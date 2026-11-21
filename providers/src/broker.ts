@@ -15,6 +15,7 @@ import {
   type DataClassification,
   type EgressDecision,
   type LLMProvider,
+  type LLMRequest,
   type StructuredRequest,
   type TaskKind,
   type UntrustedDocument,
@@ -66,11 +67,23 @@ export interface ExecutionInput {
   classification: DataClassification;
   /** Some input is a malicious variant in the synthetic manifest. */
   malicious: boolean;
+  /**
+   * A CLI's exact version from its fixed-argument version query, asked before
+   * every attempt; undefined when it cannot be read (or for an HTTP Provider).
+   */
+  version: string | undefined;
+  /** The user confirmed the unverified-isolation warning for this one call (its user action record). */
+  unverifiedAcknowledged: boolean;
 }
 
-/** CLI execution conditions (ARCHITECTURE 3.1): T09. */
+/** How a CLI call runs: the argument profile it must use and whether its isolation was verified. */
+export type CliExecution = LLMRequest["execution"] & {};
+
+export type ExecutionDecision = { run: true; cli?: CliExecution } | { run: false; reason: string };
+
+/** CLI execution conditions (ARCHITECTURE 3.1): execution-gate.ts. */
 export interface ExecutionGate {
-  decide(input: ExecutionInput): { run: true } | { run: false; reason: string };
+  decide(input: ExecutionInput): ExecutionDecision;
 }
 
 export type CallOutcome =
@@ -111,6 +124,12 @@ export interface BrokerLimits {
   backoffMaxMs: number;
   /** Ceiling for a request's own timeout. */
   maxTimeoutMs: number;
+  /**
+   * Ceiling for a CLI's version query before each attempt; the request's timeout
+   * bounds it too. One that does not answer in time is "version unknown" (not
+   * listed), so a hung query cannot hold a concurrency slot.
+   */
+  versionQueryTimeoutMs: number;
   /** Provider attempts allowed in any window of windowMs. */
   callBudget: { maxCalls: number; windowMs: number };
 }
@@ -121,6 +140,7 @@ export const DEFAULT_LIMITS: Readonly<BrokerLimits> = Object.freeze({
   backoffBaseMs: 1_000,
   backoffMaxMs: 30_000,
   maxTimeoutMs: 120_000,
+  versionQueryTimeoutMs: 10_000,
   callBudget: Object.freeze({ maxCalls: 60, windowMs: 3_600_000 }),
 });
 
@@ -149,7 +169,14 @@ export type RejectReason =
   | "missing-candidate";
 
 export type BrokerResult =
-  | { status: "ok"; requestId: string; output: unknown; attempts: number }
+  | {
+      status: "ok";
+      requestId: string;
+      output: unknown;
+      attempts: number;
+      /** For a CLI call: the profile it ran with and whether its isolation was verified. */
+      cli?: CliExecution;
+    }
   | { status: "rejected"; reason: RejectReason }
   | { status: "blocked"; requestId: string; reason: string }
   | {
@@ -163,6 +190,7 @@ interface Prepared {
   request: BrokerRequest;
   task: (typeof TASKS)[TaskKind][1];
   trigger: "user" | "background";
+  unverifiedAcknowledged: boolean;
   documents: UntrustedDocument[];
   candidates: { id: string; name: string }[];
   classification: DataClassification;
@@ -218,6 +246,7 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
   }
 
   let trigger: Prepared["trigger"];
+  let unverifiedAcknowledged = false;
   if ("jobId" in request.origin) {
     const job = readJob(deps.db, Number(request.origin.jobId));
     if (!job) return { reason: "unknown-origin" };
@@ -228,6 +257,7 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
     if (redeemed === "unknown") return { reason: "unknown-origin" };
     if (redeemed === "used") return { reason: "origin-used" };
     trigger = "user";
+    unverifiedAcknowledged = redeemed.unverifiedAcknowledged;
   }
 
   const graded: Graded[] = [];
@@ -262,11 +292,38 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
     request,
     task,
     trigger,
+    unverifiedAcknowledged,
     documents,
     candidates,
     classification: strictest(graded),
     malicious: graded.some((g) => g.malicious),
   };
+}
+
+/**
+ * The version a CLI reports through its fixed-argument query; undefined if it
+ * cannot tell within `timeoutMs`. A late answer is ignored (the Provider ends its
+ * own query process, V01-T10).
+ */
+async function cliVersion(provider: LLMProvider, timeoutMs: number): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), timeoutMs);
+  });
+  try {
+    // started inside a promise chain, so a synchronous throw is a rejection like any other
+    const query = Promise.resolve()
+      .then(() => provider.detect())
+      .then((info) =>
+        info.installed && typeof info.version === "string" ? info.version : undefined,
+      );
+    query.catch(() => undefined); // may settle after the timeout; nobody awaits it then
+    return await Promise.race([query, late]);
+  } catch {
+    return undefined; // not listed, then; the Provider's message stays out
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function semaphore(size: number) {
@@ -386,7 +443,9 @@ export function createBroker(deps: BrokerDeps) {
     const timeoutMs = Math.min(request.budget.timeoutMs, limits.maxTimeoutMs);
 
     /** Consent and egress rules (T08), then execution conditions (T09), as they stand now. */
-    const decide = (): EgressDecision | { reason: string } => {
+    const decide = async (): Promise<
+      { egress: EgressDecision; cli: CliExecution | undefined } | { reason: string }
+    > => {
       const egress = deps.egress.decide({
         providerId: provider.id,
         taskKind: request.taskKind,
@@ -400,17 +459,24 @@ export function createBroker(deps: BrokerDeps) {
         trigger,
         classification,
         malicious,
+        // asked again every attempt: a CLI updated meanwhile is no longer the listed one
+        version:
+          provider.transport === "cli"
+            ? await cliVersion(provider, Math.min(timeoutMs, limits.versionQueryTimeoutMs))
+            : undefined,
+        unverifiedAcknowledged: prepared.unverifiedAcknowledged,
       });
-      return execution.run ? egress : { reason: execution.reason };
+      return execution.run ? { egress, cli: execution.cli } : { reason: execution.reason };
     };
 
     return slot(async (): Promise<BrokerResult> => {
       for (let attempt = 1; ; attempt++) {
-        const egress = decide();
-        if ("reason" in egress) {
-          deps.recorder.record({ ...base, attempt, outcome: "blocked", reason: egress.reason });
-          return { status: "blocked", requestId, reason: egress.reason };
+        const decided = await decide();
+        if ("reason" in decided) {
+          deps.recorder.record({ ...base, attempt, outcome: "blocked", reason: decided.reason });
+          return { status: "blocked", requestId, reason: decided.reason };
         }
+        const { egress, cli } = decided;
         const where = { destination: egress.destination, policyVersion: egress.policyVersion };
         if (!takeBudget()) {
           deps.recorder.record({
@@ -439,6 +505,7 @@ export function createBroker(deps: BrokerDeps) {
             candidates: prepared.candidates,
           },
           outputSchema: task.outputJsonSchema,
+          ...(cli ? { execution: cli } : {}),
         };
         const started = clock.now();
         const result = await attemptOnce(provider, outgoing, task, timeoutMs);
@@ -450,7 +517,13 @@ export function createBroker(deps: BrokerDeps) {
           durationMs: clock.now() - started,
         });
         if (result.outcome === "ok") {
-          return { status: "ok", requestId, output: result.output, attempts: attempt };
+          return {
+            status: "ok",
+            requestId,
+            output: result.output,
+            attempts: attempt,
+            ...(cli ? { cli } : {}),
+          };
         }
         if (!request.retryable || !result.retryable || attempt >= limits.maxAttempts) {
           return { status: "failed", requestId, error: result.outcome, attempts: attempt };

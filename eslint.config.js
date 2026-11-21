@@ -3,6 +3,7 @@ import { defineConfig } from "eslint/config";
 import prettier from "eslint-config-prettier";
 import globals from "globals";
 import tseslint from "typescript-eslint";
+import gateInputs from "./tooling/eslint/gate-inputs.js";
 import moduleBoundary from "./tooling/eslint/module-boundary.js";
 
 export default defineConfig(
@@ -20,8 +21,8 @@ export default defineConfig(
   tseslint.configs.strict,
   {
     languageOptions: { globals: globals.node },
-    plugins: { pki: { rules: { "module-boundary": moduleBoundary } } },
-    rules: { "pki/module-boundary": "error" },
+    plugins: { pki: { rules: { "module-boundary": moduleBoundary, "gate-inputs": gateInputs } } },
+    rules: { "pki/module-boundary": "error", "pki/gate-inputs": "error" },
   },
   prettier,
 );

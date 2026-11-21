@@ -32,6 +32,8 @@ const requests: Partial<Record<RouteName, unknown>> = {
     policyVersion: productEgress(db).policyVersion(),
   },
   revokeConsent: { providerId: "codex" },
+  connectionTest: { acknowledgeUnverified: false },
+  setExecutionSettings: { cliBackground: false },
   // The pack does not exist: the preparation starts, then fails without touching disk.
   prepareEmbedding: { source: { kind: "local-pack", path: "/synthetic/missing-pack" } },
 };

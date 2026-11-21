@@ -181,6 +181,37 @@ export const ConsentGrantRequestSchema = z.strictObject({
 export const ConsentRevokeRequestSchema = z.strictObject({ providerId: ProviderIdSchema });
 
 /**
+ * The connection test (V01-R21): one structured call with the build's fixed
+ * synthetic material, through the Broker like any other call. The screen sends
+ * `acknowledgeUnverified` only after the user confirmed the unverified-isolation
+ * warning for this one call; it is never stored.
+ */
+export const ConnectionTestRequestSchema = z.strictObject({ acknowledgeUnverified: z.boolean() });
+
+/** A code, never Provider text: a block reason, a Broker rejection. */
+const ReasonCode = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+
+/**
+ * "ok": the Provider answered in shape; `isolation` is set for a CLI call.
+ * "blocked": a decision stopped it before the Provider ran (e.g. no consent, a
+ * CLI combination not verified, "unverified-ack-required" when the development
+ * build needs the user's confirmation first). "failed": the Provider ran but did
+ * not answer in shape (`reason`: timeout, rate-limited, provider-error,
+ * invalid-output). "rejected": the Broker refused the request itself.
+ * `reason` is null exactly for "ok"; `isolation` is null for anything but a CLI's "ok".
+ */
+export const ConnectionTestResponseSchema = z.object({
+  outcome: z.enum(["ok", "blocked", "failed", "rejected"]),
+  reason: ReasonCode.nullable(),
+  isolation: z.enum(["verified", "unverified"]).nullable(),
+});
+export type ConnectionTestResult = z.infer<typeof ConnectionTestResponseSchema>;
+
+/** Runtime execution settings (site-setup.md `providers.cli.background`): default off. */
+export const ExecutionSettingsSchema = z.strictObject({ cliBackground: z.boolean() });
+export type ExecutionSettings = z.infer<typeof ExecutionSettingsSchema>;
+
+/**
  * Starts preparing the embedding model (V01-R14, ADR 0006): from a local pack
  * folder, or by the approved download of the pinned files. Only this request
  * starts one. The revision and file hashes are build resources, not request fields.
@@ -231,6 +262,23 @@ export const routes = {
     path: "/api/consents/revoke",
     request: ConsentRevokeRequestSchema,
     response: ConsentListResponseSchema,
+  },
+  connectionTest: {
+    method: "POST",
+    path: "/api/connection-test",
+    request: ConnectionTestRequestSchema,
+    response: ConnectionTestResponseSchema,
+  },
+  executionSettings: {
+    method: "GET",
+    path: "/api/settings/execution",
+    response: ExecutionSettingsSchema,
+  },
+  setExecutionSettings: {
+    method: "POST",
+    path: "/api/settings/execution",
+    request: ExecutionSettingsSchema,
+    response: ExecutionSettingsSchema,
   },
   prepareEmbedding: {
     method: "POST",

@@ -2,8 +2,9 @@
 // directory, created owner-only first, at the latest schema; the site
 // Connector kinds are registered and fail with the follow-up notice.
 import { CONNECTOR_NOT_IMPLEMENTED } from "@pki/contracts";
-import { OPENAI_BASE_URL_SETTING } from "@pki/providers";
+import { BUILD_KIND, OPENAI_BASE_URL_SETTING } from "@pki/providers";
 import { migrations, schemaVersion, writeSetting } from "@pki/storage";
+import { FakeProvider } from "@pki/testkit";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +13,9 @@ import {
   CANONICAL_DB_FILE,
   connectorKinds,
   openCanonicalDb,
+  productCalls,
   productEgress,
+  productProviders,
 } from "./composition.ts";
 
 let root: string;
@@ -55,20 +58,76 @@ describe("site Connector kinds", () => {
 });
 
 describe("productEgress", () => {
-  // The product build refuses loopback http (V01-R11, C5 consent.binding); T09 replaces
-  // this with the build-kind switch, under which only development and test builds allow it.
-  it("refuses an http endpoint, loopback included", () => {
+  // V01-R11, C5 consent.binding: loopback http passes in development and test builds
+  // only, by the build kind (providers/src/build-kind.test.ts covers each kind);
+  // this is the test build. Plain http elsewhere is refused in every build.
+  it("takes loopback http in a test build and refuses http to anywhere else", () => {
+    expect(BUILD_KIND).toBe("test");
     const db = openCanonicalDb(join(root, "PKI"));
     try {
       const egress = productEgress(db);
-      for (const url of ["http://127.0.0.1:9/v1", "http://localhost:9/v1", "http://[::1]:9/v1"]) {
+      for (const [url, host] of [
+        ["http://127.0.0.1:9/v1", "127.0.0.1:9"],
+        ["http://localhost:9/v1", "localhost:9"],
+        ["http://[::1]:9/v1", "[::1]:9"],
+      ] as const) {
         writeSetting(db, OPENAI_BASE_URL_SETTING, url);
-        expect(egress.destination("openai-compatible")).toEqual({ problem: "insecure-endpoint" });
+        expect(egress.destination("openai-compatible")).toEqual({ destination: host });
       }
+      writeSetting(db, OPENAI_BASE_URL_SETTING, "http://api.synthetic.example/v1");
+      expect(egress.destination("openai-compatible")).toEqual({ problem: "insecure-endpoint" });
       writeSetting(db, OPENAI_BASE_URL_SETTING, "https://api.synthetic.example/v1");
       expect(egress.destination("openai-compatible")).toEqual({
         destination: "api.synthetic.example",
       });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("productCalls", () => {
+  it("binds no Provider yet, so a call is blocked without a fallback", async () => {
+    expect(productProviders()).toEqual([]);
+    const db = openCanonicalDb(join(root, "PKI"));
+    try {
+      const { broker, issuer } = productCalls(db, productEgress(db));
+      const result = await issuer.during((userActionId) =>
+        broker.call({
+          taskKind: "connection-test",
+          sourceVersionIds: [],
+          candidateItemIds: [],
+          origin: { userActionId },
+          schemaVersion: 1,
+          budget: { timeoutMs: 1000 },
+          retryable: false,
+        }),
+      );
+      expect(result).toMatchObject({ status: "blocked", reason: "no-provider" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("calls none of several bound Providers (the user's default is T10's)", async () => {
+    const db = openCanonicalDb(join(root, "PKI"));
+    try {
+      const a = new FakeProvider({ id: "claude-code", transport: "cli" });
+      const b = new FakeProvider({ id: "codex", transport: "cli" });
+      const { broker, issuer } = productCalls(db, productEgress(db), { providers: [a, b] });
+      const result = await issuer.during((userActionId) =>
+        broker.call({
+          taskKind: "connection-test",
+          sourceVersionIds: [],
+          candidateItemIds: [],
+          origin: { userActionId },
+          schemaVersion: 1,
+          budget: { timeoutMs: 1000 },
+          retryable: false,
+        }),
+      );
+      expect(result).toMatchObject({ status: "blocked", reason: "no-provider" });
+      expect([...a.requests, ...b.requests]).toEqual([]);
     } finally {
       db.close();
     }
