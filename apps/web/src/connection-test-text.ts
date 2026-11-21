@@ -23,6 +23,11 @@ const REASON: Readonly<Record<string, string>> = {
   "capabilities-unavailable": "Provider 기능을 읽을 수 없음",
 };
 
+/** A block reason in words; an unknown code is shown as it is (it is never Provider text). */
+export function blockReasonText(reason: string): string {
+  return REASON[reason] ?? reason;
+}
+
 const ERROR: Readonly<Record<string, string>> = {
   timeout: "시간 초과",
   "rate-limited": "요청 한도",
@@ -38,7 +43,7 @@ export function connectionTestText(result: ConnectionTestResult): string {
     case "ok":
       return `성공${result.isolation ? ISOLATION[result.isolation] : ""}`;
     case "blocked":
-      return `차단: ${REASON[reason] ?? reason}`;
+      return `차단: ${blockReasonText(reason)}`;
     case "failed":
       return `오류: ${ERROR[reason] ?? reason}`;
     case "rejected":

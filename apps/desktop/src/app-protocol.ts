@@ -50,13 +50,12 @@ const FORWARDED = ["authorization", "content-type", "accept"];
 export interface AppHandlerOptions {
   /** The built screens (apps/web/dist). */
   webRoot: string;
-  /** The backend's own address, `http://127.0.0.1:<port>`. */
-  backendUrl: string;
   /**
-   * False once the backend process has exited: its port is then free for any local
-   * process to bind, so nothing more is forwarded there.
+   * The running backend's own address, `http://127.0.0.1:<port>`, read per request;
+   * undefined once it has exited and until a restarted one is ready (V01-T16). A
+   * freed port is open for any local process to bind, so nothing is forwarded there.
    */
-  backendAlive: () => boolean;
+  backendUrl: () => string | undefined;
 }
 
 const plain = (status: number) => new Response(null, { status });
@@ -64,14 +63,14 @@ const plain = (status: number) => new Response(null, { status });
 export function createAppHandler({
   webRoot,
   backendUrl,
-  backendAlive,
 }: AppHandlerOptions): (request: Request) => Promise<Response> {
   const root = resolve(webRoot);
   return async (request) => {
     if (!onAppOrigin(request.url)) return plain(403);
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
-      return backendAlive() ? forward(request, url, backendUrl) : plain(502);
+      const target = backendUrl();
+      return target === undefined ? plain(502) : forward(request, url, target);
     }
     if (request.method !== "GET" && request.method !== "HEAD") return plain(405);
     return serveFile(root, url.pathname);

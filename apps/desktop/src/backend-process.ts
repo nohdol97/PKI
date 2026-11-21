@@ -15,6 +15,11 @@ export interface BackendChild {
   on(event: "message", listener: (message: unknown) => void): void;
   once(event: "exit", listener: (code: number) => void): void;
   kill(): boolean;
+  /**
+   * Ends the process without asking (POSIX SIGKILL): for one that ignored kill(),
+   * e.g. SIGTERM caught or the process stopped with the signal pending (V01-T16).
+   */
+  forceKill?(): void;
 }
 export type ForkBackend = (
   entry: string,
@@ -86,8 +91,13 @@ export interface BackendOptions {
   fixtures?: string | undefined;
   /** The shell's environment; only BACKEND_ENV_KEYS pass. */
   env?: Readonly<Record<string, string | undefined>>;
+  /** The run's session token; a restart passes the first start's (V01-T16). Default: fresh. */
+  token?: string;
   startTimeoutMs?: number;
+  /** After "stop", how long until kill() (default 5 s). */
   stopTimeoutMs?: number;
+  /** After kill(), how long until forceKill(), and after that how long stop() still waits (default 2 s each). */
+  killTimeoutMs?: number;
   /**
    * Answers the backend's secret requests; without it every answer is "unavailable".
    * Only names `isBackendReadableSecret` allows are looked up; a presence request
@@ -102,12 +112,16 @@ export interface Backend {
   pid: number | undefined;
   /** Resolves with the exit code whenever the process ends, asked to or not. */
   exited: Promise<number>;
-  /** Asks the backend to close, and kills it if it has not ended in time. */
+  /**
+   * Asks the backend to close, kills it if it has not ended in time, force-kills it
+   * if that is ignored too, and returns within stopTimeoutMs + 2 × killTimeoutMs
+   * even if no exit is ever reported.
+   */
   stop(): Promise<void>;
 }
 
 export async function startBackendProcess(options: BackendOptions): Promise<Backend> {
-  const token = randomBytes(32).toString("base64url");
+  const token = options.token ?? randomBytes(32).toString("base64url");
   const args = [
     "--origin",
     options.origin,
@@ -164,14 +178,18 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
     exited,
     async stop() {
       if (ended) return;
+      const endsWithin = (ms: number) =>
+        Promise.race([
+          exited.then(() => true),
+          new Promise<false>((resolve) => setTimeout(() => resolve(false), ms).unref()),
+        ]);
+      const killAfter = options.killTimeoutMs ?? 2_000;
       child.postMessage({ type: "stop" });
-      const timeout = new Promise<"timeout">((resolve) =>
-        setTimeout(() => resolve("timeout"), options.stopTimeoutMs ?? 5_000).unref(),
-      );
-      if ((await Promise.race([exited, timeout])) === "timeout") {
-        child.kill();
-        await exited;
-      }
+      if (await endsWithin(options.stopTimeoutMs ?? 5_000)) return;
+      child.kill();
+      if (await endsWithin(killAfter)) return;
+      child.forceKill?.();
+      await endsWithin(killAfter);
     },
   };
 }

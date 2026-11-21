@@ -21,7 +21,7 @@ describe("contract schemas", () => {
     expect(
       routes.status.response.safeParse({
         backend: { state: "ready" },
-        provider: { state: "not-implemented" },
+        provider: { state: "unavailable", providerId: null, reason: "no-provider" },
         embedding: { state: "not-implemented" },
         vectorIndex: { state: "not-implemented" },
         invalidations: { recent: [] },
@@ -49,6 +49,26 @@ describe("contract schemas", () => {
       false,
     );
     expect(invalidations.safeParse(of({ ...record, sourceId: 0 })).success).toBe(false);
+  });
+
+  it("states why the default Provider cannot take a call, as a code (V01-R5, T16)", () => {
+    const provider = routes.status.response.shape.provider;
+    expect(provider.safeParse({ state: "ready", providerId: "codex" }).success).toBe(true);
+    expect(provider.safeParse({ state: "ready" }).success).toBe(false);
+    const missing = {
+      state: "unavailable",
+      providerId: "claude-code",
+      reason: "cli-not-installed",
+      check: {
+        providerId: "claude-code",
+        installed: false,
+        version: null,
+        authentication: "unknown",
+      },
+    };
+    expect(provider.safeParse(missing).success).toBe(true);
+    expect(provider.safeParse({ ...missing, reason: "CLI said: not found" }).success).toBe(false);
+    expect(provider.safeParse({ state: "not-implemented" }).success).toBe(false);
   });
 
   it("states an unavailable component's reason (V01-R5, R15)", () => {

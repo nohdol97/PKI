@@ -15,6 +15,7 @@ import {
   type ProviderId,
   type ProviderInfo,
   type ProviderList,
+  type ProviderStatus,
   type PrepareSource,
   type RouteName,
   type RouteRequest,
@@ -241,6 +242,46 @@ async function checkProvider(provider: LLMProvider): Promise<ProviderCheck> {
   };
 }
 
+/**
+ * Whether the user's default Provider could take a call now (V01-R5, T16), for
+ * Home: none chosen, its two queries (a CLI's version and login status, an HTTP
+ * Provider's settings and key presence; nothing goes over the network) find it
+ * missing or logged out, or the egress rules would stop a general document going
+ * to it. Only the default is checked: a blocked default is never covered by
+ * another Provider (R5), so the others' state is not what Home must show.
+ */
+async function providerStatus(
+  options: ServerOptions,
+  check: (provider: LLMProvider) => Promise<ProviderCheck>,
+): Promise<ProviderStatus> {
+  const provider = selectProvider(options.calls?.providers ?? [], readDefaultProvider(options.db));
+  if (!provider) return { state: "unavailable", providerId: null, reason: "no-provider" };
+  const found = await check(provider);
+  const cli = provider.transport === "cli";
+  const reason = !found.installed
+    ? cli
+      ? "cli-not-installed"
+      : "destination-unavailable"
+    : (found.problem ??
+      (found.authentication === "unauthenticated"
+        ? cli
+          ? "cli-not-logged-in"
+          : "api-key-missing"
+        : undefined));
+  if (reason !== undefined) {
+    return { state: "unavailable", providerId: provider.id, reason, check: found };
+  }
+  const decision = options.egress.decide({
+    providerId: provider.id,
+    taskKind: "extract",
+    classification: "general",
+  });
+  if (!decision.allowed) {
+    return { state: "unavailable", providerId: provider.id, reason: decision.reason };
+  }
+  return { state: "ready", providerId: provider.id };
+}
+
 const STATUS_CHECK_FAILED: ComponentStatus = {
   state: "unavailable",
   reason: "status check failed",
@@ -350,10 +391,20 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       },
     };
   };
+  // a status read while another runs shares its queries: one set of processes per Provider
+  const statusChecks = new Map<ProviderId, Promise<ProviderCheck>>();
+  const checkShared = (provider: LLMProvider) => {
+    let running = statusChecks.get(provider.id);
+    if (!running) {
+      running = checkProvider(provider).finally(() => statusChecks.delete(provider.id));
+      statusChecks.set(provider.id, running);
+    }
+    return running;
+  };
   return {
     status: async () => ({
       backend: { state: "ready" },
-      provider: { state: "not-implemented" },
+      provider: await providerStatus(options, checkShared),
       embedding: await embeddingState(options.embedder),
       vectorIndex: await vectorIndexState(options.vectorIndex),
       invalidations: {
