@@ -2,8 +2,22 @@
 // resolved so it can come back as the same row, and deleted with its X or Y item.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
-import { readInsight, saveInsight, type InsightKey } from "./insights.ts";
-import { addEvidence, insertItem, saveFact, type KnowledgeAttributes } from "./knowledge.ts";
+import {
+  findRelation,
+  listFactsOfKind,
+  listInsightKeys,
+  listRelationPairs,
+  readInsight,
+  saveInsight,
+  type InsightKey,
+} from "./insights.ts";
+import {
+  addEvidence,
+  insertItem,
+  saveFact,
+  saveRelation,
+  type KnowledgeAttributes,
+} from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
@@ -120,5 +134,46 @@ describe("saveInsight", () => {
 
   it("returns undefined for an absent key", () => {
     expect(readInsight(db, { ...key, rule: "other" })).toBeUndefined();
+  });
+});
+
+describe("rule reads (V02-R8: depth-1 queries)", () => {
+  it("lists an item's facts of one kind with their status", () => {
+    const other = saveFact(db, { itemId: key.xItemId, kind: "k", value: "w", ...attrs }).id;
+    saveFact(db, { itemId: key.xItemId, kind: "other", value: "v", ...attrs });
+    expect(listFactsOfKind(db, key.xItemId, "k")).toEqual([
+      { id: 1, value: "v", status: "candidate" },
+      { id: other, value: "w", status: "candidate" },
+    ]);
+    expect(listFactsOfKind(db, key.yItemId, "k")).toEqual([]);
+  });
+
+  it("finds a relation by subject, type and object", () => {
+    const id = saveRelation(db, {
+      subjectId: key.xItemId,
+      type: "DEPENDS_ON",
+      objectId: key.yItemId,
+      ...attrs,
+    }).id;
+    expect(findRelation(db, key.xItemId, "DEPENDS_ON", key.yItemId)).toEqual({
+      id,
+      status: "candidate",
+    });
+    expect(findRelation(db, key.yItemId, "DEPENDS_ON", key.xItemId)).toBeUndefined();
+  });
+
+  it("lists the pairs an item takes part in, through relations or Insight rows", () => {
+    const z = insertItem(db, { type: "system", name: "C", ...attrs });
+    saveRelation(db, { subjectId: key.xItemId, type: "DEPENDS_ON", objectId: z, ...attrs });
+    saveRelation(db, { subjectId: z, type: "RELATED_TO", objectId: key.yItemId, ...attrs });
+    saveInsight(db, key, { state: "resolved" });
+    expect(listRelationPairs(db, "DEPENDS_ON", [z])).toEqual([
+      { xItemId: key.xItemId, yItemId: z },
+    ]);
+    expect(listRelationPairs(db, "DEPENDS_ON", [key.yItemId])).toEqual([]);
+    expect(listRelationPairs(db, "DEPENDS_ON", [])).toEqual([]);
+    expect(listInsightKeys(db, key.rule, [key.yItemId])).toEqual([key]);
+    expect(listInsightKeys(db, "other", [key.yItemId])).toEqual([]);
+    expect(listInsightKeys(db, key.rule, [])).toEqual([]);
   });
 });

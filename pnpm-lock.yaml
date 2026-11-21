@@ -113,6 +113,9 @@ importers:
       '@pki/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
+      '@pki/storage':
+        specifier: workspace:*
+        version: link:../storage
 
   packages/contracts:
     dependencies:
