@@ -5,5 +5,14 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@pki/contracts": "workspace:*"
+  },
+  "scripts": {
+    "dev": "node src/dev.ts"
+  },
+  "devDependencies": {
+    "@pki/testkit": "workspace:*"
   }
 }

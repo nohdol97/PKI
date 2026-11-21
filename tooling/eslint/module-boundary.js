@@ -1,6 +1,8 @@
 // Keeps workspace packages behind their public entries (ADR 0001, V01-R1):
 // a file may reach another workspace package only by its bare package name,
 // and only if its own package.json declares that package as a dependency.
+// A package declared only in devDependencies (test code such as @pki/testkit)
+// may be imported only from test files, so it cannot reach production builds (V01-R20).
 // Known gaps (not checked):
 // - createRequire(import.meta.url)("...") calls
 // - package.json "imports" subpaths ("#name")
@@ -9,6 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const SCOPE = "@pki/";
+const TEST_FILE = /\.(test|e2e)\.tsx?$/;
 
 /** @param {string} file */
 function packageRootOf(file) {
@@ -21,14 +24,16 @@ function packageRootOf(file) {
   return dir;
 }
 
-/** @param {string} root @returns {Set<string>} */
+/** @param {string} root @returns {{ runtime: Set<string>, dev: Set<string> }} */
 function declaredDependencies(root) {
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-  return new Set([
-    ...Object.keys(manifest.dependencies ?? {}),
-    ...Object.keys(manifest.devDependencies ?? {}),
-    ...Object.keys(manifest.peerDependencies ?? {}),
-  ]);
+  return {
+    runtime: new Set([
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.peerDependencies ?? {}),
+    ]),
+    dev: new Set(Object.keys(manifest.devDependencies ?? {})),
+  };
 }
 
 /** @type {import("eslint").Rule.RuleModule} */
@@ -42,6 +47,8 @@ const moduleBoundary = {
         "'{{source}}' reaches into another package by path; import its package name instead.",
       deepImport: "'{{source}}' bypasses the public entry of '{{name}}'; import '{{name}}' itself.",
       undeclaredDependency: "'{{name}}' is not a declared dependency of this package.",
+      devOnlyDependency:
+        "'{{name}}' is only a devDependency of this package; import it from test files only.",
     },
   },
   create(context) {
@@ -68,8 +75,14 @@ const moduleBoundary = {
       const name = source.split("/").slice(0, 2).join("/");
       if (name !== source) {
         context.report({ node, messageId: "deepImport", data: { source, name } });
-      } else if (!declaredDependencies(/** @type {string} */ (ownRoot)).has(name)) {
-        context.report({ node, messageId: "undeclaredDependency", data: { name } });
+      } else {
+        const { runtime, dev } = declaredDependencies(/** @type {string} */ (ownRoot));
+        if (runtime.has(name)) return;
+        if (!dev.has(name)) {
+          context.report({ node, messageId: "undeclaredDependency", data: { name } });
+        } else if (!TEST_FILE.test(context.filename)) {
+          context.report({ node, messageId: "devOnlyDependency", data: { name } });
+        }
       }
     }
 
