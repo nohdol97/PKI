@@ -87,6 +87,7 @@ class RunRecord:
     timed_out: bool
     cleanup_ok: bool
     note: str = ""
+    output_truncated: bool = False
 
 
 # ---- harness-owned observables ---------------------------------------------------------------
@@ -169,10 +170,14 @@ def detector_selftest():
         listener.stop()
     with tempfile.TemporaryDirectory() as d:
         marker = os.path.join(d, "T_SHELL.txt")
-        before = os.path.exists(marker)
+        before = observe_marker(marker)
         with open(marker, "w", encoding="utf-8") as fh:
             fh.write("x")
-        details["marker_detector"] = (not before) and os.path.exists(marker)
+        details["marker_detector"] = (not before) and observe_marker(marker)
+        log = os.path.join(d, "T_MCP.log")
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write("started\nrecv initialize\n")
+        details["line_counter"] = _count_lines(log) == 2 and _count_lines(os.path.join(d, "missing.log")) == 0
     return all(details.values()), details
 
 
@@ -273,6 +278,11 @@ def execute_profile(profile, *, prompt_doc, workdir, model, schema, timeout_s, b
             "duration_s": time.time() - started, "argv": argv}
 
 
+def observe_marker(path):
+    """The shell/hook marker detector used for real runs AND by detector_selftest."""
+    return os.path.exists(path)
+
+
 def _count_lines(path):
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -319,14 +329,16 @@ def run_attack_once(profile, attack, repetition, *, timeout_s, workroot, model, 
         listener.stop()
     res = facts["run"]
     obs = judge.Observation(
-        completed=(res.returncode == 0 and not res.timed_out and facts["structured"] is not None and not facts["schema_errors"]),
+        completed=(res.returncode == 0 and not res.timed_out and facts["structured"] is not None and not facts["schema_errors"]),  # truncation is judged by judge_run
+        output_truncated=res.output_truncated,
         timed_out=res.timed_out,
         output_text="\n".join([res.stdout, res.stderr, facts["result_text"]]),
         schema_errors=facts["schema_errors"], canary_tokens=tokens,
-        shell_marker_exists=os.path.exists(paths["shell_marker"]), hook_marker_exists=os.path.exists(paths["hook_marker"]),
+        shell_marker_exists=observe_marker(paths["shell_marker"]), hook_marker_exists=observe_marker(paths["hook_marker"]),
         net_hits=listener.hit_count, mcp_log_lines=_count_lines(paths["mcp_log"]),
         raw_event_text=res.stdout + "\n" + res.stderr)
     verdict = judge.judge_run(obs)
+    verdict.attack_id = attack.id
     cleanup_ok = True
     try:
         shutil.rmtree(run_dir)
@@ -335,7 +347,7 @@ def run_attack_once(profile, attack, repetition, *, timeout_s, workroot, model, 
         note += "work directory could not be deleted (possible leaked handle)"
     cleanup_ok = cleanup_ok and not os.path.exists(run_dir)
     return RunRecord(profile["name"], attack.id, repetition, verdict, facts["duration_s"], res.returncode,
-                     res.timed_out, cleanup_ok, note.strip())
+                     res.timed_out, cleanup_ok, note.strip(), res.output_truncated)
 
 
 def run_negative(profile, attacks, repeat, timeout_s, workroot, model, binary=None, user_tokens=None,

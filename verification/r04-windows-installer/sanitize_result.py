@@ -4,10 +4,11 @@
 STATUS: NEVER EXECUTED on a real PowerShell output (written only). Unit-tested with synthetic JSON only.
 
 The PowerShell scripts write `raw/result-raw.json` (NOT pasteable). This tool keeps ONLY what the pasteable schema
-(common/results.py, schema version 2) allows: check ids, verdicts from the fixed vocabulary, known reason codes,
-numbers, booleans and strings from the fixed allowlist or strict patterns (versions, flags, hashes). Every other
-field (free text, names, paths, `observed`/`note`/`data` blobs, unknown strings) is DROPPED and only counted in
-`dropped_fields`. So hostnames, folder names of other software, usernames and so on cannot reach the pasteable file
+(common/results.py, schema version 2) allows: check ids, fact keys and metric names from the fixed registries in
+common/results.py, verdicts from the fixed vocabulary, known reason codes, numbers, booleans and strings from the fixed
+vocabulary or the one strict value kind a key declares (version, known model family, hash). Every other field (free
+text, names, paths, unregistered keys, list items and count keys, `observed`/`note`/`data` blobs) is DROPPED and only
+counted in `dropped_fields`. So hostnames, folder names of other software, usernames and so on cannot reach the pasteable file
 even if a PowerShell script collected them. The raw file is also copied to `<out>/raw/` (local only, never paste).
 The regex redactor then runs as a second layer, and the write fails closed on any remaining environment literal
 of THIS machine plus every --redact literal.
@@ -15,7 +16,6 @@ of THIS machine plus every --redact literal.
 import argparse
 import datetime
 import json
-import math
 import os
 import sys
 
@@ -31,61 +31,20 @@ KIT = "r04-windows-installer"
 RAW_CHECK_KEYS = {"id", "verdict", "facts", "codes"}
 
 
-def _project_scalar(value):
-    if isinstance(value, bool) or value is None:
-        return value, True
-    if isinstance(value, (int, float)):
-        return (value, True) if math.isfinite(value) else (None, False)
-    if isinstance(value, str) and results.string_allowed(value):
-        return value, True
-    return None, False
-
-
-def _project_facts(facts, depth=0):
-    kept, dropped = {}, 0
-    if not isinstance(facts, dict):
-        return kept, 1
-    for key, value in facts.items():
-        key_ok = isinstance(key, str) and (results.FACT_KEY.match(key) if depth == 0 else (results.string_allowed(key) or results.FACT_KEY.match(key)))
-        if not key_ok:
-            dropped += 1
-            continue
-        if isinstance(value, dict):
-            if depth >= 1:
-                dropped += 1
-                continue
-            sub, d = _project_facts(value, depth + 1)
-            kept[key], dropped = sub, dropped + d
-        elif isinstance(value, list):
-            items = []
-            for item in value[:80]:
-                v, ok = _project_scalar(item)
-                if ok and v is not None:
-                    items.append(v)
-                else:
-                    dropped += 1
-            dropped += max(0, len(value) - 80)
-            kept[key] = items
-        else:
-            v, ok = _project_scalar(value)
-            if ok:
-                kept[key] = v
-            else:
-                dropped += 1
-    return kept, dropped
-
-
 def project_raw(raw):
     """Return (pasteable_obj, dropped_field_count). Never raises on odd content: odd content is dropped."""
     dropped = 0
     out = {"schema_version": results.SCHEMA_VERSION, "kit": KIT, "mode": "real",
            "created": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "environment": results.project_environment(raw.get("environment") or {}), "checks": [], "metrics": {}, "notes": []}
+    for key, value in (raw.get("environment") or {}).items():
+        if out["environment"].get(key) != value:
+            dropped += 1
     for key in raw:
         if key not in ("schema_version", "kit", "mode", "created", "environment", "checks", "metrics", "notes", "raw"):
             dropped += 1
     for check in raw.get("checks") or []:
-        if not isinstance(check, dict) or not (isinstance(check.get("id"), str) and results.CHECK_ID.match(check["id"])):
+        if not isinstance(check, dict) or not results.check_id_allowed(check.get("id")):
             dropped += 1
             continue
         dropped += len(set(check) - RAW_CHECK_KEYS)
@@ -93,13 +52,13 @@ def project_raw(raw):
         if verdict not in results.VERDICTS:
             dropped += 1
             verdict = "INCONCLUSIVE"  # an unreadable verdict never becomes a passing one
-        facts, d = _project_facts(check.get("facts"))
-        dropped += d
+        facts, problems = results.project_facts(check.get("facts"))
+        dropped += len(problems)
         codes = [c for c in (check.get("codes") or []) if isinstance(c, str) and c in results.CODES]
         dropped += len(check.get("codes") or []) - len(codes)
         out["checks"].append({"id": check["id"], "verdict": verdict, "facts": facts, "codes": codes})
     for name, m in (raw.get("metrics") or {}).items():
-        if (isinstance(name, str) and results.CHECK_ID.match(name) and isinstance(m, dict)
+        if (name in results.METRIC_NAMES and isinstance(m, dict)
                 and isinstance(m.get("value"), (int, float)) and not isinstance(m.get("value"), bool)):
             unit = m.get("unit") if m.get("unit") in results.UNITS else ""
             out["metrics"][name] = {"value": m["value"], "unit": unit}

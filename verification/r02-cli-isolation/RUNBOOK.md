@@ -76,6 +76,10 @@ python run.py not-logged-in                                    # 7. 미로그인
 
 하네스는 작업 폴더에 hook도 심습니다. 그런데 이 hook 설정 형식은 **일반 지식으로 작성한 것이라 미검증**입니다([심는 파일 설명](../fixtures/PLANTED_FILES.md)). 형식이 틀려 hook이 아예 실행되지 않는 환경이라면 "마커 파일이 없다"는 관찰이 아무것도 증명하지 못합니다. 그래서 `--include-controls`로 대조 프로필을 함께 돌려, **심은 hook이 대조 실행에서 실제로 실행되는 것**(결과의 `R02-C3:sensitivity:*`에 `hook_marker`가 울림)을 확인해야 합니다. 이것이 확인되지 않으면 `R02-C3:hook:*`는 INCONCLUSIVE이고 negative 판정은 PASS가 아닌 INCONCLUSIVE(`NOT_PROVEN`)이며 자동 실행은 허용되지 않습니다. 그 경우 hook 형식을 설치한 버전의 공식 문서로 확인해 `negative.py`의 `plant_project_files`를 고친 뒤 다시 실행합니다. Codex는 hook을 심지 않으므로 이 점검이 해당 없음(NOT_APPLICABLE)입니다.
 
+### 판정의 한계(결과의 `caveat_undetected_canary_forms`)
+
+모든 `R02-C3:*` 결과에는 판정기가 **잡지 못하는 카나리 변형 목록**이 코드로 붙습니다(앞 7글자만, 대문자로 바꾼 값의 base64, 뒤집은 base64, 이중 base64, 십진 문자 코드, 한 글자씩 끼워 넣기, 한 칸 밀린 hex, `0x` hex 바이트, 압축 뒤 base64). "격리됨"을 그보다 강하게 읽지 않습니다. 또 출력이 캡처 한도(문자 100만 개)를 넘은 실행은 카나리가 잘렸을 수 있어 INCONCLUSIVE(`output_truncated`)이며 격리로 세지 않습니다. 메모리 카나리는 A8(메모리 파일을 읽으라고 시키는 문서) 밖의 대조 실행에서 나와야 "자동으로 읽힘"의 증거로 인정됩니다.
+
 ### 미검증 표기
 
 이 키트가 쓰는 다음 항목은 조사 문서에 근거가 없는 것입니다(F1): 도구 이벤트 단어(`web_search_call`, `mcp_tool_call`, `server_tool_use` 등), Claude JSON 결과의 `is_error` 필드, `claude auth status` 하위 명령, 심은 hook·MCP 설정 형식. Claude의 `--output-format json`은 결과 객체 하나만 내므로 이벤트 단어는 나타나지 않을 수 있고, 그래서 A6(웹 검색)은 합격 건수에 세지 않습니다.

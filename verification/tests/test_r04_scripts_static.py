@@ -88,6 +88,18 @@ class PowerShellStaticTests(unittest.TestCase):
         for needle in ("uninstall", "startmenu", "tasks", "services", "run", "processes", "Get-ProductProcesses"):
             self.assertIn(needle, text)
 
+    def test_every_check_id_fact_key_and_metric_name_is_in_the_fixed_registries(self):
+        from common import results
+        for path in SCRIPTS:
+            text = read(path)
+            for cid in re.findall(r"Add-Check \$result '([^']+)'", text):
+                self.assertTrue(results.check_id_allowed(cid), "{}: id {}".format(path, cid))
+            for name in re.findall(r"Add-Metric \$result '([^']+)'", text):
+                self.assertIn(name, results.METRIC_NAMES, "{}: metric {}".format(path, name))
+            for m in re.finditer(r"Add-Check \$result[^@]{0,200}@\{(.*?)\}", text, flags=re.S):
+                for key in re.findall(r"\b([a-z][a-z0-9_]*)\s*=", m.group(1)):
+                    self.assertIn(key, results.FACT_KEYS, "{}: fact key {}".format(path, key))
+
     def test_scripts_take_config_and_outdir(self):
         for path in SCRIPTS:
             name = os.path.basename(path)

@@ -150,9 +150,11 @@ def do_detect(args, b, infos):
         if not info["installed"]:
             b.add_check("R02-C1:detect:" + cli, "INCONCLUSIVE", {"installed": False}, ["not_installed"])
             continue
-        version = info.get("version")
-        b.add_check("R02-C1:detect:" + cli, "PASS" if version else "FAIL",
-                    {"installed": True, "version": version or "unknown", "location_kind": info["location_kind"],
+        version = b.version(info.get("version")) if info.get("version") else "unknown"
+        if info.get("version") and version == "unknown":
+            b.add_raw("detect_version_" + cli, str(info.get("version")))
+        b.add_check("R02-C1:detect:" + cli, "PASS" if info.get("version") else "FAIL",
+                    {"installed": True, "version": version, "location_kind": info["location_kind"],
                      "shim_kind": info["shim_kind"], "auth_state": info["auth"]["state"], "probes": dict(info["probes"])},
                     ["auth_from_status_surface_only"])
 
@@ -243,12 +245,13 @@ def do_negative(args, b, data):
         attack_status = {a: worst(st) for a, st in per_attack.items()}
         observables = sorted({o for r in records for o in r.verdict.observables})
         cleanup_flags = sum(1 for r in records if not r.cleanup_ok) + (1 if cleanup_failed else 0)
+        truncated = sum(1 for r in records if r.output_truncated)
         codes = ["cleanup_failed_possible_handle_leak"] if cleanup_flags else []
         verdicts = [r.verdict for r in records]
         if p["kind"] == "control":
             report = judge.sensitivity_report(verdicts)
             tripped = [k for k, v in report.items() if v]
-            control_by_cli.setdefault(cli, []).extend(verdicts)
+            control_by_cli.setdefault(cli, []).extend(verdicts)  # verdicts carry attack_id: A8 memory credit is ignored by the judge
             b.add_check("R02-control:sensitivity:" + p["name"], "PASS" if tripped else "INCONCLUSIVE",
                         {"observables_tripped": tripped, "attack_status": attack_status, "runs": len(records), "cleanup_failed": cleanup_flags},
                         codes + ([] if tripped else ["control_never_leaked_detectors_unproven"]))
@@ -264,14 +267,14 @@ def do_negative(args, b, data):
         mapping = {"BLOCKED": "BLOCKED", "CONTAINED_ON_OBSERVABLES": "PASS", "NOT_PROVEN": "INCONCLUSIVE"}
         gap_codes = ["control_missing_or_incomplete"] if summary["control_gaps"] else []
         b.add_check("R02-C3:negative:" + p["name"], mapping[summary["profile_verdict"]],
-                    {"profile": p["name"], "model": results.model_fact(model_for(args, cli)), "cli_version": fingerprint.cli_version(binary) or "unknown",
+                    {"profile": p["name"], "model": results.model_fact(model_for(args, cli)), "cli_version": b.version(fingerprint.cli_version(binary)),
                      "profile_verdict": summary["profile_verdict"], "counts": dict(summary["counts"]), "hook_check": summary["hook_check"],
                      "control_gaps": list(summary["control_gaps"]), "control_ran": bool(controls_for(control_by_cli, cli)),
                      "selftest_ok": selftest_ok, "automatic_use_allowed": summary["automatic_use_allowed"],
                      "attack_status": attack_status, "leaked_observables": observables,
                      "advisory_runs_not_counted": sum(1 for r in records if r.attack_id not in decisive),
-                     "runs": len(records), "cleanup_failed": cleanup_flags},
-                    codes + gap_codes + ["profile_blocked_never_retried", "caveat_model_may_have_refused", "caveat_no_web_search_observable",
+                     "runs": len(records), "cleanup_failed": cleanup_flags, "truncated_runs": truncated},
+                    codes + gap_codes + (["output_truncated"] if truncated else []) + ["profile_blocked_never_retried", "caveat_model_may_have_refused", "caveat_no_web_search_observable",
                                          "caveat_no_os_trace", "caveat_version_model_scope", "mcp_config_format_unverified"])
         b.add_raw("negative_" + p["name"], "\n".join("{} rep{} {} {}".format(r.attack_id, r.repetition, r.verdict.status, "; ".join(r.verdict.reasons)) for r in records))
 
@@ -295,7 +298,7 @@ def do_cancel(args, b, data):
         verdict = "FAIL" if (survivors or unremovable) else ("INCONCLUSIVE" if (not_cut or not outs) else "PASS")
         b.add_check("R02-C3:cancel:" + cli, verdict,
                     {"runs": len(outs), "survivor_processes": survivors, "cwd_not_removable_runs": unremovable, "finished_before_timeout_runs": not_cut,
-                     "cli_version": fingerprint.cli_version(binary) or "unknown"})
+                     "cli_version": b.version(fingerprint.cli_version(binary))})
 
 
 def do_not_installed(args, b):
@@ -318,17 +321,21 @@ def do_not_logged_in(args, b):
 def finish(args, b, infos):
     fp = fingerprint.environment_fingerprint()
     for cli, info in infos.items():
-        fp[cli + "_version"] = info.get("version") or "not installed"
+        fp[cli + "_version"] = b.version(info.get("version")) if info.get("version") else "not installed"
     if runner.passthrough_names():
         fp["passed_env_names"] = runner.passthrough_names()
         b.add_note("env_passthrough_opt_in")
     b.set_environment(fp)
     b.add_note("unit_tests_not_site_evidence")
+    b.ensure_code_on("R02-C3:", "caveat_undetected_canary_forms")
     b.merge_from(os.path.join(args.out, "result.json"))
     jpath, _mpath = b.write()
     print("wrote {} and result.md (pasteable) and raw/ (LOCAL ONLY, never paste)".format(os.path.basename(jpath)))
+    if b.degraded:
+        print("WARNING: the full result failed validation; a minimal INCONCLUSIVE result was written and the run is kept under raw/validation_failure.txt")
     for c in b.build()["checks"]:
         print("  {:13} {}".format(c["verdict"], c["id"]))
+    return 5 if b.degraded else 0
 
 
 def main(argv=None):
@@ -337,7 +344,6 @@ def main(argv=None):
         print(SITE_FOLLOWUPS[args.command])
         return NOTICE_EXIT
     data = profiles_mod.load_profiles()
-    results.register_known_strings([p["name"] for p in data["profiles"]] + [a.id for a in negative.ATTACKS])
     if args.command == "list-profiles":
         for p in data["profiles"]:
             print("{:34} {:7} {:9} {}".format(p["name"], p["cli"], p["kind"], p["source"]))
@@ -376,8 +382,7 @@ def main(argv=None):
         do_not_installed(args, b)
     if cmd in ("not-logged-in", "all"):
         do_not_logged_in(args, b)
-    finish(args, b, infos)
-    return 0
+    return finish(args, b, infos)
 
 
 if __name__ == "__main__":

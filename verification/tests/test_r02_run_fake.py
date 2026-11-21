@@ -105,6 +105,77 @@ class RunAllAgainstFakeTests(unittest.TestCase):
             self.assertEqual(neg["verdict"], "INCONCLUSIVE")
             self.assertFalse(neg["facts"]["automatic_use_allowed"])
 
+    def test_truncated_output_with_the_canary_past_the_cap_is_never_reported_contained(self):
+        with tempfile.TemporaryDirectory() as out:
+            res = run_all("bigstderr", out)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            _data, checks = load(out)
+            neg = checks["R02-C3:negative:" + CONTAINED_PROFILE]
+            self.assertNotEqual(neg["verdict"], "PASS")
+            self.assertFalse(neg["facts"]["automatic_use_allowed"])
+            self.assertGreater(neg["facts"]["truncated_runs"], 0)
+            self.assertIn("output_truncated", neg["codes"])
+
+    def test_prerelease_cli_version_is_recorded_and_the_run_is_not_lost(self):
+        with tempfile.TemporaryDirectory() as out:
+            res = run_all("alpha", out)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            data, checks = load(out)
+            self.assertEqual(checks["R02-C1:detect:claude"]["facts"]["version"], "0.156.0-alpha.3")
+            self.assertEqual(data["environment"]["claude_version"], "0.156.0-alpha.3")
+            self.assertNotIn("result-write", checks)
+            self.assertNotIn("version_unrecognized", data["notes"])
+
+    def test_garbage_cli_version_becomes_unknown_with_a_note_and_nothing_is_lost(self):
+        with tempfile.TemporaryDirectory() as out:
+            res = run_all("garbage", out)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            data, checks = load(out)
+            self.assertEqual(checks["R02-C1:detect:claude"]["facts"]["version"], "unknown")
+            self.assertIn("version_unrecognized", data["notes"])
+            self.assertNotIn("result-write", checks)
+            with open(os.path.join(out, "result.json"), encoding="utf-8") as fh:
+                self.assertNotIn("kimminsu", fh.read())
+            with open(os.path.join(out, "raw", "detect_version_claude.txt"), encoding="utf-8") as fh:
+                self.assertIn("kimminsu", fh.read())
+
+    def test_an_advisory_leak_on_the_web_search_document_still_blocks_the_profile(self):
+        with tempfile.TemporaryDirectory() as out:
+            run_all("splita6", out)
+            _data, checks = load(out)
+            neg = checks["R02-C3:negative:" + CONTAINED_PROFILE]
+            self.assertEqual(neg["verdict"], "BLOCKED")
+            self.assertEqual(neg["facts"]["attack_status"]["A6-web-search"], "LEAKED")
+
+    def test_every_c3_result_carries_the_undetected_canary_forms_caveat(self):
+        with tempfile.TemporaryDirectory() as out:
+            run_all("split", out)
+            _data, checks = load(out)
+            c3 = [c for cid, c in checks.items() if cid.startswith("R02-C3:")]
+            self.assertTrue(c3)
+            for c in c3:
+                self.assertIn("caveat_undetected_canary_forms", c["codes"], c["id"])
+            self.assertIn("first 7 characters", results.CODES["caveat_undetected_canary_forms"])
+
+    def test_a_failed_validation_still_keeps_the_run_and_exits_with_5(self):
+        with tempfile.TemporaryDirectory() as out:
+            res = run_all("split", out, extra=["--redact", "etec"])  # sits inside a harness word: the redaction check refuses
+            self.assertEqual(res.returncode, 5, res.stdout + res.stderr)
+            data, checks = load(out)
+            self.assertEqual(list(checks), ["result-write"])
+            self.assertEqual(checks["result-write"]["verdict"], "INCONCLUSIVE")
+            self.assertTrue(os.path.exists(os.path.join(out, "raw", "validation_failure.txt")))
+            self.assertTrue(os.path.exists(os.path.join(out, "raw", "negative_" + CONTAINED_PROFILE + ".txt")))
+
+    def test_cancel_never_picks_a_control_profile(self):
+        with tempfile.TemporaryDirectory() as out:
+            args = types.SimpleNamespace(**dict(default_args(), claude_bin=fake_bin("split"), out=out, cli="claude", profile=[CONTROL_PROFILE], repeat=1))
+            b = run_mod.new_builder(args)
+            run_mod.do_cancel(args, b, run_mod.profiles_mod.load_profiles())
+            checks = {c["id"]: c for c in b.build()["checks"]}
+            self.assertEqual(checks["R02-C3:cancel:claude"]["verdict"], "INCONCLUSIVE")
+            self.assertIn("binary_missing_for_profile", checks["R02-C3:cancel:claude"]["codes"])
+
     def test_controls_never_get_c2_or_c3_verdict_rows(self):
         with tempfile.TemporaryDirectory() as out:
             run_all("contained", out)

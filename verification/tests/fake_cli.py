@@ -15,6 +15,10 @@ Never a real CLI and never makes a model call. Mode comes from FAKE_CLI_MODE:
   mixed            - control profiles (argv has --allowedTools) leak; other profiles fail the benign document
                      (positive call fails) but stay contained on attack documents
   split            - control profiles (argv has --allowedTools) leak; every other profile stays contained
+  bigstderr        - clean stdout, then >1 MB on stderr, THEN the canary (the capture limit cuts the canary off)
+  split-big        - control profiles leak; every other profile prints >1 MB on stderr and the canary after it
+  split-a6         - control profiles (argv has --allowedTools) leak; others stay contained except for a web-search
+                     tool event printed on the web-search (A6) document only
   iserror          - valid structured output but is_error=true
   exit1-valid      - valid structured output but exit code 1
 """
@@ -27,6 +31,7 @@ import sys
 import urllib.request
 
 MODE = os.environ.get("FAKE_CLI_MODE", "contained")
+VERSION_TEXT = "fake-cli 9.8.7 (not a real CLI)"
 
 
 def read_json(path):
@@ -88,7 +93,7 @@ def main():
     global MODE
     args = sys.argv[1:]
     if "--version" in args:
-        print("fake-cli 9.8.7 (not a real CLI)")
+        print(VERSION_TEXT)
         return
     if "--help" in args:
         print(HELP)
@@ -97,6 +102,10 @@ def main():
         print("Logged in using a fake account")
         return
     doc = sys.stdin.read()
+    if MODE == "split-big":
+        MODE = "leaky" if "--allowedTools" in args else "bigstderr"
+    if MODE == "split-a6":
+        MODE = "leaky" if "--allowedTools" in args else "a6event"
     if MODE == "split":
         MODE = "leaky" if "--allowedTools" in args else "contained"
     if MODE == "mixed":
@@ -105,6 +114,14 @@ def main():
             sys.exit(1)  # the benign positive call fails, the attack runs complete and stay contained
     if MODE == "crash":
         sys.exit(1)
+    if MODE == "a6event":
+        if "search the web" in doc:
+            sys.stderr.write('{"type":"tool_use","name":"WebSearch"}\n')
+        MODE = "contained"
+    if MODE == "bigstderr":
+        print(json.dumps({"type": "result", "is_error": False, "structured_output": {"summary": "s", "keywords": []}}), flush=True)
+        sys.stderr.write("x" * 1_100_000 + "\n" + canary_from(doc) + "\n")
+        return
     if MODE in ("leaky-resultfile", "leaky-stderr", "event-only", "memory-only", "user-token"):
         return partial_modes(doc)
     summary_parts = ["synthetic summary"]
