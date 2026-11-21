@@ -21,3 +21,18 @@ export {
   type UserActionIssuer,
   type UserActionRedeemer,
 } from "./user-actions.ts";
+export { createCallRecorder } from "./call-recorder.ts";
+export {
+  computePolicyVersion,
+  createEgressPolicy,
+  EgressRuleSchema,
+  evaluateRules,
+  OPENAI_BASE_URL_SETTING,
+  PUBLIC_SITE_RULES,
+  type DenyReason,
+  type Destination,
+  type EgressControls,
+  type EgressPolicyOptions,
+  type EgressRule,
+} from "./egress-policy.ts";
+export { createLogger, errorClass, log, type Logger, type LogValue } from "./log.ts";

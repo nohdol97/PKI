@@ -1,6 +1,7 @@
 // Single schema source for the local HTTP API (V01-R2). The UI and the backend
 // both import these; TypeScript types come from z.infer, JSON Schema from z.toJSONSchema.
 import { z } from "zod";
+import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
 export type * from "./knowledge-engine.ts";
@@ -35,6 +36,7 @@ export const ErrorResponseSchema = z.object({
     "not-found",
     "method-not-allowed",
     "connector-unavailable",
+    "destination-unavailable",
     "internal-error",
   ]),
 });
@@ -74,27 +76,76 @@ export type SourceSummary = z.infer<typeof SourceSummarySchema>;
 
 export const SourceSearchRequestSchema = z.strictObject({ query: z.string().min(1).max(200) });
 
-/** One provider call attempt (ADR 0014: no body, prompt, response or secret). */
+/**
+ * One provider call attempt (ADR 0014: no body, prompt, response or secret).
+ * `destination` and `policyVersion` are null for an attempt blocked before the
+ * egress decision named them; `reason` is the code of a blocked attempt.
+ * `egress` is how the screen labels it: a CLI call is "external" too.
+ */
 const ProviderCallSchema = z.object({
   requestId: z.string(),
   attempt: z.int().positive(),
   provider: z.string(),
-  destination: z.string(),
+  egress: z.enum(["external", "local"]),
+  destination: z.string().nullable(),
   taskKind: z.string(),
   classification: z.string(),
-  policyVersion: z.string(),
+  policyVersion: z.string().nullable(),
   outcome: z.string(),
+  reason: z.string().nullable(),
   durationMs: z.int().nonnegative().nullable(),
   createdAt: z.string(),
 });
 export const ActivityResponseSchema = z.object({ calls: z.array(ProviderCallSchema) });
 export type ProviderCall = z.infer<typeof ProviderCallSchema>;
 
-/** Read-only for now; the settings the user can change arrive with T08–T10. */
+/**
+ * `databaseEncryption` is what the canonical file is, read from the file itself
+ * (ADR 0010): "not-applied" for a plain SQLite file, "unknown" when it cannot tell.
+ */
 export const SettingsResponseSchema = z.object({
   dataDirectory: z.string(),
   schemaVersion: z.int().nonnegative(),
+  databaseEncryption: z.enum(["not-applied", "unknown"]),
 });
+
+const DataClassSchema = z.enum(DATA_CLASSES);
+const ProviderIdSchema = z.enum(PROVIDER_IDS);
+
+/**
+ * Consent per Provider (ADR 0014). A consent holds the destination and policy
+ * version it was given for; it is "valid" only while both still match.
+ */
+const ConsentSchema = z.object({
+  allowedClasses: z.array(DataClassSchema),
+  destination: z.string(),
+  policyVersion: z.string(),
+  grantedAt: z.string(),
+  state: z.enum(["valid", "stale-destination", "stale-policy"]),
+});
+export const ConsentListResponseSchema = z.object({
+  /** Computed from every rule in force; it changes when any rule changes. */
+  policyVersion: z.string(),
+  classes: z.array(DataClassSchema),
+  providers: z.array(
+    z.object({
+      providerId: ProviderIdSchema,
+      egress: z.enum(["external", "local"]),
+      /** Where this Provider's requests go now; null with the problem when unknown. */
+      destination: z.string().nullable(),
+      destinationProblem: z.enum(["destination-unavailable", "insecure-endpoint"]).nullable(),
+      consent: ConsentSchema.nullable(),
+    }),
+  ),
+});
+export type ConsentList = z.infer<typeof ConsentListResponseSchema>;
+
+/** The user picks the classes to allow; nothing is picked by default. */
+export const ConsentGrantRequestSchema = z.strictObject({
+  providerId: ProviderIdSchema,
+  allowedClasses: z.array(DataClassSchema).min(1),
+});
+export const ConsentRevokeRequestSchema = z.strictObject({ providerId: ProviderIdSchema });
 
 /**
  * Where the screens get the backend address and token: the dev server in the browser,
@@ -121,6 +172,19 @@ export const routes = {
   },
   activity: { method: "GET", path: "/api/activity", response: ActivityResponseSchema },
   settings: { method: "GET", path: "/api/settings", response: SettingsResponseSchema },
+  consents: { method: "GET", path: "/api/consents", response: ConsentListResponseSchema },
+  grantConsent: {
+    method: "POST",
+    path: "/api/consents",
+    request: ConsentGrantRequestSchema,
+    response: ConsentListResponseSchema,
+  },
+  revokeConsent: {
+    method: "POST",
+    path: "/api/consents/revoke",
+    request: ConsentRevokeRequestSchema,
+    response: ConsentListResponseSchema,
+  },
 } as const;
 export type RouteName = keyof typeof routes;
 export type RouteResponse<Name extends RouteName> = z.infer<(typeof routes)[Name]["response"]>;

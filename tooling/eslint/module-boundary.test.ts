@@ -47,7 +47,7 @@ describe("repository lint config enforces module-boundary", () => {
 
   it("fails on importing a workspace package that is not a declared dependency", async () => {
     const messages = await lintWithRepoConfig(
-      'const m = await import("@pki/providers");\nexport { m };\n',
+      'const m = await import("@pki/knowledge-engine");\nexport { m };\n',
       "backend/src/index.ts",
     );
     expect(messages).toHaveLength(1);

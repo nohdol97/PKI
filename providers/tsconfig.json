@@ -1,9 +1,12 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "outDir": "dist"
   },
-  "include": ["src"],
+  "include": ["src", "src/**/*.json"],
   "references": [
     {
       "path": "../packages/contracts"
