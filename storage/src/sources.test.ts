@@ -3,6 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { migrate } from "./migrations.ts";
+import { writeTombstone } from "./tombstones.ts";
+import { readChangeSeq } from "./revisions.ts";
 import {
   contentHash,
   readCursor,
@@ -38,7 +40,7 @@ describe("contentHash", () => {
 
 describe("saveSourceRecord", () => {
   it("creates a source and its first version", () => {
-    expect(saveSourceRecord(db, "c1", record("e1"))).toBe("created");
+    expect(saveSourceRecord(db, "c1", record("e1")).status).toBe("created");
     expect(db.all("SELECT title, body, content_hash FROM source_versions")).toEqual([
       { title: "t", body: "b", content_hash: contentHash("t", "b") },
     ]);
@@ -46,7 +48,7 @@ describe("saveSourceRecord", () => {
 
   it("makes no new version when the content hash is unchanged", () => {
     saveSourceRecord(db, "c1", record("e1"));
-    expect(saveSourceRecord(db, "c1", record("e1"))).toBe("unchanged");
+    expect(saveSourceRecord(db, "c1", record("e1")).status).toBe("unchanged");
     expect([count("sources"), count("source_versions")]).toEqual([1, 1]);
   });
 
@@ -55,14 +57,14 @@ describe("saveSourceRecord", () => {
     ["body", record("e1", "t", "b2")],
   ])("adds a version when the %s changes, keeping the old one", (_part, changed) => {
     saveSourceRecord(db, "c1", record("e1"));
-    expect(saveSourceRecord(db, "c1", changed)).toBe("created");
+    expect(saveSourceRecord(db, "c1", changed).status).toBe("created");
     expect([count("sources"), count("source_versions")]).toEqual([1, 2]);
   });
 
   it("compares with the latest version, so reverting content is a new version", () => {
     saveSourceRecord(db, "c1", record("e1", "t", "v1"));
     saveSourceRecord(db, "c1", record("e1", "t", "v2"));
-    expect(saveSourceRecord(db, "c1", record("e1", "t", "v1"))).toBe("created");
+    expect(saveSourceRecord(db, "c1", record("e1", "t", "v1")).status).toBe("created");
     expect(count("source_versions")).toBe(3);
   });
 
@@ -84,9 +86,85 @@ describe("saveSourceRecord", () => {
 
   it("keeps the same content from different instances or external ids apart", () => {
     saveSourceRecord(db, "c1", record("e1"));
-    expect(saveSourceRecord(db, "c2", record("e1"))).toBe("created");
-    expect(saveSourceRecord(db, "c1", record("e2"))).toBe("created");
+    expect(saveSourceRecord(db, "c2", record("e1")).status).toBe("created");
+    expect(saveSourceRecord(db, "c1", record("e2")).status).toBe("created");
     expect([count("sources"), count("source_versions")]).toEqual([3, 3]);
+  });
+});
+
+describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)", () => {
+  const rev = (revision: number, body = "b") => ({ ...record("e1", "t", body), revision });
+  const rows = () =>
+    db.all("SELECT version, revision, body FROM source_versions ORDER BY id") as {
+      version: number;
+      revision: number | null;
+      body: string;
+    }[];
+
+  it("numbers the version itself and keeps the record's revision beside it", () => {
+    expect(saveSourceRecord(db, "c1", rev(7))).toEqual({
+      status: "created",
+      sourceId: 1,
+      version: 1,
+    });
+    expect(rows()).toEqual([{ version: 1, revision: 7, body: "b" }]);
+  });
+
+  it("makes no new version for the same revision and content", () => {
+    saveSourceRecord(db, "c1", rev(1));
+    expect(saveSourceRecord(db, "c1", rev(1))).toEqual({ status: "unchanged" });
+    expect(rows()).toHaveLength(1);
+  });
+
+  it("adds the next product version for a greater revision with other content, keeping the old", () => {
+    saveSourceRecord(db, "c1", rev(1, "v1"));
+    expect(saveSourceRecord(db, "c1", rev(5, "v5"))).toEqual({
+      status: "created",
+      sourceId: 1,
+      version: 2,
+    });
+    expect(rows()).toEqual([
+      { version: 1, revision: 1, body: "v1" },
+      { version: 2, revision: 5, body: "v5" },
+    ]);
+  });
+
+  it("makes no new version for a greater revision with the same content", () => {
+    saveSourceRecord(db, "c1", rev(1));
+    expect(saveSourceRecord(db, "c1", rev(2))).toEqual({ status: "unchanged" });
+    expect(rows()).toHaveLength(1);
+  });
+
+  it.each([
+    ["equal", 3],
+    ["lower", 2],
+  ])("refuses an %s revision with other content and writes nothing", (_case, revision) => {
+    saveSourceRecord(db, "c1", rev(3, "v3"));
+    const seq = readChangeSeq(db);
+    expect(saveSourceRecord(db, "c1", rev(revision, "other"))).toEqual({
+      status: "refused",
+      reason: "revision-not-newer",
+    });
+    expect(rows()).toHaveLength(1);
+    expect(readChangeSeq(db)).toBe(seq);
+  });
+
+  it("leaves a lower revision with the latest content as unchanged", () => {
+    saveSourceRecord(db, "c1", rev(3));
+    expect(saveSourceRecord(db, "c1", rev(1))).toEqual({ status: "unchanged" });
+  });
+
+  it("refuses a record the tombstone would block, before the trigger aborts the page", () => {
+    saveSourceRecord(db, "c1", rev(1, "v1"));
+    writeTombstone(db, { sourceId: 1, version: 1, at: "2026-11-21T00:00:00Z", reason: "deleted" });
+    db.run("DELETE FROM source_versions");
+    const seq = readChangeSeq(db);
+    expect(saveSourceRecord(db, "c1", rev(2, "v2"))).toEqual({
+      status: "refused",
+      reason: "tombstoned",
+    });
+    expect(rows()).toEqual([]);
+    expect(readChangeSeq(db)).toBe(seq);
   });
 });
 

@@ -5,14 +5,16 @@ import type {
   ConnectorSummary,
   ConsentList,
   DataClassification,
+  ImportJsonlResponse,
   ProviderCall,
   RouteResponse,
   SourceSummary,
 } from "@pki/contracts";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import type { ApiClient } from "./api.ts";
 import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
+import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { componentText, embeddingText } from "./status-text.ts";
 
 const SCREENS = { home: "홈", sources: "원본", activity: "활동", settings: "설정" } as const;
@@ -106,9 +108,23 @@ function Sources({ api }: { api: ApiClient }) {
   const stored = useRoute(api, "sources");
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<SourceSummary[]>();
+  const [imported, setImported] = useState<ImportJsonlResponse>();
   const [error, setError] = useState<string>();
   const fail = (e: unknown) => setError(message(e));
 
+  const importFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // the same file can be chosen again (re-import)
+    if (!file) return;
+    file
+      .text()
+      .then((text) => api("importJsonl", { text }))
+      .then((result) => {
+        setImported(result);
+        setFound(undefined);
+        stored.reload();
+      }, fail);
+  };
   const sync = (connectorId: string) =>
     api("syncConnector", { connectorId }).then(() => {
       setFound(undefined);
@@ -143,6 +159,25 @@ function Sources({ api }: { api: ApiClient }) {
           ))}
         </tbody>
       </table>
+      <h2>JSONL 가져오기</h2>
+      <input
+        type="file"
+        aria-label="JSONL 파일 가져오기"
+        accept=".jsonl,application/jsonl,application/x-ndjson"
+        onChange={importFile}
+      />
+      {imported && (
+        <>
+          <p role="status">{importSummaryText(imported)}</p>
+          {imported.errors.length > 0 && (
+            <ul aria-label="거부된 줄">
+              {imported.errors.map((e) => (
+                <li key={e.line}>{lineErrorText(e)}</li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
       <h2>저장된 원본</h2>
       <form role="search" onSubmit={search}>
         <input

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectorInstances, connectorKinds, openCanonicalDb } from "./composition.ts";
-import { createConnectorManager, syncConnector } from "./connectors.ts";
+import { createConnectorManager, EXTRACT_JOB_KIND, syncConnector } from "./connectors.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures/test-connector.jsonl");
 
@@ -131,6 +131,29 @@ describe("cursor after save", () => {
     await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow(/delete/);
     expect(readCursor(db, "s")).toBeNull();
     expect(counts()).toEqual([0, 0]);
+    expect(db.all("SELECT count(*) AS n FROM jobs")).toEqual([{ n: 0 }]);
+  });
+
+  it("registers one extraction job per new version, fenced at it, with the page (V02-R4)", async () => {
+    const connector = scripted(() => ({
+      changes: [upsert("a"), upsert("a"), upsert("b"), upsert("a", "b2")],
+      nextCursor: "1",
+      hasMore: false,
+    }));
+    expect(await syncConnector(db, "s", "scripted", connector)).toEqual({
+      received: 4,
+      created: 3,
+    });
+    expect(
+      db.all(
+        `SELECT s.external_id, j.kind, j.fence_version, j.status
+           FROM jobs j JOIN sources s ON s.id = j.source_id ORDER BY j.id`,
+      ),
+    ).toEqual([
+      { external_id: "a", kind: EXTRACT_JOB_KIND, fence_version: 1, status: "queued" },
+      { external_id: "b", kind: EXTRACT_JOB_KIND, fence_version: 1, status: "queued" },
+      { external_id: "a", kind: EXTRACT_JOB_KIND, fence_version: 2, status: "queued" },
+    ]);
   });
 
   it("rejects a malformed page before storing anything", async () => {

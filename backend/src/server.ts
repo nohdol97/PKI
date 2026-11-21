@@ -45,12 +45,16 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ConnectorManager } from "./connectors.ts";
+import type { JsonlImporter } from "./jsonl-import.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const LOOPBACK = "127.0.0.1";
 const MIN_TOKEN_LENGTH = 32;
 const MAX_BODY_BYTES = 16 * 1024;
+/** Provisional (V02-T04): the import route takes a file; every other route stays at 16 KiB. */
+export const IMPORT_BODY_LIMIT = 8 * 1024 * 1024;
+const BODY_LIMITS: Partial<Record<RouteName, number>> = { importJsonl: IMPORT_BODY_LIMIT };
 
 export interface ServerOptions {
   /** Fresh per run; the caller generates it and passes it in-process, never via argv/env. */
@@ -81,6 +85,8 @@ export interface ServerOptions {
    * ("broker-not-bound"); boot.ts always binds them.
    */
   calls?: { broker: Pick<Broker, "call">; issuer: UserActionIssuer };
+  /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
+  importer?: JsonlImporter;
 }
 
 export interface RunningServer {
@@ -264,6 +270,8 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),
     syncConnector: (input) => options.connectors.sync(input.connectorId),
+    importJsonl: async ({ text }) =>
+      options.importer ? options.importer(text) : { error: "connector-unavailable" },
     sources: async () => ({ sources: listSources(options.db) }),
     searchSources: async (input) => ({ sources: findSources(options.db, input.query) }),
     activity: async () => ({ calls: listProviderCalls(options.db) }),
@@ -295,12 +303,12 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
 }
 
 /** The JSON body, or undefined when it is too large or not JSON. */
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, limit: number): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) return undefined;
+    if (size > limit) return undefined;
     chunks.push(chunk);
   }
   try {
@@ -319,7 +327,9 @@ async function handle(
   const route = routes[name];
   let input: unknown;
   if ("request" in route) {
-    const parsed = route.request.safeParse(await readJson(req));
+    const parsed = route.request.safeParse(
+      await readJson(req, BODY_LIMITS[name] ?? MAX_BODY_BYTES),
+    );
     if (!parsed.success) return reject(res, 400, "bad-request");
     input = parsed.data;
   }

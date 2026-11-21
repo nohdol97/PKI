@@ -22,8 +22,10 @@ import { createLocalEmbedder, OpenAICompatibleProvider } from "@pki/providers/ad
 import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
-import type { ConnectorFactory, ConnectorInstanceConfig } from "./connectors.ts";
+import type { ConnectorFactory, ConnectorInstanceConfig, SyncOptions } from "./connectors.ts";
+import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
+import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
 import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
 import type { ServerOptions } from "./server.ts";
 
@@ -123,6 +125,17 @@ export const connectorKinds = {
   "site-messenger": () => createSiteConnector("site-messenger"),
   "site-wiki": () => createSiteConnector("site-wiki"),
 } satisfies Record<string, ConnectorFactory>;
+
+/**
+ * The Sources screen's JSONL import (V02-R2). `runner` is woken after each page
+ * that registered extraction jobs; V02-T05 creates the runner and passes it here.
+ */
+export function productImporter(
+  db: SqlDriver,
+  options: Pick<SyncOptions, "runner"> = {},
+): JsonlImporter {
+  return (text) => importJsonl(db, text, { ...options, createConnector: createJsonlConnector });
+}
 
 /** Opens the canonical SQLite inside `dir` (default: the per-user data directory), migrated. */
 export function openCanonicalDb(dir: string = dataDirectory()): SqlDriver {

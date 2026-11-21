@@ -40,8 +40,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(6);
-    expect(migrations).toHaveLength(6);
+    expect(schemaVersion(db)).toBe(7);
+    expect(migrations).toHaveLength(7);
   });
 
   it("is idempotent when re-run", () => {
@@ -532,7 +532,7 @@ describe("schema v6 (V02-T03)", () => {
     db.run(
       "INSERT INTO jobs (kind, source_id, fence_version, status, lease_until) VALUES ('extract', 1, 1, 'leased', 'L')",
     );
-    migrate(db);
+    migrate(db, migrations.slice(0, 6));
     expect(schemaVersion(db)).toBe(6);
     expect(columns("jobs")).toEqual([
       "id",
@@ -547,5 +547,35 @@ describe("schema v6 (V02-T03)", () => {
     expect(db.all("SELECT status, lease_until, reason, lease_token FROM jobs")).toEqual([
       { status: "leased", lease_until: "L", reason: null, lease_token: 0 },
     ]);
+  });
+});
+
+describe("schema v7 (V02-T04)", () => {
+  it("adds the Connector's own revision to a v6 database's versions, null for the old rows", () => {
+    migrate(db, migrations.slice(0, 6));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a')");
+    db.run(
+      "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, 1, 'h', 't', 'b')",
+    );
+    migrate(db);
+    expect(schemaVersion(db)).toBe(7);
+    expect(columns("source_versions")).toEqual([
+      "id",
+      "source_id",
+      "version",
+      "content_hash",
+      "title",
+      "body",
+      "revision",
+    ]);
+    expect(db.all("SELECT version, revision FROM source_versions")).toEqual([
+      { version: 1, revision: null },
+    ]);
+    expect(() =>
+      db.run(
+        "INSERT INTO source_versions (source_id, version, content_hash, title, body, revision) VALUES (1, 2, 'h2', 't', 'b', 0)",
+      ),
+    ).toThrow(/CHECK/);
   });
 });
