@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Fake 'claude' executable (default mode: split). Not a real CLI."""
+import os
+import sys
+
+mode = os.environ.get("FAKE_CLI_MODE") or "split"
+os.environ["FAKE_CLI_MODE"] = mode
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import fake_cli  # noqa: E402
+
+fake_cli.MODE = mode
+fake_cli.VERSION_TEXT = "claude 1.0.0-kimminsu"
+fake_cli.main()

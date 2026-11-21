@@ -1,0 +1,17 @@
+{
+  "_notice": "NEVER USED. Example only: copy to config.json and fill it in after the V01 skeleton installer exists. Values in <angle brackets> are placeholders. The silent-install arguments below are an UNCONFIRMED example for an NSIS installer; read the electron-builder NSIS documentation for the real switches.",
+  "ProductName": "<PRODUCT-DISPLAY-NAME>",
+  "InstallerPath": "<PATH-TO-INSTALLER-ARTIFACT>",
+  "SilentInstallArgs": ["/S"],
+  "InstallDir": "%LOCALAPPDATA%\\Programs\\<PRODUCT-FOLDER>",
+  "ProductExe": "<PRODUCT>.exe",
+  "UninstallerRelativePath": "<UNINSTALLER>.exe",
+  "SilentUninstallArgs": ["/S"],
+  "WorkerProcessNames": [],
+  "Ready": { "Url": "http://127.0.0.1:<PORT>/health", "ProcessWindow": true, "TimeoutSeconds": 60 },
+  "StartupRuns": 5,
+  "Idle": { "WarmupSeconds": 30, "ObserveSeconds": 300, "IntervalSeconds": 5 },
+  "GracefulStopWaitSeconds": 15,
+  "RoundTrip": { "Method": "POST", "Url": "http://127.0.0.1:<PORT>/<SYNTHETIC-ENDPOINT>", "Body": "{\"synthetic\": true}", "ExpectContains": "<EXPECTED-TEXT>" },
+  "WatchFolders": ["%ProgramFiles%", "%LOCALAPPDATA%", "%APPDATA%", "%ProgramData%"]
+}
