@@ -4,10 +4,17 @@ STATUS: NEVER EXECUTED against a real CLI/engine/installer (written only); no em
 external WORKER process over JSON Lines, so the heavy library lives only in the worker. Unit tests use
 a hashing fake worker.
 
-CONTRACT ASSUMPTIONS (eval/golden is authored in parallel; field names are NOT confirmed):
-  eval/golden/sources/*.jsonl  SourceRecords, eval/golden/labels/*.jsonl, eval/golden/splits.json,
-  eval/scorer/score.py taking a predictions JSONL. DEFAULT_FIELD_MAP below holds every assumed name in
-  one place; override with --field-map or fix after `run.py inspect-golden` shows the real keys.
+DATASET CONTRACT (confirmed against eval/golden/README.md and eval/scorer/README.md, branch docs/r05-golden-dataset):
+  sources/*.jsonl  one line per (id, version): id, content, version, operation (upsert|delete|revoke), source_type.
+                   The benchmark embeds the LATEST version of each id and skips ids whose latest operation is
+                   `delete` (empty content). There is no language field; `guess_lang` derives ko/en/mixed.
+  labels/qa.jsonl  questions: label_id, scenario_instance, question, answerable, evidence[{record_id,...}].
+  splits.json      {"splits": {"dev": [instance ids], "eval": [...]}, "instances": {...}}; queries are the
+                   qa lines whose scenario_instance is in the chosen split.
+  predictions      one JSON line per question: {"kind":"retrieval","query_id":<qa label_id>,"ranked":[record ids]}
+  scorer           python3 eval/scorer/score.py <golden_dir> <predictions.jsonl> [--split dev|eval] [--k 5]
+Known gaps vs the scorer: retrieval ignores `access_scope` / `viewer` (the scorer does not use them either);
+the scorer scores gold evidence by record id only (version ignored).
 
 Worker protocol (stdin JSONL in, stdout JSONL out):
   in : {"id": str, "text": str, "kind": "query"|"passage"}   (prefixes from models.json are already applied)
@@ -29,9 +36,10 @@ if VERIF not in sys.path:
 from common import runner  # noqa: E402
 
 DEFAULT_FIELD_MAP = {
-    "source_id": "id", "source_text": "text", "source_lang": "lang",
-    "query_id": "query_id", "query_text": "query", "query_lang": "lang", "relevant_ids": "relevant",
-    "pred_query_id": "query_id", "pred_ranked": "ranked", "pred_doc_id": "doc_id", "pred_score": "score",
+    "source_id": "id", "source_text": "content", "source_version": "version", "source_operation": "operation",
+    "query_id": "label_id", "query_text": "question", "query_scenario": "scenario_instance",
+    "splits_key": "splits", "pred_kind": "kind", "pred_kind_value": "retrieval",
+    "pred_query_id": "query_id", "pred_ranked": "ranked",
 }
 MODELS_PATH = os.path.join(HERE, "models.json")
 
@@ -62,35 +70,56 @@ def _read_jsonl(path):
                 yield n, json.loads(line)
 
 
+def guess_lang(text):
+    """ko / en / mixed from the share of Hangul letters (the dataset has no language field)."""
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return "en"
+    ratio = sum(1 for c in letters if "\uac00" <= c <= "\ud7a3") / len(letters)
+    return "ko" if ratio > 0.6 else ("en" if ratio < 0.05 else "mixed")
+
+
 def load_sources(path, field_map):
-    out = []
+    """Latest version of each id; ids whose latest operation is `delete` are skipped."""
+    latest = {}
     for file in _jsonl_files(path):
         for n, row in _read_jsonl(file):
             try:
-                rec = {"id": row[field_map["source_id"]], "text": row[field_map["source_text"]]}
+                rid, text = row[field_map["source_id"]], row[field_map["source_text"]]
             except KeyError as exc:
                 raise GoldenFormatError("{}:{} has no field {}; run `run.py inspect-golden` and pass --field-map".format(
                     os.path.basename(file), n, exc))
-            lang = row.get(field_map.get("source_lang", ""))
-            if lang is not None:
-                rec["lang"] = lang
-            out.append(rec)
-    return out
+            version = row.get(field_map.get("source_version", ""), 0)
+            if rid not in latest or version >= latest[rid][0]:
+                latest[rid] = (version, text, row.get(field_map.get("source_operation", ""), "upsert"))
+    return [{"id": rid, "text": text, "lang": guess_lang(text)}
+            for rid, (_v, text, op) in sorted(latest.items()) if op != "delete" and text]
 
 
-def load_queries(labels_path, field_map, split_ids=None):
+def load_split_instances(golden_root, split, field_map=None):
+    fm = field_map or DEFAULT_FIELD_MAP
+    with open(os.path.join(golden_root, "splits.json"), encoding="utf-8") as fh:
+        data = json.load(fh)
+    try:
+        return set(data[fm["splits_key"]][split])
+    except KeyError:
+        raise GoldenFormatError("splits.json has no split '{}' under '{}'; run `run.py inspect-golden`".format(split, fm["splits_key"]))
+
+
+def load_queries(labels_path, field_map, instances=None):
+    """Questions from labels/qa.jsonl, optionally limited to scenario instances (a split)."""
+    path = os.path.join(labels_path, "qa.jsonl") if os.path.isdir(labels_path) else labels_path
     out = []
-    for file in _jsonl_files(labels_path):
-        for n, row in _read_jsonl(file):
-            try:
-                q = {"query_id": row[field_map["query_id"]], "query": row[field_map["query_text"]]}
-            except KeyError as exc:
-                raise GoldenFormatError("{}:{} has no field {}; run `run.py inspect-golden` and pass --field-map".format(
-                    os.path.basename(file), n, exc))
-            if row.get(field_map.get("query_lang", "")) is not None:
-                q["lang"] = row[field_map["query_lang"]]
-            if split_ids is None or q["query_id"] in split_ids:
-                out.append(q)
+    for n, row in _read_jsonl(path):
+        try:
+            q = {"query_id": row[field_map["query_id"]], "query": row[field_map["query_text"]]}
+            scenario = row[field_map["query_scenario"]]
+        except KeyError as exc:
+            raise GoldenFormatError("{}:{} has no field {}; run `run.py inspect-golden` and pass --field-map".format(
+                os.path.basename(path), n, exc))
+        if instances is None or scenario in instances:
+            q["lang"] = guess_lang(q["query"])
+            out.append(q)
     return out
 
 
@@ -109,7 +138,8 @@ def describe_golden(root):
     if os.path.exists(splits):
         with open(splits, encoding="utf-8") as fh:
             data = json.load(fh)
-        info["splits.json"] = {"keys": sorted(data.keys()) if isinstance(data, dict) else [type(data).__name__], "lines": 1}
+        info["splits.json"] = {"keys": sorted(data.keys()) if isinstance(data, dict) else [type(data).__name__], "lines": 1,
+                               "splits": sorted(data.get("splits", {})) if isinstance(data, dict) else []}
     return info
 
 
@@ -122,9 +152,9 @@ def rank(query_vec, doc_vecs, k):
 
 
 def format_prediction(query_id, ranked, field_map=None):
+    """eval/scorer/README.md: {"kind":"retrieval","query_id":...,"ranked":[record ids in rank order]}."""
     fm = field_map or DEFAULT_FIELD_MAP
-    return {fm["pred_query_id"]: query_id,
-            fm["pred_ranked"]: [{fm["pred_doc_id"]: d, fm["pred_score"]: round(s, 6)} for d, s in ranked]}
+    return {fm["pred_kind"]: fm["pred_kind_value"], fm["pred_query_id"]: query_id, fm["pred_ranked"]: [d for d, _s in ranked]}
 
 
 def run_embedding_bench(model, worker_argv, docs, queries, out_path, top_k=10, timeout_s=3600,

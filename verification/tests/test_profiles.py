@@ -81,6 +81,10 @@ class ProfileFileTests(unittest.TestCase):
             self.assertIn(p["kind"], ("contained", "control"))
         self.assertTrue(self.data["deferred"])
 
+    def test_hook_planted_flag_matches_what_negative_py_plants(self):
+        for p in self.data["profiles"]:
+            self.assertEqual(p["hook_planted"], p["cli"] == "claude", p["name"])
+
     def test_profile_names_unique(self):
         names = [p["name"] for p in self.data["profiles"]]
         self.assertEqual(len(names), len(set(names)))

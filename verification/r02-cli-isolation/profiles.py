@@ -47,6 +47,8 @@ def lint_profiles(data):
             errors.append("{}: argv[0] must be the CLI name and never a shell".format(name))
         if p.get("kind") not in ("contained", "control"):
             errors.append("{}: kind must be contained or control".format(name))
+        if not isinstance(p.get("hook_planted"), bool):
+            errors.append("{}: hook_planted must be true or false (is a project hook planted for this CLI?)".format(name))
         if not p.get("source"):
             errors.append("{}: source is required".format(name))
         for i, token in enumerate(argv):

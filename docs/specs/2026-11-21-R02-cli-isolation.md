@@ -23,7 +23,7 @@
 - 구독 로그인의 약관 허용 여부를 스크립트가 판정하지 않는다. 이는 사람이 공식 문서를 읽고 벤더에 확인할 일이다.
 - 제품의 Provider 구현(V01 이후)은 만들지 않는다.
 
-배포처 후속 항목(각 항목은 `docs/site-setup.md`의 `## 배포처 설정 체크리스트`에 같은 ID로 있다):
+배포처 후속 항목(각 항목은 `verification/SITE_FOLLOWUPS.md`의 `## 배포처 설정 체크리스트`에 같은 ID로 있다):
 
 - R02-S1: 공식 약관·벤더 서면 확인(C4). 스크립트가 아니라 사람이 하며, `run.py terms`는 안내만 출력한다.
 - R02-S2: OS 수준 프로세스·파일·네트워크 추적(Sysmon/ETW/procmon). 하네스 관찰값을 넘는 증명이며, `run.py os-trace`는 안내만 출력한다.
@@ -40,7 +40,7 @@
 - R02-R8 (경로): `not-installed`는 PATH에서 CLI를 못 찾는 상황을, `not-logged-in`은 비어 있는 임시 설정 홈으로 CLI를 띄운 상황을 재현한다. 사용자의 실제 로그인을 로그아웃하지 않는다.
 - R02-R9 (결과): 모든 하위 명령은 결과 파일을 `result.json`과 `result.md` 하나씩만 쓴다. 쓰기 전에 마스킹하고, 마스킹 뒤에도 호스트명·사용자명·홈 경로 등 실행 환경의 식별 값이 남아 있으면 파일을 쓰지 않고 실패한다. `--dry-run`은 아무것도 실행하거나 만들지 않고 argv와 만들 파일을 출력한다.
 - R02-R10 (확인 표기): 모든 스크립트 머리에 "실제 CLI에 대해 실행된 적 없음"을 적고, `verification/README.md` 표에 같은 상태를 적는다.
-- R02-R11 (문서): 한국어 절차서와 결과 양식, 약관 확인 체크리스트를 둔다. `docs/site-setup.md`에 배포처 설정 체크리스트를 만든다.
+- R02-R11 (문서): 한국어 절차서와 결과 양식, 약관 확인 체크리스트를 둔다. `verification/SITE_FOLLOWUPS.md`에 배포처 설정 체크리스트를 만든다.
 
 ## 인터페이스 / 설계 개요
 
@@ -84,7 +84,8 @@ flowchart LR
 - [ ] R02-K3 (R9): 호스트명·사용자명·홈 경로·이메일·토큰이 마스킹되고, 남아 있으면 쓰기를 거부한다 → `test_redact.py`, `test_results.py`.
 - [ ] R02-K4 (R6): 새는 가짜 CLI에서는 9종 공격 중 해당하는 판정이 `LEAKED`가 되고 프로필이 BLOCKED이며, 안 새는 가짜 CLI에서는 모두 `CONTAINED`다 → `test_r02_judge.py`.
 - [ ] R02-K5 (R9, R10): `--dry-run`이 아무 파일도 만들지 않고 argv를 출력한다 → `test_r02_dryrun.py`.
-- [ ] R02-K6 (배포처 후속 개수): 비목표의 배포처 후속 항목 2개가 `docs/site-setup.md`에 2개 항목으로 있다 → `test_site_followups.py`.
+- [ ] R02-K6 (배포처 후속 개수): 비목표의 배포처 후속 항목 2개가 `verification/SITE_FOLLOWUPS.md`에 2개 항목으로 있다 → `test_site_followups.py`.
+- [ ] R02-K8 (R6, hook 점검): 같은 CLI의 대조 프로필 실행에서 심은 hook이 실제로 실행되는 것이 관찰되기 전에는 hook 점검이 INCONCLUSIVE이고 프로필은 `CONTAINED_ON_OBSERVABLES`가 될 수 없다. 심은 Claude hook 설정 형식은 미검증이다 → `test_r02_judge.py`의 `HookCheckRuleTests`, `fixtures/PLANTED_FILES.md`.
 - [ ] R02-K7 (배포처 후속 경로): `run.py terms`, `run.py os-trace`가 "미구현, 배포처 후속"을 출력하고 비0으로 종료한다(경로당 1건) → `test_site_followups.py`.
 
 ## 미해결 질문
@@ -98,3 +99,4 @@ flowchart LR
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-21 | 최초 작성 | 이 문서 | 이슈 #11 사외 준비물 spec 고정(이슈 #37 실행 분리 방침) |
+| 2026-11-21 | 배포처 후속 체크리스트 위치를 `docs/site-setup.md`에서 `verification/SITE_FOLLOWUPS.md`로 변경 | 비목표, 요구사항, 완료 기준 | 다른 브랜치가 `docs/site-setup.md`를 소유해 병합 충돌을 피함(조정자 지시) |

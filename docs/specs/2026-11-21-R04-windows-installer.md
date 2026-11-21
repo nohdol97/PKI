@@ -22,7 +22,7 @@
 - 코드 서명 인증서 선정과 구입, 업데이트 서버 선정.
 - PowerShell 스크립트를 사외에서 실행하는 일. 이 PR의 개발 기기에는 PowerShell이 없어 구문 검사도 하지 못했다.
 
-배포처 후속 항목(각 항목은 `docs/site-setup.md`의 `## 배포처 설정 체크리스트`에 같은 ID로 있다):
+배포처 후속 항목(각 항목은 `verification/SITE_FOLLOWUPS.md`의 `## 배포처 설정 체크리스트`에 같은 ID로 있다):
 
 - R04-S1: V01 skeleton 설치 파일 제작·전달. `run.py build-skeleton`은 안내만 출력한다.
 - R04-S2: R04-C2 두 번째 설치 실험(Python/native 모듈 포함 번들). `run.py second-installer`는 안내만 출력한다.
@@ -39,7 +39,7 @@
 - R04-R7 (서명): `07-signature-info.ps1`은 설치 파일과 설치 폴더의 exe·dll·node 파일의 서명 상태를 센다.
 - R04-R8 (round trip): `08-roundtrip.ps1`은 설정 파일이 정한 합성 요청으로 Local API 쓰기·읽기를 확인한다. 브라우저·Electron 화면 확인은 사람이 체크리스트로 한다.
 - R04-R9 (결과·마스킹): PowerShell은 값을 만들 때부터 호스트명·사용자명·경로를 자리표시자로 바꾸고, `sanitize_result.py`가 다른 기기에서 한 번 더 마스킹·검증한다.
-- R04-R10 (표기·문서): 스크립트 머리에 실행된 적 없음을 적는다. 한국어 절차서, 수동 체크리스트, 결과 양식, `docs/site-setup.md` 항목을 둔다.
+- R04-R10 (표기·문서): 스크립트 머리에 실행된 적 없음을 적는다. 한국어 절차서, 수동 체크리스트, 결과 양식, `verification/SITE_FOLLOWUPS.md` 항목을 둔다.
 
 ## 인터페이스 / 설계 개요
 
@@ -63,7 +63,7 @@
 
 - [ ] R04-K1 (R9): `sanitize_result.py`가 원본 `result.json`의 식별 값을 마스킹하고 스키마를 검증하며, 남은 식별 값이 있으면 실패한다 → `test_r04_sanitize.py`.
 - [ ] R04-K2 (R10): 스크립트 전부가 머리에 "실행된 적 없음" 문구를 갖고, 모든 `.ps1`이 공용 함수 파일을 불러온다 → `test_r04_scripts_static.py`(정적 검사만, 구문 검사는 아님).
-- [ ] R04-K3 (배포처 후속 개수·경로): 비목표의 3개 항목이 `docs/site-setup.md`에 3개로 있고, `build-skeleton`·`second-installer`가 "미구현, 배포처 후속"과 비0으로 끝난다(S3은 스크립트 없는 체크리스트 항목) → `test_site_followups.py`.
+- [ ] R04-K3 (배포처 후속 개수·경로): 비목표의 3개 항목이 `verification/SITE_FOLLOWUPS.md`에 3개로 있고, `build-skeleton`·`second-installer`가 "미구현, 배포처 후속"과 비0으로 끝난다(S3은 스크립트 없는 체크리스트 항목) → `test_site_followups.py`.
 
 ## 미해결 질문
 
@@ -75,3 +75,4 @@
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-21 | 최초 작성 | 이 문서 | 이슈 #13 사외 준비물 spec 고정(이슈 #37 실행 분리 방침) |
+| 2026-11-21 | 배포처 후속 체크리스트 위치를 `docs/site-setup.md`에서 `verification/SITE_FOLLOWUPS.md`로 변경 | 비목표, 요구사항, 완료 기준 | 다른 브랜치가 `docs/site-setup.md`를 소유해 병합 충돌을 피함(조정자 지시) |

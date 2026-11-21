@@ -1,4 +1,4 @@
-"""Spec K6/K7/K3: the 배포처 후속 items in each spec match docs/site-setup.md one-to-one, and every
+"""Spec K6/K7/K3: the 배포처 후속 items in each spec match verification/SITE_FOLLOWUPS.md one-to-one, and every
 follow-up PATH prints `미구현, 배포처 후속` and exits non-zero. These are countable, not existence checks."""
 import os
 import re
@@ -29,7 +29,7 @@ def spec_items(prefix):
 
 
 def checklist_items():
-    text = read(os.path.join(DOCS, "site-setup.md"))
+    text = read(os.path.join(_paths.VERIF_DIR, "SITE_FOLLOWUPS.md"))
     assert "## 배포처 설정 체크리스트" in text
     section = text.split("## 배포처 설정 체크리스트", 1)[1]
     return re.findall(r"^- \[ \] (R0\d-S\d+):", section, flags=re.M)

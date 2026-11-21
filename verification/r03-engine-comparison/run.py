@@ -123,7 +123,7 @@ def build_parser():
     sp.add_argument("--split")
     sp.add_argument("--field-map", help="JSON file overriding DEFAULT_FIELD_MAP")
     sp.add_argument("--top-k", type=int, default=10)
-    sp.add_argument("--scorer-cmd", help="JSON array; {predictions} is replaced. Confirm eval/scorer/score.py arguments first")
+    sp.add_argument("--scorer-cmd", help="JSON array override; {predictions} is replaced. Default with --split: python3 eval/scorer/score.py <golden> {predictions} --split <split>")
     sp.add_argument("--timeout", type=float, default=7200.0)
     sp = sub.add_parser("embed-offline-check"); common(sp)
     sp.add_argument("--model", choices=["bge-m3", "e5-base"], required=True)
@@ -298,11 +298,8 @@ def cmd_embed(args):
         queries = [{"query_id": p["id"], "query": p["query"]} for p in probes["probes"]]
     else:
         docs = eb.load_sources(os.path.join(args.golden, "sources"), field_map)
-        split_ids = None
-        if args.split:
-            with open(os.path.join(args.golden, "splits.json"), encoding="utf-8") as fh:
-                split_ids = set(json.load(fh)[args.split])
-        queries = eb.load_queries(os.path.join(args.golden, "labels"), field_map, split_ids)
+        instances = eb.load_split_instances(args.golden, args.split, field_map) if args.split else None
+        queries = eb.load_queries(os.path.join(args.golden, "labels"), field_map, instances)
     os.makedirs(args.out, exist_ok=True)
     pred = os.path.join(args.out, "predictions-{}.jsonl".format(args.model))
     try:
@@ -314,15 +311,23 @@ def cmd_embed(args):
                     res["docs"], res["queries"], res["dim"], res["load_s"], res["docs_per_s"], res["peak_rss_bytes"] // 2**20),
                 note="retrieval QUALITY is judged by eval/scorer/score.py on the predictions file, not here; license_claim={}".format(model["license_claim"]),
                 data=res)
-    if args.scorer_cmd:
+    scorer_cmd = args.scorer_cmd
+    if not scorer_cmd and args.dataset == "golden" and args.split:
+        score_py = os.path.join(os.path.dirname(VERIF), "eval", "scorer", "score.py")
+        scorer_cmd = json.dumps([sys.executable, score_py, args.golden, "{predictions}", "--split", args.split])
+    if scorer_cmd:
         from common import runner
-        argv = [a.replace("{predictions}", pred) for a in json.loads(args.scorer_cmd)]
+        argv = [a.replace("{predictions}", pred) for a in json.loads(scorer_cmd)]
         scored = runner.run_process(argv, timeout_s=3600)
         b.add_raw("scorer_output:" + args.model, scored.stdout + scored.stderr)
+        try:
+            b.add_metric("scorer_retrieval:" + args.model, json.loads(scored.stdout)["retrieval"])
+        except (ValueError, KeyError):
+            pass
         b.add_check("R03-C3:score:" + args.model, "eval/scorer/score.py ran on the predictions", "PASS" if scored.returncode == 0 else "FAIL",
                     "exit={}".format(scored.returncode))
     else:
-        b.add_note("Run eval/scorer/score.py on {} (check its arguments first; its CLI was not known when this kit was written).".format(os.path.basename(pred)))
+        b.add_note("Run: python3 eval/scorer/score.py <golden> {} --split <dev|eval>  (pass --split to this command to do it automatically).".format(os.path.basename(pred)))
     finish(args, b)
     return 0
 

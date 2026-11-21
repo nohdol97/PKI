@@ -30,13 +30,25 @@ class FieldMapTests(unittest.TestCase):
             self.assertIn("license_claim", m)
             self.assertIn("prefix_source", m)
 
-    def test_load_sources_with_field_map(self):
+    def test_load_sources_takes_latest_version_and_skips_deleted(self):
+        rows = [{"id": "d1", "content": "hello", "version": 1, "operation": "upsert"},
+                {"id": "d1", "content": "hello again", "version": 2, "operation": "upsert"},
+                {"id": "d2", "content": "", "version": 2, "operation": "delete"},
+                {"id": "d3", "content": "안녕하세요 반갑습니다", "version": 1, "operation": "upsert"}]
         with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "a.jsonl")
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"doc": "d1", "body": "hello", "language": "en"}) + "\n")
-            recs = bench.load_sources(d, {"source_id": "doc", "source_text": "body", "source_lang": "language"})
-            self.assertEqual(recs, [{"id": "d1", "text": "hello", "lang": "en"}])
+            with open(os.path.join(d, "a.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
+            recs = bench.load_sources(d, bench.DEFAULT_FIELD_MAP)
+        self.assertEqual(recs, [{"id": "d1", "text": "hello again", "lang": "en"}, {"id": "d3", "text": "안녕하세요 반갑습니다", "lang": "ko"}])
+
+    def test_guess_lang(self):
+        self.assertEqual(bench.guess_lang("plain english"), "en")
+        self.assertEqual(bench.guess_lang("한국어 문장입니다"), "ko")
+        self.assertEqual(bench.guess_lang("PostgreSQL 롤백 rollback 절차를 확인한다 now"), "mixed")
+
+    def test_prediction_line_matches_the_scorer_format(self):
+        self.assertEqual(bench.format_prediction("S01-I1:qa-1", [("mail-0001", 0.9), ("wiki-0001", 0.5)]),
+                         {"kind": "retrieval", "query_id": "S01-I1:qa-1", "ranked": ["mail-0001", "wiki-0001"]})
 
     def test_missing_field_gives_actionable_error(self):
         with tempfile.TemporaryDirectory() as d:
@@ -75,8 +87,9 @@ class BenchTests(unittest.TestCase):
             with open(os.path.join(d, "p1.jsonl"), encoding="utf-8") as fh:
                 lines = [json.loads(x) for x in fh]
         self.assertEqual([x["query_id"] for x in lines], ["q1", "q2"])
-        self.assertIn(lines[0]["ranked"][0]["doc_id"], ("s4", "s5"))
-        self.assertEqual(lines[1]["ranked"][0]["doc_id"], "s3")
+        self.assertEqual({x["kind"] for x in lines}, {"retrieval"})
+        self.assertIn(lines[0]["ranked"][0], ("s4", "s5"))
+        self.assertEqual(lines[1]["ranked"][0], "s3")
         self.assertEqual(r1["dim"], 64)
 
     def test_metrics_reported(self):

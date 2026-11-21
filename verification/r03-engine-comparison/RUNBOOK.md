@@ -22,7 +22,7 @@
 ## 3. 선행 조건
 
 1. **R02가 끝나 있어야 합니다.** 엔진의 LLM 호출은 R02에서 `CONTAINED_ON_OBSERVABLES`로 판정된 CLI 프로필만 씁니다. 판정이 없거나 BLOCKED이거나 CLI 버전이 달라졌으면 하네스가 실행을 거부합니다(`--r02-result`).
-2. 평가 데이터 `eval/golden/`와 `eval/scorer/`(병행 작업 산출물)가 이 저장소에 있어야 합니다. 필드 이름은 아직 확정되지 않았으므로 `python run.py inspect-golden --golden eval/golden`으로 실제 필드를 보고, 다르면 `--field-map map.json`(예: `{"source_text": "body"}`)으로 맞춥니다.
+2. 평가 데이터 `eval/golden/`와 채점기 `eval/scorer/`가 이 저장소에 있어야 합니다(`docs/r05-golden-dataset` 브랜치 기준으로 필드 이름을 확인해 반영했습니다). 레코드는 `sources/*.jsonl`의 `id`/`content`/`version`/`operation`, 질문은 `labels/qa.jsonl`의 `label_id`/`question`/`scenario_instance`, 분할은 `splits.json`의 `splits.dev|eval`(시나리오 인스턴스 목록)입니다. 데이터가 바뀌어 필드가 달라지면 `python run.py inspect-golden --golden eval/golden`으로 실제 필드를 보고 `--field-map map.json`으로 맞춥니다.
 3. **네트워크 설치는 배포처 승인이 필요합니다.** `python run.py install-steps`로 고정 버전과 명령을 봅니다. 후보 하나당 가상환경 하나를 따로 만듭니다(서로의 의존성이 섞이지 않게). LightRAG는 release 1.5.7을 1순위, HEAD를 2순위로 적었고 어느 것을 돌렸는지 결과에 씁니다. 모델 내려받기도 승인 대상입니다.
 
 ## 4. 순서
@@ -55,7 +55,8 @@ cognee는 구조화 출력 방식(tools 호출인지 json schema인지)이 확�
 
 - 각 시나리오 단계의 판정은 탐침 질의 기준입니다. FAIL이면 `data.checks`에서 어떤 확인이 틀렸는지 봅니다("forbidden source", "stale text" 등).
 - `unverified`로 나온 확인(예: export 미구현)은 통과가 아닙니다.
-- 검색 **품질**은 이 키트가 아니라 `eval/scorer/score.py`가 판정합니다. scorer 실행 인자는 이 키트를 쓸 때 알려지지 않았으므로 `--scorer-cmd '["python","eval/scorer/score.py","--predictions","{predictions}"]'`를 실제 인자에 맞게 고칩니다.
+- 검색 **품질**은 이 키트가 아니라 `eval/scorer/score.py`가 판정합니다. `embed --dataset golden --split dev`는 predictions를 만든 뒤 `python3 eval/scorer/score.py eval/golden <predictions> --split dev`를 자동으로 실행하고 그 JSON의 `retrieval`을 결과에 남깁니다. 스키마는 `{"kind":"retrieval","query_id":<qa label_id>,"ranked":[레코드 id 순위]}`입니다. 채점기는 답할 수 있는 질문만 센다는 점, `access_scope`/`viewer`를 쓰지 않는다는 점을 알아 둡니다. eval 분할은 관례상 봉인되어 있으므로 튜닝에 쓰지 않습니다.
+- 임베딩 대상 문서는 각 `id`의 최신 버전이고, 마지막 작업이 `delete`인 레코드는 제외합니다. 언어(ko/en/mixed)는 데이터에 필드가 없어 한글 글자 비율로 추정합니다(`guess_lang`).
 - e5 모델의 `query: `/`passage: ` 접두어와 bge-m3의 접두어 없음은 모델 카드 관례를 `models.json`에 적은 것이며 **미확인**입니다. 점수를 믿기 전에 모델 카드와 대조합니다.
 - 내려받은 모델의 HF 커밋 SHA를 결과에 적습니다(고정되어 있지 않음).
 - crash 점검은 SQLite 구조에서만 구현되어 있습니다. 엔진의 crash·동시 읽기·단일 writer 점검은 어댑터 완성 뒤 같은 절차를 엔진 호출로 바꿔 실행합니다(`durability.py`의 `EngineTarget`).

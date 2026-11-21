@@ -35,12 +35,14 @@ class RunAllAgainstFakeTests(unittest.TestCase):
         with open(os.path.join(out, "result.json"), encoding="utf-8") as fh:
             return {c["id"]: c for c in json.load(fh)["checks"]}
 
-    def test_contained_fake_gives_pass_and_unproven_control(self):
+    def test_contained_fake_is_not_proven_because_the_control_never_fired_the_hook(self):
         with tempfile.TemporaryDirectory() as out:
             res = run_all("contained", out)
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             checks = self.load(out)
-            self.assertEqual(checks["R02-C3:negative:claude-A-restricted-safe"]["verdict"], "PASS")
+            self.assertEqual(checks["R02-C3:negative:claude-A-restricted-safe"]["verdict"], "INCONCLUSIVE")
+            self.assertEqual(checks["R02-C3:hook:claude-A-restricted-safe"]["verdict"], "INCONCLUSIVE")
+            self.assertFalse(checks["R02-C3:negative:claude-A-restricted-safe"]["data"]["automatic_use_allowed"])
             self.assertEqual(checks["R02-C3:sensitivity:claude-X-control-read-allowed"]["verdict"], "INCONCLUSIVE")
             self.assertEqual(checks["R02-C1:detect:claude"]["verdict"], "PASS")
             self.assertEqual(checks["R02-C3:cancel:selftest"]["verdict"], "PASS")
