@@ -11,10 +11,13 @@ import {
   createEgressPolicy,
   createExecutionGate,
   createUserActionLedger,
+  errorClass,
+  log,
   loopbackHttpAllowed,
   PUBLIC_SITE_RULES,
   type Broker,
   type EgressControls,
+  type Logger,
   type TestBuildExecution,
   type UserActionIssuer,
 } from "@pki/providers";
@@ -129,12 +132,21 @@ export const connectorKinds = {
 /**
  * The Sources screen's JSONL import (V02-R2). `runner` is woken after each page
  * that registered extraction jobs; V02-T05 creates the runner and passes it here.
+ * An instance whose sync failed is logged by its error class (default: the
+ * backend's filtered log).
  */
 export function productImporter(
   db: SqlDriver,
-  options: Pick<SyncOptions, "runner"> = {},
+  options: Pick<SyncOptions, "runner"> & { logger?: Logger } = {},
 ): JsonlImporter {
-  return (text) => importJsonl(db, text, { ...options, createConnector: createJsonlConnector });
+  const { logger = log, ...sync } = options;
+  return (text) =>
+    importJsonl(db, text, {
+      ...sync,
+      createConnector: createJsonlConnector,
+      // the class only: a message can carry the file's text (V01-R13)
+      onError: (error) => logger("import-instance-failed", { error: errorClass(error) }),
+    });
 }
 
 /** Opens the canonical SQLite inside `dir` (default: the per-user data directory), migrated. */

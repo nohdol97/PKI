@@ -28,6 +28,11 @@ export type JsonlImporter = (text: string) => Promise<ImportJsonlResponse>;
 export interface ImportOptions extends Pick<SyncOptions, "runner"> {
   /** The JSONL Connector, chosen by the composition point (composition.ts). */
   createConnector: () => Connector;
+  /**
+   * Takes an error that failed an instance's sync (its lines are reported
+   * `instance-failed`). The error's message may carry file text: log its class only.
+   */
+  onError?: (error: unknown) => void;
 }
 
 const externalIdOf = (change: Change) =>
@@ -64,7 +69,8 @@ async function importInstance(
           report.stored(outcome === "created");
         },
       });
-    } catch {
+    } catch (error) {
+      options.onError?.(error);
       // A failed page stored nothing of itself (one transaction); its lines and
       // the later rounds' are reported, the pages committed before it stay.
       const rest = rounds.slice(k + 1).flat();

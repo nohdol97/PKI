@@ -26,8 +26,13 @@ export function contentHash(title: string, body: string): string {
     .digest("hex");
 }
 
+/** The source's latest version: the (source_id, version) index, no sort. */
+export const LATEST_VERSION_SQL =
+  "SELECT content_hash, version, revision FROM source_versions WHERE source_id = ? ORDER BY version DESC LIMIT 1";
+
 /**
- * Adds a version unless the content equals the latest's. With a revision, the
+ * Adds a version unless the content equals the latest's, or the same revision with
+ * the same content is stored already. With a revision, the
  * same revision is no new version, and an equal or lower revision with other
  * content is refused (provisional; I01 owns the general revision rule). A version
  * the tombstone would block is refused here, before its trigger aborts the
@@ -47,11 +52,20 @@ export function saveSourceRecord(
     [connectorInstanceId, record.externalId],
   )[0]?.id as number;
   const hash = contentHash(record.title, record.body);
-  const latest = db.all(
-    "SELECT content_hash, version, revision FROM source_versions WHERE source_id = ? ORDER BY id DESC LIMIT 1",
-    [sourceId],
-  )[0];
+  const latest = db.all(LATEST_VERSION_SQL, [sourceId])[0];
   if (latest?.content_hash === hash) return { status: "unchanged" };
+  // An older line already stored (same revision, same content) is nothing new:
+  // re-importing a file with several versions of a source reports no error.
+  // Provisional until I01's general revision rule (sources.last_revision).
+  if (
+    record.revision !== undefined &&
+    db.all(
+      "SELECT 1 FROM source_versions WHERE source_id = ? AND revision = ? AND content_hash = ?",
+      [sourceId, record.revision, hash],
+    ).length > 0
+  ) {
+    return { status: "unchanged" };
+  }
   const latestRevision = latest?.revision as number | null | undefined;
   if (
     record.revision !== undefined &&

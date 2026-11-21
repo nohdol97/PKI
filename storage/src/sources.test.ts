@@ -6,6 +6,7 @@ import { migrate } from "./migrations.ts";
 import { writeTombstone } from "./tombstones.ts";
 import { readChangeSeq } from "./revisions.ts";
 import {
+  LATEST_VERSION_SQL,
   contentHash,
   readCursor,
   registerConnectorInstance,
@@ -147,6 +148,29 @@ describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)
     });
     expect(rows()).toHaveLength(1);
     expect(readChangeSeq(db)).toBe(seq);
+  });
+
+  it("leaves an older line already stored (same revision, same content) unchanged (C3 re-import)", () => {
+    saveSourceRecord(db, "c1", rev(1, "v1"));
+    saveSourceRecord(db, "c1", rev(2, "v2"));
+    expect(saveSourceRecord(db, "c1", rev(1, "v1"))).toEqual({ status: "unchanged" });
+    // the same revision with other content is still refused
+    expect(saveSourceRecord(db, "c1", rev(1, "other"))).toEqual({
+      status: "refused",
+      reason: "revision-not-newer",
+    });
+    expect(rows()).toHaveLength(2);
+  });
+
+  it("finds the latest version through the (source, version) index, not a sort (B-R2-S3)", () => {
+    saveSourceRecord(db, "c1", rev(1, "v1"));
+    saveSourceRecord(db, "c1", rev(2, "v2"));
+    const plan = db
+      .all(`EXPLAIN QUERY PLAN ${LATEST_VERSION_SQL}`, [1])
+      .map((r) => String(r.detail))
+      .join("\n");
+    expect(plan).not.toMatch(/TEMP B-TREE/);
+    expect(db.all(LATEST_VERSION_SQL, [1])).toMatchObject([{ version: 2, revision: 2 }]);
   });
 
   it("leaves a lower revision with the latest content as unchanged", () => {

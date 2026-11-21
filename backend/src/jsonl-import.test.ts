@@ -361,3 +361,104 @@ describe("importJsonl", () => {
     reader.close();
   });
 });
+
+describe("importJsonl, review round 2", () => {
+  /** Plants the job the first version of `external_id` would register, so its page fails. */
+  const plantJobConflict = (externalId: string) => {
+    db.run("INSERT INTO connector_instances (id, kind) VALUES (?, ?) ON CONFLICT DO NOTHING", [
+      MAIL.connector_instance_id,
+      JSONL_CONNECTOR_KIND,
+    ]);
+    const { lastInsertRowid } = db.run(
+      "INSERT INTO sources (connector_instance_id, external_id) VALUES (?, ?)",
+      [MAIL.connector_instance_id, externalId],
+    );
+    db.run(`INSERT INTO jobs (kind, source_id, fence_version, status) VALUES (?, ?, 1, 'done')`, [
+      EXTRACT_JOB_KIND,
+      lastInsertRowid,
+    ]);
+  };
+
+  it("keeps page 1 of a round and reports only page 2's lines when page 2 fails (A7)", async () => {
+    plantJobConflict("s120");
+    const before = counts();
+    const text = Array.from({ length: 150 }, (_, i) =>
+      line({ external_id: `s${i + 1}`, content: `c${i + 1}` }),
+    ).join("\n");
+    const result = await importJsonl(db, text);
+    expect(result.received).toBe(100);
+    expect(result.created).toBe(100);
+    expect(result.errorCount).toBe(50);
+    expect(result.errors).toEqual(
+      Array.from({ length: 50 }, (_, i) => ({ line: 101 + i, reason: "instance-failed" })),
+    );
+    expect(counts()).toEqual({
+      sources: before.sources + 100, // page 2's new source rows went with its rollback
+      versions: before.versions + 100,
+      jobs: before.jobs + 100,
+      changeSeq: before.changeSeq + 100,
+    });
+    expect(
+      db.all(
+        "SELECT max(CAST(substr(s.external_id, 2) AS INTEGER)) AS n FROM source_versions v JOIN sources s ON s.id = v.source_id",
+      ),
+    ).toEqual([{ n: 100 }]);
+  });
+
+  it("hands a failure to onError, and the product logs only its error class (A8)", async () => {
+    plantJobConflict(MAIL.external_id);
+    const seen: unknown[] = [];
+    const result = await importJsonlWith(db, line(), {
+      createConnector: createJsonlConnector,
+      onError: (error) => seen.push(error),
+    });
+    expect(result.errors).toEqual([{ line: 1, reason: "instance-failed" }]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBeInstanceOf(Error);
+
+    const logged: [string, unknown][] = [];
+    await productImporter(db, { logger: (event, fields) => logged.push([event, fields]) })(line());
+    expect(logged).toEqual([["import-instance-failed", { error: "Error" }]]);
+    // the message names the instance and the source; none of it is logged
+    expect(JSON.stringify(logged)).not.toContain(MAIL.connector_instance_id);
+  });
+
+  it("lists the lowest line numbers first whatever stage refused them (A9)", async () => {
+    // the store refuses line 1 after the parser refused lines 2..(LIMIT + 2)
+    const text = [
+      line({ external_id: "d", operation: "delete", content: "" }),
+      ...Array(IMPORT_ERROR_LIMIT + 1).fill("{"),
+    ].join("\n");
+    const result = await importJsonl(db, text);
+    expect(result.errorCount).toBe(IMPORT_ERROR_LIMIT + 2);
+    expect(result.errors[0]).toEqual({ line: 1, reason: "change-kind-unsupported" });
+    expect(result.errors.map((e) => e.line)).toEqual(
+      Array.from({ length: IMPORT_ERROR_LIMIT }, (_, i) => i + 1),
+    );
+  });
+
+  it("re-imports a file with several versions of one source as unchanged, with no error (B-R2-S1, C3)", async () => {
+    const text = [
+      line({ content: "v1" }),
+      line({ version: 2, content: "v2" }),
+      line({ version: 3, content: "v3" }),
+      line({ external_id: "solo", content: "solo" }),
+    ].join("\n");
+    expect(await importJsonl(db, text)).toEqual(reply({ received: 4, created: 4, errors: [] }));
+    const once = counts();
+    expect(await importJsonl(db, text)).toEqual(reply({ received: 4, created: 0, errors: [] }));
+    expect(counts()).toEqual(once);
+  });
+
+  it.each(GOLDEN)("re-imports golden %s storing nothing and refusing nothing new", async (name) => {
+    const text = readFileSync(resolve(GOLDEN_DIR, name), "utf8");
+    const first = await importJsonl(db, text);
+    const once = counts();
+    const second = await importJsonl(db, text);
+    expect(second.created).toBe(0);
+    // only the delete and revoke lines, as on the first import (until V02-T08)
+    expect(second.errors).toEqual(first.errors);
+    expect(second.errors.every((e) => e.reason === "change-kind-unsupported")).toBe(true);
+    expect(counts()).toEqual(once);
+  });
+});
