@@ -1,0 +1,82 @@
+{
+  "notice": "NEVER EXECUTED. Pins come from docs/OSS_EVALUATION.md (2.1 and 3.1 tables). Every install step needs the deployment site's approval for network installs and is run by the operator, never by this kit.",
+  "candidates": [
+    {
+      "name": "lightrag",
+      "role": "engine (execution candidate 1)",
+      "primary": "release",
+      "pins": {
+        "release": {"version": "1.5.7", "evidence": "OSS_EVALUATION 2.1 (PyPI latest 1.5.7)"},
+        "head": {"sha": "01261ed135bfd2f821ff476ed2894b35288a30f8", "version": "1.5.8rc", "evidence": "OSS_EVALUATION 2.1/2.2 E3.1"}
+      },
+      "install_steps": [
+        {"step": "Create an isolated environment for this candidate only", "command": "python -m venv <ENV-DIR>", "needs_network": false, "site_approval": false},
+        {"step": "Install the pinned release (confirm the package name in the `name` field of pyproject.toml at the pinned SHA first: OSS_EVALUATION E3.1)", "command": "<ENV-DIR>\\Scripts\\python -m pip install \"<package-name-from-E3.1>==1.5.7\"", "needs_network": true, "site_approval": true},
+        {"step": "Secondary: HEAD instead of the release", "command": "<ENV-DIR>\\Scripts\\python -m pip install \"git+https://github.com/HKUDS/LightRAG@01261ed135bfd2f821ff476ed2894b35288a30f8\"", "needs_network": true, "site_approval": true},
+        {"step": "Record which of release/HEAD was run in the result (OSS_EVALUATION section 8 requires an explicit choice)", "command": "(manual note)", "needs_network": false, "site_approval": false}
+      ],
+      "adapter": "adapters/lightrag_adapter.py",
+      "site_item": "R03-S1"
+    },
+    {
+      "name": "cognee",
+      "role": "engine (execution candidate 2)",
+      "primary": "release",
+      "pins": {
+        "release": {"version": "1.6.10", "evidence": "OSS_EVALUATION 2.1 (v1.6.10, 2026-11-18)"},
+        "head": {"sha": "1961133d0c68b450fe8e71941a756371e94f7c04", "evidence": "OSS_EVALUATION 2.1/2.2 E1.x"}
+      },
+      "install_steps": [
+        {"step": "Create an isolated environment for this candidate only", "command": "python -m venv <ENV-DIR>", "needs_network": false, "site_approval": false},
+        {"step": "Install the pinned release", "command": "<ENV-DIR>\\Scripts\\python -m pip install \"cognee==1.6.10\"", "needs_network": true, "site_approval": true},
+        {"step": "Know that the default local embedder is English-only and may download a model on first use (E1.5)", "command": "(manual note; set a multilingual embedder before the Korean runs)", "needs_network": true, "site_approval": true}
+      ],
+      "adapter": "adapters/cognee_adapter.py",
+      "site_item": "R03-S2"
+    },
+    {
+      "name": "sage-wiki",
+      "role": "engine (execution candidate 3; Go single binary)",
+      "primary": "release",
+      "pins": {
+        "release": {"version": "v0.2.13", "asset": "sage-wiki_v0.2.13_windows_amd64.zip", "evidence": "OSS_EVALUATION 3.1 (asset existence only confirmed)"},
+        "source": {"sha": "63c9d7bd99da407d6f94f061ec138feae051c558", "build": "CGO_ENABLED=0", "evidence": "OSS_EVALUATION 3.2 (go.mod#L27, Makefile#L4-L5)"}
+      },
+      "install_steps": [
+        {"step": "Download the release asset from the project's GitHub releases page (tag v0.2.13) into an empty folder and record its sha256", "command": "(manual download; the kit does not fetch it)", "needs_network": true, "site_approval": true},
+        {"step": "Secondary: build from the pinned SHA with a Go toolchain", "command": "set CGO_ENABLED=0 && go build ./...   (run inside a checkout of SHA 63c9d7bd99da407d6f94f061ec138feae051c558)", "needs_network": true, "site_approval": true}
+      ],
+      "adapter": "adapters/sage_wiki_adapter.py",
+      "site_item": "R03-S3"
+    },
+    {
+      "name": "cortexdb",
+      "role": "temporal-graph storage candidate (compared with the product-owned SQLite schema, R03-C4)",
+      "primary": "release",
+      "pins": {
+        "release": {"version": "v2.157.1", "asset": "cortexdb-grpc_windows_amd64.tar.gz and an MCP stdio executable", "evidence": "OSS_EVALUATION 3.1 (existence only confirmed; v2.158.0 existed at review time)"},
+        "source": {"sha": "50c1eeb1f2ddd35ff8f72e7ac35289fdd38a32ba", "evidence": "OSS_EVALUATION 3.2"}
+      },
+      "install_steps": [
+        {"step": "Download the release assets into an empty folder and record their sha256", "command": "(manual download; the kit does not fetch it)", "needs_network": true, "site_approval": true}
+      ],
+      "adapter": "store.py (CortexDbStore)",
+      "site_item": "R03-S4"
+    },
+    {
+      "name": "embedding-runtimes",
+      "role": "worker libraries for the embedding benchmark",
+      "primary": "fastembed",
+      "pins": {
+        "fastembed": {"version": "0.9.1", "evidence": "OSS_EVALUATION 4.5"},
+        "sentence-transformers": {"version": "6.3.0", "evidence": "OSS_EVALUATION 4.5"}
+      },
+      "install_steps": [
+        {"step": "Install ONE runtime into its own environment", "command": "<ENV-DIR>\\Scripts\\python -m pip install \"fastembed==0.9.1\"   (or \"sentence-transformers==6.3.0\")", "needs_network": true, "site_approval": true},
+        {"step": "First model use downloads the model files (BAAI/bge-m3 about 2.2 GB fp32 claim, intfloat/multilingual-e5-base about 1.1 GB claim); record each model's HF commit SHA", "command": "(done by the finished worker)", "needs_network": true, "site_approval": true}
+      ],
+      "adapter": "embed_workers/",
+      "site_item": "R03-S5"
+    }
+  ]
+}

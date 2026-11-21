@@ -1,0 +1,34 @@
+{
+  "notice": "NEVER EXECUTED. Values marked *_claim come from docs/OSS_EVALUATION.md section 4.5 (registry metadata read off-site); nothing here was downloaded or measured. HF commit SHAs are NOT pinned: record the SHA the download reports.",
+  "models": [
+    {
+      "model_id": "BAAI/bge-m3",
+      "short": "bge-m3",
+      "license_claim": "MIT (OSS_EVALUATION 4.5, source hf:BAAI/bge-m3 config/model card)",
+      "dim_claim": 1024,
+      "max_tokens_claim": 8194,
+      "onnx_claim": "repo fp32 2,267 MB; community onnx-community/bge-m3-ONNX int8 568 MB, q4 1,248 MB (OSS_EVALUATION 4.5)",
+      "korean_ndcg_claim": "0.598 top1 / 0.646 top3 on the KURE team's 8 Korean sets (self-published, not independently reproduced)",
+      "prefix_query": "",
+      "prefix_passage": "",
+      "prefix_source": "no prefix is assumed; model-card convention, UNCONFIRMED on site"
+    },
+    {
+      "model_id": "intfloat/multilingual-e5-base",
+      "short": "e5-base",
+      "license_claim": "MIT (OSS_EVALUATION 4.5, source hf:intfloat/multilingual-e5-base)",
+      "dim_claim": 768,
+      "max_tokens_claim": 514,
+      "onnx_claim": "repo fp32 1,110 MB, int8 279 MB (OSS_EVALUATION 4.5)",
+      "korean_ndcg_claim": "0.545 top1 / 0.592 top3 on the KURE team's 8 Korean sets (self-published, not independently reproduced)",
+      "prefix_query": "query: ",
+      "prefix_passage": "passage: ",
+      "prefix_source": "e5 family 'query: ' / 'passage: ' convention from the model card; UNCONFIRMED on site, verify before trusting scores"
+    }
+  ],
+  "runtimes": [
+    {"name": "fastembed (Python)", "pin": "0.9.1", "evidence": "OSS_EVALUATION 4.5 runtime table (PyPI 0.9.1; e5-base and bge-m3 only via add_custom_model)"},
+    {"name": "sentence-transformers", "pin": "6.3.0", "evidence": "OSS_EVALUATION 4.5 runtime table (torch based, largest packaging cost)"},
+    {"name": "@huggingface/transformers (Transformers.js)", "pin": "4.3.2", "evidence": "OSS_EVALUATION 4.5 runtime table; not wired in this kit (Node worker would be needed)"}
+  ]
+}

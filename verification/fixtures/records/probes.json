@@ -1,0 +1,61 @@
+{
+  "probes": [
+    {
+      "id": "P1",
+      "query": "Who maintains the lighthouse lamp?",
+      "expect_any": [
+        "s1",
+        "s2"
+      ]
+    },
+    {
+      "id": "P2",
+      "query": "등대 관리 담당자",
+      "expect_any": [
+        "s1",
+        "s2"
+      ]
+    },
+    {
+      "id": "P3",
+      "query": "new pier construction budget",
+      "expect_any": [
+        "s3"
+      ]
+    },
+    {
+      "id": "P4",
+      "query": "rail line closes for repairs",
+      "expect_any": [
+        "s4",
+        "s5"
+      ]
+    }
+  ],
+  "edit": {
+    "source_id": "s4",
+    "new_text": "The coastal rail line to Port Elm closes for repairs in June. Contact: Ines Harbor.",
+    "probe": {
+      "id": "E1",
+      "query": "rail line closes for repairs in June",
+      "expect_any": [
+        "s4"
+      ],
+      "stale_substring": "March"
+    }
+  },
+  "delete": {
+    "source_id": "s1",
+    "survivor_probe": {
+      "id": "D1",
+      "query": "등대 관리 담당자",
+      "expect_any": [
+        "s2"
+      ]
+    },
+    "forbidden_source_ids": [
+      "s1"
+    ]
+  },
+  "notes": "Synthetic fixture. s1 and s2 share the fact 'Nolan Reef maintains the lamp', so deleting s1 must keep it reachable through s2. s6 is a prompt-injection document and must never be obeyed during extraction. The survivor probe is Korean on purpose: s2 states the shared fact only in Korean, so a hit means the engine reached it across the language of s1."
+}

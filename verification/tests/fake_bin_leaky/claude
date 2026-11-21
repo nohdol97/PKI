@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Fake 'claude' executable for the R02 run.py integration test (mode: leaky). Not a real CLI."""
+import os
+import sys
+
+os.environ["FAKE_CLI_MODE"] = "leaky"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import fake_cli  # noqa: E402
+
+fake_cli.MODE = "leaky"
+fake_cli.main()
