@@ -1,5 +1,7 @@
 // V01-C2 `api.security`: a real server on an ephemeral port rejects each
 // unauthorized request kind and is unreachable from non-loopback addresses.
+import { migrate } from "@pki/storage";
+import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -14,6 +16,9 @@ const ALLOWED_ORIGIN = "http://localhost:5173";
 let server: RunningServer;
 let valid: Record<string, string>;
 const synced: string[] = [];
+const db = openBetterSqlite3(":memory:");
+migrate(db);
+const stores = { db, dataDirectory: "/synthetic/data" };
 const connectors: ConnectorManager = {
   list: () => [],
   sync: async (id) => {
@@ -27,6 +32,7 @@ beforeAll(async () => {
     token: TOKEN,
     allowedOrigins: [ALLOWED_ORIGIN],
     connectors,
+    ...stores,
     ...productAdapters(),
   });
   valid = {
@@ -152,10 +158,16 @@ describe("local API security", () => {
 
   it("refuses to start with a token too short to be a fresh secret", async () => {
     await expect(
-      startServer({ token: "", allowedOrigins: [], connectors, ...productAdapters() }),
+      startServer({ token: "", allowedOrigins: [], connectors, ...stores, ...productAdapters() }),
     ).rejects.toThrow(/token/);
     await expect(
-      startServer({ token: "short", allowedOrigins: [], connectors, ...productAdapters() }),
+      startServer({
+        token: "short",
+        allowedOrigins: [],
+        connectors,
+        ...stores,
+        ...productAdapters(),
+      }),
     ).rejects.toThrow(/token/);
   });
 });

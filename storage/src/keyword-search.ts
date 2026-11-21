@@ -8,13 +8,19 @@ import type { SqlDriver } from "./sql-driver.ts";
  * so a Korean word followed by a particle ("예산을") is found by "예산".
  */
 export function searchKeyword(db: SqlDriver, query: string, limit = 50): number[] {
-  const terms = query.split(/[\s\p{Cc}]+/u).filter(Boolean);
-  if (terms.length === 0) return [];
-  const match = terms.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" ");
+  const match = matchExpression(query);
+  if (match === undefined) return [];
   return db
     .all("SELECT rowid FROM keyword_index WHERE keyword_index MATCH ? ORDER BY rank LIMIT ?", [
       match,
       limit,
     ])
     .map((r) => r.rowid as number);
+}
+
+/** The FTS5 MATCH string for `query` (see searchKeyword), or undefined when it has no terms. */
+export function matchExpression(query: string): string | undefined {
+  const terms = query.split(/[\s\p{Cc}]+/u).filter(Boolean);
+  if (terms.length === 0) return undefined;
+  return terms.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" ");
 }

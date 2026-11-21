@@ -1,6 +1,8 @@
 // V01-T12 / R15: the status API reads the vector index state from the configured
 // VectorIndex, and the product configuration reports it unavailable.
 import { ErrorResponseSchema, routes, type VectorIndex } from "@pki/contracts";
+import { migrate } from "@pki/storage";
+import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { MemoryVectorIndex, send } from "@pki/testkit";
 import { describe, expect, it, vi } from "vitest";
 import { productAdapters } from "./composition.ts";
@@ -9,9 +11,18 @@ import { startServer } from "./server.ts";
 
 const TOKEN = "s".repeat(43);
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
+const db = openBetterSqlite3(":memory:");
+migrate(db);
+const stores = { db, dataDirectory: "/synthetic/data" };
 
 async function getStatus(vectorIndex: VectorIndex) {
-  const server = await startServer({ token: TOKEN, allowedOrigins: [], vectorIndex, connectors });
+  const server = await startServer({
+    token: TOKEN,
+    allowedOrigins: [],
+    vectorIndex,
+    connectors,
+    ...stores,
+  });
   try {
     return await send(server.port, routes.status.path, {
       host: `127.0.0.1:${server.port}`,
@@ -75,6 +86,7 @@ describe("status API: vector index", () => {
       token: TOKEN,
       allowedOrigins: [],
       connectors,
+      ...stores,
       get vectorIndex(): VectorIndex {
         throw new TypeError(canary);
       },

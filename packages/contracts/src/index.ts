@@ -62,6 +62,47 @@ export const SyncResponseSchema = z.object({
 });
 export type SyncResponse = z.infer<typeof SyncResponseSchema>;
 
+// Screen reads (V01-R3). `id` is the source version shown: always the source's latest.
+const SourceSummarySchema = z.object({
+  id: z.int(),
+  connectorId: z.string(),
+  externalId: z.string(),
+  title: z.string(),
+});
+export const SourceListResponseSchema = z.object({ sources: z.array(SourceSummarySchema) });
+export type SourceSummary = z.infer<typeof SourceSummarySchema>;
+
+export const SourceSearchRequestSchema = z.strictObject({ query: z.string().min(1).max(200) });
+
+/** One provider call attempt (ADR 0014: no body, prompt, response or secret). */
+const ProviderCallSchema = z.object({
+  requestId: z.string(),
+  attempt: z.int().positive(),
+  provider: z.string(),
+  destination: z.string(),
+  taskKind: z.string(),
+  classification: z.string(),
+  policyVersion: z.string(),
+  outcome: z.string(),
+  durationMs: z.int().nonnegative().nullable(),
+  createdAt: z.string(),
+});
+export const ActivityResponseSchema = z.object({ calls: z.array(ProviderCallSchema) });
+export type ProviderCall = z.infer<typeof ProviderCallSchema>;
+
+/** Read-only for now; the settings the user can change arrive with T08–T10. */
+export const SettingsResponseSchema = z.object({
+  dataDirectory: z.string(),
+  schemaVersion: z.int().nonnegative(),
+});
+
+/**
+ * Where the screens get the backend address and token: the dev server in the browser,
+ * the preload in Electron (V01-R3). An empty `baseUrl` means the page's own origin.
+ */
+export const SessionSchema = z.object({ baseUrl: z.string(), token: z.string().min(32) });
+export type Session = z.infer<typeof SessionSchema>;
+
 export const routes = {
   status: { method: "GET", path: "/api/status", response: StatusResponseSchema },
   connectors: { method: "GET", path: "/api/connectors", response: ConnectorListResponseSchema },
@@ -71,6 +112,15 @@ export const routes = {
     request: SyncRequestSchema,
     response: SyncResponseSchema,
   },
+  sources: { method: "GET", path: "/api/sources", response: SourceListResponseSchema },
+  searchSources: {
+    method: "POST",
+    path: "/api/sources/search",
+    request: SourceSearchRequestSchema,
+    response: SourceListResponseSchema,
+  },
+  activity: { method: "GET", path: "/api/activity", response: ActivityResponseSchema },
+  settings: { method: "GET", path: "/api/settings", response: SettingsResponseSchema },
 } as const;
 export type RouteName = keyof typeof routes;
 export type RouteResponse<Name extends RouteName> = z.infer<(typeof routes)[Name]["response"]>;

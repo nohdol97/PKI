@@ -1,6 +1,7 @@
 export type { OpenSqlDriver, RunResult, SqlDriver, SqlRow, SqlValue } from "./sql-driver.ts";
 export { migrate, migrations, schemaVersion, type Migration } from "./migrations.ts";
 export { searchKeyword } from "./keyword-search.ts";
+export { findSources, listProviderCalls, listSources } from "./listing.ts";
 export {
   dataDirectory,
   ensureDataDirectory,
