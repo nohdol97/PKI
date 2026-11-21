@@ -168,17 +168,17 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
   - 내용 hash는 제목, 본문, block을 묶어 계산한다. block이 없으면 지금 값(`[제목, 본문]`)과 같다.
   - 한 페이지 안의 역순, 페이지 사이의 역순, 동기화 사이의 역순, 파일과 API 사이의 역순은 모두 같은 규칙이다.
   - V02-T02의 tombstone 트리거는 이 판정이 놓친 경우를 막는 뒷문으로 남는다. 그 트리거가 거부하면 버그이므로 페이지 단위 실패가 된다(I01-R14).
-- **I01-R11 tombstone 사건의 판정.** tombstone 사건은 **I04 인터페이스 블록이 정한 tombstone 쓰기 입구**(V02-T08의 삭제 경로를 I04가 넓힌 것)로 기록한다. 넘기는 값은 사유, `coversVersion`(그때의 최신 version, 처음 보는 원본이면 0), `lastRevision`이다. 전파에 넘기는 `SourceChange`도 `lastRevision`을 갖는다(I04 소유). 함수 이름과 인자는 그 블록이 정본이다.
+- **I01-R11 tombstone 사건의 판정.** I01은 받아들이기로 판정한 tombstone 사건을 I04의 **`applyTombstone(tx, w)`**(I04-T05, 인자 모양은 I04 설계 개요 블록의 `TombstoneWrite`)로 기록한다. 넘기는 값은 사유와 `lastRevision`이다. **`covers_version`은 넘기지 않는다.** `applyTombstone`이 그 원본의 지금 최신 version(처음 보는 원본이면 0)과 기존 값 가운데 큰 것으로 정한다. tombstone이 실제로 바뀌면 `applyTombstone`이 그 안에서 `propagate`를 부르므로 I01이 따로 부르지 않는다. 해제는 I04의 `liftTombstone`이며 I01은 부르지 않는다.
   - **`delete`** → 사유 `source-deleted`.
     - revision이 `last`보다 작으면 적용하지 않는다. `stale-tombstone`으로 따로 센다. 동기화 결과, 가져오기 결과, I03 작업 기록에 보인다. 놓친 삭제가 조용히 묻히지 않게 하려는 것이다.
     - 같거나 크면 적용한다.
   - **`access-revoked`** → 사유 `access-revoked`. revision과 상관없이 **언제나 적용한다**. 권한은 순서보다 앞선다.
   - 적용할 때 **두 `last_revision`을 함께** `max(사건의 revision, last, T.last)`로 올린다. 원본 행의 `sources.last_revision`과 tombstone의 `last_revision`이다.
-  - **이미 tombstone이 있는 원본**에 더 큰 revision의 출처 tombstone 사건이 오면, `covers_version`이 그대로여도 `last_revision`을 올린다. 그래야 "r4 삭제 뒤 늦게 온 r3 upsert"가 0단계에서 막힌다. 내용이 바뀌지 않으므로 변경 순번은 올리지 않는다. 이 규칙은 I01의 것이며 I04가 맞춘다(후속).
+  - **이미 tombstone이 있는 원본**에 더 큰 revision의 출처 tombstone 사건이 오면, `covers_version`이 그대로여도 `last_revision`을 올린다. 그래야 "r4 삭제 뒤 늦게 온 r3 upsert"가 0단계에서 막힌다. 내용이 바뀌지 않으므로 변경 순번은 올리지 않는다. 이 규칙은 I01의 것이며 I04가 맞췄다.
   - 같은 사유, 같은 `last_revision`이면 `unchanged`다. 멱등이며 I04의 멱등 규칙과 같다.
-  - **처음 보는 원본에 대한 tombstone 사건**도 원본 행과 tombstone(`covers_version = 0`)을 남긴다. 나중에 도착한 옛 upsert가 0단계에서 막히게 하려는 것이다. 이 원본 행은 처음부터 **키 있는 해시 정체**(`identityKey`)로만 쓰고 평문 `namespace`·`externalId`를 쓰지 않는다. R8의 해시 찾기가 이 행을 찾는다.
+  - **처음 보는 원본에 대한 tombstone 사건**도 원본 행과 tombstone을 남긴다(`applyTombstone`이 `covers_version`을 0으로 정한다). 나중에 도착한 옛 upsert가 0단계에서 막히게 하려는 것이다. 이 원본 행은 처음부터 **키 있는 해시 정체**(`identityKey`)로만 쓰고 평문 `namespace`·`externalId`를 쓰지 않는다. R8의 해시 찾기가 이 행을 찾는다.
   - `user-deleted` tombstone이 있는 원본에 출처 tombstone 사건이 오면 사유는 `user-deleted`로 남고 `last_revision`만 올린다.
-  - 화면의 사용자 삭제는 출처 사건이 아니다. 사유 `user-deleted`로 쓰고 `last_revision`은 그때의 `last`다. 이 쓰기는 V02-T08의 몫이다(합의됨).
+  - 화면의 사용자 삭제는 출처 사건이 아니다. 사유 `user-deleted`로 쓰고 `last_revision`은 비운다(`null`, I04 결정). 이 쓰기는 V02-T08의 몫이다(합의됨). 해제 전까지는 사유가 모두 막으므로 revision이 필요 없고, 해제 뒤의 판정은 `sources.last_revision`으로 한다(I01-R10).
 - **I01-R12 접근 범위의 변경.** `scope-change` 사건과 I01-R10의 `scope-updated`는 같은 처리를 받는다. 범위를 쓰는 쪽은 I01이고, 전파하는 쪽은 I04다.
   - tombstone 문(0단계)과 revision 비교는 upsert와 같다: 막히면 `blocked`, `last`보다 작으면 `stale`. 같은 revision에서도 받아들인다.
   - 살아 있는 version이 없는 원본이면 `stale`이다.
@@ -268,7 +268,7 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
 
   이 표는 코드 상수 하나(`SYNC_OUTCOMES`, `packages/connector-sdk`)로도 두고 I03의 테스트가 그것을 읽는다. 문서와 상수가 어긋나면 `sync.outcome-map`이 실패한다.
 - **I01-R21 인스턴스 하나에 동기화 하나.** 한 인스턴스에서 동시에 도는 동기화와 가져오기는 하나뿐이다. 관리 모듈이 인스턴스마다 잠금을 쥔다. 백엔드는 프로세스 하나다(V01 단일 실행).
-  - 잠금이 잡혀 있을 때 정해진 동기화는 `instance-busy`로 멈추고(I03 `retry`, 시도를 쓰지 않음, 1분 뒤), 가져오기 API는 409(`instance-busy`)로 답한다. `instance-busy`는 `@pki/contracts`의 API 오류 코드 목록에 더한다.
+  - 잠금이 잡혀 있을 때 정해진 동기화는 `instance-busy`로 멈추고(I03 `retry`, 시도를 쓰지 않음, 1분 뒤), 가져오기 API는 409(`instance-busy`)로 답한다. `instance-busy`와 `storage-failed`는 `@pki/contracts`의 API 오류 코드 목록에 더한다(I01-T03).
   - 잠금은 정상 종료, 예외, 취소, 시간 초과의 **모든 경로에서 풀린다**(`finally`). 잠금을 쥔 채 예외가 나도 다음 동기화와 가져오기는 막히지 않는다.
   - 사용자가 시작한 가져오기는 **요청 안에서 동기로** 끝난다. I03의 큐에 들어가는 것은 가져오기가 등록한 추출 작업이지 가져오기 자체가 아니다.
 
@@ -304,7 +304,7 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
 - **I01-R24 로컬 가져오기 API.** `POST /api/imports`는 `{ instanceId, content }`(JSONL 텍스트)를 받는다. I01-R22와 같은 해석, I01-R10~R15와 같은 저장 규칙으로 처리하고 I01-R19의 결과를 돌려준다.
   - 기존 API와 같은 경로표(`@pki/contracts`의 `routes`)와 같은 인증(토큰, loopback, 허용 Origin)을 쓴다.
   - `instanceId`가 처음이면 종류 `jsonl-import`로 등록하고, 이미 다른 종류로 등록되어 있으면 거부한다(V01의 `registerConnectorInstance`).
-  - 본문 크기에 상한을 둔다. 잠정 10 MiB이며, 넘으면 413이다. 같은 인스턴스의 동기화가 돌고 있으면 409 `instance-busy`다(I01-R21).
+  - 본문 크기에 상한을 둔다. 잠정 10 MiB이며, 넘으면 413이다. 같은 인스턴스의 동기화가 돌고 있으면 409 `instance-busy`다(I01-R21). 저장 트랜잭션이 실패하면 500과 오류 코드 `storage-failed`다(I01-R14).
   - 요청 하나는 한 트랜잭션에 저장한다. cursor는 없다.
   - 파일 수집기와 API는 **같은 해석 함수와 같은 저장 함수**를 쓴다.
     - 해석 함수(줄 → 변경, `content_hash` 검사 포함)는 새 패키지 `@pki/connector-sdk`에 둔다. 어댑터 경계(V01-T07) 밖의 순수 라이브러리이며, Connector를 구현하지 않으므로 `src/adapters/`가 없다. `node:crypto`를 쓸 수 있다. `@pki/contracts`는 지금처럼 의존성 없이 남는다.
@@ -541,8 +541,8 @@ flowchart LR
 | ID | 내용 | 요구사항 | 기준 | 선행 | 테스트 |
 |---|---|---|---|---|---|
 | I01-T01 | 다음을 한 PR에 담는다. ① `@pki/contracts`의 규격 v2(레코드, 네 변경, `rejected`, block과 locator, 능력, 오류 두 종류, `CONNECTOR_SDK_VERSION`, `EvidenceView`) ② 이를 쓰는 모든 구현의 이전(`test-fixtures`, `site-*`, `jsonl-import`, 관리 모듈, 테스트 대역) ③ 기존 `connectorContract` 검사의 v2 이전 ④ 규격 버전 검사(I01-R1) ⑤ `sources`의 `namespace`와 유일 키(위 "T01과 T02 사이") ⑥ 새 ADR, ARCHITECTURE 5.5절 | R1, R2, R4~R7 | C1(버전), C2(필드) | **V02-T04**, **V02-T08**(T01과 T02 사이의 tombstone 사건이 V02의 삭제 경로를 쓴다) | `source-record.schema`, `connector.sdk-version`, `interim.identity`, 기존 계약·동기화 테스트가 v2로 통과, `pnpm typecheck` |
-| I01-T02 | 정본 마이그레이션(위 표의 I01-T02 몫), 정체 찾기(평문과 `identityKey`), upsert·범위 변경·tombstone 사건의 판정(I01-R8~R14, 해제 뒤 포함), 두 `last_revision` 올리기, 새 version 번호, tombstone 사건을 삭제 경로로, 범위 변경을 `propagate`의 `scope-changed`로 | R8~R14 | C2(정체·provenance), C3(중복·역순·부분 실패) | I01-T01, **V02-T04**(`source_versions.revision`), **V02-T08**, **I04-T05**(tombstone 모양 전부, `last_revision`·`lifted_at` 포함), **I04-T07**(`identityKey`), **I04-T01**(`propagate`) | `arrival.decision`, `source.provenance`, `source.tombstone`, `scope.change`, 마이그레이션 테스트 |
-| I01-T03 | 관리 모듈의 동기화 v2. 레코드 단위 검증과 `capability-violation`, `at` 정리, 페이지 트랜잭션과 checkpoint, 재스캔 1회와 `rescanned`·`deletionsMayBeMissed`·`rescan_pending`, 요청 한도와 backoff(주입한 시계), 결과의 `retryAfterMs`, 취소, 오류 문구를 옮기지 않음, 인스턴스 잠금(모든 경로에서 풂), `@pki/contracts` 오류 코드에 `instance-busy`, 새 패키지 `@pki/connector-sdk`와 module-boundary 규칙, I03 결과 표의 상수 `SYNC_OUTCOMES`, `storage-failed`, `ConnectorSummary.deletionsMayBeMissed`와 Sources 화면 표지 | R14, R16~R21 | C1 | I01-T02, I01-T04 | `sync.*`(아래 기준별 표) |
+| I01-T02 | 정본 마이그레이션(위 표의 I01-T02 몫), 정체 찾기(평문과 `identityKey`), upsert·범위 변경·tombstone 사건의 판정(I01-R8~R14, 해제 뒤 포함), 두 `last_revision` 올리기, 새 version 번호, tombstone 사건을 `applyTombstone`으로(`covers_version`은 넘기지 않음), 범위 변경을 `propagate`의 `scope-changed`로 | R8~R14 | C2(정체·provenance), C3(중복·역순·부분 실패) | I01-T01, **V02-T04**(`source_versions.revision`), **V02-T08**, **I04-T05**(tombstone 모양 전부, `last_revision`·`lifted_at` 포함), **I04-T07**(`identityKey`), **I04-T01**(`propagate`) | `arrival.decision`, `source.provenance`, `source.tombstone`, `scope.change`, 마이그레이션 테스트 |
+| I01-T03 | 관리 모듈의 동기화 v2. 레코드 단위 검증과 `capability-violation`, `at` 정리, 페이지 트랜잭션과 checkpoint, 재스캔 1회와 `rescanned`·`deletionsMayBeMissed`·`rescan_pending`, 요청 한도와 backoff(주입한 시계), 결과의 `retryAfterMs`, 취소, 오류 문구를 옮기지 않음, 인스턴스 잠금(모든 경로에서 풂), `@pki/contracts` 오류 코드에 `instance-busy`·`storage-failed`, 새 패키지 `@pki/connector-sdk`와 module-boundary 규칙, I03 결과 표의 상수 `SYNC_OUTCOMES`, `storage-failed`, `ConnectorSummary.deletionsMayBeMissed`와 Sources 화면 표지 | R14, R16~R21 | C1 | I01-T02, I01-T04 | `sync.*`(아래 기준별 표) |
 | I01-T04 | `@pki/testkit`의 `checkConnector`·`connectorContract` v2, 위반 코드 21개와 억제 규칙, 코드마다 빨간 대역 하나, 대본 수집기 | R3, R25, R26 | C1(계약), C4(suite) | I01-T01 | `contract-suite.red`, `connector.contract.v2` |
 | I01-T05 | `@pki/connector-sdk`의 JSONL 해석 함수(I01-R22), `operation`에 `access-revoked` 더하기(`ImportRecordSchema`와 그 짝인 `eval/scorer/validate.py`의 `OPERATIONS`·테스트를 같은 PR에서. 둘은 같은 어휘를 유지한다), V02-T04의 대응 함수를 `revoke` → `scope-change`로 바꾸고 V02의 잠정 테스트를 뒤집음, `jsonl-import` 수집기의 v2 동작(cursor와 능력), `POST /api/imports`(409·413 포함), 골든 데이터와 V02 fixture의 가져오기 | R22~R24 | C3 | I01-T03, **V02-T04** | `import.*` |
 | I01-T06 | 가져온 범위의 등급(I01-R15). `site/config/`의 인스턴스 범위를 `connector_instances.configured_scope`로 읽음, Broker `grade`가 `scope_claimed` 원본에 `ScopePolicy.compare`의 규칙을 씀, 설정 API에 그 값이 없음 | R15 | C2(access_scope) | I01-T02, **I04-T09**(`ScopePolicy.compare`) | `scope.claimed-grade` |
@@ -679,7 +679,7 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 
 1. **V02-T04·T08(착수 전)이 I01-T01·T05를 막는다.** 규격 v2는 V02-T04의 JSONL 수집기를 함께 옮겨야 한다. V02-T04를 이 spec의 규칙(`jsonl-import`, `namespace`, `revision`, `POST /api/imports`)대로 만들면 옮기는 일이 줄어든다. 조정자가 V02 세션에 전한다. 합성 등급을 받을 수 있는 종류 목록(`providers/src/broker.ts`, V01 "T07이 넘기는 것" 6)에 이 종류가 들어가는지도 본다.
 2. **V02-T08·T05·T10이 I01-T02·T07을 막는다.** 확인할 것은 tombstone 사건을 넘길 함수, 근거 행을 쓰는 곳, 근거 API의 모양이다.
-3. **I04가 I01-T02·T06을 막는다.** I01-T02는 I04-T05(tombstone 모양 전부)·I04-T07(`identityKey`)·I04-T01(`propagate`, tombstone 쓰기 입구)을, I01-T06은 I04-T09(`ScopePolicy.compare`)를 기다린다. I04-T05는 I01에 기대지 않는다(I04가 반영함).
+3. **I04가 I01-T02·T06을 막는다.** I01-T02는 I04-T05(tombstone 모양 전부)·I04-T07(`identityKey`)·I04-T01(`propagate`)·I04-T05(`applyTombstone`)를, I01-T06은 I04-T09(`ScopePolicy.compare`)를 기다린다. I04-T05는 I01에 기대지 않는다(I04가 반영함).
 4. **V01-T15(머지 전)**: 제품 빌드에서 `test-fixtures`를 빼는 작업이다. I01-T09의 종류 검사는 T15가 정한 제품 구성을 대상으로 한다. T15가 아직 없으면 그 검사는 T15와 함께 들어간다.
 5. **I02 spec(아직 `main`에 없음)**: I01-R7의 위치표는 I02 spec "위치표의 모양"(c613fbc)을 옮긴 것이다. I02가 머지될 때 모양이 그대로인지 본다. ADR 0015는 I02가 쓴다.
 
@@ -727,8 +727,6 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 | [ownership.md](../ownership.md) | 2절 Connector 행에 "revision·namespace 채우기, 범위 변경 사건, `deletionsOnRescan` 선언, `@pki/connector-sdk` 사용 가능"을 더한다. 3절에 "공용 저장소의 import 검사는 `site/`를 보지 않는다(I01-R28)"와 `site/config/connector-scopes.json`을 더한다 | I01-T10 |
 | [site-setup.md](../site-setup.md) | S18 항목과 번호 범위 안내를 더한다. S01~S03의 "Connector 규격"이 v2를 뜻하도록 한 줄을 덧붙인다. S08에 "`site/config/connector-scopes.json`의 인스턴스 범위와, 범위를 모를 때의 가장 엄격한 등급"을 더한다 | I01-T10 |
 | V02 spec(소유: V02 세션) | **요청 없음.** 두 번호, `revoke` 대응을 내보낸 함수 하나에 두는 것, `user-deleted`는 V02 세션과 합의되었고 V02 세션이 자기 문서에 반영한다. `revoke`를 `scope-change`로 바꾸는 일은 I01-T05의 작업이다 | — |
-| I03 spec | 이미 반영됨: `connector-sync`, I01-R20 표를 가리킴, `instance-busy`, content hash 문구. 남은 것: ① 처리기 결과 `held(reason)`와 그 풀림(인스턴스 설정 변경, 앱 갱신, 시간당 묶음 재점검) ② `storage-failed` 행 ③ Activity에 `staleTombstone`·`deletionsMayBeMissed`·`blocked`(I03-R23/T11) ④ `connector-sync`의 시도 규칙이 "수집기를 부른 실행"이라는 문장 | I03 세션 |
-| I04 spec | 이미 반영됨: 부재 추정 없음, 해시 정체에 `namespace`, `scope-changed`, I04-T05의 I01 선행 삭제, 해제 뒤 판정은 I01. 남은 것: ① 인터페이스 블록에 tombstone 쓰기 입구(`lastRevision` 포함)와 `SourceChange.lastRevision` ② 범위 값의 모양 `string[] | null`과 `atLeastAsStrict`를 블록에 ③ "출처가 revision을 주지 않으면 비어 있다"를 "규격 v1 시절 원본만"으로 ④ ADR 0013 결정 4·ADR 0014를 I04가 고칠 때 I01-R10·R15를 가리킴 ⑤ I01-R23 인용을 I01-R29로 | I04 세션 |
 
 ## 변경 이력
 
@@ -736,6 +734,7 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 |---|---|---|---|
 | 2026-11-21 | 최초 작성(초안). locator는 I02 spec의 위치표와 같은 모양, 배포처 후속 번호는 S18(I02·I03·I04와 조정) | 이 문서 | 이슈 #18의 구현 spec |
 | 2026-11-21 | `revision`이 I04의 재유입 판정에 쓰이는 출처 순서 값임을 명시, 부재로 삭제를 추정하지 않는다고 I01이 정함 | 비목표, R9, 잠정 결정 | I04 초안(27bf45f)의 가정과 대조 |
+| 2026-11-21 | 조정자 D35 반영: tombstone은 I04의 `applyTombstone`으로 기록하고 `covers_version`은 넘기지 않음(전파는 그 안에서), 화면 삭제의 `last_revision`은 `null`, 끝난 I03·I04 후속 행 삭제, `storage-failed`를 계약 오류 코드와 R24 응답에 | R11, R21, R24, 작업 분해(T02·T03), 후속 | 조정자 D35, 검토 L1·L2 |
 | 2026-11-21 | 3차 검토(A P1~P7)와 통합 검토, 조정자 D30·D32 반영. 해시로 찾은 행에 받아들이면 평문 정체를 되돌림(R8, R10). 멈춤 코드 `storage-failed`와 결과 표 행(R14, R19, R20). T01이 V02-T08을 기다림. 인스턴스 범위의 실제 위치 `site/config/connector-scopes.json`(R15). `ImportRecordSchema`와 `validate.py`를 함께(R22, T05). 검사 ⑤를 임시 복사본에서. 포크의 `@pki/connector-sdk` 사용. 범위 값 `string[] \| null`과 I04 블록의 이름. tombstone 쓰기 입구와 `lastRevision`은 I04 블록. `held`의 풀림과 처리기 결과. Activity·Sources 화면 필드. 시도 규칙의 "수집기". `sources.last_revision` 소유자 I01-T02. "번호의 최고값" 삭제. ADR 0013·0014는 I04가 고침. 낡은 후속 정리 | 요구사항, 작업 분해, 기준별 테스트, 미해결 질문, 후속 | 검토 3차, 통합 검토, D30·D32 |
 | 2026-11-21 | 2차 검토(A N1~N10, B G1~G14)와 조정자 결정 D22~D28 반영. tombstone 모양은 I04-T05 소유로 되돌리고 의존을 한 방향으로(R9, 작업 분해). `site/`를 import 검사에서 뺌(R28). 해석 함수를 새 패키지 `@pki/connector-sdk`에(R22, R24). 이미 지운 원본의 더 큰 revision 사건은 `last_revision`을 올림, 처음 보는 원본의 tombstone은 해시 정체로만(R11). 해제 뒤의 도착 판정, 같은 revision이고 살아 있는 version이 없으면 `stale`(R10, 그림). 인스턴스 범위는 배포처 설정이고 비교할 수 없으면 가장 엄격(R15). `scope-changed`로 이름을 바꿈(R12). JSONL `revoke` 전환을 I01-T05의 작업으로, `access-revoked` 줄을 더함(R22). `instance-busy`는 시도를 쓰지 않는 1분 뒤 재시도, 결과 표에 시도·다음 실행 칸과 상수(R20). 잠금 해제, 409 오류 코드, `retryAfterMs`(R19, R21, R24). 위반 억제 규칙(R25). `deletionsOnRescan` 정의와 재스캔 표시 유지(R3, R17, R23). T01과 T02 사이의 동작. 빠진 테스트 보충. 고정 마이그레이션 번호 제거 | 요구사항 전반, 그림, 작업 분해, 기준별 테스트, 미해결 질문, 후속 | 검토 2차, 조정자 D22~D28 |
 | 2026-11-21 | `source_versions.revision`은 V02-T04의 v6 열을 그대로 씀(재정의 없음), `sources.last_revision`·`tombstones.last_revision`은 I01이 더함, JSONL 필드 대응을 표로(`version` → revision), 멈춤 코드 표의 결과를 `retry`·`held`·`dead_letter`·`done`으로 하고 코드마다 한 행 | R9, R20, R22, 스키마 표, 작업 분해(T02) | 조정자: V02 세션과의 합의, I03의 `connector-sync` |
