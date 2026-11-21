@@ -160,6 +160,15 @@ describe("rule reads (V02-R8: depth-1 queries)", () => {
       status: "candidate",
     });
     expect(findRelation(db, key.yItemId, "DEPENDS_ON", key.xItemId)).toBeUndefined();
+    const related = saveRelation(db, {
+      subjectId: key.xItemId,
+      type: "RELATED_TO",
+      objectId: key.yItemId,
+      ...attrs,
+    }).id;
+    expect(findRelation(db, key.xItemId, "RELATED_TO", key.yItemId)?.id).toBe(related);
+    expect(findRelation(db, key.xItemId, "DEPENDS_ON", key.yItemId)?.id).toBe(id);
+    expect(findRelation(db, key.xItemId, "OWNS", key.yItemId)).toBeUndefined();
   });
 
   it("lists the pairs an item takes part in, through relations or Insight rows", () => {

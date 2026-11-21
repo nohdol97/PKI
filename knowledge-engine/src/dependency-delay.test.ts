@@ -121,7 +121,7 @@ describe("rule.dependency-delay — date cases (V02-R9)", () => {
 
   it.each([
     ["equal", "2026-12-05"],
-    ["earlier (이름)", "2026-12-03"],
+    ["earlier (이른 날짜)", "2026-12-03"],
     ["earlier by a year", "2025-12-10"],
   ])("creates nothing when Y's date is %s", (_case, completion) => {
     fact(x, TARGET_DATE, "2026-12-05");
@@ -157,6 +157,31 @@ describe("rule.dependency-delay — date cases (V02-R9)", () => {
     fact(y, COMPLETION_DATE, "2026-12-10T09:00", "bad-3");
     expect(recomputeDependencyDelay(db, [x])).toEqual([]);
     expect(insightCount()).toBe(0);
+  });
+
+  it("does not read an impossible date as the next day", () => {
+    fact(x, TARGET_DATE, "2026-11-30");
+    dependsOn(x, y);
+    fact(y, COMPLETION_DATE, "2026-11-31"); // Date.parse rolls it over to 2026-12-01
+    expect(recomputeDependencyDelay(db, [x])).toEqual([]);
+    fact(y, COMPLETION_DATE, "2026-12-01", "msg-real");
+    expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "created" }]);
+  });
+
+  it("skips a self-dependency (잠정)", () => {
+    fact(x, TARGET_DATE, "2026-12-05");
+    fact(x, COMPLETION_DATE, "2026-12-10");
+    dependsOn(x, x);
+    expect(recomputeDependencyDelay(db, [x])).toEqual([]);
+    expect(insightCount()).toBe(0);
+  });
+
+  it("takes any number of item ids", () => {
+    fact(x, TARGET_DATE, "2026-12-05");
+    dependsOn(x, y);
+    fact(y, COMPLETION_DATE, "2026-12-10");
+    const many = [...Array.from({ length: 40_000 }, (_, i) => i + 1000), y, y];
+    expect(recomputeDependencyDelay(db, many)).toEqual([{ key: key(), outcome: "created" }]);
   });
 
   it("lets the earliest valid target and latest valid completion decide, citing those rows", () => {
@@ -267,6 +292,29 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
     expect(insightCount()).toBe(1);
   });
 
+  it("stays a no-op when newer evidence is not in t, r, c id order", () => {
+    const body = "미리내 목표일 재확인: 2026-12-05";
+    addEvidence(db, {
+      target: { factId: t },
+      sourceVersionId: version("late-mail", body),
+      start: 0,
+      end: body.length,
+      quote: body,
+    });
+    expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "updated" }]);
+    const changes = totalChanges();
+    expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "unchanged" }]);
+    expect(totalChanges()).toBe(changes);
+  });
+
+  it("updates the same row when an item's name changes", () => {
+    const id = readInsight(db, key())?.id;
+    db.run("UPDATE items SET name = '은하수 API' WHERE id = ?", [y]);
+    expect(recomputeDependencyDelay(db, [y])).toEqual([{ key: key(), outcome: "updated" }]);
+    expect(readInsight(db, key())).toMatchObject({ id, state: "active" });
+    expect(readInsight(db, key())?.summary).toContain("은하수 API");
+  });
+
   it("updates the same row when the evidence changes", () => {
     const id = readInsight(db, key())?.id;
     const body = "물결 API 일정 재공지: 2026-12-10";
@@ -316,12 +364,34 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
     expect(readInsight(db, key())).toMatchObject({ state: "resolved", summary: null });
   });
 
-  it("resolves when the dependency is rejected, found through the Insight row", () => {
+  it("resolves when the dependency is rejected", () => {
     setKnowledgeStatus(db, "relation", r, "rejected");
     expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "resolved" }]);
     const changes = totalChanges();
     expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "unchanged" }]);
     expect(totalChanges()).toBe(changes);
+  });
+
+  it("resolves when the dependency row is deleted, found only through the Insight row", () => {
+    // V02-R12 deletes a relation with no evidence left; X and Y keep their facts
+    db.run("DELETE FROM relations WHERE id = ?", [r]);
+    expect(readInsight(db, key())?.state).toBe("active");
+    expect(recomputeDependencyDelay(db, [x, y])).toEqual([{ key: key(), outcome: "resolved" }]);
+    expect(readInsight(db, key())).toMatchObject({ state: "resolved", summary: null });
+  });
+
+  it("does not let another relation type on the same pair stand in for the dependency", () => {
+    const body = "미리내 프로젝트와 물결 API는 관련된다";
+    const other = saveRelation(db, { subjectId: x, type: "RELATED_TO", objectId: y, ...attrs }).id;
+    addEvidence(db, {
+      target: { relationId: other },
+      sourceVersionId: version("wiki-related", body),
+      start: 0,
+      end: body.length,
+      quote: body,
+    });
+    db.run("DELETE FROM relations WHERE id = ?", [r]);
+    expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "resolved" }]);
   });
 
   it("revives the same row when the condition holds again", () => {
@@ -349,6 +419,17 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
     expect(readInsight(db, key())?.state).toBe("active");
   });
 
+  it("resolves a dirty row whose condition broke", () => {
+    db.run("UPDATE insights SET state = 'dirty'");
+    setKnowledgeStatus(db, "fact", c, "rejected");
+    expect(recomputeDependencyDelay(db, [y])).toEqual([{ key: key(), outcome: "resolved" }]);
+    expect(readInsight(db, key())).toMatchObject({
+      state: "resolved",
+      summary: null,
+      evidenceIds: [],
+    });
+  });
+
   it.each(["X", "Y"] as const)("loses the row when the %s item is deleted", (side) => {
     // V02-R12 deletes the facts and relations first; items have no cascade to them
     db.run("DELETE FROM facts");
@@ -369,6 +450,18 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
       }),
     ).toThrow("caller fails");
     expect(readInsight(db, key())?.state).toBe("active");
+  });
+
+  it("writes nothing when a standalone call fails part-way", () => {
+    const z = insertItem(db, { type: "System", name: "누리 API", ...attrs });
+    dependsOn(x, z, "wiki-z");
+    fact(z, COMPLETION_DATE, "2026-12-10", "messenger-z");
+    db.run("UPDATE insights SET state = 'dirty'");
+    db.exec(`CREATE TRIGGER fail_z BEFORE INSERT ON insights WHEN NEW.y_item_id = ${z}
+             BEGIN SELECT RAISE(ABORT, 'fail z'); END`);
+    expect(() => recomputeDependencyDelay(db, [x])).toThrow("fail z");
+    expect(readInsight(db, key())?.state).toBe("dirty");
+    expect(insightCount()).toBe(1);
   });
 
   it("writes nothing for items with no dependency", () => {

@@ -60,7 +60,7 @@ type Desired = { state: "active"; summary: string; evidenceIds: number[] } | { s
 /**
  * What the pair's row should hold. With several valid dates (different values are
  * different rows, V02-R8) the earliest target and the latest completion decide,
- * the first stored winning a tie; the condition holds iff some pair is late.
+ * (one row per item, kind and value, so no ties); the condition holds iff some pair is late.
  */
 function evaluate(db: SqlDriver, { xItemId, yItemId }: InsightKey): Desired {
   const relation = findRelation(db, xItemId, DEPENDS_ON, yItemId);
@@ -100,7 +100,7 @@ const sameIds = (a: readonly number[], b: readonly number[]) =>
  * what differs: no row is created for a pair that does not hold, an unchanged
  * row is not written, a broken one is resolved (summary and evidence emptied,
  * row kept) and a resolved one revived in place. Reports each pair it judged
- * except a pair that neither holds nor has a row.
+ * except a pair that neither holds nor has a row. X = Y pairs are skipped.
  */
 export function recomputeDependencyDelay(
   db: SqlDriver,
@@ -112,6 +112,8 @@ export function recomputeDependencyDelay(
       ...listRelationPairs(db, DEPENDS_ON, itemIds),
       ...listInsightKeys(db, DEPENDENCY_DELAY, itemIds),
     ]) {
+      // A self-dependency is no other work being late (잠정): skipped, never stored.
+      if (p.xItemId === p.yItemId) continue;
       pairs.set(`${p.xItemId}:${p.yItemId}`, {
         rule: DEPENDENCY_DELAY,
         xItemId: p.xItemId,

@@ -71,7 +71,8 @@ export function readInsight(db: SqlDriver, key: InsightKey): StoredInsight | und
 // recursive query or a graph walk. Which rows are valid, and any comparison of
 // values, is the rule's code, not SQL (V02-R9).
 
-const inList = (ids: readonly number[]) => ids.map(() => "?").join(", ");
+// An id list is bound as one JSON parameter, so its length meets no SQL variable limit.
+const IDS = "(SELECT value FROM json_each(?))";
 
 /** An item's facts of one kind, oldest first. */
 export function listFactsOfKind(
@@ -115,9 +116,9 @@ export function listRelationPairs(
   return db
     .all(
       `SELECT subject_id, object_id FROM relations
-       WHERE type = ? AND (subject_id IN (${inList(itemIds)}) OR object_id IN (${inList(itemIds)}))
+       WHERE type = ? AND (subject_id IN ${IDS} OR object_id IN ${IDS})
        ORDER BY id`,
-      [type, ...itemIds, ...itemIds],
+      [type, JSON.stringify(itemIds), JSON.stringify(itemIds)],
     )
     .map((row) => ({ xItemId: row.subject_id as number, yItemId: row.object_id as number }));
 }
@@ -132,9 +133,9 @@ export function listInsightKeys(
   return db
     .all(
       `SELECT x_item_id, y_item_id FROM insights
-       WHERE rule = ? AND (x_item_id IN (${inList(itemIds)}) OR y_item_id IN (${inList(itemIds)}))
+       WHERE rule = ? AND (x_item_id IN ${IDS} OR y_item_id IN ${IDS})
        ORDER BY id`,
-      [rule, ...itemIds, ...itemIds],
+      [rule, JSON.stringify(itemIds), JSON.stringify(itemIds)],
     )
     .map((row) => ({
       rule,
