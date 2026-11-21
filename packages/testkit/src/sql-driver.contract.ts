@@ -1,0 +1,107 @@
+// V01-C7 `sql-driver.contract`: the suite every SQL driver implementation runs
+// from its own test file. testkit does not depend on storage, so the driver
+// shape the suite exercises is declared here; a driver that no longer fits it
+// fails to typecheck at the call site.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+type Value = string | number | bigint | Uint8Array | null;
+
+export interface ContractSqlDriver {
+  exec(sql: string): void;
+  run(sql: string, params?: readonly Value[]): { changes: number; lastInsertRowid: number };
+  all(sql: string, params?: readonly Value[]): Record<string, Value>[];
+  transaction<T>(fn: () => T): T;
+  close(): void;
+}
+
+export function sqlDriverContract(name: string, open: (path: string) => ContractSqlDriver): void {
+  describe(`sql-driver.contract: ${name}`, () => {
+    let dir: string;
+    let db: ContractSqlDriver;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "pki-sql-driver-"));
+      db = open(join(dir, "test.sqlite"));
+      db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, v)");
+    });
+
+    afterEach(() => {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("reports changes and the inserted rowid", () => {
+      const first = db.run("INSERT INTO t (v) VALUES (?)", ["a"]);
+      const second = db.run("INSERT INTO t (v) VALUES (?)", ["b"]);
+      expect(first).toEqual({ changes: 1, lastInsertRowid: 1 });
+      expect(second.lastInsertRowid).toBe(2);
+      expect(db.run("UPDATE t SET v = 'c'").changes).toBe(2);
+    });
+
+    it("binds positional parameters and round-trips every value type", () => {
+      const values = ["텍스트", 42, 1.5, null, new Uint8Array([1, 2, 3])];
+      for (const v of values) db.run("INSERT INTO t (v) VALUES (?)", [v]);
+      const rows = db.all("SELECT v FROM t ORDER BY id");
+      expect(rows.map((r) => r.v)).toEqual([
+        "텍스트",
+        42,
+        1.5,
+        null,
+        expect.objectContaining({ length: 3 }),
+      ]);
+      expect([...(rows[4]?.v as Uint8Array)]).toEqual([1, 2, 3]);
+    });
+
+    it("does not interpret parameter values as SQL", () => {
+      db.run("INSERT INTO t (v) VALUES (?)", ["x'); DROP TABLE t; --"]);
+      expect(db.all("SELECT v FROM t")).toEqual([{ v: "x'); DROP TABLE t; --" }]);
+    });
+
+    it("runs multi-statement scripts with exec", () => {
+      db.exec("INSERT INTO t (v) VALUES (1); INSERT INTO t (v) VALUES (2);");
+      expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 2 }]);
+    });
+
+    it("commits a transaction and returns its value", () => {
+      const result = db.transaction(() => {
+        db.run("INSERT INTO t (v) VALUES (1)");
+        return "done";
+      });
+      expect(result).toBe("done");
+      expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 1 }]);
+    });
+
+    it("rolls back every write of a failed transaction and rethrows", () => {
+      expect(() =>
+        db.transaction(() => {
+          db.run("INSERT INTO t (v) VALUES (1)");
+          throw new Error("boom");
+        }),
+      ).toThrow("boom");
+      expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 0 }]);
+    });
+
+    it("enforces foreign keys", () => {
+      db.exec(
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, t_id INTEGER NOT NULL REFERENCES t(id))",
+      );
+      expect(() => db.run("INSERT INTO child (t_id) VALUES (99)")).toThrow();
+    });
+
+    it("persists committed data across reopening the file", () => {
+      db.run("INSERT INTO t (v) VALUES ('kept')");
+      db.close();
+      db = open(join(dir, "test.sqlite"));
+      expect(db.all("SELECT v FROM t")).toEqual([{ v: "kept" }]);
+    });
+
+    it("rejects use after close", () => {
+      db.close();
+      expect(() => db.all("SELECT 1")).toThrow();
+      db = open(join(dir, "test.sqlite"));
+    });
+  });
+}

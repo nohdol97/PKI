@@ -13,6 +13,7 @@ export default defineConfig(
       "verification/**",
       "test-results/**",
       "playwright-report/**",
+      "**/dist/**",
     ],
   },
   js.configs.recommended,
