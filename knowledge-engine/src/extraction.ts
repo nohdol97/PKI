@@ -106,8 +106,11 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
 
     // items of this answer by its refs; an existing ID must be one of the candidates sent
     const items = new Map<string, Item>();
+    const seen = new Set<string>();
     for (const item of answer.items) {
-      if (items.has(item.ref)) continue; // the first entry of a ref is the one used
+      // the first entry of a ref decides it: a ref whose first entry was dropped stays dropped
+      if (seen.has(item.ref)) continue;
+      seen.add(item.ref);
       if (item.existingItemId !== null && !candidates.includes(item.existingItemId)) {
         drops.other++;
         continue;

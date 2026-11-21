@@ -123,6 +123,31 @@ stateDiagram-v2
 
 T06의 규칙은 `DIRTY`를 만들지 않고 활성 행을 곧바로 갱신하거나 해소한다. `DIRTY`를 거치는 길은 T07·T08이 그 상태를 쓰기로 정할 때의 것이다("T06이 넘기는 것" 7항).
 
+### 작업 한 건의 상태
+
+V02-R4·R5와 "T03이 넘기는 것" 1·4·5·7항, "T05가 넘기는 것" 3·9항을 합친 것이다. 닫힌 상태(`done`, `superseded`, `failed`)에서는 다시 집히지 않는다. `held`에서 `queued`로 돌아가는 길은 미해결 질문 7의 잠정 결정이다.
+
+```mermaid
+stateDiagram-v2
+  state "queued(대기)" as QUEUED
+  state "leased(임대, 처리 중)" as LEASED
+  state "done(결과를 씀)" as DONE
+  state "superseded(낡은 version)" as SUPERSEDED
+  state "held(보류, 사유 코드)" as HELD
+  state "failed(실패, 사유 코드)" as FAILED
+  [*] --> QUEUED: 원본 version 저장과 같은 트랜잭션에서 등록
+  QUEUED --> LEASED: 실행기가 집음(임대 토큰 +1)
+  LEASED --> LEASED: 임대 기한이 지나 다시 집힘(토큰 +1, 이전 보유자는 호출·닫기 불가)
+  LEASED --> SUPERSEDED: fence가 낡음(집을 때 또는 닫을 때)
+  LEASED --> DONE: fence 안에서 결과를 씀
+  LEASED --> HELD: Broker가 막음(사유 그대로) 또는 크기 초과(source-too-large)
+  LEASED --> FAILED: 거부, Provider 실패, 스키마 불일치 2회, 처리기·쓰기 오류
+  HELD --> QUEUED: (잠정) 백그라운드 설정·동의·주소 변경, 시작 때 전송 정책 버전 변경. 같은 행, 크기 초과는 제외
+  DONE --> [*]
+  SUPERSEDED --> [*]
+  FAILED --> [*]
+```
+
 ### 추출 응답의 모양 (T05에서 확정. 스키마 버전 2)
 
 | 필드 | 내용 |
@@ -217,11 +242,11 @@ flowchart LR
 3. **크기 초과(잠정).** 제목과 본문의 코드 포인트 합이 `MAX_EXTRACT_CODE_POINTS`(20000)를 넘으면 Broker를 부르지 않고 `held`(`source-too-large`)로 닫는다. 값은 근거 없이 정한 잠정 값이다. 실제 Provider의 문맥 한도와 맞추는 것은 S14·R07의 실행 뒤다.
 4. **인용문과 위치.** `knowledge-engine/src/quote.ts`의 `locateQuote(body, quote)`. 저장된 본문에서 **정확히 같은** 글자열을 찾고(정규화 없음, A21), 한 번만 나올 때만 코드 포인트로 센 `[시작, 끝)`을 돌려준다. 없음(`quote-missing`)과 두 번 이상(겹치는 경우 포함, `quote-ambiguous`), 그리고 저장소가 검사할 수 없는 경우(빈 인용문, 서로게이트 쌍을 가르는 일치, U+0000 뒤의 위치)는 버린다. 제목에서만 찾은 인용문도 버린다(근거의 위치는 본문 기준이다).
 5. **버린 수(스키마 v8).** `jobs.dropped_quotes`(인용문 대조에서 버린 사실·관계)와 `jobs.dropped_other`(후보에 없는 ID를 가리킨 항목, 응답에 없는 `ref`를 가리킨 사실·관계, 달력에 없는 날짜, 쓰는 사이에 지워진 기존 항목)를 결과를 쓰는 트랜잭션에서 남긴다. 읽는 함수는 `readExtractionDrops`. **T12**의 실행 기록이 "인용문 대조에서 버린 수"로 `dropped_quotes`를 쓴다.
-6. **연결 후보(R7).** `knowledge-engine/src/linking.ts`의 `findCandidates(db, text)`. 제목과 본문을 이은 글과 항목 이름을 둘 다 NFKC 정규화, 소문자, 공백 묶기만 한 뒤 이름이 글에 들어 있으면 후보다(부분 문자열이므로 "물결"은 "물결무늬"에도 걸린다). 모든 항목의 이름을 읽어 코드가 비교한다(잠정. 항목 수가 많아지면 I03·S02에서 다시 본다). 별칭은 두지 않았다(미해결 질문 6은 그대로). Broker의 후보 조회는 `knowledgeCandidates(db)`이며 이름과, 그 항목의 사실·관계(주체 또는 대상)의 근거가 된 **모든** version(지난 version 포함)을 돌려주어 등급 계산에 넣는다. 후보에 없는 ID를 가리킨 응답 항목은 그 항목과 그것을 가리키는 사실·관계만 버린다(응답 전체를 버리지 않음, 잠정).
+6. **연결 후보(R7).** `knowledge-engine/src/linking.ts`의 `findCandidates(db, text)`. 한 응답에서 같은 `ref`가 여러 번 나오면 처음 것만 쓰고, 처음 것이 후보 밖 ID로 버려졌으면 그 `ref`는 끝까지 버려진다. 제목과 본문을 이은 글과 항목 이름을 둘 다 NFKC 정규화, 소문자, 공백 묶기만 한 뒤 이름이 글에 들어 있으면 후보다(부분 문자열이므로 "물결"은 "물결무늬"에도 걸린다). 모든 항목의 이름을 읽어 코드가 비교한다(잠정. 항목 수가 많아지면 I03·S02에서 다시 본다). 별칭은 두지 않았다(미해결 질문 6은 그대로). Broker의 후보 조회는 `knowledgeCandidates(db)`이며 이름과, 그 항목의 사실·관계(주체 또는 대상)의 근거가 된 **모든** version(지난 version 포함)을 돌려주어 등급 계산에 넣는다. 후보에 없는 ID를 가리킨 응답 항목은 그 항목과 그것을 가리키는 사실·관계만 버린다(응답 전체를 버리지 않음, 잠정).
 7. **쓰기.** 실행기가 fence를 확인한 트랜잭션 안의 `write`에서만 쓴다. 항목은 남은 사실이나 관계가 가리킬 때만 만든다(인용문이 모두 버려진 항목은 생기지 않는다). 새 행은 상태 `candidate`, 관측 시각은 처리 시각, 유효 시각은 없음이다. 같은 행(R8)이면 T02의 고유 키가 기존 행을 돌려주고 근거만 더한다. **T07**: 같은 행이 `superseded`여도 T05는 상태를 바꾸지 않는다(되살리기는 T07의 몫). 끝으로 기록한 사실의 항목과 관계의 주체·대상을 넘겨 `recomputeDependencyDelay`를 같은 트랜잭션에서 부른다.
 8. **구성 지점과 시작·종료.** `backend/src/composition.ts`의 `productRunner(db, broker)`가 실행기에 `extract` 처리기를 묶고, `productCalls`의 Broker가 `knowledgeCandidates(db)`를 쓴다. `boot.ts`는 같은 실행기를 `createConnectorManager(..., {runner})`와 `productImporter(db, {runner})`에 주고 시작할 때 `start()`, 서버를 닫을 때 서버 다음에 `stop()`을 부른다. 백엔드의 오류 로그는 `job-error`와 오류 클래스만 남긴다.
 9. **보류를 푸는 길(미해결 질문 7의 결정, 잠정).** `storage`의 `requeueHeldJobs(db, {keep})`이 `held` 작업을 **기존 행 그대로** `queued`로 되돌린다(새 행 없음, 다시 집을 때 임대 토큰이 오른다). `releaseHeldJobs(db, runner)`가 `source-too-large`를 뺀 보류를 풀고 실행기를 깨운다. 부르는 때는 셋이다: ① API의 백그라운드 설정 쓰기, 동의 부여(성공했을 때)와 철회, OpenAI 호환 주소 설정 쓰기(server의 `onRunConditionsChanged`) ② 백엔드 시작 때 전송 정책 버전이 설정 `jobs.held-policy-version`에 적힌 값과 다를 때(`releaseOnPolicyChange`. 배포처 규칙은 빌드 값이라 재시작 때만 바뀐다) ③ 그 밖에는 풀지 않는다. 그래서 호출 예산 소진(`budget-exhausted`)으로 보류된 작업은 위 조건 중 하나가 생길 때까지 남는다. 막은 조건이 그대로면 다시 보류되고 Broker 이력에 막힌 시도가 한 행씩 더 생긴다.
-10. **백그라운드 설정이 꺼진 기본값에서의 흐름.** 가져오기로 등록된 추출은 언제나 백그라운드 호출이다(사용자 호출로 추출하는 길은 이 spec에 없다). 목록에 있는 CLI Provider로는 설정이 꺼져 있는 동안 작업이 `held`(`cli-background-off`)로 남고 Provider 호출은 0회다. 설정을 켜면 9항으로 풀려 같은 행이 `done`이 된다. HTTP Provider는 이 설정과 상관없이 동의와 전송 규칙만 본다.
+10. **백그라운드 설정이 꺼진 기본값에서의 흐름.** 가져오기로 등록된 추출은 언제나 백그라운드 호출이다(사용자 호출로 추출하는 길은 이 spec에 없다). 목록에 있는 CLI Provider로는 설정이 꺼져 있는 동안 작업이 `held`(`cli-background-off`)로 남고 Provider 호출은 0회다. 설정을 켜면 9항으로 풀려 같은 행이 `done`이 된다. HTTP Provider는 이 설정과 상관없이 동의와 전송 규칙만 본다. 그래서 HTTP Provider에 동의하는 순간 기다리던 추출과 이후의 모든 가져오기가 자리에 없을 때도 자동으로 보내진다. 동의 화면은 이 사실을 한 문장으로 밝힌다(`apps/web/src/consent-text.ts`, 테스트 `consent-text.test.ts`). 동의와 자동 실행을 따로 묻는 설계는 I03(#20)으로 넘긴다([ADR 0005](../adr/0005-llm-providers.md)의 미해결 문구 항목).
 11. **fixture별 Provider double.** `@pki/testkit`의 `fixtureExtraction()`은 `FakeProvider`의 `answer`로 쓴다. 요청 문서의 본문이 V02 fixture 줄의 `content`와 같으면, `fixtures/v02-expected.json`에서 그 레코드를 근거로 하는 사실과 관계를 인용문과 함께 돌려준다. 기존 항목의 ID는 요청의 후보 가운데 이름이 같은 것에서만 고르고, 없으면 새 항목이다. fixture가 아닌 문서에는 빈 응답이다. 언제나 정확한 인용문을 주므로 실제 추출의 증거가 아니다(A21). **T11**은 이 double을 묶은 실행의 기록에 Provider 종류 `test-double`을 적는다. 제품 빌드에 묶는 길은 아직 없다(testkit은 테스트 빌드 전용). E2E가 백엔드 프로세스에 이것을 묶으려면 T11이 테스트 빌드 전용 진입점을 만든다.
 12. **T10: 화면이 쓸 것.** 근거의 `start_offset`·`end_offset`은 본문의 **코드 포인트** 위치다. 화면에서 강조할 때 JavaScript 문자열 색인(UTF-16)으로 바로 쓰면 이모지 뒤에서 어긋난다(`Array.from(body)`나 코드 포인트 단위로 자른다). 근거의 version은 `evidence.source_version_id`이고 원본별 번호는 `source_versions.version`이다.
 13. **증명 테스트의 위치.** `extraction.quote` → `knowledge-engine/src/quote.test.ts`와 `extraction.test.ts`의 "extraction.quote (stored)", `extraction.calls`·`extraction.request`·`linking` → `knowledge-engine/src/extraction.test.ts`(실제 Broker와 SQLite), `flow.insight`·`flow.date-variant`와 보류·해제 → `backend/src/extraction-flow.test.ts`, 시작 시 실행기 연결 → `backend/src/boot.test.ts`.
@@ -345,3 +370,4 @@ test double의 결과를 실제 Provider의 결과로 적지 않는다. R07(#37)
 | 2026-11-21 | T04 검토 반영: "T04가 넘기는 것" 1항을 한 줄 한 version으로 고침(한 파일 안의 이전 version을 버리지 않고 원본마다 차례로 나눠 저장, 골든 데이터 전체 줄 대조), 4항에 instance 단위 실패 보고(`instance-failed`, `instance-conflict`), 5항에 한 번만 파싱, 파일당 instance 상한 32(`too-many-instances`), 오류 목록 상한 100과 `errorCount`, BOM, `accessScope: false` | 작업 분해(T04가 넘기는 것 1·4·5) | V02-T04 독립 검토 A M1·A2, B M1·S1·S2·W2 |
 | 2026-11-21 | T04 2차 검토 반영: 같은 revision과 같은 내용의 version이 이미 있으면 그 줄은 새것이 아님(여러 version이 든 파일의 재입력이 오류 없이 끝남, "T02가 넘기는 것" 2와 "T04가 넘기는 것" 5), 실패한 instance의 오류를 종류 이름만 기록("T04가 넘기는 것" 4). 한 차례가 두 페이지에 걸칠 때 뒤 페이지 실패의 보고와 줄 번호 순 상한을 테스트로 고정 | T02가 넘기는 것 2, T04가 넘기는 것 4·5 | V02-T04 2차 독립 검토 A A7~A9, B R2-S1~S3 |
 | 2026-11-21 | 추출 응답의 모양을 스키마 버전 2로 확정하고 V01의 잠정 버전 1을 지움. "T05가 넘기는 것" 추가: 처리기의 자리와 결과 옮기기(막힘은 보류, 스키마 불일치만 한 번 더), 크기 초과 보류(잠정 20000 코드 포인트), 인용문의 정확한 대조와 코드 포인트 위치, 버린 수(스키마 v8), 연결 후보(정규화한 이름의 부분 문자열, 후보 이름의 모든 근거 version을 등급에), 쓰기와 규칙 호출, 구성 지점과 시작·종료, 보류를 푸는 길(미해결 질문 7 결정), 백그라운드 설정이 꺼진 흐름, fixture별 Provider double, T10의 코드 포인트 강조 | 설계 개요(추출 응답의 모양), 작업 분해(T05가 넘기는 것), 미해결 질문 7 | V02-T05 구현 |
+| 2026-11-21 | T05 검토 반영: 작업 한 건의 상태 그림 추가(보류에서 대기로 돌아가는 잠정 길 포함), "T05가 넘기는 것" 6항에 같은 `ref`가 반복될 때, 10항에 HTTP Provider 동의가 곧 백그라운드 자동 전송임과 동의 화면 문구·I03 이관 | 설계 개요(작업 한 건의 상태), T05가 넘기는 것 6·10 | V02-T05 독립 검토 A-S1·A-S5, B-S1 |

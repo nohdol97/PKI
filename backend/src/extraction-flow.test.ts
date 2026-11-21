@@ -217,6 +217,21 @@ describe("held extraction", () => {
     expect(jobs().map((j) => j.status)).toEqual(["done", "done", "done"]);
   });
 
+  it("releases every held job but one held for size: settings cannot make a source smaller", async () => {
+    const { runner, importer } = pipeline(localDouble());
+    await importer(fileText("plain"));
+    await runner.wake();
+    const [first, second] = db.all("SELECT id FROM jobs ORDER BY id") as [
+      { id: number },
+      { id: number },
+    ];
+    db.run("UPDATE jobs SET reason = 'source-too-large' WHERE id = ?", [first.id]);
+    expect(releaseHeldJobs(db, runner)).toBe(2);
+    expect(readJob(db, first.id)).toMatchObject({ status: "held", reason: "source-too-large" });
+    expect(readJob(db, second.id)?.status).not.toBe("held");
+    await runner.wake();
+  });
+
   it("releases held jobs at start only when the egress rules' policy version changed", async () => {
     const { egress, runner, importer } = pipeline(localDouble());
     await importer(fileText("plain"));

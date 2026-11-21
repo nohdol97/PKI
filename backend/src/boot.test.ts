@@ -6,12 +6,21 @@
 // same egress instance the consent API wrote.
 import { routes, type SecretSource } from "@pki/contracts";
 import { openaiKeySecretName } from "@pki/providers";
-import { send, startFakeOpenAI } from "@pki/testkit";
+import {
+  readSetting,
+  registerConnectorInstance,
+  registerJob,
+  saveSourceRecord,
+  type SqlDriver,
+} from "@pki/storage";
+import { completion, send, startFakeOpenAI, type FakeHttpReply } from "@pki/testkit";
+import { connect } from "node:net";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
+import { HELD_POLICY_SETTING, openCanonicalDb } from "./composition.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "t".repeat(43);
@@ -142,5 +151,132 @@ describe("bootBackend", () => {
     } finally {
       await endpoint.close();
     }
+  });
+
+  describe("the runner's lifecycle", () => {
+    /** Writes jobs into the data directory before any backend runs on it. */
+    function seed(jobs: { status: "queued" | "held"; reason?: string }[]) {
+      const db: SqlDriver = openCanonicalDb(dir);
+      try {
+        registerConnectorInstance(db, "seeded", "jsonl-import");
+        jobs.forEach((job, i) => {
+          const saved = saveSourceRecord(db, "seeded", {
+            externalId: `s${i}`,
+            title: "t",
+            body: `seeded ${i}`,
+          });
+          if (saved.status !== "created") throw new Error("expected a version");
+          registerJob(db, {
+            kind: "extract",
+            sourceId: saved.sourceId,
+            fenceVersion: saved.version,
+          });
+          if (job.status === "held") {
+            db.run("UPDATE jobs SET status = 'held', reason = ? WHERE source_id = ?", [
+              job.reason ?? null,
+              saved.sourceId,
+            ]);
+          }
+        });
+      } finally {
+        db.close();
+      }
+    }
+    const jobsOf = (db: SqlDriver) => db.all("SELECT status, reason FROM jobs ORDER BY id");
+
+    it("starts the runner: a job left queued before the start runs with no other trigger", async () => {
+      seed([{ status: "queued" }]);
+      booted = await bootBackend({
+        dataDir: dir,
+        token: TOKEN,
+        allowedOrigins: [],
+        secrets: NO_SECRET_STORE,
+      });
+      const { db } = booted;
+      await vi.waitFor(() =>
+        expect(jobsOf(db)).toEqual([{ status: "held", reason: "destination-unavailable" }]),
+      );
+    });
+
+    it("releases held jobs at start under new egress rules, except one held for size", async () => {
+      seed([
+        { status: "held", reason: "no-consent" },
+        { status: "held", reason: "source-too-large" },
+      ]);
+      booted = await bootBackend({
+        dataDir: dir,
+        token: TOKEN,
+        allowedOrigins: [],
+        secrets: NO_SECRET_STORE,
+      });
+      const { db } = booted;
+      expect(readSetting(db, HELD_POLICY_SETTING)).toMatch(/^pv-/);
+      await vi.waitFor(() =>
+        expect(jobsOf(db)).toEqual([
+          { status: "held", reason: "destination-unavailable" }, // judged again
+          { status: "held", reason: "source-too-large" },
+        ]),
+      );
+    });
+
+    it("closes only after the running job has closed", async () => {
+      let answer!: (reply: FakeHttpReply) => void;
+      const gate = new Promise<FakeHttpReply>((resolve) => (answer = resolve));
+      const endpoint = await startFakeOpenAI(() => gate);
+      const key = openaiKeySecretName(endpoint.host);
+      const secrets: SecretSource = {
+        read: async (n) =>
+          n === key ? { state: "present", value: "sk-boot" } : { state: "missing" },
+        has: async (n) => (n === key ? "present" : "missing"),
+        deleteOthers: async () => "done",
+      };
+      try {
+        booted = await bootBackend({ dataDir: dir, token: TOKEN, allowedOrigins: [], secrets });
+        const { db } = booted;
+        const { port } = booted.server;
+        const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
+        const post = (path: string, body: unknown) => send(port, path, headers, "POST", body);
+        await post(routes.writeSettings.path, {
+          openaiCompatible: { baseUrl: endpoint.baseUrl, model: "synthetic-model" },
+        });
+        const consents = await send(port, routes.consents.path, headers);
+        await post(routes.grantConsent.path, {
+          providerId: "openai-compatible",
+          allowedClasses: ["general"],
+          destination: endpoint.host,
+          policyVersion: (consents.body as { policyVersion: string }).policyVersion,
+        });
+        const line = readFileSync(
+          resolve(import.meta.dirname, "../../fixtures/v02-mail.jsonl"),
+          "utf8",
+        );
+        await post(routes.importJsonl.path, { text: line });
+        await vi.waitFor(() => expect(endpoint.completions()).toBe(1)); // the job is in its call
+
+        const server = booted.server;
+        booted = undefined; // closed here, not again in afterEach
+        let closed = false;
+        const closing = server.close().then(() => (closed = true));
+        // the API stops listening first; the close must still wait for the job
+        await vi.waitFor(
+          () =>
+            new Promise<void>((ok, fail) => {
+              const socket = connect(port, "127.0.0.1");
+              socket.once("connect", () => (socket.destroy(), fail(new Error("still listening"))));
+              socket.once("error", () => ok());
+            }),
+        );
+        for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+        expect(closed).toBe(false);
+        expect(jobsOf(db)).toEqual([{ status: "leased", reason: null }]);
+
+        answer(completion(JSON.stringify({ items: [], facts: [], relations: [] })));
+        await closing;
+        expect(jobsOf(db)).toEqual([{ status: "done", reason: null }]);
+        db.close();
+      } finally {
+        await endpoint.close();
+      }
+    });
   });
 });

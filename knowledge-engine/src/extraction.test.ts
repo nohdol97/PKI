@@ -327,6 +327,28 @@ describe("extraction.quote (stored)", () => {
     expect(items()).toHaveLength(2); // both items carry the relation
   });
 
+  it("drops a quote found only in the title: evidence spans the body", async () => {
+    const title = "미리내 프로젝트 완료 목표 2026-12-05";
+    setUp([
+      output({
+        items: [{ ref: "a", type: "Project", name: "미리내 프로젝트", existingItemId: null }],
+        facts: [
+          {
+            item: "a",
+            kind: "target_date",
+            value: "2026-12-05",
+            epistemic: "explicit",
+            quote: title,
+          },
+        ],
+      }),
+    ]);
+    const job = imported({ id: "title", title, content: "본문에는 날짜가 없습니다." });
+    expect((await runNext()).status).toBe("done");
+    expect(facts()).toEqual([]);
+    expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 1, other: 0 });
+  });
+
   it("creates no item that nothing kept refers to", async () => {
     setUp([
       output({
@@ -427,6 +449,35 @@ describe("linking", () => {
     expect(facts()).toHaveLength(1); // the mail's only
     // the item entry and the fact that named it
     expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 0, other: 2 });
+  });
+
+  it("keeps a ref dropped when its first entry named a non-candidate ID and a later entry repeats it", async () => {
+    const quote = "물결 API 개발 완료가 2026-12-10으로 연기되었습니다";
+    setUp([
+      output({
+        items: [
+          { ref: "b", type: "System", name: "물결 API", existingItemId: "999" },
+          { ref: "b", type: "System", name: "물결 API", existingItemId: null },
+        ],
+        facts: [
+          { item: "b", kind: "completion_date", value: "2026-12-10", epistemic: "explicit", quote },
+        ],
+      }),
+    ]);
+    const job = imported(messenger);
+    expect((await runNext()).status).toBe("done");
+    expect(items()).toEqual([]);
+    expect(facts()).toEqual([]);
+    // the dropped first entry and the fact that named its ref; the repeat is ignored
+    expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 0, other: 2 });
+  });
+
+  it("searches candidates in the title as well as the body", async () => {
+    imported(mail);
+    await runNext(); // item 1: 미리내 프로젝트
+    imported({ id: "t-only", title: "미리내 프로젝트 회의", content: "다음 회의는 목요일입니다." });
+    await runNext();
+    expect(brokerRequests.at(-1)).toMatchObject({ candidateItemIds: ["1"] });
   });
 
   it("adds evidence to the same row for an equal value and keeps a different value apart", async () => {

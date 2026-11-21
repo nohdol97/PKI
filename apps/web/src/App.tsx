@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } fr
 import type { ApiClient } from "./api.ts";
 import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
+import { CONSENT_NOTICE } from "./consent-text.ts";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { componentText, embeddingText } from "./status-text.ts";
 
@@ -545,12 +546,7 @@ function Consents({ api }: { api: ApiClient }) {
     <>
       <h2>외부 전송 동의</h2>
       <Failure error={error ?? failure} />
-      <p>
-        "외부 전송"으로 표시된 Provider에 보내는 요청은 이 PC 밖의 서버로 나갑니다. CLI Provider도
-        요청을 그 CLI의 벤더 서비스로 보냅니다. 허용할 데이터 등급을 고르고 동의하기 전에는 아무것도
-        보내지 않습니다. 목적지나 전송 정책이 바뀌면 동의는 무효가 되어 다시 받아야 합니다. 화면을
-        연 뒤 목적지나 정책이 바뀌었다면 동의는 거부되고 표를 다시 불러옵니다.
-      </p>
+      <p>{CONSENT_NOTICE}</p>
       {data && (
         <>
           <p>전송 정책 버전: {data.policyVersion}</p>
