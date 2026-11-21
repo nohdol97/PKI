@@ -148,6 +148,8 @@ describe("screen routes", () => {
     const grant = await call(routes.grantConsent.path, "POST", {
       providerId: "claude-code",
       allowedClasses: ["synthetic"],
+      destination: "vendor:claude-code",
+      policyVersion: productEgress(db).policyVersion(),
     });
     expect(grant.status).toBe(200);
     const listed = await call(routes.consents.path);

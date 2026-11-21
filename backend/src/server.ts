@@ -74,6 +74,7 @@ const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "not-found": 404,
   "connector-unavailable": 409,
   "destination-unavailable": 409,
+  "consent-stale": 409,
 };
 
 const STATUS_CHECK_FAILED: ComponentStatus = {
@@ -142,7 +143,8 @@ function createHandlers(options: ServerOptions): Handlers {
       databaseEncryption: databaseEncryption(options.databaseFile),
     }),
     consents: async () => options.egress.overview(),
-    grantConsent: async (input) => options.egress.grant(input.providerId, input.allowedClasses),
+    grantConsent: async ({ providerId, allowedClasses, destination, policyVersion }) =>
+      options.egress.grant(providerId, allowedClasses, { destination, policyVersion }),
     revokeConsent: async (input) => options.egress.revoke(input.providerId),
   };
 }

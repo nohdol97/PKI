@@ -40,11 +40,11 @@ export const OPENAI_BASE_URL_SETTING = "providers.openaiCompatible.baseUrl";
  * A CLI sends to whatever vendor service the CLI itself chooses (ADR 0014), so its
  * destination is named after the CLI. The local model stays on this PC.
  */
-const FIXED_DESTINATIONS: Partial<Record<ProviderId, string>> = {
-  "claude-code": "vendor:claude-code",
-  codex: "vendor:codex",
-  "local-model": "local-model",
-};
+const FIXED_DESTINATIONS: ReadonlyMap<string, string> = new Map([
+  ["claude-code", "vendor:claude-code"],
+  ["codex", "vendor:codex"],
+  ["local-model", "local-model"],
+]);
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]", "localhost"]);
 
 export type DenyReason =
@@ -98,11 +98,15 @@ export interface EgressControls extends EgressPolicy {
   policyVersion(): string;
   destination(providerId: ProviderId): Destination;
   overview(): ConsentList;
-  /** Consent at the current destination and policy version; replaces an earlier one. */
+  /**
+   * Consent at the current destination and policy version, which must equal the
+   * ones the user was shown; replaces an earlier consent.
+   */
   grant(
     providerId: ProviderId,
     allowedClasses: readonly DataClassification[],
-  ): ConsentList | { error: "destination-unavailable" };
+    shown: { destination: string; policyVersion: string },
+  ): ConsentList | { error: "destination-unavailable" | "consent-stale" };
   revoke(providerId: ProviderId): ConsentList;
 }
 
@@ -133,7 +137,7 @@ export function createEgressPolicy(options: EgressPolicyOptions): EgressControls
 
   function destination(providerId: ProviderId): Destination {
     if (providerId === "openai-compatible") return endpointHost();
-    const fixed = FIXED_DESTINATIONS[providerId];
+    const fixed = FIXED_DESTINATIONS.get(providerId);
     return fixed ? { destination: fixed } : { problem: "destination-unavailable" };
   }
 
@@ -202,9 +206,12 @@ export function createEgressPolicy(options: EgressPolicyOptions): EgressControls
     policyVersion: () => version,
     destination,
     overview,
-    grant(providerId, allowedClasses) {
+    grant(providerId, allowedClasses, shown) {
       const current = destination(providerId);
       if (!("destination" in current)) return { error: "destination-unavailable" };
+      if (shown.destination !== current.destination || shown.policyVersion !== version) {
+        return { error: "consent-stale" };
+      }
       saveConsent(db, {
         provider: providerId,
         destination: current.destination,

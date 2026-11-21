@@ -132,7 +132,7 @@ describe("repository lint config enforces module-boundary", () => {
     );
     expect(results.length).toBeGreaterThan(20);
     expect(violations).toEqual([]);
-  });
+  }, 30_000); // lints the whole repository: seconds alone, more under a full parallel run
 
   it("allows imports inside the same package and of platform modules", async () => {
     const messages = await lintWithRepoConfig(

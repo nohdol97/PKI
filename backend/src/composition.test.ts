@@ -2,12 +2,18 @@
 // directory, created owner-only first, at the latest schema; the site
 // Connector kinds are registered and fail with the follow-up notice.
 import { CONNECTOR_NOT_IMPLEMENTED } from "@pki/contracts";
-import { migrations, schemaVersion } from "@pki/storage";
+import { OPENAI_BASE_URL_SETTING } from "@pki/providers";
+import { migrations, schemaVersion, writeSetting } from "@pki/storage";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CANONICAL_DB_FILE, connectorKinds, openCanonicalDb } from "./composition.ts";
+import {
+  CANONICAL_DB_FILE,
+  connectorKinds,
+  openCanonicalDb,
+  productEgress,
+} from "./composition.ts";
 
 let root: string;
 
@@ -46,4 +52,25 @@ describe("site Connector kinds", () => {
       });
     },
   );
+});
+
+describe("productEgress", () => {
+  // The product build refuses loopback http (V01-R11, C5 consent.binding); T09 replaces
+  // this with the build-kind switch, under which only development and test builds allow it.
+  it("refuses an http endpoint, loopback included", () => {
+    const db = openCanonicalDb(join(root, "PKI"));
+    try {
+      const egress = productEgress(db);
+      for (const url of ["http://127.0.0.1:9/v1", "http://localhost:9/v1", "http://[::1]:9/v1"]) {
+        writeSetting(db, OPENAI_BASE_URL_SETTING, url);
+        expect(egress.destination("openai-compatible")).toEqual({ problem: "insecure-endpoint" });
+      }
+      writeSetting(db, OPENAI_BASE_URL_SETTING, "https://api.synthetic.example/v1");
+      expect(egress.destination("openai-compatible")).toEqual({
+        destination: "api.synthetic.example",
+      });
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -101,7 +101,10 @@ describe("failure paths leave no input behind", () => {
       });
       writeSetting(db, OPENAI_BASE_URL_SETTING, "https://api.synthetic.example/v1");
       const egress = createEgressPolicy({ db });
-      egress.grant("openai-compatible", ["general"]);
+      egress.grant("openai-compatible", ["general"], {
+        destination: "api.synthetic.example",
+        policyVersion: egress.policyVersion(),
+      });
       const ledger = createUserActionLedger();
       const results: unknown[] = [];
       const providers = [new EchoingError(), new EchoingPlainError(), new EchoingOutput()];

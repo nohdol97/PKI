@@ -22,6 +22,19 @@ beforeEach(() => {
 });
 afterEach(() => db.close());
 
+/** Grants with the destination and policy version the consent screen would show now. */
+function grantAsShown(
+  policy: ReturnType<typeof createEgressPolicy>,
+  providerId: ProviderId,
+  classes: DataClassification[],
+) {
+  const current = policy.destination(providerId);
+  return policy.grant(providerId, classes, {
+    destination: "destination" in current ? current.destination : "",
+    policyVersion: policy.policyVersion(),
+  });
+}
+
 const rule = (
   effect: EgressRule["effect"],
   provider: EgressRule["provider"] = "*",
@@ -106,7 +119,7 @@ describe("mixed input", () => {
     const classification = strictest(graded);
     expect(classification).toBe("general");
     const policy = createEgressPolicy({ db });
-    policy.grant("claude-code", ["synthetic"]);
+    grantAsShown(policy, "claude-code", ["synthetic"]);
     expect(
       policy.decide({ providerId: "claude-code", taskKind: "extract", classification }),
     ).toEqual({ allowed: false, reason: "no-matching-rule" });
@@ -125,7 +138,7 @@ describe("createEgressPolicy.decide", () => {
 
   it("allows the consented classes only, for every task kind, naming destination and version", () => {
     const policy = createEgressPolicy({ db });
-    policy.grant("codex", ["synthetic"]);
+    grantAsShown(policy, "codex", ["synthetic"]);
     for (const taskKind of ["extract", "connection-test"] as const) {
       expect(policy.decide({ providerId: "codex", taskKind, classification: "synthetic" })).toEqual(
         {
@@ -152,7 +165,7 @@ describe("createEgressPolicy.decide", () => {
       db,
       siteRules: [rule("deny", "codex", "extract", "synthetic")],
     });
-    policy.grant("codex", ["synthetic", "general"]);
+    grantAsShown(policy, "codex", ["synthetic", "general"]);
     expect(
       policy.decide({ providerId: "codex", taskKind: "extract", classification: "synthetic" }),
     ).toEqual({ allowed: false, reason: "rule-denied" });
@@ -174,7 +187,7 @@ describe("createEgressPolicy.decide", () => {
 
   it("stops at once when consent is revoked", () => {
     const policy = createEgressPolicy({ db });
-    policy.grant("codex", ["synthetic"]);
+    grantAsShown(policy, "codex", ["synthetic"]);
     policy.revoke("codex");
     expect(
       policy.decide({ providerId: "codex", taskKind: "extract", classification: "synthetic" }),
@@ -192,11 +205,53 @@ describe("createEgressPolicy.decide", () => {
 
   it("treats a stored consent whose classes cannot be read as allowing nothing", () => {
     const policy = createEgressPolicy({ db });
-    policy.grant("codex", ["synthetic"]);
+    grantAsShown(policy, "codex", ["synthetic"]);
     db.run("UPDATE consents SET allowed_classes = 'not json' WHERE provider = 'codex'");
     expect(
       policy.decide({ providerId: "codex", taskKind: "extract", classification: "synthetic" }),
     ).toEqual({ allowed: false, reason: "no-matching-rule" });
+  });
+});
+
+describe("grant binds to what the user was shown", () => {
+  it("refuses when the shown destination or policy version is no longer current, storing nothing", () => {
+    writeSetting(db, OPENAI_BASE_URL_SETTING, "https://two.synthetic.example/v1");
+    const policy = createEgressPolicy({ db });
+    const version = policy.policyVersion();
+    expect(
+      policy.grant("openai-compatible", ["general"], {
+        destination: "one.synthetic.example",
+        policyVersion: version,
+      }),
+    ).toEqual({ error: "consent-stale" });
+    expect(
+      policy.grant("openai-compatible", ["general"], {
+        destination: "two.synthetic.example",
+        policyVersion: "pv-0000000000000000",
+      }),
+    ).toEqual({ error: "consent-stale" });
+    expect(
+      policy.decide({
+        providerId: "openai-compatible",
+        taskKind: "extract",
+        classification: "general",
+      }),
+    ).toEqual({ allowed: false, reason: "no-consent" });
+    expect(
+      policy.grant("openai-compatible", ["general"], {
+        destination: "two.synthetic.example",
+        policyVersion: version,
+      }),
+    ).toMatchObject({ policyVersion: version });
+  });
+});
+
+describe("fixed destinations", () => {
+  it("do not resolve prototype keys", () => {
+    const policy = createEgressPolicy({ db });
+    for (const key of ["constructor", "__proto__", "toString"]) {
+      expect(policy.destination(key as ProviderId)).toEqual({ problem: "destination-unavailable" });
+    }
   });
 });
 
@@ -211,7 +266,12 @@ describe("destination of the openai-compatible Provider", () => {
   it("is unavailable until an endpoint is set, and consent cannot be given then", () => {
     const policy = createEgressPolicy({ db });
     expect(decide(policy)).toEqual({ allowed: false, reason: "destination-unavailable" });
-    expect(policy.grant("openai-compatible", ["synthetic"])).toEqual({
+    expect(
+      policy.grant("openai-compatible", ["synthetic"], {
+        destination: "api.synthetic.example",
+        policyVersion: policy.policyVersion(),
+      }),
+    ).toEqual({
       error: "destination-unavailable",
     });
   });
@@ -259,6 +319,7 @@ describe("computePolicyVersion", () => {
       [{ ...deny, classification: "synthetic" }, allow],
       [deny],
       [...base, rule("deny")],
+      [allow, deny], // order alone: a reordered list asks for consent again (decision 3)
       [],
     ];
     for (const rules of variants) seen.add(computePolicyVersion(rules));
@@ -313,7 +374,7 @@ describe("overview for the consent screen", () => {
   it("shows a consent as stale when the destination or the policy changed", () => {
     writeSetting(db, OPENAI_BASE_URL_SETTING, "https://one.synthetic.example/v1");
     const policy = createEgressPolicy({ db, now: () => new Date("2026-11-21T00:00:00Z") });
-    policy.grant("openai-compatible", ["general", "synthetic", "general"]);
+    grantAsShown(policy, "openai-compatible", ["general", "synthetic", "general"]);
     const consentOf = (p: ReturnType<typeof createEgressPolicy>) =>
       p.overview().providers.find((x) => x.providerId === "openai-compatible")?.consent;
     expect(consentOf(policy)).toEqual({

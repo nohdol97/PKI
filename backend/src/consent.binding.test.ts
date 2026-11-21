@@ -82,8 +82,17 @@ async function stack(options: Stack = {}) {
     egress,
     provider,
     post: (path: string, body: unknown) => send(port, path, headers, "POST", body),
-    grant: (providerId: ProviderId, allowedClasses: string[]) =>
-      send(port, routes.grantConsent.path, headers, "POST", { providerId, allowedClasses }),
+    /** As the consent screen does: send back the destination and version it shows. */
+    grant: async (providerId: ProviderId, allowedClasses: string[]) => {
+      const shown = (await send(port, routes.consents.path, headers)).body as ConsentList;
+      const entry = shown.providers.find((p) => p.providerId === providerId);
+      return send(port, routes.grantConsent.path, headers, "POST", {
+        providerId,
+        allowedClasses,
+        destination: entry?.destination ?? "",
+        policyVersion: shown.policyVersion,
+      });
+    },
     revoke: (providerId: ProviderId) =>
       send(port, routes.revokeConsent.path, headers, "POST", { providerId }),
     overview: async () => (await send(port, routes.consents.path, headers)).body as ConsentList,
@@ -230,13 +239,62 @@ describe("consent binding", () => {
     });
   });
 
+  it("refuses a grant for a destination or policy version the screen no longer shows", async () => {
+    writeSetting(db, OPENAI_BASE_URL_SETTING, "https://one.synthetic.example/v1");
+    const s = await stack();
+    const shown = await s.overview();
+    const seen = consentOf(shown, "openai-compatible")?.destination;
+    expect(seen).toBe("one.synthetic.example");
+    // the endpoint changes between showing the screen and pressing grant
+    writeSetting(db, OPENAI_BASE_URL_SETTING, "https://two.synthetic.example/v1");
+    const stale = await s.post(routes.grantConsent.path, {
+      providerId: "openai-compatible",
+      allowedClasses: ["synthetic"],
+      destination: seen,
+      policyVersion: shown.policyVersion,
+    });
+    expect(stale).toEqual({ status: 409, body: { error: "consent-stale" } });
+    expect(consentOf(await s.overview(), "openai-compatible")?.consent).toBeNull();
+
+    // the rules changed after the screen was shown
+    const edited = await stack({
+      rules: [{ provider: "codex", taskKind: "*", classification: "*", effect: "deny" }],
+    });
+    const oldVersion = await edited.post(routes.grantConsent.path, {
+      providerId: "openai-compatible",
+      allowedClasses: ["synthetic"],
+      destination: "two.synthetic.example",
+      policyVersion: shown.policyVersion,
+    });
+    expect(oldVersion).toEqual({ status: 409, body: { error: "consent-stale" } });
+    expect(await edited.connectionTest()).toMatchObject({
+      status: "blocked",
+      reason: "no-consent",
+    });
+    expect(edited.provider.requests).toHaveLength(0);
+  });
+
   it("rejects a grant naming an unknown Provider or class, or no class", async () => {
     const s = await stack();
     for (const body of [
       { providerId: "fake", allowedClasses: ["synthetic"] },
       { providerId: "codex", allowedClasses: ["secret"] },
       { providerId: "codex", allowedClasses: [] },
-      { providerId: "codex", allowedClasses: ["synthetic"], destination: "elsewhere" },
+      { providerId: "codex", allowedClasses: ["synthetic"] },
+      { providerId: "codex", allowedClasses: ["synthetic"], destination: "vendor:codex" },
+      {
+        providerId: "codex",
+        allowedClasses: ["synthetic"],
+        destination: "vendor:codex",
+        policyVersion: "",
+      },
+      {
+        providerId: "codex",
+        allowedClasses: ["synthetic"],
+        destination: "vendor:codex",
+        policyVersion: s.egress.policyVersion(),
+        extra: 1,
+      },
     ]) {
       const res = await s.post(routes.grantConsent.path, body);
       expect(res).toEqual({ status: 400, body: { error: "bad-request" } });

@@ -59,6 +59,7 @@ export const ErrorResponseSchema = z.object({
     "method-not-allowed",
     "connector-unavailable",
     "destination-unavailable",
+    "consent-stale",
     "internal-error",
   ]),
 });
@@ -162,10 +163,18 @@ export const ConsentListResponseSchema = z.object({
 });
 export type ConsentList = z.infer<typeof ConsentListResponseSchema>;
 
-/** The user picks the classes to allow; nothing is picked by default. */
+/**
+ * The user picks the classes to allow; nothing is picked by default. The grant
+ * repeats the destination and policy version the screen showed, and is refused
+ * ("consent-stale") when either is no longer current, so a consent never binds
+ * to a destination the user did not see.
+ */
 export const ConsentGrantRequestSchema = z.strictObject({
   providerId: ProviderIdSchema,
   allowedClasses: z.array(DataClassSchema).min(1),
+  /** Empty when the screen showed none; then the grant is refused like any mismatch. */
+  destination: z.string(),
+  policyVersion: z.string().min(1),
 });
 export const ConsentRevokeRequestSchema = z.strictObject({ providerId: ProviderIdSchema });
 

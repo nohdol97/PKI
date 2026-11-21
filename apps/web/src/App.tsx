@@ -286,16 +286,22 @@ function Consents({ api }: { api: ApiClient }) {
       const rest = (prev[id] ?? []).filter((x) => x !== c);
       return { ...prev, [id]: on ? [...rest, c] : rest };
     });
-  const grant = (entry: ConsentEntry) =>
+  // repeats what this screen shows; the backend refuses it if either changed meanwhile
+  const grant = (entry: ConsentEntry, policyVersion: string) =>
     api("grantConsent", {
       providerId: entry.providerId,
       allowedClasses: chosen[entry.providerId] ?? [],
+      destination: entry.destination ?? "",
+      policyVersion,
     }).then(
       () => {
         setChosen((prev) => ({ ...prev, [entry.providerId]: [] }));
         done();
       },
-      (e: unknown) => setFailure(message(e)),
+      (e: unknown) => {
+        setFailure(message(e));
+        reload(); // show the destination and version as they are now
+      },
     );
   const revoke = (entry: ConsentEntry) =>
     api("revokeConsent", { providerId: entry.providerId }).then(done, (e: unknown) =>
@@ -307,9 +313,10 @@ function Consents({ api }: { api: ApiClient }) {
       <h2>외부 전송 동의</h2>
       <Failure error={error ?? failure} />
       <p>
-        Provider에 보내는 요청은 이 PC 밖의 서버로 나갑니다. CLI Provider도 요청을 그 CLI의 벤더
-        서비스로 보냅니다. 허용할 데이터 등급을 고르고 동의하기 전에는 아무것도 보내지 않습니다.
-        목적지나 전송 정책이 바뀌면 동의는 무효가 되어 다시 받아야 합니다.
+        "외부 전송"으로 표시된 Provider에 보내는 요청은 이 PC 밖의 서버로 나갑니다. CLI Provider도
+        요청을 그 CLI의 벤더 서비스로 보냅니다. 허용할 데이터 등급을 고르고 동의하기 전에는 아무것도
+        보내지 않습니다. 목적지나 전송 정책이 바뀌면 동의는 무효가 되어 다시 받아야 합니다. 화면을
+        연 뒤 목적지나 정책이 바뀌었다면 동의는 거부되고 표를 다시 불러옵니다.
       </p>
       {data && (
         <>
@@ -358,7 +365,7 @@ function Consents({ api }: { api: ApiClient }) {
                         type="button"
                         aria-label={`${entry.providerId} 동의`}
                         disabled={entry.destination === null || picked.length === 0}
-                        onClick={() => grant(entry)}
+                        onClick={() => grant(entry, data.policyVersion)}
                       >
                         동의
                       </button>

@@ -4,8 +4,8 @@
 // file. The consent screen gives and revokes consent, and the egress policy over
 // the same canonical file then decides accordingly: the screen is wired to it.
 import { expect, test, type Page } from "@playwright/test";
-import { createCallRecorder, createEgressPolicy } from "@pki/providers";
-import { migrate } from "@pki/storage";
+import { createCallRecorder, createEgressPolicy, OPENAI_BASE_URL_SETTING } from "@pki/providers";
+import { migrate, writeSetting } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -63,6 +63,15 @@ function decideFor(dataDir: string, providerId: "claude-code" | "codex") {
       taskKind: "connection-test",
       classification: "synthetic",
     });
+  } finally {
+    db.close();
+  }
+}
+
+function setEndpoint(dataDir: string, url: string) {
+  const db = openBetterSqlite3(dbFile(dataDir));
+  try {
+    writeSetting(db, OPENAI_BASE_URL_SETTING, url);
   } finally {
     db.close();
   }
@@ -129,6 +138,19 @@ test("CLI calls show as external egress, consent is given and revoked, encryptio
     await expect(codex).toContainText("동의 없음");
     expect(decideFor(dataDir, "codex")).toEqual({ allowed: false, reason: "no-consent" });
     await expect(page.getByText("로컬 추론")).toHaveCount(0);
+
+    // the endpoint changes after the screen was shown: the grant is refused, nothing stored
+    setEndpoint(dataDir, "https://one.synthetic.example/v1");
+    await page.reload();
+    await openScreen(page, "설정");
+    const openai = page.getByRole("row", { name: /^openai-compatible/ });
+    await expect(openai).toContainText("one.synthetic.example");
+    setEndpoint(dataDir, "https://two.synthetic.example/v1");
+    await page.getByRole("checkbox", { name: "openai-compatible 일반 허용" }).check();
+    await page.getByRole("button", { name: "openai-compatible 동의", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("consent-stale");
+    await expect(openai).toContainText("two.synthetic.example");
+    await expect(openai).toContainText("동의 없음");
   } finally {
     await vite.close();
     rmSync(dir, { recursive: true, force: true });
