@@ -2,7 +2,15 @@
 // workspace package except through its declared public entry (T01), and must not
 // reach an adapter implementation module, even inside its own package, except
 // from the composition root (T07).
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ESLint, RuleTester } from "eslint";
@@ -90,6 +98,23 @@ describe("repository lint config enforces module-boundary", () => {
     }
   });
 
+  it("lists @pki/testkit as a runtime dependency of no package", () => {
+    const manifests = ["apps", "packages"]
+      .flatMap((group) => readdirSync(join(repoRoot, group)).map((d) => join(group, d)))
+      .concat(["backend", "knowledge-engine", "providers", "storage"])
+      .map((dir) => join(repoRoot, dir, "package.json"))
+      .filter((file) => existsSync(file))
+      .map((file) => JSON.parse(readFileSync(file, "utf8")));
+    expect(manifests.map((m) => m.name)).toEqual(
+      expect.arrayContaining(["@pki/backend", "@pki/storage", "@pki/web", "@pki/testkit"]),
+    );
+    const runtime = manifests
+      .filter((m) => m.name !== "@pki/testkit")
+      .filter((m) => "@pki/testkit" in { ...m.dependencies, ...m.peerDependencies })
+      .map((m) => m.name);
+    expect(runtime).toEqual([]);
+  });
+
   it("finds no boundary violation in the repository's own code", async () => {
     const eslint = new ESLint({ cwd: repoRoot });
     const results = await eslint.lintFiles([
@@ -173,6 +198,14 @@ describe("module-boundary rule", () => {
       { code: "export function open(): SqlDriver { return d; }", filename: composition },
       { code: "export function sync(c: Connector): number { return 1; }", filename: storageModule },
       { code: "export type Factory = () => Connector;", filename: storageModule },
+      // upper code may hold and return an implementation it was given (V01-T07 B4)
+      { code: "export const i: VectorIndex = o.i;", filename: storageModule },
+      { code: "export function f(): VectorIndex { return deps.index; }", filename: storageModule },
+      { code: "export const g = async (): Promise<Connector> => load();", filename: storageModule },
+      { code: "export const p: LLMProvider = make();", filename: storageModule },
+      { code: "export const c = connector as Connector;", filename: storageModule },
+      // tests may share test helpers
+      { code: 'import { h } from "./helper.test.ts";', filename: backendTest },
     ],
     invalid: [
       {
@@ -252,15 +285,50 @@ describe("module-boundary rule", () => {
         filename: join(fixtureRoot, "storage/src/composition.ts"),
         errors: [{ messageId: "adapterImport" }],
       },
+      // import aliases and qualified names (B1), in a package that declares @pki/contracts
+      ...[
+        'import type { Connector as C } from "@pki/contracts";\nexport class X implements C {}',
+        'import type * as c from "@pki/contracts";\nexport class X implements c.Connector {}',
+      ].map((code) => ({
+        code,
+        filename: backendFile,
+        errors: [{ messageId: "adapterOutsideAdapters" }],
+      })),
+      // the contracts package defines adapters; it holds no implementation either (B2)
+      {
+        code: "export class X implements Connector {}",
+        filename: join(fixtureRoot, "packages/contracts/src/x.ts"),
+        errors: [{ messageId: "adapterOutsideAdapters" }],
+      },
+      // product code cannot reach a test module, which may reach adapters (B3)
+      ...[
+        'import { f } from "./sneaky.test.ts";',
+        'export { f } from "./sneaky.e2e.ts";',
+        'import { f } from "./screens.e2e.tsx";',
+        'const m = await import("../src/sneaky.test");',
+      ].map((code) => ({
+        code,
+        filename: backendFile,
+        errors: [{ messageId: "testModuleImport" }],
+      })),
       // an implementation outside src/adapters/ would escape the boundary
       ...[
         "export class D implements SqlDriver {}",
         "export const C = class implements Connector {};",
-        "export function open(): SqlDriver { return d; }",
-        "export const open = (): VectorIndex => v;",
+        "export function open(): SqlDriver { return { exec }; }",
+        "export const open = (): VectorIndex => ({ status });",
         "export const open: OpenSqlDriver = (p) => d(p);",
         "export const c = { manifest } satisfies Connector;",
-        "export const p: LLMProvider = make();",
+        "export const p: LLMProvider = new Fake();",
+        // every form reviewer B probed (V01-T07 B1), one case each
+        "export class X implements Partial<Connector> {}",
+        "export const open = (): VectorIndex | undefined => ({ status });",
+        "export async function open(): Promise<Connector> { return { manifest }; }",
+        "export const x = {} as Connector;",
+        "type F = () => Connector;\nexport const f: F = () => ({ manifest });",
+        "export const f: Make = () => ({ manifest });\ntype Make = () => Connector;",
+        'import type { ConnectorFactory } from "./connectors.ts";\nexport const f: ConnectorFactory = () => ({ manifest });',
+        "export const s: SqlDriver & { extra: 1 } = { exec, extra: 1 };",
       ].map((code) => ({
         code,
         filename: storageModule,

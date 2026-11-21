@@ -2,7 +2,12 @@
 // LLMProvider implementation runs from its own test file — the fake Provider
 // here, the CLI Providers against a fake CLI (T10), the OpenAI-compatible
 // Provider against a fake HTTP server (T11).
-import type { LLMProvider, LLMRequest, StructuredRequest } from "@pki/contracts";
+import {
+  ProviderError,
+  type LLMProvider,
+  type LLMRequest,
+  type StructuredRequest,
+} from "@pki/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 
 export function providerRequest(requestId = "req-1"): LLMRequest {
@@ -36,9 +41,20 @@ export function structuredRequest(requestId = "req-1"): StructuredRequest {
 
 const live = () => new AbortController().signal;
 
-export function providerContract(name: string, create: () => LLMProvider): void {
+export interface ProviderContractOptions<P extends LLMProvider> {
+  /** How many model calls `provider` has made (a fake CLI's or fake server's count). */
+  modelCalls: (provider: P) => number;
+  /** A Provider whose backend fails every generation (a fake CLI exiting non-zero, a 500). */
+  failing: () => P;
+}
+
+export function providerContract<P extends LLMProvider>(
+  name: string,
+  create: () => P,
+  options: ProviderContractOptions<P>,
+): void {
   describe(`provider.contract: ${name}`, () => {
-    let provider: LLMProvider;
+    let provider: P;
 
     beforeEach(() => {
       provider = create();
@@ -57,6 +73,7 @@ export function providerContract(name: string, create: () => LLMProvider): void 
     });
 
     it("detects, checks authentication and health without a model call", async () => {
+      const before = options.modelCalls(provider);
       const info = await provider.detect();
       expect(typeof info.installed).toBe("boolean");
       expect(["authenticated", "unauthenticated", "unknown"]).toContain(
@@ -64,6 +81,27 @@ export function providerContract(name: string, create: () => LLMProvider): void 
       );
       const health = await provider.checkHealth();
       expect(["ok", "unavailable"]).toContain(health.state);
+      expect(options.modelCalls(provider)).toBe(before);
+    });
+
+    it("counts a generation as a model call", async () => {
+      const before = options.modelCalls(provider);
+      await provider.generate(providerRequest(), live());
+      expect(options.modelCalls(provider)).toBe(before + 1);
+    });
+
+    it("reports a failed generation as a ProviderError that says whether to retry", async () => {
+      for (const run of [
+        (p: P) => p.generate(providerRequest(), live()),
+        (p: P) => p.generateStructured(structuredRequest(), live()),
+      ]) {
+        const error = await run(options.failing()).then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        expect(error).toBeInstanceOf(ProviderError);
+        expect(typeof (error as ProviderError).retryable).toBe("boolean");
+      }
     });
 
     it("generates text for a request", async () => {

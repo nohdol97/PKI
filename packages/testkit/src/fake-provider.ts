@@ -26,6 +26,8 @@ export interface FakeProviderOptions {
   /** How long an answering call stays in flight. */
   delayMs?: number;
   capabilities?: Partial<ProviderCapabilities>;
+  /** How cancel behaves: stop the call (default), never settle, or throw synchronously. */
+  cancelMode?: "stop" | "never-settles" | "throws";
 }
 
 export class FakeProvider implements LLMProvider {
@@ -33,12 +35,16 @@ export class FakeProvider implements LLMProvider {
   readonly transport: LLMProvider["transport"];
   /** Every request received, as received. */
   readonly requests: StructuredRequest[] = [];
+  /** Every cancel call, known request or not. */
   readonly cancelled: string[] = [];
+  /** The signal of every call, in order. */
+  readonly signals: AbortSignal[] = [];
   inFlight = 0;
   maxInFlight = 0;
   readonly #script: FakeStep[];
   readonly #delayMs: number;
   readonly #answer: (request: StructuredRequest) => unknown;
+  readonly #cancelMode: NonNullable<FakeProviderOptions["cancelMode"]>;
   readonly #capabilities: ProviderCapabilities;
   readonly #running = new Map<string, (reason: Error) => void>();
 
@@ -48,6 +54,7 @@ export class FakeProvider implements LLMProvider {
     this.#script = [...(options.script ?? [])];
     this.#delayMs = options.delayMs ?? 0;
     this.#answer = options.answer ?? (() => ({ reply: "ok" }));
+    this.#cancelMode = options.cancelMode ?? "stop";
     this.#capabilities = {
       structuredOutput: true,
       cancel: true,
@@ -81,15 +88,17 @@ export class FakeProvider implements LLMProvider {
     return { output: await this.#run(request, signal) };
   }
 
-  async cancel(requestId: string) {
-    const stop = this.#running.get(requestId);
-    if (!stop) return;
+  cancel(requestId: string): Promise<void> {
     this.cancelled.push(requestId);
-    stop(new Error("cancelled"));
+    if (this.#cancelMode === "throws") throw new Error("cancel failed");
+    if (this.#cancelMode === "never-settles") return new Promise(() => undefined);
+    this.#running.get(requestId)?.(new Error("cancelled"));
+    return Promise.resolve();
   }
 
   #run(request: StructuredRequest, signal: AbortSignal): Promise<unknown> {
     this.requests.push(structuredClone(request));
+    this.signals.push(signal);
     const step = this.#script.shift() ?? { output: this.#answer(request) };
     if (step === "ignore-abort") return new Promise(() => undefined);
     this.inFlight++;

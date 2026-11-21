@@ -289,6 +289,11 @@ describe("broker.class: the Broker computes the data classification", () => {
     expect(await classOf([store(synthA)], { candidateItemIds: ["item-1"] })).toBe("general");
   });
 
+  it("grades a candidate with no evidence source as general", async () => {
+    candidates.set("item-1", { name: "출처 없는 이름", evidenceSourceVersionIds: [] });
+    expect(await classOf([store(synthA)], { candidateItemIds: ["item-1"] })).toBe("general");
+  });
+
   it("rejects a candidate whose evidence source is missing", async () => {
     candidates.set("item-1", { name: "n", evidenceSourceVersionIds: ["404"] });
     expect(await asUser(extract([store(synthA)], { candidateItemIds: ["item-1"] }))).toEqual({

@@ -7,6 +7,7 @@ import {
   ProviderRateLimitError,
   type BrokerRequest,
   type LLMProvider,
+  type StructuredResponse,
 } from "@pki/contracts";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
@@ -18,6 +19,7 @@ import {
   type CallRecord,
   type EgressInput,
   type ExecutionInput,
+  strictest,
 } from "./broker.ts";
 import { TASKS } from "./tasks.ts";
 import { createUserActionLedger } from "./user-actions.ts";
@@ -120,6 +122,34 @@ describe("broker: timeout", () => {
     const result = await call({ budget: { timeoutMs: 20 } });
     expect(result).toMatchObject({ status: "failed", error: "timeout", attempts: 1 });
     expect(provider.cancelled).toEqual([provider.requests[0]?.requestId]);
+  });
+
+  it("aborts the Provider's signal on timeout even when cancel does not stop the call", async () => {
+    const provider = new FakeProvider({ script: ["ignore-abort"], cancelMode: "never-settles" });
+    const { call } = setup({ provider });
+    expect(await call({ budget: { timeoutMs: 20 } })).toMatchObject({ error: "timeout" });
+    expect(provider.signals[0]?.aborted).toBe(true);
+  });
+
+  it("returns on timeout and frees its slot even if cancel never settles", async () => {
+    const provider = new FakeProvider({
+      script: ["ignore-abort"],
+      cancelMode: "never-settles",
+    });
+    const { call } = setup({ provider, deps: { limits: { maxConcurrent: 1 } } });
+    const first = await Promise.race([
+      call({ budget: { timeoutMs: 20 } }),
+      new Promise((resolve) => setTimeout(() => resolve("still pending"), 1_000)),
+    ]);
+    expect(first).toMatchObject({ status: "failed", error: "timeout" });
+    expect(await call()).toMatchObject({ status: "ok" });
+  });
+
+  it("still aborts and reports a timeout when cancel throws synchronously", async () => {
+    const provider = new FakeProvider({ script: ["ignore-abort"], cancelMode: "throws" });
+    const { call } = setup({ provider });
+    expect(await call({ budget: { timeoutMs: 20 } })).toMatchObject({ error: "timeout" });
+    expect(provider.signals[0]?.aborted).toBe(true);
   });
 
   it("caps the caller's timeout at the Broker's ceiling", async () => {
@@ -235,7 +265,31 @@ describe("broker: concurrency cap", () => {
   });
 });
 
+describe("broker: concurrency cap after a handoff", () => {
+  it("keeps the cap when a call arrives after a queued call took over a slot", async () => {
+    const provider = new FakeProvider({ delayMs: 20 });
+    const { call } = setup({ provider, deps: { limits: { maxConcurrent: 1 } } });
+    const first = call();
+    const second = call(); // waits, then takes the slot first releases
+    await first;
+    const third = call(); // arrives while second runs
+    await Promise.all([second, third]);
+    expect(provider.maxInFlight).toBe(1);
+  });
+});
+
 describe("broker: call budget", () => {
+  it("counts an attempt exactly windowMs old as outside the window", async () => {
+    const { call, clock } = setup({
+      deps: { limits: { callBudget: { maxCalls: 1, windowMs: 1_000 } } },
+    });
+    expect((await call()).status).toBe("ok");
+    clock.t = 999;
+    expect(await call()).toMatchObject({ reason: "budget-exhausted" });
+    clock.t = 1_000;
+    expect((await call()).status).toBe("ok");
+  });
+
   it("blocks attempts beyond the budget within its window and allows them again after", async () => {
     const { call, provider, clock, records } = setup({
       deps: { limits: { callBudget: { maxCalls: 2, windowMs: 1_000 } } },
@@ -276,6 +330,19 @@ describe("broker: error recovery", () => {
     expect((await call()).status).toBe("ok");
   });
 
+  it("treats a Provider that throws synchronously like any failure: sanitized and recorded", async () => {
+    class SyncThrowing extends FakeProvider {
+      override generateStructured(): Promise<StructuredResponse> {
+        throw new Error("echo of input: SECRET-456");
+      }
+    }
+    const { call, records } = setup({ provider: new SyncThrowing() });
+    const result = await call();
+    expect(result).toMatchObject({ status: "failed", error: "provider-error", attempts: 1 });
+    expect(records).toMatchObject([{ attempt: 1, outcome: "provider-error" }]);
+    expect(JSON.stringify([result, records])).not.toContain("SECRET-456");
+  });
+
   it("does not leak the Provider's error text into the result or the history", async () => {
     const provider = new FakeProvider({
       script: [{ error: new ProviderError("echo: 본문 원문 SECRET-123", { retryable: false }) }],
@@ -294,7 +361,49 @@ describe("broker: seams for consent, egress rules and execution conditions", () 
     });
     expect(await call()).toMatchObject({ status: "blocked", reason: "no-consent" });
     expect(provider.requests).toEqual([]);
-    expect(records).toMatchObject([{ outcome: "blocked", attempt: 0 }]);
+    expect(records).toMatchObject([{ outcome: "blocked", attempt: 1 }]);
+  });
+
+  it("asks again after waiting for a slot: consent revoked while queued stops the call", async () => {
+    let allowed = true;
+    const provider = new FakeProvider({ delayMs: 20 });
+    const { call } = setup({
+      provider,
+      deps: {
+        limits: { maxConcurrent: 1 },
+        egress: {
+          decide: () => (allowed ? ALLOW : { allowed: false as const, reason: "consent-revoked" }),
+        },
+      },
+    });
+    const first = call();
+    const second = call();
+    allowed = false;
+    expect((await first).status).toBe("ok");
+    expect(await second).toMatchObject({ status: "blocked", reason: "consent-revoked" });
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  it("asks again before each retry: a block between attempts stops the retries", async () => {
+    let runs = 0;
+    const provider = new FakeProvider({ script: [{ error: retryable() }] });
+    const { call, records } = setup({
+      provider,
+      deps: {
+        execution: {
+          decide: () => (++runs === 1 ? { run: true } : { run: false, reason: "cli-not-verified" }),
+        },
+      },
+    });
+    expect(await call({ retryable: true })).toMatchObject({
+      status: "blocked",
+      reason: "cli-not-verified",
+    });
+    expect(provider.requests).toHaveLength(1);
+    expect(records.map((r) => [r.attempt, r.outcome])).toEqual([
+      [1, "provider-error"],
+      [2, "blocked"],
+    ]);
   });
 
   it("does not call the Provider when the execution condition blocks", async () => {
@@ -355,5 +464,15 @@ describe("broker: history", () => {
       );
       expect(r.requestId).toBe(result.status === "ok" ? result.requestId : "");
     }
+  });
+});
+
+describe("broker: strictest classification", () => {
+  it("is general for no input at all, and synthetic only when every input is", () => {
+    const synthetic = { classification: "synthetic" as const, malicious: false };
+    const general = { classification: "general" as const, malicious: false };
+    expect(strictest([])).toBe("general");
+    expect(strictest([synthetic, synthetic])).toBe("synthetic");
+    expect(strictest([synthetic, general])).toBe("general");
   });
 });

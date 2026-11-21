@@ -4,7 +4,9 @@
 // egress decision (T08) and the execution condition (T09), and applies the
 // concurrency cap, call budget, timeout, retry with backoff and history.
 // A request with anything but IDs, or naming a missing or used record, is
-// rejected before any of that.
+// rejected before any of that. The egress decision and the execution condition
+// are asked again before every attempt, after waiting for a slot, so a consent
+// revoked while a call waits or backs off stops it.
 import {
   BrokerRequestSchema,
   ProviderError,
@@ -80,7 +82,7 @@ export type CallOutcome =
   | "blocked"
   | "budget-exhausted";
 
-/** One history entry: no text, no Provider message (V01-R13). attempt 0 never ran. */
+/** One history entry: no text, no Provider message (V01-R13). "blocked" and "budget-exhausted" never ran. */
 export interface CallRecord {
   requestId: string;
   attempt: number;
@@ -179,6 +181,13 @@ function grade(title: string, body: string, trustedOrigin: boolean): Graded {
 
 const reject = (reason: RejectReason) => ({ status: "rejected", reason }) as const;
 
+/** The strictest class: synthetic only if there is input and all of it is synthetic. */
+export function strictest(graded: readonly Graded[]): DataClassification {
+  return graded.length > 0 && graded.every((g) => g.classification === "synthetic")
+    ? "synthetic"
+    : "general";
+}
+
 function readGraded(db: SqlDriver, id: string) {
   const stored = readSourceVersion(db, Number(id));
   if (!stored) return undefined;
@@ -237,6 +246,10 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
     const item = deps.candidates.lookup(id);
     if (!item) return { reason: "missing-candidate" };
     candidates.push({ id, name: item.name });
+    // a name with no evidence source has no known origin: general (fail closed)
+    if (item.evidenceSourceVersionIds.length === 0) {
+      graded.push({ classification: "general", malicious: false });
+    }
     for (const evidenceId of item.evidenceSourceVersionIds) {
       const read = readGraded(deps.db, evidenceId);
       if (!read) return { reason: "missing-source" };
@@ -249,8 +262,7 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
     trigger,
     documents,
     candidates,
-    // the strictest value: one general input makes the call general
-    classification: graded.every((g) => g.classification === "synthetic") ? "synthetic" : "general",
+    classification: strictest(graded),
     malicious: graded.some((g) => g.malicious),
   };
 }
@@ -290,13 +302,21 @@ async function attemptOnce(
   const timedOut = new Promise<"timeout">((resolve) => {
     timer = setTimeout(() => resolve("timeout"), timeoutMs);
   });
-  const running = provider.generateStructured(request, controller.signal);
+  // started inside a promise chain, so a synchronous throw is a rejection like any other
+  const running = Promise.resolve().then(() =>
+    provider.generateStructured(request, controller.signal),
+  );
   running.catch(() => undefined); // settles after a timeout too; nobody awaits it then
   try {
     const winner = await Promise.race([running, timedOut]);
     if (winner === "timeout") {
-      await provider.cancel(request.requestId).catch(() => undefined);
       controller.abort();
+      // asked, never awaited: a cancel that hangs or throws cannot hold the slot
+      try {
+        provider.cancel(request.requestId).catch(() => undefined);
+      } catch {
+        // the call is already aborted and reported as a timeout
+      }
       return { outcome: "timeout", retryable: true };
     }
     const output = task.output.safeParse(winner.output);
@@ -348,51 +368,55 @@ export function createBroker(deps: BrokerDeps) {
     if (!provider) return { status: "blocked", requestId, reason: "no-provider" };
 
     const base = { requestId, providerId: provider.id, taskKind: request.taskKind, classification };
-    const blocked = (reason: string): BrokerResult => {
-      deps.recorder.record({ ...base, attempt: 0, outcome: "blocked" });
-      return { status: "blocked", requestId, reason };
-    };
-    const egress = deps.egress.decide({
-      providerId: provider.id,
-      taskKind: request.taskKind,
-      classification,
-    });
-    if (!egress.allowed) return blocked(egress.reason);
-    const execution = deps.execution.decide({
-      providerId: provider.id,
-      transport: provider.transport,
-      taskKind: request.taskKind,
-      trigger,
-      classification,
-      malicious,
-    });
-    if (!execution.run) return blocked(execution.reason);
-
-    const outgoing: StructuredRequest = {
-      requestId,
-      taskKind: request.taskKind,
-      trigger,
-      dataClassification: classification,
-      egress,
-      schemaVersion: request.schemaVersion,
-      budget: request.budget,
-      retryable: request.retryable,
-      input: {
-        instructions: task.instructions,
-        untrustedDocuments: prepared.documents,
-        candidates: prepared.candidates,
-      },
-      outputSchema: task.outputJsonSchema,
-    };
     const timeoutMs = Math.min(request.budget.timeoutMs, limits.maxTimeoutMs);
-    const where = { destination: egress.destination, policyVersion: egress.policyVersion };
+
+    /** Consent and egress rules (T08), then execution conditions (T09), as they stand now. */
+    const decide = (): EgressDecision | { reason: string } => {
+      const egress = deps.egress.decide({
+        providerId: provider.id,
+        taskKind: request.taskKind,
+        classification,
+      });
+      if (!egress.allowed) return { reason: egress.reason };
+      const execution = deps.execution.decide({
+        providerId: provider.id,
+        transport: provider.transport,
+        taskKind: request.taskKind,
+        trigger,
+        classification,
+        malicious,
+      });
+      return execution.run ? egress : { reason: execution.reason };
+    };
 
     return slot(async (): Promise<BrokerResult> => {
       for (let attempt = 1; ; attempt++) {
+        const egress = decide();
+        if ("reason" in egress) {
+          deps.recorder.record({ ...base, attempt, outcome: "blocked" });
+          return { status: "blocked", requestId, reason: egress.reason };
+        }
+        const where = { destination: egress.destination, policyVersion: egress.policyVersion };
         if (!takeBudget()) {
           deps.recorder.record({ ...base, ...where, attempt, outcome: "budget-exhausted" });
           return { status: "blocked", requestId, reason: "budget-exhausted" };
         }
+        const outgoing: StructuredRequest = {
+          requestId,
+          taskKind: request.taskKind,
+          trigger,
+          dataClassification: classification,
+          egress,
+          schemaVersion: request.schemaVersion,
+          budget: request.budget,
+          retryable: request.retryable,
+          input: {
+            instructions: task.instructions,
+            untrustedDocuments: prepared.documents,
+            candidates: prepared.candidates,
+          },
+          outputSchema: task.outputJsonSchema,
+        };
         const started = clock.now();
         const result = await attemptOnce(provider, outgoing, task, timeoutMs);
         deps.recorder.record({
