@@ -290,19 +290,25 @@ interface DerivativeKind {
 }
 
 // 파생물 쓰기의 유일한 입구(R11). 트랜잭션은 부르는 쪽(I03의 결과 쓰기 트랜잭션, I03-R6 ③)이 연다.
-interface DerivedWrite {
+// 모양은 I03-T04의 임시 함수(I03 24c5959)와 같다.
+interface DerivedItem {
   kind: string                         // 등록된 종류
-  itemKey: string                      // 같은 행 판정 키(V02-R8). 정책 거부 기록에는 R7의 키로 만든 해시만 남는다
-  lineage: readonly SourceVersionRef[] // 이 항목의 계보(입력 원본 version 포함)
-  apply(tx: SqlDriver): void           // 검사를 지난 항목만 불린다
+  itemKey: string                      // 같은 행 판정 키(V02-R8). 기록에는 R7의 키로 만든 해시만 남는다
+  lineage: readonly SourceVersionRef[] // 이 항목의 계보
+  write(tx: SqlDriver): void           // 검사를 지난 항목만 불린다
+}
+interface ScopePolicyDrop {            // scope_policy_drops 테이블의 한 행과 같다(내용 없음)
+  sourceId: number; version: number; kind: string; itemKeyHash: string; reason: 'scope-policy'; at: string
 }
 type CommitResult =
-  | { status: 'committed'; written: number; dropped: number }      // dropped: 범위 정책으로 버린 항목 수(R11, 기록은 scope_policy_drops)
-  | { status: 'stale'; cause: 'missing' | 'not-latest' | 'covered' | 'lineage-covered' }  // 아무것도 쓰지 않음. 작업은 superseded
+  | { status: 'committed'; written: number; dropped: readonly ScopePolicyDrop[] }  // dropped는 같은 트랜잭션에서 저장된 기록
+  | { status: 'stale'; cause?: 'missing' | 'not-latest' | 'covered' | 'lineage-covered' }  // 아무것도 쓰지 않음. 작업은 superseded
 function commitDerived(
   tx: SqlDriver,
-  input: { sourceId: number; version: number } | null,            // 작업이 입력으로 받은 원본 version(없는 작업은 null)
-  writes: readonly DerivedWrite[],
+  input: {
+    source: { sourceId: number; version: number } | null    // 작업이 입력으로 받은 원본 version(없는 작업은 null)
+    items: readonly DerivedItem[]
+  },
 ): CommitResult
 
 // tombstone 쓰기의 유일한 입구(R9). I01의 삭제 사건과 화면의 삭제(V02-T08)가 부른다. 트랜잭션은 부르는 쪽이 연다.
@@ -394,7 +400,7 @@ C1~C3은 이슈 #21의 문장 그대로다. H1·H2는 이 프로젝트가 배포
 | C1 | `read-gate` | 통합 | 테스트가 저장 모듈로 tombstone만 쓰고 소거는 하지 않은 상태(덮였지만 아직 남아 있음)를 만든다. 그 상태에서 키워드 검색, Sources 목록, 지식 API, Insight 목록, 근거 목록, 감싼 엔진의 `relatedContext` 여섯 경로 어디에도 그 원본에서 나온 것이 없음. 빨간 경우: 경로마다 `visible`을 빼면 그 경로의 경우가 실패(6건) |
 | C1 | `read-gate.e2e` | Playwright E2E | 삭제 직후 Home·Sources·검색 화면에 그 원본과 그 Insight가 보이지 않음 |
 | C1 | `scope.inherit` | 단위 | 범위 a, b의 근거를 가진 사실의 범위 집합이 {a, b}. b 원본이 권한 상실하면 {a}. 기본 정책에서 `strictest({a})`는 a, `strictest({a, b})`는 비교 불가(가장 엄격하게 다룸), `allows`는 참 |
-| C1 | `scope.policy` | 통합 | a와 b를 묶을 수 없다는 테스트 정책에서: b 원본의 추출에 a 계보의 항목이 후보로 오지 않음. `commitDerived`가 a·b 계보를 함께 가진 Insight와 근거 추가 **그 항목만** 버리고 같은 추출의 나머지 사실은 기록됨. 작업은 `superseded`가 아니라 정상으로 끝나고 `CommitResult.dropped`가 버린 수이며 `scope_policy_drops`에 내용 없는 행이 남음. 테스트 정책의 `allows(…, 'search')`가 거짓인 범위는 키워드 검색에서 빠짐. 기본 정책에서는 V02 흐름이 그대로 |
+| C1 | `scope.policy` | 통합 | a와 b를 묶을 수 없다는 테스트 정책에서: b 원본의 추출에 a 계보의 항목이 후보로 오지 않음. `commitDerived`가 a·b 계보를 함께 가진 Insight와 근거 추가 **그 항목만** 버리고 같은 추출의 나머지 사실은 기록됨. 작업은 `superseded`가 아니라 정상으로 끝나고 `CommitResult.dropped`에 버린 항목의 기록이 담기며 같은 기록이 `scope_policy_drops`에 내용 없는 행으로 남음. 테스트 정책의 `allows(…, 'search')`가 거짓인 범위는 키워드 검색에서 빠짐. 기본 정책에서는 V02 흐름이 그대로 |
 | C1 | `scope.changed` | 통합 | 범위 변경 뒤 새 version이 생기지 않고, 변경 종류 `scope-changed`의 무효화 기록이 남음. 좁아져 묶을 수 없게 된 Insight가 해소. 다시 넓어지면 그 Insight가 같은 행으로 다시 생기고, `scope_policy_drops`에 기록이 있던 원본에 대상 `scope-recompute:<변경 순번>`인 추출 작업이 등록되고(처음 추출 작업이 남아 있어도), 두 번째로 넓어져도 다시 등록됨. 다시 추출한 뒤 기록이 비고, 작업 보존 정리가 끝난 작업 행을 지워도 기록은 남음. 표시 범위가 새 값. 기본 정책에서 빈 값끼리는 `equal`, `null`은 다른 값보다 `stricter`, 다른 배열끼리는 `incomparable`, `atLeastAsStrict(a, b)`는 a=b이거나 a가 `null`일 때만 참 |
 | C1 | `egress.derived-grade` | 통합 | 연결 후보 항목의 계보에 일반 등급 원본이 있으면 그 추출 호출의 등급이 일반(V02 `linking`과 같은 결과를 계보 경로로). 그 원본을 지운 뒤에는 그 후보가 오지 않음. 계보가 빈 ID는 일반 등급. 등록되지 않은 종류의 ID는 거부 |
 | C2 | `fence.fresh` | 통합 | ① 추출 중 출처 삭제 → 결과 버림, 작업 superseded ② 추출 중 권한 상실 → 같음 ③ **추출 중 새 version 도착** → 옛 version의 결과 버림 ④ 계보의 다른 원본(후보 항목의 근거)만 삭제되어도 결과 전체를 버림 ⑤ 포기한 작업(dead_letter)을 원본 삭제 뒤 수동 재시도해도 결과가 쓰이지 않음 ⑥ 해제 뒤 다시 받은 version의 추출 결과는 fence에 걸리지 않음. `commitDerived`의 반환이 블록의 `CommitResult` 모양 |
