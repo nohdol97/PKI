@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "apps/web" },
+    { "path": "apps/desktop" },
+    { "path": "backend" },
+    { "path": "knowledge-engine" },
+    { "path": "providers" },
+    { "path": "storage" },
+    { "path": "packages/contracts" },
+    { "path": "packages/testkit" },
+    { "path": "tooling" }
+  ]
+}

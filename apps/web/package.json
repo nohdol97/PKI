@@ -1,0 +1,9 @@
+{
+  "name": "@pki/web",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

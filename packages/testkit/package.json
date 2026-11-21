@@ -1,0 +1,9 @@
+{
+  "name": "@pki/testkit",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

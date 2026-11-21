@@ -1,0 +1,9 @@
+{
+  "name": "@pki/storage",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
