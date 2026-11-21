@@ -12,11 +12,11 @@
 | 번호 | 결정 | 상태 | 걸린 가정 |
 |---|---|---|---|
 | [0001](0001-modular-monolith-and-stack.md) | 모듈형 모놀리식과 TypeScript 스택 | 잠정 | A13, A18 |
-| [0002](0002-authority-in-product-records.md) | 정본은 제품의 기록, 엔진·벡터·Wiki는 투영 | 잠정, **사용자 확인 대기** | A09 |
+| [0002](0002-authority-in-product-records.md) | 정본은 제품의 기록, 엔진·벡터·Wiki는 투영 | 잠정, 사용자 확인 끝남(정본 유지, R07에서 재판단) | A09 |
 | [0003](0003-phase1-without-engine.md) | Phase 1은 제3자 지식 엔진 없이, 어댑터와 null 구현으로 | 잠정 | A10 |
 | [0004](0004-embedded-storage.md) | 저장소 — better-sqlite3 정본, 벡터는 어댑터 뒤(sqlite-vec 후보), 그래프 DB 없음 | 잠정 | A07, A08, A17 |
-| [0005](0005-llm-providers.md) | LLM Provider — CLI 2종과 API 키 필수 경로, 배포 빌드는 검증된 CLI만 실행 | 잠정, **사용자 확인 대기**(가져오기 뒤의 추출을 백그라운드로 보는 부분) | A01~A06, A22 |
-| [0006](0006-embedding.md) | Embedding — 별도 계약, bge-m3를 Node에서, 설치 뒤 준비 | 잠정, **사용자 확인 대기**(모델을 설치 파일에 넣지 않는 부분) | A11, A12 |
+| [0005](0005-llm-providers.md) | LLM Provider — CLI 2종과 API 키 필수 경로, 배포 빌드는 검증된 CLI만 실행 | 잠정, 사용자 확인 끝남(가져오기 뒤의 추출은 백그라운드) | A01~A06, A22 |
+| [0006](0006-embedding.md) | Embedding — 별도 계약, bge-m3를 Node에서, 설치 뒤 준비 | 잠정, 사용자 확인 끝남(모델은 설치 뒤 준비) | A11, A12 |
 | [0007](0007-packaging.md) | 패키징 — Electron + electron-builder(NSIS) + electron-updater | 잠정 | A13, A14, A15 |
 | [0008](0008-security-baseline.md) | 첫 slice부터 적용하는 보안 기준선 | 확정 | — |
 | [0009](0009-license.md) | 제품 라이선스 MIT와 번들 금지 범위 | 확정 | — |
