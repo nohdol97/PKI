@@ -5,7 +5,7 @@ import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { MemoryVectorIndex, send } from "@pki/testkit";
 import { describe, expect, it, vi } from "vitest";
-import { productAdapters } from "./composition.ts";
+import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer } from "./server.ts";
 
@@ -13,7 +13,7 @@ const TOKEN = "s".repeat(43);
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
 const db = openBetterSqlite3(":memory:");
 migrate(db);
-const stores = { db, dataDirectory: "/synthetic/data" };
+const stores = { db, dataDirectory: "/synthetic/data", egress: productEgress(db) };
 
 async function getStatus(vectorIndex: VectorIndex) {
   const server = await startServer({

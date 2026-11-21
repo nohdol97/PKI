@@ -12,6 +12,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@pki/providers": "workspace:*",
     "@pki/storage": "workspace:*",
     "@pki/testkit": "workspace:*",
     "@types/react": "^19.3.0",

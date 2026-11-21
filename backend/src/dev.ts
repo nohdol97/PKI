@@ -6,11 +6,17 @@
 // reaches only whoever holds this process's stdout pipe — not argv/env (readable by
 // other processes of the same user) and not a file left on disk.
 import { randomBytes } from "node:crypto";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { dataDirectory } from "@pki/storage";
-import { productAdapters } from "./composition.ts";
-import { connectorInstances, connectorKinds, openCanonicalDb } from "./composition.ts";
+import {
+  CANONICAL_DB_FILE,
+  connectorInstances,
+  connectorKinds,
+  openCanonicalDb,
+  productAdapters,
+  productEgress,
+} from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { startServer } from "./server.ts";
 
@@ -42,5 +48,7 @@ const server = await startServer({
   connectors,
   db,
   dataDirectory: dir,
+  databaseFile: join(dir, CANONICAL_DB_FILE),
+  egress: productEgress(db),
 });
 process.stdout.write(`${JSON.stringify({ url: server.url, token })}\n`);

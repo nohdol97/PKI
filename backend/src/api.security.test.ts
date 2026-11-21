@@ -6,7 +6,7 @@ import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { send, sendRaw } from "@pki/testkit";
-import { productAdapters } from "./composition.ts";
+import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
@@ -18,7 +18,7 @@ let valid: Record<string, string>;
 const synced: string[] = [];
 const db = openBetterSqlite3(":memory:");
 migrate(db);
-const stores = { db, dataDirectory: "/synthetic/data" };
+const stores = { db, dataDirectory: "/synthetic/data", egress: productEgress(db) };
 const connectors: ConnectorManager = {
   list: () => [],
   sync: async (id) => {

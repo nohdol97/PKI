@@ -40,15 +40,15 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(3);
-    expect(migrations).toHaveLength(3);
+    expect(schemaVersion(db)).toBe(4);
+    expect(migrations).toHaveLength(4);
   });
 
   it("is idempotent when re-run", () => {
     migrate(db);
     db.run("INSERT INTO settings (key, value) VALUES ('k', 'v')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(3);
+    expect(schemaVersion(db)).toBe(4);
     expect(db.all("SELECT value FROM settings")).toEqual([{ value: "v" }]);
   });
 
@@ -184,7 +184,7 @@ describe("schema v2 (V01-T04)", () => {
       "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (1, 'h', 't', 'b')",
     );
     migrate(db);
-    expect(schemaVersion(db)).toBe(3);
+    expect(schemaVersion(db)).toBe(4);
     expect(db.all("SELECT id, external_id FROM sources")).toEqual([{ id: 1, external_id: "e" }]);
     expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 1 }]);
     // A v1 source has no recorded kind; "unknown" is no upstream kind, so it never grades synthetic.
@@ -244,5 +244,91 @@ describe("schema v3 (V01-T07)", () => {
     expect(db.all("SELECT external_id, access_scope FROM sources")).toEqual([
       { external_id: "e", access_scope: null },
     ]);
+  });
+});
+
+describe("schema v4 (V01-T08)", () => {
+  const insertV3Call = (attempt: number, outcome: string) =>
+    db.run(
+      `INSERT INTO provider_calls (request_id, attempt, provider, destination, task_kind,
+         classification, policy_version, outcome, duration_ms, created_at)
+       VALUES ('r1', ?, 'codex', 'vendor:codex', 'extract', 'synthetic', 'pv', ?, 3, 't')`,
+      [attempt, outcome],
+    );
+  const insertCall = (
+    attempt: number,
+    outcome: string,
+    destination: string | null,
+    policyVersion: string | null,
+    reason: string | null,
+  ) =>
+    db.run(
+      `INSERT INTO provider_calls (request_id, attempt, provider, destination, task_kind,
+         classification, policy_version, outcome, reason, created_at)
+       VALUES ('r2', ?, 'codex', ?, 'extract', 'synthetic', ?, ?, ?, 't')`,
+      [attempt, destination, policyVersion, outcome, reason],
+    );
+
+  it("adds the blocked attempt's reason code to history, keeping v3 rows", () => {
+    migrate(db, migrations.slice(0, 3));
+    insertV3Call(1, "ok");
+    insertV3Call(2, "blocked");
+    migrate(db);
+    expect(columns("provider_calls")).toEqual([
+      "id",
+      "request_id",
+      "attempt",
+      "provider",
+      "destination",
+      "task_kind",
+      "classification",
+      "policy_version",
+      "outcome",
+      "reason",
+      "duration_ms",
+      "created_at",
+    ]);
+    expect(db.all("SELECT attempt, outcome, reason, destination FROM provider_calls")).toEqual([
+      { attempt: 1, outcome: "ok", reason: null, destination: "vendor:codex" },
+      // a v3 row never had one: it says so instead of guessing
+      { attempt: 2, outcome: "blocked", reason: "unrecorded", destination: "vendor:codex" },
+    ]);
+  });
+
+  it("lets only an attempt that never ran lack destination and policy version", () => {
+    migrate(db);
+    insertCall(1, "blocked", null, null, "no-consent");
+    insertCall(2, "budget-exhausted", "d", "pv", "budget-exhausted");
+    insertCall(3, "ok", "d", "pv", null);
+    expect(() => insertCall(4, "ok", null, "pv", null)).toThrow(/CHECK/);
+    expect(() => insertCall(5, "timeout", "d", null, null)).toThrow(/CHECK/);
+    expect(() => insertCall(6, "budget-exhausted", null, null, "budget-exhausted")).toThrow(
+      /CHECK/,
+    );
+    expect(() => insertCall(7, "blocked", null, null, null)).toThrow(/CHECK/);
+    expect(() => insertCall(8, "ok", "d", "pv", "no-consent")).toThrow(/CHECK/);
+    expect(() => insertCall(3, "ok", "d", "pv", null)).toThrow(/UNIQUE/);
+    for (const col of ["classification", "attempt", "outcome", "provider"]) {
+      expect(notNull("provider_calls", col)).toBe(true);
+    }
+  });
+
+  it("keeps one consent per Provider, the latest of a v3 database", () => {
+    migrate(db, migrations.slice(0, 3));
+    const grant = (provider: string, version: string) =>
+      db.run(
+        `INSERT INTO consents (provider, destination, policy_version, allowed_classes, granted_at)
+         VALUES (?, 'd', ?, '[]', 't')`,
+        [provider, version],
+      );
+    grant("codex", "old");
+    grant("codex", "new");
+    grant("claude-code", "only");
+    migrate(db);
+    expect(db.all("SELECT provider, policy_version FROM consents ORDER BY provider")).toEqual([
+      { provider: "claude-code", policy_version: "only" },
+      { provider: "codex", policy_version: "new" },
+    ]);
+    expect(() => grant("codex", "again")).toThrow(/UNIQUE/);
   });
 });

@@ -1,6 +1,8 @@
 // Composition point: the one place that picks adapter implementations for the
 // product (V01-R14, R15): the vector index, the embedder, the canonical storage
-// driver and the Connector kinds. Entry points (dev.ts, site-check.ts) build the backend from these.
+// driver, the Connector kinds and the egress policy. Entry points (dev.ts,
+// site-check.ts) build the backend from these.
+import { createEgressPolicy, PUBLIC_SITE_RULES, type EgressControls } from "@pki/providers";
 import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
@@ -12,6 +14,16 @@ import type { ServerOptions } from "./server.ts";
 /** No embedder until V01-T14 binds the Transformers.js one; the status API says "not implemented". */
 export function productAdapters(): Pick<ServerOptions, "vectorIndex" | "embedder"> {
   return { vectorIndex: new EmptyVectorIndex(), embedder: null };
+}
+
+/**
+ * The product's consent and egress rules (ADR 0014). The deployment rules are the
+ * public repository's (none: nothing leaves without consent); a fork supplies its
+ * own here (S08). `http` to loopback stays refused until the build kind (T09)
+ * tells development and test builds apart.
+ */
+export function productEgress(db: SqlDriver): EgressControls {
+  return createEgressPolicy({ db, siteRules: PUBLIC_SITE_RULES, allowLoopbackHttp: false });
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";

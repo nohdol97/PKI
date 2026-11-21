@@ -6,7 +6,12 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { send } from "@pki/testkit";
-import { connectorInstances, connectorKinds, productAdapters } from "./composition.ts";
+import {
+  connectorInstances,
+  connectorKinds,
+  productAdapters,
+  productEgress,
+} from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
@@ -20,6 +25,13 @@ let valid: Record<string, string>;
 const requests: Partial<Record<RouteName, unknown>> = {
   syncConnector: { connectorId: "fixtures" },
   searchSources: { query: "등대" },
+  grantConsent: {
+    providerId: "codex",
+    allowedClasses: ["synthetic"],
+    destination: "vendor:codex",
+    policyVersion: productEgress(db).policyVersion(),
+  },
+  revokeConsent: { providerId: "codex" },
 };
 
 beforeAll(async () => {
@@ -42,6 +54,7 @@ beforeAll(async () => {
     connectors,
     db,
     dataDirectory: "/synthetic/data",
+    egress: productEgress(db),
     ...productAdapters(),
   });
   valid = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
@@ -83,6 +96,38 @@ describe("API responses match @pki/contracts", () => {
     ["internal-error", 500, { connectorId: "broken" }],
   ])("sync %s rejection (%i)", async (error, status, body) => {
     const res = await send(server.port, sync.path, valid, sync.method, body);
+    expect(res.status).toBe(status);
+    expect(ErrorResponseSchema.parse(res.body)).toEqual({ error });
+  });
+
+  const shownVersion = productEgress(db).policyVersion();
+  it.each([
+    ["bad-request", 400, { providerId: "codex", allowedClasses: [] }],
+    ["bad-request", 400, { providerId: "fake", allowedClasses: ["synthetic"] }],
+    ["bad-request", 400, { providerId: "codex", allowedClasses: ["synthetic"] }],
+    [
+      "destination-unavailable",
+      409,
+      {
+        providerId: "openai-compatible",
+        allowedClasses: ["synthetic"],
+        destination: "api.synthetic.example",
+        policyVersion: shownVersion,
+      },
+    ],
+    [
+      "consent-stale",
+      409,
+      {
+        providerId: "codex",
+        allowedClasses: ["synthetic"],
+        destination: "vendor:elsewhere",
+        policyVersion: shownVersion,
+      },
+    ],
+  ])("grant consent %s rejection (%i)", async (error, status, body) => {
+    const grant = routes.grantConsent;
+    const res = await send(server.port, grant.path, valid, grant.method, body);
     expect(res.status).toBe(status);
     expect(ErrorResponseSchema.parse(res.body)).toEqual({ error });
   });
