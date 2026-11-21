@@ -116,6 +116,7 @@ async function openEvidence(page: Page, set: string) {
   const open = insight.getByRole("button", { name: /근거 보기/ });
   await open.focus();
   await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "근거", exact: true })).toBeFocused();
   const list = page.getByRole("list", { name: "근거 목록" }).getByRole("listitem");
   const want = expected.sets[set]?.insights[0]?.evidence ?? [];
   await expect(list).toHaveCount(want.length);
@@ -129,10 +130,19 @@ async function openEvidence(page: Page, set: string) {
     await expect(item).toContainText(evidence.quote);
     await item.getByRole("button", { name: `원본 보기: ${title}` }).press("Enter");
     await expect(source.getByRole("heading", { name: title })).toBeVisible();
+    await expect(source.getByRole("heading", { name: "원본 보기" })).toBeFocused();
     await expect(source).toContainText(`version ${evidence.version}`);
     await expect(source.getByText("가져온 자료(신뢰하지 않음)")).toBeVisible();
     await expect(source.locator("mark")).toHaveText(evidence.quote);
+    // long lines wrap: the stylesheet loads under the shell's CSP too
+    await expect(source.locator("pre")).toHaveCSS("white-space", "pre-wrap");
   }
+  // reopening the same evidence moves focus to the source heading again
+  const last = titleOf.get(want[want.length - 1]?.record_id ?? "") as string;
+  const reopen = list.filter({ hasText: last }).getByRole("button", { name: `원본 보기: ${last}` });
+  await reopen.focus();
+  await page.keyboard.press("Enter");
+  await expect(source.getByRole("heading", { name: "원본 보기" })).toBeFocused();
   return source;
 }
 

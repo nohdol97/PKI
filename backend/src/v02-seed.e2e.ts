@@ -1,13 +1,14 @@
 // Test-build-only seed (V02-T10, spec "T10이 넘기는 것" 5): puts V02 fixture sets
 // into a data directory's canonical DB through the product's import, job runner,
 // Broker and rule, with the per-fixture Provider double bound. Run with `node`
-// before an E2E starts the backend on that directory:
+// before an E2E starts the backend on that directory (it also leaves `local-model` as
+// the default Provider with consent for `general`):
 //   node backend/src/v02-seed.e2e.ts --data-dir DIR --set plain [--set malicious]
 // It adds no switch to the backend process. The `.e2e.ts` name keeps it a test
 // module: product code cannot import it (module boundary) and Playwright does not
 // collect it (testIgnore). T15: it and @pki/testkit never ship in an installer.
-import type { EgressControls } from "@pki/providers";
-import type { SqlDriver } from "@pki/storage";
+import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
+import { writeSetting, type SqlDriver } from "@pki/storage";
 import { FakeProvider, fixtureExtraction } from "@pki/testkit";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -49,6 +50,7 @@ function consentLocalModel(egress: EgressControls) {
 export async function seedV02(db: SqlDriver, sets: readonly string[]): Promise<number> {
   const egress = productEgress(db);
   consentLocalModel(egress);
+  writeSetting(db, DEFAULT_PROVIDER_SETTING, "local-model"); // the user's default (V01-T10)
   const provider = new FakeProvider({
     id: "local-model",
     transport: "http",

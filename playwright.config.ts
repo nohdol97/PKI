@@ -8,8 +8,8 @@ export default defineConfig<{ target: "browser" | "electron" }>({
     {
       name: "browser",
       testMatch: "**/*.e2e.{ts,tsx}",
-      // backend/**: the test-build-only seed entry (v02-seed.e2e.ts) is a script, not a test
-      testIgnore: ["apps/desktop/**", "backend/**"],
+      // the test-build-only seed entry is a script run by evidence.e2e.ts, not a test
+      testIgnore: ["apps/desktop/**", "backend/src/v02-seed.e2e.ts"],
     },
     { name: "build-web", testMatch: "apps/desktop/e2e/build-web.setup.ts" },
     {

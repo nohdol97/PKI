@@ -1,0 +1,17 @@
+/* The screens' one stylesheet: a file the page loads (style-src 'self'), never inline styles. */
+
+/* Imported text keeps its line breaks but wraps long lines (spec "T10이 넘기는 것" 3). */
+.source-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Words for screen readers only. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -407,7 +407,8 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       return checking;
     },
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
-    // V02-R14: only active Insights; a hidden one does not open through its evidence either.
+    // V02-R14: only active Insights, and a hidden one's evidence list is not-found. A source
+    // opens by evidence id while its rows exist (until T08's purge deletes them).
     insights: async () => ({ insights: listActiveInsights(options.db) }),
     insightEvidence: async ({ insightId }) =>
       readInsightEvidence(options.db, insightId) ?? { error: "not-found" },

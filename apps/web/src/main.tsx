@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createApiClient, loadSession } from "./api.ts";
 import { App } from "./App.tsx";
+import "./screens.css";
 
 // Electron takes the session from the preload, browser development from the dev
 // server. Nothing else differs between the two (V01-R3).

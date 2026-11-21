@@ -5,8 +5,20 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { InsightSummary, SourceView } from "./evidence-view.tsx";
-import { UNTRUSTED_BADGE } from "./evidence-text.ts";
+import { ApiError } from "./api.ts";
+import {
+  evidenceReducer,
+  InsightSummary,
+  SourceView,
+  type EvidenceState,
+} from "./evidence-view.tsx";
+import {
+  INSIGHT_GONE,
+  MARK_END,
+  MARK_START,
+  SOURCE_GONE,
+  UNTRUSTED_BADGE,
+} from "./evidence-text.ts";
 
 const malicious = readFileSync(
   resolve(import.meta.dirname, "../../../fixtures/v02-malicious.jsonl"),
@@ -104,5 +116,87 @@ describe("InsightSummary", () => {
     expect(html).toContain("확정 사실이 아닙니다");
     expect(html).not.toMatch(/>확정</);
     expect(html).not.toMatch(/<img/);
+  });
+});
+
+const source = (version: number, latestVersion: number) => ({
+  evidenceId: 7,
+  quote: "가",
+  start: 0,
+  end: 1,
+  sourceVersion: { id: 3, version, latestVersion, title: "\u202e제목", body: "가나" },
+});
+
+describe("SourceView labels", () => {
+  it("says when the evidence points to a past version, naming the latest", () => {
+    expect(renderToStaticMarkup(<SourceView source={source(1, 3)} />)).toContain(
+      "<p>version 1 · 지난 version(최신 3)</p>",
+    );
+    expect(renderToStaticMarkup(<SourceView source={source(2, 2)} />)).toContain(
+      "<p>version 2</p>",
+    );
+  });
+
+  it("isolates the imported title's direction and names the marked quote for screen readers", () => {
+    const html = renderToStaticMarkup(<SourceView source={source(1, 1)} />);
+    expect(html).toContain("<h4><bdi>\u202e제목</bdi></h4>");
+    expect(html).toContain(
+      `<span class="visually-hidden">${MARK_START}</span><mark>가</mark><span class="visually-hidden">${MARK_END}</span>`,
+    );
+    expect(html).toContain('<pre class="source-text">');
+  });
+});
+
+describe("evidenceReducer", () => {
+  const evidence = [
+    {
+      id: 7,
+      target: "fact" as const,
+      status: "candidate" as const,
+      quote: "가",
+      sourceTitle: "제목",
+      sourceVersionId: 3,
+      version: 1,
+      current: true,
+    },
+  ];
+  const open: EvidenceState = {
+    opened: { insightId: 1, evidence },
+    source: source(1, 1),
+    opens: 2,
+  };
+  const notFound = new ApiError("not-found", 404);
+
+  it("drops the shown source on 404 and says so in plain words", () => {
+    const next = evidenceReducer(open, { type: "failed", what: "source", error: notFound });
+    expect(next.source).toBeUndefined();
+    expect(next.opened).toEqual(open.opened);
+    expect(next.notice).toBe(SOURCE_GONE);
+    expect(next.notice).not.toMatch(/404|not-found/);
+  });
+
+  it("drops the evidence list and source when the Insight is gone", () => {
+    const next = evidenceReducer(open, { type: "failed", what: "insight", error: notFound });
+    expect(next).toEqual({ opens: 2, notice: INSIGHT_GONE });
+  });
+
+  it("keeps what is shown on another failure", () => {
+    const next = evidenceReducer(open, {
+      type: "failed",
+      what: "source",
+      error: new ApiError("internal-error", 500),
+    });
+    expect(next.source).toEqual(open.source);
+    expect(next.notice).toContain("불러오지 못했습니다");
+  });
+
+  it("counts every open, the same one again included, and clears the notice", () => {
+    const failed = { ...open, notice: SOURCE_GONE };
+    const again = evidenceReducer(failed, { type: "source-opened", source: source(1, 1) });
+    expect(again.opens).toBe(3);
+    expect(again.notice).toBeUndefined();
+    expect(again.opened).toEqual(open.opened);
+    const reopened = evidenceReducer(again, { type: "insight-opened", insightId: 1, evidence });
+    expect(reopened).toEqual({ opened: { insightId: 1, evidence }, opens: 4 });
   });
 });

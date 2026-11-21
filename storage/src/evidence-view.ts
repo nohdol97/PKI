@@ -1,7 +1,8 @@
 // Read-only views behind the evidence screens (V02-R14, spec "T10이 넘기는 것" 2):
 // Home's active Insights, an active Insight's evidence, and the source version an
-// evidence row points to. Nothing here writes; resolved (and dirty) Insights are
-// hidden, so they open neither as a list entry nor through their evidence.
+// evidence row points to. Nothing here writes. Resolved (and dirty) Insights are
+// hidden: not listed, and their evidence list is not read. A source is read by
+// evidence id whatever its Insight's state, while the evidence row exists.
 import type { KnowledgeStatus } from "./knowledge.ts";
 import type { SqlDriver, SqlRow } from "./sql-driver.ts";
 
