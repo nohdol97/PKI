@@ -103,7 +103,11 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     if (typeof match !== "string") {
       return reject(res, match.error === "not-found" ? 404 : 405, match.error);
     }
-    void handlers[match]().then((body) => reply(res, 200, body));
+    // Responses are checked against the shared schema; any handler failure answers a
+    // generic 500 so neither adapter errors nor off-contract bodies reach the caller.
+    handlers[match]()
+      .then((body) => reply(res, 200, routes[match].response.parse(body)))
+      .catch(() => reject(res, 500, "internal-error"));
   });
 
   await new Promise<void>((resolve, reject) => {

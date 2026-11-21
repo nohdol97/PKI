@@ -32,6 +32,7 @@ export const ErrorResponseSchema = z.object({
     "forbidden-origin",
     "not-found",
     "method-not-allowed",
+    "internal-error",
   ]),
 });
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;

@@ -1,6 +1,6 @@
 // V01-T12 / R15: the status API reads the vector index state from the configured
 // VectorIndex, and the product configuration reports it unavailable.
-import { routes, type VectorIndex } from "@pki/contracts";
+import { ErrorResponseSchema, routes, type VectorIndex } from "@pki/contracts";
 import { MemoryVectorIndex, send } from "@pki/testkit";
 import { describe, expect, it } from "vitest";
 import { productAdapters } from "./composition.ts";
@@ -8,17 +8,20 @@ import { startServer } from "./server.ts";
 
 const TOKEN = "s".repeat(43);
 
-async function vectorIndexStatus(vectorIndex: VectorIndex) {
+async function getStatus(vectorIndex: VectorIndex) {
   const server = await startServer({ token: TOKEN, allowedOrigins: [], vectorIndex });
   try {
-    const res = await send(server.port, routes.status.path, {
+    return await send(server.port, routes.status.path, {
       host: `127.0.0.1:${server.port}`,
       authorization: `Bearer ${TOKEN}`,
     });
-    return routes.status.response.parse(res.body).vectorIndex;
   } finally {
     await server.close();
   }
+}
+
+async function vectorIndexStatus(vectorIndex: VectorIndex) {
+  return routes.status.response.parse((await getStatus(vectorIndex)).body).vectorIndex;
 }
 
 describe("status API: vector index", () => {
@@ -46,5 +49,16 @@ describe("status API: vector index", () => {
       state: "unavailable",
       reason: "status check failed",
     });
+  });
+
+  it("answers a handler failure with a generic 500 and no detail", async () => {
+    // A status outside the contract (empty reason) makes the handler reject.
+    const misbehaving = Object.assign(new MemoryVectorIndex(), {
+      status: async () => ({ unavailable: "" }),
+    });
+    const res = await getStatus(misbehaving);
+    expect(res.status).toBe(500);
+    expect(ErrorResponseSchema.parse(res.body)).toEqual({ error: "internal-error" });
+    expect(res.body).toEqual({ error: "internal-error" });
   });
 });
