@@ -566,3 +566,66 @@ describe("the runner is woken after delivery (review F6)", () => {
     ]);
   });
 });
+
+describe("a stale engine through the product's wiring (review R2-1)", () => {
+  it("is not asked for proposals by the booted runner after a failed notice", async () => {
+    db.close(); // the backend opens the directory itself
+    const endpoint = await startFakeOpenAI(() =>
+      completion(JSON.stringify({ items: [], facts: [], relations: [] })),
+    );
+    const key = openaiKeySecretName(endpoint.host);
+    const secrets: SecretSource = {
+      read: async (n) =>
+        n === key ? { state: "present", value: "sk-engine" } : { state: "missing" },
+      has: async (n) => (n === key ? "present" : "missing"),
+      deleteOthers: async () => "done",
+    };
+    const engine = new ProposingKnowledgeEngine(({ ref, body }) => [
+      {
+        kind: "fact",
+        ref,
+        item: { type: "Project", name: "미리내 프로젝트", existingItemId: null },
+        factKind: "target_date",
+        value: "2026-12-05",
+        epistemic: "explicit",
+        quote: body,
+      },
+    ]);
+    vi.spyOn(engine, "upsertSource").mockRejectedValue(new Error("engine broke"));
+    const propose = vi.spyOn(engine, "proposeKnowledge");
+    try {
+      const booted = await bootBackend({
+        dataDir: dir,
+        token: TOKEN,
+        allowedOrigins: [],
+        secrets,
+        engine,
+      });
+      db = booted.db; // closed by afterEach
+      server = booted.server;
+      const { port } = booted.server;
+      const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
+      const post = (path: string, body: unknown) => send(port, path, headers, "POST", body);
+      await post(routes.setDefaultProvider.path, { providerId: "openai-compatible" });
+      await post(routes.writeSettings.path, {
+        openaiCompatible: { baseUrl: endpoint.baseUrl, model: "synthetic-model" },
+      });
+      const consents = await send(port, routes.consents.path, headers);
+      await post(routes.grantConsent.path, {
+        providerId: "openai-compatible",
+        allowedClasses: ["general"],
+        destination: endpoint.host,
+        policyVersion: (consents.body as { policyVersion: string }).policyVersion,
+      });
+      await post(routes.importJsonl.path, { text: read("v02-mail.jsonl") });
+      await booted.projections.drain(); // the upsert failed: the engine is stale now
+      await booted.runner.wake();
+      expect(db.all("SELECT status FROM jobs")).toEqual([{ status: "done" }]);
+      expect(endpoint.completions()).toBe(1); // extraction ran
+      expect(propose).not.toHaveBeenCalled();
+      expect(db.all("SELECT count(*) AS n FROM facts")).toEqual([{ n: 0 }]);
+    } finally {
+      await endpoint.close();
+    }
+  });
+});
