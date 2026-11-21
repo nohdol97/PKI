@@ -51,9 +51,10 @@ const hang = () => setInterval(() => undefined, 1_000);
 
 /** A grandchild that ignores SIGTERM; unref'd, so this process can still exit. */
 function leaveGrandchild(): number | undefined {
+  // the state dir as an argument: the leak check kills only processes that name it
   const grandchild = spawn(
     process.execPath,
-    ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"],
+    ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);", stateDir],
     { stdio: "ignore" },
   );
   grandchild.unref();

@@ -11,6 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -119,16 +120,17 @@ export function installFakeCli(config: FakeCliConfig = {}, parent = tmpdir()): F
       runs().filter((r) => r.kind === "model" && (name === undefined || r.name === name)).length,
     spawned,
     leftovers: async (waitMs = 3_000) => {
+      const ours = () => started().filter((pid) => isFake(pid, state));
       const end = Date.now() + waitMs;
-      while (started().some(processAlive) && Date.now() < end) {
+      while (ours().length > 0 && Date.now() < end) {
         await new Promise((r) => setTimeout(r, 25));
       }
-      const alive = started().filter(processAlive);
+      const alive = ours();
       for (const pid of alive) kill(pid);
       return alive;
     },
     dispose: () => {
-      for (const pid of started().filter(processAlive)) kill(pid);
+      for (const pid of started().filter((p) => isFake(p, state))) kill(pid);
       rmSync(root, { recursive: true, force: true });
     },
   };
@@ -144,12 +146,28 @@ export function processAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Whether `pid` is alive and is one of this fake's processes: its command line names
+ * this fake's state directory (each run's and each grandchild's does). A recorded PID
+ * the OS has since reused for another process is not ours, and is never killed.
+ */
+function isFake(pid: number, state: string): boolean {
+  if (!processAlive(pid)) return false;
+  try {
+    const command = execFileSync("ps", ["-ww", "-o", "command=", "-p", String(pid)], {
+      encoding: "utf8",
+    });
+    return command.includes(state);
+  } catch {
+    return false; // gone meanwhile
+  }
+}
+
+/** SIGKILL to one verified process; never to a group. */
 function kill(pid: number): void {
-  for (const target of [-pid, pid]) {
-    try {
-      process.kill(target, "SIGKILL");
-    } catch {
-      // not a group leader, or gone already
-    }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // gone already
   }
 }

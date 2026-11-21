@@ -26,7 +26,7 @@ import {
   type FakeHttpReply,
 } from "@pki/testkit";
 import { connect } from "node:net";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -85,6 +85,23 @@ describe("bootBackend", () => {
     expect((await post(routes.setExecutionSettings.path, { cliBackground: false })).body).toEqual({
       cliBackground: false,
     });
+  });
+
+  it("sweeps at start the CLI run folders a backend that is gone left in the data directory", async () => {
+    const root = join(dir, "cli-runs");
+    mkdirSync(root, { mode: 0o700 });
+    chmodSync(root, 0o700);
+    const stale = join(root, "99999999.crashed"); // a PID beyond pid_max: never alive
+    const live = join(root, `${process.pid}.running`);
+    mkdirSync(stale);
+    mkdirSync(live);
+    booted = await bootBackend({
+      dataDir: dir,
+      token: TOKEN,
+      allowedOrigins: [],
+      secrets: NO_SECRET_STORE,
+    });
+    expect([existsSync(stale), existsSync(live)]).toEqual([false, true]);
   });
 
   it("runs a connection test through the bound OpenAI-compatible Provider", async () => {

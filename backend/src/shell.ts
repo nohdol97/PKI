@@ -44,8 +44,8 @@ function parentChannel(): Channel {
     };
   }
   if (process.send) {
-    // Node fork: end with the parent.
-    process.once("disconnect", () => process.exit(0));
+    // Node fork: end with the parent, ending running CLI trees first (stop, V01-T10).
+    process.once("disconnect", () => void stop());
     return { onMessage: (l) => process.on("message", l), post: (m) => process.send?.(m) };
   }
   throw new Error("the shell entry needs a parent channel");

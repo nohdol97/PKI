@@ -272,7 +272,7 @@ describe("failure paths leave no input behind", () => {
             ["claude-code", createClaudeCodeProvider],
             ["codex", createCodexProvider],
           ] as const) {
-            const provider = create({ env: { PATH: fake.bin }, tempDir: runs });
+            const provider = create({ env: { PATH: fake.bin }, runsRoot: runs });
             const broker = createBroker({
               db,
               provider: () => provider,

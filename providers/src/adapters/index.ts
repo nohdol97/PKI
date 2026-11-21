@@ -6,6 +6,7 @@ export { createLocalEmbedder } from "./transformers-embedder.ts";
 export {
   createClaudeCodeProvider,
   createCodexProvider,
+  checkRunsRoot,
   sweepStaleCliRuns,
   type CliProviderOptions,
 } from "./cli-provider.ts";

@@ -22,7 +22,16 @@ import {
   type StructuredResponse,
 } from "@pki/contracts";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import { cliArguments, renderArguments, type CliArguments, type CliId } from "../cli-profiles.ts";
@@ -39,10 +48,13 @@ export interface CliProviderOptions {
   killGraceMs?: number;
   /**
    * The folder holding each run's temporary folder, `<pid>.<random>` by the backend's
-   * process (default `<OS temp>/pki-cli`), so a later start can sweep what a crashed
-   * backend left (sweepStaleCliRuns).
+   * process, so a later start can sweep what a crashed backend left
+   * (sweepStaleCliRuns). The product passes one inside its own data directory
+   * (composition.ts); it must be a real directory of this user, mode 0700, or
+   * nothing runs. Without one, each run gets its own `mkdtemp` in the OS temp folder
+   * and nothing is swept.
    */
-  tempDir?: string;
+  runsRoot?: string;
 }
 
 /** The parent's variables a CLI may see: R02's runner allowlist (verification/common/runner.py). */
@@ -180,7 +192,23 @@ export function childEnvironment(
   return env;
 }
 
-const defaultRunsRoot = () => join(tmpdir(), "pki-cli");
+/**
+ * Whether `root` may hold run folders and be swept: a real directory (not a
+ * symbolic link) owned by `uid`, open to nobody else (mode 0700). POSIX checks the
+ * owner and mode; Windows checks only that it is a real directory (unverified).
+ * `create` makes a missing root first, mode 0700.
+ */
+export async function checkRunsRoot(
+  root: string,
+  options: { create?: boolean; uid?: number | undefined } = {},
+): Promise<boolean> {
+  if (options.create) await mkdir(root, { recursive: true, mode: 0o700 });
+  const stat = await lstat(root).catch(() => undefined);
+  if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) return false;
+  if (process.platform === "win32") return true;
+  const uid = "uid" in options ? options.uid : process.getuid?.();
+  return stat.uid === uid && (stat.mode & 0o077) === 0;
+}
 
 function alive(pid: number): boolean {
   try {
@@ -192,19 +220,31 @@ function alive(pid: number): boolean {
 }
 
 /**
- * Removes the run folders of backends that are gone (a crash, a kill): `<pid>.*`
- * whose process no longer exists. A live process's folders and other names stay.
+ * Removes the run folders of backends that are gone (a crash, a kill): directories
+ * named `<pid>.*` whose process no longer exists. A live process's folders, other
+ * names, regular files and symbolic links stay, and a root that fails
+ * checkRunsRoot (a symbolic link, another user's, open to others) is not touched.
  * Called when the backend starts (boot.ts); a run removes its own folder when it ends.
+ * Returns how many folders it removed, or "refused".
  */
-export async function sweepStaleCliRuns(root: string = defaultRunsRoot()): Promise<void> {
+export async function sweepStaleCliRuns(
+  root: string,
+  options: { uid?: number | undefined } = {},
+): Promise<number | "refused"> {
+  if (!(await checkRunsRoot(root, options))) return "refused";
   const names = await readdir(root).catch(() => [] as string[]);
+  let removed = 0;
   await Promise.all(
     names.map(async (name) => {
       const pid = /^([1-9]\d*)\./.exec(name)?.[1];
       if (pid === undefined || alive(Number(pid))) return;
-      await rm(join(root, name), { recursive: true, force: true });
+      const entry = await lstat(join(root, name)).catch(() => undefined);
+      if (!entry || entry.isSymbolicLink() || !entry.isDirectory()) return;
+      await rm(join(root, name), { recursive: true, force: true }); // removes links, not targets
+      removed++;
     }),
   );
+  return removed;
 }
 
 /** The instructions, then the documents and candidates as JSON, labelled as data. */
@@ -231,7 +271,11 @@ class CliProvider implements LLMProvider {
   readonly #env: () => Readonly<Record<string, string | undefined>>;
   readonly #queryTimeoutMs: number;
   readonly #killGraceMs: number;
-  readonly #tempDir: () => string;
+  readonly #runsRoot: string | undefined;
+  /** Version and login status queries running now; close() ends them too. */
+  readonly #queries = new Set<TreeHandle>();
+  /** Every call and query until its folder is removed: close() waits for all of them. */
+  readonly #inflight = new Set<Promise<unknown>>();
   /** Runs by the request ID the Broker gave each attempt (`<request>:<attempt>`). */
   readonly #running = new Map<string, Running>();
   #closed = false;
@@ -243,8 +287,7 @@ class CliProvider implements LLMProvider {
     this.#env = () => env ?? process.env;
     this.#queryTimeoutMs = options.versionTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
     this.#killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
-    const temp = options.tempDir;
-    this.#tempDir = () => temp ?? defaultRunsRoot();
+    this.#runsRoot = options.runsRoot;
   }
 
   /**
@@ -262,9 +305,15 @@ class CliProvider implements LLMProvider {
       try {
         if (!statSync(candidate).isFile()) continue;
         if (process.platform !== "win32") accessSync(candidate, constants.X_OK);
+      } catch {
+        continue; // not here
+      }
+      try {
         return realpathSync(candidate);
       } catch {
-        // not here
+        // Windows reparse points and App Execution Aliases may not resolve: the found
+        // path then runs as it is (unverified, A04). On POSIX it vanished meanwhile.
+        if (process.platform === "win32") return candidate;
       }
     }
     return undefined;
@@ -274,17 +323,40 @@ class CliProvider implements LLMProvider {
     return childEnvironment(this.#env(), extra);
   }
 
-  /** A new empty folder for one run, named by this process, by its real path. */
+  /**
+   * A new empty folder for one run, by its real path: `<runsRoot>/<pid>.<random>`
+   * when the root passes checkRunsRoot (created if missing), a refusal when it
+   * does not, or a fresh `mkdtemp` in the OS temp folder without a root.
+   */
   async #workFolder(): Promise<string> {
-    const root = this.#tempDir();
-    await mkdir(root, { recursive: true, mode: 0o700 });
+    const root = this.#runsRoot;
+    if (root === undefined) return realpath(await mkdtemp(join(tmpdir(), "pki-cli-")));
+    if (!(await checkRunsRoot(root, { create: true }))) {
+      throw fail("cli-runs-root-refused", false);
+    }
     return realpath(await mkdtemp(join(root, `${process.pid}.`)));
   }
 
   /** A fixed-argument query with no input, ended at the query time limit. */
-  async #query(executable: string, args: readonly string[]) {
+  #query(executable: string, args: readonly string[]) {
+    return this.#track(this.#queryOnce(executable, args));
+  }
+
+  /** Keeps `work` in #inflight until it settles. */
+  #track<T>(work: Promise<T>): Promise<T> {
+    this.#inflight.add(work);
+    void work.then(
+      () => this.#inflight.delete(work),
+      () => this.#inflight.delete(work),
+    );
+    return work;
+  }
+
+  async #queryOnce(executable: string, args: readonly string[]) {
+    if (this.#closed) throw fail("cli-closed", false);
     const work = await this.#workFolder();
     try {
+      if (this.#closed) throw fail("cli-closed", false);
       const handle = runTree({
         executable,
         args,
@@ -294,11 +366,13 @@ class CliProvider implements LLMProvider {
         maxOutputBytes: MAX_OUTPUT_BYTES,
         killGraceMs: this.#killGraceMs,
       });
+      this.#queries.add(handle);
       const timer = setTimeout(() => void handle.kill(), this.#queryTimeoutMs);
       try {
         return await handle.done;
       } finally {
         clearTimeout(timer);
+        this.#queries.delete(handle);
       }
     } finally {
       await rm(work, { recursive: true, force: true });
@@ -306,6 +380,7 @@ class CliProvider implements LLMProvider {
   }
 
   async detect(): Promise<ProviderInfo> {
+    if (this.#closed) throw fail("cli-closed", false);
     const path = this.#find();
     if (!path) return { installed: false };
     const result = await this.#query(path, ["--version"]);
@@ -315,6 +390,7 @@ class CliProvider implements LLMProvider {
   }
 
   async checkAuthentication(): Promise<AuthStatus> {
+    if (this.#closed) throw fail("cli-closed", false);
     const args = this.#spec.authArgs;
     const path = args ? this.#find() : undefined;
     if (!args || !path) return "unknown";
@@ -351,7 +427,12 @@ class CliProvider implements LLMProvider {
    */
   async close(): Promise<void> {
     this.#closed = true;
-    await Promise.all([...this.#running.keys()].map((id) => this.cancel(id)));
+    await Promise.all([
+      ...[...this.#running.keys()].map((id) => this.cancel(id)),
+      ...[...this.#queries].map((handle) => handle.kill()),
+    ]);
+    // and until each has removed its run folder (a process exit right after must not leave one)
+    await Promise.allSettled([...this.#inflight]);
   }
 
   async cancel(requestId: string): Promise<void> {
@@ -374,7 +455,7 @@ class CliProvider implements LLMProvider {
     const running: Running = { cancelled: false };
     this.#running.set(id, running);
     try {
-      return await this.#run(request, signal, output, schema, running);
+      return await this.#track(this.#run(request, signal, output, schema, running));
     } catch (error) {
       const code = error instanceof ProviderError ? error.message : "cli-failed";
       log("cli-call-failed", { provider: this.id, code });

@@ -171,3 +171,29 @@ test("with both CLIs found, the user picks the default and the next test goes to
   expect(await fake.leftovers()).toEqual([]);
   fake.dispose();
 });
+
+test("a connection test the default CLI cannot serve shows how to install it", async ({ page }) => {
+  // the backend's answer when the default CLI is not installed (backend/src/providers-api.test.ts)
+  await page.route("**/api/connection-test", (route) =>
+    route.fulfill({
+      json: {
+        outcome: "blocked",
+        reason: "cli-not-verified",
+        isolation: null,
+        providerCheck: {
+          providerId: "claude-code",
+          installed: false,
+          version: null,
+          authentication: "unknown",
+        },
+      } satisfies ConnectionTestResult,
+    }),
+  );
+  await page.goto(`http://127.0.0.1:${port}`);
+  await openSettings(page);
+  await page.getByRole("button", { name: "연결 시험", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText(
+    "결과: 차단: 격리가 검증된 CLI 조합(버전·OS·인자 프로필)이 아님",
+  );
+  await expect(page.getByText("Claude Code: 설치되어 있지 않음. 설치:")).toBeVisible();
+});

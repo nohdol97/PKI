@@ -5,12 +5,23 @@
 // (the development OS); the Windows path (`taskkill /T /F`) is unverified (A04).
 import { ProviderError, type StructuredRequest } from "@pki/contracts";
 import { installFakeCli, processAlive, structuredRequest, type FakeCli } from "@pki/testkit";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLI_PROFILES } from "../cli-profiles.ts";
 import {
+  checkRunsRoot,
   createClaudeCodeProvider,
   createCodexProvider,
   sweepStaleCliRuns,
@@ -20,9 +31,17 @@ import {
 vi.setConfig({ testTimeout: 30_000 });
 
 const fake: FakeCli = installFakeCli();
-afterAll(() => fake.dispose());
-// leak check: every test ends its trees; whatever one leaves is killed and fails it
-afterEach(async () => expect(await fake.leftovers()).toEqual([]));
+/** This file's run root: every run's folder is made here and must be gone after it. */
+const runs = mkdtempSync(join(tmpdir(), "pki-cli-runs-kill-"));
+afterAll(() => {
+  fake.dispose();
+  rmSync(runs, { recursive: true, force: true });
+});
+// leak check: every test ends its trees and folders; whatever one leaves fails it
+afterEach(async () => {
+  expect(await fake.leftovers()).toEqual([]);
+  expect(readdirSync(runs)).toEqual([]);
+});
 beforeEach(() => {
   fake.reset();
   fake.configure({});
@@ -55,7 +74,7 @@ const failure = (p: Promise<unknown>) =>
   );
 
 describe.skipIf(process.platform === "win32").each(PROVIDERS)("cli-kill: $id", ({ id, create }) => {
-  const provider = () => create({ env: { PATH: fake.bin }, killGraceMs: 200 });
+  const provider = () => create({ env: { PATH: fake.bin }, killGraceMs: 200, runsRoot: runs });
   const request = (requestId: string, timeoutMs = 60_000): StructuredRequest => ({
     ...structuredRequest(requestId),
     budget: { timeoutMs },
@@ -170,6 +189,27 @@ describe.skipIf(process.platform === "win32").each(PROVIDERS)("cli-kill: $id", (
     await treeGone();
   });
 
+  it("ends a version query still running on close, and refuses queries after it", async () => {
+    fake.configure({ versionMode: "hang" });
+    const p = create({ env: { PATH: fake.bin }, killGraceMs: 200, runsRoot: runs });
+    const query = p.detect().catch((e: unknown) => e);
+    await until(() => fake.spawned().length === 1);
+    await p.close?.();
+    await treeGone();
+    expect(await query).toMatchObject({ installed: true }); // killed: no version read
+    expect(((await query) as { version?: string }).version).toBeUndefined();
+    for (const after of [p.detect(), p.checkAuthentication()]) {
+      const error = await after.catch((e: unknown) => e);
+      expect((error as ProviderError).message).toBe("cli-closed");
+    }
+    // refused before it looks anything up, so also where no CLI is found
+    const empty = create({ env: { PATH: runs }, runsRoot: runs });
+    await empty.close?.();
+    expect(((await empty.detect().catch((e: unknown) => e)) as ProviderError).message).toBe(
+      "cli-closed",
+    );
+  });
+
   it("stops a call cancelled before its process started", async () => {
     const p = provider();
     const call = failure(p.generateStructured(request("early:1"), new AbortController().signal));
@@ -179,22 +219,84 @@ describe.skipIf(process.platform === "win32").each(PROVIDERS)("cli-kill: $id", (
   });
 });
 
-describe("cli-kill: run folders a crashed backend left", () => {
-  it("are swept at start; a live process's folders stay", async () => {
-    const root = mkdtempSync(join(tmpdir(), "pki-cli-sweep-"));
-    try {
-      // a PID that cannot be alive (beyond pid_max) and this process's own
-      mkdirSync(join(root, "99999999.abc"));
-      mkdirSync(join(root, `${process.pid}.xyz`));
-      mkdirSync(join(root, "not-a-run"));
-      await sweepStaleCliRuns(root);
-      expect(readdirSync(root).sort()).toEqual([`${process.pid}.xyz`, "not-a-run"].sort());
-      // a run's own folder is named by its process, under the root
-      fake.configure({});
-      await createClaudeCodeProvider({ env: { PATH: fake.bin }, tempDir: root }).detect();
-      expect(readdirSync(root).sort()).toEqual([`${process.pid}.xyz`, "not-a-run"].sort());
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+describe("cli-kill: the run root and the start-up sweep", () => {
+  const request = (_cli: "codex", requestId: string): StructuredRequest => ({
+    ...structuredRequest(requestId),
+    budget: { timeoutMs: 20_000 },
+    execution: {
+      profile: CLI_PROFILES.codex.standard,
+      isolation: "verified",
+      model: "synthetic-model",
+    },
+  });
+  const roots: string[] = [];
+  const newRoot = () => {
+    const root = mkdtempSync(join(tmpdir(), "pki-cli-sweep-")); // 0700, ours
+    roots.push(root);
+    return root;
+  };
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+
+  it("sweeps dead backends' run folders only: live ones, other names, files and links stay", async () => {
+    const root = newRoot();
+    const outside = newRoot();
+    writeFileSync(join(outside, "keep.txt"), "x");
+    mkdirSync(join(root, "99999999.abc")); // a PID beyond pid_max: never alive
+    mkdirSync(join(root, `${process.pid}.xyz`));
+    mkdirSync(join(root, "not-a-run"));
+    writeFileSync(join(root, "99999998.file"), "a regular file named like a run");
+    symlinkSync(outside, join(root, "99999997.link"));
+    expect(await sweepStaleCliRuns(root)).toBe(1);
+    expect(readdirSync(root).sort()).toEqual(
+      [`${process.pid}.xyz`, "not-a-run", "99999998.file", "99999997.link"].sort(),
+    );
+    expect(readdirSync(outside)).toEqual(["keep.txt"]);
+  });
+
+  it("refuses a root that is a symbolic link: sweeps nothing through it, runs nothing in it", async () => {
+    const victim = newRoot();
+    mkdirSync(join(victim, "99999999.user-folder"));
+    writeFileSync(join(victim, "2024.report.docx"), "the user's file");
+    const link = join(newRoot(), "cli-runs");
+    symlinkSync(victim, link);
+    expect(await sweepStaleCliRuns(link)).toBe("refused");
+    expect(readdirSync(victim).sort()).toEqual(["2024.report.docx", "99999999.user-folder"]);
+    const error = await createCodexProvider({ env: { PATH: fake.bin }, runsRoot: link })
+      .generateStructured(request("codex", "root:1"), new AbortController().signal)
+      .catch((e: unknown) => e);
+    expect((error as ProviderError).message).toBe("cli-runs-root-refused");
+    expect(fake.runs()).toEqual([]);
+  });
+
+  it("refuses a root open to others or owned by another user", async () => {
+    const loose = newRoot();
+    chmodSync(loose, 0o755);
+    mkdirSync(join(loose, "99999999.abc"));
+    expect(await sweepStaleCliRuns(loose)).toBe("refused");
+    expect(readdirSync(loose)).toEqual(["99999999.abc"]);
+    expect(await checkRunsRoot(loose)).toBe(false);
+    const foreign = newRoot();
+    mkdirSync(join(foreign, "99999999.abc"));
+    expect(await sweepStaleCliRuns(foreign, { uid: (process.getuid?.() ?? 0) + 1 })).toBe(
+      "refused",
+    );
+    expect(readdirSync(foreign)).toEqual(["99999999.abc"]);
+  });
+
+  it("refuses a root that is not a directory, though it is ours and private", async () => {
+    const file = join(newRoot(), "cli-runs");
+    writeFileSync(file, "", { mode: 0o600 });
+    expect(await checkRunsRoot(file)).toBe(false);
+    expect(await sweepStaleCliRuns(file)).toBe("refused");
+  });
+
+  it("makes a missing root 0700 and names each run folder by this process", async () => {
+    const root = join(newRoot(), "cli-runs");
+    expect(await checkRunsRoot(root, { create: true })).toBe(true);
+    expect(statSync(root).mode & 0o777).toBe(0o700);
+    await createClaudeCodeProvider({ env: { PATH: fake.bin }, runsRoot: root }).detect();
+    expect(readdirSync(root)).toEqual([]); // the query's folder was made there and removed
   });
 });

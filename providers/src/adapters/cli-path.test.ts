@@ -6,7 +6,7 @@ import { ProviderError, type StructuredRequest } from "@pki/contracts";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { installFakeCli, structuredRequest, type FakeCli } from "@pki/testkit";
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +14,14 @@ import { createBroker, type ExecutionInput } from "../broker.ts";
 import { CLI_PROFILES } from "../cli-profiles.ts";
 import { createUserActionLedger } from "../user-actions.ts";
 import { createClaudeCodeProvider } from "./cli-provider.ts";
+import type { CliProviderOptions } from "./cli-provider.ts";
 
+/** This file's run root: every run's folder is made here and must be gone after it. */
+const runs = mkdtempSync(join(tmpdir(), "pki-cli-runs-test-"));
+const claudeProvider = (options: CliProviderOptions) =>
+  createClaudeCodeProvider({ runsRoot: runs, ...options });
+afterEach(() => expect(readdirSync(runs)).toEqual([]));
+afterAll(() => rmSync(runs, { recursive: true, force: true }));
 // every fake CLI run is a Node start: slow when the whole suite runs in parallel
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -51,7 +58,7 @@ const live = () => new AbortController().signal;
 describe("cli path: the Provider", () => {
   it("runs the path its version query found, not what PATH names now", async () => {
     const env: Record<string, string> = { PATH: a.bin };
-    const provider = createClaudeCodeProvider({ env });
+    const provider = claudeProvider({ env });
     const info = await provider.detect();
     expect(info).toMatchObject({ path: a.path("claude"), version: "2.1.3" });
     env.PATH = b.bin; // the CLI moved or PATH changed after the decision
@@ -65,7 +72,7 @@ describe("cli path: the Provider", () => {
     try {
       const link = join(links, "claude");
       symlinkSync(a.path("claude"), link);
-      const provider = createClaudeCodeProvider({ env: { PATH: links } });
+      const provider = claudeProvider({ env: { PATH: links } });
       const info = await provider.detect();
       expect(info).toMatchObject({ path: realpathSync(a.path("claude")), version: "2.1.3" });
       unlinkSync(link);
@@ -78,21 +85,21 @@ describe("cli path: the Provider", () => {
   });
 
   it("refuses a relative executable", async () => {
-    const provider = createClaudeCodeProvider({ env: { PATH: a.bin } });
+    const provider = claudeProvider({ env: { PATH: a.bin } });
     const error = await provider.generateStructured(request("claude"), live()).catch((e) => e);
     expect(error).toBeInstanceOf(ProviderError);
     expect(a.runs()).toEqual([]);
   });
 
   it("finds the path once for a request that brings none", async () => {
-    const provider = createClaudeCodeProvider({ env: { PATH: a.bin } });
+    const provider = claudeProvider({ env: { PATH: a.bin } });
     await provider.generateStructured(request(), live());
     expect(a.modelCalls()).toBe(1);
   });
 });
 
 describe("cli path: through the Broker", () => {
-  function broker(provider: ReturnType<typeof createClaudeCodeProvider>) {
+  function broker(provider: ReturnType<typeof claudeProvider>) {
     const db = openBetterSqlite3(":memory:");
     migrate(db);
     const ledger = createUserActionLedger();
@@ -134,7 +141,7 @@ describe("cli path: through the Broker", () => {
 
   it("runs the executable whose version it judged, though PATH changed in between", async () => {
     const env: Record<string, string> = { PATH: a.bin };
-    const provider = createClaudeCodeProvider({ env });
+    const provider = claudeProvider({ env });
     const detect = provider.detect.bind(provider);
     provider.detect = async () => {
       const info = await detect();
@@ -150,7 +157,7 @@ describe("cli path: through the Broker", () => {
   it("finds the path again for each attempt and judges that executable", async () => {
     a.configure({ version: "2.1.3", mode: "fail-echo" }); // exits non-zero: retryable
     const env: Record<string, string> = { PATH: a.bin };
-    const provider = createClaudeCodeProvider({ env });
+    const provider = claudeProvider({ env });
     const paths = [a.bin, b.bin];
     const detect = provider.detect.bind(provider);
     provider.detect = async () => {

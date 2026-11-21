@@ -21,6 +21,7 @@ import {
   releaseHeldJobs,
   releaseOnPolicyChange,
   sweepCliRuns,
+  cliRunsRoot,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -48,10 +49,10 @@ export interface BootedBackend {
 
 export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
   const db = openCanonicalDb(options.dataDir);
-  await sweepCliRuns(); // what a crashed backend's CLI runs left
+  await sweepCliRuns(options.dataDir); // what a crashed backend's CLI runs left
   // one egress instance for the consent API, the Broker (T08) and the Providers (T11)
   const egress = productEgress(db);
-  const providers = productProviders(db, options.secrets, egress);
+  const providers = productProviders(db, options.secrets, egress, cliRunsRoot(options.dataDir));
   const calls = productCalls(db, egress, { providers });
   const runner = productRunner(db, calls.broker);
   const connectors = await createConnectorManager(

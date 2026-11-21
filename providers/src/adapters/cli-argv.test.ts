@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 // V01-C4 `cli-argv` (V01-R9): the argument arrays are the code's fixed profiles,
 // equal to their R02 profile but for the model, and carry the no-session option;
 // the CLI runs with exactly them, chosen by `request.execution.profile` alone. The
@@ -6,12 +7,21 @@
 import { ProviderError, type LLMProvider, type StructuredRequest } from "@pki/contracts";
 import { installFakeCli, structuredRequest, type FakeCli } from "@pki/testkit";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { relative, resolve, join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLI_ARGUMENTS, CLI_PROFILES } from "../cli-profiles.ts";
 import { childEnvironment, createClaudeCodeProvider, createCodexProvider } from "./cli-provider.ts";
+import type { CliProviderOptions } from "./cli-provider.ts";
 
+/** This file's run root: every run's folder is made here and must be gone after it. */
+const runs = mkdtempSync(join(tmpdir(), "pki-cli-runs-test-"));
+const claudeProvider = (options: CliProviderOptions) =>
+  createClaudeCodeProvider({ runsRoot: runs, ...options });
+const codexProvider = (options: CliProviderOptions) =>
+  createCodexProvider({ runsRoot: runs, ...options });
+afterEach(() => expect(readdirSync(runs)).toEqual([]));
+afterAll(() => rmSync(runs, { recursive: true, force: true }));
 // every fake CLI run is a Node start: slow when the whole suite runs in parallel
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -43,8 +53,8 @@ beforeEach(() => {
 });
 
 const PROVIDERS = [
-  { id: "claude-code", cmd: "claude", create: createClaudeCodeProvider },
-  { id: "codex", cmd: "codex", create: createCodexProvider },
+  { id: "claude-code", cmd: "claude", create: claudeProvider },
+  { id: "codex", cmd: "codex", create: codexProvider },
 ] as const;
 
 const live = () => new AbortController().signal;
@@ -199,24 +209,24 @@ describe("cli-argv: the version string", () => {
     ["v1.0.0-beta.2+build.5", "1.0.0-beta.2"],
   ])("normalizes %j to %j as R02 does", async (versionOutput, version) => {
     fake.configure({ versionOutput });
-    expect((await createCodexProvider({ env: { PATH: fake.bin } }).detect()).version).toBe(version);
+    expect((await codexProvider({ env: { PATH: fake.bin } }).detect()).version).toBe(version);
   });
 
   it("is absent when the output has none or the query fails", async () => {
     fake.configure({ versionOutput: "no version here" });
-    expect(await createCodexProvider({ env: { PATH: fake.bin } }).detect()).toEqual({
+    expect(await codexProvider({ env: { PATH: fake.bin } }).detect()).toEqual({
       installed: true,
       path: fake.path("codex"),
     });
     fake.configure({ versionMode: "fail" });
-    expect(await createCodexProvider({ env: { PATH: fake.bin } }).detect()).toEqual({
+    expect(await codexProvider({ env: { PATH: fake.bin } }).detect()).toEqual({
       installed: true,
       path: fake.path("codex"),
     });
   });
 
   it("reports a CLI that is not on PATH as not installed, running nothing", async () => {
-    const provider = createClaudeCodeProvider({ env: { PATH: resolve(fake.bin, "../state") } });
+    const provider = claudeProvider({ env: { PATH: resolve(fake.bin, "../state") } });
     expect(await provider.detect()).toEqual({ installed: false });
     expect(await provider.checkHealth()).toEqual({ state: "unavailable", reason: "not-installed" });
   });
@@ -233,7 +243,7 @@ describe("cli-argv: the child's environment", () => {
       CLAUDE_CODE_OAUTH_TOKEN: "synthetic",
       SOME_OTHER: "x",
     };
-    await createClaudeCodeProvider({ env }).generateStructured(
+    await claudeProvider({ env }).generateStructured(
       run(CLI_PROFILES["claude-code"].standard),
       live(),
     );
@@ -279,7 +289,7 @@ describe("cli-argv: the fake CLI parses like a real one", () => {
 describe("cli-argv: what counts as found and as a version", () => {
   it("skips a relative PATH entry (a PATH hijack through the working folder)", async () => {
     const empty = resolve(fake.bin, "../state");
-    const provider = createClaudeCodeProvider({
+    const provider = claudeProvider({
       env: { PATH: [relative(process.cwd(), fake.bin), empty].join(":") },
     });
     expect(await provider.detect()).toEqual({ installed: false });
@@ -288,7 +298,7 @@ describe("cli-argv: what counts as found and as a version", () => {
 
   it("takes a version only from a query that exits 0", async () => {
     fake.configure({ versionMode: "print-and-fail" });
-    expect(await createCodexProvider({ env: { PATH: fake.bin } }).detect()).toEqual({
+    expect(await codexProvider({ env: { PATH: fake.bin } }).detect()).toEqual({
       installed: true,
       path: fake.path("codex"),
     });
@@ -315,7 +325,7 @@ describe("cli-argv: a failure carries a code, never the CLI's output", () => {
       lines.push(a.map(String).join(" "));
     });
     try {
-      const error = await createCodexProvider({ env: { PATH: fake.bin } })
+      const error = await codexProvider({ env: { PATH: fake.bin } })
         .generateStructured(run(CLI_PROFILES.codex.standard), live())
         .catch((e: unknown) => e);
       expect(error).toBeInstanceOf(ProviderError);

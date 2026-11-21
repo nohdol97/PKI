@@ -101,10 +101,13 @@ export function productProviders(
   db: SqlDriver,
   secrets: SecretSource,
   egress: EgressControls,
+  /** The CLI run folders' root, inside the data directory (cliRunsRoot); default per-run temp. */
+  cliRuns?: string,
 ): readonly LLMProvider[] {
+  const cli = cliRuns === undefined ? {} : { runsRoot: cliRuns };
   return [
-    createClaudeCodeProvider(),
-    createCodexProvider(),
+    createClaudeCodeProvider(cli),
+    createCodexProvider(cli),
     new OpenAICompatibleProvider({
       db,
       secrets,
@@ -115,9 +118,19 @@ export function productProviders(
 }
 
 /** At start: removes CLI run folders a crashed or killed backend left (V01-T10). */
-export function sweepCliRuns(): Promise<void> {
-  return sweepStaleCliRuns();
+export async function sweepCliRuns(dataDir: string): Promise<void> {
+  await sweepStaleCliRuns(cliRunsRoot(dataDir));
 }
+
+/**
+ * Where CLI runs make their temporary folders: inside the data directory the
+ * backend owns (V01-T10), not a shared temp folder another user could pre-create.
+ */
+export function cliRunsRoot(dataDir: string): string {
+  return join(dataDir, CLI_RUNS_DIR);
+}
+
+export const CLI_RUNS_DIR = "cli-runs";
 
 export interface CallsOptions {
   /** The Providers to bind: productProviders(...) in the product, doubles in tests. */
