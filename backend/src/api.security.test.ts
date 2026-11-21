@@ -80,6 +80,13 @@ describe("local API security", () => {
     expect(res).toEqual({ status: 400, body: { error: "bad-request" } });
   });
 
+  it("rejects a protocol-relative request target", async () => {
+    const lines = [`Host: 127.0.0.1:${server.port}`, `Authorization: Bearer ${TOKEN}`];
+    expect(await sendRaw(server.port, ["GET //evil.example/api/status HTTP/1.1", ...lines])).toBe(
+      400,
+    );
+  });
+
   it("binds to 127.0.0.1", () => {
     expect(server.address).toBe("127.0.0.1");
   });

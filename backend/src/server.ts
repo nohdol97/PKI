@@ -62,7 +62,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     // own; both would let the Host check read something other than what is routed.
     const hostHeaders = req.rawHeaders.filter((name, i) => i % 2 === 0 && /^host$/i.test(name));
     if (hostHeaders.length > 1) return reject(res, 400, "bad-request");
-    if (!req.url?.startsWith("/")) return reject(res, 400, "bad-request");
+    // A target starting with "//" would be parsed as naming its own authority too.
+    if (!req.url?.startsWith("/") || req.url.startsWith("//")) {
+      return reject(res, 400, "bad-request");
+    }
     if (req.headers.host !== selfHost) return reject(res, 403, "forbidden-host");
     const origin = req.headers.origin;
     if (origin !== undefined && !allowedOrigins.has(origin)) {

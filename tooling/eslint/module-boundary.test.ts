@@ -69,6 +69,8 @@ pkg("packages/contracts", { name: "@pki/contracts" });
 afterAll(() => rmSync(fixtureRoot, { recursive: true, force: true }));
 
 const backendFile = join(fixtureRoot, "backend/src/server.ts");
+const backendTest = join(fixtureRoot, "backend/src/server.test.ts");
+const backendE2e = join(fixtureRoot, "backend/src/screens.e2e.tsx");
 RuleTester.describe = describe;
 RuleTester.it = it;
 const ruleTester = new RuleTester({ languageOptions: { parser: tseslint.parser } });
@@ -77,12 +79,24 @@ describe("module-boundary rule", () => {
   ruleTester.run("module-boundary", moduleBoundary, {
     valid: [
       { code: 'import { a } from "@pki/contracts";', filename: backendFile },
-      { code: 'import type { T } from "@pki/testkit";', filename: backendFile },
+      // devDependencies-only workspace packages (test code) are reachable from test files only
+      { code: 'import { send } from "@pki/testkit";', filename: backendTest },
+      { code: 'import type { T } from "@pki/testkit";', filename: backendE2e },
       { code: 'import { b } from "../src/other.ts";', filename: backendFile },
       { code: 'import { readFile } from "node:fs/promises";', filename: backendFile },
       { code: 'import { describe } from "vitest";', filename: backendFile },
     ],
     invalid: [
+      {
+        code: 'import { send } from "@pki/testkit";',
+        filename: backendFile,
+        errors: [{ messageId: "devOnlyDependency" }],
+      },
+      {
+        code: 'export type { T } from "@pki/testkit";',
+        filename: backendFile,
+        errors: [{ messageId: "devOnlyDependency" }],
+      },
       {
         code: 'import { a } from "../../packages/contracts/src/schema.ts";',
         filename: backendFile,
