@@ -24,7 +24,7 @@ function addVersion(externalId: string, title: string, body: string): number {
     [externalId],
   );
   return db.run(
-    "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (?, ?, ?, ?)",
+    "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (?, 1, ?, ?, ?)",
     [source.lastInsertRowid, `hash-${externalId}`, title, body],
   ).lastInsertRowid;
 }

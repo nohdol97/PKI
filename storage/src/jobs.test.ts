@@ -1,4 +1,5 @@
 // V01-R6 job records: the Broker reads a job to decide that a call is background.
+// V02-R3: a job carries its source and the version it was registered for (the fence).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { readJob } from "./jobs.ts";
@@ -20,15 +21,18 @@ afterEach(() => {
 });
 
 describe("readJob", () => {
-  it("returns a stored job's kind, target version and status", () => {
+  it("returns a stored job's kind, source, fence version, status and lease", () => {
     const { lastInsertRowid } = db.run(
-      "INSERT INTO jobs (kind, source_version_id, status) VALUES ('extract', 1, 'queued')",
+      `INSERT INTO jobs (kind, source_id, fence_version, status, lease_until)
+       VALUES ('extract', 1, 1, 'queued', '2026-11-21T00:05:00Z')`,
     );
     expect(readJob(db, lastInsertRowid)).toEqual({
       id: lastInsertRowid,
       kind: "extract",
-      sourceVersionId: 1,
+      sourceId: 1,
+      fenceVersion: 1,
       status: "queued",
+      leaseUntil: "2026-11-21T00:05:00Z",
     });
   });
 
