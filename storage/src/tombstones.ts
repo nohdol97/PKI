@@ -4,11 +4,19 @@
 // leaves the stored tombstone and the sequence as they are.
 import type { SqlDriver } from "./sql-driver.ts";
 
+/**
+ * Who deleted (schema v9, agreed with the I01 and I04 specs): the screen's request
+ * (`user-deleted`, never lets the source back until an explicit lift, which V02
+ * has none of), the Connector reporting the source gone (`source-deleted`) or
+ * its access lost (`access-revoked`).
+ */
+export type TombstoneReason = "user-deleted" | "source-deleted" | "access-revoked";
+
 export interface Tombstone {
   sourceId: number;
   version: number;
   at: string;
-  reason: "deleted" | "access-revoked";
+  reason: TombstoneReason;
 }
 
 export function writeTombstone(db: SqlDriver, t: Tombstone): "written" | "unchanged" {

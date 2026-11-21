@@ -19,6 +19,7 @@ export {
 } from "./data-directory.ts";
 export {
   contentHash,
+  findSourceId,
   findSourceVersionId,
   readConnectorKind,
   readCursor,
@@ -84,7 +85,13 @@ export {
   type InsightKey,
   type StoredInsight,
 } from "./insights.ts";
-export { readTombstone, writeTombstone, type Tombstone } from "./tombstones.ts";
+export {
+  readTombstone,
+  writeTombstone,
+  type Tombstone,
+  type TombstoneReason,
+} from "./tombstones.ts";
+export { purgeSourceContent, type PurgeResult } from "./purge.ts";
 export { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
 export { listItemEvidenceVersions, listItemNames } from "./candidates.ts";
 export {

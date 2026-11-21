@@ -180,7 +180,12 @@ describe("importJsonl", () => {
   // Provisional (T04): a source the tombstone blocks is a line error, not a failed import.
   it("reports a re-imported record the tombstone blocks as a line error, storing the other lines", async () => {
     await importJsonl(db, line({ content: "v1" }));
-    writeTombstone(db, { sourceId: 1, version: 1, at: "2026-11-21T00:00:00Z", reason: "deleted" });
+    writeTombstone(db, {
+      sourceId: 1,
+      version: 1,
+      at: "2026-11-21T00:00:00Z",
+      reason: "source-deleted",
+    });
     db.run("DELETE FROM source_versions WHERE source_id = 1");
     const result = await importJsonl(
       db,
@@ -198,27 +203,68 @@ describe("importJsonl", () => {
     expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 2 }]);
   });
 
-  // Provisional until V02-T08 implements deletion: refused per line, nothing stored for it.
-  it("reports delete and revoke lines as not yet supported, storing the other lines", async () => {
+  it("purges a source on its delete line and changes nothing for delete or revoke of a source never stored", async () => {
+    await importJsonl(db, line({ external_id: "d" }));
     const result = await importJsonl(
       db,
       [
-        line({ external_id: "d", operation: "delete", content: "" }),
+        line({ external_id: "d", operation: "delete", content: "", version: 2 }),
+        line({ external_id: "never", operation: "delete", content: "" }),
         line({ external_id: "r", operation: "revoke" }),
         line({ external_id: "u" }),
       ].join("\n"),
     );
+    expect(result).toEqual(reply({ received: 4, created: 1, errors: [] }));
+    expect(
+      db.all(
+        "SELECT s.external_id, t.version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id",
+      ),
+    ).toEqual([{ external_id: "d", version: 1, reason: "source-deleted" }]);
+    expect(
+      db.all("SELECT s.external_id FROM source_versions v JOIN sources s ON s.id = v.source_id"),
+    ).toEqual([{ external_id: "u" }]);
+  });
+
+  it("keeps per-source line order across a delete between two upserts in one file", async () => {
+    // rounds: v1 is stored, the delete purges it, the later upsert is refused
+    const result = await importJsonl(
+      db,
+      [
+        line({ content: "v1" }),
+        line({ operation: "delete", content: "", version: 2 }),
+        line({ version: 3, content: "v3" }),
+        line({ external_id: "other" }),
+      ].join("\n"),
+    );
     expect(result).toEqual(
+      reply({ received: 4, created: 2, errors: [{ line: 3, reason: "tombstoned" }] }),
+    );
+    expect(db.all("SELECT version, reason FROM tombstones")).toEqual([
+      { version: 1, reason: "source-deleted" },
+    ]);
+    expect(
+      db.all("SELECT s.external_id FROM source_versions v JOIN sources s ON s.id = v.source_id"),
+    ).toEqual([{ external_id: "other" }]);
+    // importing it again: the first upsert is refused too, the delete changes nothing
+    const again = await importJsonl(
+      db,
+      [
+        line({ content: "v1" }),
+        line({ operation: "delete", content: "", version: 2 }),
+        line({ version: 3, content: "v3" }),
+        line({ external_id: "other" }),
+      ].join("\n"),
+    );
+    expect(again).toEqual(
       reply({
-        received: 3,
-        created: 1,
+        received: 4,
+        created: 0,
         errors: [
-          { line: 1, reason: "change-kind-unsupported" },
-          { line: 2, reason: "change-kind-unsupported" },
+          { line: 1, reason: "tombstoned" },
+          { line: 3, reason: "tombstoned" },
         ],
       }),
     );
-    expect(count("tombstones")).toBe(0);
   });
 
   it("refuses the lines of an instance already bound to another Connector kind", async () => {
@@ -255,17 +301,26 @@ describe("importJsonl", () => {
     ]);
   });
 
-  it.each(GOLDEN)("stores or reports every line of golden %s (no silent drop)", async (name) => {
-    const text = readFileSync(resolve(GOLDEN_DIR, name), "utf8");
-    const lines = text.split("\n").filter((l) => l.trim()).length;
-    const result = await importJsonl(db, text);
-    expect(result.created + result.errorCount).toBe(lines);
-    // the only lines not stored are deletes and revokes, until V02-T08
-    expect(new Set(result.errors.map((e) => e.reason))).toEqual(
-      new Set(["change-kind-unsupported"]),
-    );
-    expect([count("source_versions"), count("jobs")]).toEqual([result.created, result.created]);
-  });
+  it.each(GOLDEN)(
+    "stores, deletes or reports every line of golden %s (no silent drop)",
+    async (name) => {
+      const text = readFileSync(resolve(GOLDEN_DIR, name), "utf8");
+      const records = text
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l) as ImportRecord);
+      const deletions = records.filter((r) => r.operation !== "upsert").length;
+      const result = await importJsonl(db, text);
+      expect(deletions).toBeGreaterThan(0);
+      expect(result.received).toBe(records.length);
+      expect(result.created + deletions + result.errorCount).toBe(records.length);
+      expect(result.errors).toEqual([]);
+      // each delete and revoke tombstoned a source the file had stored, and purged it
+      expect(count("tombstones")).toBe(deletions);
+      expect(count("jobs")).toBe(result.created);
+      expect(count("source_versions")).toBeLessThan(result.created);
+    },
+  );
 
   it("refuses the lines of instances past the cap per file, registering none of them", async () => {
     const text = Array.from({ length: MAX_IMPORT_INSTANCES + 2 }, (_, i) =>
@@ -425,13 +480,13 @@ describe("importJsonl, review round 2", () => {
 
   it("lists the lowest line numbers first whatever stage refused them (A9)", async () => {
     // the store refuses line 1 after the parser refused lines 2..(LIMIT + 2)
-    const text = [
-      line({ external_id: "d", operation: "delete", content: "" }),
-      ...Array(IMPORT_ERROR_LIMIT + 1).fill("{"),
-    ].join("\n");
+    await importJsonl(db, line());
+    const text = [line({ content: "다른 내용" }), ...Array(IMPORT_ERROR_LIMIT + 1).fill("{")].join(
+      "\n",
+    );
     const result = await importJsonl(db, text);
     expect(result.errorCount).toBe(IMPORT_ERROR_LIMIT + 2);
-    expect(result.errors[0]).toEqual({ line: 1, reason: "change-kind-unsupported" });
+    expect(result.errors[0]).toEqual({ line: 1, reason: "revision-not-newer" });
     expect(result.errors.map((e) => e.line)).toEqual(
       Array.from({ length: IMPORT_ERROR_LIMIT }, (_, i) => i + 1),
     );
@@ -475,9 +530,10 @@ describe("importJsonl, review round 2", () => {
     const once = counts();
     const second = await importJsonl(db, text);
     expect(second.created).toBe(0);
-    // only the delete and revoke lines, as on the first import (until V02-T08)
-    expect(second.errors).toEqual(first.errors);
-    expect(second.errors.every((e) => e.reason === "change-kind-unsupported")).toBe(true);
+    expect(first.errors).toEqual([]);
+    // the lines of a source the first import deleted are refused now; nothing else
+    expect(second.errors.length).toBeGreaterThan(0);
+    expect(second.errors.every((e) => e.reason === "tombstoned")).toBe(true);
     expect(counts()).toEqual(once);
   });
 });

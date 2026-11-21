@@ -167,19 +167,29 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     return {
       status: "done",
       write: () => {
-        // an item is created only for a fact or relation that is kept
+        // An item is created only for a fact or relation that is kept. Existing
+        // items are looked up before any is created: one deleted during the Provider
+        // call (V02-R12) frees its id, which SQLite hands to the next new item, so a
+        // later lookup would find this write's own new item under the stale id.
         const ids = new Map<string, number>();
+        const gone = new Set<string>();
+        for (const [ref, item] of items) {
+          if (item.existingItemId === null) continue;
+          const id = readItem(db, Number(item.existingItemId))?.id; // deleted meanwhile: undefined
+          if (id === undefined) gone.add(ref);
+          else ids.set(ref, id);
+        }
         const touched = new Set<number>();
         const idOf = (ref: string): number | undefined => {
           if (ids.has(ref)) return ids.get(ref);
+          if (gone.has(ref)) return undefined;
           const item = items.get(ref) as Item;
-          let id: number | undefined;
-          if (item.existingItemId !== null) {
-            id = readItem(db, Number(item.existingItemId))?.id; // deleted meanwhile: undefined
-          } else {
-            id = insertItem(db, { type: item.type, name: item.name, ...attributes("explicit") });
-          }
-          if (id !== undefined) ids.set(ref, id);
+          const id = insertItem(db, {
+            type: item.type,
+            name: item.name,
+            ...attributes("explicit"),
+          });
+          ids.set(ref, id);
           return id;
         };
         for (const entry of planned) {

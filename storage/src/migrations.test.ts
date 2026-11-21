@@ -40,8 +40,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(8);
-    expect(migrations).toHaveLength(8);
+    expect(schemaVersion(db)).toBe(9);
+    expect(migrations).toHaveLength(9);
   });
 
   it("is idempotent when re-run", () => {
@@ -417,7 +417,9 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
     migrate(db);
     db.run("DELETE FROM jobs");
     db.run("DELETE FROM source_versions WHERE source_id = 1");
-    db.run("INSERT INTO tombstones (source_id, version, at, reason) VALUES (1, 2, 't', 'deleted')");
+    db.run(
+      "INSERT INTO tombstones (source_id, version, at, reason) VALUES (1, 2, 't', 'user-deleted')",
+    );
     const add = (version: number) =>
       db.run(
         "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, ?, 'h', 't', 'b')",
@@ -434,7 +436,9 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
   it("applies a tombstone only to its own source", () => {
     seedV4();
     migrate(db);
-    db.run("INSERT INTO tombstones (source_id, version, at, reason) VALUES (1, 2, 't', 'deleted')");
+    db.run(
+      "INSERT INTO tombstones (source_id, version, at, reason) VALUES (1, 2, 't', 'user-deleted')",
+    );
     db.run(
       "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (2, 2, 'h', 't', 'b')",
     );
@@ -588,12 +592,80 @@ describe("schema v8 (V02-T05)", () => {
     db.run(
       "INSERT INTO jobs (kind, source_id, fence_version, status) VALUES ('extract', 1, 1, 'done')",
     );
-    migrate(db);
+    migrate(db, migrations.slice(0, 8));
     expect(schemaVersion(db)).toBe(8);
     expect(columns("jobs").slice(-2)).toEqual(["dropped_quotes", "dropped_other"]);
     expect(db.all("SELECT dropped_quotes, dropped_other FROM jobs")).toEqual([
       { dropped_quotes: null, dropped_other: null },
     ]);
     expect(() => db.run("UPDATE jobs SET dropped_quotes = -1")).toThrow(/CHECK/);
+  });
+});
+
+describe("schema v9 (V02-T08)", () => {
+  const seedV8 = () => {
+    migrate(db, migrations.slice(0, 8));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'b')");
+    db.run("INSERT INTO tombstones (source_id, version, at, reason) VALUES (1, 2, 't', 'deleted')");
+    db.run(
+      "INSERT INTO tombstones (source_id, version, at, reason) VALUES (2, 1, 't', 'access-revoked')",
+    );
+  };
+
+  it("keeps a v8 database's tombstones, a `deleted` one as `user-deleted`", () => {
+    seedV8();
+    migrate(db, migrations.slice(0, 9));
+    expect(schemaVersion(db)).toBe(9);
+    expect(
+      db.all("SELECT source_id, version, at, reason FROM tombstones ORDER BY source_id"),
+    ).toEqual([
+      { source_id: 1, version: 2, at: "t", reason: "user-deleted" },
+      { source_id: 2, version: 1, at: "t", reason: "access-revoked" },
+    ]);
+    expect(columns("tombstones")).toEqual(["source_id", "version", "at", "reason"]);
+  });
+
+  it("takes the three agreed reasons and no other", () => {
+    seedV8();
+    migrate(db, migrations.slice(0, 9));
+    db.run("DELETE FROM tombstones");
+    for (const reason of ["user-deleted", "source-deleted", "access-revoked"]) {
+      db.run("INSERT INTO tombstones (source_id, version, at, reason) VALUES (1, 1, 't', ?)", [
+        reason,
+      ]);
+      db.run("DELETE FROM tombstones");
+    }
+    expect(() =>
+      db.run(
+        "INSERT INTO tombstones (source_id, version, at, reason) VALUES (1, 1, 't', 'deleted')",
+      ),
+    ).toThrow(/CHECK/);
+  });
+
+  it("keeps the tombstone's change sequence and version-blocking wiring", () => {
+    seedV8();
+    migrate(db, migrations.slice(0, 9));
+    const seq = () => db.all("SELECT change_seq FROM revisions")[0]?.change_seq;
+    const before = seq() as number;
+    db.run("UPDATE tombstones SET version = 3 WHERE source_id = 1");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'n')");
+    db.run(
+      "INSERT INTO tombstones (source_id, version, at, reason) VALUES (3, 1, 't', 'source-deleted')",
+    );
+    expect(seq()).toBe(before + 2);
+    expect(() =>
+      db.run(
+        "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, 3, 'h', 't', 'b')",
+      ),
+    ).toThrow(/tombstone/);
+  });
+
+  it("turns on the keyword index's secure-delete", () => {
+    migrate(db, migrations.slice(0, 9));
+    expect(db.all("SELECT v FROM keyword_index_config WHERE k = 'secure-delete'")).toEqual([
+      { v: 1 },
+    ]);
   });
 });

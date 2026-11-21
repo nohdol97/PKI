@@ -31,6 +31,8 @@ const requests: Partial<Record<RouteName, unknown>> = {
   syncConnector: { connectorId: "fixtures" },
   importJsonl: { text: readFileSync(resolve(FIXTURES, "../v02-mail.jsonl"), "utf8") },
   searchSources: { query: "등대" },
+  // the mail line importJsonl stored above
+  deleteSource: { connectorId: "conn-v02-mail", externalId: "<v02-target@mail.example.test>" },
   grantConsent: {
     providerId: "codex",
     allowedClasses: ["synthetic"],

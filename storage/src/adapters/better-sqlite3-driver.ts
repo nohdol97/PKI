@@ -3,6 +3,9 @@ import type { OpenSqlDriver, SqlRow } from "../sql-driver.ts";
 
 export const openBetterSqlite3: OpenSqlDriver = (path) => {
   const db = new Database(path);
+  // V02-R12: a deleted row's bytes are overwritten, not left in free space. The
+  // setting lives on the connection, so it is set on every open, never in a migration.
+  db.pragma("secure_delete = ON");
   return {
     exec: (sql) => void db.exec(sql),
     run: (sql, params = []) => {

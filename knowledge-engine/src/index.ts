@@ -6,6 +6,7 @@ export {
   recomputeDependencyDelay,
   type RuleOutcome,
 } from "./dependency-delay.ts";
+export { deleteSource, type DeletionRequest, type SourceDeletion } from "./deletion.ts";
 export {
   createExtractHandler,
   EXTRACT_HOLD_TOO_LARGE,

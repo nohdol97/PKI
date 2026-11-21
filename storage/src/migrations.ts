@@ -382,8 +382,43 @@ const v8: Migration = (db) =>
     ALTER TABLE jobs ADD COLUMN dropped_other INTEGER CHECK (dropped_other >= 0);
   `);
 
+// Schema v9 (V02-T08, V02-R12; reasons agreed with the I01 and I04 specs):
+// - A tombstone's reason tells who deleted: `user-deleted` (the screen's
+//   request), `source-deleted` (the Connector reported it gone) or
+//   `access-revoked`. A v8 `deleted` row cannot tell the two apart, so it becomes
+//   `user-deleted`, the one that never lets the source back (as I04 decides).
+//   The table is rebuilt under its own name (a rename would fail on the
+//   source_versions trigger that names it) and its triggers recreated.
+// - The keyword index's FTS5 `secure-delete` option, kept in the index itself:
+//   a deleted version's words leave the index's segments instead of staying
+//   behind as delete markers. PRAGMA secure_delete, which zeroes freed pages, is
+//   per connection and is set where a connection opens (the driver adapter).
+const v9: Migration = (db) =>
+  db.exec(`
+    CREATE TEMP TABLE tombstones_v8 AS SELECT source_id, version, at, reason FROM tombstones;
+    DROP TABLE tombstones;
+    CREATE TABLE tombstones (
+      source_id INTEGER PRIMARY KEY REFERENCES sources (id),
+      version INTEGER NOT NULL CHECK (version >= 1),
+      at TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK (reason IN ('user-deleted', 'source-deleted', 'access-revoked'))
+    );
+    INSERT INTO tombstones (source_id, version, at, reason)
+      SELECT source_id, version, at,
+        CASE reason WHEN 'deleted' THEN 'user-deleted' ELSE reason END
+      FROM tombstones_v8;
+    DROP TABLE tombstones_v8;
+    CREATE TRIGGER tombstones_insert AFTER INSERT ON tombstones BEGIN
+      UPDATE revisions SET change_seq = change_seq + 1;
+    END;
+    CREATE TRIGGER tombstones_update AFTER UPDATE ON tombstones BEGIN
+      UPDATE revisions SET change_seq = change_seq + 1;
+    END;
+    INSERT INTO keyword_index (keyword_index, rank) VALUES ('secure-delete', 1);
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8];
+export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8, v9];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

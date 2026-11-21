@@ -116,7 +116,12 @@ describe("job runner: version fence (V02-R5)", () => {
     const run = await runner(async () => {
       db.transaction(() => {
         db.run("DELETE FROM source_versions WHERE source_id = ?", [job.sourceId]);
-        writeTombstone(db, { sourceId: job.sourceId, version: 1, at: "x", reason: "deleted" });
+        writeTombstone(db, {
+          sourceId: job.sourceId,
+          version: 1,
+          at: "x",
+          reason: "source-deleted",
+        });
       });
       return { status: "done", write: marked(db, "deleted") };
     }).runOnce();

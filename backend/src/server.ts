@@ -39,8 +39,10 @@ import {
   type EgressControls,
   type UserActionIssuer,
 } from "@pki/providers";
+import { deleteSource } from "@pki/knowledge-engine";
 import {
   databaseEncryption,
+  findSourceId,
   findSources,
   listActiveInsights,
   listProviderCalls,
@@ -356,6 +358,14 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       options.importer ? options.importer(text) : { error: "connector-unavailable" },
     sources: async () => ({ sources: listSources(options.db) }),
     searchSources: async (input) => ({ sources: findSources(options.db, input.query) }),
+    // V02-R12: the user's deletion; until an explicit lift (none in V02) nothing brings it back
+    deleteSource: async ({ connectorId, externalId }) => {
+      const sourceId = findSourceId(options.db, connectorId, externalId);
+      if (sourceId === undefined) return { error: "not-found" };
+      const at = new Date().toISOString();
+      const { outcome } = deleteSource(options.db, sourceId, { reason: "user-deleted", at });
+      return { outcome: outcome === "deleted" ? "deleted" : "already-deleted" };
+    },
     activity: async () => ({ calls: listProviderCalls(options.db) }),
     settings: async () => settings(),
     writeSettings: async ({ openaiCompatible }) => {
