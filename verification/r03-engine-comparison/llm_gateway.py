@@ -21,6 +21,11 @@ for _p in (VERIF, R02_DIR):
 TEXT_SCHEMA = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"], "additionalProperties": False}
 
 
+def results_model_fact(model):
+    from common.results import model_fact
+    return model_fact(model)
+
+
 class GateBlocked(Exception):
     """The requested CLI profile has no CONTAINED_ON_OBSERVABLES record from R02."""
 
@@ -70,7 +75,7 @@ def delta(before, after):
             "by_purpose": {k: v for k, v in by.items() if v}}
 
 
-def gate_check(r02_result_path, profile_name, current_cli_version):
+def gate_check(r02_result_path, profile_name, current_cli_version, model=None):
     """Allow a CLI profile only if R02 recorded CONTAINED_ON_OBSERVABLES for it, on this CLI version."""
     import profiles as r02_profiles
     try:
@@ -87,11 +92,17 @@ def gate_check(r02_result_path, profile_name, current_cli_version):
     wanted = "R02-C3:negative:" + profile_name
     for check in result.get("checks", []):
         if check.get("id") == wanted:
-            data = check.get("data") or {}
+            data = check.get("facts") or {}
             if data.get("profile_verdict") != "CONTAINED_ON_OBSERVABLES":
                 raise GateBlocked("R02 verdict for {} is {}; automatic use stays blocked".format(profile_name, data.get("profile_verdict")))
-            if data.get("cli_version") != current_cli_version:
-                raise GateBlocked("R02 judged CLI version {} but {} is installed; re-run R02".format(data.get("cli_version"), current_cli_version))
+            recorded = data.get("cli_version")
+            if not (isinstance(recorded, str) and recorded and isinstance(current_cli_version, str) and current_cli_version) \
+                    or recorded in ("unknown", "not installed"):
+                raise GateBlocked("a CLI version is missing on one side (R02 record or this machine); containment is tied to a version")
+            if recorded != current_cli_version:
+                raise GateBlocked("R02 judged CLI version {} but {} is installed; re-run R02".format(recorded, current_cli_version))
+            if model is not None and data.get("model") != results_model_fact(model):
+                raise GateBlocked("R02 judged a different model than the one requested; re-run R02 for this model")
             return True
     raise GateBlocked("no R02 containment record for {}".format(profile_name))
 

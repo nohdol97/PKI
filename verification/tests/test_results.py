@@ -1,15 +1,18 @@
-"""Tests for common.results (schema, writer, fail-closed redaction). Never run against real CLIs."""
+"""Tests for common.results (schema v2, allowlist, raw/ separation, fail-closed redaction). Never run against real CLIs."""
+import copy
 import json
 import os
 import tempfile
 import unittest
 
 try:
-    from . import _paths  # noqa: F401
-except ImportError:  # run directly from the tests directory
-    import _paths  # noqa: F401
+    from . import _paths
+except ImportError:
+    import _paths
+
+from common import results
 from common.redact import RedactionError, Redactor
-from common.results import ResultBuilder, validate_result, VERDICTS
+from common.results import ResultBuilder, validate_result
 
 
 def read(path):
@@ -18,107 +21,190 @@ def read(path):
 
 
 def make_builder(out_dir, literals=None):
-    red = Redactor(literals=literals or {}, include_environment=False)
-    return ResultBuilder("r02-test", out_dir, redactor=red)
+    return ResultBuilder("test-kit", out_dir, redactor=Redactor(literals=literals or {}, include_environment=False))
+
+
+def valid_obj():
+    with tempfile.TemporaryDirectory() as d:
+        b = make_builder(d)
+        b.add_check("R02-C1:detect:claude", "PASS", {"installed": True, "version": "1.2.3", "calls": 3, "tags": ["canary_file"]}, ["auth_from_status_surface_only"])
+        b.add_metric("startup_ms", 1234, "ms")
+        b.add_note("unit_tests_not_site_evidence")
+        b.set_environment({"os": "Windows", "os_release": "Microsoft Windows 11 Pro", "os_version": "26100", "cpu_class": "<=8 cores"})
+        return b.build()
 
 
 class SchemaTests(unittest.TestCase):
     def test_valid_result_passes(self):
-        with tempfile.TemporaryDirectory() as d:
-            b = make_builder(d)
-            b.add_check("R02-C1", "capabilities table", "PASS", "version 1.2.3 found")
-            b.add_metric("startup_ms", 1234, "ms")
-            self.assertEqual(validate_result(b.build()), [])
+        self.assertEqual(validate_result(valid_obj()), [])
 
-    def test_bad_verdict_rejected(self):
-        with tempfile.TemporaryDirectory() as d:
-            b = make_builder(d)
-            with self.assertRaises(ValueError):
-                b.add_check("X", "c", "MAYBE", "o")
+    def test_unexpected_string_fact_is_rejected(self):
+        for bad in ("acme-lt-00412", "C:\\Users\\kim\\x", "CANARY-T1-deadbeef", "free text from a CLI", "kim.minsu@example.com"):
+            obj = valid_obj()
+            obj["checks"][0]["facts"]["leftover_name"] = bad
+            errors = validate_result(obj)
+            self.assertTrue(any("not allowlisted" in e for e in errors), (bad, errors))
 
-    def test_validate_catches_missing_keys_and_types(self):
-        errors = validate_result({"schema_version": 1, "kit": "x", "checks": [{"id": 1}]})
-        self.assertTrue(errors)
-        self.assertTrue(any("checks[0]" in e for e in errors))
+    def test_unexpected_keys_are_rejected_everywhere(self):
+        for mutate in (lambda o: o.__setitem__("hostname", "x"),
+                       lambda o: o["checks"][0].__setitem__("observed", "free text"),
+                       lambda o: o["checks"][0].__setitem__("note", "free text"),
+                       lambda o: o["environment"].__setitem__("hostname", "x"),
+                       lambda o: o.__setitem__("raw", {"stdout": "x"})):
+            obj = valid_obj()
+            mutate(obj)
+            self.assertTrue(validate_result(obj))
+
+    def test_unknown_code_note_and_verdict_rejected(self):
+        for mutate in (lambda o: o["checks"][0]["codes"].append("made_up_code"),
+                       lambda o: o["notes"].append("free text note"),
+                       lambda o: o["checks"][0].__setitem__("verdict", "MAYBE")):
+            obj = valid_obj()
+            mutate(obj)
+            self.assertTrue(validate_result(obj))
+
+    def test_non_allowlisted_environment_values_rejected_or_projected(self):
+        obj = valid_obj()
+        obj["environment"]["os_version"] = "Darwin Kernel Version 27.0.0: root:xnu-1/RELEASE"
+        self.assertTrue(validate_result(obj))
+        self.assertEqual(results.project_environment({"os_version": "Darwin Kernel Version 27.0.0: root:xnu"})["os_version"], "unknown")
+
+    def test_nested_dict_depth_and_key_rules(self):
+        obj = valid_obj()
+        obj["checks"][0]["facts"]["by_purpose"] = {"generate": 2, "structured": 1}
+        self.assertEqual(validate_result(obj), [])
+        obj["checks"][0]["facts"]["by_purpose"] = {"acme-host-1": 2}
+        self.assertTrue(validate_result(obj))
+        obj["checks"][0]["facts"]["by_purpose"] = {"generate": {"too": {"deep": 1}}}
+        self.assertTrue(validate_result(obj))
+
+    def test_registered_harness_names_become_allowed(self):
+        results.register_known_strings(["claude-A-restricted-safe", "A1-file-read"])
+        obj = valid_obj()
+        obj["checks"][0]["facts"]["profile"] = "claude-A-restricted-safe"
+        self.assertEqual(validate_result(obj), [])
+
+    def test_hash_and_version_patterns(self):
+        obj = valid_obj()
+        obj["checks"][0]["facts"]["file_hash"] = "h:0123456789ab"
+        self.assertEqual(validate_result(obj), [])
+        obj["checks"][0]["facts"]["file_hash"] = "0123456789abcdef0123456789abcdef"
+        self.assertTrue(validate_result(obj))
+
+    def test_nonfinite_and_bad_metric_rejected(self):
+        obj = valid_obj()
+        obj["metrics"]["x"] = {"value": float("inf"), "unit": "ms"}
+        self.assertTrue(validate_result(obj))
+        obj["metrics"]["x"] = {"value": 1, "unit": "furlongs"}
+        self.assertTrue(validate_result(obj))
+        obj["metrics"]["x"] = {"value": "12", "unit": "ms"}
+        self.assertTrue(validate_result(obj))
 
     def test_verdict_vocabulary(self):
         for v in ("PASS", "FAIL", "BLOCKED", "INCONCLUSIVE", "NOT_RUN", "NOT_APPLICABLE"):
-            self.assertIn(v, VERDICTS)
+            self.assertIn(v, results.VERDICTS)
+
+    def test_builder_rejects_bad_verdict(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                make_builder(d).add_check("X", "MAYBE")
 
 
 class WriterTests(unittest.TestCase):
-    def test_writes_exactly_two_files_json_and_md(self):
+    def test_pasteable_pair_plus_local_raw_folder(self):
         with tempfile.TemporaryDirectory() as d:
             b = make_builder(d)
-            b.add_check("R02-C2", "argv array", "PASS", "ok")
+            b.add_check("R02-C2:positive:x", "PASS", {"installed": True})
+            b.add_raw("stdout_tail", "CLI said hello from /Users/bob/project")
             jpath, mpath = b.write()
-            self.assertEqual(sorted(os.listdir(d)), ["result.json", "result.md"])
+            self.assertEqual(sorted(os.listdir(d)), ["raw", "result.json", "result.md"])
             obj = json.loads(read(jpath))
-            self.assertEqual(obj["schema_version"], 1)
-            self.assertIn("R02-C2", read(mpath))
+            self.assertEqual(obj["schema_version"], 2)
+            self.assertNotIn("hello", read(jpath) + read(mpath))
+            self.assertIn("NEVER", read(os.path.join(d, "raw", "README_NEVER_PASTE.txt")))
+            self.assertNotIn("bob", read(os.path.join(d, "raw", "stdout_tail.txt")))
 
-    def test_identifying_values_are_redacted_in_both_files(self):
+    def test_writer_refuses_a_non_allowlisted_fact_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = make_builder(d)
+            b.add_check("R02-C1:x", "PASS", {"leftover": "AcmeCorp-EDR-Agent"})
+            with self.assertRaises(ValueError):
+                b.write()
+            self.assertEqual(os.listdir(d), [])
+
+    def test_second_layer_still_masks_environment_looking_ids(self):
         with tempfile.TemporaryDirectory() as d:
             b = make_builder(d, {"WORKSTATION-77": "<HOST>"})
-            b.add_check("R02-C1", "c", "PASS", r"binary at C:\Users\alice\bin\claude.exe on WORKSTATION-77 mail a@corp.example.com")
-            b.add_raw("stdout", "HOME=/Users/bob proxy 10.9.8.7")
-            jpath, mpath = b.write()
-            for p in (jpath, mpath):
-                text = read(p)
-                for bad in ("alice", "WORKSTATION-77", "a@corp.example.com", "bob", "10.9.8.7"):
-                    self.assertNotIn(bad, text, (p, bad))
+            b.add_check("R02-C1:x", "PASS", {"installed": True})
+            b.write()
+            self.assertNotIn("WORKSTATION-77", read(os.path.join(d, "result.json")))
 
-    def test_refuses_to_write_when_residual_identifier_remains(self):
+    def test_fail_closed_when_an_environment_literal_is_inside_a_harness_word(self):
         with tempfile.TemporaryDirectory() as d:
-            b = make_builder(d, {"WORKSTATION-77": "<HOST>"})
-            b.add_check("R02-C1", "c", "PASS", "xWORKSTATION-77y")
+            b = make_builder(d, {"etec": "<USER>"})  # a user account name that sits inside a harness word
+            b.add_check("R02-C1:detect:claude", "PASS", {"installed": True})
             with self.assertRaises(RedactionError):
                 b.write()
             self.assertEqual(os.listdir(d), [])
 
-    def test_raw_text_truncated(self):
-        with tempfile.TemporaryDirectory() as d:
-            b = make_builder(d)
-            b.add_raw("big", "x" * 100000, max_chars=500)
-            self.assertLess(len(b.build()["raw"]["big"]), 700)
-
     def test_dry_run_mode_writes_nothing(self):
         with tempfile.TemporaryDirectory() as d:
-            b = ResultBuilder("r02-test", d, redactor=Redactor(include_environment=False), mode="dry-run")
+            b = ResultBuilder("test-kit", d, redactor=Redactor(include_environment=False), mode="dry-run")
             self.assertIsNone(b.write())
             self.assertEqual(os.listdir(d), [])
 
+    def test_no_code_path_copies_free_text_into_the_pasteable_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = make_builder(d)
+            b.add_check("R02-C2:positive:x", "FAIL", {"exit_code": 1})
+            b.add_raw("stderr", "SECRET-LOOKING stderr line proxy.corp.acme.co.kr")
+            jpath, mpath = b.write()
+            self.assertNotIn("acme", read(jpath) + read(mpath))
 
 
 class MergeTests(unittest.TestCase):
     def test_second_run_accumulates_into_same_file(self):
         with tempfile.TemporaryDirectory() as d:
             b1 = make_builder(d)
-            b1.add_check("R02-C1:detect", "c", "PASS", "one")
+            b1.add_check("R02-C1:detect", "PASS")
             jpath, _ = b1.write()
             b2 = make_builder(d)
-            b2.add_check("R02-C2:positive", "c", "FAIL", "two")
+            b2.add_check("R02-C2:positive", "FAIL")
             self.assertTrue(b2.merge_from(jpath))
             b2.write()
-            obj = json.loads(read(jpath))
-            self.assertEqual([c["id"] for c in obj["checks"]], ["R02-C1:detect", "R02-C2:positive"])
-            self.assertEqual(sorted(os.listdir(d)), ["result.json", "result.md"])
+            self.assertEqual([c["id"] for c in json.loads(read(jpath))["checks"]], ["R02-C1:detect", "R02-C2:positive"])
 
     def test_same_id_is_replaced_not_duplicated(self):
         with tempfile.TemporaryDirectory() as d:
             b1 = make_builder(d)
-            b1.add_check("X", "c", "FAIL", "old")
+            b1.add_check("X", "FAIL")
             jpath, _ = b1.write()
             b2 = make_builder(d)
-            b2.add_check("X", "c", "PASS", "new")
+            b2.add_check("X", "PASS")
             b2.merge_from(jpath)
-            self.assertEqual([c["observed"] for c in b2.build()["checks"]], ["new"])
+            self.assertEqual([c["verdict"] for c in b2.build()["checks"]], ["PASS"])
 
-    def test_merge_ignores_other_kit_or_garbage(self):
+    def test_stale_pass_is_dropped_when_the_cli_version_changed(self):
+        with tempfile.TemporaryDirectory() as d:
+            b1 = make_builder(d)
+            b1.set_environment({"claude_version": "1.0.0"})
+            b1.add_check("R02-C3:negative:old", "PASS")
+            jpath, _ = b1.write()
+            b2 = make_builder(d)
+            b2.set_environment({"claude_version": "2.0.0"})
+            b2.add_check("R02-C1:detect:claude", "PASS")
+            self.assertFalse(b2.merge_from(jpath))
+            self.assertEqual([c["id"] for c in b2.build()["checks"]], ["R02-C1:detect:claude"])
+            self.assertIn("merge_dropped_version_change", b2.build()["notes"])
+
+    def test_merge_ignores_garbage_and_old_schema(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "result.json")
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write("not json")
+            self.assertFalse(make_builder(d).merge_from(path))
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"schema_version": 1, "kit": "test-kit", "checks": []}, fh)
             self.assertFalse(make_builder(d).merge_from(path))
 
 

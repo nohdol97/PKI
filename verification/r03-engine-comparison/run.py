@@ -23,6 +23,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import secrets
 import sys
 import tempfile
 
@@ -32,7 +33,7 @@ for path in (HERE, VERIF):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from common import fingerprint  # noqa: E402
+from common import fingerprint, results as results_mod, runner as runner_mod  # noqa: E402
 from common.redact import Redactor  # noqa: E402
 from common.results import ResultBuilder  # noqa: E402
 
@@ -79,13 +80,21 @@ def builder(args):
 def finish(args, b, extra_env=None):
     env = fingerprint.environment_fingerprint()
     env.update(extra_env or {})
+    if runner_mod.passthrough_names():
+        env["passed_env_names"] = runner_mod.passthrough_names()
+        b.add_note("env_passthrough_opt_in")
     b.set_environment(env)
-    b.add_note("Written off-site. Unit tests of this kit are not site evidence (issue #37).")
+    b.add_note("unit_tests_not_site_evidence")
     b.merge_from(os.path.join(args.out, "result.json"))
     jpath, _ = b.write()
-    print("wrote {} and result.md".format(os.path.basename(jpath)))
+    print("wrote {} and result.md (pasteable) and raw/ (LOCAL ONLY, never paste)".format(os.path.basename(jpath)))
     for c in b.build()["checks"]:
         print("  {:13} {}".format(c["verdict"], c["id"]))
+
+
+def numeric_facts(d):
+    """Only booleans and numbers of a result dict become facts (free text never does)."""
+    return {k: v for k, v in d.items() if isinstance(v, (bool, int, float)) and k.replace("_", "").isalnum() and k[:1].islower()}
 
 
 def build_parser():
@@ -97,6 +106,7 @@ def build_parser():
             sp.add_argument("--out", default="r03-result")
         sp.add_argument("--redact", action="append", default=[])
         sp.add_argument("--dry-run", action="store_true")
+        sp.add_argument("--pass-env", action="append", default=[], metavar="NAME", help="opt in to pass a proxy/CA variable to children; names only are recorded")
 
     sub.add_parser("plan")
     sub.add_parser("install-steps")
@@ -126,6 +136,8 @@ def build_parser():
     sp.add_argument("--scorer-cmd", help="JSON array override; {predictions} is replaced. Default with --split: python3 eval/scorer/score.py <golden> {predictions} --split <split>")
     sp.add_argument("--timeout", type=float, default=7200.0)
     sp = sub.add_parser("embed-offline-check"); common(sp)
+    sp.add_argument("--outbound-blocked-attested", action="store_true",
+                    help="I blocked outbound network (firewall/VM) for this run; the kit cannot observe it, so without this flag the check stays INCONCLUSIVE")
     sp.add_argument("--model", choices=["bge-m3", "e5-base"], required=True)
     sp.add_argument("--backend", choices=sorted(WORKERS) + ["command"], default="fastembed")
     sp.add_argument("--worker-cmd")
@@ -188,15 +200,24 @@ def cmd_install_steps():
 def load_gateway(args):
     """Gateway backed by an R02-approved CLI profile. Raises GateBlocked when R02 did not clear it."""
     import profiles
-    from common import runner
     if not (args.r02_result and args.profile and args.model):
         raise SystemExit("error: --r02-result, --profile and --model are required for --llm-mode cli")
     profile = profiles.get_profile(profiles.load_profiles(), args.profile)
-    binary = os.path.abspath(args.cli_bin) if args.cli_bin else runner.resolve_executable(profile["cli"], runner.build_env())
+    binary = os.path.abspath(args.cli_bin) if args.cli_bin else runner_mod.resolve_executable(profile["cli"], runner_mod.build_env())
     if not binary:
         raise SystemExit("error: the {} CLI was not found; pass --cli-bin".format(profile["cli"]))
-    llm_gateway.gate_check(args.r02_result, args.profile, fingerprint.cli_version(binary))
+    llm_gateway.gate_check(args.r02_result, args.profile, fingerprint.cli_version(binary), args.model)
     return llm_gateway.LLMGateway(llm_gateway.CliBackend(profile, binary, args.model, args.timeout))
+
+
+FAILED_KIND_WORDS = ("probe", "stale", "forbidden", "export", "same_results")
+
+
+def check_kind(name):
+    for kind, needle in (("probe", "probe "), ("stale", "stale"), ("forbidden", "forbidden"), ("export", "export"), ("same_results", "same results")):
+        if needle in name:
+            return kind
+    return "other_check"
 
 
 def cmd_scenario(args):
@@ -214,25 +235,27 @@ def cmd_scenario(args):
         try:
             gateway = load_gateway(args)
         except llm_gateway.GateBlocked as exc:
-            b.add_check("R03-C2:gate:" + args.engine, "only R02-approved CLI profiles are used", "BLOCKED", str(exc))
+            b.add_check("R03-C2:gate:" + args.engine, "BLOCKED", {"gate_open": False})
+            b.add_raw("gate_reason_" + args.engine, str(exc))
             finish(args, b)
             return 4
     result = scenario_mod.run_scenario(adapter, records, probes, gateway, args.workdir)
     for step in result.steps:
-        verdict = "PASS" if step.ok else "FAIL"
-        unverified = [c.name for c in step.checks if c.ok is None]
-        b.add_check("R03-C1:{}:{}".format(args.engine, step.name), "scenario step " + step.name, verdict,
-                    "wall={:.2f}s llm_calls={} peak_rss={}MB store={}KB; failed: {}".format(
-                        step.wall_s, step.llm_calls, step.peak_rss_bytes // 2**20, step.store_bytes // 1024,
-                        [c.name for c in step.checks if c.ok is False] or "none"),
-                    note=("unverified: " + ", ".join(unverified)) if unverified else step.error,
-                    data={"checks": [c.__dict__ for c in step.checks], "llm_by_purpose": step.llm_by_purpose})
+        failed = [c for c in step.checks if c.ok is False]
+        b.add_check("R03-C1:{}:{}".format(args.engine, step.name), "PASS" if step.ok else "FAIL",
+                    {"wall_s": round(step.wall_s, 2), "llm_calls": step.llm_calls, "llm_by_purpose": dict(step.llm_by_purpose),
+                     "peak_rss_mb": step.peak_rss_bytes // 2 ** 20, "store_kb": step.store_bytes // 1024, "store_files": step.store_files,
+                     "checks_total": len(step.checks), "checks_failed": len(failed), "checks_unverified": sum(1 for c in step.checks if c.ok is None),
+                     "failed_kinds": sorted({check_kind(c.name) for c in failed}), "step_error": bool(step.error)})
+        b.add_raw("scenario_{}_{}".format(args.engine, step.name), "\n".join("{} {} {}".format(c.ok, c.name, c.detail) for c in step.checks) + "\n" + step.error)
     snap = gateway.snapshot()
-    b.add_metric("llm_calls_total:" + args.engine, snap["calls"])
-    b.add_metric("llm_latency_total_s:" + args.engine, round(snap["total_latency_s"], 3), "s")
+    b.add_metric("llm_calls_total_" + args.engine.replace("-", "_"), snap["calls"], "calls")
+    b.add_metric("llm_latency_total_" + args.engine.replace("-", "_"), round(snap["total_latency_s"], 3), "s")
     if result.not_implemented:
         step_name, message = result.not_implemented[0]
-        b.add_check("R03-C1:{}:{}".format(args.engine, step_name), "scenario step " + step_name, "NOT_RUN", message[:400])
+        b.add_check("R03-C1:{}:{}".format(args.engine, step_name if step_name in ("setup", "import", "extract", "relate", "incremental_edit", "delete", "restart") else "setup"),
+                    "NOT_RUN", {"not_implemented": True}, ["engine_not_implemented"])
+        b.add_raw("not_implemented_" + args.engine, message)
         finish(args, b)
         print("미구현, 배포처 후속: " + message)
         return NOTICE_EXIT
@@ -248,7 +271,8 @@ def cmd_cli_adapter(args):
     try:
         gateway = load_gateway(args)
     except llm_gateway.GateBlocked as exc:
-        b.add_check("R03-C2:cli-adapter", "engine LLM calls via an R02-approved CLI profile", "BLOCKED", str(exc))
+        b.add_check("R03-C2:cli-adapter", "BLOCKED", {"gate_open": False})
+        b.add_raw("gate_reason", str(exc))
         finish(args, b)
         return 4
     schema = {"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"], "additionalProperties": False}
@@ -256,12 +280,12 @@ def cmd_cli_adapter(args):
         out = gateway.complete("Reply with the single word ok in the answer field.", purpose="structured", schema=schema)
         ok = isinstance(out, dict) and "answer" in out
     except Exception as exc:
-        ok, out = False, type(exc).__name__
+        ok = False
+        b.add_raw("cli_adapter_error", type(exc).__name__)
     snap = gateway.snapshot()
-    b.add_check("R03-C2:cli-adapter", "engine LLM calls via an R02-approved CLI profile", "PASS" if ok else "FAIL",
-                "1 structured call: ok={} latency={:.1f}s".format(ok, snap["total_latency_s"]),
-                note="generate/structured only; embed and rerank have no CLI path (see gateway). Which kinds each engine really needs is confirmed in the scenario runs.",
-                data=snap)
+    b.add_check("R03-C2:cli-adapter", "PASS" if ok else "FAIL",
+                {"structured_call_ok": ok, "calls": snap["calls"], "failures": snap["failures"], "latency_s": round(snap["total_latency_s"], 1),
+                 "by_purpose": dict(snap["by_purpose"])})
     finish(args, b)
     return 0 if ok else 1
 
@@ -269,11 +293,13 @@ def cmd_cli_adapter(args):
 def cmd_shim(args):
     import shim_server
     if args.dry_run:
-        print("DRY RUN: would start a loopback shim (127.0.0.1) in front of an R02-approved CLI profile.")
+        print("DRY RUN: would start a loopback shim (127.0.0.1, bearer token required) in front of an R02-approved CLI profile.")
         return 0
     gateway = load_gateway(args)
-    server = shim_server.make_server(gateway, port=args.port)
-    print("shim listening on http://127.0.0.1:{}/v1  (dummy API key; Ctrl-C to stop)".format(server.server_address[1]))
+    token = secrets.token_urlsafe(16)
+    server = shim_server.make_server(gateway, port=args.port, token=token)
+    print("shim listening on http://127.0.0.1:{}/v1".format(server.server_address[1]))
+    print("use this value as the engine's API key (it is NOT a vendor key): {}".format(token))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -285,7 +311,7 @@ def cmd_shim(args):
 def cmd_embed(args):
     model = model_spec(args.model)
     if args.dry_run:
-        print("DRY RUN: would run model {} via backend {} on dataset {} (top-k {}), write predictions.jsonl and result files.".format(
+        print("DRY RUN: would run model {} via backend {} on dataset {} (top-k {}), write raw/predictions-*.jsonl and result files.".format(
             model["model_id"], args.backend, args.dataset, args.top_k))
         return 0
     b = builder(args)
@@ -300,77 +326,83 @@ def cmd_embed(args):
         docs = eb.load_sources(os.path.join(args.golden, "sources"), field_map)
         instances = eb.load_split_instances(args.golden, args.split, field_map) if args.split else None
         queries = eb.load_queries(os.path.join(args.golden, "labels"), field_map, instances)
-    os.makedirs(args.out, exist_ok=True)
-    pred = os.path.join(args.out, "predictions-{}.jsonl".format(args.model))
+    raw_dir = os.path.join(args.out, "raw")
+    os.makedirs(raw_dir, exist_ok=True)
+    pred = os.path.join(raw_dir, "predictions-{}.jsonl".format(args.model))
     try:
         res = eb.run_embedding_bench(model, worker_argv(args), docs, queries, pred, args.top_k, args.timeout, field_map)
     except NotImplementedError as exc:
         return notice(exc)
-    b.add_check("R03-C3:embed:" + args.model, "embedding speed/memory and predictions for the scorer", "PASS",
-                "docs={} queries={} dim={} load={}s docs/s={} peak_rss={}MB".format(
-                    res["docs"], res["queries"], res["dim"], res["load_s"], res["docs_per_s"], res["peak_rss_bytes"] // 2**20),
-                note="retrieval QUALITY is judged by eval/scorer/score.py on the predictions file, not here; license_claim={}".format(model["license_claim"]),
-                data=res)
+    b.add_check("R03-C3:embed:" + args.model, "PASS",
+                {"docs": res["docs"], "queries": res["queries"], "dim": res["dim"], "load_s": res["load_s"], "wall_s": res["wall_s"],
+                 "docs_per_s": res["docs_per_s"], "peak_rss_mb": res["peak_rss_bytes"] // 2 ** 20, "peak_process_count": res["peak_process_count"],
+                 "license_claim_is_unverified": True})
     scorer_cmd = args.scorer_cmd
     if not scorer_cmd and args.dataset == "golden" and args.split:
         score_py = os.path.join(os.path.dirname(VERIF), "eval", "scorer", "score.py")
         scorer_cmd = json.dumps([sys.executable, score_py, args.golden, "{predictions}", "--split", args.split])
     if scorer_cmd:
-        from common import runner
         argv = [a.replace("{predictions}", pred) for a in json.loads(scorer_cmd)]
-        scored = runner.run_process(argv, timeout_s=3600)
-        b.add_raw("scorer_output:" + args.model, scored.stdout + scored.stderr)
+        scored = runner_mod.run_process(argv, timeout_s=3600)
+        b.add_raw("scorer_output_" + args.model, scored.stdout + scored.stderr)
+        retrieval = {}
         try:
-            b.add_metric("scorer_retrieval:" + args.model, json.loads(scored.stdout)["retrieval"])
-        except (ValueError, KeyError):
+            retrieval = json.loads(scored.stdout)["retrieval"]
+        except (ValueError, KeyError, TypeError):
             pass
-        b.add_check("R03-C3:score:" + args.model, "eval/scorer/score.py ran on the predictions", "PASS" if scored.returncode == 0 else "FAIL",
-                    "exit={}".format(scored.returncode))
-    else:
-        b.add_note("Run: python3 eval/scorer/score.py <golden> {} --split <dev|eval>  (pass --split to this command to do it automatically).".format(os.path.basename(pred)))
+        b.add_check("R03-C3:score:" + args.model, "PASS" if scored.returncode == 0 and retrieval else "FAIL",
+                    {"scorer_exit": scored.returncode if scored.returncode is not None else -1,
+                     **{k: v for k, v in retrieval.items() if k in ("n_queries", "missing_predictions", "recall_at_k", "precision_at_k", "mrr") and isinstance(v, (int, float))}})
     finish(args, b)
     return 0
 
 
-def sha256_of(path):
+def sha12(path):
     h = hashlib.sha256()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
-    return h.hexdigest()
+    return "h:" + h.hexdigest()[:12]
 
 
 def cmd_embed_offline(args):
     model = model_spec(args.model)
     if args.dry_run:
-        print("DRY RUN: would re-run the worker with HF_HUB_OFFLINE=1 / TRANSFORMERS_OFFLINE=1 (names UNCONFIRMED) and scan {} for license files.".format(args.cache_dir))
+        print("DRY RUN: would re-run the worker with HF_HUB_OFFLINE=1 / TRANSFORMERS_OFFLINE=1 (names UNCONFIRMED, not in OSS_EVALUATION) and scan {} for license files.".format(args.cache_dir))
         return 0
     b = builder(args)
     docs, probes = load_fixtures()
     queries = [{"query_id": p["id"], "query": p["query"]} for p in probes["probes"]]
     with tempfile.TemporaryDirectory() as d:
         try:
-            res = eb.run_embedding_bench(model, worker_argv(args), docs[:3], queries[:1], os.path.join(d, "p.jsonl"), 3, 1800,
-                                         extra_env={"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
-            ok, note = True, "worker loaded and encoded with offline variables set (set the site firewall to block outbound traffic too; the kit cannot observe connections)"
+            eb.run_embedding_bench(model, worker_argv(args), docs[:3], queries[:1], os.path.join(d, "p.jsonl"), 3, 1800,
+                                   extra_env={"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+            worker_ok = True
         except NotImplementedError as exc:
             return notice(exc)
         except RuntimeError as exc:
-            ok, res, note = False, {}, str(exc)[:300]
-    lic = []
+            worker_ok = False
+            b.add_raw("offline_error_" + args.model, str(exc)[:500])
+    lic_hashes, total = [], 0
     if args.cache_dir and os.path.isdir(args.cache_dir):
-        total = 0
         for root, _dirs, files in os.walk(args.cache_dir):
             for f in files:
-                p = os.path.join(root, f)
-                total += os.path.getsize(p)
+                path = os.path.join(root, f)
+                total += os.path.getsize(path)
                 if f.upper().startswith(("LICENSE", "NOTICE")) or f.lower() == "readme.md":
-                    lic.append({"file": f, "bytes": os.path.getsize(p), "sha256": sha256_of(p)})
-        b.add_metric("model_cache_bytes:" + args.model, total, "bytes")
-    b.add_check("R03-C3:offline:" + args.model, "model works from the local cache without network; license files recorded",
-                "PASS" if ok else "FAIL", note, data={"license_files": lic, "license_claim": model["license_claim"]})
+                    lic_hashes.append(sha12(path))
+        b.add_metric("model_cache_bytes_" + args.model.replace("-", "_"), total, "bytes")
+    if not worker_ok:
+        verdict, codes = "FAIL", []
+    elif args.outbound_blocked_attested:
+        verdict, codes = "PASS", ["offline_attested_by_operator"]
+    else:
+        verdict, codes = "INCONCLUSIVE", ["offline_not_observed"]
+    b.add_check("R03-C3:offline:" + args.model, verdict,
+                {"worker_ok_with_offline_variables": worker_ok, "outbound_blocked_attested": bool(args.outbound_blocked_attested),
+                 "license_file_count": len(lic_hashes), "license_file_hashes": lic_hashes, "license_claim_is_unverified": True}, codes)
     finish(args, b)
-    return 0 if ok else 1
+    return 0 if worker_ok else 1
 
 
 def cmd_storage(args):
@@ -380,15 +412,15 @@ def cmd_storage(args):
     factory = store_mod.SqliteProductStore if args.store == "sqlite" else store_mod.CortexDbStore
     os.makedirs(args.workdir, exist_ok=True)
     try:
-        results = store_mod.run_store_checks(factory, os.path.join(args.workdir, "store.sqlite"))
+        outcomes = store_mod.run_store_checks(factory, os.path.join(args.workdir, "store.sqlite"))
     except NotImplementedError as exc:
         return notice(exc)
     b = builder(args)
-    for r in results:
-        b.add_check("R03-C4:store:{}:{}".format(args.store, r["name"]), "temporal store check " + r["name"],
-                    "PASS" if r["ok"] else "FAIL", r["detail"][:300])
+    for r in outcomes:
+        b.add_check("R03-C4:store:{}:{}".format(args.store, r["name"]), "PASS" if r["ok"] else "FAIL", {"ok": bool(r["ok"])})
+        b.add_raw("store_{}_{}".format(args.store, r["name"]), r["detail"])
     finish(args, b)
-    return 0 if all(r["ok"] for r in results) else 1
+    return 0 if outcomes and all(r["ok"] for r in outcomes) else 1
 
 
 def cmd_durability(args):
@@ -398,11 +430,10 @@ def cmd_durability(args):
     if args.target != "sqlite":
         return notice(NotImplementedError("R03-S1..S3: durability checks on engine '{}' need the adapter implementation".format(args.target)))
     b = builder(args)
-    base = args.workdir
     checks = ("crash", "concurrent", "single-writer") if args.check == "all" else (args.check,)
     ok_all = True
     for name in checks:
-        d = os.path.join(base, name)
+        d = os.path.join(args.workdir, name)
         os.makedirs(d, exist_ok=True)
         if name == "crash":
             res = durability.crash_check("sqlite", d)
@@ -411,13 +442,21 @@ def cmd_durability(args):
         else:
             res = durability.single_writer_check(durability.SqliteTarget(), d)
         ok_all &= res["ok"]
-        b.add_check("R03-C4:durability:{}:sqlite".format(name), "durability check " + name, "PASS" if res["ok"] else "FAIL", json.dumps(res)[:400], data=res)
+        facts = numeric_facts(res)
+        facts["integrity_error_count"] = len(res.get("integrity_errors", []))
+        b.add_check("R03-C4:durability:{}:sqlite".format(name), "PASS" if res["ok"] else "FAIL", facts, ["crash_check_sqlite_only"] if name == "crash" else [])
     finish(args, b)
     return 0 if ok_all else 1
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    try:
+        if getattr(args, "pass_env", None):
+            runner_mod.set_passthrough(args.pass_env)
+    except ValueError as exc:
+        print("error: {}".format(exc), file=sys.stderr)
+        return 2
     try:
         if args.command == "plan":
             return cmd_plan()

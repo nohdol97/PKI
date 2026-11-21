@@ -26,3 +26,9 @@ __pycache__/
 .idea/
 .vscode/
 *.swp
+
+# Verification kit: local-only raw output (never paste, never commit) and default result folders
+raw/
+r02-result/
+r03-result/
+r04-result/

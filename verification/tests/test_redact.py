@@ -33,10 +33,10 @@ class RedactTextTests(unittest.TestCase):
             self.assertNotIn("carol", out)
             self.assertNotIn("/root/", out)
 
-    def test_other_drive_paths_become_placeholder_but_system_dirs_stay(self):
-        out = self.r.redact_text(r"D:\work\secret-project\src and C:\Program Files\Tool\t.exe")
+    def test_every_drive_path_becomes_a_placeholder_including_program_files(self):
+        out = self.r.redact_text(r"D:\work\secret-project\src and C:\Program Files\AcmeCorp SecretAgent\agent.exe")
         self.assertNotIn("secret-project", out)
-        self.assertIn(r"C:\Program Files\Tool\t.exe", out)
+        self.assertNotIn("AcmeCorp", out)
 
     def test_unc_path(self):
         out = self.r.redact_text(r"copy \\fileserver01\share\docs\a.txt now")
@@ -54,8 +54,10 @@ class RedactTextTests(unittest.TestCase):
         self.assertIn("127.0.0.1:8080", out)
 
     def test_url_hosts_redacted_but_loopback_kept(self):
-        out = self.r.redact_text("GET https://internal.corp.example/path?q=1 and http://127.0.0.1:5000/x and http://localhost:1/y")
+        out = self.r.redact_text("GET https://internal.corp.example/display/SECRET/Plan?user=kim.minsu and http://127.0.0.1:5000/x and http://localhost:1/y")
         self.assertNotIn("internal.corp.example", out)
+        self.assertNotIn("SECRET", out)
+        self.assertNotIn("kim.minsu", out)
         self.assertIn("http://127.0.0.1:5000/x", out)
         self.assertIn("http://localhost:1/y", out)
 
@@ -83,7 +85,7 @@ class RedactTextTests(unittest.TestCase):
         self.assertNotIn("zzz", out)
 
     def test_harmless_key_value_pairs_are_not_over_redacted(self):
-        text = "auth=logged_in max_tokens=3 version=1.2.3 state: ok"
+        text = "auth=logged_in count=3 version=1.2.3 state: ok"
         self.assertEqual(self.r.redact_text(text), text)
 
     def test_literal_hostname_case_insensitive_and_bounded(self):
@@ -96,7 +98,7 @@ class RedactTextTests(unittest.TestCase):
         self.assertNotIn("426614174000", out)
 
     def test_synthetic_canary_and_versions_survive(self):
-        text = "canary CANARY-T1-7f3a9c ok version 2.1.330 sha " + "ab" * 32
+        text = "canary CANARY-T1-7f3a9c ok version 2.1.330 hash h:0123456789ab 2026-11-21T10:12:00Z"
         self.assertEqual(self.r.redact_text(text), text)
 
     def test_idempotent(self):
@@ -135,6 +137,81 @@ class EnvironmentLiteralTests(unittest.TestCase):
         r = Redactor(literals={"WORKSTATION-77": "<HOST>"}, include_environment=False)
         out = r.redact_text("xWORKSTATION-77y")
         self.assertEqual(r.residual_literals(out), ["WORKSTATION-77"])
+
+
+class ReviewerLeakCaseTests(unittest.TestCase):
+    """Every leak form the independent review (R1-R6) verified against the first redactor."""
+
+    def setUp(self):
+        self.r = Redactor(literals={"WORKSTATION-77": "<HOST>"}, include_environment=False)
+
+    def gone(self, raw, *needles):
+        out = self.r.redact_text(raw)
+        for n in needles:
+            self.assertNotIn(n, out, (raw, out))
+
+    def test_json_quoted_secrets(self):
+        self.gone('{"api_key": "zzz-live-123456789"}', "zzz-live")
+        self.gone('{"password": "p4ssw0rd-xyz"}', "p4ssw0rd")
+        self.gone('{"access_token": "ya29.A0ARrdaM-abc", "refresh_token": "1//0gXYZsecretvalue"}', "ya29", "secretvalue")
+
+    def test_key_names_that_contain_a_secret_word(self):
+        self.gone("aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI")
+        self.gone("client_secret=GOCSPX-abcdefghijklmnop", "GOCSPX")
+        self.gone("x-api-token: abc123def456", "abc123def456")
+
+    def test_authorization_headers_consume_the_credential(self):
+        self.gone("Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA")
+        self.gone("Authorization: Bearer abcdef0123456789", "abcdef0123456789")
+        self.gone("Proxy-Authorization: Basic Zm9vOmJhcg==", "Zm9vOmJhcg")
+
+    def test_cookies(self):
+        self.gone("Cookie: sessionid=abc123XYZ; csrftoken=qq99", "abc123XYZ", "qq99")
+        self.gone("Set-Cookie: SID=topsecretvalue; Path=/", "topsecretvalue")
+
+    def test_google_key_pem_and_long_hex(self):
+        self.gone("key=AI" + "zaSyA1234567890abcdefghijklmnopqrstu", "zaSyA1234567890")
+        self.gone("-----BEGIN RSA " + "PRIVATE KEY-----\nMIIEowIBAAKCAQEAxyz\n-----END RSA " + "PRIVATE KEY-----", "MIIEowIBAAKCAQEAxyz")
+        self.gone("secretkey " + "ab12" * 16, "ab12ab12ab12")
+        self.gone("sk-short123", "short123")
+
+    def test_aws_secret_after_akia_id(self):
+        self.gone("AK" + "IA" + "ABCDEFGHIJKLMNOP" + " wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "ABCDEFGHIJKLMNOP")
+
+    def test_bare_hosts_fqdn_hostport_and_proxies(self):
+        self.gone("resolver: acme-lt-00412.corp.acme.co.kr", "acme-lt-00412", "corp.acme.co.kr")
+        self.gone("proxy.corp.acme.co.kr:8080", "proxy.corp.acme.co.kr")
+        self.gone('{"proxy": "proxy.corp.acme.co.kr:3128"}', "corp.acme.co.kr")
+        self.gone("using proxy host:3128", "host:3128")
+        self.gone("//fileserver/share/docs", "fileserver")
+        self.gone("CN=Kim Minsu,OU=Staff,DC=corp,DC=acme,DC=local", "Kim", "acme")
+
+    def test_paths_with_spaces_and_registry(self):
+        self.gone(r"D:\Corp Data\ProjectFalcon\plan.docx", "Corp", "ProjectFalcon")
+        self.gone(r"C:\Documents and Settings\kim.minsu\x", "kim.minsu", "Settings")
+        self.gone(r"C:\ProgramData\AcmeCorp\policy.json", "AcmeCorp")
+        self.gone(r"HKCU:\Software\AcmeCorp\Agent", "AcmeCorp")
+        self.gone("opened /srv/acme/secret-share/plan.txt now", "secret-share")
+
+    def test_ipv6_mac_sid_undashed_uuid_and_idn_mail(self):
+        self.gone("addr 2001:db8:85a3::8a2e:370:7334 x", "2001:db8")
+        self.gone("fe80::1ff:fe23:4567:890a", "fe80")
+        self.gone("mac 00:1A:2B:3C:4D:5E", "00:1A:2B")
+        self.gone("sid S-1-5-21-3623811015-3361044348-30300820-1013", "3623811015")
+        self.gone("id 123e4567e89b12d3a456426614174000", "426614174000")
+        self.gone("\ubbfc\uc218@acme.\ud55c\uad6d x".encode().decode("unicode_escape") if False else "kim@xn--acme-bz1c.example", "kim@")
+
+    def test_bare_username_or_host_literal_is_masked_not_just_flagged(self):
+        r = Redactor(literals={"kimms": "<USER>", "WIN11-VM-KIMMS": "<HOST>"}, include_environment=False)
+        out = r.redact_text("hello KIMMS from win11-vm-kimms")
+        self.assertNotIn("KIMMS", out.upper().replace("<USER>", "").replace("<HOST>", ""))
+
+    def test_short_literals_whole_word_only(self):
+        r = Redactor(literals={"jo": "<USER>"}, include_environment=False)
+        self.assertEqual(r.redact_text("jo owns the job"), "<USER> owns the job")
+        r.assert_clean("job")
+        with self.assertRaises(RedactionError):
+            r.assert_clean("jo")
 
 
 if __name__ == "__main__":

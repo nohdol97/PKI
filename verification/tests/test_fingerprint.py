@@ -85,6 +85,16 @@ class ProcinfoTests(unittest.TestCase):
         rows = procinfo.parse_windows_table(text)
         self.assertEqual(rows[1], procinfo.ProcRow(812, 4, 2000000, 1.0))
 
+    def test_windows_table_with_creation_time(self):
+        rows = procinfo.parse_windows_table("812,4,2000000,10000000,133500000000000000\r\n")
+        self.assertEqual(rows[0].created, 133500000000000000)
+
+    def test_recycled_parent_pid_is_not_a_parent(self):
+        # pid 7 was created long before its recorded "child" 9 -> pid 9's parent id 7 is a recycled/ stale id
+        rows = [procinfo.ProcRow(1, 0, 0, 0, 100), procinfo.ProcRow(7, 1, 0, 0, 500), procinfo.ProcRow(9, 7, 0, 0, 200)]
+        self.assertEqual(procinfo.descendants_of(rows, 1), [7])
+        self.assertEqual(procinfo.descendants_of(rows, 7), [])
+
     def test_descendants_from_rows(self):
         rows = [procinfo.ProcRow(1, 0, 0, 0), procinfo.ProcRow(2, 1, 0, 0), procinfo.ProcRow(3, 2, 0, 0), procinfo.ProcRow(9, 8, 0, 0)]
         self.assertEqual(sorted(procinfo.descendants_of(rows, 1)), [2, 3])

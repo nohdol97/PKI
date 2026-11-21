@@ -84,6 +84,9 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn("unconfirmed", result.not_implemented[0][1])
         self.assertFalse(result.all_ok)
 
+    def test_a_step_without_any_check_is_not_a_pass(self):
+        self.assertFalse(scenario.StepResult("import").ok)
+
     def test_dir_size(self):
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "a"), "wb") as fh:

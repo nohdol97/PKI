@@ -3,8 +3,10 @@
   (no PowerShell was available where this was written). Windows PowerShell 5.1 syntax only.
   Dot-source from the numbered scripts:  . (Join-Path $PSScriptRoot 'common.ps1')
 
-  Result object = the same schema as the R02/R03 result.json (schema_version 1). Every string is passed
-  through Redact-Text before it is written. sanitize_result.py masks it a second time on another machine.
+  These scripts write a RAW result (raw\result-raw.json) plus local-only raw files under $OutDir\raw. The raw result is
+  NOT pasteable. `python run.py sanitize` projects it onto the allowlisted schema (harness-generated values only), which
+  is the only thing that may be pasted. Free text, names and paths therefore never reach the pasteable file even if a
+  script here is wrong. Facts passed to Add-Check should be booleans, numbers, or words from the fixed vocabulary.
 #>
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -40,46 +42,6 @@ function Assert-InstallerConfigured {
     return $p
 }
 
-# ---- redaction (first line of defence; sanitize_result.py is the second) --------------------------
-function Redact-Text {
-    param([string]$Text)
-    if ([string]::IsNullOrEmpty($Text)) { return $Text }
-    $literals = @(
-        @($env:USERPROFILE, '<HOME>'),
-        @($env:COMPUTERNAME, '<HOST>'),
-        @($env:USERDOMAIN, '<HOST>'),
-        @($env:USERNAME, '<USER>')
-    )
-    foreach ($pair in $literals) {
-        $lit = [string]$pair[0]
-        if ($lit.Length -ge 3) {
-            $Text = [regex]::Replace($Text, [regex]::Escape($lit), [string]$pair[1], [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-        }
-    }
-    $Text = [regex]::Replace($Text, '[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s"'']+', '<HOME>')
-    $Text = [regex]::Replace($Text, '\\\\[^\\\s"'']+\\[^\s"'']*', '<UNC>')
-    $Text = [regex]::Replace($Text, '[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}', '<EMAIL>')
-    $Text = [regex]::Replace($Text, '\b(?!127\.)(?:\d{1,3}\.){3}\d{1,3}\b', '<IP>')
-    return $Text
-}
-
-function Redact-Object {
-    param($Value)
-    if ($null -eq $Value) { return $null }
-    if ($Value -is [string]) { return (Redact-Text $Value) }
-    if ($Value -is [System.Collections.IDictionary]) {
-        $copy = [ordered]@{}
-        foreach ($k in $Value.Keys) { $copy[(Redact-Text ([string]$k))] = Redact-Object $Value[$k] }
-        return $copy
-    }
-    if ($Value -is [System.Collections.IEnumerable]) {
-        $list = New-Object System.Collections.ArrayList
-        foreach ($item in $Value) { [void]$list.Add((Redact-Object $item)) }
-        return ,$list.ToArray()
-    }
-    return $Value
-}
-
 # ---- result object -----------------------------------------------------------------------------
 function New-Result {
     return [ordered]@{
@@ -96,11 +58,11 @@ function New-Result {
 }
 
 function Add-Check {
-    param($Result, [string]$Id, [string]$Criterion, [string]$Verdict, [string]$Observed, [string]$Note = '', $Data = $null)
+    # Facts: booleans, numbers, or short words from the fixed vocabulary (anything else is dropped by sanitize_result.py).
+    param($Result, [string]$Id, [string]$Verdict, $Facts = @{}, [string[]]$Codes = @())
     $valid = @('PASS', 'FAIL', 'BLOCKED', 'INCONCLUSIVE', 'NOT_RUN', 'NOT_APPLICABLE')
     if ($valid -notcontains $Verdict) { throw "bad verdict $Verdict" }
-    $check = [ordered]@{ id = $Id; criterion = $Criterion; verdict = $Verdict; observed = $Observed; note = $Note }
-    if ($null -ne $Data) { $check['data'] = $Data }
+    $check = [ordered]@{ id = $Id; verdict = $Verdict; facts = $Facts; codes = @($Codes) }
     [void]$Result.checks.Add($check)
 }
 
@@ -110,22 +72,35 @@ function Add-Metric {
 }
 
 function Add-Note {
-    param($Result, [string]$Text)
-    [void]$Result.notes.Add($Text)
+    param($Result, [string]$Code)
+    [void]$Result.notes.Add($Code)
+}
+
+function Get-RawDir {
+    param([string]$OutDir)
+    $dir = Join-Path $OutDir 'raw'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Set-Content -LiteralPath (Join-Path $dir 'README_NEVER_PASTE.txt') -Value 'LOCAL ONLY. Raw output, names and snapshots. Never paste or commit this folder.' -Encoding UTF8
+    return $dir
+}
+
+function Save-RawFile {
+    param([string]$OutDir, [string]$Name, $Object)
+    $dir = Get-RawDir $OutDir
+    ConvertTo-Json -InputObject $Object -Depth 6 | Set-Content -LiteralPath (Join-Path $dir $Name) -Encoding UTF8
 }
 
 function Save-Result {
-    # Merges into an existing result.json of the same kit (same check ids are replaced), redacts, writes UTF-8 without BOM.
+    # Writes raw\result-raw.json (NOT pasteable). Merges with an earlier raw result of the same kit (same ids replaced).
     param($Result, [string]$OutDir)
-    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-    $path = Join-Path $OutDir 'result.json'
+    $dir = Get-RawDir $OutDir
+    $path = Join-Path $dir 'result-raw.json'
     if (Test-Path -LiteralPath $path) {
         $old = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
         if ($old.kit -eq $script:KitName) {
             $have = @($Result.checks | ForEach-Object { $_.id })
-            $kept = @($old.checks | Where-Object { $have -notcontains $_.id })
             $merged = New-Object System.Collections.ArrayList
-            foreach ($c in $kept) { [void]$merged.Add($c) }
+            foreach ($c in @($old.checks | Where-Object { $have -notcontains $_.id })) { [void]$merged.Add($c) }
             foreach ($c in $Result.checks) { [void]$merged.Add($c) }
             $Result.checks = $merged
             foreach ($prop in $old.metrics.PSObject.Properties) {
@@ -133,10 +108,16 @@ function Save-Result {
             }
         }
     }
-    $clean = Redact-Object $Result
-    $json = ConvertTo-Json -InputObject $clean -Depth 8
+    $json = ConvertTo-Json -InputObject $Result -Depth 8
     [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding($false)))
-    Write-Host ("wrote {0}  (run sanitize_result.py on it before pasting anything)" -f $path)
+    Write-Host 'wrote the RAW result (local only). Next, on any machine with Python: python run.py sanitize --raw <that file> --out <folder>'
+}
+
+function Assert-Loopback {
+    param([string]$Url)
+    if ([string]::IsNullOrEmpty($Url)) { return }
+    $u = [Uri]$Url
+    if (@('127.0.0.1', 'localhost', '::1', '[::1]') -notcontains $u.Host) { throw "URL must be loopback only: $Url" }
 }
 
 # ---- environment fingerprint (nothing identifying) ----------------------------------------------
@@ -203,22 +184,38 @@ function Get-TreeStats {
 
 function Get-Percentile {
     param([double[]]$Values, [double]$P)
-    if ($Values.Count -eq 0) { return 0 }
+    if ($Values.Count -eq 0) { return $null }
     $sorted = $Values | Sort-Object
     $index = [math]::Min($sorted.Count - 1, [math]::Ceiling($P / 100.0 * $sorted.Count) - 1)
     return $sorted[[math]::Max(0, $index)]
 }
 
+function Get-ProductProcesses {
+    # Exact names only (wildcards refused), and only processes whose executable lives under the install folder.
+    param([string]$InstallDir, [string[]]$Names)
+    $found = @()
+    foreach ($n in $Names) {
+        if ($n -match '[\*\?\[]') { throw "wildcards are not allowed in process names: $n" }
+        foreach ($p in @(Get-Process -Name ($n -replace '\.exe$', '') -ErrorAction SilentlyContinue)) {
+            $path = $null
+            try { $path = $p.Path } catch { }
+            if ($path -and $path.StartsWith($InstallDir, [System.StringComparison]::OrdinalIgnoreCase)) { $found += $p }
+        }
+    }
+    return $found
+}
+
 function Stop-ProductProcesses {
-    param([string]$ProcessName, [string[]]$ExtraNames = @())
-    foreach ($n in (@($ProcessName) + $ExtraNames)) {
-        Get-Process -Name ($n -replace '\.exe$', '') -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    param([string]$InstallDir, [string]$ProcessName, [string[]]$ExtraNames = @())
+    foreach ($p in (Get-ProductProcesses $InstallDir (@($ProcessName) + $ExtraNames))) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
     }
 }
 
 function Test-ReadyProbe {
     # Returns @{ api = ms or $null; window = ms or $null } polling until timeout.
     param($Process, $Ready, [System.Diagnostics.Stopwatch]$Watch)
+    Assert-Loopback ([string]$Ready.Url)
     $result = @{ api = $null; window = $null }
     $timeoutMs = [int]$Ready.TimeoutSeconds * 1000
     while ($Watch.ElapsedMilliseconds -lt $timeoutMs) {

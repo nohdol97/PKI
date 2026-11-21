@@ -53,7 +53,7 @@ def main(argv=None):
         print("Run on a clean Windows 11 (VM snapshot), in PowerShell, from the scripts/ folder. Needs config.json and a V01 installer.")
         for n, (name, what, crit) in enumerate(STEPS, 1):
             print("{}. {:30} {}  [{}]".format(n, name, what, crit))
-        print("then: python run.py sanitize --raw <r04-result>/result.json --out <folder>   (on any machine with Python)")
+        print("then: python run.py sanitize --raw <r04-result>/raw/result-raw.json --out <folder>   (on any machine with Python; paste only <folder>/result.*)")
         print("Manual items (SmartScreen, tray, browser/Electron screens, signing/update decisions): CHECKLIST_MANUAL.md")
         return 0
     return sanitize_result.main(["--raw", args.raw, "--out", args.out] + sum([["--redact", x] for x in args.redact], []))

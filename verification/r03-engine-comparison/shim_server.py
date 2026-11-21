@@ -20,9 +20,10 @@ def _flatten(content):
 
 
 class _Server(http.server.ThreadingHTTPServer):
-    def __init__(self, addr, handler, gateway):
+    def __init__(self, addr, handler, gateway, token=None):
         super().__init__(addr, handler)
         self.gateway = gateway
+        self.token = token
         self.unsupported_requests = []
 
 
@@ -38,7 +39,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _authorized(self):
+        token = self.server.token
+        return token is None or self.headers.get("Authorization") == "Bearer " + token
+
     def do_POST(self):
+        if not self._authorized():
+            return self._send(401, {"error": {"message": "missing or wrong bearer token"}})
         length = int(self.headers.get("Content-Length") or 0)
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
@@ -70,5 +77,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     do_GET = do_POST
 
 
-def make_server(gateway, port=0):
-    return _Server(("127.0.0.1", port), _Handler, gateway)
+def make_server(gateway, port=0, token=None):
+    """Loopback only. With a token, every request must carry `Authorization: Bearer <token>` (another local
+    process cannot use the CLI login through the shim without it)."""
+    return _Server(("127.0.0.1", port), _Handler, gateway, token)

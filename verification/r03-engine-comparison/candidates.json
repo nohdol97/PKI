@@ -1,4 +1,5 @@
 {
+  "hardening": "Pins below are top-level versions only. Before installing, record the sha256 of the downloaded artifact and compare it with the project page; after installing, keep the full pip freeze (or go.sum) locally in raw/. A hash-pinned requirements file with --require-hashes is the stronger form and must be produced on site.",
   "notice": "NEVER EXECUTED. Pins come from docs/OSS_EVALUATION.md (2.1 and 3.1 tables). Every install step needs the deployment site's approval for network installs and is run by the operator, never by this kit.",
   "candidates": [
     {

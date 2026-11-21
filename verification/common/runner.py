@@ -29,6 +29,11 @@ FORBIDDEN_ENV_PREFIXES = (
     "ANTHROPIC_", "OPENAI_", "CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "AWS_", "AZURE_", "GOOGLE_",
     "GITHUB_", "GH_", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN",
 )
+PASSTHROUGH_ALLOWED = (
+    "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "no_proxy", "all_proxy",
+    "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+)
+_passthrough = []
 _CMD_META = set('"%^&|<>!\r\n')
 
 
@@ -48,6 +53,19 @@ class RunResult:
     cpu_seconds: float = 0.0
 
 
+def set_passthrough(names):
+    """Operator opt-in (--pass-env): copy these proxy / CA variables from the parent into child environments.
+    Only the names in PASSTHROUGH_ALLOWED are accepted; values are never logged or recorded."""
+    bad = [n for n in names if n not in PASSTHROUGH_ALLOWED]
+    if bad:
+        raise ValueError("not an allowed pass-through variable: " + ", ".join(bad))
+    _passthrough[:] = list(names)
+
+
+def passthrough_names():
+    return list(_passthrough)
+
+
 def build_env(extra=None):
     """Minimal environment: allowlisted names from os.environ plus `extra`.
 
@@ -55,6 +73,9 @@ def build_env(extra=None):
     never passed: not from os.environ (the allowlist excludes them) and not through `extra`.
     """
     env = {k: v for k, v in os.environ.items() if k.upper() in ENV_ALLOWLIST}
+    for name in _passthrough:
+        if name in os.environ:
+            env[name] = os.environ[name]
     for name, value in (extra or {}).items():
         if name.upper().startswith(FORBIDDEN_ENV_PREFIXES):
             raise ValueError("refusing to pass credential-like environment variable to a child process: " + name)

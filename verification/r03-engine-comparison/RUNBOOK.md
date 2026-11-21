@@ -23,7 +23,7 @@
 
 1. **R02가 끝나 있어야 합니다.** 엔진의 LLM 호출은 R02에서 `CONTAINED_ON_OBSERVABLES`로 판정된 CLI 프로필만 씁니다. 판정이 없거나 BLOCKED이거나 CLI 버전이 달라졌으면 하네스가 실행을 거부합니다(`--r02-result`).
 2. 평가 데이터 `eval/golden/`와 채점기 `eval/scorer/`가 이 저장소에 있어야 합니다(`docs/r05-golden-dataset` 브랜치 기준으로 필드 이름을 확인해 반영했습니다). 레코드는 `sources/*.jsonl`의 `id`/`content`/`version`/`operation`, 질문은 `labels/qa.jsonl`의 `label_id`/`question`/`scenario_instance`, 분할은 `splits.json`의 `splits.dev|eval`(시나리오 인스턴스 목록)입니다. 데이터가 바뀌어 필드가 달라지면 `python run.py inspect-golden --golden eval/golden`으로 실제 필드를 보고 `--field-map map.json`으로 맞춥니다.
-3. **네트워크 설치는 배포처 승인이 필요합니다.** `python run.py install-steps`로 고정 버전과 명령을 봅니다. 후보 하나당 가상환경 하나를 따로 만듭니다(서로의 의존성이 섞이지 않게). LightRAG는 release 1.5.7을 1순위, HEAD를 2순위로 적었고 어느 것을 돌렸는지 결과에 씁니다. 모델 내려받기도 승인 대상입니다.
+3. **네트워크 설치는 배포처 승인이 필요합니다.** 설치 전에 내려받은 파일의 sha256을 PyPI·릴리스 페이지의 값과 대조해 `raw/`에 적어 두고, 설치 뒤 `pip freeze` 전체도 `raw/`에 저장합니다(고정 버전만으로는 전이 의존성이 고정되지 않음). `python run.py install-steps`로 고정 버전과 명령을 봅니다. 후보 하나당 가상환경 하나를 따로 만듭니다(서로의 의존성이 섞이지 않게). LightRAG는 release 1.5.7을 1순위, HEAD를 2순위로 적었고 어느 것을 돌렸는지 결과에 씁니다. 모델 내려받기도 승인 대상입니다.
 
 ## 4. 순서
 
@@ -34,12 +34,12 @@
 | 1 | `python run.py storage-compare --store sqlite --workdir w/s` | R03-C4 | 제품 SQLite 구조의 표준 시험(시간 유효성, span 근거, 삭제, export). 이 PR에서 구현 완료 |
 | 2 | `python run.py durability --target sqlite --workdir w/d` | R03-C4 | crash(쓰는 도중 프로세스 트리를 강제 종료한 뒤 무결성 확인), 동시 읽기, 단일 writer |
 | 3 | `python run.py embed --model bge-m3 --backend fastembed --dataset golden` (모델마다) | R03-C3 | 워커(S5)를 먼저 완성해야 함. 아니면 `미구현, 배포처 후속` 안내 |
-| 4 | `python run.py embed-offline-check --model bge-m3 --backend fastembed --cache-dir <캐시>` | R03-C3 | 내려받은 뒤 오프라인 변수로 다시 실행, 라이선스 파일의 이름·크기·해시만 기록 |
+| 4 | `python run.py embed-offline-check --model bge-m3 --backend fastembed --cache-dir <캐시> [--outbound-blocked-attested]` | R03-C3 | 내려받은 뒤 오프라인 변수(이름은 조사 문서에 없어 **미확인**)로 다시 실행. 라이선스 파일의 개수와 해시 일부만 기록. 하네스는 네트워크 접속을 관찰하지 못하므로 방화벽·VM으로 외부 접속을 막고 `--outbound-blocked-attested`를 준 경우에만 PASS이고, 아니면 INCONCLUSIVE |
 | 5 | `python run.py cli-adapter --r02-result ..\r02-cli-isolation\r02-result\result.json --profile <R02 통과 프로필> --model <모델>` | R03-C2 | 게이트 확인 + 구조화 호출 1회 |
-| 6 | 어댑터 완성(아래 5절) 뒤 `python run.py scenario --engine lightrag --workdir w/l --r02-result ... --profile ... --model ...` (엔진마다) | R03-C1 | cognee는 먼저 `python run.py shim ...`로 shim을 띄우고 cognee가 그 주소를 쓰게 설정 |
+| 6 | 어댑터 완성(아래 5절) 뒤 `python run.py scenario --engine lightrag --workdir w/l --r02-result ... --profile ... --model ...` (엔진마다) | R03-C1 | cognee는 먼저 `python run.py shim ...`로 shim을 띄우고 cognee가 그 주소와, shim이 출력한 **일회용 토큰**(벤더 키가 아님)을 쓰게 설정 |
 | 7 | `python run.py storage-compare --store cortexdb --workdir w/c` | R03-C4 | S4 완성 전에는 안내만 출력 |
 
-`--dry-run`을 모든 하위 명령에 붙여 무엇을 할지 먼저 볼 수 있습니다. 결과는 `--out`(기본 `r03-result`)의 `result.json`과 `result.md` 한 쌍입니다.
+`--dry-run`을 모든 하위 명령에 붙여 무엇을 할지 먼저 볼 수 있습니다. 결과는 `--out`(기본 `r03-result`)의 `result.json`과 `result.md` 한 쌍(붙여도 되는 것)이고, predictions·원본 출력·실패 사유는 `raw/`에만 남습니다(**붙이지 않음**). 프록시 환경이면 `--pass-env HTTPS_PROXY` 등으로 변수 이름을 지정합니다(이름만 기록).
 
 ## 5. 어댑터 뼈대를 완성하는 방법 (R03-S1~S5)
 

@@ -93,7 +93,7 @@ def detect_cli(name, override=None, path_env=None):
     info["probes"] = {k: bool(re.search(v[name], help_text)) for k, v in PROBES.items()}
     argv = AUTH_ARGV.get(name)
     if name == "claude" and info["probes"]["auth_status_command"]:
-        argv = ["auth", "status"]
+        argv = ["auth", "status"]  # UNVERIFIED subcommand (not in the research doc): used only if `claude --help` lists `auth`
     if argv is None:
         info["auth"] = {"state": "unknown", "how": "no status command found in --help"}
     else:

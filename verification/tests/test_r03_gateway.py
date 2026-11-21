@@ -16,9 +16,10 @@ shim = _paths.load_kit_module("r03-engine-comparison", "shim_server.py", "shim_s
 
 
 def r02_result(profile, verdict, version="1.2.3", extra_checks=()):
-    return {"schema_version": 1, "kit": "r02-cli-isolation", "mode": "real", "environment": {}, "metrics": {}, "raw": {},
-            "checks": [{"id": "R02-C3:negative:" + profile, "criterion": "c", "verdict": "PASS", "observed": "o", "note": "",
-                        "data": {"profile": profile, "profile_verdict": verdict, "cli_version": version}}] + list(extra_checks)}
+    return {"schema_version": 2, "kit": "r02-cli-isolation", "mode": "real", "created": "2026-11-21T00:00:00Z", "environment": {}, "metrics": {},
+            "notes": [], "dropped_fields": 0,
+            "checks": [{"id": "R02-C3:negative:" + profile, "verdict": "PASS", "codes": [],
+                        "facts": {"profile": profile, "profile_verdict": verdict, "cli_version": version}}] + list(extra_checks)}
 
 
 class GatewayCountingTests(unittest.TestCase):
@@ -88,6 +89,37 @@ class GateTests(unittest.TestCase):
             with self.assertRaises(gw.GateBlocked):
                 gw.gate_check(path, "codex-A-full", current_cli_version="1.2.4")
 
+    def test_none_versions_on_both_sides_are_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.write(d, r02_result("codex-A-full", "CONTAINED_ON_OBSERVABLES", version=None))
+            with self.assertRaises(gw.GateBlocked):
+                gw.gate_check(path, "codex-A-full", current_cli_version=None)
+            path = self.write(d, r02_result("codex-A-full", "CONTAINED_ON_OBSERVABLES", version="unknown"))
+            with self.assertRaises(gw.GateBlocked):
+                gw.gate_check(path, "codex-A-full", current_cli_version="unknown")
+            path = self.write(d, r02_result("codex-A-full", "CONTAINED_ON_OBSERVABLES", version="1.2.3"))
+            with self.assertRaises(gw.GateBlocked):
+                gw.gate_check(path, "codex-A-full", current_cli_version=None)
+
+    def test_model_must_match_the_judged_model(self):
+        with tempfile.TemporaryDirectory() as d:
+            obj = r02_result("codex-A-full", "CONTAINED_ON_OBSERVABLES")
+            obj["checks"][0]["facts"]["model"] = "gpt-5-codex"
+            path = self.write(d, obj)
+            gw.gate_check(path, "codex-A-full", current_cli_version="1.2.3", model="gpt-5-codex")
+            with self.assertRaises(gw.GateBlocked):
+                gw.gate_check(path, "codex-A-full", current_cli_version="1.2.3", model="gpt-6")
+
+    def test_the_gate_reads_what_the_real_r02_writer_produces(self):
+        from common.results import ResultBuilder
+        from common.redact import Redactor
+        with tempfile.TemporaryDirectory() as d:
+            b = ResultBuilder("r02-cli-isolation", d, redactor=Redactor(include_environment=False))
+            b.add_check("R02-C3:negative:codex-A-full", "PASS", {"profile": "codex-A-full", "model": "gpt-5-codex", "cli_version": "1.2.3",
+                                                                  "profile_verdict": "CONTAINED_ON_OBSERVABLES"})
+            jpath, _ = b.write()
+            gw.gate_check(jpath, "codex-A-full", current_cli_version="1.2.3", model="gpt-5-codex")
+
     def test_missing_or_garbage_file_refused(self):
         with self.assertRaises(gw.GateBlocked):
             gw.gate_check("/no/such/result.json", "codex-A-full", current_cli_version="1")
@@ -106,9 +138,12 @@ class GateTests(unittest.TestCase):
 
 
 class ShimTests(unittest.TestCase):
-    def start(self, backend):
+    token = None
+
+    def start(self, backend, token=None):
+        self.token = token
         g = gw.LLMGateway(backend)
-        server = shim.make_server(g, port=0)
+        server = shim.make_server(g, port=0, token=token)
         t = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         t.start()
         self.addCleanup(lambda: (server.shutdown(), server.server_close()))
@@ -116,7 +151,8 @@ class ShimTests(unittest.TestCase):
 
     def post(self, server, path, body):
         req = urllib.request.Request("http://127.0.0.1:{}{}".format(server.server_address[1], path),
-                                     data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+                                     data=json.dumps(body).encode(),
+                                     headers=dict({"Content-Type": "application/json"}, **({"Authorization": "Bearer " + self.token} if self.token else {})))
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return resp.status, json.loads(resp.read())
@@ -159,6 +195,18 @@ class ShimTests(unittest.TestCase):
         self.assertEqual(status, 501)
         self.assertIn("tools", body["error"]["message"])
         self.assertEqual(server.unsupported_requests, ["tools"])
+
+    def test_bearer_token_is_required_when_configured(self):
+        server, g = self.start(lambda p, s: {"text": "x"}, token="secret-tok")
+        ok_status, _ = self.post(server, "/v1/chat/completions", {"messages": [{"role": "user", "content": "x"}]})
+        self.assertEqual(ok_status, 200)
+        self.token = "wrong"
+        status, _ = self.post(server, "/v1/chat/completions", {"messages": [{"role": "user", "content": "x"}]})
+        self.assertEqual(status, 401)
+        self.token = None
+        status, _ = self.post(server, "/v1/chat/completions", {"messages": [{"role": "user", "content": "x"}]})
+        self.assertEqual(status, 401)
+        self.assertEqual(g.snapshot()["calls"], 1)
 
     def test_embeddings_not_served(self):
         server, _ = self.start(lambda p, s: {"text": "x"})

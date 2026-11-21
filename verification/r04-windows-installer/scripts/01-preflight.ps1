@@ -1,8 +1,8 @@
 <#
   R04 step 1: preflight. Is this a clean machine (no Node/Python/Docker/DB server installed)? (R04-R1, R04-C1)
-  STATUS: WRITTEN OFF-SITE, NEVER EXECUTED and not syntax-checked (no PowerShell where it was written).
+  STATUS: WRITTEN OFF-SITE, NEVER EXECUTED and never parsed or syntax-checked (no PowerShell where it was written).
   Needs a V01 skeleton installer artifact; without one it prints the follow-up notice (R04-S1) and exits 3.
-  Run on the deployment site's Windows 11 machine with synthetic data only. Windows PowerShell 5.1 syntax.
+  Writes a RAW local result only; pasting requires `python run.py sanitize` first. Windows PowerShell 5.1 syntax.
 #>
 param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot '..\config.json'),
@@ -14,14 +14,17 @@ $cfg = Get-Config $ConfigPath
 $null = Assert-InstallerConfigured $cfg
 $result = New-Result
 
-# 1) Commands that must NOT exist on the clean machine (names only, never paths).
+# 1) Commands that must NOT exist on the clean machine. Windows 11 ships Store alias stubs named python.exe /
+#    python3.exe under WindowsApps; those are not installed runtimes and are ignored (counted separately).
 $commandNames = 'node', 'npm', 'python', 'python3', 'py', 'docker', 'psql', 'postgres', 'mysqld', 'mongod', 'sqlservr'
-$foundCommands = @()
+$foundCommands = @(); $storeAliases = 0
 foreach ($n in $commandNames) {
-    if (Get-Command -Name $n -ErrorAction SilentlyContinue) { $foundCommands += $n }
+    foreach ($cmd in @(Get-Command -Name $n -CommandType Application -ErrorAction SilentlyContinue)) {
+        if ($cmd.Source -like '*\Microsoft\WindowsApps\*') { $storeAliases++ } elseif ($foundCommands -notcontains $n) { $foundCommands += $n }
+    }
 }
 
-# 2) Installed software entries by category (display names are matched, only the category is stored).
+# 2) Installed software entries by category (display names are matched; only the fixed category word is kept).
 $keys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
@@ -46,8 +49,8 @@ $vcRedist = [bool]($names | Where-Object { $_ -match 'Visual C\+\+.*Redistributa
 
 $clean = ($foundCommands.Count -eq 0) -and ($foundSoftware.Count -eq 0)
 $verdict = if ($clean) { 'PASS' } else { 'FAIL' }
-$observed = "commands found: [{0}]; software categories found: [{1}]; VC++ redistributable present: {2}" -f ($foundCommands -join ','), ($foundSoftware -join ','), $vcRedist
-Add-Check $result 'R04-C1:preflight' 'clean Windows 11: no Node/Python/Docker/DB server installed' $verdict $observed 'A FAIL means the machine is not clean; do not continue with the install steps. VC++ redistributable presence is information only (native modules may need it).' @{ commands = $foundCommands; software = $foundSoftware; vc_redist = $vcRedist }
-Add-Note $result 'Reboot-level cold start and a snapshot/VM revert before the run are the operator''s job (RUNBOOK.md).'
+$codes = @(); if (-not $clean) { $codes += 'r04_clean_check_failed' }
+Add-Check $result 'R04-C1:preflight' $verdict @{ commands_found = $foundCommands; software_found = $foundSoftware; store_alias_stubs_ignored = $storeAliases; vc_redist_present = $vcRedist } $codes
+Add-Note $result 'r04_not_syntax_checked'
 Save-Result $result $OutDir
 if (-not $clean) { exit 1 }

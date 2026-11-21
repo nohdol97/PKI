@@ -1,8 +1,8 @@
 <#
   R04 step 7: Authenticode signature status of the installer and installed binaries (R04-R7, R04-C3)
-  STATUS: WRITTEN OFF-SITE, NEVER EXECUTED and not syntax-checked (no PowerShell where it was written).
+  STATUS: WRITTEN OFF-SITE, NEVER EXECUTED and never parsed or syntax-checked (no PowerShell where it was written).
   Needs a V01 skeleton installer artifact; without one it prints the follow-up notice (R04-S1) and exits 3.
-  Run on the deployment site's Windows 11 machine with synthetic data only. Windows PowerShell 5.1 syntax.
+  Writes a RAW local result only; pasting requires `python run.py sanitize` first. Windows PowerShell 5.1 syntax.
 #>
 param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot '..\config.json'),
@@ -21,19 +21,21 @@ function Get-SigRow {
 }
 
 $inst = Get-SigRow $installer
-Add-Check $result 'R04-C3:signature-installer' 'installer signature status' $(if ($inst.status -eq 'Valid') { 'PASS' } else { 'INCONCLUSIVE' }) ("status {0}; signer present {1}; timestamp present {2}" -f $inst.status, $inst.has_signer, $inst.has_timestamp) 'Unsigned is expected for early skeletons; the signing certificate decision is R04-S3 (checklist).' $inst
+Add-Check $result 'R04-C3:signature-installer' $(if ($inst.status -eq 'Valid') { 'PASS' } else { 'INCONCLUSIVE' }) @{ status = $inst.status; has_signer = $inst.has_signer; has_timestamp = $inst.has_timestamp }
 
 $installDir = Get-InstallDirPath $cfg
 $counts = [ordered]@{}
-$unsigned = @()
+$unsigned = @(); $checked = 0
 if (Test-Path -LiteralPath $installDir) {
     $files = @(Get-ChildItem -LiteralPath $installDir -Recurse -File -Include *.exe, *.dll, *.node, *.sys, *.pyd -ErrorAction SilentlyContinue)
+    $checked = $files.Count
     foreach ($f in $files) {
         $row = Get-SigRow $f.FullName
         if ($counts.Contains($row.status)) { $counts[$row.status] = $counts[$row.status] + 1 } else { $counts[$row.status] = 1 }
-        if ($row.status -ne 'Valid' -and $unsigned.Count -lt 100) { $unsigned += $f.FullName.Substring($installDir.Length) }
+        if ($row.status -ne 'Valid') { $unsigned += $f.FullName.Substring($installDir.Length) }
     }
-    Add-Metric $result 'binary_files_checked' $files.Count 'files'
+    Add-Metric $result 'binary_files_checked' $checked 'files'
 }
-Add-Check $result 'R04-C3:signature-binaries' 'signature status of bundled exe/dll/node/sys/pyd files' 'INCONCLUSIVE' (($counts.Keys | ForEach-Object { "{0}={1}" -f $_, $counts[$_] }) -join '; ') 'Native modules and helper binaries that are not signed can be blocked by Smart App Control (sqlite-vec issue 368 is the only observation known; OSS_EVALUATION 4.3). SmartScreen itself is a manual checklist item.' @{ counts = $counts; not_valid = $unsigned }
+Add-Check $result 'R04-C3:signature-binaries' 'INCONCLUSIVE' @{ files_checked = $checked; status_counts = $counts; not_valid_count = $unsigned.Count }
+Save-RawFile $OutDir 'unsigned-files.json' $unsigned   # names stay local
 Save-Result $result $OutDir

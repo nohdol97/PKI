@@ -85,6 +85,19 @@ class ProfileFileTests(unittest.TestCase):
         for p in self.data["profiles"]:
             self.assertEqual(p["hook_planted"], p["cli"] == "claude", p["name"])
 
+    def test_results_allowlist_knows_every_profile_and_attack(self):
+        from common import results
+        negative = _paths.load_kit_module("r02-cli-isolation", "negative.py", "r02_negative_p")
+        self.assertEqual(set(p["name"] for p in self.data["profiles"]), set(results.PROFILE_NAMES))
+        self.assertEqual({a.id for a in negative.ATTACKS}, set(results.ATTACK_IDS))
+
+    def test_every_profile_flag_is_in_the_results_allowlist(self):
+        from common import results
+        for p in self.data["profiles"]:
+            for token in p["argv"][1:]:
+                if token.startswith("-") and len(token) > 1:
+                    self.assertIn(token, results.FLAG_WORDS, p["name"])
+
     def test_profile_names_unique(self):
         names = [p["name"] for p in self.data["profiles"]]
         self.assertEqual(len(names), len(set(names)))

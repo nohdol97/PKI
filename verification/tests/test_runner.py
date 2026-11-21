@@ -159,6 +159,23 @@ class EnvTests(unittest.TestCase):
                      "HTTPS_PROXY", "RANDOM_VAR"):
             self.assertNotIn(name, env)
 
+    def test_proxy_and_ca_variables_are_dropped_by_default_and_passed_only_by_opt_in(self):
+        fake = {"PATH": "/usr/bin", "HTTPS_PROXY": "http://p:1", "NODE_EXTRA_CA_CERTS": "/ca.pem"}
+        try:
+            with mock.patch.dict(os.environ, fake, clear=True):
+                self.assertNotIn("HTTPS_PROXY", runner.build_env())
+                runner.set_passthrough(["HTTPS_PROXY", "NODE_EXTRA_CA_CERTS"])
+                env = runner.build_env()
+            self.assertEqual(env["HTTPS_PROXY"], "http://p:1")
+            self.assertEqual(runner.passthrough_names(), ["HTTPS_PROXY", "NODE_EXTRA_CA_CERTS"])
+        finally:
+            runner.set_passthrough([])
+
+    def test_passthrough_refuses_credential_variables(self):
+        for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "HF_TOKEN", "PATHEXT2"):
+            with self.assertRaises(ValueError):
+                runner.set_passthrough([name])
+
     def test_extra_env_added(self):
         with mock.patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=True):
             env = runner.build_env({"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1", "PKI_CANARY_ENV": "tok"})

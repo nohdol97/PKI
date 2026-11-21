@@ -46,17 +46,17 @@ Windows 11에서 (1) Node, Python, Docker, DB 서버를 따로 설치하지 않�
 | 8 | `06-uninstall-leftovers.ps1` | 무인 제거 뒤 설치 전 스냅샷과 비교해 **차이만** 기록 | R04-C1 |
 | 9 | (수동) `CHECKLIST_MANUAL.md` | SmartScreen, 브라우저·Electron 화면 round trip, 트레이, 서명·업데이트 미확정 사항 | R04-C1, C3 |
 
-결과는 `-OutDir`(기본 `..\r04-result`)의 `result.json` 하나에 쌓입니다. 시작 시간의 "콜드 스타트"는 재부팅 직후 첫 실행이며 스크립트가 재부팅할 수 없으므로 재부팅 뒤 `03`을 1회 돌려 첫 값을 따로 적습니다.
+결과는 `-OutDir`(기본 `..\r04-result`)의 **`raw\result-raw.json`**에 쌓입니다. 이 파일은 **붙여 넣을 수 없는 원본**입니다. 붙이는 파일은 아래 5절의 `sanitize`가 만듭니다. 설치·제거 스크립트(02, 06)는 설치와 제거를 실제로 하므로 `-WhatIf`로 먼저 확인할 수 있고, 프로세스 종료는 **설치 폴더 아래 실행 파일**에 한정되며 이름에 `*`, `?`가 있으면 거부합니다(그래도 `WorkerProcessNames`에 `python`처럼 흔한 이름을 쓰면 설치 폴더 밖 프로세스는 건드리지 않는다는 점만 믿고 확인 후 사용). 01은 Windows 11이 기본으로 두는 Store 별칭(`python.exe` 껍데기)을 설치로 세지 않습니다. 시작 시간의 "콜드 스타트"는 재부팅 직후 첫 실행이며 스크립트가 재부팅할 수 없으므로 재부팅 뒤 `03`을 1회 돌려 첫 값을 따로 적습니다.
 
 ## 5. 결과 정리 (다른 PC에서)
 
 PowerShell은 값을 만들 때부터 호스트 이름, 사용자 이름, 홈 경로를 자리표시자로 바꿉니다. 그래도 이슈에 붙이기 전에 한 번 더 거릅니다.
 
 ```text
-python run.py sanitize --raw <r04-result>\result.json --out <정리된 폴더> [--redact <회사 이름 등>]
+python run.py sanitize --raw <r04-result>\raw\result-raw.json --out <정리된 폴더> [--redact <회사 이름 등>]
 ```
 
-스키마가 틀렸거나 식별 값이 남아 있으면 파일을 쓰지 않고 실패합니다. 성공하면 `<정리된 폴더>`의 `result.json`, `result.md`만 이슈에 붙입니다. `snapshot-*.json`은 이 PC 안에서만 쓰는 파일이며 절대 붙이지 않습니다.
+`sanitize`는 원본에서 **하네스가 만든 값(검사 id, 정해진 판정어, 숫자, 참/거짓, 고정 목록의 단어)만 남기고 나머지는 버립니다.** 버린 개수는 `dropped_fields`에 나옵니다. 따라서 PowerShell이 다른 프로그램의 폴더 이름이나 호스트 이름을 모았더라도 붙이는 파일에는 들어갈 수 없습니다(이 PC에서 모은 이름은 `raw\leftovers.json` 등에만 있음). 그 위에 정규식 마스킹이 한 번 더 걸리고, **이 sanitize를 돌리는 PC**의 호스트·사용자 값과 `--redact` 값이 남아 있으면 파일을 쓰지 않습니다. 원본을 만든 PC와 다른 PC에서 돌리면 그 PC의 값만 검사되므로, 원본 PC의 호스트·계정·회사 이름을 `--redact`로 직접 줍니다. 성공하면 `<정리된 폴더>`의 `result.json`, `result.md`만 이슈에 붙입니다. `raw\` 폴더(스냅샷, 남은 항목 이름, 원본 결과)는 이 PC 안에서만 쓰며 절대 붙이지 않습니다.
 
 ## 6. R04-C2 (두 번째 설치 실험)
 

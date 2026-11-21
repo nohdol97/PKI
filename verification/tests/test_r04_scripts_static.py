@@ -52,6 +52,42 @@ class PowerShellStaticTests(unittest.TestCase):
             for open_c, close_c in ("{}", "()", "[]"):
                 self.assertEqual(body.count(open_c), body.count(close_c), "{} unbalanced {}{}".format(path, open_c, close_c))
 
+    def test_scripts_write_only_the_raw_result_and_never_pass_format_strings_to_add_check(self):
+        common = read(os.path.join(PS_DIR, "common.ps1"))
+        self.assertIn("result-raw.json", common)
+        self.assertNotIn("'result.json'", common)
+        for path in SCRIPTS:
+            for line in read(path).splitlines():
+                if line.strip().startswith("Add-Check"):
+                    self.assertNotRegex(line, r"\s-f\s", "{}: Add-Check must take structured facts, not formatted text".format(path))
+
+    def test_kill_by_name_is_scoped_to_the_install_folder(self):
+        common = read(os.path.join(PS_DIR, "common.ps1"))
+        self.assertIn("StartsWith($InstallDir", common)
+        self.assertIn("wildcards are not allowed", common)
+        for path in SCRIPTS:
+            text = read(path)
+            self.assertNotIn("Get-Process -Name $", text.replace("common.ps1", ""))
+            for line in text.splitlines():
+                if "Stop-ProductProcesses " in line and "function" not in line:
+                    self.assertIn("$installDir", line, "{}: {}".format(path, line))
+
+    def test_installers_support_whatif_and_urls_are_loopback_checked(self):
+        for name in ("02-install-silent.ps1", "06-uninstall-leftovers.ps1"):
+            text = read(os.path.join(PS_DIR, name))
+            self.assertIn("SupportsShouldProcess", text)
+            self.assertIn("ShouldProcess(", text)
+        self.assertIn("Assert-Loopback", read(os.path.join(PS_DIR, "common.ps1")))
+        self.assertIn("Assert-Loopback", read(os.path.join(PS_DIR, "08-roundtrip.ps1")))
+
+    def test_preflight_ignores_windows_store_alias_stubs(self):
+        self.assertIn("WindowsApps", read(os.path.join(PS_DIR, "01-preflight.ps1")))
+
+    def test_uninstall_diffs_every_promised_surface(self):
+        text = read(os.path.join(PS_DIR, "06-uninstall-leftovers.ps1"))
+        for needle in ("uninstall", "startmenu", "tasks", "services", "run", "processes", "Get-ProductProcesses"):
+            self.assertIn(needle, text)
+
     def test_scripts_take_config_and_outdir(self):
         for path in SCRIPTS:
             name = os.path.basename(path)

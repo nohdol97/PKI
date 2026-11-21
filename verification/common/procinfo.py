@@ -11,14 +11,14 @@ from collections import namedtuple
 
 from . import runner
 
-ProcRow = namedtuple("ProcRow", "pid ppid rss_bytes cpu_seconds")
+ProcRow = namedtuple("ProcRow", "pid ppid rss_bytes cpu_seconds created", defaults=(None,))
 
 _CPU_TIME = re.compile(r"^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$")
 
 WINDOWS_TABLE_SCRIPT = (
     "Get-CimInstance Win32_Process | ForEach-Object { "
-    "'{0},{1},{2},{3}' -f $_.ProcessId,$_.ParentProcessId,$_.WorkingSetSize,"
-    "([uint64]$_.KernelModeTime + [uint64]$_.UserModeTime) }"
+    "'{0},{1},{2},{3},{4}' -f $_.ProcessId,$_.ParentProcessId,$_.WorkingSetSize,"
+    "([uint64]$_.KernelModeTime + [uint64]$_.UserModeTime),$_.CreationDate.ToFileTimeUtc() }"
 )
 
 
@@ -42,13 +42,14 @@ def parse_ps_table(text):
 
 
 def parse_windows_table(text):
-    """Parse `pid,ppid,workingset_bytes,cpu_time_100ns` lines from WINDOWS_TABLE_SCRIPT."""
+    """Parse `pid,ppid,workingset_bytes,cpu_time_100ns[,creation_filetime]` lines from WINDOWS_TABLE_SCRIPT."""
     rows = []
     for line in text.splitlines():
         parts = line.strip().split(",")
-        if len(parts) != 4 or not all(p.strip().isdigit() for p in parts):
+        if len(parts) not in (4, 5) or not all(p.strip().isdigit() for p in parts):
             continue
-        rows.append(ProcRow(int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]) / 1e7))
+        created = int(parts[4]) if len(parts) == 5 else None
+        rows.append(ProcRow(int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]) / 1e7, created))
     return rows
 
 
@@ -62,8 +63,14 @@ def list_process_table():
 
 
 def descendants_of(rows, root_pid):
+    """Descendants of root_pid. A row only counts as a child of its parent if it was created AFTER the parent
+    (Windows keeps a dead parent's PID in the child and recycles PIDs); creation times are optional."""
+    created = {r.pid: r.created for r in rows}
     children = {}
     for r in rows:
+        parent_created = created.get(r.ppid)
+        if r.created is not None and parent_created is not None and r.created < parent_created:
+            continue
         children.setdefault(r.ppid, []).append(r.pid)
     found, stack = [], [root_pid]
     while stack:

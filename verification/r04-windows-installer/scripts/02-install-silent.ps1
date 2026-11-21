@@ -1,9 +1,10 @@
 <#
-  R04 step 2: silent install + size + before/after snapshots (R04-R2, R04-C1, R04-C3)
-  STATUS: WRITTEN OFF-SITE, NEVER EXECUTED and not syntax-checked (no PowerShell where it was written).
+  R04 step 2: silent install + size + before-snapshot (R04-R2, R04-C1, R04-C3)
+  STATUS: WRITTEN OFF-SITE, NEVER EXECUTED and never parsed or syntax-checked (no PowerShell where it was written).
   Needs a V01 skeleton installer artifact; without one it prints the follow-up notice (R04-S1) and exits 3.
-  Run on the deployment site's Windows 11 machine with synthetic data only. Windows PowerShell 5.1 syntax.
+  Writes a RAW local result only; pasting requires `python run.py sanitize` first. Windows PowerShell 5.1 syntax.
 #>
+[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot '..\config.json'),
     [string]$OutDir = (Join-Path $PSScriptRoot '..\r04-result')
@@ -30,21 +31,22 @@ function Get-Snapshot {
         ForEach-Object { Get-ChildItem -LiteralPath $_ -ErrorAction SilentlyContinue } | ForEach-Object { $_.Name })
     $snap['tasks'] = @(Get-ScheduledTask -ErrorAction SilentlyContinue | ForEach-Object { $_.TaskName })
     $snap['services'] = @(Get-Service -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    $snap['processes'] = @(Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessName } | Sort-Object -Unique)
     return $snap
 }
 
 $cfg = Get-Config $ConfigPath
 $installer = Assert-InstallerConfigured $cfg
 $result = New-Result
-New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
-# Local-only snapshot (kept next to the result, never pasted into an issue).
-ConvertTo-Json -InputObject (Get-Snapshot $cfg) -Depth 4 | Set-Content -LiteralPath (Join-Path $OutDir 'snapshot-before.json') -Encoding UTF8
+# Local-only snapshot (lives in the raw folder, never pasted).
+Save-RawFile $OutDir 'snapshot-before.json' (Get-Snapshot $cfg)
 
 $size = (Get-Item -LiteralPath $installer).Length
 Add-Metric $result 'installer_size_bytes' $size 'bytes'
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
+if (-not $PSCmdlet.ShouldProcess('the configured installer', 'run it silently (installs software on this machine)')) { exit 0 }
 $watch = [System.Diagnostics.Stopwatch]::StartNew()
 $proc = Start-Process -FilePath $installer -ArgumentList $cfg.SilentInstallArgs -PassThru -Wait
 $watch.Stop()
@@ -57,7 +59,7 @@ Add-Metric $result 'install_duration_ms' $watch.ElapsedMilliseconds 'ms'
 Add-Metric $result 'installed_size_bytes' $sz.bytes 'bytes'
 Add-Metric $result 'installed_file_count' $sz.files 'files'
 $verdict = if (($proc.ExitCode -eq 0) -and $exeOk) { 'PASS' } else { 'FAIL' }
-Add-Check $result 'R04-C1:install' 'silent install without separately installed runtimes' $verdict ("exit code {0}; product exe present: {1}; elevated shell: {2}" -f $proc.ExitCode, $exeOk, $isAdmin) 'Run 01-preflight first; a UAC prompt or a visible wizard is a finding to note by hand.'
-ConvertTo-Json -InputObject (Get-Snapshot $cfg) -Depth 4 | Set-Content -LiteralPath (Join-Path $OutDir 'snapshot-after-install.json') -Encoding UTF8
+Add-Check $result 'R04-C1:install' $verdict @{ exit_code = [int]$proc.ExitCode; product_exe_present = $exeOk; elevated_shell = $isAdmin }
+Save-RawFile $OutDir 'snapshot-after-install.json' (Get-Snapshot $cfg)
 Save-Result $result $OutDir
 if ($verdict -ne 'PASS') { exit 1 }

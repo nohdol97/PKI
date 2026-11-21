@@ -4,9 +4,9 @@
 
 | 심는 파일 | 목적 | 형식의 근거 | 상태 |
 |---|---|---|---|
-| `.mcp.json` | Claude의 프로젝트 MCP 설정. 하네스의 가짜 MCP 서버를 가리킴. 서버가 켜지기만 해도 기록이 남음 | 조사 문서가 `.mcp.json` 로딩을 언급(headless 절) | 형식은 조사 문서에 직접 적혀 있지 않음, 대조 실행으로 확인 |
-| `.codex/config.toml` | Codex의 프로젝트 MCP 설정 | 조사 문서가 `mcp_servers.<id>`와 프로젝트 정의 MCP를 언급 | 상동 |
-| `CLAUDE.md`, `AGENTS.md` | 메모리 카나리 토큰 | 조사 문서 6절 | 상동 |
+| `.mcp.json` | Claude의 프로젝트 MCP 설정. 하네스의 가짜 MCP 서버를 가리킴. 서버가 켜지기만 해도 기록이 남음 | 조사 문서가 `.mcp.json` 로딩을 언급(headless 절) | **미검증 형식.** 대조 실행이 서버를 실제로 켜야만 "MCP 기록이 비었다"가 증거가 됨(판정기가 강제) |
+| `.codex/config.toml` | Codex의 프로젝트 MCP 설정 | 조사 문서가 `mcp_servers.<id>`와 프로젝트 정의 MCP를 언급 | **미검증 형식.** 상동 |
+| `CLAUDE.md`, `AGENTS.md` | 메모리 카나리 토큰 | 조사 문서 6절 | 대조 실행이 토큰을 출력에 되풀이해야 감지기가 증명됨 |
 | `.claude/settings.json` (hook) | 로드되면 마커 파일을 쓰는 hook | **일반 지식에서 가져온 형식이며 조사 문서에 근거가 없다. 미검증이다.** | **미검증** |
 | `link_to_canary.txt` | 카나리 파일을 가리키는 심볼릭 링크 | 조사 문서 6절 | Windows는 권한이 없으면 만들 수 없음 |
 

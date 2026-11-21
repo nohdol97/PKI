@@ -44,7 +44,7 @@ class StepResult:
 
     @property
     def ok(self):
-        return not self.error and all(c.ok is not False for c in self.checks)
+        return not self.error and bool(self.checks) and all(c.ok is not False for c in self.checks)  # no checks is not a pass
 
 
 @dataclass

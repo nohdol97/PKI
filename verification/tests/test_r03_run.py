@@ -58,22 +58,35 @@ class RunPathTests(unittest.TestCase):
             res = run("embed", "--model", "e5-base", "--backend", "command", "--worker-cmd", json.dumps([sys.executable, FAKE_WORKER]),
                       "--dataset", "fixtures", "--out", d)
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-            self.assertTrue(os.path.exists(os.path.join(d, "predictions-e5-base.jsonl")))
+            self.assertTrue(os.path.exists(os.path.join(d, "raw", "predictions-e5-base.jsonl")))
             self.assertEqual(checks(d)["R03-C3:embed:e5-base"]["verdict"], "PASS")
 
-    def test_offline_check_records_license_hashes_not_contents(self):
+    def offline(self, *extra):
         with tempfile.TemporaryDirectory() as d:
             cache = os.path.join(d, "cache")
             os.makedirs(cache)
             with open(os.path.join(cache, "LICENSE"), "w", encoding="utf-8") as fh:
                 fh.write("SECRET LICENSE TEXT 12345")
             res = run("embed-offline-check", "--model", "bge-m3", "--backend", "command",
-                      "--worker-cmd", json.dumps([sys.executable, FAKE_WORKER]), "--cache-dir", cache, "--out", os.path.join(d, "o"))
+                      "--worker-cmd", json.dumps([sys.executable, FAKE_WORKER]), "--cache-dir", cache, "--out", os.path.join(d, "o"), *extra)
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             with open(os.path.join(d, "o", "result.json"), encoding="utf-8") as fh:
                 text = fh.read()
-            self.assertIn("sha256", text)
-            self.assertNotIn("SECRET LICENSE TEXT", text)
+            return text, checks(os.path.join(d, "o"))["R03-C3:offline:bge-m3"]
+
+    def test_offline_check_is_inconclusive_without_an_attestation_and_records_hashes_not_contents(self):
+        text, check = self.offline()
+        self.assertEqual(check["verdict"], "INCONCLUSIVE")
+        self.assertIn("offline_not_observed", check["codes"])
+        self.assertEqual(len(check["facts"]["license_file_hashes"]), 1)
+        self.assertTrue(check["facts"]["license_file_hashes"][0].startswith("h:"))
+        self.assertNotIn("SECRET LICENSE TEXT", text)
+        self.assertNotIn("LICENSE\"", text)
+
+    def test_offline_check_passes_only_with_the_operator_attestation(self):
+        _text, check = self.offline("--outbound-blocked-attested")
+        self.assertEqual(check["verdict"], "PASS")
+        self.assertIn("offline_attested_by_operator", check["codes"])
 
     def test_inspect_golden_shows_keys(self):
         with tempfile.TemporaryDirectory() as d:
