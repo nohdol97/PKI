@@ -69,6 +69,14 @@ describe("startBackend", () => {
     await expect(startBackend([], entry)).rejects.toThrow("no session line");
   });
 
+  it("rejects a session line without a token", async () => {
+    const entry = fakeEntry(
+      "bad-line-no-token.mjs",
+      'console.log(JSON.stringify({ url: "u" })); setInterval(() => {}, 1000);',
+    );
+    await expect(startBackend([], entry)).rejects.toThrow("no session line");
+  });
+
   it("rejects when the backend exits before printing", async () => {
     await expect(startBackend([], fakeEntry("exit.mjs", "process.exit(3);"))).rejects.toThrow(
       "exited (3)",

@@ -46,6 +46,17 @@ describe("findSources", () => {
     ]);
   });
 
+  it("orders results by match rank, not by insertion", () => {
+    // Same length; more hits ranks higher. Rank order (strong, medium, weak) is neither
+    // insertion order nor its reverse.
+    const save = (externalId: string, body: string) =>
+      saveSourceRecord(db, "c1", { externalId, title: externalId, body });
+    save("weak", "봉화 하나 둘 셋 넷");
+    save("strong", "봉화 봉화 봉화 봉화");
+    save("medium", "봉화 봉화 하나 둘");
+    expect(findSources(db, "봉화").map((s) => s.externalId)).toEqual(["strong", "medium", "weak"]);
+  });
+
   it("applies the limit after keeping latest versions only", () => {
     // Old versions repeating the term outrank the latest ones; they must not use up the limit.
     for (let i = 0; i < 60; i++) {
