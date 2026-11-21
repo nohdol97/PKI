@@ -9,10 +9,6 @@ export const INSIGHT_NOT_CONFIRMED = "규칙이 근거에서 이끌어 낸 추�
 
 export const UNTRUSTED_BADGE = "가져온 자료(신뢰하지 않음)";
 
-/** Read by screen readers around the marked quote (the <mark> itself carries no words). */
-export const MARK_START = "[강조된 인용 시작] ";
-export const MARK_END = " [강조된 인용 끝]";
-
 /** Provisional wording (spec "T10이 넘기는 것" 7): shown instead of the API's 404 code. */
 export const INSIGHT_GONE =
   "이 Insight는 더 이상 표시되지 않습니다. 해소되었거나 근거가 삭제되었습니다.";

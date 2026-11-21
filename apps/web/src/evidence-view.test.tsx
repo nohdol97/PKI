@@ -7,18 +7,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api.ts";
 import {
+  EvidenceEntry,
   evidenceReducer,
   InsightSummary,
   SourceView,
   type EvidenceState,
 } from "./evidence-view.tsx";
-import {
-  INSIGHT_GONE,
-  MARK_END,
-  MARK_START,
-  SOURCE_GONE,
-  UNTRUSTED_BADGE,
-} from "./evidence-text.ts";
+import { INSIGHT_GONE, SOURCE_GONE, UNTRUSTED_BADGE } from "./evidence-text.ts";
 
 const malicious = readFileSync(
   resolve(import.meta.dirname, "../../../fixtures/v02-malicious.jsonl"),
@@ -137,56 +132,94 @@ describe("SourceView labels", () => {
     );
   });
 
-  it("isolates the imported title's direction and names the marked quote for screen readers", () => {
+  it("isolates the imported title's direction; the quote is marked with no extra text", () => {
     const html = renderToStaticMarkup(<SourceView source={source(1, 1)} />);
     expect(html).toContain("<h4><bdi>\u202e제목</bdi></h4>");
-    expect(html).toContain(
-      `<span class="visually-hidden">${MARK_START}</span><mark>가</mark><span class="visually-hidden">${MARK_END}</span>`,
+    // the screen-reader words are CSS generated content, outside the copyable text
+    expect(html).toContain('<pre class="source-text"><mark>가</mark>나</pre>');
+  });
+});
+
+describe("bidi isolation of imported text", () => {
+  const RLO = "\u202e";
+  it("wraps the Insight summary in <bdi>", () => {
+    const html = renderToStaticMarkup(
+      <InsightSummary
+        insight={{ id: 1, epistemic: "inferred", summary: `${RLO}위험(추론)`, evidenceCount: 3 }}
+      />,
     );
-    expect(html).toContain('<pre class="source-text">');
+    expect(html).toContain(`<strong>추론</strong> <bdi>${RLO}위험(추론)</bdi>`);
+  });
+
+  it("wraps the evidence list's source title in <bdi>, before the product's label", () => {
+    const html = renderToStaticMarkup(
+      <EvidenceEntry
+        evidence={{
+          id: 7,
+          target: "fact",
+          status: "candidate",
+          quote: "가",
+          sourceTitle: `${RLO}제목`,
+          sourceVersionId: 3,
+          version: 2,
+          current: true,
+        }}
+        onOpen={() => undefined}
+      />,
+    );
+    expect(html).toContain(`<p><bdi>${RLO}제목</bdi> · version 2</p>`);
   });
 });
 
 describe("evidenceReducer", () => {
-  const evidence = [
-    {
-      id: 7,
-      target: "fact" as const,
-      status: "candidate" as const,
-      quote: "가",
-      sourceTitle: "제목",
-      sourceVersionId: 3,
-      version: 1,
-      current: true,
-    },
-  ];
+  const entry = (id: number) => ({
+    id,
+    target: "fact" as const,
+    status: "candidate" as const,
+    quote: `인용 ${id}`,
+    sourceTitle: `제목 ${id}`,
+    sourceVersionId: 3,
+    version: 1,
+    current: true,
+  });
+  const evidence = [entry(7), entry(8)];
+  const insight = (id: number) => ({
+    id,
+    epistemic: "inferred" as const,
+    summary: `위험 ${id}(추론)`,
+    evidenceCount: 2,
+  });
   const open: EvidenceState = {
+    insights: [insight(1), insight(2)],
     opened: { insightId: 1, evidence },
     source: source(1, 1),
     opens: 2,
   };
   const notFound = new ApiError("not-found", 404);
 
-  it("drops the shown source on 404 and says so in plain words", () => {
-    const next = evidenceReducer(open, { type: "failed", what: "source", error: notFound });
+  it("drops the shown source and that evidence entry on 404, in plain words", () => {
+    const next = evidenceReducer(open, { type: "failed", what: "source", id: 7, error: notFound });
     expect(next.source).toBeUndefined();
-    expect(next.opened).toEqual(open.opened);
+    expect(next.opened).toEqual({ insightId: 1, evidence: [entry(8)] });
+    expect(next.insights).toEqual(open.insights);
     expect(next.notice).toBe(SOURCE_GONE);
     expect(next.notice).not.toMatch(/404|not-found/);
   });
 
-  it("drops the evidence list and source when the Insight is gone", () => {
-    const next = evidenceReducer(open, { type: "failed", what: "insight", error: notFound });
-    expect(next).toEqual({ opens: 2, notice: INSIGHT_GONE });
+  it("drops the Insight from the list, with its evidence and source, when it is gone", () => {
+    const next = evidenceReducer(open, { type: "failed", what: "insight", id: 1, error: notFound });
+    expect(next).toEqual({ insights: [insight(2)], opens: 2, notice: INSIGHT_GONE });
   });
 
   it("keeps what is shown on another failure", () => {
     const next = evidenceReducer(open, {
       type: "failed",
       what: "source",
+      id: 7,
       error: new ApiError("internal-error", 500),
     });
     expect(next.source).toEqual(open.source);
+    expect(next.opened).toEqual(open.opened);
     expect(next.notice).toContain("불러오지 못했습니다");
   });
 
@@ -197,6 +230,16 @@ describe("evidenceReducer", () => {
     expect(again.notice).toBeUndefined();
     expect(again.opened).toEqual(open.opened);
     const reopened = evidenceReducer(again, { type: "insight-opened", insightId: 1, evidence });
-    expect(reopened).toEqual({ opened: { insightId: 1, evidence }, opens: 4 });
+    expect(reopened).toEqual({
+      insights: open.insights,
+      opened: { insightId: 1, evidence },
+      opens: 4,
+    });
+  });
+
+  it("keeps the loaded list", () => {
+    expect(
+      evidenceReducer({ opens: 0 }, { type: "insights-loaded", insights: [insight(1)] }),
+    ).toEqual({ insights: [insight(1)], opens: 0 });
   });
 });

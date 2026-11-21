@@ -11,8 +11,6 @@ import {
   INSIGHT_EPISTEMIC,
   INSIGHT_GONE,
   INSIGHT_NOT_CONFIRMED,
-  MARK_END,
-  MARK_START,
   SOURCE_GONE,
   SPAN_UNAVAILABLE,
   splitAtCodePoints,
@@ -51,9 +49,7 @@ export function SourceView({ source }: { source: EvidenceSource }) {
         ) : (
           <>
             {parts.before}
-            <span className="visually-hidden">{MARK_START}</span>
             <mark>{parts.marked}</mark>
-            <span className="visually-hidden">{MARK_END}</span>
             {parts.after}
           </>
         )}
@@ -62,11 +58,33 @@ export function SourceView({ source }: { source: EvidenceSource }) {
   );
 }
 
+/** One entry of an Insight's evidence list. */
+export function EvidenceEntry({
+  evidence: e,
+  onOpen,
+}: {
+  evidence: EvidenceSummary;
+  onOpen: () => void;
+}) {
+  return (
+    <>
+      <p>
+        <bdi>{e.sourceTitle}</bdi> · version {e.version}
+      </p>
+      <blockquote>{e.quote}</blockquote>
+      <button type="button" aria-label={`원본 보기: ${e.sourceTitle}`} onClick={onOpen}>
+        원본 보기
+      </button>
+    </>
+  );
+}
+
 /**
- * What the evidence part of Home shows. `opens` counts successful opens, so
+ * What Home's Insight section shows. `opens` counts successful opens, so
  * reopening the same Insight or evidence moves focus to its heading again.
  */
 export interface EvidenceState {
+  insights?: InsightRow[];
   opened?: { insightId: number; evidence: EvidenceSummary[] };
   source?: EvidenceSource;
   notice?: string;
@@ -74,41 +92,51 @@ export interface EvidenceState {
 }
 
 export type EvidenceAction =
+  | { type: "insights-loaded"; insights: InsightRow[] }
   | { type: "insight-opened"; insightId: number; evidence: EvidenceSummary[] }
   | { type: "source-opened"; source: EvidenceSource }
-  | { type: "failed"; what: "insight" | "source"; error: unknown };
+  | { type: "failed"; what: "insight" | "source"; id: number; error: unknown };
 
 const gone = (error: unknown) => error instanceof ApiError && error.status === 404;
 
 /**
  * A 404 means the Insight was hidden or the evidence's rows were deleted (T08
- * purge): what was shown from it is dropped, not kept on screen, and the user
- * reads a plain sentence instead of the API code.
+ * purge): what was shown from it is dropped, not kept on screen — the Insight
+ * from the list, or the evidence entry (its quote and title) and the open source —
+ * and the user reads a plain sentence instead of the API code.
  */
 export function evidenceReducer(state: EvidenceState, action: EvidenceAction): EvidenceState {
+  const { opens } = state;
+  const insights = state.insights && { insights: state.insights };
+  const opened = state.opened && { opened: state.opened };
   switch (action.type) {
+    case "insights-loaded":
+      return { ...state, insights: action.insights };
     case "insight-opened":
       return {
+        ...insights,
         opened: { insightId: action.insightId, evidence: action.evidence },
-        opens: state.opens + 1,
+        opens: opens + 1,
       };
     case "source-opened":
-      return {
-        ...(state.opened && { opened: state.opened }),
-        source: action.source,
-        opens: state.opens + 1,
-      };
-    case "failed":
+      return { ...insights, ...opened, source: action.source, opens: opens + 1 };
+    case "failed": {
       if (!gone(action.error)) {
         return { ...state, notice: `불러오지 못했습니다: ${message(action.error)}` };
       }
-      return action.what === "insight"
-        ? { opens: state.opens, notice: INSIGHT_GONE }
-        : {
-            ...(state.opened && { opened: state.opened }),
-            opens: state.opens,
-            notice: SOURCE_GONE,
-          };
+      const { id } = action;
+      if (action.what === "insight") {
+        const left = state.insights?.filter((i) => i.id !== id);
+        return { ...(left && { insights: left }), opens, notice: INSIGHT_GONE };
+      }
+      const evidence = state.opened?.evidence.filter((e) => e.id !== id);
+      return {
+        ...insights,
+        ...(state.opened && evidence && { opened: { ...state.opened, evidence } }),
+        opens,
+        notice: SOURCE_GONE,
+      };
+    }
   }
 }
 
@@ -122,16 +150,15 @@ function useFocusOn(opens: number, shown: boolean) {
 }
 
 export function Insights({ api }: { api: ApiClient }) {
-  const [insights, setInsights] = useState<InsightRow[]>();
   const [loadError, setLoadError] = useState<string>();
   const [state, dispatch] = useReducer(evidenceReducer, { opens: 0 });
-  const { opened, source, notice } = state;
+  const { insights, opened, source, notice } = state;
   const evidenceHeading = useFocusOn(state.opens, opened !== undefined && source === undefined);
   const sourceHeading = useFocusOn(state.opens, source !== undefined);
 
   useEffect(() => {
     api("insights").then(
-      (r) => setInsights(r.insights),
+      (r) => dispatch({ type: "insights-loaded", insights: r.insights }),
       (e: unknown) => setLoadError(message(e)),
     );
   }, [api]);
@@ -139,12 +166,12 @@ export function Insights({ api }: { api: ApiClient }) {
   const openInsight = (insightId: number) =>
     api("insightEvidence", { insightId }).then(
       (r) => dispatch({ type: "insight-opened", insightId, evidence: r.evidence }),
-      (error: unknown) => dispatch({ type: "failed", what: "insight", error }),
+      (error: unknown) => dispatch({ type: "failed", what: "insight", id: insightId, error }),
     );
   const openSource = (evidenceId: number) =>
     api("evidenceSource", { evidenceId }).then(
       (s) => dispatch({ type: "source-opened", source: s }),
-      (error: unknown) => dispatch({ type: "failed", what: "source", error }),
+      (error: unknown) => dispatch({ type: "failed", what: "source", id: evidenceId, error }),
     );
 
   return (
@@ -174,17 +201,7 @@ export function Insights({ api }: { api: ApiClient }) {
           <ol aria-label="근거 목록">
             {opened.evidence.map((e) => (
               <li key={e.id}>
-                <p>
-                  <bdi>{e.sourceTitle}</bdi> · version {e.version}
-                </p>
-                <blockquote>{e.quote}</blockquote>
-                <button
-                  type="button"
-                  aria-label={`원본 보기: ${e.sourceTitle}`}
-                  onClick={() => openSource(e.id)}
-                >
-                  원본 보기
-                </button>
+                <EvidenceEntry evidence={e} onOpen={() => openSource(e.id)} />
               </li>
             ))}
           </ol>

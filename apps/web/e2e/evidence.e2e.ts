@@ -136,6 +136,14 @@ async function openEvidence(page: Page, set: string) {
     await expect(source.locator("mark")).toHaveText(evidence.quote);
     // long lines wrap: the stylesheet loads under the shell's CSP too
     await expect(source.locator("pre")).toHaveCSS("white-space", "pre-wrap");
+    // screen-reader words around the quote are generated content, not copyable text
+    const marks = await source
+      .locator("mark")
+      .evaluate((m) => [
+        getComputedStyle(m, "::before").content,
+        getComputedStyle(m, "::after").content,
+      ]);
+    expect(marks).toEqual(['"[강조된 인용 시작] "', '" [강조된 인용 끝]"']);
   }
   // reopening the same evidence moves focus to the source heading again
   const last = titleOf.get(want[want.length - 1]?.record_id ?? "") as string;
