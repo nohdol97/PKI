@@ -4,6 +4,7 @@ Records are created with explicit content; evidence spans are computed from the 
 content so quote == content[start:end] holds by construction. The committed JSONL is the
 source of truth; this script only makes spans easy to keep exact.
 """
+import datetime
 import hashlib
 import json
 import os
@@ -22,6 +23,7 @@ class World:
         self.records = []          # dicts in creation order
         self.ids = {}              # (iid, ref) -> record id
         self.contents = {}         # (record id, version) -> content
+        self.created = {}          # (record id, version) -> created_at
         self.counter = {"mail": 0, "wiki": 0, "messenger": 0}
         self.labels = {k: [] for k in
                        ("entities", "resolution_pairs", "relations", "temporal_facts", "insights", "qa")}
@@ -115,6 +117,7 @@ class Inst:
         }
         w.records.append(record)
         w.contents[(rid, version)] = content
+        w.created[(rid, version)] = created
         return rid
 
     # ---- evidence ------------------------------------------------------
@@ -162,10 +165,16 @@ class Inst:
 
     def fact(self, subj, attribute, value, vf, vu, status, evs, supersedes=None, as_of="2026-11-21", trigger=None):
         label_id = self.w.next_label(self.iid, "fact")
+        evs = self._evs(evs)
+        if vf is None and vu is None:
+            # convention: without a stated start, validity starts at the assertion (UTC day of the first evidence record)
+            first = evs[0]
+            stamp = datetime.datetime.fromisoformat(self.w.created[(first["record_id"], first["version"])])
+            vf = stamp.astimezone(datetime.timezone.utc).date().isoformat()
         row = {"label_id": label_id, "scenario_instance": self.iid, "subject": self.eid(subj),
                "attribute": attribute, "value": value, "valid_from": vf, "valid_until": vu,
                "expected_status": status, "supersedes": supersedes, "as_of": as_of,
-               "evidence": self._evs(evs)}
+               "evidence": evs}
         if trigger:
             row["trigger"] = trigger
         self.w.labels["temporal_facts"].append(row)

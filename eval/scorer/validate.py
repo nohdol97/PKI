@@ -45,6 +45,18 @@ INSIGHT_TYPES = {
 # Design section 6.7 statuses plus two dataset-level extensions: removed, restricted
 FACT_STATUSES = {"candidate", "verified", "disputed", "superseded", "rejected", "removed", "restricted"}
 
+# Controlled vocabulary for temporal_facts.attribute (one name per kind of fact, so predictions can be compared)
+FACT_ATTRIBUTES = {
+    "target_date", "completion_date", "deploy_date", "start_date", "launch_date",
+    "start_instant", "due_instant", "submit_instant",
+    "owner", "assignee", "employment", "status", "blocker", "temporary_use", "failover_target", "description",
+    "monthly_requests", "rate_limit_per_minute", "budget_krw", "unit_price_krw", "vulnerability_count",
+    "public_launch_window", "maintenance_window", "freeze_period", "p1_response_minutes",
+    "card_approval_rate", "duration_minutes",
+}
+INSTANT_ATTRIBUTES = {"start_instant", "due_instant", "submit_instant"}
+UTC_INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
 REQUIRED_SCENARIOS = {
     "schedule_dependency_delay": 3,
     "same_name_different_people": 3,
@@ -61,6 +73,7 @@ REQUIRED_SCENARIOS = {
 
 ISO_OFFSET = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?$")
+URL_HOST = re.compile(r"https?://([^/\s:]+)")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
 LOCAL_PATH = re.compile(r"(/Users/|/home/[a-z]|[A-Za-z]:\\\\Users)")
 SECRETISH = re.compile(r"(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9]{20,})")
@@ -87,6 +100,10 @@ def _check_hygiene(where, value, errors):
             domain = m.group(1).lower()
             if domain != "example.test" and not domain.endswith(".example.test"):
                 errors.append("%s: non-example.test email domain %r" % (where, domain))
+        for m in URL_HOST.finditer(text):
+            host = m.group(1).lower()
+            if host != "example.test" and not host.endswith(".example.test"):
+                errors.append("%s: non-example.test host %r" % (where, host))
         if LOCAL_PATH.search(text):
             errors.append("%s: local path-like text" % where)
         if SECRETISH.search(text):
@@ -252,6 +269,8 @@ def validate_dataset(golden_dir, required_scenarios=None):
 
     def common(name, n, row):
         where = "labels/%s.jsonl:%d" % (name, n)
+        if isinstance(row, dict) and "label_id" in row:
+            where += " (%s)" % row["label_id"]
         if not _need(row, ["label_id", "scenario_instance", "evidence"], where, errors):
             return where, False
         if row["label_id"] in seen_label_ids:
@@ -290,6 +309,11 @@ def validate_dataset(golden_dir, required_scenarios=None):
             continue
         if row["entity_type"] not in ENTITY_TYPES:
             errors.append("%s: entity_type %r not in design section 7" % (where, row["entity_type"]))
+        inst_text = "\n".join(rec["content"] for (rid, _v), rec in records.items()
+                              if rid in ids_by_instance.get(row["scenario_instance"], ()))
+        for alias in row["aliases"]:
+            if alias not in inst_text:
+                errors.append("%s: alias %r occurs in no record of the instance" % (where, alias))
 
     for n, row in enumerate(labels["resolution_pairs"], start=1):
         where, ok = common("resolution_pairs", n, row)
@@ -323,6 +347,10 @@ def validate_dataset(golden_dir, required_scenarios=None):
                                      "expected_status", "supersedes", "as_of"], where, errors):
             continue
         check_entity_ref(where, row["scenario_instance"], row["subject"])
+        if row["attribute"] not in FACT_ATTRIBUTES:
+            errors.append("%s: attribute %r not in the controlled vocabulary" % (where, row["attribute"]))
+        elif row["attribute"] in INSTANT_ATTRIBUTES and not (isinstance(row["value"], str) and UTC_INSTANT.match(row["value"])):
+            errors.append("%s: instant value %r must be UTC (...Z)" % (where, row["value"]))
         if row["expected_status"] not in FACT_STATUSES:
             errors.append("%s: expected_status %r not allowed" % (where, row["expected_status"]))
         for k in ("valid_from", "valid_until", "as_of"):
@@ -356,6 +384,13 @@ def validate_dataset(golden_dir, required_scenarios=None):
                 errors.append("%s: evidence_role must be %r when answerable=%s" % (where, want, row["answerable"]))
             if row["answerable"] and not row["answer_facts"]:
                 errors.append("%s: answerable question needs answer_facts" % where)
+
+    review = os.path.join(golden_dir, "labels", "review", "second_review_machine.jsonl")
+    if os.path.exists(review):
+        for n, row in enumerate(load_jsonl(review), start=1):
+            where = "labels/review/second_review_machine.jsonl:%d" % n
+            for e in row.get("evidence", []):
+                errors.extend(check_evidence(e, records, where))
     return errors
 
 

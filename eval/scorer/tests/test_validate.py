@@ -215,6 +215,46 @@ class TestSchema(ValidateBase):
         self.assertHasError("evidence_role")
 
 
+class TestHygieneAndVocabulary(ValidateBase):
+    def test_url_host_must_be_example_test(self):
+        def fn(rows):
+            rows[0]["source_url"] = "https://intranet.corp.com/x"
+        self.mutate("sources/mail.jsonl", fn)
+        self.assertHasError("non-example.test host")
+
+    def test_label_errors_name_the_label_id(self):
+        def fn(rows):
+            rows[0]["evidence"][0]["quote"] = "틀림"
+        self.mutate("labels/entities.jsonl", fn)
+        self.assertHasError("T1:ent-1")
+
+    def test_alias_must_occur_in_instance_sources(self):
+        def fn(rows):
+            rows[0]["aliases"] = ["존재하지않는별칭"]
+        self.mutate("labels/entities.jsonl", fn)
+        self.assertHasError("alias")
+
+    def test_attribute_must_be_in_vocabulary(self):
+        def fn(rows):
+            rows[0]["attribute"] = "some_free_text_name"
+        self.mutate("labels/temporal_facts.jsonl", fn)
+        self.assertHasError("attribute")
+
+    def test_instant_values_must_be_utc(self):
+        def fn(rows):
+            rows[0]["attribute"] = "start_instant"
+            rows[0]["value"] = "2026-11-24T09:00:00+09:00"
+        self.mutate("labels/temporal_facts.jsonl", fn)
+        self.assertHasError("UTC")
+
+    def test_second_review_file_evidence_is_checked(self):
+        os.makedirs(os.path.join(self.root, "labels", "review"))
+        bad = {"kind": "relation", "scenario_instance": "T1", "evidence": [
+            {"record_id": "mai-0001", "version": 1, "span": [0, 3], "quote": "틀림"}]}
+        write_jsonl(os.path.join(self.root, "labels", "review", "second_review_machine.jsonl"), [bad])
+        self.assertHasError("second_review_machine")
+
+
 class TestOptionalFields(ValidateBase):
     def test_trigger_must_resolve(self):
         def fn(rows):

@@ -17,9 +17,9 @@ def s08(w):
     I.pair(("mailA", "2026-11-18T10:00:00+09:00"), ("msgB", "2026-11-18T02:00:00+01:00"), "e1", "e1")
     I.pair(("mailA", "2026-11-18T10:00:00+09:00"), ("msgC", "2026-11-17T17:00:00-08:00"), "e1", "e1")
     I.pair(("mailA", "2026-11-18T10:00:00+09:00"), ("msgD", "2026-11-18T10:00:00-08:00"), "e1", "e2")
-    I.fact("e1", "start_instant_utc", "2026-11-18T01:00:00Z", "2026-11-16", None, "verified",
+    I.fact("e1", "start_instant", "2026-11-18T01:00:00Z", "2026-11-16", None, "verified",
            [("mailA", "2026-11-18T10:00:00+09:00"), ("msgB", "2026-11-18T02:00:00+01:00"), ("msgC", "2026-11-17T17:00:00-08:00")])
-    I.fact("e2", "start_instant_utc", "2026-11-18T18:00:00Z", "2026-11-16", None, "verified",
+    I.fact("e2", "start_instant", "2026-11-18T18:00:00Z", "2026-11-16", None, "verified",
            [("msgD", "2026-11-18T10:00:00-08:00")])
     I.qa("정기 점검은 UTC로 언제 시작하는가?", ["2026-11-18T01:00:00Z", "서울·베를린·시애틀 공지가 같은 시각"],
          [("mailA", "2026-11-18T10:00:00+09:00"), ("msgB", "2026-11-18T02:00:00+01:00"), ("msgC", "2026-11-17T17:00:00-08:00")])
@@ -35,9 +35,9 @@ def s08(w):
           "Re: audit deadline", "ryan.cho@example.test", "2026-11-18T09:00:00-08:00", participants=["ryan.cho@example.test", "yuna.cha@example.test"])
     I.ent("deadline", "Event", "감사 자료 제출 마감", [("wikiA", "제출 마감")])
     I.ent("plan", "Commitment", "감사 자료 제출 계획", [("mailB", "감사 자료는 2026-12-02T17:00:00+09:00에 제출하겠습니다")])
-    I.fact("deadline", "due_instant_utc", "2026-12-02T07:59:00Z", "2026-11-10", None, "verified",
+    I.fact("deadline", "due_instant", "2026-12-02T07:59:00Z", "2026-11-10", None, "verified",
            [("wikiA", "제출 마감: 2026-12-01T23:59:00-08:00")])
-    I.fact("plan", "submit_instant_utc", "2026-12-02T08:00:00Z", "2026-11-18", None, "verified",
+    I.fact("plan", "submit_instant", "2026-12-02T08:00:00Z", "2026-11-18", None, "verified",
            [("mailB", "2026-12-02T17:00:00+09:00에 제출하겠습니다")])
     I.ins("schedule_conflict", "제출 계획(2026-12-02T08:00:00Z)이 마감(2026-12-02T07:59:00Z)보다 1분 늦음", True, ["deadline", "plan"],
           [("wikiA", "제출 마감: 2026-12-01T23:59:00-08:00"), ("mailB", "2026-12-02T17:00:00+09:00에 제출하겠습니다")])
@@ -54,9 +54,9 @@ def s08(w):
     I.ent("e1", "Event", "주간 동기화(서울)", [("msgA", "주간 동기화 회의")])
     I.ent("e2", "Event", "주간 동기화(시애틀)", [("msgB", "주간 동기화 회의")])
     I.pair(("msgA", "내일 오전 9시"), ("msgB", "내일 오전 9시"), "e1", "e2")
-    I.pair(("msgA", "주간 동기화 회의"), ("mailC", "서울과 시애틀 주간 동기화"), "e1", "e1")
-    I.fact("e1", "start_instant", "2026-11-24T09:00:00+09:00", "2026-11-23", None, "verified", [("msgA", "내일 오전 9시에 주간 동기화 회의를 시작합니다. (서울 기준)")])
-    I.fact("e2", "start_instant", "2026-11-24T09:00:00-08:00", "2026-11-23", None, "verified", [("msgB", "내일 오전 9시에 주간 동기화 회의를 시작합니다. (시애틀 기준)")])
+    I.pair(("msgA", "주간 동기화 회의"), ("mailC", "서울"), "e1", "e1")
+    I.fact("e1", "start_instant", "2026-11-24T00:00:00Z", "2026-11-23", None, "verified", [("msgA", "내일 오전 9시에 주간 동기화 회의를 시작합니다. (서울 기준)")])
+    I.fact("e2", "start_instant", "2026-11-24T17:00:00Z", "2026-11-24", None, "verified", [("msgB", "내일 오전 9시에 주간 동기화 회의를 시작합니다. (시애틀 기준)")])
     I.qa("시애틀 주간 동기화는 언제 시작하나?", ["2026-11-24T09:00:00-08:00(UTC 17:00)"],
          [("msgB", "내일 오전 9시에 주간 동기화 회의를 시작합니다. (시애틀 기준)")])
 
@@ -80,7 +80,7 @@ def s09(w):
     I.pair(("mailA", "웹 서비스 점검창이 매주 화요일 22:00으로 변경되었습니다"), ("mailB", "웹 서비스 점검창이 매주 화요일 22:00으로 변경되었습니다"), "d1", "d1")
     I.pair(("mailA", "웹 서비스 점검창이 매주 화요일 22:00으로 변경되었습니다"), ("mailC", "웹 서비스 점검창이 매주 화요일 22:00으로 변경되었습니다"), "d1", "d1")
     I.pair(("mailA", "점검창이 매주 화요일 22:00"), ("msgD", "DB 점검창은 매주 목요일 02:00"), "d1", "d2")
-    I.fact("d1", "web_maintenance_window", "매주 화요일 22:00", "2026-11-09", None, "verified",
+    I.fact("d1", "maintenance_window", "매주 화요일 22:00", "2026-11-09", None, "verified",
            [("mailA", "웹 서비스 점검창이 매주 화요일 22:00으로 변경되었습니다")])
     I.qa("웹 서비스 점검창은 언제인가?", ["매주 화요일 22:00(2026-11-09부터)"],
          [("mailA", "웹 서비스 점검창이 매주 화요일 22:00으로 변경되었습니다")])
@@ -110,11 +110,11 @@ def s09(w):
           "서비스 등급 정책 초안", "woojin.jung@example.test", "2026-09-20T10:00:00+09:00")
     I.rec("msgD", "messenger", "서비스 등급 정책 문서가 두 개 보이는데 어느 게 최신인가요?", "정책 문서",
           "jiho.ahn@example.test", "2026-10-13T09:00:00+09:00", scope=["channel:ops"])
-    I.ent("pol", "BusinessRule", "P1 장애 응답 기준", [("wikiA", "P1 장애는 15분 안에 응답한다"), ("wikiB", "P1 장애는 15분 안에 응답한다")])
-    I.ent("draft", "BusinessRule", "P1 장애 응답 기준(초안 30분)", [("wikiC", "P1 장애는 30분 안에 응답한다")])
+    I.ent("pol", "BusinessRule", "P1 장애 응답 기준", [("wikiA", "P1 장애는 15분 안에 응답한다"), ("wikiB", "P1 장애는 15분 안에 응답한다"),
+                                                  ("wikiC", "P1 장애는 30분 안에 응답한다")])
     I.pair(("wikiA", "P1 장애는 15분 안에 응답한다"), ("wikiB", "P1 장애는 15분 안에 응답한다"), "pol", "pol")
-    I.pair(("wikiA", "P1 장애는 15분 안에 응답한다"), ("wikiC", "P1 장애는 30분 안에 응답한다"), "pol", "draft")
-    o = I.fact("draft", "p1_response_minutes", "30", "2026-09-20", "2026-10-10", "superseded", [("wikiC", "P1 장애는 30분 안에 응답한다")])
+    I.pair(("wikiA", "P1 장애는 15분 안에 응답한다"), ("wikiC", "P1 장애는 30분 안에 응답한다"), "pol", "pol")
+    o = I.fact("pol", "p1_response_minutes", "30", "2026-09-20", "2026-10-10", "superseded", [("wikiC", "P1 장애는 30분 안에 응답한다")])
     I.fact("pol", "p1_response_minutes", "15", "2026-10-10", None, "verified", [("wikiA", "P1 장애는 15분 안에 응답한다")], supersedes=o)
     I.qa("P1 장애는 몇 분 안에 응답해야 하나?", ["15분"], [("wikiA", "P1 장애는 15분 안에 응답한다")])
 
@@ -143,7 +143,7 @@ def s10(w):
     I.pair(("msgE", "릴리스 4.3은 다음 주에 배포합니다"), ("mailA", "릴리스 4.2를 롤백했습니다"), "r43", "rb")
     I.rel("rb", "CAUSED_BY", "err", [("mailA", "원인은 결제 승인 오류입니다"), ("msgB", "because of payment approval errors")])
     I.rel("rb", "RELATED_TO", "r43", [("msgE", "4.2와는 별개 일정이에요")], expected=False)
-    I.fact("rb", "release_4_2_status", "rolled_back", "2026-11-12", None, "verified", [("wikiD", "릴리스 4.2는 결제 승인 오류로 되돌림(rollback)되었다")])
+    I.fact("rb", "status", "rolled_back", "2026-11-12", None, "verified", [("wikiD", "릴리스 4.2는 결제 승인 오류로 되돌림(rollback)되었다")])
     I.qa("Why was release 4.2 rolled back?", ["payment approval errors(결제 승인 오류)"],
          [("msgB", "We rolled back release 4.2 because of payment approval errors"), ("mailA", "원인은 결제 승인 오류입니다")])
     # --- I2: 승인율 / approval rate / auth rate -----------------------------------------------
@@ -195,7 +195,7 @@ def s11(w):
           "가람 마일스톤 점검", "chaewon.yoon@example.test", "2026-11-18T09:00:00+09:00")
     I.rec("msgB", "messenger", "연말 회식은 가람 식당에서 하려고요. 예약은 2026-11-27 저녁 7시입니다.", "회식 장소",
           "yuna.cha@example.test", "2026-11-18T12:00:00+09:00", scope=["channel:random"])
-    I.rec("wikiC", "wiki", "# 프로젝트 가람 개요\n\n프로젝트 가람은 모바일 앱 v3를 개발하는 프로젝트이다.\n",
+    I.rec("wikiC", "wiki", "# 프로젝트 가람 개요\n\n프로젝트 가람은 모바일 앱 v3 개발을 맡은 프로젝트로, 마일스톤 점검을 정기적으로 진행한다.\n",
           "프로젝트 가람 개요", "chaewon.yoon@example.test", "2026-10-01T10:00:00+09:00")
     I.rec("msgD", "messenger", "가람 식당 예약 확인했습니다. 12명으로 잡았어요.", "회식 예약",
           "yuna.cha@example.test", "2026-11-18T12:30:00+09:00", scope=["channel:random"])
@@ -228,7 +228,7 @@ def s11(w):
     I.pair(("wikiA", "알림 서비스"), ("wikiB", "알림판"), "svc", "board")
     I.pair(("msgD", "알림 서비스"), ("wikiA", "알림 서비스"), "svc", "svc")
     I.rel("board", "DEPENDS_ON", "svc", [("msgE", "알림판 개편 일정과 알림 서비스는 무관합니다. 서로 의존하지 않아요")], expected=False)
-    I.fact("board", "revamp_deploy_date", "2026-12-02", "2026-11-17", None, "verified", [("mailC", "알림판 공지 영역 개편은 2026-12-02에 배포합니다")])
+    I.fact("board", "deploy_date", "2026-12-02", "2026-11-17", None, "verified", [("mailC", "알림판 공지 영역 개편은 2026-12-02에 배포합니다")])
     I.ins("dependency_delay", "알림 서비스 큐 지연이 알림판 개편 일정에 영향", True, ["svc", "board"],
           [("msgD", "알림 서비스 큐 지연이 있었지만 복구됐습니다"), ("mailC", "알림판 공지 영역 개편은 2026-12-02에 배포합니다")], expected=False)
     I.qa("알림판 개편은 언제 배포되나?", ["2026-12-02"], [("mailC", "알림판 공지 영역 개편은 2026-12-02에 배포합니다")])
@@ -248,7 +248,7 @@ def s11(w):
     I.ent("logi", "System", "물류 시스템", [("mailA", "물류 시스템"), ("wikiB", "물류 시스템")])
     I.rel("naru", "DEPENDS_ON", "logi", [("wikiB", "물류 시스템과는 연동하지 않는다")], expected=False)
     I.fact("naru", "target_date", "2026-12-30", "2026-11-02", None, "verified", [("msgC", "나루 프로젝트 목표일은 2026-12-30입니다")])
-    I.fact("logi", "integration_restore_date", "2026-12-10", "2026-11-16", None, "verified", [("mailA", "물류 시스템 연동이 2026-12-10까지 지연됩니다")])
+    I.fact("logi", "completion_date", "2026-12-10", "2026-11-16", None, "verified", [("mailA", "물류 시스템 연동이 2026-12-10까지 지연됩니다")])
     I.ins("dependency_delay", "물류 시스템 지연(2026-12-10)이 나루 프로젝트(2026-12-30) 일정에 영향", True, ["naru", "logi"],
           [("mailA", "물류 시스템 연동이 2026-12-10까지 지연됩니다"), ("msgC", "나루 프로젝트 목표일은 2026-12-30입니다")], expected=False)
     I.qa("나루 프로젝트 목표일은?", ["2026-12-30"], [("msgC", "나루 프로젝트 목표일은 2026-12-30입니다")])

@@ -14,6 +14,9 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 from common import load_json, load_jsonl  # noqa: E402
+from validate import RELATION_TYPES  # noqa: E402
+
+SYMMETRIC_RELATIONS = {"CONTRADICTS", "RELATED_TO"}
 
 
 def _dedupe(ranked):
@@ -62,9 +65,20 @@ def _f1(p, r):
     return _safe_div(2 * p * r, p + r)
 
 
-def relation_metrics(predicted, gold, forbidden):
-    """predicted/gold/forbidden are sets of (subject, relation, object)."""
-    predicted, gold, forbidden = set(predicted), set(gold), set(forbidden)
+def canonical_triple(t):
+    """Symmetric relation types are stored with their endpoints in sorted order."""
+    s, r, o = t
+    if r in SYMMETRIC_RELATIONS and o < s:
+        return (o, r, s)
+    return (s, r, o)
+
+
+def relation_metrics(predicted, gold, forbidden, unjudged=0):
+    """predicted/gold/forbidden are sets of (subject, relation, object). `unjudged` is the count of
+    predictions the evaluation adapter marked as touching no labelled item; they are reported, not scored."""
+    predicted = {canonical_triple(t) for t in predicted}
+    gold = {canonical_triple(t) for t in gold}
+    forbidden = {canonical_triple(t) for t in forbidden}
     tp = len(predicted & gold)
     hits = len(predicted & forbidden)
     p = _safe_div(tp, len(predicted))
@@ -75,6 +89,7 @@ def relation_metrics(predicted, gold, forbidden):
         "f1": _f1(p, r),
         "n_predicted": len(predicted),
         "n_gold": len(gold),
+        "n_unjudged": unjudged,
         "forbidden_hits": hits,
         "forbidden_rate": _safe_div(hits, len(forbidden)),
     }
@@ -115,10 +130,11 @@ def pairwise_f1(predicted, gold):
 def citation_metrics(predicted, required, forbidden):
     """predicted: {query_id: [(record_id, version)]}; required: {query_id: set of pairs} for
     answerable questions; forbidden: {query_id: set of pairs} for unanswerable ones."""
+    predicted = {qid: set(cites) for qid, cites in predicted.items()}  # a repeated citation counts once
     n_pred = n_correct = forbidden_cites = 0
     req_total = req_covered = 0
     for qid, req in required.items():
-        cited = set(predicted.get(qid, []))
+        cited = predicted.get(qid, set())
         req_total += len(req)
         req_covered += len(cited & req)
     for qid, cites in predicted.items():
@@ -166,6 +182,7 @@ def score(golden_dir, predictions_path, split=None, scenarios=None, k=5):
     citation_pred = {}
     resolution_pred = {}
     relation_pred = set()
+    unjudged = 0
     for row in load_jsonl(predictions_path):
         kind = row.get("kind")
         if kind == "retrieval":
@@ -182,6 +199,15 @@ def score(golden_dir, predictions_path, split=None, scenarios=None, k=5):
                 raise ValueError("unknown pair_id: %s" % row["pair_id"])
             resolution_pred[row["pair_id"]] = bool(row["same"])
         elif kind == "relation":
+            if row.get("judged") is False:
+                if row.get("scenario_instance") is None or row["scenario_instance"] in scope:
+                    unjudged += 1
+                continue
+            if row["relation"] not in RELATION_TYPES:
+                raise ValueError("unknown relation type: %r" % row["relation"])
+            for end in ("subject", "object"):
+                if row[end] not in entities:
+                    raise ValueError("unknown entity id in relation prediction: %r" % row[end])
             relation_pred.add((row["subject"], row["relation"], row["object"]))
         else:
             raise ValueError("unknown prediction kind: %r" % (kind,))
@@ -204,7 +230,7 @@ def score(golden_dir, predictions_path, split=None, scenarios=None, k=5):
                 if r["scenario_instance"] in scope and r["expected"]}
     forb_rel = {(r["subject"], r["relation"], r["object"]) for r in relations
                 if r["scenario_instance"] in scope and not r["expected"]}
-    pred_rel = {t for t in relation_pred if entities.get(t[0]) in scope}
+    pred_rel = {t for t in relation_pred if entities[t[0]] in scope}
 
     gold_pairs = {pid: p["same"] for pid, p in pairs.items() if p["scenario_instance"] in scope}
     pred_pairs = {pid: v for pid, v in resolution_pred.items() if pid in gold_pairs}
@@ -224,7 +250,7 @@ def score(golden_dir, predictions_path, split=None, scenarios=None, k=5):
             "precision_at_k": _mean(precisions),
             "mrr": _mean(rrs),
         },
-        "relations": relation_metrics(pred_rel, gold_rel, forb_rel),
+        "relations": relation_metrics(pred_rel, gold_rel, forb_rel, unjudged),
         "resolution": pairwise_f1(pred_pairs, gold_pairs),
         "citation": citation_metrics(pred_cites, required, forbidden),
     }

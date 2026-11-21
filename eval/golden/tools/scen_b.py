@@ -15,7 +15,7 @@ def s04(w):
     I.rel("f2", "CONTRADICTS", "f1", [("mailA", "결제 모듈 배포는 2026-12-01에 진행합니다"), ("wikiB", "배포 예정일: 2026-12-08")])
     I.fact("f1", "deploy_date", "2026-12-01", "2026-11-08", None, "disputed", [("mailA", "결제 모듈 배포는 2026-12-01에 진행합니다")])
     I.fact("f2", "deploy_date", "2026-12-08", "2026-11-08", None, "disputed", [("wikiB", "배포 예정일: 2026-12-08")])
-    I.ins("conflicting_information", "결제 모듈 배포일이 메일(2026-12-01)과 위키(2026-12-08)에서 상충", True, ["f1", "f2"],
+    I.ins("conflicting_information", "결제 모듈 배포일이 메일(2026-12-01)과 위키(2026-12-08)에서 상충", False, ["f1", "f2"],
           [("mailA", "결제 모듈 배포는 2026-12-01에 진행합니다"), ("wikiB", "배포 예정일: 2026-12-08"),
            ("msgC", "배포일이 메일과 위키에서 다르게 적혀 있는데")])
     I.qa("결제 모듈 배포일은 언제인가?", ["메일은 2026-12-01", "위키는 2026-12-08", "두 출처가 상충하며 확정할 수 없음"],
@@ -53,8 +53,9 @@ def s04(w):
     I.rel("f2", "CONTRADICTS", "f1", [("wikiA", "월 요청량은 약 120만 건이다"), ("mailB", "월 요청량은 약 12만 건으로 집계되었습니다")])
     I.fact("sys", "monthly_requests", "1200000", None, None, "disputed", [("wikiA", "월 요청량은 약 120만 건이다")])
     I.fact("sys", "monthly_requests", "120000", "2026-10-01", "2026-10-31", "disputed", [("mailB", "월 요청량은 약 12만 건으로 집계되었습니다")])
-    I.ins("conflicting_information", "검색 서비스 월 요청량이 위키와 메일에서 10배 차이", True, ["sys", "f1", "f2"],
-          [("wikiA", "월 요청량은 약 120만 건이다"), ("mailB", "월 요청량은 약 12만 건으로 집계되었습니다")])
+    I.ins("conflicting_information", "검색 서비스 월 요청량이 위키와 메일에서 10배 차이", False, ["sys", "f1", "f2"],
+          [("wikiA", "월 요청량은 약 120만 건이다"), ("mailB", "월 요청량은 약 12만 건으로 집계되었습니다"),
+           ("msgC", "요청량 숫자가 위키랑 메일이 달라서")])
     I.qa("검색 서비스의 월 요청량은?", ["위키는 약 120만 건", "메일은 약 12만 건", "상충함"],
          [("wikiA", "월 요청량은 약 120만 건이다"), ("mailB", "월 요청량은 약 12만 건으로 집계되었습니다")])
 
@@ -71,9 +72,9 @@ def s05(w):
     I.ent("old", "Fact", "정기 회의 2026-11-25 14:00", [("mailA", "2026-11-25 14:00")])
     I.ent("new", "Fact", "정기 회의 2026-11-26 14:00", [("mailB", "2026-11-26 14:00")])
     I.rel("new", "SUPERSEDES", "old", [("mailB", "정정합니다. 정기 회의는 2026-11-26 14:00입니다")])
-    o = I.fact("old", "meeting_start", "2026-11-25T14:00:00+09:00", "2026-11-10", "2026-11-11", "superseded",
+    o = I.fact("old", "start_instant", "2026-11-25T05:00:00Z", "2026-11-10", "2026-11-11", "superseded",
                [("mailA", "정기 회의는 2026-11-25 14:00에 진행합니다")])
-    I.fact("new", "meeting_start", "2026-11-26T14:00:00+09:00", "2026-11-11", None, "verified",
+    I.fact("new", "start_instant", "2026-11-26T05:00:00Z", "2026-11-11", None, "verified",
            [("mailB", "정정합니다. 정기 회의는 2026-11-26 14:00입니다")], supersedes=o)
     I.ins("important_work_change", "정기 회의 일정이 2026-11-25에서 2026-11-26으로 정정됨", False, ["old", "new"],
           [("mailA", "정기 회의는 2026-11-25 14:00에 진행합니다"), ("mailB", "정정합니다. 정기 회의는 2026-11-26 14:00입니다")])
@@ -109,13 +110,15 @@ def s05(w):
           "haram.moon@example.test", "2026-11-16T09:40:00+09:00")
     I.ent("p_old", "Person", "최도윤", [("msgA", "최도윤", 1), ("wikiC", "최도윤")])
     I.ent("p_new", "Person", "강예린", [("msgA", "강예린", 2), ("wikiC", "강예린")])
-    I.ent("duty", "Task", "11월 3주차 서버 점검", [("msgA", "서버 점검", 2)])
+    I.ent("duty", "Task", "11월 3주차 서버 점검", [("msgA", "서버 점검", 2), ("wikiC", "11월 3주차")])
+    I.ent("duty4", "Task", "11월 4주차 서버 점검", [("wikiC", "11월 4주차")])
+    I.rel("p_old", "RESPONSIBLE_FOR", "duty4", [("wikiC", "11월 4주차: 최도윤")], vf="2026-11-23")
     o = I.fact("duty", "assignee", "최도윤", "2026-11-16", "2026-11-16", "superseded", [("msgA", "서버 점검 담당자는 최도윤입니다", 1)])
     I.fact("duty", "assignee", "강예린", "2026-11-16", None, "verified", [("msgA", "서버 점검 담당자는 강예린입니다", 2),
            ("wikiC", "11월 3주차: 강예린")], supersedes=o)
-    I.rel("p_new", "RESPONSIBLE_FOR", "duty", [("msgA", "서버 점검 담당자는 강예린입니다", 2)])
+    I.rel("p_new", "RESPONSIBLE_FOR", "duty", [("msgA", "서버 점검 담당자는 강예린입니다", 2)], vf="2026-11-16")
     I.rel("p_old", "RESPONSIBLE_FOR", "duty", [("msgA", "서버 점검 담당자는 최도윤입니다", 1)], expected=False)
-    I.qa("이번 주 서버 점검 담당자는?", ["강예린", "최도윤은 수정 전 값"],
+    I.qa("2026-11-16 기준 이번 주 서버 점검 담당자는?", ["강예린", "최도윤은 수정 전 값"],
          [("msgA", "서버 점검 담당자는 강예린입니다", 2), ("wikiC", "11월 3주차: 강예린")])
 
 
@@ -131,7 +134,7 @@ def s06(w):
     I.rec("msgC", "messenger", "가람 예산 관련 자료는 별도로 안내드리겠습니다.", "자료 안내",
           "seoa.lee@example.test", "2026-11-06T09:00:00+09:00", scope=["group:finance-team"])
     I.ent("proj", "Project", "가람", [("wikiB", "프로젝트 가람")])
-    I.fact("proj", "budget_krw", "300000000", "2026-11-05", None, "removed",
+    I.fact("proj", "budget_krw", "300000000", "2026-11-05", "2026-11-15", "removed",
            [("mailA", "프로젝트 가람 예산은 3억 원으로 확정되었습니다")], trigger=I.trig("mailA", 2))
     I.fact("proj", "description", "모바일 앱 v3 개발 프로젝트", None, None, "verified",
            [("wikiB", "프로젝트 가람은 모바일 앱 v3를 개발하는 프로젝트이다")])
@@ -150,7 +153,7 @@ def s06(w):
     I.rec("mailC", "mail", "우회 경로 B 전환 훈련 결과를 공유합니다. 전환에는 평균 4분이 걸렸습니다.\n",
           "전환 훈련 결과", "yeonwoo.kang@example.test", "2026-10-25T17:00:00+09:00")
     I.ent("route", "System", "우회 경로 B", [("wikiB", "우회 경로 B"), ("mailC", "우회 경로 B")])
-    I.fact("route", "temporary_use_until_week_end", "true", "2026-11-10", None, "removed",
+    I.fact("route", "temporary_use", "true", "2026-11-10", "2026-11-12", "removed",
            [("msgA", "임시로 우회 경로 B를 쓰고 있어요. 이번 주까지만 유지합니다")], trigger=I.trig("msgA", 2))
     I.fact("route", "failover_target", "우회 경로 B", None, None, "verified",
            [("wikiB", "장애 시 우회 경로 B로 전환한다")])
@@ -169,9 +172,9 @@ def s06(w):
     I.rec("msgC", "messenger", "일정표 문서가 없어졌네요. 어디서 다시 보나요?", "일정표",
           "gaeun.shin@example.test", "2026-11-15T09:30:00+09:00", scope=["channel:team"])
     I.ent("m2", "Event", "마일스톤 M2", [("wikiA", "마일스톤 M2"), ("mailB", "마일스톤 M2")])
-    I.fact("m2", "completion_date", "2026-12-09", "2026-11-03", None, "removed",
+    I.fact("m2", "completion_date", "2026-12-09", "2026-11-03", "2026-11-14", "removed",
            [("wikiA", "마일스톤 M2 완료: 2026-12-09")], trigger=I.trig("wikiA", 2))
-    I.fact("m2", "review_start_date", "2026-12-08", "2026-11-04", None, "verified",
+    I.fact("m2", "start_date", "2026-12-08", "2026-11-04", None, "verified",
            [("mailB", "마일스톤 M2 검수는 2026-12-08에 시작합니다")])
     I.ins("schedule_conflict", "M2 완료(2026-12-09)가 검수 시작(2026-12-08)보다 늦음", True, ["m2"],
           [("wikiA", "마일스톤 M2 완료: 2026-12-09"), ("mailB", "마일스톤 M2 검수는 2026-12-08에 시작합니다")],
@@ -236,7 +239,7 @@ def s07(w):
            trigger=I.trig("msgA", 2))
     I.fact("plan", "public_launch_window", "2027년 1분기", None, None, "verified",
            [("mailC", "신규 요금제를 2027년 1분기 출시로만 표기합니다")])
-    I.qa("신규 요금제 출시일은?", [], [("msgA", "신규 요금제 출시일은 2027-01-11로 잠정 결정했습니다", 1), ("msgA", "신규 요금제 출시일은 2027-01-11로 잠정 결정했습니다", 2)],
+    I.qa("신규 요금제의 정확한 출시일(일 단위)은?", [], [("msgA", "신규 요금제 출시일은 2027-01-11로 잠정 결정했습니다", 1), ("msgA", "신규 요금제 출시일은 2027-01-11로 잠정 결정했습니다", 2)],
          answerable=False, viewer="channel:proj-x", trigger=I.trig("msgA", 2))
     I.qa("신규 요금제는 공개적으로 언제 출시된다고 안내하나?", ["2027년 1분기"],
          [("mailC", "신규 요금제를 2027년 1분기 출시로만 표기합니다")])

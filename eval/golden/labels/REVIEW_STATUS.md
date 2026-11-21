@@ -1,29 +1,77 @@
 # 라벨 검토 상태
 
-**R05-C2(독립 검토 라벨)는 아직 충족되지 않았다.** 이 폴더의 모든 라벨은 데이터를 만든 생성자(LLM)가 직접 붙인 것이고, 아직 다른 검토자가 원문만 보고 다시 만든 적이 없다. 생성 모델이 자기 결과를 채점한 값은 단독 정답으로 쓰지 않는다. 독립 검토가 끝나기 전의 점수는 "잠정 라벨 기준"이라고 표시해야 한다.
+**R05-C2(독립 검토 라벨)는 아직 충족되지 않았다.** 사람의 독립 검토는 없다. 라벨은 데이터를 만든 생성자(LLM)가 붙였고, 그중 일부(아래 "두 번째 기계 검토")만 라벨을 보지 않은 다른 기계가 한 번 다시 만들어 비교했다. 생성 모델이 자기 결과를 채점한 값은 단독 정답으로 쓰지 않는다. 독립 검토가 끝나기 전의 점수는 "잠정 라벨 기준"이라고 표시해야 한다.
 
 ## 파일별 상태
 
 | 파일 | 줄 수 | 상태 |
 |---|---|---|
-| `entities.jsonl` | 69 | generator-labelled, independent review pending |
-| `resolution_pairs.jsonl` | 47 | generator-labelled, independent review pending |
-| `relations.jsonl` | 25 | generator-labelled, independent review pending |
-| `temporal_facts.jsonl` | 53 | generator-labelled, independent review pending |
-| `insights.jsonl` | 14 | generator-labelled, independent review pending |
-| `qa.jsonl` | 40 | generator-labelled, independent review pending |
-| `../splits.json` (분할 배정) | 34 인스턴스 | generator-assigned, independent review pending |
-| `../sources/*.jsonl` (합성 원문) | 133 | generator-written (가상 데이터이며 정답이 아님) |
+| `entities.jsonl` | 91 | generator-labelled, independent review pending |
+| `resolution_pairs.jsonl` | 56 | generator-labelled, independent review pending (원래 eval 12개 인스턴스 분은 기계 두 번째 검토 있음) |
+| `relations.jsonl` | 38 | generator-labelled, independent review pending (같음) |
+| `temporal_facts.jsonl` | 64 | generator-labelled, independent review pending (같음) |
+| `insights.jsonl` | 17 | generator-labelled, independent review pending (같음) |
+| `qa.jsonl` | 47 | generator-labelled, independent review pending |
+| `../splits.json` (분할 배정) | 40 인스턴스 | generator-assigned, independent review pending |
+| `../sources/*.jsonl` (합성 원문) | 156 | generator-written (가상 데이터이며 정답이 아님) |
+| `review/second_review_machine.jsonl` | 116 | 두 번째 기계 검토의 원본 출력(라벨이 아니다) |
 
 `quote`가 `span`과 같은지, id가 풀리는지 같은 **기계적 정합성**은 `eval/scorer/validate.py`가 검사한다. 이것은 라벨의 **의미가 옳은지**를 보증하지 않는다.
 
-## 독립 검토 절차
+## 두 번째 기계 검토 (2026-11-21)
 
-1. **검토자 두 번째 1인**을 정한다. 생성자와 다른 사람 또는 다른 모델 계열이어야 하고, 사람이 최종 책임을 진다.
-2. 검토자에게 `eval/golden/sources/`와 라벨 **스키마 설명**(`eval/golden/README.md`의 라벨 형식)만 준다. 기존 `labels/`는 **보여주지 않는다**(앵커링 방지).
+리뷰어가 `eval` 분할의 원래 12개 인스턴스(`S01-I3`, `S01-I4`, `S02-I3`, `S03-I3`, `S04-I3`, `S05-I3`, `S06-I3`, `S07-I3`, `S08-I3`, `S09-I3`, `S10-I3`, `S11-I3`)에 대해, **committed 라벨 파일을 열기 전에** 원문만 보고 엔티티 해소 쌍, 관계, 시간 사실, Insight를 직접 라벨링했다(116행, 원본: `review/second_review_machine.jsonl`, 이 파일의 `evidence`도 validator가 원문과 대조한다). 결과는 다음과 같다. 리뷰 당시 committed 라벨과 비교한 값이다.
+
+| 라벨 종류 | 생성자 라벨 | 두 번째 검토 | 일치 | 불일치 | 생성자에만 | 두 번째 검토에만 |
+|---|---|---|---|---|---|---|
+| resolution_pairs | 13 | 49 | 11 (같은 쌍 10, 이행적 폐쇄 1) | 2 | 0 | 37 |
+| relations | 7 | 29 | 7 | 0 | 0 | 22 |
+| temporal_facts (값+상태) | 22 | 28 | 22 | 0 | 0 | 6 |
+| insights (타입+expected) | 5 | 10 | 5 | 0 (`is_inference`만 1건 다름) | 0 | 5 |
+
+두 번째 검토가 더 많이 만든 것은 정답이 성기기 때문이다(시나리오가 드러내려는 항목만 라벨링). 이 비교는 "생성자가 붙인 라벨을 다른 기계가 같게 만들 수 있는가"를 본 것이다.
+
+### 이것이 입증하는 것
+
+- 라벨을 보지 않은 두 번째 기계가 원래 eval 12개 인스턴스의 **쌍, 관계, 시간 사실, Insight**에서 생성자 라벨을 거의 모두 재현했다(관계, 시간 사실, Insight 타입은 전부, 쌍은 13개 중 11개).
+- 그 라벨들의 evidence span이 원문과 맞는다.
+
+### 이것이 입증하지 않는 것
+
+- **사람의 검토가 아니다.** 두 번째 기계가 생성자와 같은 모델 계열일 수 있다.
+- **QA와 엔티티 라벨은 라벨을 보지 않고 만든 것이 아니다**(요청하지 않았다). 이 둘에 대한 관찰은 사후 것이라 앵커링되어 있다.
+- **dev 분할은 다시 라벨링하지 않았다.** 이번 재작업에서 새로 더한 eval 인스턴스 6개(`S02-I4`, `S04-I4`, `S05-I4`, `S06-I4`, `S09-I4`, `S11-I4`)도 검토 대상이 아니다.
+- 성긴 정답에서의 일치는 정답이 **빠뜨린 것**에 대해 말해 주지 않는다.
+
+### 불일치 세 건과 현재(잠정) 처리
+
+1. **`S08-I3:pair-2`.** 두 번째 검토는 메일의 "서울과 시애틀 주간 동기화"를 서울 회의로 좁혀 읽었고, 생성자는 그 구절 전체를 서울 회의와 같다고 라벨링했다. 리뷰어의 판단: 그 구절은 두 회의를 모두 가리키므로 생성자 쪽이 모호하다. **조치**: 메일 쪽 mention을 "서울"로 좁혔다. *사람 판정 대기*: 좁힌 쌍이 맞는지, 아니면 이 쌍을 빼야 하는지.
+2. **`S09-I3:pair-2`.** 두 번째 검토는 P1 응답 기준 15분(최종)과 30분(초안)을 **다른 엔티티**로 봤고, 생성자는 한 엔티티의 값이 바뀐 것으로 봤다(생성자의 시간 사실도 `supersedes`로 한 대상을 전제했다). **잠정 조정(provisional, human decision pending)**: *한 엔티티가 있고 그 값이 초안(30분)에서 최종(15분)으로 대체된 것*으로 라벨링했다(쌍은 `same: true`, 시간 사실은 `superseded`). 두 해석은 다음과 같다. (a) 규칙은 한 엔티티이고 값이 버전을 가진다 — 설계 §7이 요구하는 사실의 시간 유효성 모델과 일치하고, 초안을 최종과 합친 것을 오류로 치지 않는다. (b) 초안 문서와 최종 문서가 서로 다른 지식 항목이다 — 문서 단위 분리를 존중하지만 `SUPERSEDES` 사실과 모순되고 `false_merge`를 버전 모델에 불리하게 만든다. 사람이 둘 중 하나를 확정해야 한다.
+3. **`S04-I3:ins-1`의 `is_inference`.** 두 번째 검토는 `false`, 생성자는 `true`였다(출처가 둘이고 서로 다른 숫자를 말한다). **조치**: 규칙을 정했다. *한 출처가 결론을 명시하면 `false`*(이 인스턴스는 메시지가 "위키랑 메일이 달라서"라고 말한다). 이 규칙을 dev와 eval에 일관되게 적용해 `S04-I3`과 `S04-I1`을 `false`로 바꾸었다. *사람 판정 대기*: 이 규칙 자체가 맞는지.
+
+필드 수준 차이(합의된 행 안에서): `S06-I3`의 삭제된 사실 `valid_until`(삭제 시각), `S07-I3`의 `valid_from`, `S05-I3`의 두 사실이 날짜 단위라 09:00 → 09:12 순서가 표현되지 않는 것. `valid_from`/`valid_until` 규칙(`docs/EVALUATION.md` §2.0의 5)을 정하고 앞의 값들을 채웠다. 순서는 `supersedes`로만 표현된다.
+
+### 두 번째 검토에만 있는 항목 (판정할 가치가 있는 것)
+
+- `S01-I4`: 하늘길 `DEPENDS_ON` 로그 수집기 v2는 금지(문하람이 하늘길 담당이자 v2 지연 공지자). 오태이/문하람 `RESPONSIBLE_FOR`. **미반영.**
+- `S02-I3`: 소속 `BELONGS_TO`와 유효 기간(2026-09-30까지/2026-10-01부터), 박서준(데이터팀)이 모니터링을 맡는 것은 금지. **반영함.**
+- `S03-I3`: 알림 기능 DR과 DR 훈련은 연결 금지, 설계 검토 날짜 2026-11-13. **미반영.** (엔티티 타입은 `Concept`와 `Event`로 나눴다.)
+- `S05-I3`: 최도윤 `RESPONSIBLE_FOR` 11월 4주차 서버 점검은 사실(위키)이다. 이전에는 일반적인 "서버 점검" span으로 최도윤을 금지해서 올바른 4주차 추출이 금지 삼중항에 정렬될 수 있었다. **3주차/4주차 엔티티로 나눠 반영함.**
+- `S07-I3`: "2027년 1분기"와 "2027-01-11"은 금지된 `CONTRADICTS`(공개 표기와 잠정일). **미반영.**
+- `S08-I3`: 서울/시애틀 회의 병합 금지를 관계로, 거짓 `schedule_conflict` Insight를 음성 정답으로. **미반영.**
+- `S09-I3`: 최종이 초안을 `SUPERSEDES`한다는 관계. 위 잠정 조정으로 한 엔티티가 되었으므로 엔티티 간 관계가 아니라 값의 대체(시간 사실)로 남는다.
+- `S11-I3`: 창고 앱이 물류 연동 지연에 의존한다는 사실(두 번 말해짐, 라벨 없음). 맞는 "창고 앱 지연" Insight는 정밀도 계산에서 `unjudged`가 된다(`docs/EVALUATION.md` §2.0). **미반영.**
+- 영문 이름 Jian Noh = 노지안(`S01-I3`) 쌍은 라벨에 없다. eval 원래 12개 인스턴스 중 9개에는 사람 라벨이 없다. **미반영.**
+
+미반영 항목은 라벨이 성긴 것이 의도(시나리오가 드러내려는 항목만)라서 그대로 두었고, 정밀도 계열 지표는 라벨에 닿는 예측만 센다. 사람 검토가 이 목록에서 더 추가할지 정한다.
+
+## 사람 독립 검토 절차
+
+1. **검토자 1인**을 정한다. 생성자와 다른 사람이어야 하고 사람이 최종 책임을 진다.
+2. 검토자에게 `eval/golden/sources/`와 라벨 **스키마 설명**(`eval/golden/README.md`의 라벨 형식)만 준다. 기존 `labels/`와 `labels/review/`는 **보여주지 않는다**(앵커링 방지).
 3. 검토자는 원문에서 직접 엔티티, 엔티티 해소 쌍, 관계(방해 쌍 포함), 시간 유효성, 기대 Insight, Q&A와 근거 span을 도출해 `labels_reviewer/`에 같은 형식으로 쓴다.
 4. 두 라벨 집합을 비교한다. 키(엔티티는 타입·evidence span, 관계는 삼중항, 쌍은 mention 두 개, 사실은 값·상태, Q&A는 질문·근거 쌍)로 맞춰 일치율과 불일치 목록을 만든다.
-5. **불일치는 사람이 판정**한다. 생성자도 검토자도 자기 쪽을 정답으로 밀지 않는다. 판정 결과와 이유를 `labels/REVIEW_LOG.md`에 남기고 라벨을 고친다.
+5. **불일치는 사람이 판정**한다. 생성자도 검토자도 자기 쪽을 정답으로 밀지 않는다. 판정 결과와 이유를 `labels/REVIEW_LOG.md`에 남기고 라벨을 고친다. 위의 세 건과 `S09-I3`의 두 해석이 첫 안건이다.
 6. 각 파일의 상태를 `independent review done (reviewer, date, 일치율)`로 바꾸고, 이 문서의 맨 위 선언과 spec의 R05-C2 상태를 같은 변경으로 갱신한다.
 7. 검토 중 봉인(eval) 분할을 열어 보았다면 그 사실을 기록한다. 봉인은 공개 저장소의 관례이다.
 
@@ -31,3 +79,4 @@
 
 - 생성자가 시나리오와 정답을 함께 만들었으므로 데이터가 정답을 "쉽게" 드러내도록 쓰였을 수 있다(편향).
 - 시나리오별 인스턴스는 3~4개뿐이다. 한 인스턴스의 라벨 오류가 점수에 크게 영향을 준다.
+- 두 번째 기계 검토 뒤에 라벨을 고쳤으므로 `review/second_review_machine.jsonl`은 현재 라벨과 일부 다르다. 그것이 정상이다.

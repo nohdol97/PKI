@@ -1,6 +1,6 @@
 # 스펙: R05 합성 Golden Dataset과 평가 기준
 
-- 날짜: 2026-11-21 / 상태: 초안
+- 날짜: 2026-11-21 / 상태: 초안(독립 리뷰 반영 후 재작업 중)
 - 관련: 이슈 #14(R05), 총괄 #1, Phase 0 #2, 선행 #35. 원 설계: [docs/design/original-design.md](../design/original-design.md) §5, §6.7, §7, §10, §18
 
 ## 배경
@@ -29,7 +29,7 @@
 
 ## 요구사항
 
-- R05-R1: `eval/golden/sources/{mail,wiki,messenger}.jsonl`에 SourceRecord를 둔다. 필드는 설계 §5의 `id, source_type, external_id, title, content, author, participants, thread_id, source_url, created_at, updated_at, content_hash, version, access_scope, metadata`에 `connector_instance_id`, `operation`(`upsert`/`delete`/`revoke`), `schema_version`을 더한다. 한 `(id, version)` 쌍이 한 줄이다. 총 120~180줄.
+- R05-R1: `eval/golden/sources/{mail,wiki,messenger}.jsonl`에 SourceRecord를 둔다. 필드는 설계 §5의 `id, source_type, external_id, title, content, author, participants, thread_id, source_url, created_at, updated_at, content_hash, version, access_scope, metadata`에 `connector_instance_id`, `operation`(`upsert`/`delete`/`revoke`), `schema_version`을 더한다. 한 `(id, version)` 쌍이 한 줄이다. 총 120~180줄(재작업 후 156줄).
 - R05-R2: 시나리오 `schedule_dependency_delay`(설계 §10의 A/B 예 포함, 전체 ISO 날짜), `same_name_different_people`, `abbreviation_two_meanings`, `contradicting_statements`, `correction_supersedes`, `deletion`, `permission_revocation`, `timezone_offsets`, `duplicate_threads`, `mixed_ko_en_same_concept`가 각각 3개 이상의 인스턴스를 가진다.
 - R05-R3: `distractor_noise` 시나리오가 3개 이상의 인스턴스를 가지며, 각 방해 레코드는 "연결하면 안 됨"으로 라벨링된다(relations의 `expected: false`).
 - R05-R4: `eval/golden/labels/`에 `entities`, `resolution_pairs`, `relations`, `temporal_facts`, `insights`, `qa` 여섯 파일을 둔다. 관계 type은 설계 §7, Insight type은 설계 §10, 지식 type은 설계 §7에서 고른다. 모든 라벨에 `evidence`(`{record_id, version, span:[start,end], quote}` 목록)가 있고 `quote`는 해당 레코드 `content`의 `[start,end)` 조각과 같다. `span`은 유니코드 코드포인트 기준이다. Insight는 `is_inference`를 가진다.
@@ -38,7 +38,7 @@
 - R05-R7: `eval/scorer/validate.py`가 스키마, evidence의 quote와 span 일치, id 해소, 분할의 서로소·전체 포함, 레코드 해시를 검사하고 위반을 0이 아닌 종료 코드로 알린다.
 - R05-R8: `eval/scorer/score.py`가 predictions JSONL(형식은 `eval/scorer/README.md`)에서 Recall@K, Precision@K, MRR, 관계 precision/recall, 엔티티 해소 pairwise F1, citation accuracy를 계산한다.
 - R05-R9: `docs/EVALUATION.md`(한국어)가 설계 §18의 Knowledge/Insight/Retrieval/System 지표를 정확한 식으로 정의하고, 5단계 ablation과 유지 조건, 측정 환경, 잠정 수치 기준을 담는다. 측정이 없었고 배포처에서 한다는 사실을 명시한다.
-- R05-R10: scorer와 validator의 각 함수는 실패하는 테스트가 먼저 있었다. quote와 span이 어긋난 경우를 잡는 실패 사례 테스트가 있다.
+- R05-R10: scorer와 validator의 각 함수에는 테스트가 있고, quote와 span이 어긋난 경우를 잡는 실패 사례 테스트가 있다. 구현 전에 테스트를 먼저 썼고 실패(import 오류)를 확인했다고 작업 중에는 기록했으나, 최초 커밋 `3882a23`에 테스트와 구현이 함께 들어 있어 **이력만으로는 순서를 증명할 수 없다**. 재작업(2026-11-21)에서 추가한 테스트는 변이를 되살려 빨개지는 것을 확인했다(변경 이력 참조).
 - R05-R11: 데이터와 문서에 실제 이름, 로컬 경로, 실제 도메인 이메일, 비밀값이 없다. 외부 의존성이 없다.
 - R05-R12: `eval/golden/README.md`(한국어)가 구성, 라벨 작성 방법, 알려진 한계를 적는다. 데이터를 재생성하는 스크립트는 `eval/golden/tools/`에 두되 커밋된 JSONL이 원본이다.
 
@@ -64,11 +64,11 @@ eval/golden/splits.json      ->  score.py --split dev|eval
 
 | 기준 | 요구사항 | 산출물 | 확인 방법 | 이 작업 후 상태 |
 |---|---|---|---|---|
-| R05-C1 | R05-R1~R4 | `eval/golden/sources`, `labels` | `python3 eval/scorer/validate.py eval/golden` 통과(시나리오별 인스턴스 3개 이상, quote=span 일치) | 충족 |
+| R05-C1 | R05-R1~R4 | `eval/golden/sources`, `labels` | `python3 eval/scorer/validate.py eval/golden` 통과(시나리오별 인스턴스 3개 이상, quote=span 일치) | **구조적으로만 충족**: 시나리오가 있고 모든 근거 span이 원문과 맞는 것까지 기계가 확인했다. 라벨의 의미가 옳은지는 사람 검토 전이다 |
 | R05-C2 분리 | R05-R5 | `splits.json` | validator의 분할 검사 | 충족(관례 봉인) |
 | R05-C2 자기 채점 금지·독립 검토 | R05-R6 | `labels/REVIEW_STATUS.md` | 파일 검토 | 미충족: 독립 검토 대기 |
 | R05-C2 scorer 기록 | R05-R8, R05-R10 | `eval/scorer/` | `python3 -m unittest discover -s eval/scorer/tests -v` | 충족 |
-| R05-C3 | R05-R9 | `docs/EVALUATION.md` | 파일 검토(표의 모든 칸에 수치, 측정 없음 명시) | 충족(수치는 잠정) |
+| R05-C3 | R05-R9 | `docs/EVALUATION.md` | 파일 검토(표의 칸에 수치 또는 "판정 보류" 사유, 측정 없음 명시) | 부분 충족: 정의와 수치는 고정했으나 사람 평가 지표와 일부 지표는 채점표·라벨이 없어 "판정 보류" |
 
 ## 미해결 질문
 
@@ -80,3 +80,4 @@ eval/golden/splits.json      ->  score.py --split dev|eval
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-21 | 초안 작성 | 이 문서 | 이슈 #14(R05) 착수. 구현 전에 R/C 기준 고정 |
+| 2026-11-21 | 독립 리뷰(REWORK, F1~F19) 반영: eval 인스턴스 6개 추가(34→40개, eval 12→18), 시간 사실 통제 어휘·UTC·`valid_from` 규칙, `is_inference` 규칙, 라벨 수정(F6~F8, F10~F12, F18), 중복 인용 한 번 계산·대칭 관계·미지 id 오류·`unjudged` 보고, validator에 별칭·URL host·라벨 id 메시지·두 번째 검토 파일 검사 추가, 변이 생존 두 건을 잡는 테스트 추가, 두 번째 기계 검토 결과 편입, R05-C1을 구조적 충족으로, R05-C3을 부분 충족으로 정정 | 이 문서, `eval/`, `docs/EVALUATION.md` | 리뷰어 F19 등. 모든 R/C 기준 번호는 그대로 |

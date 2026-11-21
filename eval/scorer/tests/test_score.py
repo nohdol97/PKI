@@ -28,6 +28,10 @@ class TestRankingMetrics(unittest.TestCase):
         self.assertEqual(score.reciprocal_rank(["x"], {"a"}), 0.0)
         self.assertEqual(score.reciprocal_rank(["a"], {"a"}), 1.0)
 
+    def test_reciprocal_rank_dedupes_ranked(self):
+        # a repeated id must not push the first relevant hit down (kills the no-dedupe mutation)
+        self.assertEqual(score.reciprocal_rank(["x", "x", "a"], {"a"}), 0.5)
+
     def test_k_must_be_positive(self):
         with self.assertRaises(ValueError):
             score.recall_at_k(["a"], {"a"}, 0)
@@ -52,6 +56,22 @@ class TestRelationMetrics(unittest.TestCase):
         m = score.relation_metrics(set(), {("a", "BELONGS_TO", "b")}, set())
         self.assertEqual(m["precision"], 0.0)
         self.assertEqual(m["recall"], 0.0)
+
+
+class TestRelationEdgeCases(unittest.TestCase):
+    def test_symmetric_types_ignore_direction(self):
+        for rel in ("CONTRADICTS", "RELATED_TO"):
+            m = score.relation_metrics({("b", rel, "a")}, {("a", rel, "b")}, set())
+            self.assertEqual(m["recall"], 1.0, rel)
+
+    def test_directed_types_keep_direction(self):
+        m = score.relation_metrics({("b", "DEPENDS_ON", "a")}, {("a", "DEPENDS_ON", "b")}, set())
+        self.assertEqual(m["recall"], 0.0)
+
+    def test_unjudged_count_is_reported_not_scored(self):
+        m = score.relation_metrics({("a", "DEPENDS_ON", "b")}, {("a", "DEPENDS_ON", "b")}, set(), unjudged=3)
+        self.assertEqual(m["precision"], 1.0)
+        self.assertEqual(m["n_unjudged"], 3)
 
 
 class TestPairwiseF1(unittest.TestCase):
@@ -89,6 +109,11 @@ class TestCitation(unittest.TestCase):
         self.assertAlmostEqual(m["accuracy"], 2 / 4)
         self.assertAlmostEqual(m["recall"], 2 / 3)
         self.assertEqual(m["forbidden_citations"], 1)
+
+    def test_duplicate_citations_count_once(self):
+        m = score.citation_metrics({"q1": [("r1", 1), ("r1", 1)]}, {"q1": {("r1", 1)}}, {})
+        self.assertEqual(m["n_predicted"], 1)
+        self.assertEqual(m["accuracy"], 1.0)
 
     def test_version_must_match(self):
         m = score.citation_metrics({"q1": [("r1", 2)]}, {"q1": {("r1", 1)}}, {})
@@ -153,6 +178,35 @@ class TestScoreEndToEnd(unittest.TestCase):
         write_jsonl(self.pred_path, [{"kind": "mystery"}])
         with self.assertRaises(ValueError):
             score.score(self.root, self.pred_path)
+
+    def test_relation_split_filter_drops_other_split_predictions(self):
+        # T1 is dev: under --split eval its relation predictions must not be scored (kills the no-filter mutation)
+        write_jsonl(self.pred_path, [
+            {"kind": "relation", "subject": "T1:proj", "relation": "DEPENDS_ON", "object": "T1:sys"},
+        ])
+        res = score.score(self.root, self.pred_path, split="eval")
+        self.assertEqual(res["relations"]["n_predicted"], 0)
+        res = score.score(self.root, self.pred_path, split="dev")
+        self.assertEqual(res["relations"]["n_predicted"], 1)
+
+    def test_unknown_relation_entity_is_error(self):
+        write_jsonl(self.pred_path, [{"kind": "relation", "subject": "T1:nobody", "relation": "DEPENDS_ON", "object": "T1:sys"}])
+        with self.assertRaises(ValueError):
+            score.score(self.root, self.pred_path)
+
+    def test_unknown_relation_type_is_error(self):
+        write_jsonl(self.pred_path, [{"kind": "relation", "subject": "T1:proj", "relation": "LIKES", "object": "T1:sys"}])
+        with self.assertRaises(ValueError):
+            score.score(self.root, self.pred_path)
+
+    def test_unjudged_relation_is_reported_separately(self):
+        write_jsonl(self.pred_path, [
+            {"kind": "relation", "subject": "x", "relation": "DEPENDS_ON", "object": "y", "judged": False},
+            {"kind": "relation", "subject": "T1:proj", "relation": "DEPENDS_ON", "object": "T1:sys"},
+        ])
+        res = score.score(self.root, self.pred_path)
+        self.assertEqual(res["relations"]["n_unjudged"], 1)
+        self.assertEqual(res["relations"]["precision"], 1.0)
 
     def test_unknown_query_id_is_error(self):
         write_jsonl(self.pred_path, [{"kind": "retrieval", "query_id": "nope", "ranked": []}])

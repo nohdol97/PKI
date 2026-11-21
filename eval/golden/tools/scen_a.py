@@ -18,11 +18,11 @@ def s01(w):
           "정산 API 일정", "minjae.park@example.test", "2026-11-12T09:05:00+09:00",
           thread="thr-s01-i1-settlement", scope=["channel:settlement-api"])
     I.ent("proj", "Project", "오로라", [("mailA", "오로라 프로젝트"), ("wikiB", "오로라 프로젝트")])
-    I.ent("sys", "System", "정산 API", [("wikiB", "정산 API"), ("msgC2", "정산 API")], aliases=["Settlement API"])
+    I.ent("sys", "System", "정산 API", [("wikiB", "정산 API"), ("msgC2", "정산 API")])
     I.ent("owner", "Person", "한서윤", [("mailA", "한서윤")])
     I.rel("proj", "DEPENDS_ON", "sys", [("wikiB", "오로라 프로젝트는 정산 API의 결제 승인 엔드포인트에 의존한다")])
     I.rel("owner", "RESPONSIBLE_FOR", "proj", [("wikiB", "담당: 한서윤 (프로젝트 오너)")])
-    I.fact("proj", "target_completion_date", "2026-12-05", "2026-11-03", None, "verified",
+    I.fact("proj", "target_date", "2026-12-05", "2026-11-03", None, "verified",
            [("mailA", "오로라 프로젝트의 완료 목표는 2026-12-05입니다")])
     old = I.fact("sys", "completion_date", "2026-12-03", "2026-11-10", "2026-11-12", "superseded",
                  [("msgC1", "원래 목표는 2026-12-03이었습니다")])
@@ -55,11 +55,11 @@ def s01(w):
     I.ent("proj", "Project", "가람 앱 v3", [("msgA", "가람 앱 v3")], aliases=["가람"])
     I.ent("sys", "System", "알림 게이트웨이", [("wikiB", "알림 게이트웨이"), ("mailC", "알림 게이트웨이")], aliases=["Notification Gateway"])
     I.rel("proj", "DEPENDS_ON", "sys", [("wikiB", "가람 앱의 푸시 발송은 알림 게이트웨이(Notification Gateway)에 의존한다")])
-    I.fact("proj", "target_release_date", "2026-12-15", "2026-11-05", None, "verified",
+    I.fact("proj", "target_date", "2026-12-15", "2026-11-05", None, "verified",
            [("msgA", "출시 목표는 2026-12-15로 잡았습니다")])
-    o = I.fact("sys", "send_restore_date", "2026-12-08", "2026-11-01", "2026-11-14", "superseded",
+    o = I.fact("sys", "completion_date", "2026-12-08", "2026-11-01", "2026-11-14", "superseded",
                [("mailC", "기존 안내했던 2026-12-08 복구 일정은 철회합니다")])
-    I.fact("sys", "send_restore_date", "2026-12-18", "2026-11-14", None, "verified",
+    I.fact("sys", "completion_date", "2026-12-18", "2026-11-14", None, "verified",
            [("mailC", "발송 기능이 2026-12-18까지 제한됩니다")], supersedes=o)
     I.ins("dependency_delay", "알림 게이트웨이 제한(2026-12-18)이 가람 v3 출시 목표(2026-12-15)보다 늦음", True, ["proj", "sys"],
           [("msgA", "출시 목표는 2026-12-15로 잡았습니다"),
@@ -86,12 +86,12 @@ def s01(w):
           "노지안님께,\n\n인증팀 백승우입니다. token API 일정이 밀린 점 공유드립니다. 자세한 내용은 인증팀 채널 공지를 참고해 주세요.\n",
           "token API 일정 공유", "seungwoo.baek@example.test", "2026-11-13T18:30:00+09:00",
           participants=["seungwoo.baek@example.test", "jian.noh@example.test"])
-    I.ent("proj", "Project", "Project Mir", [("mailA", "Project Mir"), ("wikiB", "Mir")], aliases=["미르"])
+    I.ent("proj", "Project", "Project Mir", [("mailA", "Project Mir"), ("wikiB", "Mir")])
     I.ent("sys", "System", "인증 서비스", [("wikiB", "인증 서비스(Auth Service)"), ("msgC", "인증 서비스")], aliases=["Auth Service"])
     I.rel("proj", "DEPENDS_ON", "sys", [("wikiB", "Mir의 로그인 흐름은 인증 서비스(Auth Service)의 token API에 의존한다")])
-    I.fact("proj", "target_release_date", "2026-12-12", "2026-11-04", None, "verified",
+    I.fact("proj", "target_date", "2026-12-12", "2026-11-04", None, "verified",
            [("mailA", "target release for Project Mir is 2026-12-12")])
-    I.fact("sys", "token_api_completion_date", "2026-12-18", "2026-11-13", None, "verified",
+    I.fact("sys", "completion_date", "2026-12-18", "2026-11-13", None, "verified",
            [("msgC", "token API 개발 완료가 2026년 12월 18일로 밀렸습니다")])
     I.ins("dependency_delay", "인증 서비스 token API 지연(2026-12-18)이 Mir 출시 목표(2026-12-12)를 위협", True, ["proj", "sys"],
           [("mailA", "target release for Project Mir is 2026-12-12"),
@@ -198,6 +198,13 @@ def s02(w):
           "모니터링", "haram.moon@example.test", "2026-10-20T15:00:00+09:00", scope=["channel:infra"])
     I.ent("p1", "Person", "박서준(데이터팀)", [("mailB", "박서준"), ("wikiA", "박서준 (데이터팀)")])
     I.ent("p2", "Person", "박서준(인프라팀)", [("mailC", "박서준"), ("wikiA", "박서준 (인프라팀)")])
+    I.ent("t1", "Organization", "데이터팀", [("wikiA", "데이터팀")])
+    I.ent("t2", "Organization", "인프라팀", [("wikiA", "인프라팀")])
+    I.ent("task", "Task", "모니터링 알림 정리", [("mailC", "모니터링 알림 정리"), ("msgD", "모니터링 알림 정리")])
+    I.rel("p1", "BELONGS_TO", "t1", [("wikiA", "박서준 (데이터팀): 2026-09-30 퇴사")], vu="2026-09-30")
+    I.rel("p2", "BELONGS_TO", "t2", [("wikiA", "박서준 (인프라팀): 2026-10-01 입사")], vf="2026-10-01")
+    I.rel("p2", "RESPONSIBLE_FOR", "task", [("mailC", "모니터링 알림 정리 작업부터 시작합니다")], vf="2026-10-02")
+    I.rel("p1", "RESPONSIBLE_FOR", "task", [("msgD", "박서준 님한테 모니터링 알림 정리 요청드렸어요")], expected=False)
     I.pair(("mailB", "박서준"), ("mailC", "박서준"), "p1", "p2")
     I.pair(("msgD", "박서준"), ("mailC", "박서준"), "p2", "p2")
     I.pair(("msgD", "박서준"), ("mailB", "박서준"), "p2", "p1")
@@ -245,7 +252,7 @@ def s03(w):
     I.pair(("msgD", "SR"), ("mailA", "SR-2041"), "c1", "c1")
     I.pair(("msgC", "SR"), ("wikiB", "SR (보안 검토, Security Review)"), "c2", "c2")
     I.pair(("msgC", "SR"), ("msgD", "SR"), "c2", "c1")
-    I.fact("c2", "release_4.3_blocker", "보안 검토 완료 대기", "2026-11-11", None, "verified",
+    I.fact("c2", "blocker", "보안 검토 완료 대기", "2026-11-11", None, "verified",
            [("msgC", "릴리스 4.3은 SR이 끝나야 배포할 수 있어요")])
     I.qa("릴리스 4.3 배포를 막고 있는 SR은 어떤 의미인가?", ["보안 검토(Security Review)"],
          [("msgC", "릴리스 4.3은 SR이 끝나야 배포할 수 있어요"), ("wikiB", "SR (보안 검토, Security Review)")])
@@ -259,12 +266,13 @@ def s03(w):
           "알림 기능 DR", "gaeun.shin@example.test", "2026-11-12T13:00:00+09:00", scope=["channel:design"])
     I.rec("msgD", "messenger", "DR 훈련 때 DB 복구 시간(RTO)을 측정합니다. 로그 수집 준비 부탁드립니다.",
           "DR 훈련", "sunwoo.baek@example.test", "2026-11-12T13:40:00+09:00", scope=["channel:infra"])
-    I.ent("c1", "Event", "DR 훈련(재해 복구)", [("mailA", "DR 훈련"), ("wikiB", "DR = Disaster Recovery(재해 복구)")], aliases=["Disaster Recovery drill"])
-    I.ent("c2", "Event", "DR(설계 검토)", [("wikiB", "DR = Design Review(설계 검토)"), ("msgC", "DR")], aliases=["Design Review"])
+    I.ent("c1", "Concept", "DR(재해 복구)", [("wikiB", "DR = Disaster Recovery(재해 복구)")], aliases=["Disaster Recovery"])
+    I.ent("c2", "Concept", "DR(설계 검토)", [("wikiB", "DR = Design Review(설계 검토)")], aliases=["Design Review"])
+    I.ent("drill", "Event", "DR 훈련", [("mailA", "DR 훈련")])
     I.pair(("mailA", "DR"), ("wikiB", "DR = Disaster Recovery(재해 복구)"), "c1", "c1")
     I.pair(("msgD", "DR"), ("mailA", "DR"), "c1", "c1")
     I.pair(("msgC", "DR"), ("msgD", "DR"), "c2", "c1")
     I.pair(("msgC", "DR"), ("wikiB", "DR = Design Review(설계 검토)"), "c2", "c2")
-    I.fact("c1", "event_date", "2026-12-03", "2026-11-12", None, "verified", [("mailA", "DR 훈련을 2026-12-03에 진행합니다")])
+    I.fact("drill", "start_date", "2026-12-03", "2026-11-12", None, "verified", [("mailA", "DR 훈련을 2026-12-03에 진행합니다")])
     I.qa("2026-12-03에 예정된 DR은 무엇인가?", ["재해 복구(Disaster Recovery) 훈련"],
          [("mailA", "DR 훈련을 2026-12-03에 진행합니다"), ("wikiB", "DR = Disaster Recovery(재해 복구)")])
