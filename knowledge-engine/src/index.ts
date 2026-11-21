@@ -16,3 +16,4 @@ export {
 } from "./extraction.ts";
 export { findCandidates, knowledgeCandidates, normalizeForLinking } from "./linking.ts";
 export { locateQuote, type QuoteDrop, type QuoteSpan } from "./quote.ts";
+export { propagateNewVersion, type Propagation } from "./propagation.ts";

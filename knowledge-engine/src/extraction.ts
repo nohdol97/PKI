@@ -8,8 +8,8 @@
 // other Provider to fall back to. A source too large for one call is held
 // without a call (no chunking). The answer's facts and relations are kept only
 // with a quote the body holds exactly once; the code computes the span. Rows are
-// the same row by the tables' keys (V02-R8); a same row gets evidence only. The
-// result is written by the runner inside the fence transaction, with the dropped
+// the same row by the tables' keys (V02-R8); a same row gets evidence only, and a
+// superseded same row is revived by it (V02-R11). The result is written by the runner inside the fence transaction, with the dropped
 // counts and the rule "의존 업무 지연" over the items written.
 import {
   EXTRACT_SCHEMA_VERSION,
@@ -24,6 +24,7 @@ import {
   readItem,
   readSourceVersion,
   recordExtractionDrops,
+  reviveSuperseded,
   saveFact,
   saveRelation,
   type EvidenceTarget,
@@ -192,12 +193,15 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
             continue;
           }
           for (const id of resolved) touched.add(id as number);
+          const target = entry.save((ref) => ids.get(ref) as number);
           addEvidence(db, {
-            target: entry.save((ref) => ids.get(ref) as number),
+            target,
             sourceVersionId: versionId,
             ...entry.span,
             quote: entry.quote,
           });
+          // the evidence just added is current (the fence held), so a superseded row lives again
+          reviveSuperseded(db, target);
         }
         recordExtractionDrops(db, job.id, drops);
         recomputeDependencyDelay(db, [...touched]);

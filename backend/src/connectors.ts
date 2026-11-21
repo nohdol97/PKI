@@ -3,7 +3,8 @@
 // the extraction job of each new version (V02-R4) and the cursor after it are
 // written in one transaction, so the stored cursor never runs ahead of the stored
 // records (ADR 0013 decision 1) and no version is stored without its job. The
-// change sequence rises in the same transaction (storage trigger).
+// change sequence rises in the same transaction (storage trigger), and so does a
+// new version's propagation to the knowledge its previous versions supported (V02-R11).
 import {
   ChangeSetSchema,
   ConnectorNotImplementedError,
@@ -13,6 +14,7 @@ import {
   type ErrorResponse,
   type SyncResponse,
 } from "@pki/contracts";
+import { propagateNewVersion } from "@pki/knowledge-engine";
 import {
   readCursor,
   registerConnectorInstance,
@@ -74,6 +76,7 @@ function storeChange(
   const saved = saveSourceRecord(db, instanceId, change.record);
   if (saved.status === "refused") return { refused: saved.reason };
   if (saved.status === "unchanged") return "unchanged";
+  propagateNewVersion(db, saved.sourceId);
   const job = registerJob(db, {
     kind: EXTRACT_JOB_KIND,
     sourceId: saved.sourceId,

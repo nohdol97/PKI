@@ -263,6 +263,17 @@ flowchart LR
 8. **T08: 설명 글의 출처.** 설명 글에는 두 항목의 이름과 두 날짜가 들어가고 근거의 인용문은 들어가지 않는다. 날짜는 사실 행의 값이라 그 사실이 지워지면 다시 계산할 때 빠진다. 그러나 **항목 이름은 근거에 묶여 있지 않다**: 이름이 지운 원본에서만 나왔더라도 다른 원본의 사실이나 관계가 남아 항목이 남으면, 그 이름은 다시 계산한 설명 글에 그대로 남는다. 이것을 R12의 "지운 내용"으로 볼지와 `delete.purge`의 카나리에 항목 이름을 넣을지는 T08이 정한다.
 9. **T10: 화면이 쓸 것.** 화면은 상태가 `active`인 행만 보이고, 근거는 `readInsight`의 `evidenceIds`로 연다. 인식 유형은 언제나 `inferred`다.
 
+**T07이 넘기는 것**. T07이 정한 것(잠정 표시가 없으면 확정)과 T08·T09·T11이 이어받는 결합 지점이다. 바꿀 때는 이 절과 `backend/src/version-propagation.test.ts`, `knowledge-engine/src/propagation.test.ts`, `storage/src/knowledge.test.ts`의 "a new version's propagation"을 함께 고친다.
+
+1. **자리와 때.** 전파는 `knowledge-engine/src/propagation.ts`의 `propagateNewVersion(db, sourceId)`다. `backend/src/connectors.ts`의 `storeChange`가 새 version을 저장한 바로 뒤, 그 version의 추출 작업을 등록하기 전에 **같은 트랜잭션에서** 부른다. 그래서 가져오기만이 아니라 모든 Connector 동기화가 이 길을 지나고, 페이지가 실패하면 전파도 함께 되돌려진다. 내용이 같아 새 version이 생기지 않은 줄(재입력)은 전파하지 않는다.
+2. **superseded로 바꾸는 행.** 저장소의 `supersedeUnsupported(db, sourceId)`가 그 원본의 어느 version엔가 근거가 있는 사실·관계 가운데 **현재 근거가 하나도 없는** 행을 superseded로 바꾼다. 다른 원본의 현재 근거가 있는 행은 그대로이고, `rejected`(사용자 결정)와 이미 superseded인 행도 건드리지 않는다. 근거는 떼지도 고치지도 않는다(T02의 `evidence_immutable` 트리거). 이전 version을 가리키던 근거는 version이 최신이 아니게 되어 저절로 지난 근거가 된다. knowledge revision은 바뀐 행마다 트리거가 올리고, 전파는 변경 순번을 올리지 않는다(새 version 저장이 이미 1 올렸다).
+3. **Insight 재계산과 "재계산 대기"(잠정).** 재계산하는 항목은 superseded로 바뀐 행만이 아니라 **그 원본의 version들이 근거로 인용한 모든 행**의 항목(사실의 항목, 관계의 주체와 대상)이다. 다른 원본 덕에 유효하게 남은 행도 Insight의 근거 목록에 지난 근거를 들고 있어 빼야 하기 때문이다(그 경우 결과는 `updated`). `dirty`는 쓰지 않는다: 같은 트랜잭션에서 곧바로 `recomputeDependencyDelay`를 불러 해소하거나 갱신한다. 그래서 같은 값을 다시 담은 수정 version이어도 그 version의 추출이 끝날 때까지(보류되면 풀릴 때까지) Insight는 해소되어 화면에서 숨는다. 상태 그림의 `DIRTY`는 여전히 쓰이지 않는다.
+4. **되살리기(잠정).** 추출의 `write`가 근거를 더한 뒤 `reviveSuperseded(db, target)`를 불러, 같은 행이 superseded이면 `candidate`로 되돌린다("T05가 넘기는 것" 7의 "T05는 상태를 바꾸지 않는다"를 이 항목이 바꾼다). superseded 전의 상태를 기록하지 않으므로 언제나 `candidate`다(V02에는 사용자 승인이 없다). `rejected`·`verified`·`disputed` 행은 그대로다. 어느 원본의 추출이든 같은 행에 현재 근거를 붙이면 되살린다. 규칙은 같은 `write`의 재계산으로 해소된 Insight를 **같은 행**에서 되살린다(R10).
+5. **이전 version의 작업.** 고치지 않는다("T03이 넘기는 것" 10). 실행기가 아직 집지 않은 이전 version의 작업은 fence에 걸려 Provider를 부르지 않고 `superseded`로 닫힌다는 테스트가 있다.
+6. **T08: 삭제는 이 함수를 쓰지 않는다.** 삭제는 version을 지우므로 근거가 cascade로 사라진 뒤에는 superseded를 가릴 수 없다. "T02가 넘기는 것" 5대로 지우기 전에 모은다. `supersedeUnsupported`의 "그 원본이 인용한 행" 질의 모양은 그 모으기에 쓸 수 있다. superseded가 된 행은 지난 근거만 남아 있으므로, 그 근거의 원본을 지우면 R12에 따라 지워진다(`delete.purge` ②).
+7. **T09: 통지는 이 자리 다음, 커밋 뒤.** R13의 "새 version 뒤 `removeSource`·`VectorIndex.remove`"는 정본을 쓴 뒤에 부르므로 `propagateNewVersion` 안이 아니라 `syncConnector`의 페이지 커밋 뒤(지금 `runner.wake()`를 부르는 곳)에 둔다. 통지에 실을 변경 순번은 커밋 뒤 `readChangeSeq`로 읽는다. 전파 자체는 변경 순번을 바꾸지 않으므로 한 페이지의 순번은 그 페이지에서 저장한 version 수만큼 오른다.
+8. **증명 테스트의 위치.** `update.recompute` → `backend/src/version-propagation.test.ts`(12-03으로 고치면 해소, 12-12로 다시 고치면 같은 Insight 행이 활성. 지난 근거가 version 1을 계속 가리킴. version 1의 내용으로 되돌리면 같은 사실 행이 되살아남. 집기 전에 바뀐 version의 작업은 `superseded`). 저장소 단위 → `storage/src/knowledge.test.ts`, 전파와 재계산 → `knowledge-engine/src/propagation.test.ts`.
+
 ## 완료 기준 (테스트 가능한 형태)
 
 C1~C5는 이슈 #17의 문장 그대로다(2026-11-21 추가된 C5 포함). H1·H2는 이 프로젝트가 배포처로 넘어가는 프로젝트라서 spec 양식이 요구하는 두 기준이며, 이슈의 문장이 아닌 별도 항목으로 이 spec에만 둔다.
@@ -372,3 +383,4 @@ test double의 결과를 실제 Provider의 결과로 적지 않는다. R07(#37)
 | 2026-11-21 | 추출 응답의 모양을 스키마 버전 2로 확정하고 V01의 잠정 버전 1을 지움. "T05가 넘기는 것" 추가: 처리기의 자리와 결과 옮기기(막힘은 보류, 스키마 불일치만 한 번 더), 크기 초과 보류(잠정 20000 코드 포인트), 인용문의 정확한 대조와 코드 포인트 위치, 버린 수(스키마 v8), 연결 후보(정규화한 이름의 부분 문자열, 후보 이름의 모든 근거 version을 등급에), 쓰기와 규칙 호출, 구성 지점과 시작·종료, 보류를 푸는 길(미해결 질문 7 결정), 백그라운드 설정이 꺼진 흐름, fixture별 Provider double, T10의 코드 포인트 강조 | 설계 개요(추출 응답의 모양), 작업 분해(T05가 넘기는 것), 미해결 질문 7 | V02-T05 구현 |
 | 2026-11-21 | T05 검토 반영: 작업 한 건의 상태 그림 추가(보류에서 대기로 돌아가는 잠정 길 포함), "T05가 넘기는 것" 6항에 같은 `ref`가 반복될 때, 10항에 HTTP Provider 동의가 곧 백그라운드 자동 전송임과 동의 화면 문구·I03 이관 | 설계 개요(작업 한 건의 상태), T05가 넘기는 것 6·10 | V02-T05 독립 검토 A-S1·A-S5, B-S1 |
 | 2026-11-21 | T05 2차 검토 반영: "T05가 넘기는 것" 10항의 동의 화면 문구를 HTTP Provider로 한정하고 CLI Provider는 백그라운드 실행을 켠 뒤에 보낸다고 밝힘 | T05가 넘기는 것 10 | V02-T05 2차 독립 검토 A-R2-S1 |
+| 2026-11-21 | "T07이 넘기는 것" 추가: 새 version을 저장한 트랜잭션에서 추출 등록 전에 전파(모든 Connector 동기화), 현재 근거가 없게 된 사실·관계만 superseded(근거는 그대로, rejected 제외), 그 원본이 인용한 모든 행의 항목을 곧바로 재계산하고 `dirty`는 쓰지 않음(잠정), 추출이 같은 행에 근거를 붙이면 `candidate`로 되살림(잠정, "T05가 넘기는 것" 7을 바꿈), 이전 version의 작업은 fence로 닫힘, T08의 삭제와 T09의 통지 자리 | 작업 분해(T07이 넘기는 것) | V02-T07 구현 |
