@@ -4,8 +4,7 @@ export type Migration = (db: SqlDriver) => void;
 
 // Schema v1 (V01-R6). Each table carries only what a V01 task reads or writes;
 // later tasks add columns through new migrations, never by editing this one.
-// Deferred with owners named in the spec task table: connector cursor storage
-// (V01-T04 migration) and source access_scope (V01-T07).
+// Deferred with an owner named in the spec task table: source access_scope (V01-T07).
 const v1: Migration = (db) =>
   db.exec(`
     CREATE TABLE sources (
@@ -83,8 +82,41 @@ const v1: Migration = (db) =>
     );
   `);
 
+// Schema v2 (V01-T04): one row per Connector instance. The kind is recorded so
+// the Broker can tell which Connector a source came from (a site-* source is
+// never synthetic, V01-C4 broker.class); the cursor is written in the same
+// transaction as the page it follows (ADR 0013 decision 1). sources is rebuilt
+// with a foreign key to it (SQLite cannot add one in place); a v1 source gets an
+// instance of kind 'unknown', which is no upstream kind and so never synthetic.
+// Rows are copied aside, sources is dropped and recreated under the same name
+// (a rename would rewrite source_versions' reference to the old table). Dropping
+// leaves source_versions rows orphaned for a moment; defer_foreign_keys holds that
+// check until commit, and re-inserting the parent rows resolves it.
+const v2: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE connector_instances (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      cursor TEXT
+    );
+    INSERT INTO connector_instances (id, kind)
+      SELECT DISTINCT connector_instance_id, 'unknown' FROM sources;
+    PRAGMA defer_foreign_keys = ON;
+    CREATE TEMP TABLE sources_v1 AS SELECT id, connector_instance_id, external_id FROM sources;
+    DROP TABLE sources;
+    CREATE TABLE sources (
+      id INTEGER PRIMARY KEY,
+      connector_instance_id TEXT NOT NULL REFERENCES connector_instances (id),
+      external_id TEXT NOT NULL,
+      UNIQUE (connector_instance_id, external_id)
+    );
+    INSERT INTO sources (id, connector_instance_id, external_id)
+      SELECT id, connector_instance_id, external_id FROM sources_v1;
+    DROP TABLE sources_v1;
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1];
+export const migrations: readonly Migration[] = [v1, v2];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

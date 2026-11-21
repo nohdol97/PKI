@@ -37,18 +37,18 @@ function tables(): string[] {
 }
 
 describe("migrate", () => {
-  it("brings a fresh database to v1 and records the version", () => {
+  it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(1);
-    expect(migrations).toHaveLength(1);
+    expect(schemaVersion(db)).toBe(2);
+    expect(migrations).toHaveLength(2);
   });
 
   it("is idempotent when re-run", () => {
     migrate(db);
     db.run("INSERT INTO settings (key, value) VALUES ('k', 'v')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(1);
+    expect(schemaVersion(db)).toBe(2);
     expect(db.all("SELECT value FROM settings")).toEqual([{ value: "v" }]);
   });
 
@@ -90,7 +90,7 @@ describe("migrate", () => {
 });
 
 describe("schema v1", () => {
-  beforeEach(() => migrate(db));
+  beforeEach(() => migrate(db, migrations.slice(0, 1)));
 
   it("has exactly the canonical tables and the keyword index", () => {
     expect(tables().filter((t) => !t.startsWith("keyword_index_"))).toEqual([
@@ -173,5 +173,57 @@ describe("schema v1", () => {
     );
     expect(() => db.run("UPDATE source_versions SET body = 'changed'")).toThrow(/immutable/);
     expect(db.all("SELECT body FROM source_versions")).toEqual([{ body: "b" }]);
+  });
+});
+
+describe("schema v2 (V01-T04)", () => {
+  it("upgrades a v1 database in place, keeping its rows", () => {
+    migrate(db, migrations.slice(0, 1));
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
+    db.run(
+      "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (1, 'h', 't', 'b')",
+    );
+    migrate(db);
+    expect(schemaVersion(db)).toBe(2);
+    expect(db.all("SELECT id, external_id FROM sources")).toEqual([{ id: 1, external_id: "e" }]);
+    expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 1 }]);
+    // A v1 source has no recorded kind; "unknown" is no upstream kind, so it never grades synthetic.
+    expect(db.all("SELECT id, kind FROM connector_instances")).toEqual([
+      { id: "c", kind: "unknown" },
+    ]);
+    expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
+  });
+
+  it("ties every source to a registered Connector instance", () => {
+    migrate(db);
+    expect(() =>
+      db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('ghost', 'e')"),
+    ).toThrow(/FOREIGN KEY/);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
+    expect(() =>
+      db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')"),
+    ).toThrow(/UNIQUE/);
+  });
+
+  it("keeps the source version and keyword index wiring after rebuilding sources", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
+    expect(() =>
+      db.run(
+        "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (404, 'h', 't', 'b')",
+      ),
+    ).toThrow(/FOREIGN KEY/);
+    expect(db.all("SELECT sql FROM sqlite_schema WHERE name = 'source_versions'")[0]?.sql).toMatch(
+      /REFERENCES "?sources"?/,
+    );
+  });
+
+  it("adds connector instances holding kind and cursor", () => {
+    migrate(db);
+    expect(columns("connector_instances")).toEqual(["id", "kind", "cursor"]);
+    expect(notNull("connector_instances", "kind")).toBe(true);
+    expect(notNull("connector_instances", "cursor")).toBe(false);
   });
 });

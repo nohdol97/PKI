@@ -1,0 +1,757 @@
+[
+  {
+    "hash": "0107c7cd3af67fa359382b0be0846e29c9e34de7b52b19e5f36f9e4cfea3ffca",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "03e8c0c1b8502727f06231b4d43d2b25718163ffa77719fd52eb3511188cefed",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "07a3263cefca0d5cd537c7c4423da457ccc11d844706dd3d80e7c268ef7188d6",
+    "malicious": true,
+    "source": "fixtures/test-connector.jsonl"
+  },
+  {
+    "hash": "0fcde810a2bb20a2b53f83a6aec5c7a4426006aebc9df496cca874fdf64a19f9",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "10f97e1d527664351409bad02cbb1bdafa30afa83d3e0826152b9dcb5e5429e7",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "11115cf9ceedfdd7cc0175b98e4c8af6e9da2b3501552e4b0026e19e43273d2d",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "1139a75e16db1c3d5b7e03b143b8779899533dec60e42a5a84ebf9ddc139bd8e",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "1329395faf8fda9198c1357298700b586c191e04317f7d41f10429effeda9731",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "13574ad733cacdb535cca03927d31540fd3e9fbfd88f1a0f8497d0c3325ed3c4",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "139556b119e4aca6070e87a8733a25bf8c2a3365ffb2a0f60ca228f444b06c93",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "1560764ce5b7446c027ba9a2e6f1274e42bd3f79c4e4c6fa65d5b9177f8071ea",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "178516c86b06f1d8f80f824c81b6d9fa8ae3342a626293c9ec3928b09292c267",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "180a1d3cd5fa267fcd8c796b9852a90b1fcc361267d8989ac730c60fb4da7c18",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "18ce339ef6922ac388a2d89e6b762c6e9c7339e51c31d6aeb4a82a3e45eeb7aa",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "1ccbcd39e8b79ab2ca1b588d6ae57f3a2c4d0b50b911a8c4ab7e28683ac01ab8",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "2235efc8f1b2fd32922e649f8a9476bd4474486207bfbfbac0430b067bd0a502",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "223e514270a20f0b98af8db072a9888c20d810dd63a3c420e2fc2f9d8684f69b",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "24f15e1414fb69b4569406d3eef7381c97cf6c515607882670c81624418db9a2",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "26009ea7165c9a4de8cd341fb86a624701851f4751bfa2006dcc99fff72ca7bc",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "272cafa539f600f9d0b9f83460fe0e3fe5463950db4b6fe33e7a8edcf93efe7e",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "274238e1195afc67b5171708868f02343d7355853b5bce11f4f52f9bc6fea019",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "27a88e8b601819823e9ffce8c781a8d8d0bb64da43039d2500d98d69e9cfa096",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "28e10a654c41f465a27ac8d23f1d523bdec81b6b1f8806ee0f5119559af067c1",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "2a6b43ec3fb61044f7ca323377cae0e30869f30d07922b099894182deeb86c9b",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "2a6e7c522487fef26100faff54a67f27f9b9c3287c0fba979010361034dcb355",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "2bea8d4f59704e2d2c3f3a25a24359026c9fb59450d567a9eaae0943d826e96b",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "2bed6fb71c8542cf35495e1b15e4915f8e4a1e462861a749d0005a35c21e4462",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "2cceda7255c75fff2295e3fddd580a655663eb9d2d541e21f33844f7fdfccd31",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "2cd53badefeb8279d2970587296cf98065526875299b207d59cd533fa98121e2",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "3006cccf18f66868fd1b2224272ca24179476bcaca0308770cae322d30f77c82",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "312fc05efddacaf9d59036100e59363b817714546cbd9e744f03cbdc5fe6a3cf",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "3267f95a09c62c974b2cf960b726623e2c5068496c65fe11308cdf855cdb446f",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "327be5ccd264dd65db28323f433d41eba4f65427cca3486abfb6399827b62cc6",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "343ad6d7b539ea15b26448abab74f57c96954f75604bc4d742e2c32f78fa495c",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "34d098e8edfaeef6a3812c9ade280aa984071029ef619bbcd42a795337018290",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "377e87ff49f5b51b766d999f73294bb2c64e3641d23bb52416349cc9ab25e78c",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "37c62d0daa5fbfcec4916e2f120d16174aeeacaf85358721f92e7b7f39fea73a",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "39c035fc14dcd7760b22b53e23a06b2b11c8662d64be120da0d7f3fc90f7885b",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "39e9491129052c1059bb9bc61e288f2d83057332555b2338165d4e0ced0fd67d",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "3c27c78ebe7ae41dfae6eb1bcecdedea28083c70d3eb7f5d6a6eb07d7d0597aa",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "3d4fc311874f0a6803bd68573b2c407e9e17edbf2a8143065512ef81603be1eb",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "403b82df75cdec329c7243b6ea4bbb2e8689f58268180c32f67566d76e51f023",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "4321ae8ed18affec68afa0848ce3e7869668adc2dbf3299293e049dc9b741742",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "450bc4dfb3dfba59137d29bcc50b47fe13db323c9de9365b622a36c457f4f964",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "46dc90a3e9ec40401b73ea531f06d2a861d2e38d95c90811453a66a85dff98e6",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "48ad9c22bf8e32061ebd037bff22972f4e23a1f036281bedad1053b75fbac5e6",
+    "malicious": false,
+    "source": "fixtures/test-connector.jsonl"
+  },
+  {
+    "hash": "4911ccf70aba9841d1285137b19b8748c6bd73af2faf64958e35993588f91f68",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "493c793f4e00aeddd45be7b5a4219c3be7a02dde9e9325654ee21f5899744de4",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "499af66ed43cb96f3a1ba27d460055e2a2a1479ecccf988aa91242c000bb7ebe",
+    "malicious": false,
+    "source": "providers/src/connection-test-material.json"
+  },
+  {
+    "hash": "4cddb6e3d862700eee3fb0ffd128fe3d747239abaa38efe2c15af2bcdd67c610",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "4d180107af2c876accb36a09c115d59357b9ba0c26eeb94a7da418a03d5c6b7e",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "4fe244daafcf7bf1a0affa4d8a3de7963c75895eaa8e6b9e4db9f8d15eadb514",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "50c74c8a5d867d88e243f43915c786d2f84266ac174989c544f788882a01f943",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "51e43bedc169f8005465aa993883eb84567ee3cd8e0f4279852114114336447f",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "53c6ac62aaa2b2dad006f08afcc364931cdf0cf69d588a7b6d553640c96ff7e9",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "5652479aba44954552c754dddff9f538efa2236faefca1a34d2b8d8109ba9f60",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "577d91f164b8100e33ced51479738736e66d2fea70f30f68f433e180c49eb3a7",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "5b7a424ce10caf3dae6121f28ac9ccc7a0e8c100d1d910d633f7bf096f86f888",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "5b84909e34740accb0012681fc72a7ccf1956fba05b9533cf63ddc862de7007f",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "5ce979cd4a89b42f972ee008f6d8ce755c3f4bacd14e17448937d19684a65ef9",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "5d5b048ac7eb9b0e3482f90ad88d1c75151cd4a23b96695b74d47b7ca8cecd33",
+    "malicious": true,
+    "source": "fixtures/test-connector.jsonl"
+  },
+  {
+    "hash": "5d6845674dcd9fea335d45dc0e02e66a5bbb82f31f810b4452c11b29a61eb0ea",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "5e592c7ecf34377efb9f832fe95a50e5bbe251e98e7563f617142ca457ded8bd",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "5f202e76bce8ba3e7f9278c2a0c49826e213d4c9228303ef99e84244ee45d5a0",
+    "malicious": false,
+    "source": "fixtures/test-connector.jsonl"
+  },
+  {
+    "hash": "6034d73c03cc7988593d805ebf218489ff9fbbaf42cb8a6f21790c825fd2afb6",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "60f4d4ba18fedabce3a8a8e9d444fb75a466034b922f58ef802066a151172a90",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "62dde4378f9ce9b543880fa2a0fa6f1445ee7461441eb19be89bf8f796bc39a9",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "66ae5057c1de3587e56467b69e34526b3fb12249f2239ed68b9cc6eff8610b74",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "67080315d4cb153acf2cd177abde31e706fc48c6d95b70ff7fb41f9c11f3cd2f",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "6fcec8f014fb6bdde86e970ca16fcd3c125712563ce3fe9530ab92671b7dac7c",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "702d0a8068655f039f01920b12b5e4ba693fe80a0f77e93a5fcc2819fffd8a53",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "711ef41982a60cc88501561f99e41d5495aee4a20ec0040364f8d040910d3c71",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "752e38497e957e8e4733e4073d75ddfe9af65e1e45af9f57bab5854c2066b682",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "775cccd9b111197397598537899c8c52fc627ff20bafa517381b4f27ce5ed8cb",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "7c1f3e954675b3ddcb065af238049051ca4dbed93708f0ee27c329b3fd0a9f3a",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "7f1cdce99df530b8fcbfcf54bfa70dd56ef87dd942951007119a9c0976db27b3",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "7f2567e7cc58d54f8eebadbb280ebd257edbcb809eeddb76c3989b81c5a6fdcf",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "7f33367e26cddcdaaa5aa516dd21b34c2d0a4596f674da23cc129910fa849ba8",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "7fcd149db047c6c84b7ef1572c9e395b4c337bf86782cf2f09cf8dc19030fbbc",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "88eab84d9c399874a7d76f33fd81f7b62b227e199d5468f085b2f0a593571139",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "8a938317272eef2b69b5147176dc88c3d21e78f2f9d2686d40bf4ff73f8a6eab",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "8aed213c06283a20e6486e6fd0503dc92b56fa8495b90d65ae555401e1b93e43",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "8b4ee67e0274651f0d52633b25240d4a3c53c7677b4ef475cdebfafa6847b741",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "8bc36c2e192f948652cfdfe4d1b48125262c665997e417d9aaaebe22a230397c",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "8bf25361d95b4205bc0776eeeab0c095c3a087559b2d09fe79b278c9a2a1b0fb",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "8d96ff42b036dcce0c7b978a5bc8e2d6bd47fa5ed9e007eb1d533ce7591e0644",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "90bced15f37e2c0494a64dc1d1504ae8f08b4669b8b624ee12592d5a6c232937",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "90c1518ec100790a28542e60e189b5a4ccc6acc5bab01ceaa7fe1b8cb987b86b",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "91f4c203eb16b1a3e3f7be3116a605b481e09607947bf131b38ee782c85e10c0",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "93bbd66a358d89426c94c2ab2494bcfd7831c77a7573520ddd682308063acf8c",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "953f79f099436d51941a40bf411cd12b0ad2ed9577963ba239d84c79a2c3fc00",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "9709de6d6c2705fc5cfee36fa0505d8d61358a2871a00b531f7c900981a491de",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "9a602587512755eef1b8b1bc9473a146786173e489a5c1b785279c3f87b91df1",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "9c4450b49273dcb41551f2b24c7c29b1eedce2b7ff2c04910944ea9290bf6a40",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "a1bc9a52b8fd98daf22c337d873137a8e518d6a3b6020620d93b95f81d137f2a",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "a2d535b8c29e0fb7d2471adb6f224f432126239729eead24a3b52fb31b8a94d8",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "a2f8e3ea99df52700c0bcc7f43a08089aa012a1826235ac07e2c37e9c94a9f6c",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "a37d59380762a5ef93c3a88803d3ad78aba91c75914e63a1487d70bd3c3b1ee5",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "a3e2a7f0843cd0713c7e4a04da0ee795caa9a7bf62e8ad17748a6fd097758521",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "a4458edabcd5113c8c2f521cb4ff71a8c4a6ac2b485472da4cb350cfa29556b3",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "a48b959c6e437b66a02d6147715a7ca216d1d4a5e290c770d963d7fa2e584525",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "a58cfb688a1208bc0077a1ae8607c86fad07b9507c7004c649499e35002f0d0d",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "a6bfb80356da10bb67eacbf18e01de5ce7d6e1457fd9783121be635bec00c0a1",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "a71319334da644d0b9b3c8b1e979f00a5184551d4389a63a792226663cb0a57f",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "a7b5a1eda4b8acbb82889ef333a0e114a7c97e72977bed2113d39aeead726fe1",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "a88755be0369e9aaebc04760f451440715d3385d3849cac7b02fe0c5c925abfa",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "a8ab13b21c5f20e97ed2304757ab17ef59a49cbf60bae0af8645452cbae261cc",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "a8b8b082a295fac25f4f11b0285fb495c9ddd0a4e562942f1530ad6e45758ffe",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "aa96e8c49dbcb63ba0d4ab00747e7b4bc31dd293349a0d6d9390a55ef332af92",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "ab9b16b70dd009d7c3a9d136382f49e7e72423f70798b43cc51fe99888686574",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "ad1e1bfca4d6ed44cb14918ff0923b195e570649239b2e5900b1870503561285",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "ad4c083404b23fec5490849df58989bad3f53bd553646ef84115c8443385db34",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "ae5a876711d67f4079611377f504c192f24f3b033bd440fba1c044ee42f9ef6e",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "af7e993987ed0438dd89055c055e8addd5d034ed0c3a9acd728c7095d366cf44",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "b11d903b6a012cc9abe6add42af56d8c8f75c96aa4df72b24274c37dbb1aa0bc",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "b41041b1d67e9426bb37e6bbebb409f3056691eecd025571171dc8e24a57ac92",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "b78b6de67fcd769eb19ae18dc5b2786dd34031101a30c5a94b4ce7b70f02334b",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "b7e2c1f39b0458e70c38957a70e5cb893c5baee5dd190bcbb3e159fa3e5bb688",
+    "malicious": false,
+    "source": "fixtures/test-connector.jsonl"
+  },
+  {
+    "hash": "b7f5aef25073147b4b07492cf5e9139bc9a9368246f7aee0bb3f08914896eadc",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "bd433ec1cf6b97f114c6984ec956b3c91aa429bc87a2f9fe6ef8ccc6cadeba01",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "c02eff7d123d5f52e1399273f5a5d7053ac737ccae1163ab7269aabbebf45f78",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "c7ed82117351f9593ab346e043b8e30fc088769728ba5355db04bccc591ccd0a",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "cd3769f7551d76d86389b243a5e6f44603322a73b512c1511f2ef24ea0bfdca7",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "d26beb79263e71a8405b51bf74c6dcd2fc6d5b6d4c008763cdc1643ed0dca29c",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "d34d93be1cb3e02a8cdc69a9ed831a3fb2ce8517cc524c4da24657ce41c19958",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "d48c71e6b460dc5ddd70dd6ebb1803ab05bdf9f26a15dcb60c21b8e8ec63d9b4",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "d50908a34939394817a2391fd8cdd3b60fa85e6d0c9ac1f5da269ad9527f53b6",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "d5ab24f64a0b6e6f4b96687d8b8ee6376e96d197e4bcdbd5a90824f204c8be53",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "d65ed6332bd75a4735bc7aa274c3d11c055fd79e733f2c0db097e3e4d45373be",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "d6d5bb77289d5f08b805c84b5df038899219f0dbd65a8701219b9512ee602be2",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "d86823e90ea5eede931eaeab881507b97ae33cb61b7083a0270411dc548dd86b",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "d87c1d1944449f6a37cd4fdb6ba0954711d1dfff7457416516e2a913ea09f67a",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "dc70ff3c1c5a53bea287ada4b8c09b6bdd9aa355d4d220e3146944b6d38747ab",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "dd0a48ebe017426644c577549b1ea407fb8cf26a09c8aa3942cf5b4167539bcb",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "df81820742653e140d99eb219eb0d3d4b116ac732234fd2b1caa82c5582e07cd",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "e058758d9bafdf91d1a43362f8c391d0921b734ab79a729a606ce439000d48c4",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "e0de96efcfdf886df152a15fee968c6dd4ed4cb093a87249a389be1f58c35448",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "e1c95496e848dea0a21a9077fc66f6dec3089b77a243d1125b719ba9be545eb5",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "e38125e9223c4c8ac2f128bc78759899916cbc766387d1a7c643379dd391c8bf",
+    "malicious": false,
+    "source": "eval/golden/sources/mail.jsonl"
+  },
+  {
+    "hash": "e9bfc3532e4d75888e7f3c5e5d215316b927300e436f89efe65074ddf4bcc3e1",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "ea9b9581f7daf1deb6d10c59665754360e1763730970f258debfc2e4fb7f0917",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "eaf58e7ce7d8a06a9dcd3e9d02ca7c97a3e49a85527535baaa2424f51421f9c3",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "f30cea1af7f0acb6a792610d0247fb0d4b29b5b10d515142e7b02112bd96ee94",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "f4adec1e0322abe6a9f321bd5ae59f76603731c38525c02e0df44075093a06f3",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "f7b145b41ef595b48ffe4230d1ff1fd0d5859da5358e202fade91f55e5e3efc5",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "fb708aba4ea4c013f47891d25d8d820489f41233af861e91ad87c3636066c6f4",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "fc5f804a74349119dca58e3c2b0be6919ed34117e1f9cce9679b48adb0fab7bc",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "fd289b4a9142666d92eae018984a1241f6c5c19d378a97c181e98f3e01ece7ae",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "fe83bb479a18f14de5b2cc16e210d3a3e170be19fa385e00b113e0870269b6b6",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "ff1b4120b3303b11059f03ab8c7ea39bcc39cc924e1cee736cdcdcf1436471ae",
+    "malicious": false,
+    "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "ff39974cadad58190178ddb29854eb3aabf0f19e2ee1bfab96bcbfff9c90b943",
+    "malicious": false,
+    "source": "eval/golden/sources/messenger.jsonl"
+  }
+]

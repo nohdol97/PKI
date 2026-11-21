@@ -20,6 +20,8 @@
 - `pnpm typecheck` — TypeScript strict 타입 검사
 - `pnpm test` — Vitest 단위·계약 테스트
 - `pnpm e2e` — Playwright E2E(아직 E2E 테스트가 없어 0건으로 통과)
+- `pnpm --filter @pki/backend site-check <종류>` — 배포처 수집기(`site-mail`, `site-messenger`, `site-wiki`) 초기화 확인. 공용 저장소에서는 `미구현, 배포처 후속`을 알리고 실패한다
+- `pnpm --filter @pki/providers build:synthetic-manifest` — `fixtures/`·`eval/golden/sources/`·연결 시험 자료가 바뀐 뒤 합성 목록을 다시 만든다(어긋나면 `pnpm test`가 실패)
 
 배포처 설정: [docs/site-setup.md](docs/site-setup.md) · 저장소 배치: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 

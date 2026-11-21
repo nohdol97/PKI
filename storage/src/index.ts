@@ -9,3 +9,11 @@ export {
   type DataDirectoryInput,
 } from "./data-directory.ts";
 export { EmptyVectorIndex } from "./empty-vector-index.ts";
+export {
+  contentHash,
+  readCursor,
+  registerConnectorInstance,
+  saveSourceRecord,
+  writeCursor,
+  type StoredRecord,
+} from "./sources.ts";

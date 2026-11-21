@@ -7,16 +7,19 @@ import {
   type ComponentStatus,
   type ErrorResponse,
   type RouteName,
+  type RouteRequest,
   type RouteResponse,
   type VectorIndex,
 } from "@pki/contracts";
 import { timingSafeEqual } from "node:crypto";
-import { createServer, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { ConnectorManager } from "./connectors.ts";
 import { matchRoute } from "./routing.ts";
 
 const LOOPBACK = "127.0.0.1";
 const MIN_TOKEN_LENGTH = 32;
+const MAX_BODY_BYTES = 16 * 1024;
 
 export interface ServerOptions {
   /** Fresh per run; the caller generates it and passes it in-process, never via argv/env. */
@@ -27,6 +30,8 @@ export interface ServerOptions {
   port?: number;
   /** Chosen by the composition point (composition.ts), never here. */
   vectorIndex: VectorIndex;
+  /** Built by the composition point (composition.ts), never here. */
+  connectors: ConnectorManager;
 }
 
 export interface RunningServer {
@@ -37,7 +42,16 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
-type Handlers = { [Name in RouteName]: () => Promise<RouteResponse<Name>> };
+type Handlers = {
+  [Name in RouteName]: (
+    input: RouteRequest<Name>,
+  ) => Promise<RouteResponse<Name> | { error: ErrorResponse["error"] }>;
+};
+
+const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
+  "not-found": 404,
+  "connector-unavailable": 409,
+};
 
 const STATUS_CHECK_FAILED: ComponentStatus = {
   state: "unavailable",
@@ -68,7 +82,47 @@ function createHandlers(options: ServerOptions): Handlers {
       embedding: { state: "not-implemented" },
       vectorIndex: await vectorIndexState(options.vectorIndex),
     }),
+    connectors: async () => ({ connectors: options.connectors.list() }),
+    syncConnector: (input) => options.connectors.sync(input.connectorId),
   };
+}
+
+/** The JSON body, or undefined when it is too large or not JSON. */
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) return undefined;
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+async function handle(
+  handlers: Handlers,
+  name: RouteName,
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
+  const route = routes[name];
+  let input: unknown;
+  if ("request" in route) {
+    const parsed = route.request.safeParse(await readJson(req));
+    if (!parsed.success) return reject(res, 400, "bad-request");
+    input = parsed.data;
+  }
+  const result = await (handlers[name] as (input: unknown) => Promise<unknown>)(input);
+  if (typeof result === "object" && result !== null && "error" in result) {
+    const { error } = result as ErrorResponse;
+    return reject(res, errorStatus[error] ?? 500, error);
+  }
+  // Responses are checked against the shared schema before they leave.
+  reply(res, 200, routes[name].response.parse(result));
 }
 
 function reply(res: ServerResponse, status: number, body: unknown) {
@@ -113,17 +167,12 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     if (typeof match !== "string") {
       return reject(res, match.error === "not-found" ? 404 : 405, match.error);
     }
-    // Last resort: responses are checked against the shared schema, and any handler
-    // failure answers a generic 500. The log names the route and error class only;
-    // messages can carry content (ADR 0008).
-    handlers[match]()
-      .then((body) => reply(res, 200, routes[match].response.parse(body)))
-      .catch((error: unknown) => {
-        console.error(
-          `route ${match} failed: ${error instanceof Error ? error.name : typeof error}`,
-        );
-        reject(res, 500, "internal-error");
-      });
+    // Last resort: any handler failure answers a generic 500. The log names the route
+    // and error class only; messages can carry content (ADR 0008).
+    handle(handlers, match, req, res).catch((error: unknown) => {
+      console.error(`route ${match} failed: ${error instanceof Error ? error.name : typeof error}`);
+      reject(res, 500, "internal-error");
+    });
   });
 
   await new Promise<void>((resolve, reject) => {

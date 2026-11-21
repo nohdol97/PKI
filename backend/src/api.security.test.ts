@@ -5,6 +5,7 @@ import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { send, sendRaw } from "@pki/testkit";
 import { productAdapters } from "./composition.ts";
+import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
 const TOKEN = "t".repeat(43);
@@ -12,11 +13,20 @@ const ALLOWED_ORIGIN = "http://localhost:5173";
 
 let server: RunningServer;
 let valid: Record<string, string>;
+const synced: string[] = [];
+const connectors: ConnectorManager = {
+  list: () => [],
+  sync: async (id) => {
+    synced.push(id);
+    return { connectorId: id, received: 0, created: 0 };
+  },
+};
 
 beforeAll(async () => {
   server = await startServer({
     token: TOKEN,
     allowedOrigins: [ALLOWED_ORIGIN],
+    connectors,
     ...productAdapters(),
   });
   valid = {
@@ -71,6 +81,27 @@ describe("local API security", () => {
     expect(res.status).toBe(401);
   });
 
+  it("runs a sync only for a request that passes every check", async () => {
+    const body = { connectorId: "c" };
+    for (const [header, value] of [
+      ["authorization", "Bearer wrong"],
+      ["host", "evil.example"],
+      ["origin", "https://evil.example"],
+    ] as const) {
+      const res = await send(
+        server.port,
+        "/api/connectors/sync",
+        { ...valid, [header]: value },
+        "POST",
+        body,
+      );
+      expect(res.status).toBeGreaterThanOrEqual(400);
+    }
+    expect(synced).toEqual([]);
+    expect((await send(server.port, "/api/connectors/sync", valid, "POST", body)).status).toBe(200);
+    expect(synced).toEqual(["c"]);
+  });
+
   it("rejects a request carrying more than one Host header", async () => {
     const host = `Host: 127.0.0.1:${server.port}`;
     const auth = `Authorization: Bearer ${TOKEN}`;
@@ -121,10 +152,10 @@ describe("local API security", () => {
 
   it("refuses to start with a token too short to be a fresh secret", async () => {
     await expect(
-      startServer({ token: "", allowedOrigins: [], ...productAdapters() }),
+      startServer({ token: "", allowedOrigins: [], connectors, ...productAdapters() }),
     ).rejects.toThrow(/token/);
     await expect(
-      startServer({ token: "short", allowedOrigins: [], ...productAdapters() }),
+      startServer({ token: "short", allowedOrigins: [], connectors, ...productAdapters() }),
     ).rejects.toThrow(/token/);
   });
 });
