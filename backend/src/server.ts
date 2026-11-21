@@ -3,8 +3,11 @@
 // allowlisted Origin (or no Origin: non-browser clients such as the shell).
 import {
   ComponentStatusSchema,
+  EmbeddingStatusSchema,
   routes,
   type ComponentStatus,
+  type EmbeddingProvider,
+  type EmbeddingStatusEntry,
   type ErrorResponse,
   type RouteName,
   type RouteRequest,
@@ -39,6 +42,8 @@ export interface ServerOptions {
   port?: number;
   /** Chosen by the composition point (composition.ts), never here. */
   vectorIndex: VectorIndex;
+  /** Chosen by the composition point; null while no implementation is bound (reported not implemented). */
+  embedder: EmbeddingProvider | null;
   /** Built by the composition point (composition.ts), never here. */
   connectors: ConnectorManager;
   /** The migrated canonical DB the screens read from. */
@@ -92,12 +97,38 @@ async function vectorIndexState(index: VectorIndex): Promise<ComponentStatus> {
   }
 }
 
+const EMBEDDING_CHECK_FAILED: EmbeddingStatusEntry = {
+  state: "unavailable",
+  reason: "status check failed",
+};
+
+const EMBEDDER_STATES = new Set(["ready", "model-missing", "preparing"]);
+
+// Reads state only: a status request never prepares a model or embeds (V01-R14).
+async function embeddingState(embedder: EmbeddingProvider | null): Promise<EmbeddingStatusEntry> {
+  if (embedder === null) return { state: "not-implemented" };
+  try {
+    const { egress } = embedder.describe();
+    const status = await embedder.status();
+    // "not-implemented" is the API's word for "nothing bound", never an embedder's.
+    if (typeof status === "string" && !EMBEDDER_STATES.has(status)) return EMBEDDING_CHECK_FAILED;
+    const mapped = EmbeddingStatusSchema.safeParse(
+      typeof status === "string"
+        ? { state: status, egress }
+        : { state: "unavailable", reason: status.unavailable, egress },
+    );
+    return mapped.success ? mapped.data : EMBEDDING_CHECK_FAILED;
+  } catch {
+    return EMBEDDING_CHECK_FAILED;
+  }
+}
+
 function createHandlers(options: ServerOptions): Handlers {
   return {
     status: async () => ({
       backend: { state: "ready" },
       provider: { state: "not-implemented" },
-      embedding: { state: "not-implemented" },
+      embedding: await embeddingState(options.embedder),
       vectorIndex: await vectorIndexState(options.vectorIndex),
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),

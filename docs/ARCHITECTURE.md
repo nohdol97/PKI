@@ -269,6 +269,12 @@ interface EmbeddingProvider {
 - 공용 저장소의 구현은 로컬에서 계산하므로 `egress`가 `'local'`이다. 포크가 원격 서비스를 부르는 구현을 넣으면 `'external'`이어야 하고, 그 경우 embedding 입력도 LLM 호출과 같은 동의·전송 정책 검사를 지난다(이슈 #1 설계 분석 5번, [ADR 0014](adr/0014-egress-policy-and-consent.md)).
 - 모델이 없거나 받을 수 없으면 `status()`가 그 사실을 알리고 키워드 검색은 계속 동작한다(V01-C6). `modelId`와 `revision`이 바뀌면 벡터 색인을 통째로 다시 만든다.
 
+**V01-T13에서 확정한 규격**(정확한 타입은 [`packages/contracts/src/embedding.ts`](../packages/contracts/src/embedding.ts), 결합 지점은 [V01 spec "T13이 넘기는 것"](specs/2026-11-21-V01-vertical-skeleton.md)):
+
+- 모델이 준비되지 않았으면 `embed`는 `AdapterUnavailableError`로 거부되고, 중단된 `prepare`는 "모델 없음"으로 남는다.
+- 상태 API는 `describe()`와 `status()`만 읽어 상태와 `egress`를 보이며, 읽을 수 없거나 규격 밖이면 그 항목만 `unavailable`("status check failed")이다.
+- 텍스트를 embedding하는 입구는 `embedWithinPolicy` 하나다. `egress`가 정확히 `'local'`이 아니면 호출마다 embedding 전송 정책을 묻고, Phase 1의 기본 정책은 모든 외부 embedding을 거부한다.
+
 ### 5.3 KnowledgeEngine
 
 제3자 지식 엔진을 꽂는 자리다. 엔진은 **후보를 제안하고 관련 문맥을 찾아 줄 뿐**이고, 무엇이 지식으로 기록되는지는 제품이 정본에 쓰면서 정한다.
@@ -470,3 +476,4 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | 2026-11-21 | 저장소 배치 표에 `tooling/` 추가 | 2절 | V01-T01: 모듈 경계 lint 규칙과 문서 대응 테스트를 둘 자리 |
 | 2026-11-21 | 5.3절과 5.4절에 "V01-T12에서 확정한 규격" 추가: null 엔진의 `appliedChangeSeq`와 시작 비교, 빈 벡터 색인의 거부를 V02가 건너뜀으로 다룸, 엔진과 색인의 순서 규칙, 묶음 거부의 처리, 상태 API의 항목별 저하 | 5.3절, 5.4절 | V01-T12 독립 검토 M1, I1, S1 |
 | 2026-11-21 | null 엔진의 예외를 없앰: 시작 비교는 구현과 무관하게 순번이 다르면(`null` 포함) 재구축하고, 재구축 없음 보장은 상태를 가진 투영에만 적용 | 5.3절 | V01-T12 재검토 N1: 계약에 null 엔진을 가려낼 신호가 없어 파이프라인이 구현에 분기해야 했음 |
+| 2026-11-21 | 5.2절에 "V01-T13에서 확정한 규격" 추가: 준비 전 `embed` 거부와 중단된 준비, 상태 API의 항목별 저하, 외부 embedding의 전송 판정 입구와 기본 거부 | 5.2절 | V01-T13 구현 |
