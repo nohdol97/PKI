@@ -60,6 +60,7 @@ V02는 이 가운데 가장 작은 조각을 만든다(V02-R4·R5, V02-T03). 작
 - **I03-R3 임대 토큰과 heartbeat.** 작업을 집는 것은 한 문장의 조건부 갱신이다: `queued`이고 실행해도 되는 시각이 지났으면 `running`으로 바꾸고, 임대 토큰을 1 올리고, 임대 주인(프로세스가 켜질 때마다 새로 만드는 실행기 ID)과 임대 기한을 쓰고, 시도 횟수를 1 올린다. 실행 중에는 임대 길이의 4분의 1마다 heartbeat로 기한을 늘리는데, 이것도 "토큰이 내가 가진 값과 같을 때만"의 조건부 갱신이다. 실패하면(누가 이미 다시 집었다) 실행기는 그 작업의 취소 신호를 끊고 결과를 쓰지 않는다. 기한이 지나 있더라도 토큰이 그대로면 heartbeat는 성공한다(절전에서 깨어난 같은 실행기가 계속하는 경우).
 - **I03-R4 임대 회수.** 실행기는 시작할 때와 매 점검 때 임대를 회수한다. 회수 대상은 `running`이면서 ① 기한이 지났거나 ② 기한이 지금보다 **임대 길이보다 더 미래**인 작업이다(②는 정상 동작에서 생길 수 없고 벽시계가 뒤로 간 경우다). 단, 지금 실행기가 메모리에 붙잡고 있는 작업은 회수하지 않고 heartbeat로 처리한다. 회수된 작업은 시도가 남았으면 `queued`, 소진됐으면 `retry`(오류 코드 `lease-expired`)로 간다. 시도 횟수는 집을 때 올라가므로, 실행할 때마다 프로세스를 죽이는 작업(poison job)도 정해진 횟수 뒤 `dead_letter`에 이른다.
 - **I03-R5 효과는 한 번만.** 작업 종류마다 결과를 정본에 쓰는 일은 **한 트랜잭션**이고, 그 트랜잭션은 맨 처음 ① 상태가 `running`이고 토큰이 내가 가진 값이며 ② 취소 요청이 없고 ③ 그 종류의 fence(원본 작업이면 V02-R5의 version과 tombstone 검사)를 통과하는지 확인한다. ①·②가 틀리면 아무것도 쓰지 않고 끝난다. ③이 틀리면 결과를 버리고 `superseded`로 닫는다. 통과하면 결과와 `succeeded`를 같은 트랜잭션에서 쓴다. 정본 밖의 효과는 Provider 호출뿐이며 이것은 효과로 치지 않고 예산으로 센다(R12). Connector 동기화의 cursor는 ADR 0013 결정 1대로 원본을 저장한 트랜잭션에서 확정되므로 같은 동기화가 두 번 돌아도 원본은 content hash로 걸러진다.
+- **I03-R5a fence를 쓰지 않는 종류.** fence는 종류마다 정한다. 원본이 지워진 **뒤에** 해야 하는 작업 — I04가 만드는 엔진·벡터 투영 제거와 정리 작업 — 은 원본 version fence를 쓰지 않는다(쓰면 tombstone 때문에 언제나 `superseded`로 닫혀 제거가 일어나지 않는다). 이런 종류는 원본 ID와 tombstone의 version을 중복 키 `(종류, 원본, fence version)`에 그대로 싣고, R5의 ①·② 검사만 한다. tombstone은 이 종류를 `superseded`로 만들지 않으며, 원본 하나의 작업을 닫는 함수(R2 아래, I04가 부름)도 이 종류를 건너뛴다. 재시도·backoff·시도 소진·수동 재시도는 다른 종류와 같다(R7~R10). Provider를 부르지 않으므로 `held`가 되지 않는다. 시도가 소진되어 `dead_letter`가 되어도 시작할 때의 변경 순번 비교(ADR 0013 결정 7)가 투영을 다시 만들므로 지운 내용이 투영에 남는 길이 닫혀 있다. 동시 실행 묶음은 `projection`(상한 1), 우선순위는 `user`(삭제 직후 검색에서 빠져야 하므로)다.
 - **I03-R6 checkpoint.** 여러 단계로 나뉘는 작업은 단계마다 그 단계의 결과와 checkpoint를 R5와 같은 검사를 거친 한 트랜잭션으로 쓴다. 다시 집힌 작업은 checkpoint부터 잇는다. checkpoint에는 **ID, 번호, 개수만** 들어가고 원본의 글이나 Provider 응답은 들어가지 않는다(삭제 때 지울 대상을 늘리지 않기 위해. ADR 0013 결정 5). 크기는 4 KiB 이하이고, 종류마다 정한 스키마에 맞지 않으면 쓰기를 거부한다. 끝 상태가 되면 checkpoint를 비운다.
 
 **결과의 분류와 재시도**
@@ -152,7 +153,8 @@ stateDiagram-v2
 | 실행 결과 | 다음 상태 | 시도 | 비고 |
 |---|---|---|---|
 | 처리기 성공, R5 통과 | succeeded | 씀 | |
-| fence 불통과, 또는 Broker `rejected: missing-source`(원본이 지워짐) | superseded | 씀 | V02-R5 |
+| fence 불통과, 또는 Broker `rejected: missing-source`(원본이 지워짐) | superseded | 씀 | V02-R5. fence를 쓰지 않는 종류(R5a)에는 없음 |
+| 투영 제거 실패(엔진·벡터 규격의 오류, 사용할 수 없음) | retry | 씀 | R5a. 소진되면 dead_letter, 시작 비교가 보완 |
 | Broker `blocked`(동의 없음, 전송 거부, `cli-*`, `unverified-*`, `no-provider`, 구조화 출력 없음, 기능 조회 실패) | held(그 사유) | 씀 | R14. 다른 Provider로 넘기지 않음 |
 | Broker `blocked: budget-exhausted` | retry | **되돌림** | R13 전체 호출 예산 |
 | `job-budget-exhausted` 뒤 양보, checkpoint 진척 | queued(1분 뒤) | 되돌림 | R13 |
@@ -258,7 +260,7 @@ flowchart LR
 |---|---|---|---|---|---|
 | I03-T01 | 작업 테이블 마이그레이션(원본 없는 작업, 시도, 실행 시각, 임대 주인·토큰, 우선순위, 공정성 키, 주기·slot, checkpoint, 오류·보류 코드, 취소 요청, 시각들, 상태 CHECK, 두 중복 키와 주기당 하나 색인), 전이 함수, V02 상태 값의 옮기기 | R1, R2 | C1 | **V02-T03 머지**, V02-T02 | `jobs.transitions`(모든 상태 쌍), `jobs.migration`(V02 스키마의 작업이 상태와 fence를 지닌 채 옮겨짐), `jobs.no-content` |
 | I03-T02 | 주입 시계(벽·단조·기다리기), 주기의 slot 계산(네 가지 주기, 로컬 시각, 일광 절약), 놓친 slot 세기, 시계 역행 보정 규칙 | R19(계산), R16(주기 값) | C2 | 없음 | `schedule.slots`, `schedule.dst`, `clock.regression` |
-| I03-T03 | 실행기 일반화: 임대 토큰, heartbeat, 임대 회수, 작업 문맥, commit·checkpoint, 결과 분류, backoff, 시도 소진, 실행 시간 제한, `test-effect` 종류와 강제 종료 시험 | R3~R9, R13(실행 시간), R22 | C1, C3(backoff) | T01, T02 | `lease.token`, `lease.reclaim`, `kill.resume`, `effect.once`, `checkpoint.resume`, `outcome.mapping`, `backoff`, `poison` |
+| I03-T03 | 실행기 일반화: 임대 토큰, heartbeat, 임대 회수, 작업 문맥, commit·checkpoint, 종류별 fence(R5a 포함), 결과 분류, backoff, 시도 소진, 실행 시간 제한, `test-effect` 종류와 강제 종료 시험 | R3~R9, R5a, R13(실행 시간), R22 | C1, C3(backoff) | T01, T02 | `lease.token`, `lease.reclaim`, `kill.resume`, `effect.once`, `checkpoint.resume`, `purge.retry`(대역 투영), `outcome.mapping`, `backoff`, `poison` |
 | I03-T04 | 동시 실행 묶음과 전체 상한, 설정 `jobs.maxConcurrent`, 우선순위와 공정성 순서 | R11, R12 | C3 | T03 | `concurrency.groups`, `priority.fairness` |
 | I03-T05 | 작업당 호출 예산과 양보, Broker 예산의 이력 복원, `budget-exhausted` 처리, 취소(대기·실행 중), 수동 재시도·버리기, 보류 해제, 실행기·스케줄러가 사용자 동작 기록을 받지 않는 구성 | R10, R13, R14 | C3 | T03 | `budget.job`, `budget.restart`, `cancel`, `manual-retry`, `held.release`, `background.gate` |
 | I03-T06 | 주기 테이블, 기본 주기, 점검(30초, 시작, 시간 단절), 합치기, 주기 멈춤, 대기열 상한, 정리 작업과 보존 | R16~R20 | C2 | T02, T03 | `coalesce.sleep`, `coalesce.restart`, `clock.jump`, `backlog.bound`, `schedule.pause`, `retention` |
@@ -282,7 +284,7 @@ T02는 V02-T03을 기다리지 않고 바로 시작할 수 있다. 나머지는 
 
 C1~C3은 이슈 #20의 문장 그대로다. H1·H2는 이 프로젝트가 배포처로 넘어가는 프로젝트라서 spec 양식이 요구하는 두 기준이며 이 spec에만 둔다.
 
-- [ ] **I03-C1** (R1~R7, R22): queued/running/retry/dead-letter/cancelled/succeeded, lease/heartbeat/checkpoint를 정의한다. 강제종료 후 lease 회수와 재처리로 효과 중복이 없다.
+- [ ] **I03-C1** (R1~R7, R5a, R22): queued/running/retry/dead-letter/cancelled/succeeded, lease/heartbeat/checkpoint를 정의한다. 강제종료 후 lease 회수와 재처리로 효과 중복이 없다.
 - [ ] **I03-C2** (R16~R20): 10분/1시간/일간/주간 기본 주기를 설정 가능하게 하고 재시작·절전·시계 변화 후 누락분을 bounded coalescing한다. 무한 backlog를 막는다.
 - [ ] **I03-C3** (R8~R15, R21): 우선순위/공정성/동시 실행/호출·시간 예산·취소·exponential backoff·rate limit·수동 retry와 Activity 가시성을 검증한다.
 - [ ] **I03-H1** (R24): 이 spec의 "배포처 후속 항목" 2개 각각에 대해 site-setup.md의 `## 배포처 설정 체크리스트` 아래에 같은 번호(S19, S20)의 항목이 있으면 통과하고, 하나라도 없거나 수가 다르면 문서 대응 테스트가 실패한다.
@@ -308,6 +310,7 @@ C1~C3은 이슈 #20의 문장 그대로다. H1·H2는 이 프로젝트가 배포
 | C1 | `kill.resume` | 통합(자식 프로세스) | `test-effect` 작업 3개 중 하나의 처리 도중 백엔드를 강제 종료하고 다시 띄우면: 셋 다 `succeeded`, 효과 행 3, 실행 기록 파일에 중단된 작업이 2번, 그 작업의 시도 2 |
 | C1 | `effect.once` | 통합 | commit 트랜잭션 직후 강제 종료하면 다시 띄워도 그 작업은 다시 실행되지 않음(실행 기록 1번) |
 | C1 | `checkpoint.resume` | 통합 | 3단계 작업을 2단계 뒤에 강제 종료하면 다시 집힌 작업이 3단계부터 이음. 단계마다 효과 행 1 |
+| C1 | `purge.retry` | 통합 | 원본을 지운 뒤 생긴 투영 제거 작업이 tombstone 때문에 `superseded`가 되지 않음. 제거가 두 번 실패하면 `retry`와 backoff를 거쳐 세 번째에 `succeeded`, 소진되면 `dead_letter`이고 다음 시작에서 `rebuild`가 불림 |
 | C1·C3 | `outcome.mapping` | 단위 | "실행 결과가 가는 곳" 표의 행마다 다음 상태, 시도 증감, 저장된 코드 |
 | C2 | `schedule.slots` | 단위 | 10분·1시간·매일·매주에서 임의 시각의 다음 slot과 두 시각 사이 slot 수 |
 | C2 | `schedule.dst` | 단위 | 일광 절약이 있는 시간대를 주입: 없는 02:30은 그 뒤 첫 유효 시각, 두 번 있는 01:30은 한 번. Asia/Seoul에서는 언제나 24시간 간격 |
@@ -379,7 +382,8 @@ C1~C3은 이슈 #20의 문장 그대로다. H1·H2는 이 프로젝트가 배포
 **다른 spec과 맞출 것**
 
 10. I01의 Connector 규격이 요청 한도와 cursor 만료를 어떤 신호로 내는지. 이 spec은 그 신호가 동기화 작업의 `rate-limited`(backoff)와 재시도할 수 없는 실패(`connector-unavailable`)로 옮겨진다고 가정한다.
-11. I04가 삭제·권한 철회 트랜잭션에서 그 원본의 끝나지 않은 작업을 `superseded`로 닫는 함수(I03-T01이 제공)를 부를지. 부르지 않아도 fence와 `missing-source`가 결과를 막지만, 지워진 원본의 작업이 대기열에 남는다.
+11. I04 초안은 투영 제거를 outbox 없이 이 작업 테이블의 재시도 가능한 작업으로 만든다고 가정한다. 이 spec은 그것을 R5a로 받는다. 낡은 작업의 상태는 `cancelled`+사유가 아니라 **`superseded`**로 정했다(V02-R5가 이미 쓰는 값이고, 사용자가 취소한 것과 fence가 닫은 것을 활동 화면에서 구분하기 위해).
+12. I04가 삭제·권한 철회 트랜잭션에서 그 원본의 끝나지 않은 작업을 `superseded`로 닫는 함수(I03-T01이 제공)를 부를지. 부르지 않아도 fence와 `missing-source`가 결과를 막지만, 지워진 원본의 작업이 대기열에 남는다.
 
 ## 변경 이력
 
