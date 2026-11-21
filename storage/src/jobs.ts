@@ -1,9 +1,10 @@
 // Job records (V01-R6, V02-R3, R4, R5). The Broker reads a job to treat a call as
-// background (V01-R8), and only while the job is leased. A job names its source
+// background (V01-R8), and only from the current lease holder. A job names its source
 // and the version it was registered for, its fence, so it outlives the deletion
 // of that version. It is registered once per (kind, source, fence version), claimed
-// with a lease that runs out, and closed by `closeJob`, which checks the fence in
-// the transaction that writes the result. The runner is backend/src/job-runner.ts.
+// with a lease that runs out (each claim raises its lease token), and closed by
+// `closeJob` for the current token only, which checks the fence in the
+// transaction that writes the result. The runner is backend/src/job-runner.ts.
 import type { SqlDriver } from "./sql-driver.ts";
 
 /**
@@ -19,8 +20,21 @@ export interface StoredJob {
   fenceVersion: number;
   status: JobStatus;
   leaseUntil: string | null;
+  /** Raised on every claim; the holder names it to the Broker and to closeJob. */
+  leaseToken: number;
   /** Why a job was held or failed: a code, never Provider text. */
   reason: string | null;
+}
+
+/** A reason is a short lowercase code: never text that could carry content. */
+export const isReasonCode = (reason: string): boolean => /^[a-z][a-z0-9-]{0,63}$/.test(reason);
+
+/** What `write` threw, so callers tell a failed result apart from a failing database. */
+export class JobWriteError extends Error {
+  constructor(cause: unknown) {
+    super("the job result could not be written", { cause });
+    this.name = "JobWriteError";
+  }
 }
 
 export interface NewJob {
@@ -31,7 +45,8 @@ export interface NewJob {
 
 export function readJob(db: SqlDriver, id: number): StoredJob | undefined {
   const row = db.all(
-    "SELECT kind, source_id, fence_version, status, lease_until, reason FROM jobs WHERE id = ?",
+    `SELECT kind, source_id, fence_version, status, lease_until, lease_token, reason
+       FROM jobs WHERE id = ?`,
     [id],
   )[0];
   if (!row) return undefined;
@@ -42,6 +57,7 @@ export function readJob(db: SqlDriver, id: number): StoredJob | undefined {
     fenceVersion: row.fence_version as number,
     status: row.status as JobStatus,
     leaseUntil: row.lease_until as string | null,
+    leaseToken: row.lease_token as number,
     reason: row.reason as string | null,
   };
 }
@@ -89,10 +105,10 @@ export function leaseNextJob(db: SqlDriver, request: LeaseRequest): StoredJob | 
       [...request.kinds, now],
     )[0]?.id as number | undefined;
     if (id === undefined) return undefined;
-    db.run("UPDATE jobs SET status = 'leased', lease_until = ? WHERE id = ?", [
-      new Date(request.now.getTime() + request.leaseMs).toISOString(),
-      id,
-    ]);
+    db.run(
+      "UPDATE jobs SET status = 'leased', lease_until = ?, lease_token = lease_token + 1 WHERE id = ?",
+      [new Date(request.now.getTime() + request.leaseMs).toISOString(), id],
+    );
     return readJob(db, id);
   });
 }
@@ -114,26 +130,38 @@ export type JobClosing =
   | { status: "superseded" };
 
 /**
- * Closes a leased job in one transaction (V02-R5). A stale fence discards the
- * closing, `write` included, and closes the job superseded. A job that is not
- * leased (closed already, or never claimed) is left as it is and nothing is
- * written. A throwing `write` rolls back and leaves the job leased.
+ * Closes a leased job in one transaction (V02-R5) for the holder of its current
+ * lease. A stale fence discards the closing, `write` included, and closes the job
+ * superseded. A job that is not leased by that lease (closed already, never
+ * claimed, or claimed again after the lease ran out) is left as it is and nothing
+ * is written. A throwing `write` rolls back, leaves the job leased and surfaces
+ * as JobWriteError; any other error is the database's. A reason that is not a
+ * code is refused (RangeError) before anything is read.
  */
 export function closeJob(
   db: SqlDriver,
-  jobId: number,
+  lease: Pick<StoredJob, "id" | "leaseToken">,
   closing: JobClosing,
 ): Exclude<JobStatus, "queued" | "leased"> | "not-leased" {
+  if ("reason" in closing && !isReasonCode(closing.reason)) {
+    throw new RangeError("a job reason must be a code");
+  }
   return db.transaction(() => {
-    const job = readJob(db, jobId);
-    if (job?.status !== "leased") return "not-leased";
+    const job = readJob(db, lease.id);
+    if (job?.status !== "leased" || job.leaseToken !== lease.leaseToken) return "not-leased";
     const status = isFenceCurrent(db, job) ? closing.status : "superseded";
-    if (status === "done" && closing.status === "done") closing.write();
+    if (status === "done" && closing.status === "done") {
+      try {
+        closing.write();
+      } catch (error) {
+        throw new JobWriteError(error);
+      }
+    }
     const reason = status === closing.status && "reason" in closing ? closing.reason : null;
     db.run("UPDATE jobs SET status = ?, lease_until = NULL, reason = ? WHERE id = ?", [
       status,
       reason,
-      jobId,
+      lease.id,
     ]);
     return status;
   });

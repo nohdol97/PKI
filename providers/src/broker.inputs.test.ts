@@ -4,7 +4,17 @@
 // manifest and its own records; a request carrying any of them is rejected
 // before the flow, as is a missing or already used record.
 import type { BrokerRequest, LLMRequest } from "@pki/contracts";
-import { migrate, registerConnectorInstance, saveSourceRecord, type SqlDriver } from "@pki/storage";
+import {
+  closeJob,
+  leaseNextJob,
+  migrate,
+  readJob,
+  registerConnectorInstance,
+  registerJob,
+  saveSourceRecord,
+  type SqlDriver,
+  type StoredJob,
+} from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { FakeProvider } from "@pki/testkit";
 import { readFileSync } from "node:fs";
@@ -306,12 +316,13 @@ describe("broker.class: the Broker computes the data classification", () => {
 describe("broker.origin: the Broker decides the call kind from its records", () => {
   // A job is registered once per kind and source version (V02-R4), so a second
   // call for the same version returns the job already registered. The runner
-  // calls the Broker only while it holds the job's lease (V02-T03).
+  // calls the Broker only while it holds the job's lease, naming that lease
+  // (token 1 here, V02-T03).
   function job(kind = "extract", sourceVersionId = store(synthA), status = "leased"): string {
     const target = "SELECT source_id, version FROM source_versions WHERE id = ?";
     db.run(
-      `INSERT INTO jobs (kind, source_id, fence_version, status)
-       SELECT ?, source_id, version, ? FROM (${target}) WHERE true ON CONFLICT DO NOTHING`,
+      `INSERT INTO jobs (kind, source_id, fence_version, status, lease_token)
+       SELECT ?, source_id, version, ?, 1 FROM (${target}) WHERE true ON CONFLICT DO NOTHING`,
       [kind, status, Number(sourceVersionId)],
     );
     return String(
@@ -324,7 +335,10 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
 
   it("treats a call from a job record as background", async () => {
     const id = store(synthA);
-    const result = await broker.call({ ...extract([id]), origin: { jobId: job("extract", id) } });
+    const result = await broker.call({
+      ...extract([id]),
+      origin: { jobId: job("extract", id), lease: "1" },
+    });
     expect(result.status).toBe("ok");
     expect(sent().trigger).toBe("background");
     expect(execution.at(-1)).toMatchObject({ trigger: "background" });
@@ -340,10 +354,12 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
     for (const extra of [
       { trigger: "user" },
       { callKind: "user" },
-      { origin: { jobId: job(), trigger: "user" } },
-      { origin: { jobId: job(), userActionId: "x" } },
+      { origin: { jobId: job(), lease: "1", trigger: "user" } },
+      { origin: { jobId: job(), lease: "1", userActionId: "x" } },
     ]) {
-      expect(await broker.call({ ...extract([id]), origin: { jobId: job() }, ...extra })).toEqual({
+      expect(
+        await broker.call({ ...extract([id]), origin: { jobId: job(), lease: "1" }, ...extra }),
+      ).toEqual({
         status: "rejected",
         reason: "invalid-request",
       });
@@ -415,12 +431,15 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
 
   it("rejects a missing job record and a job of another task kind", async () => {
     const id = store(synthA);
-    expect(await broker.call({ ...extract([id]), origin: { jobId: "404" } })).toEqual({
+    expect(await broker.call({ ...extract([id]), origin: { jobId: "404", lease: "1" } })).toEqual({
       status: "rejected",
       reason: "unknown-origin",
     });
     expect(
-      await broker.call({ ...extract([id]), origin: { jobId: job("connection-test", id) } }),
+      await broker.call({
+        ...extract([id]),
+        origin: { jobId: job("connection-test", id), lease: "1" },
+      }),
     ).toEqual({ status: "rejected", reason: "origin-mismatch" });
   });
 
@@ -429,10 +448,49 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
     for (const status of ["queued", "done", "superseded", "held", "failed"]) {
       const id = store({ ...synthA, body: `${synthA.body} ${status}` });
       expect(
-        await broker.call({ ...extract([id]), origin: { jobId: job("extract", id, status) } }),
+        await broker.call({
+          ...extract([id]),
+          origin: { jobId: job("extract", id, status), lease: "1" },
+        }),
       ).toEqual({ status: "rejected", reason: "origin-not-leased" });
     }
     expect(provider.requests).toEqual([]);
+  });
+
+  it("rejects the call of a holder whose lease ran out and was taken again", async () => {
+    // V02-T03 rework: the stale holder can neither call nor close
+    const id = store(synthA);
+    const version = db.all("SELECT source_id, version FROM source_versions WHERE id = ?", [
+      Number(id),
+    ])[0];
+    registerJob(db, {
+      kind: "extract",
+      sourceId: version?.source_id as number,
+      fenceVersion: version?.version as number,
+    });
+    const claim = (now: Date): StoredJob => {
+      const job = leaseNextJob(db, { kinds: ["extract"], now, leaseMs: 1000 });
+      if (!job) throw new Error("expected a claim");
+      return job;
+    };
+    const origin = (job: StoredJob) => ({ jobId: String(job.id), lease: String(job.leaseToken) });
+    const old = claim(new Date("2026-11-21T00:00:00.000Z"));
+    const fresh = claim(new Date("2026-11-21T00:00:02.000Z"));
+
+    expect(await broker.call({ ...extract([id]), origin: origin(old) })).toEqual({
+      status: "rejected",
+      reason: "origin-not-leased",
+    });
+    expect(await broker.call({ ...extract([id]), origin: { jobId: String(old.id) } })).toEqual({
+      status: "rejected",
+      reason: "invalid-request",
+    });
+    expect(provider.requests).toEqual([]);
+    expect((await broker.call({ ...extract([id]), origin: origin(fresh) })).status).toBe("ok");
+
+    expect(closeJob(db, fresh, { status: "done", write: () => {} })).toBe("done");
+    expect(closeJob(db, old, { status: "held", reason: "cli-background-off" })).toBe("not-leased");
+    expect(readJob(db, old.id)).toMatchObject({ status: "done", reason: null });
   });
 
   it("issues unguessable record IDs and keeps no record on disk", async () => {

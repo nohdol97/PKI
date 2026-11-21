@@ -3,11 +3,14 @@
 // the job through the version fence (storage closeJob), one job at a time. A job
 // left leased by a backend that stopped is claimed again once its lease runs out.
 // The runner never decides whether a call may run: a handler calls the Broker
-// with the job as origin, and the Broker judges the call background and applies
-// the run conditions (V01-T09). A call it did not run comes back as "held".
+// with the job and its lease token as origin, and the Broker judges the call
+// background and applies the run conditions (V01-T09). A call it did not run
+// comes back as "held".
 import {
   closeJob,
   isFenceCurrent,
+  isReasonCode,
+  JobWriteError,
   leaseNextJob,
   type JobClosing,
   type SqlDriver,
@@ -17,7 +20,11 @@ import {
 /** What a handler hands back; the runner writes it only while the fence holds. */
 export type JobResult = Exclude<JobClosing, { status: "superseded" }>;
 
-/** Runs one leased job. Throwing fails the job with the code "handler-error". */
+/**
+ * Runs one leased job; calls the Broker with origin `{jobId, lease}` from the job
+ * (`String(job.id)`, `String(job.leaseToken)`). Throwing fails the job with the
+ * code "handler-error"; a reason that is not a code fails it as "invalid-reason".
+ */
 export type JobHandler = (job: StoredJob) => Promise<JobResult>;
 
 export interface JobRun {
@@ -65,7 +72,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     if (!job) return undefined;
     const close = (closing: JobClosing): JobRun => ({
       jobId: job.id,
-      status: closeJob(db, job.id, closing),
+      status: closeJob(db, job, closing),
     });
     // stale already: no call is made for a version that is gone
     if (!isFenceCurrent(db, job)) return close({ status: "superseded" });
@@ -76,10 +83,15 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
       onError(error);
       return close({ status: "failed", reason: "handler-error" });
     }
+    if ("reason" in result && !isReasonCode(result.reason)) {
+      return close({ status: "failed", reason: "invalid-reason" });
+    }
     try {
       return close(result);
     } catch (error) {
-      onError(error);
+      // a database error (e.g. a locked file) leaves the job leased for a rerun
+      if (!(error instanceof JobWriteError)) throw error;
+      onError(error.cause);
       return close({ status: "failed", reason: "write-error" });
     }
   }
@@ -99,9 +111,11 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     again = true;
     draining ??= (async () => {
       try {
-        while (again && !stopped) {
+        while (again) {
           again = false;
-          while (!stopped && (await runOnce()));
+          while (!stopped && (await runOnce())) {
+            // one job closed; claim the next unless stopped
+          }
         }
       } catch (error) {
         onError(error); // the job stays leased and is claimed again when its lease runs out

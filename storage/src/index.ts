@@ -30,6 +30,8 @@ export {
 export {
   closeJob,
   isFenceCurrent,
+  isReasonCode,
+  JobWriteError,
   leaseNextJob,
   readJob,
   registerJob,

@@ -57,7 +57,7 @@ Phase 1에는 제3자 지식 엔진이 없다([ADR 0003](../adr/0003-phase1-with
 
 - **V02-R3 지식 스키마(마이그레이션 v5).** V01이 스키마 v1~v4를 썼으므로 지식 스키마는 다섯 번째 마이그레이션으로 들어간다. 마이그레이션으로 다음을 더한다: **항목**(프로젝트, 시스템 같은 대상), **사실**(어느 항목의 어떤 종류의 값인가. 예: 목표일), **관계**(주체 항목, 관계 유형, 대상 항목), **근거**(사실이나 관계 하나가 **어느 원본 version**의 어디에서 나왔는가: 시작, 끝, 인용문), Insight, tombstone, **변경 순번**, knowledge revision, 그리고 V01의 작업 테이블에 임대와 fence에 필요한 열. 항목·사실·관계는 인식 유형(명시 사실, 사용자 승인, 추론, 가설), 상태(candidate, verified, disputed, superseded, rejected), 유효 시각, 관측 시각을 따로 갖는다. 근거의 시작과 끝은 **유니코드 코드 포인트**로 센 `[시작, 끝)`이다(R05와 같은 단위). 원본의 version은 저장된 뒤 바뀌지 않고, 근거는 자기 version을 계속 가리킨다(이슈 #18 I01-C2). 그 version이 원본의 최신이면 "현재 근거", 아니면 "지난 근거"다.
 - **V02-R4 작업 실행기.** 작업을 정본 SQLite 테이블에 두고 기한이 있는 임대로 집는다. 원본 version 저장, 변경 순번 증가, 추출 작업 등록은 한 트랜잭션이다. 같은 원본 version의 같은 종류 작업은 한 번만 등록된다. 재시작하면 임대 기한이 지난 작업을 다시 집는다. **작업은 한 번에 하나씩 처리한다**(세 출처가 동시에 추출되어 같은 대상이 두 항목으로 생기는 일을 막는다).
-- **V02-R5 version fence.** 작업은 등록될 때의 원본 version을 들고 다닌다. 결과를 쓰는 트랜잭션 안에서 그 version이 여전히 최신이고 tombstone이 없는지 확인하고, 아니면 결과를 버리고 작업을 `superseded`로 닫는다.
+- **V02-R5 version fence.** 작업은 등록될 때의 원본 version을 들고 다닌다. 결과를 쓰는 트랜잭션 안에서 그 version이 여전히 최신이고 그 version 이상인 tombstone이 없는지 확인하고(tombstone보다 높은 version으로 다시 들어온 원본의 작업은 막지 않는다), 아니면 결과를 버리고 작업을 `superseded`로 닫는다.
 
 **추출과 연결**
 
@@ -190,13 +190,13 @@ flowchart LR
 
 **T03이 넘기는 것**. T03이 정한 것(잠정 표시가 없으면 확정)과 T04·T05·T07이 이어받는 결합 지점이다. 바꿀 때는 이 절과 `storage/src/jobs.test.ts`, `backend/src/job-runner.test.ts`를 함께 고친다.
 
-1. **작업 상태.** `queued` → `leased` → `done`·`superseded`·`held`(보류)·`failed`. 임대 기한이 지난 `leased`는 다시 집히고, 닫힌 작업은 다시 집히지 않는다. 보류와 실패의 이유는 스키마 v6에서 더한 `jobs.reason`에 **코드**로만 남긴다(Provider 문구나 본문은 넣지 않는다).
+1. **작업 상태.** `queued` → `leased` → `done`·`superseded`·`held`(보류)·`failed`. 임대 기한이 지난 `leased`는 다시 집히고, 닫힌 작업은 다시 집히지 않는다. 보류와 실패의 이유는 스키마 v6에서 더한 `jobs.reason`에 **코드**로만 남긴다(Provider 문구나 본문은 넣지 않는다). `closeJob`은 코드 모양(`/^[a-z][a-z0-9-]{0,63}$/`, `isReasonCode`)이 아닌 이유를 `RangeError`로 거부하고, 실행기는 처리기가 그런 이유를 돌려주면 `failed`(`invalid-reason`)로 닫는다. 스키마 v6은 임대 토큰 `jobs.lease_token`도 더한다(집을 때마다 1 오름).
 2. **T04: 등록.** `registerJob(db, {kind, sourceId, fenceVersion})`은 부르는 쪽의 트랜잭션 안에서 작업을 `queued`로 넣는다. 원본 version 저장과 같은 트랜잭션에서 부른다(R4). 충돌이면 `{registered: false, existing}`로 이미 있는 작업을 돌려주며 성공으로 치지 않는다. 등록 뒤 실행기를 깨우는 것(`runner.wake()`)은 T04의 몫이다.
-3. **T05: 처리기.** `createJobRunner({db, handlers: {extract: handler}})`. 처리기는 임대된 작업(`StoredJob`: 원본 ID와 fence version)을 받아 `{status: "done", write}`·`{status: "held", reason}`·`{status: "failed", reason}`을 돌려준다. `write`는 실행기가 fence를 확인하는 트랜잭션 안에서만 부르므로, 처리기는 정본에 결과를 직접 쓰지 않는다. Broker에 넘길 원본 version의 행 ID는 처리기가 `(sourceId, fenceVersion)`으로 찾는다. 처리기가 예외를 던지면 `failed`(`handler-error`), `write`가 던지면 그 쓰기는 되돌려지고 `failed`(`write-error`).
+3. **T05: 처리기.** `createJobRunner({db, handlers: {extract: handler}})`. 처리기는 임대된 작업(`StoredJob`: 원본 ID와 fence version)을 받아 `{status: "done", write}`·`{status: "held", reason}`·`{status: "failed", reason}`을 돌려준다. `write`는 실행기가 fence를 확인하는 트랜잭션 안에서만 부르므로, 처리기는 정본에 결과를 직접 쓰지 않는다. Broker에 넘길 원본 version의 행 ID는 처리기가 `(sourceId, fenceVersion)`으로 찾는다. Broker에는 `origin: {jobId: String(job.id), lease: String(job.leaseToken)}`을 넘긴다. 처리기가 예외를 던지면 `failed`(`handler-error`), `write`가 던지면 그 쓰기는 되돌려지고 `failed`(`write-error`). `write`가 아닌 데이터베이스 오류(예: 다른 프로세스가 파일을 잠가 생긴 SQLITE_BUSY)는 `write-error`가 아니다. 작업은 `leased`로 남고 임대가 끝나면 다시 집힌다.
 4. **fence(R5).** `closeJob`이 한 트랜잭션에서 확인한다: 그 원본의 최신 version이 fence version과 같고, tombstone이 없거나 tombstone의 version이 fence보다 작아야 한다. 아니면 `write`를 부르지 않고 `superseded`로 닫는다. 보류·실패도 fence가 낡았으면 `superseded`가 된다. 집을 때 이미 낡은 작업은 처리기를 부르지 않고 닫는다(지워진 원본으로 Broker를 부르지 않는다). `leased`가 아닌 작업의 결과는 버린다(`not-leased`). 그래서 같은 작업이 두 번 돌아도 결과는 한 번만 들어간다.
-5. **한 번에 하나(R4).** 실행기 하나 안의 모든 집기와 처리가 한 줄로 이어진다(`runOnce`, `wake`, 주기 확인이 겹쳐도 동시에 두 작업이 돌지 않는다). 프로세스가 둘이면 임대가 막지만, Phase 1은 백엔드 하나를 전제한다.
-6. **백그라운드 판정은 Broker가 한다.** 실행기는 설정을 읽지 않는다. Broker는 작업 기록이 **`leased`일 때만** 작업에서 나온 호출로 받고, 아니면 `origin-not-leased`로 거부한다(V01 "T07이 넘기는 것" 6의 "이미 쓴 작업 기록"). CLI 백그라운드 설정이 꺼져 Broker가 막은 호출(`cli-background-off` 등, 그리고 전송 거부)은 처리기가 `held`로 돌려주고 사유 코드를 남긴다. **다른 Provider로 넘어가지 않는다**(ARCHITECTURE 7절).
-7. **잠정: 보류는 저절로 풀리지 않는다.** `held` 작업은 다시 집히지 않는다. 설정을 켠 뒤나 사용자가 다시 시도할 때 `queued`로 되돌리는 길은 아직 없고, 필요해지는 작업(T10·T11 또는 설정 화면)이 정한다.
+5. **한 번에 하나(R4)와 임대 토큰.** 실행기 하나 안의 모든 집기와 처리가 한 줄로 이어진다(`runOnce`, `wake`, 주기 확인이 겹쳐도 동시에 두 작업이 돌지 않는다). 임대가 유효한 동안에는 다른 실행기가 그 작업을 집지 못한다. 임대가 끝나 다른 실행기가 다시 집으면 토큰이 오르므로, 이전 보유자는 Broker 호출도(`origin-not-leased`) 작업 닫기도(`not-leased`, 아무것도 쓰지 않음) 하지 못한다. 그래서 이전 보유자의 늦은 `held`가 새 보유자의 `done`을 덮어쓰지 못한다. 다만 이전 보유자의 호출이 토큰이 오르기 **전에** 이미 Broker를 지났다면 그 호출은 끝까지 간다(Broker는 요청마다 한 번 확인한다). Phase 1은 백엔드 하나를 전제한다.
+6. **백그라운드 판정은 Broker가 한다.** 실행기는 설정을 읽지 않는다. Broker는 작업 기록이 **`leased`이고 요청의 `lease`가 현재 토큰과 같을 때만** 작업에서 나온 호출로 받고, 아니면 `origin-not-leased`로 거부한다(V01 "T07이 넘기는 것" 6의 "이미 쓴 작업 기록"). `lease`가 없는 작업 요청은 `invalid-request`다. CLI 백그라운드 설정이 꺼져 Broker가 막은 호출(`cli-background-off` 등, 그리고 전송 거부)은 처리기가 `held`로 돌려주고 사유 코드를 남긴다. **다른 Provider로 넘어가지 않는다**(ARCHITECTURE 7절).
+7. **잠정: 보류는 저절로 풀리지 않는다.** `held` 작업은 다시 집히지 않는다. (종류, 원본, version)마다 한 번만 등록되므로 같은 version을 새로 등록해 풀 수도 없다. 푸는 길은 미해결 질문 7(담당 T05)에 있다.
 8. **잠정: 임대 10분, 주기 확인 30초**(`DEFAULT_LEASE_MS`, `DEFAULT_POLL_MS`). 임대는 Broker 한도(시도 3, 시간 제한 상한 120초, 대기 최대 30초)로 호출 하나가 걸릴 수 있는 시간보다 길게 잡았고, 갱신하지 않는다. 그래서 처리 중에 꺼진 뒤 다시 켜면 그 작업은 최대 10분 뒤에 이어진다. 계속 프로세스를 죽이는 작업의 재시도 횟수 제한은 없다.
 9. **T05: 구성 지점에 묶기.** 실행기는 아직 `backend/src/composition.ts`와 시작 함수에 묶이지 않았다(처리기가 하나도 없다). 첫 처리기를 넣는 T05가 구성 지점에서 실행기를 만들고 시작할 때 `start()`, 끝낼 때 `stop()`을 부른다. `stop()`은 돌고 있는 작업이 닫힐 때까지 기다린다.
 10. **T07: 새 version.** 새 version이 들어오면 그 version의 작업을 새로 등록할 뿐, 이전 version의 작업을 고치지 않는다. 이전 작업은 fence에 걸려 `superseded`로 닫힌다.
@@ -294,6 +294,7 @@ test double의 결과를 실제 Provider의 결과로 적지 않는다. R07(#37)
 **뒤 작업에서 정할 것**
 
 6. **항목의 별칭을 어디에 둘지(T05).** R7은 별칭이 "그 항목에 이미 기록된 이름에서만" 온다고 하지만, T02의 스키마는 항목마다 이름 하나만 둔다. 출처마다 다르게 부른 이름을 별칭으로 쓰려면 T05가 이름 목록을 저장할 곳(새 마이그레이션)을 정해야 한다. 정하기 전까지 연결 후보는 항목의 이름으로만 찾는다.
+7. **보류된 작업을 누가 언제 푸는가(T05).** T03의 `held` 작업은 다시 집히지 않고, 같은 version을 다시 등록할 수도 없다. 보류를 만드는 쪽(Broker가 막은 호출을 `held`로 옮기는 T05의 추출 처리기)이 푸는 길도 정한다. 잠정 제안: 막은 조건이 바뀔 때만 다시 판정한다. 곧 백그라운드 설정이나 동의·전송 규칙이 바뀌면 그 사유로 보류된 작업을 기존 행 그대로 `queued`로 되돌린다(새 행을 만들지 않으며 임대 토큰은 계속 오른다). 이는 I03의 결정 D13("보류는 막은 조건이 바뀔 때만 다시 판정")과 맞다.
 
 ## 변경 이력
 
@@ -313,3 +314,4 @@ test double의 결과를 실제 Provider의 결과로 적지 않는다. R07(#37)
 | 2026-11-21 | "T06이 넘기는 것" 추가: 규칙의 자리와 이름(`dependency_delay`, `target_date`, `completion_date`, `DEPENDS_ON`), 부르는 때와 쌍을 모으는 두 곳(잠정), 정해진 깊이 1 질의 넷(잠정), 엄격히 늦음과 "이름"을 "이른 경우"로 읽은 것, 날짜가 여럿일 때의 판정(잠정), 같으면 쓰지 않음, `dirty`는 T07·T08이 정함(잠정), 설명 글의 출처(T08), 화면이 쓸 것(T10) | 작업 분해(T06이 넘기는 것) | V02-T06 구현: T05가 쓸 이름과 T07·T08이 부를 방식을 규칙이 먼저 정해야 했음 |
 | 2026-11-21 | "T06이 넘기는 것" 고침: 2항의 Insight 행 쌍 출처가 필요한 경우를 "관계가 무효"에서 "관계 행이 지워짐"으로 바로잡고, 자기 의존을 건너뜀(잠정), 혼자 부른 호출의 되돌림, T07이 넘길 항목의 문장을 T05와 맞춤. 3항에 ID 목록을 JSON 매개변수 하나로 넘겨 개수 제한이 없음, 4항에 `2026-11-31` 같은 없는 날짜, 6항에 결과 목록에서 빠지는 쌍과 같음의 비교 기준. Insight 상태 그림에 활성→해소, 활성→갱신, 활성→삭제를 더하고 DIRTY를 거치는 길을 잠정으로 표시. T06 행의 "이름"을 "이른 날짜"로 | 작업 분해(T06 행, T06이 넘기는 것), Insight 한 건의 상태 | V02-T06 독립 검토 A F1·F3·F4·F5·F6, B F1·F2·F3·F5 |
 | 2026-11-21 | "T03이 넘기는 것" 추가: 작업 상태와 이유 코드(스키마 v6의 `jobs.reason`), 등록 API와 충돌 처리, 처리기의 모양과 실행기가 fence 트랜잭션 안에서만 결과를 씀, 집을 때 이미 낡은 작업은 부르지 않음, 한 번에 하나, Broker가 `leased` 작업 기록만 받음(`origin-not-leased`), 막힌 호출은 보류(다시 집지 않음, 잠정), 임대 10분·주기 30초(잠정), 구성 지점 연결은 T05, 새 version은 새 작업 | 작업 분해(T03이 넘기는 것) | V02-T03 구현 |
+| 2026-11-21 | T03 검토 반영: R5를 "그 version 이상인 tombstone이 없는지"로 고침, 스키마 v6에 임대 토큰(`jobs.lease_token`)을 더해 이전 임대 보유자는 Broker 호출(`origin`의 `lease`)과 작업 닫기를 모두 못 함(5·6항), 이유를 코드 모양으로 검사(1항), `write`가 던진 오류만 `write-error`이고 데이터베이스 오류는 작업을 `leased`로 남김(3항), 보류를 푸는 담당과 잠정 제안을 미해결 질문 7로(7항) | R5, T03이 넘기는 것 1·3·5·6·7, 미해결 질문 | V02-T03 독립 검토 A M1·S1~S3, B SF1~SF3 |

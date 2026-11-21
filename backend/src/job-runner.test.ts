@@ -297,3 +297,69 @@ describe("job runner: start and stop", () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("job runner: stop while a job runs (V02-T03 rework)", () => {
+  it("waits for the running job to close and claims nothing after it", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const jobs = [imported(), imported(), imported()];
+    const gate = deferred<JobResult>();
+    const handler = vi.fn<JobHandler>(() => gate.promise);
+    const r = runner(handler);
+    r.start();
+    await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+    void r.wake(); // e.g. an import finished while job 1 runs
+
+    let stopped = false;
+    const stopping = r.stop().then(() => (stopped = true));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(stopped).toBe(false);
+
+    gate.resolve({ status: "done", write: () => {} });
+    await stopping;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(jobs.map((j) => readJob(db, j.id)?.status)).toEqual(["done", "queued", "queued"]);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("job runner: failures that are not the result's (V02-T03 rework)", () => {
+  it("leaves the job leased when closing fails in the database, not as a write error", async () => {
+    const job = imported();
+    // locked once, at the first close only (another process held the file)
+    let busy = true;
+    const flaky: SqlDriver = {
+      ...db,
+      run: (sql, params) => {
+        if (busy && sql.startsWith("UPDATE jobs SET status = ?")) {
+          busy = false;
+          throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+        }
+        return db.run(sql, params);
+      },
+    };
+    const errors: unknown[] = [];
+    const write = vi.fn(marked(db, "busy"));
+    const r = runner(
+      async () => ({ status: "done", write }),
+      flaky,
+      (e) => errors.push(e),
+    );
+    await expect(r.runOnce()).rejects.toMatchObject({ code: "SQLITE_BUSY" });
+    expect(readJob(db, job.id)).toMatchObject({ status: "leased", reason: null });
+    expect(written(db, "busy")).toBe(false);
+
+    clock = new Date(T0.getTime() + LEASE);
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "done" });
+    expect(written(db, "busy")).toBe(true);
+  });
+
+  it("fails a job whose handler gives a reason that is not a code, storing a fixed code", async () => {
+    const job = imported();
+    const run = await runner(async () => ({
+      status: "held",
+      reason: "Provider said: SECRET-BODY-TEXT",
+    })).runOnce();
+    expect(run).toEqual({ jobId: job.id, status: "failed" });
+    expect(readJob(db, job.id)).toMatchObject({ status: "failed", reason: "invalid-reason" });
+  });
+});

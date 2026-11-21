@@ -354,9 +354,14 @@ const v5: Migration = (db) =>
   `);
 
 // Schema v6 (V02-T03): why a job was held or failed, as a code (never Provider
-// text), so the screen can show it (ARCHITECTURE section 7). Statuses: queued,
-// leased, done, superseded, held, failed (storage/src/jobs.ts).
-const v6: Migration = (db) => db.exec("ALTER TABLE jobs ADD COLUMN reason TEXT;");
+// text), so the screen can show it (ARCHITECTURE section 7), and the lease token,
+// raised on every claim, so only the current holder calls the Broker and closes
+// the job. Statuses: queued, leased, done, superseded, held, failed (jobs.ts).
+const v6: Migration = (db) =>
+  db.exec(`
+    ALTER TABLE jobs ADD COLUMN reason TEXT;
+    ALTER TABLE jobs ADD COLUMN lease_token INTEGER NOT NULL DEFAULT 0;
+  `);
 
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6];

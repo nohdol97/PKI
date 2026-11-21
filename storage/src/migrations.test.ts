@@ -525,7 +525,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
 });
 
 describe("schema v6 (V02-T03)", () => {
-  it("adds the reason a job was held or failed to a v5 database, keeping its jobs", () => {
+  it("adds the reason a job was held or failed and its lease token to a v5 database, keeping its jobs", () => {
     migrate(db, migrations.slice(0, 5));
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
     db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a')");
@@ -542,9 +542,10 @@ describe("schema v6 (V02-T03)", () => {
       "status",
       "lease_until",
       "reason",
+      "lease_token",
     ]);
-    expect(db.all("SELECT status, lease_until, reason FROM jobs")).toEqual([
-      { status: "leased", lease_until: "L", reason: null },
+    expect(db.all("SELECT status, lease_until, reason, lease_token FROM jobs")).toEqual([
+      { status: "leased", lease_until: "L", reason: null, lease_token: 0 },
     ]);
   });
 });
