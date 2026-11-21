@@ -10,6 +10,7 @@ import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { productAdapters, productEgress, productImporter } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
+import { IMPORT_ERROR_LIMIT } from "./jsonl-import.ts";
 import { IMPORT_BODY_LIMIT, startServer, type RunningServer } from "./server.ts";
 
 const TOKEN = "i".repeat(43);
@@ -54,8 +55,16 @@ describe("POST /api/import/jsonl", () => {
     expect(body).toEqual(res.body);
     expect(body.received).toBe(1);
     expect(body.created).toBe(1);
-    expect(body.errors).toHaveLength(400);
+    // the answer stays bounded: the first errors and their total (review B-S1)
+    expect(body.errorCount).toBe(400);
+    expect(body.errors).toHaveLength(IMPORT_ERROR_LIMIT);
     expect(body.errors[0]).toEqual({ line: 2, reason: "invalid-json" });
+  });
+
+  it("strips a leading UTF-8 BOM on this path too (review B-W2)", async () => {
+    const res = await post(bound, { text: `\uFEFF${MAIL}` });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ errors: [], errorCount: 0 });
   });
 
   it("refuses a body over the import limit", async () => {

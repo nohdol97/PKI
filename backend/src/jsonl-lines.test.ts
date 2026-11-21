@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { changeKindOf, parseJsonl } from "./jsonl-lines.ts";
+import { changeKindOf, parseJsonl, splitRounds } from "./jsonl-lines.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const fixture = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8");
@@ -14,6 +14,9 @@ const ALL = readdirSync(FIXTURES)
   .filter((f) => /^v02-.*\.jsonl$/.test(f))
   .map(fixture)
   .join("\n");
+
+const GOLDEN_DIR = resolve(import.meta.dirname, "../../eval/golden/sources");
+const GOLDEN = readdirSync(GOLDEN_DIR).filter((f) => f.endsWith(".jsonl"));
 
 const MAIL = JSON.parse(fixture("v02-mail.jsonl").trim()) as ImportRecord;
 const hashOf = (content: string) =>
@@ -67,7 +70,7 @@ describe("parseJsonl", () => {
     expect(errors).toEqual([{ line: 1, reason: "content-hash-mismatch" }]);
   });
 
-  it("keeps the newest revision of a source in a file and refuses an older one with other content", () => {
+  it("keeps every newer revision of a source as its own line, in line order (R2: one line, one version)", () => {
     const text = [
       line({ content: "v1" }),
       line({ version: 2, content: "v2" }),
@@ -77,11 +80,44 @@ describe("parseJsonl", () => {
     ].join("\n");
     const { lines, errors } = parseJsonl(text);
     expect(lines.map((l) => [l.line, l.record.version, l.record.connector_instance_id])).toEqual([
+      [1, 1, MAIL.connector_instance_id],
       [2, 2, MAIL.connector_instance_id],
       [5, 1, "conn-other"],
     ]);
     // line 3 repeats line 2 exactly: nothing new, nothing wrong
     expect(errors).toEqual([{ line: 4, reason: "revision-not-newer" }]);
+  });
+
+  it("strips a leading UTF-8 BOM (a file posted straight to the API)", () => {
+    const { lines, errors } = parseJsonl(`\uFEFF${line()}`);
+    expect(errors).toEqual([]);
+    expect(lines).toHaveLength(1);
+  });
+
+  it.each(GOLDEN)("drops no line of golden %s without a reason", (name) => {
+    const text = readFileSync(resolve(GOLDEN_DIR, name), "utf8");
+    const { lines, errors } = parseJsonl(text);
+    expect(errors).toEqual([]);
+    expect(lines.map((l) => l.line)).toEqual(
+      text.split("\n").flatMap((l, i) => (l.trim() ? [i + 1] : [])),
+    );
+  });
+});
+
+describe("splitRounds", () => {
+  it("puts each source's k-th line in round k, so a round names each source once", () => {
+    const text = [
+      line({ external_id: "a", content: "a1" }),
+      line({ external_id: "b", content: "b1" }),
+      line({ external_id: "a", version: 2, content: "a2" }),
+      line({ external_id: "a", version: 3, content: "a3" }),
+      line({ external_id: "b", version: 2, content: "b2" }),
+    ].join("\n");
+    expect(splitRounds(parseJsonl(text).lines).map((r) => r.map((l) => l.line))).toEqual([
+      [1, 2],
+      [3, 5],
+      [4],
+    ]);
   });
 });
 

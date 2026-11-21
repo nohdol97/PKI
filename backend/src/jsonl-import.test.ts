@@ -3,20 +3,28 @@
 // sequence and registers its extraction job in one transaction; importing the same
 // JSONL again changes no count; a greater revision is a new version beside the old;
 // a line the store refuses is reported by its number without aborting the rest.
-import type { ImportRecord } from "@pki/contracts";
+import type { ImportLineError, ImportRecord } from "@pki/contracts";
 import { readChangeSeq, writeTombstone, type SqlDriver } from "@pki/storage";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { CANONICAL_DB_FILE, openCanonicalDb, productImporter } from "./composition.ts";
 import { EXTRACT_JOB_KIND, type SyncOptions } from "./connectors.ts";
-import { JSONL_CONNECTOR_KIND } from "./jsonl-import.ts";
+import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
+import {
+  IMPORT_ERROR_LIMIT,
+  importJsonl as importJsonlWith,
+  JSONL_CONNECTOR_KIND,
+  MAX_IMPORT_INSTANCES,
+} from "./jsonl-import.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const fixture = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8");
+const GOLDEN_DIR = resolve(import.meta.dirname, "../../eval/golden/sources");
+const GOLDEN = readdirSync(GOLDEN_DIR).filter((f) => f.endsWith(".jsonl"));
 const PLAIN = ["v02-mail.jsonl", "v02-wiki.jsonl", "v02-messenger.jsonl"].map(fixture);
 
 let dir: string;
@@ -43,6 +51,12 @@ const counts = () => ({
   changeSeq: readChangeSeq(db),
 });
 
+/** A whole answer: every error is listed below the cap, so the count is their number. */
+const reply = (r: { received: number; created: number; errors: ImportLineError[] }) => ({
+  ...r,
+  errorCount: r.errors.length,
+});
+
 const MAIL = JSON.parse(PLAIN[0]?.trim() as string) as ImportRecord;
 const hashOf = (content: string) =>
   `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
@@ -57,7 +71,7 @@ describe("importJsonl", () => {
     let received = 0;
     for (const text of PLAIN) {
       const result = await importJsonl(db, text);
-      expect(result).toEqual({ received: 1, created: 1, errors: [] });
+      expect(result).toEqual(reply({ received: 1, created: 1, errors: [] }));
       received += result.received;
     }
     expect(received).toBe(3);
@@ -91,19 +105,21 @@ describe("importJsonl", () => {
 
   it("changes no count when the same JSONL is imported again (C3 reimport.idempotent)", async () => {
     const text = [...PLAIN, fixture("v02-malicious.jsonl")].join("\n");
-    expect(await importJsonl(db, text)).toEqual({ received: 6, created: 6, errors: [] });
+    expect(await importJsonl(db, text)).toEqual(reply({ received: 6, created: 6, errors: [] }));
     const once = counts();
-    expect(await importJsonl(db, text)).toEqual({ received: 6, created: 0, errors: [] });
+    expect(await importJsonl(db, text)).toEqual(reply({ received: 6, created: 0, errors: [] }));
     expect(counts()).toEqual(once);
   });
 
   it("adds a new product version for a greater revision with other content and keeps the old one", async () => {
     await importJsonl(db, line());
-    expect(await importJsonl(db, line({ version: 4, content: "수정된 합성 본문" }))).toEqual({
-      received: 1,
-      created: 1,
-      errors: [],
-    });
+    expect(await importJsonl(db, line({ version: 4, content: "수정된 합성 본문" }))).toEqual(
+      reply({
+        received: 1,
+        created: 1,
+        errors: [],
+      }),
+    );
     expect(
       db
         .all("SELECT version, revision, body FROM source_versions ORDER BY id")
@@ -128,11 +144,13 @@ describe("importJsonl", () => {
         line({ version: 2, content: "v2" }),
       ].join("\n"),
     );
-    expect(result).toEqual({
-      received: 2,
-      created: 1,
-      errors: [{ line: 2, reason: "revision-not-newer" }],
-    });
+    expect(result).toEqual(
+      reply({
+        received: 2,
+        created: 1,
+        errors: [{ line: 2, reason: "revision-not-newer" }],
+      }),
+    );
     expect(counts()).toEqual({
       ...before,
       sources: before.sources + 1,
@@ -147,14 +165,16 @@ describe("importJsonl", () => {
       db,
       ["{", line(), line({ content: "x", version: 0 })].join("\n"),
     );
-    expect(result).toEqual({
-      received: 1,
-      created: 1,
-      errors: [
-        { line: 1, reason: "invalid-json" },
-        { line: 3, reason: "invalid-record", field: "version" },
-      ],
-    });
+    expect(result).toEqual(
+      reply({
+        received: 1,
+        created: 1,
+        errors: [
+          { line: 1, reason: "invalid-json" },
+          { line: 3, reason: "invalid-record", field: "version" },
+        ],
+      }),
+    );
   });
 
   // Provisional (T04): a source the tombstone blocks is a line error, not a failed import.
@@ -168,11 +188,13 @@ describe("importJsonl", () => {
         "\n",
       ),
     );
-    expect(result).toEqual({
-      received: 2,
-      created: 1,
-      errors: [{ line: 1, reason: "tombstoned" }],
-    });
+    expect(result).toEqual(
+      reply({
+        received: 2,
+        created: 1,
+        errors: [{ line: 1, reason: "tombstoned" }],
+      }),
+    );
     expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 2 }]);
   });
 
@@ -186,14 +208,16 @@ describe("importJsonl", () => {
         line({ external_id: "u" }),
       ].join("\n"),
     );
-    expect(result).toEqual({
-      received: 3,
-      created: 1,
-      errors: [
-        { line: 1, reason: "change-kind-unsupported" },
-        { line: 2, reason: "change-kind-unsupported" },
-      ],
-    });
+    expect(result).toEqual(
+      reply({
+        received: 3,
+        created: 1,
+        errors: [
+          { line: 1, reason: "change-kind-unsupported" },
+          { line: 2, reason: "change-kind-unsupported" },
+        ],
+      }),
+    );
     expect(count("tombstones")).toBe(0);
   });
 
@@ -203,17 +227,77 @@ describe("importJsonl", () => {
       db,
       [line({ connector_instance_id: "site-mail" }), line({ external_id: "ok" })].join("\n"),
     );
-    expect(result).toEqual({
-      received: 1,
-      created: 1,
-      errors: [{ line: 1, reason: "instance-conflict" }],
-    });
+    expect(result).toEqual(
+      reply({
+        received: 1,
+        created: 1,
+        errors: [{ line: 1, reason: "instance-conflict" }],
+      }),
+    );
     expect(db.all("SELECT kind FROM connector_instances WHERE id = 'site-mail'")).toEqual([
       { kind: "site-mail" },
     ]);
   });
 
-  it("does not count a job registration conflict as success: the version is rolled back with it", async () => {
+  it("stores v1 and v2 of one source in one file as two versions with two jobs (R2, review A-M1)", async () => {
+    const result = await importJsonl(
+      db,
+      [line({ content: "v1" }), line({ version: 2, content: "v2" })].join("\n"),
+    );
+    expect(result).toEqual(reply({ received: 2, created: 2, errors: [] }));
+    expect(db.all("SELECT version, revision, body FROM source_versions ORDER BY id")).toEqual([
+      { version: 1, revision: 1, body: "v1" },
+      { version: 2, revision: 2, body: "v2" },
+    ]);
+    expect(db.all("SELECT fence_version FROM jobs ORDER BY id")).toEqual([
+      { fence_version: 1 },
+      { fence_version: 2 },
+    ]);
+  });
+
+  it.each(GOLDEN)("stores or reports every line of golden %s (no silent drop)", async (name) => {
+    const text = readFileSync(resolve(GOLDEN_DIR, name), "utf8");
+    const lines = text.split("\n").filter((l) => l.trim()).length;
+    const result = await importJsonl(db, text);
+    expect(result.created + result.errorCount).toBe(lines);
+    // the only lines not stored are deletes and revokes, until V02-T08
+    expect(new Set(result.errors.map((e) => e.reason))).toEqual(
+      new Set(["change-kind-unsupported"]),
+    );
+    expect([count("source_versions"), count("jobs")]).toEqual([result.created, result.created]);
+  });
+
+  it("refuses the lines of instances past the cap per file, registering none of them", async () => {
+    const text = Array.from({ length: MAX_IMPORT_INSTANCES + 2 }, (_, i) =>
+      line({ connector_instance_id: `conn-${i}`, external_id: `e-${i}` }),
+    ).join("\n");
+    const result = await importJsonl(db, text);
+    expect(result).toEqual(
+      reply({
+        received: MAX_IMPORT_INSTANCES,
+        created: MAX_IMPORT_INSTANCES,
+        errors: [
+          { line: MAX_IMPORT_INSTANCES + 1, reason: "too-many-instances" },
+          { line: MAX_IMPORT_INSTANCES + 2, reason: "too-many-instances" },
+        ],
+      }),
+    );
+    expect(count("connector_instances")).toBe(MAX_IMPORT_INSTANCES);
+  });
+
+  it("lists the first errors only, with the total count (review B-S1)", async () => {
+    const result = await importJsonl(
+      db,
+      Array(IMPORT_ERROR_LIMIT + 50)
+        .fill("{")
+        .join("\n"),
+    );
+    expect(result.errorCount).toBe(IMPORT_ERROR_LIMIT + 50);
+    expect(result.errors).toHaveLength(IMPORT_ERROR_LIMIT);
+    expect(result.errors.at(-1)).toEqual({ line: IMPORT_ERROR_LIMIT, reason: "invalid-json" });
+  });
+
+  it("reports a job registration conflict as that instance's failure, keeping the instance before it", async () => {
     db.run(`INSERT INTO connector_instances (id, kind) VALUES (?, ?)`, [
       MAIL.connector_instance_id,
       JSONL_CONNECTOR_KIND,
@@ -226,8 +310,40 @@ describe("importJsonl", () => {
       EXTRACT_JOB_KIND,
     ]);
     const before = counts();
-    await expect(importJsonl(db, line())).rejects.toThrow(/job/);
-    expect(counts()).toEqual(before);
+    const result = await importJsonl(
+      db,
+      [line({ connector_instance_id: "conn-first", external_id: "a" }), line()].join("\n"),
+    );
+    // the conflict is not a registration: the mail instance's page is rolled back
+    expect(result).toEqual(
+      reply({ received: 1, created: 1, errors: [{ line: 2, reason: "instance-failed" }] }),
+    );
+    expect(counts()).toEqual({
+      sources: before.sources + 1,
+      versions: before.versions + 1,
+      jobs: before.jobs + 1,
+      changeSeq: before.changeSeq + 1,
+    });
+  });
+
+  it("reports an instance bound to another kind during the import as instance-conflict (review B-S2)", async () => {
+    const racing = () => {
+      const connector = createJsonlConnector();
+      return {
+        ...connector,
+        initialize: async (config: unknown) => {
+          db.run("INSERT INTO connector_instances (id, kind) VALUES (?, 'test-fixtures')", [
+            MAIL.connector_instance_id,
+          ]);
+          return connector.initialize(config);
+        },
+      };
+    };
+    const result = await importJsonlWith(db, line(), { createConnector: racing });
+    expect(result).toEqual(
+      reply({ received: 0, created: 0, errors: [{ line: 1, reason: "instance-conflict" }] }),
+    );
+    expect(count("source_versions")).toBe(0);
   });
 
   it("wakes the runner once the page with new jobs is committed, and not for unchanged input", async () => {

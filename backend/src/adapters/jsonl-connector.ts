@@ -1,21 +1,23 @@
-// JSONL Connector (V02-R2): one Connector instance replays the lines of a JSONL
-// text (jsonl-lines.ts) that carry its `connector_instance_id`; the importer
-// (jsonl-import.ts) runs one per instance found in a file. The cursor is the count
-// of changes already delivered.
-import type { Change, Connector, SourceRecord } from "@pki/contracts";
-import { parseJsonl, toChange } from "../jsonl-lines.ts";
+// JSONL Connector (V02-R2): one Connector instance replays parsed JSONL lines
+// (jsonl-lines.ts) of one `connector_instance_id`. The importer (jsonl-import.ts)
+// parses a file once and hands each instance its own lines, one round at a time,
+// so a read names each source once. The cursor is the count of changes delivered.
+import type { Change, Connector, ImportRecord, SourceRecord } from "@pki/contracts";
+import { toChange } from "../jsonl-lines.ts";
 
 export interface JsonlConnectorConfig {
-  text: string;
-  connectorInstanceId: string;
+  /** Parsed lines of one instance, each source at most once. */
+  records: readonly ImportRecord[];
 }
 
 function readConfig(config: unknown): JsonlConnectorConfig {
-  const { text, connectorInstanceId } = (config ?? {}) as Partial<JsonlConnectorConfig>;
-  if (typeof text !== "string" || typeof connectorInstanceId !== "string") {
-    throw new Error("jsonl-import needs { text: string, connectorInstanceId: string }");
+  const records = (config as Partial<JsonlConnectorConfig> | null)?.records;
+  if (!Array.isArray(records)) throw new Error("jsonl-import needs { records: ImportRecord[] }");
+  const ids = new Set(records.map((r: ImportRecord) => r.external_id));
+  if (ids.size !== records.length) {
+    throw new Error("jsonl-import: a read names each source once; split the lines into rounds");
   }
-  return { text, connectorInstanceId };
+  return { records };
 }
 
 export function createJsonlConnector(): Connector {
@@ -29,13 +31,11 @@ export function createJsonlConnector(): Connector {
     manifest: {
       type: "jsonl-import",
       schemaVersion: 1,
-      capabilities: { incremental: true, deletes: true, accessScope: true, fullRescan: true },
+      // access_scope is not carried yet (V02 spec "T04가 넘기는 것" 6)
+      capabilities: { incremental: true, deletes: true, accessScope: false, fullRescan: true },
     },
     async initialize(config) {
-      const { text, connectorInstanceId } = readConfig(config);
-      changes = parseJsonl(text)
-        .lines.filter((l) => l.record.connector_instance_id === connectorInstanceId)
-        .map((l) => toChange(l.record));
+      changes = readConfig(config).records.map(toChange);
     },
     async healthCheck() {
       return changes ? { state: "ok" } : { state: "unavailable", reason: "not initialized" };

@@ -7,10 +7,25 @@ import { importSummaryText, lineErrorText } from "./import-text.ts";
 describe("importSummaryText", () => {
   it("counts what was read, what became a new version and what was refused", () => {
     expect(
-      importSummaryText({ received: 3, created: 2, errors: [{ line: 4, reason: "invalid-json" }] }),
+      importSummaryText({
+        received: 3,
+        created: 2,
+        errors: [{ line: 4, reason: "invalid-json" }],
+        errorCount: 1,
+      }),
     ).toBe("변경 3건을 읽어 새 version 2건을 저장했습니다. 거부된 줄 1건.");
-    expect(importSummaryText({ received: 3, created: 0, errors: [] })).toBe(
+    expect(importSummaryText({ received: 3, created: 0, errors: [], errorCount: 0 })).toBe(
       "변경 3건을 읽어 새 version 0건을 저장했습니다. 거부된 줄 0건.",
+    );
+  });
+
+  it("says when only the first refused lines are listed (review B-S1)", () => {
+    const errors = Array.from({ length: 100 }, (_, i) => ({
+      line: i + 1,
+      reason: "invalid-json" as const,
+    }));
+    expect(importSummaryText({ received: 0, created: 0, errors, errorCount: 4000 })).toBe(
+      "변경 0건을 읽어 새 version 0건을 저장했습니다. 거부된 줄 4000건(처음 100건만 보입니다).",
     );
   });
 });

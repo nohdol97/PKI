@@ -40,6 +40,8 @@ export interface SyncOptions {
    * Without it a refusal fails the page, of which nothing is stored.
    */
   onRefused?: (change: Change, reason: RefusalReason) => void;
+  /** Takes each stored or unchanged change once its page is committed. */
+  onStored?: (change: Change, outcome: "created" | "unchanged") => void;
   /** Woken after a page that registered jobs commits (V02-T05 binds the runner). */
   runner?: Pick<JobRunner, "wake">;
 }
@@ -117,22 +119,26 @@ export async function syncConnector(
       throw new Error(`${instanceId}: page reports more changes without progress`);
     }
     const refused: [Change, RefusalReason][] = [];
+    const stored: [Change, "created" | "unchanged"][] = [];
     const pageCreated = db.transaction(() => {
       let n = 0;
       for (const change of page.changes) {
-        const stored = storeChange(db, instanceId, change);
-        if (stored === "created") n++;
-        else if (typeof stored === "object") {
+        const outcome = storeChange(db, instanceId, change);
+        if (typeof outcome === "object") {
           if (!options.onRefused) {
-            throw new Error(`${instanceId}: ${change.kind} change refused (${stored.refused})`);
+            throw new Error(`${instanceId}: ${change.kind} change refused (${outcome.refused})`);
           }
-          refused.push([change, stored.refused]);
+          refused.push([change, outcome.refused]);
+        } else {
+          if (outcome === "created") n++;
+          stored.push([change, outcome]);
         }
       }
       writeCursor(db, instanceId, page.nextCursor);
       return n;
     });
     for (const [change, reason] of refused) options.onRefused?.(change, reason);
+    for (const [change, outcome] of stored) options.onStored?.(change, outcome);
     if (pageCreated > 0) void options.runner?.wake();
     created += pageCreated;
     received += page.changes.length;

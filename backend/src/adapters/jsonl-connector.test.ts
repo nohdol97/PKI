@@ -1,12 +1,13 @@
 // V02-R2: the JSONL Connector over the V02 synthetic fixtures passes the V01
-// Connector contract, emits only its own instance's lines, and never forwards the
-// fixtures' malicious marker.
+// Connector contract, never forwards the fixtures' malicious marker, and takes
+// lines already parsed and split by the importer (one read: each source once).
 import type { ImportRecord } from "@pki/contracts";
 import { connectorContract } from "@pki/testkit";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parseJsonl } from "../jsonl-lines.ts";
 import { createJsonlConnector } from "./jsonl-connector.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../../fixtures");
@@ -17,9 +18,14 @@ const ALL = readdirSync(FIXTURES)
   .map(fixture)
   .join("\n");
 
+/** The parsed records of one instance, as the importer hands them over. */
+const recordsOf = (text: string, instance: string) =>
+  parseJsonl(text)
+    .lines.map((l) => l.record)
+    .filter((r) => r.connector_instance_id === instance);
+
 connectorContract("jsonl-import", createJsonlConnector, {
-  text: ALL,
-  connectorInstanceId: "conn-v02-chat",
+  records: recordsOf(ALL, "conn-v02-chat"),
 });
 
 const MAIL = JSON.parse(fixture("v02-mail.jsonl").trim()) as ImportRecord;
@@ -36,9 +42,9 @@ const line = (patch: Partial<ImportRecord> & Record<string, unknown> = {}) => {
 };
 const signal = () => new AbortController().signal;
 
-async function changesOf(text: string, connectorInstanceId = MAIL.connector_instance_id) {
+async function changesOf(text: string, instance = MAIL.connector_instance_id) {
   const connector = createJsonlConnector();
-  await connector.initialize({ text, connectorInstanceId });
+  await connector.initialize({ records: recordsOf(text, instance) });
   return (await connector.getChanges(null, { limit: 1000, signal: signal() })).changes;
 }
 
@@ -67,9 +73,22 @@ describe("JSONL Connector", () => {
     });
   });
 
-  it("emits only the lines of its own instance", async () => {
-    expect(await changesOf(ALL, "conn-v02-wiki")).toHaveLength(2);
-    expect(await changesOf(ALL, "conn-nobody")).toEqual([]);
+  it("declares deletes but no access scope: it carries none (V02 review A2)", () => {
+    expect(createJsonlConnector().manifest.capabilities).toEqual({
+      incremental: true,
+      deletes: true,
+      accessScope: false,
+      fullRescan: true,
+    });
+  });
+
+  it("refuses a read naming one source twice: the importer splits those into rounds", async () => {
+    const twice = recordsOf(
+      [line(), line({ version: 2, content: "v2" })].join("\n"),
+      MAIL.connector_instance_id,
+    );
+    expect(twice).toHaveLength(2);
+    await expect(createJsonlConnector().initialize({ records: twice })).rejects.toThrow(/once/);
   });
 
   it("hands delete and revoke lines on as changes carrying the revision and the time", async () => {
@@ -86,14 +105,16 @@ describe("JSONL Connector", () => {
     ]);
     const connector = createJsonlConnector();
     await connector.initialize({
-      text: line({ external_id: "d", operation: "delete", content: "" }),
-      connectorInstanceId: MAIL.connector_instance_id,
+      records: recordsOf(
+        line({ external_id: "d", operation: "delete", content: "" }),
+        MAIL.connector_instance_id,
+      ),
     });
     expect(await connector.getDocument("d")).toBeNull();
   });
 
-  it("fails to initialize without text and an instance id", async () => {
+  it("fails to initialize without records", async () => {
     await expect(createJsonlConnector().initialize({ text: "" })).rejects.toThrow();
-    await expect(createJsonlConnector().initialize({ connectorInstanceId: "c" })).rejects.toThrow();
+    await expect(createJsonlConnector().initialize(null)).rejects.toThrow();
   });
 });

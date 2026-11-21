@@ -60,31 +60,53 @@ function checkLine(text: string, line: number): JsonlLine | ImportLineError {
 }
 
 /**
- * Every line checked alone; blank lines are skipped. Of the lines naming one
- * source (instance + external id), the last newer revision is kept: a later line
- * repeating a kept revision's content is dropped, one with an equal or lower
- * revision and other content is refused (the store's rule, sources.ts). The kept
- * lines come back in the order of their line numbers.
+ * Every line checked alone; blank lines and a leading UTF-8 BOM are skipped. Each
+ * line is one version (V02-R2), so every newer revision of a source is kept, in
+ * line order. A later line with an equal or lower revision than the source's last
+ * kept line is dropped when its content is the same (nothing new) and refused when
+ * it differs (the store's rule, sources.ts).
  */
 export function parseJsonl(text: string): { lines: JsonlLine[]; errors: ImportLineError[] } {
-  const kept = new Map<string, JsonlLine>();
+  const lines: JsonlLine[] = [];
+  const last = new Map<string, ImportRecord>();
   const errors: ImportLineError[] = [];
-  text.split("\n").forEach((raw, index) => {
+  const body = text.startsWith("\uFEFF") ? text.slice(1) : text;
+  body.split("\n").forEach((raw, index) => {
     const content = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
     if (!content.trim()) return;
     const checked = checkLine(content, index + 1);
     if (!("record" in checked)) return void errors.push(checked);
     const { record } = checked;
-    const key = JSON.stringify([record.connector_instance_id, record.external_id]);
-    const previous = kept.get(key)?.record;
+    const key = sourceKey(record);
+    const previous = last.get(key);
     if (previous && record.version <= previous.version) {
       const same = previous.title === record.title && previous.content === record.content;
       if (!same) errors.push({ line: checked.line, reason: "revision-not-newer" });
       return;
     }
-    kept.set(key, checked);
+    last.set(key, record);
+    lines.push(checked);
   });
-  return { lines: [...kept.values()].sort((a, b) => a.line - b.line), errors };
+  return { lines, errors };
+}
+
+const sourceKey = (r: ImportRecord) => JSON.stringify([r.connector_instance_id, r.external_id]);
+
+/**
+ * Splits lines into rounds: round k holds the k-th line of each source, so one
+ * Connector read names each source once (the Connector contract) while a source's
+ * lines still become versions in line order, one round after another.
+ */
+export function splitRounds(lines: readonly JsonlLine[]): JsonlLine[][] {
+  const rounds: JsonlLine[][] = [];
+  const seen = new Map<string, number>();
+  for (const line of lines) {
+    const key = sourceKey(line.record);
+    const k = seen.get(key) ?? 0;
+    seen.set(key, k + 1);
+    (rounds[k] ??= []).push(line);
+  }
+  return rounds;
 }
 
 /** The Connector change a line stands for; only the fields of SourceRecord are carried. */
