@@ -44,7 +44,7 @@
 
 ## 배포처 설정 체크리스트
 
-항목마다 무엇을 하는지, 어떤 종류의 값이 필요한지, 끝났다는 것을 무엇으로 확인하는지 적었다. 번호(`S01` 등)는 구현 spec의 비목표 항목과 일대일로 대응한다([V01](specs/2026-11-21-V01-vertical-skeleton.md) S01~S13, [V02](specs/2026-11-21-V02-vertical-slice.md) S14~S15).
+항목마다 무엇을 하는지, 어떤 종류의 값이 필요한지, 끝났다는 것을 무엇으로 확인하는지 적었다. 번호(`S01` 등)는 구현 spec의 비목표 항목과 일대일로 대응한다([V01](specs/2026-11-21-V01-vertical-skeleton.md) S01~S13, [V02](specs/2026-11-21-V02-vertical-slice.md) S14~S15, [I02-A](specs/2026-11-21-I02-document-normalization.md) S16~S17).
 
 ### 수집
 
@@ -75,6 +75,11 @@
 
 - [ ] **S14 수직 흐름을 설치본과 실제 Provider로 실행.** V02의 흐름(합성 출처 3개 → 일정 위험 Insight → 근거 화면)을 Windows 설치본에서 실제 Provider로 실행한다. 가져오기 뒤의 추출은 백그라운드 실행이므로 Provider는 둘 중 하나여야 한다: API 키 Provider(S05), 또는 목록에 등록되어 있고(S07) 백그라운드 설정을 켠 CLI. 필요한 것: S10이 끝난 환경. 확인: V02의 배포처 검증 실행기가 통과하고, 결과 기록에 Provider 종류가 "실제"로, 그리고 근거 인용문 대조에서 버려진 수가 적힌다(V02-C4, A21).
 - [ ] **S15 실제 수집 데이터에서의 품질 확인.** 실제 수집기로 가져온 자료에서 추출과 Insight가 쓸 만한지 배포처 안에서 확인한다. 필요한 것: S01~S04와 S11이 끝난 환경. 확인: 결과는 배포처 안에만 남긴다. 공용 저장소에는 범용 문제만 합성 재현 형태로 알린다([ownership.md 5절](ownership.md)).
+
+### 문서 가져오기
+
+- [ ] **S16 문서 파서 의존성의 npm 미러 설치 확인.** 문서 정규화 패키지(`@pki/document-normalize`)의 의존성(unpdf, mammoth, read-excel-file, parse5, mdast-util-from-markdown, csv-parse, yauzl, fflate, @xmldom/xmldom, iconv-lite와 그 전이 의존성)을 배포처의 npm 미러에서 설치한다. 필요한 것: 미러 주소와 그 미러가 가진 패키지의 범위(위 패키지가 전부 있는지), 설치를 막는 정책(설치 스크립트 차단 등). 확인: 저장소의 `pnpm-lock.yaml`로 `pnpm install --frozen-lockfile`이 미러에서 끝까지 성공하고, 빠진 패키지가 있으면 그 이름을 기록한다. 이 의존성은 모두 설치 스크립트와 네이티브 모듈이 없는 npm 레지스트리 패키지이며(I02-A spec R21), 미러가 막는 패키지가 있으면 [ADR 0015](adr/0015-document-parsing-stack.md)의 해당 행을 고친다.
+- [ ] **S17 실제 업무 문서로 형식별 정규화 결과 확인.** 배포처의 실제 문서 폴더(PDF, Word, Excel, HTML, Markdown, TXT, CSV, JSON을 섞어서)에 조사 실행기 `pnpm --filter @pki/document-normalize survey <폴더>`를 실행한다. 이 실행기는 형식별 성공 수, 오류 종류별 수, 한계 코드별 수, 인코딩별 수만 JSON으로 출력하며 파일 이름과 글은 출력하지 않는다. 이 저장소 안의 폴더로는 실행되지 않는다(`배포처 후속` 알림). 필요한 것: 실제 문서 폴더(문서 보안(DRM)으로 감싼 파일이 일부 든 것), 설치본(Electron)에서의 실행 방법. 확인: ① 오류 종류별 수가 설명되는 범위인지 본다. 특히 DRM으로 감싼 파일이 `corrupt`·`format-mismatch`로 알려지는지(깨진 글이 성공으로 나오지 않는지) 확인한다. ② EUC-KR(CP949) 문서가 `euc-kr` 인코딩으로 풀리는지, 이 확인을 **설치본 안의 Node(Electron 45.4.1의 Node 24.22.3)에서도** 한다. EUC-KR은 `iconv-lite`로 풀기 때문에 Electron의 ICU 구성에 기대지 않지만 설치본에서 실제로 보기 전에는 확인된 것이 아니다. ③ 한계 코드 수가 한도 기본값(`DEFAULT_LIMITS`)이 실제 문서에서 너무 빡빡한지 보는 근거가 된다. 결과는 배포처 안에만 남기고 공용 저장소에는 범용 문제만 합성 재현 형태로 알린다([ownership.md 5절](ownership.md)). 폴더 감시와 가져오기 화면은 I02-B(#19)가 맡으며 이 항목의 범위가 아니다.
 
 ## 3. 결과를 어디에 남기는가
 

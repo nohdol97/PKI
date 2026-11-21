@@ -1,0 +1,90 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 3 /Kids [7 0 R 9 0 R 11 0 R] >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /Fixture /Encoding /Identity-H /DescendantFonts [4 0 R] /ToUnicode 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Fixture /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 5 0 R /DW 1000 /CIDToGIDMap /Identity >>
+endobj
+5 0 obj
+<< /Type /FontDescriptor /FontName /Fixture /Flags 4 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 900 /Descent -200 /CapHeight 700 /StemV 80 >>
+endobj
+6 0 obj
+<< /Length 419 >>
+stream
+/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+/CMapName /Adobe-Identity-UCS def /CMapType 2 def
+1 begincodespacerange <0000> <FFFF> endcodespacerange
+12 beginbfchar
+<0001> <0066>
+<0002> <0069>
+<0003> <0072>
+<0004> <0073>
+<0005> <0074>
+<0006> <0020>
+<0007> <0070>
+<0008> <0061>
+<0009> <0067>
+<000a> <0065>
+<000b> <0068>
+<000c> <0064>
+endbfchar
+endcmap CMapName currentdict /CMap defineresource pop end end
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R /Annots [13 0 R] >>
+endobj
+8 0 obj
+<< /Length 71 >>
+stream
+BT /F1 12 Tf 72 720 Td <000100020003000400050006000700080009000a> Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 10 0 R >>
+endobj
+10 0 obj
+<< /Length 16 >>
+stream
+0 0 100 100 re f
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 12 0 R >>
+endobj
+12 0 obj
+<< /Length 71 >>
+stream
+BT /F1 12 Tf 72 720 Td <0005000b00020003000c0006000700080009000a> Tj ET
+endstream
+endobj
+13 0 obj
+<< /Type /Annot /Subtype /Link /Rect [72 700 200 720] /Border [0 0 0] /A << /S /URI /URI (https://example.invalid/link) >> >>
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000128 00000 n 
+0000000260 00000 n 
+0000000463 00000 n 
+0000000626 00000 n 
+0000001096 00000 n 
+0000001239 00000 n 
+0000001360 00000 n 
+0000001487 00000 n 
+0000001554 00000 n 
+0000001682 00000 n 
+0000001804 00000 n 
+trailer
+<< /Size 14 /Root 1 0 R >>
+startxref
+1946
+%%EOF
