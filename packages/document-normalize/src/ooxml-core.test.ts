@@ -90,9 +90,10 @@ describe("scanXml (B1)", () => {
     return out;
   };
 
-  it("skips comments, CDATA, processing instructions and keeps `>` inside quoted values", () => {
+  it("skips comments and processing instructions, keeps `>` inside quoted values, returns CDATA as text", () => {
     expect(tokens('<?xml v?><!-- <a> --><x:a k="1>2"><![CDATA[<b>]]>t<c/></x:a>')).toEqual([
       "a",
+      "#<b>",
       "#t",
       "c",
       "/a",
@@ -109,5 +110,49 @@ describe("scanXml (B1)", () => {
     expect(attributeValue(` w:type = 'x' state="hidden"`, "type")).toBe("x");
     expect(attributeValue(` a b=c d="1"`, "d")).toBe("1");
     expect(attributeValue(` a="1`, "a")).toBeUndefined();
+  });
+
+  it("decodes the five predefined entities and numeric references only (D1)", () => {
+    expect(attributeValue(` state="&#104;idden"`, "state")).toBe("hidden");
+    expect(attributeValue(` state="&#x68;&#X69;dden"`, "state")).toBe("hidden");
+    expect(attributeValue(` v="&lt;&gt;&amp;&quot;&apos;"`, "v")).toBe(`<>&"'`);
+    expect(attributeValue(` v="&nbsp;&#xZZ;&#1114112;&amp;lt;"`, "v")).toBe(
+      "&nbsp;&#xZZ;&#1114112;&lt;",
+    );
+  });
+
+  it("a processing instruction ends at `?>`, not at the first `>` (D1)", () => {
+    expect(tokens("<?pi a > <!-- ?><b/><!-- c --><d/>")).toEqual(["b", "d"]);
+  });
+
+  it("a DOCTYPE ends at its own `>`: quoted literals and the internal subset may hold `>` (D1)", () => {
+    expect(tokens('<!DOCTYPE w SYSTEM "a>b<!--"><b/><!-- c --><d/>')).toEqual(["b", "d"]);
+    expect(tokens("<!DOCTYPE w SYSTEM 'a>b'><b/>")).toEqual(["b"]);
+    expect(tokens('<!DOCTYPE w [<!ENTITY e "x>]"><!-- it\'s ]> --><?p ]> ?>]><b/>')).toEqual(["b"]);
+  });
+
+  it("CDATA content is text, an empty or unclosed CDATA is not (D1)", () => {
+    expect(tokens("<t><![CDATA[HDR]]></t>")).toEqual(["t", "#HDR", "/t"]);
+    expect(tokens("<t><![CDATA[]]></t>")).toEqual(["t", "/t"]);
+    expect(tokens("<t><![CDATA[HDR")).toEqual(["t"]);
+  });
+
+  it("stays linear on floods of `<?`, long DOCTYPE literals and unclosed CDATA (D1)", () => {
+    const mb = 1_000_000;
+    const floods = [
+      "<?".repeat(mb / 2),
+      `<!DOCTYPE a "${"x".repeat(mb)}`,
+      `<!DOCTYPE a [${"<!ENTITY e 'x".repeat(mb / 12)}`,
+      "<![CDATA[".repeat(mb / 9),
+      `<a x='${"&#104;".repeat(mb / 6)}'/>`,
+    ];
+    for (const xml of floods) {
+      const started = Date.now();
+      scanXml(xml, (t) => {
+        if (t.kind === "open") attributeValue(t.attributes, "x");
+        return false;
+      });
+      expect(Date.now() - started).toBeLessThan(1000);
+    }
   });
 });

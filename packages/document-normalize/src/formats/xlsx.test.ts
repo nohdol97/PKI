@@ -328,4 +328,33 @@ describe("B1 limitation scans stay linear on hostile XML", () => {
       "xlsx.hidden-sheet",
     );
   });
+
+  const flagged = async (mutate: (xml: string) => string) => {
+    const result = await xlsxModule.parse(withWorkbook(mutate), resolveLimits());
+    return result.ok && result.value.limitations.map((l) => l.code).includes("xlsx.hidden-sheet");
+  };
+
+  it("D1: a processing instruction holding `>` and `<!--` does not hide the sheets", async () => {
+    expect(
+      await flagged((xml) =>
+        xml
+          .replace("<sheets>", "<?pi a > <!-- ?><sheets>")
+          .replace("</workbook>", "<!-- c --></workbook>"),
+      ),
+    ).toBe(true);
+  });
+
+  it("D1: a DOCTYPE with `>` inside a quoted literal does not hide the sheets", async () => {
+    expect(
+      await flagged((xml) =>
+        xml
+          .replace(/(<\?xml[^>]*\?>)/, '$1<!DOCTYPE workbook SYSTEM "a>b<!--">')
+          .replace("</workbook>", "<!-- c --></workbook>"),
+      ),
+    ).toBe(true);
+  });
+
+  it("D1: a state written with a character reference is still hidden", async () => {
+    expect(await flagged((xml) => xml.replace('state="hidden"', 'state="&#104;idden"'))).toBe(true);
+  });
 });

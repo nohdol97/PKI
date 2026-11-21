@@ -44,8 +44,51 @@ export type XmlToken =
 const localName = (qualified: string) => qualified.slice(qualified.indexOf(":") + 1);
 
 /**
+ * Index just past the `>` that ends a `<!...` declaration (a DOCTYPE): `>` inside a quoted
+ * literal or the `[...]` internal subset does not end it, and comments and processing
+ * instructions inside the subset are skipped whole. One pass; unterminated ends at `end`.
+ */
+function declarationEnd(xml: string, from: number): number {
+  const end = xml.length;
+  let quote = "";
+  let subset = false;
+  for (let i = from; i < end; i++) {
+    const c = xml[i];
+    if (quote) {
+      if (c === quote) quote = "";
+    } else if (c === '"' || c === "'") quote = c;
+    else if (subset && c === "<" && xml.startsWith("<!--", i)) {
+      const close = xml.indexOf("-->", i + 4);
+      if (close === -1) return end;
+      i = close + 2;
+    } else if (subset && c === "<" && xml.startsWith("<?", i)) {
+      const close = xml.indexOf("?>", i + 2);
+      if (close === -1) return end;
+      i = close + 1;
+    } else if (c === "[") subset = true;
+    else if (c === "]") subset = false;
+    else if (c === ">" && !subset) return i + 1;
+  }
+  return end;
+}
+
+const PREDEFINED: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/** Decodes the five predefined entities and numeric character references; others stay as written. */
+function decodeReferences(value: string): string {
+  return value.replace(
+    /&(?:#[xX]([0-9a-fA-F]{1,8})|#([0-9]{1,8})|(amp|lt|gt|quot|apos));/g,
+    (whole, hex, dec, name) => {
+      if (name) return PREDEFINED[name] as string;
+      const code = hex ? Number.parseInt(hex, 16) : Number.parseInt(dec, 10);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    },
+  );
+}
+
+/**
  * Single-pass tag scanner for the limitation checks: every character is visited once,
- * comments, CDATA, processing instructions and declarations are skipped as a whole,
+ * comments, processing instructions and declarations are skipped as a whole, CDATA comes back as text,
  * and `>` inside a quoted attribute value does not end a tag. Element names come back
  * without their prefix. Stops when `visit` returns `true`. No backtracking, so the
  * time is linear in the part size whatever an attacker writes into it.
@@ -63,11 +106,14 @@ export function scanXml(xml: string, visit: (token: XmlToken) => boolean): void 
       next = xml.indexOf("-->", lt + 4);
       next = next === -1 ? end : next + 3;
     } else if (xml.startsWith("<![CDATA[", lt)) {
-      next = xml.indexOf("]]>", lt + 9);
-      next = next === -1 ? end : next + 3;
-    } else if (xml.startsWith("<?", lt) || xml.startsWith("<!", lt)) {
-      next = xml.indexOf(">", lt + 2);
-      next = next === -1 ? end : next + 1;
+      const close = xml.indexOf("]]>", lt + 9);
+      next = close === -1 ? end : close + 3;
+      if (close > lt + 9 && visit({ kind: "text", value: xml.slice(lt + 9, close) })) return;
+    } else if (xml.startsWith("<?", lt)) {
+      next = xml.indexOf("?>", lt + 2);
+      next = next === -1 ? end : next + 2;
+    } else if (xml.startsWith("<!", lt)) {
+      next = declarationEnd(xml, lt + 2);
     } else {
       let quote = "";
       let i = lt + 1;
@@ -114,7 +160,7 @@ export function attributeValue(attributes: string, wanted: string): string | und
     if (quote !== '"' && quote !== "'") continue;
     const close = attributes.indexOf(quote, i + 1);
     if (close === -1) return undefined;
-    if (localName(name) === wanted) return attributes.slice(i + 1, close);
+    if (localName(name) === wanted) return decodeReferences(attributes.slice(i + 1, close));
     i = close + 1;
   }
   return undefined;

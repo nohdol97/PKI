@@ -310,4 +310,26 @@ describe("B1 limitation scans stay linear on hostile XML", () => {
       "docx.headers-footers-omitted",
     );
   });
+
+  it("D1: header text written as CDATA still reports the omitted header", async () => {
+    const bytes = hostile(/^word\/header\d*\.xml$/, (xml) =>
+      xml.replace(/(<w:t[^>]*>)h(<\/w:t>)/, "$1<![CDATA[HDR]]>$2"),
+    );
+    const result = await docxModule.parse(bytes, resolveLimits());
+    expect(result.ok && result.value.limitations.map((l) => l.code)).toContain(
+      "docx.headers-footers-omitted",
+    );
+  });
+
+  it("D1: a notes part opening with a processing instruction holding `>` still reports notes", async () => {
+    const bytes = hostile(/^word\/footnotes\.xml$/, (xml) =>
+      xml
+        .replace(/(<w:footnotes[^>]*>)/, "$1<?pi a > <!-- ?>")
+        .replace("</w:footnotes>", "<!-- c --></w:footnotes>"),
+    );
+    const result = await docxModule.parse(bytes, resolveLimits());
+    expect(result.ok && result.value.limitations.map((l) => l.code)).toContain(
+      "docx.notes-omitted",
+    );
+  });
 });
