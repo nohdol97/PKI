@@ -2,7 +2,7 @@
 
 이 디렉터리의 문서를 한곳에 모은 목록이다. 제품 코드는 아직 없고, 여기 있는 것은 설계·조사·결정·구현 기준이다. 처음 읽는다면 위에서 아래 순서를 권한다.
 
-**읽기 전에**: 이 문서들은 아무것도 설치하거나 실행하지 않고 썼다. "잠정"이라고 적힌 결정은 배포처에서 실행해 확인하기 전의 것이며, 그 확인은 R07(이슈 #37)에서 한다. 낯선 말은 [ARCHITECTURE 0절](ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다.
+**읽기 전에**: 이 문서들은 아무것도 설치하거나 실행하지 않고 썼다. "잠정"이라고 적힌 결정은 배포처에서 실행해 확인하기 전의 것이며, 그 확인은 R07(이슈 #37)에서 한다. spec의 "확정"은 구현할 기준이 고정되었다는 뜻이지 그 기준이 충족되었다는 뜻이 아니다. 낯선 말은 [ARCHITECTURE 0절](ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다.
 
 ## 구조
 
@@ -18,8 +18,9 @@
 | [ownership.md](ownership.md) | 공용 저장소와 배포처 포크가 각각 무엇을 갖는가 | 확정(ADR 0012) |
 | [site-setup.md](site-setup.md) | 배포처가 채울 설정의 형태와 체크리스트 | 잠정(설정 키 이름은 V01에서 확정) |
 | [specs/2026-11-21-R01-oss-evaluation.md](specs/2026-11-21-R01-oss-evaluation.md) | OSS 평가 작업(R01)의 요구사항과 완료 기준 | 확정 |
-| [specs/2026-11-21-V01-vertical-skeleton.md](specs/2026-11-21-V01-vertical-skeleton.md) | Phase 1 뼈대(V01)의 요구사항, 완료 기준, 테스트, 작업 분해 | 초안 |
-| [specs/2026-11-21-V02-vertical-slice.md](specs/2026-11-21-V02-vertical-slice.md) | Phase 1 수직 흐름(V02)의 요구사항, 완료 기준, 테스트, 작업 분해 | 초안 |
+| [specs/2026-11-21-R06-provisional-architecture.md](specs/2026-11-21-R06-provisional-architecture.md) | 잠정 아키텍처 작업(R06)의 완료 기준과, 기준마다 그것을 충족하는 문서 | 초안 |
+| [specs/2026-11-21-V01-vertical-skeleton.md](specs/2026-11-21-V01-vertical-skeleton.md) | Phase 1 뼈대(V01)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
+| [specs/2026-11-21-V02-vertical-slice.md](specs/2026-11-21-V02-vertical-slice.md) | Phase 1 수직 흐름(V02)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
 
 ## 동작 방식
 

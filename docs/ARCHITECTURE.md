@@ -17,6 +17,7 @@
 | Provider | 생성형 LLM을 호출하는 통로. Claude Code CLI, Codex CLI, API 키로 쓰는 HTTP 엔드포인트가 각각 하나의 Provider다 |
 | Broker | 모든 Provider 호출이 반드시 지나는 관문. 전송 허용 여부, 시간 제한, 예산, 이력 기록을 한곳에서 처리한다 |
 | 외부 전송(egress) | 데이터가 사용자 PC 밖으로 나가는 일. CLI가 로컬에서 실행되어도 추론 요청은 외부 서버로 간다 |
+| 배포 빌드 / 개발 모드 | 배포 빌드는 설치 파일로 묶어 사용자에게 주는 실행본. 개발 모드는 개발자가 소스에서 직접 띄운 실행. 어느 쪽인지는 **빌드할 때 정해지며** 실행 중에 설정이나 환경 변수로 바꿀 수 없다 |
 | loopback | 자기 PC 안에서만 닿는 주소(127.0.0.1). 다른 기기에서는 접속할 수 없다 |
 | 근거(Evidence) | 지식이 나온 자리. 원본의 어느 version, 몇 번째 글자부터 몇 번째 글자까지(span)인지 가리킨다 |
 | version fence | 작업이 시작할 때 본 원본 version 번호를, 결과를 쓸 때 다시 대조하는 검사. 그 사이 원본이 바뀌었으면 결과를 버린다 |
@@ -42,14 +43,11 @@
 
 ```mermaid
 flowchart TB
-  subgraph CLIENT["화면 쪽"]
-    UI["Web UI<br/>React + TypeScript + Vite"]
-    SHELL["Electron 쉘<br/>실행·종료·트레이·자격 증명 중개"]
-  end
+  UI["Web UI<br/>React + TypeScript + Vite"]
+  SHELL["Electron 쉘<br/>실행·종료·트레이·자격 증명 중개"]
   subgraph BACKEND["Local Backend · Node.js 프로세스 하나"]
     API["API 서버<br/>loopback + 세션 토큰"]
-    JOBS["작업 큐와 실행기"]
-    PIPE["지식 파이프라인<br/>추출 조율·결정론 규칙·Insight"]
+    PIPE["작업 실행기와 지식 파이프라인<br/>추출 조율·결정론 규칙·Insight"]
     BROKER["Provider Broker<br/>전송 정책·예산·이력"]
   end
   subgraph ADAPTERS["어댑터 경계 · 구현을 바꿀 수 있는 곳"]
@@ -57,21 +55,17 @@ flowchart TB
     PROV["LLM Provider"]
     EMB["Embedding"]
     ENG["KnowledgeEngine<br/>Phase 1은 null 구현"]
-    VEC["VectorIndex"]
+    VEC["VectorIndex<br/>Phase 1은 실제 구현 없음"]
   end
-  subgraph STORES["저장소"]
-    DB[("정본 SQLite")]
-    VDB[("벡터 색인 · 투영")]
-    CRED[("OS 자격 증명 저장소")]
-  end
+  DB[("정본 SQLite")]
+  CRED[("OS 자격 증명 저장소")]
   EXT["외부 LLM 서비스"]
   UI -->|"HTTP · 브라우저와 Electron이 같은 계약"| API
   SHELL -->|"프로세스 시작·종료"| API
   SHELL --> CRED
   API --> CONN
   API --> DB
-  API --> JOBS
-  JOBS --> PIPE
+  API --> PIPE
   PIPE --> DB
   PIPE --> BROKER
   PIPE --> ENG
@@ -79,7 +73,6 @@ flowchart TB
   PIPE --> VEC
   BROKER --> PROV
   PROV -->|"승인된 데이터만"| EXT
-  VEC --> VDB
 ```
 
 읽는 법: 화면은 백엔드의 HTTP API만 안다. Electron 쉘은 화면을 띄우고 백엔드 프로세스를 켜고 끄는 일, 그리고 OS 기능(자격 증명 저장소, 트레이, 알림) 중개만 한다. 지식 처리 로직은 전부 백엔드에 있으므로 브라우저 개발 환경에서도 똑같이 돈다(원 설계 2절 "Web First, Desktop Ready").
@@ -114,15 +107,18 @@ flowchart TB
 - 쉘은 single instance lock(앱을 두 번 켜도 하나만 실행), 정상 종료 시 백엔드 종료 대기, 백엔드가 죽었을 때 재시작을 맡는다.
 - 사이드카(Python 또는 Go 엔진)는 Phase 1에 없다. 언어 선택은 미결이다([ADR 0011](adr/0011-sidecar-language.md)).
 
-### 3.1 CLI Provider의 실행 구분
+### 3.1 CLI Provider를 실행해도 되는 경우
 
-| 구분 | 뜻 | 격리 검증 전 |
+"검증된 조합 목록"은 격리 검증(R02)을 통과한 CLI 이름, 버전 범위, 인자 프로필을 적은 설정이다. 공용 저장소에서는 비어 있고 배포처가 R02를 실행한 뒤 채운다.
+
+| 실행본 | CLI 버전과 프로필이 목록에 **있다** | 목록에 **없다** |
 |---|---|---|
-| test double | 가짜 Provider, 가짜 CLI | 항상 허용 |
-| 대화형 | 사용자가 화면에서 직접 누른 한 번의 호출 | 허용. 단 최소 권한 인자 배열을 항상 쓰고 "격리 미검증" 표시와 사용자 확인을 거친다 |
-| 백그라운드 자동 | 스케줄·작업 큐가 사용자 없이 하는 호출 | **차단**(기본 OFF). 검증된 CLI 버전·설정 조합이 목록에 있고 사용자가 켰을 때만 실행 |
+| **배포 빌드** | 사용자가 직접 누른 호출은 실행. 백그라운드 자동 호출은 백그라운드 설정까지 켜져 있을 때만 실행(기본 끔) | **전부 차단.** 사용자가 직접 누른 호출도, 백그라운드 호출도 실행하지 않는다 |
+| **개발 모드** | 배포 빌드와 같다 | **합성 데이터에 한해** 사용자가 직접 시작한 호출만 실행. 최소 권한 인자 배열을 쓰고 "격리 미검증"을 표시하며 명시적 확인을 받는다. 그 밖(합성이 아닌 데이터, 백그라운드 호출)은 차단 |
 
-"검증된 조합 목록"은 제품에 든 데이터 파일이다. 공용 저장소에서는 비어 있고, 배포처가 R02를 실행한 뒤 채운다. API 키 Provider는 CLI가 아니라 HTTP 호출이므로 이 격리 검증 대상이 아니지만 전송 정책과 동의는 똑같이 적용된다([ADR 0005](adr/0005-llm-providers.md)).
+- test double(가짜 Provider, 가짜 CLI)은 언제나 쓸 수 있다.
+- "합성 데이터"는 테스트 Connector와 `fixtures/` 가져오기만 붙일 수 있는 데이터 등급이다. 사용자가 고르는 값이 아니다.
+- API 키 Provider는 CLI가 아니라 HTTP 호출이므로 이 표의 대상이 아니다. 전송 정책과 동의는 똑같이 적용된다([ADR 0005](adr/0005-llm-providers.md)).
 
 ### 3.2 제품이 직접 하는 일과 엔진의 일 — 선 긋기
 
@@ -155,7 +151,7 @@ flowchart TB
 | Provider 호출 이력(본문 없음) | 정본 SQLite | **정본**(감사용) | 복구 불가 |
 | tombstone | 정본 SQLite | **정본** | 삭제된 데이터가 되살아날 수 있음 |
 | 키워드 검색 색인 | 정본 SQLite 파일 안 | 투영. 정본과 같은 트랜잭션으로 갱신 | 정본에서 재구축 |
-| 벡터 색인 | 별도 파일 | 투영 | 지우고 정본 + embedding으로 재구축 |
+| 벡터 색인 | 별도 파일. **Phase 1에는 실제 구현이 없다** | 투영 | 지우고 정본 + embedding으로 재구축 |
 | 지식 엔진 내부 저장소 | 엔진이 쓰는 디렉터리 | 투영. Phase 1에는 없음 | 정본에서 재구축 |
 | 그래프 저장소 | — | **Phase 1에 없음.** 관계는 정본의 행이다 | — |
 | Wiki 페이지 | Phase 4(K01)에서 정함 | 투영 | 정본에서 재생성 |
@@ -167,7 +163,7 @@ flowchart TB
 
 ## 5. 어댑터 경계
 
-아래 다섯 규격은 **스케치**다. 정확한 타입은 V01 spec(Provider, Embedding, KnowledgeEngine, VectorIndex)과 V02·I01 spec(Connector)에서 확정한다(이슈 #1 설계 분석 3번). 모든 구현은 `packages/testkit`의 계약 테스트를 통과해야 하고, 각 경계에는 test double이 하나씩 있다.
+아래 다섯 규격은 **스케치**다. 정확한 타입은 V01 구현(Provider, Embedding, KnowledgeEngine, VectorIndex)과 V02·I01(Connector)에서 확정한다(이슈 #1 설계 분석 3번). 모든 구현은 `packages/testkit`의 계약 테스트를 통과해야 하고, 각 경계에는 test double이 하나씩 있다.
 
 ### 5.1 Provider
 
@@ -189,8 +185,8 @@ interface LLMProvider {
 interface LLMRequest {
   requestId: string
   taskKind: 'extract' | 'link' | 'summarize' | 'health-check'   // 작업 종류마다 예산과 전송 규칙이 다르다
-  trigger: 'interactive' | 'background'
-  dataClassification: DataClassification   // 입력에 섞인 원본들의 access_scope 중 가장 엄격한 값
+  trigger: 'user' | 'background'           // 사용자가 직접 누른 호출인가, 작업 큐가 한 호출인가
+  dataClassification: DataClassification   // 입력에 섞인 원본들의 access_scope 중 가장 엄격한 값. '합성'은 그중 하나
   egress: EgressDecision                   // Broker가 채운 허용 결정과 정책 버전
   schemaVersion: number
   budget: { timeoutMs: number; maxOutputTokens?: number }
@@ -199,7 +195,7 @@ interface LLMRequest {
 }
 ```
 
-구현은 네 가지다. `ClaudeCodeProvider`, `CodexProvider`(원 설계대로), `OpenAICompatibleProvider`(API 키. **선택이 아니라 정식 경로**), `LocalModelProvider`(계약만 있고 "미구현" 상태를 돌려준다). 상위 코드는 Provider를 직접 부르지 않고 Broker만 부른다. Broker는 호출마다 ① 전송 정책 검사 ② 동의 확인 ③ CLI 격리 조건(3.1절) ④ 동시 실행·예산 ⑤ 시간 제한과 취소 ⑥ 응답 스키마 검증 ⑦ 본문 없는 이력 기록을 순서대로 한다.
+구현은 네 가지다. `ClaudeCodeProvider`, `CodexProvider`(원 설계대로), `OpenAICompatibleProvider`(API 키. **필수 경로**), `LocalModelProvider`(계약만 있고 "미구현" 상태를 돌려준다). 상위 코드는 Provider를 직접 부르지 않고 Broker만 부른다. Broker는 호출마다 ① 전송 정책 검사 ② 동의 확인 ③ CLI 실행 조건(3.1절) ④ 동시 실행·예산 ⑤ 시간 제한과 취소 ⑥ 응답 스키마 검증 ⑦ 본문 없는 이력 기록을 순서대로 한다.
 
 ### 5.2 Embedding
 
@@ -251,7 +247,7 @@ interface VectorIndex {
 // IndexedRef는 언제나 정본의 ID다. 색인은 본문을 갖지 않는다.
 ```
 
-잠정 구현은 sqlite-vec다. 확장을 불러오지 못하면 `unavailable`을 알리고 키워드 검색으로 계속 동작한다(가정 A08). 정본 SQLite 쪽에는 드라이버를 바꿀 수 있도록 좁은 **SQL 드라이버 포트**(열기, 실행, 트랜잭션, 확장 불러오기)를 둔다([ADR 0004](adr/0004-embedded-storage.md)).
+**Phase 1에는 규격, 계약 테스트, 테스트용 메모리 구현(fake)만 있다.** 제품의 기본 구성은 `unavailable`을 돌려주는 빈 구현에 묶이고, 키워드 검색으로 동작한다. 네이티브 벡터 모듈은 V01에 넣지 않는다. sqlite-vec는 배포처에서 확인할 잠정 후보다([ADR 0004](adr/0004-embedded-storage.md), 가정 A08). 정본 SQLite 쪽에는 드라이버를 바꿀 수 있도록 좁은 **SQL 드라이버 포트**(열기, 실행, 트랜잭션, 확장 불러오기)를 둔다.
 
 ### 5.5 Connector
 
@@ -321,8 +317,8 @@ sequenceDiagram
 | 투영의 revision이 정본과 다름, 또는 투영 파일 손상 | 색인이 낡았거나 못 쓴다 | 투영을 비우고 정본에서 재구축. 그동안 `rebuilding` 상태를 알리고 키워드 검색은 유지 |
 | 추출 중 원본이 수정·삭제됨 | 낡은 결과가 도착한다 | fence와 tombstone이 쓰기를 거부 |
 | Provider 시간 초과·오류 | 호출 실패 | Broker가 재시도 가능 여부에 따라 간격을 늘려 재시도하고, 한도를 넘으면 작업을 실패로 남겨 화면에 보인다. CLI는 프로세스 트리까지 종료(가정 A04) |
-| 전송 거부 또는 동의 없음 | 호출하지 않음 | 작업을 보류로 두고 이유를 보인다. **다른 Provider로 몰래 넘어가지 않는다** |
-| Embedding 모델 없음, 벡터 확장 로드 실패 | 벡터 검색 불가 | 상태를 알리고 키워드 검색으로 동작 |
+| 전송 거부, 동의 없음, CLI 실행 조건 불충족 | 호출하지 않음 | 작업을 보류로 두고 이유를 보인다. **다른 Provider로 몰래 넘어가지 않는다** |
+| Embedding 모델 없음, 벡터 색인 사용 불가 | 벡터 검색 불가 | 상태를 알리고 키워드 검색으로 동작 |
 | 정본 SQLite 손상 | 정본 손실 | 백업에서 복원(Phase 7 H01). Phase 1에는 백업 기능이 없으므로 합성 데이터만 다룬다 |
 
 outbox와 투영 revision은 **처음으로 비동기 투영이 생기는 작업**(벡터에 실제 지식을 색인하는 시점)에서 구현한다. Phase 1의 키워드 색인은 정본과 같은 트랜잭션이라 필요 없다. knowledge revision 번호와 tombstone은 V02부터 있다.
@@ -338,7 +334,7 @@ outbox와 투영 revision은 **처음으로 비동기 투영이 생기는 작업
 | 화면이 불러오는 것 | CSP로 자기 출처만 허용. 외부 URL 이동과 새 창을 막고, 외부 링크는 사용자 확인 뒤 OS 브라우저로 연다 |
 | 가져온 내용 | **신뢰하지 않는 데이터.** 화면에는 글자로만 그린다(HTML로 해석하지 않으므로 그 안의 스크립트와 원격 자원은 실행·로드되지 않는다). LLM에는 지시와 구획을 나눠 넣고, 응답은 스키마로 검증하며, LLM의 출력은 후보일 뿐 명령이 아니다 |
 | 백엔드 → 외부 LLM | 모든 Provider에 전송 정책과 동의 적용. 거부가 우선. 요약·관련 문맥 같은 파생 데이터도 원본의 access_scope를 물려받는다. CLI 호출도 화면과 이력에 "외부 전송"으로 표시한다([ADR 0014](adr/0014-egress-policy-and-consent.md)) |
-| 백엔드 → CLI 프로세스 | 셸 없이 인자 배열로 실행, 입력은 stdin, 작업마다 빈 임시 디렉터리, 최소 환경 변수, 바깥에서 거는 시간 제한과 프로세스 트리 종료. 제품은 CLI의 로그인 파일을 읽거나 복사하지 않는다. 인자 배열 초안은 [CLI Provider 조사 5절](research/2026-11-21-cli-provider-terms-and-isolation.md)이며 **전부 미실행**이다 |
+| 백엔드 → CLI 프로세스 | 배포 빌드는 검증된 조합 목록에 있는 CLI만 실행한다(3.1절). 실행은 셸 없이 인자 배열로, 입력은 stdin, 작업마다 빈 임시 디렉터리, 최소 환경 변수, 바깥에서 거는 시간 제한과 프로세스 트리 종료. 제품은 CLI의 로그인 파일을 읽거나 복사하지 않는다. 인자 배열 초안은 [CLI Provider 조사 5절](research/2026-11-21-cli-provider-terms-and-isolation.md)이며 **전부 미실행**이다 |
 | 저장된 데이터 | 비밀 값은 OS 자격 증명 저장소에만. 데이터 디렉터리는 OS 사용자별. 로그는 민감 값 제거. **Phase 1의 정본 SQLite는 파일 단위 암호화를 하지 않으며** 그 범위와 이유는 [ADR 0010](adr/0010-encryption-at-rest.md)에 있다 |
 | 설치본 | 번들한 네이티브 모듈의 서명과 Windows의 차단 동작은 미검증이다(OSS_EVALUATION 4.7절 4~5번, 가정 A14) |
 
@@ -349,13 +345,13 @@ outbox와 투영 revision은 **처음으로 비동기 투영이 생기는 작업
 | ID | 가정 | 걸려 있는 결정 | 배포처 확인 | 틀렸을 때 바뀌는 것 |
 |---|---|---|---|---|
 | A01 | 배포 환경에서 사용자의 구독 로그인 CLI를 제품이 호출하는 것이 허용된다. 사용자는 두 CLI를 쓸 수 있다고 확인했으나 벤더 문구는 모호하거나 불리하다 | ADR 0005 | R02-C4 | CLI Provider를 배포처 설정으로 끄고 API 키 Provider만 쓴다 |
-| A02 | `claude -p`의 최소 권한 인자 배열이 구독 로그인과 함께 동작하고 도구·MCP·hooks·작업 디렉터리 밖 읽기를 막는다 | ADR 0005, 3.1절 | R02-C2, R02-C3 | 그 버전의 Claude CLI는 백그라운드 실행을 계속 차단. 대화형도 끌지 배포처가 정한다 |
+| A02 | `claude -p`의 최소 권한 인자 배열이 구독 로그인과 함께 동작하고 도구·MCP·hooks·작업 디렉터리 밖 읽기를 막는다 | ADR 0005, 3.1절 | R02-C2, R02-C3 | 그 버전은 검증된 조합 목록에 들어가지 못하고, 배포 빌드는 그 CLI를 실행하지 않는다 |
 | A03 | `codex exec`의 최소 권한 인자 배열이 셸·MCP·웹 검색을 막고 읽기 범위를 제한한다(`read-only`만으로는 읽기를 막지 못한다) | ADR 0005, 3.1절 | R02-C2, R02-C3 | A02와 같음(Codex CLI) |
-| A04 | Windows에서 제품이 CLI의 자식 프로세스 트리를 시간 제한에 맞춰 끝낼 수 있다 | ADR 0005, 7절 | R02-C3 | CLI Provider를 Windows에서 대화형으로만 쓰거나 끈다 |
+| A04 | Windows에서 제품이 CLI의 자식 프로세스 트리를 시간 제한에 맞춰 끝낼 수 있다 | ADR 0005, 7절 | R02-C3 | Windows용 조합을 목록에 넣지 않는다. Windows에서는 API 키 Provider만 쓴다 |
 | A05 | CLI의 구조화 출력 옵션이 도구를 뺀 상태에서도 동작한다 | 5.1절 `generateStructured` | R02-C1 | 그 Provider는 일반 응답을 받아 제품이 JSON을 꺼내 스키마로 검증한다(검증은 어느 경우든 제품이 한다) |
 | A06 | 배포처에 쓸 수 있는 OpenAI 호환 엔드포인트와 키가 있고 구조화 출력을 지원한다 | ADR 0005 | 배포처 설정 S05, R02 기록 | 스키마를 지시문으로 요구하고 검증으로 걸러 낸다. 엔드포인트가 아예 없으면 LLM 기능 없이 탐색만 동작 |
 | A07 | better-sqlite3의 미리 빌드된 바이너리가 Electron 설치본 안에서 재빌드 없이 로드된다 | ADR 0004 | R04-C1, R03-C4 | 패키징에 재빌드 단계를 넣거나 SQL 드라이버 포트 뒤의 드라이버를 바꾼다 |
-| A08 | sqlite-vec 확장(`vec0.dll`)이 Windows에서 서명·차단 문제 없이 로드된다 | ADR 0004 | R03-C4, R04-C2 | VectorIndex 구현을 앱 수준 전수 비교나 LanceDB로 바꾼다(OSS_EVALUATION 4.8절 차선) |
+| A08 | sqlite-vec 확장(`vec0.dll`)이 Windows에서 서명·차단 문제 없이 로드된다 | ADR 0004(벡터 구현 후보) | R03-C4, R04-C2 | VectorIndex의 구현으로 앱 수준 전수 비교나 LanceDB를 고른다(OSS_EVALUATION 4.8절 차선). Phase 1에는 실제 구현이 없으므로 Phase 1 코드는 바뀌지 않는다 |
 | A09 | "제품 기록이 정본, 엔진은 투영" 구조가 "엔진이 정본"보다 근거·시간·삭제·교정 요구를 잘 충족한다 | ADR 0002 | R03-C1, R03-C4 | 지식 항목·관계의 정본을 엔진으로 넘기고 중복 테이블을 없앤다 |
 | A10 | 원본당 구조화 호출 1회의 추출로 Phase 1 흐름이 성립하고, 이 방식이 엔진 재구현으로 번지지 않는다 | ADR 0003 | R03-C1, R03-C2 | KnowledgeEngine 어댑터에 보류 후보(LightRAG, cognee, sage-wiki) 중 실행을 통과한 것을 꽂는다 |
 | A11 | bge-m3(int8 ONNX)가 Transformers.js로 Electron 설치본 안에서 CPU로 돌고 속도·메모리가 받아들일 만하다 | ADR 0006 | R03-C3, R04-C2 | 차선 모델(multilingual-e5-base)이나 차선 런타임으로 바꾼다(OSS_EVALUATION 4.8절) |
@@ -364,7 +360,7 @@ outbox와 투영 revision은 **처음으로 비동기 투영이 생기는 작업
 | A14 | 번들한 네이티브 모듈을 서명할 수 있고 Windows의 차단(SmartScreen, Smart App Control)을 넘는 배포 방법이 있다 | ADR 0007 | R04-C3 | 배포처의 내부 배포 채널·허용 목록에 의존한다 |
 | A15 | 자동 업데이트(electron-updater)가 배포처 네트워크·정책에서 동작한다 | ADR 0007 | R04-C3 | 자동 업데이트를 설정으로 끄고 수동 교체 절차를 쓴다 |
 | A16 | Electron 쉘이 배포처 Windows의 OS 자격 증명 저장소를 쓸 수 있다 | ADR 0010 | R04-C1에 확인 항목 추가 | API 키를 저장하지 못하므로 API 키 Provider를 "사용 불가"로 표시한다(평문 저장으로 넘어가지 않는다) |
-| A17 | 쓰는 SQLite 드라이버 빌드에 전문 검색 기능이 들어 있고 한국어 질의에 쓸 만하다 | 5.4절, V01-C3 | R03-C3, R03-C4 | 토크나이저 설정을 바꾸거나 단순 부분 일치 검색으로 내린다 |
+| A17 | 쓰는 SQLite 드라이버 빌드에 전문 검색 기능이 들어 있고 한국어 질의에 쓸 만하다 | ADR 0004, V01-C3 | R03-C3, R03-C4 | 토크나이저 설정을 바꾸거나 단순 부분 일치 검색으로 내린다 |
 | A18 | Electron에 든 Node 런타임으로 백엔드를 별도 프로세스로 띄우고, 종료·중복 실행 방지·절전 복귀가 Windows에서 동작한다 | ADR 0001, 3절 | R04-C1 | 백엔드를 따로 묶은 실행 파일로 넣는다 |
 | A19 | 배포처 PC가 디스크 암호화 같은 저장 데이터 보호를 OS 수준에서 제공한다 | ADR 0010 | 배포처 설정 S11 | 정본 SQLite의 파일 단위 암호화를 넣기 전에는 실제 업무 데이터를 넣지 않는다 |
 
@@ -373,3 +369,4 @@ outbox와 투영 revision은 **처음으로 비동기 투영이 생기는 작업
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-21 | 최초 작성(잠정) | 이 문서 | R06-C1, R06-C2, R06-C4 |
+| 2026-11-21 | 배포 빌드는 검증된 CLI 조합만 실행(사용자 호출 포함), 개발 모드는 합성 데이터에 한해 예외. Phase 1의 VectorIndex는 규격과 fake만. 구성요소 그림 정리 | 0절, 2절, 3.1절, 4절, 5.1절, 5.4절, 7~9절 | 조정자 판정 1·2 반영, 이슈 #16 V01-C4 개정 |

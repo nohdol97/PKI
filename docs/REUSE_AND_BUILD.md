@@ -21,10 +21,10 @@
 | 화면 | React, Vite, shadcn/ui | 잠정 기본값(4.2절, 4.8절) | shadcn/ui는 컴포넌트 코드를 저장소로 복사하는 방식 |
 | 화면 자동 테스트 | Playwright | 잠정 기본값(4.2절). Electron 지원은 실험적 | V01, V02의 E2E |
 | 정본 저장 | better-sqlite3 | 잠정 기본값(4.3절, 4.8절) | [ADR 0004](adr/0004-embedded-storage.md) |
-| 벡터 색인 | sqlite-vec | 잠정 기본값이나 위험 "높음"(4.3절). 차선 LanceDB(4.8절) | ADR 0004. `VectorIndex` 어댑터 뒤 |
+| 벡터 색인 | sqlite-vec | 잠정 기본값이나 위험 "높음"(4.3절). 차선 LanceDB(4.8절) | ADR 0004. `VectorIndex` 어댑터 뒤의 **후보**다. Phase 1에는 넣지 않고(규격과 test double만), 배포처 확인 뒤 R07에서 채택을 정한다 |
 | Embedding 런타임 | Transformers.js(onnxruntime-node) | 잠정 기본값(4.5절, 4.8절). 위험 "중간" | [ADR 0006](adr/0006-embedding.md). `EmbeddingProvider` 어댑터 뒤 |
 | Embedding 모델 | BAAI/bge-m3(int8 ONNX) | 잠정 기본값. 차선 multilingual-e5-base(4.8절) | ADR 0006. 설치 파일에 넣지 않고 처음 쓸 때 준비 |
-| LLM 호출 | 사용자가 설치한 Claude Code CLI, Codex CLI. OpenAI 호환 HTTP 엔드포인트 | 평가 대상 아님(제품이 번들하지 않는다). 사용 조건과 격리는 [CLI Provider 조사](research/2026-11-21-cli-provider-terms-and-isolation.md) | [ADR 0005](adr/0005-llm-providers.md) |
+| LLM 호출 | 사용자가 설치한 Claude Code CLI, Codex CLI. OpenAI 호환 HTTP 엔드포인트 | 평가 대상 아님(제품이 번들하지 않는다). 사용 조건과 격리는 [CLI Provider 조사](research/2026-11-21-cli-provider-terms-and-isolation.md) | [ADR 0005](adr/0005-llm-providers.md). 설치본은 격리가 검증된 CLI 조합만 실행한다 |
 | 지식 엔진(추출 보강, 개체 해소, 관련 문맥 검색) | LightRAG, cognee, sage-wiki 중 실행을 통과한 것 | **보류**(5.1절) | `KnowledgeEngine` 어댑터 뒤. Phase 1에는 꽂지 않는다([ADR 0003](adr/0003-phase1-without-engine.md)) |
 | 시간 그래프 저장 | cortexdb | **보류**(5.1절). 제품의 SQLite 스키마와 R03-C4에서 비교 | 채택되면 어댑터 뒤 |
 | 그래프 저장소 | LadybugDB | 필요할 때 어댑터 뒤에서만(4.7절 3번, 4.8절) | Phase 1에는 없다 |
@@ -56,7 +56,7 @@ jina-embeddings v3/v4/v5, PyMuPDF, FalkorDBLite. EmbeddingGemma는 조건부이�
 | Insight Discovery | 원 설계 지정. 제품의 차별화 영역(10절) | 날짜 비교, 상태 변경, 의존 충돌, 중복 검사는 결정론 코드. 의미 해석만 LLM |
 | Proactive Feedback(알림, Digest) | 원 설계 지정(11절) | Phase 5 |
 | 사용자 피드백 기반 개인화 | 원 설계 지정(12절) | 피드백 기록, 순위 가중치, 선호. 미세 조정이나 강화 학습은 하지 않는다 |
-| LLM Provider 통합 | 원 설계 지정(4절) | Provider 3종, Broker, 전송 정책([ADR 0005](adr/0005-llm-providers.md), [0014](adr/0014-egress-policy-and-consent.md)) |
+| LLM Provider 통합 | 원 설계 지정(4절) | Provider 3종, Broker, 전송 정책, CLI 실행 조건([ADR 0005](adr/0005-llm-providers.md), [0014](adr/0014-egress-policy-and-consent.md)) |
 | Connector 인터페이스 | 원 설계 지정(5절) | 규격, 계약 테스트, JSONL·파일 import, 테스트 Connector. 실제 수집기는 배포처 포크 |
 | 제품 UX | 원 설계 지정(14절) | 화면 8개. Phase 1은 Home, Sources, Activity, Settings의 최소 화면 |
 | **정본 기록 스키마**(원본 version, 근거 span, 지식 항목과 관계, 유효·관측 시각, 상태, 사용자 교정, tombstone) | 시간 유효성, span 수준 근거, 삭제 시 파생물 제거를 모두 갖추었다고 실행으로 확인된 엔진이 없다. 사용자 교정 보존은 평가되지 않았다(6절 1번) | **기록 보관까지만.** 검색 파이프라인, 유사도 기반 개체 해소, 일반 그래프 탐색, 벡터 색인, Wiki 합성은 만들지 않는다([ARCHITECTURE 3.2절](ARCHITECTURE.md), [ADR 0002](adr/0002-authority-in-product-records.md)). R07에서 뒤집힐 수 있다 |
@@ -72,6 +72,7 @@ jina-embeddings v3/v4/v5, PyMuPDF, FalkorDBLite. EmbeddingGemma는 조건부이�
 | 기능 | 정하는 작업 | 지금 정하지 않는 이유 |
 |---|---|---|
 | 지식 엔진 선정과 사이드카 언어 | R03, R04 실행 뒤 R07 | 실행 근거가 없다 |
+| 벡터 색인의 실제 구현 | R03 실행 뒤 R07 | sqlite-vec의 Windows 로드와 서명 차단 여부를 확인하지 못했다. Phase 1 기준 중 벡터 검색을 요구하는 것이 없다([ADR 0004](adr/0004-embedded-storage.md)) |
 | 정본 SQLite의 파일 단위 암호화 | H01(#32) 전에 드라이버 조사 | 암호화 SQLite 구성요소를 평가하지 않았다([ADR 0010](adr/0010-encryption-at-rest.md)) |
 | 파일 형식별 파싱, 폴더 감시 | I02(#19) | Phase 1은 JSONL만 다룬다 |
 | 개체 해소, 시간 그래프, 충돌 처리 | S02(#23) | 엔진 선정에 달려 있다 |
