@@ -11,6 +11,7 @@ let db: SqlDriver;
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
   migrate(db);
+  db.run("INSERT INTO connector_instances (id, kind) VALUES ('test', 'test-fixtures')");
 });
 
 afterEach(() => {

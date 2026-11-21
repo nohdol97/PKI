@@ -180,9 +180,44 @@ describe("schema v2 (V01-T04)", () => {
   it("upgrades a v1 database in place, keeping its rows", () => {
     migrate(db, migrations.slice(0, 1));
     db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
+    db.run(
+      "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (1, 'h', 't', 'b')",
+    );
     migrate(db);
     expect(schemaVersion(db)).toBe(2);
-    expect(db.all("SELECT external_id FROM sources")).toEqual([{ external_id: "e" }]);
+    expect(db.all("SELECT id, external_id FROM sources")).toEqual([{ id: 1, external_id: "e" }]);
+    expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 1 }]);
+    // A v1 source has no recorded kind; "unknown" is no upstream kind, so it never grades synthetic.
+    expect(db.all("SELECT id, kind FROM connector_instances")).toEqual([
+      { id: "c", kind: "unknown" },
+    ]);
+    expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
+  });
+
+  it("ties every source to a registered Connector instance", () => {
+    migrate(db);
+    expect(() =>
+      db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('ghost', 'e')"),
+    ).toThrow(/FOREIGN KEY/);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
+    expect(() =>
+      db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')"),
+    ).toThrow(/UNIQUE/);
+  });
+
+  it("keeps the source version and keyword index wiring after rebuilding sources", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
+    expect(() =>
+      db.run(
+        "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (404, 'h', 't', 'b')",
+      ),
+    ).toThrow(/FOREIGN KEY/);
+    expect(db.all("SELECT sql FROM sqlite_schema WHERE name = 'source_versions'")[0]?.sql).toMatch(
+      /REFERENCES "?sources"?/,
+    );
   });
 
   it("adds connector instances holding kind and cursor", () => {

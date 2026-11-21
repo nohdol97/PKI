@@ -17,6 +17,7 @@ let db: SqlDriver;
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
   migrate(db);
+  for (const id of ["c1", "c2"]) registerConnectorInstance(db, id, "test-fixtures");
 });
 
 afterEach(() => {
@@ -64,6 +65,11 @@ describe("saveSourceRecord", () => {
     expect(count("source_versions")).toBe(3);
   });
 
+  it("refuses a source whose Connector instance is not registered", () => {
+    expect(() => saveSourceRecord(db, "ghost", record("e1"))).toThrow(/FOREIGN KEY/);
+    expect(count("sources")).toBe(0);
+  });
+
   it("keeps the same content from different instances or external ids apart", () => {
     saveSourceRecord(db, "c1", record("e1"));
     expect(saveSourceRecord(db, "c2", record("e1"))).toBe("created");
@@ -74,7 +80,6 @@ describe("saveSourceRecord", () => {
 
 describe("connector instances and cursors", () => {
   it("starts without a cursor and stores the one written", () => {
-    registerConnectorInstance(db, "c1", "test-fixtures");
     expect(readCursor(db, "c1")).toBeNull();
     writeCursor(db, "c1", "5");
     expect(readCursor(db, "c1")).toBe("5");
@@ -86,9 +91,8 @@ describe("connector instances and cursors", () => {
 
   it("records the kind once and refuses to rebind an instance to another kind", () => {
     registerConnectorInstance(db, "c1", "test-fixtures");
-    registerConnectorInstance(db, "c1", "test-fixtures");
     expect(() => registerConnectorInstance(db, "c1", "site-mail")).toThrow(/site-mail/);
-    expect(db.all("SELECT id, kind FROM connector_instances")).toEqual([
+    expect(db.all("SELECT id, kind FROM connector_instances WHERE id = 'c1'")).toEqual([
       { id: "c1", kind: "test-fixtures" },
     ]);
   });

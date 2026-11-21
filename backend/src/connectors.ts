@@ -48,14 +48,23 @@ export async function syncConnector(
   let cursor = readCursor(db, instanceId);
   let received = 0;
   let created = 0;
+  // One full rescan per sync: a second expiry, or a page that promises more without
+  // moving, would otherwise loop forever.
+  let rescanned = false;
   for (;;) {
     const page = ChangeSetSchema.parse(
       await connector.getChanges(cursor, { limit: PAGE_LIMIT, signal }),
     );
     if (page.cursorExpired) {
-      if (cursor === null) throw new Error(`${instanceId}: cursor expired on a full rescan`);
+      if (rescanned || cursor === null) {
+        throw new Error(`${instanceId}: cursor expired on a full rescan`);
+      }
+      rescanned = true;
       cursor = null;
       continue;
+    }
+    if (page.hasMore && page.changes.length === 0 && page.nextCursor === cursor) {
+      throw new Error(`${instanceId}: page reports more changes without progress`);
     }
     db.transaction(() => {
       for (const change of page.changes) {

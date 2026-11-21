@@ -75,6 +75,18 @@ describe("sync of the test Connector", () => {
     expect(counts()).toEqual([5, 5]);
   });
 
+  it("records the instance's kind, not its id, for the site-* origin rule", async () => {
+    const instances = [{ id: "mail-1", kind: "test-fixtures", config: { file: FIXTURES } }];
+    const manager = await createConnectorManager(db, instances, connectorKinds);
+    await manager.sync("mail-1");
+    expect(db.all("SELECT id, kind FROM connector_instances")).toEqual([
+      { id: "mail-1", kind: "test-fixtures" },
+    ]);
+    expect(db.all("SELECT DISTINCT connector_instance_id AS id FROM sources")).toEqual([
+      { id: "mail-1" },
+    ]);
+  });
+
   it("makes the synced records keyword-searchable", async () => {
     const manager = await createConnectorManager(db, connectorInstances(FIXTURES), connectorKinds);
     await manager.sync("fixtures");
@@ -154,6 +166,32 @@ describe("cursor after save", () => {
       created: 1,
     });
     expect(seen).toEqual(["old", null]);
+    expect(readCursor(db, "s")).toBe("1");
+  });
+
+  it("gives up when the cursor expires again later in the same rescan", async () => {
+    db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('s', 'scripted', 'old')");
+    let calls = 0;
+    const connector = scripted((cursor) => {
+      if (++calls > 10) throw new Error("sync did not stop");
+      return cursor === null
+        ? { changes: [upsert("a")], nextCursor: "1", hasMore: true }
+        : { changes: [], nextCursor: "x", hasMore: false, cursorExpired: true };
+    });
+    await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow(/expired/);
+    expect(calls).toBe(3);
+  });
+
+  it("gives up on a page that reports more without making progress", async () => {
+    let calls = 0;
+    const connector = scripted((cursor) => {
+      if (++calls > 10) throw new Error("sync did not stop");
+      return cursor === null
+        ? { changes: [upsert("a")], nextCursor: "1", hasMore: true }
+        : { changes: [], nextCursor: "1", hasMore: true };
+    });
+    await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow(/progress/);
+    expect(calls).toBe(2);
     expect(readCursor(db, "s")).toBe("1");
   });
 

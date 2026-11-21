@@ -1,5 +1,6 @@
 // The dev entry hands its per-run token to the parent over stdout, never argv or env,
-// and opens the canonical DB in the per-user data directory (here under a temp HOME).
+// and keeps its DB apart from the product's: a sibling "PKI-dev" folder by default
+// (here under a temp HOME), or --data-dir.
 import { CANONICAL_DB_FILE } from "./composition.ts";
 import { resolveDataDirectory } from "@pki/storage";
 import { spawn } from "node:child_process";
@@ -7,19 +8,33 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import { join, resolve } from "node:path";
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { send } from "@pki/testkit";
 
-it("prints a fresh session on stdout and serves the status API with it", async () => {
-  const home = mkdtempSync(join(tmpdir(), "pki-dev-home-"));
-  const env = {
+let home: string;
+let env: Record<string, string | undefined>;
+
+beforeEach(() => {
+  home = mkdtempSync(join(tmpdir(), "pki-dev-home-"));
+  env = {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
     XDG_DATA_HOME: join(home, "xdg"),
     LOCALAPPDATA: join(home, "local"),
   };
-  const child = spawn(process.execPath, [resolve(import.meta.dirname, "dev.ts")], {
+});
+
+afterEach(() => {
+  rmSync(home, { recursive: true, force: true });
+});
+
+/** Starts dev.ts, runs `check` against its session, then stops it. */
+async function withDev(
+  args: string[],
+  check: (port: number, headers: Record<string, string>) => Promise<void>,
+) {
+  const child = spawn(process.execPath, [resolve(import.meta.dirname, "dev.ts"), ...args], {
     stdio: ["ignore", "pipe", "inherit"],
     env,
   });
@@ -32,25 +47,36 @@ it("prints a fresh session on stdout and serves the status API with it", async (
     const session = sessions[0];
     expect(session?.token).toMatch(/^[\w-]{43}$/);
     const { host, port } = new URL(session?.url ?? "");
-    const res = await send(Number(port), "/api/status", {
-      host,
-      authorization: `Bearer ${session?.token}`,
-    });
+    await check(Number(port), { host, authorization: `Bearer ${session?.token}` });
+  } finally {
+    child.kill();
+  }
+}
+
+const productDir = () => resolveDataDirectory({ platform: process.platform, home, env });
+
+it("prints a fresh session on stdout and serves the API from a separate dev DB", async () => {
+  await withDev([], async (port, headers) => {
+    const res = await send(port, "/api/status", headers);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ vectorIndex: { state: "unavailable" } });
-    const dataDir = resolveDataDirectory({ platform: process.platform, home, env });
-    expect(existsSync(join(dataDir, CANONICAL_DB_FILE))).toBe(true);
-    const connectors = await send(Number(port), "/api/connectors", {
-      host,
-      authorization: `Bearer ${session?.token}`,
-    });
+    const connectors = await send(port, "/api/connectors", headers);
     expect(connectors.body).toMatchObject({
       connectors: expect.arrayContaining([
         { id: "fixtures", kind: "test-fixtures", state: "ready" },
       ]),
     });
-  } finally {
-    child.kill();
-    rmSync(home, { recursive: true, force: true });
-  }
+  });
+  expect(existsSync(join(`${productDir()}-dev`, CANONICAL_DB_FILE))).toBe(true);
+  expect(existsSync(productDir())).toBe(false);
+});
+
+it("uses --data-dir when given", async () => {
+  const dir = join(home, "chosen");
+  await withDev(["--data-dir", dir], async (port, headers) => {
+    expect((await send(port, "/api/status", headers)).status).toBe(200);
+  });
+  expect(existsSync(join(dir, CANONICAL_DB_FILE))).toBe(true);
+  expect(existsSync(`${productDir()}-dev`)).toBe(false);
+  expect(existsSync(productDir())).toBe(false);
 });
