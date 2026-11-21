@@ -162,6 +162,21 @@ describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)
     expect(rows()).toHaveLength(2);
   });
 
+  it("stores a newer revision whose content goes back to an older version's (review A11)", () => {
+    saveSourceRecord(db, "c1", rev(1, "x"));
+    saveSourceRecord(db, "c1", rev(2, "y"));
+    expect(saveSourceRecord(db, "c1", rev(3, "x"))).toEqual({
+      status: "created",
+      sourceId: 1,
+      version: 3,
+    });
+    expect(rows()).toEqual([
+      { version: 1, revision: 1, body: "x" },
+      { version: 2, revision: 2, body: "y" },
+      { version: 3, revision: 3, body: "x" },
+    ]);
+  });
+
   it("finds the latest version through the (source, version) index, not a sort (B-R2-S3)", () => {
     saveSourceRecord(db, "c1", rev(1, "v1"));
     saveSourceRecord(db, "c1", rev(2, "v2"));

@@ -450,6 +450,25 @@ describe("importJsonl, review round 2", () => {
     expect(counts()).toEqual(once);
   });
 
+  it("stores a newer revision going back to an older content as a new version with its job (A11)", async () => {
+    const text = [
+      line({ content: "x" }),
+      line({ version: 2, content: "y" }),
+      line({ version: 3, content: "x" }),
+    ].join("\n");
+    expect(await importJsonl(db, text)).toEqual(reply({ received: 3, created: 3, errors: [] }));
+    expect(db.all("SELECT version, revision, body FROM source_versions ORDER BY id")).toEqual([
+      { version: 1, revision: 1, body: "x" },
+      { version: 2, revision: 2, body: "y" },
+      { version: 3, revision: 3, body: "x" },
+    ]);
+    expect(db.all("SELECT fence_version FROM jobs ORDER BY id")).toEqual([
+      { fence_version: 1 },
+      { fence_version: 2 },
+      { fence_version: 3 },
+    ]);
+  });
+
   it.each(GOLDEN)("re-imports golden %s storing nothing and refusing nothing new", async (name) => {
     const text = readFileSync(resolve(GOLDEN_DIR, name), "utf8");
     const first = await importJsonl(db, text);
