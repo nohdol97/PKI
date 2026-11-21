@@ -106,18 +106,18 @@ V02가 I04로 넘긴 것: tombstone 보존 기간, 삭제한 원본의 복원, �
   
   `canonical` 종류 전부는 tombstone 쓰기와 **한 트랜잭션**이다. 뒤에 등록되는 종류도 이 순서의 한 자리를 가져야 한다.
 - **I04-R3 등록 누락의 차단.** 기계 검사는 셋이다.
-  - **정본 테이블**: 스키마의 모든 테이블은 `원본`, `등록 종류 <종류>`, `운영` 가운데 하나로 분류된 목록에 있다. `원본`은 원본의 정체 행인 `sources` 하나다. `source_versions`와 `keyword_index`·`keyword_index_*`(FTS 부속 테이블)는 `등록 종류 source`다. `등록 종류 <종류>`는 등록부에 같은 이름의 종류가 있어야 한다. `운영`은 **닫힌 목록**이다. 테이블마다 한 줄 이유를 단다(작업, 동의, 설정, Provider 호출 이력, tombstone, 번호, 무효화 기록, 해시 키, 수집기 인스턴스). 다음 둘 중 하나가 있으면 실패한다: `source_versions`·`evidence`·지식·Insight 테이블을 가리키는 외래 키, 또는 이름이 그 테이블의 ID 열(`source_version_id`, `evidence_id`, `fact_id`, `relation_id`, `item_id`, `insight_id`)인 열.
-  - **데이터 디렉터리**: 대표 흐름(V02의 가져오기 → 추출 → Insight)을 돌린 뒤 데이터 디렉터리의 모든 항목은 어느 종류의 경로이거나 운영 목록에 있어야 한다. 운영 목록은 검사 옆의 코드에 두고, 지금(origin/main `00d5d7b`)의 항목에서 시작한다: `pki.sqlite`와 그 부속 파일(`-journal`·`-wal`·`-shm`), `models/`(embedding 모델 캐시, V01-T14), `secrets.json`(비밀 값, V01-T11), 그리고 I04가 더하는 tombstone 장부. 새 운영 파일을 만드는 PR이 그 목록을 늘린다. 파생물을 쓰는 종류는 목록이 아니라 자기 경로(R1 ⑧)를 적어야 한다.
+  - **정본 테이블**: 스키마의 모든 테이블은 `원본`, `등록 종류 <종류>`, `운영` 가운데 하나로 분류된 목록에 있다. `원본`은 원본의 정체 행인 `sources` 하나다. `source_versions`와 `keyword_index`·`keyword_index_*`(FTS 부속 테이블)는 `등록 종류 source`다. `등록 종류 <종류>`는 등록부에 같은 이름의 종류가 있어야 한다. `운영`은 **닫힌 목록**이다. 테이블마다 한 줄 이유를 단다(작업, 주기(I03의 스케줄 테이블), 동의, 설정, Provider 호출 이력, tombstone, 번호, 무효화 기록, 해시 키, 수집기 인스턴스). 다음 둘 중 하나가 있으면 실패한다: `source_versions`·`evidence`·지식·Insight 테이블을 가리키는 외래 키, 또는 이름이 그 테이블의 ID 열(`source_version_id`, `evidence_id`, `fact_id`, `relation_id`, `item_id`, `insight_id`)인 열.
+  - **데이터 디렉터리**: 대표 흐름(V02의 가져오기 → 추출 → Insight)을 돌린 뒤 데이터 디렉터리의 모든 항목은 어느 종류의 경로이거나 운영 목록에 있어야 한다. 운영 목록은 검사 옆의 코드에 두고, 지금(origin/main `00d5d7b`)의 항목에서 시작한다: `pki.sqlite`와 그 부속 파일(`-journal`·`-wal`·`-shm`), `models/`(embedding 모델 캐시, V01-T14), `secrets.json`(비밀 값, V01-T11)과 저장 중에 잠시 생기는 `secrets.json.*.tmp`, 그리고 I04가 더하는 tombstone 장부. 새 운영 파일을 만드는 PR이 그 목록을 늘린다. 파생물을 쓰는 종류는 목록이 아니라 자기 경로(R1 ⑧)를 적어야 한다.
   - **어댑터**: 제품 구성에 묶이는 `KnowledgeEngine`·`VectorIndex` 구현은 등록된 투영 종류여야 하며, 아니면 백엔드가 시작을 거부한다. 제품 기본인 null 엔진과 빈 벡터 색인도 등록된 종류다(I04-T04). 그래서 이 검사는 T04 뒤에 켜지며(I04-T02의 선행), 켜는 순간 기본 구성이 실패하지 않는다.
   
   메모리에만 있는 캐시와 데이터 디렉터리 밖의 파일은 이 검사가 잡지 못한다. 그런 것을 만드는 작업은 자기 spec에 등록을 적는다.
-- **I04-R4 무효화 기록.** 전파 하나가 끝나면 내용 없는 무효화 기록 한 행을 남긴다. 기록에는 변경 순번, 원본의 내부 ID, 변경 종류와 사유, 종류별로 지운 수와 다시 계산한 수, 시각이 들어간다. 제목, 본문, 인용문, 외부 식별자, namespace는 넣지 않는다. 상태 API가 최근 기록의 수를 돌려준다. Activity 화면에 보이는 일은 I03이 이 API로 한다.
+- **I04-R4 무효화 기록.** 전파 하나가 끝나면 내용 없는 무효화 기록 한 행을 남긴다. 기록에는 변경 순번, 원본의 내부 ID, 변경 종류와 사유, 종류별로 지운 수와 다시 계산한 수, 시각이 들어간다. 제목, 본문, 인용문, 외부 식별자, namespace는 넣지 않는다. 상태 API는 필드 `invalidations`로 최근 기록을 돌려준다: `{ changeSeq, sourceId, changeKind, removedByKind, recomputedByKind, at }`의 목록과, 범위 정책으로 버린 수 `scopePolicyDrops`. Activity 화면에 보이는 일은 I03(I03-R23, I03-T11)이 이 필드로 한다.
 
 **삭제와 소거**
 
 - **I04-R5 소거 범위.** 출처 삭제, 권한 상실, 사용자 삭제는 V02-R12의 범위를 모든 등록 종류로 넓힌다. 지우는 것:
   - 그 원본의 **모든 version**의 본문·제목·출처 정보(작성자·참여자·시각)·block(I01이 version에 붙이는 locator 목록)
-  - 그 version들을 가리키는 근거와 인용문. locator는 근거 행에 따로 저장되지 않고 version의 block에서 계산되므로(I01-R23) version과 함께 사라진다.
+  - 그 version들을 가리키는 근거와 인용문. locator는 근거 행에 따로 저장되지 않고 version의 block에서 계산되므로(I01-R29) version과 함께 사라진다.
   - 근거가 하나도 남지 않은 사실·관계(상태와 상관없이), 1단계에서 모은 항목 가운데 사실도 관계도 남지 않은 항목, 그 항목을 가리키는 Insight 행
   - 남는 Insight 가운데 설명 글이 지운 원본에서 나온 것의 설명 글(다시 계산한다)
   - 키워드 색인 행, 엔진·벡터 투영 속 그 원본의 항목
@@ -134,7 +134,7 @@ V02가 I04로 넘긴 것: tombstone 보존 기간, 삭제한 원본의 복원, �
   - **키**는 설치마다 만든 무작위 값이다. I04의 마이그레이션이 만들어 **정본 데이터베이스**의 운영 테이블에 두고, tombstone 장부의 머리에도 같은 키를 적는다. 그래서 다른 PC에 복원한 백업과 오래된 백업도 계속 대조된다. 비밀 값 저장소(`secrets.json`, V01-T11)에는 두지 않는다. 그곳의 키를 잃으면 모든 삭제가 소리 없이 무효가 되고, 사용자가 지운 원본까지 다시 들어온다.
   - **키가 없는데 해시된 행이 있으면** 시작할 때 오류다. 가져오기와 동기화를 열지 않고 그 이유를 화면에 보인다. 새 키를 몰래 만들지 않는다.
   - **남는 위험**: 데이터베이스를 가진 사람은 짐작한 정체 하나를 tombstone과 대조해 볼 수 있다(사전 대조). 해시에서 정체를 뽑아내 나열할 수는 없다.
-  - 들어오는 레코드가 지운 원본인지는 같은 해시로 찾는다. I01은 이 해시를 함수 `identityKey(instance, namespace, externalId)`로 받는다. 평문으로 먼저 찾고, 없으면 해시로 찾는다. 해시로 찾은 원본에 새 레코드를 받아들이면(해제 뒤, R9) 같은 `sources` 행에 그 레코드의 평문 `namespace`·`external_id`를 다시 쓴다. 새 행을 만들지 않는다. 수집기의 `getDocument`가 평문 정체를 쓰기 때문이다.
+  - 들어오는 레코드가 지운 원본인지는 같은 해시로 찾는다. I01은 이 해시를 함수 `identityKey(instance, namespace, externalId)`로 받는다. 평문으로 먼저 찾고, 없으면 해시로 찾는다. 해시로 찾은 원본에 새 레코드를 받아들이면(해제 뒤, R9) 같은 `sources` 행에 그 레코드의 평문 `namespace`·`external_id`를 다시 쓴다. 새 행을 만들지 않는다. 수집기의 `getDocument`가 평문 정체를 쓰기 때문이다. 이 되쓰기는 도착 경로의 일이라 I01이 적고 시험한다(I01-T02). I04는 행을 찾는 `identityKey`와 해시 열의 모양만 준다.
 - **I04-R8 남는 지식의 재평가.** 다른 원본의 근거가 남은 사실·관계는 지우지 않고 V02-R11과 같은 규칙으로 상태를 다시 판정한다. 남은 근거 중 **현재 근거**가 하나 이상이면 그대로이고, 지난 근거만 남으면 superseded다. 인식 유형은 바꾸지 않는다. 상태가 바뀐 행을 입력으로 쓰는 Insight는 다시 계산한다. 근거가 하나도 남지 않은 사용자 승인(user-approved) 행도 지운다(그 값은 지운 원본에서 왔다). 계보가 없는 행(1단계 모음에 들어가지 않는 행)은 이 규칙에 걸리지 않는다.
 
 **tombstone과 보존**
@@ -142,17 +142,18 @@ V02가 I04로 넘긴 것: tombstone 보존 기간, 삭제한 원본의 복원, �
 - **I04-R9 tombstone의 모양.** I04가 스키마를 정하고, 도착 판정은 I01이 한다.
   - 열:
     - `covers_version`: 제품 version. 그 이하의 모든 version을 덮는다. 처음 보는 원본에 온 삭제 사건이면 0이고, 그때 만드는 `sources` 행은 처음부터 R7의 키 있는 해시 정체만 갖는다(평문을 쓰지 않는다).
-    - `last_revision`: 삭제 때의 출처 revision. 출처가 revision을 주지 않으면 비어 있다. 이 열은 I04-T05의 마이그레이션이 더한다. 원본 행의 `sources.last_revision`(받아들인 가장 큰 revision)은 I01의 열이며 소거 뒤에도 남는다.
+    - `last_revision`: 삭제 때의 출처 revision. 화면 삭제와, 규격 v2 이전에 저장된 원본(revision이 없던 때)에서만 비어 있다(규격 v2의 레코드는 revision이 반드시 있다, I01). 이 열은 I04-T05의 마이그레이션이 더한다. 원본 행의 `sources.last_revision`(받아들인 가장 큰 revision)은 I01의 열이며 소거 뒤에도 남는다.
     - `reason`: `source-deleted` · `access-revoked` · `user-deleted` 중 하나.
     - `lifted_at`: 해제한 시각. 해제하지 않았으면 비어 있다.
-  - 다음 제품 version은 `max(최신 version, covers_version) + 1`이다. 모든 version 행이 지워져도 이 규칙으로 정해진다. 기존 트리거(`version > tombstone`)는 이 열을 비교하도록 바꾼다.
+  - 다음 제품 version은 `max(최신 version, covers_version) + 1`이다. version 번호의 최고값은 `covers_version`이 맡으며 따로 열을 두지 않는다. 모든 version 행이 지워져도 이 규칙으로 정해진다. 기존 트리거(`version > tombstone`)는 이 열을 비교하도록 바꾼다.
   - 이 열들은 새 마이그레이션 하나로 들어온다. 번호는 정하지 않는다: 다음 빈 번호(머지 순서로 정함). 이 spec의 다른 마이그레이션도 같다.
   - **사유의 우선**: 같은 `covers_version`에서는 `user-deleted`가 출처 사유를 덮어쓴다. 출처 사유는 `user-deleted`를 덮어쓰지 못한다. 그 밖에는 더 큰 `covers_version`만 tombstone을 옮긴다. 같은 `covers_version`의 출처 tombstone이 **더 큰 revision**으로 다시 오면 `last_revision`만 올린다(I01의 규칙). 그 밖의 같거나 낮은 것은 아무것도 바꾸지 않는다. 예외는 해제된 tombstone이다. 해제 뒤 새 version이 오기 전에 같은 `covers_version`으로 다시 삭제가 오면(사용자든 출처든) 그 사유로 다시 쓰고 `lifted_at`을 비운다.
   - **변경 순번**: `covers_version`이 바뀔 때만 오른다(ARCHITECTURE 0절의 정의: 새 version, 삭제, 권한 철회). 사유가 바뀌거나 해제하는 것은 내용을 바꾸지 않으므로 순번을 올리지 않는다. 지금의 `tombstones_update` 트리거는 모든 UPDATE에 순번을 올리므로, I04-T05가 `covers_version`이 바뀔 때만 올리도록 고친다.
   - tombstone 사건은 원본의 정체 `(connector_instance_id, namespace, external_id)`로 원본 행을 찾는다(I01-R6의 사건은 `namespace`를 싣는다).
-  - **해제(lift)**: 사용자만 할 수 있다(API 하나). `lifted_at`을 쓰고, 지운 내용은 돌아오지 않는다. 해제한 뒤에는 tombstone이 도착을 막지 않는다. 그 뒤의 레코드는 I01의 보통 규칙으로 판정된다(`sources.last_revision`과의 revision 비교, I01 소유·I01 테스트). 해제 중에 출처가 낸 revision도 같다. 판정 기준은 도착 시각이 아니라 revision이다. `last_revision`이 비어 있는 경우는 규격 v1 시절에 저장된 원본(revision이 없던 때)과 revision을 주지 않는 수집기에만 생긴다.
+  - **해제(lift)**: 사용자만 할 수 있다(API 하나). `lifted_at`을 쓰고, 지운 내용은 돌아오지 않는다. 해제한 뒤에는 tombstone이 도착을 막지 않는다. 그 뒤의 레코드는 I01의 보통 규칙으로 판정된다(`sources.last_revision`과의 revision 비교, I01 소유·I01 테스트). 해제 중에 출처가 낸 revision도 같다. 판정 기준은 도착 시각이 아니라 revision이다. `last_revision`이 비어 있는 경우는 화면 삭제와 규격 v2 이전에 저장된 원본에만 생긴다.
   - **기존 데이터**: I04 이전의 `deleted` 행은 출처 삭제인지 화면 삭제인지 구분할 수 없으므로 마이그레이션이 `user-deleted`로 옮긴다(되살아나지 않는 쪽). 사용자는 해제할 수 있다. `access-revoked` 행은 그대로 둔다.
-  - 화면의 삭제 요청은 `user-deleted`를 쓴다. 이것은 V02-T08의 동작을 바꾸므로 V02 담당에게 변경을 요청한다("후속" 1).
+  - 화면의 삭제 요청을 `user-deleted`로 쓰는 것은 V02-T08의 몫이다(합의됨, 조정자 결정 D21). I04-T05는 기존 `deleted` 행을 옮기고 사유 CHECK를 바꿀 뿐이다.
+  - 쓰기 입구는 설계 개요의 `applyTombstone`·`liftTombstone`이다. `covers_version`은 입구가 정하고 부르는 쪽은 넘기지 않는다.
 - **I04-R10 보존.** tombstone은 **지우지 않는다**. 내용이 없고 행 하나가 작으며, 지우면 재수집과 백업 복원이 지운 데이터를 되살린다. 원본의 이전 version은 **남긴다**. 원 설계의 수집 기능 목록에 "문서 버전 관리"가 있고(`design/original-design.md`) ADR 0013도 이전 version을 문서 버전 관리용으로 남긴다. 이전 version은 tombstone이 덮을 때 함께 지워지거나, 사용자가 원본 하나에 대해 "이전 version 지우기"를 할 때 지워진다(선택 작업 I04-T12, 변경 종류 `old-versions-pruned`).
 
 **경합과 반복 실행**
@@ -163,12 +164,12 @@ V02가 I04로 넘긴 것: tombstone 보존 기간, 삭제한 원본의 복원, �
   
   파생물을 정본에 쓰는 모든 경로는 등록부의 쓰기 함수 `commitDerived` 하나를 지난다. I03은 결과를 쓰는 자리(I03-R6 ③)에서 이 함수를 부른다. I03-T04는 V02의 fence를 감싼 같은 모양의 임시 함수로 먼저 나가고, I04-T06이 그 본문을 아래 규칙으로 바꾼다. 같은 트랜잭션에서 하는 검사와 실패했을 때:
   - `assertFresh`·`assertLineage` 실패: 결과 **전체**를 버리고 작업은 `superseded`로 닫힌다. 낡은 결과다.
-  - R14의 `combinable` 실패: 정책이 거부한 **그 항목**(사실, 관계, 근거 연결, Insight 하나)만 버리고 버린 수와 사유 `scope-policy`를 작업 결과에 남긴다. 나머지는 쓰고 작업은 정상으로 끝난다. 정책 판단을 낡은 결과로 보지 않는다.
+  - R14의 `combinable` 실패: 정책이 거부한 **그 항목**(사실, 관계, 근거 연결, Insight 하나)만 버린다. 버린 것은 I04가 가진 운영 테이블 `scope_policy_drops`(원본, version, 항목 키의 키 있는 해시, 사유 `scope-policy`, 시각)에 남긴다. 작업 행이 아니라 따로 두는 이유는 I03의 작업 보존 정리(끝난 작업 행 삭제)가 이 기록을 지우지 않게 하려는 것이다. 이 테이블은 등록 종류 `scope-drop`(층 `knowledge`, 계보 = 그 원본 version)이라 원본을 지우면 함께 지워진다. 나머지는 쓰고 작업은 정상으로 끝난다. 정책 판단을 낡은 결과로 보지 않는다.
 
   포기한 작업(dead_letter)을 사용자가 다시 시도해도 같은 쓰기 함수를 지난다.
-- **I04-R12 멱등 소거와 투영 제거 작업.** 같은 tombstone이 다시 오면 R9의 규칙대로 아무것도 바꾸지 않는다. 소거 트랜잭션은 I03의 `supersedeOpenJobs(sourceId)`를 불러 그 원본의 끝나지 않은 작업을 닫는다. 엔진·벡터 투영의 제거는 같은 트랜잭션에서 작업으로 등록하고 커밋 뒤 실행한다. 작업 종류 `projection-remove`, 묶음 `projection`(I03의 작업 종류 표). 이 작업의 의미:
+- **I04-R12 멱등 소거와 투영 제거 작업.** 같은 tombstone이 다시 오면 R9의 규칙대로 아무것도 바꾸지 않는다. 소거 트랜잭션은 I03의 `supersedeOpenJobs(sourceId)`를 불러 그 원본의 끝나지 않은 작업을 닫는다. 엔진·벡터 투영의 제거는 같은 트랜잭션에서, **tombstone을 쓰고 변경 순번이 오른 뒤에** 작업으로 등록하고 커밋 뒤 실행한다(I03-T10이 재구축 중의 제거 작업을 변경 순번으로 닫을 때 이 순서에 기댄다). 작업 종류 `projection-remove`, 묶음 `projection`(I03-T01의 작업 종류 표). 이 작업의 의미:
   - **fence**: 원본 version fence를 쓰지 않는다(I03의 "fence를 쓰지 않는 종류" 규칙). 대신 tombstone의 `covers_version`을 싣고, 그 version 이하에서 나온 투영 항목만 지운다. 해제 뒤 다시 들어온 더 새 version의 항목은 건드리지 않는다. `supersedeOpenJobs`는 투영 작업을 닫지 않는다(I03-R3).
-  - **결과 분류**: `AdapterUnavailableError`는 `status()`가 영구히 쓸 수 없다고 보고하는 구현(빈 벡터 색인, null 엔진)에서만 "지울 것 없음, 건너뜀 기록"으로 끝낸다. 다른 구현이 이 오류를 내면 재시도한다(멈춘 사이드카일 수 있다). `StaleFenceError`는 끝난 것이 **아니다**. 투영이 그 사이 더 새 통지를 받았다는 뜻이므로, 그 투영의 **지금 fence**로 다시 보낸다: 엔진은 `removeSource({version: covers_version}, 지금 fence)`, 벡터 색인은 이미 낡은 ref를 빼고 나머지를 다시 보낸다. 범위는 여전히 `covers_version` 이하에서 나온 항목이다. 투영이 지울 것이 남지 않았다고 할 때만 끝난다. 그 밖의 오류는 I03의 재시도를 따른다.
+  - **결과 분류**: `AdapterUnavailableError`는 등록 항목에 정적 표시 `permanentlyAbsent`가 있는 구현(등록된 null 엔진, 빈 벡터 색인)에서만 "지울 것 없음, 건너뜀 기록"으로 끝낸다. 실행 중의 오류나 `status()`로 판단하지 않는다. 다른 구현이 이 오류를 내면 재시도하며 표식은 남는다(멈춘 사이드카일 수 있다). 이 분류를 구현하는 곳은 I03-T10의 분류기이고, 규칙은 여기에 있다. `StaleFenceError`는 끝난 것이 **아니다**. 투영이 그 사이 더 새 통지를 받았다는 뜻이므로, **지금 fence**로 다시 보낸다. 지금 fence는 그 원본의 지금 정본 최신 version이다(규격에 새 조회 메서드를 더하지 않는다). 엔진은 `removeSource({version: covers_version}, 지금 fence)`, 벡터 색인은 이미 낡은 ref를 빼고 나머지를 다시 보낸다. 범위는 여전히 `covers_version` 이하에서 나온 항목이다. `removeSource`가 오류 없이 끝나면(벡터는 묶음이 받아들여지면) 끝난 것이다. 그 밖의 오류는 I03의 재시도를 따른다.
   - **포기한 경우**: 포기한 작업(dead_letter)이 되었거나 끝나지 않은 `projection-remove`는 그 자체가 "이 투영은 믿을 수 없다"는 표식이다. 시작할 때는 끝나지 않았거나 포기한 것이 하나라도 있으면, 스케줄러 주기에서는 포기한 것이나 1시간 넘게 끝나지 않은 것이 있으면 변경 순번과 상관없이 그 투영 전체를 재구축한다. 재구축이 끝날 때까지 그 투영에서 읽은 결과는 R13의 검사로 거른다. 표식 확인, 강제 재구축, 재구축 중에 생긴 삭제의 처리(재구축이 읽은 변경 순번 이하의 제거 작업만 닫는다)는 **I03-T10**이 구현한다. I04-T04는 그것을 쓰고 삭제 의미의 테스트(카나리, 순서)를 맡는다.
   
   같은 제거를 두 번 실행해도 결과가 같다. 시작할 때의 변경 순번 비교와 재구축(V02-R13)은 남는다. 소거 트랜잭션 도중 실패하면 정본은 아무것도 바뀌지 않는다.
@@ -180,12 +181,12 @@ V02가 I04로 넘긴 것: tombstone 보존 기간, 삭제한 원본의 복원, �
   - 엔진: 백엔드는 엔진을 등록부가 감싼 `KnowledgeEngine`으로만 받는다. 감싼 구현의 `relatedContext`가 결과에 `visible`을 적용한다. 지금은 제품 코드가 `relatedContext`를 부르지 않으므로(V02-C5) 이 경로의 검증은 감싼 구현을 직접 부르는 테스트뿐이다.
   - 뒤의 경로(알림 발송, 답변 문맥, 인용)도 같은 검사를 쓰며, 실행 검증은 P02-C3·X01-C4가 한다.
 - **I04-R14 access_scope의 승계와 `ScopePolicy`.** 파생물의 access_scope는 **저장하지 않고 계보에서 계산한다**(계보에 든 원본들의 access_scope 집합). 범위의 판단은 규격 `ScopePolicy` 하나가 한다.
-  - `compare(a, b)`는 `stricter`·`looser`·`equal`·`incomparable` 가운데 하나를 돌려준다. `atLeastAsStrict(a, b)`는 `compare`가 `stricter`나 `equal`일 때만 참이고 `incomparable`이면 거짓이다("a가 b만큼 엄격하다고 증명될 때만"). `strictest(scopes)`는 집합의 가장 엄격한 범위이고, 비교할 수 없는 것이 섞이면 "여러 범위 — 가장 엄격하게 다룸"이다. `combinable(scopes)`와 `allows(scopes, purpose)`는 참·거짓이다.
-  - 공용 기본 구현: 같은 문자열끼리, 그리고 빈 값끼리는 `equal`이다. 그 밖(빈 값과 문자열 포함)은 `incomparable`이다. 비교할 수 없는 범위는 **가장 엄격한 것으로** 다룬다. `combinable`과 `allows`는 언제나 참이다(한 PC의 한 사용자, ARCHITECTURE 8절).
+  - 범위 값은 `string[] | null`이다(I01이 정규화한 배열. `null`은 모름). 정의는 설계 개요의 "등록 규격" 블록 하나다. `compare(a, b)`는 `stricter`·`equal`·`looser`·`incomparable` 가운데 하나를 돌려준다. `atLeastAsStrict(a, b)`는 따로 구현하지 않고 `compare`가 `stricter`나 `equal`일 때만 참으로 만든다("a가 b만큼 엄격하다고 증명될 때만"). `strictest(scopes)`는 가장 엄격한 범위이고, 비교할 수 없는 것이 섞이면 "여러 범위 — 가장 엄격하게 다룸"이다. `combinable`과 `allows`는 참·거짓이다. `allows`는 읽기 검사(R13)만 쓴다.
+  - 공용 기본 구현: 같은 배열끼리, 그리고 `null`끼리는 `equal`이다. `null`은 모름이므로 다른 어떤 값보다 `stricter`다(반대 방향은 `looser`). 그 밖의 다른 배열끼리는 `incomparable`이다. 비교할 수 없는 범위는 **가장 엄격한 것으로** 다룬다. `combinable`과 `allows`는 언제나 참이다(한 PC의 한 사용자, ARCHITECTURE 8절).
   - `combinable`이 걸리는 자리는 `commitDerived` 안이다(R11). 그래서 연결 후보로 근거를 더하는 쓰기, 같은 행에 근거를 더하는 쓰기(V02-R8), 엔진이 제안한 후보의 기록, Insight 규칙의 결과, 뒤의 그래프 경로가 모두 같은 검사를 지난다. 거부되면 그 항목만 빠진다(R11). 연결 후보 찾기(V02-R7)는 미리 걸러, 묶을 수 없는 항목을 후보로 보내지 않는다.
-  - 로컬 가져오기가 적어 보낸 범위는 사용자가 주장한 값이다. 수집기 인스턴스의 범위보다 엄격하게만 바꿀 수 있고 느슨하게는 못 바꾼다. 이 판정은 I01이 `atLeastAsStrict(적은 범위, 인스턴스 범위)`로 한다.
+  - 로컬 가져오기가 적어 보낸 범위는 사용자가 주장한 값이다. 수집기 인스턴스의 범위보다 엄격하게만 바꿀 수 있고 느슨하게는 못 바꾼다. 이 판정의 규칙은 I01-R15가 정하고, 위 블록의 `compare`·`atLeastAsStrict`만 쓴다.
   - 배포처 구현 자리 `scopePolicy: "site"`는 공용 저장소에서 `미구현, 배포처 후속` 오류로 시작을 멈춘다(S21).
-- **I04-R15 범위 변경.** I01이 내는 범위 변경(같은 내용, 새 access_scope)은 좁아지든 넓어지든 새 version을 만들지 않고 원본의 범위만 바꾼다. 그리고 변경 종류 `scope-changed`로 전파한다. 내용을 지우지 않는다. 그 원본을 계보에 가진 Insight·delivery 종류를 다시 계산하고, `combinable` 때문에 빠졌던 항목(작업 결과에 사유 `scope-policy`로 남은 것)이 있는 원본은 다시 추출하는 작업을 등록한다. 다시 계산할 때 `combinable`이 거짓이 되면 그 Insight는 해소되고, 참이 되면 다시 생긴다. 표시 범위와 전송 등급은 계보에서 계산되므로 저절로 바뀐다. 이미 합쳐진 항목은 나누지 않는다(S02). 원 시스템에서 볼 수 있는 권한 자체를 잃은 경우는 범위 변경이 아니라 tombstone `access-revoked`다.
+- **I04-R15 범위 변경.** I01이 내는 범위 변경(같은 내용, 새 access_scope)은 좁아지든 넓어지든 새 version을 만들지 않고 원본의 범위만 바꾼다. 그리고 변경 종류 `scope-changed`로 전파한다. 내용을 지우지 않는다. 그 원본을 계보에 가진 Insight·delivery 종류를 다시 계산하고, `scope_policy_drops`에 기록이 있는 원본은 그 최신 version을 다시 추출하는 작업을 등록한다. 같은 version의 처음 추출 작업이 작업 중복 키를 이미 차지하므로, 이 작업은 대상 값 `scope-recompute:<변경 순번>`을 쓴다(I03이 넓힌 중복 키와 작업 종류·대상 표에 이 값을 둔다. 의존 I03-T01). 다시 추출한 뒤 그 원본의 기록을 비운다. 다시 계산할 때 `combinable`이 거짓이 되면 그 Insight는 해소되고, 참이 되면 다시 생긴다. 표시 범위와 전송 등급은 계보에서 계산되므로 저절로 바뀐다. 이미 합쳐진 항목은 나누지 않는다(S02). 원 시스템에서 볼 수 있는 권한 자체를 잃은 경우는 범위 변경이 아니라 tombstone `access-revoked`다.
 - **I04-R16 전송 정책의 승계.** Provider에 나가는 입력이 파생물이면(지금은 연결 후보의 이름, 뒤에는 요약·관련 문맥·embedding 입력), Broker는 등록부의 `lineage`로 그 원본들을 찾는다. 각 원본의 등급을 계산하고 가장 엄격한 것을 쓴다([ADR 0014](../adr/0014-egress-policy-and-consent.md)).
   - 부르는 쪽은 파생물의 ID만 넘긴다.
   - 계보가 비어 있으면 지금 Broker처럼 일반 등급이다(합성으로 보지 않는다, fail closed).
@@ -195,10 +196,11 @@ V02가 I04로 넘긴 것: tombstone 보존 기간, 삭제한 원본의 복원, �
 **복원**
 
 - **I04-R17 백업 복원 뒤 tombstone 재적용 정책.** 정책은 다음과 같고, 실제 백업으로 하는 실행 검증은 H01-C2가 한다.
-  - **장부**: tombstone을 쓰거나 해제할 때마다 데이터 디렉터리의 **tombstone 장부** 파일에 한 줄을 더한다. 한 줄에는 R7의 키 있는 해시(`namespace`를 포함한 정체 셋의 해시), `covers_version`, `last_revision`, 사유, 해제 여부, 시각이 들어간다. 장부의 머리에는 R7의 키가 있다. 장부는 백업 대상이 아니고 복원이 덮어쓰지 않는다.
+  - **장부**: tombstone 행을 **바꾸는** 쓰기마다 데이터 디렉터리의 **tombstone 장부** 파일에 한 줄을 더한다. 바꾸는 쓰기는 생성, 사유 변경, 덮는 범위 확장, `last_revision` 상승, 해제다. 받아들이지 않았거나 아무것도 바꾸지 않은 사건(`applyTombstone`의 `unchanged`)은 줄을 남기지 않는다. 줄은 받아들일지의 판정이 트랜잭션 안에서 끝난 **뒤에** 쓴다. 줄마다 하나씩 오르는 **장부 순번**이 있고, 정본은 마지막으로 반영한 장부 순번을 같은 트랜잭션에서 설정 행에 적는다. 한 줄에는 장부 순번, R7의 키 있는 해시(`namespace`를 포함한 정체 셋의 해시), 바뀐 뒤의 `covers_version`·`last_revision`·사유·해제 여부, 시각이 들어간다. 장부의 머리에는 R7의 키가 있다. 장부는 백업 대상이 아니고 복원이 덮어쓰지 않는다.
   - **순서**: 장부에 쓰고 fsync한 **뒤에** 소거 트랜잭션을 커밋한다. 반대 순서에서는 꺼지면 삭제가 장부에서 빠진다.
-  - **시작할 때 맞춰 보기**: 커밋 전에 꺼지면 장부에만 줄이 남는다. 그래서 매번 시작할 때 API가 열리기 전에, 데이터베이스의 tombstone보다 새로운 장부 줄을 같은 소거 함수로 적용하고 무효화 기록에 남긴다. 장부의 뜻이 이긴다. 사용자나 출처가 요청한 삭제이기 때문이다.
-  - **재적용**: 복원한 데이터베이스는 화면·API·작업 실행기가 열리기 **전에** 재적용을 끝낸다. 장부와 복원본 자체의 tombstone을 합쳐, 같은 원본이면 R9의 우선 규칙으로 하나를 고른 뒤 적용한다. 재적용은 R5~R7의 소거와 같은 함수다. 끝나면 엔진·벡터 투영을 변경 순번과 상관없이 재구축한다. 복원본의 순번이 우연히 투영과 같아도 기록이 다를 수 있기 때문이다.
+  - **시작할 때 맞춰 보기**: 커밋 전에 꺼지면 장부에만 줄이 남는다. 그래서 매번 시작할 때 API가 열리기 전에, 정본이 적은 마지막 장부 순번보다 **큰 순번의 줄을 순번 차례로** 적용한다. 줄은 tombstone 행을 줄에 적힌 상태로 만들고, 덮는 범위가 넓어졌으면 같은 소거 함수로 지우며, 해제 줄이면 해제를 적용한다. 무효화 기록에 남긴다. `covers_version`의 크기로 "새로운 줄"을 판단하지 않는다(같은 범위의 다시 삭제가 빠지고, 거절된 사건이 남긴 줄이 있으면 지나치게 지운다). 장부의 뜻이 이긴다. 사용자나 출처가 요청한 일이기 때문이다.
+  - **재적용**: 복원한 데이터베이스는 화면·API·작업 실행기가 열리기 **전에** 재적용을 끝낸다. 복원본이 적은 마지막 장부 순번보다 큰 줄을 순번 차례로 적용한다(위 맞춰 보기와 같은 함수).
+  - **키가 다를 때**: 정본에 해시된 행이 있는 키는 **바꾸지 않는다**. 복원본에 키도 해시된 행도 없으면(I04 이전 백업) 마이그레이션이 새 키를 만들기 전에 장부 머리의 키를 받아들인다. 정본의 키와 장부 머리의 키가 둘 다 있고 다르면(다른 설치의 백업) 그 장부는 재적용에 쓰지 않고 "장부 없음"으로 다룬다. 이때 그 장부에 든 삭제 수를 화면에 보여 사용자가 알게 하고, 조용히 버리지 않는다. 재적용은 R5~R7의 소거와 같은 함수다. 끝나면 엔진·벡터 투영을 변경 순번과 상관없이 재구축한다. 복원본의 순번이 우연히 투영과 같아도 기록이 다를 수 있기 때문이다.
   - **장부가 없을 때**(다른 PC에 백업만 가져옴): 복원본의 tombstone은 정본에 든 키로 계속 대조된다(R7). 그러나 백업 뒤의 삭제는 알 수 없다. 화면에 "백업 뒤의 삭제는 다시 수집해야 반영됨"을 알린다. 수집기가 전체 재스캔에서 삭제를 알리는 능력(`deletionsOnRescan`, I01)이 있으면 다음 동기화로 반영된다. 없으면 그 수집기의 원본은 반영되지 않을 수 있다고 함께 알린다.
   - I04는 장부 쓰기, 시작 때 맞춰 보기, 재적용 함수, 재적용 전 차단까지 만들고, 강제 재구축은 I03-T10의 장치를 부른다. 백업 파일 형식과 복원 화면은 H01이 만든다.
 
@@ -260,14 +262,20 @@ stateDiagram-v2
   LIFTED --> ACTIVE: I01의 보통 도착 규칙으로 받은 레코드
 ```
 
-### 등록 규격 (잠정. I04-T01에서 확정해 ARCHITECTURE 5절로 옮긴다)
+### 등록 규격 — 단일 정의 (이름과 모양은 고정. 세부 타입은 I04-T01에서 확정해 ARCHITECTURE 5절로 옮긴다)
+
+아래 블록이 `ScopePolicy`, `commitDerived`, tombstone 쓰기 입구의 **유일한 정의**다. I01과 I03은 이 이름과 인자를 그대로 인용한다. 바꿀 때는 이 블록을 먼저 고치고 두 spec에 알린다.
 
 ```typescript
+// 범위 값: I01이 정규화한 배열(정렬, 중복 없음). null은 "모름"이고 가장 엄격한 것으로 다룬다.
+type AccessScope = readonly string[] | null
+
 type Layer = 'source' | 'evidence' | 'knowledge' | 'item' | 'insight' | 'delivery' | 'projection'
+type TombstoneReason = 'source-deleted' | 'access-revoked' | 'user-deleted'
 type SourceChange =
   | { kind: 'new-version' | 'old-versions-pruned'; sourceId: number; version: number }
-  | { kind: 'scope-changed'; sourceId: number }
-  | { kind: 'source-deleted' | 'access-revoked' | 'user-deleted'; sourceId: number; coversVersion: number }
+  | { kind: 'scope-changed'; sourceId: number; from: AccessScope; to: AccessScope }
+  | { kind: TombstoneReason; sourceId: number; coversVersion: number; lastRevision: number | null }
 interface DerivedRef { kind: string; id: string }                 // 정본의 ID. 내용을 갖지 않는다
 interface DerivativeKind {
   readonly kind: string
@@ -275,17 +283,51 @@ interface DerivativeKind {
   readonly references: readonly string[]                           // 같은 층에서 이 종류가 가리키는 종류
   readonly storage: 'canonical' | 'projection'
   readonly dataPaths: readonly string[]                            // 데이터 디렉터리 안 경로
+  readonly permanentlyAbsent?: true                                // 투영 종류만: null 엔진·빈 벡터 색인처럼 언제나 없는 구현
   affected(tx: SqlDriver, change: SourceChange): Affected          // 1단계: 지우기 전
   lineage(db: SqlDriver, ref: DerivedRef): SourceVersionRef[]      // 범위·등급·fence의 유일한 입력
   invalidate(ctx: InvalidationContext, snapshot: Affected, change: SourceChange): { removed: number; recomputed: number }
 }
-// 등록부의 공용 함수: propagate, assertFresh, assertLineage, commitDerived, visible, scopesOf, identityKey
-interface ScopePolicy {
-  compare(a: string | null, b: string | null): 'stricter' | 'looser' | 'equal' | 'incomparable'
-  strictest(scopes: ReadonlySet<string | null>): string | null | { incomparable: ReadonlySet<string | null> }
-  combinable(scopes: ReadonlySet<string | null>): boolean
-  allows(scopes: ReadonlySet<string | null>, purpose: 'display' | 'search' | 'notify' | 'answer'): boolean
+
+// 파생물 쓰기의 유일한 입구(R11). 트랜잭션은 부르는 쪽(I03의 결과 쓰기 트랜잭션, I03-R6 ③)이 연다.
+interface DerivedWrite {
+  kind: string                         // 등록된 종류
+  itemKey: string                      // 같은 행 판정 키(V02-R8). 정책 거부 기록에는 R7의 키로 만든 해시만 남는다
+  lineage: readonly SourceVersionRef[] // 이 항목의 계보(입력 원본 version 포함)
+  apply(tx: SqlDriver): void           // 검사를 지난 항목만 불린다
 }
+type CommitResult =
+  | { status: 'committed'; written: number; dropped: number }      // dropped: 범위 정책으로 버린 항목 수(R11, 기록은 scope_policy_drops)
+  | { status: 'stale'; cause: 'missing' | 'not-latest' | 'covered' | 'lineage-covered' }  // 아무것도 쓰지 않음. 작업은 superseded
+function commitDerived(
+  tx: SqlDriver,
+  input: { sourceId: number; version: number } | null,            // 작업이 입력으로 받은 원본 version(없는 작업은 null)
+  writes: readonly DerivedWrite[],
+): CommitResult
+
+// tombstone 쓰기의 유일한 입구(R9). I01의 삭제 사건과 화면의 삭제(V02-T08)가 부른다. 트랜잭션은 부르는 쪽이 연다.
+interface TombstoneWrite {
+  identity: { connectorInstanceId: string; namespace: string; externalId: string }
+  reason: TombstoneReason
+  lastRevision: number | null          // 출처 사건의 revision. 화면 삭제는 null
+  at: string
+}
+type TombstoneOutcome = 'created' | 'cover-extended' | 'reason-changed' | 'revision-raised' | 'unchanged'
+function applyTombstone(tx: SqlDriver, w: TombstoneWrite): { outcome: TombstoneOutcome; sourceId: number; coversVersion: number }
+function liftTombstone(tx: SqlDriver, sourceId: number, at: string): { outcome: 'lifted' | 'unchanged' }
+// covers_version은 부르는 쪽이 정하지 않는다. applyTombstone이 그 원본의 지금 최신 version(없으면 0)으로 정한다.
+// outcome이 'created'·'cover-extended'이면 같은 트랜잭션에서 propagate를 부른다. 'unchanged'이면 장부에 쓰지 않는다(R17).
+
+// 범위 판단의 유일한 정의(R14). I01은 compare·atLeastAsStrict·strictest·combinable 네 이름만 쓴다.
+interface ScopePolicy {
+  compare(a: AccessScope, b: AccessScope): 'stricter' | 'equal' | 'looser' | 'incomparable'
+  strictest(scopes: readonly AccessScope[]): AccessScope | { incomparable: readonly AccessScope[] }
+  combinable(scopes: readonly AccessScope[]): boolean
+  allows(scopes: readonly AccessScope[], purpose: 'display' | 'search' | 'notify' | 'answer'): boolean  // I04 안에서만 씀(R13)
+}
+// atLeastAsStrict는 구현하지 않고 compare에서 만든다: compare(a, b)가 'stricter'나 'equal'이면 참.
+function atLeastAsStrict(policy: ScopePolicy, a: AccessScope, b: AccessScope): boolean
+// 등록부의 그 밖의 공용 함수: propagate, assertFresh, assertLineage, visible, scopesOf, identityKey
 ```
 
 `invalidate`는 같은 입력으로 두 번 불러도 결과가 같아야 한다. 투영 종류의 `invalidate`는 기존 `KnowledgeEngine.removeSource(ref)`(그 원본의 `ref.version` 이하를 지운다)와 `VectorIndex.remove`를 부르는 얇은 어댑터이며, 그 규격은 바꾸지 않는다.
@@ -352,20 +394,21 @@ C1~C3은 이슈 #21의 문장 그대로다. H1·H2는 이 프로젝트가 배포
 | C1 | `read-gate` | 통합 | 테스트가 저장 모듈로 tombstone만 쓰고 소거는 하지 않은 상태(덮였지만 아직 남아 있음)를 만든다. 그 상태에서 키워드 검색, Sources 목록, 지식 API, Insight 목록, 근거 목록, 감싼 엔진의 `relatedContext` 여섯 경로 어디에도 그 원본에서 나온 것이 없음. 빨간 경우: 경로마다 `visible`을 빼면 그 경로의 경우가 실패(6건) |
 | C1 | `read-gate.e2e` | Playwright E2E | 삭제 직후 Home·Sources·검색 화면에 그 원본과 그 Insight가 보이지 않음 |
 | C1 | `scope.inherit` | 단위 | 범위 a, b의 근거를 가진 사실의 범위 집합이 {a, b}. b 원본이 권한 상실하면 {a}. 기본 정책에서 `strictest({a})`는 a, `strictest({a, b})`는 비교 불가(가장 엄격하게 다룸), `allows`는 참 |
-| C1 | `scope.policy` | 통합 | a와 b를 묶을 수 없다는 테스트 정책에서: b 원본의 추출에 a 계보의 항목이 후보로 오지 않음. `commitDerived`가 a·b 계보를 함께 가진 Insight와 근거 추가 **그 항목만** 버리고 같은 추출의 나머지 사실은 기록됨. 작업은 `superseded`가 아니라 정상으로 끝나고 결과에 사유 `scope-policy`와 버린 수가 남음. 테스트 정책의 `allows(…, 'search')`가 거짓인 범위는 키워드 검색에서 빠짐. 기본 정책에서는 V02 흐름이 그대로 |
-| C1 | `scope.changed` | 통합 | 범위 변경 뒤 새 version이 생기지 않고, 변경 종류 `scope-changed`의 무효화 기록이 남음. 좁아져 묶을 수 없게 된 Insight가 해소. 다시 넓어지면 그 Insight가 같은 행으로 다시 생기고, `scope-policy`로 빠졌던 항목의 원본에 다시 추출 작업이 등록됨. 표시 범위가 새 값. 기본 정책에서 빈 값끼리는 `equal`, `atLeastAsStrict(a, b)`는 a=b에서만 참 |
+| C1 | `scope.policy` | 통합 | a와 b를 묶을 수 없다는 테스트 정책에서: b 원본의 추출에 a 계보의 항목이 후보로 오지 않음. `commitDerived`가 a·b 계보를 함께 가진 Insight와 근거 추가 **그 항목만** 버리고 같은 추출의 나머지 사실은 기록됨. 작업은 `superseded`가 아니라 정상으로 끝나고 `CommitResult.dropped`가 버린 수이며 `scope_policy_drops`에 내용 없는 행이 남음. 테스트 정책의 `allows(…, 'search')`가 거짓인 범위는 키워드 검색에서 빠짐. 기본 정책에서는 V02 흐름이 그대로 |
+| C1 | `scope.changed` | 통합 | 범위 변경 뒤 새 version이 생기지 않고, 변경 종류 `scope-changed`의 무효화 기록이 남음. 좁아져 묶을 수 없게 된 Insight가 해소. 다시 넓어지면 그 Insight가 같은 행으로 다시 생기고, `scope_policy_drops`에 기록이 있던 원본에 대상 `scope-recompute:<변경 순번>`인 추출 작업이 등록되고(처음 추출 작업이 남아 있어도), 두 번째로 넓어져도 다시 등록됨. 다시 추출한 뒤 기록이 비고, 작업 보존 정리가 끝난 작업 행을 지워도 기록은 남음. 표시 범위가 새 값. 기본 정책에서 빈 값끼리는 `equal`, `null`은 다른 값보다 `stricter`, 다른 배열끼리는 `incomparable`, `atLeastAsStrict(a, b)`는 a=b이거나 a가 `null`일 때만 참 |
 | C1 | `egress.derived-grade` | 통합 | 연결 후보 항목의 계보에 일반 등급 원본이 있으면 그 추출 호출의 등급이 일반(V02 `linking`과 같은 결과를 계보 경로로). 그 원본을 지운 뒤에는 그 후보가 오지 않음. 계보가 빈 ID는 일반 등급. 등록되지 않은 종류의 ID는 거부 |
-| C2 | `fence.fresh` | 통합 | ① 추출 중 출처 삭제 → 결과 버림, 작업 superseded ② 추출 중 권한 상실 → 같음 ③ **추출 중 새 version 도착** → 옛 version의 결과 버림 ④ 계보의 다른 원본(후보 항목의 근거)만 삭제되어도 결과 전체를 버림 ⑤ 포기한 작업(dead_letter)을 원본 삭제 뒤 수동 재시도해도 결과가 쓰이지 않음 |
-| C2 | `tombstone.rules` | 통합 | 같은 `covers_version`의 `user-deleted`가 `source-deleted`를 덮어씀, 반대는 변화 없음. 낮거나 같은 tombstone은 변경 순번·행 수 그대로. 모든 version이 지워진 뒤 다음 version 번호가 `covers_version + 1`. 처음 보는 원본의 tombstone이 `covers_version` 0. 마이그레이션이 기존 `deleted`를 `user-deleted`로. 해제가 `lifted_at`을 쓰고 장부에 줄을 남김. 해제 뒤 새 version 전에 같은 `covers_version`의 삭제가 다시 오면 그 사유로 다시 쓰고 `lifted_at`을 비움. 같은 `covers_version`의 출처 tombstone이 더 큰 revision으로 오면 `last_revision`만 오름. 처음 보는 원본의 tombstone이 만든 `sources` 행에 평문 정체가 없음. 사유 변경과 해제는 변경 순번을 올리지 않음. 해제 뒤 다시 받은 version의 추출 작업이 fence에 걸리지 않음. 해시로 찾은 원본에 레코드를 다시 받으면 같은 `sources` 행이 평문 정체를 되찾고 행 수가 그대로 |
+| C2 | `fence.fresh` | 통합 | ① 추출 중 출처 삭제 → 결과 버림, 작업 superseded ② 추출 중 권한 상실 → 같음 ③ **추출 중 새 version 도착** → 옛 version의 결과 버림 ④ 계보의 다른 원본(후보 항목의 근거)만 삭제되어도 결과 전체를 버림 ⑤ 포기한 작업(dead_letter)을 원본 삭제 뒤 수동 재시도해도 결과가 쓰이지 않음 ⑥ 해제 뒤 다시 받은 version의 추출 결과는 fence에 걸리지 않음. `commitDerived`의 반환이 블록의 `CommitResult` 모양 |
+| C2 | `tombstone.rules` | 통합 | (I04-T05, 스키마와 사유만) 같은 `covers_version`의 `user-deleted`가 `source-deleted`를 덮어씀, 반대는 변화 없음. 낮거나 같은 tombstone은 `unchanged`이고 변경 순번·행 수 그대로. 같은 `covers_version`의 출처 tombstone이 더 큰 revision으로 오면 `revision-raised`이고 `last_revision`만 오름. 모든 version이 지워진 뒤 다음 version 번호가 `covers_version + 1`. 처음 보는 원본의 tombstone이 `covers_version` 0. 마이그레이션이 기존 `deleted`를 `user-deleted`로. 해제가 `lifted_at`을 씀. 해제 뒤 새 version 전에 같은 `covers_version`의 삭제가 다시 오면 그 사유로 다시 쓰고 `lifted_at`을 비움. 사유 변경과 해제는 변경 순번을 올리지 않음 |
+| C3 | `identity.hash` | 통합 | (I04-T07, 저장 함수 수준) 처음 보는 원본의 tombstone이 만든 `sources` 행에 평문 정체가 없음. 소거 뒤 해시된 행을 `identityKey`로 찾음. 평문 되쓰기와 도착 판정은 I01-T02의 테스트(`source.tombstone`, `arrival.decision`) |
 | C2 | `purge.idempotent` | 통합 | 같은 삭제 사건 두 번 → 두 번째는 변경 순번, 행 수, 무효화 기록 모두 그대로. 소거 트랜잭션이 그 원본의 끝나지 않은 작업을 모두 superseded로 닫되 투영 작업은 닫지 않음 |
-| C2 | `projection-remove` | 통합 | ① 처음에 실패하면 재시도되어 결국 제거 ② 두 번 실행해도 엔진 상태가 같음 ③ 해제 뒤 다시 들어온 더 새 version의 엔진 항목은 지워지지 않음 ④ 빈 벡터 색인에서 "건너뜀"으로 끝나고, 영구 불가가 아닌 구현의 `AdapterUnavailableError`는 재시도됨 ⑤ **낡은 fence 다시 보내기**: 제거 실패 → 해제 → v4 반영 → 재시도가 `StaleFenceError` → 지금 fence로 다시 보냄 → v1~v3 항목은 사라지고 v4는 남음 ⑥ 포기한 작업(dead_letter)이 된 뒤 변경 순번이 같아져도 재시작과 스케줄러 주기에서 그 투영의 재구축이 일어나고 카나리가 사라짐. 그 전까지 감싼 엔진의 결과에서 그 원본이 걸러짐(I03-T10의 장치 위에서 I04가 시험) ⑦ 재구축을 두 번 해도 결과가 같음 |
+| C2 | `projection-remove` | 통합 | ① 처음에 실패하면 재시도되어 결국 제거 ② 두 번 실행해도 엔진 상태가 같음 ③ 해제 뒤 다시 들어온 더 새 version의 엔진 항목은 지워지지 않음 ④ `permanentlyAbsent`가 있는 빈 벡터 색인에서 "건너뜀"으로 끝나고, 표시가 없는 구현(멈춘 사이드카 대역)의 `AdapterUnavailableError`는 재시도되며 표식이 남음 ⑤ **낡은 fence 다시 보내기**: 제거 실패 → 해제 → v4 반영 → 재시도가 `StaleFenceError` → 그 원본의 지금 최신 version을 fence로 다시 보냄 → `removeSource`가 오류 없이 끝나 작업 종료, v1~v3 항목은 사라지고 v4는 남음 ⑥ 포기한 작업(dead_letter)이 된 뒤 변경 순번이 같아져도 재시작과 스케줄러 주기에서 그 투영의 재구축이 일어나고 카나리가 사라짐. 그 전까지 감싼 엔진의 결과에서 그 원본이 걸러짐(I03-T10의 장치 위에서 I04가 시험) ⑦ 재구축을 두 번 해도 결과가 같음 |
 | C3 | `reevaluate` | 통합 | 두 원본이 근거인 사실은 한 원본을 지운 뒤 남은 근거가 현재 근거면 상태 그대로이고, 지난 근거만이면 superseded. 그 사실을 쓰는 Insight가 다시 계산되고 지운 원본에서 온 설명 글이 남지 않음. 근거가 모두 사라진 user-approved 사실은 지워짐. 계보 없는 테스트 행은 남음 |
 | C3 | `purge.canary-files` | 통합 | 파일 기반 데이터 디렉터리에서 다음 카나리(앞부분이 서로 겹치지 않음)가 삭제 뒤 `.db`·`-journal`·`-wal`·`-shm`과 종류 경로 어디에도 없음: ① 현재 version 본문 ② 예전 version에만 있던 값 ③ 색인을 거쳐 소문자가 된 낱말 ④ 인용문 ⑤ 출처 정보(작성자)와 block의 locator(시트 이름) ⑥ Insight 설명 글 ⑦ **외부 식별자와 namespace**. 권한 상실과 사용자 삭제도 같음. 빨간 경우: `secure_delete`를 끄면 ①이, FTS `secure-delete`를 끄면 ③이 실패 |
 | C3 | `purge.legacy-residue` | 통합 | I04 이전 스키마에서 설정 없이 지운 데이터베이스를 열면 `migrate` 뒤의 한 번 정리(`optimize`+`VACUUM`)가 돌아 그 카나리가 파일에서 사라짐. 두 번째 시작에는 돌지 않음 |
 | C3 | `identity.key` | 통합 | 키가 정본과 장부 머리에 같음. 키 행을 지운 데이터베이스(해시된 원본이 있음)로 시작하면 가져오기·동기화가 열리지 않고 이유가 보임. 그 상태에서 사용자 삭제했던 레코드를 넣으면 저장되지 않음. 새 키가 몰래 생기지 않음 |
 | C3 | `retention` | 통합 | tombstone은 소거 뒤에도, 재시작 뒤에도 남음. 새 version이 와도 이전 version과 그 본문이 남음(근거 유무와 상관없이). tombstone이 덮으면 함께 사라짐 |
-| C3 | `restore.reapply` | 통합 | 삭제 **전** 데이터베이스 사본을 "복원본"으로 열고 장부를 재적용하면 결과(행 수, 종류별 수, 카나리 부재)가 처음 삭제와 같음. 재적용을 두 번 해도 같음. 재적용이 끝나기 전에는 API가 응답하지 않음. 끝나면 투영 재구축이 호출됨(순번이 같아도). 장부가 없는 복원(키는 정본에만 있음)에서도 복원본의 tombstone이 대조됨. 해제 줄이 있으면 해제가 유지됨. 장부에 외부 식별자 문자열이 없음. 장부가 없으면 알림이 나옴 |
-| C3 | `ledger.boot-reconcile` | 통합 | 장부 fsync 뒤·커밋 전에 백엔드를 강제로 끝내고 **보통 재시작**하면, API가 열리기 전에 그 삭제가 적용되고 무효화 기록에 남음. 장부보다 새 tombstone이 없으면 아무것도 하지 않음 |
+| C3 | `restore.reapply` | 통합 | 삭제 **전** 데이터베이스 사본을 "복원본"으로 열고 장부를 재적용하면 결과(행 수, 종류별 수, 카나리 부재)가 처음 삭제와 같음. 재적용을 두 번 해도 같음. 재적용이 끝나기 전에는 API가 응답하지 않음. 끝나면 투영 재구축이 호출됨(순번이 같아도). 장부가 없는 복원(키는 정본에만 있음)에서도 복원본의 tombstone이 대조됨. **키 세 경우**: ① 키도 해시된 행도 없는 복원본은 장부 머리의 키를 받아들이고 장부가 적용됨 ② 해시된 행이 있는 복원본의 키는 바뀌지 않음 ③ 두 키가 다르면 장부를 쓰지 않고 "장부 없음" 알림과 그 장부의 삭제 수가 보임. 해제 줄이 있으면 해제가 유지됨. 장부에 외부 식별자 문자열이 없음. 장부가 없으면 알림이 나옴 |
+| C3 | `ledger.boot-reconcile` | 통합 | (I04-T10) ① 장부 fsync 뒤·커밋 전에 백엔드를 강제로 끝내고 **보통 재시작**하면, API가 열리기 전에 그 삭제가 적용되고 무효화 기록에 남음 ② **덜 지우기 막기**: 해제 뒤 같은 `covers_version`으로 다시 삭제한 것이 커밋 전에 꺼져도 다음 시작에 적용됨 ③ **더 지우기 막기**: 원본 삭제(v3) → 해제 → v4 받음 → 낡은 삭제 사건이 다시 옴(받아들이지 않음)이면 장부에 줄이 없고, 다음 시작이 v4를 지우지 않음 ④ 해제 줄이 커밋 전에 꺼지면 다음 시작에 해제가 적용됨 ⑤ 장부 순번이 정본의 값 이하인 줄은 적용하지 않음 ⑥ 해제가 장부에 줄을 남김 |
 | H1 | `docs.site-setup` | 단위 | 비목표 표의 번호 2개가 체크리스트에 모두 있음 |
 | H2 | `site-paths.refuse` | 통합 | 두 경로 각각에서 알림 문자열과 0이 아닌 종료 값 |
 | (T12) | `versions.prune` | 통합 | 선택 작업을 하면: 이전 version 지우기 뒤 그 version의 카나리가 파일에서 사라지고, 지난 근거만 있던 사실이 지워지며, 최신 version은 남음 |
@@ -383,7 +426,7 @@ C1~C3은 이슈 #21의 문장 그대로다. H1·H2는 이 프로젝트가 배포
 
 한 작업이 PR 하나다. 그림은 I04 안의 선후만 그렸고, 다른 작업에 대한 선행은 표가 기준이다. 모든 작업은 V02-T07·T08·T09의 머지 뒤에 시작한다(미해결 질문 1). 테스트는 작업마다 먼저 실패하는 것으로 쓰고 구현을 붙인다.
 
-**함께 진행할 수 있는 것**: T01 뒤에 T03·T04·T05가 함께 간다. T03·T04 뒤에 T02·T08이, T03·T05 뒤에 T07이 함께 간다. T06은 T03·T05와 I03-T04를 기다리고, T09는 T06 뒤에 간다. 이 순서에서 각 PR은 main을 초록으로 둔다(T02의 검사는 기본 구성의 종류가 모두 등록된 뒤에 켜진다).
+**함께 진행할 수 있는 것**: T01 뒤에 T03·T04가 함께 간다. T03 뒤에 T05가 간다. T03·T04 뒤에 T02·T08이, T03·T05 뒤에 T07이 함께 간다. T06은 T05와 I03-T04를 기다리고, T09는 T06 뒤에 간다. 각 작업의 테스트는 그 작업과 그 앞 작업만으로 돈다(뒤 작업의 동작을 시험하지 않는다). 이 순서에서 각 PR은 main을 초록으로 둔다(T02의 검사는 기본 구성의 종류가 모두 등록된 뒤에 켜진다).
 
 ```mermaid
 flowchart LR
@@ -391,9 +434,8 @@ flowchart LR
   T01 --> T04["T04 투영 제거 작업"]
   T03 --> T02["T02 등록 누락 검사"]
   T04 --> T02
-  T01 --> T05["T05 tombstone 모양과 해제"]
-  T03 --> T06["T06 fence와 쓰기 함수"]
-  T05 --> T06
+  T03 --> T05["T05 tombstone 모양과 해제"]
+  T05 --> T06["T06 fence와 쓰기 함수"]
   T03 --> T07["T07 파일 수준 소거와 식별자"]
   T05 --> T07
   T03 --> T08["T08 읽기 검사"]
@@ -410,16 +452,16 @@ flowchart LR
 
 | ID | 내용 | 요구사항 | 기준 | 선행 | 테스트 |
 |---|---|---|---|---|---|
-| I04-T01 | `DerivativeKind` 규격, 등록부의 `propagate`(두 단계)·`visible`·`scopesOf`, 계약 테스트 묶음(testkit), 무효화 기록 테이블과 상태 API의 수. 규격을 ARCHITECTURE 5절 새 소절로 옮김 | R1, R2, R4, R18(ARCHITECTURE 5절) | C1 | V02-T07, V02-T08, V02-T09 | `derivatives.contract`(대역 종류로 묶음 자체를 시험), `propagate.two-phase`(대역 종류), `invalidate.record` |
+| I04-T01 | `DerivativeKind` 규격과 설계 개요 블록의 이름·모양(`commitDerived`, `applyTombstone`·`liftTombstone`, `ScopePolicy`)을 코드 타입으로 고정, 등록부의 `propagate`(두 단계)·`visible`·`scopesOf`, 계약 테스트 묶음(testkit), 무효화 기록 테이블과 상태 API의 수. 규격을 ARCHITECTURE 5절 새 소절로 옮김 | R1, R2, R4, R18(ARCHITECTURE 5절) | C1 | V02-T07, V02-T08, V02-T09 | `derivatives.contract`(대역 종류로 묶음 자체를 시험), `propagate.two-phase`(대역 종류), `invalidate.record` |
 | I04-T02 | 테이블 분류 목록과 검사, 데이터 디렉터리 목록 검사(운영 목록은 main의 항목에서 시작), 어댑터 묶음 검사 | R3 | C1 | I04-T03, I04-T04 | `derivatives.schema-coverage`, `derivatives.data-dir`, `derivatives.unregistered-adapter` |
 | I04-T03 | 원본 version·키워드 색인·근거·사실·관계·항목·Insight를 종류로 등록, V02-T07·T08의 손 전파를 등록부 전파로 바꿈(동작 유지), 남는 지식의 재평가, `supersedeOpenJobs` 호출 | R1, R2, R5, R8, R12(작업 닫기) | C1, C3 | I04-T01, **I03-T01**(`supersedeOpenJobs`) | `derivatives.contract`(정본 종류 실제 구현), `propagate.two-phase`(실제 스키마의 cascade 위에서), V02의 `update.recompute`·`delete.purge`·`delete.propagate` 유지, `reevaluate`, `purge.idempotent`의 작업 닫기 |
-| I04-T04 | 엔진·벡터(null 엔진, 빈 벡터 색인 포함)를 투영 종류로 등록, `projection-remove`의 의미(covers_version fence, 결과 분류, 낡은 fence 다시 보내기), 감싼 `KnowledgeEngine`. 표식 확인과 강제 재구축은 I03-T10의 것을 씀. ARCHITECTURE 6절의 투영 제거 문장 고침 | R1, R12, R13(감싼 엔진), R18 | C1, C2 | I04-T01, **I03**(작업 종류·묶음 표), **I03-T10**(표식과 강제 재구축) | `derivatives.contract`(투영 종류), `projection-remove`, V02의 `engine.calls`·`engine.restart` 유지 |
-| I04-T05 | tombstone 마이그레이션(`covers_version`, `last_revision`, 사유 셋, `lifted_at`, 기존 `deleted` 옮기기, 버전 트리거), 사유 우선 규칙, 해제 API, 화면 삭제의 `user-deleted`. ADR 0013 결정 4와 ARCHITECTURE 0·6절의 tombstone 문장 고침 | R9, R12(멱등), R18 | C2 | I04-T01 (I01에 기대지 않는다. I01-T02가 이 작업을 기다린다) | `tombstone.rules`, `purge.idempotent` |
-| I04-T06 | `assertFresh`·`assertLineage`·`commitDerived`의 본문(I03-T04가 낸 임시 함수를 바꿈), 결과를 쓰는 모든 경로(V02-T05 추출, 규칙, 엔진 제안 기록)를 `commitDerived`로 옮김, `combinable` 실패는 그 항목만 버림 | R11 | C2 | I04-T03, I04-T05, **I03-T04**(`commitDerived` 모양의 임시 함수) | `fence.fresh`(①~④ 먼저, ⑤는 I03의 수동 재시도 뒤) |
-| I04-T07 | 연결마다 `journal_mode = DELETE`·`secure_delete`, FTS `secure-delete` 마이그레이션, `migrate` 뒤 한 번의 `optimize`+`VACUUM`, 식별자 해시 교체와 `identityKey`, 키를 정본에 만들고 없으면 시작 오류, 이전 version 보존 확인, 카나리 검사 도구(testkit). ADR 0013 결정 5와 ARCHITECTURE 4절 고침 | R6, R7, R10, R18 | C3 | I04-T03, I04-T05 | `purge.canary-files`, `purge.legacy-residue`, `identity.key`, `retention` |
+| I04-T04 | 엔진·벡터(null 엔진, 빈 벡터 색인은 `permanentlyAbsent`로)를 투영 종류로 등록, `projection-remove`의 의미(covers_version fence, 결과 분류, 낡은 fence 다시 보내기), 감싼 `KnowledgeEngine`. 표식 확인과 강제 재구축은 I03-T10의 것을 씀. ARCHITECTURE 6절의 투영 제거 문장 고침 | R1, R12, R13(감싼 엔진), R18 | C1, C2 | I04-T01, **I03-T01**(작업 종류·묶음 표), **I03-T05**(묶음 상한), **I03-T10**(표식, 분류기, 강제 재구축) | `derivatives.contract`(투영 종류), `projection-remove`, V02의 `engine.calls`·`engine.restart` 유지 |
+| I04-T05 | tombstone 마이그레이션(`covers_version`, `last_revision`, 사유 셋, `lifted_at`, 기존 `deleted` 옮기기, 사유 CHECK, 버전 트리거, 순번 트리거), `applyTombstone`·`liftTombstone`(사유 우선, 해제 API). ADR 0013 결정 4와 결과, ARCHITECTURE 0·6절의 tombstone 문장 고침 | R9, R12(멱등), R18 | C2 | I04-T03 (I01에 기대지 않는다. I01-T02가 이 작업을 기다린다) | `tombstone.rules`, `purge.idempotent`의 같은 사건 두 번 |
+| I04-T06 | `assertFresh`·`assertLineage`·`commitDerived`의 본문(I03-T04가 낸 임시 함수를 바꿈), 결과를 쓰는 모든 경로(V02-T05 추출, 규칙, 엔진 제안 기록)를 `commitDerived`로 옮김, `combinable` 실패는 그 항목만 버림 | R11 | C2 | I04-T05, **I03-T04**(`commitDerived` 모양의 임시 함수), **I03-T07**(수동 재시도, ⑤) | `fence.fresh` |
+| I04-T07 | 연결마다 `journal_mode = DELETE`·`secure_delete`, FTS `secure-delete` 마이그레이션, `migrate` 뒤 한 번의 `optimize`+`VACUUM`, 식별자 해시 교체와 `identityKey`, 키를 정본에 만들고 없으면 시작 오류, 이전 version 보존 확인, 카나리 검사 도구(testkit). ADR 0013 결정 5와 ARCHITECTURE 4절 고침 | R6, R7, R10, R18 | C3 | I04-T03, I04-T05 | `purge.canary-files`, `purge.legacy-residue`, `identity.key`, `identity.hash`, `retention` |
 | I04-T08 | 읽기 경로 다섯 곳에 `visible` 적용(감싼 엔진은 T04) | R13 | C1 | I04-T03, I04-T04 | `read-gate`, `read-gate.e2e` |
-| I04-T09 | `ScopePolicy` 규격과 기본 구현, 계보로 범위 계산, `commitDerived`의 `combinable`, 후보 미리 거르기, `scope-changed` 전파, Broker의 파생 입력 등급, `scopePolicy: "site"` 자리. ADR 0014와 ARCHITECTURE 8절 고침 | R14, R15, R16, R18 | C1, H2 ① | I04-T03, I04-T06, **I01**(범위 변경 operation) | `scope.inherit`, `scope.policy`, `scope.changed`, `egress.derived-grade`, `site-paths.refuse` ①, V02의 `linking` 유지 |
-| I04-T10 | tombstone 장부(머리의 키, fsync 뒤 커밋), 시작 때 맞춰 보기, 재적용 함수, 재적용 전 API 차단, 강제 재구축 호출(I03-T10), 장부 없음 알림 | R17 | C3 | I04-T04, I04-T05, I04-T07 | `restore.reapply`, `ledger.boot-reconcile` |
+| I04-T09 | `ScopePolicy` 규격과 기본 구현, 계보로 범위 계산, `commitDerived`의 `combinable`, 후보 미리 거르기, `scope-changed` 전파, Broker의 파생 입력 등급, `scopePolicy: "site"` 자리, `scope_policy_drops`와 다시 추출 작업. ADR 0014와 ARCHITECTURE 8절 고침 | R11(정책 거부 기록), R14, R15, R16, R18 | C1, H2 ① | I04-T03, I04-T06, **I01-T02**(범위 변경 operation), **I03-T01**(대상 `scope-recompute`) | `scope.inherit`, `scope.policy`, `scope.changed`, `egress.derived-grade`, `site-paths.refuse` ①, V02의 `linking` 유지 |
+| I04-T10 | tombstone 장부(머리의 키, 장부 순번, 판정 뒤·fsync 뒤 커밋), 시작 때 맞춰 보기(순번 차례, 해제 포함), 키가 다를 때의 규칙, 재적용 함수, 재적용 전 API 차단, 강제 재구축 호출(I03-T10), 장부 없음 알림 | R17 | C3 | I04-T04, I04-T05, I04-T07 | `restore.reapply`, `ledger.boot-reconcile` |
 | I04-T11 | site-setup S21·S22, 문서 대응 테스트, 배포처 실행기의 삭제 시나리오 | R18, R19 | H1, H2 ② | I04-T07, I04-T09, V02-T12 | `docs.site-setup`, `site-paths.refuse` ② |
 | I04-T12 | (선택) 원본 하나의 이전 version 지우기 API와 `old-versions-pruned` 전파 | R10(선택 부분) | C3(선택 부분) | I04-T07 | `versions.prune` |
 
@@ -452,8 +494,8 @@ flowchart LR
 - 다) V02-T08이 "T02가 넘기는 것" 6항의 두 설정을 실제로 켰는지. T07의 `optimize`+`VACUUM`은 그와 상관없이 한 번 돈다.
 - 라) V02-T07의 Insight 재계산이 "영향받은 항목"을 입력으로 받는다. T03의 재평가가 같은 입력을 쓴다.
 - 마) V02-T09의 엔진 제거 호출이 커밋 뒤 직접 호출이다. T04가 이것을 작업으로 바꾼다.
-- 바) I01 spec(작성 중): `identityKey()`를 받아 평문 다음 해시로 지운 원본을 찾고 해제 뒤 같은 행에 평문 정체를 되쓰는 것, `atLeastAsStrict`로 가져온 범위를 판정하는 것, 범위 변경을 방향과 상관없이 `scope-changed`로 내는 것, I01이 가리키는 I04 작업 번호(`ScopePolicy`는 I04-T09, 해시는 I04-T07), version에 붙는 `meta`·`blocks`(R5가 함께 지운다), 근거의 locator를 저장하지 않고 계산하는 것(I01-R23), 범위 변경 operation의 이름, `deletionsOnRescan`.
-- 사) I03 spec(작성 중): `supersedeOpenJobs`가 투영 작업을 건너뛰는 것(I03-R3), `projection-remove`의 묶음 `projection`, 결과 쓰기 자리(I03-R6 ③)에서 `commitDerived`를 부르는 것, I03-T10의 표식 확인(시작: 끝나지 않았거나 포기한 것, 주기: 포기했거나 1시간 넘게 끝나지 않은 것)과 강제 재구축, Activity가 상태 API의 무효화 기록 수를 보이는 것, 요구사항 번호(이 spec은 I03의 현재 본문 번호로 인용한다). I04의 작업 번호(T01~T12)는 이 판에서 고정한다. I01·I03이 인용한다.
+- 바) I01 spec(작성 중): `identityKey()`를 받아 평문 다음 해시로 지운 원본을 찾고 해제 뒤 같은 행에 평문 정체를 되쓰는 것(I01-T02), 설계 개요 블록의 `ScopePolicy` 네 이름과 `applyTombstone`을 그대로 쓰는 것, 범위 변경을 방향과 상관없이 `scope-changed`로 내는 것, version에 붙는 `meta`·`blocks`(R5가 함께 지운다), 근거의 locator를 저장하지 않고 계산하는 것(I01-R29), 범위 변경 operation의 이름, `deletionsOnRescan`.
+- 사) I03 spec(작성 중): `supersedeOpenJobs`가 투영 작업을 건너뛰는 것(I03-R3), `projection-remove`의 묶음 `projection`, 결과 쓰기 자리(I03-R6 ③)에서 `commitDerived`를 부르는 것, I03-T10의 표식 확인(시작: 끝나지 않았거나 포기한 것, 주기: 포기했거나 1시간 넘게 끝나지 않은 것)과 강제 재구축, Activity(I03-R23, I03-T11)가 상태 API의 `invalidations`·`scopePolicyDrops`를 보이는 것, `projection-remove` 분류기가 `permanentlyAbsent`만 건너뛰는 것, 대상 값 `scope-recompute:<변경 순번>`을 작업 표에 두는 것, `commitDerived`의 임시 함수가 블록의 모양 그대로인 것, 요구사항 번호(이 spec은 I03의 현재 본문 번호로 인용한다). I04의 작업 번호(T01~T12)는 이 판에서 고정한다. I01·I03이 인용한다.
 - 아) site-setup 번호 S21·S22는 조정자의 배정이다. 형제 spec이 확정될 때 다시 대조한다.
 
 ## 후속 — 다른 문서와 다른 작업에 넘기는 변경
@@ -462,19 +504,18 @@ flowchart LR
 
 | 대상 | 고칠 곳 | 담당 |
 |---|---|---|
-| 1. V02 spec과 V02-T08 | 화면의 삭제 요청을 `user-deleted`로 기록. 지금 R2는 "V02-R12의 삭제가 된다", 스키마는 `deleted` | **V02 담당에게 변경 요청**(조정자가 전달함). 받아들여지지 않으면 I04-T05의 마이그레이션이 처리 |
-| 2. V02 spec "T02가 넘기는 것" 2항 | "T04는 레코드의 version을 그대로 저장한다"는 D1(version은 제품이 매김, 레코드의 번호는 revision)과 어긋남 | **V02 담당에게 변경 요청**. I04의 `covers_version + 1` 규칙은 제품 번호를 전제로 함 |
+| 1. V02 spec과 V02-T08 | 화면의 삭제 요청을 `user-deleted`로 기록 | **합의됨**(조정자 결정 D21). V02 담당이 자기 문서와 V02-T08에서 고친다. I04-T05는 기존 `deleted` 행만 옮긴다 |
+| 2. V02 spec "T02가 넘기는 것" 2항 | 레코드의 번호는 revision, version은 제품이 매김(D1). I04의 `covers_version + 1` 규칙은 제품 번호를 전제로 함 | **합의됨**(D1·D21). V02 담당이 자기 문서에서 고친다 |
 | 3. ARCHITECTURE 0절 | 파생물·계보·등록부·revision 풀이 추가. tombstone 풀이를 "version 이하를 덮는 표식, 사유 셋, 해제" | I04-T05 |
 | 4. ARCHITECTURE 4절 표 | 무효화 기록, tombstone 장부와 키 행 추가. 데이터 디렉터리 밖 사본의 담당 | I04-T07 |
 | 5. ARCHITECTURE 5절 | 등록부 규격 새 소절 | I04-T01(규격), I04-T09(`ScopePolicy`) |
-| 6. ARCHITECTURE 6·7절 | "tombstone이 없다"를 "덮지 않는다"로. 두 단계 전파. 투영 제거 작업(6절). 포기 표식과 강제 재구축(7절 표) | I04-T05(6절 tombstone 문장), I04-T04(6절 투영 제거), I03-T10(7절 표) |
+| 6. ARCHITECTURE 6·7절 | "tombstone이 없다"를 "덮지 않는다"로. 두 단계 전파. 투영 제거 작업(6절). 7절 실패 표 | I04-T05(6절 tombstone 문장), I04-T04(6절 투영 제거), **I03**(7절 실패 표, 단일 담당) |
 | 7. ARCHITECTURE 8절 | "접근 범위를 넘는 연결"의 I04 몫을 `ScopePolicy`로 | I04-T09 |
-| 8. ADR 0013 | 결정 4(덮는 범위, 사유, 해제), 결정 5(파일 수준 소거, 식별자 해시와 키의 위치), 결과의 "I04에서 정한다" 두 줄을 이 spec으로. 결정 7(투영 제거 작업과 강제 재구축)은 I03 몫 | I04-T05(결정 4·결과), I04-T07(결정 5), **I03-T10**(결정 7) |
-| 9. ADR 0014 | 파생 입력의 등급은 등록부의 계보로 계산. access_scope 비교는 `ScopePolicy` | I04-T09 |
+| 8. ADR 0013 | 결정 4(덮는 범위, 사유, 해제), 결정 5(파일 수준 소거, 식별자 해시와 키의 위치), 결과의 "I04에서 정한다" 두 줄을 이 spec으로. 결정 4에는 도착 판정이 I01(revision 순서, 해제 뒤 보통 규칙)에 있다는 가리킴을 함께 적는다. 결정 7(투영 제거 작업과 강제 재구축)은 I03 몫 | I04-T05(결정 4·결과), I04-T07(결정 5), **I03-T10**(결정 7) |
+| 9. ADR 0014 | 파생 입력의 등급은 등록부의 계보로 계산. access_scope 비교는 `ScopePolicy`. 가져온 범위가 인스턴스 범위보다 느슨해질 수 없다는 규칙은 I01-R15를 가리킨다 | I04-T09 |
 | 10. site-setup.md | S21, S22 | I04-T11 |
 | 11. ownership.md | 해당 없음. 공용·배포처 경계가 바뀌지 않음(배포처 몫은 S21·S22로 site-setup에만 생김) | — |
 | 13. H03(#34) | Electron `userData`의 Chromium 저장소에 지운 내용이 남지 않는지의 부정 테스트를 H03의 기준에 넣음("남는 위험" 표) | **H03 spec 담당에게 요청** |
-| 14. I01 spec | 바)의 항목. 특히 I01이 I04-T07로 적은 `ScopePolicy` 선행은 I04-T09 | **I01 세션에 요청**(조정자 경유) |
 | 12. 새 ADR | 해당 없음. 결정은 ADR 0013·0014의 고침으로 담는다. 등록부가 ADR 트리거(구조 결정)라는 판정이 나오면 T01이 ADR을 쓴다 | I04-T01(판정) |
 
 ## 변경 이력
@@ -482,5 +523,6 @@ flowchart LR
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-21 | 최초 작성(초안) | 이 문서 | 이슈 #21의 구현 spec. V02 비목표에서 넘어온 네 가지와 이슈의 C1~C3 |
+| 2026-11-21 | 3차 반영. 설계 개요 블록을 `ScopePolicy`(`string[] | null`, `compare`의 `incomparable`, `atLeastAsStrict`는 `compare`에서)·`commitDerived`·`applyTombstone`·`liftTombstone`의 단일 정의로(통합 M1, M5). 장부는 판정 뒤 바꾸는 쓰기만, 장부 순번으로 맞춰 보기, 해제 줄 포함, 더 지우기·덜 지우기 빨간 경우(A R3-M1, L3, D31). 다시 추출은 대상 `scope-recompute:<변경 순번>`, 정책 거부는 `scope_policy_drops`(A R3-M2, 통합 M4). 키가 다를 때의 규칙(A R3-M3). 지금 fence는 원본의 최신 정본 version, `removeSource`가 끝나면 끝(A R3-L1). `secrets.json.*.tmp`(A R3-L2). 건너뜀은 정적 `permanentlyAbsent`만(통합 H1). `tombstone.rules`를 작업별로 나눔, T05를 T03 뒤로(통합 H2). 화면 삭제는 V02-T08 몫으로 합의 표시(통합 M2). Activity 필드 이름(M6). 평문 되쓰기는 I01(M7). 선행에 작업 번호, I01-R29, 최고값은 `covers_version`, revision 없음은 v2 이전 행만, 낡은 요청 삭제, 문서 담당 단일화, 주기 테이블, 등록 순서(통합 L1~L11) | 요구사항, 설계 개요, 완료 기준, 작업 분해, 미해결 질문, 후속 | 독립 재검토 A(3차), 통합 검토, 조정자 결정 D31·D32 |
 | 2026-11-21 | origin/main `00d5d7b`(V01-T11 #56, ADR 0010 결정 #57) 위로 2차 반영. 해시 키를 정본과 장부 머리에, 키가 없으면 시작 오류(A-N1, D5'). 낡은 fence의 투영 제거는 지금 fence로 다시 보냄, 영구 불가 구현만 건너뜀(A-N2, D11'). `VACUUM`은 `migrate` 뒤(A-N3). `combinable` 실패는 그 항목만 버림(A-N4). 시작 때 장부 맞춰 보기(A-N5, B-N5). 해제 뒤 다시 삭제(A-N6). 남는 위험 표의 근거와 H03 담당 미정(A-N7). 사유 변경·해제는 변경 순번을 올리지 않음(A-N8). 빈 값끼리 `equal`(A-N9). 해제 뒤 같은 행에 평문 정체(A-N10, B-N10). 데이터 디렉터리 운영 목록을 main에서(B-N1). T02를 T03·T04 뒤로, 병행 문장 고침(B-N2). 키 위치를 비밀 값 저장소에서 정본으로(B-N3). `scope-changed`로 양방향(B-N4, D22). R10을 T07에(B-N6). `propagate.two-phase`를 T03에도(B-N7). `원본`·`등록 종류 source` 구분(B-N8). ID 열 빨간 경우(B-N9). I01 요청(비목표 문장, namespace, `atLeastAsStrict`, v1 원본). 표식 확인·강제 재구축은 I03-T10, T06은 I03-T04 뒤(D24). 마이그레이션 번호를 정하지 않음(D26) | 요구사항, 설계 개요, 완료 기준, 작업 분해, 미해결 질문, 후속 | 독립 재검토 A·B(2차), 조정자 결정 D5'·D11'·D22·D24·D26, I01 요청 |
 | 2026-11-21 | origin/main(V02-T01 #53, V02-T02 #55, ADR #54) 위로 다시 씀. 두 단계 전파(H1, B2), `assertFresh`의 "최신" 조건(H2), 지운 원본의 식별자를 키 있는 해시로(H3), 이전 version 자동 정리 철회(H4), 한 번의 `optimize`+`VACUUM`과 저널 고정(M1, M2), 장부를 먼저 쓰고 커밋(M3), 복원 뒤 강제 재구축(M4), tombstone 사유 셋·우선·해제와 기존 `deleted` 옮기기(M5, M6, B12), version과 revision 구분(M7, B4), 감싼 엔진(M8), 데이터 디렉터리 밖 사본 표(M9), 범위 변경과 쓰기 경로의 `combinable`(M10), 등록 누락 검사 보강과 목표 문장 좁힘(B1), 읽기 검사의 빨간 경우(B3), `ScopePolicy.compare`·`strictest`(B5), 선행 보완(B6), 문서 변경의 담당 작업(B7). 자잘한 지적 L1~L6, B8~B15 반영. 사이트 번호 S21·S22 | 전체 | 독립 검토 A·B, 조정자 결정 D1~D8·D11·D15·D17·D18 |
