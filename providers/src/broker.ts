@@ -164,6 +164,7 @@ export type RejectReason =
   | "unexpected-ids"
   | "unknown-origin"
   | "origin-used"
+  | "origin-not-leased"
   | "origin-mismatch"
   | "missing-source"
   | "missing-candidate";
@@ -251,6 +252,11 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
     const job = readJob(deps.db, Number(request.origin.jobId));
     if (!job) return { reason: "unknown-origin" };
     if (job.kind !== request.taskKind) return { reason: "origin-mismatch" };
+    // only the holder of the job's current lease calls for it (V02-T03): a holder
+    // whose lease ran out and was claimed again names an older token
+    if (job.status !== "leased" || String(job.leaseToken) !== request.origin.lease) {
+      return { reason: "origin-not-leased" };
+    }
     trigger = "background";
   } else {
     const redeemed = deps.userActions.redeem(request.origin.userActionId);

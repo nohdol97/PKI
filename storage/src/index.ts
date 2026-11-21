@@ -27,7 +27,20 @@ export {
   type StoredRecord,
   type StoredSourceVersion,
 } from "./sources.ts";
-export { readJob, type StoredJob } from "./jobs.ts";
+export {
+  closeJob,
+  isFenceCurrent,
+  isReasonCode,
+  JobWriteError,
+  leaseNextJob,
+  readJob,
+  registerJob,
+  type JobClosing,
+  type JobStatus,
+  type LeaseRequest,
+  type NewJob,
+  type StoredJob,
+} from "./jobs.ts";
 export {
   addEvidence,
   insertItem,

@@ -38,7 +38,8 @@ export const BrokerRequestSchema = z.strictObject({
   sourceVersionIds: z.array(RowId),
   candidateItemIds: z.array(z.string().min(1)),
   origin: z.union([
-    z.strictObject({ jobId: RowId }),
+    // the lease the runner holds the job by (V02-T03): only the current one calls
+    z.strictObject({ jobId: RowId, lease: RowId }),
     z.strictObject({ userActionId: z.string().min(1) }),
   ]),
   schemaVersion: z.int().positive(),
