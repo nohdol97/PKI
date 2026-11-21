@@ -195,6 +195,19 @@ describe("cursor after save", () => {
     expect(readCursor(db, "s")).toBe("1");
   });
 
+  it("gives up when the cursor does not move even though the page has changes", async () => {
+    let calls = 0;
+    const connector = scripted((cursor) => {
+      if (++calls > 10) throw new Error("sync did not stop");
+      return cursor === null
+        ? { changes: [upsert("a")], nextCursor: "1", hasMore: true }
+        : { changes: [upsert("b")], nextCursor: "1", hasMore: true };
+    });
+    await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow(/progress/);
+    expect(calls).toBe(2);
+    expect(readCursor(db, "s")).toBe("1");
+  });
+
   it("gives up when a full rescan is itself reported expired", async () => {
     const connector = scripted(() => ({
       changes: [],

@@ -63,7 +63,7 @@ export async function syncConnector(
       cursor = null;
       continue;
     }
-    if (page.hasMore && page.changes.length === 0 && page.nextCursor === cursor) {
+    if (page.hasMore && page.nextCursor === cursor) {
       throw new Error(`${instanceId}: page reports more changes without progress`);
     }
     db.transaction(() => {
