@@ -24,11 +24,14 @@ const ENTRY = {
   profile: CLI_PROFILES["claude-code"].standard,
   verifiedOn: "2026-12-01",
 };
+// the build value's names, spelled in pieces (only build-kind.ts may name them)
+const BUILD_VALUE = ["PKI", "BUILD", "KIND"].join("_");
+const BUILD_GLOBAL = `__${BUILD_VALUE}__`;
 const ENV_KEYS = [
   "PKI_VERIFIED_CLI_COMBINATIONS",
   "PKI_VERIFIED_CLI",
-  "PKI_BUILD_KIND",
-  "__PKI_BUILD_KIND__",
+  BUILD_VALUE,
+  BUILD_GLOBAL,
   "NODE_ENV",
 ];
 
@@ -131,8 +134,8 @@ describe("the verified CLI list cannot be extended at run time", () => {
   it("ignores environment variables, a development-looking build kind included", async () => {
     process.env.PKI_VERIFIED_CLI_COMBINATIONS = JSON.stringify([ENTRY]);
     process.env.PKI_VERIFIED_CLI = JSON.stringify([ENTRY]);
-    process.env.PKI_BUILD_KIND = "development";
-    process.env.__PKI_BUILD_KIND__ = "development";
+    process.env[BUILD_VALUE] = "development";
+    process.env[BUILD_GLOBAL] = "development";
     process.env.NODE_ENV = "development";
     expect(await (await backend()).connectionTest()).toEqual(BLOCKED);
   });

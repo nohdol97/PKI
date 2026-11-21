@@ -20,7 +20,7 @@
 
 | 자원(잠정 이름) | 필요한 값의 종류 | 공용 기본값 |
 |---|---|---|
-| 검증된 CLI 조합 목록(`providers/src/verified-cli-combinations.json`) | 격리 검증을 통과한 조합의 목록. 항목마다 `cli`(`claude-code` 또는 `codex`), `version`(**정확한 버전 하나**. 범위가 아니며 CLI가 알리는 문자열과 글자까지 같아야 한다), `os`(`win32`, `darwin`, `linux`), `profile`(인자 프로필의 이름. 목록에 넣는 것은 `claude-code/standard-1`처럼 `standard` 프로필이다), `verifiedOn`(`YYYY-MM-DD`). 인자 프로필의 내용은 제품 코드(`providers/src/cli-profiles.ts`)에 고정되어 있고 여기서는 이름만 고른다. 항목이 하나라도 틀리면 백엔드가 시작하지 않는다 | 빈 목록. 비어 있으면 배포 빌드는 CLI를 실행하지 않는다 |
+| 검증된 CLI 조합 목록(`providers/src/verified-cli-combinations.json`) | 격리 검증을 통과한 조합의 목록. 항목마다 `cli`(`claude-code` 또는 `codex`), `version`(**정확한 버전 하나**. 범위가 아니며 CLI가 알리는 문자열과 글자까지 같아야 한다), `os`(`win32`, `darwin`, `linux`), `profile`(인자 프로필의 이름. 목록에 넣는 것은 `claude-code/standard-1`처럼 `standard` 프로필이다), `verifiedOn`(`YYYY-MM-DD`). 인자 프로필의 내용은 제품 코드(`providers/src/cli-profiles.ts`)에 고정되어 있고 여기서는 이름만 고른다. 제품 프로필이 어느 R02 프로필과 같은 인자인지는 그 파일에 적혀 있다(V01-T10). 그 R02 프로필의 결과로 이 이름을 적는다. 항목이 하나라도 틀리면 백엔드가 시작하지 않는다 | 빈 목록. 비어 있으면 배포 빌드는 CLI를 실행하지 않는다 |
 | 빌드 종류 | 포크가 정하지 않는다. 설치 파일을 만드는 빌드는 언제나 배포 빌드다 | 배포 빌드 |
 | 합성 목록 | 포크가 정하지 않는다. 공용 저장소의 합성 자료에서 만들어진다. 실제 수집기가 가져온 자료는 여기에 들어가지 않는다 | 공용 저장소의 합성 자료 |
 | Embedding 모델의 revision과 파일 해시 | 포크가 다른 모델을 쓰기로 했을 때만 바꾼다 | 공용 저장소가 고정한 값 |

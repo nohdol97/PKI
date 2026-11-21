@@ -77,17 +77,21 @@ interface Stack {
   testBuild?: TestBuildExecution;
   /** What the CLI double's version query reports, read before every attempt. */
   version?: () => string | undefined;
+  /** Give the CLI consent first (default); without it the egress decision blocks. */
+  consent?: boolean;
 }
 
 async function stack(options: Stack = {}) {
   const egress = productEgress(db);
   // consent for both classes, so only the execution conditions decide
   const shown = egress.overview().providers.find((p) => p.providerId === "claude-code");
-  const granted = egress.grant("claude-code", ["synthetic", "general"], {
-    destination: shown?.destination ?? "",
-    policyVersion: egress.policyVersion(),
-  });
-  if ("error" in granted) throw new Error(granted.error);
+  if (options.consent !== false) {
+    const granted = egress.grant("claude-code", ["synthetic", "general"], {
+      destination: shown?.destination ?? "",
+      policyVersion: egress.policyVersion(),
+    });
+    if ("error" in granted) throw new Error(granted.error);
+  }
   const version = options.version ?? (() => VERSION);
   const provider = new FakeProvider({
     id: "claude-code",
@@ -341,6 +345,28 @@ describe("combination that differs from the list: treated as not listed", () => 
       isolation: null,
     });
     expect(s.provider.requests).toEqual([]);
+  });
+});
+
+describe("order of the decisions", () => {
+  it("asks consent and egress rules first: without consent the CLI's version is not even queried", async () => {
+    let queries = 0;
+    const s = await stack({
+      consent: false,
+      testBuild: asDevelopment,
+      version: () => {
+        queries++;
+        return "9.9.9";
+      },
+    });
+    expect(await s.connectionTest(true)).toEqual({
+      outcome: "blocked",
+      reason: "no-consent",
+      isolation: null,
+    });
+    expect(queries).toBe(0);
+    expect(s.provider.requests).toEqual([]);
+    expect((await s.history()).map((c) => c.reason)).toEqual(["no-consent"]);
   });
 });
 

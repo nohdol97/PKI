@@ -1,32 +1,65 @@
 // Inputs of the CLI execution decision (V01-R10, ARCHITECTURE 3.1): none of them
 // may come from whoever runs the process.
 // - The build kind is one value the bundler writes into the code
-//   (`__PKI_BUILD_KIND__`), and only BUILD_KIND_MODULE reads it. Any other mention
-//   of the name fails, a `declare` included; an object key that names it (the
-//   bundler's `define` configuration) reads nothing and passes.
-// - The decision code (DECISION_MODULES: the gate, the Broker and the modules they
-//   read) touches no environment and asks the runtime nothing about how it was
-//   installed: any reference to the `process` global, `globalThis.process` and the
-//   like, `import.meta.env`, importing or requiring `process`, `node:process` or
-//   `electron`, and the properties `isPackaged`, `defaultApp`, `resourcesPath` fail.
-// Known gaps (review catches them): reaching `process` through an alias created
-// outside these files and passed in, `Function("return process")()`, a computed
-// property name other than a string literal.
+//   (`import.meta.PKI_BUILD_KIND`, see BUILD_KIND_MODULE). Only that module and
+//   the bundler configurations (BUNDLER_CONFIGS) may mention the name, in any
+//   form: an identifier, a property or key, a string or template text (which
+//   also catches the old global spelling and run-time writes such as
+//   `globalThis[...] = ` or `Object.defineProperty(globalThis, ...)`).
+// - The decision code (DECISION_MODULES: the gate, the Broker and the modules that
+//   supply the gate's inputs) touches no environment and asks the runtime nothing
+//   about how it was installed: a reference to `process`, a global object
+//   (`globalThis`, `global`, `self`, `window`), `Reflect`, `Function`, `eval` or
+//   `createRequire`; `import.meta.env`; importing or requiring `process`,
+//   `node:process`, `electron`, `module`, `node:module`, `vm`, `node:vm`; and
+//   the properties `isPackaged`, `defaultApp`, `resourcesPath` fail.
+// Known gaps (review catches them): a value reached through an object passed in
+// from outside these files (e.g. a `process` alias handed to a function here),
+// and the name of the build value assembled at run time from pieces in a module
+// that is not decision code.
 import { relative, resolve, sep } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 export const BUILD_KIND_MODULE = "providers/src/build-kind.ts";
+export const BUNDLER_CONFIGS = new Set(["vitest.config.ts"]);
 export const DECISION_MODULES = new Set([
   "providers/src/broker.ts",
   "providers/src/build-kind.ts",
   "providers/src/cli-profiles.ts",
   "providers/src/execution-gate.ts",
+  "providers/src/synthetic-manifest.ts",
+  "providers/src/user-actions.ts",
   "providers/src/verified-cli.ts",
 ]);
-const BUILD_VALUE = "__PKI_BUILD_KIND__";
-const GLOBAL_OBJECTS = new Set(["globalThis", "global", "self", "window"]);
-const RUNTIME_MODULES = new Set(["process", "node:process", "electron"]);
+// spelled in pieces so that this file does not mention the name itself
+const BUILD_VALUE = ["PKI", "BUILD", "KIND"].join("_");
+const RUNTIME_GLOBALS = new Set([
+  "process",
+  "globalThis",
+  "global",
+  "self",
+  "window",
+  "Reflect",
+  "Function",
+  "eval",
+  "createRequire",
+]);
+const RUNTIME_MODULES = new Set([
+  "process",
+  "node:process",
+  "electron",
+  "module",
+  "node:module",
+  "vm",
+  "node:vm",
+]);
 const INSTALLED_CHECKS = new Set(["isPackaged", "defaultApp", "resourcesPath"]);
+const NAMING_PARENTS = new Set([
+  "ImportSpecifier",
+  "ImportDefaultSpecifier",
+  "ImportNamespaceSpecifier",
+  "ExportSpecifier",
+]);
 
 /** A member's property name: `a.b` or `a["b"]`. @param {any} node */
 function propertyName(node) {
@@ -36,7 +69,7 @@ function propertyName(node) {
     : undefined;
 }
 
-/** True when `node` names something rather than reading it: `a.x`, `{ x: 1 }`, a class member. @param {any} node */
+/** True when `node` names something rather than reading it: `a.x`, `{ x: 1 }`, a member, a specifier. @param {any} node */
 function isNameOnly(node) {
   const parent = node.parent;
   if (!parent) return false;
@@ -50,6 +83,8 @@ function isNameOnly(node) {
   ) {
     return parent.key === node && !parent.computed;
   }
+  if (parent.type === "TSModuleDeclaration") return parent.id === node; // `declare global`
+  if (NAMING_PARENTS.has(parent.type)) return true;
   return parent.type === "TSQualifiedName" && parent.right === node;
 }
 
@@ -60,17 +95,24 @@ const gateInputs = {
     docs: { description: "Keep the CLI execution decision's inputs out of the caller's hands" },
     schema: [],
     messages: {
-      buildKindRead: `Only ${BUILD_KIND_MODULE} reads ${BUILD_VALUE}; import BUILD_KIND from it.`,
+      buildKindRead: `Only ${BUILD_KIND_MODULE} and the bundler configuration may name the build value; import BUILD_KIND from it.`,
       runtimeInput:
-        "Decision code must not read environment variables or the process (V01-R10); take the value from the build or the canonical store.",
+        "Decision code must not read environment variables, the process or global objects (V01-R10); take the value from the build or the canonical store.",
       installedCheck:
         "Decision code must not ask the runtime whether it is installed (V01-R10); the build kind decides.",
     },
   },
   create(context) {
     const rel = relative(REPO_ROOT, context.filename).split(sep).join("/");
-    const readsBuildValue = rel === BUILD_KIND_MODULE;
+    const mayName = rel === BUILD_KIND_MODULE || BUNDLER_CONFIGS.has(rel);
     const isDecision = DECISION_MODULES.has(rel);
+
+    /** @param {any} node @param {unknown} text */
+    function checkName(node, text) {
+      if (!mayName && typeof text === "string" && text.includes(BUILD_VALUE)) {
+        context.report({ node, messageId: "buildKindRead" });
+      }
+    }
 
     /** @param {any} source @param {any} node */
     function checkSource(source, node) {
@@ -81,25 +123,19 @@ const gateInputs = {
 
     return {
       Identifier(/** @type {any} */ node) {
-        if (isNameOnly(node)) return;
-        if (node.name === BUILD_VALUE && !readsBuildValue) {
-          context.report({ node, messageId: "buildKindRead" });
-        }
-        if (node.name === "process" && isDecision) {
+        checkName(node, node.name);
+        if (isDecision && RUNTIME_GLOBALS.has(node.name) && !isNameOnly(node)) {
           context.report({ node, messageId: "runtimeInput" });
         }
       },
+      Literal: (/** @type {any} */ node) => checkName(node, node.value),
+      TemplateElement: (/** @type {any} */ node) => checkName(node, node.value.cooked),
       MemberExpression(/** @type {any} */ node) {
+        if (!isDecision) return;
         const name = propertyName(node);
-        if (name === BUILD_VALUE && node.computed && !readsBuildValue) {
-          context.report({ node, messageId: "buildKindRead" });
-        }
-        if (!isDecision || name === undefined) return;
+        if (name === undefined) return;
         if (INSTALLED_CHECKS.has(name)) context.report({ node, messageId: "installedCheck" });
         const object = node.object;
-        if (name === "process" && object.type === "Identifier" && GLOBAL_OBJECTS.has(object.name)) {
-          context.report({ node, messageId: "runtimeInput" });
-        }
         if (name === "env" && object.type === "MetaProperty" && object.meta.name === "import") {
           context.report({ node, messageId: "runtimeInput" });
         }

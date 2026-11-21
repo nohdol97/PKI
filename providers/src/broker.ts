@@ -124,6 +124,12 @@ export interface BrokerLimits {
   backoffMaxMs: number;
   /** Ceiling for a request's own timeout. */
   maxTimeoutMs: number;
+  /**
+   * Ceiling for a CLI's version query before each attempt; the request's timeout
+   * bounds it too. One that does not answer in time is "version unknown" (not
+   * listed), so a hung query cannot hold a concurrency slot.
+   */
+  versionQueryTimeoutMs: number;
   /** Provider attempts allowed in any window of windowMs. */
   callBudget: { maxCalls: number; windowMs: number };
 }
@@ -134,6 +140,7 @@ export const DEFAULT_LIMITS: Readonly<BrokerLimits> = Object.freeze({
   backoffBaseMs: 1_000,
   backoffMaxMs: 30_000,
   maxTimeoutMs: 120_000,
+  versionQueryTimeoutMs: 10_000,
   callBudget: Object.freeze({ maxCalls: 60, windowMs: 3_600_000 }),
 });
 
@@ -293,13 +300,29 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
   };
 }
 
-/** The version a CLI reports through its fixed-argument query; undefined if it cannot tell. */
-async function cliVersion(provider: LLMProvider): Promise<string | undefined> {
+/**
+ * The version a CLI reports through its fixed-argument query; undefined if it
+ * cannot tell within `timeoutMs`. A late answer is ignored (the Provider ends its
+ * own query process, V01-T10).
+ */
+async function cliVersion(provider: LLMProvider, timeoutMs: number): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), timeoutMs);
+  });
   try {
-    const info = await provider.detect();
-    return info.installed && typeof info.version === "string" ? info.version : undefined;
+    // started inside a promise chain, so a synchronous throw is a rejection like any other
+    const query = Promise.resolve()
+      .then(() => provider.detect())
+      .then((info) =>
+        info.installed && typeof info.version === "string" ? info.version : undefined,
+      );
+    query.catch(() => undefined); // may settle after the timeout; nobody awaits it then
+    return await Promise.race([query, late]);
   } catch {
     return undefined; // not listed, then; the Provider's message stays out
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -437,7 +460,10 @@ export function createBroker(deps: BrokerDeps) {
         classification,
         malicious,
         // asked again every attempt: a CLI updated meanwhile is no longer the listed one
-        version: provider.transport === "cli" ? await cliVersion(provider) : undefined,
+        version:
+          provider.transport === "cli"
+            ? await cliVersion(provider, Math.min(timeoutMs, limits.versionQueryTimeoutMs))
+            : undefined,
         unverifiedAcknowledged: prepared.unverifiedAcknowledged,
       });
       return execution.run ? { egress, cli: execution.cli } : { reason: execution.reason };

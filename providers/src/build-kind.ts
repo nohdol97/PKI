@@ -1,19 +1,30 @@
 // Build kind (V01-R10, ARCHITECTURE 3.1): the one value the bundler writes into the
-// code when it builds (`define`), and this is the only module that reads it (lint
-// `pki/gate-inputs`). The test runner builds as "test" (vitest.config.ts). A run
-// of the source without a bundler, a missing value or an unknown one is a
-// production build: the strict side. Nothing at run time — an environment
-// variable, a setting, an "is this installed" check — can change it.
+// code when it builds (`define` of `import.meta.PKI_BUILD_KIND`, replaced by a
+// string literal), and this is the only module that names it (lint
+// `pki/gate-inputs`). The test runner builds as "test" (vitest.config.ts). A
+// missing or unknown value is a production build: the strict side.
+//
+// The value lives on `import.meta`, not on a global: `import.meta` is this
+// module's own object, so without a bundler (dev.ts and the shell's backend run
+// the source as it is) no other code in the process — a global, a preload
+// through NODE_OPTIONS, an environment variable — can supply it, and the build
+// is production. Rewriting this module's source (a loader hook) is out of reach
+// of any check here; it is code execution in the process.
 export type BuildKind = "production" | "development" | "test";
 
-declare const __PKI_BUILD_KIND__: string | undefined;
+declare global {
+  interface ImportMeta {
+    /** Written by the bundler only; absent when the source runs as it is. */
+    readonly PKI_BUILD_KIND?: string;
+  }
+}
 
 export function parseBuildKind(raw: string | undefined): BuildKind {
   return raw === "development" || raw === "test" ? raw : "production";
 }
 
 export const BUILD_KIND: BuildKind = parseBuildKind(
-  typeof __PKI_BUILD_KIND__ === "string" ? __PKI_BUILD_KIND__ : undefined,
+  typeof import.meta.PKI_BUILD_KIND === "string" ? import.meta.PKI_BUILD_KIND : undefined,
 );
 
 /** `http` to a loopback OpenAI-compatible endpoint (V01-R11): development and test builds only. */
