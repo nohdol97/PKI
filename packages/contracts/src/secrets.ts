@@ -6,8 +6,19 @@ import { z } from "zod";
 export const SecretNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);
 export const SecretValueSchema = z.string().min(1).max(8192);
 
-/** The OpenAI-compatible Provider's API key. */
-export const OPENAI_API_KEY_SECRET = "openai-compatible.api-key";
+/**
+ * The OpenAI-compatible Provider's API key is stored per endpoint host: its name is
+ * this prefix and the first 32 hex digits of the host's SHA-256 (`@pki/providers`
+ * `openaiKeySecretName`). A key saved for one host is never sent to another, so a
+ * changed endpoint needs the key entered again (V01-T11, review A-F3/B-B1).
+ */
+export const OPENAI_API_KEY_SECRET_PREFIX = "openai-compatible.api-key.";
+const BACKEND_READABLE = /^openai-compatible\.api-key\.[0-9a-f]{32}$/;
+
+/** The only secret names the shell gives the backend (others: "unavailable"). */
+export function isBackendReadableSecret(name: string): boolean {
+  return BACKEND_READABLE.test(name);
+}
 
 /**
  * One secret as its store has it. "unavailable": the store cannot be used (no OS
@@ -21,9 +32,16 @@ export const SecretReadSchema = z.discriminatedUnion("state", [
 ]);
 export type SecretRead = z.infer<typeof SecretReadSchema>;
 
-/** Where a Provider reads its secret, every time it is about to send. */
+/** Whether a secret is there, without its value. */
+export type SecretPresence = SecretRead["state"];
+
+/**
+ * Where a Provider gets its secret: `read` only just before it sends, `has` for
+ * checks that need presence only (the value does not leave the store for them).
+ */
 export interface SecretSource {
   read(name: string): Promise<SecretRead>;
+  has(name: string): Promise<SecretPresence>;
 }
 
 /** What the preload's secret functions answer the page; no answer carries a value. */

@@ -10,6 +10,7 @@ import type {
 } from "@pki/contracts";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { ApiClient } from "./api.ts";
+import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
 import { componentText, embeddingText } from "./status-text.ts";
 
 const SCREENS = { home: "홈", sources: "원본", activity: "활동", settings: "설정" } as const;
@@ -225,7 +226,7 @@ function Activity({ api }: { api: ApiClient }) {
 const ENCRYPTION_LABEL = { "not-applied": "적용 안 됨", unknown: "확인할 수 없음" } as const;
 
 function Settings({ api }: { api: ApiClient }) {
-  const { data, error } = useRoute(api, "settings");
+  const { data, error, reload } = useRoute(api, "settings");
   return (
     <>
       <Failure error={error} />
@@ -247,8 +248,102 @@ function Settings({ api }: { api: ApiClient }) {
           </tbody>
         </table>
       )}
+      {data && <OpenAICompatible api={api} settings={data} reload={reload} />}
       <Consents api={api} />
       <p>기본 Provider와 백그라운드 실행은 아직 설정할 수 없습니다.</p>
+    </>
+  );
+}
+
+/**
+ * The OpenAI-compatible endpoint, model and API key (V01-R11, site-setup S05). The key
+ * is stored per endpoint host and shown by presence only; changing the host asks for
+ * the key again (review A-F3/B-B1).
+ */
+function OpenAICompatible({
+  api,
+  settings,
+  reload,
+}: {
+  api: ApiClient;
+  settings: RouteResponse<"settings">;
+  reload: () => void;
+}) {
+  const current = settings.openaiCompatible;
+  const [baseUrl, setBaseUrl] = useState(current.baseUrl ?? "");
+  const [model, setModel] = useState(current.model ?? "");
+  const [key, setKey] = useState("");
+  const [failure, setFailure] = useState<string>();
+  const bridge = secretBridge();
+  const saveEndpoint = (event: FormEvent) => {
+    event.preventDefault();
+    api("writeSettings", { openaiCompatible: { baseUrl, model } }).then(
+      () => (setFailure(undefined), reload()),
+      (e: unknown) => setFailure(message(e)),
+    );
+  };
+  const saveKey = (event: FormEvent) => {
+    event.preventDefault();
+    if (!bridge || current.keyName === null) return;
+    void saveApiKey(bridge, current.keyName, key).then((result) => {
+      setKey(""); // the value leaves the page as soon as it is handed over
+      setFailure(result === "saved" ? undefined : "키를 저장할 수 없습니다 (OS 보호 저장소)");
+      reload();
+    });
+  };
+  const removeKey = () => {
+    if (!bridge || current.keyName === null) return;
+    void deleteApiKey(bridge, current.keyName).then(reload);
+  };
+  return (
+    <>
+      <h2>OpenAI 호환 Provider</h2>
+      <Failure error={failure} />
+      <form onSubmit={saveEndpoint}>
+        <label>
+          주소
+          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+        </label>
+        <label>
+          모델
+          <input value={model} onChange={(e) => setModel(e.target.value)} />
+        </label>
+        <button type="submit" disabled={baseUrl === "" || model === ""}>
+          주소 저장
+        </button>
+      </form>
+      <table>
+        <tbody>
+          <tr>
+            <th scope="row">API 키</th>
+            <td>{keyStatusText(current)}</td>
+          </tr>
+        </tbody>
+      </table>
+      {bridge ? (
+        <form onSubmit={saveKey}>
+          <label>
+            {current.host === null ? "API 키" : `${current.host}에 쓸 API 키`}
+            <input
+              type="password"
+              autoComplete="off"
+              value={key}
+              disabled={current.keyName === null}
+              onChange={(e) => setKey(e.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={current.keyName === null || key === ""}>
+            키 저장
+          </button>
+          {current.key === "present" && (
+            <button type="button" onClick={removeKey}>
+              키 삭제
+            </button>
+          )}
+        </form>
+      ) : (
+        <p>{DEV_KEY_HINT}</p>
+      )}
     </>
   );
 }

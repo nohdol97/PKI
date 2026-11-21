@@ -2,9 +2,10 @@
 // local fake HTTP server, plus what only an HTTP Provider must hold (spec "T08이
 // 넘기는 것" 4): it sends only to the destination the Broker's decision named,
 // re-reading the endpoint just before sending; `https` only (loopback `http` when
-// allowed); no user info; no redirects; the key read from the secret store per call.
+// allowed); no user info; no redirects; the key read from the secret store per call,
+// under the name bound to the endpoint host, so a key never goes to another host.
 import {
-  OPENAI_API_KEY_SECRET,
+  isBackendReadableSecret,
   ProviderError,
   ProviderRateLimitError,
   type SecretRead,
@@ -23,21 +24,34 @@ import {
 } from "@pki/testkit";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { OPENAI_BASE_URL_SETTING, OPENAI_MODEL_SETTING } from "../egress-policy.ts";
+import { openaiKeySecretName } from "../secret-names.ts";
 import { OpenAICompatibleProvider } from "./openai-compatible.ts";
 
 const KEY = "sk-synthetic-test-key";
 const MODEL = "synthetic-model";
 const live = () => new AbortController().signal;
 
-/** A secret store double holding one key (or reporting missing/unavailable). */
-function secretsOf(read: SecretRead = { state: "present", value: KEY }) {
+/**
+ * A secret store double holding one key (or reporting missing/unavailable): for the
+ * key of `forHost` only, or, without it, for any OpenAI key name. `asked` records
+ * reads of the value, `checked` presence checks.
+ */
+function secretsOf(read: SecretRead = { state: "present", value: KEY }, forHost?: string) {
   const asked: string[] = [];
-  const source: SecretSource & { asked: string[]; current: SecretRead } = {
+  const checked: string[] = [];
+  const holds = (name: string) =>
+    forHost === undefined ? isBackendReadableSecret(name) : name === openaiKeySecretName(forHost);
+  const source: SecretSource & { asked: string[]; checked: string[]; current: SecretRead } = {
     asked,
+    checked,
     current: read,
     async read(name) {
       asked.push(name);
-      return name === OPENAI_API_KEY_SECRET ? source.current : { state: "missing" };
+      return holds(name) ? source.current : { state: "missing" };
+    },
+    async has(name) {
+      checked.push(name);
+      return holds(name) ? source.current.state : "missing";
     },
   };
   return source;
@@ -167,6 +181,7 @@ describe("OpenAICompatibleProvider", () => {
               writeSetting(db, OPENAI_BASE_URL_SETTING, other.baseUrl);
               return { state: "present", value: KEY };
             },
+            has: async () => "present",
           },
         });
         const error = await p
@@ -236,6 +251,7 @@ describe("OpenAICompatibleProvider", () => {
           .generate(providerRequest("r:1", scripted.host), live())
           .catch((e) => e);
         expect(error).toBeInstanceOf(ProviderError);
+        expect(error).toMatchObject({ message: "http-307", retryable: false });
         expect(elsewhere.requests).toEqual([]);
       } finally {
         await elsewhere.close();
@@ -254,7 +270,8 @@ describe("OpenAICompatibleProvider", () => {
         `Bearer ${KEY}`,
         "Bearer sk-rotated",
       ]);
-      expect(secrets.asked).toEqual([OPENAI_API_KEY_SECRET, OPENAI_API_KEY_SECRET]);
+      const name = openaiKeySecretName(scripted.host);
+      expect(secrets.asked).toEqual([name, name]);
     });
 
     it.each([
@@ -282,11 +299,49 @@ describe("OpenAICompatibleProvider", () => {
     });
   });
 
+  describe("the key is bound to the endpoint host it was entered for", () => {
+    it("is not sent to a new host, even with consent for it, until entered for that host", async () => {
+      const other = await startFakeOpenAI();
+      try {
+        // the key was entered while the endpoint was `scripted`
+        const secrets = secretsOf({ state: "present", value: KEY }, scripted.host);
+        const p = provider(scripted.baseUrl, { secrets });
+        await p.generate(providerRequest("r:1", scripted.host), live());
+        // the endpoint moves to `other` and the Broker's decision now names it
+        writeSetting(p.db, OPENAI_BASE_URL_SETTING, other.baseUrl);
+        const error = await p.generate(providerRequest("r:2", other.host), live()).catch((e) => e);
+        expect(error).toMatchObject({ message: "api-key-missing", retryable: false });
+        expect(other.requests).toEqual([]);
+        expect(await p.checkHealth()).toEqual({ state: "unavailable", reason: "api-key-missing" });
+        expect(secrets.asked).toEqual([
+          openaiKeySecretName(scripted.host),
+          openaiKeySecretName(other.host),
+        ]);
+      } finally {
+        await other.close();
+      }
+    });
+  });
+
+  it("checks health and authentication by presence only, never reading the value", async () => {
+    const secrets = secretsOf();
+    const p = provider(scripted.baseUrl, { secrets });
+    expect(await p.checkHealth()).toEqual({ state: "ok" });
+    // a stored key is not proof the server takes it; telling would mean sending it
+    expect(await p.checkAuthentication()).toBe("unknown");
+    expect(secrets.asked).toEqual([]);
+    expect(secrets.checked).toEqual([
+      openaiKeySecretName(scripted.host),
+      openaiKeySecretName(scripted.host),
+    ]);
+  });
+
   describe("failures become ProviderErrors without the server's words", () => {
     const echo = "ECHO sk-synthetic-test-key secret document text";
     it.each([
       [500, true],
       [503, true],
+      [408, true],
       [400, false],
       [401, false],
       [403, false],
@@ -342,6 +397,14 @@ describe("OpenAICompatibleProvider", () => {
       const p = provider(scripted.baseUrl);
       const error = await p.generate(providerRequest("r:1", scripted.host), live()).catch((e) => e);
       expect(error).toMatchObject({ message: "response-too-large", retryable: false });
+    });
+
+    it("reports a connection lost mid-body as a retryable network error", async () => {
+      reply = () => ({ ...completion("x".repeat(64 * 1024)), truncate: true });
+      const p = provider(scripted.baseUrl);
+      const error = await p.generate(providerRequest("r:1", scripted.host), live()).catch((e) => e);
+      expect(error).toBeInstanceOf(ProviderError);
+      expect(error).toMatchObject({ message: "network-error", retryable: true });
     });
 
     it("reports a refused connection as retryable", async () => {

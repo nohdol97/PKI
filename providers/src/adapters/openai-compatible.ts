@@ -6,11 +6,15 @@
 //   (`parseEndpoint`) and refuses, without sending, when the host differs or the
 //   address is not `https` (or allowed loopback `http`), or carries user info.
 // - Redirects are not followed: a 307 would carry the body to a host nobody decided.
-// - The key comes from the secret store on every call and lives only in that call.
+// - The key comes from the secret store on every call and lives only in that call. It
+//   is stored per endpoint host (`openaiKeySecretName`): after the endpoint moves to
+//   another host there is no key for it until the user enters one, so a key entered
+//   for one host is never sent to another. Checks ask for presence only.
+// - Only the destination is re-checked before sending, not the consent: a consent
+//   revoked while the key is read still lets this one attempt go (handed to T09).
 // - Failures are codes. The server's error text may echo the input or the key, so
 //   no failure, log line or result repeats any of it.
 import {
-  OPENAI_API_KEY_SECRET,
   ProviderError,
   ProviderRateLimitError,
   type AuthStatus,
@@ -32,6 +36,7 @@ import {
   type EndpointCheck,
 } from "../egress-policy.ts";
 import { log } from "../log.ts";
+import { openaiKeySecretName } from "../secret-names.ts";
 
 /** A larger answer is refused unread; structured outputs in Phase 1 are small. */
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -73,13 +78,21 @@ function retryAfter(header: string | null): number | undefined {
   return Number(header.trim()) * 1000;
 }
 
-async function readCapped(response: Response): Promise<string> {
+async function readCapped(response: Response, signal: AbortSignal): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
   const chunks: Uint8Array[] = [];
   let size = 0;
   for (;;) {
-    const { done, value } = await reader.read();
+    let chunk: Awaited<ReturnType<typeof reader.read>>;
+    try {
+      chunk = await reader.read();
+    } catch {
+      // the connection dropped mid-body, or the call was aborted
+      if (signal.aborted) throw signal.reason;
+      throw failure("network-error", true);
+    }
+    const { done, value } = chunk;
     if (done) break;
     size += value.byteLength;
     if (size > MAX_RESPONSE_BYTES) {
@@ -136,10 +149,15 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return { installed: "url" in this.#endpoint() };
   }
 
-  /** A stored key is not proof the server accepts it; telling would mean sending it. */
+  /**
+   * A stored key is not proof the server accepts it; telling would mean sending it.
+   * Without an endpoint there is no host, so no key to look for.
+   */
   async checkAuthentication(): Promise<AuthStatus> {
-    const key = await this.#options.secrets.read(OPENAI_API_KEY_SECRET);
-    return key.state === "missing" ? "unauthenticated" : "unknown";
+    const endpoint = this.#endpoint();
+    if ("problem" in endpoint) return "unknown";
+    const key = await this.#options.secrets.has(openaiKeySecretName(endpoint.url.host));
+    return key === "missing" ? "unauthenticated" : "unknown";
   }
 
   /** Settings and the secret store only; nothing goes over the network. */
@@ -149,11 +167,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (!readSetting(this.#options.db, OPENAI_MODEL_SETTING)) {
       return { state: "unavailable", reason: "model-missing" };
     }
-    const key = await this.#options.secrets.read(OPENAI_API_KEY_SECRET);
-    if (key.state === "missing") return { state: "unavailable", reason: "api-key-missing" };
-    if (key.state === "unavailable") {
-      return { state: "unavailable", reason: "secret-store-unavailable" };
-    }
+    const key = await this.#options.secrets.has(openaiKeySecretName(endpoint.url.host));
+    if (key === "missing") return { state: "unavailable", reason: "api-key-missing" };
+    if (key === "unavailable") return { state: "unavailable", reason: "secret-store-unavailable" };
     return { state: "ok" };
   }
 
@@ -201,10 +217,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
     outputSchema: Readonly<Record<string, unknown>> | undefined,
   ): Promise<string> {
     signal.throwIfAborted();
-    this.#target(request); // refuse before the key is even read
+    const decided = this.#target(request); // refuse before the key is even read
     const model = readSetting(this.#options.db, OPENAI_MODEL_SETTING);
     if (!model) throw failure("model-missing", false);
-    const key = await this.#options.secrets.read(OPENAI_API_KEY_SECRET);
+    // the key entered for this host; the check below keeps the host the same until sent
+    const key = await this.#options.secrets.read(openaiKeySecretName(decided.host));
     signal.throwIfAborted();
     if (key.state === "missing") throw failure("api-key-missing", false);
     if (key.state === "unavailable") throw failure("secret-store-unavailable", false);
@@ -266,6 +283,6 @@ export class OpenAICompatibleProvider implements LLMProvider {
       const retryable = response.status >= 500 || response.status === 408;
       throw failure(`http-${response.status}`, retryable, response.status);
     }
-    return content(await readCapped(response));
+    return content(await readCapped(response, signal));
   }
 }

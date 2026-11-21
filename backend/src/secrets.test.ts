@@ -4,7 +4,7 @@
 // temporary files — even when the server fails by echoing it back. Without a usable
 // store the Provider is unavailable and nothing is sent. The shell's half (the key
 // is only ciphertext on disk; no store, no file) is apps/desktop/src/secret-store.test.ts.
-import { OPENAI_API_KEY_SECRET, routes, type SecretRead } from "@pki/contracts";
+import { routes, type SecretRead, type SecretSource } from "@pki/contracts";
 import {
   createBroker,
   createCallRecorder,
@@ -12,13 +12,16 @@ import {
   createUserActionLedger,
   OPENAI_BASE_URL_SETTING,
   OPENAI_MODEL_SETTING,
+  openaiKeySecretName,
 } from "@pki/providers";
 import { OpenAICompatibleProvider } from "@pki/providers/adapters";
 import { writeSetting, type SqlDriver } from "@pki/storage";
 import {
   completion,
+  newTempFilesContaining,
   send,
   startFakeOpenAI,
+  tempEntries,
   type FakeHttpReply,
   type FakeOpenAIServer,
 } from "@pki/testkit";
@@ -73,17 +76,25 @@ function filesUnder(root: string): string[] {
     .map((e) => join(e.parentPath, e.name));
 }
 
+/** The shell's store as the backend sees it: `read` held for the key of `host` only. */
+function storeFor(host: string, read: SecretRead): SecretSource & { asked: string[] } {
+  const asked: string[] = [];
+  const name = openaiKeySecretName(host);
+  return {
+    asked,
+    read: async (n) => (asked.push(n), n === name ? read : { state: "missing" }),
+    has: async (n) => (n === name ? read.state : "missing"),
+  };
+}
+
 function setup(read: SecretRead) {
   const egress = createEgressPolicy({ db, allowLoopbackHttp: true });
   egress.grant("openai-compatible", ["synthetic", "general"], {
     destination: server.host,
     policyVersion: egress.policyVersion(),
   });
-  const provider = new OpenAICompatibleProvider({
-    db,
-    secrets: { read: async () => read },
-    allowLoopbackHttp: true,
-  });
+  const secrets = storeFor(server.host, read);
+  const provider = new OpenAICompatibleProvider({ db, secrets, allowLoopbackHttp: true });
   const ledger = createUserActionLedger();
   const broker = createBroker({
     db,
@@ -107,10 +118,10 @@ function setup(read: SecretRead) {
         retryable: false,
       }),
     );
-  return { egress, provider, connectionTest };
+  return { egress, provider, secrets, connectionTest };
 }
 
-async function apiAnswers(egress: ReturnType<typeof createEgressPolicy>) {
+async function startApi(egress: ReturnType<typeof createEgressPolicy>, secrets?: SecretSource) {
   const api = await startServer({
     token: TOKEN,
     allowedOrigins: [],
@@ -118,9 +129,15 @@ async function apiAnswers(egress: ReturnType<typeof createEgressPolicy>) {
     db,
     dataDirectory: dir,
     egress,
+    ...(secrets ? { secrets } : {}),
     ...productAdapters(),
   });
   const headers = { host: `127.0.0.1:${api.port}`, authorization: `Bearer ${TOKEN}` };
+  return { api, headers };
+}
+
+async function apiAnswers(egress: ReturnType<typeof createEgressPolicy>, secrets?: SecretSource) {
+  const { api, headers } = await startApi(egress, secrets);
   try {
     return await Promise.all(
       [routes.status, routes.activity, routes.settings, routes.consents].map((r) =>
@@ -134,8 +151,8 @@ async function apiAnswers(egress: ReturnType<typeof createEgressPolicy>) {
 
 describe("the API key is used and left nowhere", () => {
   it("in results, history, API answers, logs, data files or temp files", async () => {
-    const tempBefore = new Set(readdirSync(tmpdir()));
-    const { egress, connectionTest } = setup({ state: "present", value: KEY_CANARY });
+    const tempBefore = tempEntries();
+    const { egress, secrets, connectionTest } = setup({ state: "present", value: KEY_CANARY });
     replies = [
       () => completion('{"reply":"ok"}'),
       (key) => ({ status: 500, body: { error: { message: `bad key ${key}` } } }),
@@ -159,7 +176,7 @@ describe("the API key is used and left nowhere", () => {
       "failed",
     ]);
 
-    const answers = await apiAnswers(egress);
+    const answers = await apiAnswers(egress, secrets);
     const texts = [
       JSON.stringify(results),
       JSON.stringify(db.all("SELECT * FROM provider_calls")),
@@ -176,16 +193,7 @@ describe("the API key is used and left nowhere", () => {
       expect(readFileSync(file).includes(KEY_CANARY), file).toBe(false);
     }
     db = openCanonicalDb(dir);
-    const created = readdirSync(tmpdir()).filter((name) => !tempBefore.has(name));
-    for (const name of created) {
-      try {
-        for (const file of filesUnder(join(tmpdir(), name))) {
-          expect(readFileSync(file).includes(KEY_CANARY)).toBe(false);
-        }
-      } catch {
-        // a sibling's directory removed while we looked, or a plain file: not ours
-      }
-    }
+    expect(newTempFilesContaining(tempBefore, KEY_CANARY)).toEqual([]);
   });
 
   it.each([
@@ -199,14 +207,50 @@ describe("the API key is used and left nowhere", () => {
     expect(server.requests).toEqual([]);
   });
 
-  it("asks the store for the key by its fixed name", async () => {
-    const asked: string[] = [];
-    const provider = new OpenAICompatibleProvider({
-      db,
-      secrets: { read: async (name) => (asked.push(name), { state: "missing" }) },
-      allowLoopbackHttp: true,
-    });
-    await provider.checkHealth();
-    expect(asked).toEqual([OPENAI_API_KEY_SECRET]);
+  // review A-F3/B-B1: what a compromised page could do with the session token alone
+  it("sends no key to a host the page re-points the endpoint and grants consent to", async () => {
+    const { egress, secrets, connectionTest } = setup({ state: "present", value: KEY_CANARY });
+    expect((await connectionTest()).status).toBe("ok");
+    const attacker = await startFakeOpenAI();
+    const { api, headers } = await startApi(egress, secrets);
+    try {
+      const moved = await send(api.port, routes.writeSettings.path, headers, "POST", {
+        openaiCompatible: { baseUrl: attacker.baseUrl, model: "synthetic-model" },
+      });
+      expect(moved.body).toMatchObject({ openaiCompatible: { key: "missing" } });
+      const consents = await send(api.port, routes.consents.path, headers);
+      const { policyVersion } = consents.body as { policyVersion: string };
+      const granted = await send(api.port, routes.grantConsent.path, headers, "POST", {
+        providerId: "openai-compatible",
+        allowedClasses: ["synthetic", "general"],
+        destination: attacker.host,
+        policyVersion,
+      });
+      expect(granted.status).toBe(200);
+      expect(
+        egress.decide({
+          providerId: "openai-compatible",
+          taskKind: "connection-test",
+          classification: "synthetic",
+        }),
+      ).toMatchObject({ allowed: true, destination: attacker.host });
+
+      const result = await connectionTest();
+      expect(result).toMatchObject({ status: "failed", error: "provider-error" });
+      expect(attacker.requests).toEqual([]);
+      expect(server.requests).toHaveLength(1); // only the first, legitimate call
+      expect(secrets.asked.at(-1)).toBe(openaiKeySecretName(attacker.host));
+    } finally {
+      await api.close();
+      await attacker.close();
+    }
+  });
+
+  it("checks presence only: health and the Settings answer never read the value", async () => {
+    const { provider, secrets, egress } = setup({ state: "present", value: KEY_CANARY });
+    expect(await provider.checkHealth()).toEqual({ state: "ok" });
+    const [, , settings] = await apiAnswers(egress, secrets);
+    expect(settings?.body).toMatchObject({ openaiCompatible: { key: "present" } });
+    expect(secrets.asked).toEqual([]);
   });
 });

@@ -17,3 +17,4 @@ export {
   type FakeHttpRequest,
   type FakeOpenAIServer,
 } from "./fake-openai-server.ts";
+export { newTempFilesContaining, tempEntries } from "./temp-scan.ts";

@@ -132,8 +132,18 @@ export const SettingsResponseSchema = z.object({
   dataDirectory: z.string(),
   schemaVersion: z.int().nonnegative(),
   databaseEncryption: z.enum(["not-applied", "unknown"]),
-  /** The OpenAI-compatible endpoint and model (site-setup S05); null until set. */
-  openaiCompatible: z.object({ baseUrl: z.string().nullable(), model: z.string().nullable() }),
+  /**
+   * The OpenAI-compatible endpoint and model (site-setup S05); null until set.
+   * `keyName` is where the key for this endpoint's `host` is stored (keys are bound
+   * to a host), `key` whether it is there; both null without an endpoint.
+   */
+  openaiCompatible: z.object({
+    baseUrl: z.string().nullable(),
+    model: z.string().nullable(),
+    host: z.string().nullable(),
+    keyName: z.string().nullable(),
+    key: z.enum(["present", "missing", "unavailable"]).nullable(),
+  }),
 });
 
 /**

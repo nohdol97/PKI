@@ -56,6 +56,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     dataDirectory: options.dataDir,
     databaseFile: join(options.dataDir, CANONICAL_DB_FILE),
     egress: productEgress(db),
+    secrets: options.secrets,
   });
   return { server, db, providers: productProviders(db, options.secrets) };
 }

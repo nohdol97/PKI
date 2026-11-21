@@ -3,9 +3,10 @@
 // (other processes of the same user can read both). The backend binds a free loopback
 // port itself and reports it back on the same channel, so no port is picked twice.
 // A secret goes the same way, only when the backend asks for it just before a call.
-import { SecretNameSchema, type SecretRead } from "@pki/contracts";
+import { isBackendReadableSecret, SecretNameSchema, type SecretRead } from "@pki/contracts";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import type { SecretStore } from "./secret-store.ts";
 
 /** The surface shared by Electron's utilityProcess.fork and Node's fork (tests). */
 export interface BackendChild {
@@ -49,10 +50,26 @@ const FromBackend = z.discriminatedUnion("type", [
     type: z.literal("secret-request"),
     id: z.int().positive(),
     name: SecretNameSchema,
+    mode: z.enum(["read", "presence"]),
   }),
 ]);
 
 const SECRET_UNAVAILABLE: SecretRead = { state: "unavailable" };
+
+async function answerSecret(
+  store: Pick<SecretStore, "read" | "has"> | undefined,
+  name: string,
+  mode: "read" | "presence",
+): Promise<SecretRead | { state: SecretRead["state"] }> {
+  if (!store || !isBackendReadableSecret(name)) return SECRET_UNAVAILABLE;
+  try {
+    if (mode === "read") return await store.read(name);
+    const presence = await store.has(name);
+    return presence.ok ? { state: presence.present ? "present" : "missing" } : SECRET_UNAVAILABLE;
+  } catch {
+    return SECRET_UNAVAILABLE;
+  }
+}
 
 export interface BackendOptions {
   fork: ForkBackend;
@@ -68,8 +85,12 @@ export interface BackendOptions {
   env?: Readonly<Record<string, string | undefined>>;
   startTimeoutMs?: number;
   stopTimeoutMs?: number;
-  /** Answers the backend's secret requests; without it every answer is "unavailable". */
-  secrets?: { read(name: string): Promise<SecretRead> } | undefined;
+  /**
+   * Answers the backend's secret requests; without it every answer is "unavailable".
+   * Only names `isBackendReadableSecret` allows are looked up; a presence request
+   * gets the state alone, never the value.
+   */
+  secrets?: Pick<SecretStore, "read" | "has"> | undefined;
 }
 
 export interface Backend {
@@ -116,11 +137,11 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
       const message = FromBackend.safeParse(raw);
       if (!message.success) return fail("sent an unexpected message");
       if (message.data.type === "secret-request") {
-        const { id, name } = message.data;
-        const read = options.secrets?.read(name) ?? Promise.resolve(SECRET_UNAVAILABLE);
-        void read
-          .catch(() => SECRET_UNAVAILABLE)
-          .then((answer) => child.postMessage({ type: "secret", id, ...answer }));
+        const { id, name, mode } = message.data;
+        void answerSecret(options.secrets, name, mode).then((answer) => {
+          // the backend may have exited meanwhile; nothing to answer then
+          if (!ended) child.postMessage({ type: "secret", id, ...answer });
+        });
         return;
       }
       if (message.data.type === "failed") return fail("failed to start");

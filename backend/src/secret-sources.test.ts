@@ -1,14 +1,17 @@
 // Where the backend reads a secret just before a call (V01-R4, R13, ADR 0010): from
 // the Electron shell over the parent channel, or, in the browser development entry
 // only, from an environment variable. Neither keeps the value.
-import { OPENAI_API_KEY_SECRET } from "@pki/contracts";
+import { openaiKeySecretName } from "@pki/providers";
 import { describe, expect, it, vi } from "vitest";
 import {
   channelSecrets,
-  devSecretVariable,
+  DEV_KEY_HOST_VARIABLE,
+  DEV_KEY_VARIABLE,
   envSecrets,
   NO_SECRET_STORE,
 } from "./secret-sources.ts";
+
+const OPENAI_API_KEY_SECRET = openaiKeySecretName("api.synthetic.example");
 
 describe("channelSecrets", () => {
   function setup(timeoutMs = 1000) {
@@ -20,7 +23,9 @@ describe("channelSecrets", () => {
   it("asks the shell by name and resolves with its answer", async () => {
     const { posted, secrets } = setup();
     const read = secrets.source.read(OPENAI_API_KEY_SECRET);
-    expect(posted).toEqual([{ type: "secret-request", id: 1, name: OPENAI_API_KEY_SECRET }]);
+    expect(posted).toEqual([
+      { type: "secret-request", id: 1, name: OPENAI_API_KEY_SECRET, mode: "read" },
+    ]);
     expect(secrets.deliver({ type: "secret", id: 1, state: "present", value: "sk-x" })).toBe(true);
     await expect(read).resolves.toEqual({ state: "present", value: "sk-x" });
   });
@@ -47,6 +52,23 @@ describe("channelSecrets", () => {
     expect(secrets.deliver(message)).toBe(false);
   });
 
+  it("asks for presence only, and refuses a presence answer that carries a value", async () => {
+    const { posted, secrets } = setup();
+    const has = secrets.source.has(OPENAI_API_KEY_SECRET);
+    expect(posted).toEqual([
+      { type: "secret-request", id: 1, name: OPENAI_API_KEY_SECRET, mode: "presence" },
+    ]);
+    expect(secrets.deliver({ type: "secret", id: 1, state: "present", value: "sk-x" })).toBe(false);
+    expect(secrets.deliver({ type: "secret", id: 1, state: "present" })).toBe(true);
+    await expect(has).resolves.toBe("present");
+  });
+
+  it("refuses a read answer without its value", async () => {
+    const { secrets } = setup();
+    void secrets.source.read("a");
+    expect(secrets.deliver({ type: "secret", id: 1, state: "present" })).toBe(false);
+  });
+
   it("answers unavailable when the shell does not answer in time", async () => {
     vi.useFakeTimers();
     try {
@@ -71,23 +93,23 @@ describe("channelSecrets", () => {
 });
 
 describe("envSecrets (browser development entry only)", () => {
-  it("reads PKI_DEV_SECRET_<NAME> at call time", async () => {
-    expect(devSecretVariable(OPENAI_API_KEY_SECRET)).toBe(
-      "PKI_DEV_SECRET_OPENAI_COMPATIBLE_API_KEY",
-    );
+  it("gives the key only under the name of the host it is set for, read at call time", async () => {
     const env: Record<string, string | undefined> = {};
     const source = envSecrets(env);
-    await expect(source.read(OPENAI_API_KEY_SECRET)).resolves.toEqual({ state: "missing" });
-    env.PKI_DEV_SECRET_OPENAI_COMPATIBLE_API_KEY = "sk-dev";
-    await expect(source.read(OPENAI_API_KEY_SECRET)).resolves.toEqual({
-      state: "present",
-      value: "sk-dev",
+    const name = openaiKeySecretName("api.synthetic.example");
+    await expect(source.read(name)).resolves.toEqual({ state: "missing" });
+    env[DEV_KEY_VARIABLE] = "sk-dev";
+    await expect(source.read(name)).resolves.toEqual({ state: "missing" }); // no host given
+    env[DEV_KEY_HOST_VARIABLE] = "API.Synthetic.Example";
+    await expect(source.read(name)).resolves.toEqual({ state: "present", value: "sk-dev" });
+    await expect(source.has(name)).resolves.toBe("present");
+    await expect(source.read(openaiKeySecretName("evil.example"))).resolves.toEqual({
+      state: "missing",
     });
-    env.PKI_DEV_SECRET_OPENAI_COMPATIBLE_API_KEY = "";
-    await expect(source.read(OPENAI_API_KEY_SECRET)).resolves.toEqual({ state: "missing" });
-    env.PKI_DEV_SECRET_OPENAI_COMPATIBLE_API_KEY = "x".repeat(8193);
-    await expect(source.read(OPENAI_API_KEY_SECRET)).resolves.toEqual({ state: "unavailable" });
-    await expect(source.read("Bad Name!")).resolves.toEqual({ state: "unavailable" });
+    env[DEV_KEY_VARIABLE] = "";
+    await expect(source.read(name)).resolves.toEqual({ state: "missing" });
+    env[DEV_KEY_VARIABLE] = "x".repeat(8193);
+    await expect(source.read(name)).resolves.toEqual({ state: "unavailable" });
   });
 });
 
@@ -96,5 +118,6 @@ describe("NO_SECRET_STORE", () => {
     await expect(NO_SECRET_STORE.read(OPENAI_API_KEY_SECRET)).resolves.toEqual({
       state: "unavailable",
     });
+    await expect(NO_SECRET_STORE.has(OPENAI_API_KEY_SECRET)).resolves.toBe("unavailable");
   });
 });

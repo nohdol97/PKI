@@ -2,8 +2,8 @@
 // spec "T08이 넘기는 것" 4). Only an `https` address, or `http` to loopback, without
 // user info, query or fragment, is stored; whether loopback `http` is then used is
 // the egress policy's call (build kind). The API key is never a setting.
-import { ErrorResponseSchema, routes } from "@pki/contracts";
-import { OPENAI_BASE_URL_SETTING, OPENAI_MODEL_SETTING } from "@pki/providers";
+import { ErrorResponseSchema, routes, type SecretSource } from "@pki/contracts";
+import { OPENAI_BASE_URL_SETTING, OPENAI_MODEL_SETTING, openaiKeySecretName } from "@pki/providers";
 import { readSetting, type SqlDriver } from "@pki/storage";
 import { send } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -19,8 +19,15 @@ const connectors: ConnectorManager = { list: () => [], sync: async () => ({ erro
 let dir: string;
 let db: SqlDriver;
 let server: RunningServer;
+/** The key store the backend asks (the shell in Electron): one key, for one host. */
+const stored = new Set<string>();
+const secrets: SecretSource = {
+  read: async () => ({ state: "unavailable" }),
+  has: async (name) => (stored.has(name) ? "present" : "missing"),
+};
 
 beforeEach(async () => {
+  stored.clear();
   dir = mkdtempSync(join(tmpdir(), "pki-settings-"));
   db = openCanonicalDb(dir);
   server = await startServer({
@@ -30,6 +37,7 @@ beforeEach(async () => {
     db,
     dataDirectory: dir,
     egress: productEgress(db),
+    secrets,
     ...productAdapters(),
   });
 });
@@ -53,7 +61,28 @@ const write = (baseUrl: string, model = "synthetic-model") =>
 describe("settings API: the OpenAI-compatible endpoint", () => {
   it("starts unset", async () => {
     expect((await call("GET")).body).toMatchObject({
-      openaiCompatible: { baseUrl: null, model: null },
+      openaiCompatible: { baseUrl: null, model: null, host: null, keyName: null, key: null },
+    });
+  });
+
+  // review A-F3/B-B1: a key belongs to the host it was entered for
+  it("shows the key for the endpoint's host only; a new host needs the key again", async () => {
+    stored.add(openaiKeySecretName("one.synthetic.example"));
+    await write("https://one.synthetic.example/v1");
+    expect((await call("GET")).body).toMatchObject({
+      openaiCompatible: {
+        host: "one.synthetic.example",
+        keyName: openaiKeySecretName("one.synthetic.example"),
+        key: "present",
+      },
+    });
+    const moved = await write("https://two.synthetic.example/v1");
+    expect(moved.body).toMatchObject({
+      openaiCompatible: {
+        host: "two.synthetic.example",
+        keyName: openaiKeySecretName("two.synthetic.example"),
+        key: "missing",
+      },
     });
   });
 

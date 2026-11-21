@@ -2,7 +2,6 @@
 // secret file only as ciphertext from the OS-protected cipher; without that cipher
 // nothing is written at all (no plaintext fallback); a damaged file is never
 // overwritten. Tests use a cipher double — never the real keychain.
-import { OPENAI_API_KEY_SECRET } from "@pki/contracts";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -19,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSecretStore, electronCipher, type Cipher } from "./secret-store.ts";
 
 const CANARY = `sk-canary-${randomUUID()}`;
+const OPENAI_API_KEY_SECRET = `openai-compatible.api-key.${"a".repeat(32)}`;
 
 /** Reversible and visibly not the plaintext: XOR with a fixed byte, behind a marker. */
 function doubleCipher(available = true) {
@@ -67,6 +67,9 @@ describe("secret store", () => {
     for (const path of everyFile(dir)) {
       expect(readFileSync(path).includes(CANARY), path).toBe(false);
     }
+    // what is stored is the cipher's output, not some other encoding of the plaintext
+    const stored = JSON.parse(readFileSync(file, "utf8")).secrets[OPENAI_API_KEY_SECRET];
+    expect(Buffer.from(stored, "base64")).toEqual(await doubleCipher().encrypt(CANARY));
     expect(everyFile(dir)).toEqual([file]); // no temporary file left behind
     if (process.platform !== "win32") {
       expect(statSync(file).mode & 0o777).toBe(0o600);
@@ -106,8 +109,19 @@ describe("secret store", () => {
     expect(existsSync(file)).toBe(false);
     expect(everyFile(dir)).toEqual([]);
     expect(cipher.calls.encrypt).toBe(0);
-    expect(await store.has(OPENAI_API_KEY_SECRET)).toEqual({ ok: false, error: "unavailable" });
+    // nothing stored is known without the OS; a stored key it cannot open is unavailable
+    expect(await store.has(OPENAI_API_KEY_SECRET)).toEqual({ ok: true, present: false });
     expect(await store.read(OPENAI_API_KEY_SECRET)).toEqual({ state: "unavailable" });
+    await createSecretStore({ file, cipher: doubleCipher() }).set(OPENAI_API_KEY_SECRET, CANARY);
+    expect(await store.has(OPENAI_API_KEY_SECRET)).toEqual({ ok: false, error: "unavailable" });
+  });
+
+  it("checks presence of a missing key without asking the OS (no keychain access)", async () => {
+    const cipher = doubleCipher();
+    const available = vi.spyOn(cipher, "available");
+    const store = createSecretStore({ file, cipher });
+    expect(await store.has(OPENAI_API_KEY_SECRET)).toEqual({ ok: true, present: false });
+    expect(available).not.toHaveBeenCalled();
   });
 
   it("deletes even while the OS protection is unavailable", async () => {
@@ -175,6 +189,17 @@ describe("electronCipher", () => {
       reEncrypt: false,
     });
     expect(s.getSelectedStorageBackend).not.toHaveBeenCalled();
+  });
+
+  it("asks the async encryptor before reading Linux's backend name", async () => {
+    const order: string[] = [];
+    const s = {
+      ...safeStorage(),
+      isAsyncEncryptionAvailable: async () => (order.push("async"), true),
+      getSelectedStorageBackend: () => (order.push("backend"), "gnome_libsecret" as const),
+    };
+    expect(await electronCipher(s, "linux").available()).toBe(true);
+    expect(order).toEqual(["async", "backend"]);
   });
 
   it.each(["basic_text", "unknown"] as const)(

@@ -46,3 +46,4 @@ export {
   type EndpointCheck,
 } from "./egress-policy.ts";
 export { createLogger, errorClass, log, type Logger, type LogValue } from "./log.ts";
+export { openaiKeySecretName } from "./secret-names.ts";

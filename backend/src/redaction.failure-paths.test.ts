@@ -24,8 +24,10 @@ import { registerConnectorInstance, saveSourceRecord, writeSetting } from "@pki/
 import {
   completion,
   FakeProvider,
+  newTempFilesContaining,
   send,
   startFakeOpenAI,
+  tempEntries,
   type FakeHttpReply,
   type FakeHttpRequest,
 } from "@pki/testkit";
@@ -101,7 +103,7 @@ function filesUnder(root: string): string[] {
 describe("failure paths leave no input behind", () => {
   it("in results, history, the activity API, logs, data files or temp files", async () => {
     const db = openCanonicalDb(dir);
-    const tempBefore = new Set(readdirSync(tmpdir()));
+    const tempBefore = tempEntries();
     try {
       registerConnectorInstance(db, "fixtures", "test-fixtures");
       saveSourceRecord(db, "fixtures", {
@@ -122,7 +124,10 @@ describe("failure paths leave no input behind", () => {
       const openai = () =>
         new OpenAICompatibleProvider({
           db,
-          secrets: { read: async () => ({ state: "present", value: "sk-synthetic" }) },
+          secrets: {
+            read: async () => ({ state: "present", value: "sk-synthetic" }),
+            has: async () => "present",
+          },
           allowLoopbackHttp: true,
         });
       const httpEcho = (request: FakeHttpRequest) => `${ECHO_MARKER} ${request.body}`;
@@ -220,19 +225,9 @@ describe("failure paths leave no input behind", () => {
     for (const file of filesUnder(dir)) {
       expect(readFileSync(file).includes(ECHO_MARKER), file).toBe(false);
     }
-    const created = readdirSync(tmpdir()).filter((name) => !tempBefore.has(name));
+    const created = [...tempEntries()].filter((name) => !tempBefore.has(name));
     expect(created.filter((name) => name.includes(run))).toEqual([]);
-    for (const name of created) {
-      // other workers' temp files may appear meanwhile; none may hold the echo
-      const path = join(tmpdir(), name);
-      try {
-        for (const file of filesUnder(path)) {
-          expect(readFileSync(file).includes(ECHO_MARKER)).toBe(false);
-        }
-      } catch {
-        // a sibling's directory removed while we looked, or a plain file: not ours
-      }
-    }
+    expect(newTempFilesContaining(tempBefore, ECHO_MARKER)).toEqual([]);
   });
 
   it("logs a failing route by name and known error class only", async () => {

@@ -79,7 +79,14 @@
 - 쉘(main 프로세스)만 저장소를 가진다. 화면은 preload의 `setSecret`·`hasSecret`·`deleteSecret`으로 저장·확인·삭제만 하고 값을 다시 읽는 함수는 없다. 백엔드는 Provider가 보내기 직전에 쉘에 묻고(전용 통로의 `secret-request`) 값을 그 호출에만 쓰며 저장하지 않는다.
 - 파일은 데이터 디렉터리(로밍하지 않는 OS 사용자별 위치, 0700)의 `secrets.json`이다. 소유자만 읽는 권한(0600)으로 새 파일을 쓴 뒤 바꿔 넣는다. Electron 기본 `userData`(Windows에서 로밍 폴더)에 두지 않는다: 암호문이 다른 PC로 따라간다.
 - OS 보호를 쓸 수 없거나, 파일을 이 저장소의 형식으로 읽을 수 없거나, 복호화가 실패하면 "사용 불가"다. 읽을 수 없는 파일은 덮어쓰지 않는다(사용자의 키가 들어 있을 수 있다). 삭제는 OS 보호 없이도 된다.
-- 브라우저 개발 환경(`backend/src/dev.ts`, 제품 빌드 밖)에는 쉘이 없으므로 `PKI_DEV_SECRET_<이름>` 환경 변수(예: `PKI_DEV_SECRET_OPENAI_COMPATIBLE_API_KEY`)를 호출할 때마다 읽고 저장하지 않는다.
+- **API 키는 입력할 때의 엔드포인트 호스트에 묶인다.** 저장 이름이 호스트에서 나오므로(`openai-compatible.api-key.<호스트의 SHA-256 앞 32자리>`), 주소를 다른 호스트로 바꾸면 그 호스트의 키가 없어 아무것도 보내지 않는다. 세션 토큰을 가진 화면은 주소를 바꾸고 동의할 수는 있지만 값을 읽을 수 없으므로 키를 새 호스트로 옮기지 못한다. 사용자가 새 호스트에 쓸 키를 다시 입력해야 한다.
+- 쉘은 백엔드가 읽을 수 있는 이름(OpenAI 호환 키의 이름 꼴)만 답한다. 상태 확인은 값이 아니라 존재만 묻고, 저장된 항목이 없으면 OS를 묻지 않는다.
+- 브라우저 개발 환경(`backend/src/dev.ts`, 제품 빌드 밖)에는 쉘이 없으므로 `PKI_DEV_OPENAI_API_KEY_HOST`(엔드포인트 호스트)와 `PKI_DEV_OPENAI_API_KEY`를 호출할 때마다 읽고 그 호스트에만 준다. 저장하지 않는다.
+
+**지켜볼 것(미검증).**
+
+- **Windows의 `Local State`**: Chromium의 암호화 계층은 DPAPI로 감싼 `safeStorage` 키를 Electron `userData`(Windows에서 로밍되는 `%APPDATA%`)의 `Local State` 파일에 둔다고 알려져 있다(Chromium os_crypt 설계, 이 저장소에서 확인하지 않음). 암호문은 로컬에 남으므로 기밀이 새지는 않지만, 로밍 프로필 동기화가 그 키를 바꾸면 `secrets.json`을 풀지 못해 "사용 불가"가 된다(닫힌 쪽으로 실패). 배포처 S11에서 확인한다.
+- **Linux의 확인 순서**: 비동기 암호기는 처음 쓸 때 초기화되므로 먼저 `isAsyncEncryptionAvailable()`을 묻고 그 뒤 `getSelectedStorageBackend()`를 읽는다. 그래도 `unknown`·`basic_text`이면 "사용 불가"다(닫힌 쪽). 실제 Linux에서는 확인하지 않았다.
 
 **남은 것.** 실제 `safeStorage`는 이 저장소의 테스트에서 부르지 않는다(실제 키체인에 쓰지 않으려고 암호화 대역으로 시험한다). 그래서 개발 OS에서도 실제 키체인과의 동작은 미검증이고, 배포처 Windows의 DPAPI 동작은 S11이 확인한다(A16). 사용자가 "값 자체가 OS 보관함에 있어야 한다"고 정하면 `@napi-rs/keyring`을 평가해 쉘 저장소의 암호화 부분을 바꾼다(저장소 인터페이스는 그대로다).
 

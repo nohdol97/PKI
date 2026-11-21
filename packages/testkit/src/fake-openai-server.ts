@@ -16,6 +16,8 @@ export interface FakeHttpReply {
   headers?: Record<string, string>;
   /** Sent as-is when a string, otherwise as JSON. */
   body?: unknown;
+  /** Announce the whole body, send half of it, then drop the connection. */
+  truncate?: boolean;
 }
 
 export interface FakeOpenAIServer {
@@ -60,9 +62,16 @@ export async function startFakeOpenAI(
       requests.push(request);
       void Promise.resolve(respond(request)).then((reply) => {
         const body = typeof reply.body === "string" ? reply.body : JSON.stringify(reply.body ?? {});
-        res
-          .writeHead(reply.status, { "content-type": "application/json", ...reply.headers })
-          .end(body);
+        const head = { "content-type": "application/json", ...reply.headers };
+        if (reply.truncate) {
+          res.writeHead(reply.status, {
+            ...head,
+            "content-length": String(Buffer.byteLength(body)),
+          });
+          res.write(body.slice(0, Math.floor(body.length / 2)), () => res.socket?.destroy());
+          return;
+        }
+        res.writeHead(reply.status, head).end(body);
       });
     });
   });

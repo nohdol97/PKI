@@ -41,15 +41,15 @@ const UNPROTECTED_LINUX_BACKENDS = new Set(["basic_text", "unknown"]);
 
 export function electronCipher(safeStorage: SafeStorageLike, platform: NodeJS.Platform): Cipher {
   return {
+    // The asynchronous encryptor starts lazily on its first use, so it is asked first;
+    // only then is Linux's backend name read. Any doubt is "unavailable" (fail closed).
     async available() {
       try {
-        if (
+        if (!(await safeStorage.isAsyncEncryptionAvailable())) return false;
+        return !(
           platform === "linux" &&
           UNPROTECTED_LINUX_BACKENDS.has(safeStorage.getSelectedStorageBackend())
-        ) {
-          return false;
-        }
-        return await safeStorage.isAsyncEncryptionAvailable();
+        );
       } catch {
         return false;
       }
@@ -137,11 +137,13 @@ export function createSecretStore(options: { file: string; cipher: Cipher }): Se
         secrets.set(name, sealed);
         return save(secrets) ? { ok: true } : UNAVAILABLE;
       }),
+    // No entry is known without the OS: the keychain is touched only for a stored key.
     has: (name) =>
       exclusive(async () => {
-        if (!(await cipher.available())) return UNAVAILABLE;
         const secrets = load();
-        return secrets ? { ok: true, present: secrets.has(name) } : UNAVAILABLE;
+        if (!secrets) return UNAVAILABLE;
+        if (!secrets.has(name)) return { ok: true, present: false };
+        return (await cipher.available()) ? { ok: true, present: true } : UNAVAILABLE;
       }),
     // No cipher needed: the user can always remove a key.
     delete: (name) =>
