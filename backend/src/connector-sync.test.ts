@@ -120,19 +120,86 @@ describe("cursor after save", () => {
   });
 
   it("keeps the old cursor and saves nothing when a page cannot be stored", async () => {
-    const connector = scripted(() => ({
-      changes: [
-        upsert("a"),
-        { kind: "delete", externalId: "a", version: 1, at: "2026-11-21T00:00:00Z" },
-      ],
-      nextCursor: "9",
-      hasMore: false,
-    }));
-    await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow(/delete/);
-    expect(readCursor(db, "s")).toBeNull();
-    expect(counts()).toEqual([0, 0]);
-    expect(db.all("SELECT count(*) AS n FROM jobs")).toEqual([{ n: 0 }]);
+    const page = (changes: ChangeSet["changes"], nextCursor: string) =>
+      scripted(() => ({ changes, nextCursor, hasMore: false }));
+    const revised = (revision: number, body: string) => ({
+      kind: "upsert" as const,
+      record: { externalId: "r", title: "t", body, revision },
+    });
+    await syncConnector(db, "s", "scripted", page([revised(2, "b")], "1"));
+    const jobs = db.all("SELECT count(*) AS n FROM jobs");
+    await expect(
+      syncConnector(db, "s", "scripted", page([upsert("a"), revised(1, "older")], "9")),
+    ).rejects.toThrow(/revision-not-newer/);
+    expect(readCursor(db, "s")).toBe("1");
+    expect(counts()).toEqual([1, 1]);
+    expect(db.all("SELECT count(*) AS n FROM jobs")).toEqual(jobs);
   });
+
+  it("skips an upsert of a deleted source and commits the rest of the page with its cursor (review A-M1)", async () => {
+    // x is stored, then deleted (V02-R12): a later upsert of x stores nothing,
+    // and neither stalls the instance's cursor nor loses the page's other changes
+    const page = (changes: ChangeSet["changes"], nextCursor: string) =>
+      scripted(() => ({ changes, nextCursor, hasMore: false }));
+    await syncConnector(db, "s", "scripted", page([upsert("x")], "1"));
+    const at = "2026-11-21T00:00:00Z";
+    await syncConnector(
+      db,
+      "s",
+      "scripted",
+      page([{ kind: "delete", externalId: "x", version: 2, at }], "2"),
+    );
+    const refused: [string, string][] = [];
+    const result = await syncConnector(
+      db,
+      "s",
+      "scripted",
+      page([upsert("a"), upsert("x", "again")], "9"),
+      {
+        onRefused: (change, reason) =>
+          refused.push([change.kind === "upsert" ? change.record.externalId : "?", reason]),
+      },
+    );
+    expect(result).toEqual({ received: 2, created: 1 });
+    expect(refused).toEqual([["x", "tombstoned"]]);
+    expect(readCursor(db, "s")).toBe("9");
+    expect(
+      db.all("SELECT s.external_id FROM source_versions v JOIN sources s ON s.id = v.source_id"),
+    ).toEqual([{ external_id: "a" }]);
+    // without onRefused (the Connector manager's sync) the page commits the same way
+    expect(
+      await syncConnector(db, "s", "scripted", page([upsert("x", "once more"), upsert("b")], "10")),
+    ).toEqual({ received: 2, created: 1 });
+    expect(readCursor(db, "s")).toBe("10");
+  });
+
+  it.each([
+    ["delete", "source-deleted"],
+    ["access-revoked", "access-revoked"],
+  ] as const)(
+    "tombstones and purges a source on a %s change, with the page and its cursor (V02-R12)",
+    async (kind, reason) => {
+      const at = "2026-11-21T00:00:00Z";
+      const connector = scripted((cursor) =>
+        cursor === null
+          ? { changes: [upsert("a"), upsert("b")], nextCursor: "1", hasMore: true }
+          : {
+              changes: [{ kind, externalId: "a", version: 3, at }],
+              nextCursor: "2",
+              hasMore: false,
+            },
+      );
+      expect(await syncConnector(db, "s", "scripted", connector)).toEqual({
+        received: 3,
+        created: 2,
+      });
+      expect(readCursor(db, "s")).toBe("2");
+      expect(counts()).toEqual([2, 1]);
+      expect(db.all("SELECT source_id, version, reason FROM tombstones")).toEqual([
+        { source_id: 1, version: 1, reason },
+      ]);
+    },
+  );
 
   it("registers one extraction job per new version, fenced at it, with the page (V02-R4)", async () => {
     const connector = scripted(() => ({

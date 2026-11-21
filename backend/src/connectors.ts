@@ -5,6 +5,8 @@
 // records (ADR 0013 decision 1) and no version is stored without its job. The
 // change sequence rises in the same transaction (storage trigger), and so does a
 // new version's propagation to the knowledge its previous versions supported (V02-R11).
+// A delete or access-revoked change tombstones and purges its source in the
+// page's transaction (V02-R12, knowledge-engine deletion.ts).
 import {
   ChangeSetSchema,
   ConnectorNotImplementedError,
@@ -14,8 +16,9 @@ import {
   type ErrorResponse,
   type SyncResponse,
 } from "@pki/contracts";
-import { propagateNewVersion } from "@pki/knowledge-engine";
+import { deleteSource, propagateNewVersion } from "@pki/knowledge-engine";
 import {
+  findSourceId,
   readCursor,
   registerConnectorInstance,
   registerJob,
@@ -31,7 +34,10 @@ const PAGE_LIMIT = 100;
 export const EXTRACT_JOB_KIND = "extract";
 
 /** A change the store would not take; nothing of it is written. */
-export type RefusalReason = "revision-not-newer" | "tombstoned" | "change-kind-unsupported";
+export type RefusalReason = "revision-not-newer" | "tombstoned";
+
+/** What a change did: a new version, nothing new, or its source tombstoned and purged. */
+export type StoredOutcome = "created" | "unchanged" | "deleted";
 
 export interface SyncOptions {
   signal?: AbortSignal;
@@ -39,11 +45,12 @@ export interface SyncOptions {
   rescan?: boolean;
   /**
    * Takes each refused change once its page is committed, and the page goes on.
-   * Without it a refusal fails the page, of which nothing is stored.
+   * Without it a refusal fails the page, of which nothing is stored, except a
+   * `tombstoned` one: that change is skipped and the page commits either way.
    */
   onRefused?: (change: Change, reason: RefusalReason) => void;
-  /** Takes each stored or unchanged change once its page is committed. */
-  onStored?: (change: Change, outcome: "created" | "unchanged") => void;
+  /** Takes each stored, unchanged or deleting change once its page is committed. */
+  onStored?: (change: Change, outcome: StoredOutcome) => void;
   /** Woken after a page that registered jobs commits (V02-T05 binds the runner). */
   runner?: Pick<JobRunner, "wake">;
 }
@@ -65,14 +72,26 @@ export interface ConnectorManager {
   >;
 }
 
-/** Stores one change; a version is stored together with its extraction job. */
+/**
+ * Stores one change; a version is stored together with its extraction job. A
+ * delete or access-revoked change tombstones every product version of its source
+ * and purges them (V02-R12); its `version` is the record's revision and orders
+ * nothing yet (provisional until I01's revision rule), and its `at` is not stored:
+ * the tombstone takes the product's clock, so no Connector text reaches it. A
+ * source never stored, or purged already, is left as it is ("unchanged").
+ */
 function storeChange(
   db: SqlDriver,
   instanceId: string,
   change: Change,
-): "created" | "unchanged" | { refused: RefusalReason } {
-  // Deletion and revocation arrive with V02-T08 (ARCHITECTURE 6); until then refused.
-  if (change.kind !== "upsert") return { refused: "change-kind-unsupported" };
+): StoredOutcome | { refused: RefusalReason } {
+  if (change.kind !== "upsert") {
+    const sourceId = findSourceId(db, instanceId, change.externalId);
+    if (sourceId === undefined) return "unchanged";
+    const reason = change.kind === "delete" ? "source-deleted" : "access-revoked";
+    const deleted = deleteSource(db, sourceId, { reason, at: new Date().toISOString() });
+    return deleted.outcome === "deleted" ? "deleted" : "unchanged";
+  }
   const saved = saveSourceRecord(db, instanceId, change.record);
   if (saved.status === "refused") return { refused: saved.reason };
   if (saved.status === "unchanged") return "unchanged";
@@ -122,13 +141,16 @@ export async function syncConnector(
       throw new Error(`${instanceId}: page reports more changes without progress`);
     }
     const refused: [Change, RefusalReason][] = [];
-    const stored: [Change, "created" | "unchanged"][] = [];
+    const stored: [Change, StoredOutcome][] = [];
     const pageCreated = db.transaction(() => {
       let n = 0;
       for (const change of page.changes) {
         const outcome = storeChange(db, instanceId, change);
         if (typeof outcome === "object") {
-          if (!options.onRefused) {
+          // A deleted source's upsert is skipped, never a page failure: the
+          // tombstone refuses it every time, so failing would stall the cursor and
+          // lose the page's other changes for good (V02-R12, review A-M1).
+          if (!options.onRefused && outcome.refused !== "tombstoned") {
             throw new Error(`${instanceId}: ${change.kind} change refused (${outcome.refused})`);
           }
           refused.push([change, outcome.refused]);

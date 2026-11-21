@@ -167,19 +167,30 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     return {
       status: "done",
       write: () => {
-        // an item is created only for a fact or relation that is kept
+        // An item is created only for a fact or relation that is kept. Existing
+        // items are looked up before any is created: one deleted during the Provider
+        // call (V02-R12) frees its id, which SQLite hands to the next new item, so a
+        // later lookup would find this write's own new item under the stale id.
         const ids = new Map<string, number>();
+        const gone = new Set<string>();
+        for (const [ref, item] of items) {
+          if (item.existingItemId === null) continue;
+          const id = readItem(db, Number(item.existingItemId))?.id; // deleted meanwhile: undefined
+          if (id === undefined) gone.add(ref);
+          else ids.set(ref, id);
+        }
         const touched = new Set<number>();
-        const idOf = (ref: string): number | undefined => {
-          if (ids.has(ref)) return ids.get(ref);
+        // only called for refs not gone: an existing item found above, or a new one
+        const idOf = (ref: string): number => {
+          const known = ids.get(ref);
+          if (known !== undefined) return known;
           const item = items.get(ref) as Item;
-          let id: number | undefined;
-          if (item.existingItemId !== null) {
-            id = readItem(db, Number(item.existingItemId))?.id; // deleted meanwhile: undefined
-          } else {
-            id = insertItem(db, { type: item.type, name: item.name, ...attributes("explicit") });
-          }
-          if (id !== undefined) ids.set(ref, id);
+          const id = insertItem(db, {
+            type: item.type,
+            name: item.name,
+            ...attributes("explicit"),
+          });
+          ids.set(ref, id);
           return id;
         };
         for (const entry of planned) {
@@ -187,12 +198,12 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
             "item" in entry.target
               ? [entry.target.item]
               : [entry.target.subject, entry.target.object];
-          const resolved = refs.map(idOf);
-          if (resolved.some((id) => id === undefined)) {
+          // drop first: idOf would create a new item for an entry dropped anyway
+          if (refs.some((ref) => gone.has(ref))) {
             drops.other++;
             continue;
           }
-          for (const id of resolved) touched.add(id as number);
+          for (const id of refs.map(idOf)) touched.add(id);
           const target = entry.save((ref) => ids.get(ref) as number);
           addEvidence(db, {
             target,

@@ -25,7 +25,7 @@ const tombstone = {
   sourceId: 1,
   version: 1,
   at: "2026-11-21T00:00:00Z",
-  reason: "deleted",
+  reason: "user-deleted",
 } as const;
 
 describe("tombstones", () => {

@@ -191,7 +191,12 @@ describe("closeJob: the version fence (V02-R5)", () => {
     lease();
     db.transaction(() => {
       db.run("DELETE FROM source_versions WHERE source_id = 1");
-      writeTombstone(db, { sourceId: 1, version: 1, at: T0.toISOString(), reason: "deleted" });
+      writeTombstone(db, {
+        sourceId: 1,
+        version: 1,
+        at: T0.toISOString(),
+        reason: "source-deleted",
+      });
     });
     let wrote = 0;
     expect(closeJob(db, held(job.id), { status: "done", write: () => void wrote++ })).toBe(
@@ -209,7 +214,7 @@ describe("closeJob: the version fence (V02-R5)", () => {
 
   it("accepts a version stored above an older tombstone", () => {
     db.run("DELETE FROM source_versions WHERE source_id = 1");
-    writeTombstone(db, { sourceId: 1, version: 1, at: T0.toISOString(), reason: "deleted" });
+    writeTombstone(db, { sourceId: 1, version: 1, at: T0.toISOString(), reason: "source-deleted" });
     db.run(
       "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, 2, 'h', 't', 'b2')",
     );

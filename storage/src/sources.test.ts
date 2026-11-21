@@ -195,7 +195,12 @@ describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)
 
   it("refuses a record the tombstone would block, before the trigger aborts the page", () => {
     saveSourceRecord(db, "c1", rev(1, "v1"));
-    writeTombstone(db, { sourceId: 1, version: 1, at: "2026-11-21T00:00:00Z", reason: "deleted" });
+    writeTombstone(db, {
+      sourceId: 1,
+      version: 1,
+      at: "2026-11-21T00:00:00Z",
+      reason: "source-deleted",
+    });
     db.run("DELETE FROM source_versions");
     const seq = readChangeSeq(db);
     expect(saveSourceRecord(db, "c1", rev(2, "v2"))).toEqual({

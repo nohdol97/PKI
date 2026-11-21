@@ -91,6 +91,25 @@ export function sqlDriverContract(name: string, open: (path: string) => Contract
       expect(() => db.run("INSERT INTO child (t_id) VALUES (99)")).toThrow();
     });
 
+    // V02-R12: deleted content must not stay in the file. secure_delete is a
+    // per-connection setting, so every open turns it on, a reopened file included.
+    it("overwrites deleted content on every connection it opens", () => {
+      expect(db.all("PRAGMA secure_delete")).toEqual([{ secure_delete: 1 }]);
+      db.close();
+      db = open(join(dir, "test.sqlite"));
+      expect(db.all("PRAGMA secure_delete")).toEqual([{ secure_delete: 1 }]);
+    });
+
+    // V02-R12: in WAL mode purged text stays in -wal after commit, and the mode is
+    // stored in the file, so every open pins the rollback journal (review B2).
+    it("opens every connection in the DELETE journal mode, even a file left in WAL", () => {
+      expect(db.all("PRAGMA journal_mode")).toEqual([{ journal_mode: "delete" }]);
+      expect(db.all("PRAGMA journal_mode = WAL")).toEqual([{ journal_mode: "wal" }]);
+      db.close();
+      db = open(join(dir, "test.sqlite"));
+      expect(db.all("PRAGMA journal_mode")).toEqual([{ journal_mode: "delete" }]);
+    });
+
     it("persists committed data across reopening the file", () => {
       db.run("INSERT INTO t (v) VALUES ('kept')");
       db.close();

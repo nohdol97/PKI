@@ -163,7 +163,7 @@ export interface StoredEvidence extends NewEvidence {
 }
 
 /** Whether version `v` of an evidence row is its source's latest ("현재 근거"). */
-const CURRENT = "v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id)";
+export const CURRENT = "v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id)";
 
 const targetValues = (t: EvidenceTarget) =>
   "factId" in t ? [t.factId, null] : [null, t.relationId];

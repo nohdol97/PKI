@@ -42,12 +42,12 @@ export type ImportRecord = z.infer<typeof ImportRecordSchema>;
  * `invalid-record` (the schema; `field` names the first failing known field),
  * `content-hash-mismatch` (not the sha256 of `content`). Arrival order:
  * `revision-not-newer` (an equal or lower version with other content).
- * `tombstoned`: a deleted or revoked source the tombstone blocks. `instance-conflict`:
+ * `tombstoned`: a deleted or revoked source the tombstone blocks (V02-R12: every
+ * version at or below it, which after a purge is every version). `instance-conflict`:
  * the `connector_instance_id` belongs to another Connector kind.
  * `too-many-instances`: past the cap of distinct instances per file (provisional).
  * `instance-failed`: its instance's sync failed (e.g. a job registration conflict)
- * and the line was not stored. `change-kind-unsupported`: delete and revoke lines
- * until V02-T08 (provisional).
+ * and the line was not stored.
  */
 export const ImportLineErrorReasonSchema = z.enum([
   "invalid-json",
@@ -58,7 +58,6 @@ export const ImportLineErrorReasonSchema = z.enum([
   "instance-conflict",
   "too-many-instances",
   "instance-failed",
-  "change-kind-unsupported",
 ]);
 export type ImportLineErrorReason = z.infer<typeof ImportLineErrorReasonSchema>;
 

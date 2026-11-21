@@ -107,6 +107,19 @@ export type SourceSummary = z.infer<typeof SourceSummarySchema>;
 export const SourceSearchRequestSchema = z.strictObject({ query: z.string().min(1).max(200) });
 
 /**
+ * The Sources screen's delete request (V02-R12): every version of the source is
+ * purged and a tombstone (reason `user-deleted`) keeps it from coming back.
+ * `already-deleted`: purged before, nothing changed.
+ */
+export const SourceDeleteRequestSchema = z.strictObject({
+  connectorId: z.string().min(1),
+  externalId: z.string().min(1),
+});
+export const SourceDeleteResponseSchema = z.object({
+  outcome: z.enum(["deleted", "already-deleted"]),
+});
+
+/**
  * One provider call attempt (ADR 0014: no body, prompt, response or secret).
  * `destination` and `policyVersion` are null for an attempt blocked before the
  * egress decision named them; `reason` is the code of a blocked attempt.
@@ -384,6 +397,12 @@ export const routes = {
     path: "/api/sources/search",
     request: SourceSearchRequestSchema,
     response: SourceListResponseSchema,
+  },
+  deleteSource: {
+    method: "POST",
+    path: "/api/sources/delete",
+    request: SourceDeleteRequestSchema,
+    response: SourceDeleteResponseSchema,
   },
   activity: { method: "GET", path: "/api/activity", response: ActivityResponseSchema },
   settings: { method: "GET", path: "/api/settings", response: SettingsResponseSchema },

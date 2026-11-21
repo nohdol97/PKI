@@ -47,10 +47,7 @@ export function saveSourceRecord(
     "INSERT INTO sources (connector_instance_id, external_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
     [connectorInstanceId, record.externalId],
   );
-  const sourceId = db.all(
-    "SELECT id FROM sources WHERE connector_instance_id = ? AND external_id = ?",
-    [connectorInstanceId, record.externalId],
-  )[0]?.id as number;
+  const sourceId = findSourceId(db, connectorInstanceId, record.externalId) as number;
   const hash = contentHash(record.title, record.body);
   const latest = db.all(LATEST_VERSION_SQL, [sourceId])[0];
   if (latest?.content_hash === hash) return { status: "unchanged" };
@@ -84,6 +81,18 @@ export function saveSourceRecord(
     [sourceId, version, hash, record.title, record.body, record.revision ?? null],
   );
   return { status: "created", sourceId, version };
+}
+
+/** The id of the source an instance names `externalId`, or undefined if never stored. */
+export function findSourceId(
+  db: SqlDriver,
+  connectorInstanceId: string,
+  externalId: string,
+): number | undefined {
+  return db.all("SELECT id FROM sources WHERE connector_instance_id = ? AND external_id = ?", [
+    connectorInstanceId,
+    externalId,
+  ])[0]?.id as number | undefined;
 }
 
 /** The kind an instance is bound to, or undefined before its first sync. */

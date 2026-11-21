@@ -17,6 +17,7 @@ import type { ApiClient } from "./api.ts";
 import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
+import { deleteConfirmText, deletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
@@ -123,6 +124,8 @@ function Sources({ api }: { api: ApiClient }) {
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<SourceSummary[]>();
   const [imported, setImported] = useState<ImportJsonlResponse>();
+  const [confirming, setConfirming] = useState<SourceSummary>();
+  const [deleted, setDeleted] = useState<string>();
   const [error, setError] = useState<string>();
   const fail = (e: unknown) => setError(message(e));
 
@@ -135,6 +138,7 @@ function Sources({ api }: { api: ApiClient }) {
       .then((text) => api("importJsonl", { text }))
       .then((result) => {
         setImported(result);
+        setDeleted(undefined);
         setFound(undefined);
         stored.reload();
       }, fail);
@@ -148,6 +152,17 @@ function Sources({ api }: { api: ApiClient }) {
     event.preventDefault();
     if (!query.trim()) return setFound(undefined);
     api("searchSources", { query }).then((result) => setFound(result.sources), fail);
+  };
+  const remove = (source: SourceSummary) => {
+    setConfirming(undefined);
+    api("deleteSource", { connectorId: source.connectorId, externalId: source.externalId }).then(
+      (result) => {
+        setDeleted(deletedText(source.title, result.outcome));
+        setFound(undefined);
+        stored.reload();
+      },
+      fail,
+    );
   };
   const shown = found ?? stored.data?.sources;
 
@@ -203,6 +218,18 @@ function Sources({ api }: { api: ApiClient }) {
         />
         <button type="submit">검색</button>
       </form>
+      {deleted && <p role="status">{deleted}</p>}
+      {confirming && (
+        <div role="alertdialog" aria-label="원본 삭제 확인">
+          <p>{deleteConfirmText(confirming.title)}</p>
+          <button type="button" onClick={() => remove(confirming)}>
+            지우기
+          </button>
+          <button type="button" onClick={() => setConfirming(undefined)}>
+            취소
+          </button>
+        </div>
+      )}
       {shown?.length === 0 && <p>{found ? "찾은 원본이 없습니다." : "저장된 원본이 없습니다."}</p>}
       {shown && shown.length > 0 && (
         <table>
@@ -212,6 +239,20 @@ function Sources({ api }: { api: ApiClient }) {
                 <td>{s.title}</td>
                 <td>{s.connectorId}</td>
                 <td>{s.externalId}</td>
+                <td>
+                  <button
+                    type="button"
+                    aria-label={`${s.title} 삭제`}
+                    onClick={() => {
+                      // one result at a time: the earlier import's or deletion's goes
+                      setImported(undefined);
+                      setDeleted(undefined);
+                      setConfirming(s);
+                    }}
+                  >
+                    삭제
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

@@ -139,7 +139,7 @@ describe("screen routes", () => {
   it("reads the settings, the encryption state read from the canonical file", async () => {
     expect((await call(routes.settings.path)).body).toEqual({
       dataDirectory: DATA_DIR,
-      schemaVersion: 8,
+      schemaVersion: 9,
       databaseEncryption: "not-applied",
       openaiCompatible: { baseUrl: null, model: null, host: null, keyName: null, key: null },
     });
@@ -169,5 +169,37 @@ describe("screen routes", () => {
         expect.objectContaining({ providerId: "claude-code", consent: null }),
       ]),
     });
+  });
+
+  // V02-R12: the Sources screen's delete request, recorded as user-deleted
+  it("deletes a source on request, after which it is neither listed nor found", async () => {
+    saveSourceRecord(db, "fixtures", {
+      externalId: "gone",
+      title: "지울 합성 일지",
+      body: "등대 합성",
+    });
+    const { path, method } = routes.deleteSource;
+    const res = await call(path, method, { connectorId: "fixtures", externalId: "gone" });
+    expect(res).toMatchObject({ status: 200, body: { outcome: "deleted" } });
+    expect(db.all("SELECT reason FROM tombstones")).toEqual([{ reason: "user-deleted" }]);
+    expect((await call(routes.sources.path)).body).toEqual({
+      sources: [expect.objectContaining({ externalId: "x1" })],
+    });
+    expect((await call(routes.searchSources.path, "POST", { query: "등대" })).body).toEqual({
+      sources: [expect.objectContaining({ externalId: "x1" })],
+    });
+    const again = await call(path, method, { connectorId: "fixtures", externalId: "gone" });
+    expect(again).toMatchObject({ status: 200, body: { outcome: "already-deleted" } });
+  });
+
+  it.each([
+    [404, "not-found", { connectorId: "fixtures", externalId: "nope" }],
+    [400, "bad-request", { connectorId: "", externalId: "x1" }],
+    [400, "bad-request", { connectorId: "fixtures", externalId: "x1", extra: 1 }],
+  ])("answers a delete request with %i %s", async (status, error, body) => {
+    const { path, method } = routes.deleteSource;
+    const res = await call(path, method, body);
+    expect(res.status).toBe(status);
+    expect(ErrorResponseSchema.parse(res.body)).toEqual({ error });
   });
 });
