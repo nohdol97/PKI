@@ -14,13 +14,22 @@ import {
   type RouteResponse,
   type VectorIndex,
 } from "@pki/contracts";
-import { errorClass, log, type EgressControls } from "@pki/providers";
+import {
+  errorClass,
+  log,
+  OPENAI_BASE_URL_SETTING,
+  OPENAI_MODEL_SETTING,
+  parseEndpoint,
+  type EgressControls,
+} from "@pki/providers";
 import {
   databaseEncryption,
   findSources,
   listProviderCalls,
   listSources,
+  readSetting,
   schemaVersion,
+  writeSetting,
   type SqlDriver,
 } from "@pki/storage";
 import { timingSafeEqual } from "node:crypto";
@@ -75,6 +84,7 @@ const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "connector-unavailable": 409,
   "destination-unavailable": 409,
   "consent-stale": 409,
+  "invalid-endpoint": 400,
 };
 
 const STATUS_CHECK_FAILED: ComponentStatus = {
@@ -124,7 +134,26 @@ async function embeddingState(embedder: EmbeddingProvider | null): Promise<Embed
   }
 }
 
+/**
+ * The endpoint as it will be stored, or undefined when refused. Loopback `http` is
+ * stored; the egress policy decides, per build kind, whether it is used.
+ */
+function storableEndpoint(raw: string): string | undefined {
+  const checked = parseEndpoint(raw, true);
+  if ("problem" in checked || /[?#]/.test(raw)) return undefined;
+  return checked.url.href;
+}
+
 function createHandlers(options: ServerOptions): Handlers {
+  const settings = () => ({
+    dataDirectory: options.dataDirectory,
+    schemaVersion: schemaVersion(options.db),
+    databaseEncryption: databaseEncryption(options.databaseFile),
+    openaiCompatible: {
+      baseUrl: readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null,
+      model: readSetting(options.db, OPENAI_MODEL_SETTING) ?? null,
+    },
+  });
   return {
     status: async () => ({
       backend: { state: "ready" },
@@ -137,11 +166,14 @@ function createHandlers(options: ServerOptions): Handlers {
     sources: async () => ({ sources: listSources(options.db) }),
     searchSources: async (input) => ({ sources: findSources(options.db, input.query) }),
     activity: async () => ({ calls: listProviderCalls(options.db) }),
-    settings: async () => ({
-      dataDirectory: options.dataDirectory,
-      schemaVersion: schemaVersion(options.db),
-      databaseEncryption: databaseEncryption(options.databaseFile),
-    }),
+    settings: async () => settings(),
+    writeSettings: async ({ openaiCompatible }) => {
+      const baseUrl = storableEndpoint(openaiCompatible.baseUrl);
+      if (baseUrl === undefined) return { error: "invalid-endpoint" };
+      writeSetting(options.db, OPENAI_BASE_URL_SETTING, baseUrl);
+      writeSetting(options.db, OPENAI_MODEL_SETTING, openaiCompatible.model);
+      return settings();
+    },
     consents: async () => options.egress.overview(),
     grantConsent: async ({ providerId, allowedClasses, destination, policyVersion }) =>
       options.egress.grant(providerId, allowedClasses, { destination, policyVersion }),

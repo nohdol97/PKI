@@ -20,7 +20,7 @@
 | [0007](0007-packaging.md) | 패키징 — Electron + electron-builder(NSIS) + electron-updater | 잠정 | A13, A14, A15 |
 | [0008](0008-security-baseline.md) | 첫 slice부터 적용하는 보안 기준선 | 확정 | — |
 | [0009](0009-license.md) | 제품 라이선스 MIT와 번들 금지 범위 | 확정 | — |
-| [0010](0010-encryption-at-rest.md) | 저장 데이터 암호화의 범위와 키 보관 | 잠정 진행, **사용자 확인 대기**(번복 시 V01-T03 재작업) | A16, A19 |
+| [0010](0010-encryption-at-rest.md) | 저장 데이터 암호화의 범위와 키 보관 | 잠정 진행, **사용자 확인 대기**(번복 시 V01-T03 재작업. 비밀 값 저장 방식은 V01-T11의 잠정 결정) | A16, A19 |
 | [0011](0011-sidecar-language.md) | 사이드카 언어 — Python, Go 단일 바이너리, 또는 없음 | **미결** | R03·R04 결과 |
 | [0012](0012-upstream-and-fork-ownership.md) | 공용 저장소와 배포처 포크의 소유 경계 | 확정 | — |
 | [0013](0013-failure-recovery.md) | 저장소 사이의 실패 복구 — 정본 먼저, fence와 tombstone, 투영은 재구축 | 잠정 | A20 |

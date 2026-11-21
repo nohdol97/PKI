@@ -2,7 +2,7 @@
 // directory, created owner-only first, at the latest schema; the site
 // Connector kinds are registered and fail with the follow-up notice.
 import { CONNECTOR_NOT_IMPLEMENTED } from "@pki/contracts";
-import { OPENAI_BASE_URL_SETTING } from "@pki/providers";
+import { OPENAI_BASE_URL_SETTING, OPENAI_MODEL_SETTING } from "@pki/providers";
 import { migrations, schemaVersion, writeSetting } from "@pki/storage";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,7 +13,9 @@ import {
   connectorKinds,
   openCanonicalDb,
   productEgress,
+  productProviders,
 } from "./composition.ts";
+import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 let root: string;
 
@@ -68,6 +70,36 @@ describe("productEgress", () => {
       writeSetting(db, OPENAI_BASE_URL_SETTING, "https://api.synthetic.example/v1");
       expect(egress.destination("openai-compatible")).toEqual({
         destination: "api.synthetic.example",
+      });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("productProviders", () => {
+  it("binds the OpenAI-compatible and the unimplemented local-model Providers", async () => {
+    const db = openCanonicalDb(join(root, "PKI"));
+    try {
+      const providers = productProviders(db, NO_SECRET_STORE);
+      expect(Object.keys(providers).sort()).toEqual(["local-model", "openai-compatible"]);
+      expect(await providers["local-model"]?.checkHealth()).toEqual({
+        state: "unavailable",
+        reason: "not-implemented",
+      });
+      // the same build-kind flag as productEgress: loopback http refused (T09 switches both)
+      writeSetting(db, OPENAI_BASE_URL_SETTING, "http://127.0.0.1:9/v1");
+      writeSetting(db, OPENAI_MODEL_SETTING, "m");
+      const openai = providers["openai-compatible"];
+      expect(await openai?.checkHealth()).toEqual({
+        state: "unavailable",
+        reason: "insecure-endpoint",
+      });
+      // without a store the Provider is unavailable, never a plaintext fallback
+      writeSetting(db, OPENAI_BASE_URL_SETTING, "https://api.synthetic.example/v1");
+      expect(await openai?.checkHealth()).toEqual({
+        state: "unavailable",
+        reason: "secret-store-unavailable",
       });
     } finally {
       db.close();

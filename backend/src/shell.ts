@@ -1,11 +1,14 @@
 // Shell entry (V01-R4): the Electron shell starts this file as a utility process. The
 // session token arrives as the first message on the parent channel, never in argv or
 // the environment; the port the server bound goes back the same way. Under Node's
-// fork (tests) the IPC channel carries the same messages.
+// fork (tests) the IPC channel carries the same messages. Secrets come the same way:
+// a Provider asks just before a call (`secret-request`) and the shell answers
+// (`secret`); nothing of them is kept here.
 // `--origin` is the screens' origin (app://pki); `--data-dir` and `--fixtures` as in dev.ts.
 import { dataDirectory } from "@pki/storage";
 import { parseArgs } from "node:util";
 import { bootBackend } from "./boot.ts";
+import { channelSecrets } from "./secret-sources.ts";
 import type { RunningServer } from "./server.ts";
 
 type ToBackend = { type: "start"; token: string } | { type: "stop" };
@@ -56,6 +59,7 @@ const { values } = parseArgs({
 });
 
 const channel = parentChannel();
+const secrets = channelSecrets((message) => channel.post(message));
 let running: { server: RunningServer; close(): void } | undefined;
 
 async function start(token: string) {
@@ -65,6 +69,7 @@ async function start(token: string) {
     fixtures: values.fixtures,
     token,
     allowedOrigins: values.origin,
+    secrets: secrets.source,
   });
   running = { server, close: () => db.close() };
   return server.port;
@@ -87,6 +92,7 @@ const failed = (error?: unknown) => {
 };
 
 channel.onMessage((data) => {
+  if (secrets.deliver(data)) return;
   const message = parse(data);
   if (message?.type === "stop") return void stop();
   if (starting) return; // one start per process; later messages are ignored

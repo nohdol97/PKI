@@ -141,6 +141,7 @@ describe("screen routes", () => {
       dataDirectory: DATA_DIR,
       schemaVersion: 4,
       databaseEncryption: "not-applied",
+      openaiCompatible: { baseUrl: null, model: null },
     });
   });
 

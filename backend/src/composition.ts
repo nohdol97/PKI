@@ -1,8 +1,10 @@
 // Composition point: the one place that picks adapter implementations for the
 // product (V01-R14, R15): the vector index, the embedder, the canonical storage
-// driver, the Connector kinds and the egress policy. Entry points (dev.ts,
-// site-check.ts) build the backend from these.
+// driver, the Connector kinds, the egress policy and the Providers. Entry points
+// (dev.ts, shell.ts, site-check.ts) build the backend from these.
+import type { LLMProvider, ProviderId, SecretSource } from "@pki/contracts";
 import { createEgressPolicy, PUBLIC_SITE_RULES, type EgressControls } from "@pki/providers";
+import { LocalModelProvider, OpenAICompatibleProvider } from "@pki/providers/adapters";
 import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
@@ -17,13 +19,42 @@ export function productAdapters(): Pick<ServerOptions, "vectorIndex" | "embedder
 }
 
 /**
+ * `http` to a loopback endpoint stays refused until the build kind (T09) tells
+ * development and test builds apart. The egress policy and the HTTP Provider read
+ * the same flag, so the Provider never sends where the policy would refuse.
+ */
+const ALLOW_LOOPBACK_HTTP = false;
+
+/**
  * The product's consent and egress rules (ADR 0014). The deployment rules are the
  * public repository's (none: nothing leaves without consent); a fork supplies its
- * own here (S08). `http` to loopback stays refused until the build kind (T09)
- * tells development and test builds apart.
+ * own here (S08).
  */
 export function productEgress(db: SqlDriver): EgressControls {
-  return createEgressPolicy({ db, siteRules: PUBLIC_SITE_RULES, allowLoopbackHttp: false });
+  return createEgressPolicy({
+    db,
+    siteRules: PUBLIC_SITE_RULES,
+    allowLoopbackHttp: ALLOW_LOOPBACK_HTTP,
+  });
+}
+
+/**
+ * The Providers the product binds so far (V01-R11): the OpenAI-compatible one, whose
+ * key `secrets` gives just before each call, and the unimplemented local model. The
+ * CLI Providers (T10) join here; the Broker that calls them is bound by T09.
+ */
+export function productProviders(
+  db: SqlDriver,
+  secrets: SecretSource,
+): Partial<Record<ProviderId, LLMProvider>> {
+  return {
+    "openai-compatible": new OpenAICompatibleProvider({
+      db,
+      secrets,
+      allowLoopbackHttp: ALLOW_LOOPBACK_HTTP,
+    }),
+    "local-model": new LocalModelProvider(),
+  };
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";

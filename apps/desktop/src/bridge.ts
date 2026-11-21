@@ -3,9 +3,10 @@
 // opening an external https link after the user confirms. The preload passes the page's
 // arguments through unchanged; every call is checked here against its sender and its
 // schema before anything happens.
-import type { Session } from "@pki/contracts";
+import { SecretNameSchema, SecretValueSchema, type Session } from "@pki/contracts";
 import { z } from "zod";
 import { onAppOrigin } from "./app-protocol.ts";
+import type { SecretStore } from "./secret-store.ts";
 
 export const BRIDGE = {
   getSession: "pki:get-session",
@@ -16,9 +17,6 @@ export const BRIDGE = {
 } as const;
 export type BridgeFunction = keyof typeof BRIDGE;
 
-const SecretName = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);
-const SecretValue = z.string().min(1).max(8192);
-
 function isPlainHttps(value: string): boolean {
   if (!URL.canParse(value)) return false;
   const url = new URL(value);
@@ -28,14 +26,11 @@ const ExternalUrl = z.string().max(2048).refine(isPlainHttps);
 
 const INPUTS = {
   getSession: z.tuple([]),
-  setSecret: z.tuple([SecretName, SecretValue]),
-  hasSecret: z.tuple([SecretName]),
-  deleteSecret: z.tuple([SecretName]),
+  setSecret: z.tuple([SecretNameSchema, SecretValueSchema]),
+  hasSecret: z.tuple([SecretNameSchema]),
+  deleteSecret: z.tuple([SecretNameSchema]),
   openExternal: z.tuple([ExternalUrl]),
 } satisfies Record<BridgeFunction, z.ZodType>;
-
-/** The secret store arrives with T11; until then nothing is kept, in plaintext or otherwise. */
-const SECRETS_NOT_IMPLEMENTED = { ok: false, error: "not-implemented" } as const;
 
 export interface ExternalTarget {
   href: string;
@@ -44,6 +39,8 @@ export interface ExternalTarget {
 
 export interface BridgeDeps {
   session: Session;
+  /** Stores, checks and deletes; the page has no function that reads a value back. */
+  secrets: Pick<SecretStore, "set" | "has" | "delete">;
   /**
    * Asks the user before a link leaves the app; true only on an explicit yes. Gets the
    * normalised href and its hostname (punycode), the form that will actually open.
@@ -74,9 +71,9 @@ function checked<Name extends BridgeFunction>(
 export function createBridgeHandlers(deps: BridgeDeps): BridgeHandlers {
   return {
     getSession: checked("getSession", async () => deps.session),
-    setSecret: checked("setSecret", async () => SECRETS_NOT_IMPLEMENTED),
-    hasSecret: checked("hasSecret", async () => SECRETS_NOT_IMPLEMENTED),
-    deleteSecret: checked("deleteSecret", async () => SECRETS_NOT_IMPLEMENTED),
+    setSecret: checked("setSecret", ([name, value]) => deps.secrets.set(name, value)),
+    hasSecret: checked("hasSecret", ([name]) => deps.secrets.has(name)),
+    deleteSecret: checked("deleteSecret", ([name]) => deps.secrets.delete(name)),
     openExternal: checked("openExternal", async ([url]) => {
       // Normalised once: the page's string may render differently (look-alike letters,
       // bidi controls) from what opens; the user confirms what opens.

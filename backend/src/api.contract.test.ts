@@ -32,6 +32,11 @@ const requests: Partial<Record<RouteName, unknown>> = {
     policyVersion: productEgress(db).policyVersion(),
   },
   revokeConsent: { providerId: "codex" },
+  // loopback http: stored, yet refused by the product egress policy, so the
+  // destination-unavailable grant case below holds whichever runs first
+  writeSettings: {
+    openaiCompatible: { baseUrl: "http://127.0.0.1:9/v1", model: "synthetic-model" },
+  },
 };
 
 beforeAll(async () => {

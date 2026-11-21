@@ -1,7 +1,9 @@
-// Starts the backend on a data directory: the canonical DB, the Connectors and the API
-// server with the product's adapters and egress controls (composition.ts). Shared by
-// the two entries that differ only in how they hand over the session: dev.ts (stdout)
-// and shell.ts (the Electron shell's parent channel).
+// Starts the backend on a data directory: the canonical DB, the Connectors, the
+// Providers and the API server with the product's adapters and egress controls
+// (composition.ts). Shared by the two entries that differ only in how they hand over
+// the session and where secrets come from: dev.ts (stdout, environment) and shell.ts
+// (the Electron shell's parent channel for both).
+import type { LLMProvider, ProviderId, SecretSource } from "@pki/contracts";
 import type { SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
@@ -11,6 +13,7 @@ import {
   openCanonicalDb,
   productAdapters,
   productEgress,
+  productProviders,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -25,11 +28,18 @@ export interface BootOptions {
   allowedOrigins: readonly string[];
   /** 0 (default) picks a free port. */
   port?: number;
+  /** Where Providers read their secrets just before a call; the backend keeps none. */
+  secrets: SecretSource;
 }
 
-export async function bootBackend(
-  options: BootOptions,
-): Promise<{ server: RunningServer; db: SqlDriver }> {
+export interface BootedBackend {
+  server: RunningServer;
+  db: SqlDriver;
+  /** Bound to the Broker by T09. */
+  providers: Partial<Record<ProviderId, LLMProvider>>;
+}
+
+export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
   const db = openCanonicalDb(options.dataDir);
   const connectors = await createConnectorManager(
     db,
@@ -47,5 +57,5 @@ export async function bootBackend(
     databaseFile: join(options.dataDir, CANONICAL_DB_FILE),
     egress: productEgress(db),
   });
-  return { server, db };
+  return { server, db, providers: productProviders(db, options.secrets) };
 }

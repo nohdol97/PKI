@@ -11,12 +11,21 @@ const PAGE = `${APP_ORIGIN}/`;
 function handlers(confirm = true) {
   const opened: string[] = [];
   const confirmExternal = vi.fn<(target: ExternalTarget) => Promise<boolean>>(async () => confirm);
+  const stored = new Map<string, string>();
+  const secrets = {
+    set: vi.fn(
+      async (name: string, value: string) => (stored.set(name, value), { ok: true as const }),
+    ),
+    has: vi.fn(async (name: string) => ({ ok: true as const, present: stored.has(name) })),
+    delete: vi.fn(async (name: string) => (stored.delete(name), { ok: true as const })),
+  };
   const bridge = createBridgeHandlers({
     session: SESSION,
+    secrets,
     confirmExternal,
     openExternal: async (url) => void opened.push(url),
   });
-  return { bridge, opened, confirmExternal };
+  return { bridge, opened, confirmExternal, secrets, stored };
 }
 
 describe("bridge handlers", () => {
@@ -50,11 +59,13 @@ describe("bridge handlers", () => {
     ["deleteSecret", []],
     ["openExternal", [42]],
     ["openExternal", ["https://a.example/", "extra"]],
+    ["setSecret", ["openai-key", "x".repeat(8193)]],
   ] as const)("rejects %s(%j) before doing anything", async (name, args) => {
-    const { bridge, opened, confirmExternal } = handlers();
+    const { bridge, opened, confirmExternal, secrets } = handlers();
     await expect(bridge[name](PAGE, [...args])).rejects.toThrow("invalid-input");
     expect(confirmExternal).not.toHaveBeenCalled();
     expect(opened).toEqual([]);
+    for (const fn of Object.values(secrets)) expect(fn).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -114,11 +125,22 @@ describe("bridge handlers", () => {
     expect(JSON.stringify([confirmExternal.mock.calls, opened])).not.toMatch(/[\u0430\u202e]/);
   });
 
-  it("reports the secret store as not implemented and keeps nothing (T11)", async () => {
-    const { bridge } = handlers();
-    const unavailable = { ok: false, error: "not-implemented" };
-    expect(await bridge.setSecret(PAGE, ["openai-key", "sk-canary"])).toEqual(unavailable);
-    expect(await bridge.hasSecret(PAGE, ["openai-key"])).toEqual(unavailable);
-    expect(await bridge.deleteSecret(PAGE, ["openai-key"])).toEqual(unavailable);
+  it("stores, checks and deletes a secret, and answers without its value (T11)", async () => {
+    const { bridge, stored } = handlers();
+    expect(await bridge.setSecret(PAGE, ["openai-key", "sk-canary"])).toEqual({ ok: true });
+    expect(stored.get("openai-key")).toBe("sk-canary");
+    const present = await bridge.hasSecret(PAGE, ["openai-key"]);
+    expect(present).toEqual({ ok: true, present: true });
+    expect(JSON.stringify(present)).not.toContain("sk-canary");
+    expect(await bridge.deleteSecret(PAGE, ["openai-key"])).toEqual({ ok: true });
+    expect(await bridge.hasSecret(PAGE, ["openai-key"])).toEqual({ ok: true, present: false });
+  });
+
+  it("refuses secret calls from any other sender", async () => {
+    const { bridge, secrets } = handlers();
+    await expect(bridge.setSecret("https://evil.example/", ["openai-key", "v"])).rejects.toThrow(
+      "forbidden-sender",
+    );
+    expect(secrets.set).not.toHaveBeenCalled();
   });
 });

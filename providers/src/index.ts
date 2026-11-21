@@ -35,11 +35,14 @@ export {
   EgressRuleSchema,
   evaluateRules,
   OPENAI_BASE_URL_SETTING,
+  OPENAI_MODEL_SETTING,
+  parseEndpoint,
   PUBLIC_SITE_RULES,
   type DenyReason,
   type Destination,
   type EgressControls,
   type EgressPolicyOptions,
   type EgressRule,
+  type EndpointCheck,
 } from "./egress-policy.ts";
 export { createLogger, errorClass, log, type Logger, type LogValue } from "./log.ts";

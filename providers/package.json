@@ -4,7 +4,8 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./adapters": "./src/adapters/index.ts"
   },
   "scripts": {
     "build:synthetic-manifest": "node src/build-synthetic-manifest.ts"

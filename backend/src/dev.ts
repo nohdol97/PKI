@@ -5,11 +5,15 @@
 // The session token is generated here and written to stdout as one JSON line, so it
 // reaches only whoever holds this process's stdout pipe — not argv/env (readable by
 // other processes of the same user) and not a file left on disk.
+// The browser has no shell to hold secrets, so here only a Provider's key comes from
+// the environment (PKI_DEV_SECRET_<NAME>, secret-sources.ts), read at call time and
+// never stored. This entry is not part of the product build.
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { dataDirectory } from "@pki/storage";
 import { bootBackend } from "./boot.ts";
+import { envSecrets } from "./secret-sources.ts";
 
 // Development seeds come from the repository's synthetic fixtures (V01-R7).
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures/test-connector.jsonl");
@@ -31,5 +35,6 @@ const { server } = await bootBackend({
   token,
   allowedOrigins: values.origin,
   port: Number(values.port),
+  secrets: envSecrets(process.env),
 });
 process.stdout.write(`${JSON.stringify({ url: server.url, token })}\n`);

@@ -107,6 +107,20 @@ describe("shell ↔ backend channel", () => {
     }
   });
 
+  it("hands over no stored secret at start: not in argv, env or the process record", async () => {
+    const canary = `sk-canary-${process.pid}-${Date.now()}`;
+    backend = await startBackendProcess({
+      fork: recordingFork,
+      entry: ENTRY,
+      origin: ORIGIN,
+      dataDir: join(dir, "data"),
+      secrets: { read: async () => ({ state: "present", value: canary }) },
+    });
+    expect(JSON.stringify(calls)).not.toContain(canary);
+    const record = processRecord(backend.pid ?? 0);
+    if (record !== undefined) expect(record).not.toContain(canary);
+  });
+
   it("passes only the allowlisted environment variables", async () => {
     backend = await start();
     const env = calls[0]?.env ?? {};

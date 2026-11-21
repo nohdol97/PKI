@@ -2,6 +2,8 @@
 // run goes to the backend over the parent-child channel, never argv or the environment
 // (other processes of the same user can read both). The backend binds a free loopback
 // port itself and reports it back on the same channel, so no port is picked twice.
+// A secret goes the same way, only when the backend asks for it just before a call.
+import { SecretNameSchema, type SecretRead } from "@pki/contracts";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
@@ -43,7 +45,14 @@ export function backendEnv(env: Readonly<Record<string, string | undefined>>) {
 const FromBackend = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("ready"), port: z.int().min(1).max(65535) }),
   z.strictObject({ type: z.literal("failed") }),
+  z.strictObject({
+    type: z.literal("secret-request"),
+    id: z.int().positive(),
+    name: SecretNameSchema,
+  }),
 ]);
+
+const SECRET_UNAVAILABLE: SecretRead = { state: "unavailable" };
 
 export interface BackendOptions {
   fork: ForkBackend;
@@ -59,6 +68,8 @@ export interface BackendOptions {
   env?: Readonly<Record<string, string | undefined>>;
   startTimeoutMs?: number;
   stopTimeoutMs?: number;
+  /** Answers the backend's secret requests; without it every answer is "unavailable". */
+  secrets?: { read(name: string): Promise<SecretRead> } | undefined;
 }
 
 export interface Backend {
@@ -104,6 +115,14 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
     child.on("message", (raw) => {
       const message = FromBackend.safeParse(raw);
       if (!message.success) return fail("sent an unexpected message");
+      if (message.data.type === "secret-request") {
+        const { id, name } = message.data;
+        const read = options.secrets?.read(name) ?? Promise.resolve(SECRET_UNAVAILABLE);
+        void read
+          .catch(() => SECRET_UNAVAILABLE)
+          .then((answer) => child.postMessage({ type: "secret", id, ...answer }));
+        return;
+      }
       if (message.data.type === "failed") return fail("failed to start");
       if (settled) return;
       settled = true;
