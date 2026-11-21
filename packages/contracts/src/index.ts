@@ -242,6 +242,39 @@ export const ExecutionSettingsSchema = z.strictObject({ cliBackground: z.boolean
 export type ExecutionSettings = z.infer<typeof ExecutionSettingsSchema>;
 
 /**
+ * The bound Providers and the user's default (V01-R9, C4): the Broker calls the
+ * default and nothing else; null until the user picks one (nothing is picked for
+ * them). Reading this list runs no process.
+ */
+export const ProviderListResponseSchema = z.object({
+  defaultProvider: ProviderIdSchema.nullable(),
+  providers: z.array(
+    z.object({ providerId: ProviderIdSchema, transport: z.enum(["cli", "http"]) }),
+  ),
+});
+export type ProviderList = z.infer<typeof ProviderListResponseSchema>;
+
+/** Picks the default; a Provider that is not bound is "not-found". */
+export const DefaultProviderRequestSchema = z.strictObject({ providerId: ProviderIdSchema });
+
+/**
+ * Each bound Provider's answer to the two queries that need no decision (V01-R9):
+ * the version query and the login status query, with fixed arguments and no
+ * input. The screen turns them into install and login guidance (V01-R5).
+ */
+export const ProviderCheckResponseSchema = z.object({
+  providers: z.array(
+    z.object({
+      providerId: ProviderIdSchema,
+      installed: z.boolean(),
+      version: z.string().nullable(),
+      authentication: z.enum(["authenticated", "unauthenticated", "unknown"]),
+    }),
+  ),
+});
+export type ProviderCheck = z.infer<typeof ProviderCheckResponseSchema>["providers"][number];
+
+/**
  * Starts preparing the embedding model (V01-R14, ADR 0006): from a local pack
  * folder, or by the approved download of the pinned files. Only this request
  * starts one. The revision and file hashes are build resources, not request fields.
@@ -321,6 +354,18 @@ export const routes = {
     path: "/api/settings/execution",
     request: ExecutionSettingsSchema,
     response: ExecutionSettingsSchema,
+  },
+  providers: { method: "GET", path: "/api/providers", response: ProviderListResponseSchema },
+  setDefaultProvider: {
+    method: "POST",
+    path: "/api/providers/default",
+    request: DefaultProviderRequestSchema,
+    response: ProviderListResponseSchema,
+  },
+  checkProviders: {
+    method: "POST",
+    path: "/api/providers/check",
+    response: ProviderCheckResponseSchema,
   },
   prepareEmbedding: {
     method: "POST",

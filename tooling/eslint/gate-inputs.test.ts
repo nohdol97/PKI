@@ -43,6 +43,7 @@ describe("gate-inputs rule", () => {
         "providers/src/egress-policy.ts",
         "providers/src/execution-gate.ts",
         "providers/src/secret-names.ts",
+        "providers/src/provider-selection.ts",
         "providers/src/synthetic-manifest.ts",
         "providers/src/user-actions.ts",
         "providers/src/verified-cli.ts",

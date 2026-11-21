@@ -10,6 +10,10 @@ import {
   type EmbeddingProvider,
   type EmbeddingStatusEntry,
   type ErrorResponse,
+  type LLMProvider,
+  type ProviderCheck,
+  type ProviderId,
+  type ProviderList,
   type PrepareSource,
   type RouteName,
   type RouteRequest,
@@ -26,6 +30,8 @@ import {
   openaiKeySecretName,
   parseEndpoint,
   readCliBackground,
+  readDefaultProvider,
+  writeDefaultProvider,
   type Broker,
   type BrokerResult,
   type EgressControls,
@@ -82,9 +88,14 @@ export interface ServerOptions {
   /**
    * The Broker and the user action issuer (composition.ts productCalls); only this
    * API layer holds the issuer. Without them the connection test is blocked
-   * ("broker-not-bound"); boot.ts always binds them.
+   * ("broker-not-bound"); boot.ts always binds them. `providers` are the ones
+   * the Broker selects from (the user's default among them); none without it.
    */
-  calls?: { broker: Pick<Broker, "call">; issuer: UserActionIssuer };
+  calls?: {
+    broker: Pick<Broker, "call">;
+    issuer: UserActionIssuer;
+    providers?: readonly LLMProvider[];
+  };
   /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
   importer?: JsonlImporter;
   /**
@@ -157,6 +168,48 @@ async function connectionTest(
     { acknowledgeUnverified },
   );
   return connectionTestResult(result);
+}
+
+function providerList(options: ServerOptions): ProviderList {
+  const providers = options.calls?.providers ?? [];
+  const chosen = readDefaultProvider(options.db);
+  return {
+    defaultProvider: providers.some((p) => p.id === chosen) ? (chosen ?? null) : null,
+    providers: providers.map((p) => ({ providerId: p.id, transport: p.transport })),
+  };
+}
+
+function setDefaultProvider(
+  options: ServerOptions,
+  providerId: ProviderId,
+): ProviderList | { error: ErrorResponse["error"] } {
+  if (!(options.calls?.providers ?? []).some((p) => p.id === providerId)) {
+    return { error: "not-found" };
+  }
+  writeDefaultProvider(options.db, providerId);
+  return providerList(options);
+}
+
+/**
+ * The two queries that need no decision (V01-R9), for each bound Provider, at the
+ * user's request only. A Provider that fails to answer is reported not installed;
+ * its message stays out.
+ */
+async function checkProvider(provider: LLMProvider): Promise<ProviderCheck> {
+  const info = await Promise.resolve()
+    .then(() => provider.detect())
+    .catch(() => ({ installed: false as const }));
+  const authentication = info.installed
+    ? await Promise.resolve()
+        .then(() => provider.checkAuthentication())
+        .catch(() => "unknown" as const)
+    : "unknown";
+  return {
+    providerId: provider.id,
+    installed: info.installed === true,
+    version: info.installed && typeof info.version === "string" ? info.version : null,
+    authentication,
+  };
 }
 
 const STATUS_CHECK_FAILED: ComponentStatus = {
@@ -316,6 +369,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       changed();
       return { cliBackground: readCliBackground(options.db) };
     },
+    providers: async () => providerList(options),
+    setDefaultProvider: async ({ providerId }) => setDefaultProvider(options, providerId),
+    checkProviders: async () => ({
+      providers: await Promise.all((options.calls?.providers ?? []).map(checkProvider)),
+    }),
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
   };
 }

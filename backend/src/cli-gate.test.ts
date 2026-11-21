@@ -6,8 +6,13 @@
 // The product wiring runs: productEgress, productCalls (Broker, execution gate,
 // history), the API server, a real canonical file.
 import { routes, type ConnectionTestResult, type ProviderCall } from "@pki/contracts";
-import { CLI_PROFILES, type TestBuildExecution } from "@pki/providers";
-import { registerConnectorInstance, saveSourceRecord, type SqlDriver } from "@pki/storage";
+import { CLI_PROFILES, DEFAULT_PROVIDER_SETTING, type TestBuildExecution } from "@pki/providers";
+import {
+  registerConnectorInstance,
+  saveSourceRecord,
+  writeSetting,
+  type SqlDriver,
+} from "@pki/storage";
 import { FakeProvider, send } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
@@ -116,6 +121,7 @@ async function stack(options: Stack = {}) {
     answer: (r) =>
       r.taskKind === "extract" ? { items: [], facts: [], relations: [] } : { reply: "ok" },
   });
+  writeSetting(db, DEFAULT_PROVIDER_SETTING, "claude-code"); // the user's default (T10)
   const calls = productCalls(
     db,
     egress,

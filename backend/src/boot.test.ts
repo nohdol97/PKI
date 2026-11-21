@@ -1,9 +1,10 @@
 // The started backend (boot.ts, shared by dev.ts and shell.ts) binds the Broker to
 // the connection-test API (V01-R21) and the background setting to the settings API,
-// default off (V01-C7 cli-background-default). The product binds the OpenAI-compatible
-// Provider (V01-T11): without an endpoint the connection test is blocked by the egress
-// decision; with endpoint, model, key and consent it reaches the endpoint, through the
-// same egress instance the consent API wrote.
+// default off (V01-C7 cli-background-default). The product binds the two CLI Providers
+// (V01-T10) and the OpenAI-compatible one (V01-T11) and calls only the user's default:
+// none before one is picked. Picked, the OpenAI-compatible Provider without an endpoint
+// is blocked by the egress decision; with endpoint, model, key and consent it reaches
+// the endpoint, through the same egress instance the consent API wrote.
 import { routes, type SecretSource } from "@pki/contracts";
 import { openaiKeySecretName } from "@pki/providers";
 import {
@@ -50,6 +51,17 @@ describe("bootBackend", () => {
     const get = (path: string) => send(port, path, headers);
     const post = (path: string, body: unknown) => send(port, path, headers, "POST", body);
 
+    expect(booted.providers.map((p) => p.id)).toEqual([
+      "claude-code",
+      "codex",
+      "openai-compatible",
+    ]);
+    expect((await post(routes.connectionTest.path, { acknowledgeUnverified: true })).body).toEqual({
+      outcome: "blocked",
+      reason: "no-provider",
+      isolation: null,
+    });
+    await post(routes.setDefaultProvider.path, { providerId: "openai-compatible" });
     expect((await post(routes.connectionTest.path, { acknowledgeUnverified: true })).body).toEqual({
       outcome: "blocked",
       reason: "destination-unavailable",
@@ -82,6 +94,7 @@ describe("bootBackend", () => {
       await post(routes.writeSettings.path, {
         openaiCompatible: { baseUrl: endpoint.baseUrl, model: "synthetic-model" },
       });
+      await post(routes.setDefaultProvider.path, { providerId: "openai-compatible" });
       const consents = await send(port, routes.consents.path, headers);
       await post(routes.grantConsent.path, {
         providerId: "openai-compatible",

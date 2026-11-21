@@ -7,6 +7,8 @@ import type {
   DataClassification,
   ImportJsonlResponse,
   ProviderCall,
+  ProviderCheck,
+  ProviderId,
   RouteResponse,
   SourceSummary,
 } from "@pki/contracts";
@@ -16,6 +18,7 @@ import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } f
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
+import { providerCheckText, providerName } from "./provider-text.ts";
 import { componentText, embeddingText } from "./status-text.ts";
 
 const SCREENS = { home: "홈", sources: "원본", activity: "활동", settings: "설정" } as const;
@@ -47,7 +50,14 @@ export function App({ api }: { api: ApiClient }) {
 }
 
 type ReadRoute =
-  "status" | "connectors" | "sources" | "activity" | "settings" | "consents" | "executionSettings";
+  | "status"
+  | "connectors"
+  | "sources"
+  | "activity"
+  | "settings"
+  | "consents"
+  | "executionSettings"
+  | "providers";
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -288,10 +298,85 @@ function Settings({ api }: { api: ApiClient }) {
         </table>
       )}
       {data && <OpenAICompatible api={api} settings={data} reload={reload} />}
+      <Providers api={api} />
       <Consents api={api} />
       <ConnectionTest api={api} />
       <BackgroundExecution api={api} />
-      <p>기본 Provider는 아직 고를 수 없습니다.</p>
+    </>
+  );
+}
+
+/**
+ * V01-R9, R5: the bound Providers, the user's default (the only one any call goes
+ * to; none until picked), and "Provider 확인", which runs each one's version and
+ * login status queries and shows install or login guidance for what is missing.
+ */
+function Providers({ api }: { api: ApiClient }) {
+  const { data, error, reload } = useRoute(api, "providers");
+  const [checks, setChecks] = useState<ProviderCheck[]>();
+  const [checking, setChecking] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  const choose = (providerId: ProviderId) =>
+    api("setDefaultProvider", { providerId }).then(
+      () => {
+        setFailure(undefined);
+        reload();
+      },
+      (e: unknown) => setFailure(message(e)),
+    );
+  const check = () => {
+    setChecking(true);
+    api("checkProviders").then(
+      (r) => {
+        setChecking(false);
+        setFailure(undefined);
+        setChecks(r.providers);
+      },
+      (e: unknown) => {
+        setChecking(false);
+        setFailure(message(e));
+      },
+    );
+  };
+  return (
+    <>
+      <h2>Provider</h2>
+      <Failure error={error ?? failure} />
+      <p>
+        연결 시험과 모든 호출은 고른 기본 Provider 하나로만 갑니다. 고르기 전에는 어느 Provider도
+        부르지 않으며, 막힌 Provider 대신 다른 것을 쓰지 않습니다.
+      </p>
+      {data && (
+        <fieldset>
+          <legend>기본 Provider</legend>
+          {data.providers.map((p) => {
+            const found = checks?.find((c) => c.providerId === p.providerId);
+            const text = found && providerCheckText(found);
+            return (
+              <div key={p.providerId}>
+                <label>
+                  <input
+                    type="radio"
+                    name="default-provider"
+                    checked={data.defaultProvider === p.providerId}
+                    onChange={() => choose(p.providerId)}
+                  />
+                  {providerName(p.providerId)}
+                </label>
+                {text && (
+                  <p>
+                    {providerName(p.providerId)}: {text.state}
+                  </p>
+                )}
+                {text?.guidance && <p>{text.guidance}</p>}
+              </div>
+            );
+          })}
+        </fieldset>
+      )}
+      <button type="button" disabled={checking} onClick={check}>
+        Provider 확인
+      </button>
     </>
   );
 }

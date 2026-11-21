@@ -90,6 +90,12 @@ export interface LLMRequest {
   readonly execution?: {
     readonly profile: string;
     readonly isolation: "verified" | "unverified";
+    /**
+     * The absolute path this attempt's version query ran (the Provider's own
+     * `detect().path`, carried by the Broker): the CLI runs that executable and
+     * looks for no other, so the version judged is the version that runs.
+     */
+    readonly executable?: string;
   };
 }
 

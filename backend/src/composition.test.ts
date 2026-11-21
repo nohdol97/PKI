@@ -2,7 +2,12 @@
 // directory, created owner-only first, at the latest schema; the site
 // Connector kinds are registered and fail with the follow-up notice.
 import { CONNECTOR_NOT_IMPLEMENTED } from "@pki/contracts";
-import { BUILD_KIND, OPENAI_BASE_URL_SETTING, OPENAI_MODEL_SETTING } from "@pki/providers";
+import {
+  BUILD_KIND,
+  DEFAULT_PROVIDER_SETTING,
+  OPENAI_BASE_URL_SETTING,
+  OPENAI_MODEL_SETTING,
+} from "@pki/providers";
 import { migrations, schemaVersion, writeSetting } from "@pki/storage";
 import { FakeProvider } from "@pki/testkit";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
@@ -87,16 +92,32 @@ describe("productEgress", () => {
   });
 });
 
+const connectionTest = (calls: ReturnType<typeof productCalls>) =>
+  calls.issuer.during((userActionId) =>
+    calls.broker.call({
+      taskKind: "connection-test",
+      sourceVersionIds: [],
+      candidateItemIds: [],
+      origin: { userActionId },
+      schemaVersion: 1,
+      budget: { timeoutMs: 1000 },
+      retryable: false,
+    }),
+  );
+
 describe("productProviders", () => {
-  // V01-T11 (provisional): the OpenAI-compatible Provider is the one callable Provider
-  // until T10 adds the CLI ones and the user's default choice; the local-model stub
-  // is not bound (it can never serve a structured request).
-  it("binds the OpenAI-compatible Provider only, with the egress policy's loopback rule", async () => {
+  // the two CLI Providers (T10) and the OpenAI-compatible one (T11); the local-model
+  // stub is not bound (it can never serve a structured request)
+  it("binds the CLI Providers and the OpenAI-compatible one with the egress policy's loopback rule", async () => {
     const db = openCanonicalDb(join(root, "PKI"));
     try {
       const providers = productProviders(db, NO_SECRET_STORE, productEgress(db));
-      expect(providers.map((p) => p.id)).toEqual(["openai-compatible"]);
-      const [openai] = providers;
+      expect(providers.map((p) => [p.id, p.transport])).toEqual([
+        ["claude-code", "cli"],
+        ["codex", "cli"],
+        ["openai-compatible", "http"],
+      ]);
+      const openai = providers.find((p) => p.id === "openai-compatible");
       writeSetting(db, OPENAI_MODEL_SETTING, "m");
       // the same build-kind rule as productEgress (this is the test build)
       writeSetting(db, OPENAI_BASE_URL_SETTING, "http://127.0.0.1:9/v1");
@@ -114,25 +135,24 @@ describe("productProviders", () => {
     }
   });
 
-  it("is what the product Broker calls: a connection test reaches its egress decision", async () => {
+  it("are what the product Broker calls: the chosen one reaches its egress decision", async () => {
     const db = openCanonicalDb(join(root, "PKI"));
     try {
       const egress = productEgress(db);
       const providers = productProviders(db, NO_SECRET_STORE, egress);
-      const { broker, issuer } = productCalls(db, egress, { providers });
-      const result = await issuer.during((userActionId) =>
-        broker.call({
-          taskKind: "connection-test",
-          sourceVersionIds: [],
-          candidateItemIds: [],
-          origin: { userActionId },
-          schemaVersion: 1,
-          budget: { timeoutMs: 1000 },
-          retryable: false,
-        }),
-      );
-      // bound (not "no-provider"); no endpoint yet, so the egress decision stops it
-      expect(result).toMatchObject({ status: "blocked", reason: "destination-unavailable" });
+      const calls = productCalls(db, egress, { providers });
+      expect(calls.providers).toBe(providers);
+      // no default chosen: none is called, though three are bound
+      expect(await connectionTest(calls)).toMatchObject({
+        status: "blocked",
+        reason: "no-provider",
+      });
+      writeSetting(db, DEFAULT_PROVIDER_SETTING, "openai-compatible");
+      // chosen (not "no-provider"); no endpoint yet, so the egress decision stops it
+      expect(await connectionTest(calls)).toMatchObject({
+        status: "blocked",
+        reason: "destination-unavailable",
+      });
     } finally {
       db.close();
     }
@@ -143,42 +163,33 @@ describe("productCalls", () => {
   it("with no Provider bound, a call is blocked without a fallback", async () => {
     const db = openCanonicalDb(join(root, "PKI"));
     try {
-      const { broker, issuer } = productCalls(db, productEgress(db), { providers: [] });
-      const result = await issuer.during((userActionId) =>
-        broker.call({
-          taskKind: "connection-test",
-          sourceVersionIds: [],
-          candidateItemIds: [],
-          origin: { userActionId },
-          schemaVersion: 1,
-          budget: { timeoutMs: 1000 },
-          retryable: false,
-        }),
-      );
-      expect(result).toMatchObject({ status: "blocked", reason: "no-provider" });
+      writeSetting(db, DEFAULT_PROVIDER_SETTING, "codex");
+      const calls = productCalls(db, productEgress(db), { providers: [] });
+      expect(await connectionTest(calls)).toMatchObject({
+        status: "blocked",
+        reason: "no-provider",
+      });
     } finally {
       db.close();
     }
   });
 
-  it("calls none of several bound Providers (the user's default is T10's)", async () => {
+  it("calls the user's default among several, read again for every call", async () => {
     const db = openCanonicalDb(join(root, "PKI"));
     try {
       const a = new FakeProvider({ id: "claude-code", transport: "cli" });
       const b = new FakeProvider({ id: "codex", transport: "cli" });
-      const { broker, issuer } = productCalls(db, productEgress(db), { providers: [a, b] });
-      const result = await issuer.during((userActionId) =>
-        broker.call({
-          taskKind: "connection-test",
-          sourceVersionIds: [],
-          candidateItemIds: [],
-          origin: { userActionId },
-          schemaVersion: 1,
-          budget: { timeoutMs: 1000 },
-          retryable: false,
-        }),
-      );
-      expect(result).toMatchObject({ status: "blocked", reason: "no-provider" });
+      const egress = productEgress(db);
+      const calls = productCalls(db, egress, { providers: [a, b] });
+      expect(await connectionTest(calls)).toMatchObject({ reason: "no-provider" });
+      writeSetting(db, DEFAULT_PROVIDER_SETTING, "codex");
+      // no consent: the egress decision blocks, but only after the default was chosen
+      expect(await connectionTest(calls)).toMatchObject({ reason: "no-consent" });
+      writeSetting(db, DEFAULT_PROVIDER_SETTING, "openai-compatible"); // not bound: no fallback
+      expect(await connectionTest(calls)).toMatchObject({ reason: "no-provider" });
+      expect(
+        db.all("SELECT provider FROM provider_calls ORDER BY id").map((r) => r.provider),
+      ).toEqual(["codex"]);
       expect([...a.requests, ...b.requests]).toEqual([]);
     } finally {
       db.close();

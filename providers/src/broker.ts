@@ -77,7 +77,7 @@ export interface ExecutionInput {
 }
 
 /** How a CLI call runs: the argument profile it must use and whether its isolation was verified. */
-export type CliExecution = LLMRequest["execution"] & {};
+export type CliExecution = Omit<LLMRequest["execution"] & {}, "executable">;
 
 export type ExecutionDecision = { run: true; cli?: CliExecution } | { run: false; reason: string };
 
@@ -306,27 +306,39 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
   };
 }
 
+interface CliFound {
+  version: string | undefined;
+  /** The absolute path the query ran; the attempt runs that executable (V01-T10). */
+  path: string | undefined;
+}
+
+const NOT_FOUND: CliFound = { version: undefined, path: undefined };
+
 /**
- * The version a CLI reports through its fixed-argument query; undefined if it
- * cannot tell within `timeoutMs`. A late answer is ignored (the Provider ends its
- * own query process, V01-T10).
+ * The version a CLI reports through its fixed-argument query, and the executable
+ * that answered; neither if it cannot tell within `timeoutMs`. A late answer is
+ * ignored (the Provider ends its own query process, V01-T10).
  */
-async function cliVersion(provider: LLMProvider, timeoutMs: number): Promise<string | undefined> {
+async function cliVersion(provider: LLMProvider, timeoutMs: number): Promise<CliFound> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => resolve(undefined), timeoutMs);
+  const late = new Promise<CliFound>((resolve) => {
+    timer = setTimeout(() => resolve(NOT_FOUND), timeoutMs);
   });
   try {
     // started inside a promise chain, so a synchronous throw is a rejection like any other
     const query = Promise.resolve()
       .then(() => provider.detect())
-      .then((info) =>
-        info.installed && typeof info.version === "string" ? info.version : undefined,
-      );
+      .then((info): CliFound => {
+        if (!info.installed) return NOT_FOUND;
+        return {
+          version: typeof info.version === "string" ? info.version : undefined,
+          path: typeof info.path === "string" ? info.path : undefined,
+        };
+      });
     query.catch(() => undefined); // may settle after the timeout; nobody awaits it then
     return await Promise.race([query, late]);
   } catch {
-    return undefined; // not listed, then; the Provider's message stays out
+    return NOT_FOUND; // not listed, then; the Provider's message stays out
   } finally {
     clearTimeout(timer);
   }
@@ -450,7 +462,8 @@ export function createBroker(deps: BrokerDeps) {
 
     /** Consent and egress rules (T08), then execution conditions (T09), as they stand now. */
     const decide = async (): Promise<
-      { egress: EgressDecision; cli: CliExecution | undefined } | { reason: string }
+      | { egress: EgressDecision; cli: CliExecution | undefined; executable: string | undefined }
+      | { reason: string }
     > => {
       const egress = deps.egress.decide({
         providerId: provider.id,
@@ -458,6 +471,11 @@ export function createBroker(deps: BrokerDeps) {
         classification,
       });
       if (!egress.allowed) return { reason: egress.reason };
+      // asked again every attempt: a CLI updated meanwhile is no longer the listed one
+      const found =
+        provider.transport === "cli"
+          ? await cliVersion(provider, Math.min(timeoutMs, limits.versionQueryTimeoutMs))
+          : NOT_FOUND;
       const execution = deps.execution.decide({
         providerId: provider.id,
         transport: provider.transport,
@@ -465,14 +483,12 @@ export function createBroker(deps: BrokerDeps) {
         trigger,
         classification,
         malicious,
-        // asked again every attempt: a CLI updated meanwhile is no longer the listed one
-        version:
-          provider.transport === "cli"
-            ? await cliVersion(provider, Math.min(timeoutMs, limits.versionQueryTimeoutMs))
-            : undefined,
+        version: found.version,
         unverifiedAcknowledged: prepared.unverifiedAcknowledged,
       });
-      return execution.run ? { egress, cli: execution.cli } : { reason: execution.reason };
+      return execution.run
+        ? { egress, cli: execution.cli, executable: found.path }
+        : { reason: execution.reason };
     };
 
     return slot(async (): Promise<BrokerResult> => {
@@ -482,7 +498,7 @@ export function createBroker(deps: BrokerDeps) {
           deps.recorder.record({ ...base, attempt, outcome: "blocked", reason: decided.reason });
           return { status: "blocked", requestId, reason: decided.reason };
         }
-        const { egress, cli } = decided;
+        const { egress, cli, executable } = decided;
         const where = { destination: egress.destination, policyVersion: egress.policyVersion };
         if (!takeBudget()) {
           deps.recorder.record({
@@ -511,7 +527,8 @@ export function createBroker(deps: BrokerDeps) {
             candidates: prepared.candidates,
           },
           outputSchema: task.outputJsonSchema,
-          ...(cli ? { execution: cli } : {}),
+          // the executable whose version was just judged runs, not one found anew
+          ...(cli ? { execution: executable === undefined ? cli : { ...cli, executable } } : {}),
         };
         const started = clock.now();
         const result = await attemptOnce(provider, outgoing, task, timeoutMs);

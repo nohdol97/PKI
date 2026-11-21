@@ -6,9 +6,13 @@
 // confirmation appears only in a development build with an unlisted CLI, which
 // the backend's integration test covers (backend/src/cli-gate.test.ts); here the
 // screen's side of it runs against answers routed in place of the backend's, and
-// the test checks what the screen sends. Choosing between two CLIs is V01-T10's.
+// the test checks what the screen sends. The T10 part: with the fake CLIs on the
+// backend's PATH (never a real CLI), "Provider 확인" finds both, the user picks
+// the default, and the next connection test goes to that Provider (its blocked
+// attempt in Activity names it: there is no consent here).
 import { expect, test, type Page } from "@playwright/test";
 import type { ConnectionTestResult } from "@pki/contracts";
+import { installFakeCli } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -33,15 +37,20 @@ let dir: string;
 let vite: ViteDevServer;
 let port: number;
 
-test.beforeEach(async () => {
-  dir = mkdtempSync(join(tmpdir(), "pki-e2e-conn-"));
+/** The dev server and its backend; `env` replaces the backend's environment variables. */
+async function startVite(env?: Record<string, string>) {
   port = await freePort();
   vite = await createServer({
-    ...webConfig({ port, dataDir: join(dir, "data") }),
+    ...webConfig({ port, dataDir: join(dir, "data"), ...(env ? { env } : {}) }),
     configFile: false,
     logLevel: "warn",
   });
   await vite.listen();
+}
+
+test.beforeEach(async () => {
+  dir = mkdtempSync(join(tmpdir(), "pki-e2e-conn-"));
+  await startVite();
 });
 test.afterEach(async () => {
   await vite.close();
@@ -54,7 +63,7 @@ test("the connection test shows the backend's block reason; background starts of
   await page.goto(`http://127.0.0.1:${port}`);
   await openSettings(page);
   await page.getByRole("button", { name: "연결 시험", exact: true }).click();
-  await expect(page.getByRole("status")).toHaveText("결과: 차단: 목적지가 설정되지 않음");
+  await expect(page.getByRole("status")).toHaveText("결과: 차단: 기본 Provider가 정해지지 않음");
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
 
   const background = page.getByRole("checkbox", { name: "CLI 백그라운드 실행 허용" });
@@ -110,4 +119,53 @@ test("an unverified CLI needs a confirmation for each call, sent with that call 
   await start.click();
   await expect(dialog).toBeVisible();
   expect(sent.at(-1)).toEqual({ acknowledgeUnverified: false });
+});
+
+test("with both CLIs found, the user picks the default and the next test goes to it", async ({
+  page,
+}) => {
+  const fake = installFakeCli({ auth: "logged-in" }, dir);
+  await vite.close();
+  await startVite({ PATH: fake.bin });
+  await page.goto(`http://127.0.0.1:${port}`);
+  await openSettings(page);
+  const chooser = page.getByRole("group", { name: "기본 Provider" });
+  const claude = chooser.getByRole("radio", { name: "Claude Code" });
+  const codex = chooser.getByRole("radio", { name: "Codex CLI" });
+  await expect(claude).not.toBeChecked();
+  await expect(codex).not.toBeChecked();
+
+  await page.getByRole("button", { name: "Provider 확인" }).click();
+  await expect(
+    page.getByText("Claude Code: 설치됨(2.1.3), 로그인 상태를 알 수 없음"),
+  ).toBeVisible();
+  await expect(page.getByText("Codex CLI: 설치됨(2.1.3), 로그인됨")).toBeVisible();
+
+  const start = page.getByRole("button", { name: "연결 시험", exact: true });
+  const activityProviders = async () => {
+    await page.getByRole("navigation").getByRole("button", { name: "활동" }).click();
+    const cells = page.getByRole("row").locator("td:nth-child(2)");
+    await expect(cells.first()).toBeVisible();
+    const names = await cells.allTextContents();
+    await openSettings(page);
+    return names.sort();
+  };
+
+  await codex.click(); // checked when the backend answers, not on the click
+  await expect(codex).toBeChecked();
+  await start.click();
+  await expect(page.getByRole("status")).toHaveText("결과: 차단: 외부 전송 동의 없음");
+  expect(await activityProviders()).toEqual(["codex"]);
+
+  await claude.click();
+  await expect(claude).toBeChecked();
+  await start.click();
+  await expect(page.getByRole("status")).toHaveText("결과: 차단: 외부 전송 동의 없음");
+  expect(await activityProviders()).toEqual(["claude-code", "codex"]);
+
+  // the choice is the backend's: a reload shows it
+  await page.reload();
+  await openSettings(page);
+  await expect(claude).toBeChecked();
+  expect(fake.modelCalls()).toBe(0);
 });

@@ -7,11 +7,12 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { send } from "@pki/testkit";
+import { FakeProvider, send } from "@pki/testkit";
 import {
   connectorInstances,
   connectorKinds,
   productAdapters,
+  productCalls,
   productEgress,
   productImporter,
 } from "./composition.ts";
@@ -42,6 +43,7 @@ const requests: Partial<Record<RouteName, unknown>> = {
   },
   connectionTest: { acknowledgeUnverified: false },
   setExecutionSettings: { cliBackground: false },
+  setDefaultProvider: { providerId: "claude-code" },
   // The pack does not exist: the preparation starts, then fails without touching disk.
   prepareEmbedding: { source: { kind: "local-pack", path: "/synthetic/missing-pack" } },
 };
@@ -67,6 +69,10 @@ beforeAll(async () => {
     db,
     dataDirectory: "/synthetic/data",
     egress: productEgress(db),
+    // a CLI double, so the Provider routes answer without running any process
+    calls: productCalls(db, productEgress(db), {
+      providers: [new FakeProvider({ id: "claude-code", transport: "cli" })],
+    }),
     ...productAdapters("/synthetic/data"),
     importer: productImporter(db),
   });

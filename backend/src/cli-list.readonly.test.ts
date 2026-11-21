@@ -4,7 +4,7 @@
 // profile they name stays blocked. The backend's modules are loaded afresh after
 // every attempt, so nothing read when a module loads can carry the entry either.
 import { routes, type ConnectionTestResult } from "@pki/contracts";
-import { CLI_PROFILES } from "@pki/providers";
+import { CLI_PROFILES, DEFAULT_PROVIDER_SETTING } from "@pki/providers";
 import { writeSetting, type SqlDriver } from "@pki/storage";
 import { FakeProvider, send } from "@pki/testkit";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -77,6 +77,7 @@ async function backend() {
     transport: "cli",
     detect: async () => ({ installed: true, version: ENTRY.version }),
   });
+  writeSetting(db, DEFAULT_PROVIDER_SETTING, "claude-code"); // the user's default (T10)
   await server?.close();
   server = await startServer({
     token: TOKEN,

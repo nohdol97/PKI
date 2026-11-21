@@ -10,7 +10,7 @@ describe("connectionTestText", () => {
     [{ outcome: "ok", reason: null, isolation: "unverified" }, "성공(격리 미검증)"],
     [
       { outcome: "blocked", reason: "no-provider", isolation: null },
-      "차단: 연결할 Provider가 없음",
+      "차단: 기본 Provider가 정해지지 않음",
     ],
     [{ outcome: "blocked", reason: "no-consent", isolation: null }, "차단: 외부 전송 동의 없음"],
     [

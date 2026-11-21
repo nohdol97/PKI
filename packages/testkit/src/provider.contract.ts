@@ -51,6 +51,11 @@ export interface ProviderContractOptions<P extends LLMProvider> {
    * sends only to the destination the Broker's decision named (T08 item 4).
    */
   destination?: () => string;
+  /**
+   * What the Broker adds to every request for this Provider before it runs; for a
+   * CLI, the execution profile (a CLI runs nothing without one). Default: none.
+   */
+  prepare?: <R extends LLMRequest>(request: R) => R;
 }
 
 export function providerContract<P extends LLMProvider>(
@@ -61,8 +66,9 @@ export function providerContract<P extends LLMProvider>(
   describe(`provider.contract: ${name}`, () => {
     let provider: P;
     const at = () => options.destination?.() ?? "test";
-    const plain = (id?: string) => providerRequest(id, at());
-    const structured = (id?: string) => structuredRequest(id, at());
+    const prepare = options.prepare ?? (<R>(request: R) => request);
+    const plain = (id?: string) => prepare(providerRequest(id, at()));
+    const structured = (id?: string) => prepare(structuredRequest(id, at()));
 
     beforeEach(() => {
       provider = create();
