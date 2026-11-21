@@ -6,6 +6,8 @@
 
 계획 단계입니다. 제품 코드는 아직 없으며, 엔진·저장소·런타임은 Phase 0의 실행 PoC 뒤에 확정합니다.
 
+잠정 아키텍처와 Phase 1 구현 spec(V01, V02)이 있습니다. 실행해 확인하기 전의 결정이며 배포처 검증 뒤에 확정합니다. 문서 전체는 [docs/README.md](docs/README.md)에서 찾을 수 있습니다.
+
 - 전체 계획과 완료 기준: [#1 총괄](https://github.com/nohdol97/PKI/issues/1)
 - 지금 진행 중인 단계: [#2 Phase 0 — OSS Research & PoC](https://github.com/nohdol97/PKI/issues/2)
 
