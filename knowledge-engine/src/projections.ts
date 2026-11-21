@@ -14,8 +14,9 @@
 // kind; an equal one is left alone. A delivery that fails marks the projection
 // stale (in the process and in a setting) and it gets no more notices until a
 // rebuild, so a later notice cannot advance its applied sequence past the one it
-// missed. AdapterUnavailableError (the empty vector index) is a skip, not a
-// failure.
+// missed. AdapterUnavailableError (the empty vector index) marks it stale the
+// same way but is no error; its rebuild being unavailable too, it is skipped at
+// no cost.
 import {
   AdapterUnavailableError,
   type EmbeddingSpace,
@@ -135,6 +136,8 @@ export interface Projections {
   reconcile(): Promise<Record<ProjectionName, ReconcileOutcome>>;
   /** Resolves once everything queued so far is delivered. */
   drain(): Promise<void>;
+  /** True from a missed notice (failed or unavailable) until a rebuild: it may hold purged content. */
+  isStale(name: ProjectionName): boolean;
 }
 
 /** The latest version of every source with one (a purged source has none). */
@@ -165,9 +168,14 @@ export function createProjections(options: ProjectionsOptions): Projections {
     return run;
   };
 
+  /**
+   * Stops notifying the projection until a rebuild and records it for the next
+   * start. An unavailable projection is stale too, without an error: a later
+   * notice it did take would move its applied sequence past the one it missed.
+   */
   const markStale = (name: ProjectionName, error: unknown) => {
     stale[name] = true;
-    options.onError?.(name, error);
+    if (!(error instanceof AdapterUnavailableError)) options.onError?.(name, error);
     try {
       writeSetting(db, PROJECTION_STALE_SETTINGS[name], "1");
     } catch (writeError) {
@@ -175,13 +183,12 @@ export function createProjections(options: ProjectionsOptions): Projections {
     }
   };
 
-  /** Runs one projection's calls; false when it is stale, unavailable or failed. */
+  /** Runs one projection's calls unless it is stale; a failure or unavailability marks it stale. */
   async function deliver(name: ProjectionName, calls: () => Promise<void>) {
     if (stale[name]) return;
     try {
       await calls();
     } catch (error) {
-      if (error instanceof AdapterUnavailableError) return;
       markStale(name, error);
     }
   }
@@ -229,9 +236,8 @@ export function createProjections(options: ProjectionsOptions): Projections {
       if (marked) writeSetting(db, PROJECTION_STALE_SETTINGS[name], "0");
       return "rebuilt";
     } catch (error) {
-      if (error instanceof AdapterUnavailableError) return "skipped";
       markStale(name, error);
-      return "failed";
+      return error instanceof AdapterUnavailableError ? "skipped" : "failed";
     }
   }
 
@@ -261,5 +267,6 @@ export function createProjections(options: ProjectionsOptions): Projections {
         ),
       })),
     drain: () => enqueue(async () => undefined),
+    isStale: (name) => stale[name],
   };
 }

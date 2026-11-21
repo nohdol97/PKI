@@ -220,9 +220,14 @@ export function productCalls(
 export function productRunner(
   db: SqlDriver,
   broker: Pick<Broker, "call">,
-  options: { now?: () => Date; engine?: KnowledgeEngine } = {},
+  options: {
+    now?: () => Date;
+    engine?: KnowledgeEngine;
+    /** The engine's notifications; a stale engine is not asked for proposals. */
+    projections?: Pick<Projections, "isStale">;
+  } = {},
 ): JobRunner {
-  const { now, engine } = options;
+  const { now, engine, projections } = options;
   const handler = createExtractHandler({
     db,
     broker,
@@ -231,6 +236,7 @@ export function productRunner(
       ? {
           engine,
           onEngineError: (error: unknown) => log("engine-error", { error: errorClass(error) }),
+          ...(projections ? { isEngineStale: () => projections.isStale("engine") } : {}),
         }
       : {}),
   });

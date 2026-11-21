@@ -133,7 +133,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
       answer: () => ({ items: [], facts: [], relations: [] }),
     });
     const { broker } = productCalls(db, egress, { providers: [extractor] });
-    runner = productRunner(db, broker, { engine: bound });
+    runner = productRunner(db, broker, { engine: bound, projections });
     const failing = () => ({
       ...connectorKinds["test-fixtures"](),
       getChanges: () => Promise.reject(new Error("connector broke")),

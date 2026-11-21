@@ -60,6 +60,11 @@ export interface ExtractHandlerOptions {
   engine?: Pick<KnowledgeEngine, "capabilities" | "proposeKnowledge">;
   /** An engine error; its message may carry engine text, so log its class only. */
   onEngineError?: (error: unknown) => void;
+  /**
+   * True while the engine missed a notice (projections.ts isStale): it may still
+   * hold purged text, which a proposed item name could carry back, so it is not asked.
+   */
+  isEngineStale?: () => boolean;
   now?: () => Date;
 }
 
@@ -88,7 +93,7 @@ async function proposals(
 ): Promise<readonly KnowledgeCandidate[]> {
   const { engine } = options;
   try {
-    if (!engine?.capabilities().propose) return [];
+    if (!engine?.capabilities().propose || options.isEngineStale?.()) return [];
     const proposed = await engine.proposeKnowledge(ref);
     return Array.isArray(proposed) ? proposed : [];
   } catch (error) {

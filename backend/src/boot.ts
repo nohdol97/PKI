@@ -73,7 +73,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   const projections = productProjections(db, { engine, ...adapters });
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
-  const runner = productRunner(db, calls.broker, { engine });
+  const runner = productRunner(db, calls.broker, { engine, projections });
   const connectors = await createConnectorManager(
     db,
     connectorInstances(options.fixtures),

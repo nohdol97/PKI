@@ -66,7 +66,11 @@ let deny: string | undefined;
 let brokerRequests: unknown[];
 let handler: ReturnType<typeof createExtractHandler>;
 
-function setUp(script: FakeStep[] = [], engine?: ExtractHandlerOptions["engine"]) {
+function setUp(
+  script: FakeStep[] = [],
+  engine?: ExtractHandlerOptions["engine"],
+  isEngineStale?: () => boolean,
+) {
   provider = new FakeProvider({ answer: fixtureExtraction(), script });
   const broker = createBroker({
     db,
@@ -95,6 +99,7 @@ function setUp(script: FakeStep[] = [], engine?: ExtractHandlerOptions["engine"]
     },
     now: () => T0,
     ...(engine ? { engine, onEngineError: (error: unknown) => engineErrors.push(error) } : {}),
+    ...(isEngineStale ? { isEngineStale } : {}),
   });
 }
 let engineErrors: unknown[] = [];
@@ -644,6 +649,21 @@ describe("engine proposals (V02-R13)", () => {
     ]);
     expect(listEvidence(db, { relationId: 2 })).toHaveLength(2);
     expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 1, other: 0 });
+  });
+
+  it("is not asked while the engine is stale: it may still hold purged text (review F5)", async () => {
+    const { engine } = await proposing((r) => [proposal(r)]);
+    const propose = vi.spyOn(engine, "proposeKnowledge");
+    let stale = true;
+    setUp([output({}), output({})], engine, () => stale);
+    expect((await runNext()).status).toBe("done");
+    expect(propose).not.toHaveBeenCalled();
+    expect(facts()).toEqual([]);
+    // rebuilt: asked again
+    stale = false;
+    imported({ id: "again", title: mail.title, content: mail.content });
+    await runNext();
+    expect(propose).toHaveBeenCalledTimes(1);
   });
 
   it("is not asked without the propose capability", async () => {

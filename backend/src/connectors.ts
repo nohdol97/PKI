@@ -183,7 +183,7 @@ export async function syncConnector(
     });
     for (const [change, reason] of refused) options.onRefused?.(change, reason);
     for (const [change, outcome] of stored) options.onStored?.(change, outcome);
-    // A failed page threw above and built no notices. The runner is woken once the
+    // A failed page threw above: the notices its changes built are never delivered. The runner is woken once the
     // engine has the page's versions, so a proposing engine knows what is extracted.
     const delivered = notices.length > 0 ? options.projections?.notify(notices) : undefined;
     if (pageCreated > 0) {

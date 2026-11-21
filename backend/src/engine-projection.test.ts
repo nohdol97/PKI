@@ -13,7 +13,7 @@ import {
   type KnowledgeEngine,
   type SecretSource,
 } from "@pki/contracts";
-import { vectorRefOf } from "@pki/knowledge-engine";
+import { vectorRefOf, type ProjectionNotice } from "@pki/knowledge-engine";
 import { openaiKeySecretName, writeDefaultProvider, type EgressControls } from "@pki/providers";
 import { readChangeSeq, saveSourceRecord, type SqlDriver } from "@pki/storage";
 import {
@@ -99,9 +99,9 @@ async function pipeline(engine: KnowledgeEngine, vectorIndex = new MemoryVectorI
   writeDefaultProvider(db, provider.id); // the user's default (V01-T10)
   const { broker } = productCalls(db, egress, { providers: [provider] });
   consent(egress);
-  runner = productRunner(db, broker, { engine });
   const adapters = { ...productAdapters(dir), vectorIndex };
   const projections = productProjections(db, { engine, ...adapters });
+  runner = productRunner(db, broker, { engine, projections });
   server = await startServer({
     token: TOKEN,
     allowedOrigins: [],
@@ -256,8 +256,7 @@ describe("engine.restart", () => {
         policyVersion: (consents.body as { policyVersion: string }).policyVersion,
       });
       await post(routes.importJsonl.path, { text: read("v02-mail.jsonl") });
-      await booted.projections.drain();
-      await booted.runner.wake();
+      await booted.runner.wake(); // no drain: the close below delivers what is queued
       expect(booted.db.all("SELECT status FROM jobs")).toEqual([{ status: "done" }]);
       expect(booted.db.all("SELECT value FROM facts")).toEqual([{ value: "2026-12-05" }]);
       await booted.server.close();
@@ -374,5 +373,196 @@ describe("engine.swap", () => {
       drops: [{ q: 0, o: 0 }],
       insights: [{ state: "active" }],
     });
+  });
+});
+
+/** Lets the event loop run `n` times (I/O included); no wall-clock wait. */
+async function turns(n = 200) {
+  for (let i = 0; i < n; i++) await new Promise<void>((r) => setImmediate(r));
+}
+
+/** A promise the test releases, and an engine call held on it. */
+function gate() {
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  return { held, release };
+}
+
+/** A Connector whose one page holds `changes`. */
+function onePage(changes: ChangeSet["changes"]): Connector {
+  return {
+    manifest: {
+      type: JSONL_CONNECTOR_KIND,
+      schemaVersion: 1,
+      capabilities: { incremental: true, deletes: true, accessScope: false, fullRescan: true },
+    },
+    initialize: async () => {},
+    healthCheck: async () => ({ state: "ok" }),
+    getChanges: async () => ({ changes, nextCursor: "1", hasMore: false }),
+    getDocument: async () => null,
+  };
+}
+const upsert = (externalId: string, body: string, revision?: number) => ({
+  kind: "upsert" as const,
+  record: { externalId, title: externalId, body, ...(revision ? { revision } : {}) },
+});
+
+describe("one page with several versions (review F2)", () => {
+  it("gives each notice its own change sequence, so a stop after the first delivery is found at start", async () => {
+    const notified: ProjectionNotice[] = [];
+    await syncConnector(
+      db,
+      "conn-page",
+      JSONL_CONNECTOR_KIND,
+      onePage([upsert("p1", "page alpha"), upsert("p2", "page beta"), upsert("p3", "page gamma")]),
+      { rescan: true, projections: { notify: async (n) => void notified.push(...n) } },
+    );
+    expect(notified.map((n) => n.changeSeq)).toEqual([1, 2, 3]);
+
+    // the process stops after the engine took the first notice only
+    const engine = new MemoryKnowledgeEngine();
+    const adapters = { vectorIndex: new MemoryVectorIndex(), embedder: null };
+    const before = productProjections(db, { engine, ...adapters });
+    await before.notify(notified.slice(0, 1));
+    expect(await engine.appliedChangeSeq()).toBe(1);
+    const restarted = productProjections(db, { engine, ...adapters });
+    expect(await restarted.reconcile()).toMatchObject({ engine: "rebuilt" });
+    expect(await related(engine, "beta gamma")).toHaveLength(2);
+  });
+});
+
+describe("a failed page (review F4)", () => {
+  it("notifies nothing of it", async () => {
+    const engine = spied(new MemoryKnowledgeEngine());
+    const vectorIndex = spied(new MemoryVectorIndex());
+    const projections = productProjections(db, { engine, vectorIndex, embedder: null });
+    const sync = (changes: ChangeSet["changes"]) =>
+      syncConnector(db, "conn-fail", JSONL_CONNECTOR_KIND, onePage(changes), {
+        rescan: true,
+        projections,
+      });
+    await sync([upsert("r", "first text", 5)]);
+    await projections.drain();
+    expect(await engine.appliedChangeSeq()).toBe(1);
+    // a new source, then a lower revision with other content: refused, the page throws
+    await expect(
+      sync([upsert("s", "rolled back", 1), upsert("r", "older text", 3)]),
+    ).rejects.toThrow(/revision-not-newer/);
+    await projections.drain();
+    expect(engine.upsertSource).toHaveBeenCalledTimes(1);
+    expect(vectorIndex.remove).toHaveBeenCalledTimes(1);
+    expect(await engine.appliedChangeSeq()).toBe(1);
+    expect(readChangeSeq(db)).toBe(1);
+  });
+});
+
+describe("boot and close order (review F3, F6)", () => {
+  const boot = (engine: KnowledgeEngine) =>
+    bootBackend({
+      dataDir: dir,
+      token: TOKEN,
+      allowedOrigins: [],
+      secrets: {
+        read: async () => ({ state: "missing" }),
+        has: async () => "missing",
+        deleteOthers: async () => "done",
+      },
+      engine,
+    });
+
+  it("serves nothing until the start-up comparison is done", async () => {
+    db.close(); // the backend opens the directory itself
+    const engine = new MemoryKnowledgeEngine();
+    const rebuild = engine.rebuild.bind(engine);
+    const { held, release } = gate();
+    let entered!: () => void;
+    const rebuilding = new Promise<void>((r) => (entered = r));
+    vi.spyOn(engine, "rebuild").mockImplementation(async (sources, seq) => {
+      entered();
+      await held;
+      await rebuild(sources, seq);
+    });
+    let ready = false;
+    const booting = boot(engine).then((b) => ((ready = true), b));
+    await rebuilding;
+    await turns();
+    expect(ready).toBe(false);
+    release();
+    const booted = await booting;
+    expect(await engine.appliedChangeSeq()).toBe(0);
+    await booted.server.close();
+    db = booted.db; // closed by afterEach
+  });
+
+  it("closes only after the queued notices are delivered", async () => {
+    db.close();
+    const engine = new MemoryKnowledgeEngine();
+    const upsertSource = engine.upsertSource.bind(engine);
+    const { held, release } = gate();
+    vi.spyOn(engine, "upsertSource").mockImplementation(async (...args) => {
+      await held;
+      await upsertSource(...args);
+    });
+    const booted = await boot(engine);
+    db = booted.db; // closed by afterEach
+    const { port } = booted.server;
+    const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
+    await send(port, routes.importJsonl.path, headers, "POST", { text: read("v02-mail.jsonl") });
+    let closed = false;
+    const closing = booted.server.close().then(() => (closed = true));
+    await turns();
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    expect(await engine.appliedChangeSeq()).toBe(1);
+  });
+});
+
+describe("the runner is woken after delivery (review F6)", () => {
+  it("so a proposing engine has the version when the import's own wake extracts it", async () => {
+    const PLAN = "여명 프로젝트의 완료 목표는 2026-12-24입니다";
+    const engine = new ProposingKnowledgeEngine(({ ref, body }): KnowledgeCandidate[] =>
+      body.includes(PLAN)
+        ? [
+            {
+              kind: "fact",
+              ref,
+              item: { type: "Project", name: "여명 프로젝트", existingItemId: null },
+              factKind: "target_date",
+              value: "2026-12-24",
+              epistemic: "explicit",
+              quote: PLAN,
+            },
+          ]
+        : [],
+    );
+    const upsertSource = engine.upsertSource.bind(engine);
+    const { held, release } = gate();
+    vi.spyOn(engine, "upsertSource").mockImplementation(async (...args) => {
+      await held;
+      await upsertSource(...args);
+    });
+    const { post, projections, runner } = await pipeline(engine);
+    const mail = JSON.parse(read("v02-mail.jsonl").trim()) as Record<string, unknown>;
+    const content = `합성 자료입니다. ${PLAN}.`;
+    const line = JSON.stringify({
+      ...mail,
+      id: "dawn-0001",
+      connector_instance_id: "conn-dawn",
+      external_id: "dawn/1",
+      title: "여명 메모",
+      content,
+      content_hash: `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`,
+    });
+    expect((await post(routes.importJsonl.path, { text: line })).body).toMatchObject({
+      created: 1,
+    });
+    await turns(); // a wake before the delivery would extract now, with no proposal
+    release();
+    await projections.drain();
+    await runner.wake();
+    expect(db.all("SELECT value, status FROM facts")).toEqual([
+      { value: "2026-12-24", status: "candidate" },
+    ]);
   });
 });

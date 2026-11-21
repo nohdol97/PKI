@@ -223,11 +223,41 @@ describe("delivery", () => {
     await projections.drain();
   });
 
-  it("treats the empty index's AdapterUnavailableError as a skip, not a failure", async () => {
+  it("marks a projection that was unavailable for a notice stale, without an error", async () => {
     const { projections, errors } = setup(new MemoryKnowledgeEngine(), new EmptyVectorIndex());
     await projections.notify([store("a", "alpha")]);
     expect(errors).toEqual([]);
-    expect(readSetting(db, PROJECTION_STALE_SETTINGS.vectorIndex)).toBeUndefined();
+    expect(projections.isStale("vectorIndex")).toBe(true);
+    expect(projections.isStale("engine")).toBe(false);
+    expect(readSetting(db, PROJECTION_STALE_SETTINGS.vectorIndex)).toBe("1");
+    // the empty index stays cost-free: its rebuild is unavailable too, a skip
+    expect(await projections.reconcile()).toEqual({ engine: "current", vectorIndex: "skipped" });
+    expect(errors).toEqual([]);
+  });
+
+  it("a deletion the engine missed while unavailable is rebuilt away at the next start (review F1)", async () => {
+    const engine = new MemoryKnowledgeEngine();
+    const remove = engine.removeSource.bind(engine);
+    vi.spyOn(engine, "removeSource")
+      .mockRejectedValueOnce(new AdapterUnavailableError("engine restarting"))
+      .mockImplementation(remove);
+    const { projections, errors } = setup(engine, new EmptyVectorIndex());
+    await projections.notify([store("a", "jwxcanary secret"), store("b", "beta")]);
+    const { notice } = deleteSourceWithNotice(db, sourceIdOf("a"), {
+      reason: "user-deleted",
+      at: AT,
+    });
+    await projections.notify([notice as ProjectionNotice]); // unavailable: missed
+    await projections.notify([store("c", "gamma")]); // a later import
+    expect(errors).toEqual([]);
+    // the engine never moved past the missed removal
+    expect(await engine.appliedChangeSeq()).toBe(2);
+    // restart: a fresh projections instance on the same store and engine
+    const { projections: restarted } = setup(engine, new EmptyVectorIndex());
+    expect(await restarted.reconcile()).toMatchObject({ engine: "rebuilt" });
+    expect(await engine.relatedContext({ text: "jwxcanary", limit: 5 })).toEqual([]);
+    expect(await engine.relatedContext({ text: "gamma", limit: 5 })).toHaveLength(1);
+    expect(readSetting(db, PROJECTION_STALE_SETTINGS.engine)).toBe("0");
   });
 
   it("after a failed delivery stops notifying that projection and marks it stale", async () => {
@@ -316,11 +346,45 @@ describe("reconcile (start-up comparison)", () => {
 });
 
 describe("AdapterUnavailableError", () => {
-  it("is a skip for either projection", async () => {
+  it("is a skip for either projection at start, which stays stale", async () => {
     const engine = new MemoryKnowledgeEngine();
     vi.spyOn(engine, "appliedChangeSeq").mockRejectedValue(new AdapterUnavailableError("off"));
     const { projections, errors } = setup(engine, new EmptyVectorIndex());
     expect(await projections.reconcile()).toEqual({ engine: "skipped", vectorIndex: "skipped" });
     expect(errors).toEqual([]);
+    expect(projections.isStale("engine")).toBe(true);
+    expect(readSetting(db, PROJECTION_STALE_SETTINGS.engine)).toBe("1");
+  });
+});
+
+describe("rebuild input", () => {
+  it("is the latest version of each source, a purged source absent", async () => {
+    store("a", "alpha one");
+    store("a", "alpha two");
+    store("b", "beta");
+    store("c", "jwxcanary");
+    deleteSourceWithNotice(db, sourceIdOf("c"), { reason: "source-deleted", at: AT });
+    const engine = new MemoryKnowledgeEngine();
+    const seen: unknown[] = [];
+    const rebuild = engine.rebuild.bind(engine);
+    vi.spyOn(engine, "rebuild").mockImplementation(async (sources, seq) => {
+      async function* tap() {
+        for await (const input of sources) {
+          seen.push(input);
+          yield input;
+        }
+      }
+      await rebuild(tap(), seq);
+    });
+    const { projections } = setup(engine, new EmptyVectorIndex());
+    await projections.reconcile();
+    expect(seen).toEqual([
+      {
+        ref: { sourceId: String(sourceIdOf("a")), version: 2 },
+        title: "a 제목",
+        body: "alpha two",
+      },
+      { ref: { sourceId: String(sourceIdOf("b")), version: 1 }, title: "b 제목", body: "beta" },
+    ]);
   });
 });
