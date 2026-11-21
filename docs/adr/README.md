@@ -25,6 +25,7 @@
 | [0012](0012-upstream-and-fork-ownership.md) | 공용 저장소와 배포처 포크의 소유 경계 | 확정 | — |
 | [0013](0013-failure-recovery.md) | 저장소 사이의 실패 복구 — 정본 먼저, fence와 tombstone, 투영은 재구축 | 잠정 | A20 |
 | [0014](0014-egress-policy-and-consent.md) | 외부 전송 정책과 동의 | 확정 | — |
+| [0015](0015-document-parsing-stack.md) | 문서 파싱 구성 — 형식별 순수 JavaScript 파서, 압축 검사를 앞에 | 잠정 | — (배포처 S16, S17) |
 
 A21(실제 Provider의 인용문 정확도)은 ADR이 아니라 V02 spec의 추출 요구사항에 걸려 있다.
 
