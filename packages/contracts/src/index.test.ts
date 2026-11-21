@@ -55,10 +55,14 @@ describe("contract schemas", () => {
     expect(
       request.safeParse({ source: { kind: "local-pack", path: "/synthetic/pack" } }).success,
     ).toBe(true);
+    expect(
+      request.safeParse({ source: { kind: "local-pack", path: `/${"p".repeat(4095)}` } }).success,
+    ).toBe(true);
     for (const body of [
       {},
       { source: { kind: "local-pack" } },
       { source: { kind: "local-pack", path: "" } },
+      { source: { kind: "local-pack", path: `/${"p".repeat(4096)}` } },
       { source: { kind: "url", url: "https://example.invalid/model" } },
       { source: { kind: "download", revision: "main" } },
       { source: { kind: "download" }, files: [] },

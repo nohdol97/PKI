@@ -8,9 +8,16 @@ import type { EmbeddingRuntime, LoadedEmbedding } from "./transformers-embedder.
 
 const noNetwork = () => Promise.reject(new Error("the local embedder does not use the network"));
 
+/** The pinned pooling, L2-normalized: the vector the embedding space is made of. */
+export const extractionOptions = (model: PinnedModel) =>
+  ({ pooling: model.pooling, normalize: true }) as const;
+
 export const transformersRuntime: EmbeddingRuntime = {
   async load(dir: string, model: PinnedModel): Promise<LoadedEmbedding> {
-    const { env, pipeline } = await import("@huggingface/transformers");
+    const { env, LogLevel, pipeline } = await import("@huggingface/transformers");
+    // Its console messages name local paths and bypass the product's log(); every
+    // failure reaches the user as a fixed phrase instead.
+    env.logLevel = LogLevel.NONE;
     env.allowRemoteModels = false;
     env.allowLocalModels = true;
     env.useFSCache = false;
@@ -30,7 +37,7 @@ export const transformersRuntime: EmbeddingRuntime = {
         const vectors: Float32Array[] = [];
         for (const text of texts) {
           signal?.throwIfAborted();
-          const output = await extractor(text, { pooling: model.pooling, normalize: true });
+          const output = await extractor(text, extractionOptions(model));
           vectors.push(Float32Array.from(output.data as Float32Array));
         }
         return vectors;

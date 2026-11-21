@@ -6,7 +6,7 @@
 import type { PrepareSource } from "@pki/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -75,13 +75,46 @@ async function copyChecked(
   if (!check.matches()) throw new ModelFileError("model file hash mismatch");
 }
 
+/**
+ * Opens a regular file for reading. Anything else (a FIFO, a device, a folder) is
+ * "model file missing": opening a FIFO blocks until a writer appears, and an abort
+ * could not end that wait (it holds a thread-pool thread). The open itself also
+ * gives way to an abort.
+ */
+async function openRegularFile(path: string, signal: AbortSignal): Promise<Readable> {
+  let regular: boolean;
+  try {
+    regular = (await stat(path)).isFile();
+  } catch {
+    regular = false;
+  }
+  if (!regular) throw new ModelFileError("model file missing");
+  signal.throwIfAborted();
+  return new Promise<Readable>((resolve, reject) => {
+    const stream = createReadStream(path);
+    const onAbort = () => {
+      stream.destroy();
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    stream.once("open", () => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(stream);
+    });
+    stream.once("error", () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(new ModelFileError("model file missing"));
+    });
+  });
+}
+
 /** True when `dir` holds every pinned file, each matching. Reads only. */
 async function matchesPinned(dir: string, model: PinnedModel, signal: AbortSignal) {
   for (const file of model.files) {
     const check = checker(file);
     try {
       await pipeline(
-        createReadStream(join(dir, file.path)),
+        await openRegularFile(join(dir, file.path), signal),
         check.transform,
         async (chunks: AsyncIterable<Buffer>) => {
           for await (const chunk of chunks) void chunk;
@@ -97,13 +130,8 @@ async function matchesPinned(dir: string, model: PinnedModel, signal: AbortSigna
   return true;
 }
 
-function localOpener(packDir: string) {
-  return (file: PinnedFile) => () =>
-    new Promise<Readable>((resolve, reject) => {
-      const stream = createReadStream(join(packDir, file.path));
-      stream.once("open", () => resolve(stream));
-      stream.once("error", () => reject(new ModelFileError("model file missing")));
-    });
+function localOpener(packDir: string, signal: AbortSignal) {
+  return (file: PinnedFile) => () => openRegularFile(join(packDir, file.path), signal);
 }
 
 function downloadOpener(model: PinnedModel, fetch: ModelFetch, signal: AbortSignal) {
@@ -121,12 +149,35 @@ function downloadOpener(model: PinnedModel, fetch: ModelFetch, signal: AbortSign
       if (isAbort(error, signal)) throw error;
       throw new ModelFileError("model download failed");
     }
-    if (!response.ok || response.body === null) {
+    // Redirects are followed, but only to https: the bytes are hash-checked either
+    // way, yet a plain-http hop would show which files are fetched (B4).
+    if (!response.ok || response.body === null || !response.url.startsWith("https://")) {
       await response.body?.cancel().catch(() => undefined);
       throw new ModelFileError("model download failed");
     }
     return Readable.fromWeb(response.body as WebReadableStream);
   };
+}
+
+const STAGING_PREFIX = ".staging-";
+
+/**
+ * Removes staging folders a killed or crashed preparation left behind (each can
+ * hold a partly written model). One embedder owns `modelsDir` and runs one
+ * preparation at a time, so none of them belongs to a live preparation.
+ */
+async function removeStaleStaging(modelsDir: string) {
+  let entries: string[];
+  try {
+    entries = await readdir(modelsDir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.startsWith(STAGING_PREFIX)) {
+      await rm(join(modelsDir, entry), { recursive: true, force: true });
+    }
+  }
 }
 
 /**
@@ -143,6 +194,7 @@ export async function installModel(options: {
   signal: AbortSignal;
 }): Promise<string> {
   const { model, modelsDir, source, signal } = options;
+  await removeStaleStaging(modelsDir);
   const target = modelFolder(modelsDir, model);
   if (await matchesPinned(target, model, signal)) return target;
 
@@ -151,10 +203,10 @@ export async function installModel(options: {
   }
   const open =
     source.kind === "local-pack"
-      ? localOpener(source.path)
+      ? localOpener(source.path, signal)
       : downloadOpener(model, options.fetch, signal);
 
-  const staging = join(modelsDir, `.staging-${randomUUID()}`);
+  const staging = join(modelsDir, `${STAGING_PREFIX}${randomUUID()}`);
   try {
     for (const file of model.files) {
       signal.throwIfAborted();

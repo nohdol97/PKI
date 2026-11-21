@@ -27,6 +27,12 @@ describe("the pinned bge-m3 model", () => {
     ]);
   });
 
+  it("pins bge-m3's dense vector: the CLS token of 1024 dimensions", () => {
+    expect(BGE_M3_INT8.pooling).toBe("cls");
+    expect(BGE_M3_INT8.dtype).toBe("int8");
+    expect(BGE_M3_INT8.dimension).toBe(1024);
+  });
+
   it("is frozen", () => {
     expect(Object.isFrozen(BGE_M3_INT8)).toBe(true);
     expect(Object.isFrozen(BGE_M3_INT8.files)).toBe(true);

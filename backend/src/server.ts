@@ -139,7 +139,9 @@ async function prepareEmbedding(
 ): Promise<RouteResponse<"prepareEmbedding"> | { error: ErrorResponse["error"] }> {
   if (embedder === null) return { error: "embedding-not-implemented" };
   const before = await embeddingState(embedder);
-  if (before.state === "preparing") return { error: "embedding-busy" };
+  // `running` is checked after the await too: two requests can both read the
+  // state before either starts, and the later one is busy, not a failed start.
+  if (before.state === "preparing" || running.size > 0) return { error: "embedding-busy" };
   if (before.state === "ready") return { embedding: before };
   const controller = new AbortController();
   running.add(controller);

@@ -6,7 +6,7 @@
 //
 // Enable with PKI_REAL_EMBEDDING_MODELS_DIR=<absolute folder for installed models>.
 // The model is prepared from PKI_REAL_EMBEDDING_PACK (an absolute local pack) when
-// set, otherwise by the approved download (about 590 MB, once; a folder that already
+// set, otherwise by the approved download (about 586 MB, once; a folder that already
 // holds the matching files is reused). The default `pnpm test` skips all of this and
 // stays offline.
 import type { PrepareSource } from "@pki/contracts";
@@ -67,6 +67,19 @@ describe.runIf(enabled)("embedding.roundtrip (real bge-m3)", () => {
   it("is ready and local", async () => {
     expect(await embedder.status()).toBe("ready");
     expect(embedder.describe().egress).toBe("local");
+  });
+
+  it("stays in the pinned embedding space (CLS pooling, normalized)", async () => {
+    // First dimensions of one sentence, recorded on the V01-T14 run (macOS arm64).
+    // Mean pooling gives 0.0384, 0.0295, -0.0287, … for the same text.
+    const [vector] = await embedder.embed(
+      ["합성 등대 점검 일지: 오전에 등명기를 닦았다."],
+      "document",
+    );
+    const reference = [0.02867, 0.05601, -0.05281, 0.00948, -0.02761, -0.0592];
+    const start = Array.from((vector as Float32Array).slice(0, reference.length));
+    start.forEach((x, i) => expect(Math.abs(x - (reference[i] as number))).toBeLessThan(5e-3));
+    expect(Math.hypot(...(vector as Float32Array))).toBeCloseTo(1, 4);
   });
 
   it("finds each synthetic sentence by a query about it, offline", async () => {

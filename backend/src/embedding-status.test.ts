@@ -5,7 +5,7 @@ import { routes, type EmbeddingProvider } from "@pki/contracts";
 import { migrate, registerConnectorInstance, saveSourceRecord } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { FakeEmbedder, send } from "@pki/testkit";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -96,6 +96,27 @@ describe("status API: embedding", () => {
     expect(fake.calls.status).toBe(3);
     expect(fake.calls.prepare).toEqual([]);
     expect(fake.calls.embed).toEqual([]);
+  });
+
+  it("installs the product's models under <dataDir>/models", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "pki-embed-location-"));
+    try {
+      // A leftover staging folder there is swept by the next preparation; one
+      // anywhere else is not, so this pins where the product's models live.
+      mkdirSync(join(dataDir, "models", ".staging-stale"), { recursive: true });
+      const { embedder } = productAdapters(dataDir);
+      await expect(
+        embedder?.prepare(
+          { kind: "local-pack", path: join(dataDir, "no-pack") },
+          AbortSignal.timeout(5000),
+        ),
+      ).rejects.toThrow();
+      expect(await embedder?.status()).toEqual({ unavailable: "model file missing" });
+      expect(readdirSync(join(dataDir, "models"))).toEqual([]);
+      expect(readdirSync(dataDir)).toEqual(["models"]);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it("reports a prepared model ready, and an external one as such", async () => {

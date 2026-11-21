@@ -110,6 +110,28 @@ describe("POST embedding prepare", () => {
     held.release();
   });
 
+  it("answers busy to the second of two simultaneous starts, without logging a failure", async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((line: string) => void lines.push(line));
+    const held = heldEmbedder();
+    // Both requests read the state before either starts the preparation.
+    const status = held.fake.status.bind(held.fake);
+    held.fake.status = async () => {
+      const state = await status();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return state;
+    };
+    const api = await start(held.fake);
+    const answers = await Promise.all([
+      api.prepare({ source: pack }),
+      api.prepare({ source: { kind: "download" } }),
+    ]);
+    expect(answers.map((a) => a.status).sort()).toEqual([200, 409]);
+    expect(held.fake.calls.prepare).toHaveLength(1);
+    expect(lines.join("\n")).not.toContain("embedding-prepare-failed");
+    held.release();
+  });
+
   it("does nothing for a model that is already ready", async () => {
     const fake = new FakeEmbedder();
     await fake.prepare(pack, new AbortController().signal);

@@ -5,9 +5,18 @@
 // a failure is reported by a fixed phrase, never the caught error's message.
 import { AdapterUnavailableError } from "@pki/contracts";
 import { FakeEmbeddingRuntime, writeModelPack } from "@pki/testkit";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BGE_M3_INT8, type PinnedModel } from "./bge-m3.ts";
 import { TransformersEmbedder, type ModelFetch } from "./transformers-embedder.ts";
@@ -29,8 +38,12 @@ let serve: (path: string) => Response;
 const fetchSpy: ModelFetch = async (url, init) => {
   init.signal.throwIfAborted();
   requests.push(url);
-  return serve(url.slice(url.indexOf("/resolve/") + "/resolve/".length + 41));
+  const response = serve(url.slice(url.indexOf("/resolve/") + "/resolve/".length + 41));
+  // A constructed Response has no URL; a real fetch reports where it ended up.
+  if (response.url === "") Object.defineProperty(response, "url", { value: finalUrl(url) });
+  return response;
 };
+let finalUrl: (url: string) => string;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "pki-embed-integrity-"));
@@ -47,6 +60,7 @@ beforeEach(() => {
   runtime = new FakeEmbeddingRuntime();
   requests = [];
   serve = (path) => new Response(readFileSync(join(pack, path)));
+  finalUrl = (url) => url;
 });
 
 afterEach(() => {
@@ -116,9 +130,33 @@ describe("local pack", () => {
     expect(runtime.loads).toEqual([]);
   });
 
-  it("refuses a relative pack path", async () => {
+  it("refuses a relative pack path, even one that names a valid pack", async () => {
+    const path = relative(process.cwd(), pack);
+    expect(readFileSync(join(path, "config.json"), "utf8")).toBe(FILES["config.json"]);
     const e = embedder();
-    await expect(e.prepare({ kind: "local-pack", path: "pack" }, signal())).rejects.toThrow();
+    await expect(e.prepare({ kind: "local-pack", path }, signal())).rejects.toThrow();
+    expect(await e.status()).toEqual({ unavailable: "model file missing" });
+    expect(runtime.loads).toEqual([]);
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "refuses a pack file that is not a regular file (a FIFO would block the read)",
+    async () => {
+      rmSync(join(pack, "tokenizer.json"));
+      execFileSync("mkfifo", [join(pack, "tokenizer.json")]);
+      const e = embedder();
+      await expect(e.prepare({ kind: "local-pack", path: pack }, signal())).rejects.toThrow();
+      expect(await e.status()).toEqual({ unavailable: "model file missing" });
+      expect(runtime.loads).toEqual([]);
+    },
+    5_000,
+  );
+
+  it("refuses a pack where a pinned file is a folder", async () => {
+    rmSync(join(pack, "tokenizer.json"));
+    mkdirSync(join(pack, "tokenizer.json"));
+    const e = embedder();
+    await expect(e.prepare({ kind: "local-pack", path: pack }, signal())).rejects.toThrow();
     expect(await e.status()).toEqual({ unavailable: "model file missing" });
   });
 
@@ -176,6 +214,15 @@ describe("approved download", () => {
     expect(sent).toBeLessThan(64 * 1024);
   });
 
+  it("refuses a download that was redirected off https", async () => {
+    finalUrl = (url) => url.replace("https://huggingface.co", "http://cdn.synthetic.example");
+    const e = embedder();
+    await expect(e.prepare({ kind: "download" }, signal())).rejects.toThrow();
+    expect(await e.status()).toEqual({ unavailable: "model download failed" });
+    expect(runtime.loads).toEqual([]);
+    expect(existsSync(installed())).toBe(false);
+  });
+
   it("reports a failed download by a fixed phrase, not the server's or network's words", async () => {
     for (const fail of [
       () => new Response("CANARY server text", { status: 404 }),
@@ -190,6 +237,37 @@ describe("approved download", () => {
       expect(await e.status()).toEqual({ unavailable: "model download failed" });
       expect(runtime.loads).toEqual([]);
     }
+  });
+});
+
+describe("leftovers of an interrupted preparation", () => {
+  // A preparation killed with the process leaves its staging folder behind; the next
+  // one removes every such folder before it starts (one embedder owns the folder).
+  const plantStale = () => {
+    mkdirSync(join(modelsDir, ".staging-stale"), { recursive: true });
+    writeFileSync(join(modelsDir, ".staging-stale", "model_int8.onnx"), "half-written");
+  };
+
+  it("are removed by the next preparation that succeeds", async () => {
+    plantStale();
+    await embedder().prepare({ kind: "local-pack", path: pack }, signal());
+    expect(readdirSync(modelsDir)).toEqual(["synthetic_embedder"]);
+  });
+
+  it("are removed by the next preparation even when it fails", async () => {
+    plantStale();
+    rmSync(pack, { recursive: true });
+    await expect(
+      embedder().prepare({ kind: "local-pack", path: pack }, signal()),
+    ).rejects.toThrow();
+    expect(readdirSync(modelsDir)).toEqual([]);
+  });
+
+  it("leave other entries of the models folder alone", async () => {
+    plantStale();
+    mkdirSync(join(modelsDir, "other-model"));
+    await embedder().prepare({ kind: "local-pack", path: pack }, signal());
+    expect(readdirSync(modelsDir).sort()).toEqual(["other-model", "synthetic_embedder"]);
   });
 });
 
