@@ -1,5 +1,6 @@
 // API client for the screens (V01-R3). Browser and Electron share it; they differ
-// only in where the Session comes from (fetchDevSession here, the preload in T06).
+// only in where the Session comes from (loadSession: the shell's preload, else the
+// dev server).
 import {
   ErrorResponseSchema,
   routes,
@@ -56,4 +57,17 @@ export async function fetchDevSession(fetchImpl: typeof fetch = fetch): Promise<
   const res = await fetchImpl(DEV_SESSION_PATH);
   if (!res.ok) throw new Error(`dev session unavailable (${res.status})`);
   return SessionSchema.parse(await res.json());
+}
+
+/** The part of the Electron preload's `window.pki` the screens use (apps/desktop bridge). */
+export interface SessionBridge {
+  getSession(): Promise<unknown>;
+}
+
+/** The shell's session when the preload is there (Electron), the dev server's otherwise. */
+export async function loadSession(
+  bridge: SessionBridge | undefined = (globalThis as { pki?: SessionBridge }).pki,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Session> {
+  return bridge ? SessionSchema.parse(await bridge.getSession()) : fetchDevSession(fetchImpl);
 }
