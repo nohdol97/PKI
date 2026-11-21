@@ -46,6 +46,18 @@ describe("findSources", () => {
     ]);
   });
 
+  it("applies the limit after keeping latest versions only", () => {
+    // Old versions repeating the term outrank the latest ones; they must not use up the limit.
+    for (let i = 0; i < 60; i++) {
+      saveSourceRecord(db, "c1", { externalId: "c", title: `등대 등대 등대 ${i}`, body: "등대" });
+    }
+    saveSourceRecord(db, "c1", { externalId: "c", title: "등대 최신", body: "합성 자료 본문" });
+    expect(findSources(db, "등대", 50).map((s) => s.title)).toEqual(
+      expect.arrayContaining(["등대 최신", "등대 점검 확정"]),
+    );
+    expect(findSources(db, "등대", 1)).toHaveLength(1);
+  });
+
   it("finds nothing for a blank query", () => {
     expect(findSources(db, "  ")).toEqual([]);
   });

@@ -20,19 +20,30 @@ export interface DevBackendOptions {
 }
 
 /** Starts the dev backend and resolves with its first stdout line: `{ url, token }`. */
-function startBackend(
+export function startBackend(
   args: string[],
+  entry = DEV_ENTRY,
 ): Promise<{ child: ChildProcess; url: string; token: string }> {
-  const child = spawn(process.execPath, [DEV_ENTRY, ...args], {
+  const child = spawn(process.execPath, [entry, ...args], {
     stdio: ["ignore", "pipe", "inherit"],
   });
-  // Also when the dev server process ends without closing the server (crash, test worker teardown).
-  process.once("exit", () => child.kill());
+  // Also when the dev server process ends without closing the server (crash, test worker
+  // teardown). Removed once the backend has ended, so restarts do not pile listeners up.
+  const kill = () => child.kill();
+  process.once("exit", kill);
+  child.once("exit", () => process.off("exit", kill));
   return new Promise((resolve, reject) => {
     child.once("exit", (code) => reject(new Error(`dev backend exited (${code})`)));
     createInterface({ input: child.stdout as NodeJS.ReadableStream }).once("line", (line) => {
-      const { url, token } = JSON.parse(line) as { url: string; token: string };
-      resolve({ child, url, token });
+      try {
+        const { url, token } = JSON.parse(line) as { url: unknown; token: unknown };
+        if (typeof url !== "string" || typeof token !== "string") throw new TypeError();
+        resolve({ child, url, token });
+      } catch {
+        // The line is not quoted: it may hold the token.
+        child.kill();
+        reject(new Error("dev backend printed no session line"));
+      }
     });
   });
 }

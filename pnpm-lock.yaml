@@ -56,6 +56,9 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1(react@19.3.1)
     devDependencies:
+      '@pki/storage':
+        specifier: workspace:*
+        version: link:../../storage
       '@pki/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit

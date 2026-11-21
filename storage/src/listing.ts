@@ -2,27 +2,34 @@
 // an edited source appears once, under its current title, in lists and searches.
 // Rows are cast to the contract types; the API checks every response against them.
 import type { ProviderCall, SourceSummary } from "@pki/contracts";
-import { searchKeyword } from "./keyword-search.ts";
+import { matchExpression } from "./keyword-search.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
-const LATEST_SOURCES = `
-  SELECT v.id, s.connector_instance_id AS connectorId, s.external_id AS externalId, v.title
-  FROM source_versions v JOIN sources s ON s.id = v.source_id
-  WHERE v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id)`;
+const COLUMNS =
+  "v.id, s.connector_instance_id AS connectorId, s.external_id AS externalId, v.title";
+const IS_LATEST = "v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id)";
 
 export function listSources(db: SqlDriver, limit = 100): SourceSummary[] {
-  return db.all(`${LATEST_SOURCES} ORDER BY v.id DESC LIMIT ?`, [
-    limit,
-  ]) as unknown as SourceSummary[];
+  return db.all(
+    `SELECT ${COLUMNS} FROM source_versions v JOIN sources s ON s.id = v.source_id
+     WHERE ${IS_LATEST} ORDER BY v.id DESC LIMIT ?`,
+    [limit],
+  ) as unknown as SourceSummary[];
 }
 
-/** Keyword search (best match first) over the sources' latest versions. */
+/**
+ * Keyword search (best match first) over the sources' latest versions. The latest-version
+ * filter runs inside the query, before LIMIT, so old versions cannot use up the limit.
+ */
 export function findSources(db: SqlDriver, query: string, limit = 50): SourceSummary[] {
-  const ids = searchKeyword(db, query, limit);
-  if (ids.length === 0) return [];
-  const rows = db.all(`${LATEST_SOURCES} AND v.id IN (${ids.map(() => "?").join(",")})`, ids);
-  const byId = new Map(rows.map((row) => [row.id, row as unknown as SourceSummary]));
-  return ids.flatMap((id) => byId.get(id) ?? []);
+  const match = matchExpression(query);
+  if (match === undefined) return [];
+  return db.all(
+    `SELECT ${COLUMNS} FROM keyword_index k
+       JOIN source_versions v ON v.id = k.rowid JOIN sources s ON s.id = v.source_id
+     WHERE keyword_index MATCH ? AND ${IS_LATEST} ORDER BY k.rank LIMIT ?`,
+    [match, limit],
+  ) as unknown as SourceSummary[];
 }
 
 /** Provider call attempts, newest first. */
