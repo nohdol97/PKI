@@ -8,3 +8,4 @@ export {
   resolveDataDirectory,
   type DataDirectoryInput,
 } from "./data-directory.ts";
+export { EmptyVectorIndex } from "./empty-vector-index.ts";

@@ -2,9 +2,16 @@
 // both import these; TypeScript types come from z.infer, JSON Schema from z.toJSONSchema.
 import { z } from "zod";
 
+export * from "./adapter-errors.ts";
+export type * from "./knowledge-engine.ts";
+export type * from "./vector-index.ts";
+
 // Parts that later V01 tasks build report "not-implemented" until then, never a guessed state.
+// "unavailable" names why, so the UI can show what does not work (V01-R5).
 export const ComponentStatusSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("ready") }),
+  z.object({ state: z.literal("rebuilding") }),
+  z.object({ state: z.literal("unavailable"), reason: z.string().min(1) }),
   z.object({ state: z.literal("not-implemented") }),
 ]);
 export type ComponentStatus = z.infer<typeof ComponentStatusSchema>;

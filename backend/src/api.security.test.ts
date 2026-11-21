@@ -4,6 +4,7 @@ import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { send, sendRaw } from "@pki/testkit";
+import { productAdapters } from "./composition.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
 const TOKEN = "t".repeat(43);
@@ -13,7 +14,11 @@ let server: RunningServer;
 let valid: Record<string, string>;
 
 beforeAll(async () => {
-  server = await startServer({ token: TOKEN, allowedOrigins: [ALLOWED_ORIGIN] });
+  server = await startServer({
+    token: TOKEN,
+    allowedOrigins: [ALLOWED_ORIGIN],
+    ...productAdapters(),
+  });
   valid = {
     host: `127.0.0.1:${server.port}`,
     authorization: `Bearer ${TOKEN}`,
@@ -115,7 +120,11 @@ describe("local API security", () => {
   });
 
   it("refuses to start with a token too short to be a fresh secret", async () => {
-    await expect(startServer({ token: "", allowedOrigins: [] })).rejects.toThrow(/token/);
-    await expect(startServer({ token: "short", allowedOrigins: [] })).rejects.toThrow(/token/);
+    await expect(
+      startServer({ token: "", allowedOrigins: [], ...productAdapters() }),
+    ).rejects.toThrow(/token/);
+    await expect(
+      startServer({ token: "short", allowedOrigins: [], ...productAdapters() }),
+    ).rejects.toThrow(/token/);
   });
 });

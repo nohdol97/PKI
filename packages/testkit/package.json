@@ -6,6 +6,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "dependencies": {
+    "@pki/contracts": "workspace:*"
+  },
   "devDependencies": {
     "vitest": "^5.1.1"
   }

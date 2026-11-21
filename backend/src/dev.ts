@@ -4,6 +4,7 @@
 // other processes of the same user) and not a file left on disk.
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
+import { productAdapters } from "./composition.ts";
 import { startServer } from "./server.ts";
 
 const { values } = parseArgs({
@@ -18,5 +19,6 @@ const server = await startServer({
   token,
   allowedOrigins: values.origin,
   port: Number(values.port),
+  ...productAdapters(),
 });
 process.stdout.write(`${JSON.stringify({ url: server.url, token })}\n`);
