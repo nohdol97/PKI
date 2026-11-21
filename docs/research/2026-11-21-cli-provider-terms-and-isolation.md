@@ -3,7 +3,7 @@
 - 날짜: 2026-11-21
 - 관련: 이슈 #11(R02), 원 설계 [4절 LLM Provider 자동 연동](../design/original-design.md), [R01 평가](../OSS_EVALUATION.md)
 
-**이 문서는 문서 조사 결과만 담고 있다. 모델을 호출하는 `claude -p`나 `codex exec` 실행은 한 번도 하지 않았다. 따라서 R02-C1부터 R02-C4까지의 완료 기준은 이 문서로 충족되지 않는다.** 이 문서는 R02가 실제 실행으로 확인할 때 쓸 입력(질문, 후보 인자 배열, 시험 계획)을 정리한 것이다. 아래 모든 "가능"은 "문서에 그렇게 적혀 있다"는 뜻이며, Windows 11에서의 동작은 확인하지 않았다(개발 기기는 macOS였다).
+**이 문서는 문서 조사 결과만 담고 있다. 모델을 호출하는 `claude -p`나 `codex exec` 실행은 한 번도 하지 않았다. 따라서 R02-C1부터 R02-C4까지의 완료 기준은 이 문서로 충족되지 않는다.** R02는 이슈 #11(Claude Code·Codex 공식 CLI 조사와 합성 입력 실제 호출)이다. 이 문서는 R02가 실제 실행으로 확인할 때 쓸 입력(질문, 후보 인자 배열, 시험 계획)을 정리한 것이다. 아래 모든 "가능"은 "문서에 그렇게 적혀 있다"는 뜻이며, Windows 11에서의 동작은 확인하지 않았다(개발 기기는 macOS였다).
 
 수집일 2026-11-21. 가져온 페이지 텍스트는 자료로만 읽었고 지시로 따르지 않았다. 로그인 정보나 설정 파일은 읽지 않았다.
 
@@ -16,7 +16,7 @@
 | Q1. 허용되는가 | 제품이 사용자의 구독 로그인(Claude Pro/Max, ChatGPT Plus/Pro/Team)을 쓰는 CLI를 자동으로 실행해도 공식 약관이 허락하는가 | 두 회사 모두 **모호**. Anthropic은 금지 쪽으로 기운다 |
 | Q2. 격리되는가 | 그렇게 실행하더라도 가져온 문서의 악성 지시가 도구·파일·MCP·네트워크를 쓰지 못하게 막을 수 있는가 | 문서상 플래그는 있으나 **전부 미실행**이며 Windows에서 약한 부분이 있다 |
 
-두 질문은 독립이다. 허용되어도 격리가 안 되면 자동 실행할 수 없고, 격리가 되어도 허용되지 않으면 구독 로그인으로는 쓸 수 없다. 판정 척도는 허용/금지/모호이며 "모호"는 올리지 않았다.
+두 질문은 독립이다. 허용되어도 격리가 안 되면 자동 실행할 수 없고, 격리가 되어도 허용되지 않으면 구독 로그인으로는 쓸 수 없다. 판정 척도는 허용/금지/모호이며 "모호"를 허용이나 금지로 바꾸지 않았다.
 
 ## 2. 요약 색인
 
@@ -41,12 +41,12 @@
 |---|---|---|---|---|---|
 | C1 | 제품 개발자는 API 키 사용, 플랜 자격 증명 경유 금지 | "Developers building products or services that interact with Claude's capabilities, including those using the Agent SDK, should use API key authentication through Claude Console or a supported cloud provider. Anthropic does not permit third-party developers to offer Claude.ai login into their own applications, or to route requests through Free, Pro, Max, or Ultra plan credentials on behalf of their users." | https://code.claude.com/docs/en/legal-and-compliance | 2026-11-21 수집 | **금지 쪽**. 사용자 자신의 CLI를 띄우기만 하는 로컬 앱이 "사용자를 대신해 라우팅"인지는 말하지 않음 |
 | C2 | 최종 사용자가 수정되지 않은 바이너리에 자기 구독으로 로그인하는 것은 허용 | "Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code as described under *Can customers offer Claude Code in their products?* above." | 같은 페이지 | 같음 | **모호**. 허용으로 읽히나 첫 문장이 C1인 문단 안에 있고 무인 자동화에 대한 말이 아님 |
-| C3 | 제품 안에서 Claude Code를 실행하는 조건 | "preinstalling or running Claude Code in your products or services ... requires agreeing to our Commercial Terms of Service" / "The Claude Code binary must not be modified" / "Customers may not pay for, resell, or intermediate Claude usage on their end users' behalf. Each end user must authenticate with their own Anthropic API key, Claude subscription plan credentials, or 3P inference provider credential" | 같은 페이지 | 같음 | **모호**. 최종 사용자 인증에 구독 자격 증명을 허용 항목으로 나열하지만 제품 공급자가 상용 약관에 동의해야 한다고 함. `claude`를 띄우는 데스크톱 앱은 "제품 안에서 실행"에 해당할 수 있음 |
+| C3 | 제품 안에서 Claude Code를 실행하는 조건 | "Unless we've mutually agreed otherwise, preinstalling or running Claude Code in your products or services (e.g. in hosted sandboxes or other agent infrastructure) requires agreeing to our Commercial Terms of Service and complying with the conditions below" / "The Claude Code binary must not be modified." / "Customers may not pay for, resell, or intermediate Claude usage on their end users' behalf. Each end user must authenticate with their own Anthropic API key, Claude subscription plan credentials, or 3P inference provider credential" | 같은 페이지 | 같음 | **모호**. 최종 사용자 인증에 구독 자격 증명을 허용 항목으로 나열하지만 제품 공급자가 상용 약관에 동의해야 한다고 함(단 "서로 달리 합의한 경우를 제외하고"라는 단서가 있고, 예로 든 것은 호스팅 샌드박스 등 에이전트 인프라라서 로컬 데스크톱 앱이 이에 해당하는지는 문구만으로 정해지지 않음). `claude`를 띄우는 데스크톱 앱은 "제품 안에서 실행"에 해당할 수 있음 |
 | C4 | 자격 증명 수집 금지 | "developers may not collect, store, or intermediate Claude.ai credentials or session tokens — sign-in to a Claude account must complete through Anthropic's own flow." | 같은 페이지 | 같음 | 제약. 제품이 자격 증명을 만지지 않는다는 요구와 일치. 허가는 아님 |
 | C5 | Agent SDK: 제3자 claude.ai 로그인·한도 금지 | "Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK. Use the API key authentication methods described in the Quickstart instead." | https://code.claude.com/docs/en/agent-sdk/overview (`.md` 형태로 수집) | — | **금지 쪽**("사전 승인된 경우 제외"는 벤더 승인 경로가 있음을 시사) |
 | C6 | 사용 한도는 일반 개인 사용 가정 | "Advertised usage limits for Pro, Max, and Ultra plans assume ordinary, individual usage of Claude Code and the Agent SDK." | https://code.claude.com/docs/en/legal-and-compliance | — | **모호**: 예약된 백그라운드 작업에 대한 말이 없음. 과도한 자동화가 의도된 사용을 넘을 수 있음을 시사 |
 | C7 | OAuth의 목적 | "OAuth authentication is intended exclusively for purchasers of Claude Free, Pro, Max, Ultra, Team, and Enterprise subscription plans and is designed to support ordinary use of Claude Code and other native Anthropic applications." | 같은 페이지 | — | **모호**("ordinary use"를 정의하지 않음) |
-| C8 | 소비자 약관: 자동화 접근 | 한국어 판이 제공됨(영어 판은 가져오지 못함. 페이지에 `Language Korean`, 시행일 2025-10-08): "귀하가 Anthropic API 키를 통해 당사 서비스에 접속하거나 당사가 이를 명시적으로 허용하는 경우를 제외하고 봇(bot), 스크립트(script) 또는 기타 방식을 통해 자동화된 또는 비인간적인 방식을 통해 당사 서비스에 접속" [금지]. 영어 번역은 수집자의 것: "Except when you access the Services via an Anthropic API key or where we explicitly permit it, accessing the Services through automated or non-human means, whether via bot, script or otherwise." | https://www.anthropic.com/legal/consumer-terms | 페이지 표기 시행일 2025-10-08 | **모호/금지 쪽**: 소비자 약관에서 `claude -p`의 명시 허가는 찾지 못함. C2의 docs가 "명시적 허가"일 수 있어 벤더 확인이 필요. 번역은 수집자 것이므로 영어 원문 확인 필요 |
+| C8 | 소비자 약관: 자동화 접근 | 수집 때는 한국어 판이 제공되었다(페이지에 `Language Korean`, 시행일 2025-10-08). 독립 검토에서 같은 URL의 영어 문장이 확인되어 아래에 함께 적는다. "귀하가 Anthropic API 키를 통해 당사 서비스에 접속하거나 당사가 이를 명시적으로 허용하는 경우를 제외하고 봇(bot), 스크립트(script) 또는 기타 방식을 통해 자동화된 또는 비인간적인 방식을 통해 당사 서비스에 접속" [금지]. 영어 원문: "Except when you are accessing our Services via an Anthropic API Key or where we otherwise explicitly permit it, to access the Services through automated or non-human means, whether through a bot, script, or otherwise." 수집자의 번역과 뜻이 같다. | https://www.anthropic.com/legal/consumer-terms | 페이지 표기 시행일 2025-10-08 | **모호/금지 쪽**: 소비자 약관에서 `claude -p`의 명시 허가는 찾지 못함. C2의 docs가 "명시적 허가"일 수 있어 벤더 확인이 필요. 영어 원문과 한국어 문장의 뜻이 같다 |
 | C9 | 집행 | "Anthropic reserves the right to take measures to enforce these restrictions and may do so without prior notice." | legal-and-compliance | — | 위험 진술 |
 | C10 | `claude -p`/headless는 공식 프로그램 모드이며 구독 인증을 문서화함 | "Use `CLAUDE_CODE_OAUTH_TOKEN` ... Use this for CI pipelines and scripts where browser login isn't available"(인증 순서 5번, 토큰은 `claude setup-token`, "Pro, Max, Ultra, Team, Enterprise 플랜 필요") | https://code.claude.com/docs/en/authentication | — | 사용자 본인 용도의 구독 인증 스크립팅이 기술적으로 존재함을 뒷받침. 제3자 제품에는 **모호**. 이 토큰을 제품이 발급·보관하면 안 됨(자격 증명 처리 금지) |
 | C11 | bare 모드는 구독을 쓰지 않음 | "Set `ANTHROPIC_API_KEY` before running it, because bare mode doesn't use your subscription login" | https://code.claude.com/docs/en/headless | — | 기술 사실(Q2 참조). Anthropic이 권장하는 스크립트 모드가 API 키 쪽을 향함 |
@@ -63,14 +63,14 @@
 |---|---|---|---|---|---|
 | O1 | 프로그램 사용은 API 키 권장 | "Use API key authentication for programmatic Codex CLI workflows, such as CI/CD jobs. Don't expose Codex execution in untrusted or public environments." | https://developers.openai.com/codex/auth | 페이지에 날짜 없음 | **모호**(권고이며 ChatGPT 로그인 금지가 아님) |
 | O2 | 자동화에서 ChatGPT 관리 인증은 좁은 조건 | "The right way to authenticate automation is with an API key. Use this guide only if you specifically need to run the workflow as your Codex account." / "the runner is trusted private infrastructure" / "Do not use this workflow for public or open-source repositories." | https://developers.openai.com/codex/auth/ci-cd-auth | 같음 | **모호**: ChatGPT 로그인 자동화는 신뢰할 수 있는 비공개 러너에서 사용자 본인 계정으로만 문서화됨. 제3자 제품에 대한 말은 없음. 이 워크플로는 `auth.json`을 복사하는데 이것은 제품이 해서는 안 되는 일 |
-| O3 | `codex exec`는 예약 작업용 | "Use `codex exec` when you want Codex to: Run as part of a pipeline (CI, pre-merge checks, scheduled jobs)." / "`codex exec` reuses saved CLI authentication by default." | https://developers.openai.com/codex/noninteractive | 같음 | **모호→사용자 본인 용도에는 허용 쪽**. 제3자 제품에 대한 명시는 없으며 올리지 않음 |
+| O3 | `codex exec`는 예약 작업용 | "Use `codex exec` when you want Codex to: Run as part of a pipeline (CI, pre-merge checks, scheduled jobs)." / "`codex exec` reuses saved CLI authentication by default." | https://developers.openai.com/codex/noninteractive | 같음 | **모호→사용자 본인 용도에는 허용 쪽**. 제3자 제품에 대한 명시는 없으며 허용으로 바꾸지 않음 |
 | O4 | 이용약관: 프로그램적 추출 | "Automatically or programmatically extract data or Output (defined below)." / "circumvent any rate limits or restrictions" | https://openai.com/policies/terms-of-use/ | 시행일 2026-01-01 | **모호**: ChatGPT 서비스 일반 약관이며 이 조항들에서 Codex 예외는 찾지 못함. Codex 도움말은 ChatGPT 이용약관이 "Codex와 ChatGPT 간 공유 데이터"에 적용된다고 함 |
 | O5 | 자격 증명 공유 | "You may not share your account credentials or make your account available to anyone else" | 같은 약관 | 같음 | 제약: 제품이 자격 증명을 추출·복사하면 안 됨(요구사항과 일치) |
 | O6 | ChatGPT 로그인 시 약관 적용 | "When you sign in to Codex using an existing ChatGPT account, the ChatGPT Terms of Use and Privacy Policy ... apply to data shared between Codex and ChatGPT." | https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan | "16일 전 갱신" 표기 | Codex를 O4와 연결 |
 | O7 | 호스트 제품의 ChatGPT 로그인 통합은 문서화된 인터페이스(`exec`가 아니라 app-server) | "Codex app-server is the interface Codex uses to power rich clients ... Use it when you want a deep integration inside your own product: authentication, ..." / "ChatGPT managed (`chatgpt`) - Codex owns the ChatGPT OAuth flow, persists tokens, and refreshes them automatically."; 외부 토큰 모드는 "experimental and intended for host apps that already own the user's ChatGPT auth lifecycle" | https://developers.openai.com/codex/app-server | 같음 | **모호**: 벤더가 허용한 임베딩에 가장 가까우나 `exec`와 다른 표면이며 무인·예약 사용이나 플랜 자격은 말하지 않음. 관리형 모드는 토큰 처리를 Codex 안에 두어 "자격 증명을 만지지 않는다"는 규칙과 맞음. 외부 토큰 모드는 그 규칙에 어긋남 |
 | O8 | 사용 한도 | "if you reach a usage limit during an active turn, Codex can continue working on that turn, subject to fair-use limits." / "Other Codex activity remains subject to your plan's usage limits" | https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan | "16일 전 갱신" 표기 | 한도는 Codex 표면 전반에서 공유됨. 예약 작업 전용 언급은 찾지 못함 |
 
-**OpenAI 판정(Q1): 모호.** 결정적 인용은 O1/O2(API 키가 자동화의 "올바른 방법", ChatGPT 관리 자동화는 신뢰할 수 있는 비공개 인프라에서 사용자 본인 계정만)와 O4(프로그램적 추출 조항)이다. 제3자 데스크톱 제품이 사용자의 ChatGPT 로그인으로 `codex exec`를 띄우는 것을 명시적으로 허용하거나 금지하는 문구는 찾지 못했다. 올리지 않았다.
+**OpenAI 판정(Q1): 모호.** 결정적 인용은 O1/O2(API 키가 자동화의 "올바른 방법", ChatGPT 관리 자동화는 신뢰할 수 있는 비공개 인프라에서 사용자 본인 계정만)와 O4(프로그램적 추출 조항)이다. 제3자 데스크톱 제품이 사용자의 ChatGPT 로그인으로 `codex exec`를 띄우는 것을 명시적으로 허용하거나 금지하는 문구는 찾지 못했다. 모호 판정을 허용이나 금지로 바꾸지 않았다.
 
 ## 4. Q2 — 격리 능력 표
 
@@ -103,7 +103,7 @@
 | 샌드박스 | `sandbox` 설정(macOS, Linux, WSL2) | sandboxing | 문서화 | "On native Windows, Claude Code runs commands unsandboxed." `failIfUnavailable`은 Windows에서 시작 시 종료시킴. 도구를 제거하면 의미가 줄지만 Windows에서 OS 방어선이 없다는 뜻 |
 | 최소 모드 대 구독 | `--bare` / `CLAUDE_CODE_SIMPLE=1` | headless, authentication | 문서화 | **구독 OAuth와 양립 불가**: "In bare mode, Claude Code never reads OAuth credentials or the system keychain", `CLAUDE_CODE_OAUTH_TOKEN`도 읽지 않음. bare 모드에서 "Claude has access to the Bash, file read, and file edit tools"이므로 `--bare`는 그 자체로 격리 모드가 아니고 구독 로그인과 쓸 수 없음 |
 | `--safe-mode` | CLAUDE.md, skills, plugins, hooks, MCP, 사용자 정의 명령·에이전트, 자동 메모리 끔. "Authentication ... built-in tools, and permissions work normally" | cli-reference | 문서화 + --help | 내장 도구는 남으므로 `--tools ""`와 병용. `--bare`와 달리 구독 인증은 유지 |
-| 신뢰 대화상자 | `-p`에는 없음 | permissions, `-p` 도움말 | 문서화 | "The workspace trust dialog is skipped when Claude is run in non-interactive mode". 검증에 실패한 설정은 조용히 무시됨 |
+| 신뢰 대화상자 | `-p`에는 없음 | permissions, `-p` 도움말 | 문서화(permissions 페이지)와 --help | permissions 페이지는 신뢰 확인이 `claude -p`나 SDK 세션에는 없다는 취지로 적는다. 아래 문장은 permissions 페이지가 아니라 로컬 `claude --help`의 `-p` 설명에 있다: "The workspace trust dialog is skipped when Claude is run in non-interactive mode". 검증에 실패한 설정은 조용히 무시됨 |
 
 ### 4.2 OpenAI Codex CLI 0.155.1 (`codex exec`)
 
@@ -223,7 +223,7 @@
 4. Windows: SIGTERM 없이 `claude -p`의 프로세스 트리 종료, 네이티브 Windows 빌드에서 Job Object 동작, Windows의 `--restricted` 파일 제한(경로 정규화, UNC/네트워크 경로).
 5. Codex 0.155.1: `permissions` 프로필, `features.shell_tool`, `web_search`, `project_doc_max_bytes`, MXC/`prefer_mxc`가 (더 새로운) 문서대로 존재하고 동작하는지. OS별 `read-only` 기본 읽기 범위. `--ignore-user-config`가 모델·provider 기본값도 버리는지.
 6. Codex exec 취소·시간 제한 계약(SIGINT/SIGTERM, Windows) — 공식 문서를 찾지 못함.
-7. "2026년 4월 4일 제3자 하네스" 변경에 대한 Anthropic 공식 문구(언론과 GitHub 이슈만 확인), 소비자 약관의 영어 원문, 2025-10-08보다 새로운 소비자 약관.
+7. "2026년 4월 4일 제3자 하네스" 변경에 대한 Anthropic 공식 문구(언론과 GitHub 이슈만 확인), 2025-10-08보다 새로운 소비자 약관.
 8. `claude -p`의 구독 사용량이 다르게 측정되는지(GitHub #97074/#107134는 사용자 보고).
 9. 전혀 시험하지 않은 것: 모든 실제 호출, 모든 실제 Windows 11 동작(개발 기기는 macOS).
 
@@ -239,7 +239,7 @@
 | 선택지 | 내용 | 결과(이점) | 결과(위험·비용) |
 |---|---|---|---|
 | A | CLI 구독을 기본으로 유지하고 벤더에 서면 확인을 요청한다 | 원 설계를 바꾸지 않는다. 사용자가 이미 낸 구독을 활용해 추가 비용이 없다 | 회신이 없거나 부정적이면 기본 경로가 막힌다. 확인 전 배포하면 약관 위반·계정 조치 위험(C9)이 제품과 사용자에게 걸린다. 벤더가 답할 때까지 출시 일정이 불확실하다 |
-| B | CLI 구독 기본은 유지하되 API 키 provider를 V01에서 선택이 아닌 정식 경로로 만든다 | 구독 경로가 막혀도 제품이 계속 동작할 수 있는 대체 경로가 처음부터 있다. 벤더 확인을 기다리는 동안에도 허용이 확실한 경로로 출시 가능 | provider 구현·시험 범위가 늘어난다. API 키는 사용량 과금이라 사용자 비용이 생긴다. 키를 안전하게 저장하는 방법(자격 증명 처리)을 설계해야 한다. 기본 경로로 구독을 두는 한 약관 위험이 남는다 |
+| B | CLI 구독 기본은 유지하되 API 키 provider를 V01에서 선택이 아닌 정식 경로로 만든다(V01 = 공통 웹·API·Provider와 로컬 데이터 수직 골격, 이슈 #16) | 구독 경로가 막혀도 제품이 계속 동작할 수 있는 대체 경로가 처음부터 있다. 벤더 확인을 기다리는 동안에도 약관상 가장 분명하게 문서화된 경로(API 키)로 출시 가능 | provider 구현·시험 범위가 늘어난다. API 키는 사용량 과금이라 사용자 비용이 생긴다. 키를 안전하게 저장하는 방법(자격 증명 처리)을 설계해야 한다. 기본 경로로 구독을 두는 한 약관 위험이 남는다 |
 | C | API 키만 쓴다 | 약관상 가장 분명한 경로(C1, O1)이고 격리·시간 제한·구조화 출력 같은 호출 통제를 제품이 직접 갖는다. Windows에서 CLI 샌드박스·취소 문제를 피한다 | 원 설계의 핵심(기존 로그인 재사용)을 포기한다. 사용자 비용과 키 발급 부담이 생긴다. 설치된 CLI를 자동 탐색한다는 설계 항목이 사라진다 |
 
 어느 선택지에서든 CLI를 호출하는 경로가 남아 있다면 R02의 격리 검증(Q2)이 필요하다. C안은 CLI 호출 경로가 없으므로 이 검증의 대상에서 빠진다.

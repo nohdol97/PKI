@@ -8,6 +8,24 @@
 
 ## 0. 읽는 법
 
+**처음 나오는 말 (한 줄 설명)**
+
+| 말 | 뜻 |
+|---|---|
+| R03, R04, R06, K01, V01, R03-C4 | 이슈 번호가 아니라 로드맵 작업 이름이다. R03 = 지식 엔진·임베딩·Embedded Storage 실행 비교(#12), R04 = Windows 최소 설치 파일과 런타임 포함 PoC(#13), R06 = PoC 근거로 아키텍처·보안·소유권 ADR 확정(#15), K01 = 근거 기반 LLM Wiki·Backlink·재생성(#25), V01 = 공통 웹·API·Provider와 로컬 데이터 수직 골격(#16). R03-C4는 R03 이슈의 완료 기준 C4다 |
+| wheel / sdist | Python 패키지의 미리 빌드된 설치 묶음(wheel)과 소스 묶음(sdist). Windows용 wheel이 없으면 Windows에서는 소스 빌드가 필요하다 |
+| 사이드카 | 앱 본체(Electron) 옆에서 따로 실행되는 보조 프로세스. 예: Python이나 Go로 만든 엔진 프로그램 |
+| shim | 두 프로그램 사이의 모양 차이를 메워 주는 얇은 중개 코드. 여기서는 "CLI를 OpenAI 호환 HTTP 서버처럼 보이게 하는 로컬 중개기"를 뜻한다 |
+| 카피레프트 | 이 소프트웨어를 포함해 배포하면 내 제품도 같은 조건으로 공개하라고 요구하는 라이선스 성격 |
+| chunk / edge / episode | chunk = 문서를 잘게 나눈 조각, edge = 지식 그래프에서 두 개체를 잇는 관계(사실), episode = graphiti가 한 번에 넣는 입력 단위 |
+| 양시간(bitemporal) | 사실이 "현실에서 참이었던 기간"과 "시스템이 그것을 기록한 시각"을 따로 저장하는 방식 |
+| HNSW | 벡터를 빠르게 근사 검색하는 색인 구조 |
+| nDCG | 검색 결과 순위의 품질을 0~1로 재는 지표(높을수록 좋음) |
+| 버스 팩터 | 핵심 기여자가 몇 명 빠지면 프로젝트가 멈추는지. 1이면 한 사람에게 달려 있다는 뜻 |
+| N-API / `asarUnpack` | N-API = Node 버전이 바뀌어도 다시 빌드하지 않고 쓸 수 있는 네이티브 모듈 규격. `asarUnpack` = Electron 패키지(asar) 안에서 풀어 놓아야 하는 파일 지정 |
+| Authenticode / OV / EV / SmartScreen | Authenticode = Windows 실행 파일 서명 방식. OV(조직 검증), EV(확장 검증) = 인증서 종류. SmartScreen = 서명·평판이 없는 프로그램에 경고를 띄우는 Windows 기능 |
+
+
 - **고정 commit**: 평가한 코드가 나중에 바뀌어도 같은 내용을 다시 볼 수 있도록, 각 저장소의 특정 commit 전체 SHA에 링크를 고정했다(permalink). 링크는 `https://github.com/<저장소>/blob/<SHA>/<경로>#L<줄>` 형태다.
 - **"가능"의 뜻**: 아무것도 설치하거나 실행하지 않았다. 표의 "가능/있음"은 모두 "소스 또는 문서에 그 메커니즘이 있다"는 뜻이다. **Windows 11에서의 실제 동작은 전부 미검증**이며 R03, R04에서 실행으로 확인한다.
 - **미검증**: 보고서가 확인하지 못했다고 적은 항목은 이 문서도 미검증으로 적는다. 추측으로 채우지 않았다.
@@ -24,7 +42,7 @@
 | ③ | 근거(provenance)·삭제 시 파생물 제거 | 지식이 어느 원문에서 나왔는지 추적되고, 원문을 지우면 그 원문에서만 나온 요약·관계가 함께 사라져야 한다 |
 | ④ | 재배포 라이선스 | 제품 라이선스가 MIT(2026-11-21 결정)이므로, 설치 파일에 같이 넣어야 하는 구성요소가 GPL, AGPL, SSPL, BSL, 비상업 라이선스이면 탈락이다 |
 
-**근거의 한계.** 모든 근거는 소스와 메타데이터를 읽은 것이다. 코드를 실행한 적이 없다. 그래서 "가능"은 "메커니즘이 소스에 있다"일 뿐이고, 실제로 동작하는지, Windows에서 되는지는 R03, R04 전까지 **미검증**이다. 이 구분을 판정 칸에서도 유지한다.
+**근거의 한계.** 모든 근거는 소스와 메타데이터를 읽은 것이다. 코드를 실행한 적이 없다. 그래서 "가능"은 "메커니즘이 소스에 있다"일 뿐이고, 실제로 동작하는지, Windows에서 되는지는 R03, R04 전까지 **미검증**이다. 이 구분을 판정 칸에서도 유지한다. 라이선스 칸의 "번들 가능", "안전" 같은 표현은 라이선스 표기를 읽은 결과이며 법률 검토가 아니다.
 
 (참고) 용어: **SSPL**은 서버 소프트웨어용 강한 카피레프트 라이선스, **BSL**은 일정 기간 뒤에야 오픈되는 제한 라이선스다. 둘 다 MIT 제품에 묶어 배포하기 어려워 탈락 대상으로 본다.
 
@@ -38,18 +56,19 @@
 
 | 항목 | cognee | graphiti | LightRAG | memind | ddsyasas/llm-wiki | Astro-Han/karpathy-llm-wiki |
 |---|---|---|---|---|---|---|
-| 고정 SHA | `1961133d0c68` | `9b8a4630092` | `01261ed135bf` | `7536460664228` | `e8dd69ebba0d` | `eafcc77001e4` |
+| 고정 SHA | `1961133d0c68` | `9b8a46300920` | `01261ed135bf` | `753646066422` | `e8dd69ebba0d` | `eafcc77001e4` |
 | commit 날짜(UTC) | 2026-11-20 | 2026-11-20 | 2026-11-20 | 2026-08-13 | 2026-06-04 | 2026-07-23 |
-| 최신 release | v1.6.10 (2026-11-18) | v0.31.2 (2026-10-20) | v1.5.8rc1 (2026-11-15), PyPI 최신 1.5.7 | 0.2.0 (2026-08-13) | v1.2.3 (2026-05-26) | 없음(릴리스·태그 0) |
+| 최신 release | v1.6.10 (2026-11-18) | v0.31.2 (2026-10-20). 이 release에는 deprecated Kuzu 드라이버와 `kuzu` extra가 아직 있음 (E2.2) | v1.5.8rc1 (2026-11-15), PyPI 최신 1.5.7 | 0.2.0 (2026-08-13) | v1.2.3 (2026-05-26) | 없음(릴리스·태그 0) |
 | 라이선스 | Apache-2.0 (E1.1) | Apache-2.0 (E2.1) | MIT (E3.1) | Apache-2.0 (E4.1) | MIT (E5.1) | MIT (E6.1) |
 | 런타임 | Python >=3.10,<3.15 | Python >=3.10 (임베디드 DB는 3.12 이상) | Python >=3.11 (HEAD 기준) | Java 21(Spring Boot) | Node >=20, Next.js 14 | 에이전트 skill(마크다운) + 표준 라이브러리 Python 스크립트 1개 |
-| ① Windows native | 부분: wheel·분류자는 있으나 OpenSSL DLL 보정 코드와 Windows 이슈가 있음 (E1.1, E1.3, 4절) | 아니오(임베디드 경로): falkordblite에 Windows wheel 없음 (E2.3) | 부분: Windows용 파일 잠금·원자적 쓰기 경로가 소스에 있음 (E3.8) | 미검증(Windows 근거 없음) (E4.6) | 부분: README 주장만 있음 (E5.6) | 미검증 |
-| ② 서버/Docker 불필요 | 소스에 있음(기본값): SQLite+LanceDB+Ladybug 임베디드 (E1.2) | 아니오(Windows): 기본값은 Neo4j 서버, 임베디드는 SSPL FalkorDB (E2.2, E2.3) | 소스에 있음(기본값). 단 파일 저장소는 "소규모 테스트용"이라고 문서에 적혀 있음 (E3.4) | 서버 불필요(SQLite)지만 JVM 필요, README 권장 시작은 Docker Compose (E4.2) | 소스에 있음(SQLite+파일) (E5.2) | 소스에 있음(파일) |
+| ① Windows native | 부분: wheel·분류자는 있으나 OpenSSL DLL 보정 코드와 Windows 이슈가 있음 (E1.1, E1.3, 2.4절) | release v0.31.2: 부분(deprecated Kuzu 드라이버 경로, Kuzu에 win_amd64 wheel 있음, 보관된 Kuzu의 Windows 충돌 이슈 #1469). 고정 HEAD: 아니오(Kuzu 제거, falkordblite에 Windows wheel 없음) (E2.2, E2.3) | 부분: Windows용 파일 잠금·원자적 쓰기 경로가 소스에 있음 (E3.8) | 미검증(Windows 근거 없음) (E4.6) | 부분: README 주장만 있음 (E5.6) | 미검증 |
+| ② 서버/Docker 불필요 | 소스에 있음(기본값): SQLite+LanceDB+Ladybug 임베디드 (E1.2) | release·HEAD 공통: 기본값은 별도 Neo4j 서버라 ② 탈락. release의 Kuzu 경로는 서버가 필요 없으나 보관된 프로젝트 위에 있고, HEAD의 임베디드 FalkorDB는 SSPL(④)이며 Windows에서 쓸 수 없다 (E2.2, E2.3) | 소스에 있음(기본값). 단 파일 저장소는 "소규모 테스트용"이라고 문서에 적혀 있음 (E3.4) | 서버 불필요(SQLite)지만 JVM 필요, README 권장 시작은 Docker Compose (E4.2) | 소스에 있음(SQLite+파일) (E5.2) | 소스에 있음(파일) |
 | ③ 근거(provenance) | 소스에 있음: edge → chunk → 문서 개정 → 파이프라인 실행 (E1.9). 문자 위치 없음 | 부분: episode 단위만 (E2.5) | 부분: chunk 단위. 일부 chunker는 원문 span 보조 파일이 있음 (E3.9) | 부분: item → raw data id (E4.5) | 부분: 페이지 → 원본 id (E5.5) | 부분: `Raw` 필드를 문자열 검색으로 확인 (E6.3) |
 | ③ 삭제 시 파생물 제거 | 소스에 있음: `forget()`이 그래프·벡터·원본·세션을 함께 제거 (E1.8). 공유 사실 보존은 미검증 | 부분: `remove_episode`가 단독 근거 edge·node 제거, 트랜잭션 없음 (E2.6) | 소스에 있음: `adelete_by_doc_id`가 추출 캐시로 영향받은 항목을 재구성 (E3.5). 반쯤 끝난 삭제는 복구 도구 필요 | 아니오: 원문 문서 삭제 API 없음 (E4.4) | 아니오: 삭제해도 파생 페이지를 남김 (E5.5) | 아니오: 범위 밖으로 명시 (E6.3) |
-| ④ 재배포 라이선스 | 직접 의존성 중 GPL/AGPL/SSPL/BSL/비상업 없음(PyPI 최신 기준). 전이 의존성·모델 가중치는 미검증 (3절) | 서버 기본값 Neo4j는 GPL-3.0, 임베디드 FalkorDB는 SSPL v1 (E2.3, 아래 라이선스 표) | 직접 의존성 중 해당 없음. 전이 의존성 미검증 | 저장소는 Apache-2.0. mysql-connector-j 조건 미확인, Spring 계열 미검증 (E4.2) | 저장소 MIT. npm 전이 의존성 미검증 | stdlib만 사용 |
+| ④ 재배포 라이선스 | 확인한 약 17개 중(pyproject 선언 직접 의존성 53개) GPL/AGPL/SSPL/BSL/비상업 없음(PyPI 최신 기준). 나머지 직접 의존성 약 36개, 전이 의존성, 모델 가중치는 미검증 → 부분 (2.3절) | 서버 기본값 Neo4j는 GPL-3.0, HEAD의 임베디드 FalkorDB는 SSPL v1 (E2.3, 아래 라이선스 표). release의 Kuzu 경로는 MIT라 ④에 걸리지 않는다(PyPI 메타 기준) | 확인한 9개 중(선언 직접 의존성 19개) 해당 없음. 나머지 10개와 전이 의존성 미검증 → 부분 | 저장소는 Apache-2.0. mysql-connector-j 조건 미확인, Spring 계열 미검증 (E4.2) | 저장소 MIT. npm 전이 의존성 미검증 | stdlib만 사용 |
 | 증분 갱신 | 소스에 있음: `update(..., chunk_level_diff=True)` (E1.7). 바뀌지 않은 chunk의 LLM 재추출 생략은 미검증 | 부분: 문서 정체성 없음, 삭제 후 재추가 또는 새 episode (E2.6) | 부분: 삭제 후 재수집만(같은 이름·같은 내용은 중복으로 거부) (E3.6) | 없음: 같은 contentId는 건너뜀 (E4.5) | 없음 (E5.5) | 없음 (E6.3) |
 | 사용자 정의 LLM client | 부분: provider 닫힌 목록, 등록 훅 없음. CLI를 쓰려면 로컬 OpenAI 호환 shim 필요(미검증) (E1.4) | 있음: `LLMClient` 추상 클래스 (E2.4). 생략하면 OpenAI 기본값으로 대체됨 | 있음: `llm_model_func` 호출 가능 객체 (E3.2) | 있음(Java 인터페이스) (E4.3) | 부분: OpenAI SDK 모양을 요구 (E5.3) | 해당 없음(에이전트가 LLM) |
+| CLI adapter 지원(`claude -p`/`codex exec`) | 제공 어댑터 없음. 이음새: `custom` provider(OpenAI 호환 `GenericAPIAdapter`). 로컬 OpenAI 호환 HTTP shim 필요(미검증). `mcp-sampling`은 MCP 호스트 위임이며 CLI 래퍼가 아님 (E1.4) | 제공 어댑터 없음. 이음새: `LLMClient` 하위 클래스(`_generate_response`). embedder·reranker도 직접 공급해야 OpenAI 키 의존이 없음. shim 불필요, 동작 미검증 (E2.4) | 제공 어댑터 없음. 이음새: `llm_model_func` 호출 가능 객체에 CLI 래퍼 함수를 넣음. shim 불필요, 동작 미검증. 기본 LLM 타임아웃 240초 (E3.2) | 제공 어댑터 없음. 이음새: `StructuredChatClient`(Java, Reactor `Mono`). shim 불필요하나 Java로 구현해야 함 (E4.3) | 제공 어댑터 없음. 이음새: OpenAI SDK 모양 객체. OpenAI 호환 shim 필요(미검증) (E5.3) | 해당 없음: 호스트 에이전트가 LLM을 실행하므로 CLI 자체가 호스트 (E6.2) |
 | 사용자 정의 embedder | 부분: 엔진 고정 목록, 기본은 영어 전용 `bge-small-en-v1.5` (E1.5) | 있음: `EmbedderClient` (E2.4) | 있음: `EmbeddingFunc`, tokenizer도 주입 가능 (E3.3) | 부분: Spring AI `EmbeddingModel` (E4.3) | 없음: 임베딩 자체가 없음 (E5.2) | 없음(벡터 미사용 설계) |
 | 시간 유효성(valid-from/to) | 부분/없음: 데이터 항목 개정 단위의 `valid_from`·`valid_until`만, 사실(edge)에는 없음 (E1.9) | 있음: edge의 `valid_at`·`invalid_at`·`expired_at` (E2.5) | 없음 (E3.9) | 부분: 사건 시각만, 유효 구간 아님 (E4.5) | 없음(생성·수정일만) (E5.5) | 없음 |
 | 성숙도 신호 | 90일 commit 2,894, 최근 7일 작성자 10명. stars·기여자 수 미기록 | 90일 commit 129, 최근 7일 작성자 4명. stars 미기록 | 90일 commit 2,299, 최근 7일 작성자 6명. stars 미기록 | 90일 commit 0, 906 stars, 열린 이슈 15 (E4.6) | 90일 commit 0, 75 stars (E5.6) | 90일 commit 0, 2,780 stars (E6.3) |
@@ -77,7 +96,7 @@ Permalink 접두는 후보마다 같다.
 **graphiti** (`https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/`)
 
 - E2.1 [pyproject.toml#L1-L22](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/pyproject.toml#L1-L22), `falkordblite` 추가 의존성은 Python 3.12 이상 [#L34-L35](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/pyproject.toml#L34-L35).
-- E2.2 백엔드는 NEO4J, FALKORDB, NEPTUNE뿐 [driver.py#L59-L62](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/graphiti_core/driver/driver.py#L59-L62). 기본 `Graphiti(uri=...)`는 Neo4j 드라이버를 만든다 [graphiti.py#L344-L349](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/graphiti_core/graphiti.py#L344-L349). Kuzu 임베디드 드라이버는 PR #2151(2026-11-15 병합)로 제거되었다([GitHub API로 확인](https://github.com/getzep/graphiti/pull/2151)).
+- E2.2 백엔드는 NEO4J, FALKORDB, NEPTUNE뿐 [driver.py#L59-L62](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/graphiti_core/driver/driver.py#L59-L62). 기본 `Graphiti(uri=...)`는 Neo4j 드라이버를 만든다 [graphiti.py#L344-L349](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/graphiti_core/graphiti.py#L344-L349). Kuzu 임베디드 드라이버는 PR #2151(2026-11-15 병합)로 **고정 HEAD에서** 제거되었다([GitHub API로 확인](https://github.com/getzep/graphiti/pull/2151)). 그러나 **release v0.31.2에는 아직 있다**: `graphiti_core/driver/kuzu_driver.py`가 들어 있고 `pyproject.toml`(tag v0.31.2) L32-33에 deprecated 표시된 `kuzu = ["kuzu>=0.11.3"]` extra가 있으며(PyPI `graphiti-core` 0.31.2 `requires_dist`에도 있음), PyPI `kuzu` 0.11.3에는 win_amd64 wheel이 있다(4.3절). 즉 임베디드 경로의 유무가 release와 HEAD에서 다르다.
 - E2.3 임베디드 경로: README는 `graphiti-core[falkordblite]`에 Python 3.12+ 요구 [README.md#L206-L209](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/README.md#L206-L209). PyPI [`falkordblite` 0.11.0](https://pypi.org/pypi/falkordblite/json)은 macOS·manylinux wheel과 sdist만 있고 Windows wheel이 없다(2026-11-21 확인). [falkordblite README](https://github.com/FalkorDB/falkordblite/blob/main/README.md)(main 브랜치, 고정 아님)는 Windows는 Ubuntu용 Bash(WSL)에서만 설치 가능하다고 적는다. FalkorDB 본체 라이선스는 SSPL v1([LICENSE](https://github.com/FalkorDB/FalkorDB)).
 - E2.4 [llm_client/client.py#L74](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/graphiti_core/llm_client/client.py#L74), [embedder/client.py#L30-L40](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/graphiti_core/embedder/client.py#L30-L40), 생략 시 OpenAI 기본값 [graphiti.py#L362-L381](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/graphiti_core/graphiti.py#L362-L381). 원격 측정(posthog)이 기본 켜짐 [telemetry.py#L22-L36](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/graphiti_core/telemetry/telemetry.py#L22-L36).
 - E2.5 시간·근거 [edges.py#L232-L252](https://github.com/getzep/graphiti/blob/9b8a4630092084734b080f2e6f409c2c23bdcc3a/graphiti_core/edges.py#L232-L252). episode보다 작은 span은 모델에 없다(이 읽기 범위 밖은 미검증).
@@ -89,7 +108,7 @@ Permalink 접두는 후보마다 같다.
 - E3.1 [pyproject.toml#L14-L58](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/pyproject.toml#L14-L58), 버전 [_version.py#L3](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/_version.py#L3).
 - E3.2 LLM: [lightrag.py#L1143](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/lightrag.py#L1143), [ProgramingWithCore.md#L96](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/docs/ProgramingWithCore.md#L96), 동시성·타임아웃 기본값 [constants.py#L103](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/constants.py#L103), [#L777](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/constants.py#L777). 추출 출력은 구분자 텍스트를 LightRAG가 파싱하는 방식으로 추정되며 정확한 형식은 따로 확인하지 않았다 [operate.py#L4423](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/operate.py#L4423).
 - E3.3 embedder: [lightrag.py#L1073](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/lightrag.py#L1073), [utils.py#L678-L708](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/utils.py#L678-L708), [AsymmetricEmbedding.md](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/docs/AsymmetricEmbedding.md), tokenizer 주입 [lightrag.py#L958](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/lightrag.py#L958). 기본 tokenizer 경로는 처음 쓸 때 tiktoken BPE 파일을 네트워크에서 내려받는다 [tiktoken_cache.py#L1-L30](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/tiktoken_cache.py#L1-L30)(이슈 #439, 종료). 로컬 우선 설치에는 오프라인 번들이 필요하다.
-- E3.4 저장소 기본값 [lightrag.py#L824](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/lightrag.py#L824). 설계 문서가 "파일 기반 저장소 5종은 소규모 테스트·검증용, 운영은 서버형 저장소"라고 적는다 [FileBackedSnapshotContract.md#L22-L24](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/docs/design/FileBackedSnapshotContract.md#L22-L24). 벡터와 그래프는 메모리에 있고 전체 파일을 다시 써서 저장한다. 규모 한계는 미측정.
+- E3.4 저장소 기본값(클래스 필드는 이 파일 L824 부근이며 줄 단위로 고정하지 않았다) [lightrag.py#L824](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/lightrag.py#L824). 설계 문서가 "파일 기반 저장소 5종은 소규모 테스트·검증용, 운영은 서버형 저장소"라고 적는다 [FileBackedSnapshotContract.md#L22-L24](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/docs/design/FileBackedSnapshotContract.md#L22-L24). 벡터와 그래프는 메모리에 있고 전체 파일을 다시 써서 저장한다. 규모 한계는 미측정.
 - E3.5 삭제 [lightrag.py#L8124-L8137](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/lightrag.py#L8124-L8137), 복구 계약 [PurgeRecoveryContract.md#L198](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/docs/design/PurgeRecoveryContract.md#L198). 반쯤 끝난 삭제의 고아 데이터는 `kg_integrity_repair`만 보고한다 [FileProcessingPipeline.md#L1085](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/docs/FileProcessingPipeline.md#L1085).
 - E3.6 증분 갱신 없음 [FileProcessingPipeline.md#L871-L875](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/docs/FileProcessingPipeline.md#L871-L875), 옵션 변경은 삭제 후 재업로드 [#L914](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/docs/FileProcessingPipeline.md#L914). 수동 KG 편집 API(`ainsert_custom_kg`, `aedit_entity/relation`)는 있다.
 - E3.7 호출 수: [operate.py#L4696](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/operate.py#L4696), [#L4772](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/operate.py#L4772), 보충 추출 기본 1회 [constants.py#L24](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/constants.py#L24), 병합 시 요약 기준 8 [constants.py#L37](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/constants.py#L37), [operate.py#L564-L650](https://github.com/HKUDS/LightRAG/blob/01261ed135bfd2f821ff476ed2894b35288a30f8/lightrag/operate.py#L564-L650). chunk당 기본 1~2회에 병합 요약이 더해진다. chunk 수는 미측정.
@@ -122,6 +141,8 @@ Permalink 접두는 후보마다 같다.
 
 ### 2.3 핵심 의존성 라이선스 (임베디드 구성 기준)
 
+이 표는 후보가 선언한 직접 의존성 전부가 아니라 임베디드 구성의 핵심만 확인한 것이다(cognee 선언 53개 중 약 17개, LightRAG 19개 중 9개). sage-wiki, cortexdb, llm-wiki-compiler는 의존성 라이선스를 확인하지 않았다(3.1절 ④ 행).
+
 출처는 2026-11-21에 가져온 PyPI 메타데이터와 GitHub 라이선스 필드다. PyPI "최신"은 저장소가 고정한 버전과 다를 수 있고, 전이 의존성과 모델 가중치는 확인하지 않았다.
 
 | 후보 | 구성요소(역할) | 라이선스 | 비고 |
@@ -139,14 +160,14 @@ Permalink 접두는 후보마다 같다.
 | graphiti | posthog, openai, redis-py | MIT, Apache-2.0, MIT | 원격 측정 기본 켜짐 (E2.4) |
 | LightRAG | nano-vectordb(벡터) | MIT | 메모리 내 전수 비교, JSON 파일. 마지막 push 2026-01-09 |
 | LightRAG | networkx(그래프) | BSD-3-Clause | 메모리 내 그래프 |
-| LightRAG | tiktoken, json_repair, pypinyin, pandas, xlsxwriter, google-genai, pipmaster | MIT, MIT, MIT, BSD-3, BSD-2, Apache-2.0, Apache-2.0 | pipmaster가 실행 중 pip 설치를 할 수 있음(동작 미검증). 해당 클래스 없음 |
+| LightRAG | tiktoken, json_repair, pypinyin, pandas, xlsxwriter, google-genai, pipmaster | MIT, MIT, MIT, BSD-3, BSD-2, Apache-2.0, Apache-2.0 | pipmaster가 실행 중 pip 설치를 할 수 있음(동작 미검증). 확인한 항목에서 GPL/AGPL/SSPL/BSL/비상업은 찾지 못함 |
 | memind | sqlite-jdbc | Apache-2.0 | 포함된 네이티브 라이브러리 라이선스는 별도 확인 못함 |
 | memind | Spring Boot / Spring AI | 미확인 | |
 | memind | mysql-connector-j(서버 모듈, runtime) | GitHub 필드 NOASSERTION, 조건 미확인 | 확인 전까지 번들 금지. 코어+SQLite 플러그인만 쓰면 피할 수 있음 |
 | llm-wiki | better-sqlite3, keytar, next, react, three | 미확인 | 저장소 자체는 MIT |
 | karpathy-llm-wiki | 없음(표준 라이브러리) | 해당 없음 | |
 
-cognee와 LightRAG의 임베디드 기본 구성에서는 직접 의존성 기준 탈락 클래스가 나오지 않았다. 탈락 클래스에 걸리는 것은 graphiti의 백엔드 옵션(Neo4j 서버 GPL-3.0, FalkorDB SSPL)이고, memind의 mysql-connector-j만 불분명하다.
+cognee와 LightRAG의 임베디드 기본 구성에서 **확인한 직접 의존성**(cognee 선언 53개 중 약 17개, LightRAG 선언 19개 중 9개)에서는 탈락 클래스가 나오지 않았다. 나머지는 확인하지 않았다. 탈락 클래스에 걸리는 것은 graphiti의 백엔드 옵션(Neo4j 서버 GPL-3.0, FalkorDB SSPL)이고, memind의 mysql-connector-j만 불분명하다.
 
 ### 2.4 Windows 관련 이슈·문서 (제목 그대로)
 
@@ -161,20 +182,81 @@ Python 후보 3개 모두 최근에 Windows 파일 잠금·원자적 쓰기·네
 
 계획된 6개 밖에서 조사한 결과다. `n90`은 2026-08-23 이후 기본 브랜치 commit 수(API 한 페이지 상한 100, "100+"는 상한 도달)다. 새 저장소의 stars는 품질 신호로 쓰지 않았다(예: agent-memory는 11주 만에 4.3k stars).
 
+### 3.0 후보 목록 (long-list)
+
+GitHub 검색으로 찾은 대안 전체다(최종 후보군과 기각 대상 포함). SHA는 수집 시점 기본 브랜치 HEAD의 12자이며, "미기록"은 수집 보고서에 값이 없다는 뜻이다. "미개봉"은 코드를 열지 않고 README·설명만으로 판단했다는 뜻이다. stars는 수집일 값이며 어린 저장소에서는 품질 신호로 쓰지 않았다. 아래 "비고"는 결정 근거를 한 줄로 줄인 것이고, 기각의 결정적 이유는 3.3절이다.
+
+| 프로젝트(URL) | SHA(12자) | stars | n90 | 라이선스 | 언어 | 비고 |
+|---|---|---|---|---|---|---|
+| [mem0ai/mem0](https://github.com/mem0ai/mem0) | `fff8a6472512` | 69,285 | 74 | Apache-2.0 | Py | 기각 사유: 유효 구간·근거 span·Wiki 계층 없음(적합성) |
+| [letta-ai/letta](https://github.com/letta-ai/letta) | `8816d3a85168` | 25,505 | 5 | Apache-2.0 | 미기록 | 기각 사유: 에이전트 하네스, 임베드 가능한 엔진 아님 |
+| [getzep/zep](https://github.com/getzep/zep) | `5e9f35d7c7dc` | 5,010 | 27 | Apache-2.0 | Py | 기각 사유: Cloud 예제 저장소, OSS 서버 없음 |
+| [microsoft/graphrag](https://github.com/microsoft/graphrag) | `34b2b67ae460` | 36,704 | 10 | MIT | Py | 기각 사유: 삭제된 입력이 파생 지식 제거로 이어지지 않음(③) |
+| [gusye1234/nano-graphrag](https://github.com/gusye1234/nano-graphrag) | `acb35c065614` | 4,010 | 0 | MIT | Py | 기각 사유: 휴면, 삭제·근거 모델 없음 |
+| [circlemind-ai/fast-graphrag](https://github.com/circlemind-ai/fast-graphrag) | `23b3a1bef643` | 3,972 | 0 | MIT | Py | 기각 사유: 13개월 휴면 |
+| [OSU-NLP-Group/HippoRAG](https://github.com/OSU-NLP-Group/HippoRAG) | `d5c8329422e0` | 4,136 | 10 | MIT | Py | 기각 사유: 삭제가 다른 chunk의 triple을 남김, 시간·근거 없음 |
+| [SciPhi-AI/R2R](https://github.com/SciPhi-AI/R2R) | `9c5a94d151f9` | 8,103 | 0 | MIT | Py | 기각 사유: 휴면, 서버형(DB 요구 미검증) |
+| [neuml/txtai](https://github.com/neuml/txtai) | `351a2bada485` | 13,689 | 100+ | Apache-2.0 | Py | 관찰 목록: 검색 계층 빌딩 블록, 엔진 아님 |
+| [run-llama/llama_index](https://github.com/run-llama/llama_index) | `99d7433f6f71` | 52,970 | 69 | MIT | Py | 기각 사유: `_delete_node`가 노드 하나만 삭제, 시간 모델 없음 |
+| [deepset-ai/haystack](https://github.com/deepset-ai/haystack) | `85b8d4e0b833` | 27,065 | 100+ | Apache-2.0 | Py | 기각 사유: 지식 모델 없는 프레임워크(설명만 읽음) |
+| [Cinnamon/kotaemon](https://github.com/Cinnamon/kotaemon) | `9ad3e4e49aa3` | 25,925 | 0 | Apache-2.0 | Py | 기각 사유: 휴면, RAG 채팅 UI |
+| [basicmachines-co/basic-memory](https://github.com/basicmachines-co/basic-memory) | `c805457289ca` | 4,647 | 100+ | AGPL-3.0 | Py | 탈락: 라이선스(④) |
+| [memodb-io/memobase](https://github.com/memodb-io/memobase) | `358c16bbc6d6` | 2,962 | 0 | Apache-2.0 | Py | 기각 사유: 휴면, DB 서버(미검증) |
+| [supermemoryai/supermemory](https://github.com/supermemoryai/supermemory) | `9547bd0f571c` | 31,676 | 100+ | MIT(저장소) | TS | 기각 사유: 서버 바이너리가 비공개 코드베이스 |
+| [MemTensor/MemOS](https://github.com/MemTensor/MemOS) | `3a16e5fe3048` | 12,467 | 100+ | Apache-2.0 | TS/Py | 기각 사유: Docker 설치 경로(서버 내부는 미개봉) |
+| [MemMachine/MemMachine](https://github.com/MemMachine/MemMachine) | `d241669aad8e` | 3,089 | 44 | Apache-2.0 | Py | 기각 사유: 별도 DB 서버(미검증) |
+| [langchain-ai/langmem](https://github.com/langchain-ai/langmem) | `4beb9c36a409` | 1,779 | 13 | MIT | Py | 기각 사유: LangGraph store 필요, 프레임워크 |
+| [mastra-ai/mastra](https://github.com/mastra-ai/mastra) | `d965fe21f066` | 29,703 | 100+ | Apache-2.0(`ee/` 제외) | TS | 기각 사유: 대화·작업 기억, KG·시간 없음 |
+| [neo4j-labs/agent-memory](https://github.com/neo4j-labs/agent-memory) | `9d45af5529ec` | 611 | 100+ | Apache-2.0 | Py | 탈락: Neo4j 서버(②) |
+| [tigerless-labs/agent-memory](https://github.com/tigerless-labs/agent-memory) | `2648ba02d3c0` | 4,324 | 100+ | MIT | Py | 최종 후보군(3.1절) → 기각(참고 용도) |
+| [mnemon-dev/mnemon](https://github.com/mnemon-dev/mnemon) | `ccc8ace2d21a` | 732 | 100+ | Apache-2.0 | Go | 기각 사유: 코딩 에이전트 기억 CLI |
+| [doobidoo/mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | `d22f074da21d` | 2,137 | 100+ | Apache-2.0 | Py | 기각 사유: MCP 기억 서비스(코드 미개봉) |
+| [MemoriLabs/Memori](https://github.com/MemoriLabs/Memori) | `574b1ea3e876` | 17,602 | 2 | Apache-2.0(LICENSE 본문, GitHub는 NOASSERTION) | Py | 기각 사유: 저활동, 호스팅 지향(미검증) |
+| [TencentCloud/TencentDB-Agent-Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory) | `083c64b11a67` | 31,078 | 65 | MIT(LICENSE 본문, GitHub는 NOASSERTION) | TS | 탈락: Docker 배포 경로(②) |
+| [Tencent/WeKnora](https://github.com/Tencent/WeKnora) | `1b3a1febf3e5` | 37,911 | 100+ | MIT(제3자 구성요소 제외) | Go | 탈락: Docker Compose 경로(②) |
+| [volcengine/OpenViking](https://github.com/volcengine/OpenViking) | `aa885b902075` | 42,543 | 100+ | AGPL-3.0 | Py | 탈락: 라이선스(④) |
+| [kuzudb/kuzu](https://github.com/kuzudb/kuzu) | `89f0263cc7a1` | 4,019 | 0 | MIT | C++ | 기각 사유: 보관됨(archived) |
+| [cozodb/cozo](https://github.com/cozodb/cozo) | 미기록(마지막 push 2024-12-04) | 4,149 | 0 | MPL-2.0 | Rust | 기각 사유: 2년 휴면 |
+| [orneryd/NornicDB](https://github.com/orneryd/NornicDB) | `b9092eb02640` | 933 | 100+ | MIT | Go | 기각 사유: 저장소 전용(코드 미개봉) |
+| [liliang-cn/cortexdb](https://github.com/liliang-cn/cortexdb) | `50c1eeb1f2dd` | 529 | 100+ | MIT | Go | 최종 후보군(3.1절) → 보류 |
+| [yifanfeng97/Hyper-Extract](https://github.com/yifanfeng97/Hyper-Extract) | `a85b4d13662a` | 4,251 | 100+ | Apache-2.0(LICENSE 본문, GitHub는 NOASSERTION) | Py | 최종 후보군(3.1절) → 기각(참고 용도) |
+| [khoj-ai/khoj](https://github.com/khoj-ai/khoj) | `ae229ca894c0` | 38,188 | 0 | AGPL-3.0 | Py | 탈락: 라이선스(④), 90일 commit 0 |
+| [reorproject/reor](https://github.com/reorproject/reor) | `9b47fcaf1158` | 8,526 | 0 | AGPL-3.0 | JS | 탈락: 라이선스(④), 보관됨 |
+| [Mintplex-Labs/anything-llm](https://github.com/Mintplex-Labs/anything-llm) | `472b1e3f4715` | 68,472 | 100+ | MIT | JS | 기각 사유: RAG 채팅 앱, KG·시간·Wiki·CLI-LLM 어댑터 없음 |
+| [MODSetter/SurfSense](https://github.com/MODSetter/SurfSense) | `b764f2838969` | 16,905 | 100+ | Apache-2.0 | Py | 탈락: Docker 설치 경로(②) |
+| [lfnovo/open-notebook](https://github.com/lfnovo/open-notebook) | `0c1e7abbd774` | 42,104 | 100+ | MIT | Py/TS | 탈락: Docker Compose + surrealdb 서비스(②) |
+| [screenpipe/screenpipe](https://github.com/screenpipe/screenpipe) | `b2f787a84634` | 22,489 | 100+ | Screenpipe Commercial License | Rust | 탈락: 라이선스(④) |
+| [nashsu/llm_wiki](https://github.com/nashsu/llm_wiki) | `e08cfce65aad` | 21,792 | 57 | GPL-3.0 | TS | 탈락: 라이선스(④) |
+| [inkeep/open-knowledge](https://github.com/inkeep/open-knowledge) | 미기록 | 4,880 | 미기록 | GPL-3.0 | TS | 탈락: 라이선스(④), 더 열어 보지 않음 |
+| [chaitin/PandaWiki](https://github.com/chaitin/PandaWiki) | 미기록 | 10,513 | 미기록 | AGPL-3.0 | TS | 탈락: 라이선스(④), 더 열어 보지 않음 |
+| [zhuzhaoyun/Molio](https://github.com/zhuzhaoyun/Molio) | `3f6fb91d7829` | 451 | 100+ | 수정된 Apache-2.0(호스팅·임베드 서비스에 상용 라이선스) | TS | 탈락: 라이선스(④), 조항 전문 미확인 |
+| [GD4AI/obsidian-llm-wiki](https://github.com/GD4AI/obsidian-llm-wiki) | `1f2990d60c4f` | 801 | 100+ | Apache-2.0 | TS | 기각 사유: Obsidian 안에서만 실행 |
+| [atomicstrata/llm-wiki-compiler](https://github.com/atomicstrata/llm-wiki-compiler) | `b8e28c666ac6` | 2,276 | 100+ | MIT | TS | 최종 후보군(3.1절) → 보류(K01 재평가) |
+| [swarmclawai/swarmvault](https://github.com/swarmclawai/swarmvault) | `815412d24298` | 737 | 0 | MIT | TS | 기각 사유: 휴면(관찰 목록) |
+| [xoai/sage-wiki](https://github.com/xoai/sage-wiki) | `63c9d7bd99da` | 659 | 35 | MIT | Go | 최종 후보군(3.1절) → 보류 |
+| [lucasastorian/llmwiki](https://github.com/lucasastorian/llmwiki) | `4d887e837823` | 1,784 | 17 | Apache-2.0 | Py | 기각 사유: 에이전트가 도구로 편집하는 Wiki, 추출 파이프라인 아님 |
+| [kytmanov/obsidian-llm-wiki-local](https://github.com/kytmanov/obsidian-llm-wiki-local) | `ad2e425f20f3` | 855 | 0 | MIT | Py | 기각 사유: Ollama 전용, 휴면 |
+| [AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) | `2e545563172f` | 16,655 | 100+ | MIT | Py | 기각 사유: skill 묶음, 엔진 아님 |
+| [sdyckjq-lab/llm-wiki-skill](https://github.com/sdyckjq-lab/llm-wiki-skill) | 미기록 | 2,596 | 미기록 | 선언 없음 | TS | 기각 사유: 라이선스 없음, skill |
+
+같은 검색에서 TypeScript/Node 시간 KG는 50 stars 이상에서 찾지 못했다. 가장 가까운 것은 9 stars의 `zrg-team/memorall`(브라우저 확장, PGlite)과 AGPL로 탈락한 `inite-ai/inite-brain-service`(43 stars) 등이며 SHA는 기록하지 않았다.
+
 ### 3.1 최종 후보군 (5개)
 
 | 항목 | cortexdb | sage-wiki | agent-memory (tigerless-labs) | llm-wiki-compiler | Hyper-Extract |
 |---|---|---|---|---|---|
 | 고정 SHA(날짜) | `50c1eeb1f2dd` (2026-11-21) | `63c9d7bd99da` (2026-11-01) | `2648ba02d3c0` (2026-11-12) | `b8e28c666ac6` (2026-11-14) | `a85b4d13662a` (2026-11-05) |
 | 라이선스·언어 | MIT, Go | MIT, Go | MIT, Python | MIT, TypeScript | Apache-2.0(LICENSE 본문; GitHub는 NOASSERTION이라 재확인 필요), Python |
-| 성숙도 신호(보고된 값) | 529 stars, 기여자 4명, 2025-08 생성, v2.157.1(2026-11-20), n90 100+ | 659 stars, 기여자 14명, v0.2.13(2026-10-25), n90 35 | 4,324 stars(신뢰 낮음), 기여자 22명, 2026-09-01 생성(11주), n90 100+ | 2,276 stars, 기여자 20명, n90 100+ | 4,251 stars, 기여자 20명, n90 100+ |
-| Windows 바이너리 | release에 `cortexdb-grpc_windows_amd64.tar.gz` 있음(존재만 확인) | release에 `sage-wiki_v0.2.13_windows_amd64.zip` 있음(존재만 확인) | README에 언급 없음: 미검증 | 소스에 win32 분기 있음(codex 어댑터) | 미검증 |
+| 성숙도 신호(보고된 값) | 529 stars, 기여자 4명, 2025-08 생성, v2.157.1(2026-11-20; 리뷰 시점에 최신은 v2.158.0, 2026-11-21), n90 100+ | 659 stars, 기여자 14명, v0.2.13(2026-10-25), n90 35 | 4,324 stars(신뢰 낮음), 기여자 22명, 2026-09-01 생성(11주), n90 100+ | 2,276 stars, 기여자 20명, n90 100+ | 4,251 stars, 기여자 20명, n90 100+ |
+| Windows 바이너리 | release에 `cortexdb-grpc_windows_amd64.tar.gz`(gRPC 서버 압축 파일)와 MCP 실행 파일이 있음(존재만 확인) | release에 `sage-wiki_v0.2.13_windows_amd64.zip` 있음(존재만 확인) | README에 언급 없음: 미검증 | 소스에 win32 분기 있음(codex 어댑터) | 미검증 |
 | 대체하는 범위 | 그래프·벡터·시간·근거 저장과 결정적 정리 단계(추출·Wiki·Q&A는 제외) | compile부터 Wiki 페이지까지 전체(엔진+Wiki 계층). 수집 커넥터·인사이트·Q&A·피드백은 제품 몫 | LLM 어댑터 계층과 수면 정리(consolidation). KG·개체 해소는 아님 | Wiki 페이지 계층만 | 추출과 증분 원본 원장 |
 | 사용자 정의 LLM | 코어에 LLM client 없음. 선택적 추출은 `JSONGenerator` 하나(`GenerateJSON`)로 주입 | `provider.Provider{Complete, Embed, Models}`. 주입은 `Workspace.Compile`에만 적용. 질의 시점 expand/rerank는 설정 기반으로 남음 | `Reasoner` 프로토콜. `claude -p`, `codex exec` 어댑터와 격리 플래그가 이미 있음 | `LLMProvider` 인터페이스. 프로세스 내 주입 `runWithProviderOverride`가 공개 SDK에서 닿는지 미검증 | LangChain `BaseChatModel`. CLI를 감싸는 하위 클래스를 끼울 수 있음(미제공) |
 | 사용자 정의 embedder | `Embedder{Embed, EmbedBatch, Dim}`, `WithEmbedder` | 검색 경로에 주입 가능. 프로세스 내 CPU embedder 번들 여부 미검증(문서 예시는 Ollama) | `Embedder` 프로토콜, 기본 `FastEmbedder`(ONNX CPU) | 같은 인터페이스. 프로세스 내 CPU embedder 미제공 | LangChain `Embeddings`, `faiss-cpu`. 로컬 CPU 래퍼는 미제공 |
 | 저장소 | SQLite 파일 1개(`modernc.org/sqlite` 순수 Go) | SQLite(순수 Go) + 자체 HNSW 벡터, `CGO_ENABLED=0` 빌드. Postgres는 선택 | 마크다운 파일 + 지워도 되는 SQLite FTS5 색인 | 파일 트리와 JSON 임베딩(64 MiB 초과 시 이진), 검색 시 색인을 메모리에 올림 | `data.json` + FAISS 색인 |
-| 증분·삭제 | `delete_document_graph`가 문서의 chunk·관계·단독 개체를 제거, 공유 개체는 분리, `dry_run` 지원. 삭제가 시간 이력 행까지 지우는지, 표시만 하는지 미검증 | manifest diff에 `Removed`, 원본 삭제 처리 `handleRemovedSources`. 고아 온톨로지 edge·개체 연쇄 삭제는 미검증 | `store.delete`는 있으나 문서에 "삭제해도 파일이 저장소에 남는다"고 적힘. 소프트 삭제이며 완전 삭제 경로는 미검증 | `llmwiki rm`이 원본과 그 원본에서만 나온 페이지를 삭제(문서 기재, 실행 안 함) | `remove_source(..., strategy="exact")`가 단독 기여 키를 삭제하고 공유 키는 다시 병합 |
+| 증분·삭제 | `delete_document_graph`가 문서의 chunk·관계·단독 개체를 제거, 공유 개체는 분리, `dry_run` 지원. 삭제가 시간 이력 행까지 지우는지 미검증. 단 인용한 [GUIDE.md#L543-L547](https://github.com/liliang-cn/cortexdb/blob/50c1eeb1f2ddd35ff8f72e7ac35289fdd38a32ba/docs/GUIDE.md#L543-L547)은 닫힌 버전이 `graph_node_history`/`graph_edge_history`로 옮겨지고 사유에 `document_deleted`가 있다고 적어, 문서 삭제 뒤에도 이력 행이 남는 것으로 읽힌다(③ 삭제 시 파생물 제거와 충돌할 수 있어 R03에서 확인) | manifest diff에 `Removed`, 원본 삭제 처리 `handleRemovedSources`. 고아 온톨로지 edge·개체 연쇄 삭제는 미검증 | `store.delete`는 있으나 문서에 "삭제해도 파일이 저장소에 남는다"고 적힘. 소프트 삭제이며 완전 삭제 경로는 미검증 | `llmwiki rm`이 원본과 그 원본에서만 나온 페이지를 삭제(문서 기재, 실행 안 함) | `remove_source(..., strategy="exact")`가 단독 기여 키를 삭제하고 공유 키는 다시 병합 |
 | 근거·시간 | edge별 `FactProvenanceFor`, 양시간(bitemporal) `valid_from/valid_to/recorded_at/retracted_at`와 `as_of`. 인용 텍스트가 문자 span인지 chunk 전체인지 미검증 | 관계에 `evidence`(지지 span), `confidence`, `source_doc`. 양시간 edge 유효성 "P3-6" | frontmatter `valid_from/invalid_at`, `recall --as-of`. 근거는 memory 단위이며 원문 span은 미검증 | 페이지 provenance와 "지지 원문 구절", 신선도(fresh/stale/orphaned). 시간 모델 없음 | 원본 원장(`he info --sources`). 근거 span 없음(소스 단위만), 유효 구간 모델 없음 |
+| ④ 재배포 라이선스 | 저장소 MIT만 확인. 의존성(`go.mod`) 라이선스 미검증 → 부분/미검증 | 저장소 MIT만 확인. 의존성(`go.mod`) 라이선스 미검증 → 부분/미검증 | 저장소 MIT만 확인. 의존성 미검증 → 부분/미검증 | 저장소 MIT만 확인. 의존성 미검증 → 부분/미검증 | 저장소 Apache-2.0(GitHub는 NOASSERTION). 의존성 미검증 → 부분/미검증 |
+| CLI adapter 지원 | 제공 어댑터 없음. 이음새: `JSONGenerator`(`GenerateJSON`). 보고서는 `claude -p` 어댑터를 약 10줄 구현으로 봄. shim 불필요 | 제공 어댑터 없음. 이음새: `WithCompileProvider`(compile에만 적용), 질의 시점 LLM 호출은 설정 기반이라 OpenAI 호환 shim 폴백 필요 | **제공됨**: `claude -p`와 `codex exec` 어댑터(격리 플래그 포함). 이음새 `Reasoner`. 실제 격리 여부 미검증 | **제공됨**: Claude Agent SDK 어댑터(`tools: []`)와 `codex exec` 어댑터(빈 임시 cwd, win32 분기). 이음새 `LLMProvider`. 실행 미검증 | 제공 어댑터 없음. 이음새: LangChain `BaseChatModel` 하위 클래스를 직접 작성 |
 | 위험 | CHANGELOG 255 KB, 15개월에 v2.157(API 변동 극심), 기여자 4명, 코딩 에이전트 기억 지향 | 1.0 이전("버전 고정" 권고), 주입 경로는 compile에 한정, 트리플 추출을 켜면 문서당 LLM 호출 1회 추가 | 11주 된 프로젝트, stars 신뢰 낮음, KG 아님 | Node >=24 요구(Electron 번들 Node와 호환 미검증), 표면적이 커서 fork 비용 큼 | LangChain 의존성 무게, 연구 코드 성격, JSON 저장 확장성 |
 
 ### 3.2 최종 후보군의 근거 링크
@@ -187,10 +269,12 @@ Python 후보 3개 모두 최근에 Windows 파일 잠금·원자적 쓰기·네
 
 ### 3.3 기각한 대안과 결정적 이유 (한 가지씩)
 
+각 프로젝트의 URL, SHA, 라이선스, stars는 3.0절 표에 있다. 이 표의 사실은 수집 보고서 기준이다.
+
 | 프로젝트 | 결정적 이유 |
 |---|---|
 | mem0 | 사실 문장 단위 기억이며 코드에 유효 구간·근거 span이 없고 Wiki 계층이 없다. 저장소는 교체형 벡터 저장소이지 권위 있는 그래프가 아니다 |
-| microsoft/graphrag | 삭제된 입력을 계산하지만(`incremental_index.py:55-56`) `packages/`의 다른 곳에서 쓰지 않아 파생 지식이 제거되지 않는다. 일괄 parquet 파이프라인 |
+| microsoft/graphrag | 삭제된 입력을 계산하지만(`microsoft/graphrag` @ `34b2b67ae460`의 `incremental_index.py:55-56`) `packages/`의 다른 곳에서 쓰지 않아 파생 지식이 제거되지 않는다. 일괄 parquet 파이프라인 |
 | nano-graphrag / fast-graphrag | 휴면(마지막 commit 2026-01-27 / 2025-11-01)이며 삭제·근거 모델이 없다 |
 | HippoRAG | 검색 연구 코드. 삭제해도 다른 chunk의 triple·개체가 남고 시간·근거 모델이 없다 |
 | R2R, memobase, kotaemon | 6~13개월 휴면 |
@@ -229,7 +313,7 @@ Python 후보 3개 모두 최근에 Windows 파일 잠금·원자적 쓰기·네
 | electron-builder | 26.18.0, 2026-10-20 | MIT | 해당 없음(빌드 도구) | 열린 이슈 50. 최근 30일 사람 commit 62건이 1인 + 봇(사실상 버스 팩터 1). v27 문서에 publisherName·검증 관련 호환성 깨짐 예고 | MIT | 낮음~중간 |
 | electron-updater | npm 6.8.11(2026-10-20), GitHub 태그 6.8.12(2026-10-26) | MIT | 해당 없음(런타임 라이브러리). Windows 자동 업데이트 대상은 **NSIS만**, Squirrel.Windows 미지원(ebdoc auto-update.md) | electron-builder와 같은 저장소 | MIT. 제공처는 GitHub Releases, S3, R2, 일반 HTTPS, Keygen. Authenticode 서명자를 `publisherName`과 대조하며 미서명 업데이트는 `verifyUpdateCodeSignature:false` 없이는 실패(ebdoc code-signing-win.md) | 낮음~중간 |
 | Electron Forge | 8.0.1, 2026-09-29 | MIT | 해당 없음 | 열린 이슈 266, 최근 90일 commit 28건이 1인 + 봇 | maker는 squirrel, wix(MSI), msix, appx, zip이며 **NSIS maker 없음**(`gh:electron/forge` `packages/maker`). 자동 업데이트는 Squirrel.Windows/update.electronjs.org(maker 구성에서의 추정) | 낮음~중간 |
-| Tauri(대안) | CLI 2.12.6, 2026-11-18 | Apache-2.0 OR MIT | 있음(Rust 빌드, WebView2 필요, 오프라인 부트스트래퍼 모드는 [문서](https://v2.tauri.app/distribute/windows-installer/)) | 열린 이슈 1,487 | 허용적 | 중간(5절 "이 조사가 강제하는 결정" 8번) |
+| Tauri(대안) | CLI 2.12.6, 2026-11-18 | Apache-2.0 OR MIT | 있음(Rust 빌드, WebView2 필요, 오프라인 부트스트래퍼 모드는 [문서](https://v2.tauri.app/distribute/windows-installer/)) | 열린 이슈 1,487 | 허용적 | 중간(4.7절 "이 조사가 강제하는 결정" 8번) |
 | Windows 코드 서명 | — | — | — | — | (a) 평판을 쌓으려면 공개 신뢰 Authenticode가 필요하고 2024년부터 OV와 EV를 SmartScreen이 같게 취급(MS-SS, ebdoc). (b) OV는 CI에서 쓸 수 있는 `.pfx`, EV는 내보낼 수 없는 하드웨어 토큰(ebdoc). (c) Microsoft **Artifact Signing**(구 Trusted Signing): 공개 신뢰는 미국·캐나다·EU·영국·호주·뉴질랜드·일본·**대한민국**·싱가포르·스위스·노르웨이·이스라엘의 조직에 제공, 개인 개발자는 미국·캐나다만(MS-AS). electron-builder의 `win.sign.type:"azure"`는 **Beta**(ebdoc). (d) 평판은 파일 해시+게시자 인증서로 쌓이며 즉시 우회되는 인증서 종류는 없다. 서명 안 한 파일은 빌드마다 평판이 다시 시작(MS-SS) | 중간: 첫 릴리스의 SmartScreen 경고는 인증서 구매만으로 없앨 수 없음 |
 
 ### 4.2 UI
@@ -280,13 +364,13 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 |---|---|---|---|---|---|---|
 | @huggingface/transformers (Transformers.js) | 4.3.2, 2026-10-27 | Apache-2.0 | `onnxruntime-node` **1.30.0**에 고정(1.31.1 존재). 1.31.1 tarball은 전 플랫폼 합쳐 307,626,018 B | 2026-11-18 push, 열린 이슈 305. Electron 관련 열린 이슈 #895, #1240, #487 | 모델은 실행 중 HF에서 받음(미리 넣으려면 `env.localModelPath`, 추정) | 중간: Electron 패키징 이슈, 네이티브 `sharp` 의존 |
 | onnxruntime(Python) | 1.32.0, 2026-11-13 | MIT | cp311~cp314 win_amd64 16.7 MB | 활발(Microsoft) | MIT | 낮음 |
-| fastembed(Python, qdrant) | 0.9.1, 2026-10-24 | Apache-2.0 | onnxruntime 기반, torch 없음, Python >=3.11 | 열린 이슈 124 | 내장 다국어: `intfloat/multilingual-e5-large`(2.24 GB), `paraphrase-multilingual-MiniLM-L12-v2`, `paraphrase-multilingual-mpnet-base-v2`. e5-small/base와 bge-m3는 `add_custom_model`로만 | 낮음 |
+| fastembed(Python, qdrant) | 0.9.1, 2026-10-24 | Apache-2.0 | onnxruntime 기반, torch 없음, Python >=3.10(PyPI 0.9.1 메타데이터 기준. 수집 보고서는 저장소 pyproject에서 >=3.11로 읽어 두 값이 다름) | 열린 이슈 124 | 내장 다국어: `intfloat/multilingual-e5-large`(2.24 GB), `paraphrase-multilingual-MiniLM-L12-v2`, `paraphrase-multilingual-mpnet-base-v2`. e5-small/base와 bge-m3는 `add_custom_model`로만 | 낮음 |
 | fastembed(npm) | 3.0.0, 2026-09-24 | MIT | onnxruntime-node 1.21.0(오래된 고정) | 1 star, 원 저장소 보관, qdrant-labs로 이전. 다국어는 e5-large뿐 | MIT | 중간~높음 |
 | sentence-transformers | 6.3.0, 2026-11-11 | Apache-2.0 | torch 기반(Windows torch 2.15.0 wheel 126.7 MB) | 활발(HF) | 패키징 비용이 가장 큼 | 중간(크기) |
 
 모델(한국어 수치는 KURE 팀이 쓴 KURE-card의 한국어 검색 데이터셋 8종 평균 NDCG이며, 이 팀이 KURE/KoE5를 직접 공개·배포하므로 참고용이고 독립 재현은 없다. 카드의 Top-k 3 표 제목이 `_top1`로 잘못 적혀 있다):
 
-| 모델 | 라이선스 | 파라미터 | 차원 | 최대 토큰 | ONNX | 번들 가능 | 한국어 nDCG (top1/top3) |
+| 모델 | 라이선스 | 파라미터 | 차원 | 최대 토큰 | ONNX | 번들 가능(라이선스 표기 기준) | 한국어 nDCG (top1/top3) |
 |---|---|---|---|---|---|---|---|
 | BAAI/bge-m3 | MIT | HF API에 없음(XLM-R-large 급 약 568 M, 추정) | 1024 | 8194 | 저장소 내 fp32 2,267 MB, 커뮤니티 `onnx-community/bge-m3-ONNX`(MIT) int8 568 MB, q4 1,248 MB | 예 | 0.598 / 0.646 |
 | nlpai-lab/KURE-v1 (bge-m3 한국어 미세조정) | MIT | 567,754,752 | 1024 | 8194 | ONNX 없음(제3자 GGUF만). 같은 구조라 직접 변환 가능(추정) | 예(MIT). 학습 데이터 라이선스 미확인 | 0.6055 / 0.6554 |
@@ -310,7 +394,7 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 
 | 구성요소 | 버전·날짜 | 라이선스 | Win x64 | 유지보수 | 재배포 조건·크기 | 위험 |
 |---|---|---|---|---|---|---|
-| PyInstaller | 6.22.3, 2026-09-12 | GPL-2.0-or-later WITH Bootloader-exception(PyPI 설명이 상용 포함 비자유 프로그램 배포를 허용한다고 명시) | 있음: `win_amd64` wheel 1.5 MB(부트로더 포함) | 2026-11-17 push, 열린 이슈 119 | 산출물은 GPL에 묶이지 않음. 묶인 제3자 라이브러리는 각자 라이선스 유지. Python 3.8~3.15 | 낮음 |
+| PyInstaller | 6.22.3, 2026-09-12 | GPL-2.0-or-later WITH Bootloader-exception(PyPI 설명이 상용 포함 비자유 프로그램 배포를 허용한다고 명시) | 있음: `win_amd64` wheel 1.5 MB(부트로더 포함) | 2026-11-17 push, 열린 이슈 119 | PyPI 설명과 부트로더 예외 문구상 산출물이 GPL에 묶이지 않는 것으로 읽힘(라이선스 표기 판독이며 법률 검토 아님). 묶인 제3자 라이브러리는 각자 라이선스 유지. Python 3.8~3.15 | 낮음 |
 | Nuitka | 4.3.5, 2026-11-08 | 컴파일러 **AGPL-3.0** + 런타임 예외(`LICENSE-RUNTIME.txt`) | 있음(빌드 머신에 MSVC 또는 MinGW 필요, 추정) | 2026-11-21 push | 컴파일된 산출물이 면제되는지는 런타임 예외에 달려 있으며 법적으로 확인하지 않음 | 중간(라이선스 검토 필요) |
 | python-build-standalone | release 20261110 (`astral-sh`) | MPL-2.0(저장소), CPython은 PSF-2.0(추정) | 있음: `cpython-3.12.16+20261110-x86_64-pc-windows-msvc-install_only.tar.gz` 47,438,699 B, `install_only_stripped` 22,365,213 B | 2026-11-20 push, Astral 관리 | 옮길 수 있는 인터프리터 + site-packages로 배포(동결 단계 없음). 빌드 시 uv 0.13.9(Apache-2.0) 사용 가능 | 낮음~중간 |
 
@@ -322,12 +406,12 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 2. EmbeddingGemma는 Gemma 이용 조건을 제품 EULA에 전달하고 Notice 파일을 둘 때만 번들 가능하다. 기본값이 아니라 **사용자가 선택해 내려받는 옵션**으로 다룬다.
 3. **Kuzu는 주 저장소가 될 수 없다**(보관됨). 대체는 LadybugDB뿐이고 0.x이므로 그래프 계층은 어댑터 뒤에 두고 권위 있는 상태를 내보낼 수 있어야 한다(Wiki·검색은 다시 만들 수 있는 투영이라는 PKI 규칙과 맞음).
 4. **네이티브 모듈은 서명·패키징 계획이 따로 필요하다.** sqlite-vec 이슈 #368은 서명 없는 `vec0.dll` 차단 사례다. better-sqlite3 `.node`, onnxruntime, LanceDB, Ladybug 바이너리, Python 사이드카 실행 파일도 같은 위험이 있다. electron-builder가 번들된 모든 DLL·`.node`를 서명하는지는 확인이 필요하다(미검증).
-5. **SmartScreen은 첫 릴리스에서 완전히 피할 수 없다.** OV와 EV는 같고 평판은 해시·게시자로 쌓인다. 안정된 서명 정체성 하나를 쓴다. Artifact Signing은 한국 **조직**에는 제공되나 한국 **개인**에는 제공되지 않는다(개인은 미국·캐나다만). 한국의 개인 개발자는 전통 OV 인증서가 필요하다.
+5. **SmartScreen은 첫 릴리스에서 완전히 피할 수 없다.** OV와 EV는 같고 평판은 해시·게시자로 쌓인다. 안정된 서명 정체성 하나를 쓴다. Artifact Signing은 한국 **조직**에는 제공되나 한국 **개인**에는 제공되지 않는다(개인은 미국·캐나다만). 한국의 개인 개발자가 쓸 수 있는 경로로 보고서는 전통 인증 기관의 OV 인증서를 추정했으나, 개인에게 OV가 발급되는지는 확인하지 않았다(미검증).
 6. **자동 업데이트가 패키저를 정한다**: electron-updater는 Windows에서 NSIS에서만 동작하는 경로를 지원하므로 electron-builder + NSIS가 지원되는 길이고 Forge에는 NSIS maker가 없다. 업데이트 검증은 게시자 DN이 서명 인증서와 일치해야 한다.
 7. **임베딩 런타임이 사이드카 필요 여부를 가른다**: Node만 쓰는 임베딩(Transformers.js → onnxruntime-node 1.30.0 고정)은 벡터에 Python 사이드카가 필요 없지만 Docling(torch)은 Python 사이드카를 강제한다. Python은 핵심 의존성이 아니라 선택적 "문서 처리" 사이드카로 둔다.
 8. **Tauri로 바꿔도 사이드카 문제는 사라지지 않는다**: 외부 바이너리를 지원하지만 Node 백엔드는 여전히 별도 바이너리로 넣어야 하고 UI는 번들 Chromium 대신 WebView2에서 돈다(문서 구조에서의 추정). 절약은 Electron 런타임 약 158 MB뿐이고 Rust와 WebView2 처리가 추가된다.
 9. **SheetJS는 npm이 아니라 CDN tarball**에서 받아야 한다. 그러지 않으면 2022년 코드가 배포된다.
-10. **한국어 품질은 bge-m3와 그 미세조정(KURE-v1)에 몰려 있다.** 공개된 유일한 한국어 표에서 e5-base 0.545 대 bge-m3 0.598이다. 저렴한 CPU 경로(e5-small int8 118 MB)는 검증된 한국어 수치가 없다.
+10. **한국어 품질은 bge-m3와 그 미세조정(KURE-v1)에 몰려 있다.** 이 조사에서 찾은 한국어 표(KURE-card, KURE 팀 자체 보고)에서 e5-base 0.545 대 bge-m3 0.598이다. 독립 벤치마크는 조회하지 않았다. 저렴한 CPU 경로(e5-small int8 118 MB)는 KURE-card에 한국어 수치가 없다.
 11. **처음 실행 시 모델 내려받기(Docling, Transformers.js 기본값)는 "오프라인 설치 파일 하나"를 깨뜨린다**: 가중치를 설치 파일이나 설치 후 팩에 미리 넣어야 한다.
 
 ### 4.8 그룹별 기본값과 차선 (잠정)
@@ -339,12 +423,12 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 | UI | Vite 8 + React 19 + shadcn/ui(복사된 MIT 코드) | Radix/Base UI primitive 직접 사용 | 전부 MIT, 런타임 라이선스 의존 없음 |
 | E2E | Playwright `_electron`(실험적) | WebdriverIO/Spectron 계열(미조사) | 실험적임을 명시 |
 | 임베디드 저장소 | better-sqlite3 13 + sqlite-vec 또는 작은 코퍼스용 앱 수준 전수 코사인 비교. **벡터는 다시 만들 수 있게 유지** | LanceDB 0.41(Apache-2.0, win-x64 바이너리, 더 큼) | SQLite는 안정적이고 미리 빌드됨. 벡터 계층 위험(sqlite-vec은 사실상 방치 우려)은 격리 |
-| 그래프(필요할 때) | LadybugDB(`@ladybugdb/core` / `ladybug`)를 어댑터 뒤에 | DuckDB 2.0(관계형, MIT, Cypher 없음) | win-x64 바이너리가 있는 유일한 Kuzu 계보. 젊으므로 격리 |
+| 그래프(필요할 때) | LadybugDB(`@ladybugdb/core` / `ladybug`)를 어댑터 뒤에 | DuckDB 2.0(관계형, MIT, Cypher 없음) | win-x64 바이너리가 있는 유지되는 Kuzu 계보(보고서 표현: "only maintained"). 젊으므로 격리 |
 | node:sqlite | 아직 채택하지 않음 | better-sqlite3 | 릴리스 후보 단계, 확장 로딩 미검증 |
 | 문서 파싱 | 형식별 가벼운 파서: pdfjs-dist(PDF), mammoth(DOCX), SheetJS CDN 또는 read-excel-file(XLSX), 나머지는 내장. 레이아웃이 복잡한 PDF에는 선택적 Docling 사이드카 | 형식별 extra를 고른 MarkItDown(Python) | 기본값에서 torch를 피함. Docling은 품질 옵션이지만 모델 358 MB + torch |
-| 임베딩 | BAAI/bge-m3(MIT) int8 ONNX 568 MB(Node의 ORT 또는 fastembed 사용자 정의 모델) | multilingual-e5-base int8(279 MB) 또는 snowflake-arctic-embed-l-v2.0 int8(570 MB, Apache-2.0, 한국어 0.594) | 번들 가능한 모델 중 검증된 한국어 점수가 가장 높고 MIT이며 ONNX가 저장소에 있고 8K 토큰. KURE-v1은 직접 변환하면 더 나은 한국어 상위 호환 |
+| 임베딩 | BAAI/bge-m3(MIT) int8 ONNX 568 MB(Node의 ORT 또는 fastembed 사용자 정의 모델) | multilingual-e5-base int8(279 MB) 또는 snowflake-arctic-embed-l-v2.0 int8(570 MB, Apache-2.0, 한국어 0.594) | ONNX가 이미 제공되는 번들 가능 모델 중 KURE-card 자체 보고 점수가 가장 높고 MIT이며 8K 토큰. KURE-v1(0.6055)과 BGE-m3-ko(0.604)는 점수가 비슷하거나 약간 높으나 ONNX가 없어 직접 변환이 필요하다 |
 | 임베딩 런타임 | Node의 Transformers.js 4(onnxruntime-node), Python 없음 | fastembed Python + onnxruntime | 기본 제품에서 Python을 없앰. fastembed가 더 잘 지원되는 대안 |
-| Python 번들링 | python-build-standalone(`install_only_stripped`) + 빌드 시 uv(사이드카가 필요할 때만) | PyInstaller 6.22(GPL+예외) | 옮길 수 있는 인터프리터가 네이티브 wheel과의 동결 취약성을 피함. PyInstaller는 라이선스상 안전 |
+| Python 번들링 | python-build-standalone(`install_only_stripped`) + 빌드 시 uv(사이드카가 필요할 때만) | PyInstaller 6.22(GPL+예외) | 옮길 수 있는 인터프리터가 네이티브 wheel과의 동결 취약성을 피함. PyInstaller는 라이선스 표기상 문제가 보이지 않음(법률 검토 아님) |
 
 이 기본값은 Windows에서 실행해 보기 전의 잠정값이다. 모든 수치(크기, 버전)는 레지스트리·API 읽기 결과이며 설치·빌드·실행을 하지 않았다.
 
@@ -362,16 +446,16 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 | graphiti | **기각**(엔진으로) | 설계 참고만 |
 | memind | **기각** | — |
 | ddsyasas/llm-wiki | **기각**(기반으로) | Wiki 계층 대안 있음 |
-| Astro-Han/karpathy-llm-wiki | **참고 패턴만** | 구성요소 아님 |
+| Astro-Han/karpathy-llm-wiki | **기각**(엔진·구성요소로는 채택하지 않음) | 참고 용도: 근거 확인 스크립트 아이디어 |
 | cortexdb (Go, MIT) | **보류** | 시간 그래프 저장 계층 후보, R03-C4에서 제품 소유 SQLite 스키마와 비교 |
-| tigerless-labs/agent-memory | **참고 구현** | R02 입력, 엔진으로 채택 안 함 |
-| Hyper-Extract | **참고** | 원본 단위 정확 제거 설계 |
+| tigerless-labs/agent-memory | **기각**(엔진·구성요소로는 채택하지 않음) | 참고 용도: `claude -p`/`codex exec` 어댑터와 격리 플래그(R02 입력). 대안: 보류 후보 3개 |
+| Hyper-Extract | **기각**(엔진·구성요소로는 채택하지 않음) | 참고 용도: 원본 단위 정확 제거 설계. 대안: 보류 후보 3개 |
 | llm-wiki-compiler (TS, MIT) | **보류** | K01에서 재평가 |
 
 **LightRAG: 보류 — R03 실행 후보 1.**
 - 강점: 호출 가능한 LLM·embedding·tokenizer 주입(E3.2, E3.3), MIT(E3.1), Windows 전용 코드 경로(E3.8), 추출 캐시로 영향받은 항목을 재구성하는 삭제(E3.5).
 - 공백: 시간 유효성 없음(E3.9), 갱신은 삭제 후 재수집(E3.6), 파일 기반 저장소는 문서가 "소규모 테스트용"이라고 적음(E3.4), 근거는 chunk 단위(일부 chunker의 span 보조 파일은 조건부, E3.9). 기본 tokenizer가 처음 쓸 때 네트워크에서 파일을 받으므로 오프라인 번들이 필요하다.
-- 탈락 조건 4개 중 소스상 걸리는 것은 없다. 단 ①은 부분(코드 경로만), 전부 실행 전이다.
+- 탈락 조건 4개 중 확인한 범위에서 걸리는 것은 없다. 단 ①은 부분(코드 경로만), ④는 부분(선언 직접 의존성 19개 중 9개만 확인), 전부 실행 전이다.
 
 **cognee: 보류 — R03 실행 후보 2.**
 - 강점: chunk 단위 diff `update()`(E1.7), `forget()`(E1.8), edge → chunk 근거(E1.9), 임베디드 SQLite/LanceDB/Ladybug(E1.2).
@@ -382,8 +466,12 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 - 미검증 항목과 성숙도 위험(모두 R03 체크리스트에 있음): 트리플·해소·온톨로지 단계가 주입한 LLM provider를 쓰는지(compile 클라이언트 생성만 추적됨), 질의 시 expand/rerank가 설정 기반으로 남음(CLI-only 환경에서 별도 shim 필요 가능), 원본 삭제 시 온톨로지 edge·개체 연쇄 삭제, 프로세스 내 CPU embedder 번들 여부, 한국어 품질, Windows 실행. 659 stars, 기여자 14명, 1.0 이전이며 "버전 고정"을 권고한다.
 
 **graphiti: 기각(엔진으로).**
-- 이유: 쓸 수 있는 임베디드 저장소가 Windows에 없다. falkordblite에 Windows wheel이 없고 SSPL FalkorDB를 내장하며(E2.3), 기본값은 Neo4j 서버(GPL-3.0)이고, Kuzu 드라이버는 2026-11-15에 제거되었다(E2.2). 탈락 조건 ①②④에 걸린다.
-- 보존: 양시간 edge 모델(`valid_at`, `invalid_at`, `expired_at`, E2.5)은 **설계 참고**로 남긴다.
+- 경로별로 걸리는 탈락 조건:
+  - 고정 HEAD의 Neo4j 서버 경로(기본값): ② 서버 필요, 서버 라이선스는 GPL-3.0이라 ④(E2.2, E2.3).
+  - HEAD의 falkordblite 경로: ① Windows wheel 없음(WSL만 안내), ④ 안에 든 FalkorDB가 SSPL v1(E2.3). HEAD에서 Kuzu 드라이버는 제거되었다(E2.2).
+  - release v0.31.2의 Kuzu 경로: 서버 없이 Windows에 설치할 수 있는 경로가 존재한다(Kuzu MIT, win_amd64 wheel). 그러나 그 드라이버는 deprecated이고 보관된 Kuzu 위에 있으며 Windows 충돌 이슈 #1469가 있었고 upstream이 제거했다. 걸리는 탈락 조건은 없지만 ③ 이전에 유지보수가 끊긴 길이다.
+- **결정적 이유**: "임베디드 저장소가 한 번도 없었다"가 아니라, 유지되는 서버 없는 Windows 경로가 없다는 점이다. 옛 release에 고정하면 upstream이 버린 경로를 채택하는 것이 된다.
+- 보존: 양시간 edge 모델(`valid_at`, `invalid_at`, `expired_at`, E2.5)은 **설계 참고**로 남긴다. 이 참고는 엔진 채택이 아니다.
 - 대안: 위 보류 후보 3개.
 
 **memind: 기각.**
@@ -394,13 +482,13 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 - 이유: 임베딩이 없고(E5.2), 삭제 라우트가 파생 페이지를 남기며(E5.5), 90일간 commit이 없다(E5.6). 탈락 조건 ③에 걸린다.
 - Wiki 계층 대안: llm-wiki-compiler(TypeScript, MIT)는 **보류**하고 K01에서 재평가한다(`rm`이 원본과 파생 페이지를 함께 지운다고 문서에 적혀 있으나 실행하지 않음, 시간 모델 없음, Node >=24 요구). 엔진 후보 중 sage-wiki가 R03를 통과하면 Wiki 계층도 함께 얻는다.
 
-**Astro-Han/karpathy-llm-wiki: 참고 패턴만.** 구성요소가 아니다. 증거 확인 스크립트(`Raw` 필드와 근거 문자열 대조) 아이디어만 참고한다(E6.1, E6.3). 삭제와 증분 갱신은 의도적으로 범위 밖이다.
+**Astro-Han/karpathy-llm-wiki: 기각(엔진·구성요소로는 채택하지 않음).** 참고 용도만 남긴다. 대안(엔진): 보류 후보 3개, (Wiki 계층): llm-wiki-compiler. 증거 확인 스크립트(`Raw` 필드와 근거 문자열 대조) 아이디어만 참고한다(E6.1, E6.3). 삭제와 증분 갱신은 의도적으로 범위 밖이다.
 
-**cortexdb (Go, MIT): 보류.** 시간 그래프 저장 계층 후보로서, 제품이 소유하는 평범한 SQLite 스키마와 R03-C4에서 비교한다. 장점은 양시간 사실, 사실별 근거, 문서 단위 삭제, LLM 없는 코어, 순수 Go SQLite, 키 경로 없음이다. 성숙도 위험이 크다(15개월에 v2.157, 기여자 4명, CHANGELOG 255 KB). 삭제 시 시간 이력이 지워지는지, 인용이 span인지 chunk인지 미검증이다.
+**cortexdb (Go, MIT): 보류.** 시간 그래프 저장 계층 후보로서, 제품이 소유하는 평범한 SQLite 스키마와 R03-C4에서 비교한다. 장점은 양시간 사실, 사실별 근거, 문서 단위 삭제, LLM 없는 코어, 순수 Go SQLite, 키 경로 없음이다. 성숙도 위험이 크다(15개월에 v2.157, 기여자 4명, CHANGELOG 255 KB). 삭제 시 시간 이력 행이 남는 것으로 읽히는 점(GUIDE L543-L547)이 ③과 충돌하는지, 인용이 span인지 chunk인지 미검증이다.
 
-**tigerless-labs/agent-memory: 참고 구현.** `claude -p` / `codex exec` 어댑터와 격리 플래그(`--strict-mcp-config --tools ""`, `--ephemeral --ignore-user-config --ignore-rules --sandbox`)가 R02 입력이 된다. 삭제는 소프트 삭제뿐이라("삭제해도 파일이 남는다") 엔진으로는 채택하지 않는다.
+**tigerless-labs/agent-memory: 기각(엔진·구성요소로는 채택하지 않음).** 대안: 보류 후보 3개. 참고 용도: `claude -p` / `codex exec` 어댑터와 격리 플래그(`--strict-mcp-config --tools ""`, `--ephemeral --ignore-user-config --ignore-rules --sandbox`)가 R02 입력이 된다. 삭제는 소프트 삭제뿐이라("삭제해도 파일이 남는다") 엔진으로는 채택하지 않는다.
 
-**Hyper-Extract: 참고.** `remove_source(..., "exact")`의 원본 단위 정확 제거 설계(단독 기여 키 삭제, 공유 키 재병합)를 참고한다. 근거 span이 없고 시간은 프롬프트 수준이다.
+**Hyper-Extract: 기각(엔진·구성요소로는 채택하지 않음).** 대안: 보류 후보 3개. 참고 용도: `remove_source(..., "exact")`의 원본 단위 정확 제거 설계(단독 기여 키 삭제, 공유 키 재병합)를 참고한다. 근거 span이 없고 시간은 프롬프트 수준이다.
 
 ### 5.2 스택 기본값과 차선
 
@@ -419,7 +507,17 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 
 아래는 R06 전까지 바뀔 수 있는 잠정 판단이다. 확정된 결정이 아니다.
 
-1. **가설: 제품이 권위 있는 Knowledge/Evidence 기록을 SQLite에 두고, 엔진은 다시 만들 수 있는 추출·검색 투영으로 쓴다.** 조사한 어떤 엔진도 시간 유효성, 원문 span 수준의 근거, 사용자 교정 보존, 삭제 계보(lineage)를 한꺼번에 제공하지 않는다. 그래서 R03은 "제품이 권위를 가진다"는 가설과 "엔진이 권위를 가진다"를 비교해 시험해야 한다. **이것은 시험할 가설이지 결정이 아니다.** 이것이 금지된 "엔진 직접 재구현"이 아닌 이유는 기록(레코드)을 저장할 뿐 그래프·벡터 알고리즘을 구현하지 않기 때문이다. 쉬운 비유로, 엔진이 도서관 검색대라면 제품은 원본 장부를 직접 갖고 검색대는 장부에서 언제든 다시 지을 수 있는 색인으로 두는 것이다. 비유가 맞지 않는 점은, 검색대가 장부와 어긋났을 때 무엇이 옳은지를 판정하는 규칙(재구축 절차)을 제품이 따로 정의해야 한다는 것이다.
+1. **R06에서 풀어야 할 긴장: 권위 있는 기록을 제품이 가질 것인가, 엔진이 가질 것인가.** 아직 가설이며 결정이 아니다.
+   - 발견한 공백(실제로 표로 비교한 축만): 시간 유효성, 원문 span 수준의 근거, 삭제 시 파생물 제거를 모두 갖춘 엔진은 6개 후보 + 최종 후보군에서 찾지 못했다. graphiti만 시간 유효성이 있고, 삭제는 부분, 근거는 episode 단위다. sage-wiki와 cortexdb는 근거·양시간·원본 삭제가 소스에 있으나 실행으로 확인하지 못했고 각각 미검증 항목이 있다(3.1절). **사용자 교정 보존은 이번 조사에서 평가하지 않았다(미평가).**
+   - 가설: 제품이 Knowledge/Evidence 기록을 SQLite에 두고 엔진은 다시 만들 수 있는 추출·검색 투영으로 쓴다. R03은 이것과 "엔진이 권위를 가진다"를 같은 조건에서 시험해야 한다.
+   - 원 설계 문장과의 충돌 가능성(R06 입력으로 그대로 인용):
+     - [69행] "특히 Knowledge Engine, Graph, Vector, LLM Wiki, Memory Management를 독자적으로 다시 구현하지 않는 것을 원칙으로 한다."
+     - [945행] "기존 Knowledge Engine이 동일 기능을 제공한다면 중복 저장소를 추가하지 않는다."
+     - [947행] "저장소별 Single Source of Truth를 명확히 정의한다."
+     - [532~536행] Knowledge Graph 기능으로 "사실의 시간 및 유효 기간 관리", "관계별 근거 추적", "기존 사실의 변경 및 대체", "상충되는 정보 관리", "원본 삭제 시 파생 지식 갱신"을 든다. 제품이 이를 담은 별도 기록을 소유하면 같은 기능을 엔진과 제품이 둘 다 갖게 될 수 있다.
+     - 반대로 [540행]은 "Embedded Graph Storage 또는 기존 Knowledge Engine의 로컬 저장소를 우선 사용한다"고 한다.
+   - 이것이 금지된 "엔진 재구현"에 해당하는지는 여기서 단정하지 않는다. 기록(레코드)을 저장하는 것과 그래프·벡터 알고리즘을 구현하는 것은 다르다는 해석이 가능하지만, 위 945행의 "중복 저장소" 조항이 기록 중복을 막는 뜻인지는 사용자가 R06에서 판단할 문제다.
+   - 쉬운 비유: 엔진이 도서관 검색대라면 제품이 원본 장부를 직접 갖고 검색대를 장부에서 다시 지을 수 있는 색인으로 두는 설계다. 비유가 맞지 않는 점은, 검색대와 장부가 어긋났을 때 무엇이 옳은지 판정하는 규칙(재구축 절차)을 제품이 따로 정의해야 한다는 것이다.
 2. **사이드카 언어가 열린 질문이 되었다.** Python(LightRAG, cognee), Go 단일 바이너리(sage-wiki, cortexdb), 사이드카 없음 중에서 R03 결과로 정한다. Go 후보는 Python 번들링·torch 문제를 피하지만 성숙도 위험이 있다.
 3. **설치 파일 안의 네이티브 바이너리는 서명이 필요하고, 첫 릴리스에서 SmartScreen 경고는 완전히 피할 수 없다.** 자동 업데이트를 하려면 NSIS(electron-builder)를 써야 한다(4.7의 4~6번).
 4. **Kuzu는 보관됨이므로 LadybugDB는 어댑터 뒤에서만 쓴다.** 0.x이고 패키지 이름이 여러 개이며 Windows 실행은 미검증이다.
@@ -429,6 +527,7 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 판정에 영향을 주는 모든 미검증 항목이다. 모두 지금은 "소스에 있음" 또는 "추정"이며 실행한 적이 없다.
 
 **공통**
+- [ ] ④ 의존성 라이선스(보류 후보 5개 전부): cognee 미확인 직접 의존성 약 36개, LightRAG 미확인 10개, sage-wiki와 cortexdb의 `go.mod`, llm-wiki-compiler의 `package.json`. 이후 전이 의존성과 번들할 모델 가중치.
 - [ ] 깨끗한 Windows 11에서 각 후보의 설치·import·실행(전 판정의 ①). 설치 파일 포장 후에도 같은지.
 - [ ] 후보별 문서당 LLM 호출 수와 지연 측정(chunk 수·보충 추출·병합 요약 빈도, graphiti의 조건부 단계).
 - [ ] 한국어 임베딩 품질과 모델 가용성, 모델 라이선스·내려받기 동작(fastembed, tiktoken, GLiNER 포함). 한국어 문서에서 추출·검색 품질.
@@ -458,7 +557,7 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 - [ ] Windows release 산출물의 실행, 1.0 이전 API 변동.
 
 **cortexdb(R03-C4)**
-- [ ] 삭제가 시간 이력 행을 지우는지 표시만 하는지.
+- [ ] 문서 삭제 뒤 이력 행(`graph_*_history`, 사유 `document_deleted`)이 남는지 지워지는지: 남는다면 삭제 시 파생물 제거(③)와 어떻게 맞출지.
 - [ ] `FactProvenanceFor`의 인용이 문자 span인지 chunk 전체인지, `graphflow.Pipeline`의 내용 해시 증분 재수집.
 - [ ] 제품 소유 SQLite 스키마 대비 성능·유지 비용, API 안정성(v2.157/15개월).
 
@@ -483,12 +582,13 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 
 ## 8. 미검증 범위
 
+- 6개 후보는 모두 고정 HEAD 기준으로 판단했다. release와 HEAD가 다른 경우(graphiti의 Kuzu 드라이버, LightRAG HEAD 1.5.8rc 대 PyPI 1.5.7)가 있으므로 R03는 release와 HEAD 중 무엇을 실행할지 명시적으로 정해야 한다.
 - **아무것도 설치하거나 실행하지 않았다.** 모든 능력 표기는 문서·소스 읽기이며 Windows 11 동작은 후보와 스택 모두 미검증이다. cortexdb와 sage-wiki의 Windows release 산출물은 파일 이름으로 존재만 확인했다.
 - 라이선스는 PyPI 최신 release 기준이며 저장소가 고정한 버전과 다를 수 있다. 전이 의존성과 모델 학습 데이터 라이선스는 확인하지 않았다.
 - 90일 commit 수는 기본 브랜치 원시 개수이며 병합·봇을 포함한다. stars·기여자 수는 후보 6개 중 일부만 보고되었고(memind 906, llm-wiki 75, karpathy-llm-wiki 2,780), cognee·graphiti·LightRAG의 stars와 기여자 수는 수집하지 않았다.
 - 대안 조사는 GitHub 검색(+ swarmvault에 한해 npm)만 썼다. PyPI, GitLab, Codeberg, GitHub 밖 프로젝트는 검색하지 않았다. 대안 후보 중 Haystack, kotaemon, R2R, memobase, MemMachine, MemOS 서버 내부, doobidoo, Memori, NornicDB, SurfSense DB 계층, inkeep/open-knowledge, PandaWiki, Molio 라이선스 조항 전문은 코드를 열어 보지 않고 README·설명만으로 판단했다.
 - Hyper-Extract, Memori, TencentDB-Agent-Memory, WeKnora의 GitHub 라이선스 탐지는 NOASSERTION이며 LICENSE 본문만 첫 줄 수준으로 읽었다. 표준 본문과 비교하지 않았다.
-- 대안 후보 일부(Letta, Zep, R2R, memobase 등)의 SHA는 수집 시점 API HEAD의 12자이며, AnythingLLM은 수집 중 저장소가 바뀌어 복제본 SHA(`472b1e3f`)와 이전 API HEAD(`7e30580e`)가 다르다. AnythingLLM Windows 설치 프로그램 소스가 MIT 저장소에 포함되는지도 미검증.
+- 3.0절의 SHA 가운데 "미기록"은 수집 보고서에 값이 없다. AnythingLLM은 수집 중 저장소가 바뀌어 복제본 SHA(`472b1e3f`)와 이전 API HEAD(`7e30580e`)가 다르며, 3.0절에는 복제본 SHA를 적었다. AnythingLLM Windows 설치 프로그램 소스가 MIT 저장소에 포함되는지도 미검증.
 - 새로 생긴 저장소의 stars 증가 진위와 유지보수자 지속 가능성은 평가하지 않았다.
 - Tauri 사이드카 주장은 문서 제목에서의 추정이며 서명 문서는 자세히 읽지 않았다. Nuitka 산출물의 라이선스 영향은 법적 검토가 필요하다.
 - 제품의 최종 엔진·저장 구조 결정, 사이드카 언어 결정, CLI 구독 로그인 허용 여부는 이 문서의 범위가 아니다(R06, R02).
