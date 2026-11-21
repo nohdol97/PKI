@@ -17,6 +17,7 @@ import {
   productImporter,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
+import { seedV02 } from "./v02-seed.e2e.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
 const TOKEN = "c".repeat(43);
@@ -46,10 +47,14 @@ const requests: Partial<Record<RouteName, unknown>> = {
   setDefaultProvider: { providerId: "claude-code" },
   // The pack does not exist: the preparation starts, then fails without touching disk.
   prepareEmbedding: { source: { kind: "local-pack", path: "/synthetic/missing-pack" } },
+  // the seed below makes Insight 1 with evidence 1..3
+  insightEvidence: { insightId: 1 },
+  evidenceSource: { evidenceId: 1 },
 };
 
 beforeAll(async () => {
   migrate(db);
+  await seedV02(db, ["plain"]);
   const failing = () => ({
     ...connectorKinds["test-fixtures"](),
     getChanges: () => Promise.reject(new Error("connector broke")),

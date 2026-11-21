@@ -17,6 +17,7 @@ import type { ApiClient } from "./api.ts";
 import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
+import { Insights } from "./evidence-view.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
 import { componentText, embeddingText } from "./status-text.ts";
@@ -91,6 +92,8 @@ function Home({ api }: { api: ApiClient }) {
   const { data, error } = useRoute(api, "status");
   return (
     <>
+      <Insights api={api} />
+      <h2>상태</h2>
       <Failure error={error} />
       {data && (
         <table>

@@ -42,8 +42,11 @@ import {
 import {
   databaseEncryption,
   findSources,
+  listActiveInsights,
   listProviderCalls,
   listSources,
+  readEvidenceSource,
+  readInsightEvidence,
   readSetting,
   schemaVersion,
   writeSetting,
@@ -404,6 +407,12 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       return checking;
     },
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
+    // V02-R14: only active Insights; a hidden one does not open through its evidence either.
+    insights: async () => ({ insights: listActiveInsights(options.db) }),
+    insightEvidence: async ({ insightId }) =>
+      readInsightEvidence(options.db, insightId) ?? { error: "not-found" },
+    evidenceSource: async ({ evidenceId }) =>
+      readEvidenceSource(options.db, evidenceId) ?? { error: "not-found" },
   };
 }
 
