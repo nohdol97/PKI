@@ -66,15 +66,16 @@ function store(record: { title: string; body: string }): string {
 }
 
 /**
- * A job row, as V02's runner will queue one: the Broker calls it background. A job
- * names its source and fence version (V02-R3), once per kind and version (V02-R4),
- * so a second call for the same version returns the job already registered.
+ * A job row as the runner holds it while it calls: the Broker calls it background
+ * and accepts it only leased (V02-T03). A job names its source and fence version
+ * (V02-R3), once per kind and version (V02-R4), so a second call for the same
+ * version returns the job already registered.
  */
 function job(sourceVersionId: string): string {
   const target = "SELECT source_id, version FROM source_versions WHERE id = ?";
   db.run(
     `INSERT INTO jobs (kind, source_id, fence_version, status)
-     SELECT 'extract', source_id, version, 'queued' FROM (${target}) WHERE true ON CONFLICT DO NOTHING`,
+     SELECT 'extract', source_id, version, 'leased' FROM (${target}) WHERE true ON CONFLICT DO NOTHING`,
     [Number(sourceVersionId)],
   );
   return String(

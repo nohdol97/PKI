@@ -305,13 +305,14 @@ describe("broker.class: the Broker computes the data classification", () => {
 
 describe("broker.origin: the Broker decides the call kind from its records", () => {
   // A job is registered once per kind and source version (V02-R4), so a second
-  // call for the same version returns the job already registered.
-  function job(kind = "extract", sourceVersionId = store(synthA)): string {
+  // call for the same version returns the job already registered. The runner
+  // calls the Broker only while it holds the job's lease (V02-T03).
+  function job(kind = "extract", sourceVersionId = store(synthA), status = "leased"): string {
     const target = "SELECT source_id, version FROM source_versions WHERE id = ?";
     db.run(
       `INSERT INTO jobs (kind, source_id, fence_version, status)
-       SELECT ?, source_id, version, 'queued' FROM (${target}) WHERE true ON CONFLICT DO NOTHING`,
-      [kind, Number(sourceVersionId)],
+       SELECT ?, source_id, version, ? FROM (${target}) WHERE true ON CONFLICT DO NOTHING`,
+      [kind, status, Number(sourceVersionId)],
     );
     return String(
       db.all(`SELECT id FROM jobs WHERE kind = ? AND (source_id, fence_version) = (${target})`, [
@@ -421,6 +422,17 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
     expect(
       await broker.call({ ...extract([id]), origin: { jobId: job("connection-test", id) } }),
     ).toEqual({ status: "rejected", reason: "origin-mismatch" });
+  });
+
+  it("rejects a job record the runner does not hold leased: queued or closed", async () => {
+    // V01 "T07이 넘기는 것" 6: a used job record is decided with the lease (V02-T03)
+    for (const status of ["queued", "done", "superseded", "held", "failed"]) {
+      const id = store({ ...synthA, body: `${synthA.body} ${status}` });
+      expect(
+        await broker.call({ ...extract([id]), origin: { jobId: job("extract", id, status) } }),
+      ).toEqual({ status: "rejected", reason: "origin-not-leased" });
+    }
+    expect(provider.requests).toEqual([]);
   });
 
   it("issues unguessable record IDs and keeps no record on disk", async () => {

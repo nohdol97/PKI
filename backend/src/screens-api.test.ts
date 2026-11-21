@@ -139,7 +139,7 @@ describe("screen routes", () => {
   it("reads the settings, the encryption state read from the canonical file", async () => {
     expect((await call(routes.settings.path)).body).toEqual({
       dataDirectory: DATA_DIR,
-      schemaVersion: 5,
+      schemaVersion: 6,
       databaseEncryption: "not-applied",
       openaiCompatible: { baseUrl: null, model: null, host: null, keyName: null, key: null },
     });

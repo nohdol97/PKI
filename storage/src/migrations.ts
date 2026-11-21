@@ -353,8 +353,13 @@ const v5: Migration = (db) =>
     END;
   `);
 
+// Schema v6 (V02-T03): why a job was held or failed, as a code (never Provider
+// text), so the screen can show it (ARCHITECTURE section 7). Statuses: queued,
+// leased, done, superseded, held, failed (storage/src/jobs.ts).
+const v6: Migration = (db) => db.exec("ALTER TABLE jobs ADD COLUMN reason TEXT;");
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5];
+export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

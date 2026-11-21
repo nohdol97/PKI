@@ -40,15 +40,15 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(5);
-    expect(migrations).toHaveLength(5);
+    expect(schemaVersion(db)).toBe(6);
+    expect(migrations).toHaveLength(6);
   });
 
   it("is idempotent when re-run", () => {
     migrate(db);
     db.run("INSERT INTO settings (key, value) VALUES ('k', 'v')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(5);
+    expect(schemaVersion(db)).toBe(migrations.length);
     expect(db.all("SELECT value FROM settings")).toEqual([{ value: "v" }]);
   });
 
@@ -184,7 +184,7 @@ describe("schema v2 (V01-T04)", () => {
       "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (1, 'h', 't', 'b')",
     );
     migrate(db);
-    expect(schemaVersion(db)).toBe(5);
+    expect(schemaVersion(db)).toBe(migrations.length);
     expect(db.all("SELECT id, external_id FROM sources")).toEqual([{ id: 1, external_id: "e" }]);
     expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 1 }]);
     // A v1 source has no recorded kind; "unknown" is no upstream kind, so it never grades synthetic.
@@ -351,7 +351,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
   it("upgrades a v4 database in place: versions numbered per source, jobs fenced", () => {
     seedV4();
     migrate(db);
-    expect(schemaVersion(db)).toBe(5);
+    expect(schemaVersion(db)).toBe(migrations.length);
     expect(db.all("SELECT id, source_id, version, title, body FROM source_versions")).toEqual([
       { id: 1, source_id: 1, version: 1, title: "a1", body: "alpha one" },
       { id: 2, source_id: 2, version: 1, title: "b1", body: "beta" },
@@ -520,6 +520,31 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
     db.run("DELETE FROM source_versions WHERE source_id = 1");
     expect(db.all("SELECT source_id, fence_version FROM jobs")).toEqual([
       { source_id: 1, fence_version: 2 },
+    ]);
+  });
+});
+
+describe("schema v6 (V02-T03)", () => {
+  it("adds the reason a job was held or failed to a v5 database, keeping its jobs", () => {
+    migrate(db, migrations.slice(0, 5));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a')");
+    db.run(
+      "INSERT INTO jobs (kind, source_id, fence_version, status, lease_until) VALUES ('extract', 1, 1, 'leased', 'L')",
+    );
+    migrate(db);
+    expect(schemaVersion(db)).toBe(6);
+    expect(columns("jobs")).toEqual([
+      "id",
+      "kind",
+      "source_id",
+      "fence_version",
+      "status",
+      "lease_until",
+      "reason",
+    ]);
+    expect(db.all("SELECT status, lease_until, reason FROM jobs")).toEqual([
+      { status: "leased", lease_until: "L", reason: null },
     ]);
   });
 });
