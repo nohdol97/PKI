@@ -23,6 +23,7 @@
 | [specs/2026-11-21-V02-vertical-slice.md](specs/2026-11-21-V02-vertical-slice.md) | Phase 1 수직 흐름(V02)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
 | [specs/2026-11-21-I01-connector-sdk.md](specs/2026-11-21-I01-connector-sdk.md) | Connector SDK 규격 v2, 원본·근거 계약, JSONL·API 가져오기(I01)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
 | [specs/2026-11-21-I03-persistent-queue.md](specs/2026-11-21-I03-persistent-queue.md) | 영속 작업 대기열·스케줄러·재시도와 절전 복구(I03)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
+| [specs/2026-11-21-I04-invalidation.md](specs/2026-11-21-I04-invalidation.md) | 수정·삭제·권한 철회의 파생물 무효화(I04): 파생물 종류 등록 계약, 소거 범위, tombstone 규칙, access_scope 승계, 복원 뒤 재적용 정책 | 초안 |
 
 ## 동작 방식
 
