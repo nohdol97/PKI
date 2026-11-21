@@ -35,4 +35,17 @@ describe("contract schemas", () => {
     expect(vectorIndex.safeParse({ state: "unavailable" }).success).toBe(false);
     expect(vectorIndex.safeParse({ state: "rebuilding" }).success).toBe(true);
   });
+
+  it("states the embedding model's state and where it computes (V01-R14)", () => {
+    const embedding = routes.status.response.shape.embedding;
+    for (const state of ["ready", "model-missing", "preparing"]) {
+      expect(embedding.safeParse({ state, egress: "local" }).success).toBe(true);
+      expect(embedding.safeParse({ state }).success).toBe(false);
+    }
+    expect(embedding.safeParse({ state: "ready", egress: "cloud" }).success).toBe(false);
+    expect(embedding.safeParse({ state: "rebuilding", egress: "local" }).success).toBe(false);
+    expect(embedding.safeParse({ state: "unavailable", reason: "x" }).success).toBe(true);
+    expect(embedding.safeParse({ state: "unavailable", egress: "local" }).success).toBe(false);
+    expect(embedding.safeParse({ state: "not-implemented" }).success).toBe(true);
+  });
 });
