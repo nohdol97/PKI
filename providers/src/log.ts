@@ -22,6 +22,8 @@ const KNOWN_ERRORS = new Set([
   "SqliteError",
   "ProviderError",
   "ProviderRateLimitError",
+  "ModelFileError",
+  "AdapterUnavailableError",
 ]);
 
 const isCode = (text: string) => text.length <= MAX_CODE && CODE.test(text);

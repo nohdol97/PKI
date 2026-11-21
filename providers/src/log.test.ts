@@ -1,8 +1,9 @@
 // V01-R13 log filtering: a log line carries codes, numbers and booleans only. Free
 // text (which may be a CLI's or server's echo of the input) is replaced, and an
 // error is named by a known class, never by its message or a crafted name.
-import { ProviderError } from "@pki/contracts";
+import { AdapterUnavailableError, ProviderError } from "@pki/contracts";
 import { describe, expect, it } from "vitest";
+import { ModelFileError } from "./adapters/model-files.ts";
 import { createLogger, errorClass } from "./log.ts";
 
 const CANARY = "Document body CANARY-7f3 and the prompt";
@@ -38,6 +39,11 @@ describe("errorClass", () => {
   it("names known classes and nothing from the message", () => {
     expect(errorClass(new TypeError(CANARY))).toBe("TypeError");
     expect(errorClass(new ProviderError(CANARY, { retryable: true }))).toBe("ProviderError");
+  });
+
+  it("names the embedder's preparation failures (V01-T14)", () => {
+    expect(errorClass(new AdapterUnavailableError(CANARY))).toBe("AdapterUnavailableError");
+    expect(errorClass(new ModelFileError("model file missing"))).toBe("ModelFileError");
   });
 
   it("does not repeat a crafted name or a thrown string", () => {

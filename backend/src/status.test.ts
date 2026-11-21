@@ -40,7 +40,7 @@ async function vectorIndexStatus(vectorIndex: VectorIndex) {
 
 describe("status API: vector index", () => {
   it("is unavailable, with a reason, in the product configuration", async () => {
-    expect(await vectorIndexStatus(productAdapters().vectorIndex)).toEqual({
+    expect(await vectorIndexStatus(productAdapters("/synthetic/data").vectorIndex)).toEqual({
       state: "unavailable",
       reason: expect.stringMatching(/\S/),
     });
