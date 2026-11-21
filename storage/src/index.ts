@@ -28,3 +28,35 @@ export {
   type StoredSourceVersion,
 } from "./sources.ts";
 export { readJob, type StoredJob } from "./jobs.ts";
+export {
+  addEvidence,
+  insertItem,
+  listEvidence,
+  readFact,
+  readItem,
+  readRelation,
+  saveFact,
+  saveRelation,
+  setKnowledgeStatus,
+  type EpistemicType,
+  type EvidenceTarget,
+  type KnowledgeAttributes,
+  type KnowledgeStatus,
+  type NewEvidence,
+  type NewFact,
+  type NewItem,
+  type NewRelation,
+  type StoredEvidence,
+  type StoredFact,
+  type StoredItem,
+  type StoredRelation,
+} from "./knowledge.ts";
+export {
+  readInsight,
+  saveInsight,
+  type InsightContent,
+  type InsightKey,
+  type StoredInsight,
+} from "./insights.ts";
+export { readTombstone, writeTombstone, type Tombstone } from "./tombstones.ts";
+export { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
