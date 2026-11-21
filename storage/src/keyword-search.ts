@@ -3,7 +3,7 @@ import type { SqlDriver } from "./sql-driver.ts";
 /**
  * Returns the ids of source versions whose title or body contain every
  * term of `query`, split on whitespace and control characters (NUL ends an
- * FTS5 string),, best match first. Each term is quoted
+ * FTS5 string), best match first. Each term is quoted
  * so FTS5 query syntax in user input stays plain text, and matched as a prefix
  * so a Korean word followed by a particle ("예산을") is found by "예산".
  */

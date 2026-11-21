@@ -79,13 +79,16 @@ describe.skipIf(process.platform === "win32")("ensureDataDirectory (POSIX)", () 
     expect(mode(dir)).toBe(0o700);
   });
 
-  it("repairs an existing directory that others can read", () => {
-    const dir = join(root, "PKI");
-    mkdirSync(dir);
-    chmodSync(dir, 0o755);
-    ensureDataDirectory(dir);
-    expect(mode(dir)).toBe(0o700);
-  });
+  it.each(["755", "750", "770", "707"])(
+    "repairs an existing directory with mode %s to owner-only",
+    (initial) => {
+      const dir = join(root, "PKI");
+      mkdirSync(dir);
+      chmodSync(dir, parseInt(initial, 8));
+      ensureDataDirectory(dir);
+      expect(mode(dir)).toBe(0o700);
+    },
+  );
 
   it("refuses a path that is not a directory", () => {
     const file = join(root, "PKI");
