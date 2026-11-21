@@ -53,6 +53,7 @@ function secretsOf(read: SecretRead = { state: "present", value: KEY }, forHost?
       checked.push(name);
       return holds(name) ? source.current.state : "missing";
     },
+    deleteOthers: async () => "done",
   };
   return source;
 }
@@ -203,6 +204,7 @@ describe("OpenAICompatibleProvider", () => {
               return { state: "present", value: KEY };
             },
             has: async () => "present",
+            deleteOthers: async () => "done",
           },
         });
         const error = await p

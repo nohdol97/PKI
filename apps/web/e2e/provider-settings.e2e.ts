@@ -6,6 +6,7 @@
 // touched: a presence check of a key that is not stored does not ask the OS).
 import { test as base, expect, type BrowserType, type Page } from "@playwright/test";
 import { launchShell } from "@pki/desktop";
+import { openaiKeySecretName } from "@pki/providers";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
@@ -102,6 +103,47 @@ test("Settings saves the endpoint, shows the key by presence, and asks again for
     }
     // the page never holds the key's value
     expect(await page.content()).not.toContain(DEV_KEY);
+  } finally {
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// review N2: the key leaves the page as soon as it is handed to the preload. The
+// browser stands in a recording preload (no real store, no keychain).
+test("the key field hands the key to the preload under the host's name, then clears", async ({
+  target,
+  playwright,
+}) => {
+  test.skip(target !== "browser", "the Electron preload would reach the real keychain");
+  const dir = mkdtempSync(join(tmpdir(), "pki-e2e-provider-key-"));
+  const { page, stop } = await open(target, dir, playwright.chromium);
+  try {
+    await page.addInitScript(() => {
+      const calls: unknown[] = [];
+      Object.assign(window, {
+        pkiCalls: calls,
+        pki: {
+          getSession: () => fetch("/__pki/session").then((r) => r.json()),
+          // records the length only: the value stays out of the page's state
+          setSecret: async (name: string, value: string) => (
+            calls.push(["set", name, value.length]),
+            { ok: true }
+          ),
+          deleteSecret: async (name: string) => (calls.push(["delete", name]), { ok: true }),
+        },
+      });
+    });
+    await page.reload();
+    await page.getByRole("navigation").getByRole("button", { name: "설정" }).click();
+    await saveEndpoint(page, "https://one.synthetic.example/v1");
+    const field = page.getByLabel("one.synthetic.example에 쓸 API 키");
+    await field.fill("sk-e2e-typed");
+    await page.getByRole("button", { name: "키 저장" }).click();
+    await expect(field).toHaveValue("");
+    expect(
+      await page.evaluate(() => (window as unknown as { pkiCalls: unknown[] }).pkiCalls),
+    ).toEqual([["set", openaiKeySecretName("one.synthetic.example"), "sk-e2e-typed".length]]);
   } finally {
     await stop();
     rmSync(dir, { recursive: true, force: true });

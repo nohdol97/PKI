@@ -79,11 +79,15 @@ function filesUnder(root: string): string[] {
 /** The shell's store as the backend sees it: `read` held for the key of `host` only. */
 function storeFor(host: string, read: SecretRead): SecretSource & { asked: string[] } {
   const asked: string[] = [];
-  const name = openaiKeySecretName(host);
+  let name: string | undefined = openaiKeySecretName(host);
   return {
     asked,
     read: async (n) => (asked.push(n), n === name ? read : { state: "missing" }),
     has: async (n) => (n === name ? read.state : "missing"),
+    deleteOthers: async (keep) => {
+      if (name !== keep) name = undefined;
+      return "done";
+    },
   };
 }
 
@@ -254,6 +258,26 @@ describe("the API key is used and left nowhere", () => {
     const result = await connectionTest();
     expect(result).toMatchObject({ status: "failed", error: "provider-error" });
     expect(server.requests).toEqual([]);
+  });
+
+  // review N1: moving away deletes the key, so moving back does not quietly reuse it
+  it("sends no key after the page moves the endpoint away and back", async () => {
+    const { egress, secrets, connectionTest } = setup({ state: "present", value: KEY_CANARY });
+    const { api, headers } = await startApi(egress, secrets);
+    try {
+      const move = (baseUrl: string) =>
+        send(api.port, routes.writeSettings.path, headers, "POST", {
+          openaiCompatible: { baseUrl, model: "synthetic-model" },
+        });
+      await move("https://elsewhere.synthetic.example/v1");
+      const back = await move(server.baseUrl);
+      expect(back.body).toMatchObject({ openaiCompatible: { key: "missing" } });
+      const result = await connectionTest();
+      expect(result).toMatchObject({ status: "failed", error: "provider-error" });
+      expect(server.requests).toEqual([]);
+    } finally {
+      await api.close();
+    }
   });
 
   it("checks presence only: health and the Settings answer never read the value", async () => {

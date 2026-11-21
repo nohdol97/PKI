@@ -50,20 +50,23 @@ const FromBackend = z.discriminatedUnion("type", [
     type: z.literal("secret-request"),
     id: z.int().positive(),
     name: SecretNameSchema,
-    mode: z.enum(["read", "presence"]),
+    mode: z.enum(["read", "presence", "prune"]),
   }),
 ]);
 
 const SECRET_UNAVAILABLE: SecretRead = { state: "unavailable" };
 
 async function answerSecret(
-  store: Pick<SecretStore, "read" | "has"> | undefined,
+  store: Pick<SecretStore, "read" | "has" | "deleteOthers"> | undefined,
   name: string,
-  mode: "read" | "presence",
+  mode: "read" | "presence" | "prune",
 ): Promise<SecretRead | { state: SecretRead["state"] }> {
   if (!store || !isBackendReadableSecret(name)) return SECRET_UNAVAILABLE;
   try {
     if (mode === "read") return await store.read(name);
+    // prune keeps `name` and answers "missing" once no other key is left
+    if (mode === "prune")
+      return (await store.deleteOthers(name)).ok ? { state: "missing" } : SECRET_UNAVAILABLE;
     const presence = await store.has(name);
     return presence.ok ? { state: presence.present ? "present" : "missing" } : SECRET_UNAVAILABLE;
   } catch {
@@ -90,7 +93,7 @@ export interface BackendOptions {
    * Only names `isBackendReadableSecret` allows are looked up; a presence request
    * gets the state alone, never the value.
    */
-  secrets?: Pick<SecretStore, "read" | "has"> | undefined;
+  secrets?: Pick<SecretStore, "read" | "has" | "deleteOthers"> | undefined;
 }
 
 export interface Backend {

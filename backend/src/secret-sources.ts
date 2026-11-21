@@ -18,16 +18,19 @@ const UNAVAILABLE: SecretRead = Object.freeze({ state: "unavailable" });
 export const NO_SECRET_STORE: SecretSource = Object.freeze({
   read: async () => UNAVAILABLE,
   has: async () => "unavailable" as const,
+  // nothing is stored, so nothing is left to delete
+  deleteOthers: async () => "done" as const,
 });
 
-type Mode = "read" | "presence";
+type Mode = "read" | "presence" | "prune";
 type Answer = SecretRead | { state: "present" };
 const PRESENCES: readonly unknown[] = ["present", "missing", "unavailable"];
 
 /** A read answer is exactly a SecretRead; a presence answer is a bare state, no value. */
 function parseAnswer(mode: Mode, rest: Record<string, unknown>): Answer | undefined {
   if (mode === "read") return SecretReadSchema.safeParse(rest).data;
-  const only = Object.keys(rest).length === 1 && PRESENCES.includes(rest.state);
+  const states = mode === "prune" ? ["missing", "unavailable"] : PRESENCES;
+  const only = Object.keys(rest).length === 1 && states.includes(rest.state);
   return only ? ({ state: rest.state } as Answer) : undefined;
 }
 
@@ -63,6 +66,8 @@ export function channelSecrets(post: (message: unknown) => void, timeoutMs = 10_
   const source: SecretSource = {
     read: (name) => ask(name, "read") as Promise<SecretRead>,
     has: async (name): Promise<SecretPresence> => (await ask(name, "presence")).state,
+    deleteOthers: async (keep) =>
+      (await ask(keep, "prune")).state === "missing" ? "done" : "unavailable",
   };
 
   /** True when `message` was the answer to a pending request (and is consumed). */
@@ -101,5 +106,6 @@ export function envSecrets(env: Readonly<Record<string, string | undefined>>): S
   return {
     read: async (name) => lookup(name),
     has: async (name) => lookup(name).state,
+    deleteOthers: async () => "done", // the environment holds the one key it names
   };
 }

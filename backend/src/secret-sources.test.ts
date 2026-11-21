@@ -63,6 +63,20 @@ describe("channelSecrets", () => {
     await expect(has).resolves.toBe("present");
   });
 
+  it("asks the shell to delete the other keys and takes a bare state", async () => {
+    const { posted, secrets } = setup();
+    const done = secrets.source.deleteOthers(OPENAI_API_KEY_SECRET);
+    expect(posted).toEqual([
+      { type: "secret-request", id: 1, name: OPENAI_API_KEY_SECRET, mode: "prune" },
+    ]);
+    expect(secrets.deliver({ type: "secret", id: 1, state: "present" })).toBe(false);
+    expect(secrets.deliver({ type: "secret", id: 1, state: "missing" })).toBe(true);
+    await expect(done).resolves.toBe("done");
+    const failed = secrets.source.deleteOthers(OPENAI_API_KEY_SECRET);
+    secrets.deliver({ type: "secret", id: 2, state: "unavailable" });
+    await expect(failed).resolves.toBe("unavailable");
+  });
+
   it("refuses a read answer without its value", async () => {
     const { secrets } = setup();
     void secrets.source.read("a");

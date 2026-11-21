@@ -26,13 +26,20 @@ let db: SqlDriver;
 let server: RunningServer;
 /** The key store the backend asks (the shell in Electron): one key, for one host. */
 const stored = new Set<string>();
+let pruneWorks = true;
 const secrets: SecretSource = {
   read: async () => ({ state: "unavailable" }),
   has: async (name) => (stored.has(name) ? "present" : "missing"),
+  deleteOthers: async (keep) => {
+    if (!pruneWorks) return "unavailable";
+    for (const name of [...stored]) if (name !== keep) stored.delete(name);
+    return "done";
+  },
 };
 
 beforeEach(async () => {
   stored.clear();
+  pruneWorks = true;
   dir = mkdtempSync(join(tmpdir(), "pki-settings-"));
   db = openCanonicalDb(dir);
   server = await startServer({
@@ -89,6 +96,27 @@ describe("settings API: the OpenAI-compatible endpoint", () => {
         key: "missing",
       },
     });
+  });
+
+  // review N1: only the current host's key is kept, so pointing back finds none
+  it("deletes earlier hosts' keys on a host change; pointing back needs the key again", async () => {
+    const one = openaiKeySecretName("one.synthetic.example");
+    stored.add(one);
+    await write("https://one.synthetic.example/v1", "model-a");
+    expect([...stored]).toEqual([one]); // same host: kept
+    await write("https://two.synthetic.example/v1");
+    expect([...stored]).toEqual([]);
+    const back = await write("https://one.synthetic.example/v1");
+    expect(back.body).toMatchObject({ openaiCompatible: { key: "missing" } });
+  });
+
+  it("changes nothing when the old keys cannot be deleted", async () => {
+    await write("https://one.synthetic.example/v1", "kept-model");
+    pruneWorks = false;
+    const res = await write("https://two.synthetic.example/v1");
+    expect(res).toEqual({ status: 409, body: { error: "secret-store-unavailable" } });
+    expect(readSetting(db, OPENAI_BASE_URL_SETTING)).toBe("https://one.synthetic.example/v1");
+    expect(readSetting(db, OPENAI_MODEL_SETTING)).toBe("kept-model");
   });
 
   it("stores an https endpoint and the model, which the consent list then names", async () => {

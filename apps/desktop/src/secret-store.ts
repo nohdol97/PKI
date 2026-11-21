@@ -5,6 +5,7 @@
 // answer says "unavailable" — there is no plaintext fallback. A file that cannot be
 // read as this store's own is never overwritten: it may hold the user's keys.
 import {
+  isBackendReadableSecret,
   SecretNameSchema,
   SecretValueSchema,
   type SecretPresenceResult,
@@ -73,6 +74,8 @@ export interface SecretStore {
   delete(name: string): Promise<SecretWriteResult>;
   /** For the backend's request just before a call; the page has no way to reach it. */
   read(name: string): Promise<SecretRead>;
+  /** Deletes every backend-readable key but `keep` (the endpoint host changed). */
+  deleteOthers(keep: string): Promise<SecretWriteResult>;
 }
 
 const UNAVAILABLE = { ok: false, error: "unavailable" } as const;
@@ -151,6 +154,16 @@ export function createSecretStore(options: { file: string; cipher: Cipher }): Se
         const secrets = load();
         if (!secrets) return UNAVAILABLE;
         if (!secrets.delete(name)) return { ok: true };
+        return save(secrets) ? { ok: true } : UNAVAILABLE;
+      }),
+    // No cipher needed, like delete.
+    deleteOthers: (keep) =>
+      exclusive(async () => {
+        const secrets = load();
+        if (!secrets) return UNAVAILABLE;
+        const others = [...secrets.keys()].filter((n) => isBackendReadableSecret(n) && n !== keep);
+        if (others.length === 0) return { ok: true };
+        for (const name of others) secrets.delete(name);
         return save(secrets) ? { ok: true } : UNAVAILABLE;
       }),
     read: (name) =>

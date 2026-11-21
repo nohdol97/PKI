@@ -133,6 +133,21 @@ describe("secret store", () => {
     });
   });
 
+  it("deletes every other backend-readable key, keeping the current one and other names", async () => {
+    const cipher = doubleCipher(false); // like delete, it needs no OS protection
+    const writer = createSecretStore({ file, cipher: doubleCipher() });
+    const other = `openai-compatible.api-key.${"b".repeat(32)}`;
+    await writer.set(OPENAI_API_KEY_SECRET, "value-current");
+    await writer.set(other, "value-other");
+    await writer.set("unrelated", "value-unrelated");
+    const store = createSecretStore({ file, cipher });
+    expect(await store.deleteOthers(OPENAI_API_KEY_SECRET)).toEqual({ ok: true });
+    expect(Object.keys(JSON.parse(readFileSync(file, "utf8")).secrets).sort()).toEqual(
+      [OPENAI_API_KEY_SECRET, "unrelated"].sort(),
+    );
+    expect(await store.deleteOthers(OPENAI_API_KEY_SECRET)).toEqual({ ok: true }); // nothing left
+  });
+
   it("reports a value it cannot decrypt as unavailable", async () => {
     await createSecretStore({ file, cipher: doubleCipher() }).set("a", "value-a");
     const broken: Cipher = {
@@ -163,6 +178,7 @@ describe("secret store", () => {
     writeFileSync(file, content);
     expect(await store.set("b", CANARY)).toEqual({ ok: false, error: "unavailable" });
     expect(await store.delete("a")).toEqual({ ok: false, error: "unavailable" });
+    expect(await store.deleteOthers("a")).toEqual({ ok: false, error: "unavailable" });
     expect(await store.has("a")).toEqual({ ok: false, error: "unavailable" });
     expect(await store.read("a")).toEqual({ state: "unavailable" });
     expect(readFileSync(file, "utf8")).toBe(content);

@@ -63,6 +63,7 @@ describe("bootBackend", () => {
       read: async (n) =>
         n === key ? { state: "present", value: "sk-boot" } : { state: "missing" },
       has: async (n) => (n === key ? "present" : "missing"),
+      deleteOthers: async () => "done",
     };
     try {
       booted = await bootBackend({ dataDir: dir, token: TOKEN, allowedOrigins: [], secrets });

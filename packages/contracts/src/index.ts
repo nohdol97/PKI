@@ -62,6 +62,7 @@ export const ErrorResponseSchema = z.object({
     "destination-unavailable",
     "consent-stale",
     "invalid-endpoint",
+    "secret-store-unavailable",
     "embedding-not-implemented",
     "embedding-busy",
     "internal-error",

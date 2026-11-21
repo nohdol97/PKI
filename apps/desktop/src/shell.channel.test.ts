@@ -118,6 +118,7 @@ describe("shell ↔ backend channel", () => {
       secrets: {
         read: async () => ({ state: "present", value: canary }),
         has: async () => ({ ok: true, present: true }),
+        deleteOthers: async () => ({ ok: true }),
       },
     });
     expect(JSON.stringify(calls)).not.toContain(canary);
@@ -128,6 +129,7 @@ describe("shell ↔ backend channel", () => {
   // review S5: the real backend asks over the real channel and the shell answers
   it("answers the running backend's presence request for the endpoint host's key", async () => {
     const asked: string[] = [];
+    const pruned: string[] = [];
     const keyName = `openai-compatible.api-key.${createHash("sha256")
       .update("one.synthetic.example")
       .digest("hex")
@@ -140,6 +142,7 @@ describe("shell ↔ backend channel", () => {
       secrets: {
         read: async () => ({ state: "unavailable" }),
         has: async (name) => (asked.push(name), { ok: true, present: name === keyName }),
+        deleteOthers: async (keep) => (pruned.push(keep), { ok: true }),
       },
     });
     const headers = {
@@ -160,6 +163,9 @@ describe("shell ↔ backend channel", () => {
       openaiCompatible: { key: "missing" },
     });
     expect(asked[0]).toBe(keyName);
+    // each endpoint write first deleted the keys of other hosts, over the same channel
+    expect(pruned).toHaveLength(2);
+    expect(pruned[0]).toBe(keyName);
   });
 
   it("passes only the allowlisted environment variables", async () => {

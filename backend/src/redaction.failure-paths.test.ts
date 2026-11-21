@@ -127,6 +127,7 @@ describe("failure paths leave no input behind", () => {
           secrets: {
             read: async () => ({ state: "present", value: "sk-synthetic" }),
             has: async () => "present",
+            deleteOthers: async () => "done",
           },
           allowLoopbackHttp: true,
           egress,

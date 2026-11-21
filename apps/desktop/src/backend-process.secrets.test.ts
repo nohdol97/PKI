@@ -40,6 +40,12 @@ function store(read: SecretRead) {
         ? ({ ok: false, error: "unavailable" } as const)
         : ({ ok: true, present: read.state === "present" } as const)
     ),
+    deleteOthers: async (keep: string) => (
+      calls.push(`prune ${keep}`),
+      read.state === "unavailable"
+        ? ({ ok: false, error: "unavailable" } as const)
+        : ({ ok: true } as const)
+    ),
   };
 }
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -69,6 +75,21 @@ describe("backend secret requests", () => {
     expect(secrets.calls).toEqual([`has ${KEY_NAME}`]);
   });
 
+  it("deletes the other keys on a prune request and answers without a value", async () => {
+    for (const [read, state] of [
+      [{ state: "present", value: CANARY }, "missing"],
+      [{ state: "unavailable" }, "unavailable"],
+    ] as const) {
+      const child = fakeChild();
+      const secrets = store(read);
+      await start(child, secrets);
+      child.send({ type: "secret-request", id: 5, name: KEY_NAME, mode: "prune" });
+      await settle();
+      expect(child.posted.at(-1)).toEqual({ type: "secret", id: 5, state });
+      expect(secrets.calls).toEqual([`prune ${KEY_NAME}`]);
+    }
+  });
+
   it.each([
     ["missing", { state: "missing" } as const],
     ["unavailable", { state: "unavailable" } as const],
@@ -86,6 +107,7 @@ describe("backend secret requests", () => {
     const failing = {
       read: () => Promise.reject(new Error("x")),
       has: () => Promise.reject(new Error("x")),
+      deleteOthers: () => Promise.reject(new Error("x")),
     };
     for (const secrets of [undefined, failing]) {
       const child = fakeChild();

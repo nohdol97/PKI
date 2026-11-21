@@ -103,6 +103,7 @@ const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "destination-unavailable": 409,
   "consent-stale": 409,
   "invalid-endpoint": 400,
+  "secret-store-unavailable": 409,
   "embedding-not-implemented": 409,
   "embedding-busy": 409,
 };
@@ -270,6 +271,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     writeSettings: async ({ openaiCompatible }) => {
       const baseUrl = storableEndpoint(openaiCompatible.baseUrl);
       if (baseUrl === undefined) return { error: "invalid-endpoint" };
+      // keys of other hosts go first, or nothing changes (review N1)
+      const keep = openaiKeySecretName(new URL(baseUrl).host);
+      if ((await secrets.deleteOthers(keep)) !== "done") {
+        return { error: "secret-store-unavailable" };
+      }
       writeSetting(options.db, OPENAI_BASE_URL_SETTING, baseUrl);
       writeSetting(options.db, OPENAI_MODEL_SETTING, openaiCompatible.model);
       return settings();

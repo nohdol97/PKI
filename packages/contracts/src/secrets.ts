@@ -42,6 +42,12 @@ export type SecretPresence = SecretRead["state"];
 export interface SecretSource {
   read(name: string): Promise<SecretRead>;
   has(name: string): Promise<SecretPresence>;
+  /**
+   * Deletes every key the backend may read except `keep` (review N1): when the
+   * endpoint host changes, earlier hosts' keys go, so pointing back to an old host
+   * never silently reuses its key. "done" also when nothing was stored.
+   */
+  deleteOthers(keep: string): Promise<"done" | "unavailable">;
 }
 
 /** What the preload's secret functions answer the page; no answer carries a value. */
