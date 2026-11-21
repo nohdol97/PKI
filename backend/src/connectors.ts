@@ -1,10 +1,13 @@
 // Connector management (ARCHITECTURE 5.5): initializes the configured instances
-// once, and syncs one by calling getChanges until it has no more pages. Each page
-// and the cursor after it are written in one transaction, so the stored cursor
-// never runs ahead of the stored records (ADR 0013 decision 1).
+// once, and syncs one by calling getChanges until it has no more pages. Each page,
+// the extraction job of each new version (V02-R4) and the cursor after it are
+// written in one transaction, so the stored cursor never runs ahead of the stored
+// records (ADR 0013 decision 1) and no version is stored without its job. The
+// change sequence rises in the same transaction (storage trigger).
 import {
   ChangeSetSchema,
   ConnectorNotImplementedError,
+  type Change,
   type Connector,
   type ConnectorSummary,
   type ErrorResponse,
@@ -13,12 +16,35 @@ import {
 import {
   readCursor,
   registerConnectorInstance,
+  registerJob,
   saveSourceRecord,
   writeCursor,
   type SqlDriver,
 } from "@pki/storage";
+import type { JobRunner } from "./job-runner.ts";
 
 const PAGE_LIMIT = 100;
+
+/** The job each new source version gets; its handler is V02-T05's. */
+export const EXTRACT_JOB_KIND = "extract";
+
+/** A change the store would not take; nothing of it is written. */
+export type RefusalReason = "revision-not-newer" | "tombstoned" | "change-kind-unsupported";
+
+export interface SyncOptions {
+  signal?: AbortSignal;
+  /** Read from the start, not from the stored cursor (an import reads its whole text). */
+  rescan?: boolean;
+  /**
+   * Takes each refused change once its page is committed, and the page goes on.
+   * Without it a refusal fails the page, of which nothing is stored.
+   */
+  onRefused?: (change: Change, reason: RefusalReason) => void;
+  /** Takes each stored or unchanged change once its page is committed. */
+  onStored?: (change: Change, outcome: "created" | "unchanged") => void;
+  /** Woken after a page that registered jobs commits (V02-T05 binds the runner). */
+  runner?: Pick<JobRunner, "wake">;
+}
 
 export interface ConnectorInstanceConfig {
   id: string;
@@ -37,15 +63,41 @@ export interface ConnectorManager {
   >;
 }
 
+/** Stores one change; a version is stored together with its extraction job. */
+function storeChange(
+  db: SqlDriver,
+  instanceId: string,
+  change: Change,
+): "created" | "unchanged" | { refused: RefusalReason } {
+  // Deletion and revocation arrive with V02-T08 (ARCHITECTURE 6); until then refused.
+  if (change.kind !== "upsert") return { refused: "change-kind-unsupported" };
+  const saved = saveSourceRecord(db, instanceId, change.record);
+  if (saved.status === "refused") return { refused: saved.reason };
+  if (saved.status === "unchanged") return "unchanged";
+  const job = registerJob(db, {
+    kind: EXTRACT_JOB_KIND,
+    sourceId: saved.sourceId,
+    fenceVersion: saved.version,
+  });
+  // A conflict is not a registration (V02 spec "T02가 넘기는 것" 3): the page fails.
+  if (!job.registered) {
+    throw new Error(
+      `${instanceId}: an ${EXTRACT_JOB_KIND} job for source ${saved.sourceId} version ${saved.version} exists already (${job.existing.status})`,
+    );
+  }
+  return "created";
+}
+
 export async function syncConnector(
   db: SqlDriver,
   instanceId: string,
   kind: string,
   connector: Connector,
-  signal: AbortSignal = new AbortController().signal,
+  options: SyncOptions = {},
 ): Promise<{ received: number; created: number }> {
+  const signal = options.signal ?? new AbortController().signal;
   db.transaction(() => registerConnectorInstance(db, instanceId, kind));
-  let cursor = readCursor(db, instanceId);
+  let cursor = options.rescan ? null : readCursor(db, instanceId);
   let received = 0;
   let created = 0;
   // One full rescan per sync: a second expiry, or a page that promises more without
@@ -66,14 +118,29 @@ export async function syncConnector(
     if (page.hasMore && page.nextCursor === cursor) {
       throw new Error(`${instanceId}: page reports more changes without progress`);
     }
-    db.transaction(() => {
+    const refused: [Change, RefusalReason][] = [];
+    const stored: [Change, "created" | "unchanged"][] = [];
+    const pageCreated = db.transaction(() => {
+      let n = 0;
       for (const change of page.changes) {
-        // Tombstones and content removal arrive with V02 (ARCHITECTURE 6).
-        if (change.kind !== "upsert") throw new Error(`${change.kind} changes are not stored yet`);
-        if (saveSourceRecord(db, instanceId, change.record) === "created") created++;
+        const outcome = storeChange(db, instanceId, change);
+        if (typeof outcome === "object") {
+          if (!options.onRefused) {
+            throw new Error(`${instanceId}: ${change.kind} change refused (${outcome.refused})`);
+          }
+          refused.push([change, outcome.refused]);
+        } else {
+          if (outcome === "created") n++;
+          stored.push([change, outcome]);
+        }
       }
       writeCursor(db, instanceId, page.nextCursor);
+      return n;
     });
+    for (const [change, reason] of refused) options.onRefused?.(change, reason);
+    for (const [change, outcome] of stored) options.onStored?.(change, outcome);
+    if (pageCreated > 0) void options.runner?.wake();
+    created += pageCreated;
     received += page.changes.length;
     cursor = page.nextCursor;
     if (!page.hasMore) return { received, created };
@@ -84,6 +151,7 @@ export async function createConnectorManager(
   db: SqlDriver,
   instances: readonly ConnectorInstanceConfig[],
   kinds: Readonly<Record<string, ConnectorFactory>>,
+  options: Pick<SyncOptions, "runner"> = {},
 ): Promise<ConnectorManager> {
   const entries = await Promise.all(
     instances.map(async ({ id, kind, config }) => {
@@ -106,7 +174,10 @@ export async function createConnectorManager(
       const entry = entries.find((e) => e.id === id);
       if (!entry) return { error: "not-found" };
       if (entry.state !== "ready") return { error: "connector-unavailable" };
-      return { connectorId: id, ...(await syncConnector(db, id, entry.kind, entry.connector)) };
+      return {
+        connectorId: id,
+        ...(await syncConnector(db, id, entry.kind, entry.connector, options)),
+      };
     },
   };
 }

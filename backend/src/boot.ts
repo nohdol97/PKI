@@ -14,6 +14,7 @@ import {
   productAdapters,
   productCalls,
   productEgress,
+  productImporter,
   productProviders,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
@@ -62,6 +63,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     egress,
     secrets: options.secrets,
     calls: productCalls(db, egress, { providers }),
+    importer: productImporter(db),
   });
   return { server, db, providers };
 }

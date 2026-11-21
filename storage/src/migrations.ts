@@ -363,8 +363,17 @@ const v6: Migration = (db) =>
     ALTER TABLE jobs ADD COLUMN lease_token INTEGER NOT NULL DEFAULT 0;
   `);
 
+// Schema v7 (V02-T04, cross-spec decision D1): the Connector's own version of a
+// record (a JSONL line's `version`), kept beside the product's per-source version
+// and compared to order arrivals (storage/src/sources.ts). Null where the
+// Connector gives none (V01 Connectors, rows from before v7).
+const v7: Migration = (db) =>
+  db.exec(
+    "ALTER TABLE source_versions ADD COLUMN revision INTEGER CHECK (revision IS NULL OR revision >= 1);",
+  );
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6];
+export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

@@ -1,7 +1,8 @@
 // Canonical source storage (V01-R7). A source is identified by Connector
-// instance + external id; a version is added only when its content hash differs
-// from the source's latest version, numbered one past it (V02-R3). Callers wrap a
-// page in one transaction.
+// instance + external id. The product numbers each source's versions itself, one
+// past its latest (V02-R3); a Connector's own version of a record, when it gives
+// one, is kept as the version's `revision` and only orders arrivals (cross-spec
+// decision D1). Callers wrap a page in one transaction.
 import { createHash } from "node:crypto";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -9,7 +10,14 @@ export interface StoredRecord {
   externalId: string;
   title: string;
   body: string;
+  /** The Connector's own version of the record, if it has one (a JSONL line's `version`). */
+  revision?: number | undefined;
 }
+
+export type SaveOutcome =
+  | { status: "created"; sourceId: number; version: number }
+  | { status: "unchanged" }
+  | { status: "refused"; reason: "revision-not-newer" | "tombstoned" };
 
 /** Title and body bound together: JSON array encoding keeps "ab"+"c" apart from "a"+"bc". */
 export function contentHash(title: string, body: string): string {
@@ -18,11 +26,23 @@ export function contentHash(title: string, body: string): string {
     .digest("hex");
 }
 
+/** The source's latest version: the (source_id, version) index, no sort. */
+export const LATEST_VERSION_SQL =
+  "SELECT content_hash, version, revision FROM source_versions WHERE source_id = ? ORDER BY version DESC LIMIT 1";
+
+/**
+ * Adds a version unless the content equals the latest's, or the same revision with
+ * the same content is stored already. With a revision, the
+ * same revision is no new version, and an equal or lower revision with other
+ * content is refused (provisional; I01 owns the general revision rule). A version
+ * the tombstone would block is refused here, before its trigger aborts the
+ * caller's transaction. A refusal writes nothing.
+ */
 export function saveSourceRecord(
   db: SqlDriver,
   connectorInstanceId: string,
   record: StoredRecord,
-): "created" | "unchanged" {
+): SaveOutcome {
   db.run(
     "INSERT INTO sources (connector_instance_id, external_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
     [connectorInstanceId, record.externalId],
@@ -32,16 +52,44 @@ export function saveSourceRecord(
     [connectorInstanceId, record.externalId],
   )[0]?.id as number;
   const hash = contentHash(record.title, record.body);
-  const latest = db.all(
-    "SELECT content_hash, version FROM source_versions WHERE source_id = ? ORDER BY id DESC LIMIT 1",
-    [sourceId],
-  )[0];
-  if (latest?.content_hash === hash) return "unchanged";
+  const latest = db.all(LATEST_VERSION_SQL, [sourceId])[0];
+  if (latest?.content_hash === hash) return { status: "unchanged" };
+  // An older line already stored (same revision, same content) is nothing new:
+  // re-importing a file with several versions of a source reports no error.
+  // Provisional until I01's general revision rule (sources.last_revision).
+  if (
+    record.revision !== undefined &&
+    db.all(
+      "SELECT 1 FROM source_versions WHERE source_id = ? AND revision = ? AND content_hash = ?",
+      [sourceId, record.revision, hash],
+    ).length > 0
+  ) {
+    return { status: "unchanged" };
+  }
+  const latestRevision = latest?.revision as number | null | undefined;
+  if (
+    record.revision !== undefined &&
+    latestRevision != null &&
+    record.revision <= latestRevision
+  ) {
+    return { status: "refused", reason: "revision-not-newer" };
+  }
+  const version = ((latest?.version as number | undefined) ?? 0) + 1;
+  const tombstone = db.all("SELECT version FROM tombstones WHERE source_id = ?", [sourceId])[0];
+  if (tombstone && version <= (tombstone.version as number)) {
+    return { status: "refused", reason: "tombstoned" };
+  }
   db.run(
-    "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (?, ?, ?, ?, ?)",
-    [sourceId, ((latest?.version as number | undefined) ?? 0) + 1, hash, record.title, record.body],
+    "INSERT INTO source_versions (source_id, version, content_hash, title, body, revision) VALUES (?, ?, ?, ?, ?, ?)",
+    [sourceId, version, hash, record.title, record.body, record.revision ?? null],
   );
-  return "created";
+  return { status: "created", sourceId, version };
+}
+
+/** The kind an instance is bound to, or undefined before its first sync. */
+export function readConnectorKind(db: SqlDriver, id: string): string | undefined {
+  return db.all("SELECT kind FROM connector_instances WHERE id = ?", [id])[0]?.kind as
+    string | undefined;
 }
 
 /** Records the instance's kind on first sight and refuses to rebind it to another kind. */
@@ -50,7 +98,7 @@ export function registerConnectorInstance(db: SqlDriver, id: string, kind: strin
     id,
     kind,
   ]);
-  const stored = db.all("SELECT kind FROM connector_instances WHERE id = ?", [id])[0]?.kind;
+  const stored = readConnectorKind(db, id);
   if (stored !== kind) {
     throw new Error(`connector instance ${id} is a ${String(stored)}, not a ${kind}`);
   }

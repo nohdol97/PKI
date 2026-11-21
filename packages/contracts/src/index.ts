@@ -2,6 +2,7 @@
 // both import these; TypeScript types come from z.infer, JSON Schema from z.toJSONSchema.
 import { z } from "zod";
 import type { EmbeddingEgress } from "./embedding.ts";
+import { ImportJsonlRequestSchema, ImportJsonlResponseSchema } from "./import-record.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
@@ -269,6 +270,12 @@ export const routes = {
     path: "/api/connectors/sync",
     request: SyncRequestSchema,
     response: SyncResponseSchema,
+  },
+  importJsonl: {
+    method: "POST",
+    path: "/api/import/jsonl",
+    request: ImportJsonlRequestSchema,
+    response: ImportJsonlResponseSchema,
   },
   sources: { method: "GET", path: "/api/sources", response: SourceListResponseSchema },
   searchSources: {

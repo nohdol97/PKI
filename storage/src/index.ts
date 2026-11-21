@@ -19,11 +19,13 @@ export {
 } from "./data-directory.ts";
 export {
   contentHash,
+  readConnectorKind,
   readCursor,
   readSourceVersion,
   registerConnectorInstance,
   saveSourceRecord,
   writeCursor,
+  type SaveOutcome,
   type StoredRecord,
   type StoredSourceVersion,
 } from "./sources.ts";

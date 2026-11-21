@@ -36,3 +36,50 @@ export const ImportRecordSchema = z
     path: ["content"],
   });
 export type ImportRecord = z.infer<typeof ImportRecordSchema>;
+
+/**
+ * Why an import line was not stored (V02-R2). Format: `invalid-json`,
+ * `invalid-record` (the schema; `field` names the first failing known field),
+ * `content-hash-mismatch` (not the sha256 of `content`). Arrival order:
+ * `revision-not-newer` (an equal or lower version with other content).
+ * `tombstoned`: a deleted or revoked source the tombstone blocks. `instance-conflict`:
+ * the `connector_instance_id` belongs to another Connector kind.
+ * `too-many-instances`: past the cap of distinct instances per file (provisional).
+ * `instance-failed`: its instance's sync failed (e.g. a job registration conflict)
+ * and the line was not stored. `change-kind-unsupported`: delete and revoke lines
+ * until V02-T08 (provisional).
+ */
+export const ImportLineErrorReasonSchema = z.enum([
+  "invalid-json",
+  "invalid-record",
+  "content-hash-mismatch",
+  "revision-not-newer",
+  "tombstoned",
+  "instance-conflict",
+  "too-many-instances",
+  "instance-failed",
+  "change-kind-unsupported",
+]);
+export type ImportLineErrorReason = z.infer<typeof ImportLineErrorReasonSchema>;
+
+export const ImportLineErrorSchema = z.strictObject({
+  /** 1-based line number in the imported text. */
+  line: z.int().min(1),
+  reason: ImportLineErrorReasonSchema,
+  field: z.string().optional(),
+});
+export type ImportLineError = z.infer<typeof ImportLineErrorSchema>;
+
+export const ImportJsonlRequestSchema = z.strictObject({ text: z.string() });
+
+/**
+ * `received` counts changes read; `created` the new source versions; `errors` the
+ * first refused lines by line number (capped, provisional 100); `errorCount` all of them.
+ */
+export const ImportJsonlResponseSchema = z.object({
+  received: z.int().nonnegative(),
+  created: z.int().nonnegative(),
+  errors: z.array(ImportLineErrorSchema),
+  errorCount: z.int().nonnegative(),
+});
+export type ImportJsonlResponse = z.infer<typeof ImportJsonlResponseSchema>;

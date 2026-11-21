@@ -4,6 +4,7 @@ import { ErrorResponseSchema, routes, type RouteName } from "@pki/contracts";
 import { OPENAI_BASE_URL_SETTING } from "@pki/providers";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { send } from "@pki/testkit";
@@ -12,6 +13,7 @@ import {
   connectorKinds,
   productAdapters,
   productEgress,
+  productImporter,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -25,6 +27,7 @@ let valid: Record<string, string>;
 // A body for every route that takes one; the schema test below fails for a route missing here.
 const requests: Partial<Record<RouteName, unknown>> = {
   syncConnector: { connectorId: "fixtures" },
+  importJsonl: { text: readFileSync(resolve(FIXTURES, "../v02-mail.jsonl"), "utf8") },
   searchSources: { query: "등대" },
   grantConsent: {
     providerId: "codex",
@@ -65,6 +68,7 @@ beforeAll(async () => {
     dataDirectory: "/synthetic/data",
     egress: productEgress(db),
     ...productAdapters("/synthetic/data"),
+    importer: productImporter(db),
   });
   valid = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
 });

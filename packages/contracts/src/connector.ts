@@ -18,6 +18,12 @@ export const SourceRecordSchema = z.strictObject({
   externalId: z.string().min(1),
   title: z.string(),
   body: z.string(),
+  /**
+   * The Connector's own version of this record, when it numbers them (a JSONL line's
+   * `version`). Storage keeps it beside its own version number and uses it only to
+   * order arrivals (V02-R2).
+   */
+  revision: z.int().min(1).optional(),
 });
 export type SourceRecord = z.infer<typeof SourceRecordSchema>;
 
