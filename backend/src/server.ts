@@ -73,7 +73,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     }
     if (!tokenMatches(req.headers.authorization, token)) return reject(res, 401, "unauthorized");
 
-    const match = matchRoute(routes, req.method, new URL(req.url, "http://_").pathname);
+    const match = matchRoute(routes, req.method, new URL(`http://_${req.url}`).pathname);
     if (typeof match !== "string") {
       return reject(res, match.error === "not-found" ? 404 : 405, match.error);
     }
