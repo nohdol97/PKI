@@ -18,7 +18,7 @@ import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } f
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
-import { providerCheckText, providerName } from "./provider-text.ts";
+import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
 import { componentText, embeddingText } from "./status-text.ts";
 
 const SCREENS = { home: "홈", sources: "원본", activity: "활동", settings: "설정" } as const;
@@ -439,7 +439,12 @@ function ConnectionTest({ api }: { api: ApiClient }) {
           </button>
         </div>
       ) : (
-        result && <p role="status">결과: {connectionTestText(result)}</p>
+        result && (
+          <>
+            <p role="status">결과: {connectionTestText(result)}</p>
+            {connectionTestGuidance(result) && <p>{connectionTestGuidance(result)}</p>}
+          </>
+        )
       )}
     </>
   );

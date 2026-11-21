@@ -5,7 +5,7 @@
 // is the CLI's own (cli-kill covers it), so the suite's 1 s budget is raised.
 import type { LLMRequest } from "@pki/contracts";
 import { installFakeCli, providerContract } from "@pki/testkit";
-import { afterAll, vi } from "vitest";
+import { afterAll, afterEach, expect, vi } from "vitest";
 import { CLI_PROFILES } from "../cli-profiles.ts";
 import { createClaudeCodeProvider, createCodexProvider } from "./cli-provider.ts";
 
@@ -14,6 +14,10 @@ vi.setConfig({ testTimeout: 30_000 });
 
 const answering = installFakeCli();
 const failing = installFakeCli({ mode: "fail-echo" });
+afterEach(async () => {
+  expect(await answering.leftovers()).toEqual([]);
+  expect(await failing.leftovers()).toEqual([]);
+});
 afterAll(() => {
   answering.dispose();
   failing.dispose();
@@ -29,7 +33,11 @@ for (const [id, cmd, create] of [
     prepare: <R extends LLMRequest>(request: R): R => ({
       ...request,
       budget: { timeoutMs: 30_000 }, // a fake CLI is a Node start: slow on a loaded machine
-      execution: { profile: CLI_PROFILES[id].standard, isolation: "verified" },
+      execution: {
+        profile: CLI_PROFILES[id].standard,
+        isolation: "verified",
+        model: "synthetic-model",
+      },
     }),
   });
 }

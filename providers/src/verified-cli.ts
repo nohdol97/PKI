@@ -16,6 +16,17 @@ export function isExactVersion(version: string | undefined): version is string {
   return typeof version === "string" && EXACT_VERSION.test(version);
 }
 
+/**
+ * A model name as the CLIs take it after `--model` / `-m`: one word that cannot be
+ * read as an option (V01-T10). R02 records the model it ran; its verdict holds for
+ * that model only, so an entry without one is invalid.
+ */
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,99}$/;
+
+export function isModelName(model: unknown): model is string {
+  return typeof model === "string" && MODEL_NAME.test(model);
+}
+
 const PROFILE_NAMES = Object.values(CLI_PROFILES).flatMap((p) => [p.standard, p.minimal]);
 
 const EntrySchema = z.strictObject({
@@ -23,6 +34,7 @@ const EntrySchema = z.strictObject({
   version: z.string().refine(isExactVersion),
   os: z.enum(["win32", "darwin", "linux"]),
   profile: z.enum(PROFILE_NAMES as [string, ...string[]]),
+  model: z.string().refine(isModelName),
   verifiedOn: z.iso.date(),
 });
 export type VerifiedCombination = Readonly<z.infer<typeof EntrySchema>>;

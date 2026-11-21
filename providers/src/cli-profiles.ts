@@ -7,16 +7,17 @@
 // Each profile records the R02 profile (verification/r02-cli-isolation/profiles.json)
 // with the same arguments, and how it differs: a deployment fork runs that R02
 // profile and lists this product profile's name with the result (site-setup S07).
-// Provisional (V01-T10): all four equal the narrowest R02 draft without R02's
-// `--model` pair (the product has no CLI model setting; the CLI's default model
-// runs), and `minimal` equals `standard` because that draft is already the least
-// privilege. The `cli-argv` test compares them with profiles.json.
+// Provisional (V01-T10): `standard` is exactly the narrowest R02 draft, its
+// `{model}` filled with the verified list entry's model (an R02 verdict holds for
+// the model it ran). `minimal` is the same draft without the model pair: the
+// development exception runs the CLI's default model, and is labelled unverified
+// anyway. The `cli-argv` test compares them with profiles.json.
 export const CLI_PROFILES = Object.freeze({
   "claude-code": Object.freeze({
-    standard: "claude-code/standard-1",
+    standard: "claude-code/standard-2",
     minimal: "claude-code/minimal-1",
   }),
-  codex: Object.freeze({ standard: "codex/standard-1", minimal: "codex/minimal-1" }),
+  codex: Object.freeze({ standard: "codex/standard-2", minimal: "codex/minimal-1" }),
 });
 
 export type CliId = keyof typeof CLI_PROFILES;
@@ -28,12 +29,20 @@ export function cliProfiles(id: string): (typeof CLI_PROFILES)[CliId] | undefine
 }
 
 /** What the Provider fills in for each run; nothing else in an argument varies. */
-export const PLACEHOLDERS = ["{schema_json}", "{schema_file}", "{result_file}", "{cwd}"] as const;
+export const PLACEHOLDERS = [
+  "{schema_json}",
+  "{schema_file}",
+  "{result_file}",
+  "{cwd}",
+  "{model}",
+] as const;
 
 export interface CliArguments {
   readonly cli: CliId;
   /** The arguments after the executable, placeholders unfilled. */
   readonly args: readonly string[];
+  /** The run needs a model (the verified list entry's) for its `{model}`. */
+  readonly needsModel: boolean;
   /** The flag carrying the output schema; dropped with its value for plain text output. */
   readonly schemaFlag: string;
   /** Variables the child gets on top of the minimal environment (R02 `env_set`). */
@@ -41,7 +50,8 @@ export interface CliArguments {
   readonly r02: { readonly profile: string; readonly differences: readonly string[] };
 }
 
-const NO_MODEL = "R02 `--model {model}` omitted: the CLI's default model runs (no product setting)";
+const NO_MODEL =
+  "R02 `--model {model}` omitted: the CLI's default model runs (development exception, unverified)";
 
 const CLAUDE_ARGS = Object.freeze([
   "-p",
@@ -68,6 +78,8 @@ const CLAUDE_ARGS = Object.freeze([
   "json",
   "--json-schema",
   "{schema_json}",
+  "--model",
+  "{model}",
 ]);
 
 const CODEX_ARGS = Object.freeze([
@@ -99,13 +111,22 @@ const CODEX_ARGS = Object.freeze([
   "-o",
   "{result_file}",
   "--json",
+  "-m",
+  "{model}",
   "-",
 ]);
 
-const claude = (): CliArguments =>
+/** The arguments without the model pair (`minimal`). */
+function withoutModel(args: readonly string[]): readonly string[] {
+  const at = args.indexOf("{model}");
+  return Object.freeze([...args.slice(0, at - 1), ...args.slice(at + 1)]);
+}
+
+const claude = (withModel: boolean): CliArguments =>
   Object.freeze({
     cli: "claude-code",
-    args: CLAUDE_ARGS,
+    args: withModel ? CLAUDE_ARGS : withoutModel(CLAUDE_ARGS),
+    needsModel: withModel,
     schemaFlag: "--json-schema",
     env: Object.freeze({
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
@@ -114,19 +135,20 @@ const claude = (): CliArguments =>
     }),
     r02: Object.freeze({
       profile: "claude-A-restricted-safe",
-      differences: Object.freeze([NO_MODEL]),
+      differences: Object.freeze(withModel ? [] : [NO_MODEL]),
     }),
   });
 
-const codex = (): CliArguments =>
+const codex = (withModel: boolean): CliArguments =>
   Object.freeze({
     cli: "codex",
-    args: CODEX_ARGS,
+    args: withModel ? CODEX_ARGS : withoutModel(CODEX_ARGS),
+    needsModel: withModel,
     schemaFlag: "--output-schema",
     env: Object.freeze({}),
     r02: Object.freeze({
       profile: "codex-A-full",
-      differences: Object.freeze([NO_MODEL.replace("--model", "-m")]),
+      differences: Object.freeze(withModel ? [] : [NO_MODEL.replace("--model", "-m")]),
     }),
   });
 
@@ -134,10 +156,10 @@ type Values<T> = T[keyof T];
 export type CliProfileName = Values<{ [Id in CliId]: Values<(typeof CLI_PROFILES)[Id]> }>;
 
 export const CLI_ARGUMENTS: Readonly<Record<CliProfileName, CliArguments>> = Object.freeze({
-  [CLI_PROFILES["claude-code"].standard]: claude(),
-  [CLI_PROFILES["claude-code"].minimal]: claude(),
-  [CLI_PROFILES.codex.standard]: codex(),
-  [CLI_PROFILES.codex.minimal]: codex(),
+  [CLI_PROFILES["claude-code"].standard]: claude(true),
+  [CLI_PROFILES["claude-code"].minimal]: claude(false),
+  [CLI_PROFILES.codex.standard]: codex(true),
+  [CLI_PROFILES.codex.minimal]: codex(false),
 });
 
 /** The arguments of `profile` for `cli`; undefined for any other name (inherited ones included). */

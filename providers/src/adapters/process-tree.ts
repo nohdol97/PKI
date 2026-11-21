@@ -4,8 +4,11 @@
 // POSIX: the child leads a new process group; ending it sends SIGTERM to the
 // group, then SIGKILL after a grace period. When the CLI exits by itself the
 // group is sent SIGKILL too, so nothing it left behind keeps running.
-// Known gap: a grandchild that leaves the group (setsid) is not reached.
-// Windows: `taskkill /PID <pid> /T /F` (unverified: never run, A04).
+// Known gaps: a grandchild that leaves the group (setsid) is not reached; whether
+// the real CLIs leave such descendants is unverified (R02 `descendants_at_kill`).
+// Windows: `taskkill /PID <pid> /T /F` while the CLI runs (unverified: never run,
+// A04). Windows has NO cleanup after a normal exit, and /T cannot find a grandchild
+// whose parent is gone; a kill-on-close Job Object is the candidate (owner T16/R04).
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 

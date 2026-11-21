@@ -21,12 +21,13 @@ import {
   type StructuredRequest,
   type StructuredResponse,
 } from "@pki/contracts";
-import { accessSync, constants, statSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { accessSync, constants, realpathSync, statSync } from "node:fs";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import { cliArguments, renderArguments, type CliArguments, type CliId } from "../cli-profiles.ts";
 import { log } from "../log.ts";
+import { isModelName } from "../verified-cli.ts";
 import { runTree, type TreeHandle } from "./process-tree.ts";
 
 export interface CliProviderOptions {
@@ -36,7 +37,11 @@ export interface CliProviderOptions {
   versionTimeoutMs?: number;
   /** SIGTERM to SIGKILL. Default 2 s (provisional). */
   killGraceMs?: number;
-  /** Where each run's temporary folder is made. Default the OS temporary folder. */
+  /**
+   * The folder holding each run's temporary folder, `<pid>.<random>` by the backend's
+   * process (default `<OS temp>/pki-cli`), so a later start can sweep what a crashed
+   * backend left (sweepStaleCliRuns).
+   */
   tempDir?: string;
 }
 
@@ -154,6 +159,54 @@ const CODEX: CliSpec = {
   },
 };
 
+/**
+ * The child's environment: the allowlisted variables of `source`, then the profile's
+ * additions; a credential name is dropped from both (R02 `build_env` checks `extra` too).
+ */
+export function childEnvironment(
+  source: Readonly<Record<string, string | undefined>>,
+  extra: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const forbidden = (key: string) =>
+    FORBIDDEN_PREFIXES.some((p) => key.toUpperCase().startsWith(p));
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined || !ENV_ALLOWLIST.has(key.toUpperCase()) || forbidden(key)) continue;
+    env[key] = value;
+  }
+  for (const [key, value] of Object.entries(extra)) {
+    if (!forbidden(key)) env[key] = value;
+  }
+  return env;
+}
+
+const defaultRunsRoot = () => join(tmpdir(), "pki-cli");
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Removes the run folders of backends that are gone (a crash, a kill): `<pid>.*`
+ * whose process no longer exists. A live process's folders and other names stay.
+ * Called when the backend starts (boot.ts); a run removes its own folder when it ends.
+ */
+export async function sweepStaleCliRuns(root: string = defaultRunsRoot()): Promise<void> {
+  const names = await readdir(root).catch(() => [] as string[]);
+  await Promise.all(
+    names.map(async (name) => {
+      const pid = /^([1-9]\d*)\./.exec(name)?.[1];
+      if (pid === undefined || alive(Number(pid))) return;
+      await rm(join(root, name), { recursive: true, force: true });
+    }),
+  );
+}
+
 /** The instructions, then the documents and candidates as JSON, labelled as data. */
 function prompt(request: LLMRequest): string {
   return (
@@ -181,6 +234,7 @@ class CliProvider implements LLMProvider {
   readonly #tempDir: () => string;
   /** Runs by the request ID the Broker gave each attempt (`<request>:<attempt>`). */
   readonly #running = new Map<string, Running>();
+  #closed = false;
 
   constructor(spec: CliSpec, options: CliProviderOptions) {
     this.#spec = spec;
@@ -190,10 +244,14 @@ class CliProvider implements LLMProvider {
     this.#queryTimeoutMs = options.versionTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
     this.#killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
     const temp = options.tempDir;
-    this.#tempDir = () => temp ?? tmpdir();
+    this.#tempDir = () => temp ?? defaultRunsRoot();
   }
 
-  /** The first absolute PATH entry holding the executable; relative entries are skipped. */
+  /**
+   * The executable in the first absolute PATH entry holding it, by its real path:
+   * a self-updating CLI is a symbolic link its updater moves, so the link itself
+   * could name another version by the time it runs. Relative entries are skipped.
+   */
   #find(): string | undefined {
     const source = this.#env();
     const path = source.PATH ?? source.Path ?? "";
@@ -204,7 +262,7 @@ class CliProvider implements LLMProvider {
       try {
         if (!statSync(candidate).isFile()) continue;
         if (process.platform !== "win32") accessSync(candidate, constants.X_OK);
-        return candidate;
+        return realpathSync(candidate);
       } catch {
         // not here
       }
@@ -212,21 +270,15 @@ class CliProvider implements LLMProvider {
     return undefined;
   }
 
-  /** The allowlisted variables of the source, then the profile's own; no credential names. */
   #childEnv(extra: Readonly<Record<string, string>>): Record<string, string> {
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(this.#env())) {
-      const upper = key.toUpperCase();
-      if (value === undefined || !ENV_ALLOWLIST.has(upper)) continue;
-      if (FORBIDDEN_PREFIXES.some((p) => upper.startsWith(p))) continue;
-      env[key] = value;
-    }
-    return { ...env, ...extra };
+    return childEnvironment(this.#env(), extra);
   }
 
-  /** A new empty folder for one run, by its real path (no symbolic link in it). */
+  /** A new empty folder for one run, named by this process, by its real path. */
   async #workFolder(): Promise<string> {
-    return realpath(await mkdtemp(join(this.#tempDir(), "pki-cli-")));
+    const root = this.#tempDir();
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    return realpath(await mkdtemp(join(root, `${process.pid}.`)));
   }
 
   /** A fixed-argument query with no input, ended at the query time limit. */
@@ -293,6 +345,15 @@ class CliProvider implements LLMProvider {
     return { output: await this.#call(request, signal, "structured", request.outputSchema) };
   }
 
+  /**
+   * Backend shutdown: ends every call still running, whole process trees, waits
+   * for them, and refuses calls from then on (a detached tree would outlive the backend).
+   */
+  async close(): Promise<void> {
+    this.#closed = true;
+    await Promise.all([...this.#running.keys()].map((id) => this.cancel(id)));
+  }
+
   async cancel(requestId: string): Promise<void> {
     const running = this.#running.get(requestId);
     if (!running) return;
@@ -307,6 +368,7 @@ class CliProvider implements LLMProvider {
     schema: StructuredRequest["outputSchema"] | undefined,
   ): Promise<unknown> {
     const id = request.requestId;
+    if (this.#closed) throw fail("cli-closed", false);
     if (this.#running.has(id)) throw fail("cli-duplicate-request", false);
     // registered at once, so a cancel that comes before the process starts stops it
     const running: Running = { cancelled: false };
@@ -322,7 +384,8 @@ class CliProvider implements LLMProvider {
     }
   }
 
-  #profile(request: LLMRequest): CliArguments {
+  /** The named profile, and the model it runs (a standard profile's must be the listed one). */
+  #profile(request: LLMRequest): { profile: CliArguments; model: string } {
     const execution = request.execution;
     const isolation = execution?.isolation;
     const profile =
@@ -330,7 +393,10 @@ class CliProvider implements LLMProvider {
         ? cliArguments(this.id, execution?.profile)
         : undefined;
     if (!profile) throw fail("cli-profile-refused", false);
-    return profile;
+    if (!profile.needsModel) return { profile, model: "" };
+    const model = execution?.model;
+    if (!isModelName(model)) throw fail("cli-model-refused", false);
+    return { profile, model };
   }
 
   /** The executable the version query ran; found once here only when the request brings none. */
@@ -356,7 +422,7 @@ class CliProvider implements LLMProvider {
   ): Promise<unknown> {
     const stopped = () => running.cancelled || signal.aborted;
     if (stopped()) throw fail("cli-cancelled", false);
-    const profile = this.#profile(request);
+    const { profile, model } = this.#profile(request);
     const executable = this.#executable(request);
     const work = await this.#workFolder();
     try {
@@ -373,6 +439,7 @@ class CliProvider implements LLMProvider {
           "{schema_file}": schemaFile,
           "{result_file}": resultFile,
           "{cwd}": cwd,
+          "{model}": model,
         },
         output,
       );

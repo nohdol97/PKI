@@ -168,4 +168,6 @@ test("with both CLIs found, the user picks the default and the next test goes to
   await openSettings(page);
   await expect(claude).toBeChecked();
   expect(fake.modelCalls()).toBe(0);
+  expect(await fake.leftovers()).toEqual([]);
+  fake.dispose();
 });

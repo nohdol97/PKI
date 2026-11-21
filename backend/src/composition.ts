@@ -28,6 +28,7 @@ import {
   createCodexProvider,
   createLocalEmbedder,
   OpenAICompatibleProvider,
+  sweepStaleCliRuns,
 } from "@pki/providers/adapters";
 import {
   createExtractHandler,
@@ -111,6 +112,11 @@ export function productProviders(
       egress,
     }),
   ];
+}
+
+/** At start: removes CLI run folders a crashed or killed backend left (V01-T10). */
+export function sweepCliRuns(): Promise<void> {
+  return sweepStaleCliRuns();
 }
 
 export interface CallsOptions {

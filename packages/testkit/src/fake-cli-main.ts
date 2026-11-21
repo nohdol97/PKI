@@ -127,6 +127,11 @@ async function model(): Promise<void> {
       return void hang();
     case "stubborn":
       return stubborn();
+    case "flood": {
+      const out = config.floodStream === "stderr" ? process.stderr : process.stdout;
+      out.write("x".repeat(2 * 1024 * 1024));
+      return stubborn();
+    }
     case "fail-echo":
       process.stderr.write(`${config.marker ?? "ECHO"} ${stdin}\n`);
       process.stdout.write(`${config.marker ?? "ECHO"} ${stdin}\n`);
@@ -177,6 +182,10 @@ if (args.length === 1 && args[0] === "--version") {
       break;
     case "fail":
       process.exit(1);
+      break;
+    case "print-and-fail":
+      process.stdout.write(`${config.version} (Claude Code)\n`);
+      process.exitCode = 1;
       break;
     default:
       process.stdout.write(

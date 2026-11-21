@@ -1,7 +1,7 @@
 // V01-R5 (안내): a CLI that is not installed shows how to install it; one that is
 // not logged in, or whose login cannot be told, shows how to log in.
 import { describe, expect, it } from "vitest";
-import { providerCheckText, providerName } from "./provider-text.ts";
+import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
 
 const check = (over: Partial<Parameters<typeof providerCheckText>[0]>) => ({
   providerId: "codex" as const,
@@ -72,5 +72,34 @@ describe("provider text", () => {
       state: "주소 설정됨",
       guidance: null,
     });
+  });
+
+  it("says on Windows that only the native .exe install runs", () => {
+    for (const providerId of ["claude-code", "codex"] as const) {
+      const text = providerCheckText(
+        check({ providerId, installed: false, version: null, authentication: "unknown" }),
+      );
+      expect(text.guidance).toContain(".exe");
+      expect(text.guidance).toContain(".cmd");
+    }
+  });
+
+  it("guides from a connection test result that carries a check", () => {
+    expect(
+      connectionTestGuidance({ outcome: "blocked", reason: "no-consent", isolation: null }),
+    ).toBeNull();
+    const missing = connectionTestGuidance({
+      outcome: "blocked",
+      reason: "cli-not-verified",
+      isolation: null,
+      providerCheck: {
+        providerId: "claude-code",
+        installed: false,
+        version: null,
+        authentication: "unknown",
+      },
+    });
+    expect(missing).toContain("Claude Code: 설치되어 있지 않음");
+    expect(missing).toContain("설치:");
   });
 });

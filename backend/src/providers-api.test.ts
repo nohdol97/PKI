@@ -4,7 +4,8 @@
 // two queries that need no decision, against the fake CLI on a test PATH.
 import { routes, type ProviderCall } from "@pki/contracts";
 import { createClaudeCodeProvider, createCodexProvider } from "@pki/providers/adapters";
-import type { SqlDriver } from "@pki/storage";
+import { writeSetting, type SqlDriver } from "@pki/storage";
+import { DEFAULT_PROVIDER_SETTING } from "@pki/providers";
 import { installFakeCli, send, type FakeCli } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,6 +56,7 @@ beforeEach(async () => {
   await start(fake.bin);
 });
 afterEach(async () => {
+  expect(await fake.leftovers()).toEqual([]);
   await server.close();
   db.close();
   rmSync(dir, { recursive: true, force: true });
@@ -134,6 +136,80 @@ describe("providers API", () => {
         .sort(),
     ).toEqual(["claude --version", "codex --version", "codex login status"]);
     expect(fake.modelCalls()).toBe(0);
+  });
+
+  it("adds install or login guidance to a connection test the default CLI cannot serve", async () => {
+    const consent = async (providerId: "codex" | "claude-code") => {
+      const { policyVersion } = (await get(routes.consents.path)).body as { policyVersion: string };
+      await post(routes.grantConsent.path, {
+        providerId,
+        allowedClasses: ["synthetic"],
+        destination: `vendor:${providerId}`,
+        policyVersion,
+      });
+    };
+    await post(routes.setDefaultProvider.path, { providerId: "codex" });
+    // before consent the CLI is not why: nothing is queried and nothing is added
+    expect((await connectionTest()).body).toEqual({
+      outcome: "blocked",
+      reason: "no-consent",
+      isolation: null,
+    });
+    await consent("codex");
+    // installed and logged in, but not listed (deciding as production): nothing to guide
+    const versionRuns = fake.runs().length;
+    expect((await connectionTest()).body).toEqual({
+      outcome: "blocked",
+      reason: "cli-not-verified",
+      isolation: null,
+    });
+    expect(fake.runs().length).toBeGreaterThan(versionRuns);
+    fake.configure({ auth: "logged-out" });
+    expect((await connectionTest()).body).toEqual({
+      outcome: "blocked",
+      reason: "cli-not-verified",
+      isolation: null,
+      providerCheck: {
+        providerId: "codex",
+        installed: true,
+        version: "2.1.3",
+        authentication: "unauthenticated",
+      },
+    });
+    await server.close();
+    await start(join(dir, "data")); // nothing on PATH
+    await post(routes.setDefaultProvider.path, { providerId: "claude-code" });
+    await consent("claude-code");
+    expect((await connectionTest()).body).toEqual({
+      outcome: "blocked",
+      reason: "cli-not-verified",
+      isolation: null,
+      providerCheck: {
+        providerId: "claude-code",
+        installed: false,
+        version: null,
+        authentication: "unknown",
+      },
+    });
+    expect(fake.modelCalls()).toBe(0);
+  });
+
+  it("shows no default and calls none when the stored one is not bound", async () => {
+    writeSetting(db, DEFAULT_PROVIDER_SETTING, "openai-compatible"); // a Provider this server lacks
+    expect((await get(routes.providers.path)).body).toMatchObject({ defaultProvider: null });
+    expect((await connectionTest()).body).toMatchObject({ reason: "no-provider" });
+  });
+
+  it("runs one check for requests that arrive while it is running", async () => {
+    const answers = await Promise.all([
+      post(routes.checkProviders.path),
+      post(routes.checkProviders.path),
+      post(routes.checkProviders.path),
+    ]);
+    expect(new Set(answers.map((a) => JSON.stringify(a))).size).toBe(1);
+    expect(fake.runs()).toHaveLength(3); // claude --version, codex --version, codex login status
+    await post(routes.checkProviders.path); // a later request checks again
+    expect(fake.runs()).toHaveLength(6);
   });
 
   it("reports CLIs that are not installed", async () => {

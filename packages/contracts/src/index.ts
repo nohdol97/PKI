@@ -218,6 +218,15 @@ export const ConsentRevokeRequestSchema = z.strictObject({ providerId: ProviderI
  */
 export const ConnectionTestRequestSchema = z.strictObject({ acknowledgeUnverified: z.boolean() });
 
+/** One Provider's answer to the version and login status queries (V01-R9). */
+const ProviderCheckSchema = z.object({
+  providerId: ProviderIdSchema,
+  installed: z.boolean(),
+  version: z.string().nullable(),
+  authentication: z.enum(["authenticated", "unauthenticated", "unknown"]),
+});
+export type ProviderCheck = z.infer<typeof ProviderCheckSchema>;
+
 /** A code, never Provider text: a block reason, a Broker rejection. */
 const ReasonCode = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
@@ -234,6 +243,12 @@ export const ConnectionTestResponseSchema = z.object({
   outcome: z.enum(["ok", "blocked", "failed", "rejected"]),
   reason: ReasonCode.nullable(),
   isolation: z.enum(["verified", "unverified"]).nullable(),
+  /**
+   * When a test that did not succeed went to a CLI that is not installed or not
+   * logged in: what its two queries found, so the screen can guide (V01-R5). A
+   * listed-only gate reports a missing CLI as `cli-not-verified`; this says why.
+   */
+  providerCheck: ProviderCheckSchema.optional(),
 });
 export type ConnectionTestResult = z.infer<typeof ConnectionTestResponseSchema>;
 
@@ -263,16 +278,8 @@ export const DefaultProviderRequestSchema = z.strictObject({ providerId: Provide
  * input. The screen turns them into install and login guidance (V01-R5).
  */
 export const ProviderCheckResponseSchema = z.object({
-  providers: z.array(
-    z.object({
-      providerId: ProviderIdSchema,
-      installed: z.boolean(),
-      version: z.string().nullable(),
-      authentication: z.enum(["authenticated", "unauthenticated", "unknown"]),
-    }),
-  ),
+  providers: z.array(ProviderCheckSchema),
 });
-export type ProviderCheck = z.infer<typeof ProviderCheckResponseSchema>["providers"][number];
 
 /**
  * Starts preparing the embedding model (V01-R14, ADR 0006): from a local pack

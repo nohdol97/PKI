@@ -5,16 +5,24 @@
 // (the development OS); the Windows path (`taskkill /T /F`) is unverified (A04).
 import { ProviderError, type StructuredRequest } from "@pki/contracts";
 import { installFakeCli, processAlive, structuredRequest, type FakeCli } from "@pki/testkit";
-import { existsSync } from "node:fs";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLI_PROFILES } from "../cli-profiles.ts";
-import { createClaudeCodeProvider, createCodexProvider } from "./cli-provider.ts";
+import {
+  createClaudeCodeProvider,
+  createCodexProvider,
+  sweepStaleCliRuns,
+} from "./cli-provider.ts";
 
 // every fake CLI run is a Node start: slow when the whole suite runs in parallel
 vi.setConfig({ testTimeout: 30_000 });
 
 const fake: FakeCli = installFakeCli();
 afterAll(() => fake.dispose());
+// leak check: every test ends its trees; whatever one leaves is killed and fails it
+afterEach(async () => expect(await fake.leftovers()).toEqual([]));
 beforeEach(() => {
   fake.reset();
   fake.configure({});
@@ -51,7 +59,11 @@ describe.skipIf(process.platform === "win32").each(PROVIDERS)("cli-kill: $id", (
   const request = (requestId: string, timeoutMs = 60_000): StructuredRequest => ({
     ...structuredRequest(requestId),
     budget: { timeoutMs },
-    execution: { profile: CLI_PROFILES[id].standard, isolation: "verified" },
+    execution: {
+      profile: CLI_PROFILES[id].standard,
+      isolation: "verified",
+      model: "synthetic-model",
+    },
   });
 
   it("ends the whole tree when the signal aborts, though the CLI ignores SIGTERM", async () => {
@@ -107,11 +119,82 @@ describe.skipIf(process.platform === "win32").each(PROVIDERS)("cli-kill: $id", (
     await treeGone();
   });
 
+  it.each(["stdout", "stderr"] as const)(
+    "ends the tree of a CLI that floods %s past 1 MiB, as a failure not to retry",
+    async (stream) => {
+      fake.configure({ mode: "flood", floodStream: stream });
+      const error = await failure(
+        provider().generateStructured(
+          request(`flood-${stream}:1`, 20_000),
+          new AbortController().signal,
+        ),
+      );
+      expect(error).toBeInstanceOf(ProviderError);
+      expect((error as ProviderError).message).toBe("cli-output-too-large");
+      expect((error as ProviderError).retryable).toBe(false);
+      await treeGone();
+    },
+  );
+
+  it("ends every running tree on close (backend shutdown) and refuses new calls", async () => {
+    fake.configure({ mode: "stubborn" });
+    const p = provider();
+    const calls = [
+      failure(p.generateStructured(request("close:1"), new AbortController().signal)),
+      failure(p.generateStructured(request("close:2"), new AbortController().signal)),
+    ];
+    await until(() => fake.spawned().length === 2);
+    await p.close?.();
+    for (const error of await Promise.all(calls)) expect(error).toBeInstanceOf(ProviderError);
+    await treeGone();
+    expect(fake.spawned().flatMap((s) => [s.child, s.grandchild])).toHaveLength(4);
+    const late = await failure(
+      p.generateStructured(request("close:3"), new AbortController().signal),
+    );
+    expect(late).toBeInstanceOf(ProviderError);
+    expect(fake.modelCalls()).toBe(2);
+  });
+
+  it("refuses a second call under a request ID still running, leaving the first", async () => {
+    fake.configure({ mode: "stubborn" });
+    const p = provider();
+    const first = failure(p.generateStructured(request("dup:1"), new AbortController().signal));
+    await until(() => fake.spawned().length === 1);
+    const second = await failure(
+      p.generateStructured(request("dup:1"), new AbortController().signal),
+    );
+    expect((second as ProviderError).message).toBe("cli-duplicate-request");
+    expect(fake.spawned().every((s) => processAlive(s.child))).toBe(true);
+    await p.cancel("dup:1");
+    expect(await first).toBeInstanceOf(ProviderError);
+    await treeGone();
+  });
+
   it("stops a call cancelled before its process started", async () => {
     const p = provider();
     const call = failure(p.generateStructured(request("early:1"), new AbortController().signal));
     await p.cancel("early:1");
     expect(await call).toBeInstanceOf(ProviderError);
     expect(fake.modelCalls()).toBe(0);
+  });
+});
+
+describe("cli-kill: run folders a crashed backend left", () => {
+  it("are swept at start; a live process's folders stay", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pki-cli-sweep-"));
+    try {
+      // a PID that cannot be alive (beyond pid_max) and this process's own
+      mkdirSync(join(root, "99999999.abc"));
+      mkdirSync(join(root, `${process.pid}.xyz`));
+      mkdirSync(join(root, "not-a-run"));
+      await sweepStaleCliRuns(root);
+      expect(readdirSync(root).sort()).toEqual([`${process.pid}.xyz`, "not-a-run"].sort());
+      // a run's own folder is named by its process, under the root
+      fake.configure({});
+      await createClaudeCodeProvider({ env: { PATH: fake.bin }, tempDir: root }).detect();
+      expect(readdirSync(root).sort()).toEqual([`${process.pid}.xyz`, "not-a-run"].sort());
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

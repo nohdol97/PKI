@@ -23,6 +23,7 @@ const listed = [
     version: VERSION,
     os: OS,
     profile: CLI_PROFILES["claude-code"].standard,
+    model: "synthetic-model",
     verifiedOn: "2026-12-01",
   },
 ];
@@ -112,7 +113,11 @@ describe("execution gate", () => {
     const gate = createExecutionGate({ db: db(), testBuild: { verified: listed } });
     expect(gate.decide(user)).toEqual({
       run: true,
-      cli: { profile: CLI_PROFILES["claude-code"].standard, isolation: "verified" },
+      cli: {
+        profile: CLI_PROFILES["claude-code"].standard,
+        isolation: "verified",
+        model: "synthetic-model",
+      },
     });
   });
 

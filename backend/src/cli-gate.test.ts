@@ -33,6 +33,7 @@ const LISTED = {
   version: VERSION,
   os: OS,
   profile: STANDARD,
+  model: "synthetic-model",
   verifiedOn: "2026-12-01",
 };
 
@@ -193,8 +194,9 @@ describe("listed combination, deciding as production", () => {
       reason: null,
       isolation: "verified",
     });
+    // the listed model runs: R02's verdict holds for that model only
     expect(s.provider.requests.map((r) => r.execution)).toEqual([
-      { profile: STANDARD, isolation: "verified" },
+      { profile: STANDARD, isolation: "verified", model: "synthetic-model" },
     ]);
   });
 
@@ -203,7 +205,7 @@ describe("listed combination, deciding as production", () => {
     expect((await s.background(true)).body).toEqual({ cliBackground: true });
     expect(await s.backgroundExtract(store(plain))).toMatchObject({
       status: "ok",
-      cli: { profile: STANDARD, isolation: "verified" },
+      cli: { profile: STANDARD, isolation: "verified", model: "synthetic-model" },
     });
     expect(s.provider.requests).toHaveLength(1);
     expect(s.provider.requests[0]?.trigger).toBe("background");

@@ -2,26 +2,36 @@
 // `codex` on a temporary folder meant to be the whole PATH. Each is a shell
 // wrapper running fake-cli-main.ts with this Node; see that file for what they
 // emulate. POSIX only (the wrappers are /bin/sh scripts).
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export type FakeCliMode = "ok" | "fail-echo" | "garbage" | "hang" | "stubborn";
+export type FakeCliMode = "ok" | "fail-echo" | "garbage" | "hang" | "stubborn" | "flood";
 
 export interface FakeCliConfig {
-  /** What a model call does: answer (default), fail echoing stdin after `marker`, print non-JSON, hang, or ignore SIGTERM and leave a grandchild. */
+  /** What a model call does: answer (default), fail echoing stdin after `marker`, print non-JSON, hang, ignore SIGTERM and leave a grandchild, or flood a stream with 2 MiB then do the same. */
   mode?: FakeCliMode;
   /** The bare version; the printed line wraps it as each CLI does. */
   version?: string;
   /** Printed instead of the wrapped version line. */
   versionOutput?: string;
-  /** The version query answers, fails, or hangs ignoring SIGTERM with a grandchild. */
-  versionMode?: "ok" | "fail" | "hang";
+  /** The version query answers, fails, prints its version but exits 1, or hangs ignoring SIGTERM with a grandchild. */
+  versionMode?: "ok" | "fail" | "print-and-fail" | "hang";
   /** `codex login status`. */
   auth?: "logged-in" | "logged-out";
   /** The structured output of a model call; default a value of the schema's required fields. */
   output?: unknown;
   marker?: string;
+  /** "flood": the stream that gets 2 MiB before the CLI hangs like "stubborn". Default stdout. */
+  floodStream?: "stdout" | "stderr";
   /** A model call that answers also leaves a grandchild running. */
   leaveGrandchild?: boolean;
 }
@@ -49,6 +59,13 @@ export interface FakeCli {
   modelCalls(name?: "claude" | "codex"): number;
   /** PIDs a "stubborn" or `leaveGrandchild` run left: the CLI process and its grandchild. */
   spawned(): { child: number; grandchild: number }[];
+  /**
+   * Leak check: waits up to `waitMs` for every process this fake started (each run and
+   * each grandchild) to end, then kills the ones still there and returns their PIDs.
+   * A test that leaves none gets []; the host keeps nothing either way.
+   */
+  leftovers(waitMs?: number): Promise<number[]>;
+  /** Removes the fake's folder, after killing anything it left. */
   dispose(): void;
 }
 
@@ -56,7 +73,8 @@ const MAIN = join(import.meta.dirname, "fake-cli-main.ts");
 const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
 export function installFakeCli(config: FakeCliConfig = {}, parent = tmpdir()): FakeCli {
-  const root = mkdtempSync(join(parent, "pki-fake-cli-"));
+  // by its real path: the Providers report the real path of what they found
+  const root = realpathSync(mkdtempSync(join(parent, "pki-fake-cli-")));
   const bin = join(root, "bin");
   const state = join(root, "state");
   mkdirSync(bin);
@@ -83,6 +101,11 @@ export function installFakeCli(config: FakeCliConfig = {}, parent = tmpdir()): F
     }
   };
   const runs = () => lines("calls.jsonl") as FakeCliRun[];
+  const spawned = () => lines("pids.jsonl") as { child: number; grandchild: number }[];
+  /** Every PID this fake started: its runs and their grandchildren. */
+  const started = () => [
+    ...new Set([...runs().map((r) => r.pid), ...spawned().flatMap((s) => [s.child, s.grandchild])]),
+  ];
   return {
     bin,
     path: (name) => join(bin, name),
@@ -94,8 +117,20 @@ export function installFakeCli(config: FakeCliConfig = {}, parent = tmpdir()): F
     runs,
     modelCalls: (name) =>
       runs().filter((r) => r.kind === "model" && (name === undefined || r.name === name)).length,
-    spawned: () => lines("pids.jsonl") as { child: number; grandchild: number }[],
-    dispose: () => rmSync(root, { recursive: true, force: true }),
+    spawned,
+    leftovers: async (waitMs = 3_000) => {
+      const end = Date.now() + waitMs;
+      while (started().some(processAlive) && Date.now() < end) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      const alive = started().filter(processAlive);
+      for (const pid of alive) kill(pid);
+      return alive;
+    },
+    dispose: () => {
+      for (const pid of started().filter(processAlive)) kill(pid);
+      rmSync(root, { recursive: true, force: true });
+    },
   };
 }
 
@@ -106,5 +141,15 @@ export function processAlive(pid: number): boolean {
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function kill(pid: number): void {
+  for (const target of [-pid, pid]) {
+    try {
+      process.kill(target, "SIGKILL");
+    } catch {
+      // not a group leader, or gone already
+    }
   }
 }

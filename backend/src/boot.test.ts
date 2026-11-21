@@ -6,6 +6,7 @@
 // is blocked by the egress decision; with endpoint, model, key and consent it reaches
 // the endpoint, through the same egress instance the consent API wrote.
 import { routes, type SecretSource } from "@pki/contracts";
+import { CLI_PROFILES } from "@pki/providers";
 import { openaiKeySecretName } from "@pki/providers";
 import {
   readSetting,
@@ -14,13 +15,22 @@ import {
   saveSourceRecord,
   type SqlDriver,
 } from "@pki/storage";
-import { completion, send, startFakeOpenAI, type FakeHttpReply } from "@pki/testkit";
+import { createClaudeCodeProvider } from "@pki/providers/adapters";
+import {
+  completion,
+  FakeProvider,
+  installFakeCli,
+  processAlive,
+  send,
+  startFakeOpenAI,
+  type FakeHttpReply,
+} from "@pki/testkit";
 import { connect } from "node:net";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bootBackend } from "./boot.ts";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { bootBackend, closeProviders } from "./boot.ts";
 import { HELD_POLICY_SETTING, openCanonicalDb } from "./composition.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
@@ -291,5 +301,54 @@ describe("bootBackend", () => {
         await endpoint.close();
       }
     });
+  });
+});
+
+describe("closeProviders (backend shutdown, V01-T10)", () => {
+  it("ends a CLI call still running, its whole tree, before the backend exits", async () => {
+    // its own folder: afterEach removes `dir` before onTestFinished runs the leak check
+    const fake = installFakeCli({ mode: "stubborn" });
+    onTestFinished(async () => {
+      // leak check: whatever the shutdown left is killed, and fails the test
+      expect(await fake.leftovers()).toEqual([]);
+      fake.dispose();
+    });
+    const provider = createClaudeCodeProvider({ env: { PATH: fake.bin }, killGraceMs: 200 });
+    const call = provider
+      .generateStructured(
+        {
+          requestId: "shutdown:1",
+          taskKind: "connection-test",
+          trigger: "user",
+          dataClassification: "synthetic",
+          egress: { allowed: true, destination: "vendor:claude-code", policyVersion: "pv" },
+          schemaVersion: 1,
+          budget: { timeoutMs: 60_000 },
+          retryable: false,
+          input: { instructions: "x", untrustedDocuments: [], candidates: [] },
+          execution: {
+            profile: CLI_PROFILES["claude-code"].standard,
+            isolation: "verified",
+            model: "synthetic-model",
+          },
+          outputSchema: { type: "object" },
+        },
+        new AbortController().signal,
+      )
+      .catch((e: unknown) => e);
+    while (fake.spawned().length === 0) await new Promise((r) => setTimeout(r, 20));
+    await closeProviders([provider], 10_000);
+    expect(await call).toBeInstanceOf(Error);
+    const pids = fake.spawned().flatMap((s) => [s.child, s.grandchild]);
+    const end = Date.now() + 5_000;
+    while (pids.some(processAlive) && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+    expect(pids.filter(processAlive)).toEqual([]);
+  }, 30_000);
+
+  it("does not wait past its limit for a Provider whose close never ends", async () => {
+    const stuck = Object.assign(new FakeProvider(), { close: () => new Promise<void>(() => {}) });
+    const started = Date.now();
+    await closeProviders([stuck, new FakeProvider()], 200);
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 });

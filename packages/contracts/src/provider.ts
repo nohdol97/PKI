@@ -91,6 +91,12 @@ export interface LLMRequest {
     readonly profile: string;
     readonly isolation: "verified" | "unverified";
     /**
+     * The model a verified combination runs: the verified list entry's, since an
+     * R02 verdict holds for the model it ran (V01-T10). The unverified minimal
+     * profile runs the CLI's default model and carries none.
+     */
+    readonly model?: string;
+    /**
      * The absolute path this attempt's version query ran (the Provider's own
      * `detect().path`, carried by the Broker): the CLI runs that executable and
      * looks for no other, so the version judged is the version that runs.
@@ -141,6 +147,12 @@ export interface LLMProvider {
   generateStructured(request: StructuredRequest, signal: AbortSignal): Promise<StructuredResponse>;
   /** Stops a running request; an unknown ID is not an error. */
   cancel(requestId: string): Promise<void>;
+  /**
+   * Backend shutdown: stops every running request (a CLI's whole process tree),
+   * waits for them and refuses new ones. Optional: a Provider with nothing that
+   * outlives the backend has none.
+   */
+  close?(): Promise<void>;
 }
 
 /**

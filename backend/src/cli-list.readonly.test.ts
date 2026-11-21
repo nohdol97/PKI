@@ -22,6 +22,7 @@ const ENTRY = {
   version: "2.1.3",
   os: platform(),
   profile: CLI_PROFILES["claude-code"].standard,
+  model: "synthetic-model",
   verifiedOn: "2026-12-01",
 };
 // the build value's names, spelled in pieces (only build-kind.ts may name them)

@@ -1,7 +1,7 @@
 // Words for the Providers in Settings (V01-R5, R9), in one place: their names, what
 // "Provider 확인" found, and how to install a CLI or log in to it. The addresses are
 // the vendor documents the CLI research cites (docs/research, sections 3 and 4).
-import type { ProviderCheck, ProviderId } from "@pki/contracts";
+import type { ConnectionTestResult, ProviderCheck, ProviderId } from "@pki/contracts";
 
 const NAME: Readonly<Record<ProviderId, string>> = {
   "claude-code": "Claude Code",
@@ -10,11 +10,17 @@ const NAME: Readonly<Record<ProviderId, string>> = {
   "local-model": "로컬 모델",
 };
 
+/** The product runs no shell, so on Windows it finds `<name>.exe` only (V01-T10, unverified). */
+const WINDOWS_NOTE =
+  " Windows에서는 실행 파일(.exe)로 설치된 CLI만 찾습니다. npm으로 설치해 생기는 .cmd 실행 파일은 지원하지 않습니다(미검증).";
+
 const INSTALL: Partial<Record<ProviderId, string>> = {
   "claude-code":
-    "설치: https://code.claude.com/docs/en/ 의 안내대로 Claude Code를 설치한 뒤, 터미널에서 `claude`를 실행해 로그인하세요.",
+    "설치: https://code.claude.com/docs/en/ 의 안내대로 Claude Code를 설치한 뒤, 터미널에서 `claude`를 실행해 로그인하세요." +
+    WINDOWS_NOTE,
   codex:
-    "설치: https://developers.openai.com/codex/ 의 안내대로 Codex CLI를 설치한 뒤, 터미널에서 `codex login`으로 로그인하세요.",
+    "설치: https://developers.openai.com/codex/ 의 안내대로 Codex CLI를 설치한 뒤, 터미널에서 `codex login`으로 로그인하세요." +
+    WINDOWS_NOTE,
 };
 
 const LOGIN: Partial<Record<ProviderId, string>> = {
@@ -56,4 +62,12 @@ export function providerCheckText(check: ProviderCheck): {
     state: `설치됨(${version}), ${AUTH[check.authentication]}`,
     guidance: check.authentication === "authenticated" ? null : (LOGIN[check.providerId] ?? null),
   };
+}
+
+/** The guidance a connection test result carries (its default CLI missing or logged out), or none. */
+export function connectionTestGuidance(result: ConnectionTestResult): string | null {
+  if (!result.providerCheck) return null;
+  const { state, guidance } = providerCheckText(result.providerCheck);
+  const line = `${providerName(result.providerCheck.providerId)}: ${state}`;
+  return guidance ? `${line}. ${guidance}` : line;
 }

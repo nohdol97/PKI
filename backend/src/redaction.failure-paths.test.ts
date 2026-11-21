@@ -282,7 +282,11 @@ describe("failure paths leave no input behind", () => {
               execution: {
                 decide: () => ({
                   run: true,
-                  cli: { profile: CLI_PROFILES[id].standard, isolation: "verified" },
+                  cli: {
+                    profile: CLI_PROFILES[id].standard,
+                    isolation: "verified",
+                    model: "synthetic-model",
+                  },
                 }),
               },
               recorder: createCallRecorder(db),

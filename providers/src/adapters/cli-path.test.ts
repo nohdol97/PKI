@@ -6,7 +6,10 @@ import { ProviderError, type StructuredRequest } from "@pki/contracts";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { installFakeCli, structuredRequest, type FakeCli } from "@pki/testkit";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBroker, type ExecutionInput } from "../broker.ts";
 import { CLI_PROFILES } from "../cli-profiles.ts";
 import { createUserActionLedger } from "../user-actions.ts";
@@ -20,6 +23,10 @@ const b: FakeCli = installFakeCli({ version: "2.1.4" });
 afterAll(() => {
   a.dispose();
   b.dispose();
+});
+afterEach(async () => {
+  expect(await a.leftovers()).toEqual([]);
+  expect(await b.leftovers()).toEqual([]);
 });
 beforeEach(() => {
   for (const f of [a, b]) {
@@ -35,6 +42,7 @@ const request = (executable?: string): StructuredRequest => ({
   execution: {
     profile: PROFILE,
     isolation: "verified",
+    model: "synthetic-model",
     ...(executable === undefined ? {} : { executable }),
   },
 });
@@ -49,6 +57,24 @@ describe("cli path: the Provider", () => {
     env.PATH = b.bin; // the CLI moved or PATH changed after the decision
     await provider.generateStructured(request(info.path), live());
     expect([a.modelCalls(), b.modelCalls()]).toEqual([1, 0]);
+  });
+
+  it("runs the real file the query ran, though the symbolic link moved in between", async () => {
+    // a self-updating CLI: PATH holds a link the updater points at a new version
+    const links = mkdtempSync(join(tmpdir(), "pki-cli-link-"));
+    try {
+      const link = join(links, "claude");
+      symlinkSync(a.path("claude"), link);
+      const provider = createClaudeCodeProvider({ env: { PATH: links } });
+      const info = await provider.detect();
+      expect(info).toMatchObject({ path: realpathSync(a.path("claude")), version: "2.1.3" });
+      unlinkSync(link);
+      symlinkSync(b.path("claude"), link); // the update lands between the query and the run
+      await provider.generateStructured(request(info.path), live());
+      expect([a.modelCalls(), b.modelCalls()]).toEqual([1, 0]);
+    } finally {
+      rmSync(links, { recursive: true, force: true });
+    }
   });
 
   it("refuses a relative executable", async () => {
@@ -82,7 +108,10 @@ describe("cli path: through the Broker", () => {
       execution: {
         decide: (input) => {
           judged.push(input);
-          return { run: true, cli: { profile: PROFILE, isolation: "verified" } };
+          return {
+            run: true,
+            cli: { profile: PROFILE, isolation: "verified", model: "synthetic-model" },
+          };
         },
       },
       recorder: { record: () => undefined },

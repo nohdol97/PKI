@@ -31,6 +31,7 @@ import {
   parseEndpoint,
   readCliBackground,
   readDefaultProvider,
+  selectProvider,
   writeDefaultProvider,
   type Broker,
   type BrokerResult,
@@ -151,6 +152,7 @@ function connectionTestResult(result: BrokerResult): ConnectionTestResult {
  */
 async function connectionTest(
   calls: ServerOptions["calls"],
+  db: SqlDriver,
   acknowledgeUnverified: boolean,
 ): Promise<ConnectionTestResult> {
   if (!calls) return { outcome: "blocked", reason: "broker-not-bound", isolation: null };
@@ -167,7 +169,19 @@ async function connectionTest(
       }),
     { acknowledgeUnverified },
   );
-  return connectionTestResult(result);
+  const answer = connectionTestResult(result);
+  // only where the CLI itself may be why: its run failed, or its execution condition
+  // blocked it (a missing CLI reads as "not listed"); never before consent and egress
+  const cliStage =
+    answer.outcome === "failed" ||
+    (answer.outcome === "blocked" && /^(cli|unverified)-/.test(answer.reason ?? ""));
+  if (!cliStage) return answer;
+  // R5: a default CLI that is missing or logged out gets its install or login guidance
+  const provider = selectProvider(calls.providers ?? [], readDefaultProvider(db));
+  if (provider?.transport !== "cli") return answer;
+  const check = await checkProvider(provider);
+  const guide = !check.installed || check.authentication === "unauthenticated";
+  return guide ? { ...answer, providerCheck: check } : answer;
 }
 
 function providerList(options: ServerOptions): ProviderList {
@@ -302,6 +316,7 @@ async function prepareEmbedding(
 
 function createHandlers(options: ServerOptions, preparations: Set<AbortController>): Handlers {
   const changed = () => options.onRunConditionsChanged?.();
+  let checking: Promise<RouteResponse<"checkProviders">> | undefined;
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -362,7 +377,8 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       changed();
       return revoked;
     },
-    connectionTest: (input) => connectionTest(options.calls, input.acknowledgeUnverified),
+    connectionTest: (input) =>
+      connectionTest(options.calls, options.db, input.acknowledgeUnverified),
     executionSettings: async () => ({ cliBackground: readCliBackground(options.db) }),
     setExecutionSettings: async ({ cliBackground }) => {
       writeSetting(options.db, CLI_BACKGROUND_SETTING, cliBackground ? "on" : "off");
@@ -371,9 +387,13 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     },
     providers: async () => providerList(options),
     setDefaultProvider: async ({ providerId }) => setDefaultProvider(options, providerId),
-    checkProviders: async () => ({
-      providers: await Promise.all((options.calls?.providers ?? []).map(checkProvider)),
-    }),
+    checkProviders: () => {
+      // requests that come while a check runs share it: one set of query processes
+      checking ??= Promise.all((options.calls?.providers ?? []).map(checkProvider))
+        .then((providers) => ({ providers }))
+        .finally(() => (checking = undefined));
+      return checking;
+    },
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
   };
 }
