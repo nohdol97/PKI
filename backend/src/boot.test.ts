@@ -7,10 +7,10 @@
 import { routes, type SecretSource } from "@pki/contracts";
 import { openaiKeySecretName } from "@pki/providers";
 import { send, startFakeOpenAI } from "@pki/testkit";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
@@ -88,6 +88,57 @@ describe("bootBackend", () => {
         isolation: null,
       });
       expect(endpoint.requests.map((r) => r.headers.authorization)).toEqual(["Bearer sk-boot"]);
+    } finally {
+      await endpoint.close();
+    }
+  });
+
+  it("runs the job runner: imported sources are extracted, held until the endpoint and consent exist", async () => {
+    const endpoint = await startFakeOpenAI();
+    const key = openaiKeySecretName(endpoint.host);
+    const secrets: SecretSource = {
+      read: async (n) =>
+        n === key ? { state: "present", value: "sk-boot" } : { state: "missing" },
+      has: async (n) => (n === key ? "present" : "missing"),
+      deleteOthers: async () => "done",
+    };
+    try {
+      booted = await bootBackend({ dataDir: dir, token: TOKEN, allowedOrigins: [], secrets });
+      const { db } = booted;
+      const { port } = booted.server;
+      const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
+      const post = (path: string, body: unknown) => send(port, path, headers, "POST", body);
+      const fixtures = resolve(import.meta.dirname, "../../fixtures");
+      const text = ["v02-mail.jsonl", "v02-wiki.jsonl", "v02-messenger.jsonl"]
+        .map((f) => readFileSync(join(fixtures, f), "utf8"))
+        .join("\n");
+      expect((await post(routes.importJsonl.path, { text })).body).toMatchObject({ created: 3 });
+      const jobs = () => db.all("SELECT status, reason FROM jobs ORDER BY id");
+      await vi.waitFor(() =>
+        expect(jobs()).toEqual(
+          Array(3).fill({ status: "held", reason: "destination-unavailable" }),
+        ),
+      );
+
+      await post(routes.writeSettings.path, {
+        openaiCompatible: { baseUrl: endpoint.baseUrl, model: "synthetic-model" },
+      });
+      // still blocked: no consent yet (imported files are "general")
+      await vi.waitFor(() =>
+        expect(jobs()).toEqual(Array(3).fill({ status: "held", reason: "no-consent" })),
+      );
+      const consents = await send(port, routes.consents.path, headers);
+      await post(routes.grantConsent.path, {
+        providerId: "openai-compatible",
+        allowedClasses: ["general"],
+        destination: endpoint.host,
+        policyVersion: (consents.body as { policyVersion: string }).policyVersion,
+      });
+      // the fake endpoint answers no extraction: asked twice per job, then failed
+      await vi.waitFor(() =>
+        expect(jobs()).toEqual(Array(3).fill({ status: "failed", reason: "invalid-output" })),
+      );
+      expect(endpoint.requests).toHaveLength(6);
     } finally {
       await endpoint.close();
     }

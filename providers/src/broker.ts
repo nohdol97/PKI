@@ -24,7 +24,7 @@ import { readJob, readSourceVersion, type SqlDriver } from "@pki/storage";
 import { randomUUID } from "node:crypto";
 import material from "./connection-test-material.json" with { type: "json" };
 import { lookupSynthetic } from "./synthetic-manifest.ts";
-import { TASKS } from "./tasks.ts";
+import { TASKS, type TaskDefinition } from "./tasks.ts";
 import type { UserActionRedeemer } from "./user-actions.ts";
 
 /**
@@ -189,7 +189,7 @@ export type BrokerResult =
 
 interface Prepared {
   request: BrokerRequest;
-  task: (typeof TASKS)[TaskKind][1];
+  task: TaskDefinition;
   trigger: "user" | "background";
   unverifiedAcknowledged: boolean;
   documents: UntrustedDocument[];

@@ -113,7 +113,8 @@ async function stack(options: Stack = {}) {
       const v = version();
       return v === undefined ? { installed: true } : { installed: true, version: v };
     },
-    answer: (r) => (r.taskKind === "extract" ? { claims: [] } : { reply: "ok" }),
+    answer: (r) =>
+      r.taskKind === "extract" ? { items: [], facts: [], relations: [] } : { reply: "ok" },
   });
   const calls = productCalls(
     db,
@@ -151,7 +152,7 @@ async function stack(options: Stack = {}) {
             sourceVersionIds: ids,
             candidateItemIds: [],
             origin: { userActionId },
-            schemaVersion: 1,
+            schemaVersion: 2,
             budget: { timeoutMs: 1000 },
             retryable: false,
           }),
@@ -163,7 +164,7 @@ async function stack(options: Stack = {}) {
         sourceVersionIds: [sourceVersionId],
         candidateItemIds: [],
         origin: { jobId: job(sourceVersionId), lease: "1" },
-        schemaVersion: 1,
+        schemaVersion: 2,
         budget: { timeoutMs: 1000 },
         retryable: false,
       }),

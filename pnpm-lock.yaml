@@ -97,6 +97,9 @@ importers:
       '@pki/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
+      '@pki/knowledge-engine':
+        specifier: workspace:*
+        version: link:../knowledge-engine
       '@pki/providers':
         specifier: workspace:*
         version: link:../providers
@@ -113,9 +116,16 @@ importers:
       '@pki/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
+      '@pki/providers':
+        specifier: workspace:*
+        version: link:../providers
       '@pki/storage':
         specifier: workspace:*
         version: link:../storage
+    devDependencies:
+      '@pki/testkit':
+        specifier: workspace:*
+        version: link:../packages/testkit
 
   packages/contracts:
     dependencies:

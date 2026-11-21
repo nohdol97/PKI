@@ -372,8 +372,18 @@ const v7: Migration = (db) =>
     "ALTER TABLE source_versions ADD COLUMN revision INTEGER CHECK (revision IS NULL OR revision >= 1);",
   );
 
+// Schema v8 (V02-T05, V02-R6): how many facts and relations an extraction
+// dropped, counted where its result is written: quotes the body did not hold
+// exactly once, and anything else (an unknown candidate, a bad date). Null for a
+// job that wrote no extraction (other kinds, rows from before v8).
+const v8: Migration = (db) =>
+  db.exec(`
+    ALTER TABLE jobs ADD COLUMN dropped_quotes INTEGER CHECK (dropped_quotes >= 0);
+    ALTER TABLE jobs ADD COLUMN dropped_other INTEGER CHECK (dropped_other >= 0);
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7];
+export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

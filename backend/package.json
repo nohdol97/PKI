@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@pki/contracts": "workspace:*",
+    "@pki/knowledge-engine": "workspace:*",
     "@pki/providers": "workspace:*",
     "@pki/storage": "workspace:*"
   },

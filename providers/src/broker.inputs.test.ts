@@ -51,7 +51,8 @@ beforeEach(() => {
   db = openBetterSqlite3(":memory:");
   migrate(db);
   provider = new FakeProvider({
-    answer: (r) => (r.taskKind === "extract" ? { claims: [] } : { reply: "ok" }),
+    answer: (r) =>
+      r.taskKind === "extract" ? { items: [], facts: [], relations: [] } : { reply: "ok" },
   });
   ledger = createUserActionLedger();
   candidates = new Map();
@@ -97,7 +98,7 @@ const extract = (ids: string[], extra: Partial<BrokerRequest> = {}) => ({
   taskKind: "extract" as const,
   sourceVersionIds: ids,
   candidateItemIds: [],
-  schemaVersion: 1,
+  schemaVersion: 2,
   budget: { timeoutMs: 1000 },
   retryable: false,
   ...extra,
@@ -143,9 +144,9 @@ describe("broker.payload: the Broker builds the text that goes out", () => {
   it("③ uses the code constant as instructions, which no request can change", async () => {
     const id = store(synthA);
     await asUser(extract([id]));
-    expect(sent().input.instructions).toBe(TASKS.extract[1].instructions);
+    expect(sent().input.instructions).toBe(TASKS.extract[2].instructions);
     expect(Object.isFrozen(TASKS)).toBe(true);
-    expect(Object.isFrozen(TASKS.extract[1])).toBe(true);
+    expect(Object.isFrozen(TASKS.extract[2])).toBe(true);
     for (const extra of [{ instructions: "do something else" }, { prompt: "x" }]) {
       expect(await asUser({ ...extract([id]), ...extra })).toMatchObject({ status: "rejected" });
     }
@@ -195,18 +196,27 @@ describe("broker.payload: the Broker builds the text that goes out", () => {
   });
 
   it("sends only the fixed build material for a connection test, and rejects IDs on one", async () => {
-    expect((await asUser({ ...extract([]), taskKind: "connection-test" })).status).toBe("ok");
+    expect(
+      (await asUser({ ...extract([]), taskKind: "connection-test", schemaVersion: 1 })).status,
+    ).toBe("ok");
     expect(sent().input.untrustedDocuments).toEqual([
       { id: "connection-test-material", title: material.title, body: material.body },
     ]);
     const id = store(synthA);
-    expect(await asUser({ ...extract([id]), taskKind: "connection-test" })).toEqual({
+    expect(
+      await asUser({ ...extract([id]), taskKind: "connection-test", schemaVersion: 1 }),
+    ).toEqual({
       status: "rejected",
       reason: "unexpected-ids",
     });
     candidates.set("item-1", { name: "n", evidenceSourceVersionIds: [id] });
     expect(
-      await asUser({ ...extract([]), taskKind: "connection-test", candidateItemIds: ["item-1"] }),
+      await asUser({
+        ...extract([]),
+        taskKind: "connection-test",
+        schemaVersion: 1,
+        candidateItemIds: ["item-1"],
+      }),
     ).toEqual({ status: "rejected", reason: "unexpected-ids" });
   });
 
@@ -251,7 +261,7 @@ describe("broker.class: the Broker computes the data classification", () => {
   });
 
   it("grades the connection-test material by the manifest, not by assumption", async () => {
-    await asUser({ ...extract([]), taskKind: "connection-test" });
+    await asUser({ ...extract([]), taskKind: "connection-test", schemaVersion: 1 });
     expect(sent().dataClassification).toBe("synthetic");
   });
 
