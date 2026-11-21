@@ -1,10 +1,13 @@
 // Starts the backend on a data directory: the canonical DB, the Connectors, the
 // Providers, the Broker, the job runner and the API server with the product's
 // adapters and egress controls (composition.ts). Closing the server stops the
-// runner too, after the job it is running closes. Shared by the two entries that differ only in how they
+// runner too, after the job it is running closes, then waits for the notices to
+// the KnowledgeEngine and VectorIndex already queued; before anything runs, the
+// start-up comparison rebuilds a projection that missed a change (V02-R13). Shared by the two entries that differ only in how they
 // hand over the session and where secrets come from: dev.ts (stdout, environment)
 // and shell.ts (the Electron shell's parent channel for both).
-import type { LLMProvider, SecretSource } from "@pki/contracts";
+import type { KnowledgeEngine, LLMProvider, SecretSource, VectorIndex } from "@pki/contracts";
+import type { Projections } from "@pki/knowledge-engine";
 import type { SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
@@ -15,7 +18,9 @@ import {
   productAdapters,
   productCalls,
   productEgress,
+  productEngine,
   productImporter,
+  productProjections,
   productProviders,
   productRunner,
   releaseHeldJobs,
@@ -24,6 +29,7 @@ import {
   cliRunsRoot,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
+import type { JobRunner } from "./job-runner.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
 export interface BootOptions {
@@ -38,6 +44,10 @@ export interface BootOptions {
   port?: number;
   /** Where Providers read their secrets just before a call; the backend keeps none. */
   secrets: SecretSource;
+  /** Replaces the composition point's KnowledgeEngine (tests: engine.restart keeps one across starts). */
+  engine?: KnowledgeEngine;
+  /** Replaces the composition point's VectorIndex (tests). */
+  vectorIndex?: VectorIndex;
 }
 
 export interface BootedBackend {
@@ -45,6 +55,9 @@ export interface BootedBackend {
   db: SqlDriver;
   /** The Providers the Broker may call (productProviders). */
   providers: readonly LLMProvider[];
+  /** Tests wait on these: the notices queued, the jobs runnable. */
+  projections: Pick<Projections, "drain">;
+  runner: Pick<JobRunner, "wake">;
 }
 
 export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
@@ -54,18 +67,24 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   const egress = productEgress(db);
   const providers = productProviders(db, options.secrets, egress, cliRunsRoot(options.dataDir));
   const calls = productCalls(db, egress, { providers });
-  const runner = productRunner(db, calls.broker);
+  const engine = options.engine ?? productEngine();
+  const adapters = productAdapters(options.dataDir);
+  if (options.vectorIndex) adapters.vectorIndex = options.vectorIndex;
+  const projections = productProjections(db, { engine, ...adapters });
+  // before anything changes the store: a notice missed by the last run is found here
+  await projections.reconcile();
+  const runner = productRunner(db, calls.broker, { engine });
   const connectors = await createConnectorManager(
     db,
     connectorInstances(options.fixtures),
     connectorKinds,
-    { runner },
+    { runner, projections },
   );
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,
     port: options.port ?? 0,
-    ...productAdapters(options.dataDir),
+    ...adapters,
     connectors,
     db,
     dataDirectory: options.dataDir,
@@ -73,7 +92,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     egress,
     secrets: options.secrets,
     calls,
-    importer: productImporter(db, { runner }),
+    importer: productImporter(db, { runner, projections }),
+    projections,
     onRunConditionsChanged: () => void releaseHeldJobs(db, runner),
   });
   releaseOnPolicyChange(db, egress, runner);
@@ -84,10 +104,13 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       close: async () => {
         await server.close();
         await runner.stop();
+        await projections.drain();
       },
     },
     db,
     providers,
+    projections,
+    runner,
   };
 }
 
