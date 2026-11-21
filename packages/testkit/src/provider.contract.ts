@@ -10,13 +10,13 @@ import {
 } from "@pki/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 
-export function providerRequest(requestId = "req-1"): LLMRequest {
+export function providerRequest(requestId = "req-1", destination = "test"): LLMRequest {
   return {
     requestId,
     taskKind: "connection-test",
     trigger: "user",
     dataClassification: "synthetic",
-    egress: { allowed: true, destination: "test", policyVersion: "test" },
+    egress: { allowed: true, destination, policyVersion: "test" },
     schemaVersion: 1,
     budget: { timeoutMs: 1000 },
     retryable: false,
@@ -28,9 +28,9 @@ export function providerRequest(requestId = "req-1"): LLMRequest {
   };
 }
 
-export function structuredRequest(requestId = "req-1"): StructuredRequest {
+export function structuredRequest(requestId = "req-1", destination = "test"): StructuredRequest {
   return {
-    ...providerRequest(requestId),
+    ...providerRequest(requestId, destination),
     outputSchema: {
       type: "object",
       properties: { reply: { type: "string" } },
@@ -46,6 +46,11 @@ export interface ProviderContractOptions<P extends LLMProvider> {
   modelCalls: (provider: P) => number;
   /** A Provider whose backend fails every generation (a fake CLI exiting non-zero, a 500). */
   failing: () => P;
+  /**
+   * The egress destination the requests carry (default "test"): an HTTP Provider
+   * sends only to the destination the Broker's decision named (T08 item 4).
+   */
+  destination?: () => string;
 }
 
 export function providerContract<P extends LLMProvider>(
@@ -55,6 +60,9 @@ export function providerContract<P extends LLMProvider>(
 ): void {
   describe(`provider.contract: ${name}`, () => {
     let provider: P;
+    const at = () => options.destination?.() ?? "test";
+    const plain = (id?: string) => providerRequest(id, at());
+    const structured = (id?: string) => structuredRequest(id, at());
 
     beforeEach(() => {
       provider = create();
@@ -86,15 +94,15 @@ export function providerContract<P extends LLMProvider>(
 
     it("counts a generation as a model call", async () => {
       const before = options.modelCalls(provider);
-      await provider.generate(providerRequest(), live());
+      await provider.generate(plain(), live());
       expect(options.modelCalls(provider)).toBe(before + 1);
     });
 
     it("reports a failed generation as a ProviderError that says whether to retry", async () => {
-      const legs: ((p: P) => Promise<unknown>)[] = [(p) => p.generate(providerRequest(), live())];
+      const legs: ((p: P) => Promise<unknown>)[] = [(p) => p.generate(plain(), live())];
       // a Provider without structured output is never asked for it (the Broker checks)
       if (options.failing().getCapabilities().structuredOutput) {
-        legs.push((p: P) => p.generateStructured(structuredRequest(), live()));
+        legs.push((p: P) => p.generateStructured(structured(), live()));
       }
       for (const run of legs) {
         const error = await run(options.failing()).then(
@@ -107,28 +115,26 @@ export function providerContract<P extends LLMProvider>(
     });
 
     it("generates text for a request", async () => {
-      const response = await provider.generate(providerRequest(), live());
+      const response = await provider.generate(plain(), live());
       expect(typeof response.text).toBe("string");
     });
 
     it("returns structured output for a structured request when it supports it", async () => {
       if (!provider.getCapabilities().structuredOutput) return;
-      const response = await provider.generateStructured(structuredRequest(), live());
+      const response = await provider.generateStructured(structured(), live());
       expect(response).toHaveProperty("output");
     });
 
     it("rejects a call whose signal is already aborted", async () => {
       const controller = new AbortController();
       controller.abort();
-      await expect(provider.generate(providerRequest(), controller.signal)).rejects.toThrow();
-      await expect(
-        provider.generateStructured(structuredRequest(), controller.signal),
-      ).rejects.toThrow();
+      await expect(provider.generate(plain(), controller.signal)).rejects.toThrow();
+      await expect(provider.generateStructured(structured(), controller.signal)).rejects.toThrow();
     });
 
     it("stops an in-flight call when its signal aborts", async () => {
       const controller = new AbortController();
-      const call = provider.generate(providerRequest("req-abort"), controller.signal);
+      const call = provider.generate(plain("req-abort"), controller.signal);
       controller.abort();
       await expect(call).rejects.toThrow();
     });
@@ -136,7 +142,7 @@ export function providerContract<P extends LLMProvider>(
     it("accepts cancel for an unknown request, and cancels a running one when it can", async () => {
       await expect(provider.cancel("no-such-request")).resolves.toBeUndefined();
       if (!provider.getCapabilities().cancel) return;
-      const call = provider.generate(providerRequest("req-cancel"), live());
+      const call = provider.generate(plain("req-cancel"), live());
       await provider.cancel("req-cancel");
       await expect(call).rejects.toThrow();
     });

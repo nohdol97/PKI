@@ -13,7 +13,11 @@ export default defineConfig<{ target: "browser" | "electron" }>({
     { name: "build-web", testMatch: "apps/desktop/e2e/build-web.setup.ts" },
     {
       name: "electron",
-      testMatch: ["apps/web/e2e/screens.e2e.ts", "apps/desktop/e2e/**/*.e2e.{ts,tsx}"],
+      testMatch: [
+        "apps/web/e2e/screens.e2e.ts",
+        "apps/web/e2e/provider-settings.e2e.ts",
+        "apps/desktop/e2e/**/*.e2e.{ts,tsx}",
+      ],
       dependencies: ["build-web"],
       use: { target: "electron" },
     },

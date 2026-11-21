@@ -35,6 +35,8 @@ export const PUBLIC_SITE_RULES: readonly EgressRule[] = Object.freeze([]);
 
 /** Setting key of the OpenAI-compatible endpoint (site-setup.md); its host is the destination. */
 export const OPENAI_BASE_URL_SETTING = "providers.openaiCompatible.baseUrl";
+/** Setting key of the model the OpenAI-compatible endpoint is asked for (site-setup.md). */
+export const OPENAI_MODEL_SETTING = "providers.openaiCompatible.model";
 
 /**
  * A CLI sends to whatever vendor service the CLI itself chooses (ADR 0014), so its
@@ -82,6 +84,26 @@ export function computePolicyVersion(rules: readonly EgressRule[]): string {
   return `pv-${createHash("sha256").update(canonical).digest("hex").slice(0, 16)}`;
 }
 
+export type EndpointCheck =
+  { url: URL } | { problem: "destination-unavailable" | "insecure-endpoint" };
+
+/**
+ * The OpenAI-compatible endpoint as the policy, the settings API and the Provider
+ * all read it (one WHATWG URL parse): `https`, or `http` to loopback when allowed.
+ * User info is refused: `URL.host` drops it, so the destination shown for consent
+ * would hide the credentials the address carries.
+ */
+export function parseEndpoint(raw: string | undefined, allowLoopbackHttp: boolean): EndpointCheck {
+  if (raw === undefined || !URL.canParse(raw)) return { problem: "destination-unavailable" };
+  const url = new URL(raw);
+  if (url.username !== "" || url.password !== "") return { problem: "insecure-endpoint" };
+  if (url.protocol === "https:") return { url };
+  if (url.protocol === "http:" && allowLoopbackHttp && LOOPBACK_HOSTS.has(url.hostname)) {
+    return { url };
+  }
+  return { problem: "insecure-endpoint" };
+}
+
 export interface EgressPolicyOptions {
   db: SqlDriver;
   siteRules?: readonly EgressRule[];
@@ -120,19 +142,11 @@ export function createEgressPolicy(options: EgressPolicyOptions): EgressControls
   const now = options.now ?? (() => new Date());
 
   function endpointHost(): Destination {
-    const raw = readSetting(db, OPENAI_BASE_URL_SETTING);
-    if (raw === undefined) return { problem: "destination-unavailable" };
-    let url: URL;
-    try {
-      url = new URL(raw);
-    } catch {
-      return { problem: "destination-unavailable" };
-    }
-    if (url.protocol === "https:") return { destination: url.host };
-    if (url.protocol === "http:" && options.allowLoopbackHttp && LOOPBACK_HOSTS.has(url.hostname)) {
-      return { destination: url.host };
-    }
-    return { problem: "insecure-endpoint" };
+    const checked = parseEndpoint(
+      readSetting(db, OPENAI_BASE_URL_SETTING),
+      options.allowLoopbackHttp ?? false,
+    );
+    return "url" in checked ? { destination: checked.url.host } : checked;
   }
 
   function destination(providerId: ProviderId): Destination {

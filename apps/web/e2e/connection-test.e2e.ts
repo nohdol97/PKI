@@ -1,8 +1,8 @@
 // V01-C4 `connection-test.e2e` (V01-R21), the T09 part: in Settings, "연결 시험"
 // shows the result or the block reason the backend's Broker returned, and the
-// background setting starts off and keeps what the user sets. The product binds
-// no Provider until V01-T10/T11, and this backend runs unbundled (a production
-// build), so the real answer is "no Provider". The unverified-isolation
+// background setting starts off and keeps what the user sets. The product binds the
+// OpenAI-compatible Provider (V01-T11) and no endpoint is set here, so the real
+// answer is the egress decision's "no destination". The unverified-isolation
 // confirmation appears only in a development build with an unlisted CLI, which
 // the backend's integration test covers (backend/src/cli-gate.test.ts); here the
 // screen's side of it runs against answers routed in place of the backend's, and
@@ -54,7 +54,7 @@ test("the connection test shows the backend's block reason; background starts of
   await page.goto(`http://127.0.0.1:${port}`);
   await openSettings(page);
   await page.getByRole("button", { name: "연결 시험", exact: true }).click();
-  await expect(page.getByRole("status")).toHaveText("결과: 차단: 연결할 Provider가 없음");
+  await expect(page.getByRole("status")).toHaveText("결과: 차단: 목적지가 설정되지 않음");
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
 
   const background = page.getByRole("checkbox", { name: "CLI 백그라운드 실행 허용" });

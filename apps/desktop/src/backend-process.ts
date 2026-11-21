@@ -2,8 +2,11 @@
 // run goes to the backend over the parent-child channel, never argv or the environment
 // (other processes of the same user can read both). The backend binds a free loopback
 // port itself and reports it back on the same channel, so no port is picked twice.
+// A secret goes the same way, only when the backend asks for it just before a call.
+import { isBackendReadableSecret, SecretNameSchema, type SecretRead } from "@pki/contracts";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import type { SecretStore } from "./secret-store.ts";
 
 /** The surface shared by Electron's utilityProcess.fork and Node's fork (tests). */
 export interface BackendChild {
@@ -43,7 +46,33 @@ export function backendEnv(env: Readonly<Record<string, string | undefined>>) {
 const FromBackend = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("ready"), port: z.int().min(1).max(65535) }),
   z.strictObject({ type: z.literal("failed") }),
+  z.strictObject({
+    type: z.literal("secret-request"),
+    id: z.int().positive(),
+    name: SecretNameSchema,
+    mode: z.enum(["read", "presence", "prune"]),
+  }),
 ]);
+
+const SECRET_UNAVAILABLE: SecretRead = { state: "unavailable" };
+
+async function answerSecret(
+  store: Pick<SecretStore, "read" | "has" | "deleteOthers"> | undefined,
+  name: string,
+  mode: "read" | "presence" | "prune",
+): Promise<SecretRead | { state: SecretRead["state"] }> {
+  if (!store || !isBackendReadableSecret(name)) return SECRET_UNAVAILABLE;
+  try {
+    if (mode === "read") return await store.read(name);
+    // prune keeps `name` and answers "missing" once no other key is left
+    if (mode === "prune")
+      return (await store.deleteOthers(name)).ok ? { state: "missing" } : SECRET_UNAVAILABLE;
+    const presence = await store.has(name);
+    return presence.ok ? { state: presence.present ? "present" : "missing" } : SECRET_UNAVAILABLE;
+  } catch {
+    return SECRET_UNAVAILABLE;
+  }
+}
 
 export interface BackendOptions {
   fork: ForkBackend;
@@ -59,6 +88,12 @@ export interface BackendOptions {
   env?: Readonly<Record<string, string | undefined>>;
   startTimeoutMs?: number;
   stopTimeoutMs?: number;
+  /**
+   * Answers the backend's secret requests; without it every answer is "unavailable".
+   * Only names `isBackendReadableSecret` allows are looked up; a presence request
+   * gets the state alone, never the value.
+   */
+  secrets?: Pick<SecretStore, "read" | "has" | "deleteOthers"> | undefined;
 }
 
 export interface Backend {
@@ -104,6 +139,14 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
     child.on("message", (raw) => {
       const message = FromBackend.safeParse(raw);
       if (!message.success) return fail("sent an unexpected message");
+      if (message.data.type === "secret-request") {
+        const { id, name, mode } = message.data;
+        void answerSecret(options.secrets, name, mode).then((answer) => {
+          // the backend may have exited meanwhile; nothing to answer then
+          if (!ended) child.postMessage({ type: "secret", id, ...answer });
+        });
+        return;
+      }
       if (message.data.type === "failed") return fail("failed to start");
       if (settled) return;
       settled = true;

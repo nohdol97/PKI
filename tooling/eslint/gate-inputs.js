@@ -23,10 +23,14 @@ const REPO_ROOT = resolve(import.meta.dirname, "../..");
 export const BUILD_KIND_MODULE = "providers/src/build-kind.ts";
 export const BUNDLER_CONFIGS = new Set(["vitest.config.ts"]);
 export const DECISION_MODULES = new Set([
+  // the egress side (V01-T11): whether and where a Provider request may leave
+  "providers/src/adapters/openai-compatible.ts",
   "providers/src/broker.ts",
   "providers/src/build-kind.ts",
   "providers/src/cli-profiles.ts",
+  "providers/src/egress-policy.ts",
   "providers/src/execution-gate.ts",
+  "providers/src/secret-names.ts",
   "providers/src/synthetic-manifest.ts",
   "providers/src/user-actions.ts",
   "providers/src/verified-cli.ts",

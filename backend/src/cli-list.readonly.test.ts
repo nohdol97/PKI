@@ -145,9 +145,11 @@ describe("the verified CLI list cannot be extended at run time", () => {
     const set = routes.setExecutionSettings.path;
     expect((await b.post(set, { cliBackground: true, verified: [ENTRY] })).status).toBe(400);
     expect((await b.post(set, { verifiedCombinations: [ENTRY] })).status).toBe(400);
-    for (const path of ["/api/settings/verified-cli", "/api/settings/cli", "/api/settings"]) {
+    for (const path of ["/api/settings/verified-cli", "/api/settings/cli"]) {
       expect([404, 405]).toContain((await b.post(path, [ENTRY])).status);
     }
+    // the endpoint settings write (T11) takes exactly its own fields
+    expect((await b.post("/api/settings", [ENTRY])).status).toBe(400);
     expect(
       (
         await b.post(routes.connectionTest.path, {

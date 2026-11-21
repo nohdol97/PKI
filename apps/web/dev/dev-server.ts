@@ -17,15 +17,19 @@ export interface DevBackendOptions {
   fixtures?: string;
   /** Canonical DB folder (default: the dev entry's sibling "PKI-dev"). */
   dataDir?: string;
+  /** Extra environment for the dev backend (e.g. the development API key variables). */
+  env?: Record<string, string>;
 }
 
 /** Starts the dev backend and resolves with its first stdout line: `{ url, token }`. */
 export function startBackend(
   args: string[],
   entry = DEV_ENTRY,
+  env?: Record<string, string>,
 ): Promise<{ child: ChildProcess; url: string; token: string }> {
   const child = spawn(process.execPath, [entry, ...args], {
     stdio: ["ignore", "pipe", "inherit"],
+    ...(env ? { env: { ...process.env, ...env } } : {}),
   });
   // Also when the dev server process ends without closing the server (crash, test worker
   // teardown). Removed once the backend has ended, so restarts do not pile listeners up.
@@ -55,12 +59,16 @@ export function devBackend(options: DevBackendOptions, port: number): Plugin {
     name: "pki-dev-backend",
     apply: "serve",
     async config() {
-      backend = await startBackend([
-        "--origin",
-        `http://${selfHost}`,
-        ...(options.fixtures ? ["--fixtures", options.fixtures] : []),
-        ...(options.dataDir ? ["--data-dir", options.dataDir] : []),
-      ]);
+      backend = await startBackend(
+        [
+          "--origin",
+          `http://${selfHost}`,
+          ...(options.fixtures ? ["--fixtures", options.fixtures] : []),
+          ...(options.dataDir ? ["--data-dir", options.dataDir] : []),
+        ],
+        undefined,
+        options.env,
+      );
       // changeOrigin rewrites Host to the backend's own address, which it requires.
       return { server: { proxy: { "/api/": { target: backend.url, changeOrigin: true } } } };
     },

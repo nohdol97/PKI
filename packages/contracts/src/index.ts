@@ -11,6 +11,7 @@ export type * from "./vector-index.ts";
 export * from "./connector.ts";
 export * from "./import-record.ts";
 export * from "./provider.ts";
+export * from "./secrets.ts";
 
 // Parts that later V01 tasks build report "not-implemented" until then, never a guessed state.
 // "unavailable" names why, so the UI can show what does not work (V01-R5).
@@ -61,6 +62,8 @@ export const ErrorResponseSchema = z.object({
     "connector-unavailable",
     "destination-unavailable",
     "consent-stale",
+    "invalid-endpoint",
+    "secret-store-unavailable",
     "embedding-not-implemented",
     "embedding-busy",
     "internal-error",
@@ -133,6 +136,31 @@ export const SettingsResponseSchema = z.object({
   dataDirectory: z.string(),
   schemaVersion: z.int().nonnegative(),
   databaseEncryption: z.enum(["not-applied", "unknown"]),
+  /**
+   * The OpenAI-compatible endpoint and model (site-setup S05); null until set.
+   * `keyName` is where the key for this endpoint's `host` is stored (keys are bound
+   * to a host), `key` whether it is there; both null without an endpoint.
+   */
+  openaiCompatible: z.object({
+    baseUrl: z.string().nullable(),
+    model: z.string().nullable(),
+    host: z.string().nullable(),
+    keyName: z.string().nullable(),
+    key: z.enum(["present", "missing", "unavailable"]).nullable(),
+  }),
+});
+
+/**
+ * Writes the OpenAI-compatible endpoint and model. The address must be `https`, or
+ * `http` to loopback (which only development and test builds then use); it may not
+ * carry user info, a query or a fragment ("invalid-endpoint"). Changing its host
+ * makes the consent for that Provider stale.
+ */
+export const SettingsWriteRequestSchema = z.strictObject({
+  openaiCompatible: z.strictObject({
+    baseUrl: z.string().min(1).max(2048),
+    model: z.string().min(1).max(200),
+  }),
 });
 
 const DataClassSchema = z.enum(DATA_CLASSES);
@@ -251,6 +279,12 @@ export const routes = {
   },
   activity: { method: "GET", path: "/api/activity", response: ActivityResponseSchema },
   settings: { method: "GET", path: "/api/settings", response: SettingsResponseSchema },
+  writeSettings: {
+    method: "POST",
+    path: "/api/settings",
+    request: SettingsWriteRequestSchema,
+    response: SettingsResponseSchema,
+  },
   consents: { method: "GET", path: "/api/consents", response: ConsentListResponseSchema },
   grantConsent: {
     method: "POST",

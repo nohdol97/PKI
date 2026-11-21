@@ -1,7 +1,9 @@
 // Electron main (V01-R4, ADR 0008). The shell starts and stops the backend, keeps one
 // instance, serves the built screens from app://pki (the backend's only allowed
 // Origin), gives the page its session through the preload, and blocks everything
-// else the page might try: Node, other origins, new windows, permissions.
+// else the page might try: Node, other origins, new windows, permissions. It holds the
+// secret store (safeStorage ciphertext in the data directory) and answers the
+// backend's requests for a secret over the parent channel.
 // Switches (development and tests): --pki-user-data, --pki-data-dir, --pki-fixtures.
 import {
   app,
@@ -9,19 +11,25 @@ import {
   dialog,
   ipcMain,
   protocol,
+  safeStorage,
   session,
   shell,
   utilityProcess,
 } from "electron";
+import { dataDirectory } from "@pki/storage";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_ORIGIN, APP_SCHEME, createAppHandler } from "./app-protocol.ts";
 import { startBackendProcess, type Backend, type ForkBackend } from "./backend-process.ts";
 import { BRIDGE, createBridgeHandlers, type BridgeFunction } from "./bridge.ts";
+import { createSecretStore, electronCipher } from "./secret-store.ts";
 import { lockDown, secureWebPreferences } from "./window.ts";
 
 const WEB_ROOT = fileURLToPath(new URL("../../web/dist/", import.meta.url));
 const BACKEND_ENTRY = fileURLToPath(new URL("../../../backend/src/shell.ts", import.meta.url));
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
+/** In the data directory: per OS user, not roaming (ADR 0010). */
+const SECRETS_FILE = "secrets.json";
 
 const option = (name: string) => app.commandLine.getSwitchValue(name) || undefined;
 
@@ -50,12 +58,17 @@ async function run() {
   );
   session.defaultSession.setPermissionCheckHandler(() => false);
 
+  const secrets = createSecretStore({
+    file: join(option("pki-data-dir") ?? dataDirectory(), SECRETS_FILE),
+    cipher: electronCipher(safeStorage, process.platform),
+  });
   backend = await startBackendProcess({
     fork: forkUtility,
     entry: BACKEND_ENTRY,
     origin: APP_ORIGIN,
     dataDir: option("pki-data-dir"),
     fixtures: option("pki-fixtures"),
+    secrets,
   });
   backendAlive = true;
   void backend.exited.then((code) => {
@@ -74,6 +87,7 @@ async function run() {
 
   const handlers = createBridgeHandlers({
     session: { baseUrl: "", token: backend.token },
+    secrets,
     confirmExternal: async ({ href, hostname }) => {
       const options = {
         type: "question" as const,

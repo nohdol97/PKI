@@ -4,6 +4,7 @@
 // messages), and the running process's own argv and environment are read back from
 // the OS to show the token is in neither.
 import { execFileSync, fork } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,6 +106,66 @@ describe("shell ↔ backend channel", () => {
       expect(record).toContain("shell.ts");
       expect(record).not.toContain(backend.token);
     }
+  });
+
+  it("hands over no stored secret at start: not in argv, env or the process record", async () => {
+    const canary = `sk-canary-${process.pid}-${Date.now()}`;
+    backend = await startBackendProcess({
+      fork: recordingFork,
+      entry: ENTRY,
+      origin: ORIGIN,
+      dataDir: join(dir, "data"),
+      secrets: {
+        read: async () => ({ state: "present", value: canary }),
+        has: async () => ({ ok: true, present: true }),
+        deleteOthers: async () => ({ ok: true }),
+      },
+    });
+    expect(JSON.stringify(calls)).not.toContain(canary);
+    const record = processRecord(backend.pid ?? 0);
+    if (record !== undefined) expect(record).not.toContain(canary);
+  });
+
+  // review S5: the real backend asks over the real channel and the shell answers
+  it("answers the running backend's presence request for the endpoint host's key", async () => {
+    const asked: string[] = [];
+    const pruned: string[] = [];
+    const keyName = `openai-compatible.api-key.${createHash("sha256")
+      .update("one.synthetic.example")
+      .digest("hex")
+      .slice(0, 32)}`;
+    backend = await startBackendProcess({
+      fork: recordingFork,
+      entry: ENTRY,
+      origin: ORIGIN,
+      dataDir: join(dir, "data"),
+      secrets: {
+        read: async () => ({ state: "unavailable" }),
+        has: async (name) => (asked.push(name), { ok: true, present: name === keyName }),
+        deleteOthers: async (keep) => (pruned.push(keep), { ok: true }),
+      },
+    });
+    const headers = {
+      authorization: `Bearer ${backend.token}`,
+      origin: ORIGIN,
+      "content-type": "application/json",
+    };
+    const write = (baseUrl: string) =>
+      fetch(`${backend?.url}/api/settings`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ openaiCompatible: { baseUrl, model: "synthetic-model" } }),
+      }).then((r) => r.json());
+    expect(await write("https://one.synthetic.example/v1")).toMatchObject({
+      openaiCompatible: { keyName, key: "present" },
+    });
+    expect(await write("https://two.synthetic.example/v1")).toMatchObject({
+      openaiCompatible: { key: "missing" },
+    });
+    expect(asked[0]).toBe(keyName);
+    // each endpoint write first deleted the keys of other hosts, over the same channel
+    expect(pruned).toHaveLength(2);
+    expect(pruned[0]).toBe(keyName);
   });
 
   it("passes only the allowlisted environment variables", async () => {

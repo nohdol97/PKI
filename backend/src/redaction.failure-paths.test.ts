@@ -2,8 +2,9 @@
 // fails by echoing its input (error text, invalid output, a crafted error name)
 // leaves the document and prompt canaries nowhere: not in the call results, the
 // history rows, the API's activity answer, the log lines, or any file of the data
-// directory; and no temporary file is left. The CLI (T10) and HTTP (T11) Providers
-// add their own echoing fakes to this case when they land.
+// directory; and no temporary file is left. The OpenAI-compatible Provider (T11) runs
+// here against a fake HTTP server that echoes the request it got, in an error body
+// and as output. The CLI Providers (T10) add their echoing fake CLI when they land.
 import {
   ProviderError,
   routes,
@@ -16,9 +17,20 @@ import {
   createEgressPolicy,
   createUserActionLedger,
   OPENAI_BASE_URL_SETTING,
+  OPENAI_MODEL_SETTING,
 } from "@pki/providers";
+import { OpenAICompatibleProvider } from "@pki/providers/adapters";
 import { registerConnectorInstance, saveSourceRecord, writeSetting } from "@pki/storage";
-import { FakeProvider, send } from "@pki/testkit";
+import {
+  completion,
+  FakeProvider,
+  newTempFilesContaining,
+  send,
+  startFakeOpenAI,
+  tempEntries,
+  type FakeHttpReply,
+  type FakeHttpRequest,
+} from "@pki/testkit";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -91,7 +103,7 @@ function filesUnder(root: string): string[] {
 describe("failure paths leave no input behind", () => {
   it("in results, history, the activity API, logs, data files or temp files", async () => {
     const db = openCanonicalDb(dir);
-    const tempBefore = new Set(readdirSync(tmpdir()));
+    const tempBefore = tempEntries();
     try {
       registerConnectorInstance(db, "fixtures", "test-fixtures");
       saveSourceRecord(db, "fixtures", {
@@ -99,16 +111,45 @@ describe("failure paths leave no input behind", () => {
         title: `합성 제목 ${DOC_CANARY}`,
         body: `합성 본문 ${DOC_CANARY}`,
       });
-      writeSetting(db, OPENAI_BASE_URL_SETTING, "https://api.synthetic.example/v1");
-      const egress = createEgressPolicy({ db });
+      // The server repeats the whole request body it received: in an error, then as output.
+      let reply: (request: FakeHttpRequest) => FakeHttpReply = () => completion("{}");
+      const http = await startFakeOpenAI((request) => reply(request));
+      writeSetting(db, OPENAI_BASE_URL_SETTING, http.baseUrl);
+      writeSetting(db, OPENAI_MODEL_SETTING, "synthetic-model");
+      const egress = createEgressPolicy({ db, allowLoopbackHttp: true });
       egress.grant("openai-compatible", ["general"], {
-        destination: "api.synthetic.example",
+        destination: http.host,
         policyVersion: egress.policyVersion(),
       });
+      const openai = () =>
+        new OpenAICompatibleProvider({
+          db,
+          secrets: {
+            read: async () => ({ state: "present", value: "sk-synthetic" }),
+            has: async () => "present",
+            deleteOthers: async () => "done",
+          },
+          allowLoopbackHttp: true,
+          egress,
+        });
+      const httpEcho = (request: FakeHttpRequest) => `${ECHO_MARKER} ${request.body}`;
       const ledger = createUserActionLedger();
       const results: unknown[] = [];
-      const providers = [new EchoingError(), new EchoingPlainError(), new EchoingOutput()];
-      for (const provider of providers) {
+      const providers = [
+        { provider: new EchoingError() },
+        { provider: new EchoingPlainError() },
+        { provider: new EchoingOutput() },
+        {
+          provider: openai(),
+          reply: (r: FakeHttpRequest) => ({ status: 500, body: { error: httpEcho(r) } }),
+        },
+        {
+          provider: openai(),
+          reply: (r: FakeHttpRequest) => completion(JSON.stringify({ claims: httpEcho(r) })),
+        },
+      ];
+      for (const { provider, reply: next } of providers) {
+        if (next) reply = next;
         const broker = createBroker({
           db,
           provider: () => provider,
@@ -133,13 +174,21 @@ describe("failure paths leave no input behind", () => {
           ),
         );
       }
+      await http.close();
       // the echo really carried the canaries: this test would see a leak
-      const sent = (providers[0] as EchoingError).requests[0];
+      const sent = (providers[0]?.provider as EchoingError).requests[0];
       expect(sent && echo(sent)).toContain(DOC_CANARY);
       expect(sent && echo(sent)).toContain("Extract the factual claims");
+      expect(http.requests).toHaveLength(4);
+      for (const request of http.requests) {
+        expect(httpEcho(request)).toContain(DOC_CANARY);
+        expect(httpEcho(request)).toContain("Extract the factual claims");
+      }
       expect(results).toMatchObject([
         { status: "failed", error: "provider-error", attempts: 3 },
         { status: "failed", error: "provider-error", attempts: 1 },
+        { status: "failed", error: "invalid-output", attempts: 1 },
+        { status: "failed", error: "provider-error", attempts: 3 },
         { status: "failed", error: "invalid-output", attempts: 1 },
       ]);
 
@@ -157,7 +206,7 @@ describe("failure paths leave no input behind", () => {
         authorization: `Bearer ${TOKEN}`,
       });
       await server.close();
-      expect((activity.body as { calls: unknown[] }).calls).toHaveLength(5);
+      expect((activity.body as { calls: unknown[] }).calls).toHaveLength(9);
 
       const history = db.all("SELECT * FROM provider_calls");
       const texts = [
@@ -178,19 +227,9 @@ describe("failure paths leave no input behind", () => {
     for (const file of filesUnder(dir)) {
       expect(readFileSync(file).includes(ECHO_MARKER), file).toBe(false);
     }
-    const created = readdirSync(tmpdir()).filter((name) => !tempBefore.has(name));
+    const created = [...tempEntries()].filter((name) => !tempBefore.has(name));
     expect(created.filter((name) => name.includes(run))).toEqual([]);
-    for (const name of created) {
-      // other workers' temp files may appear meanwhile; none may hold the echo
-      const path = join(tmpdir(), name);
-      try {
-        for (const file of filesUnder(path)) {
-          expect(readFileSync(file).includes(ECHO_MARKER)).toBe(false);
-        }
-      } catch {
-        // a sibling's directory removed while we looked, or a plain file: not ours
-      }
-    }
+    expect(newTempFilesContaining(tempBefore, ECHO_MARKER)).toEqual([]);
   });
 
   it("logs a failing route by name and known error class only", async () => {

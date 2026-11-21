@@ -12,6 +12,7 @@ import {
   createEgressPolicy,
   evaluateRules,
   OPENAI_BASE_URL_SETTING,
+  parseEndpoint,
   type EgressRule,
 } from "./egress-policy.ts";
 
@@ -298,6 +299,35 @@ describe("destination of the openai-compatible Provider", () => {
     }
     writeSetting(db, OPENAI_BASE_URL_SETTING, "http://api.synthetic.example/v1");
     expect(testBuild.destination("openai-compatible")).toEqual({ problem: "insecure-endpoint" });
+  });
+
+  // URL.host drops user info, so the destination shown for consent would hide the
+  // credentials the address carries to that host (T11).
+  it.each([
+    "https://user:pw@api.synthetic.example/v1",
+    "https://user@api.synthetic.example/v1",
+    "https://:pw@api.synthetic.example/v1",
+  ])("refuses an endpoint carrying user info: %s", (url) => {
+    writeSetting(db, OPENAI_BASE_URL_SETTING, url);
+    const policy = createEgressPolicy({ db, allowLoopbackHttp: true });
+    expect(policy.destination("openai-compatible")).toEqual({ problem: "insecure-endpoint" });
+  });
+});
+
+describe("parseEndpoint", () => {
+  it("is the one parser the policy, the settings API and the Provider share", () => {
+    expect(parseEndpoint(undefined, false)).toEqual({ problem: "destination-unavailable" });
+    expect(parseEndpoint("not a url", false)).toEqual({ problem: "destination-unavailable" });
+    const ok = parseEndpoint("https://api.synthetic.example:8443/v1", false);
+    expect("url" in ok && ok.url.host).toBe("api.synthetic.example:8443");
+    expect(parseEndpoint("http://127.0.0.1:9/v1", false)).toEqual({
+      problem: "insecure-endpoint",
+    });
+    const loopback = parseEndpoint("http://127.0.0.1:9/v1", true);
+    expect("url" in loopback && loopback.url.host).toBe("127.0.0.1:9");
+    expect(parseEndpoint("http://user@127.0.0.1:9/v1", true)).toEqual({
+      problem: "insecure-endpoint",
+    });
   });
 });
 

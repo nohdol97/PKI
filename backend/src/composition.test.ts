@@ -2,7 +2,7 @@
 // directory, created owner-only first, at the latest schema; the site
 // Connector kinds are registered and fail with the follow-up notice.
 import { CONNECTOR_NOT_IMPLEMENTED } from "@pki/contracts";
-import { BUILD_KIND, OPENAI_BASE_URL_SETTING } from "@pki/providers";
+import { BUILD_KIND, OPENAI_BASE_URL_SETTING, OPENAI_MODEL_SETTING } from "@pki/providers";
 import { migrations, schemaVersion, writeSetting } from "@pki/storage";
 import { FakeProvider } from "@pki/testkit";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
@@ -17,6 +17,7 @@ import {
   productEgress,
   productProviders,
 } from "./composition.ts";
+import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 let root: string;
 
@@ -86,12 +87,63 @@ describe("productEgress", () => {
   });
 });
 
-describe("productCalls", () => {
-  it("binds no Provider yet, so a call is blocked without a fallback", async () => {
-    expect(productProviders()).toEqual([]);
+describe("productProviders", () => {
+  // V01-T11 (provisional): the OpenAI-compatible Provider is the one callable Provider
+  // until T10 adds the CLI ones and the user's default choice; the local-model stub
+  // is not bound (it can never serve a structured request).
+  it("binds the OpenAI-compatible Provider only, with the egress policy's loopback rule", async () => {
     const db = openCanonicalDb(join(root, "PKI"));
     try {
-      const { broker, issuer } = productCalls(db, productEgress(db));
+      const providers = productProviders(db, NO_SECRET_STORE, productEgress(db));
+      expect(providers.map((p) => p.id)).toEqual(["openai-compatible"]);
+      const [openai] = providers;
+      writeSetting(db, OPENAI_MODEL_SETTING, "m");
+      // the same build-kind rule as productEgress (this is the test build)
+      writeSetting(db, OPENAI_BASE_URL_SETTING, "http://127.0.0.1:9/v1");
+      expect(await openai?.checkHealth()).toEqual({
+        state: "unavailable",
+        reason: "secret-store-unavailable",
+      });
+      writeSetting(db, OPENAI_BASE_URL_SETTING, "http://api.synthetic.example/v1");
+      expect(await openai?.checkHealth()).toEqual({
+        state: "unavailable",
+        reason: "insecure-endpoint",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is what the product Broker calls: a connection test reaches its egress decision", async () => {
+    const db = openCanonicalDb(join(root, "PKI"));
+    try {
+      const egress = productEgress(db);
+      const providers = productProviders(db, NO_SECRET_STORE, egress);
+      const { broker, issuer } = productCalls(db, egress, { providers });
+      const result = await issuer.during((userActionId) =>
+        broker.call({
+          taskKind: "connection-test",
+          sourceVersionIds: [],
+          candidateItemIds: [],
+          origin: { userActionId },
+          schemaVersion: 1,
+          budget: { timeoutMs: 1000 },
+          retryable: false,
+        }),
+      );
+      // bound (not "no-provider"); no endpoint yet, so the egress decision stops it
+      expect(result).toMatchObject({ status: "blocked", reason: "destination-unavailable" });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("productCalls", () => {
+  it("with no Provider bound, a call is blocked without a fallback", async () => {
+    const db = openCanonicalDb(join(root, "PKI"));
+    try {
+      const { broker, issuer } = productCalls(db, productEgress(db), { providers: [] });
       const result = await issuer.during((userActionId) =>
         broker.call({
           taskKind: "connection-test",

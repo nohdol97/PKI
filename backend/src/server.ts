@@ -14,12 +14,17 @@ import {
   type RouteName,
   type RouteRequest,
   type RouteResponse,
+  type SecretSource,
   type VectorIndex,
 } from "@pki/contracts";
 import {
   CLI_BACKGROUND_SETTING,
   errorClass,
   log,
+  OPENAI_BASE_URL_SETTING,
+  OPENAI_MODEL_SETTING,
+  openaiKeySecretName,
+  parseEndpoint,
   readCliBackground,
   type Broker,
   type BrokerResult,
@@ -31,6 +36,7 @@ import {
   findSources,
   listProviderCalls,
   listSources,
+  readSetting,
   schemaVersion,
   writeSetting,
   type SqlDriver,
@@ -40,6 +46,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import type { ConnectorManager } from "./connectors.ts";
 import { matchRoute } from "./routing.ts";
+import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const LOOPBACK = "127.0.0.1";
 const MIN_TOKEN_LENGTH = 32;
@@ -66,6 +73,8 @@ export interface ServerOptions {
   databaseFile?: string;
   /** Consent and egress rules, the same instance the Broker asks (composition.ts). */
   egress: EgressControls;
+  /** Asked for the presence (never the value) of the key Settings shows; default: none. */
+  secrets?: SecretSource;
   /**
    * The Broker and the user action issuer (composition.ts productCalls); only this
    * API layer holds the issuer. Without them the connection test is blocked
@@ -93,6 +102,8 @@ const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "connector-unavailable": 409,
   "destination-unavailable": 409,
   "consent-stale": 409,
+  "invalid-endpoint": 400,
+  "secret-store-unavailable": 409,
   "embedding-not-implemented": 409,
   "embedding-busy": 409,
 };
@@ -185,6 +196,16 @@ async function embeddingState(embedder: EmbeddingProvider | null): Promise<Embed
 }
 
 /**
+ * The endpoint as it will be stored, or undefined when refused. Loopback `http` is
+ * stored; the egress policy decides, per build kind, whether it is used.
+ */
+function storableEndpoint(raw: string): string | undefined {
+  const checked = parseEndpoint(raw, true);
+  if ("problem" in checked || /[?#]/.test(raw)) return undefined;
+  return checked.url.href;
+}
+
+/**
  * Starts the preparation the user asked for and answers with the state it left,
  * without waiting (V01-R14). A running one is not restarted, a ready model is left
  * as is. The embedder's error text never reaches the response or the log.
@@ -216,6 +237,24 @@ async function prepareEmbedding(
 }
 
 function createHandlers(options: ServerOptions, preparations: Set<AbortController>): Handlers {
+  const secrets = options.secrets ?? NO_SECRET_STORE;
+  const settings = async () => {
+    const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
+    const host = baseUrl !== null && URL.canParse(baseUrl) ? new URL(baseUrl).host : null;
+    const keyName = host === null ? null : openaiKeySecretName(host);
+    return {
+      dataDirectory: options.dataDirectory,
+      schemaVersion: schemaVersion(options.db),
+      databaseEncryption: databaseEncryption(options.databaseFile),
+      openaiCompatible: {
+        baseUrl,
+        model: readSetting(options.db, OPENAI_MODEL_SETTING) ?? null,
+        host,
+        keyName,
+        key: keyName === null ? null : await secrets.has(keyName),
+      },
+    };
+  };
   return {
     status: async () => ({
       backend: { state: "ready" },
@@ -228,11 +267,19 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     sources: async () => ({ sources: listSources(options.db) }),
     searchSources: async (input) => ({ sources: findSources(options.db, input.query) }),
     activity: async () => ({ calls: listProviderCalls(options.db) }),
-    settings: async () => ({
-      dataDirectory: options.dataDirectory,
-      schemaVersion: schemaVersion(options.db),
-      databaseEncryption: databaseEncryption(options.databaseFile),
-    }),
+    settings: async () => settings(),
+    writeSettings: async ({ openaiCompatible }) => {
+      const baseUrl = storableEndpoint(openaiCompatible.baseUrl);
+      if (baseUrl === undefined) return { error: "invalid-endpoint" };
+      // keys of other hosts go first, or nothing changes (review N1)
+      const keep = openaiKeySecretName(new URL(baseUrl).host);
+      if ((await secrets.deleteOthers(keep)) !== "done") {
+        return { error: "secret-store-unavailable" };
+      }
+      writeSetting(options.db, OPENAI_BASE_URL_SETTING, baseUrl);
+      writeSetting(options.db, OPENAI_MODEL_SETTING, openaiCompatible.model);
+      return settings();
+    },
     consents: async () => options.egress.overview(),
     grantConsent: async ({ providerId, allowedClasses, destination, policyVersion }) =>
       options.egress.grant(providerId, allowedClasses, { destination, policyVersion }),

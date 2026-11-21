@@ -19,7 +19,7 @@ const buildKind = at(BUILD_KIND_MODULE);
 const gate = at("providers/src/execution-gate.ts");
 const broker = at("providers/src/broker.ts");
 const elsewhere = at("backend/src/composition.ts");
-const otherProviders = at("providers/src/egress-policy.ts");
+const otherProviders = at("providers/src/log.ts");
 const viteConfig = at("vitest.config.ts");
 
 RuleTester.describe = describe;
@@ -36,10 +36,13 @@ describe("gate-inputs rule", () => {
   it("covers the gate, the Broker and the modules that supply the gate's inputs", () => {
     expect([...DECISION_MODULES].sort()).toEqual(
       [
+        "providers/src/adapters/openai-compatible.ts",
         "providers/src/broker.ts",
         "providers/src/build-kind.ts",
         "providers/src/cli-profiles.ts",
+        "providers/src/egress-policy.ts",
         "providers/src/execution-gate.ts",
+        "providers/src/secret-names.ts",
         "providers/src/synthetic-manifest.ts",
         "providers/src/user-actions.ts",
         "providers/src/verified-cli.ts",

@@ -3,7 +3,7 @@
 // driver, the Connector kinds, the egress policy, the Providers and the Broker
 // with its execution gate. Entry points (dev.ts, shell.ts through boot.ts,
 // site-check.ts) build the backend from these.
-import type { LLMProvider } from "@pki/contracts";
+import type { LLMProvider, SecretSource } from "@pki/contracts";
 import {
   BUILD_KIND,
   createBroker,
@@ -18,7 +18,7 @@ import {
   type TestBuildExecution,
   type UserActionIssuer,
 } from "@pki/providers";
-import { createLocalEmbedder } from "@pki/providers/adapters";
+import { createLocalEmbedder, OpenAICompatibleProvider } from "@pki/providers/adapters";
 import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
@@ -55,14 +55,33 @@ export function productEgress(db: SqlDriver): EgressControls {
   });
 }
 
-/** The Provider implementations the product binds: none until V01-T10 (CLI) and T11 (API key). */
-export function productProviders(): readonly LLMProvider[] {
-  return [];
+/**
+ * The Provider implementations the Broker may call (V01-R11). Provisional (V01-T11):
+ * the OpenAI-compatible one only. Its key comes from `secrets` just before each call,
+ * and it asks `egress` (the instance the API and the Broker share) again just before
+ * sending. The local-model Provider is not bound: it only answers "not implemented"
+ * and reports no structured output, so the Broker could never use it, and binding it
+ * would make two Providers, of which productCalls calls none. The CLI Providers and
+ * the user's default choice among several are V01-T10's.
+ */
+export function productProviders(
+  db: SqlDriver,
+  secrets: SecretSource,
+  egress: EgressControls,
+): readonly LLMProvider[] {
+  return [
+    new OpenAICompatibleProvider({
+      db,
+      secrets,
+      allowLoopbackHttp: loopbackHttpAllowed(BUILD_KIND),
+      egress,
+    }),
+  ];
 }
 
 export interface CallsOptions {
-  /** Default productProviders(); tests bind doubles here. */
-  providers?: readonly LLMProvider[];
+  /** The Providers to bind: productProviders(...) in the product, doubles in tests. */
+  providers: readonly LLMProvider[];
   /** The test build's pick and list (execution-gate.ts); ignored by any other build. */
   testBuild?: TestBuildExecution;
 }
@@ -70,16 +89,17 @@ export interface CallsOptions {
 /**
  * The Broker and the user action issuer (V01-R8, R10). The ledger is made here
  * once: the issuer goes to the API layer only, the redeemer to the Broker only.
- * The Broker gets `egress`, the same instance the API serves consent from (T08).
+ * The Broker gets `egress`, the same instance the API serves consent from (T08)
+ * and the Providers ask again just before sending (T11).
  * Provisional: with one Provider bound it is the one called; with none or
  * several, none is (the user's default choice is V01-T10's; no silent fallback).
  */
 export function productCalls(
   db: SqlDriver,
   egress: EgressControls,
-  options: CallsOptions = {},
+  options: CallsOptions,
 ): { broker: Broker; issuer: UserActionIssuer } {
-  const providers = options.providers ?? productProviders();
+  const { providers } = options;
   const ledger = createUserActionLedger();
   const broker = createBroker({
     db,
