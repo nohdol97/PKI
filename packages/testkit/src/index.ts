@@ -5,5 +5,7 @@ export { MemoryKnowledgeEngine } from "./memory-knowledge-engine.ts";
 export { MemoryVectorIndex } from "./memory-vector-index.ts";
 export { vectorIndexContract } from "./vector-index.contract.ts";
 export { connectorContract } from "./connector.contract.ts";
+export { embeddingContract, type EmbeddingContractSubject } from "./embedding.contract.ts";
+export { FakeEmbedder, type FakeEmbedderOptions } from "./fake-embedder.ts";
 export { FakeProvider, type FakeProviderOptions, type FakeStep } from "./fake-provider.ts";
 export { providerContract, providerRequest, structuredRequest } from "./provider.contract.ts";

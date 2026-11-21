@@ -133,6 +133,8 @@ for (const [index, seed] of seeds.entries()) {
     try {
       await expect(page.getByRole("row", { name: /백엔드/ })).toContainText("준비됨");
       await expect(page.getByRole("row", { name: /벡터 색인/ })).toContainText("사용 불가");
+      // No embedder is bound in the product configuration until V01-T14.
+      await expect(page.getByRole("row", { name: /Embedding/ })).toContainText("미구현");
 
       await openScreen(page, "원본");
       for (const kind of ["site-mail", "site-messenger", "site-wiki"]) {
