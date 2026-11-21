@@ -1,10 +1,10 @@
 // The dev entry hands its per-run token to the parent over stdout, never argv or env,
 // and keeps its DB apart from the product's: a sibling "PKI-dev" folder by default
-// (here under a temp HOME), or --data-dir.
+// (here under a temp HOME), or --data-dir. --fixtures picks the synthetic seed file.
 import { CANONICAL_DB_FILE } from "./composition.ts";
 import { resolveDataDirectory } from "@pki/storage";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import { join, resolve } from "node:path";
@@ -79,4 +79,25 @@ it("uses --data-dir when given", async () => {
   expect(existsSync(join(dir, CANONICAL_DB_FILE))).toBe(true);
   expect(existsSync(`${productDir()}-dev`)).toBe(false);
   expect(existsSync(productDir())).toBe(false);
+});
+
+it("seeds the test Connector from --fixtures and reports its data directory", async () => {
+  const dir = join(home, "seeded");
+  const fixtures = join(home, "seed.jsonl");
+  writeFileSync(
+    fixtures,
+    `${JSON.stringify({ externalId: "s1", title: "합성 씨앗", body: "b" })}\n`,
+  );
+  await withDev(["--data-dir", dir, "--fixtures", fixtures], async (port, headers) => {
+    const sync = await send(port, "/api/connectors/sync", headers, "POST", {
+      connectorId: "fixtures",
+    });
+    expect(sync.body).toEqual({ connectorId: "fixtures", received: 1, created: 1 });
+    expect((await send(port, "/api/sources", headers)).body).toMatchObject({
+      sources: [{ externalId: "s1", title: "합성 씨앗" }],
+    });
+    expect((await send(port, "/api/settings", headers)).body).toMatchObject({
+      dataDirectory: dir,
+    });
+  });
 });

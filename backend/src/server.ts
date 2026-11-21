@@ -11,6 +11,13 @@ import {
   type RouteResponse,
   type VectorIndex,
 } from "@pki/contracts";
+import {
+  findSources,
+  listProviderCalls,
+  listSources,
+  schemaVersion,
+  type SqlDriver,
+} from "@pki/storage";
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -32,6 +39,10 @@ export interface ServerOptions {
   vectorIndex: VectorIndex;
   /** Built by the composition point (composition.ts), never here. */
   connectors: ConnectorManager;
+  /** The migrated canonical DB the screens read from. */
+  db: SqlDriver;
+  /** The folder holding `db`, shown read-only in Settings. */
+  dataDirectory: string;
 }
 
 export interface RunningServer {
@@ -84,6 +95,13 @@ function createHandlers(options: ServerOptions): Handlers {
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),
     syncConnector: (input) => options.connectors.sync(input.connectorId),
+    sources: async () => ({ sources: listSources(options.db) }),
+    searchSources: async (input) => ({ sources: findSources(options.db, input.query) }),
+    activity: async () => ({ calls: listProviderCalls(options.db) }),
+    settings: async () => ({
+      dataDirectory: options.dataDirectory,
+      schemaVersion: schemaVersion(options.db),
+    }),
   };
 }
 

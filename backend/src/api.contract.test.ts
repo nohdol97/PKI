@@ -18,6 +18,7 @@ let valid: Record<string, string>;
 // A body for every route that takes one; the schema test below fails for a route missing here.
 const requests: Partial<Record<RouteName, unknown>> = {
   syncConnector: { connectorId: "fixtures" },
+  searchSources: { query: "등대" },
 };
 
 beforeAll(async () => {
@@ -38,6 +39,8 @@ beforeAll(async () => {
     token: TOKEN,
     allowedOrigins: [],
     connectors,
+    db,
+    dataDirectory: "/synthetic/data",
     ...productAdapters(),
   });
   valid = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
