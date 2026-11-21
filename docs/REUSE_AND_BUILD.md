@@ -59,7 +59,7 @@ jina-embeddings v3/v4/v5, PyMuPDF, FalkorDBLite. EmbeddingGemma는 조건부이�
 | LLM Provider 통합 | 원 설계 지정(4절) | Provider 3종, Broker, 전송 정책, CLI 실행 조건([ADR 0005](adr/0005-llm-providers.md), [0014](adr/0014-egress-policy-and-consent.md)) |
 | Connector 인터페이스 | 원 설계 지정(5절) | 규격, 계약 테스트, JSONL·파일 import, 테스트 Connector. 실제 수집기는 배포처 포크 |
 | 제품 UX | 원 설계 지정(14절) | 화면 8개. Phase 1은 Home, Sources, Activity, Settings의 최소 화면 |
-| **정본 기록 스키마**(원본 version, 근거 span, 지식 항목과 관계, 유효·관측 시각, 상태, 사용자 교정, tombstone) | 시간 유효성, span 수준 근거, 삭제 시 파생물 제거를 모두 갖추었다고 실행으로 확인된 엔진이 없다. 사용자 교정 보존은 평가되지 않았다(6절 1번) | **기록 보관까지만.** 검색 파이프라인, 유사도 기반 개체 해소, 일반 그래프 탐색, 벡터 색인, Wiki 합성은 만들지 않는다([ARCHITECTURE 3.2절](ARCHITECTURE.md), [ADR 0002](adr/0002-authority-in-product-records.md)). 사용자 확인 대기이며 R07에서 뒤집힐 수 있다 |
+| **정본 기록 스키마**(원본 version, 근거 span, 지식 항목과 관계, 유효·관측 시각, 상태, 사용자 교정, tombstone) | 시간 유효성, span 수준 근거, 삭제 시 파생물 제거를 모두 갖추었다고 실행으로 확인된 엔진이 없다. 사용자 교정 보존은 평가되지 않았다(6절 1번) | **기록 보관까지만.** 검색 파이프라인, 유사도 기반 개체 해소, 일반 그래프 탐색, 벡터 색인, Wiki 합성은 만들지 않는다([ARCHITECTURE 3.2절](ARCHITECTURE.md), [ADR 0002](adr/0002-authority-in-product-records.md)). 사용자가 위임한 판단으로 유지하기로 정했으며 R07에서 뒤집힐 수 있다 |
 | **Phase 1의 추출 조율** | 엔진 선정을 기다리면 Phase 1이 멈춘다([ADR 0003](adr/0003-phase1-without-engine.md)) | 원본당 구조화 호출 1회, chunk 분할 없음, 정확 일치로만 후보 조회. 이 선을 넘는 기능은 엔진을 꽂아서 얻는다 |
 | 작업 큐와 실행기 | 정본과 같은 SQLite 트랜잭션 안에서 작업을 등록해야 version fence가 성립한다. 기성 작업 큐 구성요소는 조사에서 평가하지 않았다 | 한 프로세스, SQLite 테이블, 임대와 재시작 복구까지. 분산 처리는 하지 않는다. Phase 2(I03)에서 기성 구성요소를 다시 검토한다 |
 | 실패 복구(fence, 내용 없는 tombstone, 변경 순번 비교와 재구축) | 저장소 사이의 일관성은 제품의 정본 규칙에 달려 있다([ADR 0013](adr/0013-failure-recovery.md)) | 정본 한 곳과 투영의 관계까지. outbox는 Phase 1에 넣지 않는다 |
