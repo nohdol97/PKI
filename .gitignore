@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local data, models and secrets
+.env
+.env.*
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+/data/
+/models/
+
+# Editors
+.idea/
+.vscode/
+*.swp
