@@ -9,11 +9,14 @@
 
 원 설계의 구조는 후보다. Phase 1 개발을 시작하려면 저장소, 엔진, 런타임, 그리고 무엇이 바뀔 수 있는지의 경계를 정해야 한다. 그런데 엔진, CLI, Windows 설치 파일의 실행 검증은 배포처에서만 할 수 있다. 그래서 이 작업은 소스 조사 근거(R01)만으로 결정을 **잠정**으로 내리고, 실행 근거가 필요한 결정에는 "잠정 — 배포처 검증 대기"를 붙이고 가정 목록을 남긴다. 확정은 R07(#37)에서 한다.
 
+**이 작업이 놓인 자리(2026-11-21 기준).** 이슈 #15가 선행으로 든 #10(R01)과 #14(R05)는 둘 다 **아직 열려 있다.** 이 문서 묶음이 올라선 branch의 바탕은 `main`이 아니라 R01의 **병합되지 않은 PR #36**이다. R05는 PR #38로 열려 있다. 따라서 이 묶음의 PR은 이슈 #15를 닫지 않고 `Refs #15`로만 잇는다. R06-C3에는 사용자 확인이 남아 있다(아래 표).
+
 ## 목표
 
 - 개발자가 Phase 1(V01, V02)을 시작하는 데 필요한 구조, 결정, 구현 기준이 저장소에 문서로 있다.
 - 실행해 보지 않은 것은 어디에도 통과나 확정으로 적혀 있지 않다.
 - 뒤집힐 수 있는 선택이 무엇이고, 뒤집히면 무엇을 바꾸는지 한 표에서 볼 수 있다.
+- 사용자가 정해야 하는데 아직 정하지 않은 것이 정해진 것처럼 적혀 있지 않다.
 
 ## 비목표 (배포처에서 후속 진행)
 
@@ -31,13 +34,14 @@
 
 - **R06-R1 산출 문서.** ARCHITECTURE, ADR 묶음과 색인, ownership, site-setup, 재사용·직접 개발 목록, V01·V02 구현 spec, 문서 색인을 `docs/`에 둔다. site-setup.md는 `## 배포처 설정 체크리스트`라는 제목 아래에 번호가 붙은 항목을 갖는다.
 - **R06-R2 최초 base 보관.** 이슈 #35의 절차와 실행 증거를 저장소 안 문서로 옮긴다.
-- **R06-R3 정본과 투영.** 데이터 종류마다 저장 위치, 정본인지 투영인지, 잃었을 때의 복구를 표로 적는다. 그래프 저장소를 Phase 1에 두는지 밝힌다.
+- **R06-R3 정본과 투영.** 데이터 종류마다 저장 위치, 정본인지 투영인지, 잃었을 때의 복구를 표로 적는다. 벡터, 그래프, Wiki 각각에 대해 투영인지를 밝힌다.
 - **R06-R4 부분 실패 복구.** 저장소 사이에서 중간에 꺼졌을 때의 복구 방식을 정한다.
 - **R06-R5 보안·데이터 결정.** OS 계정 격리, 암호화 대상과 키 보관, 백업 암호화, 임시 파일과 로그, LLM 전송 승인, embedding 실행 경로와 모델 파일의 포함·내려받기·갱신, 포크가 지킬 규격을 각각 결정으로 적는다.
-- **R06-R6 가정 표.** 실행 증거가 없는 항목마다 가정, 걸려 있는 결정, 배포처에서 확인하는 방법, 틀렸을 때 바뀌는 것을 적는다.
-- **R06-R7 어댑터 경계.** 엔진, Provider, 저장소, embedding을 어댑터 뒤에 두라는 요구를 Phase 1 spec의 요구사항과 완료 기준에 넣는다.
-- **R06-R8 엔진 재개발 금지.** 실행을 통과한 엔진이 없을 때의 길이 "대안 조사"이고 자체 엔진 개발이 아님을 결정 기록에 적는다.
-- **R06-R9 출처 일치.** 오픈소스 구성요소에 관한 서술은 OSS_EVALUATION의 해당 절과 맞아야 하고, Windows에서 동작한다거나 벤더가 허용한다는 서술을 하지 않는다.
+- **R06-R6 가정 표.** 실행 증거가 없는 항목마다 가정, 걸려 있는 결정, 확인하는 방법(누가 언제 하는지 포함), 틀렸을 때 바뀌는 것을 적는다.
+- **R06-R7 어댑터 경계.** 엔진, Provider, 저장소, embedding을 어댑터 뒤에 두라는 요구를 Phase 1 spec의 요구사항과 완료 기준에 넣는다. 규격마다 그것을 **부르는 자리**와 구현을 바꿔 끼웠을 때 달라지는 것을 확인하는 테스트가 있어야 한다.
+- **R06-R8 엔진 재개발 금지.** 실행을 통과한 엔진이 없을 때의 길이 "대안 조사"이고 자체 엔진 개발이 아님을 결정 기록에 적는다. 제품이 직접 하는 일과 엔진의 일을 가르는 선을 테스트할 수 있는 규칙으로 적는다.
+- **R06-R9 출처 일치.** 오픈소스 구성요소에 관한 서술은 OSS_EVALUATION의 해당 절과 맞아야 하고, Windows에서 동작한다거나 벤더가 허용한다는 서술을 하지 않는다. 문서 근거가 없는 사실은 누구의 진술인지와 함께 적는다.
+- **R06-R10 사용자 결정의 표시.** 사용자가 정할 일을 잠정으로 고른 경우 그 사실, 어긋날 수 있는 원 설계 문장, 번복되면 다시 하는 작업을 한곳에 모아 적는다.
 
 ## 인터페이스 / 설계 개요
 
@@ -49,29 +53,32 @@ C1~C4는 이슈 #15의 문장 그대로다.
 
 - [ ] **R06-C1** (R1, R2): OSS_EVALUATION.md, ARCHITECTURE.md, docs/adr/, docs/ownership.md, docs/site-setup.md, 재사용 기능과 직접 개발 기능 목록, Phase 1 구현 spec(V01·V02)을 PR로 남긴다. 이후 Phase의 spec은 각 작업 착수 시 작성하며 여기서는 작성 계획만 둔다. #35에서 확정·실행한 최초 base 생성 절차와 증거를 보관한다.
 - [ ] **R06-C2** (R3, R4): 원본·지식/근거·jobs/feedback 정본과 Wiki/vector/graph projection 여부를 각각 명시한다. 엔진 graph를 정본으로 택하면 중복 graph 쓰기를 제거한다. 저장소 간 부분 실패의 복구 방식(commit marker/outbox·version fence·재구축)을 정한다.
-- [ ] **R06-C3** (R5): OS 계정 격리·암호화 대상/키 저장·백업 암호화·임시파일/로그·LLM 전송승인·embedding 실행 경로와 모델 자산 포함/다운로드/업데이트·하위 포크 계약을 결정한다.
+- [ ] **R06-C3** (R5, R10): OS 계정 격리·암호화 대상/키 저장·백업 암호화·임시파일/로그·LLM 전송승인·embedding 실행 경로와 모델 자산 포함/다운로드/업데이트·하위 포크 계약을 결정한다.
 - [ ] **R06-C4** (R6, R7, R8, R9): 실행 증거가 없는 항목은 미검증 가정으로 목록화하고, 뒤집힐 수 있는 선택(엔진·Provider·저장소·embedding)은 어댑터 경계 뒤에 두도록 Phase 1 spec에 반영한다. 확정은 R07(#37)에서 한다. 엔진 부적합이거나 R03 실행을 통과한 후보가 없어 R04-C2를 수행하지 못했으면 대안 조사로 돌아가며 자체 엔진 재개발을 기본 대안으로 삼지 않는다.
 
 ### 각 기준을 충족하는 문서
 
 문서 작업이므로 "테스트"는 문서의 해당 자리를 대조하는 것이다. 충족 여부는 PR의 검증 기록과 독립 검토로 판정한다. Mermaid 그림은 사전 점검 도구로, 문서 사이의 링크와 번호 대응은 스크립트로 확인해 PR에 출력을 남긴다.
 
-| 기준 | 충족하는 문서와 자리 | R07까지 열려 있는 부분 |
+| 기준 | 충족하는 문서와 자리 | 아직 열려 있는 부분 |
 |---|---|---|
-| R06-C1 | [OSS_EVALUATION.md](../OSS_EVALUATION.md)(R01에서 작성), [ARCHITECTURE.md](../ARCHITECTURE.md), [adr/](../adr/README.md) 14건, [ownership.md](../ownership.md), [site-setup.md](../site-setup.md), [REUSE_AND_BUILD.md](../REUSE_AND_BUILD.md), [V01 spec](2026-11-21-V01-vertical-skeleton.md), [V02 spec](2026-11-21-V02-vertical-slice.md). 작성 계획은 [문서 색인](../README.md#앞으로-쓸-spec). 최초 base는 [R00 보관 문서](../research/2026-11-21-R00-initial-base.md) | "PR로 남긴다"는 PR이 열려야 충족된다. site-setup.md의 설정 키 이름은 V01에서 확정한다 |
-| R06-C2 | 정본과 투영: [ARCHITECTURE 4절](../ARCHITECTURE.md)의 표, [ADR 0002](../adr/0002-authority-in-product-records.md). 그래프: Phase 1에 없음([ADR 0004](../adr/0004-embedded-storage.md)). 복구: [ARCHITECTURE 7절](../ARCHITECTURE.md), [ADR 0013](../adr/0013-failure-recovery.md) | "엔진 graph를 정본으로 택하면"의 갈림은 지금 "택하지 않음"이다. R03 실행 결과로 뒤집힐 수 있다(가정 A09). 벡터 색인의 실제 구현은 정해지지 않았다(A08) |
-| R06-C3 | OS 계정 격리, 암호화 대상과 키, 백업, 임시 파일, 로그: [ADR 0010](../adr/0010-encryption-at-rest.md). 전송 승인: [ADR 0014](../adr/0014-egress-policy-and-consent.md). Embedding 경로와 모델 파일: [ADR 0006](../adr/0006-embedding.md). 포크 규격: [ADR 0012](../adr/0012-upstream-and-fork-ownership.md), [ownership.md](../ownership.md) 2절 | **사용자 확인 2건**: 정본 SQLite를 Phase 1에 평문으로 두는 것(ADR 0010), 모델을 설치 파일에 넣지 않는 것(ADR 0006). 정본 파일 암호화의 구현체는 H01 전에 조사한다. 백업 암호화의 방식은 H01 spec |
-| R06-C4 | 가정 표: [ARCHITECTURE 9절](../ARCHITECTURE.md#9-가정-표) A01~A19. 어댑터 경계의 반영: V01-R8, R14~R17과 V01-C7, V02-R8. 엔진 재개발 금지: [ADR 0003](../adr/0003-phase1-without-engine.md)의 범위 제한과 "결과", [ADR 0011](../adr/0011-sidecar-language.md)의 결정 기준 | 가정 19개 전부가 R07의 대조 대상이다. 사이드카 언어([ADR 0011](../adr/0011-sidecar-language.md))는 미결이다 |
+| R06-C1 | [OSS_EVALUATION.md](../OSS_EVALUATION.md)(R01에서 작성), [ARCHITECTURE.md](../ARCHITECTURE.md), [adr/](../adr/README.md) 14건, [ownership.md](../ownership.md), [site-setup.md](../site-setup.md), [REUSE_AND_BUILD.md](../REUSE_AND_BUILD.md), [V01 spec](2026-11-21-V01-vertical-skeleton.md), [V02 spec](2026-11-21-V02-vertical-slice.md). 작성 계획은 [문서 색인](../README.md#앞으로-쓸-spec). 최초 base는 [R00 보관 문서](../research/2026-11-21-R00-initial-base.md) | "PR로 남긴다"는 PR이 열려야 충족된다. OSS_EVALUATION.md는 아직 `main`에 없다(PR #36). site-setup.md의 설정 키 이름은 V01에서 확정한다 |
+| R06-C2 | 정본과 투영: [ARCHITECTURE 4절](../ARCHITECTURE.md)의 표(벡터, 엔진 저장소, 그래프, Wiki 각각 "투영"으로 명시), [ADR 0002](../adr/0002-authority-in-product-records.md). 그래프: Phase 1에 없고 도입하면 투영([ADR 0004](../adr/0004-embedded-storage.md)). 복구: [ARCHITECTURE 7절](../ARCHITECTURE.md), [ADR 0013](../adr/0013-failure-recovery.md) | **사용자 확인**: 지식의 정본을 제품이 갖는 것(ADR 0002). "엔진 graph를 정본으로 택하면"의 갈림은 지금 "택하지 않음"이며 사용자 판단이나 R03 결과로 뒤집힐 수 있다(A09). 벡터 색인의 실제 구현은 정해지지 않았다(A08) |
+| R06-C3 | OS 계정 격리, 암호화 대상과 키, 백업, 임시 파일, 로그: [ADR 0010](../adr/0010-encryption-at-rest.md). 전송 승인: [ADR 0014](../adr/0014-egress-policy-and-consent.md). Embedding 경로와 모델 파일: [ADR 0006](../adr/0006-embedding.md). 포크 규격: [ADR 0012](../adr/0012-upstream-and-fork-ownership.md), [ownership.md](../ownership.md) 2절 | **사용자 확인 2건**: 정본 SQLite를 Phase 1에 평문으로 두는 것(ADR 0010), 모델을 설치 파일에 넣지 않는 것(ADR 0006). 자격 증명 저장의 구체적 방식은 V01-T11이 조사한다(A16). 정본 파일 암호화의 구현체는 H01 전에 조사한다. 백업 암호화의 방식은 H01 spec |
+| R06-C4 | 가정 표: [ARCHITECTURE 9절](../ARCHITECTURE.md#9-가정-표) A01~A22. 어댑터 경계의 반영: V01-R8, R14~R17과 V01-C7, V02-R13(부르는 자리와 교체 증명). 엔진 재개발 금지: [ADR 0003](../adr/0003-phase1-without-engine.md)의 범위 제한 일곱 줄과 "결과", [ARCHITECTURE 3.2절](../ARCHITECTURE.md), [ADR 0011](../adr/0011-sidecar-language.md)의 결정 기준 | 가정 22개 전부가 R07의 대조 대상이다. 사이드카 언어([ADR 0011](../adr/0011-sidecar-language.md))는 미결이다. 엔진·벡터 규격의 교체 증명은 V02-T09가 끝나야 실제로 존재한다 |
+
+사용자 확인이 필요한 세 건은 [ARCHITECTURE 맨 위 표](../ARCHITECTURE.md#사용자-확인이-필요한-결정)에 모여 있다.
 
 R07(#37)이 닫히기 전에는 Phase 0을 통과로 표시하지 않는다(이슈 #1 공통 완료 규칙). 이 spec의 기준이 충족되어도 그것은 "잠정 결정이 문서로 있다"는 뜻이지 결정이 옳다고 확인되었다는 뜻이 아니다.
 
 ## 미해결 질문
 
-1. 정본 SQLite 평문과 모델 배포 방식에 대한 사용자 확인(위 표 R06-C3).
-2. 원 설계 15절의 "중복 저장소를 추가하지 않는다"와 ADR 0002의 관계. R07에서 사용자가 판단한다([ARCHITECTURE 4절](../ARCHITECTURE.md)).
+1. 사용자 확인 세 건: 지식의 정본(ADR 0002), 정본 SQLite 평문(ADR 0010), 모델 배포 방식(ADR 0006).
+2. 이슈 #15를 언제 닫는가. 선행 #10과 #14가 닫히고, PR #36이 병합되어 이 묶음의 바탕이 `main`이 되고, 위 사용자 확인이 끝난 뒤가 되어야 한다.
 
 ## 변경 이력
 
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-21 | 최초 작성 | 이 문서 | 이슈 #15가 요구한 R/C 기준 고정. 조정자 판정 6 |
+| 2026-11-21 | 선행 작업과 바탕 PR의 상태, 이슈를 닫지 않는다는 점을 배경에 명시. 사용자 확인을 3건으로(ADR 0002 추가). R10 추가, R3·R6~R9 보강. 가정 수를 22로, 범위 제한을 일곱 줄로 맞춤 | 배경, 요구사항, 기준 대조 표, 미해결 질문 | 독립 검토 F04, F11, F15, F16, F19 |
