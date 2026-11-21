@@ -431,6 +431,19 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
     ]);
   });
 
+  it("applies a tombstone only to its own source", () => {
+    seedV4();
+    migrate(db);
+    db.run("INSERT INTO tombstones (source_id, version, at, reason) VALUES (1, 2, 't', 'deleted')");
+    db.run(
+      "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (2, 2, 'h', 't', 'b')",
+    );
+    expect(db.all("SELECT version FROM source_versions WHERE source_id = 2 ORDER BY id")).toEqual([
+      { version: 1 },
+      { version: 2 },
+    ]);
+  });
+
   it("never reuses a source version id, even after the highest is deleted", () => {
     seedV4();
     migrate(db);
