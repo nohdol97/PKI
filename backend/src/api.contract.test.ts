@@ -2,7 +2,7 @@
 // schema in @pki/contracts that the UI also uses.
 import { ErrorResponseSchema, routes } from "@pki/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { send } from "./http-test-client.ts";
+import { send } from "@pki/testkit";
 import { startServer, type RunningServer } from "./server.ts";
 
 const TOKEN = "c".repeat(43);
@@ -28,6 +28,7 @@ describe("API responses match @pki/contracts", () => {
     ["forbidden-origin", "/api/status", "GET", { origin: "https://evil.example" }],
     ["not-found", "/api/nope", "GET", {}],
     ["method-not-allowed", "/api/status", "POST", {}],
+    ["bad-request", "http://evil.example/api/status", "GET", {}],
   ])("%s rejection", async (error, path, method, override) => {
     const res = await send(server.port, path, { ...valid, ...override }, method);
     expect(ErrorResponseSchema.parse(res.body)).toEqual({ error });

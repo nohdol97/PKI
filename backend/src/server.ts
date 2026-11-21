@@ -5,6 +5,7 @@ import { routes, type ErrorResponse, type RouteName, type RouteResponse } from "
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { matchRoute } from "./routing.ts";
 
 const LOOPBACK = "127.0.0.1";
 const MIN_TOKEN_LENGTH = 32;
@@ -20,6 +21,8 @@ export interface ServerOptions {
 
 export interface RunningServer {
   url: string;
+  /** The address actually bound, as reported by the socket. */
+  address: string;
   port: number;
   close(): Promise<void>;
 }
@@ -55,6 +58,11 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   let selfHost = "";
 
   const server = createServer((req, res) => {
+    // Node keeps only the first Host header, and an absolute-form URI names a host of its
+    // own; both would let the Host check read something other than what is routed.
+    const hostHeaders = req.rawHeaders.filter((name, i) => i % 2 === 0 && /^host$/i.test(name));
+    if (hostHeaders.length > 1) return reject(res, 400, "bad-request");
+    if (!req.url?.startsWith("/")) return reject(res, 400, "bad-request");
     if (req.headers.host !== selfHost) return reject(res, 403, "forbidden-host");
     const origin = req.headers.origin;
     if (origin !== undefined && !allowedOrigins.has(origin)) {
@@ -62,22 +70,25 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     }
     if (!tokenMatches(req.headers.authorization, token)) return reject(res, 401, "unauthorized");
 
-    const path = new URL(req.url ?? "/", "http://_").pathname;
-    const entry = Object.entries(routes).find(([, route]) => route.path === path);
-    if (!entry) return reject(res, 404, "not-found");
-    const [name, route] = entry as [RouteName, (typeof routes)[RouteName]];
-    if (req.method !== route.method) return reject(res, 405, "method-not-allowed");
-    reply(res, 200, handlers[name]());
+    const match = matchRoute(routes, req.method, new URL(req.url, "http://_").pathname);
+    if (typeof match !== "string") {
+      return reject(res, match.error === "not-found" ? 404 : 405, match.error);
+    }
+    reply(res, 200, handlers[match]());
   });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(options.port ?? 0, LOOPBACK, resolve);
+    server.listen(options.port ?? 0, LOOPBACK, () => {
+      server.off("error", reject);
+      resolve();
+    });
   });
-  const { port } = server.address() as AddressInfo;
+  const { address, port } = server.address() as AddressInfo;
   selfHost = `${LOOPBACK}:${port}`;
   return {
     url: `http://${selfHost}`,
+    address,
     port,
     close: () => new Promise((resolve, reject) => server.close((e) => (e ? reject(e) : resolve()))),
   };

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 import { expect, it } from "vitest";
-import { send } from "./http-test-client.ts";
+import { send } from "@pki/testkit";
 
 it("prints a fresh session on stdout and serves the status API with it", async () => {
   const child = spawn(process.execPath, [resolve(import.meta.dirname, "dev.ts")], {

@@ -3,7 +3,7 @@
 import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { send } from "./http-test-client.ts";
+import { send, sendRaw } from "@pki/testkit";
 import { startServer, type RunningServer } from "./server.ts";
 
 const TOKEN = "t".repeat(43);
@@ -64,6 +64,24 @@ describe("local API security", () => {
   it("checks before routing, so unknown paths leak nothing to unauthorized callers", async () => {
     const res = await send(server.port, "/nope", without("authorization"));
     expect(res.status).toBe(401);
+  });
+
+  it("rejects a request carrying more than one Host header", async () => {
+    const host = `Host: 127.0.0.1:${server.port}`;
+    const auth = `Authorization: Bearer ${TOKEN}`;
+    expect(await sendRaw(server.port, ["GET /api/status HTTP/1.1", host, auth])).toBe(200);
+    expect(
+      await sendRaw(server.port, ["GET /api/status HTTP/1.1", host, "Host: evil.example", auth]),
+    ).toBe(400);
+  });
+
+  it("rejects an absolute-form request URI", async () => {
+    const res = await send(server.port, `http://evil.example/api/status`, valid);
+    expect(res).toEqual({ status: 400, body: { error: "bad-request" } });
+  });
+
+  it("binds to 127.0.0.1", () => {
+    expect(server.address).toBe("127.0.0.1");
   });
 
   const external = Object.values(networkInterfaces())

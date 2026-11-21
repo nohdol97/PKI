@@ -19,6 +19,7 @@ export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
 export const ErrorResponseSchema = z.object({
   error: z.enum([
+    "bad-request",
     "unauthorized",
     "forbidden-host",
     "forbidden-origin",

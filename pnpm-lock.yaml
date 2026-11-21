@@ -51,6 +51,10 @@ importers:
       '@pki/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
+    devDependencies:
+      '@pki/testkit':
+        specifier: workspace:*
+        version: link:../packages/testkit
 
   knowledge-engine: {}
 
