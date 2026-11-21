@@ -97,9 +97,14 @@ describe("path input", () => {
     expect(r).toMatchObject({ ok: false, error: { code: "not-a-file" } });
   });
 
-  it("reports a missing file as read-failed", async () => {
-    const r = await readInput({ kind: "path", path: join(base, "nope.txt") }, DEFAULT_LIMITS);
-    expect(r).toMatchObject({ ok: false, error: { code: "read-failed" } });
+  it("reports a missing file as read-failed with the system code only, never the path", async () => {
+    const path = join(base, "SECRETMARK_dir", "nope.txt");
+    const r = await readInput({ kind: "path", path }, DEFAULT_LIMITS);
+    expect(r).toMatchObject({
+      ok: false,
+      error: { code: "read-failed", detail: { cause: "ENOENT" } },
+    });
+    expect(JSON.stringify(r)).not.toContain("SECRETMARK_dir");
   });
 
   it("reports a directory as not-a-file", async () => {

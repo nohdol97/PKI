@@ -190,15 +190,16 @@ describe("checks run before parsers", () => {
 });
 
 describe("failures are results", () => {
-  it("turns a throwing module into corrupt with the message in detail", async () => {
+  it("turns a throwing module into corrupt with only the error class in detail", async () => {
     spyTxt(() => {
-      throw new Error("boom at offset 12");
+      throw new TypeError("boom SECRETMARK_42");
     });
     const r = await normalizeDocument(bytes(utf8("x"), "a.txt"));
     expect(r).toMatchObject({
       ok: false,
-      error: { code: "corrupt", detail: { cause: "boom at offset 12" } },
+      error: { code: "corrupt", detail: { cause: "TypeError" } },
     });
+    expect(JSON.stringify(r)).not.toContain("SECRETMARK_42");
   });
 
   it("turns a rejecting module and a non-Error throw into corrupt", async () => {
@@ -216,12 +217,17 @@ describe("failures are results", () => {
     });
   });
 
-  it("bounds the length of the detail message", async () => {
+  it("keeps the message of a thrown value out of the result, whatever its length or type", async () => {
     spyTxt(() => {
       throw new Error("x".repeat(5000));
     });
     const r = await normalizeDocument(bytes(utf8("x"), "a.txt"));
-    expect(!r.ok && String(r.error.detail?.["cause"]).length).toBeLessThanOrEqual(300);
+    expect(JSON.stringify(r)).not.toContain("xxxxx");
+    spyTxt(() => {
+      throw "SECRETMARK_str";
+    });
+    const s = await normalizeDocument(bytes(utf8("x"), "a.txt"));
+    expect(JSON.stringify(s)).not.toContain("SECRETMARK_str");
   });
 
   it("passes a module's own failure through", async () => {

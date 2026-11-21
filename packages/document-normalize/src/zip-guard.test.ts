@@ -330,6 +330,72 @@ describe("the parser gets a re-zipped archive of the checked entries only", () =
   });
 });
 
+describe("B3 entries no parser reads are counted but not kept", () => {
+  const entries = (): ZipEntrySpec[] => [
+    { name: "word/document.xml", data: "<w:document/>" },
+    { name: "word/media/image1.png", data: zeros(1000) },
+  ];
+
+  it("a dropped entry is checked like any other (declared size lie still stops)", async () => {
+    const result = await guardZip(
+      buildZip([{ name: "word/media/a.png", data: zeros(1000), declaredSize: 100 }]),
+      resolveLimits().zip,
+      (n) => n.startsWith("word/media/"),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("leaves its bytes out of entries and the re-zipped archive but keeps the name", async () => {
+    const result = await guardZip(buildZip(entries()), resolveLimits().zip, (n) =>
+      n.startsWith("word/media/"),
+    );
+    if (!result.ok) throw new Error("must pass");
+    const media = result.entries.find((e) => e.name === "word/media/image1.png");
+    expect(media).toMatchObject({ dropped: true });
+    expect(media?.data.byteLength).toBe(0);
+    expect(Object.keys(unzipSync(result.rezipped))).toEqual(["word/document.xml"]);
+  });
+
+  it("DOCX with pictures still converts and still reports the omitted images", async () => {
+    const result = await docxModule.parse(
+      buildDocx({ body: [{ text: "본문" }], images: 2 }),
+      resolveLimits(),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      value: { text: "본문", limitations: [{ code: "docx.images-omitted" }] },
+    });
+    const handed = parsers.mammoth.mock.calls[0]?.[0] as { buffer: Buffer };
+    expect(
+      Object.keys(unzipSync(new Uint8Array(handed.buffer))).some((n) => n.includes("media")),
+    ).toBe(false);
+  });
+});
+
+describe("B7 duplicate entry names", () => {
+  it("are a zip-path failure with rule duplicate and no parser call", async () => {
+    const bytes = buildZip([
+      { name: "word/document.xml", data: "<w:document/>" },
+      { name: "word/document.xml", data: "<w:document>2</w:document>" },
+    ]);
+    for (const [, module] of MODULES) {
+      const error = failure(await module.parse(bytes, resolveLimits()));
+      expect(error.code).toBe("zip-path");
+      expect(error.detail?.rule).toBe("duplicate");
+    }
+    expect(parsers.mammoth).toHaveBeenCalledTimes(0);
+    expect(parsers.excel).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("B4 library messages stay out of zip failures", () => {
+  it("a damaged archive reports the error class only", async () => {
+    const garbage = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4, 5]);
+    const error = failure(await docxModule.parse(garbage, resolveLimits()));
+    expect(error.detail).toEqual({ cause: expect.stringMatching(/^[A-Za-z]+$/) });
+  });
+});
+
 describe("damaged archives", () => {
   it("a ZIP signature followed by garbage is corrupt, never a rejection", async () => {
     const garbage = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4, 5]);

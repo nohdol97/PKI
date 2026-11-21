@@ -1,4 +1,5 @@
 // I02A-C1 (XLSX), C2 (XLSX), C6 (XLSX corrupt), C8 (XLSX metadata), C9 (XLSX limitation codes).
+import { unzipSync, zipSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { resolveLimits } from "../limits.ts";
 import { buildXlsx, buildZip } from "../testing/ooxml-builder.ts";
@@ -227,11 +228,10 @@ describe("C9 limitation codes", () => {
       '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
       '<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData><mergeCells count="0"/>' +
       '<conditionalFormatting sqref="A1"><cfRule type="expression" priority="1"><formula>A1&gt;1</formula></cfRule></conditionalFormatting></worksheet>';
-    const spec: XlsxSpec = {
-      sheets: [{ name: "s", rows: [["a"]] }],
-      extraEntries: [{ name: "xl/worksheets/sheet1.xml", data: sheet }],
-    };
-    expect(await codes(spec)).toEqual([]);
+    const files = unzipSync(buildXlsx({ sheets: [{ name: "s", rows: [["a"]] }] }));
+    files["xl/worksheets/sheet1.xml"] = new TextEncoder().encode(sheet);
+    const result = await xlsxModule.parse(zipSync(files), resolveLimits());
+    expect(result.ok && result.value.limitations).toEqual([]);
   });
   it("a sheet named like a formula or merge tag does not trigger the codes", async () => {
     expect(await codes({ sheets: [{ name: "f mergeCell", rows: [["<f> <mergeCell "]] }] })).toEqual(
@@ -259,5 +259,73 @@ describe("C6 damaged input", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("corrupt");
+  });
+});
+
+describe("B4 document-derived text stays out of failures", () => {
+  it("a cell reference and a part name carrying a marker never reach message or detail", async () => {
+    const files = unzipSync(buildXlsx({ sheets: [{ name: "S1", rows: [["a"]] }] }));
+    const name = Object.keys(files).find((n) => n.startsWith("xl/worksheets/")) as string;
+    files[name] = new TextEncoder().encode(
+      new TextDecoder().decode(files[name]).replace(/r="A1"/, 'r="SECRETMARK_cell"'),
+    );
+    const result = await xlsxModule.parse(zipSync(files), resolveLimits());
+    expect(JSON.stringify(result.ok ? {} : result.error)).not.toContain("SECRETMARK");
+  });
+
+  it("a rejecting parser keeps its message out of the result", async () => {
+    excelSpy.mockRejectedValueOnce(new RangeError("SECRETMARK_msg"));
+    const result = await xlsxModule.parse(
+      buildXlsx({ sheets: [{ name: "S", rows: [["a"]] }] }),
+      resolveLimits(),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "corrupt", detail: { cause: "RangeError" } },
+    });
+    expect(JSON.stringify(result)).not.toContain("SECRETMARK_msg");
+  });
+});
+
+describe("A4 the parser reads the re-zipped archive", () => {
+  it("read-excel-file is handed the guard's archive, not the original bytes", async () => {
+    const original = buildXlsx({ sheets: [{ name: "S", rows: [["x"]] }] });
+    await xlsxModule.parse(original, resolveLimits());
+    const handed = excelSpy.mock.calls.at(-1)?.[0] as Uint8Array;
+    expect(Buffer.from(handed).equals(Buffer.from(original))).toBe(false);
+    expect(Object.keys(unzipSync(handed)).sort()).toEqual(Object.keys(unzipSync(original)).sort());
+  });
+});
+
+describe("B1 limitation scans stay linear on hostile XML", () => {
+  const withWorkbook = (mutate: (xml: string) => string) => {
+    const files = unzipSync(buildXlsx({ sheets: [{ name: "S1", rows: [["a"]], hidden: true }] }));
+    files["xl/workbook.xml"] = new TextEncoder().encode(
+      mutate(new TextDecoder().decode(files["xl/workbook.xml"])),
+    );
+    return zipSync(files);
+  };
+
+  it("a workbook comment repeating `<sheet ` without `>` finishes fast", async () => {
+    const bytes = withWorkbook((xml) =>
+      xml.replace("<sheets>", `<!-- ${"<sheet ".repeat(50_000)} --><sheets>`),
+    );
+    const started = Date.now();
+    const result = await xlsxModule.parse(bytes, resolveLimits());
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(result.ok && result.value.limitations.map((l) => l.code)).toContain("xlsx.hidden-sheet");
+  });
+
+  it("a hidden sheet mentioned only inside a comment is not reported", async () => {
+    const files = unzipSync(buildXlsx({ sheets: [{ name: "S1", rows: [["a"]] }] }));
+    files["xl/workbook.xml"] = new TextEncoder().encode(
+      new TextDecoder()
+        .decode(files["xl/workbook.xml"])
+        .replace("<sheets>", '<!-- <sheet name="x" state="hidden"/> --><sheets>'),
+    );
+    const result = await xlsxModule.parse(zipSync(files), resolveLimits());
+    expect(result.ok && result.value.limitations.map((l) => l.code)).not.toContain(
+      "xlsx.hidden-sheet",
+    );
   });
 });

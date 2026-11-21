@@ -16,9 +16,14 @@ export type InputResult =
 const tooLarge = (limit: number): InputResult =>
   formatFailure("too-large", `입력이 maxFileBytes(${limit})보다 크다`, { limit });
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** The system error code (`ENOENT`) or the class name; messages carry the file path. */
+const causeOf = (error: unknown): string => {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code)) return code;
+  return error instanceof Error ? error.name : "unknown";
+};
 const readFailed = (error: unknown): InputResult =>
-  formatFailure("read-failed", "파일을 읽지 못했다", { cause: message(error).slice(0, 200) });
+  formatFailure("read-failed", "파일을 읽지 못했다", { cause: causeOf(error) });
 
 /**
  * Whether `real` is `root` or inside it, by path segments (`/data/a` is not inside
@@ -57,8 +62,14 @@ export async function readInput(input: NormalizeInput, limits: Limits): Promise<
 
   let handle;
   try {
-    // O_NOFOLLOW: the already-resolved path must not have become a symlink since.
-    handle = await open(real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // O_NOFOLLOW: the last component must not have become a symlink since the check.
+    // O_NONBLOCK: a file swapped for a FIFO must not block the open (the handle's own
+    // stat below then refuses it). An intermediate directory swapped for a symlink after
+    // realpath is still followed; that residual gap is accepted (spec R2: reduced, not closed).
+    handle = await open(
+      real,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    );
   } catch (error) {
     return readFailed(error);
   }

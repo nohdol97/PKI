@@ -1,7 +1,13 @@
 // DOCX (I02A-R11): paragraphs in document order through mammoth's document tree,
 // after the zip guard. Nothing is executed, no external file is opened (R6).
 import mammoth from "mammoth";
-import { entryText, openOoxml, readCoreProperties } from "../ooxml-core.ts";
+import {
+  attributeValue,
+  entryText,
+  openOoxml,
+  readCoreProperties,
+  scanXml,
+} from "../ooxml-core.ts";
 import type { OoxmlPackage } from "../ooxml-core.ts";
 import { TextBuilder, formatFailure, formatSuccess } from "../text-builder.ts";
 import type { BinaryFormatModule, Limitation, Locator } from "../types.ts";
@@ -57,34 +63,71 @@ function collect(document: Node, builder: TextBuilder): void {
   walk(document.children ?? []);
 }
 
-const TAG = (name: string) => new RegExp(`<(?:\\w+:)?${name}[\\s>/]`);
-const NOTE_ITEM = /<(?:\w+:)?(?:footnote|endnote)\b([^>]*)>/g;
-const SEPARATOR_NOTE = /\btype\s*=\s*"(?:separator|continuationSeparator|continuationNotice)"/;
-const TEXT_RUN = /<(?:\w+:)?t(?:\s[^>]*)?>[^<]+<\/(?:\w+:)?t>/;
+const SEPARATOR_NOTES = new Set(["separator", "continuationSeparator", "continuationNotice"]);
+
+/** Whether a part has an opening tag with one of these local names. */
+function hasElement(xml: string, names: ReadonlySet<string>): boolean {
+  let found = false;
+  scanXml(xml, (t) => (found = t.kind === "open" && names.has(t.name)));
+  return found;
+}
+
+/** A `<t>` element whose content is a non-empty text node. */
+function hasTextRun(xml: string): boolean {
+  let inRun = false;
+  let hasText = false;
+  let found = false;
+  scanXml(xml, (t) => {
+    if (t.kind === "open") {
+      inRun = t.name === "t" && !t.selfClosing;
+      hasText = false;
+    } else if (t.kind === "text") {
+      hasText = inRun;
+    } else {
+      found = inRun && hasText && t.name === "t";
+      inRun = false;
+    }
+    return found;
+  });
+  return found;
+}
+
+/** A footnote or endnote that is not one of Word's separator notes. */
+function hasRealNote(xml: string): boolean {
+  let found = false;
+  scanXml(xml, (t) => {
+    if (t.kind === "open" && (t.name === "footnote" || t.name === "endnote")) {
+      found = !SEPARATOR_NOTES.has(attributeValue(t.attributes, "type") ?? "");
+    }
+    return found;
+  });
+  return found;
+}
+
+const PICTURE = new Set(["blip", "imagedata"]);
+const COMMENT = new Set(["comment"]);
 
 function limitations(pkg: OoxmlPackage): Limitation[] {
   const names = [...pkg.entries.keys()];
   const found: Limitation[] = [];
-  const body = entryText(pkg, "word/document.xml");
   if (
     names.some((n) => n.startsWith("word/media/")) ||
-    /<(?:\w+:)?(?:blip|imagedata)[\s>/]/.test(body)
+    hasElement(entryText(pkg, "word/document.xml"), PICTURE)
   ) {
     found.push({ code: "docx.images-omitted" });
   }
   if (
-    names.some(
-      (n) => /^word\/(?:header|footer)\d*\.xml$/.test(n) && TEXT_RUN.test(entryText(pkg, n)),
-    )
+    names.some((n) => /^word\/(?:header|footer)\d*\.xml$/.test(n) && hasTextRun(entryText(pkg, n)))
   ) {
     found.push({ code: "docx.headers-footers-omitted" });
   }
-  const realNote = (part: string) =>
-    [...entryText(pkg, part).matchAll(NOTE_ITEM)].some((m) => !SEPARATOR_NOTE.test(m[1] ?? ""));
-  if (realNote("word/footnotes.xml") || realNote("word/endnotes.xml")) {
+  if (
+    hasRealNote(entryText(pkg, "word/footnotes.xml")) ||
+    hasRealNote(entryText(pkg, "word/endnotes.xml"))
+  ) {
     found.push({ code: "docx.notes-omitted" });
   }
-  if (TAG("comment").test(entryText(pkg, "word/comments.xml"))) {
+  if (hasElement(entryText(pkg, "word/comments.xml"), COMMENT)) {
     found.push({ code: "docx.comments-omitted" });
   }
   return found;
@@ -119,7 +162,7 @@ export const docxModule: BinaryFormatModule = {
       );
     } catch (error) {
       return formatFailure("corrupt", "DOCX를 해석하지 못했다", {
-        cause: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+        cause: error instanceof Error ? error.name : "unknown",
       });
     }
   },

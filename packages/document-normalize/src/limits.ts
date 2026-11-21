@@ -21,8 +21,8 @@ export const DEFAULT_LIMITS: Readonly<Limits> = Object.freeze({
   maxFileBytes: 52_428_800,
   zip: Object.freeze({
     maxEntries: 5_000,
-    maxEntryBytes: 67_108_864,
-    maxTotalBytes: 268_435_456,
+    maxEntryBytes: 33_554_432,
+    maxTotalBytes: 134_217_728,
     maxRatio: 200,
     ratioMinBytes: 1_048_576,
   }),

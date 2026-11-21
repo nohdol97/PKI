@@ -37,28 +37,11 @@ export const FORMAT_MODULES = {
   json: jsonModule,
 } as const satisfies Record<DocumentFormat, FormatModule>;
 
-const DETAIL_LIMIT = 300;
-
+/** Only the error's class name goes into the result: library messages echo document content. */
 function corrupt(error: unknown) {
-  const cause = error instanceof Error ? error.message : String(error);
   return formatFailure("corrupt", "파일을 해석하지 못했다", {
-    cause: cause.slice(0, DETAIL_LIMIT),
+    cause: error instanceof Error ? error.name : "unknown",
   });
-}
-
-/** Runs a module; a throw or rejection becomes `corrupt` (I02A-R5). */
-async function run(
-  module: FormatModule,
-  content: string | Uint8Array,
-  limits: ReturnType<typeof resolveLimits>,
-): Promise<FormatResult> {
-  try {
-    return module.input === "text"
-      ? await module.parse(content as string, limits)
-      : await module.parse(content as Uint8Array, limits);
-  } catch (error) {
-    return corrupt(error);
-  }
 }
 
 const orderOf = (l: Limitation) => LIMITATION_CODES.indexOf(l.code);
@@ -80,7 +63,7 @@ export async function normalizeDocument(
     let result: FormatResult;
     let encoding;
     if (module.input === "bytes") {
-      result = await run(module, read.bytes, limits);
+      result = await module.parse(read.bytes, limits);
     } else {
       const decoded = decodeText(read.bytes, limits.encoding);
       if (!decoded.ok) {
@@ -90,7 +73,7 @@ export async function normalizeDocument(
         );
       }
       encoding = decoded.encoding;
-      result = await run(module, decoded.text.replace(/\r\n?/g, "\n"), limits);
+      result = await module.parse(decoded.text.replace(/\r\n?/g, "\n"), limits);
     }
     if (!result.ok) return result;
 

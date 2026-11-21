@@ -8,8 +8,8 @@ describe("DEFAULT_LIMITS", () => {
       maxFileBytes: 52_428_800,
       zip: {
         maxEntries: 5_000,
-        maxEntryBytes: 67_108_864,
-        maxTotalBytes: 268_435_456,
+        maxEntryBytes: 33_554_432,
+        maxTotalBytes: 134_217_728,
         maxRatio: 200,
         ratioMinBytes: 1_048_576,
       },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveLimits } from "./limits.ts";
-import { entryText, openOoxml, readCoreProperties } from "./ooxml-core.ts";
+import { attributeValue, entryText, openOoxml, readCoreProperties, scanXml } from "./ooxml-core.ts";
 import { buildDocx, buildZip } from "./testing/ooxml-builder.ts";
 import type { CoreProps } from "./testing/ooxml-builder.ts";
 
@@ -77,5 +77,37 @@ describe("readCoreProperties", () => {
     );
     if (!broken.ok) throw new Error("must open");
     expect(readCoreProperties(broken.pkg)).toEqual({});
+  });
+});
+
+describe("scanXml (B1)", () => {
+  const tokens = (xml: string) => {
+    const out: string[] = [];
+    scanXml(xml, (t) => {
+      out.push(t.kind === "text" ? `#${t.value}` : `${t.kind === "close" ? "/" : ""}${t.name}`);
+      return false;
+    });
+    return out;
+  };
+
+  it("skips comments, CDATA, processing instructions and keeps `>` inside quoted values", () => {
+    expect(tokens('<?xml v?><!-- <a> --><x:a k="1>2"><![CDATA[<b>]]>t<c/></x:a>')).toEqual([
+      "a",
+      "#t",
+      "c",
+      "/a",
+    ]);
+  });
+
+  it("an unterminated tag or comment ends the scan without a token", () => {
+    expect(tokens("<a><b ")).toEqual(["a"]);
+    expect(tokens("<a><!-- <b>")).toEqual(["a"]);
+  });
+
+  it("reads attribute values by local name, quoted either way", () => {
+    expect(attributeValue(` w:type = 'x' state="hidden"`, "state")).toBe("hidden");
+    expect(attributeValue(` w:type = 'x' state="hidden"`, "type")).toBe("x");
+    expect(attributeValue(` a b=c d="1"`, "d")).toBe("1");
+    expect(attributeValue(` a="1`, "a")).toBeUndefined();
   });
 });

@@ -1,6 +1,12 @@
 // XLSX (I02A-R12): every sheet in workbook order through read-excel-file, after the zip guard.
 import readXlsxFile from "read-excel-file/universal";
-import { entryText, openOoxml, readCoreProperties } from "../ooxml-core.ts";
+import {
+  attributeValue,
+  entryText,
+  openOoxml,
+  readCoreProperties,
+  scanXml,
+} from "../ooxml-core.ts";
 import type { OoxmlPackage } from "../ooxml-core.ts";
 import { TextBuilder, formatFailure, formatSuccess } from "../text-builder.ts";
 import type { BinaryFormatModule, Limitation } from "../types.ts";
@@ -22,18 +28,38 @@ function cellText(value: unknown): string | undefined {
   return text === "" ? undefined : text;
 }
 
-const FORMULA = /<(?:\w+:)?f[\s>/]/;
-const MERGE = /<(?:\w+:)?mergeCell[\s>/]/;
-const HIDDEN = /<(?:\w+:)?sheet\b[^>]*\bstate\s*=\s*"(?:hidden|veryHidden)"/;
+const HIDDEN_STATES = new Set(["hidden", "veryHidden"]);
+
+function hasHiddenSheet(workbook: string): boolean {
+  let found = false;
+  scanXml(workbook, (t) => {
+    if (t.kind === "open" && t.name === "sheet") {
+      found = HIDDEN_STATES.has(attributeValue(t.attributes, "state") ?? "");
+    }
+    return found;
+  });
+  return found;
+}
 
 function limitations(pkg: OoxmlPackage): Limitation[] {
-  const sheets = [...pkg.entries.keys()]
-    .filter((name) => /^xl\/worksheets\/[^/]+\.xml$/.test(name))
-    .map((name) => entryText(pkg, name));
+  let formula = false;
+  let merged = false;
+  // One sheet at a time, so only one decoded sheet is alive (I02A review B3).
+  for (const name of pkg.entries.keys()) {
+    if (!/^xl\/worksheets\/[^/]+\.xml$/.test(name)) continue;
+    scanXml(entryText(pkg, name), (t) => {
+      if (t.kind === "open") {
+        formula ||= t.name === "f";
+        merged ||= t.name === "mergeCell";
+      }
+      return formula && merged;
+    });
+    if (formula && merged) break;
+  }
   const found: Limitation[] = [];
-  if (sheets.some((xml) => FORMULA.test(xml))) found.push({ code: "xlsx.formula-cached-value" });
-  if (sheets.some((xml) => MERGE.test(xml))) found.push({ code: "xlsx.merged-cells" });
-  if (HIDDEN.test(entryText(pkg, "xl/workbook.xml"))) found.push({ code: "xlsx.hidden-sheet" });
+  if (formula) found.push({ code: "xlsx.formula-cached-value" });
+  if (merged) found.push({ code: "xlsx.merged-cells" });
+  if (hasHiddenSheet(entryText(pkg, "xl/workbook.xml"))) found.push({ code: "xlsx.hidden-sheet" });
   return found;
 }
 
@@ -75,7 +101,7 @@ export const xlsxModule: BinaryFormatModule = {
       );
     } catch (error) {
       return formatFailure("corrupt", "XLSX를 해석하지 못했다", {
-        cause: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+        cause: error instanceof Error ? error.name : "unknown",
       });
     }
   },

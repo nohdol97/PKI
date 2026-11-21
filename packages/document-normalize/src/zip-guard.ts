@@ -13,6 +13,8 @@ import type { NormalizeError } from "./types.ts";
 export interface GuardedEntry {
   name: string;
   data: Uint8Array;
+  /** Counted and checked, but the bytes were not kept (`data` is empty). */
+  dropped?: true;
 }
 export type GuardResult =
   | { ok: true; entries: GuardedEntry[]; rezipped: Uint8Array }
@@ -26,9 +28,10 @@ const limitFailure = (
   message: string,
   extra: Record<string, number> = {},
 ): Failure => formatFailure("zip-limit", message, { limit, ...extra });
+/** Only the error's class name goes into the result: library messages echo document content. */
 const corrupt = (cause: unknown): Failure =>
   formatFailure("corrupt", "압축 파일을 읽지 못했다", {
-    cause: (cause instanceof Error ? cause.message : String(cause)).slice(0, 300),
+    cause: cause instanceof Error ? cause.name : "unknown",
   });
 
 /** The rule an entry name breaks, or `undefined` for an acceptable name. */
@@ -58,6 +61,7 @@ function readDirectory(
 ): Promise<{ ok: true; entries: { entry: Entry; name: string }[] } | Failure> {
   return new Promise((resolve) => {
     const entries: { entry: Entry; name: string }[] = [];
+    const seen = new Set<string>();
     let total = 0;
     const stop = (failure: Failure) => {
       zip.close();
@@ -98,6 +102,12 @@ function readDirectory(
       }
       const rule = pathRule(name);
       if (rule) return stop(formatFailure("zip-path", "허용되지 않는 항목 이름이 있다", { rule }));
+      if (seen.has(name)) {
+        return stop(
+          formatFailure("zip-path", "같은 이름의 항목이 둘 이상 있다", { rule: "duplicate" }),
+        );
+      }
+      seen.add(name);
       entries.push({ entry, name });
       zip.readEntry();
     });
@@ -106,7 +116,11 @@ function readDirectory(
 }
 
 /** Inflates one entry, stopping as soon as the real size leaves the declared one. */
-function inflate(zip: ZipFile, entry: Entry): Promise<{ ok: true; data: Buffer } | Failure> {
+function inflate(
+  zip: ZipFile,
+  entry: Entry,
+  keep: boolean,
+): Promise<{ ok: true; data: Buffer } | Failure> {
   return new Promise((resolve) => {
     zip.openReadStream(entry, (error, stream) => {
       if (error) return resolve(corrupt(error));
@@ -129,7 +143,7 @@ function inflate(zip: ZipFile, entry: Entry): Promise<{ ok: true; data: Buffer }
           stream.destroy();
           return finish(sizeMismatch());
         }
-        chunks.push(chunk);
+        if (keep) chunks.push(chunk);
       });
       stream.on("end", () =>
         inflated === entry.uncompressedSize
@@ -144,7 +158,16 @@ function inflate(zip: ZipFile, entry: Entry): Promise<{ ok: true; data: Buffer }
 /** Zip timestamps are fixed so the re-zipped archive is the same for the same input. */
 const FIXED_MTIME = Date.UTC(2020, 0, 1);
 
-export async function guardZip(bytes: Uint8Array, limits: ZipLimits): Promise<GuardResult> {
+/**
+ * `drop` names entries no parser reads (pictures, embedded objects): they are inflated and
+ * counted like every other entry, but their bytes are not kept and they are left out of
+ * `rezipped`. They stay in `entries` with empty data so limitation checks still see the name.
+ */
+export async function guardZip(
+  bytes: Uint8Array,
+  limits: ZipLimits,
+  drop: (name: string) => boolean = () => false,
+): Promise<GuardResult> {
   let zip: ZipFile;
   try {
     zip = await open(bytes);
@@ -158,12 +181,13 @@ export async function guardZip(bytes: Uint8Array, limits: ZipLimits): Promise<Gu
     const entries: GuardedEntry[] = [];
     for (const { entry, name } of directory.entries) {
       if (name.endsWith("/")) continue;
-      const inflated = await inflate(zip, entry);
+      const dropped = drop(name);
+      const inflated = await inflate(zip, entry, !dropped);
       if (!inflated.ok) return inflated;
-      entries.push({ name, data: inflated.data });
+      entries.push({ name, data: inflated.data, ...(dropped ? { dropped: true } : {}) });
     }
     const files: Record<string, Uint8Array> = Object.create(null);
-    for (const { name, data } of entries) files[name] = data;
+    for (const { name, data, dropped } of entries) if (!dropped) files[name] = data;
     return { ok: true, entries, rezipped: zipSync(files, { level: 0, mtime: FIXED_MTIME }) };
   } finally {
     zip.close();
