@@ -94,6 +94,16 @@ describe("module-boundary rule", () => {
         errors: [{ messageId: "deepImport" }],
       },
       {
+        code: "const m = await import(`../../packages/contracts/src/schema.ts`);",
+        filename: backendFile,
+        errors: [{ messageId: "crossPackageRelative" }],
+      },
+      {
+        code: 'type M = typeof import("@pki/contracts/src/schema.ts");',
+        filename: backendFile,
+        errors: [{ messageId: "deepImport" }],
+      },
+      {
         code: 'export * from "@pki/storage";',
         filename: backendFile,
         errors: [{ messageId: "undeclaredDependency" }],
