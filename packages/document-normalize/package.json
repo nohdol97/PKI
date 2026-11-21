@@ -1,0 +1,29 @@
+{
+  "name": "@pki/document-normalize",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "survey": "node src/survey.ts",
+    "build:fixtures": "node src/testing/generate-fixtures.ts"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "0.8.15",
+    "csv-parse": "7.0.3",
+    "fflate": "0.8.3",
+    "iconv-lite": "0.7.3",
+    "mammoth": "1.13.0",
+    "mdast-util-from-markdown": "2.1.0",
+    "parse5": "8.1.1",
+    "read-excel-file": "9.3.20",
+    "unpdf": "2.2.1",
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@types/mdast": "4.0.4",
+    "@types/yauzl": "3.4.0"
+  }
+}
