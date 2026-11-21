@@ -1,6 +1,7 @@
 // V01-C2 `api.security`: a real server on an ephemeral port rejects each
 // unauthorized request kind and is unreachable from non-loopback addresses.
-import { migrate, openBetterSqlite3 } from "@pki/storage";
+import { migrate } from "@pki/storage";
+import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

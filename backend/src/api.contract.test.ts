@@ -1,7 +1,8 @@
 // V01-C1 `api.contract`: every API response, success or rejection, matches the
 // schema in @pki/contracts that the UI also uses.
 import { ErrorResponseSchema, routes, type RouteName } from "@pki/contracts";
-import { openBetterSqlite3, migrate } from "@pki/storage";
+import { migrate } from "@pki/storage";
+import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { send } from "@pki/testkit";

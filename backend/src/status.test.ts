@@ -1,7 +1,8 @@
 // V01-T12 / R15: the status API reads the vector index state from the configured
 // VectorIndex, and the product configuration reports it unavailable.
 import { ErrorResponseSchema, routes, type VectorIndex } from "@pki/contracts";
-import { migrate, openBetterSqlite3 } from "@pki/storage";
+import { migrate } from "@pki/storage";
+import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { MemoryVectorIndex, send } from "@pki/testkit";
 import { describe, expect, it, vi } from "vitest";
 import { productAdapters } from "./composition.ts";

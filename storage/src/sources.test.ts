@@ -1,12 +1,13 @@
 // V01-R7 source storage: identity is connector instance + external id, the same
 // content makes no new version, and each instance keeps its kind and cursor.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openBetterSqlite3 } from "./better-sqlite3-driver.ts";
+import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { migrate } from "./migrations.ts";
 import {
   contentHash,
   readCursor,
   registerConnectorInstance,
+  readSourceVersion,
   saveSourceRecord,
   writeCursor,
 } from "./sources.ts";
@@ -95,5 +96,25 @@ describe("connector instances and cursors", () => {
     expect(db.all("SELECT id, kind FROM connector_instances WHERE id = 'c1'")).toEqual([
       { id: "c1", kind: "test-fixtures" },
     ]);
+  });
+});
+
+describe("readSourceVersion", () => {
+  const versionId = () => db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+
+  it("returns title, body, access scope and the Connector kind it came from", () => {
+    saveSourceRecord(db, "c1", record("e1", "제목", "본문"));
+    db.run("UPDATE sources SET access_scope = 'team' WHERE external_id = 'e1'");
+    expect(readSourceVersion(db, versionId())).toEqual({
+      id: versionId(),
+      title: "제목",
+      body: "본문",
+      accessScope: "team",
+      connectorKind: "test-fixtures",
+    });
+  });
+
+  it("returns undefined for a missing version", () => {
+    expect(readSourceVersion(db, 404)).toBeUndefined();
   });
 });

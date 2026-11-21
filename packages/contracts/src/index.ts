@@ -6,6 +6,7 @@ export * from "./adapter-errors.ts";
 export type * from "./knowledge-engine.ts";
 export type * from "./vector-index.ts";
 export * from "./connector.ts";
+export * from "./provider.ts";
 
 // Parts that later V01 tasks build report "not-implemented" until then, never a guessed state.
 // "unavailable" names why, so the UI can show what does not work (V01-R5).

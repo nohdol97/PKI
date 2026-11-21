@@ -2,7 +2,8 @@
 // starts the dev backend on its own synthetic seed and data directory behind the Vite
 // dev server, so a value that does not change with the seed would be fixed in the UI.
 import { expect, test, type Page } from "@playwright/test";
-import { migrate, openBetterSqlite3 } from "@pki/storage";
+import { migrate } from "@pki/storage";
+import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { sendRaw } from "@pki/testkit";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

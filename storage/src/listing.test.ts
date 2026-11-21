@@ -1,7 +1,7 @@
 // Reads behind the screens (V01-R3): the source list and keyword search show each
 // source's latest version only, and the provider call history is newest first.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openBetterSqlite3 } from "./better-sqlite3-driver.ts";
+import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { findSources, listProviderCalls, listSources } from "./listing.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";

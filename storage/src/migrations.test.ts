@@ -1,7 +1,7 @@
 // V01-R6: the migration runner owns the schema version; schema v1 holds the
 // canonical tables and nothing that could carry a body or secret in history.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openBetterSqlite3 } from "./better-sqlite3-driver.ts";
+import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { migrate, migrations, schemaVersion } from "./migrations.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -40,15 +40,15 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(2);
-    expect(migrations).toHaveLength(2);
+    expect(schemaVersion(db)).toBe(3);
+    expect(migrations).toHaveLength(3);
   });
 
   it("is idempotent when re-run", () => {
     migrate(db);
     db.run("INSERT INTO settings (key, value) VALUES ('k', 'v')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(2);
+    expect(schemaVersion(db)).toBe(3);
     expect(db.all("SELECT value FROM settings")).toEqual([{ value: "v" }]);
   });
 
@@ -184,7 +184,7 @@ describe("schema v2 (V01-T04)", () => {
       "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (1, 'h', 't', 'b')",
     );
     migrate(db);
-    expect(schemaVersion(db)).toBe(2);
+    expect(schemaVersion(db)).toBe(3);
     expect(db.all("SELECT id, external_id FROM sources")).toEqual([{ id: 1, external_id: "e" }]);
     expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 1 }]);
     // A v1 source has no recorded kind; "unknown" is no upstream kind, so it never grades synthetic.
@@ -225,5 +225,24 @@ describe("schema v2 (V01-T04)", () => {
     expect(columns("connector_instances")).toEqual(["id", "kind", "cursor"]);
     expect(notNull("connector_instances", "kind")).toBe(true);
     expect(notNull("connector_instances", "cursor")).toBe(false);
+  });
+});
+
+describe("schema v3 (V01-T07)", () => {
+  it("adds an optional access scope to sources, keeping v2 rows", () => {
+    migrate(db, migrations.slice(0, 2));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
+    migrate(db);
+    expect(columns("sources")).toEqual([
+      "id",
+      "connector_instance_id",
+      "external_id",
+      "access_scope",
+    ]);
+    expect(notNull("sources", "access_scope")).toBe(false);
+    expect(db.all("SELECT external_id, access_scope FROM sources")).toEqual([
+      { external_id: "e", access_scope: null },
+    ]);
   });
 });

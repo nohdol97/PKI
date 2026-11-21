@@ -1,12 +1,8 @@
 // V01-R3: the routes behind Sources, Activity and Settings answer from the
 // canonical DB and the configured data directory, never from fixed values.
 import { ErrorResponseSchema, routes } from "@pki/contracts";
-import {
-  migrate,
-  openBetterSqlite3,
-  registerConnectorInstance,
-  saveSourceRecord,
-} from "@pki/storage";
+import { migrate, registerConnectorInstance, saveSourceRecord } from "@pki/storage";
+import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { send } from "@pki/testkit";
 import { productAdapters } from "./composition.ts";
@@ -100,7 +96,7 @@ describe("screen routes", () => {
   it("reads the settings that exist so far", async () => {
     expect((await call(routes.settings.path)).body).toEqual({
       dataDirectory: DATA_DIR,
-      schemaVersion: 2,
+      schemaVersion: 3,
     });
   });
 });
