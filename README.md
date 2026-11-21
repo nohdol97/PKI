@@ -16,6 +16,10 @@
 - 최초 커밋 이후의 모든 변경은 feature 브랜치와 Pull Request로만 들어옵니다. `main`에 직접 push하지 않습니다.
 - 구현 전에 `docs/specs/`에 요구사항과 완료 기준을 먼저 고정합니다.
 
+## 배포처 검증 키트
+
+Phase 0의 실행 PoC(CLI 격리 R02, 엔진·임베딩·저장소 비교 R03, Windows 설치 파일 R04)는 배포처에서만 실행할 수 있어, 사외에서는 스펙·스크립트·절차서·결과 양식만 준비해 두었습니다. 무엇을 어떤 순서로 실행하고 결과를 어떻게 이슈에 남기는지는 [verification/README.md](verification/README.md)를 보세요. 이 키트는 아직 어떤 실제 대상에 대해서도 실행된 적이 없습니다.
+
 ## 라이선스
 
 [MIT](LICENSE)
