@@ -4,12 +4,14 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./adapters": "./src/adapters/index.ts"
   },
   "scripts": {
     "build:synthetic-manifest": "node src/build-synthetic-manifest.ts"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.2",
     "@pki/contracts": "workspace:*",
     "@pki/storage": "workspace:*",
     "zod": "^4.6.7"

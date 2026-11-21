@@ -48,4 +48,26 @@ describe("contract schemas", () => {
     expect(embedding.safeParse({ state: "unavailable", egress: "local" }).success).toBe(false);
     expect(embedding.safeParse({ state: "not-implemented" }).success).toBe(true);
   });
+
+  it("takes an embedding preparation source of the two kinds only (V01-R14)", () => {
+    const request = routes.prepareEmbedding.request;
+    expect(request.safeParse({ source: { kind: "download" } }).success).toBe(true);
+    expect(
+      request.safeParse({ source: { kind: "local-pack", path: "/synthetic/pack" } }).success,
+    ).toBe(true);
+    expect(
+      request.safeParse({ source: { kind: "local-pack", path: `/${"p".repeat(4095)}` } }).success,
+    ).toBe(true);
+    for (const body of [
+      {},
+      { source: { kind: "local-pack" } },
+      { source: { kind: "local-pack", path: "" } },
+      { source: { kind: "local-pack", path: `/${"p".repeat(4096)}` } },
+      { source: { kind: "url", url: "https://example.invalid/model" } },
+      { source: { kind: "download", revision: "main" } },
+      { source: { kind: "download" }, files: [] },
+    ]) {
+      expect(request.safeParse(body).success).toBe(false);
+    }
+  });
 });

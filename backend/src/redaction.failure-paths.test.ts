@@ -150,7 +150,7 @@ describe("failure paths leave no input behind", () => {
         db,
         dataDirectory: dir,
         egress,
-        ...productAdapters(),
+        ...productAdapters(dir),
       });
       const activity = await send(server.port, routes.activity.path, {
         host: `127.0.0.1:${server.port}`,
@@ -211,7 +211,7 @@ describe("failure paths leave no input behind", () => {
             throw error;
           },
         },
-        ...productAdapters(),
+        ...productAdapters(dir),
       });
       const res = await send(server.port, routes.consents.path, {
         host: `127.0.0.1:${server.port}`,

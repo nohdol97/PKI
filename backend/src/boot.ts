@@ -43,7 +43,7 @@ export async function bootBackend(
     token: options.token,
     allowedOrigins: options.allowedOrigins,
     port: options.port ?? 0,
-    ...productAdapters(),
+    ...productAdapters(options.dataDir),
     connectors,
     db,
     dataDirectory: options.dataDir,

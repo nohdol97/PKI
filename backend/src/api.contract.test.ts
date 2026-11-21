@@ -34,6 +34,8 @@ const requests: Partial<Record<RouteName, unknown>> = {
   revokeConsent: { providerId: "codex" },
   connectionTest: { acknowledgeUnverified: false },
   setExecutionSettings: { cliBackground: false },
+  // The pack does not exist: the preparation starts, then fails without touching disk.
+  prepareEmbedding: { source: { kind: "local-pack", path: "/synthetic/missing-pack" } },
 };
 
 beforeAll(async () => {
@@ -57,7 +59,7 @@ beforeAll(async () => {
     db,
     dataDirectory: "/synthetic/data",
     egress: productEgress(db),
-    ...productAdapters(),
+    ...productAdapters("/synthetic/data"),
   });
   valid = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
 });

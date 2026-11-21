@@ -117,7 +117,7 @@ async function stack(options: Stack = {}) {
     dataDirectory: dir,
     egress,
     calls,
-    ...productAdapters(),
+    ...productAdapters(dir),
   });
   const port = server.port;
   const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };

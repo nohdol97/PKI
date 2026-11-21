@@ -86,7 +86,7 @@ async function backend() {
     dataDirectory: dir,
     egress,
     calls: productCalls(db, egress, { providers: [provider] }),
-    ...productAdapters(),
+    ...productAdapters(dir),
   });
   const port = server.port;
   const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };

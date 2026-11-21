@@ -18,6 +18,7 @@ import {
   type TestBuildExecution,
   type UserActionIssuer,
 } from "@pki/providers";
+import { createLocalEmbedder } from "@pki/providers/adapters";
 import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
@@ -26,10 +27,19 @@ import { createFixtureConnector } from "./adapters/fixture-connector.ts";
 import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
 import type { ServerOptions } from "./server.ts";
 
-/** No embedder until V01-T14 binds the Transformers.js one; the status API says "not implemented". */
-export function productAdapters(): Pick<ServerOptions, "vectorIndex" | "embedder"> {
-  return { vectorIndex: new EmptyVectorIndex(), embedder: null };
+/**
+ * The product's adapters inside a data directory. The embedder is the local
+ * Transformers.js one; its models install under `<dataDir>/models` only when the
+ * user prepares one, so binding it creates nothing and downloads nothing.
+ */
+export function productAdapters(dataDir: string): Pick<ServerOptions, "vectorIndex" | "embedder"> {
+  return {
+    vectorIndex: new EmptyVectorIndex(),
+    embedder: createLocalEmbedder(join(dataDir, MODELS_DIR)),
+  };
 }
+
+export const MODELS_DIR = "models";
 
 /**
  * The product's consent and egress rules (ADR 0014). The deployment rules are the

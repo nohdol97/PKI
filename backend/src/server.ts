@@ -10,6 +10,7 @@ import {
   type EmbeddingProvider,
   type EmbeddingStatusEntry,
   type ErrorResponse,
+  type PrepareSource,
   type RouteName,
   type RouteRequest,
   type RouteResponse,
@@ -92,6 +93,8 @@ const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "connector-unavailable": 409,
   "destination-unavailable": 409,
   "consent-stale": 409,
+  "embedding-not-implemented": 409,
+  "embedding-busy": 409,
 };
 
 /** Provisional: below the Broker's 120 s ceiling, long enough for a CLI to start. */
@@ -181,7 +184,38 @@ async function embeddingState(embedder: EmbeddingProvider | null): Promise<Embed
   }
 }
 
-function createHandlers(options: ServerOptions): Handlers {
+/**
+ * Starts the preparation the user asked for and answers with the state it left,
+ * without waiting (V01-R14). A running one is not restarted, a ready model is left
+ * as is. The embedder's error text never reaches the response or the log.
+ */
+async function prepareEmbedding(
+  embedder: EmbeddingProvider | null,
+  source: PrepareSource,
+  running: Set<AbortController>,
+): Promise<RouteResponse<"prepareEmbedding"> | { error: ErrorResponse["error"] }> {
+  if (embedder === null) return { error: "embedding-not-implemented" };
+  const before = await embeddingState(embedder);
+  // `running` is checked after the await too: two requests can both read the
+  // state before either starts, and the later one is busy, not a failed start.
+  if (before.state === "preparing" || running.size > 0) return { error: "embedding-busy" };
+  if (before.state === "ready") return { embedding: before };
+  const controller = new AbortController();
+  running.add(controller);
+  const failed = (error: unknown) => log("embedding-prepare-failed", { error: errorClass(error) });
+  try {
+    embedder
+      .prepare(source, controller.signal)
+      .catch(failed)
+      .finally(() => running.delete(controller));
+  } catch (error) {
+    running.delete(controller);
+    failed(error);
+  }
+  return { embedding: await embeddingState(embedder) };
+}
+
+function createHandlers(options: ServerOptions, preparations: Set<AbortController>): Handlers {
   return {
     status: async () => ({
       backend: { state: "ready" },
@@ -209,6 +243,7 @@ function createHandlers(options: ServerOptions): Handlers {
       writeSetting(options.db, CLI_BACKGROUND_SETTING, cliBackground ? "on" : "off");
       return { cliBackground: readCliBackground(options.db) };
     },
+    prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
   };
 }
 
@@ -269,7 +304,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   }
   const token = Buffer.from(options.token);
   const allowedOrigins = new Set(options.allowedOrigins);
-  const handlers = createHandlers(options);
+  // Preparations still running when the server closes are aborted; an aborted one leaves no model.
+  const preparations = new Set<AbortController>();
+  const handlers = createHandlers(options, preparations);
   let selfHost = "";
 
   const server = createServer((req, res) => {
@@ -313,6 +350,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     url: `http://${selfHost}`,
     address,
     port,
-    close: () => new Promise((resolve, reject) => server.close((e) => (e ? reject(e) : resolve()))),
+    close: () => {
+      for (const controller of preparations) controller.abort();
+      return new Promise((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
+    },
   };
 }
