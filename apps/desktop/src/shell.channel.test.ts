@@ -131,18 +131,33 @@ describe("shell ↔ backend channel", () => {
     await expect(fetch(`${running.url}/api/status`)).rejects.toThrow();
   });
 
-  it("rejects when the backend refuses the start message", async () => {
-    const short: ForkBackend = (entry, args, env) => {
+  it("rejects when the backend refuses the start message, without echoing it", async () => {
+    // A malformed start may still carry the token: the backend answers with the bare
+    // failure, nothing of what it received.
+    const canary = `${"c".repeat(40)}-canary`;
+    const received: unknown[] = [];
+    const malformed: ForkBackend = (entry, args, env) => {
       const child = nodeFork(entry, args, env);
-      // A start message that fails the entry's schema (token too short).
       return {
         ...child,
         pid: child.pid,
-        postMessage: () => child.postMessage({ type: "start", token: "x" }),
+        on: (event, listener) =>
+          child.on(event, (message) => {
+            received.push(message);
+            listener(message);
+          }),
+        // An extra field fails the entry's exact message shape.
+        postMessage: () => child.postMessage({ type: "start", token: canary, extra: canary }),
       };
     };
     await expect(
-      startBackendProcess({ fork: short, entry: ENTRY, origin: ORIGIN, dataDir: join(dir, "d") }),
-    ).rejects.toThrow(/backend/);
+      startBackendProcess({
+        fork: malformed,
+        entry: ENTRY,
+        origin: ORIGIN,
+        dataDir: join(dir, "d"),
+      }),
+    ).rejects.toThrow("backend failed to start");
+    expect(received).toEqual([{ type: "failed" }]);
   });
 });

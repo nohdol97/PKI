@@ -3,14 +3,14 @@
 // page and the arguments must match the function's schema exactly.
 import { describe, expect, it, vi } from "vitest";
 import { APP_ORIGIN } from "./app-protocol.ts";
-import { BRIDGE, createBridgeHandlers } from "./bridge.ts";
+import { BRIDGE, createBridgeHandlers, type ExternalTarget } from "./bridge.ts";
 
 const SESSION = { baseUrl: "", token: "t".repeat(43) };
 const PAGE = `${APP_ORIGIN}/`;
 
 function handlers(confirm = true) {
   const opened: string[] = [];
-  const confirmExternal = vi.fn(async () => confirm);
+  const confirmExternal = vi.fn<(target: ExternalTarget) => Promise<boolean>>(async () => confirm);
   const bridge = createBridgeHandlers({
     session: SESSION,
     confirmExternal,
@@ -64,6 +64,7 @@ describe("bridge handlers", () => {
     "app://pki/",
     "https://user:pw@example.com/",
     "not a url",
+    `https://a.example/${"a".repeat(2048)}`,
   ])("opens no external link that is not plain https: %s", async (url) => {
     const { bridge, opened, confirmExternal } = handlers();
     await expect(bridge.openExternal(PAGE, [url])).rejects.toThrow("invalid-input");
@@ -76,7 +77,10 @@ describe("bridge handlers", () => {
     expect(await yes.bridge.openExternal(PAGE, ["https://example.com/a?b=1"])).toEqual({
       opened: true,
     });
-    expect(yes.confirmExternal).toHaveBeenCalledWith("https://example.com/a?b=1");
+    expect(yes.confirmExternal).toHaveBeenCalledWith({
+      href: "https://example.com/a?b=1",
+      hostname: "example.com",
+    });
     expect(yes.opened).toEqual(["https://example.com/a?b=1"]);
 
     const no = handlers(false);
@@ -84,6 +88,30 @@ describe("bridge handlers", () => {
       opened: false,
     });
     expect(no.opened).toEqual([]);
+  });
+
+  // The user confirms the destination that will open, not the page's rendering of it:
+  // the string is normalised once, the dialog gets that form with the punycode host,
+  // and the same href goes to the OS.
+  it.each([
+    [
+      "a Cyrillic look-alike host",
+      "https://\u0430pple.com/",
+      "xn--pple-43d.com",
+      "https://xn--pple-43d.com/",
+    ],
+    [
+      "a right-to-left override",
+      "https://evil.example/\u202emoc.elppa",
+      "evil.example",
+      "https://evil.example/%E2%80%AEmoc.elppa",
+    ],
+  ])("confirms and opens the normalised URL for %s", async (_name, input, hostname, href) => {
+    const { bridge, opened, confirmExternal } = handlers(true);
+    expect(await bridge.openExternal(PAGE, [input])).toEqual({ opened: true });
+    expect(confirmExternal).toHaveBeenCalledWith({ href, hostname });
+    expect(opened).toEqual([href]);
+    expect(JSON.stringify([confirmExternal.mock.calls, opened])).not.toMatch(/[\u0430\u202e]/);
   });
 
   it("reports the secret store as not implemented and keeps nothing (T11)", async () => {

@@ -40,6 +40,7 @@ const forkUtility: ForkBackend = (entry, args, env) => {
 
 let backend: Backend | undefined;
 let window: BrowserWindow | undefined;
+let backendAlive = false;
 let quitting = false;
 
 async function run() {
@@ -56,30 +57,39 @@ async function run() {
     dataDir: option("pki-data-dir"),
     fixtures: option("pki-fixtures"),
   });
+  backendAlive = true;
   void backend.exited.then((code) => {
-    // Restarting a dead backend is T16; the screens show their requests failing.
+    backendAlive = false;
+    // Restarting a dead backend is T16; until then /api/ answers 502 (app-protocol.ts).
     if (!quitting) console.error(`PKI backend exited (${code})`);
   });
-  protocol.handle(APP_SCHEME, createAppHandler({ webRoot: WEB_ROOT, backendUrl: backend.url }));
+  protocol.handle(
+    APP_SCHEME,
+    createAppHandler({
+      webRoot: WEB_ROOT,
+      backendUrl: backend.url,
+      backendAlive: () => backendAlive,
+    }),
+  );
 
   const handlers = createBridgeHandlers({
     session: { baseUrl: "", token: backend.token },
-    confirmExternal: async (url) => {
+    confirmExternal: async ({ href, hostname }) => {
       const options = {
         type: "question" as const,
         buttons: ["열기", "취소"],
         defaultId: 1,
         cancelId: 1,
         noLink: true,
-        message: "외부 브라우저에서 이 주소를 엽니다.",
-        detail: url,
+        message: `외부 브라우저에서 ${hostname} 주소를 엽니다.`,
+        detail: href,
       };
       const answer = window
         ? await dialog.showMessageBox(window, options)
         : await dialog.showMessageBox(options);
       return answer.response === 0;
     },
-    openExternal: (url) => shell.openExternal(url),
+    openExternal: (href) => shell.openExternal(href),
   });
   for (const name of Object.keys(BRIDGE) as BridgeFunction[]) {
     ipcMain.handle(BRIDGE[name], (event, ...args: unknown[]) =>
@@ -116,10 +126,12 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on("window-all-closed", () => app.quit());
   app.on("will-quit", (event) => {
-    if (quitting || !backend) return;
+    // Nothing to stop once the backend has exited.
+    if (quitting || !backend || !backendAlive) return;
     event.preventDefault();
     quitting = true;
-    void backend.stop().finally(() => app.quit());
+    // Quit again from a fresh task: a quit issued inside this will-quit is dropped.
+    void backend.stop().finally(() => setImmediate(() => app.quit()));
   });
   run().catch((error: unknown) => {
     console.error(`PKI shell failed to start: ${error instanceof Error ? error.message : error}`);

@@ -114,6 +114,14 @@ test("the page cannot navigate away or open windows", async () => {
   ).toEqual(["app://pki/", true]);
 });
 
+test("every permission request and check is denied", async () => {
+  const states = await page.evaluate(async () => ({
+    query: (await navigator.permissions.query({ name: "notifications" })).state,
+    request: await Notification.requestPermission(),
+  }));
+  expect(states).toEqual({ query: "denied", request: "denied" });
+});
+
 test("IPC that fails the schema is refused", async () => {
   const errors = await page.evaluate(async () => {
     const pki = (window as unknown as { pki: Pki }).pki;

@@ -52,6 +52,11 @@ export interface AppHandlerOptions {
   webRoot: string;
   /** The backend's own address, `http://127.0.0.1:<port>`. */
   backendUrl: string;
+  /**
+   * False once the backend process has exited: its port is then free for any local
+   * process to bind, so nothing more is forwarded there.
+   */
+  backendAlive: () => boolean;
 }
 
 const plain = (status: number) => new Response(null, { status });
@@ -59,12 +64,15 @@ const plain = (status: number) => new Response(null, { status });
 export function createAppHandler({
   webRoot,
   backendUrl,
+  backendAlive,
 }: AppHandlerOptions): (request: Request) => Promise<Response> {
   const root = resolve(webRoot);
   return async (request) => {
     if (!onAppOrigin(request.url)) return plain(403);
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/api/")) return forward(request, url, backendUrl);
+    if (url.pathname.startsWith("/api/")) {
+      return backendAlive() ? forward(request, url, backendUrl) : plain(502);
+    }
     if (request.method !== "GET" && request.method !== "HEAD") return plain(405);
     return serveFile(root, url.pathname);
   };

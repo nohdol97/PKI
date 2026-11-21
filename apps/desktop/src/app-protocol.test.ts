@@ -51,7 +51,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const handler = () => createAppHandler({ webRoot, backendUrl });
+const handler = () => createAppHandler({ webRoot, backendUrl, backendAlive: () => true });
 const get = (path: string, init?: RequestInit) =>
   handler()(new Request(`${APP_ORIGIN}${path}`, init));
 
@@ -128,8 +128,33 @@ describe("app protocol", () => {
     expect(call?.headers["x-other"]).toBeUndefined();
   });
 
+  // Once the backend has exited, its port can be taken by any local process (another
+  // OS user's included): nothing, token and body least of all, is sent there.
+  it("stops forwarding once the backend has exited, even if the port answers again", async () => {
+    seen.length = 0;
+    let alive = true;
+    const forwarder = createAppHandler({ webRoot, backendUrl, backendAlive: () => alive });
+    const call = () =>
+      forwarder(
+        new Request(`${APP_ORIGIN}/api/settings`, {
+          method: "POST",
+          headers: { authorization: "Bearer abc" },
+          body: "{}",
+        }),
+      );
+    expect((await call()).status).toBe(201);
+    alive = false;
+    const res = await call();
+    expect(res.status).toBe(502);
+    expect(seen).toHaveLength(1);
+  });
+
   it("answers 502 when the backend cannot be reached", async () => {
-    const down = createAppHandler({ webRoot, backendUrl: "http://127.0.0.1:1" });
+    const down = createAppHandler({
+      webRoot,
+      backendUrl: "http://127.0.0.1:1",
+      backendAlive: () => true,
+    });
     const res = await down(new Request(`${APP_ORIGIN}/api/status`));
     expect(res.status).toBe(502);
   });

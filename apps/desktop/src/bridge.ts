@@ -37,12 +37,20 @@ const INPUTS = {
 /** The secret store arrives with T11; until then nothing is kept, in plaintext or otherwise. */
 const SECRETS_NOT_IMPLEMENTED = { ok: false, error: "not-implemented" } as const;
 
+export interface ExternalTarget {
+  href: string;
+  hostname: string;
+}
+
 export interface BridgeDeps {
   session: Session;
-  /** Asks the user before a link leaves the app; true only on an explicit yes. */
-  confirmExternal(url: string): Promise<boolean>;
-  /** Hands the link to the OS browser. */
-  openExternal(url: string): Promise<void>;
+  /**
+   * Asks the user before a link leaves the app; true only on an explicit yes. Gets the
+   * normalised href and its hostname (punycode), the form that will actually open.
+   */
+  confirmExternal(target: ExternalTarget): Promise<boolean>;
+  /** Hands the same normalised href to the OS browser. */
+  openExternal(href: string): Promise<void>;
 }
 
 /** Each takes the sender frame's URL and the page's arguments as received. */
@@ -70,8 +78,11 @@ export function createBridgeHandlers(deps: BridgeDeps): BridgeHandlers {
     hasSecret: checked("hasSecret", async () => SECRETS_NOT_IMPLEMENTED),
     deleteSecret: checked("deleteSecret", async () => SECRETS_NOT_IMPLEMENTED),
     openExternal: checked("openExternal", async ([url]) => {
-      if (!(await deps.confirmExternal(url))) return { opened: false };
-      await deps.openExternal(url);
+      // Normalised once: the page's string may render differently (look-alike letters,
+      // bidi controls) from what opens; the user confirms what opens.
+      const { href, hostname } = new URL(url);
+      if (!(await deps.confirmExternal({ href, hostname }))) return { opened: false };
+      await deps.openExternal(href);
       return { opened: true };
     }),
   };

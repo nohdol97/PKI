@@ -17,6 +17,8 @@ export interface ShellOptions {
   userData: string;
   dataDir?: string;
   fixtures?: string;
+  /** Extra environment for the shell process (on top of this process's). */
+  env?: Record<string, string>;
 }
 
 export function shellArgs({ userData, dataDir, fixtures }: ShellOptions): string[] {
@@ -31,7 +33,11 @@ export function shellArgs({ userData, dataDir, fixtures }: ShellOptions): string
 export async function launchShell(
   options: ShellOptions,
 ): Promise<{ app: ElectronApplication; window: Page }> {
-  const app = await _electron.launch({ executablePath: ELECTRON, args: shellArgs(options) });
+  const app = await _electron.launch({
+    executablePath: ELECTRON,
+    args: shellArgs(options),
+    ...(options.env ? { env: { ...process.env, ...options.env } as Record<string, string> } : {}),
+  });
   const window = await app.firstWindow();
   await window.waitForLoadState("domcontentloaded");
   return { app, window };
