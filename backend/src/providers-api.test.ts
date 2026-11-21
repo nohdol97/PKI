@@ -7,7 +7,7 @@ import { createClaudeCodeProvider, createCodexProvider } from "@pki/providers/ad
 import { writeSetting, type SqlDriver } from "@pki/storage";
 import { DEFAULT_PROVIDER_SETTING } from "@pki/providers";
 import { installFakeCli, send, type FakeCli } from "@pki/testkit";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -210,6 +210,58 @@ describe("providers API", () => {
     expect(fake.runs()).toHaveLength(3); // claude --version, codex --version, codex login status
     await post(routes.checkProviders.path); // a later request checks again
     expect(fake.runs()).toHaveLength(6);
+  });
+
+  it("says when the run folder root is refused, in the check and in the connection test", async () => {
+    await server.close();
+    const root = join(dir, "data", "cli-runs");
+    mkdirSync(root, { recursive: true });
+    chmodSync(root, 0o755); // open to others: not ours to run in
+    const egress = productEgress(db);
+    const env = { PATH: fake.bin };
+    server = await startServer({
+      token: TOKEN,
+      allowedOrigins: [],
+      connectors,
+      db,
+      dataDirectory: dir,
+      egress,
+      calls: productCalls(db, egress, {
+        providers: [
+          createClaudeCodeProvider({ env, runsRoot: root }),
+          createCodexProvider({ env, runsRoot: root }),
+        ],
+      }),
+      ...productAdapters(dir),
+    });
+    headers = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
+    const refused = {
+      installed: true,
+      version: null,
+      authentication: "unknown",
+      problem: "cli-runs-root-refused",
+    };
+    expect((await post(routes.checkProviders.path)).body).toEqual({
+      providers: [
+        { providerId: "claude-code", ...refused },
+        { providerId: "codex", ...refused },
+      ],
+    });
+    await post(routes.setDefaultProvider.path, { providerId: "codex" });
+    const { policyVersion } = (await get(routes.consents.path)).body as { policyVersion: string };
+    await post(routes.grantConsent.path, {
+      providerId: "codex",
+      allowedClasses: ["synthetic"],
+      destination: "vendor:codex",
+      policyVersion,
+    });
+    expect((await connectionTest()).body).toEqual({
+      outcome: "blocked",
+      reason: "cli-not-verified",
+      isolation: null,
+      providerCheck: { providerId: "codex", ...refused },
+    });
+    expect(fake.runs()).toEqual([]);
   });
 
   it("reports CLIs that are not installed", async () => {

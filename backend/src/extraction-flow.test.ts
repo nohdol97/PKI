@@ -8,7 +8,12 @@
 // the Broker's reason, no Provider call, and released in their own rows when the
 // setting, the consent or the egress rules change (V02 미해결 질문 7).
 import { routes } from "@pki/contracts";
-import { CLI_PROFILES, type EgressControls, type TestBuildExecution } from "@pki/providers";
+import {
+  CLI_PROFILES,
+  DEFAULT_PROVIDER_SETTING,
+  type EgressControls,
+  type TestBuildExecution,
+} from "@pki/providers";
 import { readJob, readSetting, writeSetting, type SqlDriver } from "@pki/storage";
 import { FakeProvider, fixtureExtraction, send } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -50,6 +55,7 @@ const LISTED = {
   version: VERSION,
   os: platform(),
   profile: CLI_PROFILES["claude-code"].standard,
+  model: "synthetic-model",
   verifiedOn: "2026-12-01",
 };
 const listed: TestBuildExecution = { decideAs: "production", verified: [LISTED] };
@@ -84,6 +90,7 @@ function consent(egress: EgressControls, providerId: "local-model" | "claude-cod
 /** The product's Broker and runner with one Provider double; the import wakes the runner. */
 function pipeline(provider: FakeProvider, testBuild?: TestBuildExecution) {
   const egress = productEgress(db);
+  writeSetting(db, DEFAULT_PROVIDER_SETTING, provider.id); // the user's default (V01-T10)
   const { broker } = productCalls(
     db,
     egress,

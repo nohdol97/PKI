@@ -102,4 +102,19 @@ describe("provider text", () => {
     expect(missing).toContain("Claude Code: 설치되어 있지 않음");
     expect(missing).toContain("설치:");
   });
+
+  it("says when the CLI's run folder cannot be used, and how to fix it", () => {
+    const text = providerCheckText(
+      check({
+        providerId: "codex",
+        installed: true,
+        version: null,
+        authentication: "unknown",
+        problem: "cli-runs-root-refused",
+      }),
+    );
+    expect(text.state).toBe("실행 폴더를 쓸 수 없음");
+    expect(text.guidance).toContain("cli-runs");
+    expect(text.guidance).toContain("0700");
+  });
 });

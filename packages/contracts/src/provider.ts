@@ -122,6 +122,11 @@ export interface ProviderInfo {
   readonly installed: boolean;
   readonly path?: string;
   readonly version?: string;
+  /**
+   * Found but cannot be run here: its run folder root (in the data directory) is
+   * not a private directory of this user (V01-T10). Nothing ran; no version.
+   */
+  readonly problem?: "cli-runs-root-refused";
 }
 
 /** A Provider that has no way to tell answers "unknown"; it never reads credential files. */

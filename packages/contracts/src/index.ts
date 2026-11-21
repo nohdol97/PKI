@@ -224,6 +224,8 @@ const ProviderCheckSchema = z.object({
   installed: z.boolean(),
   version: z.string().nullable(),
   authentication: z.enum(["authenticated", "unauthenticated", "unknown"]),
+  /** Found but its run folder root is refused (ProviderInfo.problem): nothing can run. */
+  problem: z.enum(["cli-runs-root-refused"]).optional(),
 });
 export type ProviderCheck = z.infer<typeof ProviderCheckSchema>;
 

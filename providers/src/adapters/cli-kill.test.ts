@@ -210,6 +210,14 @@ describe.skipIf(process.platform === "win32").each(PROVIDERS)("cli-kill: $id", (
     );
   });
 
+  it("starts no query whose folder was still being made when close came", async () => {
+    const p = create({ env: { PATH: fake.bin }, killGraceMs: 200, runsRoot: runs });
+    const query = p.detect().catch((e: unknown) => e); // now awaiting its run folder
+    await p.close?.();
+    expect(((await query) as ProviderError).message).toBe("cli-closed");
+    expect(fake.runs()).toEqual([]);
+  });
+
   it("stops a call cancelled before its process started", async () => {
     const p = provider();
     const call = failure(p.generateStructured(request("early:1"), new AbortController().signal));

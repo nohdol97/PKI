@@ -29,6 +29,10 @@ const LOGIN: Partial<Record<ProviderId, string>> = {
   codex: "로그인: 터미널에서 `codex login`을 실행하세요(https://developers.openai.com/codex/auth).",
 };
 
+/** The run folder root failed its check (V01-T10): only the user can fix it, safely. */
+const RUNS_ROOT =
+  "데이터 폴더 안의 cli-runs 폴더가 이 사용자만 쓸 수 있는 폴더(권한 0700)가 아니거나 링크여서 CLI를 실행하지 않습니다. 앱을 끄고 그 폴더를 지우면 다음 실행 때 0700으로 다시 만듭니다.";
+
 const AUTH = {
   authenticated: "로그인됨",
   unauthenticated: "로그인되어 있지 않음",
@@ -54,6 +58,8 @@ export function providerCheckText(check: ProviderCheck): {
       guidance: null,
     };
   }
+  if (check.problem === "cli-runs-root-refused")
+    return { state: "실행 폴더를 쓸 수 없음", guidance: RUNS_ROOT };
   if (!check.installed) {
     return { state: "설치되어 있지 않음", guidance: INSTALL[check.providerId] ?? null };
   }

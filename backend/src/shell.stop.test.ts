@@ -8,6 +8,7 @@
 import { routes } from "@pki/contracts";
 import { installFakeCli, send, type FakeCli } from "@pki/testkit";
 import { fork, type ChildProcess } from "node:child_process";
+import { request } from "node:http";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,10 +29,13 @@ beforeEach(() => {
 afterEach(async () => {
   child?.kill("SIGKILL");
   child = undefined;
-  // leak check: what the backend left is killed here, and fails the test
-  expect(await fake.leftovers()).toEqual([]);
-  fake.dispose();
-  rmSync(dir, { recursive: true, force: true });
+  try {
+    // leak check: what the backend left is killed here, and fails the test
+    expect(await fake.leftovers()).toEqual([]);
+  } finally {
+    fake.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 function start(): Promise<{ port: number; exited: Promise<number | null> }> {
@@ -51,33 +55,68 @@ function start(): Promise<{ port: number; exited: Promise<number | null> }> {
   });
 }
 
+/** A connection test whose version query hangs; resolves once the fake CLI runs it. */
+async function hungQuery(port: number): Promise<void> {
+  const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
+  const post = (path: string, body: unknown) => send(port, path, headers, "POST", body);
+  await post(routes.setDefaultProvider.path, { providerId: "codex" });
+  const { policyVersion } = (await send(port, routes.consents.path, headers)).body as {
+    policyVersion: string;
+  };
+  await post(routes.grantConsent.path, {
+    providerId: "codex",
+    allowedClasses: ["synthetic"],
+    destination: "vendor:codex",
+    policyVersion,
+  });
+  // consented: the Broker queries the CLI's version, which hangs. The raw request is
+  // dropped once the query runs, so no HTTP connection holds the server open.
+  const req = request({
+    host: "127.0.0.1",
+    port,
+    path: routes.connectionTest.path,
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+  });
+  req.on("error", () => undefined);
+  req.end(JSON.stringify({ acknowledgeUnverified: false }));
+  const end = Date.now() + 15_000;
+  while (fake.spawned().length === 0 && Date.now() < end) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  expect(fake.spawned()).toHaveLength(1);
+  req.destroy();
+}
+
+async function noneLeft(): Promise<void> {
+  // gone by the time the backend exited: nothing to wait for
+  expect(await fake.leftovers(0)).toEqual([]);
+  expect(readdirSync(join(dir, "data", "cli-runs"))).toEqual([]);
+}
+
 describe("shell entry: stop", () => {
   it("ends a CLI query tree still running before the backend exits", async () => {
     const { port, exited } = await start();
-    const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
-    const post = (path: string, body: unknown) => send(port, path, headers, "POST", body);
-    await post(routes.setDefaultProvider.path, { providerId: "codex" });
-    const { policyVersion } = (await send(port, routes.consents.path, headers)).body as {
-      policyVersion: string;
-    };
-    await post(routes.grantConsent.path, {
-      providerId: "codex",
-      allowedClasses: ["synthetic"],
-      destination: "vendor:codex",
-      policyVersion,
-    });
-    // consented: the Broker queries the CLI's version, which hangs
-    void post(routes.connectionTest.path, { acknowledgeUnverified: false }).catch(() => undefined);
-    const end = Date.now() + 15_000;
-    while (fake.spawned().length === 0 && Date.now() < end) {
-      await new Promise((r) => setTimeout(r, 25));
-    }
-    expect(fake.spawned()).toHaveLength(1);
-
+    await hungQuery(port);
     child?.send({ type: "stop" });
     expect(await exited).toBe(0);
-    // gone by the time the backend exited: nothing to wait for
-    expect(await fake.leftovers(0)).toEqual([]);
-    expect(readdirSync(join(dir, "data", "cli-runs"))).toEqual([]);
+    await noneLeft();
+  }, 60_000);
+
+  it("stops the same way when the parent goes away (disconnect)", async () => {
+    const { port, exited } = await start();
+    await hungQuery(port);
+    child?.disconnect();
+    expect(await exited).toBe(0);
+    await noneLeft();
+  }, 60_000);
+
+  it("stops once when the parent sends stop and then disconnects", async () => {
+    const { port, exited } = await start();
+    await hungQuery(port);
+    child?.send({ type: "stop" });
+    child?.disconnect();
+    expect(await exited).toBe(0);
+    await noneLeft();
   }, 60_000);
 });

@@ -37,7 +37,7 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { cliArguments, renderArguments, type CliArguments, type CliId } from "../cli-profiles.ts";
 import { log } from "../log.ts";
 import { isModelName } from "../verified-cli.ts";
-import { runTree, type TreeHandle } from "./process-tree.ts";
+import { runTree, type TreeHandle, type TreeResult } from "./process-tree.ts";
 
 export interface CliProviderOptions {
   /** Where PATH and the allowlisted variables are read from, at every call. Default: this process's. */
@@ -204,7 +204,8 @@ export async function checkRunsRoot(
 ): Promise<boolean> {
   if (options.create) await mkdir(root, { recursive: true, mode: 0o700 });
   const stat = await lstat(root).catch(() => undefined);
-  if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) return false;
+  // lstat: a symbolic link (a Windows junction too) is not a directory
+  if (!stat?.isDirectory()) return false;
   if (process.platform === "win32") return true;
   const uid = "uid" in options ? options.uid : process.getuid?.();
   return stat.uid === uid && (stat.mode & 0o077) === 0;
@@ -239,7 +240,7 @@ export async function sweepStaleCliRuns(
       const pid = /^([1-9]\d*)\./.exec(name)?.[1];
       if (pid === undefined || alive(Number(pid))) return;
       const entry = await lstat(join(root, name)).catch(() => undefined);
-      if (!entry || entry.isSymbolicLink() || !entry.isDirectory()) return;
+      if (!entry?.isDirectory()) return; // lstat: a link is not a directory
       await rm(join(root, name), { recursive: true, force: true }); // removes links, not targets
       removed++;
     }),
@@ -383,7 +384,15 @@ class CliProvider implements LLMProvider {
     if (this.#closed) throw fail("cli-closed", false);
     const path = this.#find();
     if (!path) return { installed: false };
-    const result = await this.#query(path, ["--version"]);
+    let result: TreeResult;
+    try {
+      result = await this.#query(path, ["--version"]);
+    } catch (error) {
+      if (error instanceof ProviderError && error.message === "cli-runs-root-refused") {
+        return { installed: true, path, problem: "cli-runs-root-refused" };
+      }
+      throw error;
+    }
     const ok = result.exitCode === 0 && !result.killed && !result.spawnFailed;
     const version = ok ? VERSION.exec(result.stdout)?.[0] : undefined;
     return version === undefined ? { installed: true, path } : { installed: true, path, version };

@@ -299,7 +299,7 @@ describe("failure paths leave no input behind", () => {
                   sourceVersionIds: ["1"],
                   candidateItemIds: [],
                   origin: { userActionId },
-                  schemaVersion: 1,
+                  schemaVersion: 2,
                   budget: { timeoutMs: 20_000 },
                   retryable: false,
                 }),

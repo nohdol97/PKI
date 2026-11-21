@@ -7,13 +7,14 @@
 // extraction of the edit is not retried (open question for I03), and a page that
 // fails rolls the propagation back with the version.
 import type { ChangeSet, Connector, StructuredRequest } from "@pki/contracts";
-import { type EgressControls } from "@pki/providers";
+import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
 import {
   addEvidence,
   insertItem,
   readChangeSeq,
   readKnowledgeRevision,
   saveFact,
+  writeSetting,
   type SqlDriver,
 } from "@pki/storage";
 import { FakeProvider, fixtureExtraction } from "@pki/testkit";
@@ -109,6 +110,7 @@ function pipeline(failing = { on: false }) {
     answer: answer(failing),
   });
   const egress = productEgress(db);
+  writeSetting(db, DEFAULT_PROVIDER_SETTING, provider.id); // the user's default (V01-T10)
   const { broker } = productCalls(db, egress, { providers: [provider] });
   runner = productRunner(db, broker);
   consent(egress);

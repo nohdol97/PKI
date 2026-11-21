@@ -77,13 +77,23 @@ async function start(token: string) {
   return server.port;
 }
 
-async function stop() {
+let stopping: Promise<never> | undefined;
+
+/** Once, whoever asks (the shell's "stop", then the parent going away). */
+function stop(): Promise<never> {
+  stopping ??= stopOnce();
+  return stopping;
+}
+
+async function stopOnce(): Promise<never> {
   // Running CLI trees sit in their own process groups: end them (SIGTERM, then SIGKILL
   // after 2 s) while the server closes, within the shell's 5 s stop limit (V01-T10).
   // Open connections must not keep the shell waiting; it kills the process if this hangs.
+  // A failing close is not a reason to leave the CLI trees running.
+  const closed = running?.server.close().catch(() => undefined);
   await Promise.all([
     closeProviders(running?.providers ?? [], 3_000),
-    Promise.race([running?.server.close(), new Promise((r) => setTimeout(r, 2_000))]),
+    Promise.race([closed, new Promise((r) => setTimeout(r, 2_000))]),
   ]);
   running?.close();
   process.exit(0);

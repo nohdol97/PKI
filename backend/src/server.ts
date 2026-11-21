@@ -13,6 +13,7 @@ import {
   type LLMProvider,
   type ProviderCheck,
   type ProviderId,
+  type ProviderInfo,
   type ProviderList,
   type PrepareSource,
   type RouteName,
@@ -180,7 +181,8 @@ async function connectionTest(
   const provider = selectProvider(calls.providers ?? [], readDefaultProvider(db));
   if (provider?.transport !== "cli") return answer;
   const check = await checkProvider(provider);
-  const guide = !check.installed || check.authentication === "unauthenticated";
+  const guide =
+    !check.installed || check.authentication === "unauthenticated" || check.problem !== undefined;
   return guide ? { ...answer, providerCheck: check } : answer;
 }
 
@@ -210,10 +212,11 @@ function setDefaultProvider(
  * its message stays out.
  */
 async function checkProvider(provider: LLMProvider): Promise<ProviderCheck> {
-  const info = await Promise.resolve()
+  const info: ProviderInfo = await Promise.resolve()
     .then(() => provider.detect())
-    .catch(() => ({ installed: false as const }));
-  const authentication = info.installed
+    .catch(() => ({ installed: false }));
+  const runnable = info.installed && info.problem === undefined;
+  const authentication = runnable
     ? await Promise.resolve()
         .then(() => provider.checkAuthentication())
         .catch(() => "unknown" as const)
@@ -223,6 +226,7 @@ async function checkProvider(provider: LLMProvider): Promise<ProviderCheck> {
     installed: info.installed === true,
     version: info.installed && typeof info.version === "string" ? info.version : null,
     authentication,
+    ...(info.problem === "cli-runs-root-refused" ? { problem: info.problem } : {}),
   };
 }
 
@@ -386,7 +390,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       return { cliBackground: readCliBackground(options.db) };
     },
     providers: async () => providerList(options),
-    setDefaultProvider: async ({ providerId }) => setDefaultProvider(options, providerId),
+    setDefaultProvider: async ({ providerId }) => {
+      const set = setDefaultProvider(options, providerId);
+      if (!("error" in set)) changed(); // jobs held for "no-provider" are judged again
+      return set;
+    },
     checkProviders: () => {
       // requests that come while a check runs share it: one set of query processes
       checking ??= Promise.all((options.calls?.providers ?? []).map(checkProvider))

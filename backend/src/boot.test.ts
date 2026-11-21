@@ -6,13 +6,13 @@
 // is blocked by the egress decision; with endpoint, model, key and consent it reaches
 // the endpoint, through the same egress instance the consent API wrote.
 import { routes, type SecretSource } from "@pki/contracts";
-import { CLI_PROFILES } from "@pki/providers";
-import { openaiKeySecretName } from "@pki/providers";
+import { CLI_PROFILES, DEFAULT_PROVIDER_SETTING, openaiKeySecretName } from "@pki/providers";
 import {
   readSetting,
   registerConnectorInstance,
   registerJob,
   saveSourceRecord,
+  writeSetting,
   type SqlDriver,
 } from "@pki/storage";
 import { createClaudeCodeProvider } from "@pki/providers/adapters";
@@ -163,6 +163,12 @@ describe("bootBackend", () => {
         .join("\n");
       expect((await post(routes.importJsonl.path, { text })).body).toMatchObject({ created: 3 });
       const jobs = () => db.all("SELECT status, reason FROM jobs ORDER BY id");
+      // no default Provider chosen yet (V01-T10): nothing is called
+      await vi.waitFor(() =>
+        expect(jobs()).toEqual(Array(3).fill({ status: "held", reason: "no-provider" })),
+      );
+      // choosing one judges the held jobs again
+      await post(routes.setDefaultProvider.path, { providerId: "openai-compatible" });
       await vi.waitFor(() =>
         expect(jobs()).toEqual(
           Array(3).fill({ status: "held", reason: "destination-unavailable" }),
@@ -198,6 +204,7 @@ describe("bootBackend", () => {
     function seed(jobs: { status: "queued" | "held"; reason?: string }[]) {
       const db: SqlDriver = openCanonicalDb(dir);
       try {
+        writeSetting(db, DEFAULT_PROVIDER_SETTING, "openai-compatible"); // the user's default
         registerConnectorInstance(db, "seeded", "jsonl-import");
         jobs.forEach((job, i) => {
           const saved = saveSourceRecord(db, "seeded", {
@@ -276,6 +283,7 @@ describe("bootBackend", () => {
         const { port } = booted.server;
         const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
         const post = (path: string, body: unknown) => send(port, path, headers, "POST", body);
+        await post(routes.setDefaultProvider.path, { providerId: "openai-compatible" });
         await post(routes.writeSettings.path, {
           openaiCompatible: { baseUrl: endpoint.baseUrl, model: "synthetic-model" },
         });
