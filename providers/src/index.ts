@@ -61,3 +61,12 @@ export {
 } from "./egress-policy.ts";
 export { createLogger, errorClass, log, type Logger, type LogValue } from "./log.ts";
 export { openaiKeySecretName } from "./secret-names.ts";
+export {
+  EXTRACT_FACT_KINDS,
+  EXTRACT_ITEM_TYPES,
+  EXTRACT_RELATION_TYPES,
+  EXTRACT_SCHEMA_VERSION,
+  TASKS,
+  type ExtractionOutput,
+  type TaskDefinition,
+} from "./tasks.ts";

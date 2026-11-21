@@ -87,6 +87,11 @@ export interface ServerOptions {
   calls?: { broker: Pick<Broker, "call">; issuer: UserActionIssuer };
   /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
   importer?: JsonlImporter;
+  /**
+   * Called after the background setting, a consent or the endpoint changed, the
+   * conditions that hold jobs (composition.ts releaseHeldJobs); default none.
+   */
+  onRunConditionsChanged?: () => void;
 }
 
 export interface RunningServer {
@@ -243,6 +248,7 @@ async function prepareEmbedding(
 }
 
 function createHandlers(options: ServerOptions, preparations: Set<AbortController>): Handlers {
+  const changed = () => options.onRunConditionsChanged?.();
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -286,16 +292,28 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       }
       writeSetting(options.db, OPENAI_BASE_URL_SETTING, baseUrl);
       writeSetting(options.db, OPENAI_MODEL_SETTING, openaiCompatible.model);
+      changed();
       return settings();
     },
     consents: async () => options.egress.overview(),
-    grantConsent: async ({ providerId, allowedClasses, destination, policyVersion }) =>
-      options.egress.grant(providerId, allowedClasses, { destination, policyVersion }),
-    revokeConsent: async (input) => options.egress.revoke(input.providerId),
+    grantConsent: async ({ providerId, allowedClasses, destination, policyVersion }) => {
+      const granted = options.egress.grant(providerId, allowedClasses, {
+        destination,
+        policyVersion,
+      });
+      if (!("error" in granted)) changed();
+      return granted;
+    },
+    revokeConsent: async (input) => {
+      const revoked = options.egress.revoke(input.providerId);
+      changed();
+      return revoked;
+    },
     connectionTest: (input) => connectionTest(options.calls, input.acknowledgeUnverified),
     executionSettings: async () => ({ cliBackground: readCliBackground(options.db) }),
     setExecutionSettings: async ({ cliBackground }) => {
       writeSetting(options.db, CLI_BACKGROUND_SETTING, cliBackground ? "on" : "off");
+      changed();
       return { cliBackground: readCliBackground(options.db) };
     },
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),

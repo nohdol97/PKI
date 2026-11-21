@@ -38,7 +38,7 @@ const currentEvidence = (db: SqlDriver, target: EvidenceTarget): number[] =>
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** A normalized calendar date (YYYY-MM-DD) that exists; such strings order as dates. */
-function isDate(value: string): boolean {
+export function isDate(value: string): boolean {
   const time = DATE.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
   return !Number.isNaN(time) && new Date(time).toISOString().startsWith(value);
 }

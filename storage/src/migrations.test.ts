@@ -40,8 +40,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(7);
-    expect(migrations).toHaveLength(7);
+    expect(schemaVersion(db)).toBe(8);
+    expect(migrations).toHaveLength(8);
   });
 
   it("is idempotent when re-run", () => {
@@ -558,7 +558,7 @@ describe("schema v7 (V02-T04)", () => {
     db.run(
       "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, 1, 'h', 't', 'b')",
     );
-    migrate(db);
+    migrate(db, migrations.slice(0, 7));
     expect(schemaVersion(db)).toBe(7);
     expect(columns("source_versions")).toEqual([
       "id",
@@ -577,5 +577,23 @@ describe("schema v7 (V02-T04)", () => {
         "INSERT INTO source_versions (source_id, version, content_hash, title, body, revision) VALUES (1, 2, 'h2', 't', 'b', 0)",
       ),
     ).toThrow(/CHECK/);
+  });
+});
+
+describe("schema v8 (V02-T05)", () => {
+  it("adds the extraction's dropped counts to a v7 database's jobs, null for the old rows", () => {
+    migrate(db, migrations.slice(0, 7));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a')");
+    db.run(
+      "INSERT INTO jobs (kind, source_id, fence_version, status) VALUES ('extract', 1, 1, 'done')",
+    );
+    migrate(db);
+    expect(schemaVersion(db)).toBe(8);
+    expect(columns("jobs").slice(-2)).toEqual(["dropped_quotes", "dropped_other"]);
+    expect(db.all("SELECT dropped_quotes, dropped_other FROM jobs")).toEqual([
+      { dropped_quotes: null, dropped_other: null },
+    ]);
+    expect(() => db.run("UPDATE jobs SET dropped_quotes = -1")).toThrow(/CHECK/);
   });
 });

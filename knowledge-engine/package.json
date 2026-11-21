@@ -9,6 +9,10 @@
   },
   "dependencies": {
     "@pki/contracts": "workspace:*",
+    "@pki/providers": "workspace:*",
     "@pki/storage": "workspace:*"
+  },
+  "devDependencies": {
+    "@pki/testkit": "workspace:*"
   }
 }

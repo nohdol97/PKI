@@ -19,6 +19,7 @@ export {
 } from "./data-directory.ts";
 export {
   contentHash,
+  findSourceVersionId,
   readConnectorKind,
   readCursor,
   readSourceVersion,
@@ -35,8 +36,12 @@ export {
   isReasonCode,
   JobWriteError,
   leaseNextJob,
+  readExtractionDrops,
   readJob,
+  recordExtractionDrops,
   registerJob,
+  requeueHeldJobs,
+  type ExtractionDrops,
   type JobClosing,
   type JobStatus,
   type LeaseRequest,
@@ -79,3 +84,4 @@ export {
 } from "./insights.ts";
 export { readTombstone, writeTombstone, type Tombstone } from "./tombstones.ts";
 export { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
+export { listItemEvidenceVersions, listItemNames } from "./candidates.ts";

@@ -167,7 +167,7 @@ describe("failure paths leave no input behind", () => {
               sourceVersionIds: ["1"],
               candidateItemIds: [],
               origin: { userActionId },
-              schemaVersion: 1,
+              schemaVersion: 2,
               budget: { timeoutMs: 1000 },
               retryable: true,
             }),
@@ -178,11 +178,11 @@ describe("failure paths leave no input behind", () => {
       // the echo really carried the canaries: this test would see a leak
       const sent = (providers[0]?.provider as EchoingError).requests[0];
       expect(sent && echo(sent)).toContain(DOC_CANARY);
-      expect(sent && echo(sent)).toContain("Extract the factual claims");
+      expect(sent && echo(sent)).toContain("Extract knowledge items");
       expect(http.requests).toHaveLength(4);
       for (const request of http.requests) {
         expect(httpEcho(request)).toContain(DOC_CANARY);
-        expect(httpEcho(request)).toContain("Extract the factual claims");
+        expect(httpEcho(request)).toContain("Extract knowledge items");
       }
       expect(results).toMatchObject([
         { status: "failed", error: "provider-error", attempts: 3 },
@@ -216,7 +216,7 @@ describe("failure paths leave no input behind", () => {
         logged.join("\n"),
       ];
       for (const text of texts) {
-        for (const canary of [DOC_CANARY, ECHO_MARKER, "Extract the factual claims"]) {
+        for (const canary of [DOC_CANARY, ECHO_MARKER, "Extract knowledge items"]) {
           expect(text).not.toContain(canary);
         }
       }

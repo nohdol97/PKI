@@ -1,7 +1,7 @@
 // Composition point: the one place that picks adapter implementations for the
 // product (V01-R14, R15): the vector index, the embedder, the canonical storage
-// driver, the Connector kinds, the egress policy, the Providers and the Broker
-// with its execution gate. Entry points (dev.ts, shell.ts through boot.ts,
+// driver, the Connector kinds, the egress policy, the Providers, the Broker
+// with its execution gate, and the job runner with its extract handler. Entry points (dev.ts, shell.ts through boot.ts,
 // site-check.ts) build the backend from these.
 import type { LLMProvider, SecretSource } from "@pki/contracts";
 import {
@@ -22,10 +22,29 @@ import {
   type UserActionIssuer,
 } from "@pki/providers";
 import { createLocalEmbedder, OpenAICompatibleProvider } from "@pki/providers/adapters";
-import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
+import {
+  createExtractHandler,
+  EXTRACT_HOLD_TOO_LARGE,
+  knowledgeCandidates,
+} from "@pki/knowledge-engine";
+import {
+  dataDirectory,
+  ensureDataDirectory,
+  migrate,
+  readSetting,
+  requeueHeldJobs,
+  writeSetting,
+  type SqlDriver,
+} from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
-import type { ConnectorFactory, ConnectorInstanceConfig, SyncOptions } from "./connectors.ts";
+import {
+  EXTRACT_JOB_KIND,
+  type ConnectorFactory,
+  type ConnectorInstanceConfig,
+  type SyncOptions,
+} from "./connectors.ts";
+import { createJobRunner, type JobRunner } from "./job-runner.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
@@ -110,7 +129,7 @@ export function productCalls(
     db,
     provider: () => (providers.length === 1 ? providers[0] : undefined),
     userActions: ledger.redeemer,
-    candidates: { lookup: () => undefined }, // V02 attaches the knowledge store
+    candidates: knowledgeCandidates(db),
     egress,
     execution: createExecutionGate(
       options.testBuild === undefined ? { db } : { db, testBuild: options.testBuild },
@@ -118,6 +137,58 @@ export function productCalls(
     recorder: createCallRecorder(db),
   });
   return { broker, issuer: ledger.issuer };
+}
+
+/**
+ * The job runner with the product's handlers (V02-R4, R6): extraction of each
+ * stored version through `broker`, with origin {jobId, lease} built from the
+ * leased job only. Errors are logged by class only.
+ */
+export function productRunner(
+  db: SqlDriver,
+  broker: Pick<Broker, "call">,
+  options: { now?: () => Date } = {},
+): JobRunner {
+  return createJobRunner({
+    db,
+    handlers: { [EXTRACT_JOB_KIND]: createExtractHandler({ db, broker, ...options }) },
+    ...(options.now ? { now: options.now } : {}),
+    onError: (error) => log("job-error", { error: errorClass(error) }),
+  });
+}
+
+/** Hold reasons no setting, consent or rule change can lift. */
+export const HELD_KEPT_REASONS: readonly string[] = [EXTRACT_HOLD_TOO_LARGE];
+
+/**
+ * Provisional (V02 미해결 질문 7): a condition that blocked held jobs may have
+ * changed (the background setting, a consent, the endpoint), so they are queued
+ * again in their own rows and the runner woken; the Broker judges them anew.
+ */
+export function releaseHeldJobs(db: SqlDriver, runner: Pick<JobRunner, "wake">): number {
+  const released = requeueHeldJobs(db, { keep: HELD_KEPT_REASONS });
+  if (released > 0) void runner.wake();
+  return released;
+}
+
+/** The policy version held jobs were last judged under (a setting row, not user-editable through the API). */
+export const HELD_POLICY_SETTING = "jobs.held-policy-version";
+
+/**
+ * At start: the deployment's egress rules are build values, so they change only
+ * across a restart. When the policy version differs from the one recorded, held
+ * jobs are released once and the new version recorded.
+ */
+export function releaseOnPolicyChange(
+  db: SqlDriver,
+  egress: Pick<EgressControls, "policyVersion">,
+  runner: Pick<JobRunner, "wake">,
+): number {
+  const version = egress.policyVersion();
+  if (readSetting(db, HELD_POLICY_SETTING) === version) return 0;
+  const released = releaseHeldJobs(db, runner);
+  writeSetting(db, HELD_POLICY_SETTING, version);
+  return released;
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";
@@ -130,10 +201,9 @@ export const connectorKinds = {
 } satisfies Record<string, ConnectorFactory>;
 
 /**
- * The Sources screen's JSONL import (V02-R2). `runner` is woken after each page
- * that registered extraction jobs; V02-T05 creates the runner and passes it here.
- * An instance whose sync failed is logged by its error class (default: the
- * backend's filtered log).
+ * The Sources screen's JSONL import (V02-R2). `runner` (productRunner) is woken
+ * after each page that registered extraction jobs. An instance whose sync failed
+ * is logged by its error class (default: the backend's filtered log).
  */
 export function productImporter(
   db: SqlDriver,

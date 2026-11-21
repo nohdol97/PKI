@@ -176,3 +176,42 @@ export function closeJob(
     return status;
   });
 }
+
+/** What an extraction dropped (V02-R6): quotes not found exactly once, and anything else. */
+export interface ExtractionDrops {
+  quotes: number;
+  other: number;
+}
+
+/** Records the dropped counts on the job, inside the transaction writing its result. */
+export function recordExtractionDrops(db: SqlDriver, jobId: number, drops: ExtractionDrops): void {
+  for (const n of [drops.quotes, drops.other]) {
+    if (!Number.isInteger(n) || n < 0) throw new RangeError("a dropped count is a whole number");
+  }
+  const { changes } = db.run("UPDATE jobs SET dropped_quotes = ?, dropped_other = ? WHERE id = ?", [
+    drops.quotes,
+    drops.other,
+    jobId,
+  ]);
+  if (changes !== 1) throw new Error(`job ${jobId} not found`);
+}
+
+export function readExtractionDrops(db: SqlDriver, jobId: number): ExtractionDrops | undefined {
+  const row = db.all("SELECT dropped_quotes, dropped_other FROM jobs WHERE id = ?", [jobId])[0];
+  if (row?.dropped_quotes == null || row.dropped_other == null) return undefined;
+  return { quotes: row.dropped_quotes as number, other: row.dropped_other as number };
+}
+
+/**
+ * Puts held jobs back in the queue, in their own rows (V02 미해결 질문 7): called
+ * when a condition that blocked them may have changed. Jobs held for a reason in
+ * `keep` stay held (a source too large stays too large). Each later claim raises
+ * the lease token as usual. Returns how many were queued.
+ */
+export function requeueHeldJobs(db: SqlDriver, options: { keep: readonly string[] }): number {
+  return db.run(
+    `UPDATE jobs SET status = 'queued', reason = NULL
+      WHERE status = 'held' AND reason NOT IN (SELECT value FROM json_each(?))`,
+    [JSON.stringify(options.keep)],
+  ).changes;
+}

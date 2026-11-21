@@ -126,6 +126,18 @@ export interface StoredSourceVersion {
   connectorKind: string | null;
 }
 
+/** The row ID of one source's version (a job's source and fence version), or undefined. */
+export function findSourceVersionId(
+  db: SqlDriver,
+  sourceId: number,
+  version: number,
+): number | undefined {
+  return db.all("SELECT id FROM source_versions WHERE source_id = ? AND version = ?", [
+    sourceId,
+    version,
+  ])[0]?.id as number | undefined;
+}
+
 /** One stored version with what the Broker needs to grade it, or undefined if absent. */
 export function readSourceVersion(db: SqlDriver, id: number): StoredSourceVersion | undefined {
   const row = db.all(
