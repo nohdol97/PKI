@@ -1,0 +1,340 @@
+{
+  "sealing_note": "The eval split is sealed by convention only: this repository is public, so the labels are readable by anyone. Do not tune on instances listed under 'eval'; any tuning that touched them must be disclosed with the result.",
+  "splits": {
+    "dev": [
+      "S01-I1",
+      "S01-I2",
+      "S02-I1",
+      "S02-I2",
+      "S03-I1",
+      "S03-I2",
+      "S04-I1",
+      "S04-I2",
+      "S05-I1",
+      "S05-I2",
+      "S06-I1",
+      "S06-I2",
+      "S07-I1",
+      "S07-I2",
+      "S08-I1",
+      "S08-I2",
+      "S09-I1",
+      "S09-I2",
+      "S10-I1",
+      "S10-I2",
+      "S11-I1",
+      "S11-I2"
+    ],
+    "eval": [
+      "S01-I3",
+      "S01-I4",
+      "S02-I3",
+      "S03-I3",
+      "S04-I3",
+      "S05-I3",
+      "S06-I3",
+      "S07-I3",
+      "S08-I3",
+      "S09-I3",
+      "S10-I3",
+      "S11-I3"
+    ]
+  },
+  "instances": {
+    "S01-I1": {
+      "scenario": "schedule_dependency_delay",
+      "record_ids": [
+        "mail-0001",
+        "msg-0001",
+        "msg-0002",
+        "wiki-0001"
+      ]
+    },
+    "S01-I2": {
+      "scenario": "schedule_dependency_delay",
+      "record_ids": [
+        "mail-0002",
+        "msg-0003",
+        "msg-0004",
+        "wiki-0002"
+      ]
+    },
+    "S01-I3": {
+      "scenario": "schedule_dependency_delay",
+      "record_ids": [
+        "mail-0003",
+        "mail-0004",
+        "msg-0005",
+        "wiki-0003"
+      ]
+    },
+    "S01-I4": {
+      "scenario": "schedule_dependency_delay",
+      "record_ids": [
+        "mail-0005",
+        "msg-0006",
+        "wiki-0004"
+      ]
+    },
+    "S02-I1": {
+      "scenario": "same_name_different_people",
+      "record_ids": [
+        "mail-0006",
+        "mail-0007",
+        "msg-0007",
+        "wiki-0005"
+      ]
+    },
+    "S02-I2": {
+      "scenario": "same_name_different_people",
+      "record_ids": [
+        "mail-0008",
+        "mail-0009",
+        "msg-0008",
+        "wiki-0006"
+      ]
+    },
+    "S02-I3": {
+      "scenario": "same_name_different_people",
+      "record_ids": [
+        "mail-0010",
+        "mail-0011",
+        "msg-0009",
+        "wiki-0007"
+      ]
+    },
+    "S03-I1": {
+      "scenario": "abbreviation_two_meanings",
+      "record_ids": [
+        "mail-0012",
+        "msg-0010",
+        "msg-0011",
+        "wiki-0008"
+      ]
+    },
+    "S03-I2": {
+      "scenario": "abbreviation_two_meanings",
+      "record_ids": [
+        "mail-0013",
+        "msg-0012",
+        "msg-0013",
+        "wiki-0009"
+      ]
+    },
+    "S03-I3": {
+      "scenario": "abbreviation_two_meanings",
+      "record_ids": [
+        "mail-0014",
+        "msg-0014",
+        "msg-0015",
+        "wiki-0010"
+      ]
+    },
+    "S04-I1": {
+      "scenario": "contradicting_statements",
+      "record_ids": [
+        "mail-0015",
+        "msg-0016",
+        "wiki-0011"
+      ]
+    },
+    "S04-I2": {
+      "scenario": "contradicting_statements",
+      "record_ids": [
+        "mail-0016",
+        "msg-0017",
+        "wiki-0012"
+      ]
+    },
+    "S04-I3": {
+      "scenario": "contradicting_statements",
+      "record_ids": [
+        "mail-0017",
+        "msg-0018",
+        "wiki-0013"
+      ]
+    },
+    "S05-I1": {
+      "scenario": "correction_supersedes",
+      "record_ids": [
+        "mail-0018",
+        "mail-0019",
+        "msg-0019"
+      ]
+    },
+    "S05-I2": {
+      "scenario": "correction_supersedes",
+      "record_ids": [
+        "msg-0020",
+        "wiki-0014"
+      ]
+    },
+    "S05-I3": {
+      "scenario": "correction_supersedes",
+      "record_ids": [
+        "msg-0021",
+        "msg-0022",
+        "wiki-0015"
+      ]
+    },
+    "S06-I1": {
+      "scenario": "deletion",
+      "record_ids": [
+        "mail-0020",
+        "msg-0023",
+        "wiki-0016"
+      ]
+    },
+    "S06-I2": {
+      "scenario": "deletion",
+      "record_ids": [
+        "mail-0021",
+        "msg-0024",
+        "wiki-0017"
+      ]
+    },
+    "S06-I3": {
+      "scenario": "deletion",
+      "record_ids": [
+        "mail-0022",
+        "msg-0025",
+        "wiki-0018"
+      ]
+    },
+    "S07-I1": {
+      "scenario": "permission_revocation",
+      "record_ids": [
+        "mail-0023",
+        "msg-0026",
+        "wiki-0019"
+      ]
+    },
+    "S07-I2": {
+      "scenario": "permission_revocation",
+      "record_ids": [
+        "mail-0024",
+        "msg-0027",
+        "wiki-0020"
+      ]
+    },
+    "S07-I3": {
+      "scenario": "permission_revocation",
+      "record_ids": [
+        "mail-0025",
+        "msg-0028",
+        "msg-0029"
+      ]
+    },
+    "S08-I1": {
+      "scenario": "timezone_offsets",
+      "record_ids": [
+        "mail-0026",
+        "msg-0030",
+        "msg-0031",
+        "msg-0032"
+      ]
+    },
+    "S08-I2": {
+      "scenario": "timezone_offsets",
+      "record_ids": [
+        "mail-0027",
+        "mail-0028",
+        "msg-0033",
+        "wiki-0021"
+      ]
+    },
+    "S08-I3": {
+      "scenario": "timezone_offsets",
+      "record_ids": [
+        "mail-0029",
+        "msg-0034",
+        "msg-0035"
+      ]
+    },
+    "S09-I1": {
+      "scenario": "duplicate_threads",
+      "record_ids": [
+        "mail-0030",
+        "mail-0031",
+        "mail-0032",
+        "msg-0036"
+      ]
+    },
+    "S09-I2": {
+      "scenario": "duplicate_threads",
+      "record_ids": [
+        "mail-0033",
+        "msg-0037",
+        "msg-0038",
+        "msg-0039"
+      ]
+    },
+    "S09-I3": {
+      "scenario": "duplicate_threads",
+      "record_ids": [
+        "msg-0040",
+        "wiki-0022",
+        "wiki-0023",
+        "wiki-0024"
+      ]
+    },
+    "S10-I1": {
+      "scenario": "mixed_ko_en_same_concept",
+      "record_ids": [
+        "mail-0034",
+        "msg-0041",
+        "msg-0042",
+        "msg-0043",
+        "wiki-0025"
+      ]
+    },
+    "S10-I2": {
+      "scenario": "mixed_ko_en_same_concept",
+      "record_ids": [
+        "mail-0035",
+        "msg-0044",
+        "msg-0045",
+        "wiki-0026"
+      ]
+    },
+    "S10-I3": {
+      "scenario": "mixed_ko_en_same_concept",
+      "record_ids": [
+        "mail-0036",
+        "msg-0046",
+        "msg-0047",
+        "wiki-0027"
+      ]
+    },
+    "S11-I1": {
+      "scenario": "distractor_noise",
+      "record_ids": [
+        "mail-0037",
+        "mail-0038",
+        "msg-0048",
+        "msg-0049",
+        "wiki-0028"
+      ]
+    },
+    "S11-I2": {
+      "scenario": "distractor_noise",
+      "record_ids": [
+        "mail-0039",
+        "msg-0050",
+        "msg-0051",
+        "wiki-0029",
+        "wiki-0030"
+      ]
+    },
+    "S11-I3": {
+      "scenario": "distractor_noise",
+      "record_ids": [
+        "mail-0040",
+        "mail-0041",
+        "msg-0052",
+        "msg-0053",
+        "wiki-0031"
+      ]
+    }
+  }
+}
