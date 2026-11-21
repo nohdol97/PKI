@@ -144,6 +144,21 @@ describe("purgeSourceContent", () => {
     expect(db.all("SELECT x_item_id, y_item_id FROM insights")).toEqual([]);
   });
 
+  it("never touches a fact or relation without evidence that the source did not reach (review A-S2)", () => {
+    const [a, a1] = version("a", "a");
+    const [x, y] = [item("X"), item("Y")];
+    cite({ factId: fact(x, "2026-12-05") }, a1);
+    const bare = fact(y, "2026-12-09");
+    const bareRelation = relation(y, x);
+
+    const result = purgeSourceContent(db, a);
+
+    expect(result.facts).not.toContain(bare);
+    expect(ids("facts")).toEqual([bare]);
+    expect(ids("relations")).toEqual([bareRelation]);
+    expect(ids("items")).toEqual([x, y]);
+  });
+
   it("keeps an item another source's relation still points at", () => {
     const [a, a1] = version("a", "a");
     const [, b1] = version("b", "b");
@@ -172,6 +187,7 @@ describe("purgeSourceContent", () => {
       facts: [],
       relations: [],
       items: [],
+      superseded: { facts: [], relations: [] },
       remainingItemIds: [],
     });
   });

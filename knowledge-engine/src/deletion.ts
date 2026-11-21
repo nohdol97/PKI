@@ -3,9 +3,10 @@
 // every product version of the source, which raises the change sequence; the
 // purge of all its versions with their evidence and keyword index rows, and of
 // what they alone supported (storage purge.ts); then the rule over the collected
-// items that remain. Not propagateNewVersion ("T07이 넘기는 것" 6): nothing is
-// superseded, what lost all evidence is deleted. The `dirty` Insight state is not
-// used either: the rule runs here, in the same transaction.
+// items that remain. Not propagateNewVersion ("T07이 넘기는 것" 6): what lost all
+// evidence is deleted, and only a collected row left with past evidence alone is
+// superseded (the purge does it). The `dirty` Insight state is not used either:
+// the rule runs here, in the same transaction.
 // Open jobs of the source stay; the tombstone covers their fence version, so the
 // runner closes them superseded and a late result is discarded (V02-R5).
 import {

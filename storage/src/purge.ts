@@ -4,10 +4,13 @@
 // evidence reached, and the items holding them, are collected first; after the
 // delete only those are judged: a collected fact or relation left without evidence
 // is deleted whatever its status, then a collected item left without facts and
-// relations (its Insights go with it, a foreign key cascade). Rows never reached
+// relations (its Insights go with it, a foreign key cascade). A collected one that
+// stays with past evidence only (another source moved on) becomes superseded, as
+// a new version's propagation would make it (rejected and superseded rows stay). Rows never reached
 // stay even without evidence. The keyword index rows leave through the version
 // delete trigger. The tombstone and the rule's recompute are the caller's, in the
 // same transaction (knowledge-engine deletion.ts).
+import { CURRENT, setKnowledgeStatus } from "./knowledge.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 export interface PurgeResult {
@@ -17,6 +20,8 @@ export interface PurgeResult {
   facts: number[];
   relations: number[];
   items: number[];
+  /** Kept ids that lost their last current evidence and became superseded, ascending. */
+  superseded: { facts: number[]; relations: number[] };
   /** Collected items still stored, ascending: the rule recomputes their pairs. */
   remainingItemIds: number[];
 }
@@ -55,6 +60,29 @@ export function purgeSourceContent(db: SqlDriver, sourceId: number): PurgeResult
     };
     const deletedFacts = unsupported("facts", "fact_id", facts);
     const deletedRelations = unsupported("relations", "relation_id", relations);
+    const supersede = (kind: "fact" | "relation", rows: typeof facts, deleted: number[]) => {
+      const table = kind === "fact" ? "facts" : "relations";
+      const stale = rows
+        .map((r) => r.id as number)
+        .filter((id) => !deleted.includes(id))
+        .filter(
+          (id) =>
+            db.all(
+              `SELECT 1 FROM ${table} t
+               WHERE t.id = ? AND t.status NOT IN ('superseded', 'rejected')
+                 AND NOT EXISTS (SELECT 1 FROM evidence e
+                                 JOIN source_versions v ON v.id = e.source_version_id
+                                 WHERE e.${kind}_id = t.id AND ${CURRENT})`,
+              [id],
+            ).length === 1,
+        );
+      for (const id of stale) setKnowledgeStatus(db, kind, id, "superseded");
+      return ascending(stale);
+    };
+    const superseded = {
+      facts: supersede("fact", facts, deletedFacts),
+      relations: supersede("relation", relations, deletedRelations),
+    };
 
     const items: number[] = [];
     const remainingItemIds: number[] = [];
@@ -75,6 +103,7 @@ export function purgeSourceContent(db: SqlDriver, sourceId: number): PurgeResult
       facts: ascending(deletedFacts),
       relations: ascending(deletedRelations),
       items,
+      superseded,
       remainingItemIds,
     };
   });

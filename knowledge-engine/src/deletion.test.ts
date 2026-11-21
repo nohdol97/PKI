@@ -19,6 +19,7 @@ import {
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { deleteSource } from "./deletion.ts";
+import { propagateNewVersion } from "./propagation.ts";
 import {
   COMPLETION_DATE,
   DEPENDENCY_DELAY,
@@ -177,7 +178,42 @@ describe("deleteSource", () => {
     expect(readInsight(db, key())?.state).toBe("active");
   });
 
-  it("does not supersede: a row other sources still support keeps its status", () => {
+  it("supersedes a row left with only past evidence of another source, as a new version would (review A-S1)", () => {
+    // F is cited by B v1 and A v1; B moves to v2 (F stays valid through A); then A goes
+    const f = saveFact(db, { itemId: y, kind: COMPLETION_DATE, value: "2026-12-10", ...attrs }).id;
+    const b1 = version("b", "완료 12-10");
+    cite({ factId: f }, b1.id, "완료 12-10");
+    const a1 = version("a", "완료 12-10");
+    cite({ factId: f }, a1.id, "완료 12-10");
+    const r = saveRelation(db, { subjectId: x, type: DEPENDS_ON, objectId: y, ...attrs }).id;
+    cite({ relationId: r }, b1.id, "완료 12-10");
+    cite({ relationId: r }, a1.id, "완료 12-10");
+    const rejected = saveFact(db, {
+      itemId: y,
+      kind: TARGET_DATE,
+      value: "2026-12-01",
+      ...attrs,
+    }).id;
+    cite({ factId: rejected }, b1.id, "완료 12-10");
+    cite({ factId: rejected }, a1.id, "완료 12-10");
+    db.run("UPDATE facts SET status = 'rejected' WHERE id = ?", [rejected]);
+    version("b", "완료 12-12");
+    propagateNewVersion(db, b1.sourceId);
+    expect(db.all("SELECT status FROM facts WHERE id = ?", [f])).toEqual([{ status: "candidate" }]);
+
+    const result = deleteSource(db, a1.sourceId, { reason: "source-deleted", at: AT });
+
+    expect(result).toMatchObject({ purge: { superseded: { facts: [f], relations: [r] } } });
+    expect(db.all("SELECT id, status FROM facts ORDER BY id")).toEqual([
+      { id: f, status: "superseded" },
+      { id: rejected, status: "rejected" },
+    ]);
+    expect(db.all("SELECT status FROM relations WHERE id = ?", [r])).toEqual([
+      { status: "superseded" },
+    ]);
+  });
+
+  it("keeps the status of a row another source's current evidence supports", () => {
     const { chat, late } = lateDependency();
     const other = version("chat-copy", "완료 12-10");
     cite({ factId: late }, other.id, "완료 12-10");

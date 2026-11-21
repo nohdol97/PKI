@@ -184,6 +184,43 @@ describe("hidden and old rows", () => {
   });
 });
 
+// "T10이 넘기는 것" 7: the test T08 owes. After the Sources screen deletes a source
+// (V02-R12), its Insight's evidence list and its evidence's source view are
+// not-found and carry nothing of it; evidence of the other sources still opens.
+describe("after a source is deleted (V02-T08)", () => {
+  it("answers not-found with no content for the purged source's Insight and evidence", async () => {
+    await start(["plain"]);
+    const [insight] = routes.insights.response.parse((await call("insights")).body).insights;
+    const { evidence } = routes.insightEvidence.response.parse(
+      (await call("insightEvidence", { insightId: insight?.id })).body,
+    );
+    const chat = JSON.parse(read("v02-messenger.jsonl").trim()) as Record<string, string>;
+    const purged = evidence.filter((e) => e.sourceTitle === chat.title);
+    const kept = evidence.filter((e) => e.sourceTitle !== chat.title);
+    expect([purged.length, kept.length]).toEqual([1, 2]);
+
+    const { path, method } = routes.deleteSource;
+    const deleted = await send(server.port, path, valid, method, {
+      connectorId: chat.connector_instance_id,
+      externalId: chat.external_id,
+    });
+    expect(deleted.body).toEqual({ outcome: "deleted" });
+
+    expect((await call("insights")).body).toEqual({ insights: [] });
+    const responses = [
+      await call("insightEvidence", { insightId: insight?.id }),
+      ...(await Promise.all(purged.map((e) => call("evidenceSource", { evidenceId: e.id })))),
+    ];
+    for (const res of responses) {
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "not-found" });
+    }
+    for (const e of kept) {
+      expect((await call("evidenceSource", { evidenceId: e.id })).status).toBe(200);
+    }
+  });
+});
+
 describe("request validation", () => {
   it.each([
     ["insightEvidence", { insightId: 1, extra: 1 }],

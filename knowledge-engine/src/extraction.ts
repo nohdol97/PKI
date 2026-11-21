@@ -180,9 +180,10 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
           else ids.set(ref, id);
         }
         const touched = new Set<number>();
-        const idOf = (ref: string): number | undefined => {
-          if (ids.has(ref)) return ids.get(ref);
-          if (gone.has(ref)) return undefined;
+        // only called for refs not gone: an existing item found above, or a new one
+        const idOf = (ref: string): number => {
+          const known = ids.get(ref);
+          if (known !== undefined) return known;
           const item = items.get(ref) as Item;
           const id = insertItem(db, {
             type: item.type,
@@ -197,12 +198,12 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
             "item" in entry.target
               ? [entry.target.item]
               : [entry.target.subject, entry.target.object];
-          const resolved = refs.map(idOf);
-          if (resolved.some((id) => id === undefined)) {
+          // drop first: idOf would create a new item for an entry dropped anyway
+          if (refs.some((ref) => gone.has(ref))) {
             drops.other++;
             continue;
           }
-          for (const id of resolved) touched.add(id as number);
+          for (const id of refs.map(idOf)) touched.add(id);
           const target = entry.save((ref) => ids.get(ref) as number);
           addEvidence(db, {
             target,

@@ -120,7 +120,25 @@ describe("cursor after save", () => {
   });
 
   it("keeps the old cursor and saves nothing when a page cannot be stored", async () => {
-    // x is stored, then deleted (V02-R12): a later upsert of x is refused
+    const page = (changes: ChangeSet["changes"], nextCursor: string) =>
+      scripted(() => ({ changes, nextCursor, hasMore: false }));
+    const revised = (revision: number, body: string) => ({
+      kind: "upsert" as const,
+      record: { externalId: "r", title: "t", body, revision },
+    });
+    await syncConnector(db, "s", "scripted", page([revised(2, "b")], "1"));
+    const jobs = db.all("SELECT count(*) AS n FROM jobs");
+    await expect(
+      syncConnector(db, "s", "scripted", page([upsert("a"), revised(1, "older")], "9")),
+    ).rejects.toThrow(/revision-not-newer/);
+    expect(readCursor(db, "s")).toBe("1");
+    expect(counts()).toEqual([1, 1]);
+    expect(db.all("SELECT count(*) AS n FROM jobs")).toEqual(jobs);
+  });
+
+  it("skips an upsert of a deleted source and commits the rest of the page with its cursor (review A-M1)", async () => {
+    // x is stored, then deleted (V02-R12): a later upsert of x stores nothing,
+    // and neither stalls the instance's cursor nor loses the page's other changes
     const page = (changes: ChangeSet["changes"], nextCursor: string) =>
       scripted(() => ({ changes, nextCursor, hasMore: false }));
     await syncConnector(db, "s", "scripted", page([upsert("x")], "1"));
@@ -131,13 +149,28 @@ describe("cursor after save", () => {
       "scripted",
       page([{ kind: "delete", externalId: "x", version: 2, at }], "2"),
     );
-    const jobs = db.all("SELECT count(*) AS n FROM jobs");
-    await expect(
-      syncConnector(db, "s", "scripted", page([upsert("a"), upsert("x", "again")], "9")),
-    ).rejects.toThrow(/tombstoned/);
-    expect(readCursor(db, "s")).toBe("2");
-    expect(counts()).toEqual([1, 0]);
-    expect(db.all("SELECT count(*) AS n FROM jobs")).toEqual(jobs);
+    const refused: [string, string][] = [];
+    const result = await syncConnector(
+      db,
+      "s",
+      "scripted",
+      page([upsert("a"), upsert("x", "again")], "9"),
+      {
+        onRefused: (change, reason) =>
+          refused.push([change.kind === "upsert" ? change.record.externalId : "?", reason]),
+      },
+    );
+    expect(result).toEqual({ received: 2, created: 1 });
+    expect(refused).toEqual([["x", "tombstoned"]]);
+    expect(readCursor(db, "s")).toBe("9");
+    expect(
+      db.all("SELECT s.external_id FROM source_versions v JOIN sources s ON s.id = v.source_id"),
+    ).toEqual([{ external_id: "a" }]);
+    // without onRefused (the Connector manager's sync) the page commits the same way
+    expect(
+      await syncConnector(db, "s", "scripted", page([upsert("x", "once more"), upsert("b")], "10")),
+    ).toEqual({ received: 2, created: 1 });
+    expect(readCursor(db, "s")).toBe("10");
   });
 
   it.each([

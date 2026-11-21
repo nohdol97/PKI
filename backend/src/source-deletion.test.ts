@@ -7,8 +7,8 @@
 // source cannot come back at or below its tombstone.
 import type { ChangeSet, Connector, StructuredRequest } from "@pki/contracts";
 import { deleteSource } from "@pki/knowledge-engine";
-import { type EgressControls } from "@pki/providers";
-import { readTombstone, type SqlDriver } from "@pki/storage";
+import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
+import { readTombstone, writeSetting, type SqlDriver } from "@pki/storage";
 import { FakeProvider, fixtureExtraction } from "@pki/testkit";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -52,6 +52,9 @@ const Y_NAME = `${CANARY.name} 시스템`;
 const DEPENDS = `미리내 프로젝트는 ${Y_NAME}에 의존한다`;
 const COMPLETION = new RegExp(`(\\w+) 기준 ${Y_NAME} 완료는 (\\d{4}-\\d{2}-\\d{2})`);
 const K = { connector_instance_id: "conn-k", external_id: "k", id: "k-0001" };
+// review B1: a new item named only by K, the subject of a relation on X
+const ORPHAN_NAME = "orphcanary 엔진";
+const ORPHAN_DEPENDS = `${ORPHAN_NAME}은 미리내 프로젝트에 의존한다`;
 const kVersion = (revision: number, marker: string, date: string) =>
   jsonl({
     ...K,
@@ -70,9 +73,25 @@ function answer(hooks: { during?: (request: StructuredRequest) => void }) {
   return (request: StructuredRequest): unknown => {
     hooks.during?.(request);
     const body = request.input.untrustedDocuments[0]?.body ?? "";
+    const pick = (name: string) => request.input.candidates.find((c) => c.name === name)?.id;
+    if (body.includes(ORPHAN_DEPENDS)) {
+      // one relation: a new subject Z on candidate X
+      return {
+        items: [
+          { ref: "Z", type: "System", name: ORPHAN_NAME, existingItemId: null },
+          {
+            ref: "X",
+            type: "Project",
+            name: "미리내 프로젝트",
+            existingItemId: pick("미리내 프로젝트") ?? null,
+          },
+        ],
+        facts: [],
+        relations: [{ subject: "Z", type: "DEPENDS_ON", object: "X", quote: ORPHAN_DEPENDS }],
+      };
+    }
     const match = COMPLETION.exec(body);
     if (!match) return fixture(request);
-    const pick = (name: string) => request.input.candidates.find((c) => c.name === name)?.id;
     return {
       items: [
         {
@@ -127,6 +146,7 @@ function pipeline(hooks: { during?: (request: StructuredRequest) => void } = {})
     transport: "http",
     answer: answer(hooks),
   });
+  writeSetting(db, DEFAULT_PROVIDER_SETTING, provider.id); // the user's default (V01-T10)
   const egress = productEgress(db);
   const { broker } = productCalls(db, egress, { providers: [provider] });
   runner = productRunner(db, broker);
@@ -320,6 +340,31 @@ describe("delete.propagate", () => {
     expect(db.all("SELECT status, dropped_other FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
       { status: "done", dropped_other: 1 },
     ]);
+  });
+
+  it("creates no item for a relation dropped because its other end was deleted during the call (B1)", async () => {
+    const hooks: { during?: (request: StructuredRequest) => void } = {};
+    const { runner, importer } = pipeline(hooks);
+    await importer(read("v02-mail.jsonl"));
+    await runner.wake();
+    hooks.during = () =>
+      void deleteSource(db, sourceId(MAIL.external_id as string), {
+        reason: "user-deleted",
+        at: new Date().toISOString(),
+      });
+    await importer(jsonl({ ...K, title: "k", content: `합성. ${ORPHAN_DEPENDS}.` }));
+    await runner.wake();
+
+    // X went with the mail, so the relation was dropped and Z was never made
+    expect(db.all("SELECT name FROM items")).toEqual([]);
+    expect(db.all("SELECT status, dropped_other FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
+      { status: "done", dropped_other: 1 },
+    ]);
+    deleteSource(db, sourceId("k"), { reason: "user-deleted", at: new Date().toISOString() });
+    db.close();
+    const left = storedFiles().filter(([, bytes]) => bytes.includes("orphcanary"));
+    db = openCanonicalDb(dir);
+    expect(left.map(([f]) => f)).toEqual([]);
   });
 
   it("refuses the source again at or below its tombstone, whatever revision comes (re-arrival)", async () => {

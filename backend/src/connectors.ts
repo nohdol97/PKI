@@ -45,7 +45,8 @@ export interface SyncOptions {
   rescan?: boolean;
   /**
    * Takes each refused change once its page is committed, and the page goes on.
-   * Without it a refusal fails the page, of which nothing is stored.
+   * Without it a refusal fails the page, of which nothing is stored, except a
+   * `tombstoned` one: that change is skipped and the page commits either way.
    */
   onRefused?: (change: Change, reason: RefusalReason) => void;
   /** Takes each stored, unchanged or deleting change once its page is committed. */
@@ -146,7 +147,10 @@ export async function syncConnector(
       for (const change of page.changes) {
         const outcome = storeChange(db, instanceId, change);
         if (typeof outcome === "object") {
-          if (!options.onRefused) {
+          // A deleted source's upsert is skipped, never a page failure: the
+          // tombstone refuses it every time, so failing would stall the cursor and
+          // lose the page's other changes for good (V02-R12, review A-M1).
+          if (!options.onRefused && outcome.refused !== "tombstoned") {
             throw new Error(`${instanceId}: ${change.kind} change refused (${outcome.refused})`);
           }
           refused.push([change, outcome.refused]);
