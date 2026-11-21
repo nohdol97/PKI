@@ -1,6 +1,6 @@
 # 스펙: I03 Persistent Queue·Scheduler·재시도와 절전 복구
 
-- 날짜: 2026-11-21 / 상태: 초안
+- 날짜: 2026-11-21 / 상태: 확정
 - 관련: 이슈 #20(I03), 총괄 #1, Phase 2 #4, 선행 #18(I01)·#17(V02), 후속 #21(I04)·#33(H02). [V01 spec](2026-11-21-V01-vertical-skeleton.md), [V02 spec](2026-11-21-V02-vertical-slice.md)("T02가 넘기는 것"), [ARCHITECTURE.md](../ARCHITECTURE.md), [ADR 0005](../adr/0005-llm-providers.md)("사용자 확인 결과"), [ADR 0013](../adr/0013-failure-recovery.md), [ADR 0014](../adr/0014-egress-policy-and-consent.md), [site-setup.md](../site-setup.md). 함께 작성 중인 I01·I04 spec과 맞춘 결정은 본문에 그 spec을 가리켜 적는다.
 
 낯선 말은 [ARCHITECTURE 0절](../ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다. `S19`·`S20`은 site-setup.md 체크리스트에 **새로 넣을** 번호다(S16·S17은 I02, S18은 I01, S21 이후는 I04가 쓴다). `I03-A…`는 이 spec이 새로 세우는 가정이며 ARCHITECTURE 9절의 가정 표에 옮겨 적을 대상이다.
