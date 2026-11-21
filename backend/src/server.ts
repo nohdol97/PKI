@@ -14,7 +14,9 @@ import {
   type RouteResponse,
   type VectorIndex,
 } from "@pki/contracts";
+import { errorClass, log, type EgressControls } from "@pki/providers";
 import {
+  databaseEncryption,
   findSources,
   listProviderCalls,
   listSources,
@@ -48,6 +50,10 @@ export interface ServerOptions {
   db: SqlDriver;
   /** The folder holding `db`, shown read-only in Settings. */
   dataDirectory: string;
+  /** The canonical file behind `db`, read to show its encryption state; absent for in-memory. */
+  databaseFile?: string;
+  /** Consent and egress rules, the same instance the Broker asks (composition.ts). */
+  egress: EgressControls;
 }
 
 export interface RunningServer {
@@ -67,6 +73,8 @@ type Handlers = {
 const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "not-found": 404,
   "connector-unavailable": 409,
+  "destination-unavailable": 409,
+  "consent-stale": 409,
 };
 
 const STATUS_CHECK_FAILED: ComponentStatus = {
@@ -132,7 +140,12 @@ function createHandlers(options: ServerOptions): Handlers {
     settings: async () => ({
       dataDirectory: options.dataDirectory,
       schemaVersion: schemaVersion(options.db),
+      databaseEncryption: databaseEncryption(options.databaseFile),
     }),
+    consents: async () => options.egress.overview(),
+    grantConsent: async ({ providerId, allowedClasses, destination, policyVersion }) =>
+      options.egress.grant(providerId, allowedClasses, { destination, policyVersion }),
+    revokeConsent: async (input) => options.egress.revoke(input.providerId),
   };
 }
 
@@ -217,9 +230,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       return reject(res, match.error === "not-found" ? 404 : 405, match.error);
     }
     // Last resort: any handler failure answers a generic 500. The log names the route
-    // and error class only; messages can carry content (ADR 0008).
+    // and a known error class only; messages can carry content (ADR 0008, V01-R13).
     handle(handlers, match, req, res).catch((error: unknown) => {
-      console.error(`route ${match} failed: ${error instanceof Error ? error.name : typeof error}`);
+      log("route-failed", { route: match, error: errorClass(error) });
       reject(res, 500, "internal-error");
     });
   });

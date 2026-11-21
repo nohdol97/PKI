@@ -119,8 +119,61 @@ const v2: Migration = (db) =>
 // It never makes a source synthetic; only the synthetic manifest does.
 const v3: Migration = (db) => db.exec("ALTER TABLE sources ADD COLUMN access_scope TEXT");
 
+// Schema v4 (V01-T08). History gets the reason code of an attempt that never ran
+// (T07 handoff 3), and an attempt blocked before the egress decision named a
+// destination stores none: destination and policy_version become nullable, but
+// only for "blocked" rows; every other row, the budget-exhausted one included,
+// still carries both. A v3 blocked row had no reason column: it reads "unrecorded".
+// consents becomes one row per Provider (the latest v3 row is kept), so granting
+// again replaces the old consent instead of leaving two to choose between.
+// Neither table is referenced by a foreign key, trigger or view, so each is
+// rebuilt under a temporary name and renamed.
+const v4: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE provider_calls_v4 (
+      id INTEGER PRIMARY KEY,
+      request_id TEXT NOT NULL,
+      attempt INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      destination TEXT,
+      task_kind TEXT NOT NULL,
+      classification TEXT NOT NULL,
+      policy_version TEXT,
+      outcome TEXT NOT NULL,
+      reason TEXT,
+      duration_ms INTEGER,
+      created_at TEXT NOT NULL,
+      UNIQUE (request_id, attempt),
+      CHECK (outcome = 'blocked' OR (destination IS NOT NULL AND policy_version IS NOT NULL)),
+      CHECK ((outcome IN ('blocked', 'budget-exhausted')) = (reason IS NOT NULL))
+    );
+    INSERT INTO provider_calls_v4 (id, request_id, attempt, provider, destination, task_kind,
+        classification, policy_version, outcome, reason, duration_ms, created_at)
+      SELECT id, request_id, attempt, provider, destination, task_kind, classification,
+        policy_version, outcome,
+        CASE WHEN outcome IN ('blocked', 'budget-exhausted') THEN 'unrecorded' END,
+        duration_ms, created_at
+      FROM provider_calls;
+    DROP TABLE provider_calls;
+    ALTER TABLE provider_calls_v4 RENAME TO provider_calls;
+
+    CREATE TABLE consents_v4 (
+      id INTEGER PRIMARY KEY,
+      provider TEXT NOT NULL UNIQUE,
+      destination TEXT NOT NULL,
+      policy_version TEXT NOT NULL,
+      allowed_classes TEXT NOT NULL,
+      granted_at TEXT NOT NULL
+    );
+    INSERT INTO consents_v4 (id, provider, destination, policy_version, allowed_classes, granted_at)
+      SELECT id, provider, destination, policy_version, allowed_classes, granted_at FROM consents
+      WHERE id IN (SELECT max(id) FROM consents GROUP BY provider);
+    DROP TABLE consents;
+    ALTER TABLE consents_v4 RENAME TO consents;
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3];
+export const migrations: readonly Migration[] = [v1, v2, v3, v4];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

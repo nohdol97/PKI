@@ -1,7 +1,7 @@
 // Reads behind the screens (V01-R3). A source is shown by its latest version, so
 // an edited source appears once, under its current title, in lists and searches.
 // Rows are cast to the contract types; the API checks every response against them.
-import type { ProviderCall, SourceSummary } from "@pki/contracts";
+import { providerEgress, type ProviderCall, type SourceSummary } from "@pki/contracts";
 import { matchExpression } from "./keyword-search.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -32,13 +32,56 @@ export function findSources(db: SqlDriver, query: string, limit = 50): SourceSum
   ) as unknown as SourceSummary[];
 }
 
-/** Provider call attempts, newest first. */
+/** Provider call attempts, newest first, each labelled external or local (ADR 0014). */
 export function listProviderCalls(db: SqlDriver, limit = 100): ProviderCall[] {
-  return db.all(
+  const rows = db.all(
     `SELECT request_id AS requestId, attempt, provider, destination, task_kind AS taskKind,
-       classification, policy_version AS policyVersion, outcome, duration_ms AS durationMs,
-       created_at AS createdAt
+       classification, policy_version AS policyVersion, outcome, reason,
+       duration_ms AS durationMs, created_at AS createdAt
      FROM provider_calls ORDER BY id DESC LIMIT ?`,
     [limit],
-  ) as unknown as ProviderCall[];
+  ) as unknown as Omit<ProviderCall, "egress">[];
+  return rows.map(({ requestId, attempt, provider, ...rest }) => ({
+    requestId,
+    attempt,
+    provider,
+    egress: providerEgress(provider),
+    ...rest,
+  }));
+}
+
+export interface ProviderCallRow {
+  requestId: string;
+  attempt: number;
+  provider: string;
+  destination: string | null;
+  taskKind: string;
+  classification: string;
+  policyVersion: string | null;
+  outcome: string;
+  reason: string | null;
+  durationMs: number | null;
+  createdAt: string;
+}
+
+/** Appends one attempt to history; the columns hold no body, prompt, response or secret. */
+export function insertProviderCall(db: SqlDriver, row: ProviderCallRow): void {
+  db.run(
+    `INSERT INTO provider_calls (request_id, attempt, provider, destination, task_kind,
+       classification, policy_version, outcome, reason, duration_ms, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      row.requestId,
+      row.attempt,
+      row.provider,
+      row.destination,
+      row.taskKind,
+      row.classification,
+      row.policyVersion,
+      row.outcome,
+      row.reason,
+      row.durationMs,
+      row.createdAt,
+    ],
+  );
 }

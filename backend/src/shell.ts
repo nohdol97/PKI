@@ -5,14 +5,8 @@
 // `--origin` is the screens' origin (app://pki); `--data-dir` and `--fixtures` as in dev.ts.
 import { dataDirectory } from "@pki/storage";
 import { parseArgs } from "node:util";
-import {
-  connectorInstances,
-  connectorKinds,
-  openCanonicalDb,
-  productAdapters,
-} from "./composition.ts";
-import { createConnectorManager } from "./connectors.ts";
-import { startServer, type RunningServer } from "./server.ts";
+import { bootBackend } from "./boot.ts";
+import type { RunningServer } from "./server.ts";
 
 type ToBackend = { type: "start"; token: string } | { type: "stop" };
 
@@ -65,20 +59,12 @@ const channel = parentChannel();
 let running: { server: RunningServer; close(): void } | undefined;
 
 async function start(token: string) {
-  const dir = values["data-dir"] ?? dataDirectory();
-  const db = openCanonicalDb(dir);
-  const connectors = await createConnectorManager(
-    db,
-    connectorInstances(values.fixtures),
-    connectorKinds,
-  );
-  const server = await startServer({
+  const dataDir = values["data-dir"] ?? dataDirectory();
+  const { server, db } = await bootBackend({
+    dataDir,
+    fixtures: values.fixtures,
     token,
     allowedOrigins: values.origin,
-    ...productAdapters(),
-    connectors,
-    db,
-    dataDirectory: dir,
   });
   running = { server, close: () => db.close() };
   return server.port;

@@ -9,10 +9,7 @@ import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { dataDirectory } from "@pki/storage";
-import { productAdapters } from "./composition.ts";
-import { connectorInstances, connectorKinds, openCanonicalDb } from "./composition.ts";
-import { createConnectorManager } from "./connectors.ts";
-import { startServer } from "./server.ts";
+import { bootBackend } from "./boot.ts";
 
 // Development seeds come from the repository's synthetic fixtures (V01-R7).
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures/test-connector.jsonl");
@@ -27,20 +24,12 @@ const { values } = parseArgs({
 });
 
 const dir = values["data-dir"] ?? `${dataDirectory()}-dev`;
-const db = openCanonicalDb(dir);
-const connectors = await createConnectorManager(
-  db,
-  connectorInstances(values.fixtures),
-  connectorKinds,
-);
 const token = randomBytes(32).toString("base64url");
-const server = await startServer({
+const { server } = await bootBackend({
+  dataDir: dir,
+  fixtures: values.fixtures,
   token,
   allowedOrigins: values.origin,
   port: Number(values.port),
-  ...productAdapters(),
-  connectors,
-  db,
-  dataDirectory: dir,
 });
 process.stdout.write(`${JSON.stringify({ url: server.url, token })}\n`);

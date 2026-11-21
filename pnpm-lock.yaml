@@ -70,6 +70,9 @@ importers:
       '@pki/desktop':
         specifier: workspace:*
         version: link:../desktop
+      '@pki/providers':
+        specifier: workspace:*
+        version: link:../../providers
       '@pki/storage':
         specifier: workspace:*
         version: link:../../storage
@@ -91,6 +94,9 @@ importers:
       '@pki/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
+      '@pki/providers':
+        specifier: workspace:*
+        version: link:../providers
       '@pki/storage':
         specifier: workspace:*
         version: link:../storage

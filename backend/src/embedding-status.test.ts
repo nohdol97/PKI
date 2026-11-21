@@ -6,7 +6,7 @@ import { migrate, registerConnectorInstance, saveSourceRecord } from "@pki/stora
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { FakeEmbedder, send } from "@pki/testkit";
 import { describe, expect, it } from "vitest";
-import { productAdapters } from "./composition.ts";
+import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer } from "./server.ts";
 
@@ -27,6 +27,7 @@ async function withServer<T>(
     connectors,
     db,
     dataDirectory: "/synthetic/data",
+    egress: productEgress(db),
     ...productAdapters(),
     embedder,
   });

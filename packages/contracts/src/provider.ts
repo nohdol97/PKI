@@ -4,8 +4,24 @@
 import { z } from "zod";
 import type { HealthStatus } from "./connector.ts";
 
-/** "synthetic" only by the synthetic manifest; everything else in the public repository is "general". */
-export type DataClassification = "synthetic" | "general";
+/**
+ * Data classes, least strict first (ADR 0014). "synthetic" only by the synthetic
+ * manifest; everything else in the public repository is "general".
+ */
+export const DATA_CLASSES = ["synthetic", "general"] as const;
+export type DataClassification = (typeof DATA_CLASSES)[number];
+
+export const PROVIDER_IDS = ["claude-code", "codex", "openai-compatible", "local-model"] as const;
+export type ProviderId = (typeof PROVIDER_IDS)[number];
+
+/**
+ * How a Provider's calls are labelled on screens and in history (ADR 0014): a CLI
+ * runs locally but sends the request to its vendor, so it is external. Any name
+ * other than the local-model Provider, an unknown one included, counts as external.
+ */
+export function providerEgress(provider: string): "external" | "local" {
+  return provider === "local-model" ? "local" : "external";
+}
 
 export const TASK_KINDS = ["extract", "connection-test"] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
@@ -95,7 +111,7 @@ export interface ProviderCapabilities {
 }
 
 export interface LLMProvider {
-  readonly id: "claude-code" | "codex" | "openai-compatible" | "local-model";
+  readonly id: ProviderId;
   readonly transport: "cli" | "http";
   /** Installed or not, path, version; only fixed arguments that need no gate. */
   detect(): Promise<ProviderInfo>;

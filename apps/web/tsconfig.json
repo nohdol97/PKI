@@ -10,6 +10,7 @@
     { "path": "../desktop" },
     { "path": "../../packages/contracts" },
     { "path": "../../packages/testkit" },
+    { "path": "../../providers" },
     { "path": "../../storage" }
   ]
 }
