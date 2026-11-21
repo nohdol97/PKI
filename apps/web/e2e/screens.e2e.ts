@@ -1,7 +1,11 @@
-// V01-C1 (browser half): the four screens show what the dev backend serves. Each run
-// starts the dev backend on its own synthetic seed and data directory behind the Vite
-// dev server, so a value that does not change with the seed would be fixed in the UI.
-import { expect, test, type Page } from "@playwright/test";
+// V01-C1: the four screens show what the backend serves, in the browser and in the
+// Electron shell — this same file runs under both Playwright projects (`target`).
+// Each run starts the backend on its own synthetic seed and data directory (behind the
+// Vite dev server in the browser, as the shell's child process in Electron), so a value
+// that does not change with the seed would be fixed in the UI. The two differ only in
+// where the screen takes its session from (V01-R3).
+import { test as base, expect, type BrowserType, type Page } from "@playwright/test";
+import { launchShell } from "@pki/desktop";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { sendRaw } from "@pki/testkit";
@@ -13,6 +17,9 @@ import { join } from "node:path";
 import { createServer } from "vite";
 import { DEV_SESSION_PATH } from "../src/api.ts";
 import { webConfig } from "../dev/dev-server.ts";
+
+type Target = "browser" | "electron";
+const test = base.extend<{ target: Target }>({ target: ["browser", { option: true }] });
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -49,7 +56,18 @@ function seedProviderCall(dataDir: string, destination: string) {
   db.close();
 }
 
-async function startStack({ titles, destination }: Seed) {
+interface Stack {
+  page: Page;
+  dataDir: string;
+  stop(): Promise<void>;
+}
+
+/** Seeds a fresh data directory and fixtures file, then opens the screens on `target`. */
+async function startStack(
+  { titles, destination }: Seed,
+  target: Target,
+  chromium: BrowserType,
+): Promise<Stack> {
   const dir = mkdtempSync(join(tmpdir(), "pki-e2e-"));
   const fixtures = join(dir, "seed.jsonl");
   const dataDir = join(dir, "data");
@@ -60,6 +78,27 @@ async function startStack({ titles, destination }: Seed) {
       .map((title, i) => JSON.stringify({ externalId: `e2e-${i}`, title, body: `합성 자료 ${i}` }))
       .join("\n"),
   );
+  const cleanup = () => rmSync(dir, { recursive: true, force: true });
+  if (target === "electron") {
+    const { app, window } = await launchShell({ userData: join(dir, "user"), dataDir, fixtures });
+    return { page: window, dataDir, stop: async () => (await app.close(), cleanup()) };
+  }
+  const vite = await startVite(fixtures, dataDir);
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  await page.goto(vite.url);
+  return {
+    page,
+    dataDir,
+    async stop() {
+      await browser.close();
+      await vite.close();
+      cleanup();
+    },
+  };
+}
+
+async function startVite(fixtures: string, dataDir: string) {
   const port = await freePort();
   const vite = await createServer({
     ...webConfig({ port, fixtures, dataDir }),
@@ -67,15 +106,7 @@ async function startStack({ titles, destination }: Seed) {
     logLevel: "warn",
   });
   await vite.listen();
-  return {
-    url: `http://127.0.0.1:${port}`,
-    port,
-    dataDir,
-    async stop() {
-      await vite.close();
-      rmSync(dir, { recursive: true, force: true });
-    },
-  };
+  return { url: `http://127.0.0.1:${port}`, port, close: () => vite.close() };
 }
 
 const run = randomUUID().slice(0, 8);
@@ -94,13 +125,12 @@ const openScreen = (page: Page, name: string) =>
   page.getByRole("navigation").getByRole("button", { name }).click();
 
 for (const [index, seed] of seeds.entries()) {
-  test(`screens show seed ${index} from the backend`, async ({ page }) => {
+  test(`screens show seed ${index} from the backend`, async ({ target, playwright }) => {
     const { titles } = seed;
     const other = seeds[1 - index] as Seed;
-    const stack = await startStack(seed);
+    const stack = await startStack(seed, target, playwright.chromium);
+    const { page } = stack;
     try {
-      await page.goto(stack.url);
-
       await expect(page.getByRole("row", { name: /백엔드/ })).toContainText("준비됨");
       await expect(page.getByRole("row", { name: /벡터 색인/ })).toContainText("사용 불가");
       // No embedder is bound in the product configuration until V01-T14.
@@ -136,8 +166,12 @@ for (const [index, seed] of seeds.entries()) {
   });
 }
 
-test("the proxy path still requires the session token", async ({ request }) => {
-  const stack = await startStack(seeds[0] as Seed);
+test("the proxy path still requires the session token", async ({ target, request }) => {
+  test.skip(target !== "browser", "the Vite proxy and /__pki/session exist only in the browser");
+  const dir = mkdtempSync(join(tmpdir(), "pki-e2e-"));
+  const fixtures = join(dir, "seed.jsonl");
+  writeFileSync(fixtures, JSON.stringify({ externalId: "e2e-0", title: "합성", body: "합성" }));
+  const stack = await startVite(fixtures, join(dir, "data"));
   try {
     const bare = await request.get(`${stack.url}/api/status`);
     expect(bare.status()).toBe(401);
@@ -163,6 +197,7 @@ test("the proxy path still requires the session token", async ({ request }) => {
     ]);
     expect(rebound).toBe(403);
   } finally {
-    await stack.stop();
+    await stack.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });

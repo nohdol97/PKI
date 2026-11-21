@@ -1,7 +1,13 @@
 // The screens' API client (V01-R3): it calls the shared @pki/contracts routes with the
 // session token and accepts only responses that match the shared schemas.
 import { describe, expect, it } from "vitest";
-import { ApiError, createApiClient, fetchDevSession, DEV_SESSION_PATH } from "./api.ts";
+import {
+  ApiError,
+  createApiClient,
+  fetchDevSession,
+  loadSession,
+  DEV_SESSION_PATH,
+} from "./api.ts";
 
 const TOKEN = "k".repeat(43);
 
@@ -68,5 +74,27 @@ describe("fetchDevSession", () => {
     [403, { baseUrl: "", token: TOKEN }],
   ])("refuses status %i with %j", async (status, body) => {
     await expect(fetchDevSession(fakeFetch(status, body).impl)).rejects.toThrow();
+  });
+});
+
+// Electron (T06) hands the session over the preload; the browser asks the dev server.
+// That source is the only difference between the two (V01-R3).
+describe("loadSession", () => {
+  it("takes the preload's session when the shell provides one, without fetching", async () => {
+    const fake = fakeFetch(200, { baseUrl: "", token: "d".repeat(43) });
+    const bridge = { getSession: async () => ({ baseUrl: "", token: TOKEN }) };
+    expect(await loadSession(bridge, fake.impl)).toEqual({ baseUrl: "", token: TOKEN });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("checks the preload's session against the shared schema", async () => {
+    const bridge = { getSession: async () => ({ baseUrl: "", token: "short" }) };
+    await expect(loadSession(bridge, fakeFetch(200, {}).impl)).rejects.toThrow();
+  });
+
+  it("falls back to the dev server outside the shell", async () => {
+    const fake = fakeFetch(200, { baseUrl: "", token: TOKEN });
+    expect(await loadSession(undefined, fake.impl)).toEqual({ baseUrl: "", token: TOKEN });
+    expect(fake.calls[0]?.url).toBe(DEV_SESSION_PATH);
   });
 });

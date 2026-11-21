@@ -1,6 +1,21 @@
 import { defineConfig } from "@playwright/test";
 
-// Browser E2E (V01-T05) and, from T06, Electron E2E files: `*.e2e.{ts,tsx}`.
-export default defineConfig({
-  testMatch: "**/*.e2e.{ts,tsx}",
+// `*.e2e.{ts,tsx}` files. The browser project runs them all except the shell's own;
+// the electron project (V01-T06) runs the same screens file inside the shell plus the
+// shell's tests, after building the screens the shell serves.
+export default defineConfig<{ target: "browser" | "electron" }>({
+  projects: [
+    {
+      name: "browser",
+      testMatch: "**/*.e2e.{ts,tsx}",
+      testIgnore: "apps/desktop/**",
+    },
+    { name: "build-web", testMatch: "apps/desktop/e2e/build-web.setup.ts" },
+    {
+      name: "electron",
+      testMatch: ["apps/web/e2e/screens.e2e.ts", "apps/desktop/e2e/**/*.e2e.{ts,tsx}"],
+      dependencies: ["build-web"],
+      use: { target: "electron" },
+    },
+  ],
 });

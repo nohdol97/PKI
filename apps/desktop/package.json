@@ -3,7 +3,18 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "main": "src/main.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./e2e/launch.ts"
+  },
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@pki/contracts": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "electron": "45.4.1"
   }
 }

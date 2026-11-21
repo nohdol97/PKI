@@ -135,15 +135,15 @@ flowchart TD
 
 요청에 ID 말고 다른 것이 들어 있거나, 기록이 없거나 이미 쓰였으면 이 그림에 들어오기 전에 거부된다.
 
-### API와 preload (잠정. T02와 T06에서 확정)
+### API와 preload (T02와 T06에서 확정)
 
 | 경계 | 내용 |
 |---|---|
 | HTTP API | 상태 조회(백엔드, Provider, embedding, 벡터 색인), 원본 목록과 키워드 검색, 활동(Provider 호출 이력), 설정 읽기·쓰기(기본 Provider, 동의, 백그라운드 설정), Connector 목록과 동기화 실행, embedding 준비 시작, **Provider 연결 시험** |
 | 설정 API로 바꿀 수 **없는** 것 | 빌드 종류, 검증된 조합 목록, 인자 프로필, 합성 목록, 지시문, 모델의 고정 revision과 해시 |
-| preload가 화면에 주는 함수(이것이 전부다) | 세션 받기(백엔드 주소와 토큰), 비밀 값 저장·존재 확인·삭제(값을 다시 읽어 주는 함수는 없다), 외부 링크 열기(`https`만, 사용자 확인 뒤 OS 브라우저) |
+| preload가 화면에 주는 함수(이것이 전부다) | 세션 받기(백엔드 주소와 토큰), 비밀 값 저장·존재 확인·삭제(값을 다시 읽어 주는 함수는 없다), 외부 링크 열기(`https`만, 사용자 확인 뒤 OS 브라우저). T06이 이름을 정했다: `window.pki`의 `getSession`, `setSecret`, `hasSecret`, `deleteSecret`, `openExternal`(아래 "T06이 넘기는 것") |
 | 로컬 API 접속 조건(T02가 정함) | CORS는 없다. 브라우저 개발 환경은 같은 출처의 Vite 프록시(`changeOrigin: true`)로 부르고 개발 화면의 출처를 백엔드 `--origin`에 넘긴다(T05). 브라우저 개발 환경의 세션 받기는 Vite 개발 서버의 `/__pki/session`이 맡는다(개발 서버에만 있고 토큰은 메모리에만 둔다). 개발 서버는 Vite의 Host 검사를 그대로 켜 두어 다른 이름으로 같은 주소에 오는 요청(DNS rebinding)을 막고, CORS를 꺼 다른 로컬 화면이 세션을 읽지 못하게 한다(T05, 브라우저 E2E가 둘 다 확인). Electron 화면은 `file://`로 띄우지 않는다(`Origin: null`은 거부된다). 허용 목록에 넣은 출처로 내준다(T06). T05는 개발 진입점이 stdout에 내는 토큰 줄을 코드로 읽고 어디에도 기록하지 않는다. 개발 진입점(`backend/src/dev.ts`)과 `packages/testkit`은 R20 산출물에 넣지 않는다 |
-| 쉘 ↔ 백엔드 | 부모와 자식 프로세스 사이의 전용 통로. 쉘이 세션 토큰과 포트를 넘기고, 백엔드는 호출 직전에 비밀 값을 요청한다 |
+| 쉘 ↔ 백엔드 | 부모와 자식 프로세스 사이의 전용 통로. 쉘이 세션 토큰을 넘기고, 백엔드는 스스로 빈 포트에 바인딩한 뒤 그 포트를 같은 통로로 알린다(T06. 쉘이 포트를 골라 넘기면 고른 때와 바인딩하는 때 사이에 다른 프로세스가 그 포트를 가져갈 수 있다). 백엔드는 호출 직전에 비밀 값을 요청한다(T11) |
 
 ### 저장소 배치와 도구 (잠정)
 
@@ -272,6 +272,56 @@ T07이 확장한 module-boundary 규칙은 T07보다 먼저 들어온 것(T03, T
 10. **증명 테스트의 위치**: `egress-policy` → `providers/src/egress-policy.test.ts`, `consent.binding` → `backend/src/consent.binding.test.ts`(제품 구성이 loopback `http`도 거부하는 것은 `backend/src/composition.test.ts`. T09가 빌드 종류 테스트로 바꾼다), `redaction.failure-paths`(T08 몫) → 위 8항, `egress-label.e2e` → `apps/web/e2e/egress-label.e2e.ts`(브라우저. Electron 실행은 T06의 E2E 구성을 따른다).
 11. **Embedding과의 관계**: 외부 embedding의 전송 판정(위 "T13이 넘기는 것" 7항)은 이 `EgressPolicy`를 쓰지 않는다. 그 포트를 넓히는 쪽은 여기의 `destination`·`policyVersion()`·동의 저장을 이어 쓸 수 있지만, `ProviderId`·`TaskKind`에 embedding이 없으므로 규칙의 모양도 함께 넓혀야 한다.
 
+**T06이 넘기는 것**. T06이 정한 것(잠정 결정 포함)과 뒤 작업이 이어받는 결합 지점이다.
+
+1. **화면을 내주는 출처**: Electron 화면은 `app://pki`에서 뜬다. 쉘이 `app` 스킴을 standard·secure·fetch 가능으로 등록하고 `protocol.handle`로 응답한다(`apps/desktop/src/app-protocol.ts`). 파일은 빌드한 화면(`apps/web/dist`)에서 CSP 헤더와 함께 내주고, `/api/`는 쉘의 main 프로세스가 백엔드로 넘긴다. 넘길 때 `Origin`은 언제나 `app://pki`로 고정하고(Chromium은 같은 출처의 사용자 정의 스킴 요청에 `Origin`을 싣지 않는다) 화면 요청의 헤더는 `authorization`, `content-type`, `accept`만 옮긴다. 응답은 `content-type`만 돌려준다. 백엔드는 `--origin app://pki`로 그 출처 하나만 받는다. 화면이 받는 세션의 `baseUrl`은 `""`(같은 출처)이다. **잠정 결정**: 쉘이 두 번째 loopback 서버를 열어 내주는 방법도 있으나, 같은 PC의 다른 프로세스가 닿을 수 있는 포트가 하나 더 생겨 택하지 않았다.
+2. **CSP(확정)**: `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`. 화면에 인라인 스크립트나 인라인 `<style>`이 생기면 막힌다. React의 `style` 속성은 CSSOM으로 들어가므로 막히지 않는다.
+3. **백엔드 프로세스(잠정)**: 쉘은 Electron의 `utilityProcess.fork`로 `backend/src/shell.ts`를 띄운다. Electron 45에 든 Node 24가 TypeScript 원본을 그대로 실행하고, better-sqlite3 13의 N-API 사전 빌드도 재빌드 없이 읽힌다(macOS arm64에서 관찰. Windows는 A07·A18). 통로는 utility process의 `parentPort`이고, 테스트에서는 Node `fork`의 IPC가 같은 메시지를 나른다. 메시지는 쉘 → 백엔드 `{type:"start", token}`·`{type:"stop"}`, 백엔드 → 쉘 `{type:"ready", port}`·`{type:"failed"}` 넷뿐이며, 모양이 틀린 시작 메시지는 되돌려 보내지 않고(토큰이 들었을 수 있다) 실패로 끝난다. 백엔드 환경 변수는 허용 목록(`BACKEND_ENV_KEYS`: PATH, HOME, USERPROFILE, LOCALAPPDATA, APPDATA, XDG_DATA_HOME, TMPDIR, TEMP, TMP, SystemRoot, LANG)만 넘긴다. **T15**는 원본 경로(`../../../backend/src/shell.ts`, `../../web/dist/`)를 산출물 배치로 바꾸고 백엔드를 묶는다. 종료는 `stop` 메시지 뒤 5초 안에 끝나지 않으면 kill이다. 백엔드가 스스로 죽으면 다시 띄우지 않고(**T16**), 쉘은 그 뒤의 `/api/` 요청을 백엔드 포트로 넘기지 않고 502로 끝낸다. 비워진 loopback 포트는 같은 PC의 어떤 프로세스든(다른 OS 사용자 포함) 다시 잡을 수 있어, 넘기면 토큰과 요청 본문이 그쪽으로 간다. T16이 재시작을 넣으면 새 주소로만 다시 넘긴다. 이미 죽은 백엔드에는 종료 시 `stop`을 보내지 않는다. `lifecycle.e2e`는 두 경우를 따로 본다: 백엔드가 살아 있을 때 종료하면 앱이 끝나고 백엔드 프로세스가 없다(C3), 백엔드가 죽은 뒤에도 종료가 끝난다(멈추지 않음). Electron은 앱이 끝날 때 utility process를 스스로 끝내므로 "종료 뒤 백엔드 없음"은 이 정상 종료 절차가 없어도, 백엔드가 `stop`과 SIGTERM을 무시해도 통과한다. 그 E2E가 붙잡는 것은 종료 절차가 멈추지 않는 것이고, 정상 종료 절차 자체는 `shell.channel` 테스트가 본다. 종료 처리기는 `stop()`이 곧바로 끝나는 경우(이미 끝난 백엔드)를 위해 `will-quit` 안이 아닌 새 작업에서 다시 종료를 부른다. `will-quit` 안에서 부른 종료는 버려져 앱이 멈춘다.
+
+   쉘과 백엔드, 화면 사이에 오가는 것(3·1항):
+
+   ```mermaid
+   sequenceDiagram
+     participant P as 화면 (app://pki)
+     participant M as 쉘 main
+     participant B as 백엔드 (utility process)
+     M->>B: fork (argv: --origin app://pki, --data-dir, --fixtures / env: 허용 목록만)
+     M->>B: {type: start, token}
+     alt 시작 성공
+       B-->>M: {type: ready, port}
+     else 시작 실패 또는 모양이 틀린 메시지
+       B-->>M: {type: failed} (받은 것을 되돌려 보내지 않음)
+       M->>B: kill
+     else 30초 안에 답이 없음
+       M->>B: kill
+     end
+     P->>M: fetch /api/... (authorization)
+     alt 백엔드가 살아 있음
+       M->>B: 같은 경로 (Origin: app://pki 고정, authorization·content-type·accept만)
+       B-->>M: 응답
+       M-->>P: 상태와 content-type만
+     else 백엔드가 이미 끝남
+       M-->>P: 502 (넘기지 않음)
+     end
+     Note over M,B: 앱 종료
+     alt 백엔드가 살아 있음
+       M->>B: {type: stop}
+       alt 5초 안에 끝남
+         B-->>M: exit
+       else 끝나지 않음
+         M->>B: kill
+       end
+     else 이미 끝남
+       Note over M: 보내지 않고 바로 종료
+     end
+   ```
+
+4. **preload(확정)**: `window.pki`에 `getSession`, `setSecret(name, value)`, `hasSecret(name)`, `deleteSecret(name)`, `openExternal(url)`만 있다. sandbox의 preload는 `electron`만 require할 수 있어 CommonJS 파일(`apps/desktop/src/preload.cjs`)로 두고, 통로 이름은 `bridge.ts`의 사본이며 단위 테스트가 둘을 맞춘다. preload는 인자를 그대로 넘기고, main이 보낸 프레임의 출처(`app://pki`)와 인자 수·모양을 스키마로 검사한다. 비밀 값 이름은 `^[a-z0-9][a-z0-9._-]{0,63}$`, 값은 1~8192자. **T11**: 세 비밀 값 함수는 지금 아무것도 저장하지 않고 `{ok:false, error:"not-implemented"}`를 돌려준다. T11이 OS 자격 증명 저장소를 붙이면서 결과 모양을 정한다.
+5. **외부 링크(확정)**: `https`이고 호스트가 있으며 사용자 정보(`user:pw@`)가 없고 2048자 이하인 주소만 받는다. 받은 문자열은 `new URL(url).href`로 한 번 정규화하고, OS 확인 창("열기"/"취소", 기본 "취소")은 그 href와 punycode 호스트 이름(예: 키릴 문자 `а`가 든 `аpple.com`은 `xn--pple-43d.com`, U+202E 같은 방향 제어 문자는 `%E2%80%AE`)을 보인다. "열기"를 고를 때만 **같은 href**를 `shell.openExternal`에 넘긴다. 화면이 넘긴 원래 문자열은 확인 창에도 OS에도 가지 않는다(보이는 글자와 실제로 열리는 주소가 다를 수 있다). 결과는 `{opened: boolean}`.
+6. **이동 차단(확정)**: 모든 web contents에 `will-navigate`·`will-redirect`·`will-frame-navigate`가 `app://pki` 밖이면 막고, 새 창은 `app://pki`도 포함해 모두 거부하며, webview를 막는다. 권한 요청과 권한 확인은 모두 거부한다.
+7. **단일 실행과 개발·테스트용 스위치(잠정)**: `--pki-user-data`(userData 폴더. 단일 실행 잠금이 여기에 있어 테스트마다 따로 준다), `--pki-data-dir`(정본 DB 폴더), `--pki-fixtures`(테스트 Connector의 합성 자료). **T15**가 세 스위치 모두의 산출물 처리를 맡는다: `--pki-fixtures`는 테스트 Connector와 함께 빼고, `--pki-user-data`·`--pki-data-dir`도 뺄지 정한다. `--pki-user-data`는 단일 실행 잠금의 위치를 옮기므로, 다른 값으로 띄운 두 번째 실행은 기본 데이터 폴더에 두 번째 백엔드를 띄울 수 있다. 두 번째 실행은 아무것도 띄우지 않고 0으로 끝나며 첫 창을 앞으로 가져온다.
+8. **E2E 배치(확정)**: Playwright 프로젝트는 `browser`, `build-web`(화면 빌드), `electron`(`build-web`에 의존) 셋이다. `apps/web/e2e/screens.e2e.ts` 한 파일이 `target` 옵션으로 두 프로젝트에서 돈다. 브라우저 전용인 Vite 프록시 검사는 Electron에서 건너뛴다. T08의 `apps/web/e2e/egress-label.e2e.ts`는 자기 Vite 실행 도우미를 쓰며 **브라우저에서만** 돈다(잠정). 그 화면들은 같은 빌드와 같은 API를 쓰고, Electron에서 달라지는 것(세션 출처, `/api/` 전달의 POST 본문)은 `screens.e2e`의 Electron 실행이 이미 지난다. 그 파일도 Electron에서 돌리려면 `screens.e2e`처럼 `target` 옵션으로 바꾸고 `electron` 프로젝트의 `testMatch`에 더한다. 쉘 테스트(`shell.security`, `preload.surface`, `lifecycle`)는 `apps/desktop/e2e/`에 있고 쉘 실행 도우미는 `@pki/desktop`의 진입점이다(런타임에 쉘을 import하는 곳은 없다). Electron 45에는 창의 설정을 읽는 API(`getLastWebPreferences`)가 없어 E2E는 설정을 효과로 확인한다: OS 수준 sandbox는 `app.getAppMetrics()`의 `sandboxed`(macOS·Windows만), contextIsolation은 `window.pki`의 존재(contextBridge는 격리 없이 동작하지 않는다), nodeIntegration은 `require`·`process`가 없음. 값 자체는 `secureWebPreferences` 단위 테스트가 고정한다. Linux에서는 sandbox를 그 단위 테스트로만 본다. `shell.channel`의 두 절반은 증명하는 곳이 다르다: **명령줄 인자**에 토큰이 없음은 `apps/desktop/src/shell.channel.test.ts`(Node `fork`로 띄운 실제 백엔드 진입점과 OS가 보고하는 argv)가 보이고, `lifecycle.e2e`는 Electron utility process의 **환경 변수**만 본다(토큰과 쉘에만 준 카나리 변수가 없음). Electron은 utility process의 진입 파일과 인자를 자기 통로로 넘겨 OS argv에는 서비스 종류만 보이므로, 그 E2E의 argv 검사는 무엇도 증명하지 않는다.
+
 V02의 작업은 V01-T01·T03·T04·T05·T06·T08·T12·T15에 의존한다. R04(#13)의 패키징 준비는 V01-T15에 의존한다.
 
 ## 완료 기준 (테스트 가능한 형태)
@@ -395,3 +445,7 @@ R07(#37)이 닫히기 전에는 V01을 통과로 표시하지 않는다(이슈 #
 | 2026-11-21 | T13이 확정한 Embedding 규격의 위치와 스케치보다 더 정한 점, 계약 묶음과 가짜 embedder, 상태 API의 `embedding` 모양과 항목별 저하, 제품 구성은 T14 전까지 `not-implemented`, 홈 화면 문구, 외부 embedding의 전송 판정 입구(`embedWithinPolicy`, 기본 전부 거부)를 "T13이 넘기는 것"으로 적음 | 작업 분해 | V01-T13 구현 |
 | 2026-11-21 | V01-T08 구현: 전송 정책의 위치와 규칙 모양, 규칙에서 계산하는 정책 버전, 판정 순서와 사유 코드, 목적지, 동의 저장과 API, 이력의 사유 열과 NULL 규칙(스키마 v4), 외부 전송 표시, 로그 걸러 내기, 암호화 표시, 증명 테스트 위치를 "T08이 넘기는 것"으로 적음. 배포처 전송 규칙을 실행 중 설정이 아닌 구성 지점의 값으로 정하고 site-setup.md에서 옮김 | 작업 분해, [site-setup.md](../site-setup.md) | V01-T08 구현 |
 | 2026-11-21 | T08 검토 반영: 동의 부여 요청이 화면에 보인 목적지·정책 버전을 싣고 다르면 409 `consent-stale`로 거부(5항, `consent.binding` 행), T11 HTTP Provider가 `request.egress.destination`으로만 보내고 다르면 거부할 의무(4항), 배포처 규칙에 목적지 칸이 없어 `openai-compatible` 허용은 사용자가 정한 어느 `https` 호스트에도 미침(1항, site-setup S08), 제품 구성의 loopback `http` 거부 테스트 위치(10항). 규칙 순서만 바꿔도 정책 버전이 바뀐다는 2항은 그대로 두고 테스트를 더함 | 작업 분해(T08이 넘기는 것 1·4·5·10), 기준별 증명 테스트, [site-setup.md](../site-setup.md) | V01-T08 독립 검토 A-F1·A-F2, B1~B3 |
+| 2026-11-21 | T06이 정한 것을 "T06이 넘기는 것"으로 적음: 화면을 `app://pki`에서 내주고 `/api/`를 main이 고정 `Origin`으로 넘김, CSP, utility process로 띄우는 백엔드와 통로 메시지·환경 변수 허용 목록, 백엔드가 포트를 골라 알림, preload 함수 이름과 비밀 값 함수의 미구현 응답(T11), 외부 링크 조건, 이동 차단, 개발·테스트용 스위치, E2E 배치와 설정을 효과로 확인하는 방법. API 표의 preload·쉘 ↔ 백엔드 행을 고치고 절 제목의 "잠정"을 뗌 | API와 preload, 작업 분해 | V01-T06 구현 |
+| 2026-11-21 | T06 독립 검토 반영: 백엔드가 끝난 뒤 `/api/`를 넘기지 않고 502, 외부 링크를 한 번 정규화해 확인 창에 punycode 호스트를 보이고 같은 href를 엶, 세 개발·테스트용 스위치의 산출물 처리를 T15에 맡김, `shell.channel`의 argv 절반과 env 절반을 증명하는 테스트를 바로잡음, 쉘·백엔드·화면 사이 교환의 시퀀스 다이어그램 추가 | T06이 넘기는 것 3·5·7·8 | V01-T06 검토 B-B1, B-B2, B-B7, A-F1~F3 |
+| 2026-11-21 | main(T08) 통합: `egress-label.e2e`는 브라우저에서만 돈다는 것과 Electron으로 넓히는 방법을 적음. 두 백엔드 진입점(`dev.ts`, `shell.ts`)이 같은 시작 함수(`backend/src/boot.ts`)를 씀 | T06이 넘기는 것 8 | T08 머지 뒤 통합 |
+| 2026-11-21 | T06 재검토 반영: `lifecycle.e2e`를 살아 있는 백엔드의 종료(백엔드 프로세스 없음)와 백엔드가 죽은 뒤(전달 없음, 종료가 멈추지 않음) 두 테스트로 나눔, 종료가 멈추던 문제의 방어를 새 작업에서 다시 종료를 부르는 것 하나로 줄임, 다이어그램의 종료 단계를 백엔드 생존 여부로 나눔, 무엇을 E2E가 붙잡고 무엇은 Electron이 보장하는지 적음 | T06이 넘기는 것 3 | V01-T06 재검토 RR-F1~F4 |
