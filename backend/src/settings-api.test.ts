@@ -38,7 +38,7 @@ beforeEach(async () => {
     dataDirectory: dir,
     egress: productEgress(db),
     secrets,
-    ...productAdapters(),
+    ...productAdapters(dir),
   });
 });
 afterEach(async () => {

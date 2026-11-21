@@ -10,8 +10,9 @@
 //   is stored per endpoint host (`openaiKeySecretName`): after the endpoint moves to
 //   another host there is no key for it until the user enters one, so a key entered
 //   for one host is never sent to another. Checks ask for presence only.
-// - Only the destination is re-checked before sending, not the consent: a consent
-//   revoked while the key is read still lets this one attempt go (handed to T09).
+// - Just before sending it asks the egress policy again (the Broker's own instance):
+//   a consent revoked or a policy changed while the key was read stops the attempt
+//   unless the answer still names the decided destination and policy version.
 // - Failures are codes. The server's error text may echo the input or the key, so
 //   no failure, log line or result repeats any of it.
 import {
@@ -35,6 +36,7 @@ import {
   parseEndpoint,
   type EndpointCheck,
 } from "../egress-policy.ts";
+import type { EgressPolicy } from "../broker.ts";
 import { log } from "../log.ts";
 import { openaiKeySecretName } from "../secret-names.ts";
 
@@ -50,12 +52,15 @@ export interface OpenAICompatibleOptions {
   secrets: SecretSource;
   /** `http` to loopback: development and test builds only (the same flag as the egress policy). */
   allowLoopbackHttp: boolean;
+  /** The same policy instance the Broker asks; asked again just before sending. */
+  egress: EgressPolicy;
 }
 
 type Failure =
   | "destination-unavailable"
   | "insecure-endpoint"
   | "destination-mismatch"
+  | "consent-withdrawn"
   | "model-missing"
   | "api-key-missing"
   | "secret-store-unavailable"
@@ -226,6 +231,18 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (key.state === "missing") throw failure("api-key-missing", false);
     if (key.state === "unavailable") throw failure("secret-store-unavailable", false);
     const target = this.#target(request); // the setting may have changed while the key was read
+    const now = this.#options.egress.decide({
+      providerId: this.id,
+      taskKind: request.taskKind,
+      classification: request.dataClassification,
+    });
+    if (
+      !now.allowed ||
+      now.destination !== request.egress.destination ||
+      now.policyVersion !== request.egress.policyVersion
+    ) {
+      throw failure("consent-withdrawn", false);
+    }
 
     const body = {
       model,

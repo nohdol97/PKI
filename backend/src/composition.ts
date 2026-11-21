@@ -4,7 +4,11 @@
 // (dev.ts, shell.ts, site-check.ts) build the backend from these.
 import type { LLMProvider, ProviderId, SecretSource } from "@pki/contracts";
 import { createEgressPolicy, PUBLIC_SITE_RULES, type EgressControls } from "@pki/providers";
-import { LocalModelProvider, OpenAICompatibleProvider } from "@pki/providers/adapters";
+import {
+  createLocalEmbedder,
+  LocalModelProvider,
+  OpenAICompatibleProvider,
+} from "@pki/providers/adapters";
 import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
@@ -13,10 +17,19 @@ import { createFixtureConnector } from "./adapters/fixture-connector.ts";
 import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
 import type { ServerOptions } from "./server.ts";
 
-/** No embedder until V01-T14 binds the Transformers.js one; the status API says "not implemented". */
-export function productAdapters(): Pick<ServerOptions, "vectorIndex" | "embedder"> {
-  return { vectorIndex: new EmptyVectorIndex(), embedder: null };
+/**
+ * The product's adapters inside a data directory. The embedder is the local
+ * Transformers.js one; its models install under `<dataDir>/models` only when the
+ * user prepares one, so binding it creates nothing and downloads nothing.
+ */
+export function productAdapters(dataDir: string): Pick<ServerOptions, "vectorIndex" | "embedder"> {
+  return {
+    vectorIndex: new EmptyVectorIndex(),
+    embedder: createLocalEmbedder(join(dataDir, MODELS_DIR)),
+  };
 }
+
+export const MODELS_DIR = "models";
 
 /**
  * `http` to a loopback endpoint stays refused until the build kind (T09) tells
@@ -40,18 +53,22 @@ export function productEgress(db: SqlDriver): EgressControls {
 
 /**
  * The Providers the product binds so far (V01-R11): the OpenAI-compatible one, whose
- * key `secrets` gives just before each call, and the unimplemented local model. The
+ * key `secrets` gives just before each call and which asks `egress` (the instance
+ * the API and the Broker share) again just before sending, and the unimplemented
+ * local model. The
  * CLI Providers (T10) join here; the Broker that calls them is bound by T09.
  */
 export function productProviders(
   db: SqlDriver,
   secrets: SecretSource,
+  egress: EgressControls,
 ): Partial<Record<ProviderId, LLMProvider>> {
   return {
     "openai-compatible": new OpenAICompatibleProvider({
       db,
       secrets,
       allowLoopbackHttp: ALLOW_LOOPBACK_HTTP,
+      egress,
     }),
     "local-model": new LocalModelProvider(),
   };

@@ -81,7 +81,7 @@ describe("productProviders", () => {
   it("binds the OpenAI-compatible and the unimplemented local-model Providers", async () => {
     const db = openCanonicalDb(join(root, "PKI"));
     try {
-      const providers = productProviders(db, NO_SECRET_STORE);
+      const providers = productProviders(db, NO_SECRET_STORE, productEgress(db));
       expect(Object.keys(providers).sort()).toEqual(["local-model", "openai-compatible"]);
       expect(await providers["local-model"]?.checkHealth()).toEqual({
         state: "unavailable",

@@ -41,6 +41,8 @@ export interface BootedBackend {
 
 export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
   const db = openCanonicalDb(options.dataDir);
+  // one instance for the consent API and the Providers (and the Broker, T09/T10)
+  const egress = productEgress(db);
   const connectors = await createConnectorManager(
     db,
     connectorInstances(options.fixtures),
@@ -50,13 +52,13 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     token: options.token,
     allowedOrigins: options.allowedOrigins,
     port: options.port ?? 0,
-    ...productAdapters(),
+    ...productAdapters(options.dataDir),
     connectors,
     db,
     dataDirectory: options.dataDir,
     databaseFile: join(options.dataDir, CANONICAL_DB_FILE),
-    egress: productEgress(db),
+    egress,
     secrets: options.secrets,
   });
-  return { server, db, providers: productProviders(db, options.secrets) };
+  return { server, db, providers: productProviders(db, options.secrets, egress) };
 }

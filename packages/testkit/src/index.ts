@@ -18,3 +18,4 @@ export {
   type FakeOpenAIServer,
 } from "./fake-openai-server.ts";
 export { newTempFilesContaining, tempEntries } from "./temp-scan.ts";
+export { FakeEmbeddingRuntime, sha256Hex, writeModelPack, type PackFile } from "./model-pack.ts";

@@ -33,7 +33,7 @@ beforeAll(async () => {
     allowedOrigins: [ALLOWED_ORIGIN],
     connectors,
     ...stores,
-    ...productAdapters(),
+    ...productAdapters(stores.dataDirectory),
   });
   valid = {
     host: `127.0.0.1:${server.port}`,
@@ -158,7 +158,13 @@ describe("local API security", () => {
 
   it("refuses to start with a token too short to be a fresh secret", async () => {
     await expect(
-      startServer({ token: "", allowedOrigins: [], connectors, ...stores, ...productAdapters() }),
+      startServer({
+        token: "",
+        allowedOrigins: [],
+        connectors,
+        ...stores,
+        ...productAdapters(stores.dataDirectory),
+      }),
     ).rejects.toThrow(/token/);
     await expect(
       startServer({
@@ -166,7 +172,7 @@ describe("local API security", () => {
         allowedOrigins: [],
         connectors,
         ...stores,
-        ...productAdapters(),
+        ...productAdapters(stores.dataDirectory),
       }),
     ).rejects.toThrow(/token/);
   });

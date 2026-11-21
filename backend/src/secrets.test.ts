@@ -94,7 +94,7 @@ function setup(read: SecretRead) {
     policyVersion: egress.policyVersion(),
   });
   const secrets = storeFor(server.host, read);
-  const provider = new OpenAICompatibleProvider({ db, secrets, allowLoopbackHttp: true });
+  const provider = new OpenAICompatibleProvider({ db, secrets, allowLoopbackHttp: true, egress });
   const ledger = createUserActionLedger();
   const broker = createBroker({
     db,
@@ -130,7 +130,7 @@ async function startApi(egress: ReturnType<typeof createEgressPolicy>, secrets?:
     dataDirectory: dir,
     egress,
     ...(secrets ? { secrets } : {}),
-    ...productAdapters(),
+    ...productAdapters(dir),
   });
   const headers = { host: `127.0.0.1:${api.port}`, authorization: `Bearer ${TOKEN}` };
   return { api, headers };
@@ -244,6 +244,16 @@ describe("the API key is used and left nowhere", () => {
       await api.close();
       await attacker.close();
     }
+  });
+
+  // the gap review B4 named: consent revoked after the Broker decided, while the key is read
+  it("sends nothing when the consent is revoked while the key is being read", async () => {
+    const { egress, secrets, connectionTest } = setup({ state: "present", value: KEY_CANARY });
+    const read = secrets.read;
+    secrets.read = async (name) => (egress.revoke("openai-compatible"), read(name));
+    const result = await connectionTest();
+    expect(result).toMatchObject({ status: "failed", error: "provider-error" });
+    expect(server.requests).toEqual([]);
   });
 
   it("checks presence only: health and the Settings answer never read the value", async () => {

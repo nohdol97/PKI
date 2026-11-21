@@ -11,7 +11,7 @@ import {
   type SecretRead,
   type SecretSource,
 } from "@pki/contracts";
-import { migrate, writeSetting, type SqlDriver } from "@pki/storage";
+import { migrate, readSetting, writeSetting, type SqlDriver } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import {
   completion,
@@ -65,6 +65,24 @@ function dbWith(baseUrl: string | undefined, model: string | undefined): SqlDriv
   return db;
 }
 
+/**
+ * An egress policy double that allows whatever host the endpoint names now, at
+ * policy version "test" (the contract bundle's), until `withdraw()`.
+ */
+function egressOf(db: SqlDriver) {
+  let allowed = true;
+  return {
+    withdraw: () => void (allowed = false),
+    decide: () => {
+      const raw = readSetting(db, OPENAI_BASE_URL_SETTING);
+      if (!allowed || raw === undefined || !URL.canParse(raw)) {
+        return { allowed: false, reason: "no-consent" } as const;
+      }
+      return { allowed: true, destination: new URL(raw).host, policyVersion: "test" } as const;
+    },
+  };
+}
+
 const dbs: SqlDriver[] = [];
 function provider(
   baseUrl: string | undefined,
@@ -72,12 +90,14 @@ function provider(
 ) {
   const db = dbWith(baseUrl, "model" in options ? options.model : MODEL);
   dbs.push(db);
+  const egress = egressOf(db);
   const p = new OpenAICompatibleProvider({
     db,
     secrets: options.secrets ?? secretsOf(),
     allowLoopbackHttp: options.allowLoopbackHttp ?? true,
+    egress,
   });
-  return Object.assign(p, { db });
+  return Object.assign(p, { db, egress });
 }
 
 let server: FakeOpenAIServer;
@@ -176,6 +196,7 @@ describe("OpenAICompatibleProvider", () => {
         const p = new OpenAICompatibleProvider({
           db,
           allowLoopbackHttp: true,
+          egress: egressOf(db),
           secrets: {
             read: async () => {
               writeSetting(db, OPENAI_BASE_URL_SETTING, other.baseUrl);
@@ -193,6 +214,26 @@ describe("OpenAICompatibleProvider", () => {
       } finally {
         await other.close();
       }
+    });
+
+    it("asks the egress policy again just before sending; a consent withdrawn meanwhile stops it", async () => {
+      const secrets = secretsOf();
+      const read = secrets.read.bind(secrets);
+      // the consent is revoked while the key is being fetched from the shell
+      secrets.read = async (name) => (p.egress.withdraw(), read(name));
+      const p = provider(scripted.baseUrl, { secrets });
+      const error = await p.generate(providerRequest("r:1", scripted.host), live()).catch((e) => e);
+      expect(error).toMatchObject({ retryable: false, message: "consent-withdrawn" });
+      expect(scripted.requests).toEqual([]);
+    });
+
+    it("refuses when the policy version changed since the Broker's decision", async () => {
+      const p = provider(scripted.baseUrl);
+      const request = providerRequest("r:1", scripted.host);
+      const stale = { ...request, egress: { ...request.egress, policyVersion: "pv-older" } };
+      const error = await p.generate(stale, live()).catch((e) => e);
+      expect(error).toMatchObject({ retryable: false, message: "consent-withdrawn" });
+      expect(scripted.requests).toEqual([]);
     });
 
     it.each([

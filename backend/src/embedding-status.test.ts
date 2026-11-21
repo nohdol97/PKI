@@ -5,7 +5,10 @@ import { routes, type EmbeddingProvider } from "@pki/contracts";
 import { migrate, registerConnectorInstance, saveSourceRecord } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { FakeEmbedder, send } from "@pki/testkit";
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer } from "./server.ts";
@@ -28,7 +31,7 @@ async function withServer<T>(
     db,
     dataDirectory: "/synthetic/data",
     egress: productEgress(db),
-    ...productAdapters(),
+    ...productAdapters("/synthetic/data"),
     embedder,
   });
   const headers = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
@@ -49,11 +52,31 @@ const embeddingStatus = (embedder: EmbeddingProvider | null) =>
   });
 
 describe("status API: embedding", () => {
-  it("is not implemented in the product configuration until V01-T14 binds one", async () => {
-    expect(productAdapters().embedder).toBeNull();
-    expect((await embeddingStatus(productAdapters().embedder)).embedding).toEqual({
-      state: "not-implemented",
-    });
+  it("reports the API's own word when no embedder is bound", async () => {
+    expect((await embeddingStatus(null)).embedding).toEqual({ state: "not-implemented" });
+  });
+
+  it("embedding.missing: the product's embedder starts without a model and downloads nothing", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "pki-embed-product-"));
+    const fetch = vi.fn(() => Promise.reject(new Error("no network in this test")));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const { embedder } = productAdapters(dataDir);
+      expect(embedder?.describe().egress).toBe("local");
+      await withServer(embedder, async (call) => {
+        for (let i = 0; i < 3; i++) {
+          const status = routes.status.response.parse((await call(routes.status.path)).body);
+          expect(status.embedding).toEqual({ state: "model-missing", egress: "local" });
+        }
+        const found = await call(routes.searchSources.path, "POST", { query: "등대" });
+        expect(routes.searchSources.response.parse(found.body).sources).toHaveLength(1);
+      });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(readdirSync(dataDir)).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it("embedding.missing: reports the missing model, prepares nothing, and keyword search works", async () => {
@@ -73,6 +96,27 @@ describe("status API: embedding", () => {
     expect(fake.calls.status).toBe(3);
     expect(fake.calls.prepare).toEqual([]);
     expect(fake.calls.embed).toEqual([]);
+  });
+
+  it("installs the product's models under <dataDir>/models", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "pki-embed-location-"));
+    try {
+      // A leftover staging folder there is swept by the next preparation; one
+      // anywhere else is not, so this pins where the product's models live.
+      mkdirSync(join(dataDir, "models", ".staging-stale"), { recursive: true });
+      const { embedder } = productAdapters(dataDir);
+      await expect(
+        embedder?.prepare(
+          { kind: "local-pack", path: join(dataDir, "no-pack") },
+          AbortSignal.timeout(5000),
+        ),
+      ).rejects.toThrow();
+      expect(await embedder?.status()).toEqual({ unavailable: "model file missing" });
+      expect(readdirSync(join(dataDir, "models"))).toEqual([]);
+      expect(readdirSync(dataDir)).toEqual(["models"]);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it("reports a prepared model ready, and an external one as such", async () => {

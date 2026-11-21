@@ -9,3 +9,8 @@ allowBuilds:
   better-sqlite3: false
   # Electron 45 fetches its binary on first use (index.js), not in an install script.
   electron: false
+  # The CPU binaries ship inside the npm package; the postinstall only fetches CUDA
+  # execution-provider binaries (Linux), which the local embedder does not use.
+  onnxruntime-node: false
+  # Its postinstall only warns about the version scheme of packages that depend on it.
+  protobufjs: false

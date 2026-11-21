@@ -11,6 +11,7 @@
     "build:synthetic-manifest": "node src/build-synthetic-manifest.ts"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.2",
     "@pki/contracts": "workspace:*",
     "@pki/storage": "workspace:*",
     "zod": "^4.6.7"

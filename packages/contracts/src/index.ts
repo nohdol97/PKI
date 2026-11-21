@@ -62,6 +62,8 @@ export const ErrorResponseSchema = z.object({
     "destination-unavailable",
     "consent-stale",
     "invalid-endpoint",
+    "embedding-not-implemented",
+    "embedding-busy",
     "internal-error",
   ]),
 });
@@ -206,6 +208,20 @@ export const ConsentGrantRequestSchema = z.strictObject({
 export const ConsentRevokeRequestSchema = z.strictObject({ providerId: ProviderIdSchema });
 
 /**
+ * Starts preparing the embedding model (V01-R14, ADR 0006): from a local pack
+ * folder, or by the approved download of the pinned files. Only this request
+ * starts one. The revision and file hashes are build resources, not request fields.
+ */
+export const EmbeddingPrepareRequestSchema = z.strictObject({
+  source: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("download") }),
+    z.strictObject({ kind: z.literal("local-pack"), path: z.string().min(1).max(4096) }),
+  ]),
+});
+/** Answered at once with the state the start left; a download takes minutes. */
+export const EmbeddingPrepareResponseSchema = z.object({ embedding: EmbeddingStatusSchema });
+
+/**
  * Where the screens get the backend address and token: the dev server in the browser,
  * the preload in Electron (V01-R3). An empty `baseUrl` means the page's own origin.
  */
@@ -248,6 +264,12 @@ export const routes = {
     path: "/api/consents/revoke",
     request: ConsentRevokeRequestSchema,
     response: ConsentListResponseSchema,
+  },
+  prepareEmbedding: {
+    method: "POST",
+    path: "/api/embedding/prepare",
+    request: EmbeddingPrepareRequestSchema,
+    response: EmbeddingPrepareResponseSchema,
   },
 } as const;
 export type RouteName = keyof typeof routes;

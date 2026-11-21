@@ -133,8 +133,10 @@ for (const [index, seed] of seeds.entries()) {
     try {
       await expect(page.getByRole("row", { name: /백엔드/ })).toContainText("준비됨");
       await expect(page.getByRole("row", { name: /벡터 색인/ })).toContainText("사용 불가");
-      // No embedder is bound in the product configuration until V01-T14.
-      await expect(page.getByRole("row", { name: /Embedding/ })).toContainText("미구현");
+      // The product binds the local embedder (V01-T14); no model is prepared by itself.
+      await expect(page.getByRole("row", { name: /Embedding/ })).toContainText(
+        "모델 없음, 키워드 검색으로 동작 (로컬 계산)",
+      );
 
       await openScreen(page, "원본");
       for (const kind of ["site-mail", "site-messenger", "site-wiki"]) {
