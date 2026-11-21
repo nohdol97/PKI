@@ -192,14 +192,15 @@ const revisionTriggers = ["items", "facts", "relations"]
   )
   .join("");
 
-// Schema v5 (V02-T02; the V02 spec calls it "knowledge schema v2", the second
-// schema generation, which lands as migration 5 after V01's four).
+// Schema v5 (V02-T02): the V02 spec's knowledge schema (R3), migration 5 after V01's four.
 // - source_versions gains its per-source version number (1, 2, ...), which
 //   fences, tombstones and engine notifications compare. A new version must be
-//   greater than the source's latest, so the latest id is also the latest version.
-//   It is rebuilt (a NOT NULL column cannot be added without a default); rows keep
-//   their ids, so keyword_index rows still match, and its triggers are recreated
-//   after the copy so it is not indexed twice.
+//   greater than the source's latest, so the latest id is also the latest version,
+//   and greater than its tombstone's, so a purged source never reuses a number
+//   (V02-R12). It is rebuilt (a NOT NULL column cannot be added without a
+//   default) with AUTOINCREMENT, so a deleted version's id is never handed out
+//   again; rows keep their ids, so keyword_index rows still match, and its
+//   triggers are recreated after the copy so it is not indexed twice.
 // - jobs carries the source and the version it was registered for (the fence)
 //   instead of a version row id: deleting a source's versions (V02-R12) must leave
 //   the job for the fence to close as superseded. lease_until is the lease (R4).
@@ -223,7 +224,7 @@ const v5: Migration = (db) =>
     DROP TABLE source_versions;
 
     CREATE TABLE source_versions (
-      id INTEGER PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       source_id INTEGER NOT NULL REFERENCES sources (id),
       version INTEGER NOT NULL CHECK (version >= 1),
       content_hash TEXT NOT NULL,
@@ -248,6 +249,9 @@ const v5: Migration = (db) =>
     WHEN new.version <= (SELECT coalesce(max(version), 0) FROM source_versions
                           WHERE source_id = new.source_id)
     BEGIN SELECT RAISE(ABORT, 'a new source version must be greater than the latest'); END;
+    CREATE TRIGGER source_versions_after_tombstone BEFORE INSERT ON source_versions
+    WHEN new.version <= (SELECT version FROM tombstones WHERE source_id = new.source_id)
+    BEGIN SELECT RAISE(ABORT, 'a source version must be greater than its tombstone'); END;
     CREATE TRIGGER source_versions_index AFTER INSERT ON source_versions BEGIN
       INSERT INTO keyword_index (rowid, title, body) VALUES (new.id, new.title, new.body);
     END;

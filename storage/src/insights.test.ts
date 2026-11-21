@@ -95,11 +95,21 @@ describe("saveInsight", () => {
     ).toThrow(/CHECK/);
   });
 
-  it("is deleted with its X or Y item", () => {
+  it.each(["xItemId", "yItemId"] as const)("is deleted with its %s item", (side) => {
     saveInsight(db, key, { state: "active", summary: "s", evidenceIds: evidence });
-    db.run("DELETE FROM items WHERE id = ?", [key.yItemId]);
+    // X holds the fact; its evidence and the fact go first, as V02-R12 deletes them
+    db.run("DELETE FROM facts");
+    db.run("DELETE FROM items WHERE id = ?", [key[side]]);
     expect(readInsight(db, key)).toBeUndefined();
     expect(db.all("SELECT count(*) AS n FROM insight_evidence")).toEqual([{ n: 0 }]);
+  });
+
+  it("loses its evidence and links when the source versions are deleted", () => {
+    saveInsight(db, key, { state: "active", summary: "s", evidenceIds: evidence });
+    db.run("DELETE FROM source_versions WHERE source_id = 1");
+    expect(db.all("SELECT count(*) AS n FROM evidence")).toEqual([{ n: 0 }]);
+    expect(readInsight(db, key)?.evidenceIds).toEqual([]);
+    expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
   });
 
   it("loses an evidence link when that evidence is deleted", () => {

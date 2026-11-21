@@ -155,7 +155,7 @@ flowchart LR
 | ID | 산출물 | 요구사항 | 기준 | depends_on | 검증 증거 |
 |---|---|---|---|---|---|
 | V02-T01 | 합성 fixture 3종, 날짜 변형, 악성 변형, 기대 결과, 합성 목록 등록, 문서 대응 테스트 확장 | R1, R19(테스트) | C1(입력), H1 | **R05(#14)**, V01-T01, V01-T04 | fixture가 가져오기 스키마를 통과하고 합성 목록에 들어 있다는 테스트 |
-| V02-T02 | 스키마 v5 마이그레이션, 항목·사실·관계·근거·Insight·tombstone 저장 모듈, 변경 순번, knowledge revision, 작업 테이블의 열 추가 | R3 | C1(저장), C3(영속) | V01-T03 | v4에서 v5로 올리는 마이그레이션 테스트, 저장 모듈 단위 테스트, 근거 위치가 코드 포인트 단위임을 보이는 테스트(한글과 이모지가 든 원문) |
+| V02-T02 | 스키마 v5 마이그레이션, 항목·사실·관계·근거·Insight·tombstone 저장 모듈, 변경 순번·knowledge revision(트리거로 올림), 원본 version 테이블 재구성(원본별 version 번호), 작업 테이블 재구성(원본·fence version·임대. 아래 "T02가 넘기는 것") | R3 | C1(저장), C3(영속) | V01-T03 | v4에서 v5로 올리는 마이그레이션 테스트, 저장 모듈 단위 테스트, 근거 위치가 코드 포인트 단위임을 보이는 테스트(한글과 이모지가 든 원문) |
 | V02-T03 | 작업 실행기(임대, 한 번에 하나, 재시작 재개), fence 검사 | R4, R5 | C3 | V02-T02 | 낡은 version의 결과가 버려지는 통합 테스트, 재시작 재개 통합 테스트 |
 | V02-T04 | JSONL Connector, `operation` 옮기기, 줄 단위 오류 보고, 새 version 받기, Sources 화면의 가져오기, 원본 저장·변경 순번·작업 등록의 한 트랜잭션 | R2 | C1(입력), C3(재입력) | V02-T01, V02-T02, V02-T03, V01-T04, V01-T05 | Connector 계약 테스트, 재입력 시 수가 늘지 않는 통합 테스트 |
 | V02-T05 | 추출의 지시문과 스키마(코드 상수), ID만 넘기는 추출 요청, 인용문으로 위치 계산, 연결 후보 조회, 같은 행 판정, 크기 초과 보류, fixture별 Provider double | R6, R7, R8 | C1(추출·연결) | V02-T04, V01-T08 | 인용문 대조 단위 테스트, 호출 횟수 테스트, 세 출처의 A와 B가 같은 항목으로 이어지는 통합 테스트 |
@@ -172,6 +172,17 @@ flowchart LR
 1. **가져오기 한 줄의 스키마**: `packages/contracts/src/import-record.ts`의 `ImportRecordSchema`. R05 골든 데이터의 필드 규칙(`eval/scorer/validate.py`의 `check_record`)을 옮긴 것이며, 골든 원본 전부가 이 스키마를 통과한다는 테스트가 있다. `content_hash`가 `content`의 sha256인지는 스키마가 아니라 fixture 테스트가 확인한다(contracts는 화면에서도 쓰이므로 `node:crypto`를 쓰지 않는다). T04의 JSONL Connector는 줄마다 이 스키마로 검사한다. `content_hash`가 `content`와 맞지 않는 줄을 그 줄의 오류로 거부할지는 T04가 정하고 그 결정을 테스트로 남긴다(백엔드에서는 `node:crypto`를 쓸 수 있다).
 2. **악성 표시**: fixture 줄의 `"malicious": true`는 스키마가 받아들이되(`true`만), Connector가 내는 `SourceRecord`에는 싣지 않는다(V01의 `SourceRecordSchema`가 거부한다). 이 표시는 합성 목록을 만들 때만 읽힌다. T04는 `SourceRecord`를 넓히더라도(version 등) Connector가 내는 레코드에 `malicious`가 없다는 것을 Connector 테스트로 확인한다.
 3. **fixture와 기대 결과**: `fixtures/v02-*.jsonl`과 `fixtures/v02-expected.json`(묶음 `plain`, `date-variant`, `malicious`). 날짜 변형과 악성 변형은 기본 원본과 다른 `id`·`external_id`를 가진 별도 원본이며, 날짜 변형은 메신저 원본을 **대신해** 넣는다. 수정 version이 필요한 테스트(`update.recompute` 등)는 그 테스트가 version을 만든다. 합성 목록 생성기는 `schema_version`이 있는 줄에서 `body` 대신 `content`를 읽는다. 기대 결과의 규칙 이름은 골든 라벨의 `insight_type`과 같은 `dependency_delay`다. 근거가 붙은 원문 일부에는 인용문 앞에 이모지(BMP 밖 문자)가 있어, 위치를 UTF-16 단위로 세면 틀린다.
+
+**T02가 넘기는 것**. T02가 정한 것(잠정 표시가 없으면 확정)과 뒤 작업이 이어받는 결합 지점이다. 바꿀 때는 이 절과 해당 테스트를 함께 고친다.
+
+1. **원본 version 번호.** `source_versions`에 원본마다 1부터 세는 `version` 열이 있다. 새 version은 그 원본의 최신 version보다 커야 하고, 그 원본의 tombstone이 있으면 tombstone의 version보다도 커야 한다(트리거가 거부한다). 그래서 지운 원본이 같은 번호로 다시 들어오지 못하고, 행 ID도 AUTOINCREMENT라 다시 쓰이지 않는다. 최신 행 ID와 최신 version은 언제나 같은 행이다.
+2. **T04: 레코드의 version을 그대로 저장한다.** 지금의 `saveSourceRecord`는 "최신 + 1"로 번호를 매긴다(V01 Connector가 version을 주지 않으므로 잠정). T04는 JSONL 레코드에 적힌 version을 저장하도록 바꿔야 한다(R2). 지운 원본을 "최신 + 1"로 다시 넣으면 1번이 되어 위 트리거에 거부된다.
+3. **작업 테이블.** `jobs`는 version 행의 ID 대신 원본(`source_id`)과 등록할 때의 version(`fence_version`), 임대 기한(`lease_until`)을 갖는다. 원본의 모든 version을 지워도(R12) 작업이 남아 fence가 `superseded`로 닫을 수 있게 하려는 것이다. (종류, 원본, fence version)마다 한 번만 등록된다(R4). 등록이 충돌하면 기존 작업의 상태를 확인해야 하고, 충돌을 성공으로 여기지 않는다. 작업을 등록하고 집는 API는 T03·T04가 만든다.
+4. **변경 순번과 knowledge revision은 트리거가 올린다.** 원본 version 저장과 tombstone 쓰기(더 높은 version으로 옮길 때 포함)마다 변경 순번이 같은 트랜잭션에서 정확히 1 오른다. 코드는 읽기만 한다(`readChangeSeq`). knowledge revision은 항목·사실·관계 행이 바뀔 때마다 행 하나에 1씩 오른다(잠정. 값이 같은 UPDATE도 센다). v4에서 올린 데이터베이스는 저장된 version 수에서 시작한다.
+5. **T08: 지우기 전에 영향받는 것을 모은다.** 근거는 version이 지워지면 함께 지워지고(cascade) Insight의 근거 연결도 함께 사라진다. 그래서 version을 지운 뒤에는 어떤 Insight·사실·관계가 영향을 받았는지 알 수 없다. 특히 다른 원본의 근거가 남아 있어 계속 보이는 Insight의 설명 글이 지운 원본에서 나왔을 수 있다. T08은 같은 트랜잭션에서 **지우기 전에** 그 원본의 근거에 연결된 Insight와 그 근거가 받치는 사실·관계를 먼저 모으고, 그 집합만 다시 계산하거나 지운다. 근거 없는 행을 전체에서 쓸어 지우면 처음부터 근거가 없던 행까지 지워진다.
+6. **T08: 키워드 색인의 흔적을 지운다.** FTS5의 `'delete'`는 지운 본문의 낱말을 색인의 부속 테이블에 남긴다. `PRAGMA secure_delete`만으로는 사라지지 않는다(독립 검토 B에서 확인). T08은 `keyword_index`에 FTS5 `secure-delete` 설정을 켜거나 `optimize`를 돌리고, 데이터베이스 파일과 부속 파일에서 카나리(본문, 제목, 인용문, Insight 설명 글)가 없어졌는지 테스트한다(`delete.purge`).
+7. **tombstone은 원본 행을 가리킨다.** 지워도 `sources` 행(식별자만)은 남고, tombstone의 키가 그 행이다. `writeTombstone`은 더 높은 version으로만 옮긴다. 그 원본의 실제 최신 version을 넘기는 것은 T08의 몫이다.
+8. **근거의 위치는 저장할 때 검사한다.** `addEvidence`는 저장된 본문에서 코드 포인트로 센 `[시작, 끝)`이 인용문과 정확히 같을 때만 기록한다(SQLite의 `substr`·`length`가 TEXT를 글자, 곧 코드 포인트로 센다). 본문에 U+0000이 있으면 그 뒤의 위치는 기록할 수 없다(`length`가 거기서 멈춘다). 인용문으로 위치를 계산하는 것은 T05다.
 
 ## 완료 기준 (테스트 가능한 형태)
 
@@ -251,6 +262,10 @@ test double의 결과를 실제 Provider의 결과로 적지 않는다. R07(#37)
 
 5. **사외에서의 "실제 추출" 증거.** 사외에서 쓸 수 있는 API 키가 있다면 합성 fixture로 API 키 Provider의 실제 추출을 미리 한 번 돌려 C1과 A21의 일부 증거를 남길 수 있다. 검증되지 않은 CLI로는 개발 빌드에서도 이 흐름을 돌릴 수 없다(추출은 백그라운드 호출이다). 하더라도 Windows 설치본 실행(C4)은 남는다.
 
+**뒤 작업에서 정할 것**
+
+6. **항목의 별칭을 어디에 둘지(T05).** R7은 별칭이 "그 항목에 이미 기록된 이름에서만" 온다고 하지만, T02의 스키마는 항목마다 이름 하나만 둔다. 출처마다 다르게 부른 이름을 별칭으로 쓰려면 T05가 이름 목록을 저장할 곳(새 마이그레이션)을 정해야 한다. 정하기 전까지 연결 후보는 항목의 이름으로만 찾는다.
+
 ## 변경 이력
 
 | 날짜 | 변경 내용 | 대상 | 사유 |
@@ -264,3 +279,4 @@ test double의 결과를 실제 Provider의 결과로 적지 않는다. R07(#37)
 | 2026-11-21 | "T01이 넘기는 것" 추가: 가져오기 한 줄의 스키마 위치(`ImportRecordSchema`)와 골든 데이터와의 대조, 악성 표시를 스키마가 받되 Connector가 싣지 않음, 날짜·악성 변형을 별도 원본으로 두고 날짜 변형은 메신저 원본을 대신함, 기대 결과 파일의 위치와 묶음 | 작업 분해 | V02-T01 구현: T04의 JSONL Connector보다 먼저 fixture가 통과할 스키마가 필요했음 |
 | 2026-11-21 | "T01이 넘기는 것" 보강: `content_hash` 불일치를 줄 오류로 볼지 T04가 정함, Connector가 내는 레코드에 `malicious`가 없음을 T04가 테스트, 규칙 이름을 골든 어휘 `dependency_delay`로, 인용문 앞의 BMP 밖 문자 | 작업 분해 | V02-T01 독립 검토 F1, F2, F5, F6 |
 | 2026-11-21 | 지식 스키마의 번호를 "v2"에서 마이그레이션 v5로 고침(R3, T02 행과 그림) | R3, 작업 분해(T02) | V02-T02 구현: V01-T04·T07·T08이 이미 스키마 v2~v4를 썼다 |
+| 2026-11-21 | T02 행을 실제 산출물로 고침: 원본 version 테이블을 다시 만들어 원본별 version 번호를 둠(R5의 fence와 R12의 tombstone이 비교하는 번호), 작업 테이블을 다시 만들어 version 행 ID를 빼고 원본·fence version·임대를 둠(R12로 version이 지워져도 작업이 남아야 함), 변경 순번과 knowledge revision을 트리거로 올림(ADR 0013 결정 6의 "같은 트랜잭션에서 정확히 1"). "T02가 넘기는 것" 추가: T04는 레코드의 version을 저장, tombstone 이하 version과 행 ID의 재사용 금지, T08은 지우기 전에 영향받는 Insight·사실·관계를 모으고 FTS 흔적을 지움. 미해결 질문에 별칭 저장 위치(6) 추가 | 작업 분해(T02), 미해결 질문 | V02-T02 독립 검토 A F2·F5, B S1~S3·W3 |

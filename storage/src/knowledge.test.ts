@@ -137,6 +137,27 @@ describe("facts and relations", () => {
     ).toThrow(/FOREIGN KEY/);
   });
 
+  it("refuses to delete an item while a fact or relation still names it", () => {
+    const a = item("A");
+    const b = item("B");
+    const c = item("C");
+    const fact = saveFact(db, { itemId: a, kind: "k", value: "v", ...attrs }).id;
+    const relation = saveRelation(db, {
+      subjectId: b,
+      type: "depends-on",
+      objectId: c,
+      ...attrs,
+    }).id;
+    for (const id of [a, b, c]) {
+      expect(() => db.run("DELETE FROM items WHERE id = ?", [id])).toThrow(/FOREIGN KEY/);
+    }
+    expect(readFact(db, fact)).toBeDefined();
+    db.run("DELETE FROM facts WHERE id = ?", [fact]);
+    db.run("DELETE FROM relations WHERE id = ?", [relation]);
+    for (const id of [a, b, c]) db.run("DELETE FROM items WHERE id = ?", [id]);
+    expect(db.all("SELECT count(*) AS n FROM items")).toEqual([{ n: 0 }]);
+  });
+
   it("changes the status of an item, fact or relation", () => {
     const a = item("A");
     const b = item("B");
@@ -216,6 +237,19 @@ describe("evidence", () => {
     const span = { target: { factId }, sourceVersionId: sv, start: 0, end: 1, quote: "a" };
     expect(addEvidence(db, span)).toBe(addEvidence(db, span));
     expect(listEvidence(db, { factId })).toHaveLength(1);
+  });
+
+  it("records the same span of the same version for a relation once", () => {
+    const sv = version("e", "abc");
+    const relationId = saveRelation(db, {
+      subjectId: item("A"),
+      type: "depends-on",
+      objectId: item("B"),
+      ...attrs,
+    }).id;
+    const span = { target: { relationId }, sourceVersionId: sv, start: 0, end: 1, quote: "a" };
+    expect(addEvidence(db, span)).toBe(addEvidence(db, span));
+    expect(listEvidence(db, { relationId })).toHaveLength(1);
   });
 
   it("supports a relation and belongs to exactly one fact or relation", () => {

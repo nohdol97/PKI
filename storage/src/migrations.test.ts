@@ -412,6 +412,36 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
     expect(notNull("source_versions", "version")).toBe(true);
   });
 
+  it("never reuses a version number at or below the source's tombstone (V02-R12)", () => {
+    seedV4();
+    migrate(db);
+    db.run("DELETE FROM jobs");
+    db.run("DELETE FROM source_versions WHERE source_id = 1");
+    db.run("INSERT INTO tombstones (source_id, version, at, reason) VALUES (1, 2, 't', 'deleted')");
+    const add = (version: number) =>
+      db.run(
+        "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, ?, 'h', 't', 'b')",
+        [version],
+      );
+    expect(() => add(1)).toThrow(/tombstone/);
+    expect(() => add(2)).toThrow(/tombstone/);
+    add(3);
+    expect(db.all("SELECT version FROM source_versions WHERE source_id = 1")).toEqual([
+      { version: 3 },
+    ]);
+  });
+
+  it("never reuses a source version id, even after the highest is deleted", () => {
+    seedV4();
+    migrate(db);
+    db.run("DELETE FROM jobs");
+    db.run("DELETE FROM source_versions WHERE id = 3");
+    const { lastInsertRowid } = db.run(
+      "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (2, 2, 'h', 't', 'b')",
+    );
+    expect(lastInsertRowid).toBe(4);
+  });
+
   it("adds the knowledge, Insight and tombstone tables", () => {
     migrate(db);
     expect(tables().filter((t) => !t.startsWith("keyword_index_"))).toEqual([
