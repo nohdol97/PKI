@@ -4,3 +4,4 @@ export { knowledgeEngineContract } from "./engine.contract.ts";
 export { MemoryKnowledgeEngine } from "./memory-knowledge-engine.ts";
 export { MemoryVectorIndex } from "./memory-vector-index.ts";
 export { vectorIndexContract } from "./vector-index.contract.ts";
+export { connectorContract } from "./connector.contract.ts";

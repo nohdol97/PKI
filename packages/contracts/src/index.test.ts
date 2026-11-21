@@ -8,6 +8,9 @@ describe("contract schemas", () => {
   const schemas = [
     ["error", ErrorResponseSchema],
     ...Object.entries(routes).map(([name, route]) => [name, route.response] as const),
+    ...Object.entries(routes).flatMap(([name, route]) =>
+      "request" in route ? [[`${name} request`, route.request] as const] : [],
+    ),
   ] as const;
 
   it.each(schemas)("%s converts to a JSON Schema object", (_name, schema) => {

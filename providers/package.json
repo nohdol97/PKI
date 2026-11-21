@@ -5,5 +5,8 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build:synthetic-manifest": "node src/build-synthetic-manifest.ts"
   }
 }

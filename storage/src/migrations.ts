@@ -4,8 +4,7 @@ export type Migration = (db: SqlDriver) => void;
 
 // Schema v1 (V01-R6). Each table carries only what a V01 task reads or writes;
 // later tasks add columns through new migrations, never by editing this one.
-// Deferred with owners named in the spec task table: connector cursor storage
-// (V01-T04 migration) and source access_scope (V01-T07).
+// Deferred with an owner named in the spec task table: source access_scope (V01-T07).
 const v1: Migration = (db) =>
   db.exec(`
     CREATE TABLE sources (
@@ -83,8 +82,21 @@ const v1: Migration = (db) =>
     );
   `);
 
+// Schema v2 (V01-T04): one row per Connector instance. The kind is recorded so
+// the Broker can tell which Connector a source came from (a site-* source is
+// never synthetic, V01-C4 broker.class); the cursor is written in the same
+// transaction as the page it follows (ADR 0013 decision 1).
+const v2: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE connector_instances (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      cursor TEXT
+    );
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1];
+export const migrations: readonly Migration[] = [v1, v2];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

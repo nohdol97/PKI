@@ -11,7 +11,8 @@
     "@pki/storage": "workspace:*"
   },
   "scripts": {
-    "dev": "node src/dev.ts"
+    "dev": "node src/dev.ts",
+    "site-check": "node src/site-check.ts"
   },
   "devDependencies": {
     "@pki/testkit": "workspace:*"

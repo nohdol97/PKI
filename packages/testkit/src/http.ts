@@ -13,6 +13,8 @@ export function send(
   path: string,
   headers: Record<string, string>,
   method = "GET",
+  /** Sent as-is when a string, otherwise as JSON. */
+  body?: unknown,
 ): Promise<TestResponse> {
   return new Promise((resolve, reject) => {
     const req = request({ host: "127.0.0.1", port, path, method, headers }, (res) => {
@@ -24,7 +26,7 @@ export function send(
       });
     });
     req.on("error", reject);
-    req.end();
+    req.end(body === undefined || typeof body === "string" ? body : JSON.stringify(body));
   });
 }
 

@@ -4,12 +4,14 @@ import { ErrorResponseSchema, routes, type VectorIndex } from "@pki/contracts";
 import { MemoryVectorIndex, send } from "@pki/testkit";
 import { describe, expect, it, vi } from "vitest";
 import { productAdapters } from "./composition.ts";
+import type { ConnectorManager } from "./connectors.ts";
 import { startServer } from "./server.ts";
 
 const TOKEN = "s".repeat(43);
+const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
 
 async function getStatus(vectorIndex: VectorIndex) {
-  const server = await startServer({ token: TOKEN, allowedOrigins: [], vectorIndex });
+  const server = await startServer({ token: TOKEN, allowedOrigins: [], vectorIndex, connectors });
   try {
     return await send(server.port, routes.status.path, {
       host: `127.0.0.1:${server.port}`,
@@ -72,6 +74,7 @@ describe("status API: vector index", () => {
     const options = {
       token: TOKEN,
       allowedOrigins: [],
+      connectors,
       get vectorIndex(): VectorIndex {
         throw new TypeError(canary);
       },
