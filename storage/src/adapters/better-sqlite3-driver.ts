@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import type { OpenSqlDriver, SqlRow } from "./sql-driver.ts";
+import type { OpenSqlDriver, SqlRow } from "../sql-driver.ts";
 
 export const openBetterSqlite3: OpenSqlDriver = (path) => {
   const db = new Database(path);

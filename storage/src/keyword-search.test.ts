@@ -1,7 +1,7 @@
 // V01-C3 keyword search and assumption A17: the shipped driver build has
 // SQLite full-text search, and the index follows the canonical rows.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openBetterSqlite3 } from "./better-sqlite3-driver.ts";
+import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { searchKeyword } from "./keyword-search.ts";
 import { migrate } from "./migrations.ts";
 import type { SqlDriver } from "./sql-driver.ts";

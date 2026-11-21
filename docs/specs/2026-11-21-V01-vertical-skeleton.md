@@ -237,6 +237,17 @@ flowchart LR
 
 T07이 확장한 module-boundary 규칙은 T07보다 먼저 들어온 것(T03, T04, T12, T13, T14)을 포함한 모든 어댑터 구현에 적용되고, 공개 진입점으로 다시 내보낸 구현도 대상이다. T07은 그때까지 생긴 위반을 함께 고친다.
 
+**T07이 넘기는 것**. T07이 확정한 것과, 뒤 작업이 이어받는 결합 지점이다.
+
+1. **구현 경계의 규칙(확정)**: 어댑터 구현은 각 패키지의 `src/adapters/` 아래에 둔다. 같은 패키지의 다른 모듈은 상대 경로로도 이 폴더를 import할 수 없다. 다른 패키지는 `<패키지>/adapters` 진입점으로만 받는다. 이 진입점이나 폴더를 import할 수 있는 곳은 구성 지점 `backend/src/composition.ts`와 테스트 파일뿐이다. 공개 진입점(`src/index.ts`)이 구현을 다시 내보내도 실패한다. 어댑터 규격(`Connector`, `LLMProvider`, `EmbeddingProvider`, `KnowledgeEngine`, `VectorIndex`, `SqlDriver`, `OpenSqlDriver`)을 `implements`하거나 반환 타입·값 타입·`satisfies`로 다는 코드가 `src/adapters/` 밖에 있어도 실패한다. 규격을 정의하는 `@pki/contracts`와 대역을 두는 `@pki/testkit`(테스트 빌드 전용)은 예외다. 기존 위반은 옮겼다: storage의 SQLite 드라이버와 빈 VectorIndex, knowledge-engine의 null 엔진, backend의 Connector 구현 2개. **알려진 빈틈**: 반환 타입을 적지 않거나 `Promise<…>`로 감싼 구현은 위치 검사에 걸리지 않는다. 그런 구현이 `src/adapters/` 밖에 있으면 그것을 import하는 쪽도 검사되지 않으므로, 검토에서 본다. T10·T11·T13·T14는 구현을 자기 패키지의 `src/adapters/`에 두고 구성 지점에서 묶는다.
+2. **Provider 규격(확정)**: `packages/contracts/src/provider.ts`. [ARCHITECTURE 5.1절](../ARCHITECTURE.md) 스케치와 다른 점은 셋이다. 구조화 요청은 제네릭 대신 JSON Schema(`outputSchema`)를 싣고, Broker가 같은 정의의 Zod 스키마로 응답을 검증한다. Provider 입력에 후보 항목의 이름(`candidates`)이 따로 있다. 실패는 `ProviderError`(재시도 가능 여부)와 `ProviderRateLimitError`(기다릴 시간)로 알린다. 가짜 Provider와 계약 묶음 `providerContract`는 `@pki/testkit`에 있고, 제품 코드에서 import하면 lint가 실패한다.
+3. **T08**: Broker는 호출마다 `EgressPolicy.decide({providerId, taskKind, classification})`를 묻는다. 답은 허용(목적지, 정책 버전) 또는 거부 사유다. 이력은 `CallRecorder.record(CallRecord)`로 넘긴다. 항목에는 본문도 Provider의 오류 문구도 없다. 시도마다 한 행이다. 전송 판정이나 실행 조건에 막혀 실행하지 않은 호출은 attempt 0, 예산이 다해 하지 못한 시도는 그 시도의 번호로 남는다. T08은 이 두 결합 지점을 구현하고, 막힌 호출처럼 목적지가 없는 항목을 `provider_calls`의 NOT NULL 열(destination, policy_version)에 어떻게 쓸지 정한다.
+4. **T09**: Broker는 `ExecutionGate.decide({providerId, transport, taskKind, trigger, classification, malicious})`를 묻는다. 사용자 동작 기록은 구성 지점에서 `createUserActionLedger()`로 한 번 만든다. issuer는 API 계층에만, redeemer는 Broker에만 준다. 연결 시험 API는 `issuer.during(id => broker.call({taskKind: "connection-test", …, origin: {userActionId: id}}))` 형태로 부른다. Broker 요청에는 ID만 실을 수 있으므로, 개발 빌드의 "이 호출에 대한 확인"은 T09가 사용자 동작 기록에 담도록 기록을 넓힌다. 기록은 여전히 issuer만 만든다. Broker를 제품 구성에 묶는 일도 T09의 몫이다. 지금 구성 지점에는 Broker가 없다.
+5. **T10**: CLI Provider는 가짜 CLI로 `providerContract`를 통과해야 한다. 시간이 넘으면 Broker는 `cancel(requestId)`를 부른 뒤 signal을 끊는다. 프로세스 트리를 끝내는 일은 Provider의 몫이다. Provider가 signal을 무시해도 Broker는 시간 제한에서 호출을 끝낸다. 오류 문구에는 입력이 섞일 수 있으므로 Broker는 그것을 결과에도 이력에도 옮기지 않는다.
+6. **V02**: `extract` v1의 출력 스키마(`claims[]`)는 잠정이다. V02가 새 스키마 버전으로 확정한다. 후보 항목 조회(`CandidateItems`)는 V02가 지식 저장소에 붙인다. V01에서는 어떤 ID도 찾지 못하므로 후보가 든 요청은 거부된다. 작업 기록은 지금은 작업 종류만 맞으면 백그라운드 호출로 인정한다. "이미 쓴 작업 기록"의 판정은 V02가 임대·fence와 함께 정한다. 합성 등급이 될 수 있는 Connector 종류는 `test-fixtures` 하나다. V02의 JSONL 가져오기 종류는 `providers/src/broker.ts`의 목록에 더해야 합성 등급을 받는다.
+7. **access_scope**: 스키마 v3에서 `sources`에 NULL 허용 열로 더했다. 공용 저장소에서는 어떤 범위든 일반 등급이고, 합성은 합성 목록으로만 붙는다(범위에 `synthetic`이라고 적어도 합성이 아니다). Connector가 이 열을 채우는 경로(레코드 스키마의 필드)는 I01·V02의 몫이다. 배포처는 `broker.ts`의 `grade`에서 범위를 자기 등급으로 바꾼다(S08).
+8. **Broker 한도의 기본값(잠정)**: 동시 실행 2, 요청당 시도 3, 재시도 대기는 1초부터 두 배씩 늘어 최대 30초(요청 한도 응답의 대기 시간도 이 상한을 넘지 않음), 요청 시간 제한의 상한 120초, 호출 예산 1시간에 60회. 값은 `DEFAULT_LIMITS` 한 곳에 있다.
+
 V02의 작업은 V01-T01·T03·T04·T05·T06·T08·T12·T15에 의존한다. R04(#13)의 패키징 준비는 V01-T15에 의존한다.
 
 ## 완료 기준 (테스트 가능한 형태)
@@ -351,3 +362,4 @@ R07(#37)이 닫히기 전에는 V01을 통과로 표시하지 않는다(이슈 #
 | 2026-11-21 | 스키마 v1이 미룬 열의 담당 작업 명시: cursor 저장은 T04의 마이그레이션, 원본의 access_scope는 T07 | 작업 분해(T04, T07) | T03 독립 검토 F5 |
 | 2026-11-21 | T04가 정본 DB를 여는 백엔드 구성에서 데이터 폴더 함수(`dataDirectory()`·`ensureDataDirectory()`)를 부르는 담당임을 명시 | 작업 분해(T04) | T03 재검토 G3 |
 | 2026-11-21 | T04의 결정 가운데 뒤 작업을 묶는 것을 "T04가 넘기는 것"으로 적음: 합성 목록은 커밋된 생성 결과와 최신성 테스트이며 T15 산출물 빌드가 검사를 돈다, 목록에 드는 자료(골든 데이터는 합성 등급, `verification/` 제외), 테스트 Connector는 T15가 제품 구성에서 뺀다, `site-*` 출처는 `connector_instances.kind`로 찾고 없으면 닫힌 쪽으로 실패. T07·T15 행에 가리킴 추가 | 작업 분해(T04, T07, T15) | T04 독립 검토 K2 |
+| 2026-11-21 | T07이 확정한 구현 경계 규칙(`src/adapters/`, `<패키지>/adapters` 진입점, 구성 지점 하나), Provider 규격의 위치와 스케치와 다른 점, T08·T09·T10·V02에 넘기는 결합 지점, access_scope의 뜻, Broker 한도의 잠정 기본값을 "T07이 넘기는 것"으로 적음 | 작업 분해 | V01-T07 구현 |

@@ -4,7 +4,6 @@ export type Migration = (db: SqlDriver) => void;
 
 // Schema v1 (V01-R6). Each table carries only what a V01 task reads or writes;
 // later tasks add columns through new migrations, never by editing this one.
-// Deferred with an owner named in the spec task table: source access_scope (V01-T07).
 const v1: Migration = (db) =>
   db.exec(`
     CREATE TABLE sources (
@@ -115,8 +114,13 @@ const v2: Migration = (db) =>
     DROP TABLE sources_v1;
   `);
 
+// Schema v3 (V01-T07): a source's access scope, which a Connector fills and the
+// Broker maps to a data classification (ADR 0014). NULL means none was given.
+// It never makes a source synthetic; only the synthetic manifest does.
+const v3: Migration = (db) => db.exec("ALTER TABLE sources ADD COLUMN access_scope TEXT");
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2];
+export const migrations: readonly Migration[] = [v1, v2, v3];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

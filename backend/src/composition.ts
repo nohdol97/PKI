@@ -1,18 +1,12 @@
 // Composition point: the one place that picks adapter implementations for the
 // product (V01-R15): the vector index, the canonical storage driver and the
 // Connector kinds. Entry points (dev.ts, site-check.ts) build the backend from these.
-import {
-  dataDirectory,
-  EmptyVectorIndex,
-  ensureDataDirectory,
-  migrate,
-  openBetterSqlite3,
-  type SqlDriver,
-} from "@pki/storage";
+import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
+import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
 import type { ConnectorFactory, ConnectorInstanceConfig } from "./connectors.ts";
-import { createFixtureConnector } from "./connectors/fixture-connector.ts";
-import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./connectors/site-connectors.ts";
+import { createFixtureConnector } from "./adapters/fixture-connector.ts";
+import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
 import type { ServerOptions } from "./server.ts";
 
 export function productAdapters(): Pick<ServerOptions, "vectorIndex"> {

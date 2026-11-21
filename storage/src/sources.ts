@@ -69,3 +69,32 @@ export function writeCursor(db: SqlDriver, id: string, cursor: string): void {
     throw new Error(`connector instance ${id} is not registered`);
   }
 }
+
+export interface StoredSourceVersion {
+  id: number;
+  title: string;
+  body: string;
+  accessScope: string | null;
+  /** The kind of the Connector instance the source came from; null if no such row. */
+  connectorKind: string | null;
+}
+
+/** One stored version with what the Broker needs to grade it, or undefined if absent. */
+export function readSourceVersion(db: SqlDriver, id: number): StoredSourceVersion | undefined {
+  const row = db.all(
+    `SELECT v.id, v.title, v.body, s.access_scope, c.kind
+       FROM source_versions v
+       JOIN sources s ON s.id = v.source_id
+       LEFT JOIN connector_instances c ON c.id = s.connector_instance_id
+      WHERE v.id = ?`,
+    [id],
+  )[0];
+  if (!row) return undefined;
+  return {
+    id: row.id as number,
+    title: row.title as string,
+    body: row.body as string,
+    accessScope: row.access_scope as string | null,
+    connectorKind: row.kind as string | null,
+  };
+}
