@@ -38,10 +38,18 @@
 
 **V01-C5를 읽는 법.** 그 기준은 "R06에서 정한 로컬 데이터 암호화…를 첫 영속 데이터 경로에 적용"이라고 한다. R06이 정한 것은 이 표다. 따라서 Phase 1에서 그 문장이 뜻하는 것은 "비밀 값이 OS 자격 증명 저장소에만 있고, 정본 파일은 암호화되어 있지 않으며 그 사실이 화면에 표시된다"이다. **정본 파일의 암호화는 Phase 1에 없고, 이것은 원 설계 17절의 "로컬 데이터 암호화"보다 약하다.** 배포처 실행으로 해소되는 문제가 아니라 사용자의 결정과 드라이버 조사로 해소되는 문제다.
 
-**확인하지 못한 것 두 가지.** 독립 검토가 제기했으나 이 저장소의 근거 문서에는 없고 이 문서도 확인하지 않았다. V01-T03과 V01-T11에서 문서로 확인해 적는다.
+**독립 검토가 제기한 확인 사항 두 가지.** 처음에는 이 저장소의 근거 문서에 없어 확인하지 않은 채로 두었고, V01-T03과 V01-T11에서 문서로 확인해 적기로 했다.
 
-- Electron이 Windows에서 기본으로 쓰는 사용자 데이터 디렉터리가 다른 PC로 따라다니는 프로필 위치일 수 있다. 그렇다면 정본 파일이 그 PC 밖으로 복제될 수 있으므로 데이터 디렉터리의 위치를 직접 정해야 한다.
-- Electron의 보호 저장 기능이 암호문을 OS의 자격 증명 보관함이 아니라 앱의 파일에 둘 수 있다. 그렇다면 "OS 자격 증명 저장소에만"이라는 위 문장을 그 방식의 실제 동작에 맞게 다시 써야 한다.
+- **(V01-T03에서 확인함) 데이터 디렉터리.** Electron이 Windows에서 기본으로 쓰는 사용자 데이터 디렉터리는 실제로 다른 PC로 따라다니는 위치다. Electron 문서에 따르면 `userData`의 기본값은 `appData` 아래 앱 이름 폴더이고, `appData`는 Windows에서 `%APPDATA%`다([Electron `app.getPath`](https://www.electronjs.org/docs/latest/api/app#appgetpathname)). Microsoft 문서는 `%APPDATA%`를 로밍 폴더(`FOLDERID_RoamingAppData`, `AppData\Roaming`)로, `%LOCALAPPDATA%`를 "로밍하지 않는 응용 프로그램의 데이터 보관소"(`FOLDERID_LocalAppData`, `AppData\Local`)로 적는다([KNOWNFOLDERID](https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid), [CSIDL](https://learn.microsoft.com/en-us/windows/win32/shell/csidl)). 로밍 프로필은 회사 PC에서 서버에 복사되었다가 다른 PC에 내려받히는 프로필이다. 그래서 Electron 기본값을 쓰지 않고 `storage/src/data-directory.ts`가 위치를 직접 정한다.
+
+  | OS | 위치 | 근거 |
+  |---|---|---|
+  | Windows | `%LOCALAPPDATA%\PKI`. 값이 없거나 절대 경로가 아니면 추측하지 않고 실패한다(`%APPDATA%`로 내려가지 않는다) | 위 Microsoft 문서 |
+  | macOS | `~/Library/Application Support/PKI` | Apple은 앱이 사용자 대신 만들고 관리하는 데이터를 이곳에 두라고 한다([File System Programming Guide, Library 하위 디렉터리](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/MacOSXDirectories/MacOSXDirectories.html)) |
+  | Linux | `$XDG_DATA_HOME/PKI`. 값이 없거나 비었거나 상대 경로이면 `~/.local/share/PKI` | [XDG Base Directory 명세](https://specifications.freedesktop.org/basedir-spec/latest/)가 기본값과 "상대 경로는 무시한다"를 정한다 |
+
+  남은 것: Apple은 폴더 이름을 앱의 bundle identifier로 하라고 권한다. bundle identifier는 패키징(R04)에서 정하므로 지금은 `PKI`를 쓴다. 배포처 PC가 `AppData\Local`을 로밍이나 폴더 리디렉션 대상으로 따로 설정했는지는 배포처 확인 항목이다([site-setup.md](../site-setup.md) S11).
+- **(V01-T11에서 확인할 것) 보호 저장 기능.** Electron의 보호 저장 기능이 암호문을 OS의 자격 증명 보관함이 아니라 앱의 파일에 둘 수 있다. 그렇다면 "OS 자격 증명 저장소에만"이라는 위 문장을 그 방식의 실제 동작에 맞게 다시 써야 한다.
 
 OS 자격 증명 저장소는 Electron 쉘이 중개한다. 브라우저 개발 환경에는 쉘이 없으므로 비밀 값을 환경 변수로만 읽고 저장하지 않는다.
 

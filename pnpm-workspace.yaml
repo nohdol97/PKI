@@ -5,3 +5,5 @@ packages:
   - providers
   - storage
   - packages/*
+allowBuilds:
+  better-sqlite3: false
