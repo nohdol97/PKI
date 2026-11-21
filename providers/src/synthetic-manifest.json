@@ -280,6 +280,11 @@
     "source": "eval/golden/sources/messenger.jsonl"
   },
   {
+    "hash": "5465324a0c0fa7e726caa95b092d29aea6687dcc2b51be33ef858e01fa93e987",
+    "malicious": true,
+    "source": "fixtures/v02-malicious.jsonl"
+  },
+  {
     "hash": "5652479aba44954552c754dddff9f538efa2236faefca1a34d2b8d8109ba9f60",
     "malicious": false,
     "source": "eval/golden/sources/mail.jsonl"
@@ -345,11 +350,6 @@
     "source": "eval/golden/sources/messenger.jsonl"
   },
   {
-    "hash": "66dceed3a50d1660c022f06fca86ce1313f6d38dcc9fa60e9a12d38c7a4e21b4",
-    "malicious": false,
-    "source": "fixtures/v02-mail.jsonl"
-  },
-  {
     "hash": "67080315d4cb153acf2cd177abde31e706fc48c6d95b70ff7fb41f9c11f3cd2f",
     "malicious": false,
     "source": "eval/golden/sources/wiki.jsonl"
@@ -403,6 +403,11 @@
     "hash": "7f33367e26cddcdaaa5aa516dd21b34c2d0a4596f674da23cc129910fa849ba8",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "7f6ac351336f731785890f3288cfa827561e48eafa032a1f61d25d807350618d",
+    "malicious": false,
+    "source": "fixtures/v02-mail.jsonl"
   },
   {
     "hash": "7fcd149db047c6c84b7ef1572c9e395b4c337bf86782cf2f09cf8dc19030fbbc",
@@ -470,11 +475,6 @@
     "source": "eval/golden/sources/wiki.jsonl"
   },
   {
-    "hash": "94b79d1a6e019e0a29988b008eb348fa28d01fce561f8abf99f93a8e1024baf6",
-    "malicious": false,
-    "source": "fixtures/v02-messenger.jsonl"
-  },
-  {
     "hash": "953f79f099436d51941a40bf411cd12b0ad2ed9577963ba239d84c79a2c3fc00",
     "malicious": false,
     "source": "eval/golden/sources/wiki.jsonl"
@@ -538,11 +538,6 @@
     "hash": "a6bfb80356da10bb67eacbf18e01de5ce7d6e1457fd9783121be635bec00c0a1",
     "malicious": false,
     "source": "eval/golden/sources/mail.jsonl"
-  },
-  {
-    "hash": "a70e2332691b0c0c407a3a0c1be9b478f299dcac9c22699339eeaee468993d6b",
-    "malicious": true,
-    "source": "fixtures/v02-malicious.jsonl"
   },
   {
     "hash": "a71319334da644d0b9b3c8b1e979f00a5184551d4389a63a792226663cb0a57f",
@@ -743,6 +738,11 @@
     "hash": "eaf58e7ce7d8a06a9dcd3e9d02ca7c97a3e49a85527535baaa2424f51421f9c3",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "f13cfa3af6a9f10e06d6d30fc9f9b2d921e83b92442fbc66391ffaadcc9017db",
+    "malicious": false,
+    "source": "fixtures/v02-messenger.jsonl"
   },
   {
     "hash": "f30cea1af7f0acb6a792610d0247fb0d4b29b5b10d515142e7b02112bd96ee94",

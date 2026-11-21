@@ -203,4 +203,15 @@ describe("V02 expected results", () => {
     expect(expected.sets.malicious?.insights).toHaveLength(1);
     expect(expected.sets["date-variant"]?.insights).toEqual([]);
   });
+
+  // Spans count code points (V02-R3). An emoji before a quote is two UTF-16 units,
+  // so a span in UTF-16 units would point elsewhere.
+  it.each(["plain", "malicious"])("%s: some quote follows a non-BMP character", (name) => {
+    const evidence = (expected.sets[name]?.insights ?? []).flatMap((i) => i.evidence);
+    const shifted = evidence.filter((e) => {
+      const content = byKey.get(`${e.record_id}@${e.version}`)?.content ?? "";
+      return content.indexOf(e.quote) !== e.span[0];
+    });
+    expect(shifted.length).toBeGreaterThan(0);
+  });
 });

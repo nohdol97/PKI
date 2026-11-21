@@ -1,5 +1,5 @@
 {
-  "rule": "dependency-delay",
+  "rule": "dependency_delay",
   "entities": {
     "A": {
       "type": "Project",
@@ -21,7 +21,7 @@
           "evidence": {
             "record_id": "mail-v02-0001",
             "version": 1,
-            "span": [27, 57],
+            "span": [30, 60],
             "quote": "미리내 프로젝트의 완료 목표는 2026-12-05입니다"
           }
         },
@@ -32,7 +32,7 @@
           "evidence": {
             "record_id": "msg-v02-0001",
             "version": 1,
-            "span": [10, 44],
+            "span": [12, 46],
             "quote": "물결 API 개발 완료가 2026-12-10으로 연기되었습니다"
           }
         }
@@ -52,7 +52,7 @@
       ],
       "insights": [
         {
-          "rule": "dependency-delay",
+          "rule": "dependency_delay",
           "x": "A",
           "y": "B",
           "is_inference": true,
@@ -60,7 +60,7 @@
             {
               "record_id": "mail-v02-0001",
               "version": 1,
-              "span": [27, 57],
+              "span": [30, 60],
               "quote": "미리내 프로젝트의 완료 목표는 2026-12-05입니다"
             },
             {
@@ -72,7 +72,7 @@
             {
               "record_id": "msg-v02-0001",
               "version": 1,
-              "span": [10, 44],
+              "span": [12, 46],
               "quote": "물결 API 개발 완료가 2026-12-10으로 연기되었습니다"
             }
           ]
@@ -89,7 +89,7 @@
           "evidence": {
             "record_id": "mail-v02-0001",
             "version": 1,
-            "span": [27, 57],
+            "span": [30, 60],
             "quote": "미리내 프로젝트의 완료 목표는 2026-12-05입니다"
           }
         },
@@ -141,7 +141,7 @@
           "evidence": {
             "record_id": "msg-v02-m001",
             "version": 1,
-            "span": [17, 51],
+            "span": [19, 53],
             "quote": "물결 API 개발 완료가 2026-12-10으로 연기되었습니다"
           }
         }
@@ -161,7 +161,7 @@
       ],
       "insights": [
         {
-          "rule": "dependency-delay",
+          "rule": "dependency_delay",
           "x": "A",
           "y": "B",
           "is_inference": true,
@@ -181,7 +181,7 @@
             {
               "record_id": "msg-v02-m001",
               "version": 1,
-              "span": [17, 51],
+              "span": [19, 53],
               "quote": "물결 API 개발 완료가 2026-12-10으로 연기되었습니다"
             }
           ]
