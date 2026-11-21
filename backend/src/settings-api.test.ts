@@ -3,7 +3,12 @@
 // user info, query or fragment, is stored; whether loopback `http` is then used is
 // the egress policy's call (build kind). The API key is never a setting.
 import { ErrorResponseSchema, routes, type SecretSource } from "@pki/contracts";
-import { OPENAI_BASE_URL_SETTING, OPENAI_MODEL_SETTING, openaiKeySecretName } from "@pki/providers";
+import {
+  BUILD_KIND,
+  OPENAI_BASE_URL_SETTING,
+  OPENAI_MODEL_SETTING,
+  openaiKeySecretName,
+} from "@pki/providers";
 import { readSetting, type SqlDriver } from "@pki/storage";
 import { send } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -111,10 +116,12 @@ describe("settings API: the OpenAI-compatible endpoint", () => {
     expect(readSetting(db, OPENAI_BASE_URL_SETTING)).toBe("https://api.synthetic.example/v1");
   });
 
-  it("stores loopback http, which the product build's egress policy still refuses", async () => {
+  // whether loopback http is then used is the build kind's (providers/src/build-kind.test.ts)
+  it("stores loopback http; this test build's egress policy then takes it", async () => {
+    expect(BUILD_KIND).toBe("test");
     expect((await write("http://127.0.0.1:9/v1")).status).toBe(200);
     expect(productEgress(db).destination("openai-compatible")).toEqual({
-      problem: "insecure-endpoint",
+      destination: "127.0.0.1:9",
     });
   });
 

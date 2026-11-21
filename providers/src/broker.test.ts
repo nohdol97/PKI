@@ -509,8 +509,118 @@ describe("broker: seams for consent, egress rules and execution conditions", () 
         trigger: "user",
         classification: "synthetic",
         malicious: false,
+        version: undefined,
+        unverifiedAcknowledged: false,
       },
     ]);
+  });
+
+  it("asks a CLI's version before every attempt and passes the record's acknowledgement", async () => {
+    const versions = ["2.1.3", "2.1.4"];
+    const provider = new FakeProvider({
+      id: "claude-code",
+      transport: "cli",
+      detect: async () => ({ installed: true, version: versions.shift() ?? "none" }),
+      script: [{ error: retryable() }],
+    });
+    const { broker, ledger, execution } = setup({ provider });
+    await ledger.issuer.during(
+      (userActionId) =>
+        broker.call({
+          taskKind: "connection-test",
+          sourceVersionIds: [],
+          candidateItemIds: [],
+          origin: { userActionId },
+          schemaVersion: 1,
+          budget: { timeoutMs: 1000 },
+          retryable: true,
+        }),
+      { acknowledgeUnverified: true },
+    );
+    expect(execution.map((e) => [e.transport, e.version, e.unverifiedAcknowledged])).toEqual([
+      ["cli", "2.1.3", true],
+      ["cli", "2.1.4", true],
+    ]);
+  });
+
+  it.each([
+    ["a failing version query", async () => Promise.reject(new Error("secret-ish output"))],
+    ["a CLI that is not installed", async () => ({ installed: false, version: "2.1.3" })],
+    ["a version query without a version", async () => ({ installed: true })],
+  ])("passes no version for %s", async (_, detect) => {
+    const provider = new FakeProvider({ id: "codex", transport: "cli", detect });
+    const { call, execution } = setup({ provider });
+    await call();
+    expect(execution).toHaveLength(1);
+    expect(execution[0]?.version).toBeUndefined();
+  });
+
+  it("asks the egress decision first: without consent no version query and no gate", async () => {
+    let queries = 0;
+    const provider = new FakeProvider({
+      id: "claude-code",
+      transport: "cli",
+      detect: async () => {
+        queries++;
+        return { installed: true, version: "9.9.9" };
+      },
+    });
+    const { call, execution, records } = setup({
+      provider,
+      deps: { egress: { decide: () => ({ allowed: false, reason: "no-consent" }) } },
+    });
+    expect(await call()).toMatchObject({ status: "blocked", reason: "no-consent" });
+    expect(queries).toBe(0);
+    expect(execution).toEqual([]);
+    expect(records.map((r) => r.reason)).toEqual(["no-consent"]);
+    expect(provider.requests).toEqual([]);
+  });
+
+  it("bounds a hanging version query: not listed, and the slot is given back", async () => {
+    const provider = new FakeProvider({
+      id: "claude-code",
+      transport: "cli",
+      detect: () => new Promise(() => undefined),
+    });
+    const { call, execution } = setup({
+      provider,
+      deps: { limits: { maxConcurrent: 1, versionQueryTimeoutMs: 20 } },
+    });
+    const results = await Promise.all([call(), call()]);
+    expect(results.map((r) => r.status)).toEqual(["ok", "ok"]);
+    expect(execution.map((e) => e.version)).toEqual([undefined, undefined]);
+  });
+
+  it("bounds the version query by the request's own timeout when that is shorter", async () => {
+    const provider = new FakeProvider({
+      id: "codex",
+      transport: "cli",
+      detect: () => new Promise(() => undefined),
+    });
+    const { call, execution } = setup({ provider });
+    const started = Date.now();
+    await call({ budget: { timeoutMs: 30 } });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(execution).toHaveLength(1);
+    expect(execution[0]?.version).toBeUndefined();
+  });
+
+  it("hands a CLI the profile and isolation the gate chose, and reports them", async () => {
+    const cli = { profile: "claude-code/minimal-1", isolation: "unverified" } as const;
+    const provider = new FakeProvider({ id: "claude-code", transport: "cli" });
+    const { call } = setup({
+      provider,
+      deps: { execution: { decide: () => ({ run: true, cli }) } },
+    });
+    expect(await call()).toMatchObject({ status: "ok", cli });
+    expect(provider.requests[0]?.execution).toEqual(cli);
+  });
+
+  it("sends an HTTP Provider no execution profile", async () => {
+    const { call, provider } = setup();
+    const result = await call();
+    expect(result).not.toHaveProperty("cli");
+    expect(provider.requests[0]).not.toHaveProperty("execution");
   });
 
   it("blocks when no Provider is configured, without falling back to another", async () => {

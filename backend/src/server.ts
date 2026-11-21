@@ -6,6 +6,7 @@ import {
   EmbeddingStatusSchema,
   routes,
   type ComponentStatus,
+  type ConnectionTestResult,
   type EmbeddingProvider,
   type EmbeddingStatusEntry,
   type ErrorResponse,
@@ -17,13 +18,18 @@ import {
   type VectorIndex,
 } from "@pki/contracts";
 import {
+  CLI_BACKGROUND_SETTING,
   errorClass,
   log,
   OPENAI_BASE_URL_SETTING,
   OPENAI_MODEL_SETTING,
   openaiKeySecretName,
   parseEndpoint,
+  readCliBackground,
+  type Broker,
+  type BrokerResult,
   type EgressControls,
+  type UserActionIssuer,
 } from "@pki/providers";
 import {
   databaseEncryption,
@@ -69,6 +75,12 @@ export interface ServerOptions {
   egress: EgressControls;
   /** Asked for the presence (never the value) of the key Settings shows; default: none. */
   secrets?: SecretSource;
+  /**
+   * The Broker and the user action issuer (composition.ts productCalls); only this
+   * API layer holds the issuer. Without them the connection test is blocked
+   * ("broker-not-bound"); boot.ts always binds them.
+   */
+  calls?: { broker: Pick<Broker, "call">; issuer: UserActionIssuer };
 }
 
 export interface RunningServer {
@@ -94,6 +106,46 @@ const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "embedding-not-implemented": 409,
   "embedding-busy": 409,
 };
+
+/** Provisional: below the Broker's 120 s ceiling, long enough for a CLI to start. */
+const CONNECTION_TEST_TIMEOUT_MS = 60_000;
+
+function connectionTestResult(result: BrokerResult): ConnectionTestResult {
+  switch (result.status) {
+    case "ok":
+      return { outcome: "ok", reason: null, isolation: result.cli?.isolation ?? null };
+    case "failed":
+      return { outcome: "failed", reason: result.error, isolation: null };
+    default:
+      return { outcome: result.status, reason: result.reason, isolation: null };
+  }
+}
+
+/**
+ * V01-R21: the user's one call of Phase 1. This layer opens the user action record
+ * (with the acknowledgement the screen sent for this call) and asks the Broker for
+ * a connection test; the Broker decides everything else.
+ */
+async function connectionTest(
+  calls: ServerOptions["calls"],
+  acknowledgeUnverified: boolean,
+): Promise<ConnectionTestResult> {
+  if (!calls) return { outcome: "blocked", reason: "broker-not-bound", isolation: null };
+  const result = await calls.issuer.during(
+    (userActionId) =>
+      calls.broker.call({
+        taskKind: "connection-test",
+        sourceVersionIds: [],
+        candidateItemIds: [],
+        origin: { userActionId },
+        schemaVersion: 1,
+        budget: { timeoutMs: CONNECTION_TEST_TIMEOUT_MS },
+        retryable: false,
+      }),
+    { acknowledgeUnverified },
+  );
+  return connectionTestResult(result);
+}
 
 const STATUS_CHECK_FAILED: ComponentStatus = {
   state: "unavailable",
@@ -226,6 +278,12 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     grantConsent: async ({ providerId, allowedClasses, destination, policyVersion }) =>
       options.egress.grant(providerId, allowedClasses, { destination, policyVersion }),
     revokeConsent: async (input) => options.egress.revoke(input.providerId),
+    connectionTest: (input) => connectionTest(options.calls, input.acknowledgeUnverified),
+    executionSettings: async () => ({ cliBackground: readCliBackground(options.db) }),
+    setExecutionSettings: async ({ cliBackground }) => {
+      writeSetting(options.db, CLI_BACKGROUND_SETTING, cliBackground ? "on" : "off");
+      return { cliBackground: readCliBackground(options.db) };
+    },
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
   };
 }

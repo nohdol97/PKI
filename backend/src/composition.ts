@@ -1,14 +1,24 @@
 // Composition point: the one place that picks adapter implementations for the
 // product (V01-R14, R15): the vector index, the embedder, the canonical storage
-// driver, the Connector kinds, the egress policy and the Providers. Entry points
-// (dev.ts, shell.ts, site-check.ts) build the backend from these.
-import type { LLMProvider, ProviderId, SecretSource } from "@pki/contracts";
-import { createEgressPolicy, PUBLIC_SITE_RULES, type EgressControls } from "@pki/providers";
+// driver, the Connector kinds, the egress policy, the Providers and the Broker
+// with its execution gate. Entry points (dev.ts, shell.ts through boot.ts,
+// site-check.ts) build the backend from these.
+import type { LLMProvider, SecretSource } from "@pki/contracts";
 import {
-  createLocalEmbedder,
-  LocalModelProvider,
-  OpenAICompatibleProvider,
-} from "@pki/providers/adapters";
+  BUILD_KIND,
+  createBroker,
+  createCallRecorder,
+  createEgressPolicy,
+  createExecutionGate,
+  createUserActionLedger,
+  loopbackHttpAllowed,
+  PUBLIC_SITE_RULES,
+  type Broker,
+  type EgressControls,
+  type TestBuildExecution,
+  type UserActionIssuer,
+} from "@pki/providers";
+import { createLocalEmbedder, OpenAICompatibleProvider } from "@pki/providers/adapters";
 import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
@@ -32,46 +42,77 @@ export function productAdapters(dataDir: string): Pick<ServerOptions, "vectorInd
 export const MODELS_DIR = "models";
 
 /**
- * `http` to a loopback endpoint stays refused until the build kind (T09) tells
- * development and test builds apart. The egress policy and the HTTP Provider read
- * the same flag, so the Provider never sends where the policy would refuse.
- */
-const ALLOW_LOOPBACK_HTTP = false;
-
-/**
  * The product's consent and egress rules (ADR 0014). The deployment rules are the
  * public repository's (none: nothing leaves without consent); a fork supplies its
- * own here (S08).
+ * own here (S08). `http` to a loopback endpoint passes in development and test
+ * builds only, by the build kind (V01-R11).
  */
 export function productEgress(db: SqlDriver): EgressControls {
   return createEgressPolicy({
     db,
     siteRules: PUBLIC_SITE_RULES,
-    allowLoopbackHttp: ALLOW_LOOPBACK_HTTP,
+    allowLoopbackHttp: loopbackHttpAllowed(BUILD_KIND),
   });
 }
 
 /**
- * The Providers the product binds so far (V01-R11): the OpenAI-compatible one, whose
- * key `secrets` gives just before each call and which asks `egress` (the instance
- * the API and the Broker share) again just before sending, and the unimplemented
- * local model. The
- * CLI Providers (T10) join here; the Broker that calls them is bound by T09.
+ * The Provider implementations the Broker may call (V01-R11). Provisional (V01-T11):
+ * the OpenAI-compatible one only. Its key comes from `secrets` just before each call,
+ * and it asks `egress` (the instance the API and the Broker share) again just before
+ * sending. The local-model Provider is not bound: it only answers "not implemented"
+ * and reports no structured output, so the Broker could never use it, and binding it
+ * would make two Providers, of which productCalls calls none. The CLI Providers and
+ * the user's default choice among several are V01-T10's.
  */
 export function productProviders(
   db: SqlDriver,
   secrets: SecretSource,
   egress: EgressControls,
-): Partial<Record<ProviderId, LLMProvider>> {
-  return {
-    "openai-compatible": new OpenAICompatibleProvider({
+): readonly LLMProvider[] {
+  return [
+    new OpenAICompatibleProvider({
       db,
       secrets,
-      allowLoopbackHttp: ALLOW_LOOPBACK_HTTP,
+      allowLoopbackHttp: loopbackHttpAllowed(BUILD_KIND),
       egress,
     }),
-    "local-model": new LocalModelProvider(),
-  };
+  ];
+}
+
+export interface CallsOptions {
+  /** The Providers to bind: productProviders(...) in the product, doubles in tests. */
+  providers: readonly LLMProvider[];
+  /** The test build's pick and list (execution-gate.ts); ignored by any other build. */
+  testBuild?: TestBuildExecution;
+}
+
+/**
+ * The Broker and the user action issuer (V01-R8, R10). The ledger is made here
+ * once: the issuer goes to the API layer only, the redeemer to the Broker only.
+ * The Broker gets `egress`, the same instance the API serves consent from (T08)
+ * and the Providers ask again just before sending (T11).
+ * Provisional: with one Provider bound it is the one called; with none or
+ * several, none is (the user's default choice is V01-T10's; no silent fallback).
+ */
+export function productCalls(
+  db: SqlDriver,
+  egress: EgressControls,
+  options: CallsOptions,
+): { broker: Broker; issuer: UserActionIssuer } {
+  const { providers } = options;
+  const ledger = createUserActionLedger();
+  const broker = createBroker({
+    db,
+    provider: () => (providers.length === 1 ? providers[0] : undefined),
+    userActions: ledger.redeemer,
+    candidates: { lookup: () => undefined }, // V02 attaches the knowledge store
+    egress,
+    execution: createExecutionGate(
+      options.testBuild === undefined ? { db } : { db, testBuild: options.testBuild },
+    ),
+    recorder: createCallRecorder(db),
+  });
+  return { broker, issuer: ledger.issuer };
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";

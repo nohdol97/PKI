@@ -10,8 +10,10 @@ export {
   type CallRecorder,
   type CandidateItem,
   type CandidateItems,
+  type CliExecution,
   type EgressInput,
   type EgressPolicy,
+  type ExecutionDecision,
   type ExecutionGate,
   type ExecutionInput,
   type RejectReason,
@@ -25,9 +27,21 @@ export {
 } from "./embedding.ts";
 export {
   createUserActionLedger,
+  type UserAction,
   type UserActionIssuer,
+  type UserActionOptions,
   type UserActionRedeemer,
 } from "./user-actions.ts";
+export { BUILD_KIND, loopbackHttpAllowed, type BuildKind } from "./build-kind.ts";
+export { CLI_PROFILES } from "./cli-profiles.ts";
+export {
+  CLI_BACKGROUND_SETTING,
+  createExecutionGate,
+  readCliBackground,
+  type ExecutionGateOptions,
+  type TestBuildExecution,
+} from "./execution-gate.ts";
+export { VERIFIED_CLI_COMBINATIONS, type VerifiedCombination } from "./verified-cli.ts";
 export { createCallRecorder } from "./call-recorder.ts";
 export {
   computePolicyVersion,

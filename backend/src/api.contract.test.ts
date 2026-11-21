@@ -1,6 +1,7 @@
 // V01-C1 `api.contract`: every API response, success or rejection, matches the
 // schema in @pki/contracts that the UI also uses.
 import { ErrorResponseSchema, routes, type RouteName } from "@pki/contracts";
+import { OPENAI_BASE_URL_SETTING } from "@pki/providers";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { resolve } from "node:path";
@@ -32,11 +33,12 @@ const requests: Partial<Record<RouteName, unknown>> = {
     policyVersion: productEgress(db).policyVersion(),
   },
   revokeConsent: { providerId: "codex" },
-  // loopback http: stored, yet refused by the product egress policy, so the
-  // destination-unavailable grant case below holds whichever runs first
+  // the destination-unavailable grant case below clears the endpoint again first
   writeSettings: {
     openaiCompatible: { baseUrl: "http://127.0.0.1:9/v1", model: "synthetic-model" },
   },
+  connectionTest: { acknowledgeUnverified: false },
+  setExecutionSettings: { cliBackground: false },
   // The pack does not exist: the preparation starts, then fails without touching disk.
   prepareEmbedding: { source: { kind: "local-pack", path: "/synthetic/missing-pack" } },
 };
@@ -133,6 +135,8 @@ describe("API responses match @pki/contracts", () => {
       },
     ],
   ])("grant consent %s rejection (%i)", async (error, status, body) => {
+    // no endpoint, whatever the writeSettings case above stored
+    db.run("DELETE FROM settings WHERE key = ?", [OPENAI_BASE_URL_SETTING]);
     const grant = routes.grantConsent;
     const res = await send(server.port, grant.path, valid, grant.method, body);
     expect(res.status).toBe(status);

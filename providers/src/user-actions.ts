@@ -3,28 +3,44 @@
 // the API layer and the redeemer to the Broker, so code without the issuer (a job
 // runner) cannot mint one. A record lives in memory only, belongs to the one
 // request handled inside `during`, is used at most once and ends with the request.
+// It also carries whether the user confirmed, for that one call, the
+// unverified-isolation warning of the development build (V01-R10); only the
+// issuer sets it, and it is never stored.
 import { randomUUID } from "node:crypto";
+
+export interface UserActionOptions {
+  /** The user confirmed the unverified-isolation warning for this call. */
+  acknowledgeUnverified?: boolean;
+}
 
 export interface UserActionIssuer {
   /** Opens a record for the request `handle` serves; it ends when `handle` settles. */
-  during<T>(handle: (userActionId: string) => Promise<T>): Promise<T>;
+  during<T>(handle: (userActionId: string) => Promise<T>, options?: UserActionOptions): Promise<T>;
+}
+
+/** What a redeemed record says about the call it was opened for. */
+export interface UserAction {
+  readonly unverifiedAcknowledged: boolean;
 }
 
 export interface UserActionRedeemer {
-  /** "ok" marks the record used; a record that ended or was never issued is "unknown". */
-  redeem(userActionId: string): "ok" | "used" | "unknown";
+  /** Marks the record used and returns it; a record that ended or was never issued is "unknown". */
+  redeem(userActionId: string): UserAction | "used" | "unknown";
 }
 
 export function createUserActionLedger(): {
   issuer: UserActionIssuer;
   redeemer: UserActionRedeemer;
 } {
-  const open = new Map<string, { used: boolean }>();
+  const open = new Map<string, { used: boolean; unverifiedAcknowledged: boolean }>();
   return {
     issuer: {
-      async during(handle) {
+      async during(handle, options = {}) {
         const id = randomUUID();
-        open.set(id, { used: false });
+        open.set(id, {
+          used: false,
+          unverifiedAcknowledged: options.acknowledgeUnverified === true,
+        });
         try {
           return await handle(id);
         } finally {
@@ -38,7 +54,7 @@ export function createUserActionLedger(): {
         if (!record) return "unknown";
         if (record.used) return "used";
         record.used = true;
-        return "ok";
+        return Object.freeze({ unverifiedAcknowledged: record.unverifiedAcknowledged });
       },
     },
   };
