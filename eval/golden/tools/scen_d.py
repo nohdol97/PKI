@@ -3,29 +3,29 @@ S02-I4, S04-I4, S05-I4, S06-I4, S09-I4, S11-I4. They add eval items for the rate
 
 
 def s12(w):
-    # --- S02-I4: two people named 정하린 ------------------------------------------------
+    # --- S02-I4: two people named 정하린, told apart by chat channel, minutes and a cover mail ---
     I = w.instance("S02-I4", "same_name_different_people")
-    I.rec("mailA", "mail", "정하린입니다. 정산팀에서 월말 마감 점검표를 갱신했습니다. 이번 달부터 새 표를 써 주세요.\n",
-          "월말 마감 점검표", "harin.jung1@example.test", "2026-11-18T09:00:00+09:00")
-    I.rec("mailB", "mail", "정하린입니다. 구매팀 발주서 양식이 바뀌었습니다. 첨부한 새 양식으로 요청해 주세요.\n",
-          "발주서 양식 변경", "harin.jung2@example.test", "2026-11-18T09:40:00+09:00")
-    I.rec("wikiC", "wiki", "# 팀 연락처\n\n- 정하린 (정산팀)\n- 정하린 (구매팀)\n- 오세훈 (정산팀)\n",
-          "팀 연락처", "hr-bot@example.test", "2026-10-05T09:00:00+09:00")
-    I.rec("msgD", "messenger", "정하린 님, 월말 마감 점검표 반영 확인 부탁드려요.", "점검표 확인",
-          "sehun.oh@example.test", "2026-11-19T10:00:00+09:00", scope=["channel:settlement"])
-    I.ent("p1", "Person", "정하린(정산팀)", [("mailA", "정하린"), ("wikiC", "정하린 (정산팀)")])
-    I.ent("p2", "Person", "정하린(구매팀)", [("mailB", "정하린"), ("wikiC", "정하린 (구매팀)")])
-    I.ent("t1", "Organization", "정산팀", [("wikiC", "정산팀")])
+    I.rec("msgA", "messenger", "정하린입니다. 월말 마감 점검표를 갱신했어요. 정산 채널 분들은 새 표로 바꿔 주세요.",
+          "점검표 갱신", "harin.jung1@example.test", "2026-11-18T09:00:00+09:00", scope=["channel:settlement"])
+    I.rec("msgB", "messenger", "정하린입니다. 발주서 양식이 바뀌었으니 새 양식으로 요청해 주세요.",
+          "발주서 양식", "harin.jung2@example.test", "2026-11-18T09:40:00+09:00", scope=["channel:procurement"])
+    I.rec("wikiC", "wiki", "# 11월 정례 회의록\n\n참석: 정하린(구매팀 대리), 오세훈, 조민아\n결정: 발주서 양식은 12월부터 새 양식을 쓴다.\n",
+          "11월 정례 회의록", "minah.jo@example.test", "2026-11-19T17:00:00+09:00")
+    I.rec("mailD", "mail", "정하린 님께,\n\n정산팀 점검표 반영본을 첨부합니다. 같은 정산팀 소속이라 바로 공유드립니다.\n\n오세훈 드림\n",
+          "점검표 반영본", "sehun.oh@example.test", "2026-11-19T10:00:00+09:00", participants=["sehun.oh@example.test", "harin.jung1@example.test"])
+    I.ent("p1", "Person", "정하린(정산팀)", [("msgA", "정하린"), ("mailD", "정하린")])
+    I.ent("p2", "Person", "정하린(구매팀)", [("msgB", "정하린"), ("wikiC", "정하린(구매팀 대리)")])
+    I.ent("t1", "Organization", "정산팀", [("mailD", "정산팀")])
     I.ent("t2", "Organization", "구매팀", [("wikiC", "구매팀")])
-    I.pair(("mailA", "정하린"), ("wikiC", "정하린 (정산팀)"), "p1", "p1")
-    I.pair(("mailA", "정하린"), ("mailB", "정하린"), "p1", "p2")
-    I.pair(("msgD", "정하린"), ("mailA", "정하린"), "p1", "p1")
-    I.pair(("msgD", "정하린"), ("mailB", "정하린"), "p1", "p2")
-    I.rel("p1", "BELONGS_TO", "t1", [("wikiC", "정하린 (정산팀)")])
-    I.rel("p2", "BELONGS_TO", "t2", [("wikiC", "정하린 (구매팀)")])
-    I.rel("p2", "BELONGS_TO", "t1", [("mailB", "정하린입니다. 구매팀 발주서 양식이 바뀌었습니다")], expected=False)
-    I.qa("월말 마감 점검표를 갱신한 정하린은 어느 팀인가?", ["정산팀"],
-         [("mailA", "정산팀에서 월말 마감 점검표를 갱신했습니다"), ("wikiC", "정하린 (정산팀)")])
+    I.pair(("msgA", "정하린"), ("mailD", "정하린"), "p1", "p1")
+    I.pair(("msgA", "정하린"), ("msgB", "정하린"), "p1", "p2")
+    I.pair(("msgB", "정하린"), ("wikiC", "정하린(구매팀 대리)"), "p2", "p2")
+    I.pair(("mailD", "정하린"), ("wikiC", "정하린(구매팀 대리)"), "p1", "p2")
+    I.rel("p1", "BELONGS_TO", "t1", [("mailD", "같은 정산팀 소속이라")])
+    I.rel("p2", "BELONGS_TO", "t2", [("wikiC", "정하린(구매팀 대리)")])
+    I.rel("p2", "BELONGS_TO", "t1", [("msgB", "정하린입니다. 발주서 양식이 바뀌었으니"), ("wikiC", "정하린(구매팀 대리)")], expected=False)
+    I.qa("발주서 양식 변경을 안내한 정하린은 어느 팀인가?", ["구매팀(대리)"],
+         [("msgB", "발주서 양식이 바뀌었으니 새 양식으로 요청해 주세요"), ("wikiC", "정하린(구매팀 대리)")])
 
     # --- S04-I4: owner and open date differ, no one notices -----------------------------
     I = w.instance("S04-I4", "contradicting_statements")
@@ -83,7 +83,7 @@ def s12(w):
     I.rec("mailC", "mail", "임시 계정 정리 사전 공지: 2026-12-05 작업 예정입니다.\n", "임시 계정 정리 공지",
           "woojin.jung@example.test", "2026-11-19T09:00:00+09:00", participants=["woojin.jung@example.test", "all-dev@example.test"])
     I.ent("task", "Task", "임시 계정 정리", [("wikiB", "임시 계정 정리"), ("mailC", "임시 계정 정리")])
-    I.ent("owner", "Person", "마도윤", [("msgA", "마도윤")])
+    I.ent("owner", "Person", "마도윤", [("msgA", "마도윤")], absent=True)
     I.fact("task", "owner", "마도윤", "2026-11-18", "2026-11-19", "removed",
            [("msgA", "담당은 마도윤입니다")], trigger=I.trig("msgA", 2))
     I.fact("task", "start_date", "2026-12-05", "2026-10-20", None, "verified",
@@ -110,26 +110,26 @@ def s12(w):
     I.fact("d2", "start_date", "2026-12-13", "2026-11-19", None, "verified", [("wikiD", "VPN 점검은 2026-12-13 02:00부터 04:00까지 진행한다")])
     I.qa("2026-12-06 VPN 점검 시간은?", ["02:00부터 04:00까지"], [("mailA", "VPN 점검으로 2026-12-06 02:00부터 04:00까지 접속이 제한됩니다")])
 
-    # --- S11-I4: similarly named but unrelated things ------------------------------------
+    # --- S11-I4: a glossary table lists two similar names; no message says they are unrelated -
     I = w.instance("S11-I4", "distractor_noise")
-    I.rec("wikiA", "wiki", "# 정산 리포트\n\n정산 리포트는 매월 재무팀이 확인하는 월간 보고서이다.\n", "정산 리포트",
-          "seoa.lee@example.test", "2026-09-10T10:00:00+09:00")
-    I.rec("wikiB", "wiki", "# 정산 배치(야간)\n\n야간 정산 배치는 매일 03:00에 결제 내역을 집계하는 작업이다.\n", "정산 배치(야간)",
-          "yeonwoo.kang@example.test", "2026-09-11T10:00:00+09:00")
-    I.rec("mailC", "mail", "야간 정산 배치가 2026-11-20 03:00 실행 중 20분 지연되었습니다. 현재는 정상입니다.\n", "배치 지연 안내",
+    I.rec("wikiA", "wiki", "# 업무 용어 정리\n\n| 용어 | 설명 |\n|---|---|\n| 정산 리포트 | 재무팀이 매월 확인하는 월간 보고서 |\n| 야간 정산 배치 | 매일 03:00에 결제 내역을 집계하는 작업 |\n",
+          "업무 용어 정리", "seoa.lee@example.test", "2026-09-10T10:00:00+09:00")
+    I.rec("mailB", "mail", "어젯밤 야간 정산 배치가 20분 늦게 끝났습니다(2026-11-20 03:20 종료). 이후 실행은 정상입니다.\n", "배치 지연 안내",
           "yeonwoo.kang@example.test", "2026-11-20T09:00:00+09:00")
-    I.rec("msgD", "messenger", "정산 리포트 양식 개정은 2026-11-30까지 반영해 주세요.", "리포트 양식",
-          "seoa.lee@example.test", "2026-11-20T10:00:00+09:00", scope=["channel:finance"])
-    I.rec("msgE", "messenger", "리포트 양식 개정과 야간 배치는 서로 관계없는 별개 일정입니다.", "무관 확인",
-          "seoa.lee@example.test", "2026-11-20T10:20:00+09:00", scope=["channel:finance"])
-    I.ent("report", "Document", "정산 리포트", [("wikiA", "정산 리포트"), ("msgD", "정산 리포트")])
-    I.ent("batch", "System", "야간 정산 배치", [("wikiB", "야간 정산 배치"), ("mailC", "야간 정산 배치")])
-    I.pair(("wikiA", "정산 리포트"), ("wikiB", "정산 배치"), "report", "batch")
-    I.pair(("msgD", "정산 리포트"), ("wikiA", "정산 리포트"), "report", "report")
-    I.rel("report", "DEPENDS_ON", "batch", [("msgE", "리포트 양식 개정과 야간 배치는 서로 관계없는 별개 일정입니다")], expected=False)
-    I.rel("report", "RELATED_TO", "batch", [("msgD", "정산 리포트 양식 개정은 2026-11-30까지"), ("mailC", "야간 정산 배치가 2026-11-20 03:00 실행 중 20분 지연되었습니다")], expected=False)
-    I.fact("report", "target_date", "2026-11-30", "2026-11-20", None, "verified", [("msgD", "정산 리포트 양식 개정은 2026-11-30까지 반영해 주세요")])
-    I.ins("dependency_delay", "야간 배치 지연이 정산 리포트 양식 개정 기한에 영향", True, ["batch", "report"],
-          [("mailC", "야간 정산 배치가 2026-11-20 03:00 실행 중 20분 지연되었습니다"), ("msgD", "정산 리포트 양식 개정은 2026-11-30까지 반영해 주세요")],
+    I.rec("mailC", "mail", "정산 리포트 양식 개정 건입니다. 2026-11-30까지 새 양식으로 제출해 주세요. 개정 사유는 항목 명칭 정리입니다.\n", "리포트 양식 개정 안내",
+          "seoa.lee@example.test", "2026-11-20T10:00:00+09:00", participants=["seoa.lee@example.test", "finance-team@example.test"])
+    I.rec("msgD", "messenger", "양식 개정 공지 확인했습니다. 재무팀 템플릿부터 바꿔 두겠습니다.", "양식 확인",
+          "minah.jo@example.test", "2026-11-20T10:30:00+09:00", scope=["channel:finance"])
+    I.ent("report", "Document", "정산 리포트", [("wikiA", "정산 리포트"), ("mailC", "정산 리포트")])
+    I.ent("batch", "System", "야간 정산 배치", [("wikiA", "야간 정산 배치"), ("mailB", "야간 정산 배치")])
+    I.ent("revise", "Task", "리포트 양식 개정", [("mailC", "양식 개정")])
+    I.pair(("wikiA", "정산 리포트"), ("wikiA", "야간 정산 배치"), "report", "batch")
+    I.pair(("mailC", "정산 리포트"), ("wikiA", "정산 리포트"), "report", "report")
+    I.rel("revise", "DEPENDS_ON", "batch", [("mailC", "개정 사유는 항목 명칭 정리입니다"), ("mailB", "야간 정산 배치가 20분 늦게 끝났습니다")], expected=False)
+    I.rel("report", "RELATED_TO", "batch", [("wikiA", "| 정산 리포트 | 재무팀이 매월 확인하는 월간 보고서 |"),
+                                            ("wikiA", "| 야간 정산 배치 | 매일 03:00에 결제 내역을 집계하는 작업 |")], expected=False)
+    I.fact("revise", "target_date", "2026-11-30", "2026-11-20", None, "verified", [("mailC", "2026-11-30까지 새 양식으로 제출해 주세요")])
+    I.ins("dependency_delay", "야간 배치 지연이 리포트 양식 개정 기한에 영향", True, ["batch", "revise"],
+          [("mailB", "야간 정산 배치가 20분 늦게 끝났습니다"), ("mailC", "2026-11-30까지 새 양식으로 제출해 주세요")],
           expected=False)
-    I.qa("정산 리포트 양식 개정은 언제까지 반영해야 하나?", ["2026-11-30"], [("msgD", "정산 리포트 양식 개정은 2026-11-30까지 반영해 주세요")])
+    I.qa("정산 리포트 양식은 언제까지 새 양식으로 제출해야 하나?", ["2026-11-30"], [("mailC", "2026-11-30까지 새 양식으로 제출해 주세요")])

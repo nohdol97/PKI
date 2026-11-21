@@ -61,6 +61,7 @@ def make_dataset(root):
     write_jsonl(os.path.join(root, "sources", "messenger.jsonl"), [
         record("mes-0001", "messenger", CONTENT_2),
         record("mes-0002", "messenger", CONTENT_2),
+        record("mes-0002", "messenger", "", version=2, operation="delete"),
         record("mes-0003", "messenger", CONTENT_2),
     ])
     e_p = ev("mai-0001", CONTENT_1, "한서윤")
@@ -77,7 +78,7 @@ def make_dataset(root):
         {"label_id": "T1:ent-3", "scenario_instance": "T1", "entity_id": "T1:sys", "entity_type": "System",
          "name": "정산 API", "aliases": [], "evidence": [e_sys]},
         {"label_id": "T1:ent-4", "scenario_instance": "T1", "entity_id": "T1:sys2", "entity_type": "System",
-         "name": "정산 API(다른 것)", "aliases": [], "evidence": [e_other]},
+         "name": "정산 API(다른 것)", "aliases": [], "evidence": [e_other], "expected_absent": True},
     ])
     write_jsonl(os.path.join(root, "labels", "resolution_pairs.jsonl"), [
         {"label_id": "T1:pair-1", "scenario_instance": "T1", "mention_a": e_sys, "mention_b": e_dep,

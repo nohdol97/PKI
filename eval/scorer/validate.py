@@ -309,6 +309,16 @@ def validate_dataset(golden_dir, required_scenarios=None):
             continue
         if row["entity_type"] not in ENTITY_TYPES:
             errors.append("%s: entity_type %r not in design section 7" % (where, row["entity_type"]))
+        if "expected_absent" in row:
+            if not isinstance(row["expected_absent"], bool):
+                errors.append("%s: expected_absent must be a boolean" % where)
+            elif row["expected_absent"]:
+                for e in row["evidence"]:
+                    deleted = any(r["operation"] == "delete" and r["id"] == e.get("record_id") and r["version"] > e.get("version", 0)
+                                  for r in records.values())
+                    if not deleted:
+                        errors.append("%s: expected_absent entity has evidence from %s v%s that is not deleted"
+                                      % (where, e.get("record_id"), e.get("version")))
         inst_text = "\n".join(rec["content"] for (rid, _v), rec in records.items()
                               if rid in ids_by_instance.get(row["scenario_instance"], ()))
         for alias in row["aliases"]:

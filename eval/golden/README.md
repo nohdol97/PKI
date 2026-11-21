@@ -8,10 +8,10 @@
 eval/golden/
   sources/            원문 SourceRecord (한 줄 = 한 (id, version))
     mail.jsonl          52줄
-    wiki.jsonl          40줄
+    wiki.jsonl          39줄
     messenger.jsonl     64줄
   labels/             정답 (모든 라벨에 evidence가 있다)
-    entities.jsonl          91   엔티티(설계 §7의 타입)
+    entities.jsonl          92   엔티티(설계 §7의 타입)
     resolution_pairs.jsonl  56   엔티티 해소 쌍(같음 38, 다름 18)
     relations.jsonl         38   관계(연결해야 함 26, 연결하면 안 됨 12)
     temporal_facts.jsonl    64   시간 유효성이 있는 사실과 기대 상태
@@ -66,7 +66,7 @@ eval/golden/
 모든 라벨 줄은 `label_id`, `scenario_instance`, `evidence`를 가진다.
 
 - **evidence**: `[{"record_id", "version", "span": [start, end], "quote"}]`. `span`은 `content`의 **유니코드 코드포인트** 위치이고 반개구간 `[start, end)`이다. `quote`는 `content[start:end]`와 정확히 같다. validator가 모든 근거를 검사한다.
-- **entities**: `entity_id`(`S01-I1:proj` 형식, 인스턴스 안에서만 유일), `entity_type`(설계 §7의 지식 타입), `name`, `aliases`. `aliases`는 **그 인스턴스의 원문에 실제로 나오는 표기만** 적는다(validator가 검사). 같은 대상의 값이 초안에서 확정으로 바뀐 경우처럼 값만 대체된 것은 엔티티를 나누지 않고 한 엔티티의 사실 값이 `superseded`로 바뀐 것으로 라벨링한다(`S09-I3`, 잠정 결정이며 사람 판정 대기).
+- **entities**: `entity_id`(`S01-I1:proj` 형식, 인스턴스 안에서만 유일), `entity_type`(설계 §7의 지식 타입), `name`, `aliases`. `aliases`는 **그 인스턴스의 원문에 실제로 나오는 표기만** 적는다(validator가 검사). 선택 필드 `expected_absent: true`는 "삭제된 레코드만 근거인 엔티티이므로 제품이 드러내면 안 된다"는 표시이다(validator가 근거가 모두 삭제된 레코드인지 검사하고, scorer는 재현율에서 빼고 노출 수를 센다). 같은 대상의 값이 초안에서 확정으로 바뀐 경우처럼 값만 대체된 것은 엔티티를 나누지 않고 한 엔티티의 사실 값이 `superseded`로 바뀐 것으로 라벨링한다(`S09-I3`, 잠정 결정이며 사람 판정 대기).
 - **resolution_pairs**: `mention_a`, `mention_b`(근거와 같은 형식), `entity_id_a`, `entity_id_b`, `same`. `same`은 두 id가 같은지와 일치해야 한다.
 - **relations**: `subject`, `relation`(설계 §7의 대표 관계), `object`, `expected`(`false`면 "연결하면 안 됨"), `valid_from`, `valid_until`(둘 다 null이면 "기간이 정해지지 않은 관계"이고, 소속처럼 기간이 있는 관계만 값을 적었다).
 - **temporal_facts**: `subject`, `attribute`(validator의 통제 어휘만), `value`(시각은 UTC), `valid_from`, `valid_until`(표기 규칙은 `docs/EVALUATION.md` §2.0의 5), `expected_status`, `supersedes`(대체하는 사실의 `label_id`), `as_of`, 선택 `trigger`. 상태는 설계 §6.7의 `candidate`/`verified`/`disputed`/`superseded`/`rejected`에 **이 데이터셋이 추가한** `removed`(원문 삭제로 사라져야 함)와 `restricted`(권한 철회로 일부 사용자에게 숨겨져야 함)를 더했다. `trigger`는 삭제·철회를 일으킨 레코드이다.
@@ -110,7 +110,8 @@ Insight 타입은 영어 이름으로 적었다. 설계 §10의 이름과 대응
 ## 알려진 한계
 
 - **사람 검토 전**: 라벨은 생성자의 판단이다. 기계 두 번째 검토는 원래 eval 12개 인스턴스의 일부 라벨 종류만 덮는다(`labels/REVIEW_STATUS.md`). 점수는 "잠정 라벨 기준"이다.
-- **크기**: 레코드 156줄, 인스턴스 40개. eval은 인스턴스 18개, 답변 가능 질문 17개, 연결해야 할 관계 14개로 작다. 통계적 결론에는 쓸 수 없다. `docs/EVALUATION.md`의 비율 통과선은 이 때문에 개수로 적혀 있다.
+- **크기**: 레코드 155줄, 인스턴스 40개. eval은 인스턴스 18개, 답변 가능 질문 17개, 연결해야 할 관계 14개로 작다. 통계적 결론에는 쓸 수 없다. `docs/EVALUATION.md`의 비율 통과선은 이 때문에 개수로 적혀 있다.
+- **배치 유사**: 이번 재작업에서 더한 eval 인스턴스 6개 중 `S04-I4`, `S05-I4`, `S06-I4`, `S09-I4`는 dev의 짝(`S04-I1`, `S05-I1`, `S06-I2`, `S09-I1`)과 레코드 배치가 닮았다. `S02-I4`와 `S11-I4`만 배치와 문장을 다르게 썼다. dev에서 튜닝한 결과가 eval에서 덜 일반화되는지를 보기에는 이 짝들이 약하다.
 - **문체**: 가상 글은 짧고 깔끔하다. 실제 업무 글의 노이즈(인용 사슬, 서명, 오탈자, 긴 문서)는 거의 없다.
 - **Insight 범위**: 4종만 있고 인스턴스당 많아야 1~2개다. 사람 평가 지표(관련성, 참신성, 실행 가능성)용 데이터는 없다.
 - **정렬 없음**: 제품이 만든 엔티티를 정답 엔티티에 대응시키는 규칙은 이 저장소에 없다(`docs/EVALUATION.md` §6).

@@ -255,6 +255,22 @@ class TestHygieneAndVocabulary(ValidateBase):
         self.assertHasError("second_review_machine")
 
 
+class TestExpectedAbsent(ValidateBase):
+    def test_expected_absent_needs_only_deleted_evidence(self):
+        # ent-4 is evidenced by mes-0002 v1, which the fixture deletes in v2: valid
+        self.assertEqual(self.errors(), [])
+        def fn(rows):
+            rows[3]["evidence"] = [rows[0]["evidence"][0]]   # points at the live mail record
+        self.mutate("labels/entities.jsonl", fn)
+        self.assertHasError("expected_absent")
+
+    def test_expected_absent_must_be_boolean(self):
+        def fn(rows):
+            rows[3]["expected_absent"] = "yes"
+        self.mutate("labels/entities.jsonl", fn)
+        self.assertHasError("expected_absent")
+
+
 class TestOptionalFields(ValidateBase):
     def test_trigger_must_resolve(self):
         def fn(rows):

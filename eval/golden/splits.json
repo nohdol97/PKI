@@ -346,52 +346,51 @@
       "scenario": "same_name_different_people",
       "record_ids": [
         "mail-0042",
-        "mail-0043",
         "msg-0054",
+        "msg-0055",
         "wiki-0032"
       ]
     },
     "S04-I4": {
       "scenario": "contradicting_statements",
       "record_ids": [
-        "mail-0044",
-        "msg-0055",
+        "mail-0043",
+        "msg-0056",
         "wiki-0033"
       ]
     },
     "S05-I4": {
       "scenario": "correction_supersedes",
       "record_ids": [
+        "mail-0044",
         "mail-0045",
-        "mail-0046",
-        "msg-0056"
+        "msg-0057"
       ]
     },
     "S06-I4": {
       "scenario": "deletion",
       "record_ids": [
-        "mail-0047",
-        "msg-0057",
+        "mail-0046",
+        "msg-0058",
         "wiki-0034"
       ]
     },
     "S09-I4": {
       "scenario": "duplicate_threads",
       "record_ids": [
+        "mail-0047",
         "mail-0048",
-        "mail-0049",
-        "msg-0058",
+        "msg-0059",
         "wiki-0035"
       ]
     },
     "S11-I4": {
       "scenario": "distractor_noise",
       "record_ids": [
+        "mail-0049",
         "mail-0050",
-        "msg-0059",
         "msg-0060",
-        "wiki-0036",
-        "wiki-0037"
+        "wiki-0036"
       ]
     }
   }

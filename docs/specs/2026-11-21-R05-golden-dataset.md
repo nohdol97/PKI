@@ -29,7 +29,7 @@
 
 ## 요구사항
 
-- R05-R1: `eval/golden/sources/{mail,wiki,messenger}.jsonl`에 SourceRecord를 둔다. 필드는 설계 §5의 `id, source_type, external_id, title, content, author, participants, thread_id, source_url, created_at, updated_at, content_hash, version, access_scope, metadata`에 `connector_instance_id`, `operation`(`upsert`/`delete`/`revoke`), `schema_version`을 더한다. 한 `(id, version)` 쌍이 한 줄이다. 총 120~180줄(재작업 후 156줄).
+- R05-R1: `eval/golden/sources/{mail,wiki,messenger}.jsonl`에 SourceRecord를 둔다. 필드는 설계 §5의 `id, source_type, external_id, title, content, author, participants, thread_id, source_url, created_at, updated_at, content_hash, version, access_scope, metadata`에 `connector_instance_id`, `operation`(`upsert`/`delete`/`revoke`), `schema_version`을 더한다. 한 `(id, version)` 쌍이 한 줄이다. 총 120~180줄(재작업 후 155줄).
 - R05-R2: 시나리오 `schedule_dependency_delay`(설계 §10의 A/B 예 포함, 전체 ISO 날짜), `same_name_different_people`, `abbreviation_two_meanings`, `contradicting_statements`, `correction_supersedes`, `deletion`, `permission_revocation`, `timezone_offsets`, `duplicate_threads`, `mixed_ko_en_same_concept`가 각각 3개 이상의 인스턴스를 가진다.
 - R05-R3: `distractor_noise` 시나리오가 3개 이상의 인스턴스를 가지며, 각 방해 레코드는 "연결하면 안 됨"으로 라벨링된다(relations의 `expected: false`).
 - R05-R4: `eval/golden/labels/`에 `entities`, `resolution_pairs`, `relations`, `temporal_facts`, `insights`, `qa` 여섯 파일을 둔다. 관계 type은 설계 §7, Insight type은 설계 §10, 지식 type은 설계 §7에서 고른다. 모든 라벨에 `evidence`(`{record_id, version, span:[start,end], quote}` 목록)가 있고 `quote`는 해당 레코드 `content`의 `[start,end)` 조각과 같다. `span`은 유니코드 코드포인트 기준이다. Insight는 `is_inference`를 가진다.
@@ -81,3 +81,4 @@ eval/golden/splits.json      ->  score.py --split dev|eval
 |---|---|---|---|
 | 2026-11-21 | 초안 작성 | 이 문서 | 이슈 #14(R05) 착수. 구현 전에 R/C 기준 고정 |
 | 2026-11-21 | 독립 리뷰(REWORK, F1~F19) 반영: eval 인스턴스 6개 추가(34→40개, eval 12→18), 시간 사실 통제 어휘·UTC·`valid_from` 규칙, `is_inference` 규칙, 라벨 수정(F6~F8, F10~F12, F18), 중복 인용 한 번 계산·대칭 관계·미지 id 오류·`unjudged` 보고, validator에 별칭·URL host·라벨 id 메시지·두 번째 검토 파일 검사 추가, 변이 생존 두 건을 잡는 테스트 추가, 두 번째 기계 검토 결과 편입, R05-C1을 구조적 충족으로, R05-C3을 부분 충족으로 정정 | 이 문서, `eval/`, `docs/EVALUATION.md` | 리뷰어 F19 등. 모든 R/C 기준 번호는 그대로 |
+| 2026-11-21 | 재검토(N1~N10) 반영: scorer가 판정 대상을 정함(끝점이 정답 id인 관계는 `judged:false`로 빼지 못함), `expected_absent` 엔티티 표시와 scorer·validator 처리, `S02-I4`·`S11-I4` 재작성(155줄), 평가 문서의 dev 분모·`is_inference` 분모·C1 상한 면제·표기·낡은 수치 정정 | `eval/scorer/`, `eval/golden/`, `docs/EVALUATION.md`, 이 문서 | 델타 리뷰 N1~N10 |

@@ -31,6 +31,7 @@ python3 -m unittest discover -s eval/scorer/tests -v
 | `retrieval` | `query_id`(`labels/qa.jsonl`의 `label_id`), `ranked`(레코드 id 목록, 순위순. 객체 `{"record_id": ...}`도 허용) | 질문별 검색 순위 |
 | `citation` | `query_id`, `citations`(`[{"record_id", "version"}]`) | 질문별 답변이 단 인용. 답할 수 없는 질문은 빈 목록이 정답 |
 | `relation` | `subject`, `relation`, `object` (정답 엔티티 id 사용). 라벨에 닿지 않는 예측은 `"judged": false`(선택 `scenario_instance`)로 표시 | 제품이 낸 관계 한 건 |
+| `entity` | `entity_id`(정답 엔티티 id) | 제품이 드러낸 엔티티. `expected_absent`인 엔티티를 드러내면 `surfaced_absent`로 세고 재현율에서는 뺀다 |
 | `resolution` | `pair_id`(`resolution_pairs.jsonl`의 `label_id`), `same`(true/false) | 두 mention이 같은 엔티티인가 |
 
 예시:
@@ -48,7 +49,7 @@ python3 -m unittest discover -s eval/scorer/tests -v
 - 예측이 없는 질문의 검색은 빈 순위(0점), 예측이 없는 엔티티 쌍은 "같지 않음"으로 센다. 누락 수는 출력의 `missing_predictions`, `missing`에 나온다.
 - 검색 정답은 질문의 `evidence`에 나온 `record_id`의 집합이다(버전은 보지 않음). 인용은 `(record_id, version)` 쌍으로 비교한다.
 - 같은 질문의 같은 `(record_id, version)` 인용은 한 번만 센다. `CONTRADICTS`, `RELATED_TO` 관계는 방향을 구분하지 않는다.
-- `"judged": false` 관계는 정밀도에서 빼고 출력의 `n_unjudged`로만 보고한다(`docs/EVALUATION.md` §2.0).
+- `"judged": false`는 **끝점 중 하나가 정답 엔티티 id가 아닐 때만** 존중해 정밀도에서 빼고 `n_unjudged`로 보고한다. 두 끝점이 모두 정답 id이면 예측 파일의 표시와 무관하게 항상 채점한다(금지 관계 `forbidden_hits` 포함).
 - 중복 레코드(`duplicate_threads`)는 정답 근거에 **원본만** 넣었다. 복사본을 인용하면 틀린 인용으로 센다(보수적 채점).
 - `relation`의 엔티티는 정답 엔티티 id로 적는다. 제품 엔티티를 정답 엔티티에 대응시키는 정렬은 이 도구의 범위 밖이다(`docs/EVALUATION.md` §6).
 - Insight 지표, Temporal Fact Accuracy, Source Attribution 등은 아직 계산하지 않는다(`docs/EVALUATION.md`에 정의만 있음).

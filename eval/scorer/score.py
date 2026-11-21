@@ -95,6 +95,18 @@ def relation_metrics(predicted, gold, forbidden, unjudged=0):
     }
 
 
+def entity_metrics(predicted, present, absent):
+    """predicted: set of gold entity ids the product surfaced; present: gold entities that must be found;
+    absent: entities evidenced only by deleted records, which must NOT be surfaced."""
+    predicted = set(predicted)
+    return {
+        "recall": _safe_div(len(predicted & set(present)), len(present)),
+        "n_gold": len(present),
+        "surfaced_absent": len(predicted & set(absent)),
+        "n_absent": len(absent),
+    }
+
+
 def pairwise_f1(predicted, gold):
     """predicted/gold: {pair_id: bool same-entity}. A missing prediction means 'not same'."""
     tp = fp = fn = 0
@@ -176,12 +188,14 @@ def score(golden_dir, predictions_path, split=None, scenarios=None, k=5):
     qa = {q["label_id"]: q for q in load_jsonl(os.path.join(labels, "qa.jsonl"))}
     pairs = {p["label_id"]: p for p in load_jsonl(os.path.join(labels, "resolution_pairs.jsonl"))}
     relations = load_jsonl(os.path.join(labels, "relations.jsonl"))
-    entities = {e["entity_id"]: e["scenario_instance"] for e in load_jsonl(os.path.join(labels, "entities.jsonl"))}
+    entity_rows = load_jsonl(os.path.join(labels, "entities.jsonl"))
+    entities = {e["entity_id"]: e["scenario_instance"] for e in entity_rows}
 
     retrieval_pred = {}
     citation_pred = {}
     resolution_pred = {}
     relation_pred = set()
+    entity_pred = set()
     unjudged = 0
     for row in load_jsonl(predictions_path):
         kind = row.get("kind")
@@ -199,7 +213,10 @@ def score(golden_dir, predictions_path, split=None, scenarios=None, k=5):
                 raise ValueError("unknown pair_id: %s" % row["pair_id"])
             resolution_pred[row["pair_id"]] = bool(row["same"])
         elif kind == "relation":
-            if row.get("judged") is False:
+            # The scorer, not the predictions file, decides what is judged: a triple whose endpoints are
+            # both gold entity ids is always scored. `judged: false` applies only to other endpoints.
+            both_gold = row.get("subject") in entities and row.get("object") in entities
+            if row.get("judged") is False and not both_gold:
                 if row.get("scenario_instance") is None or row["scenario_instance"] in scope:
                     unjudged += 1
                 continue
@@ -209,6 +226,10 @@ def score(golden_dir, predictions_path, split=None, scenarios=None, k=5):
                 if row[end] not in entities:
                     raise ValueError("unknown entity id in relation prediction: %r" % row[end])
             relation_pred.add((row["subject"], row["relation"], row["object"]))
+        elif kind == "entity":
+            if row["entity_id"] not in entities:
+                raise ValueError("unknown entity id in entity prediction: %r" % row["entity_id"])
+            entity_pred.add(row["entity_id"])
         else:
             raise ValueError("unknown prediction kind: %r" % (kind,))
 
@@ -232,6 +253,10 @@ def score(golden_dir, predictions_path, split=None, scenarios=None, k=5):
                 if r["scenario_instance"] in scope and not r["expected"]}
     pred_rel = {t for t in relation_pred if entities[t[0]] in scope}
 
+    present = {e["entity_id"] for e in entity_rows if e["scenario_instance"] in scope and not e.get("expected_absent")}
+    absent = {e["entity_id"] for e in entity_rows if e["scenario_instance"] in scope and e.get("expected_absent")}
+    pred_entities = {e for e in entity_pred if entities[e] in scope}
+
     gold_pairs = {pid: p["same"] for pid, p in pairs.items() if p["scenario_instance"] in scope}
     pred_pairs = {pid: v for pid, v in resolution_pred.items() if pid in gold_pairs}
 
@@ -250,6 +275,7 @@ def score(golden_dir, predictions_path, split=None, scenarios=None, k=5):
             "precision_at_k": _mean(precisions),
             "mrr": _mean(rrs),
         },
+        "entities": entity_metrics(pred_entities, present, absent),
         "relations": relation_metrics(pred_rel, gold_rel, forb_rel, unjudged),
         "resolution": pairwise_f1(pred_pairs, gold_pairs),
         "citation": citation_metrics(pred_cites, required, forbidden),

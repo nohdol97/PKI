@@ -144,11 +144,14 @@ class Inst:
         return {"record_id": self.refs[ref], "version": ver}
 
     # ---- labels --------------------------------------------------------
-    def ent(self, key, etype, name, evs, aliases=()):
-        self.w.labels["entities"].append({
+    def ent(self, key, etype, name, evs, aliases=(), absent=False):
+        row = {
             "label_id": self.w.next_label(self.iid, "ent"), "scenario_instance": self.iid,
             "entity_id": self.eid(key), "entity_type": etype, "name": name, "aliases": list(aliases),
-            "evidence": self._evs(evs)})
+            "evidence": self._evs(evs)}
+        if absent:
+            row["expected_absent"] = True   # evidenced only by deleted records: must not be surfaced
+        self.w.labels["entities"].append(row)
 
     def pair(self, a, b, ent_a, ent_b):
         ma, mb = self._ev(a), self._ev(b)

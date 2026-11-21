@@ -74,6 +74,19 @@ class TestRelationEdgeCases(unittest.TestCase):
         self.assertEqual(m["n_unjudged"], 3)
 
 
+class TestEntityMetrics(unittest.TestCase):
+    def test_recall_and_surfaced_absent(self):
+        m = score.entity_metrics({"a", "x"}, present={"a", "b"}, absent={"x", "y"})
+        self.assertAlmostEqual(m["recall"], 0.5)
+        self.assertEqual(m["surfaced_absent"], 1)
+        self.assertEqual(m["n_absent"], 2)
+
+    def test_absent_entities_do_not_count_as_gold(self):
+        m = score.entity_metrics({"a"}, present={"a"}, absent={"gone"})
+        self.assertEqual(m["recall"], 1.0)
+        self.assertEqual(m["surfaced_absent"], 0)
+
+
 class TestPairwiseF1(unittest.TestCase):
     def test_f1(self):
         gold = {"p1": True, "p2": True, "p3": False, "p4": False}
@@ -207,6 +220,42 @@ class TestScoreEndToEnd(unittest.TestCase):
         res = score.score(self.root, self.pred_path)
         self.assertEqual(res["relations"]["n_unjudged"], 1)
         self.assertEqual(res["relations"]["precision"], 1.0)
+
+    def test_judged_false_cannot_hide_gold_id_relations(self):
+        # N1: a prediction file must not exempt its own relations. Both endpoints are gold ids,
+        # so the scorer judges them whatever the `judged` field says.
+        write_jsonl(self.pred_path, [
+            {"kind": "relation", "subject": "T1:proj", "relation": "DEPENDS_ON", "object": "T1:sys2", "judged": False},
+            {"kind": "relation", "subject": "T1:proj", "relation": "DEPENDS_ON", "object": "T1:sys", "judged": False},
+        ])
+        res = score.score(self.root, self.pred_path)
+        self.assertEqual(res["relations"]["forbidden_hits"], 1)
+        self.assertEqual(res["relations"]["n_predicted"], 2)
+        self.assertEqual(res["relations"]["n_unjudged"], 0)
+        self.assertAlmostEqual(res["relations"]["precision"], 0.5)
+
+    def test_judged_false_honoured_when_an_endpoint_is_not_a_gold_id(self):
+        write_jsonl(self.pred_path, [
+            {"kind": "relation", "subject": "T1:proj", "relation": "DEPENDS_ON", "object": "not-gold", "judged": False},
+        ])
+        res = score.score(self.root, self.pred_path)
+        self.assertEqual(res["relations"]["n_unjudged"], 1)
+        self.assertEqual(res["relations"]["n_predicted"], 0)
+
+    def test_entity_predictions_scored_with_absent_marker(self):
+        # T1:sys2 is marked expected-absent in the fixture; surfacing it is a violation, not recall
+        write_jsonl(self.pred_path, [
+            {"kind": "entity", "entity_id": "T1:proj"},
+            {"kind": "entity", "entity_id": "T1:sys2"},
+        ])
+        res = score.score(self.root, self.pred_path)
+        self.assertEqual(res["entities"]["surfaced_absent"], 1)
+        self.assertAlmostEqual(res["entities"]["recall"], 1 / 3)
+
+    def test_unknown_entity_prediction_is_error(self):
+        write_jsonl(self.pred_path, [{"kind": "entity", "entity_id": "T1:nobody"}])
+        with self.assertRaises(ValueError):
+            score.score(self.root, self.pred_path)
 
     def test_unknown_query_id_is_error(self):
         write_jsonl(self.pred_path, [{"kind": "retrieval", "query_id": "nope", "ranked": []}])

@@ -6,14 +6,14 @@
 
 | 파일 | 줄 수 | 상태 |
 |---|---|---|
-| `entities.jsonl` | 91 | generator-labelled, independent review pending |
+| `entities.jsonl` | 92 | generator-labelled, independent review pending |
 | `resolution_pairs.jsonl` | 56 | generator-labelled, independent review pending (원래 eval 12개 인스턴스 분은 기계 두 번째 검토 있음) |
 | `relations.jsonl` | 38 | generator-labelled, independent review pending (같음) |
 | `temporal_facts.jsonl` | 64 | generator-labelled, independent review pending (같음) |
 | `insights.jsonl` | 17 | generator-labelled, independent review pending (같음) |
 | `qa.jsonl` | 47 | generator-labelled, independent review pending |
 | `../splits.json` (분할 배정) | 40 인스턴스 | generator-assigned, independent review pending |
-| `../sources/*.jsonl` (합성 원문) | 156 | generator-written (가상 데이터이며 정답이 아님) |
+| `../sources/*.jsonl` (합성 원문) | 155 | generator-written (가상 데이터이며 정답이 아님) |
 | `review/second_review_machine.jsonl` | 116 | 두 번째 기계 검토의 원본 출력(라벨이 아니다) |
 
 `quote`가 `span`과 같은지, id가 풀리는지 같은 **기계적 정합성**은 `eval/scorer/validate.py`가 검사한다. 이것은 라벨의 **의미가 옳은지**를 보증하지 않는다.
@@ -46,7 +46,7 @@
 ### 불일치 세 건과 현재(잠정) 처리
 
 1. **`S08-I3:pair-2`.** 두 번째 검토는 메일의 "서울과 시애틀 주간 동기화"를 서울 회의로 좁혀 읽었고, 생성자는 그 구절 전체를 서울 회의와 같다고 라벨링했다. 리뷰어의 판단: 그 구절은 두 회의를 모두 가리키므로 생성자 쪽이 모호하다. **조치**: 메일 쪽 mention을 "서울"로 좁혔다. *사람 판정 대기*: 좁힌 쌍이 맞는지, 아니면 이 쌍을 빼야 하는지.
-2. **`S09-I3:pair-2`.** 두 번째 검토는 P1 응답 기준 15분(최종)과 30분(초안)을 **다른 엔티티**로 봤고, 생성자는 한 엔티티의 값이 바뀐 것으로 봤다(생성자의 시간 사실도 `supersedes`로 한 대상을 전제했다). **잠정 조정(provisional, human decision pending)**: *한 엔티티가 있고 그 값이 초안(30분)에서 최종(15분)으로 대체된 것*으로 라벨링했다(쌍은 `same: true`, 시간 사실은 `superseded`). 두 해석은 다음과 같다. (a) 규칙은 한 엔티티이고 값이 버전을 가진다 — 설계 §7이 요구하는 사실의 시간 유효성 모델과 일치하고, 초안을 최종과 합친 것을 오류로 치지 않는다. (b) 초안 문서와 최종 문서가 서로 다른 지식 항목이다 — 문서 단위 분리를 존중하지만 `SUPERSEDES` 사실과 모순되고 `false_merge`를 버전 모델에 불리하게 만든다. 사람이 둘 중 하나를 확정해야 한다.
+2. **`S09-I3:pair-2`.** 생성자는 P1 응답 기준 15분(최종)과 30분(초안)을 **다른 엔티티**(`same: false`)로 라벨링했는데 같은 라벨 집합의 시간 사실은 `supersedes`로 한 대상을 전제했다(스스로 어긋남). 두 번째 검토는 한 엔티티의 값이 대체된 것으로 읽었다. **잠정 조정(provisional, human decision pending)**: *한 엔티티가 있고 그 값이 초안(30분)에서 최종(15분)으로 대체된 것*으로 라벨링했다(쌍은 `same: true`, 시간 사실은 `superseded`). 두 해석은 다음과 같다. (a) 규칙은 한 엔티티이고 값이 버전을 가진다 — 설계 §7이 요구하는 사실의 시간 유효성 모델과 일치하고, 초안을 최종과 합친 것을 오류로 치지 않는다. (b) 초안 문서와 최종 문서가 서로 다른 지식 항목이다 — 문서 단위 분리를 존중하지만 `SUPERSEDES` 사실과 모순되고 `false_merge`를 버전 모델에 불리하게 만든다. 사람이 둘 중 하나를 확정해야 한다.
 3. **`S04-I3:ins-1`의 `is_inference`.** 두 번째 검토는 `false`, 생성자는 `true`였다(출처가 둘이고 서로 다른 숫자를 말한다). **조치**: 규칙을 정했다. *한 출처가 결론을 명시하면 `false`*(이 인스턴스는 메시지가 "위키랑 메일이 달라서"라고 말한다). 이 규칙을 dev와 eval에 일관되게 적용해 `S04-I3`과 `S04-I1`을 `false`로 바꾸었다. *사람 판정 대기*: 이 규칙 자체가 맞는지.
 
 필드 수준 차이(합의된 행 안에서): `S06-I3`의 삭제된 사실 `valid_until`(삭제 시각), `S07-I3`의 `valid_from`, `S05-I3`의 두 사실이 날짜 단위라 09:00 → 09:12 순서가 표현되지 않는 것. `valid_from`/`valid_until` 규칙(`docs/EVALUATION.md` §2.0의 5)을 정하고 앞의 값들을 채웠다. 순서는 `supersedes`로만 표현된다.
@@ -78,5 +78,6 @@
 ## 현재 알려진 위험
 
 - 생성자가 시나리오와 정답을 함께 만들었으므로 데이터가 정답을 "쉽게" 드러내도록 쓰였을 수 있다(편향).
+- 이번 재작업에서 더한 eval 인스턴스 6개 중 `S04-I4`, `S05-I4`, `S06-I4`, `S09-I4`는 dev의 짝(`S04-I1`, `S05-I1`, `S06-I2`, `S09-I1`)과 배치가 닮았다. `S02-I4`와 `S11-I4`만 다르게 다시 썼다. 닮은 짝은 dev 튜닝이 eval로 새는 정도를 과소평가하게 한다.
 - 시나리오별 인스턴스는 3~4개뿐이다. 한 인스턴스의 라벨 오류가 점수에 크게 영향을 준다.
 - 두 번째 기계 검토 뒤에 라벨을 고쳤으므로 `review/second_review_machine.jsonl`은 현재 라벨과 일부 다르다. 그것이 정상이다.
