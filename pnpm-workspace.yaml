@@ -1,0 +1,7 @@
+packages:
+  - apps/*
+  - backend
+  - knowledge-engine
+  - providers
+  - storage
+  - packages/*

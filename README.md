@@ -11,6 +11,18 @@
 - 전체 계획과 완료 기준: [#1 총괄](https://github.com/nohdol97/PKI/issues/1)
 - 지금 진행 중인 단계: [#2 Phase 0 — OSS Research & PoC](https://github.com/nohdol97/PKI/issues/2)
 
+## 개발 명령
+
+저장소 루트에서 실행합니다. pnpm이 `package.json`의 `devEngines`에 고정한 Node.js 24로 명령을 실행합니다(없으면 내려받습니다).
+
+- `pnpm install` — 의존성 설치
+- `pnpm lint` — ESLint(모듈 경계 규칙 포함)와 Prettier 검사
+- `pnpm typecheck` — TypeScript strict 타입 검사
+- `pnpm test` — Vitest 단위·계약 테스트
+- `pnpm e2e` — Playwright E2E(아직 E2E 테스트가 없어 0건으로 통과)
+
+배포처 설정: [docs/site-setup.md](docs/site-setup.md) · 저장소 배치: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 ## 작업 방식
 
 - 이 저장소에는 범용 제품만 둡니다. 실제 메일·메신저·Wiki 수집기와 환경별 연동은 배포처 포크에서 구현합니다.
