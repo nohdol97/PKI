@@ -204,6 +204,19 @@ describe("module-boundary rule", () => {
       { code: "export const g = async (): Promise<Connector> => load();", filename: storageModule },
       { code: "export const p: LLMProvider = make();", filename: storageModule },
       { code: "export const c = connector as Connector;", filename: storageModule },
+      // a factory typed by alias that returns an existing value, like a function does (R2-5)
+      { code: "export const f: ConnectorFactory = () => existing;", filename: storageModule },
+      { code: "export const f: OpenSqlDriver = (p) => open(p);", filename: storageModule },
+      // only the function's own returns count, not a nested function's (R2-3)
+      {
+        code: "export function f(): Connector { const g = () => ({ a: 1 }); function h() { return { b: 1 }; } return deps.c; }",
+        filename: storageModule,
+      },
+      // a local that is not what is returned, or is reassigned, is not followed
+      {
+        code: "export function f(): Connector { const c = { a: 1 }; return deps.c ?? load(c); }",
+        filename: storageModule,
+      },
       // tests may share test helpers
       { code: 'import { h } from "./helper.test.ts";', filename: backendTest },
     ],
@@ -306,6 +319,13 @@ describe("module-boundary rule", () => {
         'export { f } from "./sneaky.e2e.ts";',
         'import { f } from "./screens.e2e.tsx";',
         'const m = await import("../src/sneaky.test");',
+        // bundler resolution maps a JS specifier to the TS file (R2-1), one case per extension
+        'import { f } from "./sneaky.e2e.js";',
+        'import { f } from "./sneaky.test.mjs";',
+        'import { f } from "./sneaky.test.cjs";',
+        'import { f } from "./sneaky.e2e.jsx";',
+        'import { f } from "./sneaky.test.mts";',
+        'import { f } from "./sneaky.test.cts";',
       ].map((code) => ({
         code,
         filename: backendFile,
@@ -317,7 +337,7 @@ describe("module-boundary rule", () => {
         "export const C = class implements Connector {};",
         "export function open(): SqlDriver { return { exec }; }",
         "export const open = (): VectorIndex => ({ status });",
-        "export const open: OpenSqlDriver = (p) => d(p);",
+        "export const open: OpenSqlDriver = (p) => ({ exec: p });",
         "export const c = { manifest } satisfies Connector;",
         "export const p: LLMProvider = new Fake();",
         // every form reviewer B probed (V01-T07 B1), one case each
@@ -329,6 +349,19 @@ describe("module-boundary rule", () => {
         "export const f: Make = () => ({ manifest });\ntype Make = () => Connector;",
         'import type { ConnectorFactory } from "./connectors.ts";\nexport const f: ConnectorFactory = () => ({ manifest });',
         "export const s: SqlDriver & { extra: 1 } = { exec, extra: 1 };",
+        // round 2 (R2-2): a built value returned through a local, conditionals, same-file
+        // interfaces, generic constraints and constructor types
+        "export function f(): Connector { const c = { manifest }; return c; }",
+        "export function f(): Connector { const c = new Impl(); return c; }",
+        "export const f = (): Connector => (flag ? { manifest } : fallback);",
+        "export const c: Connector = existing ?? { manifest };",
+        "interface MyConn extends Connector { extra: 1 }\nexport class X implements MyConn {}",
+        "export interface MyConn extends Partial<Connector> {}\nexport const c: MyConn = { manifest };",
+        "export function f<T extends Connector>(): T { return { manifest } as T; }",
+        "export function f(): new () => Connector { return class {}; }",
+        // R2-3: the alias fixed point, the non-null unwrap
+        "type B = A;\ntype A = Connector;\nexport class X implements B {}",
+        "export const c: Connector = { manifest }!;",
       ].map((code) => ({
         code,
         filename: storageModule,

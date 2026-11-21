@@ -12,20 +12,26 @@
 // re-export an adapter). @pki/testkit (test doubles, test builds only) is outside
 // this boundary. Outside src/adapters/, code that builds an implementation fails
 // too: a class implementing an adapter interface, or an object, class, function
-// or `new` value typed as one (annotation, return type, satisfies, as). Names are
-// followed through import aliases, qualified names, local type aliases, unions,
-// intersections, function types and the wrappers in WRAPPERS. Holding or returning
-// a value built elsewhere (`const i: VectorIndex = deps.index`) is allowed.
+// or `new` value typed as one (annotation, return type, satisfies, as), including
+// either branch of `?:`, `&&`, `||`, `??`, and a same-function `const` that the
+// function returns. Names are followed through import aliases, qualified names,
+// top-level type aliases and interfaces extending an adapter, unions,
+// intersections, function and constructor types, a function's own type
+// parameters constrained to an adapter, and the wrappers in WRAPPERS. Holding or
+// returning a value built elsewhere (`const i: VectorIndex = deps.index`) is
+// allowed, for a function value too (`const f: ConnectorFactory = () => existing`).
 // Known gaps (not checked):
 // - createRequire(import.meta.url)("...") calls
 // - package.json "imports" subpaths ("#name")
 // - absolute-path specifiers
 // - import() with a computed specifier (import(`./adapters/${name}.ts`))
-// - an implementation outside src/adapters/ that names no adapter type at all,
-//   is built indirectly (a call's result, array or Map elements), or is typed
-//   through an alias defined in another module (except ConnectorFactory) or a
-//   container other than WRAPPERS: it escapes, and so do its importers; review
-//   catches it
+// - an implementation outside src/adapters/ that names no adapter type at all;
+//   is built indirectly (a call's result, array or Map elements, spread, a local
+//   declared with let/var, outside the function, or through a second local); is
+//   typed through an alias or interface declared inside a function or in another
+//   module (except ConnectorFactory), a container other than WRAPPERS, or a type
+//   parameter of a class or a variable: it escapes, and so do its importers;
+//   review catches it
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -33,7 +39,7 @@ const SCOPE = "@pki/";
 const TEST_FILE = /\.(test|e2e)\.tsx?$/;
 const ADAPTERS_DIR = "src/adapters";
 const COMPOSITION_ROOT = { pkg: "@pki/backend", file: "src/composition.ts" };
-const TEST_SPECIFIER = /\.(test|e2e)(\.tsx?)?$/;
+const TEST_SPECIFIER = /\.(test|e2e)(\.[cm]?[jt]sx?)?$/;
 const EXEMPT_PACKAGES = new Set(["@pki/testkit"]);
 const ADAPTER_INTERFACES = new Set([
   "Connector",
@@ -81,28 +87,41 @@ function adapterName(type, names) {
     case "TSIntersectionType":
       return type.types.map((/** @type {any} */ t) => adapterName(t, names)).find(Boolean);
     case "TSFunctionType":
+    case "TSConstructorType":
       return adapterName(type.returnType?.typeAnnotation, names);
     default:
       return undefined;
   }
 }
 
-/** @param {any} node An expression: does it build a value (object, class, function, `new`)? */
+/** @param {any} node An expression: does it build a value (object, class, function, `new`)? @returns {boolean} */
 function builds(node) {
   while (["TSAsExpression", "TSSatisfiesExpression", "TSNonNullExpression"].includes(node?.type)) {
     node = node.expression;
   }
+  if (node?.type === "ConditionalExpression")
+    return builds(node.consequent) || builds(node.alternate);
+  if (node?.type === "LogicalExpression") return builds(node.left) || builds(node.right);
   return BUILT.has(node?.type);
 }
 
-/** @param {any} fn A function node: the values it returns, nested functions excluded */
+/**
+ * A function node: the values it returns, nested functions excluded. A returned
+ * name of a `const` declared in the same function stands for that const's value.
+ * @param {any} fn
+ */
 function returnedValues(fn) {
   if (fn.body?.type !== "BlockStatement") return [fn.body];
   /** @type {any[]} */
   const found = [];
+  const locals = new Map();
   /** @param {any} node */
   const visit = (node) => {
     if (node.type === "ReturnStatement") found.push(node.argument);
+    if (node.type === "VariableDeclaration" && node.kind === "const") {
+      for (const d of node.declarations)
+        if (d.id.type === "Identifier") locals.set(d.id.name, d.init);
+    }
     if (FUNCTIONS.has(node.type)) return;
     for (const [key, value] of Object.entries(node)) {
       if (key === "parent") continue;
@@ -112,7 +131,9 @@ function returnedValues(fn) {
     }
   };
   for (const statement of fn.body.body) visit(statement);
-  return found;
+  return found.map((v) =>
+    v?.type === "Identifier" && locals.has(v.name) ? locals.get(v.name) : v,
+  );
 }
 
 /** @param {string} file */
@@ -234,7 +255,12 @@ const moduleBoundary = {
     };
     /** @param {any} node */
     const returns = (node) => {
-      const name = adapterName(node.returnType?.typeAnnotation, names);
+      // its own type parameters constrained to an adapter (`<T extends Connector>`)
+      const own = new Set(names);
+      for (const param of node.typeParameters?.params ?? []) {
+        if (adapterName(param.constraint, names)) own.add(param.name?.name ?? param.name);
+      }
+      const name = adapterName(node.returnType?.typeAnnotation, own);
       if (name && returnedValues(node).some(builds)) implementation(node, name);
     };
     /** @param {any} node */
@@ -246,11 +272,25 @@ const moduleBoundary = {
       /** Collects this file's aliases of adapter names before any use is visited. */
       /** @param {any} program */
       Program: (program) => {
-        /** @type {any[]} */
+        /** Top-level type names and whether they refer to an adapter, given `names`. @type {[string, () => unknown][]} */
         const aliases = [];
         for (const statement of program.body) {
           const declaration = statement.declaration ?? statement;
-          if (declaration.type === "TSTypeAliasDeclaration") aliases.push(declaration);
+          if (declaration.type === "TSTypeAliasDeclaration") {
+            aliases.push([
+              declaration.id.name,
+              () => adapterName(declaration.typeAnnotation, names),
+            ]);
+          }
+          if (declaration.type === "TSInterfaceDeclaration") {
+            aliases.push([
+              declaration.id.name,
+              () =>
+                (declaration.extends ?? []).some((/** @type {any} */ h) =>
+                  referenced(h.expression, h.typeArguments?.params, names),
+                ),
+            ]);
+          }
           for (const spec of statement.type === "ImportDeclaration" ? statement.specifiers : []) {
             const imported = spec.imported?.name ?? spec.imported?.value;
             if (spec.type === "ImportSpecifier" && names.has(imported)) names.add(spec.local.name);
@@ -258,9 +298,9 @@ const moduleBoundary = {
         }
         for (let grew = true; grew;) {
           grew = false;
-          for (const alias of aliases) {
-            if (!names.has(alias.id.name) && adapterName(alias.typeAnnotation, names)) {
-              names.add(alias.id.name);
+          for (const [alias, refersToAdapter] of aliases) {
+            if (!names.has(alias) && refersToAdapter()) {
+              names.add(alias);
               grew = true;
             }
           }
@@ -274,7 +314,11 @@ const moduleBoundary = {
       /** @param {any} node */
       VariableDeclarator: (node) => {
         const name = adapterName(node.id?.typeAnnotation?.typeAnnotation, names);
-        if (name && builds(node.init)) implementation(node, name);
+        // a function value is judged by what it returns, as a function declaration is
+        const built = FUNCTIONS.has(node.init?.type)
+          ? returnedValues(node.init).some(builds)
+          : builds(node.init);
+        if (name && built) implementation(node, name);
       },
       TSSatisfiesExpression: typed,
       TSAsExpression: typed,

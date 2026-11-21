@@ -10,3 +10,18 @@ providerContract("fake", () => new FakeProvider(), {
       script: [{ error: new ProviderError("backend failed", { retryable: true }) }],
     }),
 });
+
+// A Provider without structured output still passes; the structured legs are skipped.
+const plainOnly = { structuredOutput: false };
+providerContract(
+  "fake without structured output",
+  () => new FakeProvider({ capabilities: plainOnly }),
+  {
+    modelCalls: (provider) => provider.requests.length,
+    failing: () =>
+      new FakeProvider({
+        capabilities: plainOnly,
+        script: [{ error: new ProviderError("backend failed", { retryable: false }) }],
+      }),
+  },
+);

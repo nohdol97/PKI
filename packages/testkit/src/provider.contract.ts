@@ -91,10 +91,12 @@ export function providerContract<P extends LLMProvider>(
     });
 
     it("reports a failed generation as a ProviderError that says whether to retry", async () => {
-      for (const run of [
-        (p: P) => p.generate(providerRequest(), live()),
-        (p: P) => p.generateStructured(structuredRequest(), live()),
-      ]) {
+      const legs: ((p: P) => Promise<unknown>)[] = [(p) => p.generate(providerRequest(), live())];
+      // a Provider without structured output is never asked for it (the Broker checks)
+      if (options.failing().getCapabilities().structuredOutput) {
+        legs.push((p: P) => p.generateStructured(structuredRequest(), live()));
+      }
+      for (const run of legs) {
         const error = await run(options.failing()).then(
           () => undefined,
           (e: unknown) => e,

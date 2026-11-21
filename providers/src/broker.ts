@@ -368,6 +368,11 @@ export function createBroker(deps: BrokerDeps) {
     if (!provider) return { status: "blocked", requestId, reason: "no-provider" };
 
     const base = { requestId, providerId: provider.id, taskKind: request.taskKind, classification };
+    // every Phase 1 task asks for structured output; a Provider without it is never called
+    if (!provider.getCapabilities().structuredOutput) {
+      deps.recorder.record({ ...base, attempt: 1, outcome: "blocked" });
+      return { status: "blocked", requestId, reason: "structured-output-unsupported" };
+    }
     const timeoutMs = Math.min(request.budget.timeoutMs, limits.maxTimeoutMs);
 
     /** Consent and egress rules (T08), then execution conditions (T09), as they stand now. */
@@ -402,7 +407,9 @@ export function createBroker(deps: BrokerDeps) {
           return { status: "blocked", requestId, reason: "budget-exhausted" };
         }
         const outgoing: StructuredRequest = {
-          requestId,
+          // one ID per attempt, so a late cancel of attempt N cannot stop attempt N + 1;
+          // history keeps the Broker's request ID and the attempt number
+          requestId: `${requestId}:${attempt}`,
           taskKind: request.taskKind,
           trigger,
           dataClassification: classification,

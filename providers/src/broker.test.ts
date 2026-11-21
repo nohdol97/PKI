@@ -92,7 +92,37 @@ describe("broker: the request a Provider receives", () => {
       retryable: true,
       budget: { timeoutMs: 1000 },
     });
-    expect(result).toMatchObject({ requestId: sent?.requestId });
+    // the Provider sees one ID per attempt, derived from the Broker's request ID
+    expect(result.status === "ok" && sent?.requestId).toBe(
+      result.status === "ok" && `${result.requestId}:1`,
+    );
+  });
+
+  it("gives every attempt its own Provider request ID", async () => {
+    const provider = new FakeProvider({ script: [{ error: retryable() }] });
+    const { call, records } = setup({ provider });
+    const result = await call({ retryable: true });
+    if (result.status !== "ok") throw new Error(result.status);
+    expect(provider.requests.map((r) => r.requestId)).toEqual([
+      `${result.requestId}:1`,
+      `${result.requestId}:2`,
+    ]);
+    expect(records.map((r) => [r.requestId, r.attempt])).toEqual([
+      [result.requestId, 1],
+      [result.requestId, 2],
+    ]);
+  });
+
+  it("does not ask a Provider without structured output, and records why", async () => {
+    const provider = new FakeProvider({ capabilities: { structuredOutput: false } });
+    const { call, records, egress } = setup({ provider });
+    expect(await call()).toMatchObject({
+      status: "blocked",
+      reason: "structured-output-unsupported",
+    });
+    expect(provider.requests).toEqual([]);
+    expect(egress).toEqual([]);
+    expect(records).toMatchObject([{ attempt: 1, outcome: "blocked" }]);
   });
 
   it("asks for the task's output schema and returns the validated output", async () => {
@@ -150,6 +180,24 @@ describe("broker: timeout", () => {
     const { call } = setup({ provider });
     expect(await call({ budget: { timeoutMs: 20 } })).toMatchObject({ error: "timeout" });
     expect(provider.signals[0]?.aborted).toBe(true);
+  });
+
+  it("a late cancel of a timed-out attempt stops only that attempt, never the retry", async () => {
+    // cancel stops the call with that ID 15 ms later, as killing a CLI process does
+    const provider = new FakeProvider({
+      script: ["ignore-abort"],
+      cancelMode: "async",
+      delayMs: 30,
+    });
+    const { call } = setup({ provider });
+    // attempt 1 times out at 50 ms; its cancel lands at about 65 ms, while attempt 2 runs
+    expect(await call({ retryable: true, budget: { timeoutMs: 50 } })).toMatchObject({
+      status: "ok",
+      attempts: 2,
+    });
+    expect(provider.cancelled).toEqual([provider.requests[0]?.requestId]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(provider.pending).toBe(0); // the first attempt was not orphaned
   });
 
   it("caps the caller's timeout at the Broker's ceiling", async () => {

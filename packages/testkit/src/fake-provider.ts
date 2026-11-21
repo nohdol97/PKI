@@ -1,18 +1,20 @@
 // Fake LLM Provider (V01-R8, ARCHITECTURE 5.1): the test double for the Provider
 // boundary. It lives in testkit, which only test files may import
 // (module-boundary devOnlyDependency), so no product build can bind it.
-import type {
-  LLMProvider,
-  LLMRequest,
-  LLMResponse,
-  ProviderCapabilities,
-  StructuredRequest,
-  StructuredResponse,
+import {
+  UnsupportedCapabilityError,
+  type LLMProvider,
+  type LLMRequest,
+  type LLMResponse,
+  type ProviderCapabilities,
+  type StructuredRequest,
+  type StructuredResponse,
 } from "@pki/contracts";
 
 /**
  * One scripted call: an answer, a thrown error, "hang" (pending until aborted or
- * cancelled) or "ignore-abort" (pending forever, a Provider that ignores its signal).
+ * cancelled) or "ignore-abort" (ignores its signal and ends only by cancel, as a
+ * CLI process does until it is killed).
  */
 export type FakeStep = { output: unknown } | { error: Error } | "hang" | "ignore-abort";
 
@@ -26,8 +28,12 @@ export interface FakeProviderOptions {
   /** How long an answering call stays in flight. */
   delayMs?: number;
   capabilities?: Partial<ProviderCapabilities>;
-  /** How cancel behaves: stop the call (default), never settle, or throw synchronously. */
-  cancelMode?: "stop" | "never-settles" | "throws";
+  /**
+   * How cancel behaves: stop the call with that request ID at once (default),
+   * stop it 15 ms later ("async", like killing a process), never settle, or
+   * throw synchronously.
+   */
+  cancelMode?: "stop" | "async" | "never-settles" | "throws";
 }
 
 export class FakeProvider implements LLMProvider {
@@ -75,6 +81,10 @@ export class FakeProvider implements LLMProvider {
   getCapabilities() {
     return this.#capabilities;
   }
+  /** Calls still running, keyed by request ID. */
+  get pending() {
+    return this.#running.size;
+  }
 
   async generate(request: LLMRequest, signal: AbortSignal): Promise<LLMResponse> {
     const output = await this.#run({ ...request, outputSchema: {} }, signal);
@@ -85,6 +95,9 @@ export class FakeProvider implements LLMProvider {
     request: StructuredRequest,
     signal: AbortSignal,
   ): Promise<StructuredResponse> {
+    if (!this.#capabilities.structuredOutput) {
+      throw new UnsupportedCapabilityError("structuredOutput");
+    }
     return { output: await this.#run(request, signal) };
   }
 
@@ -92,30 +105,37 @@ export class FakeProvider implements LLMProvider {
     this.cancelled.push(requestId);
     if (this.#cancelMode === "throws") throw new Error("cancel failed");
     if (this.#cancelMode === "never-settles") return new Promise(() => undefined);
-    this.#running.get(requestId)?.(new Error("cancelled"));
-    return Promise.resolve();
+    const stop = () => this.#running.get(requestId)?.(new Error("cancelled"));
+    if (this.#cancelMode === "stop") {
+      stop();
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => setTimeout(() => resolve(stop()), 15));
   }
 
   #run(request: StructuredRequest, signal: AbortSignal): Promise<unknown> {
     this.requests.push(structuredClone(request));
     this.signals.push(signal);
     const step = this.#script.shift() ?? { output: this.#answer(request) };
-    if (step === "ignore-abort") return new Promise(() => undefined);
     this.inFlight++;
     this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
+    let stop: (reason: Error) => void = () => undefined;
     return new Promise<unknown>((resolve, reject) => {
-      const stop = (reason: Error) => reject(reason);
-      if (signal.aborted) return stop(new Error("aborted"));
-      signal.addEventListener("abort", () => stop(new Error("aborted")), { once: true });
+      stop = reject;
+      if (step !== "ignore-abort") {
+        if (signal.aborted) return stop(new Error("aborted"));
+        signal.addEventListener("abort", () => stop(new Error("aborted")), { once: true });
+      }
       this.#running.set(request.requestId, stop);
-      if (step === "hang") return;
+      if (step === "hang" || step === "ignore-abort") return;
       setTimeout(
         () => ("error" in step ? reject(step.error) : resolve(step.output)),
         this.#delayMs,
       );
     }).finally(() => {
       this.inFlight--;
-      this.#running.delete(request.requestId);
+      // a later call under the same ID replaced this entry; leave that one
+      if (this.#running.get(request.requestId) === stop) this.#running.delete(request.requestId);
     });
   }
 }
