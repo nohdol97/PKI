@@ -23,6 +23,7 @@ it("prints a fresh session on stdout and serves the status API with it", async (
       authorization: `Bearer ${session?.token}`,
     });
     expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ vectorIndex: { state: "unavailable" } });
   } finally {
     child.kill();
   }

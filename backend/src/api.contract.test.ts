@@ -3,6 +3,7 @@
 import { ErrorResponseSchema, routes } from "@pki/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { send } from "@pki/testkit";
+import { productAdapters } from "./composition.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
 const TOKEN = "c".repeat(43);
@@ -10,7 +11,7 @@ let server: RunningServer;
 let valid: Record<string, string>;
 
 beforeAll(async () => {
-  server = await startServer({ token: TOKEN, allowedOrigins: [] });
+  server = await startServer({ token: TOKEN, allowedOrigins: [], ...productAdapters() });
   valid = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
 });
 afterAll(() => server.close());

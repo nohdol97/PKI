@@ -15,6 +15,7 @@
     "skipLibCheck": true,
     "composite": true,
     "noEmit": true,
-    "types": []
+    "types": [],
+    "erasableSyntaxOnly": true
   }
 }

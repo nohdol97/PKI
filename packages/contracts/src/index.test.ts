@@ -25,4 +25,11 @@ describe("contract schemas", () => {
     ).toBe(true);
     expect(routes.status.response.safeParse({ backend: { state: "ready" } }).success).toBe(false);
   });
+
+  it("states an unavailable component's reason (V01-R5, R15)", () => {
+    const vectorIndex = routes.status.response.shape.vectorIndex;
+    expect(vectorIndex.safeParse({ state: "unavailable", reason: "no module" }).success).toBe(true);
+    expect(vectorIndex.safeParse({ state: "unavailable" }).success).toBe(false);
+    expect(vectorIndex.safeParse({ state: "rebuilding" }).success).toBe(true);
+  });
 });

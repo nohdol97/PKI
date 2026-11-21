@@ -1,7 +1,15 @@
 // Local API server (V01-R2, ADR 0008): loopback-only, and every request must
 // carry the per-run session token, name this server as Host, and come from an
 // allowlisted Origin (or no Origin: non-browser clients such as the shell).
-import { routes, type ErrorResponse, type RouteName, type RouteResponse } from "@pki/contracts";
+import {
+  ComponentStatusSchema,
+  routes,
+  type ComponentStatus,
+  type ErrorResponse,
+  type RouteName,
+  type RouteResponse,
+  type VectorIndex,
+} from "@pki/contracts";
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -17,6 +25,8 @@ export interface ServerOptions {
   allowedOrigins: readonly string[];
   /** 0 (default) picks a free port. */
   port?: number;
+  /** Chosen by the composition point (composition.ts), never here. */
+  vectorIndex: VectorIndex;
 }
 
 export interface RunningServer {
@@ -27,14 +37,39 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
-const handlers: { [Name in RouteName]: () => RouteResponse<Name> } = {
-  status: () => ({
-    backend: { state: "ready" },
-    provider: { state: "not-implemented" },
-    embedding: { state: "not-implemented" },
-    vectorIndex: { state: "not-implemented" },
-  }),
+type Handlers = { [Name in RouteName]: () => Promise<RouteResponse<Name>> };
+
+const STATUS_CHECK_FAILED: ComponentStatus = {
+  state: "unavailable",
+  reason: "status check failed",
 };
+
+// One misbehaving adapter degrades only its own entry, so the UI still shows what works (V01-R5).
+async function vectorIndexState(index: VectorIndex): Promise<ComponentStatus> {
+  try {
+    const status = await index.status();
+    const mapped = ComponentStatusSchema.safeParse(
+      typeof status === "string"
+        ? { state: status }
+        : { state: "unavailable", reason: status.unavailable },
+    );
+    // An index that cannot report a valid state cannot serve searches either.
+    return mapped.success ? mapped.data : STATUS_CHECK_FAILED;
+  } catch {
+    return STATUS_CHECK_FAILED;
+  }
+}
+
+function createHandlers(options: ServerOptions): Handlers {
+  return {
+    status: async () => ({
+      backend: { state: "ready" },
+      provider: { state: "not-implemented" },
+      embedding: { state: "not-implemented" },
+      vectorIndex: await vectorIndexState(options.vectorIndex),
+    }),
+  };
+}
 
 function reply(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
@@ -55,6 +90,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   }
   const token = Buffer.from(options.token);
   const allowedOrigins = new Set(options.allowedOrigins);
+  const handlers = createHandlers(options);
   let selfHost = "";
 
   const server = createServer((req, res) => {
@@ -77,7 +113,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     if (typeof match !== "string") {
       return reject(res, match.error === "not-found" ? 404 : 405, match.error);
     }
-    reply(res, 200, handlers[match]());
+    // Last resort: responses are checked against the shared schema, and any handler
+    // failure answers a generic 500. The log names the route and error class only;
+    // messages can carry content (ADR 0008).
+    handlers[match]()
+      .then((body) => reply(res, 200, routes[match].response.parse(body)))
+      .catch((error: unknown) => {
+        console.error(
+          `route ${match} failed: ${error instanceof Error ? error.name : typeof error}`,
+        );
+        reject(res, 500, "internal-error");
+      });
   });
 
   await new Promise<void>((resolve, reject) => {

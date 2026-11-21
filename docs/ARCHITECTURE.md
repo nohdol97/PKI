@@ -300,6 +300,12 @@ interface KnowledgeEngine {
 
 Phase 1에는 `NullKnowledgeEngine`(아무것도 하지 않고 모든 능력이 false)과 테스트용 메모리 구현이 있다. 계약 테스트는 "삭제한 원본을 가리키는 결과가 다시 나오지 않는다", "낡은 fence는 거부된다", "rebuild를 두 번 해도 결과가 같다", "없는 능력을 있다고 하지 않는다"를 확인한다. null 구현만으로는 이 테스트가 공허하게 통과하므로 메모리 구현이 함께 있어야 한다.
 
+**V01-T12에서 확정한 규격**(정확한 타입은 [`packages/contracts/src/knowledge-engine.ts`](../packages/contracts/src/knowledge-engine.ts)):
+
+- **null 엔진과 시작 비교.** `NullKnowledgeEngine.appliedChangeSeq()`는 언제나 `null`이다. 시작 비교는 구현을 가리지 않고 같은 규칙을 따른다: 반영한 순번이 정본과 다르면(`null` 포함) `rebuild`한다. 그래서 null 엔진이 묶인 구성은 켤 때마다 `rebuild`를 부르지만, null 엔진의 `rebuild`는 아무것도 하지 않아 비용이 없다. 파이프라인이 엔진 종류로 분기하지 않게 하려고 이렇게 정했다. "깨끗한 재시작 뒤 재구축 없음"(ADR 0013 7항)은 상태를 가진 투영에 대한 보장이다.
+- **순서 규칙.** 엔진은 원본마다 받아들인 가장 높은 fence와, 제거로 지운 가장 높은 version을 기억한다. 그보다 낮은 fence의 `upsertSource`·`removeSource`, 그리고 지운 version 이하의 `upsertSource`는 `StaleFenceError`로 거부되고 아무것도 바뀌지 않는다. `removeSource(ref)`는 그 원본의 `ref.version` 이하에서 나온 것을 모두 지운다. `rebuild`는 이 기억까지 비우고 다시 만든다.
+- 없는 능력의 메서드는 `UnsupportedCapabilityError`로 거부된다.
+
 ### 5.4 VectorIndex
 
 ```typescript
@@ -318,6 +324,13 @@ interface VectorIndex {
 **Phase 1에는 규격, 계약 테스트, 테스트용 메모리 구현(fake)만 있다.** 제품의 기본 구성은 `unavailable`을 돌려주는 빈 구현에 묶이고, 키워드 검색으로 동작한다. 네이티브 벡터 모듈은 V01에 넣지 않는다. sqlite-vec는 배포처에서 확인할 잠정 후보다([ADR 0004](adr/0004-embedded-storage.md), 가정 A08).
 
 Phase 1에서 제품 코드가 이 규격을 부르는 자리는 둘뿐이다: 상태 API가 읽는 `status()`, 그리고 삭제 때의 `remove()`(5.3절 표). **`upsert`와 `search`를 부르는 제품 코드는 Phase 1에 없다.** 따라서 벡터를 쓰고 찾는 경로는 구현을 바꿔도 된다는 것이 Phase 1에서 증명되지 않으며, 그것을 부르는 기능이 생기는 X01(#30)까지 미증명으로 남는다.
+
+**V01-T12에서 확정한 규격**(정확한 타입은 [`packages/contracts/src/vector-index.ts`](../packages/contracts/src/vector-index.ts)):
+
+- **빈 구현.** 제품 기본인 `EmptyVectorIndex`는 `status()`가 `{ unavailable: 이유 }`를 돌려주고, 나머지 메서드(`remove()`, `appliedChangeSeq()` 포함)는 같은 이유를 단 `AdapterUnavailableError`로 거부한다. V02의 삭제 경로와 시작 비교는 이 오류를 실패가 아니라 "건너뜀"으로 다룬다.
+- **순서 규칙.** 색인은 ref마다 마지막 `upsert`·`remove`의 변경 순번을 기억한다. 어느 ref라도 그보다 오래된 순번을 실은 호출은 **묶음 전체가** `StaleFenceError`로 거부되고 아무것도 바뀌지 않는다. 같은 순번은 재전달로 보고 받아들인다. `reset`은 벡터와 이 기억을 모두 비운다.
+- **묶음 거부의 처리.** 묶음 전체가 거부되므로 부르는 쪽(X01)은 낡은 ref를 빼고 다시 보내거나 재구축에 맡긴다.
+- 상태 API는 색인의 상태가 규격에 맞지 않거나 읽을 수 없으면 그 항목만 `unavailable`("status check failed")로 보이고 다른 항목은 그대로 보인다.
 
 정본 SQLite 쪽에는 드라이버를 바꿀 수 있도록 좁은 **SQL 드라이버 포트**(열기, 실행, 트랜잭션)를 둔다.
 
@@ -455,3 +468,5 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | 2026-11-21 | "사용자 확인이 필요한 결정" 절 추가. CLI 판정의 네 입력을 호출하는 쪽이 정할 수 없게 다시 씀(빌드 값 하나와 기본값, 읽기 전용 목록, 작업 기록으로 판정하는 호출 종류, 합성 목록). test double의 상시 허용 삭제, 판정 없는 CLI 실행 두 가지 명시. 선 긋기 표에 같은 행 판정·대체·삭제 전파 추가. 엔진·벡터 규격을 부르는 자리 명시. 삭제를 지우기로, span을 코드 포인트와 코드 계산으로. Embedding의 egress, 동의의 범위, 쉘과 백엔드 사이 통로, 외부 링크 규칙. 가정 A20~A22 추가와 A15~A18의 확인 방법 수정. 용어 추가 | 전 절 | 독립 검토 F01~F04, F07~F12, F14, F15, F17~F19, F21 |
 | 2026-11-21 | Broker가 Provider에 보낼 글과 지시를 스스로 만들고 부르는 쪽은 ID만 넘기게 함. 사용자 동작 기록을 API 계층만 만들 수 있고 한 번만 쓰이게 함. 테스트 빌드의 판정 방식과 빌드 값을 읽는 자리의 lint 규칙. 합성 해시가 덮는 필드와 연결 시험 자료의 지위. 투영 통지의 기준을 knowledge revision에서 원본 변경 순번으로. 근거는 바뀌지 않는 version을 계속 가리키고 삭제는 모든 version을 따라가 지움. 벡터의 쓰기·찾기 경로가 X01까지 미증명임을 명시. R05의 `revoke`와 Connector의 `access-revoked` 대응. 가져오기 뒤의 추출이 백그라운드라는 결과를 사용자 확인 표에 추가 | 맨 위 표, 0절, 2절, 3.1절, 3.2절, 4절, 5.1절, 5.3~5.5절, 6절, 7절, 8절 | 독립 재검토 D01~D06, D09, D11, D12 |
 | 2026-11-21 | 저장소 배치 표에 `tooling/` 추가 | 2절 | V01-T01: 모듈 경계 lint 규칙과 문서 대응 테스트를 둘 자리 |
+| 2026-11-21 | 5.3절과 5.4절에 "V01-T12에서 확정한 규격" 추가: null 엔진의 `appliedChangeSeq`와 시작 비교, 빈 벡터 색인의 거부를 V02가 건너뜀으로 다룸, 엔진과 색인의 순서 규칙, 묶음 거부의 처리, 상태 API의 항목별 저하 | 5.3절, 5.4절 | V01-T12 독립 검토 M1, I1, S1 |
+| 2026-11-21 | null 엔진의 예외를 없앰: 시작 비교는 구현과 무관하게 순번이 다르면(`null` 포함) 재구축하고, 재구축 없음 보장은 상태를 가진 투영에만 적용 | 5.3절 | V01-T12 재검토 N1: 계약에 null 엔진을 가려낼 신호가 없어 파이프라인이 구현에 분기해야 했음 |
