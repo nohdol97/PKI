@@ -6,8 +6,8 @@
 //   form: an identifier, a property or key, a string or template text (which
 //   also catches the old global spelling and run-time writes such as
 //   `globalThis[...] = ` or `Object.defineProperty(globalThis, ...)`).
-// - The decision code (DECISION_MODULES: the gate, the Broker and the modules that
-//   supply the gate's inputs) touches no environment and asks the runtime nothing
+// - The decision code (DECISION_MODULES: the gate, the Broker, the default Provider
+//   selection and the modules that supply the gate's inputs) touches no environment and asks the runtime nothing
 //   about how it was installed: a reference to `process`, a global object
 //   (`globalThis`, `global`, `self`, `window`), `Reflect`, `Function`, `eval` or
 //   `createRequire`; `import.meta.env`; importing or requiring `process`,
@@ -30,6 +30,7 @@ export const DECISION_MODULES = new Set([
   "providers/src/cli-profiles.ts",
   "providers/src/egress-policy.ts",
   "providers/src/execution-gate.ts",
+  "providers/src/provider-selection.ts",
   "providers/src/secret-names.ts",
   "providers/src/synthetic-manifest.ts",
   "providers/src/user-actions.ts",

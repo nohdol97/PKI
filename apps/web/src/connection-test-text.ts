@@ -3,7 +3,7 @@
 import type { ConnectionTestResult } from "@pki/contracts";
 
 const REASON: Readonly<Record<string, string>> = {
-  "no-provider": "연결할 Provider가 없음",
+  "no-provider": "기본 Provider가 정해지지 않음",
   "no-consent": "외부 전송 동의 없음",
   "consent-stale-destination": "동의가 무효(목적지가 바뀜)",
   "consent-stale-policy": "동의가 무효(전송 정책이 바뀜)",

@@ -33,7 +33,18 @@ export {
   type UserActionRedeemer,
 } from "./user-actions.ts";
 export { BUILD_KIND, loopbackHttpAllowed, type BuildKind } from "./build-kind.ts";
-export { CLI_PROFILES } from "./cli-profiles.ts";
+export {
+  CLI_ARGUMENTS,
+  CLI_PROFILES,
+  type CliArguments,
+  type CliProfileName,
+} from "./cli-profiles.ts";
+export {
+  DEFAULT_PROVIDER_SETTING,
+  readDefaultProvider,
+  selectProvider,
+  writeDefaultProvider,
+} from "./provider-selection.ts";
 export {
   CLI_BACKGROUND_SETTING,
   createExecutionGate,

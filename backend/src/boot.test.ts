@@ -1,25 +1,36 @@
 // The started backend (boot.ts, shared by dev.ts and shell.ts) binds the Broker to
 // the connection-test API (V01-R21) and the background setting to the settings API,
-// default off (V01-C7 cli-background-default). The product binds the OpenAI-compatible
-// Provider (V01-T11): without an endpoint the connection test is blocked by the egress
-// decision; with endpoint, model, key and consent it reaches the endpoint, through the
-// same egress instance the consent API wrote.
+// default off (V01-C7 cli-background-default). The product binds the two CLI Providers
+// (V01-T10) and the OpenAI-compatible one (V01-T11) and calls only the user's default:
+// none before one is picked. Picked, the OpenAI-compatible Provider without an endpoint
+// is blocked by the egress decision; with endpoint, model, key and consent it reaches
+// the endpoint, through the same egress instance the consent API wrote.
 import { routes, type SecretSource } from "@pki/contracts";
-import { openaiKeySecretName } from "@pki/providers";
+import { CLI_PROFILES, DEFAULT_PROVIDER_SETTING, openaiKeySecretName } from "@pki/providers";
 import {
   readSetting,
   registerConnectorInstance,
   registerJob,
   saveSourceRecord,
+  writeSetting,
   type SqlDriver,
 } from "@pki/storage";
-import { completion, send, startFakeOpenAI, type FakeHttpReply } from "@pki/testkit";
+import { createClaudeCodeProvider } from "@pki/providers/adapters";
+import {
+  completion,
+  FakeProvider,
+  installFakeCli,
+  processAlive,
+  send,
+  startFakeOpenAI,
+  type FakeHttpReply,
+} from "@pki/testkit";
 import { connect } from "node:net";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bootBackend } from "./boot.ts";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { bootBackend, closeProviders } from "./boot.ts";
 import { HELD_POLICY_SETTING, openCanonicalDb } from "./composition.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
@@ -50,6 +61,17 @@ describe("bootBackend", () => {
     const get = (path: string) => send(port, path, headers);
     const post = (path: string, body: unknown) => send(port, path, headers, "POST", body);
 
+    expect(booted.providers.map((p) => p.id)).toEqual([
+      "claude-code",
+      "codex",
+      "openai-compatible",
+    ]);
+    expect((await post(routes.connectionTest.path, { acknowledgeUnverified: true })).body).toEqual({
+      outcome: "blocked",
+      reason: "no-provider",
+      isolation: null,
+    });
+    await post(routes.setDefaultProvider.path, { providerId: "openai-compatible" });
     expect((await post(routes.connectionTest.path, { acknowledgeUnverified: true })).body).toEqual({
       outcome: "blocked",
       reason: "destination-unavailable",
@@ -63,6 +85,23 @@ describe("bootBackend", () => {
     expect((await post(routes.setExecutionSettings.path, { cliBackground: false })).body).toEqual({
       cliBackground: false,
     });
+  });
+
+  it("sweeps at start the CLI run folders a backend that is gone left in the data directory", async () => {
+    const root = join(dir, "cli-runs");
+    mkdirSync(root, { mode: 0o700 });
+    chmodSync(root, 0o700);
+    const stale = join(root, "99999999.crashed"); // a PID beyond pid_max: never alive
+    const live = join(root, `${process.pid}.running`);
+    mkdirSync(stale);
+    mkdirSync(live);
+    booted = await bootBackend({
+      dataDir: dir,
+      token: TOKEN,
+      allowedOrigins: [],
+      secrets: NO_SECRET_STORE,
+    });
+    expect([existsSync(stale), existsSync(live)]).toEqual([false, true]);
   });
 
   it("runs a connection test through the bound OpenAI-compatible Provider", async () => {
@@ -82,6 +121,7 @@ describe("bootBackend", () => {
       await post(routes.writeSettings.path, {
         openaiCompatible: { baseUrl: endpoint.baseUrl, model: "synthetic-model" },
       });
+      await post(routes.setDefaultProvider.path, { providerId: "openai-compatible" });
       const consents = await send(port, routes.consents.path, headers);
       await post(routes.grantConsent.path, {
         providerId: "openai-compatible",
@@ -123,6 +163,12 @@ describe("bootBackend", () => {
         .join("\n");
       expect((await post(routes.importJsonl.path, { text })).body).toMatchObject({ created: 3 });
       const jobs = () => db.all("SELECT status, reason FROM jobs ORDER BY id");
+      // no default Provider chosen yet (V01-T10): nothing is called
+      await vi.waitFor(() =>
+        expect(jobs()).toEqual(Array(3).fill({ status: "held", reason: "no-provider" })),
+      );
+      // choosing one judges the held jobs again
+      await post(routes.setDefaultProvider.path, { providerId: "openai-compatible" });
       await vi.waitFor(() =>
         expect(jobs()).toEqual(
           Array(3).fill({ status: "held", reason: "destination-unavailable" }),
@@ -158,6 +204,7 @@ describe("bootBackend", () => {
     function seed(jobs: { status: "queued" | "held"; reason?: string }[]) {
       const db: SqlDriver = openCanonicalDb(dir);
       try {
+        writeSetting(db, DEFAULT_PROVIDER_SETTING, "openai-compatible"); // the user's default
         registerConnectorInstance(db, "seeded", "jsonl-import");
         jobs.forEach((job, i) => {
           const saved = saveSourceRecord(db, "seeded", {
@@ -236,6 +283,7 @@ describe("bootBackend", () => {
         const { port } = booted.server;
         const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
         const post = (path: string, body: unknown) => send(port, path, headers, "POST", body);
+        await post(routes.setDefaultProvider.path, { providerId: "openai-compatible" });
         await post(routes.writeSettings.path, {
           openaiCompatible: { baseUrl: endpoint.baseUrl, model: "synthetic-model" },
         });
@@ -278,5 +326,54 @@ describe("bootBackend", () => {
         await endpoint.close();
       }
     });
+  });
+});
+
+describe("closeProviders (backend shutdown, V01-T10)", () => {
+  it("ends a CLI call still running, its whole tree, before the backend exits", async () => {
+    // its own folder: afterEach removes `dir` before onTestFinished runs the leak check
+    const fake = installFakeCli({ mode: "stubborn" });
+    onTestFinished(async () => {
+      // leak check: whatever the shutdown left is killed, and fails the test
+      expect(await fake.leftovers()).toEqual([]);
+      fake.dispose();
+    });
+    const provider = createClaudeCodeProvider({ env: { PATH: fake.bin }, killGraceMs: 200 });
+    const call = provider
+      .generateStructured(
+        {
+          requestId: "shutdown:1",
+          taskKind: "connection-test",
+          trigger: "user",
+          dataClassification: "synthetic",
+          egress: { allowed: true, destination: "vendor:claude-code", policyVersion: "pv" },
+          schemaVersion: 1,
+          budget: { timeoutMs: 60_000 },
+          retryable: false,
+          input: { instructions: "x", untrustedDocuments: [], candidates: [] },
+          execution: {
+            profile: CLI_PROFILES["claude-code"].standard,
+            isolation: "verified",
+            model: "synthetic-model",
+          },
+          outputSchema: { type: "object" },
+        },
+        new AbortController().signal,
+      )
+      .catch((e: unknown) => e);
+    while (fake.spawned().length === 0) await new Promise((r) => setTimeout(r, 20));
+    await closeProviders([provider], 10_000);
+    expect(await call).toBeInstanceOf(Error);
+    const pids = fake.spawned().flatMap((s) => [s.child, s.grandchild]);
+    const end = Date.now() + 5_000;
+    while (pids.some(processAlive) && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+    expect(pids.filter(processAlive)).toEqual([]);
+  }, 30_000);
+
+  it("does not wait past its limit for a Provider whose close never ends", async () => {
+    const stuck = Object.assign(new FakeProvider(), { close: () => new Promise<void>(() => {}) });
+    const started = Date.now();
+    await closeProviders([stuck, new FakeProvider()], 200);
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 });

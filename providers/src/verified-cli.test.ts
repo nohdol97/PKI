@@ -1,6 +1,6 @@
 // V01-R10 verified CLI combinations: a read-only build resource. The public
 // repository's list is empty; an entry is one CLI, one exact version, one OS, one
-// argument profile name and the date R02 verified it. Nothing can add to it at
+// argument profile name, the model R02 ran and the date R02 verified it. Nothing can add to it at
 // run time (the API and setting cases: backend/src/cli-list.readonly.test.ts).
 import { describe, expect, it } from "vitest";
 import listed from "./verified-cli-combinations.json" with { type: "json" };
@@ -12,6 +12,7 @@ const entry = {
   version: "2.1.3",
   os: "win32",
   profile: CLI_PROFILES["claude-code"].standard,
+  model: "synthetic-model",
   verifiedOn: "2026-12-01",
 } as const;
 
@@ -50,8 +51,15 @@ describe("verified CLI combinations", () => {
     ["a date that is not a date", { ...entry, verifiedOn: "yesterday" }],
     ["an extra field", { ...entry, args: ["--yolo"] }],
     [
+      "no model (R02 verdicts are model-scoped)",
+      Object.fromEntries(Object.entries(entry).filter(([k]) => k !== "model")),
+    ],
+    ["an empty model", { ...entry, model: "" }],
+    ["a model read as an option", { ...entry, model: "--yolo" }],
+    ["a model with spaces", { ...entry, model: "a model" }],
+    [
       "a missing field",
-      { cli: "codex", version: "1.0.0", os: "linux", profile: "codex/standard-1" },
+      { cli: "codex", version: "1.0.0", os: "linux", profile: CLI_PROFILES.codex.standard },
     ],
   ])("refuses %s (the backend does not start)", (_, bad) => {
     expect(() => parseVerifiedList([bad])).toThrow();

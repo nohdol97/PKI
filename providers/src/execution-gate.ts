@@ -77,18 +77,22 @@ export function createExecutionGate(options: ExecutionGateOptions): ExecutionGat
       if (!profiles) return block("cli-unknown");
       // entries hold exact versions only (verified-cli.ts), so an unreadable or
       // unparsable version never equals one: it is not listed
-      const listed = verified.some(
+      const listed = verified.find(
         (e) =>
           e.cli === input.providerId &&
           e.version === input.version &&
           e.os === os &&
           e.profile === profiles.standard,
       );
-      if (listed) {
+      if (listed !== undefined) {
         if (input.trigger === "background" && !readCliBackground(options.db)) {
           return block("cli-background-off");
         }
-        return { run: true, cli: { profile: profiles.standard, isolation: "verified" } };
+        // the listed model runs: R02's verdict holds for that model only (V01-T10)
+        return {
+          run: true,
+          cli: { profile: profiles.standard, isolation: "verified", model: listed.model },
+        };
       }
       if (decideAs !== "development") return block("cli-not-verified");
       if (input.trigger !== "user") return block("unverified-background");

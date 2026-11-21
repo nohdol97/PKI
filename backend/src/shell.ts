@@ -7,7 +7,8 @@
 // `--origin` is the screens' origin (app://pki); `--data-dir` and `--fixtures` as in dev.ts.
 import { dataDirectory } from "@pki/storage";
 import { parseArgs } from "node:util";
-import { bootBackend } from "./boot.ts";
+import type { LLMProvider } from "@pki/contracts";
+import { bootBackend, closeProviders } from "./boot.ts";
 import { channelSecrets } from "./secret-sources.ts";
 import type { RunningServer } from "./server.ts";
 
@@ -43,8 +44,8 @@ function parentChannel(): Channel {
     };
   }
   if (process.send) {
-    // Node fork: end with the parent.
-    process.once("disconnect", () => process.exit(0));
+    // Node fork: end with the parent, ending running CLI trees first (stop, V01-T10).
+    process.once("disconnect", () => void stop());
     return { onMessage: (l) => process.on("message", l), post: (m) => process.send?.(m) };
   }
   throw new Error("the shell entry needs a parent channel");
@@ -60,24 +61,40 @@ const { values } = parseArgs({
 
 const channel = parentChannel();
 const secrets = channelSecrets((message) => channel.post(message));
-let running: { server: RunningServer; close(): void } | undefined;
+let running:
+  { server: RunningServer; providers: readonly LLMProvider[]; close(): void } | undefined;
 
 async function start(token: string) {
   const dataDir = values["data-dir"] ?? dataDirectory();
-  const { server, db } = await bootBackend({
+  const { server, db, providers } = await bootBackend({
     dataDir,
     fixtures: values.fixtures,
     token,
     allowedOrigins: values.origin,
     secrets: secrets.source,
   });
-  running = { server, close: () => db.close() };
+  running = { server, providers, close: () => db.close() };
   return server.port;
 }
 
-async function stop() {
+let stopping: Promise<never> | undefined;
+
+/** Once, whoever asks (the shell's "stop", then the parent going away). */
+function stop(): Promise<never> {
+  stopping ??= stopOnce();
+  return stopping;
+}
+
+async function stopOnce(): Promise<never> {
+  // Running CLI trees sit in their own process groups: end them (SIGTERM, then SIGKILL
+  // after 2 s) while the server closes, within the shell's 5 s stop limit (V01-T10).
   // Open connections must not keep the shell waiting; it kills the process if this hangs.
-  await Promise.race([running?.server.close(), new Promise((r) => setTimeout(r, 2_000))]);
+  // A failing close is not a reason to leave the CLI trees running.
+  const closed = running?.server.close().catch(() => undefined);
+  await Promise.all([
+    closeProviders(running?.providers ?? [], 3_000),
+    Promise.race([closed, new Promise((r) => setTimeout(r, 2_000))]),
+  ]);
   running?.close();
   process.exit(0);
 }

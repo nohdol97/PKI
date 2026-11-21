@@ -15,13 +15,21 @@ import {
   log,
   loopbackHttpAllowed,
   PUBLIC_SITE_RULES,
+  readDefaultProvider,
+  selectProvider,
   type Broker,
   type EgressControls,
   type Logger,
   type TestBuildExecution,
   type UserActionIssuer,
 } from "@pki/providers";
-import { createLocalEmbedder, OpenAICompatibleProvider } from "@pki/providers/adapters";
+import {
+  createClaudeCodeProvider,
+  createCodexProvider,
+  createLocalEmbedder,
+  OpenAICompatibleProvider,
+  sweepStaleCliRuns,
+} from "@pki/providers/adapters";
 import {
   createExtractHandler,
   EXTRACT_HOLD_TOO_LARGE,
@@ -80,20 +88,26 @@ export function productEgress(db: SqlDriver): EgressControls {
 }
 
 /**
- * The Provider implementations the Broker may call (V01-R11). Provisional (V01-T11):
- * the OpenAI-compatible one only. Its key comes from `secrets` just before each call,
+ * The Provider implementations the Broker may call (V01-R9, R11): the two CLI
+ * Providers (V01-T10) and the OpenAI-compatible one (V01-T11). The Broker calls
+ * only the user's default among them (productCalls). Binding runs nothing: a CLI
+ * is looked up and queried only when the user checks Providers or a call is made.
+ * The OpenAI-compatible Provider's key comes from `secrets` just before each call,
  * and it asks `egress` (the instance the API and the Broker share) again just before
  * sending. The local-model Provider is not bound: it only answers "not implemented"
- * and reports no structured output, so the Broker could never use it, and binding it
- * would make two Providers, of which productCalls calls none. The CLI Providers and
- * the user's default choice among several are V01-T10's.
+ * and reports no structured output, so the Broker could never use it.
  */
 export function productProviders(
   db: SqlDriver,
   secrets: SecretSource,
   egress: EgressControls,
+  /** The CLI run folders' root, inside the data directory (cliRunsRoot); default per-run temp. */
+  cliRuns?: string,
 ): readonly LLMProvider[] {
+  const cli = cliRuns === undefined ? {} : { runsRoot: cliRuns };
   return [
+    createClaudeCodeProvider(cli),
+    createCodexProvider(cli),
     new OpenAICompatibleProvider({
       db,
       secrets,
@@ -103,6 +117,21 @@ export function productProviders(
   ];
 }
 
+/** At start: removes CLI run folders a crashed or killed backend left (V01-T10). */
+export async function sweepCliRuns(dataDir: string): Promise<void> {
+  await sweepStaleCliRuns(cliRunsRoot(dataDir));
+}
+
+/**
+ * Where CLI runs make their temporary folders: inside the data directory the
+ * backend owns (V01-T10), not a shared temp folder another user could pre-create.
+ */
+export function cliRunsRoot(dataDir: string): string {
+  return join(dataDir, CLI_RUNS_DIR);
+}
+
+export const CLI_RUNS_DIR = "cli-runs";
+
 export interface CallsOptions {
   /** The Providers to bind: productProviders(...) in the product, doubles in tests. */
   providers: readonly LLMProvider[];
@@ -111,23 +140,23 @@ export interface CallsOptions {
 }
 
 /**
- * The Broker and the user action issuer (V01-R8, R10). The ledger is made here
- * once: the issuer goes to the API layer only, the redeemer to the Broker only.
- * The Broker gets `egress`, the same instance the API serves consent from (T08)
- * and the Providers ask again just before sending (T11).
- * Provisional: with one Provider bound it is the one called; with none or
- * several, none is (the user's default choice is V01-T10's; no silent fallback).
+ * The Broker, the user action issuer and the bound Providers (V01-R8, R9, R10).
+ * The ledger is made here once: the issuer goes to the API layer only, the
+ * redeemer to the Broker only. The Broker gets `egress`, the same instance the
+ * API serves consent from (T08) and the Providers ask again just before sending
+ * (T11), and calls the user's default Provider, read for every call; without one
+ * it calls none (provider-selection.ts, no fallback).
  */
 export function productCalls(
   db: SqlDriver,
   egress: EgressControls,
   options: CallsOptions,
-): { broker: Broker; issuer: UserActionIssuer } {
+): { broker: Broker; issuer: UserActionIssuer; providers: readonly LLMProvider[] } {
   const { providers } = options;
   const ledger = createUserActionLedger();
   const broker = createBroker({
     db,
-    provider: () => (providers.length === 1 ? providers[0] : undefined),
+    provider: () => selectProvider(providers, readDefaultProvider(db)),
     userActions: ledger.redeemer,
     candidates: knowledgeCandidates(db),
     egress,
@@ -136,7 +165,7 @@ export function productCalls(
     ),
     recorder: createCallRecorder(db),
   });
-  return { broker, issuer: ledger.issuer };
+  return { broker, issuer: ledger.issuer, providers };
 }
 
 /**
@@ -162,7 +191,7 @@ export const HELD_KEPT_REASONS: readonly string[] = [EXTRACT_HOLD_TOO_LARGE];
 
 /**
  * Provisional (V02 미해결 질문 7): a condition that blocked held jobs may have
- * changed (the background setting, a consent, the endpoint), so they are queued
+ * changed (the background setting, a consent, the endpoint, the default Provider), so they are queued
  * again in their own rows and the runner woken; the Broker judges them anew.
  */
 export function releaseHeldJobs(db: SqlDriver, runner: Pick<JobRunner, "wake">): number {

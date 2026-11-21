@@ -20,3 +20,11 @@ export {
 export { newTempFilesContaining, tempEntries } from "./temp-scan.ts";
 export { FakeEmbeddingRuntime, sha256Hex, writeModelPack, type PackFile } from "./model-pack.ts";
 export { fixtureExtraction, type FixtureExtraction } from "./fixture-extraction.ts";
+export {
+  installFakeCli,
+  processAlive,
+  type FakeCli,
+  type FakeCliConfig,
+  type FakeCliMode,
+  type FakeCliRun,
+} from "./fake-cli.ts";

@@ -10,6 +10,11 @@ import {
   type EmbeddingProvider,
   type EmbeddingStatusEntry,
   type ErrorResponse,
+  type LLMProvider,
+  type ProviderCheck,
+  type ProviderId,
+  type ProviderInfo,
+  type ProviderList,
   type PrepareSource,
   type RouteName,
   type RouteRequest,
@@ -26,6 +31,9 @@ import {
   openaiKeySecretName,
   parseEndpoint,
   readCliBackground,
+  readDefaultProvider,
+  selectProvider,
+  writeDefaultProvider,
   type Broker,
   type BrokerResult,
   type EgressControls,
@@ -82,14 +90,20 @@ export interface ServerOptions {
   /**
    * The Broker and the user action issuer (composition.ts productCalls); only this
    * API layer holds the issuer. Without them the connection test is blocked
-   * ("broker-not-bound"); boot.ts always binds them.
+   * ("broker-not-bound"); boot.ts always binds them. `providers` are the ones
+   * the Broker selects from (the user's default among them); none without it.
    */
-  calls?: { broker: Pick<Broker, "call">; issuer: UserActionIssuer };
+  calls?: {
+    broker: Pick<Broker, "call">;
+    issuer: UserActionIssuer;
+    providers?: readonly LLMProvider[];
+  };
   /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
   importer?: JsonlImporter;
   /**
-   * Called after the background setting, a consent or the endpoint changed, the
-   * conditions that hold jobs (composition.ts releaseHeldJobs); default none.
+   * Called after the background setting, a consent, the endpoint or the default
+   * Provider changed, the conditions that hold jobs (composition.ts
+   * releaseHeldJobs); default none.
    */
   onRunConditionsChanged?: () => void;
 }
@@ -140,6 +154,7 @@ function connectionTestResult(result: BrokerResult): ConnectionTestResult {
  */
 async function connectionTest(
   calls: ServerOptions["calls"],
+  db: SqlDriver,
   acknowledgeUnverified: boolean,
 ): Promise<ConnectionTestResult> {
   if (!calls) return { outcome: "blocked", reason: "broker-not-bound", isolation: null };
@@ -156,7 +171,64 @@ async function connectionTest(
       }),
     { acknowledgeUnverified },
   );
-  return connectionTestResult(result);
+  const answer = connectionTestResult(result);
+  // only where the CLI itself may be why: its run failed, or its execution condition
+  // blocked it (a missing CLI reads as "not listed"); never before consent and egress
+  const cliStage =
+    answer.outcome === "failed" ||
+    (answer.outcome === "blocked" && /^(cli|unverified)-/.test(answer.reason ?? ""));
+  if (!cliStage) return answer;
+  // R5: a default CLI that is missing or logged out gets its install or login guidance
+  const provider = selectProvider(calls.providers ?? [], readDefaultProvider(db));
+  if (provider?.transport !== "cli") return answer;
+  const check = await checkProvider(provider);
+  const guide =
+    !check.installed || check.authentication === "unauthenticated" || check.problem !== undefined;
+  return guide ? { ...answer, providerCheck: check } : answer;
+}
+
+function providerList(options: ServerOptions): ProviderList {
+  const providers = options.calls?.providers ?? [];
+  const chosen = readDefaultProvider(options.db);
+  return {
+    defaultProvider: providers.some((p) => p.id === chosen) ? (chosen ?? null) : null,
+    providers: providers.map((p) => ({ providerId: p.id, transport: p.transport })),
+  };
+}
+
+function setDefaultProvider(
+  options: ServerOptions,
+  providerId: ProviderId,
+): ProviderList | { error: ErrorResponse["error"] } {
+  if (!(options.calls?.providers ?? []).some((p) => p.id === providerId)) {
+    return { error: "not-found" };
+  }
+  writeDefaultProvider(options.db, providerId);
+  return providerList(options);
+}
+
+/**
+ * The two queries that need no decision (V01-R9), for each bound Provider, at the
+ * user's request only. A Provider that fails to answer is reported not installed;
+ * its message stays out.
+ */
+async function checkProvider(provider: LLMProvider): Promise<ProviderCheck> {
+  const info: ProviderInfo = await Promise.resolve()
+    .then(() => provider.detect())
+    .catch(() => ({ installed: false }));
+  const runnable = info.installed && info.problem === undefined;
+  const authentication = runnable
+    ? await Promise.resolve()
+        .then(() => provider.checkAuthentication())
+        .catch(() => "unknown" as const)
+    : "unknown";
+  return {
+    providerId: provider.id,
+    installed: info.installed === true,
+    version: info.installed && typeof info.version === "string" ? info.version : null,
+    authentication,
+    ...(info.problem === "cli-runs-root-refused" ? { problem: info.problem } : {}),
+  };
 }
 
 const STATUS_CHECK_FAILED: ComponentStatus = {
@@ -249,6 +321,7 @@ async function prepareEmbedding(
 
 function createHandlers(options: ServerOptions, preparations: Set<AbortController>): Handlers {
   const changed = () => options.onRunConditionsChanged?.();
+  let checking: Promise<RouteResponse<"checkProviders">> | undefined;
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -309,12 +382,26 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       changed();
       return revoked;
     },
-    connectionTest: (input) => connectionTest(options.calls, input.acknowledgeUnverified),
+    connectionTest: (input) =>
+      connectionTest(options.calls, options.db, input.acknowledgeUnverified),
     executionSettings: async () => ({ cliBackground: readCliBackground(options.db) }),
     setExecutionSettings: async ({ cliBackground }) => {
       writeSetting(options.db, CLI_BACKGROUND_SETTING, cliBackground ? "on" : "off");
       changed();
       return { cliBackground: readCliBackground(options.db) };
+    },
+    providers: async () => providerList(options),
+    setDefaultProvider: async ({ providerId }) => {
+      const set = setDefaultProvider(options, providerId);
+      if (!("error" in set)) changed(); // jobs held for "no-provider" are judged again
+      return set;
+    },
+    checkProviders: () => {
+      // requests that come while a check runs share it: one set of query processes
+      checking ??= Promise.all((options.calls?.providers ?? []).map(checkProvider))
+        .then((providers) => ({ providers }))
+        .finally(() => (checking = undefined));
+      return checking;
     },
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
   };

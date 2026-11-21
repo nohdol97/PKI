@@ -6,8 +6,13 @@
 // The product wiring runs: productEgress, productCalls (Broker, execution gate,
 // history), the API server, a real canonical file.
 import { routes, type ConnectionTestResult, type ProviderCall } from "@pki/contracts";
-import { CLI_PROFILES, type TestBuildExecution } from "@pki/providers";
-import { registerConnectorInstance, saveSourceRecord, type SqlDriver } from "@pki/storage";
+import { CLI_PROFILES, DEFAULT_PROVIDER_SETTING, type TestBuildExecution } from "@pki/providers";
+import {
+  registerConnectorInstance,
+  saveSourceRecord,
+  writeSetting,
+  type SqlDriver,
+} from "@pki/storage";
 import { FakeProvider, send } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
@@ -28,6 +33,7 @@ const LISTED = {
   version: VERSION,
   os: OS,
   profile: STANDARD,
+  model: "synthetic-model",
   verifiedOn: "2026-12-01",
 };
 
@@ -116,6 +122,7 @@ async function stack(options: Stack = {}) {
     answer: (r) =>
       r.taskKind === "extract" ? { items: [], facts: [], relations: [] } : { reply: "ok" },
   });
+  writeSetting(db, DEFAULT_PROVIDER_SETTING, "claude-code"); // the user's default (T10)
   const calls = productCalls(
     db,
     egress,
@@ -187,8 +194,9 @@ describe("listed combination, deciding as production", () => {
       reason: null,
       isolation: "verified",
     });
+    // the listed model runs: R02's verdict holds for that model only
     expect(s.provider.requests.map((r) => r.execution)).toEqual([
-      { profile: STANDARD, isolation: "verified" },
+      { profile: STANDARD, isolation: "verified", model: "synthetic-model" },
     ]);
   });
 
@@ -197,7 +205,7 @@ describe("listed combination, deciding as production", () => {
     expect((await s.background(true)).body).toEqual({ cliBackground: true });
     expect(await s.backgroundExtract(store(plain))).toMatchObject({
       status: "ok",
-      cli: { profile: STANDARD, isolation: "verified" },
+      cli: { profile: STANDARD, isolation: "verified", model: "synthetic-model" },
     });
     expect(s.provider.requests).toHaveLength(1);
     expect(s.provider.requests[0]?.trigger).toBe("background");

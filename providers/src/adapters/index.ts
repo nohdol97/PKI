@@ -3,3 +3,10 @@
 export { LOCAL_MODEL_NOT_IMPLEMENTED, LocalModelProvider } from "./local-model.ts";
 export { OpenAICompatibleProvider, type OpenAICompatibleOptions } from "./openai-compatible.ts";
 export { createLocalEmbedder } from "./transformers-embedder.ts";
+export {
+  createClaudeCodeProvider,
+  createCodexProvider,
+  checkRunsRoot,
+  sweepStaleCliRuns,
+  type CliProviderOptions,
+} from "./cli-provider.ts";

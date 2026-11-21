@@ -218,6 +218,17 @@ export const ConsentRevokeRequestSchema = z.strictObject({ providerId: ProviderI
  */
 export const ConnectionTestRequestSchema = z.strictObject({ acknowledgeUnverified: z.boolean() });
 
+/** One Provider's answer to the version and login status queries (V01-R9). */
+const ProviderCheckSchema = z.object({
+  providerId: ProviderIdSchema,
+  installed: z.boolean(),
+  version: z.string().nullable(),
+  authentication: z.enum(["authenticated", "unauthenticated", "unknown"]),
+  /** Found but its run folder root is refused (ProviderInfo.problem): nothing can run. */
+  problem: z.enum(["cli-runs-root-refused"]).optional(),
+});
+export type ProviderCheck = z.infer<typeof ProviderCheckSchema>;
+
 /** A code, never Provider text: a block reason, a Broker rejection. */
 const ReasonCode = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
@@ -234,12 +245,43 @@ export const ConnectionTestResponseSchema = z.object({
   outcome: z.enum(["ok", "blocked", "failed", "rejected"]),
   reason: ReasonCode.nullable(),
   isolation: z.enum(["verified", "unverified"]).nullable(),
+  /**
+   * When a test that did not succeed went to a CLI that is not installed or not
+   * logged in: what its two queries found, so the screen can guide (V01-R5). A
+   * listed-only gate reports a missing CLI as `cli-not-verified`; this says why.
+   */
+  providerCheck: ProviderCheckSchema.optional(),
 });
 export type ConnectionTestResult = z.infer<typeof ConnectionTestResponseSchema>;
 
 /** Runtime execution settings (site-setup.md `providers.cli.background`): default off. */
 export const ExecutionSettingsSchema = z.strictObject({ cliBackground: z.boolean() });
 export type ExecutionSettings = z.infer<typeof ExecutionSettingsSchema>;
+
+/**
+ * The bound Providers and the user's default (V01-R9, C4): the Broker calls the
+ * default and nothing else; null until the user picks one (nothing is picked for
+ * them). Reading this list runs no process.
+ */
+export const ProviderListResponseSchema = z.object({
+  defaultProvider: ProviderIdSchema.nullable(),
+  providers: z.array(
+    z.object({ providerId: ProviderIdSchema, transport: z.enum(["cli", "http"]) }),
+  ),
+});
+export type ProviderList = z.infer<typeof ProviderListResponseSchema>;
+
+/** Picks the default; a Provider that is not bound is "not-found". */
+export const DefaultProviderRequestSchema = z.strictObject({ providerId: ProviderIdSchema });
+
+/**
+ * Each bound Provider's answer to the two queries that need no decision (V01-R9):
+ * the version query and the login status query, with fixed arguments and no
+ * input. The screen turns them into install and login guidance (V01-R5).
+ */
+export const ProviderCheckResponseSchema = z.object({
+  providers: z.array(ProviderCheckSchema),
+});
 
 /**
  * Starts preparing the embedding model (V01-R14, ADR 0006): from a local pack
@@ -321,6 +363,18 @@ export const routes = {
     path: "/api/settings/execution",
     request: ExecutionSettingsSchema,
     response: ExecutionSettingsSchema,
+  },
+  providers: { method: "GET", path: "/api/providers", response: ProviderListResponseSchema },
+  setDefaultProvider: {
+    method: "POST",
+    path: "/api/providers/default",
+    request: DefaultProviderRequestSchema,
+    response: ProviderListResponseSchema,
+  },
+  checkProviders: {
+    method: "POST",
+    path: "/api/providers/check",
+    response: ProviderCheckResponseSchema,
   },
   prepareEmbedding: {
     method: "POST",

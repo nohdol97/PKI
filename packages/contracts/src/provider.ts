@@ -90,6 +90,18 @@ export interface LLMRequest {
   readonly execution?: {
     readonly profile: string;
     readonly isolation: "verified" | "unverified";
+    /**
+     * The model a verified combination runs: the verified list entry's, since an
+     * R02 verdict holds for the model it ran (V01-T10). The unverified minimal
+     * profile runs the CLI's default model and carries none.
+     */
+    readonly model?: string;
+    /**
+     * The absolute path this attempt's version query ran (the Provider's own
+     * `detect().path`, carried by the Broker): the CLI runs that executable and
+     * looks for no other, so the version judged is the version that runs.
+     */
+    readonly executable?: string;
   };
 }
 
@@ -110,6 +122,11 @@ export interface ProviderInfo {
   readonly installed: boolean;
   readonly path?: string;
   readonly version?: string;
+  /**
+   * Found but cannot be run here: its run folder root (in the data directory) is
+   * not a private directory of this user (V01-T10). Nothing ran; no version.
+   */
+  readonly problem?: "cli-runs-root-refused";
 }
 
 /** A Provider that has no way to tell answers "unknown"; it never reads credential files. */
@@ -135,6 +152,12 @@ export interface LLMProvider {
   generateStructured(request: StructuredRequest, signal: AbortSignal): Promise<StructuredResponse>;
   /** Stops a running request; an unknown ID is not an error. */
   cancel(requestId: string): Promise<void>;
+  /**
+   * Backend shutdown: stops every running request (a CLI's whole process tree),
+   * waits for them and refuses new ones. Optional: a Provider with nothing that
+   * outlives the backend has none.
+   */
+  close?(): Promise<void>;
 }
 
 /**

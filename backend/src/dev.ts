@@ -12,7 +12,7 @@ import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { dataDirectory } from "@pki/storage";
-import { bootBackend } from "./boot.ts";
+import { bootBackend, closeProviders } from "./boot.ts";
 import { envSecrets } from "./secret-sources.ts";
 
 // Development seeds come from the repository's synthetic fixtures (V01-R7).
@@ -29,7 +29,7 @@ const { values } = parseArgs({
 
 const dir = values["data-dir"] ?? `${dataDirectory()}-dev`;
 const token = randomBytes(32).toString("base64url");
-const { server } = await bootBackend({
+const { server, providers } = await bootBackend({
   dataDir: dir,
   fixtures: values.fixtures,
   token,
@@ -38,3 +38,7 @@ const { server } = await bootBackend({
   secrets: envSecrets(process.env),
 });
 process.stdout.write(`${JSON.stringify({ url: server.url, token })}\n`);
+// stopped by the dev server (SIGTERM) or Ctrl+C: end running CLI trees first (V01-T10)
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, () => void closeProviders(providers, 3_000).then(() => process.exit(0)));
+}
