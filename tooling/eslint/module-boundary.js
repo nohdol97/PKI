@@ -26,8 +26,9 @@
 // - absolute-path specifiers
 // - import() with a computed specifier (import(`./adapters/${name}.ts`))
 // - an implementation outside src/adapters/ that names no adapter type at all;
-//   is built indirectly (a call's result, array or Map elements, spread, a local
-//   declared with let/var, outside the function, or through a second local); is
+//   is built indirectly (a call's result such as Object.assign, array or Map
+//   elements, array spread; a local declared with let/var, outside the function,
+//   inside a nested block, by destructuring, or through a second local); is
 //   typed through an alias or interface declared inside a function or in another
 //   module (except ConnectorFactory), a container other than WRAPPERS, or a type
 //   parameter of a class or a variable: it escapes, and so do its importers;
@@ -94,11 +95,17 @@ function adapterName(type, names) {
   }
 }
 
-/** @param {any} node An expression: does it build a value (object, class, function, `new`)? @returns {boolean} */
-function builds(node) {
+/** @param {any} node An expression without its `as`, `satisfies` and `!` */
+function unwrap(node) {
   while (["TSAsExpression", "TSSatisfiesExpression", "TSNonNullExpression"].includes(node?.type)) {
     node = node.expression;
   }
+  return node;
+}
+
+/** @param {any} node An expression: does it build a value (object, class, function, `new`)? @returns {boolean} */
+function builds(node) {
+  node = unwrap(node);
   if (node?.type === "ConditionalExpression")
     return builds(node.consequent) || builds(node.alternate);
   if (node?.type === "LogicalExpression") return builds(node.left) || builds(node.right);
@@ -107,7 +114,8 @@ function builds(node) {
 
 /**
  * A function node: the values it returns, nested functions excluded. A returned
- * name of a `const` declared in the same function stands for that const's value.
+ * name (cast or not) of a `const` declared at the top of the function body stands
+ * for that const's value; a const inside a nested block does not (it may shadow).
  * @param {any} fn
  */
 function returnedValues(fn) {
@@ -118,10 +126,6 @@ function returnedValues(fn) {
   /** @param {any} node */
   const visit = (node) => {
     if (node.type === "ReturnStatement") found.push(node.argument);
-    if (node.type === "VariableDeclaration" && node.kind === "const") {
-      for (const d of node.declarations)
-        if (d.id.type === "Identifier") locals.set(d.id.name, d.init);
-    }
     if (FUNCTIONS.has(node.type)) return;
     for (const [key, value] of Object.entries(node)) {
       if (key === "parent") continue;
@@ -130,10 +134,18 @@ function returnedValues(fn) {
       }
     }
   };
-  for (const statement of fn.body.body) visit(statement);
-  return found.map((v) =>
-    v?.type === "Identifier" && locals.has(v.name) ? locals.get(v.name) : v,
-  );
+  for (const statement of fn.body.body) {
+    if (statement.type === "VariableDeclaration" && statement.kind === "const") {
+      for (const d of statement.declarations) {
+        if (d.id.type === "Identifier") locals.set(d.id.name, d.init);
+      }
+    }
+    visit(statement);
+  }
+  return found.map((v) => {
+    const name = unwrap(v);
+    return name?.type === "Identifier" && locals.has(name.name) ? locals.get(name.name) : v;
+  });
 }
 
 /** @param {string} file */

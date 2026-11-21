@@ -93,6 +93,8 @@ export interface CallRecord {
   destination?: string;
   policyVersion?: string;
   durationMs?: number;
+  /** Why a blocked or budget-exhausted attempt did not run: a code, never Provider text. */
+  reason?: string;
 }
 
 /** Writes history (provider_calls): T08. */
@@ -369,9 +371,17 @@ export function createBroker(deps: BrokerDeps) {
 
     const base = { requestId, providerId: provider.id, taskKind: request.taskKind, classification };
     // every Phase 1 task asks for structured output; a Provider without it is never called
-    if (!provider.getCapabilities().structuredOutput) {
-      deps.recorder.record({ ...base, attempt: 1, outcome: "blocked" });
-      return { status: "blocked", requestId, reason: "structured-output-unsupported" };
+    let structured: unknown;
+    try {
+      structured = provider.getCapabilities().structuredOutput;
+    } catch {
+      structured = "unreadable"; // the Provider's message stays out of results and history
+    }
+    if (structured !== true) {
+      const reason =
+        structured === "unreadable" ? "capabilities-unavailable" : "structured-output-unsupported";
+      deps.recorder.record({ ...base, attempt: 1, outcome: "blocked", reason });
+      return { status: "blocked", requestId, reason };
     }
     const timeoutMs = Math.min(request.budget.timeoutMs, limits.maxTimeoutMs);
 
@@ -398,12 +408,18 @@ export function createBroker(deps: BrokerDeps) {
       for (let attempt = 1; ; attempt++) {
         const egress = decide();
         if ("reason" in egress) {
-          deps.recorder.record({ ...base, attempt, outcome: "blocked" });
+          deps.recorder.record({ ...base, attempt, outcome: "blocked", reason: egress.reason });
           return { status: "blocked", requestId, reason: egress.reason };
         }
         const where = { destination: egress.destination, policyVersion: egress.policyVersion };
         if (!takeBudget()) {
-          deps.recorder.record({ ...base, ...where, attempt, outcome: "budget-exhausted" });
+          deps.recorder.record({
+            ...base,
+            ...where,
+            attempt,
+            outcome: "budget-exhausted",
+            reason: "budget-exhausted",
+          });
           return { status: "blocked", requestId, reason: "budget-exhausted" };
         }
         const outgoing: StructuredRequest = {

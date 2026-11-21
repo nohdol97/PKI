@@ -122,7 +122,40 @@ describe("broker: the request a Provider receives", () => {
     });
     expect(provider.requests).toEqual([]);
     expect(egress).toEqual([]);
-    expect(records).toMatchObject([{ attempt: 1, outcome: "blocked" }]);
+    expect(records).toMatchObject([
+      { attempt: 1, outcome: "blocked", reason: "structured-output-unsupported" },
+    ]);
+  });
+
+  it("treats a structuredOutput flag that is not exactly true as unsupported", async () => {
+    for (const flag of [undefined, "yes", 1]) {
+      const provider = new FakeProvider({
+        capabilities: { structuredOutput: flag as unknown as boolean },
+      });
+      const { call } = setup({ provider });
+      expect(await call(), String(flag)).toMatchObject({
+        reason: "structured-output-unsupported",
+      });
+      expect(provider.requests).toEqual([]);
+    }
+  });
+
+  it("blocks, records and does not leak when the Provider's capabilities cannot be read", async () => {
+    class Broken extends FakeProvider {
+      override getCapabilities(): never {
+        throw new Error("capabilities echo: SECRET-789");
+      }
+    }
+    const provider = new Broken();
+    const { call, records, egress } = setup({ provider });
+    const result = await call();
+    expect(result).toMatchObject({ status: "blocked", reason: "capabilities-unavailable" });
+    expect(provider.requests).toEqual([]);
+    expect(egress).toEqual([]);
+    expect(records).toMatchObject([
+      { attempt: 1, outcome: "blocked", reason: "capabilities-unavailable" },
+    ]);
+    expect(JSON.stringify([result, records])).not.toContain("SECRET-789");
   });
 
   it("asks for the task's output schema and returns the validated output", async () => {
@@ -409,7 +442,7 @@ describe("broker: seams for consent, egress rules and execution conditions", () 
     });
     expect(await call()).toMatchObject({ status: "blocked", reason: "no-consent" });
     expect(provider.requests).toEqual([]);
-    expect(records).toMatchObject([{ outcome: "blocked", attempt: 1 }]);
+    expect(records).toMatchObject([{ outcome: "blocked", attempt: 1, reason: "no-consent" }]);
   });
 
   it("asks again after waiting for a slot: consent revoked while queued stops the call", async () => {

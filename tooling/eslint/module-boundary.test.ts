@@ -217,6 +217,11 @@ describe("module-boundary rule", () => {
         code: "export function f(): Connector { const c = { a: 1 }; return deps.c ?? load(c); }",
         filename: storageModule,
       },
+      // a block-scoped const of the same name does not stand for the returned parameter (R3-3)
+      {
+        code: "export function f(c: Connector): Connector { { const c = { a: 1 }; } return c; }",
+        filename: storageModule,
+      },
       // tests may share test helpers
       { code: 'import { h } from "./helper.test.ts";', filename: backendTest },
     ],
@@ -353,6 +358,9 @@ describe("module-boundary rule", () => {
         // interfaces, generic constraints and constructor types
         "export function f(): Connector { const c = { manifest }; return c; }",
         "export function f(): Connector { const c = new Impl(); return c; }",
+        // round 3 (R3-1): a returned local behind a cast or `!`
+        "export function f(): Connector { const c = { manifest }; return c as Connector; }",
+        "export function f(): Connector { const c = { manifest }; return c!; }",
         "export const f = (): Connector => (flag ? { manifest } : fallback);",
         "export const c: Connector = existing ?? { manifest };",
         "interface MyConn extends Connector { extra: 1 }\nexport class X implements MyConn {}",
