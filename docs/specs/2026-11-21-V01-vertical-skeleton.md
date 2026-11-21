@@ -276,7 +276,7 @@ T07이 확장한 module-boundary 규칙은 T07보다 먼저 들어온 것(T03, T
 
 1. **화면을 내주는 출처**: Electron 화면은 `app://pki`에서 뜬다. 쉘이 `app` 스킴을 standard·secure·fetch 가능으로 등록하고 `protocol.handle`로 응답한다(`apps/desktop/src/app-protocol.ts`). 파일은 빌드한 화면(`apps/web/dist`)에서 CSP 헤더와 함께 내주고, `/api/`는 쉘의 main 프로세스가 백엔드로 넘긴다. 넘길 때 `Origin`은 언제나 `app://pki`로 고정하고(Chromium은 같은 출처의 사용자 정의 스킴 요청에 `Origin`을 싣지 않는다) 화면 요청의 헤더는 `authorization`, `content-type`, `accept`만 옮긴다. 응답은 `content-type`만 돌려준다. 백엔드는 `--origin app://pki`로 그 출처 하나만 받는다. 화면이 받는 세션의 `baseUrl`은 `""`(같은 출처)이다. **잠정 결정**: 쉘이 두 번째 loopback 서버를 열어 내주는 방법도 있으나, 같은 PC의 다른 프로세스가 닿을 수 있는 포트가 하나 더 생겨 택하지 않았다.
 2. **CSP(확정)**: `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`. 화면에 인라인 스크립트나 인라인 `<style>`이 생기면 막힌다. React의 `style` 속성은 CSSOM으로 들어가므로 막히지 않는다.
-3. **백엔드 프로세스(잠정)**: 쉘은 Electron의 `utilityProcess.fork`로 `backend/src/shell.ts`를 띄운다. Electron 45에 든 Node 24가 TypeScript 원본을 그대로 실행하고, better-sqlite3 13의 N-API 사전 빌드도 재빌드 없이 읽힌다(macOS arm64에서 관찰. Windows는 A07·A18). 통로는 utility process의 `parentPort`이고, 테스트에서는 Node `fork`의 IPC가 같은 메시지를 나른다. 메시지는 쉘 → 백엔드 `{type:"start", token}`·`{type:"stop"}`, 백엔드 → 쉘 `{type:"ready", port}`·`{type:"failed"}` 넷뿐이며, 모양이 틀린 시작 메시지는 되돌려 보내지 않고(토큰이 들었을 수 있다) 실패로 끝난다. 백엔드 환경 변수는 허용 목록(`BACKEND_ENV_KEYS`: PATH, HOME, USERPROFILE, LOCALAPPDATA, APPDATA, XDG_DATA_HOME, TMPDIR, TEMP, TMP, SystemRoot, LANG)만 넘긴다. **T15**는 원본 경로(`../../../backend/src/shell.ts`, `../../web/dist/`)를 산출물 배치로 바꾸고 백엔드를 묶는다. 종료는 `stop` 메시지 뒤 5초 안에 끝나지 않으면 kill이다. 백엔드가 스스로 죽으면 다시 띄우지 않고(**T16**), 쉘은 그 뒤의 `/api/` 요청을 백엔드 포트로 넘기지 않고 502로 끝낸다. 비워진 loopback 포트는 같은 PC의 어떤 프로세스든(다른 OS 사용자 포함) 다시 잡을 수 있어, 넘기면 토큰과 요청 본문이 그쪽으로 간다. T16이 재시작을 넣으면 새 주소로만 다시 넘긴다. 이미 죽은 백엔드에는 종료 시 `stop`을 보내지 않는다. Electron은 앱이 끝날 때 utility process를 스스로 끝내므로 `lifecycle.e2e`의 "종료 뒤 백엔드 없음"은 이 정상 종료 절차가 없어도 통과한다. 정상 종료 절차 자체는 `shell.channel` 테스트가 본다.
+3. **백엔드 프로세스(잠정)**: 쉘은 Electron의 `utilityProcess.fork`로 `backend/src/shell.ts`를 띄운다. Electron 45에 든 Node 24가 TypeScript 원본을 그대로 실행하고, better-sqlite3 13의 N-API 사전 빌드도 재빌드 없이 읽힌다(macOS arm64에서 관찰. Windows는 A07·A18). 통로는 utility process의 `parentPort`이고, 테스트에서는 Node `fork`의 IPC가 같은 메시지를 나른다. 메시지는 쉘 → 백엔드 `{type:"start", token}`·`{type:"stop"}`, 백엔드 → 쉘 `{type:"ready", port}`·`{type:"failed"}` 넷뿐이며, 모양이 틀린 시작 메시지는 되돌려 보내지 않고(토큰이 들었을 수 있다) 실패로 끝난다. 백엔드 환경 변수는 허용 목록(`BACKEND_ENV_KEYS`: PATH, HOME, USERPROFILE, LOCALAPPDATA, APPDATA, XDG_DATA_HOME, TMPDIR, TEMP, TMP, SystemRoot, LANG)만 넘긴다. **T15**는 원본 경로(`../../../backend/src/shell.ts`, `../../web/dist/`)를 산출물 배치로 바꾸고 백엔드를 묶는다. 종료는 `stop` 메시지 뒤 5초 안에 끝나지 않으면 kill이다. 백엔드가 스스로 죽으면 다시 띄우지 않고(**T16**), 쉘은 그 뒤의 `/api/` 요청을 백엔드 포트로 넘기지 않고 502로 끝낸다. 비워진 loopback 포트는 같은 PC의 어떤 프로세스든(다른 OS 사용자 포함) 다시 잡을 수 있어, 넘기면 토큰과 요청 본문이 그쪽으로 간다. T16이 재시작을 넣으면 새 주소로만 다시 넘긴다. 이미 죽은 백엔드에는 종료 시 `stop`을 보내지 않는다. `lifecycle.e2e`는 두 경우를 따로 본다: 백엔드가 살아 있을 때 종료하면 앱이 끝나고 백엔드 프로세스가 없다(C3), 백엔드가 죽은 뒤에도 종료가 끝난다(멈추지 않음). Electron은 앱이 끝날 때 utility process를 스스로 끝내므로 "종료 뒤 백엔드 없음"은 이 정상 종료 절차가 없어도, 백엔드가 `stop`과 SIGTERM을 무시해도 통과한다. 그 E2E가 붙잡는 것은 종료 절차가 멈추지 않는 것이고, 정상 종료 절차 자체는 `shell.channel` 테스트가 본다. 종료 처리기는 `stop()`이 곧바로 끝나는 경우(이미 끝난 백엔드)를 위해 `will-quit` 안이 아닌 새 작업에서 다시 종료를 부른다. `will-quit` 안에서 부른 종료는 버려져 앱이 멈춘다.
 
    쉘과 백엔드, 화면 사이에 오가는 것(3·1항):
 
@@ -304,11 +304,15 @@ T07이 확장한 module-boundary 규칙은 T07보다 먼저 들어온 것(T03, T
        M-->>P: 502 (넘기지 않음)
      end
      Note over M,B: 앱 종료
-     M->>B: {type: stop}
-     alt 5초 안에 끝남
-       B-->>M: exit
-     else 끝나지 않음
-       M->>B: kill
+     alt 백엔드가 살아 있음
+       M->>B: {type: stop}
+       alt 5초 안에 끝남
+         B-->>M: exit
+       else 끝나지 않음
+         M->>B: kill
+       end
+     else 이미 끝남
+       Note over M: 보내지 않고 바로 종료
      end
    ```
 
@@ -444,3 +448,4 @@ R07(#37)이 닫히기 전에는 V01을 통과로 표시하지 않는다(이슈 #
 | 2026-11-21 | T06이 정한 것을 "T06이 넘기는 것"으로 적음: 화면을 `app://pki`에서 내주고 `/api/`를 main이 고정 `Origin`으로 넘김, CSP, utility process로 띄우는 백엔드와 통로 메시지·환경 변수 허용 목록, 백엔드가 포트를 골라 알림, preload 함수 이름과 비밀 값 함수의 미구현 응답(T11), 외부 링크 조건, 이동 차단, 개발·테스트용 스위치, E2E 배치와 설정을 효과로 확인하는 방법. API 표의 preload·쉘 ↔ 백엔드 행을 고치고 절 제목의 "잠정"을 뗌 | API와 preload, 작업 분해 | V01-T06 구현 |
 | 2026-11-21 | T06 독립 검토 반영: 백엔드가 끝난 뒤 `/api/`를 넘기지 않고 502, 외부 링크를 한 번 정규화해 확인 창에 punycode 호스트를 보이고 같은 href를 엶, 세 개발·테스트용 스위치의 산출물 처리를 T15에 맡김, `shell.channel`의 argv 절반과 env 절반을 증명하는 테스트를 바로잡음, 쉘·백엔드·화면 사이 교환의 시퀀스 다이어그램 추가 | T06이 넘기는 것 3·5·7·8 | V01-T06 검토 B-B1, B-B2, B-B7, A-F1~F3 |
 | 2026-11-21 | main(T08) 통합: `egress-label.e2e`는 브라우저에서만 돈다는 것과 Electron으로 넓히는 방법을 적음. 두 백엔드 진입점(`dev.ts`, `shell.ts`)이 같은 시작 함수(`backend/src/boot.ts`)를 씀 | T06이 넘기는 것 8 | T08 머지 뒤 통합 |
+| 2026-11-21 | T06 재검토 반영: `lifecycle.e2e`를 살아 있는 백엔드의 종료(백엔드 프로세스 없음)와 백엔드가 죽은 뒤(전달 없음, 종료가 멈추지 않음) 두 테스트로 나눔, 종료가 멈추던 문제의 방어를 새 작업에서 다시 종료를 부르는 것 하나로 줄임, 다이어그램의 종료 단계를 백엔드 생존 여부로 나눔, 무엇을 E2E가 붙잡고 무엇은 Electron이 보장하는지 적음 | T06이 넘기는 것 3 | V01-T06 재검토 RR-F1~F4 |

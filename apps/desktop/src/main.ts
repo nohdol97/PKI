@@ -126,11 +126,12 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on("window-all-closed", () => app.quit());
   app.on("will-quit", (event) => {
-    // Nothing to stop once the backend has exited.
-    if (quitting || !backend || !backendAlive) return;
+    if (quitting || !backend) return;
     event.preventDefault();
     quitting = true;
-    // Quit again from a fresh task: a quit issued inside this will-quit is dropped.
+    // stop() sends nothing to a backend that has already exited and resolves at once;
+    // a quit issued from inside this will-quit is then dropped, so quit again from a
+    // fresh task (the one defence: it covers every stop() that resolves early).
     void backend.stop().finally(() => setImmediate(() => app.quit()));
   });
   run().catch((error: unknown) => {
