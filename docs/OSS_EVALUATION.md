@@ -62,7 +62,7 @@
 | 라이선스 | Apache-2.0 (E1.1) | Apache-2.0 (E2.1) | MIT (E3.1) | Apache-2.0 (E4.1) | MIT (E5.1) | MIT (E6.1) |
 | 런타임 | Python >=3.10,<3.15 | Python >=3.10 (임베디드 DB는 3.12 이상) | Python >=3.11 (HEAD 기준) | Java 21(Spring Boot) | Node >=20, Next.js 14 | 에이전트 skill(마크다운) + 표준 라이브러리 Python 스크립트 1개 |
 | ① Windows native | 부분: wheel·분류자는 있으나 OpenSSL DLL 보정 코드와 Windows 이슈가 있음 (E1.1, E1.3, 2.4절) | release v0.31.2: 부분(deprecated Kuzu 드라이버 경로, Kuzu에 win_amd64 wheel 있음, 보관된 Kuzu의 Windows 충돌 이슈 #1469). 고정 HEAD: 아니오(Kuzu 제거, falkordblite에 Windows wheel 없음) (E2.2, E2.3) | 부분: Windows용 파일 잠금·원자적 쓰기 경로가 소스에 있음 (E3.8) | 미검증(Windows 근거 없음) (E4.6) | 부분: README 주장만 있음 (E5.6) | 미검증 |
-| ② 서버/Docker 불필요 | 소스에 있음(기본값): SQLite+LanceDB+Ladybug 임베디드 (E1.2) | release·HEAD 공통: 기본값은 별도 Neo4j 서버라 ② 탈락. release의 Kuzu 경로는 서버가 필요 없으나 보관된 프로젝트 위에 있고, HEAD의 임베디드 FalkorDB는 SSPL(④)이며 Windows에서 쓸 수 없다 (E2.2, E2.3) | 소스에 있음(기본값). 단 파일 저장소는 "소규모 테스트용"이라고 문서에 적혀 있음 (E3.4) | 서버 불필요(SQLite)지만 JVM 필요, README 권장 시작은 Docker Compose (E4.2) | 소스에 있음(SQLite+파일) (E5.2) | 소스에 있음(파일) |
+| ② 서버/Docker 불필요 | 소스에 있음(기본값): SQLite+LanceDB+Ladybug 임베디드 (E1.2) | release·HEAD 공통: 기본 경로(별도 Neo4j 서버)는 ②에 걸린다. release의 Kuzu 경로는 서버가 필요 없으나 보관된 프로젝트 위에 있고, HEAD의 임베디드 FalkorDB는 SSPL(④)이며 Windows에서 쓸 수 없다 (E2.2, E2.3) | 소스에 있음(기본값). 단 파일 저장소는 "소규모 테스트용"이라고 문서에 적혀 있음 (E3.4) | 서버 불필요(SQLite)지만 JVM 필요, README 권장 시작은 Docker Compose (E4.2) | 소스에 있음(SQLite+파일) (E5.2) | 소스에 있음(파일) |
 | ③ 근거(provenance) | 소스에 있음: edge → chunk → 문서 개정 → 파이프라인 실행 (E1.9). 문자 위치 없음 | 부분: episode 단위만 (E2.5) | 부분: chunk 단위. 일부 chunker는 원문 span 보조 파일이 있음 (E3.9) | 부분: item → raw data id (E4.5) | 부분: 페이지 → 원본 id (E5.5) | 부분: `Raw` 필드를 문자열 검색으로 확인 (E6.3) |
 | ③ 삭제 시 파생물 제거 | 소스에 있음: `forget()`이 그래프·벡터·원본·세션을 함께 제거 (E1.8). 공유 사실 보존은 미검증 | 부분: `remove_episode`가 단독 근거 edge·node 제거, 트랜잭션 없음 (E2.6) | 소스에 있음: `adelete_by_doc_id`가 추출 캐시로 영향받은 항목을 재구성 (E3.5). 반쯤 끝난 삭제는 복구 도구 필요 | 아니오: 원문 문서 삭제 API 없음 (E4.4) | 아니오: 삭제해도 파생 페이지를 남김 (E5.5) | 아니오: 범위 밖으로 명시 (E6.3) |
 | ④ 재배포 라이선스 | 확인한 약 17개 중(pyproject 선언 직접 의존성 53개) GPL/AGPL/SSPL/BSL/비상업 없음(PyPI 최신 기준). 나머지 직접 의존성 약 36개, 전이 의존성, 모델 가중치는 미검증 → 부분 (2.3절) | 서버 기본값 Neo4j는 GPL-3.0, HEAD의 임베디드 FalkorDB는 SSPL v1 (E2.3, 아래 라이선스 표). release의 Kuzu 경로는 MIT라 ④에 걸리지 않는다(PyPI 메타 기준) | 확인한 9개 중(선언 직접 의존성 19개) 해당 없음. 나머지 10개와 전이 의존성 미검증 → 부분 | 저장소는 Apache-2.0. mysql-connector-j 조건 미확인, Spring 계열 미검증 (E4.2) | 저장소 MIT. npm 전이 의존성 미검증 | stdlib만 사용 |
@@ -469,7 +469,7 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 - 경로별로 걸리는 탈락 조건:
   - 고정 HEAD의 Neo4j 서버 경로(기본값): ② 서버 필요, 서버 라이선스는 GPL-3.0이라 ④(E2.2, E2.3).
   - HEAD의 falkordblite 경로: ① Windows wheel 없음(WSL만 안내), ④ 안에 든 FalkorDB가 SSPL v1(E2.3). HEAD에서 Kuzu 드라이버는 제거되었다(E2.2).
-  - release v0.31.2의 Kuzu 경로: 서버 없이 Windows에 설치할 수 있는 경로가 존재한다(Kuzu MIT, win_amd64 wheel). 그러나 그 드라이버는 deprecated이고 보관된 Kuzu 위에 있으며 Windows 충돌 이슈 #1469가 있었고 upstream이 제거했다. 걸리는 탈락 조건은 없지만 ③ 이전에 유지보수가 끊긴 길이다.
+  - release v0.31.2의 Kuzu 경로: 서버 없이 Windows에 설치할 수 있는 경로가 존재한다(Kuzu MIT, win_amd64 wheel). 그러나 그 드라이버는 deprecated이고 보관된 Kuzu 위에 있으며 Windows 충돌 이슈 #1469가 있었고 upstream이 제거했다. 네 가지 탈락 조건에는 걸리지 않는다. 다만 upstream이 버린 경로라 앞으로 수정·보안 패치를 받을 수 없다. 즉 graphiti 기각의 결정적 사유는 탈락 조건이 아니라 유지보수 단절이다.
 - **결정적 이유**: "임베디드 저장소가 한 번도 없었다"가 아니라, 유지되는 서버 없는 Windows 경로가 없다는 점이다. 옛 release에 고정하면 upstream이 버린 경로를 채택하는 것이 된다.
 - 보존: 양시간 edge 모델(`valid_at`, `invalid_at`, `expired_at`, E2.5)은 **설계 참고**로 남긴다. 이 참고는 엔진 채택이 아니다.
 - 대안: 위 보류 후보 3개.
@@ -508,14 +508,14 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 아래는 R06 전까지 바뀔 수 있는 잠정 판단이다. 확정된 결정이 아니다.
 
 1. **R06에서 풀어야 할 긴장: 권위 있는 기록을 제품이 가질 것인가, 엔진이 가질 것인가.** 아직 가설이며 결정이 아니다.
-   - 발견한 공백(실제로 표로 비교한 축만): 시간 유효성, 원문 span 수준의 근거, 삭제 시 파생물 제거를 모두 갖춘 엔진은 6개 후보 + 최종 후보군에서 찾지 못했다. graphiti만 시간 유효성이 있고, 삭제는 부분, 근거는 episode 단위다. sage-wiki와 cortexdb는 근거·양시간·원본 삭제가 소스에 있으나 실행으로 확인하지 못했고 각각 미검증 항목이 있다(3.1절). **사용자 교정 보존은 이번 조사에서 평가하지 않았다(미평가).**
+   - 발견한 공백(실제로 표로 비교한 축만): 시간 유효성, 원문 span 수준의 근거, 삭제 시 파생물 제거를 모두 갖추었다고 실행으로 확인된 엔진은 6개 후보 + 최종 후보군에 없다. graphiti만 시간 유효성이 있고, 삭제는 부분, 근거는 episode 단위다. sage-wiki와 cortexdb는 근거·양시간·원본 삭제가 소스에 있으나 실행으로 확인하지 못했고 각각 미검증 항목이 있다(3.1절). **사용자 교정 보존은 이번 조사에서 평가하지 않았다(미평가).**
    - 가설: 제품이 Knowledge/Evidence 기록을 SQLite에 두고 엔진은 다시 만들 수 있는 추출·검색 투영으로 쓴다. R03은 이것과 "엔진이 권위를 가진다"를 같은 조건에서 시험해야 한다.
    - 원 설계 문장과의 충돌 가능성(R06 입력으로 그대로 인용):
      - [69행] "특히 Knowledge Engine, Graph, Vector, LLM Wiki, Memory Management를 독자적으로 다시 구현하지 않는 것을 원칙으로 한다."
      - [945행] "기존 Knowledge Engine이 동일 기능을 제공한다면 중복 저장소를 추가하지 않는다."
      - [947행] "저장소별 Single Source of Truth를 명확히 정의한다."
      - [532~536행] Knowledge Graph 기능으로 "사실의 시간 및 유효 기간 관리", "관계별 근거 추적", "기존 사실의 변경 및 대체", "상충되는 정보 관리", "원본 삭제 시 파생 지식 갱신"을 든다. 제품이 이를 담은 별도 기록을 소유하면 같은 기능을 엔진과 제품이 둘 다 갖게 될 수 있다.
-     - 반대로 [540행]은 "Embedded Graph Storage 또는 기존 Knowledge Engine의 로컬 저장소를 우선 사용한다"고 한다.
+     - [540행]은 "Embedded Graph Storage 또는 기존 Knowledge Engine의 로컬 저장소를 우선 사용한다"고 한다.
    - 이것이 금지된 "엔진 재구현"에 해당하는지는 여기서 단정하지 않는다. 기록(레코드)을 저장하는 것과 그래프·벡터 알고리즘을 구현하는 것은 다르다는 해석이 가능하지만, 위 945행의 "중복 저장소" 조항이 기록 중복을 막는 뜻인지는 사용자가 R06에서 판단할 문제다.
    - 쉬운 비유: 엔진이 도서관 검색대라면 제품이 원본 장부를 직접 갖고 검색대를 장부에서 다시 지을 수 있는 색인으로 두는 설계다. 비유가 맞지 않는 점은, 검색대와 장부가 어긋났을 때 무엇이 옳은지 판정하는 규칙(재구축 절차)을 제품이 따로 정의해야 한다는 것이다.
 2. **사이드카 언어가 열린 질문이 되었다.** Python(LightRAG, cognee), Go 단일 바이너리(sage-wiki, cortexdb), 사이드카 없음 중에서 R03 결과로 정한다. Go 후보는 Python 번들링·torch 문제를 피하지만 성숙도 위험이 있다.
