@@ -142,7 +142,7 @@ flowchart TD
 | HTTP API | 상태 조회(백엔드, Provider, embedding, 벡터 색인), 원본 목록과 키워드 검색, 활동(Provider 호출 이력), 설정 읽기·쓰기(기본 Provider, 동의, 백그라운드 설정), Connector 목록과 동기화 실행, embedding 준비 시작, **Provider 연결 시험** |
 | 설정 API로 바꿀 수 **없는** 것 | 빌드 종류, 검증된 조합 목록, 인자 프로필, 합성 목록, 지시문, 모델의 고정 revision과 해시 |
 | preload가 화면에 주는 함수(이것이 전부다) | 세션 받기(백엔드 주소와 토큰), 비밀 값 저장·존재 확인·삭제(값을 다시 읽어 주는 함수는 없다), 외부 링크 열기(`https`만, 사용자 확인 뒤 OS 브라우저) |
-| 로컬 API 접속 조건(T02가 정함) | CORS는 없다. 브라우저 개발 환경은 같은 출처의 Vite 프록시(`changeOrigin: true`)로 부르고 개발 화면의 출처를 백엔드 `--origin`에 넘긴다(T05). Electron 화면은 `file://`로 띄우지 않는다(`Origin: null`은 거부된다). 허용 목록에 넣은 출처로 내준다(T06). T05는 개발 진입점이 stdout에 내는 토큰 줄을 코드로 읽고 어디에도 기록하지 않는다. 개발 진입점(`backend/src/dev.ts`)과 `packages/testkit`은 R20 산출물에 넣지 않는다 |
+| 로컬 API 접속 조건(T02가 정함) | CORS는 없다. 브라우저 개발 환경은 같은 출처의 Vite 프록시(`changeOrigin: true`)로 부르고 개발 화면의 출처를 백엔드 `--origin`에 넘긴다(T05). 브라우저 개발 환경의 세션 받기는 Vite 개발 서버의 `/__pki/session`이 맡는다(개발 서버에만 있고 토큰은 메모리에만 둔다). 개발 서버는 Vite의 Host 검사를 그대로 켜 두어 다른 이름으로 같은 주소에 오는 요청(DNS rebinding)을 막고, CORS를 꺼 다른 로컬 화면이 세션을 읽지 못하게 한다(T05, 브라우저 E2E가 둘 다 확인). Electron 화면은 `file://`로 띄우지 않는다(`Origin: null`은 거부된다). 허용 목록에 넣은 출처로 내준다(T06). T05는 개발 진입점이 stdout에 내는 토큰 줄을 코드로 읽고 어디에도 기록하지 않는다. 개발 진입점(`backend/src/dev.ts`)과 `packages/testkit`은 R20 산출물에 넣지 않는다 |
 | 쉘 ↔ 백엔드 | 부모와 자식 프로세스 사이의 전용 통로. 쉘이 세션 토큰과 포트를 넘기고, 백엔드는 호출 직전에 비밀 값을 요청한다 |
 
 ### 저장소 배치와 도구 (잠정)
@@ -159,7 +159,7 @@ flowchart TD
 | lint·서식 | ESLint와 Prettier(평가 범위 밖) | 모듈 간 import 금지 규칙과 판정 코드의 금지 입력 규칙을 lint로 건다 |
 | HTTP 서버 | Node 표준 `node:http`(T02 확정, 의존성 없음) | 기준: 허용 라이선스, 네이티브 모듈 없음, 유지보수 활발. 경로가 적고 검사 세 가지를 직접 거는 편이 프레임워크의 기본 동작(경로 해석, 플러그인 순서)을 따로 확인하는 것보다 작다 |
 | 스키마 검증 | Zod 4(T02 확정, MIT, 네이티브 모듈과 런타임 의존성 없음) | 기준: 같은 정의에서 TypeScript 타입과 JSON Schema를 둘 다 얻을 수 있을 것(CLI의 구조화 출력 옵션에 JSON Schema를 넘겨야 한다). `z.infer`로 타입을, 내장 `z.toJSONSchema`로 JSON Schema를 얻는다 |
-| 화면 구성요소 | React, Vite, shadcn/ui(4.2절) | 원 설계 지정 |
+| 화면 구성요소 | React 19, Vite 8(4.2절, T05 확정, MIT). shadcn/ui는 아직 쓰지 않는다(T05) | 원 설계 지정. JSX는 Vite 8이 직접 변환해 React 플러그인이 필요 없다. shadcn/ui는 Tailwind 설정과 구성요소 사본을 저장소에 들이는데 V01 화면은 표와 버튼뿐이라 쓸 곳이 없다. 화면이 커지는 작업에서 들인다 |
 | 정본 저장 | better-sqlite3(4.3절) | [ADR 0004](../adr/0004-embedded-storage.md). V01의 네이티브 저장 모듈은 이것 하나다 |
 | Embedding | Transformers.js, bge-m3(4.5절) | [ADR 0006](../adr/0006-embedding.md) |
 
@@ -351,3 +351,4 @@ R07(#37)이 닫히기 전에는 V01을 통과로 표시하지 않는다(이슈 #
 | 2026-11-21 | 스키마 v1이 미룬 열의 담당 작업 명시: cursor 저장은 T04의 마이그레이션, 원본의 access_scope는 T07 | 작업 분해(T04, T07) | T03 독립 검토 F5 |
 | 2026-11-21 | T04가 정본 DB를 여는 백엔드 구성에서 데이터 폴더 함수(`dataDirectory()`·`ensureDataDirectory()`)를 부르는 담당임을 명시 | 작업 분해(T04) | T03 재검토 G3 |
 | 2026-11-21 | T04의 결정 가운데 뒤 작업을 묶는 것을 "T04가 넘기는 것"으로 적음: 합성 목록은 커밋된 생성 결과와 최신성 테스트이며 T15 산출물 빌드가 검사를 돈다, 목록에 드는 자료(골든 데이터는 합성 등급, `verification/` 제외), 테스트 Connector는 T15가 제품 구성에서 뺀다, `site-*` 출처는 `connector_instances.kind`로 찾고 없으면 닫힌 쪽으로 실패. T07·T15 행에 가리킴 추가 | 작업 분해(T04, T07, T15) | T04 독립 검토 K2 |
+| 2026-11-21 | 화면 구성요소를 React 19·Vite 8로 확정하고 shadcn/ui 도입을 미룸. 브라우저 개발 환경의 세션 받기(`/__pki/session`)와 그 보호(Vite Host 검사 유지, CORS 끔)를 API 표에 적음 | 저장소 배치와 도구, API와 preload | V01-T05 구현 |

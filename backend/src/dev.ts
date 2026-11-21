@@ -1,4 +1,5 @@
-// Development entry: `pnpm --filter @pki/backend dev [--port N] [--origin URL]... [--data-dir DIR]`.
+// Development entry: `pnpm --filter @pki/backend dev [--port N] [--origin URL]... [--data-dir DIR]
+// [--fixtures FILE]`. The test Connector replays FILE (default: the repository's fixtures).
 // The DB defaults to a sibling "PKI-dev" folder (same OS rules as the product's data
 // directory), so synthetic seeds never land in the product's canonical DB.
 // The session token is generated here and written to stdout as one JSON line, so it
@@ -21,11 +22,17 @@ const { values } = parseArgs({
     port: { type: "string", default: "0" },
     origin: { type: "string", multiple: true, default: [] },
     "data-dir": { type: "string" },
+    fixtures: { type: "string", default: FIXTURES },
   },
 });
 
-const db = openCanonicalDb(values["data-dir"] ?? `${dataDirectory()}-dev`);
-const connectors = await createConnectorManager(db, connectorInstances(FIXTURES), connectorKinds);
+const dir = values["data-dir"] ?? `${dataDirectory()}-dev`;
+const db = openCanonicalDb(dir);
+const connectors = await createConnectorManager(
+  db,
+  connectorInstances(values.fixtures),
+  connectorKinds,
+);
 const token = randomBytes(32).toString("base64url");
 const server = await startServer({
   token,
@@ -33,5 +40,7 @@ const server = await startServer({
   port: Number(values.port),
   ...productAdapters(),
   connectors,
+  db,
+  dataDirectory: dir,
 });
 process.stdout.write(`${JSON.stringify({ url: server.url, token })}\n`);

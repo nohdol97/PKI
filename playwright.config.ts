@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-// Browser and Electron E2E files (`*.e2e.{ts,tsx}`) arrive with the screens (V01-T05, T06).
+// Browser E2E (V01-T05) and, from T06, Electron E2E files: `*.e2e.{ts,tsx}`.
 export default defineConfig({
   testMatch: "**/*.e2e.{ts,tsx}",
 });
