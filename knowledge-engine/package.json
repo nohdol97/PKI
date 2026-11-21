@@ -8,6 +8,7 @@
     "./adapters": "./src/adapters/index.ts"
   },
   "dependencies": {
-    "@pki/contracts": "workspace:*"
+    "@pki/contracts": "workspace:*",
+    "@pki/storage": "workspace:*"
   }
 }

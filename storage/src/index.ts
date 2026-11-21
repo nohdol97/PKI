@@ -52,6 +52,10 @@ export {
   type StoredRelation,
 } from "./knowledge.ts";
 export {
+  findRelation,
+  listFactsOfKind,
+  listInsightKeys,
+  listRelationPairs,
   readInsight,
   saveInsight,
   type InsightContent,

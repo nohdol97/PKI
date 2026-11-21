@@ -2,6 +2,7 @@
 // summary and evidence links but keeps the row, so the same row comes back when
 // the condition holds again. Deleting X or Y deletes the row (foreign key cascade).
 // A rule's Insight is an inference (V02-R9), the only epistemic type written here.
+import type { KnowledgeStatus } from "./knowledge.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 export interface InsightKey {
@@ -64,4 +65,81 @@ export function readInsight(db: SqlDriver, key: InsightKey): StoredInsight | und
       ])
       .map((r) => r.evidence_id as number),
   };
+}
+
+// The fixed reads a rule makes (V02-R8): single tables or depth-1 joins, never a
+// recursive query or a graph walk. Which rows are valid, and any comparison of
+// values, is the rule's code, not SQL (V02-R9).
+
+// An id list is bound as one JSON parameter, so its length meets no SQL variable limit.
+const IDS = "(SELECT value FROM json_each(?))";
+
+/** An item's facts of one kind, oldest first. */
+export function listFactsOfKind(
+  db: SqlDriver,
+  itemId: number,
+  kind: string,
+): { id: number; value: string; status: KnowledgeStatus }[] {
+  return db
+    .all("SELECT id, value, status FROM facts WHERE item_id = ? AND kind = ? ORDER BY id", [
+      itemId,
+      kind,
+    ])
+    .map((row) => ({
+      id: row.id as number,
+      value: row.value as string,
+      status: row.status as KnowledgeStatus,
+    }));
+}
+
+/** The relation (subject, type, object), if stored. */
+export function findRelation(
+  db: SqlDriver,
+  subjectId: number,
+  type: string,
+  objectId: number,
+): { id: number; status: KnowledgeStatus } | undefined {
+  const row = db.all(
+    "SELECT id, status FROM relations WHERE subject_id = ? AND type = ? AND object_id = ?",
+    [subjectId, type, objectId],
+  )[0];
+  return row && { id: row.id as number, status: row.status as KnowledgeStatus };
+}
+
+/** (subject, object) of each relation of `type` that has one of `itemIds` at either end. */
+export function listRelationPairs(
+  db: SqlDriver,
+  type: string,
+  itemIds: readonly number[],
+): { xItemId: number; yItemId: number }[] {
+  if (itemIds.length === 0) return [];
+  return db
+    .all(
+      `SELECT subject_id, object_id FROM relations
+       WHERE type = ? AND (subject_id IN ${IDS} OR object_id IN ${IDS})
+       ORDER BY id`,
+      [type, JSON.stringify(itemIds), JSON.stringify(itemIds)],
+    )
+    .map((row) => ({ xItemId: row.subject_id as number, yItemId: row.object_id as number }));
+}
+
+/** Keys of the rule's Insight rows, in any state, with one of `itemIds` as X or Y. */
+export function listInsightKeys(
+  db: SqlDriver,
+  rule: string,
+  itemIds: readonly number[],
+): InsightKey[] {
+  if (itemIds.length === 0) return [];
+  return db
+    .all(
+      `SELECT x_item_id, y_item_id FROM insights
+       WHERE rule = ? AND (x_item_id IN ${IDS} OR y_item_id IN ${IDS})
+       ORDER BY id`,
+      [rule, JSON.stringify(itemIds), JSON.stringify(itemIds)],
+    )
+    .map((row) => ({
+      rule,
+      xItemId: row.x_item_id as number,
+      yItemId: row.y_item_id as number,
+    }));
 }
