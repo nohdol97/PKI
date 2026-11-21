@@ -56,7 +56,7 @@ describe("pdfModule text and blocks (C1, C2)", () => {
 
   it("makes one block per page, in page order, with 1-based page locators", async () => {
     const doc = await parseOk(bytes);
-    expect(doc.text).toBe([PAGE1, PAGE2, PAGE3].join("\n"));
+    expect(doc.text).toBe([PAGE1, PAGE2, PAGE3].join("\n\n"));
     expect(doc.blocks.map((b) => b.locator)).toEqual([
       { format: "pdf", page: 1 },
       { format: "pdf", page: 2 },
@@ -77,7 +77,7 @@ describe("pdfModule text and blocks (C1, C2)", () => {
   it("counts block positions in code points, not UTF-16 units (C2)", async () => {
     const doc = await parseOk(bytes);
     const afterEmoji = doc.blocks[1];
-    expect(afterEmoji?.start).toBe([...PAGE1].length + 1);
+    expect(afterEmoji?.start).toBe([...PAGE1].length + 2);
     // The emoji is 2 UTF-16 units, so the UTF-16 index of page 2 is larger.
     expect(doc.text.indexOf(PAGE2)).toBeGreaterThan(afterEmoji?.start ?? Infinity);
     expect(doc.blocks[2]?.end).toBe([...doc.text].length);
@@ -108,7 +108,7 @@ describe("pages without a text layer (R10, R18, C9)", () => {
       { format: "pdf", page: 1 },
       { format: "pdf", page: 3 },
     ]);
-    expect(doc.text).toBe("하나\n셋");
+    expect(doc.text).toBe("하나\n\n셋");
     expect(doc.limitations).toEqual([{ code: "pdf.page-without-text", pages: [2, 4] }]);
   });
 

@@ -110,7 +110,7 @@ export const pdfModule: BinaryFormatModule = {
         }
         text = text.replace(/\n+$/, "");
         if (text.trim() === "") withoutText.push(page);
-        else builder.block(text, { format: "pdf", page });
+        else builder.block(text, { format: "pdf", page }, "\n\n");
       }
       const info = ((await pdf.getMetadata()).info ?? {}) as Record<string, unknown>;
       const limitations: Limitation[] =

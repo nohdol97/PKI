@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><title>합성 위험 HTML</title>
+<link rel="stylesheet" href="https://example.invalid/a.css">
+<style>.x { background: url(https://example.invalid/bg.png); }</style>
+</head>
+<body>
+<h1>위험 요소가 든 문서</h1>
+<script>globalThis.__pkiHtmlMarker = true; var s = "SCRIPT-BODY-SENTINEL";</script>
+<p onclick="globalThis.__pkiHtmlMarker = true">보이는 글</p>
+<img src="https://example.invalid/i.png" onerror="globalThis.__pkiHtmlMarker = true">
+<iframe src="https://example.invalid/f.html">IFRAME-SENTINEL</iframe>
+<object data="https://example.invalid/o.swf"></object>
+<svg><text>SVG-SENTINEL</text></svg>
+<noscript>NOSCRIPT-SENTINEL</noscript>
+<template><p>TEMPLATE-SENTINEL</p></template>
+<a href="https://example.invalid/link">링크 글</a>
+</body></html>
