@@ -22,6 +22,7 @@
 | [specs/2026-11-21-V01-vertical-skeleton.md](specs/2026-11-21-V01-vertical-skeleton.md) | Phase 1 뼈대(V01)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
 | [specs/2026-11-21-V02-vertical-slice.md](specs/2026-11-21-V02-vertical-slice.md) | Phase 1 수직 흐름(V02)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
 | [specs/2026-11-21-I01-connector-sdk.md](specs/2026-11-21-I01-connector-sdk.md) | Connector SDK 규격 v2, 원본·근거 계약, JSONL·API 가져오기(I01)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
+| [specs/2026-11-21-I03-persistent-queue.md](specs/2026-11-21-I03-persistent-queue.md) | 영속 작업 대기열·스케줄러·재시도와 절전 복구(I03)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
 
 ## 동작 방식
 
