@@ -198,8 +198,8 @@ describe("metadata (R17, C8)", () => {
     expect(doc.metadata).toEqual({
       title: "분기 보고서 😀",
       author: "홍길동",
-      created: "2024-01-02T03:04:05Z",
-      modified: "2024-01-02T03:00:00Z",
+      created: "2024-01-02T03:04:05.000Z",
+      modified: "2024-01-02T03:00:00.000Z",
       pageCount: 2,
     });
   });
@@ -217,12 +217,12 @@ describe("metadata (R17, C8)", () => {
     const doc = await parseOk(
       buildPdf({ pages: ["a"], info: { creationDate: "yesterday", modDate: "D:2024" } }),
     );
-    expect(doc.metadata).toEqual({ pageCount: 1, modified: "2024-01-01T00:00:00Z" });
+    expect(doc.metadata).toEqual({ pageCount: 1, modified: "2024-01-01T00:00:00.000Z" });
   });
 
   it("converts PDF dates", () => {
-    expect(pdfDateToIso("D:20240229235959-05'30'")).toBe("2024-03-01T05:29:59Z");
-    expect(pdfDateToIso("D:20240102030405")).toBe("2024-01-02T03:04:05Z");
+    expect(pdfDateToIso("D:20240229235959-05'30'")).toBe("2024-03-01T05:29:59.000Z");
+    expect(pdfDateToIso("D:20240102030405")).toBe("2024-01-02T03:04:05.000Z");
     expect(pdfDateToIso("D:20241301")).toBeUndefined();
     expect(pdfDateToIso(undefined)).toBeUndefined();
   });

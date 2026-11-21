@@ -58,7 +58,7 @@ export function pdfDateToIso(raw: unknown): string | undefined {
     return undefined;
   }
   const date = new Date(ms - offset * 60_000);
-  return date.toISOString().replace(/\.000Z$/, "Z");
+  return date.toISOString();
 }
 
 function metadataFrom(info: Record<string, unknown>, pageCount: number): DocumentMetadata {

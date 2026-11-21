@@ -60,7 +60,6 @@ describe("TextBuilder", () => {
   it("makes neither a block nor a separator for empty text", () => {
     const b = new TextBuilder();
     b.block("", { format: "txt", line: 1 });
-    expect(b.isEmpty).toBe(true);
     b.block("a", { format: "txt", line: 2 });
     b.block("", { format: "txt", line: 3 });
     b.block("b", { format: "txt", line: 4 });

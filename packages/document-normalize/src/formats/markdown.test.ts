@@ -43,7 +43,15 @@ describe("markdown blocks (R15, R9)", () => {
     );
     expect(slices(doc)).toEqual(["see the docs and logo or https://auto.example", "ref img"]);
     expect(doc.text).not.toContain("x.example/a");
-    expect(doc.limitations).toEqual([{ code: "markdown.external-references-ignored", count: 5 }]);
+    expect(doc.limitations).toEqual([{ code: "markdown.external-references-ignored", count: 6 }]);
+  });
+
+  it("counts a link reference definition's address as dropped (R15)", () => {
+    const doc = parse(
+      'text\n\n[a]: https://x.example/a\n[b]: https://x.example/b "t"\n\n> [c]: /c\n',
+    );
+    expect(doc.text).toBe("text");
+    expect(doc.limitations).toEqual([{ code: "markdown.external-references-ignored", count: 3 }]);
   });
 
   it("keeps inline code and emphasis text", () => {

@@ -58,6 +58,22 @@ describe("html blocks (R14, R9)", () => {
     ]);
   });
 
+  it("names the owning block element when the block's first text is inside an inline element (R14)", () => {
+    const paths = (html: string) =>
+      parse(html).blocks.map((b) => (b.locator as { path: string }).path);
+    const doc = parse("<body><p><b>bold</b> rest</p></body>");
+    expect(slices(doc)).toEqual(["bold rest"]);
+    expect(paths("<body><p><b>bold</b> rest</p></body>")).toEqual(["body>p[1]"]);
+    expect(paths("<body><div><span><i>deep</i></span> tail</div></body>")).toEqual(["body>div[1]"]);
+    // inline content directly in body belongs to body
+    expect(paths('<body><a href="#x">link</a> text<p>p</p></body>')).toEqual(["body", "body>p[1]"]);
+    // text after a nested block, started inside an inline element, goes back to the outer owner
+    expect(paths("<body><div><p>in</p><b>after</b> more</div></body>")).toEqual([
+      "body>div[1]>p[1]",
+      "body>div[1]",
+    ]);
+  });
+
   it("collapses whitespace except inside pre", () => {
     const doc = parse("<body><p>  a \n\t b   <i>c</i>  d </p><pre>x  y\n  z</pre></body>");
     expect(slices(doc)).toEqual(["a b c d", "x  y\n  z"]);

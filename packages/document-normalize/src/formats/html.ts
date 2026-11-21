@@ -153,11 +153,13 @@ export const htmlModule: TextFormatModule = {
       }
     };
 
-    const walk = (node: Node, path: string, pre: boolean): void => {
+    // `owner` is the path of the nearest block-level ancestor: the element that owns
+    // the block, even when the block's first text sits inside an inline element (R14).
+    const walk = (node: Node, path: string, pre: boolean, owner: string): void => {
       if (!isElement(node)) {
-        if (node.nodeName === "#text") addText(node as TextNode, path, pre);
+        if (node.nodeName === "#text") addText(node as TextNode, owner, pre);
         else if ("childNodes" in node) {
-          for (const child of node.childNodes) walk(child, path, pre);
+          for (const child of node.childNodes) walk(child, path, pre, owner);
         }
         return;
       }
@@ -186,11 +188,11 @@ export const htmlModule: TextFormatModule = {
         flush();
         const insidePre = pre || name === "pre";
         const indexed = childPaths(node, path);
-        for (const [child, childPath] of indexed) walk(child, childPath, insidePre);
+        for (const [child, childPath] of indexed) walk(child, childPath, insidePre, path);
         flush();
         return;
       }
-      for (const [child, childPath] of childPaths(node, path)) walk(child, childPath, pre);
+      for (const [child, childPath] of childPaths(node, path)) walk(child, childPath, pre, owner);
     };
 
     const siblingPath = (parentPath: string, element: Element, index: number): string =>
@@ -232,8 +234,8 @@ export const htmlModule: TextFormatModule = {
       countAddresses(root);
       for (const child of root.childNodes) {
         if (!isElement(child)) continue;
-        if (child.tagName === "body") walk(child, "body", false);
-        else walk(child, "", false);
+        if (child.tagName === "body") walk(child, "body", false, "body");
+        else walk(child, "", false, "");
       }
     }
 

@@ -71,6 +71,10 @@ export const markdownModule: TextFormatModule = {
           content = node.value;
           locator = { format: "markdown", line, node: "html" };
           break;
+        case "definition":
+          // A link reference definition holds an address that is dropped (R15).
+          dropped++;
+          return;
         default:
           if ("children" in node) for (const child of node.children as RootContent[]) block(child);
           return;

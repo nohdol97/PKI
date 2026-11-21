@@ -33,15 +33,36 @@ describe("csv module", () => {
     expect(v.limitations).toEqual([]);
   });
 
-  it("keeps the tab for empty fields and skips them as blocks", () => {
+  it("adds no tab for empty fields and no line for an all-empty record (R9)", () => {
     const v = ok("a,,c\n,,\nd,e,\n");
-    expect(v.text).toBe("a\t\tc\n\t\t\nd\te\t");
+    expect(v.text).toBe("a\tc\nd\te");
     expect(view(v)).toEqual([
       [1, 1, 1, "a"],
       [1, 1, 3, "c"],
       [3, 3, 1, "d"],
       [3, 3, 2, "e"],
     ]);
+  });
+
+  it("treats whitespace-only fields like empty ones: no block, no text", () => {
+    const v = ok("a, ,c\n  ,\t\n  ,x\n");
+    expect(v.text).toBe("a\tc\nx");
+    expect(view(v)).toEqual([
+      [1, 1, 1, "a"],
+      [1, 1, 3, "c"],
+      [3, 3, 2, "x"],
+    ]);
+    // between two blocks there is only a separator
+    const between = v.blocks
+      .slice(1)
+      .map((b, i) => v.text.slice((v.blocks[i] as { end: number }).end, b.start));
+    expect(between.every((gap) => gap === "\t" || gap === "\n")).toBe(true);
+  });
+
+  it("yields empty text for a file whose fields are all blank", () => {
+    const v = ok(",\n , \n");
+    expect(v.text).toBe("");
+    expect(v.blocks).toEqual([]);
   });
 
   it("maps a record to the line where it starts, across blank lines and quoted newlines", () => {

@@ -71,11 +71,6 @@ export class TextBuilder {
     this.#blocks.push({ start, end: this.#length, locator });
   }
 
-  /** Whether any block was added (separators are decided from this). */
-  get isEmpty(): boolean {
-    return this.#blocks.length === 0;
-  }
-
   finish(extra: { metadata?: DocumentMetadata; limitations?: Limitation[] } = {}): ParsedDocument {
     return {
       text: this.#text,

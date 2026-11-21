@@ -2,7 +2,15 @@
 // prints file names or text for a folder outside it. It runs as a child process,
 // the way `pnpm --filter @pki/document-normalize survey <folder>` runs it.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import iconv from "iconv-lite";
@@ -22,7 +30,8 @@ const tmp = () => {
   return dir;
 };
 
-describe("survey runner", () => {
+// Each case starts a Node process that loads the parsers; the default 5 s is too tight under load.
+describe("survey runner", { timeout: 60_000 }, () => {
   it("refuses a folder inside this repository with a notice and a non-zero exit (H2)", () => {
     const r = run(import.meta.dirname);
     expect(r.status).not.toBe(0);
@@ -39,6 +48,19 @@ describe("survey runner", () => {
     expect(dotted.status).not.toBe(0);
     expect(dotted.stdout.startsWith("배포처 후속")).toBe(true);
   });
+
+  // `realpathSync` (JS) keeps the caller's letter case; only the native one canonicalizes it.
+  const caseInsensitive = existsSync(import.meta.dirname.toUpperCase());
+  it.skipIf(!caseInsensitive)(
+    "refuses a case-variant spelling of a repository folder on a case-insensitive file system",
+    () => {
+      const upper = import.meta.dirname.toUpperCase();
+      expect(upper).not.toBe(import.meta.dirname);
+      const r = run(upper);
+      expect(r.status).not.toBe(0);
+      expect(r.stdout.startsWith("배포처 후속")).toBe(true);
+    },
+  );
 
   it("prints only counts for a folder outside the repository, never names or text (H2)", () => {
     const dir = tmp();

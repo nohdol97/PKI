@@ -3,10 +3,12 @@
 // successes, error codes, limitation codes, encodings). It never prints a file name
 // or any text, so its output can be pasted into a site report. A folder inside this
 // repository is refused: a result made from the repository's synthetic documents
-// must not be recorded as a site result.
+// must not be recorded as a site result. Both sides of that comparison use the native
+// realpath, which also fixes the letter case (a case-variant path on a case-insensitive
+// file system is still the repository).
 import { existsSync, readdirSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { normalizeDocument } from "./index.ts";
+import { dirname, join, resolve } from "node:path";
+import { isInside } from "./input.ts";
 
 type Counts = Record<string, number>;
 
@@ -14,16 +16,10 @@ function repositoryRoot(): string {
   let dir = import.meta.dirname;
   while (!existsSync(join(dir, "pnpm-workspace.yaml"))) {
     const parent = dirname(dir);
-    if (parent === dir) return realpathSync(import.meta.dirname);
+    if (parent === dir) return realpathSync.native(import.meta.dirname);
     dir = parent;
   }
-  return realpathSync(dir);
-}
-
-/** Whether `target` is `root` or below it, compared by path components after realpath. */
-function isInside(root: string, target: string): boolean {
-  const rel = relative(root, target);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  return realpathSync.native(dir);
 }
 
 function bump(counts: Counts, key: string): void {
@@ -42,7 +38,7 @@ if (argument === undefined || process.argv.length > 3) {
 
 let folder: string;
 try {
-  folder = realpathSync(resolve(argument));
+  folder = realpathSync.native(resolve(argument));
 } catch {
   console.error("the folder cannot be read");
   process.exit(2);
@@ -55,6 +51,9 @@ if (isInside(repositoryRoot(), folder)) {
   );
   process.exit(1);
 }
+
+// Loaded only now, so usage and refusal paths do not pay for every parser.
+const { normalizeDocument } = await import("./index.ts");
 
 const success: Counts = {};
 const errors: Counts = {};
