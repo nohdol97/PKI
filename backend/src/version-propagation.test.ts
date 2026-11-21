@@ -3,10 +3,19 @@
 // previous version supported (its evidence stays on that version) and recomputes
 // the Insight; the new version's own extraction job revives a same row it gives
 // current evidence again, and the Insight comes back in its old row. A version
-// replaced before its extraction ran is never extracted (fence, V02-R5).
-import type { StructuredRequest } from "@pki/contracts";
+// replaced before its extraction ran is never extracted (fence, V02-R5). A failed
+// extraction of the edit is not retried (open question for I03), and a page that
+// fails rolls the propagation back with the version.
+import type { ChangeSet, Connector, StructuredRequest } from "@pki/contracts";
 import { type EgressControls } from "@pki/providers";
-import { readChangeSeq, readKnowledgeRevision, type SqlDriver } from "@pki/storage";
+import {
+  addEvidence,
+  insertItem,
+  readChangeSeq,
+  readKnowledgeRevision,
+  saveFact,
+  type SqlDriver,
+} from "@pki/storage";
 import { FakeProvider, fixtureExtraction } from "@pki/testkit";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -19,7 +28,9 @@ import {
   productEgress,
   productImporter,
   productRunner,
+  releaseHeldJobs,
 } from "./composition.ts";
+import { syncConnector } from "./connectors.ts";
 import type { JobRunner } from "./job-runner.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
@@ -43,9 +54,10 @@ function chatEdit(date: string, revision: number): string {
  * its quote, B picked from the candidates the request carried (the same answer
  * the fixture gets, at another date).
  */
-function answer(): (request: StructuredRequest) => unknown {
+function answer(failing: { on: boolean }): (request: StructuredRequest) => unknown {
   const fixture = fixtureExtraction();
   return (request) => {
+    if (failing.on) throw new Error("provider down");
     const body = request.input.untrustedDocuments[0]?.body ?? "";
     const match = COMPLETION.exec(body);
     if (body === CHAT.content || !match) return fixture(request);
@@ -90,8 +102,12 @@ function consent(egress: EgressControls) {
   if ("error" in granted) throw new Error(granted.error);
 }
 
-function pipeline() {
-  const provider = new FakeProvider({ id: "local-model", transport: "http", answer: answer() });
+function pipeline(failing = { on: false }) {
+  const provider = new FakeProvider({
+    id: "local-model",
+    transport: "http",
+    answer: answer(failing),
+  });
   const egress = productEgress(db);
   const { broker } = productCalls(db, egress, { providers: [provider] });
   runner = productRunner(db, broker);
@@ -213,5 +229,120 @@ describe("update.recompute", () => {
       ["2026-12-12", "candidate"],
     ]);
     expect(insight()).toMatchObject([{ state: "active" }]);
+  });
+
+  it("leaves a failed extraction's rows superseded and its Insight resolved until the next version (no retry, open question for I03)", async () => {
+    const failing = { on: false };
+    const { runner, importer } = pipeline(failing);
+    await importer(plain());
+    await runner.wake();
+    const [first] = insight();
+    const [late] = completionFacts() as { id: number }[];
+
+    failing.on = true; // the edit restates 12-10, but its extraction fails
+    await importer(chatEdit("2026-12-10 ", 2));
+    await runner.wake();
+    failing.on = false;
+    // neither another drain nor a release of held jobs picks a failed job again
+    releaseHeldJobs(db, runner);
+    await runner.wake();
+    expect(db.all("SELECT status, reason FROM jobs WHERE fence_version = 2")).toEqual([
+      { status: "failed", reason: "provider-error" },
+    ]);
+    expect(completionFacts()).toEqual([
+      { id: late?.id, value: "2026-12-10", status: "superseded" },
+    ]);
+    expect(insight()).toEqual([{ id: first?.id, state: "resolved", summary: null }]);
+
+    // only the source's next version brings them back, in the same rows
+    await importer(chatEdit("2026-12-10", 3));
+    await runner.wake();
+    expect(completionFacts()).toEqual([{ id: late?.id, value: "2026-12-10", status: "candidate" }]);
+    expect(insight()).toMatchObject([{ id: first?.id, state: "active" }]);
+  });
+});
+
+describe("propagation atomicity", () => {
+  let page: ChangeSet["changes"] = [];
+  const connector: Connector = {
+    manifest: {
+      type: "scripted",
+      schemaVersion: 1,
+      capabilities: { incremental: true, deletes: true, accessScope: false, fullRescan: true },
+    },
+    initialize: async () => {},
+    healthCheck: async () => ({ state: "ok" }),
+    getChanges: async () => ({ changes: page, nextCursor: "c", hasMore: false }),
+    getDocument: async () => null,
+  };
+  const upsert = (externalId: string, body: string, revision?: number) => ({
+    kind: "upsert" as const,
+    record: { externalId, title: "t", body, ...(revision ? { revision } : {}) },
+  });
+  const counts = () => ({
+    versions: db.all("SELECT count(*) AS n FROM source_versions"),
+    jobs: db.all("SELECT count(*) AS n FROM jobs"),
+    seq: readChangeSeq(db),
+    revision: readKnowledgeRevision(db),
+  });
+
+  /** Source "b" at version 1 with one fact citing it, and source "other" at revision 5. */
+  async function evidenced(): Promise<number> {
+    page = [upsert("b", "B API 12-10"), upsert("other", "first", 5)];
+    await syncConnector(db, "s", "scripted", connector);
+    const v1 = db.all("SELECT min(id) AS id FROM source_versions")[0]?.id as number;
+    const attrs = {
+      epistemic: "explicit" as const,
+      status: "candidate" as const,
+      validAt: null,
+      observedAt: "2026-11-21T00:00:00Z",
+    };
+    const item = insertItem(db, { type: "System", name: "B API", ...attrs });
+    const fact = saveFact(db, {
+      itemId: item,
+      kind: "completion_date",
+      value: "2026-12-10",
+      ...attrs,
+    }).id;
+    addEvidence(db, {
+      target: { factId: fact },
+      sourceVersionId: v1,
+      start: 0,
+      end: 5,
+      quote: "B API",
+    });
+    return fact;
+  }
+
+  it("rolls the propagation back with a page that fails after storing the new version", async () => {
+    const fact = await evidenced();
+    const before = counts();
+    // the edit of "b" is stored and propagated first; the older revision of "other"
+    // is then refused, and without onRefused the whole page fails
+    page = [upsert("b", "B API 12-03"), upsert("other", "older", 3)];
+    await expect(syncConnector(db, "s", "scripted", connector, { rescan: true })).rejects.toThrow(
+      /revision-not-newer/,
+    );
+    expect(db.all("SELECT status FROM facts WHERE id = ?", [fact])).toEqual([
+      { status: "candidate" },
+    ]);
+    expect(counts()).toEqual(before);
+  });
+
+  it("stores no version whose propagation fails: the two commit together", async () => {
+    const fact = await evidenced();
+    const before = counts();
+    // superseding the fact is the propagation's only write; make it fail
+    db.exec(`CREATE TEMP TRIGGER block_supersede BEFORE UPDATE OF status ON facts
+             BEGIN SELECT RAISE(ABORT, 'propagation blocked'); END`);
+    page = [upsert("b", "B API 12-03")];
+    await expect(syncConnector(db, "s", "scripted", connector, { rescan: true })).rejects.toThrow(
+      /propagation blocked/,
+    );
+    db.exec("DROP TRIGGER block_supersede");
+    expect(db.all("SELECT status FROM facts WHERE id = ?", [fact])).toEqual([
+      { status: "candidate" },
+    ]);
+    expect(counts()).toEqual(before);
   });
 });
