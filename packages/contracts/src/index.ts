@@ -298,6 +298,65 @@ export const EmbeddingPrepareRequestSchema = z.strictObject({
 export const EmbeddingPrepareResponseSchema = z.object({ embedding: EmbeddingStatusSchema });
 
 /**
+ * Home's Insights (V02-R14): active rows only. An Insight is a rule's inference
+ * (V02-R9); "inferred" is the only epistemic type the schema lets through, so a
+ * row of any other type fails the response check instead of reaching the screen.
+ */
+const InsightSummarySchema = z.object({
+  id: z.int().positive(),
+  epistemic: z.literal("inferred"),
+  summary: z.string(),
+  evidenceCount: z.int().nonnegative(),
+});
+export const InsightListResponseSchema = z.object({ insights: z.array(InsightSummarySchema) });
+export type InsightSummary = z.infer<typeof InsightSummarySchema>;
+
+export const InsightEvidenceRequestSchema = z.strictObject({ insightId: z.int().positive() });
+
+/**
+ * One evidence row of an Insight: the fact or relation it supports (with that
+ * row's status, superseded included), the quote, and the source version it points
+ * to, numbered per source; `current` is whether that version is the source's latest.
+ */
+const EvidenceSummarySchema = z.object({
+  id: z.int().positive(),
+  target: z.enum(["fact", "relation"]),
+  status: z.enum(["candidate", "verified", "disputed", "superseded", "rejected"]),
+  quote: z.string(),
+  sourceTitle: z.string(),
+  sourceVersionId: z.int().positive(),
+  version: z.int().positive(),
+  current: z.boolean(),
+});
+export const InsightEvidenceResponseSchema = z.object({
+  insight: InsightSummarySchema,
+  evidence: z.array(EvidenceSummarySchema),
+});
+export type EvidenceSummary = z.infer<typeof EvidenceSummarySchema>;
+
+export const EvidenceSourceRequestSchema = z.strictObject({ evidenceId: z.int().positive() });
+
+/**
+ * The version an evidence row points to, read by its version id (never swapped for
+ * the source's latest), and the span: [start, end) in Unicode code points of
+ * `body`, not UTF-16 units. The body is imported, untrusted text.
+ */
+export const EvidenceSourceResponseSchema = z.object({
+  evidenceId: z.int().positive(),
+  quote: z.string(),
+  start: z.int().nonnegative(),
+  end: z.int().nonnegative(),
+  sourceVersion: z.object({
+    id: z.int().positive(),
+    version: z.int().positive(),
+    latestVersion: z.int().positive(),
+    title: z.string(),
+    body: z.string(),
+  }),
+});
+export type EvidenceSource = z.infer<typeof EvidenceSourceResponseSchema>;
+
+/**
  * Where the screens get the backend address and token: the dev server in the browser,
  * the preload in Electron (V01-R3). An empty `baseUrl` means the page's own origin.
  */
@@ -381,6 +440,19 @@ export const routes = {
     path: "/api/embedding/prepare",
     request: EmbeddingPrepareRequestSchema,
     response: EmbeddingPrepareResponseSchema,
+  },
+  insights: { method: "GET", path: "/api/insights", response: InsightListResponseSchema },
+  insightEvidence: {
+    method: "POST",
+    path: "/api/insights/evidence",
+    request: InsightEvidenceRequestSchema,
+    response: InsightEvidenceResponseSchema,
+  },
+  evidenceSource: {
+    method: "POST",
+    path: "/api/evidence/source",
+    request: EvidenceSourceRequestSchema,
+    response: EvidenceSourceResponseSchema,
   },
 } as const;
 export type RouteName = keyof typeof routes;

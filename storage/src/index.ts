@@ -87,3 +87,11 @@ export {
 export { readTombstone, writeTombstone, type Tombstone } from "./tombstones.ts";
 export { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
 export { listItemEvidenceVersions, listItemNames } from "./candidates.ts";
+export {
+  listActiveInsights,
+  readEvidenceSource,
+  readInsightEvidence,
+  type ActiveInsight,
+  type EvidenceSourceView,
+  type InsightEvidenceRow,
+} from "./evidence-view.ts";

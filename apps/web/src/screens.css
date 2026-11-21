@@ -1,0 +1,27 @@
+/* The screens' one stylesheet: a file the page loads (style-src 'self'), never inline styles. */
+
+/* Imported text keeps its line breaks but wraps long lines (spec "T10이 넘기는 것" 3). */
+.source-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Words for screen readers around the marked quote (the <mark> itself carries none).
+ * Generated content, not text nodes, so copying the source text does not pick them up.
+ */
+.source-text mark::before,
+.source-text mark::after {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.source-text mark::before {
+  content: "[강조된 인용 시작] ";
+}
+.source-text mark::after {
+  content: " [강조된 인용 끝]";
+}
