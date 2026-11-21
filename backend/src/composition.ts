@@ -1,6 +1,6 @@
 // Composition point: the one place that picks adapter implementations for the
-// product (V01-R15): the vector index, the canonical storage driver and the
-// Connector kinds. Entry points (dev.ts, site-check.ts) build the backend from these.
+// product (V01-R14, R15): the vector index, the embedder, the canonical storage
+// driver and the Connector kinds. Entry points (dev.ts, site-check.ts) build the backend from these.
 import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
@@ -9,8 +9,9 @@ import { createFixtureConnector } from "./adapters/fixture-connector.ts";
 import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
 import type { ServerOptions } from "./server.ts";
 
-export function productAdapters(): Pick<ServerOptions, "vectorIndex"> {
-  return { vectorIndex: new EmptyVectorIndex() };
+/** No embedder until V01-T14 binds the Transformers.js one; the status API says "not implemented". */
+export function productAdapters(): Pick<ServerOptions, "vectorIndex" | "embedder"> {
+  return { vectorIndex: new EmptyVectorIndex(), embedder: null };
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";

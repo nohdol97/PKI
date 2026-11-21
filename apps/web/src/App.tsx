@@ -1,13 +1,9 @@
 // The four minimal screens (V01-R3). Every value shown comes from the backend through
 // the API client; the screens hold labels only, never data.
-import type {
-  ComponentStatus,
-  ConnectorSummary,
-  RouteResponse,
-  SourceSummary,
-} from "@pki/contracts";
+import type { ConnectorSummary, RouteResponse, SourceSummary } from "@pki/contracts";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { ApiClient } from "./api.ts";
+import { componentText, embeddingText } from "./status-text.ts";
 
 const SCREENS = { home: "홈", sources: "원본", activity: "활동", settings: "설정" } as const;
 type Screen = keyof typeof SCREENS;
@@ -58,24 +54,14 @@ function Failure({ error }: { error: string | undefined }) {
   return error ? <p role="alert">불러오지 못했습니다: {error}</p> : null;
 }
 
-const STATE_LABEL = {
-  ready: "준비됨",
-  rebuilding: "재구성 중",
-  unavailable: "사용 불가",
-  "not-implemented": "미구현",
-} as const;
-
-const statusText = (status: ComponentStatus) =>
-  status.state === "unavailable"
-    ? `${STATE_LABEL.unavailable}: ${status.reason}`
-    : STATE_LABEL[status.state];
-
-const COMPONENTS = {
-  backend: "백엔드",
-  provider: "Provider",
-  embedding: "Embedding",
-  vectorIndex: "벡터 색인",
-} as const;
+function statusRows(status: RouteResponse<"status">) {
+  return [
+    ["백엔드", componentText(status.backend)],
+    ["Provider", componentText(status.provider)],
+    ["Embedding", embeddingText(status.embedding)],
+    ["벡터 색인", componentText(status.vectorIndex)],
+  ] as const;
+}
 
 function Home({ api }: { api: ApiClient }) {
   const { data, error } = useRoute(api, "status");
@@ -85,10 +71,10 @@ function Home({ api }: { api: ApiClient }) {
       {data && (
         <table>
           <tbody>
-            {(Object.keys(COMPONENTS) as (keyof typeof COMPONENTS)[]).map((key) => (
-              <tr key={key}>
-                <th scope="row">{COMPONENTS[key]}</th>
-                <td>{statusText(data[key])}</td>
+            {statusRows(data).map(([label, text]) => (
+              <tr key={label}>
+                <th scope="row">{label}</th>
+                <td>{text}</td>
               </tr>
             ))}
           </tbody>

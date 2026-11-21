@@ -1,8 +1,10 @@
 // Single schema source for the local HTTP API (V01-R2). The UI and the backend
 // both import these; TypeScript types come from z.infer, JSON Schema from z.toJSONSchema.
 import { z } from "zod";
+import type { EmbeddingEgress } from "./embedding.ts";
 
 export * from "./adapter-errors.ts";
+export type * from "./embedding.ts";
 export type * from "./knowledge-engine.ts";
 export type * from "./vector-index.ts";
 export * from "./connector.ts";
@@ -18,10 +20,30 @@ export const ComponentStatusSchema = z.discriminatedUnion("state", [
 ]);
 export type ComponentStatus = z.infer<typeof ComponentStatusSchema>;
 
+const EmbeddingEgressSchema = z.enum(["local", "external"]) satisfies z.ZodType<EmbeddingEgress>;
+
+/**
+ * The configured EmbeddingProvider's state and egress. Only the API reports
+ * "not-implemented" (no embedder bound); an unavailable entry without egress is
+ * one whose embedder could not be read at all.
+ */
+export const EmbeddingStatusSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("ready"), egress: EmbeddingEgressSchema }),
+  z.object({ state: z.literal("model-missing"), egress: EmbeddingEgressSchema }),
+  z.object({ state: z.literal("preparing"), egress: EmbeddingEgressSchema }),
+  z.object({
+    state: z.literal("unavailable"),
+    reason: z.string().min(1),
+    egress: EmbeddingEgressSchema.optional(),
+  }),
+  z.object({ state: z.literal("not-implemented") }),
+]);
+export type EmbeddingStatusEntry = z.infer<typeof EmbeddingStatusSchema>;
+
 export const StatusResponseSchema = z.object({
   backend: ComponentStatusSchema,
   provider: ComponentStatusSchema,
-  embedding: ComponentStatusSchema,
+  embedding: EmbeddingStatusSchema,
   vectorIndex: ComponentStatusSchema,
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;

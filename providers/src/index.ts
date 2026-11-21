@@ -17,6 +17,13 @@ export {
   type RejectReason,
 } from "./broker.ts";
 export {
+  denyExternalEmbedding,
+  embedWithinPolicy,
+  EmbeddingEgressDeniedError,
+  type EmbeddingEgressInput,
+  type EmbeddingEgressPolicy,
+} from "./embedding.ts";
+export {
   createUserActionLedger,
   type UserActionIssuer,
   type UserActionRedeemer,

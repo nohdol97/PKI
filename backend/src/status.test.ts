@@ -20,6 +20,7 @@ async function getStatus(vectorIndex: VectorIndex) {
     token: TOKEN,
     allowedOrigins: [],
     vectorIndex,
+    embedder: null,
     connectors,
     ...stores,
   });
@@ -87,6 +88,7 @@ describe("status API: vector index", () => {
       allowedOrigins: [],
       connectors,
       ...stores,
+      embedder: null,
       get vectorIndex(): VectorIndex {
         throw new TypeError(canary);
       },
