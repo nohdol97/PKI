@@ -1,6 +1,6 @@
 # 스펙: I01 Connector SDK, Source/Evidence 계약, JSONL·API 가져오기
 
-- 날짜: 2026-11-21 / 상태: 초안
+- 날짜: 2026-11-21 / 상태: 확정
 - 관련: 이슈 #18(I01), 총괄 #1, Phase 2 #4, 선행 #17(V02). [V01 spec](2026-11-21-V01-vertical-skeleton.md)·[V02 spec](2026-11-21-V02-vertical-slice.md)(특히 "T01이 넘기는 것", "T02가 넘기는 것"), 함께 쓰는 I02(#19)·I03(#20)·I04(#21) spec. [ARCHITECTURE 5.5절·6~8절](../ARCHITECTURE.md), [ADR 0002](../adr/0002-authority-in-product-records.md)·[0012](../adr/0012-upstream-and-fork-ownership.md)·[0013](../adr/0013-failure-recovery.md)·[0014](../adr/0014-egress-policy-and-consent.md), [ownership.md](../ownership.md), [site-setup.md](../site-setup.md)
 
 낯선 말은 [ARCHITECTURE 0절](../ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다(정본, 계약 테스트, test double, tombstone, version fence, 변경 순번, 근거). 이 spec에서 새로 쓰는 말은 아래 표에 있다. `V01-…`·`V02-…`·`I03-…`·`I04-…`는 그 spec의 번호, `S…`는 site-setup.md의 체크리스트 번호다.
