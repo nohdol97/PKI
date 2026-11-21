@@ -134,10 +134,19 @@ export type JobClosing =
  * lease. A stale fence discards the closing, `write` included, and closes the job
  * superseded. A job that is not leased by that lease (closed already, never
  * claimed, or claimed again after the lease ran out) is left as it is and nothing
- * is written. A throwing `write` rolls back, leaves the job leased and surfaces
- * as JobWriteError; any other error is the database's. A reason that is not a
- * code is refused (RangeError) before anything is read.
+ * is written. The job row is updated before `write` runs, so the transaction
+ * holds the write lock first: a file locked by another process fails the close
+ * (SQLITE_BUSY) before any result is written. A throwing `write` rolls back,
+ * leaves the job leased and surfaces as JobWriteError, unless it met a locked
+ * file (SQLITE_BUSY, SQLITE_LOCKED), which stays the database's error like any
+ * other. A reason that is not a code is refused (RangeError) before anything is read.
  */
+/** A locked file is transient: the job stays leased and is claimed again after its lease. */
+const isLockError = (error: unknown): boolean => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "SQLITE_BUSY" || code === "SQLITE_LOCKED";
+};
+
 export function closeJob(
   db: SqlDriver,
   lease: Pick<StoredJob, "id" | "leaseToken">,
@@ -150,19 +159,20 @@ export function closeJob(
     const job = readJob(db, lease.id);
     if (job?.status !== "leased" || job.leaseToken !== lease.leaseToken) return "not-leased";
     const status = isFenceCurrent(db, job) ? closing.status : "superseded";
-    if (status === "done" && closing.status === "done") {
-      try {
-        closing.write();
-      } catch (error) {
-        throw new JobWriteError(error);
-      }
-    }
     const reason = status === closing.status && "reason" in closing ? closing.reason : null;
     db.run("UPDATE jobs SET status = ?, lease_until = NULL, reason = ? WHERE id = ?", [
       status,
       reason,
       lease.id,
     ]);
+    if (status === "done" && closing.status === "done") {
+      try {
+        closing.write();
+      } catch (error) {
+        if (isLockError(error)) throw error;
+        throw new JobWriteError(error);
+      }
+    }
     return status;
   });
 }

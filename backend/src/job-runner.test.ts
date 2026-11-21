@@ -363,3 +363,51 @@ describe("job runner: failures that are not the result's (V02-T03 rework)", () =
     expect(readJob(db, job.id)).toMatchObject({ status: "failed", reason: "invalid-reason" });
   });
 });
+
+describe("job runner: round 2 review (V02-T03)", () => {
+  it("drains again after start when it was woken while stopped", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const r = runner(async () => ({ status: "done", write: () => {} }));
+    await r.stop();
+    await r.wake(); // e.g. an import finished during shutdown
+    const job = imported();
+    r.start();
+    await r.wake();
+    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("done"));
+    await r.stop();
+  });
+
+  it("takes the write lock before writing: a file locked by another process leaves the job leased", async () => {
+    db.exec("PRAGMA busy_timeout = 0");
+    const job = imported();
+    const other = reopen();
+    const write = vi.fn(marked(db, "locked"));
+    let calls = 0;
+    const r = runner(async () => {
+      // the first time, another process takes the write lock while the call is out
+      if (calls++ === 0) other.exec("BEGIN IMMEDIATE");
+      return { status: "done", write };
+    });
+    await expect(r.runOnce()).rejects.toMatchObject({ code: "SQLITE_BUSY" });
+    expect(write).not.toHaveBeenCalled();
+    other.exec("ROLLBACK");
+    expect(readJob(db, job.id)).toMatchObject({ status: "leased", reason: null });
+
+    clock = new Date(T0.getTime() + LEASE);
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "done" });
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(written(db, "locked")).toBe(true);
+  });
+
+  it("leaves the job leased when the write itself meets a locked file", async () => {
+    const job = imported();
+    const run = runner(async () => ({
+      status: "done",
+      write: () => {
+        throw Object.assign(new Error("database is locked"), { code: "SQLITE_LOCKED" });
+      },
+    })).runOnce();
+    await expect(run).rejects.toMatchObject({ code: "SQLITE_LOCKED" });
+    expect(readJob(db, job.id)).toMatchObject({ status: "leased", reason: null });
+  });
+});

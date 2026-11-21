@@ -108,6 +108,9 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
   let again = false;
   let draining: Promise<void> | undefined;
   function wake(): Promise<void> {
+    // stopped, the drain body would finish before `draining` is assigned and
+    // leave a settled promise there, so no later wake would drain again
+    if (stopped) return Promise.resolve();
     again = true;
     draining ??= (async () => {
       try {
