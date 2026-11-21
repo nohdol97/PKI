@@ -29,7 +29,7 @@
 | 시간 그래프 저장 | cortexdb | **보류**(5.1절). 제품의 SQLite 스키마와 R03-C4에서 비교 | 채택되면 어댑터 뒤 |
 | 그래프 저장소 | LadybugDB | 필요할 때 어댑터 뒤에서만(4.7절 3번, 4.8절) | Phase 1에는 없다 |
 | LLM Wiki | sage-wiki(엔진과 함께 얻는 경우), llm-wiki-compiler | 둘 다 **보류**(5.1절). 뒤쪽은 K01에서 재평가 | Phase 4(K01)에서 결정 |
-| 문서 파싱 | pdfjs-dist(PDF), mammoth(DOCX), SheetJS CDN 또는 read-excel-file(XLSX), 복잡한 PDF에는 선택적 Docling | 잠정 기본값(4.4절, 4.8절) | Phase 2(I02)에서 결정 |
+| 문서 파싱 | unpdf(PDF), mammoth(DOCX), read-excel-file(XLSX), parse5(HTML), mdast-util-from-markdown(Markdown), csv-parse(CSV), 압축 검사 yauzl·fflate, 인코딩 iconv-lite(CP949). Docling은 선택적 사이드카로 남긴다 | **잠정 결정**([ADR 0015](adr/0015-document-parsing-stack.md)). 배포처의 S16·S17 결과로 확정하거나 고친다 | 형식별 순수 JavaScript 파서, 압축 검사를 파서 앞에 둔다 |
 | Python 런타임 번들 | python-build-standalone | 사이드카가 필요할 때만(4.6절, 4.8절) | [ADR 0011](adr/0011-sidecar-language.md)이 미결 |
 
 ### 1.1 설계만 참고하는 것(코드를 가져오지 않는다)

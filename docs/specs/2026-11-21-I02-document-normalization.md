@@ -66,7 +66,7 @@
 - **I02A-R7 인코딩 사다리.** TXT·Markdown·HTML·CSV·JSON은 다음 순서로 푼다.
   1. BOM이 있으면 그 인코딩(UTF-8, UTF-16LE, UTF-16BE)으로 푼다.
   2. 없으면 엄격한 UTF-8(잘못된 바이트가 하나라도 있으면 실패)로 푼다.
-  3. 실패하면 EUC-KR로 푼다. 표준(WHATWG)의 `euc-kr`은 CP949 확장 글자까지 포함한다. 결과는 다음을 **모두** 만족할 때만 받아들인다: 대체 문자(U+FFFD)가 없다, 한글 음절이 하나 이상 있다, ASCII·한글·CJK 문장 부호·전각 글자 밖의 글자 비율이 `encoding.fallbackMaxForeignRatio` 이하다.
+  3. 실패하면 EUC-KR(CP949)로 푼다. 풀이는 `iconv-lite`의 `cp949`가 한다. 표준(WHATWG)의 `euc-kr`은 CP949 확장 글자까지 포함한다고 알려졌지만 저장소가 고정한 Node 24.22.3의 `TextDecoder("euc-kr")`는 확장 글자(예: 바이트 `8C 63` "똠")를 풀지 못해 쓰지 않는다([ADR 0015](../adr/0015-document-parsing-stack.md) 변경 이력). 결과는 다음을 **모두** 만족할 때만 받아들인다: 대체 문자(U+FFFD)가 없다, 한글 음절이 하나 이상 있다, ASCII·한글·CJK 문장 부호·전각 글자 밖의 글자 비율이 `encoding.fallbackMaxForeignRatio` 이하다.
   4. 어느 것도 아니면 `encoding-undecidable`이다. 깨진 글을 결과로 내지 않는다.
 
   결과에 `encoding: { name, method }`를 적는다(`name`: `utf-8`, `utf-16le`, `utf-16be`, `euc-kr` / `method`: `bom`, `strict`, `fallback`). 3번으로 풀었으면 한계 표시 `text.encoding-fallback`을 단다(추정이기 때문이다). HTML의 `<meta charset>` 선언은 쓰지 않는다.
@@ -326,3 +326,4 @@ T07의 문서 대응 테스트는 V01의 `tooling/docs/site-setup.test.ts`를 �
 |---|---|---|---|
 | 2026-11-21 | 최초 작성(초안) | 이 문서 | 이슈 #19의 첫 조각. 폴더·감시·저장과 I01 규격에 기대지 않는 정규화만 먼저 고정 |
 | 2026-11-21 | 확정 | 이 문서 | 오케스트레이터 검토: 범위(정규화만)·기준·작업 분해 확인, 막는 질문 없음 |
+| 2026-11-21 | R7 3단계의 풀이를 내장 `TextDecoder`에서 `iconv-lite`로 고치고 의존성 목록에 iconv-lite, @xmldom/xmldom, @types/mdast를 더한다(차이 D1·D2, T01 실측) | R7, R21(의존성), [ADR 0015](../adr/0015-document-parsing-stack.md) | Node 24.22.3의 `TextDecoder("euc-kr")`가 CP949 확장 글자를 풀지 못해 C3의 "똠"이 내장만으로는 통과할 수 없다. 나머지 둘은 pnpm의 엄격한 배치(직접 의존성)와 타입 때문이다. `pdfjs-dist`는 unpdf가 담고 있어 필요하지 않다 |
