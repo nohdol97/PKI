@@ -304,12 +304,21 @@ describe("broker.class: the Broker computes the data classification", () => {
 });
 
 describe("broker.origin: the Broker decides the call kind from its records", () => {
+  // A job is registered once per kind and source version (V02-R4), so a second
+  // call for the same version returns the job already registered.
   function job(kind = "extract", sourceVersionId = store(synthA)): string {
-    const { lastInsertRowid } = db.run(
-      "INSERT INTO jobs (kind, source_version_id, status) VALUES (?, ?, 'queued')",
+    const target = "SELECT source_id, version FROM source_versions WHERE id = ?";
+    db.run(
+      `INSERT INTO jobs (kind, source_id, fence_version, status)
+       SELECT ?, source_id, version, 'queued' FROM (${target}) WHERE true ON CONFLICT DO NOTHING`,
       [kind, Number(sourceVersionId)],
     );
-    return String(lastInsertRowid);
+    return String(
+      db.all(`SELECT id FROM jobs WHERE kind = ? AND (source_id, fence_version) = (${target})`, [
+        kind,
+        Number(sourceVersionId),
+      ])[0]?.id,
+    );
   }
 
   it("treats a call from a job record as background", async () => {

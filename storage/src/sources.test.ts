@@ -66,6 +66,17 @@ describe("saveSourceRecord", () => {
     expect(count("source_versions")).toBe(3);
   });
 
+  it("numbers each source's versions from 1 (V02-R3)", () => {
+    saveSourceRecord(db, "c1", record("e1", "t", "v1"));
+    saveSourceRecord(db, "c1", record("e2", "t", "other"));
+    saveSourceRecord(db, "c1", record("e1", "t", "v2"));
+    expect(db.all("SELECT body, version FROM source_versions ORDER BY id")).toEqual([
+      { body: "v1", version: 1 },
+      { body: "other", version: 1 },
+      { body: "v2", version: 2 },
+    ]);
+  });
+
   it("refuses a source whose Connector instance is not registered", () => {
     expect(() => saveSourceRecord(db, "ghost", record("e1"))).toThrow(/FOREIGN KEY/);
     expect(count("sources")).toBe(0);

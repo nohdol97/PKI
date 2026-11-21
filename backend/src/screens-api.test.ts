@@ -139,7 +139,7 @@ describe("screen routes", () => {
   it("reads the settings, the encryption state read from the canonical file", async () => {
     expect((await call(routes.settings.path)).body).toEqual({
       dataDirectory: DATA_DIR,
-      schemaVersion: 4,
+      schemaVersion: 5,
       databaseEncryption: "not-applied",
     });
   });

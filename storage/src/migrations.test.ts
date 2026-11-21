@@ -40,15 +40,15 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(4);
-    expect(migrations).toHaveLength(4);
+    expect(schemaVersion(db)).toBe(5);
+    expect(migrations).toHaveLength(5);
   });
 
   it("is idempotent when re-run", () => {
     migrate(db);
     db.run("INSERT INTO settings (key, value) VALUES ('k', 'v')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(4);
+    expect(schemaVersion(db)).toBe(5);
     expect(db.all("SELECT value FROM settings")).toEqual([{ value: "v" }]);
   });
 
@@ -184,7 +184,7 @@ describe("schema v2 (V01-T04)", () => {
       "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (1, 'h', 't', 'b')",
     );
     migrate(db);
-    expect(schemaVersion(db)).toBe(4);
+    expect(schemaVersion(db)).toBe(5);
     expect(db.all("SELECT id, external_id FROM sources")).toEqual([{ id: 1, external_id: "e" }]);
     expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 1 }]);
     // A v1 source has no recorded kind; "unknown" is no upstream kind, so it never grades synthetic.
@@ -212,7 +212,7 @@ describe("schema v2 (V01-T04)", () => {
     db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
     expect(() =>
       db.run(
-        "INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (404, 'h', 't', 'b')",
+        "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (404, 1, 'h', 't', 'b')",
       ),
     ).toThrow(/FOREIGN KEY/);
     expect(db.all("SELECT sql FROM sqlite_schema WHERE name = 'source_versions'")[0]?.sql).toMatch(
@@ -330,5 +330,153 @@ describe("schema v4 (V01-T08)", () => {
       { provider: "codex", policy_version: "new" },
     ]);
     expect(() => grant("codex", "again")).toThrow(/UNIQUE/);
+  });
+});
+
+describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
+  // A v4 database with two versions of one source, one of another, and a V01 job.
+  function seedV4(): void {
+    migrate(db, migrations.slice(0, 4));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a'), ('c', 'b')",
+    );
+    db.run(
+      `INSERT INTO source_versions (source_id, content_hash, title, body)
+       VALUES (1, 'h1', 'a1', 'alpha one'), (2, 'h2', 'b1', 'beta'), (1, 'h3', 'a2', 'alpha two')`,
+    );
+    db.run("INSERT INTO jobs (kind, source_version_id, status) VALUES ('extract', 3, 'queued')");
+  }
+
+  it("upgrades a v4 database in place: versions numbered per source, jobs fenced", () => {
+    seedV4();
+    migrate(db);
+    expect(schemaVersion(db)).toBe(5);
+    expect(db.all("SELECT id, source_id, version, title, body FROM source_versions")).toEqual([
+      { id: 1, source_id: 1, version: 1, title: "a1", body: "alpha one" },
+      { id: 2, source_id: 2, version: 1, title: "b1", body: "beta" },
+      { id: 3, source_id: 1, version: 2, title: "a2", body: "alpha two" },
+    ]);
+    expect(
+      db.all("SELECT id, kind, source_id, fence_version, status, lease_until FROM jobs"),
+    ).toEqual([
+      {
+        id: 1,
+        kind: "extract",
+        source_id: 1,
+        fence_version: 2,
+        status: "queued",
+        lease_until: null,
+      },
+    ]);
+    // every stored version so far was one source change
+    expect(db.all("SELECT change_seq, knowledge_revision FROM revisions")).toEqual([
+      { change_seq: 3, knowledge_revision: 0 },
+    ]);
+    expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
+  });
+
+  it("keeps the keyword index and immutability wiring of the rebuilt source versions", () => {
+    seedV4();
+    migrate(db);
+    expect(
+      db.all("SELECT rowid FROM keyword_index WHERE keyword_index MATCH 'alpha' ORDER BY rowid"),
+    ).toEqual([{ rowid: 1 }, { rowid: 3 }]);
+    db.run(
+      "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (2, 2, 'h4', 'b2', 'gamma')",
+    );
+    expect(db.all("SELECT rowid FROM keyword_index WHERE keyword_index MATCH 'gamma'")).toEqual([
+      { rowid: 4 },
+    ]);
+    db.run("DELETE FROM source_versions WHERE id = 4");
+    expect(db.all("SELECT rowid FROM keyword_index WHERE keyword_index MATCH 'gamma'")).toEqual([]);
+    expect(() => db.run("UPDATE source_versions SET body = 'x' WHERE id = 1")).toThrow(/immutable/);
+    expect(() =>
+      db.run(
+        "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (404, 1, 'h', 't', 'b')",
+      ),
+    ).toThrow(/FOREIGN KEY/);
+  });
+
+  it("only lets a source gain a version greater than its latest", () => {
+    seedV4();
+    migrate(db);
+    const add = (version: number) =>
+      db.run(
+        "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, ?, 'h', 't', 'b')",
+        [version],
+      );
+    expect(() => add(2)).toThrow();
+    expect(() => add(1)).toThrow(/greater/);
+    add(5);
+    expect(notNull("source_versions", "version")).toBe(true);
+  });
+
+  it("adds the knowledge, Insight and tombstone tables", () => {
+    migrate(db);
+    expect(tables().filter((t) => !t.startsWith("keyword_index_"))).toEqual([
+      "connector_instances",
+      "consents",
+      "evidence",
+      "facts",
+      "insight_evidence",
+      "insights",
+      "items",
+      "jobs",
+      "keyword_index",
+      "provider_calls",
+      "relations",
+      "revisions",
+      "settings",
+      "source_versions",
+      "sources",
+      "tombstones",
+    ]);
+    const attributes = ["epistemic", "status", "valid_at", "observed_at"];
+    expect(columns("items")).toEqual(["id", "type", "name", ...attributes]);
+    expect(columns("facts")).toEqual(["id", "item_id", "kind", "value", ...attributes]);
+    expect(columns("relations")).toEqual(["id", "subject_id", "type", "object_id", ...attributes]);
+    expect(columns("evidence")).toEqual([
+      "id",
+      "source_version_id",
+      "fact_id",
+      "relation_id",
+      "start_offset",
+      "end_offset",
+      "quote",
+    ]);
+    // R12: a tombstone holds no content
+    expect(columns("tombstones")).toEqual(["source_id", "version", "at", "reason"]);
+    expect(columns("insights")).toEqual([
+      "id",
+      "rule",
+      "x_item_id",
+      "y_item_id",
+      "epistemic",
+      "state",
+      "summary",
+    ]);
+  });
+
+  it("registers a job once per kind, source and fence version", () => {
+    seedV4();
+    migrate(db);
+    expect(() =>
+      db.run(
+        "INSERT INTO jobs (kind, source_id, fence_version, status) VALUES ('extract', 1, 2, 'queued')",
+      ),
+    ).toThrow(/UNIQUE/);
+    db.run(
+      "INSERT INTO jobs (kind, source_id, fence_version, status) VALUES ('extract', 2, 1, 'queued')",
+    );
+  });
+
+  it("keeps a job after its source's versions are deleted, so the fence can close it", () => {
+    seedV4();
+    migrate(db);
+    db.run("DELETE FROM source_versions WHERE source_id = 1");
+    expect(db.all("SELECT source_id, fence_version FROM jobs")).toEqual([
+      { source_id: 1, fence_version: 2 },
+    ]);
   });
 });

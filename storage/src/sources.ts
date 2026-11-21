@@ -1,6 +1,7 @@
 // Canonical source storage (V01-R7). A source is identified by Connector
 // instance + external id; a version is added only when its content hash differs
-// from the source's latest version. Callers wrap a page in one transaction.
+// from the source's latest version, numbered one past it (V02-R3). Callers wrap a
+// page in one transaction.
 import { createHash } from "node:crypto";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -32,16 +33,14 @@ export function saveSourceRecord(
   )[0]?.id as number;
   const hash = contentHash(record.title, record.body);
   const latest = db.all(
-    "SELECT content_hash FROM source_versions WHERE source_id = ? ORDER BY id DESC LIMIT 1",
+    "SELECT content_hash, version FROM source_versions WHERE source_id = ? ORDER BY id DESC LIMIT 1",
     [sourceId],
-  )[0]?.content_hash;
-  if (latest === hash) return "unchanged";
-  db.run("INSERT INTO source_versions (source_id, content_hash, title, body) VALUES (?, ?, ?, ?)", [
-    sourceId,
-    hash,
-    record.title,
-    record.body,
-  ]);
+  )[0];
+  if (latest?.content_hash === hash) return "unchanged";
+  db.run(
+    "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (?, ?, ?, ?, ?)",
+    [sourceId, ((latest?.version as number | undefined) ?? 0) + 1, hash, record.title, record.body],
+  );
   return "created";
 }
 

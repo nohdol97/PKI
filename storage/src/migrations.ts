@@ -172,8 +172,185 @@ const v4: Migration = (db) =>
     ALTER TABLE consents_v4 RENAME TO consents;
   `);
 
+// R3 lists of the V02 spec: an item, fact or relation has one of each.
+const EPISTEMIC = "'explicit', 'user-approved', 'inferred', 'hypothesis'";
+const STATUS = "'candidate', 'verified', 'disputed', 'superseded', 'rejected'";
+const KNOWLEDGE_COLUMNS = `
+      epistemic TEXT NOT NULL CHECK (epistemic IN (${EPISTEMIC})),
+      status TEXT NOT NULL CHECK (status IN (${STATUS})),
+      valid_at TEXT,
+      observed_at TEXT NOT NULL`;
+// The knowledge revision rises once per changed item, fact or relation row.
+const revisionTriggers = ["items", "facts", "relations"]
+  .flatMap((table) =>
+    ["INSERT", "UPDATE", "DELETE"].map(
+      (event) => `
+    CREATE TRIGGER ${table}_revision_${event.toLowerCase()} AFTER ${event} ON ${table} BEGIN
+      UPDATE revisions SET knowledge_revision = knowledge_revision + 1;
+    END;`,
+    ),
+  )
+  .join("");
+
+// Schema v5 (V02-T02; the V02 spec calls it "knowledge schema v2", the second
+// schema generation, which lands as migration 5 after V01's four).
+// - source_versions gains its per-source version number (1, 2, ...), which
+//   fences, tombstones and engine notifications compare. A new version must be
+//   greater than the source's latest, so the latest id is also the latest version.
+//   It is rebuilt (a NOT NULL column cannot be added without a default); rows keep
+//   their ids, so keyword_index rows still match, and its triggers are recreated
+//   after the copy so it is not indexed twice.
+// - jobs carries the source and the version it was registered for (the fence)
+//   instead of a version row id: deleting a source's versions (V02-R12) must leave
+//   the job for the fence to close as superseded. lease_until is the lease (R4).
+// - revisions holds the change sequence (ADR 0013 decision 6), raised by triggers
+//   on every new version and every tombstone written, and the knowledge revision.
+//   A v4 database starts at its number of stored versions, one change each.
+// - Evidence points at an immutable version; the span is [start, end) in code
+//   points, which SQLite's length() and substr() count for TEXT.
+// - A tombstone holds no content; the sources row (identifier only) stays.
+// - An Insight is deleted with its X or Y item; a resolved one keeps no summary.
+const v5: Migration = (db) =>
+  db.exec(`
+    PRAGMA defer_foreign_keys = ON;
+    CREATE TEMP TABLE source_versions_v4 AS
+      SELECT id, source_id,
+        row_number() OVER (PARTITION BY source_id ORDER BY id) AS version,
+        content_hash, title, body
+      FROM source_versions;
+    CREATE TEMP TABLE jobs_v4 AS SELECT id, kind, source_version_id, status FROM jobs;
+    DROP TABLE jobs;
+    DROP TABLE source_versions;
+
+    CREATE TABLE source_versions (
+      id INTEGER PRIMARY KEY,
+      source_id INTEGER NOT NULL REFERENCES sources (id),
+      version INTEGER NOT NULL CHECK (version >= 1),
+      content_hash TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      UNIQUE (source_id, version)
+    );
+    INSERT INTO source_versions (id, source_id, version, content_hash, title, body)
+      SELECT id, source_id, version, content_hash, title, body FROM source_versions_v4;
+
+    CREATE TABLE revisions (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      change_seq INTEGER NOT NULL,
+      knowledge_revision INTEGER NOT NULL
+    );
+    INSERT INTO revisions (id, change_seq, knowledge_revision)
+      SELECT 1, count(*), 0 FROM source_versions_v4;
+
+    CREATE TRIGGER source_versions_immutable BEFORE UPDATE ON source_versions
+    BEGIN SELECT RAISE(ABORT, 'source versions are immutable'); END;
+    CREATE TRIGGER source_versions_increasing BEFORE INSERT ON source_versions
+    WHEN new.version <= (SELECT coalesce(max(version), 0) FROM source_versions
+                          WHERE source_id = new.source_id)
+    BEGIN SELECT RAISE(ABORT, 'a new source version must be greater than the latest'); END;
+    CREATE TRIGGER source_versions_index AFTER INSERT ON source_versions BEGIN
+      INSERT INTO keyword_index (rowid, title, body) VALUES (new.id, new.title, new.body);
+    END;
+    CREATE TRIGGER source_versions_change_seq AFTER INSERT ON source_versions BEGIN
+      UPDATE revisions SET change_seq = change_seq + 1;
+    END;
+    CREATE TRIGGER source_versions_unindex AFTER DELETE ON source_versions BEGIN
+      INSERT INTO keyword_index (keyword_index, rowid, title, body)
+      VALUES ('delete', old.id, old.title, old.body);
+    END;
+
+    CREATE TABLE jobs (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL,
+      source_id INTEGER NOT NULL REFERENCES sources (id),
+      fence_version INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      lease_until TEXT,
+      UNIQUE (kind, source_id, fence_version)
+    );
+    INSERT INTO jobs (id, kind, source_id, fence_version, status)
+      SELECT j.id, j.kind, v.source_id, v.version, j.status
+      FROM jobs_v4 j JOIN source_versions_v4 v ON v.id = j.source_version_id;
+    DROP TABLE jobs_v4;
+    DROP TABLE source_versions_v4;
+
+    CREATE TABLE items (
+      id INTEGER PRIMARY KEY,
+      type TEXT NOT NULL,
+      name TEXT NOT NULL,${KNOWLEDGE_COLUMNS}
+    );
+    CREATE TABLE facts (
+      id INTEGER PRIMARY KEY,
+      item_id INTEGER NOT NULL REFERENCES items (id),
+      kind TEXT NOT NULL,
+      value TEXT NOT NULL,${KNOWLEDGE_COLUMNS},
+      UNIQUE (item_id, kind, value)
+    );
+    CREATE TABLE relations (
+      id INTEGER PRIMARY KEY,
+      subject_id INTEGER NOT NULL REFERENCES items (id),
+      type TEXT NOT NULL,
+      object_id INTEGER NOT NULL REFERENCES items (id),${KNOWLEDGE_COLUMNS},
+      UNIQUE (subject_id, type, object_id)
+    );
+    CREATE INDEX relations_object ON relations (object_id);
+    ${revisionTriggers}
+
+    CREATE TABLE evidence (
+      id INTEGER PRIMARY KEY,
+      source_version_id INTEGER NOT NULL REFERENCES source_versions (id) ON DELETE CASCADE,
+      fact_id INTEGER REFERENCES facts (id) ON DELETE CASCADE,
+      relation_id INTEGER REFERENCES relations (id) ON DELETE CASCADE,
+      start_offset INTEGER NOT NULL,
+      end_offset INTEGER NOT NULL,
+      quote TEXT NOT NULL,
+      CHECK ((fact_id IS NULL) <> (relation_id IS NULL)),
+      CHECK (start_offset >= 0 AND end_offset > start_offset
+             AND length(quote) = end_offset - start_offset)
+    );
+    CREATE UNIQUE INDEX evidence_fact_span ON evidence
+      (fact_id, source_version_id, start_offset, end_offset) WHERE fact_id IS NOT NULL;
+    CREATE UNIQUE INDEX evidence_relation_span ON evidence
+      (relation_id, source_version_id, start_offset, end_offset) WHERE relation_id IS NOT NULL;
+    CREATE INDEX evidence_source_version ON evidence (source_version_id);
+    CREATE TRIGGER evidence_immutable BEFORE UPDATE ON evidence
+    BEGIN SELECT RAISE(ABORT, 'evidence is immutable'); END;
+
+    CREATE TABLE insights (
+      id INTEGER PRIMARY KEY,
+      rule TEXT NOT NULL,
+      x_item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      y_item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      epistemic TEXT NOT NULL CHECK (epistemic IN (${EPISTEMIC})),
+      state TEXT NOT NULL CHECK (state IN ('active', 'dirty', 'resolved')),
+      summary TEXT,
+      UNIQUE (rule, x_item_id, y_item_id),
+      CHECK ((state = 'resolved') = (summary IS NULL))
+    );
+    CREATE INDEX insights_y ON insights (y_item_id);
+    CREATE TABLE insight_evidence (
+      insight_id INTEGER NOT NULL REFERENCES insights (id) ON DELETE CASCADE,
+      evidence_id INTEGER NOT NULL REFERENCES evidence (id) ON DELETE CASCADE,
+      PRIMARY KEY (insight_id, evidence_id)
+    ) WITHOUT ROWID;
+    CREATE INDEX insight_evidence_evidence ON insight_evidence (evidence_id);
+
+    CREATE TABLE tombstones (
+      source_id INTEGER PRIMARY KEY REFERENCES sources (id),
+      version INTEGER NOT NULL CHECK (version >= 1),
+      at TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK (reason IN ('deleted', 'access-revoked'))
+    );
+    CREATE TRIGGER tombstones_insert AFTER INSERT ON tombstones BEGIN
+      UPDATE revisions SET change_seq = change_seq + 1;
+    END;
+    CREATE TRIGGER tombstones_update AFTER UPDATE ON tombstones BEGIN
+      UPDATE revisions SET change_seq = change_seq + 1;
+    END;
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3, v4];
+export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;
