@@ -191,7 +191,7 @@ export const HELD_KEPT_REASONS: readonly string[] = [EXTRACT_HOLD_TOO_LARGE];
 
 /**
  * Provisional (V02 미해결 질문 7): a condition that blocked held jobs may have
- * changed (the background setting, a consent, the endpoint), so they are queued
+ * changed (the background setting, a consent, the endpoint, the default Provider), so they are queued
  * again in their own rows and the runner woken; the Broker judges them anew.
  */
 export function releaseHeldJobs(db: SqlDriver, runner: Pick<JobRunner, "wake">): number {

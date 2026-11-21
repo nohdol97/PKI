@@ -101,8 +101,9 @@ export interface ServerOptions {
   /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
   importer?: JsonlImporter;
   /**
-   * Called after the background setting, a consent or the endpoint changed, the
-   * conditions that hold jobs (composition.ts releaseHeldJobs); default none.
+   * Called after the background setting, a consent, the endpoint or the default
+   * Provider changed, the conditions that hold jobs (composition.ts
+   * releaseHeldJobs); default none.
    */
   onRunConditionsChanged?: () => void;
 }

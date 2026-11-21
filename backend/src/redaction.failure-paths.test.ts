@@ -18,8 +18,10 @@ import {
   createCallRecorder,
   createEgressPolicy,
   createUserActionLedger,
+  EXTRACT_SCHEMA_VERSION,
   OPENAI_BASE_URL_SETTING,
   OPENAI_MODEL_SETTING,
+  TASKS,
 } from "@pki/providers";
 import {
   createClaudeCodeProvider,
@@ -53,6 +55,8 @@ const run = randomUUID().slice(0, 8);
 const DOC_CANARY = `DOC-CANARY-${run}`;
 /** Only in what a failing Provider returns: it must appear in no file at all. */
 const ECHO_MARKER = `ECHO-MARKER-${run}`;
+/** The instructions the Broker sends with an extraction: a canary the CLI echoes back. */
+const EXTRACT_INSTRUCTIONS = TASKS.extract[EXTRACT_SCHEMA_VERSION].instructions;
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
 
 /** Fails by repeating the request's instructions and documents, as a CLI or server may. */
@@ -321,7 +325,7 @@ describe("failure paths leave no input behind", () => {
           logged.join("\n"),
         ];
         for (const text of texts) {
-          for (const canary of [DOC_CANARY, ECHO_MARKER, "Extract the factual claims"]) {
+          for (const canary of [DOC_CANARY, ECHO_MARKER, EXTRACT_INSTRUCTIONS]) {
             expect(text).not.toContain(canary);
           }
         }
