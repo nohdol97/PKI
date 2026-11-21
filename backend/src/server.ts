@@ -2,6 +2,7 @@
 // carry the per-run session token, name this server as Host, and come from an
 // allowlisted Origin (or no Origin: non-browser clients such as the shell).
 import {
+  ComponentStatusSchema,
   routes,
   type ComponentStatus,
   type ErrorResponse,
@@ -38,15 +39,24 @@ export interface RunningServer {
 
 type Handlers = { [Name in RouteName]: () => Promise<RouteResponse<Name>> };
 
+const STATUS_CHECK_FAILED: ComponentStatus = {
+  state: "unavailable",
+  reason: "status check failed",
+};
+
+// One misbehaving adapter degrades only its own entry, so the UI still shows what works (V01-R5).
 async function vectorIndexState(index: VectorIndex): Promise<ComponentStatus> {
   try {
     const status = await index.status();
-    return typeof status === "string"
-      ? { state: status }
-      : { state: "unavailable", reason: status.unavailable };
+    const mapped = ComponentStatusSchema.safeParse(
+      typeof status === "string"
+        ? { state: status }
+        : { state: "unavailable", reason: status.unavailable },
+    );
+    // An index that cannot report a valid state cannot serve searches either.
+    return mapped.success ? mapped.data : STATUS_CHECK_FAILED;
   } catch {
-    // An index that cannot even report its state cannot serve searches either.
-    return { state: "unavailable", reason: "status check failed" };
+    return STATUS_CHECK_FAILED;
   }
 }
 
@@ -103,11 +113,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     if (typeof match !== "string") {
       return reject(res, match.error === "not-found" ? 404 : 405, match.error);
     }
-    // Responses are checked against the shared schema; any handler failure answers a
-    // generic 500 so neither adapter errors nor off-contract bodies reach the caller.
+    // Last resort: responses are checked against the shared schema, and any handler
+    // failure answers a generic 500. The log names the route and error class only;
+    // messages can carry content (ADR 0008).
     handlers[match]()
       .then((body) => reply(res, 200, routes[match].response.parse(body)))
-      .catch(() => reject(res, 500, "internal-error"));
+      .catch((error: unknown) => {
+        console.error(
+          `route ${match} failed: ${error instanceof Error ? error.name : typeof error}`,
+        );
+        reject(res, 500, "internal-error");
+      });
   });
 
   await new Promise<void>((resolve, reject) => {

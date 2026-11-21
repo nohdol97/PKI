@@ -2,7 +2,7 @@
 // VectorIndex, and the product configuration reports it unavailable.
 import { ErrorResponseSchema, routes, type VectorIndex } from "@pki/contracts";
 import { MemoryVectorIndex, send } from "@pki/testkit";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { productAdapters } from "./composition.ts";
 import { startServer } from "./server.ts";
 
@@ -51,14 +51,45 @@ describe("status API: vector index", () => {
     });
   });
 
-  it("answers a handler failure with a generic 500 and no detail", async () => {
-    // A status outside the contract (empty reason) makes the handler reject.
+  it.each([
+    ["an empty reason", { unavailable: "" }],
+    ["an unknown state", "warming-up"],
+  ])("degrades only the vector index on %s outside the contract", async (_name, bogus) => {
     const misbehaving = Object.assign(new MemoryVectorIndex(), {
-      status: async () => ({ unavailable: "" }),
+      status: async () => bogus as never,
     });
     const res = await getStatus(misbehaving);
-    expect(res.status).toBe(500);
-    expect(ErrorResponseSchema.parse(res.body)).toEqual({ error: "internal-error" });
-    expect(res.body).toEqual({ error: "internal-error" });
+    expect(res.status).toBe(200);
+    expect(routes.status.response.parse(res.body)).toMatchObject({
+      backend: { state: "ready" },
+      vectorIndex: { state: "unavailable", reason: "status check failed" },
+    });
+  });
+
+  it("answers a handler failure with a generic 500 and logs no error text", async () => {
+    const canary = "CANARY-7f3a secret detail";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const options = {
+      token: TOKEN,
+      allowedOrigins: [],
+      get vectorIndex(): VectorIndex {
+        throw new TypeError(canary);
+      },
+    };
+    const server = await startServer(options);
+    try {
+      const res = await send(server.port, routes.status.path, {
+        host: `127.0.0.1:${server.port}`,
+        authorization: `Bearer ${TOKEN}`,
+      });
+      expect(res).toEqual({ status: 500, body: { error: "internal-error" } });
+      expect(ErrorResponseSchema.parse(res.body)).toEqual(res.body);
+      const lines = logged.mock.calls.map((args) => args.map(String).join(" "));
+      expect(lines).toEqual([expect.stringMatching(/status.*TypeError/)]);
+      expect(lines.join("\n")).not.toContain("CANARY");
+    } finally {
+      logged.mockRestore();
+      await server.close();
+    }
   });
 });
