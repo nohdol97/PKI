@@ -62,7 +62,7 @@ beforeAll(async () => {
     dataDirectory: DATA_DIR,
     databaseFile: join(DATA_DIR, CANONICAL_DB_FILE),
     egress: productEgress(db),
-    ...productAdapters(),
+    ...productAdapters(DATA_DIR),
   });
   valid = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
 });
