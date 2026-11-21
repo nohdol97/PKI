@@ -1,6 +1,7 @@
 // The four minimal screens (V01-R3). Every value shown comes from the backend through
 // the API client; the screens hold labels only, never data.
 import type {
+  ConnectionTestResult,
   ConnectorSummary,
   ConsentList,
   DataClassification,
@@ -10,6 +11,7 @@ import type {
 } from "@pki/contracts";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { ApiClient } from "./api.ts";
+import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { componentText, embeddingText } from "./status-text.ts";
 
 const SCREENS = { home: "홈", sources: "원본", activity: "활동", settings: "설정" } as const;
@@ -40,7 +42,8 @@ export function App({ api }: { api: ApiClient }) {
   );
 }
 
-type ReadRoute = "status" | "connectors" | "sources" | "activity" | "settings" | "consents";
+type ReadRoute =
+  "status" | "connectors" | "sources" | "activity" | "settings" | "consents" | "executionSettings";
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -248,7 +251,107 @@ function Settings({ api }: { api: ApiClient }) {
         </table>
       )}
       <Consents api={api} />
-      <p>기본 Provider와 백그라운드 실행은 아직 설정할 수 없습니다.</p>
+      <ConnectionTest api={api} />
+      <BackgroundExecution api={api} />
+      <p>기본 Provider는 아직 고를 수 없습니다.</p>
+    </>
+  );
+}
+
+/**
+ * V01-R21: one structured call with the build's fixed synthetic material, through
+ * the Broker's decisions like any other call. When the development build needs the
+ * user's confirmation of the unverified-isolation warning, this screen asks for it
+ * for that one call and sends it with the next request; nothing is stored.
+ */
+function ConnectionTest({ api }: { api: ApiClient }) {
+  const [result, setResult] = useState<ConnectionTestResult>();
+  const [confirming, setConfirming] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  const run = (acknowledgeUnverified: boolean) => {
+    setConfirming(false);
+    setRunning(true);
+    setFailure(undefined);
+    api("connectionTest", { acknowledgeUnverified }).then(
+      (r) => {
+        setRunning(false);
+        setResult(r);
+        setConfirming(!acknowledgeUnverified && needsUnverifiedConfirmation(r));
+      },
+      (e: unknown) => {
+        setRunning(false);
+        setFailure(message(e));
+      },
+    );
+  };
+  return (
+    <>
+      <h2>연결 시험</h2>
+      <p>
+        고정된 합성 시험 자료 하나로 Provider에 구조화 응답을 한 번 요청합니다. 다른 호출과 똑같이
+        동의, 전송 규칙, CLI 실행 조건을 지나며 막히면 그 이유를 보입니다.
+      </p>
+      <button type="button" disabled={running || confirming} onClick={() => run(false)}>
+        연결 시험
+      </button>
+      <Failure error={failure} />
+      {confirming ? (
+        <div
+          role="alertdialog"
+          aria-labelledby="unverified-title"
+          aria-describedby="unverified-body"
+        >
+          <h3 id="unverified-title">격리 미검증</h3>
+          <p id="unverified-body">
+            이 CLI의 버전·OS·인자 프로필 조합은 격리(파일·도구 접근 차단)가 검증되지 않았습니다.
+            개발 빌드에서만, 합성 시험 자료를 최소 권한 인자로 이번 한 번만 보냅니다. 확인은
+            저장되지 않으며 다음 시험에서 다시 묻습니다.
+          </p>
+          <button type="button" onClick={() => run(true)}>
+            이번 한 번 실행
+          </button>
+          <button type="button" onClick={() => setConfirming(false)}>
+            취소
+          </button>
+        </div>
+      ) : (
+        result && <p role="status">결과: {connectionTestText(result)}</p>
+      )}
+    </>
+  );
+}
+
+/** V01-C7: background runs of a verified CLI combination stay off until the user turns them on. */
+function BackgroundExecution({ api }: { api: ApiClient }) {
+  const { data, error, reload } = useRoute(api, "executionSettings");
+  const [failure, setFailure] = useState<string>();
+  const set = (cliBackground: boolean) =>
+    api("setExecutionSettings", { cliBackground }).then(
+      () => {
+        setFailure(undefined);
+        reload();
+      },
+      (e: unknown) => setFailure(message(e)),
+    );
+  return (
+    <>
+      <h2>백그라운드 실행</h2>
+      <Failure error={error ?? failure} />
+      <p>
+        켜면 격리가 검증된 CLI 조합이 가져오기 뒤의 추출 같은 백그라운드 작업도 실행합니다. 검증되지
+        않은 조합은 이 설정과 관계없이 백그라운드로 실행하지 않습니다. 기본값은 끔입니다.
+      </p>
+      {data && (
+        <label>
+          <input
+            type="checkbox"
+            checked={data.cliBackground}
+            onChange={(e) => set(e.target.checked)}
+          />
+          CLI 백그라운드 실행 허용
+        </label>
+      )}
     </>
   );
 }

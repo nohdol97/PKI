@@ -1,5 +1,5 @@
 // Starts the backend on a data directory: the canonical DB, the Connectors and the API
-// server with the product's adapters and egress controls (composition.ts). Shared by
+// server with the product's adapters, egress controls and Broker (composition.ts). Shared by
 // the two entries that differ only in how they hand over the session: dev.ts (stdout)
 // and shell.ts (the Electron shell's parent channel).
 import type { SqlDriver } from "@pki/storage";
@@ -10,6 +10,7 @@ import {
   connectorKinds,
   openCanonicalDb,
   productAdapters,
+  productCalls,
   productEgress,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
@@ -36,6 +37,8 @@ export async function bootBackend(
     connectorInstances(options.fixtures),
     connectorKinds,
   );
+  // one egress instance for the consent API and the Broker (T08)
+  const egress = productEgress(db);
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,
@@ -45,7 +48,8 @@ export async function bootBackend(
     db,
     dataDirectory: options.dataDir,
     databaseFile: join(options.dataDir, CANONICAL_DB_FILE),
-    egress: productEgress(db),
+    egress,
+    calls: productCalls(db, egress),
   });
   return { server, db };
 }

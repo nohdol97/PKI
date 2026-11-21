@@ -32,6 +32,8 @@ const requests: Partial<Record<RouteName, unknown>> = {
     policyVersion: productEgress(db).policyVersion(),
   },
   revokeConsent: { providerId: "codex" },
+  connectionTest: { acknowledgeUnverified: false },
+  setExecutionSettings: { cliBackground: false },
 };
 
 beforeAll(async () => {

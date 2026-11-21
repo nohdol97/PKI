@@ -80,6 +80,16 @@ export interface LLMRequest {
     readonly untrustedDocuments: readonly UntrustedDocument[];
     readonly candidates: readonly { readonly id: string; readonly name: string }[];
   };
+  /**
+   * For a CLI Provider only, from the execution conditions (ARCHITECTURE 3.1): the
+   * argument profile (a code constant's name) the CLI must run with, and whether
+   * this combination's isolation was verified. The development exception's calls
+   * are "unverified" and use the minimal profile.
+   */
+  readonly execution?: {
+    readonly profile: string;
+    readonly isolation: "verified" | "unverified";
+  };
 }
 
 /** A request for output matching a JSON Schema; the Broker validates what comes back. */

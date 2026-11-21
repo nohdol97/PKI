@@ -7,6 +7,7 @@ import {
   type LLMRequest,
   type LLMResponse,
   type ProviderCapabilities,
+  type ProviderInfo,
   type StructuredRequest,
   type StructuredResponse,
 } from "@pki/contracts";
@@ -34,6 +35,8 @@ export interface FakeProviderOptions {
    * throw synchronously.
    */
   cancelMode?: "stop" | "async" | "never-settles" | "throws";
+  /** What the fixed-argument version query reports; default installed, version "fake-1". */
+  detect?: () => Promise<ProviderInfo>;
 }
 
 export class FakeProvider implements LLMProvider {
@@ -53,6 +56,7 @@ export class FakeProvider implements LLMProvider {
   readonly #cancelMode: NonNullable<FakeProviderOptions["cancelMode"]>;
   readonly #capabilities: ProviderCapabilities;
   readonly #running = new Map<string, (reason: Error) => void>();
+  readonly #detect: () => Promise<ProviderInfo>;
 
   constructor(options: FakeProviderOptions = {}) {
     this.id = options.id ?? "openai-compatible";
@@ -61,6 +65,7 @@ export class FakeProvider implements LLMProvider {
     this.#delayMs = options.delayMs ?? 0;
     this.#answer = options.answer ?? (() => ({ reply: "ok" }));
     this.#cancelMode = options.cancelMode ?? "stop";
+    this.#detect = options.detect ?? (async () => ({ installed: true, version: "fake-1" }));
     this.#capabilities = {
       structuredOutput: true,
       cancel: true,
@@ -69,8 +74,9 @@ export class FakeProvider implements LLMProvider {
     };
   }
 
-  async detect() {
-    return { installed: true, version: "fake-1" };
+  /** Counts as a version query, never a model call. */
+  detect(): Promise<ProviderInfo> {
+    return this.#detect();
   }
   async checkAuthentication() {
     return "unknown" as const;
