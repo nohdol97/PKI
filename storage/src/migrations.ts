@@ -4,6 +4,8 @@ export type Migration = (db: SqlDriver) => void;
 
 // Schema v1 (V01-R6). Each table carries only what a V01 task reads or writes;
 // later tasks add columns through new migrations, never by editing this one.
+// Deferred with owners named in the spec task table: connector cursor storage
+// (V01-T04 migration) and source access_scope (V01-T07).
 const v1: Migration = (db) =>
   db.exec(`
     CREATE TABLE sources (
@@ -62,18 +64,22 @@ const v1: Migration = (db) =>
       granted_at TEXT NOT NULL
     );
 
-    -- ADR 0014: history holds no body, prompt, response or secret.
+    -- ADR 0014: history holds no body, prompt, response or secret. One row per
+    -- attempt, so Broker retries of a request each leave their own record.
+    -- duration_ms is absent for calls that never ran.
     CREATE TABLE provider_calls (
       id INTEGER PRIMARY KEY,
-      request_id TEXT NOT NULL UNIQUE,
+      request_id TEXT NOT NULL,
+      attempt INTEGER NOT NULL,
       provider TEXT NOT NULL,
-      destination TEXT,
+      destination TEXT NOT NULL,
       task_kind TEXT NOT NULL,
-      classification TEXT,
-      policy_version TEXT,
+      classification TEXT NOT NULL,
+      policy_version TEXT NOT NULL,
       outcome TEXT NOT NULL,
       duration_ms INTEGER,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      UNIQUE (request_id, attempt)
     );
   `);
 

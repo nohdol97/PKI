@@ -74,6 +74,9 @@ importers:
         specifier: 13.2.0
         version: 13.2.0
     devDependencies:
+      '@pki/testkit':
+        specifier: workspace:*
+        version: link:../packages/testkit
       '@types/better-sqlite3':
         specifier: 9.6.0
         version: 9.6.0

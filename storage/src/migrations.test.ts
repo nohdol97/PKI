@@ -21,6 +21,13 @@ function columns(table: string): string[] {
     .map((r) => r.name as string);
 }
 
+function notNull(table: string, column: string): boolean {
+  return (
+    db.all(`SELECT "notnull" AS n FROM pragma_table_info('${table}') WHERE name = ?`, [column])[0]
+      ?.n === 1
+  );
+}
+
 function tables(): string[] {
   return db
     .all(
@@ -118,6 +125,7 @@ describe("schema v1", () => {
     expect(columns("provider_calls")).toEqual([
       "id",
       "request_id",
+      "attempt",
       "provider",
       "destination",
       "task_kind",
@@ -127,6 +135,24 @@ describe("schema v1", () => {
       "duration_ms",
       "created_at",
     ]);
+  });
+
+  it("records each attempt of a request once, with its audit fields required", () => {
+    const insert = (attempt: number, destination: string | null) =>
+      db.run(
+        `INSERT INTO provider_calls (request_id, attempt, provider, destination, task_kind,
+           classification, policy_version, outcome, created_at)
+         VALUES ('r1', ?, 'p', ?, 'extract', 'synthetic', 'pv', 'ok', 't')`,
+        [attempt, destination],
+      );
+    insert(1, "host");
+    insert(2, "host");
+    expect(() => insert(2, "host")).toThrow(/UNIQUE/);
+    expect(() => insert(3, null)).toThrow(/NOT NULL/);
+    for (const col of ["destination", "classification", "policy_version", "attempt"]) {
+      expect(notNull("provider_calls", col)).toBe(true);
+    }
+    expect(notNull("provider_calls", "duration_ms")).toBe(false);
   });
 
   it("binds a consent to provider, destination and policy version", () => {

@@ -1,8 +1,10 @@
 // V01-R6: the data directory is per OS user, never a roaming profile
 // location, and the code decides it (not Electron's default userData).
-import { homedir } from "node:os";
-import { describe, expect, it } from "vitest";
-import { dataDirectory, resolveDataDirectory } from "./data-directory.ts";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { dataDirectory, ensureDataDirectory, resolveDataDirectory } from "./data-directory.ts";
 
 describe("resolveDataDirectory", () => {
   it("uses the non-roaming local app data folder on Windows", () => {
@@ -56,5 +58,38 @@ describe("resolveDataDirectory", () => {
     expect(dataDirectory()).toBe(
       resolveDataDirectory({ platform: process.platform, home: homedir(), env: process.env }),
     );
+  });
+});
+
+describe.skipIf(process.platform === "win32")("ensureDataDirectory (POSIX)", () => {
+  let root: string;
+  const mode = (p: string) => statSync(p).mode & 0o777;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "pki-data-dir-"));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("creates missing directories readable only by the owner", () => {
+    const dir = join(root, "a", "PKI");
+    ensureDataDirectory(dir);
+    expect(mode(dir)).toBe(0o700);
+  });
+
+  it("repairs an existing directory that others can read", () => {
+    const dir = join(root, "PKI");
+    mkdirSync(dir);
+    chmodSync(dir, 0o755);
+    ensureDataDirectory(dir);
+    expect(mode(dir)).toBe(0o700);
+  });
+
+  it("refuses a path that is not a directory", () => {
+    const file = join(root, "PKI");
+    writeFileSync(file, "");
+    expect(() => ensureDataDirectory(file)).toThrow(/EEXIST/);
   });
 });

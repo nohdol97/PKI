@@ -2,4 +2,9 @@ export type { OpenSqlDriver, RunResult, SqlDriver, SqlRow, SqlValue } from "./sq
 export { openBetterSqlite3 } from "./better-sqlite3-driver.ts";
 export { migrate, migrations, schemaVersion, type Migration } from "./migrations.ts";
 export { searchKeyword } from "./keyword-search.ts";
-export { dataDirectory, resolveDataDirectory, type DataDirectoryInput } from "./data-directory.ts";
+export {
+  dataDirectory,
+  ensureDataDirectory,
+  resolveDataDirectory,
+  type DataDirectoryInput,
+} from "./data-directory.ts";

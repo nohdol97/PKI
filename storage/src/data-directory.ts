@@ -1,3 +1,4 @@
+import { chmodSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 
@@ -30,4 +31,13 @@ export function resolveDataDirectory({ platform, home, env }: DataDirectoryInput
 
 export function dataDirectory(): string {
   return resolveDataDirectory({ platform: process.platform, home: homedir(), env: process.env });
+}
+
+/**
+ * Creates `dir` if needed and, on POSIX, leaves it readable only by its owner
+ * (ADR 0010: other OS users on the same PC). Windows ACLs are S11/H01.
+ */
+export function ensureDataDirectory(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32" && (statSync(dir).mode & 0o077) !== 0) chmodSync(dir, 0o700);
 }

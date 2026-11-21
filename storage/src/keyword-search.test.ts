@@ -71,6 +71,12 @@ describe("searchKeyword", () => {
     expect(searchKeyword(db, "   ")).toEqual([]);
   });
 
+  it("treats control characters, including NUL, as separators", () => {
+    const id = addVersion("1", "alpha", "beta");
+    for (const q of ["\u0000", "\u0001\u001f", "\u007f"]) expect(searchKeyword(db, q)).toEqual([]);
+    expect(searchKeyword(db, "alpha\u0000beta")).toEqual([id]);
+  });
+
   it("drops a deleted version from the index in the same transaction", () => {
     const id = addVersion("1", "Ephemeral", "gone soon");
     db.run("DELETE FROM source_versions WHERE id = ?", [id]);
