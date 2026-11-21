@@ -1,0 +1,192 @@
+{
+  "rule": "dependency_delay",
+  "entities": {
+    "A": {
+      "type": "Project",
+      "name": "미리내 프로젝트"
+    },
+    "B": {
+      "type": "System",
+      "name": "물결 API"
+    }
+  },
+  "sets": {
+    "plain": {
+      "files": ["v02-mail.jsonl", "v02-wiki.jsonl", "v02-messenger.jsonl"],
+      "facts": [
+        {
+          "entity": "A",
+          "attribute": "target_date",
+          "value": "2026-12-05",
+          "evidence": {
+            "record_id": "mail-v02-0001",
+            "version": 1,
+            "span": [30, 60],
+            "quote": "미리내 프로젝트의 완료 목표는 2026-12-05입니다"
+          }
+        },
+        {
+          "entity": "B",
+          "attribute": "completion_date",
+          "value": "2026-12-10",
+          "evidence": {
+            "record_id": "msg-v02-0001",
+            "version": 1,
+            "span": [12, 46],
+            "quote": "물결 API 개발 완료가 2026-12-10으로 연기되었습니다"
+          }
+        }
+      ],
+      "relations": [
+        {
+          "subject": "A",
+          "type": "DEPENDS_ON",
+          "object": "B",
+          "evidence": {
+            "record_id": "wiki-v02-0001",
+            "version": 1,
+            "span": [21, 53],
+            "quote": "미리내 프로젝트는 물결 API의 예약 엔드포인트에 의존한다"
+          }
+        }
+      ],
+      "insights": [
+        {
+          "rule": "dependency_delay",
+          "x": "A",
+          "y": "B",
+          "is_inference": true,
+          "evidence": [
+            {
+              "record_id": "mail-v02-0001",
+              "version": 1,
+              "span": [30, 60],
+              "quote": "미리내 프로젝트의 완료 목표는 2026-12-05입니다"
+            },
+            {
+              "record_id": "wiki-v02-0001",
+              "version": 1,
+              "span": [21, 53],
+              "quote": "미리내 프로젝트는 물결 API의 예약 엔드포인트에 의존한다"
+            },
+            {
+              "record_id": "msg-v02-0001",
+              "version": 1,
+              "span": [12, 46],
+              "quote": "물결 API 개발 완료가 2026-12-10으로 연기되었습니다"
+            }
+          ]
+        }
+      ]
+    },
+    "date-variant": {
+      "files": ["v02-mail.jsonl", "v02-wiki.jsonl", "v02-date-variant.jsonl"],
+      "facts": [
+        {
+          "entity": "A",
+          "attribute": "target_date",
+          "value": "2026-12-05",
+          "evidence": {
+            "record_id": "mail-v02-0001",
+            "version": 1,
+            "span": [30, 60],
+            "quote": "미리내 프로젝트의 완료 목표는 2026-12-05입니다"
+          }
+        },
+        {
+          "entity": "B",
+          "attribute": "completion_date",
+          "value": "2026-12-03",
+          "evidence": {
+            "record_id": "msg-v02-0002",
+            "version": 1,
+            "span": [17, 51],
+            "quote": "물결 API 개발 완료가 2026-12-03으로 앞당겨졌습니다"
+          }
+        }
+      ],
+      "relations": [
+        {
+          "subject": "A",
+          "type": "DEPENDS_ON",
+          "object": "B",
+          "evidence": {
+            "record_id": "wiki-v02-0001",
+            "version": 1,
+            "span": [21, 53],
+            "quote": "미리내 프로젝트는 물결 API의 예약 엔드포인트에 의존한다"
+          }
+        }
+      ],
+      "insights": []
+    },
+    "malicious": {
+      "files": ["v02-malicious.jsonl"],
+      "facts": [
+        {
+          "entity": "A",
+          "attribute": "target_date",
+          "value": "2026-12-05",
+          "evidence": {
+            "record_id": "mail-v02-m001",
+            "version": 1,
+            "span": [18, 48],
+            "quote": "미리내 프로젝트의 완료 목표는 2026-12-05입니다"
+          }
+        },
+        {
+          "entity": "B",
+          "attribute": "completion_date",
+          "value": "2026-12-10",
+          "evidence": {
+            "record_id": "msg-v02-m001",
+            "version": 1,
+            "span": [19, 53],
+            "quote": "물결 API 개발 완료가 2026-12-10으로 연기되었습니다"
+          }
+        }
+      ],
+      "relations": [
+        {
+          "subject": "A",
+          "type": "DEPENDS_ON",
+          "object": "B",
+          "evidence": {
+            "record_id": "wiki-v02-m001",
+            "version": 1,
+            "span": [28, 60],
+            "quote": "미리내 프로젝트는 물결 API의 예약 엔드포인트에 의존한다"
+          }
+        }
+      ],
+      "insights": [
+        {
+          "rule": "dependency_delay",
+          "x": "A",
+          "y": "B",
+          "is_inference": true,
+          "evidence": [
+            {
+              "record_id": "mail-v02-m001",
+              "version": 1,
+              "span": [18, 48],
+              "quote": "미리내 프로젝트의 완료 목표는 2026-12-05입니다"
+            },
+            {
+              "record_id": "wiki-v02-m001",
+              "version": 1,
+              "span": [28, 60],
+              "quote": "미리내 프로젝트는 물결 API의 예약 엔드포인트에 의존한다"
+            },
+            {
+              "record_id": "msg-v02-m001",
+              "version": 1,
+              "span": [19, 53],
+              "quote": "물결 API 개발 완료가 2026-12-10으로 연기되었습니다"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

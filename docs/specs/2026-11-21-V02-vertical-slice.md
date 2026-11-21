@@ -167,6 +167,12 @@ flowchart LR
 | V02-T11 | 흐름 전체 E2E(브라우저, Electron), 재입력, 재시작 | R16, R17 | C3(영속), C4(E2E 부분) | V02-T09, V02-T10, V01-T06 | 두 환경의 E2E 출력과 실행 기록(Provider 종류 `test-double`) |
 | V02-T12 | 배포처 검증 실행기, 실행 기록 양식, 실행 절차, site-setup S14 갱신 | R18, R19 | C4(실행기), H2 | V02-T11, V01-T15, **R04(#13)의 사외 준비물** | 실행기가 사외에서 거부하는 2건 |
 
+**T01이 넘기는 것**. T04 이후가 지켜야 하는 T01의 결정이다.
+
+1. **가져오기 한 줄의 스키마**: `packages/contracts/src/import-record.ts`의 `ImportRecordSchema`. R05 골든 데이터의 필드 규칙(`eval/scorer/validate.py`의 `check_record`)을 옮긴 것이며, 골든 원본 전부가 이 스키마를 통과한다는 테스트가 있다. `content_hash`가 `content`의 sha256인지는 스키마가 아니라 fixture 테스트가 확인한다(contracts는 화면에서도 쓰이므로 `node:crypto`를 쓰지 않는다). T04의 JSONL Connector는 줄마다 이 스키마로 검사한다. `content_hash`가 `content`와 맞지 않는 줄을 그 줄의 오류로 거부할지는 T04가 정하고 그 결정을 테스트로 남긴다(백엔드에서는 `node:crypto`를 쓸 수 있다).
+2. **악성 표시**: fixture 줄의 `"malicious": true`는 스키마가 받아들이되(`true`만), Connector가 내는 `SourceRecord`에는 싣지 않는다(V01의 `SourceRecordSchema`가 거부한다). 이 표시는 합성 목록을 만들 때만 읽힌다. T04는 `SourceRecord`를 넓히더라도(version 등) Connector가 내는 레코드에 `malicious`가 없다는 것을 Connector 테스트로 확인한다.
+3. **fixture와 기대 결과**: `fixtures/v02-*.jsonl`과 `fixtures/v02-expected.json`(묶음 `plain`, `date-variant`, `malicious`). 날짜 변형과 악성 변형은 기본 원본과 다른 `id`·`external_id`를 가진 별도 원본이며, 날짜 변형은 메신저 원본을 **대신해** 넣는다. 수정 version이 필요한 테스트(`update.recompute` 등)는 그 테스트가 version을 만든다. 합성 목록 생성기는 `schema_version`이 있는 줄에서 `body` 대신 `content`를 읽는다. 기대 결과의 규칙 이름은 골든 라벨의 `insight_type`과 같은 `dependency_delay`다. 근거가 붙은 원문 일부에는 인용문 앞에 이모지(BMP 밖 문자)가 있어, 위치를 UTF-16 단위로 세면 틀린다.
+
 ## 완료 기준 (테스트 가능한 형태)
 
 C1~C5는 이슈 #17의 문장 그대로다(2026-11-21 추가된 C5 포함). H1·H2는 이 프로젝트가 배포처로 넘어가는 프로젝트라서 spec 양식이 요구하는 두 기준이며, 이슈의 문장이 아닌 별도 항목으로 이 spec에만 둔다.
@@ -255,3 +261,5 @@ test double의 결과를 실제 Provider의 결과로 적지 않는다. R07(#37)
 | 2026-11-21 | 이슈에 추가된 C5를 옮겨 적고 R13과 T09를 C5에 연결(V01-C7에서 넘어온 부분). 근거가 바뀌지 않는 version을 계속 가리키게 하고 삭제가 모든 version을 따라가게 함(R3, R11, R12, `delete.purge`의 예전 version 경우). 추출 요청이 ID만 넘기고 후보의 출처를 등급에 넣음(R6, R7). 투영 통지의 기준을 변경 순번으로, 깨끗한 재시작에 재구축이 없다는 테스트(R13, `engine.restart`). `operation`의 대응(R2). 항목이 지워지면 그 Insight 행도 지움(R10, R12). 미증명 경로 명시 | 배경, 요구사항, 설계 개요, 작업 분해, 완료 기준, 미해결 질문 | 독립 재검토 D01, D05~D07, D09, D12, 이슈 #17 V02-C5 추가 |
 | 2026-11-21 | T09 행에 V01-T12 확정 규격 반영: `engine.restart` ①은 재시작 앞뒤에 같은 메모리 엔진 인스턴스를 씀, null 엔진은 재구축하지 않음, 빈 벡터 색인의 거부는 건너뜀 | 작업 분해(T09) | V01-T12 독립 검토 M1 |
 | 2026-11-21 | T09 행: null 엔진도 시작 비교의 같은 규칙을 따름(비용 없는 재구축) | 작업 분해(T09) | V01-T12 재검토 N1 |
+| 2026-11-21 | "T01이 넘기는 것" 추가: 가져오기 한 줄의 스키마 위치(`ImportRecordSchema`)와 골든 데이터와의 대조, 악성 표시를 스키마가 받되 Connector가 싣지 않음, 날짜·악성 변형을 별도 원본으로 두고 날짜 변형은 메신저 원본을 대신함, 기대 결과 파일의 위치와 묶음 | 작업 분해 | V02-T01 구현: T04의 JSONL Connector보다 먼저 fixture가 통과할 스키마가 필요했음 |
+| 2026-11-21 | "T01이 넘기는 것" 보강: `content_hash` 불일치를 줄 오류로 볼지 T04가 정함, Connector가 내는 레코드에 `malicious`가 없음을 T04가 테스트, 규칙 이름을 골든 어휘 `dependency_delay`로, 인용문 앞의 BMP 밖 문자 | 작업 분해 | V02-T01 독립 검토 F1, F2, F5, F6 |

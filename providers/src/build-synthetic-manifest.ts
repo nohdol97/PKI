@@ -41,11 +41,15 @@ export function buildSyntheticManifest(root: string): ManifestEntry[] {
   const inputs: [string, Item[]][] = [
     ...jsonlFiles(join(root, "fixtures")).map((file): [string, Item[]] => [
       file,
-      jsonl(file).map((r, i) => ({
-        title: text(r.title, `${file}:${i + 1} title`),
-        body: text(r.body, `${file}:${i + 1} body`),
-        malicious: r.malicious === true,
-      })),
+      jsonl(file).map((r, i) => {
+        // Test Connector lines carry `body`; JSONL import lines (V02-R1) carry `content`.
+        const field = "schema_version" in r ? "content" : "body";
+        return {
+          title: text(r.title, `${file}:${i + 1} title`),
+          body: text(r[field], `${file}:${i + 1} ${field}`),
+          malicious: r.malicious === true,
+        };
+      }),
     ]),
     // Golden delete records carry an empty body and are never ingested as content.
     ...jsonlFiles(join(root, "eval", "golden", "sources")).map((file): [string, Item[]] => [
