@@ -676,7 +676,7 @@ describe("lines the build could not apply wait and are applied when the kind ret
         ?.n;
     const kept = versions();
     expect(kept).toBeGreaterThan(0);
-    // the list still names line 1 (set by hand: the state a start leaves when the deletion line ahead was deferred and the lift behind it registered the instance)
+    // the list still names line 1 (set by hand: the list as it stands between the two passes of a start where the deletion line ahead was deferred and the lift behind it registered the instance; the second pass would drop it)
     writeSetting(old, DEFERRED, "[1]");
 
     const report = withKind()(old);
