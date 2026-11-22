@@ -316,12 +316,12 @@ export function createDerivativeRegistry(options: RegistryOptions): DerivativeRe
     }
     return [...scopes.values()];
   };
-  // stored, and covered by no tombstone (until I04-T05 renames its column covers_version)
+  // stored, and covered by no tombstone (a lift uncovers nothing: the cover stays)
   const live = (db: SqlDriver, v: SourceVersionRef) =>
     db.all(
       `SELECT 1 FROM source_versions sv WHERE sv.source_id = ? AND sv.version = ?
          AND NOT EXISTS (SELECT 1 FROM tombstones t
-                         WHERE t.source_id = sv.source_id AND t.version >= sv.version)`,
+                         WHERE t.source_id = sv.source_id AND t.covers_version >= sv.version)`,
       [v.sourceId, v.version],
     ).length === 1;
 

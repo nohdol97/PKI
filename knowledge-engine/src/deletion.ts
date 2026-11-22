@@ -7,8 +7,9 @@
 // (canonical-kinds.ts): all its versions with their evidence and keyword index
 // rows, what they alone supported, the knowledge left judged again and the rule
 // over the collected items that remain. The `dirty` Insight state is not used:
-// the rule runs here, in the same transaction. I04-T05's tombstone entry takes
-// this place.
+// the rule runs here, in the same transaction. This is V02's entry: the caller
+// names the source by id and no revision is kept. The I04 entry is applyTombstone
+// (tombstone-entry.ts); I04-T13 and I01-T02 move this entry's callers onto it.
 import {
   supersedeOpenJobs,
   writeTombstone,
@@ -60,7 +61,7 @@ export function deleteSource(
     supersedeOpenJobs(db, sourceId, when);
     const { insights, ...purge } = propagateCanonical(
       db,
-      // the tombstone keeps no revision before I04-T05
+      // V02's path carries no revision (applyTombstone does)
       { kind: reason, sourceId, coversVersion: latest, lastRevision: null },
       at,
     ).report;

@@ -465,7 +465,7 @@ export function heartbeatJob(
 export function isFenceCurrent(db: SqlDriver, job: { sourceId: number; fenceVersion: number }) {
   const row = db.all(
     `SELECT (SELECT max(version) FROM source_versions WHERE source_id = ?) AS latest,
-            (SELECT version FROM tombstones WHERE source_id = ?) AS tombstone`,
+            (SELECT covers_version FROM tombstones WHERE source_id = ?) AS tombstone`,
     [job.sourceId, job.sourceId],
   )[0];
   const tombstone = row?.tombstone as number | null;

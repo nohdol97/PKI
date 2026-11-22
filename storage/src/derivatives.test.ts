@@ -24,7 +24,7 @@ import { migrate } from "./migrations.ts";
 import { readChangeSeq } from "./revisions.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
-import { writeTombstone } from "./tombstones.ts";
+import { recordTombstoneLift, writeTombstone } from "./tombstones.ts";
 
 const AT = "2026-11-22T00:00:00.000Z";
 const permissive: ScopePolicy = {
@@ -456,6 +456,9 @@ describe("visible (I04-R13) and scopesOf (I04-R14)", () => {
       id,
     }));
     expect(registry.visible(db, refs, "display").map((r) => r.id)).toEqual(["mine", "of-a"]);
+    // a lift uncovers nothing (I04-R9): what was deleted does not come back
+    expect(recordTombstoneLift(db, c, AT)).toBe("lifted");
+    expect(registry.visible(db, refs, "display").map((r) => r.id)).toEqual(["mine", "of-a"]);
   });
 
   it("asks the policy with the lineage's scopes and the purpose", () => {
@@ -572,7 +575,8 @@ derivativeKindContract("SQL double through propagate", {
       staleInput: () => ({
         ref: { kind: "double", id: "late" },
         attempt: () =>
-          db.all("SELECT 1 FROM tombstones WHERE source_id = ? AND version >= 1", [a]).length > 0
+          db.all("SELECT 1 FROM tombstones WHERE source_id = ? AND covers_version >= 1", [a])
+            .length > 0
             ? { status: "stale", cause: "covered" }
             : row("double", "late", [{ sourceId: a, version: 1 }]),
       }),

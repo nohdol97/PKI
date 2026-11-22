@@ -12,6 +12,7 @@ export {
   type PurgeResult,
   type SourceDeletion,
 } from "./deletion.ts";
+export { applyTombstone, liftTombstone } from "./tombstone-entry.ts";
 export { CANONICAL_KINDS, derivativeRegistry, type CanonicalReport } from "./canonical-kinds.ts";
 export {
   createExtractHandler,

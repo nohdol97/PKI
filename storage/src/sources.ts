@@ -46,12 +46,12 @@ export function saveSourceRecord(
   connectorInstanceId: string,
   record: StoredRecord,
 ): SaveOutcome {
-  const namespace = record.namespace ?? "";
-  db.run(
-    "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-    [connectorInstanceId, namespace, record.externalId],
+  const sourceId = ensureSourceId(
+    db,
+    connectorInstanceId,
+    record.namespace ?? "",
+    record.externalId,
   );
-  const sourceId = findSourceId(db, connectorInstanceId, namespace, record.externalId) as number;
   const hash = contentHash(record.title, record.body);
   const latest = db.all(LATEST_VERSION_SQL, [sourceId])[0];
   if (latest?.content_hash === hash) return { status: "unchanged" };
@@ -75,16 +75,51 @@ export function saveSourceRecord(
   ) {
     return { status: "refused", reason: "revision-not-newer" };
   }
-  const version = ((latest?.version as number | undefined) ?? 0) + 1;
-  const tombstone = db.all("SELECT version FROM tombstones WHERE source_id = ?", [sourceId])[0];
-  if (tombstone && version <= (tombstone.version as number)) {
+  // Provisional until I01-T02 judges arrivals by revision: a tombstone not lifted
+  // blocks the source while no version stands above its cover (I04-R9).
+  const tombstone = db.all("SELECT covers_version, lifted_at FROM tombstones WHERE source_id = ?", [
+    sourceId,
+  ])[0];
+  if (
+    tombstone &&
+    tombstone.lifted_at === null &&
+    ((latest?.version as number | undefined) ?? 0) <= (tombstone.covers_version as number)
+  ) {
     return { status: "refused", reason: "tombstoned" };
   }
+  const version = nextSourceVersion(db, sourceId);
   db.run(
     "INSERT INTO source_versions (source_id, version, content_hash, title, body, revision) VALUES (?, ?, ?, ?, ?, ?)",
     [sourceId, version, hash, record.title, record.body, record.revision ?? null],
   );
   return { status: "created", sourceId, version };
+}
+
+/**
+ * The source's next product version (I04-R9): one past its latest and past its
+ * tombstone's cover, so a number is never reused once every version is purged.
+ */
+export function nextSourceVersion(db: SqlDriver, sourceId: number): number {
+  const row = db.all(
+    `SELECT (SELECT max(version) FROM source_versions WHERE source_id = ?) AS latest,
+            (SELECT covers_version FROM tombstones WHERE source_id = ?) AS covers`,
+    [sourceId, sourceId],
+  )[0];
+  return Math.max((row?.latest as number | null) ?? 0, (row?.covers as number | null) ?? 0) + 1;
+}
+
+/** The id of the source with this identity, its row created if it was never seen. */
+export function ensureSourceId(
+  db: SqlDriver,
+  connectorInstanceId: string,
+  namespace: string,
+  externalId: string,
+): number {
+  db.run(
+    "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+    [connectorInstanceId, namespace, externalId],
+  );
+  return findSourceId(db, connectorInstanceId, namespace, externalId) as number;
 }
 
 /** The id of the source an instance names `externalId` in `namespace`, or undefined if never stored. */

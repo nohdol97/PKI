@@ -554,8 +554,67 @@ const v12: Migration = (db) =>
     DROP TABLE sources_v11;
   `);
 
+// Schema v13 (I04-T05, I04-R9): the tombstone's shape.
+// - `version` becomes `covers_version`: the tombstone covers every product version
+//   up to it, 0 for a source deleted before any version was stored. It is also the
+//   high-water mark of the source's version numbers once its versions are purged.
+// - `last_revision`: the source system's revision at the deletion, empty for the
+//   screen's deletion and for rows from before v13. `lifted_at`: when the user
+//   lifted it, empty while it blocks arrivals.
+// - Both numbers are whole (typeof checks: INTEGER affinity alone keeps 5.5 as it is).
+// - Every row is copied: nothing a v12 row holds is dropped; a v12 row whose version is
+//   not a whole number (only hand-written SQL could store one) fails the whole migration. The three reasons stay
+//   (v9 already turned `deleted` into `user-deleted`, and its CHECK admits no other).
+// - The table is rebuilt under its own name, as in v9 (its CHECK changes). Its
+//   triggers: an insert raises the change sequence, an update only when the cover
+//   moves (a reason change, a revision or a lift changes no content), and a source
+//   version at or below the cover is refused, lifted or not (a number is never reused).
+const v13: Migration = (db) =>
+  db.exec(`
+    CREATE TEMP TABLE tombstones_v12 AS SELECT source_id, version, at, reason FROM tombstones;
+    DROP TABLE tombstones;
+    CREATE TABLE tombstones (
+      source_id INTEGER PRIMARY KEY REFERENCES sources (id),
+      covers_version INTEGER NOT NULL
+        CHECK (typeof(covers_version) = 'integer' AND covers_version >= 0),
+      last_revision INTEGER
+        CHECK (last_revision IS NULL OR (typeof(last_revision) = 'integer' AND last_revision >= 1)),
+      at TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK (reason IN ('user-deleted', 'source-deleted', 'access-revoked')),
+      lifted_at TEXT
+    );
+    INSERT INTO tombstones (source_id, covers_version, at, reason)
+      SELECT source_id, version, at, reason FROM tombstones_v12;
+    DROP TABLE tombstones_v12;
+    CREATE TRIGGER tombstones_insert AFTER INSERT ON tombstones BEGIN
+      UPDATE revisions SET change_seq = change_seq + 1;
+    END;
+    CREATE TRIGGER tombstones_update AFTER UPDATE ON tombstones
+    WHEN new.covers_version <> old.covers_version BEGIN
+      UPDATE revisions SET change_seq = change_seq + 1;
+    END;
+    DROP TRIGGER source_versions_after_tombstone;
+    CREATE TRIGGER source_versions_after_tombstone BEFORE INSERT ON source_versions
+    WHEN new.version <= (SELECT covers_version FROM tombstones WHERE source_id = new.source_id)
+    BEGIN SELECT RAISE(ABORT, 'a source version must be greater than its tombstone'); END;
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12];
+export const migrations: readonly Migration[] = [
+  v1,
+  v2,
+  v3,
+  v4,
+  v5,
+  v6,
+  v7,
+  v8,
+  v9,
+  v10,
+  v11,
+  v12,
+  v13,
+];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

@@ -215,9 +215,9 @@ describe("cursor after save", () => {
       });
       expect(readCursor(db, "s")).toBe("2");
       expect(counts()).toEqual([2, 1]);
-      expect(db.all("SELECT source_id, version, reason FROM tombstones")).toEqual([
-        { source_id: 1, version: 1, reason },
-      ]);
+      expect(db.all("SELECT source_id, covers_version AS version, reason FROM tombstones")).toEqual(
+        [{ source_id: 1, version: 1, reason }],
+      );
     },
   );
 

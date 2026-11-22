@@ -240,9 +240,12 @@ describe("delete.purge", () => {
       expect(count("source_versions")).toBe(1);
       expect(db.all("SELECT name FROM items")).toEqual([{ name: "미리내 프로젝트" }]);
       expect(count("insights")).toBe(0);
-      // ③ the tombstone holds the identifier, the version reached, a time and the reason
+      // ③ the tombstone holds the identifier, the version it covers, a time and the reason
+      // (I04-R9 adds the source's revision and the lift time; still no content)
       expect(db.all("SELECT name FROM pragma_table_info('tombstones') ORDER BY cid")).toEqual(
-        ["source_id", "version", "at", "reason"].map((name) => ({ name })),
+        ["source_id", "covers_version", "last_revision", "at", "reason", "lifted_at"].map(
+          (name) => ({ name }),
+        ),
       );
       const tombstone = readTombstone(db, sourceId("k"));
       expect(tombstone).toMatchObject({ version: 2, reason });

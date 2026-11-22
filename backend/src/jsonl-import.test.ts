@@ -217,7 +217,7 @@ describe("importJsonl", () => {
     expect(result).toEqual(reply({ received: 4, created: 1, errors: [] }));
     expect(
       db.all(
-        "SELECT s.external_id, t.version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id",
+        "SELECT s.external_id, t.covers_version AS version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id",
       ),
     ).toEqual([{ external_id: "d", version: 1, reason: "source-deleted" }]);
     expect(
@@ -239,7 +239,7 @@ describe("importJsonl", () => {
     expect(result).toEqual(
       reply({ received: 4, created: 2, errors: [{ line: 3, reason: "tombstoned" }] }),
     );
-    expect(db.all("SELECT version, reason FROM tombstones")).toEqual([
+    expect(db.all("SELECT covers_version AS version, reason FROM tombstones")).toEqual([
       { version: 1, reason: "source-deleted" },
     ]);
     expect(

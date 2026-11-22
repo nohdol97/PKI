@@ -42,7 +42,11 @@
 | 변경 순번 | 원본에 변경(새 version 저장, 삭제, 권한 철회)이 생길 때마다 정확히 1씩 오르는 번호. 투영에 통지할 때 함께 넘기고, 투영이 어디까지 반영했는지 비교하는 데 쓴다. 추출로 지식이 생기는 것만으로는 오르지 않는다 |
 | knowledge revision | 정본의 지식(항목, 사실, 관계)이 바뀔 때마다 1씩 오르는 번호. 지식 자체를 색인하는 투영(나중의 벡터 색인, Wiki)이 쓸 번호이며 Phase 1에는 그것을 읽는 투영이 없다 |
 | version fence | 작업이 시작할 때 본 원본 version 번호를, 결과를 쓸 때 다시 대조하는 검사. 그 사이 원본이 바뀌었으면 결과를 버린다 |
-| tombstone | "이 원본은 삭제되었다(또는 권한이 철회되었다)"는 표식. 내용 없이 식별자, version, 시각, 사유만 남긴다. 지운 데이터가 늦게 끝난 작업이나 재수집으로 되살아나는 것을 막는다 |
+| tombstone | "이 원본은 삭제되었다(또는 권한이 철회되었다)"는 표식. 내용이 없고, 그 원본의 **어느 version까지 덮는지**(그 이하의 모든 version), 삭제 때의 출처 revision, 시각, 사유만 남긴다. 사유는 셋이다: 출처가 지움(`source-deleted`), 권한을 잃음(`access-revoked`), 사용자가 지움(`user-deleted`). 사용자는 tombstone을 **해제**할 수 있다. 해제해도 지운 내용은 돌아오지 않고, 그 뒤의 도착을 막지 않을 뿐이다. 지운 데이터가 늦게 끝난 작업이나 재수집으로 되살아나는 것을 막는다(I04-R9) |
+| revision | 출처 시스템이 레코드에 매긴 번호. 도착의 앞뒤를 가리는 데만 쓴다. 제품이 원본마다 1부터 매기는 **version**과 다른 번호이며, fence와 tombstone은 version을 비교한다 |
+| 파생물(derivative) | 원본 version에서 계산해 만든 모든 것(근거, 사실·관계, 항목, Insight, 색인 행, 엔진·벡터 투영 등). 원본이 바뀌거나 지워지면 함께 지우거나 다시 계산해야 한다 |
+| 계보(lineage) | 파생물 하나가 어느 원본의 어느 version들에서 나왔는지의 목록. 범위, 전송 등급, fence 판단의 유일한 입력이다 |
+| 등록부(registry) | 파생물의 종류를 모아 둔 목록. 종류마다 "변경이 건드리는 행", "계보", "지우거나 다시 계산하는 법"을 등록하고, 원본 변경은 이 목록을 한 번 지나며 전파된다(5.6절) |
 | 임대(lease) | 작업 실행기가 작업 하나를 "기한까지 내가 처리한다"고 잡아 두는 것. 기한이 지나면 다른 실행이 다시 집을 수 있다 |
 | outbox | 정본을 고친 트랜잭션 안에 함께 적어 두는 "투영에 반영할 일" 목록. 중간에 꺼져도 목록이 남아 이어서 반영한다 |
 | 사이드카 | 앱 본체 옆에서 따로 실행되는 보조 프로세스(예: Python이나 Go로 만든 엔진) |
@@ -416,7 +420,9 @@ function createDerivativeRegistry(o: { kinds: readonly DerivativeKind[]; policy:
 }
 ```
 
-`SourceChange`, `ScopePolicy`, `atLeastAsStrict`, `commitDerived`의 모양(`CommitDerived`, `DerivedItem`, `CommitResult`, `ScopePolicyDrop`), `canonicalTransaction`과 `CanonicalTx`, `applyTombstone`·`liftTombstone`의 모양(`ApplyTombstone`, `LiftTombstone`, `TombstoneWrite`, `TombstoneOutcome`)은 spec 블록과 같은 이름·인자로 같은 파일에 타입으로 있다. 본문은 뒤 작업이 채운다: `commitDerived`는 I04-T06(그 전에 I03-T04의 임시 함수가 같은 모양), tombstone 입구와 래퍼는 I04-T05, 장부 줄(`LedgerLineDraft`, 지금은 I04-R17의 목록대로 잠정)은 I04-T10, `ScopePolicy`의 기본 구현은 I04-T09다.
+`SourceChange`, `ScopePolicy`, `atLeastAsStrict`, `commitDerived`의 모양(`CommitDerived`, `DerivedItem`, `CommitResult`, `ScopePolicyDrop`), `canonicalTransaction`과 `CanonicalTx`, `applyTombstone`·`liftTombstone`의 모양(`ApplyTombstone`, `LiftTombstone`, `TombstoneWrite`, `TombstoneOutcome`)은 spec 블록과 같은 이름·인자로 같은 파일에 타입으로 있다. 본문은 뒤 작업이 채운다: `commitDerived`는 I04-T06(그 전에 I03-T04의 임시 함수가 같은 모양), 장부 줄(`LedgerLineDraft`, 지금은 I04-R17의 목록대로 잠정)은 I04-T10, `ScopePolicy`의 기본 구현은 I04-T09다.
+
+- **tombstone 입구와 래퍼(I04-T05, 잠정).** 판정(누가 누구를 덮어쓰는가)과 행 쓰기는 저장소의 `recordTombstone`·`recordTombstoneLift`(`storage/src/tombstones.ts`) 한 곳에 있다. 덮는 version은 부르는 쪽이 정하지 않고 `max(최신 제품 version, 이미 있는 값)`이다. 입구 `applyTombstone`·`liftTombstone`은 `knowledge-engine/src/tombstone-entry.ts`에 있다(등록부가 필요해서다). `applyTombstone`은 원본을 정체로 찾고(처음 보는 원본은 행을 만들고 0을 덮는다), tombstone을 바꾼 경우에만 같은 트랜잭션에서 그 원본의 열린 작업을 닫고 등록부로 한 번 전파한다. `liftTombstone`은 해제 시각만 쓰고 전파하지 않는다. 출처 사건은 사유를 바꾸지 못하고(사용자의 삭제 위에서도), 더 큰 revision이면 출처 revision만 올린다. 래퍼 `canonicalTransaction`(`storage/src/canonical-transaction.ts`)은 드라이버의 트랜잭션 하나를 쓰기 잠금을 잡고 열며, 안에서 다시 부르면 같은 트랜잭션에 savepoint로 합류한다(안쪽이 예외로 끝나면 안쪽이 쓴 것만 되돌려진다). 장부 줄은 쌓기만 하고 버린다(쓰는 것은 I04-T10). V02의 `deleteSource`는 I04-T13·I01-T02가 옮길 때까지 예전 경로(`writeTombstone`)를 쓴다. 변경 순번은 새 tombstone과 덮는 version이 바뀔 때만 오른다(스키마 v13의 트리거).
 
 - **등록.** 등록부는 `createDerivativeRegistry`로 한 번 만들고 실행 중에 바뀌지 않는다(목록이 고정된다). 만들 때 이름 중복, 모르는 층, 없는 종류나 다른 층을 가리키는 `references`, 같은 층의 순환, `canonical` 종류의 `permanentlyAbsent`, 실행 위치가 다른 종류를 가리키는 `references`, `canonical`·`projection`이 아닌 실행 위치를 거부하고, 순서에서 빠진 종류가 없는지 확인한다. 실제 종류의 목록과 제품 구성은 I04-T03(정본 종류)·T04(투영 종류)가 만든다.
 - **정본 종류(I04-T03, 잠정).** 제품 등록부는 `knowledge-engine/src/canonical-kinds.ts`의 `derivativeRegistry`다(Insight 종류가 규칙을 불러야 해서 저장소가 아니라 knowledge-engine에 있다). 종류는 `source`(원본 version과 키워드 색인 행), `evidence`, `fact`·`relation`(층 knowledge), `item`, `insight` 여섯이고 모두 `canonical`, 경로 없음이다. 원본 삭제(`deleteSource`)와 새 version의 전파(`propagateNewVersion`)가 이 등록부를 지난다: 삭제는 tombstone을 쓰고 그 원본의 끝나지 않은 작업을 닫은 뒤(`supersedeOpenJobs`) 전파하고, 새 version은 이전 version을 남긴 채 현재 근거를 잃은 사실·관계를 superseded로 바꾸고 규칙을 다시 계산한다. 그래서 새 version마다 무효화 기록이 한 행 생긴다. 근거와 Insight는 아래 층의 cascade로 사라지며, 종류는 1단계 모음 가운데 사라진 행을 지운 수로 센다. 범위 변경(`scope-changed`)은 내용을 지우지 않고 그 원본을 계보에 가진 Insight만 다시 계산한다(정책 판단은 I04-T09). 이전 version 지우기는 아직 오류로 거부한다(I04-T12). 등록부는 `createProductRegistry({ policy })`로 만들며, 정책은 I04-T09 전까지 불리면 오류인 자리표시다. 한 삭제의 tombstone·작업 닫기·무효화 기록은 같은 시각을 쓴다. 자세한 결합 지점은 I04 spec "T03이 넘기는 것".
@@ -449,11 +455,11 @@ sequenceDiagram
   B->>DB: 작업 기록 확인, 보낼 글을 직접 꺼내고 등급 계산
   B-->>W: 추출 후보 또는 거부(전송 정책, 실행 조건)
   W->>DB: 결과 기록 요청(fence = n)
-  alt 최신 version이 n이고 tombstone이 없다
+  alt 최신 version이 n이고 tombstone이 n을 덮지 않는다
     DB-->>W: 지식과 근거 기록
     W->>R: 영향받은 항목의 규칙 평가
     R->>DB: Insight 갱신(중복 키로 1건 유지, 추론으로 표시)
-  else version이 바뀌었거나 tombstone이 있다
+  else version이 바뀌었거나 tombstone이 n을 덮는다
     DB-->>W: 거부 — 결과를 버리고 작업은 superseded
   end
   UI->>API: 원본 삭제
@@ -464,7 +470,7 @@ sequenceDiagram
 ```
 
 - **version fence가 걸리는 곳**: 작업 결과를 정본에 쓰는 순간. 검사와 쓰기가 같은 트랜잭션 안에 있어야 한다. 엔진과 벡터 규격을 부를 때도 변경 순번을 함께 넘겨, 낡은 통지가 최신 상태를 덮어쓰지 못하게 한다.
-- **tombstone이 걸리는 곳**: 삭제나 권한 철회를 받는 순간 기록하고, ① 진행 중이던 작업의 결과 쓰기 ② 같은 원본의 그 version 이하 재수집 ③ 투영 갱신과 검색 결과 반환에서 확인한다.
+- **tombstone이 걸리는 곳**: 삭제나 권한 철회를 받는 순간 기록하고, ① 진행 중이던 작업의 결과 쓰기 ② 같은 원본의 재수집 ③ 투영 갱신과 검색 결과 반환에서 확인한다. tombstone은 "있다/없다"가 아니라 **어느 version까지 덮는가**로 판단한다: 덮인 version에서 나온 결과와 파생물은 거부되고, 해제 뒤 들어온 더 새 version은 덮이지 않는다. 덮인 번호는 해제 뒤에도 다시 쓰지 않는다(다음 version은 덮는 version + 1). 해제되지 않은 tombstone은 그 원본의 도착을 막고, 출처의 더 큰 revision으로 돌아오는 판정은 I01이 한다(I04-R9).
 - **원본의 version은 바뀌지 않고, 근거는 자기 version을 계속 가리킨다**(이슈 #18 I01-C2와 같다). 새 version이 오면 이전 version과 그 근거는 남아 "지난 근거"가 되고, 최신 version의 근거가 없는 지식은 superseded가 된다.
 - **삭제는 숨기는 것이 아니라 지우는 것이다**: 그 원본의 **모든 version**의 본문, 그 version들을 가리키는 근거와 인용문(지난 근거 포함), 키워드 색인의 행을 지운다. 근거가 하나도 남지 않은 지식은 superseded였든 아니든 지우고, 다른 원본도 근거로 가진 지식은 남긴다. 남는 것은 내용 없는 tombstone뿐이다. 그래서 예전 version에만 있던 값도 삭제 때 함께 사라진다. 권한 철회도 같은 방식으로 지운다(원 설계 17절 "원본 삭제와 파생 지식 삭제 동기화", V02).
 - **추론과 사실의 구분**: 규칙이 만든 Insight는 인식 유형이 "추론"이다. 화면은 이를 확정 사실처럼 보이지 않게 표시한다(원 설계 10절, V02-C2).
@@ -561,3 +567,5 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | 2026-11-22 | 5.6절에 "정본 종류(I04-T03, 잠정)" 추가: 제품 등록부의 자리, 여섯 종류, 삭제·새 version이 등록부를 지남, 작업 닫기, 새 version의 기록, 수 세기, 거부하는 변경 종류, 정책 자리표시 | 5.6절 | I04-T03 구현 |
 | 2026-11-22 | 5.6절 "정본 종류" 고침: 범위 변경은 Insight만 다시 계산, `createProductRegistry`, 한 삭제의 시각 하나 | 5.6절 | I04-T03 검토 B-F1·F2·F4 |
 | 2026-11-22 | 맨 위 표 "가져오기 뒤의 추출" 행의 다시 할 작업에 V01-T17의 홈 상태 판정(`STATUS_EXECUTION`)을 더함 | 사용자 확인이 필요한 결정 | V01-T17 독립 검토 B F3 |
+| 2026-11-22 | 0절에 revision·파생물·계보·등록부 풀이를 더하고 tombstone 풀이를 "version 이하를 덮는 표식, 사유 셋, 해제"로 고침. 5.6절에 "tombstone 입구와 래퍼(I04-T05, 잠정)" 추가. 6절의 "tombstone이 없다/있다"를 "덮지 않는다/덮는다"로, tombstone이 걸리는 곳의 판단을 덮는 version으로 | 0절, 5.6절, 6절 | I04-T05 구현(I04 spec "후속" 3·6) |
+| 2026-11-22 | 5.6절 "tombstone 입구와 래퍼" 고침: 출처 사건은 사용자 삭제 위에서도 revision만 올림, 래퍼는 쓰기 잠금을 잡고 열고 중첩 호출은 savepoint | 5.6절 | I04-T05 검토 B-F2, A-F1·F2 |
