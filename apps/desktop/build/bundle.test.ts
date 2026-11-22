@@ -89,10 +89,14 @@ describe("folding a production bundle", () => {
 });
 
 describe("build check", () => {
-  // named by path, not left to the file-name rule (V02 spec "T10이 넘기는 것" 5)
+  // named by path, not left to the file-name rule (V02 spec "T10이 넘기는 것" 5, T11 7)
   it.each([
     "packages/testkit/src/fake-cli.ts",
     "backend/src/v02-seed.e2e.ts",
+    "backend/src/v02-double.e2e.ts",
+    "backend/src/v02-double.hook.e2e.ts",
+    "backend/src/v02-shell.e2e.ts",
+    "apps/desktop/e2e/double-main.ts",
     "backend/src/dev.ts",
     "apps/desktop/e2e/launch.ts",
   ])("refuses %s by its path", (path) => {
@@ -108,11 +112,9 @@ describe("build check", () => {
     "backend/src/boot.test.ts",
     "apps/web/e2e/screens.e2e.ts",
     "apps/web/src/evidence-view.test.tsx",
-    // by the patterns, whatever later tasks add (V02-T11's doubles and shell entry)
-    "backend/src/v02-double.e2e.ts",
-    "backend/src/v02-double.hook.e2e.ts",
-    "backend/src/v02-shell.e2e.ts",
-    "apps/desktop/e2e/double-main.ts",
+    // by the patterns alone, whatever later tasks add without naming it here
+    "backend/src/v99-later.e2e.ts",
+    "apps/desktop/e2e/later-helper.ts",
     "apps/web/e2e/helpers/anything.ts",
     ...Object.keys(REPLACEMENTS),
   ])("refuses %s", (path) => {

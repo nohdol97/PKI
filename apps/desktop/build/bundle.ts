@@ -25,7 +25,16 @@ export const REPLACEMENTS: Readonly<Record<string, string>> = {
 
 /** Test-only or development-only code, refused by path (V02 spec "T10이 넘기는 것" 5). */
 const FORBIDDEN_PREFIXES = ["packages/testkit/", "apps/desktop/e2e/", "apps/desktop/artifact/"];
-const FORBIDDEN_FILES = ["backend/src/v02-seed.e2e.ts", "backend/src/dev.ts"];
+// named as well as caught by the patterns below (V02 spec "T10이 넘기는 것" 5, T11 7):
+// the seed and the test-build doubles and shell entry, and the development entry
+const FORBIDDEN_FILES = [
+  "backend/src/v02-seed.e2e.ts",
+  "backend/src/v02-double.e2e.ts",
+  "backend/src/v02-double.hook.e2e.ts",
+  "backend/src/v02-shell.e2e.ts",
+  "apps/desktop/e2e/double-main.ts",
+  "backend/src/dev.ts",
+];
 const TEST_FILE = /\.(test|e2e|setup)\.[cm]?[jt]sx?$/;
 /** Any `e2e/` folder: E2E code and its helpers, whatever their file names. */
 const E2E_FOLDER = /(^|\/)e2e\//;
