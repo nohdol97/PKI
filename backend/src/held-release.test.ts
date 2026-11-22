@@ -29,6 +29,7 @@ import {
   computePolicyFingerprint,
   HELD_REEVALUATION_MS,
   reevaluateHeldJobs,
+  releaseHeldOnEvent,
   releaseOnPolicyChange,
   startHeldReevaluation,
 } from "./held-release.ts";
@@ -169,6 +170,18 @@ describe("held.release (I03-R16 ①, ③)", () => {
     await pipe.runner.wake(); // the next claim judges it again, and the Provider is called
     expect(readJob(db, b)?.status).toBe("succeeded");
     expect(provider.requests).toHaveLength(1); // only the released job's call
+  });
+
+  it("keeps the development exception's reasons liftable outside a production build", async () => {
+    // a production bundle leaves them out (artifact.contents): only the exception gives them
+    const pipe = pipeline(localDouble());
+    const ids = (await heldThree(pipe)) as [number, number, number];
+    const [a, b, c] = ids;
+    db.run("UPDATE jobs SET reason = 'unverified-ack-required' WHERE id = ?", [a]);
+    db.run("UPDATE jobs SET reason = 'unverified-background' WHERE id = ?", [b]);
+    db.run("UPDATE jobs SET reason = 'unverified-malicious' WHERE id = ?", [c]);
+    expect(releaseHeldOnEvent(db, "default-provider")).toBe(3);
+    expect(ids.map((id) => readJob(db, id)?.status)).toEqual(["queued", "queued", "queued"]);
   });
 
   it("writes the consent and the release in one transaction: a failing release leaves no consent", async () => {
