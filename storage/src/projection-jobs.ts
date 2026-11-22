@@ -97,11 +97,16 @@ export function latestCanonicalVersion(db: SqlDriver, sourceId: number): number 
   return nextSourceVersion(db, sourceId) - 1;
 }
 
-/** A job's result counts: names and whole numbers from 0 only, never text (I03-R2). */
+/**
+ * A job's result counts: names and whole numbers from 0 only, never text (I03-R2). With
+ * `lease`, only the run that still holds the job writes them (a run whose lease was lost
+ * writes nothing); without it the caller is inside the transaction that closes the job.
+ */
 export function recordResultCounts(
   db: SqlDriver,
   jobId: number,
   counts: Readonly<Record<string, number>>,
+  lease?: { leaseToken: number },
 ): void {
   const sorted: Record<string, number> = {};
   for (const key of Object.keys(counts).sort()) {
@@ -111,5 +116,10 @@ export function recordResultCounts(
     }
     sorted[key] = n as number;
   }
-  db.run("UPDATE jobs SET result_counts = ? WHERE id = ?", [JSON.stringify(sorted), jobId]);
+  db.run(
+    `UPDATE jobs SET result_counts = ? WHERE id = ?${
+      lease ? " AND status = 'running' AND lease_token = ?" : ""
+    }`,
+    [JSON.stringify(sorted), jobId, ...(lease ? [lease.leaseToken] : [])],
+  );
 }

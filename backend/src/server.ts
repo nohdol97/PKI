@@ -64,7 +64,7 @@ import type { AddressInfo } from "node:net";
 import type { ConnectorManager } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import type { InstanceImporter } from "./imports.ts";
-import type { JsonlImporter } from "./jsonl-import.ts";
+import { InstanceBusyError, type JsonlImporter } from "./jsonl-import.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -545,8 +545,15 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),
     syncConnector: (input) => options.connectors.sync(input.connectorId),
-    importJsonl: async ({ text }) =>
-      options.importer ? options.importer(text) : { error: "connector-unavailable" },
+    importJsonl: async ({ text }) => {
+      if (!options.importer) return { error: "connector-unavailable" };
+      try {
+        return await options.importer(text);
+      } catch (error) {
+        if (error instanceof InstanceBusyError) return { error: "instance-busy" };
+        throw error;
+      }
+    },
     imports: async ({ instanceId, content }) =>
       options.instanceImporter
         ? options.instanceImporter(instanceId, content)

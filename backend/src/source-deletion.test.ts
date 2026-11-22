@@ -25,7 +25,7 @@ import {
 } from "./composition.ts";
 import { syncConnector } from "./connectors.ts";
 import type { JobRunner } from "./job-runner.ts";
-import { JSONL_CONNECTOR_KIND } from "./jsonl-import.ts";
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const read = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8").trim();
@@ -167,7 +167,7 @@ function reporting(kind: "delete" | "access-revoked", externalId: string): Conne
   };
   return {
     manifest: {
-      type: JSONL_CONNECTOR_KIND,
+      type: JSONL_IMPORT_KIND,
       schemaVersion: 2,
       capabilities: {
         incremental: true,
@@ -184,7 +184,7 @@ function reporting(kind: "delete" | "access-revoked", externalId: string): Conne
   };
 }
 const report = (instance: string, kind: "delete" | "access-revoked", externalId: string) =>
-  syncConnector(db, instance, JSONL_CONNECTOR_KIND, reporting(kind, externalId), { rescan: true });
+  syncConnector(db, instance, JSONL_IMPORT_KIND, reporting(kind, externalId), { rescan: true });
 
 /** The database file and every side file next to it (-journal, -wal, -shm), as bytes. */
 function storedFiles(): [string, Buffer][] {

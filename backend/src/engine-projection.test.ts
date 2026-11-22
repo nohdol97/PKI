@@ -47,7 +47,7 @@ import {
 } from "./composition.ts";
 import { syncConnector, type ConnectorManager } from "./connectors.ts";
 import type { JobRunner } from "./job-runner.ts";
-import { JSONL_CONNECTOR_KIND } from "./jsonl-import.ts";
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { startServer, type RunningServer } from "./server.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
@@ -208,7 +208,7 @@ describe("engine.calls", () => {
     };
     const revoking: Connector = {
       manifest: {
-        type: JSONL_CONNECTOR_KIND,
+        type: JSONL_IMPORT_KIND,
         schemaVersion: 2,
         capabilities: {
           incremental: true,
@@ -223,7 +223,7 @@ describe("engine.calls", () => {
       getChanges: async () => page,
       getDocument: async () => null,
     };
-    await syncConnector(db, MAIL.connectorId, JSONL_CONNECTOR_KIND, revoking, {
+    await syncConnector(db, MAIL.connectorId, JSONL_IMPORT_KIND, revoking, {
       rescan: true,
       projections,
       runner,
@@ -424,7 +424,7 @@ function gate() {
 function onePage(changes: ChangeSet["changes"]): Connector {
   return {
     manifest: {
-      type: JSONL_CONNECTOR_KIND,
+      type: JSONL_IMPORT_KIND,
       schemaVersion: 2,
       capabilities: {
         incremental: true,
@@ -458,7 +458,7 @@ describe("one page with several versions (review F2)", () => {
     await syncConnector(
       db,
       "conn-page",
-      JSONL_CONNECTOR_KIND,
+      JSONL_IMPORT_KIND,
       onePage([upsert("p1", "page alpha"), upsert("p2", "page beta"), upsert("p3", "page gamma")]),
       { rescan: true, projections: { notify: async (n) => void notified.push(...n) } },
     );
@@ -482,7 +482,7 @@ describe("a failed page (review F4)", () => {
     const vectorIndex = spied(new MemoryVectorIndex());
     const projections = productProjections(db, { engine, vectorIndex, embedder: null });
     const sync = (changes: ChangeSet["changes"]) =>
-      syncConnector(db, "conn-fail", JSONL_CONNECTOR_KIND, onePage(changes), {
+      syncConnector(db, "conn-fail", JSONL_IMPORT_KIND, onePage(changes), {
         rescan: true,
         projections,
       });
@@ -507,7 +507,7 @@ describe("a failed page (review F4)", () => {
 
   it("registers no projection removal for a deletion on a page that fails whole (I04-R12, atomic with the page)", async () => {
     const sync = (changes: ChangeSet["changes"]) =>
-      syncConnector(db, "conn-fail-del", JSONL_CONNECTOR_KIND, onePage(changes), {
+      syncConnector(db, "conn-fail-del", JSONL_IMPORT_KIND, onePage(changes), {
         rescan: true,
       });
     await sync([upsert("d", "stored text", 5)]);

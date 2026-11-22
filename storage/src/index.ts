@@ -107,6 +107,7 @@ export {
   type NewJob,
   type StoredJob,
 } from "./jobs.ts";
+export { purgeEndedJobs } from "./job-retention.ts";
 export { PROJECTION_REBUILD_KIND, PROJECTION_REMOVE_KIND, usesVersionFence } from "./job-kinds.ts";
 export {
   closeCoveredRemoves,
@@ -130,6 +131,7 @@ export {
   heldGroups,
   requeueHeldOnFingerprint,
   requeueHeldReasons,
+  requeueHeldTarget,
   retryJob,
   type CancelResult,
   type RetryResult,

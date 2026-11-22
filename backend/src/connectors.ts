@@ -61,6 +61,12 @@ export interface SyncOptions extends PageOptions {
    * Not the rescan of I01-R17, which a sync starts itself on an expired cursor: no mark is kept.
    */
   rescan?: boolean;
+  /**
+   * The caller holds the instance's lock (`tryLockInstance`) for this whole call, as the JSONL
+   * import of the Sources screen does for every instance of a request (I01-R21): the sync does
+   * not take it again and does not answer `instance-busy`.
+   */
+  lockHeld?: boolean;
 }
 
 export interface ConnectorInstanceConfig {
@@ -73,12 +79,27 @@ export type ConnectorFactory = () => Connector;
 
 export interface ConnectorManager {
   list(): ConnectorSummary[];
+
   sync(
     id: string,
     options?: Pick<SyncOptions, "signal">,
   ): Promise<
     SyncResponse | { error: Extract<ErrorResponse["error"], "not-found" | "connector-unavailable"> }
   >;
+}
+
+/** What the hourly recheck of an instance that is not ready needs of the manager (I03-R16 ②′). */
+export interface ConnectorRecheck {
+  /**
+   * Initializes an instance that was not ready again and asks its health: ready only when
+   * both succeed. Returns the instance's state now; undefined for an unknown id.
+   */
+  recheck(id: string): Promise<ConnectorSummary["state"] | undefined>;
+}
+
+/** The configuration an instance was made with (shown by no API); the default schedules read it. */
+export interface ConnectorConfigs {
+  configOf(id: string): unknown;
 }
 
 const locks = new WeakMap<SqlDriver, Set<string>>();
@@ -148,6 +169,7 @@ export async function syncConnector(
   connector: Connector,
   options: SyncOptions = {},
 ): Promise<SyncResult> {
+  if (options.lockHeld) return runSync(db, instanceId, kind, connector, options);
   const release = tryLockInstance(db, instanceId);
   if (!release) return { ...emptyResult(), stopped: "instance-busy" };
   try {
@@ -278,18 +300,18 @@ export async function createConnectorManager(
   instances: readonly ConnectorInstanceConfig[],
   kinds: Readonly<Record<string, ConnectorFactory>>,
   options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> = {},
-): Promise<ConnectorManager> {
+): Promise<ConnectorManager & ConnectorRecheck & ConnectorConfigs> {
+  const summaryOf = (id: string, kind: string, outcome: InitializeOutcome): ConnectorSummary =>
+    "reason" in outcome
+      ? { id, kind, state: outcome.state, reason: outcome.reason }
+      : { id, kind, state: outcome.state };
   const entries = await Promise.all(
     instances.map(async ({ id, kind, config }) => {
       const factory = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
       if (!factory) throw new Error(`unknown connector kind: ${kind}`);
       const connector = factory();
       const outcome = await initializeConnector(connector, config);
-      const summary: ConnectorSummary =
-        "reason" in outcome
-          ? { id, kind, state: outcome.state, reason: outcome.reason }
-          : { id, kind, state: outcome.state };
-      return { summary, connector };
+      return { summary: summaryOf(id, kind, outcome), connector, config };
     }),
   );
   return {
@@ -300,6 +322,31 @@ export async function createConnectorManager(
           ? { ...summary, deletionsMayBeMissed: true }
           : { ...summary },
       ),
+    configOf: (id) => entries.find((e) => e.summary.id === id)?.config,
+    async recheck(id) {
+      const entry = entries.find((e) => e.summary.id === id);
+      if (!entry) return undefined;
+      if (entry.summary.state === "ready") return "ready";
+      const { id: instanceId, kind } = entry.summary;
+      const outcome = await initializeConnector(entry.connector, entry.config);
+      let ready = outcome.state === "ready";
+      if (ready) {
+        // initialized is not enough: the origin must also say it is fine
+        try {
+          ready = (await entry.connector.healthCheck()).state === "ok";
+        } catch {
+          ready = false;
+        }
+      }
+      // initialized but not healthy is unavailable, like an initialization that failed
+      const now: InitializeOutcome = ready
+        ? { state: "ready" }
+        : outcome.state === "ready"
+          ? { state: "unavailable", error: undefined }
+          : outcome;
+      entry.summary = summaryOf(instanceId, kind, now);
+      return entry.summary.state;
+    },
     async sync(id, syncOptions = {}) {
       const entry = entries.find((e) => e.summary.id === id);
       if (!entry) return { error: "not-found" };

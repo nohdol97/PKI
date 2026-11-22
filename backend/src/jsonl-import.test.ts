@@ -3,6 +3,7 @@
 // sequence and registers its extraction job in one transaction; importing the same
 // JSONL again changes no count; a greater revision is a new version beside the old;
 // a line the store refuses is reported by its number without aborting the rest.
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import type { ImportLineError, ImportRecord } from "@pki/contracts";
 import { identityKey, readChangeSeq, type SqlDriver } from "@pki/storage";
 import { createHash } from "node:crypto";
@@ -13,12 +14,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedLegacyTombstone } from "@pki/testkit";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { CANONICAL_DB_FILE, openCanonicalDb, productImporter } from "./composition.ts";
-import { EXTRACT_JOB_KIND, type SyncOptions } from "./connectors.ts";
+import { EXTRACT_JOB_KIND, tryLockInstance, type SyncOptions } from "./connectors.ts";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
 import {
   IMPORT_ERROR_LIMIT,
   importJsonl as importJsonlWith,
-  JSONL_CONNECTOR_KIND,
+  InstanceBusyError,
   MAX_IMPORT_INSTANCES,
 } from "./jsonl-import.ts";
 
@@ -83,9 +84,9 @@ describe("importJsonl", () => {
       changeSeq: before.changeSeq + 3,
     });
     expect(db.all("SELECT id, kind FROM connector_instances ORDER BY id")).toEqual([
-      { id: "conn-v02-chat", kind: JSONL_CONNECTOR_KIND },
-      { id: "conn-v02-mail", kind: JSONL_CONNECTOR_KIND },
-      { id: "conn-v02-wiki", kind: JSONL_CONNECTOR_KIND },
+      { id: "conn-v02-chat", kind: JSONL_IMPORT_KIND },
+      { id: "conn-v02-mail", kind: JSONL_IMPORT_KIND },
+      { id: "conn-v02-wiki", kind: JSONL_IMPORT_KIND },
     ]);
     expect(
       db.all(
@@ -397,7 +398,7 @@ describe("importJsonl", () => {
   it("reports a job registration conflict as that instance's failure, keeping the instance before it", async () => {
     db.run(`INSERT INTO connector_instances (id, kind) VALUES (?, ?)`, [
       MAIL.connector_instance_id,
-      JSONL_CONNECTOR_KIND,
+      JSONL_IMPORT_KIND,
     ]);
     db.run(
       "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, '', ?)",
@@ -446,6 +447,48 @@ describe("importJsonl", () => {
     expect(count("source_versions")).toBe(0);
   });
 
+  it("takes every named instance's lock before storing and holds each to the request's end: one busy refuses the whole request, none leaves a partial result", async () => {
+    const text = [
+      line({ connector_instance_id: "inst-a", external_id: "a1" }),
+      line({ connector_instance_id: "inst-b", external_id: "b1" }),
+    ].join("\n");
+    const heldDuring: boolean[] = [];
+    const probing = () => {
+      const connector = createJsonlConnector();
+      return {
+        ...connector,
+        initialize: async (config: unknown) => {
+          // while inst-a's round runs, inst-b (not yet reached) is held by this request already
+          const free = tryLockInstance(db, "inst-b");
+          heldDuring.push(free === undefined);
+          free?.();
+          return connector.initialize(config);
+        },
+      };
+    };
+    await importJsonlWith(db, text, { createConnector: probing });
+    expect(heldDuring[0]).toBe(true);
+    // the locks are free after the request
+    for (const id of ["inst-a", "inst-b"]) {
+      const free = tryLockInstance(db, id);
+      expect(free).toBeDefined();
+      free?.();
+    }
+    // one instance busy: the whole request is a 409 and the other instance stored nothing
+    const text2 = [
+      line({ connector_instance_id: "inst-a", external_id: "a2" }),
+      line({ connector_instance_id: "inst-b", external_id: "b2" }),
+    ].join("\n");
+    const stored = count("source_versions");
+    const release = tryLockInstance(db, "inst-b") as () => void;
+    await expect(
+      importJsonlWith(db, text2, { createConnector: createJsonlConnector }),
+    ).rejects.toThrow(InstanceBusyError);
+    expect(count("source_versions")).toBe(stored);
+    expect(tryLockInstance(db, "inst-a")).toBeDefined(); // inst-a's lock was released again
+    release();
+  });
+
   it("wakes the runner once the page with new jobs is committed, and not for unchanged input", async () => {
     // another connection sees only committed rows
     const reader = openBetterSqlite3(join(dir, "data", CANONICAL_DB_FILE));
@@ -467,7 +510,7 @@ describe("importJsonl, review round 2", () => {
   const plantJobConflict = (externalId: string) => {
     db.run("INSERT INTO connector_instances (id, kind) VALUES (?, ?) ON CONFLICT DO NOTHING", [
       MAIL.connector_instance_id,
-      JSONL_CONNECTOR_KIND,
+      JSONL_IMPORT_KIND,
     ]);
     const { lastInsertRowid } = db.run(
       "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, '', ?)",
