@@ -8,6 +8,7 @@ import {
   type ChangeSet,
   type Connector,
   type ConnectorCapabilities,
+  type ConnectorContext,
   type ConnectorManifest,
   type HealthStatus,
   type RejectCode,
@@ -43,6 +44,11 @@ export interface ConnectorScript {
   faults?: readonly ScriptFault[];
   /** Awaited before each answer, after the call is logged; the signal is checked after it. */
   beforeAnswer?: (call: ScriptCall) => void | Promise<void>;
+  /**
+   * Awaited by `initialize` with its second argument (undefined when none came); what it
+   * throws fails the initialization, as a Connector refusing its credentials does (I06-R5).
+   */
+  onInitialize?: (context: ConnectorContext | undefined) => void | Promise<void>;
 }
 
 export interface ScriptedConnectorOptions {
@@ -85,11 +91,12 @@ export class ScriptedConnector implements Connector {
     return this.#manifest;
   }
 
-  async initialize(config: unknown): Promise<void> {
+  async initialize(config: unknown, context?: ConnectorContext): Promise<void> {
     const script = config as Partial<ConnectorScript> | null;
     if (!Array.isArray(script?.entries)) {
       throw new ConnectorError("scripted Connector needs { entries }", { retryable: false });
     }
+    await script.onInitialize?.(context);
     this.#script = { ...script, entries: script.entries, pageSize: script.pageSize ?? 2 };
     this.#faults = (script.faults ?? []).map((fault) => ({ fault, left: fault.times ?? 1 }));
     this.#initialized = true;

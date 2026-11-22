@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(19);
-    expect(migrations).toHaveLength(19);
+    expect(schemaVersion(db)).toBe(20);
+    expect(migrations).toHaveLength(20);
   });
 
   it("is idempotent when re-run", () => {
@@ -475,15 +475,19 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "connector_instances",
       "consents",
       "evidence",
+      "fact_history",
       "facts",
       "identity_key",
       "insight_evidence",
+      "insight_user_inputs",
       "insights",
       "invalidations",
+      "item_history",
       "items",
       "jobs",
       "keyword_index",
       "provider_calls",
+      "relation_history",
       "relations",
       "revisions",
       "schedules",
@@ -494,9 +498,26 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "tombstones",
     ]);
     const attributes = ["epistemic", "status", "valid_at", "observed_at"];
-    expect(columns("items")).toEqual(["id", "type", "name", ...attributes]);
-    expect(columns("facts")).toEqual(["id", "item_id", "kind", "value", ...attributes]);
-    expect(columns("relations")).toEqual(["id", "subject_id", "type", "object_id", ...attributes]);
+    // v20 (S01-T01) added confidence and user_authored to all three, and context to facts
+    const registry = ["confidence", "user_authored"];
+    expect(columns("items")).toEqual(["id", "type", "name", ...attributes, ...registry]);
+    expect(columns("facts")).toEqual([
+      "id",
+      "item_id",
+      "kind",
+      "value",
+      ...attributes,
+      ...registry,
+      "context",
+    ]);
+    expect(columns("relations")).toEqual([
+      "id",
+      "subject_id",
+      "type",
+      "object_id",
+      ...attributes,
+      ...registry,
+    ]);
     expect(columns("evidence")).toEqual([
       "id",
       "source_version_id",
@@ -1355,7 +1376,7 @@ describe("schema v17 (I01-T03, I01-R17)", () => {
     migrate(db, migrations.slice(0, 16));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(19);
+    expect(schemaVersion(db)).toBe(20);
     expect(columns("connector_instances")).toEqual(
       expect.arrayContaining(["rescan_pending", "deletions_may_be_missed"]),
     );
@@ -1408,7 +1429,7 @@ describe("schema v18 (I04-T09, I04-R4, R11)", () => {
     migrate(db, migrations.slice(0, 17));
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(19);
+    expect(schemaVersion(db)).toBe(20);
     expect(columns("scope_policy_drops")).toEqual([
       "id",
       "source_id",
@@ -1441,7 +1462,7 @@ describe("schema v19 (I01-T06, I01-R15)", () => {
     migrate(db, migrations.slice(0, 18));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(19);
+    expect(schemaVersion(db)).toBe(20);
     expect(columns("connector_instances")).toContain("configured_scope");
     expect(db.all("SELECT id, kind, cursor, configured_scope FROM connector_instances")).toEqual([
       { id: "c", kind: "k", cursor: "x", configured_scope: null },
@@ -1457,5 +1478,323 @@ describe("schema v19 (I01-T06, I01-R15)", () => {
     for (const bad of ["'team'", "'{\"a\":1}'", "'not json'", "''"]) {
       expect(() => db.run(`UPDATE connector_instances SET configured_scope = ${bad}`)).toThrow();
     }
+  });
+});
+
+describe("schema v20 (S01-T01, S01-R5, R6, R10, R14, R15)", () => {
+  const STAMP = "2026-11-22T00:00:00Z";
+  /** A v19 database holding one item, fact, relation, evidence span and Insight at odd statuses. */
+  function seedV19(): void {
+    migrate(db, migrations.slice(0, 19));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', '', 'e')",
+    );
+    db.run(
+      "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, 1, 'h', 't', 'abc')",
+    );
+    for (const name of ["A", "B"]) {
+      db.run(
+        `INSERT INTO items (type, name, epistemic, status, observed_at) VALUES ('p', ?, 'explicit', 'candidate', ?)`,
+        [name, STAMP],
+      );
+    }
+    db.run(
+      `INSERT INTO facts (item_id, kind, value, epistemic, status, observed_at)
+       VALUES (1, 'k', 'v', 'user-approved', 'verified', ?)`,
+      [STAMP],
+    );
+    db.run(
+      `INSERT INTO relations (subject_id, type, object_id, epistemic, status, observed_at)
+       VALUES (1, 'T', 2, 'hypothesis', 'superseded', ?)`,
+      [STAMP],
+    );
+    db.run(
+      "INSERT INTO evidence (source_version_id, fact_id, start_offset, end_offset, quote) VALUES (1, 1, 0, 1, 'a')",
+    );
+    db.run(
+      "INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary) VALUES ('r', 1, 2, 'inferred', 'active', 's')",
+    );
+  }
+
+  const HISTORY = ["item_history", "fact_history", "relation_history"] as const;
+  /** A history line as the gate writes it: by default verified -> disputed, the user-approved type kept. */
+  const history = (
+    table: (typeof HISTORY)[number],
+    fk: string,
+    id: number,
+    seq: number,
+    o: { action?: string; from?: string; to?: string; fromE?: string; toE?: string } = {},
+  ) =>
+    db.run(
+      `INSERT INTO ${table} (${fk}, seq, at, actor, action, from_status, to_status, from_epistemic, to_epistemic)
+       VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)`,
+      [
+        id,
+        seq,
+        STAMP,
+        o.action ?? "approve",
+        o.from ?? "verified",
+        o.to ?? "disputed",
+        o.fromE ?? "user-approved",
+        o.toE ?? "user-approved",
+      ],
+    );
+
+  // schema.semantic-migration
+  it("adds the columns to a v19 database with rows and changes none of their status or epistemic type", () => {
+    seedV19();
+    migrate(db);
+    expect(schemaVersion(db)).toBe(20);
+    expect(db.all("SELECT name, status, epistemic, confidence, user_authored FROM items")).toEqual([
+      { name: "A", status: "candidate", epistemic: "explicit", confidence: null, user_authored: 0 },
+      { name: "B", status: "candidate", epistemic: "explicit", confidence: null, user_authored: 0 },
+    ]);
+    expect(
+      db.all("SELECT status, epistemic, confidence, user_authored, context FROM facts"),
+    ).toEqual([
+      {
+        status: "verified",
+        epistemic: "user-approved",
+        confidence: null,
+        user_authored: 0,
+        context: null,
+      },
+    ]);
+    expect(db.all("SELECT status, epistemic, confidence, user_authored FROM relations")).toEqual([
+      { status: "superseded", epistemic: "hypothesis", confidence: null, user_authored: 0 },
+    ]);
+    expect(db.all("SELECT count(*) AS n FROM evidence")).toEqual([{ n: 1 }]);
+    expect(db.all("SELECT count(*) AS n FROM insights")).toEqual([{ n: 1 }]);
+  });
+
+  it("invents no history for rows that predate it", () => {
+    seedV19();
+    migrate(db);
+    for (const table of [...HISTORY, "insight_user_inputs"]) {
+      expect(db.all(`SELECT count(*) AS n FROM ${table}`), table).toEqual([{ n: 0 }]);
+    }
+  });
+
+  it("holds no text in a history line: numbers and codes only", () => {
+    migrate(db);
+    for (const table of HISTORY) {
+      expect(columns(table), table).toEqual(
+        expect.not.arrayContaining(["name", "value", "quote", "title", "body", "context"]),
+      );
+    }
+    // the only free text of a line is the action and the reason code; a basis is two numbers
+    expect(columns("fact_history")).toEqual([
+      "fact_id",
+      "seq",
+      "at",
+      "actor",
+      "action",
+      "from_status",
+      "to_status",
+      "from_epistemic",
+      "to_epistemic",
+      "reason",
+      "basis_source_id",
+      "basis_version",
+      "batch",
+      "reverts_seq",
+    ]);
+  });
+
+  it("holds the basis as numbers, not a foreign key, so a deleted version leaves the line intact", () => {
+    migrate(db);
+    for (const table of HISTORY) {
+      expect(
+        db.all(`SELECT "table" FROM pragma_foreign_key_list('${table}')`).map((r) => r.table),
+      ).toEqual([
+        table === "item_history" ? "items" : table === "fact_history" ? "facts" : "relations",
+      ]);
+    }
+  });
+
+  // R10: confidence is 0..1 or empty; user_authored 0 or 1
+  it("takes confidence in 0..1 or empty and user_authored 0 or 1 only", () => {
+    seedV19();
+    migrate(db);
+    db.run("UPDATE items SET confidence = 0.4 WHERE id = 1");
+    for (const bad of ["-0.1", "1.5", "'x'"]) {
+      expect(() => db.run(`UPDATE facts SET confidence = ${bad}`)).toThrow(/CHECK/);
+    }
+    expect(() =>
+      db.run(
+        `INSERT INTO items (type, name, epistemic, status, observed_at, user_authored)
+         VALUES ('p', 'C', 'explicit', 'candidate', ?, 2)`,
+        [STAMP],
+      ),
+    ).toThrow(/CHECK/);
+  });
+
+  it("refuses a status, epistemic type or user_authored change with no history line behind it", () => {
+    seedV19();
+    migrate(db);
+    expect(() => db.run("UPDATE facts SET status = 'rejected'")).toThrow(/lifecycle gate/);
+    expect(() => db.run("UPDATE facts SET epistemic = 'inferred'")).toThrow(/lifecycle gate/);
+    expect(() => db.run("UPDATE facts SET user_authored = 1")).toThrow(/lifecycle gate/);
+    expect(() => db.run("UPDATE items SET status = 'verified' WHERE id = 1")).toThrow(
+      /lifecycle gate/,
+    );
+    expect(() => db.run("UPDATE relations SET status = 'candidate'")).toThrow(/lifecycle gate/);
+    expect(db.all("SELECT status FROM facts")).toEqual([{ status: "verified" }]);
+  });
+
+  it("lets an UPDATE through only when the newest history line says that very change", () => {
+    seedV19();
+    migrate(db);
+    history("fact_history", "fact_id", 1, 1); // verified -> disputed, user-approved kept
+    expect(() => db.run("UPDATE facts SET status = 'rejected'")).toThrow(/lifecycle gate/); // another target
+    expect(() => db.run("UPDATE facts SET status = 'disputed', epistemic = 'explicit'")).toThrow(
+      /lifecycle gate/,
+    );
+    db.run("UPDATE facts SET status = 'disputed'");
+    expect(db.all("SELECT status FROM facts")).toEqual([{ status: "disputed" }]);
+    // the line is spent: the row is where it says, so repeating it from here is a bare update again
+    expect(() => db.run("UPDATE facts SET status = 'rejected'")).toThrow(/lifecycle gate/);
+    expect(() => db.run("UPDATE facts SET status = 'verified'")).toThrow(/lifecycle gate/);
+    // another row's line does not count
+    history("item_history", "item_id", 2, 1); // says verified -> disputed, but item 2 is a candidate
+    expect(() => db.run("UPDATE items SET status = 'disputed' WHERE id = 2")).toThrow(
+      /lifecycle gate/,
+    );
+  });
+
+  it("refuses a line whose earlier state is not the row's own, however the target matches", () => {
+    seedV19();
+    migrate(db);
+    // item 2 is a candidate/explicit; the line says verified -> disputed with the epistemic type kept
+    history("item_history", "item_id", 2, 1, { fromE: "explicit", toE: "explicit" });
+    expect(() => db.run("UPDATE items SET status = 'disputed' WHERE id = 2")).toThrow(
+      /lifecycle gate/,
+    );
+    // fact 1 is verified/user-approved; the line names the right statuses but another earlier type
+    history("fact_history", "fact_id", 1, 1, { fromE: "explicit" });
+    expect(() => db.run("UPDATE facts SET status = 'disputed'")).toThrow(/lifecycle gate/);
+  });
+
+  it("refuses a line whose target epistemic type is not the one the update sets", () => {
+    seedV19();
+    migrate(db);
+    history("fact_history", "fact_id", 1, 1, { toE: "explicit" });
+    expect(() => db.run("UPDATE facts SET status = 'disputed'")).toThrow(/lifecycle gate/);
+    db.run("UPDATE facts SET status = 'disputed', epistemic = 'explicit'");
+    expect(db.all("SELECT status, epistemic FROM facts")).toEqual([
+      { status: "disputed", epistemic: "explicit" },
+    ]);
+  });
+
+  it("reads only the newest line: an older line that said the same change does not let it through again", () => {
+    seedV19();
+    migrate(db);
+    history("fact_history", "fact_id", 1, 1); // verified -> disputed
+    db.run("UPDATE facts SET status = 'disputed'");
+    history("fact_history", "fact_id", 1, 2, { from: "disputed", to: "verified" });
+    db.run("UPDATE facts SET status = 'verified'");
+    // line 1 says exactly this change, but line 2 is the newest and says another
+    expect(() => db.run("UPDATE facts SET status = 'disputed'")).toThrow(/lifecycle gate/);
+  });
+
+  it("lets user_authored change only behind an undo line", () => {
+    seedV19();
+    migrate(db);
+    history("fact_history", "fact_id", 1, 1);
+    expect(() => db.run("UPDATE facts SET status = 'disputed', user_authored = 1")).toThrow(
+      /lifecycle gate/,
+    );
+    history("fact_history", "fact_id", 1, 2, { action: "undo" }); // the line of 1 is spent: the row is still verified
+    db.run("UPDATE facts SET status = 'disputed', user_authored = 1");
+    expect(db.all("SELECT status, user_authored FROM facts")).toEqual([
+      { status: "disputed", user_authored: 1 },
+    ]);
+  });
+
+  it("changes a row's other columns freely (the gate watches three columns)", () => {
+    seedV19();
+    migrate(db);
+    db.run("UPDATE items SET name = 'A2', valid_at = '2026-12-01' WHERE id = 1");
+    db.run("UPDATE facts SET value = 'w', context = 'c', confidence = 0.2");
+    expect(db.all("SELECT name FROM items WHERE id = 1")).toEqual([{ name: "A2" }]);
+  });
+
+  it("cannot update a history line or delete it while its row stands, and a cascade deletes it with the row", () => {
+    seedV19();
+    migrate(db);
+    history("relation_history", "relation_id", 1, 1);
+    history("relation_history", "relation_id", 1, 2);
+    expect(() => db.run("UPDATE relation_history SET reason = 'x'")).toThrow(/immutable/);
+    expect(() => db.run("DELETE FROM relation_history WHERE seq = 2")).toThrow(
+      /only with their row/,
+    );
+    expect(() => db.run("DELETE FROM relation_history")).toThrow(/only with their row/);
+    db.run("DELETE FROM relations WHERE id = 1");
+    expect(db.all("SELECT count(*) AS n FROM relation_history")).toEqual([{ n: 0 }]);
+  });
+
+  it("deletes every kind's history with its row, and leaves another row's history", () => {
+    seedV19();
+    migrate(db);
+    db.run(
+      `INSERT INTO facts (item_id, kind, value, epistemic, status, observed_at) VALUES (2, 'k', 'v2', 'explicit', 'candidate', ?)`,
+      [STAMP],
+    );
+    history("fact_history", "fact_id", 1, 1);
+    history("fact_history", "fact_id", 2, 1);
+    db.run("DELETE FROM evidence WHERE fact_id = 1");
+    db.run("DELETE FROM facts WHERE id = 1");
+    expect(db.all("SELECT fact_id FROM fact_history")).toEqual([{ fact_id: 2 }]);
+    history("item_history", "item_id", 1, 1);
+    db.run("DELETE FROM insights");
+    db.run("DELETE FROM relations");
+    db.run("DELETE FROM facts WHERE item_id = 1");
+    db.run("DELETE FROM items WHERE id = 1");
+    expect(db.all("SELECT count(*) AS n FROM item_history")).toEqual([{ n: 0 }]);
+  });
+
+  it("numbers a row's lines from 1 without repeats, with an actor from the four", () => {
+    seedV19();
+    migrate(db);
+    history("fact_history", "fact_id", 1, 1);
+    expect(() => history("fact_history", "fact_id", 1, 1)).toThrow(/UNIQUE|PRIMARY/);
+    expect(() => history("fact_history", "fact_id", 1, 0)).toThrow(/CHECK/);
+    expect(() =>
+      db.run(
+        `INSERT INTO fact_history (fact_id, seq, at, actor, action, to_status, to_epistemic)
+         VALUES (1, 9, ?, 'robot', 'x', 'verified', 'explicit')`,
+        [STAMP],
+      ),
+    ).toThrow(/CHECK/);
+    expect(() =>
+      db.run(
+        `INSERT INTO fact_history (fact_id, seq, at, actor, action, to_status, to_epistemic, basis_source_id)
+         VALUES (1, 9, ?, 'user', 'x', 'verified', 'explicit', 1)`,
+        [STAMP],
+      ),
+    ).toThrow(/CHECK/); // a source id without its version
+  });
+
+  it("ties insight_user_inputs to an Insight and one fact or relation, and removes a line with either", () => {
+    seedV19();
+    migrate(db);
+    db.run("INSERT INTO insight_user_inputs (insight_id, fact_id) VALUES (1, 1)");
+    expect(() =>
+      db.run("INSERT INTO insight_user_inputs (insight_id, fact_id) VALUES (1, 1)"),
+    ).toThrow(/UNIQUE/);
+    expect(() => db.run("INSERT INTO insight_user_inputs (insight_id) VALUES (1)")).toThrow(
+      /CHECK/,
+    );
+    expect(() =>
+      db.run("INSERT INTO insight_user_inputs (insight_id, fact_id, relation_id) VALUES (1, 1, 1)"),
+    ).toThrow(/CHECK/);
+    db.run("INSERT INTO insight_user_inputs (insight_id, relation_id) VALUES (1, 1)");
+    db.run("DELETE FROM relations WHERE id = 1");
+    expect(db.all("SELECT fact_id, relation_id FROM insight_user_inputs")).toEqual([
+      { fact_id: 1, relation_id: null },
+    ]);
+    db.run("DELETE FROM insights WHERE id = 1");
+    expect(db.all("SELECT count(*) AS n FROM insight_user_inputs")).toEqual([{ n: 0 }]);
   });
 });

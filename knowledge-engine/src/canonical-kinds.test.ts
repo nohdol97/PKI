@@ -25,7 +25,6 @@ import {
   saveRelation,
   saveSourceRecord,
   searchKeyword,
-  setKnowledgeStatus,
   createDerivativeRegistry,
   type DerivativeKind,
   type DerivedRef,
@@ -41,6 +40,7 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import {
   derivativeKindContract,
   seedLegacyTombstone,
+  setStatusForTest,
   type DerivativeContractSubject,
 } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -664,7 +664,7 @@ describe("a source's purge through the canonical kinds (V02-R12)", () => {
     const [x, y, z] = [item("X"), item("Y"), item("Z")] as [number, number, number];
     const old = fact(x, TARGET_DATE, "2026-12-10");
     cite({ factId: old }, a1.id);
-    setKnowledgeStatus(db, "fact", old, "superseded");
+    setStatusForTest(db, "fact", old, "superseded");
     const current = fact(x, TARGET_DATE, "2026-12-12");
     cite({ factId: current }, a2.id);
     const shared = fact(y, TARGET_DATE, "2026-12-05");

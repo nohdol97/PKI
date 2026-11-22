@@ -71,7 +71,7 @@ function codesOfLine(prefix: string): string[] {
 describe("docs.connector-sdk: the tables equal the code", () => {
   it("the violation-code table lists CONNECTOR_VIOLATION_CODES, in order", () => {
     const rows = tableAfter("### 위반 코드 표");
-    expect(rows).toHaveLength(21);
+    expect(rows).toHaveLength(26);
     expect(rows.map((r) => (r[0] as string).replaceAll("`", ""))).toEqual([
       ...CONNECTOR_VIOLATION_CODES,
     ]);

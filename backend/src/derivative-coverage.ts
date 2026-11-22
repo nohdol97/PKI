@@ -44,8 +44,15 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   facts: kind("fact"),
   relations: kind("relation"),
   items: kind("item"),
+  // the lifecycle history of a row (S01-R6, R22): numbers and codes only, deleted with its row, so it
+  // belongs to the kind of the row it records
+  item_history: kind("item"),
+  fact_history: kind("fact"),
+  relation_history: kind("relation"),
   insights: kind("insight"),
   insight_evidence: kind("insight"),
+  // the user-input rows an Insight used (S01-R15): the Insight's, deleted with it or with the row
+  insight_user_inputs: kind("insight"),
   // what the scope policy left out of an extraction (I04-T09): the registered kind `scope-drop` deletes them with their source
   scope_policy_drops: kind("scope-drop"),
   jobs: operational("work queue: a row names a source by id and holds no content"),
