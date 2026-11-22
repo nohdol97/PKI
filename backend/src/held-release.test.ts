@@ -25,7 +25,13 @@ import {
   productRunner,
 } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
-import { releaseOnPolicyChange, reevaluateHeldJobs } from "./held-release.ts";
+import {
+  computePolicyFingerprint,
+  HELD_REEVALUATION_MS,
+  reevaluateHeldJobs,
+  releaseOnPolicyChange,
+  startHeldReevaluation,
+} from "./held-release.ts";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner } from "./job-runner.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -137,13 +143,16 @@ async function heldThree(pipe: ReturnType<typeof pipeline>) {
 
 describe("held.release (I03-R16 ①, ③)", () => {
   it("releases only the jobs a consent can lift, inside the consent's own transaction", async () => {
-    const pipe = pipeline(localDouble());
+    const provider = localDouble();
+    const pipe = pipeline(provider);
     const post = await api(pipe, false); // no wake: the release is not left to a callback
     const [a, b, c] = (await heldThree(pipe)) as [number, number, number];
     expect(jobs()).toEqual(Array(3).fill({ status: "held", reason: "no-consent", attempts: 0 }));
     db.run("UPDATE jobs SET reason = 'cli-background-off' WHERE id = ?", [a]);
     db.run("UPDATE jobs SET reason = 'source-too-large' WHERE id = ?", [c]);
 
+    expect(provider.requests).toHaveLength(0); // held: no Provider call
+    const history = db.all("SELECT count(*) AS n FROM provider_calls");
     const shown = pipe.egress.overview().providers.find((p) => p.providerId === "local-model");
     const answer = await post(routes.grantConsent.path, {
       providerId: "local-model",
@@ -152,11 +161,14 @@ describe("held.release (I03-R16 ①, ③)", () => {
       policyVersion: pipe.egress.policyVersion(),
     });
     expect(answer.status).toBe(200);
+    expect(provider.requests).toHaveLength(0); // the release calls nobody
+    expect(db.all("SELECT count(*) AS n FROM provider_calls")).toEqual(history); // and writes no history
     expect([a, b, c].map((id) => readJob(db, id)?.status)).toEqual(["held", "queued", "held"]);
     expect(readJob(db, b)).toMatchObject({ reason: null, attempts: 0 });
 
     await pipe.runner.wake(); // the next claim judges it again, and the Provider is called
     expect(readJob(db, b)?.status).toBe("succeeded");
+    expect(provider.requests).toHaveLength(1); // only the released job's call
   });
 
   it("writes the consent and the release in one transaction: a failing release leaves no consent", async () => {
@@ -191,6 +203,20 @@ describe("held.release (I03-R16 ①, ③)", () => {
 
     await post(routes.setExecutionSettings.path, { cliBackground: true });
     expect([a, b].map((id) => readJob(db, id)?.status)).toEqual(["queued", "held"]);
+  });
+
+  it("lets the endpoint setting lift a consent-stale-destination job, and a consent revoke the no-consent ones", async () => {
+    const pipe = pipeline(localDouble());
+    const post = await api(pipe, false);
+    const [a, b] = (await heldThree(pipe)) as [number, number, number];
+    db.run("UPDATE jobs SET reason = 'consent-stale-destination' WHERE id = ?", [a]);
+    await post(routes.writeSettings.path, {
+      openaiCompatible: { baseUrl: "https://api.example.invalid/v1", model: "m" },
+    });
+    expect([a, b].map((id) => readJob(db, id)?.status)).toEqual(["queued", "held"]);
+
+    await post(routes.revokeConsent.path, { providerId: "local-model" });
+    expect(readJob(db, b)?.status).toBe("queued");
   });
 
   it("lets a changed default Provider lift a no-provider job", async () => {
@@ -316,7 +342,9 @@ describe("background.gate (I03-R15, C3)", () => {
     db.run("UPDATE jobs SET priority = 'scheduled' WHERE status = 'queued'");
     await pipe.runner.wake();
     expect(provider.requests).toHaveLength(3); // no new call
-    expect(db.all("SELECT reason FROM jobs WHERE status = 'held'").length).toBeGreaterThan(0);
+    expect(db.all("SELECT reason FROM jobs WHERE status = 'held'")).toEqual([
+      { reason: "no-consent" },
+    ]);
   });
 
   it("gives the runner no user action record: its Broker calls name the job and carry none", async () => {
@@ -398,5 +426,74 @@ describe("manual-retry (I03-R12 ① ②, C3)", () => {
     await vi.waitFor(() =>
       expect(readJob(db, a)).toMatchObject({ status: "held", reason: "no-consent", attempts: 0 }),
     );
+  });
+});
+
+describe("computePolicyFingerprint (I03-R2, R16 ③)", () => {
+  const base = { policyVersion: "pv-1", verified: [{ cli: "x" }], defaultProvider: "codex" };
+  it("is equal for equal inputs and changes with each input alone", () => {
+    const fp = computePolicyFingerprint(base);
+    expect(computePolicyFingerprint({ ...base, verified: [{ cli: "x" }] })).toBe(fp);
+    expect(computePolicyFingerprint({ ...base, policyVersion: "pv-2" })).not.toBe(fp);
+    expect(computePolicyFingerprint({ ...base, verified: [] })).not.toBe(fp);
+    expect(computePolicyFingerprint({ ...base, defaultProvider: "claude-code" })).not.toBe(fp);
+    expect(computePolicyFingerprint({ ...base, defaultProvider: undefined })).not.toBe(fp);
+  });
+});
+
+describe("startHeldReevaluation (I03-R16 ②, fake clock)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("judges held jobs at start and every hour, and a blocked verdict leaves them held with attempts 0", async () => {
+    vi.useFakeTimers();
+    const pipe = pipeline(localDouble());
+    await pipe.importer(plain);
+    await pipe.runner.wake();
+    db.run("UPDATE jobs SET reason = 'cli-not-verified'"); // held, as an unlisted CLI leaves them
+    let allowed = false;
+    const precheck = vi.fn(async () =>
+      allowed
+        ? ({ allowed: true } as const)
+        : ({ allowed: false, reason: "cli-not-verified" } as const),
+    );
+    const wake = vi.fn(async () => {});
+    const pass = startHeldReevaluation({ db, broker: { precheck }, runner: { wake } });
+
+    await vi.advanceTimersByTimeAsync(0); // the start pass
+    expect(precheck).toHaveBeenCalledTimes(1);
+    expect(jobs()).toEqual(
+      Array(3).fill({ status: "held", reason: "cli-not-verified", attempts: 0 }),
+    );
+    await vi.advanceTimersByTimeAsync(HELD_REEVALUATION_MS - 1);
+    expect(precheck).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1); // the hour
+    expect(precheck).toHaveBeenCalledTimes(2);
+    expect(jobs().every((j) => j.status === "held" && j.attempts === 0)).toBe(true);
+
+    allowed = true; // the verified list changed: the next hour frees them together
+    await vi.advanceTimersByTimeAsync(HELD_REEVALUATION_MS);
+    expect(jobs().map((j) => j.status)).toEqual(Array(3).fill("queued"));
+    expect(wake).toHaveBeenCalledTimes(1);
+
+    pass.stop();
+    await vi.advanceTimersByTimeAsync(HELD_REEVALUATION_MS * 2);
+    expect(precheck).toHaveBeenCalledTimes(3);
+  });
+
+  it("frees at start what the verified list already allows", async () => {
+    vi.useFakeTimers();
+    const pipe = pipeline(localDouble());
+    await pipe.importer(plain);
+    await pipe.runner.wake();
+    db.run("UPDATE jobs SET reason = 'cli-not-verified'");
+    const wake = vi.fn(async () => {});
+    const pass = startHeldReevaluation({
+      db,
+      broker: { precheck: async () => ({ allowed: true }) },
+      runner: { wake },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(jobs().map((j) => j.status)).toEqual(Array(3).fill("queued"));
+    pass.stop();
   });
 });

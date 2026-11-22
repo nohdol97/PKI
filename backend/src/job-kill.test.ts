@@ -258,10 +258,10 @@ posixOnly("cancel.kill-after-flag (I03-R12, R5, C3)", () => {
     // the request is written by another process, then the backend dies before it looks at it
     expect(withDb((db) => cancelJob(db, x))).toBe("requested");
     await kill(first);
-    expect(withDb((db) => readJob(db, x))).toMatchObject({
-      status: "running",
-      cancelRequested: true,
-    });
+    // normally still running; a heartbeat that landed before the kill may have closed it already
+    const afterKill = withDb((db) => readJob(db, x));
+    expect(afterKill?.cancelRequested).toBe(true);
+    expect(["running", "cancelled"]).toContain(afterKill?.status);
 
     const second = await start();
     await until(
