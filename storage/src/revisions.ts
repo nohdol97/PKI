@@ -1,11 +1,12 @@
 // The two sequence numbers of schema v5 (ADR 0013 decision 6, V02-R3). Triggers
-// raise both inside the writing transaction; code only reads them.
+// raise both inside the writing transaction; code only reads them, except the change
+// sequence of a prune of earlier versions, which no trigger sees (`raiseChangeSeq`).
 import type { SqlDriver } from "./sql-driver.ts";
 
 const read = (db: SqlDriver, column: "change_seq" | "knowledge_revision"): number =>
   db.all(`SELECT ${column} FROM revisions`)[0]?.[column] as number;
 
-/** Raised once per new source version, new tombstone and moved tombstone cover; projections compare it. */
+/** Raised once per new source version, new tombstone, moved tombstone cover and prune of earlier versions; projections compare it. */
 export const readChangeSeq = (db: SqlDriver): number => read(db, "change_seq");
 
 /**

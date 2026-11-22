@@ -74,7 +74,7 @@ function projectionKind(kind: string, absent: boolean, at: () => string): Deriva
     invalidate: (ctx, snapshot, change) => {
       const covers = coversVersion(change);
       if (covers === undefined || snapshot.length === 0) return { removed: 0, recomputed: 0 };
-      // the job is one per source: it covers every version up to the tombstone's (R12)
+      // the job is one per source: it covers every version up to the change's cover (R12; a prune's is the one below its kept version)
       const registered = registerJob(ctx.tx, {
         kind: PROJECTION_REMOVE_KIND,
         target: kind,

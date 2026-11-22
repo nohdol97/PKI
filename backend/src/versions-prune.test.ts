@@ -26,6 +26,7 @@ const NEW = "jwxnewtext";
 let db: SqlDriver;
 let server: RunningServer;
 let valid: Record<string, string>;
+let wakes = 0;
 
 beforeAll(async () => {
   db = openCanonicalDb(DATA_DIR);
@@ -37,6 +38,9 @@ beforeAll(async () => {
     db,
     dataDirectory: DATA_DIR,
     egress: productEgress(db),
+    onRunConditionsChanged: () => {
+      wakes++;
+    },
     ...productAdapters(DATA_DIR),
   });
   valid = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
@@ -71,7 +75,9 @@ describe("versions.prune route", () => {
     save("a", `둘째 본문`);
     save("a", `최신 ${NEW} 본문`);
     expect(canariesLeft(DATA_DIR, [OLD])).toEqual([OLD]);
+    const wakesBefore = wakes;
     const res = await prune("a");
+    expect(wakes).toBe(wakesBefore + 1); // the runner is woken for the removal jobs (I04-R12)
     expect(res).toMatchObject({ status: 200, body: { outcome: "pruned", prunedVersions: 2 } });
     expect(routes.pruneVersions.response.parse(res.body)).toEqual(res.body);
     expect(versionsOf("a")).toEqual([3]);
@@ -79,9 +85,12 @@ describe("versions.prune route", () => {
   });
 
   it("answers unchanged for the repeat and for a source with a single version", async () => {
+    const wakesBefore = wakes;
     expect((await prune("a")).body).toEqual({ outcome: "unchanged", prunedVersions: 0 });
     save("single", "하나뿐");
     expect((await prune("single")).body).toEqual({ outcome: "unchanged", prunedVersions: 0 });
+    expect((await prune("nobody-either")).status).toBe(404);
+    expect(wakes).toBe(wakesBefore); // nothing was registered, nothing to wake for
     expect(versionsOf("single")).toEqual([1]);
   });
 

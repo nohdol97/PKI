@@ -209,6 +209,73 @@ describe("versions.prune", () => {
     expect(db.all("SELECT version FROM scope_policy_drops").map((r) => r.version)).toEqual([3]);
   });
 
+  it("deletes a user-rejected fact whose only evidence was pruned; a later version restating it brings it back as a candidate (decision 4)", () => {
+    const { sourceId, y } = seed();
+    const rejected = saveFact(db, {
+      itemId: y,
+      kind: COMPLETION_DATE,
+      value: "2026-12-20",
+      ...attrs,
+      status: "rejected",
+    }).id;
+    cite(rejected, sourceId, 1, V1, CANARY.old);
+    prune();
+    expect(ids("facts")).not.toContain(rejected);
+    const again = saveFact(db, {
+      itemId: y,
+      kind: COMPLETION_DATE,
+      value: "2026-12-20",
+      ...attrs,
+    });
+    expect(again.created).toBe(true);
+    expect(
+      db.all("SELECT status FROM facts WHERE id = ?", [again.id]).map((r) => r.status),
+    ).toEqual(["candidate"]);
+  });
+
+  it("keeps a fact another source's evidence supports, and supersedes one that is left with past evidence only", () => {
+    const { sourceId, y } = seed();
+    const other = (body: string) => {
+      const saved = saveSourceRecord(db, "c1", {
+        namespace: "n",
+        externalId: "other",
+        title: "다른 원본",
+        body,
+      });
+      if (saved.status !== "created") throw new Error(saved.status);
+      return saved.sourceId;
+    };
+    const bId = other("다른 원본 첫 판 zqkfirst");
+    other("다른 원본 둘째 판");
+    const supported = saveFact(db, {
+      itemId: y,
+      kind: COMPLETION_DATE,
+      value: "2026-12-14",
+      ...attrs,
+    }).id;
+    cite(supported, sourceId, 1, V1, CANARY.old);
+    cite(supported, bId, 2, "다른 원본 둘째 판", "둘째");
+    const pastOnly = saveFact(db, {
+      itemId: y,
+      kind: COMPLETION_DATE,
+      value: "2026-12-15",
+      ...attrs,
+    }).id;
+    cite(pastOnly, sourceId, 1, V1, CANARY.oldQuote);
+    cite(pastOnly, bId, 1, "다른 원본 첫 판 zqkfirst", "zqkfirst");
+    prune();
+    const status = (id: number) =>
+      db.all("SELECT status FROM facts WHERE id = ?", [id]).map((r) => r.status);
+    expect(status(supported)).toEqual(["candidate"]);
+    expect(status(pastOnly)).toEqual(["superseded"]);
+    expect(db.all("SELECT count(*) AS n FROM evidence WHERE fact_id = ?", [supported])[0]?.n).toBe(
+      1,
+    );
+    expect(db.all("SELECT count(*) AS n FROM evidence WHERE fact_id = ?", [pastOnly])[0]?.n).toBe(
+      1,
+    );
+  });
+
   it("keeps numbering above the pruned versions: the next version is 4", () => {
     seed();
     prune();
