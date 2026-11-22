@@ -1,5 +1,5 @@
-// S02-T01 `schema.catalogue-migration` (S02-R2, R3, C1): migration 22 on a database of S01's level (schema
-// v21, with rows). The catalogue's missing types, fact kinds and relation types are seeded `verified` with
+// S02-T01 `schema.catalogue-migration` (S02-R2, R3, C1): migration 23 on a database of S01's level (schema
+// v22, with rows). The catalogue's missing types, fact kinds and relation types are seeded `verified` with
 // `origin = seed`; the existing rows stay; each seeded change passes S01's checks (`applicable`); the origin
 // column is filled by R3's four steps; the three widened rules are widened only while they are S01's seed
 // rule and `verified`, with the edition up by one and no history line.
@@ -25,12 +25,12 @@ import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 /** The migration under test is the first one S02 adds: the next free number after S01's 21. */
-const S01_SCHEMA = 21;
+const PREVIOUS_SCHEMA = 22;
 
 let db: SqlDriver;
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
-  migrate(db, migrations.slice(0, S01_SCHEMA));
+  migrate(db, migrations.slice(0, PREVIOUS_SCHEMA));
 });
 afterEach(() => db.close());
 
@@ -140,10 +140,10 @@ const catalogueEntries = () =>
   ].flatMap((e) => (e.rule ? [{ name: e.name, rule: e.rule }] : []));
 
 describe("schema.catalogue-migration", () => {
-  it("is the migration after S01's, one step, and raises the schema to 22", () => {
-    expect(migrations).toHaveLength(S01_SCHEMA + 1);
+  it("is the migration after S01's, one step, and raises the schema to 23", () => {
+    expect(migrations).toHaveLength(PREVIOUS_SCHEMA + 1);
     migrate(db);
-    expect(schemaVersion(db)).toBe(S01_SCHEMA + 1);
+    expect(schemaVersion(db)).toBe(PREVIOUS_SCHEMA + 1);
   });
 
   it("seeds everything the catalogue lacks as verified, origin seed, and keeps the existing rows", () => {
@@ -481,5 +481,19 @@ describe("schema.reserved-names: a row that existed before the rule", () => {
     migrate(db);
     expect(userOntology.undo(db, id)).toMatchObject({ status: "applied" });
     expect(one("Insight").status).toBe("verified");
+  });
+
+  it("still refuses to approve a candidate that took a now-reserved name before the rule", () => {
+    const id = rawElement("item-type", "Insight", ITEM, "candidate", {
+      created: "extraction",
+      basis: true,
+    });
+    migrate(db);
+    expect(userOntology.decide(db, id, "approve")).toMatchObject({
+      status: "refused",
+      reason: "schema-invalid",
+      schemaErrors: ["reserved-name"],
+    });
+    expect(one("Insight").status).toBe("candidate");
   });
 });
