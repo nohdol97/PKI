@@ -30,6 +30,7 @@ import {
   type EgressControls,
   type ExecutionGate,
   type Logger,
+  type ScopeGrading,
   type TestBuildExecution,
   type UserActionIssuer,
   VERIFIED_CLI_COMBINATIONS,
@@ -274,6 +275,8 @@ export interface CallsOptions {
    * Broker's grade (I04-R16); default the entries' own (productRegistry in the product).
    */
   registry?: DerivativeRegistry;
+  /** The mapping scope -> class (I01-R15); a test build's own, else the public repository's (a fork replaces it, S08). */
+  scopeGrading?: ScopeGrading;
 }
 
 /**
@@ -316,7 +319,11 @@ export function productCalls(
     recorder: createCallRecorder(db),
     // a claimed scope is compared by the registry's policy, the one every other scope judgment
     // uses; the mapping scope -> class is the public repository's (a fork replaces it, S08)
-    scope: { policy: (options.registry ?? derivativeRegistry).policy, grading: publicScopeGrading },
+    scope: {
+      policy: (options.registry ?? derivativeRegistry).policy,
+      grading:
+        BUILD_KIND === "test" && options.scopeGrading ? options.scopeGrading : publicScopeGrading,
+    },
   });
   // the verified list the gate decides with: the test build's own, else the build's
   const verified =

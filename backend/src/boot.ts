@@ -14,7 +14,7 @@ import type {
   VectorIndex,
 } from "@pki/contracts";
 import type { Projections } from "@pki/knowledge-engine";
-import { BUILD_KIND, errorClass, log } from "@pki/providers";
+import { BUILD_KIND, errorClass, log, type ScopeGrading } from "@pki/providers";
 import type { DerivativeRegistry, SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
@@ -87,6 +87,8 @@ export interface BootOptions {
    * runs the registry the composition point builds, whatever a caller passes.
    */
   registry?: DerivativeRegistry;
+  /** The mapping scope -> class for the Broker (I01-R15); honoured in a test build only, like `registry`. */
+  scopeGrading?: ScopeGrading;
   /**
    * The scope policy by name (I04-R14, S21): `default` (also when absent) or `site`, which the public
    * repository does not implement, so the start stops with `배포처 후속` before anything is opened.
@@ -145,7 +147,11 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     db.close();
     throw error;
   }
-  const calls = productCalls(db, egress, { providers, registry });
+  const calls = productCalls(db, egress, {
+    providers,
+    registry,
+    ...(options.scopeGrading ? { scopeGrading: options.scopeGrading } : {}),
+  });
   const entries = productEntries(registry);
   const engine = productVisibleEngine(db, registry, bound);
   const projections = productProjections(db, { engine, ...adapters });
