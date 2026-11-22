@@ -6,6 +6,7 @@
 import { KNOWLEDGE_SCHEMA, PRODUCT_SEED, type CatalogueRule } from "@pki/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
+import { describeKnowledgeSchema } from "./knowledge-schema.ts";
 import { insertItem, saveFact, saveRelation, type KnowledgeAttributes } from "./knowledge.ts";
 import { migrate, migrations, schemaVersion } from "./migrations.ts";
 import {
@@ -13,6 +14,7 @@ import {
   applyUserOntologyChange,
   checkOntologyChange,
   factValueFit,
+  listOntologyElements,
   userOntology,
   valueFits,
   type ElementRule,
@@ -426,5 +428,58 @@ describe("schema.catalogue-migration: origin of a row made after the migration",
     ).toMatchObject({ status: "applied" });
     expect(factValueFit(db, "identifier.email", "a@example.test")).toBe("fits");
     expect(factValueFit(db, "identifier.email", " ")).toBe("misfit");
+  });
+});
+
+describe("schema.catalogue-migration: the list over a database that held same-named rows", () => {
+  const listed = () => {
+    const list = describeKnowledgeSchema(listOntologyElements(db));
+    return (name: string) => {
+      const found = list.entries.filter((e) => e.name === name);
+      expect(found).toHaveLength(1);
+      return found[0] as (typeof list.entries)[number];
+    };
+  };
+
+  it("answers a rejected name unusable, a user's usable, a user-changed rule not the catalogue's, and a squash variant as the user's row", () => {
+    rawElement("item-type", "Task", ITEM, "rejected", { created: "extraction", basis: true });
+    rawElement("item-type", "Person", ITEM, "verified", { created: "user" });
+    rawElement("item-type", "organization", ITEM, "verified", { created: "user" });
+    userChangesRule("DEPENDS_ON", { ...S01_DEPENDS_ON, subjectTypes: ["Project"] });
+    migrate(db);
+    const entry = listed();
+    expect(entry("Task")).toMatchObject({ usable: false, ruleMatches: true });
+    expect(entry("Person")).toMatchObject({ usable: true, ruleMatches: true });
+    expect(entry("DEPENDS_ON")).toMatchObject({ usable: true, ruleMatches: false });
+    // the migration took `organization` for the same name (R19), so the list does too: the user's row, usable
+    expect(entry("Organization")).toMatchObject({ usable: true, ruleMatches: true });
+    expect(one("organization").origin).toBe("user");
+  });
+});
+
+describe("schema.catalogue-migration: the migration's own rows", () => {
+  it("re-makes the lifecycle gate with the text v21 gave it", () => {
+    const gate = () =>
+      db.all("SELECT sql FROM sqlite_master WHERE name = 'ontology_elements_lifecycle_gate'")[0]
+        ?.sql;
+    const before = gate();
+    expect(before).toBeTypeOf("string");
+    migrate(db);
+    expect(gate()).toBe(before);
+  });
+});
+
+describe("schema.reserved-names: a row that existed before the rule", () => {
+  it("can come back from a retirement though its name is now reserved", () => {
+    const id = rawElement("item-type", "Insight", ITEM, "verified", { created: "user" });
+    db.run(
+      `INSERT INTO ontology_history (element_id, seq, at, actor, action, from_status, to_status, from_edition, to_edition)
+       VALUES (?, 2, ?, 'user', 'retire', 'verified', 'superseded', 1, 2)`,
+      [id, AT],
+    );
+    db.run("UPDATE ontology_elements SET status = 'superseded', edition = 2 WHERE id = ?", [id]);
+    migrate(db);
+    expect(userOntology.undo(db, id)).toMatchObject({ status: "applied" });
+    expect(one("Insight").status).toBe("verified");
   });
 });

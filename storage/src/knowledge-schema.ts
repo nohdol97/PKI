@@ -4,6 +4,7 @@
 import { KNOWLEDGE_SCHEMA, type CatalogueEntry, type KnowledgePlace } from "@pki/contracts";
 import {
   canonicalRule,
+  squash,
   type ElementKind,
   type ElementRule,
   type StoredElement,
@@ -33,7 +34,7 @@ export function describeKnowledgeSchema(
   elements: readonly Pick<StoredElement, "elementKind" | "name" | "rule" | "status">[],
 ): KnowledgeSchemaList {
   const find = (kind: ElementKind, name: string) =>
-    elements.find((e) => e.elementKind === kind && e.name === name);
+    elements.find((e) => e.elementKind === kind && squash(e.name) === squash(name));
   const entry = (
     category: KnowledgeSchemaEntry["category"],
     kind: ElementKind,

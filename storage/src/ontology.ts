@@ -175,7 +175,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const LIVE = "status NOT IN ('rejected', 'superseded')";
 
 /** The comparison of R19's duplicate check: case, `_`, `.` and `-` do not count. */
-const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
+export const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
 
 /** A normalized calendar date (YYYY-MM-DD) that exists; such strings order as dates. The one copy. */
 export const isDate = (value: string): boolean => {
@@ -268,6 +268,8 @@ function shapeErrors(
   db: SqlDriver,
   change: OntologyChange,
   target: StoredElement | undefined,
+  /** The row already exists (an undo of a retirement): a reserved name it took before S02-R3 stays its. */
+  existing = false,
 ): string[] {
   const errors = new Set<string>();
   if (change.op === "add") {
@@ -276,6 +278,7 @@ function shapeErrors(
     }
     // a name stored or computed elsewhere (S02-R3): compared as the duplicate check compares
     if (
+      !existing &&
       typeof change.name === "string" &&
       RESERVED_NAMES.some((reserved) => squash(reserved) === squash(change.name))
     ) {
@@ -753,6 +756,7 @@ export const userOntology: UserOntologyDecisions = {
         tx,
         { op: "add", name: element.name, rule: element.rule },
         undefined,
+        true,
       );
       if (schemaErrors.length > 0) return refusedWith("schema-invalid", { schemaErrors });
       // and against the rows that exist: a user's row of the kind may have been added while it was retired
