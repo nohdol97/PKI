@@ -144,8 +144,8 @@ describe("repository lint config enforces module-boundary", () => {
     /** An import of another package's file by path, written as a relative specifier from `file`. */
     const reach = (file: string, target: string) =>
       `import { x } from "${relative(dirname(join(repoRoot, file)), join(repoRoot, target))}";\nexport { x };\n`;
-    // every package name a file below could belong to (the root's, when the fork folders do not exist), so the
-    // option would open the import if it took effect
+    // every package name a file below could belong to (the root's, when the fork folders do not exist), with the
+    // file's own path in its package (an entry names one file), so the option would open the import if it took effect
     const allowList = [
       "pki",
       "@pki/backend",
@@ -158,7 +158,11 @@ describe("repository lint config enforces module-boundary", () => {
       "a block disable comment": `/* eslint-disable pki/module-boundary */\n${reach(file, target)}`,
       "a rule-setting comment that turns the rule off": `/* eslint pki/module-boundary: "off" */\n${reach(file, target)}`,
       "a rule-setting comment that gives the rule an allow-list": `/* eslint pki/module-boundary: ["error", {"allowRelative": ${JSON.stringify(
-        allowList.map((pkg) => ({ pkg, target: join(repoRoot, target) })),
+        allowList.map((pkg) => ({
+          pkg,
+          file: file.slice(file.indexOf("src/")),
+          target: join(repoRoot, target),
+        })),
       )}}] */\n${reach(file, target)}`,
     });
     const forkFiles = [
@@ -659,8 +663,15 @@ describe("module-boundary: fork packages (I05-C4)", () => {
     ),
   });
 
-  // B-S2: the allow-list slot for one cross-package relative target; shipped empty, tested with a fixture entry
-  const slot = [{ pkg: "@pki-site/composition", target: "../config/connector-scopes.json" }];
+  // B-S2: the allow-list slot for one cross-package relative target, tested with a fixture entry (the shipped
+  // entry is judged by I07-C18 below)
+  const slot = [
+    {
+      pkg: "@pki-site/composition",
+      file: "src/registration.ts",
+      target: "../config/connector-scopes.json",
+    },
+  ];
   const slotOptions = [{ allowRelative: slot }];
   ruleTester.run("module-boundary (relative allow-list slot)", moduleBoundary, {
     valid: [
@@ -678,10 +689,11 @@ describe("module-boundary: fork packages (I05-C4)", () => {
       },
     ],
     invalid: [
-      // no entry (the shipped table): refused
+      // the entry names a file: another file of the same package is refused
       {
         code: 'import s from "../../config/connector-scopes.json";',
-        filename: registration,
+        filename: compositionShell,
+        options: slotOptions,
         errors: [{ messageId: "crossPackageRelative" }],
       },
       // a sibling file next to the allowed one
@@ -712,6 +724,157 @@ describe("module-boundary: fork packages (I05-C4)", () => {
         options: slotOptions,
         errors: [{ messageId: "crossPackageRelative" }],
       },
+    ],
+  });
+
+  // I07-C18 `module-boundary` (I07-R16): the shipped table's one entry, judged with no option. One passing case
+  // and the refusals, each breaking exactly one narrowing: the package (⑥⑦⑧ and the two that sit where the
+  // target resolves the same), the file (②), the exact target (③④⑤), the form (⑨⑩⑪).
+  const SCOPES = "../../config/connector-scopes.json";
+  const staticImport = `import scopes from ${JSON.stringify(SCOPES)} with { type: "json" };`;
+  const refused = (name: string, code: string, filename: string) => ({
+    name: `refused: ${name}`,
+    code,
+    filename,
+    // the option REPLACES the shipped table: one case gives an empty one
+    ...(name.startsWith("an allowRelative option") ? { options: [{ allowRelative: [] }] } : {}),
+    errors: [{ messageId: "crossPackageRelative" }],
+  });
+  // packages whose root is two folders under the fork root, so the entry's target resolves to the very file
+  // they import: only their package (name or folder) tells them from the composition package
+  forkPkg("site/collector", { name: "@pki-site/collector" });
+  forkPkg("site/impostor", { name: "@pki-site/composition" });
+  forkPkg("packages/other", { name: "@pki/other" });
+  // the folder alone is not enough either: a package at site/composition under another name
+  const renamedRoot = mkdtempSync(join(tmpdir(), "pki-boundary-renamed-"));
+  mkdirSync(join(renamedRoot, "site/composition/src"), { recursive: true });
+  writeFileSync(
+    join(renamedRoot, "site/composition/package.json"),
+    JSON.stringify({ name: "@pki-site/not-composition" }),
+  );
+  afterAll(() => rmSync(renamedRoot, { recursive: true, force: true }));
+  ruleTester.run("module-boundary (the scopes file's one import, I07-R16)", moduleBoundary, {
+    valid: [
+      // ① the composition package's registration, a static import declaration, the resolved target
+      {
+        name: "① the composition package's registration",
+        code: staticImport,
+        filename: registration,
+      },
+      {
+        name: "a ./-prefixed relative specifier of the exact file",
+        code: 'import s from "./../../config/connector-scopes.json" with { type: "json" };',
+        filename: registration,
+      },
+      {
+        name: "a type-only import of the exact file",
+        code: 'import type s from "../../config/connector-scopes.json" with { type: "json" };',
+        filename: registration,
+      },
+      {
+        name: "a side-effect import of the exact file",
+        code: 'import "../../config/connector-scopes.json" with { type: "json" };',
+        filename: registration,
+      },
+      {
+        name: "① the same file written another way",
+        code: 'import s from "../../config/../config/connector-scopes.json";',
+        filename: registration,
+      },
+    ],
+    invalid: [
+      refused("② another file of the same package", staticImport, compositionShell),
+      refused(
+        "③ another JSON of site/config/",
+        'import s from "../../config/other.json" with { type: "json" };',
+        registration,
+      ),
+      refused("④ a .ts of site/config/", 'import s from "../../config/index.ts";', registration),
+      refused(
+        "⑤ a scopes file of another package",
+        'import s from "../../connectors/x/connector-scopes.json" with { type: "json" };',
+        registration,
+      ),
+      refused(
+        "⑥ a fork package that is not the composition package (site/connectors/x)",
+        'import s from "../../../config/connector-scopes.json" with { type: "json" };',
+        at("site/connectors/x/src/registration.ts"),
+      ),
+      refused(
+        "⑥ a fork package whose root makes the target match (site/collector)",
+        staticImport,
+        at("site/collector/src/registration.ts"),
+      ),
+      refused(
+        "⑥ the package's name alone is not enough: the folder must be site/composition",
+        staticImport,
+        at("site/impostor/src/registration.ts"),
+      ),
+      refused(
+        "⑥ the folder alone is not enough: the package must be named @pki-site/composition",
+        staticImport,
+        join(renamedRoot, "site/composition/src/registration.ts"),
+      ),
+      refused(
+        "⑦ the example package's registration, naming the very target",
+        'import s from "../../../site/config/connector-scopes.json" with { type: "json" };',
+        exampleRegistration,
+      ),
+      refused(
+        "⑧ a public package's file (the backend)",
+        'import s from "../../site/config/connector-scopes.json" with { type: "json" };',
+        publicBackend,
+      ),
+      refused(
+        "⑧ a public package whose root makes the target match",
+        staticImport,
+        at("packages/other/src/registration.ts"),
+      ),
+      refused(
+        "⑨ re-exported (export { default } from)",
+        `export { default } from ${JSON.stringify(SCOPES)};`,
+        registration,
+      ),
+      refused(
+        "⑨ re-exported (export * from)",
+        `export * from ${JSON.stringify(SCOPES)};`,
+        registration,
+      ),
+      refused(
+        "⑩ import()",
+        `const s = await import(${JSON.stringify(SCOPES)}, { with: { type: "json" } });`,
+        registration,
+      ),
+      refused(
+        "an absolute path naming the same file (the exemption is for relative specifiers)",
+        `import s from ${JSON.stringify(at("site/config/connector-scopes.json"))} with { type: "json" };`,
+        registration,
+      ),
+      refused(
+        "a dot-named folder is not a relative specifier (.hidden/../../../config/...)",
+        'import s from ".hidden/../../../config/connector-scopes.json" with { type: "json" };',
+        registration,
+      ),
+      refused(
+        "a dots-named folder is not a relative specifier (.../../../../config/...)",
+        'import s from ".../../../../config/connector-scopes.json" with { type: "json" };',
+        registration,
+      ),
+      refused(
+        "a file: URL naming the same file",
+        `import s from ${JSON.stringify(pathToFileURL(at("site/config/connector-scopes.json")).href)} with { type: "json" };`,
+        registration,
+      ),
+      refused(
+        "an allowRelative option replaces the table: an empty one leaves the shipped entry off",
+        staticImport,
+        registration,
+      ),
+      refused(
+        "⑪ typeof import()",
+        `type T = typeof import(${JSON.stringify(SCOPES)}, { with: { "resolution-mode": "import" } });`,
+        registration,
+      ),
     ],
   });
 

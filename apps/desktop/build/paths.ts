@@ -1,6 +1,7 @@
 // Where the production build puts the app folder and its report (V01-T15).
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type { ScopesReport } from "./scopes-check.ts";
 
 const DIST_DIR = resolve(import.meta.dirname, "../dist");
 /** The Electron app folder R04 packages. */
@@ -14,6 +15,8 @@ export interface BuildReport {
    * Taken before the final dead-code removal, so it may list more than the file has, never less.
    */
   bundles: Record<string, string[]>;
+  /** The build's judgment of the instance scopes file (I07-R7): a state and two counts, never a value or an id. */
+  connectorScopes: ScopesReport;
   /** The runtime packages copied into node_modules; `path` is in the app folder. */
   packages: { name: string; version: string; license: string; path: string }[];
 }
