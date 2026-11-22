@@ -140,6 +140,12 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     semanticCorrect: {
       correction: { action: "add", entry: { kind: "item", type: "Concept", name: "합성 개념" } },
     },
+    // the type definitions (S01-T07): a duplicate of a seed name is a refusal code, a seed has no line to undo, and element 1 (Project) is verified already
+    ontologyCheck: { op: "add", name: "project", rule: { elementKind: "item-type" } },
+    ontologyChange: { op: "add", name: "project", rule: { elementKind: "item-type" } },
+    ontologyDecide: { id: 1, action: "approve" },
+    ontologyUndo: { id: 1 },
+    ontologyHistory: { id: 1 },
   };
 
   beforeAll(async () => {

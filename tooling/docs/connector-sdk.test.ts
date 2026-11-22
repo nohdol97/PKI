@@ -669,7 +669,13 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     const moved = (tsconfig.references as { path: string }[]).map((r) =>
       r.path.startsWith("../../") ? r : { path: r.path.replace("../", "../../packages/") },
     );
-    expect(blocks[1]).toEqual({ ...tsconfig, references: [...moved, { path: "../connectors/<이름>" }] });
+    // the example's `include` also lists its in-package scopes file (config/*.json); a fork's file lies outside the package
+    expect(tsconfig.include).toEqual(["src", "config/*.json"]);
+    expect(blocks[1]).toEqual({
+      ...tsconfig,
+      include: ["src"],
+      references: [...moved, { path: "../connectors/<이름>" }],
+    });
     // the copy is wrong exactly where the references changed: the example's own first three are siblings
     expect(tsconfig.references.some((r: { path: string }) => /^\.\.\/(?!\.)/.test(r.path))).toBe(true);
   });

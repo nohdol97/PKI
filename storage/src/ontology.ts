@@ -5,7 +5,9 @@
 // (automated) and `applyUserOntologyChange` (package-internal) check and apply.
 // The user's change is applied and is `verified`. What an automated actor
 // proposes is recorded as a `candidate` with the source version it rests on and is never applied
-// (R20); approving, rejecting and undoing it, and the write-time enforcement, are S01-T07.
+// (R20). The user's approval, rejection and undo of an element and of a retirement (S01-T07) are in
+// `userOntology` at the end: three user transitions only (candidate -> verified, candidate -> rejected,
+// verified -> superseded by a retirement), every one behind a history line.
 //
 // A name can come from a source, so no refusal and no history line carries one: a refusal holds
 // counts and fixed codes, a history line numbers and codes (R6). The duplicates a check reports
@@ -60,7 +62,9 @@ export type OntologyRefusal =
   | "existing-data-violation"
   | "basis-required"
   | "invalid-transition"
-  | "not-found";
+  | "not-found"
+  | "not-latest"
+  | "nothing-to-undo";
 export type OntologyOutcome =
   /** The user's change was applied; `seq` is its history line. */
   | { status: "applied"; id: number; edition: number; seq: number }
@@ -74,6 +78,16 @@ export type OntologyOutcome =
       schemaErrors: readonly string[];
       impact: { liveRows: number; violations: number };
     };
+
+/** What the user's change answers: applied or refused, never a candidate (that is the automated actor's). */
+export type UserChangeOutcome = Exclude<OntologyOutcome, { status: "candidate" }>;
+
+/** What the user's approve, reject and undo answer: the refusal of the changes, plus unchanged and removed. */
+export type OntologyActionOutcome =
+  | Extract<OntologyOutcome, { status: "applied" | "refused" }>
+  | { status: "unchanged"; id: number }
+  /** An undo took away the element itself (an add of the user's, or an approval with no lineage left). */
+  | { status: "removed"; id: number };
 
 const COLUMNS = "id, element_kind, name, rule, status, edition";
 const toElement = (row: SqlRow): StoredElement => ({
@@ -101,6 +115,53 @@ export function readOntologyElement(
   return row ? toElement(row) : undefined;
 }
 
+export function readOntologyElementById(db: SqlDriver, id: number): StoredElement | undefined {
+  const row = db.all(`SELECT ${COLUMNS} FROM ontology_elements WHERE id = ?`, [id])[0];
+  return row ? toElement(row) : undefined;
+}
+
+export interface OntologyHistoryLine {
+  seq: number;
+  at: string;
+  actor: Actor;
+  action: string;
+  fromStatus: KnowledgeStatus | null;
+  toStatus: KnowledgeStatus;
+  fromEdition: number | null;
+  toEdition: number;
+  reason: string | null;
+  basisSourceId: number | null;
+  basisVersion: number | null;
+  batch: number | null;
+  revertsSeq: number | null;
+}
+
+/** An element's history, oldest first: numbers and closed codes only (S01-R6). */
+export function readOntologyHistory(db: SqlDriver, id: number): OntologyHistoryLine[] {
+  return db
+    .all(
+      `SELECT seq, at, actor, action, from_status, to_status, from_edition, to_edition, reason,
+         basis_source_id, basis_version, batch, reverts_seq
+       FROM ontology_history WHERE element_id = ? ORDER BY seq`,
+      [id],
+    )
+    .map((r) => ({
+      seq: r.seq as number,
+      at: r.at as string,
+      actor: r.actor as Actor,
+      action: r.action as string,
+      fromStatus: r.from_status as KnowledgeStatus | null,
+      toStatus: r.to_status as KnowledgeStatus,
+      fromEdition: r.from_edition as number | null,
+      toEdition: r.to_edition as number,
+      reason: r.reason as string | null,
+      basisSourceId: r.basis_source_id as number | null,
+      basisVersion: r.basis_version as number | null,
+      batch: r.batch as number | null,
+      revertsSeq: r.reverts_seq as number | null,
+    }));
+}
+
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.]{0,39}$/;
 const KINDS: readonly ElementKind[] = ["item-type", "fact-kind", "relation-type"];
 const VALUE_TYPES: readonly string[] = ["date", "text", "surface-form"];
@@ -111,10 +172,36 @@ const LIVE = "status NOT IN ('rejected', 'superseded')";
 /** The comparison of R19's duplicate check: case, `_`, `.` and `-` do not count. */
 const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
 
-const isDate = (value: string): boolean => {
+/** A normalized calendar date (YYYY-MM-DD) that exists; such strings order as dates. The one copy. */
+export const isDate = (value: string): boolean => {
   const time = DATE.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
   return !Number.isNaN(time) && new Date(time).toISOString().startsWith(value);
 };
+
+/**
+ * Whether a value is of the kind a fact kind's rule names (S01-R21): `date` a calendar date, `text`
+ * and `surface-form` not empty (after trimming). The one value check: extraction and the user's add
+ * and value fix both use it, so the two paths accept and reject the same values.
+ */
+export const valueFits = (valueType: ValueType, value: string): boolean =>
+  valueType === "date" ? isDate(value) : value.trim() !== "";
+
+/**
+ * The same check for a fact kind by name, reading the `verified` type definitions: `unregistered`
+ * when no `verified` element names the kind (the user's own paths do not govern such a kind; extraction
+ * drops it).
+ */
+export function factValueFit(
+  db: SqlDriver,
+  kind: string,
+  value: string,
+): "fits" | "misfit" | "unregistered" {
+  const element = readOntologyElement(db, "fact-kind", kind);
+  if (!element || element.status !== "verified" || element.rule.elementKind !== "fact-kind") {
+    return "unregistered";
+  }
+  return valueFits(element.rule.valueType, value) ? "fits" : "misfit";
+}
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -216,16 +303,20 @@ function liveRowCount(db: SqlDriver, kind: ElementKind, name: string): number {
   return count(db, `SELECT count(*) AS n FROM ${table} WHERE ${column} = ? AND ${LIVE}`, [name]);
 }
 
-/** Verified elements whose rule names the item type: retiring it would leave their rules pointing nowhere. */
-export function verifiedRulesNaming(db: SqlDriver, itemType: string): number {
+/** Elements in `status` whose rule names the item type. */
+function rulesNaming(db: SqlDriver, itemType: string, status: KnowledgeStatus): number {
   return listOntologyElements(db).filter(
     (e) =>
-      e.status === "verified" &&
+      e.status === status &&
       ((e.rule.elementKind === "fact-kind" && e.rule.itemTypes.includes(itemType)) ||
         (e.rule.elementKind === "relation-type" &&
           (e.rule.subjectTypes.includes(itemType) || e.rule.objectTypes.includes(itemType)))),
   ).length;
 }
+
+/** Verified elements whose rule names the item type: retiring it would leave their rules pointing nowhere. */
+export const verifiedRulesNaming = (db: SqlDriver, itemType: string): number =>
+  rulesNaming(db, itemType, "verified");
 
 const setEquals = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((t) => b.includes(t));
@@ -348,6 +439,7 @@ interface Line {
   fromEdition: number | null;
   toEdition: number;
   basis?: Basis | null;
+  revertsSeq?: number;
   at?: string | undefined;
 }
 
@@ -360,8 +452,8 @@ function writeLine(tx: SqlDriver, id: number, line: Line): number {
   );
   tx.run(
     `INSERT INTO ontology_history (element_id, seq, at, actor, action, from_status, to_status,
-       from_edition, to_edition, basis_source_id, basis_version)
-     VALUES (?, ?, coalesce(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), ?, ?, ?, ?, ?, ?, ?, ?)`,
+       from_edition, to_edition, basis_source_id, basis_version, reverts_seq)
+     VALUES (?, ?, coalesce(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       seq,
@@ -374,6 +466,7 @@ function writeLine(tx: SqlDriver, id: number, line: Line): number {
       line.toEdition,
       line.basis?.sourceId ?? null,
       line.basis?.version ?? null,
+      line.revertsSeq ?? null,
     ],
   );
   return seq;
@@ -420,7 +513,7 @@ export const applyUserOntologyChange = (
   tx: SqlDriver,
   change: OntologyChange,
   at?: string,
-): OntologyOutcome => applyChange(tx, change, "user", null, at);
+): UserChangeOutcome => applyChange(tx, change, "user", null, at) as UserChangeOutcome;
 
 function applyChange(
   tx: SqlDriver,
@@ -498,3 +591,167 @@ function applyChange(
   }
   return { status: "applied", id: target.id, edition, seq };
 }
+
+export type OntologyAction = "approve" | "reject" | "dispute";
+
+/**
+ * The user's way into the type definitions (S01-R5, R7, R20): a change, an approval or rejection of a
+ * candidate, and the undo of the user's newest step. Handed to the API layer inside `userDecisions`
+ * (semantic-user.ts), never exported by itself, so extraction and the job runner cannot reach it.
+ * The transaction is the caller's.
+ */
+export interface UserOntologyDecisions {
+  /** The user's add, rule change or retirement: checked (R19), applied, `verified`. */
+  change(tx: SqlDriver, change: OntologyChange, at?: string): UserChangeOutcome;
+  /**
+   * Approve or reject a `candidate`. Those two are the user's only transitions of an element besides a
+   * retirement; every other pair, and every dispute (elements have no `disputed`), is `invalid-transition`.
+   */
+  decide(tx: SqlDriver, id: number, action: OntologyAction, at?: string): OntologyActionOutcome;
+  /**
+   * Cancels the element's newest line when it is the user's: an approval returns to `candidate` (the
+   * element is removed when no lineage row is left), a rejection returns to `candidate`, a retirement
+   * returns to `verified` with the edition one higher (an edition never goes down), the user's add
+   * removes the element. An approval or an add of an element in use is refused with counts only
+   * (`existing-data-violation`). A rule change is not undone (`invalid-transition`).
+   */
+  undo(tx: SqlDriver, id: number, at?: string): OntologyActionOutcome;
+}
+
+const refusedWith = (
+  reason: OntologyRefusal,
+  detail: {
+    schemaErrors?: readonly string[];
+    impact?: { liveRows: number; violations: number };
+  } = {},
+): Extract<OntologyActionOutcome, { status: "refused" }> => ({
+  status: "refused",
+  reason,
+  duplicates: 0,
+  schemaErrors: detail.schemaErrors ?? [],
+  impact: detail.impact ?? { liveRows: 0, violations: 0 },
+});
+
+/** The lines a user action writes: an undo reverts one of these. */
+const USER_LINES: ReadonlySet<string> = new Set([
+  "created",
+  "approve",
+  "reject",
+  "retire",
+  "change-rule",
+]);
+
+/**
+ * What uses the element (R20): live rows of its name and, for an item type, the verified and the
+ * candidate rules that name it (a candidate rule would name a type that is no longer in force).
+ */
+function inUse(db: SqlDriver, element: StoredElement): { liveRows: number; violations: number } {
+  const liveRows = liveRowCount(db, element.elementKind, element.name);
+  const naming =
+    element.elementKind === "item-type"
+      ? rulesNaming(db, element.name, "verified") + rulesNaming(db, element.name, "candidate")
+      : 0;
+  return { liveRows, violations: liveRows + naming };
+}
+
+/** One line, then the row: only the columns that change are set (the identity trigger fires on any SET of name or kind). */
+function step(
+  tx: SqlDriver,
+  element: StoredElement,
+  action: string,
+  to: KnowledgeStatus,
+  edition: number,
+  revertsSeq: number | undefined,
+  at: string | undefined,
+): number {
+  const seq = writeLine(tx, element.id, {
+    actor: "user",
+    action,
+    fromStatus: element.status,
+    toStatus: to,
+    fromEdition: element.edition,
+    toEdition: edition,
+    ...(revertsSeq === undefined ? {} : { revertsSeq }),
+    at,
+  });
+  if (edition === element.edition) {
+    tx.run("UPDATE ontology_elements SET status = ? WHERE id = ?", [to, element.id]);
+  } else {
+    tx.run("UPDATE ontology_elements SET status = ?, edition = ? WHERE id = ?", [
+      to,
+      edition,
+      element.id,
+    ]);
+  }
+  return seq;
+}
+
+export const userOntology: UserOntologyDecisions = {
+  change: (tx, change, at) => applyUserOntologyChange(tx, change, at),
+
+  decide(tx, id, action, at) {
+    const element = readOntologyElementById(tx, id);
+    if (!element) return refusedWith("not-found");
+    // an element is never `disputed`: no dispute, whatever its status
+    if (action === "dispute") return refusedWith("invalid-transition");
+    const to: KnowledgeStatus = action === "approve" ? "verified" : "rejected";
+    if (element.status === to) return { status: "unchanged", id };
+    if (element.status !== "candidate") return refusedWith("invalid-transition");
+    if (action === "approve") {
+      // the candidate is judged again as an addition: the types its rule names and the rows it would govern may have changed
+      const addition: OntologyChange = { op: "add", name: element.name, rule: element.rule };
+      const schemaErrors = shapeErrors(tx, addition, undefined);
+      if (schemaErrors.length > 0) return refusedWith("schema-invalid", { schemaErrors });
+      const impact = impactOf(tx, addition, undefined);
+      if (impact.violations > 0) return refusedWith("existing-data-violation", { impact });
+    }
+    const seq = step(tx, element, action, to, element.edition, undefined, at);
+    return { status: "applied", id, edition: element.edition, seq };
+  },
+
+  undo(tx, id, at) {
+    const element = readOntologyElementById(tx, id);
+    if (!element) return refusedWith("not-found");
+    const newest = readOntologyHistory(tx, id).at(-1);
+    if (!newest || newest.action === "undo") return refusedWith("nothing-to-undo");
+    if (newest.actor !== "user" || !USER_LINES.has(newest.action)) return refusedWith("not-latest");
+    if (newest.action === "change-rule") return refusedWith("invalid-transition");
+    if (newest.action === "created" || newest.action === "approve") {
+      const impact = inUse(tx, element);
+      if (impact.violations > 0) return refusedWith("existing-data-violation", { impact });
+      if (
+        newest.action === "created" ||
+        count(tx, "SELECT count(*) AS n FROM ontology_basis WHERE element_id = ?", [id]) === 0
+      ) {
+        // no lineage is left to return to: a candidate without lineage must not remain (R20)
+        tx.run("DELETE FROM ontology_elements WHERE id = ?", [id]);
+        return { status: "removed", id };
+      }
+    }
+    if (newest.action === "retire") {
+      // the element comes back in force: its rule is judged again as for an addition (an item type it names
+      // may have been retired or removed while it was retired, and a retired rule is not counted by `inUse`)
+      const schemaErrors = shapeErrors(
+        tx,
+        { op: "add", name: element.name, rule: element.rule },
+        undefined,
+      );
+      if (schemaErrors.length > 0) return refusedWith("schema-invalid", { schemaErrors });
+      // and against the rows that exist: a user's row of the kind may have been added while it was retired
+      const impact = impactOf(tx, { op: "add", name: element.name, rule: element.rule }, undefined);
+      if (impact.violations > 0) return refusedWith("existing-data-violation", { impact });
+    }
+    // a retirement comes back as a new edition: the number only rises
+    const edition = newest.action === "retire" ? element.edition + 1 : element.edition;
+    const seq = step(
+      tx,
+      element,
+      "undo",
+      newest.fromStatus as KnowledgeStatus,
+      edition,
+      newest.seq,
+      at,
+    );
+    return { status: "applied", id, edition, seq };
+  },
+};

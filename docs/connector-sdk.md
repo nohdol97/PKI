@@ -521,11 +521,17 @@ site/
 ```ts
 import type { SiteRegistration } from "@pki/backend";
 import { createExampleConnector } from "@pki/connector-example/adapters";
+// The scopes file, imported statically so the build puts its value in the backend bundle (I07-R1). Here it sits in
+// this package (config/), which the build allows for the example's entry only; a fork's file is
+// site/config/connector-scopes.json and its import path is "../../config/connector-scopes.json" (I07-R7, R16).
+// The `with { type: "json" }` is required: without it Node's source run fails.
+import connectorScopes from "../config/connector-scopes.json" with { type: "json" };
 
 /** The collector's kind name is its manifest's `type` (I05-R7). */
 const KIND = "connector-example";
 
 export const registration: SiteRegistration = {
+  connectorScopes,
   connectorKinds: { [KIND]: createExampleConnector },
   connectorInstances: [
     {
@@ -637,7 +643,7 @@ pnpm --filter @pki/desktop build
 }
 ```
 
-**`tsconfig.json`은 예시를 그대로 복사할 수 없다.** 예시는 `packages/` 안에 있어 형제 패키지를 `../connector-example`처럼 가리키는데, `site/composition/`에서는 같은 패키지가 `../../packages/connector-example`이다. 그대로 두면 참조한 프로젝트를 찾지 못해 `pnpm typecheck`가 실패한다. 의존하는 워크스페이스 패키지는 모두 `references`에 있어야 하고(`tooling/workspace/tsconfig-references.test.ts`), 포크의 수집기 패키지는 `../connectors/<이름>`으로 가리킨다. 저장소 루트의 `tsconfig.base.json`을 확장하는 줄과 `../../backend` 참조는 폴더 깊이가 같아 그대로다.
+**`tsconfig.json`은 예시를 그대로 복사할 수 없다.** 예시는 `packages/` 안에 있어 형제 패키지를 `../connector-example`처럼 가리키는데, `site/composition/`에서는 같은 패키지가 `../../packages/connector-example`이다. 그대로 두면 참조한 프로젝트를 찾지 못해 `pnpm typecheck`가 실패한다. 의존하는 워크스페이스 패키지는 모두 `references`에 있어야 하고(`tooling/workspace/tsconfig-references.test.ts`), 포크의 수집기 패키지는 `../connectors/<이름>`으로 가리킨다. 저장소 루트의 `tsconfig.base.json`을 확장하는 줄과 `../../backend` 참조는 폴더 깊이가 같아 그대로다. 예시의 `include`에 있는 `config/*.json`은 예시의 범위 파일이 패키지 안에 있어서 필요한 것이고, 포크의 범위 파일은 패키지 밖(`site/config/`)이라 아래 블록은 `["src"]`만 둔다.
 
 ```json
 {
