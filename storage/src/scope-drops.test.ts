@@ -376,3 +376,33 @@ describe("only the bookkeeping item may skip the policy (I04-R11)", () => {
     );
   });
 });
+
+describe("an item with no lineage inside a sourced job is judged by the job's source (I04-R11)", () => {
+  it("does not write a content item with an empty lineage under a refusing policy, and records it under the job's version", () => {
+    const b = save("b", '["b"]');
+    const result = db.transaction(() =>
+      commitDerived(db, {
+        source: b,
+        scope: scopeOf({ combinable: () => false }),
+        items: [item("bare", [])],
+      }),
+    );
+    expect(written).toEqual([]);
+    expect(result).toMatchObject({ status: "committed", written: 0 });
+    expect(rows().map((r) => [r.source_id, r.version, r.kind])).toEqual([
+      [b.sourceId, b.version, "fact"],
+    ]);
+  });
+
+  it("writes it when the policy allows the job's source", () => {
+    const b = save("b", '["b"]');
+    db.transaction(() =>
+      commitDerived(db, {
+        source: b,
+        scope: scopeOf({ combinable: () => true }),
+        items: [item("bare", [])],
+      }),
+    );
+    expect(written).toEqual(["bare"]);
+  });
+});

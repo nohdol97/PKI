@@ -113,12 +113,19 @@ export const commitDerived: CommitDerived = (tx, input) => {
   const dropped = [];
   let written = 0;
   for (const item of input.items) {
-    // An item with no lineage (a sourceless job's write) or marked `unjudged` has no source content to
-    // judge: the policy is not asked, so it cannot hold such a job `running` (I04-T09).
-    const judged = item.unjudged !== true && item.lineage.length > 0;
-    if (scope && judged && !mayCombine(scope.policy, scopesOfVersions(tx, item.lineage))) {
+    // The policy is skipped only for the bookkeeping item (`unjudged`) and for a write that has no
+    // source at all (a sourceless job such as maintenance or connector-sync): there is no source
+    // content to judge, so a policy cannot hold such a job `running` (I04-T09). A content item that
+    // names no lineage inside a sourced job is judged by that job's source, never waved through.
+    const lineage = item.lineage.length > 0 ? item.lineage : input.source ? [input.source] : [];
+    if (
+      scope &&
+      item.unjudged !== true &&
+      lineage.length > 0 &&
+      !mayCombine(scope.policy, scopesOfVersions(tx, lineage))
+    ) {
       // the version the record names: the job's input, else where the item's lineage begins
-      const anchor = input.source ?? (item.lineage[0] as SourceVersionRef);
+      const anchor = input.source ?? (lineage[0] as SourceVersionRef);
       dropped.push(scope.recordDrop(tx, item, anchor));
       continue;
     }
