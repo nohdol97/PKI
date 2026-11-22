@@ -144,7 +144,11 @@ test("with both CLIs found, the user picks the default and the next test goes to
   const start = page.getByRole("button", { name: "연결 시험", exact: true });
   const activityProviders = async () => {
     await page.getByRole("navigation").getByRole("button", { name: "활동" }).click();
-    const cells = page.getByRole("row").locator("td:nth-child(2)");
+    // the call history only: the job area's tables have a second column too (I03-T11)
+    const cells = page
+      .getByRole("table", { name: "Provider 호출 기록" })
+      .getByRole("row")
+      .locator("td:nth-child(2)");
     await expect(cells.first()).toBeVisible();
     const names = await cells.allTextContents();
     await openSettings(page);
