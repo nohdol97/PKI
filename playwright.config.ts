@@ -8,8 +8,8 @@ export default defineConfig<{ target: "browser" | "electron" }>({
     {
       name: "browser",
       testMatch: "**/*.e2e.{ts,tsx}",
-      // the test-build-only seed entry is a script run by evidence.e2e.ts, not a test
-      testIgnore: ["apps/desktop/**", "backend/src/v02-seed.e2e.ts"],
+      // the backend's test-build-only entries (seed, Provider double) are scripts, not tests
+      testIgnore: ["apps/desktop/**", "backend/src/*.e2e.ts"],
     },
     { name: "build-web", testMatch: "apps/desktop/e2e/build-web.setup.ts" },
     {
@@ -19,6 +19,7 @@ export default defineConfig<{ target: "browser" | "electron" }>({
         "apps/web/e2e/provider-settings.e2e.ts",
         "apps/web/e2e/evidence.e2e.ts",
         "apps/web/e2e/degraded.e2e.ts",
+        "apps/web/e2e/v02-flow.e2e.ts",
         "apps/desktop/e2e/**/*.e2e.{ts,tsx}",
       ],
       dependencies: ["build-web"],

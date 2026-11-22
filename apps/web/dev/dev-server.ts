@@ -19,6 +19,8 @@ export interface DevBackendOptions {
   dataDir?: string;
   /** Extra environment for the dev backend (e.g. the development API key variables). */
   env?: Record<string, string>;
+  /** Told the started backend process (tests wait for its exit before reusing `dataDir`). */
+  onBackend?: (child: ChildProcess) => void;
 }
 
 /** Starts the dev backend and resolves with its first stdout line: `{ url, token }`. */
@@ -69,6 +71,7 @@ export function devBackend(options: DevBackendOptions, port: number): Plugin {
         undefined,
         options.env,
       );
+      options.onBackend?.(backend.child);
       // changeOrigin rewrites Host to the backend's own address, which it requires.
       return { server: { proxy: { "/api/": { target: backend.url, changeOrigin: true } } } };
     },

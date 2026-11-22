@@ -7,9 +7,8 @@
 // It adds no switch to the backend process. The `.e2e.ts` name keeps it a test
 // module: product code cannot import it (module boundary) and Playwright does not
 // collect it (testIgnore). T15: it and @pki/testkit never ship in an installer.
-import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
+import { DEFAULT_PROVIDER_SETTING } from "@pki/providers";
 import { writeSetting, type SqlDriver } from "@pki/storage";
-import { FakeProvider, fixtureExtraction } from "@pki/testkit";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -20,6 +19,7 @@ import {
   productImporter,
   productRunner,
 } from "./composition.ts";
+import { consentLocalModel, providerDouble } from "./v02-double.e2e.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const read = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8");
@@ -34,15 +34,6 @@ export function fixtureSetText(set: string): string {
   return files.map(read).join("\n");
 }
 
-function consentLocalModel(egress: EgressControls) {
-  const shown = egress.overview().providers.find((p) => p.providerId === "local-model");
-  const granted = egress.grant("local-model", ["general"], {
-    destination: shown?.destination ?? "",
-    policyVersion: egress.policyVersion(),
-  });
-  if ("error" in granted) throw new Error(granted.error);
-}
-
 /**
  * Imports `sets` (in order) and runs their extraction jobs to the end with the
  * fixture double; returns the jobs that did not end `succeeded` (none expected).
@@ -51,12 +42,7 @@ export async function seedV02(db: SqlDriver, sets: readonly string[]): Promise<n
   const egress = productEgress(db);
   consentLocalModel(egress);
   writeSetting(db, DEFAULT_PROVIDER_SETTING, "local-model"); // the user's default (V01-T10)
-  const provider = new FakeProvider({
-    id: "local-model",
-    transport: "http",
-    answer: fixtureExtraction(),
-  });
-  const { broker } = productCalls(db, egress, { providers: [provider] });
+  const { broker } = productCalls(db, egress, { providers: [providerDouble()] });
   const runner = productRunner(db, broker);
   try {
     const importer = productImporter(db, { runner });
