@@ -10,8 +10,8 @@
 // can read the registry's report, which the entry does not return.
 import {
   addEvidence,
+  commitDerived,
   insertItem,
-  isFenceCurrent,
   listInvalidations,
   migrate,
   migrations,
@@ -261,10 +261,9 @@ function subject(kind: DerivativeKind, has: { shared: boolean; withoutLineage: b
             recomputed: record?.recomputedByKind[kind.kind] ?? -1,
           };
         },
-        // V02's fence (isFenceCurrent, the one closeJob writes a result behind)
-        // stands in for commitDerived until I04-T06; a source version arrives
-        // through saveSourceRecord, whose tombstone door blocks it. The write
-        // behind the fence fails if it is ever reached.
+        // A result is written through commitDerived, the one closeJob writes behind;
+        // a source version arrives through saveSourceRecord, whose tombstone check
+        // refuses it. The write behind the fence fails if it is ever reached.
         staleInput: () =>
           kind.kind === "source"
             ? {
@@ -281,11 +280,19 @@ function subject(kind: DerivativeKind, has: { shared: boolean; withoutLineage: b
             : {
                 ref: { kind: kind.kind, id: String(nextId(TABLES[kind.kind] as string)) },
                 attempt: () =>
-                  isFenceCurrent(db, { sourceId: w.a.sourceId, fenceVersion: w.a.version })
-                    ? (() => {
-                        throw new Error("a result was written past the fence");
-                      })()
-                    : { status: "stale", cause: "covered" },
+                  commitDerived(db, {
+                    source: w.a,
+                    items: [
+                      {
+                        kind: kind.kind,
+                        itemKey: "late",
+                        lineage: [w.a],
+                        write: () => {
+                          throw new Error("a result was written past the fence");
+                        },
+                      },
+                    ],
+                  }),
               },
         dataDirectory: null,
         canary: "qzcanary",

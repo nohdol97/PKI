@@ -6,10 +6,10 @@
 // recomputed (`invalidate`). The registry is one list fixed at construction.
 //
 // This module also fixes, as types, the names and shapes of the I04 spec's
-// design-overview block that later tasks implement: commitDerived (I04-T06, with
-// I03-T04's provisional function of the same shape), canonicalTransaction and the
-// tombstone entries (I04-T05, ledger lines I04-T10) and ScopePolicy's default
-// (I04-T09). I01 and I03 cite these names; change the spec block first.
+// design-overview block that later tasks implement: commitDerived (I04-T06,
+// commit-derived.ts), canonicalTransaction and the tombstone entries (I04-T05,
+// ledger lines I04-T10) and ScopePolicy's default (I04-T09). I01 and I03 cite
+// these names; change the spec block first.
 import { startInvalidation, finishInvalidation, type SourceChangeKind } from "./invalidations.ts";
 import { readChangeSeq } from "./revisions.ts";
 import type { SqlDriver } from "./sql-driver.ts";
@@ -112,16 +112,32 @@ export interface ScopePolicyDrop {
   at: string;
 }
 
+/** Why a result is stale: the source's own version (assertFresh) or a source version in the lineage. */
+export type StaleCause = "missing" | "not-latest" | "covered" | "lineage-covered";
+
 export type CommitResult =
   /** `dropped`: the records stored in the same transaction. */
   | { status: "committed"; written: number; dropped: readonly ScopePolicyDrop[] }
   /** Nothing written; the job closes superseded. */
-  | { status: "stale"; cause?: "missing" | "not-latest" | "covered" | "lineage-covered" };
+  | { status: "stale"; cause?: StaleCause };
+
+/**
+ * What commitDerived asks of the scope policy (I04-R11, R14): an item whose
+ * lineage's scopes are not `combinable` is left out and recorded (a refusal is the
+ * policy's judgement, not a stale result). I04-T09 hands this over; without it
+ * every item passes, as under the default policy.
+ */
+export interface CommitScope {
+  policy: Pick<ScopePolicy, "combinable">;
+  /** Stores the refused item's content-free record (`scope_policy_drops`) in `tx` and returns it. */
+  recordDrop(tx: SqlDriver, item: DerivedItem): ScopePolicyDrop;
+}
 
 export interface CommitInput {
   /** The source version the job took as input; null for a job without one. */
   source: SourceVersionRef | null;
   items: readonly DerivedItem[];
+  scope?: CommitScope;
 }
 
 export type CommitDerived = (tx: SqlDriver, input: CommitInput) => CommitResult;
@@ -293,6 +309,30 @@ export function parseScope(raw: string | null): AccessScope {
   return [raw];
 }
 
+/** Stored, and covered by no tombstone (a lift uncovers nothing: the cover stays). */
+export const versionIsLive = (db: SqlDriver, v: SourceVersionRef): boolean =>
+  db.all(
+    `SELECT 1 FROM source_versions sv WHERE sv.source_id = ? AND sv.version = ?
+       AND NOT EXISTS (SELECT 1 FROM tombstones t
+                       WHERE t.source_id = sv.source_id AND t.covers_version >= sv.version)`,
+    [v.sourceId, v.version],
+  ).length === 1;
+
+/** The distinct scopes of the sources the versions belong to (a derivative's scope is never stored). */
+export function scopesOfVersions(
+  db: SqlDriver,
+  versions: readonly SourceVersionRef[],
+): AccessScope[] {
+  const scopes = new Map<string, AccessScope>();
+  for (const sourceId of new Set(versions.map((v) => v.sourceId))) {
+    const raw = db.all("SELECT access_scope FROM sources WHERE id = ?", [sourceId])[0]
+      ?.access_scope as string | null | undefined;
+    const scope = parseScope(raw ?? null);
+    scopes.set(JSON.stringify(scope), scope);
+  }
+  return [...scopes.values()];
+}
+
 const isCount = (n: number) => Number.isInteger(n) && n >= 0;
 
 export function createDerivativeRegistry(options: RegistryOptions): DerivativeRegistry {
@@ -306,25 +346,6 @@ export function createDerivativeRegistry(options: RegistryOptions): DerivativeRe
     return k;
   };
   const lineage = (db: SqlDriver, ref: DerivedRef) => kindOf(ref).lineage(db, ref);
-  const scopesOfLineage = (db: SqlDriver, versions: readonly SourceVersionRef[]) => {
-    const scopes = new Map<string, AccessScope>();
-    for (const sourceId of new Set(versions.map((v) => v.sourceId))) {
-      const raw = db.all("SELECT access_scope FROM sources WHERE id = ?", [sourceId])[0]
-        ?.access_scope as string | null | undefined;
-      const scope = parseScope(raw ?? null);
-      scopes.set(JSON.stringify(scope), scope);
-    }
-    return [...scopes.values()];
-  };
-  // stored, and covered by no tombstone (a lift uncovers nothing: the cover stays)
-  const live = (db: SqlDriver, v: SourceVersionRef) =>
-    db.all(
-      `SELECT 1 FROM source_versions sv WHERE sv.source_id = ? AND sv.version = ?
-         AND NOT EXISTS (SELECT 1 FROM tombstones t
-                         WHERE t.source_id = sv.source_id AND t.covers_version >= sv.version)`,
-      [v.sourceId, v.version],
-    ).length === 1;
-
   return {
     kinds,
     propagate(tx, change) {
@@ -353,12 +374,12 @@ export function createDerivativeRegistry(options: RegistryOptions): DerivativeRe
     visible(db, refs, purpose) {
       return refs.filter((ref) => {
         const versions = lineage(db, ref);
-        if (!versions.every((v) => live(db, v))) return false;
-        return options.policy.allows(scopesOfLineage(db, versions), purpose);
+        if (!versions.every((v) => versionIsLive(db, v))) return false;
+        return options.policy.allows(scopesOfVersions(db, versions), purpose);
       });
     },
     scopesOf(db, refs) {
-      return scopesOfLineage(
+      return scopesOfVersions(
         db,
         refs.flatMap((ref) => lineage(db, ref)),
       );

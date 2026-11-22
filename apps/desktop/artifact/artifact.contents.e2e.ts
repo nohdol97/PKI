@@ -51,7 +51,7 @@ test("no bundle kept a test-only, development-only or source-run module", () => 
       (m) =>
         m.startsWith("packages/testkit/") ||
         m.startsWith("apps/desktop/e2e/") ||
-        /\.(test|e2e|setup)\.[cm]?[jt]sx?$/.test(m) ||
+        /\.(test|e2e|setup|test-support)\.[cm]?[jt]sx?$/.test(m) ||
         /(^|\/)e2e\//.test(m) ||
         [
           "backend/src/v02-seed.e2e.ts",

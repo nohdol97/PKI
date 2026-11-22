@@ -62,15 +62,20 @@ export {
   type StoredSourceVersion,
 } from "./sources.ts";
 export {
+  assertFresh,
+  assertLineage,
+  commitDerived,
+  isFenceCurrent,
+  StaleDerivativeError,
+} from "./commit-derived.ts";
+export {
   CHECKPOINT_MAX_BYTES,
   checkpointJob,
   CLOCK_REGRESSION_LEASES,
   closeJob,
-  commitDerived,
   DEFAULT_MAX_ATTEMPTS,
   encodeCheckpoint,
   heartbeatJob,
-  isFenceCurrent,
   isJobTransition,
   isReasonCode,
   JOB_STATUSES,
@@ -188,6 +193,7 @@ export {
   type CommitDerived,
   type CommitInput,
   type CommitResult,
+  type CommitScope,
   type DerivativeKind,
   type DerivativeRegistry,
   type DerivedItem,
@@ -205,6 +211,7 @@ export {
   type ScopePurpose,
   type SourceChange,
   type SourceVersionRef,
+  type StaleCause,
   type TombstoneOutcome,
   type TombstoneWrite,
 } from "./derivatives.ts";

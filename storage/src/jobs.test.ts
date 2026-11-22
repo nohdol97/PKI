@@ -11,12 +11,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedLegacyTombstone } from "@pki/testkit";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
+import { commitDerived } from "./commit-derived.ts";
 import {
   CHECKPOINT_MAX_BYTES,
   checkpointJob,
   closeJob,
   CLOCK_REGRESSION_LEASES,
-  commitDerived,
   DEFAULT_MAX_ATTEMPTS,
   encodeCheckpoint,
   heartbeatJob,
@@ -990,7 +990,7 @@ const running = (): StoredJob => {
 const tombstone = () =>
   seedLegacyTombstone(db, { sourceId: 1, version: 1, at: "x", reason: "source-deleted" });
 
-describe("effect.fence-new-version (I03-R6 ③): commitDerived, the provisional body", () => {
+describe("effect.fence-new-version (I03-R6 ③): commitDerived through closeJob", () => {
   const item = (name: string) => ({
     kind: "fact",
     itemKey: name,
@@ -1065,6 +1065,68 @@ describe("effect.fence-new-version (I03-R6 ③): commitDerived, the provisional 
       "superseded",
     );
     expect(effects()).toBe(1);
+  });
+});
+
+describe("fence.fresh lineage-retry (I04-T06): a result lost to its lineage is extracted once more", () => {
+  // a second source whose version the result draws on, then covered
+  const drawnOn = () => {
+    const saved = saveSourceRecord(db, "c1", { externalId: "e2", title: "t", body: "b2" });
+    if (saved.status !== "created") throw new Error("expected a version");
+    const ref = { sourceId: saved.sourceId, version: saved.version };
+    seedLegacyTombstone(db, {
+      sourceId: ref.sourceId,
+      version: ref.version,
+      at: "x",
+      reason: "source-deleted",
+    });
+    return ref;
+  };
+  const lineageItem = (ref: { sourceId: number; version: number }) => ({
+    kind: "fact",
+    itemKey: "a",
+    lineage: [{ sourceId: 1, version: 1 }, ref],
+    write: effect("a"),
+  });
+  const jobs = () => db.all("SELECT id, target, status, reason FROM jobs ORDER BY id");
+
+  it("registers one extraction of the same version, with a distinct target, and names the reason", () => {
+    const job = running();
+    expect(
+      closeJob(db, held(job.id), { status: "succeeded", items: [lineageItem(drawnOn())] }),
+    ).toBe("superseded");
+    expect(effects()).toBe(0);
+    expect(jobs()).toEqual([
+      { id: job.id, target: "", status: "superseded", reason: "lineage-covered" },
+      { id: job.id + 1, target: `lineage-retry:${job.id}`, status: "queued", reason: null },
+    ]);
+    expect(readJob(db, job.id + 1)).toMatchObject({
+      sourceId: 1,
+      fenceVersion: 1,
+      kind: "extract",
+    });
+  });
+
+  it("registers nothing for a job that is itself a lineage retry (the loop bound)", () => {
+    const first = running();
+    const covered = drawnOn();
+    closeJob(db, held(first.id), { status: "succeeded", items: [lineageItem(covered)] }, T0);
+    const retry = claimed();
+    expect(retry.target).toBe(`lineage-retry:${first.id}`);
+    expect(
+      closeJob(db, held(retry.id), { status: "succeeded", items: [lineageItem(covered)] }),
+    ).toBe("superseded");
+    expect(jobs().map((j) => j.status)).toEqual(["superseded", "superseded"]);
+    expect(jobs()[1]).toMatchObject({ reason: "lineage-covered" });
+  });
+
+  it("registers nothing, and gives no reason, for a job a newer version superseded", () => {
+    const job = running();
+    newVersion("b2");
+    expect(
+      closeJob(db, held(job.id), { status: "succeeded", items: [lineageItem(drawnOn())] }),
+    ).toBe("superseded");
+    expect(jobs()).toEqual([{ id: job.id, target: "", status: "superseded", reason: null }]);
   });
 });
 
