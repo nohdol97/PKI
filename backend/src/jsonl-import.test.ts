@@ -329,7 +329,13 @@ describe("importJsonl", () => {
       expect(result.errors).toEqual([]);
       // each delete and revoke tombstoned a source the file had stored, and purged it
       expect(count("tombstones")).toBe(deletions);
-      expect(count("jobs")).toBe(result.created);
+      expect(db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'extract'")[0]?.n).toBe(
+        result.created,
+      );
+      // and registered a removal for each projection (I04-R12)
+      expect(db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-remove'")[0]?.n).toBe(
+        2 * deletions,
+      );
       expect(count("source_versions")).toBeLessThan(result.created);
     },
   );

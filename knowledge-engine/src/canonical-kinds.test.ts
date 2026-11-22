@@ -324,7 +324,7 @@ for (const kind of CANONICAL_KINDS) {
 }
 
 describe("the product registry's canonical kinds (I04-R1)", () => {
-  it("registers the six canonical kinds in phase-2 order, each in the canonical transaction", () => {
+  it("registers the six canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
     expect(derivativeRegistry.kinds.map((k) => [k.kind, k.layer, k.storage])).toEqual([
       ["source", "source", "canonical"],
       ["evidence", "evidence", "canonical"],
@@ -332,6 +332,8 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
       ["relation", "knowledge", "canonical"],
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
+      ["engine", "projection", "projection"],
+      ["vectorIndex", "projection", "projection"],
     ]);
     expect(CANONICAL_KINDS.every((k) => k.dataPaths.length === 0)).toBe(true);
   });
@@ -460,9 +462,9 @@ describe("propagateCanonical's report (I04-T03)", () => {
 });
 
 describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
-  /** The canonical kinds with each call logged, and DELETEs logged through the handed transaction. */
+  /** The product registry's kinds with each call logged, and DELETEs logged through the handed transaction. */
   function logged(log: string[]) {
-    const kinds = CANONICAL_KINDS.map((k): DerivativeKind => ({
+    const kinds = derivativeRegistry.kinds.map((k): DerivativeKind => ({
       ...k,
       affected: (tx, change) => {
         log.push(`affected:${k.kind}`);
@@ -500,14 +502,26 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
-    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(6);
+    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(8);
     expect(log.findLastIndex((e) => e.startsWith("affected:"))).toBeLessThan(firstDelete);
     expect(log.filter((e) => e.startsWith("invalidate:"))).toEqual(
-      ["source", "evidence", "fact", "relation", "item", "insight"].map((k) => `invalidate:${k}`),
+      ["source", "evidence", "fact", "relation", "item", "insight", "engine", "vectorIndex"].map(
+        (k) => `invalidate:${k}`,
+      ),
     );
     // evidence and the Insight left through the cascades of the lower layers'
     // deletes; each kind counts the rows of its own collection that are gone
-    expect(result).toEqual({ source: 1, evidence: 4, fact: 1, relation: 1, item: 2, insight: 1 });
+    // the projections' counts are the removal jobs registered (I04-T04)
+    expect(result).toEqual({
+      source: 1,
+      evidence: 4,
+      fact: 1,
+      relation: 1,
+      item: 2,
+      insight: 1,
+      engine: 1,
+      vectorIndex: 1,
+    });
     expect(exists({ kind: "insight", id: String((rows.insight as { onlyA: number }).onlyA) })).toBe(
       false,
     );
@@ -523,9 +537,27 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         changeSeq: seq + 1,
         sourceId: a.sourceId,
         changeKind: "access-revoked",
-        removedByKind: { source: 1, evidence: 4, fact: 1, relation: 1, item: 2, insight: 1 },
+        removedByKind: {
+          source: 1,
+          evidence: 4,
+          fact: 1,
+          relation: 1,
+          item: 2,
+          insight: 1,
+          engine: 1,
+          vectorIndex: 1,
+        },
         // fS keeps b's current evidence (not superseded); iS is judged again
-        recomputedByKind: { source: 0, evidence: 0, fact: 0, relation: 0, item: 0, insight: 1 },
+        recomputedByKind: {
+          source: 0,
+          evidence: 0,
+          fact: 0,
+          relation: 0,
+          item: 0,
+          insight: 1,
+          engine: 0,
+          vectorIndex: 0,
+        },
         at: expect.any(String),
       },
     ]);

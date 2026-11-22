@@ -7,7 +7,7 @@
 // change sequences agree) and `projection.request` (the forced rebuild). The clock is
 // injected; nothing sleeps.
 import { AdapterUnavailableError, StaleFenceError } from "@pki/contracts";
-import { userDeleteWithNotice, liftTombstone } from "@pki/knowledge-engine";
+import { userDelete, liftTombstone } from "@pki/knowledge-engine";
 import {
   canonicalTransaction,
   createDerivativeRegistry,
@@ -181,16 +181,29 @@ const identity = (externalId: string) => ({
 });
 const iso = () => new Date(wall).toISOString();
 
-/** The user's deletion, then the removal job registered after the tombstone raised the sequence (I04-R12). */
+/**
+ * The user's deletion. Its transaction registers a removal for each registered projection kind (I04-R12);
+ * these tests drive one projection at a time, so only the removal for `target` is kept, registered by hand
+ * for a target the registry has no kind for.
+ */
 function deleted(externalId: string, target = "engine"): StoredJob {
   const sourceId = findSourceId(db, "c", "", externalId) as number;
-  const { notice } = userDeleteWithNotice(db, identity(externalId), iso());
-  if (!notice) throw new Error("nothing was deleted");
+  const { outcome, coversVersion } = userDelete(db, identity(externalId), iso());
+  if (outcome === "unchanged") throw new Error("nothing was deleted");
+  db.run("DELETE FROM jobs WHERE kind = 'projection-remove' AND source_id = ? AND target != ?", [
+    sourceId,
+    target,
+  ]);
+  const own = db.all(
+    "SELECT id FROM jobs WHERE kind = 'projection-remove' AND source_id = ? AND target = ?",
+    [sourceId, target],
+  );
+  if (own[0]) return job(own[0].id as number);
   const r = registerJob(db, {
     kind: "projection-remove",
     target,
     sourceId,
-    fenceVersion: notice.version,
+    fenceVersion: coversVersion,
     at: new Date(wall),
   });
   if (!r.registered) throw new Error("expected a new job");

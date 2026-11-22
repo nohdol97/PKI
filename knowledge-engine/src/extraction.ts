@@ -37,6 +37,7 @@ import {
   reviveSuperseded,
   saveFact,
   saveRelation,
+  type DerivativeRegistry,
   type DerivedItem,
   type EvidenceTarget,
   type KnowledgeAttributes,
@@ -74,6 +75,8 @@ export interface ExtractHandlerOptions {
    * hold purged text, which a proposed item name could carry back, so it is not asked.
    */
   isEngineStale?: () => boolean;
+  /** The registry that names a candidate item's lineage; default the entries' own (canonical-kinds.ts). */
+  registry?: Pick<DerivativeRegistry, "lineage">;
   now?: () => Date;
 }
 
@@ -207,6 +210,7 @@ export interface RunBroker {
 
 export function createExtractHandler(options: ExtractHandlerOptions) {
   const { db } = options;
+  const registry = options.registry ?? derivativeRegistry;
   const now = options.now ?? (() => new Date());
 
   return async (job: StoredJob, context: { broker: RunBroker }): Promise<ExtractResult> => {
@@ -228,7 +232,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // draws on that is gone when the result is written makes the result stale
     // (I04-R11). Read after the call, a deleted item's lineage would be empty.
     const candidateLineage = new Map(
-      candidates.map((id) => [id, derivativeRegistry.lineage(db, { kind: "item", id })]),
+      candidates.map((id) => [id, registry.lineage(db, { kind: "item", id })]),
     );
     const ref = { sourceId: String(sourceId), version: fenceVersion as number };
     const proposed = await proposals(options, ref);

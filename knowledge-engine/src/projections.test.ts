@@ -91,7 +91,7 @@ describe("notices", () => {
         sourceId: sourceIdOf("a"),
         version: 1,
         versionId: va1,
-        replacedVersionIds: [],
+        replacedVersions: [],
         changeSeq: 1,
       },
       {
@@ -99,7 +99,7 @@ describe("notices", () => {
         sourceId: sourceIdOf("b"),
         version: 1,
         versionId: versionIds("b")[0],
-        replacedVersionIds: [],
+        replacedVersions: [],
         changeSeq: 2,
       },
       {
@@ -107,34 +107,36 @@ describe("notices", () => {
         sourceId: sourceIdOf("a"),
         version: 2,
         versionId: va2,
-        replacedVersionIds: [va1],
+        replacedVersions: [1],
         changeSeq: 3,
       },
     ]);
   });
 
-  it("of a deletion name every purged version, collected before the purge", () => {
+  it("of a deletion are none: the tombstone's transaction registers the projections' removal jobs instead (I04-R12)", () => {
     store("a", "alpha");
     store("a", "alpha two");
-    const ids = versionIds("a");
-    const { outcome, notice } = purgeSource(db, sourceIdOf("a"), {
+    const { outcome, version } = purgeSource(db, sourceIdOf("a"), {
       reason: "source-deleted",
       at: AT,
     });
     expect(outcome).toBe("deleted");
-    expect(notice).toEqual({
-      kind: "removed",
-      sourceId: sourceIdOf("a"),
-      version: 2,
-      versionIds: ids,
-      changeSeq: 3,
-    });
+    expect(version).toBe(2);
     expect(versionIds("a")).toEqual([]);
-    // nothing to delete: no notice
+    expect(
+      db.all(
+        "SELECT target, fence_version FROM jobs WHERE kind = 'projection-remove' ORDER BY target",
+      ),
+    ).toEqual([
+      { target: "engine", fence_version: 2 },
+      { target: "vectorIndex", fence_version: 2 },
+    ]);
+    // nothing to delete the second time: no change, no new job
     expect(purgeSource(db, sourceIdOf("a"), { reason: "source-deleted", at: AT })).toEqual({
       outcome: "unchanged",
       version: 2,
     });
+    expect(db.all("SELECT 1 FROM jobs WHERE kind = 'projection-remove'")).toHaveLength(2);
   });
 });
 
@@ -154,11 +156,10 @@ describe("delivery", () => {
     expect(vi.mocked(engine.removeSource).mock.calls).toEqual([
       [{ sourceId: a, version: 1 }, { version: 2 }, 3],
     ]);
-    const [va1] = versionIds("a");
     expect(vi.mocked(vectorIndex.remove).mock.calls).toEqual([
       [[], 1],
       [[], 2],
-      [[vectorRefOf(va1 as number)], 3],
+      [[vectorRefOf(sourceIdOf("a"), 1)], 3],
     ]);
     expect(await engine.appliedChangeSeq()).toBe(3);
     expect(await vectorIndex.appliedChangeSeq()).toBe(3);
@@ -168,38 +169,18 @@ describe("delivery", () => {
     ]);
   });
 
-  it("removes a deleted source from both, so none of its text is found again", async () => {
-    const { engine, vectorIndex, projections } = setup();
-    await vectorIndex.reset(SPACE);
-    await projections.notify([store("a", "jwxcanary shared"), store("b", "beta shared")]);
-    const ids = versionIds("a");
-    const { notice } = purgeSource(db, sourceIdOf("a"), {
-      reason: "user-deleted",
-      at: AT,
-    });
-    await projections.notify(notice ? [notice] : []);
-    const a = String(sourceIdOf("a"));
-    expect(vi.mocked(engine.removeSource).mock.calls).toEqual([
-      [{ sourceId: a, version: 1 }, { version: 1 }, 3],
-    ]);
-    expect(vi.mocked(vectorIndex.remove).mock.calls.at(-1)).toEqual([ids.map(vectorRefOf), 3]);
-    expect(await engine.relatedContext({ text: "jwxcanary", limit: 5 })).toEqual([]);
-    expect(await engine.relatedContext({ text: "shared", limit: 5 })).toEqual([
-      { ref: { sourceId: String(sourceIdOf("b")), version: 1 }, score: 1 },
-    ]);
-  });
-
   it("does not hand the engine a version purged before its notice was delivered", async () => {
     const { engine, projections } = setup();
     const stored = store("a", "jwxcanary");
-    const { notice } = purgeSource(db, sourceIdOf("a"), {
+    purgeSource(db, sourceIdOf("a"), {
       reason: "source-deleted",
       at: AT,
     });
-    await projections.notify([stored, notice as ProjectionNotice]);
+    await projections.notify([stored]);
     expect(engine.upsertSource).not.toHaveBeenCalled();
     expect(await engine.relatedContext({ text: "jwxcanary", limit: 5 })).toEqual([]);
-    expect(await engine.appliedChangeSeq()).toBe(2);
+    // nothing was handed over, and the removal is a job (I04-R12), not this notice's
+    expect(await engine.appliedChangeSeq()).toBeNull();
   });
 
   it("delivers in the order notified, one notice at a time", async () => {
@@ -237,28 +218,27 @@ describe("delivery", () => {
     expect(errors).toEqual([]);
   });
 
-  it("a deletion the engine missed while unavailable is rebuilt away at the next start (review F1)", async () => {
+  it("a notice the engine missed while unavailable is rebuilt away at the next start, a purged source's text with it (review F1)", async () => {
     const engine = new MemoryKnowledgeEngine();
-    const remove = engine.removeSource.bind(engine);
-    vi.spyOn(engine, "removeSource")
+    const upsert = engine.upsertSource.bind(engine);
+    vi.spyOn(engine, "upsertSource")
+      .mockImplementationOnce(upsert)
+      .mockImplementationOnce(upsert)
       .mockRejectedValueOnce(new AdapterUnavailableError("engine restarting"))
-      .mockImplementation(remove);
+      .mockImplementation(upsert);
     const { projections, errors } = setup(engine, new EmptyVectorIndex());
     await projections.notify([store("a", "jwxcanary secret"), store("b", "beta")]);
-    const { notice } = purgeSource(db, sourceIdOf("a"), {
-      reason: "user-deleted",
-      at: AT,
-    });
-    await projections.notify([notice as ProjectionNotice]); // unavailable: missed
-    await projections.notify([store("c", "gamma")]); // a later import
+    purgeSource(db, sourceIdOf("a"), { reason: "user-deleted", at: AT }); // its removal is a job, not run here
+    await projections.notify([store("c", "gamma")]); // unavailable: missed
+    await projections.notify([store("d", "delta")]); // the engine takes no more notices until a rebuild
     expect(errors).toEqual([]);
-    // the engine never moved past the missed removal
     expect(await engine.appliedChangeSeq()).toBe(2);
     // restart: a fresh projections instance on the same store and engine
     const { projections: restarted } = setup(engine, new EmptyVectorIndex());
     expect(await restarted.reconcile()).toMatchObject({ engine: "rebuilt" });
     expect(await engine.relatedContext({ text: "jwxcanary", limit: 5 })).toEqual([]);
     expect(await engine.relatedContext({ text: "gamma", limit: 5 })).toHaveLength(1);
+    expect(await engine.relatedContext({ text: "delta", limit: 5 })).toHaveLength(1);
     expect(readSetting(db, PROJECTION_STALE_SETTINGS.engine)).toBe("0");
   });
 

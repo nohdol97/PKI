@@ -13,9 +13,10 @@ import {
   recordTombstoneLift,
   supersedeOpenJobs,
   type ApplyTombstone,
+  type DerivativeRegistry,
   type LiftTombstone,
 } from "@pki/storage";
-import { propagateCanonical } from "./canonical-kinds.ts";
+import { derivativeRegistry, propagateCanonical } from "./canonical-kinds.ts";
 
 /** One clock per request: the tombstone's, the jobs' and the record's. */
 function requestTime(at: string): Date {
@@ -24,27 +25,40 @@ function requestTime(at: string): Date {
   return when;
 }
 
-export const applyTombstone: ApplyTombstone = (tx, w) => {
-  const when = requestTime(w.at);
-  // a source never seen gets its row with the keyed hash, never the plain identity (I04-R7)
-  const sourceId = ensureTombstoneSource(tx, w.identity);
-  const { outcome, tombstone } = recordTombstone(tx, sourceId, w);
-  const { coversVersion } = tombstone;
-  if (outcome === "unchanged") return { outcome, sourceId, coversVersion };
-  supersedeOpenJobs(tx, sourceId, when);
-  // the change is what the tombstone holds now: a raised revision keeps its reason
-  propagateCanonical(
-    tx,
-    { kind: tombstone.reason, sourceId, coversVersion, lastRevision: tombstone.lastRevision },
-    w.at,
-  );
-  // the purge left no version: what names the source is the hash from here on (I04-R7)
-  hashSourceIdentity(tx, sourceId);
-  return { outcome, sourceId, coversVersion };
-};
+/**
+ * The two entries over a registry (the composition root's: backend composition.ts). Nothing but
+ * the registry differs between builds, so a deletion always reaches every registered kind.
+ */
+export function tombstoneEntries(registry: DerivativeRegistry): {
+  applyTombstone: ApplyTombstone;
+  liftTombstone: LiftTombstone;
+} {
+  const applyTombstone: ApplyTombstone = (tx, w) => {
+    const when = requestTime(w.at);
+    // a source never seen gets its row with the keyed hash, never the plain identity (I04-R7)
+    const sourceId = ensureTombstoneSource(tx, w.identity);
+    const { outcome, tombstone } = recordTombstone(tx, sourceId, w);
+    const { coversVersion } = tombstone;
+    if (outcome === "unchanged") return { outcome, sourceId, coversVersion };
+    supersedeOpenJobs(tx, sourceId, when);
+    // the change is what the tombstone holds now: a raised revision keeps its reason
+    propagateCanonical(
+      tx,
+      { kind: tombstone.reason, sourceId, coversVersion, lastRevision: tombstone.lastRevision },
+      w.at,
+      registry,
+    );
+    // the purge left no version: what names the source is the hash from here on (I04-R7)
+    hashSourceIdentity(tx, sourceId);
+    return { outcome, sourceId, coversVersion };
+  };
 
-/** A lift deletes and restores nothing: no propagation and no invalidation record. */
-export const liftTombstone: LiftTombstone = (tx, sourceId, at) => {
-  requestTime(at);
-  return { outcome: recordTombstoneLift(tx, sourceId, at) };
-};
+  /** A lift deletes and restores nothing: no propagation and no invalidation record. */
+  const liftTombstone: LiftTombstone = (tx, sourceId, at) => {
+    requestTime(at);
+    return { outcome: recordTombstoneLift(tx, sourceId, at) };
+  };
+  return { applyTombstone, liftTombstone };
+}
+
+export const { applyTombstone, liftTombstone } = tombstoneEntries(derivativeRegistry);

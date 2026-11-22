@@ -8,9 +8,10 @@
 // Each change is judged and stored by the knowledge-engine's acceptChange
 // (I01-R8 to R12): an upsert by revision order, a delete or access-revoked change
 // through the tombstone entry in the page's canonical transaction, a scope change
-// on the source row. Each stored version and each deletion becomes a notice to the KnowledgeEngine and VectorIndex,
+// on the source row. Each stored version becomes a notice to the KnowledgeEngine and VectorIndex,
 // built in the page's transaction with the change sequence it reached and
-// delivered after the commit, before the runner is woken (V02-R13). A Connector
+// delivered after the commit, before the runner is woken (V02-R13). A deletion is no notice: the
+// tombstone's transaction registers the projections' removal jobs (I04-R12) and the runner is woken. A Connector
 // of another SDK version than CONNECTOR_SDK_VERSION is never initialized (I01-R1).
 import {
   ChangeSetSchema,
@@ -23,9 +24,9 @@ import {
   type SyncResponse,
 } from "@pki/contracts";
 import {
-  acceptChange,
-  propagateNewVersion,
+  defaultEntries,
   versionNotice,
+  type CanonicalEntries,
   type ProjectionNotice,
   type Projections,
 } from "@pki/knowledge-engine";
@@ -79,6 +80,11 @@ export interface SyncOptions {
   projections?: Pick<Projections, "notify">;
   /** Gives a registered job its time, the runner's clock (I03-T04); default systemClock. */
   clock?: Pick<Clock, "now">;
+  /**
+   * The entries that run the derivative registry (composition.ts `productEntries`); default the
+   * entries over the registry with no composition (knowledge-engine entries.ts).
+   */
+  entries?: Pick<CanonicalEntries, "acceptChange" | "propagateNewVersion">;
 }
 
 export interface ConnectorInstanceConfig {
@@ -110,16 +116,14 @@ function storeChange(
   change: Change,
   notices: ProjectionNotice[],
   clock: Pick<Clock, "now">,
+  entries: Pick<CanonicalEntries, "acceptChange" | "propagateNewVersion">,
 ): StoredOutcome | { refused: RefusalReason } {
-  const saved = acceptChange(tx, instanceId, change, new Date(clock.now()).toISOString());
+  const saved = entries.acceptChange(tx, instanceId, change, new Date(clock.now()).toISOString());
   if (saved.outcome === "blocked") return { refused: "tombstoned" };
   if (saved.outcome === "rejected") return { refused: "revision-not-newer" };
-  if (saved.outcome === "tombstoned") {
-    if (saved.notice) notices.push(saved.notice);
-    return "deleted";
-  }
+  if (saved.outcome === "tombstoned") return "deleted";
   if (saved.outcome !== "created") return saved.outcome;
-  propagateNewVersion(tx, saved.sourceId);
+  entries.propagateNewVersion(tx, saved.sourceId);
   notices.push(versionNotice(tx, saved.sourceId, saved.version));
   const job = registerJob(tx, {
     kind: EXTRACT_JOB_KIND,
@@ -144,6 +148,7 @@ export async function syncConnector(
   options: SyncOptions = {},
 ): Promise<{ received: number; created: number }> {
   const signal = options.signal ?? new AbortController().signal;
+  const entries = options.entries ?? defaultEntries;
   db.transaction(() => registerConnectorInstance(db, instanceId, kind));
   let cursor = options.rescan ? null : readCursor(db, instanceId);
   let received = 0;
@@ -172,7 +177,14 @@ export async function syncConnector(
     const pageCreated = canonicalTransaction(db, (tx) => {
       let n = 0;
       for (const change of page.changes) {
-        const outcome = storeChange(tx, instanceId, change, notices, options.clock ?? systemClock);
+        const outcome = storeChange(
+          tx,
+          instanceId,
+          change,
+          notices,
+          options.clock ?? systemClock,
+          entries,
+        );
         if (typeof outcome === "object") {
           // A deleted source's upsert is skipped, never a page failure: the
           // tombstone refuses it every time, so failing would stall the cursor and
@@ -191,6 +203,8 @@ export async function syncConnector(
     });
     for (const [change, reason] of refused) options.onRefused?.(change, reason);
     for (const [change, outcome] of stored) options.onStored?.(change, outcome);
+    // a deletion registered the projections' removal jobs: the runner takes them without waiting for notices
+    if (stored.some(([, outcome]) => outcome === "deleted")) void options.runner?.wake();
     // A failed page threw above: the notices its changes built are never delivered. The runner is woken once the
     // engine has the page's versions, so a proposing engine knows what is extracted.
     const delivered = notices.length > 0 ? options.projections?.notify(notices) : undefined;
@@ -259,7 +273,7 @@ export async function createConnectorManager(
   db: SqlDriver,
   instances: readonly ConnectorInstanceConfig[],
   kinds: Readonly<Record<string, ConnectorFactory>>,
-  options: Pick<SyncOptions, "runner" | "projections" | "clock"> = {},
+  options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> = {},
 ): Promise<ConnectorManager> {
   const entries = await Promise.all(
     instances.map(async ({ id, kind, config }) => {

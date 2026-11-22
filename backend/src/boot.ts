@@ -25,10 +25,14 @@ import {
   productConnectors,
   productEgress,
   productEngine,
+  productEntries,
   productImporter,
+  productProjectionPorts,
   productProjections,
   productProviders,
+  productRegistry,
   productRunner,
+  productVisibleEngine,
   sweepCliRuns,
   cliRunsRoot,
   type ConnectorSet,
@@ -66,9 +70,9 @@ export interface BootOptions {
   providers?: readonly LLMProvider[];
   embedder?: EmbeddingProvider | null;
   /**
-   * The registered projection kinds as ports, for the runner's `projection-remove` and
-   * `projection-rebuild` handlers (I03-T10). I04-T04 passes the product's; without them
-   * those jobs wait, and the marks still register their rebuilds.
+   * Replaces the product's ports for the runner's `projection-remove` and `projection-rebuild`
+   * handlers (tests: a projection double). Default the registered kinds over the bound engine and
+   * vector index (composition.ts productProjectionPorts).
    */
   projectionPorts?: ProjectionPorts;
 }
@@ -94,11 +98,23 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     options.providers ??
     productProviders(db, options.secrets, egress, cliRunsRoot(options.dataDir));
   const calls = productCalls(db, egress, { providers });
-  const engine = options.engine ?? productEngine();
+  const bound = options.engine ?? productEngine();
   const adapters = productAdapters(options.dataDir);
   if (options.vectorIndex) adapters.vectorIndex = options.vectorIndex;
   if (options.embedder !== undefined) adapters.embedder = options.embedder;
+  // the registry is built once, from the implementations bound; the backend holds the engine only as it wraps it (I04-R13)
+  const registry = productRegistry({ engine: bound, vectorIndex: adapters.vectorIndex });
+  const entries = productEntries(registry);
+  const engine = productVisibleEngine(db, registry, bound);
   const projections = productProjections(db, { engine, ...adapters });
+  const projectionPorts =
+    options.projectionPorts ??
+    productProjectionPorts(
+      db,
+      registry,
+      { engine, vectorIndex: adapters.vectorIndex },
+      projections,
+    );
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")
@@ -108,7 +124,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     policyFingerprint: calls.policyFingerprint,
     engine,
     projections,
-    ...(options.projectionPorts ? { projectionPorts: options.projectionPorts } : {}),
+    projectionPorts,
+    registry,
     // folded away from any other build (V01-T15); the runner honours it in a test build only
     ...(BUILD_KIND === "test" && options.testBuild?.jobs
       ? { testBuild: options.testBuild.jobs }
@@ -119,6 +136,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     runner,
     projections,
     clock,
+    entries,
   });
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
   // whatever the applied change sequence says (I03-R7); registered before the server serves a deletion or the runner starts
@@ -135,8 +153,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     egress,
     secrets: options.secrets,
     calls,
-    importer: productImporter(db, { runner, projections, clock }),
-    projections,
+    importer: productImporter(db, { runner, projections, clock, entries }),
+    entries,
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),
   });

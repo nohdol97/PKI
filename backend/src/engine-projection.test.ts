@@ -39,7 +39,10 @@ import {
   productEgress,
   productEngine,
   productImporter,
+  productEntries,
+  productProjectionPorts,
   productProjections,
+  productRegistry,
   productRunner,
 } from "./composition.ts";
 import { syncConnector, type ConnectorManager } from "./connectors.ts";
@@ -101,7 +104,21 @@ async function pipeline(engine: KnowledgeEngine, vectorIndex = new MemoryVectorI
   consent(egress);
   const adapters = { ...productAdapters(dir), vectorIndex };
   const projections = productProjections(db, { engine, ...adapters });
-  runner = productRunner(db, broker, { engine, projections });
+  // the registry and the ports as boot.ts builds them: a deletion's removals are jobs the runner executes (I04-T04)
+  const registry = productRegistry({ engine, vectorIndex: adapters.vectorIndex });
+  const entries = productEntries(registry);
+  runner = productRunner(db, broker, {
+    engine,
+    projections,
+    registry,
+    projectionPorts: productProjectionPorts(
+      db,
+      registry,
+      { engine, vectorIndex: adapters.vectorIndex },
+      projections,
+    ),
+  });
+  const running = runner;
   server = await startServer({
     token: TOKEN,
     allowedOrigins: [],
@@ -110,8 +127,9 @@ async function pipeline(engine: KnowledgeEngine, vectorIndex = new MemoryVectorI
     dataDirectory: dir,
     egress,
     ...adapters,
-    importer: productImporter(db, { runner, projections }),
-    projections,
+    importer: productImporter(db, { runner, projections, entries }),
+    entries,
+    onRunConditionsChanged: () => void running.wake(),
   });
   const port = server.port;
   const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
@@ -122,13 +140,8 @@ async function pipeline(engine: KnowledgeEngine, vectorIndex = new MemoryVectorI
 // by identity: a purged source's row holds the hash (I04-R7)
 const sourceIdOf = (externalId: string) =>
   String(findSourceId(db, MAIL.connectorId, "", externalId));
-const versionIdsOf = (externalId: string) =>
-  db
-    .all(
-      "SELECT v.id FROM source_versions v JOIN sources s ON s.id = v.source_id WHERE s.external_id = ?",
-      [externalId],
-    )
-    .map((r) => r.id as number);
+const readJobs = (status: string) =>
+  db.all("SELECT id FROM jobs WHERE kind = 'projection-remove' AND status = ?", [status]);
 const related = (engine: KnowledgeEngine, text: string) =>
   engine.relatedContext({ text, limit: 10 }).then((hits) => hits.map((h) => h.ref.sourceId));
 
@@ -155,17 +168,17 @@ describe("engine.calls", () => {
     expect(readChangeSeq(db)).toBe(3);
 
     const mail = sourceIdOf(MAIL.externalId);
-    const mailVersions = versionIdsOf(MAIL.externalId);
     expect(await related(engine, "윤하람 미리내")).toContain(mail);
     expect((await post(routes.deleteSource.path, { ...MAIL, namespace: "" })).body).toEqual({
       outcome: "deleted",
     });
-    await projections.drain();
+    // the deletion registered the removal jobs and woke the runner (I04-R12)
+    await vi.waitFor(() => expect(readJobs("succeeded")).toHaveLength(2));
     expect(vi.mocked(engine.removeSource).mock.calls).toEqual([
       [{ sourceId: mail, version: 1 }, { version: 1 }, 4],
     ]);
     expect(vi.mocked(vectorIndex.remove).mock.calls.at(-1)).toEqual([
-      mailVersions.map(vectorRefOf),
+      [vectorRefOf(Number(mail), 1)],
       4,
     ]);
     // the test asks the engine: the deleted source is not found, the others are
@@ -177,8 +190,9 @@ describe("engine.calls", () => {
 
   it("notifies a deletion by a Connector change too (access revoked)", async () => {
     const engine = spied(new MemoryKnowledgeEngine());
-    const { post, projections } = await pipeline(engine);
+    const { post, projections, runner } = await pipeline(engine);
     await post(routes.importJsonl.path, { text: read("v02-mail.jsonl") });
+    await runner.wake(); // idle: only the sync's own wake can run the removal jobs
     const page: ChangeSet = {
       changes: [
         {
@@ -212,8 +226,9 @@ describe("engine.calls", () => {
     await syncConnector(db, MAIL.connectorId, JSONL_CONNECTOR_KIND, revoking, {
       rescan: true,
       projections,
+      runner,
     });
-    await projections.drain();
+    await vi.waitFor(() => expect(readJobs("succeeded")).toHaveLength(2));
     expect(vi.mocked(engine.removeSource).mock.calls).toEqual([
       [{ sourceId: sourceIdOf(MAIL.externalId), version: 1 }, { version: 1 }, 2],
     ]);
