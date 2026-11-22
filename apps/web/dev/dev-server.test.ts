@@ -6,8 +6,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { startBackend } from "./dev-server.ts";
+
+// Every test here starts real processes. Slowest test, 5 runs alone: 0.64 s ("stops the dev backend ..."); 10 runs with the machine
+// 3x oversubscribed (24 busy loops on 8 cores): 4.5 s (the same test). 30 s is about 5x the loaded worst case.
+vi.setConfig({ testTimeout: 30_000 });
 
 const dir = mkdtempSync(join(tmpdir(), "pki-dev-server-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));

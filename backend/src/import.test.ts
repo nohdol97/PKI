@@ -879,10 +879,13 @@ describe("import.legacy-identity", () => {
      * - a foreign-kind instance's source and another jsonl-import instance's source that the lines
      *   never name are never touched (no version change, no tombstone);
      * - an instance holds at most one source per external id (namespace "" or the line's, never both);
-     * - `user-deleted` blocks every revision: the source has no version;
+     * - `user-deleted`, and a `source-deleted` / `access-revoked` tombstone with no last revision
+     *   (the old form, I01-R10 step 0), block every revision: the source has no version;
      * - `source-deleted` / `access-revoked` block revisions up to the tombstone's last revision: every
      *   version that exists has a greater revision (a higher revision afterwards is a NEW version,
-     *   so a tombstoned source may legitimately regain versions above it).
+     *   so a tombstoned source may legitimately regain versions above it);
+     * - liveness: no lock is held by the test, so no request answers `instance-busy` or stops, and
+     *   the first request of the empty state, when it upserts, stores at least a version for each id it names.
      */
     const SEEDS = [
       "none",
@@ -890,10 +893,12 @@ describe("import.legacy-identity", () => {
       "row+deleted",
       "hash-only tombstone",
       "row+user-deleted",
+      "row+tombstone without last revision",
     ] as const;
     const ROUTES = ["v02", "api-ci", "api-other", "file-other"] as const;
     const KINDS = ["up1", "up5", "del2", "revoke2", "revoked3"] as const;
     const IDS = ["e1", "e2"];
+    const NO_REVISION = "row+tombstone without last revision";
     const CASES_PER_SEED = 80;
 
     const lineOf = (kind: (typeof KINDS)[number], id: string, ci = "ci") => {
@@ -948,27 +953,33 @@ describe("import.legacy-identity", () => {
                 [inst],
               );
             for (const id of IDS) {
-              if (seed === "row" || seed === "row+deleted" || seed === "row+user-deleted")
-                raw("ci", id);
+              if (seed !== "none" && seed !== "hash-only tombstone") raw("ci", id);
               if (seed !== "none" && seed !== "row") {
                 canonicalTransaction(target, (tx) =>
                   applyTombstone(tx, {
                     identity: { connectorInstanceId: "ci", namespace: "", externalId: id },
                     reason: seed === "row+user-deleted" ? "user-deleted" : "source-deleted",
-                    lastRevision: seed === "row+user-deleted" ? null : 2,
+                    lastRevision: seed === "row+user-deleted" || seed === NO_REVISION ? null : 2,
                     at: new Date().toISOString(),
                   }),
                 );
               }
             }
-            for (const { route, kind } of ops) {
+            // every answer of this case; no lock is held here, so none may be a busy answer
+            const answers: unknown[] = [];
+            const versionsOf = () =>
+              target.all("SELECT count(*) AS n FROM source_versions")[0]?.n as number;
+            const versionsBefore = versionsOf();
+            let versionsAfterFirst = versionsBefore;
+            for (const [opIndex, { route, kind }] of ops.entries()) {
               // each request is two lines (two ids) naming ci, and a third naming the foreign instance
               const text = [...IDS.map((id) => lineOf(kind, id)), lineOf(kind, "e1", "fx")].join(
                 "\n",
               );
-              if (route === "v02") await productImporter(target)(text);
-              else if (route === "api-ci") await importContent(target, "ci", text);
-              else if (route === "api-other") await importContent(target, "other", text);
+              if (route === "v02") answers.push(await productImporter(target)(text));
+              else if (route === "api-ci") answers.push(await importContent(target, "ci", text));
+              else if (route === "api-other")
+                answers.push(await importContent(target, "other", text));
               else {
                 const m = await createConnectorManager(
                   target,
@@ -981,8 +992,31 @@ describe("import.legacy-identity", () => {
                   ],
                   { [JSONL_IMPORT_KIND]: createJsonlConnector },
                 );
-                await m.sync("other");
+                answers.push(await m.sync("other"));
               }
+              if (opIndex === 0) versionsAfterFirst = versionsOf();
+            }
+            // liveness: `instance-busy` is the `error` of an API answer or the `stopped` of a sync; a
+            // request of the V02 route that failed in its instance lists its lines `instance-failed`
+            for (const answer of answers) {
+              const a = answer as {
+                error?: unknown;
+                stopped?: unknown;
+                errors?: { reason: string }[];
+              };
+              expect([where, a.error, a.stopped]).toEqual([where, undefined, undefined]);
+              expect([
+                where,
+                a.errors?.filter((e) => e.reason === "instance-failed") ?? [],
+              ]).toEqual([where, []]);
+            }
+            // the simplest operation: an upsert into the empty state stores at least a version of each id
+            const first = ops[0];
+            if (seed === "none" && first && (first.kind === "up1" || first.kind === "up5")) {
+              expect([where, versionsAfterFirst - versionsBefore >= IDS.length]).toEqual([
+                where,
+                true,
+              ]);
             }
             // foreign kind: untouched
             expect([where, bystander("fx")]).toEqual([where, [{ versions: 1, tombs: 0 }]]);
@@ -990,6 +1024,15 @@ describe("import.legacy-identity", () => {
             expect([where, bystander("ci2")]).toEqual([where, [{ versions: 1, tombs: 0 }]]);
             for (const id of IDS) {
               const found = (inst: string, ns: string) => findSourceId(target, inst, ns, id);
+              // with no legacy row or tombstone, nothing is written under the legacy identity
+              if (seed === "none") {
+                expect([where, id, "no legacy write", found("ci", "")]).toEqual([
+                  where,
+                  id,
+                  "no legacy write",
+                  undefined,
+                ]);
+              }
               // at most one source per external id in an instance
               expect([
                 where,
@@ -1016,8 +1059,10 @@ describe("import.legacy-identity", () => {
                 const tomb = ids
                   .map((s) => readTombstoneState(target, s))
                   .filter((t) => t !== undefined);
+                // blocks every revision: a user deletion, or a tombstone that never had a last revision
                 const userDeleted = tomb.some(
-                  (t) => t.reason === "user-deleted" && t.liftedAt === null,
+                  (t) =>
+                    t.liftedAt === null && (t.reason === "user-deleted" || t.lastRevision === null),
                 );
                 const lastRev = Math.max(0, ...tomb.map((t) => t.lastRevision ?? 0));
                 const revisions = ids.flatMap((s) =>

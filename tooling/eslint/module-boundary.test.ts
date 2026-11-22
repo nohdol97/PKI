@@ -116,7 +116,8 @@ describe("repository lint config enforces module-boundary", () => {
   });
 
   it("finds no boundary violation in the repository's own code", async () => {
-    const eslint = new ESLint({ cwd: repoRoot });
+    // only the rule under test runs: the other rules' messages are filtered out below anyway
+    const eslint = new ESLint({ cwd: repoRoot, ruleFilter: ({ ruleId }) => ruleId === RULE_ID });
     const results = await eslint.lintFiles([
       "apps",
       "backend",
@@ -132,7 +133,9 @@ describe("repository lint config enforces module-boundary", () => {
     );
     expect(results.length).toBeGreaterThan(20);
     expect(violations).toEqual([]);
-  }, 30_000); // lints the whole repository: seconds alone, more under a full parallel run
+  }, 90_000);
+  // ^ lints the whole repository. Measured, 5 runs each: 3.3-3.5 s alone (4.3-4.5 s before only this rule
+  // ran), 16.9-19.6 s with the machine 3x oversubscribed (24 busy loops on 8 cores). 90 s is 4.5x that.
 
   it("allows imports inside the same package and of platform modules", async () => {
     const messages = await lintWithRepoConfig(
