@@ -559,6 +559,17 @@ flowchart TD
 4. **삭제는 원 시스템이 남긴다.** 이 예시는 스스로 대조하지 않는다. 지운 메모가 원 시스템에 `deleted` 표시로 남으므로 재스캔이 삭제를 빠짐없이 다시 알린다("잠정 결정"의 `deletionsOnRescan` 정의). 그래서 인스턴스 밖의 기록이 필요 없고, 계약 시나리오의 `later`는 나중 시점의 설정이다. 표시 없이 사라지는 원 시스템을 흉내 내는 예시(스스로 대조, 기록은 인스턴스 밖)는 두지 않았다.
 5. **위반 변형 셋.** `src/adapters/violating-connectors.ts`에 있고 진입점으로 내보내지 않는다. 각각 예시 수집기를 감싸 한 곳만 어긴다: 받은 cursor를 그대로 돌려주는 것(`no-progress`), 능력에서 `deletes`·`deletionsOnRescan`만 거짓으로 바꾼 것(`capability-deletes`), 초기화 전 `getChanges`에 빈 페이지로 답하는 것(`responds-before-init`). 테스트는 예시와 같은 시나리오에서 `checkConnector`가 **정확히 그 코드 하나**를 돌려주는지 본다.
 
+**T09가 넘기는 것**(I01-T09에서 정한 것. **잠정**: spec이 비워 둔 곳을 고른 것이며, 바꿀 때는 이 절과 `tooling/connectors/public-only.test.ts`, `backend/src/connectors.public-only.test.ts`를 함께 고친다). 테스트 ID `connectors.public-only`는 이 두 파일이다.
+
+1. **자리.** 검사기는 `tooling/connectors/public-only.ts`의 `checkPublicOnly(저장소 뿌리)`이고 위반 목록(`file`, `line`, `code`, `detail`)을 돌려준다. 뿌리를 인자로 받으므로 임시 복사본에 그대로 돌릴 수 있다(C4 ⑤). 원본은 TypeScript 컴파일러의 구문 트리로 읽는다(정규식이 아니다. 주석과 문자열 안의 글자는 걸리지 않는다). import·site 검사의 테스트는 `tooling/`에, 종류 검사의 테스트는 제품 구성을 불러야 하므로 `backend/src/`에 둔다(`tooling/`은 패키지가 아니라 모듈 경계 규칙상 `@pki/backend`를 부를 수 없다).
+2. **종류 검사가 보는 것.** `productConnectors().kinds`의 이름과, `productImporter`가 합성 JSONL 한 줄을 실제로 가져온 뒤 정본 `connector_instances.kind`에 남은 값을 합친 집합이 정확히 넷이어야 한다. `jsonl-import`는 `connectorKinds`에 등록되지 않고 가져오기 경로로만 생기기 때문이다(V02 구조, V01 "T15가 넘기는 것" 4항). 등록된 인스턴스의 종류가 `site-*` 셋뿐인지도 함께 본다. 묶인 산출물에서 테스트 Connector가 빠졌는지는 V01의 `artifact.contents`·`artifact.gate`가 이미 보며 이 작업은 그것을 바꾸지 않았다.
+3. **아직 없는 뿌리.** `backend/src/adapters/`는 반드시 있어야 하고 스크립트가 하나 이상 있어야 한다(없으면 `missing-root`). `packages/connector-example/`(T08)와 `packages/connector-sdk/`(T05)는 아직 `main`에 없으므로, **패키지 폴더가 없으면 건너뛰고 있으면 그 `src/`가 있어야 한다**. 두 패키지가 머지되면 고칠 것 없이 검사 대상이 된다. 두 패키지가 모두 머지된 뒤에는 `OPTIONAL_PACKAGES`를 비워 "없으면 실패"로 바꾼다(한 줄, T10 또는 마지막 머지).
+4. **`backend/src/jsonl-lines.ts`.** `jsonl-import` 수집기와 그 테스트가 어댑터 폴더 밖의 이 파일을 상대 경로로 읽는다(T05가 해석을 `@pki/connector-sdk`로 옮기기 전의 V02 구조). 예외로 눈감지 않고 **이 파일을 검사 대상에 더했다**(`EXTRA_FILES`). 같은 허용 목록을 지켜야 하고, 검사 대상 가운데 아무도 읽지 않게 되면 `unused-extra-file`로 실패한다. 그래서 **T05는 이 항목을 지운다**.
+5. **상대 경로.** 풀어 낸 경로가 그 파일과 같은 뿌리 안이거나 4항의 파일일 때만 허용한다. 다른 뿌리로 건너가는 상대 경로는 막는다(모듈 경계 규칙과 같은 방향).
+6. **모호한 곳은 엄격한 쪽.** ① 타입만 들여오는 import와 다시 내보내기(`export … from`), `import x = require()`도 허용 목록을 따른다. ② 타입 자리의 `import("…")`도 동적 import로 본다. ③ `require`, `fetch`, `XMLHttpRequest`, `WebSocket`은 **어느 자리의 식별자든**(속성 이름, 선언 이름, `globalThis.fetch` 포함) 걸리고, 문자열 키 접근(`globalThis["fetch"]`)도 걸린다. 가린 지역 이름을 따로 풀지 않는다. ④ 스크립트 확장자는 R28의 다섯에 `.jsx`, `.mts`, `.cts`를 더했다(확장자로 빠져나가지 못하게). ⑤ 테스트 파일은 `*.test.ts`·`*.test.tsx`다(Vitest가 도는 이름과 같다).
+7. **자리 표시 목록.** `SITE_PLACEHOLDERS`(`site/README.md` 하나). 목록의 파일은 일반 파일이어야 하고, 스크립트 확장자가 아니며, `#!`로 시작하지 않는다. `site/`의 다른 파일은 읽지 않는다.
+8. **변이 넷과 임시 복사본.** 테스트가 검사 대상과 `site/`를 OS 임시 폴더에 복사하고, 그 복사본의 `backend/src/adapters/`에 파일 하나씩을 더해 각각의 코드가 나오는지 본다: 허용 목록 밖 패키지의 정적 import(`import-not-allowed`), 동적 `import()`(`dynamic-import`), `require`(`require`), 전역 `fetch`(`network-global`). 같은 복사본의 `site/connectors/`에 `fetch`와 네트워크 패키지를 쓰는 파일을 두면 통과한다. 저장소 트리에는 쓰지 않는다.
+
 같이 진행할 수 있는 작업은 다음과 같다.
 - T01 뒤: T04, T09. T02는 T01과 I04의 tombstone·해시 작업(I04-T05, I04-T07)을 함께 기다린다.
 - T02 뒤: T06(I04-T09도 기다림), T07. T03은 T02와 T04를 함께 기다린다.
@@ -794,3 +805,4 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 | 2026-11-22 | T04 검토 반영(잠정 유지): 되풀이 페이지의 정지는 `no-progress` 하나(그 페이지를 접지 않음), 읽을 수 있는 버전은 `capabilities`가 없어도 먼저 보고, 페이지 상한 `maxPages`(기본 10,000)는 위반이 아닌 시나리오 오류, `scope-change` 뒤 `getDocument`는 내용과 사건의 범위로 비교, 비교 내용이 출처 정보를 포함함을 명시, 정의의 갈래별 사례 | 작업 분해(T04가 넘기는 것) | I01-T04 검토 F1~F6 |
 | 2026-11-22 | T04 재검토 반영(잠정 유지): tombstone 뒤 늦게 온 `scope-change`의 정체는 `getDocument`가 `null`이고 재스캔에서 살아 있지 않음, 마지막 페이지의 같은 cursor는 정지가 아님, `maxPages`는 양의 정수만 | 작업 분해(T04가 넘기는 것) | I01-T04 재검토 D1~D3 |
 | 2026-11-22 | "T08이 넘기는 것" 추가(잠정): 예시 패키지의 의존성 자리와 진입점, 설정이 곧 자료인 지어낸 원 시스템, cursor `seq:<n>`과 능력, 삭제를 원 시스템이 남겨 스스로 대조하지 않음, 위반 변형 셋의 자리와 어기는 곳 | 작업 분해(T08이 넘기는 것) | I01-T08 구현 |
+| 2026-11-22 | "T09가 넘기는 것" 추가(잠정): 검사기의 자리(`tooling/connectors/public-only.ts`)와 두 테스트 파일, 종류 검사가 보는 집합(등록된 종류와 가져오기가 남긴 종류), 아직 없는 두 패키지는 폴더가 생기면 검사, `backend/src/jsonl-lines.ts`를 T05까지 검사 대상에 더함, 모호한 곳은 엄격한 쪽(타입 import, 어느 자리의 식별자든, 확장자 셋 추가), 자리 표시 파일의 조건 | 작업 분해(T09가 넘기는 것) | I01-T09 구현 |

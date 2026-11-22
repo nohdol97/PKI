@@ -1,0 +1,220 @@
+// I01-R28 `connectors.public-only`: the public repository holds no real mail,
+// messenger or wiki client. The script files of the Connector paths (SCAN_ROOTS,
+// EXTRA_FILES) import only what the allow-list names, and use no dynamic
+// import(), no require and no network global. Filtering by an allow-list, not by
+// names, also refuses an SDK package nobody listed. site/ belongs to the fork
+// (ownership.md 3) and is not read, except that the placeholder files the public
+// repository ships there exist and are not scripts.
+// The repository root is a parameter: the tests run the check on a temporary copy.
+// Decisions the spec left open: I01 spec "T09가 넘기는 것".
+// Known gaps (review catches them; this stops a client brought in by mistake, not
+// hidden code): a global reached by a computed name (globalThis["fe" + "tch"]),
+// eval and new Function, sockets or device files opened through the allowed
+// node:fs, symbolic links inside a root (not followed).
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import ts from "typescript";
+
+/** Folders whose script files are inspected, relative to the repository root. */
+export const SCAN_ROOTS = [
+  "backend/src/adapters",
+  "packages/connector-example/src",
+  "packages/connector-sdk/src",
+] as const;
+
+/**
+ * Packages not on main yet (I01-T08, I01-T05): skipped while the package folder
+ * is absent, inspected as soon as it exists. Empty this once both have merged.
+ */
+export const OPTIONAL_PACKAGES: readonly string[] = [
+  "packages/connector-example",
+  "packages/connector-sdk",
+];
+
+/**
+ * Files outside the roots that a root's file reads by a relative path, inspected
+ * under the same list. jsonl-lines.ts: the JSONL parsing until I01-T05 moves it
+ * to @pki/connector-sdk; unused, the entry fails and is to be removed.
+ */
+export const EXTRA_FILES = ["backend/src/jsonl-lines.ts"] as const;
+
+/** The files the public repository ships under site/. */
+export const SITE_PLACEHOLDERS = ["site/README.md"] as const;
+
+const ALLOWED_IMPORTS = new Set([
+  "@pki/contracts",
+  "@pki/connector-sdk",
+  "zod",
+  "node:crypto",
+  "node:fs",
+  "node:fs/promises",
+  "node:path",
+]);
+const TEST_ONLY_IMPORTS = new Set(["@pki/testkit", "vitest"]);
+const TEST_FILE = /\.test\.tsx?$/;
+const SCRIPT_KINDS: Record<string, ts.ScriptKind> = {
+  ".ts": ts.ScriptKind.TS,
+  ".mts": ts.ScriptKind.TS,
+  ".cts": ts.ScriptKind.TS,
+  ".tsx": ts.ScriptKind.TSX,
+  ".js": ts.ScriptKind.JS,
+  ".mjs": ts.ScriptKind.JS,
+  ".cjs": ts.ScriptKind.JS,
+  ".jsx": ts.ScriptKind.JSX,
+};
+const NETWORK_GLOBALS = new Set(["fetch", "XMLHttpRequest", "WebSocket"]);
+const REQUIRE = "require";
+
+export type FindingCode =
+  | "import-not-allowed"
+  | "dynamic-import"
+  | "require"
+  | "network-global"
+  | "missing-root"
+  | "unused-extra-file"
+  | "placeholder-missing"
+  | "placeholder-is-script";
+
+export interface Finding {
+  /** Relative to the repository root, with forward slashes. */
+  file: string;
+  line: number;
+  code: FindingCode;
+  detail: string;
+}
+
+const isScript = (path: string): boolean => Object.hasOwn(SCRIPT_KINDS, extname(path));
+const isFile = (path: string): boolean => existsSync(path) && statSync(path).isFile();
+const isDirectory = (path: string): boolean => existsSync(path) && statSync(path).isDirectory();
+const inside = (dir: string, path: string): boolean => {
+  const rel = relative(dir, path);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+};
+
+/** The script files under `dir` (absolute), sorted. */
+function scriptsIn(dir: string): string[] {
+  if (!isDirectory(dir)) return [];
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && isScript(entry.name))
+    .map((entry) => join(entry.parentPath, entry.name))
+    .sort();
+}
+
+/** The script files the check reads in `repoRoot`, relative to it. */
+export function inspectedFiles(repoRoot: string): string[] {
+  const root = resolve(repoRoot);
+  return [
+    ...SCAN_ROOTS.flatMap((scanRoot) => scriptsIn(join(root, scanRoot))),
+    ...EXTRA_FILES.map((file) => join(root, file)).filter(isFile),
+  ].map((file) => relative(root, file).split(sep).join(posix.sep));
+}
+
+/** The placeholder files exist, are plain files and are not scripts; nothing else under site/ is read. */
+export function checkPlaceholders(
+  repoRoot: string,
+  placeholders: readonly string[] = SITE_PLACEHOLDERS,
+): Finding[] {
+  return placeholders.flatMap((file): Finding[] => {
+    const path = join(resolve(repoRoot), file);
+    const finding = (code: FindingCode, detail = ""): Finding[] => [
+      { file, line: 1, code, detail },
+    ];
+    if (!isFile(path)) return finding("placeholder-missing");
+    if (isScript(path)) return finding("placeholder-is-script", extname(path));
+    if (readFileSync(path, "utf8").startsWith("#!")) return finding("placeholder-is-script", "#!");
+    return [];
+  });
+}
+
+/** The module a declaration names, for every form that takes a string specifier. */
+function specifierOf(node: ts.Node): ts.Expression | undefined {
+  if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return node.moduleSpecifier;
+  if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+    return node.moduleReference.expression;
+  }
+  return undefined;
+}
+
+export function checkPublicOnly(repoRoot: string): Finding[] {
+  const root = resolve(repoRoot);
+  const findings: Finding[] = [];
+  const extras = EXTRA_FILES.map((file) => join(root, file));
+  const usedExtras = new Set<string>();
+
+  const inspect = (path: string, scanRoot: string | undefined): void => {
+    const file = relative(root, path).split(sep).join(posix.sep);
+    const source = ts.createSourceFile(
+      path,
+      readFileSync(path, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      SCRIPT_KINDS[extname(path)],
+    );
+    const report = (node: ts.Node, code: FindingCode, detail: string): void => {
+      const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+      findings.push({ file, line, code, detail });
+    };
+    const allowed = (specifier: string): boolean => {
+      if (ALLOWED_IMPORTS.has(specifier)) return true;
+      if (TEST_ONLY_IMPORTS.has(specifier)) return TEST_FILE.test(path);
+      if (!/^\.\.?(\/|$)/.test(specifier)) return false;
+      const target = resolve(path, "..", specifier);
+      if (scanRoot !== undefined && extras.includes(target)) {
+        usedExtras.add(target);
+        return true;
+      }
+      return scanRoot !== undefined && inside(scanRoot, target);
+    };
+    const named = (node: ts.Node, name: string): void => {
+      if (name === REQUIRE) report(node, "require", name);
+      else if (NETWORK_GLOBALS.has(name)) report(node, "network-global", name);
+    };
+    const visit = (node: ts.Node): void => {
+      const specifier = specifierOf(node);
+      if (specifier) {
+        const text = ts.isStringLiteralLike(specifier) ? specifier.text : specifier.getText(source);
+        if (!allowed(text)) report(specifier, "import-not-allowed", text);
+      }
+      if (
+        ts.isImportEqualsDeclaration(node) &&
+        ts.isExternalModuleReference(node.moduleReference)
+      ) {
+        report(node.moduleReference, "require", REQUIRE);
+      }
+      const dynamic =
+        ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword;
+      if (dynamic || ts.isImportTypeNode(node)) report(node, "dynamic-import", "import()");
+      if (ts.isIdentifier(node)) named(node, node.text);
+      if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+        named(node.argumentExpression, node.argumentExpression.text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  };
+
+  for (const scanRoot of SCAN_ROOTS) {
+    const dir = join(root, scanRoot);
+    const files = scriptsIn(dir);
+    const optional = OPTIONAL_PACKAGES.some(
+      (pkg) => scanRoot.startsWith(`${pkg}/`) && !existsSync(join(root, pkg)),
+    );
+    if (files.length === 0 && !optional) {
+      findings.push({ file: scanRoot, line: 1, code: "missing-root", detail: "" });
+    }
+    for (const file of files) inspect(file, dir);
+  }
+  for (const [i, extra] of extras.entries()) {
+    if (isFile(extra)) inspect(extra, undefined);
+    if (!usedExtras.has(extra) || !isFile(extra)) {
+      findings.push({
+        file: EXTRA_FILES[i] as string,
+        line: 1,
+        code: "unused-extra-file",
+        detail: "",
+      });
+    }
+  }
+  findings.push(...checkPlaceholders(root));
+  return findings;
+}
