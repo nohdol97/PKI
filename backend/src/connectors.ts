@@ -666,25 +666,27 @@ export async function createConnectorManager(
     return "judged";
   }
 
+  /** An instance as the list shows it, and as a change notice answers it (I06-R12, R13): the marks and the slots, never a value. */
+  const listed = (entry: Entry): ConnectorSummary => {
+    const { summary, slots, states } = entry;
+    const shown = readRescanState(db, summary.id).deletionsMayBeMissed
+      ? { ...summary, deletionsMayBeMissed: true }
+      : { ...summary };
+    return slots && slots.length > 0
+      ? {
+          ...shown,
+          credentials: slots.map(({ slot, name }, i) => ({
+            slot,
+            name,
+            state: states[i] ?? "unavailable",
+          })),
+        }
+      : shown;
+  };
+
   return {
     // the mark lives in the file, so a restart keeps it (I01-R17)
-    list: () =>
-      entries.map((entry) => {
-        const { summary, slots, states } = entry;
-        const shown = readRescanState(db, summary.id).deletionsMayBeMissed
-          ? { ...summary, deletionsMayBeMissed: true }
-          : { ...summary };
-        return slots && slots.length > 0
-          ? {
-              ...shown,
-              credentials: slots.map(({ slot, name }, i) => ({
-                slot,
-                name,
-                state: states[i] ?? "unavailable",
-              })),
-            }
-          : shown;
-      }),
+    list: () => entries.map(listed),
     configOf: (id) => find(id)?.config,
     async recheck(id, turn) {
       const entry = find(id);
@@ -707,7 +709,7 @@ export async function createConnectorManager(
       const entry = find(id);
       if (!entry) return undefined;
       const answer = (rebuild: RebuildAnswer["rebuild"]): RebuildAnswer => ({
-        summary: { ...entry.summary },
+        summary: listed(entry),
         rebuild,
       });
       if (!entry.factory || !entry.slots) return answer("skipped"); // nothing to make, or a declaration that cannot be used

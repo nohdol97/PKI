@@ -37,6 +37,12 @@ export function isConnectorCredentialSecret(name: string): boolean {
 }
 
 /**
+ * Provisional (I06-R11, R12), one place: the shortest gap between two notice-driven rebuilds of a
+ * rejected instance. The backend holds the notice back by it; the screen reads the list again after it.
+ */
+export const CREDENTIAL_RETRY_MIN_MS = 30_000;
+
+/**
  * One secret as its store has it. "unavailable": the store cannot be used (no OS
  * protection, unreadable file, failed decryption) — never a reason to fall back
  * to plaintext.
