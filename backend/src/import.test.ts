@@ -1024,6 +1024,15 @@ describe("import.legacy-identity", () => {
             expect([where, bystander("ci2")]).toEqual([where, [{ versions: 1, tombs: 0 }]]);
             for (const id of IDS) {
               const found = (inst: string, ns: string) => findSourceId(target, inst, ns, id);
+              // with no legacy row or tombstone, nothing is written under the legacy identity
+              if (seed === "none") {
+                expect([where, id, "no legacy write", found("ci", "")]).toEqual([
+                  where,
+                  id,
+                  "no legacy write",
+                  undefined,
+                ]);
+              }
               // at most one source per external id in an instance
               expect([
                 where,
