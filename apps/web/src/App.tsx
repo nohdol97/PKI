@@ -20,7 +20,7 @@ import { connectionTestText, needsUnverifiedConfirmation } from "./connection-te
 import { BACKGROUND_EXECUTION_TEXT } from "./background-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
 import { ConnectorTable } from "./connector-table.tsx";
-import { syncStopText } from "./connector-text.ts";
+import { nextSyncStops } from "./connector-text.ts";
 import { deleteConfirmText, deletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
@@ -208,7 +208,7 @@ function Sources({ api }: { api: ApiClient }) {
   const [confirming, setConfirming] = useState<SourceSummary>();
   const [deleted, setDeleted] = useState<string>();
   const [error, setError] = useState<string>();
-  const [syncStop, setSyncStop] = useState<string>();
+  const [syncStops, setSyncStops] = useState<Record<string, string>>({});
   const fail = (e: unknown) => setError(message(e));
 
   const importFile = (event: ChangeEvent<HTMLInputElement>) => {
@@ -226,11 +226,17 @@ function Sources({ api }: { api: ApiClient }) {
       }, fail);
   };
   const sync = (connectorId: string) =>
-    api("syncConnector", { connectorId }).then((result) => {
-      setSyncStop(result.stopped ? `${connectorId}: ${syncStopText(result.stopped)}` : undefined);
-      setFound(undefined);
-      stored.reload();
-    }, fail);
+    api("syncConnector", { connectorId }).then(
+      (result) => {
+        setSyncStops((stops) => nextSyncStops(stops, connectorId, result.stopped));
+        setFound(undefined);
+        stored.reload();
+      },
+      (e: unknown) => {
+        setSyncStops((stops) => nextSyncStops(stops, connectorId, undefined));
+        fail(e);
+      },
+    );
   const search = (event: FormEvent) => {
     event.preventDefault();
     if (!query.trim()) return setFound(undefined);
@@ -253,7 +259,7 @@ function Sources({ api }: { api: ApiClient }) {
       <h2>Connector</h2>
       <ConnectorTable
         connectors={connectors.data?.connectors ?? []}
-        syncStop={syncStop}
+        syncStops={syncStops}
         onSync={sync}
       />
       <h2>JSONL 가져오기</h2>

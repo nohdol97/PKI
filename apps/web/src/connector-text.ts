@@ -22,3 +22,16 @@ export const SYNC_STOP_TEXT: Readonly<Record<SyncStopCode, string>> = {
 };
 
 export const syncStopText = (code: SyncStopCode): string => SYNC_STOP_TEXT[code];
+
+/**
+ * The stop texts by instance id after one sync: that instance's text is the new stop's, or
+ * gone when its sync ended without one (or failed on HTTP, which the screen shows as an error).
+ */
+export function nextSyncStops(
+  stops: Readonly<Record<string, string>>,
+  id: string,
+  stopped: SyncStopCode | undefined,
+): Record<string, string> {
+  const rest = Object.fromEntries(Object.entries(stops).filter(([key]) => key !== id));
+  return stopped ? { ...rest, [id]: syncStopText(stopped) } : rest;
+}

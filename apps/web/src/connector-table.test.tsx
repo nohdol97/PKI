@@ -3,7 +3,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ConnectorTable } from "./connector-table.tsx";
-import { DELETIONS_MAY_BE_MISSED, syncStopText } from "./connector-text.ts";
+import { DELETIONS_MAY_BE_MISSED, nextSyncStops, syncStopText } from "./connector-text.ts";
 
 const render = (props: Partial<Parameters<typeof ConnectorTable>[0]> = {}) =>
   renderToStaticMarkup(
@@ -12,7 +12,7 @@ const render = (props: Partial<Parameters<typeof ConnectorTable>[0]> = {}) =>
         { id: "mail-1", kind: "k", state: "ready", deletionsMayBeMissed: true },
         { id: "plain", kind: "k", state: "ready" },
       ]}
-      syncStop={undefined}
+      syncStops={{}}
       onSync={() => {}}
       {...props}
     />,
@@ -26,8 +26,21 @@ describe("ConnectorTable", () => {
     expect(html).not.toContain('role="alert"');
   });
 
-  it("shows a stop as an alert with the text of its code", () => {
-    const html = render({ syncStop: syncStopText("rate-limited") });
-    expect(html).toContain(`<p role="alert">${syncStopText("rate-limited")}</p>`);
+  it("shows a stop as an alert on the row of its instance only", () => {
+    const html = render({ syncStops: { plain: syncStopText("rate-limited") } });
+    expect(html.split('role="alert"')).toHaveLength(2);
+    const [mail, plain] = html.split("<tr>").slice(1) as [string, string];
+    expect(plain).toContain(`<p role="alert">${syncStopText("rate-limited")}</p>`);
+    expect(mail).not.toContain('role="alert"');
+  });
+});
+
+describe("nextSyncStops", () => {
+  it("sets an instance's stop, leaves the others, and clears it when its next sync has none (or fails)", () => {
+    const one = nextSyncStops({}, "a", "aborted");
+    const two = nextSyncStops(one, "b", "storage-failed");
+    expect(two).toEqual({ a: syncStopText("aborted"), b: syncStopText("storage-failed") });
+    expect(nextSyncStops(two, "a", undefined)).toEqual({ b: syncStopText("storage-failed") });
+    expect(render({ syncStops: nextSyncStops(one, "a", undefined) })).not.toContain('role="alert"');
   });
 });
