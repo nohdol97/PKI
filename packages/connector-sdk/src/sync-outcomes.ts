@@ -21,7 +21,8 @@ export interface SyncOutcomeRow {
     | "backoff-or-retry-after"
     | "one-minute"
     | "none"
-    | "settings-change-or-hourly-recheck";
+    | "settings-change-or-hourly-recheck"
+    | "instance-ready";
 }
 
 /** `nextRun: "one-minute"`, in milliseconds. */
@@ -56,4 +57,7 @@ export const SYNC_OUTCOMES: readonly SyncOutcomeRow[] = [
     attempt: "unspent",
     nextRun: "settings-change-or-hourly-recheck",
   },
+  // The Connector refused the credential (I06-R10): the instance's own state, judged after the stop,
+  // is the job's held reason; the run called the Connector, but a held close always gives its attempt back.
+  { end: "credential-unusable", result: "held", attempt: "unspent", nextRun: "instance-ready" },
 ];

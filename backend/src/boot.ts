@@ -43,8 +43,12 @@ import {
 import { systemClock } from "./clock.ts";
 import { applyConfiguredScopes, bindConnectorScopes } from "./connector-scopes.ts";
 import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
-import { createConnectorManager, type ConnectorManager } from "./connectors.ts";
-import { startCollectorUpkeep } from "./connector-sync-job.ts";
+import {
+  createConnectorManager,
+  type ConnectorManager,
+  type ConnectorRebuild,
+} from "./connectors.ts";
+import { releaseOnReady, startCollectorUpkeep } from "./connector-sync-job.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
@@ -119,6 +123,8 @@ export interface BootedBackend {
   /** Tests wait on these: the notices queued, the jobs runnable. */
   projections: Pick<Projections, "drain">;
   runner: Pick<JobRunner, "wake">;
+  /** The Connector manager (tests read the instances and ask for a rebuild; the API's notice route is T04's). */
+  connectors: ConnectorManager & ConnectorRebuild;
   /** The periods' check, started at boot (I03-R22); I03-T09 adds the default periods through it. */
   scheduler: Scheduler;
 }
@@ -214,6 +220,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     clock,
     entries,
     scopes,
+    secrets: options.secrets,
+    onReady: releaseOnReady(db, runner),
   });
   late.manager = connectors;
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
@@ -290,6 +298,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     engine,
     projections,
     runner,
+    connectors,
     scheduler,
   };
 }

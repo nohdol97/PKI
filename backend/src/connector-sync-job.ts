@@ -11,10 +11,12 @@
 // the manager it is given must be the one the import path uses.
 //
 // A collector whose instance cannot run (`unavailable`, `not-implemented`) is held by a
-// reason that is the instance's own state, never a Connector's text. Three things put it
+// reason that is the instance's own state, never a Connector's text. Five things put it
 // back: the transaction that changes the instance's settings (`releaseHeldCollector`, called
-// inside that write), a start that finds the instance ready (`releaseReadyCollectors`), and
-// the hourly recheck (`recheckInstances`), one health check per instance that is not ready.
+// inside that write), a start that finds the instance ready (`releaseReadyCollectors`), the
+// hourly recheck (`recheckInstances`), one health check per instance that is not ready, a new
+// object that turned the instance ready (`releaseOnReady`, I06-R12), and the close of a job whose
+// sync stopped on an object the instance had replaced (`releaseIfReady`, I06-R10).
 import {
   INSTANCE_BUSY_RETRY_MS,
   SYNC_OUTCOMES,
@@ -30,6 +32,7 @@ import type {
   ConnectorRecheck,
   RecheckTurn,
 } from "./connectors.ts";
+import { isReplacedStop } from "./connectors.ts";
 import { COLLECTOR_HELD_REASONS, HELD_REEVALUATION_MS } from "./held-release.ts";
 import type { JobResult } from "./job-outcomes.ts";
 import type { JobHandler, JobRunner } from "./job-runner.ts";
@@ -127,6 +130,11 @@ export function createConnectorSyncHandler(options: {
   db: SqlDriver;
   /** Undefined while the composition has not handed the manager over (a wake before it is built). */
   manager: () => SyncManager | undefined;
+  /**
+   * `replacedKey` of the runs whose sync stopped on an object the instance had replaced: the close that
+   * follows puts them back (`releaseIfReady`). A current object's stop is never in it (I06-R10).
+   */
+  replaced?: Set<string>;
 }): JobHandler {
   const { db } = options;
   return async (job, context) => {
@@ -146,7 +154,18 @@ export function createConnectorSyncHandler(options: {
       return resultOf(end, undefined, heldReason(summary));
     }
     const end = endOf(answer);
-    const result = resultOf(end, answer, "");
+    // a handler still running after its run ended (cut signal) leaves no mark behind
+    if (isReplacedStop(answer) && !context.signal.aborted) options.replaced?.add(replacedKey(job));
+    // a refused credential holds the job for the instance's own reason as it stands when the job
+    // closes: the manager judged it before it answered (I06-R10); an instance that is `ready` is a newer
+    // object's, so the reason is the plain one and the release after the close runs the job again
+    const result = resultOf(
+      end,
+      answer,
+      end === "credential-unusable"
+        ? heldReason(manager.list().find((s) => s.id === job.target))
+        : "",
+    );
     // a sync that never reached the Connector counted nothing; one that did leaves its counts,
     // under the lease, whether it finished (the write below) or stopped after storing pages
     if (result.status === "succeeded") {
@@ -195,6 +214,37 @@ export function ensureDefaultSchedules(
     made.push(MAINTENANCE_KIND);
   }
   return made;
+}
+
+/** One mark per run: a later run of the same job (another lease) never matches an earlier run's mark. */
+export const replacedKey = (job: { id: number; leaseToken: unknown }): string =>
+  `${job.id}:${String(job.leaseToken)}`;
+
+/**
+ * What the manager calls when a new object turned an instance ready (I06-R12): the instance's held
+ * collector jobs go back and the runner is woken, without waiting for the hourly pass.
+ */
+export function releaseOnReady(
+  db: SqlDriver,
+  runner: Pick<JobRunner, "wake">,
+): (instanceId: string) => void {
+  return (instanceId) => {
+    if (releaseHeldCollector(db, instanceId) > 0) void runner.wake();
+  };
+}
+
+/**
+ * Right after a `connector-sync` job closed held on a stop of a replaced object (I06-R10): when its
+ * instance is ready now, the job goes back and runs on the new object. Returns whether jobs went back;
+ * the caller wakes the runner.
+ */
+export function releaseIfReady(
+  db: SqlDriver,
+  manager: Pick<ConnectorManager, "list">,
+  instanceId: string,
+): boolean {
+  const summary = manager.list().find((s) => s.id === instanceId);
+  return summary?.state === "ready" && releaseHeldCollector(db, instanceId) > 0;
 }
 
 /**

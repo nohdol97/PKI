@@ -93,6 +93,48 @@ describe("site.registration: checkSiteRegistration answers a list of codes", () 
     ).toEqual(["instance-id-duplicate", "instance-id-duplicate"]);
   });
 
+  describe("instance-credentials-invalid (I06-R2, I06-C2)", () => {
+    const declared = (credentials: unknown) =>
+      withFork({
+        connectorInstances: [{ ...instance("fork-1", "fork"), credentials } as never],
+      });
+    const bad: Array<[string, unknown]> = [
+      ["a name outside the shape: upper case", ["Token"]],
+      ["a name outside the shape: a digit first", ["1token"]],
+      ["a name outside the shape: 17 characters", ["a".repeat(17)]],
+      ["a name outside the shape: a trailing newline", ["token\n"]],
+      ["a name that is not a string", [1]],
+      ["a declaration that is not a list", "token"],
+      ["the same name twice", ["token", "token"]],
+      ["more than MAX_CREDENTIAL_SLOTS names", Array.from({ length: 9 }, (_, i) => `s${i}`)],
+    ];
+    it.each(bad)("%s", (_name, credentials) => {
+      expect(checkSiteRegistration(declared(credentials))).toEqual([
+        "instance-credentials-invalid",
+      ]);
+    });
+    it("passes the longest allowed name, the most allowed names, none, and no declaration", () => {
+      for (const ok of [
+        ["a".repeat(16)],
+        Array.from({ length: 8 }, (_, i) => `s${i}`),
+        [],
+        undefined,
+      ]) {
+        expect(checkSiteRegistration(declared(ok))).toEqual([]);
+      }
+    });
+    it("a declaration that throws when read is invalid, and the instance is left out of the merge", () => {
+      const hostile = new Proxy([], {
+        get() {
+          throw new Error("no");
+        },
+      });
+      expect(checkSiteRegistration(declared(hostile))).toEqual(["instance-credentials-invalid"]);
+      const merged = mergeSiteRegistration(declared(["Bad"]), { instances: [], kinds: {} });
+      expect(merged.connectors.instances).toEqual([]);
+    });
+  });
+
   it("instance-kind-unknown: a kind that is nowhere", () => {
     expect(
       checkSiteRegistration(withFork({ connectorInstances: [instance("a", "nowhere")] })),

@@ -98,6 +98,15 @@ export const ErrorResponseSchema = z.object({
 });
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 
+/** Why an instance whose credentials cannot be used is unavailable (I06-R9); decided from the store's answers. */
+export const CREDENTIAL_REASONS = [
+  "credential-store-unavailable",
+  "credential-missing",
+  "credential-unreadable",
+  "credential-rejected",
+] as const;
+export type CredentialReason = (typeof CREDENTIAL_REASONS)[number];
+
 // "not-implemented" is a site Connector placeholder (V01-R18); "unavailable" failed to
 // initialize, or, with reason "unsupported-sdk-version", was never initialized because
 // it implements another Connector SDK version (I01-R1).
@@ -107,7 +116,17 @@ export const ConnectorListResponseSchema = z.object({
       id: z.string(),
       kind: z.string(),
       state: z.enum(["ready", "not-implemented", "unavailable"]),
-      reason: z.literal("unsupported-sdk-version").optional(),
+      reason: z.enum(["unsupported-sdk-version", ...CREDENTIAL_REASONS]).optional(),
+      // a Connector that declared slots (I06-R13): the stored name and the last presence check of each, never a value
+      credentials: z
+        .array(
+          z.object({
+            slot: z.string(),
+            name: z.string(),
+            state: z.enum(["present", "missing", "unavailable"]),
+          }),
+        )
+        .optional(),
       // set (only then) after a rescan of a Connector that does not report deletions on
       // rescan: sources deleted while the cursor was expired may still be shown (I01-R17)
       deletionsMayBeMissed: z.boolean().optional(),
@@ -133,6 +152,7 @@ export const SYNC_STOP_CODES = [
   "aborted",
   "instance-busy",
   "storage-failed",
+  "credential-unusable",
 ] as const;
 export type SyncStopCode = (typeof SYNC_STOP_CODES)[number];
 
