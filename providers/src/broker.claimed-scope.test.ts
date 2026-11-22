@@ -251,6 +251,15 @@ describe("scope.claimed-grade: a claim never gives a looser class than the confi
   });
 });
 
+describe("scope.claimed-grade ④: an instance row that no longer exists", () => {
+  it("is an unknown configured scope: graded as the strictest, nothing compared", async () => {
+    const id = claim(["open"], ["team"]);
+    db.run("PRAGMA foreign_keys = OFF");
+    db.run("DELETE FROM connector_instances");
+    expect(await asked([id])).toEqual(["strictest:[]"]);
+  });
+});
+
 describe("scope.claimed-grade ⑤: the scope of anything but a claim is its grade as it stands", () => {
   it("is graded by the mapping of its own scope, not compared with the configured one", async () => {
     const id = store({ claimed: false, scope: JSON.stringify(["open"]), configured: ["team"] });

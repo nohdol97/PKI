@@ -326,9 +326,12 @@ function judgeScope(stored: StoredSourceVersion, { policy, grading }: ScopeGrade
   const compared: unknown = policy.compare(own, configured);
   if (!COMPARISONS.has(compared)) throw new ScopeUnjudgedError();
   if (compared === "incomparable") return strictestClass();
-  return asScopeClass(
-    grading.strictest([asScopeClass(grading.grade(own)), asScopeClass(grading.grade(configured))]),
-  );
+  const classes = [asScopeClass(grading.grade(own)), asScopeClass(grading.grade(configured))];
+  const stricter = asScopeClass(grading.strictest(classes));
+  // the stricter of two classes is one of them: the claim never gives a class beyond the two,
+  // whatever the fork's `strictest` does
+  if (!classes.includes(stricter)) throw new ScopeUnjudgedError();
+  return stricter;
 }
 
 const reject = (reason: RejectReason) => ({ status: "rejected", reason }) as const;
