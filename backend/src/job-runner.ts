@@ -125,7 +125,10 @@ export interface RunnerSettings {
 }
 
 /** Why a run stopped waiting for its handler: over its time, or its job is no longer its own. */
-type RunEnd = "run-timeout" | "lost";
+type RunEnd = typeof TIMED_OUT | typeof LOST;
+// symbols no handler can hand back: a handler's result is never taken for an ending
+const TIMED_OUT = Symbol("run-timeout");
+const LOST = Symbol("lost");
 
 const DEFAULT_SETTINGS: RunnerSettings = {
   leaseMs: DEFAULT_LEASE_MS,
@@ -192,10 +195,10 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     // The runtime's interval wakes the run (a Clock sleep cannot be cancelled once
     // the job closed); what it reads and writes is the injected clock.
     const beat = setInterval(() => {
-      if (clock.monotonic() - started >= limit) return end("run-timeout"); // I03-R14
+      if (clock.monotonic() - started >= limit) return end(TIMED_OUT); // I03-R14
       try {
         // claimed again or closed: stop, and write nothing
-        if (!heartbeatJob(db, job, { now: now(), leaseMs })) end("lost");
+        if (!heartbeatJob(db, job, { now: now(), leaseMs })) end(LOST);
       } catch (error) {
         onError(error); // e.g. a locked file: the next heartbeat or the lease decides
       }
@@ -238,7 +241,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
         const saved = checkpointJob(db, job, { fields, value, ...(write && { write }) }, now());
         if (saved !== "saved") {
           closed = saved;
-          end("lost");
+          end(LOST);
         }
         return saved;
       },
@@ -254,8 +257,8 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
       return close(failure("handler-error", facts()));
     }
     // the job is no longer this run's: nothing is written (closeJob would refuse it anyway)
-    if (result === "lost") return { jobId: job.id, status: closed };
-    if (result === "run-timeout") return close(failure("run-timeout", facts()));
+    if (result === LOST) return { jobId: job.id, status: closed };
+    if (result === TIMED_OUT) return close(failure("run-timeout", facts()));
     // a yield counts as progress only when the job's checkpoint moved during this run
     const progressed = () => readJob(db, job.id)?.checkpoint !== job.checkpoint;
     try {

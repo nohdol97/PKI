@@ -971,6 +971,17 @@ describe("a result outside the declared ones (I03-R9, review A-F2)", () => {
   });
 });
 
+describe("a handler cannot name the runner's own endings (review A R2-N1)", () => {
+  it("a result that is the text of an ending is the handler's undeclared result: handler-error", async () => {
+    for (const text of ["lost", "run-timeout"]) {
+      const job = imported();
+      const run = await runner(async () => text as unknown as JobResult).runOnce();
+      expect(run).toEqual({ jobId: job.id, status: "retry" });
+      expect(readJob(db, job.id)).toMatchObject({ status: "retry", reason: "handler-error" });
+    }
+  });
+});
+
 describe("checkpoint.resume (I03-R8, C1): a job claimed again goes on from its checkpoint", () => {
   const STEPS = { checkpointFields: ["step"] };
   const stepRows = (on: SqlDriver) =>
