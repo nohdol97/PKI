@@ -551,6 +551,14 @@ flowchart TD
    - `getDocument`는 대본 전체를 접은 상태다: 가장 큰 revision의 upsert(역순 도착의 옛것은 원 시스템의 최신을 바꾸지 않는다, R2), 뒤따른 `scope-change`의 범위, tombstone 뒤에는 `null`(그 뒤의 upsert는 다시 살린다). 그래서 역순을 담은 대본은 `get-document-mismatch`가 날 수 있다. 계약 묶음을 통과하는 대본은 정체마다 revision이 커지는 차례다.
    - 대본 수집기 자신이 `connectorContract`를 통과하며, 21개 빨간 대역은 이것을 바탕으로 한 곳씩만 어긴 것이다.
 
+**T08이 넘기는 것**(I01-T08에서 정한 것. **잠정**: T10이 문서에서 가리키면서 바꿀 수 있고, 바꿀 때는 이 절과 `packages/connector-example/src/adapters/`의 두 테스트 파일을 함께 고친다).
+
+1. **패키지의 모양.** `@pki/connector-example`은 비공개이고 `scripts`가 없다. `@pki/contracts`는 `dependencies`, `@pki/testkit`은 `devDependencies`다(V01-T07의 경계 규칙이 테스트 파일에서만 testkit을 쓰게 한다). `vitest`는 다른 패키지처럼 저장소 뿌리의 것을 쓰고 적지 않는다. 진입점은 `@pki/connector-example/adapters`(`createExampleConnector`) 하나이며 어느 패키지도 이 패키지를 의존성으로 적지 않는다(자기 테스트가 워크스페이스의 `package.json`을 읽어 확인한다).
+2. **지어낸 원 시스템.** 설정이 곧 자료다: `{ namespace, notes }`. 메모 하나는 `id`, 원 시스템의 변경 순번 `seq`, `revision`, `updatedAt`, 그리고 `title`·`body` 또는 `deleted: true`다. 메모마다 한 줄(지금 상태)이라 한 번 읽는 동안 정체가 한 번만 나온다. 설정은 `ChangeSchema`로 검사하고, 틀리면(순번·정체 중복 포함) `ConnectorError`(재시도 불가)로 초기화가 실패한다.
+3. **cursor와 능력.** cursor는 `seq:<마지막으로 넘긴 순번>`이다. 모양이 다르거나 원 시스템의 마지막 순번보다 큰 cursor에는 `cursorExpired` 페이지(`changes` 빔, `hasMore` 거짓)로 답한다. `limit`이 1보다 작으면 실패한다(제자리 cursor를 돌려주지 않으려는 것). 능력은 `incremental`·`deletes`·`fullRescan`·`deletionsOnRescan`이 참, `accessScope`가 거짓이다.
+4. **삭제는 원 시스템이 남긴다.** 이 예시는 스스로 대조하지 않는다. 지운 메모가 원 시스템에 `deleted` 표시로 남으므로 재스캔이 삭제를 빠짐없이 다시 알린다("잠정 결정"의 `deletionsOnRescan` 정의). 그래서 인스턴스 밖의 기록이 필요 없고, 계약 시나리오의 `later`는 나중 시점의 설정이다. 표시 없이 사라지는 원 시스템을 흉내 내는 예시(스스로 대조, 기록은 인스턴스 밖)는 두지 않았다.
+5. **위반 변형 셋.** `src/adapters/violating-connectors.ts`에 있고 진입점으로 내보내지 않는다. 각각 예시 수집기를 감싸 한 곳만 어긴다: 받은 cursor를 그대로 돌려주는 것(`no-progress`), 능력에서 `deletes`·`deletionsOnRescan`만 거짓으로 바꾼 것(`capability-deletes`), 초기화 전 `getChanges`에 빈 페이지로 답하는 것(`responds-before-init`). 테스트는 예시와 같은 시나리오에서 `checkConnector`가 **정확히 그 코드 하나**를 돌려주는지 본다.
+
 같이 진행할 수 있는 작업은 다음과 같다.
 - T01 뒤: T04, T09. T02는 T01과 I04의 tombstone·해시 작업(I04-T05, I04-T07)을 함께 기다린다.
 - T02 뒤: T06(I04-T09도 기다림), T07. T03은 T02와 T04를 함께 기다린다.
@@ -785,3 +793,4 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 | 2026-11-22 | "T04가 넘기는 것" 추가(잠정): 위반 코드 상수와 결과의 모양, 시나리오의 "나중 상태"는 새 인스턴스의 처음부터 읽기, 검사 차례와 억제 규칙의 구현, 판정 세부(마지막 변경이 `scope-change`인 정체는 `getDocument` 비교 제외 등), 대본 수집기의 대본·오류 주입·호출 기록 | 작업 분해(T04가 넘기는 것) | I01-T04 구현 |
 | 2026-11-22 | T04 검토 반영(잠정 유지): 되풀이 페이지의 정지는 `no-progress` 하나(그 페이지를 접지 않음), 읽을 수 있는 버전은 `capabilities`가 없어도 먼저 보고, 페이지 상한 `maxPages`(기본 10,000)는 위반이 아닌 시나리오 오류, `scope-change` 뒤 `getDocument`는 내용과 사건의 범위로 비교, 비교 내용이 출처 정보를 포함함을 명시, 정의의 갈래별 사례 | 작업 분해(T04가 넘기는 것) | I01-T04 검토 F1~F6 |
 | 2026-11-22 | T04 재검토 반영(잠정 유지): tombstone 뒤 늦게 온 `scope-change`의 정체는 `getDocument`가 `null`이고 재스캔에서 살아 있지 않음, 마지막 페이지의 같은 cursor는 정지가 아님, `maxPages`는 양의 정수만 | 작업 분해(T04가 넘기는 것) | I01-T04 재검토 D1~D3 |
+| 2026-11-22 | "T08이 넘기는 것" 추가(잠정): 예시 패키지의 의존성 자리와 진입점, 설정이 곧 자료인 지어낸 원 시스템, cursor `seq:<n>`과 능력, 삭제를 원 시스템이 남겨 스스로 대조하지 않음, 위반 변형 셋의 자리와 어기는 곳 | 작업 분해(T08이 넘기는 것) | I01-T08 구현 |
