@@ -122,6 +122,7 @@ const TABLES: Record<string, string> = {
   relation: "relations",
   item: "items",
   insight: "insights",
+  "scope-drop": "scope_policy_drops",
 };
 const exists = (ref: DerivedRef) =>
   db.all(`SELECT 1 FROM ${TABLES[ref.kind]} WHERE id = ?`, [Number(ref.id)]).length === 1;
@@ -162,6 +163,13 @@ function world() {
   });
   const iN = saveInsight(db, key(xN as number, yN as number), { state: "resolved" });
 
+  // what the scope policy once left out of a's extraction (I04-R11): one source's, so no shared row
+  const dropA = db.run(
+    `INSERT INTO scope_policy_drops (source_id, version, kind, item_key_hash, reason, at)
+     VALUES (?, ?, 'fact', 'qzhash', 'scope-policy', ?)`,
+    [a.sourceId, a.version, AT],
+  ).lastInsertRowid;
+
   const rows: Record<
     string,
     { onlyA: number; shared: number | null; withoutLineage: number | null }
@@ -172,6 +180,7 @@ function world() {
     relation: { onlyA: rA, shared: rS, withoutLineage: rN },
     item: { onlyA: xA as number, shared: xS as number, withoutLineage: xN as number },
     insight: { onlyA: iA, shared: iS, withoutLineage: iN },
+    "scope-drop": { onlyA: dropA, shared: null, withoutLineage: null },
   };
   const built = new Map<string, readonly SourceVersionRef[]>();
   for (const [kind, r] of Object.entries(rows)) {
@@ -308,6 +317,8 @@ function subject(kind: DerivativeKind, has: { shared: boolean; withoutLineage: b
 const NOT_APPLICABLE: Record<string, { shared: boolean; withoutLineage: boolean }> = {
   source: { shared: false, withoutLineage: false },
   evidence: { shared: false, withoutLineage: false },
+  // a record names the one source version whose extraction it came from
+  "scope-drop": { shared: false, withoutLineage: false },
 };
 const BOTH = { shared: true, withoutLineage: true };
 
@@ -318,18 +329,20 @@ const SUBJECTS: Record<string, { shared: boolean; withoutLineage: boolean }> = {
   relation: BOTH,
   item: BOTH,
   insight: BOTH,
+  "scope-drop": { shared: false, withoutLineage: false },
 };
 for (const kind of CANONICAL_KINDS) {
   derivativeKindContract(`canonical kind ${kind.kind}`, subject(kind, SUBJECTS[kind.kind] ?? BOTH));
 }
 
 describe("the product registry's canonical kinds (I04-R1)", () => {
-  it("registers the six canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
+  it("registers the seven canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
     expect(derivativeRegistry.kinds.map((k) => [k.kind, k.layer, k.storage])).toEqual([
       ["source", "source", "canonical"],
       ["evidence", "evidence", "canonical"],
       ["fact", "knowledge", "canonical"],
       ["relation", "knowledge", "canonical"],
+      ["scope-drop", "knowledge", "canonical"],
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
       ["engine", "projection", "projection"],
@@ -368,7 +381,7 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
       (t) => db.all(`SELECT count(*) AS n FROM ${t}`)[0]?.n,
     );
 
-  it("collects only the Insights whose lineage holds the source and changes no content", () => {
+  it("collects only the Insights on the items the source reaches, and the records, and changes no content", () => {
     const { b, rows } = world();
     const before = counts();
     const statuses = db.all(
@@ -387,6 +400,8 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
       fact: [],
       relation: [],
       item: [],
+      // every record of what the policy left out is collected: its source's re-extraction is queued (I04-R15)
+      "scope-drop": [String(rows["scope-drop"]?.onlyA)],
       insight: [String(rows.insight?.shared)],
     });
 
@@ -502,12 +517,20 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
-    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(8);
+    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(9);
     expect(log.findLastIndex((e) => e.startsWith("affected:"))).toBeLessThan(firstDelete);
     expect(log.filter((e) => e.startsWith("invalidate:"))).toEqual(
-      ["source", "evidence", "fact", "relation", "item", "insight", "engine", "vectorIndex"].map(
-        (k) => `invalidate:${k}`,
-      ),
+      [
+        "source",
+        "evidence",
+        "fact",
+        "relation",
+        "scope-drop",
+        "item",
+        "insight",
+        "engine",
+        "vectorIndex",
+      ].map((k) => `invalidate:${k}`),
     );
     // evidence and the Insight left through the cascades of the lower layers'
     // deletes; each kind counts the rows of its own collection that are gone
@@ -517,6 +540,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       evidence: 4,
       fact: 1,
       relation: 1,
+      "scope-drop": 1,
       item: 2,
       insight: 1,
       engine: 1,
@@ -542,6 +566,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           evidence: 4,
           fact: 1,
           relation: 1,
+          "scope-drop": 1,
           item: 2,
           insight: 1,
           engine: 1,
@@ -553,6 +578,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           evidence: 0,
           fact: 0,
           relation: 0,
+          "scope-drop": 0,
           item: 0,
           insight: 1,
           engine: 0,

@@ -688,6 +688,30 @@ const v17: Migration = (db) =>
       CHECK (deletions_may_be_missed IN (0, 1));
   `);
 
+// Schema v18 (I04-T09, I04-R4, R11, R15): what the scope policy left out of an extraction.
+// One row per refused item: the source and the version of the extraction's input, the
+// kind of the item, the keyed hash of its key (I04-R7: the key is names and values) and
+// when. No content. The rows are not job rows, so the jobs' retention clean-up does not
+// delete them; they are the registered kind `scope-drop`, so deleting the source deletes
+// them. `(source_id, version, kind, item_key_hash)` is unique: extracting again records
+// the same refusal once. A source's rows are cleared when its re-extraction (queued when
+// a scope change makes the refusal worth judging again) has run. The version number is
+// the next free one: whichever of two tasks adding a migration merges later renumbers
+// (`v18` and its line in `migrations`).
+const v18: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE scope_policy_drops (
+      id INTEGER PRIMARY KEY,
+      source_id INTEGER NOT NULL REFERENCES sources (id),
+      version INTEGER NOT NULL CHECK (typeof(version) = 'integer' AND version >= 1),
+      kind TEXT NOT NULL,
+      item_key_hash TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK (reason = 'scope-policy'),
+      at TEXT NOT NULL,
+      UNIQUE (source_id, version, kind, item_key_hash)
+    );
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -707,6 +731,7 @@ export const migrations: readonly Migration[] = [
   v15,
   v16,
   v17,
+  v18,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

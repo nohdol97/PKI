@@ -49,6 +49,7 @@ import {
   canonicalTransaction,
   findSourceId,
   listLiftableTombstones,
+  countScopePolicyDrops,
   listInvalidations,
   listProviderCalls,
   LEGACY_CLEANUP_SETTING,
@@ -133,7 +134,7 @@ export interface ServerOptions {
   entries?: Pick<CanonicalEntries, "userDelete" | "liftTombstone">;
   /**
    * The registry every read path asks before it shows a derived row (I04-R13, read-gate.ts); default
-   * the product's kinds with the interim policy (the composition point passes its own, boot.ts).
+   * the product's kinds with the default scope policy (the composition point passes its own, boot.ts).
    */
   registry?: DerivativeRegistry;
   /**
@@ -537,6 +538,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
           recomputedByKind: r.recomputedByKind,
           at: r.at,
         })),
+        scopePolicyDrops: countScopePolicyDrops(options.db),
       },
       dataProtection: {
         legacyCleanup:

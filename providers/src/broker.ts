@@ -24,7 +24,12 @@ import {
   type TaskKind,
   type UntrustedDocument,
 } from "@pki/contracts";
-import { readJob, readSourceVersion, type SqlDriver } from "@pki/storage";
+import {
+  readJob,
+  readSourceVersion,
+  UnregisteredDerivativeError,
+  type SqlDriver,
+} from "@pki/storage";
 import { randomUUID } from "node:crypto";
 import material from "./connection-test-material.json" with { type: "json" };
 import { lookupSynthetic } from "./synthetic-manifest.ts";
@@ -205,7 +210,9 @@ export type RejectReason =
   | "origin-not-leased"
   | "origin-mismatch"
   | "missing-source"
-  | "missing-candidate";
+  | "missing-candidate"
+  /** An input names a derivative of a kind the registry does not know: its sources cannot be graded (I04-R16). */
+  | "unregistered-derivative";
 
 export type BrokerResult =
   | {
@@ -322,7 +329,15 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
   }
   const candidates: Prepared["candidates"] = [];
   for (const id of request.candidateItemIds) {
-    const item = deps.candidates.lookup(id);
+    let item: CandidateItem | undefined;
+    try {
+      item = deps.candidates.lookup(id);
+    } catch (error) {
+      // a kind the registry does not know has no lineage to grade by: refuse, never guess (I04-R16)
+      if (error instanceof UnregisteredDerivativeError)
+        return { reason: "unregistered-derivative" };
+      throw error;
+    }
     if (!item) return { reason: "missing-candidate" };
     candidates.push({ id, name: item.name });
     // a name with no evidence source has no known origin: general (fail closed)

@@ -45,6 +45,7 @@ import {
   createExtractHandler,
   createProductRegistry,
   createProjections,
+  derivativeRegistry,
   ENGINE_KIND,
   knowledgeCandidates,
   VECTOR_KIND,
@@ -54,10 +55,13 @@ import {
 } from "@pki/knowledge-engine";
 import { createVisibleEngine, NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
+  createCommitScope,
   dataDirectory,
+  defaultScopePolicy,
   ensureDataDirectory,
   prepareCanonicalDb,
   type DerivativeRegistry,
+  type ScopePolicy,
   type SqlDriver,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
@@ -76,7 +80,6 @@ import {
   type SyncManager,
 } from "./connector-sync-job.ts";
 import { computePolicyFingerprint } from "./held-release.ts";
-import { INTERIM_POLICY } from "./interim-policy.ts";
 import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-runner.ts";
 import { createMaintenanceHandler } from "./maintenance.ts";
 import { MAINTENANCE_KIND } from "./scheduler.ts";
@@ -122,21 +125,25 @@ export function productEngine(): KnowledgeEngine {
 }
 
 /**
- * The derivative registry of the product (I04-R1): the six canonical kinds and the two projections, the
+ * The derivative registry of the product (I04-R1): the seven canonical kinds and the two projections, the
  * one place that builds it. `permanentlyAbsent` is the implementations' own, static fact: the null
  * engine and the empty vector index never hold anything, so an unavailable error from them ends a
  * removal as a skip; any other implementation (a sidecar that may be stopped) does not carry it.
- * The scope policy is the interim one (interim-policy.ts) until I04-T09 configures it.
+ * `policy` is the scope policy the deployment chose (productScopePolicy); the default when none.
  */
 export function productRegistry(adapters: {
   engine: KnowledgeEngine;
   vectorIndex: VectorIndex;
+  policy?: ScopePolicy;
 }): DerivativeRegistry {
   const permanentlyAbsent: PermanentlyAbsent = {
     ...(adapters.engine instanceof NullKnowledgeEngine ? { [ENGINE_KIND]: true as const } : {}),
     ...(adapters.vectorIndex instanceof EmptyVectorIndex ? { [VECTOR_KIND]: true as const } : {}),
   };
-  return createProductRegistry({ policy: INTERIM_POLICY, permanentlyAbsent });
+  return createProductRegistry({
+    policy: adapters.policy ?? defaultScopePolicy,
+    permanentlyAbsent,
+  });
 }
 
 /** The entries that store a change, delete a source or lift a tombstone through `registry`. */
@@ -261,6 +268,11 @@ export interface CallsOptions {
   providers: readonly LLMProvider[];
   /** The test build's pick and list (execution-gate.ts); ignored by any other build. */
   testBuild?: TestBuildExecution;
+  /**
+   * The registry that names the sources of a derivative input (a candidate item) for the
+   * Broker's grade (I04-R16); default the entries' own (productRegistry in the product).
+   */
+  registry?: DerivativeRegistry;
 }
 
 /**
@@ -297,7 +309,7 @@ export function productCalls(
     db,
     provider: () => selectProvider(providers, readDefaultProvider(db)),
     userActions: ledger.redeemer,
-    candidates: knowledgeCandidates(db),
+    candidates: knowledgeCandidates(db, options.registry ?? derivativeRegistry),
     egress,
     execution,
     recorder: createCallRecorder(db),
@@ -351,6 +363,11 @@ export function productRunner(
   } = {},
 ): JobRunner {
   const { clock, engine, projections } = options;
+  // the registry's policy judges the commit too (I04-R11, R14): one policy for the candidates, the rule and the write
+  const scope = createCommitScope({
+    policy: (options.registry ?? derivativeRegistry).policy,
+    ...(clock ? { now: () => new Date(clock.now()).toISOString() } : {}),
+  });
   const handler = createExtractHandler({
     db,
     ...(options.registry ? { registry: options.registry } : {}),
@@ -381,6 +398,7 @@ export function productRunner(
         : {}),
     },
     kinds: PROJECTION_KIND_SETTINGS,
+    scope,
     broker,
     ...(clock ? { clock } : {}),
     ...(options.policyFingerprint ? { policyFingerprint: options.policyFingerprint } : {}),

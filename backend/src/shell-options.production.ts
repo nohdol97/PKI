@@ -9,7 +9,13 @@ import type { ShellOptions } from "./shell-options.ts";
 export function shellOptions(args?: string[]): ShellOptions {
   const { values } = parseArgs({
     args,
-    options: { origin: { type: "string", multiple: true, default: [] } },
+    options: {
+      origin: { type: "string", multiple: true, default: [] },
+      "scope-policy": { type: "string" },
+    },
   });
-  return { origins: values.origin };
+  return {
+    origins: values.origin,
+    ...(values["scope-policy"] === undefined ? {} : { scopePolicy: values["scope-policy"] }),
+  };
 }

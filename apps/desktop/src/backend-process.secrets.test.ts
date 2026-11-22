@@ -52,7 +52,14 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 const start = (
   child: ReturnType<typeof fakeChild>,
   secrets?: Parameters<typeof startBackendProcess>[0]["secrets"],
-) => startBackendProcess({ fork: child.fork, entry: "x", origin: "app://pki", secrets });
+) =>
+  startBackendProcess({
+    fork: child.fork,
+    entry: "x",
+    origin: "app://pki",
+    scopePolicy: undefined,
+    secrets,
+  });
 
 describe("backend secret requests", () => {
   it("answers a read with the stored value, matched by ID", async () => {

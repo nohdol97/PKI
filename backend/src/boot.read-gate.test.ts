@@ -4,7 +4,7 @@
 // Dropping the registry argument on one path leaves it on the default registry, which shows the row,
 // and that path's test red.
 import { routes } from "@pki/contracts";
-import { NO_POLICY_YET, createProductRegistry } from "@pki/knowledge-engine";
+import { createProductRegistry } from "@pki/knowledge-engine";
 import {
   addEvidence,
   createDerivativeRegistry,
@@ -15,6 +15,7 @@ import {
   saveSourceRecord,
   type DerivativeRegistry,
   type DerivedRef,
+  defaultScopePolicy,
 } from "@pki/storage";
 import { send } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -42,8 +43,8 @@ afterEach(async () => {
 function hiding() {
   const asked: string[] = [];
   const base = createDerivativeRegistry({
-    kinds: createProductRegistry({ policy: NO_POLICY_YET }).kinds,
-    policy: { ...NO_POLICY_YET, allows: () => true },
+    kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+    policy: { ...defaultScopePolicy, allows: () => true },
   });
   const registry: DerivativeRegistry = {
     ...base,

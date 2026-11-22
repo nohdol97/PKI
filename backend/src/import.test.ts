@@ -465,6 +465,37 @@ describe("import.revoke-switch", () => {
     expect(count("source_versions")).toBe(0);
   });
 
+  it("a revoke line registers the scope-changed propagation, and queues the re-extraction of a source whose policy drops it left (I04-T09)", async () => {
+    await imported(line({ external_id: "a" }));
+    await imported(line({ external_id: "dropped-for" }));
+    const id = db.all("SELECT id FROM sources WHERE external_id = 'a'")[0]?.id as number;
+    // a refusing policy left a record for this source's latest version
+    db.run(
+      "INSERT INTO scope_policy_drops (source_id, version, kind, item_key_hash, reason, at) VALUES (?, 1, 'candidate', 'h', 'scope-policy', '2026-11-22T00:00:00Z')",
+      [id],
+    );
+    const before = db.all(
+      "SELECT count(*) AS n FROM invalidations WHERE change_kind = 'scope-changed'",
+    )[0]?.n;
+    const result = await imported(
+      line({
+        external_id: "dropped-for",
+        operation: "revoke",
+        version: 2,
+        access_scope: ["user:writer"],
+      }),
+    );
+    expect(result).toMatchObject({ scopeUpdated: 1 });
+    expect(
+      db.all("SELECT count(*) AS n FROM invalidations WHERE change_kind = 'scope-changed'")[0]?.n,
+    ).toBe((before as number) + 1);
+    expect(
+      db.all(
+        "SELECT source_id, status FROM jobs WHERE kind = 'extract' AND target LIKE 'scope-recompute:%'",
+      ),
+    ).toEqual([{ source_id: id, status: "queued" }]);
+  });
+
   it("a revoke line narrows the scope and keeps the version, where access-revoked would purge it", async () => {
     await imported(line({ external_id: "a" }));
     const result = await imported(
