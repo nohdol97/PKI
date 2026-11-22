@@ -330,6 +330,28 @@ describe("the inspected roots", () => {
     });
   }
 
+  // the content of every required root is held, not only its file count
+  for (const scanRoot of required) {
+    it(`${scanRoot}: a violation planted in it is the one finding`, () => {
+      const path = `${scanRoot}/planted/client.ts`;
+      expect(withFile(path, `import "node:https";\n`)).toEqual([
+        { file: path, line: 1, code: "import-not-allowed", detail: "node:https" },
+      ]);
+    });
+  }
+
+  it("the check reads exactly the files it reports as inspected", () => {
+    const copy = copyOfRepo();
+    // one violation in every inspected file: each is reported, none besides
+    for (const file of inspectedFiles(copy)) write(copy, file, `import "node:https";\n`);
+    expect(inspectedFiles(copy).length).toBeGreaterThan(required.length);
+    expect(
+      checkPublicOnly(copy)
+        .filter((f) => f.code === "import-not-allowed")
+        .map((f) => f.file),
+    ).toEqual(inspectedFiles(copy));
+  });
+
   // a plain loop, not it.each: the list is empty once both packages have landed
   for (const pkg of OPTIONAL_PACKAGES) {
     it(`${pkg} is read as soon as the package exists, needs its src/, and must leave the optional list`, () => {

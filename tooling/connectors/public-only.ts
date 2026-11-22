@@ -120,13 +120,30 @@ function symlinksIn(dir: string): string[] {
     .sort();
 }
 
+interface Target {
+  /** Absolute. */
+  path: string;
+  /** The root the file is under (absolute); undefined for an extra file. */
+  scanRoot: string | undefined;
+}
+
+/** Every file the check parses: the one list both the check and its liveness report read. */
+function targets(root: string): Target[] {
+  return [
+    ...SCAN_ROOTS.flatMap((scanRoot) => {
+      const dir = join(root, scanRoot);
+      return scriptsIn(dir).map((path): Target => ({ path, scanRoot: dir }));
+    }),
+    ...EXTRA_FILES.map((file): Target => ({ path: join(root, file), scanRoot: undefined })).filter(
+      (target) => isFile(target.path),
+    ),
+  ];
+}
+
 /** The script files the check reads in `repoRoot`, relative to it. */
 export function inspectedFiles(repoRoot: string): string[] {
   const root = resolve(repoRoot);
-  return [
-    ...SCAN_ROOTS.flatMap((scanRoot) => scriptsIn(join(root, scanRoot))),
-    ...EXTRA_FILES.map((file) => join(root, file)).filter(isFile),
-  ].map((file) => relative(root, file).split(sep).join(posix.sep));
+  return targets(root).map((target) => relative(root, target.path).split(sep).join(posix.sep));
 }
 
 /** The placeholder files exist, are plain files and are not scripts; nothing else under site/ is read. */
@@ -212,25 +229,25 @@ export function checkPublicOnly(repoRoot: string): Finding[] {
     visit(source);
   };
 
+  const files = targets(root);
   for (const scanRoot of SCAN_ROOTS) {
     const dir = join(root, scanRoot);
-    const files = scriptsIn(dir);
     const pkg = OPTIONAL_PACKAGES.find((optional) => scanRoot.startsWith(`${optional}/`));
     const landed = pkg !== undefined && existsSync(join(root, pkg));
     if (landed) {
       findings.push({ file: pkg, line: 1, code: "optional-package-present", detail: "" });
     }
-    if (files.length === 0 && (pkg === undefined || landed)) {
+    const empty = !files.some((target) => target.scanRoot === dir);
+    if (empty && (pkg === undefined || landed)) {
       findings.push({ file: scanRoot, line: 1, code: "missing-root", detail: "" });
     }
     for (const link of symlinksIn(dir)) {
       const file = relative(root, link).split(sep).join(posix.sep);
       findings.push({ file, line: 1, code: "symlink", detail: "" });
     }
-    for (const file of files) inspect(file, dir);
   }
+  for (const target of files) inspect(target.path, target.scanRoot);
   for (const [i, extra] of extras.entries()) {
-    if (isFile(extra)) inspect(extra, undefined);
     if (!usedExtras.has(extra) || !isFile(extra)) {
       findings.push({
         file: EXTRA_FILES[i] as string,
