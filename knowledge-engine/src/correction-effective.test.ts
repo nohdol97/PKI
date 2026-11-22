@@ -346,6 +346,70 @@ describe("correction.effective: the lineage of a user's row", () => {
   });
 });
 
+describe("correction.effective: the lineage of a user-written relation and of an approved row", () => {
+  /** X has a memo from the secret source, the dates are cited from `a`, the relation is the user's. */
+  function relationWorld() {
+    const a = source("a");
+    const saved = saveSourceRecord(db, "c", {
+      externalId: "secret-doc",
+      title: "s",
+      body: "비밀 본문",
+      accessScope: ["secret"],
+    });
+    if (saved.status !== "created") throw new Error("source");
+    const secret = {
+      sourceId: saved.sourceId,
+      v1: db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number,
+      version: saved.version,
+    };
+    const x = item("X");
+    const y = item("Y");
+    fact(x, TARGET_DATE, "2026-12-10", a);
+    fact(x, "memo", "메모", secret);
+    fact(y, COMPLETION_DATE, "2026-12-20", a);
+    const written = add({ kind: "relation", subjectId: x, type: DEPENDS_ON, objectId: y });
+    return { x, y, written };
+  }
+
+  it("a policy that cannot combine the sources of a user-written relation makes no Insight", () => {
+    const { x, y } = relationWorld();
+    rule(x, y);
+    // the cited evidence is `a`'s alone; the relation the user wrote brings its two items' sources, the secret one too
+    expect(insightOf(x, y)).toBeUndefined();
+  });
+
+  it("control: the same world makes the Insight when the combination is allowed", () => {
+    const { x, y, written } = relationWorld();
+    recomputeDependencyDelay(db, [x, y]);
+    const made = insightOf(x, y);
+    expect(made?.state).toBe("active");
+    expect(inputs(made?.id as number)).toEqual([{ fact_id: null, relation_id: written.id }]);
+  });
+
+  it("an approved row is an input only while it has no current evidence: current evidence later is cited instead", () => {
+    const a = source("a");
+    const b = source("b", true);
+    const x = item("X");
+    const y = item("Y");
+    fact(x, TARGET_DATE, "2026-12-10", a);
+    relation(x, y, a);
+    const old = fact(y, COMPLETION_DATE, "2026-12-20", b);
+    userDecisions.decide(db, { kind: "fact", id: old }, "approve");
+    rule(x, y);
+    expect(inputs(insightOf(x, y)?.id as number)).toEqual([{ fact_id: old, relation_id: null }]);
+    // a later extraction states the value in b's current version
+    const current = db.all("SELECT max(id) AS id FROM source_versions WHERE source_id = ?", [
+      b.sourceId,
+    ])[0]?.id as number;
+    cite({ factId: old }, { ...b, v1: current });
+    rule(x, y);
+    const made = insightOf(x, y);
+    expect(made?.state).toBe("active");
+    expect(inputs(made?.id as number)).toEqual([]);
+    expect(made?.evidenceIds).toHaveLength(3);
+  });
+});
+
 describe("correction.effective: insight_user_inputs goes with the Insight", () => {
   it("is removed when the Insight is deleted (its item deleted by a source's deletion)", () => {
     const a = source("a");

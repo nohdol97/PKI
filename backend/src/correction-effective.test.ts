@@ -339,6 +339,51 @@ describe("correction.effective: the evidence API leaves out a user input the pol
   });
 });
 
+describe("correction.effective: the evidence API's user inputs, relation side and status", () => {
+  /** Denies what rests on the secret source alone; any set of several scopes may be shown and combined. */
+  const secretSingle: ScopePolicy = {
+    ...defaultScopePolicy,
+    allows: (scopes) => !(scopes.length === 1 && scopes[0]?.includes("secret")),
+  };
+
+  it("leaves out an approved relation whose own lineage the policy denies; the count follows", async () => {
+    const a = source("a");
+    const secret = source("secret-doc", SECRET, true); // its evidence is past: approving needs no current evidence
+    const x = item("X");
+    const y = item("Y");
+    fact(x, "target_date", TARGET, a);
+    fact(y, "completion_date", LATE, a);
+    const rel = dependsOn(x, y, secret);
+    userDecisions.decide(db, { kind: "relation", id: rel }, "approve");
+    recomputeDependencyDelay(db, [x, y]);
+    expect(db.all("SELECT relation_id FROM insight_user_inputs")).toEqual([{ relation_id: rel }]);
+    await start(registryWith(secretSingle));
+    const [made] = await insights();
+    expect(made?.evidenceCount).toBe(2);
+    const shown = await evidenceOf(made?.id as number);
+    expect(shown.userInputs).toEqual([]);
+    expect(shown.insight.evidenceCount).toBe(2);
+  });
+
+  it("reports the status of a user input that is not verified (a disputed row the user wrote still counts)", async () => {
+    const w = pair(EARLY);
+    const written = userDecisions.add(db, {
+      kind: "fact",
+      itemId: w.y,
+      factKind: "completion_date",
+      value: LATE,
+    });
+    if (written.status !== "applied") throw new Error("add");
+    userDecisions.decide(db, written.ref, "dispute");
+    recomputeDependencyDelay(db, [w.x, w.y]);
+    await start();
+    const [made] = await insights();
+    expect((await evidenceOf(made?.id as number)).userInputs).toEqual([
+      { target: "fact", id: written.ref.id, status: "disputed" },
+    ]);
+  });
+});
+
 describe("semantic.api: the scope of the rows the user wrote", () => {
   const writtenOn = (itemId: number, value: string): EntryRef => {
     const r = userDecisions.add(db, { kind: "fact", itemId, factKind: "memo", value });
