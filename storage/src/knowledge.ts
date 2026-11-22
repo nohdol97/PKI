@@ -14,6 +14,8 @@ export interface KnowledgeAttributes {
   validAt: string | null;
   /** When it was observed (recorded). */
   observedAt: string;
+  /** The model's own 0..1 number, never read to decide a status or epistemic type (S01-R10); read back as null when absent. */
+  confidence?: number | null;
 }
 
 export interface NewItem extends KnowledgeAttributes {
@@ -35,26 +37,28 @@ export type StoredItem = NewItem & { id: number };
 export type StoredFact = NewFact & { id: number };
 export type StoredRelation = NewRelation & { id: number };
 
-const ATTRIBUTES = "epistemic, status, valid_at, observed_at";
+const ATTRIBUTES = "epistemic, status, valid_at, observed_at, confidence";
 const attributeValues = (k: KnowledgeAttributes) => [
   k.epistemic,
   k.status,
   k.validAt,
   k.observedAt,
+  k.confidence ?? null,
 ];
 const attributesOf = (row: SqlRow): KnowledgeAttributes => ({
   epistemic: row.epistemic as EpistemicType,
   status: row.status as KnowledgeStatus,
   validAt: row.valid_at as string | null,
   observedAt: row.observed_at as string,
+  confidence: row.confidence as number | null,
 });
 
 export function insertItem(db: SqlDriver, item: NewItem): number {
-  return db.run(`INSERT INTO items (type, name, ${ATTRIBUTES}) VALUES (?, ?, ?, ?, ?, ?)`, [
-    item.type,
-    item.name,
-    ...attributeValues(item),
-  ]).lastInsertRowid;
+  const values = [item.type, item.name, ...attributeValues(item)];
+  return db.run(
+    `INSERT INTO items (type, name, ${ATTRIBUTES}) VALUES (${values.map(() => "?").join(", ")})`,
+    values,
+  ).lastInsertRowid;
 }
 
 export function readItem(db: SqlDriver, id: number): StoredItem | undefined {
@@ -71,10 +75,11 @@ function saveUnique(
   key: readonly [number | string, string, number | string],
   attributes: KnowledgeAttributes,
 ): { id: number; created: boolean } {
+  const values = [...key, ...attributeValues(attributes)];
   const { changes } = db.run(
-    `INSERT INTO ${table} (${keyColumns.join(", ")}, ${ATTRIBUTES}) VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT DO NOTHING`,
-    [...key, ...attributeValues(attributes)],
+    `INSERT INTO ${table} (${keyColumns.join(", ")}, ${ATTRIBUTES})
+     VALUES (${values.map(() => "?").join(", ")}) ON CONFLICT DO NOTHING`,
+    values,
   );
   const id = db.all(
     `SELECT id FROM ${table} WHERE ${keyColumns.map((c) => `${c} = ?`).join(" AND ")}`,
@@ -131,19 +136,6 @@ export function readRelation(db: SqlDriver, id: number): StoredRelation | undefi
     objectId: row.object_id as number,
     ...attributesOf(row),
   };
-}
-
-const TABLES = { item: "items", fact: "facts", relation: "relations" } as const;
-
-export function setKnowledgeStatus(
-  db: SqlDriver,
-  kind: keyof typeof TABLES,
-  id: number,
-  status: KnowledgeStatus,
-): void {
-  if (db.run(`UPDATE ${TABLES[kind]} SET status = ? WHERE id = ?`, [status, id]).changes !== 1) {
-    throw new Error(`${kind} ${id} not found`);
-  }
 }
 
 export type EvidenceTarget = { factId: number } | { relationId: number };
@@ -219,18 +211,4 @@ export function listEvidence(db: SqlDriver, target: EvidenceTarget): StoredEvide
       quote: row.quote as string,
       current: row.current === 1,
     }));
-}
-
-/**
- * Brings a superseded fact or relation back as a candidate when an extraction
- * gives it current evidence again (V02-R11; provisional: the status before it was
- * superseded is not kept). Any other status is left alone; returns whether it changed.
- */
-export function reviveSuperseded(db: SqlDriver, target: EvidenceTarget): boolean {
-  const [table, id] =
-    "factId" in target ? ["facts", target.factId] : ["relations", target.relationId];
-  return (
-    db.run(`UPDATE ${table} SET status = 'candidate' WHERE id = ? AND status = 'superseded'`, [id])
-      .changes === 1
-  );
 }

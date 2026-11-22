@@ -178,10 +178,8 @@ export {
   readFact,
   readItem,
   readRelation,
-  reviveSuperseded,
   saveFact,
   saveRelation,
-  setKnowledgeStatus,
   type EpistemicType,
   type EvidenceTarget,
   type KnowledgeAttributes,
@@ -195,6 +193,15 @@ export {
   type StoredItem,
   type StoredRelation,
 } from "./knowledge.ts";
+export {
+  automatedLifecycle,
+  type Actor,
+  type AutomatedLifecycle,
+  type Basis,
+  type EntryRef,
+  type Outcome,
+  type Refusal,
+} from "./semantic-lifecycle.ts";
 export {
   findRelation,
   listEvidenceVersions,
