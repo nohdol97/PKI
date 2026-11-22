@@ -152,14 +152,25 @@ const shapesOf = (value: string) => [
 ];
 
 /**
- * Whether any string inside `value` holds one of the `needles`: keys and values of objects
- * and arrays and, of an Error, its name, message, `cause` and `errors` as well.
+ * Whether any string inside `value` holds one of the `needles`: every own key of an object or
+ * array (symbols too, hidden ones such as an Error's `stack` too) and its value and, of an
+ * Error, its name, message, `cause` and `errors` as well. With no needles it looks at nothing,
+ * so a scenario without credentials never reads a thing the Connector hands back. A property
+ * that throws when read is not inspected.
  */
 function holds(value: unknown, needles: readonly string[], seen = new Set<object>()): boolean {
+  if (needles.length === 0) return false;
   if (typeof value === "string") return needles.some((needle) => value.includes(needle));
   if (typeof value !== "object" || value === null || seen.has(value)) return false;
   seen.add(value);
-  const parts: unknown[] = Object.entries(value).flat();
+  const parts: unknown[] = [];
+  for (const key of Reflect.ownKeys(value)) {
+    try {
+      parts.push(key, (value as Record<PropertyKey, unknown>)[key]);
+    } catch {
+      parts.push(key);
+    }
+  }
   if (value instanceof Error) parts.push(value.name, value.message, value.cause);
   if (value instanceof AggregateError) parts.push(value.errors);
   return parts.some((part) => holds(part, needles, seen));
@@ -383,8 +394,30 @@ const CONSOLE_FUNCTIONS = [
   "assert",
 ] as const;
 
+/**
+ * How long a check with the log taps on may run before it is given up (provisional). It is
+ * below the five seconds vitest gives a test, so a Connector that never settles ends the
+ * check with an error and not with the taps still on.
+ */
+const LOG_TAP_DEADLINE_MS = 4000;
+
 /** One check at a time wears the taps below: overlapping ones would restore each other's. */
 let tapQueue: Promise<void> = Promise.resolve();
+
+/** Whether what `console` is about to print holds a value; what cannot be read is judged by its text. */
+function printsValue(args: unknown[], needles: readonly string[]): boolean {
+  let text = "";
+  try {
+    text = format(...args);
+  } catch {
+    // the text of what cannot be formatted is not looked at
+  }
+  try {
+    return holds(args, needles) || holds(text, needles);
+  } catch {
+    return holds(text, needles);
+  }
+}
 
 /**
  * Runs `run` with `console` and the standard streams tapped (I06-R21): a text that holds one
@@ -408,7 +441,7 @@ async function withLogTaps<T>(
       const original = targets[name];
       if (typeof original !== "function") continue;
       targets[name] = function (this: unknown, ...args: unknown[]) {
-        if (holds(args, needles) || holds(format(...args), needles)) {
+        if (printsValue(args, needles)) {
           leaked = true;
           return undefined;
         }
@@ -430,9 +463,20 @@ async function withLogTaps<T>(
       } as typeof stream.write;
       restores.push(() => (stream.write = original));
     }
-    const result = await run();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    return { result, leaked };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("the contract check did not finish within its deadline")),
+        LOG_TAP_DEADLINE_MS,
+      );
+    });
+    try {
+      const result = await Promise.race([run(), deadline]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return { result, leaked };
+    } finally {
+      clearTimeout(timer);
+    }
   } finally {
     for (const restore of restores) restore();
     release();
@@ -713,7 +757,10 @@ async function rejection(
     return;
   }
   const signalled = await connector.getChanges(null, { limit: 1, signal: signal() }).then(
-    () => false,
+    (page) => {
+      check.returned(page);
+      return false;
+    },
     (error: unknown) => {
       check.thrown(error);
       return error instanceof ConnectorCredentialError;

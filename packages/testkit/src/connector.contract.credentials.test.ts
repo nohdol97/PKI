@@ -69,6 +69,14 @@ const flat = (error: unknown): string => {
   }
 };
 
+/** An error whose stack holds `text` and whose message no longer does (the stack is fixed once read). */
+const withOnlyStack = (text: string) => {
+  const error = new Error(text);
+  void error.stack;
+  error.message = "refused";
+  return error;
+};
+
 /** A scripted Connector that keeps the token it read at initialize and answers nothing before it. */
 class Holding extends ScriptedConnector {
   token = "";
@@ -116,7 +124,11 @@ const failsAbortedWith = (make: (token: string) => unknown) =>
  * A Connector for the rejected scenario: given WRONG instead of TOKEN, `refuse` decides what
  * its initialize does, and `health` is what it then answers to a health check.
  */
-const refusing = (refuse: () => Promise<void>, health?: HealthStatus) =>
+const refusing = (
+  refuse: () => Promise<void>,
+  health?: HealthStatus,
+  answerWhenWrong?: (wrong: string) => ChangeSet,
+) =>
   class extends ScriptedConnector {
     protected wrong = false;
     override async initialize(config: unknown, context?: ConnectorContext) {
@@ -126,6 +138,14 @@ const refusing = (refuse: () => Promise<void>, health?: HealthStatus) =>
     }
     override async healthCheck() {
       return this.wrong && health ? health : super.healthCheck();
+    }
+    override async getChanges(
+      cursor: string | null,
+      opts: { limit: number; signal: AbortSignal },
+    ): Promise<ChangeSet> {
+      return this.wrong && answerWhenWrong
+        ? answerWhenWrong(WRONG)
+        : super.getChanges(cursor, opts);
     }
   };
 
@@ -175,6 +195,27 @@ describe("connector.contract.credentials", () => {
       expect(codes).toContain("credential-in-record");
     });
 
+    it("is reported when only the pages of getChanges carry the value", async () => {
+      class PagesOnly extends Holding {
+        override async getChanges(
+          cursor: string | null,
+          opts: { limit: number; signal: AbortSignal },
+        ): Promise<ChangeSet> {
+          const page = await super.getChanges(cursor, opts);
+          const echo = (c: Change): Change =>
+            c.kind === "upsert"
+              ? { ...c, record: { ...c.record, metadata: { echo: this.token } } }
+              : c;
+          return { ...page, changes: page.changes.map(echo) };
+        }
+      }
+      // getDocument then differs from what was delivered, which is its own violation
+      expect(await checkConnector(() => new PagesOnly(), scenario())).toEqual([
+        "get-document-mismatch",
+        "credential-in-record",
+      ]);
+    });
+
     it("is not looked for when the scenario has no credentials", async () => {
       const Leaky = leaksInRecord((t) => t);
       expect(await checkConnector(() => new Leaky(), { config: ORIGIN })).toEqual([]);
@@ -205,6 +246,11 @@ describe("connector.contract.credentials", () => {
         (t) => new Error("refused", { cause: new Error("because", { cause: t }) }),
       ],
       ["a thrown text", (t) => `refused ${Buffer.from(t).toString("base64")}`],
+      ["its stack alone, the message having been replaced", (t) => withOnlyStack(`refused ${t}`)],
+      [
+        "a field under a symbol key",
+        (t) => Object.assign(new Error("refused"), { [Symbol("k")]: t }),
+      ],
     ])(
       "is reported alone when the cancelled-call error carries the value in %s",
       async (_n, make) => {
@@ -350,6 +396,51 @@ describe("connector.contract.credentials", () => {
       );
     });
 
+    /** Answers the rejected scenario's first read with what `answer` builds from WRONG. */
+    const answeringRejected = (answer: (wrong: string) => ChangeSet) =>
+      refusing(async () => undefined, undefined, answer);
+
+    it("scans the page the rejected instance's getChanges returns, and only that page leaks", async () => {
+      const Leaky = answeringRejected((wrong) => ({
+        changes: [upsert({ ...record("a"), metadata: { echo: wrong } })],
+        nextCursor: "offset:1",
+        hasMore: false,
+      }));
+      expect(await checkConnector(() => new Leaky(), rejectedOnly)).toEqual([
+        "credential-in-record",
+        "credential-rejection-unsignalled",
+      ]);
+    });
+
+    it("scans the cursor of the page the rejected instance's getChanges returns", async () => {
+      const Leaky = answeringRejected((wrong) => ({
+        changes: [],
+        nextCursor: wrong,
+        hasMore: false,
+      }));
+      expect(await checkConnector(() => new Leaky(), rejectedOnly)).toEqual([
+        "credential-in-record",
+        "credential-rejection-unsignalled",
+      ]);
+    });
+
+    it("scans the error the rejected instance's getChanges throws", async () => {
+      const Leaky = class extends refusing(async () => undefined) {
+        override async getChanges(
+          cursor: string | null,
+          opts: { limit: number; signal: AbortSignal },
+        ): Promise<ChangeSet> {
+          if (this.wrong) {
+            throw Object.assign(new ConnectorCredentialError(), { cause: new Error(WRONG) });
+          }
+          return super.getChanges(cursor, opts);
+        }
+      };
+      expect(await checkConnector(() => new Leaky(), rejectedOnly)).toEqual([
+        "credential-in-error",
+      ]);
+    });
+
     it("is not looked for when the scenario has no rejected part", async () => {
       expect(await checkConnector(() => new Holding(), scenario())).toEqual([]);
     });
@@ -389,6 +480,18 @@ describe("connector.contract.credentials", () => {
       expect(new Set(arities)).toEqual(new Set([1]));
       expect(taps.length).toBeGreaterThan(0);
       expect(new Set(taps)).toEqual(new Set([true]));
+    });
+
+    it("looks at no error at all: a cancelled-call error that throws when its keys are listed changes nothing", async () => {
+      const Hostile = failsAbortedWith(
+        () =>
+          new Proxy(new Error("refused"), {
+            ownKeys() {
+              throw new Error("keys that cannot be listed");
+            },
+          }),
+      );
+      expect(await checkConnector(() => new Hostile(), { config: ORIGIN })).toEqual([]);
     });
   });
 
@@ -502,6 +605,39 @@ describe("connector.contract.output-clean", () => {
     expect(hasValue(text)).toBe(false);
   });
 
+  it.each<[string, (token: string) => Error]>([
+    ["its stack alone", (t) => withOnlyStack(`origin said ${t}`)],
+    ["a symbol-keyed field", (t) => Object.assign(new Error("origin"), { [Symbol("k")]: t })],
+  ])(
+    "attaches no cause at any of the three sites when the error holds the value in %s",
+    async (_n, make) => {
+      class Fails extends ScriptedConnector {
+        override async initialize(config: unknown, context?: ConnectorContext) {
+          const boom = (config as { boom?: string }).boom;
+          if (boom) throw make(TOKEN);
+          return super.initialize(config, context);
+        }
+      }
+      const first = scenario({ config: { boom: "first" } });
+      const later = scenario({ later: { boom: "later" } });
+      const mid = scenario({
+        config: {
+          entries: ENTRIES,
+          pageSize: 1,
+          faults: [{ cursor: "offset:1", raise: make(TOKEN) }],
+        },
+      });
+      for (const s of [first, later, mid]) {
+        const failure = await checkConnector(() => new Fails(), s).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).cause).toBeUndefined();
+      }
+    },
+  );
+
   it("keeps the cause of a failure that holds no value", async () => {
     const cause = new ConnectorError("origin down", { retryable: true });
     const text = await failureText(
@@ -592,6 +728,57 @@ describe("connector.contract.output-clean", () => {
       expect(FUNCTIONS.map((name) => console[name])).toEqual(before);
       expect(process.stdout.write).toBe(out);
       expect(process.stderr.write).toBe(err);
+    });
+
+    it("gives up a check that never settles within its deadline, with no value in the error, and puts everything back", async () => {
+      class Hangs extends ScriptedConnector {
+        override async initialize(): Promise<void> {
+          await new Promise(() => undefined);
+        }
+      }
+      const before = FUNCTIONS.map((name) => console[name]);
+      const out = process.stdout.write;
+      const err = process.stderr.write;
+      const text = await failureText(() => new Hangs(), scenario());
+      expect(text).toContain("deadline");
+      expect(hasValue(text)).toBe(false);
+      expect(FUNCTIONS.map((name) => console[name])).toEqual(before);
+      expect(process.stdout.write).toBe(out);
+      expect(process.stderr.write).toBe(err);
+      // the queue is released: a credentialed check that follows still runs
+      expect(await checkConnector(() => new Holding(), scenario())).toEqual([]);
+    }, 15_000);
+
+    it("does not let a logged object with a throwing getter make console.log throw", async () => {
+      class Hostile extends Holding {
+        override async initialize(config: unknown, context?: ConnectorContext) {
+          await super.initialize(config, context);
+          console.log({
+            get boom(): string {
+              throw new Error("a getter that throws");
+            },
+          });
+        }
+      }
+      const heard = await recording(async () => {
+        expect(await checkConnector(() => new Hostile(), scenario())).toEqual([]);
+      });
+      expect(heard).toHaveLength(1);
+    });
+
+    it("still catches a value that only the formatted text holds, next to such an object", async () => {
+      class Hostile extends Holding {
+        override async initialize(config: unknown, context?: ConnectorContext) {
+          await super.initialize(config, context);
+          console.log("%s", {
+            toString: () => this.token,
+            get boom(): string {
+              throw new Error("a getter that throws");
+            },
+          });
+        }
+      }
+      expect(await checkConnector(() => new Hostile(), scenario())).toEqual(["credential-in-log"]);
     });
 
     it("hands back only codes, so a failure report built from the result carries no value", async () => {

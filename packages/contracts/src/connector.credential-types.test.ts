@@ -60,6 +60,12 @@ describe("connector.credential-types", () => {
     expect(Object.keys(error)).toEqual(["name"]);
   });
 
+  it("takes no argument: a message cannot be passed", () => {
+    // @ts-expect-error the constructor has no parameter
+    const error = new ConnectorCredentialError("x");
+    expect(error.message).toBe(CONNECTOR_CREDENTIAL_MESSAGE);
+  });
+
   it("names the health reason that reports a rejection", () => {
     expect(HEALTH_REASON_CREDENTIAL_REJECTED).toBe("credential-rejected");
   });
