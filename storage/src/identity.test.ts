@@ -155,6 +155,28 @@ describe("identity.hash", () => {
   });
 });
 
+describe("purge.legacy-residue: a clean-up that cannot finish", () => {
+  /** A driver whose VACUUM fails while `failing.on`, as with no room for the copy. */
+  const failing = { on: true };
+  const withVacuumFailure = (inner: SqlDriver): SqlDriver => ({
+    ...inner,
+    exec: (sql) => {
+      if (failing.on && sql === "VACUUM") throw new Error("database or disk is full");
+      inner.exec(sql);
+    },
+  });
+
+  it("does not stop the start, records nothing as done and tries again at the next start", () => {
+    db.run("DELETE FROM settings WHERE key = 'purge.legacy-cleanup'");
+    failing.on = true;
+    expect(prepareCanonicalDb(withVacuumFailure(db))).toEqual({ legacyCleanup: "failed" });
+    expect(readSetting(db, "purge.legacy-cleanup")).toBeUndefined();
+    failing.on = false;
+    expect(prepareCanonicalDb(withVacuumFailure(db))).toEqual({ legacyCleanup: "done" });
+    expect(readSetting(db, "purge.legacy-cleanup")).toBe("done");
+  });
+});
+
 describe("purge.legacy-residue", () => {
   const LEGACY = { body: "kvzlegacybody", old: "jwxlegacyword" };
   /** What a build without the settings left: deleted text still in the file. */

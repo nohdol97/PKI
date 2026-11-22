@@ -157,8 +157,9 @@ describe("purge.canary-files", () => {
 
   it("control: with the FTS secure-delete off the indexed word stays (③)", () => {
     seed();
+    // only the FTS option is off: the page-level overwrite stays on, so the word
+    // can only be left by the index's own segments
     db.run("INSERT INTO keyword_index (keyword_index, rank) VALUES ('secure-delete', 0)");
-    db.exec("PRAGMA secure_delete = OFF");
     entry("user-deleted");
     expect(residue()).toContain(CANARY.word);
   });

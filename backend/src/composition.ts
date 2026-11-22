@@ -369,7 +369,10 @@ export function productImporter(
 export function openCanonicalDb(dir: string = dataDirectory()): SqlDriver {
   ensureDataDirectory(dir);
   const db = openBetterSqlite3(join(dir, CANONICAL_DB_FILE));
-  prepareCanonicalDb(db);
+  // a failed clean-up does not stop the start: it stays `pending` in the status API
+  // (dataProtection) and is tried again at the next start; the missing-key error
+  // propagates and no backend starts (the shell logs its class)
+  if (prepareCanonicalDb(db).legacyCleanup === "failed") log("legacy-cleanup-failed", {});
   return db;
 }
 

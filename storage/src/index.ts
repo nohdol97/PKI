@@ -19,6 +19,7 @@ export { deleteConsent, readConsent, saveConsent, type StoredConsent } from "./c
 export { readSetting, writeSetting } from "./settings.ts";
 export {
   IdentityKeyMissingError,
+  LEGACY_CLEANUP_SETTING,
   ensureTombstoneSource,
   findHashedSourceId,
   hashSourceIdentity,

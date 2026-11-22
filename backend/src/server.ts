@@ -53,6 +53,7 @@ import {
   listSources,
   readEvidenceSource,
   readInsightEvidence,
+  LEGACY_CLEANUP_SETTING,
   readSetting,
   schemaVersion,
   writeSetting,
@@ -492,6 +493,10 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
           recomputedByKind: r.recomputedByKind,
           at: r.at,
         })),
+      },
+      dataProtection: {
+        legacyCleanup:
+          readSetting(options.db, LEGACY_CLEANUP_SETTING) === "done" ? "done" : "pending",
       },
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),

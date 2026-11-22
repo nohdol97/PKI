@@ -8,7 +8,14 @@ import {
   OPENAI_BASE_URL_SETTING,
   OPENAI_MODEL_SETTING,
 } from "@pki/providers";
-import { migrations, schemaVersion, writeSetting } from "@pki/storage";
+import {
+  IdentityKeyMissingError,
+  migrations,
+  readSetting,
+  schemaVersion,
+  writeSetting,
+} from "@pki/storage";
+import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { FakeProvider } from "@pki/testkit";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,6 +53,37 @@ describe("openCanonicalDb", () => {
       if (process.platform !== "win32") expect(statSync(dir).mode & 0o777).toBe(0o700);
     } finally {
       db.close();
+    }
+  });
+});
+
+describe("openCanonicalDb: the start of a database with deleted sources (I04-R6, R7)", () => {
+  it("finishes the one-time clean-up, so the next start has none to do", () => {
+    const dir = join(root, "PKI");
+    openCanonicalDb(dir).close();
+    const again = openCanonicalDb(dir);
+    try {
+      expect(readSetting(again, "purge.legacy-cleanup")).toBe("done");
+    } finally {
+      again.close();
+    }
+  });
+
+  it("refuses to start when hashed sources lost the identity key, and makes no new key", () => {
+    const dir = join(root, "PKI");
+    const first = openCanonicalDb(dir);
+    first.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    first.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id, identity_hashed) VALUES ('c', 'h', 'h', 1)",
+    );
+    first.run("DELETE FROM identity_key");
+    first.close();
+    expect(() => openCanonicalDb(dir)).toThrow(IdentityKeyMissingError);
+    const raw = openBetterSqlite3(join(dir, CANONICAL_DB_FILE));
+    try {
+      expect(raw.all("SELECT count(*) AS n FROM identity_key")[0]?.n).toBe(0);
+    } finally {
+      raw.close();
     }
   });
 });

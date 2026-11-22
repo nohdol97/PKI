@@ -297,6 +297,13 @@ export const StatusResponseSchema = z.object({
    * dropped) beside `recent`, with the table it counts.
    */
   invalidations: z.object({ recent: z.array(InvalidationSchema) }),
+  /**
+   * I04-R6, the screen's "데이터 보호" item. `legacyCleanup`: `pending` while the
+   * one-time clean-up of earlier deletions' traces (FTS optimize + VACUUM) has not
+   * finished, e.g. no room for the VACUUM copy: the item reads "이전 삭제의 흔적
+   * 정리 실패" and the next start tries again. The text is I04-T13's.
+   */
+  dataProtection: z.object({ legacyCleanup: z.enum(["done", "pending"]) }),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 

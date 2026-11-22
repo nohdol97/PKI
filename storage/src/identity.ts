@@ -66,8 +66,9 @@ export function findHashedSourceId(
   if (!hasHashedSources(db)) return undefined;
   const hash = identityKey(db, connectorInstanceId, namespace, externalId);
   return db.all(
-    "SELECT id FROM sources WHERE connector_instance_id = ? AND identity_hashed = 1 AND external_id = ?",
-    [connectorInstanceId, hash],
+    // namespace too: a hashed row holds the hash in both, and the unique index starts there
+    "SELECT id FROM sources WHERE connector_instance_id = ? AND namespace = ? AND external_id = ? AND identity_hashed = 1",
+    [connectorInstanceId, hash, hash],
   )[0]?.id as number | undefined;
 }
 
@@ -125,7 +126,8 @@ export interface PreparedCanonicalDb {
   legacyCleanup: "done" | "skipped" | "failed";
 }
 
-const LEGACY_CLEANUP = "purge.legacy-cleanup";
+/** The setting that holds `done` once the one-time clean-up finished (the status API reads it). */
+export const LEGACY_CLEANUP_SETTING = "purge.legacy-cleanup";
 
 /**
  * Brings a canonical database up to date before anything opens it (I04-R6, R7):
@@ -148,13 +150,13 @@ export function prepareCanonicalDb(db: SqlDriver): PreparedCanonicalDb {
     );
     for (const { id } of ids) hashSourceIdentity(db, id as number);
   });
-  if (readSetting(db, LEGACY_CLEANUP) === "done") return { legacyCleanup: "skipped" };
+  if (readSetting(db, LEGACY_CLEANUP_SETTING) === "done") return { legacyCleanup: "skipped" };
   try {
     db.run("INSERT INTO keyword_index (keyword_index) VALUES ('optimize')");
     db.exec("VACUUM");
   } catch {
     return { legacyCleanup: "failed" };
   }
-  writeSetting(db, LEGACY_CLEANUP, "done");
+  writeSetting(db, LEGACY_CLEANUP_SETTING, "done");
   return { legacyCleanup: "done" };
 }

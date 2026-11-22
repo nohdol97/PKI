@@ -9,7 +9,7 @@ beforeEach(() => void (dir = mkdtempSync(join(tmpdir(), "pki-canary-"))));
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("canary inspection tool", () => {
-  it("finds a canary in ", () => {
+  it("finds a canary in the database, a side file and a nested projection path", () => {
     mkdirSync(join(dir, "index", "deep"), { recursive: true });
     writeFileSync(join(dir, "pki.sqlite"), "xx kvzalpha xx");
     writeFileSync(join(dir, "pki.sqlite-journal"), "jwxbeta");
