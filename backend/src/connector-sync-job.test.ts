@@ -962,6 +962,26 @@ describe("review rework 1 (I03-T09 reviewer A)", () => {
     expect(job(queued.id).status).toBe("held"); // nothing was released after stop
   });
 
+  it("N1: a recheck leaves no abort listener behind on the stop signal", async () => {
+    let listeners = 0;
+    const signal = {
+      aborted: false,
+      addEventListener: () => void listeners++,
+      removeEventListener: () => void listeners--,
+    } as unknown as AbortSignal;
+    const manager = {
+      list: (): ConnectorSummary[] => [
+        { id: "a", kind: "k", state: "unavailable" },
+        { id: "b", kind: "k", state: "unavailable" },
+      ],
+      recheck: async () => "unavailable" as const,
+    };
+    for (let pass = 0; pass < 4; pass++) {
+      await recheckInstances({ db, manager, runner: { wake: async () => {} }, signal });
+    }
+    expect(listeners).toBe(0);
+  });
+
   it("quit: stop resolves at once even when the recheck of an instance never settles", async () => {
     const manager = {
       list: (): ConnectorSummary[] => [{ id: "hung", kind: "k", state: "unavailable" }],

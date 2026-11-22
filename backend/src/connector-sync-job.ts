@@ -253,18 +253,22 @@ async function boundedRecheck(
   const done = () => void inFlight.delete(id);
   settled.then(done, done);
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   try {
     return await Promise.race([
       settled,
       new Promise<undefined>(
         (resolve) => (timer = setTimeout(() => resolve(undefined), timeoutMs)),
       ),
-      new Promise<undefined>((resolve) =>
-        signal?.addEventListener("abort", () => resolve(undefined)),
-      ),
+      new Promise<undefined>((resolve) => {
+        onAbort = () => resolve(undefined);
+        signal?.addEventListener("abort", onAbort);
+      }),
     ]);
   } finally {
     clearTimeout(timer);
+    // the stop signal outlives every recheck: a listener left behind would pile up hour after hour
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
   }
 }
 
