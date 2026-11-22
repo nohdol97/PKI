@@ -1,5 +1,6 @@
 // The ledger file (I04-R17): its format, how it opens (missing, another key, a cut last
 // line), the numbers it hands out, and the real file operations.
+import { MAX_INSTANCE_ID_LENGTH } from "@pki/contracts";
 import { createHash } from "node:crypto";
 import { memoryLedgerIo } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -401,7 +402,7 @@ describe("everything the writer writes the reader reads (round trip)", () => {
     draft({ reason: "source-deleted", lastRevision: 7 }),
     draft({ reason: "access-revoked", coversVersion: 0 }),
     draft({ liftedAt: "2026-11-23T00:00:00.000Z" }), // a lift
-    draft({ connectorKind: "site-mail", connectorInstanceId: "i".repeat(256) }),
+    draft({ connectorKind: "site-mail", connectorInstanceId: "i".repeat(MAX_INSTANCE_ID_LENGTH) }),
   ];
   it("appended lines (delete, lift), a cancel record, and a seed are all read back", () => {
     const { io, ledger } = open(memoryLedgerIo(), { seed: variants, hasData: true });
@@ -422,7 +423,7 @@ describe("everything the writer writes the reader reads (round trip)", () => {
       { connectorKind: "k".repeat(65) },
       { connectorKind: "" },
       { connectorInstanceId: "" },
-      { connectorInstanceId: "i".repeat(257) },
+      { connectorInstanceId: "i".repeat(MAX_INSTANCE_ID_LENGTH + 1) },
       { identityHash: hh("x").toUpperCase() },
       { identityHash: "abc" },
       { at: "not a date" },

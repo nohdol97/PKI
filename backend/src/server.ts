@@ -47,6 +47,7 @@ import { defaultEntries, type CanonicalEntries } from "@pki/knowledge-engine";
 import {
   databaseEncryption,
   canonicalTransaction,
+  LedgerLineUnwritableError,
   findSourceId,
   listLiftableTombstones,
   countScopePolicyDrops,
@@ -709,7 +710,14 @@ async function handle(
     if (!parsed.success) return reject(res, 400, "bad-request");
     input = parsed.data;
   }
-  const result = await (handlers[name] as (input: unknown) => Promise<unknown>)(input);
+  let result: unknown;
+  try {
+    result = await (handlers[name] as (input: unknown) => Promise<unknown>)(input);
+  } catch (error) {
+    // fail closed, with its own answer: no tombstone without a readable ledger line
+    if (error instanceof LedgerLineUnwritableError) return reject(res, 409, "ledger-unwritable");
+    throw error;
+  }
   if (typeof result === "object" && result !== null && "error" in result) {
     const { error } = result as ErrorResponse;
     return reject(res, errorStatus[error] ?? 500, error);

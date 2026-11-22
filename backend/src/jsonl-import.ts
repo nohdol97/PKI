@@ -14,7 +14,7 @@ import type {
   ImportRecord,
 } from "@pki/contracts";
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
-import { readConnectorKind, type SqlDriver } from "@pki/storage";
+import { LedgerLineUnwritableError, readConnectorKind, type SqlDriver } from "@pki/storage";
 import {
   syncConnector,
   tryLockInstance,
@@ -66,7 +66,7 @@ async function importInstance(
     stored(created: boolean): void;
     refused(line: number, reason: ImportLineError["reason"]): void;
   },
-): Promise<number[]> {
+): Promise<{ lines: number[]; unwritable: boolean }> {
   const rounds = splitRounds(lines);
   for (const [k, round] of rounds.entries()) {
     const lineOf = new Map(round.map((l) => [l.record.external_id, l.line]));
@@ -100,10 +100,17 @@ async function importInstance(
       // A failed page stored nothing of itself (one transaction); its lines and
       // the later rounds' are reported, the pages committed before it stay.
       const rest = rounds.slice(k + 1).flat();
-      return [...round.map((l) => l.line).filter((l) => !done.has(l)), ...rest.map((l) => l.line)];
+      return {
+        lines: [
+          ...round.map((l) => l.line).filter((l) => !done.has(l)),
+          ...rest.map((l) => l.line),
+        ],
+        // a deletion whose ledger line cannot be written is refused: its own code, not a bare failure
+        unwritable: error instanceof LedgerLineUnwritableError,
+      };
     }
   }
-  return [];
+  return { lines: [], unwritable: false };
 }
 
 export async function importJsonl(
@@ -158,9 +165,19 @@ export async function importJsonl(
         for (const { line } of lines) errors.push({ line, reason: "instance-conflict" });
         continue;
       }
-      const failed = await importInstance(db, instanceId, lines, options, report);
+      const { lines: failed, unwritable } = await importInstance(
+        db,
+        instanceId,
+        lines,
+        options,
+        report,
+      );
       // bound to another kind meanwhile (a rebind that did not take the lock), or its sync failed
-      const reason = boundElsewhere(instanceId) ? "instance-conflict" : "instance-failed";
+      const reason = boundElsewhere(instanceId)
+        ? "instance-conflict"
+        : unwritable
+          ? "ledger-unwritable"
+          : "instance-failed";
       for (const line of failed) errors.push({ line, reason });
     }
   } finally {

@@ -25,6 +25,7 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname } from "node:path";
+import { MAX_INSTANCE_ID_LENGTH } from "@pki/contracts";
 import type { LedgerLineDraft } from "./derivatives.ts";
 import type { TombstoneReason } from "./tombstones.ts";
 
@@ -198,7 +199,7 @@ const isInt = (v: unknown): v is number =>
   typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= 1e12;
 /** An identifier of a line (instance, kind, hash): a short non-empty string. */
 const isName = (v: unknown): v is string =>
-  typeof v === "string" && v.length > 0 && v.length <= 256;
+  typeof v === "string" && v.length > 0 && v.length <= MAX_INSTANCE_ID_LENGTH;
 /** The keyed hash (HMAC-SHA-256, hex): exactly 64 hex digits. */
 const isHash = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
 /** A connector kind: the syntax the registered kinds all follow (the composition checks it is a known one). */

@@ -8,6 +8,14 @@
 import { z } from "zod";
 import { ISO_WITH_OFFSET as isoWithOffset } from "./connector.ts";
 
+/**
+ * The longest connector instance id anywhere (I04-R17): the import line's `connector_instance_id`, the
+ * import API's `instanceId`, a registered instance, and what the tombstone ledger's reader accepts. One
+ * limit, so no source can exist whose deletion could not be written to the ledger. 128 is what
+ * `/api/imports` already took; the golden data and fixtures use ids of at most 13 characters.
+ */
+export const MAX_INSTANCE_ID_LENGTH = 128;
+
 export const ImportRecordSchema = z
   .strictObject({
     id: z.string().min(1),
@@ -25,7 +33,7 @@ export const ImportRecordSchema = z
     version: z.int().min(1),
     access_scope: z.array(z.string()),
     metadata: z.record(z.string(), z.unknown()),
-    connector_instance_id: z.string().min(1),
+    connector_instance_id: z.string().min(1).max(MAX_INSTANCE_ID_LENGTH),
     operation: z.enum(["upsert", "delete", "revoke", "access-revoked"]),
     schema_version: z.literal("1"),
     malicious: z.literal(true).optional(),
@@ -59,6 +67,7 @@ export const ImportLineErrorReasonSchema = z.enum([
   "instance-conflict",
   "too-many-instances",
   "instance-failed",
+  "ledger-unwritable",
 ]);
 export type ImportLineErrorReason = z.infer<typeof ImportLineErrorReasonSchema>;
 
@@ -90,6 +99,6 @@ export type ImportJsonlResponse = z.infer<typeof ImportJsonlResponseSchema>;
  * caller's name for it, not a `connector_instance_id` of the lines (those are namespaces).
  */
 export const ImportRequestSchema = z.strictObject({
-  instanceId: z.string().min(1).max(128),
+  instanceId: z.string().min(1).max(MAX_INSTANCE_ID_LENGTH),
   content: z.string(),
 });

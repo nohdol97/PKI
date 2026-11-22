@@ -15,14 +15,14 @@ import type {
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { outcomeText } from "./activity-text.ts";
 import { JobsArea } from "./activity-jobs.tsx";
-import type { ApiClient } from "./api.ts";
+import { ApiError, type ApiClient } from "./api.ts";
 import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { BACKGROUND_EXECUTION_TEXT } from "./background-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
 import { ConnectorTable } from "./connector-table.tsx";
 import { nextSyncStops } from "./connector-text.ts";
-import { deleteConfirmText, deletedText } from "./delete-text.ts";
+import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { invalidationText } from "./job-text.ts";
@@ -247,11 +247,17 @@ function Sources({ api }: { api: ApiClient }) {
   const remove = (source: SourceSummary) => {
     setConfirming(undefined);
     const { connectorId, namespace, externalId } = source;
-    api("deleteSource", { connectorId, namespace, externalId }).then((result) => {
-      setDeleted(deletedText(source.title, result.outcome));
-      setFound(undefined);
-      stored.reload();
-    }, fail);
+    api("deleteSource", { connectorId, namespace, externalId }).then(
+      (result) => {
+        setDeleted(deletedText(source.title, result.outcome));
+        setFound(undefined);
+        stored.reload();
+      },
+      (e: unknown) =>
+        e instanceof ApiError && e.code === "ledger-unwritable"
+          ? setDeleted(notDeletedText(source.title))
+          : fail(e),
+    );
   };
   const shown = found ?? stored.data?.sources;
 

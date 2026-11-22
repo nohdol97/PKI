@@ -1,7 +1,7 @@
 // V02-R12: before the Sources screen deletes a source it says what goes and that
 // the source cannot be imported again; after, it says what happened.
 import { describe, expect, it } from "vitest";
-import { deleteConfirmText, deletedText } from "./delete-text.ts";
+import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts";
 
 describe("deleteConfirmText", () => {
   it("names the source and says every version, its evidence and the knowledge only it held go for good", () => {
@@ -17,5 +17,14 @@ describe("deletedText", () => {
     expect(deletedText("합성 일지", "already-deleted")).toBe(
       "「합성 일지」은(는) 이미 지워졌습니다.",
     );
+  });
+});
+
+describe("notDeletedText (I04-R17)", () => {
+  it("says the source was not deleted, why, and that it is untouched, without any id", () => {
+    const text = notDeletedText("합성 일지");
+    expect(text).toContain("「합성 일지」은(는) 지우지 못했습니다");
+    expect(text).toContain("삭제 장부에 적을 수 없는 형식");
+    expect(text).toContain("원본은 그대로");
   });
 });

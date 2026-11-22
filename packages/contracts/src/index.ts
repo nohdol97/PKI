@@ -89,6 +89,7 @@ export const ErrorResponseSchema = z.object({
     "embedding-busy",
     "instance-busy",
     "storage-failed",
+    "ledger-unwritable",
     "payload-too-large",
     "internal-error",
   ]),
