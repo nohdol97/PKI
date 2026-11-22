@@ -33,9 +33,16 @@ function versionOfRow(ref: DerivedRef): SourceVersionRef {
   return { sourceId: Number(match[1]), version: Number(match[2]) };
 }
 
-/** The changes that purge a source: the three tombstone reasons. Others reach a projection as notices. */
+/**
+ * The version a removal covers: a tombstone's cover, or for a prune the one below the version it
+ * keeps (I04-T12). Other changes reach a projection as notices.
+ */
 const coversVersion = (change: SourceChange): number | undefined =>
-  "coversVersion" in change ? change.coversVersion : undefined;
+  change.kind === "old-versions-pruned"
+    ? change.version - 1
+    : "coversVersion" in change
+      ? change.coversVersion
+      : undefined;
 
 function projectionKind(kind: string, absent: boolean, at: () => string): DerivativeKind {
   return {
@@ -45,14 +52,20 @@ function projectionKind(kind: string, absent: boolean, at: () => string): Deriva
     storage: "projection",
     dataPaths: [],
     ...(absent ? { permanentlyAbsent: true as const } : {}),
-    // every stored version of the source, before the purge: what the projection may still hold
+    // every stored version of the source the change takes, before it: what the projection may still hold
     affected: (tx: SqlDriver, change): Affected =>
       coversVersion(change) === undefined
         ? []
         : tx
-            .all("SELECT version FROM source_versions WHERE source_id = ? ORDER BY version", [
-              change.sourceId,
-            ])
+            .all(
+              "SELECT version FROM source_versions WHERE source_id = ? AND version <= ? ORDER BY version",
+              [
+                change.sourceId,
+                change.kind === "old-versions-pruned"
+                  ? change.version - 1
+                  : Number.MAX_SAFE_INTEGER,
+              ],
+            )
             .map((r) => {
               const version = { sourceId: change.sourceId, version: r.version as number };
               return { ref: { kind, id: projectionRowId(version) }, lineage: [version] };
@@ -61,7 +74,7 @@ function projectionKind(kind: string, absent: boolean, at: () => string): Deriva
     invalidate: (ctx, snapshot, change) => {
       const covers = coversVersion(change);
       if (covers === undefined || snapshot.length === 0) return { removed: 0, recomputed: 0 };
-      // the job is one per source: it covers every version up to the tombstone's (R12)
+      // the job is one per source: it covers every version up to the change's cover (R12; a prune's is the one below its kept version)
       const registered = registerJob(ctx.tx, {
         kind: PROJECTION_REMOVE_KIND,
         target: kind,

@@ -193,6 +193,18 @@ export const SourceDeleteResponseSchema = z.object({
 });
 
 /**
+ * The Sources screen's prune of one source's earlier versions (I04-R10, I04-T12): every version
+ * below the latest is deleted, with the evidence on it and the knowledge only that evidence
+ * supported. The source stays and no tombstone is written. `unchanged`: the source has no earlier
+ * version (a repeat included). An unknown or purged source is `not-found`.
+ */
+export const VersionsPruneRequestSchema = SourceDeleteRequestSchema;
+export const VersionsPruneResponseSchema = z.object({
+  outcome: z.enum(["pruned", "unchanged"]),
+  prunedVersions: z.number().int().min(0),
+});
+
+/**
  * The user's way back (I04-R9): the sources a tombstone blocks and the lift of one.
  * Only the user's request lifts. A purged source's identity is no longer kept in
  * the clear (I04-R7), so the list names a source by an opaque `id` (the local
@@ -749,6 +761,12 @@ export const routes = {
     path: "/api/sources/search",
     request: SourceSearchRequestSchema,
     response: SourceListResponseSchema,
+  },
+  pruneVersions: {
+    method: "POST",
+    path: "/api/sources/prune-versions",
+    request: VersionsPruneRequestSchema,
+    response: VersionsPruneResponseSchema,
   },
   deleteSource: {
     method: "POST",
