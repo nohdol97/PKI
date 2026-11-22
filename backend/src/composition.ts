@@ -47,7 +47,6 @@ import {
   createProjections,
   ENGINE_KIND,
   knowledgeCandidates,
-  NO_POLICY_YET,
   VECTOR_KIND,
   type CanonicalEntries,
   type PermanentlyAbsent,
@@ -71,6 +70,7 @@ import {
 } from "./connectors.ts";
 import type { Clock } from "./clock.ts";
 import { computePolicyFingerprint } from "./held-release.ts";
+import { INTERIM_POLICY } from "./interim-policy.ts";
 import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-runner.ts";
 import { projectionPorts } from "./projection-ports.ts";
 import { importContent, type InstanceImporter } from "./imports.ts";
@@ -109,7 +109,7 @@ export function productEngine(): KnowledgeEngine {
  * one place that builds it. `permanentlyAbsent` is the implementations' own, static fact: the null
  * engine and the empty vector index never hold anything, so an unavailable error from them ends a
  * removal as a skip; any other implementation (a sidecar that may be stopped) does not carry it.
- * The scope policy is the placeholder until I04-T09 configures it.
+ * The scope policy is the interim one (interim-policy.ts) until I04-T09 configures it.
  */
 export function productRegistry(adapters: {
   engine: KnowledgeEngine;
@@ -119,7 +119,7 @@ export function productRegistry(adapters: {
     ...(adapters.engine instanceof NullKnowledgeEngine ? { [ENGINE_KIND]: true as const } : {}),
     ...(adapters.vectorIndex instanceof EmptyVectorIndex ? { [VECTOR_KIND]: true as const } : {}),
   };
-  return createProductRegistry({ policy: NO_POLICY_YET, permanentlyAbsent });
+  return createProductRegistry({ policy: INTERIM_POLICY, permanentlyAbsent });
 }
 
 /** The entries that store a change, delete a source or lift a tombstone through `registry`. */

@@ -49,17 +49,13 @@ import {
   canonicalTransaction,
   findSourceId,
   listLiftableTombstones,
-  findSources,
-  listActiveInsights,
   listInvalidations,
   listProviderCalls,
-  listSources,
-  readEvidenceSource,
-  readInsightEvidence,
   LEGACY_CLEANUP_SETTING,
   readSetting,
   schemaVersion,
   writeSetting,
+  type DerivativeRegistry,
   type SqlDriver,
 } from "@pki/storage";
 import { timingSafeEqual } from "node:crypto";
@@ -69,6 +65,7 @@ import type { ConnectorManager } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import type { InstanceImporter } from "./imports.ts";
 import type { JsonlImporter } from "./jsonl-import.ts";
+import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
@@ -134,6 +131,11 @@ export interface ServerOptions {
    * entries over the registry with no composition (knowledge-engine entries.ts).
    */
   entries?: Pick<CanonicalEntries, "userDelete" | "liftTombstone">;
+  /**
+   * The registry every read path asks before it shows a derived row (I04-R13, read-gate.ts); default
+   * the product's kinds with the interim policy (the composition point passes its own, boot.ts).
+   */
+  registry?: DerivativeRegistry;
   /**
    * Called after the background setting, a consent, the endpoint or the default
    * Provider changed and the held jobs it can lift were put back in the queue, in
@@ -500,6 +502,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     return result;
   };
   const entries = options.entries ?? defaultEntries;
+  const gate = createReadGate(options.db, options.registry ?? defaultReadRegistry);
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -548,8 +551,8 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       options.instanceImporter
         ? options.instanceImporter(instanceId, content)
         : { error: "connector-unavailable" },
-    sources: async () => ({ sources: listSources(options.db) }),
-    searchSources: async (input) => ({ sources: findSources(options.db, input.query) }),
+    sources: async () => ({ sources: gate.sources() }),
+    searchSources: async (input) => ({ sources: gate.searchSources(input.query) }),
     // V02-R12: the user's deletion; until an explicit lift (none in V02) nothing brings it back
     // The request names the source's whole identity (I01-R8), as the listing shows it.
     deleteSource: async ({ connectorId, namespace, externalId }) => {
@@ -633,11 +636,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
     // V02-R14: only active Insights, and a hidden one's evidence list is not-found. A source
     // opens by evidence id while its rows exist (until T08's purge deletes them).
-    insights: async () => ({ insights: listActiveInsights(options.db) }),
+    insights: async () => ({ insights: gate.insights() }),
     insightEvidence: async ({ insightId }) =>
-      readInsightEvidence(options.db, insightId) ?? { error: "not-found" },
+      gate.insightEvidence(insightId) ?? { error: "not-found" },
     evidenceSource: async ({ evidenceId }) =>
-      readEvidenceSource(options.db, evidenceId) ?? { error: "not-found" },
+      gate.evidenceSource(evidenceId) ?? { error: "not-found" },
   };
 }
 

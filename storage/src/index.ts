@@ -239,6 +239,7 @@ export { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
 export { listItemEvidenceVersions, listItemNames } from "./candidates.ts";
 export {
   listActiveInsights,
+  listInsightEvidenceIds,
   readEvidenceSource,
   readInsightEvidence,
   type ActiveInsight,

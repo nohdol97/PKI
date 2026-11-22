@@ -162,6 +162,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     importer: productImporter(db, { runner, projections, clock, entries }),
     instanceImporter: productInstanceImporter(db, { runner, projections, clock, entries }),
     entries,
+    registry,
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),
   });
