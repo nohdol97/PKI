@@ -66,7 +66,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import type { ConnectorManager } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
-import type { JsonlImporter } from "./jsonl-import.ts";
+import { InstanceBusyError, type JsonlImporter } from "./jsonl-import.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
@@ -148,6 +148,7 @@ type Handlers = {
 const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "not-found": 404,
   "connector-unavailable": 409,
+  "instance-busy": 409,
   "destination-unavailable": 409,
   "consent-stale": 409,
   "invalid-endpoint": 400,
@@ -522,8 +523,15 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),
     syncConnector: (input) => options.connectors.sync(input.connectorId),
-    importJsonl: async ({ text }) =>
-      options.importer ? options.importer(text) : { error: "connector-unavailable" },
+    importJsonl: async ({ text }) => {
+      if (!options.importer) return { error: "connector-unavailable" };
+      try {
+        return await options.importer(text);
+      } catch (error) {
+        if (error instanceof InstanceBusyError) return { error: "instance-busy" };
+        throw error;
+      }
+    },
     sources: async () => ({ sources: listSources(options.db) }),
     searchSources: async (input) => ({ sources: findSources(options.db, input.query) }),
     // V02-R12: the user's deletion; until an explicit lift (none in V02) nothing brings it back

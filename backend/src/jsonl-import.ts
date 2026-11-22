@@ -14,7 +14,7 @@ import type {
   ImportRecord,
 } from "@pki/contracts";
 import { readConnectorKind, type SqlDriver } from "@pki/storage";
-import { syncConnector, type SyncOptions } from "./connectors.ts";
+import { syncConnector, tryLockInstance, type SyncOptions } from "./connectors.ts";
 import { parseJsonl, splitRounds, type JsonlLine } from "./jsonl-lines.ts";
 
 export const JSONL_CONNECTOR_KIND = "jsonl-import";
@@ -22,6 +22,14 @@ export const JSONL_CONNECTOR_KIND = "jsonl-import";
 export const MAX_IMPORT_INSTANCES = 32;
 /** Provisional: refused lines listed in an answer; `errorCount` counts them all. */
 export const IMPORT_ERROR_LIMIT = 100;
+
+/** An instance the file names has a sync or an import running (I01-R21): nothing of the file was stored. */
+export class InstanceBusyError extends Error {
+  constructor() {
+    super("an instance of the file is busy");
+    this.name = "InstanceBusyError";
+  }
+}
 
 export type JsonlImporter = (text: string) => Promise<ImportJsonlResponse>;
 
@@ -117,6 +125,14 @@ export async function importJsonl(
     const kind = readConnectorKind(db, id);
     return kind !== undefined && kind !== JSONL_CONNECTOR_KIND;
   };
+  // a running sync or import of an instance the file names refuses the whole request before
+  // any of it is stored (the API answers 409); one that starts after this check is the
+  // instance's failure below
+  for (const instanceId of instances.keys()) {
+    const release = tryLockInstance(db, instanceId);
+    if (!release) throw new InstanceBusyError();
+    release();
+  }
   for (const [instanceId, lines] of instances) {
     if (boundElsewhere(instanceId)) {
       for (const { line } of lines) errors.push({ line, reason: "instance-conflict" });
