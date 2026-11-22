@@ -357,10 +357,10 @@ describe("importJsonl", () => {
       MAIL.connector_instance_id,
       JSONL_CONNECTOR_KIND,
     ]);
-    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES (?, ?)", [
-      MAIL.connector_instance_id,
-      MAIL.external_id,
-    ]);
+    db.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, '', ?)",
+      [MAIL.connector_instance_id, MAIL.external_id],
+    );
     db.run(
       `INSERT INTO jobs (kind, source_id, fence_version, status, run_after, fairness_key,
          registered_change_seq, created_at, updated_at)
@@ -428,7 +428,7 @@ describe("importJsonl, review round 2", () => {
       JSONL_CONNECTOR_KIND,
     ]);
     const { lastInsertRowid } = db.run(
-      "INSERT INTO sources (connector_instance_id, external_id) VALUES (?, ?)",
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, '', ?)",
       [MAIL.connector_instance_id, externalId],
     );
     db.run(

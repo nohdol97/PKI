@@ -177,15 +177,29 @@ describe("engine.calls", () => {
     const { post, projections } = await pipeline(engine);
     await post(routes.importJsonl.path, { text: read("v02-mail.jsonl") });
     const page: ChangeSet = {
-      changes: [{ kind: "access-revoked", externalId: MAIL.externalId, version: 2, at: "x" }],
+      changes: [
+        {
+          kind: "access-revoked",
+          namespace: "",
+          externalId: MAIL.externalId,
+          revision: 2,
+          at: "2026-11-21T00:00:00Z",
+        },
+      ],
       nextCursor: "1",
       hasMore: false,
     };
     const revoking: Connector = {
       manifest: {
         type: JSONL_CONNECTOR_KIND,
-        schemaVersion: 1,
-        capabilities: { incremental: true, deletes: true, accessScope: false, fullRescan: true },
+        schemaVersion: 2,
+        capabilities: {
+          incremental: true,
+          deletes: true,
+          accessScope: false,
+          fullRescan: true,
+          deletionsOnRescan: false,
+        },
       },
       initialize: async () => {},
       healthCheck: async () => ({ state: "ok" }),
@@ -393,8 +407,14 @@ function onePage(changes: ChangeSet["changes"]): Connector {
   return {
     manifest: {
       type: JSONL_CONNECTOR_KIND,
-      schemaVersion: 1,
-      capabilities: { incremental: true, deletes: true, accessScope: false, fullRescan: true },
+      schemaVersion: 2,
+      capabilities: {
+        incremental: true,
+        deletes: true,
+        accessScope: false,
+        fullRescan: true,
+        deletionsOnRescan: false,
+      },
     },
     initialize: async () => {},
     healthCheck: async () => ({ state: "ok" }),
@@ -402,9 +422,16 @@ function onePage(changes: ChangeSet["changes"]): Connector {
     getDocument: async () => null,
   };
 }
-const upsert = (externalId: string, body: string, revision?: number) => ({
+const upsert = (externalId: string, body: string, revision = 1) => ({
   kind: "upsert" as const,
-  record: { externalId, title: externalId, body, ...(revision ? { revision } : {}) },
+  record: {
+    namespace: "",
+    externalId,
+    revision,
+    schemaVersion: 2 as const,
+    title: externalId,
+    body,
+  },
 });
 
 describe("one page with several versions (review F2)", () => {

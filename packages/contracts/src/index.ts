@@ -86,13 +86,16 @@ export const ErrorResponseSchema = z.object({
 });
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 
-// "not-implemented" is a site Connector placeholder (V01-R18); "unavailable" failed to initialize.
+// "not-implemented" is a site Connector placeholder (V01-R18); "unavailable" failed to
+// initialize, or, with reason "unsupported-sdk-version", was never initialized because
+// it implements another Connector SDK version (I01-R1).
 export const ConnectorListResponseSchema = z.object({
   connectors: z.array(
     z.object({
       id: z.string(),
       kind: z.string(),
       state: z.enum(["ready", "not-implemented", "unavailable"]),
+      reason: z.literal("unsupported-sdk-version").optional(),
     }),
   ),
 });

@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(11);
-    expect(migrations).toHaveLength(11);
+    expect(schemaVersion(db)).toBe(12);
+    expect(migrations).toHaveLength(12);
   });
 
   it("is idempotent when re-run", () => {
@@ -196,7 +196,7 @@ describe("schema v2 (V01-T04)", () => {
   });
 
   it("ties every source to a registered Connector instance", () => {
-    migrate(db);
+    migrate(db, migrations.slice(0, 2));
     expect(() =>
       db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('ghost', 'e')"),
     ).toThrow(/FOREIGN KEY/);
@@ -210,7 +210,9 @@ describe("schema v2 (V01-T04)", () => {
   it("keeps the source version and keyword index wiring after rebuilding sources", () => {
     migrate(db);
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
-    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', '', 'e')",
+    );
     expect(() =>
       db.run(
         "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (404, 1, 'h', 't', 'b')",
@@ -234,7 +236,7 @@ describe("schema v3 (V01-T07)", () => {
     migrate(db, migrations.slice(0, 2));
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
     db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'e')");
-    migrate(db);
+    migrate(db, migrations.slice(0, 3));
     expect(columns("sources")).toEqual([
       "id",
       "connector_instance_id",
@@ -691,7 +693,9 @@ describe("schema v10 (I04-T01)", () => {
   it("never reuses a record id", () => {
     migrate(db);
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
-    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', '', 'a')",
+    );
     const insert = () =>
       db.run(
         "INSERT INTO invalidations (change_seq, source_id, change_kind, at) VALUES (1, 1, 'user-deleted', 't')",
@@ -756,7 +760,7 @@ describe("schema v11 (I03-T01, I03-R2)", () => {
 
   it("jobs.migration: keeps queued, held and superseded jobs with their source and fence, target empty", () => {
     seedV10();
-    migrate(db);
+    migrate(db, migrations.slice(0, 11));
     expect(schemaVersion(db)).toBe(11);
     const kept = rows().filter((r) =>
       ["queued", "held", "superseded"].includes(r.status as string),
@@ -870,7 +874,9 @@ describe("schema v11 (I03-T01, I03-R2)", () => {
   it("guards the status list, the source a fenced kind needs and the three duplicate keys", () => {
     migrate(db);
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
-    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', '', 'a')",
+    );
     const insert = (values: string) =>
       db.run(
         `INSERT INTO jobs (kind, target, source_id, fence_version, status, schedule_id, slot,
@@ -888,5 +894,101 @@ describe("schema v11 (I03-T01, I03-R2)", () => {
     expect(() => insert("'connector-sync', 'c', NULL, NULL, 'held', NULL, NULL")).toThrow(/UNIQUE/);
     insert("'connector-sync', 'c', NULL, NULL, 'succeeded', NULL, NULL");
     expect(() => insert("'maintenance', '', NULL, NULL, 'queued', 6, NULL")).toThrow(/CHECK/);
+  });
+});
+
+describe("schema v12 (I01-T01)", () => {
+  const seedV11 = () => {
+    migrate(db, migrations.slice(0, 11));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, external_id, access_scope) VALUES ('c', 'a', '[\"t\"]')",
+    );
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'b')");
+    db.run(
+      "INSERT INTO source_versions (source_id, version, content_hash, title, body, revision) VALUES (1, 1, 'h', 't', 'b', 4)",
+    );
+    db.run(
+      `INSERT INTO jobs (kind, source_id, fence_version, status, run_after, fairness_key,
+         registered_change_seq, created_at, updated_at)
+       VALUES ('extract', 1, 1, 'succeeded', 0, 'c', 0, 0, 0)`,
+    );
+    db.run(
+      "INSERT INTO tombstones (source_id, version, at, reason) VALUES (2, 1, 't', 'source-deleted')",
+    );
+    db.run(
+      "INSERT INTO invalidations (change_seq, source_id, change_kind, at) VALUES (1, 2, 'source-deleted', 't')",
+    );
+  };
+
+  it("puts a v11 database's sources in the empty namespace, keeping ids and references", () => {
+    seedV11();
+    migrate(db, migrations.slice(0, 12));
+    expect(schemaVersion(db)).toBe(12);
+    expect(columns("sources")).toEqual([
+      "id",
+      "connector_instance_id",
+      "namespace",
+      "external_id",
+      "access_scope",
+    ]);
+    expect(
+      db.all("SELECT id, connector_instance_id, namespace, external_id, access_scope FROM sources"),
+    ).toEqual([
+      { id: 1, connector_instance_id: "c", namespace: "", external_id: "a", access_scope: '["t"]' },
+      { id: 2, connector_instance_id: "c", namespace: "", external_id: "b", access_scope: null },
+    ]);
+    expect(db.all("SELECT source_id, revision FROM source_versions")).toEqual([
+      { source_id: 1, revision: 4 },
+    ]);
+    expect(db.all("SELECT kind, source_id, fence_version, status, fairness_key FROM jobs")).toEqual(
+      [{ kind: "extract", source_id: 1, fence_version: 1, status: "succeeded", fairness_key: "c" }],
+    );
+    expect(db.all("SELECT source_id FROM tombstones")).toEqual([{ source_id: 2 }]);
+    expect(db.all("SELECT source_id FROM invalidations")).toEqual([{ source_id: 2 }]);
+    expect(db.all("PRAGMA foreign_key_check")).toEqual([]);
+  });
+
+  it("identifies a source by instance, namespace and external id (I01-R8)", () => {
+    seedV11();
+    migrate(db);
+    expect(notNull("sources", "namespace")).toBe(true);
+    db.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', 'n', 'a')",
+    );
+    expect(() =>
+      db.run(
+        "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', 'n', 'a')",
+      ),
+    ).toThrow(/UNIQUE/);
+    expect(() =>
+      db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'z')"),
+    ).toThrow(/NOT NULL/);
+    expect(() =>
+      db.run(
+        "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('ghost', '', 'a')",
+      ),
+    ).toThrow(/FOREIGN KEY/);
+  });
+
+  it("keeps the tables that reference sources tied to it after the rebuild", () => {
+    seedV11();
+    migrate(db);
+    for (const table of ["source_versions", "jobs", "tombstones", "invalidations"]) {
+      expect(db.all("SELECT sql FROM sqlite_schema WHERE name = ?", [table])[0]?.sql).toMatch(
+        /REFERENCES "?sources"? \(id\)/,
+      );
+    }
+    expect(() =>
+      db.run(
+        "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (404, 1, 'h', 't', 'b')",
+      ),
+    ).toThrow(/FOREIGN KEY/);
+    // The version-blocking trigger still reads the tombstone of the kept source id.
+    expect(() =>
+      db.run(
+        "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (2, 1, 'h', 't', 'b')",
+      ),
+    ).toThrow(/tombstone/);
   });
 });

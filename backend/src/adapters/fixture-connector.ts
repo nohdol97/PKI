@@ -1,7 +1,14 @@
-// Test Connector (V01-R7): replays a JSONL file of synthetic records, one per
-// line. The cursor is the count of records already delivered. A fixture line's
-// "malicious" marker is for the synthetic manifest only and is not forwarded.
-import { SourceRecordSchema, type Connector, type SourceRecord } from "@pki/contracts";
+// Test Connector (V01-R7, SDK v2): replays a JSONL file of synthetic records, one
+// per line, in the instance's one namespace (""). A line's optional `revision`
+// is the record's (1 when absent). The cursor is the count of records already
+// delivered. A fixture line's "malicious" marker is for the synthetic manifest
+// only and is not forwarded.
+import {
+  CONNECTOR_SDK_VERSION,
+  SourceRecordSchema,
+  type Connector,
+  type SourceRecord,
+} from "@pki/contracts";
 import { readFileSync } from "node:fs";
 
 export function createFixtureConnector(): Connector {
@@ -14,8 +21,14 @@ export function createFixtureConnector(): Connector {
   return {
     manifest: {
       type: "test-fixtures",
-      schemaVersion: 1,
-      capabilities: { incremental: true, deletes: false, accessScope: false, fullRescan: true },
+      schemaVersion: CONNECTOR_SDK_VERSION,
+      capabilities: {
+        incremental: true,
+        deletes: false,
+        accessScope: false,
+        fullRescan: true,
+        deletionsOnRescan: false,
+      },
     },
     async initialize(config) {
       const file = (config as { file?: unknown } | null)?.file;
@@ -24,8 +37,15 @@ export function createFixtureConnector(): Connector {
         .split("\n")
         .filter((line) => line.trim())
         .map((line) => {
-          const { externalId, title, body } = JSON.parse(line);
-          return SourceRecordSchema.parse({ externalId, title, body });
+          const { externalId, title, body, revision = 1 } = JSON.parse(line);
+          return SourceRecordSchema.parse({
+            namespace: "",
+            externalId,
+            revision,
+            schemaVersion: CONNECTOR_SDK_VERSION,
+            title,
+            body,
+          });
         });
     },
     async healthCheck() {
@@ -45,8 +65,8 @@ export function createFixtureConnector(): Connector {
         hasMore: end < all.length,
       };
     },
-    async getDocument(externalId) {
-      return loaded().find((r) => r.externalId === externalId) ?? null;
+    async getDocument({ namespace, externalId }) {
+      return loaded().find((r) => r.namespace === namespace && r.externalId === externalId) ?? null;
     },
   };
 }

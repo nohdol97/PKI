@@ -201,15 +201,14 @@ describe("purgeSourceContent on a database upgraded from v8", () => {
     try {
       migrate(old, migrations.slice(0, 8));
       registerConnectorInstance(old, "c1", "test-fixtures");
-      const saved = saveSourceRecord(old, "c1", {
-        externalId: "a",
-        title: "zkqtitle",
-        body: "합성 vbnbody",
-      });
-      if (saved.status !== "created") throw new Error(saved.status);
+      // Written as a v8 build wrote it: today's saveSourceRecord names a namespace (v10).
+      old.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c1', 'a')");
+      old.run(
+        "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, 1, 'h', 'zkqtitle', '합성 vbnbody')",
+      );
       expect(readFileSync(file).includes("vbnbody")).toBe(true);
       migrate(old);
-      purgeSourceContent(old, saved.sourceId);
+      purgeSourceContent(old, 1);
       const bytes = readFileSync(file);
       expect(["zkqtitle", "vbnbody"].filter((c) => bytes.includes(c))).toEqual([]);
     } finally {

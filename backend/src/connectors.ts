@@ -9,9 +9,11 @@
 // page's transaction (V02-R12, knowledge-engine deletion.ts). Each stored version
 // and each deletion becomes a notice to the KnowledgeEngine and VectorIndex,
 // built in the page's transaction with the change sequence it reached and
-// delivered after the commit, before the runner is woken (V02-R13).
+// delivered after the commit, before the runner is woken (V02-R13). A Connector
+// of another SDK version than CONNECTOR_SDK_VERSION is never initialized (I01-R1).
 import {
   ChangeSetSchema,
+  CONNECTOR_SDK_VERSION,
   ConnectorNotImplementedError,
   type Change,
   type Connector,
@@ -85,11 +87,13 @@ export interface ConnectorManager {
 
 /**
  * Stores one change; a version is stored together with its extraction job. A
- * delete or access-revoked change tombstones every product version of its source
- * and purges them (V02-R12); its `version` is the record's revision and orders
- * nothing yet (provisional until I01's revision rule), and its `at` is not stored:
- * the tombstone takes the product's clock, so no Connector text reaches it. A
- * source never stored, or purged already, is left as it is ("unchanged").
+ * source is the instance's (namespace, external id) (I01-R8). A delete or
+ * access-revoked change tombstones every product version of its source and
+ * purges them (V02-R12), at the source's latest product version: its `revision`
+ * orders nothing yet (I01 spec "T01과 T02 사이"; I01-T02's arrival rule), and its
+ * `at` is not stored: the tombstone takes the product's clock, so no Connector
+ * text reaches it. A source never stored, or purged already, is left as it is
+ * ("unchanged"). A scope change has no store before I01-T02 and fails its page.
  */
 function storeChange(
   db: SqlDriver,
@@ -97,8 +101,11 @@ function storeChange(
   change: Change,
   notices: ProjectionNotice[],
 ): StoredOutcome | { refused: RefusalReason } {
+  if (change.kind === "scope-change") {
+    throw new Error(`${instanceId}: scope-change is not stored before I01-T02`);
+  }
   if (change.kind !== "upsert") {
-    const sourceId = findSourceId(db, instanceId, change.externalId);
+    const sourceId = findSourceId(db, instanceId, change.namespace, change.externalId);
     if (sourceId === undefined) return "unchanged";
     const reason = change.kind === "delete" ? "source-deleted" : "access-revoked";
     const { notice } = deleteSourceWithNotice(db, sourceId, {
@@ -198,6 +205,47 @@ export async function syncConnector(
   }
 }
 
+/** What initializing one Connector came to, as the Connector list shows it. */
+export type InitializeOutcome =
+  | { state: "ready" }
+  | { state: "unavailable"; reason: "unsupported-sdk-version" }
+  | { state: "not-implemented" | "unavailable"; error: unknown };
+
+/**
+ * Initializes a Connector unless it implements another SDK version (I01-R1): that
+ * one is never initialized and is unavailable for `unsupported-sdk-version`.
+ */
+export async function initializeConnector(
+  connector: Connector,
+  config: unknown,
+): Promise<InitializeOutcome> {
+  if (connector.manifest.schemaVersion !== CONNECTOR_SDK_VERSION) {
+    return { state: "unavailable", reason: "unsupported-sdk-version" };
+  }
+  try {
+    await connector.initialize(config);
+    return { state: "ready" };
+  } catch (error) {
+    const state = error instanceof ConnectorNotImplementedError ? "not-implemented" : "unavailable";
+    return { state, error };
+  }
+}
+
+/**
+ * `site-check <kind>` (V01-R18, I01-R1): one line naming the kind and its outcome,
+ * the version reason or the initialization error's message, and whether it is ok.
+ */
+export async function siteCheck(
+  kind: string,
+  create: ConnectorFactory,
+): Promise<{ ok: boolean; line: string }> {
+  const outcome = await initializeConnector(create(), {});
+  if (outcome.state === "ready") return { ok: true, line: `${kind}: ok` };
+  if ("reason" in outcome) return { ok: false, line: `${kind}: ${outcome.reason}` };
+  const { error } = outcome;
+  return { ok: false, line: `${kind}: ${error instanceof Error ? error.message : String(error)}` };
+}
+
 export async function createConnectorManager(
   db: SqlDriver,
   instances: readonly ConnectorInstanceConfig[],
@@ -209,25 +257,23 @@ export async function createConnectorManager(
       const factory = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
       if (!factory) throw new Error(`unknown connector kind: ${kind}`);
       const connector = factory();
-      try {
-        await connector.initialize(config);
-        return { id, kind, state: "ready" as const, connector };
-      } catch (error) {
-        const state: ConnectorSummary["state"] =
-          error instanceof ConnectorNotImplementedError ? "not-implemented" : "unavailable";
-        return { id, kind, state, connector };
-      }
+      const outcome = await initializeConnector(connector, config);
+      const summary: ConnectorSummary =
+        "reason" in outcome
+          ? { id, kind, state: outcome.state, reason: outcome.reason }
+          : { id, kind, state: outcome.state };
+      return { summary, connector };
     }),
   );
   return {
-    list: () => entries.map(({ id, kind, state }) => ({ id, kind, state })),
+    list: () => entries.map(({ summary }) => ({ ...summary })),
     async sync(id) {
-      const entry = entries.find((e) => e.id === id);
+      const entry = entries.find((e) => e.summary.id === id);
       if (!entry) return { error: "not-found" };
-      if (entry.state !== "ready") return { error: "connector-unavailable" };
+      if (entry.summary.state !== "ready") return { error: "connector-unavailable" };
       return {
         connectorId: id,
-        ...(await syncConnector(db, id, entry.kind, entry.connector, options)),
+        ...(await syncConnector(db, id, entry.summary.kind, entry.connector, options)),
       };
     },
   };

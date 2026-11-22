@@ -155,18 +155,27 @@ function pipeline(hooks: { during?: (request: StructuredRequest) => void } = {})
   return { provider, runner, importer: productImporter(db) };
 }
 
+/** The time a Connector reports with its change; the tombstone never takes it. */
+const CONNECTOR_AT = "1999-01-01T00:00:00Z";
+
 /** A Connector of the JSONL kind reporting one change of `externalId`. */
 function reporting(kind: "delete" | "access-revoked", externalId: string): Connector {
   const page: ChangeSet = {
-    changes: [{ kind, externalId, version: 9, at: "not a time, and not stored" }],
+    changes: [{ kind, namespace: "", externalId, revision: 9, at: CONNECTOR_AT }],
     nextCursor: "1",
     hasMore: false,
   };
   return {
     manifest: {
       type: JSONL_CONNECTOR_KIND,
-      schemaVersion: 1,
-      capabilities: { incremental: true, deletes: true, accessScope: false, fullRescan: true },
+      schemaVersion: 2,
+      capabilities: {
+        incremental: true,
+        deletes: true,
+        accessScope: false,
+        fullRescan: true,
+        deletionsOnRescan: false,
+      },
     },
     initialize: async () => {},
     healthCheck: async () => ({ state: "ok" }),
@@ -239,6 +248,7 @@ describe("delete.purge", () => {
       expect(tombstone).toMatchObject({ version: 2, reason });
       // the product's clock, never the Connector's text
       expect(Number.isNaN(Date.parse(tombstone?.at ?? ""))).toBe(false);
+      expect(tombstone?.at).not.toBe(CONNECTOR_AT);
     },
   );
 });

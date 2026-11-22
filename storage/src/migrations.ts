@@ -527,8 +527,35 @@ const v11: Migration = (db) =>
     DELETE FROM settings WHERE key = 'jobs.held-policy-version';
   `);
 
+// Schema v12 (I01-T01, I01-R8): a source is identified by instance + namespace +
+// external id; the namespace is where an external id is unique within one
+// instance (one wiki space, one mailbox), "" when it has one range. A v11 source
+// takes "". sources is rebuilt the v2 way (the UNIQUE constraint cannot change in
+// place): copied aside, dropped and recreated under its own name so the tables
+// referencing it (source_versions, jobs, tombstones, invalidations) keep that reference; no
+// reference cascades, and defer_foreign_keys holds their check until the rows are
+// back. The namespace has no default: whoever writes a source names it.
+const v12: Migration = (db) =>
+  db.exec(`
+    PRAGMA defer_foreign_keys = ON;
+    CREATE TEMP TABLE sources_v11 AS
+      SELECT id, connector_instance_id, external_id, access_scope FROM sources;
+    DROP TABLE sources;
+    CREATE TABLE sources (
+      id INTEGER PRIMARY KEY,
+      connector_instance_id TEXT NOT NULL REFERENCES connector_instances (id),
+      namespace TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      access_scope TEXT,
+      UNIQUE (connector_instance_id, namespace, external_id)
+    );
+    INSERT INTO sources (id, connector_instance_id, namespace, external_id, access_scope)
+      SELECT id, connector_instance_id, '', external_id, access_scope FROM sources_v11;
+    DROP TABLE sources_v11;
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11];
+export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

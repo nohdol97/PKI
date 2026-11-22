@@ -3,6 +3,7 @@
 // implementation under the same kind.
 import {
   CONNECTOR_NOT_IMPLEMENTED,
+  CONNECTOR_SDK_VERSION,
   ConnectorNotImplementedError,
   type Connector,
 } from "@pki/contracts";
@@ -14,8 +15,14 @@ export function createSiteConnector(type: (typeof SITE_CONNECTOR_KINDS)[number])
   return {
     manifest: {
       type,
-      schemaVersion: 1,
-      capabilities: { incremental: false, deletes: false, accessScope: false, fullRescan: false },
+      schemaVersion: CONNECTOR_SDK_VERSION,
+      capabilities: {
+        incremental: false,
+        deletes: false,
+        accessScope: false,
+        fullRescan: false,
+        deletionsOnRescan: false,
+      },
     },
     initialize: fail,
     healthCheck: async () => ({ state: "unavailable", reason: CONNECTOR_NOT_IMPLEMENTED }),
