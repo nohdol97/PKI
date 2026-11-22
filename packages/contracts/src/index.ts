@@ -15,6 +15,7 @@ export * from "./adapter-errors.ts";
 export type * from "./embedding.ts";
 export type * from "./knowledge-engine.ts";
 export type * from "./vector-index.ts";
+export * from "./cell-grammar.ts";
 export * from "./connector.ts";
 export * from "./import-record.ts";
 export * from "./provider.ts";
