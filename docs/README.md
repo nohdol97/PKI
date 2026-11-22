@@ -29,7 +29,7 @@
 | [specs/2026-11-22-I02-local-file-import.md](specs/2026-11-22-I02-local-file-import.md) | 로컬 파일·폴더 가져오기(I02-B, #19·#116): `local-files` 수집기, 위치 승인과 경로 제한, 이동·이름 바꾸기, 감시와 맞춰 보기, 정규화 격리, 경로 신뢰 경계의 위협 모델, 철회와 삭제 장부, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-22-I05-site-connector-registration.md](specs/2026-11-22-I05-site-connector-registration.md) | 배포처 수집기를 `site/` 안에서 등록하는 장치(I05, #113): 빌드 시점 진입점 주입, 등록 계약(사이트 종류만), 신뢰 경계, 시작 동작, 등급 매핑과 범위 정책의 공급, 포크 모양에서의 공용 시험, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-22-I07-installed-scopes-file.md](specs/2026-11-22-I07-installed-scopes-file.md) | 설치본이 인스턴스 범위(`site/config/connector-scopes.json`)를 얻는 길(I07, #115): 포크의 등록이 빌드할 때 값을 묶고 실행본은 파일을 읽지 않음, 빌드 판정, 산출물 검사, 설치본 확인 절차, 작업 분해 | 확정(잠정 결정 포함) |
-| [specs/2026-11-22-S01-semantic-registry.md](specs/2026-11-22-S01-semantic-registry.md) | Semantic 등록부(S01): 상태 전이와 변경 이력·취소, 자동 승격 조건, 인식 유형과 confidence의 분리, 사용자 교정 보존, 표기와 문맥별 정의, 유형 정의 변경의 검사 | 초안 |
+| [specs/2026-11-22-S01-semantic-registry.md](specs/2026-11-22-S01-semantic-registry.md) | Semantic 등록부(S01): 상태 전이와 변경 이력·취소, 자동 승격 조건, 인식 유형과 confidence의 분리, 사용자 교정 보존, 표기와 문맥별 정의, 유형 정의 변경의 검사 | 확정(잠정 결정 포함) |
 
 ## 동작 방식
 
@@ -51,7 +51,7 @@
 | R02, R03, R04(배포처 실행 검증의 사외 준비) | #11, #12, #13 | 각 작업 착수 시. 실행 절차서와 결과 기록 양식을 함께 낸다 |
 | R05(골든 데이터와 평가 기준) | #14 | 착수 시. V02보다 먼저 닫혀야 한다 |
 | I01~I04(Phase 2 수집) | #18~#21 | I01, I03, I04와 I02-A, I02-B는 spec이 있다 |
-| S01~S03(Phase 3 Semantic) | #22~#24 | S01은 spec 초안이 있다(R07의 엔진 결정 전에 썼고, 그 결정에 걸리는 부분은 spec의 배경에 적었다). S02·S03은 착수 시 |
+| S01~S03(Phase 3 Semantic) | #22~#24 | S01은 spec이 확정됐다(R07의 엔진 결정 전에 썼고, 그 결정에 걸리는 부분은 spec의 배경에 적었다). S02·S03은 착수 시 |
 | K01~K02(Phase 4), P01~P03(Phase 5), X01~X02(Phase 6), H01~H03(Phase 7) | #25~#34 | 각 작업 착수 시 |
 
 ## 참고

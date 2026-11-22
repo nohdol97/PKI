@@ -1,6 +1,6 @@
 # 스펙: S01 Semantic 등록부·후보 검증·사용자 교정 보존
 
-- 날짜: 2026-11-22 / 상태: 초안
+- 날짜: 2026-11-22 / 상태: 확정(잠정 결정 포함)
 - 관련: 이슈 #22(S01), 총괄 #1(설계 분석 7·8·9번), Phase 3 #5, 선행 #21(I04), 후속 #23(S02)·#24(S03)·#25(K01)·#29(P03, 사용자 조치 입구를 쓰는 쪽)·#31(X02, 같은 입구를 화면에서 부르는 쪽). [원 설계 6절](../design/original-design.md), [V02 spec](2026-11-21-V02-vertical-slice.md), [I04 spec](2026-11-21-I04-invalidation.md), [ARCHITECTURE.md](../ARCHITECTURE.md), [ADR 0002](../adr/0002-authority-in-product-records.md)·[0003](../adr/0003-phase1-without-engine.md)·[0013](../adr/0013-failure-recovery.md), [site-setup.md](../site-setup.md)
 
 낯선 말은 [ARCHITECTURE 0절](../ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다. 이 spec이 새로 쓰거나 뜻을 좁히는 말은 아래와 같다.
