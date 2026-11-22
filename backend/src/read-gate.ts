@@ -7,6 +7,7 @@
 import { createProductRegistry } from "@pki/knowledge-engine";
 import type { RouteResponse, SemanticKind, SemanticList, SourceSummary } from "@pki/contracts";
 import {
+  describeKnowledgeSchema,
   findSources,
   listActiveInsights,
   listOntologyElements,
@@ -64,6 +65,11 @@ export interface ReadGate {
   ontology(): RouteResponse<"ontology">;
   /** Whether the element is stored and shown: the one answer for an id that is absent, deleted or hidden. */
   ontologyShown(id: number): boolean;
+  /**
+   * The knowledge-schema list (S02-R25): the catalogue against the type definitions shown. A definition the
+   * gate hides counts as absent, so the list does not reveal a candidate of a source the caller may not see.
+   */
+  knowledgeSchema(): RouteResponse<"knowledgeSchema">;
 }
 
 export interface ReadGateOptions {
@@ -175,6 +181,8 @@ export function createReadGate(
         rule: plain(e.rule),
       })),
     }),
+    knowledgeSchema: () =>
+      describeKnowledgeSchema(only(listOntologyElements(db), "ontology", (e) => e.id, "display")),
     ontologyShown: (id) => readOntologyElementById(db, id) !== undefined && isShown("ontology", id),
   };
 }

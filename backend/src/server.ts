@@ -849,6 +849,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       semanticAction(ref, (decisions, at) => decisions.undo(options.db, ref, at)),
     // S01-R23, T07: the type definitions. The user's operations take the same one entry; an id that is
     // absent, deleted or hidden is the one same not-found; a refusal is a code with counts in a 200 body.
+    knowledgeSchema: async () => gate.knowledgeSchema(),
     ontology: async () => gate.ontology(),
     ontologyHistory: async ({ id }) =>
       gate.ontologyShown(id)

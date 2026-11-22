@@ -1903,7 +1903,7 @@ describe("schema v21 (S01-T06, S01-R18, R20, R22)", () => {
   });
 
   it("seeds the registry with the code's constants and R4's, verified, edition 1, the same every time", () => {
-    migrate(db);
+    migrate(db, migrations.slice(0, 21));
     const seed = () =>
       db.all("SELECT element_kind, name, rule, status, edition FROM ontology_elements ORDER BY id");
     const dates = {
@@ -1963,7 +1963,7 @@ describe("schema v21 (S01-T06, S01-R18, R20, R22)", () => {
     const first = seed();
     db.close();
     db = openBetterSqlite3(":memory:");
-    migrate(db);
+    migrate(db, migrations.slice(0, 21));
     expect(seed()).toEqual(first);
   });
 
@@ -1979,7 +1979,7 @@ describe("schema v21 (S01-T06, S01-R18, R20, R22)", () => {
     expect(() => migrate(db, failing)).toThrow(/broken/);
     expect(schemaVersion(db)).toBe(20);
     expect(tables().filter((t) => t.startsWith("ontology_"))).toEqual([]);
-    migrate(db);
+    migrate(db, migrations.slice(0, 21));
     expect(db.all("SELECT count(*) AS n FROM ontology_elements")).toEqual([{ n: 10 }]);
   });
 

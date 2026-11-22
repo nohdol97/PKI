@@ -1072,6 +1072,189 @@ const v22: Migration = (db) =>
       .join("")}
   `);
 
+// Schema v23 (S02-T01, S02-R2, R3): the knowledge-schema catalogue's first edition.
+// - `ontology_elements.origin` (R3): where a definition came from: `seed` (the product put it there),
+//   `user` (the user added it through the API) or `source-proposed` (an automated actor proposed it from
+//   a source). It is written once, when the row is made, and never changes (a trigger refuses). An added
+//   column needs no table rebuild: the column has a constant default and a CHECK, and the rule stays JSON,
+//   so the new value type `identifier` needs no schema change either (the closed list of value types is in
+//   code, as it was for S01's three).
+// - The fill runs before this migration adds any row, in R3's order: a lineage row, or a creation line by
+//   an automated actor (the lineage row goes with its source, the line stays), means `source-proposed`; a
+//   creation line by the user means `user`; a name (of that kind) in the product seed means `seed` (a row
+//   no user created, which a spec merged earlier may have seeded); the rest is `user`. Then the rows the
+//   catalogue lacks are added as `verified`, edition 1, `origin = seed`, with no history line.
+// - A name that already exists (same kind, R19's comparison) is left alone whatever its status.
+// - The three widened rules (target_date, completion_date, DEPENDS_ON) are widened only while the stored
+//   rule is S01's seed rule to the letter and the status is `verified`; the edition goes up by one and no
+//   history line is written (a migration is not an actor). The lifecycle gate demands such a line, so it is
+//   dropped for the update and made again as v21 made it.
+// - The knowledge revision does not move: this is the seed's kind of write (as in v21).
+// The migration keeps its own copy of the constants (a later edition of the catalogue must not change what
+// an earlier migration does); `schema.catalogue-migration` compares the copy with the catalogue.
+// The version number is the next free one: whichever of two tasks adding a migration merges later
+// renumbers (`v23` and its line in `migrations`).
+type SeedRow = readonly [elementKind: string, name: string, rule: object];
+const V23_ITEM_TYPES = [
+  "Person",
+  "Organization",
+  "Decision",
+  "Task",
+  "Commitment",
+  "Event",
+  "Issue",
+  "Dependency",
+  "BusinessRule",
+  "OpenQuestion",
+];
+const V23_ALL_ITEM_TYPES = [...V23_ITEM_TYPES, "Project", "System", "Concept"];
+const v23Relation = (
+  name: string,
+  subjectTypes: string[],
+  objectTypes: string[],
+  symmetric = false,
+) =>
+  [
+    "relation-type",
+    name,
+    { elementKind: "relation-type", subjectTypes, objectTypes, symmetric },
+  ] as const;
+const v23Fact = (name: string, itemTypes: string[], valueType: string, cardinality: string) =>
+  ["fact-kind", name, { elementKind: "fact-kind", itemTypes, valueType, cardinality }] as const;
+/** What v23 adds; the lists are sorted as an element's stored rule is (the type lists of a rule). */
+const V23_ADDITIONS: readonly SeedRow[] = [
+  ...V23_ITEM_TYPES.map((name) => ["item-type", name, { elementKind: "item-type" }] as const),
+  v23Relation(
+    "BELONGS_TO",
+    ["Organization", "Person", "Project", "System", "Task"],
+    ["Organization", "Project"],
+  ),
+  v23Relation(
+    "RESPONSIBLE_FOR",
+    ["Organization", "Person"],
+    ["Commitment", "Decision", "Issue", "Project", "System", "Task"],
+  ),
+  v23Relation("RELATED_TO", [...V23_ALL_ITEM_TYPES].sort(), [...V23_ALL_ITEM_TYPES].sort(), true),
+  v23Relation("DECIDED", ["Organization", "Person"], ["Decision"]),
+  v23Relation(
+    "CAUSED_BY",
+    ["Decision", "Event", "Issue", "Task"],
+    ["BusinessRule", "Decision", "Dependency", "Event", "Issue"],
+  ),
+  v23Fact("identifier.email", ["Organization", "Person"], "identifier", "many"),
+  v23Fact("identifier.key", [...V23_ALL_ITEM_TYPES].sort(), "identifier", "one"),
+  v23Fact(
+    "statement",
+    [
+      "BusinessRule",
+      "Commitment",
+      "Decision",
+      "Dependency",
+      "Event",
+      "Issue",
+      "OpenQuestion",
+      "Task",
+    ],
+    "text",
+    "many",
+  ),
+];
+/** The widened rules: element, S01's seed rule (the one condition) and the widened rule. */
+const V23_WIDENED: readonly (readonly [kind: string, name: string, to: object])[] = [
+  ...["target_date", "completion_date"].map(
+    (name) =>
+      [
+        "fact-kind",
+        name,
+        {
+          elementKind: "fact-kind",
+          itemTypes: ["Commitment", "Project", "System", "Task"],
+          valueType: "date",
+          cardinality: "one",
+        },
+      ] as const,
+  ),
+  [
+    "relation-type",
+    "DEPENDS_ON",
+    {
+      elementKind: "relation-type",
+      subjectTypes: ["Commitment", "Project", "System", "Task"],
+      objectTypes: ["Commitment", "Dependency", "Project", "System", "Task"],
+      symmetric: false,
+    },
+  ],
+];
+const v23: Migration = (db) => {
+  const revision = db.all("SELECT knowledge_revision FROM revisions")[0]
+    ?.knowledge_revision as number;
+  db.exec(`
+    ALTER TABLE ontology_elements ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'
+      CHECK (origin IN ('seed', 'user', 'source-proposed'));
+  `);
+  const seedKeys = new Set(
+    [...ONTOLOGY_SEED, ...V23_ADDITIONS].map(([kind, name]) => `${kind}:${name}`),
+  );
+  const creation = (id: number) =>
+    db.all(
+      "SELECT actor FROM ontology_history WHERE element_id = ? AND seq = 1 AND action = 'created'",
+      [id],
+    )[0]?.actor as string | undefined;
+  const existing = db.all("SELECT id, element_kind, name FROM ontology_elements");
+  for (const row of existing) {
+    const id = row.id as number;
+    const created = creation(id);
+    const hasLineage =
+      db.all("SELECT 1 AS n FROM ontology_basis WHERE element_id = ? LIMIT 1", [id]).length > 0;
+    const origin =
+      hasLineage || (created !== undefined && created !== "user")
+        ? "source-proposed"
+        : created === "user"
+          ? "user"
+          : seedKeys.has(`${row.element_kind as string}:${row.name as string}`)
+            ? "seed"
+            : "user";
+    db.run("UPDATE ontology_elements SET origin = ? WHERE id = ?", [origin, id]);
+  }
+  const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
+  const taken = new Set(
+    existing.map((r) => `${r.element_kind as string}:${squash(r.name as string)}`),
+  );
+  for (const [kind, name, rule] of V23_ADDITIONS) {
+    if (taken.has(`${kind}:${squash(name)}`)) continue;
+    db.run(
+      "INSERT INTO ontology_elements (element_kind, name, rule, status, edition, origin) VALUES (?, ?, ?, 'verified', 1, 'seed')",
+      [kind, name, JSON.stringify(rule)],
+    );
+  }
+  // the lifecycle gate demands a history line for an edition change; a migration writes none
+  db.exec("DROP TRIGGER ontology_elements_lifecycle_gate");
+  for (const [kind, name, to] of V23_WIDENED) {
+    const from = ONTOLOGY_SEED.find(([k, n]) => k === kind && n === name)?.[2];
+    db.run(
+      `UPDATE ontology_elements SET rule = ?, edition = edition + 1
+       WHERE element_kind = ? AND name = ? AND status = 'verified' AND rule = ?`,
+      [JSON.stringify(to), kind, name, JSON.stringify(from)],
+    );
+  }
+  db.exec(`
+    CREATE TRIGGER ontology_elements_lifecycle_gate
+    BEFORE UPDATE OF status, rule, edition ON ontology_elements
+    WHEN (new.status IS NOT old.status OR new.rule IS NOT old.rule OR new.edition IS NOT old.edition)
+      AND ((new.rule IS NOT old.rule AND new.edition IS old.edition)
+        OR NOT EXISTS (
+          SELECT 1 FROM ontology_history h
+          WHERE h.element_id = old.id
+            AND h.seq = (SELECT max(seq) FROM ontology_history WHERE element_id = old.id)
+            AND h.from_status = old.status AND h.to_status = new.status
+            AND h.from_edition = old.edition AND h.to_edition = new.edition))
+    BEGIN SELECT RAISE(ABORT, 'status, rule and edition change only through the ontology gate'); END;
+    CREATE TRIGGER ontology_elements_origin_fixed BEFORE UPDATE OF origin ON ontology_elements
+    BEGIN SELECT RAISE(ABORT, 'an element keeps its origin'); END;
+  `);
+  db.run("UPDATE revisions SET knowledge_revision = ?", [revision]);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1096,6 +1279,7 @@ export const migrations: readonly Migration[] = [
   v20,
   v21,
   v22,
+  v23,
 ];
 
 export function schemaVersion(db: SqlDriver): number {
