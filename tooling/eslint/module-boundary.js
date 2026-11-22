@@ -82,12 +82,24 @@ const COMPOSITION_POINTS = [
 ];
 
 /**
- * The one cross-package relative targets a package may import (I05-R4): `{ pkg, target }` allows `pkg` to
- * import the file `resolve(<pkg root>, target)` and no other. The resolved paths are compared, never the
- * specifier text. Empty: the I07 task adds its one entry. The rule option `allowRelative` replaces the table (tests).
- * @type {{ pkg: string, target: string }[]}
+ * The one cross-package relative import a file may make (I05-R4, I07-R16): an entry allows the file `file` of
+ * the package `pkg` (at `dir` when given, like a composition point) to import the file
+ * `resolve(<pkg root>, target)` by a static `import` declaration and no other way. All of them must hold:
+ * the package, its file, the exact resolved target (never the specifier text, never the working directory or
+ * this rule file's place) and the form: `export ... from`, `import()` and `typeof import()` stay refused.
+ * The fork's one: its composition package's registration takes the scopes file the build binds, at
+ * `<composition package root>/../../site/config/connector-scopes.json`. The rule option `allowRelative`
+ * replaces the table (tests).
+ * @type {{ pkg: string, file: string, target: string, dir?: string }[]}
  */
-const RELATIVE_ALLOWED = [];
+const RELATIVE_ALLOWED = [
+  {
+    pkg: "@pki-site/composition",
+    file: "src/registration.ts",
+    dir: "site/composition",
+    target: "../../site/config/connector-scopes.json",
+  },
+];
 const TEST_SPECIFIER = /\.(test|e2e|test-support)(\.[cm]?[jt]sx?)?$/;
 /** A package's top-level e2e/ folder holds test code only, whatever the file names. */
 const E2E_DIR = "e2e";
@@ -268,8 +280,13 @@ const moduleBoundary = {
             type: "array",
             items: {
               type: "object",
-              properties: { pkg: { type: "string" }, target: { type: "string" } },
-              required: ["pkg", "target"],
+              properties: {
+                pkg: { type: "string" },
+                file: { type: "string" },
+                dir: { type: "string" },
+                target: { type: "string" },
+              },
+              required: ["pkg", "file", "target"],
               additionalProperties: false,
             },
           },
@@ -309,13 +326,13 @@ const moduleBoundary = {
     const ownPath = relative(ownRoot, context.filename).split(sep).join("/");
     const isTest = TEST_FILE.test(context.filename) || inE2eDir(context.filename);
     const rootPath = ownRoot.split(sep).join("/");
-    const isComposition = COMPOSITION_POINTS.some(
-      (p) =>
-        ownName === p.pkg &&
-        ownPath === p.file &&
-        (p.dir === undefined || rootPath.endsWith(`/${p.dir}`)),
-    );
-    /** @type {{ pkg: string, target: string }[]} */
+    /** Whether this file is the file `p` names: the package by name, the file in it and, when given, its folder. */
+    const isFileOf = (/** @type {{ pkg: string, file: string, dir?: string }} */ p) =>
+      ownName === p.pkg &&
+      ownPath === p.file &&
+      (p.dir === undefined || rootPath.endsWith(`/${p.dir}`));
+    const isComposition = COMPOSITION_POINTS.some(isFileOf);
+    /** @type {{ pkg: string, file: string, target: string, dir?: string }[]} */
     const allowedRelative = context.options[0]?.allowRelative ?? RELATIVE_ALLOWED;
     const isFork = String(ownName).startsWith(FORK_SCOPE);
     // who may reach an implementation: a composition point, implementations themselves, tests
@@ -392,8 +409,11 @@ const moduleBoundary = {
       }
     }
 
-    /** @param {any} node A Literal, or an expression-free TemplateLiteral */
-    function check(node) {
+    /**
+     * @param {any} node A Literal, or an expression-free TemplateLiteral
+     * @param {boolean} [staticImport] The node is the source of an `import` declaration (the one form the relative allowance covers)
+     */
+    function check(node, staticImport = false) {
       let source;
       if (node?.type === "Literal" && typeof node.value === "string") source = node.value;
       else if (node?.type === "TemplateLiteral" && node.expressions.length === 0) {
@@ -409,9 +429,9 @@ const moduleBoundary = {
           return;
         }
         if (
+          staticImport &&
           allowedRelative.some(
-            (a) =>
-              a.pkg === ownName && resolved === resolve(/** @type {string} */ (ownRoot), a.target),
+            (a) => isFileOf(a) && resolved === resolve(/** @type {string} */ (ownRoot), a.target),
           )
         ) {
           return;
@@ -540,7 +560,7 @@ const moduleBoundary = {
       TSSatisfiesExpression: typed,
       TSAsExpression: typed,
       ImportDeclaration: (node) => {
-        check(node.source);
+        check(node.source, true);
         userEntry(node);
       },
       ExportNamedDeclaration: (node) => {
