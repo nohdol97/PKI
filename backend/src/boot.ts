@@ -37,6 +37,7 @@ import { systemClock } from "./clock.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
+import { createScheduler, type Scheduler } from "./scheduler.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
 export interface BootOptions {
@@ -73,6 +74,8 @@ export interface BootedBackend {
   /** Tests wait on these: the notices queued, the jobs runnable. */
   projections: Pick<Projections, "drain">;
   runner: Pick<JobRunner, "wake">;
+  /** The periods' check, started at boot (I03-R22); I03-T09 adds the default periods through it. */
+  scheduler: Scheduler;
 }
 
 export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
@@ -134,11 +137,21 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     runner,
     onError: (error) => log("held-reevaluation-error", { error: errorClass(error) }),
   });
+  // the check at start and every 30 s: due periods, and the run times a clock that
+  // went back left in the future (I03-R22), with or without any period stored
+  const scheduler = createScheduler({
+    db,
+    clock,
+    onRegistered: () => void runner.wake(),
+    onError: (error) => log("scheduler-error", { error: errorClass(error) }),
+  });
+  scheduler.start();
   return {
     server: {
       ...server,
       close: async () => {
         reevaluation.stop();
+        scheduler.stop();
         await server.close();
         await runner.stop();
         await projections.drain();
@@ -148,6 +161,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     providers,
     projections,
     runner,
+    scheduler,
   };
 }
 

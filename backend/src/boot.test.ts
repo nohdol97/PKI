@@ -31,6 +31,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { bootBackend, closeProviders } from "./boot.ts";
 import { openCanonicalDb } from "./composition.ts";
+import { BACKOFF_MAX_MS } from "./schedule.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "t".repeat(43);
@@ -373,5 +374,45 @@ describe("closeProviders (backend shutdown, V01-T10)", () => {
     const started = Date.now();
     await closeProviders([stuck, new FakeProvider()], 200);
     expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe("bootBackend scheduler (I03-T08, R22)", () => {
+  it("starts the scheduler check at boot, wakes the runner for what it registers and stops it on close", async () => {
+    // a run time left far ahead by a clock that went back: the start check pulls it back
+    const seed = openCanonicalDb(dir);
+    const far = registerJob(seed, { kind: "connector-sync", target: "c1" });
+    if (!far.registered) throw new Error("register");
+    seed.run("UPDATE jobs SET run_after = ? WHERE id = ?", [
+      Date.now() + 9 * 86_400_000,
+      far.job.id,
+    ]);
+    seed.close();
+
+    booted = await bootBackend({
+      dataDir: dir,
+      token: TOKEN,
+      allowedOrigins: [],
+      secrets: NO_SECRET_STORE,
+    });
+    const pulled = booted.db.all("SELECT run_after FROM jobs WHERE id = ?", [far.job.id])[0]
+      ?.run_after as number;
+    expect(pulled).toBeLessThanOrEqual(Date.now() + BACKOFF_MAX_MS);
+    expect(booted.scheduler.isRunning()).toBe(true);
+
+    const wake = vi.spyOn(booted.runner, "wake");
+    const { schedule } = booted.scheduler.ensureSchedule({
+      kind: "connector-sync",
+      target: "c2",
+      period: { kind: "hourly" },
+    });
+    booted.scheduler.runNow(schedule.id);
+    expect(wake).toHaveBeenCalled();
+
+    const closing = booted;
+    booted = undefined;
+    await closing.server.close();
+    expect(closing.scheduler.isRunning()).toBe(false);
+    closing.db.close();
   });
 });

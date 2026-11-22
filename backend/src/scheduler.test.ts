@@ -13,7 +13,7 @@ import {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Clock } from "./clock.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { BACKOFF_MAX_MS, type Period } from "./schedule.ts";
@@ -29,10 +29,10 @@ let dir: string;
 let db: SqlDriver;
 const open: SqlDriver[] = [];
 let wall = T0;
-let sleepers: (() => void)[] = [];
 const clock: Clock = {
   now: () => wall,
-  sleep: () => new Promise<void>((resolve) => sleepers.push(resolve)),
+  // the scheduler waits on a runtime timer it can cancel, never on Clock.sleep (I03-T04 item 10)
+  sleep: () => Promise.reject(new Error("the scheduler must not use Clock.sleep")),
   monotonic: () => 0,
 };
 
@@ -50,10 +50,10 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-scheduler-"));
   db = reopen();
   wall = T0;
-  sleepers = [];
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const d of open.splice(0)) d.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -73,8 +73,6 @@ function finish(
   closeJob(db, job, closing, new Date(wall));
   return readJob(db, job.id) as StoredJob;
 }
-
-const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 const jobsOf = (scheduleId: number) =>
   db.all("SELECT id, slot, status FROM jobs WHERE schedule_id = ? ORDER BY id", [scheduleId]);
@@ -208,6 +206,20 @@ describe("clock.jump", () => {
     expect(jobsOf(schedule.id)).toHaveLength(2);
   });
 
+  it("a clock set back onto a slot is due in the same check that recomputed its next due time", () => {
+    const s = scheduler();
+    const { schedule } = s.ensureSchedule({ kind: "connector-sync", target: "c1", period: hourly });
+    wall = T0 + 11 * HOUR + 1000;
+    s.check();
+    finish();
+    wall = T0 + 5 * HOUR; // back, exactly on a slot
+    const report = s.check();
+    expect(report.due).toEqual([
+      { scheduleId: schedule.id, outcome: "registered", missed: 1, jobId: expect.any(Number) },
+    ]);
+    expect(jobsOf(schedule.id).map((j) => j.slot)).toEqual([T0 + 11 * HOUR, T0 + 5 * HOUR]);
+  });
+
   it("a slot seen again while its job is still open counts as coalesced", () => {
     const s = scheduler();
     const { schedule } = s.ensureSchedule({ kind: "connector-sync", target: "c1", period: hourly });
@@ -257,11 +269,16 @@ describe("clock.jump", () => {
       retry.job.id,
     ]);
     db.run("UPDATE jobs SET run_after = ? WHERE id = ?", [wall + BACKOFF_MAX_MS, fine.job.id]);
+    const registered = wall;
+    wall += 5 * MIN;
     const report = s.check();
     expect(report.pulledBack).toBe(2);
-    expect((readJob(db, queued.job.id) as StoredJob).runAfter).toBe(wall + BACKOFF_MAX_MS);
-    expect((readJob(db, retry.job.id) as StoredJob).runAfter).toBe(wall + BACKOFF_MAX_MS);
-    expect((readJob(db, fine.job.id) as StoredJob).runAfter).toBe(wall + BACKOFF_MAX_MS);
+    const touched = (job: StoredJob) => readJob(db, job.id) as StoredJob;
+    expect(touched(queued.job).updatedAt).toBe(wall); // a moved row is dated
+    expect(touched(fine.job).updatedAt).toBe(registered); // a row left alone is not
+    expect(touched(queued.job).runAfter).toBe(wall + BACKOFF_MAX_MS);
+    expect(touched(retry.job).runAfter).toBe(wall + BACKOFF_MAX_MS);
+    expect(touched(fine.job).runAfter).toBe(registered + BACKOFF_MAX_MS);
     expect(s.check().pulledBack).toBe(0);
   });
 });
@@ -281,12 +298,16 @@ describe("backlog.bound", () => {
     expect(jobsOf(schedule.id)).toEqual([]);
     expect(s.get(schedule.id)?.counts.skipped).toBe(1);
     expect(s.get(schedule.id)?.nextDue).toBe(T0 + 2 * HOUR); // the slot is not counted twice
-    expect(sourceless(11).registered).toBe(true); // a user's import is not refused
+    // a run now is a user's action: the cap does not refuse it (R21)
+    const manual = s.ensureSchedule({ kind: "connector-sync", target: "c2", period: daily });
+    const now = s.runNow(manual.schedule.id);
+    expect(now.registered).toBe(true);
     // room again: the next slot goes in
     db.run("UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE target = 'fill-0'", [wall]);
     db.run("UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE target = 'fill-1'", [wall]);
-    db.run("UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE target = 'fill-11'", [
+    db.run("UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE id = ?", [
       wall,
+      now.job.id,
     ]);
     wall = T0 + 2 * HOUR + 1000;
     expect(s.check().due[0]).toMatchObject({ outcome: "registered" });
@@ -410,6 +431,8 @@ describe("schedule.pause", () => {
       dead.id,
     ]);
     wall += 1000;
+    s.check(); // a check sees the dead letter open again, so its next end is new
+    wall += 1000;
     finish({ status: "dead_letter", reason: "other-code" });
     wall += HOUR;
     s.check();
@@ -434,6 +457,59 @@ describe("schedule.pause", () => {
     wall += DAY;
     s.check();
     expect(s.get(schedule.id)?.warning).toBeUndefined();
+  });
+});
+
+describe("schedule.pause: the dead letter a check has not seen, and the clock", () => {
+  it("a dead letter that ended while the period was off does not pause it again once enabled", () => {
+    const s = scheduler();
+    const { schedule } = s.ensureSchedule({ kind: "connector-sync", target: "c1", period: hourly });
+    wall = T0 + HOUR + 1000;
+    s.check();
+    s.disable(schedule.id);
+    finish({ status: "dead_letter", reason: "permission-denied" }); // no check sees it
+    s.enable(schedule.id);
+    expect(s.get(schedule.id)?.pause).toBeUndefined();
+    wall = T0 + 3 * HOUR;
+    expect(s.check().due[0]).toMatchObject({ outcome: "registered" });
+    expect(s.get(schedule.id)?.pause).toBeUndefined();
+    expect(jobsOf(schedule.id)).toHaveLength(2);
+  });
+
+  it("a dead letter that ended just before enable, unseen by any check, is not a reason to pause", () => {
+    const s = scheduler();
+    const { schedule } = s.ensureSchedule({ kind: "connector-sync", target: "c1", period: hourly });
+    wall = T0 + HOUR + 1000;
+    s.check();
+    finish({ status: "dead_letter", reason: "permission-denied" });
+    wall += 1000;
+    s.check(); // sees it: paused
+    expect(s.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "permission-denied" });
+    s.enable(schedule.id);
+    wall = T0 + 3 * HOUR;
+    expect(s.check().due[0]).toMatchObject({ outcome: "registered" });
+  });
+
+  it("a dead letter after the clock went back pauses the period (the marker is not a clock reading)", () => {
+    const s = scheduler();
+    const { schedule } = s.ensureSchedule({ kind: "connector-sync", target: "c1", period: hourly });
+    wall = T0 + 30 * HOUR + 1000;
+    s.check();
+    finish({ status: "dead_letter", reason: "permission-denied" });
+    wall += 1000;
+    s.check();
+    s.enable(schedule.id); // the marker now sits at the first dead letter, ended at hour 30
+    wall = T0 + 5 * HOUR + 1000; // the clock goes back a day
+    s.check();
+    wall = T0 + 6 * HOUR + 1000;
+    expect(s.check().due[0]).toMatchObject({ outcome: "registered" });
+    finish({ status: "dead_letter", reason: "other-code" }); // ends at hour 6: before hour 30
+    wall += 1000;
+    s.check();
+    expect(s.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "other-code" });
+    wall = T0 + 8 * HOUR;
+    expect(s.check().due[0]).toMatchObject({ outcome: "paused" });
+    expect(jobsOf(schedule.id)).toHaveLength(2);
   });
 });
 
@@ -537,7 +613,8 @@ describe("schedule.config", () => {
 });
 
 describe("schedule.loop", () => {
-  it("checks at start, then every interval, and stops", async () => {
+  it("checks at start, then every interval, and stops with no timer armed", () => {
+    vi.useFakeTimers();
     const s = scheduler({ intervalMs: 30_000 });
     const { schedule } = s.ensureSchedule({
       kind: "connector-sync",
@@ -545,30 +622,89 @@ describe("schedule.loop", () => {
       period: tenMinutes,
     });
     wall = T0 + 10 * MIN + 1000;
-    s.start(); // the first check runs before any sleep
+    s.start(); // the first check runs before any wait
+    expect(s.isRunning()).toBe(true);
     expect(jobsOf(schedule.id)).toHaveLength(1);
     finish();
-    expect(sleepers).toHaveLength(1);
     wall += 10 * MIN;
-    sleepers.shift()?.();
-    await flush();
+    vi.advanceTimersByTime(29_999);
+    expect(jobsOf(schedule.id)).toHaveLength(1);
+    vi.advanceTimersByTime(1);
     expect(jobsOf(schedule.id)).toHaveLength(2);
-    const stopped = s.stop();
-    await stopped;
-    sleepers.splice(0).forEach((wake) => wake());
-    await flush();
+    s.stop();
+    expect(s.isRunning()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    finish();
     wall += HOUR;
+    vi.advanceTimersByTime(HOUR);
     expect(jobsOf(schedule.id)).toHaveLength(2);
   });
 
-  it("reports a failing check to onError and goes on", async () => {
+  it("starts once: a second start neither checks nor arms a second timer", () => {
+    vi.useFakeTimers();
+    const s = scheduler();
+    expect(s.start()).toBeDefined();
+    expect(s.start()).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(1);
+    s.stop();
+  });
+
+  it("reports a failing period to onError and goes on", () => {
+    vi.useFakeTimers();
     const errors: unknown[] = [];
     const s = scheduler({ onError: (e) => errors.push(e), timeZone: () => "No/Such_Zone" });
     s.ensureSchedule({ kind: "maintenance", period: daily, zone: "UTC" });
     wall += HOUR;
     s.start();
     expect(errors).toHaveLength(1);
-    expect(sleepers).toHaveLength(1);
-    await s.stop();
+    expect(vi.getTimerCount()).toBe(1);
+    s.stop();
+  });
+
+  it("reports a clock read that throws to onError and goes on", () => {
+    vi.useFakeTimers();
+    const errors: unknown[] = [];
+    const s = scheduler({
+      onError: (e) => errors.push(e),
+      timeZone: () => {
+        throw new Error("zone");
+      },
+    });
+    s.start();
+    expect(errors).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(1);
+    s.stop();
+  });
+});
+
+describe("check isolation and ordering", () => {
+  it("one malformed row does not stop the others or the pull-back, and the wake comes after the commit", () => {
+    const errors: unknown[] = [];
+    const seen: number[] = [];
+    const other = reopen(); // a second connection reads only what was committed
+    const s = scheduler({
+      onError: (e) => errors.push(e),
+      onRegistered: (job) =>
+        seen.push(
+          other.all("SELECT count(*) AS n FROM jobs WHERE id = ?", [job.id])[0]?.n as number,
+        ),
+    });
+    const good = s.ensureSchedule({ kind: "connector-sync", target: "g", period: hourly });
+    const bad = s.ensureSchedule({ kind: "connector-sync", target: "b", period: daily });
+    db.run("UPDATE schedules SET period = ? WHERE id = ?", [
+      JSON.stringify({ kind: "daily", at: { hour: 99, minute: 0 } }),
+      bad.schedule.id,
+    ]);
+    const far = registerJob(db, { kind: "test-effect", target: "x", at: new Date(wall) });
+    if (!far.registered) throw new Error("register");
+    db.run("UPDATE jobs SET run_after = ? WHERE id = ?", [wall + 9 * DAY, far.job.id]);
+    wall = T0 + 3 * DAY;
+    const report = s.check();
+    expect(errors).toHaveLength(1);
+    expect(report.failed).toEqual([bad.schedule.id]);
+    expect(report.pulledBack).toBe(1);
+    expect(report.due).toHaveLength(1);
+    expect(jobsOf(good.schedule.id)).toHaveLength(1);
+    expect(seen).toEqual([1]); // visible to another connection when the wake came
   });
 });

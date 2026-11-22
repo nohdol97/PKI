@@ -617,7 +617,7 @@ const v14: Migration = (db) =>
       next_due INTEGER NOT NULL,
       last_run_slot INTEGER,
       paused_code TEXT,
-      failure_seen_at INTEGER NOT NULL DEFAULT 0,
+      failure_seen_job INTEGER NOT NULL DEFAULT 0,
       warning TEXT,
       last_missed INTEGER NOT NULL DEFAULT 0,
       registered_count INTEGER NOT NULL DEFAULT 0,

@@ -1208,7 +1208,7 @@ describe("schema v14 (I03-T08)", () => {
       "next_due",
       "last_run_slot",
       "paused_code",
-      "failure_seen_at",
+      "failure_seen_job",
       "warning",
       "last_missed",
       "registered_count",

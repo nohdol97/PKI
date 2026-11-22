@@ -11,14 +11,17 @@
 //   - a paused period registers nothing; one with an open job coalesces; at the cap
 //     of open jobs the slot is skipped; a slot whose job exists was already run (or
 //     coalesced if that job is open); else one job is registered.
-// The loop wakes every `intervalMs` and checks at once on start; a wake after the
-// clock jumped is itself the check that sees the jump.
+// The loop checks at once on start and every `intervalMs` on a runtime timer (a
+// Clock.sleep cannot be cancelled); a check after the clock jumped is itself the one
+// that sees the jump. Each schedule is checked on its own: one that throws is
+// reported and the rest go on. `onRegistered` fires after the check commits.
 import {
   countOpenJobs,
   createSchedule,
   hasSucceededAfter,
   jobOfSlot,
   latestDeadLetterAfter,
+  latestDeadLetterId,
   listSchedules,
   openJobOfSchedule,
   pullBackRunAfter,
@@ -87,6 +90,8 @@ export interface CheckReport {
   /** Stored job run times pulled back to now + the backoff cap. */
   pulledBack: number;
   due: DueReport[];
+  /** Schedules whose check threw (`onError` got each); the others were checked. */
+  failed: number[];
   backlog: Backlog;
 }
 
@@ -100,7 +105,7 @@ export interface SchedulerDeps {
   intervalMs?: number;
   /** Default OPEN_JOB_CAP. */
   openJobCap?: number;
-  /** Called after a job is registered, so a runner can wake. */
+  /** Called after the check that registered a job has committed, so a runner can wake. */
   onRegistered?: (job: StoredJob) => void;
   /** A failed check of the loop; the loop goes on. */
   onError?: (error: unknown) => void;
@@ -109,9 +114,15 @@ export interface SchedulerDeps {
 export interface Scheduler {
   /** One check. */
   check(): CheckReport;
-  /** Checks now, then every interval until `stop`. Returns the first check's report (undefined if it failed: `onError` got it). */
+  /**
+   * Checks now, then every interval until `stop`, on a runtime timer that `stop`
+   * cancels (a `Clock.sleep` cannot be cancelled and would hold the exit). Returns
+   * the first check's report; undefined if it failed (`onError` got it) or the loop was already running.
+   */
   start(): CheckReport | undefined;
-  stop(): Promise<void>;
+  /** Cancels the timer; a check already under way finishes. */
+  stop(): void;
+  isRunning(): boolean;
   /** Creates the period of (kind, target) unless it exists; the stored one stands (I03-R18). */
   ensureSchedule(input: { kind: string; target?: string; period: Period; zone?: string }): {
     created: boolean;
@@ -149,9 +160,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const intervalMs = deps.intervalMs ?? CHECK_INTERVAL_MS;
   const cap = deps.openJobCap ?? OPEN_JOB_CAP;
   let lastCheckAt: number | undefined;
-  let running = false;
-  let loop: Promise<void> | undefined;
-  let wakeLoop: (() => void) | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
 
   const view = (row: StoredSchedule): ScheduleView => {
     const { period, pausedCode, warning, ...rest } = row;
@@ -177,24 +186,38 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     return { open, cap, warning: open >= cap * OPEN_JOB_WARN_RATIO };
   }
 
-  /** What a dead letter of the period does: pause it, or warn when it cannot pause (I03-R20). */
+  /**
+   * What a dead letter of the period does: pause it, or warn when it cannot pause
+   * (I03-R20). Dead letters are told apart by job ID (a marker that only grows; a
+   * clock reading would hide the ones that end after the clock went back).
+   */
   function noteFailure(row: StoredSchedule, now: number): StoredSchedule {
     const patch: SchedulePatch = {};
-    const dead = latestDeadLetterAfter(db, row.id, row.failureSeenAt);
+    let seen = row.failureSeenJob;
+    // a dead letter seen before and taken up again by hand: its next end is new
+    const open = openJobOfSchedule(db, row.id);
+    if (open && open.id <= seen) seen = open.id - 1;
+    const dead = latestDeadLetterAfter(db, row.id, seen);
     if (dead) {
-      patch.failureSeenAt = dead.finishedAt;
+      seen = dead.id;
       const code = dead.reason ?? "unknown";
       if (row.kind === MAINTENANCE_KIND) patch.warning = code;
       else patch.pausedCode = code;
-    } else if (row.warning !== null && hasSucceededAfter(db, row.id, row.failureSeenAt)) {
+    } else if (row.warning !== null && hasSucceededAfter(db, row.id, seen)) {
       patch.warning = null; // the cleanup ran again: the warning is over
     }
+    if (seen !== row.failureSeenJob) patch.failureSeenJob = seen;
     if (Object.keys(patch).length === 0) return row;
     updateSchedule(db, row.id, patch, now);
     return stored(row.id);
   }
 
-  function checkOne(initial: StoredSchedule, now: number, zone: string): DueReport | undefined {
+  function checkOne(
+    initial: StoredSchedule,
+    now: number,
+    zone: string,
+    registered: StoredJob[],
+  ): DueReport | undefined {
     const row = noteFailure(initial, now);
     const period = periodOf(row);
     const reconciled = reconcileNextDue({
@@ -243,7 +266,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       at: new Date(now),
     });
     if (!job.registered) return finish("coalesced", "coalesced"); // a race with another writer
-    deps.onRegistered?.(job.job);
+    registered.push(job.job);
     return {
       ...finish("registered", "registered", { lastRunSlot: due.slot }),
       jobId: job.job.id,
@@ -256,17 +279,35 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const discontinuity =
       lastCheckAt !== undefined && (now < lastCheckAt || now - lastCheckAt > 2 * intervalMs);
     lastCheckAt = now;
-    return db.transaction(
+    const registered: StoredJob[] = [];
+    const failed: number[] = [];
+    const report = db.transaction(
       () => {
         // clampRunAt is the one rule of how far ahead a run time may lie
-        const pulledBack = pullBackRunAfter(db, now + BACKOFF_MAX_MS, (at) => clampRunAt(at, now));
-        const due = listSchedules(db)
-          .filter((row) => row.enabled)
-          .flatMap((row) => checkOne(row, now, zone) ?? []);
-        return { discontinuity, pulledBack, due, backlog: backlog() };
+        const pulledBack = pullBackRunAfter(
+          db,
+          now + BACKOFF_MAX_MS,
+          (at) => clampRunAt(at, now),
+          now,
+        );
+        const due: DueReport[] = [];
+        for (const row of listSchedules(db)) {
+          if (!row.enabled) continue;
+          try {
+            const result = checkOne(row, now, zone, registered);
+            if (result) due.push(result);
+          } catch (error) {
+            // one row that cannot be read must not stop the others or the pull-back
+            failed.push(row.id);
+            deps.onError?.(error);
+          }
+        }
+        return { discontinuity, pulledBack, due, failed, backlog: backlog() };
       },
       { immediate: true },
     );
+    for (const job of registered) deps.onRegistered?.(job); // after the commit
+    return report;
   }
 
   function safeCheck(): CheckReport | undefined {
@@ -278,31 +319,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
   }
 
-  async function run(): Promise<void> {
-    while (running) {
-      await Promise.race([
-        clock.sleep(intervalMs),
-        new Promise<void>((resolve) => (wakeLoop = resolve)),
-      ]);
-      if (running) safeCheck();
-    }
-  }
-
   return {
     check,
     start() {
-      if (running) return undefined;
-      running = true;
-      const first = safeCheck();
-      loop = run();
-      return first;
+      if (timer !== undefined) return undefined;
+      timer = setInterval(safeCheck, intervalMs);
+      return safeCheck();
     },
-    async stop() {
-      running = false;
-      wakeLoop?.();
-      await loop;
-      loop = undefined;
+    stop() {
+      clearInterval(timer);
+      timer = undefined;
     },
+    isRunning: () => timer !== undefined,
     ensureSchedule({ kind, target = "", period, zone }) {
       checkedPeriod(period);
       const at = clock.now();
@@ -350,6 +378,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         {
           enabled: true,
           pausedCode: null,
+          // what died while it was off or before a check saw it is not a reason to pause again
+          failureSeenJob: latestDeadLetterId(db, id),
           zone,
           nextDue: nextSlotAfter(periodOf(row), at, zone),
         },

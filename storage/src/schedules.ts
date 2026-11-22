@@ -32,8 +32,11 @@ export interface StoredSchedule {
   lastRunSlot: number | null;
   /** The last error code of the job that gave the period up; null while it is not paused. */
   pausedCode: string | null;
-  /** The end time of the latest dead letter a check has seen for this period. */
-  failureSeenAt: number;
+  /**
+   * The ID of the latest dead letter of this period that a check or an enable has
+   * accounted for. A job ID, not a time: IDs only grow, a wall clock can go back.
+   */
+  failureSeenJob: number;
   /** An error code kept for a period that cannot pause (the cleanup period). */
   warning: string | null;
   /** The missed slots of the latest due check. */
@@ -71,7 +74,7 @@ function fromRow(row: Record<string, SqlValue>): StoredSchedule {
     nextDue: row.next_due as number,
     lastRunSlot: (row.last_run_slot ?? null) as number | null,
     pausedCode: (row.paused_code ?? null) as string | null,
-    failureSeenAt: row.failure_seen_at as number,
+    failureSeenJob: row.failure_seen_job as number,
     warning: (row.warning ?? null) as string | null,
     lastMissed: row.last_missed as number,
     counts: {
@@ -121,7 +124,7 @@ export interface SchedulePatch {
   nextDue?: number;
   lastRunSlot?: number | null;
   pausedCode?: string | null;
-  failureSeenAt?: number;
+  failureSeenJob?: number;
   warning?: string | null;
   lastMissed?: number;
   /** Added to the counters. */
@@ -134,7 +137,7 @@ const COLUMNS = {
   nextDue: "next_due",
   lastRunSlot: "last_run_slot",
   pausedCode: "paused_code",
-  failureSeenAt: "failure_seen_at",
+  failureSeenJob: "failure_seen_job",
   warning: "warning",
   lastMissed: "last_missed",
 } as const;
@@ -193,27 +196,35 @@ export function jobOfSlot(db: SqlDriver, scheduleId: number, slot: number): Stor
   return id === undefined ? undefined : readJob(db, id as number);
 }
 
-/** The latest dead letter of a schedule that ended after `after`: its code and end time. */
+/** The latest dead letter of a schedule with an ID above `afterJob`: its ID and code. */
 export function latestDeadLetterAfter(
   db: SqlDriver,
   scheduleId: number,
-  after: number,
-): { reason: string | null; finishedAt: number } | undefined {
+  afterJob: number,
+): { id: number; reason: string | null } | undefined {
   const row = db.all(
-    `SELECT reason, finished_at FROM jobs
-      WHERE schedule_id = ? AND status = 'dead_letter' AND finished_at > ?
-      ORDER BY finished_at DESC, id DESC LIMIT 1`,
-    [scheduleId, after],
+    `SELECT id, reason FROM jobs
+      WHERE schedule_id = ? AND status = 'dead_letter' AND id > ?
+      ORDER BY id DESC LIMIT 1`,
+    [scheduleId, afterJob],
   )[0];
-  return row && { reason: row.reason as string | null, finishedAt: row.finished_at as number };
+  return row && { id: row.id as number, reason: row.reason as string | null };
 }
 
-/** Whether a job of the schedule succeeded after `after`. */
-export function hasSucceededAfter(db: SqlDriver, scheduleId: number, after: number): boolean {
+/** The ID of the latest job of a schedule that is a dead letter now; 0 when none. */
+export function latestDeadLetterId(db: SqlDriver, scheduleId: number): number {
+  return db.all(
+    "SELECT coalesce(max(id), 0) AS id FROM jobs WHERE schedule_id = ? AND status = 'dead_letter'",
+    [scheduleId],
+  )[0]?.id as number;
+}
+
+/** Whether a job of the schedule with an ID above `afterJob` succeeded. */
+export function hasSucceededAfter(db: SqlDriver, scheduleId: number, afterJob: number): boolean {
   return (
     db.all(
-      "SELECT 1 AS hit FROM jobs WHERE schedule_id = ? AND status = 'succeeded' AND finished_at > ? LIMIT 1",
-      [scheduleId, after],
+      "SELECT 1 AS hit FROM jobs WHERE schedule_id = ? AND status = 'succeeded' AND id > ? LIMIT 1",
+      [scheduleId, afterJob],
     ).length === 1
   );
 }
@@ -227,6 +238,7 @@ export function pullBackRunAfter(
   db: SqlDriver,
   above: number,
   clamp: (runAfter: number) => number,
+  now: number,
 ): number {
   const rows = db.all(
     "SELECT id, run_after FROM jobs WHERE status IN ('queued', 'retry') AND run_after > ?",
@@ -236,7 +248,11 @@ export function pullBackRunAfter(
   for (const row of rows) {
     const to = clamp(row.run_after as number);
     if (to !== row.run_after) {
-      moved += db.run("UPDATE jobs SET run_after = ? WHERE id = ?", [to, row.id as number]).changes;
+      moved += db.run("UPDATE jobs SET run_after = ?, updated_at = ? WHERE id = ?", [
+        to,
+        now,
+        row.id as number,
+      ]).changes;
     }
   }
   return moved;
