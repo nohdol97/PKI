@@ -15,9 +15,25 @@ export const SecretValueSchema = z.string().min(1).max(8192);
 export const OPENAI_API_KEY_SECRET_PREFIX = "openai-compatible.api-key.";
 const BACKEND_READABLE = /^openai-compatible\.api-key\.[0-9a-f]{32}$/;
 
-/** The only secret names the shell gives the backend (others: "unavailable"). */
+/**
+ * The Provider key names: what a Provider host change prunes (`deleteOthers`) and
+ * the only kind a prune may keep. Connector credentials are not among them (I06-R4).
+ */
 export function isBackendReadableSecret(name: string): boolean {
   return BACKEND_READABLE.test(name);
+}
+
+/**
+ * A Connector credential's stored name: `connector.<32 hex>.<slot>` (I06-R3). The hex
+ * is the first 32 digits of the SHA-256 of kind, a newline and instance ID
+ * (`@pki/backend` `connectorCredentialName`); the slot is a lower-case word of 1-16
+ * characters. The shell reads and checks these for the backend besides Provider
+ * keys, but never prunes them.
+ */
+const CONNECTOR_CREDENTIAL = /^connector\.[0-9a-f]{32}\.[a-z][a-z0-9-]{0,15}$/;
+
+export function isConnectorCredentialSecret(name: string): boolean {
+  return CONNECTOR_CREDENTIAL.test(name);
 }
 
 /**
