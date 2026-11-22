@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   componentText,
+  dataProtectionText,
   DOWNLOAD_APPROVAL,
   embeddingText,
   providerStatusText,
@@ -178,5 +179,16 @@ describe("DOWNLOAD_APPROVAL", () => {
     expect(DOWNLOAD_APPROVAL).toContain("넘겨 주는");
     expect(DOWNLOAD_APPROVAL).toContain("586 MB");
     expect(DOWNLOAD_APPROVAL).toContain("해시");
+  });
+});
+
+describe("status.data-protection: dataProtectionText (I04-R6)", () => {
+  it("says the clean-up of earlier deletions' traces failed, and that the next start tries again", () => {
+    expect(dataProtectionText({ legacyCleanup: "pending" })).toBe(
+      "이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)",
+    );
+  });
+  it("says nothing is pending when it is done", () => {
+    expect(dataProtectionText({ legacyCleanup: "done" })).toBe("정상");
   });
 });

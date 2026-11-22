@@ -131,6 +131,7 @@ export {
   type StoredInsight,
 } from "./insights.ts";
 export {
+  listLiftableTombstones,
   readTombstone,
   readTombstoneState,
   recordTombstone,

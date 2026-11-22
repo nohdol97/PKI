@@ -26,6 +26,8 @@ import {
   type VectorIndex,
 } from "@pki/contracts";
 import {
+  canonicalTransaction,
+  findSourceId,
   readChangeSeq,
   readSetting,
   readSourceVersion,
@@ -33,6 +35,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { deleteSource, type DeletionRequest, type SourceDeletion } from "./deletion.ts";
+import { applyTombstone } from "./tombstone-entry.ts";
 
 /** What one committed change tells the projections. */
 export type ProjectionNotice =
@@ -114,6 +117,50 @@ export function deleteSourceWithNotice(
       changeSeq: readChangeSeq(db),
     };
     return { deletion, notice };
+  });
+}
+
+/**
+ * The user's deletion (V02-R12, I04-R9): applyTombstone with reason `user-deleted`
+ * and no revision, in one canonical transaction. `deleted` is any outcome that
+ * changed the tombstone (a purged source can be re-marked by the user over a
+ * source's reason or after a lift); the notice is there only when versions were
+ * purged, so a delete of nothing stored does not wake the engine.
+ */
+export function userDeleteWithNotice(
+  db: SqlDriver,
+  identity: { connectorInstanceId: string; namespace: string; externalId: string },
+  at: string,
+): { outcome: "deleted" | "unchanged"; notice?: ProjectionNotice } {
+  return canonicalTransaction(db, (tx) => {
+    const { connectorInstanceId, namespace, externalId } = identity;
+    const sourceId = findSourceId(tx, connectorInstanceId, namespace, externalId);
+    const versionIds =
+      sourceId === undefined
+        ? []
+        : idsOf(
+            tx.all("SELECT id FROM source_versions WHERE source_id = ? ORDER BY version", [
+              sourceId,
+            ]),
+          );
+    const result = applyTombstone(tx, {
+      identity,
+      reason: "user-deleted",
+      lastRevision: null,
+      at,
+    });
+    if (result.outcome === "unchanged") return { outcome: "unchanged" };
+    if (versionIds.length === 0) return { outcome: "deleted" };
+    return {
+      outcome: "deleted",
+      notice: {
+        kind: "removed",
+        sourceId: result.sourceId,
+        version: result.coversVersion,
+        versionIds,
+        changeSeq: readChangeSeq(tx),
+      },
+    };
   });
 }
 

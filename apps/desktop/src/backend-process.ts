@@ -48,9 +48,22 @@ export function backendEnv(env: Readonly<Record<string, string | undefined>>) {
   ) as Record<string, string>;
 }
 
+/** A start the backend refused; `reason` is a fixed class it reported (I04-R7), never its message. */
+export class BackendStartError extends Error {
+  readonly reason: "identity-key-missing" | undefined;
+  constructor(reason?: "identity-key-missing") {
+    super("backend failed to start");
+    this.reason = reason;
+    this.name = "BackendStartError";
+  }
+}
+
 const FromBackend = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("ready"), port: z.int().min(1).max(65535) }),
-  z.strictObject({ type: z.literal("failed") }),
+  z.strictObject({
+    type: z.literal("failed"),
+    reason: z.literal("identity-key-missing").optional(),
+  }),
   z.strictObject({
     type: z.literal("secret-request"),
     id: z.int().positive(),
@@ -143,12 +156,12 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
       reject(new Error("backend did not start in time"));
     }, options.startTimeoutMs ?? 30_000);
     let settled = false;
-    const fail = (why: string) => {
+    const fail = (why: string | BackendStartError) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       child.kill();
-      reject(new Error(`backend ${why}`));
+      reject(typeof why === "string" ? new Error(`backend ${why}`) : why);
     };
     child.on("message", (raw) => {
       const message = FromBackend.safeParse(raw);
@@ -161,7 +174,7 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
         });
         return;
       }
-      if (message.data.type === "failed") return fail("failed to start");
+      if (message.data.type === "failed") return fail(new BackendStartError(message.data.reason));
       if (settled) return;
       settled = true;
       clearTimeout(timer);

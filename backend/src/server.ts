@@ -42,10 +42,12 @@ import {
   type ExecutionInput,
   type UserActionIssuer,
 } from "@pki/providers";
-import { deleteSourceWithNotice, type Projections } from "@pki/knowledge-engine";
+import { liftTombstone, type Projections, userDeleteWithNotice } from "@pki/knowledge-engine";
 import {
   databaseEncryption,
+  canonicalTransaction,
   findSourceId,
+  listLiftableTombstones,
   findSources,
   listActiveInsights,
   listInvalidations,
@@ -510,15 +512,27 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     deleteSource: async ({ connectorId, namespace, externalId }) => {
       const sourceId = findSourceId(options.db, connectorId, namespace, externalId);
       if (sourceId === undefined) return { error: "not-found" };
-      const at = new Date().toISOString();
-      const { notice } = deleteSourceWithNotice(options.db, sourceId, {
-        reason: "user-deleted",
-        at,
-      });
-      if (!notice) return { outcome: "already-deleted" };
-      void options.projections?.notify([notice]);
+      const { outcome, notice } = userDeleteWithNotice(
+        options.db,
+        { connectorInstanceId: connectorId, namespace, externalId },
+        new Date().toISOString(),
+      );
+      if (outcome === "unchanged") return { outcome: "already-deleted" };
+      if (notice) void options.projections?.notify([notice]);
       return { outcome: "deleted" };
     },
+    // I04-R9: the only caller of liftTombstone; Connector and source events never lift
+    tombstones: async () => ({
+      tombstones: listLiftableTombstones(options.db).map((t) => ({
+        id: t.sourceId,
+        connectorId: t.connectorInstanceId,
+        reason: t.reason,
+        coversVersion: t.coversVersion,
+        at: t.at,
+      })),
+    }),
+    liftTombstone: async ({ id }) =>
+      canonicalTransaction(options.db, (tx) => liftTombstone(tx, id, new Date().toISOString())),
     activity: async () => ({ calls: listProviderCalls(options.db) }),
     settings: async () => settings(),
     writeSettings: async ({ openaiCompatible }) => {
