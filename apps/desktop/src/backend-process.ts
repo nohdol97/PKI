@@ -3,7 +3,12 @@
 // (other processes of the same user can read both). The backend binds a free loopback
 // port itself and reports it back on the same channel, so no port is picked twice.
 // A secret goes the same way, only when the backend asks for it just before a call.
-import { isBackendReadableSecret, SecretNameSchema, type SecretRead } from "@pki/contracts";
+import {
+  isBackendReadableSecret,
+  isConnectorCredentialSecret,
+  SecretNameSchema,
+  type SecretRead,
+} from "@pki/contracts";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { SecretStore } from "./secret-store.ts";
@@ -98,12 +103,17 @@ const FromBackend = z.discriminatedUnion("type", [
 const SECRET_UNAVAILABLE: SecretRead = { state: "unavailable" };
 
 async function answerSecret(
-  store: Pick<SecretStore, "read" | "has" | "deleteOthers"> | undefined,
+  store: Pick<SecretStore, "read" | "has" | "deleteOthers" | "available"> | undefined,
   name: string,
   mode: "read" | "presence" | "prune",
 ): Promise<SecretRead | { state: SecretRead["state"] }> {
-  if (!store || !isBackendReadableSecret(name)) return SECRET_UNAVAILABLE;
+  const provider = isBackendReadableSecret(name);
+  // a prune keeps a Provider key and deletes other Provider keys only (I06-R4)
+  const allowed = provider || (mode !== "prune" && isConnectorCredentialSecret(name));
+  if (!store || !allowed) return SECRET_UNAVAILABLE;
   try {
+    // without OS protection an empty credential slot is not "missing" but unusable (I06-R4)
+    if (!provider && mode === "presence" && !(await store.available())) return SECRET_UNAVAILABLE;
     if (mode === "read") return await store.read(name);
     // prune keeps `name` and answers "missing" once no other key is left
     if (mode === "prune")
@@ -141,10 +151,11 @@ export interface BackendOptions {
   killTimeoutMs?: number;
   /**
    * Answers the backend's secret requests; without it every answer is "unavailable".
-   * Only names `isBackendReadableSecret` allows are looked up; a presence request
-   * gets the state alone, never the value.
+   * Only Provider key names (`isBackendReadableSecret`) and Connector credential names
+   * (`isConnectorCredentialSecret`, never for a prune) are looked up; a presence
+   * request gets the state alone, never the value.
    */
-  secrets?: Pick<SecretStore, "read" | "has" | "deleteOthers"> | undefined;
+  secrets?: Pick<SecretStore, "read" | "has" | "deleteOthers" | "available"> | undefined;
 }
 
 export interface Backend {

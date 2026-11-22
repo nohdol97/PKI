@@ -4,6 +4,7 @@
 // browser development entry (dev.ts, not in the product build) reads environment
 // variables instead; anything else has no store and answers "unavailable".
 import {
+  isConnectorCredentialSecret,
   SecretNameSchema,
   SecretReadSchema,
   SecretValueSchema,
@@ -96,6 +97,8 @@ export const DEV_KEY_HOST_VARIABLE = "PKI_DEV_OPENAI_API_KEY_HOST";
  */
 export function envSecrets(env: Readonly<Record<string, string | undefined>>): SecretSource {
   function lookup(name: string): SecretRead {
+    // no environment route to a Connector credential (I06-R4)
+    if (isConnectorCredentialSecret(name)) return UNAVAILABLE;
     const host = env[DEV_KEY_HOST_VARIABLE];
     const value = env[DEV_KEY_VARIABLE];
     if (!host || !URL.canParse(`https://${host}`)) return { state: "missing" };

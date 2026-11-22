@@ -76,6 +76,8 @@ export interface SecretStore {
   read(name: string): Promise<SecretRead>;
   /** Deletes every backend-readable key but `keep` (the endpoint host changed). */
   deleteOthers(keep: string): Promise<SecretWriteResult>;
+  /** Whether the OS protection can be used; the shell asks it for a Connector credential's presence. */
+  available(): Promise<boolean>;
 }
 
 const UNAVAILABLE = { ok: false, error: "unavailable" } as const;
@@ -131,6 +133,7 @@ export function createSecretStore(options: { file: string; cipher: Cipher }): Se
   }
 
   return {
+    available: () => cipher.available(),
     set: (name, value) =>
       exclusive(async () => {
         if (!(await cipher.available())) return UNAVAILABLE;
