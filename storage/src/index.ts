@@ -214,7 +214,15 @@ export {
   type SemanticRelationView,
   type SemanticRowView,
 } from "./semantic-view.ts";
-export { userDecisions, type UserAction, type UserDecisions } from "./semantic-user.ts";
+export {
+  userDecisions,
+  type AddResult,
+  type ReplaceResult,
+  type UndoResult,
+  type UserAction,
+  type UserDecisions,
+  type UserEntry,
+} from "./semantic-user.ts";
 export {
   applyOntologyChange,
   checkOntologyChange,

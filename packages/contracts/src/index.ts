@@ -781,6 +781,50 @@ export const SemanticDecideRequestSchema = z.strictObject({
   id: z.int().positive(),
   action: z.enum(["approve", "reject", "dispute"]),
 });
+/**
+ * What the user may type into a direct add or a value fix (S01-R7, R18, R3). A name is an identifier
+ * (letter first, then letters, digits, `_` and `.`, at most 40). A value or a name is text of 1 to
+ * 500 code points after trimming (the length the spec gives a definition; provisional for the rest).
+ * The check of a value's shape against its kind (a date) is the server's, which reads the kind.
+ */
+export const SEMANTIC_TEXT_MAX = 500;
+const SemanticIdentifierSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_.]{0,39}$/);
+const SemanticTextSchema = z.string().refine((v) => {
+  const length = [...v.trim()].length;
+  return length >= 1 && length <= SEMANTIC_TEXT_MAX;
+});
+const SemanticIdSchema = z.int().positive();
+export const SemanticUserEntrySchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("item"),
+    type: SemanticIdentifierSchema,
+    name: SemanticTextSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("fact"),
+    itemId: SemanticIdSchema,
+    factKind: SemanticIdentifierSchema,
+    value: SemanticTextSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("relation"),
+    subjectId: SemanticIdSchema,
+    type: SemanticIdentifierSchema,
+    objectId: SemanticIdSchema,
+  }),
+]);
+export type SemanticUserEntryRequest = z.infer<typeof SemanticUserEntrySchema>;
+/** A direct add, or a fact's value fixed to the one the user wrote (one batch, S01-R7). */
+export const SemanticCorrectRequestSchema = z.strictObject({
+  correction: z.discriminatedUnion("action", [
+    z.strictObject({ action: z.literal("add"), entry: SemanticUserEntrySchema }),
+    z.strictObject({
+      action: z.literal("replace"),
+      id: SemanticIdSchema,
+      value: SemanticTextSchema,
+    }),
+  ]),
+});
 const SemanticRowSchema = z.object({
   id: z.int().positive(),
   status: SemanticStatusSchema,
@@ -828,7 +872,7 @@ const SemanticStateSchema = z.object({
  */
 export const SemanticOutcomeSchema = z
   .object({
-    status: z.enum(["applied", "unchanged", "refused"]),
+    status: z.enum(["applied", "unchanged", "refused", "removed"]),
     /** The history line the action wrote (`applied` only). */
     seq: z.int().positive().optional(),
     /** The row as it is now (`applied` and `unchanged`). */
@@ -841,9 +885,40 @@ export const SemanticOutcomeSchema = z
       ? o.seq !== undefined && o.entry !== undefined && o.reason === undefined
       : o.status === "unchanged"
         ? o.seq === undefined && o.entry !== undefined && o.reason === undefined
-        : o.seq === undefined && o.entry === undefined && o.reason !== undefined,
+        : o.status === "removed"
+          ? o.seq === undefined && o.entry === undefined && o.reason === undefined
+          : o.seq === undefined && o.entry === undefined && o.reason !== undefined,
   );
 export type SemanticOutcome = z.infer<typeof SemanticOutcomeSchema>;
+/**
+ * The answer to a direct add or a value fix. `applied`: `entry` is the row the user wrote, and for a
+ * fix `replaced` is the old fact as it stands now. `refused` with `value-exists` names the row that
+ * has the value (`existing`); approving it is the next step. A row that is absent or hidden is the
+ * 404 `not-found` and not a refusal. No name, value or quote is in any of it.
+ */
+export const SemanticCorrectionSchema = z
+  .object({
+    status: z.enum(["applied", "refused"]),
+    /** The history line the new row's creation wrote (`applied` only). */
+    seq: z.int().positive().optional(),
+    entry: SemanticStateSchema.optional(),
+    replaced: SemanticStateSchema.optional(),
+    reason: z.enum(SEMANTIC_REFUSALS).optional(),
+    existing: z.object({ kind: SemanticKindSchema, id: z.int().positive() }).optional(),
+  })
+  .refine((o) =>
+    o.status === "applied"
+      ? o.seq !== undefined &&
+        o.entry !== undefined &&
+        o.reason === undefined &&
+        o.existing === undefined
+      : o.reason !== undefined &&
+        o.seq === undefined &&
+        o.entry === undefined &&
+        o.replaced === undefined &&
+        (o.reason === "value-exists") === (o.existing !== undefined),
+  );
+export type SemanticCorrection = z.infer<typeof SemanticCorrectionSchema>;
 export const SemanticHistoryResponseSchema = z.object({
   lines: z.array(
     z.object({
@@ -1050,6 +1125,12 @@ export const routes = {
     path: "/api/semantic/decide",
     request: SemanticDecideRequestSchema,
     response: SemanticOutcomeSchema,
+  },
+  semanticCorrect: {
+    method: "POST",
+    path: "/api/semantic/correct",
+    request: SemanticCorrectRequestSchema,
+    response: SemanticCorrectionSchema,
   },
   semanticUndo: {
     method: "POST",

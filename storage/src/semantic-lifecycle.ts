@@ -104,6 +104,9 @@ export const TRANSITIONS: readonly Transition[] = [
     kinds: FACT_OR_RELATION,
   })),
   { from: "verified", to: "superseded", actor: "user", action: "replace", kinds: FACT_OR_RELATION },
+  // the value fix retires a candidate or disputed value by rejecting it (R7); the line is `replace` too
+  { from: "candidate", to: "rejected", actor: "user", action: "replace", kinds: FACT_OR_RELATION },
+  { from: "disputed", to: "rejected", actor: "user", action: "replace", kinds: FACT_OR_RELATION },
 ];
 
 export const NO_CURRENT_EVIDENCE_APPROVAL = "accepted-without-current-evidence";
@@ -133,6 +136,8 @@ export interface Line {
   batch?: number | null;
   revertsSeq?: number | null;
   at?: string | undefined;
+  /** Sets `user_authored` in the same UPDATE; the schema's gate allows it behind an `undo` line only (R8). */
+  userAuthored?: 0 | 1;
 }
 
 /** Writes the history line, then the row: the order the schema's gate trigger requires. */
@@ -163,11 +168,17 @@ export function writeLine(tx: SqlDriver, ref: EntryRef, line: Line): number {
     ],
   );
   if (line.from) {
-    tx.run(`UPDATE ${table} SET status = ?, epistemic = ? WHERE id = ?`, [
-      line.to.status,
-      line.to.epistemic,
-      ref.id,
-    ]);
+    tx.run(
+      `UPDATE ${table} SET status = ?, epistemic = ?${
+        line.userAuthored === undefined ? "" : ", user_authored = ?"
+      } WHERE id = ?`,
+      [
+        line.to.status,
+        line.to.epistemic,
+        ...(line.userAuthored === undefined ? [] : [line.userAuthored]),
+        ref.id,
+      ],
+    );
   }
   return seq;
 }
@@ -176,13 +187,21 @@ interface TransitionOptions {
   basis?: Basis | null;
   batch?: number | null;
   at?: string | undefined;
+  /** Picks the table row of this action when several rows share the pair (the value fix's `replace`). */
+  action?: string;
 }
 
 /**
- * What a user action line is: the actions the user takes (S01-R7). A test seed's line is not one.
- * T03 adds the direct add's creation line (`created` by the user) here.
+ * What a user action line is: the actions the user takes (S01-R7), the direct add's creation line
+ * (`created` by the user) included. A test seed's line is not one.
  */
-const USER_ACTIONS: ReadonlySet<string> = new Set(["approve", "reject", "dispute", "replace"]);
+const USER_ACTIONS: ReadonlySet<string> = new Set([
+  "approve",
+  "reject",
+  "dispute",
+  "replace",
+  "created",
+]);
 export const isUserAction = (l: StoredLine) => l.actor === "user" && USER_ACTIONS.has(l.action);
 
 /**
@@ -244,6 +263,7 @@ export function applyTransition(
   to: KnowledgeStatus,
   options: TransitionOptions = {},
 ): Outcome {
+  const { action: wanted, ...lineOptions } = options;
   if (actor === "policy" && to === "disputed" && !options.basis) {
     return { status: "refused", reason: "basis-required" };
   }
@@ -255,7 +275,12 @@ export function applyTransition(
   }
   if (row.status === to) return { status: "unchanged" };
   const found = TRANSITIONS.find(
-    (t) => t.from === row.status && t.to === to && t.actor === actor && t.kinds.includes(ref.kind),
+    (t) =>
+      t.from === row.status &&
+      t.to === to &&
+      t.actor === actor &&
+      t.kinds.includes(ref.kind) &&
+      (wanted === undefined || t.action === wanted),
   );
   if (!found) return { status: "refused", reason: "invalid-transition" };
   const approving = actor === "user" && to === "verified";
@@ -275,7 +300,7 @@ export function applyTransition(
       : found.action === "supersede"
         ? EVIDENCE_LOST
         : null,
-    ...options,
+    ...lineOptions,
   });
   return { status: "applied", seq };
 }
@@ -288,6 +313,7 @@ interface StoredLine {
   fromStatus: KnowledgeStatus | null;
   fromEpistemic: EpistemicType | null;
   toStatus: KnowledgeStatus;
+  batch: number | null;
   revertsSeq: number | null;
 }
 
@@ -295,7 +321,7 @@ export const linesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] => {
   const { history, fk } = TABLES[ref.kind];
   return tx
     .all(
-      `SELECT seq, actor, action, reason, from_status, from_epistemic, to_status, reverts_seq
+      `SELECT seq, actor, action, reason, from_status, from_epistemic, to_status, batch, reverts_seq
        FROM ${history} WHERE ${fk} = ? ORDER BY seq`,
       [ref.id],
     )
@@ -307,6 +333,7 @@ export const linesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] => {
       fromStatus: r.from_status as KnowledgeStatus | null,
       fromEpistemic: r.from_epistemic as EpistemicType | null,
       toStatus: r.to_status as KnowledgeStatus,
+      batch: r.batch as number | null,
       revertsSeq: r.reverts_seq as number | null,
     }));
 };
@@ -333,6 +360,9 @@ const holdsEvidence = (ref: EntryRef) => FACT_OR_RELATION.includes(ref.kind);
 
 export const automatedLifecycle: AutomatedLifecycle = {
   created(tx, ref, actor, basis, at) {
+    // the user's creation line is the direct add's (semantic-user.ts) and counts as a user action (R12)
+    if (actor === "user")
+      throw new Error("a creation line by the user is written by the user entry");
     const row = readRow(tx, ref);
     if (!row) throw new Error(`${ref.kind} ${ref.id} not found`);
     writeLine(tx, ref, { from: null, to: row, actor, action: "created", basis, at });
