@@ -16,10 +16,9 @@ export const BACKEND_ENTRY = fileURLToPath(
 export const REFUSE_DEBUGGING: boolean = false;
 
 /**
- * The scope policy name the backend is started with (I04-R14). A source run (development and tests)
+ * The scope policy name the backend is started with (I04-R14, I05-R15). A source run (development and tests)
  * reads it from the environment (`PKI_SCOPE_POLICY`); the production build bundles layout.production.ts,
- * which gives the build-time name and ignores the environment (docs/site-setup.md: a build-time value
- * cannot be changed by an environment variable).
+ * which gives none and ignores the environment, so the backend's registration decides (docs/site-setup.md).
  */
 export function scopePolicyName(env: Readonly<Record<string, string | undefined>>) {
   return env["PKI_SCOPE_POLICY"];

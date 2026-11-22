@@ -276,8 +276,10 @@ export interface CallsOptions {
    * Broker's grade (I04-R16); default the entries' own (productRegistry in the product).
    */
   registry?: DerivativeRegistry;
-  /** The mapping scope -> class (I01-R15); a test build's own, else the public repository's (a fork replaces it, S08). */
+  /** The mapping scope -> class (I01-R15); a test build's own, else the public repository's. Honoured in a test build only. */
   scopeGrading?: ScopeGrading;
+  /** The deployment's mapping, from its registration (I05-R14, S08): used in every build, before the test build's own. */
+  siteScopeGrading?: ScopeGrading;
 }
 
 /**
@@ -319,11 +321,13 @@ export function productCalls(
     execution,
     recorder: createCallRecorder(db),
     // a claimed scope is compared by the registry's policy, the one every other scope judgment
-    // uses; the mapping scope -> class is the public repository's (a fork replaces it, S08)
+    // uses; the mapping scope -> class is the registration's, else a test build's own, else the public
+    // repository's (I05-R14, S08)
     scope: {
       policy: (options.registry ?? derivativeRegistry).policy,
       grading:
-        BUILD_KIND === "test" && options.scopeGrading ? options.scopeGrading : publicScopeGrading,
+        options.siteScopeGrading ??
+        (BUILD_KIND === "test" && options.scopeGrading ? options.scopeGrading : publicScopeGrading),
     },
   });
   // the verified list the gate decides with: the test build's own, else the build's
@@ -421,6 +425,9 @@ export function productRunner(
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";
+
+/** The placeholder kinds the product lists as not implemented; a registration may replace them (I05-R7). */
+export { SITE_CONNECTOR_KINDS };
 
 /** The product's Connector kinds: the site kinds, listed as not implemented (V01-R18). */
 export const connectorKinds = {

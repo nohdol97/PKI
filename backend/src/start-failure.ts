@@ -4,6 +4,7 @@ import { LedgerReapplyError } from "@pki/knowledge-engine";
 import { IdentityKeyMissingError, LedgerUnavailableError } from "@pki/storage";
 import { UnregisteredAdapterError } from "./derivative-coverage.ts";
 import { ScopePolicyNotImplementedError, UnknownScopePolicyError } from "./scope-policy.ts";
+import { SiteRegistrationInvalidError } from "./site-registration.ts";
 
 export type StartFailureReason =
   | "identity-key-missing"
@@ -11,7 +12,8 @@ export type StartFailureReason =
   | "scope-policy-invalid"
   | "adapter-unregistered"
   | "ledger-reapply-failed"
-  | "ledger-unavailable";
+  | "ledger-unavailable"
+  | "site-registration-invalid";
 export type StartFailureReport = {
   type: "failed";
   reason?: StartFailureReason;
@@ -36,15 +38,21 @@ export function startFailureReport(error?: unknown): StartFailureReport {
   if (error instanceof UnregisteredAdapterError) {
     return { type: "failed", reason: "adapter-unregistered" };
   }
+  if (error instanceof SiteRegistrationInvalidError) {
+    return { type: "failed", reason: "site-registration-invalid" };
+  }
   return { type: "failed" };
 }
 
 /**
  * The one line the shell prints to stderr for a refused start: the error's class only (its
  * message can carry a path or file text, V01-R13), except the fixed notice of a policy this
- * repository leaves to the deployment, which names no data (I04-H2 ①).
+ * repository leaves to the deployment, which names no data (I04-H2 ①), and the codes and counts of
+ * a registration that stops the start (fixed words and numbers, I05-R9).
  */
 export function startFailureLine(error: unknown): string {
+  if (error instanceof SiteRegistrationInvalidError)
+    return `backend start failed: ${error.message}`;
   return error instanceof ScopePolicyNotImplementedError || error instanceof UnknownScopePolicyError
     ? error.message
     : `backend start failed: ${error instanceof Error ? error.name : typeof error}`;

@@ -6,6 +6,7 @@ import {
   blocksValid,
   ChangeSchema,
   ChangeSetSchema,
+  CONNECTOR_KIND_PATTERN,
   CONNECTOR_NOT_IMPLEMENTED,
   CONNECTOR_SDK_VERSION,
   ConnectorError,
@@ -324,4 +325,18 @@ describe("ConnectorNotImplementedError", () => {
     expect(CONNECTOR_NOT_IMPLEMENTED).toBe("미구현, 배포처 후속");
     expect(new ConnectorNotImplementedError().message).toBe("미구현, 배포처 후속");
   });
+});
+
+// I05-R7: the one shape of a connector kind name; the tombstone ledger's reader uses the same constant.
+describe("CONNECTOR_KIND_PATTERN (I05-R7)", () => {
+  it.each(["a", "jsonl-import", "site-mail", "k1", "a".repeat(64)])("accepts %s", (kind) => {
+    expect(CONNECTOR_KIND_PATTERN.test(kind)).toBe(true);
+  });
+
+  it.each(["", "A", "1a", "-a", "a_b", "a b", "a".repeat(65), "a\n", "é", "a.b"])(
+    "refuses %j",
+    (kind) => {
+      expect(CONNECTOR_KIND_PATTERN.test(kind)).toBe(false);
+    },
+  );
 });

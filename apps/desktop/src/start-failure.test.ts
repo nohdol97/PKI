@@ -151,3 +151,25 @@ describe("a ledger that cannot be opened or created refuses the start with its o
     expect(text).not.toBe("앱을 시작하지 못했습니다.");
   });
 });
+
+describe("a registration that stops the start has its own text (I05-R9)", () => {
+  it("says the build's registration touched a public kind or instance, and where the codes are, with no registered text", async () => {
+    const error = await start({ type: "failed", reason: "site-registration-invalid" }).catch(
+      (e: unknown) => e,
+    );
+    const text = startFailureText(error);
+    expect(text).toContain("등록");
+    expect(text).toContain("공용");
+    expect(text).toContain("표준 오류");
+    expect(text).not.toBe("앱을 시작하지 못했습니다.");
+  });
+
+  it("accepts no field next to the reason: the notice stays one fixed word", async () => {
+    const error = await start({
+      type: "failed",
+      reason: "site-registration-invalid",
+      codes: ["instance-id-reserved"],
+    }).catch((e: unknown) => e);
+    expect((error as Error).message).toBe("backend sent an unexpected message");
+  });
+});

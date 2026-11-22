@@ -1,7 +1,8 @@
 // The shell entry's command line in the production build (V01-T15), bundled in
 // place of shell-options.ts: the screens' origins only. The canonical DB is the
-// per-user data directory and the Connectors are the product's; any other
-// argument fails the start (parseArgs is strict), the closed side.
+// per-user data directory and the Connectors are the product's plus the registration's; any other
+// argument, `--scope-policy` included (the policy is the registration's, I05-R15), fails the start
+// (parseArgs is strict), the closed side.
 import { parseArgs } from "node:util";
 import type { ShellOptions } from "./shell-options.ts";
 
@@ -11,11 +12,7 @@ export function shellOptions(args?: string[]): ShellOptions {
     args,
     options: {
       origin: { type: "string", multiple: true, default: [] },
-      "scope-policy": { type: "string" },
     },
   });
-  return {
-    origins: values.origin,
-    ...(values["scope-policy"] === undefined ? {} : { scopePolicy: values["scope-policy"] }),
-  };
+  return { origins: values.origin };
 }

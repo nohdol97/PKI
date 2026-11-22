@@ -1,7 +1,7 @@
 // V01-R17 (spec "T17이 넘기는 것" 2): the backend's entries never pass bootBackend's
 // test-only replacements. The options stay in the production bundle (like `engine`
 // and `vectorIndex`), so what keeps the product's Providers and embedder bound is
-// that dev.ts and shell.ts hand bootBackend a literal object with neither key and
+// that dev.ts and shell-main.ts (the body of shell.ts) hand bootBackend a literal object with neither key and
 // nothing spread into it.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -38,7 +38,7 @@ function swapProblems(source: string): string[] {
 }
 
 describe("entries pass no swap option (V01-R17)", () => {
-  it.each(["dev.ts", "shell.ts"])("%s", (file) => {
+  it.each(["dev.ts", "shell-main.ts"])("%s", (file) => {
     const source = readFileSync(resolve(import.meta.dirname, file), "utf8");
     expect(swapProblems(source)).toEqual([]);
   });

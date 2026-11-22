@@ -25,7 +25,7 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname } from "node:path";
-import { MAX_INSTANCE_ID_LENGTH } from "@pki/contracts";
+import { CONNECTOR_KIND_PATTERN, MAX_INSTANCE_ID_LENGTH } from "@pki/contracts";
 import type { LedgerLineDraft } from "./derivatives.ts";
 import type { TombstoneReason } from "./tombstones.ts";
 
@@ -203,8 +203,7 @@ const isName = (v: unknown): v is string =>
 /** The keyed hash (HMAC-SHA-256, hex): exactly 64 hex digits. */
 const isHash = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
 /** A connector kind: the syntax the registered kinds all follow (the composition checks it is a known one). */
-const isKind = (v: unknown): v is string =>
-  typeof v === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(v);
+const isKind = (v: unknown): v is string => typeof v === "string" && CONNECTOR_KIND_PATTERN.test(v);
 /** A time a line may hold: one the entries would accept (`new Date` parses it). No line's content may stop a start. */
 const isTime = (v: unknown): v is string =>
   typeof v === "string" && v.length <= 64 && !Number.isNaN(new Date(v).getTime());

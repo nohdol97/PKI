@@ -119,6 +119,32 @@ describe("site-paths.refuse ①: scopePolicy site stops the start (I04-H2, R14)"
   }, 30_000);
 });
 
+describe("scope-policy: the name and the registration decide (I05-R15, I05-C13)", () => {
+  const mine: ScopePolicy = { ...defaultScopePolicy };
+
+  it("no name: the registration's policy, else the public default", () => {
+    expect(productScopePolicy(undefined, mine)).toBe(mine);
+    expect(productScopePolicy(undefined, undefined)).toBe(defaultScopePolicy);
+  });
+
+  it("`default`: the public default, whatever is registered", () => {
+    expect(productScopePolicy("default", mine)).toBe(defaultScopePolicy);
+    expect(productScopePolicy("default", undefined)).toBe(defaultScopePolicy);
+  });
+
+  it("`site`: the registration's policy; with none registered the start stops with the follow-up notice", () => {
+    expect(productScopePolicy("site", mine)).toBe(mine);
+    expect(() => productScopePolicy("site", undefined)).toThrow(ScopePolicyNotImplementedError);
+  });
+
+  it("any other name stops the start as an unknown name, a registered policy or not", () => {
+    for (const name of ["siet", "", "  ", "strict"]) {
+      expect(() => productScopePolicy(name, mine), name).toThrow(UnknownScopePolicyError);
+      expect(() => productScopePolicy(name, undefined), name).toThrow(UnknownScopePolicyError);
+    }
+  });
+});
+
 describe("the extract job kind has one name", () => {
   it("is the same in the backend and in the scope-drop kind's re-extraction (I04-R15)", () => {
     expect(EXTRACT_JOB_KIND).toBe(STORAGE_EXTRACT_JOB_KIND);
@@ -312,15 +338,12 @@ describe("scope.policy and scope.changed through the product's runner", () => {
 });
 
 describe("the shell's switch and the failure report (I04-H2 ①)", () => {
-  it("takes the policy name from --scope-policy in the source run and in the production build, and not from the environment", async () => {
+  it("takes the policy name from --scope-policy in the source run only (the production build refuses the switch: I05-R15), and not from the environment", async () => {
     const { shellOptions: source } = await import("./shell-options.ts");
     const { shellOptions: production } = await import("./shell-options.production.ts");
     expect(source(["--origin", "app://pki", "--scope-policy", "site"]).scopePolicy).toBe("site");
-    expect(production(["--origin", "app://pki", "--scope-policy", "site"])).toEqual({
-      origins: ["app://pki"],
-      scopePolicy: "site",
-    });
     expect(production(["--origin", "app://pki"])).toEqual({ origins: ["app://pki"] });
+    expect(() => production(["--origin", "app://pki", "--scope-policy", "site"])).toThrow();
   });
 
   it("reports a fixed class for each refused policy, and prints its notice", async () => {

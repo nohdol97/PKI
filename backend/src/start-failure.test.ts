@@ -2,7 +2,8 @@
 import { LedgerReapplyError } from "@pki/knowledge-engine";
 import { IdentityKeyMissingError, LedgerUnavailableError } from "@pki/storage";
 import { describe, expect, it } from "vitest";
-import { startFailureReport } from "./start-failure.ts";
+import { SiteRegistrationInvalidError } from "./site-registration.ts";
+import { startFailureLine, startFailureReport } from "./start-failure.ts";
 
 describe("start.identity-key-text: startFailureReport", () => {
   it("names the missing identity key and nothing of the error", () => {
@@ -26,6 +27,23 @@ describe("start.identity-key-text: startFailureReport", () => {
       type: "failed",
       reason: "ledger-unavailable",
     });
+  });
+  it("names a registration that stops the start by one fixed reason; the codes and counts go to the stderr line only (I05-R9)", () => {
+    const error = new SiteRegistrationInvalidError([
+      { code: "instance-kind-reserved", count: 2 },
+      { code: "instance-id-reserved", count: 1 },
+    ]);
+    expect(startFailureReport(error)).toEqual({
+      type: "failed",
+      reason: "site-registration-invalid",
+    });
+    expect(startFailureLine(error)).toBe(
+      "backend start failed: site-registration-invalid instance-kind-reserved=2 instance-id-reserved=1",
+    );
+    // the error's own message carries the same codes and counts, nothing the registration wrote
+    expect(error.message).toBe(
+      "site-registration-invalid instance-kind-reserved=2 instance-id-reserved=1",
+    );
   });
   it("is the bare failure for any other error or none", () => {
     expect(startFailureReport(new Error("/home/u/secret.db"))).toEqual({ type: "failed" });

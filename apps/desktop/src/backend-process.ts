@@ -54,7 +54,8 @@ export type StartFailureReason =
   | "scope-policy-invalid"
   | "adapter-unregistered"
   | "ledger-reapply-failed"
-  | "ledger-unavailable";
+  | "ledger-unavailable"
+  | "site-registration-invalid";
 
 /** A start the backend refused; `reason` is a fixed class it reported (I04-R7), never its message. */
 export class BackendStartError extends Error {
@@ -81,6 +82,7 @@ const FromBackend = z.discriminatedUnion("type", [
         "adapter-unregistered",
         "ledger-reapply-failed",
         "ledger-unavailable",
+        "site-registration-invalid",
       ])
       .optional(),
     line: z.int().positive().optional(),
