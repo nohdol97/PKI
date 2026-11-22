@@ -135,7 +135,8 @@ describe("lifecycle.transitions", () => {
       const listed = TABLE_R5.some(
         ([f, t, a, kinds]) => f === from && t === to && a === actor && kinds.includes(kind),
       );
-      const outcome = applyTransition(db, ref, actor, to);
+      // a policy's dispute needs its basis, the one input the table walk adds
+      const outcome = applyTransition(db, ref, actor, to, { basis: BASIS });
       if (from === to) {
         expect(outcome).toEqual({ status: "unchanged" });
       } else if (listed) {

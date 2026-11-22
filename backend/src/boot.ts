@@ -27,6 +27,7 @@ import {
   productEgress,
   productEngine,
   productEntries,
+  productUserDecisions,
   productImporter,
   productInstanceImporter,
   productProjectionPorts,
@@ -250,6 +251,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     }),
     entries,
     registry,
+    decisions: productUserDecisions(),
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),
     jobs: {
