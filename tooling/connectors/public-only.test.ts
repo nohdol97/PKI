@@ -38,7 +38,7 @@ afterEach(() => {
 function copyOfRepo(): string {
   const copy = mkdtempSync(join(tmpdir(), "pki-public-only-"));
   copies.push(copy);
-  for (const path of [...SCAN_ROOTS, ...EXTRA_FILES, "site"]) {
+  for (const path of [...SCAN_ROOTS, ...EXTRA_FILES, ...SITE_PLACEHOLDERS]) {
     if (existsSync(join(REPO, path)))
       cpSync(join(REPO, path), join(copy, path), { recursive: true });
   }

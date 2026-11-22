@@ -32,7 +32,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { join } from "node:path";
-import { applyConfiguredScopes, type ConnectorScopes } from "./connector-scopes.ts";
+import { applyConfiguredScopes, NO_SCOPES, type ConnectorScopes } from "./connector-scopes.ts";
 import { LEDGER_HISTORY_SETTING, readLedgerHistory, type HistoryName } from "./ledger-history.ts";
 import { requestProjectionRebuild } from "./projection-jobs.ts";
 
@@ -169,7 +169,7 @@ export function reapplyAtStart(
     afterReconcile: (d) => (ledger ? healFromDatabase(d, ledger) : { healed: 0, unwritable: 0 }),
   })(db);
   // an instance the re-apply registered gets the scope the deployment configured, like every other path (I01-R15)
-  applyConfiguredScopes(db, scopes);
+  applyConfiguredScopes(db, scopes ?? NO_SCOPES);
   recordHistory(db, report, new Date(now).toISOString());
   if (needsRebuild(report)) {
     for (const target of [ENGINE_KIND, VECTOR_KIND]) {

@@ -10,6 +10,7 @@ import { CONNECTOR_KIND_PATTERN, MAX_INSTANCE_ID_LENGTH, type Connector } from "
 import { log, SCOPE_CLASSES, type ScopeGrading } from "@pki/providers";
 import type { ScopePolicy } from "@pki/storage";
 import { productConnectors, type ConnectorSet } from "./composition.ts";
+import { bindConnectorScopes } from "./connector-scopes.ts";
 import type { ConnectorFactory, ConnectorInstanceConfig } from "./connectors.ts";
 import {
   isPublicInstanceId,
@@ -27,6 +28,12 @@ export interface SiteRegistration {
   readonly scopeGrading?: ScopeGrading;
   /** The access scope policy (S21); default the public one. */
   readonly scopePolicy?: ScopePolicy;
+  /**
+   * The fork's range file, imported statically (I07-R1): instance id -> scope
+   * values, or null. Not typed narrowly on purpose; it is read and checked when used (I07-R3).
+   * None: every instance's configured scope is unknown.
+   */
+  readonly connectorScopes?: unknown;
 }
 
 /** The public repository's registration: nothing. */
@@ -43,7 +50,9 @@ export type SiteRegistrationCode =
   | "instance-id-reserved"
   | "kind-factory-threw"
   | "kind-manifest-mismatch"
-  | "scope-grading-invalid";
+  | "scope-grading-invalid"
+  | "connector-scopes-field-invalid"
+  | "connector-scopes-entry-invalid";
 
 /** The violations that leave their item out and let the start go on (counted in the log). */
 const DROPPED_CODES = [
@@ -164,7 +173,8 @@ export function mergeSiteRegistration(
 /**
  * The check a fork's `registration.test.ts` runs (I05-R9): the codes found, one per occurrence, and
  * an empty list for a registration that is fine. Besides the structure it asks each registered kind's
- * function once, and the mapping its few questions. `base` default is the product's own set.
+ * function once, and the mapping its few questions. The scopes value gives `connector-scopes-field-invalid` when it is not an object and
+ * `connector-scopes-entry-invalid` once per registration when one or more entries are not well-formed. `base` default is the product's own set.
  */
 export function checkSiteRegistration(
   site: SiteRegistration,
@@ -190,6 +200,10 @@ export function checkSiteRegistration(
   if (site.scopeGrading && !scopeGradingValid(site.scopeGrading)) {
     violations.push("scope-grading-invalid");
   }
+  // check only (I07-R5): the start goes on on the closed side, the instance or the whole value unknown
+  const bound = bindConnectorScopes(site.connectorScopes);
+  if (bound.state === "invalid") violations.push("connector-scopes-field-invalid");
+  if (bound.rejected > 0) violations.push("connector-scopes-entry-invalid");
   return violations;
 }
 

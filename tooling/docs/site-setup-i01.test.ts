@@ -126,12 +126,12 @@ const NAMED_FACTS = [
   { item: "S08", token: "scopeGrading", file: "backend/src/site-registration.ts", holds: "readonly scopeGrading?: ScopeGrading;" },
   { item: "S08", token: "checkSiteRegistration", file: "backend/src/site-registration.ts", holds: "export function checkSiteRegistration(" },
   { item: "S08", token: "scope-grading-invalid", file: "backend/src/site-registration.ts", holds: '| "scope-grading-invalid"' },
-  { item: "S18", token: "connector-scopes.json", file: "backend/src/connector-scopes.ts", holds: '"../../site/config/connector-scopes.json"' },
   { item: "S18", token: "configured_scope", file: "storage/src/migrations.ts", holds: "ADD COLUMN configured_scope TEXT" },
   { item: "S18", token: "connector_instances", file: "storage/src/migrations.ts", holds: "CREATE TABLE connector_instances (" },
   { item: "S18", token: "connector-scopes-absent", file: "backend/src/connector-scopes.ts", holds: '"absent"' },
-  { item: "S18", token: "connector-scopes-unreadable", file: "backend/src/connector-scopes.ts", holds: '"unreadable"' },
   { item: "S18", token: "connector-scopes-invalid", file: "backend/src/connector-scopes.ts", holds: '"invalid"' },
+  { item: "S18", token: "connector-scopes-empty", file: "backend/src/connector-scopes.ts", holds: '"empty"' },
+  { item: "S18", token: "connector-scopes-bound", file: "backend/src/connector-scopes.ts", holds: '"bound"' },
   { item: "S18", token: "connector-scopes-rejected", file: "backend/src/boot.ts", holds: 'log("connector-scopes-rejected"' },
   { item: "S18", token: "connectorContract", file: "packages/testkit/src/connector.contract.ts", holds: "export function connectorContract(" },
   { item: "S18", token: "ConnectorRateLimitError", file: "packages/contracts/src/connector.ts", holds: "export class ConnectorRateLimitError" },
@@ -277,9 +277,14 @@ describe("docs.site-setup (I01): what S08 and S18 name exists", () => {
 });
 
 describe("docs.site-setup (I01): what S18 says is not built stays true", () => {
-  it("the build resource is read from the source tree by a URL relative to the module", () => {
-    const code = readFileSync(resolve(repoRoot, "backend/src/connector-scopes.ts"), "utf8");
-    expect(code).toContain('new URL(\n  "../../site/config/connector-scopes.json",\n  import.meta.url,\n)');
+  it("the log codes S18 names are the ones the code writes, and the retired one is gone (I07-R4)", () => {
+    const s18 = itemText(siteText, "S18");
+    expect(s18).not.toContain("connector-scopes-unreadable");
+    const boot = readFileSync(resolve(repoRoot, "backend/src/boot.ts"), "utf8");
+    expect(boot).toContain("`connector-scopes-${state}`");
+    expect(readFileSync(resolve(repoRoot, "backend/src/connector-scopes.ts"), "utf8")).not.toContain(
+      "unreadable",
+    );
   });
 
   it("S18's page-cap figure is the contract suite's constant", () => {

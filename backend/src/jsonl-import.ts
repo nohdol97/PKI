@@ -40,7 +40,7 @@ export type JsonlImporter = (text: string) => Promise<ImportJsonlResponse>;
 
 export interface ImportOptions extends Pick<
   SyncOptions,
-  "runner" | "projections" | "clock" | "entries"
+  "runner" | "projections" | "clock" | "entries" | "scopes"
 > {
   /** The JSONL Connector, chosen by the composition point (composition.ts). */
   createConnector: () => Connector;
@@ -80,6 +80,7 @@ async function importInstance(
         ...(options.projections ? { projections: options.projections } : {}),
         ...(options.clock ? { clock: options.clock } : {}),
         ...(options.entries ? { entries: options.entries } : {}),
+        ...(options.scopes ? { scopes: options.scopes } : {}),
         rescan: true,
         onRefused: (change, reason) => {
           const line = lineOf.get(externalIdOf(change)) as number;
