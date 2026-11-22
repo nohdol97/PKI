@@ -91,15 +91,13 @@ export class MemoryTabularSource implements ContractTabularSource<unknown> {
     const rowNumbers = [...new Set(cells.map((c) => c.row))].sort((a, b) => a - b);
     const inRow = (row: number) =>
       cells.filter((c) => c.row === row).sort((a, b) => a.column - b.column);
-    const headerRow = rowNumbers.find((row) => {
-      const header = inRow(row);
-      return (
-        header.length >= 2 &&
-        new Set(header.map((c) => processed(c.text))).size === header.length &&
-        header.every((c) => !isNumberText(c.text) && !isDateText(c.text))
-      );
-    });
-    if (headerRow === undefined) return { key: sheet, reason: "no-header" };
+    // The first row with two values is the only header candidate; if it fails, no header.
+    const headerRow = rowNumbers.find((row) => inRow(row).length >= 2);
+    const candidate = headerRow === undefined ? [] : inRow(headerRow);
+    const isHeader =
+      new Set(candidate.map((c) => processed(c.text))).size === candidate.length &&
+      candidate.every((c) => !isNumberText(c.text) && !isDateText(c.text));
+    if (headerRow === undefined || !isHeader) return { key: sheet, reason: "no-header" };
     const header = inRow(headerRow);
     const columns: ContractColumn[] = header.map((c) => ({
       index: c.column,

@@ -218,6 +218,33 @@ export function tabularContract<Db>(
       expect(reasonOf(run(fixtures[name]), "")).toBe("no-header");
     });
 
+    it.each([
+      [
+        "a duplicate name after processing, text rows below",
+        [
+          ["Amount", "amount"],
+          ["foo", "bar"],
+          ["1", "2"],
+        ],
+      ],
+      [
+        "a first row of numbers, text rows below",
+        [
+          ["1", "2"],
+          ["사과", "배"],
+        ],
+      ],
+      [
+        "a padded number in the first row, text rows below",
+        [
+          ["이름", " 42"],
+          ["가", "나"],
+        ],
+      ],
+    ] as const)("the first row with two values is the only header candidate: %s", (_what, rows) => {
+      expect(reasonOf(run(csvVersion(rows)), "")).toBe("no-header");
+    });
+
     it("is not a table with no data row", () => {
       expect(reasonOf(run(fixtures["table-csv-no-rows.csv"]), "")).toBe("no-rows");
     });

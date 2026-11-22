@@ -113,15 +113,16 @@ function tableOf(key: TableKey, rows: Map<number, Cell[]>, maxCells: number): Ta
   const ordered = [...rows.entries()]
     .sort(([a], [b]) => a - b)
     .map(([, cells]) => cells.sort((a, b) => a.column - b.column));
-  const headerAt = ordered.findIndex((cells) => {
-    if (cells.length < 2) return false;
-    const seen = new Set(cells.map((c) => normalizeForLinking(c.text)));
-    return (
-      seen.size === cells.length && cells.every((c) => !isNumberText(c.text) && !isDateText(c.text))
-    );
-  });
-  if (headerAt === -1) return { key, reason: "no-header" };
-  const header = ordered[headerAt] as Cell[];
+  // The first row with two values is the only candidate (S03-R5): rows above it with fewer
+  // are skipped, and if it is not a header the sheet is not a table.
+  const headerAt = ordered.findIndex((cells) => cells.length >= 2);
+  const candidate = ordered[headerAt];
+  const isHeader =
+    candidate !== undefined &&
+    new Set(candidate.map((c) => normalizeForLinking(c.text))).size === candidate.length &&
+    candidate.every((c) => !isNumberText(c.text) && !isDateText(c.text));
+  if (!isHeader) return { key, reason: "no-header" };
+  const header = candidate as Cell[];
   const columns: TableColumn[] = header.map((c) => ({
     index: c.column,
     name: normalizeForLinking(c.text),

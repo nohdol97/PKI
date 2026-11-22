@@ -9,6 +9,7 @@ import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import {
   MemoryTabularSource,
+  csvVersion,
   TABULAR_CONTRACT_FIXTURES,
   tabularContract,
   type StoredTableVersion,
@@ -94,6 +95,18 @@ describe("sqlTabularSource: what the stored version holds", () => {
         { maxCells: 1000 },
       );
       expect(read?.limitations).toEqual([]);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("skips a one-cell title but still judges only the next two-value row as the header", () => {
+    const h = openSql();
+    try {
+      const ref = h.store(csvVersion([["제목"], ["Amount", "amount"], ["foo", "bar"]]));
+      expect(h.source.read(h.db, ref, { maxCells: 1000 })?.tables).toEqual([
+        { key: "", reason: "no-header" },
+      ]);
     } finally {
       h.close();
     }
