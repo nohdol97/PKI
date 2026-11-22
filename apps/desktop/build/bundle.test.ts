@@ -194,6 +194,151 @@ describe("build check", () => {
   });
 });
 
+/** What the product's own test ids are not: a module that a test build or a source run keeps for itself. */
+const REFUSED_IN_ARTIFACT = (m: string) =>
+  m.startsWith("packages/testkit/") ||
+  /\.(test|e2e|setup|test-support)\.[cm]?[jt]sx?$/.test(m) ||
+  /(^|\/)e2e\//.test(m) ||
+  [
+    "backend/src/dev.ts",
+    "backend/src/adapters/fixture-connector.ts",
+    "backend/src/shell-options.ts",
+    "apps/desktop/src/layout.ts",
+  ].includes(m);
+
+describe("bundle: the public entry, named directly (I05-C14 ③, R16)", () => {
+  it("keeps no module of site/, of the example package or of the example collector", async () => {
+    const { modules } = await bundled("backend/src/shell.ts", "production");
+    expect(modules).toContain("backend/src/shell-main.ts");
+    expect(
+      modules.filter(
+        (m) =>
+          m.startsWith("site/") ||
+          m.startsWith("packages/site-example/") ||
+          m.startsWith("packages/connector-example/"),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("bundle: the example package's entry, as a fork's is (I05-C15, R17)", () => {
+  const ENTRY = "packages/site-example/src/shell.ts";
+
+  it("① keeps the registration and the example collector, ② no test file, testkit or source-run module, ④ no development or test code", async () => {
+    const { modules, code } = await bundled(ENTRY, "production");
+    expect(modules).toEqual(
+      expect.arrayContaining([
+        "packages/site-example/src/registration.ts",
+        "packages/site-example/src/shell.ts",
+        "packages/connector-example/src/adapters/example-connector.ts",
+        "backend/src/shell-main.ts",
+      ]),
+    );
+    expect(modules.filter(REFUSED_IN_ARTIFACT)).toEqual([]);
+    for (const marker of [...DEVELOPMENT_EXCEPTION_MARKERS, ...TEST_PICK_MARKERS, NAME]) {
+      expect(code, marker).not.toContain(marker);
+    }
+    expect(code).toContain("connector-example");
+    // the fork-shape proof of C20 ③ in process: the entry's bundle has no composition-package lookup
+    expect(code).not.toContain("site/composition");
+  });
+
+  it("applies the production swap: the options module of source runs is not in it, and the entry takes neither --scope-policy nor --fixtures", async () => {
+    const { modules, code } = await bundled(ENTRY, "production");
+    expect(modules).toContain("backend/src/shell-options.production.ts");
+    expect(modules).not.toContain("backend/src/shell-options.ts");
+    // the options the entry's argument parser knows: the origin only, no policy name and no test fixtures
+    expect(code).toMatch(/options: \{ origin: \{/);
+    expect(code).not.toMatch(/"scope-policy": \{/);
+    expect(code).not.toMatch(/fixtures: \{/);
+    for (const text of ["fixtureConnectors", "createFixtureConnector"]) {
+      expect(code, text).not.toContain(text);
+    }
+  });
+
+  it("③ fails when the registration reaches a test module", async () => {
+    const dir = join(REPO_ROOT, "apps/desktop/build/.bundle-test-registration");
+    mkdirSync(dir, { recursive: true });
+    try {
+      writeFileSync(
+        join(dir, "shell.ts"),
+        'import { registration } from "./registration.ts";\nconsole.log(registration);\n',
+      );
+      writeFileSync(
+        join(dir, "registration.ts"),
+        'import { notes } from "./registration.test.ts";\nexport const registration = notes;\n',
+      );
+      writeFileSync(join(dir, "registration.test.ts"), "export const notes = [];\n");
+      await expect(
+        bundle({
+          input: join(dir, "shell.ts"),
+          outFile: join(out, "refused-registration.mjs"),
+          buildKind: "production",
+        }),
+      ).rejects.toThrow(/registration\.test\.ts is a test-only module/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("bundle: a native module the bundle would take in silently (I05-C15 ⑤)", () => {
+  /** A fake package under a temporary node_modules, with the files `files` give it (never a real install). */
+  function nativeEntry(name: string, files: Record<string, string>): string {
+    const dir = mkdtempSync(join(out, "native-"));
+    const pkg = join(dir, "node_modules", name);
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({ name, version: "1.0.0", main: "index.js" }),
+    );
+    writeFileSync(join(pkg, "index.js"), "module.exports = { native: true };\n");
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(join(pkg, rel, ".."), { recursive: true });
+      writeFileSync(join(pkg, rel), text);
+    }
+    const entry = join(dir, "entry.ts");
+    writeFileSync(entry, `import value from ${JSON.stringify(name)};\nconsole.log(value);\n`);
+    return entry;
+  }
+
+  it.each([
+    ["a binding.gyp", { "binding.gyp": "{}" }],
+    ["a prebuilds/ folder", { "prebuilds/linux-x64/addon.bin": "x" }],
+    ["a .node file", { "lib/addon.node": "x" }],
+  ])("fails a bundle that reaches a package with %s", async (_what, files) => {
+    const entry = nativeEntry("fake-native", files);
+    await expect(
+      bundle({ input: entry, outFile: join(out, "native.mjs"), buildKind: "production" }),
+    ).rejects.toThrow(/fake-native is a native module/);
+  });
+
+  it("fails for a scoped package too", async () => {
+    const entry = nativeEntry("@fake/native", { "binding.gyp": "{}" });
+    await expect(
+      bundle({ input: entry, outFile: join(out, "native.mjs"), buildKind: "production" }),
+    ).rejects.toThrow(/@fake\/native is a native module/);
+  });
+
+  it("takes a package of plain files (positive control)", async () => {
+    const entry = nativeEntry("fake-plain", { "lib/helper.js": "module.exports = 1;\n" });
+    const file = join(out, "plain.mjs");
+    await bundle({ input: entry, outFile: file, buildKind: "production" });
+    expect(readFileSync(file, "utf8")).toContain("native: true");
+  });
+
+  it("does not refuse a name the runtime packages carry: those stay external and are copied by the build", async () => {
+    const entry = nativeEntry("better-sqlite3", {
+      "binding.gyp": "{}",
+      "build/Release/x.node": "x",
+    });
+    const file = join(out, "external.mjs");
+    await bundle({ input: entry, outFile: file, buildKind: "production" });
+    expect(readFileSync(file, "utf8")).toContain('"better-sqlite3"');
+    expect(readFileSync(file, "utf8")).not.toContain("native: true");
+  });
+});
+
 describe("runtime packages", () => {
   /** A pnpm-like store: each package's dependencies are its siblings. */
   function store() {

@@ -51,6 +51,8 @@ test("no bundle kept a test-only, development-only or source-run module", () => 
       (m) =>
         m.startsWith("packages/testkit/") ||
         m.startsWith("apps/desktop/e2e/") ||
+        // the public example of a fork's composition package is never part of the product (I05-R16, R20)
+        m.startsWith("packages/site-example/") ||
         /\.(test|e2e|setup|test-support)\.[cm]?[jt]sx?$/.test(m) ||
         /(^|\/)e2e\//.test(m) ||
         [
@@ -62,6 +64,15 @@ test("no bundle kept a test-only, development-only or source-run module", () => 
         ].includes(m),
     );
   expect(refused).toEqual([]);
+});
+
+test("no bundle carries the lookup of a composition package (I05-R2, C2)", () => {
+  // the entry is chosen at build time (backend-entry.ts); the production layout knows the bundled
+  // ./backend/shell.js alone. True in the public tree and in a fork-shaped one (I05-R25).
+  for (const bundle of Object.keys(report.bundles)) {
+    const text = readFileSync(join(APP_DIR, bundle), "utf8");
+    expect(text.includes("site/composition"), bundle).toBe(false);
+  }
 });
 
 test("neither bundle carries the development exception or the test build's pick", () => {

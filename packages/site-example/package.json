@@ -1,0 +1,17 @@
+{
+  "name": "@pki/site-example",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "site-check": "node src/site-check.ts"
+  },
+  "dependencies": {
+    "@pki/backend": "workspace:*",
+    "@pki/connector-example": "workspace:*"
+  },
+  "devDependencies": {
+    "@pki/contracts": "workspace:*",
+    "@pki/testkit": "workspace:*"
+  }
+}

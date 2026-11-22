@@ -26,6 +26,7 @@ Phase 1의 골격(V01: 화면, 로컬 API, Electron 쉘, 정본 저장, Provider
 - `pnpm --filter @pki/desktop build` — 프로덕션 빌드. 백엔드·화면·쉘을 배포 빌드로 묶어 Electron 앱 폴더 `apps/desktop/dist/app/`을 만든다(설치 파일은 만들지 않는다). 합성 목록이 낡았으면 실패한다. 네이티브 모듈은 빌드한 PC의 것만 들어가므로 Windows용은 Windows에서 빌드한다.
 - `python3 verification/v02-site-flow/run.py preflight --config <config.json>` — V02 배포처 검증 실행기(Windows 설치본과 실제 Provider 전용, 그 밖에서는 `배포처 후속`을 알리고 실패한다). 절차: [RUNBOOK](verification/v02-site-flow/RUNBOOK.md)
 - `pnpm --filter @pki/backend site-check <종류>` — 배포처 수집기(`site-mail`, `site-messenger`, `site-wiki`) 초기화 확인. 공용 저장소에서는 `미구현, 배포처 후속`을 알리고 실패한다
+- `pnpm --filter @pki/site-example site-check <종류>` — 배포처 포크의 조립 패키지(`site/composition`)가 갖는 `site-check`와 같은 모양의 예시. 예시 등록의 수집기 종류(`connector-example`)를 확인한다
 - `PKI_REAL_EMBEDDING_MODELS_DIR=<절대 경로> pnpm vitest run providers/src/adapters/embedding.roundtrip.test.ts` — 실제 bge-m3 모델로 embedding 왕복과 계약 테스트를 돈다(기본 `pnpm test`는 건너뛰고 네트워크를 쓰지 않는다). 처음 한 번 고정된 파일 약 586 MB를 내려받고, `PKI_REAL_EMBEDDING_PACK=<절대 경로>`를 주면 그 로컬 팩에서 가져온다
 - `pnpm --filter @pki/providers build:synthetic-manifest` — `fixtures/`·`eval/golden/sources/`·연결 시험 자료가 바뀐 뒤 합성 목록을 다시 만든다(어긋나면 `pnpm test`와 프로덕션 빌드가 실패한다)
 - `pnpm --filter @pki/providers check:synthetic-manifest` — 합성 목록이 최신인지 확인만 한다
