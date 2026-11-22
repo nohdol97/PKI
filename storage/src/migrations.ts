@@ -712,9 +712,9 @@ const v18: Migration = (db) =>
     );
   `);
 
-// Schema v19 (I01-T06, I01-R15): the scope the deployment configured for an instance, read
-// from `site/config/connector-scopes.json` at start. NULL is "unknown" (the public default:
-// the file is not shipped), otherwise a JSON array of strings. The Broker compares an
+// Schema v19 (I01-T06, I01-R15): the scope the deployment configured for an instance, copied
+// from the site registration's `connectorScopes` at start. NULL is "unknown" (the public default:
+// the registration carries none), otherwise a JSON array of strings. The Broker compares an
 // imported (claimed) scope with it. It is a column of an operational table, not a
 // derivative, and no API route returns it. The version number is the next free one:
 // whichever of two tasks adding a migration merges later renumbers (`v19` and its line in
@@ -815,6 +815,145 @@ const v20: Migration = (db) =>
     CREATE INDEX insight_user_inputs_relation_row ON insight_user_inputs (relation_id);
   `);
 
+// Schema v21 (S01-T06, S01-R18, R20, R22): the type-definition registry (ontology elements).
+// - `ontology_elements`: one row per item type, fact kind or relation type: the name (an identifier,
+//   no text), its rule as JSON of the kind's fixed shape, its status (the same five) and its edition
+//   (1 when it is added, +1 for every applied rule change or retirement). A change to the table
+//   raises the knowledge revision (R18).
+// - `ontology_basis` (the lineage, R20): the source versions a candidate was proposed from, as numbers
+//   (no foreign key, as in a history line); a verified element keeps its rows and is read as having
+//   none, and the row goes with its source (R22).
+// - `ontology_history` (R6): one line per creation, transition or rule change, numbers and codes
+//   only: the before and after edition, never a name, rule or text. As in v20 it cannot be updated,
+//   and a line is deleted only with its element (the cascade passes: the parent is gone by then).
+// - An element's name and kind never change (a rename would skip every R19 check).
+// - The gate: status, rule and edition change only when the newest history line says that very
+//   change, and a rule changes only together with its edition. An INSERT is not blocked.
+// - The seed (R18): what the code constants held (Project, System, target_date, completion_date,
+//   DEPENDS_ON) and R4's (Concept, definition, alias.*), all verified, edition 1, with no history line
+//   (as rows before v20 have none, R6). The revision triggers are made after the seed, so a database
+//   that is upgraded does not see its knowledge revision move.
+// The version number is the next free one: whichever of two tasks adding a migration merges later
+// renumbers (`v21` and its line in `migrations`).
+const ITEM_TYPES = ["Project", "System", "Concept"] as const;
+const ONTOLOGY_SEED: readonly (readonly [string, string, object])[] = [
+  ...ITEM_TYPES.map((name) => ["item-type", name, { elementKind: "item-type" }] as const),
+  ...["target_date", "completion_date"].map(
+    (name) =>
+      [
+        "fact-kind",
+        name,
+        {
+          elementKind: "fact-kind",
+          itemTypes: ["Project", "System"],
+          valueType: "date",
+          cardinality: "one",
+        },
+      ] as const,
+  ),
+  [
+    "fact-kind",
+    "definition",
+    { elementKind: "fact-kind", itemTypes: ["Concept"], valueType: "text", cardinality: "many" },
+  ],
+  ...["alias.synonym", "alias.abbreviation", "alias.translation"].map(
+    (name) =>
+      [
+        "fact-kind",
+        name,
+        {
+          elementKind: "fact-kind",
+          itemTypes: ["Concept", "Project", "System"],
+          valueType: "surface-form",
+          cardinality: "many",
+        },
+      ] as const,
+  ),
+  [
+    "relation-type",
+    "DEPENDS_ON",
+    {
+      elementKind: "relation-type",
+      subjectTypes: ["Project", "System"],
+      objectTypes: ["Project", "System"],
+      symmetric: false,
+    },
+  ],
+];
+const v21: Migration = (db) => {
+  db.exec(`
+    CREATE TABLE ontology_elements (
+      id INTEGER PRIMARY KEY,
+      element_kind TEXT NOT NULL CHECK (element_kind IN ('item-type', 'fact-kind', 'relation-type')),
+      name TEXT NOT NULL CHECK (name GLOB '[A-Za-z]*' AND name NOT GLOB '*[^A-Za-z0-9_.]*'
+        AND length(name) <= 40),
+      rule TEXT NOT NULL CHECK (json_valid(rule) AND json_type(rule) = 'object'),
+      status TEXT NOT NULL CHECK (status IN (${STATUS})),
+      edition INTEGER NOT NULL CHECK (typeof(edition) = 'integer' AND edition >= 1),
+      UNIQUE (element_kind, name)
+    );
+    CREATE TABLE ontology_basis (
+      element_id INTEGER NOT NULL REFERENCES ontology_elements (id) ON DELETE CASCADE,
+      source_id INTEGER NOT NULL,
+      version INTEGER NOT NULL CHECK (typeof(version) = 'integer' AND version >= 1),
+      PRIMARY KEY (element_id, source_id, version)
+    ) WITHOUT ROWID;
+    CREATE INDEX ontology_basis_source ON ontology_basis (source_id, version);
+    CREATE TABLE ontology_history (
+      element_id INTEGER NOT NULL REFERENCES ontology_elements (id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL CHECK (seq >= 1),
+      at TEXT NOT NULL,
+      actor TEXT NOT NULL CHECK (actor IN ('user', 'extraction', 'propagation', 'policy')),
+      action TEXT NOT NULL,
+      from_status TEXT CHECK (from_status IN (${STATUS})),
+      to_status TEXT NOT NULL CHECK (to_status IN (${STATUS})),
+      from_edition INTEGER,
+      to_edition INTEGER NOT NULL CHECK (to_edition >= 1),
+      reason TEXT,
+      basis_source_id INTEGER,
+      basis_version INTEGER,
+      batch INTEGER,
+      reverts_seq INTEGER,
+      PRIMARY KEY (element_id, seq),
+      CHECK ((basis_source_id IS NULL) = (basis_version IS NULL))
+    ) WITHOUT ROWID;
+    CREATE TRIGGER ontology_history_no_update BEFORE UPDATE ON ontology_history
+    BEGIN SELECT RAISE(ABORT, 'history lines are immutable'); END;
+    CREATE TRIGGER ontology_history_no_delete BEFORE DELETE ON ontology_history
+    WHEN EXISTS (SELECT 1 FROM ontology_elements WHERE id = old.element_id)
+    BEGIN SELECT RAISE(ABORT, 'history lines are deleted only with their row'); END;
+    CREATE TRIGGER ontology_elements_lifecycle_gate
+    BEFORE UPDATE OF status, rule, edition ON ontology_elements
+    WHEN (new.status IS NOT old.status OR new.rule IS NOT old.rule OR new.edition IS NOT old.edition)
+      AND ((new.rule IS NOT old.rule AND new.edition IS old.edition)
+        OR NOT EXISTS (
+          SELECT 1 FROM ontology_history h
+          WHERE h.element_id = old.id
+            AND h.seq = (SELECT max(seq) FROM ontology_history WHERE element_id = old.id)
+            AND h.from_status = old.status AND h.to_status = new.status
+            AND h.from_edition = old.edition AND h.to_edition = new.edition))
+    BEGIN SELECT RAISE(ABORT, 'status, rule and edition change only through the ontology gate'); END;
+    CREATE TRIGGER ontology_elements_identity_fixed BEFORE UPDATE OF name, element_kind ON ontology_elements
+    BEGIN SELECT RAISE(ABORT, 'an element keeps its name and kind'); END;
+  `);
+  for (const [elementKind, name, rule] of ONTOLOGY_SEED) {
+    db.run(
+      "INSERT INTO ontology_elements (element_kind, name, rule, status, edition) VALUES (?, ?, ?, 'verified', 1)",
+      [elementKind, name, JSON.stringify(rule)],
+    );
+  }
+  db.exec(
+    ["INSERT", "UPDATE", "DELETE"]
+      .map(
+        (event) => `
+    CREATE TRIGGER ontology_elements_revision_${event.toLowerCase()} AFTER ${event} ON ontology_elements BEGIN
+      UPDATE revisions SET knowledge_revision = knowledge_revision + 1;
+    END;`,
+      )
+      .join(""),
+  );
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -837,6 +976,7 @@ export const migrations: readonly Migration[] = [
   v18,
   v19,
   v20,
+  v21,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

@@ -60,6 +60,16 @@ const CSV = "이름,수량,비고\n사과,3,😀\n배,5,\n";
 const CSV_RAGGED = "a,b,c\nd,e\nf,g,h,i\n";
 const CSV_EUCKR = "이름,수량\n똠,1\n";
 
+// Table fixtures (S03-T02): the inputs the TabularSource contract reads after they are
+// normalized. "table-" files are not about normalizing; they are about being read as tables.
+const TABLE_CSV_BLANK_CELLS = "이름,수량,비고\n사과,3,😀\n배,,메모\n,,\n귤,7,\n감,2,,초과\n";
+const TABLE_CSV_TITLE_ABOVE = "분기 보고\n이름,수량\n사과,3\n배,5\n";
+const TABLE_CSV_NUMBER_FIRST_ROW = "1,2,3\n4,5,6\n";
+const TABLE_CSV_PADDED_NUMBER_FIRST_ROW = "이름, 42\n사과,3\n";
+const TABLE_CSV_DATE_FIRST_ROW = "구분,2024-01-31\n사과,3\n";
+const TABLE_CSV_DUPLICATE_HEADER = "Amount,amount\n1,2\n3,4\n";
+const TABLE_CSV_NO_ROWS = "이름,수량\n,\n";
+
 const JSON_TEXT = '{\n  "이름": "합성 문서",\n  "목록": [1, 2, 3],\n  "이모지": "😀"\n}\n';
 
 const NOT_XML = "이것은 XML이 아니다 <<<";
@@ -98,6 +108,13 @@ export function generateFixtures(): Map<string, Uint8Array> {
     ["limit-csv-ragged.csv", enc(CSV_RAGGED)],
     ["limit-csv-euckr.csv", cp949(CSV_EUCKR)],
     ["corrupt-csv-unclosed-quote.csv", enc('a,"b\nc,d\n')],
+    ["table-csv-blank-cells.csv", enc(TABLE_CSV_BLANK_CELLS)],
+    ["table-csv-title-above.csv", enc(TABLE_CSV_TITLE_ABOVE)],
+    ["table-csv-number-first-row.csv", enc(TABLE_CSV_NUMBER_FIRST_ROW)],
+    ["table-csv-padded-number-first-row.csv", enc(TABLE_CSV_PADDED_NUMBER_FIRST_ROW)],
+    ["table-csv-date-first-row.csv", enc(TABLE_CSV_DATE_FIRST_ROW)],
+    ["table-csv-duplicate-header.csv", enc(TABLE_CSV_DUPLICATE_HEADER)],
+    ["table-csv-no-rows.csv", enc(TABLE_CSV_NO_ROWS)],
     ["normal-json.json", enc(JSON_TEXT)],
     ["corrupt-json-invalid.json", enc('{"a": [1, 2,}\n')],
     // PDF
@@ -185,6 +202,51 @@ export function generateFixtures(): Map<string, Uint8Array> {
             merges: ["A2:B2"],
           },
           { name: "숨김", rows: [["숨긴 시트의 글"]], hidden: true },
+        ],
+      }),
+    ],
+    [
+      "table-xlsx-two-sheets.xlsx",
+      buildXlsx({
+        sheets: [
+          {
+            name: "매출",
+            rows: [
+              ["월간 매출 😀"],
+              ["월", "금액", "메모"],
+              ["1월", 1000, null],
+              ["2월", 2000.5, "한글 😀 뒤"],
+            ],
+          },
+          {
+            name: "재고",
+            rows: [
+              ["품목", "수량"],
+              ["사과", 3],
+            ],
+          },
+        ],
+      }),
+    ],
+    [
+      "table-xlsx-hidden-sheet.xlsx",
+      buildXlsx({
+        sheets: [
+          {
+            name: "공개",
+            rows: [
+              ["이름", "값"],
+              ["가", 1],
+            ],
+          },
+          {
+            name: "숨김",
+            rows: [
+              ["코드", "설명"],
+              ["x", "y"],
+            ],
+            hidden: true,
+          },
         ],
       }),
     ],

@@ -12,6 +12,9 @@
       "path": "../packages/contracts"
     },
     {
+      "path": "../packages/document-normalize"
+    },
+    {
       "path": "../packages/testkit"
     },
     {

@@ -7,10 +7,13 @@
 // development exception and the test build's pick (artifact.contents).
 // Source-run modules are bundled as their production pairs (REPLACEMENTS), and a
 // test-only module reached by the bundle fails the build (forbiddenReason), named
-// by path, not only by the `*.test`/`*.e2e` file-name rule.
+// by path, not only by the `*.test`/`*.e2e` file-name rule. A package under node_modules that is
+// native code (a binding.gyp, a prebuilds/ folder or a .node file) fails the build too: it would
+// otherwise be bundled without its binary and fall silently to whatever code is left (I05-R17).
 import { rolldown, type Plugin } from "rolldown";
+import { existsSync, readdirSync } from "node:fs";
 import { builtinModules } from "node:module";
-import { relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 
 export const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 
@@ -74,6 +77,47 @@ export function forbiddenReason(id: string): string | undefined {
   return undefined;
 }
 
+/** The package a file under node_modules belongs to: its folder and name (`name` or `@scope/name`). */
+function installedPackage(id: string): { dir: string; name: string } | undefined {
+  const parts = id.split(sep);
+  const at = parts.lastIndexOf("node_modules");
+  if (at < 0) return undefined;
+  const length = parts[at + 1]?.startsWith("@") ? 2 : 1;
+  const names = parts.slice(at + 1, at + 1 + length);
+  if (names.length < length) return undefined;
+  return { dir: parts.slice(0, at + 1 + length).join(sep), name: names.join("/") };
+}
+
+/** A `.node` file anywhere in the package's own folder (a nested node_modules is another package). */
+function holdsNodeFile(dir: string): boolean {
+  return readdirSync(dir, { withFileTypes: true }).some((entry) =>
+    entry.isDirectory()
+      ? entry.name !== "node_modules" && holdsNodeFile(join(dir, entry.name))
+      : entry.name.endsWith(".node"),
+  );
+}
+
+const nativeChecked = new Map<string, boolean>();
+/**
+ * Why the build refuses the installed module at `id` (an absolute path): its package is native code.
+ * The packages the build copies into the app folder (EXTERNAL_PACKAGES) never get here: they stay external.
+ */
+export function nativeReason(id: string): string | undefined {
+  const pkg = installedPackage(id);
+  if (pkg === undefined) return undefined;
+  let native = nativeChecked.get(pkg.dir);
+  if (native === undefined) {
+    native =
+      existsSync(join(pkg.dir, "binding.gyp")) ||
+      existsSync(join(pkg.dir, "prebuilds")) ||
+      holdsNodeFile(pkg.dir);
+    nativeChecked.set(pkg.dir, native);
+  }
+  return native
+    ? `${pkg.name} is a native module (binding.gyp, prebuilds/ or a .node file)`
+    : undefined;
+}
+
 function productionModules(): Plugin {
   return {
     name: "pki-production-modules",
@@ -82,7 +126,7 @@ function productionModules(): Plugin {
       if (!resolved || resolved.external) return resolved;
       const pair = REPLACEMENTS[repoPath(resolved.id)];
       if (pair !== undefined) return resolve(REPO_ROOT, pair);
-      const why = forbiddenReason(resolved.id);
+      const why = forbiddenReason(resolved.id) ?? nativeReason(resolved.id);
       if (why !== undefined) this.error(why);
       return resolved;
     },

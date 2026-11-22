@@ -153,6 +153,30 @@ const EXPECTED: Record<string, Outcome> = {
     metadata: { sheetNames: ["계산", "숨김"] },
   },
   "corrupt-xlsx-broken-workbook.xlsx": { ok: false, code: "corrupt" },
+  "table-csv-blank-cells.csv": {
+    ok: true,
+    blocks: 13,
+    encoding: utf8,
+    limitations: [{ code: "csv.ragged-rows", count: 1 }],
+  },
+  "table-csv-title-above.csv": {
+    ok: true,
+    blocks: 7,
+    encoding: utf8,
+    limitations: [{ code: "csv.ragged-rows", count: 3 }],
+  },
+  "table-csv-number-first-row.csv": { ok: true, blocks: 6, encoding: utf8, limitations: [] },
+  "table-csv-padded-number-first-row.csv": { ok: true, blocks: 4, encoding: utf8, limitations: [] },
+  "table-csv-date-first-row.csv": { ok: true, blocks: 4, encoding: utf8, limitations: [] },
+  "table-csv-duplicate-header.csv": { ok: true, blocks: 6, encoding: utf8, limitations: [] },
+  "table-csv-no-rows.csv": { ok: true, blocks: 2, encoding: utf8, limitations: [] },
+  "table-xlsx-two-sheets.xlsx": { ok: true, blocks: 15, limitations: [] },
+  "table-xlsx-hidden-sheet.xlsx": {
+    ok: true,
+    blocks: 10,
+    limitations: [{ code: "xlsx.hidden-sheet" }],
+    metadata: { sheetNames: ["공개", "숨김"] },
+  },
 };
 
 /**

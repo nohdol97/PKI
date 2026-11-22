@@ -27,6 +27,7 @@ import {
   productEgress,
   productEngine,
   productEntries,
+  productUserDecisions,
   productImporter,
   productInstanceImporter,
   productProjectionPorts,
@@ -40,7 +41,7 @@ import {
   type ConnectorSet,
 } from "./composition.ts";
 import { systemClock } from "./clock.ts";
-import { applyConfiguredScopes, CONNECTOR_SCOPES } from "./connector-scopes.ts";
+import { applyConfiguredScopes, bindConnectorScopes } from "./connector-scopes.ts";
 import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
 import { createConnectorManager, type ConnectorManager } from "./connectors.ts";
 import { startCollectorUpkeep } from "./connector-sync-job.ts";
@@ -133,14 +134,13 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     options.connectors ?? productConnectors(),
   );
   const db = openCanonicalDb(options.dataDir);
-  // the instances' configured scopes follow the build's file before anything is graded (I01-R15)
-  applyConfiguredScopes(db);
-  // one fixed line per state, so a build that lost the file is told from one that has none to use
-  if (CONNECTOR_SCOPES.file !== "read") {
-    log(`connector-scopes-${CONNECTOR_SCOPES.file}`, { configured: 0 });
-  } else if (CONNECTOR_SCOPES.rejected > 0) {
-    log("connector-scopes-rejected", { count: CONNECTOR_SCOPES.rejected });
-  }
+  // the instances' configured scopes follow the registration's value before anything is graded (I01-R15);
+  // one table, handed to every place that copies it (I07-R2). It never stops the start: what is bad is unknown
+  const { scopes, state, configured, rejected } = bindConnectorScopes(site.connectorScopes);
+  applyConfiguredScopes(db, scopes);
+  // exactly one fixed line per state, counts only, so a build that lost the value is told from one that has none (I07-R4)
+  log(`connector-scopes-${state}`, { configured });
+  if (rejected > 0) log("connector-scopes-rejected", { count: rejected });
   await sweepCliRuns(options.dataDir); // what a crashed backend's CLI runs left
   // one egress instance for the consent API, the Broker (T08) and the Providers (T11)
   const egress = productEgress(db);
@@ -186,7 +186,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // an instance a line would register must be of a kind this build knows (a corrupt line cannot bind one to a bogus kind):
   // the merged kinds, a registered one included (I05-R12), and the import's
   const knownKinds = new Set([...Object.keys(kinds), JSONL_IMPORT_KIND]);
-  reapplyAtStart(db, registry, systemClock.now(), (kind) => knownKinds.has(kind));
+  reapplyAtStart(db, registry, systemClock.now(), (kind) => knownKinds.has(kind), scopes);
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")
@@ -213,6 +213,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     projections,
     clock,
     entries,
+    scopes,
   });
   late.manager = connectors;
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
@@ -239,16 +240,18 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     egress,
     secrets: options.secrets,
     calls,
-    importer: productImporter(db, { runner, projections, clock, entries, connectors }),
+    importer: productImporter(db, { runner, projections, clock, entries, connectors, scopes }),
     instanceImporter: productInstanceImporter(db, {
       runner,
       projections,
       clock,
       entries,
       connectors,
+      scopes,
     }),
     entries,
     registry,
+    decisions: productUserDecisions(),
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),
     jobs: {

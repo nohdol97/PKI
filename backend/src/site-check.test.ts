@@ -15,7 +15,7 @@ import {
   siteCheckGuidance,
   type SiteCheckIo,
 } from "./site-check-main.ts";
-import { publicSite } from "./site-registration.ts";
+import { publicSite, type SiteRegistration } from "./site-registration.ts";
 
 let root: string;
 beforeEach(() => void (root = mkdtempSync(join(tmpdir(), "pki-site-check-"))));
@@ -238,5 +238,101 @@ describe("the entry script", () => {
     const text = readFileSync(script, "utf8");
     expect(text).toContain('resolve(import.meta.dirname, "../..")');
     expect(text).toContain("process.argv.slice(2)");
+  });
+});
+
+describe("site-check --scopes (I07-R6, I07-C7, I07-H2 ①)", () => {
+  const SCOPE = "synthetic-scope-marker-ffff";
+  const ID = "synthetic-instance-marker-gggg";
+  const run = async (site: SiteRegistration, args: string[] = ["--scopes"]) => {
+    const { io, seen } = capture();
+    await runSiteCheck(site, args, io);
+    return seen;
+  };
+  const every = (seen: { stdout: string[]; stderr: string[] }) =>
+    [...seen.stdout, ...seen.stderr].join("\n");
+
+  it("no field (H2 ①: the empty registration): not implemented, points at S30, the exit is not zero", async () => {
+    for (const site of [publicSite, {}]) {
+      const seen = await run(site);
+      expect(seen.stdout).toEqual([]);
+      expect(seen.stderr).toHaveLength(1);
+      expect(seen.stderr[0]).toContain("미구현, 배포처 후속");
+      expect(seen.stderr[0]).toContain("S30");
+      expect(seen.code).toBe(1);
+    }
+  });
+
+  it("not an object, or an entry that is not well-formed: the state and the count, the exit is not zero", async () => {
+    const field = await run({ connectorScopes: [SCOPE] });
+    expect(field.stderr).toEqual([expect.stringContaining("connector-scopes-field-invalid")]);
+    expect(field.code).toBe(1);
+    const entries = await run({ connectorScopes: { [ID]: "x", b: [1], c: [SCOPE] } });
+    expect(entries.stderr).toEqual([expect.stringContaining("틀린 항목 2개")]);
+    expect(entries.stderr[0]).toContain("connector-scopes-entry-invalid");
+    expect(entries.code).toBe(1);
+  });
+
+  it("a sparse array entry is a refused entry: not zero", async () => {
+    // eslint-disable-next-line no-sparse-arrays
+    const seen = await run({ connectorScopes: { a: [, SCOPE], b: [SCOPE] } });
+    expect(seen.stderr).toEqual([expect.stringContaining("틀린 항목 1개")]);
+    expect(seen.code).toBe(1);
+  });
+
+  it("the example marker is still in the value: told, the exit is not zero (also next to another scope)", async () => {
+    for (const connectorScopes of [
+      { [ID]: ["pki-example-scope"] },
+      { [ID]: [SCOPE, "pki-example-scope"], other: [SCOPE] },
+    ]) {
+      const seen = await run({ connectorScopes });
+      expect(seen.stderr).toEqual([expect.stringContaining("예시 값이 그대로다")]);
+      expect(seen.code).toBe(1);
+    }
+  });
+
+  it("no entry with a scope (an empty object, all null): told, the exit is not zero", async () => {
+    for (const connectorScopes of [{}, { [ID]: null, b: null }]) {
+      const seen = await run({ connectorScopes });
+      expect(seen.stderr).toEqual([expect.stringContaining("범위가 있는 항목이 없다")]);
+      expect(seen.code).toBe(1);
+    }
+  });
+
+  it("otherwise: the number of entries and of scoped entries, the exit is zero (unset)", async () => {
+    const seen = await run({ connectorScopes: { [ID]: [SCOPE], b: null, c: [SCOPE, "x"] } });
+    expect(seen.stdout).toEqual(["--scopes: 항목 3개, 범위가 있는 항목 2개"]);
+    expect(seen.stderr).toEqual([]);
+    expect(seen.code).toBeUndefined();
+  });
+
+  it("no output of any row holds a scope value or an instance id", async () => {
+    for (const connectorScopes of [
+      [SCOPE],
+      { [ID]: "x", [SCOPE]: [SCOPE] },
+      { [ID]: ["pki-example-scope", SCOPE] },
+      { [ID]: null },
+      { [ID]: [SCOPE] },
+    ]) {
+      const text = every(await run({ connectorScopes }));
+      expect(text).not.toContain(SCOPE);
+      expect(text).not.toContain(ID);
+    }
+  });
+
+  it("without --scopes the kind cases are as before, and a kind named like the argument is no kind", async () => {
+    const seen = await run({ connectorScopes: { a: [SCOPE] } }, ["site-mail"]);
+    expect(seen.stderr).toEqual(["site-mail: 미구현, 배포처 후속"]);
+    expect(seen.code).toBe(1);
+    const usage = await run({}, ["scopes"]);
+    expect(usage.code).toBe(2);
+  });
+
+  it("the public command in a tree with a composition package still points at the fork's command first", async () => {
+    composition(JSON.stringify({ name: "@acme-site/composition" }));
+    const { io, seen } = capture();
+    await publicSiteCheck(root, ["--scopes"], io);
+    expect(seen.code).toBe(2);
+    expect(seen.stderr.join("\n")).toContain("@acme-site/composition");
   });
 });

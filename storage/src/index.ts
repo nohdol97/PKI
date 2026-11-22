@@ -203,6 +203,36 @@ export {
   type Refusal,
 } from "./semantic-lifecycle.ts";
 export {
+  listSemanticFacts,
+  listSemanticItems,
+  listSemanticRelations,
+  readSemanticHistory,
+  readSemanticState,
+  type SemanticFactView,
+  type SemanticHistoryLine,
+  type SemanticItemView,
+  type SemanticRelationView,
+  type SemanticRowView,
+} from "./semantic-view.ts";
+export { userDecisions, type UserAction, type UserDecisions } from "./semantic-user.ts";
+export {
+  applyOntologyChange,
+  checkOntologyChange,
+  listOntologyElements,
+  readOntologyElement,
+  verifiedRulesNaming,
+  type AutomatedActor,
+  type Cardinality,
+  type ElementKind,
+  type ElementRule,
+  type OntologyChange,
+  type OntologyCheck,
+  type OntologyOutcome,
+  type OntologyRefusal,
+  type StoredElement,
+  type ValueType,
+} from "./ontology.ts";
+export {
   findRelation,
   listEvidenceVersions,
   listFactsOfKind,

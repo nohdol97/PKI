@@ -76,6 +76,7 @@ describe("the registered projection kinds (I04-R1)", () => {
       ["fact", "knowledge", "canonical"],
       ["relation", "knowledge", "canonical"],
       ["scope-drop", "knowledge", "canonical"],
+      ["ontology", "knowledge", "canonical"],
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
       [ENGINE_KIND, "projection", "projection"],

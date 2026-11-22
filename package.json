@@ -13,7 +13,7 @@
   },
   "scripts": {
     "lint": "eslint . && prettier --check .",
-    "typecheck": "tsc -b",
+    "typecheck": "node tooling/workspace/typecheck.ts",
     "test": "vitest run",
     "e2e": "playwright test"
   },
