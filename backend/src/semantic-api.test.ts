@@ -2,9 +2,9 @@
 // approve, reject, dispute and undo over HTTP. A request passes the token, Host and Origin checks
 // and the body schema; a row that is absent, deleted or hidden by the read gate answers the same
 // `not-found` and changes nothing; a gate refusal is a code, never a text; a repeat is unchanged.
-// All data is synthetic. A `user-override`, `basis-required` or `value-exists` refusal cannot come
-// from the three actions of this task (the first two are the automated entry's, the third is T03's):
-// the gate's tests (storage/src/semantic-user.test.ts) hold them.
+// All data is synthetic. A `user-override` or `basis-required` refusal cannot come from the user's
+// actions (the automated entry's): the gate's tests (storage/src/semantic-user.test.ts) hold them.
+// S01-T03 adds the direct add and the value fix (`POST /api/semantic/correct`, `value-exists`).
 import { routes, type RouteName } from "@pki/contracts";
 import { createProductRegistry } from "@pki/knowledge-engine";
 import {
@@ -370,6 +370,12 @@ describe("validation and the request checks", () => {
       semanticHistory: { kind: "fact", id: w.fact },
       semanticDecide: { kind: "fact", id: w.fact, action: "approve" },
       semanticUndo: { kind: "fact", id: w.fact },
+      semanticCorrect: {
+        correction: {
+          action: "add",
+          entry: { kind: "fact", itemId: w.item, factKind: "owner", value: "합성" },
+        },
+      },
     };
     for (const [name, body] of Object.entries(bodies)) {
       for (const [header, value, status] of [
@@ -393,6 +399,14 @@ describe("validation and the request checks", () => {
     expect(db.all("SELECT status FROM facts WHERE id = ?", [w.fact])).toEqual([
       { status: "verified" },
     ]);
+    // the refused requests added nothing; the one with an allowed Origin adds the row
+    expect(db.all("SELECT 1 FROM facts WHERE kind = 'owner'")).toHaveLength(0);
+    const added = await call("semanticCorrect", bodies.semanticCorrect, {
+      ...valid,
+      origin: ORIGIN,
+    });
+    expect(added.status).toBe(200);
+    expect(db.all("SELECT 1 FROM facts WHERE kind = 'owner'")).toHaveLength(1);
   });
 
   it("does not answer a read route with POST or an action route with GET", async () => {
@@ -407,6 +421,11 @@ describe("validation and the request checks", () => {
     await start({ decisions: false });
     const res = await call("semanticDecide", { kind: "fact", id: w.fact, action: "approve" });
     expect(res).toEqual({ status: 404, body: { error: "not-found" } });
+    expect(
+      await call("semanticCorrect", {
+        correction: { action: "replace", id: w.fact, value: "2026-12-06" },
+      }),
+    ).toEqual({ status: 404, body: { error: "not-found" } });
     expect(db.all("SELECT status FROM facts WHERE id = ?", [w.fact])).toEqual([
       { status: "candidate" },
     ]);
@@ -551,5 +570,465 @@ describe("a row that is absent, deleted or hidden (S01-R22: no existence leak)",
     ]) {
       expect(leaks(res.body)).toEqual([]);
     }
+  });
+});
+
+describe("POST /api/semantic/correct: a direct add and a value fix (S01-T03, R7, R23)", () => {
+  const correct = (correction: unknown) => call("semanticCorrect", { correction });
+  const addFact = (itemId: number, value: string, factKind = "target_date") =>
+    correct({ action: "add", entry: { kind: "fact", itemId, factKind, value } });
+  const fixFact = (id: number, value: string) => correct({ action: "replace", id, value });
+  const parse = (res: { body: unknown }) => routes.semanticCorrect.response.parse(res.body);
+  const listed = async (itemId: number) =>
+    routes.semantic.response
+      .parse((await call("semantic")).body)
+      .items.find((i) => i.id === itemId);
+  const counts = () => ({
+    facts: db.all("SELECT count(*) AS n FROM facts")[0]?.n,
+    items: db.all("SELECT count(*) AS n FROM items")[0]?.n,
+    relations: db.all("SELECT count(*) AS n FROM relations")[0]?.n,
+    lines: db.all("SELECT count(*) AS n FROM fact_history")[0]?.n,
+  });
+
+  it("adds a fact the user wrote: verified, user-approved, listed as written and decided, with its creation line", async () => {
+    const w = world();
+    await start();
+    const res = await addFact(w.item, "  2026-12-24  ");
+    expect(res.status).toBe(200);
+    const body = parse(res);
+    expect(body).toMatchObject({
+      status: "applied",
+      seq: 1,
+      entry: { kind: "fact", status: "verified", epistemic: "user-approved" },
+    });
+    const id = body.entry?.id as number;
+    expect(db.all("SELECT value FROM facts WHERE id = ?", [id])).toEqual([{ value: "2026-12-24" }]); // trimmed
+    const row = (await listed(w.item))?.facts.find((f) => f.id === id);
+    expect(row).toMatchObject({
+      value: "2026-12-24",
+      status: "verified",
+      epistemic: "user-approved",
+      confidence: null,
+      userDecided: true,
+      userAuthored: true,
+      evidenceCount: 0,
+    });
+    const history = await call("semanticHistory", { kind: "fact", id });
+    expect(routes.semanticHistory.response.parse(history.body).lines).toEqual([
+      expect.objectContaining({
+        seq: 1,
+        actor: "user",
+        action: "created",
+        fromStatus: null,
+        toStatus: "verified",
+        toEpistemic: "user-approved",
+        batch: null,
+      }),
+    ]);
+    expect(leaks(history.body)).toEqual([]);
+  });
+
+  it("adds an item and a relation, and an undo of each deletes the row and answers removed", async () => {
+    const w = world();
+    await start();
+    const item = parse(
+      await correct({ action: "add", entry: { kind: "item", type: "Concept", name: "합성 개념" } }),
+    );
+    const itemId = item.entry?.id as number;
+    const relation = parse(
+      await correct({
+        action: "add",
+        entry: { kind: "relation", subjectId: w.item, type: "RELATES_TO", objectId: itemId },
+      }),
+    );
+    expect(relation).toMatchObject({ status: "applied", entry: { kind: "relation" } });
+    const relationId = relation.entry?.id as number;
+    expect((await listed(w.item))?.relations.map((r) => r.id)).toContain(relationId);
+    // the item has a relation hanging on it: its undo is refused, the relation's is not
+    expect((await call("semanticUndo", { kind: "item", id: itemId })).body).toEqual({
+      status: "refused",
+      reason: "not-latest",
+    });
+    const gone = await call("semanticUndo", { kind: "relation", id: relationId });
+    expect(routes.semanticUndo.response.parse(gone.body)).toEqual({ status: "removed" });
+    expect((await call("semanticUndo", { kind: "item", id: itemId })).body).toEqual({
+      status: "removed",
+    });
+    expect((await listed(w.item))?.relations.map((r) => r.id)).not.toContain(relationId);
+    expect(await listed(itemId)).toBeUndefined();
+    // a row that is gone is the one not-found
+    expect(await call("semanticUndo", { kind: "item", id: itemId })).toEqual({
+      status: 404,
+      body: { error: "not-found" },
+    });
+  });
+
+  it("fixes a candidate's value: the old row is rejected, the new one is the user's, and one undo takes both back", async () => {
+    const w = world();
+    await start();
+    const res = parse(await fixFact(w.fact, "2026-12-20"));
+    expect(res).toMatchObject({
+      status: "applied",
+      entry: { kind: "fact", status: "verified", epistemic: "user-approved" },
+      replaced: { kind: "fact", id: w.fact, status: "rejected", epistemic: "explicit" },
+    });
+    const fresh = res.entry?.id as number;
+    const item = await listed(w.item);
+    expect(item?.facts.map((f) => [f.id, f.status, f.userAuthored])).toEqual([
+      [w.fact, "rejected", false],
+      [fresh, "verified", true],
+    ]);
+    const lines = routes.semanticHistory.response.parse(
+      (await call("semanticHistory", { kind: "fact", id: w.fact })).body,
+    ).lines;
+    expect(lines.at(-1)).toMatchObject({ actor: "user", action: "replace", toStatus: "rejected" });
+    expect(lines.at(-1)?.batch).not.toBeNull();
+
+    const undone = await call("semanticUndo", { kind: "fact", id: w.fact });
+    expect(routes.semanticUndo.response.parse(undone.body)).toMatchObject({
+      status: "applied",
+      entry: { status: "candidate", epistemic: "explicit" },
+    });
+    expect((await listed(w.item))?.facts.map((f) => [f.id, f.status])).toEqual([
+      [w.fact, "candidate"],
+    ]);
+    expect((await call("semanticUndo", { kind: "fact", id: w.fact })).body).toEqual({
+      status: "refused",
+      reason: "nothing-to-undo",
+    });
+  });
+
+  it("stores a fixed value trimmed, as an added one", async () => {
+    const w = world();
+    await start();
+    const res = parse(await fixFact(w.fact, "  2026-12-20 \n"));
+    expect(db.all("SELECT value FROM facts WHERE id = ?", [res.entry?.id as number])).toEqual([
+      { value: "2026-12-20" },
+    ]);
+  });
+
+  it("fixes a verified fact: the old row is superseded; undone from the new row it answers removed and restores the old", async () => {
+    const w = world();
+    await start();
+    await call("semanticDecide", { kind: "fact", id: w.fact, action: "approve" });
+    const res = parse(await fixFact(w.fact, "2026-12-20"));
+    expect(res.replaced).toMatchObject({ status: "superseded", epistemic: "user-approved" });
+    const undone = await call("semanticUndo", { kind: "fact", id: res.entry?.id });
+    expect(undone.body).toEqual({ status: "removed" });
+    expect((await listed(w.item))?.facts).toEqual([
+      expect.objectContaining({ id: w.fact, status: "verified", epistemic: "user-approved" }),
+    ]);
+  });
+
+  it("refuses a fix of a fact that is already superseded or rejected, as a code, writing nothing", async () => {
+    const w = world();
+    await start();
+    await call("semanticDecide", { kind: "fact", id: w.fact, action: "reject" });
+    const before = counts();
+    const res = await fixFact(w.fact, "2026-12-20");
+    expect(res).toEqual({ status: 200, body: { status: "refused", reason: "invalid-transition" } });
+    expect(counts()).toEqual(before);
+  });
+
+  // the next step the refusal advertises, end to end
+  it.each([
+    ["candidate", async () => undefined],
+    [
+      "rejected",
+      async (w: { fact: number }) =>
+        void (await call("semanticDecide", { kind: "fact", id: w.fact, action: "reject" })),
+    ],
+    [
+      "disputed",
+      async (w: { fact: number }) => {
+        await call("semanticDecide", { kind: "fact", id: w.fact, action: "approve" });
+        await call("semanticDecide", { kind: "fact", id: w.fact, action: "dispute" });
+      },
+    ],
+    [
+      "superseded",
+      async (w: { fact: number; sourceId: number; version: number }) => {
+        // the propagation superseded it: a newer version no longer cites it
+        saveSourceRecord(db, "c", { externalId: "a", title: "제목 a", body: "다른 내용" });
+        expect(
+          automatedLifecycle.supersede(
+            db,
+            { kind: "fact", id: w.fact },
+            { sourceId: w.sourceId, version: 2 },
+          ).status,
+        ).toBe("applied");
+      },
+    ],
+  ] as const)(
+    "refuses an add and a fix of a value a %s fact has, naming it, and approving that id then undoing returns it",
+    async (status, prepare) => {
+      const w = world();
+      await start();
+      await prepare(w);
+      const before = counts();
+      const prior = db.all("SELECT status, epistemic FROM facts WHERE id = ?", [w.fact])[0];
+      expect(prior?.status).toBe(status);
+      const other = parse(await addFact(w.item, "2026-12-01")); // a row whose value could be fixed to it
+      const added = await addFact(w.item, VALUE);
+      expect(parse(added)).toEqual({
+        status: "refused",
+        reason: "value-exists",
+        existing: { kind: "fact", id: w.fact },
+      });
+      const fixed = await fixFact(other.entry?.id as number, VALUE);
+      expect(fixed.body).toEqual(added.body);
+      expect(counts()).toEqual({
+        ...before,
+        facts: (before.facts as number) + 1,
+        lines: (before.lines as number) + 1,
+      });
+      expect(leaks(added.body)).toEqual([]);
+
+      // approve it, then take the approval back
+      const approved = await call("semanticDecide", {
+        kind: "fact",
+        id: w.fact,
+        action: "approve",
+      });
+      expect(approved.body).toMatchObject({
+        status: status === "disputed" ? "applied" : "applied",
+        entry: { status: "verified", epistemic: "user-approved" },
+      });
+      await call("semanticUndo", { kind: "fact", id: w.fact });
+      expect(db.all("SELECT status, epistemic FROM facts WHERE id = ?", [w.fact])[0]).toEqual(
+        prior,
+      );
+    },
+  );
+
+  it("refuses a relation that exists, and an item with the same type and name, naming the row", async () => {
+    const w = world();
+    await start();
+    const relation = await correct({
+      action: "add",
+      entry: { kind: "relation", subjectId: w.item, type: "DEPENDS_ON", objectId: w.other },
+    });
+    expect(relation.body).toEqual({
+      status: "refused",
+      reason: "value-exists",
+      existing: { kind: "relation", id: w.relation },
+    });
+    const item = await correct({
+      action: "add",
+      entry: { kind: "item", type: "Project", name: NAME },
+    });
+    expect(item.body).toEqual({
+      status: "refused",
+      reason: "value-exists",
+      existing: { kind: "item", id: w.item },
+    });
+  });
+
+  const long = (n: number, unit = "가") => unit.repeat(n);
+  const bad: [string, unknown][] = [
+    ["an unknown action", { action: "delete", id: 1, value: "x" }],
+    ["no correction", undefined],
+    [
+      "a name that is no identifier",
+      { action: "add", entry: { kind: "fact", itemId: 1, factKind: "9lives", value: "x" } },
+    ],
+    [
+      "a kind with a space",
+      { action: "add", entry: { kind: "fact", itemId: 1, factKind: "a b", value: "x" } },
+    ],
+    [
+      "a kind of 41 characters",
+      { action: "add", entry: { kind: "fact", itemId: 1, factKind: long(41, "a"), value: "x" } },
+    ],
+    [
+      "an empty value",
+      { action: "add", entry: { kind: "fact", itemId: 1, factKind: "owner", value: "" } },
+    ],
+    [
+      "a blank value",
+      { action: "add", entry: { kind: "fact", itemId: 1, factKind: "owner", value: "   " } },
+    ],
+    [
+      "a value of 501 code points",
+      { action: "add", entry: { kind: "fact", itemId: 1, factKind: "owner", value: long(501) } },
+    ],
+    [
+      "a value of 501 emoji",
+      {
+        action: "add",
+        entry: { kind: "fact", itemId: 1, factKind: "owner", value: long(501, "😀") },
+      },
+    ],
+    ["a blank item name", { action: "add", entry: { kind: "item", type: "Concept", name: " " } }],
+    [
+      "an item id of zero",
+      { action: "add", entry: { kind: "fact", itemId: 0, factKind: "owner", value: "x" } },
+    ],
+    [
+      "a fractional end",
+      { action: "add", entry: { kind: "relation", subjectId: 1, type: "T", objectId: 1.5 } },
+    ],
+    [
+      "an extra key",
+      {
+        action: "add",
+        entry: { kind: "fact", itemId: 1, factKind: "owner", value: "x", status: "candidate" },
+      },
+    ],
+    [
+      "a status of the row",
+      { action: "add", entry: { kind: "item", type: "T", name: "n", status: "candidate" } },
+    ],
+    [
+      "a kind that is not a row",
+      { action: "add", entry: { kind: "ontology", type: "T", name: "n" } },
+    ],
+    ["a fix without an id", { action: "replace", value: "x" }],
+    ["a fix with an id of zero", { action: "replace", id: 0, value: "x" }],
+    ["a fix with a blank value", { action: "replace", id: 1, value: "" }],
+  ];
+  it.each(bad)(
+    "answers 400 to %s, with no text of the request, and changes nothing",
+    async (_name, correction) => {
+      world();
+      await start();
+      const before = counts();
+      const res = await call(
+        "semanticCorrect",
+        correction === undefined ? undefined : { correction },
+      );
+      expect(res).toEqual({ status: 400, body: { error: "bad-request" } });
+      expect(counts()).toEqual(before);
+      expect((await call("semanticCorrect", { correction, extra: 1 })).status).toBe(400);
+    },
+  );
+
+  it("takes a value of exactly 500 code points, emoji included, and stores it whole", async () => {
+    const w = world();
+    await start();
+    for (const unit of ["가", "😀"]) {
+      const res = parse(await addFact(w.item, long(500, unit), "definition"));
+      expect(res.status).toBe("applied");
+      expect(
+        db.all("SELECT length(value) AS n FROM facts WHERE id = ?", [res.entry?.id as number]),
+      ).toEqual([{ n: 500 }]);
+    }
+  });
+
+  it("holds a date kind to a real date, for an add and for a fix, and any other kind to text", async () => {
+    const w = world();
+    await start();
+    const before = counts();
+    for (const kind of ["target_date", "completion_date"]) {
+      for (const value of ["tomorrow", "2026-02-30", "2026-1-5", "2026-12-24T00:00"]) {
+        expect([kind, value, (await addFact(w.item, value, kind)).status]).toEqual([
+          kind,
+          value,
+          400,
+        ]);
+      }
+    }
+    expect((await fixFact(w.fact, "not a date")).status).toBe(400);
+    expect(counts()).toEqual(before);
+    expect((await addFact(w.item, "not a date", "owner")).status).toBe(200);
+    expect(parse(await addFact(w.item, "2026-02-28", "completion_date")).status).toBe("applied");
+  });
+
+  it("answers not-found, as for an item that does not exist, when the item, a relation end or the fact is hidden", async () => {
+    const open = world("open");
+    const hidden = world("hidden", SECRET);
+    const policy: ScopePolicy = {
+      ...defaultScopePolicy,
+      allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+    };
+    await start({
+      registry: createDerivativeRegistry({
+        kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+        policy,
+      }),
+    });
+    const NOT_FOUND = { status: 404, body: { error: "not-found" } };
+    const before = counts();
+    expect(await addFact(hidden.item, "2026-12-24")).toEqual(NOT_FOUND);
+    expect(await addFact(99_999, "2026-12-24")).toEqual(NOT_FOUND);
+    for (const [subjectId, objectId] of [
+      [hidden.item, open.item],
+      [open.item, hidden.item],
+      [open.item, 99_999],
+    ] as const) {
+      expect(
+        await correct({
+          action: "add",
+          entry: { kind: "relation", subjectId, type: "T", objectId },
+        }),
+      ).toEqual(NOT_FOUND);
+    }
+    expect(await fixFact(hidden.fact, "2026-12-24")).toEqual(NOT_FOUND);
+    expect(await fixFact(99_999, "2026-12-24")).toEqual(NOT_FOUND);
+    // not-found comes before the shape check: a bad date for a hidden fact is not a 400
+    expect(await fixFact(hidden.fact, "not a date")).toEqual(NOT_FOUND);
+    expect(counts()).toEqual(before);
+    // the open row is reachable
+    expect((await addFact(open.item, "2026-12-24")).status).toBe(200);
+  });
+
+  // an item shown over a hidden fact: the value that fact holds is not told by value-exists
+  it("answers not-found, not value-exists, for a value only a hidden row of the item has", async () => {
+    const open = world("open");
+    const secret = source("secret", SECRET);
+    const hiddenFact = saveFact(db, {
+      itemId: open.item,
+      kind: "owner",
+      value: "합성",
+      ...attrs,
+    }).id;
+    automatedLifecycle.created(db, { kind: "fact", id: hiddenFact }, "extraction", null);
+    addEvidence(db, {
+      target: { factId: hiddenFact },
+      sourceVersionId: secret.versionId,
+      start: 0,
+      end: 2,
+      quote: NAME.slice(0, 2),
+    });
+    const alone: ScopePolicy = {
+      ...defaultScopePolicy,
+      allows: (scopes) => !(scopes.length === 1 && scopes[0]?.includes("secret")),
+    };
+    await start({
+      registry: createDerivativeRegistry({
+        kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+        policy: alone,
+      }),
+    });
+    const before = counts();
+    expect(await addFact(open.item, "합성", "owner")).toEqual({
+      status: 404,
+      body: { error: "not-found" },
+    });
+    const other = parse(await addFact(open.item, "다른 값", "owner"));
+    expect(await fixFact(other.entry?.id as number, "합성")).toEqual({
+      status: 404,
+      body: { error: "not-found" },
+    });
+    expect(counts()).toEqual({
+      ...before,
+      facts: (before.facts as number) + 1,
+      lines: (before.lines as number) + 1,
+    });
+    // the shown row's value is told as before
+    expect((await addFact(open.item, VALUE)).body).toMatchObject({ reason: "value-exists" });
+  });
+
+  it("carries no fixture text in a refusal, a not-found or a validation error, and writes no text into a history line", async () => {
+    const w = world();
+    await start();
+    const refused = await addFact(w.item, VALUE);
+    const missing = await addFact(99_999, "x");
+    const invalid = await correct({ action: "replace", id: w.fact, value: "" });
+    const fixed = await fixFact(w.fact, "2026-12-21");
+    for (const res of [refused, missing, invalid, fixed]) expect(leaks(res.body)).toEqual([]);
+    const history = JSON.stringify(db.all("SELECT * FROM fact_history WHERE actor = 'user'"));
+    expect(history).not.toContain("2026-12-21");
+    expect(history).not.toContain(VALUE);
   });
 });
