@@ -398,6 +398,13 @@ flowchart LR
 9. **Broker 출처.** `BrokerRequest.origin`의 작업 출처는 `{ jobId, leaseToken }`이다(이름이 `lease`에서 바뀜). Broker는 작업이 `running`이고 `leaseToken`이 행의 토큰과 같을 때만 받고, 아니면 `origin-not-leased`(이름은 그대로)로 거부한다. 원본 닫기와 회수가 토큰을 올리므로 그 뒤 낡은 실행기의 호출도 거부된다.
 10. **트랜잭션 선택지.** `SqlDriver.transaction(fn, options?)`의 `options`는 `TransactionOptions` 객체이고 지금 항목은 `immediate` 하나다. I04-T10은 같은 객체에 `beforeCommit`을 더한다. 드라이버 계약 테스트에 `transaction.immediate`가 있다(두 번째 연결은 `busy_timeout = 0`이라 기다리지 않는다).
 
+**T02가 넘기는 것**. T02가 정한 것(잠정 표시가 없으면 확정)과 T03·T04·T08이 이어받는 결합 지점이다. 바꿀 때는 이 절과 `backend/src/schedule.test.ts`·`backend/src/clock.test.ts`를 함께 고친다.
+
+1. **시계.** `backend/src/clock.ts`의 `Clock`은 Broker의 시계 모양(`BrokerDeps["clock"]`에서 이름만 붙인 `BrokerClock`. `broker.ts`는 고치지 않았다)에 `monotonic()`을 더한 것이고, 기본값 `systemClock`은 `Date.now`, `setTimeout`, `performance.now`다. `Clock`은 그대로 Broker에 넘길 수 있다. 시간대는 시계에 넣지 않고 `systemTimeZone()`으로 점검마다 따로 읽는다(테스트는 계산 함수에 시간대를 직접 준다). 실행기·스케줄러에 시계를 꽂는 일은 T03·T08이다.
+2. **주기와 slot.** `backend/src/schedule.ts`의 `Period`는 `every-10-minutes`, `hourly`, `daily`(로컬 시각 `{ hour, minute }`), `weekly`(요일 0=일요일~6과 로컬 시각) 넷이다. 계산 함수는 모두 순수하며 시각(UTC 밀리초)과 IANA 시간대를 받는다: `slotAtOrBefore`, `nextSlotAfter`(언제나 엄밀히 뒤), `countSlots(from, to)`(양끝 포함), `dueSlots(nextDue, now)`(R20 ①②③: 놓친 수, 작업을 넣을 마지막 slot, 다음 예정). 범위 밖의 시각·요일과 알 수 없는 시간대는 `RangeError`다. 다음 예정이 slot 격자에 있지 않아 범위 안에 slot이 없으면(주기를 막 바꾼 경우) `slot`은 비고 다음 예정만 옮긴다. 일광 절약의 없는 시각은 그 전환 순간(뉴욕 3월 둘째 일요일의 02:30 → 03:00), 두 번 있는 시각은 앞의 것이다.
+3. **점검 B·C 단계.** `reconcileNextDue`가 "다음 예정이 지금 + 한 주기보다 뒤이거나 시간대가 바뀌었는가"를 한 번에 판정한다. 한 주기는 명목 길이(매일 24시간, 매주 7일)다. 시계 역행이 먼저다: 저장된 다음 예정이 지금 + 한 주기보다 뒤면 **지금 이상인 첫 slot**(지금과 같으면 곧바로 예정이 지난 것이 된다)으로 다시 잡는다. 이때는 시간대가 바뀌었어도 마지막 실행 slot을 보지 않는다(시계가 뒤로 가면 그 slot이 미래라 주기가 시계를 기다리며 멈추기 때문이며, 같은 slot의 두 번 실행은 `(주기, slot)` 키가 막는다). 다시 계산한 값이 저장된 값과 같으면(일광 절약이 끝나는 날 앞의 25시간 하루) `regressed`는 거짓이다. 역행이 아니고 매일·매주 주기의 시간대가 바뀌었으면 새 시간대에서 마지막 실행 slot + 주기의 절반 이상인 첫 slot이다(잠정. **한 번도 돌지 않은 주기는 저장된 다음 예정 − 한 주기를 마지막 실행으로 본다**). 10분·1시간 주기는 시간대가 바뀌어도 저장할 시간대만 바꾼다. 결과의 `zone`을 주기 행에 저장한다.
+4. **작업의 실행 시각.** `clampRunAt(runAt, now)`은 지금 + `BACKOFF_MAX_MS`(1시간)보다 뒤인 실행 시각을 그 값으로 당긴다. T04의 backoff 상한은 이 상수를 쓴다. 임대 기한(R5 ②)과 예산(R14)의 역행 보정, 시간 단절의 판정(점검 간격의 2배 초과 또는 음수)은 T02에 넣지 않았다(T03·T06·T08).
+
 ### 후속: 다른 문서에 필요한 고침 (이 spec에서는 고치지 않음)
 
 | 문서 | 고칠 것 | 맡는 작업 |
@@ -578,3 +585,4 @@ C1~C3은 이슈 #20의 문장 그대로다. H1·H2는 이 프로젝트가 배포
 | 2026-11-21 | 결과 표의 `StaleFenceError` 행을 R7과 맞춤, 임시 `commitDerived`의 `cause` 구분(`covered`·`not-latest`), `transaction`의 `immediate`와 I04의 `beforeCommit`이 함께 쓰이는 모양 | 결과 표, `commitDerived`의 모양, R4, I03-T01 | 통합 검토 3차 |
 | 2026-11-22 | "I03-T01이 넘기는 것" 추가: 작업 테이블 마이그레이션의 열과 중복 방지, 옮길 때 채운 값과 첫 시작의 보류 재평가(설정 `jobs.held-policy-version` 지움), 전이 함수와 끝난 시각, 등록·집기·heartbeat·원본 닫기의 모양, 결과는 T04 전까지 V02 뜻 그대로, Broker 출처 `{ jobId, leaseToken }`, `TransactionOptions` | 작업 분해(I03-T01이 넘기는 것) | I03-T01 구현 |
 | 2026-11-22 | I03-T01 검토 반영: R2의 옮길 때 임대 토큰을 0이 아니라 V02 값 그대로로 고침(토큰은 오르기만 함), `jobs.migration-v02-status` 기준을 맞춤, "I03-T01이 넘기는 것" 2항(원본 행이 없는 작업도 버리지 않음)·8항(`closeJob`의 즉시 잠금) | R2, 완료 기준, 작업 분해(I03-T01이 넘기는 것) | I03-T01 독립 검토 A F1·F5, B W1 |
+| 2026-11-22 | I03-T02 구현의 결합 지점("T02가 넘기는 것"): `Clock`과 `systemClock`·`systemTimeZone`, `Period`와 slot 계산 함수, 점검 B·C 단계를 한 함수로 하고 시계 역행을 시간대 변경보다 먼저 판정, 한 번도 돌지 않은 주기의 시간대 변경 기준(잠정), `clampRunAt`과 `BACKOFF_MAX_MS` | 작업 분해 | I03-T02 구현 |
