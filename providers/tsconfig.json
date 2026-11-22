@@ -6,7 +6,7 @@
     "emitDeclarationOnly": true,
     "outDir": "dist"
   },
-  "include": ["src", "src/**/*.json"],
+  "include": ["src", "src/**/*.json", "e2e"],
   "references": [
     {
       "path": "../packages/contracts"

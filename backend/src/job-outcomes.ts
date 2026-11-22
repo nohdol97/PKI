@@ -55,8 +55,25 @@ export function failure(code: string, run: RunFacts): JobClosing {
   return { status: "retry", reason: code, runAfter: run.now + backoffMs(run.attempts, code) };
 }
 
-/** The run of a result: `progressed` is asked only for a yield. */
-export type ClassifiedRun = RunFacts & { progressed: () => boolean };
+/**
+ * The run of a result: `progressed` is asked only for a yield, `budgetResumesAt`
+ * only for a spent window budget (the Broker's `budgetUsage().resetsAt`; none
+ * known gives the longest wait).
+ */
+export type ClassifiedRun = RunFacts & {
+  progressed: () => boolean;
+  budgetResumesAt?: () => number | null | undefined;
+};
+
+/** The block the context's wrapped Broker gives a run past its request budget (I03-R14). */
+export const JOB_BUDGET_EXHAUSTED = "job-budget-exhausted";
+
+/** A yield: it ran again later, its attempt unspent, only when the checkpoint moved. */
+function yielded(run: ClassifiedRun): JobClosing {
+  return run.progressed()
+    ? { status: "queued", runAfter: run.now + YIELD_DELAY_MS }
+    : failure("yield-no-progress", run);
+}
 
 /** The closing of a declared result; undefined for anything else. */
 function closing(result: JobResult, run: ClassifiedRun): JobClosing | undefined {
@@ -73,25 +90,31 @@ function closing(result: JobResult, run: ClassifiedRun): JobClosing | undefined 
     case "held":
       return { status: "held", reason: result.reason };
     case "yield":
-      return run.progressed()
-        ? { status: "queued", runAfter: run.now + YIELD_DELAY_MS }
-        : failure("yield-no-progress", run);
+      return yielded(run);
     case "fail":
       if (typeof result.retryable !== "boolean") return undefined;
       return result.retryable
         ? failure(result.code, run)
         : { status: "dead_letter", reason: result.code };
     case "blocked":
-      // the Broker made no call: the attempt is given back either way (I03-R11).
-      // Provisional: a spent budget waits the whole window; T06 asks budgetUsage()
+      // the Broker made no call: the attempt is given back either way (I03-R11)
+      if (result.reason === JOB_BUDGET_EXHAUSTED) return yielded(run); // a handler that did not yield itself
       return result.reason === "budget-exhausted"
         ? {
             status: "retry",
             reason: result.reason,
-            runAfter: run.now + BACKOFF_MAX_MS,
+            // when the oldest attempt leaves the window, due now at the earliest and one hour at the latest
+            runAfter: Math.min(
+              Math.max(run.budgetResumesAt?.() ?? Number.POSITIVE_INFINITY, run.now),
+              run.now + BACKOFF_MAX_MS,
+            ),
             refund: true,
           }
         : { status: "held", reason: result.reason };
+    case "cancelled":
+      // a cancel request closes the job cancelled whatever this says (closeJob, I03-R12);
+      // without one it is a failure to retry. Provisional: T07 may close it directly
+      return failure("cancelled", run);
     case "rejected":
       // a source gone is the fence's answer; any other rejection is the code's fault
       return result.reason === "missing-source"

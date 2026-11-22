@@ -3,8 +3,14 @@
 // record, so nothing else an entry carries reaches the DB, and a value that is not
 // one of the known codes is stored as a code saying so, never as given.
 import { DATA_CLASSES, PROVIDER_IDS, TASK_KINDS } from "@pki/contracts";
-import { insertProviderCall, type SqlDriver } from "@pki/storage";
-import type { CallOutcome, CallRecorder } from "./broker.ts";
+import {
+  finishProviderCall,
+  insertProviderCall,
+  interruptStartedCalls,
+  listAttemptTimes,
+  type SqlDriver,
+} from "@pki/storage";
+import type { CallOutcome, CallRecord, CallRecorder } from "./broker.ts";
 
 const OUTCOMES: ReadonlySet<CallOutcome> = new Set<CallOutcome>([
   "ok",
@@ -14,6 +20,9 @@ const OUTCOMES: ReadonlySet<CallOutcome> = new Set<CallOutcome>([
   "invalid-output",
   "blocked",
   "budget-exhausted",
+  "started",
+  "interrupted",
+  "cancelled",
 ]);
 const CODE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_CODE = 64;
@@ -31,21 +40,30 @@ export function createCallRecorder(
   db: SqlDriver,
   now: () => Date = () => new Date(),
 ): CallRecorder {
+  const write = (entry: CallRecord) =>
+    insertProviderCall(db, {
+      requestId: entry.requestId,
+      attempt: entry.attempt,
+      provider: known(PROVIDER_IDS, entry.providerId),
+      destination: entry.destination ?? null,
+      taskKind: known(TASK_KINDS, entry.taskKind),
+      classification: known(DATA_CLASSES, entry.classification),
+      policyVersion: entry.policyVersion ?? null,
+      outcome: known(OUTCOMES, entry.outcome),
+      reason: entry.reason === undefined ? null : reasonCode(entry.reason),
+      durationMs: entry.durationMs ?? null,
+      createdAt: now().toISOString(),
+    });
   return {
     record(entry) {
-      insertProviderCall(db, {
-        requestId: entry.requestId,
-        attempt: entry.attempt,
-        provider: known(PROVIDER_IDS, entry.providerId),
-        destination: entry.destination ?? null,
-        taskKind: known(TASK_KINDS, entry.taskKind),
-        classification: known(DATA_CLASSES, entry.classification),
-        policyVersion: entry.policyVersion ?? null,
-        outcome: known(OUTCOMES, entry.outcome),
-        reason: entry.reason === undefined ? null : reasonCode(entry.reason),
-        durationMs: entry.durationMs ?? null,
-        createdAt: now().toISOString(),
-      });
+      write(entry);
     },
+    begin(entry) {
+      const id = write({ ...entry, outcome: "started" });
+      return ({ outcome, durationMs }) =>
+        finishProviderCall(db, id, { outcome: known(OUTCOMES, outcome), durationMs });
+    },
+    attemptTimes: (afterMs) => listAttemptTimes(db, afterMs),
+    interruptStarted: () => interruptStartedCalls(db),
   };
 }

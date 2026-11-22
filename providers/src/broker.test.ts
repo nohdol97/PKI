@@ -53,7 +53,13 @@ function setup(options: { provider?: FakeProvider; deps?: Partial<BrokerDeps> } 
         return { run: true };
       },
     },
-    recorder: { record: (r) => void records.push(r) },
+    recorder: {
+      record: (r) => void records.push(r),
+      // history is written in two steps for a call that reaches the Provider; the tests read the whole row
+      begin: (entry) => (result) => void records.push({ ...entry, ...result }),
+      attemptTimes: () => [],
+      interruptStarted: () => 0,
+    },
     clock: { now: () => clock.t, sleep: async (ms) => void sleeps.push(ms) },
     ...options.deps,
   });

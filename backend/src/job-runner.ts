@@ -19,7 +19,7 @@
 // with the job and its lease token as origin, and the Broker judges the call
 // background and applies the run conditions (V01-T09). A call it did not run
 // comes back as the Broker's result and holds the job, its attempt unspent.
-import { BUILD_KIND } from "@pki/providers";
+import { BUILD_KIND, type Broker } from "@pki/providers";
 import {
   checkpointJob,
   closeJob,
@@ -38,6 +38,7 @@ import {
 } from "@pki/storage";
 import { randomUUID } from "node:crypto";
 import { systemClock, type Clock } from "./clock.ts";
+import { DEFAULT_MAX_REQUESTS, jobBroker, type JobBroker } from "./job-broker.ts";
 import { classifyResult, DEFAULT_RUN_TIMEOUT_MS, failure, type JobResult } from "./job-outcomes.ts";
 
 export type { JobResult } from "./job-outcomes.ts";
@@ -46,6 +47,11 @@ export type { JobResult } from "./job-outcomes.ts";
 export interface JobRunContext {
   /** Cut once the lease is lost, the run is over its time or a step met a closed job; pass it to the Broker. */
   signal: AbortSignal;
+  /**
+   * The only Broker a handler may call: it counts the run's requests (limit
+   * `kinds[kind].maxRequests`), blocks the one past it, and passes `signal` on.
+   */
+  broker: JobBroker;
   /** The checkpoint the job was claimed with: where a job claimed again goes on (I03-R8). */
   lastCheckpoint: Checkpoint | null;
   /**
@@ -70,6 +76,8 @@ export interface JobKindSettings {
   maxAttempts?: number;
   /** Default DEFAULT_RUN_TIMEOUT_MS (I03-R14). */
   runTimeoutMs?: number;
+  /** Broker requests one run may make, default DEFAULT_MAX_REQUESTS (I03-R14). */
+  maxRequests?: number;
   /** The fields its checkpoint may hold; none declared, no checkpoint (I03-R8). */
   checkpointFields?: readonly string[];
 }
@@ -94,6 +102,8 @@ export interface JobRunnerOptions {
   db: SqlDriver;
   /** Handlers by job kind; jobs of other kinds are left queued. */
   handlers: Readonly<Record<string, JobHandler>>;
+  /** The Broker the handlers call through their context (I03-R14); a runner of Broker-less kinds has none. */
+  broker?: Pick<Broker, "call" | "budgetUsage">;
   /** Attempt limit, run-time limit and checkpoint fields by kind. */
   kinds?: Readonly<Record<string, JobKindSettings>>;
   /** Default systemClock: `now()` gives every stored time, `monotonic()` times a run. */
@@ -280,6 +290,10 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     let closed: JobRun["status"] = "not-leased";
     const context: JobRunContext = {
       signal,
+      broker: jobBroker(options.broker, {
+        limit: kindSettings[job.kind]?.maxRequests ?? DEFAULT_MAX_REQUESTS,
+        signal,
+      }),
       lastCheckpoint: readCheckpoint(job),
       checkpoint(value, write) {
         const fields = kindSettings[job.kind]?.checkpointFields ?? [];
@@ -307,7 +321,8 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     // a yield counts as progress only when the job's checkpoint moved during this run
     const progressed = () => readJob(db, job.id)?.checkpoint !== job.checkpoint;
     try {
-      return close(classifyResult(result, { ...facts(), progressed }));
+      const budgetResumesAt = () => options.broker?.budgetUsage().resetsAt;
+      return close(classifyResult(result, { ...facts(), progressed, budgetResumesAt }));
     } catch (error) {
       // a database error (e.g. a locked file) leaves the job running for a rerun
       if (!(error instanceof JobWriteError)) throw error;

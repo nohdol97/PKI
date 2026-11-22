@@ -17,7 +17,17 @@ export interface Clock extends BrokerClock {
 
 export const systemClock: Clock = {
   now: () => Date.now(),
-  sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+  sleep: (ms, signal) =>
+    new Promise<void>((resolve) => {
+      if (signal?.aborted) return resolve();
+      const done = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      signal?.addEventListener("abort", done, { once: true }); // a cut signal ends the wait early
+    }),
   monotonic: () => performance.now(),
 };
 

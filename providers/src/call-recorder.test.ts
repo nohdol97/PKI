@@ -115,4 +115,42 @@ describe("createCallRecorder", () => {
       ["local-model", "local"],
     ]);
   });
+
+  it("begin writes a started row at once and the returned function fixes its result", () => {
+    const recorder = createCallRecorder(db, at);
+    const finish = recorder.begin({
+      ...base,
+      attempt: 1,
+      destination: "vendor:claude-code",
+      policyVersion: "pv-1",
+    });
+    expect(listProviderCalls(db)[0]).toMatchObject({
+      outcome: "started",
+      durationMs: null,
+      destination: "vendor:claude-code",
+    });
+    finish({ outcome: "cancelled", durationMs: 5 });
+    expect(listProviderCalls(db)[0]).toMatchObject({ outcome: "cancelled", durationMs: 5 });
+  });
+
+  it("interruptStarted fixes rows a dead process left, attemptTimes still counts them", () => {
+    const recorder = createCallRecorder(db, at);
+    recorder.begin({ ...base, attempt: 1, destination: "d", policyVersion: "p" });
+    recorder.record({ ...base, attempt: 2, outcome: "blocked", reason: "no-consent" });
+    expect(recorder.interruptStarted()).toBe(1);
+    expect(listProviderCalls(db).map((c) => c.outcome)).toEqual(["blocked", "interrupted"]);
+    expect(recorder.attemptTimes(at().getTime() - 1)).toEqual([at().getTime()]);
+  });
+
+  it("never stores an outcome it does not know as given", () => {
+    const recorder = createCallRecorder(db, at);
+    recorder.record({
+      ...base,
+      attempt: 1,
+      outcome: "SECRET" as never,
+      destination: "d",
+      policyVersion: "p",
+    });
+    expect(listProviderCalls(db)[0]?.outcome).toBe("unrecognized");
+  });
 });

@@ -10,6 +10,7 @@ import {
   EXTRACT_RELATION_TYPES,
   EXTRACT_SCHEMA_VERSION,
   TASKS,
+  type Broker,
   type EgressInput,
 } from "@pki/providers";
 import {
@@ -64,6 +65,7 @@ let provider: FakeProvider;
 let egressAsked: EgressInput[];
 let deny: string | undefined;
 let brokerRequests: unknown[];
+let recording: { call(raw: unknown): ReturnType<Broker["call"]> };
 let handler: ReturnType<typeof createExtractHandler>;
 
 function setUp(
@@ -86,17 +88,22 @@ function setUp(
       },
     },
     execution: { decide: () => ({ run: true }) },
-    recorder: { record: () => undefined },
+    recorder: {
+      record: () => undefined,
+      begin: () => () => undefined,
+      attemptTimes: () => [],
+      interruptStarted: () => 0,
+    },
     clock: { now: () => 0, sleep: async () => undefined },
   });
+  recording = {
+    call: (raw) => {
+      brokerRequests.push(structuredClone(raw));
+      return broker.call(raw);
+    },
+  };
   handler = createExtractHandler({
     db,
-    broker: {
-      call: (raw) => {
-        brokerRequests.push(structuredClone(raw));
-        return broker.call(raw);
-      },
-    },
     now: () => T0,
     ...(engine ? { engine, onEngineError: (error: unknown) => engineErrors.push(error) } : {}),
     ...(isEngineStale ? { isEngineStale } : {}),
@@ -147,7 +154,7 @@ async function runNext() {
   const job = leaseNextJob(db, { kinds: ["extract"], now: T0, leaseMs: 60_000 });
   const fence = { sourceId: job?.sourceId as number, fenceVersion: job?.fenceVersion as number };
   if (!job || !isFenceCurrent(db, fence)) throw new Error("expected a current job");
-  const result = await handler(job);
+  const result = await handler(job, { broker: recording });
   const closes = result.status === "succeeded" || result.status === "held";
   return { job, result, status: closes ? closeJob(db, job, result) : result.status };
 }

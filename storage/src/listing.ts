@@ -64,9 +64,13 @@ export interface ProviderCallRow {
   createdAt: string;
 }
 
-/** Appends one attempt to history; the columns hold no body, prompt, response or secret. */
-export function insertProviderCall(db: SqlDriver, row: ProviderCallRow): void {
-  db.run(
+/**
+ * Appends one attempt to history and returns its row ID; the columns hold no body,
+ * prompt, response or secret. An attempt about to reach a Provider is written with
+ * outcome "started" and fixed by `finishProviderCall` (I03-R14).
+ */
+export function insertProviderCall(db: SqlDriver, row: ProviderCallRow): number {
+  return db.run(
     `INSERT INTO provider_calls (request_id, attempt, provider, destination, task_kind,
        classification, policy_version, outcome, reason, duration_ms, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -83,5 +87,42 @@ export function insertProviderCall(db: SqlDriver, row: ProviderCallRow): void {
       row.durationMs,
       row.createdAt,
     ],
+  ).lastInsertRowid;
+}
+
+/** Sets the result of a started attempt; a row that is no longer "started" is left as it is. */
+export function finishProviderCall(
+  db: SqlDriver,
+  id: number,
+  result: { outcome: string; durationMs: number },
+): void {
+  db.run(
+    "UPDATE provider_calls SET outcome = ?, duration_ms = ? WHERE id = ? AND outcome = 'started'",
+    [result.outcome, result.durationMs, id],
   );
+}
+
+/**
+ * Turns every "started" attempt into "interrupted" and returns how many: at a
+ * Broker's start, an attempt still started belongs to a process that died. It
+ * stays an attempt, so it still counts against the budget (I03-R14).
+ */
+export function interruptStartedCalls(db: SqlDriver): number {
+  return db.run("UPDATE provider_calls SET outcome = 'interrupted' WHERE outcome = 'started'")
+    .changes;
+}
+
+/**
+ * When the attempts after `afterMs` (UTC milliseconds, exclusive) were made,
+ * oldest first: every row that reached the Provider ("started" and "interrupted"
+ * included), not the "blocked" and "budget-exhausted" ones that never ran. Rows
+ * dated in the future (a clock that went back) are included as stored.
+ */
+export function listAttemptTimes(db: SqlDriver, afterMs: number): number[] {
+  const rows = db.all(
+    `SELECT created_at AS at FROM provider_calls
+     WHERE outcome NOT IN ('blocked', 'budget-exhausted') AND created_at > ?`,
+    [new Date(afterMs).toISOString()],
+  );
+  return rows.map((r) => Date.parse(r.at as string)).sort((a, b) => a - b);
 }

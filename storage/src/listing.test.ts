@@ -2,7 +2,16 @@
 // source's latest version only, and the provider call history is newest first.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
-import { findSources, listProviderCalls, listSources } from "./listing.ts";
+import {
+  finishProviderCall,
+  findSources,
+  insertProviderCall,
+  interruptStartedCalls,
+  listAttemptTimes,
+  listProviderCalls,
+  listSources,
+  type ProviderCallRow,
+} from "./listing.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
@@ -107,6 +116,56 @@ describe("listProviderCalls", () => {
         createdAt: "2026-11-21T00:00:00Z",
       },
       expect.objectContaining({ attempt: 1, durationMs: 12 }),
+    ]);
+  });
+});
+
+describe("started attempts (I03-R14, I03-T06)", () => {
+  const row = (requestId: string, outcome: string, createdAt: string): ProviderCallRow => ({
+    requestId,
+    attempt: 1,
+    provider: "fake",
+    destination: "synthetic.example",
+    taskKind: "connection-test",
+    classification: "synthetic",
+    policyVersion: "p1",
+    outcome,
+    reason: outcome === "blocked" || outcome === "budget-exhausted" ? "x" : null,
+    durationMs: null,
+    createdAt,
+  });
+
+  it("insertProviderCall returns the row's ID and finishProviderCall sets its result once", () => {
+    const id = insertProviderCall(db, row("r1", "started", "2026-11-21T00:00:00.000Z"));
+    expect(listProviderCalls(db)[0]).toMatchObject({ outcome: "started", durationMs: null });
+    finishProviderCall(db, id, { outcome: "ok", durationMs: 7 });
+    expect(listProviderCalls(db)[0]).toMatchObject({ outcome: "ok", durationMs: 7 });
+    // a finished row is never overwritten by a late fix
+    finishProviderCall(db, id, { outcome: "timeout", durationMs: 9 });
+    expect(listProviderCalls(db)[0]).toMatchObject({ outcome: "ok", durationMs: 7 });
+  });
+
+  it("interruptStartedCalls turns only started rows into interrupted and counts them", () => {
+    insertProviderCall(db, row("r1", "started", "2026-11-21T00:00:00.000Z"));
+    insertProviderCall(db, row("r2", "ok", "2026-11-21T00:00:01.000Z"));
+    expect(interruptStartedCalls(db)).toBe(1);
+    expect(listProviderCalls(db).map((c) => c.outcome)).toEqual(["ok", "interrupted"]);
+    expect(interruptStartedCalls(db)).toBe(0);
+  });
+
+  it("listAttemptTimes lists attempts after the cut, started and interrupted included, blocked and budget-exhausted not", () => {
+    insertProviderCall(db, row("a", "ok", "2026-11-21T00:00:00.000Z"));
+    insertProviderCall(db, row("b", "started", "2026-11-21T00:10:00.000Z"));
+    insertProviderCall(db, row("c", "interrupted", "2026-11-21T00:20:00.000Z"));
+    insertProviderCall(db, row("d", "blocked", "2026-11-21T00:30:00.000Z"));
+    insertProviderCall(db, row("e", "budget-exhausted", "2026-11-21T00:40:00.000Z"));
+    insertProviderCall(db, row("f", "cancelled", "2026-11-21T00:50:00.000Z"));
+    const at = (iso: string) => Date.parse(iso);
+    // exactly at the cut is outside the window (the Broker's own rule)
+    expect(listAttemptTimes(db, at("2026-11-21T00:00:00.000Z"))).toEqual([
+      at("2026-11-21T00:10:00.000Z"),
+      at("2026-11-21T00:20:00.000Z"),
+      at("2026-11-21T00:50:00.000Z"),
     ]);
   });
 });

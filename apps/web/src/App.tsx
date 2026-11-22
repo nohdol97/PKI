@@ -14,6 +14,7 @@ import type {
   SourceSummary,
 } from "@pki/contracts";
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { outcomeText } from "./activity-text.ts";
 import type { ApiClient } from "./api.ts";
 import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
@@ -384,7 +385,7 @@ function Activity({ api }: { api: ApiClient }) {
                 <td>{c.taskKind}</td>
                 <td>{c.classification}</td>
                 <td>{c.policyVersion ?? NONE}</td>
-                <td>{c.outcome}</td>
+                <td>{outcomeText(c.outcome)}</td>
                 <td>{c.reason ?? NONE}</td>
                 <td>{c.durationMs ?? NONE}</td>
               </tr>

@@ -259,6 +259,8 @@ interface LLMProvider {
 
 구현은 네 가지다. `ClaudeCodeProvider`, `CodexProvider`(원 설계대로), `OpenAICompatibleProvider`(API 키. **필수 경로**), `LocalModelProvider`(계약만 있고 "미구현" 상태를 돌려준다). 상위 코드는 Provider를 직접 부르지 않고 Broker만 부른다. Broker는 호출마다 ① 기록 조회로 호출 종류 판정 ② 정본에서 문서와 후보를 꺼내고 등급 계산 ③ 동의와 전송 정책 검사 ④ CLI 실행 조건(3.1절) ⑤ 동시 실행·예산 ⑥ 시간 제한과 취소 ⑦ 응답 스키마 검증 ⑧ 본문 없는 이력 기록을 순서대로 한다.
 
+**취소, 이력, 예산(I03-T06).** `broker.call(요청, signal?)`은 `AbortSignal`을 받는다. 신호는 시도 앞에서, 시도 중에, 재시도 대기 중에 확인하며, 끊기면 결과는 `{ status: "cancelled" }`이다(Broker 자신의 시간 제한만 `timeout`이다). 이미 Provider에 보낸 시도는 이력 결과가 `cancelled`이고 예산에 센다. 보내기 전에 끊긴 요청은 이력 행도 예산도 남기지 않는다. 이력은 Provider를 부르기 **전에** 결과 `started` 행으로 쓰고 시도가 끝나면 그 행의 결과로 고친다. Broker는 시작할 때 죽은 프로세스가 남긴 `started` 행을 `interrupted`로 고치고(예산에는 그대로 센다), 시간창(1시간) 안의 실제 시도 행(`blocked`·`budget-exhausted` 제외)으로 시간창 예산을 채운다. 그래서 재시작이나 호출 중 강제 종료로 예산이 0이 되지 않는다. 벽시계가 뒤로 가서 미래로 적힌 시도는 지금으로 당겨 세므로 예산은 늦어도 시간창 하나 뒤에 풀린다. `budgetUsage()`는 `{ used, maxCalls, windowMs, resetsAt }`를 주고, `resetsAt`은 가장 오래된 시도가 시간창에서 빠지는 때다(예산 소진 작업의 다음 실행 시각이며 활동 화면도 쓴다).
+
 Broker가 Provider에 보내는 원본의 필드는 **제목과 본문뿐**이다. 작성자, 참여자, 메타데이터는 Phase 1에서 보내지 않는다. 합성 목록의 해시가 제목과 본문을 함께 묶어 계산되는 것은 이 때문이다(본문은 목록에 있는데 제목이 다르면 합성이 아니다).
 
 ### 5.2 Embedding
