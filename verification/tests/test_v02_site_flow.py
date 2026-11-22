@@ -1,5 +1,7 @@
 """V02-T12 site runner (spec V02 "T12가 넘기는 것"): V02-H2 `site-verify.refuse`, V02-C4 `run-record`, stale records,
 and the allowlisted pasteable result. All inputs are synthetic; nothing here is site evidence."""
+import contextlib
+import io
 import json
 import os
 import sqlite3
@@ -315,6 +317,15 @@ class SummarizeCommit(unittest.TestCase):
         self.assertIn('"other-commit": 1', res.stdout)
         self.assertEqual(bad.returncode, site.CONFIG_EXIT)
 
+    def test_unknown_commit_pairs_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "run-record.browser.json"), "w", encoding="utf-8") as fh:
+                json.dump(e2e_record(commit="unknown"), fh)
+            res = run_cli("summarize", "--records", d, "--since", STARTED, "--commit", "unknown")
+        self.assertEqual(res.returncode, site.CONFIG_EXIT)
+        self.assertEqual(res.stdout, "")
+        self.assertIn("미검증", res.stderr)
+
 
 class SiteDatabase(unittest.TestCase):
     """`record` counts the canonical DB like `v02-flow.e2e` and derives the Provider kind from the calls it shows."""
@@ -379,6 +390,31 @@ class SiteDatabase(unittest.TestCase):
             self.assertEqual(os.listdir(d), [])
 
 
+class RecordLockedDb(unittest.TestCase):
+    """`record` on a locked DB tells the operator to close the app (exit 1); gate and DB path are patched."""
+
+    def test_lock_hint(self):
+        def locked(*_a, **_k):
+            raise sqlite3.OperationalError("database is locked")
+
+        with tempfile.TemporaryDirectory() as d:
+            cfg_path = os.path.join(d, "config.json")
+            with open(cfg_path, "w", encoding="utf-8") as fh:
+                json.dump(config(), fh)
+            with open(os.path.join(d, "run-state.json"), "w", encoding="utf-8") as fh:
+                json.dump({"startedAt": STARTED}, fh)
+            saved = site.gate, site.site_db_path, site.read_site_db
+            site.gate, site.site_db_path, site.read_site_db = (lambda _c: "0.1.0"), (lambda: os.path.join(d, "x")), locked
+            err = io.StringIO()
+            try:
+                with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                    code = site.main(["record", "--config", cfg_path, "--out", d])
+            finally:
+                site.gate, site.site_db_path, site.read_site_db = saved
+        self.assertEqual(code, 1)
+        self.assertIn(site.DB_BUSY_HINT, err.getvalue())
+
+
 class Judge(unittest.TestCase):
     def test_pass_needs_the_counts_and_all_observations(self):
         self.assertEqual(site.judge(COUNTS, ALL_OBSERVED), "PASS")
@@ -427,6 +463,7 @@ class PasteableResult(unittest.TestCase):
         self.assertEqual(facts["model"], "gpt-5-mini")
         self.assertEqual(facts["app_version"], "0.1.0")
         self.assertEqual(facts["dropped_quotes"], 0)
+        self.assertEqual(facts["kit_commit"], COMMIT[:12])
         self.assertEqual(sorted(os.listdir(d)), ["raw", "result.json", "result.md"])
         with open(os.path.join(d, "raw", "run-record.windows-installer.json"), encoding="utf-8") as fh:
             self.assertEqual(rr.validate_record(json.load(fh)), [])
@@ -443,6 +480,12 @@ class PasteableResult(unittest.TestCase):
             self.assertNotIn(needle, text)
         facts = read_json(os.path.join(d, "result.json"))["checks"][0]["facts"]
         self.assertRegex(facts["model"], r"^h:[0-9a-f]{12}$")
+
+    def test_kit_commit_allows_only_a_12_hex_prefix_or_unknown(self):
+        self.assertTrue(results.string_allowed(COMMIT[:12], "kit_commit"))
+        self.assertTrue(results.string_allowed("unknown", "kit_commit"))
+        for bad in (COMMIT, "acmecorp-kim", "0123456789AB", COMMIT[:11]):
+            self.assertFalse(results.string_allowed(bad, "kit_commit"), bad)
 
     def test_a_cli_provider_version_is_kept_as_a_version(self):
         rec = site_record(provider={"kind": "real", "id": "codex", "name": "codex", "version": "0.98.0"})

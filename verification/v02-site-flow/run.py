@@ -283,7 +283,8 @@ def write_results(record, verdict, observed, out_dir, literals):
              "source_versions": c["sourceVersions"], "insights": c["insights"], "active_insights": c["activeInsights"],
              "jobs_not_succeeded": c["jobsNotSucceeded"], "provider_calls": c["providerCalls"],
              "dropped_quotes": c["droppedQuotes"], "dropped_other": c["droppedOther"],
-             "observed": [w for w in OBSERVATIONS if w in observed]}
+             "observed": [w for w in OBSERVATIONS if w in observed],
+             "kit_commit": record["commit"][:12] if record["commit"] != "unknown" else "unknown"}
     notes = ["unit_tests_not_site_evidence"]
     if p["id"] == "openai-compatible":
         facts["model"] = results.model_fact(p["version"])
@@ -327,6 +328,10 @@ def main(argv=None):
 
     if args.command == "summarize":
         commit = args.commit
+        if commit == "unknown":
+            print("--commit unknown pairs nothing: a site record without a commit cannot show the same-commit E2E "
+                  "(record the pairing as 미검증)", file=sys.stderr)
+            return CONFIG_EXIT
         if commit is not None and not rr.COMMIT_RE.match(commit):
             commit = _git("rev-parse", "--verify", "--quiet", commit + "^{commit}")
             if not commit:

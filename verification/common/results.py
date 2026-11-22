@@ -166,7 +166,7 @@ FACT_KEYS = {
     "http_status", "response_bytes", "expected_text_present", "elapsed_ms", "had_error",
     # V02 site runner
     "provider_kind", "provider_id", "app_version", "source_versions", "insights", "active_insights", "jobs_not_succeeded",
-    "provider_calls", "dropped_quotes", "dropped_other", "observed",
+    "provider_calls", "dropped_quotes", "dropped_other", "observed", "kit_commit",
     # fail-soft result
     "validation_errors",
 }
@@ -179,7 +179,7 @@ HASH_RE = re.compile(r"^h:[0-9a-f]{12}$")
 MODEL_TOKENS = {"claude", "opus", "sonnet", "haiku", "gpt", "codex", "mini", "nano", "turbo", "preview", "latest", "high", "medium", "low"}
 MODEL_FIRST = {"claude", "gpt", "codex"}
 _MODEL_NUM = re.compile(r"^(\d{1,8}([.]\d{1,3})?[a-z]?|o\d)$")
-VALUE_KINDS = {"version": "version", "cli_version": "version", "app_version": "version", "model": "model", "license_file_hashes": "hash"}
+VALUE_KINDS = {"version": "version", "cli_version": "version", "app_version": "version", "kit_commit": "commit12", "model": "model", "license_file_hashes": "hash"}
 ENV_VALUES = {
     "os": re.compile(r"^(Windows|Darwin|Linux)$"),
     "os_release": re.compile(r"^(\d{1,5}(\.\d{1,5}){0,3}|Microsoft Windows \d{1,2}( (Home|Pro|Enterprise|Education|N)){0,2})$"),
@@ -230,6 +230,8 @@ def string_allowed(value, key=None):
         return model_ok(value) or bool(HASH_RE.match(value))
     if kind == "hash":
         return bool(HASH_RE.match(value))
+    if kind == "commit12":  # a commit's first 12 hex (the redactor masks 40-hex runs as tokens)
+        return bool(re.match(r"^[0-9a-f]{12}$", value)) or value == "unknown"
     return False
 
 

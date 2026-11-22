@@ -60,13 +60,13 @@ V02의 흐름(합성 출처 3개 가져오기 → "의존 업무 지연" Insight
 
 ### 같은 커밋의 E2E 기록(test double) 짝짓기
 
-C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요구합니다. test double 쪽 기록은 이 실행기가 아니라 **같은 커밋에서 돌린 `v02-flow.e2e`** 가 만듭니다. 저장소의 Node 도구(`pnpm install --frozen-lockfile`)가 있는 PC에서 돌립니다. 사외 개발 PC여도 되고 배포처 PC여도 됩니다. 설치본 PC에서 돌린다면 `record`를 끝낸 **뒤에** 합니다. E2E는 임시 데이터 폴더를 쓰지만 Electron 쪽이 이 PC에서 원본 쉘을 띄우기 때문입니다.
+C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요구합니다. test double 쪽 기록은 이 실행기가 아니라 **같은 커밋에서 돌린 `v02-flow.e2e`** 가 만듭니다. 기준이 되는 커밋은 배포처 실행의 것입니다: `v02-result\raw\run-record.windows-installer.json`의 `commit` 값(40자)이며, `result.md`의 `kit_commit`은 그 앞 12자입니다. E2E는 그 커밋을 체크아웃한 저장소에서 돌립니다. 저장소의 Node 도구(`pnpm install --frozen-lockfile`)가 있는 PC에서 돌립니다. 사외 개발 PC여도 되고 배포처 PC여도 됩니다. 설치본 PC에서 돌린다면 `record`를 끝낸 **뒤에** 합니다. E2E는 임시 데이터 폴더를 쓰지만 Electron 쪽이 이 PC에서 원본 쉘을 띄우기 때문입니다.
 
 1. 시작 시각을 적어 둡니다(UTC, 예: `2026-11-22T01:00:00.000Z`).
 2. `pnpm exec playwright test apps/web/e2e/v02-flow.e2e.ts --project=browser --project=electron`
-3. `python verification\v02-site-flow\run.py summarize --records test-results\v02-flow --since <1의 시각> --commit HEAD`
+3. `python verification\v02-site-flow\run.py summarize --records test-results\v02-flow --since <1의 시각> --commit <배포처 기록의 commit 40자>`
 
-`--commit`에는 40자 SHA나 `HEAD`처럼 그 체크아웃에서 git이 푸는 이름을 줍니다. 1의 시각보다 먼저 끝났거나, 다른 커밋이거나, 양식에 맞지 않는 기록은 `ignored`에 세어지고 표에 나오지 않습니다. 표의 두 줄(`browser`, `electron`, 종류 `test-double`)을 결과 양식의 둘째 행에 옮깁니다.
+`--commit`에는 배포처 기록의 40자 SHA를 줍니다. `HEAD`도 받지만 그것은 E2E를 돌린 PC의 HEAD일 뿐이므로, 같은 PC·같은 체크아웃에서 배포처 실행과 E2E를 둘 다 했을 때만 씁니다. 배포처 기록의 `commit`이 `unknown`이면(git이 아닌 폴더에서 실행) 같은 커밋임을 보일 수 없습니다. 이때 `--commit unknown`은 거부되며(종료 값 2), 결과 양식의 짝짓기 행을 **미검증**으로 적습니다. 1의 시각보다 먼저 끝났거나, 다른 커밋이거나, 양식에 맞지 않는 기록은 `ignored`에 세어지고 표에 나오지 않습니다. 표의 두 줄(`browser`, `electron`, 종류 `test-double`)을 결과 양식의 둘째 행에 옮깁니다.
 
 ## 7. 이 절차가 확인하지 못하는 것
 
