@@ -1,14 +1,15 @@
 // The pipeline's notifications to the KnowledgeEngine and the VectorIndex
 // (V02-R13, ARCHITECTURE 5.3 and 5.4, ADR 0013). Both are projections of the
-// canonical store: a notice is built inside the transaction that changed a
-// source (versionNotice, userDeleteWithNotice, acceptChange) with the change sequence that
-// change reached, and delivered only after that transaction committed, one notice
-// at a time in the order notified. A stored version is upserted into the engine
-// (its text read from the store at delivery, so a version purged meanwhile is
-// never handed over) and the versions it replaced are removed from both; a
-// deletion removes every purged version from both. The vector index holds no
-// vectors in Phase 1 (nothing upserts), so its removals keep its applied change
-// sequence in step with the store.
+// canonical store: a notice is built inside the transaction that stored a
+// version (versionNotice) with the change sequence that change reached, and
+// delivered only after that transaction committed, one notice at a time in the
+// order notified. A stored version is upserted into the engine (its text read
+// from the store at delivery, so a version purged meanwhile is never handed
+// over) and the versions it replaced are removed from both. A deletion is no
+// notice: the tombstone's transaction registers a `projection-remove` job per
+// projection (projection-kinds.ts, I04-R12), which the job runner executes.
+// The vector index holds no vectors in Phase 1 (nothing upserts), so its
+// removals keep its applied change sequence in step with the store.
 // Missed notices are found at start (reconcile): a projection whose applied
 // sequence differs from the store's, null included, is rebuilt, whatever its
 // kind; an equal one is left alone. A delivery that fails marks the projection
@@ -27,36 +28,28 @@ import {
 } from "@pki/contracts";
 import {
   canonicalTransaction,
-  findSourceId,
   readChangeSeq,
   readSetting,
   readSourceVersion,
   writeSetting,
+  type DerivativeRegistry,
   type SqlDriver,
 } from "@pki/storage";
-import { applyTombstone } from "./tombstone-entry.ts";
+import { derivativeRegistry } from "./canonical-kinds.ts";
+import { tombstoneEntries } from "./tombstone-entry.ts";
 
-/** What one committed change tells the projections. */
-export type ProjectionNotice =
-  | {
-      kind: "version";
-      sourceId: number;
-      /** The stored version: the source's latest when the notice was built. */
-      version: number;
-      versionId: number;
-      /** The source's lower versions' row IDs, past evidence now. */
-      replacedVersionIds: number[];
-      changeSeq: number;
-    }
-  | {
-      kind: "removed";
-      sourceId: number;
-      /** The tombstone's version, covering every version. */
-      version: number;
-      /** Every purged version's row ID, collected before the purge. */
-      versionIds: number[];
-      changeSeq: number;
-    };
+/** What one committed version tells the projections. */
+export interface ProjectionNotice {
+  kind: "version";
+  sourceId: number;
+  /** The stored version: the source's latest when the notice was built. */
+  version: number;
+  /** The source's lower versions, past evidence now. */
+  replacedVersions: number[];
+  /** The version's row ID: its text is read from the store at delivery. */
+  versionId: number;
+  changeSeq: number;
+}
 
 export type ProjectionName = "engine" | "vectorIndex";
 
@@ -67,13 +60,13 @@ export const PROJECTION_STALE_SETTINGS: Readonly<Record<ProjectionName, string>>
 });
 
 /**
- * Provisional (X01 decides when vectors are written): a vector's canonical ID is
- * its source version row's. Version row IDs are never reused (AUTOINCREMENT,
- * V02 "T02가 넘기는 것" 1), unlike item, fact and relation IDs after a purge.
+ * Provisional (X01 decides when vectors are written): a vector's canonical ID names its source version,
+ * `source-version:<sourceId>:<version>`. Neither number is ever reused (versions only count up, past a
+ * tombstone's cover), and a removal after a deletion can name the versions up to the cover without the
+ * version rows, which the purge took.
  */
-export const vectorRefOf = (versionId: number): IndexedRef => `source-version:${versionId}`;
-
-const idsOf = (rows: Record<string, unknown>[]) => rows.map((r) => r.id as number);
+export const vectorRefOf = (sourceId: number, version: number): IndexedRef =>
+  `source-version:${sourceId}:${version}`;
 
 /** Call inside the transaction that stored `version` of the source, right after storing it. */
 export function versionNotice(db: SqlDriver, sourceId: number, version: number): ProjectionNotice {
@@ -86,59 +79,48 @@ export function versionNotice(db: SqlDriver, sourceId: number, version: number):
     sourceId,
     version,
     versionId,
-    replacedVersionIds: idsOf(
-      db.all(
-        "SELECT id FROM source_versions WHERE source_id = ? AND version < ? ORDER BY version",
+    replacedVersions: db
+      .all(
+        "SELECT version FROM source_versions WHERE source_id = ? AND version < ? ORDER BY version",
         [sourceId, version],
-      ),
-    ),
+      )
+      .map((r) => r.version as number),
     changeSeq: readChangeSeq(db),
   };
 }
 
-/**
- * The user's deletion (V02-R12, I04-R9): applyTombstone with reason `user-deleted`
- * and no revision, in one canonical transaction. `deleted` is any outcome that
- * changed the tombstone (a purged source can be re-marked by the user over a
- * source's reason or after a lift); the notice is there only when versions were
- * purged, so a delete of nothing stored does not wake the engine.
- */
-export function userDeleteWithNotice(
+/** The user's deletion's outcome: `deleted` is any outcome that changed the tombstone. */
+export type UserDelete = (
   db: SqlDriver,
   identity: { connectorInstanceId: string; namespace: string; externalId: string },
   at: string,
-): { outcome: "deleted" | "unchanged"; notice?: ProjectionNotice } {
-  return canonicalTransaction(db, (tx) => {
-    const { connectorInstanceId, namespace, externalId } = identity;
-    const sourceId = findSourceId(tx, connectorInstanceId, namespace, externalId);
-    const versionIds =
-      sourceId === undefined
-        ? []
-        : idsOf(
-            tx.all("SELECT id FROM source_versions WHERE source_id = ? ORDER BY version", [
-              sourceId,
-            ]),
-          );
-    const result = applyTombstone(tx, {
-      identity,
-      reason: "user-deleted",
-      lastRevision: null,
-      at,
-    });
-    if (result.outcome === "unchanged") return { outcome: "unchanged" };
-    if (versionIds.length === 0) return { outcome: "deleted" };
-    return {
-      outcome: "deleted",
-      notice: {
-        kind: "removed",
+) => { outcome: "deleted" | "unchanged"; sourceId: number; coversVersion: number };
+
+/**
+ * The user's deletion (V02-R12, I04-R9): applyTombstone with reason `user-deleted` and no revision, in
+ * one canonical transaction over a registry. A purged source can be re-marked by the user over a
+ * source's reason or after a lift. The removal from the projections is the jobs that transaction
+ * registered; the caller wakes the runner.
+ */
+export function createUserDelete(registry: DerivativeRegistry): UserDelete {
+  const { applyTombstone } = tombstoneEntries(registry);
+  return (db, identity, at) =>
+    canonicalTransaction(db, (tx) => {
+      const result = applyTombstone(tx, {
+        identity,
+        reason: "user-deleted",
+        lastRevision: null,
+        at,
+      });
+      return {
+        outcome: result.outcome === "unchanged" ? "unchanged" : "deleted",
         sourceId: result.sourceId,
-        version: result.coversVersion,
-        versionIds,
-        changeSeq: readChangeSeq(tx),
-      },
-    };
-  });
+        coversVersion: result.coversVersion,
+      };
+    });
 }
+
+export const userDelete: UserDelete = createUserDelete(derivativeRegistry);
 
 export type ReconcileOutcome = "current" | "rebuilt" | "skipped" | "failed";
 
@@ -157,6 +139,12 @@ export interface Projections {
   notify(notices: readonly ProjectionNotice[]): Promise<void>;
   /** The start-up comparison and rebuild, queued like a notice. */
   reconcile(): Promise<Record<ProjectionName, ReconcileOutcome>>;
+  /**
+   * Rebuilds one projection from the canonical store and reports `seq` as applied (a `projection-rebuild`
+   * job: the sequence it read before reading the store). Queued like a notice, so it never overlaps a
+   * delivery; clears the projection's stale mark. A failure is thrown for the job to classify, never marked.
+   */
+  rebuild(name: ProjectionName, seq: number): Promise<void>;
   /** Resolves once everything queued so far is delivered. */
   drain(): Promise<void>;
   /** True from a missed notice (failed or unavailable) until a rebuild: it may hold purged content. */
@@ -220,30 +208,36 @@ export function createProjections(options: ProjectionsOptions): Projections {
     const sourceId = String(notice.sourceId);
     const fence = { version: notice.version };
     const seq = notice.changeSeq;
-    if (notice.kind === "version") {
-      await deliver("engine", async () => {
-        const stored = readSourceVersion(db, notice.versionId);
-        // purged after the commit: its removal notice follows, nothing to hand over
-        if (stored) {
-          const ref = { sourceId, version: notice.version };
-          await engine.upsertSource({ ref, title: stored.title, body: stored.body }, fence, seq);
-        }
-        if (notice.version > 1) {
-          await engine.removeSource({ sourceId, version: notice.version - 1 }, fence, seq);
-        }
-      });
-      await deliver("vectorIndex", () =>
-        vectorIndex.remove(notice.replacedVersionIds.map(vectorRefOf), seq),
-      );
-    } else {
-      await deliver("engine", () =>
-        engine.removeSource({ sourceId, version: notice.version }, fence, seq),
-      );
-      await deliver("vectorIndex", () =>
-        vectorIndex.remove(notice.versionIds.map(vectorRefOf), seq),
-      );
-    }
+    await deliver("engine", async () => {
+      const stored = readSourceVersion(db, notice.versionId);
+      // purged after the commit: its removal job follows, nothing to hand over
+      if (stored) {
+        const ref = { sourceId, version: notice.version };
+        await engine.upsertSource({ ref, title: stored.title, body: stored.body }, fence, seq);
+      }
+      if (notice.version > 1) {
+        await engine.removeSource({ sourceId, version: notice.version - 1 }, fence, seq);
+      }
+    });
+    await deliver("vectorIndex", () =>
+      vectorIndex.remove(
+        notice.replacedVersions.map((version) => vectorRefOf(notice.sourceId, version)),
+        seq,
+      ),
+    );
   }
+
+  const rebuilders: Record<ProjectionName, (seq: number) => Promise<void>> = {
+    engine: (seq) => engine.rebuild(latestSources(db), seq),
+    vectorIndex: async (seq) => {
+      const space = options.embeddingSpace();
+      if (!space) throw new AdapterUnavailableError("no embedding space bound");
+      // Phase 1 writes no vectors (X01), so the rebuilt index is empty; an
+      // empty removal records the sequence it was rebuilt at.
+      await vectorIndex.reset(space);
+      await vectorIndex.remove([], seq);
+    },
+  };
 
   async function reconcileOne(
     name: ProjectionName,
@@ -271,24 +265,21 @@ export function createProjections(options: ProjectionsOptions): Projections {
       }),
     reconcile: () =>
       enqueue(async () => ({
-        engine: await reconcileOne(
-          "engine",
-          () => engine.appliedChangeSeq(),
-          (seq) => engine.rebuild(latestSources(db), seq),
-        ),
+        engine: await reconcileOne("engine", () => engine.appliedChangeSeq(), rebuilders.engine),
         vectorIndex: await reconcileOne(
           "vectorIndex",
           () => vectorIndex.appliedChangeSeq(),
-          async (seq) => {
-            const space = options.embeddingSpace();
-            if (!space) throw new AdapterUnavailableError("no embedding space bound");
-            // Phase 1 writes no vectors (X01), so the rebuilt index is empty; an
-            // empty removal records the sequence it was rebuilt at.
-            await vectorIndex.reset(space);
-            await vectorIndex.remove([], seq);
-          },
+          rebuilders.vectorIndex,
         ),
       })),
+    rebuild: (name, seq) =>
+      enqueue(async () => {
+        await rebuilders[name](seq);
+        stale[name] = false;
+        if (readSetting(db, PROJECTION_STALE_SETTINGS[name]) === "1") {
+          writeSetting(db, PROJECTION_STALE_SETTINGS[name], "0");
+        }
+      }),
     drain: () => enqueue(async () => undefined),
     isStale: (name) => stale[name],
   };

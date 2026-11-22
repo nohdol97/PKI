@@ -42,7 +42,7 @@ import {
   type ExecutionInput,
   type UserActionIssuer,
 } from "@pki/providers";
-import { liftTombstone, type Projections, userDeleteWithNotice } from "@pki/knowledge-engine";
+import { defaultEntries, type CanonicalEntries } from "@pki/knowledge-engine";
 import {
   databaseEncryption,
   canonicalTransaction,
@@ -118,12 +118,16 @@ export interface ServerOptions {
   };
   /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
   importer?: JsonlImporter;
-  /** Notified after a deletion from the screen commits (V02-R13; composition.ts productProjections). */
-  projections?: Pick<Projections, "notify">;
+  /**
+   * The entries that run the derivative registry (composition.ts `productEntries`); default the
+   * entries over the registry with no composition (knowledge-engine entries.ts).
+   */
+  entries?: Pick<CanonicalEntries, "userDelete" | "liftTombstone">;
   /**
    * Called after the background setting, a consent, the endpoint or the default
    * Provider changed and the held jobs it can lift were put back in the queue, in
-   * the same transaction as the change (held-release.ts); boot wakes the runner.
+   * the same transaction as the change (held-release.ts), and after a deletion registered
+   * the projections' removal jobs (I04-R12); boot wakes the runner.
    * Default none.
    */
   onRunConditionsChanged?: () => void;
@@ -480,6 +484,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     options.onRunConditionsChanged?.();
     return result;
   };
+  const entries = options.entries ?? defaultEntries;
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -531,13 +536,13 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     deleteSource: async ({ connectorId, namespace, externalId }) => {
       const sourceId = findSourceId(options.db, connectorId, namespace, externalId);
       if (sourceId === undefined) return { error: "not-found" };
-      const { outcome, notice } = userDeleteWithNotice(
+      const { outcome } = entries.userDelete(
         options.db,
         { connectorInstanceId: connectorId, namespace, externalId },
         new Date().toISOString(),
       );
       if (outcome === "unchanged") return { outcome: "already-deleted" };
-      if (notice) void options.projections?.notify([notice]);
+      options.onRunConditionsChanged?.(); // wakes the runner for the removal jobs the deletion registered (I04-R12)
       return { outcome: "deleted" };
     },
     // I04-R9: the only caller of liftTombstone; Connector and source events never lift
@@ -551,7 +556,9 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       })),
     }),
     liftTombstone: async ({ id }) =>
-      canonicalTransaction(options.db, (tx) => liftTombstone(tx, id, new Date().toISOString())),
+      canonicalTransaction(options.db, (tx) =>
+        entries.liftTombstone(tx, id, new Date().toISOString()),
+      ),
     activity: async () => ({ calls: listProviderCalls(options.db) }),
     settings: async () => settings(),
     writeSettings: async ({ openaiCompatible }) => {

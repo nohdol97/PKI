@@ -378,16 +378,15 @@ describe("source.tombstone", () => {
     expect(count("sources")).toBe(1);
   });
 
-  it("hands the engine a notice of what a deletion purged, and none when nothing was stored", () => {
+  it("registers the projections' removal jobs for what a deletion purged, and none when nothing was stored", () => {
     upsert(1);
-    const purged = del(2);
-    expect(purged).toMatchObject({
-      outcome: "tombstoned",
-      notice: { kind: "removed", versionIds: [1] },
-    });
+    const jobs = () =>
+      db.all("SELECT target FROM jobs WHERE kind = 'projection-remove' ORDER BY target");
+    expect(del(2)).toMatchObject({ outcome: "tombstoned" });
+    expect(jobs()).toEqual([{ target: "engine" }, { target: "vectorIndex" }]);
     expect(del(3, "never")).toMatchObject({ outcome: "tombstoned" });
     expect(del(3, "never")).toEqual({ outcome: "unchanged" });
-    expect((del(9, "never") as { notice?: unknown }).notice).toBeUndefined();
+    expect(jobs()).toHaveLength(2);
   });
 
   describe("on a file", () => {

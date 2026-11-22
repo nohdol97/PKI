@@ -268,6 +268,9 @@ describe("purge.idempotent: the purge closes the source's open jobs (I04-R12)", 
       { id: dead, status: "dead_letter", reason: null },
       { id: remove, status: "queued", reason: null },
       { id: otherSource, status: "queued", reason: null },
+      // the purge's removal for the vector index (I04-R12), registered after it closed the others; the engine's
+      // is the one above (the same source and cover: one job)
+      { id: otherSource + 1, status: "queued", reason: null },
     ]);
     // a running job's holder loses its lease: its heartbeat and result write fail
     expect(tokens()[running]).toBe((before[running] as number) + 1);

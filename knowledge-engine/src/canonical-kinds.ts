@@ -10,7 +10,8 @@
 // collection the cascades took. A new version supersedes what lost its current
 // evidence and recomputes the rule (V02-R11); nothing is deleted and the earlier
 // versions stay (I04-R10). Facts and relations a deletion leaves are judged again
-// by the same rule (I04-R8). Projection kinds join the registry in I04-T04.
+// by the same rule (I04-R8). The two projection kinds (projection-kinds.ts) follow them in the
+// product registry; they register the removal jobs after the canonical purge.
 //
 // The entries, applyTombstone and propagateNewVersion, keep their results (the ids
 // each kind touched and the rule's outcomes); the kinds note those for the entry
@@ -33,6 +34,7 @@ import {
   type SqlValue,
 } from "@pki/storage";
 import { recomputeDependencyDelay, type RuleOutcome } from "./dependency-delay.ts";
+import { projectionKinds, type PermanentlyAbsent } from "./projection-kinds.ts";
 
 /** What one propagation did, by id, for V02's entries (ascending ids). */
 export interface CanonicalReport {
@@ -344,7 +346,7 @@ export const CANONICAL_KINDS: readonly DerivativeKind[] = Object.freeze([
  * No scope policy yet: its default arrives with I04-T09, and nothing reads
  * visible or scopesOf before I04-T08. Propagation does not consult it.
  */
-const NO_POLICY_YET: ScopePolicy = {
+export const NO_POLICY_YET: ScopePolicy = {
   compare: () => {
     throw new Error("the scope policy arrives with I04-T09");
   },
@@ -360,20 +362,34 @@ const NO_POLICY_YET: ScopePolicy = {
 };
 
 /**
- * A registry of the product's kinds. Its record's time is the running entry's
- * (a deletion's request time), else the clock's. I04-T04 and I04-T09 build it at
- * the composition root with the projection kinds and the configured policy (I04
- * spec "T03이 넘기는 것" 1).
+ * A registry of the product's kinds: the six canonical ones and the two projections. Its record's
+ * time is the running entry's (a deletion's request time), else the clock's. The composition root
+ * builds it (backend composition.ts `productRegistry`) with the configured policy and the marks of
+ * the implementations it binds: `permanentlyAbsent` says which projection's implementation never
+ * holds anything (I04-R12); the list of kinds is the same for every build.
  */
-export function createProductRegistry(options: { policy: ScopePolicy }): DerivativeRegistry {
+export function createProductRegistry(options: {
+  policy: ScopePolicy;
+  permanentlyAbsent?: PermanentlyAbsent;
+}): DerivativeRegistry {
+  const now = () => running?.at ?? new Date().toISOString();
   return createDerivativeRegistry({
-    kinds: CANONICAL_KINDS,
+    kinds: [
+      ...CANONICAL_KINDS,
+      ...projectionKinds({
+        at: now,
+        ...(options.permanentlyAbsent ? { permanentlyAbsent: options.permanentlyAbsent } : {}),
+      }),
+    ],
     policy: options.policy,
-    now: () => running?.at ?? new Date().toISOString(),
+    now,
   });
 }
 
-/** The registry V02's entries run until the composition root builds one (provisional). */
+/**
+ * The registry the entries run until the composition root hands them its own (the entries of
+ * entries.ts take a registry): the same kinds, with no mark and the placeholder policy.
+ */
 export const derivativeRegistry = createProductRegistry({ policy: NO_POLICY_YET });
 
 /**
@@ -386,6 +402,7 @@ export function propagateCanonical(
   db: SqlDriver,
   change: SourceChange,
   at: string = new Date().toISOString(),
+  registry: DerivativeRegistry = derivativeRegistry,
 ): { propagation: RegistryPropagation; report: CanonicalReport } {
   const report: CanonicalReport = {
     versions: 0,
@@ -400,7 +417,7 @@ export function propagateCanonical(
   const run: Run = { report, at, invalidationIds: new Set() };
   running = run;
   try {
-    const propagation = derivativeRegistry.propagate(db, change);
+    const propagation = registry.propagate(db, change);
     const noted = [...run.invalidationIds];
     if (noted.length !== 1 || noted[0] !== propagation.invalidationId) {
       throw new Error(

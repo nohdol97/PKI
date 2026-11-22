@@ -162,7 +162,6 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
       }),
       ...adapters,
       importer: productImporter(db, { runner, projections }),
-      projections,
     });
     valid = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
   });
