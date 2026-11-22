@@ -18,4 +18,11 @@ describe("connector-example.violations", () => {
   ] as const)("checkConnector reports %s for its variant", async (code, create) => {
     expect(await checkConnector(create, { config: EARLIER, later: LATER })).toEqual([code]);
   });
+
+  it("the responds-before-init variant answers getChanges, and only that, before initialize", async () => {
+    const variant = createEarlyAnswerConnector();
+    const page = await variant.getChanges(null, { limit: 1, signal: new AbortController().signal });
+    expect(page).toEqual({ changes: [], nextCursor: "seq:0", hasMore: false });
+    await expect(variant.getDocument({ namespace: "", externalId: "note-1" })).rejects.toThrow();
+  });
 });

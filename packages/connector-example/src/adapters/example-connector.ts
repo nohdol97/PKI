@@ -28,7 +28,8 @@ interface Origin {
   entries: { seq: number; change: Change }[];
 }
 
-const CURSOR = /^seq:(\d{1,15})$/;
+// As many digits as the largest `seq` a config may hold (a safe integer).
+const CURSOR = /^seq:(\d{1,16})$/;
 const idOf = (change: Change) =>
   change.kind === "upsert" ? change.record.externalId : change.externalId;
 

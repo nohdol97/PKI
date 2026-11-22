@@ -21,12 +21,14 @@ const identity = (change: Change) =>
   `${change.kind} ${change.kind === "upsert" ? change.record.externalId : change.externalId}`;
 async function readAll(connector: Connector, cursor: string | null, limit: number) {
   const changes: Change[] = [];
-  for (;;) {
+  // Bounded: a Connector that never ends its read fails the test instead of hanging it.
+  for (let pages = 0; pages < 20; pages++) {
     const page = await connector.getChanges(cursor, { limit, signal: signal() });
     changes.push(...(page.changes as Change[]));
     cursor = page.nextCursor;
     if (!page.hasMore) return { changes, cursor };
   }
+  throw new Error("the read did not end within 20 pages");
 }
 
 describe("connector-example.contract", () => {
@@ -86,6 +88,20 @@ describe("connector-example", () => {
       expect(page).toMatchObject({ changes: [], hasMore: false, cursorExpired: true });
     },
   );
+
+  it("takes back the cursor of the largest sequence number it accepts", async () => {
+    const [note] = EARLIER.notes;
+    const config = { namespace: "n", notes: [{ ...note, seq: Number.MAX_SAFE_INTEGER }] };
+    const connector = await started(config);
+    const { changes, cursor } = await readAll(connector, null, 10);
+    expect(changes).toHaveLength(1);
+    expect(cursor).toBe(`seq:${Number.MAX_SAFE_INTEGER}`);
+    expect(await connector.getChanges(cursor, { limit: 10, signal: signal() })).toEqual({
+      changes: [],
+      nextCursor: cursor,
+      hasMore: false,
+    });
+  });
 
   it("refuses a limit below 1 instead of returning the cursor it was given", async () => {
     const connector = await started(EARLIER);
