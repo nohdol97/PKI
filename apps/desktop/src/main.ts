@@ -40,7 +40,7 @@ import {
   switches,
   WEB_ROOT,
 } from "./layout.ts";
-import { createNormalizerHostBroker, startNormalizerHostProcess } from "./normalizer-host.ts";
+import { createProductNormalizerHostBroker } from "./normalizer-host.ts";
 import { loadScreens, lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
@@ -104,13 +104,10 @@ async function run() {
         secrets,
         token,
         normalizerHost: (backendChild) =>
-          createNormalizerHostBroker({
-            // the bundled host entry, no arguments, no environment (I02B-R22, I02B-C50)
-            forkHost: () =>
-              startNormalizerHostProcess(
-                (entry, args, options) => utilityProcess.fork(entry, args, options),
-                NORMALIZER_HOST_ENTRY,
-              ),
+          // the bundled host entry, no arguments, no environment (I02B-R22, I02B-C50)
+          createProductNormalizerHostBroker({
+            fork: (entry, args, options) => utilityProcess.fork(entry, args, options),
+            entry: NORMALIZER_HOST_ENTRY,
             newChannel: () => new MessageChannelMain(),
             backend: backendChild,
           }),

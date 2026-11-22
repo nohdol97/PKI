@@ -19,6 +19,30 @@ export interface BackendEnd {
   postMessage(message: unknown, transfer?: readonly unknown[]): void;
 }
 
+/** What `utilityProcess.fork` is called with (Electron's, or a fake in tests). */
+export type ForkUtility = (
+  entry: string,
+  args: string[],
+  options: { env: Record<string, string>; serviceName: string; stdio: "ignore" },
+) => UtilityLike;
+
+/**
+ * The shell's broker as the product builds it (main.ts): the host is the bundled entry, started with no
+ * argument and an empty environment, whatever a request carries (I02B-C50).
+ */
+export function createProductNormalizerHostBroker(options: {
+  fork: ForkUtility;
+  entry: string;
+  newChannel: BrokerOptions["newChannel"];
+  backend: BackendEnd;
+}): NormalizerHostBroker {
+  return createNormalizerHostBroker({
+    forkHost: () => startNormalizerHostProcess(options.fork, options.entry),
+    newChannel: options.newChannel,
+    backend: options.backend,
+  });
+}
+
 /** The part of Electron's `utilityProcess.fork` result the shell uses. */
 export interface UtilityLike {
   readonly pid: number | undefined;
@@ -33,11 +57,7 @@ export interface UtilityLike {
  * what the backend sent reaches this call (I02B-C50).
  */
 export function startNormalizerHostProcess(
-  fork: (
-    entry: string,
-    args: string[],
-    options: { env: Record<string, string>; serviceName: string; stdio: "ignore" },
-  ) => UtilityLike,
+  fork: ForkUtility,
   entry: string,
   args: readonly string[] = [],
 ): HostProcess {
@@ -101,24 +121,35 @@ export function createNormalizerHostBroker(options: BrokerOptions): NormalizerHo
     }
   };
 
-  async function endLive() {
+  /** Waits for `current` to exit for `ms`, with a timer of its own each time. */
+  const exitsWithin = (current: Live, ms: number) =>
+    Promise.race([
+      current.exited.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), ms).unref()),
+    ]);
+
+  /**
+   * Ends the live host and says whether it is gone. A host that is still there after kill() and
+   * forceKill() (or one that cannot be forced: no pid) is not gone: the caller starts no next host over it.
+   */
+  async function endLive(): Promise<boolean> {
     const current = live;
-    if (current === undefined) return;
+    if (current === undefined) return true;
     live = undefined;
     current.host.kill();
-    const timer = new Promise<void>((resolve) => setTimeout(resolve, killAfterMs).unref());
-    await Promise.race([current.exited, timer]);
-    if (!current.gone) {
-      current.host.forceKill?.();
-      await Promise.race([current.exited, timer]);
-    }
+    if (await exitsWithin(current, killAfterMs)) return true;
+    current.host.forceKill?.();
+    return exitsWithin(current, killAfterMs);
   }
 
   async function serve(id: number) {
+    let ports: { port1: unknown; port2: unknown } | undefined;
     try {
-      await endLive();
+      // never two hosts: the next one starts over a host that is gone, or not at all
+      if (!(await endLive())) throw new Error("the previous host is still alive");
       if (stopped) return;
-      const { port1, port2 } = options.newChannel();
+      ports = options.newChannel();
+      const { port1, port2 } = ports;
       const host = options.forkHost();
       const current: Live = {
         id,
@@ -138,6 +169,14 @@ export function createNormalizerHostBroker(options: BrokerOptions): NormalizerHo
       host.postMessage({ type: "port" }, [port1]);
       tell({ type: "normalizer-host", id }, [port2]);
     } catch {
+      // the ports of a host that did not start are closed, not left to the garbage collector
+      for (const port of [ports?.port1, ports?.port2]) {
+        try {
+          (port as { close?: () => void } | undefined)?.close?.();
+        } catch {
+          // already closed
+        }
+      }
       tell({ type: "normalizer-host-failed", id });
     }
   }

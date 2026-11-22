@@ -61,7 +61,9 @@ test("the app folder is laid out for Electron", () => {
 
 test("the normalizer host and its worker are the product's, not the tests' (I02B-R22, R25)", () => {
   // the host program and the I02-A normalizer are live in their bundles
-  expect(report.bundles["backend/host.js"]).toContain("packages/document-normalize/src/host.ts");
+  expect(report.bundles["backend/host.js"]).toContain(
+    "packages/document-normalize/src/host-core.ts",
+  );
   expect(report.bundles["backend/isolated-worker.js"]).toContain(
     "packages/document-normalize/src/normalize.ts",
   );
@@ -75,6 +77,8 @@ test("the normalizer host and its worker are the product's, not the tests' (I02B
   const host = readFileSync(join(APP_DIR, "backend/host.js"), "utf8");
   expect(host).toContain("isolated-worker");
   expect(host).not.toContain("bomb");
+  // and takes no argument naming another worker file: that seam is the test host's alone
+  expect(host).not.toContain("--worker");
 });
 
 test("no bundle kept a test-only, development-only or source-run module", () => {

@@ -172,6 +172,106 @@ describe("results and reuse", () => {
   });
 });
 
+describe("the host is not trusted (I02B-R23)", () => {
+  it("a result that is not a NormalizeResult is worker-failed, the host is ended, the file is not retried, and nothing of it is returned", async () => {
+    const { spawner, hosts } = spawnerOf(
+      (n) =>
+        new FakeHost(
+          n === 1
+            ? (job) => ({
+                type: "result",
+                id: job.id,
+                result: {
+                  ok: true,
+                  document: { blocks: "not-an-array" },
+                  injected: { path: "/etc/passwd" },
+                },
+              })
+            : ok,
+        ),
+    );
+    const n = createIsolatedNormalizer({ spawner, ...LIMITS });
+    const result = await n.normalize(file(1));
+    expect(result).toMatchObject({ ok: false, error: { code: "worker-failed" } });
+    expect(JSON.stringify(result)).not.toContain("passwd");
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0]?.killed).toBe(true);
+    expect((await n.normalize(file(2))).ok).toBe(true);
+    expect(hosts).toHaveLength(2);
+  });
+});
+
+describe("the size limit comes first (I02B-R22)", () => {
+  it("a file over maxFileBytes is too-large without a host: nothing is spawned or copied", async () => {
+    const { spawner, hosts } = spawnerOf(() => new FakeHost(ok));
+    const n = createIsolatedNormalizer({ spawner, ...LIMITS });
+    const result = await n.normalize(
+      { bytes: new Uint8Array(10), name: "big.md" },
+      { limits: { maxFileBytes: 9 } },
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: "too-large", detail: { limit: 9 } } });
+    expect(hosts).toHaveLength(0);
+    // at the limit it is a job
+    expect(
+      (
+        await n.normalize(
+          { bytes: new Uint8Array(9), name: "ok.md" },
+          { limits: { maxFileBytes: 9 } },
+        )
+      ).ok,
+    ).toBe(true);
+  });
+});
+
+describe("close and recheck", () => {
+  it("close while the host is still starting ends it: the job does not run and answers worker-failed", async () => {
+    let late: FakeHost | undefined;
+    const spawner: HostSpawner = {
+      spawn: () =>
+        new Promise((resolve) => setTimeout(() => resolve((late = new FakeHost(ok))), 50)),
+    };
+    const n = createIsolatedNormalizer({ spawner, ...LIMITS });
+    const running = n.normalize(file(1));
+    await new Promise((r) => setTimeout(r, 10));
+    await n.close();
+    expect(await running).toMatchObject({ ok: false, error: { code: "worker-failed" } });
+    expect(late?.killed).toBe(true);
+    expect(late?.jobs()).toHaveLength(0);
+    // and it was ended before it was told anything
+    expect(late?.posted).toEqual([]);
+  });
+
+  it("close while the host is up but not yet ready ends it too", async () => {
+    const { spawner, hosts } = spawnerOf(() => new FakeHost(ok, false));
+    const n = createIsolatedNormalizer({ spawner, ...LIMITS });
+    const running = n.normalize(file(1));
+    await vi.waitFor(() => expect(hosts).toHaveLength(1));
+    await n.close();
+    expect(await running).toMatchObject({ ok: false, error: { code: "worker-failed" } });
+    expect(hosts[0]?.killed).toBe(true);
+  });
+
+  it("recheck does not reject when the channel fails to send: the canary did not come back", async () => {
+    let broken = false;
+    const { spawner } = spawnerOf(() => {
+      const host = new FakeHost(() => "die");
+      const post = host.post.bind(host);
+      host.post = (message: unknown) => {
+        if (broken && (message as { type?: string }).type === "job")
+          throw new Error("ERR_IPC_CHANNEL_CLOSED");
+        post(message);
+      };
+      return host;
+    });
+    const n = createIsolatedNormalizer({ spawner, ...LIMITS });
+    for (const i of [1, 2, 3]) await n.normalize(file(i));
+    expect(n.unavailable()).toBe(true);
+    broken = true;
+    await expect(n.recheck()).resolves.toBe(false);
+    expect(n.unavailable()).toBe(true);
+  });
+});
+
 describe("what a host that ends a job itself tells the backend", () => {
   it.each(["timed-out", "resource-exceeded", "worker-failed"] as const)(
     "%s is the result, the host is ended, the file is not retried, the next job has a new host",
@@ -363,6 +463,24 @@ describe("a death without a word (I02B-C51)", () => {
     const { spawner, hosts } = spawnerOf(() => new FakeHost(() => "die"));
     const n = createIsolatedNormalizer({ spawner, ...LIMITS });
     for (let i = 0; i < 3; i++) await n.normalize(file(1));
+    expect(hosts.flatMap((h) => h.jobs()).filter((j) => j.name === CANARY.name)).toHaveLength(0);
+    expect(n.unavailable()).toBe(false);
+  });
+
+  it("a death, a death, a limit the host reported, a death: the limit breaks the run, no canary", async () => {
+    const { spawner, hosts } = spawnerOf(
+      () =>
+        new FakeHost((job) =>
+          job.name === "limit.md" ? { type: "limit", id: job.id, code: "timed-out" } : "die",
+        ),
+    );
+    const n = createIsolatedNormalizer({ spawner, ...LIMITS });
+    await n.normalize(file(1));
+    await n.normalize(file(2));
+    expect(await n.normalize({ ...file(3), name: "limit.md" })).toMatchObject({
+      error: { code: "timed-out" },
+    });
+    await n.normalize(file(4));
     expect(hosts.flatMap((h) => h.jobs()).filter((j) => j.name === CANARY.name)).toHaveLength(0);
     expect(n.unavailable()).toBe(false);
   });

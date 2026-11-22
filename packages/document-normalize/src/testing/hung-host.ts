@@ -9,3 +9,5 @@ process.on("message", (message: { type?: string }) => {
   }
 });
 process.send?.({ type: "ready", processType: null, parentKind: "node-ipc" });
+// a stuck host must not outlive its test: it leaves when the channel closes (when the loop is not running)
+process.on("disconnect", () => process.exit(0));

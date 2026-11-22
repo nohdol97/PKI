@@ -18,11 +18,11 @@ const appDir = import.meta.dirname;
 const scenario =
   process.argv.find((a) => a.startsWith("--scenario="))?.slice("--scenario=".length) ?? "basic";
 // the product's own worker for the scenarios that measure it; the test worker for the rest
-const PRODUCT_WORKER_SCENARIOS = ["product-worker", "g23"];
-const hostArgs = PRODUCT_WORKER_SCENARIOS.includes(scenario)
-  ? []
-  : ["--worker", join(appDir, "backend", "bomb-worker.js")];
-const hostEntry = join(appDir, "backend", "host.js");
+const PRODUCT_WORKER_SCENARIOS = ["product-worker", "g23", "bad-requests"];
+const product = PRODUCT_WORKER_SCENARIOS.includes(scenario);
+// the product's host entry takes no argument; the test host entry takes the test worker
+const hostArgs = product ? [] : ["--worker", join(appDir, "backend", "bomb-worker.js")];
+const hostEntry = join(appDir, "backend", product ? "host.js" : "test-host.js");
 
 const report = (record: object) => console.log(`T ${JSON.stringify(record)}`);
 app.dock?.hide();

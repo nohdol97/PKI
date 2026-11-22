@@ -36,5 +36,3 @@ export type {
   IsolatedResult,
 } from "./isolated.ts";
 export { createForkSpawner } from "./spawn-node.ts";
-// inputs for the tests of the isolated normalizer (I02B-R25): slow and heavy documents rebuilt on demand
-export { BOMB, makePdfBomb, makeSlowMarkdown, makeTriggerXlsx } from "./testing/time-bombs.ts";

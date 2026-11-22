@@ -2,6 +2,7 @@
 // `isolated-worker.ts`, plus jobs named in `BOMB` that never end or fill memory, so every limit of the
 // host is proven without a parser. Any other name is an ordinary file. Handed to the host with
 // `--worker <this file>`; the product host never runs it.
+import { getHeapStatistics } from "node:v8";
 import { parentPort, workerData } from "node:worker_threads";
 import { normalizeDocument } from "../normalize.ts";
 import type { WorkerJob, WorkerReply, WorkerUp } from "../host-protocol.ts";
@@ -34,7 +35,12 @@ port.on("message", (job: WorkerJob) => {
         keep.push(block);
         total += block.length;
         Atomics.store(record, 0, BigInt(total));
-        if (total > maxExternalMemoryBytes && Atomics.load(record, 1) === 0n) {
+        // the crossing is recorded in the quantity the host reads (this isolate's external_memory,
+        // which also holds the worker's own baseline), not in this loop's own total
+        if (
+          getHeapStatistics().external_memory > maxExternalMemoryBytes &&
+          Atomics.load(record, 1) === 0n
+        ) {
           Atomics.store(record, 1, BigInt(Date.now()));
         }
       }

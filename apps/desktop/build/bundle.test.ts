@@ -172,6 +172,31 @@ describe("build check", () => {
     );
   });
 
+  it("refuses the normalizer's testing folder by path and its `.slow.ts` files by name (I02B-R25)", () => {
+    for (const path of [
+      "packages/document-normalize/src/testing/bomb-worker.ts",
+      "packages/document-normalize/src/testing/test-host.ts",
+      "packages/document-normalize/src/testing/time-bombs.ts",
+      "packages/document-normalize/src/trigger-repeat.slow.ts",
+    ]) {
+      expect(forbiddenReason(join(REPO_ROOT, path)), path).toMatch(/is a test-only module/);
+    }
+    // the product's own files are not
+    expect(
+      forbiddenReason(join(REPO_ROOT, "packages/document-normalize/src/host.ts")),
+    ).toBeUndefined();
+  });
+
+  it("fails a bundle that reaches the normalizer's time-bomb inputs", async () => {
+    await expect(
+      bundle({
+        input: "packages/document-normalize/src/testing/time-bombs.ts",
+        outFile: join(out, "bombs.mjs"),
+        buildKind: "production",
+      }),
+    ).rejects.toThrow(/test-only module/);
+  });
+
   it("fails a bundle that reaches a test-only module, by path rather than by name", async () => {
     const dir = join(REPO_ROOT, "apps/desktop/build/.bundle-test-input");
     mkdirSync(dir, { recursive: true });

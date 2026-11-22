@@ -19,11 +19,16 @@ const ENTRIES = [
   ["apps/desktop/artifact/normalizer-main.ts", "main.js"],
   ["backend/src/normalizer-stand-in.test-support.ts", "backend/stand-in.js"],
   ["packages/document-normalize/src/host.ts", "backend/host.js"],
+  ["packages/document-normalize/src/testing/test-host.ts", "backend/test-host.js"],
   ["packages/document-normalize/src/isolated-worker.ts", "backend/isolated-worker.js"],
   ["packages/document-normalize/src/testing/bomb-worker.ts", "backend/bomb-worker.js"],
 ] as const;
 const TEST_ONLY = [
   "apps/desktop/artifact/normalizer-main.ts",
+  "packages/document-normalize/src/testing/test-host.ts",
+  "packages/document-normalize/src/testing/bomb-worker.ts",
+  "packages/document-normalize/src/testing/time-bombs.ts",
+  "packages/document-normalize/src/testing/ooxml-builder.ts",
   "backend/src/normalizer-stand-in.test-support.ts",
 ];
 
@@ -178,6 +183,7 @@ test("the shell takes nothing but a number from a request, and starts only the b
   expect(hosts.spawned).toBe(1);
   expect(hosts.forks).toHaveLength(1);
   expect(hosts.forks[0]?.entry.endsWith("backend/host.js")).toBe(true);
+  expect(hosts.forks[0]?.args).toEqual([]);
   expect(hosts.forks[0]?.env).toEqual({});
   expect(JSON.stringify(hosts.forks)).not.toMatch(/\/bin\/sh|--inspect|"A"/);
 });

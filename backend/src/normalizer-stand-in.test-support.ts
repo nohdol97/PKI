@@ -2,11 +2,11 @@
 // like the real backend. It answers the shell's `start`, then runs the scenario the test main names
 // (`test-run`), asking for normalizer hosts through the backend's real adapter ⓑ file and the real
 // isolated normalizer. Everything it learns goes to the test main as `test-log` records.
+/* eslint-disable pki/module-boundary -- the time-bomb inputs are test code the package's entry does not export (a product bundle refuses them: bundle.ts), so this test file reaches them by path (I02B-C50) */
+import { BOMB, makeTriggerXlsx } from "../../packages/document-normalize/src/testing/time-bombs.ts";
 import { electronHostChannel } from "./normalizer-host-electron.ts";
 import {
-  BOMB,
   createIsolatedNormalizer,
-  makeTriggerXlsx,
   normalizeDocument,
   type HostHandle,
   type HostSpawner,

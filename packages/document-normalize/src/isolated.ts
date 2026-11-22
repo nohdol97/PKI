@@ -168,6 +168,11 @@ export function createIsolatedNormalizer(options: IsolatedNormalizerOptions): Is
         () => undefined,
       );
       const handle = await Promise.race([spawned, startup]);
+      // closed while the host was starting: it is not kept
+      if (closed) {
+        handle.kill();
+        throw new Error("closed");
+      }
       const c: Conn = { handle, gone: false, waiter: undefined };
       handle.onMessage((raw) => {
         const message = parseFromHost(raw);
@@ -246,21 +251,24 @@ export function createIsolatedNormalizer(options: IsolatedNormalizerOptions): Is
         if (end) drop(c);
         resolve(outcome);
       };
-      void waitFor(c, (m) => (m.type === "result" || m.type === "limit") && m.id === job.id).then(
-        (event) => {
-          if (event === "gone")
-            return finish(closed ? { kind: "aborted" } : { kind: "died" }, false);
-          if (event.type === "result") {
-            return finish({ kind: "result", result: event.result as IsolatedResult }, false);
-          }
-          if (event.type === "limit") {
-            return finish(
-              { kind: "limit", code: event.code, ...(event.diag ? { diag: event.diag } : {}) },
-              true,
-            );
-          }
-        },
-      );
+      void waitFor(
+        c,
+        (m) =>
+          m.type === "invalid" || ((m.type === "result" || m.type === "limit") && m.id === job.id),
+      ).then((event) => {
+        if (event === "gone") return finish(closed ? { kind: "aborted" } : { kind: "died" }, false);
+        // a result that is not a NormalizeResult: the host is not to be trusted, it goes
+        if (event.type === "invalid") return finish({ kind: "limit", code: "worker-failed" }, true);
+        if (event.type === "result") {
+          return finish({ kind: "result", result: event.result as IsolatedResult }, false);
+        }
+        if (event.type === "limit") {
+          return finish(
+            { kind: "limit", code: event.code, ...(event.diag ? { diag: event.diag } : {}) },
+            true,
+          );
+        }
+      });
       if (job.signal) {
         onAbort = () => finish({ kind: "aborted" }, true);
         if (job.signal.aborted) onAbort();
@@ -311,11 +319,23 @@ export function createIsolatedNormalizer(options: IsolatedNormalizerOptions): Is
   return {
     normalize(input, opts = {}) {
       return enqueue(async () => {
+        let limits;
         try {
           // a bad limits object is the caller's bug; the Promise still does not reject
-          resolveLimits(opts.limits);
+          limits = resolveLimits(opts.limits);
         } catch {
           return fail("worker-failed");
+        }
+        // too large is the normalizer's own answer, given before the bytes are copied to a host
+        if (input.bytes.length > limits.maxFileBytes) {
+          return {
+            ok: false,
+            error: {
+              code: "too-large",
+              message: `입력이 maxFileBytes(${limits.maxFileBytes})보다 크다`,
+              detail: { limit: limits.maxFileBytes },
+            },
+          };
         }
         try {
           return await runJob({
@@ -335,7 +355,8 @@ export function createIsolatedNormalizer(options: IsolatedNormalizerOptions): Is
     recheck() {
       return enqueue(async () => {
         if (!unavailable || closed) return !unavailable;
-        if (!(await canary())) return false;
+        // like normalize, it does not reject: a channel that fails to send is a canary that did not come back
+        if (!(await canary().catch(() => false))) return false;
         unavailable = false;
         deaths.clear();
         return true;

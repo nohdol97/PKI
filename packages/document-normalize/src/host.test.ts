@@ -23,6 +23,7 @@ const BOMB_WORKER = here("./testing/bomb-worker.ts");
 const NET_WORKER = here("./testing/net-watch-worker.ts");
 const HUNG_HOST = here("./testing/hung-host.ts");
 const HOST = here("./host.ts");
+const TEST_HOST = here("./testing/test-host.ts");
 
 const MARKDOWN = new TextEncoder().encode("# Title\n\nSome text.\n");
 const small = { bytes: MARKDOWN, name: "small.md" };
@@ -71,10 +72,13 @@ function make(options: {
 }) {
   const normalizer = createIsolatedNormalizer({
     spawner: watched(
-      createForkSpawner({
-        ...(options.workerFile === undefined ? {} : { workerFile: options.workerFile }),
-        ...(options.hostFile === undefined ? {} : { hostFile: options.hostFile }),
-      }),
+      createForkSpawner(
+        options.workerFile !== undefined
+          ? { hostFile: TEST_HOST, args: ["--worker", options.workerFile] }
+          : options.hostFile !== undefined
+            ? { hostFile: options.hostFile }
+            : {},
+      ),
     ),
     timeoutMs: options.timeoutMs ?? 1_000,
     maxHeapMb: options.maxHeapMb ?? 256,
@@ -191,18 +195,23 @@ describe("memory and other ends of a job (I02B-C16)", () => {
       serialization: "advanced",
       stdio: ["ignore", "ignore", "ignore", "ipc"],
     });
-    const ready = new Promise((resolve) => child.once("message", resolve));
-    child.send({
-      type: "init",
-      maxHeapMb: 256,
-      maxExternalMemoryBytes: 1024 ** 3,
-      externalPollMs: 250,
-      timeoutMs: 30_000,
-    });
-    await ready;
-    const pid = child.pid;
-    child.disconnect();
-    expect(await until(() => !alive(pid), 2_000)).toBe(true);
+    // a host that fails this test must not outlive it
+    try {
+      const ready = new Promise((resolve) => child.once("message", resolve));
+      child.send({
+        type: "init",
+        maxHeapMb: 256,
+        maxExternalMemoryBytes: 1024 ** 3,
+        externalPollMs: 250,
+        timeoutMs: 30_000,
+      });
+      await ready;
+      const pid = child.pid;
+      child.disconnect();
+      expect(await until(() => !alive(pid), 2_000)).toBe(true);
+    } finally {
+      child.kill("SIGKILL");
+    }
   });
 });
 

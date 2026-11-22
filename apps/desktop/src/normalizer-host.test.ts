@@ -2,23 +2,31 @@
 // on a request from the backend, hands out the two ends of a port, keeps one host per backend, and
 // takes nothing from a request but a number. The real processes are in artifact.normalizer.e2e.ts.
 import { describe, expect, it, vi } from "vitest";
+import { NORMALIZER_HOST_ENTRY } from "./layout.production.ts";
 import {
   createNormalizerHostBroker,
+  createProductNormalizerHostBroker,
   startNormalizerHostProcess,
   type HostProcess,
   type UtilityLike,
 } from "./normalizer-host.ts";
 
+/** How a fake host ends: at once, after a delay, or never. */
+type Exits = "at-once" | number | "never";
+
 class FakeHost implements HostProcess {
-  pid = 100;
+  pid: number | undefined = 100;
   readonly sent: { message: unknown; transfer: readonly unknown[] | undefined }[] = [];
   killed = false;
   forced = false;
+  alive = true;
   private onExit: (() => void)[] = [];
-  private readonly ignoresKill: boolean;
-  /** `ignoresKill`: stays up until forced, like a process that ignored SIGTERM. */
-  constructor(ignoresKill = false) {
-    this.ignoresKill = ignoresKill;
+  private readonly afterKill: Exits;
+  private readonly afterForce: Exits;
+  /** `afterKill`: stays up when `"never"`, like a process that ignored SIGTERM. `afterForce`: likewise. */
+  constructor(afterKill: Exits = "at-once", afterForce: Exits = "at-once") {
+    this.afterKill = afterKill;
+    this.afterForce = afterForce;
   }
   postMessage(message: unknown, transfer?: readonly unknown[]) {
     this.sent.push({ message, transfer });
@@ -26,35 +34,52 @@ class FakeHost implements HostProcess {
   once(_event: "exit", listener: () => void) {
     this.onExit.push(listener);
   }
+  private endAfter(how: Exits) {
+    if (how === "never") return;
+    if (how === "at-once") this.exit();
+    else setTimeout(() => this.exit(), how);
+  }
   kill() {
     this.killed = true;
-    if (!this.ignoresKill) this.exit();
+    this.endAfter(this.afterKill);
     return true;
   }
   forceKill() {
     this.forced = true;
-    this.exit();
+    this.endAfter(this.afterForce);
   }
   exit() {
+    this.alive = false;
     for (const l of this.onExit.splice(0)) l();
   }
 }
 
-function setup(options: { ignoresKill?: boolean } = {}) {
+function setup(options: { afterKill?: Exits; afterForce?: Exits; forkThrows?: boolean } = {}) {
   const hosts: FakeHost[] = [];
   const toBackend: { message: unknown; transfer: readonly unknown[] | undefined }[] = [];
+  const closedPorts: string[] = [];
+  /** The most hosts alive at the moment one was started (counting the new one). */
+  let maxAlive = 0;
   let channels = 0;
   const broker = createNormalizerHostBroker({
     forkHost: () => {
-      const host = new FakeHost(options.ignoresKill);
+      if (options.forkThrows) throw new Error("fork failed");
+      const host = new FakeHost(options.afterKill, options.afterForce);
       hosts.push(host);
+      maxAlive = Math.max(maxAlive, hosts.filter((h) => h.alive).length);
       return host;
     },
-    newChannel: () => ({ port1: `host-port-${++channels}`, port2: `backend-port-${channels}` }),
+    newChannel: () => {
+      const n = ++channels;
+      return {
+        port1: { name: `host-port-${n}`, close: () => closedPorts.push(`host-port-${n}`) },
+        port2: { name: `backend-port-${n}`, close: () => closedPorts.push(`backend-port-${n}`) },
+      };
+    },
     backend: { postMessage: (message, transfer) => toBackend.push({ message, transfer }) },
     killTimeoutMs: 50,
   });
-  return { broker, hosts, toBackend };
+  return { broker, hosts, toBackend, closedPorts, maxAlive: () => maxAlive };
 }
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -64,9 +89,14 @@ describe("normalizer host broker", () => {
     broker.start(7);
     await tick();
     expect(hosts).toHaveLength(1);
-    expect(hosts[0]?.sent).toEqual([{ message: { type: "port" }, transfer: ["host-port-1"] }]);
+    expect(hosts[0]?.sent).toEqual([
+      { message: { type: "port" }, transfer: [expect.objectContaining({ name: "host-port-1" })] },
+    ]);
     expect(toBackend).toEqual([
-      { message: { type: "normalizer-host", id: 7 }, transfer: ["backend-port-1"] },
+      {
+        message: { type: "normalizer-host", id: 7 },
+        transfer: [expect.objectContaining({ name: "backend-port-1" })],
+      },
     ]);
   });
 
@@ -83,14 +113,50 @@ describe("normalizer host broker", () => {
     expect(hosts[0]?.sent).toHaveLength(1);
   });
 
-  it("a host that ignores kill is forced, and the next one starts after it is gone", async () => {
-    const { broker, hosts } = setup({ ignoresKill: true });
+  it("a host that ignores kill and ends only some time after it is forced: the next one starts after it is gone (never two alive)", async () => {
+    // exits 30 ms after forceKill(), asynchronously: the wait after forceKill needs a timer of its own
+    const { broker, hosts, maxAlive } = setup({ afterKill: "never", afterForce: 30 });
     broker.start(1);
     await tick();
     broker.start(2);
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 250));
     expect(hosts[0]?.forced).toBe(true);
     expect(hosts).toHaveLength(2);
+    expect(maxAlive()).toBe(1);
+  });
+
+  it("a host that stays alive through kill and forceKill: no second host is started, the request is answered `failed`, its ports are closed", async () => {
+    const { broker, hosts, toBackend, closedPorts } = setup({
+      afterKill: "never",
+      afterForce: "never",
+    });
+    broker.start(1);
+    await tick();
+    broker.start(2);
+    await new Promise((r) => setTimeout(r, 250));
+    expect(hosts).toHaveLength(1);
+    expect(toBackend.at(-1)?.message).toEqual({ type: "normalizer-host-failed", id: 2 });
+    // no port pair was made for request 2, and the first host's ports went to the backend and the host
+    expect(closedPorts).toEqual([]);
+  });
+
+  it("a host without a pid cannot be forced: the same answer", async () => {
+    const { broker, hosts, toBackend } = setup({ afterKill: "never", afterForce: "never" });
+    broker.start(1);
+    await tick();
+    if (hosts[0]) hosts[0].pid = undefined;
+    broker.start(2);
+    await new Promise((r) => setTimeout(r, 250));
+    expect(hosts).toHaveLength(1);
+    expect(toBackend.at(-1)?.message).toEqual({ type: "normalizer-host-failed", id: 2 });
+  });
+
+  it("when the host cannot be forked the port pair that was made is closed", async () => {
+    const { broker, toBackend, closedPorts } = setup({ forkThrows: true });
+    broker.start(1);
+    await tick();
+    expect(toBackend.at(-1)?.message).toEqual({ type: "normalizer-host-failed", id: 1 });
+    expect(closedPorts.sort()).toEqual(["backend-port-1", "host-port-1"]);
   });
 
   it("while one start is in progress only the newest waiting request is kept; the others are told it failed", async () => {
@@ -170,5 +236,31 @@ describe("startNormalizerHostProcess", () => {
     expect(calls).toEqual([
       ["/app/backend/host.js", [], { env: {}, serviceName: "PKI normalizer", stdio: "ignore" }],
     ]);
+  });
+});
+
+describe("the product's broker (what main.ts builds)", () => {
+  it("starts the bundled entry with no argument, an empty environment and no streams, whatever the request carried", async () => {
+    const calls: unknown[][] = [];
+    const child: UtilityLike = { pid: 5, postMessage: vi.fn(), once: vi.fn(), kill: () => true };
+    const broker = createProductNormalizerHostBroker({
+      fork: (entry, args, options) => {
+        calls.push([entry, args, options]);
+        return child;
+      },
+      entry: NORMALIZER_HOST_ENTRY,
+      newChannel: () => ({ port1: {}, port2: {} }),
+      backend: { postMessage: vi.fn() },
+    });
+    // the request is a number: there is nothing else to pass on
+    broker.start(1);
+    await tick();
+    expect(calls).toEqual([
+      [NORMALIZER_HOST_ENTRY, [], { env: {}, serviceName: "PKI normalizer", stdio: "ignore" }],
+    ]);
+  });
+
+  it("the production layout's entry is the bundled backend/host.js next to main.js", () => {
+    expect(NORMALIZER_HOST_ENTRY.endsWith("/backend/host.js")).toBe(true);
   });
 });

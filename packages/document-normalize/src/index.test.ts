@@ -11,4 +11,10 @@ describe("public entry", () => {
     expect(api.NORMALIZE_ERROR_CODES).toContain("zip-limit");
     expect(api.DOCUMENT_FORMATS).toHaveLength(8);
   });
+
+  it("does not export the test inputs: a product import of the entry cannot reach them (I02B-R25)", () => {
+    for (const name of ["BOMB", "makeSlowMarkdown", "makePdfBomb", "makeTriggerXlsx"]) {
+      expect(api).not.toHaveProperty(name);
+    }
+  });
 });

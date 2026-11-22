@@ -27,7 +27,13 @@ export const REPLACEMENTS: Readonly<Record<string, string>> = {
 };
 
 /** Test-only or development-only code, refused by path (V02 spec "T10이 넘기는 것" 5). */
-const FORBIDDEN_PREFIXES = ["packages/testkit/", "apps/desktop/e2e/", "apps/desktop/artifact/"];
+const FORBIDDEN_PREFIXES = [
+  "packages/testkit/",
+  "apps/desktop/e2e/",
+  "apps/desktop/artifact/",
+  // the normalizer's test workers, test host and time-bomb inputs (I02B-R25)
+  "packages/document-normalize/src/testing/",
+];
 // named as well as caught by the patterns below (V02 spec "T10이 넘기는 것" 5, T11 7):
 // the seed and the test-build doubles and shell entry, the swapped configuration's
 // doubles and preload (V01 spec "T17이 넘기는 것" 3), and the development entry
@@ -46,7 +52,7 @@ const FORBIDDEN_FILES = [
   // the ledger crash test's child, killed after it wrote a ledger line and before COMMIT (I04-R17)
   "backend/src/ledger-kill.child.ts",
 ];
-const TEST_FILE = /\.(test|e2e|setup|test-support)\.[cm]?[jt]sx?$/;
+const TEST_FILE = /\.(test|e2e|setup|test-support|slow)\.[cm]?[jt]sx?$/;
 /** Any `e2e/` folder: E2E code and its helpers, whatever their file names. */
 const E2E_FOLDER = /(^|\/)e2e\//;
 /** Reached through the composition root's static import; must not survive tree-shaking. */
