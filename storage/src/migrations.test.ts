@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(13);
-    expect(migrations).toHaveLength(13);
+    expect(schemaVersion(db)).toBe(14);
+    expect(migrations).toHaveLength(14);
   });
 
   it("is idempotent when re-run", () => {
@@ -1037,7 +1037,7 @@ describe("schema v13 (I04-T05, I04-R9)", () => {
     seedV12();
     const before = seq();
     migrate(db);
-    expect(schemaVersion(db)).toBe(13);
+    expect(schemaVersion(db)).toBe(migrations.length);
     expect(columns("tombstones")).toEqual([
       "source_id",
       "covers_version",
@@ -1107,7 +1107,7 @@ describe("schema v13 (I04-T05, I04-R9)", () => {
     const rows = db.all("SELECT * FROM tombstones ORDER BY source_id");
     const before = seq();
     migrate(db);
-    expect(schemaVersion(db)).toBe(13);
+    expect(schemaVersion(db)).toBe(migrations.length);
     expect(db.all("SELECT * FROM tombstones ORDER BY source_id")).toEqual(rows);
     expect(seq()).toBe(before);
   });

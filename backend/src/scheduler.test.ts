@@ -7,6 +7,7 @@ import {
   readJob,
   registerJob,
   releaseRetryJobs,
+  retryJob,
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
@@ -488,6 +489,28 @@ describe("schedule.pause", () => {
     wall += 1000;
     s.check(); // sees job 1 open: revived
   }
+
+  it("manual-retry.revives-schedule-marker: a dead letter retried by hand that dies before any check saw it open pauses the period", () => {
+    const s = scheduler();
+    const { schedule } = s.ensureSchedule({ kind: "connector-sync", target: "c1", period: hourly });
+    wall = T0 + HOUR + 1000;
+    s.check();
+    finish({ status: "dead_letter", reason: "first" });
+    wall += 1000;
+    s.check();
+    s.enable(schedule.id); // the first is dismissed
+    wall = T0 + 3 * HOUR;
+    s.check();
+    finish({ status: "dead_letter", reason: "second" });
+    wall += 1000;
+    s.check();
+    s.enable(schedule.id); // both are dismissed
+    expect(retryJob(db, 1, new Date(wall))).toBe("queued"); // no check runs between the retry and the death
+    finish({ status: "dead_letter", reason: "third" });
+    wall += 1000;
+    s.check();
+    expect(s.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "third" });
+  });
 
   it("enable dismisses a revived job that already died again, before any check saw it", () => {
     const s = scheduler();

@@ -87,6 +87,15 @@ export function retryJob(db: SqlDriver, id: number, at: Date = new Date()): Retr
            policy_fingerprint = NULL WHERE id = ?`,
         [at.getTime(), id],
       );
+      // a dead letter of a schedule taken up again: its next end is news to the
+      // schedule's pause, even if no check saw it open in between (I03-R20)
+      if (job.status === "dead_letter" && job.scheduleId !== null) {
+        db.run("UPDATE schedules SET revived_job = ?, updated_at = ? WHERE id = ?", [
+          id,
+          at.getTime(),
+          job.scheduleId,
+        ]);
+      }
       return "queued";
     },
     { immediate: true },

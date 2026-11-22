@@ -24,6 +24,7 @@ import {
   retryJob,
 } from "./job-actions.ts";
 import { migrate } from "./migrations.ts";
+import { createSchedule, readSchedule } from "./schedules.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -242,6 +243,46 @@ describe("manual-retry and discard (I03-R12 ① ②, C3)", () => {
     expect(second.registered).toBe(true);
     expect(retryJob(db, first.job.id, at(10))).toBe("duplicate-open");
     expect(state(first.job.id).status).toBe("dead_letter");
+  });
+
+  describe("manual-retry.revives-schedule-marker (I03-T08 handoff)", () => {
+    const schedule = () =>
+      createSchedule(db, {
+        kind: "extract",
+        target: "",
+        period: "{}",
+        zone: "UTC",
+        nextDue: 1,
+        at: 1,
+      }).schedule;
+    const scheduledDeadLetter = (scheduleId: number): StoredJob => {
+      const r = registerJob(db, {
+        kind: "extract",
+        sourceId: 1,
+        fenceVersion: 1,
+        schedule: { id: scheduleId, slot: 1 },
+        at: T0,
+      });
+      if (!r.registered) throw new Error("expected a new job");
+      db.run("UPDATE jobs SET status = 'dead_letter', finished_at = 1 WHERE id = ?", [r.job.id]);
+      return state(r.job.id);
+    };
+
+    it("records the revived job on its schedule, in the retry's transaction", () => {
+      const { id } = schedule();
+      const job = scheduledDeadLetter(id);
+      expect(readSchedule(db, id)?.revivedJob).toBe(0);
+      expect(retryJob(db, job.id, at(10))).toBe("queued");
+      expect(readSchedule(db, id)?.revivedJob).toBe(job.id);
+    });
+
+    it("writes nothing for a job without a schedule, a held job, or a refused retry", () => {
+      const { id } = schedule();
+      retryJob(db, inStatus("dead_letter").id, at(10));
+      retryJob(db, inStatus("held").id, at(10));
+      retryJob(db, scheduledDeadLetter(id).id + 1000, at(10));
+      expect(readSchedule(db, id)?.revivedJob).toBe(0);
+    });
   });
 
   it("discards a dead letter as cancelled, and nothing else", () => {
