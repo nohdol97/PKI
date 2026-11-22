@@ -6,6 +6,8 @@
 import {
   addEvidence,
   attachLedger,
+  defaultScopePolicy,
+  type ScopePolicy,
   canonicalTransaction,
   identityKey,
   insertItem,
@@ -35,7 +37,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { derivativeRegistry } from "./canonical-kinds.ts";
+import { createProductRegistry, derivativeRegistry } from "./canonical-kinds.ts";
 import { COMPLETION_DATE } from "./dependency-delay.ts";
 import { createLedgerReapply, LedgerReapplyError, reapplyLedger } from "./ledger-reapply.ts";
 import { applyTombstone, liftTombstone } from "./tombstone-entry.ts";
@@ -366,6 +368,49 @@ describe("restore.reapply", () => {
     expect(reapplyLedger(old)).toMatchObject({ applied: 1, canonicalSeq: 2 });
     expect(readTombstoneState(old, mail)).toMatchObject({ coversVersion: 1 });
   });
+});
+
+describe("under a scope policy (I04-T09)", () => {
+  const refusing = {
+    ...defaultScopePolicy,
+    allows: () => false,
+    combinable: () => false,
+    strictest: () => ({ incomparable: [] }),
+  } as unknown as ScopePolicy;
+  const throwing = new Proxy(
+    {},
+    {
+      get: () => () => {
+        throw new Error("a scope policy was asked during a deletion");
+      },
+    },
+  ) as unknown as ScopePolicy;
+
+  it.each([
+    ["refusing", refusing],
+    ["throwing", throwing],
+  ])(
+    "a deletion is re-applied under a %s policy, and the source's drop rows go with it",
+    (_name, policy) => {
+      const mail = seedSecond(db);
+      const old = backup(db);
+      del(db);
+      const afterDeletion = state(db);
+      restart(old);
+      const drop = (sourceId: number) =>
+        old.run(
+          "INSERT INTO scope_policy_drops (source_id, version, kind, item_key_hash, reason, at) VALUES (?, 1, 'fact', 'h', 'scope-policy', 'x')",
+          [sourceId],
+        );
+      drop(chat);
+      drop(mail);
+
+      createLedgerReapply(createProductRegistry({ policy }))(old);
+
+      expect(state(old)).toEqual(afterDeletion);
+      expect(old.all("SELECT source_id FROM scope_policy_drops")).toEqual([{ source_id: mail }]);
+    },
+  );
 });
 
 describe("what the ledger and the database say about each other", () => {

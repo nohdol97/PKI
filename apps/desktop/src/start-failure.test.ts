@@ -113,3 +113,25 @@ describe("an adapter no kind covers refuses the start with its own text (I04-R3)
     expect(startFailureText(error)).not.toBe("앱을 시작하지 못했습니다.");
   });
 });
+
+describe("a ledger line that cannot be applied refuses the start with its line number (I04-R17)", () => {
+  it("shows the line number and the recovery steps, nothing else", async () => {
+    const error = await start({
+      type: "failed",
+      reason: "ledger-reapply-failed",
+      line: 7,
+    }).catch((e: unknown) => e);
+    const text = startFailureText(error);
+    expect(text).toContain("7번 줄");
+    expect(text).toContain("장부 파일을 지우지 말고");
+    expect(text).not.toBe("앱을 시작하지 못했습니다.");
+  });
+  it("refuses a line number that is not a positive integer or a string", async () => {
+    for (const line of [0, -1, 1.5, "7 /secret"]) {
+      const error = await start({ type: "failed", reason: "ledger-reapply-failed", line }).catch(
+        (e: unknown) => e,
+      );
+      expect((error as Error).message).toBe("backend sent an unexpected message");
+    }
+  });
+});
