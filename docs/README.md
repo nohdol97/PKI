@@ -31,7 +31,7 @@
 | [specs/2026-11-22-I06-connector-credentials.md](specs/2026-11-22-I06-connector-credentials.md) | 수집기에 자격 증명을 넘기는 경로(I06, #114): V01의 비밀 값 저장소에 인스턴스별 칸으로 두고 `initialize`의 접근자로 넘김, 없음·저장소 불가·읽을 수 없음·거부의 사유와 보류, 누출 없음의 시험, 계약 묶음의 위반 코드, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-22-I07-installed-scopes-file.md](specs/2026-11-22-I07-installed-scopes-file.md) | 설치본이 인스턴스 범위(`site/config/connector-scopes.json`)를 얻는 길(I07, #115): 포크의 등록이 빌드할 때 값을 묶고 실행본은 파일을 읽지 않음, 빌드 판정, 산출물 검사, 설치본 확인 절차, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-22-S01-semantic-registry.md](specs/2026-11-22-S01-semantic-registry.md) | Semantic 등록부(S01): 상태 전이와 변경 이력·취소, 자동 승격 조건, 인식 유형과 confidence의 분리, 사용자 교정 보존, 표기와 문맥별 정의, 유형 정의 변경의 검사 | 확정(잠정 결정 포함) |
-| [specs/2026-11-22-S02-entity-resolution-temporal-graph.md](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) | 개체 해소·시간 그래프·충돌 처리(S02, #23): 지식 유형 16과 관계 유형 11의 판 번호 있는 목록, 식별자·조직·프로젝트·이웃·시간 신호로 만드는 합치기 후보와 동명이인 확인, 행을 옮기지 않는 합치기와 풀기·나누기, 유효 구간과 관측 시각의 분리, SUPERSEDES·CONTRADICTS와 근거를 든 자동 이의, 근거 사슬과 깊이 3의 관계 경로, 범위가 엇갈리는 길의 차단, Provider로 나가는 이름의 등급 | 초안 |
+| [specs/2026-11-22-S02-entity-resolution-temporal-graph.md](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) | 개체 해소·시간 그래프·충돌 처리(S02, #23): 지식 유형 16과 관계 유형 11의 판 번호 있는 목록, 식별자·조직·프로젝트·이웃·시간 신호로 만드는 합치기 후보와 동명이인 확인, 행을 옮기지 않는 합치기와 풀기·나누기, 유효 구간과 관측 시각의 분리, SUPERSEDES·CONTRADICTS와 근거를 든 자동 이의, 근거 사슬과 깊이 3의 관계 경로, 범위가 엇갈리는 길의 차단, Provider로 나가는 이름의 등급 | 확정(잠정 결정 포함) |
 
 ## 동작 방식
 
@@ -53,7 +53,7 @@
 | R02, R03, R04(배포처 실행 검증의 사외 준비) | #11, #12, #13 | 각 작업 착수 시. 실행 절차서와 결과 기록 양식을 함께 낸다 |
 | R05(골든 데이터와 평가 기준) | #14 | 착수 시. V02보다 먼저 닫혀야 한다 |
 | I01~I04(Phase 2 수집) | #18~#21 | I01, I03, I04와 I02-A, I02-B는 spec이 있다 |
-| S01~S03(Phase 3 Semantic) | #22~#24 | S01은 spec이 확정됐다(R07의 엔진 결정 전에 썼고, 그 결정에 걸리는 부분은 spec의 배경에 적었다). S02는 spec 초안이 있다(S01의 구현과 나란히 썼고, S01의 코드가 굳은 뒤 다시 볼 곳을 spec에 적었다). S03은 착수 시 |
+| S01~S03(Phase 3 Semantic) | #22~#24 | S01은 spec이 확정됐다(R07의 엔진 결정 전에 썼고, 그 결정에 걸리는 부분은 spec의 배경에 적었다). S02는 spec이 확정됐다(S01의 구현과 나란히 썼고, S01의 코드가 굳은 뒤 다시 볼 곳을 spec에 적었다). S03은 착수 시 |
 | K01~K02(Phase 4), P01~P03(Phase 5), X01~X02(Phase 6), H01~H03(Phase 7) | #25~#34 | 각 작업 착수 시 |
 
 ## 참고
