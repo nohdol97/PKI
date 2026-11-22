@@ -9,6 +9,14 @@ export {
 export { acceptChange, type Accepted, type AcceptOptions } from "./arrival.ts";
 export { applyTombstone, liftTombstone } from "./tombstone-entry.ts";
 export {
+  createLedgerReapply,
+  reapplyLedger,
+  LedgerNotAttachedError,
+  LedgerReapplyError,
+  type LedgerReapply,
+  type ReapplyReport,
+} from "./ledger-reapply.ts";
+export {
   CANONICAL_KINDS,
   createProductRegistry,
   derivativeRegistry,

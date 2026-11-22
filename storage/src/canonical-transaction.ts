@@ -5,12 +5,25 @@
 // read, judge, then write). A call inside one joins it with the same tx, as a
 // savepoint: if it throws and the outer one catches, its rows and its queued
 // lines are undone, never half kept.
-// I04-T10 adds the ledger: numbering the queued lines and writing them right
-// before COMMIT. Until then the lines are dropped with the transaction. Called
-// inside a raw driver transaction, this one is itself a savepoint: T10's write
-// must wait for the real COMMIT, not this one's release.
+// The ledger (I04-R17, I04-T10): when the driver has one attached (the composition
+// root attaches it), the outermost transaction numbers the queued lines and writes
+// them right before COMMIT, in the driver's `beforeCommit`, then records the last
+// number in the same transaction. Called inside a raw driver transaction, a
+// transaction that holds a ledger cannot open: `beforeCommit` would run at a
+// savepoint's release, before the outer transaction could still roll back.
 import type { CanonicalTransaction, CanonicalTx, LedgerLineDraft } from "./derivatives.ts";
+import { readSetting, writeSetting } from "./settings.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+import { LEDGER_SEQ_SETTING, LedgerDegradedError, ledgerOf } from "./tombstone-ledger.ts";
+
+/** The last ledger sequence the database has applied or written (0 before any). */
+export function readLedgerSeq(db: SqlDriver): number {
+  return Number(readSetting(db, LEDGER_SEQ_SETTING) ?? 0);
+}
+
+export function writeLedgerSeq(db: SqlDriver, seq: number): void {
+  writeSetting(db, LEDGER_SEQ_SETTING, String(seq));
+}
 
 interface Open {
   tx: CanonicalTx;
@@ -31,7 +44,10 @@ export const canonicalTransaction: CanonicalTransaction = (db, fn) => {
       throw error;
     }
   }
+  const ledger = ledgerOf(db);
+  if (ledger?.isLocked()) throw new LedgerDegradedError();
   const lines: LedgerLineDraft[] = [];
+  let assigned: number[] = [];
   const tx: CanonicalTx = {
     exec: (sql) => db.exec(sql),
     run: (sql, params) => db.run(sql, params),
@@ -43,7 +59,29 @@ export const canonicalTransaction: CanonicalTransaction = (db, fn) => {
   open.set(db, { tx, lines });
   open.set(tx, { tx, lines });
   try {
-    return db.transaction(() => fn(tx), { immediate: true });
+    return db.transaction(() => fn(tx), {
+      immediate: true,
+      ...(ledger && {
+        beforeCommit: () => {
+          if (lines.length === 0) return;
+          assigned = ledger.reserve(lines.length, readLedgerSeq(tx));
+          ledger.append(assigned, lines);
+          writeLedgerSeq(tx, assigned[assigned.length - 1] as number);
+        },
+      }),
+    });
+  } catch (error) {
+    // the lines may be in the file and their transaction is gone: say so, so the next
+    // start does not apply a deletion that never happened. If even that cannot be
+    // written the ledger locks, and the next start applies them as requested.
+    if (ledger && assigned.length > 0) {
+      try {
+        ledger.cancel(assigned);
+      } catch {
+        ledger.lock();
+      }
+    }
+    throw error;
   } finally {
     open.delete(db);
     open.delete(tx);

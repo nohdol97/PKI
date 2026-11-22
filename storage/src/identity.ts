@@ -8,7 +8,7 @@
 // check, hashing the plain rows an earlier build left, and one clean-up of what
 // earlier deletions left in the file (I04-R6).
 import { createHmac, randomBytes } from "node:crypto";
-import { migrate } from "./migrations.ts";
+import { migrate, schemaVersion } from "./migrations.ts";
 import { readSetting, writeSetting } from "./settings.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -29,7 +29,7 @@ export class IdentityKeyMissingError extends Error {
   }
 }
 
-function readKey(db: SqlDriver): Uint8Array | undefined {
+export function readKey(db: SqlDriver): Uint8Array | undefined {
   return db.all("SELECT key FROM identity_key WHERE id = 1")[0]?.key as Uint8Array | undefined;
 }
 
@@ -92,6 +92,60 @@ export function ensureTombstoneSource(db: SqlDriver, identity: SourceIdentity): 
 }
 
 /**
+ * The source of a ledger line (I04-R17): the connector instance and the keyed hash of its identity.
+ * A hashed row holds the hash itself; a source still held plain is found by hashing the plain
+ * identities of that instance (a restored database older than the deletion). A source never seen
+ * gets its hashed row, as a tombstone for an unseen source does.
+ */
+export function ensureSourceByHash(
+  db: SqlDriver,
+  connectorInstanceId: string,
+  hash: string,
+): number {
+  const hashed = db.all(
+    "SELECT id FROM sources WHERE connector_instance_id = ? AND namespace = ? AND external_id = ? AND identity_hashed = 1",
+    [connectorInstanceId, hash, hash],
+  )[0]?.id as number | undefined;
+  if (hashed !== undefined) return hashed;
+  for (const row of db.all(
+    "SELECT id, namespace, external_id FROM sources WHERE connector_instance_id = ? AND identity_hashed = 0",
+    [connectorInstanceId],
+  )) {
+    const identity = identityKey(
+      db,
+      connectorInstanceId,
+      row.namespace as string,
+      row.external_id as string,
+    );
+    if (identity === hash) return row.id as number;
+  }
+  return db.run(
+    "INSERT INTO sources (connector_instance_id, namespace, external_id, identity_hashed) VALUES (?, ?, ?, 1)",
+    [connectorInstanceId, hash, hash],
+  ).lastInsertRowid;
+}
+
+/** The connector instance and keyed hash that name a stored source in the ledger. */
+export function sourceLedgerName(
+  db: SqlDriver,
+  sourceId: number,
+): { connectorInstanceId: string; identityHash: string } {
+  const row = db.all(
+    "SELECT connector_instance_id, namespace, external_id, identity_hashed FROM sources WHERE id = ?",
+    [sourceId],
+  )[0];
+  if (!row) throw new RangeError(`source ${sourceId} does not exist`);
+  const instance = row.connector_instance_id as string;
+  return {
+    connectorInstanceId: instance,
+    identityHash:
+      row.identity_hashed === 1
+        ? (row.namespace as string)
+        : identityKey(db, instance, row.namespace as string, row.external_id as string),
+  };
+}
+
+/**
  * Replaces a purged source's plain namespace and external id by the hash. Only a
  * source with a tombstone and no version left is hashed: one that holds versions
  * (a lift, then new arrivals) is live and keeps the plain identity its Connector
@@ -131,14 +185,23 @@ export const LEGACY_CLEANUP_SETTING = "purge.legacy-cleanup";
 
 /**
  * Brings a canonical database up to date before anything opens it (I04-R6, R7):
- * `migrate`; a key (made only when no source is hashed; otherwise a start error);
+ * `migrate` (an older database takes the ledger's key, `options.ledgerKey`); a key (made only when no source is hashed; otherwise a start error);
  * the plain rows of earlier tombstones hashed; and once, FTS `optimize` and
  * `VACUUM` (outside any transaction: `VACUUM` cannot run in one) for the traces
  * earlier deletions left. A `VACUUM` that fails (no room for the copy) does not
  * stop the start: it is tried again at the next one.
  */
-export function prepareCanonicalDb(db: SqlDriver): PreparedCanonicalDb {
+export function prepareCanonicalDb(
+  db: SqlDriver,
+  options: { ledgerKey?: Uint8Array | undefined } = {},
+): PreparedCanonicalDb {
+  // a database from before v14 holds no key and no hashed row: the key the migration makes
+  // is a stranger to the ledger beside it, so the ledger's key is taken first (I04-R17)
+  const keyless = schemaVersion(db) < 14;
   migrate(db);
+  if (keyless && options.ledgerKey?.length === 32) {
+    db.run("UPDATE identity_key SET key = ? WHERE id = 1", [options.ledgerKey]);
+  }
   if (!readKey(db)) {
     if (hasHashedSources(db)) throw new IdentityKeyMissingError();
     db.run("INSERT INTO identity_key (id, key) VALUES (1, ?)", [randomBytes(32)]);

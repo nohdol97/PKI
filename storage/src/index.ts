@@ -3,6 +3,7 @@ export type {
   RunResult,
   SqlDriver,
   SqlRow,
+  SqlDriverOptions,
   SqlValue,
   TransactionOptions,
 } from "./sql-driver.ts";
@@ -23,7 +24,10 @@ export { readSetting, writeSetting } from "./settings.ts";
 export {
   IdentityKeyMissingError,
   LEGACY_CLEANUP_SETTING,
+  ensureSourceByHash,
   ensureTombstoneSource,
+  readKey,
+  sourceLedgerName,
   findHashedSourceId,
   hashSourceIdentity,
   identityKey,
@@ -189,11 +193,29 @@ export {
   readTombstoneState,
   recordTombstone,
   recordTombstoneLift,
+  writeTombstoneAsIs,
   type TombstoneEvent,
   type TombstoneReason,
   type TombstoneState,
 } from "./tombstones.ts";
-export { canonicalTransaction } from "./canonical-transaction.ts";
+export { canonicalTransaction, readLedgerSeq, writeLedgerSeq } from "./canonical-transaction.ts";
+export {
+  LEDGER_FILE,
+  LEDGER_REPORT_SETTING,
+  LEDGER_SEQ_SETTING,
+  LedgerDegradedError,
+  attachLedger,
+  ledgerOf,
+  nodeLedgerIo,
+  openLedger,
+  parseLedger,
+  type LedgerContents,
+  type LedgerIo,
+  type LedgerLine,
+  type LedgerOpenStatus,
+  type OpenLedgerOptions,
+  type TombstoneLedger,
+} from "./tombstone-ledger.ts";
 export {
   atLeastAsStrict,
   createDerivativeRegistry,

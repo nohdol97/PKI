@@ -40,6 +40,8 @@ const FORBIDDEN_FILES = [
   // the test-build-only job kind and the kill tests' backend entry (I03-R24)
   "backend/src/test-effect.ts",
   "backend/src/job-kill.child.ts",
+  // the ledger crash test's child, killed after it wrote a ledger line and before COMMIT (I04-R17)
+  "backend/src/ledger-kill.child.ts",
 ];
 const TEST_FILE = /\.(test|e2e|setup|test-support)\.[cm]?[jt]sx?$/;
 /** Any `e2e/` folder: E2E code and its helpers, whatever their file names. */

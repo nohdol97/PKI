@@ -71,6 +71,7 @@ import {
 import type { Clock } from "./clock.ts";
 import { computePolicyFingerprint } from "./held-release.ts";
 import { INTERIM_POLICY } from "./interim-policy.ts";
+import { attachDirectoryLedger, readLedgerKey } from "./ledger-boot.ts";
 import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-runner.ts";
 import { projectionPorts } from "./projection-ports.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
@@ -436,7 +437,13 @@ export function openCanonicalDb(dir: string = dataDirectory()): SqlDriver {
   // a failed clean-up does not stop the start: it stays `pending` in the status API
   // (dataProtection) and is tried again at the next start; the missing-key error
   // propagates and no backend starts (the shell logs its class)
-  if (prepareCanonicalDb(db).legacyCleanup === "failed") log("legacy-cleanup-failed", {});
+  // an I04-before database takes the ledger's key before the migration's own is used (I04-R17)
+  const ledgerKey = readLedgerKey(dir);
+  if (prepareCanonicalDb(db, { ledgerKey }).legacyCleanup === "failed") {
+    log("legacy-cleanup-failed", {});
+  }
+  // from here every canonical transaction that queues a deletion writes its line first
+  attachDirectoryLedger(db, dir);
   return db;
 }
 

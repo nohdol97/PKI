@@ -41,6 +41,7 @@ import { systemClock } from "./clock.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
+import { reapplyAtStart } from "./ledger-boot.ts";
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -120,6 +121,9 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       { engine, vectorIndex: adapters.vectorIndex },
       projections,
     );
+  // R17: the deletions the database has not seen (a restore, a kill before COMMIT) are applied
+  // before the API opens and before anything runs; a line that fails stops the start here
+  reapplyAtStart(db, registry, systemClock.now());
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")

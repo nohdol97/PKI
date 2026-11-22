@@ -5,10 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@pki/storage", async (original) => ({
-  ...(await original<typeof import("@pki/storage")>()),
-  prepareCanonicalDb: () => ({ legacyCleanup: "failed" }),
-}));
+// the real preparation still runs (the ledger needs the database's key); only its report is forced
+vi.mock("@pki/storage", async (original) => {
+  const storage = await original<typeof import("@pki/storage")>();
+  return {
+    ...storage,
+    prepareCanonicalDb: (...args: Parameters<typeof storage.prepareCanonicalDb>) => {
+      storage.prepareCanonicalDb(...args);
+      return { legacyCleanup: "failed" };
+    },
+  };
+});
 
 import { openCanonicalDb } from "./composition.ts";
 
