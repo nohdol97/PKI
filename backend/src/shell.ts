@@ -6,6 +6,7 @@
 // (`secret`); nothing of them is kept here.
 // `--origin` is the screens' origin (app://pki); a source run also takes `--data-dir`
 // and `--fixtures` as in dev.ts, the production build neither (shell-options.ts).
+import { startFailureReport } from "./start-failure.ts";
 import { dataDirectory } from "@pki/storage";
 import type { LLMProvider } from "@pki/contracts";
 import { bootBackend, closeProviders } from "./boot.ts";
@@ -99,7 +100,7 @@ const failed = (error?: unknown) => {
   if (error !== undefined) {
     console.error(`backend start failed: ${error instanceof Error ? error.name : typeof error}`);
   }
-  channel.post({ type: "failed" });
+  channel.post(startFailureReport(error));
   process.exit(1);
 };
 

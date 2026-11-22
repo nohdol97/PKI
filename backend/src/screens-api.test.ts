@@ -4,6 +4,7 @@ import { ErrorResponseSchema, routes } from "@pki/contracts";
 import { applyTombstone } from "@pki/knowledge-engine";
 import { createCallRecorder } from "@pki/providers";
 import {
+  findSourceId,
   identityKey,
   canonicalTransaction,
   listInvalidations,
@@ -217,44 +218,67 @@ describe("screen routes", () => {
     expect(again).toMatchObject({ status: 200, body: { outcome: "already-deleted" } });
   });
 
-  // I04-T13 (tombstone.ui-delete, C2): the delete goes through applyTombstone in a
-  // canonical transaction. The user's deletion wins over a source's: where the old
-  // V02 path answered already-deleted, the entry rewrites the reason, with no revision.
-  it("records the screen's delete through the tombstone entry: user-deleted, no revision, one propagation", async () => {
+  // I04-T13 (tombstone.ui-delete, C2): the screen's delete goes through applyTombstone in
+  // a canonical transaction: reason user-deleted, no revision, the source purged, one propagation.
+  const tombstoneOf = (externalId: string) => {
+    const sourceId = findSourceId(db, "fixtures", "", externalId) ?? 0;
+    return db.all(
+      `SELECT reason, last_revision AS lastRevision, lifted_at AS liftedAt FROM tombstones WHERE source_id = ?`,
+      [sourceId],
+    );
+  };
+  const versionCount = (externalId: string) =>
+    db.all("SELECT count(*) AS n FROM source_versions WHERE source_id = ?", [
+      findSourceId(db, "fixtures", "", externalId) ?? 0,
+    ])[0]?.n;
+  const deleteUi = (externalId: string) =>
+    call(routes.deleteSource.path, routes.deleteSource.method, {
+      connectorId: "fixtures",
+      namespace: "",
+      externalId,
+    });
+
+  it("tombstone.ui-delete: a live source's delete is user-deleted without a revision, purges it and propagates once", async () => {
+    saveSourceRecord(db, "fixtures", {
+      externalId: "live",
+      title: "합성 화면 삭제",
+      body: "봉화 합성",
+    });
+    expect(versionCount("live")).toBe(1);
+    const before = listInvalidations(db, 100).length;
+    expect(await deleteUi("live")).toMatchObject({ status: 200, body: { outcome: "deleted" } });
+    expect(tombstoneOf("live")).toEqual([
+      { reason: "user-deleted", lastRevision: null, liftedAt: null },
+    ]);
+    expect(versionCount("live")).toBe(0);
+    expect(listInvalidations(db, 100).length).toBe(before + 1);
+    expect((await deleteUi("live")).body).toEqual({ outcome: "already-deleted" });
+    expect(listInvalidations(db, 100).length).toBe(before + 1);
+  });
+
+  // the user's deletion wins over a source's: where the old V02 path answered
+  // already-deleted, the entry rewrites the reason, with no revision
+  it("tombstone.ui-delete: over a source's tombstone the reason becomes user-deleted and the revision is cleared", async () => {
     saveSourceRecord(db, "fixtures", {
       externalId: "ui",
       title: "합성 화면 삭제",
       body: "봉화 합성",
     });
-    const identity = { connectorInstanceId: "fixtures", namespace: "", externalId: "ui" };
     canonicalTransaction(db, (tx) =>
       applyTombstone(tx, {
-        identity,
+        identity: { connectorInstanceId: "fixtures", namespace: "", externalId: "ui" },
         reason: "source-deleted",
         lastRevision: 5,
         at: "2026-11-22T00:00:00.000Z",
       }),
     );
     const before = listInvalidations(db, 100).length;
-    const res = await call(routes.deleteSource.path, routes.deleteSource.method, {
-      connectorId: "fixtures",
-      namespace: "",
-      externalId: "ui",
-    });
-    expect(res).toMatchObject({ status: 200, body: { outcome: "deleted" } });
-    expect(
-      db.all(
-        `SELECT t.reason, t.last_revision AS lastRevision, t.lifted_at AS liftedAt
-           FROM tombstones t JOIN sources s ON s.id = t.source_id WHERE s.external_id = 'ui'`,
-      ),
-    ).toEqual([{ reason: "user-deleted", lastRevision: null, liftedAt: null }]);
+    expect(await deleteUi("ui")).toMatchObject({ status: 200, body: { outcome: "deleted" } });
+    expect(tombstoneOf("ui")).toEqual([
+      { reason: "user-deleted", lastRevision: null, liftedAt: null },
+    ]);
     expect(listInvalidations(db, 100).length).toBe(before + 1);
-    const again = await call(routes.deleteSource.path, routes.deleteSource.method, {
-      connectorId: "fixtures",
-      namespace: "",
-      externalId: "ui",
-    });
-    expect(again.body).toEqual({ outcome: "already-deleted" });
+    expect((await deleteUi("ui")).body).toEqual({ outcome: "already-deleted" });
   });
 
   it.each([

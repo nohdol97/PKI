@@ -3,6 +3,7 @@
 // remote embedder reads as external egress. A reason Home does not know is shown
 // as its code: every reason is a code or a fixed phrase, never adapter text.
 import type { ComponentStatus, EmbeddingStatusEntry, ProviderStatus } from "@pki/contracts";
+import type { RouteResponse } from "@pki/contracts";
 import { blockReasonText } from "./connection-test-text.ts";
 import { providerCheckText, providerName } from "./provider-text.ts";
 
@@ -91,3 +92,11 @@ export const DOWNLOAD_APPROVAL =
 
 export const LOCAL_PACK_HINT =
   "로컬 팩: 모델 파일 4개가 든 폴더의 절대 경로입니다. 파일은 네트워크 없이 이 PC에서 읽고, 해시가 맞을 때만 설치합니다.";
+
+/**
+ * The data-protection item (I04-R6): `pending` on a running backend means the clean-up
+ * of earlier deletions' traces failed at this start (it starts after the backend's
+ * database was prepared), and is tried again at the next one.
+ */
+export const dataProtectionText = (status: RouteResponse<"status">["dataProtection"]) =>
+  status.legacyCleanup === "pending" ? "이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)" : "정상";

@@ -141,15 +141,16 @@ export const SourceDeleteResponseSchema = z.object({
 });
 
 /**
- * The user's way back (I04-R9): sources a tombstone blocks, as the Sources screen
- * identifies them, and the lift of one. Only the user's request lifts. A lift
+ * The user's way back (I04-R9): the sources a tombstone blocks and the lift of one.
+ * Only the user's request lifts. A purged source's identity is no longer kept in
+ * the clear (I04-R7), so the list names a source by an opaque `id` (the local
+ * handle the lift takes), its connector instance, the reason and when. A lift
  * deletes and restores nothing: the source can only be received again.
- * `unchanged`: already lifted, no tombstone, or no such source.
+ * `unchanged`: already lifted, no tombstone, or no such id.
  */
 const TombstonedSourceSchema = z.object({
+  id: z.int().positive(),
   connectorId: z.string(),
-  namespace: z.string(),
-  externalId: z.string(),
   reason: z.enum(["user-deleted", "source-deleted", "access-revoked"]),
   coversVersion: z.int().nonnegative(),
   at: z.string(),
@@ -157,7 +158,7 @@ const TombstonedSourceSchema = z.object({
 export const TombstoneListResponseSchema = z.object({
   tombstones: z.array(TombstonedSourceSchema),
 });
-export const TombstoneLiftRequestSchema = SourceDeleteRequestSchema;
+export const TombstoneLiftRequestSchema = z.strictObject({ id: z.int().positive() });
 export const TombstoneLiftResponseSchema = z.object({ outcome: z.enum(["lifted", "unchanged"]) });
 
 /**

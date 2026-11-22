@@ -524,21 +524,15 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     // I04-R9: the only caller of liftTombstone; Connector and source events never lift
     tombstones: async () => ({
       tombstones: listLiftableTombstones(options.db).map((t) => ({
+        id: t.sourceId,
         connectorId: t.connectorInstanceId,
-        namespace: t.namespace,
-        externalId: t.externalId,
         reason: t.reason,
         coversVersion: t.coversVersion,
         at: t.at,
       })),
     }),
-    liftTombstone: async ({ connectorId, namespace, externalId }) => {
-      const sourceId = findSourceId(options.db, connectorId, namespace, externalId);
-      if (sourceId === undefined) return { outcome: "unchanged" };
-      return canonicalTransaction(options.db, (tx) =>
-        liftTombstone(tx, sourceId, new Date().toISOString()),
-      );
-    },
+    liftTombstone: async ({ id }) =>
+      canonicalTransaction(options.db, (tx) => liftTombstone(tx, id, new Date().toISOString())),
     activity: async () => ({ calls: listProviderCalls(options.db) }),
     settings: async () => settings(),
     writeSettings: async ({ openaiCompatible }) => {
