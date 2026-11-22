@@ -4,6 +4,7 @@
 // that is normalized before the limit is too weak to reproduce the review's time, and the test fails for
 // that (a weak input is not read as a pass). Not a `.test.ts`: each run holds the 60 s limit. See
 // vitest.normalizer-slow.config.ts.
+import { appendFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { createIsolatedNormalizer, type IsolatedNormalizer } from "./isolated.ts";
 import { createForkSpawner } from "./spawn-node.ts";
@@ -40,9 +41,10 @@ async function limited(bytes: Uint8Array, name: string) {
   const started = performance.now();
   const result = await n.normalize({ bytes, name });
   const seconds = (performance.now() - started) / 1000;
-  console.log(
-    `C17 ${name}: ${bytes.length} bytes -> ${result.ok ? "normalized" : result.error.code} in ${seconds.toFixed(1)} s`,
-  );
+  const line = `C17 ${name}: ${bytes.length} bytes -> ${result.ok ? "normalized" : result.error.code} in ${seconds.toFixed(1)} s at ${new Date().toISOString()}`;
+  console.log(line);
+  // the console of a passing test is not kept: when set, the line goes to this file too
+  if (process.env.PKI_SLOW_LOG !== undefined) appendFileSync(process.env.PKI_SLOW_LOG, `${line}\n`);
   return { result, seconds };
 }
 

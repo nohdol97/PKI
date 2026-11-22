@@ -9,10 +9,16 @@
 //   pnpm exec vitest run --config vitest.normalizer-slow.config.ts
 // and write the date, the commit and both counts in the PR (I02B-C49).
 import { fork } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const CHILD = fileURLToPath(new URL("./testing/trigger-backend.ts", import.meta.url));
+/** When set, every run and the summary are appended here as lines of JSON (the console of a passing test is not kept). */
+const LOG = process.env.PKI_SLOW_LOG;
+const note = (line: object) => {
+  if (LOG !== undefined) appendFileSync(LOG, `${JSON.stringify(line)}\n`);
+};
 const RUNS = 30;
 const HEAP_MB = 512;
 
@@ -31,7 +37,10 @@ function runOnce(mode: "isolated" | "in-process"): Promise<Ended> {
     });
     let report: Record<string, unknown> | undefined;
     child.on("message", (m) => (report = m as Record<string, unknown>));
-    child.once("exit", (code, signal) => resolve({ code, signal, report }));
+    child.once("exit", (code, signal) => {
+      note({ mode, code, signal, report, at: new Date().toISOString() });
+      resolve({ code, signal, report });
+    });
   });
 }
 
@@ -58,6 +67,7 @@ describe("I02B-C49: the trigger input, 30 times at maxHeapMb 512", () => {
       `without the boundary: process aborted ${aborted}/${RUNS}, worker finished the file ${finished}/${RUNS}, ` +
       `signals ${JSON.stringify(without.map((e) => e.signal).filter((s) => s !== null))}`;
     console.log(summary);
+    note({ summary });
     expect(lived, summary).toBe(RUNS);
     expect(mapped, summary).toBe(RUNS);
     if (aborted === 0) context.skip(`판정 불가: ${summary}`);
