@@ -43,10 +43,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 const SCOPE = "@pki/";
-const TEST_FILE = /\.(test|e2e)\.tsx?$/;
+/** `*.test-support.ts` is test code too (helpers no product file may import). */
+const TEST_FILE = /\.(test|e2e|test-support)\.tsx?$/;
 const ADAPTERS_DIR = "src/adapters";
 const COMPOSITION_ROOT = { pkg: "@pki/backend", file: "src/composition.ts" };
-const TEST_SPECIFIER = /\.(test|e2e)(\.[cm]?[jt]sx?)?$/;
+const TEST_SPECIFIER = /\.(test|e2e|test-support)(\.[cm]?[jt]sx?)?$/;
 /** A package's top-level e2e/ folder holds test code only, whatever the file names. */
 const E2E_DIR = "e2e";
 

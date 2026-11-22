@@ -23,7 +23,7 @@ import {
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { propagateNewVersion } from "./propagation.ts";
-import { purgeSource as deleteSource } from "./test-purge.ts";
+import { purgeSource as deleteSource } from "./purge.test-support.ts";
 import {
   COMPLETION_DATE,
   DEPENDENCY_DELAY,

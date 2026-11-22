@@ -27,7 +27,7 @@ import {
   versionNotice,
   type ProjectionNotice,
 } from "./projections.ts";
-import { purgeSource } from "./test-purge.ts";
+import { purgeSource } from "./purge.test-support.ts";
 
 const SPACE = { modelId: "fake", revision: "r1", dimension: 3 };
 const AT = "2026-11-22T00:00:00.000Z";

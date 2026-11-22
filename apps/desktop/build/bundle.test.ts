@@ -163,6 +163,13 @@ describe("build check", () => {
     expect(forbiddenReason(join(REPO_ROOT, path))).toBeUndefined();
   });
 
+  it("refuses a `*.test-support.ts` helper by its file name", () => {
+    const path = "knowledge-engine/src/purge.test-support.ts";
+    expect(forbiddenReason(join(REPO_ROOT, path))).toBe(
+      `${path} is a test-only module (file name)`,
+    );
+  });
+
   it("fails a bundle that reaches a test-only module, by path rather than by name", async () => {
     const dir = join(REPO_ROOT, "apps/desktop/build/.bundle-test-input");
     mkdirSync(dir, { recursive: true });

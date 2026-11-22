@@ -228,6 +228,8 @@ describe("module-boundary rule", () => {
       },
       // tests may share test helpers
       { code: 'import { h } from "./helper.test.ts";', filename: backendTest },
+      // and the `*.test-support.ts` helpers (I01-T02)
+      { code: 'import { h } from "./purge.test-support.ts";', filename: backendTest },
     ],
     invalid: [
       {
@@ -335,6 +337,10 @@ describe("module-boundary rule", () => {
         'import { f } from "./sneaky.e2e.jsx";',
         'import { f } from "./sneaky.test.mts";',
         'import { f } from "./sneaky.test.cts";',
+        // a test-support helper is test code: no product file imports it (I01-T02)
+        'import { f } from "./purge.test-support.ts";',
+        'export { f } from "./purge.test-support.js";',
+        'const m = await import("./purge.test-support");',
         // an E2E helper under the package's e2e/ folder, by file or by folder (V02-T11 A-F2)
         'import { openEvidence } from "../e2e/screens.ts";',
         'export * from "../e2e";',

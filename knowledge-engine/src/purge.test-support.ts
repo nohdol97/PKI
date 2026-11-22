@@ -1,4 +1,4 @@
-// Test support: applies a source's tombstone through the product entries, by the
+// Test support (a `*.test-support.ts` file: refused in product code by lint and the bundle). Applies a source's tombstone through the product entries, by the
 // source's row id (V02's deleteSource, which took an id, is gone). Not exported
 // from the package. A purged source's row holds only a hash, so a plain identity
 // read before the first call is remembered for the calls after it.
@@ -17,7 +17,8 @@ interface Identity {
   namespace: string;
   externalId: string;
 }
-const known = new Map<number, Identity>();
+/** Plain identities by database, then source id: ids repeat across the databases of one file. */
+const known = new WeakMap<SqlDriver, Map<number, Identity>>();
 
 export function purgeSource(
   db: SqlDriver,
@@ -28,14 +29,16 @@ export function purgeSource(
     "SELECT connector_instance_id AS i, namespace AS n, external_id AS e, identity_hashed AS h FROM sources WHERE id = ?",
     [sourceId],
   )[0];
+  const byId = known.get(db) ?? new Map<number, Identity>();
+  known.set(db, byId);
   if (row && row.h === 0) {
-    known.set(sourceId, {
+    byId.set(sourceId, {
       connectorInstanceId: row.i as string,
       namespace: row.n as string,
       externalId: row.e as string,
     });
   }
-  const identity = known.get(sourceId);
+  const identity = byId.get(sourceId);
   if (!identity) throw new Error(`source ${sourceId}: no plain identity to apply a tombstone by`);
   const versionIds = db
     .all("SELECT id FROM source_versions WHERE source_id = ? ORDER BY version", [sourceId])

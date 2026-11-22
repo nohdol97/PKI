@@ -196,7 +196,6 @@ const canariesIn = () =>
   Object.values(CANARY).filter((c) => storedFiles().some(([, bytes]) => bytes.includes(c)));
 
 const count = (table: string) => db.all(`SELECT count(*) AS n FROM ${table}`)[0]?.n as number;
-/** By identity, across the instances the flows use: a purged source's row holds the hash (I04-R7). */
 /** The user's deletion of the source with this id, as the screen's route does it (userDeleteWithNotice). */
 function deleteSource(
   target: SqlDriver,
@@ -218,6 +217,7 @@ function deleteSource(
   );
 }
 
+/** By identity, across the instances the flows use: a purged source's row holds the hash (I04-R7). */
 const sourceId = (externalId: string) =>
   db
     .all("SELECT DISTINCT connector_instance_id AS id FROM sources")
