@@ -1,9 +1,12 @@
 // V01-R3: the routes behind Sources, Activity and Settings answer from the
 // canonical DB and the configured data directory, never from fixed values.
 import { ErrorResponseSchema, routes } from "@pki/contracts";
+import { applyTombstone } from "@pki/knowledge-engine";
 import { createCallRecorder } from "@pki/providers";
 import {
   identityKey,
+  canonicalTransaction,
+  listInvalidations,
   migrations,
   registerConnectorInstance,
   saveSourceRecord,
@@ -212,6 +215,46 @@ describe("screen routes", () => {
       externalId: "gone",
     });
     expect(again).toMatchObject({ status: 200, body: { outcome: "already-deleted" } });
+  });
+
+  // I04-T13 (tombstone.ui-delete, C2): the delete goes through applyTombstone in a
+  // canonical transaction. The user's deletion wins over a source's: where the old
+  // V02 path answered already-deleted, the entry rewrites the reason, with no revision.
+  it("records the screen's delete through the tombstone entry: user-deleted, no revision, one propagation", async () => {
+    saveSourceRecord(db, "fixtures", {
+      externalId: "ui",
+      title: "합성 화면 삭제",
+      body: "봉화 합성",
+    });
+    const identity = { connectorInstanceId: "fixtures", namespace: "", externalId: "ui" };
+    canonicalTransaction(db, (tx) =>
+      applyTombstone(tx, {
+        identity,
+        reason: "source-deleted",
+        lastRevision: 5,
+        at: "2026-11-22T00:00:00.000Z",
+      }),
+    );
+    const before = listInvalidations(db, 100).length;
+    const res = await call(routes.deleteSource.path, routes.deleteSource.method, {
+      connectorId: "fixtures",
+      namespace: "",
+      externalId: "ui",
+    });
+    expect(res).toMatchObject({ status: 200, body: { outcome: "deleted" } });
+    expect(
+      db.all(
+        `SELECT t.reason, t.last_revision AS lastRevision, t.lifted_at AS liftedAt
+           FROM tombstones t JOIN sources s ON s.id = t.source_id WHERE s.external_id = 'ui'`,
+      ),
+    ).toEqual([{ reason: "user-deleted", lastRevision: null, liftedAt: null }]);
+    expect(listInvalidations(db, 100).length).toBe(before + 1);
+    const again = await call(routes.deleteSource.path, routes.deleteSource.method, {
+      connectorId: "fixtures",
+      namespace: "",
+      externalId: "ui",
+    });
+    expect(again.body).toEqual({ outcome: "already-deleted" });
   });
 
   it.each([

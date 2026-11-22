@@ -122,7 +122,7 @@ export function recordTombstoneLift(
   return changes === 1 ? "lifted" : "unchanged";
 }
 
-/** V02's tombstone, as deleteSource writes and reads it until I04-T13 and I01-T02 move to the entries. */
+/** V02's tombstone, as deleteSource writes and reads it until I01-T02 moves to the entries. */
 export interface Tombstone {
   sourceId: number;
   version: number;

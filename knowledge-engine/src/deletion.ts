@@ -9,7 +9,8 @@
 // over the collected items that remain. The `dirty` Insight state is not used:
 // the rule runs here, in the same transaction. This is V02's entry: the caller
 // names the source by id and no revision is kept. The I04 entry is applyTombstone
-// (tombstone-entry.ts); I04-T13 and I01-T02 move this entry's callers onto it.
+// (tombstone-entry.ts); I01-T02 moves this entry's remaining callers (the
+// Connector's delete and revoke) onto it. The screen's delete moved in I04-T13.
 import {
   hashSourceIdentity,
   supersedeOpenJobs,

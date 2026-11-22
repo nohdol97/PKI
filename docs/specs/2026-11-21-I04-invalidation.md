@@ -572,6 +572,13 @@ flowchart LR
 16. **I04-T13과의 결합.** T13의 해제 목록·`GET /api/tombstones`·`tombstone-routes`·`screens-api` 시험이 평문 `namespace`·`external_id`를 읽으므로 T07 뒤에는 해시를 읽는다(목록의 `namespace`·`externalId`가 해시이고 해제 요청에 그 값을 되돌려 주면 `findSourceId`의 평문 대조가 맞아 해제는 동작한다). T13이 T07 위로 리베이스하며 고친다. 화면에 무엇을 보일지는 T13 행에 적었다.
 17. **데이터 디렉터리 밖 사본의 담당**(후속 4). 장부 파일은 I04-T10, 백업·복원 실행은 H01(#32)이다. ARCHITECTURE 4절에 장부 행과 이 담당을 적었다.
 
+**T13이 넘기는 것 / 잠정 결정**(잠정). 화면 삭제를 입구로 옮긴 작업이 정한 것이다. 바꿀 때는 이 절과 `backend/src/screens-api.test.ts`(`tombstone.ui-delete`)를 함께 고친다.
+
+1. **자리.** `userDeleteWithNotice`(`knowledge-engine/src/projections.ts`)가 `canonicalTransaction` 하나 안에서 `applyTombstone`(사유 `user-deleted`, `lastRevision` null)을 부른다. `POST /api/sources/delete`(`backend/src/server.ts`)가 이것을 부르고, 모르는 원본의 `not-found`는 그대로 서버가 먼저 가린다. 옛 호출(`deleteSourceWithNotice` 안의 `deleteSource`)은 Connector의 삭제·접근 회수가 I01-T02까지 쓰므로 지우지 않았고, 화면 경로만 거기서 떠났다.
+2. **응답 모양은 그대로.** `deleted`는 `applyTombstone`이 `unchanged`가 아닌 결과를 돌려준 경우이고, `unchanged`는 `already-deleted`다. 지운 행의 ID를 돌려주지 않는 `applyTombstone`의 반환(T05 "넘기는 것" 12)은 쓰지 않는다: 화면 응답은 그 값을 쓴 적이 없고, 투영 통지(`removed`)는 호출 전에 읽은 version 행 ID와 `coversVersion`으로 만든다.
+3. **동작이 달라지는 곳**(R9의 규칙이 그대로 오는 것). 첫째, 출처 사유(`source-deleted`·`access-revoked`)로 이미 tombstone된 원본을 사용자가 지우면 사유가 `user-deleted`로 바뀌고 `last_revision`이 빈다(옛 경로는 `already-deleted`로 끝났다). 둘째, 해제된 tombstone의 원본을 다시 지우면 `deleted`다. 셋째, 지울 version이 하나도 없으면 투영 통지는 보내지 않는다(응답은 `deleted`).
+4. **사용자 해제 경로는 이 작업에서 만들지 않았다**(T05 "넘기는 것" 10이 T13에 넘긴 HTTP 경로와 해제 목록). C2가 가리키는 삭제의 이동만 했고, 해제는 화면과 계약(`packages/contracts`)이 함께 바뀌는 별도의 일이라 후속 작업으로 남긴다. T13 행의 해제 경로 문장은 그때까지 열려 있다.
+
 ## 미해결 질문
 
 **작업을 막는 것**
@@ -650,3 +657,4 @@ flowchart LR
 | 2026-11-22 | "T07이 넘기는 것 / 잠정 결정" 추가(잠정): 스키마 v14(`identity_key`, `sources.identity_hashed`), `identityKey(db, ...)`의 모양, 소거 뒤 같은 트랜잭션에서 해시로 바꾸는 조건(tombstone 있고 version 없음), 키가 없으면 시작 오류(해시된 행이 없으면 새 키), `migrate` 뒤 한 번의 `optimize`+`VACUUM`과 실패 처리, 카나리 도구, 카나리 ⑤와 평문 되쓰기의 담당, 소거 뒤 평문으로 찾던 V02 시험의 이동 | 작업 분해 | I04-T07 구현 |
 | 2026-11-22 | I04-T07 검토 반영(잠정): 통제 경우 ③이 FTS `secure-delete`만 끔(F1), 정리 실패는 로그와 상태 API `dataProtection.legacyCleanup`에 남기고 화면 글(정리 실패, 키 없음 이유)을 I04-T13 행의 소유로(F2), `VACUUM` 실패 경로와 `openCanonicalDb`의 키 없음 시작 오류 시험(F3·F4), "T07이 넘기는 것" 14~17(T10의 키 순서 제약, 장부 머리 문장의 T10 이월, T13 결합, 밖 사본의 담당)과 T13 행의 결합, 마이그레이션 번호 겹침은 I03-T08 쪽(F5·F10), 해시 대조 질의에 `namespace`(F8) | 작업 분해(T13 행), "T07이 넘기는 것" | I04-T07 독립 검토 F1~F5·F8·F10 |
 | 2026-11-22 | "T07이 넘기는 것" 2의 번호 충돌 문구를 머지 뒤 상태로 바꿈: I04-T05가 v13으로 머지됐고, I03-T08과 이 작업이 모두 v14라 나중에 머지되는 쪽이 v15로 다시 매김 | 작업 분해("T07이 넘기는 것" 2) | #85·#86 머지 뒤 리베이스에서 I03-T08도 v14가 됨 |
+| 2026-11-22 | I04-T13 구현(잠정): 화면 삭제를 `canonicalTransaction` 안의 `applyTombstone`(`user-deleted`, 빈 `last_revision`)으로 옮김. "T13이 넘기는 것 / 잠정 결정" 추가(옛 경로는 Connector용으로 남김, 출처 사유 덮어쓰기, 해제 경로는 후속) | 작업 분해(T13 행, "T13이 넘기는 것") | I04-T13 구현 |
