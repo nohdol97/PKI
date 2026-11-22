@@ -294,13 +294,13 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     try {
       return await attempt(job, cut.signal, ended, end);
     } finally {
+      active.delete(job.id);
+      clearInterval(beat);
       try {
         options.onRunEnded?.(job);
       } catch (error) {
         onError(error);
       }
-      active.delete(job.id);
-      clearInterval(beat);
     }
   }
 

@@ -597,7 +597,7 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     // the check initializes with an empty config, so a collector that needs one ends 1 with its own message
     expect(seven).toContain("`site-check`는 **빈 설정(`{}`)으로** 초기화한다.");
     expect(seven).toContain("설정을 요구하는 수집기는 자기 설정 오류의 문구로 실패하고 1로 끝난다");
-    expect(read("backend/src/connectors.ts")).toContain("await initializeConnector(create(), {});");
+    expect(read("backend/src/connectors.ts")).toContain("await initializeConnector(create(), {}, { credentials: REFUSING_CREDENTIALS });");
     expect(JSON.parse(read(`${exampleDir}/package.json`)).scripts["site-check"]).toBe("node src/site-check.ts");
     expect(JSON.parse(read("apps/desktop/package.json")).scripts.build).toBeDefined();
   });
@@ -641,13 +641,13 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     const code = read("backend/src/site-registration.ts");
     const union = /export type SiteRegistrationCode =([^;]*);/.exec(code)?.[1] ?? "";
     const all = [...union.matchAll(/"([a-z-]+)"/g)].map((m) => m[1] as string);
-    expect(all.length).toBe(12);
+    expect(all.length).toBe(13);
     for (const name of all) expect(namesToken(seven, name), name).toBe(true);
     const stopping = [...(/const STOPPING_CODES = \[([^\]]*)\]/.exec(code)?.[1] ?? "").matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
     const rows = seven.split("\n").filter((l) => /^\| `[a-z-]+` \|/.test(l));
     const stoppingRows = rows.filter((l) => l.includes("**시작을 멈춘다**")).map((l) => /^\| `([a-z-]+)`/.exec(l)?.[1]);
     expect(stoppingRows).toEqual(stopping);
-    expect(rows.length).toBe(10);
+    expect(rows.length).toBe(11);
   });
 
   it("names the public kinds and the placeholders the registration cannot or may take, as the code lists them", () => {

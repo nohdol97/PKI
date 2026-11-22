@@ -154,7 +154,8 @@ export function createConnectorSyncHandler(options: {
       return resultOf(end, undefined, heldReason(summary));
     }
     const end = endOf(answer);
-    if (isReplacedStop(answer)) options.replaced?.add(replacedKey(job));
+    // a handler still running after its run ended (cut signal) leaves no mark behind
+    if (isReplacedStop(answer) && !context.signal.aborted) options.replaced?.add(replacedKey(job));
     // a refused credential holds the job for the instance's own reason as it stands when the job
     // closes: the manager judged it before it answered (I06-R10); an instance that is `ready` is a newer
     // object's, so the reason is the plain one and the release after the close runs the job again

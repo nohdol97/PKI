@@ -276,6 +276,7 @@ async function runSync(
  */
 const replacedStops = new WeakSet<object>();
 export const isReplacedStop = (answer: object): boolean => replacedStops.has(answer);
+export const markReplacedStop = (answer: object): void => void replacedStops.add(answer);
 
 /** What initializing one Connector came to, as the Connector list shows it. */
 export type InitializeOutcome =
@@ -750,7 +751,7 @@ export async function createConnectorManager(
         release();
       }
       const answer = { connectorId: id, ...result };
-      if (replaced) replacedStops.add(answer);
+      if (replaced) markReplacedStop(answer);
       return answer;
     },
   };

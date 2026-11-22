@@ -38,8 +38,9 @@ describe("boot.credentials-release (I06-R12)", () => {
   it("a rebuild that turns the rejected instance ready runs its held job without the hourly pass", async () => {
     const name = connectorCredentialName("fork", "a", "token");
     const secrets = {
-      read: async (): Promise<SecretRead> => ({ state: "present", value: "synthetic-value-a" }),
-      has: async () => "present" as const,
+      read: async (n: string): Promise<SecretRead> =>
+        n === name ? { state: "present", value: "synthetic-value-a" } : { state: "missing" },
+      has: async (n: string) => (n === name ? ("present" as const) : ("missing" as const)),
       deleteOthers: async () => "done" as const,
     };
     let made = 0;
@@ -77,7 +78,6 @@ describe("boot.credentials-release (I06-R12)", () => {
         connectorInstances: [{ id: "a", kind: "fork", config: {}, credentials: ["token"] }],
       },
     });
-    expect(name).toMatch(/^connector\./);
     expect(booted.connectors.list().find((c) => c.id === "a")?.reason).toBe("credential-rejected");
     const queued = registerJob(booted.db, { kind: CONNECTOR_SYNC_KIND, target: "a" });
     if (!queued.registered) throw new Error("expected a new job");

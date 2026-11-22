@@ -404,23 +404,42 @@ describe("connector-sync-job: only a replaced object's stop is put back at close
 });
 
 describe("job-runner: a mark does not outlive its run (I06-R10)", () => {
-  it("onRunEnded is called once for every run, also when the handler never settles and the run is cancelled", async () => {
+  const sql = (text: string, params: unknown[] = []) => db.run(text, params as never);
+
+  it("a cancelled run closes first, then its end is announced, once each", async () => {
     const { createJobRunner } = await import("./job-runner.ts");
-    const ended: number[] = [];
-    const closed: number[] = [];
+    const calls: string[] = [];
     const runner = createJobRunner({
       db,
       handlers: { [CONNECTOR_SYNC_KIND]: () => new Promise(() => {}) },
-      onRunEnded: (j) => void ended.push(j.id),
-      onClosed: (j) => void closed.push(j.id),
+      onRunEnded: () => void calls.push("ended"),
+      onClosed: () => void calls.push("closed"),
     });
     const queued = register("a");
     const run = runner.runOnce();
     await flush();
     expect(runner.cancelRunning(queued.id)).toBe(true);
     await run;
-    expect(ended).toEqual([queued.id]);
-    expect(closed).toEqual([queued.id]);
+    expect(calls).toEqual(["closed", "ended"]);
+  });
+
+  it("a run whose lease is lost ends without a close: onRunEnded once, onClosed never, the run is not-leased", async () => {
+    const { createJobRunner } = await import("./job-runner.ts");
+    const calls: string[] = [];
+    const runner = createJobRunner({
+      db,
+      handlers: { [CONNECTOR_SYNC_KIND]: () => new Promise(() => {}) },
+      testBuild: { leaseMs: 40 },
+      onRunEnded: () => void calls.push("ended"),
+      onClosed: () => void calls.push("closed"),
+    });
+    const queued = register("a");
+    const run = runner.runOnce();
+    await flush();
+    sql("UPDATE jobs SET lease_token = lease_token + 1 WHERE id = ?", [queued.id]); // another claim took it
+    const ran = await run; // the next heartbeat finds the lease gone
+    expect(ran).toMatchObject({ jobId: queued.id, status: "not-leased" });
+    expect(calls).toEqual(["ended"]);
   });
 
   it("a mark is keyed by the run's lease: a later run of the same job never matches an earlier mark", async () => {
@@ -428,5 +447,76 @@ describe("job-runner: a mark does not outlive its run (I06-R10)", () => {
     expect(replacedKey({ id: 1, leaseToken: "x" })).not.toBe(
       replacedKey({ id: 1, leaseToken: "y" }),
     );
+  });
+
+  /** One instance, `ready`, whose sync answers as the test scripts it. */
+  async function scripted(answers: Array<"replaced" | "current" | (() => Promise<"replaced">)>) {
+    const { markReplacedStop } = await import("./connectors.ts");
+    let calls = 0;
+    const manager = {
+      list: () => [{ id: "a", kind: KIND, state: "ready" as const }],
+      sync: async (_id: string, o?: { signal?: AbortSignal }) => {
+        void o;
+        const kind = answers[Math.min(calls++, answers.length - 1)];
+        const which = typeof kind === "function" ? await kind() : kind;
+        const answer = {
+          connectorId: "a",
+          received: 0,
+          created: 0,
+          unchanged: 0,
+          scopeUpdated: 0,
+          stale: 0,
+          staleTombstone: 0,
+          blocked: 0,
+          tombstoned: 0,
+          rejected: [],
+          rejectedCount: 0,
+          rescanned: false,
+          deletionsMayBeMissed: false,
+          stopped: "credential-unusable" as const,
+        };
+        if (which === "replaced") markReplacedStop(answer);
+        if (calls > 6) return { error: "not-found" as const }; // a loop ends by its assertion
+        return answer;
+      },
+    };
+    return {
+      manager,
+      calls: () => calls,
+      runner: productRunner(db, broker, { connectors: () => manager }),
+    };
+  }
+
+  it("a mark made by run N is used up by it: run N+1 of the same job, stopped on the current object, is not requeued", async () => {
+    const { runner, calls } = await scripted(["replaced", "current"]);
+    const queued = register("a");
+    await runner.runOnce(); // N: replaced stop, held, put back at once
+    await flush();
+    expect(calls()).toBe(2); // N+1 ran from the put-back and stopped on the current object
+    expect(job(queued.id)).toMatchObject({ status: "held", reason: "connector-unavailable" });
+  });
+
+  it("a run that lost its lease before its replaced stop came back leaves no mark: the job's next run is not requeued by it", async () => {
+    let release!: () => void;
+    const lateReplaced = async () => {
+      await new Promise<void>((r) => (release = r));
+      return "replaced" as const;
+    };
+    const { runner, calls } = await scripted([lateReplaced, "current"]);
+    const queued = register("a");
+    const run = runner.runOnce();
+    await flush();
+    db.run("UPDATE jobs SET lease_token = lease_token + 1 WHERE id = ?", [queued.id] as never);
+    release(); // the cut handler's answer arrives after its run ended
+    await run;
+    await flush();
+    db.run(
+      "UPDATE jobs SET status = 'queued', reason = NULL, lease_token = lease_token + 1 WHERE id = ?",
+      [queued.id] as never,
+    );
+    await runner.runOnce(); // the next run: a current-object stop on a ready instance
+    await flush();
+    expect(calls()).toBe(2);
+    expect(job(queued.id)).toMatchObject({ status: "held", reason: "connector-unavailable" });
   });
 });
