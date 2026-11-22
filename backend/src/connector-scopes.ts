@@ -52,9 +52,15 @@ export function bindConnectorScopes(value: unknown): BoundConnectorScopes {
     // own keys only; a Map keeps a key like `__proto__` as an ordinary id
     for (const [id, held] of Object.entries(value)) {
       entries++;
-      if (held === null) scopes.set(id, null);
-      else if (Array.isArray(held) && held.every((v) => typeof v === "string" && v !== "")) {
-        scopes.set(id, normalizeScope(held as string[]));
+      if (held === null) {
+        scopes.set(id, null);
+        continue;
+      }
+      // the array is copied once and the copy is checked and normalized: a hole or a value that
+      // changes between reads cannot pass the check and be stored as something else
+      const values: unknown[] | undefined = Array.isArray(held) ? Array.from(held) : undefined;
+      if (values?.every((v) => typeof v === "string" && v !== "")) {
+        scopes.set(id, normalizeScope(values as string[]));
         configured++;
       } else rejected++;
     }

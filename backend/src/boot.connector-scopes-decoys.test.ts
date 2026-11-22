@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -36,7 +37,6 @@ let work: string;
 let dataDir: string;
 let cwdBefore: string;
 let madeRepoDecoy: boolean;
-let madeRepoConfigDir: boolean;
 let booted: Awaited<ReturnType<typeof bootBackend>> | undefined;
 const ENV_NAMES = [
   "PKI_CONNECTOR_SCOPES",
@@ -47,6 +47,27 @@ const ENV_NAMES = [
   "PKI_SITE_CONFIG",
   "SITE_CONFIG_DIR",
 ];
+
+const ENV_CONTENT_NAMES = ["PKI_CONNECTOR_SCOPES", "PKI_SITE_CONNECTOR_SCOPES"];
+
+/**
+ * Whether the decoy at `file` is this test's to put and remove: nothing is there, or what is there is
+ * exactly this test's decoy (a leftover of a run that was killed before it cleaned up). Any other
+ * content is a real file (a fork's) and is never written over or removed.
+ */
+const ownsDecoy = (file: string): boolean =>
+  !existsSync(file) || readFileSync(file, "utf8") === DECOY_TEXT;
+
+/** Removes the decoy this test owns, and its folder if that is left empty; a file that is not ours stays. */
+const releaseDecoy = (file: string, owned: boolean): void => {
+  if (!owned) return;
+  rmSync(file, { force: true });
+  try {
+    rmdirSync(dirname(file));
+  } catch {
+    // not empty (or not there): somebody else's files stay
+  }
+};
 
 const put = (file: string, text: string): void => {
   mkdirSync(resolve(file, ".."), { recursive: true });
@@ -62,8 +83,7 @@ beforeEach(() => {
   cwdBefore = process.cwd();
   // the old module-relative place. A fork's checkout may already have a real range file there: that file
   // is then the decoy (it must not be read either) and is neither written nor removed here
-  madeRepoDecoy = !existsSync(REPO_DECOY);
-  madeRepoConfigDir = !existsSync(dirname(REPO_DECOY));
+  madeRepoDecoy = ownsDecoy(REPO_DECOY);
   if (madeRepoDecoy) put(REPO_DECOY, DECOY_TEXT);
   put(join(cwdFolder, "site/config/connector-scopes.json"), DECOY_TEXT);
   put(join(cwdFolder, "connector-scopes.json"), DECOY_TEXT);
@@ -76,6 +96,8 @@ beforeEach(() => {
       n.includes("DIR") ? join(cwdFolder, "site/config") : join(dataDir, "connector-scopes.json"),
     );
   }
+  // and two that carry the decoy's CONTENT, for a reader that takes the value from the environment
+  for (const n of ENV_CONTENT_NAMES) vi.stubEnv(n, DECOY_TEXT);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 afterEach(async () => {
@@ -85,9 +107,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   process.chdir(cwdBefore);
   vi.unstubAllEnvs();
-  if (madeRepoDecoy) {
-    rmSync(madeRepoConfigDir ? dirname(REPO_DECOY) : REPO_DECOY, { recursive: true, force: true });
-  }
+  releaseDecoy(REPO_DECOY, madeRepoDecoy);
   rmSync(work, { recursive: true, force: true });
 });
 
@@ -153,5 +173,37 @@ describe("I07-C2 ①: a decoy range file is not read", () => {
       expect(readFileSync(file, "utf8")).toContain(DECOY);
     }
     expect(process.env.PKI_CONNECTOR_SCOPES_FILE).toContain("connector-scopes.json");
+  });
+
+  it("a content-carrying environment variable is set for the run", async () => {
+    await importBoth();
+    expect(process.env.PKI_CONNECTOR_SCOPES).toContain(DECOY);
+  });
+});
+
+describe("the repo-root decoy's ownership (a killed run's leftover)", () => {
+  let scratch: string;
+  beforeEach(() => void (scratch = mkdtempSync(join(tmpdir(), "pki-decoy-own-"))));
+  afterEach(() => rmSync(scratch, { recursive: true, force: true }));
+
+  it("takes back its own leftover: planted exactly, it is owned and gone (with its folder) after release", () => {
+    const file = join(scratch, "site/config/connector-scopes.json");
+    put(file, DECOY_TEXT);
+    expect(ownsDecoy(file)).toBe(true);
+    releaseDecoy(file, true);
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(dirname(file))).toBe(false);
+  });
+
+  it("a file with other content is not owned and is left untouched", () => {
+    const file = join(scratch, "site/config/connector-scopes.json");
+    put(file, '{"real":["scope"]}\n');
+    expect(ownsDecoy(file)).toBe(false);
+    releaseDecoy(file, ownsDecoy(file));
+    expect(readFileSync(file, "utf8")).toBe('{"real":["scope"]}\n');
+  });
+
+  it("nothing there is owned", () => {
+    expect(ownsDecoy(join(scratch, "none.json"))).toBe(true);
   });
 });

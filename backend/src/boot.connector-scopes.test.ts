@@ -110,7 +110,7 @@ describe("C1: the value comes from the registration", () => {
 });
 
 describe("C4 ③ and the closed side: what is not usable is unknown, never wider", () => {
-  it("an import-registered instance gets the table's value before its first source is stored; an entry the table lacks stays NULL", async () => {
+  it("an import-registered instance gets the table's value after its import; an entry the table lacks, nulls or refuses stays NULL", async () => {
     const { db, importInto } = await boot({
       connectorScopes: { "imp-one": ["team"], "imp-bad": "team", "imp-null": null },
     });

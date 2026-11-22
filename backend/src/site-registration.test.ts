@@ -416,6 +416,13 @@ describe("site.registration: the instance scopes' two check-only codes (I07-R5, 
     }
   });
 
+  it("② a sparse array is entry-invalid", () => {
+    // eslint-disable-next-line no-sparse-arrays
+    expect(checkSiteRegistration({ connectorScopes: { a: [, "x"] } })).toEqual([
+      "connector-scopes-entry-invalid",
+    ]);
+  });
+
   it("③ neither code for a well-formed value or for a registration without the field", () => {
     for (const site of [
       {},

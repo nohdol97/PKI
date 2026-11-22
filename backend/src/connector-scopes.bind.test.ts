@@ -117,6 +117,28 @@ describe("what a registration's value binds (C3)", () => {
     expect(bindConnectorScopes(proxied)).toMatchObject({ state: "invalid", configured: 0 });
   });
 
+  it("④ a sparse array is a refused entry, and an array that changes between reads is stored as the one copy that was checked", () => {
+    // eslint-disable-next-line no-sparse-arrays
+    const sparse = bindConnectorScopes({ a: [, "x"], ok: ["y"] });
+    expect(sparse).toMatchObject({ state: "bound", rejected: 1, entries: 2, configured: 1 });
+    expect(sparse.scopes.has("a")).toBe(false);
+    let reads = 0;
+    const shifting = new Proxy(["x"], {
+      get(target, key, receiver) {
+        if (key === "length") return 1;
+        if (key === "0") return reads++ === 0 ? "x" : 7;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    // read once: what the copy held is what is checked and stored, never a later read's value
+    const changed = bindConnectorScopes({ a: shifting, ok: ["y"] });
+    expect(changed.scopes.get("a")).toEqual(["x"]);
+    expect(changed).toMatchObject({ state: "bound", rejected: 0, configured: 2 });
+    for (const scope of changed.scopes.values()) {
+      expect(scope === null || scope.every((s) => typeof s === "string" && s !== "")).toBe(true);
+    }
+  });
+
   it("④ never widens: every bound scope is exactly the normalized entry the value held", () => {
     const value = { a: ["b", "a", "a"], c: ["z"], d: ["x", 1], e: null };
     const bound = bindConnectorScopes(value);

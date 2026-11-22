@@ -173,7 +173,8 @@ export function mergeSiteRegistration(
 /**
  * The check a fork's `registration.test.ts` runs (I05-R9): the codes found, one per occurrence, and
  * an empty list for a registration that is fine. Besides the structure it asks each registered kind's
- * function once, and the mapping its few questions. `base` default is the product's own set.
+ * function once, and the mapping its few questions. The scopes value gives `connector-scopes-field-invalid` when it is not an object and
+ * `connector-scopes-entry-invalid` once per registration when one or more entries are not well-formed. `base` default is the product's own set.
  */
 export function checkSiteRegistration(
   site: SiteRegistration,

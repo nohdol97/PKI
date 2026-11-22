@@ -273,6 +273,13 @@ describe("site-check --scopes (I07-R6, I07-C7, I07-H2 ①)", () => {
     expect(entries.code).toBe(1);
   });
 
+  it("a sparse array entry is a refused entry: not zero", async () => {
+    // eslint-disable-next-line no-sparse-arrays
+    const seen = await run({ connectorScopes: { a: [, SCOPE], b: [SCOPE] } });
+    expect(seen.stderr).toEqual([expect.stringContaining("틀린 항목 1개")]);
+    expect(seen.code).toBe(1);
+  });
+
   it("the example marker is still in the value: told, the exit is not zero (also next to another scope)", async () => {
     for (const connectorScopes of [
       { [ID]: ["pki-example-scope"] },
