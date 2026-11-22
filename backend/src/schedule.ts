@@ -114,36 +114,61 @@ export interface NextDue {
   zone: string;
   /** A daily or weekly period moved to the slots of a new zone. */
   rezoned: boolean;
-  /** The stored next due time lay more than a period after now and was recomputed. */
+  /** The stored next due time lay after the latest value it can legitimately hold and was recomputed. */
   regressed: boolean;
 }
 
 /**
  * The next due time to keep before judging whether a period is due (R22; check
- * steps B and C). A next due time more than one period after now means the clock
- * went back: it is recomputed as the first slot at or after now, so the period
- * does not stall until the clock catches up. Otherwise, when the zone of a daily
- * or weekly period changed, it moves to the first slot of the new zone at least
- * half a period after the last run, so one day does not run at 03:00 of both
- * zones. A period that never ran takes one period before its stored next due time
- * as its last run.
+ * steps B and C).
+ *
+ * A legitimate next due time is at most the later of the first slot after now and,
+ * when the last run is not after now, the first slot at least half a period after
+ * the last run (what a zone change sets; it can lie up to about one and a half
+ * periods ahead, so a bound of "now + one period" would undo it on the next check).
+ * A stored next due time past that bound, computed in the stored zone, means the
+ * clock went back: it is recomputed as the first slot at or after now, so the
+ * period does not stall until the clock catches up.
+ *
+ * Otherwise, when the zone of a daily or weekly period changed, it moves to the
+ * first slot of the new zone at least half a period after the last run, so one day
+ * does not run at 03:00 of both zones, and at least half a period before the
+ * stored next due time, so slots already counted are not counted again (for a
+ * period that never ran this is the new zone's slot nearest the stored one). It is
+ * capped at the bound in the new zone, so the next check keeps it.
  */
 export function reconcileNextDue(input: NextDueInput): NextDue {
-  const { period, zone, now } = input;
-  const length = periodLengthMs(period);
+  const { period, zone, now, lastRunSlot } = input;
+  const half = periodLengthMs(period) / 2;
   const rezoned = isLocal(period) && input.zone !== input.storedZone;
-  if (input.nextDue > now + length) {
+  if (
+    input.nextDue >
+    latestLegitimate(period, now, lastRunSlot, isLocal(period) ? input.storedZone : zone)
+  ) {
     const nextDue = firstSlotAtOrAfter(period, now, zone);
     return { nextDue, zone, rezoned, regressed: nextDue !== input.nextDue };
   }
   if (!rezoned) return { nextDue: input.nextDue, zone, rezoned, regressed: false };
-  const lastRun = input.lastRunSlot ?? input.nextDue - length;
-  return {
-    nextDue: firstSlotAtOrAfter(period, lastRun + length / 2, zone),
-    zone,
-    rezoned,
-    regressed: false,
-  };
+  const earliest = Math.max(
+    lastRunSlot === undefined ? -Infinity : lastRunSlot + half,
+    input.nextDue - half,
+  );
+  const nextDue = Math.min(
+    firstSlotAtOrAfter(period, earliest, zone),
+    latestLegitimate(period, now, lastRunSlot, zone),
+  );
+  return { nextDue, zone, rezoned, regressed: false };
+}
+
+function latestLegitimate(
+  period: Period,
+  now: number,
+  lastRunSlot: number | undefined,
+  zone: string,
+): number {
+  const next = nextSlotAfter(period, now, zone);
+  if (lastRunSlot === undefined || lastRunSlot > now) return next;
+  return Math.max(next, firstSlotAtOrAfter(period, lastRunSlot + periodLengthMs(period) / 2, zone));
 }
 
 /** A job's next run time pulled back to now plus the backoff cap when the clock went back (R22). */
@@ -174,11 +199,19 @@ function lastSlotDay(period: LocalPeriod, t: number, zone: string): number {
     period.kind === "weekly"
       ? today - modulo(today + 4 - checkedWeekday(period.weekday), 7)
       : today;
-  // A slot lies on its own local day, so it is this day's or a neighbour's.
+  // A slot lies on its own local day, so it is this day's or a neighbour's. The
+  // step ahead matters only where a fall-back crosses local midnight (the next
+  // day's early slot came before a repeated late hour of today); no zone in
+  // current tzdata was found to do so, so no test pins it.
   day += step;
   while (localSlot(period, day, zone) > t) day -= step;
   return day;
 }
+
+// Resolved local times by zone and wall time: a check resolves the same few days
+// many times over. Bounded; cleared when full.
+const resolved = new Map<string, number>();
+const RESOLVED_LIMIT = 4096;
 
 /** The instant of a period's local time on a local day. */
 function localSlot(period: LocalPeriod, day: number, zone: string): number {
@@ -193,7 +226,15 @@ function localSlot(period: LocalPeriod, day: number, zone: string): number {
   ) {
     throw new RangeError(`local time out of range: ${hour}:${minute}`);
   }
-  return resolveLocal(day * DAY + hour * HOUR + minute * MINUTE, zone);
+  const wall = day * DAY + hour * HOUR + minute * MINUTE;
+  const key = `${zone} ${wall}`;
+  let slot = resolved.get(key);
+  if (slot === undefined) {
+    if (resolved.size >= RESOLVED_LIMIT) resolved.clear();
+    slot = resolveLocal(wall, zone);
+    resolved.set(key, slot);
+  }
+  return slot;
 }
 
 /**

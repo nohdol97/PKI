@@ -231,7 +231,7 @@ describe("schedule.tz-change", () => {
     expect(result.rezoned).toBe(true);
   });
 
-  it("anchors on one period before the stored next due time when it never ran", () => {
+  it("takes the new zone's slot nearest the stored next due time when it never ran", () => {
     const result = reconcileNextDue({
       period: daily(3),
       nextDue: at("2026-01-15T18:00:00Z"), // Seoul 03:00 on the 16th
@@ -241,6 +241,192 @@ describe("schedule.tz-change", () => {
     });
     expect(result.nextDue).toBe(at("2026-01-16T03:00:00Z"));
   });
+
+  it("keeps the rezoned next due time on the checks that follow (Seoul to London)", () => {
+    const first = reconcileNextDue({
+      period: daily(3),
+      nextDue: at("2026-01-15T18:00:00Z"),
+      storedZone: "Asia/Seoul",
+      zone: "Europe/London",
+      lastRunSlot: ranInSeoul,
+      now: ranInSeoul + 5 * MIN,
+    });
+    // More than a period after now, yet legitimate: not a clock that went back.
+    const second = reconcileNextDue({
+      period: daily(3),
+      nextDue: first.nextDue,
+      storedZone: first.zone,
+      zone: "Europe/London",
+      lastRunSlot: ranInSeoul,
+      now: ranInSeoul + 5 * MIN + 30_000,
+    });
+    expect(second).toEqual({
+      nextDue: at("2026-01-16T03:00:00Z"),
+      zone: "Europe/London",
+      rezoned: false,
+      regressed: false,
+    });
+  });
+
+  it("applies the half-period rule on the eve of a 25-hour day (London to New York)", () => {
+    // 03:00 BST on 2026-10-24; London falls back on the 25th, so its next 03:00 is 25 h later.
+    const ranInLondon = at("2026-10-24T02:00:00Z");
+    const first = reconcileNextDue({
+      period: daily(3),
+      nextDue: at("2026-10-25T03:00:00Z"),
+      storedZone: "Europe/London",
+      zone: "America/New_York",
+      lastRunSlot: ranInLondon,
+      now: ranInLondon + 10 * MIN,
+    });
+    // New York 03:00 on the 24th (07:00Z) is only 5 hours after the London run.
+    expect(first).toEqual({
+      nextDue: at("2026-10-25T07:00:00Z"),
+      zone: "America/New_York",
+      rezoned: true,
+      regressed: false,
+    });
+    const second = reconcileNextDue({
+      period: daily(3),
+      nextDue: first.nextDue,
+      storedZone: first.zone,
+      zone: "America/New_York",
+      lastRunSlot: ranInLondon,
+      now: ranInLondon + 10 * MIN + 30_000,
+    });
+    expect(second.nextDue).toBe(at("2026-10-25T07:00:00Z"));
+    expect(second.regressed).toBe(false);
+  });
+
+  it("anchors on the last run when it is less than a period before the next due time", () => {
+    // New York's 23-hour day: ran 03:00 EST on 2026-03-07 (08:00Z), next 03:00 EDT is 23 h later.
+    // Shanghai 03:00 on the 8th (19:00Z on the 7th) is 11 hours after the run: too soon.
+    const ran = at("2026-03-07T08:00:00Z");
+    const result = reconcileNextDue({
+      period: daily(3),
+      nextDue: at("2026-03-08T07:00:00Z"),
+      storedZone: "America/New_York",
+      zone: "Asia/Shanghai",
+      lastRunSlot: ran,
+      now: ran + 10 * MIN,
+    });
+    expect(result.nextDue).toBe(at("2026-03-08T19:00:00Z"));
+  });
+
+  it("caps the rezoned next due time at the first slot after now when nothing ran", () => {
+    // Half a period before Seoul's 03:00 is past London's next 03:00, an hour away.
+    const result = reconcileNextDue({
+      period: daily(3),
+      nextDue: at("2026-01-15T18:00:00Z"),
+      storedZone: "Asia/Seoul",
+      zone: "Europe/London",
+      now: at("2026-01-15T02:00:00Z"),
+    });
+    expect(result).toEqual({
+      nextDue: at("2026-01-15T03:00:00Z"),
+      zone: "Europe/London",
+      rezoned: true,
+      regressed: false,
+    });
+  });
+
+  it("does not move the next due time back to slots already counted after an old last run", () => {
+    // A held period: the last run is days old while the next due time moved on.
+    const result = reconcileNextDue({
+      period: daily(3),
+      nextDue: at("2026-01-15T18:00:00Z"),
+      storedZone: "Asia/Seoul",
+      zone: "Europe/London",
+      lastRunSlot: at("2026-01-10T18:00:00Z"),
+      now: at("2026-01-15T10:00:00Z"),
+    });
+    expect(result.nextDue).toBe(at("2026-01-16T03:00:00Z"));
+    expect(result.regressed).toBe(false);
+  });
+
+  it("runs each slot once and reports no regression over two and a half periods of 30-second checks", () => {
+    const cases = [
+      {
+        // Seoul to London 5 minutes after the Seoul run (the C2 scenario).
+        nextDue: at("2026-01-15T18:00:00Z"),
+        storedZone: "Asia/Seoul",
+        zone: "Europe/London",
+        lastRunSlot: ranInSeoul,
+        start: ranInSeoul + 5 * MIN,
+        runs: ["2026-01-16T03:00:00.000Z", "2026-01-17T03:00:00.000Z"],
+      },
+      {
+        // London to Seoul an hour after the London run.
+        nextDue: at("2026-01-16T03:00:00Z"),
+        storedZone: "Europe/London",
+        zone: "Asia/Seoul",
+        lastRunSlot: at("2026-01-15T03:00:00Z"),
+        start: at("2026-01-15T04:00:00Z"),
+        runs: ["2026-01-15T18:00:00.000Z", "2026-01-16T18:00:00.000Z"],
+      },
+      {
+        // London to New York before London's 25-hour day.
+        nextDue: at("2026-10-25T03:00:00Z"),
+        storedZone: "Europe/London",
+        zone: "America/New_York",
+        lastRunSlot: at("2026-10-24T02:00:00Z"),
+        start: at("2026-10-24T02:10:00Z"),
+        runs: ["2026-10-25T07:00:00.000Z", "2026-10-26T07:00:00.000Z"],
+      },
+      {
+        // New York to Shanghai on New York's 23-hour day.
+        nextDue: at("2026-03-08T07:00:00Z"),
+        storedZone: "America/New_York",
+        zone: "Asia/Shanghai",
+        lastRunSlot: at("2026-03-07T08:00:00Z"),
+        start: at("2026-03-07T08:10:00Z"),
+        runs: ["2026-03-08T19:00:00.000Z", "2026-03-09T19:00:00.000Z"],
+      },
+      {
+        // Never ran: Seoul to London.
+        nextDue: at("2026-01-15T18:00:00Z"),
+        storedZone: "Asia/Seoul",
+        zone: "Europe/London",
+        lastRunSlot: undefined,
+        start: at("2026-01-15T10:00:00Z"),
+        runs: ["2026-01-16T03:00:00.000Z", "2026-01-17T03:00:00.000Z"],
+      },
+      {
+        // Never ran, an hour before London 03:00: capped at the first slot after now.
+        nextDue: at("2026-01-15T18:00:00Z"),
+        storedZone: "Asia/Seoul",
+        zone: "Europe/London",
+        lastRunSlot: undefined,
+        start: at("2026-01-15T02:00:00Z"),
+        runs: ["2026-01-15T03:00:00.000Z", "2026-01-16T03:00:00.000Z", "2026-01-17T03:00:00.000Z"],
+      },
+    ];
+    for (const c of cases) {
+      const period = daily(3);
+      let { nextDue, storedZone, lastRunSlot } = c;
+      const runs: string[] = [];
+      for (let now = c.start; now < c.start + 2.5 * DAY; now += 30_000) {
+        const reconciled = reconcileNextDue({
+          period,
+          nextDue,
+          storedZone,
+          zone: c.zone,
+          ...(lastRunSlot === undefined ? {} : { lastRunSlot }),
+          now,
+        });
+        expect(reconciled.regressed, new Date(now).toISOString()).toBe(false);
+        ({ nextDue, zone: storedZone } = reconciled);
+        const due = dueSlots(period, nextDue, now, c.zone);
+        if (!due) continue;
+        nextDue = due.nextDue;
+        if (due.slot === undefined) continue;
+        expect(due.missed).toBe(1);
+        runs.push(new Date(due.slot).toISOString());
+        lastRunSlot = due.slot;
+      }
+      expect(runs).toEqual(c.runs);
+    }
+  }, 60_000);
 
   it("leaves the next due time of an unchanged zone alone", () => {
     const nextDue = at("2026-01-15T18:00:00Z");
@@ -300,15 +486,30 @@ describe("clock.regression", () => {
     expect(dailyResult.regressed).toBe(true);
   });
 
-  it("keeps a next due time within one period of now", () => {
+  it("keeps the first slot after now", () => {
+    const nextDue = at("2026-01-15T13:00:00Z");
     const result = reconcileNextDue({
       period: hourly,
-      nextDue: now + HOUR,
+      nextDue,
       storedZone: "UTC",
       zone: "UTC",
       now,
     });
-    expect(result).toEqual({ nextDue: now + HOUR, zone: "UTC", rezoned: false, regressed: false });
+    expect(result).toEqual({ nextDue, zone: "UTC", rezoned: false, regressed: false });
+  });
+
+  it("recomputes when the clock went back past the last run, even by less than a period", () => {
+    const ran = at("2026-01-15T13:00:00Z");
+    const result = reconcileNextDue({
+      period: hourly,
+      nextDue: ran + HOUR,
+      storedZone: "UTC",
+      zone: "UTC",
+      lastRunSlot: ran,
+      now: ran - 10_000,
+    });
+    // The slot that already ran is due again; the (period, slot) key counts it as already run.
+    expect(result).toEqual({ nextDue: ran, zone: "UTC", rezoned: false, regressed: true });
   });
 
   it("recomputes to a slot equal to now, which is then due", () => {
