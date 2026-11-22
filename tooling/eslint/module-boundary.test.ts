@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { ESLint, RuleTester } from "eslint";
 import tseslint from "typescript-eslint";
@@ -427,6 +428,8 @@ describe("module-boundary: fork packages (I05-C4)", () => {
     name: "@pki-site/connector-x",
     dependencies: { "@pki/contracts": "workspace:*" },
   });
+  // B-W7: a collector named like the composition package, which is not at site/composition
+  forkPkg("site/connectors/y", { name: "@pki-site/composition" });
   afterAll(() => rmSync(forkRoot, { recursive: true, force: true }));
   const at = (rel: string) => join(forkRoot, rel);
 
@@ -473,6 +476,12 @@ describe("module-boundary: fork packages (I05-C4)", () => {
       {
         code: 'import { c } from "@pki-site/connector-x/adapters";',
         filename: at("site/connectors/x/src/registration.ts"),
+        errors: [{ messageId: "adapterEntry" }],
+      },
+      // B-W7: the composition-point name belongs to the package at site/composition only
+      {
+        code: 'import { c } from "@pki-site/connector-x/adapters";',
+        filename: at("site/connectors/y/src/registration.ts"),
         errors: [{ messageId: "adapterEntry" }],
       },
       // ③ a collector implements Connector outside its src/adapters/
@@ -554,6 +563,89 @@ describe("module-boundary: fork packages (I05-C4)", () => {
           errors: [{ messageId: "deepImport" }],
         },
       ]),
+    ],
+  });
+
+  // B-S1: absolute paths and file: URLs are judged like relative ones, by the package of their target
+  const absoluteBoot = join(forkRoot, "backend/src/boot.ts");
+  const urlBoot = pathToFileURL(absoluteBoot).href;
+  ruleTester.run("module-boundary (absolute and file: specifiers)", moduleBoundary, {
+    valid: [
+      // a path inside the file's own package is fine, written absolute or as a URL
+      {
+        code: `import { r } from ${JSON.stringify(at("site/composition/src/registration.ts"))};`,
+        filename: compositionShell,
+      },
+      {
+        code: `import { r } from ${JSON.stringify(pathToFileURL(at("site/composition/src/registration.ts")).href)};`,
+        filename: compositionShell,
+      },
+    ],
+    invalid: [registration, exampleShell, compositionTest].flatMap((filename) =>
+      [
+        `import { bootBackend } from ${JSON.stringify(absoluteBoot)};`,
+        `export { bootBackend } from ${JSON.stringify(absoluteBoot)};`,
+        `const m = await import(${JSON.stringify(absoluteBoot)});`,
+        `import { bootBackend } from ${JSON.stringify(urlBoot)};`,
+        `export * from ${JSON.stringify(urlBoot)};`,
+        `const m = await import(${JSON.stringify(urlBoot)});`,
+      ].map((code) => ({ code, filename, errors: [{ messageId: "crossPackageRelative" }] })),
+    ),
+  });
+
+  // B-S2: the allow-list slot for one cross-package relative target; shipped empty, tested with a fixture entry
+  const slot = [{ pkg: "@pki-site/composition", target: "../config/connector-scopes.json" }];
+  const slotOptions = [{ allowRelative: slot }];
+  ruleTester.run("module-boundary (relative allow-list slot)", moduleBoundary, {
+    valid: [
+      // exactly the one resolved file, from the named package
+      {
+        code: 'import s from "../../config/connector-scopes.json";',
+        filename: registration,
+        options: slotOptions,
+      },
+      // the same file written another way resolves to the same path
+      {
+        code: 'import s from "../../config/../config/connector-scopes.json";',
+        filename: registration,
+        options: slotOptions,
+      },
+    ],
+    invalid: [
+      // no entry (the shipped table): refused
+      {
+        code: 'import s from "../../config/connector-scopes.json";',
+        filename: registration,
+        errors: [{ messageId: "crossPackageRelative" }],
+      },
+      // a sibling file next to the allowed one
+      {
+        code: 'import s from "../../config/other.json";',
+        filename: registration,
+        options: slotOptions,
+        errors: [{ messageId: "crossPackageRelative" }],
+      },
+      // the same file name in another folder: the resolved path differs though the text ends alike
+      {
+        code: 'import s from "../../other/connector-scopes.json";',
+        filename: registration,
+        options: slotOptions,
+        errors: [{ messageId: "crossPackageRelative" }],
+      },
+      // a traversal that reaches another file
+      {
+        code: 'import s from "../../config/../../backend/src/boot.ts";',
+        filename: registration,
+        options: slotOptions,
+        errors: [{ messageId: "crossPackageRelative" }],
+      },
+      // the same specifier from a different package
+      {
+        code: 'import s from "../../config/connector-scopes.json";',
+        filename: at("site/connectors/x/src/index.ts"),
+        options: slotOptions,
+        errors: [{ messageId: "crossPackageRelative" }],
+      },
     ],
   });
 

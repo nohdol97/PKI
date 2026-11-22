@@ -27,10 +27,10 @@
 // The direction is fork -> public only: a public package may not import "@pki-site/…". A fork-shaped
 // package reaches the backend by its package name alone, so nothing of backend/src (bootBackend takes
 // unchecked connectors and policies) is reached by a path or a subpath, test files included.
+// Absolute paths and file: URLs are resolved and judged like relative specifiers (by the package of their target).
 // Known gaps (not checked):
 // - createRequire(import.meta.url)("...") calls
 // - package.json "imports" subpaths ("#name")
-// - absolute-path specifiers
 // - import() with a computed specifier (import(`./adapters/${name}.ts`))
 // - an implementation outside src/adapters/ that names no adapter type at all;
 //   is built indirectly (a call's result such as Object.assign, array or Map
@@ -46,7 +46,8 @@
 //   that upper code must import (I04 spec, "T05가 넘기는 것" 9). Closing this
 //   gap must exempt that file by name.
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const SCOPE = "@pki/";
 /** A deployment fork's packages (I05-R4); the letters live here and in tooling/workspace, nowhere in the public packages. */
@@ -57,9 +58,18 @@ const ADAPTERS_DIR = "src/adapters";
 /** The files that may pick adapter implementations (this file's header): package name and path in it. */
 const COMPOSITION_POINTS = [
   { pkg: "@pki/backend", file: "src/composition.ts" },
-  { pkg: "@pki-site/composition", file: "src/registration.ts" },
+  // the name alone is not enough: only the package at site/composition counts (a collector with that name does not)
+  { pkg: "@pki-site/composition", file: "src/registration.ts", dir: "site/composition" },
   { pkg: "@pki/site-example", file: "src/registration.ts" },
 ];
+
+/**
+ * The one cross-package relative targets a package may import (I05-R4): `{ pkg, target }` allows `pkg` to
+ * import the file `resolve(<pkg root>, target)` and no other. The resolved paths are compared, never the
+ * specifier text. Empty: the I07 task adds its one entry. The rule option `allowRelative` replaces the table (tests).
+ * @type {{ pkg: string, target: string }[]}
+ */
+const RELATIVE_ALLOWED = [];
 const TEST_SPECIFIER = /\.(test|e2e|test-support)(\.[cm]?[jt]sx?)?$/;
 /** A package's top-level e2e/ folder holds test code only, whatever the file names. */
 const E2E_DIR = "e2e";
@@ -217,7 +227,23 @@ const moduleBoundary = {
   meta: {
     type: "problem",
     docs: { description: "Forbid imports that bypass another workspace package's public entry" },
-    schema: [],
+    schema: [
+      {
+        type: "object",
+        properties: {
+          allowRelative: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { pkg: { type: "string" }, target: { type: "string" } },
+              required: ["pkg", "target"],
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+    ],
     messages: {
       crossPackageRelative:
         "'{{source}}' reaches into another package by path; import its package name instead.",
@@ -245,11 +271,32 @@ const moduleBoundary = {
     const ownName = JSON.parse(readFileSync(join(ownRoot, "package.json"), "utf8")).name;
     const ownPath = relative(ownRoot, context.filename).split(sep).join("/");
     const isTest = TEST_FILE.test(context.filename) || inE2eDir(context.filename);
-    const isComposition = COMPOSITION_POINTS.some((p) => ownName === p.pkg && ownPath === p.file);
+    const rootPath = ownRoot.split(sep).join("/");
+    const isComposition = COMPOSITION_POINTS.some(
+      (p) =>
+        ownName === p.pkg &&
+        ownPath === p.file &&
+        (p.dir === undefined || rootPath.endsWith(`/${p.dir}`)),
+    );
+    /** @type {{ pkg: string, target: string }[]} */
+    const allowedRelative = context.options[0]?.allowRelative ?? RELATIVE_ALLOWED;
     const isFork = String(ownName).startsWith(FORK_SCOPE);
     // who may reach an implementation: a composition point, implementations themselves, tests
     const mayReachAdapters =
       isComposition || isTest || inAdapters(ownPath) || EXEMPT_PACKAGES.has(ownName);
+
+    /** The file a relative, absolute or file: URL specifier names; undefined for a package name. */
+    function pathOf(/** @type {string} */ source) {
+      if (source.startsWith(".")) return resolve(dirname(context.filename), source);
+      if (source.startsWith("file:")) {
+        try {
+          return fileURLToPath(source);
+        } catch {
+          return resolve(dirname(context.filename), "_unreadable-file-url");
+        }
+      }
+      return isAbsolute(source) ? resolve(source) : undefined;
+    }
 
     /** @param {any} node A Literal, or an expression-free TemplateLiteral */
     function check(node) {
@@ -259,11 +306,20 @@ const moduleBoundary = {
         source = node.quasis[0]?.value.cooked;
       }
       if (typeof source !== "string") return;
-      if (source.startsWith(".")) {
+      const target = pathOf(source);
+      if (target !== undefined) {
         // Treat the target as a directory so a specifier naming a package root resolves to it.
-        const resolved = resolve(dirname(context.filename), source);
+        const resolved = target;
         if (!isTest && (TEST_SPECIFIER.test(source) || inE2eDir(join(resolved, "_")))) {
           context.report({ node, messageId: "testModuleImport", data: { source } });
+          return;
+        }
+        if (
+          allowedRelative.some(
+            (a) =>
+              a.pkg === ownName && resolved === resolve(/** @type {string} */ (ownRoot), a.target),
+          )
+        ) {
           return;
         }
         if (packageRootOf(join(resolved, "_")) !== ownRoot) {

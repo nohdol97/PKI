@@ -36,6 +36,11 @@ describe("backend-entry", () => {
     expect(() => backendEntry(root)).toThrow(join(root, "site/composition/src/shell.ts"));
   });
 
+  it("the package.json decides: a bare site/composition folder, even with an entry file, is not a composition package", () => {
+    write("site/composition/src/shell.ts");
+    expect(backendEntry(root)).toBe(join(root, "backend/src/shell.ts"));
+  });
+
   it("the production layout names only the bundled entry; its code has no composition lookup", () => {
     const production = readFileSync(resolve(import.meta.dirname, "layout.production.ts"), "utf8");
     expect(production).toContain("./backend/shell.js");

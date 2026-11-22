@@ -2,6 +2,7 @@
 // project and, when they exist, the composition package and the collector packages of a fork. The root is an
 // argument, so each shape of the `site/` folder is a temporary root and the real checkout's own shape never
 // changes the result.
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -51,10 +52,12 @@ describe("workspace.typecheck-projects", () => {
     ]);
   });
 
-  it("looks at a fork package only if it has a tsconfig.json", () => {
+  it("fails, naming the package, for a fork package with no tsconfig.json: it is never left out silently", () => {
     write("site/connectors/a/package.json", JSON.stringify({ name: "a" }));
     project("site/connectors/b");
-    expect(typecheckProjects(root)).toEqual([".", "site/connectors/b"]);
+    expect(() => typecheckProjects(root)).toThrow(
+      "site/connectors/a has no tsconfig.json: add one (the type check would leave it out)",
+    );
   });
 
   it("does not add a public package: the root tsconfig.json lists those", () => {
@@ -76,4 +79,41 @@ describe("workspace.typecheck-projects", () => {
     ).references;
     expect(references.filter((r) => r.path.startsWith("site"))).toEqual([]);
   });
+});
+
+describe("the runner's exit status (C-F1)", () => {
+  const RUNNER = join(REAL_ROOT, "tooling/workspace/typecheck.ts");
+  const run = () =>
+    spawnSync(process.execPath, [RUNNER, root], { encoding: "utf8", cwd: root, timeout: 120_000 });
+  const forkProject = (source: string) => {
+    write("tsconfig.json", '{ "compilerOptions": { "noEmit": true }, "include": ["root.ts"] }');
+    write("root.ts", "export {};\n");
+    write("site/composition/package.json", JSON.stringify({ name: "@pki-site/composition" }));
+    write(
+      "site/composition/tsconfig.json",
+      '{ "compilerOptions": { "noEmit": true }, "include": ["src"] }',
+    );
+    write("site/composition/src/a.ts", source);
+  };
+
+  it("passes tsc's failure through: a fork project with a type error gives a non-zero status and names the file", () => {
+    forkProject('export const bad: number = "x";\n');
+    const result = run();
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("site/composition/src/a.ts");
+  }, 130_000);
+
+  it("a clean fork project gives 0", () => {
+    forkProject("export const good: number = 1;\n");
+    expect(run().status).toBe(0);
+  }, 130_000);
+
+  it("a fork package with no tsconfig.json fails with the message, not a stack", () => {
+    write("tsconfig.json", '{ "files": [] }');
+    write("site/composition/package.json", "{}");
+    const result = run();
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("site/composition has no tsconfig.json");
+    expect(result.stderr).not.toContain("    at ");
+  }, 130_000);
 });

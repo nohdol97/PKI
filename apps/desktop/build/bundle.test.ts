@@ -239,6 +239,8 @@ describe("bundle: the example package's entry, as a fork's is (I05-C15, R17)", (
       expect(code, marker).not.toContain(marker);
     }
     expect(code).toContain("connector-example");
+    // the fork-shape proof of C20 ③ in process: the entry's bundle has no composition-package lookup
+    expect(code).not.toContain("site/composition");
   });
 
   it("applies the production swap: the options module of source runs is not in it, and the entry takes neither --scope-policy nor --fixtures", async () => {

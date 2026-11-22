@@ -80,6 +80,15 @@ describe("site.no-public-reference", () => {
     expect(publicReferenceProblems(root)).toEqual([]);
   });
 
+  it("finds the fork's name in the example package's own folder too: only the example's name is its own to use", () => {
+    write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+    write("packages/site-example/package.json", JSON.stringify({ name: "@pki/site-example" }));
+    write("packages/site-example/src/a.ts", `import "${FORK}";\n`);
+    expect(publicReferenceProblems(root)).toEqual([
+      "packages/site-example/src/a.ts names @pki-site/",
+    ]);
+  });
+
   it("holds in the real checkout", () => {
     expect(publicReferenceProblems(REAL_ROOT)).toEqual([]);
   });

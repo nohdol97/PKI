@@ -8,20 +8,36 @@ import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { isSiteDir, workspaceDirs } from "./packages.ts";
 
-/** The projects to build, relative to `root`: `.` and the fork's packages that have a tsconfig.json, sorted. */
+/**
+ * The projects to build, relative to `root`: `.` and the fork's packages, sorted. A fork package with no
+ * tsconfig.json fails by name rather than being left out, which would pass its errors silently.
+ */
 export function typecheckProjects(root: string): string[] {
-  const fork = workspaceDirs(root)
-    .filter((dir) => isSiteDir(dir) && existsSync(join(root, dir, "tsconfig.json")))
-    .sort();
+  const fork = workspaceDirs(root).filter(isSiteDir).sort();
+  for (const dir of fork) {
+    if (!existsSync(join(root, dir, "tsconfig.json"))) {
+      throw new Error(`${dir} has no tsconfig.json: add one (the type check would leave it out)`);
+    }
+  }
   return [".", ...fork];
 }
 
-if (import.meta.main) {
-  const root = resolve(import.meta.dirname, "../..");
-  const tsc = join(root, "node_modules/typescript/bin/tsc");
+/** Runs `tsc -b` over the projects of `root` and returns its exit status (a failed start is 1). */
+export function runTypecheck(root: string): number {
+  const tsc = join(import.meta.dirname, "../../node_modules/typescript/bin/tsc");
   const run = spawnSync(process.execPath, [tsc, "-b", ...typecheckProjects(root)], {
     cwd: root,
     stdio: "inherit",
   });
-  process.exitCode = run.status ?? 1;
+  return run.status ?? 1;
+}
+
+if (import.meta.main) {
+  try {
+    // the root is the repository's; an argument names another (the runner's own tests)
+    process.exitCode = runTypecheck(resolve(process.argv[2] ?? join(import.meta.dirname, "../..")));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
