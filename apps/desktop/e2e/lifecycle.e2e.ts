@@ -9,8 +9,8 @@
 // exits, so "no backend after quit" holds even if the backend ignored stop; what the
 // quit tests catch is a quit that hangs, live backend or dead. V01-T16: a backend
 // that dies is started again (a bounded number of times) at a new address, the old
-// port is never forwarded to, and a backend that ignores stop and SIGTERM is
-// force-killed so the quit ends within the shell's time limit.
+// port is never forwarded to, and a backend that ignores stop and SIGTERM does not
+// hold the quit past the shell's time limit.
 import { expect, test } from "@playwright/test";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -106,7 +106,8 @@ test("start, single instance, and quit with a live backend", async () => {
     const code = await new Promise<number | null>((resolve) => second.once("exit", resolve));
     expect(code).toBe(0);
     expect(app.windows()).toHaveLength(1);
-    // the second launch started no backend of its own, and the first one's is untouched
+    // the first instance's backend is untouched (the second instance's own exit before
+    // it starts anything is main.ts's app.exit(0) ahead of run(), held by the exit code)
     expect(await backendPids(app)).toEqual([pid]);
     await window.getByRole("navigation").getByRole("button", { name: "설정" }).click();
     await expect(window.getByRole("row", { name: /데이터 폴더/ })).toContainText(options.dataDir);
@@ -215,7 +216,7 @@ test("after the last restart: no forwarding, and quitting still completes", asyn
   }
 });
 
-test("a backend that ignores stop and SIGTERM is force-killed and the quit ends in time", async () => {
+test("the quit ends within the time limit when the backend ignores stop and SIGTERM", async () => {
   test.skip(process.platform === "win32", "SIGSTOP is POSIX; Windows kill is TerminateProcess");
   const dir = mkdtempSync(join(tmpdir(), "pki-lifecycle-"));
   const { app, pid } = await startedShell({ userData: join(dir, "u"), dataDir: join(dir, "d") });
@@ -224,7 +225,10 @@ test("a backend that ignores stop and SIGTERM is force-killed and the quit ends 
     process.kill(pid, "SIGSTOP");
     const began = Date.now();
     await app.close();
-    // stop 5 s + kill 2 s + force kill (backend-process.ts), with room for a loaded machine
+    // stop 5 s, then kill(): on macOS Electron's kill() ends even a stopped process about
+    // 2 s later (measured, review A F4), before the shell's SIGKILL step would. The guard
+    // this holds is that the quit ends within the limit; the bounded stop sequence itself,
+    // SIGKILL included, is held by src/backend-process.stop.test.ts. Room for a loaded machine.
     expect(Date.now() - began).toBeLessThan(15_000);
     await expect.poll(() => alive(pid), { timeout: 5_000 }).toBe(false);
   } finally {

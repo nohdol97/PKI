@@ -188,7 +188,8 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
       if (await endsWithin(options.stopTimeoutMs ?? 5_000)) return;
       child.kill();
       if (await endsWithin(killAfter)) return;
-      child.forceKill?.();
+      // only while it has not ended: an ended process's PID can be the OS's to give again
+      if (!ended) child.forceKill?.();
       await endsWithin(killAfter);
     },
   };

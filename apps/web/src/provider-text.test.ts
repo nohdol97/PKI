@@ -48,7 +48,7 @@ describe("provider text", () => {
     const unknown = providerCheckText(
       check({ providerId: "claude-code", version: "2.1.3", authentication: "unknown" }),
     );
-    expect(unknown.state).toBe("설치됨(2.1.3), 로그인 상태를 알 수 없음");
+    expect(unknown.state).toBe("설치됨(2.1.3), 로그인 상태를 확인할 수 없음");
     expect(unknown.guidance).toContain("claude");
     expect(unknown.guidance).toContain("로그인");
   });

@@ -137,7 +137,7 @@ test("with both CLIs found, the user picks the default and the next test goes to
 
   await page.getByRole("button", { name: "Provider 확인" }).click();
   await expect(
-    page.getByText("Claude Code: 설치됨(2.1.3), 로그인 상태를 알 수 없음"),
+    page.getByText("Claude Code: 설치됨(2.1.3), 로그인 상태를 확인할 수 없음"),
   ).toBeVisible();
   await expect(page.getByText("Codex CLI: 설치됨(2.1.3), 로그인됨")).toBeVisible();
 

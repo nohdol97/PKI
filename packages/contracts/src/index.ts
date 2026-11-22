@@ -264,7 +264,12 @@ export type ProviderCheck = z.infer<typeof ProviderCheckSchema>;
  * still judged by the Broker.
  */
 export const ProviderStatusSchema = z.discriminatedUnion("state", [
-  z.object({ state: z.literal("ready"), providerId: ProviderIdSchema }),
+  /** `check` only for a CLI whose login could not be confirmed: Home guides as Settings does. */
+  z.object({
+    state: z.literal("ready"),
+    providerId: ProviderIdSchema,
+    check: ProviderCheckSchema.optional(),
+  }),
   z.object({
     state: z.literal("unavailable"),
     providerId: ProviderIdSchema.nullable(),

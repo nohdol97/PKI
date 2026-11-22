@@ -2,8 +2,10 @@
 // Electron shell (`target`, as screens.e2e). The product as it ships already runs
 // without an embedding model and without a vector index; the backend's PATH here
 // holds no CLI, or only the fake CLI (never a real one). Home names what does not
-// work and how to fix it, and the stored sources still list and search. The
-// download approval is opened and cancelled, never approved: no network is used.
+// work and how to fix it, and the stored sources still list and search. Every
+// prepare request the page sends is recorded: opening and cancelling the download
+// approval sends none, and approving it (browser only, answered by a stub in place
+// of the backend so nothing is downloaded) sends exactly the download source.
 // "네트워크 없음" has no screen state of its own (nothing probes the network); the
 // failures it causes are in backend/src/degraded.test.ts.
 import { test as base, expect, type BrowserType, type Page } from "@playwright/test";
@@ -71,6 +73,17 @@ async function startStack(dir: string, path: string, target: Target, chromium: B
   };
 }
 
+/** The bodies of the prepare requests the page sends from now on. */
+function prepareRequests(page: Page): unknown[] {
+  const bodies: unknown[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/embedding/prepare") {
+      bodies.push(request.postDataJSON());
+    }
+  });
+  return bodies;
+}
+
 const openScreen = (page: Page, name: string) =>
   page.getByRole("navigation").getByRole("button", { name }).click();
 
@@ -102,6 +115,7 @@ test("no CLI, no model, no vector index: Home says so and guides; sources still 
   mkdirSync(noCli);
   const stack = await startStack(dir, noCli, target, playwright.chromium);
   const { page } = stack;
+  const prepared = prepareRequests(page);
   try {
     const row = (name: RegExp) => page.getByRole("row", { name });
     await expect(row(/백엔드/)).toContainText("준비됨");
@@ -122,13 +136,18 @@ test("no CLI, no model, no vector index: Home says so and guides; sources still 
     await expect(row(/Embedding/)).toContainText(
       "사용 불가: 모델 파일이 없음, 키워드 검색으로 동작 (로컬 계산)",
     );
-    // the download asks first, naming where from and how much; cancelled here
+    expect(prepared).toEqual([{ source: { kind: "local-pack", path: join(dir, "no-pack") } }]);
+    // the download asks first, naming where from and how much; opening and
+    // cancelling it sends nothing
     await page.getByRole("button", { name: "모델 내려받기…" }).click();
     const approval = page.getByRole("alertdialog", { name: "모델 내려받기" });
     await expect(approval).toContainText("huggingface.co");
     await expect(approval).toContainText("586 MB");
     await approval.getByRole("button", { name: "취소" }).click();
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await page.getByRole("button", { name: "모델 내려받기…" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "취소" }).click();
+    expect(prepared).toHaveLength(1);
 
     await explorationWorks(page);
   } finally {
@@ -156,6 +175,39 @@ test("전송 거부: an installed default without consent is shown blocked; sour
     await stack.stop();
     expect(await fake.leftovers()).toEqual([]);
     fake.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("approving the download sends exactly the download source, once", async ({
+  target,
+  playwright,
+}) => {
+  // page.route intercepts the browser's http requests; in Electron the app:// scheme
+  // would reach the real backend and start a real download, so the approval runs here only
+  test.skip(target !== "browser", "the approval is stubbed through the browser's http route");
+  const dir = mkdtempSync(join(tmpdir(), "pki-e2e-degraded-"));
+  const noCli = join(dir, "no-cli");
+  mkdirSync(noCli);
+  const stack = await startStack(dir, noCli, target, playwright.chromium);
+  const { page } = stack;
+  const prepared = prepareRequests(page);
+  // answered here: the request never reaches the backend, so nothing is downloaded
+  await page.route("**/api/embedding/prepare", (route) =>
+    route.fulfill({ json: { embedding: { state: "model-missing", egress: "local" } } }),
+  );
+  try {
+    await page.getByRole("button", { name: "모델 내려받기…" }).click();
+    expect(prepared).toEqual([]);
+    await page
+      .getByRole("alertdialog", { name: "모델 내려받기" })
+      .getByRole("button", { name: "내려받기 승인" })
+      .click();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await expect.poll(() => prepared.length).toBe(1);
+    expect(prepared).toEqual([{ source: { kind: "download" } }]);
+  } finally {
+    await stack.stop();
     rmSync(dir, { recursive: true, force: true });
   }
 });

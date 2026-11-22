@@ -63,10 +63,13 @@ interface Parts {
   path?: string;
   embedder?: EmbeddingProvider | null;
   vectorIndex?: VectorIndex;
+  /** The server's clock for the Provider check's reuse window (default: real time). */
+  now?: () => number;
+  egress?: ReturnType<typeof productEgress>;
 }
 
 async function start(parts: Parts = {}) {
-  const egress = productEgress(db);
+  const egress = parts.egress ?? productEgress(db);
   const env = { PATH: parts.path ?? fake.bin };
   const providers = [
     createClaudeCodeProvider({ env }),
@@ -85,6 +88,7 @@ async function start(parts: Parts = {}) {
     calls: productCalls(db, egress, { providers }),
     vectorIndex: parts.vectorIndex ?? new MemoryVectorIndex(),
     embedder,
+    ...(parts.now ? { now: parts.now } : {}),
   });
   headers = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
 }
@@ -101,11 +105,14 @@ const post = (path: string, body?: unknown) => send(port(), path, headers, "POST
 const status = async (): Promise<StatusResponse> =>
   routes.status.response.parse((await get(routes.status.path)).body);
 
-function grant(providerId: "codex" | "openai-compatible") {
+function grant(
+  providerId: "claude-code" | "codex" | "openai-compatible",
+  classes: ("synthetic" | "general")[] = ["synthetic", "general"],
+) {
   const egress = productEgress(db);
   const current = egress.destination(providerId);
   if (!("destination" in current)) throw new Error("no destination to consent to");
-  egress.grant(providerId, ["synthetic", "general"], {
+  egress.grant(providerId, classes, {
     destination: current.destination,
     policyVersion: egress.policyVersion(),
   });
@@ -265,6 +272,53 @@ describe("degraded states (V01-R5)", () => {
     await explorationWorks();
   });
 
+  it("Claude Code has no login status command: ready, with the unknown login carried for guidance", async () => {
+    writeSetting(db, DEFAULT_PROVIDER_SETTING, "claude-code");
+    grant("claude-code");
+    await start();
+    expect((await status()).provider).toEqual({
+      state: "ready",
+      providerId: "claude-code",
+      check: {
+        providerId: "claude-code",
+        installed: true,
+        version: "2.1.3",
+        authentication: "unknown",
+      },
+    });
+  });
+
+  it("전송 거부: a consent for synthetic material only does not cover a general document", async () => {
+    productEgress(db).revoke("codex");
+    grant("codex", ["synthetic"]);
+    await start();
+    expect((await status()).provider).toEqual({
+      state: "unavailable",
+      providerId: "codex",
+      reason: "no-matching-rule",
+    });
+    await explorationWorks();
+  });
+
+  it("a Provider status that cannot be read degrades only its own row", async () => {
+    const egress = productEgress(db);
+    await start({
+      egress: {
+        ...egress,
+        decide: () => {
+          throw new TypeError("corrupt rules");
+        },
+      },
+    });
+    expect(await status()).toEqual({
+      backend: { state: "ready" },
+      provider: { state: "unavailable", providerId: null, reason: "status-check-failed" },
+      embedding: { state: "ready", egress: "local" },
+      vectorIndex: { state: "ready" },
+    });
+    await explorationWorks();
+  });
+
   it("embedding 모델 없음: the model is reported missing and nothing prepares it", async () => {
     const embedder = new FakeEmbedder();
     await start({ embedder });
@@ -344,5 +398,52 @@ describe("the product on a PC with no CLI and no network (all five at once)", ()
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("the Provider check behind the status (T16 handoff 2)", () => {
+  const queries = () => fake.runs().filter((r) => r.kind === "version" || r.kind === "auth");
+  let clock: number;
+  beforeEach(() => {
+    clock = 1_000_000;
+  });
+
+  it("status reads that come together share one set of queries", async () => {
+    await start({ now: () => clock });
+    const all = await Promise.all([status(), status(), status()]);
+    expect(all.map((s) => s.provider.state)).toEqual(["ready", "ready", "ready"]);
+    expect(
+      queries()
+        .map((r) => r.kind)
+        .sort(),
+    ).toEqual(["auth", "version"]);
+  });
+
+  it("reuses the last check for 60 s, so reading status again runs nothing", async () => {
+    await start({ now: () => clock });
+    await status();
+    fake.reset();
+    clock += 59_000;
+    for (let i = 0; i < 3; i++) await status();
+    expect(queries()).toEqual([]);
+    clock += 2_000;
+    await status();
+    expect(
+      queries()
+        .map((r) => r.kind)
+        .sort(),
+    ).toEqual(["auth", "version"]);
+  });
+
+  it('"Provider 확인" runs the queries again and the status shows what it found', async () => {
+    await start({ now: () => clock });
+    expect((await status()).provider.state).toBe("ready");
+    fake.configure({ auth: "logged-out" });
+    fake.reset();
+    await post(routes.checkProviders.path);
+    const ran = queries().length;
+    expect(ran).toBeGreaterThan(0);
+    expect((await status()).provider).toMatchObject({ reason: "cli-not-logged-in" });
+    expect(queries()).toHaveLength(ran);
   });
 });

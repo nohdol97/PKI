@@ -23,7 +23,8 @@ const KEYWORD_ONLY = "키워드 검색으로 동작";
 const REASON: Readonly<Record<string, string>> = {
   "model file missing": "모델 파일이 없음",
   "model file hash mismatch": "모델 파일이 고정 값과 다름",
-  "model download failed": "모델을 내려받지 못함(네트워크 연결 확인)",
+  // also a proxy's refusal or a final address that is not https (T14 handoff 2)
+  "model download failed": "모델을 내려받지 못함(네트워크·프록시 확인)",
   "model install failed": "모델을 설치하지 못함",
   "embedding runtime failed to load": "실행 모듈을 불러오지 못함",
   "status check failed": "상태를 읽지 못함",
@@ -56,21 +57,24 @@ export function providerStatusText(status: ProviderStatus): {
   text: string;
   guidance: string | null;
 } {
+  if (status.state === "unavailable" && status.reason === "status-check-failed") {
+    return { text: "상태를 읽지 못함", guidance: null };
+  }
   if (status.providerId === null) {
     return { text: "기본 Provider가 정해지지 않음. 설정 화면에서 고르세요.", guidance: null };
   }
   const name = providerName(status.providerId);
-  if (status.state === "ready") return { text: `${name}: 사용 가능`, guidance: null };
   if (status.check) {
     const { state, guidance } = providerCheckText(status.check);
     return { text: `${name}: ${state}`, guidance };
   }
+  if (status.state === "ready") return { text: `${name}: 사용 가능`, guidance: null };
   return { text: `${name}: 전송이 막힘(${blockReasonText(status.reason)})`, guidance: null };
 }
 
 /** The pinned model the approval is for (T14 handoff 1·2): source host, size, the hash check. */
 export const DOWNLOAD_APPROVAL =
-  "huggingface.co에서 고정된 bge-m3 모델 파일 4개(합 약 586 MB)를 내려받습니다. 파일마다 크기와 해시가 고정 값과 맞을 때만 설치하고, 맞지 않으면 아무것도 설치하지 않습니다. 이 승인은 이번 한 번의 내려받기에만 쓰입니다.";
+  "huggingface.co(와 그곳이 넘겨 주는 내려받기 서버)에서 고정된 bge-m3 모델 파일 4개(합 약 586 MB)를 내려받습니다. 파일마다 크기와 해시가 고정 값과 맞을 때만 설치하고, 맞지 않으면 아무것도 설치하지 않습니다. 이 승인은 이번 한 번의 내려받기에만 쓰입니다.";
 
 export const LOCAL_PACK_HINT =
   "로컬 팩: 모델 파일 4개가 든 폴더의 절대 경로입니다. 파일은 네트워크 없이 이 PC에서 읽고, 해시가 맞을 때만 설치합니다.";

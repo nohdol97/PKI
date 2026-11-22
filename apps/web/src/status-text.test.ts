@@ -32,7 +32,7 @@ describe("embeddingText", () => {
     ],
     [
       { state: "unavailable", reason: "model download failed", egress: "local" },
-      "사용 불가: 모델을 내려받지 못함(네트워크 연결 확인), 키워드 검색으로 동작 (로컬 계산)",
+      "사용 불가: 모델을 내려받지 못함(네트워크·프록시 확인), 키워드 검색으로 동작 (로컬 계산)",
     ],
     [
       { state: "unavailable", reason: "model file missing", egress: "local" },
@@ -106,6 +106,31 @@ describe("providerStatusText (V01-R5, T16)", () => {
     expect(loggedOut.guidance).toMatch(/^로그인: .*codex login/);
   });
 
+  it("guides logging in when a CLI's login cannot be confirmed, as Settings does", () => {
+    const unknown = providerStatusText({
+      state: "ready",
+      providerId: "claude-code",
+      check: {
+        providerId: "claude-code",
+        installed: true,
+        version: "2.1.3",
+        authentication: "unknown",
+      },
+    });
+    expect(unknown.text).toBe("Claude Code: 설치됨(2.1.3), 로그인 상태를 확인할 수 없음");
+    expect(unknown.guidance).toMatch(/^로그인: 터미널에서 `claude`/);
+  });
+
+  it("says the Provider state could not be read, not that no default is chosen", () => {
+    expect(
+      providerStatusText({
+        state: "unavailable",
+        providerId: null,
+        reason: "status-check-failed",
+      }),
+    ).toEqual({ text: "상태를 읽지 못함", guidance: null });
+  });
+
   it("says a blocked egress is blocked, in the connection test's words", () => {
     expect(
       providerStatusText({ state: "unavailable", providerId: "codex", reason: "no-consent" }),
@@ -119,6 +144,8 @@ describe("providerStatusText (V01-R5, T16)", () => {
 describe("DOWNLOAD_APPROVAL", () => {
   it("names where the files come from, how much, and that hashes are checked", () => {
     expect(DOWNLOAD_APPROVAL).toContain("huggingface.co");
+    // the large files come from the hosts huggingface.co redirects to (a firewall must allow them)
+    expect(DOWNLOAD_APPROVAL).toContain("넘겨 주는");
     expect(DOWNLOAD_APPROVAL).toContain("586 MB");
     expect(DOWNLOAD_APPROVAL).toContain("해시");
   });
