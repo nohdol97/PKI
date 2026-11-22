@@ -233,7 +233,7 @@ describe("update.recompute", () => {
     expect(insight()).toMatchObject([{ state: "active" }]);
   });
 
-  it("leaves a failed extraction's rows superseded and its Insight resolved until the next version (no retry, open question for I03)", async () => {
+  it("leaves a failed extraction's rows superseded and its Insight resolved while its job waits to retry, until the next version", async () => {
     const failing = { on: false };
     const { runner, importer } = pipeline(failing);
     await importer(plain());
@@ -245,11 +245,11 @@ describe("update.recompute", () => {
     await importer(chatEdit("2026-12-10 ", 2));
     await runner.wake();
     failing.on = false;
-    // neither another drain nor a release of held jobs picks a failed job again
+    // neither another drain nor a release of held jobs picks it again before its backoff (I03-R10)
     releaseHeldJobs(db, runner);
     await runner.wake();
-    expect(db.all("SELECT status, reason FROM jobs WHERE fence_version = 2")).toEqual([
-      { status: "dead_letter", reason: "provider-error" },
+    expect(db.all("SELECT status, reason, attempts FROM jobs WHERE fence_version = 2")).toEqual([
+      { status: "retry", reason: "provider-error", attempts: 1 },
     ]);
     expect(completionFacts()).toEqual([
       { id: late?.id, value: "2026-12-10", status: "superseded" },

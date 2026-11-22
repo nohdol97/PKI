@@ -11,21 +11,27 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
+  CHECKPOINT_MAX_BYTES,
+  checkpointJob,
   closeJob,
   CLOCK_REGRESSION_LEASES,
+  commitDerived,
   DEFAULT_MAX_ATTEMPTS,
+  encodeCheckpoint,
   heartbeatJob,
   isJobTransition,
   isReasonCode,
   JOB_STATUSES,
   JobWriteError,
   leaseNextJob,
+  readCheckpoint,
   readJob,
   reclaimLeases,
   registerJob,
   releaseRetryJobs,
   supersedeOpenJobs,
   transitionJob,
+  type JobClosing,
   type JobStatus,
   type NewJob,
   type StoredJob,
@@ -958,5 +964,374 @@ describe("closeJob takes the write lock as it begins (review B-W1)", () => {
       leaseUntil: T0.getTime() + LEASE,
     });
     expect(reads).toEqual([0]);
+  });
+});
+
+// I03-T04: the result write behind R6's three checks, the closings of the outcome
+// table with their attempts, the checkpoint and per-kind attempt limits.
+const effects = () => db.all("SELECT key FROM settings WHERE key LIKE 'effect-%'").length;
+const effect = (name: string) => () =>
+  void db.run("INSERT INTO settings (key, value) VALUES (?, 'x')", [`effect-${name}`]);
+/** A job of the first source's version, claimed. */
+const running = (): StoredJob => {
+  registered();
+  return claimed();
+};
+const tombstone = () =>
+  writeTombstone(db, { sourceId: 1, version: 1, at: "x", reason: "source-deleted" });
+
+describe("effect.fence-new-version (I03-R6 ③): commitDerived, the provisional body", () => {
+  const item = (name: string) => ({
+    kind: "fact",
+    itemKey: name,
+    lineage: [{ sourceId: 1, version: 1 }],
+    write: effect(name),
+  });
+
+  it("writes every item of a current source version, dropping none", () => {
+    expect(
+      commitDerived(db, { source: { sourceId: 1, version: 1 }, items: [item("a"), item("b")] }),
+    ).toEqual({ status: "committed", written: 2, dropped: [] });
+    expect(effects()).toBe(2);
+  });
+
+  it("writes nothing for a version that is no longer the latest: stale, not-latest", () => {
+    newVersion("b2");
+    expect(commitDerived(db, { source: { sourceId: 1, version: 1 }, items: [item("a")] })).toEqual({
+      status: "stale",
+      cause: "not-latest",
+    });
+    expect(effects()).toBe(0);
+  });
+
+  it("names the newer version, not a tombstone row below the job's version, as the cause", () => {
+    // versions first: a save past an unlifted tombstone is refused once I04-T05 lands
+    newVersion("b2");
+    newVersion("b3");
+    tombstone(); // covers version 1: its row alone does not make version 2 covered
+    expect(commitDerived(db, { source: { sourceId: 1, version: 2 }, items: [item("a")] })).toEqual({
+      status: "stale",
+      cause: "not-latest",
+    });
+    expect(effects()).toBe(0);
+  });
+
+  it("writes nothing for a version that is not there at all: stale, missing", () => {
+    db.run("DELETE FROM source_versions WHERE source_id = 1");
+    expect(commitDerived(db, { source: { sourceId: 1, version: 1 }, items: [item("a")] })).toEqual({
+      status: "stale",
+      cause: "missing",
+    });
+    expect(effects()).toBe(0);
+  });
+
+  it("writes nothing for a source under a tombstone: stale, covered", () => {
+    tombstone();
+    expect(commitDerived(db, { source: { sourceId: 1, version: 1 }, items: [item("a")] })).toEqual({
+      status: "stale",
+      cause: "covered",
+    });
+    expect(effects()).toBe(0);
+  });
+
+  it("writes the items of a job without a source", () => {
+    expect(commitDerived(db, { source: null, items: [item("a")] })).toMatchObject({
+      status: "committed",
+      written: 1,
+    });
+  });
+
+  it("closeJob writes items through it and closes a stale job superseded with no effect", () => {
+    const fresh = running();
+    expect(closeJob(db, held(fresh.id), { status: "succeeded", items: [item("a")] })).toBe(
+      "succeeded",
+    );
+    expect(effects()).toBe(1);
+
+    newVersion("b2");
+    const stale = registered("other");
+    leaseNextJob(db, { kinds: ["other"], now: T0, leaseMs: LEASE });
+    expect(closeJob(db, held(stale.id), { status: "succeeded", items: [item("b")] })).toBe(
+      "superseded",
+    );
+    expect(effects()).toBe(1);
+  });
+});
+
+describe("outcome.mapping (I03-R6, R9, R11): what closeJob stores for each closing", () => {
+  const RUN_AT = at(30_000).getTime();
+  const closings: [JobClosing, Partial<StoredJob>][] = [
+    [
+      { status: "succeeded", write: () => {} },
+      { status: "succeeded", reason: null, attempts: 1 },
+    ],
+    [
+      { status: "held", reason: "cli-background-off" },
+      { status: "held", reason: "cli-background-off", attempts: 0 },
+    ],
+    [
+      { status: "dead_letter", reason: "invalid-output" },
+      { status: "dead_letter", reason: "invalid-output", attempts: 1 },
+    ],
+    [{ status: "superseded" }, { status: "superseded", reason: null, attempts: 1 }],
+    [
+      { status: "retry", reason: "timeout", runAfter: RUN_AT },
+      { status: "retry", reason: "timeout", attempts: 1, runAfter: RUN_AT, finishedAt: null },
+    ],
+    [
+      { status: "retry", reason: "budget-exhausted", runAfter: RUN_AT, refund: true },
+      { status: "retry", reason: "budget-exhausted", attempts: 0, runAfter: RUN_AT },
+    ],
+    [
+      { status: "queued", runAfter: RUN_AT },
+      { status: "queued", reason: null, attempts: 0, runAfter: RUN_AT, leaseUntil: null },
+    ],
+  ];
+
+  it.each(closings)("%o", (closing, stored) => {
+    const job = running();
+    expect(closeJob(db, held(job.id), closing, at(5))).toBe(closing.status);
+    expect(readJob(db, job.id)).toMatchObject(stored);
+  });
+
+  it.each(closings)(
+    "a cancel request discards %o: cancelled, nothing written (R6 ②)",
+    (closing) => {
+      const job = running();
+      db.run("UPDATE jobs SET cancel_requested = 1 WHERE id = ?", [job.id]);
+      const cancelled =
+        closing.status === "succeeded" ? { status: closing.status, write: effect("c") } : closing;
+      expect(closeJob(db, held(job.id), cancelled, at(5))).toBe("cancelled");
+      expect(readJob(db, job.id)).toMatchObject({
+        status: "cancelled",
+        reason: null,
+        attempts: 1,
+        finishedAt: at(5).getTime(),
+      });
+      expect(effects()).toBe(0);
+    },
+  );
+
+  it.each(closings)("a stale fence discards %o: superseded (R6 ③)", (closing) => {
+    const job = running();
+    newVersion("b2");
+    expect(closeJob(db, held(job.id), closing)).toBe("superseded");
+    expect(readJob(db, job.id)).toMatchObject({ status: "superseded", reason: null, attempts: 1 });
+  });
+
+  it("sees the cancel request before the fence (the table's order)", () => {
+    const job = running();
+    newVersion("b2");
+    db.run("UPDATE jobs SET cancel_requested = 1 WHERE id = ?", [job.id]);
+    expect(closeJob(db, held(job.id), { status: "succeeded", write: () => {} })).toBe("cancelled");
+  });
+
+  it("writes nothing and changes nothing for a lease that is not the job's (R6 ①)", () => {
+    const job = running();
+    const before = readJob(db, job.id);
+    const old = { id: job.id, leaseToken: job.leaseToken - 1 };
+    for (const [closing] of closings) expect(closeJob(db, old, closing)).toBe("not-leased");
+    expect(readJob(db, job.id)).toEqual(before);
+  });
+
+  it("never refunds below zero attempts", () => {
+    const job = running();
+    db.run("UPDATE jobs SET attempts = 0 WHERE id = ?", [job.id]);
+    closeJob(db, held(job.id), { status: "held", reason: "no-provider" });
+    expect(readJob(db, job.id)?.attempts).toBe(0);
+  });
+
+  it("refuses a run-at time that is not a whole number, leaving the job running", () => {
+    const job = running();
+    expect(() =>
+      closeJob(db, held(job.id), { status: "retry", reason: "timeout", runAfter: 1.5 }),
+    ).toThrow(RangeError);
+    expect(readJob(db, job.id)?.status).toBe("running");
+  });
+
+  it("a retry waits for its run-at time, then is claimed again with its attempts kept", () => {
+    const job = running();
+    closeJob(db, held(job.id), { status: "retry", reason: "timeout", runAfter: RUN_AT }, at(5));
+    expect(lease(at(29_999))).toBeUndefined();
+    expect(lease(at(30_000))).toMatchObject({ id: job.id, attempts: 2, reason: null });
+  });
+});
+
+describe("attempts.refund (I03-R11): runs that made no outside call spend no attempt", () => {
+  it("holds and releases ten times at zero attempts, then a failure leaves four", () => {
+    const job = registered();
+    for (let i = 0; i < 10; i++) {
+      const run = claimed(at(i));
+      expect(run.attempts).toBe(1);
+      closeJob(db, run, { status: "held", reason: "cli-background-off" }, at(i));
+      expect(readJob(db, job.id)).toMatchObject({ status: "held", attempts: 0 });
+      transitionJob(db, job.id, { from: "held", to: "queued", at: at(i) });
+    }
+    const run = claimed(at(10));
+    closeJob(db, run, { status: "retry", reason: "provider-error", runAfter: at(10).getTime() });
+    expect(readJob(db, job.id)).toMatchObject({ status: "retry", attempts: 1 });
+    expect(DEFAULT_MAX_ATTEMPTS - (readJob(db, job.id)?.attempts ?? 0)).toBe(4);
+  });
+
+  it("a job that fails every run is given up after its attempts, through retry alone", () => {
+    const job = registered();
+    for (let i = 1; i <= DEFAULT_MAX_ATTEMPTS; i++) {
+      const run = claimed(at(i));
+      expect(run.attempts).toBe(i);
+      closeJob(db, run, { status: "retry", reason: "provider-error", runAfter: at(i).getTime() });
+      expect(readJob(db, job.id)?.status).toBe("retry");
+    }
+    expect(lease(at(100))).toBeUndefined();
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "dead_letter",
+      reason: "provider-error",
+      attempts: DEFAULT_MAX_ATTEMPTS,
+    });
+  });
+
+  it("takes attempt limits by kind, the default for a kind not named", () => {
+    const limited = registered("limited");
+    const other = registered("other");
+    db.run("UPDATE jobs SET status = 'retry', reason = 'timeout', attempts = 2");
+    const request = { kinds: ["limited", "other"], now: T0, maxAttempts: { limited: 2 } };
+    expect(releaseRetryJobs(db, request)).toBe(2);
+    expect(readJob(db, limited.id)?.status).toBe("dead_letter");
+    expect(readJob(db, other.id)?.status).toBe("queued");
+
+    // the kind not named stops at the default, neither sooner nor later
+    const retrying = (attempts: number) =>
+      db.run("UPDATE jobs SET status = 'retry', attempts = ? WHERE id = ?", [attempts, other.id]);
+    retrying(DEFAULT_MAX_ATTEMPTS - 1);
+    releaseRetryJobs(db, request);
+    expect(readJob(db, other.id)?.status).toBe("queued");
+    retrying(DEFAULT_MAX_ATTEMPTS);
+    releaseRetryJobs(db, request);
+    expect(readJob(db, other.id)?.status).toBe("dead_letter");
+    db.run("UPDATE jobs SET status = 'retry', reason = 'timeout'");
+
+    db.run("UPDATE jobs SET status = 'running', attempts = 2, lease_until = 0");
+    expect(reclaimLeases(db, { ...request, leaseMs: LEASE })).toBe(2);
+    expect(readJob(db, limited.id)).toMatchObject({ status: "retry", reason: "lease-expired" });
+    expect(readJob(db, other.id)?.status).toBe("queued");
+  });
+});
+
+describe("checkpoint.limits (I03-R8): what a checkpoint may hold", () => {
+  const FIELDS = ["step", "itemId"];
+
+  it("stores the declared fields as JSON with sorted keys", () => {
+    expect(encodeCheckpoint(FIELDS, { step: 2, itemId: 7 })).toBe('{"itemId":7,"step":2}');
+  });
+
+  it("refuses a field its kind did not declare, text, and anything but a whole number from 0", () => {
+    const refused: unknown[] = [
+      { step: 1, body: 3 },
+      { step: "CANARY source text" },
+      { step: 1.5 },
+      { step: -1 },
+      { step: Number.NaN },
+      { step: { nested: 1 } },
+      { step: [1] },
+      { step: null },
+      [1],
+      null,
+      "CANARY",
+    ];
+    for (const value of refused) {
+      expect(() => encodeCheckpoint(FIELDS, value as never)).toThrow(RangeError);
+    }
+  });
+
+  it("refuses a checkpoint over 4 KiB and takes one just under", () => {
+    expect(CHECKPOINT_MAX_BYTES).toBe(4096);
+    const fields = Array.from({ length: 600 }, (_, i) => `f${String(i).padStart(3, "0")}`);
+    const of = (n: number) => Object.fromEntries(fields.slice(0, n).map((f) => [f, 1]));
+    const fits = Math.floor((CHECKPOINT_MAX_BYTES - 1) / '"f000":1,'.length); // "{" + n entries
+    expect(encodeCheckpoint(fields, of(fits))).toHaveLength(CHECKPOINT_MAX_BYTES);
+    expect(() => encodeCheckpoint(fields, of(fits + 1))).toThrow(RangeError);
+  });
+
+  it("a refused checkpoint leaves the stored one and writes no step", () => {
+    const job = running();
+    expect(
+      checkpointJob(db, held(job.id), { fields: FIELDS, value: { step: 1 }, write: effect("1") }),
+    ).toBe("saved");
+    const big = Array.from({ length: 400 }, (_, i) => `f${i}`);
+    const attempts: [readonly string[], Record<string, unknown>][] = [
+      [big, Object.fromEntries(big.map((f) => [f, Number.MAX_SAFE_INTEGER]))],
+      [FIELDS, { step: 2, undeclared: 1 }],
+      [FIELDS, { step: "CANARY source text" }],
+    ];
+    for (const [fields, value] of attempts) {
+      expect(() =>
+        checkpointJob(db, held(job.id), { fields, value: value as never, write: effect("x") }),
+      ).toThrow(RangeError);
+    }
+    expect(readJob(db, job.id)).toMatchObject({ status: "running", checkpoint: '{"step":1}' });
+    expect(effects()).toBe(1);
+  });
+});
+
+describe("checkpoint.resume (I03-R8): a step and its checkpoint in one transaction", () => {
+  const FIELDS = ["step"];
+  const step = (n: number, write = effect(`s${n}`)) => ({
+    fields: FIELDS,
+    value: { step: n },
+    write,
+  });
+
+  it("keeps the checkpoint across a reclaim, and clears it once the job ends", () => {
+    const job = running();
+    checkpointJob(db, held(job.id), step(1), at(1));
+    checkpointJob(db, held(job.id), step(2), at(2));
+    const again = claimed(at(LEASE)); // the run died: reclaimed and claimed again
+    expect(readCheckpoint(again)).toEqual({ step: 2 });
+    expect(readCheckpoint(registered("other"))).toBeNull();
+    expect(checkpointJob(db, again, step(3))).toBe("saved");
+    expect(effects()).toBe(3);
+    closeJob(db, again, { status: "succeeded", write: () => {} });
+    expect(readJob(db, job.id)?.checkpoint).toBeNull();
+  });
+
+  it("rolls the step back with its checkpoint when the step's write throws", () => {
+    const job = running();
+    checkpointJob(db, held(job.id), step(1));
+    expect(() =>
+      checkpointJob(
+        db,
+        held(job.id),
+        step(2, () => {
+          effect("partial")();
+          throw new Error("constraint");
+        }),
+      ),
+    ).toThrow(JobWriteError);
+    expect(readJob(db, job.id)?.checkpoint).toBe('{"step":1}');
+    expect(effects()).toBe(1);
+  });
+
+  it("writes nothing under a lease that is not the job's (R6 ①)", () => {
+    const job = running();
+    expect(checkpointJob(db, { id: job.id, leaseToken: job.leaseToken - 1 }, step(1))).toBe(
+      "not-leased",
+    );
+    expect(readJob(db, job.id)).toMatchObject({ status: "running", checkpoint: null });
+    expect(effects()).toBe(0);
+  });
+
+  it("closes a job with a cancel request cancelled, the step unwritten (R6 ②)", () => {
+    const job = running();
+    db.run("UPDATE jobs SET cancel_requested = 1 WHERE id = ?", [job.id]);
+    expect(checkpointJob(db, held(job.id), step(1))).toBe("cancelled");
+    expect(readJob(db, job.id)?.status).toBe("cancelled");
+    expect(effects()).toBe(0);
+  });
+
+  it("closes a job whose version went stale superseded, the step unwritten (R6 ③)", () => {
+    const job = running();
+    newVersion("b2");
+    expect(checkpointJob(db, held(job.id), step(1))).toBe("superseded");
+    expect(readJob(db, job.id)).toMatchObject({ status: "superseded", checkpoint: null });
+    expect(effects()).toBe(0);
   });
 });

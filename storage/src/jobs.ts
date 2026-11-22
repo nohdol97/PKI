@@ -6,6 +6,10 @@
 // claimed with a lease that runs out and is reclaimed (each claim and reclaim
 // raises its lease token), and leaves `running` for the current token only. Only the functions here change a
 // status, and only along JOB_TRANSITIONS. The runner is backend/src/job-runner.ts.
+// A result and a checkpoint are written behind I03-R6's three checks (closeJob,
+// checkpointJob); the fence among them is commitDerived, here in the provisional
+// body I04-T06 replaces.
+import type { CommitDerived, DerivedItem } from "./derivatives.ts";
 import { readChangeSeq } from "./revisions.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
 
@@ -265,8 +269,23 @@ export function transitionJob(db: SqlDriver, id: number, change: JobTransition):
   );
 }
 
-/** The attempt limit until kinds set their own (I03-R11; provisional, T04). */
+/** The attempt limit of a kind that names none (I03-R11). */
 export const DEFAULT_MAX_ATTEMPTS = 5;
+
+/** One limit for every kind, or limits by kind (a kind not named has the default). */
+export type AttemptLimits = number | Readonly<Record<string, number>>;
+
+/** The SQL value of a job row's attempt limit, and its parameters. */
+function attemptLimit(max: AttemptLimits | undefined): { sql: string; params: SqlValue[] } {
+  const byKind = typeof max === "object" ? Object.entries(max) : [];
+  if (byKind.length === 0) {
+    return { sql: "?", params: [typeof max === "number" ? max : DEFAULT_MAX_ATTEMPTS] };
+  }
+  return {
+    sql: `CASE kind ${byKind.map(() => "WHEN ? THEN ?").join(" ")} ELSE ? END`,
+    params: [...byKind.flat(), DEFAULT_MAX_ATTEMPTS],
+  };
+}
 
 export interface LeaseRequest {
   /** Only jobs of these kinds are claimed (the kinds a handler exists for). */
@@ -283,7 +302,7 @@ export interface LeaseRequest {
   /** Jobs the runner holds in memory: its heartbeat keeps them, no reclaim (I03-R5). */
   holding?: readonly number[];
   /** Default DEFAULT_MAX_ATTEMPTS. */
-  maxAttempts?: number;
+  maxAttempts?: AttemptLimits;
 }
 
 const placeholders = (values: readonly unknown[]) => values.map(() => "?").join(", ");
@@ -291,8 +310,8 @@ const readNow = (now: LeaseRequest["now"]): Date => (typeof now === "function" ?
 
 /**
  * A lease ending further ahead than this many lease lengths is a wall clock that
- * went back (I03-R5 ②). Provisional: two, not one, so a heartbeat written a moment
- * later by another backend (I03-A3) is not taken for a regression (review RA-1).
+ * went back (I03-R5 ②). Two, not one, so a heartbeat written a moment later by
+ * another backend (I03-A3) is not taken for a regression (review RA-1; settled by I03-T04).
  */
 export const CLOCK_REGRESSION_LEASES = 2;
 
@@ -303,13 +322,14 @@ export const CLOCK_REGRESSION_LEASES = 2;
  * Broker calls and result write fail. A job with a cancel request becomes
  * cancelled, one with attempts left queued, one out of attempts retry with the
  * code `lease-expired` (releaseRetryJobs then gives it up). A run that died keeps
- * its attempt (R11), so a job that kills its process every time ends. Provisional:
- * a running row with no lease end is reclaimed too. Returns how many were reclaimed.
+ * its attempt (R11), so a job that kills its process every time ends. A running
+ * row with no lease end is reclaimed too, along the same three branches (no one
+ * would claim it again otherwise). Returns how many were reclaimed.
  */
 export function reclaimLeases(db: SqlDriver, request: Omit<LeaseRequest, "owner">): number {
   if (request.kinds.length === 0) return 0;
   const holding = request.holding ?? [];
-  const max = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const limit = attemptLimit(request.maxAttempts);
   const where = `kind IN (${placeholders(request.kinds)}) AND status = 'running'
       AND (lease_until IS NULL OR lease_until <= ? OR lease_until > ?)
       AND id NOT IN (${placeholders(holding)})`;
@@ -322,7 +342,7 @@ export function reclaimLeases(db: SqlDriver, request: Omit<LeaseRequest, "owner"
       // in this order: a cancel request first, then the attempts left
       const branches: [JobStatus, string, string][] = [
         ["cancelled", "cancel_requested = 1", "NULL"],
-        ["retry", "attempts >= ?", "'lease-expired'"],
+        ["retry", `attempts >= ${limit.sql}`, "'lease-expired'"],
         ["queued", "1", "NULL"],
       ];
       for (const [to, condition, reason] of branches) {
@@ -330,7 +350,7 @@ export function reclaimLeases(db: SqlDriver, request: Omit<LeaseRequest, "owner"
         reclaimed += db.run(
           `UPDATE jobs SET ${set}, reason = ${reason}, lease_token = lease_token + 1
             WHERE ${where} AND ${condition}`,
-          [...setParams, ...params, ...(to === "retry" ? [max] : [])],
+          [...setParams, ...params, ...(to === "retry" ? limit.params : [])],
         ).changes;
       }
       return reclaimed;
@@ -340,26 +360,26 @@ export function reclaimLeases(db: SqlDriver, request: Omit<LeaseRequest, "owner"
 }
 
 /**
- * The one exit from retry (I03-R11; provisional: T04 adds backoff and per-kind
- * limits): a job of `kinds` out of attempts becomes a dead letter at once, its
- * code kept; one with attempts left is queued once its run-at time came, its code
- * cleared. Runs in the caller's transaction. Returns how many left retry.
+ * The one exit from retry (I03-R11): a job of `kinds` out of its kind's attempts
+ * becomes a dead letter at once, its code kept; one with attempts left is queued
+ * once its run-at time came (the backoff closeJob wrote), its code cleared. Runs
+ * in the caller's transaction. Returns how many left retry.
  */
 export function releaseRetryJobs(
   db: SqlDriver,
-  request: { kinds: readonly string[]; now: Date; maxAttempts?: number },
+  request: { kinds: readonly string[]; now: Date; maxAttempts?: AttemptLimits },
 ): number {
   if (request.kinds.length === 0) return 0;
   const now = request.now.getTime();
-  const max = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const limit = attemptLimit(request.maxAttempts);
   const kinds = `kind IN (${placeholders(request.kinds)}) AND status = 'retry'`;
   const dead = moving("dead_letter", now);
   const queued = moving("queued", now);
   return (
-    db.run(`UPDATE jobs SET ${dead.set} WHERE ${kinds} AND attempts >= ?`, [
+    db.run(`UPDATE jobs SET ${dead.set} WHERE ${kinds} AND attempts >= ${limit.sql}`, [
       ...dead.params,
       ...request.kinds,
-      max,
+      ...limit.params,
     ]).changes +
     db.run(`UPDATE jobs SET ${queued.set}, reason = NULL WHERE ${kinds} AND run_after <= ?`, [
       ...queued.params,
@@ -444,10 +464,19 @@ export function isFenceCurrent(db: SqlDriver, job: { sourceId: number; fenceVers
   return row?.latest === job.fenceVersion && (tombstone === null || tombstone < job.fenceVersion);
 }
 
+/**
+ * How a run leaves `running` (I03-R9, "실행 결과가 가는 곳"). A held job, a yield
+ * with progress (`queued`) and a `retry` with `refund` made no outside call: the
+ * attempt the claim raised is given back (I03-R11).
+ */
 export type JobClosing =
   | { status: "succeeded"; write: () => void }
+  | { status: "succeeded"; items: readonly DerivedItem[] }
   | { status: "held" | "dead_letter"; reason: string }
-  | { status: "superseded" };
+  | { status: "superseded" }
+  /** `runAfter`: when it may run again, UTC milliseconds (the backoff). */
+  | { status: "retry"; reason: string; runAfter: number; refund?: boolean }
+  | { status: "queued"; runAfter: number };
 
 /** A locked file is transient: the job stays running and is claimed again after its lease. */
 const isLockError = (error: unknown): boolean => {
@@ -456,53 +485,201 @@ const isLockError = (error: unknown): boolean => {
 };
 
 /**
- * Closes a running job in one immediate transaction (V02-R5) for the holder of
- * its current lease. A stale fence discards the closing, `write` included, and closes the job
- * superseded. A job that is not running under that lease (closed already, never
- * claimed, or claimed again after the lease ran out) is left as it is and nothing
- * is written. The job row is updated before `write` runs, so the transaction
- * holds the write lock first: a file locked by another process fails the close
- * (SQLITE_BUSY) before any result is written. A throwing `write` rolls back,
- * leaves the job running and surfaces as JobWriteError, unless it met a locked
- * file (SQLITE_BUSY, SQLITE_LOCKED), which stays the database's error like any
- * other. A reason that is not a code is refused (RangeError) before anything is read.
+ * The fence of a result written from a source version (I03-R6 ③, I04-R11), in the
+ * provisional body I03-T04 ships: V02's fence alone. A stale source writes
+ * nothing. Its cause is `not-latest` when a newer version exists, asked first: a
+ * tombstone row below the job's version (a lifted cover, I04-T05) is not why it
+ * is stale; else `covered` under a tombstone, else the version is `missing`. A
+ * current source, or none, writes every item. I04-T06 replaces this body with
+ * assertFresh, assertLineage and combinable; its callers stay as they are.
  */
-export function closeJob(
+export const commitDerived: CommitDerived = (tx, input) => {
+  const { source } = input;
+  if (source && !isFenceCurrent(tx, { sourceId: source.sourceId, fenceVersion: source.version })) {
+    const row = tx.all(
+      `SELECT EXISTS (SELECT 1 FROM source_versions WHERE source_id = ? AND version > ?) AS newer,
+              EXISTS (SELECT 1 FROM tombstones WHERE source_id = ?) AS tombstone`,
+      [source.sourceId, source.version, source.sourceId],
+    )[0];
+    return {
+      status: "stale",
+      cause: row?.newer === 1 ? "not-latest" : row?.tombstone === 1 ? "covered" : "missing",
+    };
+  }
+  for (const item of input.items) item.write(tx);
+  return { status: "committed", written: input.items.length, dropped: [] };
+};
+
+type Lease = Pick<StoredJob, "id" | "leaseToken">;
+
+/**
+ * I03-R6's three checks, in their order, inside the caller's immediate
+ * transaction: ① the job is running under this lease, else nothing is written
+ * ("not-leased"); ② no cancel request, else the job closes cancelled; ③ the fence
+ * (commitDerived, which writes `result` once it holds), else the job closes
+ * superseded. Returns the job when all three passed. A lone write function is
+ * one derived item of the job's source version (provisional: I04-T06 has handlers
+ * hand over their items). A throwing write surfaces as JobWriteError, unless it
+ * met a locked file.
+ */
+function checkedWrite(
   db: SqlDriver,
-  lease: Pick<StoredJob, "id" | "leaseToken">,
-  closing: JobClosing,
-  at: Date = new Date(),
-): JobClosing["status"] | "not-leased" {
-  if ("reason" in closing) assertReason(closing.reason);
-  // immediate: a deferred close would read, then meet another connection's
-  // write lock with SQLITE_BUSY at once, skipping the busy wait (review B-W1)
-  return db.transaction(
-    () => {
-      const job = readJob(db, lease.id);
-      if (job?.status !== "running" || job.leaseToken !== lease.leaseToken) return "not-leased";
-      const { sourceId, fenceVersion } = job; // a sourceless kind has no fence
-      const current =
-        sourceId === null ||
-        fenceVersion === null ||
-        isFenceCurrent(db, { sourceId, fenceVersion });
-      const status = current ? closing.status : "superseded";
-      const reason = status === closing.status && "reason" in closing ? closing.reason : null;
-      transitionJob(db, lease.id, {
-        from: "running",
-        to: status,
-        reason,
-        leaseToken: lease.leaseToken,
-        at,
-      });
-      if (status === "succeeded" && closing.status === "succeeded") {
+  lease: Lease,
+  result: readonly DerivedItem[] | (() => void),
+  at: Date,
+): StoredJob | "not-leased" | "cancelled" | "superseded" {
+  const job = readJob(db, lease.id);
+  if (job?.status !== "running" || job.leaseToken !== lease.leaseToken) return "not-leased";
+  const close = (to: "cancelled" | "superseded") => {
+    transitionJob(db, lease.id, { from: "running", to, leaseToken: lease.leaseToken, at });
+    return to;
+  };
+  if (job.cancelRequested) return close("cancelled");
+  const { sourceId, fenceVersion } = job; // a sourceless kind has no fence
+  const source =
+    sourceId === null || fenceVersion === null ? null : { sourceId, version: fenceVersion };
+  const items: readonly DerivedItem[] =
+    typeof result === "function"
+      ? [
+          {
+            kind: job.kind,
+            itemKey: `job:${job.id}`,
+            lineage: source ? [source] : [],
+            write: result,
+          },
+        ]
+      : result;
+  const committed = commitDerived(db, {
+    source,
+    items: items.map((item) => ({
+      ...item,
+      write: (tx: SqlDriver) => {
         try {
-          closing.write();
+          item.write(tx);
         } catch (error) {
           if (isLockError(error)) throw error;
           throw new JobWriteError(error);
         }
-      }
-      return status;
+      },
+    })),
+  });
+  return committed.status === "stale" ? close("superseded") : job;
+}
+
+/**
+ * Closes a running job in one immediate transaction (I03-R6) for the holder of
+ * its current lease, behind the three checks of checkedWrite: a job not running
+ * under that lease (closed already, never claimed, or claimed again) is left as it
+ * is and nothing is written; a cancel request discards the closing, whatever it
+ * is, and closes the job cancelled; a stale fence discards it and closes the job
+ * superseded. Otherwise the closing is applied: the result is written with
+ * `succeeded`; `held`, a yield (`queued`) and a refunded `retry` give the claim's
+ * attempt back; `retry` and `queued` set when the job may run again. A file
+ * locked by another process fails the close (SQLITE_BUSY) before any result is
+ * written. A throwing `write` rolls back, leaves the job running and surfaces as
+ * JobWriteError, unless it met a locked file (SQLITE_BUSY, SQLITE_LOCKED), which
+ * stays the database's error like any other. A reason that is not a code is
+ * refused (RangeError) before anything is read.
+ */
+export function closeJob(
+  db: SqlDriver,
+  lease: Lease,
+  closing: JobClosing,
+  at: Date = new Date(),
+): JobClosing["status"] | "cancelled" | "not-leased" {
+  if ("reason" in closing) assertReason(closing.reason);
+  if ("runAfter" in closing && !Number.isSafeInteger(closing.runAfter)) {
+    throw new RangeError("a run-at time is a whole number of milliseconds");
+  }
+  // immediate: a deferred close would read, then meet another connection's
+  // write lock with SQLITE_BUSY at once, skipping the busy wait (review B-W1)
+  return db.transaction(
+    () => {
+      const result =
+        closing.status !== "succeeded" ? [] : "items" in closing ? closing.items : closing.write;
+      const job = checkedWrite(db, lease, result, at);
+      if (typeof job === "string") return job;
+      transitionJob(db, lease.id, {
+        from: "running",
+        to: closing.status,
+        reason: "reason" in closing ? closing.reason : null,
+        leaseToken: lease.leaseToken,
+        at,
+      });
+      const refund =
+        closing.status === "held" ||
+        closing.status === "queued" ||
+        (closing.status === "retry" && closing.refund === true);
+      db.run(
+        "UPDATE jobs SET run_after = coalesce(?, run_after), attempts = max(attempts - ?, 0) WHERE id = ?",
+        ["runAfter" in closing ? closing.runAfter : null, refund ? 1 : 0, lease.id],
+      );
+      return closing.status;
+    },
+    { immediate: true },
+  );
+}
+
+/** A checkpoint's size limit in UTF-8 bytes (I03-R8). */
+export const CHECKPOINT_MAX_BYTES = 4096;
+
+/** A checkpoint: the fields its kind declared, each a count, a number or a row ID. */
+export type Checkpoint = Readonly<Record<string, number>>;
+
+/**
+ * A checkpoint as stored: JSON with sorted keys. Only the kind's declared fields,
+ * only whole numbers from 0 (IDs, numbers, counts: no text can be carried, I03-R8),
+ * at most CHECKPOINT_MAX_BYTES; anything else is refused (RangeError).
+ */
+export function encodeCheckpoint(fields: readonly string[], value: Checkpoint): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new RangeError("a checkpoint is an object of its kind's fields");
+  }
+  const sorted: Record<string, number> = {};
+  for (const key of Object.keys(value).sort()) {
+    const n: unknown = value[key];
+    if (!fields.includes(key)) throw new RangeError("a checkpoint holds its kind's fields only");
+    if (!Number.isSafeInteger(n) || (n as number) < 0) {
+      throw new RangeError("a checkpoint field is a whole number from 0");
+    }
+    sorted[key] = n as number;
+  }
+  const encoded = JSON.stringify(sorted);
+  if (new TextEncoder().encode(encoded).length > CHECKPOINT_MAX_BYTES) {
+    throw new RangeError(`a checkpoint is at most ${CHECKPOINT_MAX_BYTES} bytes`);
+  }
+  return encoded;
+}
+
+/** The checkpoint a claimed job resumes from; null when it has none. */
+export function readCheckpoint(job: Pick<StoredJob, "checkpoint">): Checkpoint | null {
+  return job.checkpoint === null ? null : (JSON.parse(job.checkpoint) as Checkpoint);
+}
+
+/**
+ * Writes one step of a running job and its checkpoint in one immediate
+ * transaction (I03-R8), behind the same three checks as closeJob: "saved", or
+ * what the checks answered ("cancelled" and "superseded" closed the job). A
+ * checkpoint encodeCheckpoint refuses is refused before anything is read, the
+ * stored one staying as it is.
+ */
+export function checkpointJob(
+  db: SqlDriver,
+  lease: Lease,
+  step: { fields: readonly string[]; value: Checkpoint; write?: () => void },
+  at: Date = new Date(),
+): "saved" | "cancelled" | "superseded" | "not-leased" {
+  const encoded = encodeCheckpoint(step.fields, step.value);
+  return db.transaction(
+    () => {
+      const job = checkedWrite(db, lease, step.write ?? [], at);
+      if (typeof job === "string") return job;
+      db.run("UPDATE jobs SET checkpoint = ?, updated_at = ? WHERE id = ?", [
+        encoded,
+        at.getTime(),
+        lease.id,
+      ]);
+      return "saved";
     },
     { immediate: true },
   );

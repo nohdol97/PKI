@@ -36,7 +36,7 @@ export function createTestEffectHandler(db: SqlDriver, options: TestEffectOption
     appendFileSync(options.runLog, `${job.id} ${job.attempts}\n`);
     if (pause.has(job.target)) {
       await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
-      return { status: "dead_letter", reason: "paused" }; // never written: the lease is lost
+      return { status: "fail", code: "paused", retryable: false }; // never written: the lease is lost
     }
     return {
       status: "succeeded",

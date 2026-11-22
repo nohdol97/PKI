@@ -137,13 +137,19 @@ function imported(line: Pick<Line, "id" | "title" | "content">, instance = "impo
   });
 }
 
-/** One runner step: lease, handle, close through the fence. */
+/**
+ * One runner step: lease, handle, and close through the fence what the handler
+ * closes itself (a result, a hold). A Broker result that was not an answer, and a
+ * failure, are the runner's to place (backend job-outcomes.ts): `status` is the
+ * handler's and the job stays running here.
+ */
 async function runNext() {
   const job = leaseNextJob(db, { kinds: ["extract"], now: T0, leaseMs: 60_000 });
   const fence = { sourceId: job?.sourceId as number, fenceVersion: job?.fenceVersion as number };
   if (!job || !isFenceCurrent(db, fence)) throw new Error("expected a current job");
   const result = await handler(job);
-  return { job, result, status: closeJob(db, job, result) };
+  const closes = result.status === "succeeded" || result.status === "held";
+  return { job, result, status: closes ? closeJob(db, job, result) : result.status };
 }
 
 const items = () => db.all("SELECT id, type, name, status FROM items ORDER BY id");
@@ -173,15 +179,12 @@ describe("extraction.calls", () => {
     expect(facts()).toHaveLength(1);
   });
 
-  it("asks again once on a schema mismatch and stops dead-lettered after the second", async () => {
+  it("asks again once on a schema mismatch and hands back the second failure", async () => {
     setUp([{ output: { claims: [] } }, { output: { claims: [] } }, { output: { claims: [] } }]);
     imported(mail);
-    const { status, job } = await runNext();
+    const { result } = await runNext();
     expect(provider.requests).toHaveLength(2);
-    expect(status).toBe("dead_letter");
-    expect(db.all("SELECT reason FROM jobs WHERE id = ?", [job.id])).toEqual([
-      { reason: "invalid-output" },
-    ]);
+    expect(result).toMatchObject({ status: "failed", error: "invalid-output" });
     expect(facts()).toEqual([]);
   });
 
@@ -196,12 +199,9 @@ describe("extraction.calls", () => {
   it("does not repeat a call that failed otherwise", async () => {
     setUp([{ error: new Error("boom") }]);
     imported(mail);
-    const { status, job } = await runNext();
-    expect(status).toBe("dead_letter");
+    const { result } = await runNext();
+    expect(result).toMatchObject({ status: "failed", error: "provider-error" });
     expect(provider.requests).toHaveLength(1);
-    expect(db.all("SELECT reason FROM jobs WHERE id = ?", [job.id])).toEqual([
-      { reason: "provider-error" },
-    ]);
   });
 
   it("holds a source too large for one call without calling", async () => {
@@ -222,15 +222,12 @@ describe("extraction.calls", () => {
     expect(provider.requests).toHaveLength(1);
   });
 
-  it("holds a call the Broker blocked with its reason, with no Provider call", async () => {
+  it("hands back a call the Broker blocked with its reason, with no Provider call", async () => {
     deny = "no-consent";
     imported(mail);
-    const { status, job } = await runNext();
-    expect(status).toBe("held");
+    const { result } = await runNext();
+    expect(result).toMatchObject({ status: "blocked", reason: "no-consent" });
     expect(provider.requests).toHaveLength(0);
-    expect(db.all("SELECT reason FROM jobs WHERE id = ?", [job.id])).toEqual([
-      { reason: "no-consent" },
-    ]);
   });
 });
 
@@ -691,7 +688,7 @@ describe("engine proposals (V02-R13)", () => {
     const { engine } = await proposing((r) => [proposal(r)]);
     setUp([], engine);
     deny = "no-consent";
-    expect((await runNext()).status).toBe("held");
+    expect((await runNext()).status).toBe("blocked");
     expect(facts()).toEqual([]);
   });
 });
