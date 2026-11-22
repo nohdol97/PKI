@@ -73,13 +73,23 @@ export interface ReapplyReport {
 
 export type LedgerReapply = (db: SqlDriver) => ReapplyReport;
 
-export function createLedgerReapply(registry: DerivativeRegistry): LedgerReapply {
+export interface ReapplyOptions {
+  /** Whether a connector kind is one the composition knows; a line naming another is never used to register an instance. */
+  knownKind?: (kind: string) => boolean;
+  /** Runs once the lines are applied (the database and the ledger agree up to the file's highest); returns lines written. */
+  afterReconcile?: (db: SqlDriver) => number;
+}
+
+export function createLedgerReapply(
+  registry: DerivativeRegistry,
+  options: ReapplyOptions = {},
+): LedgerReapply {
   let unrecoverable = 0;
   const applyLine = (db: SqlDriver, line: LedgerLine): void =>
     void canonicalTransaction(db, (tx) => {
       if (readConnectorKind(tx, line.connectorInstanceId) === undefined) {
         // the source row needs its instance (a foreign key): the real kind, never a placeholder
-        if (line.connectorKind === null) {
+        if (line.connectorKind === null || options.knownKind?.(line.connectorKind) === false) {
           writeLedgerSeq(tx, line.seq);
           unrecoverable++;
           return;
@@ -135,7 +145,7 @@ export function createLedgerReapply(registry: DerivativeRegistry): LedgerReapply
       truncated: ledger.status.truncated,
       damaged: contents.damaged,
       seeded: ledger.status.seeded,
-      healed: ledger.status.healed,
+      healed: 0,
       missing: ledger.status.missing,
       setAside: ledger.status.setAside,
     };
@@ -156,6 +166,7 @@ export function createLedgerReapply(registry: DerivativeRegistry): LedgerReapply
         if (line.liftedAt !== null) report.lifted++;
       }
     });
+    report.healed = options.afterReconcile?.(db) ?? 0;
     report.unrecoverable = unrecoverable;
     report.applied -= unrecoverable;
     report.canonicalSeq = readLedgerSeq(db);

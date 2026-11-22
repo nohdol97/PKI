@@ -223,6 +223,8 @@ export {
   LEDGER_REPORT_SETTING,
   LEDGER_SEQ_SETTING,
   LedgerDegradedError,
+  LedgerUnavailableError,
+  draftReadable,
   attachLedger,
   ledgerOf,
   createNodeLedgerIo,

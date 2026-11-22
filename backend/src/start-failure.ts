@@ -1,7 +1,7 @@
 // What the backend tells the shell about a refused start (I04-R7): a fixed class,
 // never the error's message (it can carry a path or file text; V01-R13).
 import { LedgerReapplyError } from "@pki/knowledge-engine";
-import { IdentityKeyMissingError } from "@pki/storage";
+import { IdentityKeyMissingError, LedgerUnavailableError } from "@pki/storage";
 import { UnregisteredAdapterError } from "./derivative-coverage.ts";
 import { ScopePolicyNotImplementedError, UnknownScopePolicyError } from "./scope-policy.ts";
 
@@ -10,7 +10,8 @@ export type StartFailureReason =
   | "scope-policy-not-implemented"
   | "scope-policy-invalid"
   | "adapter-unregistered"
-  | "ledger-reapply-failed";
+  | "ledger-reapply-failed"
+  | "ledger-unavailable";
 export type StartFailureReport = {
   type: "failed";
   reason?: StartFailureReason;
@@ -19,6 +20,9 @@ export type StartFailureReport = {
 };
 
 export function startFailureReport(error?: unknown): StartFailureReport {
+  if (error instanceof LedgerUnavailableError) {
+    return { type: "failed", reason: "ledger-unavailable" };
+  }
   if (error instanceof LedgerReapplyError) {
     return { type: "failed", reason: "ledger-reapply-failed", line: error.seq };
   }

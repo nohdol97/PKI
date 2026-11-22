@@ -1,6 +1,7 @@
 // canonicalTransaction with a ledger attached (I04-R17, I04-T10): the queued lines are
 // numbered and written right before the real COMMIT; a transaction that does not commit
 // leaves no line (or a cancel record); nothing but the ledger's own failure stops writes.
+import { createHash } from "node:crypto";
 import { memoryLedgerIo, type MemoryLedgerIo } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,12 +22,14 @@ import {
   type TombstoneLedger,
 } from "./tombstone-ledger.ts";
 
+const hh = (s: string) => createHash("sha256").update(s).digest("hex");
+
 const P = "/data/tombstone-ledger.jsonl";
 const KEY = new Uint8Array(32).fill(7);
 const draft = (hash: string): LedgerLineDraft => ({
   connectorInstanceId: "c1",
   connectorKind: "k1",
-  identityHash: hash,
+  identityHash: hh(hash),
   coversVersion: 1,
   lastRevision: null,
   reason: "user-deleted",
@@ -63,9 +66,9 @@ describe("the ledger write", () => {
     });
     canonicalTransaction(db, (tx) => tx.queueLedgerLine(draft("c")));
     expect(file().lines.map((l) => [l.seq, l.identityHash])).toEqual([
-      [1, "a"],
-      [2, "b"],
-      [3, "c"],
+      [1, hh("a")],
+      [2, hh("b")],
+      [3, hh("c")],
     ]);
     expect(readLedgerSeq(db)).toBe(3);
   });
@@ -142,7 +145,7 @@ describe("a transaction that does not commit", () => {
         // the outer carries on
       }
     });
-    expect(file().lines.map((l) => l.identityHash)).toEqual(["outer"]);
+    expect(file().lines.map((l) => l.identityHash)).toEqual([hh("outer")]);
   });
 
   it("a nested call that succeeds adds its line to the outer's, and an outer that fails drops both", () => {
@@ -158,7 +161,7 @@ describe("a transaction that does not commit", () => {
       tx.queueLedgerLine(draft("a"));
       canonicalTransaction(db, (inner) => inner.queueLedgerLine(draft("b")));
     });
-    expect(file().lines.map((l) => l.identityHash)).toEqual(["a", "b"]);
+    expect(file().lines.map((l) => l.identityHash)).toEqual([hh("a"), hh("b")]);
   });
 
   it("COMMIT fails: the transaction is undone, a cancel record names the exact numbers, and the next line gets the number after them", () => {
@@ -247,7 +250,7 @@ describe("the cancel record cannot be written", () => {
       "COMMIT failed",
     );
     // the line is in the file and was not cancelled: the next start applies it
-    expect(file().lines.map((l) => l.identityHash)).toEqual(["a"]);
+    expect(file().lines.map((l) => l.identityHash)).toEqual([hh("a")]);
     expect(ledger.isLocked()).toBe(true);
     let ran = false;
     let error: unknown;

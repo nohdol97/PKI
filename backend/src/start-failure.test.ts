@@ -1,6 +1,6 @@
 // I04-R7: what the backend tells the shell about a refused start is a fixed class.
 import { LedgerReapplyError } from "@pki/knowledge-engine";
-import { IdentityKeyMissingError } from "@pki/storage";
+import { IdentityKeyMissingError, LedgerUnavailableError } from "@pki/storage";
 import { describe, expect, it } from "vitest";
 import { startFailureReport } from "./start-failure.ts";
 
@@ -17,6 +17,14 @@ describe("start.identity-key-text: startFailureReport", () => {
       type: "failed",
       reason: "ledger-reapply-failed",
       line: 7,
+    });
+  });
+  it("names a ledger that could not be opened or created, never the cause", () => {
+    expect(
+      startFailureReport(new LedgerUnavailableError(new Error("/home/u/ledger EACCES"))),
+    ).toEqual({
+      type: "failed",
+      reason: "ledger-unavailable",
     });
   });
   it("is the bare failure for any other error or none", () => {

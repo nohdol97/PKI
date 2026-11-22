@@ -1,6 +1,7 @@
 // The ledger's real file operations (I04-R17), over a recording fs: a write that is short is
 // finished or fails, the file is fsynced before the database commits and the directory after a
 // create, the cut-line heal works on bytes, and a part-written line never swallows the next one.
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +20,8 @@ import {
   type LedgerFs,
   type LedgerIo,
 } from "./tombstone-ledger.ts";
+
+const hh = (s: string) => createHash("sha256").update(s).digest("hex");
 
 /** An in-memory fs: files by path, directories by prefix; every call is logged. */
 function memoryFs(options: { chunk?: number; stall?: boolean } = {}) {
@@ -158,7 +161,7 @@ describe("through a canonical transaction", () => {
   const draft = (hash: string): LedgerLineDraft => ({
     connectorInstanceId: "c1",
     connectorKind: "k1",
-    identityHash: hash,
+    identityHash: hh(hash),
     coversVersion: 1,
     lastRevision: null,
     reason: "user-deleted",
@@ -243,7 +246,7 @@ describe("through a canonical transaction", () => {
     expect(readSetting(db, "w")).toBeUndefined();
     canonicalTransaction(db, (tx) => tx.queueLedgerLine(draft("b")));
     const read = parseLedger(text);
-    expect(read.lines.map((l) => [l.seq, l.identityHash])).toEqual([[2, "b"]]);
+    expect(read.lines.map((l) => [l.seq, l.identityHash])).toEqual([[2, hh("b")]]);
     expect(read.damaged).toBe(1); // the fragment, kept apart
     expect(read.maxSeq).toBe(2); // the cancel record kept number 1 out of reuse
     db.close();
@@ -277,7 +280,7 @@ describe("through a canonical transaction", () => {
     });
     expect(() => ledger.append(ledger.reserve(1, 0), [draft("a")])).toThrow("disk full");
     ledger.append(ledger.reserve(1, 0), [draft("b")]);
-    expect(parseLedger(text).lines.map((l) => l.identityHash)).toEqual(["b"]);
+    expect(parseLedger(text).lines.map((l) => l.identityHash)).toEqual([hh("b")]);
   });
 
   it("a savepoint opened through the tx that rolls back takes the lines queued inside it", () => {
@@ -308,7 +311,7 @@ describe("through a canonical transaction", () => {
         // the outer goes on
       }
     });
-    expect(parseLedger(text).lines.map((l) => l.identityHash)).toEqual(["kept"]);
+    expect(parseLedger(text).lines.map((l) => l.identityHash)).toEqual([hh("kept")]);
     db.close();
   });
 });

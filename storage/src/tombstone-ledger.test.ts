@@ -1,12 +1,20 @@
 // The ledger file (I04-R17): its format, how it opens (missing, another key, a cut last
 // line), the numbers it hands out, and the real file operations.
+import { createHash } from "node:crypto";
 import { memoryLedgerIo } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { LedgerLineDraft } from "./derivatives.ts";
-import { nodeLedgerIo, openLedger, parseLedger } from "./tombstone-ledger.ts";
+import {
+  LedgerUnavailableError,
+  nodeLedgerIo,
+  openLedger,
+  parseLedger,
+} from "./tombstone-ledger.ts";
+
+const hh = (s: string) => createHash("sha256").update(s).digest("hex");
 
 const KEY = new Uint8Array(32).fill(7);
 const OTHER = new Uint8Array(32).fill(9);
@@ -15,7 +23,7 @@ const P = "/data/tombstone-ledger.jsonl";
 const draft = (over: Partial<LedgerLineDraft> = {}): LedgerLineDraft => ({
   connectorInstanceId: "c1",
   connectorKind: "k1",
-  identityHash: "h1",
+  identityHash: hh("h1"),
   coversVersion: 2,
   lastRevision: null,
   reason: "user-deleted",
@@ -39,7 +47,7 @@ describe("ledger file format", () => {
       seq: 1,
       i: "c1",
       k: "k1",
-      h: "h1",
+      h: hh("h1"),
       cv: 2,
       lr: null,
       reason: "user-deleted",
@@ -50,13 +58,13 @@ describe("ledger file format", () => {
 
   it("reads lines back, leaves out cancelled ones, and counts the highest number cancel records included", () => {
     const { io, ledger } = open();
-    ledger.append(ledger.reserve(2, 0), [draft(), draft({ identityHash: "h2" })]);
+    ledger.append(ledger.reserve(2, 0), [draft(), draft({ identityHash: hh("h2") })]);
     ledger.cancel([2]);
-    ledger.append(ledger.reserve(1, 0), [draft({ identityHash: "h3" })]);
+    ledger.append(ledger.reserve(1, 0), [draft({ identityHash: hh("h3") })]);
     const read = parseLedger(io.files.get(P) as string);
     expect(read.lines.map((l) => [l.seq, l.identityHash])).toEqual([
-      [1, "h1"],
-      [3, "h3"],
+      [1, hh("h1")],
+      [3, hh("h3")],
     ]);
     expect(read.maxSeq).toBe(3);
     expect(read.truncated).toBe(false);
@@ -69,7 +77,7 @@ describe("ledger file format", () => {
       t: "line",
       seq: 1,
       i: "c",
-      h: "h",
+      h: hh("h"),
       cv: 1,
       lr: null,
       reason: "user-deleted",
@@ -90,7 +98,7 @@ describe("ledger file format", () => {
       seq: 1,
       i: "c",
       k: "k1",
-      h: "h",
+      h: hh("h"),
       cv: 1,
       lr: null,
       reason: "user-deleted",
@@ -125,7 +133,7 @@ describe("ledger file format", () => {
       t: "line",
       seq: 1,
       i: "c",
-      h: "h",
+      h: hh("h"),
       cv: 1,
       lr: null,
       reason: "user-deleted",
@@ -173,7 +181,7 @@ describe("opening", () => {
   it("sets a ledger of another key aside, counts its deletions, and starts a new one", () => {
     const io = memoryLedgerIo();
     const foreign = open(io, { key: OTHER }).ledger;
-    foreign.append(foreign.reserve(2, 0), [draft(), draft({ identityHash: "h2" })]);
+    foreign.append(foreign.reserve(2, 0), [draft(), draft({ identityHash: hh("h2") })]);
     foreign.cancel([2]);
     const { ledger } = open(io);
     expect(ledger.status.setAside).toEqual([
@@ -216,7 +224,7 @@ describe("opening", () => {
     io.files.set(P, `${io.files.get(P)}{"t":"line","seq":2,"i":"c`);
     const { ledger } = open(io);
     expect(ledger.status.truncated).toBe(true);
-    ledger.append(ledger.reserve(1, 0), [draft({ identityHash: "h9" })]);
+    ledger.append(ledger.reserve(1, 0), [draft({ identityHash: hh("h9") })]);
     const read = parseLedger(io.files.get(P) as string);
     expect(read.lines.map((l) => l.seq)).toEqual([1, 2]);
     expect(read.damaged).toBe(0);
@@ -262,7 +270,7 @@ describe("the real files", () => {
 });
 
 describe("creating a ledger over a database that holds tombstones", () => {
-  const seed = [draft(), draft({ identityHash: "h2", liftedAt: "2026-11-23T00:00:00.000Z" })];
+  const seed = [draft(), draft({ identityHash: hh("h2"), liftedAt: "2026-11-23T00:00:00.000Z" })];
 
   it("writes the header and one line per tombstone in the one atomic step, numbered after the database's number", () => {
     const { io, ledger } = open(memoryLedgerIo(), {
@@ -275,8 +283,8 @@ describe("creating a ledger over a database that holds tombstones", () => {
     const read = parseLedger(io.files.get(P) as string);
     expect(read.key).toBe(hex(KEY));
     expect(read.lines.map((l) => [l.seq, l.identityHash, l.liftedAt !== null])).toEqual([
-      [5, "h1", false],
-      [6, "h2", true],
+      [5, hh("h1"), false],
+      [6, hh("h2"), true],
     ]);
     expect(ledger.status).toMatchObject({ created: true, seeded: 2, seededThrough: 6 });
     expect(ledger.reserve(1, 4)).toEqual([7]);
@@ -287,7 +295,7 @@ describe("creating a ledger over a database that holds tombstones", () => {
     io.fail = (op) => (op === "create" ? new Error("disk full") : undefined);
     expect(() =>
       openLedger({ path: P, key: KEY, canonicalSeq: 0, hasData: true, seed: () => seed, io }),
-    ).toThrow("disk full");
+    ).toThrow(LedgerUnavailableError);
     expect(io.files.has(P)).toBe(false);
     io.fail = () => undefined;
     const again = openLedger({
@@ -334,7 +342,7 @@ describe("a line may not make a start fail: value domains", () => {
     seq: 1,
     i: "c",
     k: "k1",
-    h: "h",
+    h: hh("h"),
     cv: 1,
     lr: null,
     reason: "user-deleted",
@@ -350,6 +358,10 @@ describe("a line may not make a start fail: value domains", () => {
     ["seq", 1e13],
     ["i", ""],
     ["h", ""],
+    ["h", "abc"],
+    ["h", "A".repeat(64)],
+    ["h", "0".repeat(65)],
+    ["k", "Bad Kind"],
     ["k", ""],
     ["i", "x".repeat(300)],
     ["at", "2026-11-22T00:00:00.000Z".repeat(4)],
@@ -368,5 +380,16 @@ describe("a line may not make a start fail: value domains", () => {
   it("does not count an empty line (a write that failed before any byte)", () => {
     const read = parseLedger(`${header}\n${JSON.stringify(base)}\n\n`);
     expect([read.lines.length, read.damaged]).toEqual([1, 0]);
+  });
+  it("two lines with the same number and different content: the second is unreadable, not silently skipped; an exact repeat is kept (the re-apply skips it)", () => {
+    const first = { ...base, seq: 4 };
+    const other = { ...base, seq: 4, cv: 9 };
+    const text = (...lines: object[]) =>
+      header + lines.map((l) => `${JSON.stringify(l)}\n`).join("");
+    const contradiction = parseLedger(text(first, other));
+    expect(contradiction.lines.map((l) => l.coversVersion)).toEqual([1]);
+    expect(contradiction.damaged).toBe(1);
+    const repeat = parseLedger(text(first, first));
+    expect([repeat.lines.length, repeat.damaged]).toEqual([2, 0]);
   });
 });

@@ -223,22 +223,33 @@ describe("status.data-protection: dataProtectionText (I04-R6, I04-R17)", () => {
     expect(text).toContain("전체 재스캔");
   });
   it("shows how many ledgers were set aside and the deletions they hold, and that none was applied", () => {
-    expect(protection({ setAsideLedgers: 2, setAsideDeletions: 7 })).toBe(
+    expect(protection({ setAsideLedgers: 2, setAsideDeletions: 7 })).toContain(
       "다른 설치의 삭제 장부 2개(삭제 7건)는 적용하지 않고 옆에 두었습니다",
     );
   });
   it("shows the lines that could not be applied or read, and the ones applied again", () => {
-    expect(protection({ unrecoverable: 3 })).toBe("다시 적용하지 못한 삭제 3건(연결 정보 없음)");
-    expect(protection({ ignoredLines: 2 })).toBe("읽지 못해 무시한 삭제 장부 줄 2개");
-    expect(protection({ reapplied: 4 })).toBe("시작할 때 삭제 4건을 다시 적용했습니다");
+    expect(protection({ unrecoverable: 3 })).toContain(
+      "다시 적용하지 못한 삭제 3건(연결 정보 없음)",
+    );
+    expect(protection({ ignoredLines: 2 })).toContain("읽지 못해 무시한 삭제 장부 줄 2개");
+    expect(protection({ reapplied: 4 })).toContain("시작할 때 삭제 4건을 다시 적용했습니다");
+  });
+  it("explains what the ledger is once, before the first note about it, in plain words", () => {
+    const text = protection({ state: "degraded", unrecoverable: 1 });
+    expect(text.match(/삭제 장부는 지운 자료가/g)).toHaveLength(1);
+    expect(text).toContain("되살아나지 않도록");
+    expect(text).toContain("자료의 내용은 적지 않습니다");
+    expect(text.indexOf("삭제 장부는 지운 자료가")).toBeLessThan(text.indexOf("변경을 막았습니다"));
+    expect(protection({})).not.toContain("삭제 장부는 지운 자료가");
   });
   it("lists every note when several hold, the clean-up first", () => {
     const text = protection(
       { state: "degraded", setAsideLedgers: 1, setAsideDeletions: 1 },
       "pending",
     );
-    expect(text.split(" / ")).toHaveLength(3);
     expect(text.startsWith("이전 삭제")).toBe(true);
+    expect(text).toContain("변경을 막았습니다");
+    expect(text).toContain("옆에 두었습니다");
   });
   it("keeps what happened at earlier starts after the current state is ok, with the date of the last time", () => {
     const text = protection({
@@ -248,9 +259,11 @@ describe("status.data-protection: dataProtectionText (I04-R6, I04-R17)", () => {
         unrecoverable: { total: 1, last: "2026-11-21T01:00:00.000Z" },
       },
     });
-    expect(text.startsWith("정상 · 지난 기록: ")).toBe(true);
+    expect(text.startsWith("정상 · ")).toBe(true);
+    expect(text).toContain("지난 기록: ");
     expect(text).toContain("삭제 장부가 없어 새로 만듦 2번(마지막 발생: 2026-11-22)");
     expect(text).toContain("다시 적용하지 못한 삭제 1건(마지막 발생: 2026-11-21)");
+    expect(text).toContain("삭제 장부는 지운 자료가"); // the history is about the ledger: explained once here
   });
   it("says nothing of the history while nothing ever happened", () => {
     expect(protection({})).toBe("정상");

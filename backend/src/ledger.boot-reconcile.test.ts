@@ -19,6 +19,7 @@ import {
   registerConnectorInstance,
   saveSourceRecord,
   defaultScopePolicy,
+  LedgerDegradedError,
   ledgerOf,
   listInvalidations,
   cancelJob,
@@ -31,6 +32,7 @@ import { EmptyVectorIndex } from "@pki/storage/adapters";
 import { send } from "@pki/testkit";
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdtempSync,
@@ -49,7 +51,7 @@ import {
   productEngine,
   productRegistry,
 } from "./composition.ts";
-import { reapplyAtStart } from "./ledger-boot.ts";
+import { healFromDatabase, reapplyAtStart } from "./ledger-boot.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "t".repeat(43);
@@ -77,7 +79,7 @@ afterEach(async () => {
 /** Two versions of one source, in a database prepared and ledgered as the backend opens it. */
 function seeded(): SqlDriver {
   const db = openCanonicalDb(dir);
-  registerConnectorInstance(db, "c1", "test-fixtures");
+  registerConnectorInstance(db, "c1", "jsonl-import");
   for (const [i, externalId] of ["chat", "chat", "mail"].entries()) {
     saveSourceRecord(db, "c1", { namespace: "n", externalId, title: `t${i}`, body: `b${i} 본문` });
   }
@@ -380,7 +382,7 @@ describe("re-apply onto a database that lacks the line's connector instance", ()
     expect(db.all("SELECT count(*) AS n FROM tombstones")[0]?.n).toBe(1);
     expect(versionsOf(db, "chat")).toBe(0);
     // the instance is registered with its real kind, so a later sync of the same kind is not refused
-    expect(() => registerConnectorInstance(db, "c1", "test-fixtures")).not.toThrow();
+    expect(() => registerConnectorInstance(db, "c1", "jsonl-import")).not.toThrow();
   };
 
   it("a fresh database beside a ledger (the ledger's key is adopted): the instance is registered with its real kind and the deletion applies", async () => {
@@ -466,7 +468,7 @@ describe("a ledger started over existing tombstones", () => {
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0] as string)).toMatchObject({
       la: "2026-11-23T00:00:00.000Z",
-      k: "test-fixtures",
+      k: "jsonl-import",
     });
   });
 });
@@ -525,7 +527,7 @@ describe("the status API's data protection item shows the ledger", () => {
       t: "line",
       seq: 1,
       i: "c1",
-      k: "test-fixtures",
+      k: "jsonl-import",
       h: "00".repeat(32),
       cv: 1,
       lr: null,
@@ -666,7 +668,7 @@ describe("a seed that was cut short, and the history that outlives the current s
       t: "line",
       seq: 1,
       i: "c1",
-      k: "test-fixtures",
+      k: "jsonl-import",
       h: "00".repeat(32),
       cv: 1,
       lr: null,
@@ -678,5 +680,223 @@ describe("a seed that was cut short, and the history that outlives the current s
     await start();
     expect((await statusOf()).history.ignoredLines?.total).toBe(1);
     expect(versionsOf(live().db, "chat")).toBe(2);
+  });
+});
+
+describe("the heal comes after the re-apply", () => {
+  const dropLineOf = (hash: string, how: "remove" | "corrupt") => {
+    const [header, ...rest] = readFileSync(join(dir, LEDGER_FILE), "utf8").trimEnd().split("\n");
+    const kept = rest.flatMap((l) =>
+      l.includes(hash) ? (how === "corrupt" ? [l.replace('"t":"line"', '"t":"lin')] : []) : [l],
+    );
+    writeFileSync(join(dir, LEDGER_FILE), `${[header, ...kept].join("\n")}\n`);
+  };
+
+  it.each(["remove", "corrupt"] as const)(
+    "a deletion made after the backup is applied even when an earlier deletion's line is %s-d: the heal does not pass it",
+    async (how) => {
+      const db = seeded();
+      userDelete(db, identity(), AT); // A: chat, line 1
+      db.exec(`VACUUM INTO '${join(dir, "backup.sqlite")}'`);
+      userDelete(db, identity("mail"), AT); // B: mail, line 2, after the backup
+      db.close();
+      const hash = readFileSync(join(dir, LEDGER_FILE), "utf8")
+        .split("\n")
+        .map((l) => (l.includes('"seq":1,') ? (JSON.parse(l) as { h: string }).h : ""))
+        .find(Boolean) as string;
+      dropLineOf(hash, how);
+      copyFileSync(join(dir, "backup.sqlite"), join(dir, CANONICAL_DB_FILE));
+
+      await start();
+
+      expect(versionsOf(live().db, "mail")).toBe(0); // B came back before the fix
+      expect(versionsOf(live().db, "chat")).toBe(0);
+      const lines = readFileSync(join(dir, LEDGER_FILE), "utf8").match(/"t":"line"/g) ?? [];
+      expect(lines.length).toBeGreaterThanOrEqual(2); // A's line is written again after B was applied
+      expect(readLedgerSeq(live().db)).toBeGreaterThanOrEqual(2);
+    },
+  );
+
+  it("an ordinary restart after the heal changes nothing more", async () => {
+    const db = seeded();
+    userDelete(db, identity(), AT);
+    db.close();
+    const [header] = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n");
+    writeFileSync(join(dir, LEDGER_FILE), `${header}\n`);
+    await start();
+    const once = readFileSync(join(dir, LEDGER_FILE), "utf8");
+    await stop();
+    await start();
+    expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toBe(once);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "a heal the ledger cannot take locks it, the start goes on, the status says degraded, and deletions are refused",
+    async () => {
+      const db = seeded();
+      userDelete(db, identity(), AT);
+      db.close();
+      const [header] = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n");
+      writeFileSync(join(dir, LEDGER_FILE), `${header}\n`);
+      chmodSync(join(dir, LEDGER_FILE), 0o444);
+
+      await start();
+
+      const { port } = live().server;
+      const res = await send(port, routes.status.path, {
+        host: `127.0.0.1:${port}`,
+        authorization: `Bearer ${TOKEN}`,
+      });
+      expect(
+        (res.body as { dataProtection: { ledger: { state: string } } }).dataProtection.ledger.state,
+      ).toBe("degraded");
+      expect(() => userDelete(live().db, identity("mail"), AT)).toThrow(LedgerDegradedError);
+      expect(versionsOf(live().db, "mail")).toBe(1);
+      chmodSync(join(dir, LEDGER_FILE), 0o644);
+    },
+  );
+
+  it("a tombstone whose state the reader would reject is not written by the heal, at this start or any other", async () => {
+    const db = seeded();
+    userDelete(db, identity(), AT);
+    db.run("UPDATE tombstones SET at = 'not a date'");
+    db.close();
+    const [header] = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n");
+    writeFileSync(join(dir, LEDGER_FILE), `${header}\n`);
+    await start();
+    expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toBe(`${header}\n`);
+    await stop();
+    await start();
+    expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toBe(`${header}\n`);
+  });
+});
+
+describe("a kind in a line", () => {
+  const lineFor = (over: Record<string, unknown>) =>
+    JSON.stringify({
+      t: "line",
+      seq: 1,
+      i: "unknown-instance",
+      k: "jsonl-import",
+      h: "00".repeat(32),
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: AT,
+      la: null,
+      ...over,
+    });
+  const withLine = (text: string) => {
+    const [header] = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n");
+    writeFileSync(join(dir, LEDGER_FILE), `${header}\n${text}\n`);
+  };
+
+  it("an unknown kind never registers an instance: the line is unrecoverable, and a real connector of that id can still be registered", async () => {
+    seeded().close();
+    withLine(lineFor({ k: "bogus-kind" }));
+    await start();
+    expect(
+      live().db.all("SELECT 1 FROM connector_instances WHERE id = 'unknown-instance'"),
+    ).toEqual([]);
+    const report = JSON.parse(
+      live().db.all("SELECT value FROM settings WHERE key = 'tombstone-ledger.report'")[0]
+        ?.value as string,
+    ) as { unrecoverable: number; applied: number };
+    expect(report).toMatchObject({ unrecoverable: 1, applied: 0 });
+    expect(() =>
+      registerConnectorInstance(live().db, "unknown-instance", "jsonl-import"),
+    ).not.toThrow();
+  });
+
+  it("a kind of known name is registered, and a kind that is not even a name is an unreadable line", async () => {
+    seeded().close();
+    withLine(`${lineFor({})}\n${lineFor({ seq: 2, i: "other", k: "Bad Kind!" })}`);
+    await start();
+    expect(
+      live().db.all("SELECT kind FROM connector_instances WHERE id = 'unknown-instance'"),
+    ).toEqual([{ kind: "jsonl-import" }]);
+    const report = JSON.parse(
+      live().db.all("SELECT value FROM settings WHERE key = 'tombstone-ledger.report'")[0]
+        ?.value as string,
+    ) as { damaged: number };
+    expect(report.damaged).toBe(1);
+  });
+});
+
+describe("an instance a line registers gets the configured scope (I01-R15)", () => {
+  it("like every other path: its row holds the scope the deployment configured for that id", () => {
+    seeded().close();
+    const [header] = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n");
+    const line = JSON.stringify({
+      t: "line",
+      seq: 1,
+      i: "unknown-instance",
+      k: "jsonl-import",
+      h: "00".repeat(32),
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: AT,
+      la: null,
+    });
+    writeFileSync(join(dir, LEDGER_FILE), `${header}\n${line}\n`);
+    const db = openCanonicalDb(dir);
+    reapplyAtStart(
+      db,
+      productRegistry({ engine: productEngine(), vectorIndex: new EmptyVectorIndex() }),
+      Date.parse(AT),
+      () => true,
+      new Map([["unknown-instance", ["org:all"]]]),
+    );
+    expect(
+      db.all("SELECT configured_scope FROM connector_instances WHERE id = 'unknown-instance'")[0]
+        ?.configured_scope,
+    ).not.toBeNull();
+    db.close();
+  });
+});
+
+describe("the heal's own guards", () => {
+  it("never writes past a ledger line the database has not applied: it writes nothing and locks", () => {
+    const db = seeded();
+    userDelete(db, identity(), AT); // a tombstone with its line 1
+    db.close();
+    const [header, ...rest] = readFileSync(join(dir, LEDGER_FILE), "utf8").trimEnd().split("\n");
+    // the ledger has a line (seq 7) for another source that this database never applied, and none for chat
+    const other = JSON.stringify({
+      t: "line",
+      seq: 7,
+      i: "c1",
+      k: "jsonl-import",
+      h: "11".repeat(32),
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: AT,
+      la: null,
+    });
+    writeFileSync(join(dir, LEDGER_FILE), `${header}\n${other}\n`);
+    void rest;
+    const restored = openCanonicalDb(dir);
+    const before = readFileSync(join(dir, LEDGER_FILE), "utf8");
+    const ledger = ledgerOf(restored) as NonNullable<ReturnType<typeof ledgerOf>>;
+    expect(healFromDatabase(restored, ledger)).toBe(0);
+    expect(ledger.isLocked()).toBe(true);
+    expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toBe(before);
+    expect(readLedgerSeq(restored)).toBeLessThan(7);
+    restored.close();
+  });
+
+  it("a ledger created over a database whose tombstone the reader would reject is created without that line", () => {
+    const db = seeded();
+    userDelete(db, identity(), AT);
+    userDelete(db, identity("mail"), AT);
+    db.run("UPDATE tombstones SET at = 'not a date' WHERE source_id = 1");
+    db.close();
+    rmSync(join(dir, LEDGER_FILE));
+    const reopened = openCanonicalDb(dir);
+    const lines = readFileSync(join(dir, LEDGER_FILE), "utf8").match(/"t":"line"/g) ?? [];
+    expect(lines).toHaveLength(1); // mail's only
+    reopened.close();
   });
 });

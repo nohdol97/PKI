@@ -199,6 +199,11 @@ const isInt = (v: unknown): v is number =>
 /** An identifier of a line (instance, kind, hash): a short non-empty string. */
 const isName = (v: unknown): v is string =>
   typeof v === "string" && v.length > 0 && v.length <= 256;
+/** The keyed hash (HMAC-SHA-256, hex): exactly 64 hex digits. */
+const isHash = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+/** A connector kind: the syntax the registered kinds all follow (the composition checks it is a known one). */
+const isKind = (v: unknown): v is string =>
+  typeof v === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(v);
 /** A time a line may hold: one the entries would accept (`new Date` parses it). No line's content may stop a start. */
 const isTime = (v: unknown): v is string =>
   typeof v === "string" && v.length <= 64 && !Number.isNaN(new Date(v).getTime());
@@ -211,8 +216,8 @@ function readLine(raw: unknown): LedgerLine | undefined {
     !isInt(r.seq) ||
     r.seq < 1 ||
     !isName(r.i) ||
-    !(r.k === undefined || r.k === null || isName(r.k)) ||
-    !isName(r.h) ||
+    !(r.k === undefined || r.k === null || isKind(r.k)) ||
+    !isHash(r.h) ||
     !isInt(r.cv) ||
     !(r.lr === null || isInt(r.lr)) ||
     typeof r.reason !== "string" ||
@@ -247,6 +252,7 @@ export function parseLedger(text: string): LedgerContents {
     damaged: 0,
   };
   const cancelled = new Set<number>();
+  const seen = new Map<number, string>();
   pieces.forEach((piece, index) => {
     // a write that failed before any byte left an empty line: nothing was lost, nothing to count
     if (piece === "" && index > 0) return;
@@ -274,6 +280,14 @@ export function parseLedger(text: string): LedgerContents {
       out.damaged++;
       return;
     }
+    // the same number with other content is a contradiction, not a replay: the second is unreadable
+    const content = JSON.stringify(line);
+    const earlier = seen.get(line.seq);
+    if (earlier !== undefined && earlier !== content) {
+      out.damaged++;
+      return;
+    }
+    seen.set(line.seq, content);
     out.maxSeq = Math.max(out.maxSeq, line.seq);
     out.lines.push(line);
   });
@@ -297,6 +311,14 @@ const encodeLine = (seq: number, d: LedgerLineDraft) =>
     la: d.liftedAt,
   });
 
+/**
+ * Whether the reader accepts the line the draft would be written as. The seed and the heal write only
+ * such lines: a value the reader rejects would be written again at every start and never count.
+ */
+export function draftReadable(d: LedgerLineDraft): boolean {
+  return parseLedger(`{"t":"header","v":1,"key":"k"}\n${encodeLine(1, d)}\n`).lines.length === 1;
+}
+
 /** What opening the ledger found; the start-up reconcile reports it. */
 export interface LedgerOpenStatus {
   /** A new file was started at this open (missing, or set aside). */
@@ -309,8 +331,6 @@ export interface LedgerOpenStatus {
   missing: boolean;
   /** The file ended in a cut line (a write the process died in); it was cut off, never applied. */
   truncated: boolean;
-  /** Lines written at this start for tombstones the ledger had none for (a lost or cut seed); set by the composition root. */
-  healed: number;
   /** Ledgers set aside because their key is not this database's, with the deletions each held. */
   setAside: { file: string; deletions: number; reason: "other-key" | "damaged-header" }[];
 }
@@ -372,7 +392,24 @@ function freeName(io: LedgerIo, path: string, label: string): string {
  * and a new one starts; a cut last line is cut off the file (it is reported by the
  * reconcile, which reads the file first).
  */
+/** The ledger could not be opened or created (unreadable file, no room, no permission): the start stops, the data is untouched. */
+export class LedgerUnavailableError extends Error {
+  readonly code = "ledger-unavailable";
+  constructor(cause: unknown) {
+    super("the tombstone ledger could not be opened or created", { cause });
+    this.name = "LedgerUnavailableError";
+  }
+}
+
 export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
+  try {
+    return openLedgerUnchecked(options);
+  } catch (error) {
+    throw new LedgerUnavailableError(error);
+  }
+}
+
+function openLedgerUnchecked(options: OpenLedgerOptions): TombstoneLedger {
   const { path, key, io = nodeLedgerIo } = options;
   io.discardTemp(path); // a crash between the temp write and the rename left it; nothing in it counts
   const header = `${JSON.stringify({ t: "header", v: 1, key: hex(key) })}\n`;
@@ -380,7 +417,6 @@ export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
     created: false,
     seeded: 0,
     seededThrough: 0,
-    healed: 0,
     missing: false,
     truncated: false,
     setAside: [],
@@ -403,7 +439,7 @@ export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
   };
 
   const createWithSeed = (): void => {
-    const drafts = options.seed?.() ?? [];
+    const drafts = (options.seed?.() ?? []).filter(draftReadable);
     const first = options.canonicalSeq + 1;
     io.create(path, header + drafts.map((d, i) => `${encodeLine(first + i, d)}\n`).join(""));
     status.created = true;

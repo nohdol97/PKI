@@ -137,3 +137,17 @@ describe("a ledger line that cannot be applied refuses the start with its line n
     }
   });
 });
+
+describe("a ledger that cannot be opened or created refuses the start with its own text (I04-R17)", () => {
+  it("says what happened, that the data is untouched, and what to check, with no path", async () => {
+    const error = await start({ type: "failed", reason: "ledger-unavailable" }).catch(
+      (e: unknown) => e,
+    );
+    const text = startFailureText(error);
+    expect(text).toContain("삭제 장부 파일을 열거나 만들지 못해");
+    expect(text).toContain("데이터는 그대로");
+    expect(text).toContain("빈 공간");
+    expect(text).toContain("쓰기 권한");
+    expect(text).not.toBe("앱을 시작하지 못했습니다.");
+  });
+});
