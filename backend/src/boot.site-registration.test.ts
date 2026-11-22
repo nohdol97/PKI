@@ -222,6 +222,24 @@ describe("boot.registration-rejected: four violations leave their item out and a
     },
   );
 
+  it("instance-credentials-invalid (I06-C2): the start ends, only that instance is left out and the line carries the code and the count", async () => {
+    await boot({
+      connectorKinds: { fork: kindOf("fork") },
+      connectorInstances: [
+        { ...instance("bad-1", "fork"), credentials: ["Bad Slot"] },
+        { ...instance("bad-2", "fork"), credentials: ["a", "a"] },
+        { ...instance("good", "fork"), credentials: ["token"] },
+      ],
+    });
+    expect(events("site-registration-rejected")).toEqual([
+      { event: "site-registration-rejected", code: "instance-credentials-invalid", count: 2 },
+    ]);
+    const ids = (await api().list()).map((c) => c.id);
+    expect(ids).toContain("good");
+    expect(ids).not.toContain("bad-1");
+    expect(ids).not.toContain("bad-2");
+  });
+
   it("counts every occurrence of a code and writes one line per code", async () => {
     await boot({
       connectorKinds: { A: kindOf("A"), B: kindOf("B"), fork: kindOf("fork") },

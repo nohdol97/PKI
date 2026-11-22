@@ -242,6 +242,65 @@ describe("derivatives.schema-coverage", () => {
     db.close();
   });
 
+  it("classifies the local file index (I02B-R33, C23): the entries as source identity, the other two operational", () => {
+    const db = freshDb();
+    expect(checkTableCoverage(db, registry)).toEqual([]);
+    expect(TABLE_CLASSIFICATION.local_file_entries).toEqual({ class: "source" });
+    expect(TABLE_CLASSIFICATION.local_locations?.class).toBe("operational");
+    expect(TABLE_CLASSIFICATION.local_index_seq?.class).toBe("operational");
+    // the index is not a derivative kind: the registry has the same ten kinds as before it
+    expect(registry.kinds.map((k) => k.kind).sort()).toEqual([
+      "engine",
+      "evidence",
+      "fact",
+      "insight",
+      "item",
+      "ontology",
+      "relation",
+      "scope-drop",
+      "source",
+      "vectorIndex",
+    ]);
+    // each of the three stands or falls with its entry
+    for (const table of ["local_locations", "local_index_seq", "local_file_entries"]) {
+      const rest = Object.fromEntries(
+        Object.entries(TABLE_CLASSIFICATION).filter(([name]) => name !== table),
+      );
+      expect(
+        checkTableCoverage(db, registry, rest).some((p) => p.includes(`"${table}"`)),
+        table,
+      ).toBe(true);
+    }
+    db.close();
+  });
+
+  it("a source-class table without the trigger on `tombstones` that scrubs it fails (classified but nothing empties it)", () => {
+    for (const trigger of ["tombstones_local_index_insert", "tombstones_local_index_update"]) {
+      const db = freshDb();
+      db.exec(`DROP TRIGGER ${trigger}`);
+      const problems = checkTableCoverage(db, registry);
+      expect(problems, trigger).toEqual([expect.stringContaining('"local_file_entries"')]);
+      expect(problems[0]).toContain("tombstones");
+      db.close();
+    }
+  });
+
+  it("a second source-class table is accepted only with its own scrubbing trigger", () => {
+    const db = freshDb();
+    db.exec("CREATE TABLE other_identity (id INTEGER PRIMARY KEY)");
+    const withIt = { ...TABLE_CLASSIFICATION, other_identity: { class: "source" as const } };
+    expect(checkTableCoverage(db, registry, withIt)).toHaveLength(2); // for a new row, for a changed one
+    db.exec(
+      "CREATE TRIGGER tombstones_other_identity AFTER INSERT ON tombstones BEGIN DELETE FROM other_identity; END",
+    );
+    expect(checkTableCoverage(db, registry, withIt)).toEqual([expect.stringContaining("updated")]);
+    db.exec(
+      "CREATE TRIGGER tombstones_other_identity_u AFTER UPDATE ON tombstones BEGIN DELETE FROM other_identity; END",
+    );
+    expect(checkTableCoverage(db, registry, withIt)).toEqual([]);
+    db.close();
+  });
+
   it("registered kinds without a table are the projection ones; every canonical kind owns a table", () => {
     const tableKinds = new Set(
       Object.values(TABLE_CLASSIFICATION).flatMap((c) => (c.class === "kind" ? [c.kind] : [])),

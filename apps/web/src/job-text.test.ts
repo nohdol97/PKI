@@ -56,6 +56,18 @@ describe("reasonText", () => {
     expect(reasonText("manager-not-ready")).toContain("준비");
   });
 
+  it("words the four credential holds apart from each other and from the plain one (I06-R10)", () => {
+    const codes = [
+      "credential-store-unavailable",
+      "credential-missing",
+      "credential-unreadable",
+      "credential-rejected",
+    ];
+    const texts = codes.map(reasonText);
+    expect(new Set([...texts, reasonText("connector-unavailable")]).size).toBe(5);
+    for (const text of texts) expect(text).toMatch(/자격 증명/);
+  });
+
   it("never turns text into a sentence: a string that is not a code shape comes back unchanged and the screen renders it as text", () => {
     expect(reasonText("<img src=x onerror=alert(1)>")).toBe("<img src=x onerror=alert(1)>");
   });

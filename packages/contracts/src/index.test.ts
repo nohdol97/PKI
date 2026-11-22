@@ -177,6 +177,7 @@ describe("sync v2 contract (I01-R19, R21, T03)", () => {
       "aborted",
       "instance-busy",
       "storage-failed",
+      "credential-unusable",
     ]);
     expect(SyncResponseSchema.safeParse(result).success).toBe(true);
     expect(
