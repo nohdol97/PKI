@@ -10,6 +10,7 @@
 // can read the registry's report, which the entry does not return.
 import {
   addEvidence,
+  applyOntologyChange,
   commitDerived,
   insertItem,
   listInvalidations,
@@ -39,6 +40,7 @@ import {
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import {
+  addUserOntologyElementForTest,
   derivativeKindContract,
   seedLegacyTombstone,
   setStatusForTest,
@@ -124,6 +126,7 @@ const TABLES: Record<string, string> = {
   item: "items",
   insight: "insights",
   "scope-drop": "scope_policy_drops",
+  ontology: "ontology_elements",
 };
 const exists = (ref: DerivedRef) =>
   db.all(`SELECT 1 FROM ${TABLES[ref.kind]} WHERE id = ?`, [Number(ref.id)]).length === 1;
@@ -171,6 +174,31 @@ function world() {
     [a.sourceId, a.version, AT],
   ).lastInsertRowid;
 
+  // type definitions (S01-T06): a candidate proposed from a only, one from a and b, and one the user
+  // added (no lineage). The user's row is the contract's lineage-free row: a proposal the user approved
+  // would carry lineage rows with an empty `lineage()`, which the contract's ⑤ cannot hold (ontology.candidates).
+  const propose = (name: string, ...from: { sourceId: number; version: number }[]) => {
+    const [first, ...more] = from;
+    const outcome = applyOntologyChange(
+      db,
+      { op: "add", name, rule: { elementKind: "item-type" } },
+      "extraction",
+      first as { sourceId: number; version: number },
+    );
+    if (outcome.status !== "candidate") throw new Error(JSON.stringify(outcome));
+    for (const extra of more) {
+      db.run("INSERT INTO ontology_basis (element_id, source_id, version) VALUES (?, ?, ?)", [
+        outcome.id,
+        extra.sourceId,
+        extra.version,
+      ]);
+    }
+    return outcome.id;
+  };
+  const ontoA = propose("OntoA", lineA[0] as { sourceId: number; version: number });
+  const ontoS = propose("OntoShared", ...lineAB);
+  const added = addUserOntologyElementForTest(db, "OntoUser");
+
   const rows: Record<
     string,
     { onlyA: number; shared: number | null; withoutLineage: number | null }
@@ -182,6 +210,7 @@ function world() {
     item: { onlyA: xA as number, shared: xS as number, withoutLineage: xN as number },
     insight: { onlyA: iA, shared: iS, withoutLineage: iN },
     "scope-drop": { onlyA: dropA, shared: null, withoutLineage: null },
+    ontology: { onlyA: ontoA, shared: ontoS, withoutLineage: added },
   };
   const built = new Map<string, readonly SourceVersionRef[]>();
   for (const [kind, r] of Object.entries(rows)) {
@@ -331,19 +360,21 @@ const SUBJECTS: Record<string, { shared: boolean; withoutLineage: boolean }> = {
   item: BOTH,
   insight: BOTH,
   "scope-drop": { shared: false, withoutLineage: false },
+  ontology: BOTH,
 };
 for (const kind of CANONICAL_KINDS) {
   derivativeKindContract(`canonical kind ${kind.kind}`, subject(kind, SUBJECTS[kind.kind] ?? BOTH));
 }
 
 describe("the product registry's canonical kinds (I04-R1)", () => {
-  it("registers the seven canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
+  it("registers the eight canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
     expect(derivativeRegistry.kinds.map((k) => [k.kind, k.layer, k.storage])).toEqual([
       ["source", "source", "canonical"],
       ["evidence", "evidence", "canonical"],
       ["fact", "knowledge", "canonical"],
       ["relation", "knowledge", "canonical"],
       ["scope-drop", "knowledge", "canonical"],
+      ["ontology", "knowledge", "canonical"],
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
       ["engine", "projection", "projection"],
@@ -394,6 +425,7 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
       item: [],
       // every record of what the policy left out is collected: its source's re-extraction is queued (I04-R15)
       "scope-drop": [String(rows["scope-drop"]?.onlyA)],
+      ontology: [], // a scope change keeps every lineage row (S01-R22)
       insight: [String(rows.insight?.shared)],
     });
 
@@ -509,7 +541,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
-    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(9);
+    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(10);
     expect(log.findLastIndex((e) => e.startsWith("affected:"))).toBeLessThan(firstDelete);
     expect(log.filter((e) => e.startsWith("invalidate:"))).toEqual(
       [
@@ -518,6 +550,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         "fact",
         "relation",
         "scope-drop",
+        "ontology",
         "item",
         "insight",
         "engine",
@@ -533,6 +566,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       fact: 1,
       relation: 1,
       "scope-drop": 1,
+      ontology: 1,
       item: 2,
       insight: 1,
       engine: 1,
@@ -559,6 +593,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           fact: 1,
           relation: 1,
           "scope-drop": 1,
+          ontology: 1,
           item: 2,
           insight: 1,
           engine: 1,
@@ -571,6 +606,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           fact: 0,
           relation: 0,
           "scope-drop": 0,
+          ontology: 0,
           item: 0,
           insight: 1,
           engine: 0,

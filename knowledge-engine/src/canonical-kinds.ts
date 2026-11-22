@@ -154,6 +154,15 @@ const lineageOf: Record<string, (db: SqlDriver, id: number) => SourceVersionRef[
       EVIDENCE_VERSIONS("e.id IN (SELECT evidence_id FROM insight_evidence WHERE insight_id = ?)"),
       [id],
     ),
+  // only a candidate or a rejected type definition follows its source; a verified one (and a retired
+  // one, which was verified) is a rule the user accepted and holds no lineage (S01-R20, R22)
+  ontology: (db, id) =>
+    versionsOf(
+      db,
+      `SELECT b.source_id, b.version FROM ontology_basis b JOIN ontology_elements e ON e.id = b.element_id
+       WHERE b.element_id = ? AND e.status IN ('candidate', 'rejected') ORDER BY b.source_id, b.version`,
+      [id],
+    ),
 };
 
 const lineage = (kind: string) => (db: SqlDriver, ref: DerivedRef) =>
@@ -421,6 +430,47 @@ const SCOPE_DROP: DerivativeKind = {
   },
 };
 
+/**
+ * The type definitions (`ontology_elements`, schema v21, S01-R22) and their lineage rows. A deletion
+ * (or a prune, for the versions below the one kept) takes the lineage rows that point at the source,
+ * for every element, a verified one included (its rows were kept for an undo, R20); then it deletes
+ * the candidate and rejected elements left with none. A verified or retired element stays: it is
+ * the user's rule, and its history with it. A new version or a scope change keeps every row.
+ */
+const ONTOLOGY: DerivativeKind = {
+  ...base("ontology", "knowledge"),
+  affected: (tx, change) => {
+    const mode = supported(change);
+    if (mode === "new-version" || mode === "scope-changed") return [];
+    return collect(
+      tx,
+      "ontology",
+      `SELECT DISTINCT element_id AS id FROM ontology_basis WHERE source_id = ? ${below(change)}
+       ORDER BY id`,
+      [change.sourceId, ...belowParams(change)],
+    );
+  },
+  invalidate: (ctx, snapshot, change) => {
+    noting(ctx);
+    const { tx } = ctx;
+    let removed = 0;
+    for (const { ref } of snapshot) {
+      const id = Number(ref.id);
+      tx.run(`DELETE FROM ontology_basis WHERE element_id = ? AND source_id = ? ${below(change)}`, [
+        id,
+        change.sourceId,
+        ...belowParams(change),
+      ]);
+      removed += tx.run(
+        `DELETE FROM ontology_elements WHERE id = ? AND status IN ('candidate', 'rejected')
+         AND NOT EXISTS (SELECT 1 FROM ontology_basis WHERE element_id = ?)`,
+        [id, id],
+      ).changes;
+    }
+    return { removed, recomputed: 0 };
+  },
+};
+
 /** The target of a re-extraction a scope change queued (I04-R15). */
 export const RECOMPUTE_PREFIX = "scope-recompute:";
 
@@ -431,6 +481,7 @@ export const CANONICAL_KINDS: readonly DerivativeKind[] = Object.freeze([
   knowledgeKind("fact"),
   knowledgeKind("relation"),
   SCOPE_DROP,
+  ONTOLOGY,
   ITEM,
   INSIGHT,
 ]);
