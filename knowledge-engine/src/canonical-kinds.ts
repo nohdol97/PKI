@@ -74,17 +74,21 @@ function noting(ctx: InvalidationContext): CanonicalReport | undefined {
 const ascending = (values: Iterable<number>) => [...new Set(values)].sort((a, b) => a - b);
 
 /**
- * The change kinds the canonical kinds propagate. `old-versions-pruned` has no
- * producer before I04-T12, which defines it; refusing it keeps it from passing
- * as zero counts.
+ * The change kinds the canonical kinds propagate: the three tombstone reasons are one
+ * "deletion". A prune (I04-T12) names the version it keeps (`change.version`, the latest);
+ * the versions it takes are those below it.
  */
-function supported(change: SourceChange): "new-version" | "scope-changed" | "deletion" {
-  if (change.kind === "old-versions-pruned") {
-    throw new Error("old-versions-pruned is propagated from I04-T12");
-  }
+function supported(change: SourceChange): "new-version" | "scope-changed" | "deletion" | "pruned" {
+  if (change.kind === "old-versions-pruned") return "pruned";
   if (change.kind === "new-version" || change.kind === "scope-changed") return change.kind;
   return "deletion";
 }
+
+/** A prune takes the versions below the one it keeps; every other deletion takes all of them. */
+const below = (change: SourceChange, column = "") =>
+  change.kind === "old-versions-pruned" ? `AND ${column}version < ?` : "";
+const belowParams = (change: SourceChange): SqlValue[] =>
+  change.kind === "old-versions-pruned" ? [change.version] : [];
 
 const versionsOf = (db: SqlDriver, sql: string, params: SqlValue[]): SourceVersionRef[] =>
   db
@@ -159,12 +163,16 @@ const base = (kind: string, layer: DerivativeKind["layer"]) =>
 /** Source versions and their keyword index rows (I04-R3 `등록 종류 source`). */
 const SOURCE: DerivativeKind = {
   ...base("source", "source"),
-  affected: (tx, change) =>
-    supported(change) !== "deletion"
-      ? [] // a new version or a scope change keeps every version (I04-R10, R15)
-      : collect(tx, "source", "SELECT id FROM source_versions WHERE source_id = ? ORDER BY id", [
-          change.sourceId,
-        ]),
+  affected: (tx, change) => {
+    const mode = supported(change);
+    if (mode === "new-version" || mode === "scope-changed") return []; // every version stays (I04-R10, R15)
+    return collect(
+      tx,
+      "source",
+      `SELECT id FROM source_versions WHERE source_id = ? ${below(change)} ORDER BY id`,
+      [change.sourceId, ...belowParams(change)],
+    );
+  },
   // the delete trigger takes the version's keyword index row; the cascades its
   // evidence and the Insights' links to that evidence
   invalidate: (ctx, snapshot) => {
@@ -180,16 +188,19 @@ const SOURCE: DerivativeKind = {
 
 const EVIDENCE: DerivativeKind = {
   ...base("evidence", "evidence"),
-  affected: (tx, change) =>
-    supported(change) !== "deletion"
-      ? [] // evidence is immutable; on an earlier version it becomes past evidence by itself
-      : collect(
-          tx,
-          "evidence",
-          `SELECT e.id FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
-           WHERE v.source_id = ? ORDER BY e.id`,
-          [change.sourceId],
-        ),
+  affected: (tx, change) => {
+    const mode = supported(change);
+    if (mode === "new-version" || mode === "scope-changed") {
+      return []; // evidence is immutable; on an earlier version it becomes past evidence by itself
+    }
+    return collect(
+      tx,
+      "evidence",
+      `SELECT e.id FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
+       WHERE v.source_id = ? ${below(change, "v.")} ORDER BY e.id`,
+      [change.sourceId, ...belowParams(change)],
+    );
+  },
   // the version delete cascaded it; whatever a schema without the cascade kept goes here
   invalidate: (ctx, snapshot) => {
     noting(ctx);
@@ -345,12 +356,13 @@ const SCOPE_DROP: DerivativeKind = {
   affected: (tx, change) => {
     const mode = supported(change);
     if (mode === "new-version") return [];
-    const where = mode === "deletion" ? "WHERE source_id = ?" : "";
+    // a record names the version it refused: a prune takes the records of the versions it takes
+    const where = mode === "scope-changed" ? "" : `WHERE source_id = ? ${below(change)}`;
     return collect(
       tx,
       "scope-drop",
       `SELECT id FROM scope_policy_drops ${where} ORDER BY id`,
-      mode === "deletion" ? [change.sourceId] : [],
+      mode === "scope-changed" ? [] : [change.sourceId, ...belowParams(change)],
     );
   },
   invalidate: (ctx, snapshot, change) => {
