@@ -29,8 +29,8 @@ import {
   productEgress,
   productImporter,
   productRunner,
-  releaseHeldJobs,
 } from "./composition.ts";
+import { releaseHeldOnEvent } from "./held-release.ts";
 import { syncConnector } from "./connectors.ts";
 import type { JobRunner } from "./job-runner.ts";
 
@@ -246,7 +246,7 @@ describe("update.recompute", () => {
     await runner.wake();
     failing.on = false;
     // neither another drain nor a release of held jobs picks it again before its backoff (I03-R10)
-    releaseHeldJobs(db, runner);
+    releaseHeldOnEvent(db, "default-provider");
     await runner.wake();
     expect(db.all("SELECT status, reason, attempts FROM jobs WHERE fence_version = 2")).toEqual([
       { status: "retry", reason: "provider-error", attempts: 1 },

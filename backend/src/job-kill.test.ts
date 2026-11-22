@@ -7,7 +7,7 @@
 // its effect stayed once. POSIX only: the rig kills and probes a process group
 // (`process.kill(-pid)`), which Windows does not have, so there it is skipped
 // with that reason until S19/R04 adapts it; SIGKILL on Windows is unverified (S19).
-import { readJob, registerJob, type SqlDriver } from "@pki/storage";
+import { cancelJob, readJob, registerJob, type SqlDriver } from "@pki/storage";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -248,4 +248,32 @@ posixOnly("poison (I03-R5, R11, R24)", () => {
     const effects = withDb(readTestEffects);
     expect([poison, o1, o2].map((id) => effects.get(id))).toEqual([undefined, 1, 1]);
   }, 120_000);
+});
+
+posixOnly("cancel.kill-after-flag (I03-R12, R5, C3)", () => {
+  it("closes a job cancelled after its cancel request was written and the backend killed, without running it again", async () => {
+    const [x, next] = register("x", "next") as [number, number];
+    const first = await start(["x"]);
+    await until("job x to run", () => runsOf(x).length === 1, first.child);
+    // the request is written by another process, then the backend dies before it looks at it
+    expect(withDb((db) => cancelJob(db, x))).toBe("requested");
+    await kill(first);
+    expect(withDb((db) => readJob(db, x))).toMatchObject({
+      status: "running",
+      cancelRequested: true,
+    });
+
+    const second = await start();
+    await until(
+      "the job to be cancelled and the next to finish",
+      () => statuses([x, next]).join() === "cancelled,succeeded",
+      second.child,
+    );
+    await kill(second);
+
+    expect(runsOf(x)).toHaveLength(1); // never run again
+    expect(withDb(readTestEffects).get(x)).toBeUndefined();
+    expect(withDb(readTestEffects).get(next)).toBe(1);
+    expect(withDb((db) => readJob(db, x))).toMatchObject({ status: "cancelled", attempts: 1 });
+  }, 90_000);
 });

@@ -4,11 +4,11 @@
 import { migrate, migrations, readJob, type SqlDriver } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { HELD_POLICY_SETTING, releaseOnPolicyChange } from "./composition.ts";
+import { releaseOnPolicyChange } from "./held-release.ts";
 import { EXTRACT_HOLD_TOO_LARGE } from "@pki/knowledge-engine";
 
 let db: SqlDriver;
-const egress = { policyVersion: () => "pv-1" };
+const FINGERPRINT = "pf-1";
 let wakes = 0;
 const runner = { wake: async () => void wakes++ };
 
@@ -27,19 +27,16 @@ beforeEach(() => {
       [version, reason],
     );
   }
-  // judged under the current rules already: V02 alone would not release them again
-  db.run("INSERT INTO settings (key, value) VALUES (?, ?)", [HELD_POLICY_SETTING, "pv-1"]);
   wakes = 0;
 });
 
 afterEach(() => db.close());
 
 it("judges migrated held jobs once at the first start, keeping the one held for size", () => {
-  expect(releaseOnPolicyChange(db, egress, runner)).toBe(0); // before the migration: not again
   migrate(db);
-  expect(releaseOnPolicyChange(db, egress, runner)).toBe(1);
+  expect(releaseOnPolicyChange(db, FINGERPRINT, runner)).toBe(1); // no fingerprint: changed
   expect(readJob(db, 1)).toMatchObject({ status: "queued", reason: null });
   expect(readJob(db, 2)).toMatchObject({ status: "held", reason: EXTRACT_HOLD_TOO_LARGE });
   expect(wakes).toBe(1);
-  expect(releaseOnPolicyChange(db, egress, runner)).toBe(0); // once: the next start keeps them
+  expect(releaseOnPolicyChange(db, FINGERPRINT, runner)).toBe(0); // once: the next start keeps them
 });

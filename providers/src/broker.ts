@@ -484,6 +484,12 @@ async function unlessAborted(wait: Promise<void>, signal: AbortSignal | undefine
   }
 }
 
+/** How long precheck remembers a CLI's version (I03-R16 ②): one query per Provider per hour. */
+export const PRECHECK_VERSION_MEMORY_MS = 3_600_000;
+
+/** The answer of precheck: the real call's decisions, without the call. */
+export type PrecheckResult = { allowed: true } | { allowed: false; reason: string };
+
 export function createBroker(deps: BrokerDeps) {
   const limits: BrokerLimits = { ...DEFAULT_LIMITS, ...deps.limits };
   const clock = deps.clock ?? {
@@ -653,7 +659,72 @@ export function createBroker(deps: BrokerDeps) {
     });
   }
 
-  return { call, budgetUsage };
+  const versions = new Map<string, { at: number; found: CliFound }>();
+
+  /**
+   * Would a background call of `taskKind` to the selected Provider run now? The
+   * decisions are the real call's, in its order: a Provider selected (and the one
+   * named, if one is), structured output, the egress decision, the execution
+   * condition. The Provider's model is never called and history is not written. It
+   * is asked as the strictest call: background, "general" data, and possibly a
+   * malicious variant (no document is read), so a pass can be too generous
+   * but never too strict: a job put back that is blocked again loses nothing
+   * (I03-R16 ②). A CLI's version is asked at most once an hour per Provider.
+   */
+  async function precheck(input: {
+    taskKind: TaskKind;
+    providerId?: LLMProvider["id"];
+  }): Promise<PrecheckResult> {
+    const provider = deps.provider();
+    if (!provider || (input.providerId !== undefined && provider.id !== input.providerId)) {
+      return { allowed: false, reason: "no-provider" };
+    }
+    let structured: unknown;
+    try {
+      structured = provider.getCapabilities().structuredOutput;
+    } catch {
+      structured = "unreadable";
+    }
+    if (structured !== true) {
+      return {
+        allowed: false,
+        reason:
+          structured === "unreadable"
+            ? "capabilities-unavailable"
+            : "structured-output-unsupported",
+      };
+    }
+    const classification: DataClassification = "general";
+    const egress = deps.egress.decide({
+      providerId: provider.id,
+      taskKind: input.taskKind,
+      classification,
+    });
+    if (!egress.allowed) return { allowed: false, reason: egress.reason };
+    let found = NOT_FOUND;
+    if (provider.transport === "cli") {
+      const at = clock.now();
+      const known = versions.get(provider.id);
+      if (known && at - known.at < PRECHECK_VERSION_MEMORY_MS) found = known.found;
+      else {
+        found = await cliVersion(provider, limits.versionQueryTimeoutMs);
+        versions.set(provider.id, { at, found });
+      }
+    }
+    const execution = deps.execution.decide({
+      providerId: provider.id,
+      transport: provider.transport,
+      taskKind: input.taskKind,
+      trigger: "background",
+      classification,
+      malicious: true,
+      version: found.version,
+      unverifiedAcknowledged: false,
+    });
+    return execution.run ? { allowed: true } : { allowed: false, reason: execution.reason };
+  }
+
+  return { call, budgetUsage, precheck };
 }
 
 export type Broker = ReturnType<typeof createBroker>;

@@ -14,23 +14,21 @@ import {
   type EgressControls,
   type TestBuildExecution,
 } from "@pki/providers";
-import { readJob, readSetting, writeSetting, type SqlDriver } from "@pki/storage";
+import { readJob, writeSetting, type SqlDriver } from "@pki/storage";
 import { FakeProvider, fixtureExtraction, send } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  HELD_POLICY_SETTING,
   openCanonicalDb,
   productAdapters,
   productCalls,
   productEgress,
   productImporter,
   productRunner,
-  releaseHeldJobs,
-  releaseOnPolicyChange,
 } from "./composition.ts";
+import { releaseHeldOnEvent, releaseOnPolicyChange } from "./held-release.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import type { JobRunner } from "./job-runner.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -91,13 +89,13 @@ function consent(egress: EgressControls, providerId: "local-model" | "claude-cod
 function pipeline(provider: FakeProvider, testBuild?: TestBuildExecution) {
   const egress = productEgress(db);
   writeSetting(db, DEFAULT_PROVIDER_SETTING, provider.id); // the user's default (V01-T10)
-  const { broker } = productCalls(
+  const calls = productCalls(
     db,
     egress,
     testBuild ? { providers: [provider], testBuild } : { providers: [provider] },
   );
-  runner = productRunner(db, broker);
-  return { egress, runner, importer: productImporter(db, { runner }) };
+  runner = productRunner(db, calls.broker, { policyFingerprint: calls.policyFingerprint });
+  return { egress, calls, runner, importer: productImporter(db, { runner }) };
 }
 
 const localDouble = () =>
@@ -178,7 +176,7 @@ describe("held extraction", () => {
       db,
       dataDirectory: dir,
       egress,
-      onRunConditionsChanged: () => void releaseHeldJobs(db, run),
+      onRunConditionsChanged: () => void run.wake(),
       ...productAdapters(dir),
     });
     const port = server.port;
@@ -224,7 +222,7 @@ describe("held extraction", () => {
     expect(jobs().map((j) => j.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
   });
 
-  it("releases every held job but one held for size: settings cannot make a source smaller", async () => {
+  it("releases every held job a changed default Provider can lift but one held for size: settings cannot make a source smaller", async () => {
     const { runner, importer } = pipeline(localDouble());
     await importer(fileText("plain"));
     await runner.wake();
@@ -233,26 +231,23 @@ describe("held extraction", () => {
       { id: number },
     ];
     db.run("UPDATE jobs SET reason = 'source-too-large' WHERE id = ?", [first.id]);
-    expect(releaseHeldJobs(db, runner)).toBe(2);
+    expect(releaseHeldOnEvent(db, "default-provider")).toBe(2);
     expect(readJob(db, first.id)).toMatchObject({ status: "held", reason: "source-too-large" });
     expect(readJob(db, second.id)?.status).not.toBe("held");
     await runner.wake();
   });
 
-  it("releases held jobs at start only when the egress rules' policy version changed", async () => {
-    const { egress, runner, importer } = pipeline(localDouble());
+  it("stamps a hold with its policy and releases at start only what a changed fingerprint can end", async () => {
+    const { calls, runner, importer } = pipeline(localDouble());
     await importer(fileText("plain"));
     await runner.wake();
     const [first] = db.all("SELECT id FROM jobs ORDER BY id") as [{ id: number }];
-    const token = readJob(db, first.id)?.leaseToken;
+    const fingerprint = calls.policyFingerprint();
+    expect(readJob(db, first.id)).toMatchObject({ status: "held", policyFingerprint: fingerprint });
 
-    expect(releaseOnPolicyChange(db, egress, runner)).toBe(3); // nothing recorded yet
-    await runner.wake();
-    expect(readSetting(db, HELD_POLICY_SETTING)).toBe(egress.policyVersion());
-    expect(readJob(db, first.id)).toMatchObject({ status: "held", leaseToken: (token ?? 0) + 1 });
-    expect(releaseOnPolicyChange(db, egress, runner)).toBe(0); // same rules: stays held
-
-    writeSetting(db, HELD_POLICY_SETTING, "pv-older");
-    expect(releaseOnPolicyChange(db, egress, runner)).toBe(3);
+    expect(releaseOnPolicyChange(db, fingerprint, runner)).toBe(0); // same policy: stays held
+    expect(releaseOnPolicyChange(db, "pf-older", runner)).toBe(0); // no consent is not a policy matter
+    db.run("UPDATE jobs SET reason = 'rule-denied'");
+    expect(releaseOnPolicyChange(db, "pf-older", runner)).toBe(3);
   });
 });

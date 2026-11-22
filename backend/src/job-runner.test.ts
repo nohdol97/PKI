@@ -11,7 +11,7 @@ import {
   readJob,
   registerConnectorInstance,
   registerJob,
-  requeueHeldJobs,
+  requeueHeldReasons,
   saveSourceRecord,
   supersedeOpenJobs,
   writeTombstone,
@@ -823,7 +823,7 @@ describe("attempts.refund (I03-R11, C3): runs the Broker did not let out spend n
         reason: "cli-background-off",
         attempts: 0,
       });
-      expect(requeueHeldJobs(db, { keep: [] })).toBe(1); // the setting changed: judged anew
+      expect(requeueHeldReasons(db, { reasons: ["cli-background-off"] })).toBe(1); // the setting changed: judged anew
     }
     result = { status: "blocked", requestId: "r", reason: "budget-exhausted" };
     expect(await r.runOnce()).toEqual({ jobId: job.id, status: "retry" });

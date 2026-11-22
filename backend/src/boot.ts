@@ -14,7 +14,7 @@ import type {
   VectorIndex,
 } from "@pki/contracts";
 import type { Projections } from "@pki/knowledge-engine";
-import { BUILD_KIND } from "@pki/providers";
+import { BUILD_KIND, errorClass, log } from "@pki/providers";
 import type { SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
@@ -29,14 +29,13 @@ import {
   productProjections,
   productProviders,
   productRunner,
-  releaseHeldJobs,
-  releaseOnPolicyChange,
   sweepCliRuns,
   cliRunsRoot,
   type ConnectorSet,
 } from "./composition.ts";
 import { systemClock } from "./clock.ts";
 import { createConnectorManager } from "./connectors.ts";
+import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
@@ -96,6 +95,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   const clock = systemClock;
   const runner = productRunner(db, calls.broker, {
     clock,
+    policyFingerprint: calls.policyFingerprint,
     engine,
     projections,
     // folded away from any other build (V01-T15); the runner honours it in a test build only
@@ -123,14 +123,22 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     calls,
     importer: productImporter(db, { runner, projections, clock }),
     projections,
-    onRunConditionsChanged: () => void releaseHeldJobs(db, runner),
+    // the held jobs were put back in the transaction that changed the condition (R16 ①)
+    onRunConditionsChanged: () => void runner.wake(),
   });
-  releaseOnPolicyChange(db, egress, runner);
+  releaseOnPolicyChange(db, calls.policyFingerprint(), runner);
   runner.start();
+  const reevaluation = startHeldReevaluation({
+    db,
+    broker: calls.broker,
+    runner,
+    onError: (error) => log("held-reevaluation-error", { error: errorClass(error) }),
+  });
   return {
     server: {
       ...server,
       close: async () => {
+        reevaluation.stop();
         await server.close();
         await runner.stop();
         await projections.drain();

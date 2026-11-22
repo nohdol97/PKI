@@ -1,6 +1,7 @@
 export {
   createBroker,
   DEFAULT_LIMITS,
+  PRECHECK_VERSION_MEMORY_MS,
   type Broker,
   type BrokerDeps,
   type BudgetUsage,
@@ -17,6 +18,7 @@ export {
   type ExecutionDecision,
   type ExecutionGate,
   type ExecutionInput,
+  type PrecheckResult,
   type RejectReason,
 } from "./broker.ts";
 export {

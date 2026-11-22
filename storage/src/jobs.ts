@@ -221,7 +221,7 @@ export function registerJob(
 }
 
 /** The SET clause and its parameters for moving a job into `to` at `at`. */
-function moving(to: JobStatus, at: number): { set: string; params: SqlValue[] } {
+export function moving(to: JobStatus, at: number): { set: string; params: SqlValue[] } {
   const parts = ["status = ?", "updated_at = ?", "finished_at = ?"];
   const params: SqlValue[] = [to, at, ENDED.includes(to) ? at : null];
   if (to !== "running") parts.push("lease_until = NULL", "lease_owner = NULL");
@@ -480,7 +480,9 @@ export function isFenceCurrent(db: SqlDriver, job: { sourceId: number; fenceVers
 export type JobClosing =
   | { status: "succeeded"; write: () => void }
   | { status: "succeeded"; items: readonly DerivedItem[] }
-  | { status: "held" | "dead_letter"; reason: string }
+  /** `policyFingerprint`: the policy a held job was judged under (I03-R16 ③); absent is stored as empty. */
+  | { status: "held"; reason: string; policyFingerprint?: string }
+  | { status: "dead_letter"; reason: string }
   | { status: "superseded" }
   /** `runAfter`: when it may run again, UTC milliseconds (the backoff). */
   | { status: "retry"; reason: string; runAfter: number; refund?: boolean }
@@ -622,6 +624,12 @@ export function closeJob(
         "UPDATE jobs SET run_after = coalesce(?, run_after), attempts = max(attempts - ?, 0) WHERE id = ?",
         ["runAfter" in closing ? closing.runAfter : null, refund ? 1 : 0, lease.id],
       );
+      if (closing.status === "held") {
+        db.run("UPDATE jobs SET policy_fingerprint = ? WHERE id = ?", [
+          closing.policyFingerprint ?? null,
+          lease.id,
+        ]);
+      }
       return closing.status;
     },
     { immediate: true },
@@ -735,22 +743,4 @@ export function readExtractionDrops(db: SqlDriver, jobId: number): ExtractionDro
   const row = db.all("SELECT dropped_quotes, dropped_other FROM jobs WHERE id = ?", [jobId])[0];
   if (row?.dropped_quotes == null || row.dropped_other == null) return undefined;
   return { quotes: row.dropped_quotes as number, other: row.dropped_other as number };
-}
-
-/**
- * Puts held jobs back in the queue, in their own rows (V02 미해결 질문 7): called
- * when a condition that blocked them may have changed. Jobs held for a reason in
- * `keep` stay held (a source too large stays too large). Each later claim raises
- * the lease token as usual. Returns how many were queued.
- */
-export function requeueHeldJobs(
-  db: SqlDriver,
-  options: { keep: readonly string[]; at?: Date },
-): number {
-  const { set, params } = moving("queued", (options.at ?? new Date()).getTime());
-  return db.run(
-    `UPDATE jobs SET ${set}, reason = NULL
-      WHERE status = 'held' AND reason NOT IN (SELECT value FROM json_each(?))`,
-    [...params, JSON.stringify(options.keep)],
-  ).changes;
 }
