@@ -16,6 +16,7 @@ import {
   normalizeColumnName,
   normalizeValue,
 } from "./analytical-types.ts";
+import { insertItem, saveFact, type KnowledgeAttributes } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import {
   applyUserOntologyChange,
@@ -335,6 +336,57 @@ describe("ontology.analytical-seeds: the shape check of dataChecks (S03-R13)", (
     expect(checkOntologyChange(db, change(fk("text", [], { extra: 1 }))).schemaErrors).toEqual([
       "rule-malformed",
     ]);
+  });
+});
+
+describe("ontology.analytical-seeds: the effect on existing rows (S01-R19 step 3)", () => {
+  const attrs: KnowledgeAttributes = {
+    epistemic: "explicit",
+    status: "candidate",
+    validAt: null,
+    observedAt: "2026-11-21T00:00:00Z",
+  };
+  const change = (rule: ElementRule): OntologyChange => ({
+    op: "change-rule",
+    elementKind: "fact-kind",
+    name: "note_kind",
+    rule,
+  });
+  const withRow = (value: string) => {
+    expect(applyUserOntologyChange(db, add("note_kind", fk("text")))).toMatchObject({
+      status: "applied",
+    });
+    const itemId = insertItem(db, { type: "Project", name: "P", ...attrs });
+    saveFact(db, { itemId, kind: "note_kind", value, ...attrs });
+  };
+
+  it.each([
+    ["currency", undefined, "not a currency code"],
+    ["column", ["schema"], "가".repeat(201)],
+    ["calculation", ["schema", "aggregation"], "sum(a)/sum(b)"],
+    ["period", undefined, "hourly"],
+    ["date", undefined, "not a date"],
+  ] as const)(
+    "refuses a change to %s while a live row's value is not one",
+    (type, checks, value) => {
+      withRow(value);
+      expect(checkOntologyChange(db, change(fk(type, checks)))).toMatchObject({
+        schemaErrors: [],
+        impact: { liveRows: 1, violations: 1 },
+        applicable: false,
+      });
+      expect(applyUserOntologyChange(db, change(fk(type, checks)))).toMatchObject({
+        status: "refused",
+        reason: "existing-data-violation",
+      });
+    },
+  );
+
+  it("applies the change when every live value is one of the new type", () => {
+    withRow("KRW");
+    expect(applyUserOntologyChange(db, change(fk("currency")))).toMatchObject({
+      status: "applied",
+    });
   });
 });
 

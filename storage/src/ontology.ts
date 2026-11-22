@@ -400,8 +400,7 @@ function factViolations(
   );
   const misfits = rows.filter(
     (r) =>
-      !rule.itemTypes.includes(r.type as string) ||
-      (rule.valueType === "date" && !isDate(r.value as string)),
+      !rule.itemTypes.includes(r.type as string) || !valueFits(rule.valueType, r.value as string),
   ).length;
   const crowded =
     rule.cardinality === "one"
