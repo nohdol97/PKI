@@ -77,6 +77,12 @@ export {
   type StoredJob,
 } from "./jobs.ts";
 export {
+  DEFAULT_MAX_CONCURRENT,
+  JOB_GROUP_CAPS,
+  JOB_KIND_GROUPS,
+  jobGroup,
+} from "./job-concurrency.ts";
+export {
   addEvidence,
   insertItem,
   listEvidence,
