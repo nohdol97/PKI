@@ -28,6 +28,7 @@
 | [specs/2026-11-21-I04-invalidation.md](specs/2026-11-21-I04-invalidation.md) | 수정·삭제·권한 철회의 파생물 무효화(I04): 파생물 종류 등록 계약, 소거 범위, tombstone 규칙, access_scope 승계, 복원 뒤 재적용 정책 | 확정 |
 | [specs/2026-11-22-I02-local-file-import.md](specs/2026-11-22-I02-local-file-import.md) | 로컬 파일·폴더 가져오기(I02-B, #19·#116): `local-files` 수집기, 위치 승인과 경로 제한, 이동·이름 바꾸기, 감시와 맞춰 보기, 정규화 격리, 경로 신뢰 경계의 위협 모델, 철회와 삭제 장부, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-22-I05-site-connector-registration.md](specs/2026-11-22-I05-site-connector-registration.md) | 배포처 수집기를 `site/` 안에서 등록하는 장치(I05, #113): 빌드 시점 진입점 주입, 등록 계약(사이트 종류만), 신뢰 경계, 시작 동작, 등급 매핑과 범위 정책의 공급, 포크 모양에서의 공용 시험, 작업 분해 | 확정(잠정 결정 포함) |
+| [specs/2026-11-22-I07-installed-scopes-file.md](specs/2026-11-22-I07-installed-scopes-file.md) | 설치본이 인스턴스 범위(`site/config/connector-scopes.json`)를 얻는 길(I07, #115): 포크의 등록이 빌드할 때 값을 묶고 실행본은 파일을 읽지 않음, 빌드 판정, 산출물 검사, 설치본 확인 절차, 작업 분해 | 확정(잠정 결정 포함) |
 
 ## 동작 방식
 

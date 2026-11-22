@@ -1,7 +1,7 @@
 # 스펙: I05 배포처 수집기를 `site/` 안에서 등록하는 장치
 
 - 날짜: 2026-11-22 / 상태: 확정(잠정 결정 포함)
-- 관련: 이슈 #113(이 spec), 함께 열린 #114(자격 증명)·#115(설치본의 인스턴스 범위 파일), #116(파일 인스턴스. [I02-B spec](2026-11-22-I02-local-file-import.md)이 흡수한다. 그 spec은 이 spec보다 먼저 합쳐진다), 선행 #18(I01). [I01 spec](2026-11-21-I01-connector-sdk.md)("T09가 넘기는 것", "T10이 넘기는 것"), [I03 spec](2026-11-21-I03-persistent-queue.md)(보류와 재점검), [I04 spec](2026-11-21-I04-invalidation.md)(I04-R14 접근 범위 정책), [V01 spec](2026-11-21-V01-vertical-skeleton.md)(V01-T15 산출물 검사), [ADR 0012](../adr/0012-upstream-and-fork-ownership.md), [ownership.md](../ownership.md), [connector-sdk.md](../connector-sdk.md), [site-setup.md](../site-setup.md)
+- 관련: 이슈 #113(이 spec), 함께 열린 #114(자격 증명)·#115(설치본의 인스턴스 범위 파일), #116(파일 인스턴스. [I02-B spec](2026-11-22-I02-local-file-import.md)이 흡수한다. 두 spec 모두 합쳐졌다: 이 spec이 PR #119, 그 spec이 PR #120), 선행 #18(I01). [I01 spec](2026-11-21-I01-connector-sdk.md)("T09가 넘기는 것", "T10이 넘기는 것"), [I03 spec](2026-11-21-I03-persistent-queue.md)(보류와 재점검), [I04 spec](2026-11-21-I04-invalidation.md)(I04-R14 접근 범위 정책), [V01 spec](2026-11-21-V01-vertical-skeleton.md)(V01-T15 산출물 검사), [ADR 0012](../adr/0012-upstream-and-fork-ownership.md), [ownership.md](../ownership.md), [connector-sdk.md](../connector-sdk.md), [site-setup.md](../site-setup.md)
 
 낯선 말은 [ARCHITECTURE 0절](../ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다. 이 spec에서 새로 쓰는 말은 아래 표에 있다. `I01-…`·`I03-…`·`I04-…`·`V01-…`·`I02B-…`은 그 spec의 번호, `S…`는 site-setup.md 체크리스트 번호다.
 
@@ -69,7 +69,7 @@
 
 | 번호 | 항목 |
 |---|---|
-| S26 | 포크의 조립 패키지(`site/composition/`)를 만들고 수집기, 인스턴스, 등급 매핑, 접근 범위 정책을 등록한다. 등록 검사와 `site-check`가 통과하고, 공용 변경을 한 번 받아 와 `site/` 밖의 충돌이 `pnpm-lock.yaml`뿐임을 기록한다. 포크에서 `pnpm lint && pnpm typecheck && pnpm test`가 통과함도 함께 기록한다 |
+| S26 | 포크의 조립 패키지(`site/composition/`)를 만들고 수집기, 인스턴스, 등급 매핑, 접근 범위 정책을 등록한다. 등록 검사와 `site-check`가 통과하고, 공용 변경을 한 번 받아 와 `site/` 밖의 충돌이 `pnpm-lock.yaml`뿐임을 기록한다(수집기 의존성에 설치 스크립트가 있으면 `pnpm-workspace.yaml`의 `allowBuilds`에 더한 `false` 줄도 포함한다). 포크에서 `pnpm lint && pnpm typecheck && pnpm test`가 통과함도 함께 기록한다 |
 | S27 | 포크의 빌드를 Windows 11 설치본으로 만들어 등록한 수집기가 목록에 나오고 동기화되는지, 멈추는 수집기를 넣었을 때 앱이 제한 시간 안에 켜지는지 실행하고 기록한다 |
 
 실제 수집기의 구현과 인증은 S01~S04가, 규격 v2의 실제 확인은 S18이 이미 갖고 있으므로 다시 세지 않는다.
@@ -97,7 +97,7 @@
   - 공용 패키지는 `@pki-site/*`를 가져오거나 의존성으로 적지 못한다. 방향은 언제나 포크 → 공용이다.
   - 경계 규칙은 패키지 이름으로 포크의 것을 알아본다. 그래서 `site/` 아래의 패키지가 `@pki/…` 이름을 쓰면 규칙을 벗어난다. 이를 막으려고 `site/composition`의 이름은 `@pki-site/composition`, `site/connectors/*`의 이름은 `@pki-site/`로 시작해야 한다는 검사를 둔다(`tooling/workspace/`의 시험. 공용 저장소에서는 볼 패키지가 없어 통과한다).
   - **글자 `@pki-site/`는 워크스페이스에 든 공용 패키지에 나오지 않는다**(`apps/*`, `backend`, `knowledge-engine`, `providers`, `storage`, `packages/*`의 소스, `package.json`, `tsconfig.json`. 테스트 파일도 소스다). 이 이름을 알아야 하는 것은 `tooling/` 아래(경계 규칙, 워크스페이스 검사와 그 시험)와 문서다. 그래서 공용 패키지의 시험 픽스처는 `@pki-site/`가 아닌 이름을 쓴다(예: `site-check`의 안내를 보는 시험이 임시 루트에 만드는 조립 패키지의 이름). 공용 코드는 포크 패키지의 이름을 알 필요가 없어야 하기 때문이다(I05-R19도 이름을 적지 않고 읽어 온다).
-- **I05-R5 lockfile.** 포크의 `pnpm-lock.yaml`은 `pnpm install`이 더한 것(포크 패키지의 `importers` 항목과 그 외부 의존성)만 공용과 다르다. 손으로 고치지 않는다. 공용 변경을 받아 올 때 이 파일이 충돌하면 공용 쪽 내용을 취하고 `pnpm install`을 다시 실행한다(가정 A3). 이 절차와 "이 파일이 `site/` 밖에서 달라지는 유일한 추적 파일"이라는 점을 문서에 적는다(I05-R21). 포크 수집기의 의존성은 레지스트리에서 받는 것이어야 한다는 점도 함께 적는다(공용 시험 `tooling/workspace/lockfile-registry.test.ts`가 git·tarball·로컬 주소를 거부하고, 그 시험은 포크에서도 돈다).
+- **I05-R5 lockfile.** 포크의 `pnpm-lock.yaml`은 `pnpm install`이 더한 것(포크 패키지의 `importers` 항목과 그 외부 의존성)만 공용과 다르다. 손으로 고치지 않는다. 공용 변경을 받아 올 때 이 파일이 충돌하면 공용 쪽 내용을 취하고 `pnpm install`을 다시 실행한다(가정 A3). 이 절차와 "`site/` 밖에서 달라지는 추적 파일은 이 파일이고, 예외는 아래 하나다"라는 점을 문서에 적는다(I05-R21). 예외: 포크 의존성에 설치 스크립트가 있으면 `pnpm install`이 `ERR_PNPM_IGNORED_BUILDS`로 실패하고, 그 실패한 실행이 `pnpm-workspace.yaml`의 `allowBuilds`에 `<패키지>: set this to true or false` 줄을 스스로 써 넣는다. 포크는 그 줄을 `false`로 고친다(스크립트를 돌리지 않는다는 이 spec의 전제와 같은 값이고, I05-T01이 잰 값은 이것뿐이다. "I05-T01이 넘기는 것" 2). 스크립트가 정말 필요한 의존성(`true`)은 비목표(설치 스크립트가 필요한 의존성은 지원하지 않는다)이므로 ownership.md 5절로 공용에 알린다. 문서에 이 경우도 적는다(I05-R21). 포크 수집기의 의존성은 레지스트리에서 받는 것이어야 한다는 점도 함께 적는다(공용 시험 `tooling/workspace/lockfile-registry.test.ts`가 git·tarball·로컬 주소를 거부하고, 그 시험은 포크에서도 돈다).
 
 ### 등록 계약
 
@@ -188,7 +188,7 @@
 ### 산출물과 공용 전용 검사
 
 - **I05-R16 공용 빌드는 그대로.** 공용 진입점 `backend/src/shell.ts`를 묶으면 묶음에 남은 모듈에 `site/`, `packages/site-example/`, `packages/connector-example/` 아래의 것이 없다. 빈 등록으로 띄운 제품의 종류와 인스턴스는 `productConnectors()`가 주는 것과 같다. 이 spec은 제품의 종류가 **무엇인지**를 고정하지 않는다(그것은 종류를 더하는 spec의 몫이다).
-- **I05-R17 포크 빌드는 등록한 것만.** 조립 패키지의 진입점을 묶으면 등록과 그 수집기의 모듈이 들어가고, 테스트 파일과 `@pki/testkit`은 들어가지 않는다. 등록이 테스트 모듈에 닿으면 빌드가 실패한다(V01-T15의 경로 규칙이 `site/`에도 그대로 걸린다). 공용 묶음이 지키는 나머지 규칙(`apps/desktop/build/bundle.ts`의 `DROPPED_MODULES`, 테스트 빌드 표지 검사)도 이 묶음에 똑같이 적용된다.
+- **I05-R17 포크 빌드는 등록한 것만.** 조립 패키지의 진입점을 묶으면 등록과 그 수집기의 모듈이 들어가고, 테스트 파일과 `@pki/testkit`은 들어가지 않는다. 등록이 테스트 모듈에 닿으면 빌드가 실패한다(V01-T15의 경로 규칙이 `site/`에도 그대로 걸린다). 공용 묶음이 지키는 나머지 규칙(`apps/desktop/build/bundle.ts`의 `DROPPED_MODULES`, 테스트 빌드 표지 검사)도 이 묶음에 똑같이 적용된다. 수집기 패키지의 의존성이 네이티브 모듈이면 묶기가 실패한다(`EXTERNAL_PACKAGES`에 든 이름은 제외. 그대로 두면 빌드가 조용히 지나간다, I05-T01).
 - **I05-R18 읽어 들이는 코드 없음.** 제품 코드(`backend/src`, `apps/desktop/src`, `knowledge-engine/src`, `storage/src`, `providers/src`)에는 `site/` 아래를 폴더로 훑거나 동적으로 `import`·`require`하는 코드가 없다. **정해진 경로 하나가 있는지 보거나 그 JSON을 읽는 것**은 여기에 들지 않는다: `backendEntry`의 `site/composition/package.json` 확인, `site-check`의 그 파일 읽기(I05-R19), 기존의 `site/config/connector-scopes.json` 읽기. `checkPublicOnly`가 보는 범위와 자리 표시 목록(`site/README.md` 하나)은 바뀌지 않고, 공용 저장소와 포크 양쪽에서 통과한다.
 - **I05-R19 `site-check`의 안내.** 조립 패키지가 있는 저장소에서 공용 명령 `pnpm --filter @pki/backend site-check`를 실행하면, 자리표시의 결과를 내는 대신 포크의 명령을 알리고 2로 끝난다. 포크가 구현한 종류에 `미구현`이 나오는 오해를 막는다.
   - 공용 코드는 포크 패키지의 이름을 적어 두지 않는다. `site/composition/package.json`의 `name`을 읽어 `pnpm --filter <그 이름> site-check <종류>`를 알린다. 그 값이 패키지 이름의 모양이 아니거나 읽을 수 없으면 이름 없이 "`site/composition`의 `site-check`를 실행하라"는 안내만 낸다.
@@ -210,8 +210,8 @@
 
 ### 문서
 
-- **I05-R22 connector-sdk.md.** 6장의 "`site/connectors/`에 두려면" 항목, 7장, 11장의 #113 행, 5장의 재점검 문장을 새 장치로 고친다. 7장은 포크가 더하는 파일의 목록과 예시 패키지의 발췌, I05-R21의 명령, lockfile 절차, "신뢰 경계와 남는 위험"의 요약(포크의 코드는 가둬지지 않는다, 시간 제한이 막지 못하는 것, I05-R13의 동시 초기화 전제, 버려진 객체는 닫히지 않으며 늦은 재점검이 연달아 세 번이면 다시 시작할 때까지 재점검을 그만둔다는 점, 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다는 주의)을 갖는다. I02-B가 먼저 고친 #116 관련 문장은 되살리지 않는다(I02B-C36이 계속 통과한다).
-- **I05-R23 ownership.md.** 3절의 폴더 그림에 `site/composition/`을 더하고, "현재의 예외" 문단을 줄인다. 남는 것은 `pnpm-lock.yaml`(도구가 만든 변경만), #114, #115와 이 spec의 비목표에 적은 빌드 값이다. #116은 I02-B가 닫으므로 이 spec은 그 문단에 #116이 있어야 한다고도 없어야 한다고도 요구하지 않는다.
+- **I05-R22 connector-sdk.md.** 6장의 "`site/connectors/`에 두려면" 항목, 7장, 11장의 #113 행, 5장의 재점검 문장을 새 장치로 고친다. 7장은 포크가 더하는 파일의 목록과 예시 패키지의 발췌, I05-R21의 명령, lockfile 절차(설치 스크립트가 있는 의존성이면 `allowBuilds`도 달라지고 그 줄을 포크가 `false`로 고쳐야 한다는 점 포함), "신뢰 경계와 남는 위험"의 요약(포크의 코드는 가둬지지 않는다, 시간 제한이 막지 못하는 것, I05-R13의 동시 초기화 전제, 버려진 객체는 닫히지 않으며 늦은 재점검이 연달아 세 번이면 다시 시작할 때까지 재점검을 그만둔다는 점, 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다는 주의)을 갖는다. I02-B가 고친 #116 관련 문장은 되살리지 않는다(I02B-C36이 계속 통과한다).
+- **I05-R23 ownership.md.** 3절의 폴더 그림에 `site/composition/`을 더하고, "현재의 예외" 문단을 줄인다. 남는 것은 `pnpm-lock.yaml`(도구가 만든 변경만), `pnpm-workspace.yaml`의 `allowBuilds`에 포크 의존성을 위해 더한 `false` 줄(`packages:` 목록은 포함하지 않는다), #114, #115와 이 spec의 비목표에 적은 빌드 값이다. #116은 I02-B가 닫으므로 이 spec은 그 문단에 #116이 있어야 한다고도 없어야 한다고도 요구하지 않는다.
 - **I05-R24 site-setup.md와 ADR.** "빌드할 때 정해지는 것" 표의 수집기 인스턴스 행과 접근 범위 정책 이름 행, S08의 매핑을 끼우는 자리, S21의 구현 방법 ②③을 등록 객체로 고친다. 체크리스트에 S26·S27을 넣고 번호 범위 안내에 이 spec을 더한다. 결합 방식의 결정은 새 ADR에 남기고 `docs/README.md` 색인에 올린다. ADR 번호는 I02-B의 ADR 바로 다음이다(지금 마지막이 0016이므로 I02-B가 0017, 이 spec이 0018. I02-B의 번호가 달라지면 그 다음 번호).
 
 ### 포크 모양에서의 공용 시험
@@ -311,7 +311,8 @@ site/
 | 포크 모듈이 **읽히는 도중에 예외**(정적 `import`의 모듈 최상위 코드) | `runShell`이 불리기 전에 진입점이 끝난다 | 백엔드 프로세스가 시작 전에 끝나고, 셸은 기존의 시작 실패로 알린다 | 포크의 `pnpm test`(조립 패키지의 부팅 테스트), S27 |
 | 수집기가 프로세스를 끝내거나 메모리를 다 씀 | 같은 프로세스다 | 백엔드가 죽는다 | 포크의 검토 |
 | 제한을 넘긴 초기화가 뒤에서 계속 돎 | 규격 v2에 취소와 닫기가 없다 | 끝나지 않은 객체는 인스턴스마다 많아야 둘이다. 그 밖에 늦게 끝나 버려진 객체(성공했든 실패했든)는 닫히지 않은 채 자원을 쥘 수 있고, 재점검을 그만두는 한도 때문에 인스턴스마다 넷(시작 때 하나, 재점검 셋)을 넘지 않는다. 제한 안에 실패해 버려진 객체도 닫히지 않는다(I05-R13) | 수집기 작성자 안내. 규격에 닫기를 더하는 일은 뒤 작업 |
-| **악의적인 포크 코드나 그 의존성** | 믿는 코드로 실었다. 등록 검사는 코드의 행동을 보지 않는다 | 정본, 비밀 값, 네트워크에 모두 닿는다 | 포크의 코드 검토와 의존성 관리. `allowBuilds`를 지원하지 않으므로 설치 스크립트는 돌지 않는다 |
+| **악의적인 포크 코드나 그 의존성** | 믿는 코드로 실었다. 등록 검사는 코드의 행동을 보지 않는다 | 정본, 비밀 값, 네트워크에 모두 닿는다 | 포크의 코드 검토와 의존성 관리. 설치 스크립트는 돌지 않는다. 다만 설치 스크립트가 있는 의존성은 포크가 `pnpm-workspace.yaml`의 `allowBuilds`에 `false`를 적기 전에는 `pnpm install`이 실패한다. 스크립트가 정말 필요한 의존성은 비목표다(I05-R5) |
+| 수집기 패키지가 `EXTERNAL_PACKAGES`의 이름(예: `better-sqlite3`)을 자기 버전으로 선언(소스를 읽은 것, I05-T01) | 그 이름은 묶음에서 빠지고 앱 폴더에는 `build.ts`의 `DECLARED_IN`이 정한 패키지만 복사된다 | 실행 때 수집기는 공용이 복사한 것을 쓰고 이를 확인하는 검사는 없다 | 포크의 검토 |
 | 포크가 계약 묶음을 돌리지 않고 수집기를 등록 | 빌드가 강제하지 않는다(I05-R21) | 규격을 어긴 수집기가 실린다. 돌려준 값의 검사는 그대로 걸린다 | 문서의 절차, S18 |
 
 ### 인스턴스의 상태
@@ -369,11 +370,11 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 | I05-T01 | **PoC: 가정 A1~A6의 실측 기록**(이 spec에 "T01이 넘기는 것" 절). 제품 코드 없음 | — | C3④, C5, C21의 전제 | 이 spec | 버리는 작업 트리에서 돌린 명령과 출력(로그 파일). 가정마다 맞음·틀림과, 틀리면 고른 다음 수 |
 | I05-T02 | **시작과 재점검**: 시작 때의 시간 제한, 인스턴스 단위 실패, 새 객체 재점검, 늦은 결과 버림, 만들고 초기화하는 한 곳 | — | C8, C9, C10(①②), C11 | `backend/src/connectors.ts`, `backend/src/connector-sync-job.ts`와 `connector-sync-job.test.ts`, 새 `backend/src/connectors.boot.test.ts`, `backend/src/boot.ts`(로그 코드), **문서 대응**: `tooling/docs/connector-sdk.test.ts`의 "boot waits for every initialize…" 가드(`instances.map(…`, `unknown connector kind`), `await connector.initialize(config);` 고정, `recheck`·`healthCheck` 줄, `backend/src/connector-sdk.docs.test.ts`, connector-sdk.md 5장 재점검 문장과 7장의 시작 문장, I03 spec의 재초기화 주석(후속 표) | `connectors.boot-bounded`, `connectors.boot-isolated`, `boot.stored-mismatch`, `connectors.recheck-fresh`(열 경우), 고친 문서 대응 테스트 통과 |
 | I05-T03 | **등록 계약과 주입**: `SiteRegistration`, `publicSite`, `checkSiteRegistration`, 공용 종류 상수와 공용 인스턴스 ID 판정, 종류 이름 모양 상수, 합치기, `runShell`·`runSiteCheck`·`bootBackend`의 `site`, 시작 때의 거르기와 시작 실패 사유, 등급 매핑, 접근 범위 정책, `site-check`의 안내 | T02 | C6, C7, C10(③④⑤), C12, C13, C14(①②), C18, H2, C20(①) | 새 `backend/src/site-registration.ts`와 공용 종류 모듈, `backend/src/composition.ts`, `boot.ts`(등록의 `site` 옵션, 장부 재적용의 아는 종류와 그 순서), `shell.ts`와 새 `shell-main.ts`, `site-check.ts`와 `site-check.test.ts`, `shell-options.ts`, `shell-options.production.ts`, `scope-policy.ts`와 그 테스트, `start-failure.ts`와 그 테스트, `index.ts`, `connectors.public-only.test.ts`, `packages/contracts/src/`(종류 이름 모양 상수), `storage/src/tombstone-ledger.ts`(그 상수를 씀), `providers/src/broker.ts`(합성으로 믿는 종류를 시험이 볼 수 있게), `apps/desktop/src/layout.production.ts`, `main.ts`, `backend-process.ts`(사유 목록 두 곳), `start-failure-text.ts`, `start-failure.test.ts`, `layout.scope-policy.test.ts`, **문서 대응**: `tooling/docs/connector-sdk.test.ts`의 `connectorKinds`·`connectorInstances`·`productConnectors`·`site-check` 스크립트 고정과 `connectorKinds` 블록을 잘라 보는 가드, `tooling/docs/site-setup-i01.test.ts`의 `: publicScopeGrading,`·`productCalls` 고정, `tooling/docs/site-setup-i04.test.ts`의 `SCOPE_POLICY` 행, site-setup.md의 두 빌드 표 행과 S08·S21 ②③ 문장, I04 spec의 I04-R14 한 줄(후속 표) | `site.registration`(코드마다 1건, 빈 등록 0건, 합치기 4건), `site.public-kinds`, `boot.site-registration`, `boot.registration-rejected`, `boot.registration-invalid`, `boot.site-registration-ledger`(3건), `claimed-scope.wiring`(호출 기록), `scope-policy`(표의 여섯 행), `layout.scope-policy`, `site-check`(임시 루트의 기존 3건, 안내 2건) |
-| I05-T04 | **워크스페이스, 경계 규칙, 예시 패키지, 진입점 선택, 산출물 검사** | T01, T03 | C1, C2, C3(①②③⑤), C4, C14(③), C15, C16, C17, C20(②③) | `pnpm-workspace.yaml`, `tooling/eslint/module-boundary.js`와 `module-boundary.test.ts`, 새 `tooling/workspace/typecheck.ts`와 그 테스트, `tooling/workspace/tsconfig-references.test.ts`, `tooling/docs/readme-commands.test.ts`, `README.md`나 `docs/site-setup.md`(예시 패키지의 스크립트 한 줄), `tooling/workspace/lockfile-registry.test.ts`(또는 그 옆의 새 테스트), 새 `tooling/workspace/fork-shape.test.ts`, 루트 `package.json`(`typecheck` 스크립트)과 루트 `tsconfig.json`, `packages/site-example/**`(새), 새 `apps/desktop/src/backend-entry.ts`와 그 테스트, `apps/desktop/src/layout.ts`, `apps/desktop/build/build.ts`, `build/bundle.test.ts`, `apps/desktop/artifact/artifact.contents.e2e.ts`, `pnpm-lock.yaml`(예시 패키지의 항목), **문서 대응**: `tooling/docs/connector-sdk.test.ts`의 읽어 들이기 탐지기와 그 음성 사례 | `module-boundary`(일곱 경우), `workspace.typecheck-projects`, `workspace.site-packages`, `workspace.lockfile-site-importers`, `tsconfig project references`, `readme-commands`(없는 부모 폴더, `site/` 패키지 제외, 예시 패키지 포함), `site.example-registration`, `site.example-boot`, `site.no-public-reference`, `backend-entry`(3건), `bundle`(공용 입력 1건, 예시 입력 3건), `fork-shape`, `pnpm e2e`의 `artifact.contents` |
+| I05-T04 | **워크스페이스, 경계 규칙, 예시 패키지, 진입점 선택, 산출물 검사** | T01, T03 | C1, C2, C3(①②③⑤), C4, C14(③), C15, C16, C17, C20(②③) | `pnpm-workspace.yaml`, `backend/tsconfig.json`(`noEmit: false`, `emitDeclarationOnly: true`, `outDir: "dist"`로 `storage`와 맞춘다. `@pki/backend`를 참조하는 첫 프로젝트가 생기면 지금의 `noEmit`이 TS6310을 내기 때문이다. I05-T01이 측정), `tooling/eslint/module-boundary.js`와 `module-boundary.test.ts`, 새 `tooling/workspace/typecheck.ts`와 그 테스트, `tooling/workspace/tsconfig-references.test.ts`, `tooling/docs/readme-commands.test.ts`, `README.md`나 `docs/site-setup.md`(예시 패키지의 스크립트 한 줄), `tooling/workspace/lockfile-registry.test.ts`(또는 그 옆의 새 테스트), 새 `tooling/workspace/fork-shape.test.ts`, 루트 `package.json`(`typecheck` 스크립트)과 루트 `tsconfig.json`, `packages/site-example/**`(새), 새 `apps/desktop/src/backend-entry.ts`와 그 테스트, `apps/desktop/src/layout.ts`, `apps/desktop/build/build.ts`, `apps/desktop/build/bundle.ts`(네이티브 모듈 검사), `build/bundle.test.ts`, `apps/desktop/artifact/artifact.contents.e2e.ts`, `pnpm-lock.yaml`(예시 패키지의 항목), **문서 대응**: `tooling/docs/connector-sdk.test.ts`의 읽어 들이기 탐지기와 그 음성 사례 | `module-boundary`(일곱 경우), `workspace.typecheck-projects`, `workspace.site-packages`, `workspace.lockfile-site-importers`, `tsconfig project references`, `readme-commands`(없는 부모 폴더, `site/` 패키지 제외, 예시 패키지 포함), `site.example-registration`, `site.example-boot`, `site.no-public-reference`, `backend-entry`(3건), `bundle`(공용 입력 1건, 예시 입력 3건, 네이티브 모듈에 닿는 변형 1건), `fork-shape`, `pnpm e2e`의 `artifact.contents` |
 | I05-T05 | **문서, ADR, site-setup S26·S27, 포크 모양 예행 기록**(이 spec에 "T05가 넘기는 것" 절) | T04 | C19, H1, C3④, C5, C21 | `docs/connector-sdk.md`(6·7·11장), `docs/ownership.md`, `docs/site-setup.md`(S26·S27, 번호 범위 안내), 새 ADR(I02-B의 ADR 다음 번호), `docs/README.md`, 새 `tooling/docs/site-setup-i05.test.ts`, `tooling/docs/connector-sdk.test.ts`, `backend/src/connector-sdk.docs.test.ts`, I01 spec의 처리 표시(후속 표), 이 spec | `docs.connector-sdk`, `docs.site-setup`(I05), 그리고 버리는 작업 트리에서 예시를 `site/`에 복사해 I05-R21의 명령 전부와 공용 변경 받기를 한 번 실행한 명령·출력·`git status --porcelain` |
 
 - **기준과 작업의 대응**: C1~C21과 H1·H2가 모두 위 표의 한 행 이상에 있다. C3은 T04(자동 시험)와 T05(명령 증거 ④), C10은 T02(①②)와 T03(장부 ③④⑤), C14는 T03(종류)과 T04(묶음), C20은 T03(`site-check`)과 T04(나머지)로 나뉜다.
-- **I02-B와의 순서**: I02-B spec이 먼저 합쳐지지만 구현은 섞여 간다. I02-B의 JSONL 파일 위치 작업(I02B-T13)은 `connectors.ts`를 만지므로 이 spec의 T02가 합쳐진 뒤에 간다. 공용 종류 상수는 T03이 만든다. I02-B의 종류가 T03보다 먼저 들어와 있으면 T03이 그 이름을 상수에 넣고, 나중에 들어오면 I02-B의 작업이 넣는다(잊으면 I05-C14 ①이 실패한다).
+- **I02-B와의 순서**: 이 spec이 먼저 합쳐졌고(PR #119) I02-B spec도 합쳐졌다(PR #120. S23~S25와 ADR 0017을 갖는다). 구현은 섞여 간다. I02-B의 JSONL 파일 위치 작업(I02B-T06)은 `connectors.ts`를 만지므로 이 spec의 T02가 합쳐진 뒤에 간다. 공용 종류 상수는 T03이 만든다. I02-B의 종류가 T03보다 먼저 들어와 있으면 T03이 그 이름을 상수에 넣고, 나중에 들어오면 I02-B의 작업이 넣는다(잊으면 I05-C14 ①이 실패한다).
 
 **이 절을 줄이면**: 결합은 "포크의 진입점이 공용 함수를 부른다"는 한 문장이다. 경계는 `SiteRegistration`이고, 그 계약은 `checkSiteRegistration`과 예시 패키지로 공용에서 증명한다. 포크의 코드는 믿는 코드로 실리고 가둬지지 않으며, 등록 검사와 시간 제한은 실수와 느린 초기화를 잡는 장치다. 실행 중 로더는 두지 않는다.
 
@@ -385,7 +386,7 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 - [ ] **I05-C2** (R2): `backendEntry`에 임시 폴더를 주면 ① 조립 패키지가 없을 때 `backend/src/shell.ts` ② 있을 때 `site/composition/src/shell.ts` ③ `package.json`만 있고 진입점이 없을 때 그 경로를 적은 오류가 된다. 배포 빌드의 셸 묶음 글자에 `site/composition`이 없다.
 - [ ] **I05-C3** (R3): ① `pnpm-workspace.yaml`의 `packages:` 목록 안에 두 줄이 있다 ② `site/composition`과 `site/connectors`가 없는 저장소에서 참조 검사 테스트와 README 명령 테스트가 통과한다(패키지 찾기 함수에 부모 폴더가 없는 글롭을 가진 임시 루트를 주면 예외 없이 건너뛴다). README 명령 테스트는 `site/` 아래 패키지의 스크립트를 "적혀 있지 않음"으로 세지 않고, `@pki/site-example`의 스크립트가 공용 문서에 없으면 실패한다 ③ 타입 검사 대상이 조립 패키지가 없는 임시 루트에서는 루트 하나이고, 포크 모양의 임시 루트에서는 그 프로젝트들이 더해진다 ⑤ lockfile의 `site/` `importers` 집합이 디스크의 포크 패키지 집합과 같다(판정 함수에 두 모양의 입력을 주어 같을 때 통과, 한쪽에만 있을 때 실패. 실제 저장소에서도 통과한다). ④ **[한 번의 증거]**(T01, T05) 공용 저장소에서 `pnpm install --frozen-lockfile`이 통과하고 `git status --porcelain`이 비어 있다. 검증되지 않는 범위: 그 뒤의 pnpm 버전 변경.
 - [ ] **I05-C4** (R4): 경계 규칙과 이름 검사가 다음 일곱을 판정한다. ① `@pki-site/composition`의 `src/registration.ts`가 `<수집기>/adapters`를 가져오면 통과 ② 같은 패키지의 다른 파일이 가져오면 실패 ③ 수집기 패키지가 `src/adapters/` 밖에서 `Connector`를 구현하면 실패 ④ 공용 패키지가 `@pki-site/*`를 가져오면 실패 ⑤ 포크 패키지가 적지 않은 `@pki/*`를 가져오면 실패 ⑥ `@pki/site-example`의 `src/registration.ts`가 `@pki/connector-example/adapters`를 가져오면 통과하고 같은 패키지의 다른 파일은 실패하며, 실제 예시 패키지가 `pnpm lint`의 경계 규칙을 위반 0건으로 통과한다 ⑦ 임시 루트의 `site/connectors/x`가 `@pki/x`라는 이름이거나 `site/composition`의 이름이 `@pki-site/composition`이 아니면 이름 검사가 실패한다.
-- [ ] **I05-C5** (R5) **[한 번의 증거]**(T05): 예시를 `site/`에 포크 모양으로 복사하고 `pnpm install`을 하면 `git status --porcelain`에 `site/` 아래와 `pnpm-lock.yaml`만 나온다. 공용 쪽에서 lockfile을 바꾼 commit을 합쳐 충돌이 난 뒤, 공용 쪽 내용을 취하고 `pnpm install`을 실행하면 `pnpm install --frozen-lockfile`이 통과한다. 검증되지 않는 범위: 실제 포크의 의존성 조합, 그 뒤의 pnpm 버전 변경, Windows. 그리고 "`site/` 밖에서 달라지는 것은 lockfile뿐"이라는 불변식은 그 뒤의 공용 변경에 대해 자동 가드가 없다(포크가 S26에서 기록한다). 자동으로 붙잡는 부분은 C3 ⑤다.
+- [ ] **I05-C5** (R5) **[한 번의 증거]**(T05): 예시를 `site/`에 포크 모양으로 복사하고 `pnpm install`을 하면 `git status --porcelain`에 `site/` 아래와 `pnpm-lock.yaml`만 나온다. 공용 쪽에서 lockfile을 바꾼 commit을 합쳐 충돌이 난 뒤, 공용 쪽 내용을 취하고 `pnpm install`을 실행하면 `pnpm install --frozen-lockfile`이 통과한다. 검증되지 않는 범위: 실제 포크의 의존성 조합, 그 뒤의 pnpm 버전 변경, Windows. 그리고 "`site/` 밖에서 달라지는 것은 lockfile뿐"이라는 불변식은 설치 스크립트가 없는 의존성에서만 성립한다. 설치 스크립트가 있는 의존성이면 `pnpm-workspace.yaml`의 `allowBuilds`도 달라지고(I05-R5), 예행의 예시 패키지에는 그런 의존성이 없어 이 증거는 그 경우를 보지 못한다. 이 불변식은 그 뒤의 공용 변경에 대해 자동 가드가 없다(포크가 S26에서 기록한다). 자동으로 붙잡는 부분은 C3 ⑤다. 닫는 방법은 그대로 **[한 번의 증거]**다.
 - [ ] **I05-C6** (R6~R9): `checkSiteRegistration`이 ① 빈 등록과 예시 등록에 빈 목록 ② 표의 열 코드 각각을 그 위반 하나만 가진 등록에 돌려준다. 합친 결과는 ③ 자리표시 이름을 등록하면 그 종류가 대체되고 자리표시 인스턴스가 사라지며, 포크가 그 자리표시의 ID를 쓸 수 있음 ④ 대체하지 않은 자리표시는 종류와 인스턴스가 남고 초기화하면 `미구현, 배포처 후속` ⑤ 새 이름은 추가됨 ⑥ 공용 종류 상수의 **각 이름**을 등록하면 등록되지 않음(이름을 시험에 적지 않고 상수를 돌며 확인한다) ⑦ 128자 ID는 받고 129자와 빈 ID는 `instance-id-invalid`.
 - [ ] **I05-C7** (R1, R8, R9): 시작할 때의 세 갈래가 각각 그 결과가 된다. ① 빼고 계속하는 위반 넷을 각각 가진 등록으로 띄우면 시작이 끝나고 그 항목만 빠지며 로그에 `site-registration-rejected`와 그 코드가 남는다 ② `instance-kind-unknown`을 가진 등록으로 띄우면 시작이 끝나고 그 인스턴스가 `unavailable`이며 로그에 `connector-kind-unknown`만 남고 `site-registration-rejected`는 없다 ③ 공용 종류 상수의 각 이름과 대체하지 않은 자리표시 이름을 `kind`로 적은 인스턴스(`instance-kind-reserved`), 공용 인스턴스의 ID를 적은 인스턴스(`instance-id-reserved`) 각각으로 띄우면 시작이 `site-registration-invalid`로 실패하고 서버가 열리지 않으며, 알림에 등록이 적은 글이 없다 ④ 바탕 묶음을 넘긴 시작(`fixtureConnectors`)에서도 등록이 그 위에 합쳐지고 `test-fixtures` 인스턴스를 적은 등록은 ③과 같이 실패한다.
 - [ ] **I05-C8** (R10, R11): `initialize`가 끝나지 않는 수집기와 멀쩡한 수집기를 함께 등록하고 띄우면 ① 제한 시간 안에 시작이 끝남 ② 앞의 것은 `unavailable`, 뒤의 것은 `ready` ③ 앞의 것의 동기화 요청은 `connector-unavailable` ④ 그 수집 작업은 사유 `connector-unavailable`로 보류 ⑤ 제한 뒤에 그 `initialize`를 끝내도 상태가 그대로.
@@ -395,13 +396,13 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 - [ ] **I05-C12** (R14): 호출을 기록하는 매핑을 등록에 넣고 띄우면 Broker의 등급 판정이 그 매핑을 부르고, 넣지 않으면 그 매핑이 불리지 않고 공용 매핑이 쓰인다.
 - [ ] **I05-C13** (R15): 정책 표의 여섯 행이 각각 그 결과가 된다. 배포 빌드의 이름 함수는 값을 주지 않고, 배포 빌드의 인자 해석은 `--scope-policy`를 거부한다.
 - [ ] **I05-C14** (R7, R16): ① 공용 구성 지점이 주는 종류(`productConnectors()`와 `fixtureConnectors()`의 `kinds`) 가운데 자리표시가 아닌 것, `JSONL_IMPORT_KIND`, Broker가 합성으로 믿는 종류가 **모두 공용 종류 상수에 있고**, 그 구성 지점이 만드는 인스턴스의 ID 가운데 자리표시가 아닌 것이 모두 공용 인스턴스 ID 판정에 걸린다(공용이 종류나 인스턴스를 더하면서 상수를 고치지 않으면 실패한다) ② 빈 등록으로 띄운 제품의 종류와 인스턴스가 `productConnectors()`가 주는 것과 같다 ③ 공용 진입점 `backend/src/shell.ts`를 **직접 지정해** 묶으면 남은 모듈에 `site/`, `packages/site-example/`, `packages/connector-example/` 아래의 것이 없다. 이 기준은 제품의 종류 이름을 시험에 적어 고정하지 않는다(`connectors.public-only`의 기존 단언은 그 종류를 더하는 작업이 고친다).
-- [ ] **I05-C15** (R17): 예시 진입점을 배포 빌드로 묶으면 ① 등록과 예시 수집기의 모듈이 남고 ② 테스트 파일과 `@pki/testkit`이 없으며 ③ 등록이 테스트 모듈을 가져오게 바꾼 변형은 묶기가 실패하고 ④ 공용 묶음과 같은 `DROPPED_MODULES`·테스트 빌드 표지 검사를 통과한다.
+- [ ] **I05-C15** (R17): 예시 진입점을 배포 빌드로 묶으면 ① 등록과 예시 수집기의 모듈이 남고 ② 테스트 파일과 `@pki/testkit`이 없으며 ③ 등록이 테스트 모듈을 가져오게 바꾼 변형은 묶기가 실패하고 ④ 공용 묶음과 같은 `DROPPED_MODULES`·테스트 빌드 표지 검사를 통과한다 ⑤ 수집기 패키지가 네이티브 모듈에 닿는 변형은 묶기가 실패한다(`EXTERNAL_PACKAGES`에 든 이름은 제외). 여기서 네이티브 모듈은 패키지 폴더에 `binding.gyp`나 `prebuilds/` 폴더가 있거나 `.node` 파일이 든 패키지이고, 시험은 임시 폴더의 `node_modules`에 그런 파일만 둔 가짜 패키지로 하므로 저장소의 lockfile에 설치 스크립트가 있는 의존성이 들어가지 않는다. 이 검사는 `node_modules`를 걸러 내는 `bundle().modules`에 기대지 않는다(I05-T01이 측정).
 - [ ] **I05-C16** (R18): 제품 코드 다섯 뿌리에 `site/` 아래를 훑거나 동적으로 읽는 파일이 없다. 탐지기는 통째로 적은 경로와 조각으로 만든 경로를 모두 잡고(양성 사례), 정해진 경로 하나의 존재 확인과 JSON 읽기(`backend-entry.ts`의 모양, `site-check`의 모양)는 잡지 않는다(음성 사례). `checkPublicOnly`가 빈 목록이다. 이 탐지기는 글자 모양을 보는 것이라 다른 방식으로 경로를 만드는 로더는 빠져나간다. 즉 낡은 문장을 잡는 장치이지 안전 가드가 아니다. "포크의 코드는 묶인 것만 실행된다"의 보장은 묶음의 모듈 목록을 보는 C14 ③과 C15다.
 - [ ] **I05-C17** (R20, R21): 예시 패키지에 등록 검사 테스트와 부팅 테스트가 있다. 문서가 적은 명령 가운데 공용 저장소에 있는 것(`lint`, `typecheck`, `test`, `@pki/desktop`의 `build`)은 그 스크립트가 실제로 있고, 포크의 명령(`site-check`)은 예시 패키지의 `package.json`에 같은 이름의 스크립트로 있다. 검증되지 않는 범위: `@pki-site/composition`이라는 이름으로의 실행(포크에만 있다. S26).
 - [ ] **I05-C18** (R19): 조립 패키지가 있는 임시 루트에서 `site-check`의 판정을 실행하면 ① 그 `package.json`의 `name`을 넣은 포크의 명령을 알리고 2로 끝난다 ② `name`이 없거나 패키지 이름의 모양이 아니면 이름 없는 안내를 내고 2로 끝난다 ③ 조립 패키지가 없는 임시 루트에서는 지금과 같다.
 - [ ] **I05-C19** (R22~R24): 문서 대응 테스트가 다음을 판정한다.
   - connector-sdk.md 7장이 포크가 더하는 파일 목록, 예시 패키지에서 온 발췌(표지가 가리키는 파일에 그대로 있음), I05-R21의 명령, lockfile 절차, "가둬지지 않는다"와 동시 초기화 전제의 문장을 갖는다. 11장에 #113 행이 없다.
-  - ownership.md 3절의 예외 문단이 `composition.ts`, `pnpm-workspace.yaml`, `backend/package.json`을 더는 적지 않고 `pnpm-lock.yaml`, #114, #115를 적는다(#116은 보지 않는다).
+  - ownership.md 3절의 예외 문단이 `composition.ts`, `backend/package.json`, `pnpm-workspace.yaml`의 `packages:` 목록을 더는 적지 않고 `pnpm-lock.yaml`, `pnpm-workspace.yaml`의 `allowBuilds` `false` 줄(포크 의존성의 설치 스크립트용), #114, #115를 적는다(#116은 보지 않는다).
   - site-setup.md의 두 행과 S08·S21이 `registration`을 가리키고 `SCOPE_POLICY`를 더는 적지 않는다.
   - 새 ADR이 `docs/README.md` 색인에 있다.
 - [ ] **I05-C20** (R25): ① 기존 `site-check` 시험 셋이 조립 패키지가 없는 임시 루트로 실행되어, 실제 저장소 루트에 `site/composition`이 있어도 결과가 같다 ② I05-R25의 목록에 든 코드 각각을 포크 모양의 임시 루트(`site/composition/package.json`과 진입점, `site/connectors/x`)로 부르면 포크 쪽 결과가 나오고, `site/` 아래에 안내문뿐인 임시 루트와 `site/connectors`만 있는 임시 루트로 부르면 예외 없이 공용 쪽 결과가 나온다(`fork-shape`) ③ 실제 저장소 루트로 도는 검사는 공용 진입점을 직접 지정한 묶음 밖에서 "`site/`의 모듈이 없다"를 단언하지 않는다(산출물 e2e는 두 모양에서 참인 규칙만 본다).
@@ -416,8 +417,8 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 1. **"실제 루트를 보는 공용 시험"을 미리 막는 탐지기.** I05-R25는 지금의 목록을 임시 루트로 옮기고(C20) 포크 모양에서 한 번 돌려 본다(C21). 나중에 누가 실제 루트의 `site/`를 보는 시험을 더하면 자동으로는 잡히지 않는다. 테스트 파일을 훑는 탐지기를 둘 수 있으나, 무엇이 "루트를 보는 호출"인지를 글자로 판정해야 해서 빠져나가기 쉽고 오탐이 난다. 남긴 이유: 비용에 비해 붙잡는 것이 불확실하다. 다시 볼 때: 포크가 S26에서 공용 시험 실패를 한 번이라도 알릴 때.
 2. **버린 수집기 객체의 정리.** 제한을 넘기거나 재점검에서 실패한 객체는 닫히지 않는다(I05-R13). 닫으려면 규격에 호출을 더해야 하고 그것은 규격 v3의 일이다. 남긴 이유: 규격 변경은 이 spec의 비목표다. 다시 볼 때: S27이나 S18에서 남은 객체가 자원을 쥐어 문제가 될 때.
 3. **동기 멈춤과 모듈 최상위 예외.** 같은 프로세스에서는 막을 수 없다("신뢰 경계와 남는 위험"). 막으려면 수집기를 다른 프로세스나 작업자로 옮겨야 한다. 남긴 이유: 구조를 바꾸는 별도의 결정이고, 지금은 포크의 검토와 S27이 맡는다. 다시 볼 때: 배포처가 검토하지 않은 수집기를 실어야 할 때.
-4. **가정 A1~A6.** 아무것도 실행해 보지 않았다. I05-T01이 잰다. A1이 틀리면 설계의 전제가 바뀌므로 T04는 T01을 기다린다.
-5. **실행 중에 생기는 공용 인스턴스 ID의 접두사.** I02-B가 사용자의 승인으로 만드는 인스턴스(`jsonl-file:<id>` 모양)의 접두사는 I02-B의 구현이 공용 인스턴스 ID 판정에 더해야 한다. C14 ①은 구성 지점이 **시작할 때** 만드는 ID만 볼 수 있어 이것을 잡지 못한다. 겹치더라도 정본의 규칙(I05-R12)이 닫힌 쪽으로 막는다. 남긴 이유: 이 spec은 I02-B spec을 고치지 않는다. 조정자가 I02-B에 전한다(후속 표).
+4. **가정 A1~A6.** I05-T01이 재서 "I05-T01이 넘기는 것"에 적었다. A1은 맞아 설계의 전제는 그대로다. 설계에 영향을 주는 항목은 그 절의 "설계에 영향"에 있다.
+5. **실행 중에 생기는 공용 인스턴스 ID의 접두사.** I02-B가 사용자의 승인으로 만드는 인스턴스(`jsonl-file:<id>` 모양)의 접두사는 공용 인스턴스 ID 판정에 들어가야 하고, I02-B spec이 합쳐져 그 요구가 I02B-R51과 I02B-C48로 올라가 있다(I02B-T06이 맡는다). C14 ①은 구성 지점이 **시작할 때** 만드는 ID만 볼 수 있어 이것을 잡지 못한다. 겹치더라도 정본의 규칙(I05-R12)이 닫힌 쪽으로 막는다. 남긴 이유: 이 spec은 I02-B spec을 고치지 않는다. 전달은 끝났고 I02-B의 구현이 이를 닫는다(후속 표).
 6. **종류를 모르는 빌드가 건너뛴 장부 줄.** 재적용은 건너뛴 줄도 "본 것"으로 적용 위치를 올린다(I04-T10의 기존 동작). 그래서 포크가 어떤 종류를 **뺀 빌드로** 백업을 복원해 띄웠다가 나중에 그 종류를 다시 넣으면, 그 사이에 건너뛴 삭제는 다시 적용되지 않는다. 건수는 화면과 이력에 남으므로 조용하지는 않다. 남긴 이유: 고치려면 장부의 적용 위치 규칙(I04)을 바꿔야 하고 이 spec의 범위 밖이다. 조정자가 I04의 뒤 작업으로 전한다(후속 표). 그때까지 문서(connector-sdk.md 7장)에 "수집기 종류를 뺀 빌드로 백업을 복원하지 않는다"를 적는다(I05-T05).
 
 ## 잠정 결정과 가정
@@ -443,13 +444,86 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 | 계약 묶음 통과는 문서의 절차 | 빌드는 수집기마다의 지어낸 원 시스템을 알 수 없다 | 포크의 CI가 생기면 그 단계로 강제한다 |
 | 공용에 "`site/`에 안내문만 있다"는 검사를 두지 않음 | 그 검사는 포크에서 반드시 실패한다. I01-T10도 같은 이유로 그런 가드를 지웠다. I05-R25가 같은 원칙을 모든 공용 시험에 적용한다 | 공용 저장소임을 알리는 표지가 생길 때 |
 | #115는 이 spec이 풀지 않는다 | #115의 과제는 파일을 산출물에 넣는 것이고 이 장치는 코드를 싣는 것이다. 같은 장치로 풀지는 #115의 spec이 정한다 | #115의 spec |
-| 가정 A1: `packages:`의 항목이 아무 폴더와도 맞지 않아도 pnpm 11이 오류 없이 넘어가고 lockfile을 바꾸지 않는다 | 확인되지 않았다. I05-T01이 잰다 | 실패하면 `site/*` 모양의 글롭을 시험하고, 그래도 안 되면 조정자에게 알린다(설계의 전제다) |
-| 가정 A2: 포크 패키지를 더하면 lockfile에 그 `importers` 항목과 외부 의존성만 더해진다 | I01-T10의 시험(예시를 `site/connectors/`에 복사)이 설치와 계약 묶음까지는 확인했다. lockfile의 차이는 보지 않았다 | I05-T01, T05 |
-| 가정 A3: 충돌한 lockfile은 공용 쪽을 취하고 `pnpm install`을 다시 하면 고쳐진다 | 확인되지 않았다 | 실패하면 대안 5를 다시 본다 |
-| 가정 A4: Node 24의 소스 실행이 `site/composition/src/shell.ts`에서 `@pki/backend`를 지금 패키지들과 같은 방식으로 가져온다 | 공용 패키지끼리는 지금 그렇게 돈다. `site/` 자리에서는 보지 않았다 | I05-T01 |
-| 가정 A5: 번들러가 `site/` 진입점에서 수집기의 의존성을 그 패키지 자리 기준으로 찾아 묶는다. 네이티브 모듈에 닿으면 빌드가 실패한다 | 확인되지 않았다 | I05-T01. 조용히 넘어가면 실패하게 만드는 일을 T04에 더한다 |
-| 가정 A6: `tsc -b`가 프로젝트 경로 여럿을 한 번에 받는다 | 확인되지 않았다 | 안 되면 실행기가 차례로 부른다 |
+| 가정 A1: `packages:`의 항목이 아무 폴더와도 맞지 않아도 pnpm 11이 오류 없이 넘어가고 lockfile을 바꾸지 않는다 | **맞음**(I05-T01, macOS에서 측정). 폴더가 없어도 `pnpm install --frozen-lockfile`이 통과하고 lockfile이 바뀌지 않았다. 다만 이 글롭을 읽는 기존 시험 둘이 실패한다("I05-T01이 넘기는 것" 1) | 실패하면 `site/*` 모양의 글롭을 시험하고, 그래도 안 되면 조정자에게 알린다(설계의 전제다) |
+| 가정 A2: 포크 패키지를 더하면 lockfile에 그 `importers` 항목과 외부 의존성만 더해진다 | **맞음**(I05-T01). lockfile에 32줄이 더해지고 지워진 줄은 0이다. 단, 포크 의존성에 설치 스크립트가 있으면 `pnpm-workspace.yaml`도 바뀐다("I05-T01이 넘기는 것" 2). 실제 포크의 의존성 조합은 T05 | I05-T01, T05 |
+| 가정 A3: 충돌한 lockfile은 공용 쪽을 취하고 `pnpm install`을 다시 하면 고쳐진다 | **맞음**(I05-T01). 충돌 뒤 공용 쪽을 취하고 `pnpm install`을 하면 `--frozen-lockfile`이 통과한다. 한 가지 충돌 모양만 시험했다("I05-T01이 넘기는 것" 3) | 실패하면 대안 5를 다시 본다 |
+| 가정 A4: Node 24의 소스 실행이 `site/composition/src/shell.ts`에서 `@pki/backend`를 지금 패키지들과 같은 방식으로 가져온다 | **맞음**(I05-T01). `site/composition/src/shell.ts`가 `@pki/backend`를 가져와 Node 24로 직접 실행되었다. 조건: 조립 패키지가 직접 가져오는 패키지를 모두 자기 `package.json`에 적어야 한다("I05-T01이 넘기는 것" 4) | I05-T01 |
+| 가정 A5: 번들러가 `site/` 진입점에서 수집기의 의존성을 그 패키지 자리 기준으로 찾아 묶는다. 네이티브 모듈에 닿으면 빌드가 실패한다 | **부분**(I05-T01). 의존성은 포크 패키지 자리 기준으로 찾아 묶였지만, 네이티브 모듈에 닿아도 빌드가 **실패하지 않았다**("I05-T01이 넘기는 것" 5) | I05-T01. 조용히 넘어가면 실패하게 만드는 일을 T04에 더한다(그렇게 한다) |
+| 가정 A6: `tsc -b`가 프로젝트 경로 여럿을 한 번에 받는다 | **부분**(I05-T01). 여러 경로를 한 번에 받고 오류도 모두 낸다. 그러나 `backend/tsconfig.json`이 선언 파일을 내보내도록 고쳐야만 통과한다(TS6310, "I05-T01이 넘기는 것" 6) | 안 되면 실행기가 차례로 부른다 |
 | Windows에서의 확인 | 하지 않는다. 이 spec은 산출물의 배치를 바꾸지 않고 묶음의 입력만 바꾼다. 실제 확인은 S27이다 | — |
+
+### I05-T01이 넘기는 것
+
+가정 A1~A6을 이 저장소의 고정 도구(pnpm 11.17.0, `devEngines`가 받는 Node 24.22.3, TypeScript 6.0.3, 번들러 rolldown 1.2.19)로 쟀다. 버리는 작업 트리(`git worktree add --detach`)와 버리는 복제본에서만 돌렸고 제품 코드, 패키지 매니페스트, lockfile은 이 PR에 없다. 모든 명령과 출력, 종료 코드는 `_workspace/pki-phase2h/i05_t01_poc.log`에 있다(이 저장소에는 올라가지 않는 로컬 기록이다). macOS에서만 돌렸다. Windows는 돌리지 않았다.
+
+| 가정 | 판정 | 본 것 한 줄 |
+|---|---|---|
+| A1 | 맞음 | 두 글롭을 더하고 폴더가 없을 때 `pnpm install --frozen-lockfile`, `pnpm install`이 모두 종료 코드 0이고 lockfile의 해시가 그대로 |
+| A2 | 맞음 | 포크 패키지 둘을 더하고 `pnpm install`하니 lockfile에 32줄 추가, 삭제 0줄. 추가는 `importers` 항목, 외부 의존성 `packages`와 `snapshots`뿐 |
+| A3 | 맞음 | 병합 충돌(`UU pnpm-lock.yaml`)에서 공용 쪽을 취하고 `pnpm install`하니 `--frozen-lockfile` 통과. 결과 lockfile은 공용 쪽에 포크 항목 32줄만 더한 것 |
+| A4 | 맞음 | `pnpm exec node site/composition/src/shell.ts`가 `@pki/backend`를 가져와 종료 코드 0 (조건 있음) |
+| A5 | 부분 | 의존성은 묶였다. 네이티브 모듈은 빌드를 **실패시키지 않고** 조용히 지나감 |
+| A6 | 부분 | 경로 셋을 한 번에 받고 오류를 모두 냄. 단 `backend/tsconfig.json`을 고쳐야 통과 |
+
+**1. A1 (글롭이 아무 폴더와도 맞지 않을 때)**
+
+- 명령: 버리는 트리의 `pnpm-workspace.yaml`에 `site/composition`과 `site/connectors/*`를 더한 뒤(`site/`에는 `README.md`만 있다) `pnpm install --frozen-lockfile`, `pnpm install`, `git status --porcelain`, `shasum -a 256 pnpm-lock.yaml`.
+- 본 것: 두 설치 모두 종료 코드 0, "Already up to date". `git status`는 `pnpm-workspace.yaml`만 바뀐 것으로 나왔고 lockfile 해시는 설치 전후가 같았다.
+- 판정: 맞음. 대안 글롭 시험은 필요 없었다.
+- 덧붙여 본 것: 같은 상태에서 `pnpm exec vitest run tooling/workspace tooling/docs/readme-commands.test.ts`는 실패했다. `tooling/workspace/tsconfig-references.test.ts`(둘)와 `tooling/docs/readme-commands.test.ts`(파일 전체)가 `readdirSync('site/connectors')`에서 `ENOENT`를 냈다. 글롭 끝이 `/*`인 줄의 부모 폴더가 없으면 터진다. I05-C3 ②가 이미 요구하는 수정이고 이 결과가 그 필요를 확인한다.
+- T04가 할 일: 위 두 시험이 쓰는 패키지 찾기 함수에서 부모 폴더가 없는 글롭을 건너뛰게 한다(spec대로). 새로 정할 것은 없다.
+
+**2. A2 (포크 패키지를 더하면 lockfile에 무엇이 바뀌나)**
+
+- 명령: 버리는 트리에 `@pki-site/composition`(의존: `@pki/backend`, 수집기)과 `@pki-site/connector-x`(의존: `@pki/contracts`, 외부 패키지 `is-odd@3.0.1`)를 만들고 `pnpm install --frozen-lockfile`(설치 전), `pnpm install`, `git diff --numstat pnpm-lock.yaml`.
+- 본 것: 설치 전의 `--frozen-lockfile`은 `ERR_PNPM_OUTDATED_LOCKFILE`로 종료 코드 1(예상대로). `pnpm install` 뒤 `32 0 pnpm-lock.yaml`(추가 32, 삭제 0), 조각(hunk)은 `importers`, `packages`, `snapshots` 셋이다. 이어서 `--frozen-lockfile`은 통과했다.
+- 판정: 맞음.
+- 덧붙여 본 것(설계에 영향 2): 포크 의존성 중 **설치 스크립트가 있는 패키지**(`bufferutil@4.1.0`로 측정)를 더하면 `pnpm install`이 `ERR_PNPM_IGNORED_BUILDS`로 종료 코드 1이 되고, 그 실패 실행이 **`pnpm-workspace.yaml`의 `allowBuilds`에 `bufferutil: set this to true or false`라는 줄을 스스로 써 넣는다.** 그 줄을 `bufferutil: false`로 고치고 다시 설치하면 종료 코드 0이다.
+- T04의 C3 ⑤에 넘기는 입력(내 측정이 아니라 독립 검토의 재실행이다. 출처: `_workspace/pki-phase2h/phase3_reviewer_i05_t01.md`): 의존성이 하나도 없는 포크 패키지를 더하면 `pnpm install --frozen-lockfile`이 종료 코드 0이지만 lockfile `importers`에 `site/connectors/x: {}`를 쓴다. 그 폴더를 지워도 `pnpm install`(frozen이든 아니든)이 그 항목을 지우지 않는다(의존성이 있는 패키지는 지워진다). 그래서 의존성 없는 포크 패키지를 지운 포크에서는 C3 ⑤(lockfile의 `site/` `importers` 집합 = 디스크의 포크 패키지 집합)가 실패하고 `pnpm install`로 고쳐지지 않는다. T04는 이 경우의 판정과 고치는 법(그 항목을 지운다)을 정해야 한다.
+- T04·T05가 할 일: C5의 "`git status`에 `site/`와 `pnpm-lock.yaml`만"은 설치 스크립트가 없는 의존성에서만 참이다. T05의 예행(예시 패키지의 의존성에 설치 스크립트가 없다)은 이 사정을 건드리지 못하므로, 문서(connector-sdk.md 7장, S26)에 이 경우를 적는다.
+
+**3. A3 (충돌한 lockfile 고치기)**
+
+- 명령: 버리는 복제본에서 `base` → `fork`(포크 패키지와 그 lockfile) 가지와 `public`(공용이 `storage`에 의존성 `is-number@7.0.0`을 더하고 lockfile이 바뀜) 가지를 만들고 `git merge public`. 충돌 뒤 `git checkout --theirs pnpm-lock.yaml`(공용 쪽), `pnpm install --frozen-lockfile`, `pnpm install`, `pnpm install --frozen-lockfile`.
+- 본 것: `CONFLICT (content): Merge conflict in pnpm-lock.yaml`, 충돌 표지 2곳. 공용 쪽을 취한 직후의 `--frozen-lockfile`은 종료 코드 1(포크 패키지 항목이 없음)이었고, `pnpm install` 뒤에는 통과했다. 결과 lockfile을 `public` 가지와 비교하면 `32 0`, 즉 포크 항목만 더해졌다.
+- 판정: 맞음. 대안 5는 다시 볼 필요가 없다.
+- 검증되지 않은 범위: 충돌 모양은 하나(포크의 조각과 공용의 조각이 이웃한 경우, `merge`)다. `rebase`와 다른 충돌 모양은 시험하지 않았다. 실제 포크의 의존성 조합과 그 뒤의 pnpm 버전 변경은 T05와 포크의 몫이다.
+
+**4. A4 (Node 24 소스 실행이 `site/`에서 `@pki/backend`를 가져오나)**
+
+- 명령: `site/composition/src/shell.ts`(`import { startServer } from "@pki/backend"`와 `registration.ts`를 가져옴)를 `pnpm exec node site/composition/src/shell.ts`, 그 폴더 안에서 `pnpm exec node src/shell.ts`, `pnpm --filter @pki-site/composition exec node src/shell.ts`로 실행. 또 `pnpm exec vitest run site/composition`.
+- 본 것: 셋 다 종료 코드 0이고 `startServer`가 `function`으로 나왔다(Node v24.22.3). vitest도 `site/composition`의 시험 1건을 찾아 통과시켰다(`vitest.config.ts`의 `**/*.test.ts` 포함 패턴에 `site/`가 이미 들어 있다).
+- 판정: 맞음. 조건 하나: 첫 시도에서 `registration.ts`가 자기 `package.json`에 적지 않은 `@pki/contracts`를 가져오자 `ERR_MODULE_NOT_FOUND`로 실패했다(pnpm의 엄격한 `node_modules` 때문). 로그에 반대 사례로 남겼다.
+- T04가 할 일: 조립 패키지와 예시 패키지의 `package.json`에 직접 가져오는 `@pki/*`를 모두 적는다. 이것은 I05-C4 ⑤(적지 않은 `@pki/*`를 가져오면 실패)와 같은 방향이고 새 요구가 아니다.
+
+**5. A5 (번들러가 `site/` 진입점의 의존성을 찾아 묶나)**
+
+- 명령: 저장소의 `apps/desktop/build/bundle.ts`의 `bundle()`을 `buildKind: "production"`으로 `site/composition/src/shell.ts`에 호출(임시 스크립트는 버리는 트리에만 두었다). 수집기 패키지에 `is-odd`(순수 JS, 그 아래 `is-number`), `bufferutil@4.1.0`(네이티브 `.node` 파일과 `node-gyp-build`), `better-sqlite3`(`EXTERNAL_PACKAGES`에 든 것)를 하나씩 가져오게 하고 세 번 묶었다. 또 등록이 `registration.test.ts`를 가져오게 한 변형.
+- 본 것:
+  - `is-odd`: 종료 코드 0. 남은 모듈 목록에 `site/composition/src/...`와 `site/connectors/x/src/adapters/...`가 있고, 산출물에 `is-number`와 `isOdd` 코드가 들어 있었다. 의존성을 수집기 패키지 자리(`site/connectors/x/node_modules`) 기준으로 찾아 묶었다.
+  - `bufferutil`(네이티브): **종료 코드 0, 경고도 오류도 없음.** 산출물에는 `node-gyp-build`의 탐색 코드와 `try { require_node_gyp_build()(__dirname) } catch { require_fallback() }`가 묶여 들어가고 `.node` 파일은 들어가지 않는다. 이 패키지는 실행 때 `__dirname`이 묶음 파일의 폴더가 되어 미리 만든 바이너리를 못 찾고 순수 JS 대체 코드로 조용히 내려갈 것으로 읽힌다(묶은 코드를 읽은 추정이고 실행해 보지 않았다. 내려갈 코드가 없는 네이티브 패키지는 실행 때 실패할 것이다).
+  - `better-sqlite3`: 종료 코드 0, 산출물에 `import "better-sqlite3";`가 남는다. (여기서부터는 측정이 아니라 소스를 읽은 것이다.) 앱 폴더의 `node_modules`에 복사되는 패키지는 `apps/desktop/build/build.ts`의 `DECLARED_IN`이 정한 뿌리(`better-sqlite3`는 `storage`, `@huggingface/transformers`는 `providers`)에서 `runtime-packages.ts`가 찾은 것뿐이다. 수집기 패키지가 따로 선언한 같은 이름은 그 목록과 무관하게 지나간다.
+  - 등록이 테스트 모듈을 가져오는 변형: 종료 코드 1, `RolldownError: site/composition/src/registration.test.ts is a test-only module (file name)`, 산출물 파일 없음. I05-R17·C15 ③의 전제는 맞다.
+- 판정: 부분. "의존성을 포크 패키지 자리 기준으로 찾아 묶는다"는 맞고 "네이티브 모듈에 닿으면 빌드가 실패한다"는 틀렸다.
+- T04가 할 일(표의 처방 그대로, 측정으로 모양이 정해졌다): 네이티브 모듈이 조용히 지나가지 않도록 묶기를 실패시키는 검사를 더한다. 묶음의 모듈 목록(`bundle().modules`)은 `node_modules`를 걸러 내므로 그것으로는 못 잡는다. 후보 둘: (a) 산출물 글자에서 `node-gyp-build`, `.node"` 같은 표지를 찾는다, (b) `onLog`/플러그인의 `resolveId`에서 `binding.gyp`나 `prebuilds/` 폴더가 있는 패키지에 닿으면 실패시킨다. 어느 쪽이든 `EXTERNAL_PACKAGES`에 든 이름은 허용 목록으로 구분해야 한다. 고르는 것은 T04의 몫이다(잠정: (b), 글자 모양보다 패키지 구조를 보는 쪽이 덜 빠져나간다).
+- 검증되지 않은 범위: 산출물을 실제로 실행하지 않았다. 설치본 패키징과 Windows의 네이티브 모듈 배치는 보지 않았다.
+
+**6. A6 (`tsc -b`가 프로젝트 여럿을 한 번에 받나)**
+
+- 명령: 버리는 트리에서 `pnpm exec tsc -b`(기준선, 종료 코드 0), `pnpm exec tsc -b . site/composition site/connectors/x`, 두 프로젝트에 일부러 형식 오류를 넣은 같은 명령, 순서를 바꾼 명령.
+- 본 것:
+  - 지금의 `backend/tsconfig.json` 그대로: 종료 코드 2, `site/composition/tsconfig.json(5,18): error TS6310: Referenced project '.../backend' may not disable emit.` `backend`가 `noEmit`(기준 설정에서 상속)이라 다른 프로젝트가 참조할 수 없다. 지금까지 `@pki/backend`를 의존하는 패키지가 없어서 드러나지 않았다(`storage`, `providers`, `packages/*`는 선언 파일만 내보내도록 `noEmit: false`, `emitDeclarationOnly: true`, `outDir: "dist"`를 갖는다).
+  - `backend/tsconfig.json`에 그 세 줄을 더하자: 같은 명령이 종료 코드 0. 오류를 넣으면 두 프로젝트의 오류가 **모두** 출력되고 종료 코드 1이다(내 로그의 순서 바꾼 실행은 오류가 없는 경우뿐이다. 오류가 있을 때 순서를 바꿔도 같다는 것은 독립 검토의 재실행이 확인했고 출처는 `_workspace/pki-phase2h/phase3_reviewer_i05_t01.md`이다. 내 로그가 아니다). `backend/dist`는 `.gitignore`의 `dist/`에 걸려 추적되지 않는다.
+- 판정: 부분. "경로 여럿을 한 번에 받는다"는 맞다. 그러나 `@pki/backend`를 참조하려면 `backend/tsconfig.json`을 고쳐야 한다.
+- T03·T04가 할 일: `backend/tsconfig.json`에 위 세 줄을 더한다(`site-registration.ts`를 `packages/site-example`이 가져오는 순간 필요하므로 그것을 처음 만드는 작업, 즉 T04의 예시 패키지가 늦어도 같은 PR에서). 실행기(`tooling/workspace/typecheck.ts`)는 차례로 부를 필요 없이 경로를 한 번에 넘기면 된다.
+
+**설계에 영향**
+
+아래 셋은 조정자가 받아들였고, 같은 PR의 뒤 commit이 요구사항 R5·R17, 기준 C5·C15, 작업 표 T04, 신뢰 경계 표, R22와 S26 문장에 반영했다.
+
+1. **I05-R5, I05-C5, "신뢰 경계" 표의 `allowBuilds` 문장(A2).** 포크 의존성에 설치 스크립트가 있으면 `pnpm install`이 종료 코드 1로 실패하고 `pnpm-workspace.yaml`을 스스로 고친다. 그래서 "`site/` 밖에서 달라지는 것은 lockfile뿐"이 그 경우엔 거짓이고, "`allowBuilds`를 지원하지 않으므로 설치 스크립트는 돌지 않는다"는 "스크립트는 돌지 않지만 `allowBuilds`에 그 패키지를 `false`로 적기 전에는 설치가 실패한다"로 읽어야 정확하다. 반영: R5에 "설치 스크립트가 있는 의존성은 `pnpm-workspace.yaml`의 `allowBuilds`에 `false`로 한 줄 더하고, 그 줄이 `site/` 밖에서 달라지는 두 번째 추적 파일이다"를 더하고, C5의 검증되지 않는 범위에 "설치 스크립트가 있는 의존성"을 더하며, S26과 connector-sdk.md 7장의 lockfile 절차에 적는다.
+2. **I05-T03·T04의 "바뀌는 파일"(A6).** `backend/tsconfig.json`이 목록에 없다. 반영: T04의 파일 목록(또는 이를 먼저 필요로 하는 T03)에 `backend/tsconfig.json`(선언 파일 내보내기 세 줄)을 더한다. 요구사항은 바뀌지 않는다.
+3. **I05-T04의 네이티브 모듈 검사(A5).** spec의 처방("조용히 넘어가면 실패하게 만드는 일을 T04에 더한다")이 이미 있으나 완료 기준에는 없다. 반영: I05-C15에 "수집기 패키지가 네이티브 모듈에 닿으면 묶기가 실패한다(`EXTERNAL_PACKAGES`는 제외)"를 ⑤로 더한다.
 
 ## 후속(다른 문서의 고칠 곳)
 
@@ -458,7 +532,7 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 | I04 spec | I04-R14의 "이름이 없으면 기본"에 이 spec I05-R15를 가리키는 한 줄 | I05-T03 |
 | I03 spec | "I03-T09가 넘기는 것"의 "재초기화가 안전한지는 수집기 규격이 정하지 않았다"는 잠정 주석에, I05-R13이 새 객체로 풀었고 늦은 재점검 결과를 버리게 되었다는 한 줄 | I05-T02 |
 | I01 spec | "T10이 넘기는 것" 4·5·8항 가운데 이 spec이 닫은 것에 처리 표시 | I05-T05 |
-| I02-B spec과 그 구현 | ① 공용이 더하는 종류(`local-files`)와 시작할 때 만드는 인스턴스의 ID를 공용 종류 모듈에 더한다(잊으면 I05-C14 ①이 실패한다) ② 실행 중에 만드는 인스턴스 ID의 접두사를 공용 인스턴스 ID 판정에 더한다(미해결 질문 5) ③ connector-sdk.md 7장은 I02-B가 먼저 고치고 이 spec의 T05가 그 위에서 고친다 | 조정자가 I02-B에 전한다 |
+| I02-B spec과 그 구현 | ① 공용이 더하는 종류(`local-files`)와 시작할 때 만드는 인스턴스의 ID를 공용 종류 모듈에 더한다(잊으면 I05-C14 ①이 실패한다) ② 실행 중에 만드는 인스턴스 ID의 접두사를 공용 인스턴스 ID 판정에 더한다(미해결 질문 5. I02-B spec이 I02B-R51·I02B-C48로 가져갔고 I02B-T06이 맡는다) ③ connector-sdk.md 7장은 나중에 들어오는 작업이 먼저 들어온 것에 맞춰 고친다 | ②는 I02-B의 spec에 반영됨 |
 | 이슈 #115 | 이 spec은 #115를 풀지 않으며, 남기는 것 셋(설계 개요)과 "등록으로 싣는 방법은 후보 하나"라는 점 | 조정자 |
 | 이슈 #113 | 번호 배정(S26·S27, ADR은 I02-B 다음)과 작업 묶음 다섯. 그리고 이슈의 과제 2("공용 파일을 고치지 않고 lockfile이 포크의 추가를 받는다")를 이 spec이 "도구가 다시 만든 `pnpm-lock.yaml`의 차이는 받아들인다"로 좁혔다는 점 | 조정자 |
 | I04 spec(삭제 장부) | 시작 때의 "아는 종류"가 합친 등록의 종류가 된다는 한 줄(I05-T03). 건너뛴 줄의 적용 위치 문제(미해결 질문 6)는 I04의 뒤 작업 후보 | I05-T03, 조정자 |
@@ -469,4 +543,7 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 |---|---|---|---|
 | 2026-11-22 | 최초 작성(초안). 결합은 빌드 시점의 진입점 주입, 재점검은 새 객체, 배포처 후속 번호는 S23·S24(잠정) | 이 문서 | 이슈 #113의 구현 spec |
 | 2026-11-22 | 독립 검토 반영, 상태를 확정(잠정 결정 포함)으로. ① 공용 종류를 상수 하나에서 얻고 종류의 집합을 고정하지 않음(R7, R16, C6, C14) ② 등록은 사이트 종류의 인스턴스만 만들고, 공용 종류의 인스턴스와 공용 인스턴스 ID는 시작을 멈춤(R8, R9, C7). 인스턴스 ID는 기존 128자 한도 ③ 공용 시험이 포크 모양에서 통과해야 함(새 R25, C20, C21) ④ 글자 `@pki-site/`가 나올 수 있는 곳을 하나의 규칙으로(R4, R19, C1, C18) ⑤ 예시 패키지를 경계 규칙의 조립 지점에 넣고 포크 패키지 이름 검사를 둠(R4, C4) ⑥ 배포처 번호를 S26·S27로, ADR은 I02-B 다음 번호로. 근거 없던 I04 인용 삭제 ⑦ 재점검의 빈 곳(만드는 함수의 예외, 늦은 결과, 동시 초기화)을 R13·C11에 ⑧ "신뢰 경계와 남는 위험" 절 추가, 목표의 과장 수정, ADR 0012 인용 수정 ⑨ #115를 풀지 않는다고 고침 ⑩ 기준마다 닫는 방법 표시, 작업을 PoC 하나와 묶음 넷으로 다시 묶고 문서 대응 테스트와 빠진 파일을 적음 | 이 문서, `docs/README.md` | PR #119 독립 검토 두 건과 델타 재검토(통과. 남은 여섯을 반영: C10 ②의 주어, 버려진 객체의 한계와 재점검을 그만두는 한도 `RECHECK_LATE_LIMIT` 3과 C11 ⑩, 시작 실패 알림의 형식과 사유 목록 세 곳, 시험 픽스처의 이름, 바탕에만 있는 종류의 코드, "합친 종류 표의 이름"). 독립 검토 두 건(첫째: 필수 6, 권고 9, 관찰 6. 둘째: 필수 2, 권고 9, 관찰 8). 둘째에서 더한 것: ⑪ 삭제 장부 재적용이 합친 종류를 알고 등록 검사가 그보다 먼저 끝남(R12, C10) ⑫ README 명령 테스트가 `site/` 폴더가 있어도 없어도 통과(R3, R25, C3, C20) ⑬ 종류 없는 인스턴스의 재점검, 등급 매핑 검사가 묻는 것, lockfile 의존성 주소 |
+| 2026-11-22 | 가정 A1~A6 실측 결과를 "I05-T01이 넘기는 것" 절에 기록하고 가정 표의 확인 칸과 미해결 질문 4를 갱신. A1~A4 맞음, A5·A6 부분. 요구사항 글자는 고치지 않고 "설계에 영향" 셋(설치 스크립트가 있는 의존성과 R5·C5, `backend/tsconfig.json`의 선언 파일 내보내기, 네이티브 모듈 검사 기준)을 제안으로 적음 | 이 문서 | I05-T01(#113). 버리는 트리에서 측정, 로그는 로컬 `_workspace/pki-phase2h/i05_t01_poc.log`. macOS만, Windows 미실행 |
+| 2026-11-22 | I05-T01의 설계 영향 셋을 반영. ① R5·C5·신뢰 경계 표·R22·S26: `allowBuilds`가 `site/` 밖에서 달라지는 두 번째 추적 파일이 될 수 있음(실패한 `pnpm install`이 그 파일을 고침, 포크가 `false`로 고침) ② T04의 파일에 `backend/tsconfig.json` 선언 파일 내보내기 ③ C15 ⑤와 R17: 네이티브 모듈에 닿는 묶기는 실패. 또 낡은 병합 순서 문장 정정(이 spec이 PR #119로 먼저 합쳐졌고 I02-B spec은 #120으로 열려 있으며 JSONL 작업은 `I02B-T06`) | 이 문서 | 조정자의 결정(PR #124 후속) |
+| 2026-11-22 | 독립 검토(PR #124) 반영. ① `allowBuilds`는 측정한 `false`만 허용하고 `true`가 필요한 의존성은 비목표(ownership.md 5절)로 되돌림(R5, S26, 신뢰 경계 표, R22, 앞의 변경 이력 행) ② R5의 "유일한 파일" 문장을 불변식과 예외로 다시 쓰고 R23·C19에 `allowBuilds` `false` 줄의 좁은 예외 ③ A6의 "약 16초"를 지우고 순서 바꾼 실행의 출처를 검토 보고서로 표시 ④ A5의 `better-sqlite3` 문장을 소스를 읽은 것으로 표시하고 `build.ts`의 `DECLARED_IN`으로 바로잡음 ⑤ 의존성 없는 포크 패키지의 빈 `importers` 항목을 C3 ⑤의 입력으로 기록(W1) ⑥ C15 ⑤에 네이티브 모듈의 정의, 잔여 위험 표에 `EXTERNAL_PACKAGES` 이름 한 줄(W4) ⑦ I02-B spec 합침(PR #120)에 따라 머리말, 순서 문장, 미해결 질문 5, 후속 표 ②③ 갱신 | 이 문서 | PR #124 독립 검토 BLOCK(F1~F4, W1·W3·W4)과 조정자의 결정 |
 | 2026-11-22 | I05-R11의 로그 코드에 `connector-initialize-failed`를 더함(`initialize`가 던진 경우, 시작할 때만) | I05-R11 | I05-T02 독립 검토 F1: C9가 네 경우 모두 정해진 로그 코드를 요구하는데 R11은 셋만 적었음 |
