@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import { CANONICAL_DB_FILE } from "./composition.ts";
@@ -35,6 +35,8 @@ const DECOY_TEXT = `${JSON.stringify({ "imp-one": [DECOY], "imp-two": [DECOY] })
 let work: string;
 let dataDir: string;
 let cwdBefore: string;
+let madeRepoDecoy: boolean;
+let madeRepoConfigDir: boolean;
 let booted: Awaited<ReturnType<typeof bootBackend>> | undefined;
 const ENV_NAMES = [
   "PKI_CONNECTOR_SCOPES",
@@ -58,9 +60,11 @@ beforeEach(() => {
   const cwdFolder = join(work, "cwd");
   mkdirSync(cwdFolder);
   cwdBefore = process.cwd();
-  // the old module-relative place: refused to exist before this test makes it (a leftover would hide a read)
-  expect(existsSync(REPO_DECOY)).toBe(false);
-  put(REPO_DECOY, DECOY_TEXT);
+  // the old module-relative place. A fork's checkout may already have a real range file there: that file
+  // is then the decoy (it must not be read either) and is neither written nor removed here
+  madeRepoDecoy = !existsSync(REPO_DECOY);
+  madeRepoConfigDir = !existsSync(dirname(REPO_DECOY));
+  if (madeRepoDecoy) put(REPO_DECOY, DECOY_TEXT);
   put(join(cwdFolder, "site/config/connector-scopes.json"), DECOY_TEXT);
   put(join(cwdFolder, "connector-scopes.json"), DECOY_TEXT);
   put(join(dataDir, "connector-scopes.json"), DECOY_TEXT);
@@ -81,7 +85,9 @@ afterEach(async () => {
   vi.restoreAllMocks();
   process.chdir(cwdBefore);
   vi.unstubAllEnvs();
-  rmSync(REPO_DECOY, { force: true });
+  if (madeRepoDecoy) {
+    rmSync(madeRepoConfigDir ? dirname(REPO_DECOY) : REPO_DECOY, { recursive: true, force: true });
+  }
   rmSync(work, { recursive: true, force: true });
 });
 
@@ -139,7 +145,7 @@ describe("I07-C2 ①: a decoy range file is not read", () => {
   it("the decoys really were in place for the run (the test is not vacuous)", async () => {
     await importBoth();
     for (const file of [
-      REPO_DECOY,
+      ...(madeRepoDecoy ? [REPO_DECOY] : []),
       join(process.cwd(), "site/config/connector-scopes.json"),
       join(dataDir, "connector-scopes.json"),
       join(dataDir, "site/config/connector-scopes.json"),
