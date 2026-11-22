@@ -198,18 +198,20 @@ describe("importJsonl", () => {
     expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 2 }]);
   });
 
-  it("purges a source on its delete line and tombstones a source never stored on its delete or revoke line (I01-R11)", async () => {
+  it("purges a source on its delete line and tombstones a source never stored on its delete or access-revoked line (I01-R11)", async () => {
     await importJsonl(db, line({ external_id: "d" }));
     const result = await importJsonl(
       db,
       [
         line({ external_id: "d", operation: "delete", content: "", version: 2 }),
         line({ external_id: "never", operation: "delete", content: "" }),
-        line({ external_id: "r", operation: "revoke" }),
+        line({ external_id: "r", operation: "access-revoked" }),
+        // a revoke line is a scope change (I01-R22): of a source never stored it is stale, no tombstone
+        line({ external_id: "rv", operation: "revoke" }),
         line({ external_id: "u" }),
       ].join("\n"),
     );
-    expect(result).toEqual(reply({ received: 4, created: 1, errors: [] }));
+    expect(result).toEqual(reply({ received: 5, created: 1, errors: [] }));
     expect(
       db.all(
         "SELECT s.external_id, t.covers_version AS version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id ORDER BY t.source_id",
@@ -236,6 +238,24 @@ describe("importJsonl", () => {
     expect(
       db.all("SELECT s.external_id FROM source_versions v JOIN sources s ON s.id = v.source_id"),
     ).toEqual([{ external_id: "u" }]);
+  });
+
+  it("reports a revoke line whose content is not the stored latest version's, at its line (I01-R22)", async () => {
+    await importJsonl(db, line({ external_id: "m" }));
+    const result = await importJsonl(
+      db,
+      [
+        line({ external_id: "m", operation: "revoke", version: 2, content: "changed meanwhile" }),
+        line({ external_id: "n" }),
+      ].join("\n"),
+    );
+    expect(result).toEqual(
+      reply({
+        received: 2,
+        created: 1,
+        errors: [{ line: 1, reason: "scope-change-content-mismatch" }],
+      }),
+    );
   });
 
   it("keeps per-source line order across a delete between two upserts in one file", async () => {
@@ -321,13 +341,15 @@ describe("importJsonl", () => {
         .split("\n")
         .filter((l) => l.trim())
         .map((l) => JSON.parse(l) as ImportRecord);
-      const deletions = records.filter((r) => r.operation !== "upsert").length;
+      // a delete tombstones; a revoke narrows the scope and keeps the version (I01-R22)
+      const deletions = records.filter((r) => r.operation === "delete").length;
+      const revokes = records.filter((r) => r.operation === "revoke").length;
       const result = await importJsonl(db, text);
-      expect(deletions).toBeGreaterThan(0);
+      expect(deletions + revokes).toBeGreaterThan(0);
       expect(result.received).toBe(records.length);
-      expect(result.created + deletions + result.errorCount).toBe(records.length);
+      expect(result.created + deletions + revokes + result.errorCount).toBe(records.length);
       expect(result.errors).toEqual([]);
-      // each delete and revoke tombstoned a source the file had stored, and purged it
+      // each delete tombstoned a source the file had stored, and purged it; a revoke did not
       expect(count("tombstones")).toBe(deletions);
       expect(db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'extract'")[0]?.n).toBe(
         result.created,

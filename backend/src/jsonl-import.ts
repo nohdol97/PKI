@@ -77,7 +77,7 @@ async function importInstance(
         },
         onError: (error) => (storageError = error),
       });
-      // a stopped sync is this instance's failure, as a thrown one was (T05 replaces this path)
+      // a stopped sync is this instance's failure, as a thrown one was
       if (synced.stopped) throw storageError ?? new Error(`sync stopped: ${synced.stopped}`);
     } catch (error) {
       options.onError?.(error);

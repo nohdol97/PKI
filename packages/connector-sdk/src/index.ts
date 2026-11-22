@@ -7,3 +7,17 @@ export {
   type SyncEnd,
   type SyncOutcomeRow,
 } from "./sync-outcomes.ts";
+export {
+  changeKindOf,
+  expectedContent,
+  JSONL_CAPABILITIES,
+  JSONL_IMPORT_KIND,
+  MAX_JSONL_BYTES,
+  MAX_JSONL_LINE_CHARS,
+  parseJsonl,
+  placeOf,
+  recordToChange,
+  type JsonlLine,
+  type JsonlRejection,
+  type ParseOptions,
+} from "./jsonl.ts";

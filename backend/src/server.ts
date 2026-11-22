@@ -1,6 +1,7 @@
 // Local API server (V01-R2, ADR 0008): loopback-only, and every request must
 // carry the per-run session token, name this server as Host, and come from an
 // allowlisted Origin (or no Origin: non-browser clients such as the shell).
+import { MAX_JSONL_BYTES } from "@pki/connector-sdk";
 import {
   ComponentStatusSchema,
   EmbeddingStatusSchema,
@@ -66,6 +67,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import type { ConnectorManager } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
+import type { InstanceImporter } from "./imports.ts";
 import type { JsonlImporter } from "./jsonl-import.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -75,7 +77,14 @@ const MIN_TOKEN_LENGTH = 32;
 const MAX_BODY_BYTES = 16 * 1024;
 /** Provisional (V02-T04): the import route takes a file; every other route stays at 16 KiB. */
 export const IMPORT_BODY_LIMIT = 8 * 1024 * 1024;
-const BODY_LIMITS: Partial<Record<RouteName, number>> = { importJsonl: IMPORT_BODY_LIMIT };
+/** Provisional (I01-R24): the body of POST /api/imports, which answers 413 above it. */
+export const IMPORTS_BODY_LIMIT = MAX_JSONL_BYTES;
+const BODY_LIMITS: Partial<Record<RouteName, number>> = {
+  importJsonl: IMPORT_BODY_LIMIT,
+  imports: IMPORTS_BODY_LIMIT,
+};
+/** The routes whose too-large body answers 413 `payload-too-large`; the others answer 400. */
+const ANSWERS_413: ReadonlySet<RouteName> = new Set(["imports"]);
 /** How many of the latest invalidation records the status API returns (provisional, I04-T01). */
 const STATUS_INVALIDATIONS = 20;
 
@@ -118,6 +127,8 @@ export interface ServerOptions {
   };
   /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
   importer?: JsonlImporter;
+  /** The local import API's importer (composition.ts productInstanceImporter); without it the route answers connector-unavailable. */
+  instanceImporter?: InstanceImporter;
   /**
    * The entries that run the derivative registry (composition.ts `productEntries`); default the
    * entries over the registry with no composition (knowledge-engine entries.ts).
@@ -149,8 +160,9 @@ type Handlers = {
   ) => Promise<RouteResponse<Name> | { error: ErrorResponse["error"] }>;
 };
 
-const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
+export const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "not-found": 404,
+  "bad-request": 400,
   "connector-unavailable": 409,
   "destination-unavailable": 409,
   "consent-stale": 409,
@@ -158,6 +170,9 @@ const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   "secret-store-unavailable": 409,
   "embedding-not-implemented": 409,
   "embedding-busy": 409,
+  // I01-R21, R24: the import API's own answers; an oversize body answers 413 where it is read
+  "instance-busy": 409,
+  "storage-failed": 500,
 };
 
 /** Provisional: below the Broker's 120 s ceiling, long enough for a CLI to start. */
@@ -529,6 +544,10 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     syncConnector: (input) => options.connectors.sync(input.connectorId),
     importJsonl: async ({ text }) =>
       options.importer ? options.importer(text) : { error: "connector-unavailable" },
+    imports: async ({ instanceId, content }) =>
+      options.instanceImporter
+        ? options.instanceImporter(instanceId, content)
+        : { error: "connector-unavailable" },
     sources: async () => ({ sources: listSources(options.db) }),
     searchSources: async (input) => ({ sources: findSources(options.db, input.query) }),
     // V02-R12: the user's deletion; until an explicit lift (none in V02) nothing brings it back
@@ -622,13 +641,19 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
   };
 }
 
-/** The JSON body, or undefined when it is too large or not JSON. */
+const TOO_LARGE = Symbol("too-large");
+
+/**
+ * The JSON body, TOO_LARGE when it is over `limit` (judged by the declared length first
+ * and by the bytes received after, before anything is parsed), or undefined when it is not JSON.
+ */
 async function readJson(req: IncomingMessage, limit: number): Promise<unknown> {
+  if (Number(req.headers["content-length"]) > limit) return TOO_LARGE;
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > limit) return undefined;
+    if (size > limit) return TOO_LARGE;
     chunks.push(chunk);
   }
   try {
@@ -647,9 +672,9 @@ async function handle(
   const route = routes[name];
   let input: unknown;
   if ("request" in route) {
-    const parsed = route.request.safeParse(
-      await readJson(req, BODY_LIMITS[name] ?? MAX_BODY_BYTES),
-    );
+    const body = await readJson(req, BODY_LIMITS[name] ?? MAX_BODY_BYTES);
+    if (body === TOO_LARGE && ANSWERS_413.has(name)) return reject(res, 413, "payload-too-large");
+    const parsed = route.request.safeParse(body === TOO_LARGE ? undefined : body);
     if (!parsed.success) return reject(res, 400, "bad-request");
     input = parsed.data;
   }

@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@pki/connector-sdk": "workspace:*",
     "@pki/contracts": "workspace:*",
     "@pki/knowledge-engine": "workspace:*",
     "@pki/providers": "workspace:*",

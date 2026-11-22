@@ -1,13 +1,14 @@
-// V02-R2: the JSONL Connector over the V02 synthetic fixtures passes the
-// Connector contract (SDK v2), never forwards the fixtures' malicious marker, and
-// takes lines already parsed and split by the importer (one read: each source once).
-import type { ImportRecord } from "@pki/contracts";
+// I01-R23: the JSONL Connector (SDK v2) over the V02 synthetic fixtures passes the
+// Connector contract, never forwards the fixtures' malicious marker, reads its file
+// through the SDK's parser, and its cursor is `<sha256 of the file>:<entries given>`.
+// It also takes lines already parsed by the V02 screen's importer (`{ records }`).
+import { MAX_JSONL_BYTES, parseJsonl } from "@pki/connector-sdk";
+import { ConnectorError, type ImportRecord } from "@pki/contracts";
 import { connectorContract } from "@pki/testkit";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
-import { parseJsonl } from "../jsonl-lines.ts";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import { createJsonlConnector } from "./jsonl-connector.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../../fixtures");
@@ -18,15 +19,24 @@ const ALL = readdirSync(FIXTURES)
   .map(fixture)
   .join("\n");
 
-/** The parsed records of one instance, as the importer hands them over. */
+// a folder of the ignored test output (an adapter's test may not import node:os)
+const SCRATCH = resolve(import.meta.dirname, "../../../.vitest/jsonl-connector");
+mkdirSync(SCRATCH, { recursive: true });
+const dir = mkdtempSync(join(SCRATCH, "t-"));
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
+let counter = 0;
+/** A file holding `text`; returns its path. */
+const fileOf = (text: string) => {
+  const path = join(dir, `f${counter++}.jsonl`);
+  writeFileSync(path, text);
+  return path;
+};
+
+/** The parsed records of one instance, as the screen's importer hands them over. */
 const recordsOf = (text: string, instance: string) =>
   parseJsonl(text)
     .lines.map((l) => l.record)
     .filter((r) => r.connector_instance_id === instance);
-
-connectorContract("jsonl-import", createJsonlConnector, {
-  config: { records: recordsOf(ALL, "conn-v02-chat") },
-});
 
 const MAIL = JSON.parse(fixture("v02-mail.jsonl").trim()) as ImportRecord;
 const hashOf = (content: string) =>
@@ -40,86 +50,220 @@ const line = (patch: Partial<ImportRecord> & Record<string, unknown> = {}) => {
       : record,
   );
 };
+connectorContract("jsonl-import (a file)", createJsonlConnector, {
+  config: { path: fileOf(ALL) },
+  later: { path: fileOf(`${ALL}\n${line({ external_id: "later-1" })}`) },
+});
+connectorContract("jsonl-import (parsed lines)", createJsonlConnector, {
+  config: { records: recordsOf(ALL, "conn-v02-chat") },
+});
+
 const signal = () => new AbortController().signal;
 
-async function changesOf(text: string, instance = MAIL.connector_instance_id) {
+async function opened(config: unknown) {
   const connector = createJsonlConnector();
-  await connector.initialize({ records: recordsOf(text, instance) });
+  await connector.initialize(config);
+  return connector;
+}
+async function changesOf(text: string) {
+  const connector = await opened({ path: fileOf(text) });
   return (await connector.getChanges(null, { limit: 1000, signal: signal() })).changes;
 }
 
-describe("JSONL Connector", () => {
-  it("emits the record's content as the body with its own version as the revision, and no malicious marker", async () => {
+describe("JSONL Connector: mapping (I01-R22)", () => {
+  it("emits the line's source facts, its version as the revision and its connector_instance_id as the namespace, and no malicious marker", async () => {
     const malicious = fixture("v02-malicious.jsonl");
     expect(malicious).toContain('"malicious":true');
     const changes = await changesOf(malicious);
-    expect(changes).toHaveLength(1);
     const [change] = changes;
+    const source = JSON.parse(malicious.split("\n")[0] as string) as ImportRecord;
     expect(change?.kind === "upsert" && Object.keys(change.record).sort()).toEqual([
+      "accessScope",
+      "author",
       "body",
+      "createdAt",
       "externalId",
+      "metadata",
       "namespace",
+      "participants",
       "revision",
       "schemaVersion",
+      "sourceType",
+      "sourceUrl",
+      "threadId",
       "title",
+      "updatedAt",
     ]);
-    const source = JSON.parse(malicious.split("\n")[0] as string) as ImportRecord;
-    expect(change).toEqual({
+    expect(change).toMatchObject({
       kind: "upsert",
       record: {
-        namespace: "",
+        namespace: source.connector_instance_id,
         externalId: source.external_id,
-        revision: 1,
+        revision: source.version,
         schemaVersion: 2,
         title: source.title,
         body: source.content,
+        accessScope: source.access_scope,
       },
     });
   });
 
-  it("declares deletes but no access scope: it carries none (V02 review A2)", () => {
+  it("declares all five capabilities (I01-R23)", () => {
     expect(createJsonlConnector().manifest.capabilities).toEqual({
       incremental: true,
       deletes: true,
-      accessScope: false,
+      accessScope: true,
       fullRescan: true,
-      deletionsOnRescan: false,
+      deletionsOnRescan: true,
     });
   });
 
-  it("refuses a read naming one source twice: the importer splits those into rounds", async () => {
-    const twice = recordsOf(
-      [line(), line({ version: 2, content: "v2" })].join("\n"),
-      MAIL.connector_instance_id,
-    );
-    expect(twice).toHaveLength(2);
-    await expect(createJsonlConnector().initialize({ records: twice })).rejects.toThrow(/once/);
-  });
-
-  it("hands delete and revoke lines on as changes carrying the revision and the time", async () => {
+  it("hands delete, access-revoked and revoke lines on as a tombstone event, a tombstone event and a scope change", async () => {
     const at = "2026-11-04T09:00:00+09:00";
     const changes = await changesOf(
       [
         line({ external_id: "d", operation: "delete", content: "", version: 3, updated_at: at }),
+        line({ external_id: "a", operation: "access-revoked", version: 2, updated_at: at }),
         line({ external_id: "r", operation: "revoke", version: 2, updated_at: at }),
       ].join("\n"),
     );
+    const ns = MAIL.connector_instance_id;
     expect(changes).toEqual([
-      { kind: "delete", namespace: "", externalId: "d", revision: 3, at },
-      { kind: "access-revoked", namespace: "", externalId: "r", revision: 2, at },
+      { kind: "delete", namespace: ns, externalId: "d", revision: 3, at },
+      { kind: "access-revoked", namespace: ns, externalId: "a", revision: 2, at },
+      {
+        kind: "scope-change",
+        namespace: ns,
+        externalId: "r",
+        revision: 2,
+        at,
+        accessScope: MAIL.access_scope,
+      },
     ]);
-    const connector = createJsonlConnector();
-    await connector.initialize({
-      records: recordsOf(
-        line({ external_id: "d", operation: "delete", content: "" }),
-        MAIL.connector_instance_id,
-      ),
-    });
-    expect(await connector.getDocument({ namespace: "", externalId: "d" })).toBeNull();
   });
 
-  it("fails to initialize without records", async () => {
+  it("answers getDocument with the latest upsert of a source, and null for a deleted or unknown one", async () => {
+    const ns = MAIL.connector_instance_id;
+    const connector = await opened({
+      path: fileOf(
+        [
+          line({ external_id: "a", content: "first" }),
+          line({ external_id: "a", version: 2, content: "second" }),
+          line({ external_id: "gone" }),
+          line({ external_id: "gone", version: 2, operation: "delete", content: "" }),
+        ].join("\n"),
+      ),
+    });
+    expect(await connector.getDocument({ namespace: ns, externalId: "a" })).toMatchObject({
+      body: "second",
+      revision: 2,
+    });
+    expect(await connector.getDocument({ namespace: ns, externalId: "gone" })).toBeNull();
+    expect(await connector.getDocument({ namespace: ns, externalId: "unknown" })).toBeNull();
+  });
+
+  it("takes parsed lines in the instance's one namespace, and fails to initialize without a path or records", async () => {
+    const connector = await opened({
+      records: recordsOf(fixture("v02-mail.jsonl"), MAIL.connector_instance_id),
+    });
+    const { changes } = await connector.getChanges(null, { limit: 10, signal: signal() });
+    expect(changes[0]).toMatchObject({ kind: "upsert", record: { namespace: "" } });
     await expect(createJsonlConnector().initialize({ text: "" })).rejects.toThrow();
+    await expect(createJsonlConnector().initialize({ path: "" })).rejects.toThrow();
     await expect(createJsonlConnector().initialize(null)).rejects.toThrow();
+  });
+});
+
+describe("JSONL Connector: the cursor (I01-R23)", () => {
+  const text = [1, 2, 3].map((n) => line({ external_id: `e${n}` })).join("\n");
+
+  it("is the file's sha256 and the entries given; the same file again has nothing new", async () => {
+    const path = fileOf(text);
+    const connector = await opened({ path });
+    const first = await connector.getChanges(null, { limit: 2, signal: signal() });
+    const sha = createHash("sha256").update(readFileSync(path)).digest("hex");
+    expect(first).toMatchObject({ nextCursor: `${sha}:2`, hasMore: true });
+    const second = await connector.getChanges(first.nextCursor, { limit: 2, signal: signal() });
+    expect(second).toMatchObject({ nextCursor: `${sha}:3`, hasMore: false });
+    expect(second.changes).toHaveLength(1);
+    const again = await connector.getChanges(second.nextCursor, { limit: 2, signal: signal() });
+    expect(again).toMatchObject({ changes: [], nextCursor: `${sha}:3`, hasMore: false });
+    expect(again.cursorExpired).toBeUndefined();
+  });
+
+  it("expires when the file's content changed since the cursor was made (import.duplicate, sync.rescan ⑥)", async () => {
+    const path = fileOf(text);
+    const connector = await opened({ path });
+    const read = await connector.getChanges(null, { limit: 2, signal: signal() });
+    writeFileSync(path, `${text}\n${line({ external_id: "e4" })}`);
+    expect(
+      await connector.getChanges(read.nextCursor, { limit: 2, signal: signal() }),
+    ).toMatchObject({
+      cursorExpired: true,
+    });
+  });
+
+  it.each(["", "5", "abc:1", `${"0".repeat(64)}:1`, `${"0".repeat(64)}:x`])(
+    "expires on a cursor of another shape or file: %j",
+    async (cursor) => {
+      const connector = await opened({ path: fileOf(text) });
+      expect(await connector.getChanges(cursor, { limit: 2, signal: signal() })).toMatchObject({
+        cursorExpired: true,
+      });
+    },
+  );
+
+  it("expires on a count past the file's entries", async () => {
+    const path = fileOf(text);
+    const connector = await opened({ path });
+    const sha = createHash("sha256").update(readFileSync(path)).digest("hex");
+    expect(await connector.getChanges(`${sha}:4`, { limit: 2, signal: signal() })).toMatchObject({
+      cursorExpired: true,
+    });
+  });
+});
+
+describe("JSONL Connector: refused lines and pages (I01-R14, R22)", () => {
+  it("reports a refused line by `line:<n>` and a code, never its text, and goes on", async () => {
+    const canary = "CANARY-file-line-9921";
+    const connector = await opened({
+      path: fileOf(
+        [
+          line({ external_id: "ok-1" }),
+          `{"${canary}": `,
+          line({ external_id: "no-scope", access_scope: [], title: canary }),
+          line({ external_id: "ok-2" }),
+        ].join("\n"),
+      ),
+    });
+    const page = await connector.getChanges(null, { limit: 10, signal: signal() });
+    expect(page.changes).toHaveLength(2);
+    expect(page.rejected).toEqual([
+      { at: "line:2", code: "invalid-json" },
+      { at: "line:3", code: "schema" },
+    ]);
+    expect(JSON.stringify(page.rejected)).not.toContain(canary);
+  });
+
+  it("fails a read with a plain non-retryable ConnectorError when the file is missing, and says nothing of the path", async () => {
+    const path = join(dir, "no-such-CANARY-path.jsonl");
+    const connector = await opened({ path });
+    const error = await connector.getChanges(null, { limit: 10, signal: signal() }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(ConnectorError);
+    expect((error as ConnectorError).retryable).toBe(false);
+    expect((error as ConnectorError).message).not.toContain("CANARY");
+    expect(await connector.healthCheck()).toMatchObject({ state: "unavailable" });
+  });
+
+  it("refuses a file over the size limit before reading it", async () => {
+    const connector = await opened({ path: fileOf("x".repeat(MAX_JSONL_BYTES + 1)) });
+    const error = await connector.getChanges(null, { limit: 10, signal: signal() }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(ConnectorError);
   });
 });

@@ -26,7 +26,7 @@ export const ImportRecordSchema = z
     access_scope: z.array(z.string()),
     metadata: z.record(z.string(), z.unknown()),
     connector_instance_id: z.string().min(1),
-    operation: z.enum(["upsert", "delete", "revoke"]),
+    operation: z.enum(["upsert", "delete", "revoke", "access-revoked"]),
     schema_version: z.literal("1"),
     malicious: z.literal(true).optional(),
   })
@@ -41,7 +41,8 @@ export type ImportRecord = z.infer<typeof ImportRecordSchema>;
  * `invalid-record` (the schema; `field` names the first failing known field),
  * `content-hash-mismatch` (not the sha256 of `content`). Arrival order:
  * `revision-not-newer` (an equal or lower version with other content).
- * `tombstoned`: a deleted or revoked source the tombstone blocks (V02-R12: every
+ * `scope-change-content-mismatch`: a `revoke` line whose content is not the stored latest
+ * version's (I01-R22). `tombstoned`: a deleted or revoked source the tombstone blocks (V02-R12: every
  * version at or below it, which after a purge is every version). `instance-conflict`:
  * the `connector_instance_id` belongs to another Connector kind.
  * `too-many-instances`: past the cap of distinct instances per file (provisional).
@@ -53,6 +54,7 @@ export const ImportLineErrorReasonSchema = z.enum([
   "invalid-record",
   "content-hash-mismatch",
   "revision-not-newer",
+  "scope-change-content-mismatch",
   "tombstoned",
   "instance-conflict",
   "too-many-instances",
@@ -81,3 +83,13 @@ export const ImportJsonlResponseSchema = z.object({
   errorCount: z.int().nonnegative(),
 });
 export type ImportJsonlResponse = z.infer<typeof ImportJsonlResponseSchema>;
+
+/**
+ * The local import API's request (I01-R24): a JSONL text for one product instance. The
+ * instance is registered with kind `jsonl-import` on its first import; its id is the
+ * caller's name for it, not a `connector_instance_id` of the lines (those are namespaces).
+ */
+export const ImportRequestSchema = z.strictObject({
+  instanceId: z.string().min(1).max(128),
+  content: z.string(),
+});
