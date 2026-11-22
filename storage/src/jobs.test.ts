@@ -5,6 +5,9 @@
 // source's latest and no tombstone covers it; otherwise the job closes superseded.
 // I03-R1..R3 (I03-T01): eight statuses and only the drawn transitions, the jobs
 // with no source, the three duplicate guards, and closing a source's open jobs.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
@@ -349,7 +352,7 @@ describe("closeJob: only the current lease holder closes (V02-T03 rework)", () =
     const job = registered();
     const old = claimed();
     const fresh = claimed(at(LEASE));
-    expect(fresh.leaseToken).toBeGreaterThan(old.leaseToken);
+    expect(fresh.leaseToken).toBe(old.leaseToken + 2); // reclaimed, then claimed
     let wrote = 0;
     expect(closeJob(db, old, { status: "succeeded", write: () => void wrote++ })).toBe(
       "not-leased",
@@ -660,5 +663,51 @@ describe("heartbeatJob (I03-R4, the conditional extension T03 runs)", () => {
     expect(heartbeatJob(db, { ...held1, leaseToken: 9 }, { now: at(1), leaseMs: LEASE })).toBe(
       false,
     );
+  });
+  it("fails once the job left running, even under the same token", () => {
+    const job = registered();
+    const held1 = claimed();
+    expect(closeJob(db, held1, { status: "succeeded", write: () => {} })).toBe("succeeded");
+    expect(readJob(db, job.id)?.leaseToken).toBe(held1.leaseToken); // a close keeps the token
+    expect(heartbeatJob(db, held1, { now: at(1), leaseMs: LEASE })).toBe(false);
+    expect(readJob(db, job.id)).toMatchObject({ status: "succeeded", leaseUntil: null });
+  });
+});
+
+describe("closeJob takes the write lock as it begins (review B-W1)", () => {
+  // Deferred, the close read the job and then met another connection's write
+  // lock with SQLITE_BUSY at once (SQLite skips the busy wait to avoid deadlock).
+  // Immediate, it asks for the lock before reading, where the busy wait applies.
+  // The second connection's open write transaction stands for the other backend.
+  let dir: string;
+  let file: SqlDriver;
+  let other: SqlDriver;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "pki-jobs-lock-"));
+    file = openBetterSqlite3(join(dir, "db.sqlite"));
+    migrate(file);
+    registerConnectorInstance(file, "c1", "test-fixtures");
+    saveSourceRecord(file, "c1", { externalId: "e1", title: "t", body: "b" });
+    registerJob(file, { kind: "extract", sourceId: 1, fenceVersion: 1 });
+    other = openBetterSqlite3(join(dir, "db.sqlite"));
+    file.exec("PRAGMA busy_timeout = 0"); // no test waits on the lock
+  });
+  afterEach(() => {
+    other.close();
+    file.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("asks for the lock before reading the job, and closes once the lock is free", () => {
+    const job = leaseNextJob(file, { kinds: ["extract"], now: T0, leaseMs: LEASE }) as StoredJob;
+    let reads = 0;
+    const counted: SqlDriver = { ...file, all: (sql, params) => (reads++, file.all(sql, params)) };
+    other.exec("BEGIN IMMEDIATE; INSERT INTO settings (key, value) VALUES ('lock', 'x')");
+    expect(() => closeJob(counted, job, { status: "succeeded", write: () => {} })).toThrow(
+      /locked|busy/i,
+    );
+    expect(reads).toBe(0);
+    other.exec("COMMIT");
+    expect(closeJob(counted, job, { status: "succeeded", write: () => {} })).toBe("succeeded");
   });
 });

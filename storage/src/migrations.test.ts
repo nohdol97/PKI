@@ -2,6 +2,7 @@
 // canonical tables and nothing that could carry a body or secret in history.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
+import { leaseNextJob, readJob } from "./jobs.ts";
 import { migrate, migrations, schemaVersion } from "./migrations.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -822,12 +823,42 @@ describe("schema v11 (I03-T01, I03-R2)", () => {
   it("jobs.migration-v02-status: compares the converted lease as a number (an ISO string would never expire)", () => {
     seedV10();
     migrate(db);
-    // a lease that ran out is due for reclaim; one still running is not
+    // the product's claim reclaims the lease that ran out (token 3 -> 4) and not
+    // the one still running, then claims the oldest queued job
+    const claimed = leaseNextJob(db, {
+      kinds: ["extract"],
+      now: new Date("2027-01-01T00:00:00.000Z"),
+      leaseMs: 1_000,
+    });
+    expect(claimed).toMatchObject({ id: 1, status: "running" });
+    expect(readJob(db, 2)).toMatchObject({ status: "queued", leaseToken: 4, leaseUntil: null });
+    expect(readJob(db, 3)).toMatchObject({
+      status: "running",
+      leaseToken: 1,
+      leaseUntil: Date.parse(T_LEASE_FUTURE),
+    });
+  });
+
+  it("v10 copies every job row: one whose source row is gone is kept, or the migration fails whole", () => {
+    seedV10();
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.run(
+      `INSERT INTO jobs (kind, source_id, fence_version, status, lease_token)
+       VALUES ('extract', 404, 1, 'queued', 2)`,
+    );
+    const jobs = db.all("SELECT count(*) AS n FROM jobs")[0]?.n;
+    db.exec("PRAGMA foreign_keys = ON");
+    // enforced foreign keys refuse the orphan: nothing is copied, nothing lost
+    expect(() => migrate(db)).toThrow(/FOREIGN KEY/);
+    expect(schemaVersion(db)).toBe(10);
+    expect(db.all("SELECT count(*) AS n FROM jobs")[0]?.n).toBe(jobs);
+    // a driver without them keeps the row, its fairness key falling back to the kind
+    db.exec("PRAGMA foreign_keys = OFF");
+    migrate(db);
+    expect(db.all("SELECT count(*) AS n FROM jobs")[0]?.n).toBe(jobs);
     expect(
-      db.all("SELECT fence_version FROM jobs WHERE status = 'running' AND lease_until <= ?", [
-        Date.parse("2027-01-01T00:00:00.000Z"),
-      ]),
-    ).toEqual([{ fence_version: 2 }]);
+      db.all("SELECT source_id, fairness_key, lease_token FROM jobs WHERE source_id = 404"),
+    ).toEqual([{ source_id: 404, fairness_key: "extract", lease_token: 2 }]);
   });
 
   it("jobs.migration-v02-status: forgets the policy version held jobs were judged under, so the first start judges them once", () => {

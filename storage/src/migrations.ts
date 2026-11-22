@@ -450,7 +450,8 @@ const v10: Migration = (db) =>
 //   so a converted lease would otherwise never expire). Migrated rows get the
 //   migration time as created/updated/run-at, and as finished time when their
 //   status is done (succeeded, superseded, dead_letter); attempts 0, token kept,
-//   priority 'user', fairness key the source's Connector instance, the change
+//   priority 'user', fairness key the source's Connector instance (the kind if
+//   its source row is gone: every row is copied, never dropped), the change
 //   sequence of now, no policy fingerprint (empty means changed).
 // - Duplicate guards: (kind, target, source, fence version); (schedule, slot);
 //   and, since UNIQUE never binds NULLs, one open job per (kind, target) among
@@ -465,8 +466,9 @@ const v11: Migration = (db) =>
   db.exec(`
     CREATE TEMP TABLE jobs_v10 AS
       SELECT j.id, j.kind, j.source_id, j.fence_version, j.status, j.lease_until, j.reason,
-             j.lease_token, j.dropped_quotes, j.dropped_other, s.connector_instance_id
-        FROM jobs j JOIN sources s ON s.id = j.source_id;
+             j.lease_token, j.dropped_quotes, j.dropped_other,
+             coalesce(s.connector_instance_id, j.kind) AS fairness_key
+        FROM jobs j LEFT JOIN sources s ON s.id = j.source_id;
     DROP TABLE jobs;
     CREATE TABLE jobs (
       id INTEGER PRIMARY KEY,
@@ -517,7 +519,7 @@ const v11: Migration = (db) =>
         reason, lease_token,
         CASE WHEN lease_until IS NULL THEN NULL
           ELSE CAST(round((julianday(lease_until) - 2440587.5) * 86400000) AS INTEGER) END,
-        ${NOW_MS}, connector_instance_id, (SELECT change_seq FROM revisions), ${NOW_MS}, ${NOW_MS},
+        ${NOW_MS}, fairness_key, (SELECT change_seq FROM revisions), ${NOW_MS}, ${NOW_MS},
         CASE WHEN status IN ('done', 'failed', 'superseded') THEN ${NOW_MS} END,
         dropped_quotes, dropped_other
       FROM jobs_v10;

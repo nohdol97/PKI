@@ -355,8 +355,8 @@ const isLockError = (error: unknown): boolean => {
 };
 
 /**
- * Closes a running job in one transaction (V02-R5) for the holder of its current
- * lease. A stale fence discards the closing, `write` included, and closes the job
+ * Closes a running job in one immediate transaction (V02-R5) for the holder of
+ * its current lease. A stale fence discards the closing, `write` included, and closes the job
  * superseded. A job that is not running under that lease (closed already, never
  * claimed, or claimed again after the lease ran out) is left as it is and nothing
  * is written. The job row is updated before `write` runs, so the transaction
@@ -373,31 +373,38 @@ export function closeJob(
   at: Date = new Date(),
 ): JobClosing["status"] | "not-leased" {
   if ("reason" in closing) assertReason(closing.reason);
-  return db.transaction(() => {
-    const job = readJob(db, lease.id);
-    if (job?.status !== "running" || job.leaseToken !== lease.leaseToken) return "not-leased";
-    const { sourceId, fenceVersion } = job; // a sourceless kind has no fence
-    const current =
-      sourceId === null || fenceVersion === null || isFenceCurrent(db, { sourceId, fenceVersion });
-    const status = current ? closing.status : "superseded";
-    const reason = status === closing.status && "reason" in closing ? closing.reason : null;
-    transitionJob(db, lease.id, {
-      from: "running",
-      to: status,
-      reason,
-      leaseToken: lease.leaseToken,
-      at,
-    });
-    if (status === "succeeded" && closing.status === "succeeded") {
-      try {
-        closing.write();
-      } catch (error) {
-        if (isLockError(error)) throw error;
-        throw new JobWriteError(error);
+  // immediate: a deferred close would read, then meet another connection's
+  // write lock with SQLITE_BUSY at once, skipping the busy wait (review B-W1)
+  return db.transaction(
+    () => {
+      const job = readJob(db, lease.id);
+      if (job?.status !== "running" || job.leaseToken !== lease.leaseToken) return "not-leased";
+      const { sourceId, fenceVersion } = job; // a sourceless kind has no fence
+      const current =
+        sourceId === null ||
+        fenceVersion === null ||
+        isFenceCurrent(db, { sourceId, fenceVersion });
+      const status = current ? closing.status : "superseded";
+      const reason = status === closing.status && "reason" in closing ? closing.reason : null;
+      transitionJob(db, lease.id, {
+        from: "running",
+        to: status,
+        reason,
+        leaseToken: lease.leaseToken,
+        at,
+      });
+      if (status === "succeeded" && closing.status === "succeeded") {
+        try {
+          closing.write();
+        } catch (error) {
+          if (isLockError(error)) throw error;
+          throw new JobWriteError(error);
+        }
       }
-    }
-    return status;
-  });
+      return status;
+    },
+    { immediate: true },
+  );
 }
 
 /**
