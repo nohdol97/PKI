@@ -25,7 +25,10 @@ import { runSiteCheck, type SiteCheckIo } from "./site-check-main.ts";
 import type { SiteRegistration } from "./site-registration.ts";
 
 const TOKEN = "u".repeat(43);
-const CANARY = "synthetic canary/token+0001";
+/** The value the store holds; the code-shaped one passes the product log's field filter, so a leak into a field shows (B3). */
+const PLAIN_CANARY = "synthetic canary/token+0001";
+const CODE_CANARY = "synthCanaryToken_0001";
+let CANARY = PLAIN_CANARY;
 const PLANTED = "synthetic planted/marker+0002";
 const shapes = (value: string): string[] => [
   value,
@@ -37,6 +40,7 @@ let dir: string;
 let logLines: string[];
 let booted: Awaited<ReturnType<typeof bootBackend>> | undefined;
 beforeEach(() => {
+  CANARY = PLAIN_CANARY;
   dir = mkdtempSync(join(tmpdir(), "pki-canary-"));
   logLines = [];
   vi.spyOn(console, "error").mockImplementation(
@@ -231,6 +235,16 @@ describe("connectors.credentials-canary (I06-C14)", () => {
       expect(checkOutput).not.toContain(shape); // ④ site-check
     }
     expect(checkOutput).toBe(`${KIND}: ok (credential-required)`);
+  });
+
+  it("B3 with a code-shaped value, which the log's field filter lets through, the same places are clean", async () => {
+    CANARY = CODE_CANARY;
+    const { answers, checkOutput } = await exercise("synthetic body of the record");
+    const stored = filesUnder(join(dir, "data"));
+    expect(stored.filter((text) => text.includes(CODE_CANARY))).toEqual([]);
+    expect(logLines.filter((line) => line.includes(CODE_CANARY))).toEqual([]);
+    expect(answers.filter((text) => text.includes(CODE_CANARY))).toEqual([]);
+    expect(checkOutput).not.toContain(CODE_CANARY);
   });
 
   it("the paths ran: the refused sync stopped credential-unusable, the failed one connector-failed, and the held jobs say their reasons", async () => {

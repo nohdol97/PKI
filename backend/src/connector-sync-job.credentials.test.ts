@@ -7,11 +7,12 @@ import { readJob, registerJob, type SqlDriver, type StoredJob } from "@pki/stora
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openCanonicalDb, productRunner } from "./composition.ts";
 import { connectorCredentialName } from "./connector-credentials.ts";
-import { CONNECTOR_SYNC_KIND, recheckInstances } from "./connector-sync-job.ts";
+import { CONNECTOR_SYNC_KIND, recheckInstances, releaseOnReady } from "./connector-sync-job.ts";
 import { createConnectorManager, type ConnectorFactory } from "./connectors.ts";
+import type { JobRunner } from "./job-runner.ts";
 
 let dir: string;
 let db: SqlDriver;
@@ -20,6 +21,7 @@ beforeEach(() => {
   db = openCanonicalDb(join(dir, "data"));
 });
 afterEach(() => {
+  vi.useRealTimers();
   db.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -99,6 +101,8 @@ const refusedAfterReading = (slot: string) => async (c: ConnectorContext) => {
   throw new ConnectorCredentialError();
 };
 
+const late: { runner?: JobRunner } = {};
+
 async function setup(
   instances: { id: string; slots?: string[] }[],
   values: Record<string, string>,
@@ -115,9 +119,11 @@ async function setup(
       ...(slots ? { credentials: slots } : {}),
     })),
     { [KIND]: kind.factory },
-    { secrets },
+    // as boot.ts wires it: a new object that turns an instance ready releases its held jobs
+    { secrets, onReady: releaseOnReady(db, { wake: () => (late.runner as JobRunner).wake() }) },
   );
   const runner = productRunner(db, broker, { connectors: () => manager });
+  late.runner = runner;
   return { secrets, kind, manager, runner };
 }
 const register = (target: string): StoredJob => {
@@ -320,5 +326,79 @@ describe("connector-sync-job: a stale object's sync (I06-C6 ⑥)", () => {
     await flush();
     expect(job(queued.id)).toMatchObject({ status: "held", reason: "credential-rejected" });
     expect(kind.objects.map((o) => o.changeCalls)).toEqual([1, 0]);
+  });
+});
+
+describe("connector-sync-job: a rebuild that turns the instance ready releases its held jobs (I06-R12, C9 ①)", () => {
+  const rejectedThenFine = [{ initialize: refusedAfterReading("token") }, {}];
+
+  it("the immediate rebuild: the job held for credential-rejected runs without the hourly pass", async () => {
+    const { runner, manager } = await setup(
+      [{ id: "a", slots: ["token"] }],
+      { [name("token", "a")]: "synthetic-value-a" },
+      ...rejectedThenFine,
+    );
+    const queued = register("a");
+    await runner.runOnce();
+    expect(job(queued.id)).toMatchObject({ status: "held", reason: "credential-rejected" });
+    expect((await manager.rebuild("a"))?.rebuild).toBe("done");
+    await flush();
+    expect(job(queued.id).status).toBe("succeeded");
+  });
+
+  it("the owed rebuild (behind the 30 s gap) releases the job as well", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { runner, manager } = await setup(
+      [{ id: "a", slots: ["token"] }],
+      { [name("token", "a")]: "synthetic-value-a" },
+      { initialize: refusedAfterReading("token") },
+      { initialize: refusedAfterReading("token") },
+      {},
+    );
+    const queued = register("a");
+    await runner.runOnce();
+    expect((await manager.rebuild("a"))?.summary.reason).toBe("credential-rejected"); // the gap starts
+    expect((await manager.rebuild("a"))?.rebuild).toBe("queued");
+    expect(job(queued.id).status).toBe("held");
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flush();
+    expect(manager.list()[0]).toMatchObject({ state: "ready" });
+    expect(job(queued.id).status).toBe("succeeded");
+  });
+});
+
+describe("connector-sync-job: only a replaced object's stop is put back at close (I06-R10)", () => {
+  it("a held close on the current object is never requeued, even when the instance reads ready", async () => {
+    let calls = 0;
+    const manager = {
+      list: () => [{ id: "a", kind: KIND, state: "ready" as const }],
+      sync: async () => {
+        calls++;
+        // a loop would end by itself here so that the test fails by its assertion, not by hanging
+        if (calls > 5) return { error: "not-found" as const };
+        return {
+          connectorId: "a",
+          received: 0,
+          created: 0,
+          unchanged: 0,
+          scopeUpdated: 0,
+          stale: 0,
+          staleTombstone: 0,
+          blocked: 0,
+          tombstoned: 0,
+          rejected: [],
+          rejectedCount: 0,
+          rescanned: false,
+          deletionsMayBeMissed: false,
+          stopped: "credential-unusable" as const,
+        };
+      },
+    };
+    const runner = productRunner(db, broker, { connectors: () => manager });
+    const queued = register("a");
+    await runner.runOnce();
+    await flush();
+    expect(calls).toBe(1);
+    expect(job(queued.id)).toMatchObject({ status: "held", reason: "connector-unavailable" });
   });
 });

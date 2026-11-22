@@ -409,13 +409,16 @@ export function productRunner(
         }
       : {}),
   });
+  const replaced = new Set<number>();
   const runner: JobRunner = createJobRunner({
     db,
-    // a collector job closed held for an instance that is ready by now goes back at once (I06-R10)
+    // a collector job whose sync stopped on a replaced object goes back at once, on the new one (I06-R10)
     onClosed: (job, status) => {
       const manager = options.connectors?.();
+      const stoppedOnReplaced = replaced.delete(job.id);
       if (
         status === "held" &&
+        stoppedOnReplaced &&
         job.kind === CONNECTOR_SYNC_KIND &&
         manager &&
         releaseIfReady(db, manager, job.target)
@@ -427,7 +430,13 @@ export function productRunner(
       [EXTRACT_JOB_KIND]: handler,
       [MAINTENANCE_KIND]: createMaintenanceHandler({ db, ...(clock ? { clock } : {}) }),
       ...(options.connectors
-        ? { [CONNECTOR_SYNC_KIND]: createConnectorSyncHandler({ db, manager: options.connectors }) }
+        ? {
+            [CONNECTOR_SYNC_KIND]: createConnectorSyncHandler({
+              db,
+              manager: options.connectors,
+              replaced,
+            }),
+          }
         : {}),
       ...(options.projectionPorts
         ? projectionHandlers({

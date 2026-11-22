@@ -940,3 +940,186 @@ describe("connectors.credentials-kept (I06-C12)", () => {
     expect(other.objects).toHaveLength(0);
   });
 });
+
+describe("connectors.credentials-rework (review fixes)", () => {
+  const ok = { [name("token")]: "synthetic-token-1" };
+  const plainFailure = async () => Promise.reject(new Error("no"));
+
+  it("B1 a rebuild past its limit: the hung new object's accessor is cut, and reads nothing", async () => {
+    const store = makeStore(ok);
+    const kind = kindOf({}, { initialize: never });
+    const manager = await start([declared(["token"])], kind.factory, store);
+    const rebuild = manager.rebuild(ID);
+    await vi.advanceTimersByTimeAsync(RECHECK_TIMEOUT_MS);
+    await rebuild;
+    store.reads.length = 0;
+    await expect(kind.objects[1]?.context?.credentials.read("token")).rejects.toBeInstanceOf(
+      ConnectorCredentialError,
+    );
+    expect(store.reads).toEqual([]);
+  });
+
+  it("B1 a recheck whose turn the caller closed: the hung new object's accessor is cut, before and after the store answers", async () => {
+    const store = makeStore();
+    const kind = kindOf({ initialize: never });
+    const manager = await start([declared(["token"])], kind.factory, store);
+    store.values.set(name("token"), "synthetic-token-1");
+    const turn = { open: true };
+    void manager.recheck(ID, turn);
+    await vi.advanceTimersByTimeAsync(10);
+    const context = kind.objects[0]?.context as ConnectorContext;
+    // asked while the turn is open: it waits for the store, then the turn closes before the answer is used
+    let answer!: (v: SecretRead) => void;
+    store.read = () => new Promise<SecretRead>((r) => (answer = r));
+    const inFlight = context.credentials.read("token");
+    await vi.advanceTimersByTimeAsync(0);
+    turn.open = false;
+    answer({ state: "present", value: "synthetic-token-1" });
+    await expect(inFlight).rejects.toBeInstanceOf(ConnectorCredentialError);
+    store.reads.length = 0;
+    await expect(context.credentials.read("token")).rejects.toBeInstanceOf(
+      ConnectorCredentialError,
+    );
+    expect(store.reads).toEqual([]);
+  });
+
+  it("B2 (I05-R13 kept) an initialize that never settles holds the instance's slot: no third object and the notice is queued; one that settles late frees it (the late-limit test above revives the instance)", async () => {
+    const store = makeStore(ok);
+    const kind = kindOf({}, { initialize: never }, {});
+    const manager = await start([declared(["token"])], kind.factory, store);
+    const rebuild = manager.rebuild(ID);
+    await vi.advanceTimersByTimeAsync(RECHECK_TIMEOUT_MS);
+    await rebuild;
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(await manager.recheck(ID)).toBe("unavailable");
+    expect((await manager.rebuild(ID))?.rebuild).toBe("queued");
+    expect(kind.objects).toHaveLength(2);
+  });
+
+  it("A2 an invalid declaration stays invalid on a recheck and a rebuild: no object, the state does not change", async () => {
+    const store = makeStore(ok);
+    const kind = kindOf({});
+    const manager = await start([declared(["Bad Slot"])], kind.factory, store);
+    expect(await manager.recheck(ID)).toBe("unavailable");
+    expect((await manager.rebuild(ID))?.rebuild).toBe("skipped");
+    expect(kind.objects).toHaveLength(0);
+    expect(stateOf(manager)).toMatchObject({ state: "unavailable" });
+  });
+
+  it("C-F4 a rebuild that passes its limit after a stop judged the instance rejected leaves it rejected and skipped by the hourly recheck", async () => {
+    const store = makeStore(ok);
+    const kind = kindOf(
+      {
+        getChanges: async () => {
+          throw new ConnectorCredentialError();
+        },
+      },
+      { initialize: never },
+      {},
+    );
+    const manager = await start([declared(["token"])], kind.factory, store);
+    const rebuild = manager.rebuild(ID);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await manager.sync(ID)).toMatchObject({ stopped: "credential-unusable" });
+    expect(stateOf(manager)?.reason).toBe("credential-rejected");
+    await vi.advanceTimersByTimeAsync(RECHECK_TIMEOUT_MS);
+    expect((await rebuild)?.summary.reason).toBe("credential-rejected");
+    expect(stateOf(manager)?.reason).toBe("credential-rejected");
+    expect(await manager.recheck(ID)).toBe("unavailable");
+    expect(kind.objects).toHaveLength(2);
+  });
+
+  it("C-F2 while the stopped sync's judgement waits for the store no second sync reaches the origin", async () => {
+    const store = makeStore(ok);
+    const kind = kindOf({
+      getChanges: async () => {
+        throw new ConnectorCredentialError();
+      },
+    });
+    const manager = await start([declared(["token"])], kind.factory, store);
+    let open!: () => void;
+    store.gateNext = new Promise<void>((r) => (open = r));
+    const first = manager.sync(ID);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await manager.sync(ID)).toMatchObject({ stopped: "instance-busy" });
+    open();
+    expect(await first).toMatchObject({ stopped: "credential-unusable" });
+    expect(kind.objects[0]?.changeCalls).toBe(1);
+  });
+
+  it("C-F5 the gap starts when the rebuild started, not when it ended", async () => {
+    let finish!: () => void;
+    const store = makeStore(ok);
+    const kind = kindOf(
+      { initialize: refusedAfter("token") },
+      {
+        initialize: async (c) => {
+          await new Promise<void>((r) => (finish = r));
+          await refusedAfter("token")(c);
+        },
+      },
+      {},
+    );
+    const manager = await start([declared(["token"])], kind.factory, store);
+    const first = manager.rebuild(ID); // starts at t0, takes 20 s, ends rejected
+    await vi.advanceTimersByTimeAsync(20_000);
+    finish();
+    expect((await first)?.summary.reason).toBe("credential-rejected");
+    expect((await manager.rebuild(ID))?.rebuild).toBe("queued");
+    await vi.advanceTimersByTimeAsync(CREDENTIAL_RETRY_MIN_MS - 20_000 - 1);
+    expect(kind.objects).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(kind.objects).toHaveLength(3);
+  });
+
+  it.each(["yes", {}, 1, null])(
+    "B4 a presence answer of %j is not a presence: credential-store-unavailable, no object",
+    async (garbage) => {
+      const store = makeStore(ok);
+      store.has = (async (n: string) => (store.asked.push(n), garbage)) as never;
+      const kind = kindOf({});
+      const manager = await start([declared(["token"])], kind.factory, store);
+      expect(stateOf(manager)).toMatchObject({ reason: "credential-store-unavailable" });
+      expect(stateOf(manager)?.credentials?.map((c) => c.state)).toEqual(["unavailable"]);
+      expect(kind.objects).toHaveLength(0);
+    },
+  );
+
+  it("B5 the object whose sync was refused reads nothing more", async () => {
+    const store = makeStore(ok);
+    const kind = kindOf({
+      getChanges: async () => {
+        throw new ConnectorCredentialError();
+      },
+    });
+    const manager = await start([declared(["token"])], kind.factory, store);
+    await manager.sync(ID);
+    store.reads.length = 0;
+    await expect(kind.objects[0]?.context?.credentials.read("token")).rejects.toBeInstanceOf(
+      ConnectorCredentialError,
+    );
+    expect(store.reads).toEqual([]);
+  });
+
+  it("A1 the instance's turning ready is announced once, for a rebuild and for a recheck, and not for one that fails", async () => {
+    const store = makeStore(ok);
+    const readyIds: string[] = [];
+    const kind = kindOf({ initialize: plainFailure }, {}, {}, { initialize: plainFailure });
+    const manager = await createConnectorManager(
+      db,
+      [declared(["token"])],
+      { [KIND]: kind.factory },
+      {
+        secrets: store,
+        onReady: (id) => void readyIds.push(id),
+      },
+    );
+    expect(readyIds).toEqual([]);
+    expect(await manager.recheck(ID)).toBe("ready");
+    expect(readyIds).toEqual([ID]);
+    await manager.rebuild(ID);
+    expect(readyIds).toEqual([ID, ID]);
+    await manager.rebuild(ID); // object 4 fails
+    expect(readyIds).toEqual([ID, ID]);
+  });
+});

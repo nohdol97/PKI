@@ -270,6 +270,13 @@ async function runSync(
   }
 }
 
+/**
+ * The sync answers whose stop came from an object the instance had already replaced (I06-R10). A side
+ * table, not a field: the answer is the API's body and carries nothing about the manager's objects.
+ */
+const replacedStops = new WeakSet<object>();
+export const isReplacedStop = (answer: object): boolean => replacedStops.has(answer);
+
 /** What initializing one Connector came to, as the Connector list shows it. */
 export type InitializeOutcome =
   | { state: "ready" }
@@ -420,6 +427,11 @@ export async function createConnectorManager(
   options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries" | "scopes"> & {
     /** Where credentials come from (I06-R6); none: every declared slot is `unavailable` (I06-R18). */
     secrets?: CredentialStore | undefined;
+    /**
+     * Called when a new object turned an instance `ready` (a rebuild, owed or immediate, or a recheck):
+     * the held collector jobs of the instance go back (I06-R12). Never throws into the manager.
+     */
+    onReady?: (id: string) => void;
   } = {},
 ): Promise<ConnectorManager & ConnectorRecheck & ConnectorConfigs & ConnectorRebuild> {
   const { secrets } = options;
@@ -513,7 +525,9 @@ export async function createConnectorManager(
     rebuiltAt?: number,
   ): Promise<"kept" | "late"> {
     const { id } = entry.summary;
-    const access = createCredentialAccess(entry.slots ?? [], secrets);
+    // an object whose turn closed before the instance took it reads nothing, even while its initialize hangs (I06-R7)
+    let adopted = false;
+    const access = createCredentialAccess(entry.slots ?? [], secrets, () => adopted || turn.open);
     const { connector, outcome: opened } = await openConnector(
       id,
       entry.factory as ConnectorFactory,
@@ -536,7 +550,15 @@ export async function createConnectorManager(
       return "late";
     }
     entry.lateRechecks = 0;
+    adopted = true;
     adopt(entry, { connector, access, outcome });
+    if (entry.summary.state === "ready") {
+      try {
+        options.onReady?.(id);
+      } catch {
+        // the release is best effort; the hourly pass puts back what it missed
+      }
+    }
     // the gap of a rejected instance runs from the start of the rebuild that ended so; set before the slot frees
     entry.rejectedRebuildAt =
       rebuiltAt !== undefined && entry.summary.reason === "credential-rejected"
@@ -597,7 +619,7 @@ export async function createConnectorManager(
   /** Makes a new object of an instance of any state and waits for it at most RECHECK_TIMEOUT_MS (I06-R12). */
   async function startRebuild(entry: Entry): Promise<void> {
     const turn: RecheckTurn = { open: true };
-    const wasReady = entry.summary.state === "ready";
+    const before = entry.connector;
     const work = renew(entry, turn, clock.now());
     occupy(entry, work);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -611,7 +633,8 @@ export async function createConnectorManager(
     if (outcome === "timeout") {
       turn.open = false;
       entry.rejectedRebuildAt = undefined;
-      if (wasReady) {
+      // decided by the state now, not at the start: an old object that a stop already judged is not undone (I06-R12)
+      if (before !== undefined && entry.connector === before && entry.summary.state === "ready") {
         // the old object's access would read a value never shown to work: it is not left ready (I06-R12)
         entry.access?.revoke();
         entry.connector = undefined;
@@ -623,12 +646,12 @@ export async function createConnectorManager(
   }
 
   /** A refused `getChanges` of the instance's current object: its state is re-judged (I06-R9, R10). */
-  async function judgeStop(entry: Entry, used: Connector): Promise<void> {
+  async function judgeStop(entry: Entry, used: Connector): Promise<"judged" | "replaced"> {
     const access = entry.access;
-    if (!access || entry.connector !== used) return;
+    if (!access || entry.connector !== used) return "replaced";
     const reason = await access.judge();
     // another object took the instance while the store was asked: this stop is the old one's (I06-R10)
-    if (entry.connector !== used) return;
+    if (entry.connector !== used) return "replaced";
     access.revoke();
     entry.states = access.states();
     entry.connector = undefined;
@@ -639,6 +662,7 @@ export async function createConnectorManager(
       entry.summary.kind,
       reason ? { state: "unavailable", reason } : unavailable,
     );
+    return "judged";
   }
 
   return {
@@ -665,7 +689,7 @@ export async function createConnectorManager(
       const entry = find(id);
       if (!entry) return undefined;
       if (entry.summary.state === "ready") return "ready";
-      if (!entry.factory) return entry.summary.state; // no kind: nothing to make
+      if (!entry.factory || !entry.slots) return entry.summary.state; // nothing to make, or a declaration that cannot be used
       // a refused value is not offered to the origin again by the clock (I06-R11), nor while the slot is taken
       if (entry.summary.reason === "credential-rejected" || entry.slot) return entry.summary.state;
       if (entry.lateRechecks >= RECHECK_LATE_LIMIT) {
@@ -685,7 +709,7 @@ export async function createConnectorManager(
         summary: { ...entry.summary },
         rebuild,
       });
-      if (!entry.factory) return answer("skipped"); // no kind: nothing to make
+      if (!entry.factory || !entry.slots) return answer("skipped"); // nothing to make, or a declaration that cannot be used
       if (entry.lateRechecks >= RECHECK_LATE_LIMIT) {
         if (!entry.abandonedLogged) log("connector-recheck-abandoned", { id });
         entry.abandonedLogged = true;
@@ -706,13 +730,28 @@ export async function createConnectorManager(
         return { error: "connector-unavailable" };
       }
       const used = entry.connector;
-      const result = await syncConnector(db, id, entry.summary.kind, used, {
-        ...options,
-        ...syncOptions,
-      });
-      // the state is judged before the answer returns, so the job that closes on it reads the new state (I06-R10)
-      if (result.stopped === "credential-unusable") await judgeStop(entry, used);
-      return { connectorId: id, ...result };
+      // the instance's lock is held through the judgement, so no second sync reaches the origin with the
+      // refused value while the store is asked (I06-R10)
+      const release = tryLockInstance(db, id);
+      if (!release) return { connectorId: id, ...emptyResult(), stopped: "instance-busy" };
+      let result: SyncResult;
+      let replaced = false;
+      try {
+        result = await syncConnector(db, id, entry.summary.kind, used, {
+          ...options,
+          ...syncOptions,
+          lockHeld: true,
+        });
+        // the state is judged before the answer returns, so the job that closes on it reads the new state (I06-R10)
+        if (result.stopped === "credential-unusable") {
+          replaced = (await judgeStop(entry, used)) === "replaced";
+        }
+      } finally {
+        release();
+      }
+      const answer = { connectorId: id, ...result };
+      if (replaced) replacedStops.add(answer);
+      return answer;
     },
   };
 }

@@ -44,7 +44,7 @@ import { systemClock } from "./clock.ts";
 import { applyConfiguredScopes, bindConnectorScopes } from "./connector-scopes.ts";
 import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
 import { createConnectorManager, type ConnectorManager } from "./connectors.ts";
-import { startCollectorUpkeep } from "./connector-sync-job.ts";
+import { releaseOnReady, startCollectorUpkeep } from "./connector-sync-job.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
@@ -215,6 +215,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     entries,
     scopes,
     secrets: options.secrets,
+    onReady: releaseOnReady(db, runner),
   });
   late.manager = connectors;
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,

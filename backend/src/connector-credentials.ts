@@ -131,6 +131,8 @@ export interface CredentialAccess {
 export function createCredentialAccess(
   declaration: CredentialDeclaration,
   store: CredentialStore | undefined,
+  /** False while the object this accessor belongs to is abandoned before it was ever adopted (I06-R7). */
+  live: () => boolean = () => true,
 ): CredentialAccess {
   const names = new Map(declaration.map(({ slot, name }) => [slot, name]));
   const marks = { missing: false, unreadable: false, undeclared: false };
@@ -166,7 +168,7 @@ export function createCredentialAccess(
 
   const credentials: ConnectorCredentials = {
     async read(slot) {
-      if (revoked) return refuse();
+      if (revoked || !live()) return refuse();
       const name = typeof slot === "string" ? names.get(slot) : undefined;
       if (name === undefined || store === undefined) {
         if (name === undefined) marks.undeclared = true;
@@ -174,7 +176,7 @@ export function createCredentialAccess(
         return refuse();
       }
       const raw = await within(() => store.read(name), CREDENTIAL_CHECK_TIMEOUT_MS);
-      if (revoked) return refuse(); // cut while it waited: the value goes nowhere
+      if (revoked || !live()) return refuse(); // cut while it waited: the value goes nowhere
       const answer = SecretReadSchema.safeParse(raw);
       if (answer.success && answer.data.state === "present") return answer.data.value;
       if (answer.success && answer.data.state === "missing") marks.missing = true;

@@ -124,8 +124,8 @@ export interface JobRunnerOptions {
   /** Errors the runner caught (a throwing handler or write, a failing claim). */
   onError?: (error: unknown) => void;
   /**
-   * Called right after a run's job was closed by the handler's result (not for a lost lease), with the
-   * job and how it closed. Connector sync uses it to put a job back that closed held for an instance that
+   * Called right after every close a run attempts, with the job and what `closeJob` answered (that can
+   * be `not-leased` or `cancelled`, so a caller filters on the status it wants). Connector sync uses it to put a job back that closed held for an instance that
    * is ready by now (I06-R10). A throw is reported to `onError`.
    */
   onClosed?: (job: StoredJob, status: JobRun["status"]) => void;
