@@ -5,7 +5,7 @@
 // projection job never meets it. `scope.policy` (storage part).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
-import { commitDerived } from "./commit-derived.ts";
+import { commitDerived, UnjudgedItemError } from "./commit-derived.ts";
 import {
   createCommitScope,
   clearScopePolicyDrops,
@@ -201,7 +201,10 @@ describe("recording a refused item (I04-R11)", () => {
       commitDerived(db, {
         source: b,
         scope: scopeOf(throwing),
-        items: [{ ...item("bookkeeping", [b]), unjudged: true }, item("content", [b])],
+        items: [
+          { ...item("bookkeeping", [b]), kind: "extraction", unjudged: true },
+          item("content", [b]),
+        ],
       }),
     );
     expect(written).toEqual(["bookkeeping"]);
@@ -342,5 +345,34 @@ describe("closeJob and checkpointJob hand the scope to commitDerived (I04-T09)",
     expect(status).toBe("succeeded");
     expect(written).toEqual(["removed"]);
     expect(countScopePolicyDrops(db)).toBe(0);
+  });
+});
+
+describe("only the bookkeeping item may skip the policy (I04-R11)", () => {
+  it.each(["fact", "relation", "insight", "scope-drop"])(
+    "refuses an item of kind %s marked unjudged: it throws before anything is written, even under a refusing policy",
+    (kind) => {
+      const b = save("b", '["b"]');
+      const marked = { ...item("x", [b]), kind, unjudged: true } as unknown as DerivedItem;
+      expect(() =>
+        db.transaction(() =>
+          commitDerived(db, {
+            source: b,
+            scope: scopeOf({ combinable: () => false }),
+            items: [item("first", [b]), marked],
+          }),
+        ),
+      ).toThrow(UnjudgedItemError);
+      expect(written).toEqual([]);
+      expect(countScopePolicyDrops(db)).toBe(0);
+    },
+  );
+
+  it("refuses a bookkeeping item whose unjudged is not exactly true", () => {
+    const b = save("b", '["b"]');
+    const odd = { ...item("x", [b]), kind: "extraction", unjudged: 1 } as unknown as DerivedItem;
+    expect(() => db.transaction(() => commitDerived(db, { source: b, items: [odd] }))).toThrow(
+      UnjudgedItemError,
+    );
   });
 });

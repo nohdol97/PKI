@@ -41,6 +41,25 @@ export function createCommitScope(options: {
   };
 }
 
+/**
+ * Records that a candidate item was not offered to the Broker because the policy would not let its
+ * sources be put together with the extracted version (I04-R14, R15): the same content-free row as a
+ * refused item (kind `candidate`, the keyed hash of the item's id), so a later widening extracts the
+ * version again and offers it.
+ */
+export function recordWithheldCandidate(
+  tx: SqlDriver,
+  source: { sourceId: number; version: number },
+  candidateId: string,
+  at: string,
+): void {
+  tx.run(
+    `INSERT INTO scope_policy_drops (source_id, version, kind, item_key_hash, reason, at)
+     VALUES (?, ?, 'candidate', ?, 'scope-policy', ?) ON CONFLICT DO NOTHING`,
+    [source.sourceId, source.version, keyedTextHash(tx, DROP_DOMAIN, candidateId), at],
+  );
+}
+
 /** How many items the policy has left out and whose source has not been extracted again (the status API's `scopePolicyDrops`). */
 export function countScopePolicyDrops(db: SqlDriver): number {
   return db.all("SELECT count(*) AS n FROM scope_policy_drops")[0]?.n as number;

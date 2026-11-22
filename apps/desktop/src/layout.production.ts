@@ -10,6 +10,18 @@ export const BACKEND_ENTRY = fileURLToPath(new URL("./backend/shell.js", import.
 
 export const REFUSE_DEBUGGING: boolean = true;
 
+/**
+ * The scope policy of this build (I04-R14, S21): a build-time value, changed in this file and built
+ * again, never by the environment. The public repository's is `default`; a fork that implements its
+ * own policy sets its name here.
+ */
+export const SCOPE_POLICY = "default";
+
+/** The name passed to the backend: the build's own, whatever the environment says. */
+export function scopePolicyName(): string {
+  return SCOPE_POLICY;
+}
+
 export function switches(): Switches {
   return {};
 }

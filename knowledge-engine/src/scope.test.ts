@@ -315,6 +315,21 @@ describe("scope.changed: the re-extraction of sources the policy left something 
   });
 
   it.each(["queued", "running", "retry", "held"])(
+    "an open FIRST extraction (target '', %s) does not stop a scope-recompute re-extraction from being queued",
+    (status) => {
+      const b = source("b", "b의 본문", ["b"]);
+      db.run(
+        `INSERT INTO jobs (kind, target, source_id, fence_version, status, run_after, fairness_key,
+           registered_change_seq, created_at, updated_at) VALUES ('extract', '', ?, 1, ?, 0, 'c1', 0, 0, 0)`,
+        [b.sourceId, status],
+      );
+      drop(b.sourceId, 1, "k");
+      run(scopeChange(b.sourceId));
+      expect(jobs().map((j) => j.target)).toEqual(["", expect.stringMatching(/^scope-recompute:/)]);
+    },
+  );
+
+  it.each(["queued", "running", "retry", "held"])(
     "queues no second re-extraction of a source version while one is %s: K scope changes over N sources leave at most N open jobs",
     (status) => {
       const a = source("a", "a의 본문", ["a"]);

@@ -9,6 +9,7 @@
 // and the job closes superseded. A scope the policy refuses (`combinable`, I04-R14; a policy that
 // errs refuses) is not stale: it leaves out that item only and the rest is written.
 import {
+  BOOKKEEPING_KIND,
   scopesOfVersions,
   versionIsLive,
   type CommitDerived,
@@ -17,6 +18,14 @@ import {
 } from "./derivatives.ts";
 import { mayCombine } from "./scope-policy.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+
+/** An item carries the `unjudged` mark without being the bookkeeping item: a programming error, nothing is written. */
+export class UnjudgedItemError extends Error {
+  override name = "UnjudgedItemError";
+  constructor(kind: string) {
+    super(`an item of kind ${kind} may not skip the scope policy`);
+  }
+}
 
 /** A result that no longer holds; `cause` is what commitDerived reports. */
 export class StaleDerivativeError extends Error {
@@ -83,6 +92,13 @@ export function assertLineage(db: SqlDriver, lineage: readonly SourceVersionRef[
  * rolls it back.
  */
 export const commitDerived: CommitDerived = (tx, input) => {
+  // before anything is checked or written: only the bookkeeping item may skip the policy
+  for (const item of input.items) {
+    const mark = (item as { unjudged?: unknown }).unjudged;
+    if (mark !== undefined && (mark !== true || item.kind !== BOOKKEEPING_KIND)) {
+      throw new UnjudgedItemError(item.kind);
+    }
+  }
   try {
     if (input.source) assertFresh(tx, input.source.sourceId, input.source.version);
     assertLineage(

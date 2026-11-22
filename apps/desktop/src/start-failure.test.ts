@@ -24,6 +24,7 @@ const start = (report: unknown) =>
     fork: () => childReporting(report),
     entry: "unused",
     origin: "app://pki",
+    scopePolicy: undefined,
   });
 
 describe("start.identity-key-text: the start failure text (I04-R7)", () => {

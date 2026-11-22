@@ -184,6 +184,36 @@ describe("scope.policy: one request never carries a refused combination of candi
     expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 0, other: 1 });
   });
 
+  it("records a withheld candidate, and a widening extracts the version again and offers it", async () => {
+    const a = source("a", "알", ["a"]);
+    const b = source("b", "비", ["b"]);
+    knownItem("알파", a);
+    const beta = knownItem("베타", b);
+    const c = source("c", "알파와 베타 메모", ["c"]);
+    const kit = setUp(noAandB);
+    await extract(kit, c);
+    expect(db.all("SELECT source_id, version, kind FROM scope_policy_drops")).toEqual([
+      { source_id: c.sourceId, version: 1, kind: "candidate" },
+    ]);
+    expect(JSON.stringify(db.all("SELECT * FROM scope_policy_drops"))).not.toMatch(/베타|알파/);
+
+    // b's scope widens to something that goes with a: the change queues c's extraction again
+    setScope(b.sourceId, ["z"]);
+    const { propagation } = db.transaction(() =>
+      propagateCanonical(
+        db,
+        { kind: "scope-changed", sourceId: b.sourceId, from: ["b"], to: ["z"] },
+        T0.toISOString(),
+        kit.registry,
+      ),
+    );
+    const target = `scope-recompute:${propagation.invalidationId}`;
+    await extract(kit, c, target);
+    expect(requests.at(-1)?.candidateItemIds).toHaveLength(2);
+    expect(requests.at(-1)?.candidateItemIds).toContain(String(beta));
+    expect(count("scope_policy_drops")).toBe(0);
+  });
+
   it("offers both when each goes with the source and with the other (control)", async () => {
     const a = source("a", "알", ["a"]);
     const a2 = source("a2", "알2", ["a"]);

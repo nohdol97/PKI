@@ -96,20 +96,31 @@ export interface DerivativeKind {
 
 // commitDerived (I04-R11): the only way a derivative is written. The caller (I03's
 // result-writing transaction, I03-R6 ③) opens the transaction.
-export interface DerivedItem {
-  /** A registered kind. */
-  kind: string;
+interface DerivedItemBase {
   /** The same-row key (V02-R8); a record keeps only its keyed hash (I04-R7). */
   itemKey: string;
   lineage: readonly SourceVersionRef[];
-  /**
-   * A content-free item (a job's bookkeeping): the scope policy is not asked about it, so a policy that
-   * errs or refuses cannot take it with it (I04-T09). Never set for an item that carries source content.
-   */
-  unjudged?: true;
   /** Called only for an item that passed the checks. */
   write(tx: SqlDriver): void;
 }
+
+/** The kind of a job's content-free bookkeeping item, the only one the scope policy is not asked about. */
+export const BOOKKEEPING_KIND = "extraction";
+
+export type DerivedItem =
+  | (DerivedItemBase & {
+      /** A registered kind. */
+      kind: string;
+      unjudged?: never;
+    })
+  | (DerivedItemBase & {
+      /**
+       * A content-free item (a job's bookkeeping): the scope policy is not asked about it, so a policy
+       * that errs or refuses cannot take it with it (I04-T09). Only this kind may carry the mark.
+       */
+      kind: typeof BOOKKEEPING_KIND;
+      unjudged: true;
+    });
 
 /** One row of scope_policy_drops (I04-T09); no content. */
 export interface ScopePolicyDrop {

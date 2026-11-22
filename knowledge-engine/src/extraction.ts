@@ -33,7 +33,9 @@ import {
   findSourceVersionId,
   insertItem,
   readSourceVersion,
+  BOOKKEEPING_KIND,
   recordExtractionDrops,
+  recordWithheldCandidate,
   reviveSuperseded,
   saveFact,
   saveRelation,
@@ -251,6 +253,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     const drops = { quotes: 0, other: 0 };
     const candidateLineage = new Map<string, LineageRef[]>();
     const together: LineageRef[] = [own];
+    const withheld: string[] = [];
     for (const found of findCandidates(db, `${stored.title}\n${stored.body}`)) {
       const id = String(found);
       const lineage = registry.lineage(db, { kind: "item", id });
@@ -259,6 +262,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         together.push(...lineage);
       } else {
         drops.other++;
+        withheld.push(id);
       }
     }
     const candidates = [...candidateLineage.keys()];
@@ -407,17 +411,19 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // this source, which this extraction judges again, are cleared before it records its own
     // (I04-R15; the records of a version before this one are out of date as well).
     const bookkeeping: DerivedItem = {
-      kind: "extraction",
+      kind: BOOKKEEPING_KIND,
       itemKey: "bookkeeping",
       lineage: [own],
       // no source content: a policy that errs must not lose the counts or skip the clean-up
-      unjudged: true,
+      unjudged: true as const,
       write: (tx) => {
         recordExtractionDrops(tx, job.id, drops);
         tx.run("DELETE FROM scope_policy_drops WHERE source_id = ? AND version <= ?", [
           own.sourceId,
           own.version,
         ]);
+        // a candidate the policy kept from this call is a record too: a widening extracts this version again
+        for (const id of withheld) recordWithheldCandidate(tx, own, id, now().toISOString());
       },
     };
     // the rule runs last, over what the written items touched; it too judges each Insight's

@@ -119,7 +119,7 @@ export interface BackendOptions {
    * The scope policy by name (I04-R14), passed as the backend's `--scope-policy` switch: a setting, not
    * environment passthrough (BACKEND_ENV_KEYS stays the OS folders). None: the backend's default.
    */
-  scopePolicy?: string | undefined;
+  scopePolicy: string | undefined;
   /** The shell's environment; only BACKEND_ENV_KEYS pass. */
   env?: Readonly<Record<string, string | undefined>>;
   /** The run's session token; a restart passes the first start's (V01-T16). Default: fresh. */

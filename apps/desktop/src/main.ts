@@ -31,7 +31,7 @@ import { superviseBackend, type Supervisor } from "./backend-supervisor.ts";
 import { BRIDGE, createBridgeHandlers, type BridgeFunction } from "./bridge.ts";
 import { createSecretStore, electronCipher } from "./secret-store.ts";
 import { debuggingRequested } from "./debugging.ts";
-import { BACKEND_ENTRY, REFUSE_DEBUGGING, switches, WEB_ROOT } from "./layout.ts";
+import { BACKEND_ENTRY, REFUSE_DEBUGGING, scopePolicyName, switches, WEB_ROOT } from "./layout.ts";
 import { loadScreens, lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
@@ -89,8 +89,8 @@ async function run() {
         origin: APP_ORIGIN,
         dataDir,
         fixtures,
-        // a deployment setting read here, not passed through the backend's environment (I04-R14)
-        scopePolicy: process.env.PKI_SCOPE_POLICY,
+        // a build-time value in a production build, the environment's only in a source run (layout.ts, I04-R14)
+        scopePolicy: scopePolicyName(process.env),
         secrets,
         token,
       }),

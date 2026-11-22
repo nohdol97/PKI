@@ -69,6 +69,7 @@ export {
   assertFresh,
   assertLineage,
   commitDerived,
+  UnjudgedItemError,
   isFenceCurrent,
   StaleDerivativeError,
 } from "./commit-derived.ts";
@@ -205,6 +206,7 @@ export {
 export { canonicalTransaction } from "./canonical-transaction.ts";
 export {
   atLeastAsStrict,
+  BOOKKEEPING_KIND,
   createDerivativeRegistry,
   LAYERS,
   scopesOfVersions,
@@ -244,6 +246,7 @@ export {
   clearScopePolicyDrops,
   countScopePolicyDrops,
   createCommitScope,
+  recordWithheldCandidate,
   scopePolicyDropSources,
 } from "./scope-drops.ts";
 export {
