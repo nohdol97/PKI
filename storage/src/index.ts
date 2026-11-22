@@ -36,6 +36,29 @@ export {
   type PreparedCanonicalDb,
   type SourceIdentity,
 } from "./identity.ts";
+export {
+  createLocalFileIndex,
+  insertLocation,
+  listLocations,
+  LOCAL_FILES_INSTANCE_ID,
+  newLocalId,
+  readLocation,
+  setLocationState,
+  WRITABLE_LOCATION_STATES,
+  type EntryFields,
+  type EntryState,
+  type InsertRefusal,
+  type InsertResult,
+  type LocalFileEntry,
+  type LocalFileIndex,
+  type LocalLocation,
+  type LocationState,
+  type LocationType,
+  type NewEntry,
+  type NewLocation,
+  type UpdateResult,
+  type WriteRefusal,
+} from "./local-files.ts";
 export { databaseEncryption } from "./database-encryption.ts";
 export {
   dataDirectory,
