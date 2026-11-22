@@ -36,6 +36,7 @@ Phase 1의 골격(V01: 화면, 로컬 API, Electron 쉘, 정본 저장, Provider
 ## 작업 방식
 
 - 이 저장소에는 범용 제품만 둡니다. 실제 메일·메신저·Wiki 수집기와 환경별 연동은 배포처 포크에서 구현합니다.
+- 수집기(Connector)를 새로 만드는 방법: [docs/connector-sdk.md](docs/connector-sdk.md)
 - 테스트와 이슈에는 합성 데이터만 사용합니다.
 - 최초 커밋 이후의 모든 변경은 feature 브랜치와 Pull Request로만 들어옵니다. `main`에 직접 push하지 않습니다.
 - 구현 전에 `docs/specs/`에 요구사항과 완료 기준을 먼저 고정합니다.
