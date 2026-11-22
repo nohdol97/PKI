@@ -27,6 +27,7 @@ import {
   registerConnectorInstance,
   registerJob,
   saveSourceRecord,
+  userDecisions,
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
@@ -888,6 +889,43 @@ describe("semantic history of an extraction (S01-T01: lifecycle.history, epistem
     await runNext();
     expect(db.all("SELECT epistemic FROM facts")).toEqual([{ epistemic: "explicit" }]);
     expect(factLines()).toHaveLength(2); // the hypothesis statement lowered nothing and wrote nothing
+  });
+
+  it("does not raise a hypothesis fact the user rejected, whatever a later source states (S01-R12, R11 ②)", async () => {
+    setUp([answer("hypothesis"), answer("explicit", "1")]);
+    imported({ id: "a", title: "t", content: Q1 });
+    imported({ id: "b", title: "t", content: `다시: ${Q1}` });
+    await runNext();
+    const { id } = facts()[0] as { id: number };
+    expect(userDecisions.decide(db, { kind: "fact", id }, "reject").status).toBe("applied");
+    await runNext();
+    expect(listEvidence(db, { factId: id })).toHaveLength(2); // the evidence is added all the same
+    expect(db.all("SELECT epistemic, status FROM facts")).toEqual([
+      { epistemic: "hypothesis", status: "rejected" },
+    ]);
+    expect(factLines().map((l) => l.action)).toEqual(["created", "reject"]);
+  });
+
+  // a value fix is T03's: its `replace` line is written by hand here, the one state a user cannot reach yet
+  it("does not raise a fact the user superseded when the restore is refused with user-override (B4)", async () => {
+    setUp([answer("hypothesis"), answer("explicit", "1")]);
+    imported({ id: "a", title: "t", content: Q1 });
+    imported({ id: "b", title: "t", content: `다시: ${Q1}` });
+    await runNext();
+    const { id } = facts()[0] as { id: number };
+    db.run(
+      `INSERT INTO fact_history (fact_id, seq, at, actor, action, from_status, to_status,
+         from_epistemic, to_epistemic)
+       VALUES (?, 2, '2026-11-22T00:00:00Z', 'user', 'replace', 'candidate', 'superseded',
+         'hypothesis', 'hypothesis')`,
+      [id],
+    );
+    db.run("UPDATE facts SET status = 'superseded' WHERE id = ?", [id]);
+    await runNext();
+    expect(db.all("SELECT epistemic, status FROM facts")).toEqual([
+      { epistemic: "hypothesis", status: "superseded" },
+    ]);
+    expect(factLines()).toHaveLength(2);
   });
 
   it("restores a fact a new version superseded to the state it had, not to candidate (V02-R11, S01-R5)", async () => {

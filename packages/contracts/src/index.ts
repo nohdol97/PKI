@@ -727,6 +727,124 @@ export const RebuildProjectionResponseSchema = z.object({
 });
 
 /**
+ * The Semantic registry's read and user actions (S01-R23, T02). A row is an item, a fact or a relation;
+ * the list shows the registry's rows with their status and epistemic type (two columns that never
+ * compute each other), the confidence the Provider gave (or null), and whether the user decided
+ * or wrote the row. A refusal is a code from the lifecycle gate (`refused`), never a text; a row
+ * that is not there, is hidden by the read gate or was deleted all answer `not-found`.
+ * The history holds numbers and closed codes only, no name, value or quote (S01-R6).
+ */
+export const SemanticKindSchema = z.enum(["item", "fact", "relation"]);
+export type SemanticKind = z.infer<typeof SemanticKindSchema>;
+const SemanticStatusSchema = z.enum([
+  "candidate",
+  "verified",
+  "disputed",
+  "superseded",
+  "rejected",
+]);
+const SemanticEpistemicSchema = z.enum(["explicit", "user-approved", "inferred", "hypothesis"]);
+export const SEMANTIC_REFUSALS = [
+  "invalid-transition",
+  "user-override",
+  "basis-required",
+  "not-latest",
+  "nothing-to-undo",
+  "value-exists",
+] as const;
+export const SemanticRefRequestSchema = z.strictObject({
+  kind: SemanticKindSchema,
+  id: z.int().positive(),
+});
+export const SemanticDecideRequestSchema = z.strictObject({
+  kind: SemanticKindSchema,
+  id: z.int().positive(),
+  action: z.enum(["approve", "reject", "dispute"]),
+});
+const SemanticRowSchema = z.object({
+  id: z.int().positive(),
+  status: SemanticStatusSchema,
+  epistemic: SemanticEpistemicSchema,
+  confidence: z.number().min(0).max(1).nullable(),
+  /** The user took an action on it that no undo cancelled. */
+  userDecided: z.boolean(),
+  /** The user wrote the value (a direct add); false for every row extraction made. */
+  userAuthored: z.boolean(),
+});
+export const SemanticFactSchema = SemanticRowSchema.extend({
+  kind: z.string(),
+  value: z.string(),
+  context: z.string().nullable(),
+  /** Evidence on the source's current version. */
+  evidenceCount: z.int().nonnegative(),
+});
+export const SemanticRelationSchema = SemanticRowSchema.extend({
+  type: z.string(),
+  subjectId: z.int().positive(),
+  objectId: z.int().positive(),
+  evidenceCount: z.int().nonnegative(),
+});
+export const SemanticItemSchema = SemanticRowSchema.extend({
+  type: z.string(),
+  name: z.string(),
+  facts: z.array(SemanticFactSchema),
+  /** The relations whose subject is this item. */
+  relations: z.array(SemanticRelationSchema),
+});
+export const SemanticListResponseSchema = z.object({
+  items: z.array(SemanticItemSchema),
+  truncated: z.boolean(),
+});
+export type SemanticList = z.infer<typeof SemanticListResponseSchema>;
+const SemanticStateSchema = z.object({
+  kind: SemanticKindSchema,
+  id: z.int().positive(),
+  status: SemanticStatusSchema,
+  epistemic: SemanticEpistemicSchema,
+});
+/**
+ * One object (a contract schema must convert to a JSON Schema object): `applied` carries `seq` and
+ * `entry`, `unchanged` carries `entry`, `refused` carries `reason`.
+ */
+export const SemanticOutcomeSchema = z
+  .object({
+    status: z.enum(["applied", "unchanged", "refused"]),
+    /** The history line the action wrote (`applied` only). */
+    seq: z.int().positive().optional(),
+    /** The row as it is now (`applied` and `unchanged`). */
+    entry: SemanticStateSchema.optional(),
+    /** The gate's refusal (`refused` only). */
+    reason: z.enum(SEMANTIC_REFUSALS).optional(),
+  })
+  .refine((o) =>
+    o.status === "applied"
+      ? o.seq !== undefined && o.entry !== undefined && o.reason === undefined
+      : o.status === "unchanged"
+        ? o.seq === undefined && o.entry !== undefined && o.reason === undefined
+        : o.seq === undefined && o.entry === undefined && o.reason !== undefined,
+  );
+export type SemanticOutcome = z.infer<typeof SemanticOutcomeSchema>;
+export const SemanticHistoryResponseSchema = z.object({
+  lines: z.array(
+    z.object({
+      seq: z.int().positive(),
+      at: z.string(),
+      actor: z.enum(["user", "extraction", "propagation", "policy"]),
+      action: z.string().max(40),
+      fromStatus: SemanticStatusSchema.nullable(),
+      toStatus: SemanticStatusSchema,
+      fromEpistemic: SemanticEpistemicSchema.nullable(),
+      toEpistemic: SemanticEpistemicSchema,
+      reason: z.string().max(60).nullable(),
+      basisSourceId: z.int().positive().nullable(),
+      basisVersion: z.int().positive().nullable(),
+      batch: z.int().positive().nullable(),
+      revertsSeq: z.int().positive().nullable(),
+    }),
+  ),
+});
+
+/**
  * Where the screens get the backend address and token: the dev server in the browser,
  * the preload in Electron (V01-R3). An empty `baseUrl` means the page's own origin.
  */
@@ -899,6 +1017,25 @@ export const routes = {
     path: "/api/evidence/source",
     request: EvidenceSourceRequestSchema,
     response: EvidenceSourceResponseSchema,
+  },
+  semantic: { method: "GET", path: "/api/semantic", response: SemanticListResponseSchema },
+  semanticHistory: {
+    method: "POST",
+    path: "/api/semantic/history",
+    request: SemanticRefRequestSchema,
+    response: SemanticHistoryResponseSchema,
+  },
+  semanticDecide: {
+    method: "POST",
+    path: "/api/semantic/decide",
+    request: SemanticDecideRequestSchema,
+    response: SemanticOutcomeSchema,
+  },
+  semanticUndo: {
+    method: "POST",
+    path: "/api/semantic/undo",
+    request: SemanticRefRequestSchema,
+    response: SemanticOutcomeSchema,
   },
 } as const;
 export type RouteName = keyof typeof routes;

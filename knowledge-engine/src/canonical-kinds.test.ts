@@ -25,6 +25,7 @@ import {
   saveRelation,
   saveSourceRecord,
   searchKeyword,
+  userDecisions,
   createDerivativeRegistry,
   type DerivativeKind,
   type DerivedRef,
@@ -834,6 +835,46 @@ describe("a new version's propagation through the canonical kinds (V02-R11)", ()
     cite({ factId }, v1.id);
     expect(propagateNewVersion(db, v1.sourceId).facts).toEqual([]);
     expect(statusOf("facts", factId)).toBe("candidate");
+  });
+});
+
+describe("a new version's propagation and the rows the user decided (S01-R12, user-override.guard)", () => {
+  const statusOf = (id: number) => db.all("SELECT status FROM facts WHERE id = ?", [id])[0]?.status;
+  const linesOf = (id: number) =>
+    db.all("SELECT action, reason FROM fact_history WHERE fact_id = ? ORDER BY seq", [id]);
+
+  it("does not supersede a row approved with no current evidence, goes on with the others, and counts only what it superseded", () => {
+    const b = item("B");
+    const v1 = version("msg-1", "B API는 12월 10일");
+    const plain = fact(b, "k", "plain");
+    const approvedLate = fact(b, "k", "approved-late");
+    const rejectedThenApproved = fact(b, "k", "rejected-then-approved");
+    const approvedWithEvidence = fact(b, "k", "approved-with-evidence");
+    for (const id of [plain, approvedLate, rejectedThenApproved, approvedWithEvidence]) {
+      cite({ factId: id }, v1.id);
+    }
+    userDecisions.decide(db, { kind: "fact", id: rejectedThenApproved }, "reject");
+    userDecisions.decide(db, { kind: "fact", id: approvedWithEvidence }, "approve"); // current evidence now
+    version("msg-1", "B API는 12월 3일"); // the evidence above is past evidence from here
+    userDecisions.decide(db, { kind: "fact", id: approvedLate }, "approve");
+    userDecisions.decide(db, { kind: "fact", id: rejectedThenApproved }, "approve");
+    expect(linesOf(approvedLate)).toEqual([
+      { action: "approve", reason: "accepted-without-current-evidence" },
+    ]);
+
+    const report = propagateNewVersion(db, v1.sourceId);
+    // only what the gate applied is reported: the two protected rows are neither superseded nor counted
+    expect(report.facts).toEqual([plain, approvedWithEvidence]);
+    expect(statusOf(plain)).toBe("superseded");
+    expect(statusOf(approvedWithEvidence)).toBe("superseded");
+    expect(statusOf(approvedLate)).toBe("verified");
+    expect(statusOf(rejectedThenApproved)).toBe("verified");
+    // the refusal writes no line
+    expect(linesOf(approvedLate)).toHaveLength(1);
+    expect(linesOf(rejectedThenApproved).map((l) => l.action)).toEqual(["reject", "approve"]);
+    // once the approval is undone, the next propagation takes the row like any other
+    userDecisions.undo(db, { kind: "fact", id: approvedLate });
+    expect(propagateNewVersion(db, v1.sourceId).facts).toEqual([approvedLate]);
   });
 });
 

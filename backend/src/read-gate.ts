@@ -5,14 +5,18 @@
 // snippet, order or error of it reaches the caller. A registry that cannot judge throws and the call fails
 // (the server answers a generic 500): a row is never shown unjudged.
 import { createProductRegistry } from "@pki/knowledge-engine";
-import type { SourceSummary } from "@pki/contracts";
+import type { SemanticKind, SemanticList, SourceSummary } from "@pki/contracts";
 import {
   findSources,
   listActiveInsights,
   listInsightEvidenceIds,
+  listSemanticFacts,
+  listSemanticItems,
+  listSemanticRelations,
   listSources,
   readEvidenceSource,
   readInsightEvidence,
+  readSemanticState,
   type ActiveInsight,
   type DerivativeRegistry,
   type DerivedRef,
@@ -38,18 +42,26 @@ export interface ReadGate {
   ): { insight: ActiveInsight; evidence: InsightEvidenceRow[] } | undefined;
   /** undefined when the evidence row is absent or not shown. */
   evidenceSource(evidenceId: number): EvidenceSourceView | undefined;
+  /** The Semantic registry's items with the facts and relations shown (S01-R23): a hidden row is left out whole. */
+  semantic(): SemanticList;
+  /** Whether the registry row is stored and shown: the one answer for a row that is absent, deleted or hidden. */
+  semanticShown(kind: SemanticKind, id: number): boolean;
 }
 
 export interface ReadGateOptions {
   /** How many sources the list and the search return (provisional: the storage reads' own limits). */
   sourcesLimit?: number;
   searchLimit?: number;
+  /** How many items the Semantic list returns. */
+  semanticLimit?: number;
   /** The most rows read to fill a limit (default 10000; a test lowers it). */
   maxScan?: number;
 }
 
 const SOURCES_LIMIT = 100;
 const SEARCH_LIMIT = 50;
+/** Provisional (S01-T02): the Semantic list's items per answer; `truncated` says more exist. */
+const SEMANTIC_LIMIT = 100;
 /** The most rows read to fill a limit when many are hidden (the window grows fourfold until then). */
 const MAX_SCAN = 10_000;
 
@@ -103,6 +115,7 @@ export function createReadGate(
   const maxScan = options.maxScan ?? MAX_SCAN;
   const sourcesLimit = options.sourcesLimit ?? SOURCES_LIMIT;
   const searchLimit = options.searchLimit ?? SEARCH_LIMIT;
+  const semanticLimit = options.semanticLimit ?? SEMANTIC_LIMIT;
   const isShown = (kind: string, id: number) =>
     shown([{ kind, id: String(id) }], "display").has(String(id));
   return {
@@ -124,5 +137,19 @@ export function createReadGate(
     evidenceSource(evidenceId) {
       return isShown("evidence", evidenceId) ? readEvidenceSource(db, evidenceId) : undefined;
     },
+    semantic() {
+      // one more than the limit tells whether the list was cut
+      const items = filled((n) => listSemanticItems(db, n), "item", "display", semanticLimit + 1);
+      return {
+        items: items.slice(0, semanticLimit).map((item) => ({
+          ...item,
+          facts: only(listSemanticFacts(db, item.id), "fact", (f) => f.id, "display"),
+          relations: only(listSemanticRelations(db, item.id), "relation", (r) => r.id, "display"),
+        })),
+        truncated: items.length > semanticLimit,
+      };
+    },
+    semanticShown: (kind, id) =>
+      readSemanticState(db, { kind, id }) !== undefined && isShown(kind, id),
   };
 }
