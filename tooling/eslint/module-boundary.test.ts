@@ -164,6 +164,7 @@ afterAll(() => rmSync(fixtureRoot, { recursive: true, force: true }));
 const backendFile = join(fixtureRoot, "backend/src/server.ts");
 const backendTest = join(fixtureRoot, "backend/src/server.test.ts");
 const backendE2e = join(fixtureRoot, "backend/src/screens.e2e.tsx");
+const backendE2eHelper = join(fixtureRoot, "backend/e2e/helper.ts");
 const composition = join(fixtureRoot, "backend/src/composition.ts");
 const storageIndex = join(fixtureRoot, "storage/src/index.ts");
 const storageAdapter = join(fixtureRoot, "storage/src/adapters/driver.ts");
@@ -181,6 +182,9 @@ describe("module-boundary rule", () => {
       // devDependencies-only workspace packages (test code) are reachable from test files only
       { code: 'import { send } from "@pki/testkit";', filename: backendTest },
       { code: 'import type { T } from "@pki/testkit";', filename: backendE2e },
+      // a package's top-level e2e/ folder is test code whatever the file name (V02-T11 A-F2)
+      { code: 'import { send } from "@pki/testkit";', filename: backendE2eHelper },
+      { code: 'import { open } from "./launch.ts";', filename: backendE2eHelper },
       { code: 'import { b } from "../src/other.ts";', filename: backendFile },
       { code: 'import { readFile } from "node:fs/promises";', filename: backendFile },
       { code: 'import { describe } from "vitest";', filename: backendFile },
@@ -331,6 +335,9 @@ describe("module-boundary rule", () => {
         'import { f } from "./sneaky.e2e.jsx";',
         'import { f } from "./sneaky.test.mts";',
         'import { f } from "./sneaky.test.cts";',
+        // an E2E helper under the package's e2e/ folder, by file or by folder (V02-T11 A-F2)
+        'import { openEvidence } from "../e2e/screens.ts";',
+        'export * from "../e2e";',
       ].map((code) => ({
         code,
         filename: backendFile,

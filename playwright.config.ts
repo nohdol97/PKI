@@ -8,8 +8,15 @@ export default defineConfig<{ target: "browser" | "electron" }>({
     {
       name: "browser",
       testMatch: "**/*.e2e.{ts,tsx}",
-      // the backend's test-build-only entries (seed, Provider double) are scripts, not tests
-      testIgnore: ["apps/desktop/**", "backend/src/*.e2e.ts"],
+      // the backend's test-build-only entries (seed, Provider double) are scripts, not
+      // tests: named one by one, so a future backend E2E is not dropped silently
+      testIgnore: [
+        "apps/desktop/**",
+        "backend/src/v02-seed.e2e.ts",
+        "backend/src/v02-double.e2e.ts",
+        "backend/src/v02-double.hook.e2e.ts",
+        "backend/src/v02-shell.e2e.ts",
+      ],
     },
     { name: "build-web", testMatch: "apps/desktop/e2e/build-web.setup.ts" },
     {

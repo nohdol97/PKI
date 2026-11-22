@@ -9,7 +9,8 @@
 // package's "<name>/adapters" entry. Any other module fails, type-only imports
 // and a public entry re-exporting one included. Test files may reach the
 // implementation they test; product code may not import a test module (it could
-// re-export an adapter). @pki/testkit (test doubles, test builds only) is outside
+// re-export an adapter). A test module is a `.test`/`.e2e` file or any file under a
+// package's top-level e2e/ folder (E2E helpers such as launch.ts, V02-T11 A-F2). @pki/testkit (test doubles, test builds only) is outside
 // this boundary. Outside src/adapters/, code that builds an implementation fails
 // too: a class implementing an adapter interface, or an object, class, function
 // or `new` value typed as one (annotation, return type, satisfies, as), including
@@ -41,6 +42,14 @@ const TEST_FILE = /\.(test|e2e)\.tsx?$/;
 const ADAPTERS_DIR = "src/adapters";
 const COMPOSITION_ROOT = { pkg: "@pki/backend", file: "src/composition.ts" };
 const TEST_SPECIFIER = /\.(test|e2e)(\.[cm]?[jt]sx?)?$/;
+/** A package's top-level e2e/ folder holds test code only, whatever the file names. */
+const E2E_DIR = "e2e";
+
+/** @param {string} path An absolute path @returns {boolean} */
+function inE2eDir(path) {
+  const root = packageRootOf(path);
+  return root !== undefined && relative(root, path).split(sep)[0] === E2E_DIR;
+}
 const EXEMPT_PACKAGES = new Set(["@pki/testkit"]);
 const ADAPTER_INTERFACES = new Set([
   "Connector",
@@ -199,7 +208,7 @@ const moduleBoundary = {
     if (!ownRoot) return {};
     const ownName = JSON.parse(readFileSync(join(ownRoot, "package.json"), "utf8")).name;
     const ownPath = relative(ownRoot, context.filename).split(sep).join("/");
-    const isTest = TEST_FILE.test(context.filename);
+    const isTest = TEST_FILE.test(context.filename) || inE2eDir(context.filename);
     const isComposition = ownName === COMPOSITION_ROOT.pkg && ownPath === COMPOSITION_ROOT.file;
     // who may reach an implementation: the root, implementations themselves, tests
     const mayReachAdapters =
@@ -214,12 +223,12 @@ const moduleBoundary = {
       }
       if (typeof source !== "string") return;
       if (source.startsWith(".")) {
-        if (!isTest && TEST_SPECIFIER.test(source)) {
+        // Treat the target as a directory so a specifier naming a package root resolves to it.
+        const resolved = resolve(dirname(context.filename), source);
+        if (!isTest && (TEST_SPECIFIER.test(source) || inE2eDir(join(resolved, "_")))) {
           context.report({ node, messageId: "testModuleImport", data: { source } });
           return;
         }
-        // Treat the target as a directory so a specifier naming a package root resolves to it.
-        const resolved = resolve(dirname(context.filename), source);
         if (packageRootOf(join(resolved, "_")) !== ownRoot) {
           context.report({ node, messageId: "crossPackageRelative", data: { source } });
         } else if (

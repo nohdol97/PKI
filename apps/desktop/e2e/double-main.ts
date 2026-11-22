@@ -7,6 +7,7 @@
 // (src/main.ts) unchanged. Not importable from Node (it imports Electron's
 // main-process API). T15 keeps this file, like the rest of e2e/, out of the build.
 import { utilityProcess } from "electron";
+import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const SHELL_ENTRY = fileURLToPath(new URL("../../../backend/src/shell.ts", import.meta.url));
@@ -16,8 +17,20 @@ const DOUBLE_ENTRY = fileURLToPath(
 
 const fork = utilityProcess.fork;
 utilityProcess.fork = (modulePath, args, options) => {
-  // a shell that forks anything else has changed: fail loudly, never run unbound
-  if (modulePath !== SHELL_ENTRY) throw new Error(`unexpected backend entry: ${modulePath}`);
+  // a shell that forks anything else has changed: fail loudly, never run unbound. The
+  // reason also goes to the file the E2E names (PKI_E2E_GUARD_FILE), which it reads
+  // when the shell does not start (this may run before the E2E can read stderr). Then
+  // the process ends at once: a throw reaches the shell's start-failure dialog, which
+  // blocks the main process until clicked, and process.exit and app.exit did not end
+  // it under Playwright's inspector (observed).
+  if (modulePath !== SHELL_ENTRY) {
+    const message = `PKI E2E: unexpected backend entry ${modulePath}; expected ${SHELL_ENTRY}`;
+    process.stderr.write(`${message}\n`);
+    const file = process.env.PKI_E2E_GUARD_FILE;
+    if (file) appendFileSync(file, `${message}\n`);
+    process.kill(process.pid, "SIGKILL");
+    throw new Error(message);
+  }
   return fork(DOUBLE_ENTRY, args, options);
 };
 

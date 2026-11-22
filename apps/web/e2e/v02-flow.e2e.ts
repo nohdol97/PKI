@@ -19,7 +19,7 @@ import { ELECTRON, shellArgs } from "@pki/desktop";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { arch, platform, release, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -57,56 +57,102 @@ interface Stack {
   stop(): Promise<void>;
 }
 
-/** Opens the screens on `target` over `dir`'s data directory, the Provider double bound. */
+/** Stacks not yet stopped: afterEach stops them (a timed-out test skips its finally). */
+const live = new Set<() => Promise<void>>();
+
+/**
+ * Closes what `closers` holds, last first, once; every closer runs even if one fails.
+ * Registered in `live` until it has run.
+ */
+function closer(closers: (() => Promise<unknown>)[]): () => Promise<void> {
+  let closing: Promise<void> | undefined;
+  const close = () =>
+    (closing ??= (async () => {
+      live.delete(close);
+      const failures: unknown[] = [];
+      for (const c of closers.reverse()) await c().catch((e: unknown) => failures.push(e));
+      if (failures.length > 0) throw failures[0];
+    })());
+  live.add(close);
+  return close;
+}
+
+/** Ends a child process and waits for its exit (the next start reuses the data directory). */
+async function ended(child: ChildProcess) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exit = once(child, "exit");
+  child.kill();
+  await exit;
+}
+
+/**
+ * Opens the screens on `target` over `dir`'s data directory, the Provider double bound.
+ * If any step fails, whatever it launched is closed before the error is thrown.
+ */
 async function startStack(target: Target, dir: string, chromium: BrowserType): Promise<Stack> {
   const dataDir = join(dir, "data");
   // An empty fixtures file: nothing but the screen's import puts sources in this DB.
   const fixtures = join(dir, "empty.jsonl");
   writeFileSync(fixtures, "");
   const requested: string[] = [];
-  if (target === "electron") {
-    // the shell's switches, after its app folder (which the test main replaces)
-    const [, ...switches] = shellArgs({ userData: join(dir, "user"), dataDir, fixtures });
-    const app = await _electron.launch({
-      executablePath: ELECTRON,
-      args: [SHELL_MAIN, ...switches],
-    });
-    const window = await app.firstWindow();
-    await window.waitForLoadState("domcontentloaded");
-    window.on("request", (r) => requested.push(r.url()));
-    const electron = await app.evaluate(() => process.versions.electron);
-    return { page: window, requested, electron, stop: () => app.close() };
-  }
-  const port = await freePort();
-  let backend: ChildProcess | undefined;
-  const vite = await createServer({
-    ...webConfig({
-      port,
-      fixtures,
-      dataDir,
-      env: { NODE_OPTIONS: BACKEND_PRELOAD },
-      onBackend: (child) => (backend = child),
-    }),
-    configFile: false,
-    logLevel: "warn",
-  });
-  await vite.listen();
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  page.on("request", (r) => requested.push(r.url()));
-  await page.goto(`http://127.0.0.1:${port}`);
-  return {
-    page,
-    requested,
-    async stop() {
-      await browser.close();
-      await vite.close();
-      // the next start reuses the data directory: the old backend must be gone first
-      if (backend && backend.exitCode === null && backend.signalCode === null) {
-        await once(backend, "exit");
+  const closers: (() => Promise<unknown>)[] = [];
+  const stop = closer(closers);
+  try {
+    if (target === "electron") {
+      // the shell's switches, after its app folder (which the test main replaces)
+      const [, ...switches] = shellArgs({ userData: join(dir, "user"), dataDir, fixtures });
+      // where the test main's fork guard writes why it stopped the shell
+      const guardFile = join(dir, "shell-guard.txt");
+      const app = await _electron.launch({
+        executablePath: ELECTRON,
+        args: [SHELL_MAIN, ...switches],
+        // within the test's time, so a shell stuck at start fails instead of timing out
+        timeout: 30_000,
+        env: { ...process.env, PKI_E2E_GUARD_FILE: guardFile } as Record<string, string>,
+      });
+      closers.push(() => app.close());
+      try {
+        // a shell that ends before its window opens fails now, not at the test timeout
+        const exited = once(app.process(), "exit").then(([code]) => {
+          throw new Error(`the shell exited (${String(code)})`);
+        });
+        exited.catch(() => undefined);
+        const window = await Promise.race([app.firstWindow({ timeout: 30_000 }), exited]);
+        await window.waitForLoadState("domcontentloaded");
+        window.on("request", (r) => requested.push(r.url()));
+        const electron = await app.evaluate(() => process.versions.electron);
+        return { page: window, requested, electron, stop };
+      } catch (error) {
+        const said = existsSync(guardFile) ? readFileSync(guardFile, "utf8") : "";
+        throw new Error(`the shell did not start: ${String(error)}\n${said}`, {
+          cause: error,
+        });
       }
-    },
-  };
+    }
+    const port = await freePort();
+    const vite = await createServer({
+      ...webConfig({
+        port,
+        fixtures,
+        dataDir,
+        env: { NODE_OPTIONS: BACKEND_PRELOAD },
+        onBackend: (child) => closers.push(() => ended(child)),
+      }),
+      configFile: false,
+      logLevel: "warn",
+    });
+    closers.push(() => vite.close());
+    await vite.listen();
+    const browser = await chromium.launch();
+    closers.push(() => browser.close());
+    const page = await browser.newPage();
+    page.on("request", (r) => requested.push(r.url()));
+    await page.goto(`http://127.0.0.1:${port}`);
+    return { page, requested, stop };
+  } catch (error) {
+    await stop().catch(() => undefined);
+    throw error;
+  }
 }
 
 const go = (page: Page, screen: "홈" | "원본") =>
@@ -139,7 +185,7 @@ function countRows(dir: string) {
       sourceVersions: one("SELECT count(*) AS n FROM source_versions"),
       insights: one("SELECT count(*) AS n FROM insights"),
       activeInsights: one("SELECT count(*) AS n FROM insights WHERE state = 'active'"),
-      jobsNotDone: one("SELECT count(*) AS n FROM jobs WHERE status <> 'done'"),
+      jobsNotSucceeded: one("SELECT count(*) AS n FROM jobs WHERE status <> 'succeeded'"),
       providerCalls: Number(
         db.all("SELECT count(*) AS n FROM provider_calls WHERE provider = ? AND outcome = 'ok'", [
           PROVIDER.id,
@@ -164,7 +210,11 @@ let dir: string;
 test.beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-e2e-flow-"));
 });
-test.afterEach(() => rmSync(dir, { recursive: true, force: true }));
+test.afterEach(async () => {
+  // what a failed or timed-out test left running, before its folder goes
+  await Promise.allSettled([...live].map((stop) => stop()));
+  rmSync(dir, { recursive: true, force: true });
+});
 
 test("v02-flow.e2e: import → extraction → Insight → evidence, re-import, restart", async ({
   target,
@@ -210,7 +260,7 @@ test("v02-flow.e2e: import → extraction → Insight → evidence, re-import, r
     sourceVersions: 3,
     insights: 1,
     activeInsights: 1,
-    jobsNotDone: 0,
+    jobsNotSucceeded: 0,
     providerCalls: 3,
     droppedQuotes: 0,
     droppedOther: 0,
