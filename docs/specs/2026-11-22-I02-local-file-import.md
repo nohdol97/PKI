@@ -125,7 +125,7 @@ I02-A는 파일 하나를 글과 위치표로 바꾸는 순수 모듈(`@pki/docu
   | `network-location` | UNC 경로(`\\server\share`, `\\?\UNC\`)다. 문구는 `미구현, 배포처 후속`을 포함한다(S25) |
   | `unsupported-format` | `file`인데 여덟 형식이 아니거나, `jsonl-file`인데 확장자가 `.jsonl`이 아니다 |
 
-  한 요청이 여러 사유에 걸리면 표의 위에서부터 처음 걸린 것 하나를 돌려준다(`\\?\UNC\`는 `network-location`이 `unsupported-path-form`보다 먼저다). 승인할 때 symlink를 끝까지 따라간 **실제 경로**(I02B-R6)와 그 폴더(또는 파일)의 **정체**(`dev`, `ino`)를 함께 저장한다. 화면에는 사용자가 고른 경로를 보인다.
+  한 요청이 여러 사유에 걸리면 표의 위에서부터 처음 걸린 것 하나를 돌려준다(`\\?\UNC\`는 `network-location`이 `unsupported-path-form`보다 먼저다). UNC는 모양만으로 정해지므로 파일 시스템을 묻기 전에 `network-location`이다(공유를 찾으려고 네트워크에 닿지 않는다). 승인할 때 symlink를 끝까지 따라간 **실제 경로**(I02B-R6)와 그 폴더(또는 파일)의 **정체**(`dev`, `ino`)를 함께 저장한다. 화면에는 사용자가 고른 경로를 보인다.
 - **I02B-R6 경로 경계 모듈.** `@pki/connector-sdk`에 경로 경계 모듈 하나를 둔다. 승인 검사, 폴더 훑기, 파일 열기가 모두 이것을 쓴다. 규칙은 다음과 같다.
   - **실제 경로는 OS에게 묻는다.** `fs.realpath.native`를 쓴다(Node가 스스로 계산하는 `fs.realpath`가 아니다). Windows의 junction과 짧은 이름을 OS가 푼 결과를 받기 위해서다. 그 결과가 정말 긴 이름과 저장된 대소문자로 돌아오는지는 이 저장소에서 확인하지 못했으므로(가정 G10, G18) 안쪽 판정은 이 문자열 하나에 기대지 않는다(I02B-R48).
   - **안쪽 판정은 구성 단위로 한다.** 문자열 앞부분 비교가 아니다(`/data/a`는 `/data/ab` 안이 아니다).
@@ -404,7 +404,7 @@ I02-A는 파일 하나를 글과 위치표로 바꾸는 순수 모듈(`@pki/docu
 
     UNC(`\\server\share`, `\\?\UNC\`)는 따로 `network-location`이다. 짧은 이름은 **알아볼 수 있는 만큼만** 막는다: 모양이 8.3이고 `~숫자`가 든 구간을 거부한다. 정말로 그런 이름의 폴더도 거부되지만(닫는 쪽) 선택 창은 긴 이름을 돌려주므로 실제로 걸릴 일은 드물다. 짧은 이름이 그 모양을 벗어나는 경우는 경로 글자로는 알아볼 수 없고, 아래의 정체 판정이 받친다. 이 분류는 문자열만 보는 순수 함수라서 **어느 OS에서든 Windows 규칙으로 테스트한다**(I02B-C37).
   - **대소문자는 언제나 접는다.** 제품은 볼륨이 대소문자를 구분하는지 알아내려 하지 않는다. "데이터 디렉터리 안인가"와 "다른 위치와 겹치는가"를 경로로 판정할 때는 **모든 OS에서** 대소문자를 접고 유니코드 정규형을 맞춘 뒤 구성 단위로 비교한다. 대소문자를 구분하는 볼륨에서는 `Docs`와 `docs`가 겹친다고 잘못 거부될 수 있다. 그 대가를 받아들인다(거부는 되돌릴 수 있고, 잘못 통과는 `secrets.json`을 읽는다).
-  - **판정은 두 길이고, 하나라도 "안"이면 안이다.** ① 경로: 위의 접은 비교. ② 정체: 후보 폴더에서 볼륨의 맨 위까지 조상을 하나씩 올라가며 그 `(dev, ino)`가 금지 폴더(데이터 디렉터리, 셸의 사용자 자료 폴더, 다른 위치의 루트)의 것과 같은지 보고, 거꾸로 금지 폴더의 조상 가운데 후보와 같은 것이 있는지도 본다. 훑기에서는 내려가는 폴더마다 그 정체가 금지 폴더의 것과 같으면 내려가지 않는다. ②는 글자가 어떻게 적혔든(대소문자, 짧은 이름, junction을 거친 표기) 같은 폴더를 같다고 본다.
+  - **판정은 두 길이고, 하나라도 "안"이면 안이다.** ① 경로: 위의 접은 비교. ② 정체: 후보 폴더에서 볼륨의 맨 위까지 조상을 하나씩 올라가며 그 `(dev, ino)`가 금지 폴더(데이터 디렉터리, 셸의 사용자 자료 폴더, 다른 위치의 루트)의 것과 같은지 보고, 거꾸로 금지 폴더의 조상 가운데 후보와 같은 것이 있는지도 본다(거꾸로 보기는 **다른 위치의 루트에만** 한다. 데이터 디렉터리와 사용자 자료 폴더를 품은 폴더는 승인되고, 훑을 때 그 아래만 뺀다: I02B-R6). 어느 조상의 정체도 읽을 수 없으면 "안"으로 본다. 훑기에서는 내려가는 폴더마다 그 정체가 금지 폴더의 것과 같으면 내려가지 않는다. ②는 글자가 어떻게 적혔든(대소문자, 짧은 이름, junction을 거친 표기) 같은 폴더를 같다고 본다.
   - **셸의 사용자 자료 폴더.** 데이터 디렉터리는 일부러 Electron의 userData와 다른 곳이다(`storage/src/data-directory.ts`). Windows에서 userData는 로밍 `%APPDATA%` 아래에 있고 이름이 `.`으로 시작하지 않아 무시 목록에 걸리지 않는다. 설치본에서는 주 프로세스가 백엔드를 띄울 때 그 경로를 넘기고(`apps/desktop/src/backend-process.ts`), 금지 폴더 목록에 든다. 브라우저 개발 모드에는 그 폴더가 없다. 설치본에서 그 경로가 실제로 무엇인지는 확인된 값이 아니다(가정 G16, S23 W11).
   - **표시: `site-verify`.** Windows에서 ①의 실제 경로가 긴 이름과 저장된 대소문자로 돌아오는지(G10, G18), ②의 `ino`가 믿을 만한지(G14)는 S23 W11·W12가 본다. 공용 코드의 거부 가지는 저장소 안의 테스트가 본다(I02B-C37, C38).
 
@@ -496,12 +496,18 @@ interface LocalFilesPorts {
 
 // 색인 포트의 쓰기: 조건이 안 맞으면 applied가 거짓이고 아무것도 바뀌지 않는다(I02B-R33)
 interface LocalFileIndex {
-  updateEntry(externalId: string, expectedSeq: number, next: EntryFields): { applied: boolean };
-  insertEntry(locationId: string, entry: NewEntry, seenPathHashesOfSameContent: readonly string[]): { applied: boolean };
-  // 읽기는 생략
+  // 적용되면 { applied: true, seq }, 아니면 { applied: false, reason }. 이유는 닫힌 목록이다:
+  //   update: stale(순번이 다르거나 항목이 없음) | dead(deleted·forgotten) | location-closed | path-taken
+  //   insert: forgotten | duplicate | location-closed
+  updateEntry(externalId: string, expectedSeq: number, next: EntryFields): UpdateResult;
+  // 경로는 평문으로 받는다(키 있는 해시는 정본 안에서 만든다). entry가 위치 ID를 갖는다
+  insertEntry(entry: NewEntry, seenPathsOfSameContent: readonly string[]): InsertResult;
+  // 읽기: lastSeq, entryOf, findByPath(평문 먼저, 없으면 해시), findForgottenByContent, entriesOfLocation, entriesAfter
 }
 
-// 정본의 색인 (열 이름은 잠정)
+// 정본의 색인 (T02에서 확정. root_dev·root_ino·file_no·mtime_ns는 10진수 글자: 64비트 번호가 JS 수에 안 든다.
+//   위치 ID와 파일 ID는 CHECK로 22자 base64url을 강제한다. 지운 항목(deleted, forgotten)은 평문 열이
+//   모두 NULL이어야 한다는 CHECK가 있다. deleted는 두 해시도 NULL이다)
 // local_locations(id, type, display_path, real_path, root_dev, root_ino, state, state_reason,
 //                 limit_exceeded, last_pass_at, created_at)
 // local_index_seq(id = 1, value)   -- 순번의 한 행짜리 카운터. 내려가지 않는다
@@ -981,3 +987,4 @@ C1~C52와 H1, H2는 모두 개발 OS(macOS, Linux)와 저장소가 고정한 Nod
 | 2026-11-23 | 독립 검토(PR #136)로 설계 결정 보류. 이 행은 **기록의 사실만** 바로잡는다: G2 칸의 "정상 파일 최대 439.5 MiB"를 정정(큰 XLSX는 힙 한도 512 MB에서 9번 모두 끝까지 가지 못했고 439.5 MiB는 죽기 직전까지의 최대값이며, 정상 문서 형식 12개의 최대는 15.8 MiB). 앞 행들이 적은 "`worker_threads` 구현은 유지"와 남는 위험 14·한도 표·R16 등 **요구사항과 결정은 이 행이 고치지 않았다**: 힙 한도 중단이 512 MB에서 30번 중 7번(23%) 프로세스 전체를 중단시켰고, 설치본에서 `child_process.fork`가 계획된 `RunAsNode` fuse 끔(V01 spec 467행)으로 막히며, main이 띄운 utility process는 되는 것을 추가로 쟀다. 설계 결정은 [기록](../research/2026-11-22-I02B-T01-poc.md)의 "추가 측정 B1~B3"와 "선택지 비교"로 아키텍트가 한다 | 가정 표 G2 | 검토 지적(M3)과 추가 측정. 측정 기록 research/2026-11-22-I02B-T01-poc.md |
 | 2026-11-23 | I02B-T01의 추가 측정(B1~B3)에 따른 설계 결정을 반영. ① 정규화를 백엔드 안의 작업자에서 **별도 호스트 프로세스**로 옮김(D9를 바꿈. R50이 처음 정한 길이고, 앞선 판의 "같은 상주 메모리 문제" 근거는 거둠) ② 호스트 안에서는 작업자 하나: 힙은 `resourceLimits`, 힙 밖은 호스트의 주 스레드가 읽는 `external_memory`, 벽시계는 백엔드가 호스트를 끝냄(D24, R23) ③ 호스트 프로그램 하나에 띄우는 길 둘(보통의 Node는 `child_process.fork`, 묶인 Electron은 주 프로세스가 띄우는 utility process). ⓑ의 배관은 `미확인`이라 T02의 첫 산출물로(D25, G20, C50) ④ `maxHeapMb` 512 → 1,536(D26) ⑤ `resource-exceeded`는 훑기마다 다시 하지 않고 파일이나 메모리 한도가 바뀔 때만, 까닭 모를 호스트의 죽음도 같은 사유(D27, R16, C47) ⑥ 가정 G19(실패)·G20·G21·G22, 기준 C49(유발 입력 30번, 빨개지지 않으면 판정 불가)·C50, C16을 호스트를 거치게, C45의 넘은 순간을 따로 재게 ⑦ 넘치게 적은 문장 정정: G3의 증거(대역 진입점, 설치본 아님), 힙 쪽 "여유" 주장 삭제, 시트마다 22,000행, zlib의 근거 ⑧ 비목표·버린 대안·남는 위험 2·11·13·14와 새 16~18, "작업을 막는 것", T02·T03 행 ⑨ T06에 넘겨받은 두 줄(`openConnector` 한 곳, 양보 행의 자리) | 이 문서 | PR #136 독립 검토(M1~M4, S1~S5)와 추가 측정 B1~B3. 조정자의 결정 |
 | 2026-11-23 | 델타 재검토(통과)의 메모 D-N1~D-N11 반영. ① 까닭 모를 호스트의 죽음은 한 번 다시 해 보고, 잇달아 세 번이면 고정 문서로 호스트의 고장을 가려내며, 고장이면 훑기를 멈추고 `normalizer-unavailable`을 보임(R23, R16, R36, R38, D27, C51, C52) ② C50: 주 프로세스가 띄운 utility process임을 확인, 주 프로세스 쪽에서 끝낸 호스트, 요청에서 인자·환경을 받지 않음, 호스트는 하나 ③ 가두는 측정의 인용을 모양별로 나눠 적음(D9, G19) ④ Electron 안의 힙 사용은 재지 않은 가설로(G23), T02의 측정 항목 ⑤ 벽시계는 호스트가 먼저 재고 백엔드가 뒷받침(R23, D24, C16) ⑥ 양보 행의 자리(C35), I05-T03이 이미 `main`에 있음을 반영(T02·T03·T06 행, 미해결 질문 5), R22의 "주 스레드"를 "백엔드"로, C49를 돌린 때를 증거로 적게, fuse 실험의 종료 코드를 남기지 못한 사실(G22) | 이 문서 | PR #136 델타 재검토의 메모(막는 항목 없음) |
+| 2026-11-23 | I02B-T02b(경로 경계 모듈·색인 저장) 구현 중 좁게 읽은 틈 다섯을 고침. ① UNC는 모양만으로 정해져 파일 시스템을 묻기 전에 `network-location`(R5) ② 정체로 거꾸로 보기는 다른 위치의 루트에만 하고, 읽을 수 없는 조상은 "안"(R48) ③ 색인 포트의 모양 확정: 쓰기 결과에 `reason`, `insertEntry`는 평문 경로를 받고 위치 ID는 entry가 가짐(포트 절) ④ 트리거는 `present`·`skipped` 항목만 비워서, 이미 `deleted`인 항목에 사용자 삭제가 와도 `forgotten`으로 바꾸지 않고(해시를 이미 지웠다) `forgotten`의 revision은 올리지 않으며 `deleted`는 revision이 1 오름(R33, R13) ⑤ 번호·시각·정체는 10진수 글자로 저장하고 ID 모양과 지운 항목의 평문 NULL을 CHECK로 강제 | R5, R33, R48, 포트와 색인의 모양 | I02B-T02b 구현에서 발견한 해석 틈. 독립 검토 대상 |
