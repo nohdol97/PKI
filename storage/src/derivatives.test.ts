@@ -302,6 +302,11 @@ describe("derivative registry: the list is checked once, and fixed", () => {
       /permanentlyAbsent/,
     ],
     ["an unknown layer", [sqlDouble("x", "attic" as Layer)], /layer/],
+    [
+      "an unknown storage",
+      [sqlDouble("x", "item", { storage: "canonnical" as DerivativeKind["storage"] })],
+      /unknown storage canonnical/,
+    ],
   ])("refuses %s", (_name, kinds, message) => {
     expect(make(kinds)).toThrow(message);
   });

@@ -405,7 +405,7 @@ function createDerivativeRegistry(o: { kinds: readonly DerivativeKind[]; policy:
 
 `SourceChange`, `ScopePolicy`, `atLeastAsStrict`, `commitDerived`의 모양(`CommitDerived`, `DerivedItem`, `CommitResult`, `ScopePolicyDrop`), `canonicalTransaction`과 `CanonicalTx`, `applyTombstone`·`liftTombstone`의 모양(`ApplyTombstone`, `LiftTombstone`, `TombstoneWrite`, `TombstoneOutcome`)은 spec 블록과 같은 이름·인자로 같은 파일에 타입으로 있다. 본문은 뒤 작업이 채운다: `commitDerived`는 I04-T06(그 전에 I03-T04의 임시 함수가 같은 모양), tombstone 입구와 래퍼는 I04-T05, 장부 줄(`LedgerLineDraft`, 지금은 I04-R17의 목록대로 잠정)은 I04-T10, `ScopePolicy`의 기본 구현은 I04-T09다.
 
-- **등록.** 등록부는 `createDerivativeRegistry`로 한 번 만들고 실행 중에 바뀌지 않는다(목록이 고정된다). 만들 때 이름 중복, 모르는 층, 없는 종류나 다른 층을 가리키는 `references`, 같은 층의 순환, `canonical` 종류의 `permanentlyAbsent`, 실행 위치가 다른 종류를 가리키는 `references`를 거부한다. 실제 종류의 목록과 제품 구성은 I04-T03(정본 종류)·T04(투영 종류)가 만든다.
+- **등록.** 등록부는 `createDerivativeRegistry`로 한 번 만들고 실행 중에 바뀌지 않는다(목록이 고정된다). 만들 때 이름 중복, 모르는 층, 없는 종류나 다른 층을 가리키는 `references`, 같은 층의 순환, `canonical` 종류의 `permanentlyAbsent`, 실행 위치가 다른 종류를 가리키는 `references`, `canonical`·`projection`이 아닌 실행 위치를 거부하고, 순서에서 빠진 종류가 없는지 확인한다. 실제 종류의 목록과 제품 구성은 I04-T03(정본 종류)·T04(투영 종류)가 만든다.
 - **두 단계 전파.** `propagate`는 받은 트랜잭션만 쓴다. 시작할 때 무효화 기록 한 행을 넣어 ID를 정하고, 1단계에서 모든 종류의 `affected`를 부른 뒤(아무것도 지우기 전), 2단계에서 `invalidate`를 부른다. 순서는 `canonical` 종류 전부를 층 순서로, 그 다음 `projection` 종류 전부를 층 순서로다(층이 `projection`이 아닌 투영 종류도 정본 종류 뒤). 같은 층·같은 실행 위치 안에서는 다른 종류를 가리키는 종류가 먼저다. 끝나면 종류마다 지운 수와 다시 계산한 수(0 포함)를 그 행에 적는다. 종류가 음수나 정수가 아닌 수를 돌려주면 오류이고, 부르는 쪽의 트랜잭션이 기록까지 되돌린다.
 - **무효화 기록**(스키마 v10 `invalidations`). 변경 순번(전파를 시작할 때의 값), 원본의 내부 ID, 변경 종류(tombstone이면 그 사유), 종류별 수, 시각. 제목·본문·인용문·외부 식별자는 넣지 않는다. 상태 API는 `invalidations: { recent }`로 최근 20건을 새것부터 돌려준다. 범위 정책으로 버린 수 `invalidations.scopePolicyDrops`는 I04-T09가 같은 객체에 더한다.
 - **읽기 검사 `visible`.** 계보의 모든 version이 저장되어 있고 tombstone에 덮이지 않았으며, 계보 원본들의 범위를 `ScopePolicy.allows`가 그 용도에 허용하는 ref만 순서대로 남긴다. 계보가 없는 행은 정책만 본다. 읽기 경로에 붙이는 것은 I04-T08이다.
@@ -541,3 +541,4 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | 2026-11-21 | 4절 저장 표에 CLI 실행 임시 폴더(`cli-runs/`) 행 추가 | 4절 | V01-T10 재검토 B R2-1 |
 | 2026-11-22 | 5.6절 "파생물 등록부 — 무효화 계약" 추가(I04-T01에서 확정한 규격: 등록, 두 단계 전파, 무효화 기록, `visible`, `scopesOf`, 계약 테스트 묶음). 5절 머리말에 5.6절의 위치를 적음 | 5절 | I04-R18: 확정된 `DerivativeKind` 규격을 5절 새 소절로 옮긴다 |
 | 2026-11-22 | 5.6절 고침: 투영 종류는 층과 상관없이 정본 종류 뒤에 실행, 실행 위치가 다른 `references` 거부, 상태 API의 모양 `invalidations: { recent }`와 T09의 `scopePolicyDrops`, 계약 묶음의 해당 없음 검사와 닫힌 목록 | 5.6절 | I04-T01 독립 검토 F2·F3·F4 |
+| 2026-11-22 | 5.6절 "등록"에 모르는 실행 위치 거부와 빠진 종류 확인 추가 | 5.6절 | I04-T01 독립 재검토 R2-1 |

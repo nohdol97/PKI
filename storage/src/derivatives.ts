@@ -30,6 +30,9 @@ export const LAYERS = [
 ] as const;
 export type Layer = (typeof LAYERS)[number];
 
+/** Phase-2 stages (I04-R2, R12): every canonical kind, then every projection kind. */
+const STORAGES = ["canonical", "projection"] as const;
+
 export type SourceChange =
   | { kind: "new-version" | "old-versions-pruned"; sourceId: number; version: number }
   | { kind: "scope-changed"; sourceId: number; from: AccessScope; to: AccessScope }
@@ -232,6 +235,9 @@ function phaseOrder(kinds: readonly DerivativeKind[]): DerivativeKind[] {
     if (!(LAYERS as readonly string[]).includes(k.layer)) {
       throw new Error(`derivative kind ${k.kind}: unknown layer ${k.layer}`);
     }
+    if (!(STORAGES as readonly string[]).includes(k.storage)) {
+      throw new Error(`derivative kind ${k.kind}: unknown storage ${k.storage}`);
+    }
     if (byName.has(k.kind)) throw new Error(`derivative kind ${k.kind} is registered twice`);
     if (k.permanentlyAbsent && k.storage !== "projection") {
       throw new Error(`derivative kind ${k.kind}: permanentlyAbsent is for projection kinds`);
@@ -250,22 +256,25 @@ function phaseOrder(kinds: readonly DerivativeKind[]): DerivativeKind[] {
       }
     }
   }
-  const stages = (["canonical", "projection"] as const).flatMap((storage) =>
-    LAYERS.map((layer) => ({ storage, layer })),
-  );
-  return stages.flatMap(({ storage, layer }) => {
+  const stages = STORAGES.flatMap((storage) => LAYERS.map((layer) => ({ storage, layer })));
+  const ordered = stages.flatMap(({ storage, layer }) => {
     const pending = kinds.filter((k) => k.storage === storage && k.layer === layer);
-    const ordered: DerivativeKind[] = [];
+    const inStage: DerivativeKind[] = [];
     while (pending.length > 0) {
       // ready: no pending kind still points at it
       const i = pending.findIndex((k) => !pending.some((p) => p.references.includes(k.kind)));
       if (i < 0) {
         throw new Error(`derivative kinds ${pending.map((k) => k.kind).join(", ")} form a cycle`);
       }
-      ordered.push(...pending.splice(i, 1));
+      inStage.push(...pending.splice(i, 1));
     }
-    return ordered;
+    return inStage;
   });
+  // every kind has a stage: a kind left out would never be invalidated
+  if (ordered.length !== kinds.length) {
+    throw new Error(`derivative registry ordered ${ordered.length} of ${kinds.length} kinds`);
+  }
+  return ordered;
 }
 
 /** The stored scope text: a JSON array of strings, or one plain value (V01 Connectors). */
