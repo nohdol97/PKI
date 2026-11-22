@@ -690,7 +690,9 @@ describe("projection.fallback", () => {
     ["a given-up removal", "status = 'dead_letter', attempts = 5"],
     [
       "an unfinished removal registered a minute ago",
-      "status = 'retry', run_after = created_at + 36000000",
+      // Not due at boot on the real clock. `created_at + …` in the same UPDATE reads the old
+      // created_at (the fake clock's T0), a fixed moment that real time passes.
+      `status = 'retry', run_after = ${Date.now() + 10 * HOUR}`,
     ],
   ])(
     "at start: %s makes the boot register the rebuild and run it, the canary gone",
