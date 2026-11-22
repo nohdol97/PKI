@@ -4,6 +4,8 @@
 // version left). jobs.ts judges the fence only for the kinds this says use one.
 /** The job each new source version gets (V02-T05); a scope change may queue one more (I04-R15). */
 export const EXTRACT_JOB_KIND = "extract";
+/** The job a table source's version gets while `analytical.profile` is ON (S03-R6): no Provider call, version fence. */
+export const DATASET_PROFILE_KIND = "dataset-profile";
 export const PROJECTION_REMOVE_KIND = "projection-remove";
 export const PROJECTION_REBUILD_KIND = "projection-rebuild";
 

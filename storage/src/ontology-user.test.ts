@@ -531,8 +531,9 @@ describe("ontology.candidates: a rule change and a retirement leave history (R20
   it("undoes the retirement of a seed, which has no creation line", () => {
     const id = idOf("fact-kind", "alias.translation");
     userOntology.change(db, { op: "retire", elementKind: "fact-kind", name: "alias.translation" });
-    expect(userOntology.undo(db, id)).toMatchObject({ status: "applied", edition: 3 });
-    expect(stateOf(id)).toEqual({ status: "verified", edition: 3 });
+    // alias.translation is widened to Metric and Dataset by the analytical migration: edition 2 before
+    expect(userOntology.undo(db, id)).toMatchObject({ status: "applied", edition: 4 });
+    expect(stateOf(id)).toEqual({ status: "verified", edition: 4 });
     expect(actions(id)).toEqual(["retire", "undo"]);
   });
 

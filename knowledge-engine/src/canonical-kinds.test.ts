@@ -23,6 +23,7 @@ import {
   registerConnectorInstance,
   saveFact,
   saveInsight,
+  saveDatasetTable,
   saveRelation,
   saveSourceRecord,
   searchKeyword,
@@ -129,6 +130,7 @@ const TABLES: Record<string, string> = {
   ontology: "ontology_elements",
   "entity-merge": "item_merges",
   "merge-candidate": "merge_candidates",
+  "analytical-check": "dataset_tables",
 };
 const exists = (ref: DerivedRef) =>
   ref.kind === "entity-merge" || ref.kind === "merge-candidate"
@@ -194,6 +196,12 @@ function world() {
      VALUES (?, ?, 'fact', 'qzhash', 'scope-policy', ?)`,
     [a.sourceId, a.version, AT],
   ).lastInsertRowid;
+
+  // a table of a (S03-T04): a Dataset item tied to a's table, the one source it follows
+  const dataset = insertItem(db, { type: "Dataset", name: "DS", ...attrs });
+  saveDatasetTable(db, { itemId: dataset, sourceId: a.sourceId, key: "", rowCount: 1 });
+  const tableA = db.all("SELECT id FROM dataset_tables WHERE source_id = ?", [a.sourceId])[0]
+    ?.id as number;
 
   // type definitions (S01-T06): a candidate proposed from a only, one from a and b, and one the user
   // added (no lineage). The user's row is the contract's lineage-free row: a proposal the user approved
@@ -264,6 +272,7 @@ function world() {
     insight: { onlyA: iA, shared: iS, withoutLineage: iN },
     "scope-drop": { onlyA: dropA, shared: null, withoutLineage: null },
     ontology: { onlyA: ontoA, shared: ontoS, withoutLineage: added },
+    "analytical-check": { onlyA: tableA, shared: null, withoutLineage: null },
   };
   const built = new Map<string, readonly SourceVersionRef[]>();
   for (const [kind, r] of Object.entries(rows)) {
@@ -411,6 +420,8 @@ const NOT_APPLICABLE: Record<string, { shared: boolean; withoutLineage: boolean 
   evidence: { shared: false, withoutLineage: false },
   // a record names the one source version whose extraction it came from
   "scope-drop": { shared: false, withoutLineage: false },
+  // a table's row names the one source the table is read from (S03-R6)
+  "analytical-check": { shared: false, withoutLineage: false },
 };
 const BOTH = { shared: true, withoutLineage: true };
 
@@ -425,13 +436,14 @@ const SUBJECTS: Record<string, { shared: boolean; withoutLineage: boolean }> = {
   ontology: BOTH,
   "entity-merge": BOTH,
   "merge-candidate": BOTH,
+  "analytical-check": { shared: false, withoutLineage: false },
 };
 for (const kind of CANONICAL_KINDS) {
   derivativeKindContract(`canonical kind ${kind.kind}`, subject(kind, SUBJECTS[kind.kind] ?? BOTH));
 }
 
 describe("the product registry's canonical kinds (I04-R1)", () => {
-  it("registers the ten canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
+  it("registers the eleven canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
     expect(derivativeRegistry.kinds.map((k) => [k.kind, k.layer, k.storage])).toEqual([
       ["source", "source", "canonical"],
       ["evidence", "evidence", "canonical"],
@@ -445,6 +457,7 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
       ["merge-candidate", "item", "canonical"],
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
+      ["analytical-check", "insight", "canonical"],
       ["engine", "projection", "projection"],
       ["vectorIndex", "projection", "projection"],
     ]);
@@ -498,6 +511,7 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
       "entity-merge": [String(rows["entity-merge"]?.shared)],
       "merge-candidate": [],
       insight: [String(rows.insight?.shared)],
+      "analytical-check": [], // a table's row follows its source's deletion only (S03-T04)
     });
 
     const { propagation } = db.transaction(() => propagateCanonical(db, scopeChange(b.sourceId)));
@@ -620,7 +634,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
-    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(12);
+    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(13);
     expect(log.findLastIndex((e) => e.startsWith("affected:"))).toBeLessThan(firstDelete);
     expect(log.filter((e) => e.startsWith("invalidate:"))).toEqual(
       [
@@ -634,6 +648,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         "merge-candidate",
         "item",
         "insight",
+        "analytical-check",
         "engine",
         "vectorIndex",
       ].map((k) => `invalidate:${k}`),
@@ -653,6 +668,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       "merge-candidate": 1,
       item: 2,
       insight: 1,
+      "analytical-check": 1,
       engine: 1,
       vectorIndex: 1,
     });
@@ -682,6 +698,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           "merge-candidate": 1,
           item: 2,
           insight: 1,
+          "analytical-check": 1,
           engine: 1,
           vectorIndex: 1,
         },
@@ -697,6 +714,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           "merge-candidate": 0,
           item: 0,
           insight: 1,
+          "analytical-check": 0,
           engine: 0,
           vectorIndex: 0,
         },

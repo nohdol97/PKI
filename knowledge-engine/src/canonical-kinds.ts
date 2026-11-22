@@ -164,6 +164,11 @@ const lineageOf: Record<string, (db: SqlDriver, id: number) => SourceVersionRef[
       ),
       ...userInputsOf(db, id).map((input) => rowLineage(db, input)),
     ),
+  // a dataset table follows its source: the source's versions are its lineage (S03-R17)
+  "analytical-check": (db, id) =>
+    versionsOf(db, VERSIONS("v.source_id = (SELECT source_id FROM dataset_tables WHERE id = ?)"), [
+      id,
+    ]),
   // only a candidate or a rejected type definition follows its source; a verified one (and a retired
   // one, which was verified) is a rule the user accepted and holds no lineage (S01-R20, R22)
   ontology: (db, id) =>
@@ -782,6 +787,36 @@ const ONTOLOGY: DerivativeKind = {
   },
 };
 
+/**
+ * The analytical semantic's rows that are not registry rows (`dataset_tables` and `analytical_checks`, schema
+ * v24, S03-R17). Layer `insight`: it runs after the fact, relation and item kinds, so a later judgement sees
+ * the rows they left. S03-T04 registers the kind with what its table needs: a deleted source's
+ * `dataset_tables` rows go in the deletion's transaction (the source row stays, so nothing cascades). A new
+ * version, a scope change and a prune keep every row: the Dataset of the next version is the same item
+ * (S03-R6). The check rows and the judgement of the claims that rest on a table are S03-T05's; a check row
+ * goes with its fact or its version by cascade until then.
+ */
+const ANALYTICAL_CHECK: DerivativeKind = {
+  ...base("analytical-check", "insight"),
+  affected: (tx, change) => {
+    if (supported(change) !== "deletion") return [];
+    return collect(
+      tx,
+      "analytical-check",
+      "SELECT id FROM dataset_tables WHERE source_id = ? ORDER BY id",
+      [change.sourceId],
+    );
+  },
+  invalidate: (ctx, snapshot) => {
+    noting(ctx);
+    let removed = 0;
+    for (const { ref } of snapshot) {
+      removed += ctx.tx.run("DELETE FROM dataset_tables WHERE id = ?", [Number(ref.id)]).changes;
+    }
+    return { removed, recomputed: 0 };
+  },
+};
+
 /** The target of a re-extraction a scope change queued (I04-R15). */
 export const RECOMPUTE_PREFIX = "scope-recompute:";
 
@@ -804,6 +839,7 @@ export const canonicalKinds = (
     entityMergeKind(membershipListeners),
     MERGE_CANDIDATE,
     INSIGHT,
+    ANALYTICAL_CHECK,
   ]);
 export const CANONICAL_KINDS: readonly DerivativeKind[] = canonicalKinds();
 

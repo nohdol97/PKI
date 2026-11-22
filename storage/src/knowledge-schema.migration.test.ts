@@ -26,6 +26,8 @@ import type { SqlDriver } from "./sql-driver.ts";
 
 /** The migration under test is the first one S02 adds: the next free number after S01's 21. */
 const PREVIOUS_SCHEMA = 22;
+/** The database this migration leaves: later migrations (S03-T04) are not under test here. */
+const upToS02 = migrations.slice(0, PREVIOUS_SCHEMA + 1);
 
 let db: SqlDriver;
 beforeEach(() => {
@@ -177,7 +179,7 @@ describe("schema.catalogue-migration", () => {
     );
     const revision = readKnowledgeRevision(db);
 
-    migrate(db);
+    migrate(db, upToS02);
 
     expect(
       ["items", "facts", "relations", "item_history", "fact_history"].map((t) =>
@@ -240,7 +242,7 @@ describe("schema.catalogue-migration", () => {
   });
 
   it("widens the three rules while they are S01's seed rule, edition +1, no history line", () => {
-    migrate(db);
+    migrate(db, upToS02);
     for (const name of ["target_date", "completion_date"]) {
       const row = one(name);
       expect(row.edition).toBe(2);
@@ -269,7 +271,7 @@ describe("schema.catalogue-migration", () => {
     db.run(
       "UPDATE ontology_elements SET status = 'superseded', edition = 2 WHERE name = 'completion_date'",
     );
-    migrate(db);
+    migrate(db, upToS02);
     const depends = one("DEPENDS_ON");
     expect(depends.edition).toBe(2);
     expect(parse(depends)).toEqual({ ...S01_DEPENDS_ON, subjectTypes: ["Project"] });
@@ -309,7 +311,7 @@ describe("schema.catalogue-migration", () => {
     ];
     const before = storedBefore().filter((r) => touched.includes(r.name));
 
-    migrate(db);
+    migrate(db, upToS02);
 
     expect(one("Task")).toMatchObject({
       status: "rejected",
@@ -349,13 +351,13 @@ describe("schema.catalogue-migration", () => {
       { elementKind: "fact-kind", itemTypes: ["Project"], valueType: "text", cardinality: "many" },
       "verified",
     );
-    migrate(db);
+    migrate(db, upToS02);
     expect(one("Concept", "fact-kind").origin).toBe("user");
     expect(one("Concept", "item-type").origin).toBe("seed");
   });
 
   it("keeps origin fixed, closed and not null, and the lifecycle and revision gates in force", () => {
-    migrate(db);
+    migrate(db, upToS02);
     expect(() =>
       db.run("UPDATE ontology_elements SET origin = 'user' WHERE name = 'Person'"),
     ).toThrow(/origin/);
@@ -394,7 +396,7 @@ describe("schema.catalogue-migration: origin of a row made after the migration",
     db.all("SELECT origin FROM ontology_elements WHERE name = ?", [name])[0]?.origin;
 
   it("is `user` for the user's add and `source-proposed` for a proposal, and approving keeps it", () => {
-    migrate(db);
+    migrate(db, upToS02);
     registerConnectorInstance(db, "c", "test-fixtures");
     const saved = saveSourceRecord(db, "c", { externalId: "d", title: "t", body: "본문" });
     if (saved.status !== "created") throw new Error(saved.status);
@@ -432,7 +434,7 @@ describe("schema.catalogue-migration: origin of a row made after the migration",
   });
 
   it("takes the value type `identifier` as a fact kind's: a non-empty value fits, an empty one does not", () => {
-    migrate(db);
+    migrate(db, upToS02);
     expect(valueFits("identifier", "ab@example.test")).toBe(true);
     expect(valueFits("identifier", "  ")).toBe(false);
     expect(
@@ -467,7 +469,7 @@ describe("schema.catalogue-migration: the list over a database that held same-na
     rawElement("item-type", "Person", ITEM, "verified", { created: "user" });
     rawElement("item-type", "organization", ITEM, "verified", { created: "user" });
     userChangesRule("DEPENDS_ON", { ...S01_DEPENDS_ON, subjectTypes: ["Project"] });
-    migrate(db);
+    migrate(db, upToS02);
     const entry = listed();
     expect(entry("Task")).toMatchObject({ usable: false, ruleMatches: true });
     expect(entry("Person")).toMatchObject({ usable: true, ruleMatches: true });
@@ -485,7 +487,7 @@ describe("schema.catalogue-migration: the migration's own rows", () => {
         ?.sql;
     const before = gate();
     expect(before).toBeTypeOf("string");
-    migrate(db);
+    migrate(db, upToS02);
     expect(gate()).toBe(before);
   });
 });
@@ -499,7 +501,7 @@ describe("schema.reserved-names: a row that existed before the rule", () => {
       [id, AT],
     );
     db.run("UPDATE ontology_elements SET status = 'superseded', edition = 2 WHERE id = ?", [id]);
-    migrate(db);
+    migrate(db, upToS02);
     expect(userOntology.undo(db, id)).toMatchObject({ status: "applied" });
     expect(one("Insight").status).toBe("verified");
   });
@@ -509,7 +511,7 @@ describe("schema.reserved-names: a row that existed before the rule", () => {
       created: "extraction",
       basis: true,
     });
-    migrate(db);
+    migrate(db, upToS02);
     expect(userOntology.decide(db, id, "approve")).toMatchObject({
       status: "refused",
       reason: "schema-invalid",
