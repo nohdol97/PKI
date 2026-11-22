@@ -99,7 +99,10 @@ test("no bundle carries the lookup of a composition package (I05-R2, C2)", () =>
     "main.js",
   ).toBe(false);
   // a public-shaped tree has no `site/composition` to name: no bundle carries the folder name either
-  if (backendEntry(REPO_ROOT) === join(REPO_ROOT, "backend/src/shell.ts")) {
+  const publicShaped = backendEntry(REPO_ROOT) === join(REPO_ROOT, "backend/src/shell.ts");
+  // the shape is read a second way, so a wrong `backendEntry` cannot switch the strict reading off unseen
+  expect(publicShaped, "shape").toBe(!existsSync(join(REPO_ROOT, "site/composition/package.json")));
+  if (publicShaped) {
     for (const bundle of Object.keys(report.bundles)) {
       const text = readFileSync(join(APP_DIR, bundle), "utf8");
       expect(text.includes("site/composition"), bundle).toBe(false);

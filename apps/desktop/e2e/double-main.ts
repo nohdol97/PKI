@@ -7,14 +7,23 @@
 // (src/main.ts) unchanged. Not importable from Node (it imports Electron's
 // main-process API). T15 keeps this file, like the rest of e2e/, out of the build.
 import { utilityProcess } from "electron";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { backendEntry } from "../src/backend-entry.ts";
 
 // The entry the shell forks from source is the build's choice (I05-R2): the public one, or a fork's own when
 // the tree has a composition package. The double still forks the public double entry below, so v02-flow
 // exercises the public double, not a fork's registration.
-const SHELL_ENTRY = backendEntry(fileURLToPath(new URL("../../..", import.meta.url)));
+const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
+const SHELL_ENTRY = backendEntry(ROOT);
+// the shape is read a second way, so entry selection is pinned apart from the shell's own use of it
+if (
+  (SHELL_ENTRY === join(ROOT, "backend/src/shell.ts")) ===
+  existsSync(join(ROOT, "site/composition/package.json"))
+) {
+  throw new Error(`PKI E2E: backendEntry ${SHELL_ENTRY} disagrees with the shape of ${ROOT}`);
+}
 const DOUBLE_ENTRY = fileURLToPath(
   new URL("../../../backend/src/v02-shell.e2e.ts", import.meta.url),
 );
