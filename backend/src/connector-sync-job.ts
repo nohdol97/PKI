@@ -24,7 +24,12 @@ import {
 import type { ConnectorSummary, SyncResponse } from "@pki/contracts";
 import { errorClass, log } from "@pki/providers";
 import { recordResultCounts, requeueHeldTarget, type SqlDriver } from "@pki/storage";
-import type { ConnectorConfigs, ConnectorManager, ConnectorRecheck } from "./connectors.ts";
+import type {
+  ConnectorConfigs,
+  ConnectorManager,
+  ConnectorRecheck,
+  RecheckTurn,
+} from "./connectors.ts";
 import { COLLECTOR_HELD_REASONS, HELD_REEVALUATION_MS } from "./held-release.ts";
 import type { JobResult } from "./job-outcomes.ts";
 import type { JobHandler, JobRunner } from "./job-runner.ts";
@@ -255,7 +260,8 @@ async function boundedRecheck(
   inFlight: Set<string>,
   signal?: AbortSignal,
 ): Promise<ConnectorSummary["state"] | undefined> {
-  const settled = manager.recheck(id);
+  const turn: RecheckTurn = { open: true };
+  const settled = manager.recheck(id, turn);
   inFlight.add(id);
   const done = () => void inFlight.delete(id);
   settled.then(done, done);
@@ -273,6 +279,7 @@ async function boundedRecheck(
       }),
     ]);
   } finally {
+    turn.open = false; // a result that comes after this is dropped (I05-R13)
     clearTimeout(timer);
     // the stop signal outlives every recheck: a listener left behind would pile up hour after hour
     if (onAbort) signal?.removeEventListener("abort", onAbort);

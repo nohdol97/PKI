@@ -153,7 +153,7 @@
 - **I05-R11 한 인스턴스의 실패는 그 인스턴스만.** 만드는 함수가 던짐, `initialize`가 던짐, 제한 시간 초과, 모르는 종류의 네 경우 모두 시작은 계속되고 그 인스턴스만 `unavailable`이다.
   - 그 인스턴스의 동기화 요청은 `connector-unavailable`로 답한다.
   - 그 인스턴스의 수집 작업은 사유 `connector-unavailable`로 보류된다(I03-R16의 기존 동작).
-  - 로그에는 정해진 코드와 인스턴스 `id`만 남는다: `connector-initialize-timeout`, `connector-factory-failed`, `connector-kind-unknown`. 수집기가 던진 글은 남기지 않는다.
+  - 로그에는 정해진 코드와 인스턴스 `id`만 남는다: `connector-initialize-timeout`, `connector-factory-failed`, `connector-initialize-failed`(`initialize`가 예외를 던짐. 시작할 때만 남기고 재점검에서는 남기지 않는다), `connector-kind-unknown`. 수집기가 던진 글은 남기지 않는다.
   - `ConnectorNotImplementedError`는 지금처럼 `not-implemented`다.
 - **I05-R12 저장된 자료와의 어긋남.** 정본에 남은 것이 지금 등록과 맞지 않아도 시작은 끝난다.
   - 정본의 인스턴스 행, 주기, 작업이 지금 등록에 없는 종류나 인스턴스를 가리키면 그 작업은 지금처럼 `instance-not-found`로 닫힌다(I03의 기존 동작. 이 spec은 바꾸지 않고 시험으로 붙잡는다).
@@ -546,3 +546,4 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 | 2026-11-22 | 가정 A1~A6 실측 결과를 "I05-T01이 넘기는 것" 절에 기록하고 가정 표의 확인 칸과 미해결 질문 4를 갱신. A1~A4 맞음, A5·A6 부분. 요구사항 글자는 고치지 않고 "설계에 영향" 셋(설치 스크립트가 있는 의존성과 R5·C5, `backend/tsconfig.json`의 선언 파일 내보내기, 네이티브 모듈 검사 기준)을 제안으로 적음 | 이 문서 | I05-T01(#113). 버리는 트리에서 측정, 로그는 로컬 `_workspace/pki-phase2h/i05_t01_poc.log`. macOS만, Windows 미실행 |
 | 2026-11-22 | I05-T01의 설계 영향 셋을 반영. ① R5·C5·신뢰 경계 표·R22·S26: `allowBuilds`가 `site/` 밖에서 달라지는 두 번째 추적 파일이 될 수 있음(실패한 `pnpm install`이 그 파일을 고침, 포크가 `false`로 고침) ② T04의 파일에 `backend/tsconfig.json` 선언 파일 내보내기 ③ C15 ⑤와 R17: 네이티브 모듈에 닿는 묶기는 실패. 또 낡은 병합 순서 문장 정정(이 spec이 PR #119로 먼저 합쳐졌고 I02-B spec은 #120으로 열려 있으며 JSONL 작업은 `I02B-T06`) | 이 문서 | 조정자의 결정(PR #124 후속) |
 | 2026-11-22 | 독립 검토(PR #124) 반영. ① `allowBuilds`는 측정한 `false`만 허용하고 `true`가 필요한 의존성은 비목표(ownership.md 5절)로 되돌림(R5, S26, 신뢰 경계 표, R22, 앞의 변경 이력 행) ② R5의 "유일한 파일" 문장을 불변식과 예외로 다시 쓰고 R23·C19에 `allowBuilds` `false` 줄의 좁은 예외 ③ A6의 "약 16초"를 지우고 순서 바꾼 실행의 출처를 검토 보고서로 표시 ④ A5의 `better-sqlite3` 문장을 소스를 읽은 것으로 표시하고 `build.ts`의 `DECLARED_IN`으로 바로잡음 ⑤ 의존성 없는 포크 패키지의 빈 `importers` 항목을 C3 ⑤의 입력으로 기록(W1) ⑥ C15 ⑤에 네이티브 모듈의 정의, 잔여 위험 표에 `EXTERNAL_PACKAGES` 이름 한 줄(W4) ⑦ I02-B spec 합침(PR #120)에 따라 머리말, 순서 문장, 미해결 질문 5, 후속 표 ②③ 갱신 | 이 문서 | PR #124 독립 검토 BLOCK(F1~F4, W1·W3·W4)과 조정자의 결정 |
+| 2026-11-22 | I05-R11의 로그 코드에 `connector-initialize-failed`를 더함(`initialize`가 던진 경우, 시작할 때만) | I05-R11 | I05-T02 독립 검토 F1: C9가 네 경우 모두 정해진 로그 코드를 요구하는데 R11은 셋만 적었음 |

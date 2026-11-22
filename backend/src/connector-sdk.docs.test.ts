@@ -31,6 +31,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectorKinds, openCanonicalDb } from "./composition.ts";
+import { INITIALIZE_TIMEOUT_MS, RECHECK_LATE_LIMIT } from "./connectors.ts";
 import { RECHECK_TIMEOUT_MS, SYNC_PERIOD } from "./connector-sync-job.ts";
 import { REJECTED_LIST_LIMIT, SYNC_BACKOFF, siteCheck } from "./connectors.ts";
 import { importContent } from "./imports.ts";
@@ -216,6 +217,13 @@ describe("docs.connector-sdk: the numbers equal the code", () => {
   it("the recheck cap the text gives is the constant", () => {
     expect(RECHECK_TIMEOUT_MS).toBe(60_000);
     expect(DOC).toContain("60초(`RECHECK_TIMEOUT_MS`)");
+  });
+
+  it("the start limit and the late-recheck limit the text gives are the constants", () => {
+    expect(INITIALIZE_TIMEOUT_MS).toBe(10_000);
+    expect(DOC).toContain("10초(`INITIALIZE_TIMEOUT_MS`)");
+    expect(RECHECK_LATE_LIMIT).toBe(3);
+    expect(DOC).toContain("연달아 3번(`RECHECK_LATE_LIMIT`)");
   });
 
   it("the default period of a pulling instance is hourly", () => {

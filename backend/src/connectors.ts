@@ -17,7 +17,9 @@
 // sequence it reached and delivered after the commit, before the runner is woken
 // (V02-R13). A deletion is no notice: the tombstone's transaction registers the
 // projections' removal jobs (I04-R12) and the runner is woken after the page's notices. A Connector of another SDK version than CONNECTOR_SDK_VERSION is never
-// initialized (I01-R1).
+// initialized (I01-R1). The start waits for each instance at most INITIALIZE_TIMEOUT_MS and an
+// instance that fails, is late or has no kind is unavailable alone (I05-R10, R11); a recheck builds a
+// new object and keeps its result only while its turn still waits (I05-R13).
 import {
   ChangeSetEnvelopeSchema,
   CONNECTOR_SDK_VERSION,
@@ -30,6 +32,7 @@ import {
   type SyncResponse,
   type SyncStopCode,
 } from "@pki/contracts";
+import { log } from "@pki/providers";
 import {
   beginRescan,
   readCursor,
@@ -80,6 +83,12 @@ export interface ConnectorInstanceConfig {
 
 export type ConnectorFactory = () => Connector;
 
+/** Provisional (I05-R10), one place: the longest the start waits for one instance's initialize. */
+export const INITIALIZE_TIMEOUT_MS = 10_000;
+
+/** Provisional (I05-R13), one place: rechecks in a row that ended late before an instance's are given up. */
+export const RECHECK_LATE_LIMIT = 3;
+
 export interface ConnectorManager {
   list(): ConnectorSummary[];
 
@@ -94,10 +103,17 @@ export interface ConnectorManager {
 /** What the hourly recheck of an instance that is not ready needs of the manager (I03-R16 ②′). */
 export interface ConnectorRecheck {
   /**
-   * Initializes an instance that was not ready again and asks its health: ready only when
-   * both succeed. Returns the instance's state now; undefined for an unknown id.
+   * Makes a new object of an instance that was not ready, initializes it and asks its health: the
+   * instance takes the object and is ready only when both succeed (I05-R13). Returns the
+   * instance's state now; undefined for an unknown id, and for a result that came after `turn`
+   * was closed: that one is dropped (`turn.open` false), and counts toward giving the instance up.
    */
-  recheck(id: string): Promise<ConnectorSummary["state"] | undefined>;
+  recheck(id: string, turn?: RecheckTurn): Promise<ConnectorSummary["state"] | undefined>;
+}
+
+/** The one turn that waits for a recheck's result; its owner closes it when it stops waiting. */
+export interface RecheckTurn {
+  open: boolean;
 }
 
 /** The configuration an instance was made with (shown by no API); the default schedules read it. */
@@ -280,6 +296,46 @@ export async function siteCheck(
   return { ok: false, line: `${kind}: ${error instanceof Error ? error.message : String(error)}` };
 }
 
+/** What one instance is: its state, the object that initialized (only a ready one is used), and how to make another. */
+interface Entry {
+  summary: ConnectorSummary;
+  config: unknown;
+  connector: Connector | undefined;
+  /** Undefined for a kind this build does not have. */
+  factory: ConnectorFactory | undefined;
+  /** Rechecks in a row that ended after their turn closed (I05-R13). */
+  lateRechecks: number;
+  abandonedLogged: boolean;
+}
+
+/**
+ * The one place a Connector is made and initialized, for the start and for a recheck (I05-R13).
+ * A factory that throws is `unavailable` and logs its fixed code; the thrown text is dropped.
+ */
+async function openConnector(
+  id: string,
+  factory: ConnectorFactory,
+  config: unknown,
+): Promise<{ connector: Connector | undefined; outcome: InitializeOutcome }> {
+  let connector: Connector;
+  try {
+    connector = factory();
+  } catch {
+    log("connector-factory-failed", { id });
+    return { connector: undefined, outcome: { state: "unavailable", error: undefined } };
+  }
+  return { connector, outcome: await initializeConnector(connector, config) };
+}
+
+/** Whether a ready outcome's object also reports itself healthy (initialized is not enough). */
+async function healthy(connector: Connector): Promise<boolean> {
+  try {
+    return (await connector.healthCheck()).state === "ok";
+  } catch {
+    return false;
+  }
+}
+
 export async function createConnectorManager(
   db: SqlDriver,
   instances: readonly ConnectorInstanceConfig[],
@@ -290,13 +346,38 @@ export async function createConnectorManager(
     "reason" in outcome
       ? { id, kind, state: outcome.state, reason: outcome.reason }
       : { id, kind, state: outcome.state };
-  const entries = await Promise.all(
-    instances.map(async ({ id, kind, config }) => {
+  const unavailable: InitializeOutcome = { state: "unavailable", error: undefined };
+  // each instance alone: a late result of one that passed its limit is never read (I05-R10, R11)
+  const entries: Entry[] = await Promise.all(
+    instances.map(async ({ id, kind, config }): Promise<Entry> => {
       const factory = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
-      if (!factory) throw new Error(`unknown connector kind: ${kind}`);
-      const connector = factory();
-      const outcome = await initializeConnector(connector, config);
-      return { summary: summaryOf(id, kind, outcome), connector, config };
+      const entry = (outcome: InitializeOutcome, connector?: Connector): Entry => ({
+        summary: summaryOf(id, kind, outcome),
+        config,
+        connector,
+        factory,
+        lateRechecks: 0,
+        abandonedLogged: false,
+      });
+      if (!factory) {
+        log("connector-kind-unknown", { id });
+        return entry(unavailable);
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const limit = new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), INITIALIZE_TIMEOUT_MS);
+      });
+      const opened = await Promise.race([openConnector(id, factory, config), limit]);
+      clearTimeout(timer);
+      if (opened === "timeout") {
+        log("connector-initialize-timeout", { id });
+        return entry(unavailable);
+      }
+      // the start only: a recheck runs every hour and would repeat it
+      if (opened.connector && opened.outcome.state === "unavailable" && "error" in opened.outcome) {
+        log("connector-initialize-failed", { id });
+      }
+      return entry(opened.outcome, opened.connector);
     }),
   );
   return {
@@ -308,34 +389,40 @@ export async function createConnectorManager(
           : { ...summary },
       ),
     configOf: (id) => entries.find((e) => e.summary.id === id)?.config,
-    async recheck(id) {
+    async recheck(id, turn) {
       const entry = entries.find((e) => e.summary.id === id);
       if (!entry) return undefined;
       if (entry.summary.state === "ready") return "ready";
       const { id: instanceId, kind } = entry.summary;
-      const outcome = await initializeConnector(entry.connector, entry.config);
-      let ready = outcome.state === "ready";
-      if (ready) {
-        // initialized is not enough: the origin must also say it is fine
-        try {
-          ready = (await entry.connector.healthCheck()).state === "ok";
-        } catch {
-          ready = false;
-        }
+      if (!entry.factory) return entry.summary.state; // no kind: nothing to make
+      if (entry.lateRechecks >= RECHECK_LATE_LIMIT) {
+        if (!entry.abandonedLogged) log("connector-recheck-abandoned", { id: instanceId });
+        entry.abandonedLogged = true;
+        return entry.summary.state;
       }
+      const { connector, outcome } = await openConnector(instanceId, entry.factory, entry.config);
+      const ready =
+        outcome.state === "ready" && connector !== undefined && (await healthy(connector));
+      if (turn && !turn.open) {
+        entry.lateRechecks++; // its turn stopped waiting: the result is dropped, the object left open
+        return undefined;
+      }
+      entry.lateRechecks = 0;
+      if (ready) entry.connector = connector;
       // initialized but not healthy is unavailable, like an initialization that failed
-      const now: InitializeOutcome = ready
-        ? { state: "ready" }
-        : outcome.state === "ready"
-          ? { state: "unavailable", error: undefined }
-          : outcome;
-      entry.summary = summaryOf(instanceId, kind, now);
+      entry.summary = summaryOf(
+        instanceId,
+        kind,
+        ready ? { state: "ready" } : outcome.state === "ready" ? unavailable : outcome,
+      );
       return entry.summary.state;
     },
     async sync(id, syncOptions = {}) {
       const entry = entries.find((e) => e.summary.id === id);
       if (!entry) return { error: "not-found" };
-      if (entry.summary.state !== "ready") return { error: "connector-unavailable" };
+      if (entry.summary.state !== "ready" || !entry.connector) {
+        return { error: "connector-unavailable" };
+      }
       return {
         connectorId: id,
         ...(await syncConnector(db, id, entry.summary.kind, entry.connector, {
