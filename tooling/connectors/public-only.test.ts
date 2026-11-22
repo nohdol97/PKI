@@ -297,9 +297,29 @@ describe("the inspected roots", () => {
     expect(OPTIONAL_PACKAGES.filter((pkg) => existsSync(join(REPO, pkg)))).toEqual([]);
   });
 
-  it.each(["packages/connector-example", "packages/connector-sdk"])(
-    "%s is read as soon as the package exists, needs its src/, and must leave the optional list",
-    (pkg) => {
+  // every root outside a package still listed as optional (the list shrinks as packages land)
+  const required = SCAN_ROOTS.filter(
+    (scanRoot) => !OPTIONAL_PACKAGES.some((pkg) => scanRoot.startsWith(`${pkg}/`)),
+  );
+  it("backend/src/adapters is a required root", () => {
+    expect(required).toContain(ADAPTERS);
+  });
+  for (const scanRoot of required) {
+    it(`${scanRoot} is required: without it the check fails`, () => {
+      const copy = copyOfRepo();
+      rmSync(join(copy, scanRoot), { recursive: true, force: true });
+      expect(checkPublicOnly(copy)).toContainEqual({
+        file: scanRoot,
+        line: 1,
+        code: "missing-root",
+        detail: "",
+      });
+    });
+  }
+
+  // a plain loop, not it.each: the list is empty once both packages have landed
+  for (const pkg of OPTIONAL_PACKAGES) {
+    it(`${pkg} is read as soon as the package exists, needs its src/, and must leave the optional list`, () => {
       const copy = copyOfRepo();
       rmSync(join(copy, pkg), { recursive: true, force: true });
       expect(checkPublicOnly(copy)).toEqual([]);
@@ -324,8 +344,8 @@ describe("the inspected roots", () => {
       // outside src/ (configuration, build output) is not a Connector path
       write(copy, `${pkg}/vitest.config.ts`, `import "vitest/config";\n`);
       expect(checkPublicOnly(copy)).toHaveLength(2);
-    },
-  );
+    });
+  }
 
   it("reads a script whatever the case of its extension", () => {
     for (const name of ["m.TS", "m.Mjs", "m.CTS", "m.Tsx"]) {
