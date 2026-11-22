@@ -1,7 +1,7 @@
 // S01-T02: the user's approve, reject, dispute and undo (S01-R5, R7, R8) and the protection of the
 // rows the user decided (R12). `lifecycle.undo` (approve, reject, dispute), `user-override.guard`.
-// States are reached by real user actions wherever the user can reach them now; a line is forged
-// only for what a later task (T03's value fix, a direct add) will write, and each such test says so.
+// States are reached by real user actions (the value fix and the direct add are T03's, tested in
+// semantic-user-correction.test.ts); a line is forged only where a test says so.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
@@ -283,8 +283,8 @@ describe("lifecycle.undo (approve, reject, dispute) (S01-R8)", () => {
     expect(state(ref)).toEqual({ status: "candidate", epistemic: "explicit" });
   });
 
-  // T03 writes the value fix's `replace` line and its batch; until then it is not undone here.
-  it("leaves a user line of another action (a value fix) to the task that writes it: invalid-transition, no line", () => {
+  // a value fix writes its `replace` line with a batch (T03); a bare one, as written here, is no fix of the entry's
+  it("does not undo a bare replace line (no batch, no value fix of the user entry): invalid-transition, no line", () => {
     const ref = row("fact", "verified", "user-approved");
     expect(applyTransition(db, ref, "user", "superseded").status).toBe("applied");
     expect(undo(ref)).toEqual({ status: "refused", reason: "invalid-transition" });
@@ -439,21 +439,18 @@ describe("user-override.guard (S01-R12)", () => {
     });
   });
 
-  it("does not supersede a row written by the user (user_authored), and writes no line", () => {
-    // T03 makes such a row; its column is set here by a plain INSERT, which the gate does not block
+  it("does not supersede a row written by the user (a real direct add), and writes no line", () => {
     const owner = insertItem(db, { type: "p", name: "o", ...attrs("verified", "user-approved") });
-    const id = db.run(
-      `INSERT INTO facts (item_id, kind, value, epistemic, status, observed_at, user_authored)
-       VALUES (?, 'k', 'v', 'user-approved', 'verified', '2026-11-21T00:00:00Z', 1)`,
-      [owner],
-    ).lastInsertRowid;
-    const ref: EntryRef = { kind: "fact", id };
+    const added = userDecisions.add(db, { kind: "fact", itemId: owner, factKind: "k", value: "v" });
+    if (added.status !== "applied") throw new Error("expected the add");
+    const ref = added.ref;
+    expect(read(ref)).toMatchObject({ status: "verified", epistemic: "user-approved" });
     expect(automatedLifecycle.supersede(db, ref, BASIS)).toEqual({
       status: "refused",
       reason: "user-override",
     });
     expect(state(ref).status).toBe("verified");
-    expect(lines(ref)).toEqual([]);
+    expect(lines(ref)).toHaveLength(1); // the creation line alone
   });
 
   it("does not bring back a row the user superseded, and a user action cancelled by an undo no longer holds the row", () => {
