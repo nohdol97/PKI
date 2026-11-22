@@ -1,7 +1,8 @@
 // I07-T02 (I07-R2, I07-C2 ② ③): the instance scopes cannot be moved by an argument, and the code that
 // reads them looks at no ambient input. ② the production build's argument parsing refuses what it does
 // not know, `--connector-scopes` included. ③ is a check of letters (it cannot see another way to read
-// a file; the guarantee is boot.connector-scopes-decoys): the reading module does not use the file
+// a file; the guarantee is boot.connector-scopes-decoys and boot.connector-scopes-relative): the
+// reading module does not use the file
 // system, `process.env`, `process.argv`, `process.cwd` or `import.meta.url`, and no product code of the
 // five roots names the range file.
 import { readFileSync, readdirSync, statSync } from "node:fs";
