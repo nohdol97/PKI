@@ -294,7 +294,7 @@ describe("profile.dataset: what is not a table", () => {
 });
 
 describe("profile.dataset: the switch is read when the job runs", () => {
-  it("writes nothing for a job queued while ON and run after the switch went OFF (retry included)", async () => {
+  it("writes nothing for a job queued while ON and run after the switch went OFF", async () => {
     arrive(
       "sales",
       "주문표",

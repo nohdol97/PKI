@@ -488,17 +488,18 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
       });
     }
     for (const name of EXTRACT_ALIAS_FACT_KINDS) {
-      // a surface form is written on any of the item types, as the text it is, any number of them
+      // a surface form is written on any of the item types, as the text it is, any number of them;
+      // S03-R2 widens it to Metric and Dataset (the analytical migration)
       expect(seed("fact-kind").find((e) => e.name === name)?.rule).toEqual({
         elementKind: "fact-kind",
-        itemTypes: [...EXTRACT_ITEM_TYPES].sort(),
+        itemTypes: [...EXTRACT_ITEM_TYPES, "Dataset", "Metric"].sort(),
         valueType: "surface-form",
         cardinality: "many",
       });
     }
     expect(seed("fact-kind").find((e) => e.name === EXTRACT_DEFINITION_FACT_KIND)?.rule).toEqual({
       elementKind: "fact-kind",
-      itemTypes: ["Concept"],
+      itemTypes: ["Concept", "Dataset", "Metric"], // S03-R2 widens it
       valueType: "text",
       cardinality: "many",
     });

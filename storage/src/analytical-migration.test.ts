@@ -1,6 +1,6 @@
 // S03-T04 `ontology.analytical-seeds` (the migration part, S03-R2, R13, C1) and the two tables of S03-R1
 // (`dataset_tables`, `analytical_checks`): the migration after S02's on a database of S02's level (schema
-// v23, with rows). It seeds the analytical names `verified`, edition 1, `origin = seed`, with the rules'
+// v24, with rows). It seeds the analytical names `verified`, edition 1, `origin = seed`, with the rules'
 // `dataChecks`, and no history line; a name that exists is left alone; the four rules S02 seeded are widened
 // to Metric and Dataset only while they are S02's seed rule and `verified`; the lifecycle gate is made
 // again with the text it had; the knowledge revision does not move.
@@ -16,8 +16,8 @@ import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import { readKnowledgeRevision } from "./revisions.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
-/** S02's last migration: the database this migration upgrades. */
-const S02_SCHEMA = 23;
+/** S02's last migration (S02-T04's v24): the database this migration upgrades. */
+const S02_SCHEMA = 24;
 const MIGRATION_SCHEMA = S02_SCHEMA + 1;
 
 let db: SqlDriver;
@@ -278,7 +278,7 @@ describe("ontology.analytical-seeds: the migration", () => {
 });
 
 describe("ontology.analytical-seeds: the migration is atomic", () => {
-  it("a failure inside v24 leaves schema v23 as it was: no table, no seed row, the gate and revision intact", () => {
+  it("a failure inside v25 leaves schema v24 as it was: no table, no seed row, the gate and revision intact", () => {
     const before = {
       rows: rows(),
       revision: readKnowledgeRevision(db),

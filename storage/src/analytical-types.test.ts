@@ -220,7 +220,7 @@ const add = (name: string, rule: ElementRule): OntologyChange => ({ op: "add", n
 let db: SqlDriver;
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
-  migrate(db, migrations.slice(0, 23)); // S02's level: the analytical migration is what these checks judge
+  migrate(db, migrations.slice(0, 24)); // S02's level: the analytical migration is what these checks judge
 });
 afterEach(() => db.close());
 
