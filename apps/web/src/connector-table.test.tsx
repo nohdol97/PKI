@@ -3,7 +3,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ConnectorTable } from "./connector-table.tsx";
-import { DELETIONS_MAY_BE_MISSED, nextSyncStops, syncStopText } from "./connector-text.ts";
+import { CREDENTIAL_REASONS, type ConnectorSummary } from "@pki/contracts";
+import {
+  CREDENTIAL_REASON_TEXT,
+  CREDENTIAL_SLOT_STATE_TEXT,
+  DELETIONS_MAY_BE_MISSED,
+  nextSyncStops,
+  syncStopText,
+} from "./connector-text.ts";
 
 const render = (props: Partial<Parameters<typeof ConnectorTable>[0]> = {}) =>
   renderToStaticMarkup(
@@ -42,5 +49,94 @@ describe("nextSyncStops", () => {
     expect(two).toEqual({ a: syncStopText("aborted"), b: syncStopText("storage-failed") });
     expect(nextSyncStops(two, "a", undefined)).toEqual({ b: syncStopText("storage-failed") });
     expect(render({ syncStops: nextSyncStops(one, "a", undefined) })).not.toContain('role="alert"');
+  });
+});
+
+// I06-R14, I06-C11 ④ ⑤: the slots of an instance, their states, the entry and the words of the four reasons
+const NAME = `connector.${"b".repeat(32)}.token`;
+const declared = (over: Partial<ConnectorSummary> = {}): ConnectorSummary => ({
+  id: "mail-1",
+  kind: "k",
+  state: "unavailable",
+  reason: "credential-missing",
+  credentials: [{ slot: "token", name: NAME, state: "missing" }],
+  ...over,
+});
+const renderCredentials = (connector: ConnectorSummary, withBridge = true) =>
+  render({
+    connectors: [connector],
+    canEnterCredentials: withBridge,
+    credentialNotes: {},
+    onCredentialChange: () => {},
+  });
+
+describe("ConnectorTable credentials", () => {
+  it("shows each reason in its own words on the row of the instance", () => {
+    const seen = CREDENTIAL_REASONS.map((reason) => {
+      const html = renderCredentials(declared({ reason }));
+      expect(html).toContain(CREDENTIAL_REASON_TEXT[reason]);
+      return html;
+    });
+    expect(new Set(seen).size).toBe(CREDENTIAL_REASONS.length);
+  });
+
+  it("lists a slot with its state, a labelled password input and a save button, when the shell is there", () => {
+    const html = renderCredentials(declared());
+    expect(html).toContain(CREDENTIAL_SLOT_STATE_TEXT.missing);
+    expect(html).toContain('type="password"');
+    expect(html).toContain('autoComplete="off"');
+    expect(html).toContain('aria-label="mail-1 token 값"');
+    expect(html).toContain("저장");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>저장<\/button>/); // nothing typed: nothing to save
+    expect(html).not.toContain("삭제"); // nothing stored: nothing to delete
+  });
+
+  it("offers the delete button only where a value is stored, and keeps the stored name out of the page's text", () => {
+    const html = renderCredentials(
+      declared({ credentials: [{ slot: "token", name: NAME, state: "present" }] }),
+    );
+    expect(html).toContain('aria-label="mail-1 token 삭제"');
+    expect(html).toContain(CREDENTIAL_SLOT_STATE_TEXT.present);
+  });
+
+  it("says the state of a slot the store cannot answer for, in its own words", () => {
+    const html = renderCredentials(
+      declared({
+        reason: "credential-store-unavailable",
+        credentials: [{ slot: "token", name: NAME, state: "unavailable" }],
+      }),
+    );
+    expect(html).toContain(CREDENTIAL_SLOT_STATE_TEXT.unavailable);
+  });
+
+  it("shows no input without the shell, only the notice that this run has no store", () => {
+    const html = renderCredentials(declared(), false);
+    expect(html).not.toContain("<input");
+    expect(html).not.toContain('type="password"');
+    expect(html).toContain("이 실행에는 저장소가 없습니다");
+  });
+
+  it("draws nothing of credentials for an instance that declared no slot, with or without the shell", () => {
+    for (const withBridge of [true, false]) {
+      const html = renderCredentials(
+        { id: "plain", kind: "k", state: "ready" } as ConnectorSummary,
+        withBridge,
+      );
+      expect(html).not.toContain("<input");
+      expect(html).not.toContain("저장소가 없습니다");
+    }
+  });
+
+  it("puts the note of the last credential action on the row of its instance only", () => {
+    const html = render({
+      connectors: [declared(), declared({ id: "other" })],
+      canEnterCredentials: true,
+      credentialNotes: { other: "곧 반영됩니다" },
+      onCredentialChange: () => {},
+    });
+    expect(html.split("곧 반영됩니다")).toHaveLength(2);
+    const [first, second] = html.split("<tr>").slice(1) as [string, string];
+    expect(first).not.toContain("곧 반영됩니다");
+    expect(second).toContain("곧 반영됩니다");
   });
 });

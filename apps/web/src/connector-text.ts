@@ -1,5 +1,10 @@
 // Words for a Connector's row on the Sources screen (I01-R17).
-import type { ConnectorSummary, SyncStopCode } from "@pki/contracts";
+import {
+  CREDENTIAL_REASONS,
+  type ConnectorSummary,
+  type CredentialReason,
+  type SyncStopCode,
+} from "@pki/contracts";
 
 export const DELETIONS_MAY_BE_MISSED = "만료된 동안 지워진 원본을 놓쳤을 수 있음";
 
@@ -36,4 +41,35 @@ export function nextSyncStops(
 ): Record<string, string> {
   const rest = Object.fromEntries(Object.entries(stops).filter(([key]) => key !== id));
   return stopped ? { ...rest, [id]: syncStopText(stopped) } : rest;
+}
+
+/** Why an instance is unavailable for want of a usable credential, and what the user can do (I06-R9, R14). */
+export const CREDENTIAL_REASON_TEXT: Readonly<Record<CredentialReason, string>> = {
+  "credential-store-unavailable":
+    "자격 증명 저장소를 쓸 수 없습니다. 이 PC의 OS 보호 저장소를 쓸 수 있어야 값을 저장할 수 있습니다.",
+  "credential-missing": "자격 증명이 없습니다. 아래에 값을 입력하세요.",
+  "credential-unreadable": "저장된 자격 증명을 읽을 수 없습니다. 값을 지우고 다시 입력하세요.",
+  "credential-rejected":
+    "원 시스템이 자격 증명을 거부했습니다(틀림, 만료, 철회). 값을 고쳐 입력하세요.",
+};
+
+/** A slot as the store last answered for it (I06-R13); the value is never shown. */
+export const CREDENTIAL_SLOT_STATE_TEXT: Readonly<
+  Record<NonNullable<ConnectorSummary["credentials"]>[number]["state"], string>
+> = {
+  present: "저장됨",
+  missing: "없음",
+  unavailable: "저장소를 쓸 수 없음",
+};
+
+/** Where there is no shell there is no store to put a credential in (I06-R14). */
+export const NO_CREDENTIAL_STORE_TEXT =
+  "이 실행에는 저장소가 없습니다. 자격 증명은 설치된 앱에서만 입력할 수 있습니다.";
+
+/** The row's reason in words, for the credential reasons; nothing for the others. */
+export function connectorReasonText(connector: ConnectorSummary): string | undefined {
+  const { reason } = connector;
+  return reason !== undefined && (CREDENTIAL_REASONS as readonly string[]).includes(reason)
+    ? CREDENTIAL_REASON_TEXT[reason as CredentialReason]
+    : undefined;
 }
