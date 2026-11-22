@@ -4,10 +4,12 @@
 // the runner holds are not reclaimed, and fairness keys take turns from the
 // runner's memory. Handlers are gated by the test; clocks are injected.
 import {
+  closeJob,
   readJob,
   registerConnectorInstance,
   registerJob,
   saveSourceRecord,
+  supersedeOpenJobs,
   writeSetting,
   type JobPriority,
   type SqlDriver,
@@ -17,6 +19,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Clock } from "./clock.ts";
 import { openCanonicalDb } from "./composition.ts";
 import {
   createJobRunner,
@@ -34,11 +37,19 @@ const T0 = new Date("2026-11-21T00:00:00.000Z");
 const LEASE = 60_000;
 let clock = T0;
 const now = () => clock;
+/** The monotonic reading of the injected clock, moved by the tests alone. */
+let mono = 0;
+const testClock: Clock = {
+  now: () => clock.getTime(),
+  sleep: async () => {},
+  monotonic: () => mono,
+};
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-jobs-concurrency-"));
   db = openCanonicalDb(join(dir, "data"));
   clock = T0;
+  mono = 0;
   registerConnectorInstance(db, "A", "test-fixtures");
   registerConnectorInstance(db, "B", "test-fixtures");
 });
@@ -94,7 +105,7 @@ function gated(onError?: (e: unknown) => void, pollMs?: number) {
   const runner: JobRunner = createJobRunner({
     db,
     handlers: Object.fromEntries(KINDS.map((kind) => [kind, handler])),
-    now,
+    clock: testClock,
     testBuild: { leaseMs: LEASE, ...(pollMs === undefined ? {} : { pollMs }) },
     ...(onError && { onError }),
   });
@@ -368,12 +379,91 @@ describe("concurrency.groups (I03-R13): runOnce, stop and the held jobs", () => 
     const g = gated((e) => errors.push(e));
     const drained = g.runner.wake();
     await vi.waitFor(() => expect(g.running()).toHaveLength(2));
-    g.finish(g.running()[0] as number, { status: "dead_letter", reason: "gone" });
+    g.finish(g.running()[0] as number, { status: "fail", code: "gone", retryable: false });
     await vi.waitFor(() => expect(g.started).toHaveLength(3));
     for (const id of g.running()) g.finish(id);
     await drained;
     expect(jobs.map(status).sort()).toEqual(["dead_letter", "succeeded", "succeeded"]);
     expect(errors).toEqual([]);
+  });
+});
+
+describe("concurrency.groups (I03-R13, R14; I03-T05 item 9): a run that ended without its handler", () => {
+  /** Extract jobs whose handlers never return on their own and ignore their signal. */
+  function abandoning() {
+    const started: number[] = [];
+    const late = new Map<number, (result: JobResult) => void>();
+    const runner = createJobRunner({
+      db,
+      handlers: {
+        extract: (job) => {
+          started.push(job.id);
+          return new Promise<JobResult>((resolve) => late.set(job.id, resolve));
+        },
+      },
+      kinds: { extract: { runTimeoutMs: 1000 } },
+      clock: testClock,
+      testBuild: { leaseMs: LEASE },
+    });
+    return { runner, started, late };
+  }
+  const marker = vi.fn();
+
+  beforeEach(() => {
+    marker.mockClear();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  });
+
+  it("a timed-out handler that never returns frees its place: the next job of its group runs, and its late write is refused", async () => {
+    const first = extract("A");
+    const second = extract("B");
+    const { runner, started, late } = abandoning();
+    const drained = runner.wake();
+    await vi.waitFor(() => expect(started).toEqual([first.id]));
+    await vi.advanceTimersByTimeAsync(LEASE / 4);
+    expect(status(second)).toBe("queued"); // knowledge is full while the first runs in time
+
+    mono = 1000; // over the kind's limit at the next heartbeat
+    await vi.advanceTimersByTimeAsync(LEASE / 4);
+    await vi.waitFor(() => expect(started).toEqual([first.id, second.id]));
+    expect(readJob(db, first.id)).toMatchObject({ status: "retry", reason: "run-timeout" });
+    expect(readJob(db, second.id)).toMatchObject({ status: "running", attempts: 1 });
+
+    // the abandoned handler comes back while the second runs: nothing of it is written
+    const lease = { id: first.id, leaseToken: 1 };
+    late.get(first.id)?.({ status: "succeeded", write: marker });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closeJob(db, lease, { status: "succeeded", write: marker })).toBe("not-leased");
+    expect(marker).not.toHaveBeenCalled();
+    expect(readJob(db, first.id)).toMatchObject({ status: "retry", reason: "run-timeout" });
+    expect(status(second)).toBe("running");
+
+    late.get(second.id)?.({ status: "succeeded", write: () => {} });
+    await drained; // the first waits out its backoff: nothing else is due
+    expect(status(second)).toBe("succeeded");
+    expect(started).toEqual([first.id, second.id]);
+  });
+
+  it("a run that lost its job frees its place the same way", async () => {
+    const first = extract("A");
+    const second = extract("B");
+    const { runner, started, late } = abandoning();
+    const drained = runner.wake();
+    await vi.waitFor(() => expect(started).toEqual([first.id]));
+    // the source is closed under the running job (I03-R3): its token is raised
+    expect(supersedeOpenJobs(db, first.sourceId as number, now())).toBe(1);
+    expect(status(second)).toBe("queued"); // nothing claims until the runner notices
+
+    await vi.advanceTimersByTimeAsync(LEASE / 4); // the heartbeat fails: the run ends
+    await vi.waitFor(() => expect(started).toEqual([first.id, second.id]));
+    late.get(first.id)?.({ status: "succeeded", write: marker });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(marker).not.toHaveBeenCalled();
+    expect(readJob(db, first.id)).toMatchObject({ status: "superseded", reason: "source-closed" });
+
+    late.get(second.id)?.({ status: "succeeded", write: () => {} });
+    await drained;
+    expect(status(second)).toBe("succeeded");
   });
 });
 

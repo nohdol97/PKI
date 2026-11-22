@@ -1,5 +1,6 @@
 // V02-R4, R5, C3 integration on a real SQLite file: the runner claims jobs with an
-// expiring lease, one at a time, picks up a job left running by a backend that
+// expiring lease, one knowledge job at a time (other groups together: I03-T05,
+// job-concurrency.test.ts), picks up a job left running by a backend that
 // stopped once the lease runs out, and discards a result whose version went
 // stale before it was written. Clocks are injected; nothing sleeps.
 // I03-T04: results go through the outcome table (retry with backoff, refunds,
