@@ -131,8 +131,10 @@ export async function importJsonl(
   };
   // a running sync or import of an instance the file names refuses the whole request before
   // any of it is stored (the API answers 409); one that starts after this check is the
-  // instance's failure below
+  // instance's failure below. An instance bound to another kind is refused line by line
+  // (`instance-conflict`) whatever its lock says, so it does not make the request a 409.
   for (const instanceId of instances.keys()) {
+    if (boundElsewhere(instanceId)) continue;
     const release = tryLockInstance(db, instanceId);
     if (!release) throw new InstanceBusyError();
     release();

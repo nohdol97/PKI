@@ -59,6 +59,20 @@ describe("retention (I03-R21): ended jobs past 30 days are deleted", () => {
     expect(young.map((j) => exists(j.id))).toEqual([true, true, true, true]);
   });
 
+  it("spares the newest job row, so a deleted id is never issued again (jobs.id has no AUTOINCREMENT)", () => {
+    const old = job("maintenance", "succeeded", 40);
+    const newest = job("maintenance", "succeeded", 40);
+    expect(purgeEndedJobs(db, NOW - 30 * DAY)).toBe(1);
+    expect(exists(old.id)).toBe(false);
+    expect(exists(newest.id)).toBe(true);
+    const next = job("maintenance", "queued", 0);
+    expect(next.id).toBeGreaterThan(newest.id);
+    // once a newer job exists the spared row goes with the next pass
+    expect(purgeEndedJobs(db, NOW - 30 * DAY)).toBe(1);
+    expect(exists(newest.id)).toBe(false);
+    expect(exists(next.id)).toBe(true);
+  });
+
   it("keeps a row ended exactly 30 days ago: it is deleted once it is more than 30 days past", () => {
     const edge = job("maintenance", "succeeded", 30);
     expect(purgeEndedJobs(db, NOW - 30 * DAY)).toBe(0);
@@ -78,6 +92,7 @@ describe("retention (I03-R21): ended jobs past 30 days are deleted", () => {
     const mark = job("projection-remove", "dead_letter", 400, "engine");
     const rebuildDead = job("projection-rebuild", "dead_letter", 31, "engine");
     const closed = job("projection-remove", "superseded", 31, "vector");
+    job("maintenance", "queued", 0); // a newer row: the newest one is always spared
     expect(purgeEndedJobs(db, NOW - 30 * DAY)).toBe(2);
     expect(exists(mark.id)).toBe(true);
     expect(exists(rebuildDead.id)).toBe(false);

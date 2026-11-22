@@ -56,10 +56,14 @@ export interface RunFacts {
 
 /**
  * A retryable failure: retry after the backoff of the run's attempt, the attempt spent.
- * `askedMs`, a wait the origin asked for, lengthens it but never past the backoff cap.
+ * `askedMs`, a wait the origin asked for, lengthens it but never past the backoff cap; the
+ * origin may give a fractional number, a stored time is whole milliseconds, so it is rounded up.
  */
 export function failure(code: string, run: RunFacts, askedMs = 0): JobClosing {
-  const wait = Math.max(backoffMs(run.attempts, code), Math.min(askedMs, BACKOFF_MAX_MS));
+  const wait = Math.max(
+    backoffMs(run.attempts, code),
+    Math.ceil(Math.min(askedMs, BACKOFF_MAX_MS)),
+  );
   return { status: "retry", reason: code, runAfter: run.now + wait };
 }
 
@@ -119,7 +123,7 @@ function closing(result: JobResult, run: ClassifiedRun): JobClosing | undefined 
       return {
         status: "retry",
         reason: result.code,
-        runAfter: run.now + result.delayMs,
+        runAfter: run.now + Math.ceil(result.delayMs), // a stored time is whole milliseconds
         refund: true,
       };
     case "blocked":

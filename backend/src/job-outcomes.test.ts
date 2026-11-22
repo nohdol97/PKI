@@ -280,3 +280,19 @@ describe("outcome.retry-after (I01-R20 `rate-limited`): the later of the backoff
     }
   });
 });
+
+describe("outcome.whole-ms: a stored time is whole milliseconds (I03-T09 review F1)", () => {
+  const run = { attempts: 1, now: NOW, progressed: () => false };
+
+  it("rounds a fractional request and a fractional defer up", () => {
+    expect(
+      classifyResult(
+        { status: "fail", code: "rate-limited", retryable: true, retryAfterMs: 600_000.5 },
+        run,
+      ),
+    ).toMatchObject({ runAfter: NOW + 600_001 });
+    expect(
+      classifyResult({ status: "defer", code: "instance-busy", delayMs: 1000.2 }, run),
+    ).toMatchObject({ runAfter: NOW + 1001 });
+  });
+});

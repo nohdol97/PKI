@@ -20,6 +20,7 @@ import type { Clock } from "./clock.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { createMaintenanceHandler, RETENTION_MS } from "./maintenance.ts";
 import { createJobRunner } from "./job-runner.ts";
+import { createScheduler } from "./scheduler.ts";
 import { MAINTENANCE_KIND } from "./scheduler.ts";
 
 const DAY = 24 * 60 * 60_000;
@@ -141,5 +142,40 @@ describe("retention (I03-R21): the cleanup job", () => {
     await runner().runOnce();
     expect(exists(oldRun.id)).toBe(false);
     expect(readJob(db, job.id)?.status).toBe("succeeded");
+  });
+
+  it("leaves a schedule's dead-letter marker dangling but harmless: ids only grow, so a later give-up still pauses it", async () => {
+    const scheduler = createScheduler({ db, clock, timeZone: () => "UTC" });
+    const { schedule } = scheduler.ensureSchedule({
+      kind: "connector-sync",
+      target: "c1",
+      period: { kind: "hourly" },
+    });
+    const giveUp = (slot: number) => {
+      const r = registerJob(db, {
+        kind: "connector-sync",
+        target: "c1",
+        schedule: { id: schedule.id, slot },
+        at: new Date(wall),
+      });
+      if (!r.registered) throw new Error("expected a new job");
+      db.run("UPDATE jobs SET status = 'dead_letter', reason = 'x', finished_at = ? WHERE id = ?", [
+        wall - 40 * DAY,
+        r.job.id,
+      ]);
+      return r.job.id;
+    };
+    const first = giveUp(1);
+    scheduler.check();
+    expect(scheduler.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "x" });
+    scheduler.enable(schedule.id); // the marker is now `first`
+    giveUp(2); // a newer row, so `first` is not the newest and is purged
+    cleanup();
+    await runner().runOnce();
+    expect(exists(first)).toBe(false);
+    const again = giveUp(3);
+    expect(again).toBeGreaterThan(first);
+    scheduler.check();
+    expect(scheduler.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "x" });
   });
 });

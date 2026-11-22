@@ -334,7 +334,7 @@ export function productRunner(
      * is made after the runner, as it wakes it; I03-T09). Given, the runner also runs
      * `connector-sync`; none, those jobs wait.
      */
-    connectors?: () => SyncManager;
+    connectors?: () => SyncManager | undefined;
     /** The registry that names a candidate item's lineage (productRegistry); default `derivativeRegistry` (knowledge-engine canonical-kinds.ts). */
     registry?: DerivativeRegistry;
   } = {},

@@ -126,11 +126,12 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")
   const clock = systemClock;
   // the manager wakes the runner and the runner's `connector-sync` handler calls the manager:
-  // the handler reads it at each run, and no run starts before it is set (runner.start below)
+  // the handler reads it at each run; a run claimed before it is set (a wake can claim before
+  // runner.start) is deferred by the handler, its attempt unspent
   const late: { manager?: ConnectorManager } = {};
   const runner = productRunner(db, calls.broker, {
     clock,
-    connectors: () => late.manager as ConnectorManager,
+    connectors: () => late.manager,
     policyFingerprint: calls.policyFingerprint,
     engine,
     projections,
@@ -194,7 +195,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       close: async () => {
         reevaluation.stop();
         scheduler.stop();
-        collectors.stop();
+        await collectors.stop();
         await server.close();
         await runner.stop();
         await projections.drain();

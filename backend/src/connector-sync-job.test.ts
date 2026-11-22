@@ -14,12 +14,20 @@ import {
   type ConnectorSummary,
   type SyncResponse,
 } from "@pki/contracts";
-import { leaseNextJob, readJob, registerJob, type SqlDriver, type StoredJob } from "@pki/storage";
+import {
+  closeJob,
+  leaseNextJob,
+  readJob,
+  registerConnectorInstance,
+  registerJob,
+  type SqlDriver,
+  type StoredJob,
+} from "@pki/storage";
 import { ScriptedConnector, send } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import type { Clock } from "./clock.ts";
 import { openCanonicalDb, type ConnectorSet } from "./composition.ts";
@@ -32,6 +40,7 @@ import {
   recheckInstances,
   releaseHeldCollector,
   releaseReadyCollectors,
+  startCollectorUpkeep,
   SYNC_PERIOD,
 } from "./connector-sync-job.ts";
 import { HELD_REASONS } from "./held-release.ts";
@@ -424,6 +433,18 @@ describe("connector-sync.exclusive (I03-R19, I01-R21): one sync or import per in
     release();
   });
 
+  it("B-F2: an instance bound to another kind is refused line by line even when its lock is held, and never makes the request a 409", async () => {
+    const gated = gatedConnector();
+    gated.open();
+    booted = await boot(gated);
+    registerConnectorInstance(booted.db, "K", "other-kind");
+    const release = tryLockInstance(booted.db, "K") as () => void;
+    const conflict = await post(booted, "K");
+    expect(conflict.status).toBe(200);
+    expect(conflict.body).toMatchObject({ errors: [{ reason: "instance-conflict" }] });
+    release();
+  });
+
   it("does not hold instance B while A's sync runs", async () => {
     const a = gatedConnector();
     const manager = await createConnectorManager(
@@ -708,6 +729,45 @@ describe("the product's composition (bootBackend)", () => {
     expect(readJob(booted.db, old.job.id)).toBeUndefined();
   });
 
+  it("B-F3: closing the backend stops the hourly recheck (removing stop() from close goes red)", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      let initializations = 0;
+      const sleeper = (): Connector => ({
+        ...new ScriptedConnector(),
+        manifest: new ScriptedConnector().manifest,
+        initialize: async () => {
+          initializations++;
+          throw new ConnectorNotImplementedError();
+        },
+        healthCheck: async () => ({ state: "unavailable", reason: "x" }),
+        getChanges: async () => ({ changes: [], nextCursor: "0", hasMore: false }),
+        getDocument: async () => null,
+      });
+      booted = await bootBackend({
+        dataDir: join(dir, "boot"),
+        token: "t".repeat(43),
+        allowedOrigins: [],
+        secrets: NO_SECRET_STORE,
+        connectors: {
+          instances: [{ id: "later", kind: "sleeper", config: {} }],
+          kinds: { sleeper },
+        },
+      });
+      await new Promise((r) => setTimeout(r, 50)); // the pass at start has run
+      await booted.server.close();
+      const db = booted.db; // still open: a pass that is not stopped would reach the Connector
+      booted = undefined;
+      const before = initializations;
+      vi.advanceTimersByTime(3 * 60 * 60_000);
+      await new Promise((r) => setTimeout(r, 50));
+      db.close();
+      expect(initializations).toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   function rec() {
     return {
       namespace: "",
@@ -718,4 +778,227 @@ describe("the product's composition (bootBackend)", () => {
       body: "b",
     };
   }
+});
+
+describe("review rework 1 (I03-T09 reviewer A)", () => {
+  it("F1: a fractional retryAfterMs from the origin closes as a retry on a whole millisecond, never leaves the job running", async () => {
+    const queued = register();
+    await runnerOf(
+      fakeManager(() => ({
+        connectorId: "c1",
+        ...ZERO,
+        stopped: "rate-limited",
+        retryAfterMs: 600_000.5,
+      })),
+    ).runOnce();
+    const after = job(queued.id);
+    expect(after).toMatchObject({ status: "retry", reason: "rate-limited" });
+    expect(after.runAfter).toBe(T0 + 600_001);
+  });
+
+  it("F6: every retry row whose attempt is not spent waits one minute by the table, so the handler's one fixed delay cannot drift", () => {
+    const unspent = SYNC_OUTCOMES.filter((r) => r.result === "retry" && r.attempt === "unspent");
+    expect(unspent.length).toBeGreaterThan(0);
+    for (const row of unspent) expect(row.nextRun).toBe("one-minute");
+  });
+
+  async function late() {
+    const state = { ready: false };
+    const inner = new ScriptedConnector();
+    const connector: Connector = {
+      manifest: inner.manifest,
+      initialize: async (config: unknown) => {
+        if (!state.ready) throw new ConnectorNotImplementedError();
+        await inner.initialize(config);
+      },
+      healthCheck: () => inner.healthCheck(),
+      getChanges: inner.getChanges.bind(inner),
+      getDocument: inner.getDocument.bind(inner),
+    };
+    const manager = await createConnectorManager(
+      db,
+      [{ id: "site-x", kind: "late", config: { entries: [] } }],
+      { late: () => connector },
+    );
+    return { state, manager };
+  }
+
+  it("F2: an instance that becomes ready while its sync job is closing as held is released by the next pass", async () => {
+    const { state, manager } = await late();
+    const racing: Pick<ConnectorManager, "sync" | "list"> = {
+      list: () => manager.list(),
+      sync: async () => {
+        // the recheck runs inside the job: the job is `running`, so it releases nothing
+        state.ready = true;
+        await manager.recheck("site-x");
+        return { error: "connector-unavailable" };
+      },
+    };
+    const queued = register("site-x");
+    await runnerOf(racing).runOnce();
+    expect(job(queued.id)).toMatchObject({ status: "held", attempts: 0 });
+    expect(manager.list()[0]?.state).toBe("ready");
+
+    const woken: number[] = [];
+    await recheckInstances({
+      db,
+      manager,
+      runner: { wake: async () => void woken.push(1) },
+      at: () => new Date(wall),
+    });
+    expect(job(queued.id)).toMatchObject({ status: "queued", attempts: 0 });
+    expect(woken).toEqual([1]);
+  });
+
+  it("F3: a run that lost its lease and then stops after storing pages writes no counts", async () => {
+    const queued = register();
+    const stale = leaseNextJob(db, {
+      kinds: [CONNECTOR_SYNC_KIND],
+      now: new Date(wall),
+      leaseMs: HOUR,
+      owner: "old",
+    }) as StoredJob;
+    // the lease is lost: the job is closed and claimed again under a new token
+    closeJob(db, stale, { status: "retry", reason: "run-timeout", runAfter: wall }, new Date(wall));
+    const fresh = leaseNextJob(db, {
+      kinds: [CONNECTOR_SYNC_KIND],
+      now: new Date(wall),
+      leaseMs: HOUR,
+      owner: "new",
+    }) as StoredJob;
+    expect(fresh.leaseToken).not.toBe(stale.leaseToken);
+    const manager = fakeManager(() => ({
+      connectorId: "c1",
+      ...ZERO,
+      received: 5,
+      created: 5,
+      stopped: "connector-error",
+    }));
+    const handler = createConnectorSyncHandler({ db, manager: () => manager });
+    await handler(stale, { signal: new AbortController().signal } as never);
+    expect(job(queued.id).resultCounts).toBeNull();
+    await handler(fresh, { signal: new AbortController().signal } as never);
+    expect(JSON.parse(job(queued.id).resultCounts as string)).toMatchObject({ created: 5 });
+  });
+
+  it("F4: a recheck that never answers is cut at the timeout, the others are still checked, and it is not started again while pending", async () => {
+    const hung = { calls: 0 };
+    const manager = {
+      list: (): ConnectorSummary[] => [
+        { id: "hung", kind: "k", state: "unavailable" },
+        { id: "ok", kind: "k", state: "unavailable" },
+      ],
+      recheck: (id: string) => {
+        if (id === "hung") {
+          hung.calls++;
+          return new Promise<never>(() => {});
+        }
+        return Promise.resolve("unavailable" as const);
+      },
+    };
+    const inFlight = new Set<string>();
+    const options = { db, manager, runner: { wake: async () => {} }, timeoutMs: 5, inFlight };
+    expect(await recheckInstances(options)).toEqual([]);
+    expect(await recheckInstances(options)).toEqual([]);
+    expect(hung.calls).toBe(1);
+  });
+
+  it("F4: upkeep passes do not overlap: while a slow recheck is pending the other instance is not rechecked again", async () => {
+    const calls = { slow: 0, quick: 0 };
+    const manager = {
+      list: (): ConnectorSummary[] => [
+        { id: "slow", kind: "k", state: "unavailable" },
+        { id: "quick", kind: "k", state: "unavailable" },
+      ],
+      recheck: async (id: string) => {
+        if (id === "slow") {
+          calls.slow++;
+          await new Promise((r) => setTimeout(r, 40));
+        } else calls.quick++;
+        return "unavailable" as const;
+      },
+    };
+    const scheduler = createScheduler({ db, clock, timeZone: () => "UTC" });
+    const upkeep = startCollectorUpkeep({
+      db,
+      manager,
+      scheduler,
+      runner: { wake: async () => {} },
+      intervalMs: 5,
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    await upkeep.stop();
+    expect(calls.slow).toBeGreaterThan(1);
+    // each pass checks slow, then quick: quick is never ahead of slow, and behind by the pass cut short
+    expect(calls.quick).toBeLessThanOrEqual(calls.slow);
+    expect(calls.slow - calls.quick).toBeLessThanOrEqual(1);
+  });
+
+  it("B-F3: stop ends a pass under way without another write, and clears the timer", async () => {
+    const { state, manager } = await late();
+    const queued = register("site-x");
+    await runnerOf(manager).runOnce(); // held: the instance is not ready
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => (finish = resolve));
+    const slow = {
+      list: () => manager.list(),
+      recheck: async (id: string) => {
+        await pending; // the recheck is in flight when stop is called
+        state.ready = true;
+        return manager.recheck(id);
+      },
+    };
+    const scheduler = createScheduler({ db, clock, timeZone: () => "UTC" });
+    const upkeep = startCollectorUpkeep({
+      db,
+      manager: slow,
+      scheduler,
+      runner: { wake: async () => {} },
+      intervalMs: 5,
+    });
+    await upkeep.stop();
+    finish();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(job(queued.id).status).toBe("held"); // nothing was released after stop
+  });
+
+  it("B-F3: a pass cut by stop does not go on to release ready instances", async () => {
+    const queued = register("ready-one");
+    db.run("UPDATE jobs SET status = 'held', reason = 'not-implemented' WHERE id = ?", [queued.id]);
+    const manager = {
+      list: (): ConnectorSummary[] => [
+        { id: "hung", kind: "k", state: "unavailable" },
+        { id: "ready-one", kind: "k", state: "ready" },
+      ],
+      recheck: () => new Promise<never>(() => {}),
+    };
+    const scheduler = createScheduler({ db, clock, timeZone: () => "UTC" });
+    const upkeep = startCollectorUpkeep({
+      db,
+      manager,
+      scheduler,
+      runner: { wake: async () => {} },
+      intervalMs: 3_600_000,
+    });
+    db.run("UPDATE jobs SET status = 'held', reason = 'not-implemented' WHERE id = ?", [queued.id]); // the start release put it back
+    await upkeep.stop();
+    expect(job(queued.id).status).toBe("held");
+  });
+
+  it("B-F4: a claim that meets no manager yet is deferred with a code, its attempt unspent", async () => {
+    const queued = register();
+    const runner = createJobRunner({
+      db,
+      clock,
+      handlers: {
+        [CONNECTOR_SYNC_KIND]: createConnectorSyncHandler({ db, manager: () => undefined }),
+      },
+    });
+    await runner.runOnce();
+    expect(job(queued.id)).toMatchObject({
+      status: "retry",
+      reason: "manager-not-ready",
+      attempts: 0,
+    });
+  });
 });

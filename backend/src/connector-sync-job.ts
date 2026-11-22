@@ -15,7 +15,12 @@
 // back: the transaction that changes the instance's settings (`releaseHeldCollector`, called
 // inside that write), a start that finds the instance ready (`releaseReadyCollectors`), and
 // the hourly recheck (`recheckInstances`), one health check per instance that is not ready.
-import { INSTANCE_BUSY_RETRY_MS, SYNC_OUTCOMES, type SyncEnd } from "@pki/connector-sdk";
+import {
+  INSTANCE_BUSY_RETRY_MS,
+  SYNC_OUTCOMES,
+  type SyncEnd,
+  type SyncOutcomeRow,
+} from "@pki/connector-sdk";
 import type { ConnectorSummary, SyncResponse } from "@pki/contracts";
 import { errorClass, log } from "@pki/providers";
 import { recordResultCounts, requeueHeldTarget, type SqlDriver } from "@pki/storage";
@@ -33,6 +38,9 @@ export const CONNECTOR_SYNC_KIND = "connector-sync";
 export const SYNC_PERIOD: Period = { kind: "hourly" };
 /** The default period of the cleanup (I03-R18, R21): the retention would stop if it did. */
 export const CLEANUP_PERIOD: Period = { kind: "daily", at: { hour: 3, minute: 0 } };
+
+/** How long a run that met no manager yet waits (it never ran a Connector, so no attempt is spent). */
+export const MANAGER_NOT_READY_RETRY_MS = 5_000;
 
 /** The code of a job whose instance is not among the configured ones any more. */
 export const INSTANCE_NOT_FOUND = "instance-not-found";
@@ -68,6 +76,11 @@ function heldReason(summary: ConnectorSummary | undefined): string {
 /** The end of a sync for I01's table: the stop code, or `completed`. */
 const endOf = (sync: SyncResponse): SyncEnd => sync.stopped ?? "completed";
 
+/** The wait of each `nextRun` that an unspent retry can have (I01-R20); only one-minute exists. */
+const UNSPENT_RETRY_DELAYS: Readonly<Partial<Record<SyncOutcomeRow["nextRun"], number>>> = {
+  "one-minute": INSTANCE_BUSY_RETRY_MS,
+};
+
 /**
  * The handler's result for one end, by the table row. `retry`: an attempt spent waits
  * the backoff (and what the origin asked); one that is not spent (the Connector was never
@@ -84,14 +97,19 @@ function resultOf(end: SyncEnd, sync: SyncResponse | undefined, reason: string):
     case "dead_letter":
       return { status: "fail", code: end, retryable: false };
     case "retry":
-      return row.attempt === "unspent"
-        ? { status: "defer", code: end, delayMs: INSTANCE_BUSY_RETRY_MS }
-        : {
-            status: "fail",
-            code: end,
-            retryable: true,
-            ...(sync?.retryAfterMs !== undefined && { retryAfterMs: sync.retryAfterMs }),
-          };
+      if (row.attempt === "unspent") {
+        // the wait is the row's `nextRun`; a value this map does not know is not guessed
+        const delayMs = UNSPENT_RETRY_DELAYS[row.nextRun];
+        return delayMs === undefined
+          ? { status: "fail", code: "unmapped-sync-end", retryable: false }
+          : { status: "defer", code: end, delayMs };
+      }
+      return {
+        status: "fail",
+        code: end,
+        retryable: true,
+        ...(sync?.retryAfterMs !== undefined && { retryAfterMs: sync.retryAfterMs }),
+      };
   }
 }
 
@@ -102,11 +120,16 @@ function resultOf(end: SyncEnd, sync: SyncResponse | undefined, reason: string):
  */
 export function createConnectorSyncHandler(options: {
   db: SqlDriver;
-  manager: () => SyncManager;
+  /** Undefined while the composition has not handed the manager over (a wake before it is built). */
+  manager: () => SyncManager | undefined;
 }): JobHandler {
   const { db } = options;
   return async (job, context) => {
     const manager = options.manager();
+    // not built yet: no Connector was called, so wait and give the attempt back
+    if (!manager) {
+      return { status: "defer", code: "manager-not-ready", delayMs: MANAGER_NOT_READY_RETRY_MS };
+    }
     const answer: SyncAnswer = await manager.sync(job.target, { signal: context.signal });
     if ("error" in answer) {
       // the instance left the configuration: nothing to retry until the user fixes it
@@ -196,6 +219,9 @@ export function releaseReadyCollectors(
   return released;
 }
 
+/** How long one instance's recheck may take before the pass goes on without it. */
+export const RECHECK_TIMEOUT_MS = 60_000;
+
 export interface RecheckOptions {
   db: SqlDriver;
   manager: Pick<ConnectorManager, "list"> & ConnectorRecheck;
@@ -203,24 +229,65 @@ export interface RecheckOptions {
   /** Called with each instance that became ready (the composition makes its default period). */
   onUsable?: (summary: ConnectorSummary) => void;
   at?: () => Date;
+  /** Default RECHECK_TIMEOUT_MS. */
+  timeoutMs?: number;
+  /** Aborted by `stop`: the pass ends at once and writes nothing more. */
+  signal?: AbortSignal;
+  /** The instances whose recheck has not settled: kept across passes so a hung one is not started again. */
+  inFlight?: Set<string>;
+}
+
+/** The instance's state after its recheck, or undefined when it did not settle in time. */
+async function boundedRecheck(
+  manager: ConnectorRecheck,
+  id: string,
+  timeoutMs: number,
+  inFlight: Set<string>,
+  signal?: AbortSignal,
+): Promise<ConnectorSummary["state"] | undefined> {
+  const settled = manager.recheck(id);
+  inFlight.add(id);
+  const done = () => void inFlight.delete(id);
+  settled.then(done, done);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      settled,
+      new Promise<undefined>(
+        (resolve) => (timer = setTimeout(() => resolve(undefined), timeoutMs)),
+      ),
+      new Promise<undefined>((resolve) =>
+        signal?.addEventListener("abort", () => resolve(undefined)),
+      ),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
  * The hourly recheck (R16 ②′): each instance that is not ready is initialized again and
- * asked for its health once; one that is ok has its held jobs put back and is reported usable.
- * Returns the ids of the instances that became ready.
+ * asked for its health once, at most `timeoutMs` each and never while an earlier recheck of it
+ * is still pending; one that is ok has its held jobs put back and is reported usable. Every
+ * ready instance also has its held collector jobs put back: a job that closed held after the
+ * instance became ready (its sync met the old state, the recheck found it ready while the job
+ * was still running) would otherwise wait for a restart. Returns the ids that became ready.
  */
 export async function recheckInstances(options: RecheckOptions): Promise<string[]> {
   const { db, manager } = options;
+  const inFlight = options.inFlight ?? new Set<string>();
+  const timeoutMs = options.timeoutMs ?? RECHECK_TIMEOUT_MS;
   const usable: string[] = [];
-  for (const { id } of manager.list().filter((s) => s.state !== "ready")) {
-    if ((await manager.recheck(id)) !== "ready") continue;
+  for (const { id } of manager.list().filter((s) => s.state !== "ready" && !inFlight.has(s.id))) {
+    const state = await boundedRecheck(manager, id, timeoutMs, inFlight, options.signal);
+    if (options.signal?.aborted) return usable; // stopped: the database may be closed
+    if (state !== "ready") continue;
     usable.push(id);
-    releaseHeldCollector(db, id, options.at?.());
     const summary = manager.list().find((s) => s.id === id);
     if (summary) options.onUsable?.(summary);
   }
-  if (usable.length > 0) void options.runner.wake();
+  const released = releaseReadyCollectors(db, manager.list(), options.at?.());
+  if (usable.length > 0 || released.length > 0) void options.runner.wake();
   return usable;
 }
 
@@ -237,7 +304,7 @@ export function startCollectorUpkeep(options: {
   runner: Pick<JobRunner, "wake">;
   intervalMs?: number;
   onError?: (error: unknown) => void;
-}): { stop(): void } {
+}): { stop(): Promise<void> } {
   const { db, manager, scheduler, runner } = options;
   const onError =
     options.onError ?? ((e) => log("collector-upkeep-error", { error: errorClass(e) }));
@@ -252,15 +319,39 @@ export function startCollectorUpkeep(options: {
     ensureDefaultSchedules(scheduler, manager.list());
     if (releaseReadyCollectors(db, manager.list()).length > 0) void runner.wake();
   });
-  const pass = () =>
-    recheckInstances({
-      db,
-      manager,
-      runner,
-      onUsable: () => guarded(() => ensureDefaultSchedules(scheduler, manager.list())),
-    }).then(() => undefined, onError);
+  const inFlight = new Set<string>();
+  const stopping = new AbortController();
+  let current: Promise<void> | undefined; // a pass still running is not started again
+  const run = async () => {
+    try {
+      await recheckInstances({
+        db,
+        manager,
+        runner,
+        inFlight,
+        signal: stopping.signal,
+        onUsable: () => guarded(() => ensureDefaultSchedules(scheduler, manager.list())),
+      });
+    } catch (error) {
+      onError(error);
+    } finally {
+      current = undefined;
+    }
+  };
+  const pass = async () => {
+    if (current || stopping.signal.aborted) return;
+    current = run();
+    await current;
+  };
   void pass();
   const timer = setInterval(() => void pass(), options.intervalMs ?? HELD_REEVALUATION_MS);
   timer.unref();
-  return { stop: () => clearInterval(timer) };
+  return {
+    // the timer is cleared and a pass under way ends without another write; resolves once it has
+    stop: async () => {
+      clearInterval(timer);
+      stopping.abort();
+      await current;
+    },
+  };
 }
