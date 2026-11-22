@@ -26,6 +26,7 @@
 | [specs/2026-11-21-I02-document-normalization.md](specs/2026-11-21-I02-document-normalization.md) | 문서 정규화(I02-A, 이슈 #19의 첫 조각)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
 | [specs/2026-11-21-I03-persistent-queue.md](specs/2026-11-21-I03-persistent-queue.md) | 영속 작업 대기열·스케줄러·재시도와 절전 복구(I03)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
 | [specs/2026-11-21-I04-invalidation.md](specs/2026-11-21-I04-invalidation.md) | 수정·삭제·권한 철회의 파생물 무효화(I04): 파생물 종류 등록 계약, 소거 범위, tombstone 규칙, access_scope 승계, 복원 뒤 재적용 정책 | 확정 |
+| [specs/2026-11-22-I02-local-file-import.md](specs/2026-11-22-I02-local-file-import.md) | 로컬 파일·폴더 가져오기(I02-B, #19·#116): `local-files` 수집기, 위치 승인과 경로 제한, 이동·이름 바꾸기, 감시와 맞춰 보기, 정규화 격리, 작업 분해 | 초안(검토 전) |
 
 ## 동작 방식
 
