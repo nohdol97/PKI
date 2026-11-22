@@ -292,7 +292,7 @@ export {
   type InvalidationRecord,
   type SourceChangeKind,
 } from "./invalidations.ts";
-export { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
+export { raiseChangeSeq, readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
 export { listItemNames } from "./candidates.ts";
 export {
   listActiveInsights,

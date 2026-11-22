@@ -7,6 +7,7 @@
 import type { DerivativeRegistry } from "@pki/storage";
 import { createAcceptChange, type AcceptChange } from "./arrival.ts";
 import { derivativeRegistry } from "./canonical-kinds.ts";
+import { createPruneVersions, type PruneVersions } from "./prune-versions.ts";
 import { createPropagateNewVersion, type PropagateNewVersion } from "./propagation.ts";
 import { createUserDelete, type UserDelete } from "./projections.ts";
 import { tombstoneEntries } from "./tombstone-entry.ts";
@@ -18,6 +19,7 @@ export interface CanonicalEntries {
   acceptChange: AcceptChange;
   propagateNewVersion: PropagateNewVersion;
   userDelete: UserDelete;
+  pruneVersions: PruneVersions;
 }
 
 export function createCanonicalEntries(registry: DerivativeRegistry): CanonicalEntries {
@@ -27,6 +29,7 @@ export function createCanonicalEntries(registry: DerivativeRegistry): CanonicalE
     acceptChange: createAcceptChange(registry),
     propagateNewVersion: createPropagateNewVersion(registry),
     userDelete: createUserDelete(registry),
+    pruneVersions: createPruneVersions(registry),
   };
 }
 
