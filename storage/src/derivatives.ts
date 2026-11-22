@@ -102,6 +102,11 @@ export interface DerivedItem {
   /** The same-row key (V02-R8); a record keeps only its keyed hash (I04-R7). */
   itemKey: string;
   lineage: readonly SourceVersionRef[];
+  /**
+   * A content-free item (a job's bookkeeping): the scope policy is not asked about it, so a policy that
+   * errs or refuses cannot take it with it (I04-T09). Never set for an item that carries source content.
+   */
+  unjudged?: true;
   /** Called only for an item that passed the checks. */
   write(tx: SqlDriver): void;
 }

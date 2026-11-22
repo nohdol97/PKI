@@ -249,7 +249,7 @@ const drop = (sourceId: number, version: number, key: string) =>
   );
 const jobs = () =>
   db.all(
-    "SELECT kind, target, source_id AS sourceId, fence_version AS fence, status FROM jobs ORDER BY id",
+    "SELECT kind, target, source_id AS sourceId, fence_version AS fence, status, priority FROM jobs ORDER BY id",
   );
 
 describe("scope.changed: the re-extraction of sources the policy left something out of (I04-R15)", () => {
@@ -270,6 +270,7 @@ describe("scope.changed: the re-extraction of sources the policy left something 
         sourceId: a.sourceId,
         fence: 1,
         status: "queued",
+        priority: "scheduled",
       },
       {
         kind: "extract",
@@ -277,6 +278,7 @@ describe("scope.changed: the re-extraction of sources the policy left something 
         sourceId: b2.sourceId,
         fence: 2,
         status: "queued",
+        priority: "scheduled",
       },
     ]);
     expect(propagation.recomputedByKind["scope-drop"]).toBe(2);
@@ -292,7 +294,7 @@ describe("scope.changed: the re-extraction of sources the policy left something 
     expect(propagation.recomputedByKind["scope-drop"]).toBe(0);
   });
 
-  it("queues again, under another target, when the first extraction's job row still holds its own key and when a second widening follows", () => {
+  it("queues a second widening under another target once the first re-extraction is closed, while the first extraction's own job row (target '') does not stand in the way", () => {
     const b = source("b", "b의 본문", ["b"]);
     // the first extraction's job: the same (kind, source, version) as the re-extraction's, target ''
     db.run(
@@ -302,14 +304,31 @@ describe("scope.changed: the re-extraction of sources the policy left something 
     );
     drop(b.sourceId, 1, "k");
     const first = run(scopeChange(b.sourceId)).propagation.invalidationId;
+    db.run("UPDATE jobs SET status = 'succeeded' WHERE target = ?", [`scope-recompute:${first}`]);
     const second = run(scopeChange(b.sourceId)).propagation.invalidationId;
     expect(first).not.toBe(second);
     expect(jobs().map((j) => [j.target, j.status])).toEqual([
       ["", "succeeded"],
-      [`scope-recompute:${first}`, "queued"],
+      [`scope-recompute:${first}`, "succeeded"],
       [`scope-recompute:${second}`, "queued"],
     ]);
   });
+
+  it.each(["queued", "running", "retry", "held"])(
+    "queues no second re-extraction of a source version while one is %s: K scope changes over N sources leave at most N open jobs",
+    (status) => {
+      const a = source("a", "a의 본문", ["a"]);
+      const b = source("b", "b의 본문", ["b"]);
+      const c = source("c", "c의 본문", ["c"]);
+      drop(a.sourceId, 1, "k1");
+      drop(b.sourceId, 1, "k2");
+      run(scopeChange(c.sourceId));
+      db.run("UPDATE jobs SET status = ? WHERE kind = 'extract'", [status]);
+      for (let k = 0; k < 4; k++) run(scopeChange(c.sourceId));
+      expect(jobs()).toHaveLength(2);
+      expect(jobs().every((j) => j.status === status)).toBe(true);
+    },
+  );
 
   it("keeps the records when the job rows are deleted (the jobs' retention clean-up)", () => {
     const b = source("b", "b의 본문", ["b"]);

@@ -85,7 +85,8 @@ export interface BootOptions {
   /**
    * The scope policy by name (I04-R14, S21): `default` (also when absent) or `site`, which the public
    * repository does not implement, so the start stops with `배포처 후속` before anything is opened.
-   * The entries pass `PKI_SCOPE_POLICY` (scope-policy.ts scopePolicyFromEnv).
+   * The desktop shell passes it as the backend's `--scope-policy` switch (from its own `PKI_SCOPE_POLICY`),
+   * the development entry reads `PKI_SCOPE_POLICY` (scope-policy.ts scopePolicyFromEnv).
    */
   scopePolicy?: string | undefined;
 }

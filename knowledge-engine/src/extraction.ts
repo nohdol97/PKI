@@ -45,7 +45,7 @@ import {
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
-import { derivativeRegistry } from "./canonical-kinds.ts";
+import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
 import { isDate, recomputeDependencyDelay } from "./dependency-delay.ts";
 import { findCandidates } from "./linking.ts";
 import { locateQuote, type QuoteSpan } from "./quote.ts";
@@ -231,6 +231,15 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       return { status: "held", reason: EXTRACT_HOLD_TOO_LARGE };
     }
     const own: LineageRef = { sourceId: sourceId as number, version: fenceVersion as number };
+    // A re-extraction queued by a scope change whose records are gone already (another one cleared
+    // them) has nothing to judge again: it ends without a Provider call (I04-R15).
+    if (
+      job.target.startsWith(RECOMPUTE_PREFIX) &&
+      db.all("SELECT 1 FROM scope_policy_drops WHERE source_id = ? LIMIT 1", [own.sourceId])
+        .length === 0
+    ) {
+      return { status: "succeeded", items: [] };
+    }
     // What each candidate item came from, read now, when it is offered: a source it
     // draws on that is gone when the result is written makes the result stale
     // (I04-R11). Read after the call, a deleted item's lineage would be empty. An item
@@ -401,6 +410,8 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       kind: "extraction",
       itemKey: "bookkeeping",
       lineage: [own],
+      // no source content: a policy that errs must not lose the counts or skip the clean-up
+      unjudged: true,
       write: (tx) => {
         recordExtractionDrops(tx, job.id, drops);
         tx.run("DELETE FROM scope_policy_drops WHERE source_id = ? AND version <= ?", [

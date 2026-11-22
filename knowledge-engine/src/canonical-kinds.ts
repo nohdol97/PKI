@@ -372,7 +372,16 @@ const SCOPE_DROP: DerivativeKind = {
       ])[0]?.v as number | null;
       // a source with no version left has nothing to extract (its records went with it)
       if (latest === null || latest === undefined) continue;
+      // one open re-extraction per source version is enough: it judges every record, whichever
+      // change queued it, so K scope changes leave at most one job per source (I04-R15)
+      const open = tx.all(
+        `SELECT 1 FROM jobs WHERE kind = ? AND source_id = ? AND fence_version = ?
+           AND target LIKE ? AND status IN ('queued', 'running', 'retry', 'held') LIMIT 1`,
+        [EXTRACT_JOB_KIND, sourceId, latest, `${RECOMPUTE_PREFIX}%`],
+      );
+      if (open.length > 0) continue;
       const job = registerJob(tx, {
+        priority: "scheduled",
         kind: EXTRACT_JOB_KIND,
         target: `${RECOMPUTE_PREFIX}${ctx.invalidationId}`,
         sourceId,

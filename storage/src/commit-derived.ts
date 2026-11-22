@@ -97,10 +97,12 @@ export const commitDerived: CommitDerived = (tx, input) => {
   const dropped = [];
   let written = 0;
   for (const item of input.items) {
-    if (scope && !mayCombine(scope.policy, scopesOfVersions(tx, item.lineage))) {
+    // An item with no lineage (a sourceless job's write) or marked `unjudged` has no source content to
+    // judge: the policy is not asked, so it cannot hold such a job `running` (I04-T09).
+    const judged = item.unjudged !== true && item.lineage.length > 0;
+    if (scope && judged && !mayCombine(scope.policy, scopesOfVersions(tx, item.lineage))) {
       // the version the record names: the job's input, else where the item's lineage begins
-      const anchor = input.source ?? item.lineage[0];
-      if (!anchor) throw new RangeError("a refused item has no source version to record it under");
+      const anchor = input.source ?? (item.lineage[0] as SourceVersionRef);
       dropped.push(scope.recordDrop(tx, item, anchor));
       continue;
     }

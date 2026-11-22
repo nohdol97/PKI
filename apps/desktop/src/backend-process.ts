@@ -48,10 +48,13 @@ export function backendEnv(env: Readonly<Record<string, string | undefined>>) {
   ) as Record<string, string>;
 }
 
+export type StartFailureReason =
+  "identity-key-missing" | "scope-policy-not-implemented" | "scope-policy-invalid";
+
 /** A start the backend refused; `reason` is a fixed class it reported (I04-R7), never its message. */
 export class BackendStartError extends Error {
-  readonly reason: "identity-key-missing" | undefined;
-  constructor(reason?: "identity-key-missing") {
+  readonly reason: StartFailureReason | undefined;
+  constructor(reason?: StartFailureReason) {
     super("backend failed to start");
     this.reason = reason;
     this.name = "BackendStartError";
@@ -62,7 +65,9 @@ const FromBackend = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("ready"), port: z.int().min(1).max(65535) }),
   z.strictObject({
     type: z.literal("failed"),
-    reason: z.literal("identity-key-missing").optional(),
+    reason: z
+      .enum(["identity-key-missing", "scope-policy-not-implemented", "scope-policy-invalid"])
+      .optional(),
   }),
   z.strictObject({
     type: z.literal("secret-request"),
@@ -102,6 +107,11 @@ export interface BackendOptions {
   dataDir?: string | undefined;
   /** Synthetic JSONL for the test Connector (source runs only: layout.ts, V01-T15). */
   fixtures?: string | undefined;
+  /**
+   * The scope policy by name (I04-R14), passed as the backend's `--scope-policy` switch: a setting, not
+   * environment passthrough (BACKEND_ENV_KEYS stays the OS folders). None: the backend's default.
+   */
+  scopePolicy?: string | undefined;
   /** The shell's environment; only BACKEND_ENV_KEYS pass. */
   env?: Readonly<Record<string, string | undefined>>;
   /** The run's session token; a restart passes the first start's (V01-T16). Default: fresh. */
@@ -140,6 +150,7 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
     options.origin,
     ...(options.dataDir ? ["--data-dir", options.dataDir] : []),
     ...(options.fixtures ? ["--fixtures", options.fixtures] : []),
+    ...(options.scopePolicy !== undefined ? ["--scope-policy", options.scopePolicy] : []),
   ];
   const child = options.fork(options.entry, args, backendEnv(options.env ?? process.env));
   let ended = false;

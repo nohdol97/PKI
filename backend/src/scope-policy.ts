@@ -17,8 +17,12 @@ export class ScopePolicyNotImplementedError extends Error {
 /** A name that is none of `SCOPE_POLICIES` (a typo must not fall back to the default). */
 export class UnknownScopePolicyError extends Error {
   override name = "UnknownScopePolicyError";
-  constructor() {
-    super(`scopePolicy must be one of: ${SCOPE_POLICIES.join(", ")}`);
+  constructor(empty = false) {
+    super(
+      empty
+        ? `scopePolicy is empty; name one of: ${SCOPE_POLICIES.join(", ")} or leave it unset`
+        : `scopePolicy must be one of: ${SCOPE_POLICIES.join(", ")}`,
+    );
   }
 }
 
@@ -30,7 +34,7 @@ export class UnknownScopePolicyError extends Error {
 export function productScopePolicy(name: string = "default"): ScopePolicy {
   if (name === "default") return defaultScopePolicy;
   if (name === "site") throw new ScopePolicyNotImplementedError();
-  throw new UnknownScopePolicyError();
+  throw new UnknownScopePolicyError(name.trim() === "");
 }
 
 /** The scope policy named in the environment (`PKI_SCOPE_POLICY`); the entries pass it to `bootBackend`. */

@@ -67,6 +67,8 @@ describe("site-paths.refuse ①: scopePolicy site stops the start (I04-H2, R14)"
     expect(() => productScopePolicy("site")).toThrow(ScopePolicyNotImplementedError);
     expect(() => productScopePolicy("siet")).toThrow(UnknownScopePolicyError);
     expect(() => productScopePolicy("")).toThrow(UnknownScopePolicyError);
+    expect(() => productScopePolicy("  ")).toThrow(/is empty/);
+    expect(() => productScopePolicy("siet")).toThrow(/must be one of/);
   });
 
   it("refuses bootBackend before any file is opened, with the notice that begins 배포처 후속", async () => {
@@ -97,9 +99,9 @@ describe("site-paths.refuse ①: scopePolicy site stops the start (I04-H2, R14)"
     ).rejects.toThrow(UnknownScopePolicyError);
   });
 
-  it("makes the real shell entry print the notice to stderr and exit 1 when PKI_SCOPE_POLICY is site", async () => {
-    const proc = fork(SHELL, ["--data-dir", join(dir, "data")], {
-      env: { PATH: process.env.PATH ?? "", HOME: dir, PKI_SCOPE_POLICY: "site" },
+  it("makes the real shell entry print the notice to stderr and exit 1 when the switch --scope-policy is site", async () => {
+    const proc = fork(SHELL, ["--data-dir", join(dir, "data"), "--scope-policy", "site"], {
+      env: { PATH: process.env.PATH ?? "", HOME: dir },
       execArgv: [],
       stdio: ["ignore", "ignore", "pipe", "ipc"],
     });
@@ -112,7 +114,7 @@ describe("site-paths.refuse ①: scopePolicy site stops the start (I04-H2, R14)"
     const code = await exited;
     expect(stderr.startsWith("배포처 후속")).toBe(true);
     expect(stderr.trim().split("\n")).toHaveLength(1); // one notice
-    expect(messages).toEqual([{ type: "failed" }]);
+    expect(messages).toEqual([{ type: "failed", reason: "scope-policy-not-implemented" }]);
     expect(code).toBe(1);
   }, 30_000);
 });
@@ -306,5 +308,34 @@ describe("scope.policy and scope.changed through the product's runner", () => {
     expect(count("relations")).toBe(1);
     expect(count("insights")).toBe(1);
     expect(count("scope_policy_drops")).toBe(0);
+  });
+});
+
+describe("the shell's switch and the failure report (I04-H2 ①)", () => {
+  it("takes the policy name from --scope-policy in the source run and in the production build, and not from the environment", async () => {
+    const { shellOptions: source } = await import("./shell-options.ts");
+    const { shellOptions: production } = await import("./shell-options.production.ts");
+    expect(source(["--origin", "app://pki", "--scope-policy", "site"]).scopePolicy).toBe("site");
+    expect(production(["--origin", "app://pki", "--scope-policy", "site"])).toEqual({
+      origins: ["app://pki"],
+      scopePolicy: "site",
+    });
+    expect(production(["--origin", "app://pki"])).toEqual({ origins: ["app://pki"] });
+  });
+
+  it("reports a fixed class for each refused policy, and prints its notice", async () => {
+    const { startFailureLine, startFailureReport } = await import("./start-failure.ts");
+    expect(startFailureReport(new ScopePolicyNotImplementedError())).toEqual({
+      type: "failed",
+      reason: "scope-policy-not-implemented",
+    });
+    expect(startFailureReport(new UnknownScopePolicyError(true))).toEqual({
+      type: "failed",
+      reason: "scope-policy-invalid",
+    });
+    expect(startFailureLine(new ScopePolicyNotImplementedError()).startsWith("배포처 후속")).toBe(
+      true,
+    );
+    expect(startFailureLine(new UnknownScopePolicyError(true))).toMatch(/is empty/);
   });
 });

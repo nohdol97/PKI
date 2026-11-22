@@ -89,6 +89,8 @@ async function run() {
         origin: APP_ORIGIN,
         dataDir,
         fixtures,
+        // a deployment setting read here, not passed through the backend's environment (I04-R14)
+        scopePolicy: process.env.PKI_SCOPE_POLICY,
         secrets,
         token,
       }),

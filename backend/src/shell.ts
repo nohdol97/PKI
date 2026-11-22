@@ -11,7 +11,6 @@ import { dataDirectory } from "@pki/storage";
 import type { LLMProvider } from "@pki/contracts";
 import { bootBackend, closeProviders } from "./boot.ts";
 import { channelSecrets } from "./secret-sources.ts";
-import { scopePolicyFromEnv } from "./scope-policy.ts";
 import { shellOptions } from "./shell-options.ts";
 import type { RunningServer } from "./server.ts";
 
@@ -69,7 +68,7 @@ async function start(token: string) {
     token,
     allowedOrigins: options.origins,
     secrets: secrets.source,
-    scopePolicy: scopePolicyFromEnv(process.env),
+    scopePolicy: options.scopePolicy,
   });
   running = { server, providers, close: () => db.close() };
   return server.port;

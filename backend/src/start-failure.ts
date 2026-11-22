@@ -1,14 +1,21 @@
 // What the backend tells the shell about a refused start (I04-R7): a fixed class,
 // never the error's message (it can carry a path or file text; V01-R13).
 import { IdentityKeyMissingError } from "@pki/storage";
-import { ScopePolicyNotImplementedError } from "./scope-policy.ts";
+import { ScopePolicyNotImplementedError, UnknownScopePolicyError } from "./scope-policy.ts";
 
-export type StartFailureReport = { type: "failed"; reason?: "identity-key-missing" };
+export type StartFailureReason =
+  "identity-key-missing" | "scope-policy-not-implemented" | "scope-policy-invalid";
+export type StartFailureReport = { type: "failed"; reason?: StartFailureReason };
 
 export function startFailureReport(error?: unknown): StartFailureReport {
-  return error instanceof IdentityKeyMissingError
-    ? { type: "failed", reason: "identity-key-missing" }
-    : { type: "failed" };
+  if (error instanceof IdentityKeyMissingError)
+    return { type: "failed", reason: "identity-key-missing" };
+  if (error instanceof ScopePolicyNotImplementedError) {
+    return { type: "failed", reason: "scope-policy-not-implemented" };
+  }
+  if (error instanceof UnknownScopePolicyError)
+    return { type: "failed", reason: "scope-policy-invalid" };
+  return { type: "failed" };
 }
 
 /**
@@ -17,7 +24,7 @@ export function startFailureReport(error?: unknown): StartFailureReport {
  * repository leaves to the deployment, which names no data (I04-H2 ①).
  */
 export function startFailureLine(error: unknown): string {
-  return error instanceof ScopePolicyNotImplementedError
+  return error instanceof ScopePolicyNotImplementedError || error instanceof UnknownScopePolicyError
     ? error.message
     : `backend start failed: ${error instanceof Error ? error.name : typeof error}`;
 }

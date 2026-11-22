@@ -166,14 +166,76 @@ describe("recording a refused item (I04-R11)", () => {
     expect(rows().map((r) => [r.source_id, r.version])).toEqual([[b.sourceId, b.version]]);
   });
 
-  it("refuses to drop an item it cannot anchor (no source, no lineage): the commit throws, nothing is written", () => {
-    const never: Pick<ScopePolicy, "combinable"> = { combinable: () => false };
-    expect(() =>
-      db.transaction(() =>
-        commitDerived(db, { source: null, scope: scopeOf(never), items: [item("x", [])] }),
-      ),
-    ).toThrow(RangeError);
-    expect(countScopePolicyDrops(db)).toBe(0);
+  it.each([
+    ["refuses everything", () => false],
+    [
+      "throws",
+      () => {
+        throw new Error("cannot judge");
+      },
+    ],
+  ])(
+    "does not ask a policy that %s about an item with no lineage: it is written, nothing recorded",
+    (_n, combinable) => {
+      const result = db.transaction(() =>
+        commitDerived(db, {
+          source: null,
+          scope: scopeOf({ combinable }),
+          items: [item("x", [])],
+        }),
+      );
+      expect(result).toEqual({ status: "committed", written: 1, dropped: [] });
+      expect(written).toEqual(["x"]);
+      expect(countScopePolicyDrops(db)).toBe(0);
+    },
+  );
+
+  it("does not ask the policy about an item marked unjudged, even with a lineage", () => {
+    const b = save("b", '["b"]');
+    const throwing = {
+      combinable: () => {
+        throw new Error("cannot judge");
+      },
+    };
+    db.transaction(() =>
+      commitDerived(db, {
+        source: b,
+        scope: scopeOf(throwing),
+        items: [{ ...item("bookkeeping", [b]), unjudged: true }, item("content", [b])],
+      }),
+    );
+    expect(written).toEqual(["bookkeeping"]);
+    expect(countScopePolicyDrops(db)).toBe(1);
+  });
+
+  it("lets a sourceless job's write through closeJob under a refusing and a throwing policy, the job closing succeeded", () => {
+    for (const combinable of [
+      () => false,
+      () => {
+        throw new Error("cannot judge");
+      },
+    ]) {
+      registerJob(db, {
+        kind: "maintenance-test",
+        at: new Date(0),
+        target: String(written.length),
+      });
+      const job = leaseNextJob(db, {
+        kinds: ["maintenance-test"],
+        now: new Date(0),
+        leaseMs: 1000,
+      });
+      if (!job) throw new Error("expected a job");
+      const status = closeJob(
+        db,
+        job,
+        { status: "succeeded", write: () => void written.push("maintenance") },
+        new Date(0),
+        scopeOf({ combinable }),
+      );
+      expect(status).toBe("succeeded");
+    }
+    expect(written).toEqual(["maintenance", "maintenance"]);
   });
 });
 

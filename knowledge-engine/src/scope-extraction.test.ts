@@ -434,3 +434,50 @@ describe("scope.policy: the rule judges an Insight's evidence under the policy a
     expect(count("insights")).toBe(1);
   });
 });
+
+describe("scope.changed: a re-extraction with nothing left to judge makes no call (I04-R15)", () => {
+  it("ends succeeded without a Provider request when its source's records are already cleared", async () => {
+    const b = source("b", BODY, ["s"]);
+    const kit = setUp(sameScopeOnly, refusedAtCommit);
+    const run = await extract(kit, b, "scope-recompute:7");
+    expect(run.status).toBe("succeeded");
+    expect(requests).toEqual([]);
+    expect(count("facts")).toBe(0);
+  });
+
+  it("still extracts when a record is there", async () => {
+    const b = source("b", BODY, ["s"]);
+    db.run(
+      `INSERT INTO scope_policy_drops (source_id, version, kind, item_key_hash, reason, at)
+       VALUES (?, 1, 'fact', 'h', 'scope-policy', ?)`,
+      [b.sourceId, T0.toISOString()],
+    );
+    await extract(setUp(sameScopeOnly, refusedAtCommit), b, "scope-recompute:7");
+    expect(requests).toHaveLength(1);
+    expect(count("scope_policy_drops")).toBe(0);
+  });
+});
+
+describe("scope.policy: the job's bookkeeping is not judged (I04-R11)", () => {
+  it("clears the old records and records the drop counts although the policy errs on everything", async () => {
+    const b = source("b", "메모", ["s"]);
+    db.run(
+      `INSERT INTO scope_policy_drops (source_id, version, kind, item_key_hash, reason, at)
+       VALUES (?, 1, 'fact', 'old', 'scope-policy', ?)`,
+      [b.sourceId, T0.toISOString()],
+    );
+    const throwing: ScopePolicy = {
+      ...defaultScopePolicy,
+      combinable: () => {
+        throw new Error("cannot judge");
+      },
+    };
+    const { job } = await extract(setUp(throwing), b);
+    // the old record is gone; the only record left is the rule item this policy refused
+    expect(db.all("SELECT kind, item_key_hash FROM scope_policy_drops")).toMatchObject([
+      { kind: "insight" },
+    ]);
+    expect(db.all("SELECT 1 FROM scope_policy_drops WHERE item_key_hash = 'old'")).toEqual([]);
+    expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 0, other: 0 });
+  });
+});
