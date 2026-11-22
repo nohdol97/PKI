@@ -27,6 +27,7 @@
 | [specs/2026-11-21-I03-persistent-queue.md](specs/2026-11-21-I03-persistent-queue.md) | 영속 작업 대기열·스케줄러·재시도와 절전 복구(I03)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
 | [specs/2026-11-21-I04-invalidation.md](specs/2026-11-21-I04-invalidation.md) | 수정·삭제·권한 철회의 파생물 무효화(I04): 파생물 종류 등록 계약, 소거 범위, tombstone 규칙, access_scope 승계, 복원 뒤 재적용 정책 | 확정 |
 | [specs/2026-11-22-I05-site-connector-registration.md](specs/2026-11-22-I05-site-connector-registration.md) | 배포처 수집기를 `site/` 안에서 등록하는 장치(I05, #113): 빌드 시점 진입점 주입, 등록 계약(사이트 종류만), 신뢰 경계, 시작 동작, 등급 매핑과 범위 정책의 공급, 포크 모양에서의 공용 시험, 작업 분해 | 확정(잠정 결정 포함) |
+| [specs/2026-11-22-I06-connector-credentials.md](specs/2026-11-22-I06-connector-credentials.md) | 수집기에 자격 증명을 넘기는 경로(I06, #114): V01의 비밀 값 저장소에 인스턴스별 칸으로 두고 `initialize`의 접근자로 넘김, 없음·저장소 불가·거부의 사유와 보류, 누출 없음의 시험, 계약 묶음의 위반 코드, 작업 분해 | 초안 |
 
 ## 동작 방식
 
