@@ -122,7 +122,9 @@ async function stack(options: Stack = {}) {
       return v === undefined ? { installed: true } : { installed: true, version: v };
     },
     answer: (r) =>
-      r.taskKind === "extract" ? { items: [], facts: [], relations: [] } : { reply: "ok" },
+      r.taskKind === "extract"
+        ? { items: [], facts: [], relations: [], terms: [], definitions: [] }
+        : { reply: "ok" },
   });
   writeSetting(db, DEFAULT_PROVIDER_SETTING, "claude-code"); // the user's default (T10)
   const calls = productCalls(
@@ -161,7 +163,7 @@ async function stack(options: Stack = {}) {
             sourceVersionIds: ids,
             candidateItemIds: [],
             origin: { userActionId },
-            schemaVersion: 2,
+            schemaVersion: 3,
             budget: { timeoutMs: 1000 },
             retryable: false,
           }),
@@ -173,7 +175,7 @@ async function stack(options: Stack = {}) {
         sourceVersionIds: [sourceVersionId],
         candidateItemIds: [],
         origin: { jobId: job(sourceVersionId), leaseToken: "1" },
-        schemaVersion: 2,
+        schemaVersion: 3,
         budget: { timeoutMs: 1000 },
         retryable: false,
       }),

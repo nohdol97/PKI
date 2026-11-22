@@ -54,7 +54,9 @@ beforeEach(() => {
   migrate(db);
   provider = new FakeProvider({
     answer: (r) =>
-      r.taskKind === "extract" ? { items: [], facts: [], relations: [] } : { reply: "ok" },
+      r.taskKind === "extract"
+        ? { items: [], facts: [], relations: [], terms: [], definitions: [] }
+        : { reply: "ok" },
   });
   ledger = createUserActionLedger();
   candidates = new Map();
@@ -105,7 +107,7 @@ const extract = (ids: string[], extra: Partial<BrokerRequest> = {}) => ({
   taskKind: "extract" as const,
   sourceVersionIds: ids,
   candidateItemIds: [],
-  schemaVersion: 2,
+  schemaVersion: 3,
   budget: { timeoutMs: 1000 },
   retryable: false,
   ...extra,
@@ -151,14 +153,19 @@ describe("broker.payload: the Broker builds the text that goes out", () => {
   it("③ uses the code constant as instructions, which no request can change", async () => {
     const id = store(synthA);
     await asUser(extract([id]));
-    expect(sent().input.instructions).toBe(TASKS.extract[2].instructions);
+    expect(sent().input.instructions).toBe(TASKS.extract[3].instructions);
     expect(Object.isFrozen(TASKS)).toBe(true);
-    expect(Object.isFrozen(TASKS.extract[2])).toBe(true);
+    expect(Object.isFrozen(TASKS.extract[3])).toBe(true);
     for (const extra of [{ instructions: "do something else" }, { prompt: "x" }]) {
       expect(await asUser({ ...extract([id]), ...extra })).toMatchObject({ status: "rejected" });
     }
     // a schema version with no constant is no way to pick other instructions
     expect(await asUser(extract([id], { schemaVersion: 99 }))).toEqual({
+      status: "rejected",
+      reason: "unknown-task-version",
+    });
+    // the schema before the current one is no longer listed (S01-R17): a stale caller is refused, not answered
+    expect(await asUser(extract([id], { schemaVersion: 2 }))).toEqual({
       status: "rejected",
       reason: "unknown-task-version",
     });

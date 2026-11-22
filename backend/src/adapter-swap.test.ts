@@ -136,7 +136,9 @@ describe("adapter-swap (V01-C7, R17)", () => {
       id: "local-model",
       transport: "http",
       answer: (r) =>
-        r.taskKind === "extract" ? { items: [], facts: [], relations: [] } : { reply: "ok" },
+        r.taskKind === "extract"
+          ? { items: [], facts: [], relations: [], terms: [], definitions: [] }
+          : { reply: "ok" },
     });
     const embedder = new FakeEmbedder();
     const call = await boot({ providers: [provider], embedder });

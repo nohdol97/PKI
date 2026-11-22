@@ -74,6 +74,8 @@ function answer(failing: { on: boolean }): (request: StructuredRequest) => unkno
           quote: match[0],
         },
       ],
+      definitions: [],
+      terms: [],
       relations: [],
     };
   };

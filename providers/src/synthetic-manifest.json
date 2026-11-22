@@ -135,6 +135,11 @@
     "source": "eval/golden/sources/messenger.jsonl"
   },
   {
+    "hash": "2c0a480b48ce4da18b19c01f24a63469d8492abf3f7568beb7c086096e6775a1",
+    "malicious": false,
+    "source": "fixtures/s01-glossary.jsonl"
+  },
+  {
     "hash": "2cceda7255c75fff2295e3fddd580a655663eb9d2d541e21f33844f7fdfccd31",
     "malicious": false,
     "source": "eval/golden/sources/mail.jsonl"
@@ -493,6 +498,11 @@
     "hash": "9c4450b49273dcb41551f2b24c7c29b1eedce2b7ff2c04910944ea9290bf6a40",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "9e8eddd92da9765b24316935e4e743f28f44cea12f53a64231f490d0bd2036e5",
+    "malicious": true,
+    "source": "fixtures/s01-glossary.jsonl"
   },
   {
     "hash": "a1bc9a52b8fd98daf22c337d873137a8e518d6a3b6020620d93b95f81d137f2a",

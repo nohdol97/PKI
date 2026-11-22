@@ -84,10 +84,15 @@ export {
 export { createLogger, errorClass, log, type Logger, type LogValue } from "./log.ts";
 export { openaiKeySecretName } from "./secret-names.ts";
 export {
+  EXTRACT_ALIAS_FACT_KIND,
+  EXTRACT_ALIAS_FACT_KINDS,
+  EXTRACT_DEFINITION_FACT_KIND,
+  EXTRACT_DEFINITION_MAX_CODE_POINTS,
   EXTRACT_FACT_KINDS,
   EXTRACT_ITEM_TYPES,
   EXTRACT_RELATION_TYPES,
   EXTRACT_SCHEMA_VERSION,
+  EXTRACT_TERM_KINDS,
   TASKS,
   type ExtractionOutput,
   type TaskDefinition,
