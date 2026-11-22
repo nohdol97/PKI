@@ -5,6 +5,7 @@ import {
   addEvidence,
   insertItem,
   listEvidence,
+  listInvalidations,
   migrate,
   readInsight,
   registerConnectorInstance,
@@ -115,12 +116,21 @@ describe("propagateNewVersion", () => {
   it("changes nothing for a source none of whose evidence is past", () => {
     lateDependency();
     const fresh = version("new", "무관한 글");
-    const changes = db.all("SELECT total_changes() AS n")[0]?.n;
+    const changes = db.all("SELECT total_changes() AS n")[0]?.n as number;
     expect(propagateNewVersion(db, fresh.sourceId)).toEqual({
       facts: [],
       relations: [],
       insights: [],
     });
-    expect(db.all("SELECT total_changes() AS n")[0]?.n).toBe(changes);
+    // only the propagation's invalidation record (I04-R4, I04-T03): its row and
+    // its counts, all zero
+    expect(db.all("SELECT total_changes() AS n")[0]?.n).toBe(changes + 2);
+    expect(listInvalidations(db)).toMatchObject([
+      {
+        changeKind: "new-version",
+        removedByKind: { fact: 0, relation: 0, item: 0, insight: 0 },
+        recomputedByKind: { fact: 0, relation: 0, item: 0, insight: 0 },
+      },
+    ]);
   });
 });

@@ -163,7 +163,7 @@ export interface StoredEvidence extends NewEvidence {
 }
 
 /** Whether version `v` of an evidence row is its source's latest ("현재 근거"). */
-export const CURRENT = "v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id)";
+const CURRENT = "v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id)";
 
 const targetValues = (t: EvidenceTarget) =>
   "factId" in t ? [t.factId, null] : [null, t.relationId];
@@ -219,48 +219,6 @@ export function listEvidence(db: SqlDriver, target: EvidenceTarget): StoredEvide
       quote: row.quote as string,
       current: row.current === 1,
     }));
-}
-
-/**
- * After a new version of source `sourceId` (V02-R11): every fact and relation
- * with evidence on one of that source's versions that now has no current evidence
- * at all becomes superseded. The evidence stays on its version as past evidence
- * (it is immutable). Rejected and already superseded rows are left alone. Returns
- * the rows changed, and the items of every row the source's versions cite (a
- * fact's item, a relation's subject and object), ascending: a row another source
- * keeps valid has past evidence too, which its Insight must drop.
- */
-export function supersedeUnsupported(
-  db: SqlDriver,
-  sourceId: number,
-): { facts: number[]; relations: number[]; itemIds: number[] } {
-  const cited = (table: "facts" | "relations", column: "fact_id" | "relation_id", items: string) =>
-    db.all(
-      `SELECT t.id, t.status, ${items},
-         EXISTS (SELECT 1 FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
-                 WHERE e.${column} = t.id AND ${CURRENT}) AS supported
-       FROM ${table} t
-       WHERE t.id IN (SELECT e.${column} FROM evidence e
-                      JOIN source_versions v ON v.id = e.source_version_id
-                      WHERE v.source_id = ?)
-       ORDER BY t.id`,
-      [sourceId],
-    );
-  const stale = (rows: SqlRow[]) =>
-    rows
-      .filter((r) => r.supported === 0 && r.status !== "superseded" && r.status !== "rejected")
-      .map((r) => r.id as number);
-  const factRows = cited("facts", "fact_id", "t.item_id AS a, NULL AS b");
-  const relationRows = cited("relations", "relation_id", "t.subject_id AS a, t.object_id AS b");
-  const facts = stale(factRows);
-  const relations = stale(relationRows);
-  for (const id of facts) setKnowledgeStatus(db, "fact", id, "superseded");
-  for (const id of relations) setKnowledgeStatus(db, "relation", id, "superseded");
-  const itemIds = new Set<number>();
-  for (const row of [...factRows, ...relationRows]) {
-    for (const id of [row.a, row.b]) if (id !== null) itemIds.add(id as number);
-  }
-  return { facts, relations, itemIds: [...itemIds].sort((x, y) => x - y) };
 }
 
 /**

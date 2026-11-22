@@ -6,7 +6,13 @@ export {
   recomputeDependencyDelay,
   type RuleOutcome,
 } from "./dependency-delay.ts";
-export { deleteSource, type DeletionRequest, type SourceDeletion } from "./deletion.ts";
+export {
+  deleteSource,
+  type DeletionRequest,
+  type PurgeResult,
+  type SourceDeletion,
+} from "./deletion.ts";
+export { CANONICAL_KINDS, derivativeRegistry, type CanonicalReport } from "./canonical-kinds.ts";
 export {
   createExtractHandler,
   EXTRACT_HOLD_TOO_LARGE,

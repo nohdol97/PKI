@@ -5,11 +5,13 @@
 import {
   addEvidence,
   insertItem,
+  listInvalidations,
   migrate,
   readChangeSeq,
   readInsight,
   readTombstone,
   registerConnectorInstance,
+  registerJob,
   saveFact,
   saveRelation,
   saveSourceRecord,
@@ -221,5 +223,76 @@ describe("deleteSource", () => {
     expect(db.all("SELECT status FROM facts WHERE id = ?", [late])).toEqual([
       { status: "candidate" },
     ]);
+  });
+});
+
+describe("purge.idempotent: the purge closes the source's open jobs (I04-R12)", () => {
+  it("supersedes every open job of the source in the purge's transaction, but no projection job, dead letter or other source's job", () => {
+    const { chat, mail } = lateDependency();
+    const job = (kind: string, target: string, sourceId = chat.sourceId) => {
+      const r = registerJob(db, { kind, target, sourceId, fenceVersion: 1 });
+      if (!r.registered) throw new Error("not registered");
+      return r.job.id;
+    };
+    const set = (id: number, status: string) =>
+      db.run("UPDATE jobs SET status = ? WHERE id = ?", [status, id]);
+    const queued = job("extract", "q");
+    const running = job("extract", "r");
+    set(running, "running");
+    const retry = job("extract", "t");
+    set(retry, "retry");
+    const held = job("extract", "h");
+    set(held, "held");
+    const dead = job("extract", "d");
+    set(dead, "dead_letter");
+    const remove = job("projection-remove", "engine");
+    const otherSource = job("extract", "q", mail.sourceId);
+    const tokens = () =>
+      Object.fromEntries(
+        db.all("SELECT id, lease_token FROM jobs").map((r) => [r.id as number, r.lease_token]),
+      );
+    const before = tokens();
+
+    deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
+
+    const rows = db.all("SELECT id, status, reason FROM jobs ORDER BY id");
+    expect(rows).toEqual([
+      { id: queued, status: "superseded", reason: "source-closed" },
+      { id: running, status: "superseded", reason: "source-closed" },
+      { id: retry, status: "superseded", reason: "source-closed" },
+      { id: held, status: "superseded", reason: "source-closed" },
+      { id: dead, status: "dead_letter", reason: null },
+      { id: remove, status: "queued", reason: null },
+      { id: otherSource, status: "queued", reason: null },
+    ]);
+    // a running job's holder loses its lease: its heartbeat and result write fail
+    expect(tokens()[running]).toBe((before[running] as number) + 1);
+  });
+
+  it("changes nothing the second time: sequence, rows, records and jobs as they were", () => {
+    const { chat } = lateDependency();
+    deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
+    const r = registerJob(db, {
+      kind: "extract",
+      target: "late",
+      sourceId: chat.sourceId,
+      fenceVersion: 1,
+    });
+    expect(r.registered).toBe(true);
+    const snapshot = () => ({
+      seq: readChangeSeq(db),
+      rows: ["source_versions", "evidence", "facts", "relations", "items", "insights"].map(
+        (t) => db.all(`SELECT count(*) AS n FROM ${t}`)[0]?.n,
+      ),
+      records: listInvalidations(db),
+      jobs: db.all("SELECT id, status, reason, lease_token FROM jobs ORDER BY id"),
+    });
+    const before = snapshot();
+
+    expect(deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT })).toEqual({
+      outcome: "unchanged",
+    });
+
+    expect(snapshot()).toEqual(before);
   });
 });

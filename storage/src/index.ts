@@ -76,7 +76,6 @@ export {
   saveFact,
   saveRelation,
   setKnowledgeStatus,
-  supersedeUnsupported,
   type EpistemicType,
   type EvidenceTarget,
   type KnowledgeAttributes,
@@ -107,7 +106,6 @@ export {
   type Tombstone,
   type TombstoneReason,
 } from "./tombstones.ts";
-export { purgeSourceContent, type PurgeResult } from "./purge.ts";
 export {
   atLeastAsStrict,
   createDerivativeRegistry,
