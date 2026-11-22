@@ -361,7 +361,7 @@ function Activity({ api }: { api: ApiClient }) {
       <Failure error={error} />
       {data?.calls.length === 0 && <p>Provider 호출 기록이 없습니다.</p>}
       {data && data.calls.length > 0 && (
-        <table>
+        <table aria-label="Provider 호출 기록">
           <thead>
             <tr>
               <th>시각</th>
