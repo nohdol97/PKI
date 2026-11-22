@@ -136,6 +136,33 @@ describe("bridge handlers", () => {
     expect(await bridge.hasSecret(PAGE, ["openai-key"])).toEqual({ ok: true, present: false });
   });
 
+  it("stores, checks and deletes a Connector credential name, answering without its value (I06-C15 ②③)", async () => {
+    const { bridge, stored } = handlers();
+    const name = `connector.${"0123456789abcdef".repeat(2)}.token`;
+    const answers = [
+      await bridge.setSecret(PAGE, [name, "sk-canary-bridge"]),
+      await bridge.hasSecret(PAGE, [name]),
+      await bridge.deleteSecret(PAGE, [name]),
+    ];
+    expect(answers).toEqual([{ ok: true }, { ok: true, present: true }, { ok: true }]);
+    expect(JSON.stringify(answers)).not.toContain("sk-canary-bridge");
+    expect(stored.has(name)).toBe(false);
+    // no function that reads a value back: the page's whole secret surface is these three
+    expect(
+      Object.keys(bridge)
+        .filter((k) => /secret/i.test(k))
+        .sort(),
+    ).toEqual(["deleteSecret", "hasSecret", "setSecret"]);
+  });
+
+  it("refuses a malformed credential name before the store sees it", async () => {
+    const { bridge, secrets } = handlers();
+    for (const name of ["Connector.X", `connector.${"0".repeat(32)}.${"a".repeat(40)}`, "a/b"]) {
+      await expect(bridge.setSecret(PAGE, [name, "v"])).rejects.toThrow();
+    }
+    expect(secrets.set).not.toHaveBeenCalled();
+  });
+
   it("refuses secret calls from any other sender", async () => {
     const { bridge, secrets } = handlers();
     await expect(bridge.setSecret("https://evil.example/", ["openai-key", "v"])).rejects.toThrow(

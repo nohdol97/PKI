@@ -185,6 +185,67 @@ describe("secret store", () => {
   });
 });
 
+describe("secret store, Connector credential names (I06-C1 ③⑤, I06-C15 ①②④)", () => {
+  const HEX = "0123456789abcdef".repeat(2);
+  const CONNECTOR_NAME = `connector.${HEX}.token`;
+  const canaryShapes = (value: string) => [
+    Buffer.from(value, "utf8"),
+    Buffer.from(Buffer.from(value, "utf8").toString("base64")),
+    Buffer.from(Buffer.from(value, "utf8").toString("hex")),
+  ];
+
+  it("stores a canary under a credential name with no plaintext, base64 or hex shape on disk", async () => {
+    const store = createSecretStore({ file, cipher: doubleCipher() });
+    const set = await store.set(CONNECTOR_NAME, CANARY);
+    const has = await store.has(CONNECTOR_NAME);
+    expect(set).toEqual({ ok: true });
+    expect(has).toEqual({ ok: true, present: true });
+    expect(JSON.stringify([set, has])).not.toContain(CANARY);
+    for (const path of everyFile(dir)) {
+      for (const shape of canaryShapes(CANARY))
+        expect(readFileSync(path).includes(shape)).toBe(false);
+    }
+    const removed = await store.delete(CONNECTOR_NAME);
+    expect(removed).toEqual({ ok: true });
+    expect(JSON.stringify(removed)).not.toContain(CANARY);
+    expect(await store.has(CONNECTOR_NAME)).toEqual({ ok: true, present: false });
+  });
+
+  it("writes nothing for a credential name while the OS protection is unavailable", async () => {
+    const store = createSecretStore({ file, cipher: doubleCipher(false) });
+    expect(await store.set(CONNECTOR_NAME, CANARY)).toEqual({ ok: false, error: "unavailable" });
+    expect(existsSync(file)).toBe(false);
+    expect(everyFile(dir)).toEqual([]);
+  });
+
+  it("keeps Connector credentials when a Provider prune runs, and deletes the other Provider keys", async () => {
+    const writer = createSecretStore({ file, cipher: doubleCipher() });
+    const other = `openai-compatible.api-key.${"b".repeat(32)}`;
+    await writer.set(OPENAI_API_KEY_SECRET, "value-current");
+    await writer.set(other, "value-other");
+    await writer.set(CONNECTOR_NAME, "value-connector");
+    expect(await writer.deleteOthers(OPENAI_API_KEY_SECRET)).toEqual({ ok: true });
+    expect(Object.keys(JSON.parse(readFileSync(file, "utf8")).secrets).sort()).toEqual(
+      [OPENAI_API_KEY_SECRET, CONNECTOR_NAME].sort(),
+    );
+    expect(await writer.read(CONNECTOR_NAME)).toEqual({
+      state: "present",
+      value: "value-connector",
+    });
+  });
+
+  it("answers `has` as before: an empty slot is absent even without the OS protection", async () => {
+    const store = createSecretStore({ file, cipher: doubleCipher(false) });
+    expect(await store.has(CONNECTOR_NAME)).toEqual({ ok: true, present: false });
+    expect(await store.has(OPENAI_API_KEY_SECRET)).toEqual({ ok: true, present: false });
+  });
+
+  it("tells the shell whether the cipher is usable", async () => {
+    expect(await createSecretStore({ file, cipher: doubleCipher() }).available()).toBe(true);
+    expect(await createSecretStore({ file, cipher: doubleCipher(false) }).available()).toBe(false);
+  });
+});
+
 describe("electronCipher", () => {
   const safeStorage = () => ({
     isAsyncEncryptionAvailable: vi.fn(async () => true),
