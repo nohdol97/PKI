@@ -164,6 +164,7 @@ describe("shell ↔ backend channel", () => {
       scopePolicy: undefined,
       dataDir: join(dir, "data"),
       secrets: {
+        available: async () => true,
         read: async () => ({ state: "present", value: canary }),
         has: async () => ({ ok: true, present: true }),
         deleteOthers: async () => ({ ok: true }),
@@ -189,6 +190,7 @@ describe("shell ↔ backend channel", () => {
       scopePolicy: undefined,
       dataDir: join(dir, "data"),
       secrets: {
+        available: async () => true,
         read: async () => ({ state: "unavailable" }),
         has: async (name) => (asked.push(name), { ok: true, present: name === keyName }),
         deleteOthers: async (keep) => (pruned.push(keep), { ok: true }),
@@ -256,6 +258,7 @@ describe("shell ↔ backend channel", () => {
           scopePolicy: undefined,
           dataDir: join(dir, "data"),
           secrets: {
+            available: async () => true,
             read: async (name) => (
               asked.push(`read ${name}`),
               name === keyName ? { state: "present", value: canary } : { state: "missing" }

@@ -2,6 +2,7 @@
 // the Electron shell over the parent channel, or, in the browser development entry
 // only, from an environment variable. Neither keeps the value.
 import { openaiKeySecretName } from "@pki/providers";
+import { connectorCredentialName } from "./connector-credentials.ts";
 import { describe, expect, it, vi } from "vitest";
 import {
   channelSecrets,
@@ -12,6 +13,7 @@ import {
 } from "./secret-sources.ts";
 
 const OPENAI_API_KEY_SECRET = openaiKeySecretName("api.synthetic.example");
+const CONNECTOR_SECRET = connectorCredentialName("synthetic-kind", "inst-1", "token");
 
 describe("channelSecrets", () => {
   function setup(timeoutMs = 1000) {
@@ -124,6 +126,42 @@ describe("envSecrets (browser development entry only)", () => {
     await expect(source.read(name)).resolves.toEqual({ state: "missing" });
     env[DEV_KEY_VARIABLE] = "x".repeat(8193);
     await expect(source.read(name)).resolves.toEqual({ state: "unavailable" });
+  });
+});
+
+// I06-C1 ④ `secret-sources` (I06-R4): no environment-variable route to a Connector credential.
+describe("Connector credential names without a shell", () => {
+  it("envSecrets answers unavailable to read and presence, even with the dev variables set", async () => {
+    const env = {
+      [DEV_KEY_VARIABLE]: "sk-dev-canary",
+      [DEV_KEY_HOST_VARIABLE]: "api.synthetic.example",
+    };
+    const source = envSecrets(env);
+    await expect(source.read(OPENAI_API_KEY_SECRET)).resolves.toEqual({
+      state: "present",
+      value: "sk-dev-canary",
+    }); // the Provider key still resolves
+    await expect(source.read(CONNECTOR_SECRET)).resolves.toEqual({ state: "unavailable" });
+    await expect(source.has(CONNECTOR_SECRET)).resolves.toBe("unavailable");
+    await expect(envSecrets({}).has(CONNECTOR_SECRET)).resolves.toBe("unavailable");
+  });
+
+  it("NO_SECRET_STORE answers unavailable to read and presence", async () => {
+    await expect(NO_SECRET_STORE.read(CONNECTOR_SECRET)).resolves.toEqual({
+      state: "unavailable",
+    });
+    await expect(NO_SECRET_STORE.has(CONNECTOR_SECRET)).resolves.toBe("unavailable");
+  });
+
+  it("the channel source asks the shell for a credential name and takes its answer", async () => {
+    const posted: unknown[] = [];
+    const secrets = channelSecrets((m) => void posted.push(m), 1000);
+    const has = secrets.source.has(CONNECTOR_SECRET);
+    expect(posted).toEqual([
+      { type: "secret-request", id: 1, name: CONNECTOR_SECRET, mode: "presence" },
+    ]);
+    secrets.deliver({ type: "secret", id: 1, state: "unavailable" });
+    await expect(has).resolves.toBe("unavailable");
   });
 });
 
