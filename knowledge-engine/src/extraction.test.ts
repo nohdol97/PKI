@@ -906,7 +906,7 @@ describe("semantic history of an extraction (S01-T01: lifecycle.history, epistem
     expect(factLines().map((l) => l.action)).toEqual(["created", "reject"]);
   });
 
-  // a value fix is T03's: its `replace` line is written by hand here, the one state a user cannot reach yet
+  // the `replace` line is written by hand: a real value fix supersedes only a verified row, which an approval made user-approved, so a superseded hypothesis row is not reachable (reextract-preserve.test.ts has the real fix)
   it("does not raise a fact the user superseded when the restore is refused with user-override (B4)", async () => {
     setUp([answer("hypothesis"), answer("explicit", "1")]);
     imported({ id: "a", title: "t", content: Q1 });
