@@ -92,6 +92,44 @@ export {
   type TombstoneReason,
 } from "./tombstones.ts";
 export { purgeSourceContent, type PurgeResult } from "./purge.ts";
+export {
+  atLeastAsStrict,
+  createDerivativeRegistry,
+  LAYERS,
+  UnregisteredDerivativeError,
+  type AccessScope,
+  type Affected,
+  type ApplyTombstone,
+  type CanonicalTransaction,
+  type CanonicalTx,
+  type CommitDerived,
+  type CommitInput,
+  type CommitResult,
+  type DerivativeKind,
+  type DerivativeRegistry,
+  type DerivedItem,
+  type DerivedRef,
+  type InvalidationContext,
+  type InvalidationCounts,
+  type Layer,
+  type LedgerLineDraft,
+  type LiftTombstone,
+  type Propagation,
+  type RegistryOptions,
+  type ScopeComparison,
+  type ScopePolicy,
+  type ScopePolicyDrop,
+  type ScopePurpose,
+  type SourceChange,
+  type SourceVersionRef,
+  type TombstoneOutcome,
+  type TombstoneWrite,
+} from "./derivatives.ts";
+export {
+  listInvalidations,
+  type InvalidationRecord,
+  type SourceChangeKind,
+} from "./invalidations.ts";
 export { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
 export { listItemEvidenceVersions, listItemNames } from "./candidates.ts";
 export {
