@@ -42,7 +42,7 @@ import {
 } from "@pki/storage";
 import { tryLockInstance } from "./instance-lock.ts";
 import { systemClock, type Clock } from "./clock.ts";
-import { applyConfiguredScope } from "./connector-scopes.ts";
+import { applyConfiguredScope, NO_SCOPES, type ConnectorScopes } from "./connector-scopes.ts";
 import {
   addPage,
   emptyResult,
@@ -73,6 +73,11 @@ export interface SyncOptions extends PageOptions {
    * not take it again and does not answer `instance-busy`.
    */
   lockHeld?: boolean;
+  /**
+   * The configured scopes of this backend (I07-R2), copied into the instance's row when this sync
+   * first names it; default none, every instance unknown.
+   */
+  scopes?: ConnectorScopes;
 }
 
 export interface ConnectorInstanceConfig {
@@ -189,7 +194,7 @@ async function runSync(
   const capabilities = connector.manifest.capabilities;
   db.transaction(() => {
     registerConnectorInstance(db, instanceId, kind);
-    applyConfiguredScope(db, instanceId); // a source's grade compares claims with it (I01-R15)
+    applyConfiguredScope(db, instanceId, options.scopes ?? NO_SCOPES); // a source's grade compares claims with it (I01-R15)
   });
   // A rescan the last sync left unfinished is this one's to end (I01-R17).
   let rescanning = readRescanState(db, instanceId).pending;
@@ -340,7 +345,7 @@ export async function createConnectorManager(
   db: SqlDriver,
   instances: readonly ConnectorInstanceConfig[],
   kinds: Readonly<Record<string, ConnectorFactory>>,
-  options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> = {},
+  options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries" | "scopes"> = {},
 ): Promise<ConnectorManager & ConnectorRecheck & ConnectorConfigs> {
   const summaryOf = (id: string, kind: string, outcome: InitializeOutcome): ConnectorSummary =>
     "reason" in outcome

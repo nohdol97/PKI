@@ -389,3 +389,70 @@ describe("site.registration: merging onto the base set", () => {
     expect(connectors.instances.map((i) => i.id)).toEqual(["seed", "f1"]);
   });
 });
+
+describe("site.registration: the instance scopes' two check-only codes (I07-R5, I07-C6)", () => {
+  const SCOPE = "synthetic-scope-marker-eeee";
+
+  it("① connector-scopes-field-invalid: a value that is not an object", () => {
+    for (const connectorScopes of [[], [SCOPE], null, SCOPE, 7, true]) {
+      expect(checkSiteRegistration({ connectorScopes }), JSON.stringify(connectorScopes)).toEqual([
+        "connector-scopes-field-invalid",
+      ]);
+    }
+  });
+
+  it("② connector-scopes-entry-invalid: one or more entries that are not an array of non-empty strings, once", () => {
+    for (const connectorScopes of [
+      { a: "x" },
+      { a: [""] },
+      { a: [1] },
+      { a: [["x"]] },
+      { a: { x: true } },
+      { ok: [SCOPE], bad: "x", worse: [2] },
+    ]) {
+      expect(checkSiteRegistration({ connectorScopes }), JSON.stringify(connectorScopes)).toEqual([
+        "connector-scopes-entry-invalid",
+      ]);
+    }
+  });
+
+  it("③ neither code for a well-formed value or for a registration without the field", () => {
+    for (const site of [
+      {},
+      publicSite,
+      { connectorScopes: undefined },
+      { connectorScopes: {} },
+      { connectorScopes: { a: [SCOPE, "b"], b: [], c: null } },
+      { connectorScopes: JSON.parse('{"__proto__": ["x"]}') as unknown },
+    ] satisfies SiteRegistration[]) {
+      expect(checkSiteRegistration(site)).toEqual([]);
+    }
+  });
+
+  it("a scopes violation comes after the others and does not hide them", () => {
+    const codes = checkSiteRegistration({
+      connectorKinds: { "Bad Name": kindOf("x") },
+      scopeGrading: { grade: () => "nope" as never, strictest: () => "nope" as never },
+      connectorScopes: { a: 1 },
+    });
+    expect(codes).toEqual([
+      "kind-name-invalid",
+      "scope-grading-invalid",
+      "connector-scopes-entry-invalid",
+    ]);
+  });
+
+  it("the codes are not the log codes (`connector-scopes-invalid` names the start's log line alone)", () => {
+    const codes = checkSiteRegistration({ connectorScopes: 7 });
+    expect(codes).not.toContain("connector-scopes-invalid" as never);
+  });
+
+  it("the merge is untouched: a scopes violation drops nothing and stops nothing", () => {
+    const { connectors, violations } = mergeSiteRegistration(
+      { connectorScopes: 7 },
+      productConnectors(),
+    );
+    expect(violations).toEqual([]);
+    expect(connectors).toEqual(productConnectors());
+  });
+});

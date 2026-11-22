@@ -8,6 +8,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { productConnectors } from "./composition.ts";
+import { bindConnectorScopes } from "./connector-scopes.ts";
 import { siteCheck } from "./connectors.ts";
 import {
   mergeSiteRegistration,
@@ -28,6 +29,15 @@ const processIo: SiteCheckIo = {
   stderr: (line) => void process.stderr.write(`${line}\n`),
   exitCode: (code) => void (process.exitCode = code),
 };
+
+/**
+ * The scope value the example package's range file carries (I07-R8): a made-up value the public code
+ * reserves, so a fork that copied the example without filling it in is told. Provisional.
+ */
+export const EXAMPLE_SCOPE_MARKER = "pki-example-scope";
+
+/** The command's argument that asks about the registration's instance scopes instead of one kind (I07-R6). */
+const SCOPES_ARG = "--scopes";
 
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 
@@ -53,6 +63,28 @@ export function siteCheckGuidance(root: string): string | undefined {
   return `이 저장소에는 배포처 조립 패키지(site/composition)가 있습니다. 공용 site-check는 자리표시만 확인하므로 실행하지 않습니다. 대신 ${command}`;
 }
 
+/** The registration's instance scope state (I07-R6): counts and states only, never a scope value or an instance id. */
+function reportScopes(site: SiteRegistration, io: SiteCheckIo): void {
+  const bound = bindConnectorScopes(site.connectorScopes);
+  const fail = (line: string): void => {
+    io.stderr(`${SCOPES_ARG}: ${line}`);
+    io.exitCode(1);
+  };
+  if (bound.state === "absent") {
+    fail("미구현, 배포처 후속 (S30: 범위 파일을 채우고 등록의 connectorScopes에 묶는다)");
+  } else if (bound.state === "invalid") {
+    fail("connectorScopes가 객체가 아니다 (connector-scopes-field-invalid)");
+  } else if (bound.rejected > 0) {
+    fail(`틀린 항목 ${bound.rejected}개 (connector-scopes-entry-invalid)`);
+  } else if ([...bound.scopes.values()].some((scope) => scope?.includes(EXAMPLE_SCOPE_MARKER))) {
+    fail("예시 값이 그대로다 (채우지 않은 예시의 범위 값)");
+  } else if (bound.configured === 0) {
+    fail(`범위가 있는 항목이 없다 (항목 ${bound.entries}개)`);
+  } else {
+    io.stdout(`${SCOPES_ARG}: 항목 ${bound.entries}개, 범위가 있는 항목 ${bound.configured}개`);
+  }
+}
+
 /** Initializes the kind named in `args` of `site`'s kinds over the product's. */
 export async function runSiteCheck(
   site: SiteRegistration,
@@ -64,6 +96,10 @@ export async function runSiteCheck(
   if (refused) {
     io.stderr(refused.message);
     io.exitCode(1);
+    return;
+  }
+  if (args[0] === SCOPES_ARG) {
+    reportScopes(site, io);
     return;
   }
   const { kinds } = connectors;

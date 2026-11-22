@@ -8,29 +8,16 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bootBackend } from "./boot.ts";
+import { NO_SECRET_STORE } from "./secret-sources.ts";
+
+/** The instance scopes the registration carries (`connectorScopes`, I07-R1): what a fork's range file binds. */
+const held = { scopes: new Map<string, string[] | null>() };
 
 vi.mock("@pki/providers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@pki/providers")>()),
   BUILD_KIND: "production",
 }));
-
-const held = vi.hoisted(() => ({ scopes: new Map<string, string[] | null>() }));
-vi.mock("./connector-scopes.ts", async (importOriginal) => {
-  const real = await importOriginal<typeof import("./connector-scopes.ts")>();
-  return {
-    ...real,
-    get CONNECTOR_SCOPES() {
-      return { scopes: held.scopes, rejected: 0, file: "read" };
-    },
-    applyConfiguredScope: (db: Parameters<typeof real.applyConfiguredScope>[0], id: string) =>
-      real.applyConfiguredScope(db, id, held.scopes),
-    applyConfiguredScopes: (db: Parameters<typeof real.applyConfiguredScopes>[0]) =>
-      real.applyConfiguredScopes(db, held.scopes),
-  };
-});
-
-const { bootBackend } = await import("./boot.ts");
-const { NO_SECRET_STORE } = await import("./secret-sources.ts");
 
 const TOKEN = "g".repeat(43);
 const MAIL = JSON.parse(
@@ -84,6 +71,10 @@ async function importedWith(extra: Record<string, unknown>) {
     secrets: NO_SECRET_STORE,
     providers: [],
     ...extra,
+    site: {
+      ...(extra.site as object | undefined),
+      connectorScopes: Object.fromEntries(held.scopes),
+    },
   });
   const port = booted.server.port;
   const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };

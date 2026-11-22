@@ -712,9 +712,9 @@ const v18: Migration = (db) =>
     );
   `);
 
-// Schema v19 (I01-T06, I01-R15): the scope the deployment configured for an instance, read
-// from `site/config/connector-scopes.json` at start. NULL is "unknown" (the public default:
-// the file is not shipped), otherwise a JSON array of strings. The Broker compares an
+// Schema v19 (I01-T06, I01-R15): the scope the deployment configured for an instance, copied
+// from the site registration's `connectorScopes` at start. NULL is "unknown" (the public default:
+// the registration carries none), otherwise a JSON array of strings. The Broker compares an
 // imported (claimed) scope with it. It is a column of an operational table, not a
 // derivative, and no API route returns it. The version number is the next free one:
 // whichever of two tasks adding a migration merges later renumbers (`v19` and its line in
