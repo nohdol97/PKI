@@ -89,6 +89,7 @@ export const ErrorResponseSchema = z.object({
     "embedding-busy",
     "instance-busy",
     "storage-failed",
+    "ledger-unwritable",
     "payload-too-large",
     "internal-error",
   ]),
@@ -358,6 +359,11 @@ export const ProviderStatusSchema = z.discriminatedUnion("state", [
 ]);
 export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
 
+const LedgerHistoryEntry = z.object({
+  total: z.int().nonnegative(),
+  last: z.string().nullable(),
+});
+
 export const StatusResponseSchema = z.object({
   backend: ComponentStatusSchema,
   provider: ProviderStatusSchema,
@@ -377,9 +383,41 @@ export const StatusResponseSchema = z.object({
    * I04-R6, the screen's "데이터 보호" item. `legacyCleanup`: `pending` while the
    * one-time clean-up of earlier deletions' traces (FTS optimize + VACUUM) has not
    * finished, e.g. no room for the VACUUM copy: the item reads "이전 삭제의 흔적
-   * 정리 실패" and the next start tries again. The text is I04-T13's.
+   * 정리 실패" and the next start tries again.
+   * `ledger` (I04-R17, I04-T10): the tombstone ledger beside the database. `state`: `ok`;
+   * `missing-created` (no ledger file although the database holds data: deletions made after a
+   * backup are unknown, a new ledger was started); `degraded` (a cancel line could not be written:
+   * canonical writes are refused until the next start). The rest are counts of the last start:
+   * lines carried over again, lines that could not be (unknown instance, no kind), lines ignored
+   * as cut or unreadable, and the ledgers set aside (another installation's, or a damaged header)
+   * with the deletions they hold. Integers and fixed codes only; no identifier.
    */
-  dataProtection: z.object({ legacyCleanup: z.enum(["done", "pending"]) }),
+  dataProtection: z.object({
+    legacyCleanup: z.enum(["done", "pending"]),
+    ledger: z.object({
+      state: z.enum(["ok", "missing-created", "degraded"]),
+      reapplied: z.int().nonnegative(),
+      unrecoverable: z.int().nonnegative(),
+      /** Tombstones left out of a new or completed ledger because their line would not be readable. */
+      unwritable: z.int().nonnegative(),
+      ignoredLines: z.int().nonnegative(),
+      setAsideLedgers: z.int().nonnegative(),
+      setAsideDeletions: z.int().nonnegative(),
+      /**
+       * What the ledger had to do at any start so far, with the time of the last one: the current
+       * state above may be `ok` again, this does not vanish. Clearing it is a follow-up (an
+       * acknowledge action); set-aside ledgers show until the files are removed.
+       */
+      history: z.object({
+        missingCreated: LedgerHistoryEntry,
+        setAside: LedgerHistoryEntry,
+        unrecoverable: LedgerHistoryEntry,
+        ignoredLines: LedgerHistoryEntry,
+        reapplied: LedgerHistoryEntry,
+        seeded: LedgerHistoryEntry,
+      }),
+    }),
+  }),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 

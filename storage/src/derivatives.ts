@@ -170,13 +170,19 @@ export type CommitDerived = (tx: SqlDriver, input: CommitInput) => CommitResult;
  * until I04-T10 writes the ledger: the line's content as R17 lists it.
  */
 export interface LedgerLineDraft {
+  /** The source's connector instance (plain: the hashed row keeps it too). */
+  connectorInstanceId: string;
+  /** The instance's kind: the re-apply registers the real instance before it recreates a source. */
+  connectorKind: string;
   /** The keyed hash of (connector instance, namespace, external id), I04-R7. */
   identityHash: string;
   coversVersion: number;
   lastRevision: number | null;
   reason: TombstoneReason;
-  lifted: boolean;
+  /** The tombstone's own time (the deletion's, also on a lift line). */
   at: string;
+  /** When the user lifted it; null for a deletion line. */
+  liftedAt: string | null;
 }
 
 /**

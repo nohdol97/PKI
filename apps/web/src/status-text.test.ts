@@ -1,6 +1,9 @@
 // V01-R5, R14: Home states what each part can do, in words; for embedding also
 // whether texts leave the machine (a remote embedder is shown as external egress).
+import type { RouteResponse } from "@pki/contracts";
 import { describe, expect, it } from "vitest";
+
+type LedgerStatus = RouteResponse<"status">["dataProtection"]["ledger"];
 import {
   componentText,
   dataProtectionText,
@@ -182,13 +185,98 @@ describe("DOWNLOAD_APPROVAL", () => {
   });
 });
 
-describe("status.data-protection: dataProtectionText (I04-R6)", () => {
+const OK: LedgerStatus = {
+  state: "ok",
+  reapplied: 0,
+  unrecoverable: 0,
+  unwritable: 0,
+  ignoredLines: 0,
+  setAsideLedgers: 0,
+  setAsideDeletions: 0,
+  history: {
+    missingCreated: { total: 0, last: null },
+    setAside: { total: 0, last: null },
+    unrecoverable: { total: 0, last: null },
+    ignoredLines: { total: 0, last: null },
+    reapplied: { total: 0, last: null },
+    seeded: { total: 0, last: null },
+  },
+};
+const protection = (ledger: Partial<LedgerStatus>, legacyCleanup: "done" | "pending" = "done") =>
+  dataProtectionText({ legacyCleanup, ledger: { ...OK, ...ledger } });
+
+describe("status.data-protection: dataProtectionText (I04-R6, I04-R17)", () => {
   it("says the clean-up of earlier deletions' traces failed, and that the next start tries again", () => {
-    expect(dataProtectionText({ legacyCleanup: "pending" })).toBe(
-      "이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)",
+    expect(protection({}, "pending")).toBe("이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)");
+  });
+  it("says normal only when nothing is wrong and nothing was done at the start", () => {
+    expect(protection({})).toBe("정상");
+  });
+  it("does not say normal when the ledger is degraded, and says what is blocked and what lifts it", () => {
+    expect(protection({ state: "degraded" })).toContain("변경을 막고 있습니다");
+    expect(protection({ state: "degraded" })).toContain("다시 시작");
+    // what degraded means and what to check; never the promise that a restart alone lifts it
+    expect(protection({ state: "degraded" })).toContain("삭제가 하나도 사라지지 않도록");
+    expect(protection({ state: "degraded" })).toContain("빈 공간");
+    expect(protection({ state: "degraded" })).toContain("쓰기 권한");
+    expect(protection({ state: "degraded" })).not.toContain("풀립니다");
+    expect(protection({ state: "degraded" })).not.toContain("정상");
+  });
+  it("says a missing ledger was made anew, that deletions after a backup must be collected again, and the rescan limit", () => {
+    const text = protection({ state: "missing-created" });
+    expect(text).toContain("삭제 장부가 없어 새로 만들었습니다");
+    expect(text).toContain("다시 수집");
+    expect(text).toContain("전체 재스캔");
+  });
+  it("shows how many ledgers were set aside and the deletions they hold, and that none was applied", () => {
+    expect(protection({ setAsideLedgers: 2, setAsideDeletions: 7 })).toContain(
+      "다른 설치의 삭제 장부 2개(삭제 7건)는 적용하지 않고 옆에 두었습니다",
     );
   });
-  it("says nothing is pending when it is done", () => {
-    expect(dataProtectionText({ legacyCleanup: "done" })).toBe("정상");
+  it("shows the lines that could not be applied or read, and the ones applied again", () => {
+    expect(protection({ unrecoverable: 3 })).toContain(
+      "다시 적용하지 못한 삭제 3건(연결 정보 없음)",
+    );
+    expect(protection({ ignoredLines: 2 })).toContain("읽지 못해 무시한 삭제 장부 줄 2개");
+    expect(protection({ reapplied: 4 })).toContain("시작할 때 삭제 4건을 다시 적용했습니다");
+  });
+  it("shows the tombstones that could not be written to the ledger, as a count", () => {
+    expect(protection({ unwritable: 2 })).toContain("장부에 적을 수 없는 상태의 삭제 2건");
+  });
+  it("explains what the ledger is once, before the first note about it, in plain words", () => {
+    const text = protection({ state: "degraded", unrecoverable: 1 });
+    expect(text.match(/삭제 장부는 지운 자료가/g)).toHaveLength(1);
+    expect(text).toContain("되살아나지 않도록");
+    expect(text).toContain("자료의 내용은 적지 않습니다");
+    expect(text.indexOf("삭제 장부는 지운 자료가")).toBeLessThan(
+      text.indexOf("변경을 막고 있습니다"),
+    );
+    expect(protection({})).not.toContain("삭제 장부는 지운 자료가");
+  });
+  it("lists every note when several hold, the clean-up first", () => {
+    const text = protection(
+      { state: "degraded", setAsideLedgers: 1, setAsideDeletions: 1 },
+      "pending",
+    );
+    expect(text.startsWith("이전 삭제")).toBe(true);
+    expect(text).toContain("변경을 막고 있습니다");
+    expect(text).toContain("옆에 두었습니다");
+  });
+  it("keeps what happened at earlier starts after the current state is ok, with the date of the last time", () => {
+    const text = protection({
+      history: {
+        ...OK.history,
+        missingCreated: { total: 2, last: "2026-11-22T09:30:00.000Z" },
+        unrecoverable: { total: 1, last: "2026-11-21T01:00:00.000Z" },
+      },
+    });
+    expect(text.startsWith("정상 · ")).toBe(true);
+    expect(text).toContain("지난 기록: ");
+    expect(text).toContain("삭제 장부가 없어 새로 만듦 2번(마지막 발생: 2026-11-22)");
+    expect(text).toContain("다시 적용하지 못한 삭제 1건(마지막 발생: 2026-11-21)");
+    expect(text).toContain("삭제 장부는 지운 자료가"); // the history is about the ledger: explained once here
+  });
+  it("says nothing of the history while nothing ever happened", () => {
+    expect(protection({})).toBe("정상");
   });
 });

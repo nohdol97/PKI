@@ -44,3 +44,12 @@ describe("lineErrorText", () => {
     expect(lineErrorText({ line: 1, reason })).toMatch(/^1번째 줄: \S/);
   });
 });
+
+describe("a deletion line the ledger cannot record (I04-R17)", () => {
+  it("has its own words, not the bare failure's", () => {
+    const text = lineErrorText({ line: 3, reason: "ledger-unwritable" });
+    expect(text).toContain("3번째 줄");
+    expect(text).toContain("삭제 장부에 적을 수 없는");
+    expect(text).not.toContain("저장이 실패");
+  });
+});

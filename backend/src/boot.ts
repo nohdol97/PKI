@@ -14,6 +14,7 @@ import type {
   VectorIndex,
 } from "@pki/contracts";
 import type { Projections } from "@pki/knowledge-engine";
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { BUILD_KIND, errorClass, log, type ScopeGrading } from "@pki/providers";
 import type { DerivativeRegistry, SqlDriver } from "@pki/storage";
 import { join } from "node:path";
@@ -46,6 +47,7 @@ import { startCollectorUpkeep } from "./connector-sync-job.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
+import { reapplyAtStart } from "./ledger-boot.ts";
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
 import { productScopePolicy } from "./scope-policy.ts";
@@ -163,6 +165,14 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       { engine, vectorIndex: adapters.vectorIndex },
       projections,
     );
+  // R17: the deletions the database has not seen (a restore, a kill before COMMIT) are applied
+  // before the API opens and before anything runs; a line that fails stops the start here
+  // an instance a line would register must be of a kind this build knows (a corrupt line cannot bind one to a bogus kind)
+  const knownKinds = new Set([
+    ...Object.keys((options.connectors ?? productConnectors()).kinds),
+    JSONL_IMPORT_KIND,
+  ]);
+  reapplyAtStart(db, registry, systemClock.now(), (kind) => knownKinds.has(kind));
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")

@@ -13,7 +13,7 @@ export interface ContractSqlDriver {
   exec(sql: string): void;
   run(sql: string, params?: readonly Value[]): { changes: number; lastInsertRowid: number };
   all(sql: string, params?: readonly Value[]): Record<string, Value>[];
-  transaction<T>(fn: () => T, options?: { immediate?: boolean }): T;
+  transaction<T>(fn: () => T, options?: { immediate?: boolean; beforeCommit?: () => void }): T;
   close(): void;
 }
 
@@ -115,6 +115,67 @@ export function sqlDriverContract(name: string, open: (path: string) => Contract
           }, options);
         }
         expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 3 }]);
+      });
+    });
+
+    // I04-R17 `beforeCommit`: runs after fn and before COMMIT, in the same transaction; its
+    // throw rolls everything back; only the outermost transaction takes it.
+    describe("transaction.beforeCommit", () => {
+      it("runs after fn, before the commit, and its writes commit with fn's", () => {
+        const order: string[] = [];
+        const result = db.transaction(
+          () => {
+            order.push("fn");
+            db.run("INSERT INTO t (v) VALUES ('fn')");
+            return 7;
+          },
+          {
+            beforeCommit: () => {
+              order.push("before");
+              expect(db.all("SELECT v FROM t")).toEqual([{ v: "fn" }]);
+              db.run("INSERT INTO t (v) VALUES ('hook')");
+            },
+          },
+        );
+        expect(result).toBe(7);
+        expect(order).toEqual(["fn", "before"]);
+        expect(db.all("SELECT v FROM t ORDER BY id")).toEqual([{ v: "fn" }, { v: "hook" }]);
+      });
+
+      it("rolls back what fn wrote when beforeCommit throws, and rethrows", () => {
+        expect(() =>
+          db.transaction(() => void db.run("INSERT INTO t (v) VALUES ('fn')"), {
+            beforeCommit: () => {
+              throw new Error("ledger down");
+            },
+          }),
+        ).toThrow("ledger down");
+        expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 0 }]);
+        db.transaction(() => void db.run("INSERT INTO t (v) VALUES ('after')"));
+        expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 1 }]);
+      });
+
+      it("does not run beforeCommit when fn throws", () => {
+        let ran = false;
+        expect(() =>
+          db.transaction(
+            () => {
+              throw new Error("fn");
+            },
+            { beforeCommit: () => void (ran = true) },
+          ),
+        ).toThrow("fn");
+        expect(ran).toBe(false);
+      });
+
+      it("refuses beforeCommit inside an open transaction, and leaves that transaction alone", () => {
+        db.transaction(() => {
+          db.run("INSERT INTO t (v) VALUES ('outer')");
+          expect(() => db.transaction(() => undefined, { beforeCommit: () => undefined })).toThrow(
+            /outermost/,
+          );
+        });
+        expect(db.all("SELECT v FROM t")).toEqual([{ v: "outer" }]);
       });
     });
 

@@ -20,6 +20,22 @@ function fakeFetch(status: number, body: unknown) {
   return { calls, impl: impl as typeof fetch };
 }
 
+describe("createApiClient: a deletion the ledger cannot record", () => {
+  it("throws an ApiError with the fixed code on 409", async () => {
+    const api = createApiClient(
+      { baseUrl: "", token: TOKEN },
+      fakeFetch(409, { error: "ledger-unwritable" }).impl,
+    );
+    const error = await api("deleteSource", {
+      connectorId: "c",
+      namespace: "n",
+      externalId: "e",
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ code: "ledger-unwritable", status: 409 });
+  });
+});
+
 describe("createApiClient", () => {
   it("sends the session token to the route's method and path", async () => {
     const fake = fakeFetch(200, { connectors: [] });

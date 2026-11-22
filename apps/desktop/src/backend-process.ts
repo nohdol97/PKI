@@ -52,14 +52,19 @@ export type StartFailureReason =
   | "identity-key-missing"
   | "scope-policy-not-implemented"
   | "scope-policy-invalid"
-  | "adapter-unregistered";
+  | "adapter-unregistered"
+  | "ledger-reapply-failed"
+  | "ledger-unavailable";
 
 /** A start the backend refused; `reason` is a fixed class it reported (I04-R7), never its message. */
 export class BackendStartError extends Error {
   readonly reason: StartFailureReason | undefined;
-  constructor(reason?: StartFailureReason) {
+  /** With `ledger-reapply-failed`: the ledger line number, never its content. */
+  readonly ledgerLine: number | undefined;
+  constructor(reason?: StartFailureReason, ledgerLine?: number) {
     super("backend failed to start");
     this.reason = reason;
+    this.ledgerLine = ledgerLine;
     this.name = "BackendStartError";
   }
 }
@@ -74,8 +79,11 @@ const FromBackend = z.discriminatedUnion("type", [
         "scope-policy-not-implemented",
         "scope-policy-invalid",
         "adapter-unregistered",
+        "ledger-reapply-failed",
+        "ledger-unavailable",
       ])
       .optional(),
+    line: z.int().positive().optional(),
   }),
   z.strictObject({
     type: z.literal("secret-request"),
@@ -193,7 +201,8 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
         });
         return;
       }
-      if (message.data.type === "failed") return fail(new BackendStartError(message.data.reason));
+      if (message.data.type === "failed")
+        return fail(new BackendStartError(message.data.reason, message.data.line));
       if (settled) return;
       settled = true;
       clearTimeout(timer);

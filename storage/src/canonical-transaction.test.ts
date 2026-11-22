@@ -21,12 +21,14 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 const line: LedgerLineDraft = {
+  connectorInstanceId: "c1",
+  connectorKind: "k1",
   identityHash: "h",
   coversVersion: 1,
   lastRevision: null,
   reason: "user-deleted",
-  lifted: false,
   at: "2026-11-22T00:00:00.000Z",
+  liftedAt: null,
 };
 
 describe("canonicalTransaction", () => {
