@@ -5,6 +5,7 @@
 // read a text through parseJsonl. The fixtures' `malicious` marker is for the
 // synthetic manifest only and never reaches a Change.
 import {
+  CONNECTOR_SDK_VERSION,
   ImportRecordSchema,
   type Change,
   type ImportLineError,
@@ -14,10 +15,12 @@ import { createHash } from "node:crypto";
 
 /**
  * The one place a JSONL `operation` becomes a Connector change kind. Provisional
- * for `revoke`: I01 maps it to a scope change and adds an operation for losing
- * access entirely (V02 spec "T04가 넘기는 것").
+ * for `revoke`: I01-T05 maps it to a scope change (widening this return type) and
+ * adds an operation for losing access entirely (V02 spec "T04가 넘기는 것").
  */
-export function changeKindOf(operation: ImportRecord["operation"]): Change["kind"] {
+export function changeKindOf(
+  operation: ImportRecord["operation"],
+): Exclude<Change["kind"], "scope-change"> {
   switch (operation) {
     case "upsert":
       return "upsert";
@@ -109,19 +112,25 @@ export function splitRounds(lines: readonly JsonlLine[]): JsonlLine[][] {
   return rounds;
 }
 
-/** The Connector change a line stands for; only the fields of SourceRecord are carried. */
+/**
+ * The Connector change a line stands for (SDK v2): the line's `version` is the
+ * revision, never a product version (I01-R9). Only identity, revision and content
+ * are carried, in the instance's one namespace: each `connector_instance_id` is
+ * its own instance here. I01-T05 maps the rest of the line (I01-R22).
+ */
 export function toChange(record: ImportRecord): Change {
   const kind = changeKindOf(record.operation);
+  const identity = { namespace: "", externalId: record.external_id, revision: record.version };
   if (kind === "upsert") {
     return {
       kind,
       record: {
-        externalId: record.external_id,
+        ...identity,
+        schemaVersion: CONNECTOR_SDK_VERSION,
         title: record.title,
         body: record.content,
-        revision: record.version,
       },
     };
   }
-  return { kind, externalId: record.external_id, version: record.version, at: record.updated_at };
+  return { kind, ...identity, at: record.updated_at };
 }

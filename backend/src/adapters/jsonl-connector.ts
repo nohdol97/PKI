@@ -2,7 +2,15 @@
 // (jsonl-lines.ts) of one `connector_instance_id`. The importer (jsonl-import.ts)
 // parses a file once and hands each instance its own lines, one round at a time,
 // so a read names each source once. The cursor is the count of changes delivered.
-import type { Change, Connector, ImportRecord, SourceRecord } from "@pki/contracts";
+// SDK v2: one product instance per `connector_instance_id` (V02), so its records
+// are in the instance's one namespace, "" (I01-R5), until I01-T05's import API.
+import {
+  CONNECTOR_SDK_VERSION,
+  type Change,
+  type Connector,
+  type ImportRecord,
+  type SourceRecord,
+} from "@pki/contracts";
 import { toChange } from "../jsonl-lines.ts";
 
 export interface JsonlConnectorConfig {
@@ -30,9 +38,16 @@ export function createJsonlConnector(): Connector {
   return {
     manifest: {
       type: "jsonl-import",
-      schemaVersion: 1,
-      // access_scope is not carried yet (V02 spec "T04가 넘기는 것" 6)
-      capabilities: { incremental: true, deletes: true, accessScope: false, fullRescan: true },
+      schemaVersion: CONNECTOR_SDK_VERSION,
+      // access_scope is not carried yet (V02 spec "T04가 넘기는 것" 6); the v2
+      // cursor and capabilities of I01-R23 are I01-T05's
+      capabilities: {
+        incremental: true,
+        deletes: true,
+        accessScope: false,
+        fullRescan: true,
+        deletionsOnRescan: false,
+      },
     },
     async initialize(config) {
       changes = readConfig(config).records.map(toChange);
@@ -50,9 +65,13 @@ export function createJsonlConnector(): Connector {
       const end = Math.min(start + limit, all.length);
       return { changes: all.slice(start, end), nextCursor: String(end), hasMore: end < all.length };
     },
-    async getDocument(externalId): Promise<SourceRecord | null> {
+    async getDocument({ namespace, externalId }): Promise<SourceRecord | null> {
       for (const change of loaded()) {
-        if (change.kind === "upsert" && change.record.externalId === externalId) {
+        if (
+          change.kind === "upsert" &&
+          change.record.namespace === namespace &&
+          change.record.externalId === externalId
+        ) {
           return change.record;
         }
       }

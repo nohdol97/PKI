@@ -13,7 +13,7 @@
 | [research/2026-11-21-cli-provider-terms-and-isolation.md](research/2026-11-21-cli-provider-terms-and-isolation.md) | Claude Code·Codex CLI를 제품이 호출해도 되는지(약관)와 격리할 수 있는지의 문서 조사 | 문서 조사, 실행 전 |
 | [research/2026-11-21-R00-initial-base.md](research/2026-11-21-R00-initial-base.md) | 빈 저장소에 최초 commit을 올린 절차와 증거 | 보관 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 구성요소, 프로세스, 정본과 투영, 어댑터 규격, 실패 복구, 보안, **가정 표** | 잠정 |
-| [adr/](adr/README.md) | 결정 기록 15건(잠정 10, 확정 4, 미결 1) | 색인 참조 |
+| [adr/](adr/README.md) | 결정 기록 16건(잠정 11, 확정 4, 미결 1) | 색인 참조 |
 | [REUSE_AND_BUILD.md](REUSE_AND_BUILD.md) | 기능별 재사용·직접 개발·미룸 목록 | 잠정 |
 | [ownership.md](ownership.md) | 공용 저장소와 배포처 포크가 각각 무엇을 갖는가 | 확정(ADR 0012) |
 | [site-setup.md](site-setup.md) | 배포처가 채울 설정의 형태와 체크리스트 | 잠정(설정 키 이름은 V01에서 확정) |

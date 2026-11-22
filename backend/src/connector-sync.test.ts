@@ -33,8 +33,14 @@ function scripted(pages: (cursor: string | null) => ChangeSet): Connector {
   return {
     manifest: {
       type: "scripted",
-      schemaVersion: 1,
-      capabilities: { incremental: true, deletes: true, accessScope: false, fullRescan: true },
+      schemaVersion: 2,
+      capabilities: {
+        incremental: true,
+        deletes: true,
+        accessScope: false,
+        fullRescan: true,
+        deletionsOnRescan: false,
+      },
     },
     initialize: async () => {},
     healthCheck: async () => ({ state: "ok" }),
@@ -43,9 +49,9 @@ function scripted(pages: (cursor: string | null) => ChangeSet): Connector {
   };
 }
 
-const upsert = (externalId: string, body = "b") => ({
+const upsert = (externalId: string, body = "b", revision = 1) => ({
   kind: "upsert" as const,
-  record: { externalId, title: "t", body },
+  record: { namespace: "", externalId, revision, schemaVersion: 2 as const, title: "t", body },
 });
 
 describe("sync of the test Connector", () => {
@@ -122,10 +128,7 @@ describe("cursor after save", () => {
   it("keeps the old cursor and saves nothing when a page cannot be stored", async () => {
     const page = (changes: ChangeSet["changes"], nextCursor: string) =>
       scripted(() => ({ changes, nextCursor, hasMore: false }));
-    const revised = (revision: number, body: string) => ({
-      kind: "upsert" as const,
-      record: { externalId: "r", title: "t", body, revision },
-    });
+    const revised = (revision: number, body: string) => upsert("r", body, revision);
     await syncConnector(db, "s", "scripted", page([revised(2, "b")], "1"));
     const jobs = db.all("SELECT count(*) AS n FROM jobs");
     await expect(
@@ -147,7 +150,7 @@ describe("cursor after save", () => {
       db,
       "s",
       "scripted",
-      page([{ kind: "delete", externalId: "x", version: 2, at }], "2"),
+      page([{ kind: "delete", namespace: "", externalId: "x", revision: 2, at }], "2"),
     );
     const refused: [string, string][] = [];
     const result = await syncConnector(
@@ -184,7 +187,7 @@ describe("cursor after save", () => {
         cursor === null
           ? { changes: [upsert("a"), upsert("b")], nextCursor: "1", hasMore: true }
           : {
-              changes: [{ kind, externalId: "a", version: 3, at }],
+              changes: [{ kind, namespace: "", externalId: "a", revision: 3, at }],
               nextCursor: "2",
               hasMore: false,
             },
@@ -203,7 +206,7 @@ describe("cursor after save", () => {
 
   it("registers one extraction job per new version, fenced at it, with the page (V02-R4)", async () => {
     const connector = scripted(() => ({
-      changes: [upsert("a"), upsert("a"), upsert("b"), upsert("a", "b2")],
+      changes: [upsert("a"), upsert("a"), upsert("b"), upsert("a", "b2", 2)],
       nextCursor: "1",
       hasMore: false,
     }));
@@ -230,7 +233,7 @@ describe("cursor after save", () => {
           changes: [
             {
               kind: "upsert",
-              record: { externalId: "a", title: "t", body: "b", classification: "synthetic" },
+              record: { ...upsert("a").record, classification: "synthetic" },
             },
           ],
           nextCursor: "1",

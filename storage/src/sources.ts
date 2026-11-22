@@ -1,12 +1,15 @@
 // Canonical source storage (V01-R7). A source is identified by Connector
-// instance + external id. The product numbers each source's versions itself, one
-// past its latest (V02-R3); a Connector's own version of a record, when it gives
-// one, is kept as the version's `revision` and only orders arrivals (cross-spec
-// decision D1). Callers wrap a page in one transaction.
+// instance + namespace + external id (I01-R8). The product numbers each
+// source's versions itself, one past its latest (V02-R3); a Connector's own
+// version of a record, when it gives one, is kept as the version's `revision`
+// and only orders arrivals (cross-spec decision D1). Callers wrap a page in one
+// transaction.
 import { createHash } from "node:crypto";
 import type { SqlDriver } from "./sql-driver.ts";
 
 export interface StoredRecord {
+  /** Where the external id is unique within the instance; absent is "", its one range (I01-R5). */
+  namespace?: string | undefined;
   externalId: string;
   title: string;
   body: string;
@@ -43,11 +46,12 @@ export function saveSourceRecord(
   connectorInstanceId: string,
   record: StoredRecord,
 ): SaveOutcome {
+  const namespace = record.namespace ?? "";
   db.run(
-    "INSERT INTO sources (connector_instance_id, external_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
-    [connectorInstanceId, record.externalId],
+    "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+    [connectorInstanceId, namespace, record.externalId],
   );
-  const sourceId = findSourceId(db, connectorInstanceId, record.externalId) as number;
+  const sourceId = findSourceId(db, connectorInstanceId, namespace, record.externalId) as number;
   const hash = contentHash(record.title, record.body);
   const latest = db.all(LATEST_VERSION_SQL, [sourceId])[0];
   if (latest?.content_hash === hash) return { status: "unchanged" };
@@ -83,16 +87,17 @@ export function saveSourceRecord(
   return { status: "created", sourceId, version };
 }
 
-/** The id of the source an instance names `externalId`, or undefined if never stored. */
+/** The id of the source an instance names `externalId` in `namespace`, or undefined if never stored. */
 export function findSourceId(
   db: SqlDriver,
   connectorInstanceId: string,
+  namespace: string,
   externalId: string,
 ): number | undefined {
-  return db.all("SELECT id FROM sources WHERE connector_instance_id = ? AND external_id = ?", [
-    connectorInstanceId,
-    externalId,
-  ])[0]?.id as number | undefined;
+  return db.all(
+    "SELECT id FROM sources WHERE connector_instance_id = ? AND namespace = ? AND external_id = ?",
+    [connectorInstanceId, namespace, externalId],
+  )[0]?.id as number | undefined;
 }
 
 /** The kind an instance is bound to, or undefined before its first sync. */

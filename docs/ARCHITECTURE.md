@@ -348,23 +348,36 @@ Phase 1에서 제품 코드가 이 규격을 부르는 자리는 둘뿐이다: �
 
 ### 5.5 Connector
 
-원 설계 5절의 인터페이스에 삭제 사건, cursor 만료, 나눠 받기, 전체 재스캔, 능력 선언, 스키마 버전을 더했다. 원 설계의 `sync()`는 Connector가 아니라 Connector 관리 모듈의 일로 옮겼다. 관리 모듈이 `getChanges`를 반복해 부르고, 받은 것을 저장한 **뒤에** cursor를 확정한다.
+원 설계 5절의 인터페이스에 삭제 사건, cursor 만료, 나눠 받기, 전체 재스캔, 능력 선언, 규격 버전을 더했다. 원 설계의 `sync()`는 Connector가 아니라 Connector 관리 모듈의 일로 옮겼다. 관리 모듈이 `getChanges`를 반복해 부르고, 받은 것을 저장한 **뒤에** cursor를 확정한다. 지금 규격은 v2다([ADR 0016](adr/0016-connector-sdk-v2.md), [I01 spec](specs/2026-11-21-I01-connector-sdk.md)). 관리 모듈은 `manifest.schemaVersion`이 `CONNECTOR_SDK_VERSION`(2)이 아닌 수집기를 초기화하지 않고 `unavailable`(사유 `unsupported-sdk-version`)로 둔다.
 
 ```typescript
+const CONNECTOR_SDK_VERSION = 2
 interface Connector {
-  readonly manifest: { type: string; schemaVersion: number; capabilities: { incremental: boolean; deletes: boolean; accessScope: boolean; fullRescan: boolean } }
-  initialize(config: unknown): Promise<void>   // 미구현 연동은 '미구현, 배포처 후속'이라는 Unavailable 오류로 실패한다
-  healthCheck(): Promise<HealthStatus>
+  readonly manifest: { type: string; schemaVersion: number; capabilities: { incremental: boolean; deletes: boolean; accessScope: boolean; fullRescan: boolean; deletionsOnRescan: boolean } }
+  initialize(config: unknown): Promise<void>   // 미구현 연동은 '미구현, 배포처 후속'이라는 오류로 실패한다
+  healthCheck(): Promise<HealthStatus>          // 던지지 않는다
   getChanges(cursor: string | null, opts: { limit: number; signal: AbortSignal }): Promise<ChangeSet>
-  getDocument(externalId: string): Promise<SourceRecord | null>
+  getDocument(ref: { namespace: string; externalId: string }): Promise<SourceRecord | null>
 }
+interface SourceRecord {   // 모르는 필드는 거부. 인스턴스 ID·등급·합성·악성 필드 없음
+  namespace: string; externalId: string; revision: number; schemaVersion: 2
+  title: string; body: string; blocks?: { start: number; end: number; locator: NativeLocator }[]
+  accessScope?: string[]; sourceType?: string; sourceUrl?: string; author?: string; participants?: string[]
+  threadId?: string; createdAt?: string; updatedAt?: string; metadata?: Record<string, unknown>
+}
+type Ref = { namespace: string; externalId: string; revision: number; at: string }
 type Change =
   | { kind: 'upsert'; record: SourceRecord }
-  | { kind: 'delete' | 'access-revoked'; externalId: string; version: number; at: string }
-interface ChangeSet { changes: Change[]; nextCursor: string; hasMore: boolean; cursorExpired?: boolean }   // cursorExpired면 전체 재스캔
+  | ({ kind: 'scope-change'; accessScope: string[] } & Ref)
+  | ({ kind: 'delete' | 'access-revoked' } & Ref)
+interface ChangeSet { changes: Change[]; nextCursor: string; hasMore: boolean; cursorExpired?: boolean   // cursorExpired면 전체 재스캔
+                      rejected?: { at: string; code: RejectCode }[] }
+// 실패: ConnectorError(retryable), ConnectorRateLimitError(retryAfterMs), ConnectorNotImplementedError
 ```
 
-원본의 정체는 `connector_instance_id + external_id`이고 content hash는 내용 중복을 찾는 데만 쓴다. 내용이 같아도 출처·권한·시점이 다르면 따로 보존한다(이슈 #1 설계 분석 2번). Connector는 데이터 등급을 정하지 못한다. access_scope를 채울 뿐이고 등급은 Broker가 계산한다. R05의 골든 데이터는 레코드의 `operation` 필드에 `upsert`, `delete`, `revoke`를 쓴다. JSONL Connector는 이것을 차례로 `upsert`, `delete`, `access-revoked`로 옮긴다. 공용 저장소는 JSONL import와 테스트 Connector를 구현하고, 실제 메일·메신저·Wiki 수집기는 배포처 포크가 이 계약으로 구현한다.
+원본의 정체는 `connector_instance_id + namespace + external_id`다. namespace는 한 인스턴스 안에서 원본 식별자가 유일한 범위(위키 공간, 편지함)이고, 범위가 하나면 빈 문자열이다. 인스턴스 ID는 레코드가 아니라 관리 모듈이 동기화하는 인스턴스에서 붙는다. content hash는 한 원본 안에서 새 version을 만들지 판단하는 데만 쓴다. 내용이 같아도 출처·권한·시점이 다르면 따로 보존한다(이슈 #1 설계 분석 2번). `revision`은 원 시스템이 매긴 개정 번호로 도착 순서를 가리는 데만 쓰고, 제품의 version 번호와 섞지 않는다. Connector는 데이터 등급을 정하지 못한다. access_scope를 채울 뿐이고 등급은 Broker가 계산한다. block의 locator는 I02의 위치표와 같은 모양이다.
+
+R05의 골든 데이터는 레코드의 `operation` 필드에 `upsert`, `delete`, `revoke`를 쓴다. JSONL Connector는 `revoke`를 `scope-change`(내용은 그대로, 범위가 좁아짐)로 옮기고, 사용자가 더는 볼 수 없는 경우는 새 값 `access-revoked`로 적는다(I01-R22). 이 대응은 I01-T05가 바꾸며, 그 전까지는 `revoke`를 `access-revoked`로 옮긴다. 공용 저장소는 JSONL import와 테스트 Connector를 구현하고, 실제 메일·메신저·Wiki 수집기는 배포처 포크가 이 계약으로 구현한다.
 
 ### 5.6 파생물 등록부 — 무효화 계약
 
@@ -543,3 +556,4 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | 2026-11-22 | 5.6절 고침: 투영 종류는 층과 상관없이 정본 종류 뒤에 실행, 실행 위치가 다른 `references` 거부, 상태 API의 모양 `invalidations: { recent }`와 T09의 `scopePolicyDrops`, 계약 묶음의 해당 없음 검사와 닫힌 목록 | 5.6절 | I04-T01 독립 검토 F2·F3·F4 |
 | 2026-11-22 | 5.6절 "등록"에 모르는 실행 위치 거부와 빠진 종류 확인 추가 | 5.6절 | I04-T01 독립 재검토 R2-1 |
 | 2026-11-22 | 3절 쉘의 재시작 문장을 V01-T16이 넣은 동작(3번까지, 같은 토큰, 새 주소)으로 고침 | 3절 | V01-T16 검토 B F6 |
+| 2026-11-22 | 5.5절을 Connector 규격 v2로 고침: 코드 스케치(레코드 필드, 네 변경, `rejected`, 오류 두 종류, `getDocument`의 namespace, `deletionsOnRescan`), 원본 정체에 namespace, 규격 버전 검사, JSONL `revoke`의 대응(I01-T05에서 `scope-change`) | 5.5절 | I01-T01, ADR 0016 |

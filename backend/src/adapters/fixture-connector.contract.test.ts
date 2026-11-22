@@ -1,5 +1,5 @@
 // V01-R7: the test Connector over the repository's synthetic fixtures passes the
-// Connector contract, and never forwards the fixtures' malicious marker.
+// Connector contract (SDK v2), and never forwards the fixtures' malicious marker.
 import { connectorContract } from "@pki/testkit";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -22,6 +22,9 @@ describe("test-fixtures Connector", () => {
       expect(change.kind === "upsert" && Object.keys(change.record).sort()).toEqual([
         "body",
         "externalId",
+        "namespace",
+        "revision",
+        "schemaVersion",
         "title",
       ]);
     }

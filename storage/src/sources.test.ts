@@ -1,5 +1,6 @@
-// V01-R7 source storage: identity is connector instance + external id, the same
-// content makes no new version, and each instance keeps its kind and cursor.
+// V01-R7 source storage: identity is connector instance + namespace + external id
+// (I01-R8), the same content makes no new version, and each instance keeps its
+// kind and cursor.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { migrate } from "./migrations.ts";
@@ -8,6 +9,7 @@ import { readChangeSeq } from "./revisions.ts";
 import {
   LATEST_VERSION_SQL,
   contentHash,
+  findSourceId,
   readCursor,
   registerConnectorInstance,
   readSourceVersion,
@@ -40,6 +42,24 @@ describe("contentHash", () => {
 });
 
 describe("saveSourceRecord", () => {
+  it("keeps one external id in two namespaces as two sources, even with the same content", () => {
+    expect(saveSourceRecord(db, "c1", { ...record("e1"), namespace: "space-a" }).status).toBe(
+      "created",
+    );
+    expect(saveSourceRecord(db, "c1", { ...record("e1"), namespace: "space-b" }).status).toBe(
+      "created",
+    );
+    expect(saveSourceRecord(db, "c1", record("e1")).status).toBe("created");
+    expect(db.all("SELECT namespace, external_id FROM sources ORDER BY id")).toEqual([
+      { namespace: "space-a", external_id: "e1" },
+      { namespace: "space-b", external_id: "e1" },
+      { namespace: "", external_id: "e1" },
+    ]);
+    expect(findSourceId(db, "c1", "space-b", "e1")).toBe(2);
+    expect(findSourceId(db, "c1", "", "e1")).toBe(3);
+    expect(findSourceId(db, "c1", "space-c", "e1")).toBeUndefined();
+  });
+
   it("creates a source and its first version", () => {
     expect(saveSourceRecord(db, "c1", record("e1")).status).toBe("created");
     expect(db.all("SELECT title, body, content_hash FROM source_versions")).toEqual([

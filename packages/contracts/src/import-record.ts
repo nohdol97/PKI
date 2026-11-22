@@ -6,8 +6,7 @@
 // `malicious: true` marks a synthetic malicious variant for the synthetic
 // manifest only; a Connector drops it, since SourceRecordSchema rejects it.
 import { z } from "zod";
-
-const isoWithOffset = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+import { ISO_WITH_OFFSET as isoWithOffset } from "./connector.ts";
 
 export const ImportRecordSchema = z
   .strictObject({

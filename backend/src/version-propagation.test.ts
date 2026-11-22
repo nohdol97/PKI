@@ -269,17 +269,23 @@ describe("propagation atomicity", () => {
   const connector: Connector = {
     manifest: {
       type: "scripted",
-      schemaVersion: 1,
-      capabilities: { incremental: true, deletes: true, accessScope: false, fullRescan: true },
+      schemaVersion: 2,
+      capabilities: {
+        incremental: true,
+        deletes: true,
+        accessScope: false,
+        fullRescan: true,
+        deletionsOnRescan: false,
+      },
     },
     initialize: async () => {},
     healthCheck: async () => ({ state: "ok" }),
     getChanges: async () => ({ changes: page, nextCursor: "c", hasMore: false }),
     getDocument: async () => null,
   };
-  const upsert = (externalId: string, body: string, revision?: number) => ({
+  const upsert = (externalId: string, body: string, revision = 1) => ({
     kind: "upsert" as const,
-    record: { externalId, title: "t", body, ...(revision ? { revision } : {}) },
+    record: { namespace: "", externalId, revision, schemaVersion: 2 as const, title: "t", body },
   });
   const counts = () => ({
     versions: db.all("SELECT count(*) AS n FROM source_versions"),
@@ -321,7 +327,7 @@ describe("propagation atomicity", () => {
     const before = counts();
     // the edit of "b" is stored and propagated first; the older revision of "other"
     // is then refused, and without onRefused the whole page fails
-    page = [upsert("b", "B API 12-03"), upsert("other", "older", 3)];
+    page = [upsert("b", "B API 12-03", 2), upsert("other", "older", 3)];
     await expect(syncConnector(db, "s", "scripted", connector, { rescan: true })).rejects.toThrow(
       /revision-not-newer/,
     );
@@ -337,7 +343,7 @@ describe("propagation atomicity", () => {
     // superseding the fact is the propagation's only write; make it fail
     db.exec(`CREATE TEMP TRIGGER block_supersede BEFORE UPDATE OF status ON facts
              BEGIN SELECT RAISE(ABORT, 'propagation blocked'); END`);
-    page = [upsert("b", "B API 12-03")];
+    page = [upsert("b", "B API 12-03", 2)];
     await expect(syncConnector(db, "s", "scripted", connector, { rescan: true })).rejects.toThrow(
       /propagation blocked/,
     );

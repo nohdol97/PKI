@@ -471,8 +471,9 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     sources: async () => ({ sources: listSources(options.db) }),
     searchSources: async (input) => ({ sources: findSources(options.db, input.query) }),
     // V02-R12: the user's deletion; until an explicit lift (none in V02) nothing brings it back
-    deleteSource: async ({ connectorId, externalId }) => {
-      const sourceId = findSourceId(options.db, connectorId, externalId);
+    // The request names the source's whole identity (I01-R8), as the listing shows it.
+    deleteSource: async ({ connectorId, namespace, externalId }) => {
+      const sourceId = findSourceId(options.db, connectorId, namespace, externalId);
       if (sourceId === undefined) return { error: "not-found" };
       const at = new Date().toISOString();
       const { notice } = deleteSourceWithNotice(options.db, sourceId, {

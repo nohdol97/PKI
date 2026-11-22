@@ -1,6 +1,6 @@
-// V02-R2: the JSONL Connector over the V02 synthetic fixtures passes the V01
-// Connector contract, never forwards the fixtures' malicious marker, and takes
-// lines already parsed and split by the importer (one read: each source once).
+// V02-R2: the JSONL Connector over the V02 synthetic fixtures passes the
+// Connector contract (SDK v2), never forwards the fixtures' malicious marker, and
+// takes lines already parsed and split by the importer (one read: each source once).
 import type { ImportRecord } from "@pki/contracts";
 import { connectorContract } from "@pki/testkit";
 import { createHash } from "node:crypto";
@@ -58,17 +58,21 @@ describe("JSONL Connector", () => {
     expect(change?.kind === "upsert" && Object.keys(change.record).sort()).toEqual([
       "body",
       "externalId",
+      "namespace",
       "revision",
+      "schemaVersion",
       "title",
     ]);
     const source = JSON.parse(malicious.split("\n")[0] as string) as ImportRecord;
     expect(change).toEqual({
       kind: "upsert",
       record: {
+        namespace: "",
         externalId: source.external_id,
+        revision: 1,
+        schemaVersion: 2,
         title: source.title,
         body: source.content,
-        revision: 1,
       },
     });
   });
@@ -79,6 +83,7 @@ describe("JSONL Connector", () => {
       deletes: true,
       accessScope: false,
       fullRescan: true,
+      deletionsOnRescan: false,
     });
   });
 
@@ -100,8 +105,8 @@ describe("JSONL Connector", () => {
       ].join("\n"),
     );
     expect(changes).toEqual([
-      { kind: "delete", externalId: "d", version: 3, at },
-      { kind: "access-revoked", externalId: "r", version: 2, at },
+      { kind: "delete", namespace: "", externalId: "d", revision: 3, at },
+      { kind: "access-revoked", namespace: "", externalId: "r", revision: 2, at },
     ]);
     const connector = createJsonlConnector();
     await connector.initialize({
@@ -110,7 +115,7 @@ describe("JSONL Connector", () => {
         MAIL.connector_instance_id,
       ),
     });
-    expect(await connector.getDocument("d")).toBeNull();
+    expect(await connector.getDocument({ namespace: "", externalId: "d" })).toBeNull();
   });
 
   it("fails to initialize without records", async () => {

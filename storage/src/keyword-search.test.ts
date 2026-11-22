@@ -20,7 +20,7 @@ afterEach(() => {
 
 function addVersion(externalId: string, title: string, body: string): number {
   const source = db.run(
-    "INSERT INTO sources (connector_instance_id, external_id) VALUES ('test', ?)",
+    "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('test', '', ?)",
     [externalId],
   );
   return db.run(

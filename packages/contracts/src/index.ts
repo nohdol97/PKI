@@ -86,13 +86,16 @@ export const ErrorResponseSchema = z.object({
 });
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 
-// "not-implemented" is a site Connector placeholder (V01-R18); "unavailable" failed to initialize.
+// "not-implemented" is a site Connector placeholder (V01-R18); "unavailable" failed to
+// initialize, or, with reason "unsupported-sdk-version", was never initialized because
+// it implements another Connector SDK version (I01-R1).
 export const ConnectorListResponseSchema = z.object({
   connectors: z.array(
     z.object({
       id: z.string(),
       kind: z.string(),
       state: z.enum(["ready", "not-implemented", "unavailable"]),
+      reason: z.literal("unsupported-sdk-version").optional(),
     }),
   ),
 });
@@ -109,9 +112,11 @@ export const SyncResponseSchema = z.object({
 export type SyncResponse = z.infer<typeof SyncResponseSchema>;
 
 // Screen reads (V01-R3). `id` is the source version shown: always the source's latest.
+// A source is connector instance + namespace + external id (I01-R8).
 const SourceSummarySchema = z.object({
   id: z.int(),
   connectorId: z.string(),
+  namespace: z.string(),
   externalId: z.string(),
   title: z.string(),
 });
@@ -127,6 +132,8 @@ export const SourceSearchRequestSchema = z.strictObject({ query: z.string().min(
  */
 export const SourceDeleteRequestSchema = z.strictObject({
   connectorId: z.string().min(1),
+  /** Required: one external id may name a source in several namespaces (I01-R8). */
+  namespace: z.string(),
   externalId: z.string().min(1),
 });
 export const SourceDeleteResponseSchema = z.object({
