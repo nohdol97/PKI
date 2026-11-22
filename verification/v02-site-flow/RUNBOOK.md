@@ -74,3 +74,32 @@ C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요
 - **어느 실행 파일이 정본 DB를 썼는지 실행기는 알 수 없습니다.** 설치본, `dist\app`, 원본 실행이 모두 같은 데이터 폴더를 쓰고, 빌드 종류는 DB에 남지 않습니다. 기록의 `windows-installer`는 사람이 설치된 exe로만 앱을 켰다는 관찰(`launched-installed`)에 기댑니다. 제품 이름(`productName`)도 설정에서 오므로 실행기는 그 이름이 이 제품의 것인지 확인하지 못합니다.
 - 실행 중에 앱이 내보낸 연결은 보지 않습니다(S08, R02-S2).
 - 품질(정확도)의 합격선은 없습니다(R05). 실제 업무 자료의 품질은 S15입니다.
+
+## 8. 삭제 시나리오: 실제 수집기의 삭제·권한 상실과 파일 소거 (S22, I04-R19)
+
+> **상태: 작성만 됨 — 실행된 적 없음.** 이 저장소에는 실제 수집기가 없고 Windows에서 돌려 본 적도 없습니다. 사외에서는 거부 경로와 카나리 찾기·판정·기록 형식만 합성 자료로 단위 시험했습니다. 그 통과는 배포처 결과가 아닙니다. 스펙: [I04 spec](../../docs/specs/2026-11-21-I04-invalidation.md) I04-R19, 배포처 항목: [site-setup.md S22](../../docs/site-setup.md).
+
+**무엇을 증명하나.** 합성 원본 셋을 실제 수집기로 가져온 뒤, 하나는 출처에서 삭제하고 하나는 권한을 잃게 만들면, ① 그 두 원본이 읽기 경로에서 바로 사라지고 ② 엔진·벡터 색인 등 투영의 제거 작업이 끝나며(끝나지 않았거나 포기한 것이 있으면 앱이 투영을 강제로 다시 만든 뒤) ③ 아래 세 곳의 **어느 파일에도**, 그리고 키워드 색인의 단어 목록에도 그 두 원본의 글이 남지 않습니다. 남겨 둔 셋째 원본은 대조군입니다: 그 글이 파일에서도, 키워드 색인에서도 찾아지지 않으면 찾기가 아무것도 못 보는 것이므로 판정이 `INCONCLUSIVE`입니다. (대조군이 정본 표 `source_versions`에서만 찾아지고 색인에서는 아니라면 색인을 찾았다는 증거가 못 되므로 색인 쪽을 따로 묻습니다.)
+
+**용어.** *카나리*: 합성 원본의 본문에 넣는 임의의 영문 소문자 단어(셋이 서로 다른 글자로 시작하게 만듭니다). *출처 삭제*: 원 시스템에서 그 항목이 지워졌다고 수집기가 알리는 사건(`source-deleted`). *권한 상실*: 사용자가 그 항목을 더는 볼 수 없다고 수집기가 알리는 사건(`access-revoked`). *투영*: 정본에서 만들어 다시 만들 수 있는 색인(키워드, 엔진, 벡터).
+
+**준비.** 3절의 준비와 같되, 설정은 `delete-config.example.json`을 `v02-result\delete-config.json`으로 복사해 채웁니다(`productName`, `installedExe`, 쓸 수집기 종류 `collector.kind`: `site-mail`·`site-messenger`·`site-wiki`, **`userDataDir`**: Electron의 userData 폴더(Chromium 저장소)의 절대 경로로 **필수**이며 없으면 `preflight`가 설정 오류로 멈춥니다. 이 폴더는 데이터 폴더 `%LOCALAPPDATA%\PKI` 밖입니다(`storage/src/data-directory.ts`가 일부러 따로 정했고 `apps/desktop`은 userData 위치를 바꾸지 않아 로밍 `%APPDATA%` 아래에 앱 이름으로 생깁니다. 앱 이름은 패키지 이름 `pki-desktop`(`apps/desktop/build/build.ts`)에서 오지만 R04의 패키저가 다른 이름을 줄 수 있어 설치본에서 확인된 값이 아닙니다: 설치한 PC에서 실제 폴더를 보고 적습니다). 엔진·벡터 색인이 이 두 폴더 밖에 파일을 둔다면 그 절대 경로를 `extraScanDirs`에. 이 실행기는 Provider를 묻지 않습니다. 데이터 폴더가 **비어 있어야** 합니다(옛 흔적이 이번 결과로 읽히지 않게).
+
+| 순서 | 할 일 | 확인 |
+|---|---|---|
+| 1 | `python verification\v02-site-flow\run.py delete-scenario preflight --config v02-result\delete-config.json` | `preflight ok`. 설치본이 아니거나 Windows가 아니면 `배포처 후속`으로 시작하는 알림과 종료 값 3 |
+| 2 | `python verification\v02-site-flow\run.py delete-scenario prepare --config v02-result\delete-config.json --out v02-result` | 역할(`deleted`, `revoked`, `kept`)별 카나리 단어 셋이 출력되고 `delete-scenario-state.json`이 생김. 정본 DB가 이미 있으면 종료 값 4 |
+| 3 | 수집기의 **시험 시스템**에서 합성 항목 셋을 만들고 각 본문에 카나리 하나씩 넣습니다. 앱은 **설치된 exe로만** 켭니다. 수집기를 동기화해 셋 모두 가져오고 추출이 끝날 때까지 기다립니다 | 앱에서 셋 모두 보임 → `launched-installed` |
+| 4 | 시험 시스템에서 `deleted` 항목을 지우고 동기화합니다 | 그 항목이 Sources·검색·근거에서 바로 사라짐 → `source-deleted-event` |
+| 5 | 시험 시스템에서 `revoked` 항목의 열람 권한을 뺍니다(항목은 남기고 시험 계정만 못 보게). 수집기가 이것을 **권한 상실 사건**(`access-revoked`)으로 알려야 합니다. 내용은 그대로 두고 범위만 좁히는 **범위 변경**(`scope-change`, JSONL 가져오기의 `revoke` 줄)은 삭제가 아니라 이 시나리오의 권한 상실이 못 됩니다. 동기화합니다 | 그 항목이 같은 화면들에서 바로 사라짐 → `access-revoked-event` |
+| 6 | 두 원본의 글이 어느 읽기 화면에도 없는지 봅니다(`kept` 항목은 그대로) | → `reads-gone` |
+| 7 | 활동 화면(또는 상태)에서 투영 제거 작업이 모두 끝났는지, 끝나지 않은 것이 있으면 투영이 다시 만들어졌는지 봅니다. 그다음 **앱을 완전히 닫습니다**(알림 영역 포함) | → `projections-clean` |
+| 8 | `python verification\v02-site-flow\run.py delete-scenario record --config v02-result\delete-config.json --out v02-result --observed launched-installed --observed source-deleted-event --observed access-revoked-event --observed reads-gone --observed projections-clean` (확인한 것만 적습니다) | `I04-C3:delete-scenario PASS`(종료 값 0). 지운 수가 다르거나 카나리가 남았으면 `FAIL`, 대조군을 못 찾았거나 관찰이 빠지면 `INCONCLUSIVE`(종료 값 1) |
+
+**찾는 곳.** ① 데이터 폴더 `%LOCALAPPDATA%\PKI`의 모든 파일(`-journal`·`-wal`·`-shm` 포함) ② `userDataDir`의 모든 파일(Chromium 저장소) ③ `extraScanDirs`의 모든 파일. 이 밖은 보지 않습니다. **찾는 방식**: 카나리 단어의 끝 12글자를 대소문자 구분 없이 ASCII, UTF-16LE, UTF-16BE로 찾습니다(SQLite FTS5는 앞 단어와 앞부분이 같은 단어를 뒤쪽 조각만으로 저장하므로 단어 전체가 아니라 끝을 찾습니다). 추가로 정본의 키워드 색인이 **논리적으로** 지운 카나리를 단어로 아직 갖고 있는지 SQLite `fts5vocab`으로 읽기 전용으로 묻습니다. 이 물음은 색인이 "어떤 단어를 가졌다고 말하는가"만 보며 파일의 바이트는 보지 않습니다. 반대로 바이트 찾기는 색인에 단어로 등록되지 않고 파일에 남은 조각(지워진 뒤의 잔여)을 잡는 것입니다. 둘이 서로 다른 것을 봅니다. 그리고 대조군이 색인에 단어로 있는지도 이 물음으로 확인합니다(바이트 찾기가 색인을 읽었다는 증거가 못 되므로). 정본 DB가 FTS5를 쓰는 표 `keyword_index`를 가져야 하고 실행기가 쓰는 Python의 SQLite에 FTS5가 있어야 합니다. 없으면 오류로 끝나며 통과가 되지 않습니다.
+
+**판정.** `PASS`는 다음을 모두 만족할 때만입니다: 정본의 무효화 기록에 `source-deleted` 1건, `access-revoked` 1건, `user-deleted` 0건, 지운 두 카나리가 찾는 곳의 모든 파일에서 0건이고 키워드 색인 단어 목록에도 없음, 대조군 카나리가 파일과 색인 양쪽에서 찾아짐, 읽을 수 없던 폴더·파일이 0개, 관찰 다섯 모두. **읽을 수 없는 경로**에는 권한이 막힌 폴더·파일 말고 가리키는 곳이 없는 바로가기(끊어진 심볼릭 링크)도 들며, 있으면 판정이 영구히 `INCONCLUSIVE`입니다(안전한 쪽으로 둔 것입니다). 그 링크를 지우거나 열 수 있게 한 뒤 `record`를 다시 실행합니다. 그 경로를 범위에서 빼야 한다면 그 폴더를 미검증으로 적습니다. 지운 카나리가 남았거나 삭제 사건 수가 다르면 `FAIL`, 대조군이 안 찾아졌거나 읽을 수 없는 경로(개수만 기록)가 있거나 관찰이 빠지면 `INCONCLUSIVE`입니다(종료 값 1). 하나라도 남았으면 그 단어가 어느 종류의 파일에 있는지 배포처 안에서 찾습니다(Chromium 저장소, 엔진 색인, 데이터베이스의 여유 공간 등). 그 파일 이름은 결과에 적히지 않습니다.
+
+**붙이는 것.** `v02-result\result.md`만. 허용 목록의 값은 다음 열두 가지입니다: `collector_kind`(수집기 종류), `app_version`, `deleted_source_deleted`·`deleted_access_revoked`·`deleted_user_deleted`(종류별 지운 수), `canaries_found`(파일에서 찾은 지운 카나리 수), `index_canaries_found`(색인에 남은 지운 카나리 수), `control_canary_found`·`control_canary_in_index`(대조군이 파일·색인에서 찾아졌는지), `unreadable_paths`(읽을 수 없던 경로 수), `observed`(관찰 단어), `kit_commit`. `raw\`, `config`, 상태 파일(카나리 단어가 있음)은 붙이지 않습니다. 결과는 이슈 #21에 남깁니다.
+
+**이 절차가 확인하지 못하는 것(미검증으로 둡니다).** 화면과 투영 작업은 사람의 관찰입니다. 찾기는 위 세 곳의 파일 바이트만 봅니다: OS 백업·볼륨 스냅샷, 지운 파일 조각, 임시 폴더, 크래시 덤프, 페이지 파일, Provider 쪽 보관은 보지 않습니다(S11, S05·S08). 파일 안에서도 다음 꼴은 못 봅니다: 압축되었거나 접두 압축된 저장소(엔진의 FST·LZ4, Snappy 등. 그 안의 글자는 바이트로 나타나지 않습니다), 암호화된 저장소, SQLite 페이지 경계에서 둘로 나뉘어 저장된 글, UTF-16 밖의 인코딩(zlib·base64 등). 키워드 색인에 단어가 남았는지는 `fts5vocab`이 논리적으로 묻지만(바이트가 아니라 색인이 가진 단어 목록), 압축된 파일 안의 글자는 그것으로도 보지 못합니다. 엔진·벡터 색인이 이런 형식이면 그 구현의 자체 확인 수단(저장된 단어를 묻는 명령)을 배포처가 따로 씁니다. 알림 영역에서 앱이 꺼졌는지는 사람이 확인합니다. 어느 실행 파일이 DB를 썼는지는 7절과 같이 확인하지 못합니다.
