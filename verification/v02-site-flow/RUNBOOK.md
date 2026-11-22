@@ -74,3 +74,30 @@ C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요
 - **어느 실행 파일이 정본 DB를 썼는지 실행기는 알 수 없습니다.** 설치본, `dist\app`, 원본 실행이 모두 같은 데이터 폴더를 쓰고, 빌드 종류는 DB에 남지 않습니다. 기록의 `windows-installer`는 사람이 설치된 exe로만 앱을 켰다는 관찰(`launched-installed`)에 기댑니다. 제품 이름(`productName`)도 설정에서 오므로 실행기는 그 이름이 이 제품의 것인지 확인하지 못합니다.
 - 실행 중에 앱이 내보낸 연결은 보지 않습니다(S08, R02-S2).
 - 품질(정확도)의 합격선은 없습니다(R05). 실제 업무 자료의 품질은 S15입니다.
+
+## 8. 삭제 시나리오: 실제 수집기의 삭제·권한 상실과 파일 소거 (S22, I04-R19)
+
+> **상태: 작성만 됨 — 실행된 적 없음.** 이 저장소에는 실제 수집기가 없고 Windows에서 돌려 본 적도 없습니다. 사외에서는 거부 경로와 카나리 찾기·판정·기록 형식만 합성 자료로 단위 시험했습니다. 그 통과는 배포처 결과가 아닙니다. 스펙: [I04 spec](../../docs/specs/2026-11-21-I04-invalidation.md) I04-R19, 배포처 항목: [site-setup.md S22](../../docs/site-setup.md).
+
+**무엇을 증명하나.** 합성 원본 셋을 실제 수집기로 가져온 뒤, 하나는 출처에서 삭제하고 하나는 권한을 잃게 만들면, ① 그 두 원본이 읽기 경로에서 바로 사라지고 ② 엔진·벡터 색인 등 투영의 제거 작업이 끝나며(끝나지 않았거나 포기한 것이 있으면 앱이 투영을 강제로 다시 만든 뒤) ③ 데이터 디렉터리의 **어느 파일에도** 그 두 원본의 글이 남지 않습니다. 남겨 둔 셋째 원본은 대조군입니다: 그 글이 찾아지지 않으면 찾기가 아무것도 못 보는 것이므로 판정이 `INCONCLUSIVE`입니다.
+
+**용어.** *카나리*: 합성 원본의 본문에 넣는 임의의 영문 소문자 단어(셋이 서로 다른 글자로 시작하게 만듭니다). *출처 삭제*: 원 시스템에서 그 항목이 지워졌다고 수집기가 알리는 사건(`source-deleted`). *권한 상실*: 사용자가 그 항목을 더는 볼 수 없다고 수집기가 알리는 사건(`access-revoked`). *투영*: 정본에서 만들어 다시 만들 수 있는 색인(키워드, 엔진, 벡터).
+
+**준비.** 3절의 준비와 같되, 설정은 `delete-config.example.json`을 `v02-result\delete-config.json`으로 복사해 채웁니다(`productName`, `installedExe`, 쓸 수집기 종류 `collector.kind`: `site-mail`·`site-messenger`·`site-wiki`, 엔진·벡터 색인이 데이터 폴더 밖에 파일을 둔다면 그 절대 경로를 `extraScanDirs`에). 이 실행기는 Provider를 묻지 않습니다. 데이터 폴더가 **비어 있어야** 합니다(옛 흔적이 이번 결과로 읽히지 않게).
+
+| 순서 | 할 일 | 확인 |
+|---|---|---|
+| 1 | `python verification\v02-site-flow\run.py delete-scenario preflight --config v02-result\delete-config.json` | `preflight ok`. 설치본이 아니거나 Windows가 아니면 `배포처 후속`으로 시작하는 알림과 종료 값 3 |
+| 2 | `python verification\v02-site-flow\run.py delete-scenario prepare --config v02-result\delete-config.json --out v02-result` | 역할(`deleted`, `revoked`, `kept`)별 카나리 단어 셋이 출력되고 `delete-scenario-state.json`이 생김. 정본 DB가 이미 있으면 종료 값 4 |
+| 3 | 수집기의 **시험 시스템**에서 합성 항목 셋을 만들고 각 본문에 카나리 하나씩 넣습니다. 앱은 **설치된 exe로만** 켭니다. 수집기를 동기화해 셋 모두 가져오고 추출이 끝날 때까지 기다립니다 | 앱에서 셋 모두 보임 → `launched-installed` |
+| 4 | 시험 시스템에서 `deleted` 항목을 지우고 동기화합니다 | 그 항목이 Sources·검색·근거에서 바로 사라짐 → `source-deleted-event` |
+| 5 | 시험 시스템에서 `revoked` 항목의 열람 권한을 뺍니다(항목은 남기고 시험 계정만 못 보게). 동기화합니다 | 그 항목이 같은 화면들에서 바로 사라짐 → `access-revoked-event` |
+| 6 | 두 원본의 글이 어느 읽기 화면에도 없는지 봅니다(`kept` 항목은 그대로) | → `reads-gone` |
+| 7 | 활동 화면(또는 상태)에서 투영 제거 작업이 모두 끝났는지, 끝나지 않은 것이 있으면 투영이 다시 만들어졌는지 봅니다. 그다음 **앱을 완전히 닫습니다**(알림 영역 포함) | → `projections-clean` |
+| 8 | `python verification\v02-site-flow\run.py delete-scenario record --config v02-result\delete-config.json --out v02-result --observed launched-installed --observed source-deleted-event --observed access-revoked-event --observed reads-gone --observed projections-clean` (확인한 것만 적습니다) | `I04-C3:delete-scenario PASS`(종료 값 0). 지운 수가 다르거나 카나리가 남았으면 `FAIL`, 대조군을 못 찾았거나 관찰이 빠지면 `INCONCLUSIVE`(종료 값 1) |
+
+**판정.** `PASS`는 다음을 모두 만족할 때만입니다: 정본의 무효화 기록에 `source-deleted` 1건과 `access-revoked` 1건(그 밖의 삭제 사건 없음), 지운 두 카나리가 데이터 폴더(와 `extraScanDirs`)의 모든 파일에서 0건, 대조군 카나리가 찾아짐, 관찰 다섯 모두. 하나라도 남았으면 그 단어가 어느 종류의 파일에 있는지 배포처 안에서 찾습니다(브라우저 저장소, 엔진 색인, 데이터베이스의 여유 공간 등). 그 파일 이름은 결과에 적히지 않습니다.
+
+**붙이는 것.** `v02-result\result.md`만(허용 목록의 값: 수집기 종류, 앱 버전, 종류별 지운 수, 카나리 발견 수, 대조군 발견 여부, 관찰 단어). `raw\`, `config`, 상태 파일(카나리 단어가 있음)은 붙이지 않습니다. 결과는 이슈 #21에 남깁니다.
+
+**이 절차가 확인하지 못하는 것.** 화면과 투영 작업은 사람의 관찰입니다. 찾기는 데이터 폴더(와 `extraScanDirs`) 안의 파일만 봅니다: OS 백업·볼륨 스냅샷, 지운 파일 조각, Provider 쪽 보관은 보지 않습니다(S11, S05·S08). 알림 영역에서 앱이 꺼졌는지는 사람이 확인합니다. 어느 실행 파일이 DB를 썼는지는 7절과 같이 확인하지 못합니다.

@@ -10,6 +10,8 @@ and this runner checks the preconditions, prepares the synthetic input, then cou
   record      refusal checks; counts the DB like v02-flow.e2e; writes the pasteable result.json/result.md and the
               local raw/run-record.windows-installer.json
   summarize   lists the current run records of a folder, ignoring stale, other-commit and malformed ones
+  delete-scenario preflight|prepare|record   the deletion scenario of I04 (S22, see delete_scenario.py): its own refusal
+              ("배포처 후속", I04-H2 ②) outside the Windows installer; needs no Provider
 
 Exit values: 0 ok/PASS, 1 FAIL or INCONCLUSIVE or a write refusal, 2 config error, 3 `배포처 후속` notice, 4 stale data.
 """
@@ -30,6 +32,7 @@ for _p in (HERE, VERIF):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import delete_scenario  # noqa: E402
 import run_record as rr  # noqa: E402
 from common import results  # noqa: E402
 from common.fingerprint import environment_fingerprint  # noqa: E402
@@ -42,6 +45,8 @@ NOTICE_DOUBLE = ("배포처 후속: S14 test double Provider(또는 설정과 �
                  "실제 Provider(openai-compatible, claude-code, codex)를 설정하고 Windows 설치본에서 다시 실행한다(V02-H2 ①).")
 NOTICE_NOT_INSTALLER = ("배포처 후속: S14 Windows 설치본이 아닌 환경의 실행은 배포처 결과로 기록하지 않는다. "
                         "R04의 설치 파일로 설치한 Windows 11에서 실행한다(V02-H2 ②, 이유: {code}).")
+NOTICE_DELETE_NOT_INSTALLER = ("배포처 후속: S22 Windows 설치본이 아닌 환경의 삭제 시나리오는 배포처 결과로 기록하지 않는다. "
+                               "미구현, 배포처 후속: 실제 수집기가 있는 배포처 포크에서, R04의 설치 파일로 설치한 Windows 11에서 실행한다(I04-H2 ②, 이유: {code}).")
 # the operator attests these; `launched-installed`: every start was the installed exe (the DB does not say which
 # binary wrote it, and dist\app or source runs use the same data folder)
 OBSERVATIONS = ("launched-installed", "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept")
@@ -58,12 +63,8 @@ class Refusal(Exception):
         self.notice, self.code = notice, code
 
 
-class StaleData(Exception):
-    """The canonical DB holds data from before this run."""
-
-
-class ConfigError(Exception):
-    pass
+StaleData = delete_scenario.StaleData  # one class for both scenarios
+ConfigError = delete_scenario.ConfigError
 
 
 class RecordInvalid(Exception):
@@ -74,7 +75,7 @@ DB_BUSY_HINT = ("refused: the canonical DB is locked or has an unfinished write.
                 "(also from the tray) and run `record` again.")
 
 
-def load_config(path):
+def load_json_object(path):
     try:
         with open(path, encoding="utf-8-sig") as fh:
             cfg = json.load(fh)
@@ -82,6 +83,11 @@ def load_config(path):
         raise ConfigError("config is not readable JSON ({})".format(type(exc).__name__))
     if not isinstance(cfg, dict):
         raise ConfigError("config must be a JSON object")
+    return cfg
+
+
+def load_config(path):
+    cfg = load_json_object(path)
     provider = cfg.get("provider")
     if not (isinstance(cfg.get("productName"), str) and isinstance(cfg.get("installedExe"), str)
             and isinstance(provider, dict)
@@ -102,10 +108,10 @@ def _norm(path):
     return ntpath.normcase(ntpath.normpath(path.strip().strip('"'))).rstrip("\\")
 
 
-def check_installer(cfg, platform, read_uninstall, is_file, in_git_tree):
+def check_installer(cfg, platform, read_uninstall, is_file, in_git_tree, notice=NOTICE_NOT_INSTALLER):
     """The installed app's version from its uninstall entry, or Refusal ②. Inputs are measured, never overridable."""
     def refuse(code):
-        raise Refusal(NOTICE_NOT_INSTALLER.format(code=code), code)
+        raise Refusal(notice.format(code=code), code)
 
     if platform != "win32":
         refuse("not-windows")
@@ -169,6 +175,15 @@ def in_git_tree(path):
 def gate(cfg):
     check_provider(cfg)
     return check_installer(cfg, sys.platform, read_uninstall_windows, os.path.isfile, in_git_tree)
+
+
+_in_git_tree = in_git_tree
+
+
+def delete_gate(cfg, platform=None, read_uninstall=None, is_file=None, in_git_tree=None):
+    """The installer check of the deletion scenario (I04-H2 ②): the same measured inputs, the S22 notice, no Provider."""
+    return check_installer(cfg, platform or sys.platform, read_uninstall or read_uninstall_windows, is_file or os.path.isfile,
+                           in_git_tree or _in_git_tree, notice=NOTICE_DELETE_NOT_INSTALLER)
 
 
 # ---- prepare / record ------------------------------------------------------------------------------------------------
@@ -307,6 +322,39 @@ def write_results(record, verdict, observed, out_dir, literals):
     return paths
 
 
+# ---- deletion scenario (I04-R19, S22) -------------------------------------------------------------------------------
+
+def run_delete_scenario(args):
+    """Refusal first, before the config is read: outside Windows nothing else is looked at. Raises like the other commands."""
+    if sys.platform != "win32":
+        raise Refusal(NOTICE_DELETE_NOT_INSTALLER.format(code="not-windows"), "not-windows")
+    cfg = delete_scenario.validate_config(load_json_object(args.config))
+    app_version = delete_gate(cfg)
+    if args.action == "preflight":
+        print("preflight ok: installed app {}, collector {}".format(app_version, cfg["collector"]["kind"]))
+        return 0
+    if not args.out:
+        raise ConfigError("--out is required for {}".format(args.action))
+    db_path = site_db_path()
+    if args.action == "prepare":
+        canaries = delete_scenario.prepare(db_path, args.out)
+        print("wrote {} to --out. Put each word into the text of one synthetic item of the site's test system, "
+              "RUNBOOK.md section 8 (never into a real item):".format(delete_scenario.STATE_FILE))
+        for role in delete_scenario.ROLES:
+            print("  {:8} {}".format(role, canaries[role]))
+        return 0
+    started_at, canaries = delete_scenario.load_state(args.out)
+    counts = delete_scenario.read_delete_counts(db_path)
+    dirs = [ntpath.dirname(db_path)] + cfg.get("extraScanDirs", [])
+    found = delete_scenario.scan_canaries(dirs, canaries)
+    verdict = delete_scenario.judge(counts, found, args.observed)
+    record = delete_scenario.build_record(cfg, app_version, counts, found, verdict, args.observed, started_at,
+                                          commit=_git("rev-parse", "HEAD"))
+    delete_scenario.write_results(record, verdict, args.observed, args.out, args.redact)
+    print("{} {} (paste only result.json/result.md; never raw/)".format(delete_scenario.CHECK_ID, verdict))
+    return 0 if verdict == "PASS" else 1
+
+
 # ---- entry -----------------------------------------------------------------------------------------------------------
 
 def main(argv=None):
@@ -320,6 +368,12 @@ def main(argv=None):
         if name == "record":
             sp.add_argument("--observed", action="append", default=[], choices=OBSERVATIONS)
             sp.add_argument("--redact", action="append", default=[])
+    sp = sub.add_parser("delete-scenario")
+    sp.add_argument("action", choices=("preflight", "prepare", "record"))
+    sp.add_argument("--config", required=True)
+    sp.add_argument("--out")
+    sp.add_argument("--observed", action="append", default=[], choices=delete_scenario.OBSERVATIONS)
+    sp.add_argument("--redact", action="append", default=[])
     sp = sub.add_parser("summarize")
     sp.add_argument("--records", required=True)
     sp.add_argument("--since", required=True)
@@ -350,6 +404,8 @@ def main(argv=None):
         return 0
 
     try:
+        if args.command == "delete-scenario":
+            return run_delete_scenario(args)
         cfg = load_config(args.config)
         app_version = gate(cfg)
         if args.command == "preflight":

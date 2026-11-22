@@ -78,6 +78,7 @@ R02(약관 확인 포함)와 R04는 서로 독립이라 병행할 수 있습니�
 | `r04-windows-installer/run.py`, `sanitize_result.py` | 순서 안내, 결과 2차 마스킹 | 작성만 됨 — 실행된 적 없음 |
 | `r04-windows-installer/scripts/01..08-*.ps1`, `common.ps1` | 설치·측정·점검 PowerShell | 작성만 됨 — 실행된 적 없음, **구문 검사도 못 함** |
 | `v02-site-flow/run.py`, `run_record.py` | V02 배포처 검증 실행기(`preflight`/`prepare`/`record`/`summarize`)와 실행 기록 양식 v1 | 작성만 됨 — 실행된 적 없음 (거부 경로와 기록 양식만 단위 테스트, Windows 분기 미실행) |
+| `v02-site-flow/delete_scenario.py`, `delete-config.example.json` | I04 삭제 시나리오(`run.py delete-scenario preflight`/`prepare`/`record`, S22): 카나리 세 개, 무효화 기록 세기, 데이터 폴더 전체 카나리 찾기 | 작성만 됨 — 실행된 적 없음 (거부 경로·찾기·판정·기록 형식만 합성 자료로 단위 테스트, Windows 분기와 실제 수집기 미실행) |
 | `tests/` | 위 코드의 단위 테스트(가짜 CLI, 가짜 엔진, 가짜 워커) | 사외 기기에서 통과 — 배포처 증거 아님 |
 
 ## 사외 단위 테스트 실행
