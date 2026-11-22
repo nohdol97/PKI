@@ -10,9 +10,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
-import { openCanonicalDb } from "./composition.ts";
+import { openCanonicalDb, productImporter } from "./composition.ts";
 import { createConnectorManager, tryLockInstance, type ConnectorManager } from "./connectors.ts";
 import { importContent, type ImportOutcome } from "./imports.ts";
+import { storePage } from "./page-store.ts";
+import { JSONL_CAPABILITIES, parseJsonl } from "@pki/connector-sdk";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const GOLDEN_DIR = resolve(import.meta.dirname, "../../eval/golden/sources");
@@ -619,5 +621,141 @@ describe("sync.rescan ⑥: the file collector's edited file", () => {
     const result = await sync(await collector(path));
     // the position is the line, through the page envelope as on the API
     expect(result.rejected).toEqual([{ at: "line:2", code: "scope-change-content-mismatch" }]);
+  });
+});
+
+describe('import.legacy-identity: sources the V02 screen route stored (namespace "") are the same sources (T01 handoff 7)', () => {
+  const legacy = (text: string) => productImporter(db)(text);
+  const E1 = line({ external_id: "e1", connector_instance_id: "ci" });
+
+  it("a deleted source does not come back when its line is imported by the API", async () => {
+    await legacy(E1);
+    await legacy(
+      line({
+        external_id: "e1",
+        connector_instance_id: "ci",
+        operation: "delete",
+        content: "",
+        version: 2,
+      }),
+    );
+    expect(count("source_versions")).toBe(0);
+    const result = await imported(E1, "ci");
+    expect(result).toMatchObject({ created: 0, blocked: 1 });
+    expect(count("source_versions")).toBe(0);
+    expect(count("sources")).toBe(1);
+  });
+
+  it("re-importing a V02-stored file through the API keeps the source count and adds no version", async () => {
+    await legacy(E1);
+    const result = await imported(E1, "ci");
+    expect(result).toMatchObject({ created: 0, unchanged: 1 });
+    expect(db.all("SELECT namespace FROM sources")).toEqual([{ namespace: "" }]);
+    expect(count("source_versions")).toBe(1);
+    // a newer revision is a new version of the same source, in place
+    expect(
+      await imported(
+        line({ external_id: "e1", connector_instance_id: "ci", version: 2, content: "v2" }),
+        "ci",
+      ),
+    ).toMatchObject({ created: 1 });
+    expect(count("sources")).toBe(1);
+  });
+
+  it("a source that already exists under the line's namespace is the one judged, though a legacy twin exists", async () => {
+    await imported(E1, "ci"); // (ci, "ci")
+    await legacy(E1); // (ci, "") twin from before this change
+    expect(await imported(E1, "ci")).toMatchObject({ unchanged: 1, created: 0 });
+    expect(
+      await imported(
+        line({ external_id: "e1", connector_instance_id: "ci", version: 2, content: "v2" }),
+        "ci",
+      ),
+    ).toMatchObject({ created: 1 });
+    expect(
+      db.all(
+        "SELECT s.namespace, count(*) AS n FROM sources s JOIN source_versions v ON v.source_id = s.id GROUP BY s.namespace ORDER BY s.namespace",
+      ),
+    ).toEqual([
+      { namespace: "", n: 1 },
+      { namespace: "ci", n: 2 },
+    ]);
+  });
+
+  it("a source never stored under the legacy identity keeps the line's namespace", async () => {
+    await imported(E1, "ci");
+    expect(db.all("SELECT namespace FROM sources")).toEqual([{ namespace: "ci" }]);
+  });
+});
+
+describe("import.hardening (review A2, A3, W2)", () => {
+  const nested = (depth: number) =>
+    JSON.parse(`${'{"a":'.repeat(depth)}1${"}".repeat(depth)}`) as Record<string, unknown>;
+
+  it("A2: a deeply nested metadata line is refused as schema and the other lines are stored", async () => {
+    const result = await imported(
+      [
+        line({ external_id: "ok" }),
+        line({ external_id: "deep", metadata: nested(1000) }),
+        line({ external_id: "ok2" }),
+      ].join("\n"),
+    );
+    expect(result.rejected).toEqual([{ at: "line:2", code: "schema" }]);
+    expect(result.created).toBe(2);
+  });
+
+  it("A2: the file collector's cursor passes the deep line", async () => {
+    const path = fileOf(
+      [line({ external_id: "ok" }), line({ external_id: "deep", metadata: nested(1000) })].join(
+        "\n",
+      ),
+    );
+    const m = await collector(path);
+    const first = await sync(m);
+    expect(first).toMatchObject({ created: 1 });
+    expect(first.stopped).toBeUndefined();
+    expect(first.rejected).toEqual([{ at: "line:2", code: "schema" }]);
+    expect(readCursor(db, "file")).not.toBeNull();
+    expect(await sync(m)).toMatchObject({ received: 0 });
+  });
+
+  it("A3: an id of a configured connector of another kind is refused, and stays unbound", async () => {
+    const reserved = { list: () => [{ id: "site-x", kind: "site-mail", state: "ready" as const }] };
+    expect(await importContent(db, "site-x", "", { connectors: reserved })).toEqual({
+      error: "bad-request",
+    });
+    expect(db.all("SELECT id FROM connector_instances WHERE id = 'site-x'")).toEqual([]);
+    expect(await importContent(db, "other-id", line(), { connectors: reserved })).toMatchObject({
+      created: 1,
+    });
+  });
+
+  it("W2: a scope change that reaches the store without its note is refused as schema, not stored unchecked", async () => {
+    await imported(line({ external_id: "a" }));
+    const { lines } = parseJsonl(
+      line({
+        external_id: "a",
+        operation: "revoke",
+        content: "other",
+        version: 2,
+        access_scope: ["user:writer"],
+      }),
+    );
+    const change = lines[0]?.change as object;
+    const copy = JSON.parse(JSON.stringify(change)); // a copied object has lost the note
+    const result = storePage(
+      {
+        db,
+        instanceId: "inst",
+        kind: JSONL_IMPORT_KIND,
+        capabilities: JSONL_CAPABILITIES,
+        options: {},
+      },
+      { changes: [copy], rejected: [], nextCursor: null, endsRescan: false },
+    );
+    expect(result).toMatchObject({ rejected: [{ at: "change:0", code: "schema" }] });
+    expect(db.all("SELECT access_scope FROM sources")).toEqual([
+      { access_scope: JSON.stringify(["group:team", "user:writer"]) },
+    ]);
   });
 });

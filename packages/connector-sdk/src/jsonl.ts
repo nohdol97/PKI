@@ -34,6 +34,9 @@ export const JSONL_CAPABILITIES: ConnectorCapabilities = {
 /** Provisional (I01-R24): the most a file or a request body may hold. */
 export const MAX_JSONL_BYTES = 10 * 1024 * 1024;
 
+/** Provisional: the deepest nesting a line may have; storage's JSON checks and `stableJson` recurse. */
+export const MAX_JSONL_DEPTH = 64;
+
 /** Provisional: the longest line parsed, in UTF-16 units; a longer one is refused as `schema`. */
 export const MAX_JSONL_LINE_CHARS = 1024 * 1024;
 
@@ -157,6 +160,13 @@ const sha256 = (content: string) =>
 const carriesScope = (operation: ImportRecord["operation"]) =>
   operation === "upsert" || operation === "revoke";
 
+/** Whether `value` nests deeper than `limit`; it stops at the limit, so it never recurses deeper. */
+function deeperThan(value: unknown, limit: number): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  if (limit <= 0) return true;
+  return Object.values(value).some((child) => deeperThan(child, limit - 1));
+}
+
 function checkLine(
   text: string,
   line: number,
@@ -169,6 +179,7 @@ function checkLine(
   } catch {
     return { line, code: "invalid-json" };
   }
+  if (deeperThan(value, MAX_JSONL_DEPTH)) return { line, code: "schema" };
   const parsed = ImportRecordSchema.safeParse(value);
   if (!parsed.success) {
     // Only a field of the schema is named: an unknown key is text from the file.

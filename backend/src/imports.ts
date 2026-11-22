@@ -9,13 +9,16 @@
 import { JSONL_CAPABILITIES, JSONL_IMPORT_KIND, parseJsonl } from "@pki/connector-sdk";
 import type { ErrorResponse, SyncResponse } from "@pki/contracts";
 import { readConnectorKind, registerConnectorInstance, type SqlDriver } from "@pki/storage";
-import { tryLockInstance } from "./connectors.ts";
+import { tryLockInstance, type ConnectorManager } from "./connectors.ts";
 import { addPage, emptyResult, storePage, type PageOptions } from "./page-store.ts";
 
 export type ImportOptions = Pick<
   PageOptions,
   "runner" | "projections" | "clock" | "entries" | "onError"
->;
+> & {
+  /** The configured Connector instances: an id of one of another kind is not this path's to bind. */
+  connectors?: Pick<ConnectorManager, "list">;
+};
 
 /** What the route answers: the sync-shaped result, or the error code and nothing else. */
 export type ImportOutcome =
@@ -34,6 +37,11 @@ export async function importContent(
   // nothing awaits between this check and the lock, so no sync can bind it meanwhile
   const kind = readConnectorKind(db, instanceId);
   if (kind !== undefined && kind !== JSONL_IMPORT_KIND) return { error: "bad-request" };
+  // a configured Connector that never synced is not bound yet: its id is still its own
+  const { connectors, ...pageOptions } = options;
+  if (connectors?.list().some((c) => c.id === instanceId && c.kind !== JSONL_IMPORT_KIND)) {
+    return { error: "bad-request" };
+  }
   const release = tryLockInstance(db, instanceId);
   if (!release) return { error: "instance-busy" };
   try {
@@ -45,7 +53,7 @@ export async function importContent(
         instanceId,
         kind: JSONL_IMPORT_KIND,
         capabilities: JSONL_CAPABILITIES,
-        options,
+        options: pageOptions,
       },
       {
         changes: lines.map((l) => l.change),

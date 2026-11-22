@@ -160,7 +160,13 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     secrets: options.secrets,
     calls,
     importer: productImporter(db, { runner, projections, clock, entries }),
-    instanceImporter: productInstanceImporter(db, { runner, projections, clock, entries }),
+    instanceImporter: productInstanceImporter(db, {
+      runner,
+      projections,
+      clock,
+      entries,
+      connectors,
+    }),
     entries,
     registry,
     // the held jobs were put back in the transaction that changed the condition (R16 ①)

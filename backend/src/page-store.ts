@@ -243,10 +243,18 @@ export function storePage(
     pageCreated = canonicalTransaction(db, (tx) => {
       let created = 0;
       for (const { i, change, seen } of judged) {
+        if (scopeClaimed && change.kind === "scope-change" && !seen) {
+          // an import's scope change that lost its note cannot be checked: refused, never stored unchecked
+          rejected.push({ at: place(i), code: "schema" });
+          continue;
+        }
+        const effective = scopeClaimed ? withLegacyIdentity(tx, instanceId, change) : change;
         const outcome =
-          seen && change.kind === "scope-change" && contentMismatch(tx, instanceId, change, seen)
+          seen &&
+          effective.kind === "scope-change" &&
+          contentMismatch(tx, instanceId, effective, seen)
             ? "content-mismatch"
-            : storeChange(tx, instanceId, change, notices, clock, entries, scopeClaimed);
+            : storeChange(tx, instanceId, effective, notices, clock, entries, scopeClaimed);
         if (outcome === "blocked") {
           counts.blocked++;
           refused.push([change, "tombstoned"]);
@@ -309,6 +317,24 @@ export function addPage(result: SyncResult, page: PageResult): void {
   for (const entry of page.rejected) {
     if (result.rejected.length < REJECTED_LIST_LIMIT) result.rejected.push(entry);
   }
+}
+
+/**
+ * The V02 screen route stored imported sources in namespace "" (one product instance per
+ * `connector_instance_id`). A source or a tombstone under that identity, with the same
+ * instance and external id, is the same source as the new path's (namespace = the line's
+ * `connector_instance_id`): the change is judged against it, so a deleted source stays
+ * fenced and a stored one is updated in place, not duplicated. No data is moved.
+ */
+function withLegacyIdentity(tx: CanonicalTx, instanceId: string, change: Change): Change {
+  const namespace = change.kind === "upsert" ? change.record.namespace : change.namespace;
+  const externalId = change.kind === "upsert" ? change.record.externalId : change.externalId;
+  if (namespace === "") return change;
+  if (findSourceId(tx, instanceId, namespace, externalId) !== undefined) return change;
+  if (findSourceId(tx, instanceId, "", externalId) === undefined) return change;
+  return change.kind === "upsert"
+    ? { ...change, record: { ...change.record, namespace: "" } }
+    : { ...change, namespace: "" };
 }
 
 /**

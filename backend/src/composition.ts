@@ -66,6 +66,7 @@ import {
   EXTRACT_JOB_KIND,
   type ConnectorFactory,
   type ConnectorInstanceConfig,
+  type ConnectorManager,
   type SyncOptions,
 } from "./connectors.ts";
 import type { Clock } from "./clock.ts";
@@ -438,6 +439,7 @@ export function productInstanceImporter(
   db: SqlDriver,
   options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> & {
     logger?: Logger;
+    connectors?: Pick<ConnectorManager, "list">;
   } = {},
 ): InstanceImporter {
   const { logger = log, ...sync } = options;
