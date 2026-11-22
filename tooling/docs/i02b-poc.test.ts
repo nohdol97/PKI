@@ -74,6 +74,15 @@ describe("docs.poc-record: the I02B-T01 record covers every I02B-R50 row", () =>
     });
   }
 
+  it("item 2 records the verdicts of the changed memory gauge as well as the first one", () => {
+    // the first gauge (resident memory) failed and was replaced; both outcomes stay on record
+    const section = found.get(2) ?? "";
+    const verdicts = [...section.matchAll(/\*\*판정[^*\n]*\*\*:\s*`([^`]*)`/g)].map((m) => m[1]);
+    expect(verdicts.length).toBeGreaterThanOrEqual(6);
+    expect(verdicts).toContain("실패");
+    expect(section).toMatch(/external_memory/);
+  });
+
   it("a verdict resting on reading code alone is not allowed to stay a pass", () => {
     // the review turns such a verdict into 판정 불가 (I02B-C46); the record must not say it as its basis
     expect(recordText).not.toMatch(/코드를 읽어 보니/);

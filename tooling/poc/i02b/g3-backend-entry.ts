@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { normalizeDocument } from "../../../packages/document-normalize/src/index.ts";
+import { detection, readWhileBusy } from "./g2b-gauge.ts";
 import { g1Cases } from "./g1-terminate.ts";
 
 interface ParentPort {
@@ -111,6 +112,10 @@ async function run(data: { fixturesDir: string; pdfInflated: number }) {
   log(
     `mem-buffer in utility process: worker held ${held} MiB; RSS growth at stop ${(grownEnd / MiB).toFixed(0)} MiB; RSS watchdog (1536 MiB) fired: ${rssFired}; external_memory gauge over 1536 MiB: ${extFired}`,
   );
+
+  // 4. the alternative gauge inside Electron (G2 follow-up)
+  await readWhileBusy(workerFile, 20, log);
+  await detection(workerFile, 20, log);
 
   parent.postMessage({ type: "done" });
 }
