@@ -485,6 +485,7 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
       kind: "extract",
       sourceId: version?.source_id as number,
       fenceVersion: version?.version as number,
+      at: new Date("2026-11-21T00:00:00.000Z"), // due at the first claim below (I03-T03)
     });
     const claim = (now: Date): StoredJob => {
       const job = leaseNextJob(db, { kinds: ["extract"], now, leaseMs: 1000 });

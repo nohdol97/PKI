@@ -16,7 +16,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
-import { createJobRunner, type JobHandler, type JobResult } from "./job-runner.ts";
+import {
+  createJobRunner,
+  DEFAULT_HEARTBEAT_MS,
+  DEFAULT_LEASE_MS,
+  testRunnerSettings,
+  type JobHandler,
+  type JobResult,
+} from "./job-runner.ts";
 
 let dir: string;
 let db: SqlDriver;
@@ -62,6 +69,7 @@ function imported(externalId = `s${++seq}`, body = "b1"): StoredJob {
       kind: "extract",
       sourceId: row.source_id as number,
       fenceVersion: row.version as number,
+      at: now(), // due on the injected clock: a claim honours the run-at time (I03-T03)
     });
     if (!r.registered) throw new Error("expected a new job");
     return r.job;
@@ -87,7 +95,7 @@ const runner = (handler: JobHandler, on = db, onError?: (e: unknown) => void) =>
     db: on,
     handlers: { extract: handler },
     now,
-    leaseMs: LEASE,
+    testBuild: { leaseMs: LEASE },
     ...(onError && { onError }),
   });
 
@@ -162,7 +170,10 @@ describe("job runner: restart (V02-R4, R16)", () => {
 
     clock = new Date(T0.getTime() + LEASE);
     expect(await restarted.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
-    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ id: job.id }));
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ id: job.id }),
+      expect.anything(),
+    );
     expect(written(after, "a")).toBe(true);
   });
 
@@ -300,7 +311,7 @@ describe("job runner: start and stop", () => {
       db,
       handlers: { extract: handler },
       now,
-      leaseMs: LEASE,
+      testBuild: { leaseMs: LEASE },
       pollMs: 1000,
     });
     const first = imported();
@@ -431,5 +442,162 @@ describe("job runner: round 2 review (V02-T03)", () => {
     })).runOnce();
     await expect(run).rejects.toMatchObject({ code: "SQLITE_LOCKED" });
     expect(readJob(db, job.id)).toMatchObject({ status: "running", reason: null });
+  });
+});
+
+describe("lease.token (I03-R4..R6): two runs contend for one job", () => {
+  // The sequence of "두 실행이 한 작업을 다투는 경우": A claims and stalls past its
+  // lease, B reclaims, claims and writes; A's heartbeat then fails, so A's signal is
+  // cut and its late result is never written. Fake clock, fake interval timers.
+  it("fails A's heartbeat and result write once B took the job: one effect", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const job = imported("a");
+    const gate = deferred<JobResult>();
+    let signal: AbortSignal | undefined;
+    const aWrite = vi.fn(marked(db, "a"));
+    const a = runner((_job, context) => {
+      signal = context.signal;
+      return gate.promise;
+    });
+    const aRun = a.runOnce();
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    const aToken = readJob(db, job.id)?.leaseToken as number;
+
+    clock = new Date(T0.getTime() + LEASE); // A stalled (sleep): its lease ran out
+    const other = reopen();
+    const b = runner(async () => ({ status: "succeeded", write: marked(other, "b") }), other);
+    expect(await b.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
+    expect(readJob(db, job.id)).toMatchObject({ status: "succeeded", leaseToken: aToken + 2 });
+
+    expect(signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(LEASE / 4); // A's heartbeat: running under its token? no
+    expect(signal?.aborted).toBe(true);
+
+    gate.resolve({ status: "succeeded", write: aWrite });
+    expect(await aRun).toEqual({ jobId: job.id, status: "not-leased" });
+    expect(aWrite).not.toHaveBeenCalled();
+    expect([written(db, "a"), written(db, "b")]).toEqual([false, true]);
+  });
+
+  it("keeps a long job's lease by heartbeat: a second runner reclaims nothing", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const job = imported("a");
+    const gate = deferred<JobResult>();
+    const a = runner(() => gate.promise);
+    const aRun = a.runOnce();
+    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("running"));
+    const b = runner(async () => ({ status: "succeeded", write: () => {} }), reopen());
+    for (let i = 1; i <= 12; i++) {
+      clock = new Date(T0.getTime() + (i * LEASE) / 4);
+      await vi.advanceTimersByTimeAsync(LEASE / 4);
+      expect(await b.runOnce()).toBeUndefined();
+    }
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "running",
+      leaseUntil: T0.getTime() + 4 * LEASE,
+    });
+    gate.resolve({ status: "succeeded", write: marked(db, "a") });
+    expect(await aRun).toEqual({ jobId: job.id, status: "succeeded" });
+  });
+
+  it("lease.heartbeat-after-expiry: the same runner awake after sleep keeps its job and writes", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const job = imported("a");
+    const gate = deferred<JobResult>();
+    let signal: AbortSignal | undefined;
+    const a = runner((_job, context) => {
+      signal = context.signal;
+      return gate.promise;
+    });
+    const aRun = a.runOnce();
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    clock = new Date(T0.getTime() + 3 * LEASE); // asleep three leases, no one took it
+    await vi.advanceTimersByTimeAsync(LEASE / 4);
+    expect(signal?.aborted).toBe(false);
+    expect(readJob(db, job.id)?.leaseUntil).toBe(T0.getTime() + 4 * LEASE);
+    gate.resolve({ status: "succeeded", write: marked(db, "a") });
+    expect(await aRun).toEqual({ jobId: job.id, status: "succeeded" });
+    expect(written(db, "a")).toBe(true);
+  });
+
+  it("stops heartbeating once the job closed", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    imported("a");
+    await runner(async () => ({ status: "succeeded", write: () => {} })).runOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("names a new runner ID per runner as the lease owner", async () => {
+    const first = imported("a");
+    const second = imported("b");
+    const owners: (string | null)[] = [];
+    const handler: JobHandler = async (job) => {
+      owners.push(readJob(db, job.id)?.leaseOwner ?? null);
+      return { status: "succeeded", write: () => {} };
+    };
+    await runner(handler).runOnce();
+    await runner(handler).runOnce();
+    expect([first.id, second.id].map((id) => readJob(db, id)?.status)).toEqual([
+      "succeeded",
+      "succeeded",
+    ]);
+    expect(owners[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(owners[1]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(owners[0]).not.toBe(owners[1]);
+  });
+});
+
+describe("lease.test-build (I03-R24): lease length and test kinds in a test build only", () => {
+  // honoured in a test build only: createJobRunner enters testRunnerSettings when
+  // the build kind is "test", which the bundler folds away from any other build
+  // (a production bundle without it: apps/desktop/build/bundle.test.ts)
+  const handlers = () => ({
+    "test-effect": async () => ({ status: "held" as const, reason: "x" }),
+  });
+
+  it("defaults to a two-minute lease and a heartbeat at a quarter of it", () => {
+    expect([DEFAULT_LEASE_MS, DEFAULT_HEARTBEAT_MS]).toEqual([120_000, 30_000]);
+    expect(testRunnerSettings(undefined)).toEqual({
+      leaseMs: DEFAULT_LEASE_MS,
+      heartbeatMs: DEFAULT_HEARTBEAT_MS,
+    });
+  });
+
+  it("takes the test options, the heartbeat at a quarter of the lease", () => {
+    expect(testRunnerSettings({ leaseMs: 1000, pollMs: 50, handlers })).toEqual({
+      leaseMs: 1000,
+      heartbeatMs: 250,
+      pollMs: 50,
+      handlers,
+    });
+  });
+
+  it("refuses a lease that is not a positive whole number of milliseconds", () => {
+    for (const leaseMs of [0, -1, 1.5, Number.NaN]) {
+      expect(() => testRunnerSettings({ leaseMs })).toThrow(RangeError);
+    }
+  });
+
+  it("this runner (a test build) claims for the test lease and runs the test kinds' handlers", async () => {
+    const { job } = registerJob(db, { kind: "test-effect", target: "t", at: clock }) as {
+      job: StoredJob;
+    };
+    let until: number | null = null;
+    const r = createJobRunner({
+      db,
+      handlers: {},
+      now,
+      testBuild: {
+        leaseMs: 1000,
+        handlers: (on) => ({
+          "test-effect": async (claimed) => {
+            until = readJob(on, claimed.id)?.leaseUntil ?? null;
+            return { status: "succeeded", write: () => {} };
+          },
+        }),
+      },
+    });
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
+    expect(until).toBe(T0.getTime() + 1000);
   });
 });

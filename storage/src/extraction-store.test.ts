@@ -106,7 +106,8 @@ describe("linking reads", () => {
 
 function leasedJob(externalId: string) {
   const { sourceId, version } = stored(externalId, `body of ${externalId}`);
-  registerJob(db, { kind: "extract", sourceId, fenceVersion: version });
+  // due at the claim's time: a claim honours the run-at time (I03-T03)
+  registerJob(db, { kind: "extract", sourceId, fenceVersion: version, at: new Date(0) });
   const job = leaseNextJob(db, { kinds: ["extract"], now: new Date(0), leaseMs: 1000 });
   if (!job) throw new Error("expected a job");
   return job;

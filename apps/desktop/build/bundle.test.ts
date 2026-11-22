@@ -88,6 +88,31 @@ describe("folding a production bundle", () => {
   });
 });
 
+describe("folding a production bundle: the job runner's test options (I03-R24)", () => {
+  /** The backend as the shell entry starts it: bootBackend, the runner inside. */
+  function bootEntry(): string {
+    const entry = join(out, `boot-entry-${++seq}.ts`);
+    const boot = join(REPO_ROOT, "backend/src/boot.ts");
+    writeFileSync(entry, `export { bootBackend } from ${JSON.stringify(boot)};\n`);
+    return entry;
+  }
+  const TEST_JOB_MARKERS = ["testRunnerSettings", "createTestEffectHandler", "test_effects"];
+
+  it("leaves out the test lease and test kinds in a production bundle, keeping the runner", async () => {
+    const { code } = await bundled(bootEntry(), "production");
+    for (const marker of [...TEST_PICK_MARKERS, ...TEST_JOB_MARKERS]) {
+      expect(code, marker).not.toContain(marker);
+    }
+    // live: the runner and its reclaim are there
+    expect(code).toContain("lease-expired");
+  });
+
+  it("keeps the runner's test options in a test bundle", async () => {
+    const { code } = await bundled(bootEntry(), "test");
+    expect(code).toContain("testRunnerSettings");
+  });
+});
+
 describe("build check", () => {
   // named by path, not left to the file-name rule (V02 spec "T10이 넘기는 것" 5, T11 7)
   it.each([
@@ -99,6 +124,8 @@ describe("build check", () => {
     "apps/desktop/e2e/double-main.ts",
     "backend/src/dev.ts",
     "apps/desktop/e2e/launch.ts",
+    "backend/src/test-effect.ts",
+    "backend/src/job-kill.child.ts",
   ])("refuses %s by its path", (path) => {
     expect(forbiddenReason(join(REPO_ROOT, path))).toBe(`${path} is a test-only module`);
   });

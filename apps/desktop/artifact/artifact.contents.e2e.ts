@@ -93,6 +93,9 @@ test("no file the build wrote carries a double, a test switch or the build value
     // the test Connector and the test-build-only seed (T04 ③, V02 T10 5)
     "createFixtureConnector",
     "v02-seed",
+    // the test-build-only job kind (I03-R24)
+    "createTestEffectHandler",
+    "test_effects",
     // doubles of @pki/testkit (T07, T10, T13)
     "installFakeCli",
     "FakeProvider",
