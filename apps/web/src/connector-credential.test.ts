@@ -32,8 +32,8 @@ function harness(rebuild: Answer["rebuild"] = "done") {
     return new Response(JSON.stringify(answer(rebuild)), { status: 200 });
   });
   const bridge = {
-    setSecret: vi.fn(async (..._args: [string, string]) => ({ ok: true }) as unknown),
-    deleteSecret: vi.fn(async (..._args: [string]) => ({ ok: true }) as unknown),
+    setSecret: vi.fn<(name: string, value: string) => Promise<unknown>>(async () => ({ ok: true })),
+    deleteSecret: vi.fn<(name: string) => Promise<unknown>>(async () => ({ ok: true })),
   };
   const api = createApiClient(
     { baseUrl: "http://127.0.0.1:1", token: "t".repeat(43) },
