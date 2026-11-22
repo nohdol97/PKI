@@ -35,6 +35,7 @@ import {
   type JobClosing,
   type SqlDriver,
   type StoredJob,
+  usesVersionFence,
 } from "@pki/storage";
 import { randomUUID } from "node:crypto";
 import { systemClock, type Clock } from "./clock.ts";
@@ -303,6 +304,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     if (
       sourceId !== null &&
       fenceVersion !== null &&
+      usesVersionFence(job.kind) && // a projection job runs after its source is gone (I03-R7)
       !isFenceCurrent(db, { sourceId, fenceVersion })
     ) {
       return close({ status: "superseded" });

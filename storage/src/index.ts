@@ -103,6 +103,17 @@ export {
   type NewJob,
   type StoredJob,
 } from "./jobs.ts";
+export { PROJECTION_REBUILD_KIND, PROJECTION_REMOVE_KIND, usesVersionFence } from "./job-kinds.ts";
+export {
+  closeCoveredRemoves,
+  COVERED_BY_REBUILD,
+  latestCanonicalVersion,
+  markedProjections,
+  recordResultCounts,
+  REMOVE_BLOCKED_AFTER_MS,
+  UNKNOWN_PROJECTION_CODE,
+  type MarkerCheck,
+} from "./projection-jobs.ts";
 export {
   DEFAULT_MAX_CONCURRENT,
   JOB_GROUP_CAPS,

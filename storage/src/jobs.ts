@@ -11,6 +11,7 @@
 import { commitDerived } from "./commit-derived.ts";
 import type { DerivedItem } from "./derivatives.ts";
 import { assertMaxConcurrent, pickDueJob } from "./job-concurrency.ts";
+import { FENCE_FREE_KINDS, usesVersionFence } from "./job-kinds.ts";
 import { readChangeSeq } from "./revisions.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
 
@@ -467,8 +468,9 @@ export function heartbeatJob(
  * attempt the claim raised is given back (I03-R11).
  */
 export type JobClosing =
-  | { status: "succeeded"; write: () => void }
-  | { status: "succeeded"; items: readonly DerivedItem[] }
+  /** `reason`: a code stored with the success, e.g. `adapter-unavailable` for a skip (I03-R7). */
+  | { status: "succeeded"; write: () => void; reason?: string }
+  | { status: "succeeded"; items: readonly DerivedItem[]; reason?: string }
   /** `policyFingerprint`: the policy a held job was judged under (I03-R16 ③); absent is stored as empty. */
   | { status: "held"; reason: string; policyFingerprint?: string }
   | { status: "dead_letter"; reason: string }
@@ -512,9 +514,11 @@ function checkedWrite(
     return to;
   };
   if (job.cancelRequested) return close("cancelled");
-  const { sourceId, fenceVersion } = job; // a sourceless kind has no fence
+  const { sourceId, fenceVersion } = job; // a sourceless kind has no fence, nor a projection kind (I03-R7)
   const source =
-    sourceId === null || fenceVersion === null ? null : { sourceId, version: fenceVersion };
+    sourceId === null || fenceVersion === null || !usesVersionFence(job.kind)
+      ? null
+      : { sourceId, version: fenceVersion };
   const items: readonly DerivedItem[] =
     typeof result === "function"
       ? [
@@ -701,7 +705,7 @@ export function supersedeOpenJobs(db: SqlDriver, sourceId: number, at: Date = ne
   return db.run(
     `UPDATE jobs SET ${set}, reason = 'source-closed', lease_token = lease_token + 1
       WHERE source_id = ? AND status IN ${OPEN_SQL}
-        AND kind NOT IN ('projection-remove', 'projection-rebuild')`,
+        AND kind NOT IN (${FENCE_FREE_KINDS.map((k) => `'${k}'`).join(", ")})`,
     [...params, sourceId],
   ).changes;
 }
