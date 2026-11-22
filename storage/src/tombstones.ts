@@ -146,3 +146,23 @@ export function readTombstone(db: SqlDriver, sourceId: number): Tombstone | unde
   const state = readTombstoneState(db, sourceId);
   return state && { sourceId, version: state.coversVersion, at: state.at, reason: state.reason };
 }
+
+/** The sources an unlifted tombstone blocks, by identity, oldest first: what the user can lift. */
+export function listLiftableTombstones(db: SqlDriver): (TombstoneState & {
+  connectorInstanceId: string;
+  namespace: string;
+  externalId: string;
+})[] {
+  return db
+    .all(
+      `SELECT s.id, s.connector_instance_id, s.namespace, s.external_id
+         FROM tombstones t JOIN sources s ON s.id = t.source_id
+        WHERE t.lifted_at IS NULL ORDER BY t.at, s.id`,
+    )
+    .map((row) => ({
+      ...(readTombstoneState(db, row.id as number) as TombstoneState),
+      connectorInstanceId: row.connector_instance_id as string,
+      namespace: row.namespace as string,
+      externalId: row.external_id as string,
+    }));
+}

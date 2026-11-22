@@ -42,10 +42,12 @@ import {
   type ExecutionInput,
   type UserActionIssuer,
 } from "@pki/providers";
-import { type Projections, userDeleteWithNotice } from "@pki/knowledge-engine";
+import { liftTombstone, type Projections, userDeleteWithNotice } from "@pki/knowledge-engine";
 import {
   databaseEncryption,
+  canonicalTransaction,
   findSourceId,
+  listLiftableTombstones,
   findSources,
   listActiveInsights,
   listInvalidations,
@@ -518,6 +520,24 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       if (outcome === "unchanged") return { outcome: "already-deleted" };
       if (notice) void options.projections?.notify([notice]);
       return { outcome: "deleted" };
+    },
+    // I04-R9: the only caller of liftTombstone; Connector and source events never lift
+    tombstones: async () => ({
+      tombstones: listLiftableTombstones(options.db).map((t) => ({
+        connectorId: t.connectorInstanceId,
+        namespace: t.namespace,
+        externalId: t.externalId,
+        reason: t.reason,
+        coversVersion: t.coversVersion,
+        at: t.at,
+      })),
+    }),
+    liftTombstone: async ({ connectorId, namespace, externalId }) => {
+      const sourceId = findSourceId(options.db, connectorId, namespace, externalId);
+      if (sourceId === undefined) return { outcome: "unchanged" };
+      return canonicalTransaction(options.db, (tx) =>
+        liftTombstone(tx, sourceId, new Date().toISOString()),
+      );
     },
     activity: async () => ({ calls: listProviderCalls(options.db) }),
     settings: async () => settings(),

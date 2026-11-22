@@ -141,6 +141,26 @@ export const SourceDeleteResponseSchema = z.object({
 });
 
 /**
+ * The user's way back (I04-R9): sources a tombstone blocks, as the Sources screen
+ * identifies them, and the lift of one. Only the user's request lifts. A lift
+ * deletes and restores nothing: the source can only be received again.
+ * `unchanged`: already lifted, no tombstone, or no such source.
+ */
+const TombstonedSourceSchema = z.object({
+  connectorId: z.string(),
+  namespace: z.string(),
+  externalId: z.string(),
+  reason: z.enum(["user-deleted", "source-deleted", "access-revoked"]),
+  coversVersion: z.int().nonnegative(),
+  at: z.string(),
+});
+export const TombstoneListResponseSchema = z.object({
+  tombstones: z.array(TombstonedSourceSchema),
+});
+export const TombstoneLiftRequestSchema = SourceDeleteRequestSchema;
+export const TombstoneLiftResponseSchema = z.object({ outcome: z.enum(["lifted", "unchanged"]) });
+
+/**
  * One provider call attempt (ADR 0014: no body, prompt, response or secret).
  * `destination` and `policyVersion` are null for an attempt blocked before the
  * egress decision named them; `reason` is the code of a blocked attempt.
@@ -468,6 +488,13 @@ export const routes = {
     path: "/api/sources/delete",
     request: SourceDeleteRequestSchema,
     response: SourceDeleteResponseSchema,
+  },
+  tombstones: { method: "GET", path: "/api/tombstones", response: TombstoneListResponseSchema },
+  liftTombstone: {
+    method: "POST",
+    path: "/api/tombstones/lift",
+    request: TombstoneLiftRequestSchema,
+    response: TombstoneLiftResponseSchema,
   },
   activity: { method: "GET", path: "/api/activity", response: ActivityResponseSchema },
   settings: { method: "GET", path: "/api/settings", response: SettingsResponseSchema },

@@ -92,6 +92,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     searchSources: { query: "등대" },
     // a record syncConnector stored above, not one the evidence seed below relies on
     deleteSource: { connectorId: "fixtures", namespace: "", externalId: "fx-001" },
+    liftTombstone: { connectorId: "fixtures", namespace: "", externalId: "fx-001" },
     grantConsent: {
       providerId: "codex",
       allowedClasses: ["synthetic"],
