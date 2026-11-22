@@ -112,11 +112,20 @@ export interface JobRunnerOptions {
   pollMs?: number;
   /** The test build's lease, poll and test kinds (testRunnerSettings); ignored by any other build. */
   testBuild?: RunnerTestBuild;
+  /** The policy fingerprint a job held by the Broker is stamped with (I03-R16 ③); none: stamped empty. */
+  policyFingerprint?: () => string;
   /** Errors the runner caught (a throwing handler or write, a failing claim). */
   onError?: (error: unknown) => void;
 }
 
 export interface JobRunner {
+  /**
+   * Cuts the signal of a job this runner is running and stops waiting for its
+   * handler, so the cancel the user just requested (the flag is written already)
+   * takes effect now instead of at the next heartbeat (I03-R12). False when this
+   * runner does not hold the job: another process's heartbeat sees the flag.
+   */
+  cancelRunning(jobId: number): boolean;
   /**
    * Claims one job and resolves once it closed, beside the jobs already running;
    * undefined at once when nothing is due or a limit leaves no job to claim.
@@ -160,10 +169,11 @@ export interface RunnerSettings {
 }
 
 /** Why a run stopped waiting for its handler: over its time, or its job is no longer its own. */
-type RunEnd = typeof TIMED_OUT | typeof LOST;
+type RunEnd = typeof TIMED_OUT | typeof LOST | typeof CANCELLED;
 // symbols no handler can hand back: a handler's result is never taken for an ending
 const TIMED_OUT = Symbol("run-timeout");
 const LOST = Symbol("lost");
+const CANCELLED = Symbol("cancelled");
 
 const DEFAULT_SETTINGS: RunnerSettings = {
   leaseMs: DEFAULT_LEASE_MS,
@@ -213,6 +223,8 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
   /** Each fairness key's last turn (I03-R13): memory only, empty after a restart. */
   const lastClaimed = new Map<string, number>();
   let turn = 0;
+  /** The jobs this runner is running, each with what ends its run for a cancel request. */
+  const active = new Map<number, () => void>();
 
   /** Claims one job the limits allow and starts it; undefined when there is none. */
   function claim(): Promise<JobRun> | undefined {
@@ -254,13 +266,17 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
       try {
         // claimed again or closed: stop, and write nothing
         if (!heartbeatJob(db, job, { now: now(), leaseMs })) end(LOST);
+        // a cancel request another process wrote: the close below turns the run into `cancelled`
+        else if (readJob(db, job.id)?.cancelRequested) end(CANCELLED);
       } catch (error) {
         onError(error); // e.g. a locked file: the next heartbeat or the lease decides
       }
     }, heartbeatMs);
+    active.set(job.id, () => end(CANCELLED));
     try {
       return await attempt(job, cut.signal, ended, end);
     } finally {
+      active.delete(job.id);
       clearInterval(beat);
     }
   }
@@ -271,10 +287,15 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     ended: Promise<RunEnd>,
     end: (why: RunEnd) => void,
   ): Promise<JobRun> {
+    // a hold records the policy it was judged under (I03-R16 ③)
+    const stamped = (closing: JobClosing): JobClosing =>
+      closing.status === "held" && options.policyFingerprint
+        ? { ...closing, policyFingerprint: options.policyFingerprint() }
+        : closing;
     const close = (closing: JobClosing): JobRun => ({
       jobId: job.id,
       // a lost lease (failed heartbeat) fails closeJob's own token check: nothing is written
-      status: closeJob(db, job, closing, now()),
+      status: closeJob(db, job, stamped(closing), now()),
     });
     const facts = () => ({ attempts: job.attempts, now: clock.now() });
     // stale already: no call is made for a version that is gone
@@ -318,6 +339,9 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     // the job is no longer this run's: nothing is written (closeJob would refuse it anyway)
     if (result === LOST) return { jobId: job.id, status: closed };
     if (result === TIMED_OUT) return close(failure("run-timeout", facts()));
+    // the cancel request is in the row, so whatever closing this is, closeJob closes the job
+    // cancelled (R6 ②) and writes none of it
+    if (result === CANCELLED) return close(failure("cancelled", facts()));
     // a yield counts as progress only when the job's checkpoint moved during this run
     const progressed = () => readJob(db, job.id)?.checkpoint !== job.checkpoint;
     try {
@@ -377,6 +401,11 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
 
   let timer: ReturnType<typeof setInterval> | undefined;
   return {
+    cancelRunning(jobId) {
+      const cancel = active.get(jobId);
+      cancel?.();
+      return cancel !== undefined;
+    },
     runOnce,
     wake,
     start() {

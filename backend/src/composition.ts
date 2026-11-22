@@ -30,6 +30,7 @@ import {
   type Logger,
   type TestBuildExecution,
   type UserActionIssuer,
+  VERIFIED_CLI_COMBINATIONS,
 } from "@pki/providers";
 import {
   createClaudeCodeProvider,
@@ -41,7 +42,6 @@ import {
 import {
   createExtractHandler,
   createProjections,
-  EXTRACT_HOLD_TOO_LARGE,
   knowledgeCandidates,
   type Projections,
 } from "@pki/knowledge-engine";
@@ -50,9 +50,6 @@ import {
   dataDirectory,
   ensureDataDirectory,
   prepareCanonicalDb,
-  readSetting,
-  requeueHeldJobs,
-  writeSetting,
   type SqlDriver,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
@@ -64,6 +61,7 @@ import {
   type SyncOptions,
 } from "./connectors.ts";
 import type { Clock } from "./clock.ts";
+import { computePolicyFingerprint } from "./held-release.ts";
 import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-runner.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
@@ -203,6 +201,8 @@ export function productCalls(
   issuer: UserActionIssuer;
   providers: readonly LLMProvider[];
   execution: ExecutionGate;
+  /** What a held job is stamped with and a start compares (I03-R16 ③). */
+  policyFingerprint: () => string;
 } {
   const { providers } = options;
   const ledger = createUserActionLedger();
@@ -221,7 +221,18 @@ export function productCalls(
     execution,
     recorder: createCallRecorder(db),
   });
-  return { broker, issuer: ledger.issuer, providers, execution };
+  // the verified list the gate decides with: the test build's own, else the build's
+  const verified =
+    BUILD_KIND === "test" && options.testBuild?.verified !== undefined
+      ? options.testBuild.verified
+      : VERIFIED_CLI_COMBINATIONS;
+  const policyFingerprint = () =>
+    computePolicyFingerprint({
+      policyVersion: egress.policyVersion(),
+      verified,
+      defaultProvider: readDefaultProvider(db),
+    });
+  return { broker, issuer: ledger.issuer, providers, execution, policyFingerprint };
 }
 
 /**
@@ -241,6 +252,8 @@ export function productRunner(
     projections?: Pick<Projections, "isStale">;
     /** The test build's lease, poll and test kinds (job-runner.ts); ignored by any other build. */
     testBuild?: RunnerTestBuild;
+    /** Stamped on a job the Broker held (productCalls). */
+    policyFingerprint?: () => string;
   } = {},
 ): JobRunner {
   const { clock, engine, projections } = options;
@@ -260,44 +273,11 @@ export function productRunner(
     handlers: { [EXTRACT_JOB_KIND]: handler },
     broker,
     ...(clock ? { clock } : {}),
+    ...(options.policyFingerprint ? { policyFingerprint: options.policyFingerprint } : {}),
     // folded away from any other build with the runner's own test branch (V01-T15)
     ...(BUILD_KIND === "test" && options.testBuild ? { testBuild: options.testBuild } : {}),
     onError: (error) => log("job-error", { error: errorClass(error) }),
   });
-}
-
-/** Hold reasons no setting, consent or rule change can lift. */
-export const HELD_KEPT_REASONS: readonly string[] = [EXTRACT_HOLD_TOO_LARGE];
-
-/**
- * Provisional (V02 미해결 질문 7): a condition that blocked held jobs may have
- * changed (the background setting, a consent, the endpoint, the default Provider), so they are queued
- * again in their own rows and the runner woken; the Broker judges them anew.
- */
-export function releaseHeldJobs(db: SqlDriver, runner: Pick<JobRunner, "wake">): number {
-  const released = requeueHeldJobs(db, { keep: HELD_KEPT_REASONS });
-  if (released > 0) void runner.wake();
-  return released;
-}
-
-/** The policy version held jobs were last judged under (a setting row, not user-editable through the API). */
-export const HELD_POLICY_SETTING = "jobs.held-policy-version";
-
-/**
- * At start: the deployment's egress rules are build values, so they change only
- * across a restart. When the policy version differs from the one recorded, held
- * jobs are released once and the new version recorded.
- */
-export function releaseOnPolicyChange(
-  db: SqlDriver,
-  egress: Pick<EgressControls, "policyVersion">,
-  runner: Pick<JobRunner, "wake">,
-): number {
-  const version = egress.policyVersion();
-  if (readSetting(db, HELD_POLICY_SETTING) === version) return 0;
-  const released = releaseHeldJobs(db, runner);
-  writeSetting(db, HELD_POLICY_SETTING, version);
-  return released;
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";

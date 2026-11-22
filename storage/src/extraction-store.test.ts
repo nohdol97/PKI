@@ -11,7 +11,7 @@ import {
   listItemNames,
   readExtractionDrops,
   recordExtractionDrops,
-  requeueHeldJobs,
+  requeueHeldReasons,
 } from "./index.ts";
 import { addEvidence, insertItem, saveFact, saveRelation } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
@@ -132,8 +132,8 @@ describe("extraction drops", () => {
   });
 });
 
-describe("requeueHeldJobs", () => {
-  it("puts held jobs back in the queue in their own rows, except the kept reasons", () => {
+describe("requeueHeldReasons", () => {
+  it("puts held jobs of the named reasons back in the queue in their own rows", () => {
     const blocked = leasedJob("a");
     closeJob(db, blocked, { status: "held", reason: "cli-background-off" });
     const large = leasedJob("b");
@@ -142,7 +142,7 @@ describe("requeueHeldJobs", () => {
     closeJob(db, failed, { status: "dead_letter", reason: "invalid-output" });
     const jobs = db.all("SELECT count(*) AS n FROM jobs")[0]?.n;
 
-    expect(requeueHeldJobs(db, { keep: ["source-too-large"] })).toBe(1);
+    expect(requeueHeldReasons(db, { reasons: ["cli-background-off"] })).toBe(1);
     expect(readJob(db, blocked.id)).toMatchObject({ status: "queued", reason: null });
     expect(readJob(db, large.id)).toMatchObject({ status: "held", reason: "source-too-large" });
     expect(readJob(db, failed.id)).toMatchObject({
@@ -155,6 +155,6 @@ describe("requeueHeldJobs", () => {
     const again = leaseNextJob(db, { kinds: ["extract"], now: new Date(0), leaseMs: 1000 });
     expect(again?.id).toBe(blocked.id);
     expect(again?.leaseToken).toBe(blocked.leaseToken + 1);
-    expect(requeueHeldJobs(db, { keep: [] })).toBe(1); // the large one, when not kept
+    expect(requeueHeldReasons(db, { reasons: ["source-too-large"] })).toBe(1);
   });
 });

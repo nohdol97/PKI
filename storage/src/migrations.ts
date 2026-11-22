@@ -458,8 +458,8 @@ const v10: Migration = (db) =>
 //   sourceless jobs, and one open job per schedule. The schedule table arrives
 //   with I03-T08, so schedule_id carries no foreign key yet.
 // - The setting recording the policy version held jobs were last judged under
-//   (backend composition.ts HELD_POLICY_SETTING) is removed, so the first start
-//   judges the migrated held jobs once (I03-R2: an empty fingerprint is changed).
+//   (`jobs.held-policy-version`, the V02 backend's) is removed; the first start
+//   judges the migrated held jobs once by their empty fingerprint (I03-R2, held-release.ts).
 const OPEN_STATUSES = "('queued', 'running', 'retry', 'held')";
 const NOW_MS = "CAST(round((julianday('now') - 2440587.5) * 86400000) AS INTEGER)";
 const v11: Migration = (db) =>

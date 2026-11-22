@@ -78,7 +78,6 @@ export {
   recordExtractionDrops,
   registerJob,
   releaseRetryJobs,
-  requeueHeldJobs,
   supersedeOpenJobs,
   transitionJob,
   type AttemptLimits,
@@ -98,6 +97,16 @@ export {
   JOB_KIND_GROUPS,
   jobGroup,
 } from "./job-concurrency.ts";
+export {
+  cancelJob,
+  discardJob,
+  heldGroups,
+  requeueHeldOnFingerprint,
+  requeueHeldReasons,
+  retryJob,
+  type CancelResult,
+  type RetryResult,
+} from "./job-actions.ts";
 export {
   addEvidence,
   insertItem,

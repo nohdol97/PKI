@@ -8,7 +8,6 @@
 import { routes, type SecretSource } from "@pki/contracts";
 import { CLI_PROFILES, DEFAULT_PROVIDER_SETTING, openaiKeySecretName } from "@pki/providers";
 import {
-  readSetting,
   registerConnectorInstance,
   registerJob,
   saveSourceRecord,
@@ -31,7 +30,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { bootBackend, closeProviders } from "./boot.ts";
-import { HELD_POLICY_SETTING, openCanonicalDb } from "./composition.ts";
+import { openCanonicalDb } from "./composition.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "t".repeat(43);
@@ -257,7 +256,6 @@ describe("bootBackend", () => {
         secrets: NO_SECRET_STORE,
       });
       const { db } = booted;
-      expect(readSetting(db, HELD_POLICY_SETTING)).toMatch(/^pv-/);
       await vi.waitFor(() =>
         expect(jobsOf(db)).toEqual([
           { status: "held", reason: "destination-unavailable" }, // judged again

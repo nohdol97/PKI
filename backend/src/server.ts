@@ -65,6 +65,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ConnectorManager } from "./connectors.ts";
+import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import type { JsonlImporter } from "./jsonl-import.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -121,8 +122,9 @@ export interface ServerOptions {
   projections?: Pick<Projections, "notify">;
   /**
    * Called after the background setting, a consent, the endpoint or the default
-   * Provider changed, the conditions that hold jobs (composition.ts
-   * releaseHeldJobs); default none.
+   * Provider changed and the held jobs it can lift were put back in the queue, in
+   * the same transaction as the change (held-release.ts); boot wakes the runner.
+   * Default none.
    */
   onRunConditionsChanged?: () => void;
   /** Milliseconds now, for the Provider check's reuse window (tests); default Date.now. */
@@ -463,7 +465,21 @@ async function prepareEmbedding(
 }
 
 function createHandlers(options: ServerOptions, preparations: Set<AbortController>): Handlers {
-  const changed = () => options.onRunConditionsChanged?.();
+  // a condition that holds jobs changes together with the release it allows: one
+  // transaction, so a stop between the two cannot lose the release (I03-R16 ①)
+  const releasing = <T>(
+    event: HeldEvent,
+    change: () => T,
+    applied: (result: T) => boolean = () => true,
+  ): T => {
+    const result = options.db.transaction(() => {
+      const done = change();
+      if (applied(done)) releaseHeldOnEvent(options.db, event);
+      return done;
+    });
+    options.onRunConditionsChanged?.();
+    return result;
+  };
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -546,39 +562,41 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       if ((await secrets.deleteOthers(keep)) !== "done") {
         return { error: "secret-store-unavailable" };
       }
-      writeSetting(options.db, OPENAI_BASE_URL_SETTING, baseUrl);
-      writeSetting(options.db, OPENAI_MODEL_SETTING, openaiCompatible.model);
+      releasing("provider-config", () => {
+        writeSetting(options.db, OPENAI_BASE_URL_SETTING, baseUrl);
+        writeSetting(options.db, OPENAI_MODEL_SETTING, openaiCompatible.model);
+      });
       checks.forget();
-      changed();
       return settings();
     },
     consents: async () => options.egress.overview(),
     grantConsent: async ({ providerId, allowedClasses, destination, policyVersion }) => {
-      const granted = options.egress.grant(providerId, allowedClasses, {
-        destination,
-        policyVersion,
-      });
-      if (!("error" in granted)) changed();
-      return granted;
+      return releasing(
+        "consent",
+        () => options.egress.grant(providerId, allowedClasses, { destination, policyVersion }),
+        (granted) => !("error" in granted),
+      );
     },
     revokeConsent: async (input) => {
-      const revoked = options.egress.revoke(input.providerId);
-      changed();
-      return revoked;
+      return releasing("consent", () => options.egress.revoke(input.providerId));
     },
     connectionTest: (input) =>
       connectionTest(options.calls, options.db, input.acknowledgeUnverified, checks.fresh),
     executionSettings: async () => ({ cliBackground: readCliBackground(options.db) }),
     setExecutionSettings: async ({ cliBackground }) => {
-      writeSetting(options.db, CLI_BACKGROUND_SETTING, cliBackground ? "on" : "off");
-      changed();
+      releasing("background", () =>
+        writeSetting(options.db, CLI_BACKGROUND_SETTING, cliBackground ? "on" : "off"),
+      );
       return { cliBackground: readCliBackground(options.db) };
     },
     providers: async () => providerList(options),
     setDefaultProvider: async ({ providerId }) => {
-      const set = setDefaultProvider(options, providerId);
+      const set = releasing(
+        "default-provider",
+        () => setDefaultProvider(options, providerId),
+        (result) => !("error" in result), // jobs held for "no-provider" are judged again
+      );
       checks.forget();
-      if (!("error" in set)) changed(); // jobs held for "no-provider" are judged again
       return set;
     },
     // requests that come while a check runs share it (one set of query processes per
