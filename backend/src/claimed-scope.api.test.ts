@@ -122,7 +122,7 @@ describe("scope.claimed-grade: the Broker the backend builds judges with the reg
     taskKind: "extract" as const,
     sourceVersionIds: [id],
     candidateItemIds: [],
-    schemaVersion: 3,
+    schemaVersion: 4,
     budget: { timeoutMs: 1000 },
     retryable: false,
   });

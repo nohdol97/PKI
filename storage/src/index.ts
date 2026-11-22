@@ -309,6 +309,7 @@ export {
   checkOntologyChange,
   factValueFit,
   isDate,
+  isElementName,
   valueFits,
   listOntologyElements,
   readOntologyElement,

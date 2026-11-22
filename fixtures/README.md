@@ -13,6 +13,9 @@
 - `s01-glossary.jsonl`: S01(Semantic 등록부)의 표기·정의 추출 원본([S01 spec](../docs/specs/2026-11-22-S01-semantic-registry.md) R2·R3). 한 줄이 원본 version 하나이고 모양은 `v02-*.jsonl`과 같다. 용어집 한 쪽(`wiki-s01-0001`)과 그 악성 변형(`wiki-s01-m001`: 스크립트 태그, 원격 이미지, "이전 지시를 무시" 문장)이다. 한 개념의 정의가 두 문맥에 하나씩 있고, 표기는 약어·한영 표기·동의어 셋이며 `MT`와 `mt`는 같은 표기다.
 - `s01-expected.json`: 위 두 원본의 기대 결과(`plain`, `malicious`). 개념, 표기(종류, 인용문), 정의(값, 문맥 꼬리표)와 각 근거(코드 포인트 `[시작, 끝)`, 인용문). 인용문은 자기 원본에 정확히 한 번 나오고, 표기는 자기 인용문 안에 있으며, 정의의 값은 인용문과 같다.
 
+- `s02-entities.jsonl`: S02(개체 해소)의 추출 원본([S02 spec](../docs/specs/2026-11-22-S02-entity-resolution-temporal-graph.md) R4·R5·R7). 한 줄이 원본 version 하나이고 모양은 `v02-*.jsonl`과 같다. 조직 개요 한 쪽(`wiki-s02-0001`)과 그 악성 변형(`wiki-s02-m001`: 스크립트 태그, 원격 이미지, "이전 지시를 무시" 문장)이다. 사람(Person) 하나의 사번(`identifier.key`, 꼬리표 "인사")과 메일 주소(`identifier.email`), 소속·담당·의존 관계 셋, 결정(Decision) 하나의 진술(`statement`), 목록에 없는 유형 제안 하나(`Milestone`)가 있다. 메일 주소는 `example.test`다.
+- `s02-expected.json`: 위 두 원본의 기대 결과(`plain`, `malicious`). 식별자(값, 꼬리표), 관계, 진술, 유형 제안과 각 근거(코드 포인트 `[시작, 끝)`, 인용문). 인용문은 자기 원본에 정확히 한 번 나오고, 식별자 값과 진술은 자기 인용문 안에 있다.
+
 여기의 자료를 고치거나 더하면 `pnpm --filter @pki/providers build:synthetic-manifest`로 합성 목록을 다시 만들어 함께 커밋한다. 목록이 자료와 어긋나면 `pnpm test`가 실패한다.
 
 ## documents/

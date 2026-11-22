@@ -48,6 +48,9 @@ const CANARY = {
   alias: "vsjalias", // ⑧ a surface form, the value of an `alias.*` fact (S01-R2)
   definition: "ndzdefinition", // ⑧ a definition, the value of a `definition` fact (S01-R3)
   context: "kfbcontext", // ⑧ a definition's context tag (S01-R3)
+  identifier: "rqvidentifier", // ⑨ an identifier, the value of an `identifier.*` fact (S02-R2)
+  statement: "zcwstatement", // ⑨ a statement, the value of a `statement` fact (S02-R2)
+  tag: "tgdtag", // ⑨ the context tag of an `identifier.key` (S02-R4)
 };
 const ALL = Object.values(CANARY);
 const AT = "2026-11-22T00:00:00.000Z";
@@ -80,7 +83,7 @@ const IDENTITY = {
   externalId: CANARY.externalId,
 };
 const OLD_BODY = `값 ${CANARY.old} 입니다`;
-const NEW_BODY = `이제 ${CANARY.body} 와 ${CANARY.word} 그리고 ${CANARY.quote} 입니다 ${CANARY.alias} ${CANARY.definition}`;
+const NEW_BODY = `이제 ${CANARY.body} 와 ${CANARY.word} 그리고 ${CANARY.quote} 입니다 ${CANARY.alias} ${CANARY.definition} ${CANARY.identifier} ${CANARY.statement}`;
 
 /** One source, two versions (the first with the old value), a fact on each, one Insight. */
 function seed() {
@@ -137,6 +140,22 @@ function seed() {
   };
   vocabulary("alias.synonym", CANARY.alias, null);
   vocabulary("definition", CANARY.definition, CANARY.context);
+  // S02-R2: an identifier with its context tag on a person, a statement on a decision, both from the current version
+  const personItem = insertItem(db, { type: "Person", name: "W 사람", ...attrs });
+  const decisionItem = insertItem(db, { type: "Decision", name: "V 결정", ...attrs });
+  const written = (itemId: number, kind: string, value: string, context: string | null) => {
+    const id = saveFact(db, { itemId, kind, value, context, ...attrs }).id;
+    const start = NEW_BODY.indexOf(value);
+    addEvidence(db, {
+      target: { factId: id },
+      sourceVersionId: versionId(2),
+      start,
+      end: start + value.length,
+      quote: value,
+    });
+  };
+  written(personItem, "identifier.key", CANARY.identifier, CANARY.tag);
+  written(decisionItem, "statement", CANARY.statement, null);
   const evidenceOld = fact(x, "2026-12-10", 1, OLD_BODY, CANARY.old);
   const evidenceNew = fact(y, "2026-12-12", 2, NEW_BODY, CANARY.quote);
   saveInsight(
@@ -197,11 +216,40 @@ describe("purge.canary-files", () => {
     }
   });
 
+  it("leaves no identifier, statement or context tag of an identifier in any file after the deletion (S02-R2, R4)", () => {
+    seed();
+    const rows = () =>
+      db.all(
+        "SELECT kind, value, context FROM facts WHERE kind IN ('identifier.key', 'statement') ORDER BY id",
+      );
+    expect(rows()).toEqual([
+      { kind: "identifier.key", value: CANARY.identifier, context: CANARY.tag },
+      { kind: "statement", value: CANARY.statement, context: null },
+    ]);
+    entry("user-deleted");
+    expect(rows()).toEqual([]);
+    expect(db.all("SELECT 1 FROM items WHERE type IN ('Person', 'Decision')")).toEqual([]);
+    const left = residue();
+    for (const canary of [CANARY.identifier, CANARY.statement, CANARY.tag]) {
+      expect(left).not.toContain(canary);
+    }
+  });
+
   it("control: with PRAGMA secure_delete off the current text stays (①)", () => {
     seed();
     db.exec("PRAGMA secure_delete = OFF");
     entry("user-deleted");
     expect(residue()).toContain(CANARY.body);
+  });
+
+  it("control: with PRAGMA secure_delete off the identifier, the statement and the tag stay (the red case of S02's canaries)", () => {
+    seed();
+    db.exec("PRAGMA secure_delete = OFF");
+    entry("user-deleted");
+    const left = residue();
+    for (const canary of [CANARY.identifier, CANARY.statement, CANARY.tag]) {
+      expect(left).toContain(canary);
+    }
   });
 
   it("control: with the FTS secure-delete off the indexed word stays (③)", () => {
