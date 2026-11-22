@@ -174,7 +174,7 @@ describe("interim.identity", () => {
     );
     expect(
       db.all(
-        "SELECT s.namespace, t.version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id",
+        "SELECT s.namespace, t.covers_version AS version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id",
       ),
     ).toEqual([{ namespace: "a", version: 2, reason: "source-deleted" }]);
     expect(

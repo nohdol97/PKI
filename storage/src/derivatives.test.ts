@@ -572,7 +572,8 @@ derivativeKindContract("SQL double through propagate", {
       staleInput: () => ({
         ref: { kind: "double", id: "late" },
         attempt: () =>
-          db.all("SELECT 1 FROM tombstones WHERE source_id = ? AND version >= 1", [a]).length > 0
+          db.all("SELECT 1 FROM tombstones WHERE source_id = ? AND covers_version >= 1", [a])
+            .length > 0
             ? { status: "stale", cause: "covered" }
             : row("double", "late", [{ sourceId: a, version: 1 }]),
       }),

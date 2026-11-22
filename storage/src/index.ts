@@ -26,7 +26,9 @@ export {
 } from "./data-directory.ts";
 export {
   contentHash,
+  ensureSourceId,
   findSourceId,
+  nextSourceVersion,
   findSourceVersionId,
   readConnectorKind,
   readCursor,
@@ -106,10 +108,16 @@ export {
 } from "./insights.ts";
 export {
   readTombstone,
+  readTombstoneState,
+  recordTombstone,
+  recordTombstoneLift,
   writeTombstone,
   type Tombstone,
+  type TombstoneEvent,
   type TombstoneReason,
+  type TombstoneState,
 } from "./tombstones.ts";
+export { canonicalTransaction } from "./canonical-transaction.ts";
 export {
   atLeastAsStrict,
   createDerivativeRegistry,
