@@ -25,6 +25,7 @@ import { migrate } from "./migrations.ts";
 import {
   applyTransition,
   automatedLifecycle,
+  isUserDecided,
   NO_CURRENT_EVIDENCE_APPROVAL,
   writeLine,
   type EntryRef,
@@ -419,6 +420,34 @@ describe("resolution.merge-unmerge: the S01 undo and protection read past the me
     expect(undo?.action).toBe("undo");
     // a restore reads the state before the approval across the merge line
     expect(db.all("SELECT status FROM items WHERE id = ?", [a])).toEqual([{ status: "candidate" }]);
+  });
+});
+
+describe("resolution.merge-unmerge: a merge line is no user decision (S02-R11)", () => {
+  it("leaves the item not user-decided and lets automated transitions through", () => {
+    const [a, b] = [extractedItem(), extractedItem()] as [number, number];
+    merge(a, b);
+    expect(isUserDecided(db, { kind: "item", id: a })).toBe(false);
+    expect(isUserDecided(db, { kind: "item", id: b })).toBe(false);
+    // an automated actor may still raise an item's epistemic type: a user-decided row would refuse it
+    expect(automatedLifecycle.explicitEvidence(db, { kind: "item", id: a }, BASIS)).not.toEqual({
+      status: "refused",
+      reason: "user-override",
+    });
+    const fact: EntryRef = {
+      kind: "fact",
+      id: saveFact(db, {
+        itemId: a,
+        kind: "target_date",
+        value: "2026-12-05",
+        ...attrs,
+        epistemic: "hypothesis",
+      }).id,
+    };
+    automatedLifecycle.created(db, fact, "extraction", BASIS);
+    expect(automatedLifecycle.explicitEvidence(db, fact, BASIS)).toMatchObject({
+      status: "applied",
+    });
   });
 });
 
