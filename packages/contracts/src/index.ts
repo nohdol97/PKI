@@ -3,7 +3,11 @@
 import { z } from "zod";
 import type { EmbeddingEgress } from "./embedding.ts";
 import { NativeLocatorSchema } from "./connector.ts";
-import { ImportJsonlRequestSchema, ImportJsonlResponseSchema } from "./import-record.ts";
+import {
+  ImportJsonlRequestSchema,
+  ImportJsonlResponseSchema,
+  ImportRequestSchema,
+} from "./import-record.ts";
 import { REJECT_CODES } from "./connector.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
@@ -85,6 +89,7 @@ export const ErrorResponseSchema = z.object({
     "embedding-busy",
     "instance-busy",
     "storage-failed",
+    "payload-too-large",
     "internal-error",
   ]),
 });
@@ -691,6 +696,14 @@ export const routes = {
     path: "/api/import/jsonl",
     request: ImportJsonlRequestSchema,
     response: ImportJsonlResponseSchema,
+  },
+  // I01-R24: one JSONL text for one instance, stored by the sync's own page store; the answer
+  // is a sync's result (`connectorId` is the instance), with the refused lines in `rejected`
+  imports: {
+    method: "POST",
+    path: "/api/imports",
+    request: ImportRequestSchema,
+    response: SyncResponseSchema,
   },
   sources: { method: "GET", path: "/api/sources", response: SourceListResponseSchema },
   searchSources: {

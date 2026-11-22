@@ -36,7 +36,7 @@ describe("ImportRecordSchema", () => {
 
   it.each([
     ["an unknown key", { classification: "synthetic" }],
-    ["an unknown operation", { operation: "access-revoked" }],
+    ["an unknown operation", { operation: "purge" }],
     ["an unknown source type", { source_type: "calendar" }],
     ["version 0", { version: 0 }],
     ["a timestamp without an offset", { created_at: "2026-11-03T10:12:00" }],
@@ -44,6 +44,22 @@ describe("ImportRecordSchema", () => {
     ["another schema version", { schema_version: "2" }],
   ])("rejects %s", (_name, change) => {
     expect(ImportRecordSchema.safeParse({ ...record, ...change }).success).toBe(false);
+  });
+
+  // import.revoke-switch ①: I01-R22 adds `access-revoked`; the schema and the golden checker
+  // (eval/scorer/validate.py) keep one vocabulary
+  it("takes access-revoked, and its operations are the golden checker's", () => {
+    expect(ImportRecordSchema.safeParse({ ...record, operation: "access-revoked" }).success).toBe(
+      true,
+    );
+    const checker = readFileSync(
+      resolve(import.meta.dirname, "../../eval/scorer/validate.py"),
+      "utf8",
+    );
+    const declared = /^OPERATIONS = \{(.*)\}$/m.exec(checker)?.[1] ?? "";
+    const names = [...declared.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+    expect(names.length).toBeGreaterThan(0);
+    expect([...names].sort()).toEqual([...ImportRecordSchema.shape.operation.options].sort());
   });
 
   it("requires a delete line to carry empty content", () => {

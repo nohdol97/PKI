@@ -19,99 +19,57 @@
 // projections' removal jobs (I04-R12) and the runner is woken after the page's notices. A Connector of another SDK version than CONNECTOR_SDK_VERSION is never
 // initialized (I01-R1).
 import {
-  blocksValid,
-  ChangeSchema,
   ChangeSetEnvelopeSchema,
   CONNECTOR_SDK_VERSION,
   ConnectorError,
   ConnectorNotImplementedError,
   ConnectorRateLimitError,
-  rejectedPositionValid,
-  type Change,
   type Connector,
-  type ConnectorCapabilities,
   type ConnectorSummary,
   type ErrorResponse,
-  type RejectCode,
   type SyncResponse,
   type SyncStopCode,
 } from "@pki/contracts";
 import {
-  defaultEntries,
-  versionNotice,
-  type CanonicalEntries,
-  type ProjectionNotice,
-  type Projections,
-} from "@pki/knowledge-engine";
-import {
   beginRescan,
-  canonicalTransaction,
-  finishRescan,
   readCursor,
   readRescanState,
   registerConnectorInstance,
-  registerJob,
-  writeCursor,
-  type CanonicalTx,
   type SqlDriver,
 } from "@pki/storage";
+import { tryLockInstance } from "./instance-lock.ts";
 import { systemClock, type Clock } from "./clock.ts";
 import { applyConfiguredScope } from "./connector-scopes.ts";
-import type { JobRunner } from "./job-runner.ts";
+import {
+  addPage,
+  emptyResult,
+  storePage,
+  type PageOptions,
+  type SyncResult,
+} from "./page-store.ts";
+
+export { tryLockInstance } from "./instance-lock.ts";
+export { EXTRACT_JOB_KIND, REJECTED_LIST_LIMIT } from "./page-store.ts";
+export type { RefusalReason, StoredOutcome, SyncResult } from "./page-store.ts";
 
 const PAGE_LIMIT = 100;
 
 /** Provisional (I01-R18), one place: tries per page, the longest wait, the first retry wait. */
 export const SYNC_BACKOFF = { attempts: 3, maxWaitMs: 30_000, firstWaitMs: 1000 } as const;
 
-/** Provisional: refused records listed in a result; `rejectedCount` counts them all. */
-export const REJECTED_LIST_LIMIT = 100;
-
-/** The job each new source version gets; its handler is V02-T05's. */
-export const EXTRACT_JOB_KIND = "extract";
-
-/**
- * A change the store would not take; nothing of it is written. `revision-not-newer`
- * is the same revision with other content (I01-R10 step 2); `tombstoned` is the
- * door of a tombstone (step 0).
- */
-export type RefusalReason = "revision-not-newer" | "tombstoned";
-
-/**
- * What a change did: a new version, a new scope, its source tombstoned, or nothing
- * new (`unchanged`; `stale` for an older revision, `stale-tombstone` for a delete
- * below the revision the store holds: neither is an error, I01-R10, R11).
- */
-export type StoredOutcome =
-  "created" | "unchanged" | "deleted" | "scope-updated" | "stale" | "stale-tombstone";
-
-/** What one sync did; the API adds the instance's id (SyncResponse). */
-export type SyncResult = Omit<SyncResponse, "connectorId">;
-
-export interface SyncOptions {
+export interface SyncOptions extends PageOptions {
   signal?: AbortSignal;
   /**
    * Read from the start, not from the stored cursor (an import reads its whole text).
    * Not the rescan of I01-R17, which a sync starts itself on an expired cursor: no mark is kept.
    */
   rescan?: boolean;
-  /** Takes each change refused at a tombstone's door or for revision conflict, once its page is committed. */
-  onRefused?: (change: Change, reason: RefusalReason) => void;
-  /** Takes each stored, unchanged or deleting change once its page is committed. */
-  onStored?: (change: Change, outcome: StoredOutcome) => void;
-  /** Takes the error that failed a page's storage; its text may carry file text: log its class only. */
-  onError?: (error: unknown) => void;
-  /** Woken after a page that registered jobs commits (V02-T05 binds the runner). */
-  runner?: Pick<JobRunner, "wake">;
-  /** Notified after each page commits, of its stored versions and deletions (V02-R13). */
-  projections?: Pick<Projections, "notify">;
-  /** Gives a registered job its time and waits between tries, the runner's clock (I03-T04); default systemClock. */
-  clock?: Pick<Clock, "now" | "sleep">;
   /**
-   * The entries that run the derivative registry (composition.ts `productEntries`); default the
-   * entries over the registry with no composition (knowledge-engine entries.ts).
+   * The caller holds the instance's lock (`tryLockInstance`) for this whole call, as the JSONL
+   * import of the Sources screen does for every instance of a request (I01-R21): the sync does
+   * not take it again and does not answer `instance-busy`.
    */
-  entries?: Pick<CanonicalEntries, "acceptChange" | "propagateNewVersion">;
+  lockHeld?: boolean;
 }
 
 export interface ConnectorInstanceConfig {
@@ -142,94 +100,10 @@ export interface ConnectorRecheck {
   recheck(id: string): Promise<ConnectorSummary["state"] | undefined>;
 }
 
-const locks = new WeakMap<SqlDriver, Set<string>>();
-
-/**
- * Takes an instance's lock, or returns undefined when it is held (I01-R21): one sync or
- * import per instance at a time. Call the returned function once, in a `finally`, on
- * every path. Locks are kept per database handle, so every taker must hold the same one.
- */
-export function tryLockInstance(db: SqlDriver, instanceId: string): (() => void) | undefined {
-  let held = locks.get(db);
-  if (!held) locks.set(db, (held = new Set()));
-  if (held.has(instanceId)) return undefined;
-  held.add(instanceId);
-  const set = held;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    set.delete(instanceId);
-  };
+/** The configuration an instance was made with (shown by no API); the default schedules read it. */
+export interface ConnectorConfigs {
+  configOf(id: string): unknown;
 }
-
-/** The ways a change may be refused before it reaches the store (I01-R3). */
-function violatesCapabilities(change: Change, capabilities: ConnectorCapabilities): boolean {
-  if (change.kind === "upsert") {
-    const scoped = change.record.accessScope !== undefined;
-    return capabilities.accessScope ? !scoped : scoped;
-  }
-  if (change.kind === "scope-change") return !capabilities.accessScope;
-  return !capabilities.deletes; // delete, access-revoked
-}
-
-type Judged =
-  | StoredOutcome
-  /** the door of a tombstone */
-  | "blocked"
-  /** the same revision, other content */
-  | "revision-conflict";
-
-/**
- * Stores one change; a version is stored together with its extraction job. A
- * source is the instance's (namespace, external id) (I01-R8). The judgment is
- * acceptChange's; a deletion takes the product's clock (`at` is not stored: no
- * Connector text reaches the tombstone).
- */
-function storeChange(
-  tx: CanonicalTx,
-  instanceId: string,
-  change: Change,
-  notices: ProjectionNotice[],
-  clock: Pick<Clock, "now">,
-  entries: Pick<CanonicalEntries, "acceptChange" | "propagateNewVersion">,
-): Judged {
-  const saved = entries.acceptChange(tx, instanceId, change, new Date(clock.now()).toISOString());
-  if (saved.outcome === "blocked") return "blocked";
-  if (saved.outcome === "rejected") return "revision-conflict";
-  if (saved.outcome === "tombstoned") return "deleted";
-  if (saved.outcome !== "created") return saved.outcome;
-  entries.propagateNewVersion(tx, saved.sourceId);
-  notices.push(versionNotice(tx, saved.sourceId, saved.version));
-  const job = registerJob(tx, {
-    kind: EXTRACT_JOB_KIND,
-    sourceId: saved.sourceId,
-    fenceVersion: saved.version,
-    at: new Date(clock.now()), // the clock the runner claims by
-  });
-  // A conflict is not a registration (V02 spec "T02가 넘기는 것" 3): the page fails.
-  if (!job.registered) {
-    throw new Error(
-      `${instanceId}: an ${EXTRACT_JOB_KIND} job for source ${saved.sourceId} version ${saved.version} exists already (${job.existing.status})`,
-    );
-  }
-  return "created";
-}
-
-const emptyResult = (): SyncResult => ({
-  received: 0,
-  created: 0,
-  unchanged: 0,
-  scopeUpdated: 0,
-  stale: 0,
-  staleTombstone: 0,
-  blocked: 0,
-  tombstoned: 0,
-  rejected: [],
-  rejectedCount: 0,
-  rescanned: false,
-  deletionsMayBeMissed: false,
-});
 
 /** A page, or the code a sync stops with when it cannot be had (I01-R18). */
 type Fetched = { page: unknown } | { stop: SyncStopCode; retryAfterMs?: number };
@@ -277,6 +151,7 @@ export async function syncConnector(
   connector: Connector,
   options: SyncOptions = {},
 ): Promise<SyncResult> {
+  if (options.lockHeld) return runSync(db, instanceId, kind, connector, options);
   const release = tryLockInstance(db, instanceId);
   if (!release) return { ...emptyResult(), stopped: "instance-busy" };
   try {
@@ -294,7 +169,6 @@ async function runSync(
   options: SyncOptions,
 ): Promise<SyncResult> {
   const signal = options.signal ?? new AbortController().signal;
-  const entries = options.entries ?? defaultEntries;
   const clock = options.clock ?? systemClock;
   const capabilities = connector.manifest.capabilities;
   db.transaction(() => {
@@ -335,93 +209,17 @@ async function runSync(
     // A page that promises more without moving would otherwise loop forever.
     if (page.hasMore && page.nextCursor === cursor) return stop("no-progress");
 
-    const refused: [Change, RefusalReason][] = [];
-    const stored: [Change, StoredOutcome][] = [];
-    const rejected: { at: string; code: RejectCode }[] = [];
-    const counts = emptyResult();
-    const notices: ProjectionNotice[] = [];
-    // what the Connector refused itself: its position is kept only in the short shape
-    page.rejected.forEach(({ at, code }, i) => {
-      rejected.push({ at: rejectedPositionValid(at) ? at : `change:${i}`, code });
-    });
-    const judged: [number, Change][] = [];
-    page.changes.forEach((raw, i) => {
-      const parsed = ChangeSchema.safeParse(raw);
-      const refuse = (code: RejectCode) => rejected.push({ at: `change:${i}`, code });
-      if (!parsed.success) return refuse("schema");
-      const change = parsed.data;
-      if (violatesCapabilities(change, capabilities)) return refuse("capability-violation");
-      if (
-        change.kind === "upsert" &&
-        !blocksValid(change.record.body, change.record.blocks ?? [])
-      ) {
-        return refuse("invalid-blocks");
-      }
-      judged.push([i, change]);
-    });
-
-    let pageCreated: number;
-    try {
-      pageCreated = canonicalTransaction(db, (tx) => {
-        let created = 0;
-        for (const [i, change] of judged) {
-          const outcome = storeChange(tx, instanceId, change, notices, clock, entries);
-          if (outcome === "blocked") {
-            counts.blocked++;
-            refused.push([change, "tombstoned"]);
-          } else if (outcome === "revision-conflict") {
-            rejected.push({ at: `change:${i}`, code: "revision-conflict" });
-            refused.push([change, "revision-not-newer"]);
-          } else {
-            stored.push([change, outcome]);
-            if (outcome === "created") created++;
-            else if (outcome === "unchanged") counts.unchanged++;
-            else if (outcome === "scope-updated") counts.scopeUpdated++;
-            else if (outcome === "stale") counts.stale++;
-            else if (outcome === "stale-tombstone") counts.staleTombstone++;
-            else counts.tombstoned++;
-          }
-        }
-        writeCursor(tx, instanceId, page.nextCursor);
-        // the page that ends a rescan ends it in the same transaction
-        if (rescanning && !page.hasMore) {
-          finishRescan(tx, instanceId, !capabilities.deletionsOnRescan);
-        }
-        return created;
-      });
-    } catch (error) {
-      // nothing of this page was stored, and none of its text reaches the result (I01-R4)
-      options.onError?.(error);
-      return stop("storage-failed");
-    }
-    for (const [change, reason] of refused) options.onRefused?.(change, reason);
-    for (const [change, outcome] of stored) options.onStored?.(change, outcome);
-    // The runner is woken once the engine has the page's versions, so a proposing
-    // engine knows what is extracted.
-    const delivered = notices.length > 0 ? options.projections?.notify(notices) : undefined;
-    // a deletion registered the projections' removal jobs: the runner takes them too, after the notices
-    const deleted = stored.some(([, outcome]) => outcome === "deleted");
-    if (pageCreated > 0 || deleted) {
-      const runner = options.runner;
-      if (delivered) void delivered.then(() => runner?.wake());
-      else void runner?.wake();
-    }
-    result.received += page.changes.length;
-    result.created += pageCreated;
-    for (const key of [
-      "unchanged",
-      "scopeUpdated",
-      "stale",
-      "staleTombstone",
-      "blocked",
-      "tombstoned",
-    ] as const) {
-      result[key] += counts[key];
-    }
-    result.rejectedCount += rejected.length;
-    for (const entry of rejected) {
-      if (result.rejected.length < REJECTED_LIST_LIMIT) result.rejected.push(entry);
-    }
+    const stored = storePage(
+      { db, instanceId, kind, capabilities, options },
+      {
+        changes: page.changes,
+        rejected: page.rejected,
+        nextCursor: page.nextCursor,
+        endsRescan: rescanning && !page.hasMore,
+      },
+    );
+    if ("stopped" in stored) return stop(stored.stopped);
+    addPage(result, stored);
     cursor = page.nextCursor;
     if (!page.hasMore) {
       return {
@@ -487,7 +285,7 @@ export async function createConnectorManager(
   instances: readonly ConnectorInstanceConfig[],
   kinds: Readonly<Record<string, ConnectorFactory>>,
   options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> = {},
-): Promise<ConnectorManager & ConnectorRecheck> {
+): Promise<ConnectorManager & ConnectorRecheck & ConnectorConfigs> {
   const summaryOf = (id: string, kind: string, outcome: InitializeOutcome): ConnectorSummary =>
     "reason" in outcome
       ? { id, kind, state: outcome.state, reason: outcome.reason }
@@ -509,6 +307,7 @@ export async function createConnectorManager(
           ? { ...summary, deletionsMayBeMissed: true }
           : { ...summary },
       ),
+    configOf: (id) => entries.find((e) => e.summary.id === id)?.config,
     async recheck(id) {
       const entry = entries.find((e) => e.summary.id === id);
       if (!entry) return undefined;

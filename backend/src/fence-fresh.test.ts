@@ -129,7 +129,12 @@ const count = (table: string) => db.all(`SELECT count(*) AS n FROM ${table}`)[0]
 const jobStatuses = () =>
   db.all("SELECT status, reason FROM jobs WHERE kind = 'extract' ORDER BY id");
 const mailId = () =>
-  findSourceId(db, MAIL.connector_instance_id as string, "", MAIL.external_id as string) as number;
+  findSourceId(
+    db,
+    MAIL.connector_instance_id as string,
+    MAIL.connector_instance_id as string,
+    MAIL.external_id as string,
+  ) as number;
 const written = () => [count("items"), count("facts"), count("relations"), count("evidence")];
 /** The mail's tombstone through the product entry (V02's deleteSource is gone, I01-T02). */
 const tombstoneMail = (reason: TombstoneReason) =>
@@ -137,7 +142,7 @@ const tombstoneMail = (reason: TombstoneReason) =>
     applyTombstone(tx, {
       identity: {
         connectorInstanceId: MAIL.connector_instance_id as string,
-        namespace: "",
+        namespace: MAIL.connector_instance_id as string,
         externalId: MAIL.external_id as string,
       },
       reason,
@@ -167,6 +172,7 @@ describe("fence.fresh: the result of an extraction behind commitDerived", () => 
     await importer(read("v02-mail.jsonl"));
     hooks.during = () =>
       void saveSourceRecord(db, MAIL.connector_instance_id as string, {
+        namespace: MAIL.connector_instance_id as string,
         externalId: MAIL.external_id as string,
         title: MAIL.title as string,
         body: "더 새 version의 합성 본문",
@@ -241,6 +247,7 @@ describe("fence.fresh: the result of an extraction behind commitDerived", () => 
 
     // the backend entry (acceptChange and its job registration) is bypassed: saveSourceRecord stores the version directly
     const saved = saveSourceRecord(db, MAIL.connector_instance_id as string, {
+      namespace: MAIL.connector_instance_id as string,
       externalId: MAIL.external_id as string,
       title: MAIL.title as string,
       body: MAIL.content as string,

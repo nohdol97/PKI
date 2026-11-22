@@ -54,6 +54,12 @@ export interface ConnectorScenario {
    * error, not a violation: unique cursors are progress). PAGE_CAP by default.
    */
   maxPages?: number;
+  /**
+   * The Connector reads a file whose every line is a version (the JSONL collector, I01-R23): a
+   * source may be upserted more than once in a read, each time with a greater revision. Only
+   * then is a repeated upsert not `duplicate-identity`; an equal or lower revision still is.
+   */
+  versionedSources?: boolean;
 }
 
 type Caps = {
@@ -124,9 +130,11 @@ class Check {
   readonly found = new Set<ConnectorViolationCode>();
   readonly caps: Caps;
   readonly maxPages: number;
-  constructor(caps: Caps, maxPages: number) {
+  readonly versioned: boolean;
+  constructor(caps: Caps, maxPages: number, versioned = false) {
     this.caps = caps;
     this.maxPages = maxPages;
+    this.versioned = versioned;
   }
 
   add(code: ConnectorViolationCode) {
@@ -223,8 +231,16 @@ class Check {
       const identity = identityOf(record);
       if (identity === null) return;
       if (delivered.has(identity)) {
-        this.add("duplicate-identity");
-        read.pageFault = true;
+        const before = read.lastUpsert.get(identity)?.revision;
+        const newer =
+          this.versioned &&
+          typeof record.revision === "number" &&
+          typeof before === "number" &&
+          record.revision > before;
+        if (!newer) {
+          this.add("duplicate-identity");
+          read.pageFault = true;
+        }
       }
       delivered.add(identity);
       read.last.set(identity, { kind: "upsert", record });
@@ -310,6 +326,7 @@ export async function checkConnector(
       deletionsOnRescan: capabilities.deletionsOnRescan === true,
     },
     maxPages,
+    scenario.versionedSources === true,
   );
   for (const code of manifestFaults) check.add(code);
 

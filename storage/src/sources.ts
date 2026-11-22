@@ -104,6 +104,14 @@ const sameScope = (a: AccessScope, b: AccessScope) =>
 export const LATEST_VERSION_SQL =
   "SELECT content_hash, version, revision FROM source_versions WHERE source_id = ? ORDER BY version DESC LIMIT 1";
 
+/**
+ * The content hash of the source's latest version, or undefined when it has none (a
+ * purged or never-stored source). `scope-change-content-mismatch` compares it (I01-R22).
+ */
+export function readLatestContentHash(db: SqlDriver, sourceId: number): string | undefined {
+  return db.all(LATEST_VERSION_SQL, [sourceId])[0]?.content_hash as string | undefined;
+}
+
 interface Standing {
   last: number | null;
   scope: AccessScope;

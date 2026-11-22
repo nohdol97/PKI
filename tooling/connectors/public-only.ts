@@ -36,10 +36,10 @@ export const OPTIONAL_PACKAGES: readonly string[] = [];
 
 /**
  * Files outside the roots that a root's file reads by a relative path, inspected
- * under the same list. jsonl-lines.ts: the JSONL parsing until I01-T05 moves it
- * to @pki/connector-sdk; unused, the entry fails and is to be removed.
+ * under the same list; an entry nobody reads fails, and is to be removed. Empty since
+ * I01-T05 moved the JSONL parsing (backend/src/jsonl-lines.ts) into @pki/connector-sdk.
  */
-export const EXTRA_FILES = ["backend/src/jsonl-lines.ts"] as const;
+export const EXTRA_FILES: readonly string[] = [];
 
 /** The files the public repository ships under site/. */
 export const SITE_PLACEHOLDERS = ["site/README.md"] as const;
@@ -127,22 +127,27 @@ interface Target {
 }
 
 /** Every file the check parses: the one list both the check and its liveness report read. */
-function targets(root: string): Target[] {
+function targets(root: string, extraFiles: readonly string[]): Target[] {
   return [
     ...SCAN_ROOTS.flatMap((scanRoot) => {
       const dir = join(root, scanRoot);
       return scriptsIn(dir).map((path): Target => ({ path, scanRoot: dir }));
     }),
-    ...EXTRA_FILES.map((file): Target => ({ path: join(root, file), scanRoot: undefined })).filter(
-      (target) => isFile(target.path),
-    ),
+    ...extraFiles
+      .map((file): Target => ({ path: join(root, file), scanRoot: undefined }))
+      .filter((target) => isFile(target.path)),
   ];
 }
 
 /** The script files the check reads in `repoRoot`, relative to it. */
-export function inspectedFiles(repoRoot: string): string[] {
+export function inspectedFiles(
+  repoRoot: string,
+  extraFiles: readonly string[] = EXTRA_FILES,
+): string[] {
   const root = resolve(repoRoot);
-  return targets(root).map((target) => relative(root, target.path).split(sep).join(posix.sep));
+  return targets(root, extraFiles).map((target) =>
+    relative(root, target.path).split(sep).join(posix.sep),
+  );
 }
 
 /** The placeholder files exist, are plain files and are not scripts; nothing else under site/ is read. */
@@ -171,10 +176,13 @@ function specifierOf(node: ts.Node): ts.Expression | undefined {
   return undefined;
 }
 
-export function checkPublicOnly(repoRoot: string): Finding[] {
+export function checkPublicOnly(
+  repoRoot: string,
+  extraFiles: readonly string[] = EXTRA_FILES,
+): Finding[] {
   const root = resolve(repoRoot);
   const findings: Finding[] = [];
-  const extras = EXTRA_FILES.map((file) => join(root, file));
+  const extras = extraFiles.map((file) => join(root, file));
   const usedExtras = new Set<string>();
 
   const inspect = (path: string, scanRoot: string | undefined): void => {
@@ -228,7 +236,7 @@ export function checkPublicOnly(repoRoot: string): Finding[] {
     visit(source);
   };
 
-  const files = targets(root);
+  const files = targets(root, extraFiles);
   for (const scanRoot of SCAN_ROOTS) {
     const dir = join(root, scanRoot);
     const pkg = OPTIONAL_PACKAGES.find((optional) => scanRoot.startsWith(`${optional}/`));
@@ -249,7 +257,7 @@ export function checkPublicOnly(repoRoot: string): Finding[] {
   for (const [i, extra] of extras.entries()) {
     if (!usedExtras.has(extra) || !isFile(extra)) {
       findings.push({
-        file: EXTRA_FILES[i] as string,
+        file: extraFiles[i] as string,
         line: 1,
         code: "unused-extra-file",
         detail: "",
