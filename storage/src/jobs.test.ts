@@ -1004,10 +1004,11 @@ describe("effect.fence-new-version (I03-R6 ③): commitDerived, the provisional 
     expect(effects()).toBe(0);
   });
 
-  it("names the newer version, not a tombstone below it, as the cause (a lifted cover, I04-T05)", () => {
-    tombstone(); // covers version 1
+  it("names the newer version, not a tombstone row below the job's version, as the cause", () => {
+    // versions first: a save past an unlifted tombstone is refused once I04-T05 lands
     newVersion("b2");
     newVersion("b3");
+    tombstone(); // covers version 1: its row alone does not make version 2 covered
     expect(commitDerived(db, { source: { sourceId: 1, version: 2 }, items: [item("a")] })).toEqual({
       status: "stale",
       cause: "not-latest",
