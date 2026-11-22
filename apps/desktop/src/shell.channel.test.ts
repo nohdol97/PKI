@@ -11,7 +11,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BACKEND_ENV_KEYS,
   backendEnv,
@@ -19,6 +19,10 @@ import {
   type Backend,
   type ForkBackend,
 } from "./backend-process.ts";
+
+// Every test here starts real processes. Slowest test, 5 runs alone: 0.64 s ("gives every run its own token", which starts two backends one after the other); 10 runs with the machine
+// 3x oversubscribed (24 busy loops on 8 cores): 6.1 s (the same test, over the 5 s limit). 30 s is about 5x the loaded worst case.
+vi.setConfig({ testTimeout: 30_000 });
 
 const ENTRY = fileURLToPath(new URL("../../../backend/src/shell.ts", import.meta.url));
 const ORIGIN = "app://pki";
