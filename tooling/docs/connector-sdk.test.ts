@@ -16,7 +16,15 @@ const read = (path: string) => readFileSync(resolve(repoRoot, path), "utf8");
 /** Files the text names that belong to the deployment fork: the public repository has none of them. */
 const FORK_FILES = new Set(["site/config/connector-scopes.json"]);
 /** A fork's file: the one scopes file, or anything under `site/` (the fork's composition and collector packages). */
-const isForkPath = (path: string) => FORK_FILES.has(path) || path.startsWith("site/");
+/** The fork's import specifier of the scopes file, relative to `site/composition/src/`: the fork's file, not the public tree's. */
+const FORK_IMPORT_SPECIFIER = "../../config/connector-scopes.json";
+/** The example's import specifier of its scopes file, relative to `packages/site-example/src/`: the I07 block checks it resolves there. */
+const EXAMPLE_IMPORT_SPECIFIER = "../config/connector-scopes.json";
+const isForkPath = (path: string) =>
+  FORK_FILES.has(path) || path.startsWith("site/") || path === FORK_IMPORT_SPECIFIER;
+/** A path the text names that is neither a fork's file nor the example's import specifier and is not in the repository. */
+const isMissing = (path: string) =>
+  !isForkPath(path) && path !== EXAMPLE_IMPORT_SPECIFIER && !existsSync(resolve(repoRoot, path));
 const docText = read("docs/connector-sdk.md");
 const ownership = read("docs/ownership.md");
 const readme = read("README.md");
@@ -227,7 +235,7 @@ describe("docs.connector-sdk: what the text names exists in the code", () => {
   it("every file path the text names exists", () => {
     const paths = namedPaths(docText, docsDir);
     expect(paths.length).toBeGreaterThanOrEqual(8);
-    expect(paths.filter((p) => !isForkPath(p) && !existsSync(resolve(repoRoot, p)))).toEqual([]);
+    expect(paths.filter(isMissing)).toEqual([]);
   });
 
   it("every relative link in the text resolves", () => {
@@ -287,9 +295,7 @@ describe("docs.connector-sdk: what the text names exists in the code", () => {
 
   it("fails when a file the text names does not exist", () => {
     const mutated = docText.replace("backend/src/composition.ts", "backend/src/gone.ts");
-    const missing = namedPaths(mutated, docsDir).filter(
-      (p) => !isForkPath(p) && !existsSync(resolve(repoRoot, p)),
-    );
+    const missing = namedPaths(mutated, docsDir).filter(isMissing);
     expect(docText).toContain("backend/src/composition.ts");
     expect(missing).toEqual(["backend/src/gone.ts"]);
   });
@@ -442,7 +448,10 @@ describe("docs.connector-sdk: shape of the text", () => {
 
   it("chapter 11 names each tracked gap by its issue number; the fork registration (#113) is built and is no row", () => {
     const eleven = chapter(docText, 11);
-    for (const issue of ["#114", "#115", "#116", "#121"]) expect(eleven, issue).toContain(issue);
+    for (const issue of ["#114", "#116", "#121"]) expect(eleven, issue).toContain(issue);
+    // #115 is built (I07): neither the chapter 11 table nor chapter 7's list of what is missing names it
+    expect(eleven).not.toContain("#115");
+    expect(chapter(docText, 7)).not.toContain("#115");
     expect(eleven).not.toContain("#113");
     expect(chapter(docText, 7)).not.toContain("#113");
     expect(chapter(docText, 7)).toContain("#121");
@@ -501,9 +510,10 @@ describe("docs.connector-sdk: the places that point to it", () => {
     for (const word of ["scope-change", "revision", "namespace", "deletionsOnRescan", "@pki/connector-sdk"]) {
       expect(section(2), word).toContain(word);
     }
-    for (const word of ["connector-scopes.json", "import 검사", "`site/`를 보지 않으므로", "현재의 예외", "#114", "#115"]) {
+    for (const word of ["connector-scopes.json", "import 검사", "`site/`를 보지 않으므로", "현재의 예외", "#114"]) {
       expect(section(3), word).toContain(word);
     }
+    expect(section(3)).not.toContain("#115");
   });
 
   it("site-setup says once that its Connector specification is v2 (the lines before S01)", () => {
@@ -587,6 +597,7 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
         "pnpm install",
         "pnpm lint && pnpm typecheck && pnpm test",
         "pnpm --filter @pki-site/composition site-check <종류>",
+        "pnpm --filter @pki-site/composition site-check --scopes",
         "pnpm --filter @pki/desktop build",
         "```",
       ].join("\n"),
@@ -824,11 +835,13 @@ describe("docs.connector-sdk (I05): ownership.md section 3 (I05-R23)", () => {
     expect(three).toContain("├── composition/     포크: 조립 패키지(등록 객체 하나와 진입점 둘. 수집기를 제품에 끼운다)");
   });
 
-  it("leaves only the lockfile, the allowBuilds `false` lines, #114, #115 and the build values in the exception paragraph", () => {
+  it("leaves only the lockfile, the allowBuilds `false` lines, #114 and the build values in the exception paragraph (#115 is closed by I07)", () => {
     expect(exception.length).toBeGreaterThan(300);
-    for (const word of ["`pnpm-lock.yaml`", "`allowBuilds`", "`false` 줄", "#114", "#115", "배포처 전송 규칙", "묶을 Provider", "검증된 CLI 조합 목록", "데이터 등급 목록"]) {
+    for (const word of ["`pnpm-lock.yaml`", "`allowBuilds`", "`false` 줄", "#114", "배포처 전송 규칙", "묶을 Provider", "검증된 CLI 조합 목록", "데이터 등급 목록"]) {
       expect(exception, word).toContain(word);
     }
+    expect(exception).not.toContain("#115");
+    expect(exception).toContain("번호(#114)는 공용 저장소의 이슈다.");
     // the whole normative sentence (review F8): a `true`, or a licence to run the scripts, must turn it red
     expect(exception).toContain(
       "`pnpm-workspace.yaml`의 `allowBuilds`: 설치 스크립트가 있는 포크 의존성을 위해 더한 `false` 줄뿐이다(스크립트를 돌리지 않는다는 뜻이다). `packages:` 목록은 포함하지 않는다.",
@@ -858,7 +871,7 @@ describe("docs.connector-sdk (I05): the ADR and its index (I05-R24)", () => {
     expect(adr).toContain("# ADR 0018: 배포처 수집기는 빌드할 때 진입점 주입으로 등록한다");
     expect(adr).toContain("상태: **잠정 — 배포처 검증 대기**");
     expect(read("docs/adr/README.md")).toContain("| [0018](0018-fork-registration-at-build-time.md) |");
-    expect(docsIndex).toContain("결정 기록 17건(잠정 12, 확정 4, 미결 1.");
+    expect(docsIndex).toContain("결정 기록 18건(잠정 13, 확정 4, 미결 1.");
     expect(docsIndex).toContain("포크에 두고 연결하는 방식은 ADR 0018");
     const numbers = readdirSync(resolve(docsDir, "adr")).flatMap((f) => /^(\d{4})-/.exec(f)?.[1] ?? []);
     expect(numbers).toContain("0018");
@@ -868,5 +881,245 @@ describe("docs.connector-sdk (I05): the ADR and its index (I05-R24)", () => {
     for (const text of [docText, ownership, read("docs/site-setup.md")]) {
       expect(text).toContain("adr/0018-fork-registration-at-build-time.md");
     }
+  });
+});
+
+describe("docs.connector-sdk (I07): the scopes file in chapter 7 (I07-R15)", () => {
+  const seven = chapter(docText, 7);
+  const section = seven.slice(seven.indexOf("### 인스턴스 범위 파일"), seven.indexOf("### 빌드와 산출물"));
+  const forkImportLine =
+    'import connectorScopes from "../../config/connector-scopes.json" with { type: "json" };';
+
+  it("shows connectorScopes in the registration excerpt and in the field table, and the excerpt is the example's file", () => {
+    const registrationExcerpt = excerpts(seven).found.find((f) => f.file === "packages/site-example/src/registration.ts");
+    expect(registrationExcerpt?.lines).toContain("  connectorScopes,");
+    expect(registrationExcerpt?.lines).toContain(
+      'import connectorScopes from "../config/connector-scopes.json" with { type: "json" };',
+    );
+    expect(seven).toContain("| `connectorScopes` | 인스턴스마다의 접근 범위(site-setup S18) | 모든 인스턴스가 알 수 없음 |");
+    expect(excerptProblems(seven)).toEqual([]);
+  });
+
+  it("says outside the excerpt, below it, what the fork's import line is and where the file is kept", () => {
+    for (const sentence of [
+      "위 발췌의 범위 파일 `import` 줄은 예시 패키지의 경로(`../config/connector-scopes.json`)다.",
+      `포크의 \`site/composition/src/registration.ts\`는 같은 줄을 \`${forkImportLine}\`로 적고 \`connectorScopes\`를 등록의 필드로 넘긴다.`,
+      "**범위 파일은 `site/config/connector-scopes.json`에만 둔다(다른 자리나 다른 이름이면 빌드가 멈추거나 판정을 벗어난다).**",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    // the fork's line is not an excerpt: it is in no fenced ts block and the example's file does not hold it
+    expect(excerpts(seven).found.flatMap((f) => f.lines)).not.toContain(forkImportLine);
+    expect(read("packages/site-example/src/registration.ts")).not.toContain(forkImportLine);
+    // the two specifiers the text names resolve as it says: the example's from its src/, the fork's from site/composition/src/
+    expect(existsSync(resolve(repoRoot, "packages/site-example/src", EXAMPLE_IMPORT_SPECIFIER))).toBe(true);
+    expect(resolve(repoRoot, "site/composition/src", FORK_IMPORT_SPECIFIER)).toBe(
+      resolve(repoRoot, "site/config/connector-scopes.json"),
+    );
+  });
+
+  it("has the section, says the registration binds the file at build time and the running build reads nothing", () => {
+    expect(section.length).toBeGreaterThan(1000);
+    for (const sentence of [
+      "**이 파일이 설치본에 따로 놓이는 것이 아니라, 등록이 빌드할 때 그 내용을 가져와 백엔드 묶음에 넣는다.**",
+      "실행본은 이 파일을 디스크에서 읽지 않고 등록이 건넨 값만 쓴다.",
+      "그래서 환경 변수, 명령줄 인자, 현재 폴더, 데이터 폴더나 설치 폴더에 놓은 파일로는 값을 바꿀 수 없고, 바꾸려면 다시 빌드한다.",
+      "[ADR 0020](adr/0020-installed-scopes-in-registration.md)",
+    ]) {
+      expect(section, sentence).toContain(sentence);
+    }
+  });
+
+  it("says the place and the name are fixed, what stops the build there and what the build cannot see", () => {
+    for (const sentence of [
+      "범위 파일은 `site/config/connector-scopes.json`에만 둔다. 조립 패키지 안(`site/composition/config/` 등)에 두면 빌드가 `scopes-file-misplaced`로 멈춘다.",
+      "다른 이름으로 바꾸거나 `node_modules/` 아래의 JSON을 가져오는 것은 빌드가 보지 못하므로 멈추지 않고 보고서가 `absent`로 통과한다.",
+      "그 경우는 받아들인 위험이고, 시작 로그는 `bound`인데 보고서는 `absent`라는 데서 드러난다.",
+      "인스턴스 ID를 잘못 적은 항목은 형식이 맞아 드러나지 않는다(S31의 확인이 드러낸다).",
+      "가져온 값을 다른 곳에는 쓰면서 `connectorScopes`에는 넘기지 않은 등록도 빌드는 통과시킨다.",
+      "이 경우 `site-check --scopes`가 0이 아닌 값으로 끝나고 시작 로그가 `absent`를 남긴다.",
+    ]) {
+      expect(section, sentence).toContain(sentence);
+    }
+  });
+
+  it("says the import line needs `with { type: \"json\" }`, that no tsconfig setting is added, and not to turn resolveJsonModule off", () => {
+    for (const sentence of [
+      "`import` 줄에는 `with { type: \"json\" }`가 꼭 있어야 한다.",
+      "빠져도 타입 검사와 시험은 통과하고 Node의 소스 실행은 `ERR_IMPORT_ATTRIBUTE_MISSING`으로 실패한다.",
+      "속성 없는 가져오기의 묶기는 재지 않았다(통과하면 값이 묶음에 들어가 설치본은 정상이고, 실패하면 빌드가 멈춘다. 어느 쪽이든 조용하지 않다).",
+      "측정한 모양(`references` 없는 최소 패키지)에서는 `tsconfig.json`에 더할 설정이 없다.",
+      "`references`가 있는 실제 포크의 `tsconfig.json`은 재지 않았다.",
+      "다만 `resolveJsonModule`을 `false`로 두지 않는다(명시로 `false`이면 TypeScript가 JSON 모듈을 찾지 못한다).",
+      "포크의 범위 파일은 패키지 밖(`site/config/`)에 있어서 `include`에 더할 것도 없다.",
+    ]) {
+      expect(section, sentence).toContain(sentence);
+    }
+    // the example's own guard of the attribute and its tsconfig (no `resolveJsonModule`) are what the text describes
+    expect(read("packages/site-example/src/scopes.test.ts")).toContain("`with { type: \"json\" }`");
+    expect(read("packages/site-example/tsconfig.json")).not.toContain("resolveJsonModule");
+    expect(read("tsconfig.base.json")).not.toContain("resolveJsonModule");
+  });
+
+  it("says the one exception of the module boundary rule, with the three things it needs and what stays barred", () => {
+    for (const sentence of [
+      "규칙에 **예외 하나**가 있다: 조립 패키지(`@pki-site/composition`)의 `site/composition/src/registration.ts`가 이 파일을 상대 경로의 정적 `import` 선언으로 가져오는 것만 허용된다.",
+      "같은 패키지의 다른 파일(시험 파일 포함), `site/config/`의 다른 파일, `export … from`, `import()`, 절대 경로로 같은 파일을 가리키는 것은 지금처럼 막힌다.",
+      "앞에서 적은 대로 인라인 설정 주석으로 규칙을 끄는 길도 없다.",
+    ]) {
+      expect(section, sentence).toContain(sentence);
+    }
+    const rule = read("tooling/eslint/module-boundary.js");
+    expect(rule).toContain('pkg: "@pki-site/composition",');
+    expect(rule).toContain('file: "src/registration.ts",');
+    expect(rule).toContain('target: "../../site/config/connector-scopes.json",');
+  });
+
+  it("says what stops the build, in which words, where the result is left, and that nothing is copied", () => {
+    for (const sentence of [
+      "`pnpm --filter @pki/desktop build`는 백엔드를 묶은 뒤 범위 파일을 판정하고 다음 넷이면 멈춘다. 멈추면 오류의 문구에 이 코드가 적힌다.",
+      "`scopes-file-misplaced`는 허용된 자리가 아닌 범위 파일이 묶음에 있는 것, `scopes-file-unbound`는 `site/config/connector-scopes.json`이 있는데 등록이 가져오지 않아 묶음에 없는 것, `scopes-file-invalid`는 객체가 아니거나 틀린 항목이 있거나 키 `__proto__`나 두 번 나오는 키가 있는 것, `scopes-file-placeholder`는 예시의 범위 값 `pki-example-scope`가 그대로인 것이다.",
+      "파일이 없거나(`absent`) 범위가 있는 항목이 하나도 없는 것(`empty`)은 멈추지 않는다.",
+      "통과한 빌드는 마지막 출력 줄을 `connector scopes: <상태>`로 끝내고, `apps/desktop/dist` 폴더의 `build-report.json`에 있는 `connectorScopes`에 상태(`absent`, `empty`, `bound`)와 항목 수, 범위가 있는 항목 수를 적는다.",
+      "범위 값과 인스턴스 ID는 어디에도 싣지 않는다. 빌드는 범위 파일을 앱 폴더에 복사하지 않는다.",
+    ]) {
+      expect(section, sentence).toContain(sentence);
+    }
+    const judgment = read("apps/desktop/build/scopes-check.ts");
+    for (const code of ["scopes-file-misplaced", "scopes-file-unbound", "scopes-file-invalid", "scopes-file-placeholder"]) {
+      expect(judgment, code).toContain(`| "${code}"`);
+    }
+    expect(judgment).toContain('const EXAMPLE_PLACE = `packages/site-example/config/${FILE_NAME}`;');
+    expect(read("packages/contracts/src/site-scopes.ts")).toContain("pki-example-scope");
+    const build = read("apps/desktop/build/build.ts");
+    expect(build).toContain("connector scopes: ${scopes.state}");
+    expect(build).not.toMatch(/cpSync\([^)]*scopes/);
+  });
+
+  it("says an instance made while running cannot be listed and the browser backend knows no scopes, as the code has it", () => {
+    for (const sentence of [
+      "실행 중에 만들어지는 가져오기 인스턴스(I02-B의 `jsonl-file:…`)는 ID를 미리 알 수 없어 범위 파일에 적을 수 없고, 그런 인스턴스는 알 수 없음(닫힌 쪽)이다.",
+      "브라우저 개발용 백엔드(`backend/src/dev.ts`)는 등록을 받지 않으므로 포크에서도 모든 인스턴스가 알 수 없음이다.",
+    ]) {
+      expect(section, sentence).toContain(sentence);
+    }
+    expect(read("backend/src/dev.ts")).not.toContain("connectorScopes");
+  });
+
+  it("lists the four edits of a fork that copies the example, each as a full sentence, and the copied files they name exist", () => {
+    for (const sentence of [
+      "**예시를 `site/composition/`에 복사하는 포크는 범위 파일 때문에 네 곳을 고친다.**",
+      "고치지 않으면 빌드가 멈추거나 `pnpm typecheck`와 `pnpm test`가 실패한다(`import` 경로만 고친 시험 파일은 `pnpm lint`도 실패한다).",
+      "1. 복사된 `site/composition/config/connector-scopes.json`(예시의 `packages/site-example/config/connector-scopes.json`)을 `site/config/connector-scopes.json`으로 옮긴다(`site/config/` 폴더를 만든다). `registration.ts`의 `import` 줄은 `../../config/connector-scopes.json`으로 고친다(`with { type: \"json\" }`는 그대로 둔다). 파일의 값은 예시의 인스턴스 ID(`example-import`)와 범위 값(`pki-example-scope`)이 아닌 포크의 것으로 바꾼다. 옮기지 않으면 빌드가 `scopes-file-misplaced`로, 값을 바꾸지 않으면 `scopes-file-placeholder`로 멈춘다.",
+      "2. 복사한 `site/composition/src/scopes.test.ts`는 범위 파일을 `import`하지 않고 `readFileSync`로 읽도록 고친다. 옛 경로(`../config/connector-scopes.json`)는 타입 검사가 찾지 못하고(`TS2307`), 경로를 `../../config/connector-scopes.json`으로 고쳐 가져오면 경계 규칙이 `registration.ts`가 아닌 파일의 가져오기를 막는다(`pki/module-boundary`). 시험이 가져오기를 넣는 인스턴스와 기대하는 값도 포크의 범위 파일의 것으로 맞춘다.",
+      "3. 복사한 `site/composition/src/registration.test.ts`와 `site/composition/src/shell.boot.test.ts`가 기대하는 수집기 종류와 인스턴스 ID를 포크의 등록에 맞춘다(수집기 종류와 인스턴스를 바꾸지 않았다면 고칠 것이 없다).",
+      "4. 복사한 `tsconfig.json`의 `include`를 `[\"src\"]`로 한다(위 블록). 예시의 `config/*.json`은 범위 파일이 패키지 안에 있을 때만 필요하다.",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    // what the copied files hold, which is why each of the four edits is needed
+    const scopesTest = read("packages/site-example/src/scopes.test.ts");
+    expect(scopesTest).toContain('import scopesFile from "../config/connector-scopes.json" with { type: "json" };');
+    expect(scopesTest).toContain('const INSTANCE = "example-import";');
+    expect(read("packages/site-example/config/connector-scopes.json")).toContain('"example-import": ["pki-example-scope"]');
+    expect(read("packages/site-example/src/registration.test.ts")).toContain('id: "example-notes"');
+    expect(read("packages/site-example/src/shell.boot.test.ts")).toContain('id: "example-notes"');
+    expect(JSON.parse(read("packages/site-example/tsconfig.json")).include).toEqual(["src", "config/*.json"]);
+  });
+
+  it("gives the fork the `--scopes` command, as the code answers it, in the commands, the bullets and the recap", () => {
+    for (const sentence of [
+      "- 포크의 `site-check --scopes`는 종류 대신 등록의 인스턴스 범위 상태를 알린다. 항목 수와 범위가 있는 항목 수만 적고 범위 값과 인스턴스 ID는 적지 않는다.",
+      "등록에 `connectorScopes`가 없으면(`미구현, 배포처 후속`), 객체가 아니면, 틀린 항목이 있으면, 예시의 범위 값이 그대로이면, 범위가 있는 항목이 하나도 없으면 0이 아닌 값으로 끝난다.",
+      "`pnpm --filter @pki-site/composition site-check --scopes`, `pnpm --filter @pki/desktop build`다.",
+      "- 인스턴스 범위 파일은 `site/config/connector-scopes.json`에만 두고, 등록이 정적 `import`로 가져와 빌드할 때 백엔드 묶음에 넣는다. 실행본은 그 파일을 읽지 않는다. 자리가 틀리거나 묶이지 않았거나 형식이 틀렸거나 예시 값 그대로이면 빌드가 멈춘다.",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    const code = read("backend/src/site-check-main.ts");
+    for (const line of [
+      'fail("미구현, 배포처 후속 (S30: 범위 파일을 채우고 등록의 connectorScopes에 묶는다)");',
+      'fail("connectorScopes가 객체가 아니다 (connector-scopes-field-invalid)");',
+      "fail(`틀린 항목 ${bound.rejected}개 (connector-scopes-entry-invalid)`);",
+      'fail("예시 값이 그대로다 (채우지 않은 예시의 범위 값)");',
+      "fail(`범위가 있는 항목이 없다 (항목 ${bound.entries}개)`);",
+    ]) {
+      expect(code, line).toContain(line);
+    }
+  });
+
+  it("lists the files a fork adds with the scopes file under config/, and the build's bundle line says only the backend holds the value", () => {
+    for (const line of [
+      "└── config/                       설정 값: connector-scopes.json(인스턴스 범위. 등록이 가져온다)",
+      "│       ├── registration.ts       registration: SiteRegistration(범위 파일을 `connectorScopes`로 넘긴다)",
+    ]) {
+      expect(seven, line).toContain(line);
+    }
+    expect(seven).toContain(
+      "- 범위 파일의 값은 백엔드 묶음 안에만 있다. 앱 폴더에는 `connector-scopes.json`이라는 이름의 파일이 없고, 셸의 묶음(`main.js`)과 화면(`web/`)에도 값이 없다. 공용 진입점을 묶으면 범위 파일도 그 값도 묶음에 없다",
+    );
+  });
+});
+
+describe("docs.connector-sdk (I07): chapters 7 and 11 no longer list the installed build's gap, ownership.md says the registration binds the file (I07-R15)", () => {
+  it("chapter 7's list of what is missing keeps #114 and #116, in two items, without the scopes file", () => {
+    const seven = chapter(docText, 7);
+    const at = seven.indexOf("### 아직 없는 것");
+    const list = seven.slice(at, seven.indexOf("### 포크가 수집기를 만들 때 지킬 것"));
+    expect(list).toContain("1. **수집기에 비밀 값을 건네는 통로가 없다**(공용 저장소 #114). 8장.");
+    expect(list).toContain("2. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116).");
+    expect(list).not.toContain("3. ");
+    expect(list).not.toContain("connector-scopes.json");
+    expect(list).not.toContain("#115");
+  });
+
+  it("chapter 11's table has no row for the scopes file and no 'only the source tree reads it' sentence", () => {
+    const eleven = chapter(docText, 11);
+    expect(eleven).not.toContain("connector-scopes.json");
+    expect(eleven).not.toContain("소스 트리에서 실행할 때만 그 파일을 읽는다");
+  });
+
+  it("ownership.md says the file takes effect only when bound into the registration, and where it may be kept", () => {
+    const lines = ownership.split("\n");
+    const start = lines.findIndex((l) => l.startsWith("## 3. "));
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((l) => l.startsWith("## "));
+    const three = rest.slice(0, end < 0 ? undefined : end).join("\n");
+    expect(three).toContain(
+      "이 파일은 포크의 등록(`connectorScopes`)에 묶어야 쓰이고, 포크의 빌드가 그 값을 백엔드 묶음에 넣는다.",
+    );
+    expect(three).toContain(
+      "파일은 `site/config/connector-scopes.json`에만 둔다(다른 자리나 이름이면 빌드가 멈추거나 판정을 벗어난다. 방법은 [connector-sdk.md](connector-sdk.md) 7장).",
+    );
+    expect(three).not.toContain("#115");
+  });
+});
+
+describe("docs.connector-sdk (I07): the ADR and its index (I07-R15)", () => {
+  it("ADR 0020 exists with its title and state, and the ADR index and the docs index list it", () => {
+    const adr = read("docs/adr/0020-installed-scopes-in-registration.md");
+    expect(adr).toContain("# ADR 0020: 포크의 인스턴스 범위는 등록이 빌드할 때 묶어 설치본에 싣는다");
+    expect(adr).toContain("상태: **잠정 — 배포처 검증 대기**");
+    expect(read("docs/adr/README.md")).toContain("| [0020](0020-installed-scopes-in-registration.md) |");
+    expect(docsIndex).toContain("인스턴스 범위 파일은 ADR 0020과 S30·S31");
+    expect(docsIndex).toContain("결정 기록 18건(잠정 13, 확정 4, 미결 1.");
+  });
+
+  it("the ADR index links only files that exist (0017 and 0019 stay reserved for I02-B and I06: no link to a file not written yet)", () => {
+    const index = read("docs/adr/README.md");
+    const links = [...index.matchAll(/\]\((\d{4}-[a-z0-9-]+\.md)\)/g)].map((m) => m[1] as string);
+    expect(links.length).toBeGreaterThanOrEqual(17);
+    expect(links.filter((l) => !existsSync(resolve(docsDir, "adr", l)))).toEqual([]);
+    const numbers = readdirSync(resolve(docsDir, "adr")).flatMap((f) => /^(\d{4})-/.exec(f)?.[1] ?? []);
+    expect(numbers).toContain("0020");
+  });
+
+  it("the ADR points to the chapter, the checklist and the spec, and names its eight decisions", () => {
+    const adr = read("docs/adr/0020-installed-scopes-in-registration.md");
+    for (const ref of ["../specs/2026-11-22-I07-installed-scopes-file.md", "../connector-sdk.md", "../site-setup.md", "0018-fork-registration-at-build-time.md"]) {
+      expect(adr, ref).toContain(ref);
+    }
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) expect(adr).toContain(`\n${n}. **`);
+    expect(adr).not.toContain("\n9. **");
   });
 });

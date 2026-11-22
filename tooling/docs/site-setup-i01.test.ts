@@ -215,10 +215,11 @@ describe("docs.site-setup (I01): what S08 and S18 name exists", () => {
     expect(s08).toContain("`scope-unjudged`");
   });
 
-  it("S18 states the build resource's format and that the installed path is not built", () => {
+  it("S18 states the file's format and that the registration binds it at build time (I07-R14: the installed-build gap sentence is gone)", () => {
     expect(s18).toContain('{ "<인스턴스 ID>": ["범위", ...] | null }');
     expect(s18).toContain("설치본");
-    expect(s18).toContain("만들지 않았다");
+    expect(s18).toContain("포크의 등록이 빌드할 때 묶는다");
+    expect(s18).not.toContain("설치본에서 이 파일을 읽는 길은 만들지 않았다");
   });
 
   it("every file path S08 and S18 name exists in the repository", () => {
@@ -268,11 +269,12 @@ describe("docs.site-setup (I01): what S08 and S18 name exists", () => {
   });
 
   it("fails when a file the items name does not exist", () => {
-    const mutated = s18.replace("backend/src/connector-scopes.ts", "backend/src/no-such-scopes.ts");
+    expect(s18).toContain("`providers/src/log.ts`");
+    const mutated = s18.replace("providers/src/log.ts", "providers/src/no-such-log.ts");
     const missing = namedPaths(mutated).filter(
       (p) => !FORK_FILES.has(p) && !existsSync(resolve(repoRoot, p)),
     );
-    expect(missing).toEqual(["backend/src/no-such-scopes.ts"]);
+    expect(missing).toEqual(["providers/src/no-such-log.ts"]);
   });
 });
 
@@ -294,12 +296,14 @@ describe("docs.site-setup (I01): what S18 says is not built stays true", () => {
     );
   });
 
-  it("S18 names the tracked gap and states the check's caveats", () => {
+  it("S18 no longer names the tracked gap (#115) and points to S31; the check's caveats moved to S31 (I07-R14)", () => {
     const s18 = itemText(siteText, "S18");
-    expect(s18).toContain("#115");
-    expect(s18).toContain("모두 `null`");
-    expect(s18).toContain("정렬");
-    expect(s18).toContain("거짓 통과");
+    expect(s18).not.toContain("#115");
+    expect(s18).toContain("S31");
+    // the check on an installed build reads the canonical database, not the log, so the old log caveat ("거짓 통과") is not carried over
+    const s31 = itemText(siteText, "S31");
+    expect(s31).toContain("모두 `null`");
+    expect(s31).toContain("정렬");
   });
 
   it("S08 separates collector sources (grade(null)) from claimed ones (strictest([]))", () => {
