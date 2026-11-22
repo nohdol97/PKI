@@ -73,7 +73,7 @@ describe("ledger file format", () => {
       cv: 1,
       lr: null,
       reason: "user-deleted",
-      at: "a",
+      at: "2026-11-22T00:00:00.000Z",
       la: null,
     });
     const text = `${whole}${good}\n{"t":"line","seq":2\n${good.replace('"seq":1', '"seq":3')}`;
@@ -94,7 +94,7 @@ describe("ledger file format", () => {
       cv: 1,
       lr: null,
       reason: "user-deleted",
-      at: "a",
+      at: "2026-11-22T00:00:00.000Z",
       la: null,
     };
     const bad: Record<string, unknown> = {
@@ -129,7 +129,7 @@ describe("ledger file format", () => {
       cv: 1,
       lr: null,
       reason: "user-deleted",
-      at: "a",
+      at: "2026-11-22T00:00:00.000Z",
       la: null,
     };
     for (const bad of [{ reason: "gone" }, { cv: -1 }, { seq: 0 }, { la: 5 }]) {
@@ -258,5 +258,115 @@ describe("the real files", () => {
     const other = openLedger({ path, key: OTHER, canonicalSeq: 0, hasData: false });
     expect(other.status.setAside).toMatchObject([{ deletions: 1 }]);
     expect(nodeLedgerIo.exists(join(dir, "tombstone-ledger.other-key-1.jsonl"))).toBe(true);
+  });
+});
+
+describe("creating a ledger over a database that holds tombstones", () => {
+  const seed = [draft(), draft({ identityHash: "h2", liftedAt: "2026-11-23T00:00:00.000Z" })];
+
+  it("writes the header and one line per tombstone in the one atomic step, numbered after the database's number", () => {
+    const { io, ledger } = open(memoryLedgerIo(), {
+      canonicalSeq: 4,
+      hasData: true,
+      seed: () => seed,
+    });
+    expect(io.log.filter((l) => l.startsWith("create"))).toEqual([`create:${P}`]);
+    expect(io.log.some((l) => l.startsWith("append"))).toBe(false);
+    const read = parseLedger(io.files.get(P) as string);
+    expect(read.key).toBe(hex(KEY));
+    expect(read.lines.map((l) => [l.seq, l.identityHash, l.liftedAt !== null])).toEqual([
+      [5, "h1", false],
+      [6, "h2", true],
+    ]);
+    expect(ledger.status).toMatchObject({ created: true, seeded: 2, seededThrough: 6 });
+    expect(ledger.reserve(1, 4)).toEqual([7]);
+  });
+
+  it("a creation that fails leaves no file, and the next start creates it with the seed", () => {
+    const io = memoryLedgerIo();
+    io.fail = (op) => (op === "create" ? new Error("disk full") : undefined);
+    expect(() =>
+      openLedger({ path: P, key: KEY, canonicalSeq: 0, hasData: true, seed: () => seed, io }),
+    ).toThrow("disk full");
+    expect(io.files.has(P)).toBe(false);
+    io.fail = () => undefined;
+    const again = openLedger({
+      path: P,
+      key: KEY,
+      canonicalSeq: 0,
+      hasData: true,
+      seed: () => seed,
+      io,
+    });
+    expect(again.status.seeded).toBe(2);
+    expect(parseLedger(io.files.get(P) as string).lines).toHaveLength(2);
+  });
+
+  it("a temp file a crash left is removed at the next open, and the ledger is created with its seed", () => {
+    const io = memoryLedgerIo();
+    io.files.set(`${P}.tmp`, "half a ledger");
+    const ledger = openLedger({
+      path: P,
+      key: KEY,
+      canonicalSeq: 0,
+      hasData: true,
+      seed: () => seed,
+      io,
+    });
+    expect(io.files.has(`${P}.tmp`)).toBe(false);
+    expect(ledger.status.seeded).toBe(2);
+  });
+
+  it("a ledger that already exists is not seeded again", () => {
+    const io = memoryLedgerIo();
+    open(io, { seed: () => seed });
+    let called = false;
+    const again = open(io, { seed: () => ((called = true), seed) }).ledger;
+    expect(called).toBe(false);
+    expect(again.status.created).toBe(false);
+  });
+});
+
+describe("a line may not make a start fail: value domains", () => {
+  const header = `${JSON.stringify({ t: "header", v: 1, key: "k" })}\n`;
+  const base = {
+    t: "line",
+    seq: 1,
+    i: "c",
+    k: "k1",
+    h: "h",
+    cv: 1,
+    lr: null,
+    reason: "user-deleted",
+    at: "2026-11-22T00:00:00.000Z",
+    la: null,
+  };
+  const bad: [string, unknown][] = [
+    ["at", "not a date"],
+    ["at", ""],
+    ["la", "yesterday"],
+    ["cv", 1e13],
+    ["lr", 1e13],
+    ["seq", 1e13],
+    ["i", ""],
+    ["h", ""],
+    ["k", ""],
+    ["i", "x".repeat(300)],
+    ["at", "2026-11-22T00:00:00.000Z".repeat(4)],
+  ];
+  it.each(bad)("a line whose %s is %j is damaged, skipped, and applies nothing", (field, value) => {
+    const read = parseLedger(`${header}${JSON.stringify({ ...base, [field]: value })}\n`);
+    expect([read.lines.length, read.damaged]).toEqual([0, 1]);
+  });
+  it("accepts the legacy line without a kind, and a null kind", () => {
+    const { k: _k, ...legacy } = base;
+    for (const line of [legacy, { ...base, k: null }]) {
+      const read = parseLedger(`${header}${JSON.stringify(line)}\n`);
+      expect(read.lines.map((l) => l.connectorKind)).toEqual([null]);
+    }
+  });
+  it("does not count an empty line (a write that failed before any byte)", () => {
+    const read = parseLedger(`${header}\n${JSON.stringify(base)}\n\n`);
+    expect([read.lines.length, read.damaged]).toEqual([1, 0]);
   });
 });

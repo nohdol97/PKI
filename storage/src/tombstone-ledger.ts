@@ -21,6 +21,7 @@ import {
   readFileSync,
   renameSync,
   truncateSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
 import { dirname } from "node:path";
@@ -41,6 +42,13 @@ export interface LedgerIo {
   append(path: string, text: string): void;
   /** Cuts what follows the file's last newline (a cut line) and fsyncs it. */
   cutToLastNewline(path: string): void;
+  /**
+   * Makes `path` appear with exactly `text`, or not at all: the text goes to `path + ".tmp"`, is
+   * fsynced, renamed into place and the directory fsynced. Used for a new ledger with its seed.
+   */
+  create(path: string, text: string): void;
+  /** Removes a left-over `path + ".tmp"` (a crash between the write and the rename); none is fine. */
+  discardTemp(path: string): void;
   /** Renames `from` to a name that does not exist yet and fsyncs the directory. */
   rename(from: string, to: string): void;
   exists(path: string): boolean;
@@ -57,6 +65,7 @@ export interface LedgerFs {
   readFileSync(path: string): Uint8Array;
   truncateSync(path: string, bytes: number): void;
   renameSync(from: string, to: string): void;
+  unlinkSync(path: string): void;
 }
 
 export const realLedgerFs: LedgerFs = {
@@ -68,6 +77,7 @@ export const realLedgerFs: LedgerFs = {
   readFileSync: (path) => readFileSync(path),
   truncateSync,
   renameSync,
+  unlinkSync,
 };
 
 /** The ledger's file operations over `fs`. `platform` is a parameter so the Windows branch can be run. */
@@ -86,6 +96,23 @@ export function createNodeLedgerIo(
       fs.closeSync(fd);
     }
   };
+  const writeDurably = (path: string, flags: string, text: string): void => {
+    const bytes = Buffer.from(text, "utf8");
+    const fd = fs.openSync(path, flags, 0o600);
+    try {
+      // writeSync may write less than asked (disk full, a size limit) and does not loop: a cut
+      // line must never look like a durable one, so every byte goes out or this throws
+      let written = 0;
+      while (written < bytes.length) {
+        const n = fs.writeSync(fd, bytes, written, bytes.length - written);
+        if (n <= 0) throw new Error("the ledger write made no progress");
+        written += n;
+      }
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+  };
   return {
     read: (path) => {
       try {
@@ -97,22 +124,23 @@ export function createNodeLedgerIo(
     },
     append: (path, text) => {
       const created = !fs.existsSync(path);
-      const bytes = Buffer.from(text, "utf8");
-      const fd = fs.openSync(path, "a", 0o600);
-      try {
-        // writeSync may write less than asked (disk full, a size limit) and does not loop: a cut
-        // line must never look like a durable one, so every byte goes out or this throws
-        let written = 0;
-        while (written < bytes.length) {
-          const n = fs.writeSync(fd, bytes, written, bytes.length - written);
-          if (n <= 0) throw new Error("the ledger write made no progress");
-          written += n;
-        }
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
+      writeDurably(path, "a", text);
       if (created) fsyncDirectory(dirname(path));
+    },
+    create: (path, text) => {
+      const temp = `${path}.tmp`;
+      writeDurably(temp, "w", text);
+      // rename over an existing name is not portable (Windows): the caller creates only where the
+      // name is free. Unverified on Windows.
+      fs.renameSync(temp, path);
+      fsyncDirectory(dirname(path));
+    },
+    discardTemp: (path) => {
+      try {
+        fs.unlinkSync(`${path}.tmp`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     },
     cutToLastNewline: (path) => {
       // on the bytes: decoded text would shift the offset past invalid UTF-8
@@ -165,8 +193,15 @@ export interface LedgerContents {
 
 const REASONS: readonly string[] = ["user-deleted", "source-deleted", "access-revoked"];
 
+/** A number a line may hold: a finite non-negative integer far below anything the database counts. */
 const isInt = (v: unknown): v is number =>
-  typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= 1e12;
+/** An identifier of a line (instance, kind, hash): a short non-empty string. */
+const isName = (v: unknown): v is string =>
+  typeof v === "string" && v.length > 0 && v.length <= 256;
+/** A time a line may hold: one the entries would accept (`new Date` parses it). No line's content may stop a start. */
+const isTime = (v: unknown): v is string =>
+  typeof v === "string" && v.length <= 64 && !Number.isNaN(new Date(v).getTime());
 
 function readLine(raw: unknown): LedgerLine | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
@@ -175,15 +210,15 @@ function readLine(raw: unknown): LedgerLine | undefined {
     r.t !== "line" ||
     !isInt(r.seq) ||
     r.seq < 1 ||
-    typeof r.i !== "string" ||
-    !(r.k === undefined || typeof r.k === "string") ||
-    typeof r.h !== "string" ||
+    !isName(r.i) ||
+    !(r.k === undefined || r.k === null || isName(r.k)) ||
+    !isName(r.h) ||
     !isInt(r.cv) ||
     !(r.lr === null || isInt(r.lr)) ||
     typeof r.reason !== "string" ||
     !REASONS.includes(r.reason) ||
-    typeof r.at !== "string" ||
-    !(r.la === null || typeof r.la === "string")
+    !isTime(r.at) ||
+    !(r.la === null || isTime(r.la))
   ) {
     return undefined;
   }
@@ -213,6 +248,8 @@ export function parseLedger(text: string): LedgerContents {
   };
   const cancelled = new Set<number>();
   pieces.forEach((piece, index) => {
+    // a write that failed before any byte left an empty line: nothing was lost, nothing to count
+    if (piece === "" && index > 0) return;
     let raw: unknown;
     try {
       raw = JSON.parse(piece);
@@ -262,12 +299,18 @@ const encodeLine = (seq: number, d: LedgerLineDraft) =>
 
 /** What opening the ledger found; the start-up reconcile reports it. */
 export interface LedgerOpenStatus {
-  /** A new file was started at this open (missing, or set aside): the database's tombstones are not in it yet. */
+  /** A new file was started at this open (missing, or set aside). */
   created: boolean;
+  /** Lines the new file was created with (one per tombstone the database held); 0 when none or not created. */
+  seeded: number;
+  /** The last number the seed took; the database records it (the file holds the lines already). */
+  seededThrough: number;
   /** No ledger file although the database holds data: deletions after the backup are unknown. */
   missing: boolean;
   /** The file ended in a cut line (a write the process died in); it was cut off, never applied. */
   truncated: boolean;
+  /** Lines written at this start for tombstones the ledger had none for (a lost or cut seed); set by the composition root. */
+  healed: number;
   /** Ledgers set aside because their key is not this database's, with the deletions each held. */
   setAside: { file: string; deletions: number; reason: "other-key" | "damaged-header" }[];
 }
@@ -306,6 +349,12 @@ export interface OpenLedgerOptions {
   canonicalSeq: number;
   /** Whether the database holds any source or tombstone. */
   hasData: boolean;
+  /**
+   * The lines a new file starts with, one per tombstone the database already holds (called only when a
+   * file is created). They are written in the same atomic step as the header: a crash leaves either
+   * the whole new ledger or none, never a header-only file over a database with deletions.
+   */
+  seed?: () => readonly LedgerLineDraft[];
   io?: LedgerIo;
 }
 
@@ -325,9 +374,13 @@ function freeName(io: LedgerIo, path: string, label: string): string {
  */
 export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
   const { path, key, io = nodeLedgerIo } = options;
+  io.discardTemp(path); // a crash between the temp write and the rename left it; nothing in it counts
   const header = `${JSON.stringify({ t: "header", v: 1, key: hex(key) })}\n`;
   const status: LedgerOpenStatus = {
     created: false,
+    seeded: 0,
+    seededThrough: 0,
+    healed: 0,
     missing: false,
     truncated: false,
     setAside: [],
@@ -349,11 +402,20 @@ export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
     }
   };
 
+  const createWithSeed = (): void => {
+    const drafts = options.seed?.() ?? [];
+    const first = options.canonicalSeq + 1;
+    io.create(path, header + drafts.map((d, i) => `${encodeLine(first + i, d)}\n`).join(""));
+    status.created = true;
+    status.seeded = drafts.length;
+    lastSeq = options.canonicalSeq + drafts.length;
+    status.seededThrough = drafts.length > 0 ? lastSeq : 0;
+  };
+
   const text = io.read(path);
   if (text === undefined) {
     status.missing = options.canonicalSeq > 0 || options.hasData;
-    status.created = true;
-    io.append(path, header);
+    createWithSeed();
   } else {
     const found = parseLedger(text);
     if (found.key === undefined || found.key !== hex(key)) {
@@ -364,8 +426,7 @@ export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
         deletions: found.lines.length,
         reason: found.key === undefined ? "damaged-header" : "other-key",
       });
-      status.created = true;
-      io.append(path, header);
+      createWithSeed();
     } else {
       lastSeq = found.maxSeq;
       if (found.truncated) {

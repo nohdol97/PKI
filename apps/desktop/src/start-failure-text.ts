@@ -17,7 +17,7 @@ const REASON_TEXT: Record<Exclude<StartFailureReason, "ledger-reapply-failed">, 
 
 /** The ledger line is a number the backend reports; no identifier or path is in the text. */
 const ledgerText = (line: number | undefined) =>
-  `삭제 장부의 ${line === undefined ? "한" : `${line}번`} 줄을 다시 적용하지 못해 시작하지 않았습니다. 삭제한 자료가 되살아나지 않도록 데이터를 열지 않습니다. 장부 파일을 지우지 말고, 데이터 폴더의 백업을 복원하거나 지원에 이 줄 번호를 알려 주세요.`;
+  `삭제 장부의 ${line === undefined ? "한" : `${line}번`} 줄을 다시 적용하지 못해 시작하지 않았습니다. 삭제한 자료가 되살아나지 않도록 데이터를 열지 않습니다. 데이터 폴더와 안의 삭제 장부 파일을 그대로 두고(장부를 지우면 삭제가 풀립니다) 이 줄 번호를 알려 주세요. 원인이 고쳐지기 전에는 앱이 시작되지 않습니다.`;
 
 export function startFailureText(error: unknown): string {
   if (!(error instanceof BackendStartError) || error.reason === undefined) return GENERIC;

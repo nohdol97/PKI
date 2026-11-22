@@ -211,6 +211,14 @@ describe("degraded states (V01-R5)", () => {
           ignoredLines: 0,
           setAsideLedgers: 0,
           setAsideDeletions: 0,
+          history: {
+            missingCreated: { total: 0, last: null },
+            setAside: { total: 0, last: null },
+            unrecoverable: { total: 0, last: null },
+            ignoredLines: { total: 0, last: null },
+            reapplied: { total: 0, last: null },
+            seeded: { total: 0, last: null },
+          },
         },
       },
     });
@@ -367,6 +375,14 @@ describe("degraded states (V01-R5)", () => {
           ignoredLines: 0,
           setAsideLedgers: 0,
           setAsideDeletions: 0,
+          history: {
+            missingCreated: { total: 0, last: null },
+            setAside: { total: 0, last: null },
+            unrecoverable: { total: 0, last: null },
+            ignoredLines: { total: 0, last: null },
+            reapplied: { total: 0, last: null },
+            seeded: { total: 0, last: null },
+          },
         },
       },
     });
@@ -451,6 +467,14 @@ describe("the product on a PC with no CLI and no network (all five at once)", ()
             ignoredLines: 0,
             setAsideLedgers: 0,
             setAsideDeletions: 0,
+            history: {
+              missingCreated: { total: 0, last: null },
+              setAside: { total: 0, last: null },
+              unrecoverable: { total: 0, last: null },
+              ignoredLines: { total: 0, last: null },
+              reapplied: { total: 0, last: null },
+              seeded: { total: 0, last: null },
+            },
           },
         },
       });

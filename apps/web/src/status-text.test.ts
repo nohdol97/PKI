@@ -192,6 +192,14 @@ const OK: LedgerStatus = {
   ignoredLines: 0,
   setAsideLedgers: 0,
   setAsideDeletions: 0,
+  history: {
+    missingCreated: { total: 0, last: null },
+    setAside: { total: 0, last: null },
+    unrecoverable: { total: 0, last: null },
+    ignoredLines: { total: 0, last: null },
+    reapplied: { total: 0, last: null },
+    seeded: { total: 0, last: null },
+  },
 };
 const protection = (ledger: Partial<LedgerStatus>, legacyCleanup: "done" | "pending" = "done") =>
   dataProtectionText({ legacyCleanup, ledger: { ...OK, ...ledger } });
@@ -231,5 +239,20 @@ describe("status.data-protection: dataProtectionText (I04-R6, I04-R17)", () => {
     );
     expect(text.split(" / ")).toHaveLength(3);
     expect(text.startsWith("이전 삭제")).toBe(true);
+  });
+  it("keeps what happened at earlier starts after the current state is ok, with the date of the last time", () => {
+    const text = protection({
+      history: {
+        ...OK.history,
+        missingCreated: { total: 2, last: "2026-11-22T09:30:00.000Z" },
+        unrecoverable: { total: 1, last: "2026-11-21T01:00:00.000Z" },
+      },
+    });
+    expect(text.startsWith("정상 · 지난 기록: ")).toBe(true);
+    expect(text).toContain("삭제 장부가 없어 새로 만듦 2번(마지막 발생: 2026-11-22)");
+    expect(text).toContain("다시 적용하지 못한 삭제 1건(마지막 발생: 2026-11-21)");
+  });
+  it("says nothing of the history while nothing ever happened", () => {
+    expect(protection({})).toBe("정상");
   });
 });

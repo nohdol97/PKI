@@ -123,7 +123,9 @@ describe("a ledger line that cannot be applied refuses the start with its line n
     }).catch((e: unknown) => e);
     const text = startFailureText(error);
     expect(text).toContain("7번 줄");
-    expect(text).toContain("장부 파일을 지우지 말고");
+    expect(text).toContain("그대로 두고");
+    expect(text).toContain("장부를 지우면 삭제가 풀립니다");
+    expect(text).not.toContain("백업");
     expect(text).not.toBe("앱을 시작하지 못했습니다.");
   });
   it("refuses a line number that is not a positive integer or a string", async () => {

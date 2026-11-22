@@ -9,6 +9,7 @@ import {
   readSetting,
   type SqlDriver,
 } from "@pki/storage";
+import { readLedgerHistory } from "./ledger-history.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -28,6 +29,18 @@ function setAsideIn(dir: string): { ledgers: number; deletions: number } {
   } catch {
     return { ledgers: 0, deletions: 0 };
   }
+}
+
+function historyOf(db: SqlDriver): LedgerStatus["history"] {
+  const h = readLedgerHistory(db);
+  return {
+    missingCreated: h.missingCreated,
+    setAside: h.setAside,
+    unrecoverable: h.unrecoverable,
+    ignoredLines: h.ignoredLines,
+    reapplied: h.reapplied,
+    seeded: h.seeded,
+  };
 }
 
 export function ledgerStatus(db: SqlDriver, dataDir: string): LedgerStatus {
@@ -52,5 +65,6 @@ export function ledgerStatus(db: SqlDriver, dataDir: string): LedgerStatus {
     ignoredLines: count(report.damaged) + (report.truncated === true ? 1 : 0),
     setAsideLedgers: setAside.ledgers,
     setAsideDeletions: setAside.deletions,
+    history: historyOf(db),
   };
 }

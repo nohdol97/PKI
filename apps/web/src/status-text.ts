@@ -93,6 +93,15 @@ export const DOWNLOAD_APPROVAL =
 export const LOCAL_PACK_HINT =
   "로컬 팩: 모델 파일 4개가 든 폴더의 절대 경로입니다. 파일은 네트워크 없이 이 PC에서 읽고, 해시가 맞을 때만 설치합니다.";
 
+const HISTORY_TEXT = [
+  ["missingCreated", "삭제 장부가 없어 새로 만듦"],
+  ["setAside", "다른 설치의 장부를 옆에 둠"],
+  ["unrecoverable", "다시 적용하지 못한 삭제"],
+  ["ignoredLines", "읽지 못해 무시한 장부 줄"],
+  ["reapplied", "시작 때 다시 적용한 삭제"],
+  ["seeded", "장부에 뒤늦게 채운 삭제"],
+] as const;
+
 /**
  * The data-protection item (I04-R6): `pending` on a running backend means the clean-up
  * of earlier deletions' traces failed at this start (it starts after the backend's
@@ -125,5 +134,15 @@ export const dataProtectionText = (status: RouteResponse<"status">["dataProtecti
   if (ledger.reapplied > 0) {
     notes.push(`시작할 때 삭제 ${ledger.reapplied}건을 다시 적용했습니다`);
   }
-  return notes.length === 0 ? "정상" : notes.join(" / ");
+  const head = notes.length === 0 ? "정상" : notes.join(" / ");
+  // what happened at earlier starts does not vanish when the current state is ok again
+  const past = HISTORY_TEXT.flatMap(([name, label]) => {
+    const entry = ledger.history[name];
+    return entry.total > 0 && entry.last !== null
+      ? [
+          `${label} ${entry.total}${name === "missingCreated" ? "번" : "건"}(마지막 발생: ${entry.last.slice(0, 10)})`,
+        ]
+      : [];
+  });
+  return past.length === 0 ? head : `${head} · 지난 기록: ${past.join(", ")}`;
 };

@@ -261,6 +261,7 @@ describe("derivatives.data-dir", () => {
       "tombstone-ledger.jsonl",
       "tombstone-ledger.other-key-1.jsonl",
       "tombstone-ledger.damaged-12.jsonl",
+      "tombstone-ledger.jsonl.tmp",
     ])
       writeFileSync(join(dir, f), "");
     expect(checkDataDirectory(dir, registry)).toEqual([]);
@@ -269,10 +270,11 @@ describe("derivatives.data-dir", () => {
       "tombstone-ledger.other-key-0.jsonl",
       "tombstone-ledger.other-key-.jsonl",
       "tombstone-ledger.stale-1.jsonl",
-      "tombstone-ledger.jsonl.tmp",
+      "tombstone-ledger.jsonl.tmp2",
+      "tombstone-ledger.jsonl.tmp.bak",
     ])
       writeFileSync(join(dir, f), "");
-    expect(checkDataDirectory(dir, registry)).toHaveLength(5);
+    expect(checkDataDirectory(dir, registry)).toHaveLength(6);
   });
 
   it("an unknown file fails and the message names it", () => {

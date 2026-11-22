@@ -50,7 +50,15 @@ function memoryFs(options: { chunk?: number; stall?: boolean } = {}) {
       return f;
     },
     truncateSync: (p, bytes) => void files.set(p, (files.get(p) as Buffer).subarray(0, bytes)),
-    renameSync: () => undefined,
+    renameSync: (from, to) => {
+      log.push(`rename:${from}->${to}`);
+      files.set(to, files.get(from) as Buffer);
+      files.delete(from);
+    },
+    unlinkSync: (p) => {
+      log.push(`unlink:${p}`);
+      if (!files.delete(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    },
   };
   return { fs, files, log };
 }
@@ -179,6 +187,8 @@ describe("through a canonical transaction", () => {
       },
       cutToLastNewline: () => undefined,
       rename: () => undefined,
+      create: (_p, t) => void (text = t),
+      discardTemp: () => undefined,
       exists: (p) => p === P && text !== "",
     };
     const ledger = openLedger({
@@ -219,6 +229,8 @@ describe("through a canonical transaction", () => {
       },
       cutToLastNewline: () => undefined,
       rename: () => undefined,
+      create: (_p, t) => void (text = t),
+      discardTemp: () => undefined,
       exists: (p) => p === P && text !== "",
     };
     const ledger = openLedger({
@@ -242,6 +254,8 @@ describe("through a canonical transaction", () => {
       append: (_p, t) => void (text += t),
       cutToLastNewline: () => undefined,
       rename: () => undefined,
+      create: (_p, t) => void (text = t),
+      discardTemp: () => undefined,
       exists: (p) => p === P && text !== "",
     };
     attachLedger(

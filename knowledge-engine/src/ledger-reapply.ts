@@ -53,6 +53,8 @@ export interface ReapplyReport {
   lifted: number;
   /** Lines whose instance this database does not know and that carry no kind to register it with: counted, not applied (their numbers are taken). */
   unrecoverable: number;
+  /** Lines written to the ledger for tombstones it had no line for (a seed that was lost). */
+  healed: number;
   /** Lines at or below the database's sequence, or repeating a sequence already applied. */
   skipped: number;
   /** The database's applied sequence after the run. */
@@ -61,6 +63,8 @@ export interface ReapplyReport {
   truncated: boolean;
   /** Complete lines that could not be read, not applied. */
   damaged: number;
+  /** Lines a new ledger was created with, and lines written for tombstones the ledger lacked: tombstones now in the ledger that were not. */
+  seeded: number;
   /** No ledger file although the database holds data: deletions after the backup are unknown. */
   missing: boolean;
   /** Ledgers set aside at this start (another installation's key) and their deletion counts. */
@@ -130,6 +134,8 @@ export function createLedgerReapply(registry: DerivativeRegistry): LedgerReapply
       canonicalSeq: readLedgerSeq(db),
       truncated: ledger.status.truncated,
       damaged: contents.damaged,
+      seeded: ledger.status.seeded,
+      healed: ledger.status.healed,
       missing: ledger.status.missing,
       setAside: ledger.status.setAside,
     };

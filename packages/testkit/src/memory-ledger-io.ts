@@ -2,12 +2,14 @@
 // (I04-R17 crash matrix). The shape is the storage port's (`LedgerIo`), declared here
 // because testkit does not depend on storage; a port that no longer fits fails to
 // typecheck at the call site.
-export type LedgerIoOperation = "read" | "append" | "cut" | "rename";
+export type LedgerIoOperation = "read" | "append" | "create" | "cut" | "rename" | "discard";
 
 export interface MemoryLedgerIo {
   read(path: string): string | undefined;
   append(path: string, text: string): void;
   cutToLastNewline(path: string): void;
+  create(path: string, text: string): void;
+  discardTemp(path: string): void;
   rename(from: string, to: string): void;
   exists(path: string): boolean;
   /** The files by path. A test seeds or reads them directly. */
@@ -28,6 +30,16 @@ export function memoryLedgerIo(): MemoryLedgerIo {
       const error = io.fail?.("append", path, text);
       if (error) throw error;
       io.files.set(path, (io.files.get(path) ?? "") + text);
+    },
+    create: (path, text) => {
+      io.log.push(`create:${path}`);
+      const error = io.fail?.("create", path, text);
+      if (error) throw error;
+      io.files.set(path, text);
+    },
+    discardTemp: (path) => {
+      io.log.push(`discard:${path}`);
+      io.files.delete(`${path}.tmp`);
     },
     cutToLastNewline: (path) => {
       io.log.push(`cut:${path}`);

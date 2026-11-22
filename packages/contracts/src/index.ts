@@ -353,6 +353,11 @@ export const ProviderStatusSchema = z.discriminatedUnion("state", [
 ]);
 export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
 
+const LedgerHistoryEntry = z.object({
+  total: z.int().nonnegative(),
+  last: z.string().nullable(),
+});
+
 export const StatusResponseSchema = z.object({
   backend: ComponentStatusSchema,
   provider: ProviderStatusSchema,
@@ -390,6 +395,19 @@ export const StatusResponseSchema = z.object({
       ignoredLines: z.int().nonnegative(),
       setAsideLedgers: z.int().nonnegative(),
       setAsideDeletions: z.int().nonnegative(),
+      /**
+       * What the ledger had to do at any start so far, with the time of the last one: the current
+       * state above may be `ok` again, this does not vanish. Clearing it is a follow-up (an
+       * acknowledge action); set-aside ledgers show until the files are removed.
+       */
+      history: z.object({
+        missingCreated: LedgerHistoryEntry,
+        setAside: LedgerHistoryEntry,
+        unrecoverable: LedgerHistoryEntry,
+        ignoredLines: LedgerHistoryEntry,
+        reapplied: LedgerHistoryEntry,
+        seeded: LedgerHistoryEntry,
+      }),
     }),
   }),
 });

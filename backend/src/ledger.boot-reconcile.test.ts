@@ -470,7 +470,11 @@ describe("the status API's data protection item shows the ledger", () => {
       host: `127.0.0.1:${port}`,
       authorization: `Bearer ${TOKEN}`,
     });
-    return (res.body as { dataProtection: { ledger: unknown } }).dataProtection.ledger;
+    // the history is tested apart (it outlives the state): only the current state is compared here
+    const { history: _history, ...current } = (
+      res.body as { dataProtection: { ledger: { history: unknown } } }
+    ).dataProtection.ledger;
+    return current;
   };
   const OK = {
     state: "ok",
@@ -561,5 +565,108 @@ describe("the status API's data protection item shows the ledger", () => {
     writeFileSync(join(dir, LEDGER_FILE), `${real}\n${line}\n`);
     await start();
     expect(await ledgerOfStatus()).toEqual({ ...OK, unrecoverable: 1 });
+  });
+});
+
+describe("a seed that was cut short, and the history that outlives the current state", () => {
+  const headerOnly = () => {
+    const [header] = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n");
+    writeFileSync(join(dir, LEDGER_FILE), `${header}\n`);
+  };
+  const statusOf = async () => {
+    const { port } = live().server;
+    const res = await send(port, routes.status.path, {
+      host: `127.0.0.1:${port}`,
+      authorization: `Bearer ${TOKEN}`,
+    });
+    return (res.body as { dataProtection: { ledger: Record<string, unknown> } }).dataProtection
+      .ledger as {
+      state: string;
+      history: Record<string, { total: number; last: string | null }>;
+    };
+  };
+
+  it("a header-only ledger over a database with deletions is completed at the start, reported, and a later restore of an older backup applies the deletion", async () => {
+    const db = seeded();
+    db.exec(`VACUUM INTO '${join(dir, "backup.sqlite")}'`);
+    userDelete(db, identity(), AT);
+    db.close();
+    headerOnly(); // the state a crash between the header and the seed left in an earlier build
+
+    await start();
+
+    expect(readFileSync(join(dir, LEDGER_FILE), "utf8").match(/"t":"line"/g)).toHaveLength(1);
+    const status = await statusOf();
+    expect(status.history.seeded?.total).toBe(1);
+    expect(status.history.seeded?.last).not.toBeNull();
+    await stop();
+    copyFileSync(join(dir, "backup.sqlite"), join(dir, CANONICAL_DB_FILE));
+    await start();
+    expect(versionsOf(live().db, "chat")).toBe(0);
+  });
+
+  it("a ledger created because it was missing is not forgotten after a restart: the state is ok, the history says when", async () => {
+    seeded().close();
+    rmSync(join(dir, LEDGER_FILE));
+    await start();
+    expect((await statusOf()).state).toBe("missing-created");
+    const first = (await statusOf()).history.missingCreated;
+    expect(first?.total).toBe(1);
+    await stop();
+    await start();
+    const second = await statusOf();
+    expect(second.state).toBe("ok");
+    expect(second.history.missingCreated).toEqual(first); // kept, not counted twice
+    await stop();
+    await start();
+    expect((await statusOf()).history.missingCreated).toEqual(first);
+  });
+
+  it("an unrecoverable line stays in the history after the restarts that follow, and an unreadable line already seen is not counted again", async () => {
+    seeded().close();
+    const real = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n")[0];
+    const good = {
+      t: "line",
+      seq: 1,
+      i: "unknown-instance",
+      h: "00".repeat(32),
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: AT,
+      la: null,
+    };
+    writeFileSync(join(dir, LEDGER_FILE), `${real}\n${JSON.stringify(good)}\n{broken\n`);
+    await start();
+    const first = await statusOf();
+    expect(first.history.unrecoverable?.total).toBe(1);
+    expect(first.history.ignoredLines?.total).toBe(1);
+    await stop();
+    await start();
+    const second = await statusOf();
+    expect(second.state).toBe("ok");
+    expect(second.history.unrecoverable).toEqual(first.history.unrecoverable);
+    expect(second.history.ignoredLines).toEqual(first.history.ignoredLines);
+  });
+
+  it("a well-formed line whose time is not a date never stops the start: it is unreadable, counted and skipped", async () => {
+    seeded().close();
+    const real = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n")[0];
+    const bad = {
+      t: "line",
+      seq: 1,
+      i: "c1",
+      k: "test-fixtures",
+      h: "00".repeat(32),
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: "not a date",
+      la: null,
+    };
+    writeFileSync(join(dir, LEDGER_FILE), `${real}\n${JSON.stringify(bad)}\n`);
+    await start();
+    expect((await statusOf()).history.ignoredLines?.total).toBe(1);
+    expect(versionsOf(live().db, "chat")).toBe(2);
   });
 });

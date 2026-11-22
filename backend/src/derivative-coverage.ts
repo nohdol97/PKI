@@ -141,7 +141,7 @@ export const OPERATIONAL_DATA_ENTRIES: readonly RegExp[] = [
   // the tombstone ledger (I04-T10, R17): keyed hashes and plain connector instance ids of deleted
   // sources, no source content. The names set aside beside it are made only when a ledger's key differs
   // from the database's or its header is damaged.
-  /^tombstone-ledger\.jsonl$/,
+  /^tombstone-ledger\.jsonl(\.tmp)?$/, // the ledger; `.tmp` is a new one a crash left before its rename
   /^tombstone-ledger\.(other-key|damaged)-[1-9][0-9]*\.jsonl$/,
 ];
 

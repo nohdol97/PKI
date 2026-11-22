@@ -123,6 +123,14 @@ describe("status API: data protection (I04-R6)", () => {
         ignoredLines: 0,
         setAsideLedgers: 0,
         setAsideDeletions: 0,
+        history: {
+          missingCreated: { total: 0, last: null },
+          setAside: { total: 0, last: null },
+          unrecoverable: { total: 0, last: null },
+          ignoredLines: { total: 0, last: null },
+          reapplied: { total: 0, last: null },
+          seeded: { total: 0, last: null },
+        },
       },
     });
     writeSetting(db, "purge.legacy-cleanup", "done");
@@ -136,6 +144,14 @@ describe("status API: data protection (I04-R6)", () => {
         ignoredLines: 0,
         setAsideLedgers: 0,
         setAsideDeletions: 0,
+        history: {
+          missingCreated: { total: 0, last: null },
+          setAside: { total: 0, last: null },
+          unrecoverable: { total: 0, last: null },
+          ignoredLines: { total: 0, last: null },
+          reapplied: { total: 0, last: null },
+          seeded: { total: 0, last: null },
+        },
       },
     });
   });
