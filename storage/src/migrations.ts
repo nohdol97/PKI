@@ -599,6 +599,23 @@ const v13: Migration = (db) =>
     BEGIN SELECT RAISE(ABORT, 'a source version must be greater than its tombstone'); END;
   `);
 
+// Schema v14 (I04-T07, I04-R7): the installation's identity key and the mark of a
+// source whose identifier is the keyed hash. The key lives in the canonical
+// database (one row, 32 random bytes), not in the secrets store: losing a key
+// there would silently void every deletion. `identity_hashed` is how a start finds
+// whether any hash exists (a missing key then stops it); the hashing itself needs
+// HMAC and runs after `migrate` (identity.ts).
+const v14: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE identity_key (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      key BLOB NOT NULL CHECK (typeof(key) = 'blob' AND length(key) = 32)
+    );
+    INSERT INTO identity_key (id, key) VALUES (1, randomblob(32));
+    ALTER TABLE sources ADD COLUMN identity_hashed INTEGER NOT NULL DEFAULT 0
+      CHECK (identity_hashed IN (0, 1));
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -614,6 +631,7 @@ export const migrations: readonly Migration[] = [
   v11,
   v12,
   v13,
+  v14,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

@@ -8,7 +8,7 @@
 import type { ChangeSet, Connector, StructuredRequest } from "@pki/contracts";
 import { deleteSource } from "@pki/knowledge-engine";
 import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
-import { readTombstone, writeSetting, type SqlDriver } from "@pki/storage";
+import { findSourceId, readTombstone, writeSetting, type SqlDriver } from "@pki/storage";
 import { FakeProvider, fixtureExtraction } from "@pki/testkit";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -196,8 +196,12 @@ const canariesIn = () =>
   Object.values(CANARY).filter((c) => storedFiles().some(([, bytes]) => bytes.includes(c)));
 
 const count = (table: string) => db.all(`SELECT count(*) AS n FROM ${table}`)[0]?.n as number;
+/** By identity, across the instances the flows use: a purged source's row holds the hash (I04-R7). */
 const sourceId = (externalId: string) =>
-  db.all("SELECT id FROM sources WHERE external_id = ?", [externalId])[0]?.id as number;
+  db
+    .all("SELECT DISTINCT connector_instance_id AS id FROM sources")
+    .map((r) => findSourceId(db, r.id as string, "", externalId))
+    .find((id) => id !== undefined) as number;
 
 /** Mail (X targets 12-05), then K's v1 (Y completes 12-10) and v2 (12-12), each extracted. */
 async function canaryFlow() {

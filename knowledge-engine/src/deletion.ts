@@ -11,6 +11,7 @@
 // names the source by id and no revision is kept. The I04 entry is applyTombstone
 // (tombstone-entry.ts); I04-T13 and I01-T02 move this entry's callers onto it.
 import {
+  hashSourceIdentity,
   supersedeOpenJobs,
   writeTombstone,
   type InsightKey,
@@ -65,6 +66,7 @@ export function deleteSource(
       { kind: reason, sourceId, coversVersion: latest, lastRevision: null },
       at,
     ).report;
+    hashSourceIdentity(db, sourceId); // the purge left no version (I04-R7)
     return { outcome: "deleted", version: latest, purge, insights };
   });
 }

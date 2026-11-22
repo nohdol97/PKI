@@ -7,6 +7,7 @@
 // projection marked stale until a rebuild.
 import { AdapterUnavailableError, type KnowledgeEngine, type VectorIndex } from "@pki/contracts";
 import {
+  findSourceId,
   migrate,
   readChangeSeq,
   readSetting,
@@ -47,8 +48,8 @@ function store(externalId: string, body: string): ProjectionNotice {
     return versionNotice(db, saved.sourceId, saved.version);
   });
 }
-const sourceIdOf = (externalId: string) =>
-  db.all("SELECT id FROM sources WHERE external_id = ?", [externalId])[0]?.id as number;
+// by identity: a purged source's row holds the hash (I04-R7)
+const sourceIdOf = (externalId: string) => findSourceId(db, "c1", "", externalId) as number;
 const versionIds = (externalId: string) =>
   db
     .all("SELECT id FROM source_versions WHERE source_id = ? ORDER BY version", [

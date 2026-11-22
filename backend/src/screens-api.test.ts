@@ -3,6 +3,7 @@
 import { ErrorResponseSchema, routes } from "@pki/contracts";
 import { createCallRecorder } from "@pki/providers";
 import {
+  identityKey,
   migrations,
   registerConnectorInstance,
   saveSourceRecord,
@@ -259,10 +260,16 @@ describe("screen routes", () => {
     expect(await listed()).toEqual([["space-a", "합성 space-a"]]);
     expect((await del("space-a")).body).toEqual({ outcome: "deleted" });
     expect(await listed()).toEqual([]);
+    // both purged rows hold their keyed hash, one each (I04-R7)
+    const hashes = ["space-a", "space-b"]
+      .map((namespace) => identityKey(db, "fixtures", namespace, "shared"))
+      .sort();
     expect(
       db.all(
-        "SELECT s.namespace FROM tombstones t JOIN sources s ON s.id = t.source_id WHERE s.external_id = 'shared' ORDER BY s.namespace",
+        `SELECT s.namespace FROM tombstones t JOIN sources s ON s.id = t.source_id
+          WHERE s.namespace IN (?, ?) ORDER BY s.namespace`,
+        hashes,
       ),
-    ).toEqual([{ namespace: "space-a" }, { namespace: "space-b" }]);
+    ).toEqual(hashes.map((namespace) => ({ namespace })));
   });
 });

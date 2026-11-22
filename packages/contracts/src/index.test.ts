@@ -25,6 +25,7 @@ describe("contract schemas", () => {
         embedding: { state: "not-implemented" },
         vectorIndex: { state: "not-implemented" },
         invalidations: { recent: [] },
+        dataProtection: { legacyCleanup: "done" },
       }).success,
     ).toBe(true);
     expect(routes.status.response.safeParse({ backend: { state: "ready" } }).success).toBe(false);

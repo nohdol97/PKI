@@ -6,7 +6,7 @@ import {
   type ChangeSet,
   type Connector,
 } from "@pki/contracts";
-import { readCursor, type SqlDriver } from "@pki/storage";
+import { identityKey, readCursor, type SqlDriver } from "@pki/storage";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -176,7 +176,10 @@ describe("interim.identity", () => {
       db.all(
         "SELECT s.namespace, t.covers_version AS version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id",
       ),
-    ).toEqual([{ namespace: "a", version: 2, reason: "source-deleted" }]);
+      // the purged source's namespace is the keyed hash (I04-R7)
+    ).toEqual([
+      { namespace: identityKey(db, "s", "a", "e"), version: 2, reason: "source-deleted" },
+    ]);
     expect(
       db.all(
         "SELECT s.namespace, v.body FROM source_versions v JOIN sources s ON s.id = v.source_id",
