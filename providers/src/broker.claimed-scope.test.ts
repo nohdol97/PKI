@@ -99,7 +99,9 @@ let broker: ReturnType<typeof createBroker>;
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
   migrate(db);
-  provider = new FakeProvider({ answer: () => ({ items: [], facts: [], relations: [] }) });
+  provider = new FakeProvider({
+    answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
+  });
   ledger = createUserActionLedger();
   candidates = new Map();
   seen = [];

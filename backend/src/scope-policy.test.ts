@@ -233,6 +233,8 @@ function pipeline(policy: ScopePolicy, during: () => void) {
             quote: "새것의 완료는 2026-12-10",
           },
         ],
+        definitions: [],
+        terms: [],
         relations: [
           { subject: "X", type: "DEPENDS_ON", object: "N", quote: "알파는 새것에 의존한다" },
         ],

@@ -49,8 +49,8 @@ const confidence = z.number().nullish();
 // Entries are plain objects: the JSON Schema still forbids other fields, but a
 // Provider that adds some (positions, say) is not a schema mismatch; parsing
 // strips them, so a position the model gave is never used (V02-R6).
-// `terms` and `definitions` default to empty on parsing (provisional, S01-T08): the JSON Schema the
-// Provider gets asks for both, and an answer without them is one that found none.
+// `terms` and `definitions` are required: an answer that found none carries `[]`, and one without the
+// lists is malformed (it is asked once more, V01-R8).
 const extractOutput = z.strictObject({
   items: z.array(
     z.object({
@@ -84,33 +84,29 @@ const extractOutput = z.strictObject({
     }),
   ),
   /** Other names an item has (S01-R2). */
-  terms: z
-    .array(
-      z.object({
-        item: z.string().min(1),
-        /** The surface form, as the document writes it; the code checks that the quote holds it. */
-        form: z.string().min(1),
-        kind: z.enum(EXTRACT_TERM_KINDS),
-        /** Copied exactly from the document; holds the form. */
-        quote: z.string().min(1),
-        confidence,
-      }),
-    )
-    .default([]),
+  terms: z.array(
+    z.object({
+      item: z.string().min(1),
+      /** The surface form, as the document writes it; the code checks that the quote holds it. */
+      form: z.string().min(1),
+      kind: z.enum(EXTRACT_TERM_KINDS),
+      /** Copied exactly from the document; holds the form. */
+      quote: z.string().min(1),
+      confidence,
+    }),
+  ),
   /** Definitions the document states of a concept (S01-R3). */
-  definitions: z
-    .array(
-      z.object({
-        item: z.string().min(1),
-        /** The definition itself, copied exactly from the document: the stored value is this text. */
-        quote: z.string().min(1),
-        /** A short tag for the context the definition holds in, when the document has one. */
-        context: z.string().nullish(),
-        epistemic: z.enum(["explicit", "hypothesis"]),
-        confidence,
-      }),
-    )
-    .default([]),
+  definitions: z.array(
+    z.object({
+      item: z.string().min(1),
+      /** The definition itself, copied exactly from the document: the stored value is this text. */
+      quote: z.string().min(1),
+      /** A short tag for the context the definition holds in, when the document has one. */
+      context: z.string().nullish(),
+      epistemic: z.enum(["explicit", "hypothesis"]),
+      confidence,
+    }),
+  ),
 });
 export type ExtractionOutput = z.infer<typeof extractOutput>;
 

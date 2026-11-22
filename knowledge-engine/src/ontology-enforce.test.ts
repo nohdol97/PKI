@@ -47,7 +47,7 @@ let recording: { call(raw: unknown): ReturnType<Broker["call"]> };
 
 function setUp(script: FakeStep[] = []) {
   const provider = new FakeProvider({
-    answer: () => ({ items: [], facts: [], relations: [] }),
+    answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
     script,
   });
   const broker = createBroker({
@@ -117,7 +117,9 @@ async function run(): Promise<StoredJob> {
   closeJob(db, job, result);
   return job;
 }
-const answer = (o: object): FakeStep => ({ output: { items: [], facts: [], relations: [], ...o } });
+const answer = (o: object): FakeStep => ({
+  output: { items: [], facts: [], relations: [], terms: [], definitions: [], ...o },
+});
 const project = { ref: "p", type: "Project", name: "미리내 프로젝트", existingItemId: null };
 const system = { ref: "s", type: "System", name: "물결 시스템", existingItemId: null };
 const fact = (item: string, kind: string, value: string, quote: string) => ({

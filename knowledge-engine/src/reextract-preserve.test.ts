@@ -75,6 +75,8 @@ const answer = (dates: string[], existing: string | null = null): FakeStep => ({
       epistemic: "explicit",
       quote: sentence(date),
     })),
+    definitions: [],
+    terms: [],
     relations: [],
   },
 });

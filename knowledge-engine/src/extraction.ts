@@ -44,6 +44,8 @@ import {
 } from "@pki/providers";
 import {
   addEvidence,
+  findSameForm,
+  normalizeForLinking,
   automatedLifecycle,
   findSourceVersionId,
   insertItem,
@@ -67,9 +69,8 @@ import {
 } from "@pki/storage";
 import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
 import { recomputeDependencyDelay } from "./dependency-delay.ts";
-import { findCandidates, normalizeForLinking } from "./linking.ts";
+import { findCandidates } from "./linking.ts";
 import { locateQuote, type QuoteSpan } from "./quote.ts";
-import { findSameForm } from "./surface-form.ts";
 
 /** What the handler hands the runner (a subset of backend job-outcomes.ts JobResult). */
 export type ExtractResult =
@@ -82,7 +83,7 @@ export type ExtractResult =
 export const EXTRACT_HOLD_TOO_LARGE = "source-too-large";
 /** Provisional: title and body, in code points, that one call takes (no chunking, V02-R8). */
 export const MAX_EXTRACT_CODE_POINTS = 20_000;
-/** Provisional: the longest context tag of a definition, in code points (S01-R3 says "short"); a longer one drops its entry. */
+/** Provisional: the longest context tag of a definition, in code points (S01-R3 says "short"); a longer one is dropped from an otherwise kept definition. */
 export const MAX_CONTEXT_CODE_POINTS = 80;
 /** Provisional: the Broker's ceiling for one request. */
 export const EXTRACT_TIMEOUT_MS = 120_000;
@@ -215,10 +216,14 @@ function engineAnswer(
               },
             ],
             relations: [],
+            terms: [],
+            definitions: [],
           }
         : c.kind === "relation"
           ? {
               facts: [],
+              terms: [],
+              definitions: [],
               relations: [
                 {
                   subject: refOf(c.subject),
@@ -494,7 +499,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // (trimmed, still a span), at most 500 code points; the tag, when given, is short.
     for (const def of answer.definitions) {
       const value = def.quote.trim();
-      const tag = def.context?.trim() || null;
+      let tag = def.context?.trim() || null;
       const rule = rules.factKind(EXTRACT_DEFINITION_FACT_KIND);
       const type = typeOf(def.item);
       if (
@@ -503,11 +508,15 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         !rules.itemType(type) ||
         !rule.itemTypes.includes(type as string) ||
         !valueFits(rule.valueType, value) ||
-        [...value].length > EXTRACT_DEFINITION_MAX_CODE_POINTS ||
-        (tag !== null && [...tag].length > MAX_CONTEXT_CODE_POINTS)
+        [...value].length > EXTRACT_DEFINITION_MAX_CODE_POINTS
       ) {
         drops.other++;
         continue;
+      }
+      // a literal definition is kept without a tag that is too long; the tag is counted as dropped
+      if (tag !== null && [...tag].length > MAX_CONTEXT_CODE_POINTS) {
+        drops.other++;
+        tag = null;
       }
       plan([def.item], value, {
         kind: "fact",

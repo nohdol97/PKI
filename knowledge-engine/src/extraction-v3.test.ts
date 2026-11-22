@@ -8,6 +8,7 @@
 import { createBroker, createUserActionLedger, type Broker } from "@pki/providers";
 import {
   closeJob,
+  insertItem,
   isFenceCurrent,
   leaseNextJob,
   listEvidence,
@@ -16,6 +17,7 @@ import {
   readExtractionDrops,
   registerConnectorInstance,
   registerJob,
+  saveFact,
   saveSourceRecord,
   userDecisions,
   type EntryRef,
@@ -711,7 +713,7 @@ describe("definition.contexts (S01-R3)", () => {
     ]);
   });
 
-  it("stores the tag trimmed, none for a tag that is empty or only white space, and drops an entry whose tag is long", async () => {
+  it("stores the tag trimmed, none for a tag that is empty or only white space, and keeps a definition without its tag when the tag is too long (the tag is counted as dropped)", async () => {
     const job = await extract(
       BODY,
       answer({
@@ -726,6 +728,7 @@ describe("definition.contexts (S01-R3)", () => {
     expect(kindsOf("definition").map((f) => [f.value, f.context])).toEqual([
       [DEF_A, "결제"],
       [DEF_B, null],
+      [Q_ML, null],
     ]);
     expect(drops(job)).toEqual({ quotes: 0, other: 1 });
   });
@@ -900,4 +903,130 @@ describe("extract.v3: the synthetic glossary through the fixture double", () => 
       expect(facts().every((f) => f.status === "candidate")).toBe(true);
     },
   );
+});
+
+describe("extract.v3: edges the mutations pointed at", () => {
+  it("counts the 500 cap on the trimmed quote, not on the white space around it", async () => {
+    const at500 = exact(500, "가");
+    const job = await extract(
+      `앞  ${at500}  뒤`,
+      answer({ items: [concept], definitions: [definition("c", `  ${at500}  `)] }),
+    );
+    expect(kindsOf("definition").map((f) => [...(f.value as string)].length)).toEqual([500]);
+    expect(drops(job)).toEqual({ quotes: 0, other: 0 });
+  });
+
+  it("drops a definition that is only white space as other, not as a quote", async () => {
+    const job = await extract(
+      `${BODY}\n   \n`,
+      answer({ items: [concept], definitions: [definition("c", "   ")] }),
+    );
+    expect(facts()).toEqual([]);
+    expect(drops(job)).toEqual({ quotes: 0, other: 1 });
+  });
+
+  it("trims a form before it is stored and compared", async () => {
+    await extract(
+      BODY,
+      answer({ items: [concept], terms: [term("c", "  ML  ", "abbreviation", Q_ML)] }),
+    );
+    expect(kindsOf("alias.abbreviation").map((f) => f.value)).toEqual(["ML"]);
+  });
+
+  it("gives the evidence to the oldest row when two rows already hold the same form", async () => {
+    const attrs = {
+      epistemic: "explicit",
+      status: "candidate",
+      validAt: null,
+      observedAt: "2026-11-23T00:00:00.000Z",
+    } as const;
+    const item = insertItem(db, { type: "Concept", name: "미리내 용어", ...attrs });
+    const older = saveFact(db, {
+      itemId: item,
+      kind: "alias.abbreviation",
+      value: "ML",
+      ...attrs,
+    }).id;
+    const newer = saveFact(db, {
+      itemId: item,
+      kind: "alias.abbreviation",
+      value: "ml",
+      ...attrs,
+    }).id;
+    await extract(
+      BODY,
+      answer({
+        items: [{ ...concept, existingItemId: String(item) }],
+        terms: [term("c", "ML", "abbreviation", Q_ML)],
+      }),
+    );
+    expect(listEvidence(db, { factId: older })).toHaveLength(1);
+    expect(listEvidence(db, { factId: newer })).toHaveLength(0);
+    expect(facts()).toHaveLength(2);
+  });
+});
+
+describe("vocabulary.forms: the user's add and value fix judge a form as extraction does (S01-R2, T03 hand-off 6)", () => {
+  const addForm = (itemId: number, value: string, kind = "alias.abbreviation") =>
+    userDecisions.add(db, { kind: "fact", itemId, factKind: kind, value });
+
+  it("refuses a user-added form that is the same form as an extracted one, naming the extracted row", async () => {
+    await extract(
+      BODY,
+      answer({ items: [concept], terms: [term("c", "ML", "abbreviation", Q_ML)] }),
+    );
+    const id = factId("ML");
+    for (const same of ["ml", "ＭＬ", "  M L ".replace(" L", "L")]) {
+      expect(addForm(1, same)).toEqual({
+        status: "refused",
+        reason: "value-exists",
+        existing: { kind: "fact", id },
+      });
+    }
+    expect(facts()).toHaveLength(1);
+    // another kind or another item is its own row
+    expect(addForm(1, "ml", "alias.synonym").status).toBe("applied");
+  });
+
+  it("lets extraction attach its evidence to the user's row instead of adding a second one", async () => {
+    await extract(
+      BODY,
+      answer({ items: [concept], definitions: [definition("c", DEF_A)] }),
+      "first",
+    );
+    const added = addForm(1, "ml");
+    expect(added.status).toBe("applied");
+    await extract(
+      BODY,
+      answer({
+        items: [{ ...concept, existingItemId: "1" }],
+        terms: [term("c", "ML", "abbreviation", Q_ML)],
+      }),
+      "second",
+    );
+    expect(kindsOf("alias.abbreviation").map((f) => [f.value, f.status])).toEqual([
+      ["ml", "verified"],
+    ]);
+    expect(listEvidence(db, { factId: factId("ml") })).toHaveLength(1);
+  });
+
+  it("refuses a value fix whose new form is the same form as another row of the item", async () => {
+    await extract(
+      BODY,
+      answer({
+        items: [concept],
+        terms: [term("c", "ML", "abbreviation", Q_ML), term("c", "MLX", "abbreviation", Q_MLX)],
+      }),
+    );
+    const out = userDecisions.replaceValue(db, ref(factId("MLX")), "ml");
+    expect(out).toMatchObject({ status: "refused", reason: "value-exists" });
+    expect(facts().map((f) => f.status)).toEqual(["candidate", "candidate"]);
+  });
+
+  it("still compares a value that is not a surface form letter for letter", async () => {
+    await extract(BODY, answer({ items: [concept], definitions: [definition("c", DEF_A)] }));
+    expect(addForm(1, "Alpha text", "definition").status).toBe("applied");
+    expect(addForm(1, "alpha text", "definition").status).toBe("applied");
+    expect(addForm(1, "alpha text", "definition")).toMatchObject({ reason: "value-exists" });
+  });
 });

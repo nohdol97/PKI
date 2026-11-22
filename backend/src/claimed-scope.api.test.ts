@@ -135,7 +135,9 @@ describe("scope.claimed-grade: the Broker the backend builds judges with the reg
   it("a policy of the registry that cannot compare stops the call; the default policy lets it through", async () => {
     const db = openCanonicalDb(dir);
     const id = claimedSource(db);
-    const extractor = new FakeProvider({ answer: () => ({ items: [], facts: [], relations: [] }) });
+    const extractor = new FakeProvider({
+      answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
+    });
     const asUser = (calls: ReturnType<typeof productCalls>) =>
       calls.issuer.during((userActionId) =>
         calls.broker.call({ origin: { userActionId }, ...request(id) }),

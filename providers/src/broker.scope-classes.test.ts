@@ -28,7 +28,9 @@ let graded: Record<string, string>;
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
   migrate(db);
-  provider = new FakeProvider({ answer: () => ({ items: [], facts: [], relations: [] }) });
+  provider = new FakeProvider({
+    answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
+  });
   graded = { open: "restricted", team: "restricted" };
   answerOf = (classes) => classes[0] as string;
 });

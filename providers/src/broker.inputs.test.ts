@@ -54,7 +54,9 @@ beforeEach(() => {
   migrate(db);
   provider = new FakeProvider({
     answer: (r) =>
-      r.taskKind === "extract" ? { items: [], facts: [], relations: [] } : { reply: "ok" },
+      r.taskKind === "extract"
+        ? { items: [], facts: [], relations: [], terms: [], definitions: [] }
+        : { reply: "ok" },
   });
   ledger = createUserActionLedger();
   candidates = new Map();

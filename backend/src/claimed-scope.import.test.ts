@@ -139,7 +139,7 @@ function broker(db: SqlDriver, injected: boolean) {
   const extractor = new FakeProvider({
     id: "local-model",
     transport: "http",
-    answer: () => ({ items: [], facts: [], relations: [] }),
+    answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
   });
   writeDefaultProvider(db, "local-model");
   const calls = productCalls(db, egress, {

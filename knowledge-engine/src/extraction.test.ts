@@ -173,7 +173,9 @@ const versionOf = (job: StoredJob) =>
     job.sourceId,
     job.fenceVersion,
   ])[0]?.id as number;
-const output = (o: object): FakeStep => ({ output: { items: [], facts: [], relations: [], ...o } });
+const output = (o: object): FakeStep => ({
+  output: { items: [], facts: [], relations: [], terms: [], definitions: [], ...o },
+});
 
 describe("extraction schema", () => {
   it("names what the rule reads (dependency-delay.ts)", () => {
@@ -348,6 +350,8 @@ describe("extraction.quote (stored)", () => {
             quote: "물결 API",
           },
         ],
+        definitions: [],
+        terms: [],
         relations: [
           {
             subject: "a",
@@ -527,6 +531,8 @@ describe("linking", () => {
         facts: [
           { item: "a", kind: "target_date", value: n, epistemic: "explicit", quote: quote(n) },
         ],
+        definitions: [],
+        terms: [],
         relations: [],
       },
     });
@@ -828,6 +834,8 @@ describe("semantic history of an extraction (S01-T01: lifecycle.history, epistem
         facts: [
           { item: "a", kind: "target_date", value: "2026-12-05", epistemic: "explicit", quote: Q1 },
         ],
+        definitions: [],
+        terms: [],
         relations: [{ subject: "a", type: DEPENDS_ON, object: "b", quote: dependsOn }],
       }),
     ]);

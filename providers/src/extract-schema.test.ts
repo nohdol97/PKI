@@ -45,10 +45,17 @@ describe("extract.v3: the schema", () => {
     expect(data.definitions[0]).toEqual(v3.definitions[0]);
   });
 
-  it("reads a version-2-shaped answer as one without terms and definitions (provisional: the arrays default to empty)", () => {
-    const result = parse({ items: [], facts: [], relations: [] });
-    expect(result.success).toBe(true);
-    expect(result.data).toMatchObject({ terms: [], definitions: [] });
+  it("rejects a version-2-shaped answer and one missing either list: an answer that found none carries []", () => {
+    expect(parse({ items: [], facts: [], relations: [] }).success).toBe(false);
+    const withoutTerms: Record<string, unknown> = { ...v3 };
+    delete withoutTerms.terms;
+    const withoutDefinitions: Record<string, unknown> = { ...v3 };
+    delete withoutDefinitions.definitions;
+    expect(parse(withoutTerms).success).toBe(false);
+    expect(parse(withoutDefinitions).success).toBe(false);
+    expect(parse({ items: [], facts: [], relations: [], terms: [], definitions: [] }).success).toBe(
+      true,
+    );
   });
 
   it("names the types and kinds the prompt lists, the seed's own names", () => {
