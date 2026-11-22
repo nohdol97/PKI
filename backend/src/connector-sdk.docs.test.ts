@@ -17,6 +17,7 @@ import {
   blocksValid,
   ChangeSchema,
   CONNECTOR_SDK_VERSION,
+  MAX_INSTANCE_ID_LENGTH,
   ConnectorRateLimitError,
   REJECT_CODES,
   rejectedPositionValid,
@@ -190,6 +191,14 @@ describe("docs.connector-sdk: the numbers equal the code", () => {
       readFileSync(resolve(repo, "packages/testkit/src/connector.contract.ts"), "utf8"),
     ).toContain("const PAGE_CAP = 10_000;");
     expect(DOC).toContain("기본 10,000쪽");
+  });
+
+  it("the instance id limit is 128, one value for the import line, the API and the ledger, and the deletion refusals are named", () => {
+    expect(MAX_INSTANCE_ID_LENGTH).toBe(128);
+    expect(DOC).toContain("1자 이상 128자 이하(`MAX_INSTANCE_ID_LENGTH`");
+    expect(DOC).toContain("`invalid-record`");
+    expect(DOC).toContain("409 `ledger-unwritable`");
+    expect(DOC).toContain("^[a-z][a-z0-9-]{0,63}$");
   });
 
   it("the contract suite reads with limit 1000 and 1, as the text says, and the list shows 100 rejections", () => {
