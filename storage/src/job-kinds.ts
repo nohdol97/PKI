@@ -5,7 +5,10 @@
 export const PROJECTION_REMOVE_KIND = "projection-remove";
 export const PROJECTION_REBUILD_KIND = "projection-rebuild";
 
-const FENCE_FREE_KINDS: readonly string[] = [PROJECTION_REMOVE_KIND, PROJECTION_REBUILD_KIND];
+export const FENCE_FREE_KINDS: readonly string[] = [
+  PROJECTION_REMOVE_KIND,
+  PROJECTION_REBUILD_KIND,
+];
 
 /** False for the projection kinds: their source and version are a name and a cover, not a fence. */
 export const usesVersionFence = (kind: string): boolean => !FENCE_FREE_KINDS.includes(kind);

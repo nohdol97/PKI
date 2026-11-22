@@ -282,11 +282,60 @@ describe("projection.classify", () => {
     expect(requested.map((j) => [j.kind, j.target])).toEqual([["projection-rebuild", "engine"]]);
   });
 
-  it("a removal for a projection nobody bound is given up with a code (a build's fault), not retried", async () => {
+  it("a removal for a projection nobody bound is retried with the backoff, then given up with the code unknown-projection", async () => {
     stored("a", "x");
     const removal = deleted("a", "graph");
-    await drain(runnerOf(ports()));
+    const runner = runnerOf(ports());
+    await drain(runner);
+    expect(job(removal.id)).toMatchObject({
+      status: "retry",
+      reason: "unknown-projection",
+      runAfter: wall + 30_000,
+    });
+    for (let i = 0; i < 6; i++) {
+      wall += HOUR;
+      await drain(runner);
+    }
     expect(job(removal.id)).toMatchObject({ status: "dead_letter", reason: "unknown-projection" });
+  });
+
+  it("scheduler checks with no port bound keep the rebuild rows bounded; a new removal lets a check register again", async () => {
+    stored("a", "x");
+    deleted("a", "graph");
+    const runner = runnerOf(ports());
+    const scheduler = createScheduler({ db, clock, timeZone: () => "UTC" });
+    // 12 hours of two-minute checks (a check every 30 s only adds identical rows), the runner draining after each
+    for (let i = 0; i < 360; i++) {
+      wall += 2 * MIN;
+      scheduler.check();
+      await drain(runner);
+    }
+    const rows = rebuildJobs();
+    expect(rows.length).toBeLessThanOrEqual(2);
+    expect(rows.at(-1)).toMatchObject({ status: "dead_letter", reason: "unknown-projection" });
+    expect(openRebuilds("graph")).toEqual([]);
+    // until something changes: a removal registered after the dead rebuild marks the target again
+    stored("b", "y");
+    deleted("b", "graph");
+    const before = rebuildJobs().length;
+    wall += HOUR + 1;
+    scheduler.check();
+    expect(rebuildJobs().length).toBe(before + 1);
+  });
+
+  it("at start the suppression does not apply: a boot may have bound the port", () => {
+    stored("a", "x");
+    const removal = deleted("a", "graph");
+    db.run("UPDATE jobs SET status = 'dead_letter' WHERE id = ?", [removal.id]);
+    const dead = requestProjectionRebuild(db, "graph", { at: new Date(wall) });
+    db.run("UPDATE jobs SET status = 'dead_letter', reason = 'unknown-projection' WHERE id = ?", [
+      dead.job.id,
+    ]);
+    db.run("UPDATE jobs SET created_at = created_at - 1 WHERE id = ?", [removal.id]);
+    expect(checkProjectionMarkers(db, { phase: "check", now: wall })).toEqual([]);
+    expect(checkProjectionMarkers(db, { phase: "start", now: wall }).map((j) => j.target)).toEqual([
+      "graph",
+    ]);
   });
 
   it("the removal of a deleted source is not closed by the version fence: it runs and succeeds (R7)", async () => {

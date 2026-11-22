@@ -31,6 +31,7 @@ import {
   PROJECTION_REMOVE_KIND,
   readChangeSeq,
   recordResultCounts,
+  UNKNOWN_PROJECTION_CODE,
   registerJob,
   type DerivativeKind,
   type SqlDriver,
@@ -39,7 +40,8 @@ import {
 import type { JobHandler, JobKindSettings } from "./job-runner.ts";
 import type { JobResult } from "./job-outcomes.ts";
 
-export { PROJECTION_REBUILD_KIND, PROJECTION_REMOVE_KIND };
+/** No port is bound for the job's projection: retried with the backoff, and a rebuild that dies of it is not registered again by a check (storage markedProjections). */
+export const UNKNOWN_PROJECTION = UNKNOWN_PROJECTION_CODE;
 
 /** The code of a skipped removal or rebuild (ARCHITECTURE 5.4). */
 export const ADAPTER_UNAVAILABLE = "adapter-unavailable";
@@ -121,7 +123,7 @@ export function projectionHandlers(options: ProjectionHandlerOptions): Record<st
 
   const remove: JobHandler = async (job, context) => {
     const port = ports[job.target];
-    if (!port) return fail("unknown-projection", false);
+    if (!port) return fail(UNKNOWN_PROJECTION);
     // the removal names its source and its cover by the row (source_id, fence_version)
     const sourceId = job.sourceId as number;
     const coversVersion = job.fenceVersion as number;
@@ -148,7 +150,7 @@ export function projectionHandlers(options: ProjectionHandlerOptions): Record<st
 
   const rebuild: JobHandler = async (job, context) => {
     const port = ports[job.target];
-    if (!port) return fail("unknown-projection", false);
+    if (!port) return fail(UNKNOWN_PROJECTION);
     const readSeq = readChangeSeq(db); // before the projection reads the canonical store
     let code: string | undefined;
     try {

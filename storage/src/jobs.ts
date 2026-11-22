@@ -11,7 +11,7 @@
 // body I04-T06 replaces.
 import type { CommitDerived, DerivedItem } from "./derivatives.ts";
 import { assertMaxConcurrent, pickDueJob } from "./job-concurrency.ts";
-import { usesVersionFence } from "./job-kinds.ts";
+import { FENCE_FREE_KINDS, usesVersionFence } from "./job-kinds.ts";
 import { readChangeSeq } from "./revisions.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
 
@@ -719,7 +719,7 @@ export function supersedeOpenJobs(db: SqlDriver, sourceId: number, at: Date = ne
   return db.run(
     `UPDATE jobs SET ${set}, reason = 'source-closed', lease_token = lease_token + 1
       WHERE source_id = ? AND status IN ${OPEN_SQL}
-        AND kind NOT IN ('projection-remove', 'projection-rebuild')`,
+        AND kind NOT IN (${FENCE_FREE_KINDS.map((k) => `'${k}'`).join(", ")})`,
     [...params, sourceId],
   ).changes;
 }

@@ -3,13 +3,16 @@
 // latest version a stale removal is re-sent with, and a job's numeric result counts.
 // What a removal removes and how errors are classified are backend's
 // (projection-jobs.ts); the marks and the cover are rows, so they are judged here.
-import { PROJECTION_REMOVE_KIND } from "./job-kinds.ts";
+import { PROJECTION_REBUILD_KIND, PROJECTION_REMOVE_KIND } from "./job-kinds.ts";
 import { moving, OPEN_JOB_STATUSES } from "./jobs.ts";
 import { nextSourceVersion } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 /** A removal open this long past its registration is blocked, not retrying (I03-R7 "표식"). */
 export const REMOVE_BLOCKED_AFTER_MS = 60 * 60_000;
+
+/** The code of a job whose projection has no port bound (backend UNKNOWN_PROJECTION). */
+export const UNKNOWN_PROJECTION_CODE = "unknown-projection";
 
 /** The code a rebuild closes the removals it covered with. */
 export const COVERED_BY_REBUILD = "covered-by-rebuild";
@@ -38,11 +41,26 @@ export function markedProjections(db: SqlDriver, check: MarkerCheck): string[] {
           [PROJECTION_REMOVE_KIND],
         )
       : db.all(
-          `SELECT DISTINCT target FROM jobs
-            WHERE kind = ? AND (status = 'dead_letter'
-                                OR (status IN ${OPEN_SQL} AND created_at < ?))
-            ORDER BY target`,
-          [PROJECTION_REMOVE_KIND, check.now - REMOVE_BLOCKED_AFTER_MS],
+          // a target whose latest rebuild died of `unknown-projection` (no port bound) and that
+          // has no removal registered since is not marked again: another rebuild would die the same
+          `SELECT DISTINCT j.target FROM jobs j
+            WHERE j.kind = ? AND (j.status = 'dead_letter'
+                                OR (j.status IN ${OPEN_SQL} AND j.created_at < ?))
+              AND NOT EXISTS (
+                SELECT 1 FROM jobs r
+                 WHERE r.kind = ? AND r.target = j.target AND r.status = 'dead_letter'
+                   AND r.reason = ?
+                   AND r.id = (SELECT max(id) FROM jobs WHERE kind = ? AND target = j.target)
+                   AND r.id > (SELECT max(id) FROM jobs WHERE kind = ? AND target = j.target))
+            ORDER BY j.target`,
+          [
+            PROJECTION_REMOVE_KIND,
+            check.now - REMOVE_BLOCKED_AFTER_MS,
+            PROJECTION_REBUILD_KIND,
+            UNKNOWN_PROJECTION_CODE,
+            PROJECTION_REBUILD_KIND,
+            PROJECTION_REMOVE_KIND,
+          ],
         );
   return rows.map((r) => r.target as string);
 }

@@ -120,6 +120,9 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     projections,
     clock,
   });
+  // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
+  // whatever the applied change sequence says (I03-R7); registered before the server serves a deletion or the runner starts
+  checkProjectionMarkers(db, { phase: "start", now: clock.now() });
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,
@@ -138,9 +141,6 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     onRunConditionsChanged: () => void runner.wake(),
   });
   releaseOnPolicyChange(db, calls.policyFingerprint(), runner);
-  // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
-  // whatever the applied change sequence says (I03-R7); registered before the runner starts
-  checkProjectionMarkers(db, { phase: "start", now: clock.now() });
   runner.start();
   const reevaluation = startHeldReevaluation({
     db,

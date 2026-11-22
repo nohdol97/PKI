@@ -4,6 +4,7 @@
 // database's running rows inside the claim's immediate transaction (jobs.ts
 // leaseNextJob), so they hold for every runner on the file. A job whose group is
 // full is no candidate, so a job of another group behind it is claimed.
+import { PROJECTION_REBUILD_KIND, PROJECTION_REMOVE_KIND } from "./job-kinds.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
 
 /** The overall limit until the setting `jobs.maxConcurrent` says otherwise (I03 "기본값"). */
@@ -20,8 +21,8 @@ export const JOB_GROUP_CAPS: Readonly<Record<string, number>> = {
 /** The group of each kind; `perTarget` splits it by target (a Connector instance each). */
 export const JOB_KIND_GROUPS: Readonly<Record<string, { group: string; perTarget?: true }>> = {
   extract: { group: "knowledge" },
-  "projection-remove": { group: "projection" },
-  "projection-rebuild": { group: "projection" },
+  [PROJECTION_REMOVE_KIND]: { group: "projection" },
+  [PROJECTION_REBUILD_KIND]: { group: "projection" },
   maintenance: { group: "maintenance" },
   "connector-sync": { group: "connector-sync", perTarget: true },
 };

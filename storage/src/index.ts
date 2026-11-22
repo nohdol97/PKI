@@ -99,6 +99,7 @@ export {
   markedProjections,
   recordResultCounts,
   REMOVE_BLOCKED_AFTER_MS,
+  UNKNOWN_PROJECTION_CODE,
   type MarkerCheck,
 } from "./projection-jobs.ts";
 export {
