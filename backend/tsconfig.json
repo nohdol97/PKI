@@ -9,6 +9,9 @@
       "path": "../knowledge-engine"
     },
     {
+      "path": "../packages/connector-sdk"
+    },
+    {
       "path": "../packages/contracts"
     },
     {

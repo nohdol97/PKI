@@ -42,7 +42,10 @@ export type JobResult =
   | { status: "superseded" }
   | { status: "yield" }
   | { status: "held"; reason: string }
-  | { status: "fail"; code: string; retryable: boolean }
+  /** `retryAfterMs`: a wait the origin asked for; a retry waits the later of it and the backoff (I01-R20). */
+  | { status: "fail"; code: string; retryable: boolean; retryAfterMs?: number }
+  /** A run that called nothing outside and asks to run again after `delayMs`, its attempt given back (I03-R19). */
+  | { status: "defer"; code: string; delayMs: number }
   | Exclude<BrokerResult, { status: "ok" }>;
 
 /** The run a result came from: its attempt (raised by the claim) and the wall clock. */
@@ -51,10 +54,21 @@ export interface RunFacts {
   now: number;
 }
 
-/** A retryable failure: retry after the backoff of the run's attempt, the attempt spent. */
-export function failure(code: string, run: RunFacts): JobClosing {
-  return { status: "retry", reason: code, runAfter: run.now + backoffMs(run.attempts, code) };
+/**
+ * A retryable failure: retry after the backoff of the run's attempt, the attempt spent.
+ * `askedMs`, a wait the origin asked for, lengthens it but never past the backoff cap; the
+ * origin may give a fractional number, a stored time is whole milliseconds, so it is rounded up.
+ */
+export function failure(code: string, run: RunFacts, askedMs = 0): JobClosing {
+  const wait = Math.max(
+    backoffMs(run.attempts, code),
+    Math.ceil(Math.min(askedMs, BACKOFF_MAX_MS)),
+  );
+  return { status: "retry", reason: code, runAfter: run.now + wait };
 }
+
+/** A wait that is a number from 0; anything else asks for nothing. */
+const asked = (ms: unknown): number => (typeof ms === "number" && ms >= 0 ? ms : 0);
 
 /**
  * The run of a result: `progressed` is asked only for a yield, `budgetResumesAt`
@@ -101,8 +115,17 @@ function closing(result: JobResult, run: ClassifiedRun): JobClosing | undefined 
     case "fail":
       if (typeof result.retryable !== "boolean") return undefined;
       return result.retryable
-        ? failure(result.code, run)
+        ? failure(result.code, run, asked(result.retryAfterMs))
         : { status: "dead_letter", reason: result.code };
+    case "defer":
+      // no outside call was made: the attempt is given back, the job waits as asked
+      if (typeof result.delayMs !== "number" || !(result.delayMs >= 0)) return undefined;
+      return {
+        status: "retry",
+        reason: result.code,
+        runAfter: run.now + Math.ceil(result.delayMs), // a stored time is whole milliseconds
+        refund: true,
+      };
     case "blocked":
       // the Broker made no call: the attempt is given back either way (I03-R11)
       if (result.reason === JOB_BUDGET_EXHAUSTED) return yielded(run); // a handler that did not yield itself

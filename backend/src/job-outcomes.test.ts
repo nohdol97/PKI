@@ -213,3 +213,86 @@ describe("outcome.mapping (I03-R9): a handler's result to the job's closing", ()
     ]);
   });
 });
+
+describe("outcome.defer (I03-T09, I03-R19): a run that called nothing outside asks to run later", () => {
+  const run = { attempts: 3, now: NOW, progressed: () => false };
+
+  it("closes as a retry that gives the attempt back, due after the delay, with the code as reason", () => {
+    expect(
+      classifyResult({ status: "defer", code: "instance-busy", delayMs: MINUTE }, run),
+    ).toEqual({
+      status: "retry",
+      reason: "instance-busy",
+      runAfter: NOW + MINUTE,
+      refund: true,
+    });
+  });
+
+  it("is the handler-error retry when the delay is not a number from 0 or the code is missing", () => {
+    for (const bad of [
+      { status: "defer", code: "instance-busy", delayMs: -1 },
+      { status: "defer", code: "instance-busy", delayMs: Number.NaN },
+      { status: "defer", code: "instance-busy", delayMs: "60000" },
+      { status: "defer", delayMs: MINUTE },
+    ]) {
+      expect(classifyResult(bad as unknown as JobResult, run)).toMatchObject({
+        status: "retry",
+        reason: "handler-error",
+      });
+    }
+  });
+
+  it("gives up a code that is not a code, as every reason does", () => {
+    expect(classifyResult({ status: "defer", code: "Not A Code", delayMs: 0 }, run)).toEqual({
+      status: "dead_letter",
+      reason: "invalid-reason",
+    });
+  });
+});
+
+describe("outcome.retry-after (I01-R20 `rate-limited`): the later of the backoff and what the origin asked", () => {
+  const run = { attempts: 1, now: NOW, progressed: () => false };
+  const fail = (retryAfterMs?: number): JobResult => ({
+    status: "fail",
+    code: "rate-limited",
+    retryable: true,
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+  });
+
+  it("waits the origin's request when it is longer than the backoff", () => {
+    expect(classifyResult(fail(20 * MINUTE), run)).toMatchObject({ runAfter: NOW + 20 * MINUTE });
+  });
+
+  it("waits the backoff when the request is shorter", () => {
+    expect(classifyResult(fail(SECOND), run)).toMatchObject({ runAfter: NOW + 5 * MINUTE });
+    expect(classifyResult(fail(), run)).toMatchObject({ runAfter: NOW + 5 * MINUTE });
+  });
+
+  it("never waits past the backoff cap: a request of a year is an hour", () => {
+    expect(classifyResult(fail(365 * 24 * 60 * MINUTE), run)).toMatchObject({
+      runAfter: NOW + BACKOFF_MAX_MS,
+    });
+  });
+
+  it("ignores a request that is not a number from 0", () => {
+    for (const bad of [-1, Number.NaN]) {
+      expect(classifyResult(fail(bad), run)).toMatchObject({ runAfter: NOW + 5 * MINUTE });
+    }
+  });
+});
+
+describe("outcome.whole-ms: a stored time is whole milliseconds (I03-T09 review F1)", () => {
+  const run = { attempts: 1, now: NOW, progressed: () => false };
+
+  it("rounds a fractional request and a fractional defer up", () => {
+    expect(
+      classifyResult(
+        { status: "fail", code: "rate-limited", retryable: true, retryAfterMs: 600_000.5 },
+        run,
+      ),
+    ).toMatchObject({ runAfter: NOW + 600_001 });
+    expect(
+      classifyResult({ status: "defer", code: "instance-busy", delayMs: 1000.2 }, run),
+    ).toMatchObject({ runAfter: NOW + 1001 });
+  });
+});

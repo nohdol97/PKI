@@ -32,6 +32,8 @@ interface HeldReason {
   periodic?: true;
   /** The policy fingerprint's inputs (rules, verified list, default Provider) can end it. */
   policy?: true;
+  /** A Connector instance's own state: lifted per instance (connector-sync-job.ts), never by the events above. */
+  collector?: true;
 }
 
 const BY_PROVIDER = "default-provider" as const; // a different Provider may be allowed
@@ -50,6 +52,11 @@ export const HELD_REASONS: Readonly<Record<string, HeldReason>> = {
   "capabilities-unavailable": { events: [BY_PROVIDER], periodic: true },
   "structured-output-unsupported": { events: [BY_PROVIDER], periodic: true },
   "no-provider": { events: [BY_PROVIDER], periodic: true, policy: true },
+  // A collector held because its instance cannot run (I03-R16 ②′, I01-R20): the instance's
+  // settings change, a start that finds it ready and the hourly recheck lift it, per instance.
+  "unsupported-sdk-version": { events: [], collector: true },
+  "connector-unavailable": { events: [], collector: true },
+  "not-implemented": { events: [], collector: true },
   // Only the development exception gives these (execution-gate.ts), so a production
   // build never holds a job for them; the constant folds and the bundle keeps none of
   // the exception's strings (artifact.contents). Provisional: a production start on a
@@ -68,6 +75,9 @@ const reasonsWhere = (test: (reason: HeldReason) => boolean): string[] =>
   Object.entries(HELD_REASONS)
     .filter(([, reason]) => test(reason))
     .map(([code]) => code);
+
+/** The reasons a collector is held for, lifted per Connector instance (connector-sync-job.ts). */
+export const COLLECTOR_HELD_REASONS: readonly string[] = reasonsWhere((r) => r.collector === true);
 
 /** Lifts the jobs `event` can lift, in the caller's transaction. Returns how many went back. */
 export function releaseHeldOnEvent(db: SqlDriver, event: HeldEvent, at?: Date): number {
