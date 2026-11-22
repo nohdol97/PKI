@@ -4,6 +4,13 @@
 // Vite dev server in the browser, as the shell's child process in Electron), so a value
 // that does not change with the seed would be fixed in the UI. The two differ only in
 // where the screen takes its session from (V01-R3).
+// V01-C7 `screens.e2e`(double 구성) (V01-R17, spec "T17이 넘기는 것" 3): the same
+// screens test runs again on a backend whose Provider and Embedding implementations
+// are replaced by doubles (the preload backend/src/swap-double.hook.e2e.ts; browser
+// only, provisional). Since the screens are meant not to change, passing alone would
+// not tell the doubles were bound: in that configuration the test also runs a
+// connection test that succeeds only through the Provider double and prepares a
+// local pack that only the embedder double accepts.
 import { test as base, expect, type BrowserType, type Page } from "@playwright/test";
 import { launchShell } from "@pki/desktop";
 import { migrate } from "@pki/storage";
@@ -13,12 +20,16 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createServer } from "vite";
 import { DEV_SESSION_PATH } from "../src/api.ts";
 import { webConfig } from "../dev/dev-server.ts";
 
 type Target = "browser" | "electron";
+/** The product's composition, or the Provider and Embedding replaced by doubles. */
+type Config = "product" | "swapped";
+const SWAP_PRELOAD = `--import=${pathToFileURL(resolve(import.meta.dirname, "../../../backend/src/swap-double.hook.e2e.ts")).href}`;
 const test = base.extend<{ target: Target }>({ target: ["browser", { option: true }] });
 
 function freePort(): Promise<number> {
@@ -67,6 +78,7 @@ async function startStack(
   { titles, destination }: Seed,
   target: Target,
   chromium: BrowserType,
+  config: Config = "product",
 ): Promise<Stack> {
   const dir = mkdtempSync(join(tmpdir(), "pki-e2e-"));
   const fixtures = join(dir, "seed.jsonl");
@@ -83,7 +95,11 @@ async function startStack(
     const { app, window } = await launchShell({ userData: join(dir, "user"), dataDir, fixtures });
     return { page: window, dataDir, stop: async () => (await app.close(), cleanup()) };
   }
-  const vite = await startVite(fixtures, dataDir);
+  const vite = await startVite(
+    fixtures,
+    dataDir,
+    config === "swapped" ? { NODE_OPTIONS: SWAP_PRELOAD } : undefined,
+  );
   const browser = await chromium.launch();
   const page = await browser.newPage();
   await page.goto(vite.url);
@@ -98,10 +114,10 @@ async function startStack(
   };
 }
 
-async function startVite(fixtures: string, dataDir: string) {
+async function startVite(fixtures: string, dataDir: string, env?: Record<string, string>) {
   const port = await freePort();
   const vite = await createServer({
-    ...webConfig({ port, fixtures, dataDir }),
+    ...webConfig({ port, fixtures, dataDir, ...(env ? { env } : {}) }),
     configFile: false,
     logLevel: "warn",
   });
@@ -124,48 +140,82 @@ const seeds: readonly Seed[] = [
 const openScreen = (page: Page, name: string) =>
   page.getByRole("navigation").getByRole("button", { name }).click();
 
-for (const [index, seed] of seeds.entries()) {
-  test(`screens show seed ${index} from the backend`, async ({ target, playwright }) => {
-    const { titles } = seed;
-    const other = seeds[1 - index] as Seed;
-    const stack = await startStack(seed, target, playwright.chromium);
-    const { page } = stack;
-    try {
-      await expect(page.getByRole("row", { name: /백엔드/ })).toContainText("준비됨");
-      await expect(page.getByRole("row", { name: /벡터 색인/ })).toContainText("사용 불가");
-      // The product binds the local embedder (V01-T14); no model is prepared by itself.
-      await expect(page.getByRole("row", { name: /Embedding/ })).toContainText(
-        "모델 없음, 키워드 검색으로 동작 (로컬 계산)",
-      );
+const configs: readonly Config[] = ["product", "swapped"];
 
-      await openScreen(page, "원본");
-      for (const kind of ["site-mail", "site-messenger", "site-wiki"]) {
-        await expect(page.getByRole("row", { name: new RegExp(kind) })).toContainText(
-          "미구현(배포처 후속)",
+for (const config of configs) {
+  for (const [index, seed] of seeds.entries()) {
+    const name = config === "product" ? "" : " with the Provider and Embedding swapped";
+    test(`screens show seed ${index} from the backend${name}`, async ({ target, playwright }) => {
+      test.skip(
+        config === "swapped" && target !== "browser",
+        "the swapped configuration binds its doubles through the dev backend's preload (browser)",
+      );
+      const { titles } = seed;
+      const other = seeds[1 - index] as Seed;
+      const stack = await startStack(seed, target, playwright.chromium, config);
+      const { page } = stack;
+      try {
+        await expect(page.getByRole("row", { name: /백엔드/ })).toContainText("준비됨");
+        await expect(page.getByRole("row", { name: /벡터 색인/ })).toContainText("사용 불가");
+        // The product binds the local embedder (V01-T14); no model is prepared by itself.
+        await expect(page.getByRole("row", { name: /Embedding/ })).toContainText(
+          "모델 없음, 키워드 검색으로 동작 (로컬 계산)",
         );
+
+        await openScreen(page, "원본");
+        for (const kind of ["site-mail", "site-messenger", "site-wiki"]) {
+          await expect(page.getByRole("row", { name: new RegExp(kind) })).toContainText(
+            "미구현(배포처 후속)",
+          );
+        }
+        await expect(page.getByText("저장된 원본이 없습니다.")).toBeVisible();
+        await page.getByRole("button", { name: "fixtures 동기화" }).click();
+        for (const title of titles) await expect(page.getByText(title)).toBeVisible();
+        for (const title of other.titles) await expect(page.getByText(title)).toHaveCount(0);
+
+        await page.getByRole("searchbox", { name: "검색어" }).fill("등대");
+        await page.getByRole("button", { name: "검색" }).click();
+        await expect(page.getByText(titles[0])).toBeVisible();
+        await expect(page.getByText(titles[1])).toHaveCount(0);
+
+        await openScreen(page, "활동");
+        await expect(page.getByRole("row", { name: new RegExp(seed.destination) })).toContainText(
+          "connection-test",
+        );
+        await expect(page.getByText(other.destination)).toHaveCount(0);
+
+        await openScreen(page, "설정");
+        await expect(page.getByRole("row", { name: /데이터 폴더/ })).toContainText(stack.dataDir);
+        if (config === "swapped") await doublesAnswer(page, stack.dataDir);
+      } finally {
+        await stack.stop();
       }
-      await expect(page.getByText("저장된 원본이 없습니다.")).toBeVisible();
-      await page.getByRole("button", { name: "fixtures 동기화" }).click();
-      for (const title of titles) await expect(page.getByText(title)).toBeVisible();
-      for (const title of other.titles) await expect(page.getByText(title)).toHaveCount(0);
+    });
+  }
+}
 
-      await page.getByRole("searchbox", { name: "검색어" }).fill("등대");
-      await page.getByRole("button", { name: "검색" }).click();
-      await expect(page.getByText(titles[0])).toBeVisible();
-      await expect(page.getByText(titles[1])).toHaveCount(0);
-
-      await openScreen(page, "활동");
-      await expect(page.getByRole("row", { name: new RegExp(seed.destination) })).toContainText(
-        "connection-test",
-      );
-      await expect(page.getByText(other.destination)).toHaveCount(0);
-
-      await openScreen(page, "설정");
-      await expect(page.getByRole("row", { name: /데이터 폴더/ })).toContainText(stack.dataDir);
-    } finally {
-      await stack.stop();
-    }
+/**
+ * The swapped configuration only, from Settings: choosing the Provider double and
+ * consenting as a user would, the connection test succeeds (the product's dev backend
+ * binds no such Provider), and a local pack prepares (the product's embedder would
+ * find no model files there).
+ */
+async function doublesAnswer(page: Page, dataDir: string) {
+  const radio = page.getByRole("group", { name: "기본 Provider" }).getByRole("radio", {
+    name: "로컬 모델",
   });
+  await radio.click();
+  await expect(radio).toBeChecked();
+  await page.getByRole("checkbox", { name: "local-model 합성 허용" }).check();
+  await page.getByRole("button", { name: "local-model 동의", exact: true }).click();
+  await expect(page.getByRole("row", { name: /^local-model/ })).toContainText("동의함: 합성");
+  await page.getByRole("button", { name: "연결 시험", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("결과: 성공");
+
+  await openScreen(page, "홈");
+  await page.getByRole("textbox", { name: "로컬 팩 폴더" }).fill(join(dataDir, "pack"));
+  await page.getByRole("button", { name: "로컬 팩에서 준비" }).click();
+  await expect(page.getByRole("row", { name: /Embedding/ })).toContainText("준비됨 (로컬 계산)");
 }
 
 test("the proxy path still requires the session token", async ({ target, request }) => {

@@ -139,6 +139,36 @@ describe("providerStatusText (V01-R5, T16)", () => {
       providerStatusText({ state: "unavailable", providerId: "codex", reason: "brand-new-code" }),
     ).toEqual({ text: "Codex CLI: 전송이 막힘(brand-new-code)", guidance: null });
   });
+
+  it("says the execution condition stops it, apart from egress (T17 handoff 1)", () => {
+    expect(
+      providerStatusText({ state: "unavailable", providerId: "codex", reason: "cli-not-verified" }),
+    ).toEqual({
+      text: "Codex CLI: 실행이 막힘(격리가 검증된 CLI 조합(버전·OS·인자 프로필)이 아님)",
+      guidance: null,
+    });
+    expect(
+      providerStatusText({
+        state: "unavailable",
+        providerId: "claude-code",
+        reason: "cli-background-off",
+      }),
+    ).toEqual({
+      text: "Claude Code: 실행이 막힘(백그라운드 실행이 꺼져 있음)",
+      guidance:
+        '설정 화면에서 "CLI 백그라운드 실행 허용"을 켜면 가져온 자료의 추출이 이 CLI로 실행됩니다. 연결 시험은 켜지 않아도 실행됩니다.',
+    });
+    expect(
+      providerStatusText({
+        state: "unavailable",
+        providerId: "codex",
+        reason: "unverified-background",
+      }),
+    ).toEqual({
+      text: "Codex CLI: 실행이 막힘(격리 미검증 CLI는 백그라운드로 실행하지 않음)",
+      guidance: null,
+    });
+  });
 });
 
 describe("DOWNLOAD_APPROVAL", () => {

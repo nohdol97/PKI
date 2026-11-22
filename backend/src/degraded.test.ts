@@ -4,7 +4,10 @@
 // still list and keyword search still finds them, and a blocked Provider is never
 // replaced by another one. The last test boots the product as it ships, on a PC with
 // no CLI and no network, where all five hold at once. No real CLI, network or model:
-// the fake CLI, a rejecting fetch, the fake embedder.
+// the fake CLI, a rejecting fetch, the fake embedder. The healthy configuration
+// lists the fake CLI's version as verified with background calls on, since Home's
+// status asks the Broker's execution gate too (V01-T17 handoff 1); the last describe
+// takes those away.
 import {
   routes,
   type EmbeddingProvider,
@@ -13,10 +16,13 @@ import {
   type VectorIndex,
 } from "@pki/contracts";
 import {
+  CLI_BACKGROUND_SETTING,
+  CLI_PROFILES,
   DEFAULT_PROVIDER_SETTING,
   OPENAI_BASE_URL_SETTING,
   OPENAI_MODEL_SETTING,
   openaiKeySecretName,
+  type TestBuildExecution,
 } from "@pki/providers";
 import {
   createClaudeCodeProvider,
@@ -28,7 +34,7 @@ import type { SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex } from "@pki/storage/adapters";
 import { FakeEmbedder, installFakeCli, MemoryVectorIndex, send, type FakeCli } from "@pki/testkit";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend, type BootedBackend } from "./boot.ts";
@@ -50,6 +56,16 @@ const TOKEN = "d".repeat(43);
 const ENDPOINT = "https://api.synthetic.example/v1";
 const KEY = openaiKeySecretName("api.synthetic.example");
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
+/** The fake CLIs' version (installFakeCli's default) on the verified list, as a site would register it (S07). */
+const listed = (cli: "claude-code" | "codex", version = "2.1.3") => ({
+  cli,
+  version,
+  os: platform(),
+  profile: CLI_PROFILES[cli].standard,
+  model: "synthetic-model",
+  verifiedOn: "2026-11-22",
+});
+const HEALTHY: TestBuildExecution = { verified: [listed("claude-code"), listed("codex")] };
 /** Whether the synthetic key is stored; a test may save it while the server runs. */
 let keyStored = true;
 const keyStore: SecretSource = {
@@ -74,6 +90,8 @@ interface Parts {
   /** The server's clock for the Provider check's reuse window (default: real time). */
   now?: () => number;
   egress?: ReturnType<typeof productEgress>;
+  /** The execution gate's test-build pick (default HEALTHY: both fake CLIs listed, decided as production). */
+  testBuild?: TestBuildExecution;
 }
 
 async function start(parts: Parts = {}) {
@@ -93,7 +111,7 @@ async function start(parts: Parts = {}) {
     dataDirectory: dir,
     egress,
     secrets: keyStore,
-    calls: productCalls(db, egress, { providers }),
+    calls: productCalls(db, egress, { providers, testBuild: parts.testBuild ?? HEALTHY }),
     vectorIndex: parts.vectorIndex ?? new MemoryVectorIndex(),
     embedder,
     ...(parts.now ? { now: parts.now } : {}),
@@ -154,6 +172,7 @@ beforeEach(() => {
   fake = installFakeCli({ auth: "logged-in" }, dir);
   writeSetting(db, DEFAULT_PROVIDER_SETTING, "codex");
   grant("codex");
+  writeSetting(db, CLI_BACKGROUND_SETTING, "on");
   fetchCalls = [];
   keyStored = true;
   vi.stubGlobal(
@@ -500,5 +519,106 @@ describe("the Provider check behind the status (T16 handoff 2)", () => {
       openaiCompatible: { baseUrl: ENDPOINT, model: "synthetic-model" },
     });
     expect((await status()).provider).toMatchObject({ reason: "cli-not-logged-in" });
+  });
+});
+
+describe("the execution conditions behind the status (V01-T17 handoff 1)", () => {
+  let clock: number;
+  beforeEach(() => {
+    clock = 1_000_000;
+  });
+
+  it("decided as production with an empty list: an installed, logged-in, consented CLI is blocked with the gate's reason", async () => {
+    await start({ testBuild: { decideAs: "production", verified: [] } });
+    expect((await status()).provider).toEqual({
+      state: "unavailable",
+      providerId: "codex",
+      reason: "cli-not-verified",
+    });
+    // the Broker answers the user's call with the same decision
+    const test = await post(routes.connectionTest.path, { acknowledgeUnverified: false });
+    expect(test.body).toMatchObject({ outcome: "blocked", reason: "cli-not-verified" });
+    expect(fake.modelCalls()).toBe(0);
+    await explorationWorks();
+  });
+
+  it("egress is asked before the gate: without consent the first obstacle is the consent, as the Broker answers", async () => {
+    productEgress(db).revoke("codex");
+    await start({ testBuild: { verified: [] } });
+    expect((await status()).provider).toEqual({
+      state: "unavailable",
+      providerId: "codex",
+      reason: "no-consent",
+    });
+    const test = await post(routes.connectionTest.path, { acknowledgeUnverified: false });
+    expect(test.body).toMatchObject({ outcome: "blocked", reason: "no-consent" });
+    expect(fake.modelCalls()).toBe(0);
+  });
+
+  it("a test build that picks nothing decides as production: the shipped list (empty) blocks", async () => {
+    await start({ testBuild: {} });
+    expect((await status()).provider).toMatchObject({ reason: "cli-not-verified" });
+  });
+
+  it("Claude Code, whose login cannot be read, is blocked too; no login guidance stands in for the reason", async () => {
+    writeSetting(db, DEFAULT_PROVIDER_SETTING, "claude-code");
+    grant("claude-code");
+    await start({ testBuild: { verified: [] } });
+    expect((await status()).provider).toEqual({
+      state: "unavailable",
+      providerId: "claude-code",
+      reason: "cli-not-verified",
+    });
+  });
+
+  it("listed with background calls off: blocked as extraction would be; switching them on shows at once", async () => {
+    writeSetting(db, CLI_BACKGROUND_SETTING, "off");
+    await start({ now: () => clock });
+    expect((await status()).provider).toEqual({
+      state: "unavailable",
+      providerId: "codex",
+      reason: "cli-background-off",
+    });
+    fake.reset();
+    const on = await post(routes.setExecutionSettings.path, { cliBackground: true });
+    expect(on.status).toBe(200);
+    expect((await status()).provider).toEqual({ state: "ready", providerId: "codex" });
+    // the setting is read fresh; the CLI's kept check answers the version
+    expect(fake.runs()).toEqual([]);
+  });
+
+  it("decided as development, an unlisted CLI is not run in the background: the gate's own reason", async () => {
+    await start({ testBuild: { decideAs: "development", verified: [] } });
+    expect((await status()).provider).toMatchObject({
+      state: "unavailable",
+      reason: "unverified-background",
+    });
+  });
+
+  it("the version comes from the kept check: an updated CLI shows unlisted after Provider 확인", async () => {
+    await start({ now: () => clock });
+    expect((await status()).provider.state).toBe("ready");
+    fake.configure({ auth: "logged-in", version: "2.1.4" });
+    fake.reset();
+    clock += 30_000;
+    // within the 60 s window nothing runs, so the kept version still decides
+    expect((await status()).provider.state).toBe("ready");
+    expect(fake.runs()).toEqual([]);
+    await post(routes.checkProviders.path);
+    expect((await status()).provider).toEqual({
+      state: "unavailable",
+      providerId: "codex",
+      reason: "cli-not-verified",
+    });
+  });
+
+  it("an HTTP default is not decided by the CLI conditions", async () => {
+    writeSetting(db, OPENAI_BASE_URL_SETTING, ENDPOINT);
+    writeSetting(db, OPENAI_MODEL_SETTING, "synthetic-model");
+    writeSetting(db, DEFAULT_PROVIDER_SETTING, "openai-compatible");
+    grant("openai-compatible");
+    await start({ testBuild: { verified: [] } });
+    expect((await status()).provider).toEqual({ state: "ready", providerId: "openai-compatible" });
+    expect(fetchCalls).toEqual([]);
   });
 });

@@ -10,6 +10,8 @@
 // synthetic material is still blocked `cli-not-verified` (a development build would
 // run it, marked unverified) and so is the background extraction of imported data
 // (a development build: `unverified-background`). No model call reaches the CLI.
+// Home's status says so too: the consented default CLI is blocked with the gate's
+// reason, not shown as usable (V01-T17 handoff 1, T15 review B-X1).
 // The backend takes no switch: `--fixtures` or `--data-dir` stops it before it is
 // ready. The whole app (shell + this backend) starts in artifact.shell.e2e.ts;
 // Playwright cannot drive it, since it refuses the debugging switches Playwright needs.
@@ -122,6 +124,11 @@ test("the built backend blocks an unlisted CLI in a development-looking setting"
     expect(granted.status).toBe(200);
     expect((await api("/api/settings/execution", { cliBackground: true })).body).toEqual({
       cliBackground: true,
+    });
+    expect(((await api("/api/status")).body as { provider: unknown }).provider).toEqual({
+      state: "unavailable",
+      providerId: "claude-code",
+      reason: "cli-not-verified",
     });
 
     // the user's call on the fixed synthetic material, the unverified warning acknowledged

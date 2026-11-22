@@ -17,6 +17,8 @@ export default defineConfig<{ target: "browser" | "electron" }>({
         "backend/src/v02-double.e2e.ts",
         "backend/src/v02-double.hook.e2e.ts",
         "backend/src/v02-shell.e2e.ts",
+        "backend/src/swap-double.e2e.ts",
+        "backend/src/swap-double.hook.e2e.ts",
       ],
     },
     { name: "build-web", testMatch: "apps/desktop/e2e/build-web.setup.ts" },
