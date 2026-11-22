@@ -36,6 +36,7 @@ export type Layer = (typeof LAYERS)[number];
 const STORAGES = ["canonical", "projection"] as const;
 
 export type SourceChange =
+  /** For a prune, `version` is the one kept (the latest); the versions below it are taken (I04-T12). */
   | { kind: "new-version" | "old-versions-pruned"; sourceId: number; version: number }
   | { kind: "scope-changed"; sourceId: number; from: AccessScope; to: AccessScope }
   | { kind: TombstoneReason; sourceId: number; coversVersion: number; lastRevision: number | null };

@@ -134,7 +134,7 @@ export interface ServerOptions {
    * The entries that run the derivative registry (composition.ts `productEntries`); default the
    * entries over the registry with no composition (knowledge-engine entries.ts).
    */
-  entries?: Pick<CanonicalEntries, "userDelete" | "liftTombstone">;
+  entries?: Pick<CanonicalEntries, "userDelete" | "liftTombstone" | "pruneVersions">;
   /**
    * The registry every read path asks before it shows a derived row (I04-R13, read-gate.ts); default
    * the product's kinds with the default scope policy (the composition point passes its own, boot.ts).
@@ -586,6 +586,17 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       if (outcome === "unchanged") return { outcome: "already-deleted" };
       options.onRunConditionsChanged?.(); // wakes the runner for the removal jobs the deletion registered (I04-R12)
       return { outcome: "deleted" };
+    },
+    // I04-R10 (optional, I04-T12): the user's prune of one source's earlier versions; never automatic
+    pruneVersions: async ({ connectorId, namespace, externalId }) => {
+      const result = entries.pruneVersions(
+        options.db,
+        { connectorInstanceId: connectorId, namespace, externalId },
+        new Date().toISOString(),
+      );
+      if (result.outcome === "not-found") return { error: "not-found" };
+      if (result.outcome === "pruned") options.onRunConditionsChanged?.(); // the removal jobs it registered (I04-R12)
+      return { outcome: result.outcome, prunedVersions: result.prunedVersions };
     },
     // I04-R9: the only caller of liftTombstone; Connector and source events never lift
     tombstones: async () => ({

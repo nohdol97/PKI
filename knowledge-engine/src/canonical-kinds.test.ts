@@ -358,15 +358,6 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
       expect(SUBJECTS[k.kind], k.kind).toEqual(NOT_APPLICABLE[k.kind] ?? BOTH);
     }
   });
-
-  it("refuses old-versions-pruned until I04-T12 defines it, instead of counting zero", () => {
-    const { a } = world();
-    const change: SourceChange = { kind: "old-versions-pruned", sourceId: a.sourceId, version: 1 };
-    expect(() => db.transaction(() => derivativeRegistry.propagate(db, change))).toThrow(
-      /old-versions-pruned/,
-    );
-    expect(listInvalidations(db)).toEqual([]);
-  });
 });
 
 describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are judged again", () => {
