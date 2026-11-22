@@ -30,7 +30,9 @@
 // and `REPLACE INTO` / `INSERT OR REPLACE` on items, facts or relations (a replace deletes the row and
 // its history through the cascade, and the new row has no line) fail outside it, tests and
 // @pki/testkit's seed excepted. Both look at the text of string and template literals and at
-// import and export specifiers by name.
+// import and export specifiers by name, and a namespace import's member access or destructuring.
+// The tables are the item, fact and relation ones and their histories; the ontology tables are
+// T07's to add.
 // Known gaps (not checked):
 // - the user entry reached through `import("@pki/storage")`, `export * from "@pki/storage"` or a
 //   value passed in from a module that may hold it
@@ -89,9 +91,16 @@ const USER_ENTRY = new Set(["userDecisions", "UserDecisions", "UserAction"]);
 const USER_ENTRY_VALUE = "userDecisions";
 const API_LAYER = { pkg: "@pki/backend", file: "src/server.ts" };
 const GATE_MODULE = { pkg: "@pki/storage", file: "src/semantic-lifecycle.ts" };
-const HISTORY_INSERT =
-  /\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+["'`[]?(?:main\.)?(?:item|fact|relation)_history\b/i;
-const ROW_REPLACE = /\bREPLACE\s+INTO\s+["'`[]?(?:main\.)?(?:items|facts|relations)\b/i;
+// A table name as SQL may spell it: bare, quoted, or behind a schema (`main."fact_history"`).
+const TABLE = String.raw`(?:["'\`[]?\w+["'\`\]]?\s*\.\s*)?["'\`[]?`;
+const HISTORY_INSERT = new RegExp(
+  String.raw`\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+${TABLE}(?:item|fact|relation)_history\b`,
+  "i",
+);
+const ROW_REPLACE = new RegExp(
+  String.raw`\bREPLACE\s+INTO\s+${TABLE}(?:items|facts|relations)\b`,
+  "i",
+);
 const ADAPTER_INTERFACES = new Set([
   "Connector",
   "ConnectorFactory",
@@ -293,6 +302,17 @@ const moduleBoundary = {
         }
       }
     }
+    /** @param {any} node `const { userDecisions } = ns` where `ns` is `import * as ns from "@pki/storage"` */
+    function namespaceDestructuring(node) {
+      if (node.init?.type !== "Identifier" || !storageNamespaces.has(node.init.name)) return;
+      if (node.id?.type !== "ObjectPattern") return;
+      for (const prop of node.id.properties) {
+        const key = prop.key?.name ?? prop.key?.value;
+        if (prop.type === "Property" && USER_ENTRY.has(key) && !userEntryAllowed(key, false)) {
+          context.report({ node: prop, messageId: "userEntryImport", data: { name: key } });
+        }
+      }
+    }
     /** @param {any} node A Literal or TemplateLiteral: SQL text that writes what only the gate writes */
     function registrySql(node) {
       if (mayWriteRegistry) return;
@@ -430,6 +450,7 @@ const moduleBoundary = {
       ArrowFunctionExpression: returns,
       /** @param {any} node */
       VariableDeclarator: (node) => {
+        namespaceDestructuring(node);
         const name = adapterName(node.id?.typeAnnotation?.typeAnnotation, names);
         // a function value is judged by what it returns, as a function declaration is
         const built = FUNCTIONS.has(node.init?.type)

@@ -538,6 +538,37 @@ describe("the user entry and the registry's writes (S01-T02)", () => {
     }
   });
 
+  it("fails on a bare REPLACE into a history table and on quoted or schema-qualified table names", async () => {
+    for (const sql of [
+      "REPLACE INTO fact_history (fact_id) VALUES (1)",
+      "replace into item_history (item_id) values (1)",
+      'INSERT INTO main."fact_history" (fact_id) VALUES (1)',
+      'INSERT INTO "main"."relation_history" (relation_id) VALUES (1)',
+      'REPLACE INTO main."facts" (item_id) VALUES (1)',
+      'INSERT OR REPLACE INTO "main"."items" (type) VALUES (1)',
+      "REPLACE INTO [relations] (subject_id) VALUES (1)",
+    ]) {
+      expect(
+        await ids(`export const q = ${JSON.stringify(sql)};\n`, "storage/src/knowledge.ts"),
+        sql,
+      ).toEqual(["registryWrite"]);
+    }
+  });
+
+  it("fails on destructuring the user entry out of a namespace import of @pki/storage", async () => {
+    const code =
+      'import * as s from "@pki/storage";\nconst { userDecisions } = s;\nexport { userDecisions };\n';
+    expect(await ids(code, "knowledge-engine/src/extraction.ts")).toEqual(["userEntryImport"]);
+    expect(await ids(code, "backend/src/server.ts")).toEqual(["userEntryImport"]);
+    expect(await ids(code, "backend/src/composition.ts")).toEqual([]);
+    expect(
+      await ids(
+        'import * as s from "@pki/storage";\nconst { insertItem } = s;\nexport { insertItem };\n',
+        "knowledge-engine/src/extraction.ts",
+      ),
+    ).toEqual([]);
+  });
+
   it("lets the gate module, a test file and the test seed write them, and other tables' inserts and replaces pass", async () => {
     const history = 'export const q = "INSERT INTO fact_history (fact_id) VALUES (1)";\n';
     expect(await ids(history, "storage/src/semantic-lifecycle.ts")).toEqual([]);

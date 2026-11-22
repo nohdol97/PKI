@@ -196,12 +196,33 @@ describe("GET /api/semantic: the registry's rows", () => {
     });
   });
 
-  it("cuts the list at its limit and says so", async () => {
-    for (let i = 0; i < 101; i++) insertItem(db, { type: "Project", name: `P${i}`, ...attrs });
+  it.each([
+    [100, false],
+    [101, true],
+  ])("lists %i items and says truncated=%s at the limit of 100", async (count, truncated) => {
+    for (let i = 0; i < count; i++) insertItem(db, { type: "Project", name: `P${i}`, ...attrs });
     await start();
     const list = routes.semantic.response.parse((await call("semantic")).body);
     expect(list.items).toHaveLength(100);
-    expect(list.truncated).toBe(true);
+    expect(list.truncated).toBe(truncated);
+  });
+
+  it("counts the evidence on the source's current version only, for a fact and a relation", async () => {
+    const w = world();
+    await start();
+    const counts = async () => {
+      const item = routes.semantic.response
+        .parse((await call("semantic")).body)
+        .items.find((i) => i.id === w.item);
+      return [item?.facts[0]?.evidenceCount, item?.relations[0]?.evidenceCount];
+    };
+    expect(await counts()).toEqual([1, 1]);
+    // a newer version that no longer cites them: the evidence rows stay, as past evidence
+    saveSourceRecord(db, "c", { externalId: "a", title: "제목 a", body: "다른 내용" });
+    expect(
+      db.all("SELECT 1 FROM evidence WHERE fact_id = ? OR relation_id = ?", [w.fact, w.relation]),
+    ).toHaveLength(2);
+    expect(await counts()).toEqual([0, 0]);
   });
 });
 
@@ -453,7 +474,7 @@ describe("a row that is absent, deleted or hidden (S01-R22: no existence leak)",
 
   // a policy that denies a scope set of exactly the secret source: an item over two sources is
   // shown, its fact from the secret source alone is not
-  it("leaves a hidden fact out of a shown item, and answers not-found to it", async () => {
+  it("leaves a hidden fact and a hidden relation out of a shown item, and answers not-found to them", async () => {
     const open = world("open");
     const secret = source("secret", SECRET);
     const hiddenFact = saveFact(db, {
@@ -465,6 +486,21 @@ describe("a row that is absent, deleted or hidden (S01-R22: no existence leak)",
     automatedLifecycle.created(db, { kind: "fact", id: hiddenFact }, "extraction", null);
     addEvidence(db, {
       target: { factId: hiddenFact },
+      sourceVersionId: secret.versionId,
+      start: 0,
+      end: 2,
+      quote: NAME.slice(0, 2),
+    });
+    // a relation under the same shown item, cited only from the secret source
+    const hiddenRelation = saveRelation(db, {
+      subjectId: open.item,
+      type: "OWNS",
+      objectId: open.other,
+      ...attrs,
+    }).id;
+    automatedLifecycle.created(db, { kind: "relation", id: hiddenRelation }, "extraction", null);
+    addEvidence(db, {
+      target: { relationId: hiddenRelation },
       sourceVersionId: secret.versionId,
       start: 0,
       end: 2,
@@ -484,6 +520,11 @@ describe("a row that is absent, deleted or hidden (S01-R22: no existence leak)",
     const item = list.items.find((i) => i.id === open.item);
     expect(item?.facts.map((f) => f.id)).toEqual([open.fact]);
     for (const res of await probe("fact", hiddenFact)) expect(res).toEqual(NOT_FOUND);
+    expect(item?.relations.map((r) => r.id)).toEqual([open.relation]);
+    for (const res of await probe("relation", hiddenRelation)) expect(res).toEqual(NOT_FOUND);
+    expect(db.all("SELECT status FROM relations WHERE id = ?", [hiddenRelation])).toEqual([
+      { status: "candidate" },
+    ]);
     expect(db.all("SELECT status FROM facts WHERE id = ?", [hiddenFact])).toEqual([
       { status: "candidate" },
     ]);

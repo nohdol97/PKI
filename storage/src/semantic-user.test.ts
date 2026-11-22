@@ -351,6 +351,14 @@ describe("user-override.guard (S01-R12)", () => {
     expect(state(ref)).toEqual({ status: "verified", epistemic: "user-approved" });
   });
 
+  it("a policy dispute alone does not make a row user-decided: an automated call after it is not refused as user-override", () => {
+    const ref = row("fact", "verified", "hypothesis");
+    expect(automatedLifecycle.raiseDispute(db, ref, BASIS).status).toBe("applied");
+    expect(lines(ref)[0]).toMatchObject({ actor: "policy", action: "dispute" });
+    expect(automatedLifecycle.explicitEvidence(db, ref, BASIS).status).toBe("applied");
+    expect(state(ref)).toEqual({ status: "disputed", epistemic: "explicit" });
+  });
+
   it("an automated dispute needs the source version, and a policy dispute leaves the value and the epistemic type", () => {
     const ref = row("fact", "candidate", "explicit");
     decide(ref, "approve");
@@ -365,6 +373,8 @@ describe("user-override.guard (S01-R12)", () => {
     expect(lines(ref)).toHaveLength(1);
     expect(automatedLifecycle.raiseDispute(db, ref, BASIS).status).toBe("applied");
     expect(state(ref)).toEqual({ status: "disputed", epistemic: "user-approved" });
+    // the policy's line is no user action: it is not undone (R8)
+    expect(undo(ref)).toEqual({ status: "refused", reason: "not-latest" });
     expect(lines(ref)[1]).toMatchObject({
       actor: "policy",
       action: "dispute",

@@ -1,7 +1,8 @@
 // The user's entry to the Semantic registry's lifecycle (S01-R7, R8): approve, reject, dispute and
 // undo, built on the gate's `applyTransition` with the actor `user`. It is exported from the package
-// index but may be imported only by the composition point (backend/src/composition.ts) and the API
-// layer (backend/src/server.ts) (module-boundary lint, `lifecycle.actor-boundary`): extraction,
+// index but its value may be imported only by the composition point (backend/src/composition.ts),
+// which hands it to the API layer (backend/src/server.ts, which may name its types only) (module-boundary
+// lint, `lifecycle.actor-boundary`): extraction,
 // propagation and the job runner reach the registry through `automatedLifecycle` alone, which has
 // no function that approves or rejects. The transaction is the caller's.
 //
