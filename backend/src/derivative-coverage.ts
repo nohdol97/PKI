@@ -65,6 +65,16 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   consents: operational("the user's consent per Provider"),
   settings: operational("settings and the projections' stale marks"),
   provider_calls: operational("Provider call history, no content"),
+  // the local file index (I02B-R33): what a file is and where it was seen, so source identity like
+  // `sources`, not a derivative kind (it is written before its source exists and keeps rows after a
+  // deletion). A trigger on `tombstones` scrubs it; `checkTableCoverage` requires that trigger.
+  local_file_entries: { class: "source" },
+  local_locations: operational(
+    "the places the user approved: settings, no source content (I02B-R33)",
+  ),
+  local_index_seq: operational(
+    "one row, the counter of the local index's sequence numbers (I02B-R33)",
+  ),
   tombstones: operational("deletion records, the identity hashed (I04-R6, R7)"),
   revisions: operational("the revision numbers of the sources"),
   invalidations: operational("content-free record of each propagation (I04-R4)"),
@@ -133,6 +143,26 @@ export function checkTableCoverage(
             `operational table "${table}" has the derived-row column "${String(col.name)}"`,
           );
         }
+      }
+    }
+  }
+  // A source-class table other than `sources` holds source identity that a deletion must reach; the
+  // only way that reaches every writer of a tombstone is a trigger on `tombstones`, for a new row and
+  // for a changed one, that names it (I02B-R33). Classified without them, nothing empties it.
+  const tombstoneTriggers = db
+    .all("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND lower(tbl_name) = 'tombstones'")
+    .map((r) => String(r.sql).toLowerCase());
+  for (const table of tables) {
+    if (table.toLowerCase() === "sources") continue;
+    if (byName.get(table.toLowerCase())?.class !== "source") continue;
+    const name = table.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const named = new RegExp(`(?<!\\w)${name}(?!\\w)`);
+    for (const event of ["insert", "update"]) {
+      const onEvent = new RegExp(`\\b(after|before)\\s+${event}\\b`);
+      if (!tombstoneTriggers.some((sql) => named.test(sql) && onEvent.test(sql))) {
+        problems.push(
+          `source-class table "${table}" has no trigger on "tombstones" that empties it when a row is ${event === "insert" ? "inserted" : "updated"}: a deletion would leave its rows (I02B-R33)`,
+        );
       }
     }
   }
