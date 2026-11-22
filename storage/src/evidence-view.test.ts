@@ -1,7 +1,7 @@
 // V02-R14 evidence views (spec "T10이 넘기는 것" 2): an Insight's evidence says
 // whether its version is the source's latest, and the source view reads the version
 // the evidence points to while naming the latest. Only active Insights are listed.
-import type { NativeLocator } from "@pki/contracts";
+import { EvidenceViewSchema, type NativeLocator } from "@pki/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { listActiveInsights, readEvidenceSource, readInsightEvidence } from "./evidence-view.ts";
@@ -173,15 +173,20 @@ describe("evidence locator (I01-R29)", () => {
     expect(readEvidenceSource(db, evidenceId)?.locator).toEqual({ format: "pdf", page: 1 });
   });
 
-  it("counts code points: the block end is exclusive and an emoji is one unit", () => {
+  it("counts code points: an astral character before the boundary is one unit", () => {
+    // UTF-16 offsets of this body run one ahead after the emoji, so a UTF-16 start of 1
+    // (code point 1) would read as 2 and land in the second block
     const blocks = [
-      { start: 0, end: 1, locator: { format: "pdf", page: 1 } },
-      { start: 1, end: 20, locator: { format: "pdf", page: 2 } },
+      { start: 0, end: 2, locator: { format: "pdf", page: 1 } },
+      { start: 2, end: 20, locator: { format: "pdf", page: 2 } },
     ];
-    const first = seedEvidence(BODY, blocks, { start: 0, end: 1 }, "a");
-    const second = seedEvidence(BODY, blocks, { start: 1, end: 2 }, "b");
-    expect(readEvidenceSource(db, first.evidenceId)?.locator).toEqual({ format: "pdf", page: 1 });
-    expect(readEvidenceSource(db, second.evidenceId)?.locator).toEqual({ format: "pdf", page: 2 });
+    const inFirst = seedEvidence(BODY, blocks, { start: 1, end: 2 }, "a");
+    const inSecond = seedEvidence(BODY, blocks, { start: 2, end: 3 }, "b");
+    expect(readEvidenceSource(db, inFirst.evidenceId)?.locator).toEqual({ format: "pdf", page: 1 });
+    expect(readEvidenceSource(db, inSecond.evidenceId)?.locator).toEqual({
+      format: "pdf",
+      page: 2,
+    });
   });
 
   it("keeps computing a past evidence's locator from the version it points to", () => {
@@ -199,6 +204,53 @@ describe("evidence locator (I01-R29)", () => {
     const view = readEvidenceSource(db, evidenceId);
     expect(view?.sourceVersion).toMatchObject({ id: versionId, version: 1, latestVersion: 2 });
     expect(view?.locator).toEqual({ format: "pdf", page: 1 });
+  });
+
+  it("keeps a past evidence's own version locator on the Insight list path too", () => {
+    const { evidenceId } = seedEvidence(
+      BODY,
+      [{ start: 0, end: 20, locator: { format: "pdf", page: 1 } }],
+      { start: 2, end: 5 },
+    );
+    const y = insertItem(db, { ...attrs, type: "System", name: "Y" });
+    const x = db.all("SELECT id FROM items LIMIT 1")[0]?.id as number;
+    saveInsight(
+      db,
+      { rule: "dependency_delay", xItemId: x, yItemId: y },
+      { state: "active", summary: "위험(추론)", evidenceIds: [evidenceId] },
+    );
+    saveSourceRecord(db, "c1", {
+      externalId: "s1",
+      title: "합성 제목",
+      body: `새 머리말 ${BODY}`,
+      blocks: [{ start: 0, end: 30, locator: { format: "pdf", page: 9 } }],
+    });
+    const insightId = listActiveInsights(db)[0]?.id as number;
+    expect(readInsightEvidence(db, insightId)?.evidence[0]).toMatchObject({
+      version: 1,
+      current: false,
+      locator: { format: "pdf", page: 1 },
+    });
+  });
+
+  it("answers in the shape of EvidenceView (I01-R29)", () => {
+    const { evidenceId, versionId } = seedEvidence(
+      BODY,
+      [{ start: 0, end: 20, locator: { format: "pdf", page: 1 } }],
+      { start: 2, end: 5 },
+    );
+    const read = readEvidenceSource(db, evidenceId);
+    expect(read).toBeDefined();
+    const { sourceVersion, start, end, quote, locator } = read as NonNullable<typeof read>;
+    expect(
+      EvidenceViewSchema.parse({
+        sourceVersionId: sourceVersion.id,
+        version: sourceVersion.version,
+        span: { start, end },
+        quote,
+        locator,
+      }),
+    ).toMatchObject({ sourceVersionId: versionId, version: 1, span: { start: 2, end: 5 } });
   });
 
   it("is on each row of an Insight's evidence list too", () => {
