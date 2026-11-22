@@ -118,7 +118,7 @@ export function nativeReason(id: string): string | undefined {
     : undefined;
 }
 
-function productionModules(): Plugin {
+function productionModules(allowTestOnly: readonly string[]): Plugin {
   return {
     name: "pki-production-modules",
     async resolveId(source, importer, options) {
@@ -126,7 +126,10 @@ function productionModules(): Plugin {
       if (!resolved || resolved.external) return resolved;
       const pair = REPLACEMENTS[repoPath(resolved.id)];
       if (pair !== undefined) return resolve(REPO_ROOT, pair);
-      const why = forbiddenReason(resolved.id) ?? nativeReason(resolved.id);
+      const why =
+        (allowTestOnly.includes(repoPath(resolved.id))
+          ? undefined
+          : forbiddenReason(resolved.id)) ?? nativeReason(resolved.id);
       if (why !== undefined) this.error(why);
       return resolved;
     },
@@ -139,6 +142,12 @@ export interface BundleOptions {
   outFile: string;
   /** Written as `import.meta.PKI_BUILD_KIND`; undefined writes nothing (as without a bundler). */
   buildKind: string | undefined;
+  /**
+   * Repository paths of test-only modules this one bundle may reach (the test app of an artifact test,
+   * e.g. a stand-in backend entry); the production build passes none. Only these exact paths are
+   * exempt: the rest of the refusals stand.
+   */
+  allowTestOnly?: readonly string[];
 }
 
 /** Bundles `input` into `outFile`; returns the repository modules the bundle kept. */
@@ -159,7 +168,7 @@ export async function bundle(options: BundleOptions): Promise<{ modules: string[
       options.buildKind === undefined
         ? {}
         : { define: { "import.meta.PKI_BUILD_KIND": JSON.stringify(options.buildKind) } },
-    plugins: [productionModules()],
+    plugins: [productionModules(options.allowTestOnly ?? [])],
     onLog(level, log, handler) {
       // a warning is a build failure: an unresolved import or an eval must not ship quietly
       if (level === "warn") throw new Error(`bundle ${options.input}: ${log.message}`);

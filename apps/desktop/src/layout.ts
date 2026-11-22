@@ -12,6 +12,11 @@ export const WEB_ROOT = fileURLToPath(new URL("../../web/dist/", import.meta.url
 /** The public entry, or a fork's own where the repository has a composition package (I05-R2). */
 export const BACKEND_ENTRY = backendEntry(fileURLToPath(new URL("../../../", import.meta.url)));
 
+/** The normalizer host's entry the shell starts for the backend (I02B-R22). */
+export const NORMALIZER_HOST_ENTRY = fileURLToPath(
+  new URL("../../../packages/document-normalize/src/host.ts", import.meta.url),
+);
+
 /** Source runs keep the debugging switches: Playwright drives the shell through them. */
 export const REFUSE_DEBUGGING: boolean = false;
 

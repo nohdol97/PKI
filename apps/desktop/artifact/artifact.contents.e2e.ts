@@ -30,10 +30,40 @@ test.beforeAll(() => {
 test("the app folder is laid out for Electron", () => {
   const manifest = JSON.parse(readFileSync(join(APP_DIR, "package.json"), "utf8"));
   expect(manifest).toMatchObject({ main: "main.js", type: "module" });
-  for (const file of ["main.js", "preload.cjs", "backend/shell.js", "web/index.html"]) {
+  for (const file of [
+    "main.js",
+    "preload.cjs",
+    "backend/shell.js",
+    "backend/host.js",
+    "backend/isolated-worker.js",
+    "web/index.html",
+  ]) {
     expect(existsSync(join(APP_DIR, file)), file).toBe(true);
   }
-  expect(Object.keys(report.bundles).sort()).toEqual(["backend/shell.js", "main.js"]);
+  expect(Object.keys(report.bundles).sort()).toEqual([
+    "backend/host.js",
+    "backend/isolated-worker.js",
+    "backend/shell.js",
+    "main.js",
+  ]);
+});
+
+test("the normalizer host and its worker are the product's, not the tests' (I02B-R22, R25)", () => {
+  // the host program and the I02-A normalizer are live in their bundles
+  expect(report.bundles["backend/host.js"]).toContain("packages/document-normalize/src/host.ts");
+  expect(report.bundles["backend/isolated-worker.js"]).toContain(
+    "packages/document-normalize/src/normalize.ts",
+  );
+  // no test worker, time-bomb input or net watch is in the folder
+  const testing = Object.values(report.bundles)
+    .flat()
+    .filter((m) => m.startsWith("packages/document-normalize/src/testing/"));
+  expect(testing).toEqual([]);
+  expect(ownFiles().some((f) => /bomb|hung-host|net-watch/.test(f))).toBe(false);
+  // the bundled host starts no worker but the one next to it
+  const host = readFileSync(join(APP_DIR, "backend/host.js"), "utf8");
+  expect(host).toContain("isolated-worker");
+  expect(host).not.toContain("bomb");
 });
 
 test("no bundle kept a test-only, development-only or source-run module", () => {

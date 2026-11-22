@@ -8,6 +8,8 @@ import type { Switches } from "./layout.ts";
 export const WEB_ROOT = fileURLToPath(new URL("./web/", import.meta.url));
 export const BACKEND_ENTRY = fileURLToPath(new URL("./backend/shell.js", import.meta.url));
 
+export const NORMALIZER_HOST_ENTRY = fileURLToPath(new URL("./backend/host.js", import.meta.url));
+
 export const REFUSE_DEBUGGING: boolean = true;
 
 /**

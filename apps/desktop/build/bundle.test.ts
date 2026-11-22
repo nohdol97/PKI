@@ -188,6 +188,34 @@ describe("build check", () => {
     }
   });
 
+  it("lets one bundle reach the test-only modules it names by path, and no others (the test app of an artifact test)", async () => {
+    const dir = join(REPO_ROOT, "apps/desktop/build/.bundle-test-input");
+    mkdirSync(dir, { recursive: true });
+    try {
+      const helper = "apps/desktop/build/.bundle-test-input/helper.test-support.ts";
+      writeFileSync(join(dir, "helper.test-support.ts"), "export const helper = 1;\n");
+      const entry = join(dir, "entry.ts");
+      writeFileSync(
+        entry,
+        'import { helper } from "./helper.test-support.ts";\nconsole.log(helper);\n',
+      );
+      const build = (allowTestOnly?: string[]) =>
+        bundle({
+          input: entry,
+          outFile: join(out, "allow.mjs"),
+          buildKind: "test",
+          ...(allowTestOnly === undefined ? {} : { allowTestOnly }),
+        });
+      await expect(build()).rejects.toThrow(/test-only module/);
+      await expect(
+        build(["apps/desktop/build/.bundle-test-input/other.test-support.ts"]),
+      ).rejects.toThrow(/test-only module/);
+      await expect(build([helper])).resolves.toMatchObject({ modules: expect.any(Array) });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("puts the production pair in place of a source-run module", async () => {
     const { modules } = await bundled("backend/src/shell-options.ts", "production");
     expect(modules).toEqual(["backend/src/shell-options.production.ts"]);
