@@ -592,6 +592,8 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
       ].join("\n"),
     );
     expect(seven).toContain("**문서의 절차이고 빌드가 강제하지 않는다.**");
+    expect(seven).toContain("`pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다.");
+    expect(read("package.json")).toContain('"lint": "eslint . && prettier --check ."');
     // the check initializes with an empty config, so a collector that needs one ends 1 with its own message
     expect(seven).toContain("`site-check`는 **빈 설정(`{}`)으로** 초기화한다.");
     expect(seven).toContain("설정을 요구하는 수집기는 자기 설정 오류의 문구로 실패하고 1로 끝난다");

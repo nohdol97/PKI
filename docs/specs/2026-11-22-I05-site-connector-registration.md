@@ -538,6 +538,49 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 2. **I05-T03·T04의 "바뀌는 파일"(A6).** `backend/tsconfig.json`이 목록에 없다. 반영: T04의 파일 목록(또는 이를 먼저 필요로 하는 T03)에 `backend/tsconfig.json`(선언 파일 내보내기 세 줄)을 더한다. 요구사항은 바뀌지 않는다.
 3. **I05-T04의 네이티브 모듈 검사(A5).** spec의 처방("조용히 넘어가면 실패하게 만드는 일을 T04에 더한다")이 이미 있으나 완료 기준에는 없다. 반영: I05-C15에 "수집기 패키지가 네이티브 모듈에 닿으면 묶기가 실패한다(`EXTERNAL_PACKAGES`는 제외)"를 ⑤로 더한다.
 
+### I05-T05가 넘기는 것
+
+I05-T05는 문서(connector-sdk.md 5·6·7·11장, ownership.md 3절, site-setup S26·S27과 번호 범위), ADR 0018, 문서 대응 시험을 쓰고, T04 검토에서 넘어온 작은 코드 넷과 `startServer` 정리를 하고, **포크 모양의 버리는 작업 트리**에서 I05-R21의 명령 전부와 공용 변경 받기를 한 번 돌렸다. 모든 명령, 종료 코드(명령에서 바로 읽었고 파이프나 `echo`로 가리지 않았다), 출력은 `_workspace/pki-phase2h/i05_t05_rehearsal.log`와 같은 이름의 폴더에 있다(이 저장소에는 올라가지 않는 로컬 기록이다). 한 번의 증거이며 macOS에서만 돌렸다. Windows는 돌리지 않았다. 셸의 `node --version`은 v26.5.0이었고 pnpm 스크립트가 저장소가 고정한 Node 24를 쓴다는 것은 프로젝트 문서의 설명이다(이 기록이 직접 재지는 않았다).
+
+**예행의 모양.** 트리는 `git worktree add --detach`로 만들었다(처음 a07560e, 도중에 공용 시험의 타입 오류를 고친 64597d8로 옮겼다. 포크의 파일과 lockfile 변경은 그대로 두었다). `packages/site-example`을 `site/composition`으로 복사해 이름을 `@pki-site/composition`으로 바꾸고, 수집기 패키지 `site/connectors/x`(`@pki-site/connector-x`)를 더했다. 수집기는 공용 예시 수집기의 구현을 복사해 의존성 `slugify@1.6.6`(레지스트리 패키지, 설치 스크립트 없음, 자기 타입을 가짐)을 쓰게 한 것이고, 계약 묶음 테스트를 갖는다. 등록에는 예시 종류와 이 종류 둘을 넣었다. **I07-T03(설치본의 범위 파일)은 이 예행을 시작할 때 `origin/main`에 합쳐져 있지 않았다**(`scopes-file-misplaced` 판정이 트리에 없었고, 마지막으로 가져왔을 때도 같았다). 그래서 범위 파일은 놓지 않았다. 합쳐진 뒤의 예행은 I07 spec "I07-T01이 넘기는 것"과 I07-R7대로 범위 파일을 `site/config/connector-scopes.json`에 두고 `registration.ts`의 `import` 경로를 `../../config/connector-scopes.json`으로 고치고 예시 표지값을 바꾼 뒤 돌려야 한다. 이 예행은 그것을 보지 못한다.
+
+| 명령 | 종료 코드 | 본 것 |
+|---|---|---|
+| (시작) `pnpm install --frozen-lockfile`, `git status --porcelain` | 0 | 상태가 비어 있음(0줄) |
+| 예시를 `site/composition`으로 복사하고 `pnpm install` | 0 | 상태: ` M pnpm-lock.yaml`, `?? site/composition/` |
+| `pnpm typecheck`, **예시의 `tsconfig.json`을 그대로 둠** | **2** | `TS6053: File '…/site/connector-example' not found` 등 셋과 `TS5083`. connector-sdk.md 7장의 "그대로 복사할 수 없다"의 증거 |
+| 세 참조(`../X` → `../../packages/X`)를 고치고 수집기를 더한 뒤 `pnpm install` | 0 | lockfile **+38 −0**, 조각 셋(`importers`, `packages`, `snapshots`) |
+| `pnpm install --frozen-lockfile` | 0 | `Already up to date` |
+| `git status --porcelain`, `git diff --stat HEAD -- . ':(exclude)site' ':(exclude)pnpm-lock.yaml'` | 0 | ` M pnpm-lock.yaml`, `?? site/composition/`, `?? site/connectors/`. 공용 파일의 변경 0 |
+| `pnpm lint` | 1, 뒤에 0 | 처음은 손으로 쓴 두 파일이 `prettier --check`에 걸림. `pnpm exec prettier --write site` 뒤 0 |
+| `pnpm typecheck` | 2, 뒤에 0 | 처음은 두 가지: 수집기 패키지의 복사 실수(예행의 실수. 그 파일이 없는 모듈을 가져옴)와 **공용의 시험 `backend/src/connector-sdk.docs.test.ts`의 타입 오류 한 줄**(`exactOptionalPropertyTypes`. 이 PR이 고쳤다. 공용 트리의 `pnpm typecheck`는 그 시험을 쓰기 전에만 돌렸었다). 둘을 고친 뒤 0 |
+| `pnpm --filter @pki-site/composition site-check connector-example`, `… fork-x` | 1, 1 | `connector-example: invalid config`, `fork-x: invalid config`. `site-check`는 빈 설정 `{}`으로 초기화하므로 설정을 요구하는 수집기는 자기 오류의 문구로 끝난다. **문서가 "ok"라고 적었던 것을 이 결과로 고쳤다**(7장, S26) |
+| `… site-check site-mail`, `… site-check no-such-kind` | 1, 2 | `site-mail: 미구현, 배포처 후속`(대체하지 않은 자리표시), `usage: site-check <site-mail|site-messenger|site-wiki|connector-example|fork-x>` |
+| `pnpm --filter @pki/backend site-check site-mail`(공용 명령, 조립 패키지가 있는 트리) | 2 | 포크의 명령 `pnpm --filter @pki-site/composition site-check <종류>`를 안내함(I05-R19) |
+| `pnpm --filter @pki/desktop build` | 0 | `built apps/desktop/dist/app: main.js, backend/shell.js, web/, 43 runtime packages`. 백엔드 묶음에 `fork-x` 3곳, `slugify` 9곳. `--scope-policy`, `--fixtures`, `testBuildDecision`, `@pki/testkit`, `registration.test`는 각 0곳 |
+| `pnpm test`(**전체**, 공용 테스트 파일을 하나도 고치지 않음) | 0 | 283 파일 통과·1 건너뜀, **5556 통과·26 건너뜀**, 354 s. 포크의 시험만 세면 3 파일 6건 |
+| `pnpm e2e` | **1** | 60 통과, **5 실패**, 5 건너뜀(2.5분). 아래 "예행이 찾은 것" |
+| 공용 변경 받기: 공용 가지(문서 한 줄과 공용 패키지의 의존성 하나, lockfile 변경)를 포크 가지에 `git merge` | 0 | 두 번은 lockfile이 충돌 없이 합쳐졌다(`storage`에, 그리고 `providers`에 `is-number`를 더함). 첫 번째는 합친 뒤 `pnpm install --frozen-lockfile` 0, `git status --porcelain` 0줄, 공용 가지와 다른 추적 파일은 `pnpm-lock.yaml` 하나(+38)로 확인했다 |
+| 같은 병합이 **충돌하는 모양**(공용이 `providers`에 `slash@5.1.0`을 더함: 알파벳으로 포크의 `slugify` 항목 바로 앞) | 1(병합) | `UU pnpm-lock.yaml` 하나. 공용의 `docs/README.md`, `providers/package.json`은 병합에 실려 옴 |
+| 고치는 법대로: `git checkout --theirs pnpm-lock.yaml`(병합이라 `theirs`가 공용), `pnpm install --frozen-lockfile` | 1 | `specifiers in the lockfile don't match specifiers in package.json: * 3 dependencies were added: @pki/testkit@workspace:*, @pki/contracts@workspace:*, slugify@1.6.6`(포크 항목이 없음) |
+| `pnpm install`, `pnpm install --frozen-lockfile` | 0, 0 | 공용 가지의 lockfile과 비교해 **+38 −0**(포크 항목만). commit 뒤 `git status --porcelain` 0줄, 공용 가지와 다른 추적 파일은 `pnpm-lock.yaml` 하나 |
+| 그 뒤 `pnpm lint`, `pnpm typecheck`, `pnpm exec vitest run tooling/workspace` | 0, 0, 0 | 7 파일 48건 통과 |
+| 설치 스크립트가 있는 의존성(`bufferutil@4.1.0`)을 수집기에 더하고 `pnpm install` | **1** | `ERR_PNPM_IGNORED_BUILDS: Ignored build scripts: bufferutil@4.1.0`, 그리고 `pnpm-workspace.yaml`의 `allowBuilds`에 `bufferutil: set this to true or false` 줄이 써짐. `false`로 고치고 `pnpm install` 0, `--frozen-lockfile` 0. 달라진 추적 파일은 `pnpm-lock.yaml`과 `pnpm-workspace.yaml`(I05-T01 A2와 같은 결과를 이 트리에서 다시 봄) |
+
+**예행이 찾은 것.**
+
+1. **공용 e2e 다섯이 포크 모양에서 실패한다.** 셋의 원인이 있다. 포크가 만든 앱 자체의 문제는 아니다(포크가 만든 `backend/shell.js`와 셸을 띄우는 `artifact` 시험, 수명 주기·보안·런타임 시험은 통과했다). 이 PR은 그 시험을 고치지 않았다(기존 시험의 단언을 바꾸는 일이라 이 작업의 범위 밖으로 두었다). 후속이다.
+   - `apps/desktop/artifact/artifact.contents.e2e.ts:69`("no bundle carries the lookup of a composition package"): 모든 묶음에서 글자 `site/composition`을 찾는다. 포크의 백엔드 묶음은 자기 모듈을 `// site/composition/src/registration.ts`와 `// site/composition/src/shell.ts`(번들러의 영역 주석)로 적으므로 2곳에서 걸린다. 같은 묶음에서 그 조회의 글자 `site/composition/package.json`은 0곳이다. 시험의 주석은 "포크 모양에서도 참"이라고 적었으나 틀렸다(I05-R25, C20 ③). 쉬운 고침: 조회의 글자(`site/composition/package.json`과 `has a package.json but no backend entry`)를 모든 묶음에서 찾고, 폴더 이름 전체는 셸 묶음(`main.js`)에서만 찾는다.
+   - `apps/desktop/artifact/artifact.gate.e2e.ts:105`: 수집기 목록이 정확히 자리표시 셋이어야 한다고 단언한다. 포크의 등록은 자기 인스턴스를 더하므로 `example-notes`, `x-notes`가 더 나온다. 쉬운 고침: 시험 수집기가 없다는 부정형(`fixtures` ID와 `test-fixtures` 종류가 없다)으로 바꾼다.
+   - `apps/web/e2e/v02-flow.e2e.ts`의 셋(재실행해도 같다. 기계 부하가 아니다): 시험용 셸의 `apps/desktop/e2e/double-main.ts`가 `PKI E2E: unexpected backend entry <루트>/site/composition/src/shell.ts; expected <루트>/backend/src/shell.ts`로 셸을 멈춘다. 포크 모양의 트리에서 소스 실행은 포크의 진입점을 고르기(I05-R2) 때문이다. Playwright 쪽에는 `electron.launch: WebSocket error: socket hang up`으로 보인다. 쉬운 고침: 기대 값을 `backendEntry(루트)`로 구한다.
+2. **공용 시험의 타입 오류**(위 표). 이 PR이 고쳤다.
+3. **`site-check`가 빈 설정으로 초기화한다**는 점이 문서에 없었다. 7장과 S26에 적었다.
+4. **포크의 손으로 쓴 파일은 `prettier --check`에 걸린다.** 7장에 `pnpm exec prettier --write site`를 적었다.
+
+**포크가 손으로 해야 하는 일**(예행에서 한 것). 조립 패키지의 `tsconfig.json`의 참조 세 줄을 `../../packages/…`로 고친다. 수집기 패키지의 `package.json`, `tsconfig.json`, 구현, 계약 테스트를 쓰고 조립 패키지의 `package.json`·`tsconfig.json`·`registration.ts`에 그 수집기를 더한다. 복사한 `registration.test.ts`의 기대 값을 자기 등록에 맞춘다(예시의 시험은 종류 하나를 단언한다). `pnpm install`을 실행하고 `pnpm-lock.yaml`의 변경을 commit한다. `pnpm exec prettier --write site`로 서식을 맞춘다. 공용 변경을 받아 올 때 `pnpm-lock.yaml`이 충돌하면 공용 쪽을 취하고 `pnpm install`을 다시 실행한다. 설치 스크립트가 있는 의존성이면 `allowBuilds`의 줄을 `false`로 고친다.
+
+**검증하지 않은 것.** Windows(경로, 네이티브 모듈 검사, 설치본의 실행). 실제 포크의 의존성 조합과 실제 수집기(예행의 수집기는 공용 예시 수집기를 복사한 것이고 의존성은 하나다). 이 결과는 `rebase`로 공용 변경을 받는 경우를 보지 않았다(`merge`의 충돌 모양 하나와 충돌 없는 둘). 설치본을 실제로 설치해 켜고 동기화하는 일(S27)과 멈추는 수집기를 넣은 설치본의 시작 시간. 네이티브 모듈 검사가 놓치는 두 곳(계산된 이름의 불러오기, 빌드한 OS)은 이 예행에서 재지 않았다(T04 검토가 잰 것을 문서에 옮겼다). 범위 파일(I07-T03이 합쳐지기 전이다). 이 예행 뒤에 공용에 더해지는 시험은 다음 예행이나 포크의 S26에서 드러난다(미해결 질문 1). `pnpm e2e`의 위 다섯 실패는 시험의 고침과 함께 다시 돌려야 한다.
+
 ## 후속(다른 문서의 고칠 곳)
 
 | 문서 | 고칠 것 | 하는 작업 |
@@ -565,3 +608,4 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 | 2026-11-23 | I05-T04 구현 중 좁은 틈을 메움. ① 포크 모양의 패키지는 `backend/src`를 경로나 하위 경로로 가져오지 못하며 시험 파일도 같다. R1의 "`backend/src`의 파일을 경로로 가져온다"는 시험 파일에서도 경계 규칙이 이미 막아 왔으므로 "진입점 파일을 경로로 띄운다"로 고침(R1, C4 ⑧) ② 포크의 묶음도 소스 실행용 모듈의 교체를 받아 `--scope-policy`·`--fixtures`를 받지 않음(R17, C15 ④) ③ lockfile의 `site/` 항목이 디스크와 어긋날 때의 고치는 법(R3) ④ 예시 수집기 패키지의 "어느 워크스페이스 패키지의 의존성도 아니다" 시험은 예시 조립 패키지 하나를 예외로 둠(R20) ⑤ `fork-shape`는 다른 패키지의 코드(`backendEntry`, `site-check` 안내)를 자식 프로세스에서 경로로 불러 시험한다(시험 파일은 다른 패키지를 가져올 수 없다. C20 ②) | I05-R1, R3, R17, C4, C15, 작업 분해 T04 | I05-T03 검토(D1, D2)와 I05-T04 구현(#113): 스펙이 침묵한 자리에서 가장 좁은 읽기를 택하고 같은 PR에서 적음 |
 | 2026-11-23 | I05-T04 검토 반영. ① 경계 규칙은 절대 경로와 `file:` 주소도 상대 경로처럼 가리키는 파일의 패키지로 판정(C4 ⑧) ② 패키지 밖 상대 경로 허용표 `RELATIVE_ALLOWED`(빈 채로, 해석된 경로 비교)(R4) ③ 조립 지점 이름은 `site/composition`의 패키지에만(R4) ④ `site/` 아래 패키지에 `tsconfig.json`이 없으면 타입 검사가 이름을 적어 실패(R3) ⑤ 이전 행의 ④⑤를 R20과 C20 ②의 본문으로 옮김 ⑥ C4와 T04 행의 "일곱"을 "여덟"로 | I05-R3, R4, R20, C4, C20, 작업 분해 T04 | I05-T04 독립 검토 두 건(C-F1~F6, B-S1·S2·W5·W7) |
 | 2026-11-23 | I07 spec이 더한 것을 가리키는 한 줄씩. ① #115에 남기는 것 2: I07이 등록의 필드 후보를 골랐다 ② R18: 기존의 범위 파일 읽기는 I07-T02 뒤에 없어진다 ③ R6·R9의 표 뒤에 I07이 더한 필드와 두 코드 | I05-R6, R9, R18, 설계 개요 "#114와 #115에 남기는 것" | I07-T02(#115)가 I05 spec의 후속 표 ①~③을 처리함. 요구사항의 뜻은 바꾸지 않았다 |
+| 2026-11-23 | I05-T05 구현: 문서(connector-sdk.md 5·6·7·11장, ownership.md 3절, site-setup S26·S27과 번호 범위), ADR 0018과 색인, I01 spec의 처리 표시, 문서 대응 시험을 씀. T04 검토 잔여: 포크 파일의 인라인 ESLint 설정 금지, 읽을 수 없는 `file:` 주소 거부, `startFailureReport`가 던지지 않음, 포크 조립 지점이 사용자 진입을 가져오는 경우의 시험. `startServer`는 쓰는 곳이 없어 패키지 진입점에서 뺌(R1). 잔여 위험 표에 넷을 더함(린트가 보지 않는 길, 네이티브 검사가 놓치는 것, 예시 `tsconfig.json`의 복사, 패키지 없는 진입 파일). "I05-T05가 넘기는 것" 절에 포크 모양 예행을 기록함. 예행에서 공용 e2e 다섯이 포크 모양에서 실패하는 것(세 원인)과 `site-check`가 빈 설정으로 초기화하는 점, 공용 시험의 타입 오류 한 줄을 찾음 | I05-R1, 위험 표, 이 절 | I05-T05(#113). 이 spec의 작업 다섯이 모두 구현됨. 포크 모양 예행은 macOS에서 한 번이고 Windows와 실제 포크는 S26·S27 |
