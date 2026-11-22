@@ -208,6 +208,23 @@ describe("the import allow-list", () => {
     expect(codes(`${ADAPTERS}/extra.test.js`, text)).toHaveLength(2);
   });
 
+  it("allows node:os and node:child_process in the SDK's own test files only (the path-boundary tests make temporary folders and a FIFO)", () => {
+    const text = `import { tmpdir } from "node:os";\nimport { execFileSync } from "node:child_process";\nexport { tmpdir, execFileSync };\n`;
+    const SDK = "packages/connector-sdk/src";
+    expect(withFile(`${SDK}/local-path.test.ts`, text)).toEqual([]);
+    // not in an SDK product file, not in another root's test file, not in a look-alike
+    for (const path of [
+      `${SDK}/local-path-extra.ts`,
+      `${ADAPTERS}/extra.test.ts`,
+      `${SDK}/x.test.js`,
+    ]) {
+      expect(
+        withFile(path, text).map((f) => f.code + ":" + f.detail),
+        path,
+      ).toEqual(["import-not-allowed:node:os", "import-not-allowed:node:child_process"]);
+    }
+  });
+
   it("refuses a relative path that leaves the root, the extra file aside", () => {
     expect(codes(FILE, `export * from "../server.ts";\n`)).toEqual([
       "import-not-allowed:../server.ts",
