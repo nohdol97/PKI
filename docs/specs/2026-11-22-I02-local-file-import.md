@@ -2,7 +2,7 @@
 
 - 날짜: 2026-11-22 / 상태: 확정(잠정 결정 포함)
 - 관련: 이슈 #19(I02)의 남은 조각, 이슈 #116(JSONL 파일 인스턴스와 경로 제한)을 흡수, 맞물림 #113(배포처 수집기 등록, I05 spec), #32(H01 백업·복원), #33(H02 Windows 수명 주기). 선행 spec [I02-A 문서 정규화](2026-11-21-I02-document-normalization.md), [I01 Connector SDK](2026-11-21-I01-connector-sdk.md), [I03 작업 대기열](2026-11-21-I03-persistent-queue.md), [I04 무효화](2026-11-21-I04-invalidation.md), [V01](2026-11-21-V01-vertical-skeleton.md). 문서 [connector-sdk.md](../connector-sdk.md), [site-setup.md](../site-setup.md), [ADR 0015](../adr/0015-document-parsing-stack.md), [ADR 0016](../adr/0016-connector-sdk-v2.md)
-- 기준 코드: `origin/main` `3493a75`(tombstone 장부 PR #118 포함). 이 문서가 코드에 대해 말하는 사실은 그 커밋에서 확인했다.
+- 기준 코드: `origin/main` `3493a75`(tombstone 장부 PR #118 포함). 이 문서가 코드에 대해 말하는 사실은 그 커밋에서 확인했다. 그 뒤 `main`에 들어온 것은 I05 spec 문서뿐이다(`9ae1f8a`. 코드는 같다).
 
 낯선 말은 [ARCHITECTURE 0절](../ARCHITECTURE.md#0-처음-나오는-말)과 [connector-sdk.md](../connector-sdk.md) 머리의 표에 풀이가 있다. 이 문서에서 새로 쓰는 말은 다음과 같다.
 
@@ -16,7 +16,7 @@
 | 파일의 정체(`dev`, `ino`) | OS가 파일이나 폴더 하나에 붙인 번호 한 쌍(어느 볼륨의, 몇 번 파일인가). 경로는 이름표이고 이것은 주민번호에 가깝다. 이름표를 바꿔 달아도(이름 바꾸기, symlink 바꿔치기) 번호는 그대로다. 다른 점은 파일을 지우면 OS가 그 번호를 새 파일에 다시 줄 수 있다는 것이다 |
 | 닫는 쪽(fail closed) | 판정할 수 없을 때 "읽지 않는다·승인하지 않는다" 쪽으로 정하는 것. 문이 고장 나면 열린 채가 아니라 잠긴 채로 두는 것과 같다 |
 
-요구사항 번호는 `I02B-R<n>`, 기준은 `I02B-C<n>`, 작업은 `I02B-T<nn>`이다. I02-A가 `I02A-` 접두사를 썼으므로 같은 방식으로 `I02B-`를 쓴다. `I02-R<n>` 모양의 번호는 두 문서 어디에도 없어서 겹치지 않는다. 배포처 항목 번호는 **S23~S25로 확정**이다(S16~S17 I02-A, S18 I01, S19~S20 I03, S21~S22 I04). 새 ADR은 다음 빈 번호인 **0017**이다. 함께 쓰이는 I05 spec(#113)은 그 뒤의 번호(S26 이후, ADR 0018 이후)를 쓴다. 이 spec이 `main`에 먼저 들어간다.
+요구사항 번호는 `I02B-R<n>`, 기준은 `I02B-C<n>`, 작업은 `I02B-T<nn>`이다. I02-A가 `I02A-` 접두사를 썼으므로 같은 방식으로 `I02B-`를 쓴다. `I02-R<n>` 모양의 번호는 두 문서 어디에도 없어서 겹치지 않는다. 배포처 항목 번호는 **S23~S25로 확정**이다(S16~S17 I02-A, S18 I01, S19~S20 I03, S21~S22 I04). 새 ADR은 다음 빈 번호인 **0017**이다. [I05 spec](2026-11-22-I05-site-connector-registration.md)(#113)은 S26·S27과 ADR 0018을 쓴다(조정자가 두 spec의 번호를 함께 배정했다). I05 spec이 이 spec의 작업을 `I02B-T13`이라 부르는 곳은 이 문서의 I02B-T06(JSONL 파일 위치)을 뜻한다. 작업을 다시 묶으면서 번호가 바뀌었다.
 
 ## 배경
 
@@ -94,7 +94,7 @@ I02-A는 파일 하나를 글과 위치표로 바꾸는 순수 모듈(`@pki/docu
 - **I02B-R1 `local-files` 수집기.** 파일·폴더 가져오기는 별도의 가져오기 경로가 아니라 Connector 규격 v2의 수집기 종류 `local-files`다. 저장, cursor, 작업 대기열, tombstone, 장부, 화면의 동기화 상태는 기존 것을 그대로 쓴다. 능력 선언은 `incremental`, `deletes`, `fullRescan`, `deletionsOnRescan`이 참이고 `accessScope`가 거짓이다. `@pki/testkit`의 계약 묶음(`connectorContract`)을 위반 0건으로 통과한다.
 - **I02B-R2 인스턴스 하나, 위치마다 namespace.** 제품은 `local-files` 인스턴스를 **하나**(ID `local-files`) 등록한다. 승인 위치마다 무작위 위치 ID를 만들고 그것이 레코드의 `namespace`다. 원본의 정체는 `(local-files, 위치 ID, 파일 ID)`다. 승인 위치가 하나도 없어도 인스턴스는 준비 상태이고 변경 0건을 돌려준다. 그래서 위치를 더하고 빼는 일에 수집기 관리 모듈을 고칠 필요가 없다.
   - **위치 ID의 모양.** 무작위 16바이트를 base64url로 적은 22자(`[A-Za-z0-9_-]{22}`)다. 파일 ID도 같은 모양이다. 그래서 JSONL 파일 위치의 인스턴스 ID `jsonl-file:<위치 ID>`(I02B-R41)는 33자이고, 장부와 가져오기 스키마가 받는 인스턴스 ID의 한도(`MAX_INSTANCE_ID_LENGTH` = 128, `packages/contracts/src/import-record.ts`) 안이다. 한도를 넘는 ID는 장부가 줄을 거부해 삭제 자체가 거부되므로 모양을 여기서 고정한다.
-  - **공용 종류의 목록은 하나다.** `local-files`는 제품이 아는 종류의 그 한 목록에 더한다. 지금은 `backend/src/composition.ts`의 `connectorKinds`이고, I05가 그것을 공용 종류 상수로 정리해 "배포처가 쓸 수 없는 예약 이름"을 거기서 끌어낸다. 이 spec의 작업(I02B-T03)이 먼저 들어가면 `connectorKinds`에 더하고, I05가 먼저 들어가 있으면 I05가 둔 그 상수에 더한다. 어느 쪽이든 둘째 목록을 만들지 않는다. 시작할 때의 장부 재적용이 `local-files`를 아는 종류로 보는 것도 같은 목록에서 나온다(`backend/src/boot.ts`). `local-files`의 수집기는 포트(I02B-R4)가 필요하므로, 목록의 모양(이름만의 상수인지, 포트를 받아 만드는 함수인지)은 그 작업에서 정하되 **이름을 읽는 곳은 하나**여야 한다.
+  - **공용 종류의 목록은 하나다.** `local-files`는 제품이 아는 종류의 그 한 목록에 더한다. I05가 공용 종류 상수(`PUBLIC_CONNECTOR_KINDS`, 잠정 이름. I05-R7)를 만들어 "배포처가 쓸 수 없는 예약 이름"을 거기서 끌어낸다. 그 상수는 I05-T03이 공용 종류 모듈(`backend/src/`의 새 파일)에 두며 **아직 코드에 없다.** 지금 제품의 종류 목록은 `backend/src/composition.ts`의 `connectorKinds`다. 이 spec의 작업(I02B-T03)이 I05-T03보다 먼저 들어가면 `connectorKinds`에 더하고 I05-T03이 그 이름을 상수로 옮긴다. I05-T03이 먼저 들어가 있으면 I02B-T03이 그 상수에 더한다(잊으면 I05-C14가 실패한다). 어느 쪽이든 둘째 목록을 만들지 않는다. 시작할 때의 장부 재적용이 `local-files`를 아는 종류로 보는 것도 같은 목록에서 나온다(`backend/src/boot.ts`). `local-files`의 수집기는 포트(I02B-R4)가 필요하므로, 목록의 모양(이름만의 상수인지, 포트를 받아 만드는 함수인지)은 그 작업에서 정하되 **이름을 읽는 곳은 하나**여야 한다.
 - **I02B-R3 승인 위치의 종류.** 종류는 셋이다.
 
   | 종류 | 고르는 것 | 읽는 수집기 |
@@ -330,7 +330,7 @@ I02-A는 파일 하나를 글과 위치표로 바꾸는 순수 모듈(`@pki/docu
 - **I02B-R41 `jsonl-file` 위치.** 사용자가 승인한 JSONL 파일 하나는 기존 `jsonl-import` 수집기의 인스턴스 하나(ID `jsonl-file:<위치 ID>`, 설정 `{ path }`)가 된다. 줄의 뜻, 범위의 표시(`scope_claimed`), `deletionsOnRescan` 거짓은 I01-R22·R23 그대로다.
   - 승인, 저장, 경로 검사, 화면은 가~자의 것을 쓴다. JSONL만을 위한 설정 화면이나 설정 파일은 만들지 않는다.
   - 파일 수집기(`backend/src/adapters/jsonl-connector.ts`)는 경로를 그대로 읽지 않고 경로 경계 모듈로 연다(I02B-R47의 순서: 승인 때 적어 둔 정체와 연 핸들의 정체가 같을 때만 읽는다. 일반 파일만, 데이터 디렉터리 안 금지).
-  - 수집기 관리 모듈에 실행 중 인스턴스를 더하고 빼는 입구를 둔다(`jsonl-file` 위치의 승인·철회가 부른다). 더하면 기본 주기가 생기고(`ensureDefaultSchedules`), 빼면 그 인스턴스의 주기를 끈다. 재시작하면 `local_locations`의 `jsonl-file` 행에서 인스턴스를 다시 만든다. 이 입구는 I05(#113)가 고치는 파일(`backend/src/connectors.ts`)에 있으므로 그 작업이 들어온 뒤에 한다(I02B-T06).
+  - 수집기 관리 모듈에 실행 중 인스턴스를 더하고 빼는 입구를 둔다(`jsonl-file` 위치의 승인·철회가 부른다). 더하면 기본 주기가 생기고(`ensureDefaultSchedules`), 빼면 그 인스턴스의 주기를 끈다. 재시작하면 `local_locations`의 `jsonl-file` 행에서 인스턴스를 다시 만든다. 이 입구는 I05(#113)가 고치는 파일(`backend/src/connectors.ts`, I05-T02)에 있으므로 그 작업이 들어온 뒤에 한다(I02B-T06).
   - 철회는 I02B-R10·R49와 같다: 그 인스턴스의 원본을 사용자 삭제로 지운다(잠금은 그 인스턴스의 것이다).
   - **다른 위치의 원본을 건드리지 못한다.** JSONL 줄의 `connector_instance_id`는 믿을 수 없는 글이고, 가져오기에는 그 값이 가리키는 옛 인스턴스의 namespace 없는(`""`) 원본으로 쓰기를 옮기는 길이 있다(`backend/src/page-store.ts`). `jsonl-file:*` 인스턴스는 이 spec 뒤에 처음 생기므로 namespace 없는 원본을 갖지 않는다. 그래서 한 `jsonl-file` 위치의 줄이 다른 `jsonl-file` 위치의 원본에 닿을 수 없다. 이 불변식을 테스트로 고정한다(I02B-C33).
 - **I02B-R42 폴더 안의 `.jsonl`.** `folder` 위치 안에서 만난 `.jsonl` 파일은 문서로 읽지 않는다. `unsupported-format`으로 건너뛰고 사유 문구가 "JSONL 파일 추가"를 안내한다. 형식 전환 스위치는 두지 않는다. 한 파일을 읽는 길은 종류마다 하나다.
@@ -740,17 +740,17 @@ flowchart LR
   T03 --> T04["T04 위치의 수명 주기: 상태, 철회, 구동기, 화면, 셸"]
   T03 --> T05["T05 스레드 순서와 DOCX 메모"]
   T04 --> T06["T06 JSONL 파일 위치, 긴 동기화의 양보, 문서, 검증 실행기"]
-  I05["I05의 connectors.ts 변경(#113)"] --> T06
+  I05["I05-T02: connectors.ts 변경(#113)"] --> T06
 ```
 
 | ID | 산출물 하나 | 주요 파일 | 요구사항 | 기준 | depends_on | I05와 독립인가 | 기대하는 검증 증거 |
 |---|---|---|---|---|---|---|---|
 | I02B-T01 | 착수 전 측정과 판정 기록 | `tooling/poc/i02b/`(측정 스크립트. 제품 코드가 아니다), `docs/research/2026-11-22-I02B-T01-poc.md`, `tooling/docs/i02b-poc.test.ts` | R50 | C46 | — | 예 | I02B-R50의 일곱 항목마다 돌린 명령, 관찰한 출력, 판정. "실패"가 있으면 이 spec의 어느 자리가 바뀌는지. 묶인 테스트 산출물 안에서 작업자가 뜬 출력 |
 | I02B-T02 | 기반 셋: 격리 정규화 실행기, 경로 경계 모듈, 색인 저장(테이블 둘, tombstone 트리거, 조건 붙은 쓰기, 테이블 분류) | `packages/document-normalize/src/isolated.ts`, `isolated-worker.ts`, `testing/time-bombs.ts`, `version.ts`; `packages/connector-sdk/src/local-path.ts`, `index.ts`; `storage/src/migrations.ts`⚠, `storage/src/local-files.ts`, `backend/src/derivative-coverage.ts`⚠, I04 spec의 I04-R3 문장; import 검사(`tooling/`) | R5(검사 함수), R6, R14(상수), R22~R25, R33, R46~R48 | C3(검사 함수 수준), C4, C16~C19, C22(저장 수준: tombstone을 쓰면 항목이 비워지고 정본 바이트에 카나리 없음), C23, C37, C38, C42, C45 | T01 | 예 | 두 재현 입력과 시험용 작업자의 종료 시간·오류 종류 출력. 탈출 시도 묶음에서 밖의 파일 읽기 0건. 세 틈에 끼운 바꿔치기가 잡힘. 순번 대조 줄과 트리거를 각각 지우면 빨개지는 테스트. 테이블 분류 검사 통과 |
-| I02B-T03 | `local-files` 수집기, 공용 종류 등록, 승인 API·최소 화면, 변경 감지 전부(**첫 수직 조각의 끝**) | `backend/src/adapters/local-files-connector.ts`, 계약 테스트; `backend/src/composition.ts`⚠, `boot.ts`⚠, `server.ts`⚠, `local-locations.ts`; `packages/contracts/src/index.ts`⚠; `backend/package.json`, `pnpm-lock.yaml`⚠; `apps/web/src/local-locations.tsx`, `local-locations-text.ts`, `App.tsx`⚠; 측정 스크립트 | R1~R4, R3(`folder`), R5, R11~R16, R19, R21(한도·페이지 예산), R26, R31, R32, R35, R36(목록·승인), R37(개발 입력·테스트 대역), R38(목록·추가), R40 | C1, C2, C3(API 수준), C5, C6, C7, C9, C10, C14, C20, C21, C24, C25, C27, C30, C43, C44, C47 | T02 | 파일 겹침(`composition.ts`, `boot.ts`). 기능 의존은 없다. 먼저 들어간 쪽에 뒤쪽이 맞춘다 | `connectorContract` 위반 0건. e2e: 승인 → Markdown → 원본과 근거 → 파일 삭제 → tombstone. 테스트 산출물에서 선택 창 대역으로 같은 길. 이동 뒤 원본 ID 유지. 데이터 디렉터리 항목이 전과 같음. p95 측정값 |
+| I02B-T03 | `local-files` 수집기, 공용 종류 등록, 승인 API·최소 화면, 변경 감지 전부(**첫 수직 조각의 끝**) | `backend/src/adapters/local-files-connector.ts`, 계약 테스트; `backend/src/composition.ts`⚠, `boot.ts`⚠, `server.ts`⚠, `local-locations.ts`; `packages/contracts/src/index.ts`⚠; `backend/package.json`, `pnpm-lock.yaml`⚠; `apps/web/src/local-locations.tsx`, `local-locations-text.ts`, `App.tsx`⚠; 측정 스크립트 | R1~R4, R3(`folder`), R5, R11~R16, R19, R21(한도·페이지 예산), R26, R31, R32, R35, R36(목록·승인), R37(개발 입력·테스트 대역), R38(목록·추가), R40 | C1, C2, C3(API 수준), C5, C6, C7, C9, C10, C14, C20, C21, C24, C25, C27, C30, C43, C44, C47 | T02 | 파일 겹침(`composition.ts`, `boot.ts`. I05-T03과). 기능 의존은 없다. 먼저 들어간 쪽에 뒤쪽이 맞추고, 공용 종류 상수에 `local-files`를 넣는 쪽도 그 순서로 정해진다(I02B-R2) | `connectorContract` 위반 0건. e2e: 승인 → Markdown → 원본과 근거 → 파일 삭제 → tombstone. 테스트 산출물에서 선택 창 대역으로 같은 길. 이동 뒤 원본 ID 유지. 데이터 디렉터리 항목이 전과 같음. p95 측정값 |
 | I02B-T04 | 위치의 수명 주기: 상태·대량 삭제 보류·재연결·일시 중지·철회(장부와 묶음), 구동기와 감시, 건너뛴 파일·근거 위치표 화면, 셸의 선택 창·표·폴더에서 보기 | 수집기, `backend/src/local-locations.ts`, `local-files-driver.ts`, `boot.ts`⚠, `server.ts`⚠(공통 처리기의 `ledger-degraded`), `shell.ts`; `apps/web/src/local-locations.tsx`, `evidence-view.tsx`⚠, `evidence-text.ts`⚠; `apps/desktop/src/bridge.ts`⚠, `preload.cjs`⚠, `backend-process.ts`⚠ | R7~R10, R17, R18, R20, R27, R28, R33(다시 가져오기), R34, R36(나머지), R37(설치본), R38(나머지), R39, R49 | C8, C11, C12, C13, C15, C22(세 삭제 경로 통합), C26, C28, C29, C39, C40, C41 | T03 | 파일 겹침(`boot.ts`). 기능 의존은 없다 | 위치를 없앤 훑기에서 삭제 0건. 장부를 잠근 채 철회하면 409와 행 수 그대로. 묶음 사이에 끝낸 뒤 재시작하면 철회가 이어짐. 복원 대역에서 평문 경로 0건. 감시를 끈 채·빠뜨린 채의 최종 상태가 디스크와 같음. 표 없는 승인이 배포 빌드에서 거부 |
 | I02B-T05 | 스레드의 시간 순서 복원, DOCX 메모 복원 | `storage/src/sources.ts` 또는 새 `thread.ts`, `packages/contracts/src/index.ts`⚠, `server.ts`⚠, 화면; `packages/document-normalize/src/formats/docx.ts`, `ooxml-core.ts`, `packages/contracts/src/connector.ts`⚠, I02-A·I01 spec 표 | R29, R30, R36(thread) | C31, C32 | T03(메모의 `participants`가 레코드에 실리는 것). 스레드 절반은 선행이 없다 | 예 | 뒤섞인 도착·섞인 오프셋·날짜 없는 둘의 fixture에서 같은 순서. 메모 fixture의 순서·블록·위치표, 한계 코드 세 집합 같음 |
-| I02B-T06 | JSONL 파일 위치(#116)와 "파일 추가", 긴 동기화의 양보, 문서·배포처 체크리스트·Windows 검증 실행기 | `backend/src/connectors.ts`⚠, `adapters/jsonl-connector.ts`, `local-locations.ts`, 화면; `connector-sync-job.ts`⚠, `packages/connector-sdk/src/sync-outcomes.ts`⚠, I01 spec의 표; `docs/adr/0017-*.md`, `ARCHITECTURE.md`, `connector-sdk.md`, `site-setup.md`, I04 spec, `docs/README.md`, README, `tooling/docs/site-setup-i02b.test.ts`; `verification/local-files/`, `verification/tests/` | R3(`jsonl-file`, `file`), R21(양보), R41~R45 | C33, C34, C35, C36, H1, H2 | T04, **I05의 `connectors.ts` 변경이 `main`에 들어온 뒤** | 아니오(선행) | 승인한 JSONL 파일이 주기 동기화로 들어옴. 바꿔치기한 경로 거부. 실행 시간 상한보다 긴 동기화가 시도를 쓰지 않고 이어짐. `sync.outcome-map`이 I01 spec의 새 표와 맞음. 문서 대응 테스트. 실행기의 거부 1건과 내용 비노출 |
+| I02B-T06 | JSONL 파일 위치(#116)와 "파일 추가", 긴 동기화의 양보, 문서·배포처 체크리스트·Windows 검증 실행기 | `backend/src/connectors.ts`⚠, `adapters/jsonl-connector.ts`, `local-locations.ts`, 화면; `connector-sync-job.ts`⚠, `packages/connector-sdk/src/sync-outcomes.ts`⚠, I01 spec의 표; `docs/adr/0017-*.md`, `ARCHITECTURE.md`, `connector-sdk.md`, `site-setup.md`, I04 spec, `docs/README.md`, README, `tooling/docs/site-setup-i02b.test.ts`; `verification/local-files/`, `verification/tests/` | R3(`jsonl-file`, `file`), R21(양보), R41~R45 | C33, C34, C35, C36, H1, H2 | T04, **I05-T02(`connectors.ts` 변경)가 `main`에 들어온 뒤** | 아니오(선행) | 승인한 JSONL 파일이 주기 동기화로 들어옴. 바꿔치기한 경로 거부. 실행 시간 상한보다 긴 동기화가 시도를 쓰지 않고 이어짐. `sync.outcome-map`이 I01 spec의 새 표와 맞음. 문서 대응 테스트. 실행기의 거부 1건과 내용 비노출 |
 
 ⚠는 다른 작업이나 다른 spec(I05, I04의 뒤 작업)과 함께 고치는 파일이다. 같은 ⚠ 파일을 고치는 묶음은 동시에 발행하지 않는다. T05는 T04와 동시에 할 수 있다(`server.ts`와 `contracts`의 경로표가 겹치므로 먼저 끝난 쪽에 뒤쪽이 맞춘다). `file` 종류(파일 하나짜리 위치)는 수집기에서는 폴더의 특수한 경우라 T03이 다루고, 화면의 "파일 추가"와 API의 그 종류는 T06이 "JSONL 파일 추가"와 함께 연다. C3은 검사 함수 수준(T02)과 API 수준(T03)에서 각각 증명한다. C22는 저장 수준(T02)에서 먼저, 세 삭제 경로 전부는 T04가 닫는다. H2의 ②(UNC 거부)는 T03에서 먼저 통과하고 T06이 ①과 함께 닫는다.
 
@@ -898,9 +898,9 @@ C1~C47과 H1, H2는 모두 개발 OS(macOS, Linux)와 저장소가 고정한 Nod
 
 **조정이 필요한 것**
 
-5. **I05(#113)와의 순서.** 이 spec이 먼저 `main`에 들어간다. T06은 `backend/src/connectors.ts`와 `connector-sync-job.ts`를 고치므로 I05의 그 파일 변경이 들어온 뒤에 한다. T03·T04는 I05와 `composition.ts`·`boot.ts`가 겹치지만 기능 의존은 없다. `local-files`의 `initialize`는 디스크를 훑지 않고 다시 불려도 안전하므로 I05가 정할 시간 제한·재초기화 규칙을 그대로 받는다.
-6. **공용 종류의 한 목록.** I05가 예약 이름을 끌어낼 상수의 이름과 모양은 I05가 정한다. 이 spec은 "`local-files`는 그 한 곳에 든다"만 고정한다(I02B-R2, C43). T03이 먼저 들어가면 지금의 `connectorKinds`에 더하고 I05가 옮긴다.
-7. **번호.** S23~S25와 ADR 0017은 이 spec의 것으로 확정이다. I05는 S26 이후와 ADR 0018 이후를 쓴다.
+5. **I05(#113)와의 순서.** 두 spec의 문서는 모두 확정이고 구현은 섞여 간다. T06은 `backend/src/connectors.ts`와 `connector-sync-job.ts`를 고치므로 I05-T02가 들어온 뒤에 한다. T03·T04는 I05와 `composition.ts`·`boot.ts`가 겹치지만 기능 의존은 없다. `local-files`의 `initialize`는 디스크를 훑지 않고 다시 불려도 안전하므로 I05가 정할 시간 제한·재초기화 규칙을 그대로 받는다.
+6. **공용 종류의 한 목록.** I05가 예약 이름을 끌어낼 상수의 이름과 모양은 I05가 정한다(I05-R7, I05-T03). 이 spec은 "`local-files`는 그 한 곳에 든다"만 고정한다(I02B-R2, C43). T03이 먼저 들어가면 지금의 `connectorKinds`에 더하고 I05-T03이 옮긴다. I05 spec은 포크의 등록이 `local-files`와 `jsonl-import`의 인스턴스를 만들지 못하게 한다(`instance-kind-reserved`). `jsonl-file:` 접두사의 인스턴스 ID도 공용이 예약한 것으로 그 판정(`isPublicInstanceId`, 잠정 이름)에 들어가야 한다. T06이 그 접두사를 더한다.
+7. **번호.** S23~S25와 ADR 0017은 이 spec의 것으로 확정이다. I05는 S26·S27과 ADR 0018을 쓴다.
 8. **I04의 문서.** I04-R3의 `원본` 분류를 넓히는 것은 I04 spec을 고치는 일이다(I02B-R43, T06). 분류 코드(`derivative-coverage.ts`)는 T02가 먼저 고치므로, T02의 PR이 I04 spec의 그 문장도 함께 고친다(코드와 문서가 한 PR에서 어긋나지 않게). T06은 나머지 문서를 맡는다.
 
 **일부러 남긴 것**(이유와 함께)
