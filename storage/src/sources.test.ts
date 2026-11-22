@@ -292,6 +292,15 @@ describe("rescan state (I01-R17)", () => {
     expect(readRescanState(db, "c1")).toEqual({ pending: false, deletionsMayBeMissed: false });
   });
 
+  it("beginRescan only raises the deletions mark: it stays until a rescan ends (R17)", () => {
+    beginRescan(db, "c1", true);
+    finishRescan(db, "c1", true);
+    beginRescan(db, "c1", false);
+    expect(readRescanState(db, "c1")).toEqual({ pending: true, deletionsMayBeMissed: true });
+    finishRescan(db, "c1", false);
+    expect(readRescanState(db, "c1")).toEqual({ pending: false, deletionsMayBeMissed: false });
+  });
+
   it("refuses to mark an instance that is not registered", () => {
     expect(() => beginRescan(db, "never", true)).toThrow(/not registered/);
     expect(() => finishRescan(db, "never", true)).toThrow(/not registered/);

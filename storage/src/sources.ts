@@ -339,13 +339,17 @@ export function readRescanState(
 
 /**
  * Starts a rescan: drops the cursor (the next read starts from null, whether or not
- * this sync gets any page stored) and marks the rescan pending until it ends.
+ * this sync gets any page stored) and marks the rescan pending until it ends. It only
+ * raises the deletions mark: the mark stays until a rescan ends, and the page that ends
+ * it (finishRescan) is the one that clears it (I01-R17).
  */
 export function beginRescan(db: SqlDriver, id: string, deletionsMayBeMissed: boolean): void {
   if (
     db.run(
       `UPDATE connector_instances
-         SET cursor = NULL, rescan_pending = 1, deletions_may_be_missed = ? WHERE id = ?`,
+         SET cursor = NULL, rescan_pending = 1,
+             deletions_may_be_missed = CASE WHEN ? = 1 THEN 1 ELSE deletions_may_be_missed END
+       WHERE id = ?`,
       [deletionsMayBeMissed ? 1 : 0, id],
     ).changes !== 1
   ) {

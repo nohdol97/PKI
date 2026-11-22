@@ -118,7 +118,9 @@ describe("connector.sdk-version", () => {
       { id: "good-1", kind: "good", state: "ready" },
     ]);
     expect(await manager.sync("broken-1")).toEqual({ error: "connector-unavailable" });
-    expect(await manager.sync("good-1")).toMatchObject({ connectorId: "good-1" });
+    expect(await manager.sync("good-1")).toMatchObject({
+      connectorId: "good-1",
+    });
     const check = await siteCheck("broken", () => broken.connector);
     expect(check).toEqual({ ok: false, line: "broken: unsupported-sdk-version" });
     expect(JSON.stringify([manager.list(), check])).not.toContain("SECRET");

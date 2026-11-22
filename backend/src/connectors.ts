@@ -284,6 +284,9 @@ async function runSync(
   db.transaction(() => registerConnectorInstance(db, instanceId, kind));
   // A rescan the last sync left unfinished is this one's to end (I01-R17).
   let rescanning = readRescanState(db, instanceId).pending;
+  // Only a rescan this sync started ends it when its cursor expires; a carried-over
+  // one may be restarted once (I01-R17: one rescan per sync).
+  let startedHere = false;
   let cursor = options.rescan ? null : readCursor(db, instanceId);
   const result = emptyResult();
   const stop = (code: SyncStopCode, retryAfterMs?: number): SyncResult => ({
@@ -303,9 +306,10 @@ async function runSync(
     if (page.cursorExpired) {
       // One full rescan per sync, and only for a Connector that can: a second expiry
       // while rescanning, or one on a null cursor, ends it (I01-R17).
-      if (rescanning || cursor === null || !capabilities.fullRescan) return stop("cursor-expired");
+      if (startedHere || cursor === null || !capabilities.fullRescan) return stop("cursor-expired");
       db.transaction(() => beginRescan(db, instanceId, !capabilities.deletionsOnRescan));
       rescanning = true;
+      startedHere = true;
       cursor = null;
       continue;
     }

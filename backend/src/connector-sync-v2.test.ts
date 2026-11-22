@@ -184,13 +184,19 @@ describe("sync.checkpoint", () => {
     expect(readCursor(db, "s")).toBeNull();
   });
 
-  it("a signal already cut does not call the Connector", async () => {
-    const connector = new ScriptedConnector();
-    const m = await manager(connector, { entries });
+  it("a signal already cut does not call the Connector (review W1)", async () => {
+    let calls = 0;
+    const m = await manager(
+      stub(() => {
+        calls++;
+        return { changes: [], nextCursor: "1", hasMore: false };
+      }),
+      {},
+    );
     expect(await m.sync("s", { signal: AbortSignal.abort() })).toMatchObject({
       stopped: "aborted",
     });
-    expect(connector.calls).toEqual([]);
+    expect(calls).toBe(0);
   });
 });
 
@@ -545,6 +551,31 @@ describe("sync.rescan", () => {
     const third = await resumed.sync("s");
     expect(third).toMatchObject({ rescanned: false, deletionsMayBeMissed: false, received: 0 });
     expect(resumed.list()).toMatchObject([{ deletionsMayBeMissed: true }]);
+  });
+});
+
+describe("sync.rescan, a carried-over rescan whose cursor expires (review F1)", () => {
+  it("restarts the rescan from null in the next sync and completes it, clearing rescan_pending", async () => {
+    db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('s', 'scripted', 'stale')");
+    const four = ["a", "b", "c", "d"].map((id) => up(id));
+    const connector = new ScriptedConnector();
+    const first = await manager(connector, {
+      entries: four,
+      faults: [{ cursor: "offset:2", raise: new ConnectorError("x", { retryable: false }) }],
+    });
+    expect(await first.sync("s")).toMatchObject({ stopped: "connector-failed", rescanned: true });
+    expect(pending()).toEqual({ p: 1, m: 1 });
+
+    // the origin expires the cursor the carried-over rescan stopped at
+    await connector.initialize({
+      entries: four,
+      faults: [{ cursor: "offset:2", expire: true }],
+    });
+    const second = await first.sync("s");
+    expect(second).not.toHaveProperty("stopped");
+    expect(second).toMatchObject({ rescanned: true, deletionsMayBeMissed: true });
+    expect(pending()).toEqual({ p: 0, m: 1 });
+    expect(counts()).toEqual([4, 4]);
   });
 });
 

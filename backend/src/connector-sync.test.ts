@@ -30,6 +30,12 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** A success carries no stop code: toMatchObject alone would not notice a spurious one. */
+const noStop = <T extends object>(result: T): T => {
+  expect(result).not.toHaveProperty("stopped");
+  return result;
+};
+
 const counts = () =>
   ["sources", "source_versions"].map((t) => db.all(`SELECT count(*) AS n FROM ${t}`)[0]?.n);
 
@@ -67,11 +73,15 @@ describe("sync of the test Connector", () => {
       fixtureConnectorKinds(),
     );
     const first = await manager.sync("fixtures");
-    expect(first).toMatchObject({ connectorId: "fixtures", received: 5, created: 5 });
+    expect(noStop(first)).toMatchObject({
+      connectorId: "fixtures",
+      received: 5,
+      created: 5,
+    });
     expect(first).not.toHaveProperty("stopped");
     expect(counts()).toEqual([5, 5]);
 
-    expect(await manager.sync("fixtures")).toMatchObject({
+    expect(noStop(await manager.sync("fixtures"))).toMatchObject({
       connectorId: "fixtures",
       received: 0,
       created: 0,
@@ -87,7 +97,7 @@ describe("sync of the test Connector", () => {
     );
     await manager.sync("fixtures");
     db.run("UPDATE connector_instances SET cursor = NULL WHERE id = 'fixtures'");
-    expect(await manager.sync("fixtures")).toMatchObject({
+    expect(noStop(await manager.sync("fixtures"))).toMatchObject({
       connectorId: "fixtures",
       received: 5,
       created: 0,
@@ -137,7 +147,7 @@ describe("cursor after save", () => {
         ? { changes: [upsert("a")], nextCursor: "1", hasMore: true }
         : { changes: [upsert("b")], nextCursor: "2", hasMore: false },
     );
-    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+    expect(noStop(await syncConnector(db, "s", "scripted", connector))).toMatchObject({
       received: 2,
       created: 2,
     });
@@ -169,7 +179,7 @@ describe("cursor after save", () => {
       "scripted",
       page([upsert("a"), upsert("r", "other", 2)], "9"),
     );
-    expect(result).toMatchObject({
+    expect(noStop(result)).toMatchObject({
       created: 1,
       rejected: [{ at: "change:1", code: "revision-conflict" }],
     });
@@ -201,7 +211,7 @@ describe("cursor after save", () => {
           refused.push([change.kind === "upsert" ? change.record.externalId : "?", reason]),
       },
     );
-    expect(result).toMatchObject({ received: 2, created: 1, blocked: 1 });
+    expect(noStop(result)).toMatchObject({ received: 2, created: 1, blocked: 1 });
     expect(refused).toEqual([["x", "tombstoned"]]);
     expect(readCursor(db, "s")).toBe("9");
     expect(
@@ -230,7 +240,7 @@ describe("cursor after save", () => {
               hasMore: false,
             },
       );
-      expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+      expect(noStop(await syncConnector(db, "s", "scripted", connector))).toMatchObject({
         received: 3,
         created: 2,
         tombstoned: 1,
@@ -249,7 +259,7 @@ describe("cursor after save", () => {
       nextCursor: "1",
       hasMore: false,
     }));
-    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+    expect(noStop(await syncConnector(db, "s", "scripted", connector))).toMatchObject({
       received: 4,
       created: 3,
     });
@@ -288,7 +298,7 @@ describe("cursor after save", () => {
           hasMore: false,
         }) as unknown as ChangeSet,
     );
-    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+    expect(noStop(await syncConnector(db, "s", "scripted", connector))).toMatchObject({
       created: 1,
       rejected: [{ at: "change:0", code: "schema" }],
     });
@@ -304,7 +314,7 @@ describe("cursor after save", () => {
         ? { changes: [], nextCursor: "old", hasMore: false, cursorExpired: true }
         : { changes: [upsert("a")], nextCursor: "1", hasMore: false };
     });
-    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+    expect(noStop(await syncConnector(db, "s", "scripted", connector))).toMatchObject({
       received: 1,
       created: 1,
       rescanned: true,
