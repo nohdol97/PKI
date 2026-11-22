@@ -25,7 +25,7 @@ STARTED = "2026-11-22T01:00:00.000Z"
 FINISHED = "2026-11-22T01:30:00.000Z"
 COUNTS = {"sourceVersions": 3, "insights": 1, "activeInsights": 1, "jobsNotSucceeded": 0,
           "providerCalls": 3, "droppedQuotes": 0, "droppedOther": 0}
-ALL_OBSERVED = ["insight-inference", "evidence-opened", "reimport-no-new", "restart-kept"]
+ALL_OBSERVED = ["launched-installed", "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept"]
 
 
 def e2e_record(**over):
@@ -65,22 +65,28 @@ def run_cli(*args):
 
 
 def notice_lines(res):
-    return [line for line in (res.stdout + res.stderr).splitlines() if line.startswith(NOTICE)]
+    """Notice lines on stdout (the spec's channel); a notice on stderr is a failure of its own."""
+    assert not [line for line in res.stderr.splitlines() if NOTICE in line], res.stderr
+    return [line for line in res.stdout.splitlines() if line.startswith(NOTICE)]
 
 
 def make_db(path, providers=("openai-compatible",) * 3, created=STARTED, versions=3, insights=(("active",),),
-            jobs=(("succeeded", 0, 0),) * 3):
+            jobs=(("succeeded", 0, 0),) * 3, connection_tests=()):
+    """The columns read_site_db reads, as in storage/src/migrations.ts. `providers`: ok `extract` calls;
+    `connection_tests`: ok `connection-test` calls (the settings screen's test, RUNBOOK step 3)."""
     db = sqlite3.connect(path)
     db.executescript("""
         CREATE TABLE source_versions (id INTEGER PRIMARY KEY);
         CREATE TABLE insights (id INTEGER PRIMARY KEY, state TEXT NOT NULL);
         CREATE TABLE jobs (id INTEGER PRIMARY KEY, status TEXT NOT NULL, dropped_quotes INTEGER, dropped_other INTEGER);
-        CREATE TABLE provider_calls (id INTEGER PRIMARY KEY, provider TEXT NOT NULL, outcome TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE provider_calls (id INTEGER PRIMARY KEY, provider TEXT NOT NULL, task_kind TEXT NOT NULL,
+                                     outcome TEXT NOT NULL, created_at TEXT NOT NULL);
     """)
     db.executemany("INSERT INTO source_versions DEFAULT VALUES", [()] * versions)
     db.executemany("INSERT INTO insights (state) VALUES (?)", list(insights))
     db.executemany("INSERT INTO jobs (status, dropped_quotes, dropped_other) VALUES (?, ?, ?)", list(jobs))
-    db.executemany("INSERT INTO provider_calls (provider, outcome, created_at) VALUES (?, 'ok', ?)", [(p, created) for p in providers])
+    db.executemany("INSERT INTO provider_calls (provider, task_kind, outcome, created_at) VALUES (?, ?, 'ok', ?)",
+                   [(p, "extract", created) for p in providers] + [(p, "connection-test", created) for p in connection_tests])
     db.commit()
     db.close()
 
@@ -117,6 +123,13 @@ class SiteVerifyRefuse(unittest.TestCase):
     def test_a_double_id_claimed_as_real_is_still_case_1(self):
         lines = notice_lines(self.run_with(config(kind="real", id="local-model")))
         self.assertEqual(len(lines), 1)
+        self.assertIn("test double", lines[0])
+
+    def test_a_testkit_name_under_a_real_id_is_case_1(self):
+        res = self.run_with(config(kind="real", id="codex", name="@pki/testkit FakeProvider", version="0.98.0"))
+        self.assertEqual(res.returncode, site.NOTICE_EXIT)
+        lines = notice_lines(res)
+        self.assertEqual(len(lines), 1, res.stdout + res.stderr)
         self.assertIn("test double", lines[0])
 
     def test_prepare_and_record_go_through_the_same_gate(self):
@@ -171,9 +184,33 @@ class InstallerCheck(unittest.TestCase):
         prefix = [{"DisplayName": "PKI", "InstallLocation": "C:\\Users\\u\\AppData\\Local\\Programs\\PK", "DisplayVersion": "0.1.0"}]
         self.assertEqual(self.code(entries=prefix), "not-installed")
 
+    def test_another_products_entry_is_not_this_install(self):
+        other = [{"DisplayName": "Other Product", "InstallLocation": "C:\\Users\\u\\AppData\\Local\\Programs\\PKI",
+                  "DisplayVersion": "0.1.0"}]
+        self.assertEqual(self.code(entries=other), "not-installed")
+
+    def test_exe_path_must_be_an_absolute_exe(self):
+        self.assertEqual(self.code(exe="PKI\\PKI.exe"), "exe-missing")
+        self.assertEqual(self.code(exe="C:\\Users\\u\\AppData\\Local\\Programs\\PKI\\PKI.cmd"), "exe-missing")
+
     def test_bad_display_version(self):
         bad = [{"DisplayName": "PKI", "InstallLocation": "C:\\Users\\u\\AppData\\Local\\Programs\\PKI", "DisplayVersion": "dev build"}]
         self.assertEqual(self.code(entries=bad), "app-version")
+
+
+class GitTree(unittest.TestCase):
+    """The real in_git_tree (case ② build-output): a `.git` folder, a worktree's `.git` file, and neither."""
+
+    def test_git_folder_file_and_none(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name, make in (("repo", os.mkdir), ("worktree", lambda p: open(p, "w").close())):
+                root = os.path.join(d, name)
+                os.makedirs(os.path.join(root, "apps", "x"))
+                make(os.path.join(root, ".git"))
+                self.assertTrue(site.in_git_tree(os.path.join(root, "apps", "x", "PKI.exe")), name)
+            plain = os.path.join(d, "plain", "PKI")
+            os.makedirs(plain)
+            self.assertFalse(site.in_git_tree(os.path.join(plain, "PKI.exe")))
 
 
 class RunRecord(unittest.TestCase):
@@ -205,10 +242,22 @@ class RunRecord(unittest.TestCase):
         self.assertTrue(rr.validate_record(named))
         self.assertTrue(rr.validate_record(site_record(target="electron")))
 
+    def test_real_is_only_the_site_runners_on_the_installer(self):
+        rec = e2e_record(target="electron", electron="45.4.1",
+                         provider={"kind": "real", "id": "codex", "name": "codex", "version": "0.98.0"})
+        self.assertEqual(rr.validate_record(rec), ["real is recorded only by the site runner on the Windows installer"])
+
+    def test_a_testkit_version_cannot_be_real(self):
+        rec = site_record()
+        rec["provider"] = dict(rec["provider"], version="@pki/testkit 1.0.0")
+        self.assertEqual(rr.validate_record(rec), ["a testkit Provider cannot be real"])
+
     def test_the_site_target_needs_a_real_provider(self):
         rec = site_record()
         rec["provider"] = dict(e2e_record()["provider"])
-        self.assertTrue(rr.validate_record(rec))
+        problems = rr.validate_record(rec)  # each rule pinned by its own message (they overlap on this record)
+        self.assertIn("the Windows installer record needs a real provider", problems)
+        self.assertIn("a test double runs only in the E2E targets", problems)
 
     def test_r18_fields_are_required(self):
         for key in ("os", "appVersion", "commit", "finishedAt"):
@@ -252,6 +301,21 @@ class StaleRecords(unittest.TestCase):
         self.assertEqual(ignored, {})
 
 
+class SummarizeCommit(unittest.TestCase):
+    def test_head_resolves_to_the_full_sha(self):
+        head = subprocess.run(["git", "-C", _paths.REPO_DIR, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        with tempfile.TemporaryDirectory() as d:
+            for target, commit in (("browser", head), ("electron", "f" * 40)):
+                with open(os.path.join(d, "run-record.{}.json".format(target)), "w", encoding="utf-8") as fh:
+                    json.dump(e2e_record(target=target, commit=commit), fh)
+            res = run_cli("summarize", "--records", d, "--since", STARTED, "--commit", "HEAD")
+            bad = run_cli("summarize", "--records", d, "--since", STARTED, "--commit", "no-such-ref-xyz")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual([l.split()[0] for l in res.stdout.splitlines()[:-1]], ["browser"])
+        self.assertIn('"other-commit": 1', res.stdout)
+        self.assertEqual(bad.returncode, site.CONFIG_EXIT)
+
+
 class SiteDatabase(unittest.TestCase):
     """`record` counts the canonical DB like `v02-flow.e2e` and derives the Provider kind from the calls it shows."""
 
@@ -276,6 +340,14 @@ class SiteDatabase(unittest.TestCase):
         with self.assertRaises(site.Refusal):
             self.counts(providers=("codex",) * 3)
 
+    def test_connection_tests_neither_count_nor_refuse(self):
+        got = self.counts(connection_tests=("openai-compatible", "codex"))
+        self.assertEqual(got["providerCalls"], 3)
+
+    def test_an_unreadable_call_time_is_stale(self):
+        with self.assertRaises(site.StaleData):
+            self.counts(created="yesterday")
+
     def test_rows_older_than_the_run_are_stale(self):
         with self.assertRaises(site.StaleData):
             self.counts(created="2026-11-21T00:00:00.000Z")
@@ -289,6 +361,17 @@ class SiteDatabase(unittest.TestCase):
             self.assertEqual((os.path.getmtime(path), os.path.getsize(path)), before)
             self.assertEqual(sorted(os.listdir(d)), ["pki.sqlite"])
 
+    def test_the_connection_cannot_write(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pki.sqlite")
+            make_db(path)
+            db = site.open_ro(path)
+            try:
+                with self.assertRaises(sqlite3.OperationalError):
+                    db.execute("INSERT INTO insights (state) VALUES ('active')")
+            finally:
+                db.close()
+
     def test_a_missing_db_is_not_created(self):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(sqlite3.Error):
@@ -301,9 +384,25 @@ class Judge(unittest.TestCase):
         self.assertEqual(site.judge(COUNTS, ALL_OBSERVED), "PASS")
         self.assertEqual(site.judge(dict(COUNTS, providerCalls=4, droppedQuotes=2), ALL_OBSERVED), "PASS")
         self.assertEqual(site.judge(COUNTS, ALL_OBSERVED[:3]), "INCONCLUSIVE")
+        self.assertEqual(site.judge(COUNTS, ALL_OBSERVED[1:]), "INCONCLUSIVE")  # launched-installed missing
         self.assertEqual(site.judge(dict(COUNTS, insights=2), ALL_OBSERVED), "FAIL")
         self.assertEqual(site.judge(dict(COUNTS, providerCalls=2), ALL_OBSERVED), "FAIL")
         self.assertEqual(site.judge(dict(COUNTS, jobsNotSucceeded=1), ALL_OBSERVED), "FAIL")
+
+
+class SiteRecordForm(unittest.TestCase):
+    """The record the runner builds passes the form; a record that does not is never written."""
+
+    def test_the_runners_record_is_valid(self):
+        for verdict in ("PASS", "FAIL"):
+            self.assertEqual(rr.validate_record(site.build_site_record(config(), "0.1.0", dict(COUNTS), verdict, STARTED)), [])
+
+    def test_an_invalid_record_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "out")
+            with self.assertRaises(site.RecordInvalid):
+                site.write_results(site_record(appVersion="source"), "PASS", ALL_OBSERVED, out, [])
+            self.assertFalse(os.path.exists(out))
 
 
 class PasteableResult(unittest.TestCase):

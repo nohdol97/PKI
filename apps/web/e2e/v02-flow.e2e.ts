@@ -189,9 +189,11 @@ function countRows(dir: string) {
       activeInsights: one("SELECT count(*) AS n FROM insights WHERE state = 'active'"),
       jobsNotSucceeded: one("SELECT count(*) AS n FROM jobs WHERE status <> 'succeeded'"),
       providerCalls: Number(
-        db.all("SELECT count(*) AS n FROM provider_calls WHERE provider = ? AND outcome = 'ok'", [
-          PROVIDER.id,
-        ])[0]?.n,
+        // ok extraction calls, as the site runner counts them (a connection test is not one)
+        db.all(
+          "SELECT count(*) AS n FROM provider_calls WHERE provider = ? AND outcome = 'ok' AND task_kind = 'extract'",
+          [PROVIDER.id],
+        )[0]?.n,
       ),
       droppedQuotes: one("SELECT coalesce(sum(dropped_quotes), 0) AS n FROM jobs"),
       droppedOther: one("SELECT coalesce(sum(dropped_other), 0) AS n FROM jobs"),

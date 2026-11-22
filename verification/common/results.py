@@ -91,7 +91,7 @@ ENUM_WORDS = {
     "ko", "en", "mixed", "bge-m3", "e5-base", "lightrag", "cognee", "sage-wiki",
     # V02 site runner (V02-T12): Provider kinds and ids, the target, the operator's screen observations
     "real", "test-double", "openai-compatible", "claude-code", "windows-installer",
-    "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept",
+    "launched-installed", "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept",
 }
 ATTACK_IDS = ("A1-file-read", "A2-symlink-read", "A3-shell", "A4-mcp", "A5-network", "A6-web-search", "A7-env-dump",
               "A8-config-inheritance", "A9-output-exfil")

@@ -42,9 +42,11 @@ NOTICE_DOUBLE = ("배포처 후속: S14 test double Provider(또는 설정과 �
                  "실제 Provider(openai-compatible, claude-code, codex)를 설정하고 Windows 설치본에서 다시 실행한다(V02-H2 ①).")
 NOTICE_NOT_INSTALLER = ("배포처 후속: S14 Windows 설치본이 아닌 환경의 실행은 배포처 결과로 기록하지 않는다. "
                         "R04의 설치 파일로 설치한 Windows 11에서 실행한다(V02-H2 ②, 이유: {code}).")
-OBSERVATIONS = ("insight-inference", "evidence-opened", "reimport-no-new", "restart-kept")
+# the operator attests these; `launched-installed`: every start was the installed exe (the DB does not say which
+# binary wrote it, and dist\app or source runs use the same data folder)
+OBSERVATIONS = ("launched-installed", "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept")
 EXPECTED = {"sourceVersions": 3, "insights": 1, "activeInsights": 1, "jobsNotSucceeded": 0}
-MIN_PROVIDER_CALLS = 3  # one extraction per source; a schema mismatch calls once more (extraction.calls)
+MIN_PROVIDER_CALLS = 3  # ok `extract` calls: one per source; a schema mismatch calls once more (extraction.calls)
 APP_DIR, DB_FILE = "PKI", "pki.sqlite"  # storage/src/data-directory.ts, backend/src/composition.ts
 FIXTURE_SET, FIXTURE_FILE = "plain", "v02-plain.jsonl"
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
@@ -62,6 +64,14 @@ class StaleData(Exception):
 
 class ConfigError(Exception):
     pass
+
+
+class RecordInvalid(Exception):
+    """The runner's own record failed the form check: nothing is written."""
+
+
+DB_BUSY_HINT = ("refused: the canonical DB is locked or has an unfinished write. Close the app completely "
+                "(also from the tray) and run `record` again.")
 
 
 def load_config(path):
@@ -192,21 +202,28 @@ def prepare(db_path, out_dir):
         json.dump({"startedAt": rr.now_iso()}, fh)
 
 
+def open_ro(db_path):
+    """A read-only connection: never creates the file, never writes (no rollback of a hot journal either)."""
+    return sqlite3.connect("file:{}?mode=ro".format(pathname2url(os.path.abspath(db_path))), uri=True)
+
+
 def read_site_db(db_path, cfg, started_at):
-    """The e2e's counts from the canonical DB, opened read-only. The record's Provider kind follows the calls the DB
-    shows: an ok call by anything but the configured real Provider is refusal ①; a row older than the run is stale."""
+    """The e2e's counts from the canonical DB, opened read-only. An ok extraction call by any Provider id other than
+    the configured real one is refusal ①; connection tests (`task_kind = 'connection-test'`) neither count nor
+    refuse. The DB holds only the Provider id: a double bound under a real id is kept out of the installer by
+    V01-T15's build check, not by this runner. A call row older than the run is stale."""
     floor = rr.parse_time(started_at)
-    db = sqlite3.connect("file:{}?mode=ro".format(pathname2url(os.path.abspath(db_path))), uri=True)
+    db = open_ro(db_path)
     try:
         one = lambda sql, *a: int(db.execute(sql, a).fetchone()[0])  # noqa: E731
-        calls = db.execute("SELECT provider, outcome, created_at FROM provider_calls").fetchall()
-        for _provider, _outcome, created in calls:
+        calls = db.execute("SELECT provider, outcome, task_kind, created_at FROM provider_calls").fetchall()
+        for _provider, _outcome, _kind, created in calls:
             try:
                 if rr.parse_time(created) < floor:
                     raise StaleData("provider calls older than this run are in the DB")
             except ValueError:
                 raise StaleData("a provider call has an unreadable time")
-        seen = {provider for provider, outcome, _c in calls if outcome == "ok"}
+        seen = {provider for provider, outcome, kind, _c in calls if outcome == "ok" and kind == "extract"}
         if seen - {cfg["provider"]["id"]}:
             raise Refusal(NOTICE_DOUBLE, "observed-provider")
         return {
@@ -214,7 +231,7 @@ def read_site_db(db_path, cfg, started_at):
             "insights": one("SELECT count(*) FROM insights"),
             "activeInsights": one("SELECT count(*) FROM insights WHERE state = 'active'"),
             "jobsNotSucceeded": one("SELECT count(*) FROM jobs WHERE status <> 'succeeded'"),
-            "providerCalls": one("SELECT count(*) FROM provider_calls WHERE provider = ? AND outcome = 'ok'",
+            "providerCalls": one("SELECT count(*) FROM provider_calls WHERE provider = ? AND outcome = 'ok' AND task_kind = 'extract'",
                                  cfg["provider"]["id"]),
             "droppedQuotes": one("SELECT coalesce(sum(dropped_quotes), 0) FROM jobs"),
             "droppedOther": one("SELECT coalesce(sum(dropped_other), 0) FROM jobs"),
@@ -255,7 +272,11 @@ def build_site_record(cfg, app_version, counts, verdict, started_at):
 
 
 def write_results(record, verdict, observed, out_dir, literals):
-    """The allowlisted pasteable pair (fails closed, writes nothing on error), then the local raw/ run record."""
+    """The allowlisted pasteable pair (fails closed, writes nothing on error), then the local raw/ run record.
+    The record must pass its own form check first."""
+    problems = rr.validate_record(record)
+    if problems:
+        raise RecordInvalid("; ".join(problems[:5]))
     p = record["provider"]
     c = record["counts"]
     facts = {"provider_kind": p["kind"], "provider_id": p["id"], "app_version": results.normalize_version(record["appVersion"])[0],
@@ -301,12 +322,18 @@ def main(argv=None):
     sp = sub.add_parser("summarize")
     sp.add_argument("--records", required=True)
     sp.add_argument("--since", required=True)
-    sp.add_argument("--commit")
+    sp.add_argument("--commit", help="full 40-hex SHA, or a name git resolves in this checkout (e.g. HEAD)")
     args = ap.parse_args(argv)
 
     if args.command == "summarize":
+        commit = args.commit
+        if commit is not None and not rr.COMMIT_RE.match(commit):
+            commit = _git("rev-parse", "--verify", "--quiet", commit + "^{commit}")
+            if not commit:
+                print("--commit does not name a commit of this checkout", file=sys.stderr)
+                return CONFIG_EXIT
         try:
-            kept, ignored = rr.load_current_records(args.records, args.since, args.commit)
+            kept, ignored = rr.load_current_records(args.records, args.since, commit)
         except ValueError:
             print("--since must be a UTC timestamp like 2026-11-22T01:00:00.000Z", file=sys.stderr)
             return CONFIG_EXIT
@@ -326,7 +353,7 @@ def main(argv=None):
         db_path = site_db_path()
         if args.command == "prepare":
             prepare(db_path, args.out)
-            print("wrote {} and run-state.json to --out. Next: RUNBOOK.md steps 3-6, close the app, then `record`."
+            print("wrote {} and run-state.json to --out. Next: RUNBOOK.md steps 3-7, close the app, then `record`."
                   .format(FIXTURE_FILE))
             return 0
         with open(os.path.join(args.out, "run-state.json"), encoding="utf-8") as fh:
@@ -346,8 +373,9 @@ def main(argv=None):
     except StaleData as exc:
         print("stale-data: {}".format(exc), file=sys.stderr)
         return STALE_EXIT
-    except (RedactionError, sqlite3.Error) as exc:
-        print("refused: {}".format(type(exc).__name__), file=sys.stderr)
+    except (RedactionError, RecordInvalid, sqlite3.Error) as exc:
+        busy = isinstance(exc, sqlite3.OperationalError) and any(w in str(exc) for w in ("locked", "readonly", "busy"))
+        print(DB_BUSY_HINT if busy else "refused: {}: {}".format(type(exc).__name__, exc), file=sys.stderr)
         return 1
 
 
