@@ -31,7 +31,7 @@ import { BRIDGE, createBridgeHandlers, type BridgeFunction } from "./bridge.ts";
 import { createSecretStore, electronCipher } from "./secret-store.ts";
 import { debuggingRequested } from "./debugging.ts";
 import { BACKEND_ENTRY, REFUSE_DEBUGGING, switches, WEB_ROOT } from "./layout.ts";
-import { lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
+import { loadScreens, lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 /** In the data directory: per OS user, not roaming (ADR 0010). */
@@ -134,7 +134,7 @@ async function run() {
     webPreferences: secureWebPreferences(PRELOAD),
   });
   window.once("ready-to-show", () => window?.show());
-  await window.loadURL(`${APP_ORIGIN}/`);
+  await loadScreens(window, WEB_ROOT);
 }
 
 // Must precede app ready: the screens' scheme behaves like https (secure, standard origin).
@@ -179,8 +179,12 @@ if (debugging) {
     // quit while starting (SIGTERM): the backend or the window's load is cut short, not
     // failed, and a modal error box would hold the quit until someone closes it
     // (V01-T15 artifact.shell)
-    if (quitRequested || window?.isDestroyed()) return;
-    console.error(`PKI shell failed to start: ${error instanceof Error ? error.message : error}`);
+    const why = error instanceof Error ? error.message : error;
+    if (quitRequested || window?.isDestroyed()) {
+      console.error(`PKI shell start stopped by a quit: ${why}`);
+      return;
+    }
+    console.error(`PKI shell failed to start: ${why}`);
     dialog.showErrorBox("PKI", "앱을 시작하지 못했습니다.");
     app.exit(1);
   });

@@ -4,7 +4,9 @@
 // Node's inspector asked for, it exits before the window and the backend exist.
 // Without them, in a development-looking environment and with the source runs'
 // switches, it starts its backend from backend/shell.js on the per-user data
-// directory of the (temporary) HOME and writes nothing where the switches point.
+// directory of the (temporary) HOME, loads the screens from web/ (the shell's
+// "screens loaded" line: a missing or failing page fails the start instead), and
+// writes nothing where the switches point.
 // Chromium's own --user-data-dir keeps its profile out of the real one (T15 6).
 import { expect, test } from "@playwright/test";
 import { resolveDataDirectory } from "@pki/storage";
@@ -14,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { APP_DIR } from "../build/paths.ts";
 import { ELECTRON } from "../e2e/launch.ts";
+import { SCREENS_LOADED } from "../src/window.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../../fixtures");
 
@@ -40,12 +43,14 @@ function launch(args: string[]) {
   const dataDir = resolveDataDirectory({ platform: process.platform, home, env });
   const child = spawn(ELECTRON, [APP_DIR, `--user-data-dir=${join(dir, "chromium")}`, ...args], {
     env,
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
+  let stdout = "";
   child.stderr?.on("data", (d: Buffer) => (stderr += d.toString()));
+  child.stdout?.on("data", (d: Buffer) => (stdout += d.toString()));
   const exited = new Promise<number | null>((r) => child.once("exit", (code) => r(code)));
-  return { child, exited, dataDir, stderr: () => stderr };
+  return { child, exited, dataDir, stderr: () => stderr, stdout: () => stdout };
 }
 
 for (const args of [["--remote-debugging-port=0"], ["--remote-debugging-pipe"], ["--inspect=0"]]) {
@@ -76,10 +81,12 @@ test("starts its backend on the user's data directory and ignores the switches",
     `--pki-fixtures=${join(FIXTURES, "test-connector.jsonl")}`,
   ]);
   try {
-    // the backend from backend/shell.js opened and migrated the canonical DB
+    // the screens from web/ answered and loaded (review D1: a blank window is a failure),
+    // after the backend from backend/shell.js opened and migrated the canonical DB
     await expect
-      .poll(() => existsSync(join(app.dataDir, "pki.sqlite")), { timeout: 30_000 })
+      .poll(() => app.stdout().includes(SCREENS_LOADED), { timeout: 30_000, message: app.stderr() })
       .toBe(true);
+    expect(existsSync(join(app.dataDir, "pki.sqlite"))).toBe(true);
     expect(app.child.exitCode).toBeNull();
   } finally {
     app.child.kill("SIGTERM");
