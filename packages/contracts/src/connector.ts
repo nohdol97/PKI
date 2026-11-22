@@ -32,6 +32,35 @@ export class ConnectorError extends Error {
   }
 }
 
+/** The fixed message of ConnectorCredentialError: it never carries a slot, a name or a value. */
+export const CONNECTOR_CREDENTIAL_MESSAGE = "connector credential unusable";
+
+/**
+ * A credential cannot be used (I06-R5): the slot is undeclared, missing or
+ * unreadable, or the origin system refused it (wrong, expired, revoked). It takes
+ * no argument and its message is fixed, so no value can reach a log or a response.
+ */
+export class ConnectorCredentialError extends Error {
+  constructor() {
+    super(CONNECTOR_CREDENTIAL_MESSAGE);
+    this.name = "ConnectorCredentialError";
+  }
+}
+
+/** What `healthCheck` answers as `unavailable.reason` when the origin refused the credential. */
+export const HEALTH_REASON_CREDENTIAL_REJECTED = "credential-rejected";
+
+/** The accessor of a declared slot's value: read on every call, never remembered by the product. */
+export interface ConnectorCredentials {
+  /** The slot's value; a slot that cannot be used is refused with ConnectorCredentialError. */
+  read(slot: string): Promise<string>;
+}
+
+/** What the product hands `initialize` beside the config (I06-R5). */
+export interface ConnectorContext {
+  readonly credentials: ConnectorCredentials;
+}
+
 /** The origin system refused for now and said when to come back (I01-R4, R18). */
 export class ConnectorRateLimitError extends Error {
   readonly retryAfterMs: number;
@@ -230,7 +259,7 @@ export interface ConnectorManifest {
 export interface Connector {
   readonly manifest: ConnectorManifest;
   /** Unimplemented integrations fail with ConnectorNotImplementedError. */
-  initialize(config: unknown): Promise<void>;
+  initialize(config: unknown, context?: ConnectorContext): Promise<void>;
   /** Never throws: `ok`, or `unavailable` with a reason. */
   healthCheck(): Promise<HealthStatus>;
   getChanges(

@@ -343,6 +343,11 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
   | `get-document-mismatch` | `getDocument`가 마지막으로 낸 레코드와 다름 |
   | `get-document-unknown` | 모르는 정체에 `null`이 아님 |
   | `abort-ignored` | 이미 취소된 신호로 부른 `getChanges`가 성공함 |
+  | `credential-in-record` | 시나리오의 자격 증명 값이 `getChanges`·`getDocument`가 돌려준 것 안에 있음(`credentials`가 있을 때, I06-R21) |
+  | `credential-in-health` | 시나리오의 값이 `healthCheck`의 답 안에 있음(`credentials`가 있을 때) |
+  | `credential-in-error` | 시나리오의 값이 수집기가 던진 오류의 문구·이름·열거되는 필드·`cause` 사슬 안에 있음(`credentials`나 `rejected`가 있을 때) |
+  | `credential-in-log` | `checkConnector` 한 번이 도는 동안 `console`과 표준 출력·오류로 나간 글 안에 시나리오의 값이 있음(`credentials`나 `rejected`가 있을 때) |
+  | `credential-rejection-unsignalled` | 거부 시나리오(`rejected`)로 새 객체를 초기화하고 한 번 읽었는데 `initialize`도 첫 `getChanges`도 `ConnectorCredentialError`로 끝나지 않음. `healthCheck`의 값은 이 코드를 면하지 않는다 |
 
   미구현 표시에 돌리면 위반 대신 `not-implemented` 하나를 돌려준다.
 

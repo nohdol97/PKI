@@ -2,18 +2,25 @@
 // returns the specification violations it finds as codes from a closed list,
 // independent of any test framework; connectorContract wraps it as a vitest
 // suite. The suppression rules of I01-R25 keep structurally linked violations to
-// one code each. Codes only: no message nor record content leaves the check.
+// one code each. Codes only: no message nor record content leaves the check, and
+// no value of the scenario's credentials (I06-R20 to R22): the check hands the
+// Connector an accessor for the made-up values, looks for them in what it gets
+// back and what it relays, and does not repeat them in its own errors.
 import {
   ChangeSchema,
   ChangeSetSchema,
   CONNECTOR_SDK_VERSION,
   blocksValid,
+  ConnectorCredentialError,
   rejectedPositionValid,
   type Connector,
+  type ConnectorContext,
+  type ConnectorCredentials,
 } from "@pki/contracts";
+import { format } from "node:util";
 import { describe, expect, it } from "vitest";
 
-/** I01-R25's table, in its order. */
+/** I01-R25's table and, from `credential-in-record` on, I06-R21's, in their order. */
 export const CONNECTOR_VIOLATION_CODES = [
   "manifest-invalid",
   "sdk-version-mismatch",
@@ -36,6 +43,11 @@ export const CONNECTOR_VIOLATION_CODES = [
   "get-document-mismatch",
   "get-document-unknown",
   "abort-ignored",
+  "credential-in-record",
+  "credential-in-health",
+  "credential-in-error",
+  "credential-in-log",
+  "credential-rejection-unsignalled",
 ] as const;
 export type ConnectorViolationCode = (typeof CONNECTOR_VIOLATION_CODES)[number];
 /** A not-implemented placeholder yields `not-implemented` alone, instead of violations. */
@@ -60,7 +72,22 @@ export interface ConnectorScenario {
    * then is a repeated upsert not `duplicate-identity`; an equal or lower revision still is.
    */
   versionedSources?: boolean;
+  /**
+   * Slot → made-up value (16 characters or more; a shorter one is a scenario error). The
+   * check hands the Connector an accessor that reads them and looks for them, plain, in
+   * base64 and percent-encoded, in what the Connector returns, throws and writes (I06-R20).
+   */
+  credentials?: Record<string, string>;
+  /**
+   * The made-up origin set to refuse: with it, a new instance initialized with this config
+   * and these values must end `initialize` or its first `getChanges` in
+   * ConnectorCredentialError (`credential-rejection-unsignalled`, I06-R20).
+   */
+  rejected?: { config: unknown; credentials: Record<string, string> };
 }
+
+/** Values shorter than this are not distinctive enough to look for (I06-R20). */
+const MIN_CREDENTIAL_LENGTH = 16;
 
 type Caps = {
   incremental: boolean;
@@ -103,14 +130,40 @@ function canonical(value: unknown): string {
   );
 }
 const signal = () => new AbortController().signal;
-const settles = async (call: () => Promise<unknown>) => {
-  try {
-    await call();
-    return true;
-  } catch {
-    return false;
-  }
-};
+
+/** The accessor the contract hands `initialize`: the scenario's values, other slots refused. */
+function accessorOf(values: Readonly<Record<string, string>>): ConnectorCredentials {
+  return {
+    async read(slot) {
+      const value = Object.hasOwn(values, slot) ? values[slot] : undefined;
+      if (value === undefined) throw new ConnectorCredentialError();
+      return value;
+    },
+  };
+}
+const initialize = (connector: Connector, config: unknown, context?: ConnectorContext) =>
+  context ? connector.initialize(config, context) : connector.initialize(config);
+
+/** The three shapes a value is looked for in (I06-R16): plain, base64, percent-encoded. */
+const shapesOf = (value: string) => [
+  value,
+  Buffer.from(value).toString("base64"),
+  encodeURIComponent(value),
+];
+
+/**
+ * Whether any string inside `value` holds one of the `needles`: keys and values of objects
+ * and arrays and, of an Error, its name, message, `cause` and `errors` as well.
+ */
+function holds(value: unknown, needles: readonly string[], seen = new Set<object>()): boolean {
+  if (typeof value === "string") return needles.some((needle) => value.includes(needle));
+  if (typeof value !== "object" || value === null || seen.has(value)) return false;
+  seen.add(value);
+  const parts: unknown[] = Object.entries(value).flat();
+  if (value instanceof Error) parts.push(value.name, value.message, value.cause);
+  if (value instanceof AggregateError) parts.push(value.errors);
+  return parts.some((part) => holds(part, needles, seen));
+}
 
 interface Read {
   /** Every change delivered, in order. */
@@ -131,14 +184,43 @@ class Check {
   readonly caps: Caps;
   readonly maxPages: number;
   readonly versioned: boolean;
-  constructor(caps: Caps, maxPages: number, versioned = false) {
+  /** What the scenario's credential values look like; none: no credential check is on. */
+  readonly needles: readonly string[];
+  constructor(caps: Caps, maxPages: number, versioned: boolean, needles: readonly string[]) {
     this.caps = caps;
     this.maxPages = maxPages;
     this.versioned = versioned;
+    this.needles = needles;
   }
 
   add(code: ConnectorViolationCode) {
     this.found.add(code);
+  }
+
+  /** What a call returned: a value of the scenario in it is `credential-in-record`. */
+  returned(value: unknown) {
+    if (holds(value, this.needles)) this.add("credential-in-record");
+  }
+
+  /**
+   * What a call threw: a value of the scenario in it is `credential-in-error`. True when it is,
+   * so that the check does not attach the error as the `cause` of its own (I06-R22).
+   */
+  thrown(error: unknown) {
+    const leaked = holds(error, this.needles);
+    if (leaked) this.add("credential-in-error");
+    return leaked;
+  }
+
+  /** Whether a call to the Connector settled; what it threw is looked at. */
+  async settles(call: () => Promise<unknown>) {
+    try {
+      await call();
+      return true;
+    } catch (error) {
+      this.thrown(error);
+      return false;
+    }
   }
 
   /** One read from `null`; `upserts` carries the last upsert revision per identity across reads. */
@@ -164,10 +246,12 @@ class Check {
       try {
         page = await connector.getChanges(cursor, { limit, signal: signal() });
       } catch (error) {
-        throw new Error("getChanges failed during a contract read; check the scenario", {
-          cause: error,
-        });
+        throw new Error(
+          "getChanges failed during a contract read; check the scenario",
+          this.thrown(error) ? undefined : { cause: error },
+        );
       }
+      this.returned(page);
       const shaped = this.pageShape(page);
       if (!shaped) return read;
       const next = shaped.nextCursor;
@@ -284,6 +368,80 @@ function manifestOf(connector: Connector) {
   }
 }
 
+const CONSOLE_FUNCTIONS = [
+  "log",
+  "info",
+  "warn",
+  "error",
+  "debug",
+  "trace",
+  "dir",
+  "dirxml",
+  "table",
+  "group",
+  "groupCollapsed",
+  "assert",
+] as const;
+
+/** One check at a time wears the taps below: overlapping ones would restore each other's. */
+let tapQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Runs `run` with `console` and the standard streams tapped (I06-R21): a text that holds one
+ * of `needles` is not passed on and is counted as a leak; any other goes where it was going.
+ * `run` and the turn of the event loop after it are inside the tap, so a write a timer makes
+ * once a call has answered is seen when it falls before the run's end.
+ */
+async function withLogTaps<T>(
+  needles: readonly string[],
+  run: () => Promise<T>,
+): Promise<{ result: T; leaked: boolean }> {
+  const before = tapQueue;
+  let release!: () => void;
+  tapQueue = new Promise<void>((resolve) => (release = resolve));
+  await before;
+  const restores: (() => void)[] = [];
+  let leaked = false;
+  try {
+    const targets = console as unknown as Record<string, unknown>;
+    for (const name of CONSOLE_FUNCTIONS) {
+      const original = targets[name];
+      if (typeof original !== "function") continue;
+      targets[name] = function (this: unknown, ...args: unknown[]) {
+        if (holds(args, needles) || holds(format(...args), needles)) {
+          leaked = true;
+          return undefined;
+        }
+        return (original as (...a: unknown[]) => unknown).apply(this, args);
+      };
+      restores.push(() => (targets[name] = original));
+    }
+    for (const stream of [process.stdout, process.stderr]) {
+      const original = stream.write;
+      stream.write = function (chunk: unknown, ...rest: unknown[]) {
+        const text =
+          typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString();
+        if (holds(text, needles)) {
+          leaked = true;
+          (rest.find((a) => typeof a === "function") as (() => void) | undefined)?.();
+          return true;
+        }
+        return (original as (...a: unknown[]) => boolean).call(stream, chunk, ...rest);
+      } as typeof stream.write;
+      restores.push(() => (stream.write = original));
+    }
+    const result = await run();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return { result, leaked };
+  } finally {
+    for (const restore of restores) restore();
+    release();
+  }
+}
+
+const valuesOf = (credentials: Readonly<Record<string, string>> | undefined) =>
+  Object.values(credentials ?? {});
+
 /**
  * Runs the Connector the scenario sets up and returns the violation codes found,
  * once each, in CONNECTOR_VIOLATION_CODES order. A scenario that does not
@@ -297,6 +455,30 @@ export async function checkConnector(
   if (!Number.isSafeInteger(maxPages) || maxPages <= 0) {
     throw new Error("the scenario's maxPages must be a positive integer");
   }
+  const values = [...valuesOf(scenario.credentials), ...valuesOf(scenario.rejected?.credentials)];
+  if (values.some((value) => typeof value !== "string" || value.length < MIN_CREDENTIAL_LENGTH)) {
+    throw new Error(
+      `the scenario's credential values must be strings of ${MIN_CREDENTIAL_LENGTH} characters or more`,
+    );
+  }
+  if (values.length === 0) return runCheck(create, scenario, []);
+  const needles = values.flatMap(shapesOf);
+  const { result, leaked } = await withLogTaps(needles, () => runCheck(create, scenario, needles));
+  if (!leaked || result.includes("not-implemented")) return result;
+  return CONNECTOR_VIOLATION_CODES.filter(
+    (code) => code === "credential-in-log" || (result as string[]).includes(code),
+  );
+}
+
+async function runCheck(
+  create: () => Connector,
+  scenario: ConnectorScenario,
+  needles: readonly string[],
+): Promise<ConnectorCheckCode[]> {
+  const { maxPages = PAGE_CAP } = scenario;
+  const context = scenario.credentials
+    ? { credentials: accessorOf(scenario.credentials) }
+    : undefined;
   const subject = create();
   const manifest = manifestOf(subject);
   if (!isObject(manifest)) return ["manifest-invalid"];
@@ -327,30 +509,34 @@ export async function checkConnector(
     },
     maxPages,
     scenario.versionedSources === true,
+    needles,
   );
   for (const code of manifestFaults) check.add(code);
 
   const fresh = create();
   const answeredEarly =
-    (await settles(() => fresh.getChanges(null, { limit: 1, signal: signal() }))) ||
-    (await settles(() => fresh.getDocument({ namespace: "", externalId: UNKNOWN_ID })));
+    (await check.settles(() => fresh.getChanges(null, { limit: 1, signal: signal() }))) ||
+    (await check.settles(() => fresh.getDocument({ namespace: "", externalId: UNKNOWN_ID })));
 
   try {
-    await subject.initialize(scenario.config);
+    await initialize(subject, scenario.config, context);
   } catch (error) {
     if (error instanceof Error && error.name === "ConnectorNotImplementedError") {
       return ["not-implemented"];
     }
-    throw new Error("the Connector did not initialize with the scenario's config", {
-      cause: error,
-    });
+    throw new Error(
+      "the Connector did not initialize with the scenario's config",
+      check.thrown(error) ? undefined : { cause: error },
+    );
   }
   if (answeredEarly) check.add("responds-before-init");
 
   try {
     const health: unknown = await subject.healthCheck();
     if (!isObject(health) || health.state !== "ok") check.add("unhealthy-after-init");
-  } catch {
+    if (holds(health, needles)) check.add("credential-in-health");
+  } catch (error) {
+    check.thrown(error);
     check.add("health-threw"); // and so not unhealthy-after-init
   }
 
@@ -365,14 +551,17 @@ export async function checkConnector(
   if (whole.complete) {
     await finalCursor(check, subject, whole);
     await documents(check, subject, whole);
-    if (scenario.later !== undefined) await rescan(check, create, scenario.later, whole, upserts);
+    if (scenario.later !== undefined) {
+      await rescan(check, create, scenario.later, whole, upserts, context);
+    }
   }
 
   const aborted = new AbortController();
   aborted.abort();
-  if (await settles(() => subject.getChanges(null, { limit: 1, signal: aborted.signal }))) {
+  if (await check.settles(() => subject.getChanges(null, { limit: 1, signal: aborted.signal }))) {
     check.add("abort-ignored");
   }
+  if (scenario.rejected) await rejection(check, create, scenario.rejected);
 
   return CONNECTOR_VIOLATION_CODES.filter((code) => check.found.has(code));
 }
@@ -381,6 +570,7 @@ async function finalCursor(check: Check, connector: Connector, whole: Read) {
   if (!check.caps.incremental) return;
   try {
     const next = await connector.getChanges(whole.finalCursor, { limit: 1000, signal: signal() });
+    check.returned(next);
     if (
       !isObject(next) ||
       !Array.isArray(next.changes) ||
@@ -389,7 +579,8 @@ async function finalCursor(check: Check, connector: Connector, whole: Read) {
     ) {
       check.add("changes-after-final-cursor");
     }
-  } catch {
+  } catch (error) {
+    check.thrown(error);
     check.add("changes-after-final-cursor");
   }
 }
@@ -398,10 +589,11 @@ async function documents(check: Check, connector: Connector, whole: Read) {
   for (const [identity, seen] of whole.last) {
     const [namespace, externalId] = JSON.parse(identity) as [string, string];
     try {
-      if (!documentMatches(seen, await connector.getDocument({ namespace, externalId }))) {
-        check.add("get-document-mismatch");
-      }
-    } catch {
+      const doc = await connector.getDocument({ namespace, externalId });
+      check.returned(doc);
+      if (!documentMatches(seen, doc)) check.add("get-document-mismatch");
+    } catch (error) {
+      check.thrown(error);
       check.add("get-document-mismatch");
     }
   }
@@ -413,8 +605,11 @@ async function documents(check: Check, connector: Connector, whole: Read) {
   }
   for (const probe of probes) {
     try {
-      if ((await connector.getDocument(probe)) !== null) check.add("get-document-unknown");
-    } catch {
+      const doc = await connector.getDocument(probe);
+      check.returned(doc);
+      if (doc !== null) check.add("get-document-unknown");
+    } catch (error) {
+      check.thrown(error);
       check.add("get-document-unknown");
     }
   }
@@ -452,14 +647,16 @@ async function rescan(
   later: unknown,
   whole: Read,
   upserts: Map<Identity, number>,
+  context: ConnectorContext | undefined,
 ) {
   const connector = create();
   try {
-    await connector.initialize(later);
+    await initialize(connector, later, context);
   } catch (error) {
-    throw new Error("the Connector did not initialize with the scenario's later config", {
-      cause: error,
-    });
+    throw new Error(
+      "the Connector did not initialize with the scenario's later config",
+      check.thrown(error) ? undefined : { cause: error },
+    );
   }
   const after = await check.read(connector, 1000, upserts);
   if (!after.complete) return;
@@ -492,6 +689,37 @@ async function rescan(
       check.add("rescan-deletion-missing");
     }
   }
+}
+
+/**
+ * The Connector the made-up origin refuses (I06-R21): a new instance, initialized with the
+ * rejected config and values, ends `initialize` or its first `getChanges` in
+ * ConnectorCredentialError, or it is `credential-rejection-unsignalled`. A health answer is
+ * the rescan path's signal and does not stand in for it.
+ */
+async function rejection(
+  check: Check,
+  create: () => Connector,
+  rejected: NonNullable<ConnectorScenario["rejected"]>,
+) {
+  const connector = create();
+  try {
+    await connector.initialize(rejected.config, {
+      credentials: accessorOf(rejected.credentials),
+    });
+  } catch (error) {
+    check.thrown(error);
+    if (!(error instanceof ConnectorCredentialError)) check.add("credential-rejection-unsignalled");
+    return;
+  }
+  const signalled = await connector.getChanges(null, { limit: 1, signal: signal() }).then(
+    () => false,
+    (error: unknown) => {
+      check.thrown(error);
+      return error instanceof ConnectorCredentialError;
+    },
+  );
+  if (!signalled) check.add("credential-rejection-unsignalled");
 }
 
 /** The contract as a vitest suite: the Connector the scenario sets up has no violation. */
