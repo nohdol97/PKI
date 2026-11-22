@@ -616,7 +616,7 @@ pnpm --filter @pki-site/composition site-check <종류>
 pnpm --filter @pki/desktop build
 ```
 
-- `pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다. 손으로 쓴 파일의 서식이 틀리면 `pnpm exec prettier --write site`로 맞춘다. `pnpm typecheck`는 저장소의 프로젝트와 `site/composition`, `site/connectors/*`의 `tsconfig.json`을 함께 본다. `site/` 아래 패키지에 `tsconfig.json`이 없으면 그 패키지 이름을 적어 실패한다. `pnpm test`는 공용 테스트 파일을 하나도 고치지 않은 채 포크 모양에서도 통과해야 한다(`site/`의 존재로 갈리는 코드는 저장소 루트를 인자로 받는다). **`pnpm e2e`는 다르다. 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 지금 포크 모양에서 실패한다.** 공용 저장소의 I05-T06이 고친다. 그때까지 포크 모양에서 공용 저장소의 e2e 통과를 기대하지 않는다.
+- `pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다. 손으로 쓴 파일의 서식이 틀리면 `pnpm exec prettier --write site`로 맞춘다. `pnpm typecheck`는 저장소의 프로젝트와 `site/composition`, `site/connectors/*`의 `tsconfig.json`을 함께 본다. `site/` 아래 패키지에 `tsconfig.json`이 없으면 그 패키지 이름을 적어 실패한다. `pnpm test`는 공용 테스트 파일을 하나도 고치지 않은 채 포크 모양에서도 통과해야 한다(`site/`의 존재로 갈리는 코드는 저장소 루트를 인자로 받는다). **`pnpm e2e`도 포크 모양에서 통과한다(I05-T06, macOS 예행 한 번).** 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 두 모양에서 참이 되도록 고쳐졌다. 다만 `v02-flow`는 포크 모양에서도 공용 이중을 띄우므로 포크의 등록이 아니라 공용 이중을 시험한다. 포크의 등록으로 띄운 앱은 산출물 시험이 본다.
 - 포크의 `site-check <종류>`는 위와 같은 판정을 등록의 종류(자리표시를 대체한 것 포함)에 한다. 모르는 종류는 사용법을 적고 2로 끝난다. 등록이 시작을 멈추는 위반을 가졌으면 그 코드와 건수를 표준 오류에 적고 1로 끝난다. 예시 패키지에서 `pnpm --filter @pki/site-example site-check <종류>`로 같게 돌려 볼 수 있다.
 - `pnpm --filter @pki/backend site-check <종류>`는 **공용 저장소의 명령**이다. 조립 패키지가 있는 저장소에서 실행하면 자리표시의 결과를 내지 않고, 그 패키지의 `package.json`의 `name`을 읽어 위의 포크 명령을 알린 뒤 2로 끝난다. 포크가 구현한 종류에 `미구현`이 나오는 오해를 막으려는 것이다.
 - `pnpm --filter @pki/desktop build`는 포크의 진입점을 묶어 설치본을 만든다. Windows 11 설치본으로 만들어 실행하는 확인은 site-setup S27이다.

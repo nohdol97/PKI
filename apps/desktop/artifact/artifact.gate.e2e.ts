@@ -24,9 +24,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { APP_DIR } from "../build/paths.ts";
+import { backendEntry } from "../src/backend-entry.ts";
 import { ELECTRON } from "../e2e/launch.ts";
 
-const FIXTURES = resolve(import.meta.dirname, "../../../fixtures");
+const ROOT = resolve(import.meta.dirname, "../../..");
+const FIXTURES = join(ROOT, "fixtures");
 const BACKEND = join(APP_DIR, "backend", "shell.js");
 
 let dir: string;
@@ -100,13 +102,24 @@ test("the built backend blocks an unlisted CLI in a development-looking setting"
       send(port, path, headers, body === undefined ? "GET" : "POST", body);
 
     expect((await api("/api/settings")).body).toMatchObject({ dataDirectory: dataDir });
-    // no test Connector: the site kinds only
-    const { connectors } = (await api("/api/connectors")).body as { connectors: { id: string }[] };
-    expect(connectors.map((c) => c.id).sort()).toEqual([
-      "site-mail",
-      "site-messenger",
-      "site-wiki",
-    ]);
+    // no test Connector, in either shape of the repository (I05-R25): neither its instance id nor its kind
+    const { connectors } = (await api("/api/connectors")).body as {
+      connectors: { id: string; kind: string }[];
+    };
+    expect(connectors.map((c) => c.id)).not.toContain("fixtures");
+    expect(connectors.map((c) => c.kind)).not.toContain("test-fixtures");
+    // a public-shaped tree (the build chose the public entry): the three placeholders and nothing else;
+    // a fork's registration adds its own instances
+    const publicShaped = backendEntry(ROOT) === join(ROOT, "backend/src/shell.ts");
+    // the shape is read a second way, so a wrong `backendEntry` cannot switch the exact list off unseen
+    expect(publicShaped, "shape").toBe(!existsSync(join(ROOT, "site/composition/package.json")));
+    if (publicShaped) {
+      expect(connectors.map((c) => c.id).sort()).toEqual([
+        "site-mail",
+        "site-messenger",
+        "site-wiki",
+      ]);
+    }
 
     // a configuration a development build would run: the CLI, consented, background on
     expect((await api("/api/providers/default", { providerId: "claude-code" })).status).toBe(200);
