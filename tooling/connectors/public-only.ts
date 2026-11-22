@@ -54,6 +54,12 @@ const ALLOWED_IMPORTS = new Set([
   "node:path",
 ]);
 const TEST_ONLY_IMPORTS = new Set(["@pki/testkit", "vitest"]);
+/**
+ * Allowed in the SDK's own test files only (I02B-T02): the path-boundary tests make temporary folders
+ * and a FIFO (`mkfifo`), which Node cannot create. Product files and other roots' tests stay refused.
+ */
+const SDK_TEST_ONLY_IMPORTS = new Set(["node:os", "node:child_process"]);
+const SDK_ROOT = "packages/connector-sdk/src/";
 const TEST_FILE = /\.test\.tsx?$/;
 const SCRIPT_KINDS: Record<string, ts.ScriptKind> = {
   ".ts": ts.ScriptKind.TS,
@@ -201,8 +207,13 @@ export function checkPublicOnly(
     const allowed = (specifier: string): boolean => {
       if (ALLOWED_IMPORTS.has(specifier)) return true;
       if (TEST_ONLY_IMPORTS.has(specifier)) return TEST_FILE.test(path);
+      if (SDK_TEST_ONLY_IMPORTS.has(specifier)) {
+        return TEST_FILE.test(path) && file.startsWith(SDK_ROOT);
+      }
       if (!/^\.\.?(\/|$)/.test(specifier)) return false;
       const target = resolve(path, "..", specifier);
+      // a test file's capabilities (SDK_TEST_ONLY_IMPORTS) must not be borrowed by importing it
+      if (TEST_FILE.test(target) && !TEST_FILE.test(path)) return false;
       if (scanRoot !== undefined && extras.includes(target)) {
         usedExtras.add(target);
         return true;
