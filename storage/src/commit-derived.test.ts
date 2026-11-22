@@ -14,10 +14,11 @@ import {
   StaleDerivativeError,
 } from "./commit-derived.ts";
 import type { DerivedItem, ScopePolicyDrop, SourceVersionRef } from "./derivatives.ts";
+import { seedLegacyTombstone } from "@pki/testkit";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
-import { recordTombstoneLift, writeTombstone } from "./tombstones.ts";
+import { recordTombstoneLift } from "./tombstones.ts";
 
 let db: SqlDriver;
 beforeEach(() => {
@@ -36,7 +37,7 @@ const save = (name: string, body: string, scope?: string) => {
   return { sourceId: saved.sourceId, version: saved.version };
 };
 const cover = (sourceId: number, version: number) =>
-  writeTombstone(db, { sourceId, version, at: AT, reason: "source-deleted" });
+  seedLegacyTombstone(db, { sourceId, version, at: AT, reason: "source-deleted" });
 
 const written: string[] = [];
 beforeEach(() => void (written.length = 0));

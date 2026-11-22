@@ -5,9 +5,10 @@
 // the job closes superseded; a dead job retried after the deletion writes nothing;
 // a version arriving after a lift is not caught by the fence.
 import type { StructuredRequest } from "@pki/contracts";
-import { deleteSource } from "@pki/knowledge-engine";
+import { applyTombstone } from "@pki/knowledge-engine";
 import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
 import {
+  canonicalTransaction,
   closeJob,
   findSourceId,
   leaseNextJob,
@@ -16,6 +17,7 @@ import {
   saveSourceRecord,
   writeSetting,
   type SqlDriver,
+  type TombstoneReason,
 } from "@pki/storage";
 import { FakeProvider, fixtureExtraction } from "@pki/testkit";
 import { createHash } from "node:crypto";
@@ -127,6 +129,20 @@ const jobStatuses = () => db.all("SELECT status, reason FROM jobs ORDER BY id");
 const mailId = () =>
   findSourceId(db, MAIL.connector_instance_id as string, "", MAIL.external_id as string) as number;
 const written = () => [count("items"), count("facts"), count("relations"), count("evidence")];
+/** The mail's tombstone through the product entry (V02's deleteSource is gone, I01-T02). */
+const tombstoneMail = (reason: TombstoneReason) =>
+  canonicalTransaction(db, (tx) =>
+    applyTombstone(tx, {
+      identity: {
+        connectorInstanceId: MAIL.connector_instance_id as string,
+        namespace: "",
+        externalId: MAIL.external_id as string,
+      },
+      reason,
+      lastRevision: null,
+      at: new Date().toISOString(),
+    }),
+  );
 
 describe("fence.fresh: the result of an extraction behind commitDerived", () => {
   it.each(["user-deleted", "access-revoked"] as const)(
@@ -135,8 +151,7 @@ describe("fence.fresh: the result of an extraction behind commitDerived", () => 
       const hooks: { during?: () => void } = {};
       const { provider, runner, importer } = pipeline(hooks);
       await importer(read("v02-mail.jsonl"));
-      hooks.during = () =>
-        void deleteSource(db, mailId(), { reason, at: new Date().toISOString() });
+      hooks.during = () => void tombstoneMail(reason);
       await runner.wake();
       expect(provider.requests).toHaveLength(1);
       expect(jobStatuses()).toEqual([{ status: "superseded", reason: "source-closed" }]);
@@ -172,7 +187,7 @@ describe("fence.fresh: the result of an extraction behind commitDerived", () => 
     hooks.during = (request) => {
       hooks.during = undefined;
       expect(request.input.candidates.map((c) => c.id)).toContain(String(x?.id));
-      deleteSource(db, mailId(), { reason: "user-deleted", at: new Date().toISOString() });
+      tombstoneMail("user-deleted");
     };
     await importer(kLine(1, K_BODY));
     await runner.wake();
@@ -201,7 +216,7 @@ describe("fence.fresh: the result of an extraction behind commitDerived", () => 
       "dead_letter",
     );
     // a dead job is not open: the deletion leaves it
-    deleteSource(db, mailId(), { reason: "user-deleted", at: new Date().toISOString() });
+    tombstoneMail("user-deleted");
     expect(jobStatuses()).toEqual([{ status: "dead_letter", reason: "provider-error" }]);
 
     const actions = createJobActions({ db, runner });
@@ -218,11 +233,11 @@ describe("fence.fresh: the result of an extraction behind commitDerived", () => 
     await importer(read("v02-mail.jsonl"));
     await runner.wake();
     const sourceId = mailId();
-    deleteSource(db, sourceId, { reason: "user-deleted", at: new Date().toISOString() });
+    tombstoneMail("user-deleted");
     expect(written()).toEqual([0, 0, 0, 0]);
     expect(recordTombstoneLift(db, sourceId, new Date().toISOString())).toBe("lifted");
 
-    // the arrival path of I01 is not used: the version row goes in directly
+    // the backend entry (acceptChange and its job registration) is bypassed: saveSourceRecord stores the version directly
     const saved = saveSourceRecord(db, MAIL.connector_instance_id as string, {
       externalId: MAIL.external_id as string,
       title: MAIL.title as string,

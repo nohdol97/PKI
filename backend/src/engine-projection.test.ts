@@ -474,9 +474,9 @@ describe("a failed page (review F4)", () => {
     await sync([upsert("r", "first text", 5)]);
     await projections.drain();
     expect(await engine.appliedChangeSeq()).toBe(1);
-    // a new source, then a lower revision with other content: refused, the page throws
+    // a new source, then the same revision with other content: refused, the page throws
     await expect(
-      sync([upsert("s", "rolled back", 1), upsert("r", "older text", 3)]),
+      sync([upsert("s", "rolled back", 1), upsert("r", "other text", 5)]),
     ).rejects.toThrow(/revision-not-newer/);
     await projections.drain();
     expect(engine.upsertSource).toHaveBeenCalledTimes(1);

@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { seedLegacyTombstone } from "@pki/testkit";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { commitDerived } from "./commit-derived.ts";
 import {
@@ -40,7 +41,6 @@ import { migrate } from "./migrations.ts";
 import { readChangeSeq } from "./revisions.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
-import { writeTombstone } from "./tombstones.ts";
 
 let db: SqlDriver;
 
@@ -253,7 +253,7 @@ describe("closeJob: the version fence (V02-R5)", () => {
     lease();
     db.transaction(() => {
       db.run("DELETE FROM source_versions WHERE source_id = 1");
-      writeTombstone(db, {
+      seedLegacyTombstone(db, {
         sourceId: 1,
         version: 1,
         at: T0.toISOString(),
@@ -270,13 +270,23 @@ describe("closeJob: the version fence (V02-R5)", () => {
   it("discards a result when a tombstone covers the fence even if the version row is left", () => {
     const job = registered();
     lease();
-    writeTombstone(db, { sourceId: 1, version: 1, at: T0.toISOString(), reason: "access-revoked" });
+    seedLegacyTombstone(db, {
+      sourceId: 1,
+      version: 1,
+      at: T0.toISOString(),
+      reason: "access-revoked",
+    });
     expect(closeJob(db, held(job.id), { status: "succeeded", write: () => {} })).toBe("superseded");
   });
 
   it("accepts a version stored above an older tombstone", () => {
     db.run("DELETE FROM source_versions WHERE source_id = 1");
-    writeTombstone(db, { sourceId: 1, version: 1, at: T0.toISOString(), reason: "source-deleted" });
+    seedLegacyTombstone(db, {
+      sourceId: 1,
+      version: 1,
+      at: T0.toISOString(),
+      reason: "source-deleted",
+    });
     db.run(
       "INSERT INTO source_versions (source_id, version, content_hash, title, body) VALUES (1, 2, 'h', 't', 'b2')",
     );
@@ -978,7 +988,7 @@ const running = (): StoredJob => {
   return claimed();
 };
 const tombstone = () =>
-  writeTombstone(db, { sourceId: 1, version: 1, at: "x", reason: "source-deleted" });
+  seedLegacyTombstone(db, { sourceId: 1, version: 1, at: "x", reason: "source-deleted" });
 
 describe("effect.fence-new-version (I03-R6 ③): commitDerived through closeJob", () => {
   const item = (name: string) => ({
@@ -1064,7 +1074,7 @@ describe("fence.fresh lineage-retry (I04-T06): a result lost to its lineage is e
     const saved = saveSourceRecord(db, "c1", { externalId: "e2", title: "t", body: "b2" });
     if (saved.status !== "created") throw new Error("expected a version");
     const ref = { sourceId: saved.sourceId, version: saved.version };
-    writeTombstone(db, {
+    seedLegacyTombstone(db, {
       sourceId: ref.sourceId,
       version: ref.version,
       at: "x",

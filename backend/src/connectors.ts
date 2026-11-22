@@ -5,9 +5,10 @@
 // records (ADR 0013 decision 1) and no version is stored without its job. The
 // change sequence rises in the same transaction (storage trigger), and so does a
 // new version's propagation to the knowledge its previous versions supported (V02-R11).
-// A delete or access-revoked change tombstones and purges its source in the
-// page's transaction (V02-R12, knowledge-engine deletion.ts). Each stored version
-// and each deletion becomes a notice to the KnowledgeEngine and VectorIndex,
+// Each change is judged and stored by the knowledge-engine's acceptChange
+// (I01-R8 to R12): an upsert by revision order, a delete or access-revoked change
+// through the tombstone entry in the page's canonical transaction, a scope change
+// on the source row. Each stored version and each deletion becomes a notice to the KnowledgeEngine and VectorIndex,
 // built in the page's transaction with the change sequence it reached and
 // delivered after the commit, before the runner is woken (V02-R13). A Connector
 // of another SDK version than CONNECTOR_SDK_VERSION is never initialized (I01-R1).
@@ -22,19 +23,19 @@ import {
   type SyncResponse,
 } from "@pki/contracts";
 import {
-  deleteSourceWithNotice,
+  acceptChange,
   propagateNewVersion,
   versionNotice,
   type ProjectionNotice,
   type Projections,
 } from "@pki/knowledge-engine";
 import {
-  findSourceId,
+  canonicalTransaction,
   readCursor,
   registerConnectorInstance,
   registerJob,
-  saveSourceRecord,
   writeCursor,
+  type CanonicalTx,
   type SqlDriver,
 } from "@pki/storage";
 import { systemClock, type Clock } from "./clock.ts";
@@ -45,11 +46,20 @@ const PAGE_LIMIT = 100;
 /** The job each new source version gets; its handler is V02-T05's. */
 export const EXTRACT_JOB_KIND = "extract";
 
-/** A change the store would not take; nothing of it is written. */
+/**
+ * A change the store would not take; nothing of it is written. `revision-not-newer`
+ * is the same revision with other content (I01-R10 step 2); `tombstoned` is the
+ * door of a tombstone (step 0).
+ */
 export type RefusalReason = "revision-not-newer" | "tombstoned";
 
-/** What a change did: a new version, nothing new, or its source tombstoned and purged. */
-export type StoredOutcome = "created" | "unchanged" | "deleted";
+/**
+ * What a change did: a new version, a new scope, its source tombstoned, or nothing
+ * new (`unchanged`; `stale` for an older revision, `stale-tombstone` for a delete
+ * below the revision the store holds: neither is an error, I01-R10, R11).
+ */
+export type StoredOutcome =
+  "created" | "unchanged" | "deleted" | "scope-updated" | "stale" | "stale-tombstone";
 
 export interface SyncOptions {
   signal?: AbortSignal;
@@ -90,42 +100,28 @@ export interface ConnectorManager {
 
 /**
  * Stores one change; a version is stored together with its extraction job. A
- * source is the instance's (namespace, external id) (I01-R8). A delete or
- * access-revoked change tombstones every product version of its source and
- * purges them (V02-R12), at the source's latest product version: its `revision`
- * orders nothing yet (I01 spec "T01과 T02 사이"; I01-T02's arrival rule), and its
- * `at` is not stored: the tombstone takes the product's clock, so no Connector
- * text reaches it. A source never stored, or purged already, is left as it is
- * ("unchanged"). A scope change has no store before I01-T02 and fails its page.
+ * source is the instance's (namespace, external id) (I01-R8). The judgment is
+ * acceptChange's; a deletion takes the product's clock (`at` is not stored: no
+ * Connector text reaches the tombstone).
  */
 function storeChange(
-  db: SqlDriver,
+  tx: CanonicalTx,
   instanceId: string,
   change: Change,
   notices: ProjectionNotice[],
   clock: Pick<Clock, "now">,
 ): StoredOutcome | { refused: RefusalReason } {
-  if (change.kind === "scope-change") {
-    throw new Error(`${instanceId}: scope-change is not stored before I01-T02`);
-  }
-  if (change.kind !== "upsert") {
-    const sourceId = findSourceId(db, instanceId, change.namespace, change.externalId);
-    if (sourceId === undefined) return "unchanged";
-    const reason = change.kind === "delete" ? "source-deleted" : "access-revoked";
-    const { notice } = deleteSourceWithNotice(db, sourceId, {
-      reason,
-      at: new Date().toISOString(),
-    });
-    if (!notice) return "unchanged";
-    notices.push(notice);
+  const saved = acceptChange(tx, instanceId, change, new Date(clock.now()).toISOString());
+  if (saved.outcome === "blocked") return { refused: "tombstoned" };
+  if (saved.outcome === "rejected") return { refused: "revision-not-newer" };
+  if (saved.outcome === "tombstoned") {
+    if (saved.notice) notices.push(saved.notice);
     return "deleted";
   }
-  const saved = saveSourceRecord(db, instanceId, change.record);
-  if (saved.status === "refused") return { refused: saved.reason };
-  if (saved.status === "unchanged") return "unchanged";
-  propagateNewVersion(db, saved.sourceId);
-  notices.push(versionNotice(db, saved.sourceId, saved.version));
-  const job = registerJob(db, {
+  if (saved.outcome !== "created") return saved.outcome;
+  propagateNewVersion(tx, saved.sourceId);
+  notices.push(versionNotice(tx, saved.sourceId, saved.version));
+  const job = registerJob(tx, {
     kind: EXTRACT_JOB_KIND,
     sourceId: saved.sourceId,
     fenceVersion: saved.version,
@@ -173,10 +169,10 @@ export async function syncConnector(
     const refused: [Change, RefusalReason][] = [];
     const stored: [Change, StoredOutcome][] = [];
     const notices: ProjectionNotice[] = [];
-    const pageCreated = db.transaction(() => {
+    const pageCreated = canonicalTransaction(db, (tx) => {
       let n = 0;
       for (const change of page.changes) {
-        const outcome = storeChange(db, instanceId, change, notices, options.clock ?? systemClock);
+        const outcome = storeChange(tx, instanceId, change, notices, options.clock ?? systemClock);
         if (typeof outcome === "object") {
           // A deleted source's upsert is skipped, never a page failure: the
           // tombstone refuses it every time, so failing would stall the cursor and
@@ -190,7 +186,7 @@ export async function syncConnector(
           stored.push([change, outcome]);
         }
       }
-      writeCursor(db, instanceId, page.nextCursor);
+      writeCursor(tx, instanceId, page.nextCursor);
       return n;
     });
     for (const [change, reason] of refused) options.onRefused?.(change, reason);

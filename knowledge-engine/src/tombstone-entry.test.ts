@@ -326,7 +326,7 @@ describe("tombstone.rules: liftTombstone and what follows it", () => {
   it("numbers the version that arrives after a lift covers_version + 1, and a deletion then extends the cover", () => {
     apply("source-deleted", 7);
     const record = { namespace: "n", externalId: "chat", title: "chat", body: "돌아옴" };
-    expect(saveSourceRecord(db, "c1", record)).toEqual({ status: "refused", reason: "tombstoned" });
+    expect(saveSourceRecord(db, "c1", record)).toEqual({ status: "blocked" });
     lift(chat);
     expect(saveSourceRecord(db, "c1", record)).toEqual({
       status: "created",

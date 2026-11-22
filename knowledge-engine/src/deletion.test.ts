@@ -1,7 +1,9 @@
-// A source's deletion or access revocation (V02-R12) in one transaction: a
-// content-free tombstone covering every product version, the purge of all its
-// versions and what they alone supported, and the rule recomputed over the
-// collected items that remain. It never propagates as a new version would.
+// A source's deletion or access revocation (V02-R12, I04-R9) through the tombstone
+// entry applyTombstone in one canonical transaction: a content-free tombstone
+// covering every product version, the purge of all its versions and what they
+// alone supported, and the rule recomputed over the collected items that remain.
+// It never propagates as a new version would. `deleteSource` below stands for
+// "apply the tombstone of the source with this id" (test-purge.ts; V02's own entry is gone).
 import {
   addEvidence,
   insertItem,
@@ -9,7 +11,7 @@ import {
   migrate,
   readChangeSeq,
   readInsight,
-  readTombstone,
+  readTombstoneState,
   registerConnectorInstance,
   registerJob,
   saveFact,
@@ -20,8 +22,8 @@ import {
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deleteSource } from "./deletion.ts";
 import { propagateNewVersion } from "./propagation.ts";
+import { purgeSource as deleteSource } from "./purge.test-support.ts";
 import {
   COMPLETION_DATE,
   DEPENDENCY_DELAY,
@@ -85,11 +87,13 @@ describe("deleteSource", () => {
     const result = deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
 
     expect(result).toMatchObject({ outcome: "deleted", version: 2 });
-    expect(readTombstone(db, chat.sourceId)).toEqual({
+    expect(readTombstoneState(db, chat.sourceId)).toEqual({
       sourceId: chat.sourceId,
-      version: 2,
+      coversVersion: 2,
+      lastRevision: null,
       at: AT,
       reason: "source-deleted",
+      liftedAt: null,
     });
     expect(readChangeSeq(db)).toBe(seq + 1);
     expect(db.all("SELECT 1 FROM source_versions WHERE source_id = ?", [chat.sourceId])).toEqual(
@@ -104,11 +108,12 @@ describe("deleteSource", () => {
 
     const result = deleteSource(db, wiki.sourceId, { reason: "user-deleted", at: AT });
 
-    expect(result).toMatchObject({
-      outcome: "deleted",
-      purge: { relations: [relation], items: [], remainingItemIds: [x, y] },
-      insights: [{ key: key(), outcome: "resolved" }],
-    });
+    expect(result).toMatchObject({ outcome: "deleted" });
+    expect(db.all("SELECT id FROM relations WHERE id = ?", [relation])).toEqual([]);
+    expect(db.all("SELECT id FROM items WHERE id IN (?, ?) ORDER BY id", [x, y])).toEqual([
+      { id: x },
+      { id: y },
+    ]);
     expect(readInsight(db, key())).toMatchObject({
       id: before?.id,
       state: "resolved",
@@ -142,28 +147,28 @@ describe("deleteSource", () => {
     recomputeDependencyDelay(db, [x, y]);
     const before = readInsight(db, key());
 
-    const result = deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
+    deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
 
     // the evidence link went with the purged evidence (cascade); the rule finds
     // the rest as it wants it, so the row is judged and left as it is
-    expect(result.outcome === "deleted" && result.insights).toEqual([
-      { key: key(), outcome: "unchanged" },
-    ]);
     const after = readInsight(db, key());
     expect(after).toMatchObject({ id: before?.id, state: "active" });
     expect(after?.evidenceIds).toContain(kept);
     expect(after?.evidenceIds).toHaveLength(3);
   });
 
-  it("changes nothing for a source already purged", () => {
+  it("changes nothing for the same deletion of a source already purged", () => {
     const { chat } = lateDependency();
     deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
     const seq = readChangeSeq(db);
-    expect(deleteSource(db, chat.sourceId, { reason: "user-deleted", at: "later" })).toEqual({
+    expect(deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT })).toMatchObject({
       outcome: "unchanged",
     });
     expect(readChangeSeq(db)).toBe(seq);
-    expect(readTombstone(db, chat.sourceId)).toMatchObject({ at: AT, reason: "source-deleted" });
+    expect(readTombstoneState(db, chat.sourceId)).toMatchObject({
+      at: AT,
+      reason: "source-deleted",
+    });
   });
 
   it("rolls everything back when a step fails, the tombstone included", () => {
@@ -174,7 +179,7 @@ describe("deleteSource", () => {
     expect(() => deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT })).toThrow(
       /injected/,
     );
-    expect(readTombstone(db, chat.sourceId)).toBeUndefined();
+    expect(readTombstoneState(db, chat.sourceId)).toBeUndefined();
     expect(readChangeSeq(db)).toBe(seq);
     expect(db.all("SELECT count(*) AS n FROM source_versions")).toEqual([{ n: 3 }]);
     expect(readInsight(db, key())?.state).toBe("active");
@@ -203,9 +208,8 @@ describe("deleteSource", () => {
     propagateNewVersion(db, b1.sourceId);
     expect(db.all("SELECT status FROM facts WHERE id = ?", [f])).toEqual([{ status: "candidate" }]);
 
-    const result = deleteSource(db, a1.sourceId, { reason: "source-deleted", at: AT });
+    deleteSource(db, a1.sourceId, { reason: "source-deleted", at: AT });
 
-    expect(result).toMatchObject({ purge: { superseded: { facts: [f], relations: [r] } } });
     expect(db.all("SELECT id, status FROM facts ORDER BY id")).toEqual([
       { id: f, status: "superseded" },
       { id: rejected, status: "rejected" },
@@ -289,7 +293,7 @@ describe("purge.idempotent: the purge closes the source's open jobs (I04-R12)", 
     });
     const before = snapshot();
 
-    expect(deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT })).toEqual({
+    expect(deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT })).toMatchObject({
       outcome: "unchanged",
     });
 
@@ -314,7 +318,7 @@ describe("one clock per deletion (I04-T03)", () => {
       { updated_at: Date.parse(AT), finished_at: Date.parse(AT) },
     ]);
     expect(listInvalidations(db)[0]?.at).toBe(AT);
-    expect(readTombstone(db, chat.sourceId)?.at).toBe(AT);
+    expect(readTombstoneState(db, chat.sourceId)?.at).toBe(AT);
   });
 
   it("refuses a deletion time that is not a date, writing nothing", () => {
@@ -322,7 +326,7 @@ describe("one clock per deletion (I04-T03)", () => {
     expect(() =>
       deleteSource(db, chat.sourceId, { reason: "source-deleted", at: "later" }),
     ).toThrow(RangeError);
-    expect(readTombstone(db, chat.sourceId)).toBeUndefined();
+    expect(readTombstoneState(db, chat.sourceId)).toBeUndefined();
   });
 
   it("checks the time before its first write, not only by rolling back", () => {

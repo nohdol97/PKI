@@ -1,7 +1,7 @@
 // The pipeline's notifications to the KnowledgeEngine and the VectorIndex
 // (V02-R13, ARCHITECTURE 5.3 and 5.4, ADR 0013). Both are projections of the
 // canonical store: a notice is built inside the transaction that changed a
-// source (versionNotice, deleteSourceWithNotice) with the change sequence that
+// source (versionNotice, userDeleteWithNotice, acceptChange) with the change sequence that
 // change reached, and delivered only after that transaction committed, one notice
 // at a time in the order notified. A stored version is upserted into the engine
 // (its text read from the store at delivery, so a version purged meanwhile is
@@ -34,7 +34,6 @@ import {
   writeSetting,
   type SqlDriver,
 } from "@pki/storage";
-import { deleteSource, type DeletionRequest, type SourceDeletion } from "./deletion.ts";
 import { applyTombstone } from "./tombstone-entry.ts";
 
 /** What one committed change tells the projections. */
@@ -95,29 +94,6 @@ export function versionNotice(db: SqlDriver, sourceId: number, version: number):
     ),
     changeSeq: readChangeSeq(db),
   };
-}
-
-/** deleteSource (V02-R12) with the notice of what it purged; no notice when nothing was deleted. */
-export function deleteSourceWithNotice(
-  db: SqlDriver,
-  sourceId: number,
-  request: DeletionRequest,
-): { deletion: SourceDeletion; notice?: ProjectionNotice } {
-  return db.transaction(() => {
-    const versionIds = idsOf(
-      db.all("SELECT id FROM source_versions WHERE source_id = ? ORDER BY version", [sourceId]),
-    );
-    const deletion = deleteSource(db, sourceId, request);
-    if (deletion.outcome !== "deleted") return { deletion };
-    const notice: ProjectionNotice = {
-      kind: "removed",
-      sourceId,
-      version: deletion.version,
-      versionIds,
-      changeSeq: readChangeSeq(db),
-    };
-    return { deletion, notice };
-  });
 }
 
 /**

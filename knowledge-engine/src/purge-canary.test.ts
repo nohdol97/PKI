@@ -17,6 +17,7 @@ import {
   searchKeyword,
   type KnowledgeAttributes,
   type SqlDriver,
+  type StoredRecord,
   type TombstoneReason,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
@@ -25,7 +26,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deleteSource } from "./deletion.ts";
 import { COMPLETION_DATE, DEPENDENCY_DELAY } from "./dependency-delay.ts";
 import { applyTombstone } from "./tombstone-entry.ts";
 
@@ -37,8 +37,9 @@ const CANARY = {
   insight: "xfginsight", // ⑥ the Insight's explanation
   externalId: "hrtextid", // ⑦ the external identifier
   namespace: "lknspace", // ⑦ and its namespace
+  author: "wqpauthor", // ⑤ provenance an earlier version holds (I01-R13)
+  locator: "hnxlocator", // ⑤ the locator of a block of the current version (I01-R7)
 };
-// ⑤ (author, a block's locator) are columns I01 adds; none exists on this schema.
 const ALL = Object.values(CANARY);
 const AT = "2026-11-22T00:00:00.000Z";
 const attrs: KnowledgeAttributes = {
@@ -74,14 +75,25 @@ const NEW_BODY = `이제 ${CANARY.body} 와 ${CANARY.word} 그리고 ${CANARY.qu
 
 /** One source, two versions (the first with the old value), a fact on each, one Insight. */
 function seed() {
-  const record = (body: string) => ({
+  const record = (body: string, extra: Partial<StoredRecord> = {}): StoredRecord => ({
     namespace: CANARY.namespace,
     externalId: CANARY.externalId,
     title: "t",
     body,
+    ...extra,
   });
-  const first = saveSourceRecord(db, "c1", record(OLD_BODY));
-  const second = saveSourceRecord(db, "c1", record(NEW_BODY));
+  const first = saveSourceRecord(
+    db,
+    "c1",
+    record(OLD_BODY, { provenance: { author: CANARY.author } }),
+  );
+  const second = saveSourceRecord(
+    db,
+    "c1",
+    record(NEW_BODY, {
+      blocks: [{ start: 0, end: 2, locator: { format: "xlsx", sheet: CANARY.locator } }],
+    }),
+  );
   if (first.status !== "created" || second.status !== "created") throw new Error("seed");
   const versionId = (v: number) =>
     db.all("SELECT id FROM source_versions WHERE source_id = ? AND version = ?", [
@@ -141,12 +153,6 @@ describe("purge.canary-files", () => {
       expect(searchKeyword(db, CANARY.word.toLowerCase())).toEqual([]);
     },
   );
-
-  it("is the same for the V02 entry, deleteSource", () => {
-    const sourceId = seed();
-    deleteSource(db, sourceId, { reason: "user-deleted", at: AT });
-    expect(residue()).toEqual([]);
-  });
 
   it("control: with PRAGMA secure_delete off the current text stays (①)", () => {
     seed();

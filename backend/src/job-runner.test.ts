@@ -14,7 +14,6 @@ import {
   requeueHeldReasons,
   saveSourceRecord,
   supersedeOpenJobs,
-  writeTombstone,
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
@@ -22,6 +21,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedLegacyTombstone } from "@pki/testkit";
 import type { Clock } from "./clock.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { DEFAULT_RUN_TIMEOUT_MS } from "./job-outcomes.ts";
@@ -151,7 +151,7 @@ describe("job runner: version fence (V02-R5)", () => {
     const run = await runner(async () => {
       db.transaction(() => {
         db.run("DELETE FROM source_versions WHERE source_id = ?", [job.sourceId]);
-        writeTombstone(db, {
+        seedLegacyTombstone(db, {
           sourceId: job.sourceId as number,
           version: 1,
           at: "x",
@@ -697,7 +697,7 @@ describe("effect.fence-new-version (I03-R6 ③, C1): a result behind commitDeriv
     await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("running"));
     db.transaction(() => {
       db.run("DELETE FROM source_versions WHERE source_id = ?", [job.sourceId]);
-      writeTombstone(db, {
+      seedLegacyTombstone(db, {
         sourceId: job.sourceId as number,
         version: 1,
         at: "x",

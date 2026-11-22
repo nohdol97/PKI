@@ -12,7 +12,7 @@
 // versions stay (I04-R10). Facts and relations a deletion leaves are judged again
 // by the same rule (I04-R8). Projection kinds join the registry in I04-T04.
 //
-// V02's entries, deleteSource and propagateNewVersion, keep their results (the ids
+// The entries, applyTombstone and propagateNewVersion, keep their results (the ids
 // each kind touched and the rule's outcomes); the kinds note those for the entry
 // that runs the registry, by its transaction, beside the counts the record keeps.
 import {

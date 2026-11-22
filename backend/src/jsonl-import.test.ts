@@ -4,12 +4,13 @@
 // JSONL again changes no count; a greater revision is a new version beside the old;
 // a line the store refuses is reported by its number without aborting the rest.
 import type { ImportLineError, ImportRecord } from "@pki/contracts";
-import { identityKey, readChangeSeq, writeTombstone, type SqlDriver } from "@pki/storage";
+import { identityKey, readChangeSeq, type SqlDriver } from "@pki/storage";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedLegacyTombstone } from "@pki/testkit";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { CANONICAL_DB_FILE, openCanonicalDb, productImporter } from "./composition.ts";
 import { EXTRACT_JOB_KIND, type SyncOptions } from "./connectors.ts";
@@ -134,7 +135,7 @@ describe("importJsonl", () => {
     ]);
   });
 
-  it("reports by line number a lower revision with other content, storing the other lines", async () => {
+  it("takes a lower revision as stale, whatever its content: no error, nothing stored, the other lines stored (I01-R10)", async () => {
     await importJsonl(db, line({ version: 3, content: "v3" }));
     const before = counts();
     const result = await importJsonl(
@@ -144,13 +145,7 @@ describe("importJsonl", () => {
         line({ version: 2, content: "v2" }),
       ].join("\n"),
     );
-    expect(result).toEqual(
-      reply({
-        received: 2,
-        created: 1,
-        errors: [{ line: 2, reason: "revision-not-newer" }],
-      }),
-    );
+    expect(result).toEqual(reply({ received: 2, created: 1, errors: [] }));
     expect(counts()).toEqual({
       ...before,
       sources: before.sources + 1,
@@ -180,7 +175,7 @@ describe("importJsonl", () => {
   // Provisional (T04): a source the tombstone blocks is a line error, not a failed import.
   it("reports a re-imported record the tombstone blocks as a line error, storing the other lines", async () => {
     await importJsonl(db, line({ content: "v1" }));
-    writeTombstone(db, {
+    seedLegacyTombstone(db, {
       sourceId: 1,
       version: 1,
       at: "2026-11-21T00:00:00Z",
@@ -203,7 +198,7 @@ describe("importJsonl", () => {
     expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 2 }]);
   });
 
-  it("purges a source on its delete line and changes nothing for delete or revoke of a source never stored", async () => {
+  it("purges a source on its delete line and tombstones a source never stored on its delete or revoke line (I01-R11)", async () => {
     await importJsonl(db, line({ external_id: "d" }));
     const result = await importJsonl(
       db,
@@ -217,14 +212,25 @@ describe("importJsonl", () => {
     expect(result).toEqual(reply({ received: 4, created: 1, errors: [] }));
     expect(
       db.all(
-        "SELECT s.external_id, t.covers_version AS version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id",
+        "SELECT s.external_id, t.covers_version AS version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id ORDER BY t.source_id",
       ),
-      // the purged source's identifier is the keyed hash, no longer "d" (I04-R7)
+      // a purged source's identifier is the keyed hash, no longer "d" (I04-R7); a
+      // source never seen is a hashed row from the start, covering version 0
     ).toEqual([
       {
         external_id: identityKey(db, MAIL.connector_instance_id, "", "d"),
         version: 1,
         reason: "source-deleted",
+      },
+      {
+        external_id: identityKey(db, MAIL.connector_instance_id, "", "never"),
+        version: 0,
+        reason: "source-deleted",
+      },
+      {
+        external_id: identityKey(db, MAIL.connector_instance_id, "", "r"),
+        version: 0,
+        reason: "access-revoked",
       },
     ]);
     expect(
@@ -233,7 +239,7 @@ describe("importJsonl", () => {
   });
 
   it("keeps per-source line order across a delete between two upserts in one file", async () => {
-    // rounds: v1 is stored, the delete purges it, the later upsert is refused
+    // rounds: v1 is stored, the delete (revision 2) purges it, revision 3 is a new version past the cover
     const result = await importJsonl(
       db,
       [
@@ -243,16 +249,21 @@ describe("importJsonl", () => {
         line({ external_id: "other" }),
       ].join("\n"),
     );
-    expect(result).toEqual(
-      reply({ received: 4, created: 2, errors: [{ line: 3, reason: "tombstoned" }] }),
-    );
+    expect(result).toEqual(reply({ received: 4, created: 3, errors: [] }));
     expect(db.all("SELECT covers_version AS version, reason FROM tombstones")).toEqual([
       { version: 1, reason: "source-deleted" },
     ]);
     expect(
-      db.all("SELECT s.external_id FROM source_versions v JOIN sources s ON s.id = v.source_id"),
-    ).toEqual([{ external_id: "other" }]);
-    // importing it again: the first upsert is refused too, the delete changes nothing
+      db.all(
+        "SELECT s.external_id, v.version FROM source_versions v JOIN sources s ON s.id = v.source_id ORDER BY v.id",
+      ),
+    ).toEqual([
+      { external_id: "other", version: 1 },
+      { external_id: MAIL.external_id, version: 2 },
+    ]);
+    // importing it again: the tombstone is still there (nobody lifted it), so
+    // revision 1, not above the delete's, is blocked; the delete is below what is
+    // held (stale-tombstone, not applied); revision 3 and the other line are unchanged
     const again = await importJsonl(
       db,
       [
@@ -263,15 +274,9 @@ describe("importJsonl", () => {
       ].join("\n"),
     );
     expect(again).toEqual(
-      reply({
-        received: 4,
-        created: 0,
-        errors: [
-          { line: 1, reason: "tombstoned" },
-          { line: 3, reason: "tombstoned" },
-        ],
-      }),
+      reply({ received: 4, created: 0, errors: [{ line: 1, reason: "tombstoned" }] }),
     );
+    expect(count("source_versions")).toBe(2);
   });
 
   it("refuses the lines of an instance already bound to another Connector kind", async () => {

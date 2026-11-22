@@ -8,7 +8,6 @@ import {
   migrate,
   registerConnectorInstance,
   saveSourceRecord,
-  writeTombstone,
   type DerivativeKind,
   type Layer,
   type SqlDriver,
@@ -16,6 +15,7 @@ import {
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { MemoryVectorIndex, send } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { seedLegacyTombstone } from "@pki/testkit";
 import { productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer } from "./server.ts";
@@ -110,7 +110,12 @@ describe("invalidate.record", () => {
       now: () => AT,
     });
     db.transaction(() => {
-      writeTombstone(db, { sourceId: saved.sourceId, version: 1, at: AT, reason: "user-deleted" });
+      seedLegacyTombstone(db, {
+        sourceId: saved.sourceId,
+        version: 1,
+        at: AT,
+        reason: "user-deleted",
+      });
       registry.propagate(db, {
         kind: "user-deleted",
         sourceId: saved.sourceId,

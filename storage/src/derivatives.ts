@@ -294,7 +294,7 @@ function phaseOrder(kinds: readonly DerivativeKind[]): DerivativeKind[] {
 }
 
 /** The stored scope text: a JSON array of strings, or one plain value (V01 Connectors). */
-function parseScope(raw: string | null): AccessScope {
+export function parseScope(raw: string | null): AccessScope {
   if (raw === null) return null;
   if (raw.startsWith("[")) {
     try {

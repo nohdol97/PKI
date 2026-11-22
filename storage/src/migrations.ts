@@ -649,6 +649,30 @@ const v15: Migration = (db) =>
     );
   `);
 
+// Schema v16 (I01-T02, I01-R9, R13): what a Connector's record leaves in the store.
+// - `sources.last_revision`: the greatest revision the source system gave that the
+//   store accepted (arrivals are ordered by it; it outlives a purge and a lift),
+//   empty for a source from before it. `sources.scope_claimed`: 1 when the scope
+//   is a user's own claim (an import, I01-R15), set by the arrival path.
+// - `source_versions` gains the record's schema version (rows so far are 1), the
+//   provenance (JSON: author, participants, times, metadata) and the blocks (JSON).
+//   They belong to the version and go with it (I01-R13). Columns are added, not
+//   rebuilt as v5 did: ADD COLUMN rewrites no row, so ids, triggers, the keyword
+//   index and every table pointing at a version stay as they were, and the
+//   immutability trigger (which guards UPDATE) is never fired.
+// - `tombstones.last_revision` is I04-T05's (v13); nothing here.
+const v16: Migration = (db) =>
+  db.exec(`
+    ALTER TABLE sources ADD COLUMN last_revision INTEGER
+      CHECK (last_revision IS NULL OR (typeof(last_revision) = 'integer' AND last_revision >= 1));
+    ALTER TABLE sources ADD COLUMN scope_claimed INTEGER NOT NULL DEFAULT 0
+      CHECK (scope_claimed IN (0, 1));
+    ALTER TABLE source_versions ADD COLUMN record_schema_version INTEGER NOT NULL DEFAULT 1
+      CHECK (record_schema_version >= 1);
+    ALTER TABLE source_versions ADD COLUMN meta TEXT CHECK (meta IS NULL OR json_valid(meta));
+    ALTER TABLE source_versions ADD COLUMN blocks TEXT CHECK (blocks IS NULL OR json_valid(blocks));
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -666,6 +690,7 @@ export const migrations: readonly Migration[] = [
   v13,
   v14,
   v15,
+  v16,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

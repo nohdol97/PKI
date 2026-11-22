@@ -6,9 +6,9 @@
 // with its item; a job leased or queued before the purge never writes; the
 // source cannot come back at or below its tombstone.
 import type { ChangeSet, Connector, StructuredRequest } from "@pki/contracts";
-import { deleteSource } from "@pki/knowledge-engine";
+import { userDeleteWithNotice } from "@pki/knowledge-engine";
 import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
-import { findSourceId, readTombstone, writeSetting, type SqlDriver } from "@pki/storage";
+import { findSourceId, readTombstoneState, writeSetting, type SqlDriver } from "@pki/storage";
 import { FakeProvider, fixtureExtraction } from "@pki/testkit";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -196,6 +196,27 @@ const canariesIn = () =>
   Object.values(CANARY).filter((c) => storedFiles().some(([, bytes]) => bytes.includes(c)));
 
 const count = (table: string) => db.all(`SELECT count(*) AS n FROM ${table}`)[0]?.n as number;
+/** The user's deletion of the source with this id, as the screen's route does it (userDeleteWithNotice). */
+function deleteSource(
+  target: SqlDriver,
+  id: number,
+  { at }: { reason: "user-deleted"; at: string },
+) {
+  const row = target.all(
+    "SELECT connector_instance_id AS i, namespace AS n, external_id AS e FROM sources WHERE id = ?",
+    [id],
+  )[0];
+  return userDeleteWithNotice(
+    target,
+    {
+      connectorInstanceId: row?.i as string,
+      namespace: row?.n as string,
+      externalId: row?.e as string,
+    },
+    at,
+  );
+}
+
 /** By identity, across the instances the flows use: a purged source's row holds the hash (I04-R7). */
 const sourceId = (externalId: string) =>
   db
@@ -251,8 +272,8 @@ describe("delete.purge", () => {
           (name) => ({ name }),
         ),
       );
-      const tombstone = readTombstone(db, sourceId("k"));
-      expect(tombstone).toMatchObject({ version: 2, reason });
+      const tombstone = readTombstoneState(db, sourceId("k"));
+      expect(tombstone).toMatchObject({ coversVersion: 2, reason });
       // the product's clock, never the Connector's text
       expect(Number.isNaN(Date.parse(tombstone?.at ?? ""))).toBe(false);
       expect(tombstone?.at).not.toBe(CONNECTOR_AT);
@@ -283,7 +304,9 @@ describe("delete.propagate", () => {
       { kind: "completion_date" },
     ]);
     expect(count("items")).toBe(2);
-    expect(readTombstone(db, sourceId(wiki.external_id as string))?.reason).toBe("source-deleted");
+    expect(readTombstoneState(db, sourceId(wiki.external_id as string))?.reason).toBe(
+      "source-deleted",
+    );
   });
 
   it("keeps a fact another source also supports, with the Insight", async () => {

@@ -41,7 +41,7 @@ const FORBIDDEN_FILES = [
   "backend/src/test-effect.ts",
   "backend/src/job-kill.child.ts",
 ];
-const TEST_FILE = /\.(test|e2e|setup)\.[cm]?[jt]sx?$/;
+const TEST_FILE = /\.(test|e2e|setup|test-support)\.[cm]?[jt]sx?$/;
 /** Any `e2e/` folder: E2E code and its helpers, whatever their file names. */
 const E2E_FOLDER = /(^|\/)e2e\//;
 /** Reached through the composition root's static import; must not survive tree-shaking. */
