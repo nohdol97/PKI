@@ -12,6 +12,11 @@ export interface RunResult {
   lastInsertRowid: number;
 }
 
+/** How a transaction begins; one object so later options sit beside this one. */
+export interface TransactionOptions {
+  immediate?: boolean;
+}
+
 export interface SqlDriver {
   /** Runs one or more statements without parameters (schema scripts). */
   exec(sql: string): void;
@@ -19,8 +24,12 @@ export interface SqlDriver {
   run(sql: string, params?: readonly SqlValue[]): RunResult;
   /** Runs one statement and returns every row. */
   all(sql: string, params?: readonly SqlValue[]): SqlRow[];
-  /** Commits when `fn` returns, rolls back and rethrows when it throws. */
-  transaction<T>(fn: () => T): T;
+  /**
+   * Commits when `fn` returns, rolls back and rethrows when it throws. The write
+   * lock is taken at the first write unless `immediate` (I03-R4) takes it as the
+   * transaction begins (`BEGIN IMMEDIATE`). A nested call joins the outer one.
+   */
+  transaction<T>(fn: () => T, options?: TransactionOptions): T;
   close(): void;
 }
 

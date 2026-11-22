@@ -224,7 +224,7 @@ describe("update.recompute", () => {
     expect(provider.requests.length).toBe(calls + 1);
     expect(db.all("SELECT fence_version, status FROM jobs WHERE fence_version > 1")).toEqual([
       { fence_version: 2, status: "superseded" },
-      { fence_version: 3, status: "done" },
+      { fence_version: 3, status: "succeeded" },
     ]);
     expect(completionFacts().map((f) => [f.value, f.status])).toEqual([
       ["2026-12-10", "superseded"],
@@ -249,7 +249,7 @@ describe("update.recompute", () => {
     releaseHeldJobs(db, runner);
     await runner.wake();
     expect(db.all("SELECT status, reason FROM jobs WHERE fence_version = 2")).toEqual([
-      { status: "failed", reason: "provider-error" },
+      { status: "dead_letter", reason: "provider-error" },
     ]);
     expect(completionFacts()).toEqual([
       { id: late?.id, value: "2026-12-10", status: "superseded" },

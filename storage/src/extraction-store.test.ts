@@ -117,7 +117,7 @@ describe("extraction drops", () => {
     const job = leasedJob("a");
     expect(readExtractionDrops(db, job.id)).toBeUndefined();
     closeJob(db, job, {
-      status: "done",
+      status: "succeeded",
       write: () => recordExtractionDrops(db, job.id, { quotes: 2, other: 1 }),
     });
     expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 2, other: 1 });
@@ -138,13 +138,16 @@ describe("requeueHeldJobs", () => {
     const large = leasedJob("b");
     closeJob(db, large, { status: "held", reason: "source-too-large" });
     const failed = leasedJob("c");
-    closeJob(db, failed, { status: "failed", reason: "invalid-output" });
+    closeJob(db, failed, { status: "dead_letter", reason: "invalid-output" });
     const jobs = db.all("SELECT count(*) AS n FROM jobs")[0]?.n;
 
     expect(requeueHeldJobs(db, { keep: ["source-too-large"] })).toBe(1);
     expect(readJob(db, blocked.id)).toMatchObject({ status: "queued", reason: null });
     expect(readJob(db, large.id)).toMatchObject({ status: "held", reason: "source-too-large" });
-    expect(readJob(db, failed.id)).toMatchObject({ status: "failed", reason: "invalid-output" });
+    expect(readJob(db, failed.id)).toMatchObject({
+      status: "dead_letter",
+      reason: "invalid-output",
+    });
     expect(db.all("SELECT count(*) AS n FROM jobs")[0]?.n).toBe(jobs);
 
     // claimed again with a raised token, so the old holder still cannot call or close
