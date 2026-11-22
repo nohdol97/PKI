@@ -7,7 +7,7 @@ import { createFixtureConnector } from "./fixture-connector.ts";
 
 const file = resolve(import.meta.dirname, "../../../fixtures/test-connector.jsonl");
 
-connectorContract("test-fixtures", createFixtureConnector, { file });
+connectorContract("test-fixtures", createFixtureConnector, { config: { file } });
 
 describe("test-fixtures Connector", () => {
   it("emits records without the fixture-only malicious marker", async () => {

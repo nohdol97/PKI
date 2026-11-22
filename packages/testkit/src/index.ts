@@ -5,7 +5,22 @@ export { MemoryKnowledgeEngine } from "./memory-knowledge-engine.ts";
 export { ProposingKnowledgeEngine, type Proposer } from "./proposing-knowledge-engine.ts";
 export { MemoryVectorIndex } from "./memory-vector-index.ts";
 export { vectorIndexContract } from "./vector-index.contract.ts";
-export { connectorContract } from "./connector.contract.ts";
+export {
+  CONNECTOR_VIOLATION_CODES,
+  checkConnector,
+  connectorContract,
+  type ConnectorCheckCode,
+  type ConnectorScenario,
+  type ConnectorViolationCode,
+} from "./connector.contract.ts";
+export {
+  ScriptedConnector,
+  type ConnectorScript,
+  type ScriptCall,
+  type ScriptedConnectorOptions,
+  type ScriptEntry,
+  type ScriptFault,
+} from "./scripted-connector.ts";
 export {
   DERIVATIVE_CONTRACT_CASES,
   derivativeKindContract,
