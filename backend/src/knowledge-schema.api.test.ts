@@ -87,16 +87,14 @@ describe("graph.api (catalogue)", () => {
     expect(list.entries.map((e) => [e.name, e.place])).toEqual(
       catalogued.map((e) => [e.name, e.place]),
     );
-    // The database is migrated to edition 1: the edition-2 names have no row until S03-T04's migration, and
-    // the rules edition 2 widened differ from the stored ones until then.
-    for (const [i, e] of list.entries.entries()) {
-      const source = catalogued[i];
+    // The database is migrated to edition 2 (S03-T04's migration seeds the analytical names and widens the
+    // four rules): every name that is a type definition is usable and has the catalogue's rule.
+    for (const e of list.entries) {
       const stored = e.place === "type-definition";
-      const later = (source?.since ?? 1) > 1;
       expect({ name: e.name, usable: e.usable, ruleMatches: e.ruleMatches }).toEqual({
         name: e.name,
-        usable: stored ? !later : null,
-        ruleMatches: stored ? !later && source?.widenedAt === undefined : null,
+        usable: stored ? true : null,
+        ruleMatches: stored ? true : null,
       });
     }
     expect(entryOf(list, "Document")).toMatchObject({ place: "sources" });

@@ -4,6 +4,7 @@
 // is now the `date` kind's), and a relation whose ends do not fit its direction are dropped alone and
 // counted in `other`; a `one` value count does not stop a write. The seed is compared with the
 // prompt's lists. All data is synthetic.
+import { NOT_EXTRACTED_NAMES } from "@pki/contracts";
 import {
   createBroker,
   createUserActionLedger,
@@ -527,9 +528,39 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
         "Dependency",
         "BusinessRule",
         "OpenQuestion",
+        // S03-R2 (the analytical migration): S03-T07 puts these into the prompt and empties them
+        "Dataset",
+        "Metric",
+        "Join",
       ],
-      "fact-kind": ["identifier.email", "identifier.key", "statement"],
-      "relation-type": ["BELONGS_TO", "RESPONSIBLE_FOR", "RELATED_TO", "DECIDED", "CAUSED_BY"],
+      "fact-kind": [
+        "identifier.email",
+        "identifier.key",
+        "statement",
+        "dataset.role",
+        "dataset.grain",
+        "dataset.measure",
+        "dataset.dimension",
+        "dataset.time_dimension",
+        "metric.calculation",
+        "metric.unit",
+        "metric.version",
+        "metric.currency",
+        "metric.period",
+        "join.keys",
+        "join.cardinality",
+      ],
+      "relation-type": [
+        "BELONGS_TO",
+        "RESPONSIBLE_FOR",
+        "RELATED_TO",
+        "DECIDED",
+        "CAUSED_BY",
+        "MEASURED_ON",
+        "JOIN_LEFT",
+        "JOIN_RIGHT",
+        "USES_JOIN",
+      ],
     };
     const prompt = {
       "item-type": [...EXTRACT_ITEM_TYPES] as string[],
@@ -541,7 +572,10 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
       "relation-type": [...EXTRACT_RELATION_TYPES] as string[],
     };
     for (const kind of ["item-type", "fact-kind", "relation-type"] as const) {
-      const names = seed(kind).map((e) => e.name);
+      // `dataset.column` is seeded and never extracted (S03-R2): the catalogue says so
+      const names = seed(kind)
+        .map((e) => e.name)
+        .filter((name) => !NOT_EXTRACTED_NAMES.includes(name));
       expect([...names].sort(), kind).toEqual([...prompt[kind], ...notYet[kind]].sort());
       // a name is in the prompt or in the list, never both
       expect(

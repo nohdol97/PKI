@@ -502,6 +502,18 @@ export const ExecutionSettingsSchema = z.strictObject({ cliBackground: z.boolean
 export type ExecutionSettings = z.infer<typeof ExecutionSettingsSchema>;
 
 /**
+ * The analytical semantic's runtime settings (S03-R5, R6, site-setup.md): `profile` is the switch of the
+ * Dataset profile (default off: dark launch); `maxCells` bounds the size of a table the profile and the
+ * checks read (default 200,000). The most is provisional.
+ */
+export const MAX_ANALYTICAL_CELLS = 10_000_000;
+export const AnalyticalSettingsSchema = z.strictObject({
+  profile: z.boolean(),
+  maxCells: z.int().min(1).max(MAX_ANALYTICAL_CELLS),
+});
+export type AnalyticalSettings = z.infer<typeof AnalyticalSettingsSchema>;
+
+/**
  * The bound Providers and the user's default (V01-R9, C4): the Broker calls the
  * default and nothing else; null until the user picks one (nothing is picked for
  * them). Reading this list runs no process.
@@ -1321,6 +1333,17 @@ export const routes = {
     path: "/api/settings/execution",
     request: ExecutionSettingsSchema,
     response: ExecutionSettingsSchema,
+  },
+  analyticalSettings: {
+    method: "GET",
+    path: "/api/settings/analytical",
+    response: AnalyticalSettingsSchema,
+  },
+  setAnalyticalSettings: {
+    method: "POST",
+    path: "/api/settings/analytical",
+    request: AnalyticalSettingsSchema,
+    response: AnalyticalSettingsSchema,
   },
   providers: { method: "GET", path: "/api/providers", response: ProviderListResponseSchema },
   setDefaultProvider: {

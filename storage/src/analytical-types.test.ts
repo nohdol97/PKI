@@ -17,7 +17,7 @@ import {
   normalizeValue,
 } from "./analytical-types.ts";
 import { insertItem, saveFact, type KnowledgeAttributes } from "./knowledge.ts";
-import { migrate } from "./migrations.ts";
+import { migrate, migrations } from "./migrations.ts";
 import {
   applyUserOntologyChange,
   checkOntologyChange,
@@ -220,7 +220,7 @@ const add = (name: string, rule: ElementRule): OntologyChange => ({ op: "add", n
 let db: SqlDriver;
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
-  migrate(db);
+  migrate(db, migrations.slice(0, 23)); // S02's level: the analytical migration is what these checks judge
 });
 afterEach(() => db.close());
 

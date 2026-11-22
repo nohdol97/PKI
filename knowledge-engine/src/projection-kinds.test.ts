@@ -81,6 +81,7 @@ describe("the registered projection kinds (I04-R1)", () => {
       ["merge-candidate", "item", "canonical"],
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
+      ["analytical-check", "insight", "canonical"],
       [ENGINE_KIND, "projection", "projection"],
       [VECTOR_KIND, "projection", "projection"],
     ]);

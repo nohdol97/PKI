@@ -472,8 +472,10 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
   it("adds the knowledge, Insight and tombstone tables", () => {
     migrate(db);
     expect(tables().filter((t) => !t.startsWith("keyword_index_"))).toEqual([
+      "analytical_checks",
       "connector_instances",
       "consents",
+      "dataset_tables",
       "evidence",
       "fact_history",
       "facts",
