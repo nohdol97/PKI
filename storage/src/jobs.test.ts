@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
   closeJob,
+  CLOCK_REGRESSION_LEASES,
   DEFAULT_MAX_ATTEMPTS,
   heartbeatJob,
   isJobTransition,
@@ -747,16 +748,27 @@ describe("lease.reclaim (I03-R5)", () => {
     });
   });
 
-  it("reclaims a lease further ahead than one lease length (the wall clock went back)", () => {
+  it("reclaims a lease further ahead than two lease lengths (the wall clock went back)", () => {
+    expect(CLOCK_REGRESSION_LEASES).toBe(2);
     const job = registered();
     const held1 = claimed(at(10 * LEASE)); // until 11 * LEASE
-    // exactly one lease ahead is a fresh claim or heartbeat: kept
-    expect(reclaim(at(10 * LEASE))).toBe(0);
-    expect(reclaim(at(10 * LEASE - 1))).toBe(1);
+    // up to two leases ahead is kept: a fresh claim or heartbeat, or one written a moment later
+    expect(reclaim(at(9 * LEASE))).toBe(0);
+    expect(reclaim(at(9 * LEASE - 1))).toBe(1);
     expect(readJob(db, job.id)).toMatchObject({
       status: "queued",
       leaseToken: held1.leaseToken + 1,
     });
+  });
+
+  it("keeps a lease another backend's heartbeat extended a millisecond past now + lease (review RA-1)", () => {
+    // A claims at T0 and heartbeats at T0 + 30 001 ms; B claims with now = T0 + 30 000
+    const job = registered();
+    const a = claimed();
+    expect(heartbeatJob(db, a, { now: at(30_001), leaseMs: LEASE })).toBe(true);
+    expect(lease(at(30_000))).toBeUndefined();
+    expect(readJob(db, job.id)).toMatchObject({ status: "running", leaseToken: a.leaseToken });
+    expect(heartbeatJob(db, a, { now: at(30_002), leaseMs: LEASE })).toBe(true);
   });
 
   it("leaves the jobs the runner holds in memory to its heartbeat", () => {
@@ -916,5 +928,21 @@ describe("closeJob takes the write lock as it begins (review B-W1)", () => {
     expect(leaseNextJob(counted, { kinds: ["extract"], now: T0, leaseMs: LEASE })).toMatchObject({
       status: "running",
     });
+  });
+
+  it("lease.pick: reads a clock function once, after the lock is held (review RA-1)", () => {
+    const reads: number[] = [];
+    const clock = () => (reads.push(reads.length), T0);
+    other.exec("BEGIN IMMEDIATE; INSERT INTO settings (key, value) VALUES ('lock', 'x')");
+    expect(() => leaseNextJob(file, { kinds: ["extract"], now: clock, leaseMs: LEASE })).toThrow(
+      /locked|busy/i,
+    );
+    expect(reads).toEqual([]); // the lock was not held: the clock was never read
+    other.exec("COMMIT");
+    expect(leaseNextJob(file, { kinds: ["extract"], now: clock, leaseMs: LEASE })).toMatchObject({
+      status: "running",
+      leaseUntil: T0.getTime() + LEASE,
+    });
+    expect(reads).toEqual([0]);
   });
 });

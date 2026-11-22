@@ -39,6 +39,7 @@ export {
   type StoredSourceVersion,
 } from "./sources.ts";
 export {
+  CLOCK_REGRESSION_LEASES,
   closeJob,
   DEFAULT_MAX_ATTEMPTS,
   heartbeatJob,

@@ -271,7 +271,12 @@ export const DEFAULT_MAX_ATTEMPTS = 5;
 export interface LeaseRequest {
   /** Only jobs of these kinds are claimed (the kinds a handler exists for). */
   kinds: readonly string[];
-  now: Date;
+  /**
+   * The wall clock. A function is read once the write lock is held, so a lease
+   * another backend extended while this one waited for the lock is not seen ahead
+   * of a `now` taken before (review RA-1).
+   */
+  now: Date | (() => Date);
   leaseMs: number;
   /** The runner's ID, new every process start (I03-R4). */
   owner?: string;
@@ -282,10 +287,18 @@ export interface LeaseRequest {
 }
 
 const placeholders = (values: readonly unknown[]) => values.map(() => "?").join(", ");
+const readNow = (now: LeaseRequest["now"]): Date => (typeof now === "function" ? now() : now);
 
 /**
- * Reclaims the leases of `kinds` that ran out, or that end further ahead than one
- * lease length (the wall clock went back), except the jobs the runner holds
+ * A lease ending further ahead than this many lease lengths is a wall clock that
+ * went back (I03-R5 ②). Provisional: two, not one, so a heartbeat written a moment
+ * later by another backend (I03-A3) is not taken for a regression (review RA-1).
+ */
+export const CLOCK_REGRESSION_LEASES = 2;
+
+/**
+ * Reclaims the leases of `kinds` that ran out, or that end further ahead than
+ * CLOCK_REGRESSION_LEASES lease lengths (the wall clock went back), except the jobs the runner holds
  * (I03-R5). Each reclaim raises the lease token, so the old holder's heartbeat,
  * Broker calls and result write fail. A job with a cancel request becomes
  * cancelled, one with attempts left queued, one out of attempts retry with the
@@ -295,15 +308,16 @@ const placeholders = (values: readonly unknown[]) => values.map(() => "?").join(
  */
 export function reclaimLeases(db: SqlDriver, request: Omit<LeaseRequest, "owner">): number {
   if (request.kinds.length === 0) return 0;
-  const now = request.now.getTime();
   const holding = request.holding ?? [];
   const max = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const where = `kind IN (${placeholders(request.kinds)}) AND status = 'running'
       AND (lease_until IS NULL OR lease_until <= ? OR lease_until > ?)
       AND id NOT IN (${placeholders(holding)})`;
-  const params: SqlValue[] = [...request.kinds, now, now + request.leaseMs, ...holding];
   return db.transaction(
     () => {
+      const now = readNow(request.now).getTime(); // under the write lock
+      const ahead = now + CLOCK_REGRESSION_LEASES * request.leaseMs;
+      const params: SqlValue[] = [...request.kinds, now, ahead, ...holding];
       let reclaimed = 0;
       // in this order: a cancel request first, then the attempts left
       const branches: [JobStatus, string, string][] = [
@@ -361,18 +375,20 @@ export function releaseRetryJobs(
  * jobs released (releaseRetryJobs); queued jobs with a cancel request are closed
  * cancelled, never claimed; then the queued job with the lowest ID whose run-at
  * time came and that has no cancel request is claimed: token and attempts raised,
- * lease end, heartbeat and owner written. Priority and fairness order are T05's.
+ * lease end, heartbeat and owner written. A `now` function is read once, after the
+ * lock is held. Priority and fairness order are T05's.
  */
 export function leaseNextJob(db: SqlDriver, request: LeaseRequest): StoredJob | undefined {
   if (request.kinds.length === 0) return undefined;
-  const now = request.now.getTime();
   const kinds = `kind IN (${placeholders(request.kinds)})`;
   // cancel-requested jobs were closed just before, in the same transaction
   const due = `status = 'queued' AND run_after <= ?`;
   return db.transaction(
     () => {
-      reclaimLeases(db, request);
-      releaseRetryJobs(db, request);
+      const at = readNow(request.now); // under the write lock (BEGIN IMMEDIATE)
+      const now = at.getTime();
+      reclaimLeases(db, { ...request, now: at });
+      releaseRetryJobs(db, { ...request, now: at });
       const cancel = moving("cancelled", now);
       db.run(
         `UPDATE jobs SET ${cancel.set}, reason = NULL

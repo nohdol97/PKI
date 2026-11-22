@@ -98,14 +98,17 @@ describe("folding a production bundle: the job runner's test options (I03-R24)",
   }
   const TEST_JOB_MARKERS = ["testRunnerSettings", "createTestEffectHandler", "test_effects"];
 
-  it("leaves out the test lease and test kinds in a production bundle, keeping the runner", async () => {
-    const { code } = await bundled(bootEntry(), "production");
-    for (const marker of [...TEST_PICK_MARKERS, ...TEST_JOB_MARKERS]) {
-      expect(code, marker).not.toContain(marker);
-    }
-    // live: the runner and its reclaim are there
-    expect(code).toContain("lease-expired");
-  });
+  it.each(["production", "development"])(
+    "leaves out the test lease and test kinds in a %s bundle, keeping the runner",
+    async (kind) => {
+      const { code } = await bundled(bootEntry(), kind);
+      for (const marker of [...TEST_PICK_MARKERS, ...TEST_JOB_MARKERS]) {
+        expect(code, marker).not.toContain(marker);
+      }
+      // live: the runner and its reclaim are there
+      expect(code).toContain("lease-expired");
+    },
+  );
 
   it("keeps the runner's test options in a test bundle", async () => {
     const { code } = await bundled(bootEntry(), "test");

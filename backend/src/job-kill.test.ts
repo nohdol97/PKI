@@ -4,7 +4,9 @@
 // group; the test kills it where the run log shows the paused job ran, and checks
 // that nothing of the group is left. The run log shows how often a job ran, the
 // effect rows how often its result stayed: C1 holds only if a job ran twice and
-// its effect stayed once. Not run on Windows (S19).
+// its effect stayed once. POSIX only: the rig kills and probes a process group
+// (`process.kill(-pid)`), which Windows does not have, so there it is skipped
+// with that reason until S19/R04 adapts it; SIGKILL on Windows is unverified (S19).
 import { readJob, registerJob, type SqlDriver } from "@pki/storage";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -12,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
-import { readRunLog, readTestEffects, TEST_EFFECT_JOB_KIND } from "./test-effect.ts";
+import { readRunLog, readTestEffects, TEST_EFFECT_JOB_KIND, writePauseLog } from "./test-effect.ts";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const VITEST = join(ROOT, "node_modules", "vitest", "vitest.mjs");
@@ -70,7 +72,18 @@ interface Backend {
 }
 
 /** Starts the backend; `pause` lists the targets whose test-effect jobs wait to be killed. */
-async function start(pause: readonly string[] = []): Promise<Backend> {
+/** Skipped on Windows: the rig needs POSIX process groups (S19, R04 adapt it). */
+const posixOnly = describe.skipIf(process.platform === "win32");
+
+/**
+ * Starts the backend; `pause` lists the targets whose test-effect jobs wait to be
+ * killed before their result, `pauseInWrite` those that stop inside the result
+ * transaction.
+ */
+async function start(
+  pause: readonly string[] = [],
+  pauseInWrite: readonly string[] = [],
+): Promise<Backend> {
   const ready = join(dir, `ready-${live.length}`);
   const child = spawn(process.execPath, [VITEST, "run", "--config", CHILD_CONFIG, "--root", ROOT], {
     cwd: ROOT,
@@ -83,6 +96,7 @@ async function start(pause: readonly string[] = []): Promise<Backend> {
       PKI_KILL_DATA_DIR: dataDir,
       PKI_KILL_RUN_LOG: runLog,
       PKI_KILL_PAUSE: pause.join(","),
+      PKI_KILL_PAUSE_WRITE: pauseInWrite.join(","),
       PKI_KILL_LEASE_MS: String(LEASE_MS),
       PKI_KILL_READY: ready,
     },
@@ -141,7 +155,7 @@ function register(...targets: string[]): number[] {
 const statuses = (ids: readonly number[]) =>
   withDb((db) => ids.map((id) => readJob(db, id)?.status));
 
-describe("kill.resume (I03-R24, C1)", () => {
+posixOnly("kill.resume (I03-R24, C1)", () => {
   it("finishes three jobs after a kill in the middle of one: three effects, the killed job ran twice", async () => {
     const [a, b, c] = register("a", "b", "c") as [number, number, number];
     const first = await start(["b"]);
@@ -165,7 +179,7 @@ describe("kill.resume (I03-R24, C1)", () => {
   }, 90_000);
 });
 
-describe("effect.once (I03-R6, R24)", () => {
+posixOnly("effect.once (I03-R6, R24)", () => {
   it("does not run again a job killed right after its result was written", async () => {
     // the next job runs only once x's result committed: one job at a time
     const [x, next] = register("x", "next") as [number, number];
@@ -183,7 +197,28 @@ describe("effect.once (I03-R6, R24)", () => {
   }, 90_000);
 });
 
-describe("poison (I03-R5, R11, R24)", () => {
+posixOnly("effect.rollback (I03-R6, R24; review RA-2)", () => {
+  it("rolls the effect back with the result transaction a kill interrupts, and writes it once on the rerun", async () => {
+    const [w] = register("w") as [number];
+    const pauses = writePauseLog(runLog);
+    const first = await start([], ["w"]);
+    // the effect row is written, the transaction not committed
+    await until("job w to stop inside its result write", () => existsSync(pauses), first.child);
+    await kill(first);
+
+    // the next open rolls the interrupted transaction back: no effect, the job still running
+    expect(withDb(readTestEffects).get(w)).toBeUndefined();
+    expect(withDb((db) => readJob(db, w))).toMatchObject({ status: "running", attempts: 1 });
+
+    const second = await start();
+    await until("job w to finish", () => statuses([w])[0] === "succeeded", second.child);
+    await kill(second);
+    expect(withDb(readTestEffects).get(w)).toBe(1);
+    expect(runsOf(w).map((r) => r.attempt)).toEqual([1, 2]);
+  }, 90_000);
+});
+
+posixOnly("poison (I03-R5, R11, R24)", () => {
   it("gives up a job that kills the backend every run after the fifth reclaim, and finishes the rest", async () => {
     const [poison, o1, o2] = register("poison", "o1", "o2") as [number, number, number];
     for (let run = 1; run <= 5; run++) {

@@ -17,7 +17,9 @@ const setting = (name: string): string => {
 
 it("runs the backend until killed", async () => {
   const runLog = setting("PKI_KILL_RUN_LOG");
-  const pause = setting("PKI_KILL_PAUSE").split(",").filter(Boolean);
+  const list = (name: string) => setting(name).split(",").filter(Boolean);
+  const pause = list("PKI_KILL_PAUSE");
+  const pauseInWrite = list("PKI_KILL_PAUSE_WRITE");
   await bootBackend({
     dataDir: setting("PKI_KILL_DATA_DIR"),
     token: "k".repeat(43),
@@ -28,7 +30,7 @@ it("runs the backend until killed", async () => {
         leaseMs: Number(setting("PKI_KILL_LEASE_MS")),
         pollMs: 100,
         handlers: (db) => ({
-          [TEST_EFFECT_JOB_KIND]: createTestEffectHandler(db, { runLog, pause }),
+          [TEST_EFFECT_JOB_KIND]: createTestEffectHandler(db, { runLog, pause, pauseInWrite }),
         }),
       },
     },

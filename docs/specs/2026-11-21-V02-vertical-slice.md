@@ -213,7 +213,7 @@ flowchart LR
 7. **tombstone은 원본 행을 가리킨다.** 지워도 `sources` 행(식별자만)은 남고, tombstone의 키가 그 행이다. `writeTombstone`은 더 높은 version으로만 옮긴다. 그 원본의 실제 최신 version을 넘기는 것은 T08의 몫이다.
 8. **근거의 위치는 저장할 때 검사한다.** `addEvidence`는 저장된 본문에서 코드 포인트로 센 `[시작, 끝)`이 인용문과 정확히 같을 때만 기록한다(SQLite의 `substr`·`length`가 TEXT를 글자, 곧 코드 포인트로 센다). 본문에 U+0000이 있으면 그 뒤의 위치는 기록할 수 없다(`length`가 거기서 멈춘다). 인용문으로 위치를 계산하는 것은 T05다.
 
-**T03이 넘기는 것**. T03이 정한 것(잠정 표시가 없으면 확정)과 T04·T05·T07이 이어받는 결합 지점이다. 바꿀 때는 이 절과 `storage/src/jobs.test.ts`, `backend/src/job-runner.test.ts`를 함께 고친다. **I03-T01이 이 절의 이름을 바꿨다**: 상태 `leased`·`done`·`failed`는 `running`·`succeeded`·`dead_letter`이고, Broker 출처는 `{jobId, leaseToken}`이며 Broker는 `running`과 그 토큰을 본다(아래 1·3·5·6항과 "T05가 넘기는 것" 2항의 옛 이름은 그 이름으로 읽는다. 현재 모양은 [I03 spec](2026-11-21-I03-persistent-queue.md)의 "I03-T01이 넘기는 것").
+**T03이 넘기는 것**. T03이 정한 것(잠정 표시가 없으면 확정)과 T04·T05·T07이 이어받는 결합 지점이다. 바꿀 때는 이 절과 `storage/src/jobs.test.ts`, `backend/src/job-runner.test.ts`를 함께 고친다. **I03-T01이 이 절의 이름을 바꿨다**: 상태 `leased`·`done`·`failed`는 `running`·`succeeded`·`dead_letter`이고, Broker 출처는 `{jobId, leaseToken}`이며 Broker는 `running`과 그 토큰을 본다(아래 1·3·5·6항과 "T05가 넘기는 것" 2항의 옛 이름은 그 이름으로 읽는다. 현재 모양은 [I03 spec](2026-11-21-I03-persistent-queue.md)의 "I03-T01이 넘기는 것"). **I03-T03이 8항과 3항을 대신한다**: 임대는 2분이고 4분의 1마다 heartbeat로 늘리며, 시도 상한(기본 5회)을 넘긴 작업은 `dead_letter`가 되고, 처리기는 두 번째 인자 `{ signal }`(임대를 잃으면 끊김)을 받는다(I03 spec "I03-T03이 넘기는 것" 2·4·6항).
 
 1. **작업 상태.** `queued` → `leased` → `done`·`superseded`·`held`(보류)·`failed`. 임대 기한이 지난 `leased`는 다시 집히고, 닫힌 작업은 다시 집히지 않는다. 보류와 실패의 이유는 스키마 v6에서 더한 `jobs.reason`에 **코드**로만 남긴다(Provider 문구나 본문은 넣지 않는다). `closeJob`은 코드 모양(`/^[a-z][a-z0-9-]{0,63}$/`, `isReasonCode`)이 아닌 이유를 `RangeError`로 거부하고, 실행기는 처리기가 그런 이유를 돌려주면 `failed`(`invalid-reason`)로 닫는다. 스키마 v6은 임대 토큰 `jobs.lease_token`도 더한다(집을 때마다 1 오름).
 2. **T04: 등록.** `registerJob(db, {kind, sourceId, fenceVersion})`은 부르는 쪽의 트랜잭션 안에서 작업을 `queued`로 넣는다. 원본 version 저장과 같은 트랜잭션에서 부른다(R4). 충돌이면 `{registered: false, existing}`로 이미 있는 작업을 돌려주며 성공으로 치지 않는다. 등록 뒤 실행기를 깨우는 것(`runner.wake()`)은 T04의 몫이다.
@@ -494,3 +494,4 @@ test double의 결과를 실제 Provider의 결과로 적지 않는다. R07(#37)
 | 2026-11-22 | "T10이 넘기는 것" 5의 T15 몫에 V01-T15가 닫았다는 표시와 위치(빌드 검사, `artifact.contents`) | 작업 분해(T10이 넘기는 것 5) | V01-T15 독립 검토 B-F7 |
 | 2026-11-22 | "T07이 넘기는 것" 1, "T08이 넘기는 것" 1·6에 I04-T03이 바꾼 것을 적음: 전파와 소거가 등록부의 정본 종류로, 손 전파 함수 삭제, 소거가 작업을 닫음 | 작업 분해(T07·T08이 넘기는 것) | I04-T03 구현 |
 | 2026-11-22 | I04-T03 검토 반영: "T07이 넘기는 것" 머리·2·6, "T08이 넘기는 것" 머리·11의 지운 함수·테스트 파일 가리킴에 I04-T03이 바꾼 것을 적음 | 작업 분해(T07·T08이 넘기는 것) | I04-T03 검토 B-F3, A-L3 |
+| 2026-11-22 | "T03이 넘기는 것" 머리말에 I03-T03이 8항(임대 2분, heartbeat, 시도 상한)과 3항(처리기 두 번째 인자)을 대신한다는 문장 | 작업 분해(T03이 넘기는 것) | I03-T03 독립 검토 B-F2 |

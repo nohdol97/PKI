@@ -527,6 +527,24 @@ describe("lease.token (I03-R4..R6): two runs contend for one job", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("reads its clock for a claim only once the write lock is held (review RA-1)", async () => {
+    db.exec("PRAGMA busy_timeout = 0");
+    imported("a");
+    const other = reopen();
+    let reads = 0;
+    const r = createJobRunner({
+      db,
+      handlers: { extract: async () => ({ status: "succeeded", write: () => {} }) },
+      now: () => (reads++, clock),
+      testBuild: { leaseMs: LEASE },
+    });
+    other.exec("BEGIN IMMEDIATE"); // another backend holds the lock
+    await expect(r.runOnce()).rejects.toMatchObject({ code: "SQLITE_BUSY" });
+    expect(reads).toBe(0);
+    other.exec("ROLLBACK");
+    expect(await r.runOnce()).toMatchObject({ status: "succeeded" });
+  });
+
   it("names a new runner ID per runner as the lease owner", async () => {
     const first = imported("a");
     const second = imported("b");

@@ -131,7 +131,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
 
   // one job at a time: no job is held while claiming, so none is passed as holding
   async function step(): Promise<JobRun | undefined> {
-    const job = leaseNextJob(db, { kinds, now: now(), leaseMs, owner });
+    const job = leaseNextJob(db, { kinds, now, leaseMs, owner }); // read under the lock
     return job && run(job);
   }
 
