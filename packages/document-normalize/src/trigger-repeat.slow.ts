@@ -26,20 +26,26 @@ interface Ended {
   code: number | null;
   signal: NodeJS.Signals | null;
   report: Record<string, unknown> | undefined;
+  /** V8's own abort text on the process's standard error: `FATAL ERROR: ... heap limit ...`. */
+  fatal: string;
 }
 
-function runOnce(mode: "isolated" | "in-process"): Promise<Ended> {
+function runOnce(mode: "isolated" | "in-process", heapMb = HEAP_MB): Promise<Ended> {
   return new Promise((resolve) => {
-    const child = fork(CHILD, [mode, String(HEAP_MB)], {
+    const child = fork(CHILD, [mode, String(heapMb)], {
       execArgv: [],
       env: { PATH: process.env.PATH ?? "" },
-      stdio: ["ignore", "ignore", "ignore", "ipc"],
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    let fatal = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      fatal ||= /FATAL ERROR[^\n]*/.exec(chunk.toString())?.[0] ?? "";
     });
     let report: Record<string, unknown> | undefined;
     child.on("message", (m) => (report = m as Record<string, unknown>));
     child.once("exit", (code, signal) => {
-      note({ mode, code, signal, report, at: new Date().toISOString() });
-      resolve({ code, signal, report });
+      note({ mode, code, signal, fatal, report, at: new Date().toISOString() });
+      resolve({ code, signal, report, fatal });
     });
   });
 }
@@ -59,12 +65,20 @@ describe("I02B-C49: the trigger input, 30 times at maxHeapMb 512", () => {
     ).length;
     const unexplained = withHost.filter((e) => e.report?.unexplainedDeath === true).length;
     const without = await repeat("in-process");
-    const aborted = without.filter((e) => e.signal !== null || e.code !== 0).length;
+    // aborted: the process ended without a word, by a signal or by V8's own fatal heap abort; a process
+    // that ended some other way (a crash of the test's own script) is counted apart and is not an abort
+    const aborted = without.filter(
+      (e) => e.report === undefined && (e.signal !== null || e.fatal !== ""),
+    ).length;
+    const otherEnds = without.filter(
+      (e) => e.report === undefined && e.signal === null && e.fatal === "",
+    ).length;
     const finished = without.filter((e) => e.report?.first === "ok").length;
     const summary =
       `C49 at ${new Date().toISOString()}: with the host: backend alive ${lived}/${RUNS}, ` +
       `resource-exceeded and the next file normalized ${mapped}/${RUNS} (host aborted without a word in ${unexplained}); ` +
-      `without the boundary: process aborted ${aborted}/${RUNS}, worker finished the file ${finished}/${RUNS}, ` +
+      `without the boundary: process aborted ${aborted}/${RUNS} (other ends without a word: ${otherEnds}), worker finished the file ${finished}/${RUNS}, ` +
+      `fatal lines ${JSON.stringify([...new Set(without.map((e) => e.fatal).filter(Boolean))])}, ` +
       `signals ${JSON.stringify(without.map((e) => e.signal).filter((s) => s !== null))}`;
     console.log(summary);
     note({ summary });
@@ -72,5 +86,12 @@ describe("I02B-C49: the trigger input, 30 times at maxHeapMb 512", () => {
     expect(mapped, summary).toBe(RUNS);
     if (aborted === 0) context.skip(`판정 불가: ${summary}`);
     expect(aborted, summary).toBeGreaterThanOrEqual(1);
+  });
+
+  it("the no-boundary script reports what its worker did: with a heap large enough the file is normalized", async () => {
+    // guards the variant against counting its own script's crash as an abort
+    const end = await runOnce("in-process", 2_048);
+    expect(end.report, JSON.stringify(end)).toEqual({ first: "ok" });
+    expect(end.code).toBe(0);
   });
 });

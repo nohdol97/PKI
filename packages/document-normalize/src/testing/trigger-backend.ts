@@ -39,9 +39,10 @@ async function inProcess() {
     resourceLimits: { maxOldGenerationSizeMb: maxHeapMb },
   });
   const outcome = await new Promise<string>((resolve) => {
-    worker.once("message", (m: { result: { ok: boolean } }) =>
-      resolve(m.result.ok ? "ok" : "error"),
-    );
+    // the worker says `up` first; the result is the message after the job
+    worker.on("message", (m: { type: string; result?: { ok: boolean } }) => {
+      if (m.type === "result") resolve(m.result?.ok ? "ok" : "error");
+    });
     worker.once("error", (e: Error & { code?: string }) => resolve(e.code ?? e.name));
     worker.once("exit", () => resolve("exit"));
     worker.postMessage({ type: "job", id: 1, bytes: trigger, name: "trigger.xlsx" });
