@@ -92,7 +92,7 @@ it("seeds the test Connector from --fixtures and reports its data directory", as
     const sync = await send(port, "/api/connectors/sync", headers, "POST", {
       connectorId: "fixtures",
     });
-    expect(sync.body).toEqual({ connectorId: "fixtures", received: 1, created: 1 });
+    expect(sync.body).toMatchObject({ connectorId: "fixtures", received: 1, created: 1 });
     expect((await send(port, "/api/sources", headers)).body).toMatchObject({
       sources: [{ externalId: "s1", title: "합성 씨앗" }],
     });

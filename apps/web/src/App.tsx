@@ -20,6 +20,7 @@ import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } f
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { BACKGROUND_EXECUTION_TEXT } from "./background-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
+import { connectorNote } from "./connector-text.ts";
 import { deleteConfirmText, deletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
@@ -261,6 +262,7 @@ function Sources({ api }: { api: ApiClient }) {
               <th scope="row">{c.id}</th>
               <td>{c.kind}</td>
               <td>{CONNECTOR_STATE[c.state]}</td>
+              <td>{connectorNote(c)}</td>
               <td>
                 {c.state === "ready" && (
                   <button type="button" aria-label={`${c.id} 동기화`} onClick={() => sync(c.id)}>

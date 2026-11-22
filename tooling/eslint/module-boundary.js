@@ -57,6 +57,19 @@ function inE2eDir(path) {
   return root !== undefined && relative(root, path).split(sep)[0] === E2E_DIR;
 }
 const EXEMPT_PACKAGES = new Set(["@pki/testkit"]);
+/**
+ * @pki/connector-sdk is a pure library (I01-R24): outside the adapter boundary, importable
+ * by any package that declares it, and itself importing only these (I01-R28's list).
+ */
+const SDK_PACKAGE = "@pki/connector-sdk";
+const SDK_ALLOWED_IMPORTS = new Set([
+  "@pki/contracts",
+  "zod",
+  "node:crypto",
+  "node:fs",
+  "node:fs/promises",
+  "node:path",
+]);
 const ADAPTER_INTERFACES = new Set([
   "Connector",
   "ConnectorFactory",
@@ -205,6 +218,8 @@ const moduleBoundary = {
         "'{{source}}' is an adapter implementation entry; only the composition root (backend/src/composition.ts) may import it.",
       testModuleImport:
         "'{{source}}' is a test module; product code cannot import it (it may reach adapter implementations).",
+      sdkImportNotAllowed:
+        "'{{source}}' is not on @pki/connector-sdk's import list (@pki/contracts, zod, node:crypto, node:fs, node:fs/promises, node:path); the SDK is a pure library.",
       adapterOutsideAdapters:
         "'{{name}}' is implemented outside src/adapters/; adapter implementations live there, behind the composition root.",
     },
@@ -247,6 +262,10 @@ const moduleBoundary = {
         ) {
           context.report({ node, messageId: "adapterImport", data: { source } });
         }
+        return;
+      }
+      if (ownName === SDK_PACKAGE && !isTest && !SDK_ALLOWED_IMPORTS.has(source)) {
+        context.report({ node, messageId: "sdkImportNotAllowed", data: { source } });
         return;
       }
       if (!source.startsWith(SCOPE)) return;

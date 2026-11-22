@@ -391,3 +391,69 @@ describe("module-boundary rule", () => {
     ],
   });
 });
+
+// I01-R24, T03: @pki/connector-sdk is a pure library outside the adapter boundary. Any
+// package may import it by name (when it declares it); it imports only @pki/contracts,
+// zod and the node: modules the Connector paths may use (I01-R28's allow-list).
+describe("the @pki/connector-sdk allow-list", () => {
+  const sdkFile = "packages/connector-sdk/src/parse.ts";
+  const ids = async (code: string, file = sdkFile) =>
+    (await lintWithRepoConfig(code, file)).map((m) => m.messageId);
+
+  it("lets the package import @pki/contracts, zod, its own files and the node: modules of the list", async () => {
+    for (const specifier of [
+      "@pki/contracts",
+      "zod",
+      "node:crypto",
+      "node:fs",
+      "node:fs/promises",
+      "node:path",
+      "./sync-outcomes.ts",
+    ]) {
+      expect(await ids(`import * as x from "${specifier}";\nexport { x };\n`), specifier).toEqual(
+        [],
+      );
+    }
+  });
+
+  it("refuses any other import in the package's product files: a node: module outside the list, a bare package, another workspace package", async () => {
+    for (const specifier of ["node:https", "node:net", "node:child_process", "ws", "vitest"]) {
+      expect(await ids(`import * as x from "${specifier}";\nexport { x };\n`), specifier).toEqual([
+        "sdkImportNotAllowed",
+      ]);
+    }
+    expect(await ids('import * as x from "@pki/storage";\nexport { x };\n')).toContain(
+      "sdkImportNotAllowed",
+    );
+    expect(await ids('export const m = () => import("node:https");\n')).toEqual([
+      "sdkImportNotAllowed",
+    ]);
+  });
+
+  it("lets the package's test files also take vitest and @pki/testkit", async () => {
+    expect(
+      await ids(
+        'import { it } from "vitest";\nexport { it };\n',
+        "packages/connector-sdk/src/parse.test.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("lets other packages' files take other modules: the allow-list binds the SDK only", async () => {
+    expect(
+      await ids('import * as x from "node:https";\nexport { x };\n', "backend/src/anything.ts"),
+    ).toEqual([]);
+  });
+
+  it("depends on @pki/contracts alone, and a package that does not declare it cannot import it by name", async () => {
+    const manifest = JSON.parse(
+      readFileSync(join(repoRoot, "packages/connector-sdk/package.json"), "utf8"),
+    );
+    expect(manifest.name).toBe("@pki/connector-sdk");
+    expect(Object.keys(manifest.dependencies)).toEqual(["@pki/contracts"]);
+    // storage does not declare it: the existing dependency rule speaks, not a new one
+    expect(
+      await ids('import * as x from "@pki/connector-sdk";\nexport { x };\n', "storage/src/x.ts"),
+    ).toEqual(["undeclaredDependency"]);
+  });
+});

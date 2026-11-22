@@ -325,12 +325,15 @@ describe("propagation atomicity", () => {
   it("rolls the propagation back with a page that fails after storing the new version", async () => {
     const fact = await evidenced();
     const before = counts();
-    // the edit of "b" is stored and propagated first; the same revision of "other"
-    // with other content is then refused, and without onRefused the whole page fails
-    page = [upsert("b", "B API 12-03", 2), upsert("other", "older", 5)];
-    await expect(syncConnector(db, "s", "scripted", connector, { rescan: true })).rejects.toThrow(
-      /revision-not-newer/,
-    );
+    // the edit of "b" is stored and propagated first; a new source the store cannot take
+    // then fails the whole page
+    db.exec(`CREATE TRIGGER refuse_fresh BEFORE INSERT ON sources WHEN new.external_id = 'fresh'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END`);
+    page = [upsert("b", "B API 12-03", 2), upsert("fresh", "older", 5)];
+    expect(await syncConnector(db, "s", "scripted", connector, { rescan: true })).toMatchObject({
+      stopped: "storage-failed",
+      created: 0,
+    });
     expect(db.all("SELECT status FROM facts WHERE id = ?", [fact])).toEqual([
       { status: "candidate" },
     ]);
@@ -345,9 +348,14 @@ describe("propagation atomicity", () => {
     db.exec(`CREATE TEMP TRIGGER block_supersede BEFORE UPDATE OF status ON facts
              BEGIN SELECT RAISE(ABORT, 'propagation blocked'); END`);
     page = [upsert("b", "B API 12-03", 2)];
-    await expect(syncConnector(db, "s", "scripted", connector, { rescan: true })).rejects.toThrow(
-      /propagation blocked/,
-    );
+    const failures: unknown[] = [];
+    expect(
+      await syncConnector(db, "s", "scripted", connector, {
+        rescan: true,
+        onError: (error) => failures.push(error),
+      }),
+    ).toMatchObject({ stopped: "storage-failed" });
+    expect(String(failures[0])).toMatch(/propagation blocked/);
     db.exec("DROP TRIGGER block_supersede");
     expect(db.all("SELECT status FROM facts WHERE id = ?", [fact])).toEqual([
       { status: "candidate" },

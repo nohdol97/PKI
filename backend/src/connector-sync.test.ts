@@ -67,10 +67,11 @@ describe("sync of the test Connector", () => {
       fixtureConnectorKinds(),
     );
     const first = await manager.sync("fixtures");
-    expect(first).toEqual({ connectorId: "fixtures", received: 5, created: 5 });
+    expect(first).toMatchObject({ connectorId: "fixtures", received: 5, created: 5 });
+    expect(first).not.toHaveProperty("stopped");
     expect(counts()).toEqual([5, 5]);
 
-    expect(await manager.sync("fixtures")).toEqual({
+    expect(await manager.sync("fixtures")).toMatchObject({
       connectorId: "fixtures",
       received: 0,
       created: 0,
@@ -86,10 +87,11 @@ describe("sync of the test Connector", () => {
     );
     await manager.sync("fixtures");
     db.run("UPDATE connector_instances SET cursor = NULL WHERE id = 'fixtures'");
-    expect(await manager.sync("fixtures")).toEqual({
+    expect(await manager.sync("fixtures")).toMatchObject({
       connectorId: "fixtures",
       received: 5,
       created: 0,
+      unchanged: 5,
     });
     expect(counts()).toEqual([5, 5]);
   });
@@ -135,7 +137,7 @@ describe("cursor after save", () => {
         ? { changes: [upsert("a")], nextCursor: "1", hasMore: true }
         : { changes: [upsert("b")], nextCursor: "2", hasMore: false },
     );
-    expect(await syncConnector(db, "s", "scripted", connector)).toEqual({
+    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
       received: 2,
       created: 2,
     });
@@ -145,15 +147,34 @@ describe("cursor after save", () => {
   it("keeps the old cursor and saves nothing when a page cannot be stored", async () => {
     const page = (changes: ChangeSet["changes"], nextCursor: string) =>
       scripted(() => ({ changes, nextCursor, hasMore: false }));
-    const revised = (revision: number, body: string) => upsert("r", body, revision);
-    await syncConnector(db, "s", "scripted", page([revised(2, "b")], "1"));
+    await syncConnector(db, "s", "scripted", page([upsert("r", "b", 2)], "1"));
     const jobs = db.all("SELECT count(*) AS n FROM jobs");
-    await expect(
-      syncConnector(db, "s", "scripted", page([upsert("a"), revised(2, "other")], "9")),
-    ).rejects.toThrow(/revision-not-newer/);
+    db.exec(`CREATE TRIGGER refuse_x BEFORE INSERT ON sources WHEN new.external_id = 'x'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END`);
+    expect(
+      await syncConnector(db, "s", "scripted", page([upsert("a"), upsert("x")], "9")),
+    ).toMatchObject({ stopped: "storage-failed", received: 0, created: 0 });
     expect(readCursor(db, "s")).toBe("1");
     expect(counts()).toEqual([1, 1]);
     expect(db.all("SELECT count(*) AS n FROM jobs")).toEqual(jobs);
+  });
+
+  it("refuses a record that repeats a revision with other content alone, and stores the page's rest (I01-R14)", async () => {
+    const page = (changes: ChangeSet["changes"], nextCursor: string) =>
+      scripted(() => ({ changes, nextCursor, hasMore: false }));
+    await syncConnector(db, "s", "scripted", page([upsert("r", "b", 2)], "1"));
+    const result = await syncConnector(
+      db,
+      "s",
+      "scripted",
+      page([upsert("a"), upsert("r", "other", 2)], "9"),
+    );
+    expect(result).toMatchObject({
+      created: 1,
+      rejected: [{ at: "change:1", code: "revision-conflict" }],
+    });
+    expect(readCursor(db, "s")).toBe("9");
+    expect(counts()).toEqual([2, 2]);
   });
 
   it("skips an upsert of a deleted source and commits the rest of the page with its cursor (review A-M1)", async () => {
@@ -180,7 +201,7 @@ describe("cursor after save", () => {
           refused.push([change.kind === "upsert" ? change.record.externalId : "?", reason]),
       },
     );
-    expect(result).toEqual({ received: 2, created: 1 });
+    expect(result).toMatchObject({ received: 2, created: 1, blocked: 1 });
     expect(refused).toEqual([["x", "tombstoned"]]);
     expect(readCursor(db, "s")).toBe("9");
     expect(
@@ -189,7 +210,7 @@ describe("cursor after save", () => {
     // without onRefused (the Connector manager's sync) the page commits the same way
     expect(
       await syncConnector(db, "s", "scripted", page([upsert("x", "once more"), upsert("b")], "10")),
-    ).toEqual({ received: 2, created: 1 });
+    ).toMatchObject({ received: 2, created: 1, blocked: 1 });
     expect(readCursor(db, "s")).toBe("10");
   });
 
@@ -209,9 +230,10 @@ describe("cursor after save", () => {
               hasMore: false,
             },
       );
-      expect(await syncConnector(db, "s", "scripted", connector)).toEqual({
+      expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
         received: 3,
         created: 2,
+        tombstoned: 1,
       });
       expect(readCursor(db, "s")).toBe("2");
       expect(counts()).toEqual([2, 1]);
@@ -227,7 +249,7 @@ describe("cursor after save", () => {
       nextCursor: "1",
       hasMore: false,
     }));
-    expect(await syncConnector(db, "s", "scripted", connector)).toEqual({
+    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
       received: 4,
       created: 3,
     });
@@ -243,23 +265,34 @@ describe("cursor after save", () => {
     ]);
   });
 
-  it("rejects a malformed page before storing anything", async () => {
+  it("rejects a page of the wrong shape before storing anything", async () => {
+    const connector = scripted(
+      () => ({ changes: upsert("a"), nextCursor: "1", hasMore: false }) as unknown as ChangeSet,
+    );
+    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+      stopped: "invalid-page",
+    });
+    expect(counts()).toEqual([0, 0]);
+    expect(readCursor(db, "s")).toBeNull();
+  });
+
+  it("refuses a record carrying a field of the Connector's own making alone (record-level, I01-R14)", async () => {
     const connector = scripted(
       () =>
         ({
           changes: [
-            {
-              kind: "upsert",
-              record: { ...upsert("a").record, classification: "synthetic" },
-            },
+            { kind: "upsert", record: { ...upsert("a").record, classification: "synthetic" } },
+            upsert("b"),
           ],
           nextCursor: "1",
           hasMore: false,
         }) as unknown as ChangeSet,
     );
-    await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow();
-    expect(counts()).toEqual([0, 0]);
-    expect(readCursor(db, "s")).toBeNull();
+    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+      created: 1,
+      rejected: [{ at: "change:0", code: "schema" }],
+    });
+    expect(counts()).toEqual([1, 1]);
   });
 
   it("rescans from the start when the Connector reports the cursor expired", async () => {
@@ -271,9 +304,10 @@ describe("cursor after save", () => {
         ? { changes: [], nextCursor: "old", hasMore: false, cursorExpired: true }
         : { changes: [upsert("a")], nextCursor: "1", hasMore: false };
     });
-    expect(await syncConnector(db, "s", "scripted", connector)).toEqual({
+    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
       received: 1,
       created: 1,
+      rescanned: true,
     });
     expect(seen).toEqual(["old", null]);
     expect(readCursor(db, "s")).toBe("1");
@@ -288,7 +322,9 @@ describe("cursor after save", () => {
         ? { changes: [upsert("a")], nextCursor: "1", hasMore: true }
         : { changes: [], nextCursor: "x", hasMore: false, cursorExpired: true };
     });
-    await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow(/expired/);
+    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+      stopped: "cursor-expired",
+    });
     expect(calls).toBe(3);
   });
 
@@ -300,7 +336,9 @@ describe("cursor after save", () => {
         ? { changes: [upsert("a")], nextCursor: "1", hasMore: true }
         : { changes: [], nextCursor: "1", hasMore: true };
     });
-    await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow(/progress/);
+    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+      stopped: "no-progress",
+    });
     expect(calls).toBe(2);
     expect(readCursor(db, "s")).toBe("1");
   });
@@ -313,7 +351,9 @@ describe("cursor after save", () => {
         ? { changes: [upsert("a")], nextCursor: "1", hasMore: true }
         : { changes: [upsert("b")], nextCursor: "1", hasMore: true };
     });
-    await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow(/progress/);
+    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+      stopped: "no-progress",
+    });
     expect(calls).toBe(2);
     expect(readCursor(db, "s")).toBe("1");
   });
@@ -325,6 +365,8 @@ describe("cursor after save", () => {
       hasMore: false,
       cursorExpired: true,
     }));
-    await expect(syncConnector(db, "s", "scripted", connector)).rejects.toThrow(/expired/);
+    expect(await syncConnector(db, "s", "scripted", connector)).toMatchObject({
+      stopped: "cursor-expired",
+    });
   });
 });

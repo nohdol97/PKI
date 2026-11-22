@@ -325,6 +325,46 @@ export function readCursor(db: SqlDriver, id: string): string | null {
     null) as string | null;
 }
 
+/** The rescan state of an instance (I01-R17); both false before its first sync. */
+export function readRescanState(
+  db: SqlDriver,
+  id: string,
+): { pending: boolean; deletionsMayBeMissed: boolean } {
+  const row = db.all(
+    "SELECT rescan_pending AS p, deletions_may_be_missed AS m FROM connector_instances WHERE id = ?",
+    [id],
+  )[0];
+  return { pending: row?.p === 1, deletionsMayBeMissed: row?.m === 1 };
+}
+
+/**
+ * Starts a rescan: drops the cursor (the next read starts from null, whether or not
+ * this sync gets any page stored) and marks the rescan pending until it ends.
+ */
+export function beginRescan(db: SqlDriver, id: string, deletionsMayBeMissed: boolean): void {
+  if (
+    db.run(
+      `UPDATE connector_instances
+         SET cursor = NULL, rescan_pending = 1, deletions_may_be_missed = ? WHERE id = ?`,
+      [deletionsMayBeMissed ? 1 : 0, id],
+    ).changes !== 1
+  ) {
+    throw new Error(`connector instance ${id} is not registered`);
+  }
+}
+
+/** Ends a pending rescan; call it in the transaction of the page that ends it. */
+export function finishRescan(db: SqlDriver, id: string, deletionsMayBeMissed: boolean): void {
+  if (
+    db.run(
+      "UPDATE connector_instances SET rescan_pending = 0, deletions_may_be_missed = ? WHERE id = ?",
+      [deletionsMayBeMissed ? 1 : 0, id],
+    ).changes !== 1
+  ) {
+    throw new Error(`connector instance ${id} is not registered`);
+  }
+}
+
 export function writeCursor(db: SqlDriver, id: string, cursor: string): void {
   if (
     db.run("UPDATE connector_instances SET cursor = ? WHERE id = ?", [cursor, id]).changes !== 1

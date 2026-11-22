@@ -27,13 +27,12 @@ export const SCAN_ROOTS = [
 ] as const;
 
 /**
- * Packages not on main yet (connector-sdk, I01-T05; connector-example landed
- * with I01-T08 and left the list): skipped while the package folder
- * is absent. Once the folder exists the root is inspected and the entry itself
- * is a finding: the PR that lands the package removes its entry, and from then
- * on a missing root fails.
+ * Packages not on main yet: skipped while the package folder is absent. Once the folder
+ * exists the root is inspected and the entry itself is a finding: the PR that lands the
+ * package removes its entry, and from then on a missing root fails. Empty since
+ * connector-sdk landed with I01-T03 (connector-example left it with I01-T08).
  */
-export const OPTIONAL_PACKAGES: readonly string[] = ["packages/connector-sdk"];
+export const OPTIONAL_PACKAGES: readonly string[] = [];
 
 /**
  * Files outside the roots that a root's file reads by a relative path, inspected
