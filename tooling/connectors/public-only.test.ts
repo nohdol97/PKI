@@ -63,8 +63,21 @@ describe("the repository's Connector paths", () => {
     expect(checkPublicOnly(REPO)).toEqual([]);
   });
 
+  it("the roots are R28's three Connector paths", () => {
+    expect(SCAN_ROOTS).toEqual([
+      "backend/src/adapters",
+      "packages/connector-example/src",
+      "packages/connector-sdk/src",
+    ]);
+  });
+
   it("the check is live: it read the public Connectors and the extra file", () => {
     const files = inspectedFiles(REPO);
+    // every root whose package is in the repository contributes a script
+    for (const scanRoot of SCAN_ROOTS) {
+      const pending = OPTIONAL_PACKAGES.some((pkg) => scanRoot.startsWith(`${pkg}/`));
+      if (!pending) expect(files.filter((f) => f.startsWith(`${scanRoot}/`))).not.toEqual([]);
+    }
     for (const file of [
       `${ADAPTERS}/site-connectors.ts`,
       `${ADAPTERS}/jsonl-connector.ts`,
