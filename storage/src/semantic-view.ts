@@ -135,3 +135,18 @@ export function readSemanticHistory(db: SqlDriver, ref: EntryRef): SemanticHisto
       revertsSeq: r.reverts_seq as number | null,
     }));
 }
+
+/**
+ * The items a registry row bears on: the item itself, a fact's item, a relation's two ends. The rule
+ * of the dependency-delay Insight reads these, so they are the items to judge again after an action
+ * on the row (S01-R15). Empty when the row is not stored.
+ */
+export function itemsOfEntry(db: SqlDriver, ref: EntryRef): number[] {
+  const row =
+    ref.kind === "item"
+      ? db.all("SELECT id AS a FROM items WHERE id = ?", [ref.id])[0]
+      : ref.kind === "fact"
+        ? db.all("SELECT item_id AS a FROM facts WHERE id = ?", [ref.id])[0]
+        : db.all("SELECT subject_id AS a, object_id AS b FROM relations WHERE id = ?", [ref.id])[0];
+  return row ? [row.a as number, ...(row.b === undefined ? [] : [row.b as number])] : [];
+}

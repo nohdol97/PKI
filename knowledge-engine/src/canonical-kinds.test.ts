@@ -141,7 +141,12 @@ function world() {
   const lineA = [{ sourceId: a.sourceId, version: a.version }];
   const lineAB = [...lineA, { sourceId: b.sourceId, version: b.version }];
 
-  const [xA, yA, xS, yS, xN, yN] = ["XA", "YA", "XS", "YS", "XN", "YN"].map(item) as number[];
+  const [xA, yA, xS, yS, yN] = ["XA", "YA", "XS", "YS", "YN"].map(item) as number[];
+  // the item without lineage is one the user created (S01-R22, T04): an extraction's fact from `a` is on
+  // it, yet the item follows no source, so it has no lineage and stays when `a` is deleted
+  const created = userDecisions.add(db, { kind: "item", type: "Project", name: "XN" });
+  if (created.status !== "applied") throw new Error("the user's item");
+  const xN = created.ref.id;
   const fA = fact(xA as number, TARGET_DATE, "2026-12-05");
   const eA = cite({ factId: fA }, a.id);
   const rA = relation(xA as number, yA as number);
@@ -152,8 +157,10 @@ function world() {
   const rS = relation(xS as number, yS as number);
   const erSa = cite({ relationId: rS }, a.id);
   const erS = cite({ relationId: rS }, b.id);
-  const fN = fact(xN as number, TARGET_DATE, "2026-12-07");
-  const rN = relation(xN as number, yN as number);
+  const fN = fact(xN, TARGET_DATE, "2026-12-07");
+  const fNa = fact(xN, TARGET_DATE, "2026-12-08");
+  cite({ factId: fNa }, a.id);
+  const rN = relation(xN, yN as number);
   const key = (x: number, y: number) => ({ rule: DEPENDENCY_DELAY, xItemId: x, yItemId: y });
   const iA = saveInsight(db, key(xA as number, yA as number), {
     state: "active",
@@ -165,7 +172,7 @@ function world() {
     summary: "추론",
     evidenceIds: [efSa, efSb, erSa, erS],
   });
-  const iN = saveInsight(db, key(xN as number, yN as number), { state: "resolved" });
+  const iN = saveInsight(db, key(xN, yN as number), { state: "resolved" });
 
   // what the scope policy once left out of a's extraction (I04-R11): one source's, so no shared row
   const dropA = db.run(
@@ -207,7 +214,7 @@ function world() {
     evidence: { onlyA: eA, shared: null, withoutLineage: null },
     fact: { onlyA: fA, shared: fS, withoutLineage: fN },
     relation: { onlyA: rA, shared: rS, withoutLineage: rN },
-    item: { onlyA: xA as number, shared: xS as number, withoutLineage: xN as number },
+    item: { onlyA: xA as number, shared: xS as number, withoutLineage: xN },
     insight: { onlyA: iA, shared: iS, withoutLineage: iN },
     "scope-drop": { onlyA: dropA, shared: null, withoutLineage: null },
     ontology: { onlyA: ontoA, shared: ontoS, withoutLineage: added },
@@ -218,7 +225,7 @@ function world() {
     if (r.shared !== null) built.set(`${kind}:${r.shared}`, lineAB);
     if (r.withoutLineage !== null) built.set(`${kind}:${r.withoutLineage}`, []);
   }
-  return { a, b, rows, built };
+  return { a, b, rows, built, fNa };
 }
 
 /**
@@ -462,14 +469,14 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
 
 describe("propagateCanonical's report (I04-T03)", () => {
   it("notes the ids whatever driver object the kinds are handed", () => {
-    const { a, rows } = world();
+    const { a, rows, fNa } = world();
     const wrapped: SqlDriver = { ...db };
     const { report } = db.transaction(() =>
       propagateCanonical(wrapped, deletionOf(a.sourceId), AT),
     );
     expect(report).toMatchObject({
       versions: 1,
-      facts: [rows.fact?.onlyA],
+      facts: [rows.fact?.onlyA, fNa], // fNa: an extraction's fact on the item the user created
       relations: [rows.relation?.onlyA],
     });
     expect(listInvalidations(db)[0]?.at).toBe(AT);
@@ -562,8 +569,8 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
     // the projections' counts are the removal jobs registered (I04-T04)
     expect(result).toEqual({
       source: 1,
-      evidence: 4,
-      fact: 1,
+      evidence: 5, // fNa's too
+      fact: 2,
       relation: 1,
       "scope-drop": 1,
       ontology: 1,
@@ -589,8 +596,8 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         changeKind: "access-revoked",
         removedByKind: {
           source: 1,
-          evidence: 4,
-          fact: 1,
+          evidence: 5,
+          fact: 2,
           relation: 1,
           "scope-drop": 1,
           ontology: 1,
