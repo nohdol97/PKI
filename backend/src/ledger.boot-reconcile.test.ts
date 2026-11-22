@@ -72,6 +72,10 @@ function seeded(): SqlDriver {
   }
   return db;
 }
+const live = () => {
+  if (!booted) throw new Error("the backend is not started");
+  return booted;
+};
 const start = async (registry?: DerivativeRegistry) =>
   (booted = await bootBackend({
     dataDir: dir,
@@ -92,7 +96,7 @@ function spiedRegistry(order: string[]): DerivativeRegistry {
   };
 }
 const sourcesShown = async () => {
-  const { port } = booted!.server;
+  const { port } = live().server;
   const res = await send(port, routes.sources.path, {
     host: `127.0.0.1:${port}`,
     authorization: `Bearer ${TOKEN}`,
@@ -133,11 +137,11 @@ describe("ledger.boot-reconcile", () => {
     await start();
 
     expect(await sourcesShown()).toEqual(["mail"]);
-    expect(versionsOf(booted!.db, "chat")).toBe(0);
-    expect(readLedgerSeq(booted!.db)).toBe(1);
-    expect(listInvalidations(booted!.db).map((r) => r.changeKind)).toEqual(["user-deleted"]);
+    expect(versionsOf(live().db, "chat")).toBe(0);
+    expect(readLedgerSeq(live().db)).toBe(1);
+    expect(listInvalidations(live().db).map((r) => r.changeKind)).toEqual(["user-deleted"]);
     // the removal from the engine and vector index is registered as for any deletion (I04-T04)
-    const removals = booted!.db.all("SELECT kind FROM jobs WHERE kind = 'projection-remove'");
+    const removals = live().db.all("SELECT kind FROM jobs WHERE kind = 'projection-remove'");
     expect(removals.length).toBeGreaterThan(0);
   });
 
@@ -190,13 +194,13 @@ describe("ledger.boot-reconcile", () => {
     });
     await start();
     const rebuilds = () =>
-      booted!.db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-rebuild'")[0]?.n;
+      live().db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-rebuild'")[0]?.n;
     expect(rebuilds()).toBe(2); // the engine and the vector index, whatever their applied sequence says
     await stop();
     await start();
-    expect(readLedgerSeq(booted!.db)).toBe(1);
+    expect(readLedgerSeq(live().db)).toBe(1);
     expect(rebuilds()).toBe(2);
-    expect(booted!.db.all("SELECT count(*) AS n FROM invalidations")[0]?.n).toBe(1);
+    expect(live().db.all("SELECT count(*) AS n FROM invalidations")[0]?.n).toBe(1);
   });
 });
 
@@ -218,12 +222,12 @@ describe("restore.reapply through the backend start", () => {
 
     await start();
 
-    expect(readTombstoneState(booted!.db, sourceId)).toEqual(final.chat);
-    expect(readTombstoneState(booted!.db, 2)).toEqual(final.mail);
-    expect(readLedgerSeq(booted!.db)).toBe(3);
+    expect(readTombstoneState(live().db, sourceId)).toEqual(final.chat);
+    expect(readTombstoneState(live().db, 2)).toEqual(final.mail);
+    expect(readLedgerSeq(live().db)).toBe(3);
     expect(await sourcesShown()).toEqual([]);
     expect(
-      booted!.db.all(
+      live().db.all(
         "SELECT kind, target FROM jobs WHERE kind = 'projection-rebuild' ORDER BY target",
       ),
     ).toEqual([
@@ -241,12 +245,12 @@ describe("restore.reapply through the backend start", () => {
 
     await start();
 
-    expect(readLedgerSeq(booted!.db)).toBe(1);
+    expect(readLedgerSeq(live().db)).toBe(1);
     expect(
-      booted!.db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-remove'")[0]?.n,
+      live().db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-remove'")[0]?.n,
     ).toBe(0);
     expect(
-      booted!.db.all("SELECT target FROM jobs WHERE kind = 'projection-rebuild' ORDER BY target"),
+      live().db.all("SELECT target FROM jobs WHERE kind = 'projection-rebuild' ORDER BY target"),
     ).toEqual([{ target: ENGINE_KIND }, { target: VECTOR_KIND }]);
   });
 
@@ -258,20 +262,20 @@ describe("restore.reapply through the backend start", () => {
     await start();
 
     const report = JSON.parse(
-      booted!.db.all("SELECT value FROM settings WHERE key = 'tombstone-ledger.report'")[0]
+      live().db.all("SELECT value FROM settings WHERE key = 'tombstone-ledger.report'")[0]
         ?.value as string,
     ) as { missing: boolean; applied: number };
     expect(report).toMatchObject({ missing: true, applied: 0 });
     expect(existsSync(join(dir, LEDGER_FILE))).toBe(true);
     // nothing was deleted, so no removal is open: the rebuilds are the reconcile's own request
     expect(
-      booted!.db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-remove'")[0]?.n,
+      live().db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-remove'")[0]?.n,
     ).toBe(0);
     expect(
-      booted!.db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-rebuild'")[0]?.n,
+      live().db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-rebuild'")[0]?.n,
     ).toBe(2);
     // and a deletion made now is written to the new ledger
-    userDelete(booted!.db, identity("mail"), AT);
+    userDelete(live().db, identity("mail"), AT);
     expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toMatch(/"t":"line","seq":1,/);
   });
 
@@ -295,7 +299,7 @@ describe("restore.reapply through the backend start", () => {
     await start();
 
     const report = JSON.parse(
-      booted!.db.all("SELECT value FROM settings WHERE key = 'tombstone-ledger.report'")[0]
+      live().db.all("SELECT value FROM settings WHERE key = 'tombstone-ledger.report'")[0]
         ?.value as string,
     ) as { applied: number; setAside: { file: string; deletions: number }[] };
     expect(report.applied).toBe(0);
@@ -306,9 +310,9 @@ describe("restore.reapply through the backend start", () => {
       }),
     ]);
     expect(existsSync(join(dir, "tombstone-ledger.other-key-1.jsonl"))).toBe(true);
-    expect(versionsOf(booted!.db, "chat")).toBe(2);
+    expect(versionsOf(live().db, "chat")).toBe(2);
     expect(
-      booted!.db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-rebuild'")[0]?.n,
+      live().db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'projection-rebuild'")[0]?.n,
     ).toBe(2);
   });
 
@@ -316,7 +320,7 @@ describe("restore.reapply through the backend start", () => {
     const db = seeded();
     db.close();
     await start();
-    const { port } = booted!.server;
+    const { port } = live().server;
     const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
     const res = await send(port, routes.deleteSource.path, headers, "POST", {
       connectorId: "c1",

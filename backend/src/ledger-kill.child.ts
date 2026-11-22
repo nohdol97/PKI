@@ -10,19 +10,18 @@ import {
   attachLedger,
   nodeLedgerIo,
   openLedger,
-  prepareCanonicalDb,
   readKey,
   readLedgerSeq,
 } from "@pki/storage";
-import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
+import { openCanonicalDb } from "./composition.ts";
 
 const dir = process.env.PKI_KILL_DATA_DIR;
 if (dir === undefined) throw new Error("PKI_KILL_DATA_DIR is not set");
 const externalId = process.env.PKI_KILL_EXTERNAL_ID ?? "chat";
 
-const db = openBetterSqlite3(join(dir, "pki.sqlite"));
-prepareCanonicalDb(db);
+// the backend's own open (prepared, ledger attached), then the same ledger again over the killing adapter
+const db = openCanonicalDb(dir);
 attachLedger(
   db,
   openLedger({

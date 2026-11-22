@@ -53,7 +53,6 @@ const P = "/data/tombstone-ledger.jsonl";
 let dir: string;
 let io: MemoryLedgerIo;
 let db: SqlDriver;
-let ledger: TombstoneLedger;
 let chat: number;
 let n = 0;
 const opened: SqlDriver[] = [];
@@ -158,7 +157,7 @@ beforeEach(() => {
   migrate(db);
   registerConnectorInstance(db, "c1", "test-fixtures");
   prepareCanonicalDb(db);
-  ledger = attach(db);
+  attach(db);
   chat = seed(db);
 });
 afterEach(() => {
