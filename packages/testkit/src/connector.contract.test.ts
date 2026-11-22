@@ -1,4 +1,5 @@
-// I01-R25 `contract-suite.red`: for each of the 21 violation codes, a double whose
+// I01-R25 `contract-suite.red`: for each of the 21 violation codes of I01 (the five
+// credential codes of I06-R21 have their own file, connector.contract.credentials.test.ts), a double whose
 // main fault is that violation makes checkConnector return exactly that code,
 // after the suppression rules; each suppression rule has its own case. The base
 // every double departs from is the scripted Connector, which passes the suite
@@ -156,7 +157,19 @@ class Stalling extends SizeDependent {
   }
 }
 
-const RED: Record<ConnectorViolationCode, () => Double> = {
+const CREDENTIAL_CODES = [
+  "credential-in-record",
+  "credential-in-health",
+  "credential-in-error",
+  "credential-in-log",
+  "credential-rejection-unsignalled",
+] as const;
+type LegacyCode = Exclude<ConnectorViolationCode, (typeof CREDENTIAL_CODES)[number]>;
+const LEGACY_CODES = CONNECTOR_VIOLATION_CODES.filter(
+  (code): code is LegacyCode => !(CREDENTIAL_CODES as readonly string[]).includes(code),
+);
+
+const RED: Record<LegacyCode, () => Double> = {
   "manifest-invalid": () => ({
     create: () => scripted({ fullRescan: false }),
     scenario: scenario(),
@@ -313,14 +326,14 @@ const RED: Record<ConnectorViolationCode, () => Double> = {
 };
 
 describe("contract-suite.red", () => {
-  it("names exactly the 21 codes of the I01-R25 table, in its order", () => {
+  it("names exactly the codes of the I01-R25 table (21 of I01 and the 5 of I06-R21), in its order", () => {
     const spec = readFileSync(
       resolve(import.meta.dirname, "../../../docs/specs/2026-11-21-I01-connector-sdk.md"),
       "utf8",
     );
     const section = spec.slice(spec.indexOf("**I01-R25 "), spec.indexOf("**I01-R26 "));
     const codes = [...section.matchAll(/^\s*\| `([a-z-]+)` \|/gm)].map((m) => m[1]);
-    expect(codes).toHaveLength(21);
+    expect(codes).toHaveLength(26);
     expect([...CONNECTOR_VIOLATION_CODES]).toEqual(codes);
   });
 
@@ -328,13 +341,10 @@ describe("contract-suite.red", () => {
     expect(await checkConnector(base().create, base().scenario)).toEqual([]);
   });
 
-  it.each(CONNECTOR_VIOLATION_CODES)(
-    "a double violating %s yields exactly that code",
-    async (code) => {
-      const double = RED[code]();
-      expect(await checkConnector(double.create, double.scenario)).toEqual([code]);
-    },
-  );
+  it.each(LEGACY_CODES)("a double violating %s yields exactly that code", async (code) => {
+    const double = RED[code]();
+    expect(await checkConnector(double.create, double.scenario)).toEqual([code]);
+  });
 
   it.each<[string, () => Double, ConnectorViolationCode]>([
     [

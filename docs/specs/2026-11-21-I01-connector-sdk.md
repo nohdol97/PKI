@@ -343,6 +343,11 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
   | `get-document-mismatch` | `getDocument`가 마지막으로 낸 레코드와 다름 |
   | `get-document-unknown` | 모르는 정체에 `null`이 아님 |
   | `abort-ignored` | 이미 취소된 신호로 부른 `getChanges`가 성공함 |
+  | `credential-in-record` | 시나리오의 자격 증명 값이 `getChanges`·`getDocument`가 돌려준 것 안에 있음(`credentials`가 있을 때, I06-R21) |
+  | `credential-in-health` | 시나리오의 값이 `healthCheck`의 답 안에 있음(`credentials`가 있을 때) |
+  | `credential-in-error` | 시나리오의 값이 수집기가 던진 오류의 문구·이름·열거되는 필드·`cause` 사슬 안에 있음(`credentials`나 `rejected`가 있을 때) |
+  | `credential-in-log` | `checkConnector` 한 번이 도는 동안 `console`과 표준 출력·오류로 나간 글 안에 시나리오의 값이 있음(`credentials`나 `rejected`가 있을 때) |
+  | `credential-rejection-unsignalled` | 거부 시나리오(`rejected`)로 새 객체를 초기화하고 한 번 읽었는데 `initialize`도 첫 `getChanges`도 `ConnectorCredentialError`로 끝나지 않음. `healthCheck`의 값은 이 코드를 면하지 않는다 |
 
   미구현 표시에 돌리면 위반 대신 `not-implemented` 하나를 돌려준다.
 
@@ -582,8 +587,8 @@ flowchart TD
 
 **T04가 넘기는 것**(I01-T04에서 정한 것. **잠정**: T03·T08이 쓰면서 바꿀 수 있고, 바꿀 때는 이 절과 `packages/testkit/src/connector.contract.test.ts`, `packages/testkit/src/scripted-connector.test.ts`를 함께 고친다).
 
-1. **자리와 이름.** `@pki/testkit`이 `checkConnector`, `connectorContract`, `CONNECTOR_VIOLATION_CODES`(I01-R25 표의 21개, 표의 순서), 타입 `ConnectorViolationCode`·`ConnectorCheckCode`(위반 코드와 `not-implemented`)·`ConnectorScenario`, 대본 수집기 `ScriptedConnector`와 그 대본 타입을 낸다. 자기 테스트가 R25 표를 이 문서에서 읽어 상수와 대조한다.
-2. **시나리오.** `ConnectorScenario`는 `{ config, later?, maxPages? }`다. `later`가 있으면 새 인스턴스를 `create()`로 만들어 그 설정으로 초기화하고 처음부터(cursor `null`) 읽는 것을 재스캔으로 본다. 앱을 다시 켠 뒤의 재스캔과 같은 모양이라, 스스로 대조하는 수집기는 그 기록을 인스턴스 밖(설정이 가리키는 저장소)에 둬야 통과한다. `maxPages`는 한 읽기가 가져갈 페이지 수의 상한이다(기본 `PAGE_CAP` = 10,000, 잠정). 상한에 닿으면 위반이 아니라 시나리오 오류로 던진다. 양의 정수가 아닌 값(`NaN`, 0, 음수, 소수, 무한대)도 시나리오 오류다. 처음 보는 cursor가 이어지는 것은 진행이므로 `no-progress`로 적지 않는다. 그보다 큰 수집기는 `maxPages`를 올린다. `connectorContract(name, create, scenario)`는 `checkConnector`의 결과가 빈 목록인지 보는 vitest 묶음이다. 기존 호출(`test-fixtures`, `jsonl-import`)은 `{ config }`로 바뀌었다.
+1. **자리와 이름.** `@pki/testkit`이 `checkConnector`, `connectorContract`, `CONNECTOR_VIOLATION_CODES`(I01-R25 표의 21개, 표의 순서), 타입 `ConnectorViolationCode`·`ConnectorCheckCode`(위반 코드와 `not-implemented`)·`ConnectorScenario`, 대본 수집기 `ScriptedConnector`와 그 대본 타입을 낸다. 자기 테스트가 R25 표를 이 문서에서 읽어 상수와 대조한다. (I06-T01: 코드는 26개가 되었다. [I06 spec](2026-11-22-I06-connector-credentials.md)의 R21.)
+2. **시나리오.** `ConnectorScenario`는 `{ config, later?, maxPages? }`다. `later`가 있으면 새 인스턴스를 `create()`로 만들어 그 설정으로 초기화하고 처음부터(cursor `null`) 읽는 것을 재스캔으로 본다. 앱을 다시 켠 뒤의 재스캔과 같은 모양이라, 스스로 대조하는 수집기는 그 기록을 인스턴스 밖(설정이 가리키는 저장소)에 둬야 통과한다. `maxPages`는 한 읽기가 가져갈 페이지 수의 상한이다(기본 `PAGE_CAP` = 10,000, 잠정). 상한에 닿으면 위반이 아니라 시나리오 오류로 던진다. 양의 정수가 아닌 값(`NaN`, 0, 음수, 소수, 무한대)도 시나리오 오류다. 처음 보는 cursor가 이어지는 것은 진행이므로 `no-progress`로 적지 않는다. 그보다 큰 수집기는 `maxPages`를 올린다. `connectorContract(name, create, scenario)`는 `checkConnector`의 결과가 빈 목록인지 보는 vitest 묶음이다. 기존 호출(`test-fixtures`, `jsonl-import`)은 `{ config }`로 바뀌었다. (I06-T01: 시나리오에 선택 필드 `credentials`·`rejected`가 더해졌고 대본 수집기는 대본의 `onInitialize`를 받는다. I06 spec의 R20과 "T01이 넘기는 것".)
 3. **결과.** `checkConnector`는 겹침 없이 `CONNECTOR_VIOLATION_CODES`의 순서로 정렬한 코드 목록을 돌려준다. 문구나 레코드 내용은 싣지 않는다. 초기화가 `ConnectorNotImplementedError`로 실패하면 `["not-implemented"]`만 돌려준다. 그 밖의 초기화 실패나 읽기 도중의 예외는 시나리오가 틀린 것으로 보고 던진다(위반 코드가 아니다).
 4. **검사의 차례와 억제(R25 억제 규칙의 구현).**
    - manifest를 읽을 수 없으면(객체가 아니거나 getter가 던짐) `manifest-invalid` 하나로 끝난다. `schemaVersion`이 2가 아니면 그 버전으로 다른 검사를 하지 않고 `sdk-version-mismatch`(와 버전 밖의 `manifest-invalid`. `capabilities`가 객체가 아닌 것도 여기에 든다)로 끝난다. 버전이 2인데 `capabilities`가 객체가 아니면 `manifest-invalid` 하나로 끝난다. 레코드의 `schemaVersion`이 2가 아니거나 manifest와 다르면 `record-schema`가 아니라 `sdk-version-mismatch`다(스키마는 그 필드를 2로 바꿔 놓고 본다).

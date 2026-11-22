@@ -726,6 +726,95 @@ const v19: Migration = (db) =>
         OR (json_valid(configured_scope) AND json_type(configured_scope) = 'array'));
   `);
 
+// Schema v20 (S01-T01, S01-R1, R5, R6, R10, R15): the Semantic registry sits on the item, fact
+// and relation rows (V02-R3). Each gains `confidence` (the model's own 0..1 number, kept apart from
+// the epistemic type, R10) and `user_authored` (a value the user wrote, R14); a fact gains `context`
+// (R3). Rows so far keep their status and epistemic type: confidence and context are NULL,
+// user_authored 0.
+// - A history table per kind (R6) holds one line per creation, transition or restore: numbers and
+//   codes only, never a name, value or quote. It cannot be updated, and a line cannot be deleted
+//   while its row stands; the cascade of the row's own delete passes (the parent is gone by then, so
+//   the guard's WHEN is false; S01 spec "S01-T01이 넘기는 것" 1). No line is invented for older rows.
+//   The basis is a source id and version, not a foreign key: a number outlives a deleted version
+//   (R6, provisional decision 16).
+// - The gate (R5): status, epistemic type and user_authored change only when the row's newest history
+//   line says that very change, so the one module that writes the line first and then updates the row
+//   (storage/src/semantic-lifecycle.ts) passes and a bare UPDATE does not. An INSERT is not blocked.
+// - `insight_user_inputs` (R15) ties an Insight to the fact or relation (a user-input row, R15) it used; it
+//   is written from S01-T04 on and goes with the Insight or the row.
+// The version number is the next free one: whichever of two tasks adding a migration merges later
+// renumbers (`v20` and its line in `migrations`).
+const confidenceColumn = `REAL CHECK (confidence IS NULL
+  OR (typeof(confidence) IN ('real', 'integer') AND confidence >= 0 AND confidence <= 1))`;
+const authoredColumn = "INTEGER NOT NULL DEFAULT 0 CHECK (user_authored IN (0, 1))";
+const lifecycleKinds = [
+  { table: "items", history: "item_history", fk: "item_id" },
+  { table: "facts", history: "fact_history", fk: "fact_id" },
+  { table: "relations", history: "relation_history", fk: "relation_id" },
+] as const;
+const v20: Migration = (db) =>
+  db.exec(`
+    ALTER TABLE items ADD COLUMN confidence ${confidenceColumn};
+    ALTER TABLE items ADD COLUMN user_authored ${authoredColumn};
+    ALTER TABLE facts ADD COLUMN confidence ${confidenceColumn};
+    ALTER TABLE facts ADD COLUMN user_authored ${authoredColumn};
+    ALTER TABLE facts ADD COLUMN context TEXT;
+    ALTER TABLE relations ADD COLUMN confidence ${confidenceColumn};
+    ALTER TABLE relations ADD COLUMN user_authored ${authoredColumn};
+    ${lifecycleKinds
+      .map(
+        ({ table, history, fk }) => `
+    CREATE TABLE ${history} (
+      ${fk} INTEGER NOT NULL REFERENCES ${table} (id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL CHECK (seq >= 1),
+      at TEXT NOT NULL,
+      actor TEXT NOT NULL CHECK (actor IN ('user', 'extraction', 'propagation', 'policy')),
+      action TEXT NOT NULL,
+      from_status TEXT CHECK (from_status IN (${STATUS})),
+      to_status TEXT NOT NULL CHECK (to_status IN (${STATUS})),
+      from_epistemic TEXT CHECK (from_epistemic IN (${EPISTEMIC})),
+      to_epistemic TEXT NOT NULL CHECK (to_epistemic IN (${EPISTEMIC})),
+      reason TEXT,
+      basis_source_id INTEGER,
+      basis_version INTEGER,
+      batch INTEGER,
+      reverts_seq INTEGER,
+      PRIMARY KEY (${fk}, seq),
+      CHECK ((basis_source_id IS NULL) = (basis_version IS NULL))
+    ) WITHOUT ROWID;
+    CREATE TRIGGER ${history}_no_update BEFORE UPDATE ON ${history}
+    BEGIN SELECT RAISE(ABORT, 'history lines are immutable'); END;
+    CREATE TRIGGER ${history}_no_delete BEFORE DELETE ON ${history}
+    WHEN EXISTS (SELECT 1 FROM ${table} WHERE id = old.${fk})
+    BEGIN SELECT RAISE(ABORT, 'history lines are deleted only with their row'); END;
+    CREATE TRIGGER ${table}_lifecycle_gate BEFORE UPDATE OF status, epistemic, user_authored ON ${table}
+    WHEN (new.status IS NOT old.status OR new.epistemic IS NOT old.epistemic
+          OR new.user_authored IS NOT old.user_authored)
+      AND NOT EXISTS (
+        SELECT 1 FROM ${history} h
+        WHERE h.${fk} = old.id
+          AND h.seq = (SELECT max(seq) FROM ${history} WHERE ${fk} = old.id)
+          AND h.from_status = old.status AND h.to_status = new.status
+          AND h.from_epistemic = old.epistemic AND h.to_epistemic = new.epistemic
+          AND (new.user_authored IS old.user_authored OR h.action = 'undo'))
+    BEGIN SELECT RAISE(ABORT, 'status, epistemic type and user_authored change only through the lifecycle gate'); END;`,
+      )
+      .join("")}
+
+    CREATE TABLE insight_user_inputs (
+      insight_id INTEGER NOT NULL REFERENCES insights (id) ON DELETE CASCADE,
+      fact_id INTEGER REFERENCES facts (id) ON DELETE CASCADE,
+      relation_id INTEGER REFERENCES relations (id) ON DELETE CASCADE,
+      CHECK ((fact_id IS NULL) <> (relation_id IS NULL))
+    );
+    CREATE UNIQUE INDEX insight_user_inputs_fact ON insight_user_inputs (insight_id, fact_id)
+      WHERE fact_id IS NOT NULL;
+    CREATE UNIQUE INDEX insight_user_inputs_relation ON insight_user_inputs (insight_id, relation_id)
+      WHERE relation_id IS NOT NULL;
+    CREATE INDEX insight_user_inputs_fact_row ON insight_user_inputs (fact_id);
+    CREATE INDEX insight_user_inputs_relation_row ON insight_user_inputs (relation_id);
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -747,6 +836,7 @@ export const migrations: readonly Migration[] = [
   v17,
   v18,
   v19,
+  v20,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

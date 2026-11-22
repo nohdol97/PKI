@@ -10,8 +10,10 @@
 // other Provider to fall back to. A source too large for one call is held
 // without a call (no chunking). The answer's facts and relations are kept only
 // with a quote the body holds exactly once; the code computes the span. Rows are
-// the same row by the tables' keys (V02-R8); a same row gets evidence only, and a
-// superseded same row is revived by it (V02-R11). The result is handed over as
+// the same row by the tables' keys (V02-R8); a same row gets evidence only, a row
+// propagation superseded is restored by it, and an explicit statement lifts a
+// hypothesis row (V02-R11, S01-R5, R11): each through the lifecycle gate, which
+// writes the history line, as does each row it creates. The result is handed over as
 // items (I04-R11): the job's bookkeeping (drop counts, records of earlier refusals), one
 // per kept fact or relation, then the rule "의존 업무 지연". The runner writes them through commitDerived, inside the
 // fence transaction, and only when the source version and every source a kept
@@ -30,13 +32,13 @@ import {
 } from "@pki/providers";
 import {
   addEvidence,
+  automatedLifecycle,
   findSourceVersionId,
   insertItem,
   readSourceVersion,
   BOOKKEEPING_KIND,
   recordExtractionDrops,
   recordWithheldCandidate,
-  reviveSuperseded,
   saveFact,
   saveRelation,
   type DerivativeRegistry,
@@ -92,7 +94,12 @@ interface Planned {
   /** The same-row key's content, for the item's record (hashed before it is kept, I04-R7). */
   key: string;
   target: { item: string } | { subject: string; object: string };
-  save: (tx: SqlDriver, ids: (ref: string) => number) => EvidenceTarget;
+  save: (
+    tx: SqlDriver,
+    ids: (ref: string) => number,
+  ) => { target: EvidenceTarget; created: boolean };
+  /** The answer states it as explicit (S01-R11): a hypothesis row with this evidence becomes explicit. */
+  explicit: boolean;
   span: QuoteSpan;
   quote: string;
 }
@@ -328,14 +335,16 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         kind: "fact",
         key: JSON.stringify(["fact", items.get(fact.item)?.name, fact.kind, value]),
         target: { item: fact.item },
-        save: (tx, ids) => ({
-          factId: saveFact(tx, {
+        explicit: fact.epistemic === "explicit",
+        save: (tx, ids) => {
+          const saved = saveFact(tx, {
             itemId: ids(fact.item),
             kind: fact.kind,
             value,
             ...attributes(fact.epistemic),
-          }).id,
-        }),
+          });
+          return { target: { factId: saved.id }, created: saved.created };
+        },
       });
     }
     for (const relation of answer.relations) {
@@ -348,14 +357,16 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
           items.get(relation.object)?.name,
         ]),
         target: { subject: relation.subject, object: relation.object },
-        save: (tx, ids) => ({
-          relationId: saveRelation(tx, {
+        explicit: true,
+        save: (tx, ids) => {
+          const saved = saveRelation(tx, {
             subjectId: ids(relation.subject),
             type: relation.type,
             objectId: ids(relation.object),
             ...attributes("explicit"),
-          }).id,
-        }),
+          });
+          return { target: { relationId: saved.id }, created: saved.created };
+        },
       });
     }
 
@@ -380,6 +391,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         itemKey: entry.key,
         lineage: lineageOf(drawnOn(refs)),
         write: (tx) => {
+          const at = now().toISOString();
           const idOf = (ref: string): number => {
             const known = ids.get(ref);
             if (known !== undefined) return known;
@@ -389,19 +401,27 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
               name: item.name,
               ...attributes("explicit"),
             });
+            automatedLifecycle.created(tx, { kind: "item", id }, "extraction", own, at);
             ids.set(ref, id);
             return id;
           };
           for (const id of refs.map(idOf)) touched.add(id);
-          const target = entry.save(tx, (ref) => ids.get(ref) as number);
+          const { target, created } = entry.save(tx, (ref) => ids.get(ref) as number);
+          const row =
+            "factId" in target
+              ? ({ kind: "fact", id: target.factId } as const)
+              : ({ kind: "relation", id: target.relationId } as const);
+          if (created) automatedLifecycle.created(tx, row, "extraction", own, at);
           addEvidence(tx, {
             target,
             sourceVersionId: versionId,
             ...entry.span,
             quote: entry.quote,
           });
-          // the evidence just added is current (the fence held), so a superseded row lives again
-          reviveSuperseded(tx, target);
+          // the evidence just added is current (the fence held): a row propagation superseded is
+          // restored (V02-R11, S01-R5), and a hypothesis row the answer states as explicit rises (R11)
+          automatedLifecycle.evidenceReturned(tx, row, own, at);
+          if (entry.explicit) automatedLifecycle.explicitEvidence(tx, row, own, at);
         },
       };
     });

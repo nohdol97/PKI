@@ -44,7 +44,7 @@
 export interface Connector {
   readonly manifest: ConnectorManifest;
   /** Unimplemented integrations fail with ConnectorNotImplementedError. */
-  initialize(config: unknown): Promise<void>;
+  initialize(config: unknown, context?: ConnectorContext): Promise<void>;
   /** Never throws: `ok`, or `unavailable` with a reason. */
   healthCheck(): Promise<HealthStatus>;
   getChanges(
@@ -421,7 +421,7 @@ export function createStuckCursorConnector(): Connector {
 
 ### 위반 코드 표
 
-`checkConnector`가 돌려주는 코드는 닫힌 목록 21개이고 `CONNECTOR_VIOLATION_CODES`가 같은 순서로 갖고 있다. 구조상 함께 일어나는 위반은 하나만 보고한다(예: `health-threw`가 나면 `unhealthy-after-init`은 보지 않고, 버전이 다르면 그 버전으로 다른 검사를 하지 않고 `sdk-version-mismatch`를 보고한다. manifest의 모양이 함께 틀렸으면 `manifest-invalid`도 같이 나올 수 있다).
+`checkConnector`가 돌려주는 코드는 닫힌 목록 26개이고 `CONNECTOR_VIOLATION_CODES`가 같은 순서로 갖고 있다. 구조상 함께 일어나는 위반은 하나만 보고한다(예: `health-threw`가 나면 `unhealthy-after-init`은 보지 않고, 버전이 다르면 그 버전으로 다른 검사를 하지 않고 `sdk-version-mismatch`를 보고한다. manifest의 모양이 함께 틀렸으면 `manifest-invalid`도 같이 나올 수 있다).
 
 | 코드 | 잡는 것 |
 |---|---|
@@ -446,6 +446,11 @@ export function createStuckCursorConnector(): Connector {
 | `get-document-mismatch` | `getDocument`가 마지막으로 낸 레코드와 다름 |
 | `get-document-unknown` | 모르는 정체에 `null`이 아님 |
 | `abort-ignored` | 이미 취소된 신호로 부른 `getChanges`가 성공함 |
+| `credential-in-record` | 시나리오의 자격 증명 값이 `getChanges`·`getDocument`가 돌려준 것 안에 있음(`credentials`가 있을 때, I06-R21) |
+| `credential-in-health` | 시나리오의 값이 `healthCheck`의 답 안에 있음(`credentials`가 있을 때) |
+| `credential-in-error` | 시나리오의 값이 수집기가 던진 오류의 문구·이름·열거되는 필드·`cause` 사슬 안에 있음(`credentials`나 `rejected`가 있을 때) |
+| `credential-in-log` | `checkConnector` 한 번이 도는 동안 `console`과 표준 출력·오류로 나간 글 안에 시나리오의 값이 있음(`credentials`나 `rejected`가 있을 때) |
+| `credential-rejection-unsignalled` | 거부 시나리오(`rejected`)로 새 객체를 초기화하고 한 번 읽었는데 `initialize`도 첫 `getChanges`도 `ConnectorCredentialError`로 끝나지 않음. `healthCheck`의 값은 이 코드를 면하지 않는다 |
 
 아직 구현하지 않은 자리표시용(`ConnectorNotImplementedError`로 초기화가 실패하는 것)에 돌리면 위반 대신 `not-implemented` 하나만 돌려준다. 그 밖의 초기화 실패나 읽는 도중의 예외는 위반이 아니라 시나리오가 틀린 것으로 보고 던져진다. 이 검사는 `getChanges`를 `limit` 1000과 1로 두 번 읽어 비교한다. 제품이 쓰는 100은 아니다. 제품과 다르게 보이는 곳이 셋 있다. ① 페이지의 겉모양이 틀린 것은 계약 묶음에서는 `record-schema`이고 제품에서는 `invalid-page`로 멈춘다. ② 묶음의 `no-progress`는 같은 cursor를 되풀이하는 것뿐 아니라 **앞서 본 cursor로 되돌아가는 순환**도 잡는다. 제품은 받은 cursor와 같은 것만 잡는다. ③ 위반이 둘 이상이면 머리 줄의 `expected [ ... ] to deeply equal []`는 줄여 보일 수 있으니 그 아래의 차이(diff)에서 코드를 전부 읽는다.
 
@@ -459,7 +464,7 @@ export function createStuckCursorConnector(): Connector {
 
 - 내 수집기 테스트의 핵심은 `connectorContract(이름, 만드는 함수, { config, later })` 한 줄이다.
 - 예시는 `pnpm exec vitest run packages/connector-example`로 지금 돌려 볼 수 있다.
-- 위반 코드는 21개이고 위 표가 전부다. 코드는 위반의 종류만 알려 주고 문구는 없다.
+- 위반 코드는 26개이고 위 표가 전부다. 코드는 위반의 종류만 알려 주고 문구는 없다.
 - 이 검사는 지어낸 원 시스템으로 돌린 것이다. 실제 원 시스템에서의 확인은 S18이다.
 
 ## 7. 수집기를 포크에 두고 제품에 연결하는 법

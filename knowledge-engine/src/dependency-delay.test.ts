@@ -14,12 +14,12 @@ import {
   saveFact,
   saveRelation,
   saveSourceRecord,
-  setKnowledgeStatus,
   type KnowledgeAttributes,
   type KnowledgeStatus,
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
+import { setStatusForTest } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   COMPLETION_DATE,
@@ -223,7 +223,7 @@ describe("rule.dependency-delay — validity (V02-R9)", () => {
   ] as const)("creates nothing when the %s is superseded or rejected", (_n, kind, index) => {
     const ids = rows();
     for (const status of ["superseded", "rejected"] as KnowledgeStatus[]) {
-      setKnowledgeStatus(db, kind, ids[kind][index] as number, status);
+      setStatusForTest(db, kind, ids[kind][index] as number, status);
       expect(recomputeDependencyDelay(db, [x, y])).toEqual([]);
     }
     expect(insightCount()).toBe(0);
@@ -233,8 +233,8 @@ describe("rule.dependency-delay — validity (V02-R9)", () => {
     "counts a %s row as valid",
     (status) => {
       const ids = rows();
-      setKnowledgeStatus(db, "relation", ids.relation[0], status);
-      setKnowledgeStatus(db, "fact", ids.fact[0], status);
+      setStatusForTest(db, "relation", ids.relation[0], status);
+      setStatusForTest(db, "fact", ids.fact[0], status);
       expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "created" }]);
     },
   );
@@ -259,7 +259,7 @@ describe("rule.dependency-delay — validity (V02-R9)", () => {
     fact(x, TARGET_DATE, "2026-12-20");
     dependsOn(x, y);
     fact(y, COMPLETION_DATE, "2026-12-10");
-    setKnowledgeStatus(db, "fact", early, "superseded");
+    setStatusForTest(db, "fact", early, "superseded");
     expect(recomputeDependencyDelay(db, [x])).toEqual([]);
   });
 });
@@ -335,7 +335,7 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
 
   it("updates the same row when the later date changes", () => {
     const id = readInsight(db, key())?.id;
-    setKnowledgeStatus(db, "fact", c, "superseded");
+    setStatusForTest(db, "fact", c, "superseded");
     fact(y, COMPLETION_DATE, "2026-12-12", "messenger-2");
     expect(recomputeDependencyDelay(db, [y])).toEqual([{ key: key(), outcome: "updated" }]);
     expect(readInsight(db, key())).toMatchObject({ id, state: "active" });
@@ -344,7 +344,7 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
 
   it("resolves when the condition breaks, clearing summary and evidence but keeping the row", () => {
     const id = readInsight(db, key())?.id;
-    setKnowledgeStatus(db, "fact", c, "superseded");
+    setStatusForTest(db, "fact", c, "superseded");
     fact(y, COMPLETION_DATE, "2026-12-03", "messenger-2");
     expect(recomputeDependencyDelay(db, [y])).toEqual([{ key: key(), outcome: "resolved" }]);
     expect(readInsight(db, key())).toEqual({
@@ -365,7 +365,7 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
   });
 
   it("resolves when the dependency is rejected", () => {
-    setKnowledgeStatus(db, "relation", r, "rejected");
+    setStatusForTest(db, "relation", r, "rejected");
     expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "resolved" }]);
     const changes = totalChanges();
     expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "unchanged" }]);
@@ -398,7 +398,7 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
     const id = readInsight(db, key())?.id;
     // a newer row, so a deleted-and-reinserted row could not get the same id back
     saveInsight(db, { ...key(), rule: "spacer" }, { state: "resolved" });
-    setKnowledgeStatus(db, "fact", c, "superseded");
+    setStatusForTest(db, "fact", c, "superseded");
     recomputeDependencyDelay(db, [y]);
     const later = fact(y, COMPLETION_DATE, "2026-12-12", "messenger-2");
     expect(recomputeDependencyDelay(db, [y])).toEqual([{ key: key(), outcome: "revived" }]);
@@ -421,7 +421,7 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
 
   it("resolves a dirty row whose condition broke", () => {
     db.run("UPDATE insights SET state = 'dirty'");
-    setKnowledgeStatus(db, "fact", c, "rejected");
+    setStatusForTest(db, "fact", c, "rejected");
     expect(recomputeDependencyDelay(db, [y])).toEqual([{ key: key(), outcome: "resolved" }]);
     expect(readInsight(db, key())).toMatchObject({
       state: "resolved",
@@ -441,7 +441,7 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
   });
 
   it("is rolled back with the caller's transaction", () => {
-    setKnowledgeStatus(db, "relation", r, "rejected");
+    setStatusForTest(db, "relation", r, "rejected");
     expect(() =>
       db.transaction(() => {
         expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(), outcome: "resolved" }]);

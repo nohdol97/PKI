@@ -10,14 +10,13 @@ import {
   readFact,
   readItem,
   readRelation,
-  reviveSuperseded,
   saveFact,
   saveRelation,
-  setKnowledgeStatus,
   type KnowledgeAttributes,
 } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { readKnowledgeRevision } from "./revisions.ts";
+import { applyTransition, automatedLifecycle } from "./semantic-lifecycle.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -68,6 +67,7 @@ describe("items", () => {
       status: "verified",
       validAt: null,
       observedAt: "2026-11-21T00:00:00Z",
+      confidence: null,
     });
     expect(readItem(db, 404)).toBeUndefined();
   });
@@ -102,6 +102,7 @@ describe("facts and relations", () => {
       kind: "target-date",
       value: "2026-12-05",
       ...attrs,
+      confidence: null,
     });
     const other = saveFact(db, { itemId: a, kind: "target-date", value: "2026-12-10", ...attrs });
     expect(other.created).toBe(true);
@@ -125,6 +126,7 @@ describe("facts and relations", () => {
       type: "depends-on",
       objectId: b,
       ...attrs,
+      confidence: null,
     });
   });
 
@@ -159,7 +161,7 @@ describe("facts and relations", () => {
     expect(db.all("SELECT count(*) AS n FROM items")).toEqual([{ n: 0 }]);
   });
 
-  it("changes the status of an item, fact or relation", () => {
+  it("changes the status of an item, fact or relation only through the gate", () => {
     const a = item("A");
     const b = item("B");
     const fact = saveFact(db, { itemId: a, kind: "k", value: "v", ...attrs }).id;
@@ -169,13 +171,27 @@ describe("facts and relations", () => {
       objectId: b,
       ...attrs,
     }).id;
-    setKnowledgeStatus(db, "fact", fact, "superseded");
-    setKnowledgeStatus(db, "relation", relation, "rejected");
-    setKnowledgeStatus(db, "item", b, "disputed");
+    automatedLifecycle.supersede(db, { kind: "fact", id: fact }, { sourceId: 1, version: 1 });
+    applyTransition(db, { kind: "relation", id: relation }, "user", "rejected");
+    applyTransition(db, { kind: "item", id: b }, "user", "verified");
+    applyTransition(db, { kind: "item", id: b }, "user", "disputed");
     expect(readFact(db, fact)?.status).toBe("superseded");
     expect(readRelation(db, relation)?.status).toBe("rejected");
     expect(readItem(db, b)?.status).toBe("disputed");
-    expect(() => setKnowledgeStatus(db, "fact", 404, "verified")).toThrow(/not found/);
+    expect(() => db.run("UPDATE facts SET status = 'verified' WHERE id = ?", [fact])).toThrow(
+      /lifecycle gate/,
+    );
+  });
+
+  it("takes a row inserted at any status, epistemic type and confidence (an INSERT is not gated)", () => {
+    const id = insertItem(db, {
+      type: "p",
+      name: "n",
+      ...attrs,
+      status: "verified",
+      epistemic: "user-approved",
+    });
+    expect(readItem(db, id)).toMatchObject({ status: "verified", epistemic: "user-approved" });
   });
 });
 
@@ -320,7 +336,7 @@ describe("knowledge revision", () => {
     // the same row again is no change
     saveFact(db, { itemId: a, kind: "k", value: "v", ...attrs });
     expect(readKnowledgeRevision(db)).toBe(4);
-    setKnowledgeStatus(db, "fact", fact, "superseded");
+    automatedLifecycle.supersede(db, { kind: "fact", id: fact }, { sourceId: 1, version: 1 });
     expect(readKnowledgeRevision(db)).toBe(5);
     const sv = version("e", "abc");
     addEvidence(db, {
@@ -336,38 +352,43 @@ describe("knowledge revision", () => {
   });
 });
 
-describe("reviving a superseded row (V02-R11)", () => {
-  const statusOf = (table: "facts" | "relations", id: number) =>
-    db.all(`SELECT status FROM ${table} WHERE id = ?`, [id])[0]?.status;
-  // The supersede half of V02-R11 is the fact and relation kinds' (knowledge-engine
-  // canonical-kinds.test.ts, I04-T03).
+describe("confidence (S01-R10)", () => {
+  const epistemics = ["explicit", "user-approved", "inferred", "hypothesis"] as const;
+  const values = [null, 0, 0.5, 1] as const;
 
-  it("revives a superseded row as a candidate, and leaves any other status alone", () => {
+  it("stores every epistemic type with every confidence unchanged, on items, facts and relations", () => {
     const b = item("B");
-    const superseded = saveFact(db, { itemId: b, kind: "k", value: "1", ...attrs }).id;
-    const relation = saveRelation(db, {
-      subjectId: b,
-      type: "T",
-      objectId: item("C"),
-      ...attrs,
-    }).id;
-    setKnowledgeStatus(db, "fact", superseded, "superseded");
-    setKnowledgeStatus(db, "relation", relation, "superseded");
-    const rejected = saveFact(db, { itemId: b, kind: "k", value: "2", ...attrs }).id;
-    setKnowledgeStatus(db, "fact", rejected, "rejected");
-    const verified = saveFact(db, { itemId: b, kind: "k", value: "3", ...attrs }).id;
-    setKnowledgeStatus(db, "fact", verified, "verified");
+    for (const epistemic of epistemics) {
+      for (const confidence of values) {
+        const k = `${epistemic}-${confidence}`;
+        const own = { ...attrs, epistemic, confidence };
+        const stored = [
+          readItem(db, insertItem(db, { type: "p", name: k, ...own })),
+          readFact(db, saveFact(db, { itemId: b, kind: "k", value: k, ...own }).id),
+          readRelation(db, saveRelation(db, { subjectId: b, type: k, objectId: b, ...own }).id),
+        ];
+        for (const row of stored) expect(row).toMatchObject({ epistemic, confidence });
+      }
+    }
+  });
 
-    expect(reviveSuperseded(db, { factId: superseded })).toBe(true);
-    expect(reviveSuperseded(db, { relationId: relation })).toBe(true);
-    expect(reviveSuperseded(db, { factId: superseded })).toBe(false);
-    expect(reviveSuperseded(db, { factId: rejected })).toBe(false);
-    expect(reviveSuperseded(db, { factId: verified })).toBe(false);
-    expect([
-      statusOf("facts", superseded),
-      statusOf("relations", relation),
-      statusOf("facts", rejected),
-      statusOf("facts", verified),
-    ]).toEqual(["candidate", "candidate", "rejected", "verified"]);
+  it("leaves confidence empty when none is given, and refuses a number outside 0..1 or a non-number", () => {
+    expect(readItem(db, item("A"))?.confidence).toBeNull();
+    const bad = [-0.01, 1.01, Number.POSITIVE_INFINITY, "high"] as never[];
+    for (const confidence of bad) {
+      expect(() => insertItem(db, { type: "p", name: "x", ...attrs, confidence })).toThrow(/CHECK/);
+    }
+  });
+
+  it("is not touched by an approval, a rejection or a restore", () => {
+    const b = item("B");
+    const fact = saveFact(db, { itemId: b, kind: "k", value: "v", ...attrs, confidence: 0.3 }).id;
+    const ref = { kind: "fact", id: fact } as const;
+    automatedLifecycle.supersede(db, ref, { sourceId: 1, version: 1 });
+    automatedLifecycle.evidenceReturned(db, ref, { sourceId: 1, version: 2 });
+    applyTransition(db, ref, "user", "verified");
+    applyTransition(db, ref, "user", "disputed");
+    applyTransition(db, ref, "user", "rejected");
+    expect(readFact(db, fact)).toMatchObject({ status: "rejected", confidence: 0.3 });
   });
 });
