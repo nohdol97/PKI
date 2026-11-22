@@ -105,6 +105,15 @@ export function productAdapters(dataDir: string): Pick<ServerOptions, "vectorInd
 
 export const MODELS_DIR = "models";
 
+/**
+ * The implementations that never hold anything: the ones `productRegistry` marks `permanentlyAbsent`
+ * (by `instanceof`) and that derivative-coverage.ts checks no real adapter subclasses.
+ */
+export const NULL_IMPLEMENTATIONS = {
+  [ENGINE_KIND]: NullKnowledgeEngine,
+  [VECTOR_KIND]: EmptyVectorIndex,
+} as const;
+
 /** The product's KnowledgeEngine: none is plugged in during Phase 1 (ADR 0003). */
 export function productEngine(): KnowledgeEngine {
   return new NullKnowledgeEngine();
