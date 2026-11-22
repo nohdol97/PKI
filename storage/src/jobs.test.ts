@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
   closeJob,
+  CLOCK_REGRESSION_LEASES,
+  DEFAULT_MAX_ATTEMPTS,
   heartbeatJob,
   isJobTransition,
   isReasonCode,
@@ -19,7 +21,9 @@ import {
   JobWriteError,
   leaseNextJob,
   readJob,
+  reclaimLeases,
   registerJob,
+  releaseRetryJobs,
   supersedeOpenJobs,
   transitionJob,
   type JobStatus,
@@ -650,7 +654,7 @@ describe("jobs.supersede-open (I03-R3)", () => {
   });
 });
 
-describe("heartbeatJob (I03-R4, the conditional extension T03 runs)", () => {
+describe("lease.heartbeat-after-expiry (I03-R4): the conditional extension", () => {
   it("extends the current holder's lease, even past its expiry", () => {
     const job = registered();
     const held1 = claimed();
@@ -672,6 +676,200 @@ describe("heartbeatJob (I03-R4, the conditional extension T03 runs)", () => {
     expect(heartbeatJob(db, held1, { now: at(1), leaseMs: LEASE })).toBe(false);
     expect(readJob(db, job.id)).toMatchObject({ status: "succeeded", leaseUntil: null });
   });
+  it("fails for a job held under the same token, and leaves it held", () => {
+    const job = registered();
+    const held1 = claimed();
+    // running -> held keeps the token: only the status tells the holder apart
+    expect(
+      transitionJob(db, job.id, {
+        from: "running",
+        to: "held",
+        reason: "r",
+        leaseToken: held1.leaseToken,
+      }),
+    ).toBe(true);
+    expect(readJob(db, job.id)?.leaseToken).toBe(held1.leaseToken);
+    expect(heartbeatJob(db, held1, { now: at(LEASE + 5), leaseMs: LEASE })).toBe(false);
+    expect(readJob(db, job.id)).toMatchObject({ status: "held", leaseUntil: null });
+  });
+});
+
+/** Writes a column the code under test only reads (T07 sets cancel requests, T04 run-at times). */
+const poke = (id: number, set: string, params: (number | string)[] = []) =>
+  db.run(`UPDATE jobs SET ${set} WHERE id = ?`, [...params, id]);
+
+describe("lease.pick (I03-R4): what a claim skips and closes", () => {
+  it("does not claim a queued job whose run-at time is still ahead, and claims it once due", () => {
+    const job = registered();
+    poke(job.id, "run_after = ?", [at(1000).getTime()]);
+    expect(lease(at(999))).toBeUndefined();
+    expect(readJob(db, job.id)?.status).toBe("queued");
+    expect(lease(at(1000))).toMatchObject({ id: job.id, status: "running" });
+  });
+
+  it("closes a queued job with a cancel request cancelled instead of claiming it, and claims the next", () => {
+    const cancelled = registered("extract", 1, 1);
+    newVersion("b2");
+    const next = registered("extract", 1, 2);
+    poke(cancelled.id, "cancel_requested = 1");
+    expect(lease()).toMatchObject({ id: next.id, status: "running" });
+    expect(readJob(db, cancelled.id)).toMatchObject({
+      status: "cancelled",
+      attempts: 0,
+      leaseToken: 0,
+      finishedAt: T0.getTime(),
+    });
+  });
+
+  it("leaves a cancel-requested job of a kind it does not handle", () => {
+    const other = registered("unhandled");
+    poke(other.id, "cancel_requested = 1");
+    expect(lease()).toBeUndefined();
+    expect(readJob(db, other.id)?.status).toBe("queued");
+  });
+});
+
+describe("lease.reclaim (I03-R5)", () => {
+  const reclaim = (now: Date, holding: readonly number[] = []) =>
+    reclaimLeases(db, { kinds: ["extract"], now, leaseMs: LEASE, holding });
+
+  it("reclaims a lease that ran out, raising the token: running -> queued, attempts kept", () => {
+    const job = registered();
+    const held1 = claimed();
+    expect(reclaim(at(LEASE - 1))).toBe(0);
+    expect(reclaim(at(LEASE))).toBe(1);
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "queued",
+      leaseToken: held1.leaseToken + 1,
+      attempts: 1,
+      leaseUntil: null,
+      leaseOwner: null,
+      reason: null,
+    });
+  });
+
+  it("reclaims a lease further ahead than two lease lengths (the wall clock went back)", () => {
+    expect(CLOCK_REGRESSION_LEASES).toBe(2);
+    const job = registered();
+    const held1 = claimed(at(10 * LEASE)); // until 11 * LEASE
+    // up to two leases ahead is kept: a fresh claim or heartbeat, or one written a moment later
+    expect(reclaim(at(9 * LEASE))).toBe(0);
+    expect(reclaim(at(9 * LEASE - 1))).toBe(1);
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "queued",
+      leaseToken: held1.leaseToken + 1,
+    });
+  });
+
+  it("keeps a lease another backend's heartbeat extended a millisecond past now + lease (review RA-1)", () => {
+    // A claims at T0 and heartbeats at T0 + 30 001 ms; B claims with now = T0 + 30 000
+    const job = registered();
+    const a = claimed();
+    expect(heartbeatJob(db, a, { now: at(30_001), leaseMs: LEASE })).toBe(true);
+    expect(lease(at(30_000))).toBeUndefined();
+    expect(readJob(db, job.id)).toMatchObject({ status: "running", leaseToken: a.leaseToken });
+    expect(heartbeatJob(db, a, { now: at(30_002), leaseMs: LEASE })).toBe(true);
+  });
+
+  it("leaves the jobs the runner holds in memory to its heartbeat", () => {
+    const job = registered();
+    claimed();
+    expect(reclaim(at(5 * LEASE), [job.id])).toBe(0);
+    expect(readJob(db, job.id)?.status).toBe("running");
+    expect(reclaim(at(5 * LEASE), [job.id + 1])).toBe(1);
+  });
+
+  it("leaves running jobs of kinds it was not asked for", () => {
+    const other = registered("unhandled");
+    lease(T0, ["unhandled"]);
+    expect(reclaim(at(5 * LEASE))).toBe(0);
+    expect(readJob(db, other.id)?.status).toBe("running");
+  });
+
+  it("closes a reclaimed job with a cancel request cancelled", () => {
+    const job = registered();
+    const held1 = claimed();
+    poke(job.id, "cancel_requested = 1");
+    expect(reclaim(at(LEASE))).toBe(1);
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "cancelled",
+      leaseToken: held1.leaseToken + 1,
+      finishedAt: at(LEASE).getTime(),
+    });
+  });
+
+  it("sends a job out of attempts to retry with lease-expired, and the claim dead-letters it", () => {
+    const job = registered();
+    expect(DEFAULT_MAX_ATTEMPTS).toBe(5);
+    let t = 0;
+    for (let i = 1; i < DEFAULT_MAX_ATTEMPTS; i++) {
+      expect(lease(at(t))).toMatchObject({ id: job.id, attempts: i });
+      t += LEASE;
+    }
+    expect(lease(at(t))).toMatchObject({ id: job.id, attempts: DEFAULT_MAX_ATTEMPTS });
+    t += LEASE;
+    // the fifth reclaim: no attempt left, so retry, not queued
+    expect(reclaim(at(t))).toBe(1);
+    expect(readJob(db, job.id)).toMatchObject({ status: "retry", reason: "lease-expired" });
+    // the one exit from retry (R11) gives up: dead letter, the code kept
+    expect(lease(at(t))).toBeUndefined();
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "dead_letter",
+      reason: "lease-expired",
+      attempts: DEFAULT_MAX_ATTEMPTS,
+      finishedAt: at(t).getTime(),
+    });
+  });
+
+  it("takes the attempt limit from the request", () => {
+    const job = registered();
+    leaseNextJob(db, { kinds: ["extract"], now: T0, leaseMs: LEASE, maxAttempts: 1 });
+    expect(
+      reclaimLeases(db, { kinds: ["extract"], now: at(LEASE), leaseMs: LEASE, maxAttempts: 1 }),
+    ).toBe(1);
+    expect(readJob(db, job.id)).toMatchObject({ status: "retry", reason: "lease-expired" });
+  });
+
+  it("reclaims a running row with no lease end (nothing else would claim it again)", () => {
+    const job = registered();
+    claimed();
+    poke(job.id, "lease_until = NULL");
+    expect(reclaim(T0)).toBe(1);
+    expect(readJob(db, job.id)?.status).toBe("queued");
+  });
+});
+
+describe("releaseRetryJobs (I03-R11, provisional until T04): the one exit from retry", () => {
+  /** A job of the given attempts sent to retry the way a reclaim does. */
+  function retrying(attempts: number, runAfter = T0.getTime()): StoredJob {
+    const job = registered();
+    poke(job.id, "status = 'retry', reason = 'lease-expired', attempts = ?, run_after = ?", [
+      attempts,
+      runAfter,
+    ]);
+    return job;
+  }
+  const release = (now: Date) => releaseRetryJobs(db, { kinds: ["extract"], now });
+
+  it("queues a job with attempts left once its run-at time came, clearing the code", () => {
+    const job = retrying(2, at(1000).getTime());
+    expect(release(at(999))).toBe(0);
+    expect(readJob(db, job.id)?.status).toBe("retry");
+    expect(release(at(1000))).toBe(1);
+    expect(readJob(db, job.id)).toMatchObject({ status: "queued", reason: null, finishedAt: null });
+  });
+
+  it("dead-letters a job out of attempts at once, whatever its run-at time", () => {
+    const job = retrying(DEFAULT_MAX_ATTEMPTS, at(10_000).getTime());
+    expect(release(T0)).toBe(1);
+    expect(readJob(db, job.id)).toMatchObject({ status: "dead_letter", reason: "lease-expired" });
+  });
+
+  it("leaves retry jobs of other kinds", () => {
+    const job = retrying(DEFAULT_MAX_ATTEMPTS);
+    expect(releaseRetryJobs(db, { kinds: ["other"], now: T0 })).toBe(0);
+    expect(readJob(db, job.id)?.status).toBe("retry");
+  });
 });
 
 describe("closeJob takes the write lock as it begins (review B-W1)", () => {
@@ -688,7 +886,8 @@ describe("closeJob takes the write lock as it begins (review B-W1)", () => {
     migrate(file);
     registerConnectorInstance(file, "c1", "test-fixtures");
     saveSourceRecord(file, "c1", { externalId: "e1", title: "t", body: "b" });
-    registerJob(file, { kind: "extract", sourceId: 1, fenceVersion: 1 });
+    // due at T0: a claim honours the run-at time (I03-T03)
+    registerJob(file, { kind: "extract", sourceId: 1, fenceVersion: 1, at: T0 });
     other = openBetterSqlite3(join(dir, "db.sqlite"));
     file.exec("PRAGMA busy_timeout = 0"); // no test waits on the lock
   });
@@ -709,5 +908,55 @@ describe("closeJob takes the write lock as it begins (review B-W1)", () => {
     expect(reads).toBe(0);
     other.exec("COMMIT");
     expect(closeJob(counted, job, { status: "succeeded", write: () => {} })).toBe("succeeded");
+  });
+
+  it("lease.pick: a claim asks for the lock before running any statement (BEGIN IMMEDIATE)", () => {
+    // reads and writes both: deferred, the transaction would begin and its first
+    // statement meet the lock; immediate, nothing runs before the lock is held
+    let reads = 0;
+    const counted: SqlDriver = {
+      ...file,
+      all: (sql, params) => (reads++, file.all(sql, params)),
+      run: (sql, params) => (reads++, file.run(sql, params)),
+    };
+    other.exec("BEGIN IMMEDIATE; INSERT INTO settings (key, value) VALUES ('lock', 'x')");
+    expect(() => leaseNextJob(counted, { kinds: ["extract"], now: T0, leaseMs: LEASE })).toThrow(
+      /locked|busy/i,
+    );
+    expect(reads).toBe(0);
+    other.exec("COMMIT");
+    expect(leaseNextJob(counted, { kinds: ["extract"], now: T0, leaseMs: LEASE })).toMatchObject({
+      status: "running",
+    });
+  });
+
+  it("lease.reclaim: reclaimLeases on its own also reads a clock function only under the lock", () => {
+    const reads: number[] = [];
+    const clock = () => (reads.push(reads.length), at(10 * LEASE));
+    leaseNextJob(file, { kinds: ["extract"], now: T0, leaseMs: LEASE });
+    other.exec("BEGIN IMMEDIATE; INSERT INTO settings (key, value) VALUES ('lock', 'x')");
+    expect(() => reclaimLeases(file, { kinds: ["extract"], now: clock, leaseMs: LEASE })).toThrow(
+      /locked|busy/i,
+    );
+    expect(reads).toEqual([]);
+    other.exec("COMMIT");
+    expect(reclaimLeases(file, { kinds: ["extract"], now: clock, leaseMs: LEASE })).toBe(1);
+    expect(reads).toEqual([0]);
+  });
+
+  it("lease.pick: reads a clock function once, after the lock is held (review RA-1)", () => {
+    const reads: number[] = [];
+    const clock = () => (reads.push(reads.length), T0);
+    other.exec("BEGIN IMMEDIATE; INSERT INTO settings (key, value) VALUES ('lock', 'x')");
+    expect(() => leaseNextJob(file, { kinds: ["extract"], now: clock, leaseMs: LEASE })).toThrow(
+      /locked|busy/i,
+    );
+    expect(reads).toEqual([]); // the lock was not held: the clock was never read
+    other.exec("COMMIT");
+    expect(leaseNextJob(file, { kinds: ["extract"], now: clock, leaseMs: LEASE })).toMatchObject({
+      status: "running",
+      leaseUntil: T0.getTime() + LEASE,
+    });
+    expect(reads).toEqual([0]);
   });
 });

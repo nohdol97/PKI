@@ -130,6 +130,7 @@ function imported(line: Pick<Line, "id" | "title" | "content">, instance = "impo
       kind: "extract",
       sourceId: saved.sourceId,
       fenceVersion: saved.version,
+      at: T0, // due at runNext's claim time: a claim honours the run-at time (I03-T03)
     });
     if (!r.registered) throw new Error("expected a new job");
     return r.job;

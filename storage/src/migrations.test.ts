@@ -828,11 +828,14 @@ describe("schema v11 (I03-T01, I03-R2)", () => {
     seedV10();
     migrate(db);
     // the product's claim reclaims the lease that ran out (token 3 -> 4) and not
-    // the one still running, then claims the oldest queued job
+    // the one still running, then claims the oldest queued job. The lease is long
+    // enough to reach the running one's end: one further ahead than a lease is a
+    // clock that went back, and reclaimed too (I03-R5, T03)
+    const now = new Date("2027-01-01T00:00:00.000Z");
     const claimed = leaseNextJob(db, {
       kinds: ["extract"],
-      now: new Date("2027-01-01T00:00:00.000Z"),
-      leaseMs: 1_000,
+      now,
+      leaseMs: Date.parse(T_LEASE_FUTURE) - now.getTime(),
     });
     expect(claimed).toMatchObject({ id: 1, status: "running" });
     expect(readJob(db, 2)).toMatchObject({ status: "queued", leaseToken: 4, leaseUntil: null });

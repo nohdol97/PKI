@@ -34,6 +34,9 @@ const FORBIDDEN_FILES = [
   "backend/src/v02-shell.e2e.ts",
   "apps/desktop/e2e/double-main.ts",
   "backend/src/dev.ts",
+  // the test-build-only job kind and the kill tests' backend entry (I03-R24)
+  "backend/src/test-effect.ts",
+  "backend/src/job-kill.child.ts",
 ];
 const TEST_FILE = /\.(test|e2e|setup)\.[cm]?[jt]sx?$/;
 /** Any `e2e/` folder: E2E code and its helpers, whatever their file names. */

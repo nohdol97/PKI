@@ -1,10 +1,10 @@
-// Job records (V01-R6, V02-R3..R5, I03-R1..R4). The Broker reads a job to treat a
+// Job records (V01-R6, V02-R3..R5, I03-R1..R5). The Broker reads a job to treat a
 // call as background (V01-R8), and only from the current lease holder. A job
 // names its source and the version it was registered for, its fence, so it
 // outlives the deletion of that version; Connector syncs, projection rebuilds
 // and cleanup have no source. A job is registered once per duplicate key,
-// claimed with a lease that runs out (each claim raises its lease token), and
-// leaves `running` for the current token only. Only the functions here change a
+// claimed with a lease that runs out and is reclaimed (each claim and reclaim
+// raises its lease token), and leaves `running` for the current token only. Only the functions here change a
 // status, and only along JOB_TRANSITIONS. The runner is backend/src/job-runner.ts.
 import { readChangeSeq } from "./revisions.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
@@ -265,46 +265,147 @@ export function transitionJob(db: SqlDriver, id: number, change: JobTransition):
   );
 }
 
+/** The attempt limit until kinds set their own (I03-R11; provisional, T04). */
+export const DEFAULT_MAX_ATTEMPTS = 5;
+
 export interface LeaseRequest {
   /** Only jobs of these kinds are claimed (the kinds a handler exists for). */
   kinds: readonly string[];
-  now: Date;
+  /**
+   * The wall clock. A function is read once the write lock is held, so a lease
+   * another backend extended while this one waited for the lock is not seen ahead
+   * of a `now` taken before (review RA-1).
+   */
+  now: Date | (() => Date);
   leaseMs: number;
   /** The runner's ID, new every process start (I03-R4). */
   owner?: string;
+  /** Jobs the runner holds in memory: its heartbeat keeps them, no reclaim (I03-R5). */
+  holding?: readonly number[];
+  /** Default DEFAULT_MAX_ATTEMPTS. */
+  maxAttempts?: number;
+}
+
+const placeholders = (values: readonly unknown[]) => values.map(() => "?").join(", ");
+const readNow = (now: LeaseRequest["now"]): Date => (typeof now === "function" ? now() : now);
+
+/**
+ * A lease ending further ahead than this many lease lengths is a wall clock that
+ * went back (I03-R5 ②). Provisional: two, not one, so a heartbeat written a moment
+ * later by another backend (I03-A3) is not taken for a regression (review RA-1).
+ */
+export const CLOCK_REGRESSION_LEASES = 2;
+
+/**
+ * Reclaims the leases of `kinds` that ran out, or that end further ahead than
+ * CLOCK_REGRESSION_LEASES lease lengths (the wall clock went back), except the jobs the runner holds
+ * (I03-R5). Each reclaim raises the lease token, so the old holder's heartbeat,
+ * Broker calls and result write fail. A job with a cancel request becomes
+ * cancelled, one with attempts left queued, one out of attempts retry with the
+ * code `lease-expired` (releaseRetryJobs then gives it up). A run that died keeps
+ * its attempt (R11), so a job that kills its process every time ends. Provisional:
+ * a running row with no lease end is reclaimed too. Returns how many were reclaimed.
+ */
+export function reclaimLeases(db: SqlDriver, request: Omit<LeaseRequest, "owner">): number {
+  if (request.kinds.length === 0) return 0;
+  const holding = request.holding ?? [];
+  const max = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const where = `kind IN (${placeholders(request.kinds)}) AND status = 'running'
+      AND (lease_until IS NULL OR lease_until <= ? OR lease_until > ?)
+      AND id NOT IN (${placeholders(holding)})`;
+  return db.transaction(
+    () => {
+      const now = readNow(request.now).getTime(); // under the write lock
+      const ahead = now + CLOCK_REGRESSION_LEASES * request.leaseMs;
+      const params: SqlValue[] = [...request.kinds, now, ahead, ...holding];
+      let reclaimed = 0;
+      // in this order: a cancel request first, then the attempts left
+      const branches: [JobStatus, string, string][] = [
+        ["cancelled", "cancel_requested = 1", "NULL"],
+        ["retry", "attempts >= ?", "'lease-expired'"],
+        ["queued", "1", "NULL"],
+      ];
+      for (const [to, condition, reason] of branches) {
+        const { set, params: setParams } = moving(to, now);
+        reclaimed += db.run(
+          `UPDATE jobs SET ${set}, reason = ${reason}, lease_token = lease_token + 1
+            WHERE ${where} AND ${condition}`,
+          [...setParams, ...params, ...(to === "retry" ? [max] : [])],
+        ).changes;
+      }
+      return reclaimed;
+    },
+    { immediate: true },
+  );
 }
 
 /**
- * Claims the oldest queued job until now + leaseMs, in an immediate transaction
- * (I03-R4). Run-at times and cancel requests are not consulted yet: nothing
- * sets them before I03-T03/T04, which pass the injected clock to registration. A running job of those kinds whose lease ran out is
- * reclaimed first (running -> queued, token raised) and so claimed again
- * (queued -> running, token and attempts raised).
+ * The one exit from retry (I03-R11; provisional: T04 adds backoff and per-kind
+ * limits): a job of `kinds` out of attempts becomes a dead letter at once, its
+ * code kept; one with attempts left is queued once its run-at time came, its code
+ * cleared. Runs in the caller's transaction. Returns how many left retry.
+ */
+export function releaseRetryJobs(
+  db: SqlDriver,
+  request: { kinds: readonly string[]; now: Date; maxAttempts?: number },
+): number {
+  if (request.kinds.length === 0) return 0;
+  const now = request.now.getTime();
+  const max = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const kinds = `kind IN (${placeholders(request.kinds)}) AND status = 'retry'`;
+  const dead = moving("dead_letter", now);
+  const queued = moving("queued", now);
+  return (
+    db.run(`UPDATE jobs SET ${dead.set} WHERE ${kinds} AND attempts >= ?`, [
+      ...dead.params,
+      ...request.kinds,
+      max,
+    ]).changes +
+    db.run(`UPDATE jobs SET ${queued.set}, reason = NULL WHERE ${kinds} AND run_after <= ?`, [
+      ...queued.params,
+      ...request.kinds,
+      now,
+    ]).changes
+  );
+}
+
+/**
+ * Claims a job of `kinds` until now + leaseMs, in one immediate transaction
+ * (I03-R4): first the leases that ran out are reclaimed (reclaimLeases) and retry
+ * jobs released (releaseRetryJobs); queued jobs with a cancel request are closed
+ * cancelled, never claimed; then the queued job with the lowest ID whose run-at
+ * time came and that has no cancel request is claimed: token and attempts raised,
+ * lease end, heartbeat and owner written. A `now` function is read once, after the
+ * lock is held. Priority and fairness order are T05's.
  */
 export function leaseNextJob(db: SqlDriver, request: LeaseRequest): StoredJob | undefined {
   if (request.kinds.length === 0) return undefined;
-  const now = request.now.getTime();
-  const kinds = `kind IN (${request.kinds.map(() => "?").join(", ")})`;
+  const kinds = `kind IN (${placeholders(request.kinds)})`;
+  // cancel-requested jobs were closed just before, in the same transaction
+  const due = `status = 'queued' AND run_after <= ?`;
   return db.transaction(
     () => {
-      const reclaim = moving("queued", now);
+      const at = readNow(request.now); // under the write lock (BEGIN IMMEDIATE)
+      const now = at.getTime();
+      reclaimLeases(db, { ...request, now: at });
+      releaseRetryJobs(db, { ...request, now: at });
+      const cancel = moving("cancelled", now);
       db.run(
-        `UPDATE jobs SET ${reclaim.set}, lease_token = lease_token + 1
-          WHERE ${kinds} AND status = 'running' AND lease_until <= ?`,
-        [...reclaim.params, ...request.kinds, now],
+        `UPDATE jobs SET ${cancel.set}, reason = NULL
+          WHERE ${kinds} AND status = 'queued' AND cancel_requested = 1`,
+        [...cancel.params, ...request.kinds],
       );
-      const id = db.all(
-        `SELECT id FROM jobs
-          WHERE ${kinds} AND status = 'queued' ORDER BY id LIMIT 1`,
-        request.kinds,
-      )[0]?.id as number | undefined;
+      const id = db.all(`SELECT id FROM jobs WHERE ${kinds} AND ${due} ORDER BY id LIMIT 1`, [
+        ...request.kinds,
+        now,
+      ])[0]?.id as number | undefined;
       if (id === undefined) return undefined;
       const claim = moving("running", now);
       db.run(
         `UPDATE jobs SET ${claim.set}, lease_until = ?, lease_owner = ?, heartbeat_at = ?,
            lease_token = lease_token + 1, attempts = attempts + 1
-          WHERE id = ? AND status = 'queued'`,
-        [...claim.params, now + request.leaseMs, request.owner ?? null, now, id],
+          WHERE id = ? AND ${due}`,
+        [...claim.params, now + request.leaseMs, request.owner ?? null, now, id, now],
       );
       return readJob(db, id);
     },

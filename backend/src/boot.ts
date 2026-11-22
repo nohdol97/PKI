@@ -8,6 +8,7 @@
 // and shell.ts (the Electron shell's parent channel for both).
 import type { KnowledgeEngine, LLMProvider, SecretSource, VectorIndex } from "@pki/contracts";
 import type { Projections } from "@pki/knowledge-engine";
+import { BUILD_KIND } from "@pki/providers";
 import type { SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
@@ -29,7 +30,7 @@ import {
   type ConnectorSet,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
-import type { JobRunner } from "./job-runner.ts";
+import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
 export interface BootOptions {
@@ -48,6 +49,8 @@ export interface BootOptions {
   engine?: KnowledgeEngine;
   /** Replaces the composition point's VectorIndex (tests). */
   vectorIndex?: VectorIndex;
+  /** The test build's job lease, poll and test kinds (job-runner.ts); ignored by any other build. */
+  testBuild?: { jobs?: RunnerTestBuild };
 }
 
 export interface BootedBackend {
@@ -73,7 +76,14 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   const projections = productProjections(db, { engine, ...adapters });
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
-  const runner = productRunner(db, calls.broker, { engine, projections });
+  const runner = productRunner(db, calls.broker, {
+    engine,
+    projections,
+    // folded away from any other build (V01-T15); the runner honours it in a test build only
+    ...(BUILD_KIND === "test" && options.testBuild?.jobs
+      ? { testBuild: options.testBuild.jobs }
+      : {}),
+  });
   const { instances, kinds } = options.connectors ?? productConnectors();
   const connectors = await createConnectorManager(db, instances, kinds, { runner, projections });
   const server = await startServer({

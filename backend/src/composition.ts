@@ -62,7 +62,7 @@ import {
   type ConnectorInstanceConfig,
   type SyncOptions,
 } from "./connectors.ts";
-import { createJobRunner, type JobRunner } from "./job-runner.ts";
+import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-runner.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
@@ -228,6 +228,8 @@ export function productRunner(
     engine?: KnowledgeEngine;
     /** The engine's notifications; a stale engine is not asked for proposals. */
     projections?: Pick<Projections, "isStale">;
+    /** The test build's lease, poll and test kinds (job-runner.ts); ignored by any other build. */
+    testBuild?: RunnerTestBuild;
   } = {},
 ): JobRunner {
   const { now, engine, projections } = options;
@@ -247,6 +249,8 @@ export function productRunner(
     db,
     handlers: { [EXTRACT_JOB_KIND]: handler },
     ...(now ? { now } : {}),
+    // folded away from any other build with the runner's own test branch (V01-T15)
+    ...(BUILD_KIND === "test" && options.testBuild ? { testBuild: options.testBuild } : {}),
     onError: (error) => log("job-error", { error: errorClass(error) }),
   });
 }
