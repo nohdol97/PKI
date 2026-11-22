@@ -159,7 +159,7 @@ describe("connector-sync.stop-codes (I03-R19, I01-R20): each end of a sync, by I
   it("has a case for every row of I01's constant, and the constant has every row of the spec table", () => {
     const covered = SYNC_OUTCOMES.map((row) => row.end);
     expect(new Set(covered).size).toBe(covered.length);
-    expect(covered).toHaveLength(12);
+    expect(covered).toHaveLength(13);
   });
 
   for (const row of SYNC_OUTCOMES) {

@@ -53,6 +53,20 @@ export class ConnectorCredentialError extends Error {
   }
 }
 
+/**
+ * Whether a thrown value is a ConnectorCredentialError (I06-R5). `instanceof` alone misses the class
+ * of a second `@pki/contracts` copy (a fork's bundle), so the fixed name and message pair counts too.
+ * One rule for the product and for the contract suite.
+ */
+export function isConnectorCredentialError(error: unknown): boolean {
+  return (
+    error instanceof ConnectorCredentialError ||
+    (error instanceof Error &&
+      error.name === "ConnectorCredentialError" &&
+      error.message === CONNECTOR_CREDENTIAL_MESSAGE)
+  );
+}
+
 /** What `healthCheck` answers as `unavailable.reason` when the origin refused the credential. */
 export const HEALTH_REASON_CREDENTIAL_REJECTED = "credential-rejected";
 

@@ -242,7 +242,7 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
 
   코드는 닫힌 목록이다.
   - **거부**: `invalid-json`, `schema`, `content-hash-mismatch`, `revision-conflict`, `invalid-blocks`, `capability-violation`, `scope-change-content-mismatch`.
-  - **멈춤**: `invalid-page`, `no-progress`, `cursor-expired`, `rate-limited`, `connector-error`, `connector-failed`, `aborted`, `instance-busy`, `storage-failed`. `storage-failed`는 페이지 저장 트랜잭션의 실패(트리거의 거부 포함, I01-R14)다. 그 페이지는 저장되지 않고 cursor는 그대로다.
+  - **멈춤**: `invalid-page`, `no-progress`, `cursor-expired`, `rate-limited`, `connector-error`, `connector-failed`, `aborted`, `instance-busy`, `storage-failed`, `credential-unusable`. `credential-unusable`은 `getChanges`가 `ConnectorCredentialError`를 던진 멈춤이다(I06-R10). 같은 호출을 다시 시도하지 않는다. `storage-failed`는 페이지 저장 트랜잭션의 실패(트리거의 거부 포함, I01-R14)다. 그 페이지는 저장되지 않고 cursor는 그대로다.
 
   `unsupported-sdk-version`은 멈춤 코드가 아니라 인스턴스 상태의 사유다(I01-R1).
 - **I01-R20 정해진 동기화는 I03의 작업이다.** 주기적으로 끌어오는 동기화는 I03의 작업 종류 `connector-sync`로 돌며, 그 작업이 이 관리 모듈의 동기화를 부른다. 멈춤 코드가 I03의 결과로 옮겨지는 표는 **이 spec이 정하고 I03이 가리킨다.** 결과는 `retry`, `held`, `dead_letter`, `done` 넷 가운데 하나이며, 멈춤 코드(I01-R19)와 인스턴스 상태마다 한 행이 있다. `done`은 I03의 `succeeded`로 닫힌다.
@@ -261,6 +261,7 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
   | `storage-failed` | `retry`, 시도가 다하면 `dead_letter` | 씀 | I03 backoff | 디스크 사정이면 다시 하면 풀린다. 트리거의 거부처럼 늘 같은 실패면 시도가 다해 포기한 작업(dead_letter)으로 남아 보인다 |
   | 인스턴스가 `unavailable`(초기화 실패, `unsupported-sdk-version`) | `held` | 쓰지 않음 | 그 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 I03의 시간당 묶음 재점검 | 설정이나 수집기가 바뀌어야 풀린다 |
   | 인스턴스가 `not-implemented`(`site-*`) | `held` | 쓰지 않음 | 그 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 I03의 시간당 묶음 재점검 | 포크가 실제 구현을 등록해야 풀린다 |
+  | `credential-unusable` | `held` | 쓰지 않음 | 그 인스턴스가 `ready`가 될 때(변경 알림, 앱을 다시 시작함, 사유가 `credential-rejected`가 아니면 I03의 시간당 묶음 재점검) | 수집기가 자격 증명을 쓸 수 없다고 알렸다(I06-R10). 값을 고치면 풀린다. 수집기를 불렀지만 `held`로 닫으면 시도는 되돌려진다 |
 
   `held`인 주기는 I03이 "멈춤"과 그 이유로 보인다. 처리기는 I03의 처리기 결과 `held(reason)`를 돌려주며, 이유 코드는 인스턴스 상태의 사유다.
 

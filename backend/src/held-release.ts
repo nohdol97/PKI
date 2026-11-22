@@ -57,6 +57,11 @@ export const HELD_REASONS: Readonly<Record<string, HeldReason>> = {
   "unsupported-sdk-version": { events: [], collector: true },
   "connector-unavailable": { events: [], collector: true },
   "not-implemented": { events: [], collector: true },
+  // The instance's credentials cannot be used (I06-R9): lifted per instance when it is ready again.
+  "credential-store-unavailable": { events: [], collector: true },
+  "credential-missing": { events: [], collector: true },
+  "credential-unreadable": { events: [], collector: true },
+  "credential-rejected": { events: [], collector: true },
   // Only the development exception gives these (execution-gate.ts), so a production
   // build never holds a job for them; the constant folds and the bundle keeps none of
   // the exception's strings (artifact.contents). Provisional: a production start on a
