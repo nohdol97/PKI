@@ -2,6 +2,7 @@ export {
   COMPLETION_DATE,
   DEPENDENCY_DELAY,
   DEPENDS_ON,
+  isDate,
   TARGET_DATE,
   recomputeDependencyDelay,
   type RuleOutcome,
