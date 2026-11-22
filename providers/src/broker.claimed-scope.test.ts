@@ -147,7 +147,7 @@ const extract = (ids: string[], extra: Partial<BrokerRequest> = {}) => ({
   taskKind: "extract" as const,
   sourceVersionIds: ids,
   candidateItemIds: [],
-  schemaVersion: 2,
+  schemaVersion: 3,
   budget: { timeoutMs: 1000 },
   retryable: false,
   ...extra,

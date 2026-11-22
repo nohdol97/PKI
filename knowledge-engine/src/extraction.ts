@@ -23,12 +23,20 @@
 // candidates for the same version (V02-R13); they pass the same checks as the
 // answer (the extraction schema, the offered candidate IDs, the exact quote) and
 // are written with it, as candidates. An engine that fails proposes nothing.
+// Schema 3 (S01-R17) adds surface forms (`terms`) and definitions: facts of the kinds `alias.*` and
+// `definition`. A form must be in its quote and the quote in the stored text; a definition is a literal span
+// of the text (the value is the quote, at most 500 code points) with an optional short context tag; the same
+// form is judged by the V02-R7 processing (surface-form.ts). A `confidence` outside 0..1 drops its entry; one
+// inside is written when the row is created and never changed (S01-R10).
 // Before anything is planned each fact and relation is fitted to the type definitions (S01-R21):
 // its item types, fact kind or relation type must be `verified` elements, the value must be of
 // the kind the fact kind's rule names, and a relation's ends must fit its direction; what does not
 // fit is dropped and counted in `other`. A `one` value count does not stop a write (R9 reads it).
 import type { KnowledgeCandidate, KnowledgeEngine, SourceVersionRef } from "@pki/contracts";
 import {
+  EXTRACT_ALIAS_FACT_KIND,
+  EXTRACT_DEFINITION_FACT_KIND,
+  EXTRACT_DEFINITION_MAX_CODE_POINTS,
   EXTRACT_SCHEMA_VERSION,
   TASKS,
   type BrokerResult,
@@ -59,8 +67,9 @@ import {
 } from "@pki/storage";
 import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
 import { recomputeDependencyDelay } from "./dependency-delay.ts";
-import { findCandidates } from "./linking.ts";
+import { findCandidates, normalizeForLinking } from "./linking.ts";
 import { locateQuote, type QuoteSpan } from "./quote.ts";
+import { findSameForm } from "./surface-form.ts";
 
 /** What the handler hands the runner (a subset of backend job-outcomes.ts JobResult). */
 export type ExtractResult =
@@ -73,6 +82,8 @@ export type ExtractResult =
 export const EXTRACT_HOLD_TOO_LARGE = "source-too-large";
 /** Provisional: title and body, in code points, that one call takes (no chunking, V02-R8). */
 export const MAX_EXTRACT_CODE_POINTS = 20_000;
+/** Provisional: the longest context tag of a definition, in code points (S01-R3 says "short"); a longer one drops its entry. */
+export const MAX_CONTEXT_CODE_POINTS = 80;
 /** Provisional: the Broker's ceiling for one request. */
 export const EXTRACT_TIMEOUT_MS = 120_000;
 
@@ -111,6 +122,10 @@ interface Planned {
   span: QuoteSpan;
   quote: string;
 }
+
+/** S01-R10: the model's number is 0..1 or absent; an entry with a number outside is dropped. */
+const confidenceInRange = (c: number | null | undefined): boolean =>
+  c === undefined || c === null || (c >= 0 && c <= 1);
 
 /** Calls once, and once more only for an answer that did not match the schema. */
 async function extractOnce(broker: RunBroker, request: object): Promise<BrokerResult> {
@@ -166,7 +181,7 @@ function engineAnswer(
   ref: SourceVersionRef,
   drops: { other: number },
 ): ExtractionOutput {
-  const out: ExtractionOutput = { items: [], facts: [], relations: [] };
+  const out: ExtractionOutput = { items: [], facts: [], relations: [], terms: [], definitions: [] };
   const refs = new Map<string, string>();
   // engine output is untrusted: read defensively, the schema decides
   for (const c of candidates) {
@@ -230,7 +245,7 @@ function engineAnswer(
 
 /** The answers in one, each answer's refs kept to itself. */
 function merged(answers: readonly ExtractionOutput[]): ExtractionOutput {
-  const out: ExtractionOutput = { items: [], facts: [], relations: [] };
+  const out: ExtractionOutput = { items: [], facts: [], relations: [], terms: [], definitions: [] };
   answers.forEach((answer, i) => {
     const ns = (ref: string) => `${i}:${ref}`;
     out.items.push(...answer.items.map((item) => ({ ...item, ref: ns(item.ref) })));
@@ -238,6 +253,8 @@ function merged(answers: readonly ExtractionOutput[]): ExtractionOutput {
     out.relations.push(
       ...answer.relations.map((r) => ({ ...r, subject: ns(r.subject), object: ns(r.object) })),
     );
+    out.terms.push(...answer.terms.map((t) => ({ ...t, item: ns(t.item) })));
+    out.definitions.push(...answer.definitions.map((d) => ({ ...d, item: ns(d.item) })));
   });
   return out;
 }
@@ -357,17 +374,22 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         const id = items.get(ref)?.existingItemId;
         return id === null || id === undefined ? [] : (candidateLineage.get(id) ?? []);
       });
-    const attributes = (epistemic: KnowledgeAttributes["epistemic"]): KnowledgeAttributes => ({
+    const attributes = (
+      epistemic: KnowledgeAttributes["epistemic"],
+      confidence: number | null | undefined,
+    ): KnowledgeAttributes => ({
       epistemic,
       status: "candidate",
       validAt: null,
       observedAt: now().toISOString(),
+      confidence: confidence ?? null,
     });
     for (const fact of answer.facts) {
       const value = fact.value.trim();
       const rule = rules.factKind(fact.kind);
       const type = typeOf(fact.item);
       if (
+        !confidenceInRange(fact.confidence) ||
         !rule ||
         !rules.itemType(type) ||
         !rule.itemTypes.includes(type as string) ||
@@ -386,7 +408,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
             itemId: ids(fact.item),
             kind: fact.kind,
             value,
-            ...attributes(fact.epistemic),
+            ...attributes(fact.epistemic, fact.confidence),
           });
           return { target: { factId: saved.id }, created: saved.created };
         },
@@ -397,6 +419,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       const subject = typeOf(relation.subject);
       const object = typeOf(relation.object);
       if (
+        !confidenceInRange(relation.confidence) ||
         !rule ||
         !rules.itemType(subject) ||
         !rules.itemType(object) ||
@@ -421,9 +444,90 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
             subjectId: ids(relation.subject),
             type: relation.type,
             objectId: ids(relation.object),
-            ...attributes("explicit"),
+            ...attributes("explicit", relation.confidence),
           });
           return { target: { relationId: saved.id }, created: saved.created };
+        },
+      });
+    }
+    // S01-R2: a surface form is a fact of the kind `alias.<kind>` of its item; it must be in its quote.
+    for (const term of answer.terms) {
+      const form = term.form.trim();
+      const kind = EXTRACT_ALIAS_FACT_KIND[term.kind];
+      const rule = rules.factKind(kind);
+      const type = typeOf(term.item);
+      if (
+        !confidenceInRange(term.confidence) ||
+        !rule ||
+        !rules.itemType(type) ||
+        !rule.itemTypes.includes(type as string) ||
+        !valueFits(rule.valueType, form)
+      ) {
+        drops.other++;
+        continue;
+      }
+      if (!term.quote.includes(form)) {
+        drops.quotes++;
+        continue;
+      }
+      plan([term.item], term.quote, {
+        kind: "fact",
+        key: JSON.stringify(["fact", items.get(term.item)?.name, kind, normalizeForLinking(form)]),
+        target: { item: term.item },
+        explicit: true,
+        save: (tx, ids) => {
+          const itemId = ids(term.item);
+          // the same form (V02-R7 processing) of this item and kind is the same row: evidence only
+          const same = findSameForm(tx, itemId, kind, form);
+          if (same !== undefined) return { target: { factId: same }, created: false };
+          const saved = saveFact(tx, {
+            itemId,
+            kind,
+            value: form,
+            ...attributes("explicit", term.confidence),
+          });
+          return { target: { factId: saved.id }, created: saved.created };
+        },
+      });
+    }
+    // S01-R3, provisional decision 10: a definition is a literal span of the text, the value is the quote
+    // (trimmed, still a span), at most 500 code points; the tag, when given, is short.
+    for (const def of answer.definitions) {
+      const value = def.quote.trim();
+      const tag = def.context?.trim() || null;
+      const rule = rules.factKind(EXTRACT_DEFINITION_FACT_KIND);
+      const type = typeOf(def.item);
+      if (
+        !confidenceInRange(def.confidence) ||
+        !rule ||
+        !rules.itemType(type) ||
+        !rule.itemTypes.includes(type as string) ||
+        !valueFits(rule.valueType, value) ||
+        [...value].length > EXTRACT_DEFINITION_MAX_CODE_POINTS ||
+        (tag !== null && [...tag].length > MAX_CONTEXT_CODE_POINTS)
+      ) {
+        drops.other++;
+        continue;
+      }
+      plan([def.item], value, {
+        kind: "fact",
+        key: JSON.stringify([
+          "fact",
+          items.get(def.item)?.name,
+          EXTRACT_DEFINITION_FACT_KIND,
+          value,
+        ]),
+        target: { item: def.item },
+        explicit: def.epistemic === "explicit",
+        save: (tx, ids) => {
+          const saved = saveFact(tx, {
+            itemId: ids(def.item),
+            kind: EXTRACT_DEFINITION_FACT_KIND,
+            value,
+            context: tag,
+            ...attributes(def.epistemic, def.confidence),
+          });
+          return { target: { factId: saved.id }, created: saved.created };
         },
       });
     }
@@ -457,7 +561,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
             const id = insertItem(tx, {
               type: item.type,
               name: item.name,
-              ...attributes("explicit"),
+              ...attributes("explicit", null),
             });
             automatedLifecycle.created(tx, { kind: "item", id }, "extraction", own, at);
             ids.set(ref, id);

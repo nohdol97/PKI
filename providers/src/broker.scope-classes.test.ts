@@ -79,7 +79,7 @@ async function call(ids: string[], inputs: string[][] = []) {
       taskKind: "extract",
       sourceVersionIds: ids,
       candidateItemIds: [],
-      schemaVersion: 2,
+      schemaVersion: 3,
       budget: { timeoutMs: 1000 },
       retryable: false,
     }),
