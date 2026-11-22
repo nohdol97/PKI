@@ -269,6 +269,7 @@ describe("lifecycle.transitions", () => {
         seq: 1,
       });
       expect(read(ref)).toMatchObject({ status: "candidate", epistemic: "hypothesis" });
+      expect(lines(ref)[0]).toMatchObject({ action: "evidence-returned", reverts_seq: null });
     });
 
     it("refuses a superseded row whose newest line is no propagation supersede (not the user's, not a restore)", () => {
