@@ -9,8 +9,12 @@
 import { utilityProcess } from "electron";
 import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { backendEntry } from "../src/backend-entry.ts";
 
-const SHELL_ENTRY = fileURLToPath(new URL("../../../backend/src/shell.ts", import.meta.url));
+// The entry the shell forks from source is the build's choice (I05-R2): the public one, or a fork's own when
+// the tree has a composition package. The double still forks the public double entry below, so v02-flow
+// exercises the public double, not a fork's registration.
+const SHELL_ENTRY = backendEntry(fileURLToPath(new URL("../../..", import.meta.url)));
 const DOUBLE_ENTRY = fileURLToPath(
   new URL("../../../backend/src/v02-shell.e2e.ts", import.meta.url),
 );

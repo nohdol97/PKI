@@ -692,7 +692,7 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
       "`site/`와 `packages/site-example/`의 파일에서는 인라인 설정(`// eslint-disable pki/module-boundary`, `/* eslint pki/module-boundary: … */`)이 효력이 없다.",
       "**린트가 보지 않는 길이 다섯 있다.** `tsconfig`의 `paths` 별칭, 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`, `package.json`의 `imports`(`#이름`)다.",
       "`pnpm lint`는 저장소 루트의 `eslint.config.js` 하나만 쓴다(`eslint -c eslint.config.js`). 포크가 `site/` 아래에 둔 ESLint 설정 파일은 읽히지 않는다.",
-      "**`pnpm e2e`는 다르다. 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 지금 포크 모양에서 실패한다.** 공용 저장소의 I05-T06이 고친다.",
+      "**`pnpm e2e`도 포크 모양에서 통과한다(I05-T06).** 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 두 모양에서 참이 되도록 고쳐졌다.",
       "일부러 해야 닿는 길이고 린트는 막지 않는다. 포크의 코드 검토가 맡는다.",
     ]) {
       expect(seven, sentence).toContain(sentence);

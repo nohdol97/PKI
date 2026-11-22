@@ -5,9 +5,12 @@
 // `build-artifact` setup builds the folder first.
 import { expect, test } from "@playwright/test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
+import { backendEntry } from "../src/backend-entry.ts";
 import { DEVELOPMENT_EXCEPTION_MARKERS, TEST_PICK_MARKERS } from "../build/bundle.ts";
 import { APP_DIR, readBuildReport, type BuildReport } from "../build/paths.ts";
+
+const ROOT = resolve(import.meta.dirname, "../../..");
 
 // spelled in pieces: only build-kind.ts and bundler configs may name the build value
 const BUILD_VALUE = ["PKI", "BUILD", "KIND"].join("_");
@@ -68,10 +71,31 @@ test("no bundle kept a test-only, development-only or source-run module", () => 
 
 test("no bundle carries the lookup of a composition package (I05-R2, C2)", () => {
   // the entry is chosen at build time (backend-entry.ts); the production layout knows the bundled
-  // ./backend/shell.js alone. True in the public tree and in a fork-shaped one (I05-R25).
+  // ./backend/shell.js alone. True in the public tree and in a fork-shaped one (I05-R25): a fork's
+  // backend bundle names its own modules in region comments (`// site/composition/src/...`), so the
+  // folder name alone is looked for in the shell bundle (main.js) only, and in every bundle only
+  // the lookup's own literals. They are read from backend-entry.ts, so the probe follows them.
+  const lookup = readFileSync(resolve(import.meta.dirname, "../src/backend-entry.ts"), "utf8");
+  const probes = [
+    /"(site\/composition\/package\.json)"/.exec(lookup)?.[1],
+    /(has a package\.json but no backend entry)/.exec(lookup)?.[1],
+  ].filter((probe) => probe !== undefined);
+  // live: a probe that stopped matching would pass every bundle for nothing
+  expect(probes, "lookup literals in backend-entry.ts").toHaveLength(2);
   for (const bundle of Object.keys(report.bundles)) {
     const text = readFileSync(join(APP_DIR, bundle), "utf8");
-    expect(text.includes("site/composition"), bundle).toBe(false);
+    for (const probe of probes) expect(text.includes(probe), `${bundle}: ${probe}`).toBe(false);
+  }
+  expect(
+    readFileSync(join(APP_DIR, "main.js"), "utf8").includes("site/composition"),
+    "main.js",
+  ).toBe(false);
+  // a public-shaped tree has no `site/composition` to name: no bundle carries the folder name either
+  if (backendEntry(ROOT) === join(ROOT, "backend/src/shell.ts")) {
+    for (const bundle of Object.keys(report.bundles)) {
+      const text = readFileSync(join(APP_DIR, bundle), "utf8");
+      expect(text.includes("site/composition"), bundle).toBe(false);
+    }
   }
 });
 
