@@ -280,6 +280,11 @@
     "source": "eval/golden/sources/wiki.jsonl"
   },
   {
+    "hash": "522874f6c9bb0634dc8a3fae4b261d66dab0535ff1055a108a3d276c5c4f89d4",
+    "malicious": true,
+    "source": "fixtures/s02-entities.jsonl"
+  },
+  {
     "hash": "53c6ac62aaa2b2dad006f08afcc364931cdf0cf69d588a7b6d553640c96ff7e9",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
@@ -708,6 +713,11 @@
     "hash": "dd0a48ebe017426644c577549b1ea407fb8cf26a09c8aa3942cf5b4167539bcb",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "df65140bbddf017a47f9e4dba73a05b9fb61501977cd1ee8c5cda40f3d7b63d0",
+    "malicious": false,
+    "source": "fixtures/s02-entities.jsonl"
   },
   {
     "hash": "df81820742653e140d99eb219eb0d3d4b116ac732234fd2b1caa82c5582e07cd",
