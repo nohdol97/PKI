@@ -60,7 +60,13 @@ const noIgnore = () => false;
 
 async function collect(options: Partial<WalkOptions> = {}): Promise<WalkEvent[]> {
   const events: WalkEvent[] = [];
-  for await (const e of walkLocation({ rootRealPath: loc, limits, ignore: noIgnore, ...options }))
+  for await (const e of walkLocation({
+    rootRealPath: loc,
+    limits,
+    ignore: noIgnore,
+    excluded: [],
+    ...options,
+  }))
     events.push(e);
   return events;
 }
@@ -135,6 +141,7 @@ const read = (
     relativePath,
     kind: "folder",
     maxFileBytes: 1_000_000,
+    excluded: [],
     ...(fs ? { fs } : {}),
     ...over,
   });
@@ -355,6 +362,7 @@ describe("reading one file in the order of I02B-R47", () => {
   it("a file location is read by its own real path", async () => {
     writeFileSync(join(loc, "one.md"), INSIDE);
     const r = await readLocationFile({
+      excluded: [],
       rootRealPath: join(loc, "one.md"),
       relativePath: "",
       kind: "file",

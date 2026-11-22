@@ -212,6 +212,8 @@ export function checkPublicOnly(
       }
       if (!/^\.\.?(\/|$)/.test(specifier)) return false;
       const target = resolve(path, "..", specifier);
+      // a test file's capabilities (SDK_TEST_ONLY_IMPORTS) must not be borrowed by importing it
+      if (TEST_FILE.test(target) && !TEST_FILE.test(path)) return false;
       if (scanRoot !== undefined && extras.includes(target)) {
         usedExtras.add(target);
         return true;

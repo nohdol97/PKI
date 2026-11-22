@@ -10,7 +10,7 @@
 // changed entry is never overwritten by the scan's old plaintext. Every sequence number comes from the
 // one-row counter `local_index_seq`, never from MAX(seq).
 import { randomBytes } from "node:crypto";
-import { identityKey, keyedTextHash } from "./identity.ts";
+import { identityKey, keyedTextHash, keyedTextHasher } from "./identity.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
 
 /** The connector instance the trigger and the index belong to. */
@@ -227,6 +227,37 @@ export function createLocalFileIndex(db: SqlDriver): LocalFileIndex {
       [locationId, path, except],
     ).length > 0;
 
+  /**
+   * Whether a forgotten entry of the location matches the new one: by path, or by content when its path
+   * holds no file of that content now. Nothing is hashed while the location has no forgotten entry (the
+   * usual case); otherwise the key is read once and the seen paths are compared here, not bound one
+   * parameter each (a location can hold more same-content files than SQLite has variables).
+   */
+  const forgottenMatches = (entry: NewEntry, seenPaths: readonly string[]): boolean => {
+    const any = db.all(
+      "SELECT 1 FROM local_file_entries WHERE location_id = ? AND state = 'forgotten' LIMIT 1",
+      [entry.locationId],
+    );
+    if (any.length === 0) return false;
+    const pathOf = keyedTextHasher(db, "local-path");
+    const here = (path: string) => pathOf(`${entry.locationId}\n${path}`);
+    const byPath = db.all(
+      "SELECT 1 FROM local_file_entries WHERE location_id = ? AND state = 'forgotten' AND path_hash = ?",
+      [entry.locationId, here(entry.relativePath)],
+    );
+    if (byPath.length > 0) return true;
+    if (entry.contentHash === null) return false;
+    const sameContent = db
+      .all(
+        "SELECT path_hash FROM local_file_entries WHERE location_id = ? AND state = 'forgotten' AND content_keyed_hash = ?",
+        [entry.locationId, contentHashOf(entry.locationId, entry.contentHash)],
+      )
+      .map((r) => r.path_hash as string);
+    if (sameContent.length === 0) return false;
+    const seen = new Set(seenPaths.map(here));
+    return sameContent.some((hash) => !seen.has(hash));
+  };
+
   return {
     lastSeq: () => db.all("SELECT value FROM local_index_seq WHERE id = 1")[0]?.value as number,
 
@@ -326,22 +357,9 @@ export function createLocalFileIndex(db: SqlDriver): LocalFileIndex {
           ) {
             return { applied: false, reason: "duplicate" };
           }
-          const byPath = db.all(
-            "SELECT 1 FROM local_file_entries WHERE location_id = ? AND state = 'forgotten' AND path_hash = ?",
-            [entry.locationId, pathHash(entry.locationId, entry.relativePath)],
-          );
-          let byContent: unknown[] = [];
-          if (entry.contentHash !== null) {
-            const seen = seenPathsOfSameContent.map((p) => pathHash(entry.locationId, p));
-            byContent = db.all(
-              `SELECT 1 FROM local_file_entries WHERE location_id = ? AND state = 'forgotten'
-               AND content_keyed_hash = ?
-               ${seen.length > 0 ? `AND path_hash NOT IN (${seen.map(() => "?").join(", ")})` : ""}`,
-              [entry.locationId, contentHashOf(entry.locationId, entry.contentHash), ...seen],
-            );
-          }
-          if (byPath.length > 0 || byContent.length > 0)
+          if (forgottenMatches(entry, seenPathsOfSameContent)) {
             return { applied: false, reason: "forgotten" };
+          }
           const seq = takeSeq();
           db.run(
             `INSERT INTO local_file_entries (external_id, location_id, identity_hash, relative_path,

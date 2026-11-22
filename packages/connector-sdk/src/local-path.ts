@@ -109,7 +109,9 @@ export type PathClass =
 const unsupported = (shape: PathShape): PathClass => ({ form: "unsupported-path-form", shape });
 const hasControlCharacter = (path: string): boolean =>
   [...path].some((ch) => ch.charCodeAt(0) < 0x20);
-const RESERVED_DEVICE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+// COM and LPT also take the superscript digits Windows reserves; CONIN$ and CONOUT$ are console devices
+const RESERVED_DEVICE =
+  /^(con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3]|conin\$|conout\$)$/i;
 
 /** An 8.3-looking part that carries `~digits` (`PROGRA~1`, `B~2.TXT`): maybe a short name the OS would expand. */
 function looksLikeShortName(part: string): boolean {
@@ -144,7 +146,10 @@ export function classifyPath(path: string, rules: PathRules = hostRules()): Path
     if (part === "" || part === ".") continue;
     if (part.includes(":")) return unsupported("alternate-stream");
     if (/[. ]$/.test(part)) return unsupported("trailing-dot-or-space");
-    if (RESERVED_DEVICE.test(part.split(".")[0] ?? "")) return unsupported("reserved-device-name");
+    // the name before the first dot, trailing spaces trimmed: `CON .txt` is the device `CON`
+    if (RESERVED_DEVICE.test((part.split(".")[0] ?? "").replace(/ +$/, ""))) {
+      return unsupported("reserved-device-name");
+    }
     if (looksLikeShortName(part)) return unsupported("short-name");
   }
   return { form: "ok" };
@@ -350,11 +355,16 @@ export async function checkApproval(
       return rejected("overlaps-location");
     }
     const ancestors = await chainOfCandidate();
+    // a stored identity that is no decimal number (BigInt("") would read as 0): nothing to compare, close
+    if (!/^[0-9]+$/.test(location.rootDev) || !/^[0-9]+$/.test(location.rootIno)) {
+      return rejected("overlaps-location");
+    }
     const root: FileId = { dev: BigInt(location.rootDev), ino: BigInt(location.rootIno) };
     if (!ancestors || ancestors.some((a) => sameId(a, root))) return rejected("overlaps-location");
-    // the other way round: the candidate lies above the location
+    // the other way round: the candidate lies above the location. A location whose chain cannot be
+    // read (its disk is gone) is not "elsewhere": fail closed, as for the candidate's own chain
     const above = await identityChain(fs, location.realPath, rules);
-    if (above?.some((a) => sameId(a, id))) return rejected("overlaps-location");
+    if (!above || above.some((a) => sameId(a, id))) return rejected("overlaps-location");
   }
 
   const name = api.basename(real);
@@ -398,7 +408,8 @@ export interface WalkOptions {
   limits: { maxDepth: number; maxRelativePathChars: number };
   /** Names (not paths) that are counted and not walked. */
   ignore: (name: string) => boolean;
-  excluded?: readonly ExcludedFolder[];
+  /** Required: an empty list must be written out. Leaving it out would walk the data directory. */
+  excluded: readonly ExcludedFolder[];
 }
 
 /**
@@ -438,7 +449,7 @@ async function* walkDir(
     return;
   }
   const folded = foldedParts(real);
-  for (const place of options.excluded ?? []) {
+  for (const place of options.excluded) {
     if (place.paths.some((p) => isWithin(folded, p)) || (place.id && sameId(place.id, dirId))) {
       yield { kind: "ignored", relativePath };
       return;
@@ -447,6 +458,18 @@ async function* walkDir(
   let names: string[];
   try {
     names = await fs.readdir(dir);
+  } catch {
+    yield { kind: "unreadable-dir", relativePath };
+    return;
+  }
+  // a folder swapped while it was listed is not the folder that was checked: drop what was listed
+  try {
+    const again = await fs.realpath(dir);
+    const againId = idOf(await fs.stat(again));
+    if (again !== expectedReal || !againId || !sameId(againId, dirId)) {
+      yield { kind: "skip", relativePath, reason: "redirected" };
+      return;
+    }
   } catch {
     yield { kind: "unreadable-dir", relativePath };
     return;
@@ -506,7 +529,9 @@ export type ReadFailure =
   | "identity-unavailable"
   | "not-readable"
   | "locked"
-  | "too-large";
+  | "too-large"
+  /** The folder is one the product never reads (the data directory, the user-data folder). */
+  | "excluded";
 
 export type ReadResult =
   | { ok: true; bytes: Uint8Array; size: number; mtimeNs: string; dev: string; ino: string }
@@ -519,6 +544,28 @@ export interface ReadOptions {
   relativePath: string;
   kind: "folder" | "file";
   maxFileBytes: number;
+  /** Required, as for the walk: a read under an excluded folder is refused (by path and by identity). */
+  excluded: readonly ExcludedFolder[];
+  /** The identity the walk saw for this file: when given, the opened file must be that one. */
+  expectedId?: { dev: string; ino: string };
+}
+
+/**
+ * Whether a folder is, or lies under, an excluded one: by its folded path, and by the identities of it
+ * and every ancestor. An identity chain that cannot be read counts as "excluded" (fail closed) when an
+ * excluded folder has an identity to compare.
+ */
+async function isExcludedFolder(
+  fs: BoundaryFs,
+  real: string,
+  excluded: readonly ExcludedFolder[],
+): Promise<boolean> {
+  const folded = foldedParts(real);
+  if (excluded.some((place) => place.paths.some((p) => isWithin(folded, p)))) return true;
+  const withId = excluded.flatMap((place) => (place.id ? [place.id] : []));
+  if (withId.length === 0) return false;
+  const chain = await identityChain(fs, real, hostRules());
+  return !chain || chain.some((a) => withId.some((id) => sameId(a, id)));
 }
 
 const READ_CHUNK_BYTES = 65_536;
@@ -555,6 +602,7 @@ export async function readLocationFile(options: ReadOptions): Promise<ReadResult
   }
   if (before.real !== expectedParent) return fail("redirected");
   if (!before.id) return fail("identity-unavailable");
+  if (await isExcludedFolder(fs, before.real, options.excluded)) return fail("excluded");
 
   // ② the name
   let named: FileId | undefined;
@@ -586,6 +634,13 @@ export async function readLocationFile(options: ReadOptions): Promise<ReadResult
     const openedId = idOf(opened);
     if (!openedId) return fail("identity-unavailable");
     if (!sameId(openedId, named)) return fail("redirected");
+    if (
+      options.expectedId &&
+      (openedId.dev.toString() !== options.expectedId.dev ||
+        openedId.ino.toString() !== options.expectedId.ino)
+    ) {
+      return fail("redirected");
+    }
     if (opened.size > BigInt(options.maxFileBytes)) return fail("too-large");
 
     // ⑤ read from the handle only

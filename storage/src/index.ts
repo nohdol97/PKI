@@ -32,6 +32,7 @@ export {
   hashSourceIdentity,
   identityKey,
   keyedTextHash,
+  keyedTextHasher,
   prepareCanonicalDb,
   type PreparedCanonicalDb,
   type SourceIdentity,

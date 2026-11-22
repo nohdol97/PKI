@@ -67,6 +67,22 @@ export function keyedTextHash(db: SqlDriver, domain: string, text: string): stri
   return keyedMac(db, [domain, text]);
 }
 
+/** The same hash as `keyedTextHash`, with the key read once: for many texts of one domain. */
+export function keyedTextHasher(db: SqlDriver, domain: string): (text: string) => string {
+  const key = readKey(db);
+  if (!key) throw new IdentityKeyMissingError();
+  return (text) => {
+    const mac = createHmac("sha256", key);
+    for (const part of [domain, text]) {
+      const bytes = Buffer.from(part, "utf8");
+      const length = Buffer.alloc(4);
+      length.writeUInt32BE(bytes.length);
+      mac.update(length).update(bytes);
+    }
+    return mac.digest("hex");
+  };
+}
+
 const hasHashedSources = (db: SqlDriver) =>
   db.all("SELECT 1 FROM sources WHERE identity_hashed = 1 LIMIT 1").length > 0;
 

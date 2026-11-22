@@ -152,7 +152,7 @@ describe("counter (I02B-R33: one source of sequence numbers)", () => {
     expect(index.lastSeq()).toBe(3);
   });
 
-  it("cannot be lowered or deleted, whoever writes", () => {
+  it("cannot be lowered by UPDATE or deleted by DELETE (REPLACE and a second insert: see the review tests)", () => {
     const index = createLocalFileIndex(db);
     index.insertEntry(newEntry(), []);
     expect(() => db.run("UPDATE local_index_seq SET value = 0")).toThrow();

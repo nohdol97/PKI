@@ -52,6 +52,7 @@ interface Node {
   id?: [bigint, bigint]; // dev, ino (default: a fresh non-zero identity)
   kind?: "dir" | "file";
   unreadable?: boolean;
+  statThrows?: boolean; // the OS cannot say (an unplugged or failing volume)
 }
 function stubFs(nodes: Record<string, Node>): BoundaryFs {
   let next = 1000n;
@@ -63,6 +64,7 @@ function stubFs(nodes: Record<string, Node>): BoundaryFs {
   };
   const stat = (p: string): StatInfo => {
     const n = nodeOf(p);
+    if (n.statThrows) throw Object.assign(new Error("EIO"), { code: "EIO" });
     const id = n.id ?? ids.get(p) ?? (ids.set(p, [1n, next++]), ids.get(p) as [bigint, bigint]);
     const kind = n.kind ?? "dir";
     return {
@@ -386,6 +388,41 @@ describe("path and identity are two routes; either one saying 'inside' is enough
     nodes["/vol/Other"] = { id: [1n, 77n] };
     const c = ctx({ fs: stubFs(nodes), rules: "posix", forbidden });
     expect((await reject("folder", "/vol/Other", c)).code).toBe("inside-data-directory");
+  });
+
+  it("an ancestor whose stat THROWS makes the answer 'inside' too (fail closed on the error path, not only on a 0)", async () => {
+    const nodes = base();
+    nodes["/vol"] = { id: [1n, 3n], statThrows: true };
+    nodes["/vol/Other"] = { id: [1n, 77n] };
+    const c = ctx({ fs: stubFs(nodes), rules: "posix", forbidden });
+    expect((await reject("folder", "/vol/Other", c)).code).toBe("inside-data-directory");
+  });
+
+  it("a location whose root cannot be read (an unplugged disk) blocks a new approval as overlapping: its chain is unknown, so fail closed", async () => {
+    const nodes = base();
+    nodes["/vol/Other"] = { id: [1n, 77n] };
+    delete nodes[DOCS]; // the stored location's folder is gone
+    const c = ctx({ fs: stubFs(nodes), rules: "posix", locations: [location] });
+    expect((await reject("folder", "/vol/Other", c)).code).toBe("overlaps-location");
+  });
+
+  it("an identity with dev 0 and a non-zero ino is unavailable as well", async () => {
+    const nodes = base();
+    nodes["/vol/Dev0"] = { id: [0n, 5n] };
+    const c = ctx({ fs: stubFs(nodes), rules: "posix" });
+    expect((await reject("folder", "/vol/Dev0", c)).code).toBe("identity-unavailable");
+  });
+
+  it("a stored root identity that is not a number is a closed rejection, not an exception", async () => {
+    const nodes = base();
+    nodes["/vol/Other"] = { id: [1n, 77n] };
+    for (const bad of [
+      { rootDev: "abc", rootIno: "20" },
+      { rootDev: "1", rootIno: "" },
+    ]) {
+      const c = ctx({ fs: stubFs(nodes), rules: "posix", locations: [{ ...location, ...bad }] });
+      expect((await reject("folder", "/vol/Other", c)).code).toBe("overlaps-location");
+    }
   });
 
   it("a candidate elsewhere on the same volume is approved", async () => {

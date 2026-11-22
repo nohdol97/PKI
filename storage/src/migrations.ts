@@ -971,15 +971,25 @@ const v21: Migration = (db) => {
 //   instance `local-files`: a JSONL line's namespace and external id are untrusted text. An entry that
 //   is no longer live (`deleted`, `forgotten`) is left alone, so a collector's own `deleted` write
 //   followed by the `delete` it caused does not take a second sequence number.
+/** Decimal text: digits only (a 64-bit number does not fit a JS number, so it is kept as text). */
+const DECIMAL = (column: string) => `${column} <> '' AND ${column} NOT GLOB '*[^0-9]*'`;
+/** A file number: the inode, or `dev:ino`, each decimal. */
+const FILE_NO = (column: string) =>
+  `${column} GLOB '[0-9]*' AND ${column} NOT GLOB '*[^0-9:]*' AND ${column} NOT GLOB '*:*:*' AND ${column} NOT GLOB '*:'`;
 const LOCAL_ID_SHAPE = (column: string) =>
   `length(${column}) = 22 AND ${column} NOT GLOB '*[^A-Za-z0-9_-]*'`;
+// The entry a tombstone names, found by index and not by scan: the source row is read once (plain: its
+// namespace and external id are the location id and file id, primary key `external_id`; hashed: its
+// namespace is `identity_hash`, a unique index), so the plan is a MULTI-INDEX OR on those two. The
+// instance is decided once, in the trigger's WHEN, so the tombstone of any other connector costs one
+// primary-key read of `sources`.
+const ofSource = (column: string, hashed: 0 | 1) =>
+  `(SELECT ${column} FROM sources WHERE id = new.source_id AND identity_hashed = ${hashed})`;
 const localEntryOfTombstone = (entry: string) => `
   ${entry}.state IN ('present', 'skipped')
-  AND EXISTS (
-    SELECT 1 FROM sources s
-     WHERE s.id = new.source_id AND s.connector_instance_id = 'local-files'
-       AND ((s.identity_hashed = 0 AND s.namespace = ${entry}.location_id AND s.external_id = ${entry}.external_id)
-         OR (s.identity_hashed = 1 AND s.namespace = ${entry}.identity_hash)))`;
+  AND ((${entry}.external_id = ${ofSource("external_id", 0)}
+        AND ${entry}.location_id = ${ofSource("namespace", 0)})
+    OR ${entry}.identity_hash = ${ofSource("namespace", 1)})`;
 const v22: Migration = (db) =>
   db.exec(`
     CREATE TABLE local_locations (
@@ -987,8 +997,8 @@ const v22: Migration = (db) =>
       type TEXT NOT NULL CHECK (type IN ('folder', 'file', 'jsonl-file')),
       display_path TEXT NOT NULL,
       real_path TEXT NOT NULL,
-      root_dev TEXT NOT NULL,
-      root_ino TEXT NOT NULL,
+      root_dev TEXT NOT NULL CHECK (${DECIMAL("root_dev")}),
+      root_ino TEXT NOT NULL CHECK (${DECIMAL("root_ino")}),
       state TEXT NOT NULL DEFAULT 'active'
         CHECK (state IN ('active', 'paused', 'unavailable', 'needs-confirmation', 'revoking')),
       state_reason TEXT,
@@ -1001,6 +1011,8 @@ const v22: Migration = (db) =>
       value INTEGER NOT NULL CHECK (typeof(value) = 'integer' AND value >= 0)
     );
     INSERT INTO local_index_seq (id, value) VALUES (1, 0);
+    CREATE TRIGGER local_index_seq_single BEFORE INSERT ON local_index_seq
+    BEGIN SELECT RAISE(ABORT, 'the local index sequence has one row, made by the migration'); END;
     CREATE TRIGGER local_index_seq_never_down BEFORE UPDATE ON local_index_seq
     WHEN new.value < old.value
     BEGIN SELECT RAISE(ABORT, 'the local index sequence never goes down'); END;
@@ -1013,10 +1025,10 @@ const v22: Migration = (db) =>
       relative_path TEXT,
       path_hash TEXT,
       size INTEGER CHECK (size IS NULL OR (typeof(size) = 'integer' AND size >= 0)),
-      mtime_ns TEXT,
+      mtime_ns TEXT CHECK (mtime_ns IS NULL OR (${DECIMAL("mtime_ns")})),
       content_hash TEXT,
       content_keyed_hash TEXT,
-      file_no TEXT,
+      file_no TEXT CHECK (file_no IS NULL OR (${FILE_NO("file_no")})),
       revision INTEGER NOT NULL CHECK (typeof(revision) = 'integer' AND revision >= 1),
       normalizer_version INTEGER,
       seq INTEGER NOT NULL UNIQUE CHECK (typeof(seq) = 'integer' AND seq >= 1),
@@ -1032,6 +1044,7 @@ const v22: Migration = (db) =>
     );
     CREATE UNIQUE INDEX local_file_entries_path ON local_file_entries (location_id, relative_path)
       WHERE relative_path IS NOT NULL;
+    CREATE INDEX local_file_entries_location ON local_file_entries (location_id, seq);
     CREATE INDEX local_file_entries_forgotten_path ON local_file_entries (location_id, path_hash)
       WHERE state = 'forgotten';
     CREATE INDEX local_file_entries_forgotten_content ON local_file_entries (location_id, content_keyed_hash)
@@ -1040,7 +1053,8 @@ const v22: Migration = (db) =>
       .map(
         (event) => `
     CREATE TRIGGER tombstones_local_index_${event.toLowerCase()} AFTER ${event} ON tombstones
-    WHEN new.lifted_at IS NULL
+    WHEN new.lifted_at IS NULL AND EXISTS (
+      SELECT 1 FROM sources WHERE id = new.source_id AND connector_instance_id = 'local-files')
     BEGIN
       UPDATE local_index_seq SET value = value + 1 WHERE id = 1 AND EXISTS (
         SELECT 1 FROM local_file_entries e WHERE ${localEntryOfTombstone("e")});

@@ -225,6 +225,23 @@ describe("the import allow-list", () => {
     }
   });
 
+  it("a non-test file cannot import a test file to reach what only tests may import (P-F6)", () => {
+    const SDK = "packages/connector-sdk/src";
+    const copy = copyOfRepo();
+    write(copy, `${SDK}/helper.test.ts`, `export { execFileSync } from "node:child_process";\n`);
+    write(
+      copy,
+      `${SDK}/evil.ts`,
+      `import { execFileSync } from "./helper.test.ts";\nexport { execFileSync };\n`,
+    );
+    const findings = checkPublicOnly(copy).map((f) => `${f.file}:${f.code}:${f.detail}`);
+    expect(findings).toEqual([`${SDK}/evil.ts:import-not-allowed:./helper.test.ts`]);
+    // a test file importing a test file is fine
+    write(copy, `${SDK}/evil.ts`, `export {};\n`);
+    write(copy, `${SDK}/other.test.ts`, `import "./helper.test.ts";\n`);
+    expect(checkPublicOnly(copy)).toEqual([]);
+  });
+
   it("refuses a relative path that leaves the root, the extra file aside", () => {
     expect(codes(FILE, `export * from "../server.ts";\n`)).toEqual([
       "import-not-allowed:../server.ts",
