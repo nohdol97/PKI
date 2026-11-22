@@ -52,7 +52,16 @@ export const canonicalTransaction: CanonicalTransaction = (db, fn) => {
     exec: (sql) => db.exec(sql),
     run: (sql, params) => db.run(sql, params),
     all: (sql, params) => db.all(sql, params),
-    transaction: (inner, options) => db.transaction(inner, options),
+    // a savepoint that rolls back takes the lines queued inside it, like a joined canonicalTransaction
+    transaction: (inner, options) => {
+      const mark = lines.length;
+      try {
+        return db.transaction(inner, options);
+      } catch (error) {
+        lines.length = mark;
+        throw error;
+      }
+    },
     close: () => db.close(),
     queueLedgerLine: (line) => void lines.push(line),
   };

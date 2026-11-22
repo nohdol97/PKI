@@ -39,60 +39,101 @@ export interface LedgerIo {
   read(path: string): string | undefined;
   /** Appends and fsyncs the file; a created file also gets its directory fsynced. */
   append(path: string, text: string): void;
-  /** Cuts the file to `bytes` and fsyncs it. */
-  truncate(path: string, bytes: number): void;
+  /** Cuts what follows the file's last newline (a cut line) and fsyncs it. */
+  cutToLastNewline(path: string): void;
   /** Renames `from` to a name that does not exist yet and fsyncs the directory. */
   rename(from: string, to: string): void;
   exists(path: string): boolean;
 }
 
-function fsyncDirectory(dir: string): void {
-  // POSIX makes a created or renamed file durable only with its directory fsynced. Windows
-  // cannot open a directory like this; there the call is skipped. Unverified on Windows (H01).
-  if (process.platform === "win32") return;
-  const fd = openSync(dir, "r");
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
+/** The `node:fs` calls the real file operations make, so a test can fail a short write or watch the order. */
+export interface LedgerFs {
+  existsSync(path: string): boolean;
+  openSync(path: string, flags: string, mode?: number): number;
+  /** Returns how many bytes were written, which may be fewer than asked. */
+  writeSync(fd: number, buffer: Uint8Array, offset: number, length: number): number;
+  fsyncSync(fd: number): void;
+  closeSync(fd: number): void;
+  readFileSync(path: string): Uint8Array;
+  truncateSync(path: string, bytes: number): void;
+  renameSync(from: string, to: string): void;
 }
 
-export const nodeLedgerIo: LedgerIo = {
-  read: (path) => {
-    try {
-      return readFileSync(path, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
-  },
-  append: (path, text) => {
-    const created = !existsSync(path);
-    const fd = openSync(path, "a", 0o600);
-    try {
-      writeSync(fd, text);
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    if (created) fsyncDirectory(dirname(path));
-  },
-  truncate: (path, bytes) => {
-    truncateSync(path, bytes);
-    const fd = openSync(path, "r+");
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-  },
-  rename: (from, to) => {
-    renameSync(from, to);
-    fsyncDirectory(dirname(to));
-  },
-  exists: (path) => existsSync(path),
+export const realLedgerFs: LedgerFs = {
+  existsSync,
+  openSync: (path, flags, mode) => openSync(path, flags, mode),
+  writeSync: (fd, buffer, offset, length) => writeSync(fd, buffer, offset, length),
+  fsyncSync,
+  closeSync,
+  readFileSync: (path) => readFileSync(path),
+  truncateSync,
+  renameSync,
 };
+
+/** The ledger's file operations over `fs`. `platform` is a parameter so the Windows branch can be run. */
+export function createNodeLedgerIo(
+  fs: LedgerFs = realLedgerFs,
+  platform: NodeJS.Platform = process.platform,
+): LedgerIo {
+  const fsyncDirectory = (dir: string): void => {
+    // POSIX makes a created or renamed file durable only with its directory fsynced. Windows
+    // cannot open a directory like this; there the call is skipped. Unverified on Windows (H01).
+    if (platform === "win32") return;
+    const fd = fs.openSync(dir, "r");
+    try {
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+  };
+  return {
+    read: (path) => {
+      try {
+        return Buffer.from(fs.readFileSync(path)).toString("utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw error;
+      }
+    },
+    append: (path, text) => {
+      const created = !fs.existsSync(path);
+      const bytes = Buffer.from(text, "utf8");
+      const fd = fs.openSync(path, "a", 0o600);
+      try {
+        // writeSync may write less than asked (disk full, a size limit) and does not loop: a cut
+        // line must never look like a durable one, so every byte goes out or this throws
+        let written = 0;
+        while (written < bytes.length) {
+          const n = fs.writeSync(fd, bytes, written, bytes.length - written);
+          if (n <= 0) throw new Error("the ledger write made no progress");
+          written += n;
+        }
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      if (created) fsyncDirectory(dirname(path));
+    },
+    cutToLastNewline: (path) => {
+      // on the bytes: decoded text would shift the offset past invalid UTF-8
+      const bytes = fs.readFileSync(path);
+      fs.truncateSync(path, Buffer.from(bytes).lastIndexOf(0x0a) + 1);
+      const fd = fs.openSync(path, "r+");
+      try {
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+    },
+    rename: (from, to) => {
+      fs.renameSync(from, to);
+      fsyncDirectory(dirname(to));
+    },
+    exists: (path) => fs.existsSync(path),
+  };
+}
+
+export const nodeLedgerIo: LedgerIo = createNodeLedgerIo();
 
 /** A ledger line as written: the draft, numbered. */
 export interface LedgerLine {
@@ -295,6 +336,19 @@ export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
   let locked = false;
   let reconcile = false;
 
+  // after a write that failed part-way the file may end in a fragment: the next write starts on a new
+  // line, so the fragment is one unreadable line of its own and never swallows a good one
+  let dirty = false;
+  const write = (text: string): void => {
+    try {
+      io.append(path, dirty ? `\n${text}` : text);
+      dirty = false;
+    } catch (error) {
+      dirty = true;
+      throw error;
+    }
+  };
+
   const text = io.read(path);
   if (text === undefined) {
     status.missing = options.canonicalSeq > 0 || options.hasData;
@@ -316,8 +370,7 @@ export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
       lastSeq = found.maxSeq;
       if (found.truncated) {
         status.truncated = true;
-        const whole = text.slice(0, text.lastIndexOf("\n") + 1);
-        io.truncate(path, Buffer.byteLength(whole, "utf8"));
+        io.cutToLastNewline(path);
       }
     }
   }
@@ -332,10 +385,10 @@ export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
       return Array.from({ length: count }, (_, i) => first + i);
     },
     append: (seqs, drafts) => {
-      io.append(path, drafts.map((d, i) => `${encodeLine(seqs[i] as number, d)}\n`).join(""));
+      write(drafts.map((d, i) => `${encodeLine(seqs[i] as number, d)}\n`).join(""));
     },
     cancel: (seqs) => {
-      io.append(path, `${JSON.stringify({ t: "cancel", seqs })}\n`);
+      write(`${JSON.stringify({ t: "cancel", seqs })}\n`);
     },
     lock: () => {
       locked = true;
