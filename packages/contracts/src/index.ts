@@ -363,7 +363,14 @@ export const StatusResponseSchema = z.object({
    * first. I04-T09 adds `scopePolicyDrops` (how many items the scope policy
    * dropped) beside `recent`, with the table it counts.
    */
-  invalidations: z.object({ recent: z.array(InvalidationSchema) }),
+  invalidations: z.object({
+    recent: z.array(InvalidationSchema),
+    /**
+     * Items the scope policy dropped (I04-R4). Optional until I04-T09, which adds the
+     * count and its table, makes it part of every answer; Activity shows it when present.
+     */
+    scopePolicyDrops: z.int().nonnegative().optional(),
+  }),
   /**
    * I04-R6, the screen's "데이터 보호" item. `legacyCleanup`: `pending` while the
    * one-time clean-up of earlier deletions' traces (FTS optimize + VACUUM) has not
@@ -506,6 +513,163 @@ export const EvidenceSourceResponseSchema = z.object({
 export type EvidenceSource = z.infer<typeof EvidenceSourceResponseSchema>;
 
 /**
+ * The Activity screen's job area (I03-R23). Everything here is a code, an id or a count:
+ * no source text and no Provider text reaches it (a job row holds none), so a screen can
+ * word every code itself. Times are ISO strings like the call history's.
+ */
+const JobCode = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+export const JOB_STATUS_VALUES = [
+  "queued",
+  "running",
+  "retry",
+  "held",
+  "succeeded",
+  "superseded",
+  "cancelled",
+  "dead_letter",
+] as const;
+export const JobStatusSchema = z.enum(JOB_STATUS_VALUES);
+export type JobStatusValue = z.infer<typeof JobStatusSchema>;
+
+const JobSummarySchema = z.object({
+  id: z.int().positive(),
+  kind: JobCode,
+  /** A Connector instance, a projection name, or a re-extraction's target; '' when the kind has none. */
+  target: z.string().max(200),
+  /** The internal source id, never its title: a title is imported text. */
+  sourceId: z.int().positive().nullable(),
+  status: JobStatusSchema,
+  /** Why the job is held, retrying or ended (a skip too), as a code. */
+  reason: JobCode.nullable(),
+  attempts: z.int().nonnegative(),
+  maxAttempts: z.int().positive(),
+  priority: z.enum(["user", "scheduled", "maintenance"]),
+  /** The next run time of a queued or retrying job (a held job's has no meaning, an ended job's is past). */
+  runAfter: z.string(),
+  finishedAt: z.string().nullable(),
+  cancelRequested: z.boolean(),
+  /** What a finished run counted (a sync's received, created, ...; a cleanup's purged): whole numbers only. */
+  resultCounts: z.record(z.string().max(40), z.int().nonnegative()).nullable(),
+});
+export type JobSummary = z.infer<typeof JobSummarySchema>;
+
+const LocalTimeSchema = z.strictObject({
+  hour: z.int().min(0).max(23),
+  minute: z.int().min(0).max(59),
+});
+export const SchedulePeriodSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("every-10-minutes") }),
+  z.strictObject({ kind: z.literal("hourly") }),
+  z.strictObject({ kind: z.literal("daily"), at: LocalTimeSchema }),
+  z.strictObject({
+    kind: z.literal("weekly"),
+    weekday: z.literal([0, 1, 2, 3, 4, 5, 6]),
+    at: LocalTimeSchema,
+  }),
+]);
+export type SchedulePeriod = z.infer<typeof SchedulePeriodSchema>;
+
+const ScheduleSummarySchema = z.object({
+  id: z.int().positive(),
+  kind: JobCode,
+  target: z.string().max(200),
+  period: SchedulePeriodSchema,
+  zone: z.string().max(100),
+  enabled: z.boolean(),
+  nextDue: z.string(),
+  lastRunSlot: z.string().nullable(),
+  /** Slots the latest check found due but not run (a sleep or a closed app). */
+  lastMissed: z.int().nonnegative(),
+  counts: z.object({
+    registered: z.int().nonnegative(),
+    coalesced: z.int().nonnegative(),
+    heldCoalesced: z.int().nonnegative(),
+    skipped: z.int().nonnegative(),
+    alreadyRan: z.int().nonnegative(),
+  }),
+  /** Why it registers nothing: its job gave up (the error code) or its job is held (the reason). */
+  pause: z
+    .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("failed"), code: JobCode }),
+      z.object({ kind: z.literal("held"), reason: JobCode }),
+    ])
+    .optional(),
+  /** A cleanup period cannot pause: its last failure's code stays here until a run succeeds. */
+  warning: JobCode.optional(),
+});
+export type ScheduleSummary = z.infer<typeof ScheduleSummarySchema>;
+
+const ProjectionActivitySchema = z.object({
+  name: z.string().max(100),
+  /** Removals not finished (queued, running, retrying, held) and removals given up. */
+  openRemoves: z.int().nonnegative(),
+  deadRemoves: z.int().nonnegative(),
+  /** `repeating`: rebuilds keep being given up and registered again (I03-R7): the projection is not usable. */
+  rebuild: z.enum(["none", "pending", "repeating"]),
+});
+export type ProjectionActivity = z.infer<typeof ProjectionActivitySchema>;
+
+export const JobsResponseSchema = z.object({
+  /** Every status, over all rows. */
+  counts: z.record(JobStatusSchema, z.int().nonnegative()),
+  /** Newest first, at most `limit`; `truncated` when more rows exist. */
+  jobs: z.array(JobSummarySchema),
+  truncated: z.boolean(),
+  schedules: z.array(ScheduleSummarySchema),
+  projections: z.array(ProjectionActivitySchema),
+  /** The Broker's call budget in its window; null while no Broker is bound. */
+  budget: z
+    .object({
+      used: z.int().nonnegative(),
+      maxCalls: z.int().positive(),
+      windowMs: z.int().positive(),
+      resetsAt: z.string().nullable(),
+    })
+    .nullable(),
+  /** Unfinished jobs of every kind against the cap; `warning` from 90% of it. */
+  backlog: z.object({ open: z.int().nonnegative(), cap: z.int().positive(), warning: z.boolean() }),
+});
+export type JobsResponse = z.infer<typeof JobsResponseSchema>;
+
+export const JobIdRequestSchema = z.strictObject({ id: z.int().positive() });
+/** A user action answers 200 with what became of it; a job or schedule that is gone is `not-found`. */
+export const CancelJobResponseSchema = z.object({
+  outcome: z.enum([
+    "cancelled",
+    "requested",
+    "finished",
+    "not-cancellable",
+    "not-found",
+    "unavailable",
+  ]),
+});
+export const RetryJobResponseSchema = z.object({
+  outcome: z.enum(["queued", "not-retryable", "duplicate-open", "not-found", "unavailable"]),
+});
+export const DiscardJobResponseSchema = z.object({
+  outcome: z.enum(["discarded", "not-dead-letter", "not-found", "unavailable"]),
+});
+export const ScheduleChangeRequestSchema = z.strictObject({
+  id: z.int().positive(),
+  period: SchedulePeriodSchema,
+});
+export const ScheduleActionResponseSchema = z.object({
+  outcome: z.enum(["done", "not-found", "unavailable"]),
+  schedule: ScheduleSummarySchema.optional(),
+});
+export const RunScheduleResponseSchema = z.object({
+  /** `started`: a job was registered; `already-open`: one was open, and it stays the one. */
+  outcome: z.enum(["started", "already-open", "not-found", "unavailable"]),
+  jobId: z.int().positive().optional(),
+});
+export const RebuildProjectionRequestSchema = z.strictObject({
+  projection: z.string().min(1).max(100),
+});
+export const RebuildProjectionResponseSchema = z.object({
+  outcome: z.enum(["requested", "already-open", "unknown-projection", "unavailable"]),
+});
+
+/**
  * Where the screens get the backend address and token: the dev server in the browser,
  * the preload in Electron (V01-R3). An empty `baseUrl` means the page's own origin.
  */
@@ -548,6 +712,55 @@ export const routes = {
     response: TombstoneLiftResponseSchema,
   },
   activity: { method: "GET", path: "/api/activity", response: ActivityResponseSchema },
+  jobs: { method: "GET", path: "/api/jobs", response: JobsResponseSchema },
+  cancelJob: {
+    method: "POST",
+    path: "/api/jobs/cancel",
+    request: JobIdRequestSchema,
+    response: CancelJobResponseSchema,
+  },
+  retryJob: {
+    method: "POST",
+    path: "/api/jobs/retry",
+    request: JobIdRequestSchema,
+    response: RetryJobResponseSchema,
+  },
+  discardJob: {
+    method: "POST",
+    path: "/api/jobs/discard",
+    request: JobIdRequestSchema,
+    response: DiscardJobResponseSchema,
+  },
+  changeSchedule: {
+    method: "POST",
+    path: "/api/schedules/change",
+    request: ScheduleChangeRequestSchema,
+    response: ScheduleActionResponseSchema,
+  },
+  disableSchedule: {
+    method: "POST",
+    path: "/api/schedules/disable",
+    request: JobIdRequestSchema,
+    response: ScheduleActionResponseSchema,
+  },
+  enableSchedule: {
+    method: "POST",
+    path: "/api/schedules/enable",
+    request: JobIdRequestSchema,
+    response: ScheduleActionResponseSchema,
+  },
+  runSchedule: {
+    method: "POST",
+    path: "/api/schedules/run",
+    request: JobIdRequestSchema,
+    response: RunScheduleResponseSchema,
+  },
+  rebuildProjection: {
+    method: "POST",
+    path: "/api/projections/rebuild",
+    request: RebuildProjectionRequestSchema,
+    response: RebuildProjectionResponseSchema,
+  },
   settings: { method: "GET", path: "/api/settings", response: SettingsResponseSchema },
   writeSettings: {
     method: "POST",

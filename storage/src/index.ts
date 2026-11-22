@@ -107,6 +107,12 @@ export {
   type StoredJob,
 } from "./jobs.ts";
 export { purgeEndedJobs } from "./job-retention.ts";
+export {
+  countJobsByStatus,
+  listRecentJobs,
+  projectionActivity,
+  type ProjectionActivity,
+} from "./job-activity.ts";
 export { PROJECTION_REBUILD_KIND, PROJECTION_REMOVE_KIND, usesVersionFence } from "./job-kinds.ts";
 export {
   closeCoveredRemoves,

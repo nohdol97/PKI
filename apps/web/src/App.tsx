@@ -14,6 +14,7 @@ import type {
 } from "@pki/contracts";
 import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { outcomeText } from "./activity-text.ts";
+import { JobsArea } from "./activity-jobs.tsx";
 import type { ApiClient } from "./api.ts";
 import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
@@ -24,6 +25,7 @@ import { nextSyncStops } from "./connector-text.ts";
 import { deleteConfirmText, deletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
+import { invalidationText } from "./job-text.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
 import {
   componentText,
@@ -348,8 +350,14 @@ const NONE = "—";
 
 function Activity({ api }: { api: ApiClient }) {
   const { data, error } = useRoute(api, "activity");
+  const status = useRoute(api, "status");
   return (
     <>
+      <JobsArea api={api} />
+      <h2>무효화 기록</h2>
+      <Failure error={status.error} />
+      {status.data && <p>{invalidationText(status.data.invalidations)}</p>}
+      <h2>Provider 호출 기록</h2>
       <Failure error={error} />
       {data?.calls.length === 0 && <p>Provider 호출 기록이 없습니다.</p>}
       {data && data.calls.length > 0 && (
