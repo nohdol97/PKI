@@ -124,6 +124,8 @@ describe("build check", () => {
     "backend/src/v02-double.e2e.ts",
     "backend/src/v02-double.hook.e2e.ts",
     "backend/src/v02-shell.e2e.ts",
+    "backend/src/swap-double.e2e.ts",
+    "backend/src/swap-double.hook.e2e.ts",
     "apps/desktop/e2e/double-main.ts",
     "backend/src/dev.ts",
     "apps/desktop/e2e/launch.ts",

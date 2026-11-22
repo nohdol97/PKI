@@ -26,6 +26,7 @@ import {
   selectProvider,
   type Broker,
   type EgressControls,
+  type ExecutionGate,
   type Logger,
   type TestBuildExecution,
   type UserActionIssuer,
@@ -183,9 +184,11 @@ export interface CallsOptions {
 }
 
 /**
- * The Broker, the user action issuer and the bound Providers (V01-R8, R9, R10).
- * The ledger is made here once: the issuer goes to the API layer only, the
- * redeemer to the Broker only. The Broker gets `egress`, the same instance the
+ * The Broker, the user action issuer, the bound Providers and the execution gate
+ * (V01-R8, R9, R10). The ledger is made here once: the issuer goes to the API layer
+ * only, the redeemer to the Broker only. The gate is made here once too: the
+ * Broker decides every attempt with it, and the API layer asks the same instance
+ * for Home's status (V01-T17), so no second copy of the rule exists. The Broker gets `egress`, the same instance the
  * API serves consent from (T08) and the Providers ask again just before sending
  * (T11), and calls the user's default Provider, read for every call; without one
  * it calls none (provider-selection.ts, no fallback).
@@ -194,24 +197,30 @@ export function productCalls(
   db: SqlDriver,
   egress: EgressControls,
   options: CallsOptions,
-): { broker: Broker; issuer: UserActionIssuer; providers: readonly LLMProvider[] } {
+): {
+  broker: Broker;
+  issuer: UserActionIssuer;
+  providers: readonly LLMProvider[];
+  execution: ExecutionGate;
+} {
   const { providers } = options;
   const ledger = createUserActionLedger();
+  // the pick reaches the gate in a test build only; folded away from any other
+  const execution = createExecutionGate(
+    BUILD_KIND === "test" && options.testBuild !== undefined
+      ? { db, testBuild: options.testBuild }
+      : { db },
+  );
   const broker = createBroker({
     db,
     provider: () => selectProvider(providers, readDefaultProvider(db)),
     userActions: ledger.redeemer,
     candidates: knowledgeCandidates(db),
     egress,
-    // the pick reaches the gate in a test build only; folded away from any other
-    execution: createExecutionGate(
-      BUILD_KIND === "test" && options.testBuild !== undefined
-        ? { db, testBuild: options.testBuild }
-        : { db },
-    ),
+    execution,
     recorder: createCallRecorder(db),
   });
-  return { broker, issuer: ledger.issuer, providers };
+  return { broker, issuer: ledger.issuer, providers, execution };
 }
 
 /**

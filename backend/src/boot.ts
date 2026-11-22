@@ -6,7 +6,13 @@
 // start-up comparison rebuilds a projection that missed a change (V02-R13). Shared by the two entries that differ only in how they
 // hand over the session and where secrets come from: dev.ts (stdout, environment)
 // and shell.ts (the Electron shell's parent channel for both).
-import type { KnowledgeEngine, LLMProvider, SecretSource, VectorIndex } from "@pki/contracts";
+import type {
+  EmbeddingProvider,
+  KnowledgeEngine,
+  LLMProvider,
+  SecretSource,
+  VectorIndex,
+} from "@pki/contracts";
 import type { Projections } from "@pki/knowledge-engine";
 import { BUILD_KIND } from "@pki/providers";
 import type { SqlDriver } from "@pki/storage";
@@ -51,6 +57,12 @@ export interface BootOptions {
   vectorIndex?: VectorIndex;
   /** The test build's job lease, poll and test kinds (job-runner.ts); ignored by any other build. */
   testBuild?: { jobs?: RunnerTestBuild };
+  /**
+   * Replace the composition point's Providers and embedder (tests: adapter-swap,
+   * V01-R17). The entries never pass them; everything else stays the product's.
+   */
+  providers?: readonly LLMProvider[];
+  embedder?: EmbeddingProvider | null;
 }
 
 export interface BootedBackend {
@@ -68,11 +80,14 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   await sweepCliRuns(options.dataDir); // what a crashed backend's CLI runs left
   // one egress instance for the consent API, the Broker (T08) and the Providers (T11)
   const egress = productEgress(db);
-  const providers = productProviders(db, options.secrets, egress, cliRunsRoot(options.dataDir));
+  const providers =
+    options.providers ??
+    productProviders(db, options.secrets, egress, cliRunsRoot(options.dataDir));
   const calls = productCalls(db, egress, { providers });
   const engine = options.engine ?? productEngine();
   const adapters = productAdapters(options.dataDir);
   if (options.vectorIndex) adapters.vectorIndex = options.vectorIndex;
+  if (options.embedder !== undefined) adapters.embedder = options.embedder;
   const projections = productProjections(db, { engine, ...adapters });
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();

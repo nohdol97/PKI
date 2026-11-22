@@ -49,9 +49,13 @@ export function embeddingText(status: EmbeddingStatusEntry) {
   return egress ? `${text} (${EGRESS_LABEL[egress]})` : text;
 }
 
+/** The execution gate's reason codes (providers/src/execution-gate.ts), apart from egress. */
+const EXECUTION_REASON = /^(cli|unverified)-/;
+
 /**
  * The default Provider's state (T16): what its queries found, with the install or
- * login guidance Settings shows for the same finding, or why egress stops it.
+ * login guidance Settings shows for the same finding, or why egress or the CLI
+ * execution conditions stop it (T17).
  */
 export function providerStatusText(status: ProviderStatus): {
   text: string;
@@ -69,7 +73,9 @@ export function providerStatusText(status: ProviderStatus): {
     return { text: `${name}: ${state}`, guidance };
   }
   if (status.state === "ready") return { text: `${name}: 사용 가능`, guidance: null };
-  return { text: `${name}: 전송이 막힘(${blockReasonText(status.reason)})`, guidance: null };
+  // the execution gate's reasons (T17 handoff 1); the ones a check finds came with it above
+  const stopped = EXECUTION_REASON.test(status.reason) ? "실행이 막힘" : "전송이 막힘";
+  return { text: `${name}: ${stopped}(${blockReasonText(status.reason)})`, guidance: null };
 }
 
 /** The pinned model the approval is for (T14 handoff 1·2): source host, size, the hash check. */

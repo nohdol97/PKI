@@ -38,6 +38,8 @@ import {
   type Broker,
   type BrokerResult,
   type EgressControls,
+  type ExecutionGate,
+  type ExecutionInput,
   type UserActionIssuer,
 } from "@pki/providers";
 import { deleteSourceWithNotice, type Projections } from "@pki/knowledge-engine";
@@ -101,11 +103,14 @@ export interface ServerOptions {
    * API layer holds the issuer. Without them the connection test is blocked
    * ("broker-not-bound"); boot.ts always binds them. `providers` are the ones
    * the Broker selects from (the user's default among them); none without it.
+   * `execution` is the Broker's own execution gate, asked again for Home's status
+   * (V01-T17), so the status never carries a second copy of the rule.
    */
   calls?: {
     broker: Pick<Broker, "call">;
     issuer: UserActionIssuer;
     providers?: readonly LLMProvider[];
+    execution: ExecutionGate;
   };
   /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
   importer?: JsonlImporter;
@@ -283,12 +288,27 @@ function providerChecks(now: () => number) {
 }
 
 /**
- * Whether the user's default Provider could take a call now (V01-R5, T16), for
+ * The call Home's status asks about (V01-T17 handoff 1, provisional): the product's
+ * main one, the extraction of an imported general document, which the job runner
+ * makes in the background. Set `trigger` to "user" for the connection test's answer
+ * instead (a listed CLI with background calls off would then read usable).
+ */
+const STATUS_EXECUTION = {
+  taskKind: "extract",
+  trigger: "background",
+  classification: "general",
+  malicious: false,
+  unverifiedAcknowledged: false,
+} as const satisfies Partial<ExecutionInput>;
+
+/**
+ * Whether the user's default Provider could take a call now (V01-R5, T16, T17), for
  * Home: none chosen, its two queries (a CLI's version and login status, an HTTP
  * Provider's settings and key presence; nothing goes over the network) find it
- * missing or logged out, or the egress rules would stop a general document going
- * to it. Only the default is checked: a blocked default is never covered by
- * another Provider (R5), so the others' state is not what Home must show.
+ * missing or logged out, the egress rules would stop a general document going to
+ * it, or the Broker's execution gate would block it (a CLI not on the verified
+ * list, background calls off). Only the default is checked: a blocked default is
+ * never covered by another Provider (R5), so the others' state is not what Home must show.
  */
 async function providerStatus(
   options: ServerOptions,
@@ -330,6 +350,16 @@ async function readProviderStatus(
   });
   if (!decision.allowed) {
     return { state: "unavailable", providerId: provider.id, reason: decision.reason };
+  }
+  // the Broker's gate, with the version the check found (kept up to 60 s); no process runs
+  const execution = options.calls?.execution.decide({
+    ...STATUS_EXECUTION,
+    providerId: provider.id,
+    transport: provider.transport,
+    version: found.version ?? undefined,
+  });
+  if (execution && !execution.run) {
+    return { state: "unavailable", providerId: provider.id, reason: execution.reason };
   }
   // a CLI whose login cannot be read (Claude Code has no status command) may still
   // work: ready, with the finding so Home guides like Settings does

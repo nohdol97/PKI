@@ -26,12 +26,15 @@ export const REPLACEMENTS: Readonly<Record<string, string>> = {
 /** Test-only or development-only code, refused by path (V02 spec "T10이 넘기는 것" 5). */
 const FORBIDDEN_PREFIXES = ["packages/testkit/", "apps/desktop/e2e/", "apps/desktop/artifact/"];
 // named as well as caught by the patterns below (V02 spec "T10이 넘기는 것" 5, T11 7):
-// the seed and the test-build doubles and shell entry, and the development entry
+// the seed and the test-build doubles and shell entry, the swapped configuration's
+// doubles and preload (V01 spec "T17이 넘기는 것" 3), and the development entry
 const FORBIDDEN_FILES = [
   "backend/src/v02-seed.e2e.ts",
   "backend/src/v02-double.e2e.ts",
   "backend/src/v02-double.hook.e2e.ts",
   "backend/src/v02-shell.e2e.ts",
+  "backend/src/swap-double.e2e.ts",
+  "backend/src/swap-double.hook.e2e.ts",
   "apps/desktop/e2e/double-main.ts",
   "backend/src/dev.ts",
   // the test-build-only job kind and the kill tests' backend entry (I03-R24)
