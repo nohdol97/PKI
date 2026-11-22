@@ -38,6 +38,7 @@ import {
   type ConnectorSet,
 } from "./composition.ts";
 import { systemClock } from "./clock.ts";
+import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
@@ -109,6 +110,13 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // the registry is built once, from the implementations bound; the backend holds the engine only as it wraps it (I04-R13)
   const registry =
     options.registry ?? productRegistry({ engine: bound, vectorIndex: adapters.vectorIndex });
+  try {
+    // an adapter no registered kind covers would escape a deletion (I04-R3): refuse to start
+    assertBoundAdaptersRegistered(registry, { engine: bound, vectorIndex: adapters.vectorIndex });
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   const entries = productEntries(registry);
   const engine = productVisibleEngine(db, registry, bound);
   const projections = productProjections(db, { engine, ...adapters });
