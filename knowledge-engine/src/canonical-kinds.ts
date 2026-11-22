@@ -343,8 +343,9 @@ export const CANONICAL_KINDS: readonly DerivativeKind[] = Object.freeze([
 ]);
 
 /**
- * No scope policy yet: its default arrives with I04-T09, and nothing reads
- * visible or scopesOf before I04-T08. Propagation does not consult it.
+ * No scope policy yet: its default arrives with I04-T09. Every judgement throws, so a registry that
+ * holds it fails every `visible` call closed; the backend's product registry runs the interim policy
+ * (backend interim-policy.ts) until T09. Propagation does not consult it.
  */
 export const NO_POLICY_YET: ScopePolicy = {
   compare: () => {
