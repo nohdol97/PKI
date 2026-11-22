@@ -37,6 +37,7 @@ import {
   writeCursor,
   type SqlDriver,
 } from "@pki/storage";
+import { systemClock, type Clock } from "./clock.ts";
 import type { JobRunner } from "./job-runner.ts";
 
 const PAGE_LIMIT = 100;
@@ -66,6 +67,8 @@ export interface SyncOptions {
   runner?: Pick<JobRunner, "wake">;
   /** Notified after each page commits, of its stored versions and deletions (V02-R13). */
   projections?: Pick<Projections, "notify">;
+  /** Gives a registered job its time, the runner's clock (I03-T04); default systemClock. */
+  clock?: Pick<Clock, "now">;
 }
 
 export interface ConnectorInstanceConfig {
@@ -100,6 +103,7 @@ function storeChange(
   instanceId: string,
   change: Change,
   notices: ProjectionNotice[],
+  clock: Pick<Clock, "now">,
 ): StoredOutcome | { refused: RefusalReason } {
   if (change.kind === "scope-change") {
     throw new Error(`${instanceId}: scope-change is not stored before I01-T02`);
@@ -125,6 +129,7 @@ function storeChange(
     kind: EXTRACT_JOB_KIND,
     sourceId: saved.sourceId,
     fenceVersion: saved.version,
+    at: new Date(clock.now()), // the clock the runner claims by
   });
   // A conflict is not a registration (V02 spec "T02가 넘기는 것" 3): the page fails.
   if (!job.registered) {
@@ -171,7 +176,7 @@ export async function syncConnector(
     const pageCreated = db.transaction(() => {
       let n = 0;
       for (const change of page.changes) {
-        const outcome = storeChange(db, instanceId, change, notices);
+        const outcome = storeChange(db, instanceId, change, notices, options.clock ?? systemClock);
         if (typeof outcome === "object") {
           // A deleted source's upsert is skipped, never a page failure: the
           // tombstone refuses it every time, so failing would stall the cursor and
@@ -258,7 +263,7 @@ export async function createConnectorManager(
   db: SqlDriver,
   instances: readonly ConnectorInstanceConfig[],
   kinds: Readonly<Record<string, ConnectorFactory>>,
-  options: Pick<SyncOptions, "runner" | "projections"> = {},
+  options: Pick<SyncOptions, "runner" | "projections" | "clock"> = {},
 ): Promise<ConnectorManager> {
   const entries = await Promise.all(
     instances.map(async ({ id, kind, config }) => {

@@ -2,10 +2,14 @@
 // expiring lease, one at a time, picks up a job left running by a backend that
 // stopped once the lease runs out, and discards a result whose version went
 // stale before it was written. Clocks are injected; nothing sleeps.
+// I03-T04: results go through the outcome table (retry with backoff, refunds,
+// the run-time limit on the injected monotonic clock) and steps through checkpoints.
 import {
+  DEFAULT_MAX_ATTEMPTS,
   readJob,
   registerConnectorInstance,
   registerJob,
+  requeueHeldJobs,
   saveSourceRecord,
   writeTombstone,
   type SqlDriver,
@@ -15,13 +19,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Clock } from "./clock.ts";
 import { openCanonicalDb } from "./composition.ts";
+import { DEFAULT_RUN_TIMEOUT_MS } from "./job-outcomes.ts";
 import {
   createJobRunner,
   DEFAULT_HEARTBEAT_MS,
   DEFAULT_LEASE_MS,
   testRunnerSettings,
   type JobHandler,
+  type JobKindSettings,
   type JobResult,
 } from "./job-runner.ts";
 
@@ -33,6 +40,13 @@ const T0 = new Date("2026-11-21T00:00:00.000Z");
 const LEASE = 60_000;
 let clock = T0;
 const now = () => clock;
+/** The monotonic reading of the injected clock, moved by the tests alone. */
+let mono = 0;
+const testClock: Clock = {
+  now: () => clock.getTime(),
+  sleep: async () => {},
+  monotonic: () => mono,
+};
 
 function reopen(): SqlDriver {
   const next = openCanonicalDb(join(dir, "data"));
@@ -44,6 +58,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-jobs-"));
   db = reopen();
   clock = T0;
+  mono = 0;
   registerConnectorInstance(db, "c", "test-fixtures");
 });
 
@@ -90,13 +105,19 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const runner = (handler: JobHandler, on = db, onError?: (e: unknown) => void) =>
+const runner = (
+  handler: JobHandler,
+  on = db,
+  onError?: (e: unknown) => void,
+  settings?: JobKindSettings,
+) =>
   createJobRunner({
     db: on,
     handlers: { extract: handler },
-    now,
+    clock: testClock,
     testBuild: { leaseMs: LEASE },
     ...(onError && { onError }),
+    ...(settings && { kinds: { extract: settings } }),
   });
 
 describe("job runner: version fence (V02-R5)", () => {
@@ -260,7 +281,7 @@ describe("job runner: outcomes other than a result", () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it("fails a job whose handler throws with a code, not the error text", async () => {
+  it("retries a job whose handler throws, with a code, not the error text", async () => {
     const job = imported();
     const errors: unknown[] = [];
     const run = await runner(
@@ -270,12 +291,17 @@ describe("job runner: outcomes other than a result", () => {
       db,
       (e) => errors.push(e),
     ).runOnce();
-    expect(run).toEqual({ jobId: job.id, status: "dead_letter" });
-    expect(readJob(db, job.id)).toMatchObject({ status: "dead_letter", reason: "handler-error" });
+    expect(run).toEqual({ jobId: job.id, status: "retry" });
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "retry",
+      reason: "handler-error",
+      attempts: 1,
+      runAfter: T0.getTime() + 30_000,
+    });
     expect(errors).toHaveLength(1);
   });
 
-  it("fails a job whose result cannot be written, keeping none of it", async () => {
+  it("retries a job whose result cannot be written, keeping none of it", async () => {
     const job = imported();
     const run = await runner(async () => ({
       status: "succeeded",
@@ -284,8 +310,8 @@ describe("job runner: outcomes other than a result", () => {
         throw new Error("constraint");
       },
     })).runOnce();
-    expect(run).toEqual({ jobId: job.id, status: "dead_letter" });
-    expect(readJob(db, job.id)).toMatchObject({ status: "dead_letter", reason: "write-error" });
+    expect(run).toEqual({ jobId: job.id, status: "retry" });
+    expect(readJob(db, job.id)).toMatchObject({ status: "retry", reason: "write-error" });
     expect(written(db, "partial")).toBe(false);
   });
 
@@ -310,7 +336,7 @@ describe("job runner: start and stop", () => {
     const r = createJobRunner({
       db,
       handlers: { extract: handler },
-      now,
+      clock: testClock,
       testBuild: { leaseMs: LEASE },
       pollMs: 1000,
     });
@@ -535,7 +561,7 @@ describe("lease.token (I03-R4..R6): two runs contend for one job", () => {
     const r = createJobRunner({
       db,
       handlers: { extract: async () => ({ status: "succeeded", write: () => {} }) },
-      now: () => (reads++, clock),
+      clock: { ...testClock, now: () => (reads++, clock.getTime()) },
       testBuild: { leaseMs: LEASE },
     });
     other.exec("BEGIN IMMEDIATE"); // another backend holds the lock
@@ -604,7 +630,7 @@ describe("lease.test-build (I03-R24): lease length and test kinds in a test buil
     const r = createJobRunner({
       db,
       handlers: {},
-      now,
+      clock: testClock,
       testBuild: {
         leaseMs: 1000,
         handlers: (on) => ({
@@ -617,5 +643,377 @@ describe("lease.test-build (I03-R24): lease length and test kinds in a test buil
     });
     expect(await r.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
     expect(until).toBe(T0.getTime() + 1000);
+  });
+});
+
+describe("effect.fence-new-version (I03-R6 ③, C1): a result behind commitDerived", () => {
+  const effectRows = (on: SqlDriver) =>
+    on.all("SELECT key FROM settings WHERE key LIKE 'effect-%'").length;
+  /** A result handed over as derived items, each writing one effect row. */
+  const derived = (job: StoredJob, names: string[]): JobResult => ({
+    status: "succeeded",
+    items: names.map((name) => ({
+      kind: "fact",
+      itemKey: name,
+      lineage: [{ sourceId: job.sourceId as number, version: job.fenceVersion as number }],
+      write: marked(db, `effect-${name}`),
+    })),
+  });
+
+  it("writes every item of a result whose version stayed the latest", async () => {
+    const job = imported("a");
+    const run = await runner(async (claimed) => derived(claimed, ["x", "y"])).runOnce();
+    expect(run).toEqual({ jobId: job.id, status: "succeeded" });
+    expect(effectRows(db)).toBe(2);
+  });
+
+  it("a new version arriving while the Provider answers: superseded, no effect row, no retry", async () => {
+    const job = imported("a", "v1");
+    const answer = deferred<undefined>();
+    const r = runner(async (claimed) => {
+      await answer.promise; // the extraction waits for the Provider
+      return derived(claimed, ["x", "y"]);
+    });
+    const run = r.runOnce();
+    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("running"));
+    const next = imported("a", "v2");
+    answer.resolve(undefined);
+    expect(await run).toEqual({ jobId: job.id, status: "superseded" });
+    expect(effectRows(db)).toBe(0);
+    expect(readJob(db, job.id)).toMatchObject({ status: "superseded", finishedAt: T0.getTime() });
+    expect((await r.runOnce())?.jobId).toBe(next.id); // only the new version's job is left
+  });
+
+  it("the source deleted while the Provider answers: superseded, no effect row", async () => {
+    const job = imported("a");
+    const answer = deferred<undefined>();
+    const run = runner(async (claimed) => {
+      await answer.promise;
+      return derived(claimed, ["x"]);
+    }).runOnce();
+    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("running"));
+    db.transaction(() => {
+      db.run("DELETE FROM source_versions WHERE source_id = ?", [job.sourceId]);
+      writeTombstone(db, {
+        sourceId: job.sourceId as number,
+        version: 1,
+        at: "x",
+        reason: "source-deleted",
+      });
+    });
+    answer.resolve(undefined);
+    expect(await run).toEqual({ jobId: job.id, status: "superseded" });
+    expect(effectRows(db)).toBe(0);
+  });
+});
+
+describe("outcome.mapping (I03-R9..R11): the runner stores what the table says", () => {
+  const broker = { requestId: "r", attempts: 1 };
+
+  it("retries a transient Broker failure after its backoff, on the injected clock", async () => {
+    const job = imported();
+    const results: JobResult[] = [
+      { status: "failed", error: "provider-error", ...broker },
+      { status: "failed", error: "rate-limited", ...broker },
+      { status: "succeeded", write: marked(db, "third") },
+    ];
+    const handler = vi.fn<JobHandler>(async () => results.shift() as JobResult);
+    const r = runner(handler);
+    clock = new Date(T0.getTime() + 7);
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "retry" });
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "retry",
+      reason: "provider-error",
+      attempts: 1,
+      runAfter: T0.getTime() + 7 + 30_000,
+      updatedAt: T0.getTime() + 7,
+    });
+    clock = new Date(T0.getTime() + 7 + 29_999);
+    expect(await r.runOnce()).toBeUndefined();
+    clock = new Date(T0.getTime() + 7 + 30_000);
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "retry" });
+    // the second attempt would wait a minute; a rate limit waits five
+    expect(readJob(db, job.id)).toMatchObject({
+      reason: "rate-limited",
+      attempts: 2,
+      runAfter: clock.getTime() + 5 * 60_000,
+    });
+    clock = new Date(clock.getTime() + 5 * 60_000);
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
+    expect(readJob(db, job.id)).toMatchObject({ status: "succeeded", attempts: 3, reason: null });
+    expect(handler).toHaveBeenCalledTimes(3);
+  });
+
+  it("gives up a job that fails every attempt, and one whose kind allows fewer sooner", async () => {
+    const run = async (settings?: JobKindSettings) => {
+      const job = imported();
+      const handler = vi.fn<JobHandler>(async () => ({
+        status: "fail",
+        code: "storage-failed",
+        retryable: true,
+      }));
+      const r = runner(handler, db, undefined, settings);
+      for (let i = 0; i < 10; i++) {
+        clock = new Date(clock.getTime() + 60 * 60_000);
+        await r.runOnce();
+      }
+      expect(readJob(db, job.id)).toMatchObject({
+        status: "dead_letter",
+        reason: "storage-failed",
+      });
+      return handler.mock.calls.length;
+    };
+    expect(await run()).toBe(DEFAULT_MAX_ATTEMPTS);
+    expect(await run({ maxAttempts: 2 })).toBe(2);
+  });
+
+  it("gives up at once a failure that cannot be retried, and a superseded job stays closed", async () => {
+    const failed = imported();
+    const stale = imported();
+    const results: JobResult[] = [
+      { status: "fail", code: "missing-version", retryable: false },
+      { status: "rejected", reason: "missing-source" },
+    ];
+    const r = runner(async () => results.shift() as JobResult);
+    expect(await r.runOnce()).toEqual({ jobId: failed.id, status: "dead_letter" });
+    expect(await r.runOnce()).toEqual({ jobId: stale.id, status: "superseded" });
+    expect(readJob(db, failed.id)).toMatchObject({ reason: "missing-version", attempts: 1 });
+  });
+
+  it("queues a yield that moved its checkpoint a minute later, unspent; one that did not is a retry", async () => {
+    const job = imported();
+    let step = 0;
+    const r = runner(
+      async (_job, context) => {
+        if (step < 2) context.checkpoint({ step: ++step });
+        return { status: "yield" };
+      },
+      db,
+      undefined,
+      { checkpointFields: ["step"] },
+    );
+    for (const expected of [1, 2]) {
+      expect(await r.runOnce()).toEqual({ jobId: job.id, status: "queued" });
+      expect(readJob(db, job.id)).toMatchObject({
+        status: "queued",
+        attempts: 0,
+        checkpoint: `{"step":${expected}}`,
+        runAfter: clock.getTime() + 60_000,
+      });
+      clock = new Date(clock.getTime() + 60_000);
+    }
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "retry" });
+    expect(readJob(db, job.id)).toMatchObject({ reason: "yield-no-progress", attempts: 1 });
+  });
+});
+
+describe("attempts.refund (I03-R11, C3): runs the Broker did not let out spend no attempt", () => {
+  it("held and released ten times: zero attempts; then a failure leaves four; a spent budget none", async () => {
+    const job = imported();
+    let result: JobResult = { status: "blocked", requestId: "r", reason: "cli-background-off" };
+    const handler = vi.fn<JobHandler>(async () => result);
+    const r = runner(handler);
+    for (let i = 0; i < 10; i++) {
+      expect(await r.runOnce()).toEqual({ jobId: job.id, status: "held" });
+      expect(readJob(db, job.id)).toMatchObject({
+        status: "held",
+        reason: "cli-background-off",
+        attempts: 0,
+      });
+      expect(requeueHeldJobs(db, { keep: [] })).toBe(1); // the setting changed: judged anew
+    }
+    result = { status: "blocked", requestId: "r", reason: "budget-exhausted" };
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "retry" });
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "retry",
+      reason: "budget-exhausted",
+      attempts: 0,
+    });
+    clock = new Date(T0.getTime() + 60 * 60_000);
+    result = { status: "failed", error: "provider-error", requestId: "r", attempts: 1 };
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "retry" });
+    const { attempts } = readJob(db, job.id) as StoredJob;
+    expect(DEFAULT_MAX_ATTEMPTS - attempts).toBe(4);
+    expect(handler).toHaveBeenCalledTimes(12);
+  });
+});
+
+describe("run-timeout (I03-R14, C3): a run over its time on the monotonic clock", () => {
+  it("cuts the signal and retries the job, without waiting for its handler", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const job = imported();
+    let signal: AbortSignal | undefined;
+    const late = deferred<JobResult>();
+    const lateWrite = vi.fn(marked(db, "late"));
+    const r = runner((_job, context) => {
+      signal = context.signal;
+      return late.promise; // ignores its signal
+    });
+    let run: unknown;
+    void r.runOnce().then((done) => (run = done));
+    await vi.waitFor(() => expect(signal).toBeDefined());
+
+    expect(DEFAULT_RUN_TIMEOUT_MS).toBe(600_000);
+    mono = DEFAULT_RUN_TIMEOUT_MS - 1;
+    clock = new Date(T0.getTime() + 3 * 24 * 3_600_000); // the wall clock jumping is not run time
+    await vi.advanceTimersByTimeAsync(LEASE / 4);
+    expect(signal?.aborted).toBe(false);
+    expect(run).toBeUndefined();
+    expect(readJob(db, job.id)?.status).toBe("running");
+
+    mono = DEFAULT_RUN_TIMEOUT_MS;
+    await vi.advanceTimersByTimeAsync(LEASE / 4);
+    expect(signal?.aborted).toBe(true);
+    await vi.waitFor(() => expect(run).toEqual({ jobId: job.id, status: "retry" }));
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "retry",
+      reason: "run-timeout",
+      attempts: 1,
+      runAfter: clock.getTime() + 30_000,
+      leaseUntil: null,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+
+    late.resolve({ status: "succeeded", write: lateWrite }); // its result comes too late
+    await vi.advanceTimersByTimeAsync(0);
+    expect(lateWrite).not.toHaveBeenCalled();
+    expect(readJob(db, job.id)?.status).toBe("retry");
+  });
+
+  it("takes the limit of the job's kind", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const job = imported();
+    const run = runner(() => new Promise<never>(() => {}), db, undefined, {
+      runTimeoutMs: 1000,
+    }).runOnce();
+    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("running"));
+    mono = 1000;
+    await vi.advanceTimersByTimeAsync(LEASE / 4);
+    expect(await run).toEqual({ jobId: job.id, status: "retry" });
+  });
+
+  it("a run within its time keeps its lease and result", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const job = imported();
+    const gate = deferred<JobResult>();
+    const run = runner(() => gate.promise).runOnce();
+    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("running"));
+    mono = DEFAULT_RUN_TIMEOUT_MS - 1;
+    await vi.advanceTimersByTimeAsync(LEASE / 4);
+    gate.resolve({ status: "succeeded", write: marked(db, "in-time") });
+    expect(await run).toEqual({ jobId: job.id, status: "succeeded" });
+    expect(written(db, "in-time")).toBe(true);
+  });
+});
+
+describe("checkpoint.resume (I03-R8, C1): a job claimed again goes on from its checkpoint", () => {
+  const STEPS = { checkpointFields: ["step"] };
+  const stepRows = (on: SqlDriver) =>
+    on.all("SELECT key FROM settings WHERE key LIKE 'step-%' ORDER BY key").map((r) => r.key);
+  /** Three steps, each one effect row with its checkpoint; `stopAfter` hangs like a killed run. */
+  const stepped =
+    (on: SqlDriver, ran: number[], stopAfter?: number): JobHandler =>
+    async (_job, context) => {
+      for (let step = (context.lastCheckpoint?.step ?? 0) + 1; step <= 3; step++) {
+        ran.push(step);
+        context.checkpoint({ step }, marked(on, `step-${step}`));
+        if (step === stopAfter) await new Promise<never>(() => {});
+      }
+      return { status: "succeeded", write: marked(on, "step-done") };
+    };
+
+  it("stopped after step 2, it resumes at step 3: one effect row per step", async () => {
+    const job = imported("a");
+    const first: number[] = [];
+    void runner(stepped(db, first, 2), db, undefined, STEPS).runOnce();
+    await vi.waitFor(() => expect(first).toEqual([1, 2]));
+    expect(readJob(db, job.id)).toMatchObject({ status: "running", checkpoint: '{"step":2}' });
+    db.close(); // the backend stops with the job running, two steps written
+    open.splice(open.indexOf(db), 1);
+
+    const after = reopen();
+    const second: number[] = [];
+    const restarted = runner(stepped(after, second), after, undefined, STEPS);
+    clock = new Date(T0.getTime() + LEASE);
+    expect(await restarted.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
+    expect(second).toEqual([3]);
+    expect(stepRows(after)).toEqual(["step-1", "step-2", "step-3", "step-done"]);
+    expect(readJob(after, job.id)).toMatchObject({ status: "succeeded", checkpoint: null });
+  });
+
+  it("a step refused by the checks ends the run: the signal is cut and its result is not written", async () => {
+    const job = imported("a");
+    let signal: AbortSignal | undefined;
+    const run = await runner(
+      async (_job, context) => {
+        signal = context.signal;
+        db.run("UPDATE jobs SET cancel_requested = 1 WHERE id = ?", [job.id]); // the user cancels
+        expect(context.checkpoint({ step: 1 }, marked(db, "step-1"))).toBe("cancelled");
+        return { status: "succeeded", write: marked(db, "step-done") };
+      },
+      db,
+      undefined,
+      STEPS,
+    ).runOnce();
+    expect(run).toEqual({ jobId: job.id, status: "cancelled" });
+    expect(signal?.aborted).toBe(true);
+    expect(stepRows(db)).toEqual([]);
+    expect(readJob(db, job.id)?.status).toBe("cancelled");
+  });
+
+  it("a kind that declared no checkpoint fields cannot write one", async () => {
+    const job = imported("a");
+    const run = await runner(async (_job, context) => {
+      context.checkpoint({ step: 1 });
+      return { status: "succeeded", write: () => {} };
+    }).runOnce();
+    expect(run).toEqual({ jobId: job.id, status: "retry" });
+    expect(readJob(db, job.id)).toMatchObject({ reason: "handler-error", checkpoint: null });
+  });
+});
+
+describe("jobs.no-content (I03-R2, R8, R9, C1): a job row never holds source text", () => {
+  const CANARY = "CANARY-7f3a-source-body";
+
+  it("keeps the canary out of the row and the checkpoint, whatever the handler tries", async () => {
+    const tries: JobHandler[] = [
+      async () => {
+        throw new Error(`could not parse: ${CANARY}`);
+      },
+      async (_job, context) => {
+        context.checkpoint({ step: CANARY } as never);
+        return { status: "succeeded", write: () => {} };
+      },
+      async (_job, context) => {
+        context.checkpoint({ [CANARY]: 1 });
+        return { status: "succeeded", write: () => {} };
+      },
+      async () => ({ status: "held", reason: CANARY }),
+      async () => ({ status: "fail", code: CANARY, retryable: true }),
+      async () => ({ status: "blocked", requestId: "r", reason: CANARY }),
+      async () => ({
+        status: "succeeded",
+        write: () => {
+          throw new Error(CANARY);
+        },
+      }),
+    ];
+    for (const handler of tries) {
+      imported(undefined, CANARY); // the source's body is the canary
+      await runner(handler, db, () => {}, { checkpointFields: ["step"] }).runOnce();
+    }
+    const rows = db.all("SELECT * FROM jobs");
+    expect(rows).toHaveLength(tries.length);
+    expect(rows.map((r) => r.status).sort()).toEqual([
+      "dead_letter",
+      "dead_letter",
+      "dead_letter",
+      "retry",
+      "retry",
+      "retry",
+      "retry",
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("CANARY");
+    expect(rows.every((r) => r.checkpoint === null)).toBe(true);
   });
 });

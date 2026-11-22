@@ -35,6 +35,7 @@ import {
   cliRunsRoot,
   type ConnectorSet,
 } from "./composition.ts";
+import { systemClock } from "./clock.ts";
 import { createConnectorManager } from "./connectors.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -91,7 +92,10 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   const projections = productProjections(db, { engine, ...adapters });
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
+  // one clock for the runner and for the jobs imports and syncs register (I03 "시계")
+  const clock = systemClock;
   const runner = productRunner(db, calls.broker, {
+    clock,
     engine,
     projections,
     // folded away from any other build (V01-T15); the runner honours it in a test build only
@@ -100,7 +104,11 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       : {}),
   });
   const { instances, kinds } = options.connectors ?? productConnectors();
-  const connectors = await createConnectorManager(db, instances, kinds, { runner, projections });
+  const connectors = await createConnectorManager(db, instances, kinds, {
+    runner,
+    projections,
+    clock,
+  });
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,
@@ -113,7 +121,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     egress,
     secrets: options.secrets,
     calls,
-    importer: productImporter(db, { runner, projections }),
+    importer: productImporter(db, { runner, projections, clock }),
     projections,
     onRunConditionsChanged: () => void releaseHeldJobs(db, runner),
   });

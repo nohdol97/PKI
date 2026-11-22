@@ -63,6 +63,7 @@ import {
   type ConnectorInstanceConfig,
   type SyncOptions,
 } from "./connectors.ts";
+import type { Clock } from "./clock.ts";
 import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-runner.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
@@ -233,7 +234,8 @@ export function productRunner(
   db: SqlDriver,
   broker: Pick<Broker, "call">,
   options: {
-    now?: () => Date;
+    /** The runner's clock (job-runner.ts); it also dates what an extraction observed. */
+    clock?: Clock;
     engine?: KnowledgeEngine;
     /** The engine's notifications; a stale engine is not asked for proposals. */
     projections?: Pick<Projections, "isStale">;
@@ -241,11 +243,11 @@ export function productRunner(
     testBuild?: RunnerTestBuild;
   } = {},
 ): JobRunner {
-  const { now, engine, projections } = options;
+  const { clock, engine, projections } = options;
   const handler = createExtractHandler({
     db,
     broker,
-    ...(now ? { now } : {}),
+    ...(clock ? { now: () => new Date(clock.now()) } : {}),
     ...(engine
       ? {
           engine,
@@ -257,7 +259,7 @@ export function productRunner(
   return createJobRunner({
     db,
     handlers: { [EXTRACT_JOB_KIND]: handler },
-    ...(now ? { now } : {}),
+    ...(clock ? { clock } : {}),
     // folded away from any other build with the runner's own test branch (V01-T15)
     ...(BUILD_KIND === "test" && options.testBuild ? { testBuild: options.testBuild } : {}),
     onError: (error) => log("job-error", { error: errorClass(error) }),
@@ -350,7 +352,7 @@ export function fixtureConnectors(file: string): ConnectorSet {
  */
 export function productImporter(
   db: SqlDriver,
-  options: Pick<SyncOptions, "runner" | "projections"> & { logger?: Logger } = {},
+  options: Pick<SyncOptions, "runner" | "projections" | "clock"> & { logger?: Logger } = {},
 ): JsonlImporter {
   const { logger = log, ...sync } = options;
   return (text) =>

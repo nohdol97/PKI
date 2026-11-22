@@ -4,7 +4,9 @@
 // the text holds, and the running job with its lease token as origin, taken from
 // the job the runner leased and from nothing else. The Broker reads the text,
 // attaches the instructions, grades and gates the call (background, consent,
-// egress). A blocked call holds the job with the Broker's reason; there is no
+// egress). A call that was not answered is handed to the runner as the Broker
+// gave it; the runner's outcome table decides (a blocked call holds the job with
+// the Broker's reason, a transient failure is retried; I03-R9): there is no
 // other Provider to fall back to. A source too large for one call is held
 // without a call (no chunking). The answer's facts and relations are kept only
 // with a quote the body holds exactly once; the code computes the span. Rows are
@@ -34,7 +36,6 @@ import {
   saveFact,
   saveRelation,
   type EvidenceTarget,
-  type JobClosing,
   type KnowledgeAttributes,
   type SqlDriver,
   type StoredJob,
@@ -43,8 +44,12 @@ import { isDate, recomputeDependencyDelay } from "./dependency-delay.ts";
 import { findCandidates } from "./linking.ts";
 import { locateQuote, type QuoteSpan } from "./quote.ts";
 
-/** What the handler hands the runner (job-runner.ts JobResult). */
-export type ExtractResult = Exclude<JobClosing, { status: "superseded" }>;
+/** What the handler hands the runner (a subset of backend job-outcomes.ts JobResult). */
+export type ExtractResult =
+  | { status: "succeeded"; write: () => void }
+  | { status: "held"; reason: string }
+  | { status: "fail"; code: string; retryable: false }
+  | Exclude<BrokerResult, { status: "ok" }>;
 
 /** The hold reason of a source too large for one call; changing settings does not release it. */
 export const EXTRACT_HOLD_TOO_LARGE = "source-too-large";
@@ -202,7 +207,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         : findSourceVersionId(db, sourceId, fenceVersion);
     const stored = versionId === undefined ? undefined : readSourceVersion(db, versionId);
     if (versionId === undefined || !stored) {
-      return { status: "dead_letter", reason: "missing-version" };
+      return { status: "fail", code: "missing-version", retryable: false };
     }
     if ([...stored.title].length + [...stored.body].length > MAX_EXTRACT_CODE_POINTS) {
       return { status: "held", reason: EXTRACT_HOLD_TOO_LARGE };
@@ -217,17 +222,11 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       origin: { jobId: String(job.id), leaseToken: String(job.leaseToken) },
       schemaVersion: EXTRACT_SCHEMA_VERSION,
       budget: { timeoutMs: EXTRACT_TIMEOUT_MS },
-      // one call (V02-R6): a transient failure dead-letters the job; retry policy is I03-T04's
+      // one call (V02-R6): a transient failure is retried by the job after its
+      // backoff (I03-R10), not inside the Broker (provisional until I03-T06's budget)
       retryable: false,
     });
-    switch (result.status) {
-      case "blocked":
-        return { status: "held", reason: result.reason };
-      case "rejected":
-        return { status: "dead_letter", reason: result.reason };
-      case "failed":
-        return { status: "dead_letter", reason: result.error };
-    }
+    if (result.status !== "ok") return result;
     const body = stored.body;
     const drops = { quotes: 0, other: 0 };
     // the Broker checked its output against the schema
