@@ -133,6 +133,16 @@ importers:
         specifier: workspace:*
         version: link:../packages/testkit
 
+  packages/connector-example:
+    dependencies:
+      '@pki/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@pki/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+
   packages/contracts:
     dependencies:
       zod:

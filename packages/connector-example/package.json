@@ -1,0 +1,15 @@
+{
+  "name": "@pki/connector-example",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./adapters": "./src/adapters/example-connector.ts"
+  },
+  "dependencies": {
+    "@pki/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@pki/testkit": "workspace:*"
+  }
+}

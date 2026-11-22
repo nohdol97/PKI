@@ -7,6 +7,7 @@
     { "path": "knowledge-engine" },
     { "path": "providers" },
     { "path": "storage" },
+    { "path": "packages/connector-example" },
     { "path": "packages/contracts" },
     { "path": "packages/document-normalize" },
     { "path": "packages/testkit" },
