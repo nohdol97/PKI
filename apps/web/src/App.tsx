@@ -18,6 +18,7 @@ import { outcomeText } from "./activity-text.ts";
 import type { ApiClient } from "./api.ts";
 import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
+import { BACKGROUND_EXECUTION_TEXT } from "./background-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
 import { deleteConfirmText, deletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
@@ -578,7 +579,7 @@ function ConnectionTest({ api }: { api: ApiClient }) {
 }
 
 /** V01-C7: background runs of a verified CLI combination stay off until the user turns them on. */
-function BackgroundExecution({ api }: { api: ApiClient }) {
+export function BackgroundExecution({ api }: { api: ApiClient }) {
   const { data, error, reload } = useRoute(api, "executionSettings");
   const [failure, setFailure] = useState<string>();
   const set = (cliBackground: boolean) =>
@@ -593,10 +594,7 @@ function BackgroundExecution({ api }: { api: ApiClient }) {
     <>
       <h2>백그라운드 실행</h2>
       <Failure error={error ?? failure} />
-      <p>
-        켜면 격리가 검증된 CLI 조합이 가져오기 뒤의 추출 같은 백그라운드 작업도 실행합니다. 검증되지
-        않은 조합은 이 설정과 관계없이 백그라운드로 실행하지 않습니다. 기본값은 끔입니다.
-      </p>
+      <p>{BACKGROUND_EXECUTION_TEXT}</p>
       {data && (
         <label>
           <input

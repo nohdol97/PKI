@@ -12,7 +12,7 @@
 // judgement at the next claim, which holds it again, attempt unspent, if the
 // condition stands (R11). A reason not in the table (a source too large) is never lifted here.
 import { TASK_KINDS, type TaskKind } from "@pki/contracts";
-import { readDefaultProvider, type Broker } from "@pki/providers";
+import { BUILD_KIND, readDefaultProvider, type Broker } from "@pki/providers";
 import {
   heldGroups,
   requeueHeldOnFingerprint,
@@ -47,13 +47,21 @@ export const HELD_REASONS: Readonly<Record<string, HeldReason>> = {
   "cli-background-off": { events: ["background", BY_PROVIDER] },
   "cli-not-verified": { events: [BY_PROVIDER], periodic: true, policy: true },
   "cli-unknown": { events: [BY_PROVIDER], periodic: true, policy: true },
-  "unverified-background": { events: [BY_PROVIDER], periodic: true, policy: true },
-  "unverified-not-synthetic": { events: [BY_PROVIDER], periodic: true, policy: true },
-  "unverified-malicious": { events: [BY_PROVIDER], periodic: true, policy: true },
-  "unverified-ack-required": { events: [BY_PROVIDER], periodic: true, policy: true },
   "capabilities-unavailable": { events: [BY_PROVIDER], periodic: true },
   "structured-output-unsupported": { events: [BY_PROVIDER], periodic: true },
   "no-provider": { events: [BY_PROVIDER], periodic: true, policy: true },
+  // Only the development exception gives these (execution-gate.ts), so a production
+  // build never holds a job for them; the constant folds and the bundle keeps none of
+  // the exception's strings (artifact.contents). Provisional: a production start on a
+  // database a development build left with such a job keeps it held.
+  ...(BUILD_KIND === "production"
+    ? {}
+    : {
+        "unverified-background": { events: [BY_PROVIDER], periodic: true, policy: true },
+        "unverified-not-synthetic": { events: [BY_PROVIDER], periodic: true, policy: true },
+        "unverified-malicious": { events: [BY_PROVIDER], periodic: true, policy: true },
+        "unverified-ack-required": { events: [BY_PROVIDER], periodic: true, policy: true },
+      }),
 };
 
 const reasonsWhere = (test: (reason: HeldReason) => boolean): string[] =>
