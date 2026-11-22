@@ -14,11 +14,10 @@ import {
   saveFact,
   saveRelation,
   setKnowledgeStatus,
-  supersedeUnsupported,
   type KnowledgeAttributes,
 } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
-import { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
+import { readKnowledgeRevision } from "./revisions.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -337,82 +336,11 @@ describe("knowledge revision", () => {
   });
 });
 
-describe("a new version's propagation (V02-R11)", () => {
-  const sourceIdOf = (externalId: string) =>
-    db.all("SELECT id FROM sources WHERE external_id = ?", [externalId])[0]?.id as number;
-  /** Evidence quoting the first `n` code points of the version's body. */
-  const cite = (target: { factId: number } | { relationId: number }, sv: number, quote: string) =>
-    addEvidence(db, { target, sourceVersionId: sv, start: 0, end: [...quote].length, quote });
+describe("reviving a superseded row (V02-R11)", () => {
   const statusOf = (table: "facts" | "relations", id: number) =>
     db.all(`SELECT status FROM ${table} WHERE id = ?`, [id])[0]?.status;
-
-  it("supersedes what the source's newer version leaves without current evidence, keeping the evidence on its version", () => {
-    const a = item("A");
-    const b = item("B");
-    const c = item("C");
-    const v1 = version("msg-1", "B API는 12월 10일");
-    const other = version("wiki-1", "B API는 12월 10일");
-    const unrelated = version("mail-1", "C는 12월 5일");
-    const onlyHere = saveFact(db, { itemId: b, kind: "completion", value: "12-10", ...attrs }).id;
-    const shared = saveFact(db, { itemId: b, kind: "name", value: "B API", ...attrs }).id;
-    const rejected = saveFact(db, {
-      itemId: b,
-      kind: "owner",
-      value: "x",
-      ...attrs,
-      status: "rejected",
-    }).id;
-    const relation = saveRelation(db, {
-      subjectId: a,
-      type: "DEPENDS_ON",
-      objectId: b,
-      ...attrs,
-    }).id;
-    const elsewhere = saveFact(db, { itemId: c, kind: "target", value: "12-05", ...attrs }).id;
-    const old = cite({ factId: onlyHere }, v1, "B API는 12월 10일");
-    cite({ factId: shared }, v1, "B API");
-    cite({ factId: shared }, other, "B API");
-    cite({ factId: rejected }, v1, "B");
-    cite({ relationId: relation }, v1, "B API");
-    cite({ factId: elsewhere }, unrelated, "C는 12월 5일");
-
-    const v2 = version("msg-1", "B API는 12월 3일");
-    const seq = readChangeSeq(db);
-    const revision = readKnowledgeRevision(db);
-    expect(supersedeUnsupported(db, sourceIdOf("msg-1"))).toEqual({
-      facts: [onlyHere],
-      relations: [relation],
-      itemIds: [a, b],
-    });
-
-    expect(statusOf("facts", onlyHere)).toBe("superseded");
-    expect(statusOf("relations", relation)).toBe("superseded");
-    expect(statusOf("facts", shared)).toBe("candidate"); // another source's evidence is current
-    expect(statusOf("facts", rejected)).toBe("rejected"); // a rejection is not overwritten
-    expect(statusOf("facts", elsewhere)).toBe("candidate");
-    // the evidence is not taken off: it stays on version 1 as past evidence
-    expect(listEvidence(db, { factId: onlyHere })).toEqual([
-      expect.objectContaining({ id: old, sourceVersionId: v1, current: false }),
-    ]);
-    expect(v2).toBeGreaterThan(v1);
-    // the triggers count: two rows changed, no source version stored
-    expect(readKnowledgeRevision(db)).toBe(revision + 2);
-    expect(readChangeSeq(db)).toBe(seq);
-    // nothing is left to supersede the second time; the cited rows' items are still reported
-    expect(supersedeUnsupported(db, sourceIdOf("msg-1"))).toEqual({
-      facts: [],
-      relations: [],
-      itemIds: [a, b],
-    });
-    expect(readKnowledgeRevision(db)).toBe(revision + 2);
-  });
-
-  it("supersedes nothing while the cited version is still the source's latest", () => {
-    const factId = saveFact(db, { itemId: item("B"), kind: "k", value: "v", ...attrs }).id;
-    cite({ factId }, version("msg-1", "B API"), "B");
-    expect(supersedeUnsupported(db, sourceIdOf("msg-1")).facts).toEqual([]);
-    expect(statusOf("facts", factId)).toBe("candidate");
-  });
+  // The supersede half of V02-R11 is the fact and relation kinds' (knowledge-engine
+  // canonical-kinds.test.ts, I04-T03).
 
   it("revives a superseded row as a candidate, and leaves any other status alone", () => {
     const b = item("B");

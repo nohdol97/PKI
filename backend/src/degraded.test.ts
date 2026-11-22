@@ -394,7 +394,12 @@ describe("the product on a PC with no CLI and no network (all five at once)", ()
         provider: { state: "unavailable", providerId: null, reason: "no-provider" },
         embedding: { state: "model-missing", egress: "local" },
         vectorIndex: { state: "unavailable", reason: "no vector index module in this build" },
-        invalidations: { recent: [] },
+        // each synced version's propagation left its record (I04-R4, I04-T03)
+        invalidations: {
+          recent: [2, 1].map((changeSeq) =>
+            expect.objectContaining({ changeSeq, changeKind: "new-version" }),
+          ),
+        },
       });
       await call(routes.setDefaultProvider.path, { providerId: "claude-code" });
       expect((await read()).provider).toMatchObject({

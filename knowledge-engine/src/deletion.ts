@@ -1,23 +1,26 @@
-// A source's deletion or access revocation (V02-R12), one transaction: a tombstone
-// (identifier, the version reached, the time, the reason; no content) covering
-// every product version of the source, which raises the change sequence; the
-// purge of all its versions with their evidence and keyword index rows, and of
-// what they alone supported (storage purge.ts); then the rule over the collected
-// items that remain. Not propagateNewVersion ("T07이 넘기는 것" 6): what lost all
-// evidence is deleted, and only a collected row left with past evidence alone is
-// superseded (the purge does it). The `dirty` Insight state is not used either:
-// the rule runs here, in the same transaction.
-// Open jobs of the source stay; the tombstone covers their fence version, so the
-// runner closes them superseded and a late result is discarded (V02-R5).
+// A source's deletion or access revocation (V02-R12, I04-R5, R12), one
+// transaction: a tombstone (identifier, the version reached, the time, the
+// reason; no content) covering every product version of the source, which raises
+// the change sequence; the source's open jobs closed (I03's supersedeOpenJobs:
+// a running job's holder loses its lease, projection jobs stay); then the
+// registry's propagation of the tombstone change through every canonical kind
+// (canonical-kinds.ts): all its versions with their evidence and keyword index
+// rows, what they alone supported, the knowledge left judged again and the rule
+// over the collected items that remain. The `dirty` Insight state is not used:
+// the rule runs here, in the same transaction. I04-T05's tombstone entry takes
+// this place.
 import {
-  purgeSourceContent,
+  supersedeOpenJobs,
   writeTombstone,
   type InsightKey,
-  type PurgeResult,
   type SqlDriver,
   type TombstoneReason,
 } from "@pki/storage";
-import { recomputeDependencyDelay, type RuleOutcome } from "./dependency-delay.ts";
+import { propagateCanonical, type CanonicalReport } from "./canonical-kinds.ts";
+import type { RuleOutcome } from "./dependency-delay.ts";
+
+/** What the canonical kinds deleted and kept, by id, ascending. */
+export type PurgeResult = Omit<CanonicalReport, "insights">;
 
 export type SourceDeletion =
   | {
@@ -46,17 +49,21 @@ export function deleteSource(
       sourceId,
     ])[0]?.v as number | null;
     if (latest === null) return { outcome: "unchanged" };
+    // one clock for the whole deletion: the tombstone's, the jobs' and the record's
+    const when = new Date(at);
+    if (Number.isNaN(when.getTime())) throw new RangeError(`deletion time is not a date: ${at}`);
     // A stored version is always above the source's tombstone (storage trigger),
     // so the latest version covers every version, past tombstones included.
     if (writeTombstone(db, { sourceId, version: latest, at, reason }) !== "written") {
       throw new Error(`source ${sourceId}: tombstone not moved to version ${latest}`);
     }
-    const purge = purgeSourceContent(db, sourceId);
-    return {
-      outcome: "deleted",
-      version: latest,
-      purge,
-      insights: recomputeDependencyDelay(db, purge.remainingItemIds),
-    };
+    supersedeOpenJobs(db, sourceId, when);
+    const { insights, ...purge } = propagateCanonical(
+      db,
+      // the tombstone keeps no revision before I04-T05
+      { kind: reason, sourceId, coversVersion: latest, lastRevision: null },
+      at,
+    ).report;
+    return { outcome: "deleted", version: latest, purge, insights };
   });
 }

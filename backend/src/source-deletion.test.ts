@@ -308,7 +308,7 @@ describe("delete.propagate", () => {
     expect(db.all("SELECT status FROM jobs")).toEqual([{ status: "superseded" }]);
   });
 
-  it("discards the result of a job leased before the purge (fence)", async () => {
+  it("discards the result of a job leased before the purge (its lease closed by the purge)", async () => {
     const hooks: { during?: () => void } = {};
     const { provider, runner, importer } = pipeline(hooks);
     await importer(read("v02-mail.jsonl"));
@@ -319,8 +319,10 @@ describe("delete.propagate", () => {
       });
     await runner.wake();
     expect(provider.requests).toHaveLength(1);
+    // the purge closed the running job (I04-R12, supersedeOpenJobs): its holder's
+    // close no longer holds the lease, so nothing of its result is written
     expect(db.all("SELECT status, reason FROM jobs")).toEqual([
-      { status: "superseded", reason: null },
+      { status: "superseded", reason: "source-closed" },
     ]);
     expect([count("items"), count("facts"), count("evidence")]).toEqual([0, 0, 0]);
   });

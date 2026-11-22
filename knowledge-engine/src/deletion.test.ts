@@ -5,11 +5,13 @@
 import {
   addEvidence,
   insertItem,
+  listInvalidations,
   migrate,
   readChangeSeq,
   readInsight,
   readTombstone,
   registerConnectorInstance,
+  registerJob,
   saveFact,
   saveRelation,
   saveSourceRecord,
@@ -221,5 +223,121 @@ describe("deleteSource", () => {
     expect(db.all("SELECT status FROM facts WHERE id = ?", [late])).toEqual([
       { status: "candidate" },
     ]);
+  });
+});
+
+describe("purge.idempotent: the purge closes the source's open jobs (I04-R12)", () => {
+  it("supersedes every open job of the source in the purge's transaction, but no projection job, dead letter or other source's job", () => {
+    const { chat, mail } = lateDependency();
+    const job = (kind: string, target: string, sourceId = chat.sourceId) => {
+      const r = registerJob(db, { kind, target, sourceId, fenceVersion: 1 });
+      if (!r.registered) throw new Error("not registered");
+      return r.job.id;
+    };
+    const set = (id: number, status: string) =>
+      db.run("UPDATE jobs SET status = ? WHERE id = ?", [status, id]);
+    const queued = job("extract", "q");
+    const running = job("extract", "r");
+    set(running, "running");
+    const retry = job("extract", "t");
+    set(retry, "retry");
+    const held = job("extract", "h");
+    set(held, "held");
+    const dead = job("extract", "d");
+    set(dead, "dead_letter");
+    const remove = job("projection-remove", "engine");
+    const otherSource = job("extract", "q", mail.sourceId);
+    const tokens = () =>
+      Object.fromEntries(
+        db.all("SELECT id, lease_token FROM jobs").map((r) => [r.id as number, r.lease_token]),
+      );
+    const before = tokens();
+
+    deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
+
+    const rows = db.all("SELECT id, status, reason FROM jobs ORDER BY id");
+    expect(rows).toEqual([
+      { id: queued, status: "superseded", reason: "source-closed" },
+      { id: running, status: "superseded", reason: "source-closed" },
+      { id: retry, status: "superseded", reason: "source-closed" },
+      { id: held, status: "superseded", reason: "source-closed" },
+      { id: dead, status: "dead_letter", reason: null },
+      { id: remove, status: "queued", reason: null },
+      { id: otherSource, status: "queued", reason: null },
+    ]);
+    // a running job's holder loses its lease: its heartbeat and result write fail
+    expect(tokens()[running]).toBe((before[running] as number) + 1);
+  });
+
+  it("changes nothing the second time: sequence, rows, records and jobs as they were", () => {
+    const { chat } = lateDependency();
+    deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
+    const r = registerJob(db, {
+      kind: "extract",
+      target: "late",
+      sourceId: chat.sourceId,
+      fenceVersion: 1,
+    });
+    expect(r.registered).toBe(true);
+    const snapshot = () => ({
+      seq: readChangeSeq(db),
+      rows: ["source_versions", "evidence", "facts", "relations", "items", "insights"].map(
+        (t) => db.all(`SELECT count(*) AS n FROM ${t}`)[0]?.n,
+      ),
+      records: listInvalidations(db),
+      jobs: db.all("SELECT id, status, reason, lease_token FROM jobs ORDER BY id"),
+    });
+    const before = snapshot();
+
+    expect(deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT })).toEqual({
+      outcome: "unchanged",
+    });
+
+    expect(snapshot()).toEqual(before);
+  });
+});
+
+describe("one clock per deletion (I04-T03)", () => {
+  it("stamps the closed jobs and the invalidation record with the deletion's time", () => {
+    const { chat } = lateDependency();
+    const r = registerJob(db, {
+      kind: "extract",
+      target: "q",
+      sourceId: chat.sourceId,
+      fenceVersion: 1,
+    });
+    if (!r.registered) throw new Error("not registered");
+
+    deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
+
+    expect(db.all("SELECT updated_at, finished_at FROM jobs WHERE id = ?", [r.job.id])).toEqual([
+      { updated_at: Date.parse(AT), finished_at: Date.parse(AT) },
+    ]);
+    expect(listInvalidations(db)[0]?.at).toBe(AT);
+    expect(readTombstone(db, chat.sourceId)?.at).toBe(AT);
+  });
+
+  it("refuses a deletion time that is not a date, writing nothing", () => {
+    const { chat } = lateDependency();
+    expect(() =>
+      deleteSource(db, chat.sourceId, { reason: "source-deleted", at: "later" }),
+    ).toThrow(RangeError);
+    expect(readTombstone(db, chat.sourceId)).toBeUndefined();
+  });
+
+  it("checks the time before its first write, not only by rolling back", () => {
+    const { chat } = lateDependency();
+    const writes: string[] = [];
+    const watched: SqlDriver = {
+      ...db,
+      run: (sql, params) => {
+        writes.push(sql);
+        return db.run(sql, params);
+      },
+    };
+    expect(() =>
+      deleteSource(watched, chat.sourceId, { reason: "source-deleted", at: "later" }),
+    ).toThrow(RangeError);
+    expect(writes).toEqual([]);
   });
 });

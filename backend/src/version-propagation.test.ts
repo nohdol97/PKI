@@ -340,7 +340,8 @@ describe("propagation atomicity", () => {
   it("stores no version whose propagation fails: the two commit together", async () => {
     const fact = await evidenced();
     const before = counts();
-    // superseding the fact is the propagation's only write; make it fail
+    // superseding the fact is the propagation's knowledge write (beside its invalidation
+    // record, I04-T03); make it fail
     db.exec(`CREATE TEMP TRIGGER block_supersede BEFORE UPDATE OF status ON facts
              BEGIN SELECT RAISE(ABORT, 'propagation blocked'); END`);
     page = [upsert("b", "B API 12-03", 2)];
