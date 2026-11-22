@@ -14,7 +14,7 @@ import type {
   VectorIndex,
 } from "@pki/contracts";
 import type { Projections } from "@pki/knowledge-engine";
-import { BUILD_KIND, errorClass, log } from "@pki/providers";
+import { BUILD_KIND, errorClass, log, type ScopeGrading } from "@pki/providers";
 import type { DerivativeRegistry, SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
@@ -39,6 +39,7 @@ import {
   type ConnectorSet,
 } from "./composition.ts";
 import { systemClock } from "./clock.ts";
+import { applyConfiguredScopes, CONNECTOR_SCOPES } from "./connector-scopes.ts";
 import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
 import { createConnectorManager, type ConnectorManager } from "./connectors.ts";
 import { startCollectorUpkeep } from "./connector-sync-job.ts";
@@ -86,6 +87,8 @@ export interface BootOptions {
    * runs the registry the composition point builds, whatever a caller passes.
    */
   registry?: DerivativeRegistry;
+  /** The mapping scope -> class for the Broker (I01-R15); honoured in a test build only, like `registry`. */
+  scopeGrading?: ScopeGrading;
   /**
    * The scope policy by name (I04-R14, S21): `default` (also when absent) or `site`, which the public
    * repository does not implement, so the start stops with `배포처 후속` before anything is opened.
@@ -113,6 +116,14 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // the policy before any file is opened: a name that is not implemented stops the start (I04-H2 ①)
   const policy = productScopePolicy(options.scopePolicy);
   const db = openCanonicalDb(options.dataDir);
+  // the instances' configured scopes follow the build's file before anything is graded (I01-R15)
+  applyConfiguredScopes(db);
+  // one fixed line per state, so a build that lost the file is told from one that has none to use
+  if (CONNECTOR_SCOPES.file !== "read") {
+    log(`connector-scopes-${CONNECTOR_SCOPES.file}`, { configured: 0 });
+  } else if (CONNECTOR_SCOPES.rejected > 0) {
+    log("connector-scopes-rejected", { count: CONNECTOR_SCOPES.rejected });
+  }
   await sweepCliRuns(options.dataDir); // what a crashed backend's CLI runs left
   // one egress instance for the consent API, the Broker (T08) and the Providers (T11)
   const egress = productEgress(db);
@@ -136,7 +147,11 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     db.close();
     throw error;
   }
-  const calls = productCalls(db, egress, { providers, registry });
+  const calls = productCalls(db, egress, {
+    providers,
+    registry,
+    ...(options.scopeGrading ? { scopeGrading: options.scopeGrading } : {}),
+  });
   const entries = productEntries(registry);
   const engine = productVisibleEngine(db, registry, bound);
   const projections = productProjections(db, { engine, ...adapters });

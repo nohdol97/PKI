@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(18);
-    expect(migrations).toHaveLength(18);
+    expect(schemaVersion(db)).toBe(19);
+    expect(migrations).toHaveLength(19);
   });
 
   it("is idempotent when re-run", () => {
@@ -231,6 +231,7 @@ describe("schema v2 (V01-T04)", () => {
       "cursor",
       "rescan_pending", // v17
       "deletions_may_be_missed", // v17
+      "configured_scope", // v19
     ]);
     expect(notNull("connector_instances", "kind")).toBe(true);
     expect(notNull("connector_instances", "cursor")).toBe(false);
@@ -1354,7 +1355,7 @@ describe("schema v17 (I01-T03, I01-R17)", () => {
     migrate(db, migrations.slice(0, 16));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(18);
+    expect(schemaVersion(db)).toBe(19);
     expect(columns("connector_instances")).toEqual(
       expect.arrayContaining(["rescan_pending", "deletions_may_be_missed"]),
     );
@@ -1407,7 +1408,7 @@ describe("schema v18 (I04-T09, I04-R4, R11)", () => {
     migrate(db, migrations.slice(0, 17));
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(18);
+    expect(schemaVersion(db)).toBe(19);
     expect(columns("scope_policy_drops")).toEqual([
       "id",
       "source_id",
@@ -1432,5 +1433,29 @@ describe("schema v18 (I04-T09, I04-R4, R11)", () => {
     expect(() => drop(id, { version: 0, hash: "h4" })).toThrow();
     expect(() => drop(id + 1, { hash: "h5" })).toThrow(); // no such source
     expect(db.all("SELECT count(*) AS n FROM scope_policy_drops")).toEqual([{ n: 4 }]);
+  });
+});
+
+describe("schema v19 (I01-T06, I01-R15)", () => {
+  it("adds configured_scope to connector_instances, NULL (unknown) for every row so far", () => {
+    migrate(db, migrations.slice(0, 18));
+    db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
+    migrate(db);
+    expect(schemaVersion(db)).toBe(19);
+    expect(columns("connector_instances")).toContain("configured_scope");
+    expect(db.all("SELECT id, kind, cursor, configured_scope FROM connector_instances")).toEqual([
+      { id: "c", kind: "k", cursor: "x", configured_scope: null },
+    ]);
+  });
+
+  it("takes NULL or a JSON array only", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run("UPDATE connector_instances SET configured_scope = '[\"team\"]'");
+    db.run("UPDATE connector_instances SET configured_scope = '[]'");
+    db.run("UPDATE connector_instances SET configured_scope = NULL");
+    for (const bad of ["'team'", "'{\"a\":1}'", "'not json'", "''"]) {
+      expect(() => db.run(`UPDATE connector_instances SET configured_scope = ${bad}`)).toThrow();
+    }
   });
 });

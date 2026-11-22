@@ -712,6 +712,20 @@ const v18: Migration = (db) =>
     );
   `);
 
+// Schema v19 (I01-T06, I01-R15): the scope the deployment configured for an instance, read
+// from `site/config/connector-scopes.json` at start. NULL is "unknown" (the public default:
+// the file is not shipped), otherwise a JSON array of strings. The Broker compares an
+// imported (claimed) scope with it. It is a column of an operational table, not a
+// derivative, and no API route returns it. The version number is the next free one:
+// whichever of two tasks adding a migration merges later renumbers (`v19` and its line in
+// `migrations`).
+const v19: Migration = (db) =>
+  db.exec(`
+    ALTER TABLE connector_instances ADD COLUMN configured_scope TEXT
+      CHECK (configured_scope IS NULL
+        OR (json_valid(configured_scope) AND json_type(configured_scope) = 'array'));
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -732,6 +746,7 @@ export const migrations: readonly Migration[] = [
   v16,
   v17,
   v18,
+  v19,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

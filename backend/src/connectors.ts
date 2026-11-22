@@ -39,6 +39,7 @@ import {
 } from "@pki/storage";
 import { tryLockInstance } from "./instance-lock.ts";
 import { systemClock, type Clock } from "./clock.ts";
+import { applyConfiguredScope } from "./connector-scopes.ts";
 import {
   addPage,
   emptyResult,
@@ -170,7 +171,10 @@ async function runSync(
   const signal = options.signal ?? new AbortController().signal;
   const clock = options.clock ?? systemClock;
   const capabilities = connector.manifest.capabilities;
-  db.transaction(() => registerConnectorInstance(db, instanceId, kind));
+  db.transaction(() => {
+    registerConnectorInstance(db, instanceId, kind);
+    applyConfiguredScope(db, instanceId); // a source's grade compares claims with it (I01-R15)
+  });
   // A rescan the last sync left unfinished is this one's to end (I01-R17).
   let rescanning = readRescanState(db, instanceId).pending;
   // Only a rescan this sync started ends it when its cursor expires; a carried-over
