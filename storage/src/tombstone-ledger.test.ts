@@ -359,7 +359,7 @@ describe("a line may not make a start fail: value domains", () => {
     expect([read.lines.length, read.damaged]).toEqual([0, 1]);
   });
   it("accepts the legacy line without a kind, and a null kind", () => {
-    const { k: _k, ...legacy } = base;
+    const legacy = Object.fromEntries(Object.entries(base).filter(([key]) => key !== "k"));
     for (const line of [legacy, { ...base, k: null }]) {
       const read = parseLedger(`${header}${JSON.stringify(line)}\n`);
       expect(read.lines.map((l) => l.connectorKind)).toEqual([null]);

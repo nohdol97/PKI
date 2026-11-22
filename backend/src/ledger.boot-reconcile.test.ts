@@ -479,9 +479,11 @@ describe("the status API's data protection item shows the ledger", () => {
       authorization: `Bearer ${TOKEN}`,
     });
     // the history is tested apart (it outlives the state): only the current state is compared here
-    const { history: _history, ...current } = (
-      res.body as { dataProtection: { ledger: { history: unknown } } }
-    ).dataProtection.ledger;
+    const current = {
+      ...(res.body as { dataProtection: { ledger: Record<string, unknown> } }).dataProtection
+        .ledger,
+    };
+    delete current.history;
     return current;
   };
   const OK = {
