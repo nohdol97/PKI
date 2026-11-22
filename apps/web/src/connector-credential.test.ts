@@ -1,12 +1,14 @@
 // I06-C11 (I06-R14, R17): the screen's credential path with doubles for the preload (records `setSecret` and
 // `deleteSecret`) and for `fetch` (records every request). The value goes to the shell's store and nowhere else:
 // no request, no result and no text carries it. Every value is made up.
-import { CREDENTIAL_RETRY_MIN_MS, type RouteResponse } from "@pki/contracts";
+import { CREDENTIAL_RETRY_MIN_MS, SecretValueSchema, type RouteResponse } from "@pki/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createApiClient } from "./api.ts";
 import {
   changeCredential,
+  checkCredentialValue,
   credentialOutcomeText,
+  MAX_CREDENTIAL_LENGTH,
   rereadDelaysMs,
   type CredentialOutcome,
 } from "./connector-credential.ts";
@@ -122,6 +124,49 @@ describe("connector-credential (I06-C11)", () => {
     for (const status of ["store-unavailable", "delete-failed", "notify-failed"] as const) {
       expect(rereadDelaysMs({ status })).toEqual([]);
     }
+    expect(rereadDelaysMs({ status: "refused", reason: "line-break" })).toEqual([]);
+  });
+
+  it("F3 the limit is the shell's: a value of exactly that many characters is stored whole, one more is refused, never cut", async () => {
+    expect(SecretValueSchema.safeParse("x".repeat(MAX_CREDENTIAL_LENGTH)).success).toBe(true);
+    expect(SecretValueSchema.safeParse("x".repeat(MAX_CREDENTIAL_LENGTH + 1)).success).toBe(false);
+    const whole = "x".repeat(MAX_CREDENTIAL_LENGTH);
+    const ok = harness();
+    await changeCredential(ok.deps, "mail-1", NAME, { kind: "save", value: whole });
+    expect(ok.bridge.setSecret).toHaveBeenCalledWith(NAME, whole);
+    const refused = harness();
+    const outcome = await changeCredential(refused.deps, "mail-1", NAME, {
+      kind: "save",
+      value: whole + "x",
+    });
+    expect(outcome).toEqual({ status: "refused", reason: "too-long" });
+    expect(refused.bridge.setSecret).not.toHaveBeenCalled();
+    expect(refused.requests).toEqual([]);
+    expect(credentialOutcomeText(outcome)).toContain(String(MAX_CREDENTIAL_LENGTH));
+    expect(checkCredentialValue(whole)).toBeUndefined();
+  });
+
+  it("F3 a value with a line break is refused whatever its kind of break: nothing stored, no notice, fixed words", async () => {
+    for (const value of ["a\nb", "a\r\nb", "a\rb", `-----BEGIN-----\n${CANARY}\n-----END-----`]) {
+      const { bridge, requests, deps } = harness();
+      const outcome = await changeCredential(deps, "mail-1", NAME, { kind: "save", value });
+      expect(outcome).toEqual({ status: "refused", reason: "line-break" });
+      expect(bridge.setSecret).not.toHaveBeenCalled();
+      expect(requests).toEqual([]);
+      expect(credentialOutcomeText(outcome)).toContain("한 줄 값만 넣을 수 있습니다");
+      expect(credentialOutcomeText(outcome)).not.toContain(CANARY);
+    }
+  });
+
+  it("F3 a paste the screen refused is an action too: its words, no store, no notice", async () => {
+    const { bridge, requests, deps } = harness();
+    const outcome = await changeCredential(deps, "mail-1", NAME, {
+      kind: "refused",
+      reason: "line-break",
+    });
+    expect(credentialOutcomeText(outcome)).toContain("한 줄 값만 넣을 수 있습니다");
+    expect(bridge.setSecret).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
   });
 });
 

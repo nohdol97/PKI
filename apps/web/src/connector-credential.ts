@@ -6,7 +6,23 @@ import { CREDENTIAL_RETRY_MIN_MS, type RouteResponse } from "@pki/contracts";
 import type { ApiClient } from "./api.ts";
 import { deleteApiKey, saveApiKey, type SecretBridge } from "./api-key.ts";
 
-export type CredentialAction = { kind: "save"; value: string } | { kind: "delete" };
+/** Why a value was refused before it reached the shell: it would have been changed or cut (I06-T04 decision, F3). */
+export type CredentialRefusal = "line-break" | "too-long";
+
+/** "refused" is the screen's own refusal of a paste; a save is checked again here. */
+export type CredentialAction =
+  | { kind: "save"; value: string }
+  | { kind: "delete" }
+  | { kind: "refused"; reason: CredentialRefusal };
+
+/** The shell's limit (`SecretValueSchema`); a longer value is refused, never cut. */
+export const MAX_CREDENTIAL_LENGTH = 8192;
+
+/** A credential entered here is one line of at most `MAX_CREDENTIAL_LENGTH` characters. */
+export function checkCredentialValue(value: string): CredentialRefusal | undefined {
+  if (/[\r\n]/.test(value)) return "line-break";
+  return value.length > MAX_CREDENTIAL_LENGTH ? "too-long" : undefined;
+}
 
 type Notice = RouteResponse<"credentialsChanged">;
 
@@ -15,6 +31,7 @@ export type CredentialOutcome =
   | { status: "store-unavailable" }
   | { status: "delete-failed" }
   | { status: "notify-failed" }
+  | { status: "refused"; reason: CredentialRefusal }
   | { status: "notified"; summary: Notice["summary"]; rebuild: Notice["rebuild"] };
 
 /**
@@ -27,6 +44,11 @@ export async function changeCredential(
   name: string,
   action: CredentialAction,
 ): Promise<CredentialOutcome> {
+  if (action.kind === "refused") return { status: "refused", reason: action.reason };
+  if (action.kind === "save") {
+    const reason = checkCredentialValue(action.value);
+    if (reason) return { status: "refused", reason };
+  }
   // a refused call of the preload (invalid input, wrong sender) is no store either
   const stored =
     action.kind === "save"
@@ -50,8 +72,15 @@ const NOTICE_TEXT = {
   skipped: "앱을 다시 시작해야 반영됩니다.",
 } as const satisfies Record<Notice["rebuild"], string>;
 
+const REFUSAL_TEXT = {
+  "line-break": "한 줄 값만 넣을 수 있습니다. 여러 줄 값(PEM, JSON)은 이 화면에서 받지 않습니다.",
+  "too-long": `값이 너무 깁니다. ${MAX_CREDENTIAL_LENGTH}자까지 넣을 수 있고, 저장하지 않았습니다.`,
+} as const satisfies Record<CredentialRefusal, string>;
+
 export function credentialOutcomeText(outcome: CredentialOutcome): string {
   switch (outcome.status) {
+    case "refused":
+      return REFUSAL_TEXT[outcome.reason];
     case "store-unavailable":
       return "자격 증명을 저장할 수 없습니다 (OS 보호 저장소를 쓸 수 없음).";
     case "delete-failed":

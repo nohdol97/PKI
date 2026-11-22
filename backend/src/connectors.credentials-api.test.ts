@@ -244,7 +244,7 @@ describe("the route passes the manager's answer through", () => {
 });
 
 describe("the route without a manager that can rebuild", () => {
-  it("answers connector-unavailable (a manager of a development entry has no rebuild)", async () => {
+  it("answers connector-unavailable (only a test double lacks it: the product's manager is built before the server starts)", async () => {
     const db = openBetterSqlite3(":memory:");
     migrate(db);
     const stores = { db, dataDirectory: "/synthetic/data", egress: productEgress(db) };

@@ -91,12 +91,17 @@ describe("ConnectorTable credentials", () => {
     expect(html).not.toContain("삭제"); // nothing stored: nothing to delete
   });
 
-  it("offers the delete button only where a value is stored, and keeps the stored name out of the page's text", () => {
+  it("offers the delete button only where a value is stored, and the stored name is not in the page", () => {
     const html = renderCredentials(
       declared({ credentials: [{ slot: "token", name: NAME, state: "present" }] }),
     );
     expect(html).toContain('aria-label="mail-1 token 삭제"');
     expect(html).toContain(CREDENTIAL_SLOT_STATE_TEXT.present);
+    expect(html).not.toContain(NAME);
+  });
+
+  it("F2 the input is not controlled: no value attribute is drawn, so a typed value never sits in the DOM", () => {
+    expect(renderCredentials(declared())).not.toMatch(/<input[^>]* value=/);
   });
 
   it("says the state of a slot the store cannot answer for, in its own words", () => {
@@ -107,6 +112,9 @@ describe("ConnectorTable credentials", () => {
       }),
     );
     expect(html).toContain(CREDENTIAL_SLOT_STATE_TEXT.unavailable);
+    // F6, decision row 1: the state is the last check, so the input stays; a failed save says so (connector-credential.test ③)
+    expect(html).toContain('type="password"');
+    expect(html).toContain('aria-label="mail-1 token 저장"');
   });
 
   it("shows no input without the shell, only the notice that this run has no store", () => {

@@ -191,6 +191,8 @@ async function exercise(
   // the change notice of every instance, whatever it leaks (C14 ③): each answer is searched with the rest
   for (const { id } of instances)
     await call(routes.credentialsChanged.path, "POST", { connectorId: id });
+  // and the hourly recheck of every instance (those that are not ready make a new object): C14 runs both before the sweep
+  for (const { id } of instances) await booted.connectors.recheck(id);
   // scheduled syncs: the refused, the failed and the one with no value are held or given up with a code
   for (const id of ["sync-refused", "sync-failed", "missing", "ok"]) {
     registerJob(booted.db, { kind: CONNECTOR_SYNC_KIND, target: id });

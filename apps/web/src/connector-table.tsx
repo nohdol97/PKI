@@ -2,7 +2,7 @@
 // the reason a sync stopped, from its code only (I01-R19), and for an instance that declared
 // credential slots the slots' states with the input, save and delete (I06-R14).
 import type { ConnectorSummary } from "@pki/contracts";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { CredentialAction } from "./connector-credential.ts";
 import {
   connectorNote,
@@ -19,7 +19,12 @@ const CONNECTOR_STATE: Record<ConnectorSummary["state"], string> = {
 
 type Slot = NonNullable<ConnectorSummary["credentials"]>[number];
 
-/** One slot: its state, and where the shell is there the input, save and (for a stored value) delete. */
+/**
+ * One slot: its state, and where the shell is there the input, save and (for a stored value) delete. The
+ * input is uncontrolled: the typed value is in the field only (not in React state, not in the DOM's value
+ * attribute), read on submit and cleared at once. A line break or a value over the limit is refused in words
+ * and never altered (I06-T04 decision, F3). The input stays enabled so the focus is kept (F4).
+ */
 function SlotEntry({
   connectorId,
   slot,
@@ -31,35 +36,66 @@ function SlotEntry({
   canEnter: boolean;
   onChange: (connectorId: string, name: string, action: CredentialAction) => Promise<void> | void;
 }) {
-  const [value, setValue] = useState("");
+  const field = useRef<HTMLInputElement>(null);
+  const working = useRef(false);
+  const [empty, setEmpty] = useState(true);
   const [busy, setBusy] = useState(false);
   const label = `${connectorId} ${slot.slot}`;
   const run = (action: CredentialAction) => {
+    working.current = true;
     setBusy(true);
-    void Promise.resolve(onChange(connectorId, slot.name, action)).finally(() => setBusy(false));
+    void Promise.resolve(onChange(connectorId, slot.name, action)).finally(() => {
+      working.current = false;
+      setBusy(false);
+      field.current?.focus();
+    });
   };
+  const refuseLineBreak = () => {
+    if (field.current) field.current.value = "";
+    setEmpty(true);
+    run({ kind: "refused", reason: "line-break" });
+  };
+  // typed or inserted text with a line break: the field would turn it into a space
+  useEffect(() => {
+    const input = field.current;
+    if (!input) return;
+    const onBeforeInput = (event: InputEvent) => {
+      if (/[\r\n]/.test(event.data ?? "")) {
+        event.preventDefault();
+        refuseLineBreak();
+      }
+    };
+    input.addEventListener("beforeinput", onBeforeInput);
+    return () => input.removeEventListener("beforeinput", onBeforeInput);
+  });
   const save = (event: FormEvent) => {
     event.preventDefault();
-    if (value === "") return;
-    const typed = value;
-    setValue(""); // the value leaves the page as soon as it is handed over
+    const input = field.current;
+    if (!input || working.current || input.value === "") return;
+    const typed = input.value;
+    input.value = ""; // the value leaves the page as soon as it is handed over
+    setEmpty(true);
     run({ kind: "save", value: typed });
   };
   return (
-    <li>
+    <li aria-busy={busy}>
       {slot.slot}: {CREDENTIAL_SLOT_STATE_TEXT[slot.state]}
       {canEnter && (
         <form onSubmit={save}>
           <input
+            ref={field}
             type="password"
             autoComplete="off"
-            maxLength={8192}
             aria-label={`${label} 값`}
-            value={value}
-            disabled={busy}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => setEmpty(e.target.value === "")}
+            onPaste={(e) => {
+              if (/[\r\n]/.test(e.clipboardData.getData("text"))) {
+                e.preventDefault();
+                refuseLineBreak();
+              }
+            }}
           />
-          <button type="submit" aria-label={`${label} 저장`} disabled={busy || value === ""}>
+          <button type="submit" aria-label={`${label} 저장`} disabled={empty}>
             저장
           </button>
           {slot.state === "present" && (

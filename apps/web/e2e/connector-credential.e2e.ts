@@ -4,6 +4,7 @@
 // tells the backend only the instance's ID and clears the field; without the preload no input is drawn.
 // The list and the change notice are answered by the test (page.route): the value must appear in neither
 // request, nor in the page.
+import { CREDENTIAL_RETRY_MIN_MS } from "@pki/contracts";
 import { expect, test as base, type Page, type Route } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
@@ -144,9 +145,13 @@ test("a value typed into the slot goes to the preload under the listed name, the
     await expect(page.getByRole("button", { name: "mail-1 token 삭제" })).toHaveCount(0);
 
     await field.fill(CANARY);
+    // while typing the value is in the field only: not in the DOM's value attribute, not in the page (F2)
+    expect((await field.getAttribute("value")) ?? "").not.toContain(CANARY);
+    expect(await page.content()).not.toContain(CANARY);
     backend.slot = "present"; // what the backend sees once the shell stored it
     await field.press("Enter"); // the keyboard submits like the button
     await expect(field).toHaveValue("");
+    await expect(field).toBeFocused(); // the place is kept for the keyboard (F4)
     await expect(page.getByRole("status")).toContainText("반영했습니다.");
     expect(await preloadCalls(page)).toEqual([["set", NAME, CANARY.length]]);
     expect(backend.notices).toHaveLength(1);
@@ -164,6 +169,7 @@ test("a value typed into the slot goes to the preload under the listed name, the
     backend.slot = "missing";
     await page.keyboard.press("Enter");
     await expect(page.getByRole("list", { name: "mail-1 자격 증명" })).toContainText("token: 없음");
+    await expect(field).toBeFocused(); // a delete leaves the focus on the field, not on the page body (F4)
     expect(await preloadCalls(page)).toEqual([
       ["set", NAME, CANARY.length],
       ["delete", NAME],
@@ -194,6 +200,56 @@ test("a store the shell refuses is said so and gives no notice, and the field st
   }
 });
 
+test("a value the screen cannot take whole is refused in words, never stored cut or changed (F3)", async ({
+  page,
+}) => {
+  const backend = fresh();
+  await recordingPreload(page, true);
+  const { show, stop } = await open(page, backend);
+  try {
+    await show();
+    const field = page.getByLabel("mail-1 token 값");
+    const status = page.getByRole("status");
+    const refused = "한 줄 값만 넣을 수 있습니다";
+
+    // typed or inserted text with a line break
+    await field.focus();
+    await page.keyboard.insertText("line1\nline2");
+    await expect(status).toContainText(refused);
+    await expect(field).toHaveValue("");
+
+    // a paste with a line break
+    const notPrevented = await field.evaluate((input) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "-----BEGIN-----\nsynthetic\n-----END-----");
+      return input.dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+      );
+    });
+    expect(notPrevented).toBe(false); // the paste itself was cancelled, not just answered with the words
+    await expect(status).toContainText(refused);
+    await expect(field).toHaveValue("");
+
+    // longer than the shell takes: refused at submit, not cut to 8192 and not reported as reflected
+    await field.fill("x".repeat(9000));
+    await field.press("Enter");
+    await expect(status).toContainText("8192");
+    await expect(status).not.toContainText("반영");
+    await expect(field).toHaveValue("");
+
+    expect(await preloadCalls(page)).toEqual([]);
+    expect(backend.notices).toEqual([]);
+
+    // exactly the limit is stored whole
+    await field.fill("y".repeat(8192));
+    await field.press("Enter");
+    await expect(status).toContainText("반영했습니다.");
+    expect(await preloadCalls(page)).toEqual([["set", NAME, 8192]]);
+  } finally {
+    await stop();
+  }
+});
+
 test("a queued notice says it will be reflected soon and reads the list again after the gap; a skipped one asks for a restart", async ({
   page,
 }) => {
@@ -209,7 +265,7 @@ test("a queued notice says it will be reflected soon and reads the list again af
     await page.getByRole("button", { name: "mail-1 token 저장" }).click();
     await expect(page.getByRole("status")).toContainText("곧 반영됩니다.");
     await expect.poll(() => backend.lists).toBe(before + 1); // at once
-    await page.clock.fastForward(30_000);
+    await page.clock.fastForward(CREDENTIAL_RETRY_MIN_MS);
     await expect.poll(() => backend.lists).toBe(before + 2); // and after the gap
 
     backend.rebuild = "skipped";
