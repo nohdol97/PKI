@@ -350,3 +350,79 @@ test("stale.e2e: after a source is deleted, Home no longer shows its Insight", a
     await stack.stop();
   }
 });
+
+// I04-C1 `read-gate.e2e` (I04-T08): the end-to-end behaviour the user sees. Right after a source is deleted
+// on the Sources screen it is gone from the list, the keyword search, Home and, on a second page that
+// already holds the Insight's evidence, the evidence source. This does not prove the read gate: the
+// deletion purges the rows in the same transaction, so the test stays green without the gate. The gate's
+// own guards are backend/src/read-gate.test.ts and boot.read-gate.test.ts.
+test("read-gate.e2e: right after a source is deleted it is gone from the list, the search, Home and the evidence", async ({
+  target,
+  playwright,
+}) => {
+  const file = join(dir, "v02-plain.jsonl");
+  writeFileSync(file, fixtureSetText("plain"));
+  const messenger = recordTitle("v02-messenger.jsonl");
+  const word = "연기되었습니다"; // in the messenger record's body only
+  const stack = await startStack(target, dir, playwright.chromium);
+  const { page } = stack;
+  const search = async (query: string) => {
+    await page.getByRole("search").getByLabel("검색어").fill(query);
+    await page.getByRole("search").getByRole("button", { name: "검색" }).click();
+  };
+  try {
+    await importFile(page, file, 3, 3);
+    await awaitInsight(page);
+    const other = target === "browser" ? await page.context().browser()?.newPage() : undefined;
+    if (other) {
+      await other.goto(page.url());
+      await insightItems(other)
+        .first()
+        .getByRole("button", { name: /근거 보기/ })
+        .click();
+      await expect(
+        other.getByRole("list", { name: "근거 목록" }).getByRole("listitem"),
+      ).toHaveCount(3);
+    }
+    // before: the source is listed and found by its word
+    await go(page, "원본");
+    await expect(page.getByRole("table").getByText(messenger, { exact: true })).toBeVisible();
+    await search(word);
+    await expect(page.getByRole("table").getByText(messenger, { exact: true })).toBeVisible();
+
+    await page.getByLabel("검색어").fill("");
+    await page.getByRole("search").getByRole("button", { name: "검색" }).click();
+    await page.getByRole("button", { name: `${messenger} 삭제` }).click();
+    await page
+      .getByRole("alertdialog", { name: "원본 삭제 확인" })
+      .getByRole("button", { name: "지우기" })
+      .click();
+    await expect(page.getByRole("status")).toHaveText(`「${messenger}」을(를) 지웠습니다.`);
+
+    // after, at once: the list and the search leave it out, the other two sources stay
+    await go(page, "홈");
+    await go(page, "원본");
+    await expect(page.getByRole("table").getByText(messenger, { exact: true })).toHaveCount(0);
+    for (const kept of [recordTitle("v02-mail.jsonl"), recordTitle("v02-wiki.jsonl")]) {
+      await expect(page.getByRole("table").getByText(kept, { exact: true })).toBeVisible();
+    }
+    await search(word);
+    await expect(page.getByText("찾은 원본이 없습니다.")).toBeVisible();
+    await go(page, "홈");
+    await expect(insightItems(page)).toHaveCount(0);
+
+    if (other) {
+      await other
+        .getByRole("list", { name: "근거 목록" })
+        .getByRole("listitem")
+        .filter({ hasText: messenger })
+        .getByRole("button", { name: `원본 보기: ${messenger}` })
+        .click();
+      await expect(other.getByRole("alert")).toHaveText(
+        "이 근거의 원본은 더 이상 없습니다. 삭제되었을 수 있습니다.",
+      );
+    }
+  } finally {
+    await stack.stop();
+  }
+});

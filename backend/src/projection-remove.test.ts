@@ -31,6 +31,7 @@ import {
   saveSourceRecord,
   type DerivativeKind,
   type DerivedRef,
+  type DerivativeRegistry,
   type ScopePolicy,
   type SqlDriver,
   type StoredJob,
@@ -533,7 +534,11 @@ describe("the product's boot wiring (I04-T04)", () => {
 
   /** Boots on `dir`, stores one source and deletes it through the screen's route. */
   async function bootAndDelete(
-    extra: { engine?: KnowledgeEngine; vectorIndex?: VectorIndex } = {},
+    extra: {
+      engine?: KnowledgeEngine;
+      vectorIndex?: VectorIndex;
+      registry?: DerivativeRegistry;
+    } = {},
   ) {
     // the data directory has the canonical file already; boot opens it again
     db.close();
@@ -602,9 +607,14 @@ describe("the product's boot wiring (I04-T04)", () => {
     expect(removed).toEqual([String(saved.sourceId)]);
   });
 
-  it("hands out the engine only as the registry wraps it: the call goes through the registry's judgement, which the policy placeholder fails closed", async () => {
+  it("hands out the engine only as the registry wraps it: the call goes through the registry's judgement of the booted registry", async () => {
     const held = new MemoryKnowledgeEngine();
-    await bootAndDelete({ engine: held });
+    // a registry that differs from the product's: its policy allows no scope for a search
+    const denying = createProductRegistry({
+      policy: { ...permissive, allows: () => false },
+      permanentlyAbsent: { vectorIndex: true }, // the booted empty vector index, as the product marks it
+    });
+    await bootAndDelete({ engine: held, registry: denying });
     const live = booted as NonNullable<typeof booted>;
     // the double holds a source; the raw engine would return it
     const kept = saveSourceRecord(live.db, "c", { externalId: "y", title: "y", body: "keeper" });
@@ -615,9 +625,7 @@ describe("the product's boot wiring (I04-T04)", () => {
       99,
     );
     expect(await held.relatedContext({ text: "keeper", limit: 5 })).toHaveLength(1); // the raw one answers
-    // the wrapped one asks the policy, which the product has not configured yet (I04-T09): closed, not open
-    await expect(live.engine.relatedContext({ text: "keeper", limit: 5 })).rejects.toThrow(
-      /scope policy/,
-    );
+    // the wrapped one asks the booted registry's policy, which says no: hidden, not shown
+    expect(await live.engine.relatedContext({ text: "keeper", limit: 5 })).toEqual([]);
   });
 });
