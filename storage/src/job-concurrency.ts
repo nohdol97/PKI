@@ -41,8 +41,12 @@ export function jobGroup(kind: string, target: string): { name: string; cap: num
 
 const quoted = (text: string) => `'${text.replaceAll("'", "''")}'`;
 
-/** jobGroup's name as SQL over the row `j`, built from the same table. */
-const GROUP_SQL = `CASE j.kind ${Object.entries(JOB_KIND_GROUPS)
+/**
+ * jobGroup's name as SQL over a row `j` (kind, target), built from the same
+ * table. The claim names running rows by jobGroup and candidates by this, so the
+ * two must agree (job-concurrency.test.ts compares them).
+ */
+export const JOB_GROUP_SQL = `CASE j.kind ${Object.entries(JOB_KIND_GROUPS)
   .map(
     ([kind, { group, perTarget }]) =>
       `WHEN ${quoted(kind)} THEN ${perTarget ? `${quoted(`${group}:`)} || j.target` : quoted(group)}`,
@@ -94,7 +98,7 @@ export function pickDueJob(db: SqlDriver, request: PickRequest): number | undefi
     `SELECT j.id FROM jobs j LEFT JOIN json_each(?) turn ON turn.key = j.fairness_key
       WHERE j.kind IN (${request.kinds.map(() => "?").join(", ")})
         AND j.status = 'queued' AND j.run_after <= ?
-        AND ${GROUP_SQL} NOT IN (SELECT value FROM json_each(?))
+        AND ${JOB_GROUP_SQL} NOT IN (SELECT value FROM json_each(?))
       ORDER BY ${PRIORITY_SQL}, coalesce(turn.value, 0), j.run_after, j.id
       LIMIT 1`,
     params,

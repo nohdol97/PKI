@@ -327,30 +327,33 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
   }
 
   let stopped = false;
-  let again = false;
+  /** Ends the drain's wait for a running job to close: a wake claims at once. */
+  let woken: (() => void) | undefined;
   let draining: Promise<void> | undefined;
   function wake(): Promise<void> {
     // stopped, the drain body would finish before `draining` is assigned and
     // leave a settled promise there, so no later wake would drain again
     if (stopped) return Promise.resolve();
-    again = true;
+    woken?.();
     draining ??= (async () => {
       try {
         await Promise.resolve(); // as runOnce: not in the caller's stack
-        while (again) {
-          again = false;
-          while (!stopped) {
-            for (let running = claim(); running; running = stopped ? undefined : claim()) {
-              // the job stays running and is claimed again when its lease runs out
-              running.catch(onError);
-            }
-            if (held.size === 0) break;
-            await Promise.race(held.values()); // one closed: a place may be free
+        while (!stopped) {
+          for (let running = claim(); running; running = stopped ? undefined : claim()) {
+            // the job stays running and is claimed again when its lease runs out
+            running.catch(onError);
           }
+          if (held.size > 0) {
+            // a job closed (a place may be free) or a wake (new work, a raised
+            // limit, a lease to reclaim): either way, claim again
+            const wakes = new Promise<void>((resolve) => (woken = resolve));
+            await Promise.race([...held.values(), wakes]);
+          } else break; // nothing runs, and no wake can arrive between the claim and here
         }
       } catch (error) {
         onError(error); // a failing claim, e.g. a locked file: the next wake claims again
       } finally {
+        woken = undefined;
         draining = undefined;
       }
     })();

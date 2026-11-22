@@ -9,7 +9,13 @@ import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
-import { DEFAULT_MAX_CONCURRENT, JOB_GROUP_CAPS, jobGroup } from "./job-concurrency.ts";
+import {
+  DEFAULT_MAX_CONCURRENT,
+  JOB_GROUP_CAPS,
+  JOB_GROUP_SQL,
+  JOB_KIND_GROUPS,
+  jobGroup,
+} from "./job-concurrency.ts";
 import {
   leaseNextJob,
   readJob,
@@ -101,6 +107,31 @@ describe("concurrency.groups (I03-R13): the groups are constants", () => {
 
   it("defaults to two jobs overall", () => {
     expect(DEFAULT_MAX_CONCURRENT).toBe(2);
+  });
+});
+
+describe("concurrency.groups (I03-R13; review F3): the query and the code name a group alike", () => {
+  // Running rows are named by jobGroup, candidates by JOB_GROUP_SQL inside the
+  // query: a full group is skipped only while the two give the same name.
+  const sqlName = (kind: string, target: string) =>
+    db.all(`SELECT ${JOB_GROUP_SQL} AS name FROM (SELECT ? AS kind, ? AS target) j`, [
+      kind,
+      target,
+    ])[0]?.name;
+
+  it("for every kind of the table and one outside it, whatever the target", () => {
+    const kinds = [...Object.keys(JOB_KIND_GROUPS), "test-effect"];
+    expect(kinds).toContain("connector-sync");
+    for (const kind of kinds) {
+      for (const target of ["", "A", "B", "engine", "scope-recompute:7", "it's: a 'target'"]) {
+        expect(sqlName(kind, target), `${kind} / ${target}`).toBe(jobGroup(kind, target).name);
+      }
+    }
+  });
+
+  it("names two Connector instances' syncs apart in the query", () => {
+    expect(sqlName("connector-sync", "A")).toBe("connector-sync:A");
+    expect(sqlName("connector-sync", "B")).toBe("connector-sync:B");
   });
 });
 

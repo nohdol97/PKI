@@ -74,7 +74,7 @@ const KINDS = ["extract", "connector-sync", "projection-rebuild", "maintenance"]
 const DONE: JobResult = { status: "succeeded", write: () => {} };
 
 /** A runner whose handlers wait for the test: what runs now, what ran, in which order. */
-function gated(onError?: (e: unknown) => void) {
+function gated(onError?: (e: unknown) => void, pollMs?: number) {
   const gates = new Map<number, (result: JobResult) => void>();
   const started: number[] = [];
   let mostAtOnce = 0;
@@ -95,7 +95,7 @@ function gated(onError?: (e: unknown) => void) {
     db,
     handlers: Object.fromEntries(KINDS.map((kind) => [kind, handler])),
     now,
-    testBuild: { leaseMs: LEASE },
+    testBuild: { leaseMs: LEASE, ...(pollMs === undefined ? {} : { pollMs }) },
     ...(onError && { onError }),
   });
   return {
@@ -215,6 +215,65 @@ describe("concurrency.groups (I03-R13, C3): the runner runs jobs together", () =
     g.finish(g.running()[0] as number);
     await drained;
     expect(g.most().atOnce).toBe(3);
+  });
+});
+
+describe("concurrency.groups (I03-R13; review F1): work that arrives while a job runs", () => {
+  it("a wake while an extract runs starts a sync registered since, without waiting for it", async () => {
+    const running = extract("A");
+    const g = gated();
+    const drained = g.runner.wake();
+    await vi.waitFor(() => expect(g.running()).toEqual([running.id]));
+    const arrived = sync("B");
+    void g.runner.wake(); // e.g. "run now" while the extraction is still going
+    await vi.waitFor(() => expect(g.running()).toEqual([running.id, arrived.id]));
+    g.finish(arrived.id);
+    g.finish(running.id);
+    await drained;
+    expect(g.started).toEqual([running.id, arrived.id]);
+  });
+
+  it("the poll starts it too", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const running = extract("A");
+    const g = gated(undefined, 1000);
+    g.runner.start();
+    await vi.waitFor(() => expect(g.running()).toEqual([running.id]));
+    const arrived = sync("B");
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(() => expect(g.running()).toEqual([running.id, arrived.id]));
+    g.finish(arrived.id);
+    g.finish(running.id);
+    await g.runner.stop();
+  });
+
+  it("a wake after the setting was raised starts a job that waited for a place", async () => {
+    writeSetting(db, JOBS_MAX_CONCURRENT_SETTING, "1");
+    const jobs = [sync("A"), rebuild("engine")];
+    const g = gated();
+    const drained = g.runner.wake();
+    await vi.waitFor(() => expect(g.running()).toHaveLength(1));
+    writeSetting(db, JOBS_MAX_CONCURRENT_SETTING, "2");
+    void g.runner.wake();
+    await vi.waitFor(() => expect(g.running()).toHaveLength(2));
+    for (const id of g.running()) g.finish(id);
+    await drained;
+    expect(count(jobs, "succeeded")).toBe(2);
+  });
+
+  it("a wake with nothing new to claim leaves the drain waiting, and it still ends", async () => {
+    const jobs = [extract("A"), extract("B")];
+    const g = gated();
+    const drained = g.runner.wake();
+    await vi.waitFor(() => expect(g.running()).toEqual([jobs[0]?.id]));
+    void g.runner.wake(); // knowledge is full: nothing to claim
+    await new Promise((r) => setTimeout(r, 20));
+    expect(g.started).toEqual([jobs[0]?.id]);
+    g.finish(jobs[0]?.id as number);
+    await vi.waitFor(() => expect(g.running()).toEqual([jobs[1]?.id]));
+    g.finish(jobs[1]?.id as number);
+    await drained;
+    expect(count(jobs, "succeeded")).toBe(2);
   });
 });
 
