@@ -129,6 +129,11 @@ export interface JobRunnerOptions {
    * is ready by now (I06-R10). A throw is reported to `onError`.
    */
   onClosed?: (job: StoredJob, status: JobRun["status"]) => void;
+  /**
+   * Called when a run is over, whichever way: after a close, and also when the lease was lost and no close
+   * happened. A mark kept for the run (connector sync's replaced-object mark) ends here (I06-R10).
+   */
+  onRunEnded?: (job: StoredJob) => void;
 }
 
 export interface JobRunner {
@@ -289,6 +294,11 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     try {
       return await attempt(job, cut.signal, ended, end);
     } finally {
+      try {
+        options.onRunEnded?.(job);
+      } catch (error) {
+        onError(error);
+      }
       active.delete(job.id);
       clearInterval(beat);
     }

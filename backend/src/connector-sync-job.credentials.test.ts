@@ -402,3 +402,31 @@ describe("connector-sync-job: only a replaced object's stop is put back at close
     expect(job(queued.id)).toMatchObject({ status: "held", reason: "connector-unavailable" });
   });
 });
+
+describe("job-runner: a mark does not outlive its run (I06-R10)", () => {
+  it("onRunEnded is called once for every run, also when the handler never settles and the run is cancelled", async () => {
+    const { createJobRunner } = await import("./job-runner.ts");
+    const ended: number[] = [];
+    const closed: number[] = [];
+    const runner = createJobRunner({
+      db,
+      handlers: { [CONNECTOR_SYNC_KIND]: () => new Promise(() => {}) },
+      onRunEnded: (j) => void ended.push(j.id),
+      onClosed: (j) => void closed.push(j.id),
+    });
+    const queued = register("a");
+    const run = runner.runOnce();
+    await flush();
+    expect(runner.cancelRunning(queued.id)).toBe(true);
+    await run;
+    expect(ended).toEqual([queued.id]);
+    expect(closed).toEqual([queued.id]);
+  });
+
+  it("a mark is keyed by the run's lease: a later run of the same job never matches an earlier mark", async () => {
+    const { replacedKey } = await import("./connector-sync-job.ts");
+    expect(replacedKey({ id: 1, leaseToken: "x" })).not.toBe(
+      replacedKey({ id: 1, leaseToken: "y" }),
+    );
+  });
+});

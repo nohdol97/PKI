@@ -131,10 +131,10 @@ export function createConnectorSyncHandler(options: {
   /** Undefined while the composition has not handed the manager over (a wake before it is built). */
   manager: () => SyncManager | undefined;
   /**
-   * Job ids whose sync stopped on an object the instance had replaced: the close that follows puts them
-   * back (`releaseIfReady`). A current object's stop is never in it (I06-R10).
+   * `replacedKey` of the runs whose sync stopped on an object the instance had replaced: the close that
+   * follows puts them back (`releaseIfReady`). A current object's stop is never in it (I06-R10).
    */
-  replaced?: Set<number>;
+  replaced?: Set<string>;
 }): JobHandler {
   const { db } = options;
   return async (job, context) => {
@@ -154,7 +154,7 @@ export function createConnectorSyncHandler(options: {
       return resultOf(end, undefined, heldReason(summary));
     }
     const end = endOf(answer);
-    if (isReplacedStop(answer)) options.replaced?.add(job.id);
+    if (isReplacedStop(answer)) options.replaced?.add(replacedKey(job));
     // a refused credential holds the job for the instance's own reason as it stands when the job
     // closes: the manager judged it before it answered (I06-R10); an instance that is `ready` is a newer
     // object's, so the reason is the plain one and the release after the close runs the job again
@@ -214,6 +214,10 @@ export function ensureDefaultSchedules(
   }
   return made;
 }
+
+/** One mark per run: a later run of the same job (another lease) never matches an earlier run's mark. */
+export const replacedKey = (job: { id: number; leaseToken: unknown }): string =>
+  `${job.id}:${String(job.leaseToken)}`;
 
 /**
  * What the manager calls when a new object turned an instance ready (I06-R12): the instance's held

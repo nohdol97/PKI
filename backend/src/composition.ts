@@ -82,6 +82,7 @@ import {
   CONNECTOR_SYNC_KIND,
   createConnectorSyncHandler,
   releaseIfReady,
+  replacedKey,
   type SyncManager,
 } from "./connector-sync-job.ts";
 import { computePolicyFingerprint } from "./held-release.ts";
@@ -409,13 +410,14 @@ export function productRunner(
         }
       : {}),
   });
-  const replaced = new Set<number>();
+  const replaced = new Set<string>();
   const runner: JobRunner = createJobRunner({
     db,
     // a collector job whose sync stopped on a replaced object goes back at once, on the new one (I06-R10)
+    onRunEnded: (job) => void replaced.delete(replacedKey(job)), // a mark does not outlive its run
     onClosed: (job, status) => {
       const manager = options.connectors?.();
-      const stoppedOnReplaced = replaced.delete(job.id);
+      const stoppedOnReplaced = replaced.delete(replacedKey(job));
       if (
         status === "held" &&
         stoppedOnReplaced &&
