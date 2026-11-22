@@ -1,5 +1,5 @@
 // V02-R4, R5, C3 integration on a real SQLite file: the runner claims jobs with an
-// expiring lease, one at a time, picks up a job left leased by a backend that
+// expiring lease, one at a time, picks up a job left running by a backend that
 // stopped once the lease runs out, and discards a result whose version went
 // stale before it was written. Clocks are injected; nothing sleeps.
 import {
@@ -94,17 +94,20 @@ const runner = (handler: JobHandler, on = db, onError?: (e: unknown) => void) =>
 describe("job runner: version fence (V02-R5)", () => {
   it("writes the result of a job whose version is still the latest and closes it done", async () => {
     const job = imported("a");
-    const run = await runner(async () => ({ status: "done", write: marked(db, "a") })).runOnce();
-    expect(run).toEqual({ jobId: job.id, status: "done" });
+    const run = await runner(async () => ({
+      status: "succeeded",
+      write: marked(db, "a"),
+    })).runOnce();
+    expect(run).toEqual({ jobId: job.id, status: "succeeded" });
     expect(written(db, "a")).toBe(true);
-    expect(readJob(db, job.id)).toMatchObject({ status: "done", leaseUntil: null });
+    expect(readJob(db, job.id)).toMatchObject({ status: "succeeded", leaseUntil: null });
   });
 
   it("discards a result whose source got a new version while it ran: superseded", async () => {
     const job = imported("a", "v1");
     const run = await runner(async () => {
       imported("a", "v2"); // a newer version arrives while the Broker call is out
-      return { status: "done", write: marked(db, "stale") };
+      return { status: "succeeded", write: marked(db, "stale") };
     }).runOnce();
     expect(run).toEqual({ jobId: job.id, status: "superseded" });
     expect(written(db, "stale")).toBe(false);
@@ -117,13 +120,13 @@ describe("job runner: version fence (V02-R5)", () => {
       db.transaction(() => {
         db.run("DELETE FROM source_versions WHERE source_id = ?", [job.sourceId]);
         writeTombstone(db, {
-          sourceId: job.sourceId,
+          sourceId: job.sourceId as number,
           version: 1,
           at: "x",
           reason: "source-deleted",
         });
       });
-      return { status: "done", write: marked(db, "deleted") };
+      return { status: "succeeded", write: marked(db, "deleted") };
     }).runOnce();
     expect(run?.status).toBe("superseded");
     expect(written(db, "deleted")).toBe(false);
@@ -139,23 +142,26 @@ describe("job runner: version fence (V02-R5)", () => {
 });
 
 describe("job runner: restart (V02-R4, R16)", () => {
-  it("resumes a job left leased by a stopped backend once its lease runs out", async () => {
+  it("resumes a job left running by a stopped backend once its lease runs out", async () => {
     const job = imported("a");
     const before = runner(() => new Promise<never>(() => {})); // the call never returns
     void before.runOnce();
-    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("leased"));
-    db.close(); // the backend stops with the job leased
+    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("running"));
+    db.close(); // the backend stops with the job running
     open.splice(open.indexOf(db), 1);
 
     const after = reopen();
-    const handler = vi.fn<JobHandler>(async () => ({ status: "done", write: marked(after, "a") }));
+    const handler = vi.fn<JobHandler>(async () => ({
+      status: "succeeded",
+      write: marked(after, "a"),
+    }));
     const restarted = runner(handler, after);
     clock = new Date(T0.getTime() + LEASE - 1);
     expect(await restarted.runOnce()).toBeUndefined();
     expect(handler).not.toHaveBeenCalled();
 
     clock = new Date(T0.getTime() + LEASE);
-    expect(await restarted.runOnce()).toEqual({ jobId: job.id, status: "done" });
+    expect(await restarted.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ id: job.id }));
     expect(written(after, "a")).toBe(true);
   });
@@ -165,22 +171,28 @@ describe("job runner: restart (V02-R4, R16)", () => {
     db.close();
     open.splice(open.indexOf(db), 1);
     const after = reopen();
-    const run = await runner(async () => ({ status: "done", write: () => {} }), after).runOnce();
-    expect(run).toEqual({ jobId: job.id, status: "done" });
+    const run = await runner(
+      async () => ({ status: "succeeded", write: () => {} }),
+      after,
+    ).runOnce();
+    expect(run).toEqual({ jobId: job.id, status: "succeeded" });
   });
 
   it("counts a job once when a late result from the earlier run arrives after the rerun", async () => {
     const job = imported("a");
     const late = deferred<JobResult>();
     const first = runner(() => late.promise).runOnce();
-    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("leased"));
+    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("running"));
 
     const other = reopen(); // a second connection runs it again after the lease ran out
     clock = new Date(T0.getTime() + LEASE);
-    const rerun = runner(async () => ({ status: "done", write: marked(other, "rerun") }), other);
-    expect(await rerun.runOnce()).toEqual({ jobId: job.id, status: "done" });
+    const rerun = runner(
+      async () => ({ status: "succeeded", write: marked(other, "rerun") }),
+      other,
+    );
+    expect(await rerun.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
 
-    late.resolve({ status: "done", write: marked(db, "late") });
+    late.resolve({ status: "succeeded", write: marked(db, "late") });
     expect(await first).toEqual({ jobId: job.id, status: "not-leased" });
     expect(written(db, "late")).toBe(false);
     expect(written(db, "rerun")).toBe(true);
@@ -207,12 +219,16 @@ describe("job runner: one job at a time (V02-R4)", () => {
     for (const [i, gate] of [...gates.values()].entries()) {
       await vi.waitFor(() => expect(order).toHaveLength(i + 1));
       expect(running).toBe(1);
-      gate.resolve({ status: "done", write: () => {} });
+      gate.resolve({ status: "succeeded", write: () => {} });
     }
     await drained;
     expect(most).toBe(1);
     expect(order).toEqual(jobs.map((j) => j.id));
-    expect(jobs.map((j) => readJob(db, j.id)?.status)).toEqual(["done", "done", "done"]);
+    expect(jobs.map((j) => readJob(db, j.id)?.status)).toEqual([
+      "succeeded",
+      "succeeded",
+      "succeeded",
+    ]);
   });
 });
 
@@ -243,34 +259,34 @@ describe("job runner: outcomes other than a result", () => {
       db,
       (e) => errors.push(e),
     ).runOnce();
-    expect(run).toEqual({ jobId: job.id, status: "failed" });
-    expect(readJob(db, job.id)).toMatchObject({ status: "failed", reason: "handler-error" });
+    expect(run).toEqual({ jobId: job.id, status: "dead_letter" });
+    expect(readJob(db, job.id)).toMatchObject({ status: "dead_letter", reason: "handler-error" });
     expect(errors).toHaveLength(1);
   });
 
   it("fails a job whose result cannot be written, keeping none of it", async () => {
     const job = imported();
     const run = await runner(async () => ({
-      status: "done",
+      status: "succeeded",
       write: () => {
         marked(db, "partial")();
         throw new Error("constraint");
       },
     })).runOnce();
-    expect(run).toEqual({ jobId: job.id, status: "failed" });
-    expect(readJob(db, job.id)).toMatchObject({ status: "failed", reason: "write-error" });
+    expect(run).toEqual({ jobId: job.id, status: "dead_letter" });
+    expect(readJob(db, job.id)).toMatchObject({ status: "dead_letter", reason: "write-error" });
     expect(written(db, "partial")).toBe(false);
   });
 
   it("leaves jobs of a kind it has no handler for untouched", async () => {
     const { job } = registerJob(db, {
       kind: "unhandled",
-      sourceId: imported().sourceId,
+      sourceId: imported().sourceId as number,
       fenceVersion: 1,
     }) as {
       job: StoredJob;
     };
-    const r = runner(async () => ({ status: "done", write: () => {} }));
+    const r = runner(async () => ({ status: "succeeded", write: () => {} }));
     await r.wake();
     expect(readJob(db, job.id)?.status).toBe("queued");
   });
@@ -279,7 +295,7 @@ describe("job runner: outcomes other than a result", () => {
 describe("job runner: start and stop", () => {
   it("drains on start, picks up later jobs on the poll, and stops claiming after stop", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    const handler = vi.fn<JobHandler>(async () => ({ status: "done", write: () => {} }));
+    const handler = vi.fn<JobHandler>(async () => ({ status: "succeeded", write: () => {} }));
     const r = createJobRunner({
       db,
       handlers: { extract: handler },
@@ -289,11 +305,11 @@ describe("job runner: start and stop", () => {
     });
     const first = imported();
     r.start();
-    await vi.waitFor(() => expect(readJob(db, first.id)?.status).toBe("done"));
+    await vi.waitFor(() => expect(readJob(db, first.id)?.status).toBe("succeeded"));
 
     const second = imported();
     await vi.advanceTimersByTimeAsync(1000);
-    await vi.waitFor(() => expect(readJob(db, second.id)?.status).toBe("done"));
+    await vi.waitFor(() => expect(readJob(db, second.id)?.status).toBe("succeeded"));
 
     await r.stop();
     const third = imported();
@@ -319,23 +335,24 @@ describe("job runner: stop while a job runs (V02-T03 rework)", () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(stopped).toBe(false);
 
-    gate.resolve({ status: "done", write: () => {} });
+    gate.resolve({ status: "succeeded", write: () => {} });
     await stopping;
     await vi.advanceTimersByTimeAsync(5000);
-    expect(jobs.map((j) => readJob(db, j.id)?.status)).toEqual(["done", "queued", "queued"]);
+    expect(jobs.map((j) => readJob(db, j.id)?.status)).toEqual(["succeeded", "queued", "queued"]);
     expect(handler).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("job runner: failures that are not the result's (V02-T03 rework)", () => {
-  it("leaves the job leased when closing fails in the database, not as a write error", async () => {
+  it("leaves the job running when closing fails in the database, not as a write error", async () => {
     const job = imported();
     // locked once, at the first close only (another process held the file)
     let busy = true;
     const flaky: SqlDriver = {
       ...db,
       run: (sql, params) => {
-        if (busy && sql.startsWith("UPDATE jobs SET status = ?")) {
+        // the close's status write (it names the reason; the claim's reclaim does not)
+        if (busy && sql.startsWith("UPDATE jobs SET status = ?") && sql.includes("reason = ?")) {
           busy = false;
           throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
         }
@@ -345,16 +362,16 @@ describe("job runner: failures that are not the result's (V02-T03 rework)", () =
     const errors: unknown[] = [];
     const write = vi.fn(marked(db, "busy"));
     const r = runner(
-      async () => ({ status: "done", write }),
+      async () => ({ status: "succeeded", write }),
       flaky,
       (e) => errors.push(e),
     );
     await expect(r.runOnce()).rejects.toMatchObject({ code: "SQLITE_BUSY" });
-    expect(readJob(db, job.id)).toMatchObject({ status: "leased", reason: null });
+    expect(readJob(db, job.id)).toMatchObject({ status: "running", reason: null });
     expect(written(db, "busy")).toBe(false);
 
     clock = new Date(T0.getTime() + LEASE);
-    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "done" });
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
     expect(written(db, "busy")).toBe(true);
   });
 
@@ -364,25 +381,25 @@ describe("job runner: failures that are not the result's (V02-T03 rework)", () =
       status: "held",
       reason: "Provider said: SECRET-BODY-TEXT",
     })).runOnce();
-    expect(run).toEqual({ jobId: job.id, status: "failed" });
-    expect(readJob(db, job.id)).toMatchObject({ status: "failed", reason: "invalid-reason" });
+    expect(run).toEqual({ jobId: job.id, status: "dead_letter" });
+    expect(readJob(db, job.id)).toMatchObject({ status: "dead_letter", reason: "invalid-reason" });
   });
 });
 
 describe("job runner: round 2 review (V02-T03)", () => {
   it("drains again after start when it was woken while stopped", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    const r = runner(async () => ({ status: "done", write: () => {} }));
+    const r = runner(async () => ({ status: "succeeded", write: () => {} }));
     await r.stop();
     await r.wake(); // e.g. an import finished during shutdown
     const job = imported();
     r.start();
     await r.wake();
-    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("done"));
+    await vi.waitFor(() => expect(readJob(db, job.id)?.status).toBe("succeeded"));
     await r.stop();
   });
 
-  it("takes the write lock before writing: a file locked by another process leaves the job leased", async () => {
+  it("takes the write lock before writing: a file locked by another process leaves the job running", async () => {
     db.exec("PRAGMA busy_timeout = 0");
     const job = imported();
     const other = reopen();
@@ -391,28 +408,28 @@ describe("job runner: round 2 review (V02-T03)", () => {
     const r = runner(async () => {
       // the first time, another process takes the write lock while the call is out
       if (calls++ === 0) other.exec("BEGIN IMMEDIATE");
-      return { status: "done", write };
+      return { status: "succeeded", write };
     });
     await expect(r.runOnce()).rejects.toMatchObject({ code: "SQLITE_BUSY" });
     expect(write).not.toHaveBeenCalled();
     other.exec("ROLLBACK");
-    expect(readJob(db, job.id)).toMatchObject({ status: "leased", reason: null });
+    expect(readJob(db, job.id)).toMatchObject({ status: "running", reason: null });
 
     clock = new Date(T0.getTime() + LEASE);
-    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "done" });
+    expect(await r.runOnce()).toEqual({ jobId: job.id, status: "succeeded" });
     expect(write).toHaveBeenCalledTimes(1);
     expect(written(db, "locked")).toBe(true);
   });
 
-  it("leaves the job leased when the write itself meets a locked file", async () => {
+  it("leaves the job running when the write itself meets a locked file", async () => {
     const job = imported();
     const run = runner(async () => ({
-      status: "done",
+      status: "succeeded",
       write: () => {
         throw Object.assign(new Error("database is locked"), { code: "SQLITE_LOCKED" });
       },
     })).runOnce();
     await expect(run).rejects.toMatchObject({ code: "SQLITE_LOCKED" });
-    expect(readJob(db, job.id)).toMatchObject({ status: "leased", reason: null });
+    expect(readJob(db, job.id)).toMatchObject({ status: "running", reason: null });
   });
 });

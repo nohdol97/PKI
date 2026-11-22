@@ -213,8 +213,8 @@ export function productCalls(
 
 /**
  * The job runner with the product's handlers (V02-R4, R6): extraction of each
- * stored version through `broker`, with origin {jobId, lease} built from the
- * leased job only, and the proposals of `engine` when it has the capability
+ * stored version through `broker`, with origin {jobId, leaseToken} built from the
+ * running job only, and the proposals of `engine` when it has the capability
  * (V02-R13). Errors are logged by class only.
  */
 export function productRunner(

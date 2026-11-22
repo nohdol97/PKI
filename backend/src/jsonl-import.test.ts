@@ -361,9 +361,12 @@ describe("importJsonl", () => {
       MAIL.connector_instance_id,
       MAIL.external_id,
     ]);
-    db.run(`INSERT INTO jobs (kind, source_id, fence_version, status) VALUES (?, 1, 1, 'done')`, [
-      EXTRACT_JOB_KIND,
-    ]);
+    db.run(
+      `INSERT INTO jobs (kind, source_id, fence_version, status, run_after, fairness_key,
+         registered_change_seq, created_at, updated_at)
+       VALUES (?, 1, 1, 'succeeded', 0, 'f', 0, 0, 0)`,
+      [EXTRACT_JOB_KIND],
+    );
     const before = counts();
     const result = await importJsonl(
       db,
@@ -428,10 +431,12 @@ describe("importJsonl, review round 2", () => {
       "INSERT INTO sources (connector_instance_id, external_id) VALUES (?, ?)",
       [MAIL.connector_instance_id, externalId],
     );
-    db.run(`INSERT INTO jobs (kind, source_id, fence_version, status) VALUES (?, ?, 1, 'done')`, [
-      EXTRACT_JOB_KIND,
-      lastInsertRowid,
-    ]);
+    db.run(
+      `INSERT INTO jobs (kind, source_id, fence_version, status, run_after, fairness_key,
+         registered_change_seq, created_at, updated_at)
+       VALUES (?, ?, 1, 'succeeded', 0, 'f', 0, 0, 0)`,
+      [EXTRACT_JOB_KIND, lastInsertRowid],
+    );
   };
 
   it("keeps page 1 of a round and reports only page 2's lines when page 2 fails (A7)", async () => {

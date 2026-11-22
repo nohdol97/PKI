@@ -139,7 +139,8 @@ function imported(line: Pick<Line, "id" | "title" | "content">, instance = "impo
 /** One runner step: lease, handle, close through the fence. */
 async function runNext() {
   const job = leaseNextJob(db, { kinds: ["extract"], now: T0, leaseMs: 60_000 });
-  if (!job || !isFenceCurrent(db, job)) throw new Error("expected a current job");
+  const fence = { sourceId: job?.sourceId as number, fenceVersion: job?.fenceVersion as number };
+  if (!job || !isFenceCurrent(db, fence)) throw new Error("expected a current job");
   const result = await handler(job);
   return { job, result, status: closeJob(db, job, result) };
 }
@@ -165,18 +166,18 @@ describe("extraction.calls", () => {
   it("makes exactly one Provider call for one source version", async () => {
     imported(mail);
     const { status, result } = await runNext();
-    expect(status).toBe("done");
-    expect(result.status).toBe("done");
+    expect(status).toBe("succeeded");
+    expect(result.status).toBe("succeeded");
     expect(provider.requests).toHaveLength(1);
     expect(facts()).toHaveLength(1);
   });
 
-  it("asks again once on a schema mismatch and stops failed after the second", async () => {
+  it("asks again once on a schema mismatch and stops dead-lettered after the second", async () => {
     setUp([{ output: { claims: [] } }, { output: { claims: [] } }, { output: { claims: [] } }]);
     imported(mail);
     const { status, job } = await runNext();
     expect(provider.requests).toHaveLength(2);
-    expect(status).toBe("failed");
+    expect(status).toBe("dead_letter");
     expect(db.all("SELECT reason FROM jobs WHERE id = ?", [job.id])).toEqual([
       { reason: "invalid-output" },
     ]);
@@ -186,7 +187,7 @@ describe("extraction.calls", () => {
   it("uses the second answer when only the first mismatched", async () => {
     setUp([{ output: { claims: [] } }]);
     imported(mail);
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(provider.requests).toHaveLength(2);
     expect(facts()).toHaveLength(1);
   });
@@ -195,7 +196,7 @@ describe("extraction.calls", () => {
     setUp([{ error: new Error("boom") }]);
     imported(mail);
     const { status, job } = await runNext();
-    expect(status).toBe("failed");
+    expect(status).toBe("dead_letter");
     expect(provider.requests).toHaveLength(1);
     expect(db.all("SELECT reason FROM jobs WHERE id = ?", [job.id])).toEqual([
       { reason: "provider-error" },
@@ -216,7 +217,7 @@ describe("extraction.calls", () => {
   it("counts the size in code points, title included", async () => {
     // just under the limit in code points, far over it in UTF-16 units
     imported({ id: "emoji", title: "t", content: "🙂".repeat(MAX_EXTRACT_CODE_POINTS - 2) });
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(provider.requests).toHaveLength(1);
   });
 
@@ -245,7 +246,7 @@ describe("extraction.request", () => {
       taskKind: "extract",
       sourceVersionIds: [String(versionOf(second))],
       candidateItemIds: [String(a)],
-      origin: { jobId: String(second.id), lease: "1" },
+      origin: { jobId: String(second.id), leaseToken: "1" },
       schemaVersion: EXTRACT_SCHEMA_VERSION,
       budget: { timeoutMs: 120_000 },
       retryable: false,
@@ -260,7 +261,7 @@ describe("extraction.request", () => {
   it("puts a malicious variant's instruction in the document section only", async () => {
     const malicious = lines("v02-malicious.jsonl");
     for (const line of malicious) imported(line);
-    for (let i = 0; i < malicious.length; i++) expect((await runNext()).status).toBe("done");
+    for (let i = 0; i < malicious.length; i++) expect((await runNext()).status).toBe("succeeded");
     expect(provider.requests).toHaveLength(3);
     for (const request of provider.requests) {
       expect(request.input.instructions).toBe(TASKS.extract[EXTRACT_SCHEMA_VERSION].instructions);
@@ -295,7 +296,7 @@ describe("extraction.quote (stored)", () => {
       }),
     ]);
     const job = imported(mail);
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     const fact = facts()[0] as { id: number };
     expect(listEvidence(db, { factId: fact.id })).toMatchObject([
       { sourceVersionId: versionOf(job), start: 30, end: 60, quote, current: true },
@@ -336,7 +337,7 @@ describe("extraction.quote (stored)", () => {
       }),
     ]);
     const job = imported(wiki);
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(facts()).toEqual([]);
     expect(db.all("SELECT count(*) AS n FROM relations")).toEqual([{ n: 1 }]);
     expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 2, other: 0 });
@@ -360,7 +361,7 @@ describe("extraction.quote (stored)", () => {
       }),
     ]);
     const job = imported({ id: "title", title, content: "본문에는 날짜가 없습니다." });
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(facts()).toEqual([]);
     expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 1, other: 0 });
   });
@@ -381,7 +382,7 @@ describe("extraction.quote (stored)", () => {
       }),
     ]);
     imported(mail);
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(items()).toEqual([]);
   });
 
@@ -398,7 +399,7 @@ describe("extraction.quote (stored)", () => {
       }),
     ]);
     const job = imported(mail);
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(facts()).toEqual([]);
     expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 0, other: 3 });
   });
@@ -422,7 +423,7 @@ describe("linking", () => {
 
   it("links A and B across the three sources to one item each", async () => {
     for (const line of [mail, wiki, messenger]) imported(line);
-    for (let i = 0; i < 3; i++) expect((await runNext()).status).toBe("done");
+    for (let i = 0; i < 3; i++) expect((await runNext()).status).toBe("succeeded");
     expect(items()).toEqual([
       { id: 1, type: "Project", name: "미리내 프로젝트", status: "candidate" },
       { id: 2, type: "System", name: "물결 API", status: "candidate" },
@@ -460,7 +461,7 @@ describe("linking", () => {
       }),
     ]);
     const job = imported(messenger); // names no existing item: no candidates
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(provider.requests[0]?.input.candidates).toEqual([]);
     expect(facts()).toHaveLength(1); // the mail's only
     // the item entry and the fact that named it
@@ -481,7 +482,7 @@ describe("linking", () => {
       }),
     ]);
     const job = imported(messenger);
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(items()).toEqual([]);
     expect(facts()).toEqual([]);
     // the dropped first entry and the fact that named its ref; the repeat is ignored
@@ -564,7 +565,7 @@ describe("engine proposals (V02-R13)", () => {
   ) {
     const engine = new ProposingKnowledgeEngine(({ ref }) => candidates(ref));
     const job = imported(line);
-    const ref = { sourceId: String(job.sourceId), version: job.fenceVersion };
+    const ref = { sourceId: String(job.sourceId), version: job.fenceVersion as number };
     await engine.upsertSource({ ref, title: line.title, body: line.content }, ref, 1);
     return { engine, ref };
   }
@@ -574,7 +575,7 @@ describe("engine proposals (V02-R13)", () => {
     const propose = vi.spyOn(engine, "proposeKnowledge");
     setUp([output({})], engine);
     const { status, job } = await runNext();
-    expect(status).toBe("done");
+    expect(status).toBe("succeeded");
     expect(propose).toHaveBeenCalledWith(ref);
     expect(items()).toEqual([
       { id: 1, type: "Project", name: "미리내 프로젝트", status: "candidate" },
@@ -656,7 +657,7 @@ describe("engine proposals (V02-R13)", () => {
     const propose = vi.spyOn(engine, "proposeKnowledge");
     let stale = true;
     setUp([output({}), output({})], engine, () => stale);
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(propose).not.toHaveBeenCalled();
     expect(facts()).toEqual([]);
     // rebuilt: asked again
@@ -671,7 +672,7 @@ describe("engine proposals (V02-R13)", () => {
     const propose = vi.spyOn(engine, "proposeKnowledge");
     setUp([output({})], engine);
     imported(mail);
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(propose).not.toHaveBeenCalled();
     expect(facts()).toEqual([]);
   });
@@ -680,7 +681,7 @@ describe("engine proposals (V02-R13)", () => {
     const { engine } = await proposing((r) => [proposal(r)]);
     vi.spyOn(engine, "proposeKnowledge").mockRejectedValue(new Error("engine broke"));
     setUp([output({})], engine);
-    expect((await runNext()).status).toBe("done");
+    expect((await runNext()).status).toBe("succeeded");
     expect(facts()).toEqual([]);
     expect(engineErrors).toHaveLength(1);
   });

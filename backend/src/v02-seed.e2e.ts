@@ -45,7 +45,7 @@ function consentLocalModel(egress: EgressControls) {
 
 /**
  * Imports `sets` (in order) and runs their extraction jobs to the end with the
- * fixture double; returns the jobs that did not end `done` (none expected).
+ * fixture double; returns the jobs that did not end `succeeded` (none expected).
  */
 export async function seedV02(db: SqlDriver, sets: readonly string[]): Promise<number> {
   const egress = productEgress(db);
@@ -68,7 +68,7 @@ export async function seedV02(db: SqlDriver, sets: readonly string[]): Promise<n
   } finally {
     await runner.stop();
   }
-  return db.all("SELECT id FROM jobs WHERE status <> 'done'").length;
+  return db.all("SELECT id FROM jobs WHERE status <> 'succeeded'").length;
 }
 
 if (import.meta.main) {

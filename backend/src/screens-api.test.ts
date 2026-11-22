@@ -2,7 +2,12 @@
 // canonical DB and the configured data directory, never from fixed values.
 import { ErrorResponseSchema, routes } from "@pki/contracts";
 import { createCallRecorder } from "@pki/providers";
-import { registerConnectorInstance, saveSourceRecord, type SqlDriver } from "@pki/storage";
+import {
+  migrations,
+  registerConnectorInstance,
+  saveSourceRecord,
+  type SqlDriver,
+} from "@pki/storage";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -139,7 +144,7 @@ describe("screen routes", () => {
   it("reads the settings, the encryption state read from the canonical file", async () => {
     expect((await call(routes.settings.path)).body).toEqual({
       dataDirectory: DATA_DIR,
-      schemaVersion: 10,
+      schemaVersion: migrations.length, // the latest migration, whatever its number
       databaseEncryption: "not-applied",
       openaiCompatible: { baseUrl: null, model: null, host: null, keyName: null, key: null },
     });

@@ -6,12 +6,14 @@
 import type { BrokerRequest, LLMRequest } from "@pki/contracts";
 import {
   closeJob,
+  JOB_STATUSES,
   leaseNextJob,
   migrate,
   readJob,
   registerConnectorInstance,
   registerJob,
   saveSourceRecord,
+  supersedeOpenJobs,
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
@@ -326,28 +328,27 @@ describe("broker.class: the Broker computes the data classification", () => {
 describe("broker.origin: the Broker decides the call kind from its records", () => {
   // A job is registered once per kind and source version (V02-R4), so a second
   // call for the same version returns the job already registered. The runner
-  // calls the Broker only while it holds the job's lease, naming that lease
-  // (token 1 here, V02-T03).
-  function job(kind = "extract", sourceVersionId = store(synthA), status = "leased"): string {
-    const target = "SELECT source_id, version FROM source_versions WHERE id = ?";
-    db.run(
-      `INSERT INTO jobs (kind, source_id, fence_version, status, lease_token)
-       SELECT ?, source_id, version, ?, 1 FROM (${target}) WHERE true ON CONFLICT DO NOTHING`,
-      [kind, status, Number(sourceVersionId)],
-    );
-    return String(
-      db.all(`SELECT id FROM jobs WHERE kind = ? AND (source_id, fence_version) = (${target})`, [
-        kind,
-        Number(sourceVersionId),
-      ])[0]?.id,
-    );
+  // calls the Broker only while the job is running under its lease, naming that
+  // lease token (token 1 here, V02-T03, I03-R2).
+  function job(kind = "extract", sourceVersionId = store(synthA), status = "running"): string {
+    const version = db.all("SELECT source_id, version FROM source_versions WHERE id = ?", [
+      Number(sourceVersionId),
+    ])[0];
+    const r = registerJob(db, {
+      kind,
+      sourceId: version?.source_id as number,
+      fenceVersion: version?.version as number,
+    });
+    const id = r.registered ? r.job.id : r.existing.id;
+    db.run("UPDATE jobs SET status = ?, lease_token = 1 WHERE id = ?", [status, id]);
+    return String(id);
   }
 
   it("treats a call from a job record as background", async () => {
     const id = store(synthA);
     const result = await broker.call({
       ...extract([id]),
-      origin: { jobId: job("extract", id), lease: "1" },
+      origin: { jobId: job("extract", id), leaseToken: "1" },
     });
     expect(result.status).toBe("ok");
     expect(sent().trigger).toBe("background");
@@ -364,11 +365,15 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
     for (const extra of [
       { trigger: "user" },
       { callKind: "user" },
-      { origin: { jobId: job(), lease: "1", trigger: "user" } },
-      { origin: { jobId: job(), lease: "1", userActionId: "x" } },
+      { origin: { jobId: job(), leaseToken: "1", trigger: "user" } },
+      { origin: { jobId: job(), leaseToken: "1", userActionId: "x" } },
     ]) {
       expect(
-        await broker.call({ ...extract([id]), origin: { jobId: job(), lease: "1" }, ...extra }),
+        await broker.call({
+          ...extract([id]),
+          origin: { jobId: job(), leaseToken: "1" },
+          ...extra,
+        }),
       ).toEqual({
         status: "rejected",
         reason: "invalid-request",
@@ -441,26 +446,29 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
 
   it("rejects a missing job record and a job of another task kind", async () => {
     const id = store(synthA);
-    expect(await broker.call({ ...extract([id]), origin: { jobId: "404", lease: "1" } })).toEqual({
+    expect(
+      await broker.call({ ...extract([id]), origin: { jobId: "404", leaseToken: "1" } }),
+    ).toEqual({
       status: "rejected",
       reason: "unknown-origin",
     });
     expect(
       await broker.call({
         ...extract([id]),
-        origin: { jobId: job("connection-test", id), lease: "1" },
+        origin: { jobId: job("connection-test", id), leaseToken: "1" },
       }),
     ).toEqual({ status: "rejected", reason: "origin-mismatch" });
   });
 
-  it("rejects a job record the runner does not hold leased: queued or closed", async () => {
-    // V01 "T07이 넘기는 것" 6: a used job record is decided with the lease (V02-T03)
-    for (const status of ["queued", "done", "superseded", "held", "failed"]) {
+  it("broker.origin-running: rejects a job record that is not running: queued, waiting or closed", async () => {
+    // V01 "T07이 넘기는 것" 6: a used job record is decided with the lease (V02-T03),
+    // by the renamed status (I03-R2): every status but running is refused
+    for (const status of JOB_STATUSES.filter((s) => s !== "running")) {
       const id = store({ ...synthA, body: `${synthA.body} ${status}` });
       expect(
         await broker.call({
           ...extract([id]),
-          origin: { jobId: job("extract", id, status), lease: "1" },
+          origin: { jobId: job("extract", id, status), leaseToken: "1" },
         }),
       ).toEqual({ status: "rejected", reason: "origin-not-leased" });
     }
@@ -483,7 +491,10 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
       if (!job) throw new Error("expected a claim");
       return job;
     };
-    const origin = (job: StoredJob) => ({ jobId: String(job.id), lease: String(job.leaseToken) });
+    const origin = (job: StoredJob) => ({
+      jobId: String(job.id),
+      leaseToken: String(job.leaseToken),
+    });
     const old = claim(new Date("2026-11-21T00:00:00.000Z"));
     const fresh = claim(new Date("2026-11-21T00:00:02.000Z"));
 
@@ -498,9 +509,27 @@ describe("broker.origin: the Broker decides the call kind from its records", () 
     expect(provider.requests).toEqual([]);
     expect((await broker.call({ ...extract([id]), origin: origin(fresh) })).status).toBe("ok");
 
-    expect(closeJob(db, fresh, { status: "done", write: () => {} })).toBe("done");
+    expect(closeJob(db, fresh, { status: "succeeded", write: () => {} })).toBe("succeeded");
     expect(closeJob(db, old, { status: "held", reason: "cli-background-off" })).toBe("not-leased");
-    expect(readJob(db, old.id)).toMatchObject({ status: "done", reason: null });
+    expect(readJob(db, old.id)).toMatchObject({ status: "succeeded", reason: null });
+  });
+
+  it("broker.origin-running: passes a running job's current token, refuses it once the source's jobs close", async () => {
+    // I03-R2, R3: a token that no longer matches (a reclaim, a source closing) is a stale runner
+    const id = store(synthA);
+    const jobId = job("extract", id);
+    const call = (leaseToken: string) =>
+      broker.call({ ...extract([id]), origin: { jobId, leaseToken } });
+    expect(await call("2")).toEqual({ status: "rejected", reason: "origin-not-leased" });
+    expect(provider.requests).toEqual([]);
+    expect((await call("1")).status).toBe("ok");
+    const calls = provider.requests.length;
+    supersedeOpenJobs(db, readJob(db, Number(jobId))?.sourceId as number);
+    expect(readJob(db, Number(jobId))).toMatchObject({ status: "superseded", leaseToken: 2 });
+    for (const token of ["1", "2"]) {
+      expect(await call(token)).toEqual({ status: "rejected", reason: "origin-not-leased" });
+    }
+    expect(provider.requests).toHaveLength(calls);
   });
 
   it("issues unguessable record IDs and keeps no record on disk", async () => {

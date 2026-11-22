@@ -1,7 +1,7 @@
 // The extract job handler (V02-R6, R7, R8; ADR 0003): one source version, one
 // structured Broker call (asked once more only when the answer did not match the
 // schema). The handler sends IDs only: the version, the candidate items whose name
-// the text holds, and the leased job with its lease token as origin, taken from
+// the text holds, and the running job with its lease token as origin, taken from
 // the job the runner leased and from nothing else. The Broker reads the text,
 // attaches the instructions, grades and gates the call (background, consent,
 // egress). A blocked call holds the job with the Broker's reason; there is no
@@ -195,32 +195,38 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
   const now = options.now ?? (() => new Date());
 
   return async (job: StoredJob): Promise<ExtractResult> => {
-    const versionId = findSourceVersionId(db, job.sourceId, job.fenceVersion);
+    const { sourceId, fenceVersion } = job; // an extract job has both (schema v10 CHECK)
+    const versionId =
+      sourceId === null || fenceVersion === null
+        ? undefined
+        : findSourceVersionId(db, sourceId, fenceVersion);
     const stored = versionId === undefined ? undefined : readSourceVersion(db, versionId);
-    if (versionId === undefined || !stored) return { status: "failed", reason: "missing-version" };
+    if (versionId === undefined || !stored) {
+      return { status: "dead_letter", reason: "missing-version" };
+    }
     if ([...stored.title].length + [...stored.body].length > MAX_EXTRACT_CODE_POINTS) {
       return { status: "held", reason: EXTRACT_HOLD_TOO_LARGE };
     }
     const candidates = findCandidates(db, `${stored.title}\n${stored.body}`).map(String);
-    const ref = { sourceId: String(job.sourceId), version: job.fenceVersion };
+    const ref = { sourceId: String(sourceId), version: fenceVersion as number };
     const proposed = await proposals(options, ref);
     const result = await extractOnce(broker, {
       taskKind: "extract",
       sourceVersionIds: [String(versionId)],
       candidateItemIds: candidates,
-      origin: { jobId: String(job.id), lease: String(job.leaseToken) },
+      origin: { jobId: String(job.id), leaseToken: String(job.leaseToken) },
       schemaVersion: EXTRACT_SCHEMA_VERSION,
       budget: { timeoutMs: EXTRACT_TIMEOUT_MS },
-      // one call (V02-R6): a transient failure fails the job; retry policy is I03's
+      // one call (V02-R6): a transient failure dead-letters the job; retry policy is I03-T04's
       retryable: false,
     });
     switch (result.status) {
       case "blocked":
         return { status: "held", reason: result.reason };
       case "rejected":
-        return { status: "failed", reason: result.reason };
+        return { status: "dead_letter", reason: result.reason };
       case "failed":
-        return { status: "failed", reason: result.error };
+        return { status: "dead_letter", reason: result.error };
     }
     const body = stored.body;
     const drops = { quotes: 0, other: 0 };
@@ -287,7 +293,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     }
 
     return {
-      status: "done",
+      status: "succeeded",
       write: () => {
         // An item is created only for a fact or relation that is kept. Existing
         // items are looked up before any is created: one deleted during the Provider

@@ -13,7 +13,7 @@ export interface ContractSqlDriver {
   exec(sql: string): void;
   run(sql: string, params?: readonly Value[]): { changes: number; lastInsertRowid: number };
   all(sql: string, params?: readonly Value[]): Record<string, Value>[];
-  transaction<T>(fn: () => T): T;
+  transaction<T>(fn: () => T, options?: { immediate?: boolean }): T;
   close(): void;
 }
 
@@ -82,6 +82,40 @@ export function sqlDriverContract(name: string, open: (path: string) => Contract
         }),
       ).toThrow("boom");
       expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 0 }]);
+    });
+
+    // I03-R4 `transaction.immediate`: an immediate transaction takes the write lock as
+    // it begins, so another connection's write meets a busy file; by default the
+    // lock waits for the transaction's first write, as before. The second
+    // connection does not wait for the lock (busy_timeout 0), so no test sleeps.
+    describe("transaction.immediate", () => {
+      let other: ContractSqlDriver;
+      beforeEach(() => {
+        other = open(join(dir, "test.sqlite"));
+        other.exec("PRAGMA busy_timeout = 0");
+      });
+      afterEach(() => other.close());
+
+      it("takes the write lock as an immediate transaction begins", () => {
+        db.transaction(
+          () => {
+            expect(() => other.run("INSERT INTO t (v) VALUES ('other')")).toThrow(/locked|busy/i);
+            expect(other.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 0 }]);
+            db.run("INSERT INTO t (v) VALUES ('mine')");
+          },
+          { immediate: true },
+        );
+        expect(db.all("SELECT v FROM t")).toEqual([{ v: "mine" }]);
+      });
+
+      it("defers the lock to the first write without the option", () => {
+        for (const options of [undefined, {}, { immediate: false }]) {
+          db.transaction(() => {
+            other.run("INSERT INTO t (v) VALUES ('other')");
+          }, options);
+        }
+        expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 3 }]);
+      });
     });
 
     it("enforces foreign keys", () => {

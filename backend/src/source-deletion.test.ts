@@ -338,7 +338,7 @@ describe("delete.propagate", () => {
     expect(db.all("SELECT id, name FROM items")).toEqual([{ id: x?.id, name: Y_NAME }]);
     expect(count("relations")).toBe(0);
     expect(db.all("SELECT status, dropped_other FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
-      { status: "done", dropped_other: 1 },
+      { status: "succeeded", dropped_other: 1 },
     ]);
   });
 
@@ -358,7 +358,7 @@ describe("delete.propagate", () => {
     // X went with the mail, so the relation was dropped and Z was never made
     expect(db.all("SELECT name FROM items")).toEqual([]);
     expect(db.all("SELECT status, dropped_other FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
-      { status: "done", dropped_other: 1 },
+      { status: "succeeded", dropped_other: 1 },
     ]);
     deleteSource(db, sourceId("k"), { reason: "user-deleted", at: new Date().toISOString() });
     db.close();

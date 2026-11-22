@@ -126,9 +126,9 @@ describe("flow.insight", () => {
       "general",
     ]);
     expect(jobs()).toEqual([
-      { status: "done", reason: null },
-      { status: "done", reason: null },
-      { status: "done", reason: null },
+      { status: "succeeded", reason: null },
+      { status: "succeeded", reason: null },
+      { status: "succeeded", reason: null },
     ]);
     expect(db.all("SELECT type, name FROM items ORDER BY id")).toEqual([
       { type: "Project", name: "미리내 프로젝트" },
@@ -160,7 +160,7 @@ describe("flow.date-variant", () => {
     consent(egress, "local-model");
     await importer(fileText("date-variant"));
     await runner.wake();
-    expect(jobs().map((j) => j.status)).toEqual(["done", "done", "done"]);
+    expect(jobs().map((j) => j.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
     expect(db.all("SELECT value FROM facts WHERE kind = 'completion_date'")).toEqual([
       { value: "2026-12-03" },
     ]);
@@ -199,7 +199,7 @@ describe("held extraction", () => {
     await post(routes.setExecutionSettings.path, { cliBackground: true });
     await runner.wake(); // the release woke it already; this waits for the drain
     expect(provider.requests).toHaveLength(3);
-    expect(jobs().map((j) => j.status)).toEqual(["done", "done", "done"]);
+    expect(jobs().map((j) => j.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
     expect(db.all("SELECT count(*) AS n FROM jobs")).toEqual([{ n: 3 }]); // same rows
     expect(db.all("SELECT state FROM insights")).toEqual([{ state: "active" }]);
   });
@@ -221,7 +221,7 @@ describe("held extraction", () => {
     });
     await runner.wake();
     expect(provider.requests).toHaveLength(3);
-    expect(jobs().map((j) => j.status)).toEqual(["done", "done", "done"]);
+    expect(jobs().map((j) => j.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
   });
 
   it("releases every held job but one held for size: settings cannot make a source smaller", async () => {

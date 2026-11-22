@@ -40,8 +40,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(10);
-    expect(migrations).toHaveLength(10);
+    expect(schemaVersion(db)).toBe(11);
+    expect(migrations).toHaveLength(11);
   });
 
   it("is idempotent when re-run", () => {
@@ -508,7 +508,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
 
   it("registers a job once per kind, source and fence version", () => {
     seedV4();
-    migrate(db);
+    migrate(db, migrations.slice(0, 5));
     expect(() =>
       db.run(
         "INSERT INTO jobs (kind, source_id, fence_version, status) VALUES ('extract', 1, 2, 'queued')",
@@ -698,5 +698,164 @@ describe("schema v10 (I04-T01)", () => {
     const first = insert();
     db.run("DELETE FROM invalidations");
     expect(insert()).toBe(first + 1);
+  });
+});
+
+describe("schema v11 (I03-T01, I03-R2)", () => {
+  const T_LEASE_PAST = "2026-11-21T10:00:00.123Z";
+  const T_LEASE_FUTURE = "2999-01-01T00:00:00.000Z";
+
+  // A v10 database (V02-T03's jobs, I04-T01's invalidations) with one job of each status, two sources on two instances.
+  function seedV10(): void {
+    migrate(db, migrations.slice(0, 10));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('d', 'jsonl-import')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a'), ('d', 'b')",
+    );
+    db.run(
+      `INSERT INTO source_versions (source_id, version, content_hash, title, body)
+       VALUES (1, 1, 'h1', 't', 'b'), (2, 1, 'h2', 't', 'b')`,
+    );
+    const job = (status: string, source: number, extra: Record<string, unknown> = {}) =>
+      db.run(
+        `INSERT INTO jobs (kind, source_id, fence_version, status, lease_until, reason, lease_token,
+           dropped_quotes, dropped_other)
+         VALUES ('extract', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          source,
+          (extra.fence as number | undefined) ?? 1,
+          status,
+          (extra.leaseUntil as string | undefined) ?? null,
+          (extra.reason as string | undefined) ?? null,
+          (extra.token as number | undefined) ?? 0,
+          (extra.quotes as number | undefined) ?? null,
+          (extra.other as number | undefined) ?? null,
+        ],
+      );
+    job("queued", 1, { fence: 1 });
+    job("leased", 1, { fence: 2, leaseUntil: T_LEASE_PAST, token: 3 });
+    job("leased", 1, { fence: 3, leaseUntil: T_LEASE_FUTURE, token: 1 });
+    job("done", 1, { fence: 4, token: 2, quotes: 1, other: 0 });
+    job("failed", 1, { fence: 5, reason: "invalid-output", token: 1 });
+    job("held", 2, { fence: 1, reason: "no-consent", token: 1 });
+    job("held", 2, { fence: 2, reason: "source-too-large", token: 1 });
+    job("superseded", 2, { fence: 3, token: 1 });
+    db.run("INSERT INTO settings (key, value) VALUES ('jobs.held-policy-version', 'p1')");
+  }
+
+  const rows = () =>
+    db.all(
+      `SELECT id, kind, target, source_id, fence_version, status, reason, attempts, lease_token,
+              lease_until, lease_owner, priority, fairness_key, schedule_id, slot,
+              policy_fingerprint, cancel_requested, finished_at IS NOT NULL AS finished,
+              dropped_quotes, dropped_other
+         FROM jobs ORDER BY id`,
+    );
+
+  it("jobs.migration: keeps queued, held and superseded jobs with their source and fence, target empty", () => {
+    seedV10();
+    migrate(db);
+    expect(schemaVersion(db)).toBe(11);
+    const kept = rows().filter((r) =>
+      ["queued", "held", "superseded"].includes(r.status as string),
+    );
+    expect(kept.map((r) => [r.status, r.source_id, r.fence_version, r.target])).toEqual([
+      ["queued", 1, 1, ""],
+      ["held", 2, 1, ""],
+      ["held", 2, 2, ""],
+      ["superseded", 2, 3, ""],
+    ]);
+  });
+
+  it("jobs.migration-v02-status: renames the statuses, keeps reasons and fills the new columns", () => {
+    seedV10();
+    const seq = db.all("SELECT change_seq FROM revisions")[0]?.change_seq;
+    const before = Date.now();
+    migrate(db);
+    const after = Date.now();
+    expect(rows()).toEqual(
+      [
+        ["queued", null, 0, null, "c", 0],
+        ["running", null, 3, Date.parse(T_LEASE_PAST), "c", 0],
+        ["running", null, 1, Date.parse(T_LEASE_FUTURE), "c", 0],
+        ["succeeded", null, 2, null, "c", 1],
+        ["dead_letter", "invalid-output", 1, null, "c", 1],
+        ["held", "no-consent", 1, null, "d", 0],
+        ["held", "source-too-large", 1, null, "d", 0],
+        ["superseded", null, 1, null, "d", 1],
+      ].map(([status, reason, token, leaseUntil, fairness, finished], i) => ({
+        id: i + 1,
+        kind: "extract",
+        target: "",
+        source_id: i < 5 ? 1 : 2,
+        fence_version: [1, 2, 3, 4, 5, 1, 2, 3][i],
+        status,
+        reason,
+        attempts: 0,
+        lease_token: token,
+        lease_until: leaseUntil,
+        lease_owner: null,
+        priority: "user",
+        fairness_key: fairness,
+        schedule_id: null,
+        slot: null,
+        policy_fingerprint: null,
+        cancel_requested: 0,
+        finished,
+        dropped_quotes: i === 3 ? 1 : null,
+        dropped_other: i === 3 ? 0 : null,
+      })),
+    );
+    for (const r of db.all(
+      "SELECT registered_change_seq, created_at, updated_at, run_after, finished_at FROM jobs",
+    )) {
+      expect(r.registered_change_seq).toBe(seq);
+      for (const t of [r.created_at, r.updated_at, r.run_after]) {
+        expect(t).toBeGreaterThanOrEqual(Math.floor(before / 1000) * 1000);
+        expect(t).toBeLessThanOrEqual(after);
+      }
+      if (r.finished_at !== null) expect(r.finished_at).toBe(r.updated_at);
+    }
+  });
+
+  it("jobs.migration-v02-status: compares the converted lease as a number (an ISO string would never expire)", () => {
+    seedV10();
+    migrate(db);
+    // a lease that ran out is due for reclaim; one still running is not
+    expect(
+      db.all("SELECT fence_version FROM jobs WHERE status = 'running' AND lease_until <= ?", [
+        Date.parse("2027-01-01T00:00:00.000Z"),
+      ]),
+    ).toEqual([{ fence_version: 2 }]);
+  });
+
+  it("jobs.migration-v02-status: forgets the policy version held jobs were judged under, so the first start judges them once", () => {
+    seedV10();
+    migrate(db);
+    expect(db.all("SELECT * FROM settings WHERE key = 'jobs.held-policy-version'")).toEqual([]);
+  });
+
+  it("guards the status list, the source a fenced kind needs and the three duplicate keys", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a')");
+    const insert = (values: string) =>
+      db.run(
+        `INSERT INTO jobs (kind, target, source_id, fence_version, status, schedule_id, slot,
+           run_after, fairness_key, registered_change_seq, created_at, updated_at)
+         VALUES (${values}, 0, 'k', 0, 0, 0)`,
+      );
+    insert("'extract', '', 1, 1, 'queued', NULL, NULL");
+    expect(() => insert("'extract', '', 1, 1, 'queued', NULL, NULL")).toThrow(/UNIQUE/);
+    insert("'extract', 'other', 1, 1, 'queued', NULL, NULL");
+    expect(() => insert("'extract', '', 1, 2, 'leased', NULL, NULL")).toThrow(/CHECK/);
+    expect(() => insert("'extract', '', NULL, NULL, 'queued', NULL, NULL")).toThrow(/CHECK/);
+    insert("'connector-sync', 'c', NULL, NULL, 'queued', 5, 1");
+    expect(() => insert("'connector-sync', 'c', NULL, NULL, 'succeeded', 5, 1")).toThrow(/UNIQUE/);
+    expect(() => insert("'maintenance', '', NULL, NULL, 'queued', 5, 2")).toThrow(/UNIQUE/);
+    expect(() => insert("'connector-sync', 'c', NULL, NULL, 'held', NULL, NULL")).toThrow(/UNIQUE/);
+    insert("'connector-sync', 'c', NULL, NULL, 'succeeded', NULL, NULL");
+    expect(() => insert("'maintenance', '', NULL, NULL, 'queued', 6, NULL")).toThrow(/CHECK/);
   });
 });

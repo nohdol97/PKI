@@ -73,15 +73,17 @@ function store(record: { title: string; body: string }): string {
 
 /**
  * A job row as the runner holds it while it calls: the Broker calls it background
- * and accepts it only leased, naming the current lease (V02-T03). A job names its source and fence version
+ * and accepts it only running, naming the current lease token (V02-T03, I03-R2). A job names its source and fence version
  * (V02-R3), once per kind and version (V02-R4), so a second call for the same
  * version returns the job already registered.
  */
 function job(sourceVersionId: string): string {
   const target = "SELECT source_id, version FROM source_versions WHERE id = ?";
   db.run(
-    `INSERT INTO jobs (kind, source_id, fence_version, status, lease_token)
-     SELECT 'extract', source_id, version, 'leased', 1 FROM (${target}) WHERE true ON CONFLICT DO NOTHING`,
+    `INSERT INTO jobs (kind, source_id, fence_version, status, lease_token, run_after,
+       fairness_key, registered_change_seq, created_at, updated_at)
+     SELECT 'extract', source_id, version, 'running', 1, 0, 'f', 0, 0, 0 FROM (${target})
+      WHERE true ON CONFLICT DO NOTHING`,
     [Number(sourceVersionId)],
   );
   return String(
@@ -170,7 +172,7 @@ async function stack(options: Stack = {}) {
         taskKind: "extract",
         sourceVersionIds: [sourceVersionId],
         candidateItemIds: [],
-        origin: { jobId: job(sourceVersionId), lease: "1" },
+        origin: { jobId: job(sourceVersionId), leaseToken: "1" },
         schemaVersion: 2,
         budget: { timeoutMs: 1000 },
         retryable: false,

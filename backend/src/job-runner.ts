@@ -1,11 +1,12 @@
 // The job runner (V02-R4, R5, ADR 0013 decision 9) inside the backend process.
 // It claims a job with an expiring lease, runs the handler of its kind and closes
 // the job through the version fence (storage closeJob), one job at a time. A job
-// left leased by a backend that stopped is claimed again once its lease runs out.
+// left running by a backend that stopped is claimed again once its lease runs out.
 // The runner never decides whether a call may run: a handler calls the Broker
 // with the job and its lease token as origin, and the Broker judges the call
 // background and applies the run conditions (V01-T09). A call it did not run
-// comes back as "held".
+// comes back as "held". Until I03-T04 generalizes results, a failure is final:
+// the job becomes a dead letter (I03-R2's rename of V02's "failed").
 import {
   closeJob,
   isFenceCurrent,
@@ -21,9 +22,9 @@ import {
 export type JobResult = Exclude<JobClosing, { status: "superseded" }>;
 
 /**
- * Runs one leased job; calls the Broker with origin `{jobId, lease}` from the job
- * (`String(job.id)`, `String(job.leaseToken)`). Throwing fails the job with the
- * code "handler-error"; a reason that is not a code fails it as "invalid-reason".
+ * Runs one running job; calls the Broker with origin `{jobId, leaseToken}` from
+ * the job (`String(job.id)`, `String(job.leaseToken)`). Throwing dead-letters the
+ * job with the code "handler-error"; a reason that is not a code with "invalid-reason".
  */
 export type JobHandler = (job: StoredJob) => Promise<JobResult>;
 
@@ -72,27 +73,34 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     if (!job) return undefined;
     const close = (closing: JobClosing): JobRun => ({
       jobId: job.id,
-      status: closeJob(db, job, closing),
+      status: closeJob(db, job, closing, now()),
     });
     // stale already: no call is made for a version that is gone
-    if (!isFenceCurrent(db, job)) return close({ status: "superseded" });
+    const { sourceId, fenceVersion } = job;
+    if (
+      sourceId !== null &&
+      fenceVersion !== null &&
+      !isFenceCurrent(db, { sourceId, fenceVersion })
+    ) {
+      return close({ status: "superseded" });
+    }
     let result: JobResult;
     try {
       result = await (handlers[job.kind] as JobHandler)(job); // kinds are its keys
     } catch (error) {
       onError(error);
-      return close({ status: "failed", reason: "handler-error" });
+      return close({ status: "dead_letter", reason: "handler-error" });
     }
     if ("reason" in result && !isReasonCode(result.reason)) {
-      return close({ status: "failed", reason: "invalid-reason" });
+      return close({ status: "dead_letter", reason: "invalid-reason" });
     }
     try {
       return close(result);
     } catch (error) {
-      // a database error (e.g. a locked file) leaves the job leased for a rerun
+      // a database error (e.g. a locked file) leaves the job running for a rerun
       if (!(error instanceof JobWriteError)) throw error;
       onError(error.cause);
-      return close({ status: "failed", reason: "write-error" });
+      return close({ status: "dead_letter", reason: "write-error" });
     }
   }
 
@@ -121,7 +129,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
           }
         }
       } catch (error) {
-        onError(error); // the job stays leased and is claimed again when its lease runs out
+        onError(error); // the job stays running and is claimed again when its lease runs out
       } finally {
         draining = undefined;
       }

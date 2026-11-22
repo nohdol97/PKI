@@ -189,9 +189,9 @@ describe("bootBackend", () => {
         destination: endpoint.host,
         policyVersion: (consents.body as { policyVersion: string }).policyVersion,
       });
-      // the fake endpoint answers no extraction: asked twice per job, then failed
+      // the fake endpoint answers no extraction: asked twice per job, then dead-lettered
       await vi.waitFor(() =>
-        expect(jobs()).toEqual(Array(3).fill({ status: "failed", reason: "invalid-output" })),
+        expect(jobs()).toEqual(Array(3).fill({ status: "dead_letter", reason: "invalid-output" })),
       );
       expect(endpoint.requests).toHaveLength(6);
     } finally {
@@ -316,11 +316,11 @@ describe("bootBackend", () => {
         );
         for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
         expect(closed).toBe(false);
-        expect(jobsOf(db)).toEqual([{ status: "leased", reason: null }]);
+        expect(jobsOf(db)).toEqual([{ status: "running", reason: null }]);
 
         answer(completion(JSON.stringify({ items: [], facts: [], relations: [] })));
         await closing;
-        expect(jobsOf(db)).toEqual([{ status: "done", reason: null }]);
+        expect(jobsOf(db)).toEqual([{ status: "succeeded", reason: null }]);
         db.close();
       } finally {
         await endpoint.close();

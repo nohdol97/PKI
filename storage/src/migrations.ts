@@ -356,7 +356,7 @@ const v5: Migration = (db) =>
 // Schema v6 (V02-T03): why a job was held or failed, as a code (never Provider
 // text), so the screen can show it (ARCHITECTURE section 7), and the lease token,
 // raised on every claim, so only the current holder calls the Broker and closes
-// the job. Statuses: queued, leased, done, superseded, held, failed (jobs.ts).
+// the job. Statuses: queued, leased, done, superseded, held, failed (renamed in v11).
 const v6: Migration = (db) =>
   db.exec(`
     ALTER TABLE jobs ADD COLUMN reason TEXT;
@@ -437,8 +437,96 @@ const v10: Migration = (db) =>
     );
   `);
 
+// Schema v11 (I03-T01, I03-R1, R2): the job table of the persistent queue,
+// rebuilt under its own name (SQLite cannot drop NOT NULL from source_id).
+// - Eight statuses under a CHECK; V02-T03's are renamed: leased -> running,
+//   done -> succeeded, failed -> dead_letter (a V02 failure was final, so it
+//   becomes a dead letter the user can retry), the rest kept. `reason` stays.
+// - A job may have no source (a Connector sync, a projection rebuild, cleanup);
+//   source and fence version come together, and the kinds fenced by a source
+//   (extract, projection-remove) must have one. `target` names a projection or
+//   Connector instance, '' when none.
+// - Every time is UTC milliseconds (an ISO TEXT always sorts above an INTEGER,
+//   so a converted lease would otherwise never expire). Migrated rows get the
+//   migration time as created/updated/run-at, and as finished time when their
+//   status is done (succeeded, superseded, dead_letter); attempts 0, token kept,
+//   priority 'user', fairness key the source's Connector instance, the change
+//   sequence of now, no policy fingerprint (empty means changed).
+// - Duplicate guards: (kind, target, source, fence version); (schedule, slot);
+//   and, since UNIQUE never binds NULLs, one open job per (kind, target) among
+//   sourceless jobs, and one open job per schedule. The schedule table arrives
+//   with I03-T08, so schedule_id carries no foreign key yet.
+// - The setting recording the policy version held jobs were last judged under
+//   (backend composition.ts HELD_POLICY_SETTING) is removed, so the first start
+//   judges the migrated held jobs once (I03-R2: an empty fingerprint is changed).
+const OPEN_STATUSES = "('queued', 'running', 'retry', 'held')";
+const NOW_MS = "CAST(round((julianday('now') - 2440587.5) * 86400000) AS INTEGER)";
+const v11: Migration = (db) =>
+  db.exec(`
+    CREATE TEMP TABLE jobs_v10 AS
+      SELECT j.id, j.kind, j.source_id, j.fence_version, j.status, j.lease_until, j.reason,
+             j.lease_token, j.dropped_quotes, j.dropped_other, s.connector_instance_id
+        FROM jobs j JOIN sources s ON s.id = j.source_id;
+    DROP TABLE jobs;
+    CREATE TABLE jobs (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL,
+      target TEXT NOT NULL DEFAULT '',
+      source_id INTEGER REFERENCES sources (id),
+      fence_version INTEGER,
+      status TEXT NOT NULL CHECK (status IN
+        ('queued', 'running', 'retry', 'held', 'succeeded', 'superseded', 'cancelled', 'dead_letter')),
+      reason TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+      run_after INTEGER NOT NULL,
+      lease_owner TEXT,
+      lease_token INTEGER NOT NULL DEFAULT 0,
+      lease_until INTEGER,
+      heartbeat_at INTEGER,
+      priority TEXT NOT NULL DEFAULT 'user' CHECK (priority IN ('user', 'scheduled', 'maintenance')),
+      fairness_key TEXT NOT NULL,
+      schedule_id INTEGER,
+      slot INTEGER,
+      checkpoint TEXT,
+      result_counts TEXT,
+      policy_fingerprint TEXT,
+      cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
+      registered_change_seq INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      finished_at INTEGER,
+      dropped_quotes INTEGER CHECK (dropped_quotes >= 0),
+      dropped_other INTEGER CHECK (dropped_other >= 0),
+      CHECK ((source_id IS NULL) = (fence_version IS NULL)),
+      CHECK (source_id IS NOT NULL OR kind NOT IN ('extract', 'projection-remove')),
+      CHECK ((schedule_id IS NULL) = (slot IS NULL)),
+      UNIQUE (kind, target, source_id, fence_version),
+      UNIQUE (schedule_id, slot)
+    );
+    CREATE UNIQUE INDEX jobs_open_sourceless ON jobs (kind, target)
+      WHERE source_id IS NULL AND status IN ${OPEN_STATUSES};
+    CREATE UNIQUE INDEX jobs_open_per_schedule ON jobs (schedule_id)
+      WHERE schedule_id IS NOT NULL AND status IN ${OPEN_STATUSES};
+    CREATE INDEX jobs_source ON jobs (source_id);
+    INSERT INTO jobs (id, kind, source_id, fence_version, status, reason, lease_token,
+        lease_until, run_after, fairness_key, registered_change_seq, created_at, updated_at,
+        finished_at, dropped_quotes, dropped_other)
+      SELECT id, kind, source_id, fence_version,
+        CASE status WHEN 'leased' THEN 'running' WHEN 'done' THEN 'succeeded'
+          WHEN 'failed' THEN 'dead_letter' ELSE status END,
+        reason, lease_token,
+        CASE WHEN lease_until IS NULL THEN NULL
+          ELSE CAST(round((julianday(lease_until) - 2440587.5) * 86400000) AS INTEGER) END,
+        ${NOW_MS}, connector_instance_id, (SELECT change_seq FROM revisions), ${NOW_MS}, ${NOW_MS},
+        CASE WHEN status IN ('done', 'failed', 'superseded') THEN ${NOW_MS} END,
+        dropped_quotes, dropped_other
+      FROM jobs_v10;
+    DROP TABLE jobs_v10;
+    DELETE FROM settings WHERE key = 'jobs.held-policy-version';
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8, v9, v10];
+export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

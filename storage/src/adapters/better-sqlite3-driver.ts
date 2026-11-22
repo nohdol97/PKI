@@ -16,7 +16,10 @@ export const openBetterSqlite3: OpenSqlDriver = (path) => {
       return { changes, lastInsertRowid: Number(lastInsertRowid) };
     },
     all: (sql, params = []) => db.prepare(sql).all(...params) as SqlRow[],
-    transaction: (fn) => db.transaction(fn)(),
+    transaction: (fn, options) => {
+      const transaction = db.transaction(fn);
+      return options?.immediate ? transaction.immediate() : transaction();
+    },
     close: () => void db.close(),
   };
 };

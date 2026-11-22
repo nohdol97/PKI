@@ -1,4 +1,11 @@
-export type { OpenSqlDriver, RunResult, SqlDriver, SqlRow, SqlValue } from "./sql-driver.ts";
+export type {
+  OpenSqlDriver,
+  RunResult,
+  SqlDriver,
+  SqlRow,
+  SqlValue,
+  TransactionOptions,
+} from "./sql-driver.ts";
 export { migrate, migrations, schemaVersion, type Migration } from "./migrations.ts";
 export { searchKeyword } from "./keyword-search.ts";
 export {
@@ -33,18 +40,27 @@ export {
 } from "./sources.ts";
 export {
   closeJob,
+  heartbeatJob,
   isFenceCurrent,
+  isJobTransition,
   isReasonCode,
+  JOB_STATUSES,
+  JOB_TRANSITIONS,
   JobWriteError,
   leaseNextJob,
+  OPEN_JOB_STATUSES,
   readExtractionDrops,
   readJob,
   recordExtractionDrops,
   registerJob,
   requeueHeldJobs,
+  supersedeOpenJobs,
+  transitionJob,
   type ExtractionDrops,
   type JobClosing,
+  type JobPriority,
   type JobStatus,
+  type JobTransition,
   type LeaseRequest,
   type NewJob,
   type StoredJob,
