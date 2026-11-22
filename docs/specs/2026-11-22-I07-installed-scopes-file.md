@@ -405,7 +405,7 @@ PoC 하나와 구현 넷이다. 한 행이 PR 하나다. I05의 구현은 다른
   - tsconfig 설정(`include`, `resolveJsonModule`)은 이 거부와 무관하다. 규칙은 `tsconfig`를 읽지 않고 `package.json`의 위치만 본다.
   - **C13 ③의 상시 시험은 설 수 있다.** 임시 루트에서 `tsc -b site/composition`이 종료 코드 0이다. 단 조건 둘: 임시 루트에 `tsconfig.base.json`의 사본이 있어야 하고(최소 패키지가 `../../tsconfig.base.json`을 상속한다), 최소 패키지의 `tsconfig.json`에 `types: ["node"]`를 두면 임시 루트에 `@types/node`가 없어 `TS2688`로 실패한다(기준 설정의 `types: []`를 그대로 쓴다). 대조: 임시 루트에서 형식 오류를 넣으면 `TS2322`로 종료 코드 1, JSON을 지우면 `TS2307`로 종료 코드 1이므로 시험이 붙잡는 것이 있다.
 - 판정: 틀림. 전제는 "타입 검사와 모듈 경계 규칙을 **둘 다** 어기지 않는다"였고, 앞쪽은 맞고 뒤쪽이 틀렸다. 이 spec의 B3 행이 정한 대로 tsconfig 설정으로 풀리는지 먼저 봤고(풀리지 않는다) 다음 수는 고르지 않았다.
-- 검증되지 않은 범위: `references`가 있는 실제 포크 `tsconfig.json`, 포크의 다른 `@pki/*` 가져오기와 함께 있는 파일. `pnpm lint`(`eslint . && prettier --check .`)를 통째로 돌리지 않았다(`eslint site/composition`만). Prettier가 JSON을 어떻게 보는지는 보지 않았다.
+- 검증되지 않은 범위: `references`가 있는 실제 포크 `tsconfig.json`, 포크의 다른 `@pki/*` 가져오기와 함께 있는 파일. `pnpm lint`(측정 당시 `eslint . && prettier --check .`. I05-T05 뒤로는 `eslint -c eslint.config.js . && prettier --check .`)를 통째로 돌리지 않았다(`eslint site/composition`만). Prettier가 JSON을 어떻게 보는지는 보지 않았다.
 - 뒤 작업이 할 일: **조정자가 고른다**(아래 "설계에 영향" 1). 어느 쪽이든 T03의 C13 ③은 위 조건으로 선다.
 
 **4. B4 (묶음이 JSON을 안에 넣고 모듈 목록에 저장소 경로로 나오나)**

@@ -41,6 +41,7 @@ Connector를 구현하는 방법(규격, 받아들이는 규칙, 오류와 재�
 ```text
 site/
 ├── README.md        공용 저장소가 갖는 유일한 파일(이 자리의 용도 안내)
+├── composition/     포크: 조립 패키지(등록 객체 하나와 진입점 둘. 수집기를 제품에 끼운다)
 ├── connectors/      포크: 실제 수집기
 ├── providers/       포크: 필요할 때만
 └── config/          포크: 설정 값(인스턴스 범위 `connector-scopes.json` 포함)
@@ -48,11 +49,15 @@ site/
 
 공용 저장소는 `site/` 아래에 안내문 말고는 아무것도 만들지 않고, 포크는 `site/` 밖의 파일을 고치지 않는 것을 원칙으로 한다. 두 쪽이 같은 파일을 고치지 않으므로 공용의 변경을 받아 갈 때 충돌이 나지 않는다. `site/` 밖을 고쳐야만 하는 일이 생기면 그것은 규격에 빈 곳이 있다는 신호다. 고치지 말고 5절의 방법으로 공용에 알린다.
 
-**현재의 예외(알려진 빈 곳).** 규칙은 위와 같지만, 지금은 수집기를 `site/` 안에 두고도 제품에 연결할 방법이 없어서 포크가 `site/` 밖의 다음 파일을 고쳐야 한다. `backend/src/composition.ts`(수집기 종류·인스턴스, 등급 매핑 끼우기), `pnpm-workspace.yaml`의 `packages:` 목록과 `pnpm-lock.yaml`, `backend/package.json`의 의존성. 이것은 허용된 일이 아니라 아직 메우지 못한 빈 곳이며 공용 저장소의 #113이 추적한다. 설치본이 인스턴스 범위 파일을 읽는 길(#115), 수집기에 비밀 값을 건네는 길(#114), 파일 인스턴스를 설정하는 길(#116)도 같은 종류의 빈 곳이다(번호는 모두 공용 저장소의 이슈다). 자세한 목록은 [connector-sdk.md](connector-sdk.md) 7장에 있다.
+**현재의 예외.** 규칙은 위와 같다. 포크는 수집기, 인스턴스, 등급 매핑, 접근 범위 정책을 `site/composition/`의 등록에 적어 제품에 끼우고, 이를 위해 공용의 `backend/src/composition.ts`나 `backend/package.json`을 고치지 않는다. 방법은 [connector-sdk.md](connector-sdk.md) 7장에, 이렇게 정한 이유는 [ADR 0018](adr/0018-fork-registration-at-build-time.md)에 있다. 그래도 `site/` 밖에서 달라지는 추적 파일이 아직 있다. 번호(#114, #115)는 공용 저장소의 이슈다.
+
+- `pnpm-lock.yaml`: `pnpm install`이 다시 쓴 변경만(포크 패키지의 항목과 그 외부 의존성). 손으로 고치지 않는다. 공용 변경을 받아 충돌하면 공용 쪽 내용을 취하고 `pnpm install`을 다시 실행한다.
+- `pnpm-workspace.yaml`의 `allowBuilds`: 설치 스크립트가 있는 포크 의존성을 위해 더한 `false` 줄뿐이다(스크립트를 돌리지 않는다는 뜻이다). `packages:` 목록은 포함하지 않는다. 스크립트가 정말 필요한 의존성은 지원하지 않으며 5절의 방법으로 공용에 알린다.
+- 아직 메우지 못한 길과 빌드 값: 수집기에 비밀 값을 건네는 길(#114), 설치본이 인스턴스 범위 파일을 읽는 길(#115), 그리고 배포처 전송 규칙·묶을 Provider·검증된 CLI 조합 목록·데이터 등급 목록. 마지막 넷은 각각 정책 판단이 따로 필요해 등록 객체로 옮기지 않았고, 포크가 공용 파일을 고쳐야 하는 값이다([site-setup.md](site-setup.md) 2절의 "빌드할 때 정해지는 것" 표).
 
 `site/config/connector-scopes.json`은 수집기 인스턴스마다의 접근 범위를 두는 파일이고, 가져온 범위가 인스턴스에 정해 둔 범위보다 느슨한 등급을 얻지 못하게 하는 기준이다([site-setup.md](site-setup.md) S18). 공용 저장소의 import 검사(수집기 경로가 허용 목록 밖의 패키지나 네트워크를 쓰지 못하게 하는 검사)는 `site/`를 보지 않으므로, 포크의 수집기는 `site/connectors/`에서 자기 시스템의 클라이언트를 쓸 수 있다.
 
-`site/connectors/`에 둔 수집기를 계약 테스트로 확인하는 방법은 [connector-sdk.md](connector-sdk.md) 6장에, 제품에 연결하는 길이 아직 없다는 점은 7장에 있다.
+`site/connectors/`에 둔 수집기를 계약 테스트로 확인하는 방법은 [connector-sdk.md](connector-sdk.md) 6장에, 제품에 연결하는 방법은 7장에 있다.
 
 ## 4. 변경이 흐르는 방향
 

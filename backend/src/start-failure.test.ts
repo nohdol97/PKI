@@ -77,6 +77,32 @@ describe("startFailureLine prints no name a thrown value controls (security revi
     expect(startFailureLine(proxy)).toBe("backend start failed: other");
   });
 
+  // security review T03 D5: the report that goes to the shell is built from the same `instanceof` chain, so a
+  // trap that throws there must not stop the failure message (nothing would be posted and the process would die
+  // on an unhandled rejection that prints the thrown error)
+  it("builds the failure report from a hostile value too: no reason, never a throw", () => {
+    const getter = Object.assign(new Error("x"), {});
+    Object.defineProperty(getter, "name", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    expect(startFailureReport(getter)).toEqual({ type: "failed" });
+    const proxy = new Proxy(new Error("x"), {
+      getPrototypeOf() {
+        throw new Error("boom");
+      },
+    });
+    expect(startFailureReport(proxy)).toEqual({ type: "failed" });
+    const hostileSeq = Object.assign(Object.create(LedgerReapplyError.prototype) as Error, {});
+    Object.defineProperty(hostileSeq, "seq", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    expect(startFailureReport(hostileSeq)).toEqual({ type: "failed" });
+  });
+
   it("keeps the name of the project's own classes that carry a reason", () => {
     expect(startFailureLine(new IdentityKeyMissingError())).toBe(
       "backend start failed: IdentityKeyMissingError",
