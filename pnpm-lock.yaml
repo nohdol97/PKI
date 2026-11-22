@@ -132,6 +132,9 @@ importers:
         specifier: workspace:*
         version: link:../storage
     devDependencies:
+      '@pki/document-normalize':
+        specifier: workspace:*
+        version: link:../packages/document-normalize
       '@pki/testkit':
         specifier: workspace:*
         version: link:../packages/testkit

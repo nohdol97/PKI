@@ -9,7 +9,7 @@
 import { JSONL_CAPABILITIES, JSONL_IMPORT_KIND, parseJsonl } from "@pki/connector-sdk";
 import type { ErrorResponse, SyncResponse } from "@pki/contracts";
 import { readConnectorKind, registerConnectorInstance, type SqlDriver } from "@pki/storage";
-import { applyConfiguredScope } from "./connector-scopes.ts";
+import { applyConfiguredScope, NO_SCOPES, type ConnectorScopes } from "./connector-scopes.ts";
 import { tryLockInstance, type ConnectorManager } from "./connectors.ts";
 import { addPage, emptyResult, storePage, type PageOptions } from "./page-store.ts";
 
@@ -19,6 +19,8 @@ export type ImportOptions = Pick<
 > & {
   /** The configured Connector instances: an id of one of another kind is not this path's to bind. */
   connectors?: Pick<ConnectorManager, "list">;
+  /** The configured scopes of this backend (I07-R2); default none, every instance unknown. */
+  scopes?: ConnectorScopes;
 };
 
 /** What the route answers: the sync-shaped result, or the error code and nothing else. */
@@ -39,7 +41,7 @@ export async function importContent(
   const kind = readConnectorKind(db, instanceId);
   if (kind !== undefined && kind !== JSONL_IMPORT_KIND) return { error: "bad-request" };
   // a configured Connector that never synced is not bound yet: its id is still its own
-  const { connectors, ...pageOptions } = options;
+  const { connectors, scopes, ...pageOptions } = options;
   if (connectors?.list().some((c) => c.id === instanceId && c.kind !== JSONL_IMPORT_KIND)) {
     return { error: "bad-request" };
   }
@@ -49,7 +51,7 @@ export async function importContent(
     const { lines, rejected } = parseJsonl(content);
     db.transaction(() => {
       registerConnectorInstance(db, instanceId, JSONL_IMPORT_KIND);
-      applyConfiguredScope(db, instanceId); // the grade of its sources compares claims with it (I01-R15)
+      applyConfiguredScope(db, instanceId, scopes ?? NO_SCOPES); // the grade of its sources compares claims with it (I01-R15)
     });
     const stored = storePage(
       {

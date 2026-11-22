@@ -1,88 +1,87 @@
-// The scope a deployment configured for each Connector instance (I01-R15). It is a build
-// resource, `site/config/connector-scopes.json` (instance id -> array of scope values), bound
-// at build time and read only while running, like the verified CLI list. The public
-// repository does not ship the file, so every instance's configured scope is unknown (null);
-// the Broker grades an imported scope as the strictest class against an unknown one. A file
-// that cannot be read, is not an object, or holds an entry that is not an array of strings
-// makes that instance unknown too: nothing here ever widens a grade. The scope is copied into
-// `connector_instances.configured_scope` (start, and when a sync first names an instance)
-// because that is where the Broker reads it; no API route returns it.
+// The scope a deployment configured for each Connector instance (I01-R15, I07-R2, R3): it arrives
+// as `SiteRegistration.connectorScopes` (instance id -> array of scope values), the fork's file
+// bound at build time, and is read nowhere else: this module touches no file, environment, argument
+// or module location. The public registration carries none, so every instance's configured scope is
+// unknown (null); the Broker grades an imported scope as the strictest class against an unknown one.
+// A value that is not an object, or an entry that is not an array of strings, makes that instance
+// unknown too: nothing here ever widens a grade. The scope is copied into
+// `connector_instances.configured_scope` (start, and when a sync or an import first names an instance)
+// because that is where the Broker reads it; no API route returns it. The table is made once per
+// started backend and handed to every place that copies it.
 import { normalizeScope, listConnectorInstanceIds, setConfiguredScope } from "@pki/storage";
 import type { AccessScope, SqlDriver } from "@pki/storage";
-import { readFileSync } from "node:fs";
 
 export type ConnectorScopes = ReadonlyMap<string, AccessScope>;
 
-export const CONNECTOR_SCOPES_FILE = new URL(
-  "../../site/config/connector-scopes.json",
-  import.meta.url,
-);
+/** No configured scope for any instance: the closed side that a caller handing no table gets. */
+export const NO_SCOPES: ConnectorScopes = new Map();
 
-/** How the file stood: not there, read, or whole-file unusable (it could not be read, or is not a JSON object). */
-export type ScopesFileState = "absent" | "read" | "unreadable" | "invalid";
+/** How the registration's value stood: no field, not an object, no entry with a scope, or at least one. */
+export type ScopesState = "absent" | "invalid" | "empty" | "bound";
 
-export interface ParsedConnectorScopes {
+export interface BoundConnectorScopes {
   scopes: ConnectorScopes;
-  /** Entries of a file that was read but not used (a bad entry leaves only its instance unknown). */
+  state: ScopesState;
+  /** Entries of an object that were not used (a bad entry leaves only its instance unknown). */
   rejected: number;
-  file: ScopesFileState;
+  /** Own entries of the object, used or not. */
+  entries: number;
+  /** Entries that carry a scope (not null) and were used. */
+  configured: number;
 }
 
-/** Instance id -> scope from the file's text; what is not a well-formed entry is left out (unknown). */
-export function parseConnectorScopes(text: string): ParsedConnectorScopes {
-  let root: unknown;
-  try {
-    root = JSON.parse(text);
-  } catch {
-    return { scopes: new Map(), rejected: 0, file: "invalid" };
-  }
-  if (root === null || typeof root !== "object" || Array.isArray(root)) {
-    return { scopes: new Map(), rejected: 0, file: "invalid" };
+const unusable = (state: "absent" | "invalid"): BoundConnectorScopes => ({
+  scopes: new Map(),
+  state,
+  rejected: 0,
+  entries: 0,
+  configured: 0,
+});
+
+/** Instance id -> scope from the registration's value; what is not a well-formed entry is left out (unknown). */
+export function bindConnectorScopes(value: unknown): BoundConnectorScopes {
+  if (value === undefined) return unusable("absent");
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return unusable("invalid");
   }
   const scopes = new Map<string, AccessScope>();
   let rejected = 0;
-  for (const [id, value] of Object.entries(root)) {
-    if (value === null) scopes.set(id, null);
-    else if (Array.isArray(value) && value.every((v) => typeof v === "string" && v !== "")) {
-      scopes.set(id, normalizeScope(value as string[]));
-    } else rejected++;
-  }
-  return { scopes, rejected, file: "read" };
-}
-
-/** The file's text; throws when it cannot be read (ENOENT is "no file"). */
-const readFileText = (): string => readFileSync(CONNECTOR_SCOPES_FILE, "utf8");
-
-/** `read` throws when there is no file or it cannot be read; the cause is told by the error's `code`. */
-export function loadConnectorScopes(read: () => string = readFileText): ParsedConnectorScopes {
-  let text: string;
+  let entries = 0;
+  let configured = 0;
   try {
-    text = read();
-  } catch (error) {
-    const file: ScopesFileState =
-      (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT" ? "absent" : "unreadable";
-    return { scopes: new Map(), rejected: 0, file };
+    // own keys only; a Map keeps a key like `__proto__` as an ordinary id
+    for (const [id, held] of Object.entries(value)) {
+      entries++;
+      if (held === null) {
+        scopes.set(id, null);
+        continue;
+      }
+      // the array is copied once and the copy is checked and normalized: a hole or a value that
+      // changes between reads cannot pass the check and be stored as something else
+      const values: unknown[] | undefined = Array.isArray(held) ? Array.from(held) : undefined;
+      if (values?.every((v) => typeof v === "string" && v !== "")) {
+        scopes.set(id, normalizeScope(values as string[]));
+        configured++;
+      } else rejected++;
+    }
+  } catch {
+    // a value that throws when read is unusable as a whole: the closed side, never a stop
+    return unusable("invalid");
   }
-  return parseConnectorScopes(text);
+  return { scopes, state: configured > 0 ? "bound" : "empty", rejected, entries, configured };
 }
 
-/** The configured scopes of this build (bound when the module is loaded). */
-export const CONNECTOR_SCOPES: ParsedConnectorScopes = loadConnectorScopes();
-
-/** One instance's configured scope into its row; an instance the file does not name is unknown. */
+/** One instance's configured scope into its row; an instance the table does not name is unknown. */
 export function applyConfiguredScope(
   db: SqlDriver,
   instanceId: string,
-  scopes: ConnectorScopes = CONNECTOR_SCOPES.scopes,
+  scopes: ConnectorScopes,
 ): void {
   setConfiguredScope(db, instanceId, scopes.get(instanceId) ?? null);
 }
 
-/** Every instance row follows the file: a scope removed from it is cleared (unknown), not kept. */
-export function applyConfiguredScopes(
-  db: SqlDriver,
-  scopes: ConnectorScopes = CONNECTOR_SCOPES.scopes,
-): void {
+/** Every instance row follows the table: a scope removed from it is cleared (unknown), not kept. */
+export function applyConfiguredScopes(db: SqlDriver, scopes: ConnectorScopes): void {
   db.transaction(() => {
     for (const id of listConnectorInstanceIds(db)) applyConfiguredScope(db, id, scopes);
   });

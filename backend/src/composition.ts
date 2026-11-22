@@ -477,7 +477,7 @@ export function fixtureConnectors(file: string): ConnectorSet {
  */
 export function productImporter(
   db: SqlDriver,
-  options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> & {
+  options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries" | "scopes"> & {
     logger?: Logger;
     connectors?: Pick<ConnectorManager, "list">;
   } = {},
@@ -499,7 +499,7 @@ export function productImporter(
  */
 export function productInstanceImporter(
   db: SqlDriver,
-  options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> & {
+  options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries" | "scopes"> & {
     logger?: Logger;
     connectors?: Pick<ConnectorManager, "list">;
   } = {},

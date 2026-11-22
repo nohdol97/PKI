@@ -878,6 +878,38 @@ describe("an instance a line registers gets the configured scope (I01-R15)", () 
   });
 });
 
+describe("an instance a ledger line registers, through the started backend (I07-C4 ④)", () => {
+  it("gets the value of the registration's `connectorScopes` when the start re-applies the line", async () => {
+    seeded().close();
+    const [header] = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n");
+    const line = JSON.stringify({
+      t: "line",
+      seq: 1,
+      i: "ledger-registered",
+      k: "jsonl-import",
+      h: "00".repeat(32),
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: AT,
+      la: null,
+    });
+    writeFileSync(join(dir, LEDGER_FILE), `${header}\n${line}\n`);
+    booted = await bootBackend({
+      dataDir: dir,
+      token: TOKEN,
+      allowedOrigins: [],
+      secrets: NO_SECRET_STORE,
+      site: { connectorScopes: { "ledger-registered": ["z", "a"] } },
+    });
+    expect(
+      live().db.all(
+        "SELECT configured_scope FROM connector_instances WHERE id = 'ledger-registered'",
+      )[0]?.configured_scope,
+    ).toBe('["a","z"]');
+  });
+});
+
 describe("the heal's own guards", () => {
   it("never writes past a ledger line the database has not applied: it writes nothing and locks", () => {
     const db = seeded();

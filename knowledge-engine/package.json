@@ -13,6 +13,7 @@
     "@pki/storage": "workspace:*"
   },
   "devDependencies": {
+    "@pki/document-normalize": "workspace:*",
     "@pki/testkit": "workspace:*"
   }
 }

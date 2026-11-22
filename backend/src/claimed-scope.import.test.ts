@@ -1,6 +1,6 @@
 // I01-C2 `scope.claimed-grade` (I01-R15) through the booted backend (I01-T06 handoff 10①): what an
 // import leaves (`scope_claimed = 1`, the claimed scope, the instance's configured scope) is what the
-// Broker grades. The build's scope file is replaced by a map the test holds (none ships); the policy
+// Broker grades. The instance scopes are a map the test holds and hands in as the registration's `connectorScopes` (I07-R1); the policy
 // and the scope -> class mapping are test doubles honoured in a test build only.
 import { routes } from "@pki/contracts";
 import { createProductRegistry } from "@pki/knowledge-engine";
@@ -23,25 +23,12 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bootBackend } from "./boot.ts";
+import { openCanonicalDb, productCalls, productEgress } from "./composition.ts";
+import { NO_SECRET_STORE } from "./secret-sources.ts";
 
-const held = vi.hoisted(() => ({ scopes: new Map<string, string[] | null>() }));
-vi.mock("./connector-scopes.ts", async (importOriginal) => {
-  const real = await importOriginal<typeof import("./connector-scopes.ts")>();
-  return {
-    ...real,
-    get CONNECTOR_SCOPES() {
-      return { scopes: held.scopes, rejected: 0, file: "read" };
-    },
-    applyConfiguredScope: (db: Parameters<typeof real.applyConfiguredScope>[0], id: string) =>
-      real.applyConfiguredScope(db, id, held.scopes),
-    applyConfiguredScopes: (db: Parameters<typeof real.applyConfiguredScopes>[0]) =>
-      real.applyConfiguredScopes(db, held.scopes),
-  };
-});
-
-const { bootBackend } = await import("./boot.ts");
-const { openCanonicalDb, productCalls, productEgress } = await import("./composition.ts");
-const { NO_SECRET_STORE } = await import("./secret-sources.ts");
+/** The instance scopes the registration carries (`connectorScopes`, I07-R1): what a fork's range file binds. */
+const held = { scopes: new Map<string, string[] | null>() };
 
 const TOKEN = "m".repeat(43);
 const MAIL = JSON.parse(
@@ -98,6 +85,7 @@ async function boot(injected: boolean) {
     allowedOrigins: [],
     secrets: NO_SECRET_STORE,
     providers: [],
+    site: { connectorScopes: Object.fromEntries(held.scopes) },
     ...(injected ? { registry: registry(), scopeGrading: grading } : {}),
   });
   const { port } = booted.server;

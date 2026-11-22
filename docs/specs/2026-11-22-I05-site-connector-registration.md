@@ -114,6 +114,8 @@
   | `scopeGrading` | 접근 범위 → 데이터 등급 매핑(S08) | `publicScopeGrading` |
   | `scopePolicy` | 접근 범위 정책(S21) | 공용 기본 정책 |
 
+  이 표 뒤에 [I07 spec](2026-11-22-I07-installed-scopes-file.md)(I07-R1)이 선택 필드 `connectorScopes`(인스턴스 범위, 없으면 모든 인스턴스가 알 수 없음)를 더했다.
+
 - **I05-R7 종류 이름.**
   - 이름은 `^[a-z][a-z0-9-]{0,63}$`를 따른다. 삭제 장부가 종류에 요구하는 규칙과 같은 것이며(`storage/src/tombstone-ledger.ts`의 `isKind`, [connector-sdk.md](../connector-sdk.md) 4장 "삭제 장부"), 이 규칙을 벗어난 종류의 원본은 지울 수 없게 된다. 두 곳이 **한 상수**를 쓰도록 그 모양을 `@pki/contracts`로 옮겨 내보낸다.
   - **공용 종류는 등록할 수 없다**(`kind-reserved`). 공용 종류의 목록은 **상수 하나**(`PUBLIC_CONNECTOR_KINDS`, 잠정 이름)에서 온다. 이 상수는 공용 코드가 수집기 종류로 쓰는 이름 가운데 자리표시가 아닌 것 전부다: 공용 구성 지점이 등록하는 종류, 가져오기가 정본에 적는 종류(`JSONL_IMPORT_KIND`), 소스 실행과 시험 전용 종류. 지금 값은 `jsonl-import`와 `test-fixtures`다. **이 spec은 그 값을 고정하지 않는다.** 공용이 종류를 더하면(예: I02-B의 `local-files`) 상수에 더하는 것만으로 예약되고 이 spec과 그 기준은 바뀌지 않는다. 상수에 더하기를 잊으면 시험이 실패한다(I05-C14).
@@ -144,6 +146,8 @@
   | `kind-factory-threw` | 만드는 함수가 예외를 던짐 | 검사에서만(시작할 때는 I05-R11이 인스턴스 단위로 다룬다) |
   | `kind-manifest-mismatch` | `manifest.type`이 종류 이름과 다름 | 검사에서만 |
   | `scope-grading-invalid` | 매핑이 허용된 등급 밖을 답하거나, `strictest([])`·`grade(null)`이 가장 엄격한 등급이 아님 | 검사에서만(Broker가 호출마다 닫힌 쪽으로 거절한다) |
+
+  이 표 뒤에 [I07 spec](2026-11-22-I07-installed-scopes-file.md)(I07-R5)가 `connector-scopes-field-invalid`와 `connector-scopes-entry-invalid` 두 행(둘 다 검사에서만)을 더했다. I05-C6 ②의 "열 코드"는 이 표의 I05가 정한 열 코드를 뜻한다.
 
   - **빼고 계속하는 넷**(`kind-name-invalid`, `kind-reserved`, `instance-id-invalid`, `instance-id-duplicate`)은 로그에 `site-registration-rejected`와 코드, 건수를 한 번 남긴다.
   - **`instance-kind-unknown`**은 빠지는 것이 없으므로 `site-registration-rejected`에 세지 않는다. 그 인스턴스마다 `connector-kind-unknown` 한 줄만 남는다(I05-R11). 한 사건에 로그 코드는 하나다.
@@ -194,7 +198,7 @@
 
 - **I05-R16 공용 빌드는 그대로.** 공용 진입점 `backend/src/shell.ts`를 묶으면 묶음에 남은 모듈에 `site/`, `packages/site-example/`, `packages/connector-example/` 아래의 것이 없다. 빈 등록으로 띄운 제품의 종류와 인스턴스는 `productConnectors()`가 주는 것과 같다. 이 spec은 제품의 종류가 **무엇인지**를 고정하지 않는다(그것은 종류를 더하는 spec의 몫이다).
 - **I05-R17 포크 빌드는 등록한 것만.** 조립 패키지의 진입점을 묶으면 등록과 그 수집기의 모듈이 들어가고, 테스트 파일과 `@pki/testkit`은 들어가지 않는다. 등록이 테스트 모듈에 닿으면 빌드가 실패한다(V01-T15의 경로 규칙이 `site/`에도 그대로 걸린다). 공용 묶음이 지키는 나머지 규칙(`apps/desktop/build/bundle.ts`의 `DROPPED_MODULES`, 테스트 빌드 표지 검사)도 이 묶음에 똑같이 적용된다. 소스 실행용 모듈의 교체(`REPLACEMENTS`)도 같다: 포크 진입점이 부르는 셸 본체는 `shell-options.production.ts`를 받으므로 이 묶음의 진입점은 `--scope-policy`와 `--fixtures`를 받지 않는다(I05-R15의 "설치본을 `default`로 돌리는 스위치는 없다"가 포크의 빌드에서도 성립한다). 수집기 패키지의 의존성이 네이티브 모듈이면 묶기가 실패한다(`EXTERNAL_PACKAGES`에 든 이름은 제외. 그대로 두면 빌드가 조용히 지나간다, I05-T01).
-- **I05-R18 읽어 들이는 코드 없음.** 제품 코드(`backend/src`, `apps/desktop/src`, `knowledge-engine/src`, `storage/src`, `providers/src`)에는 `site/` 아래를 폴더로 훑거나 동적으로 `import`·`require`하는 코드가 없다. **정해진 경로 하나가 있는지 보거나 그 JSON을 읽는 것**은 여기에 들지 않는다: `backendEntry`의 `site/composition/package.json` 확인, `site-check`의 그 파일 읽기(I05-R19), 기존의 `site/config/connector-scopes.json` 읽기. `checkPublicOnly`가 보는 범위와 자리 표시 목록(`site/README.md` 하나)은 바뀌지 않고, 공용 저장소와 포크 양쪽에서 통과한다.
+- **I05-R18 읽어 들이는 코드 없음.** 제품 코드(`backend/src`, `apps/desktop/src`, `knowledge-engine/src`, `storage/src`, `providers/src`)에는 `site/` 아래를 폴더로 훑거나 동적으로 `import`·`require`하는 코드가 없다. **정해진 경로 하나가 있는지 보거나 그 JSON을 읽는 것**은 여기에 들지 않는다: `backendEntry`의 `site/composition/package.json` 확인, `site-check`의 그 파일 읽기(I05-R19), 기존의 `site/config/connector-scopes.json` 읽기(이 읽기는 I07-T02 뒤에 없어진다. I07-R2). `checkPublicOnly`가 보는 범위와 자리 표시 목록(`site/README.md` 하나)은 바뀌지 않고, 공용 저장소와 포크 양쪽에서 통과한다.
 - **I05-R19 `site-check`의 안내.** 조립 패키지가 있는 저장소에서 공용 명령 `pnpm --filter @pki/backend site-check`를 실행하면, 자리표시의 결과를 내는 대신 포크의 명령을 알리고 2로 끝난다. 포크가 구현한 종류에 `미구현`이 나오는 오해를 막는다.
   - 공용 코드는 포크 패키지의 이름을 적어 두지 않는다. `site/composition/package.json`의 `name`을 읽어 `pnpm --filter <그 이름> site-check <종류>`를 알린다. 그 값이 패키지 이름의 모양이 아니거나 읽을 수 없으면 이름 없이 "`site/composition`의 `site-check`를 실행하라"는 안내만 낸다.
   - 저장소 루트는 인자로 받는다(I05-R25). 공용 진입점 `site-check.ts`는 실행 파일이라 가져올 수 없으므로, 안내와 `runSiteCheck(site, args)`는 `backend/src/site-check-main.ts`에 있고 포크의 `site-check.ts`는 `@pki/backend`에서 `runSiteCheck`를 가져온다.
@@ -347,8 +351,8 @@ stateDiagram-v2
 - **#114(자격 증명).** 수집기 객체를 만들고 초기화하는 일은 관리 모듈의 한 곳에서만 일어나게 한다(시작과 재점검이 같은 길을 쓴다, I05-R13). #114가 건넬 값은 그 한 곳의 호출과 `SiteRegistration`의 필드로 들어오면 되고, 이 spec은 그 모양을 정하지 않는다.
 - **#115(인스턴스 범위 파일).** **이 장치는 #115를 풀지 않는다.** #115의 과제는 "빌드할 때 파일을 산출물에 넣고 백엔드가 고정 경로에서 읽는다"와 "공용 빌드에는 파일이 없고 배포처 빌드에는 있다"이며, 지금의 읽는 코드(`backend/src/connector-scopes.ts`)와 문서 대응 테스트도 파일을 전제로 한다. 이 spec이 #115에 남기는 것은 셋이다.
   1. 빌드가 포크의 진입점을 고르는 자리(`backendEntry`)가 생긴다. #115의 "배포처 빌드에만 있다"는 산출물 검사가 같은 판정에 기댈 수 있다.
-  2. `SiteRegistration`이라는 객체가 생긴다. 등록의 `registration.ts`가 JSON을 정적으로 가져와 필드로 넘기는 방법은 **후보 하나**이며, 고를지 말지와 그때 #115의 과제 문장을 어떻게 고칠지는 #115의 spec이 정한다.
-  3. 이 spec은 `connector-scopes.ts`, 파일 상태의 로그 코드, S18의 확인 문장과 그 가드 테스트를 **바꾸지 않는다.**
+  2. `SiteRegistration`이라는 객체가 생긴다. 등록의 `registration.ts`가 JSON을 정적으로 가져와 필드로 넘기는 방법은 **후보 하나**이며, 고를지 말지와 그때 #115의 과제 문장을 어떻게 고칠지는 #115의 spec이 정한다. **그 spec([I07 spec](2026-11-22-I07-installed-scopes-file.md))이 이 후보를 골랐다**(I07-R1, 값은 등록의 `connectorScopes`로 들어온다).
+  3. 이 spec은 `connector-scopes.ts`, 파일 상태의 로그 코드, S18의 확인 문장과 그 가드 테스트를 **바꾸지 않는다.** (그것들은 I07이 바꾼다. I07-T02.)
 
 ### 대안과 기각 사유
 
@@ -556,3 +560,4 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 | 2026-11-23 | I05-T03 검토 반영. ① 패키지 진입점은 포크의 파일이 쓰는 것만 내보내고 `bootBackend`는 내보내지 않음(R1) ② R9의 표준 오류 한 줄은 건수가 있는 코드만 정해진 순서로 ③ `runSiteCheck`가 시작을 멈추는 위반을 알림(R9) | I05-R1, R9 | I05-T03 독립 검토(보안 F1, W3, 기준 F2) |
 | 2026-11-23 | I05-T04 구현 중 좁은 틈을 메움. ① 포크 모양의 패키지는 `backend/src`를 경로나 하위 경로로 가져오지 못하며 시험 파일도 같다. R1의 "`backend/src`의 파일을 경로로 가져온다"는 시험 파일에서도 경계 규칙이 이미 막아 왔으므로 "진입점 파일을 경로로 띄운다"로 고침(R1, C4 ⑧) ② 포크의 묶음도 소스 실행용 모듈의 교체를 받아 `--scope-policy`·`--fixtures`를 받지 않음(R17, C15 ④) ③ lockfile의 `site/` 항목이 디스크와 어긋날 때의 고치는 법(R3) ④ 예시 수집기 패키지의 "어느 워크스페이스 패키지의 의존성도 아니다" 시험은 예시 조립 패키지 하나를 예외로 둠(R20) ⑤ `fork-shape`는 다른 패키지의 코드(`backendEntry`, `site-check` 안내)를 자식 프로세스에서 경로로 불러 시험한다(시험 파일은 다른 패키지를 가져올 수 없다. C20 ②) | I05-R1, R3, R17, C4, C15, 작업 분해 T04 | I05-T03 검토(D1, D2)와 I05-T04 구현(#113): 스펙이 침묵한 자리에서 가장 좁은 읽기를 택하고 같은 PR에서 적음 |
 | 2026-11-23 | I05-T04 검토 반영. ① 경계 규칙은 절대 경로와 `file:` 주소도 상대 경로처럼 가리키는 파일의 패키지로 판정(C4 ⑧) ② 패키지 밖 상대 경로 허용표 `RELATIVE_ALLOWED`(빈 채로, 해석된 경로 비교)(R4) ③ 조립 지점 이름은 `site/composition`의 패키지에만(R4) ④ `site/` 아래 패키지에 `tsconfig.json`이 없으면 타입 검사가 이름을 적어 실패(R3) ⑤ 이전 행의 ④⑤를 R20과 C20 ②의 본문으로 옮김 ⑥ C4와 T04 행의 "일곱"을 "여덟"로 | I05-R3, R4, R20, C4, C20, 작업 분해 T04 | I05-T04 독립 검토 두 건(C-F1~F6, B-S1·S2·W5·W7) |
+| 2026-11-23 | I07 spec이 더한 것을 가리키는 한 줄씩. ① #115에 남기는 것 2: I07이 등록의 필드 후보를 골랐다 ② R18: 기존의 범위 파일 읽기는 I07-T02 뒤에 없어진다 ③ R6·R9의 표 뒤에 I07이 더한 필드와 두 코드 | I05-R6, R9, R18, 설계 개요 "#114와 #115에 남기는 것" | I07-T02(#115)가 I05 spec의 후속 표 ①~③을 처리함. 요구사항의 뜻은 바꾸지 않았다 |
