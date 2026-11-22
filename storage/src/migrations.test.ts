@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(23);
-    expect(migrations).toHaveLength(23);
+    expect(schemaVersion(db)).toBe(24);
+    expect(migrations).toHaveLength(24);
   });
 
   it("is idempotent when re-run", () => {
@@ -482,13 +482,17 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "insight_user_inputs",
       "insights",
       "invalidations",
+      "item_distinct",
       "item_history",
+      "item_merges",
+      "item_split_moves",
       "items",
       "jobs",
       "keyword_index",
       "local_file_entries",
       "local_index_seq",
       "local_locations",
+      "merge_candidates",
       "ontology_basis",
       "ontology_elements",
       "ontology_history",
@@ -1382,7 +1386,7 @@ describe("schema v17 (I01-T03, I01-R17)", () => {
     migrate(db, migrations.slice(0, 16));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(23);
+    expect(schemaVersion(db)).toBe(24);
     expect(columns("connector_instances")).toEqual(
       expect.arrayContaining(["rescan_pending", "deletions_may_be_missed"]),
     );
@@ -1435,7 +1439,7 @@ describe("schema v18 (I04-T09, I04-R4, R11)", () => {
     migrate(db, migrations.slice(0, 17));
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(23);
+    expect(schemaVersion(db)).toBe(24);
     expect(columns("scope_policy_drops")).toEqual([
       "id",
       "source_id",
@@ -1468,7 +1472,7 @@ describe("schema v19 (I01-T06, I01-R15)", () => {
     migrate(db, migrations.slice(0, 18));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(23);
+    expect(schemaVersion(db)).toBe(24);
     expect(columns("connector_instances")).toContain("configured_scope");
     expect(db.all("SELECT id, kind, cursor, configured_scope FROM connector_instances")).toEqual([
       { id: "c", kind: "k", cursor: "x", configured_scope: null },
@@ -1551,7 +1555,7 @@ describe("schema v20 (S01-T01, S01-R5, R6, R10, R14, R15)", () => {
   it("adds the columns to a v19 database with rows and changes none of their status or epistemic type", () => {
     seedV19();
     migrate(db);
-    expect(schemaVersion(db)).toBe(23);
+    expect(schemaVersion(db)).toBe(24);
     expect(db.all("SELECT name, status, epistemic, confidence, user_authored FROM items")).toEqual([
       { name: "A", status: "candidate", epistemic: "explicit", confidence: null, user_authored: 0 },
       { name: "B", status: "candidate", epistemic: "explicit", confidence: null, user_authored: 0 },
@@ -1874,7 +1878,7 @@ describe("schema v21 (S01-T06, S01-R18, R20, R22)", () => {
     seedV20();
     const before = revision();
     migrate(db);
-    expect(schemaVersion(db)).toBe(23);
+    expect(schemaVersion(db)).toBe(24);
     expect(revision()).toEqual(before); // the seed is not a knowledge change an upgrade should show
     expect(db.all("SELECT name, status, epistemic FROM items")).toEqual([
       { name: "A", status: "candidate", epistemic: "explicit" },
@@ -1986,7 +1990,7 @@ describe("schema v21 (S01-T06, S01-R18, R20, R22)", () => {
   it("refuses a database newer than the build instead of downgrading it", () => {
     migrate(db);
     expect(() => migrate(db, migrations.slice(0, 20))).toThrow(/newer than this build/);
-    expect(schemaVersion(db)).toBe(23);
+    expect(schemaVersion(db)).toBe(24);
   });
 
   it("takes an identifier name of 40 characters at most, a kind of the three, and an edition of 1 or more", () => {
@@ -2185,7 +2189,7 @@ describe("schema v22 (I02B-T02, I02B-R33)", () => {
     );
     const key = db.all("SELECT key FROM identity_key")[0]?.key;
     migrate(db);
-    expect(schemaVersion(db)).toBe(23);
+    expect(schemaVersion(db)).toBe(24);
     expect(tables().filter((t) => t.startsWith("local_"))).toEqual([
       "local_file_entries",
       "local_index_seq",

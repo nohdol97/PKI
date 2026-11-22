@@ -309,15 +309,23 @@ describe("lifecycle.undo (direct add) (S01-R8, provisional decision 6)", () => {
     expect(stored(ref)).toMatchObject({ status: "candidate", user_authored: 0 });
   });
 
-  it("does not delete an item facts or relations hang on: not-latest, nothing changes", () => {
+  it("does not delete an item facts or relations hang on: existing-data-violation with the counts, nothing changes (S02-R11: it was not-latest before the merge records came)", () => {
     const item = added({ kind: "item", type: "Concept", name: "n" });
     added(factEntry(item.id, "2026-12-24"));
     const before = everything();
-    expect(userDecisions.undo(db, item)).toEqual({ status: "refused", reason: "not-latest" });
+    expect(userDecisions.undo(db, item)).toEqual({
+      status: "refused",
+      reason: "existing-data-violation",
+      held: { facts: 1, relations: 0, merges: 0, distinct: 0, splitMoves: 0 },
+    });
     expect(everything()).toEqual(before);
     const other = added({ kind: "item", type: "Concept", name: "m" });
     added({ kind: "relation", subjectId: newItem(), type: "T", objectId: other.id });
-    expect(userDecisions.undo(db, other)).toEqual({ status: "refused", reason: "not-latest" });
+    expect(userDecisions.undo(db, other)).toEqual({
+      status: "refused",
+      reason: "existing-data-violation",
+      held: { facts: 0, relations: 1, merges: 0, distinct: 0, splitMoves: 0 },
+    });
   });
 
   it("is a second undo's nothing-to-undo after an undo that kept the row, and not-latest after a later line of another actor", () => {
@@ -759,14 +767,16 @@ describe("correction.duplicate-value (S01-R7, provisional decision 13)", () => {
 });
 
 describe("the user entry", () => {
-  it("has the four row calls and the `ontology` member with its three operations (S01-T07)", () => {
+  it("has the four row calls, the `ontology` member with its three operations (S01-T07) and the `entities` member (S02-T04)", () => {
     expect(Object.keys(userDecisions).sort()).toEqual([
       "add",
       "decide",
+      "entities",
       "ontology",
       "replaceValue",
       "undo",
     ]);
     expect(Object.keys(userDecisions.ontology).sort()).toEqual(["change", "decide", "undo"]);
+    expect(Object.keys(userDecisions.entities).sort()).toEqual(["merge", "setDistinct", "unmerge"]);
   });
 });

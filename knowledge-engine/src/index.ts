@@ -20,6 +20,7 @@ export {
 } from "./ledger-reapply.ts";
 export {
   CANONICAL_KINDS,
+  canonicalKinds,
   createProductRegistry,
   derivativeRegistry,
   RECOMPUTE_PREFIX,

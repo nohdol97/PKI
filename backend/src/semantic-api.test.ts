@@ -645,9 +645,11 @@ describe("POST /api/semantic/correct: a direct add and a value fix (S01-T03, R7,
     const relationId = relation.entry?.id as number;
     expect((await listed(w.item))?.relations.map((r) => r.id)).toContain(relationId);
     // the item has a relation hanging on it: its undo is refused, the relation's is not
+    // (S02-R11: the refusal is `existing-data-violation` with the counts, as for a merge line; it was `not-latest`)
     expect((await call("semanticUndo", { kind: "item", id: itemId })).body).toEqual({
       status: "refused",
-      reason: "not-latest",
+      reason: "existing-data-violation",
+      held: { facts: 0, relations: 1, merges: 0, distinct: 0, splitMoves: 0 },
     });
     const gone = await call("semanticUndo", { kind: "relation", id: relationId });
     expect(routes.semanticUndo.response.parse(gone.body)).toEqual({ status: "removed" });

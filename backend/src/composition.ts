@@ -58,12 +58,13 @@ import {
 import { createVisibleEngine, NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   createCommitScope,
+  createUserDecisions,
   dataDirectory,
   defaultScopePolicy,
   ensureDataDirectory,
   prepareCanonicalDb,
-  userDecisions,
   type DerivativeRegistry,
+  type MembershipListener,
   type ScopePolicy,
   type SqlDriver,
   type UserDecisions,
@@ -133,7 +134,17 @@ export function productEngine(): KnowledgeEngine {
 }
 
 /**
- * The derivative registry of the product (I04-R1): the seven canonical kinds and the two projections, the
+ * The receivers of a changed membership (S02-R13): a fixed list, in the order they run, that a merge, an
+ * unmerge, a group resting or waking and a split announce to in their own transaction. Both users of the
+ * list, the user's entry and the derivative kind `entity-merge`, are built from this one constant. A receiver
+ * deletes or recomputes what rests on an item and never throws in a deletion's propagation (a throw rolls
+ * that propagation back); S02-T05 (the rule's Insight), S02-T06 (candidates), S02-T08 (conflicts) and S03
+ * (the check lines) add theirs here, at review. Empty until a receiver exists.
+ */
+export const MEMBERSHIP_LISTENERS: readonly MembershipListener[] = Object.freeze([]);
+
+/**
+ * The derivative registry of the product (I04-R1): the ten canonical kinds and the two projections, the
  * one place that builds it. `permanentlyAbsent` is the implementations' own, static fact: the null
  * engine and the empty vector index never hold anything, so an unavailable error from them ends a
  * removal as a skip; any other implementation (a sidecar that may be stopped) does not carry it.
@@ -151,6 +162,7 @@ export function productRegistry(adapters: {
   return createProductRegistry({
     policy: adapters.policy ?? defaultScopePolicy,
     permanentlyAbsent,
+    membershipListeners: MEMBERSHIP_LISTENERS,
   });
 }
 
@@ -159,8 +171,13 @@ export function productRegistry(adapters: {
  * undoes. It goes to the API layer alone (boot.ts passes it to startServer); the module-boundary lint
  * keeps extraction, propagation and the job runner from importing it.
  */
-export function productUserDecisions(): UserDecisions {
-  return userDecisions;
+export function productUserDecisions(
+  registry: Pick<DerivativeRegistry, "combinable">,
+): UserDecisions {
+  return createUserDecisions({
+    combinable: (db, lineage) => registry.combinable(db, lineage),
+    listeners: MEMBERSHIP_LISTENERS,
+  });
 }
 
 /** The entries that store a change, delete a source or lift a tombstone through `registry`. */

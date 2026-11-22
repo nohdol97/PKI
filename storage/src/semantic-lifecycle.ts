@@ -35,6 +35,7 @@ export type Refusal =
   | "not-latest"
   | "nothing-to-undo"
   | "value-exists"
+  | "existing-data-violation"
   | "not-found";
 export type Outcome =
   /** `seq` is the history line the change wrote. */
@@ -326,7 +327,7 @@ export function applyTransition(
   return { status: "applied", seq };
 }
 
-interface StoredLine {
+export interface StoredLine {
   seq: number;
   actor: Actor;
   action: string;
@@ -337,6 +338,23 @@ interface StoredLine {
   batch: number | null;
   revertsSeq: number | null;
 }
+
+/**
+ * The history actions that change neither a status nor an epistemic type (S02-R11, R15, R17,
+ * provisional decision 18): a merge, an unmerge, a split and a validity fix. The undo does not revert
+ * them and every search for "the last action" (the line to undo, the line that made the state, the
+ * last user action) reads past them, so one of them never ends an approval's undo or its protection.
+ */
+export const STATE_NEUTRAL_ACTIONS: ReadonlySet<string> = new Set([
+  "merge",
+  "unmerge",
+  "split",
+  "set-validity",
+]);
+
+/** The lines of a row without the state-neutral ones: what the undo and the restore read. */
+export const stateLinesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] =>
+  linesOf(tx, ref).filter((l) => !STATE_NEUTRAL_ACTIONS.has(l.action));
 
 export const linesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] => {
   const { history, fk } = TABLES[ref.kind];
@@ -370,8 +388,9 @@ function stateMaker(lines: readonly StoredLine[]): StoredLine | undefined | "unr
   while (line?.action === "undo") {
     // the gate always names the line it reverted; one that does not is no history to restore from
     if (line.revertsSeq === null) return "unreadable";
-    const before: number = line.revertsSeq - 1;
-    line = lines.find((l) => l.seq === before);
+    const reverted: number = line.revertsSeq;
+    // the line before it: a state-neutral line between the two (S02-R11) is no state to restore
+    line = lines.findLast((l) => l.seq < reverted);
   }
   return line;
 }
@@ -397,7 +416,7 @@ export const automatedLifecycle: AutomatedLifecycle = {
     const row = readRow(tx, ref);
     if (!row) return { status: "refused", reason: "not-found" };
     if (row.status !== "superseded") return { status: "unchanged" };
-    const maker = stateMaker(linesOf(tx, ref));
+    const maker = stateMaker(stateLinesOf(tx, ref));
     if (maker === "unreadable") return { status: "refused", reason: "invalid-transition" };
     // a row from before S01 has no line: the cautious state is a candidate
     let to: Row = { status: "candidate", epistemic: row.epistemic };

@@ -148,11 +148,26 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     ontologyDecide: { id: 1, action: "approve" },
     ontologyUndo: { id: 1 },
     ontologyHistory: { id: 1 },
+    // entity resolution (S02-T04): the bodies are set in beforeAll, after two items of the user's own and a line between them exist
+    entityMerge: { member: 1, into: 1 },
+    entityUnmerge: { mergeId: 1 },
+    entityDistinct: { a: 1, b: 2, on: true },
   };
 
   beforeAll(async () => {
     migrate(db);
     await seedV02(db, ["plain"]);
+    // two items the user made and the line that merges them: the unmerge route's body, and a distinct mark's two ends
+    const made = ["병합 시험 가", "병합 시험 나"].map((name) => {
+      const added = userDecisions.add(db, { kind: "item", type: "Concept", name });
+      if (added.status !== "applied") throw new Error("the user's item");
+      return added.ref.id;
+    }) as [number, number];
+    const merged = userDecisions.entities.merge(db, made[0], made[1]);
+    if (merged.status !== "applied") throw new Error("the merge");
+    requests.entityMerge = { member: made[0], into: made[0] }; // already one: a refusal code in a 200 body
+    requests.entityUnmerge = { mergeId: merged.mergeId };
+    requests.entityDistinct = { a: made[0], b: made[1], on: true };
     const adapters = productAdapters("/synthetic/data");
     const bound = engine();
     projections = productProjections(db, { engine: bound, ...adapters });

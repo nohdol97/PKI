@@ -248,13 +248,16 @@ describe("derivatives.schema-coverage", () => {
     expect(TABLE_CLASSIFICATION.local_file_entries).toEqual({ class: "source" });
     expect(TABLE_CLASSIFICATION.local_locations?.class).toBe("operational");
     expect(TABLE_CLASSIFICATION.local_index_seq?.class).toBe("operational");
-    // the index is not a derivative kind: the registry has the same ten kinds as before it
+    // the index is not a derivative kind: the registry has the same kinds as before it (S02-T04 added the
+    // two entity-resolution kinds)
     expect(registry.kinds.map((k) => k.kind).sort()).toEqual([
       "engine",
+      "entity-merge",
       "evidence",
       "fact",
       "insight",
       "item",
+      "merge-candidate",
       "ontology",
       "relation",
       "scope-drop",

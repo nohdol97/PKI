@@ -1165,3 +1165,106 @@ describe("the user entry and the registry's writes (S01-T02)", () => {
     }
   });
 });
+
+// S02-T04 (S02-R11, R26): merging is the user's alone. The entry's constructor and the entity operations' type
+// are guarded like `userDecisions`, and a merge line is written by storage/src/entity-decisions.ts alone.
+describe("the entity operations of the user entry (S02-T04)", () => {
+  const ids = async (code: string, file: string) =>
+    (await lintWithRepoConfig(code, file)).map((m) => m.messageId);
+  const constructor =
+    'import { createUserDecisions } from "@pki/storage";\nexport { createUserDecisions };\n';
+
+  it("fails when extraction, the job runner or any other module imports the entry's constructor, by name or through a namespace", async () => {
+    for (const file of [
+      "knowledge-engine/src/extraction.ts",
+      "knowledge-engine/src/entity-resolution.ts",
+      "backend/src/job-runner.ts",
+      "backend/src/connector-sync-job.ts",
+    ]) {
+      expect(await ids(constructor, file), file).toEqual(["userEntryImport"]);
+    }
+    expect(
+      await ids(
+        'import * as s from "@pki/storage";\nexport const x = s.createUserDecisions;\n',
+        "knowledge-engine/src/extraction.ts",
+      ),
+    ).toEqual(["userEntryImport"]);
+    expect(
+      await ids(
+        'import * as s from "@pki/storage";\nconst { createUserDecisions } = s;\nexport { createUserDecisions };\n',
+        "knowledge-engine/src/extraction.ts",
+      ),
+    ).toEqual(["userEntryImport"]);
+  });
+
+  it("fails on the entity operations' type outside the composition root and the API layer", async () => {
+    const type =
+      'import type { EntityDecisions } from "@pki/storage";\nexport type T = EntityDecisions;\n';
+    expect(await ids(type, "knowledge-engine/src/extraction.ts")).toEqual(["userEntryImport"]);
+    expect(await ids(type, "backend/src/jobs-view.ts")).toEqual(["userEntryImport"]);
+  });
+
+  it("lets the composition root hold the constructor, the API layer name the type and not the constructor, and a test file import either", async () => {
+    expect(await ids(constructor, "backend/src/composition.ts")).toEqual([]);
+    expect(await ids(constructor, "backend/src/server.ts")).toEqual(["userEntryImport"]);
+    expect(
+      await ids(
+        'import type { EntityDecisions } from "@pki/storage";\nexport type T = EntityDecisions;\n',
+        "backend/src/server.ts",
+      ),
+    ).toEqual([]);
+    expect(await ids(constructor, "knowledge-engine/src/entity-merge-kind.test.ts")).toEqual([]);
+    // the constructor holds the entry itself: even a type-only import of its name is the composition root's alone
+    expect(
+      await ids(
+        'import type { createUserDecisions } from "@pki/storage";\nexport type T = typeof createUserDecisions;\n',
+        "backend/src/server.ts",
+      ),
+    ).toEqual(["userEntryImport"]);
+  });
+
+  it("fails on a merge line written outside storage/src/entity-decisions.ts, in any statement form", async () => {
+    for (const sql of [
+      "INSERT INTO item_merges (member_id, representative_id, at) VALUES (1, 2, 'x')",
+      "insert  or  ignore\n into item_merges(member_id) values (1)",
+      "REPLACE INTO item_merges (member_id) VALUES (1)",
+      "INSERT OR REPLACE INTO item_merges (member_id) VALUES (1)",
+      'INSERT INTO main."item_merges" (member_id) VALUES (1)',
+      "INSERT INTO [item_merges] (member_id) VALUES (1)",
+    ]) {
+      const code = `export const q = ${JSON.stringify(sql)};\n`;
+      for (const file of [
+        "backend/src/server.ts",
+        "knowledge-engine/src/extraction.ts",
+        "knowledge-engine/src/canonical-kinds.ts",
+        "storage/src/semantic-lifecycle.ts",
+        "storage/src/entity-groups.ts",
+      ]) {
+        expect(await ids(code, file), `${file}: ${sql}`).toEqual(["registryWrite"]);
+      }
+    }
+  });
+
+  it("lets the user entry's module, the migration and test files write merge lines; an UPDATE, a DELETE and a read pass", async () => {
+    const insert = 'export const q = "INSERT INTO item_merges (member_id) VALUES (1)";\n';
+    expect(await ids(insert, "storage/src/entity-decisions.ts")).toEqual([]);
+    expect(await ids(insert, "storage/src/migrations.ts")).toEqual([]);
+    expect(await ids(insert, "storage/src/entity-merge.test.ts")).toEqual([]);
+    expect(await ids(insert, "packages/testkit/src/knowledge-status-seed.ts")).toEqual([]);
+    for (const sql of [
+      "UPDATE item_merges SET representative_id = 3 WHERE id = 1",
+      "DELETE FROM item_merges WHERE id = 1",
+      "SELECT * FROM item_merges",
+      "INSERT INTO item_distinct (item_a, item_b) VALUES (1, 2)",
+      "INSERT INTO item_merges_copy SELECT * FROM item_merges",
+    ]) {
+      expect(
+        await ids(
+          `export const q = ${JSON.stringify(sql)};\n`,
+          "knowledge-engine/src/canonical-kinds.ts",
+        ),
+        sql,
+      ).toEqual([]);
+    }
+  });
+});

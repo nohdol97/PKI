@@ -1,5 +1,5 @@
 // The canonical derivative kinds (I04-R1, I04-T03) and the product's derivative
-// registry. Six kinds live in the canonical file and run inside the transaction
+// registry. Ten kinds live in the canonical file (the last two are entity resolution's, S02-T04, below) and run inside the transaction
 // that changed the source: source versions with their keyword index rows (the
 // version delete trigger), evidence, facts, relations, items and Insights. A
 // deletion's phase 1 collects what the source's evidence reaches before anything
@@ -23,8 +23,11 @@ import {
   createDerivativeRegistry,
   defaultScopePolicy,
   EXTRACT_JOB_KIND,
+  lineageOfItems,
   listEvidence,
+  notifyMembership,
   registerJob,
+  rejudgeGroups,
   rowLineage,
   unionOfVersions,
   userInputsOf,
@@ -34,6 +37,7 @@ import {
   type DerivedRef,
   type InsightKey,
   type InvalidationContext,
+  type MembershipListener,
   type Propagation as RegistryPropagation,
   type ScopePolicy,
   type SourceChange,
@@ -448,6 +452,231 @@ const INSIGHT: DerivativeKind = {
 };
 
 /**
+ * The ids of the entity-resolution kinds name a row of one of several tables, or a pair: `merge:<id>`,
+ * `distinct:<a>:<b>` and `split:<id>` for `entity-merge`, `candidate:<a>:<b>` for `merge-candidate` (the
+ * pair is the key). The ids are numbers only; the rows hold no text.
+ */
+const mergeRef = (table: "merge" | "distinct" | "split" | "candidate", ...key: number[]) =>
+  `${table}:${key.join(":")}`;
+
+/** The items a row of `entity-merge` or `merge-candidate` names; none when the row is gone. */
+function itemsOfRef(db: SqlDriver, id: string): number[] {
+  const [table, ...key] = id.split(":");
+  const numbers = key.map(Number);
+  const ends = (sql: string) =>
+    db
+      .all(sql, numbers)
+      .flatMap((r) => Object.values(r).filter((v): v is number => typeof v === "number"));
+  switch (table) {
+    case "merge":
+      return ends("SELECT member_id, representative_id FROM item_merges WHERE id = ?");
+    case "distinct":
+      return ends("SELECT item_a, item_b FROM item_distinct WHERE item_a = ? AND item_b = ?");
+    case "split":
+      return ends("SELECT from_item_id, to_item_id FROM item_split_moves WHERE id = ?");
+    case "candidate":
+      return ends("SELECT item_a, item_b FROM merge_candidates WHERE item_a = ? AND item_b = ?");
+    default:
+      return [];
+  }
+}
+
+const pairLineage = (db: SqlDriver, ref: DerivedRef) => lineageOfItems(db, itemsOfRef(db, ref.id));
+
+/** The items the source's evidence reaches (the item kind's collection), as plain ids. */
+const reachedItems = (tx: SqlDriver, sourceId: number): number[] =>
+  tx
+    .all(`SELECT id FROM (${CITED_ITEMS}) ORDER BY id`, [sourceId, sourceId, sourceId])
+    .map((r) => r.id as number);
+
+const idList = (ids: readonly number[]) => JSON.stringify(ids);
+
+const entityRows = (tx: SqlDriver, mode: "all" | "merges", reached: readonly number[]) => {
+  const list = idList(reached);
+  const IN = "IN (SELECT value FROM json_each(?))";
+  const rows: string[] = tx
+    .all(
+      `SELECT id FROM item_merges WHERE member_id ${IN} OR representative_id ${IN} ORDER BY id`,
+      [list, list],
+    )
+    .map((r) => mergeRef("merge", r.id as number));
+  if (mode === "all") {
+    rows.push(
+      ...tx
+        .all(
+          `SELECT item_a, item_b FROM item_distinct WHERE item_a ${IN} OR item_b ${IN}
+              ORDER BY item_a, item_b`,
+          [list, list],
+        )
+        .map((r) => mergeRef("distinct", r.item_a as number, r.item_b as number)),
+      ...tx
+        .all(
+          `SELECT id FROM item_split_moves WHERE from_item_id ${IN} OR to_item_id ${IN} ORDER BY id`,
+          [list, list],
+        )
+        .map((r) => mergeRef("split", r.id as number)),
+    );
+  }
+  return rows;
+};
+
+const refExists = (tx: SqlDriver, id: string) => itemsOfRef(tx, id).length > 0;
+
+/**
+ * The merge lines, distinct marks and split records (S02-R14, R16; `item_merges`, `item_distinct`,
+ * `item_split_moves`, schema v24). Each names two items and has their two lineages. A deletion or a prune
+ * takes the rows that name an item deleted with it, and first mends the chain around such an item: the lines
+ * that pointed at the deleted item point at what it pointed at (A->B->C with B gone is A->C), and when the
+ * deleted item was the top, the smallest member becomes the top of the others. That runs before the item
+ * kind deletes the item (this kind references it, so it runs first), because the foreign keys would take
+ * the lines with it. Then every group the change reached is judged again, resting or waking all its lines
+ * together (R13); a group that rested or woke is announced to the membership listeners, in this
+ * transaction, and a listener that throws rolls the propagation back. A scope change only judges again.
+ * A new version changes no lineage and does nothing. Counted as removed: the collected rows no longer stored
+ * (the lines of a deleted item, the cascade of a deleted fact's split record); as recomputed: the lines
+ * joined to a new end and the lines that rested or woke.
+ */
+function entityMergeKind(listeners: readonly MembershipListener[]): DerivativeKind {
+  return {
+    ...base("entity-merge", "item"),
+    references: ["item"],
+    lineage: pairLineage,
+    affected: (tx, change) => {
+      const mode = supported(change);
+      if (mode === "new-version") return [];
+      const rows = entityRows(
+        tx,
+        mode === "scope-changed" ? "merges" : "all",
+        reachedItems(tx, change.sourceId),
+      );
+      return rows.map((id) => {
+        const ref = { kind: "entity-merge", id };
+        return { ref, lineage: pairLineage(tx, ref) };
+      });
+    },
+    invalidate: (ctx, snapshot, change) => {
+      const mode = supported(change);
+      if (mode === "new-version") return { removed: 0, recomputed: 0 };
+      noting(ctx);
+      const { tx } = ctx;
+      const doomed = doomedItems(ctx, change);
+      // the groups to judge again: every item a collected merge line names, before anything is mended
+      const touched = new Set<number>();
+      for (const { ref } of snapshot) {
+        if (ref.id.startsWith("merge:")) for (const id of itemsOfRef(tx, ref.id)) touched.add(id);
+      }
+      let recomputed = 0;
+      for (const id of doomed) recomputed += joinAround(tx, id);
+      if (doomed.length > 0) {
+        const list = idList(doomed);
+        tx.run(
+          `DELETE FROM item_distinct WHERE item_a IN (SELECT value FROM json_each(?))
+             OR item_b IN (SELECT value FROM json_each(?))`,
+          [list, list],
+        );
+        tx.run(
+          `DELETE FROM item_split_moves WHERE from_item_id IN (SELECT value FROM json_each(?))
+             OR to_item_id IN (SELECT value FROM json_each(?))`,
+          [list, list],
+        );
+      }
+      const survivors = [...touched].filter((id) => !doomed.includes(id));
+      const judged = rejudgeGroups(tx, survivors, (lineage) => ctx.combinable(lineage));
+      recomputed += judged.changedLines;
+      // a group that rested or woke is a membership change; a relink alone moves no row's item
+      notifyMembership(tx, listeners, { items: judged.items, movedRows: [] });
+      return {
+        removed: snapshot.filter(({ ref }) => !refExists(tx, ref.id)).length,
+        recomputed,
+      };
+    },
+  };
+}
+
+/**
+ * Mends the chain around an item that is about to be deleted (S02-R14) and drops its own line; the
+ * number of lines joined to a new end is returned.
+ */
+function joinAround(tx: SqlDriver, item: number): number {
+  const parent = tx.all("SELECT id, representative_id FROM item_merges WHERE member_id = ?", [
+    item,
+  ])[0];
+  const below = tx.all(
+    "SELECT id, member_id FROM item_merges WHERE representative_id = ? ORDER BY member_id",
+    [item],
+  );
+  let joined = 0;
+  if (parent) {
+    for (const line of below) {
+      tx.run("UPDATE item_merges SET representative_id = ? WHERE id = ?", [
+        parent.representative_id as number,
+        line.id as number,
+      ]);
+      joined++;
+    }
+    tx.run("DELETE FROM item_merges WHERE id = ?", [parent.id as number]);
+    return joined;
+  }
+  // the top itself goes: the member with the smallest id leads the others
+  const [leader, ...others] = below;
+  if (!leader) return 0;
+  tx.run("DELETE FROM item_merges WHERE id = ?", [leader.id as number]);
+  for (const line of others) {
+    tx.run("UPDATE item_merges SET representative_id = ? WHERE id = ?", [
+      leader.member_id as number,
+      line.id as number,
+    ]);
+    joined++;
+  }
+  return joined;
+}
+
+/**
+ * The merge candidates (S02-R10; `merge_candidates`, schema v24): a pair the product suggests, its lineage
+ * the two items'. S02-T06 computes and recomputes them; this kind removes what an item's deletion takes (a
+ * deleted source's items are deleted before it counts, so a candidate of two items deleted with the source
+ * is gone). Nothing is recomputed here.
+ */
+const MERGE_CANDIDATE: DerivativeKind = {
+  ...base("merge-candidate", "item"),
+  references: ["item"],
+  lineage: pairLineage,
+  affected: (tx, change) => {
+    const mode = supported(change);
+    if (mode === "new-version" || mode === "scope-changed") return [];
+    const list = idList(reachedItems(tx, change.sourceId));
+    return tx
+      .all(
+        `SELECT item_a, item_b FROM merge_candidates
+         WHERE item_a IN (SELECT value FROM json_each(?)) OR item_b IN (SELECT value FROM json_each(?))
+         ORDER BY item_a, item_b`,
+        [list, list],
+      )
+      .map((r) => {
+        const ref = {
+          kind: "merge-candidate",
+          id: mergeRef("candidate", r.item_a as number, r.item_b as number),
+        };
+        return { ref, lineage: pairLineage(tx, ref) };
+      });
+  },
+  invalidate: (ctx, snapshot, change) => {
+    noting(ctx);
+    const { tx } = ctx;
+    const doomed = doomedItems(ctx, change);
+    if (doomed.length > 0) {
+      const list = idList(doomed);
+      tx.run(
+        `DELETE FROM merge_candidates WHERE item_a IN (SELECT value FROM json_each(?))
+           OR item_b IN (SELECT value FROM json_each(?))`,
+        [list, list],
+      );
+    }
+    return { removed: snapshot.filter(({ ref }) => !refExists(tx, ref.id)).length, recomputed: 0 };
+  },
+};
+
+/**
  * The records of what the scope policy left out (`scope_policy_drops`, schema v18, I04-R11).
  * A deleted source's go with it. A scope change keeps them and queues the extraction of the
  * latest version of every source that has one, since the policy's answer may differ now:
@@ -556,17 +785,27 @@ const ONTOLOGY: DerivativeKind = {
 /** The target of a re-extraction a scope change queued (I04-R15). */
 export const RECOMPUTE_PREFIX = "scope-recompute:";
 
-/** The canonical kinds in their registration order (the registry orders them by layer). */
-export const CANONICAL_KINDS: readonly DerivativeKind[] = Object.freeze([
-  SOURCE,
-  EVIDENCE,
-  knowledgeKind("fact"),
-  knowledgeKind("relation"),
-  SCOPE_DROP,
-  ONTOLOGY,
-  ITEM,
-  INSIGHT,
-]);
+/**
+ * The canonical kinds in their registration order (the registry orders them by layer). The membership
+ * listeners are the fixed list the composition root hands over (S02-R13); `CANONICAL_KINDS` is the same
+ * kinds with none, as the default registry and the contract suites run them.
+ */
+export const canonicalKinds = (
+  membershipListeners: readonly MembershipListener[] = [],
+): readonly DerivativeKind[] =>
+  Object.freeze([
+    SOURCE,
+    EVIDENCE,
+    knowledgeKind("fact"),
+    knowledgeKind("relation"),
+    SCOPE_DROP,
+    ONTOLOGY,
+    ITEM,
+    entityMergeKind(membershipListeners),
+    MERGE_CANDIDATE,
+    INSIGHT,
+  ]);
+export const CANONICAL_KINDS: readonly DerivativeKind[] = canonicalKinds();
 
 /**
  * A registry of the product's kinds: the six canonical ones and the two projections. Its record's
@@ -578,11 +817,13 @@ export const CANONICAL_KINDS: readonly DerivativeKind[] = Object.freeze([
 export function createProductRegistry(options: {
   policy: ScopePolicy;
   permanentlyAbsent?: PermanentlyAbsent;
+  /** The fixed list of receivers of a changed membership (S02-R13); none by default. */
+  membershipListeners?: readonly MembershipListener[];
 }): DerivativeRegistry {
   const now = () => running?.at ?? new Date().toISOString();
   return createDerivativeRegistry({
     kinds: [
-      ...CANONICAL_KINDS,
+      ...canonicalKinds(options.membershipListeners),
       ...projectionKinds({
         at: now,
         ...(options.permanentlyAbsent ? { permanentlyAbsent: options.permanentlyAbsent } : {}),

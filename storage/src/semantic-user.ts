@@ -10,21 +10,29 @@
 // A direct add makes a row the user wrote (`user_authored`, verified, user-approved, no evidence).
 // A value fix is one batch: the old fact is retired by the user (superseded when it was verified,
 // rejected when it was a candidate or disputed) and the new value is added; one undo takes both back.
-// The type definitions' user operations (ontology.ts, S01-T07) travel in the same object, so the
-// one lint-guarded name `userDecisions` is the only way to them.
+// The type definitions' user operations (ontology.ts, S01-T07) and entity resolution's (entity-decisions.ts,
+// S02-T04: merge, unmerge, the distinct mark) travel in the same object, so the one lint-guarded name
+// `userDecisions` (and its constructor `createUserDecisions`, which the composition root calls) is the only way to them.
 import { listEvidence } from "./knowledge.ts";
 import { findSameForm, isSurfaceFormKind } from "./surface-form.ts";
 import {
   applyTransition,
   isUserAction,
-  linesOf,
   readRow,
+  stateLinesOf,
   writeLine,
   type EntryRef,
   type Outcome,
   type Refusal,
   type Row,
 } from "./semantic-lifecycle.ts";
+import {
+  createEntityDecisions,
+  type EntityDecisions,
+  type EntityDecisionsOptions,
+} from "./entity-decisions.ts";
+import { scopesOfVersions } from "./derivatives.ts";
+import { defaultScopePolicy, mayCombine } from "./scope-policy.ts";
 import { userOntology, type UserOntologyDecisions } from "./ontology.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -52,8 +60,23 @@ export type ReplaceResult =
   | { status: "applied"; replaced: EntryRef; added: EntryRef; seq: number }
   | { status: "refused"; reason: Refusal; existing?: EntryRef };
 
-/** `removed`: the undo deleted the row (a direct add nothing had touched), so there is no state to report. */
-export type UndoResult = Outcome | { status: "removed" };
+/** What hangs on an item (S02-R11): the rows, merge lines, distinct marks and split records that name it. */
+export interface HeldCounts {
+  facts: number;
+  relations: number;
+  merges: number;
+  distinct: number;
+  splitMoves: number;
+}
+
+/**
+ * `removed`: the undo deleted the row (a direct add nothing had touched), so there is no state to report.
+ * `existing-data-violation` carries the counts of what hangs on the item, never a name or a value.
+ */
+export type UndoResult =
+  | Outcome
+  | { status: "removed" }
+  | { status: "refused"; reason: "existing-data-violation"; held: HeldCounts };
 
 /** The user's entry (the interface of the S01 spec). */
 export interface UserDecisions {
@@ -83,6 +106,8 @@ export interface UserDecisions {
   undo(tx: SqlDriver, ref: EntryRef, at?: string): UndoResult;
   /** The type definitions' user operations (S01-T07): change, approve and reject a candidate, undo. */
   readonly ontology: UserOntologyDecisions;
+  /** Entity resolution's user operations (S02-T04): merge, unmerge, the distinct mark. */
+  readonly entities: EntityDecisions;
 }
 
 const TABLE = { item: "items", fact: "facts", relation: "relations" } as const;
@@ -162,11 +187,36 @@ function insertAuthored(
 const nextBatch = (tx: SqlDriver): number =>
   (tx.all("SELECT coalesce(max(batch), 0) + 1 AS next FROM fact_history")[0]?.next as number) ?? 1;
 
+/** What names the item: its facts and relations, merge lines, distinct marks and split records (S02-R11). */
+function heldBy(tx: SqlDriver, id: number): HeldCounts {
+  const count = (sql: string, params: number[]) => tx.all(sql, params)[0]?.n as number;
+  return {
+    facts: count("SELECT count(*) AS n FROM facts WHERE item_id = ?", [id]),
+    relations: count("SELECT count(*) AS n FROM relations WHERE subject_id = ? OR object_id = ?", [
+      id,
+      id,
+    ]),
+    merges: count(
+      "SELECT count(*) AS n FROM item_merges WHERE member_id = ? OR representative_id = ?",
+      [id, id],
+    ),
+    distinct: count("SELECT count(*) AS n FROM item_distinct WHERE item_a = ? OR item_b = ?", [
+      id,
+      id,
+    ]),
+    splitMoves: count(
+      "SELECT count(*) AS n FROM item_split_moves WHERE from_item_id = ? OR to_item_id = ?",
+      [id, id],
+    ),
+  };
+}
+
 /**
  * Cancels the creation line of a row the user wrote. Nothing came to it: the row goes (its history
  * with it). Evidence an extraction attached meanwhile keeps it, as a candidate hypothesis that is no
- * longer the user's (provisional decision 6). An item that facts or relations hang on is kept as
- * it is: `not-latest`, the later change being those rows.
+ * longer the user's (provisional decision 6). An item that anything hangs on is kept as it is, the
+ * counts are the answer: `existing-data-violation` (S02-R11), the same code the type definitions' undo
+ * refuses with. Deleting it would take the user's moved rows and merge lines with it.
  */
 function undoCreated(
   tx: SqlDriver,
@@ -175,16 +225,16 @@ function undoCreated(
   created: { seq: number },
   at: string | undefined,
 ): UndoResult {
+  if (ref.kind === "item") {
+    const held = heldBy(tx, ref.id);
+    if (Object.values(held).some((n) => n > 0)) {
+      return { status: "refused", reason: "existing-data-violation", held };
+    }
+    tx.run("DELETE FROM items WHERE id = ?", [ref.id]);
+    return { status: "removed" };
+  }
   const held =
-    ref.kind === "item"
-      ? tx.all(
-          `SELECT 1 FROM facts WHERE item_id = ?
-           UNION ALL SELECT 1 FROM relations WHERE subject_id = ? OR object_id = ? LIMIT 1`,
-          [ref.id, ref.id, ref.id],
-        ).length > 0
-      : listEvidence(tx, ref.kind === "fact" ? { factId: ref.id } : { relationId: ref.id }).length >
-        0;
-  if (ref.kind === "item" && held) return { status: "refused", reason: "not-latest" };
+    listEvidence(tx, ref.kind === "fact" ? { factId: ref.id } : { relationId: ref.id }).length > 0;
   if (!held) {
     tx.run(`DELETE FROM ${TABLE[ref.kind]} WHERE id = ?`, [ref.id]);
     return { status: "removed" };
@@ -206,7 +256,7 @@ function revertLine(
   tx: SqlDriver,
   ref: EntryRef,
   row: Row,
-  newest: ReturnType<typeof linesOf>[number],
+  newest: ReturnType<typeof stateLinesOf>[number],
   at: string | undefined,
 ): UndoResult {
   if (newest.action === "created") return undoCreated(tx, ref, row, newest, at);
@@ -231,7 +281,7 @@ function revertLine(
 function undoBatch(
   tx: SqlDriver,
   ref: EntryRef,
-  newest: ReturnType<typeof linesOf>[number],
+  newest: ReturnType<typeof stateLinesOf>[number],
   at: string | undefined,
 ): UndoResult {
   if (ref.kind !== "fact" || newest.batch === null) {
@@ -243,7 +293,7 @@ function undoBatch(
       ref: { kind: "fact", id: r.fact_id as number } as EntryRef,
       seq: r.seq as number,
     }));
-  const lines = members.map((m) => ({ m, newest: linesOf(tx, m.ref).at(-1) }));
+  const lines = members.map((m) => ({ m, newest: stateLinesOf(tx, m.ref).at(-1) }));
   // a member deleted since leaves fewer rows than the fix made; one with a later line is not at its fix
   const whole = members.length >= 2 && lines.every((l) => l.newest?.seq === l.m.seq);
   if (!whole) return { status: "refused", reason: "not-latest" };
@@ -262,8 +312,9 @@ function undoBatch(
   return answer;
 }
 
-export const userDecisions: UserDecisions = {
+const buildUserDecisions = (entities: EntityDecisions): UserDecisions => ({
   ontology: userOntology,
+  entities,
 
   decide: (tx, ref, action, at) => applyTransition(tx, ref, "user", TARGET[action], { at }),
 
@@ -316,7 +367,8 @@ export const userDecisions: UserDecisions = {
   undo(tx, ref, at) {
     const row = readRow(tx, ref);
     if (!row) return { status: "refused", reason: "not-found" };
-    const newest = linesOf(tx, ref).at(-1);
+    // a merge, an unmerge, a split or a validity fix is read past (S02-R11): it is no state to go back to
+    const newest = stateLinesOf(tx, ref).at(-1);
     if (!newest || newest.action === "undo")
       return { status: "refused", reason: "nothing-to-undo" };
     if (!isUserAction(newest)) return { status: "refused", reason: "not-latest" };
@@ -327,4 +379,18 @@ export const userDecisions: UserDecisions = {
     }
     return revertLine(tx, ref, row, newest, at);
   },
-};
+});
+
+/**
+ * The user's entry as the composition root builds it: the scope policy and the fixed list of membership
+ * listeners are its own (S02-R13). The module-boundary lint lets the composition root and the API layer's
+ * types hold this name and no other code.
+ */
+export const createUserDecisions = (options: EntityDecisionsOptions): UserDecisions =>
+  buildUserDecisions(createEntityDecisions(options));
+
+/** The entry with the public default policy (it refuses nothing) and no listener: what a test without a composition point uses. */
+export const userDecisions: UserDecisions = createUserDecisions({
+  combinable: (db, lineage) => mayCombine(defaultScopePolicy, scopesOfVersions(db, lineage)),
+  listeners: [],
+});

@@ -1255,6 +1255,67 @@ const v23: Migration = (db) => {
   db.run("UPDATE revisions SET knowledge_revision = ?", [revision]);
 };
 
+// Schema v24 (S02-T04, S02-R11, R14, R15, R16): the merge, distinct-mark, candidate and split-move
+// tables of entity resolution. S02's spec calls this its second migration; the number is the next free
+// one when this task merged, and whichever of two tasks adding a migration merges later renumbers
+// (`v24` and its line in `migrations`).
+// - `item_merges` (R11): "the member is the representative's" as one line, no row moved. One line per
+//   member (a member has one representative), so a chain is a path of lines and a group a tree; a line
+//   never points at its own member. `active` is 0 while the group's lineage cannot be put together
+//   (R13: the whole group's lines rest together). Both ends are foreign keys: a deleted item takes its
+//   lines, after the derivative kind `entity-merge` has joined the chain around it (R14).
+// - `item_distinct` (R16): "these two are not the same", the smaller id first, who left it (`user`, or
+//   `link-check` for R8's check) and when.
+// - `merge_candidates` (R10): a pair the product suggests, the smaller id first, the signal codes as a
+//   JSON array of codes, and when. No text. S02-T06 writes it; it is created here with the other three.
+// - `item_split_moves` (R15): one line per fact or relation a split moved, numbers only. S02-T07 writes
+//   it. The three references are foreign keys that cascade, so a deleted item or row takes the line.
+// None holds a name, value or quote; all four belong to the derivative kinds `entity-merge` and
+// `merge-candidate` (backend derivative-coverage.ts).
+const v24: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE item_merges (
+      id INTEGER PRIMARY KEY,
+      member_id INTEGER NOT NULL UNIQUE REFERENCES items (id) ON DELETE CASCADE,
+      representative_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+      at TEXT NOT NULL,
+      CHECK (member_id <> representative_id)
+    );
+    CREATE INDEX item_merges_representative ON item_merges (representative_id);
+
+    CREATE TABLE item_distinct (
+      item_a INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      item_b INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      by TEXT NOT NULL CHECK (by IN ('user', 'link-check')),
+      at TEXT NOT NULL,
+      PRIMARY KEY (item_a, item_b),
+      CHECK (item_a < item_b)
+    ) WITHOUT ROWID;
+    CREATE INDEX item_distinct_b ON item_distinct (item_b);
+
+    CREATE TABLE merge_candidates (
+      item_a INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      item_b INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      signals TEXT NOT NULL CHECK (json_valid(signals) AND json_type(signals) = 'array'),
+      at TEXT NOT NULL,
+      PRIMARY KEY (item_a, item_b),
+      CHECK (item_a < item_b)
+    ) WITHOUT ROWID;
+    CREATE INDEX merge_candidates_b ON merge_candidates (item_b);
+
+    CREATE TABLE item_split_moves (
+      id INTEGER PRIMARY KEY,
+      from_item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      to_item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      fact_id INTEGER REFERENCES facts (id) ON DELETE CASCADE,
+      relation_id INTEGER REFERENCES relations (id) ON DELETE CASCADE,
+      CHECK ((fact_id IS NULL) <> (relation_id IS NULL))
+    );
+    CREATE INDEX item_split_moves_from ON item_split_moves (from_item_id);
+    CREATE INDEX item_split_moves_to ON item_split_moves (to_item_id);
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1280,6 +1341,7 @@ export const migrations: readonly Migration[] = [
   v21,
   v22,
   v23,
+  v24,
 ];
 
 export function schemaVersion(db: SqlDriver): number {
