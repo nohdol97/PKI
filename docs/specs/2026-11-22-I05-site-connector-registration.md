@@ -596,13 +596,12 @@ I05-T06(#149)은 T05 예행이 찾은 공용 e2e 다섯 실패를 고쳤다. 단
 
 | 명령 | 종료 코드 | 본 것 |
 |---|---|---|
-| 공용 트리 `pnpm e2e` 첫 실행 | 1 | 64 통과, 5 건너뜀, **1 실패: `lifecycle.e2e.ts:89`가 30 s 시간 초과**(단언 실패 아님. 부하). 로그 `i05_t06_e2e_public.log` |
-| 같은 시험 한 파일만 다시 `pnpm e2e apps/desktop/e2e/lifecycle.e2e.ts` | 0 | 5 통과(`i05_t06_e2e_public_lifecycle_rerun.log`) |
-| 포크 모양 버리는 트리 `pnpm e2e` | **0** | **65 통과, 5 건너뜀**(2.2분). `i05_t06_e2e_fork.log` |
-| 포크 모양 `pnpm lint`, `pnpm typecheck` | FORKLINT, FORKTC | `i05_t06_fork_lint.log`, `i05_t06_fork_typecheck.log` |
-| 공용 트리 `pnpm lint`, `pnpm typecheck` | 0, 0 | 시험 고친 뒤 |
+| 공용 트리 `pnpm e2e`(I07-T03을 합친 뒤) | 0 | **68 통과, 5 건너뜀**(2.6분). `i05_t06_e2e_public2.log`. 합치기 전의 첫 실행은 1이었고 원인은 `lifecycle.e2e.ts:89`의 30 s 시간 초과 하나(단언 실패 아님, 부하. 그 파일만 다시 돌려 0, 5 통과). `i05_t06_e2e_public.log`, `…lifecycle_rerun.log` |
+| 포크 모양 버리는 트리 `pnpm e2e`(I07-T03을 합친 뒤) | **0** | **68 통과, 5 건너뜀**(2.4분). `i05_t06_e2e_fork.log`. 같은 트리의 앞선 전체 실행은 1이었다: 66 통과, 2 실패(`evidence.e2e.ts:72`가 30 s 시간 초과, `degraded.e2e.ts:161`이 5 s 기다림 끝에 행을 못 찾음. 둘 다 고친 시험이 아니고 부하가 높을 때의 시간 문제로 본다). 그 두 파일만 다시 돌려 0, 10 통과·1 건너뜀(`i05_t06_e2e_fork_run1.log`, `…_rerun.log`). 그 뒤 전체를 한 번 더 돌려 위의 0 |
+| 포크 모양 `pnpm lint`, `pnpm typecheck` | 0, 0 | `i05_t06_fork_lint.log`, `i05_t06_fork_typecheck.log` |
+| 공용 트리 `pnpm lint`, `pnpm typecheck`, `pnpm test` | 0, 0, 0 | `test`: 291 파일 통과·1 건너뜀, **5867 통과·26 건너뜀**(문서 고정 시험 포함) |
 
-포크 모양의 트리는 `git worktree add --detach`로 만들었고 T05와 같게 `packages/site-example`을 `site/composition`(`@pki-site/composition`)으로 복사해 참조 경로를 고쳤으며, 수집기 `site/connectors/x`(`@pki-site/connector-x`, 설치 스크립트 없는 `slugify@1.6.6`에 의존)를 더하고 `pnpm install`(lockfile 변경만 생김)과 `prettier --write site`를 했다. 커밋하지 않았고 끝에 지웠다. 포크 모양에서 목록에는 `x-notes`, `example-notes`가 더 나왔고 단언은 통과했다.
+포크 모양의 트리는 `git worktree add --detach`로 만들었고 T05와 같게 `packages/site-example`을 `site/composition`(`@pki-site/composition`)으로 복사해 참조 경로를 고쳤으며, 수집기 `site/connectors/x`(`@pki-site/connector-x`, 설치 스크립트 없는 `slugify@1.6.6`에 의존. 어댑터는 `src/adapters/` 아래에 둔다. 경계 규칙이 그 밖의 구현을 막는다)를 더하고 `pnpm install`(lockfile 변경만 생김)과 `prettier --write site`를 했다. 커밋하지 않았고 끝에 지웠다. 포크 모양에서 목록에는 `x-notes`, `example-notes`가 더 나왔고 단언은 통과했다.
 
 **변이**(백업을 복사해 바꾸고 해당 e2e 파일을 돌려 빨개짐을 보고 복원해 `cmp`로 같음을 확인). 모두 빨개졌다.
 
@@ -618,9 +617,9 @@ I05-T06(#149)은 T05 예행이 찾은 공용 e2e 다섯 실패를 고쳤다. 단
 | v02-flow 셋 | 공용 | 소스 실행이 `backend/src/dev.ts`를 포크하게 함 | 셋 빨강(`unexpected backend entry`, `socket hang up`) |
 | v02-flow 셋 | 포크 | 소스 실행이 공용 `backend/src/shell.ts`를 포크하게 함 | 셋 빨강(같은 문구) |
 
-**I07-T03.** 예행 시작과 끝, 푸시 직전의 `origin/main`에 I07-T03은 합쳐져 있지 않았다. 그래서 범위 파일을 놓지 않았다. 합쳐진 뒤의 예행은 I07 spec "I07-T01이 넘기는 것"·I07-R7대로 파일을 `site/config/`에 두고 `import` 경로와 값을 바꿔야 한다. 이 예행은 그것을 보지 못한다.
+**I07-T03.** 첫 예행 때는 합쳐져 있지 않았고, 합쳐진 뒤(PR #151, `origin/main` a08cce2) 이 가지에 병합하고 **포크 모양 트리를 새로 만들어** 예행을 다시 했다. 범위 파일은 I07 spec "I07-T01이 넘기는 것"·I07-R7대로 `site/config/connector-scopes.json`에 두었고(조립 패키지 밖), 복사한 `registration.ts`의 가져오기를 `../../config/connector-scopes.json`으로 고쳤으며, 값을 예시의 표지값이 아닌 지어낸 값으로 바꾸고(`{ "example-notes": ["fork-synthetic-scope"] }`), 복사한 `tsconfig.json`의 `include`는 `["src"]`로 했다. 이 트리에서 빌드는 `scopes-file-misplaced`·`scopes-file-placeholder` 없이 통과했고, I07-T03이 `artifact.contents.e2e.ts`에 더한 두 검사(보고서의 `connectorScopes`, 범위 파일이 앱 폴더에 없음)와 `artifact.scopes-decoys.e2e.ts`도 포크 모양에서 통과했다(위 68 통과).
 
-**검증하지 않은 것.** Windows. 실제 포크와 실제 수집기(예행 수집기는 공용 예시의 복사). 설치본의 실행. 범위 파일(위). `rebase`로 공용 변경을 받는 경우(REBASE). `v02-flow`가 포크의 등록을 시험하는 것은 아니다(공용 이중을 시험한다).
+**검증하지 않은 것.** Windows. 실제 포크와 실제 수집기(예행 수집기는 공용 예시의 복사). 설치본의 실행. 범위 파일(위). `rebase`로 공용 변경을 받는 경우(기계 부하가 15를 넘어 이번에 돌리지 않았다. T05는 `merge`만 봤다). 시험 고침의 변이는 I07-T03 병합 전에 돌렸고, 병합에서 `artifact.contents.e2e.ts`의 충돌만 풀었다(내 단언은 그대로, `ROOT`를 `bundle.ts`의 `REPO_ROOT`로 바꿈). 변이를 다시 돌리지는 않았다. `v02-flow`가 포크의 등록을 시험하는 것은 아니다(공용 이중을 시험한다).
 
 ## 후속(다른 문서의 고칠 곳)
 
