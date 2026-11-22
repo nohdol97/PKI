@@ -21,7 +21,6 @@ import type { KnowledgeCandidate, KnowledgeEngine, SourceVersionRef } from "@pki
 import {
   EXTRACT_SCHEMA_VERSION,
   TASKS,
-  type Broker,
   type BrokerResult,
   type ExtractionOutput,
 } from "@pki/providers";
@@ -60,7 +59,6 @@ export const EXTRACT_TIMEOUT_MS = 120_000;
 
 export interface ExtractHandlerOptions {
   db: SqlDriver;
-  broker: Pick<Broker, "call">;
   /** The bound KnowledgeEngine (composition.ts); asked only when it reports the propose capability. */
   engine?: Pick<KnowledgeEngine, "capabilities" | "proposeKnowledge">;
   /** An engine error; its message may carry engine text, so log its class only. */
@@ -82,10 +80,7 @@ interface Planned {
 }
 
 /** Calls once, and once more only for an answer that did not match the schema. */
-async function extractOnce(
-  broker: ExtractHandlerOptions["broker"],
-  request: object,
-): Promise<BrokerResult> {
+async function extractOnce(broker: RunBroker, request: object): Promise<BrokerResult> {
   const first = await broker.call(request);
   if (first.status === "failed" && first.error === "invalid-output") return broker.call(request);
   return first;
@@ -195,11 +190,17 @@ function merged(answers: readonly ExtractionOutput[]): ExtractionOutput {
   return out;
 }
 
+/** The run's Broker: the job context's wrapped one counts and cancels (I03-R14). */
+export interface RunBroker {
+  call(raw: unknown): Promise<BrokerResult>;
+}
+
 export function createExtractHandler(options: ExtractHandlerOptions) {
-  const { db, broker } = options;
+  const { db } = options;
   const now = options.now ?? (() => new Date());
 
-  return async (job: StoredJob): Promise<ExtractResult> => {
+  return async (job: StoredJob, context: { broker: RunBroker }): Promise<ExtractResult> => {
+    const { broker } = context;
     const { sourceId, fenceVersion } = job; // an extract job has both (schema v10 CHECK)
     const versionId =
       sourceId === null || fenceVersion === null
@@ -223,7 +224,8 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       schemaVersion: EXTRACT_SCHEMA_VERSION,
       budget: { timeoutMs: EXTRACT_TIMEOUT_MS },
       // one call (V02-R6): a transient failure is retried by the job after its
-      // backoff (I03-R10), not inside the Broker (provisional until I03-T06's budget)
+      // backoff (I03-R10), not inside the Broker (provisional: the run's request
+      // budget, I03-R14, counts requests, and each is up to three Provider attempts)
       retryable: false,
     });
     if (result.status !== "ok") return result;

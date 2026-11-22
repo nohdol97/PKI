@@ -9,8 +9,11 @@ export type {
 export { migrate, migrations, schemaVersion, type Migration } from "./migrations.ts";
 export { searchKeyword } from "./keyword-search.ts";
 export {
+  finishProviderCall,
   findSources,
   insertProviderCall,
+  interruptStartedCalls,
+  listAttemptTimes,
   listProviderCalls,
   listSources,
   type ProviderCallRow,

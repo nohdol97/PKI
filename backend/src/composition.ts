@@ -232,7 +232,7 @@ export function productCalls(
  */
 export function productRunner(
   db: SqlDriver,
-  broker: Pick<Broker, "call">,
+  broker: Pick<Broker, "call" | "budgetUsage">,
   options: {
     /** The runner's clock (job-runner.ts); it also dates what an extraction observed. */
     clock?: Clock;
@@ -246,7 +246,6 @@ export function productRunner(
   const { clock, engine, projections } = options;
   const handler = createExtractHandler({
     db,
-    broker,
     ...(clock ? { now: () => new Date(clock.now()) } : {}),
     ...(engine
       ? {
@@ -259,6 +258,7 @@ export function productRunner(
   return createJobRunner({
     db,
     handlers: { [EXTRACT_JOB_KIND]: handler },
+    broker,
     ...(clock ? { clock } : {}),
     // folded away from any other build with the runner's own test branch (V01-T15)
     ...(BUILD_KIND === "test" && options.testBuild ? { testBuild: options.testBuild } : {}),

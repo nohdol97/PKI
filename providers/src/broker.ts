@@ -3,6 +3,10 @@
 // its records, reads the text from the canonical store, grades it, asks the
 // egress decision (T08) and the execution condition (T09), and applies the
 // concurrency cap, call budget, timeout, retry with backoff and history.
+// An outer AbortSignal ends a request (also between retries) as "cancelled".
+// An attempt is written to history as "started" before the Provider is asked and
+// fixed when it ends; at start the budget is read back from that history, so a
+// restart or a call killed midway does not reset it (I03-R14).
 // A request with anything but IDs, or naming a missing or used record, is
 // rejected before any of that. The egress decision and the execution condition
 // are asked again before every attempt, after waiting for a slot, so a consent
@@ -93,7 +97,19 @@ export type CallOutcome =
   | "provider-error"
   | "invalid-output"
   | "blocked"
-  | "budget-exhausted";
+  | "budget-exhausted"
+  /** Written before the Provider is asked; fixed to the result when the attempt ends. */
+  | "started"
+  /** A "started" attempt whose process died: it still counts against the budget. */
+  | "interrupted"
+  /** Ended by the caller's AbortSignal after it was sent. */
+  | "cancelled";
+
+/** Outcomes of an attempt that reached the Provider and ended in this process. */
+type AttemptOutcome = Exclude<
+  CallOutcome,
+  "blocked" | "budget-exhausted" | "started" | "interrupted"
+>;
 
 /** One history entry: no text, no Provider message (V01-R13). "blocked" and "budget-exhausted" never ran. */
 export interface CallRecord {
@@ -112,7 +128,28 @@ export interface CallRecord {
 
 /** Writes history (provider_calls): T08. */
 export interface CallRecorder {
+  /** Writes an attempt that did not run, or one that is already over. */
   record(entry: CallRecord): void;
+  /**
+   * Writes an attempt about to reach the Provider as "started"; the returned
+   * function sets its result. The row's time is what the budget counts.
+   */
+  begin(
+    entry: Omit<CallRecord, "outcome" | "durationMs" | "reason">,
+  ): (result: { outcome: AttemptOutcome; durationMs: number }) => void;
+  /** When the attempts after `afterMs` (exclusive) were made, "started" and "interrupted" included. */
+  attemptTimes(afterMs: number): number[];
+  /** Turns the "started" attempts a dead process left into "interrupted"; returns how many. */
+  interruptStarted(): number;
+}
+
+/** The window budget as it stands (also for the Activity screen, I03-R22). */
+export interface BudgetUsage {
+  used: number;
+  maxCalls: number;
+  windowMs: number;
+  /** When the oldest counted attempt leaves the window and a slot frees; null with no attempt. */
+  resetsAt: number | null;
 }
 
 export interface BrokerLimits {
@@ -154,7 +191,8 @@ export interface BrokerDeps {
   execution: ExecutionGate;
   recorder: CallRecorder;
   limits?: Partial<BrokerLimits>;
-  clock?: { now(): number; sleep(ms: number): Promise<void> };
+  /** `sleep` may end early when `signal` is cut; the Broker does not depend on that. */
+  clock?: { now(): number; sleep(ms: number, signal?: AbortSignal): Promise<void> };
 }
 
 export type RejectReason =
@@ -180,6 +218,8 @@ export type BrokerResult =
     }
   | { status: "rejected"; reason: RejectReason }
   | { status: "blocked"; requestId: string; reason: string }
+  /** The caller's AbortSignal ended the request (not the Broker's own time limit). */
+  | { status: "cancelled" }
   | {
       status: "failed";
       requestId: string;
@@ -364,30 +404,43 @@ function semaphore(size: number) {
 type Attempt =
   | { outcome: "ok"; output: unknown }
   | {
-      outcome: Exclude<CallOutcome, "ok" | "blocked" | "budget-exhausted">;
+      outcome: Exclude<AttemptOutcome, "ok">;
       retryable: boolean;
       retryAfterMs?: number;
     };
+
+/** Resolves when `signal` is cut (at once if it already is); `off` removes the listener. */
+function whenAborted(signal: AbortSignal | undefined) {
+  if (!signal) return { cut: new Promise<void>(() => {}), off: () => {} };
+  let onAbort!: () => void;
+  const cut = new Promise<void>((resolve) => (onAbort = resolve));
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
+  return { cut, off: () => signal.removeEventListener("abort", onAbort) };
+}
 
 async function attemptOnce(
   provider: LLMProvider,
   request: StructuredRequest,
   task: Prepared["task"],
   timeoutMs: number,
+  signal: AbortSignal | undefined,
 ): Promise<Attempt> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<"timeout">((resolve) => {
     timer = setTimeout(() => resolve("timeout"), timeoutMs);
   });
+  const outer = whenAborted(signal);
+  const cancelled = outer.cut.then(() => "cancelled" as const);
   // started inside a promise chain, so a synchronous throw is a rejection like any other
   const running = Promise.resolve().then(() =>
     provider.generateStructured(request, controller.signal),
   );
   running.catch(() => undefined); // settles after a timeout too; nobody awaits it then
   try {
-    const winner = await Promise.race([running, timedOut]);
-    if (winner === "timeout") {
+    const winner = await Promise.race([running, timedOut, cancelled]);
+    if (winner === "timeout" || winner === "cancelled") {
       controller.abort();
       // asked, never awaited: a cancel that hangs or throws cannot hold the slot
       try {
@@ -395,7 +448,9 @@ async function attemptOnce(
       } catch {
         // the call is already aborted and reported as a timeout
       }
-      return { outcome: "timeout", retryable: true };
+      return winner === "timeout"
+        ? { outcome: "timeout", retryable: true }
+        : { outcome: "cancelled", retryable: false };
     }
     const output = task.output.safeParse(winner.output);
     return output.success
@@ -415,6 +470,17 @@ async function attemptOnce(
     };
   } finally {
     clearTimeout(timer);
+    outer.off();
+  }
+}
+
+/** Waits for `wait`, or until `signal` is cut, whichever is first. */
+async function unlessAborted(wait: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  const outer = whenAborted(signal);
+  try {
+    await Promise.race([wait, outer.cut]);
+  } finally {
+    outer.off();
   }
 }
 
@@ -425,19 +491,46 @@ export function createBroker(deps: BrokerDeps) {
     sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
   };
   const slot = semaphore(limits.maxConcurrent);
-  const attemptTimes: number[] = [];
+  // The window budget is read back from history (I03-R14): attempts a dead process
+  // left "started" are "interrupted" first, and still count.
+  deps.recorder.interruptStarted();
+  const attemptTimes: number[] = deps.recorder.attemptTimes(
+    clock.now() - limits.callBudget.windowMs,
+  );
+  const CANCELLED = { status: "cancelled" } as const;
 
-  function takeBudget(): boolean {
-    const now = clock.now();
+  /** Drops attempts out of the window; one dated after now (the clock went back) counts as now. */
+  function settleBudget(now: number): void {
+    for (let i = 0; i < attemptTimes.length; i++) {
+      if ((attemptTimes[i] ?? 0) > now) attemptTimes[i] = now;
+    }
     while (attemptTimes.length > 0 && (attemptTimes[0] ?? 0) <= now - limits.callBudget.windowMs) {
       attemptTimes.shift();
     }
+  }
+
+  function takeBudget(): boolean {
+    const now = clock.now();
+    settleBudget(now);
     if (attemptTimes.length >= limits.callBudget.maxCalls) return false;
     attemptTimes.push(now);
     return true;
   }
 
-  async function call(raw: unknown): Promise<BrokerResult> {
+  function budgetUsage(): BudgetUsage {
+    settleBudget(clock.now());
+    const { maxCalls, windowMs } = limits.callBudget;
+    return {
+      used: attemptTimes.length,
+      maxCalls,
+      windowMs,
+      resetsAt: attemptTimes.length > 0 ? (attemptTimes[0] ?? 0) + windowMs : null,
+    };
+  }
+
+  /** `signal` ends the request wherever it is: before an attempt, in one, or between two. */
+  async function call(raw: unknown, signal?: AbortSignal): Promise<BrokerResult> {
+    if (signal?.aborted) return CANCELLED;
     const prepared = prepare(deps, raw);
     if ("reason" in prepared) return reject(prepared.reason);
     const { request, task, trigger, classification, malicious } = prepared;
@@ -494,7 +587,9 @@ export function createBroker(deps: BrokerDeps) {
 
     return slot(async (): Promise<BrokerResult> => {
       for (let attempt = 1; ; attempt++) {
+        if (signal?.aborted) return CANCELLED;
         const decided = await decide();
+        if (signal?.aborted) return CANCELLED; // nothing was sent: no row, no budget
         if ("reason" in decided) {
           deps.recorder.record({ ...base, attempt, outcome: "blocked", reason: decided.reason });
           return { status: "blocked", requestId, reason: decided.reason };
@@ -531,15 +626,12 @@ export function createBroker(deps: BrokerDeps) {
           // the executable whose version was just judged runs, not one found anew
           ...(cli ? { execution: executable === undefined ? cli : { ...cli, executable } } : {}),
         };
+        // history first: a call killed midway still leaves its attempt (I03-R14)
+        const finish = deps.recorder.begin({ ...base, ...where, attempt });
         const started = clock.now();
-        const result = await attemptOnce(provider, outgoing, task, timeoutMs);
-        deps.recorder.record({
-          ...base,
-          ...where,
-          attempt,
-          outcome: result.outcome,
-          durationMs: clock.now() - started,
-        });
+        const result = await attemptOnce(provider, outgoing, task, timeoutMs, signal);
+        finish({ outcome: result.outcome, durationMs: clock.now() - started });
+        if (result.outcome === "cancelled") return CANCELLED;
         if (result.outcome === "ok") {
           return {
             status: "ok",
@@ -553,12 +645,15 @@ export function createBroker(deps: BrokerDeps) {
           return { status: "failed", requestId, error: result.outcome, attempts: attempt };
         }
         const backoff = limits.backoffBaseMs * 2 ** (attempt - 1);
-        await clock.sleep(Math.min(result.retryAfterMs ?? backoff, limits.backoffMaxMs));
+        await unlessAborted(
+          clock.sleep(Math.min(result.retryAfterMs ?? backoff, limits.backoffMaxMs), signal),
+          signal,
+        );
       }
     });
   }
 
-  return { call };
+  return { call, budgetUsage };
 }
 
 export type Broker = ReturnType<typeof createBroker>;

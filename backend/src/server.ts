@@ -163,6 +163,9 @@ function connectionTestResult(result: BrokerResult): ConnectionTestResult {
       return { outcome: "ok", reason: null, isolation: result.cli?.isolation ?? null };
     case "failed":
       return { outcome: "failed", reason: result.error, isolation: null };
+    case "cancelled":
+      // this call carries no signal: nothing here cuts one
+      return { outcome: "blocked", reason: "cancelled", isolation: null };
     default:
       return { outcome: result.status, reason: result.reason, isolation: null };
   }

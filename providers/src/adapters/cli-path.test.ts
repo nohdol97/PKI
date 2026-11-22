@@ -121,7 +121,12 @@ describe("cli path: through the Broker", () => {
           };
         },
       },
-      recorder: { record: () => undefined },
+      recorder: {
+        record: () => undefined,
+        begin: () => () => undefined,
+        attemptTimes: () => [],
+        interruptStarted: () => 0,
+      },
       clock: { now: () => 0, sleep: async () => undefined },
     });
     const call = () =>

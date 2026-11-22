@@ -3,6 +3,7 @@ export {
   DEFAULT_LIMITS,
   type Broker,
   type BrokerDeps,
+  type BudgetUsage,
   type BrokerLimits,
   type BrokerResult,
   type CallOutcome,
