@@ -16,13 +16,7 @@ export {
   type CanonicalReport,
 } from "./canonical-kinds.ts";
 export { createCanonicalEntries, defaultEntries, type CanonicalEntries } from "./entries.ts";
-export {
-  ENGINE_KIND,
-  projectionKinds,
-  projectionRowId,
-  VECTOR_KIND,
-  type PermanentlyAbsent,
-} from "./projection-kinds.ts";
+export { ENGINE_KIND, VECTOR_KIND, type PermanentlyAbsent } from "./projection-kinds.ts";
 export {
   createExtractHandler,
   EXTRACT_HOLD_TOO_LARGE,
@@ -38,7 +32,6 @@ export {
   createProjections,
   PROJECTION_STALE_SETTINGS,
   userDelete,
-  latestSources,
   vectorRefOf,
   versionNotice,
   type ProjectionName,

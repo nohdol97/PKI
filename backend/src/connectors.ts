@@ -203,12 +203,12 @@ export async function syncConnector(
     });
     for (const [change, reason] of refused) options.onRefused?.(change, reason);
     for (const [change, outcome] of stored) options.onStored?.(change, outcome);
-    // a deletion registered the projections' removal jobs: the runner takes them without waiting for notices
-    if (stored.some(([, outcome]) => outcome === "deleted")) void options.runner?.wake();
     // A failed page threw above: the notices its changes built are never delivered. The runner is woken once the
     // engine has the page's versions, so a proposing engine knows what is extracted.
     const delivered = notices.length > 0 ? options.projections?.notify(notices) : undefined;
-    if (pageCreated > 0) {
+    // a deletion registered the projections' removal jobs: the runner takes them too, after the notices
+    const deleted = stored.some(([, outcome]) => outcome === "deleted");
+    if (pageCreated > 0 || deleted) {
       const runner = options.runner;
       if (delivered) void delivered.then(() => runner?.wake());
       else void runner?.wake();

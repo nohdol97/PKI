@@ -322,7 +322,7 @@ export function productRunner(
      * `projection-remove` and `projection-rebuild` (projection-jobs.ts); none, those jobs wait.
      */
     projectionPorts?: ProjectionPorts;
-    /** The registry that names a candidate item's lineage (productRegistry); default the entries' own. */
+    /** The registry that names a candidate item's lineage (productRegistry); default `derivativeRegistry` (knowledge-engine canonical-kinds.ts). */
     registry?: DerivativeRegistry;
   } = {},
 ): JobRunner {

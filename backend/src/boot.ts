@@ -15,7 +15,7 @@ import type {
 } from "@pki/contracts";
 import type { Projections } from "@pki/knowledge-engine";
 import { BUILD_KIND, errorClass, log } from "@pki/providers";
-import type { SqlDriver } from "@pki/storage";
+import type { DerivativeRegistry, SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
   CANONICAL_DB_FILE,
@@ -75,6 +75,8 @@ export interface BootOptions {
    * vector index (composition.ts productProjectionPorts).
    */
   projectionPorts?: ProjectionPorts;
+  /** Replaces the product's registry (tests: a registry that differs from the default shows which paths receive it). */
+  registry?: DerivativeRegistry;
 }
 
 export interface BootedBackend {
@@ -105,7 +107,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   if (options.vectorIndex) adapters.vectorIndex = options.vectorIndex;
   if (options.embedder !== undefined) adapters.embedder = options.embedder;
   // the registry is built once, from the implementations bound; the backend holds the engine only as it wraps it (I04-R13)
-  const registry = productRegistry({ engine: bound, vectorIndex: adapters.vectorIndex });
+  const registry =
+    options.registry ?? productRegistry({ engine: bound, vectorIndex: adapters.vectorIndex });
   const entries = productEntries(registry);
   const engine = productVisibleEngine(db, registry, bound);
   const projections = productProjections(db, { engine, ...adapters });

@@ -152,7 +152,7 @@ export interface Projections {
 }
 
 /** The latest version of every source with one (a purged source has none). */
-export async function* latestSources(db: SqlDriver): AsyncGenerator<EngineSourceInput> {
+async function* latestSources(db: SqlDriver): AsyncGenerator<EngineSourceInput> {
   const rows = db.all(
     `SELECT v.id, v.source_id, v.version FROM source_versions v
       WHERE v.version = (SELECT max(version) FROM source_versions WHERE source_id = v.source_id)

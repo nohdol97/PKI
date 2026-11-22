@@ -259,6 +259,31 @@ describe("delivery", () => {
   });
 });
 
+describe("rebuild (a projection-rebuild job's call)", () => {
+  it("clears the stale mark, in the process and in the setting, only after the rebuild succeeded", async () => {
+    const engine = new MemoryKnowledgeEngine();
+    const upsert = engine.upsertSource.bind(engine);
+    vi.spyOn(engine, "upsertSource")
+      .mockRejectedValueOnce(new Error("engine down"))
+      .mockImplementation(upsert);
+    vi.spyOn(engine, "rebuild")
+      .mockRejectedValueOnce(new Error("rebuild failed"))
+      .mockImplementation(MemoryKnowledgeEngine.prototype.rebuild.bind(engine));
+    const { projections } = setup(engine, new MemoryVectorIndex());
+    await projections.notify([store("a", "alpha")]);
+    expect(projections.isStale("engine")).toBe(true);
+    expect(readSetting(db, PROJECTION_STALE_SETTINGS.engine)).toBe("1");
+
+    await expect(projections.rebuild("engine", 1)).rejects.toThrow(/rebuild failed/);
+    expect(projections.isStale("engine")).toBe(true);
+    expect(readSetting(db, PROJECTION_STALE_SETTINGS.engine)).toBe("1");
+
+    await projections.rebuild("engine", 1);
+    expect(projections.isStale("engine")).toBe(false);
+    expect(readSetting(db, PROJECTION_STALE_SETTINGS.engine)).toBe("0");
+  });
+});
+
 describe("reconcile (start-up comparison)", () => {
   it("rebuilds an engine behind the canonical change sequence from the latest versions", async () => {
     store("a", "alpha");
