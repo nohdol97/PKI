@@ -18,10 +18,14 @@ export const CONNECTOR_SCOPES_FILE = new URL(
   import.meta.url,
 );
 
+/** How the file stood: not there, read, or whole-file unusable (it could not be read, or is not a JSON object). */
+export type ScopesFileState = "absent" | "read" | "unreadable" | "invalid";
+
 export interface ParsedConnectorScopes {
   scopes: ConnectorScopes;
-  /** Entries (or the whole file, counted as one) that were not used. */
+  /** Entries of a file that was read but not used (a bad entry leaves only its instance unknown). */
   rejected: number;
+  file: ScopesFileState;
 }
 
 /** Instance id -> scope from the file's text; what is not a well-formed entry is left out (unknown). */
@@ -30,10 +34,10 @@ export function parseConnectorScopes(text: string): ParsedConnectorScopes {
   try {
     root = JSON.parse(text);
   } catch {
-    return { scopes: new Map(), rejected: 1 };
+    return { scopes: new Map(), rejected: 0, file: "invalid" };
   }
   if (root === null || typeof root !== "object" || Array.isArray(root)) {
-    return { scopes: new Map(), rejected: 1 };
+    return { scopes: new Map(), rejected: 0, file: "invalid" };
   }
   const scopes = new Map<string, AccessScope>();
   let rejected = 0;
@@ -43,25 +47,23 @@ export function parseConnectorScopes(text: string): ParsedConnectorScopes {
       scopes.set(id, normalizeScope(value as string[]));
     } else rejected++;
   }
-  return { scopes, rejected };
+  return { scopes, rejected, file: "read" };
 }
 
-/** The file's text, or undefined when there is no file (the public repository). */
-function readFileText(): string | undefined {
+/** The file's text; throws when it cannot be read (ENOENT is "no file"). */
+const readFileText = (): string => readFileSync(CONNECTOR_SCOPES_FILE, "utf8");
+
+/** `read` throws when there is no file or it cannot be read; the cause is told by the error's `code`. */
+export function loadConnectorScopes(read: () => string = readFileText): ParsedConnectorScopes {
+  let text: string;
   try {
-    return readFileSync(CONNECTOR_SCOPES_FILE, "utf8");
+    text = read();
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    return "unreadable"; // not JSON: parsed as an invalid file, so every instance stays unknown
+    const file: ScopesFileState =
+      (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT" ? "absent" : "unreadable";
+    return { scopes: new Map(), rejected: 0, file };
   }
-}
-
-export function loadConnectorScopes(read: () => string | undefined = readFileText): {
-  scopes: ConnectorScopes;
-  rejected: number;
-} {
-  const text = read();
-  return text === undefined ? { scopes: new Map(), rejected: 0 } : parseConnectorScopes(text);
+  return parseConnectorScopes(text);
 }
 
 /** The configured scopes of this build (bound when the module is loaded). */

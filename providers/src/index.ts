@@ -22,7 +22,12 @@ export {
   type RejectReason,
   type ScopeGrader,
 } from "./broker.ts";
-export { publicScopeGrading, type ScopeGrading } from "./scope-grading.ts";
+export {
+  publicScopeGrading,
+  SCOPE_CLASSES,
+  type ScopeClass,
+  type ScopeGrading,
+} from "./scope-grading.ts";
 export {
   denyExternalEmbedding,
   embedWithinPolicy,

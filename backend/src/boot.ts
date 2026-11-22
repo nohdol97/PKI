@@ -115,7 +115,10 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   const db = openCanonicalDb(options.dataDir);
   // the instances' configured scopes follow the build's file before anything is graded (I01-R15)
   applyConfiguredScopes(db);
-  if (CONNECTOR_SCOPES.rejected > 0) {
+  // one fixed line per state, so a build that lost the file is told from one that has none to use
+  if (CONNECTOR_SCOPES.file !== "read") {
+    log(`connector-scopes-${CONNECTOR_SCOPES.file}`, { configured: 0 });
+  } else if (CONNECTOR_SCOPES.rejected > 0) {
     log("connector-scopes-rejected", { count: CONNECTOR_SCOPES.rejected });
   }
   await sweepCliRuns(options.dataDir); // what a crashed backend's CLI runs left

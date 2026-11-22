@@ -36,7 +36,12 @@ import {
 } from "@pki/storage";
 import { randomUUID } from "node:crypto";
 import material from "./connection-test-material.json" with { type: "json" };
-import { publicScopeGrading, type ScopeGrading } from "./scope-grading.ts";
+import {
+  publicScopeGrading,
+  SCOPE_CLASSES,
+  type ScopeClass,
+  type ScopeGrading,
+} from "./scope-grading.ts";
 import { lookupSynthetic } from "./synthetic-manifest.ts";
 import { TASKS, type TaskDefinition } from "./tasks.ts";
 import type { UserActionRedeemer } from "./user-actions.ts";
@@ -52,7 +57,7 @@ const CONNECTION_TEST_DOCUMENT: UntrustedDocument = Object.freeze({
   body: material.body,
 });
 
-export type { ScopeGrading } from "./scope-grading.ts";
+export type { ScopeClass, ScopeGrading } from "./scope-grading.ts";
 
 /** The judge of scopes and the mapping scope -> class (I01-R15); the public repository's own by default. */
 export interface ScopeGrader {
@@ -284,22 +289,25 @@ class ScopeUnjudgedError extends Error {
 
 const COMPARISONS: ReadonlySet<unknown> = new Set(["stricter", "equal", "looser", "incomparable"]);
 
-/** The answer if it is one of the classes; anything else is no answer. */
-function asClass(answer: unknown): DataClassification {
-  if (answer === "synthetic" || answer === "general") return answer;
+/** The answer if it is a class a scope may give; synthetic (the manifest's alone) or any other is no answer. */
+function asScopeClass(answer: unknown): ScopeClass {
+  if (typeof answer === "string" && (SCOPE_CLASSES as readonly string[]).includes(answer)) {
+    return answer as ScopeClass;
+  }
   throw new ScopeUnjudgedError();
 }
 
 /**
  * The class the scope of a stored source gives (I01-R15). A scope the source system
  * reported is mapped as it stands. A scope an import claimed is compared with the scope the
- * deployment configured for the instance: a claim as strict as the configured scope or
- * stricter has its own class, a looser one the configured scope's, and any doubt (an unknown
- * claim, an unknown configured scope, incomparable scopes) the strictest class. So a claim
- * narrows a grade and never widens it. A policy or mapping that throws or answers outside
- * its closed set judges nothing (`ScopeUnjudgedError`).
+ * deployment configured for the instance. Unless the comparison shows the claim as strict as
+ * the configured scope or stricter, or looser, the strictest class is the result: an unknown
+ * claim, an unknown configured scope and incomparable scopes. When it is shown, the result is
+ * the stricter of the two scopes' classes, whichever way they compare, so the claim never gives
+ * a looser class than the configured scope even for a mapping that is not monotone. A policy or
+ * mapping that throws or answers outside its closed set judges nothing (`ScopeUnjudgedError`).
  */
-function scopeClass(stored: StoredSourceVersion, scope: ScopeGrader): DataClassification {
+function scopeClass(stored: StoredSourceVersion, scope: ScopeGrader): ScopeClass {
   try {
     return judgeScope(stored, scope);
   } catch {
@@ -308,26 +316,19 @@ function scopeClass(stored: StoredSourceVersion, scope: ScopeGrader): DataClassi
   }
 }
 
-function judgeScope(
-  stored: StoredSourceVersion,
-  { policy, grading }: ScopeGrader,
-): DataClassification {
+function judgeScope(stored: StoredSourceVersion, { policy, grading }: ScopeGrader): ScopeClass {
   const own = parseScope(stored.accessScope);
-  if (!stored.scopeClaimed) return asClass(grading.grade(own));
+  if (!stored.scopeClaimed) return asScopeClass(grading.grade(own));
   const configured = stored.configuredScope;
+  const strictestClass = () => asScopeClass(grading.strictest([]));
   // nothing configured (the public default) or nothing claimed: no comparison can show the claim safe
-  if (own === null || configured === null) return asClass(grading.strictest());
+  if (own === null || configured === null) return strictestClass();
   const compared: unknown = policy.compare(own, configured);
   if (!COMPARISONS.has(compared)) throw new ScopeUnjudgedError();
-  switch (compared) {
-    case "stricter":
-    case "equal":
-      return asClass(grading.grade(own));
-    case "looser":
-      return asClass(grading.grade(configured));
-    default:
-      return asClass(grading.strictest());
-  }
+  if (compared === "incomparable") return strictestClass();
+  return asScopeClass(
+    grading.strictest([asScopeClass(grading.grade(own)), asScopeClass(grading.grade(configured))]),
+  );
 }
 
 const reject = (reason: RejectReason) => ({ status: "rejected", reason }) as const;

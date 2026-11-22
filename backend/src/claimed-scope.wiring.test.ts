@@ -13,13 +13,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const held = vi.hoisted(() => ({
   scopes: new Map<string, string[] | null>(),
   rejected: 0,
+  file: "read" as "absent" | "read" | "unreadable" | "invalid",
 }));
 vi.mock("./connector-scopes.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("./connector-scopes.ts")>();
   return {
     ...real,
     get CONNECTOR_SCOPES() {
-      return { scopes: held.scopes, rejected: held.rejected };
+      return { scopes: held.scopes, rejected: held.rejected, file: held.file };
     },
     applyConfiguredScope: (db: Parameters<typeof real.applyConfiguredScope>[0], id: string) =>
       real.applyConfiguredScope(db, id, held.scopes),
@@ -41,6 +42,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-claimed-scope-"));
   held.scopes = new Map();
   held.rejected = 0;
+  held.file = "read";
 });
 afterEach(async () => {
   await booted?.server.close();
@@ -105,26 +107,37 @@ describe("scope.claimed-grade: the configured scopes follow the build's file", (
     expect(configured(db)).toEqual([{ id: "fixtures", configured_scope: '["team"]' }]);
   });
 
+  const lines = (logged: { mock: { calls: unknown[][] } }) =>
+    logged.mock.calls
+      .map(([l]) => String(l))
+      .filter((l) => l.includes("connector-scopes-"))
+      .map((l) => JSON.parse(l) as unknown);
+
   it("logs how many entries of the file were not used, by count only", async () => {
     held.rejected = 3;
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await boot();
-    expect(logged.mock.calls.map(([line]) => String(line))).toContainEqual(
-      expect.stringContaining('"connector-scopes-rejected"'),
-    );
-    const line = logged.mock.calls
-      .map(([l]) => String(l))
-      .find((l) => l.includes("connector-scopes-rejected"));
-    expect(JSON.parse(line ?? "{}")).toEqual({ event: "connector-scopes-rejected", count: 3 });
+    expect(lines(logged)).toEqual([{ event: "connector-scopes-rejected", count: 3 }]);
   });
 
-  it("logs nothing when the file has no rejected entry", async () => {
+  it("logs nothing when the file was read and every entry is used", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await boot();
-    expect(
-      logged.mock.calls
-        .map(([l]) => String(l))
-        .some((l) => l.includes("connector-scopes-rejected")),
-    ).toBe(false);
+    expect(lines(logged)).toEqual([]);
+  });
+
+  it("logs one fixed line per whole-file state, so a missing file is told from an unusable one", async () => {
+    for (const file of ["absent", "unreadable", "invalid"] as const) {
+      held.file = file;
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      await boot();
+      expect(lines(logged), file).toEqual([{ event: `connector-scopes-${file}`, configured: 0 }]);
+      await booted?.server.close();
+      booted?.db.close();
+      booted = undefined;
+      rmSync(dir, { recursive: true, force: true });
+      dir = mkdtempSync(join(tmpdir(), "pki-claimed-scope-"));
+      vi.restoreAllMocks();
+    }
   });
 });

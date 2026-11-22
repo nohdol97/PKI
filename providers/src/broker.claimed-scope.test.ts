@@ -2,9 +2,9 @@
 // user's claim (`sources.scope_claimed`, an import) is graded by comparing the claim with
 // the scope the deployment configured for its instance (`ScopePolicy.compare`, I04-T09);
 // the claim can narrow the grade and never widen it. A deployment fork brings the mapping
-// scope -> grade (S08) and its policy; both are fakes here. The fake mapping is made
-// lenient where a real one is strict (`grade(null)` is "synthetic") so a Broker that asks
-// the mapping where it must answer "strictest" is seen.
+// scope -> class (S08) and its policy; both are fakes here. A scope can never give the synthetic
+// class (the manifest's alone), so the mapping has one legal answer and the branches are told
+// apart by what the Broker asked (`calls`), not by the class that comes out.
 import type { BrokerRequest } from "@pki/contracts";
 import {
   migrate,
@@ -39,32 +39,30 @@ function fakeCompare(a: AccessScope, b: AccessScope): ScopeComparison {
   return x === y ? "equal" : x > y ? "stricter" : "looser";
 }
 
-let compareCalls: [AccessScope, AccessScope][];
+/** What the Broker asked of the policy and the mapping, in order. */
+let calls: string[];
 let compareOverride: ((a: AccessScope, b: AccessScope) => unknown) | undefined;
+let gradeOverride: ((scope: AccessScope) => unknown) | undefined;
+let strictestOverride: ((classes: readonly string[]) => unknown) | undefined;
 
 const policy: ScopePolicy = {
   compare: (a, b) => {
-    compareCalls.push([a, b]);
+    calls.push(`compare:${a?.join("+") ?? "null"}|${b?.join("+") ?? "null"}`);
     return (compareOverride ? compareOverride(a, b) : fakeCompare(a, b)) as ScopeComparison;
   },
   strictest: () => null,
   combinable: () => true,
   allows: () => true,
 };
-
-let gradeOverride: ((scope: AccessScope) => unknown) | undefined;
-let strictestOverride: (() => unknown) | undefined;
-/** public and open (and open-*) scopes are the loose ones: synthetic here; team and secret are general. */
-const lenient = (l: string) => l === "public" || l.startsWith("open");
 const grading: ScopeGrading = {
-  grade: (scope) =>
-    (gradeOverride
-      ? gradeOverride(scope)
-      : // null is unknown: a real mapping makes it strict, this one does not (see the header)
-        scope === null || (scope.length > 0 && scope.every(lenient))
-        ? "synthetic"
-        : "general") as "general",
-  strictest: () => (strictestOverride ? strictestOverride() : "general") as "general",
+  grade: (scope) => {
+    calls.push(`grade:${scope?.join("+") ?? "null"}`);
+    return (gradeOverride ? gradeOverride(scope) : "general") as "general";
+  },
+  strictest: (classes) => {
+    calls.push(`strictest:[${classes.join(",")}]`);
+    return (strictestOverride ? strictestOverride(classes) : "general") as "general";
+  },
 };
 
 let db: SqlDriver;
@@ -105,7 +103,7 @@ beforeEach(() => {
   ledger = createUserActionLedger();
   candidates = new Map();
   seen = [];
-  compareCalls = [];
+  calls = [];
   compareOverride = undefined;
   gradeOverride = undefined;
   strictestOverride = undefined;
@@ -126,7 +124,7 @@ interface Stored {
 /** One source the way an import leaves it; returns its version id. Content is unlisted unless given. */
 function store(o: Stored = {}): string {
   const kind = o.kind ?? "jsonl-import";
-  const instance = o.instance ?? `${kind}-inst`;
+  const instance = o.instance ?? `${kind}-inst-${seq + 1}`;
   registerConnectorInstance(db, instance, kind);
   if (o.configured !== undefined) setConfiguredScope(db, instance, o.configured);
   const externalId = `ext-${++seq}`;
@@ -162,73 +160,120 @@ const classOf = async (ids: string[], extra: Partial<BrokerRequest> = {}) => {
   return provider.requests.at(-1)?.dataClassification;
 };
 
+const asked = async (ids: string[], extra: Partial<BrokerRequest> = {}) => {
+  calls = [];
+  expect(await classOf(ids, extra)).toBe("general");
+  return calls;
+};
+
 describe("scope.claimed-grade ①-④: a claim is compared with the configured scope", () => {
-  it("① a claim looser than the configured scope is graded as the configured scope", async () => {
-    // both outcomes differ from the claim's own grade (synthetic)
-    expect(await classOf([claim(["open"], ["team"])])).toBe("general");
-    // the configured scope's grade is synthetic here, so "the strictest" would be wrong
-    expect(await classOf([claim(["public"], ["open"])])).toBe("synthetic");
+  it("① a looser, equal or stricter claim is graded by both scopes' classes, the stricter taken", async () => {
+    expect(await asked([claim(["open"], ["team"])])).toEqual([
+      "compare:open|team",
+      "grade:open",
+      "grade:team",
+      "strictest:[general,general]",
+    ]);
+    expect(await asked([claim(["open"], ["open"])])).toEqual([
+      "compare:open|open",
+      "grade:open",
+      "grade:open",
+      "strictest:[general,general]",
+    ]);
+    expect(await asked([claim(["secret"], ["team"])])).toEqual([
+      "compare:secret|team",
+      "grade:secret",
+      "grade:team",
+      "strictest:[general,general]",
+    ]);
   });
 
-  it("② an equal claim has the claim's grade", async () => {
-    expect(await classOf([claim(["open"], ["open"])])).toBe("synthetic");
+  it("③ an incomparable claim is graded as the strictest class, no scope's class asked", async () => {
+    expect(await asked([claim(["open-eu"], ["open"])])).toEqual([
+      "compare:open-eu|open",
+      "strictest:[]",
+    ]);
   });
 
-  it("② a stricter claim has the claim's grade (a claim narrows)", async () => {
-    // configured open is synthetic; the claim team is stricter and general
-    expect(await classOf([claim(["team"], ["open"])])).toBe("general");
-  });
-
-  it("③ an incomparable claim is graded as the strictest grade", async () => {
-    // both scopes would be synthetic; only "strictest" is general
-    expect(await classOf([claim(["open-eu"], ["open"])])).toBe("general");
-  });
-
-  it("④ a configured scope that is unknown (null) is graded as the strictest, without asking the mapping", async () => {
-    // grade(null) is synthetic in this mapping: a Broker asking it would answer synthetic
-    expect(await classOf([claim(["open"], null)])).toBe("general");
+  it("④ a configured scope that is unknown (null) is graded as the strictest, without asking the policy or the mapping", async () => {
+    expect(await asked([claim(["open"], null)])).toEqual(["strictest:[]"]);
   });
 
   it("④ a claim that is unknown (null) is graded as the strictest even against a known configured scope", async () => {
-    expect(await classOf([store({ scope: null, configured: ["open"] })])).toBe("general");
+    expect(await asked([store({ scope: null, configured: ["open"] })])).toEqual(["strictest:[]"]);
   });
 
   it("④ a claim that is not a scope at all (text that is not an array) is graded as the strictest", async () => {
-    expect(await classOf([store({ scope: "garbage-text", configured: ["open"] })])).toBe("general");
-    expect(await classOf([store({ scope: "[1,2", configured: ["open"] })])).toBe("general");
+    expect(await asked([store({ scope: "garbage-text", configured: ["open"] })])).toEqual([
+      "compare:garbage-text|open",
+      "strictest:[]",
+    ]);
+    expect(await asked([store({ scope: "[1,2", configured: ["open"] })])).toEqual([
+      "compare:[1,2|open",
+      "strictest:[]",
+    ]);
   });
 
   it("asks compare(claim, configured), in that order, with the stored scopes", async () => {
-    await classOf([claim(["team", "open"], ["secret"])]);
-    expect(compareCalls).toEqual([[["open", "team"], ["secret"]]]);
+    expect((await asked([claim(["team", "open"], ["secret"])]))[0]).toBe(
+      "compare:open+team|secret",
+    );
+  });
+});
+
+describe("scope.claimed-grade: a claim never gives a looser class than the configured scope", () => {
+  // a policy that calls secret stricter than team: whatever the mapping says, the Broker asks for
+  // the stricter of the two classes (a mapping that is not monotone cannot make the claim looser)
+  it("takes the stricter of the two classes, for every comparison that shows the claim", async () => {
+    const seenClasses: string[][] = [];
+    strictestOverride = (classes) => {
+      seenClasses.push([...classes]);
+      return "general";
+    };
+    await classOf([claim(["secret"], ["team"])]);
+    await classOf([claim(["open"], ["team"])]);
+    await classOf([claim(["team"], ["team"])]);
+    expect(seenClasses).toEqual([
+      ["general", "general"],
+      ["general", "general"],
+      ["general", "general"],
+    ]);
+  });
+
+  it("a class that would be looser (synthetic) from the mapping for the claim is refused, not returned", async () => {
+    // the probe: the claim is stricter than the configured scope, the mapping calls it synthetic
+    gradeOverride = (scope) => (scope?.includes("secret") ? "synthetic" : "general");
+    expect(await call(extract([claim(["secret"], ["team"])]))).toEqual({
+      status: "rejected",
+      reason: "scope-unjudged",
+    });
+    expect(provider.requests).toEqual([]);
   });
 });
 
 describe("scope.claimed-grade ⑤: the scope of anything but a claim is its grade as it stands", () => {
   it("is graded by the mapping of its own scope, not compared with the configured one", async () => {
-    // own open is synthetic; compared with configured team it would be "looser" -> general
     const id = store({ claimed: false, scope: JSON.stringify(["open"]), configured: ["team"] });
-    expect(await classOf([id])).toBe("synthetic");
-    expect(compareCalls).toEqual([]);
+    expect(await asked([id])).toEqual(["grade:open"]);
   });
 
   it("an unknown (null) own scope is the mapping's answer for null", async () => {
-    expect(await classOf([store({ claimed: false, scope: null })])).toBe("synthetic");
+    expect(await asked([store({ claimed: false, scope: null })])).toEqual(["grade:null"]);
   });
 });
 
 describe("scope.claimed-grade: every source of the input is graded, the first or not", () => {
-  const loose = () => claim(["open"], ["open"]); // synthetic
-  const tight = () => claim(["open-eu"], ["open"]); // incomparable -> general
+  const loose = () => claim(["open"], ["open"]);
+  const tight = () => claim(["open-eu"], ["open"]);
 
-  it("grades synthetic only when all sources are", async () => {
-    expect(await classOf([loose(), loose()])).toBe("synthetic");
-  });
-
-  it("a source that grades strictest makes the call general, in any position", async () => {
-    expect(await classOf([tight(), loose(), loose()])).toBe("general");
-    expect(await classOf([loose(), tight(), loose()])).toBe("general");
-    expect(await classOf([loose(), loose(), tight()])).toBe("general");
+  it("asks the policy and the mapping for each source, the last of several included", async () => {
+    const got = await asked([loose(), tight(), loose()]);
+    expect(got.filter((c) => c.startsWith("compare:"))).toEqual([
+      "compare:open|open",
+      "compare:open-eu|open",
+      "compare:open|open",
+    ]);
+    expect(got.filter((c) => c === "strictest:[]")).toHaveLength(1);
   });
 
   it("applies to the evidence of a candidate item, the last of several included", async () => {
@@ -236,16 +281,24 @@ describe("scope.claimed-grade: every source of the input is graded, the first or
       name: "n",
       evidenceSourceVersionIds: [loose(), loose(), tight()],
     });
-    expect(await classOf([loose()], { candidateItemIds: ["item-1"] })).toBe("general");
-    candidates.set("item-2", { name: "m", evidenceSourceVersionIds: [loose(), loose()] });
-    expect(await classOf([loose()], { candidateItemIds: ["item-2"] })).toBe("synthetic");
+    const got = await asked([loose()], { candidateItemIds: ["item-1"] });
+    expect(got.filter((c) => c.startsWith("compare:"))).toEqual([
+      "compare:open|open",
+      "compare:open|open",
+      "compare:open|open",
+      "compare:open-eu|open",
+    ]);
+    expect(got.filter((c) => c === "strictest:[]")).toHaveLength(1);
   });
 });
 
 describe("scope.claimed-grade: a policy or mapping that cannot judge stops the request", () => {
-  const stopped = async (ids: string[]) => {
+  const stopped = async (ids: string[], extra: Partial<BrokerRequest> = {}) => {
     const before = provider.requests.length;
-    expect(await call(extract(ids))).toEqual({ status: "rejected", reason: "scope-unjudged" });
+    expect(await call(extract(ids, extra))).toEqual({
+      status: "rejected",
+      reason: "scope-unjudged",
+    });
     expect(provider.requests).toHaveLength(before);
   };
 
@@ -263,26 +316,34 @@ describe("scope.claimed-grade: a policy or mapping that cannot judge stops the r
     }
   });
 
-  it("a mapping that throws, or answers a class that does not exist", async () => {
+  it("a mapping that throws, or answers anything but a class a scope may give (synthetic included)", async () => {
     const id = claim(["open"], ["open"]);
     gradeOverride = () => {
       throw new Error("mapping down");
     };
     await stopped([id]);
-    for (const bad of [undefined, null, "secret", 1]) {
+    for (const bad of [undefined, null, "secret", 1, "synthetic", "restricted"]) {
       gradeOverride = () => bad;
       await stopped([id]);
     }
   });
 
-  it("a strictest that throws or is not a class, where the strictest is what the grade needs", async () => {
-    const id = claim(["open-eu"], ["open"]); // incomparable: asks strictest
-    strictestOverride = () => {
-      throw new Error("down");
-    };
-    await stopped([id]);
-    strictestOverride = () => "top-secret";
-    await stopped([id]);
+  it("a mapping that answers synthetic for a source that is not a claim", async () => {
+    gradeOverride = () => "synthetic";
+    await stopped([store({ claimed: false, scope: JSON.stringify(["open"]) })]);
+  });
+
+  it("a strictest that throws or answers anything but a class a scope may give, where the grade needs it", async () => {
+    for (const id of [claim(["open-eu"], ["open"]), claim(["open"], ["open"])]) {
+      strictestOverride = () => {
+        throw new Error("down");
+      };
+      await stopped([id]);
+      for (const bad of ["top-secret", "synthetic", undefined]) {
+        strictestOverride = () => bad;
+        await stopped([id]);
+      }
+    }
   });
 
   it("the failure of a later source stops the request (every source is judged)", async () => {
@@ -294,10 +355,7 @@ describe("scope.claimed-grade: a policy or mapping that cannot judge stops the r
     };
     await stopped([good, claim(["open"], ["open"]), bad]);
     candidates.set("item-1", { name: "n", evidenceSourceVersionIds: [good, bad] });
-    expect(await call(extract([good], { candidateItemIds: ["item-1"] }))).toEqual({
-      status: "rejected",
-      reason: "scope-unjudged",
-    });
+    await stopped([good], { candidateItemIds: ["item-1"] });
   });
 });
 
@@ -311,32 +369,30 @@ describe("scope.claimed-grade ⑦⑧: the synthetic class is the manifest's alon
     .map((l) => JSON.parse(l) as { title: string; body: string; malicious?: boolean })
     .find((f) => !f.malicious) as { title: string; body: string };
 
-  it("a listed text from the fixtures Connector stays synthetic whatever its scope grades", async () => {
+  it("a listed text from the fixtures Connector stays synthetic, its scope never asked", async () => {
     const id = store({
       kind: "test-fixtures",
       claimed: false,
       scope: JSON.stringify(["team"]),
       ...synthetic,
     });
+    calls = [];
     expect(await classOf([id])).toBe("synthetic");
+    expect(calls).toEqual([]);
   });
 
-  it("a listed text imported as a claim is graded by its scope (V01 correction: import is not a trusted kind)", async () => {
-    // the claim is the strictest-graded one; its being listed does not lift it
-    expect(
-      await classOf([
-        store({ scope: JSON.stringify(["open-eu"]), configured: ["open"], ...synthetic }),
-      ]),
-    ).toBe("general");
-    // and a claim the mapping grades synthetic is synthetic by the scope, not by the list
+  it("a listed text that came in by import is general (V01: imports are general), claimed or not", async () => {
     expect(
       await classOf([
         store({ scope: JSON.stringify(["open"]), configured: ["open"], ...synthetic }),
       ]),
-    ).toBe("synthetic");
+    ).toBe("general");
+    expect(
+      await classOf([store({ claimed: false, scope: JSON.stringify(["open"]), ...synthetic })]),
+    ).toBe("general");
   });
 
-  it("an unlisted text under the fixtures kind is graded by its scope, not by its kind", async () => {
+  it("an unlisted text under the fixtures kind is general, whatever its scope", async () => {
     const id = store({
       kind: "test-fixtures",
       scope: JSON.stringify(["team"]),
@@ -368,7 +424,7 @@ describe("scope.claimed-grade: the public default", () => {
       expect(result.status).toBe("ok");
       expect(provider.requests.at(-1)?.dataClassification).toBe("general");
     }
-    expect(compareCalls).toEqual([]);
+    expect(calls).toEqual([]);
     expect(seen.every((c) => c === "general")).toBe(true);
   });
 });

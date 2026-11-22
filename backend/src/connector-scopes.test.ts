@@ -51,11 +51,13 @@ describe("the file's content", () => {
     expect(rejected).toBe(6);
   });
 
-  it("is empty and counted for a file that is not a JSON object", () => {
+  it("is empty and invalid (not a count of entries) for a file that is not a JSON object", () => {
     for (const text of ["", "{", "[]", '"x"', "null", "7"]) {
-      const parsed = parseConnectorScopes(text);
-      expect(parsed.scopes.size, text).toBe(0);
-      expect(parsed.rejected, text).toBe(1);
+      expect(parseConnectorScopes(text), text).toEqual({
+        scopes: new Map(),
+        rejected: 0,
+        file: "invalid",
+      });
     }
   });
 
@@ -68,17 +70,37 @@ describe("the file's content", () => {
 });
 
 describe("loading", () => {
-  it("no file: nothing configured, nothing rejected", () => {
-    expect(loadConnectorScopes(() => undefined)).toEqual({ scopes: new Map(), rejected: 0 });
+  const failing = (code: string | undefined) => () => {
+    throw Object.assign(new Error("read failed"), code === undefined ? {} : { code });
+  };
+
+  it("no file (ENOENT): nothing configured, told as absent", () => {
+    expect(loadConnectorScopes(failing("ENOENT"))).toEqual({
+      scopes: new Map(),
+      rejected: 0,
+      file: "absent",
+    });
+  });
+
+  it("a file that cannot be read (any other error) is told as unreadable, every instance unknown", () => {
+    for (const code of ["EACCES", "EISDIR", "EIO", undefined]) {
+      expect(loadConnectorScopes(failing(code)), String(code)).toEqual({
+        scopes: new Map(),
+        rejected: 0,
+        file: "unreadable",
+      });
+    }
   });
 
   it("a file that is read is parsed", () => {
-    expect(loadConnectorScopes(() => '{"a":["x"]}').scopes.get("a")).toEqual(["x"]);
+    const loaded = loadConnectorScopes(() => '{"a":["x"],"b":"bad"}');
+    expect(loaded.scopes.get("a")).toEqual(["x"]);
+    expect(loaded).toMatchObject({ rejected: 1, file: "read" });
   });
 
   it("the public repository ships no file, so this build configures nothing", () => {
     expect(existsSync(fileURLToPath(CONNECTOR_SCOPES_FILE))).toBe(false);
-    expect(CONNECTOR_SCOPES).toEqual({ scopes: new Map(), rejected: 0 });
+    expect(CONNECTOR_SCOPES).toEqual({ scopes: new Map(), rejected: 0, file: "absent" });
   });
 
   it("the file is site/config/connector-scopes.json at the repository root", () => {
