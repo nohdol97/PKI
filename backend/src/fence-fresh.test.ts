@@ -237,7 +237,7 @@ describe("fence.fresh: the result of an extraction behind commitDerived", () => 
     expect(written()).toEqual([0, 0, 0, 0]);
     expect(recordTombstoneLift(db, sourceId, new Date().toISOString())).toBe("lifted");
 
-    // the arrival path of I01 is not used: the version row goes in directly
+    // the backend entry (acceptChange and its job registration) is bypassed: saveSourceRecord stores the version directly
     const saved = saveSourceRecord(db, MAIL.connector_instance_id as string, {
       externalId: MAIL.external_id as string,
       title: MAIL.title as string,
