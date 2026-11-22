@@ -24,9 +24,28 @@ describe("contract schemas", () => {
         provider: { state: "not-implemented" },
         embedding: { state: "not-implemented" },
         vectorIndex: { state: "not-implemented" },
+        invalidations: [],
       }).success,
     ).toBe(true);
     expect(routes.status.response.safeParse({ backend: { state: "ready" } }).success).toBe(false);
+  });
+
+  it("states each invalidation record's counts per kind, never content (I04-R4)", () => {
+    const invalidations = routes.status.response.shape.invalidations;
+    const record = {
+      changeSeq: 3,
+      sourceId: 1,
+      changeKind: "user-deleted",
+      removedByKind: { facts: 2 },
+      recomputedByKind: { insights: 1 },
+      at: "2026-11-22T00:00:00.000Z",
+    };
+    expect(invalidations.safeParse([record]).success).toBe(true);
+    expect(invalidations.safeParse([{ ...record, changeKind: "deleted" }]).success).toBe(false);
+    expect(invalidations.safeParse([{ ...record, removedByKind: { facts: -1 } }]).success).toBe(
+      false,
+    );
+    expect(invalidations.safeParse([{ ...record, sourceId: 0 }]).success).toBe(false);
   });
 
   it("states an unavailable component's reason (V01-R5, R15)", () => {

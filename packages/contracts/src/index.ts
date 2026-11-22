@@ -44,11 +44,35 @@ export const EmbeddingStatusSchema = z.discriminatedUnion("state", [
 ]);
 export type EmbeddingStatusEntry = z.infer<typeof EmbeddingStatusSchema>;
 
+/**
+ * One invalidation record (I04-R4): what a source change removed and recomputed,
+ * counted per registered derivative kind. No title, body, quote or identifier;
+ * `sourceId` is the internal id. For a tombstone, `changeKind` is its reason.
+ */
+const InvalidationSchema = z.object({
+  changeSeq: z.int().nonnegative(),
+  sourceId: z.int().positive(),
+  changeKind: z.enum([
+    "new-version",
+    "old-versions-pruned",
+    "scope-changed",
+    "source-deleted",
+    "access-revoked",
+    "user-deleted",
+  ]),
+  removedByKind: z.record(z.string(), z.int().nonnegative()),
+  recomputedByKind: z.record(z.string(), z.int().nonnegative()),
+  at: z.string(),
+});
+export type InvalidationSummary = z.infer<typeof InvalidationSchema>;
+
 export const StatusResponseSchema = z.object({
   backend: ComponentStatusSchema,
   provider: ComponentStatusSchema,
   embedding: EmbeddingStatusSchema,
   vectorIndex: ComponentStatusSchema,
+  /** The latest invalidation records, newest first (I04-R4; Activity shows them, I03-T11). */
+  invalidations: z.array(InvalidationSchema),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 

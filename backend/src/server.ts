@@ -45,6 +45,7 @@ import {
   findSourceId,
   findSources,
   listActiveInsights,
+  listInvalidations,
   listProviderCalls,
   listSources,
   readEvidenceSource,
@@ -68,6 +69,8 @@ const MAX_BODY_BYTES = 16 * 1024;
 /** Provisional (V02-T04): the import route takes a file; every other route stays at 16 KiB. */
 export const IMPORT_BODY_LIMIT = 8 * 1024 * 1024;
 const BODY_LIMITS: Partial<Record<RouteName, number>> = { importJsonl: IMPORT_BODY_LIMIT };
+/** How many of the latest invalidation records the status API returns (provisional, I04-T01). */
+const STATUS_INVALIDATIONS = 20;
 
 export interface ServerOptions {
   /** Fresh per run; the caller generates it and passes it in-process, never via argv/env. */
@@ -353,6 +356,14 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       provider: { state: "not-implemented" },
       embedding: await embeddingState(options.embedder),
       vectorIndex: await vectorIndexState(options.vectorIndex),
+      invalidations: listInvalidations(options.db, STATUS_INVALIDATIONS).map((r) => ({
+        changeSeq: r.changeSeq,
+        sourceId: r.sourceId,
+        changeKind: r.changeKind,
+        removedByKind: r.removedByKind,
+        recomputedByKind: r.recomputedByKind,
+        at: r.at,
+      })),
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),
     syncConnector: (input) => options.connectors.sync(input.connectorId),

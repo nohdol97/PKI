@@ -417,8 +417,28 @@ const v9: Migration = (db) =>
     INSERT INTO keyword_index (keyword_index, rank) VALUES ('secure-delete', 1);
   `);
 
+// Schema v10 (I04-T01, I04-R4): one invalidation record per propagation, written
+// in the propagating transaction (so a rollback leaves none). It holds no content:
+// the change sequence, the source's internal id, the change kind (for a tombstone,
+// its reason) and, per registered derivative kind, how many rows were removed and
+// recomputed (JSON objects of counts, filled when the propagation ends). Ids are
+// never reused: a re-extraction job's target names one (`scope-recompute:<id>`, I04-R15).
+const v10: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE invalidations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      change_seq INTEGER NOT NULL CHECK (change_seq >= 0),
+      source_id INTEGER NOT NULL REFERENCES sources (id),
+      change_kind TEXT NOT NULL CHECK (change_kind IN ('new-version', 'old-versions-pruned',
+        'scope-changed', 'source-deleted', 'access-revoked', 'user-deleted')),
+      removed_by_kind TEXT NOT NULL DEFAULT '{}',
+      recomputed_by_kind TEXT NOT NULL DEFAULT '{}',
+      at TEXT NOT NULL
+    );
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
-export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8, v9];
+export const migrations: readonly Migration[] = [v1, v2, v3, v4, v5, v6, v7, v8, v9, v10];
 
 export function schemaVersion(db: SqlDriver): number {
   return db.all("PRAGMA user_version")[0]?.user_version as number;

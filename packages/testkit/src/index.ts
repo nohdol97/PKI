@@ -6,6 +6,16 @@ export { ProposingKnowledgeEngine, type Proposer } from "./proposing-knowledge-e
 export { MemoryVectorIndex } from "./memory-vector-index.ts";
 export { vectorIndexContract } from "./vector-index.contract.ts";
 export { connectorContract } from "./connector.contract.ts";
+export {
+  DERIVATIVE_CONTRACT_CASES,
+  derivativeKindContract,
+  type ContractDerivativeKind,
+  type ContractDerivedRef,
+  type ContractSourceVersionRef,
+  type DerivativeContractCase,
+  type DerivativeContractFixture,
+  type DerivativeContractSubject,
+} from "./derivatives.contract.ts";
 export { embeddingContract, type EmbeddingContractSubject } from "./embedding.contract.ts";
 export { FakeEmbedder, type FakeEmbedderOptions } from "./fake-embedder.ts";
 export { FakeProvider, type FakeProviderOptions, type FakeStep } from "./fake-provider.ts";

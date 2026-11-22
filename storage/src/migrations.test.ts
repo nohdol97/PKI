@@ -40,8 +40,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(9);
-    expect(migrations).toHaveLength(9);
+    expect(schemaVersion(db)).toBe(10);
+    expect(migrations).toHaveLength(10);
   });
 
   it("is idempotent when re-run", () => {
@@ -468,6 +468,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "facts",
       "insight_evidence",
       "insights",
+      "invalidations",
       "items",
       "jobs",
       "keyword_index",
@@ -667,5 +668,35 @@ describe("schema v9 (V02-T08)", () => {
     expect(db.all("SELECT v FROM keyword_index_config WHERE k = 'secure-delete'")).toEqual([
       { v: 1 },
     ]);
+  });
+});
+
+describe("schema v10 (I04-T01)", () => {
+  it("adds the invalidation records, holding counts and no content column", () => {
+    migrate(db, migrations.slice(0, 9));
+    expect(tables()).not.toContain("invalidations");
+    migrate(db, migrations.slice(0, 10));
+    expect(columns("invalidations")).toEqual([
+      "id",
+      "change_seq",
+      "source_id",
+      "change_kind",
+      "removed_by_kind",
+      "recomputed_by_kind",
+      "at",
+    ]);
+  });
+
+  it("never reuses a record id", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'test-fixtures')");
+    db.run("INSERT INTO sources (connector_instance_id, external_id) VALUES ('c', 'a')");
+    const insert = () =>
+      db.run(
+        "INSERT INTO invalidations (change_seq, source_id, change_kind, at) VALUES (1, 1, 'user-deleted', 't')",
+      ).lastInsertRowid;
+    const first = insert();
+    db.run("DELETE FROM invalidations");
+    expect(insert()).toBe(first + 1);
   });
 });
