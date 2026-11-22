@@ -46,7 +46,7 @@ describe("connector-example.contract", () => {
     expect(own.private).toBe(true);
   });
 
-  it("is not a dependency of any workspace package (not in the product)", () => {
+  it("is not a dependency of any workspace package but the public example of a fork's composition package (not in the product)", () => {
     const dirs = [
       root,
       ...readdirSync(root).map((d) => join(root, d)),
@@ -55,10 +55,11 @@ describe("connector-example.contract", () => {
       ),
     ].filter((dir) => existsSync(join(dir, "package.json")));
     expect(dirs.length).toBeGreaterThan(5);
+    // packages/site-example registers it as the collector of its example registration (I05-R20); nothing public imports that package
     const dependents = dirs.filter((dir) =>
       declared(manifestOf(dir)).includes("@pki/connector-example"),
     );
-    expect(dependents).toEqual([]);
+    expect(dependents).toEqual([join(root, "packages/site-example")]);
   });
 });
 
