@@ -137,6 +137,21 @@ class DeleteConfig(unittest.TestCase):
             with self.assertRaises(site.ConfigError, msg=repr(bad)):
                 ds.validate_config(config(userDataDir=bad))
 
+    def test_extra_scan_dirs_with_a_variable_are_expanded_before_the_absolute_check(self):
+        old = os.environ.get("PKI_TEST_ENGINE_ROOT")
+        os.environ["PKI_TEST_ENGINE_ROOT"] = "D:\\engine"
+        try:
+            ds.validate_config(config(extraScanDirs=["%PKI_TEST_ENGINE_ROOT%\\idx"]))
+            self.assertEqual(ds.scan_dirs(config(extraScanDirs=["%PKI_TEST_ENGINE_ROOT%\\idx"]), "C:\\d\\pki.sqlite")[-1], "D:\\engine\\idx")
+            with self.assertRaises(site.ConfigError):  # a variable that expands to a relative path is still refused
+                os.environ["PKI_TEST_ENGINE_ROOT"] = "engine"
+                ds.validate_config(config(extraScanDirs=["%PKI_TEST_ENGINE_ROOT%\\idx"]))
+        finally:
+            if old is None:
+                os.environ.pop("PKI_TEST_ENGINE_ROOT", None)
+            else:
+                os.environ["PKI_TEST_ENGINE_ROOT"] = old
+
     def test_extra_scan_dirs_must_be_absolute_windows_paths(self):
         for bad in (["relative\\dir"], "D:\\engine", [3]):
             with self.assertRaises(site.ConfigError, msg=repr(bad)):
@@ -227,6 +242,16 @@ class CanaryScan(unittest.TestCase):
                 os.chmod(locked, 0o700)
             self.assertEqual(found, {"deleted": 0, "revoked": 0, "kept": 1})  # the locked folder hid the canary
             self.assertEqual(unreadable, 2)  # the folder and the file, counted
+
+    @unittest.skipIf(sys.platform == "win32", "needs POSIX symlinks")
+    def test_a_dangling_symlink_is_counted_unreadable_so_the_verdict_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.symlink(os.path.join(d, "no-such-target"), os.path.join(d, "dangling"))
+            with open(os.path.join(d, "kept.db"), "wb") as fh:
+                fh.write(CANARIES["kept"].encode())
+            found, unreadable = ds.scan_canaries([d], CANARIES)
+        self.assertEqual((found["kept"], unreadable), (1, 1))
+        self.assertEqual(verdict(found=found, unreadable=unreadable), "INCONCLUSIVE")
 
     def test_a_missing_folder_is_an_error_not_a_clean_result(self):
         with self.assertRaises(site.ConfigError):
@@ -358,6 +383,17 @@ class RecordWriting(unittest.TestCase):
             text = read(md_path)
             for secret in CANARIES.values():
                 self.assertNotIn(secret, text)
+
+    def test_the_runbook_lists_exactly_the_facts_the_runner_writes(self):
+        """RUNBOOK 8 "붙이는 것" names the pasteable fields; they must equal the facts write_results produces."""
+        import re
+        runbook = read(os.path.join(_paths.VERIF_DIR, KIT, "RUNBOOK.md"))
+        paragraph = runbook.split("**붙이는 것.**", 1)[1].split("\n\n", 1)[0].split("`raw", 1)[0]  # the allowlist sentence, not the never-paste list
+        listed = set(re.findall(r"`([a-z]+(?:_[a-z]+)*)`", paragraph))
+        with tempfile.TemporaryDirectory() as out:
+            _, (json_path, _md) = self.write(out=out)
+            written = set(json.loads(read(json_path))["checks"][0]["facts"])
+        self.assertEqual(listed, written)
 
     def test_a_failed_run_is_recorded_as_failed_with_the_count(self):
         with tempfile.TemporaryDirectory() as out:

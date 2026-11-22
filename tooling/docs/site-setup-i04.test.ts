@@ -146,6 +146,12 @@ const NAMED_FACTS = [
   { item: "S22", token: "extraScanDirs", file: "verification/v02-site-flow/delete_scenario.py", holds: 'cfg.get("extraScanDirs"' },
   { item: "S22", token: "userDataDir", file: "verification/v02-site-flow/delete_scenario.py", holds: 'cfg.get("userDataDir")' },
   { item: "S22", token: "fts5vocab", file: "verification/v02-site-flow/delete_scenario.py", holds: "USING fts5vocab(" },
+  { item: "S22", token: "deletionsOnRescan", file: "packages/connector-sdk/src/jsonl.ts", holds: "deletionsOnRescan: false" },
+  { item: "S22", token: "POST /api/imports", file: "packages/contracts/src/index.ts", holds: 'path: "/api/imports"' },
+  { item: "S22", token: "revoke", file: "packages/connector-sdk/src/jsonl.ts", holds: 'case "revoke":' },
+  { item: "S22", token: "access-revoked", file: "packages/connector-sdk/src/jsonl.ts", holds: 'case "access-revoked":' },
+  { item: "S21", token: "scope-changed", file: "knowledge-engine/src/arrival.ts", holds: 'kind: "scope-changed"' },
+  { item: "S21", token: "revoke", file: "packages/connector-sdk/src/jsonl.ts", holds: 'case "revoke":' },
   { item: "S22", token: "pki-desktop", file: "apps/desktop/build/build.ts", holds: 'name: "pki-desktop"' },
   { item: "S22", token: "identity_key", file: "storage/src/migrations.ts", holds: "CREATE TABLE identity_key" },
   {

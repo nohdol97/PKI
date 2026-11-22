@@ -56,7 +56,8 @@ def validate_config(cfg):
         raise ConfigError("config needs userDataDir: the absolute folder of the Electron shell's userData (Chromium storage), "
                           "which lies outside the data folder (site-setup S22)")
     extra = cfg.get("extraScanDirs", [])
-    if not (isinstance(extra, list) and all(isinstance(d, str) and _is_abs(d) for d in extra)):
+    # %VAR% is expanded first, as scan_dirs does: what is validated is what is scanned
+    if not (isinstance(extra, list) and all(isinstance(d, str) and _is_abs(ntpath.expandvars(d)) for d in extra)):
         raise ConfigError("extraScanDirs must be a list of absolute Windows folder paths")
     return cfg
 
