@@ -37,6 +37,11 @@ export interface StoredSchedule {
    * accounted for. A job ID, not a time: IDs only grow, a wall clock can go back.
    */
   failureSeenJob: number;
+  /**
+   * A job at or below `failureSeenJob` that a user took up again by hand and a
+   * check saw open: its next end counts as a new dead letter; 0 when none.
+   */
+  revivedJob: number;
   /** An error code kept for a period that cannot pause (the cleanup period). */
   warning: string | null;
   /** The missed slots of the latest due check. */
@@ -75,6 +80,7 @@ function fromRow(row: Record<string, SqlValue>): StoredSchedule {
     lastRunSlot: (row.last_run_slot ?? null) as number | null,
     pausedCode: (row.paused_code ?? null) as string | null,
     failureSeenJob: row.failure_seen_job as number,
+    revivedJob: row.revived_job as number,
     warning: (row.warning ?? null) as string | null,
     lastMissed: row.last_missed as number,
     counts: {
@@ -125,6 +131,7 @@ export interface SchedulePatch {
   lastRunSlot?: number | null;
   pausedCode?: string | null;
   failureSeenJob?: number;
+  revivedJob?: number;
   warning?: string | null;
   lastMissed?: number;
   /** Added to the counters. */
@@ -138,6 +145,7 @@ const COLUMNS = {
   lastRunSlot: "last_run_slot",
   pausedCode: "paused_code",
   failureSeenJob: "failure_seen_job",
+  revivedJob: "revived_job",
   warning: "warning",
   lastMissed: "last_missed",
 } as const;
@@ -196,17 +204,21 @@ export function jobOfSlot(db: SqlDriver, scheduleId: number, slot: number): Stor
   return id === undefined ? undefined : readJob(db, id as number);
 }
 
-/** The latest dead letter of a schedule with an ID above `afterJob`: its ID and code. */
+/**
+ * The latest dead letter of a schedule that is news: one with an ID above
+ * `afterJob`, or the `revivedJob` (a seen one taken up again by hand and ended again).
+ */
 export function latestDeadLetterAfter(
   db: SqlDriver,
   scheduleId: number,
   afterJob: number,
+  revivedJob = 0,
 ): { id: number; reason: string | null } | undefined {
   const row = db.all(
     `SELECT id, reason FROM jobs
-      WHERE schedule_id = ? AND status = 'dead_letter' AND id > ?
+      WHERE schedule_id = ? AND status = 'dead_letter' AND (id > ? OR id = ?)
       ORDER BY id DESC LIMIT 1`,
-    [scheduleId, afterJob],
+    [scheduleId, afterJob, revivedJob],
   )[0];
   return row && { id: row.id as number, reason: row.reason as string | null };
 }

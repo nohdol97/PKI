@@ -25,6 +25,7 @@ import {
   listSchedules,
   openJobOfSchedule,
   pullBackRunAfter,
+  readJob,
   readSchedule,
   registerJob,
   updateSchedule,
@@ -194,12 +195,15 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   function noteFailure(row: StoredSchedule, now: number): StoredSchedule {
     const patch: SchedulePatch = {};
     let seen = row.failureSeenJob;
-    // a dead letter seen before and taken up again by hand: its next end is new
+    let revived = row.revivedJob;
+    // a dead letter seen before and taken up again by hand: its next end is news, and
+    // only that job's (a newer one already accounted for stays accounted for)
     const open = openJobOfSchedule(db, row.id);
-    if (open && open.id <= seen) seen = open.id - 1;
-    const dead = latestDeadLetterAfter(db, row.id, seen);
+    if (open && open.id <= seen) revived = open.id;
+    const dead = latestDeadLetterAfter(db, row.id, seen, revived);
     if (dead) {
-      seen = dead.id;
+      if (dead.id === revived) revived = 0;
+      seen = Math.max(seen, dead.id);
       const code = dead.reason ?? "unknown";
       if (row.kind === MAINTENANCE_KIND) patch.warning = code;
       else patch.pausedCode = code;
@@ -207,6 +211,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       patch.warning = null; // the cleanup ran again: the warning is over
     }
     if (seen !== row.failureSeenJob) patch.failureSeenJob = seen;
+    if (revived !== row.revivedJob) patch.revivedJob = revived;
     if (Object.keys(patch).length === 0) return row;
     updateSchedule(db, row.id, patch, now);
     return stored(row.id);
@@ -380,6 +385,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           pausedCode: null,
           // what died while it was off or before a check saw it is not a reason to pause again
           failureSeenJob: latestDeadLetterId(db, id),
+          // a revived job that already ended again is dismissed too; one still open is not
+          revivedJob: readJob(db, row.revivedJob)?.status === "dead_letter" ? 0 : row.revivedJob,
           zone,
           nextDue: nextSlotAfter(periodOf(row), at, zone),
         },

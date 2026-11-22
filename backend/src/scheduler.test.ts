@@ -439,6 +439,37 @@ describe("schedule.pause", () => {
     expect(s.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "other-code" });
   });
 
+  it("a retry by hand of an older dead letter does not pause a re-enabled period on a newer, dismissed one", () => {
+    const s = scheduler();
+    const { schedule } = s.ensureSchedule({ kind: "connector-sync", target: "c1", period: hourly });
+    wall = T0 + HOUR + 1000;
+    s.check();
+    const first = finish({ status: "dead_letter", reason: "first" });
+    wall += 1000;
+    s.check(); // paused on the first
+    s.enable(schedule.id);
+    wall = T0 + 3 * HOUR;
+    s.check(); // job 2 registered
+    finish({ status: "dead_letter", reason: "second" });
+    wall += 1000;
+    s.check(); // paused on the second
+    s.enable(schedule.id); // the user dismissed both
+    db.run("UPDATE jobs SET status = 'queued', reason = NULL, finished_at = NULL WHERE id = ?", [
+      first.id,
+    ]);
+    wall += 1000;
+    s.check();
+    expect(s.get(schedule.id)?.pause).toBeUndefined(); // the second is not news
+    wall += 1000;
+    finish({ status: "dead_letter", reason: "third" }); // the revived job ends
+    wall += 1000;
+    s.check();
+    expect(s.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "third" });
+    wall += 1000;
+    s.check();
+    expect(s.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "third" });
+  });
+
   it("does not pause the maintenance period: it runs the next slot and leaves a warning", () => {
     const s = scheduler();
     const { schedule } = s.ensureSchedule({ kind: "maintenance", period: daily });
