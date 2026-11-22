@@ -2,17 +2,24 @@
 // `derivatives.data-dir` every entry of the data directory after a flow, `derivatives.unregistered-adapter`
 // the implementations the composition binds. Each fails closed on what nobody registered.
 import { routes } from "@pki/contracts";
+import { computePolicyVersion, DEFAULT_PROVIDER_SETTING } from "@pki/providers";
 import { createProductRegistry, NO_POLICY_YET } from "@pki/knowledge-engine";
 import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
-import { createDerivativeRegistry, migrate, type DerivativeKind } from "@pki/storage";
+import {
+  createDerivativeRegistry,
+  migrate,
+  saveConsent,
+  writeSetting,
+  type DerivativeKind,
+} from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
-import { send } from "@pki/testkit";
+import { FakeProvider, fixtureExtraction, send } from "@pki/testkit";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
-import { productEngine, productRegistry } from "./composition.ts";
+import { openCanonicalDb, productEngine, productRegistry } from "./composition.ts";
 import {
   checkBoundAdapters,
   checkDataDirectory,
@@ -22,8 +29,13 @@ import {
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "c".repeat(43);
-const MAIL = readFileSync(resolve(import.meta.dirname, "../../fixtures/v02-mail.jsonl"), "utf8");
 const registry = productRegistry({ engine: productEngine(), vectorIndex: new EmptyVectorIndex() });
+
+const without = (name: string) =>
+  createDerivativeRegistry({
+    kinds: createProductRegistry({ policy: NO_POLICY_YET }).kinds.filter((k) => k.kind !== name),
+    policy: NO_POLICY_YET,
+  });
 
 let dir: string;
 beforeEach(() => {
@@ -66,6 +78,37 @@ describe("derivatives.schema-coverage", () => {
         table,
       ).toBe(true);
     }
+    db.close();
+  });
+
+  it("a table whose kind is missing from the registry GIVEN fails (not the default registry)", () => {
+    const db = freshDb();
+    const problems = checkTableCoverage(db, without("fact"));
+    expect(problems).toEqual([expect.stringContaining('"facts"')]);
+    expect(problems[0]).toContain('"fact"');
+    db.close();
+  });
+
+  it("SQLite names are case-insensitive: upper-case spellings do not evade the checks", () => {
+    const db = freshDb();
+    db.exec(`CREATE TABLE op_a (EVIDENCE_ID INTEGER);
+      CREATE TABLE op_b (e INTEGER REFERENCES Evidence(id));
+      CREATE TABLE op_c (f INTEGER REFERENCES "FACTS"(id));
+      CREATE TABLE Op_D (x INTEGER)`);
+    const operational = { class: "operational", reason: "test" } as const;
+    const problems = checkTableCoverage(db, registry, {
+      ...TABLE_CLASSIFICATION,
+      op_a: operational,
+      op_b: operational,
+      op_c: operational,
+      op_d: operational, // classified in lower case, created as Op_D: it is classified
+    });
+    expect(problems).toHaveLength(3);
+    expect(problems).toEqual([
+      expect.stringContaining('"op_a"'),
+      expect.stringContaining('"op_b"'),
+      expect.stringContaining('"op_c"'),
+    ]);
     db.close();
   });
 
@@ -137,29 +180,69 @@ describe("derivatives.schema-coverage", () => {
 });
 
 describe("derivatives.data-dir", () => {
-  const boot = () =>
-    bootBackend({
+  it("after import, extraction and an Insight on the default configuration, every entry is claimed", async () => {
+    const seeding = openCanonicalDb(dir);
+    writeSetting(seeding, DEFAULT_PROVIDER_SETTING, "local-model");
+    saveConsent(seeding, {
+      provider: "local-model",
+      destination: "local-model",
+      policyVersion: computePolicyVersion([]),
+      allowedClasses: ["general"],
+      grantedAt: "2026-11-22T00:00:00.000Z",
+    });
+    seeding.close();
+    const provider = new FakeProvider({
+      id: "local-model",
+      transport: "http",
+      answer: fixtureExtraction(),
+    });
+    // the null engine and the empty vector index: the start is not refused
+    const booted = await bootBackend({
       dataDir: dir,
       token: TOKEN,
       allowedOrigins: [],
       secrets: NO_SECRET_STORE,
-      providers: [],
+      providers: [provider],
     });
-
-  it("after the default configuration starts and imports a file, every entry is claimed", async () => {
-    const booted = await boot(); // the null engine and the empty vector index: the start is not refused
     const { port } = booted.server;
-    const res = await send(
-      port,
-      routes.importJsonl.path,
-      { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` },
-      "POST",
-      { text: MAIL },
-    );
+    const headers = { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` };
+    const text = ["v02-mail.jsonl", "v02-wiki.jsonl", "v02-messenger.jsonl"]
+      .map((f) => readFileSync(resolve(import.meta.dirname, "../../fixtures", f), "utf8"))
+      .join("\n");
+    const res = await send(port, routes.importJsonl.path, headers, "POST", { text });
     expect(res.status).toBe(200);
+    await vi.waitFor(() =>
+      expect(booted.db.all("SELECT status FROM jobs").map((j) => j.status)).toEqual([
+        "succeeded",
+        "succeeded",
+        "succeeded",
+      ]),
+    );
+    // the flow reached the end: the directory is not checked after a flow that did nothing
+    expect(booted.db.all("SELECT count(*) AS n FROM insights")[0]?.n).toBeGreaterThan(0);
     await booted.server.close();
     booted.db.close();
     expect(checkDataDirectory(dir, registry)).toEqual([]);
+  });
+
+  it("a kind path written with backslashes claims the file (Windows spelling)", () => {
+    const winKind: DerivativeKind = {
+      kind: "winwriter",
+      layer: "delivery",
+      references: [],
+      storage: "canonical",
+      dataPaths: ["derived\\index.bin"],
+      lineage: () => [],
+      affected: () => [],
+      invalidate: () => ({ removed: 0, recomputed: 0 }),
+    };
+    mkdirSync(join(dir, "derived"));
+    writeFileSync(join(dir, "derived/index.bin"), "");
+    const reg = createDerivativeRegistry({
+      kinds: [...registry.kinds, winKind],
+      policy: NO_POLICY_YET,
+    });
+    expect(checkDataDirectory(dir, reg)).toEqual([]);
   });
 
   it("the operational entries of the product are accepted", () => {
@@ -212,11 +295,6 @@ describe("derivatives.data-dir", () => {
 });
 
 describe("derivatives.unregistered-adapter", () => {
-  const without = (name: string) =>
-    createDerivativeRegistry({
-      kinds: createProductRegistry({ policy: NO_POLICY_YET }).kinds.filter((k) => k.kind !== name),
-      policy: NO_POLICY_YET,
-    });
   const options = () => ({
     dataDir: dir,
     token: TOKEN,
@@ -240,6 +318,9 @@ describe("derivatives.unregistered-adapter", () => {
     await expect(bootBackend({ ...options(), registry: without("engine") })).rejects.toThrow(
       /refusing to start.*engine/,
     );
+    await expect(bootBackend({ ...options(), registry: without("engine") })).rejects.toMatchObject({
+      name: "UnregisteredAdapterError(engine)",
+    });
   });
 
   it("a vector index bound while the registry has no vector kind: the backend refuses to start", async () => {

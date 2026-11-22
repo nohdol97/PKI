@@ -86,13 +86,16 @@ export function checkTableCoverage(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
     )
     .map((r) => r.name as string);
+  // SQLite identifiers are case-insensitive: the schema's names are compared lower-cased, so the
+  // classification's names (the keys of the list) are written in lower case
+  const byName = new Map(Object.entries(classification));
   const kindTables = new Set(
     Object.entries(classification)
       .filter(([, c]) => c.class === "kind")
       .map(([name]) => name),
   );
   for (const table of tables) {
-    const entry = classification[table];
+    const entry = byName.get(table.toLowerCase());
     if (!entry) {
       problems.push(
         `table "${table}" is not classified: add it to TABLE_CLASSIFICATION (backend/src/derivative-coverage.ts) as the source row, a registered kind's table (and make that kind delete its rows), or operational with a reason`,
@@ -106,12 +109,12 @@ export function checkTableCoverage(
     }
     if (entry.class === "operational") {
       for (const fk of db.all(`PRAGMA foreign_key_list(${quoted(table)})`)) {
-        if (kindTables.has(fk.table as string)) {
+        if (kindTables.has((fk.table as string).toLowerCase())) {
           problems.push(`operational table "${table}" has a foreign key to "${String(fk.table)}"`);
         }
       }
       for (const col of db.all(`PRAGMA table_info(${quoted(table)})`)) {
-        if (ID_COLUMNS.includes(col.name as string)) {
+        if (ID_COLUMNS.includes((col.name as string).toLowerCase())) {
           problems.push(
             `operational table "${table}" has the derived-row column "${String(col.name)}"`,
           );
@@ -119,9 +122,9 @@ export function checkTableCoverage(
       }
     }
   }
+  const existing = new Set(tables.map((t) => t.toLowerCase()));
   for (const name of Object.keys(classification)) {
-    if (!tables.includes(name))
-      problems.push(`classified table "${name}" does not exist: remove it`);
+    if (!existing.has(name)) problems.push(`classified table "${name}" does not exist: remove it`);
   }
   return problems;
 }
@@ -171,7 +174,14 @@ export function checkBoundAdapters(
   registry: Pick<DerivativeRegistry, "kinds">,
   adapters: { engine: KnowledgeEngine; vectorIndex: VectorIndex },
 ): string[] {
-  const problems: string[] = [];
+  return boundAdapterProblems(registry, adapters).map((p) => p.message);
+}
+
+function boundAdapterProblems(
+  registry: Pick<DerivativeRegistry, "kinds">,
+  adapters: { engine: KnowledgeEngine; vectorIndex: VectorIndex },
+): { name: string; message: string }[] {
+  const problems: { name: string; message: string }[] = [];
   const projections = new Set(
     registry.kinds.filter((k) => k.storage === "projection").map((k) => k.kind),
   );
@@ -180,16 +190,31 @@ export function checkBoundAdapters(
     [VECTOR_KIND, adapters.vectorIndex],
   ] as const) {
     if (!projections.has(name)) {
-      problems.push(`the bound ${name} implementation has no registered projection kind "${name}"`);
+      problems.push({
+        name,
+        message: `the bound ${name} implementation has no registered projection kind "${name}"`,
+      });
     }
     const base = NULL_IMPLEMENTATIONS[name];
     if (bound instanceof base && Object.getPrototypeOf(bound) !== base.prototype) {
-      problems.push(
-        `the bound ${name} implementation subclasses ${base.name}: a real adapter must implement the port itself`,
-      );
+      problems.push({
+        name,
+        message: `the bound ${name} implementation subclasses ${base.name}: a real adapter must implement the port itself`,
+      });
     }
   }
   return problems;
+}
+
+/**
+ * The refusal of the start. The shell logs only an error's `name` (shell.ts), so the name carries the
+ * fixed adapter kind names ("engine", "vectorIndex"); the message is fixed text and holds no path or data.
+ */
+export class UnregisteredAdapterError extends Error {
+  constructor(adapterKinds: readonly string[], message: string) {
+    super(message);
+    this.name = `UnregisteredAdapterError(${adapterKinds.join(",")})`;
+  }
 }
 
 /** Refuses the start (throws) when `checkBoundAdapters` finds anything. */
@@ -197,6 +222,11 @@ export function assertBoundAdaptersRegistered(
   registry: Pick<DerivativeRegistry, "kinds">,
   adapters: { engine: KnowledgeEngine; vectorIndex: VectorIndex },
 ): void {
-  const problems = checkBoundAdapters(registry, adapters);
-  if (problems.length > 0) throw new Error(`refusing to start: ${problems.join("; ")}`);
+  const problems = boundAdapterProblems(registry, adapters);
+  if (problems.length > 0) {
+    throw new UnregisteredAdapterError(
+      [...new Set(problems.map((p) => p.name))],
+      `refusing to start: ${problems.map((p) => p.message).join("; ")}`,
+    );
+  }
 }
