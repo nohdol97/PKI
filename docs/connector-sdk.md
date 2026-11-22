@@ -148,7 +148,7 @@ export interface Connector {
 |---|---|---|
 | 0 | 그 원본에 해제되지 않은 tombstone이 있다 | 사용자가 지운 것은 해제 전까지 모두 막는다. 출처가 지운 것·권한을 잃은 것은 tombstone의 revision보다 **큰** revision만 통과하고 나머지는 막는다. 막힌 것은 `blocked`로 세고 저장하지 않는다 |
 | 1 | revision이 last보다 작다 | `stale`(옛것). 저장하지 않고 오류도 아니다 |
-| 2 | revision이 last와 같다 | 내용이 같고 범위도 같으면 `unchanged`, 범위만 다르면 `scope-updated`, 내용이 다르면 `revision-conflict`로 그 레코드를 거부한다 |
+| 2 | revision이 last와 같다 | 살아 있는 최신 버전이 없으면(해제 뒤의 재전송) 내용과 상관없이 `stale`. 있으면 내용이 같고 범위도 같을 때 `unchanged`, 범위만 다르면 `scope-updated`, 내용이 다르면 `revision-conflict`로 그 레코드를 거부한다 |
 | 3 | revision이 last보다 크다 | 내용이 같으면 새 버전 없이 last만 올린다(범위가 다르면 `scope-updated`, 같으면 `unchanged`). 내용이 다르면 `created`로 새 버전을 만든다 |
 
 여기서 수집기가 지킬 것이 나온다.
@@ -250,7 +250,7 @@ export class ConnectorError extends Error {
 | 멈추지 않고 끝남(거부·`stale-tombstone`·`deletionsMayBeMissed`가 있어도) | `done` | — | 다음 주기 | 레코드 단위의 일은 결과에 남았고, 다시 돌려도 같다 |
 | `rate-limited` | `retry` | 씀 | 작업 대기열의 대기 시간과 결과의 `retryAfterMs` 가운데 늦은 쪽 | 시간이 지나면 풀린다 |
 | `connector-error` | `retry` | 씀 | 작업 대기열의 대기 시간 | 수집기가 재시도해도 된다고 했다 |
-| `instance-busy` | `retry` | 쓰지 않음 | 1분 뒤 | 같은 인스턴스의 가져오기가 끝나면 풀린다. 수집기를 부르지 않았다 |
+| `instance-busy` | `retry` | 쓰지 않음 | 1분 뒤 | 같은 인스턴스의 가져오기가 끝나면 풀린다. 수집기를 부르지 않았다(`jsonl-import` 종류가 제품에 등록되면 다시 볼 것. 그 종류는 수집기를 부른 뒤에도 이 코드로 멈출 수 있다) |
 | `aborted` | `retry` | 씀 | 작업 대기열의 대기 시간 | 임대 상실이나 실행 시간 초과는 실행기의 사정이다 |
 | `connector-failed` | `dead_letter` | — | 없음 | 수집기가 재시도할 수 없다고 했다 |
 | `invalid-page` | `dead_letter` | — | 없음 | 수집기의 규격 위반이다. 다시 돌려도 같다 |
@@ -477,17 +477,17 @@ site-mail: 미구현, 배포처 후속
 
 - 초기화가 던진 오류는 그 문구가 그대로 출력된다(위 줄의 `미구현, 배포처 후속`이 그 문구다). 초기화가 성공하면 `<종류>: ok`가 나오고 0으로 끝난다. 규격 버전이 다르면 `<종류>: unsupported-sdk-version`이 나오고 1로 끝난다.
 
-**없는 것(열린 항목).** 아래는 모두 만들어지지 않았다. 번호는 이 저장소의 추적 이슈다.
+**없는 것(열린 항목).** 아래는 모두 만들어지지 않았다. 번호(공용 저장소 #113 등)는 **공용(upstream) 저장소**의 추적 이슈다. 포크에서 `#113`은 포크 자신의 이슈를 가리키므로 공용 저장소의 이슈 목록에서 찾는다.
 
-1. **`site/` 안에서 수집기를 등록하는 길이 없다**(#113). 제품은 `site/` 폴더에서 수집기를 찾아 올리지 않는다. 그래서 포크가 지금 `site/` 밖에서 고쳐야 하는 곳은 다음 전부다.
+1. **`site/` 안에서 수집기를 등록하는 길이 없다**(공용 저장소 #113). 제품은 `site/` 폴더에서 수집기를 찾아 올리지 않는다. 그래서 포크가 지금 `site/` 밖에서 고쳐야 하는 곳은 다음 전부다.
    - `backend/src/composition.ts`의 `connectorKinds`(종류와 만드는 함수)와 `connectorInstances()`(인스턴스와 설정).
    - `pnpm-workspace.yaml`의 `packages:` 목록(6장 3번)과, `pnpm install`이 바꾸는 `pnpm-lock.yaml`.
    - `backend/package.json`: 포크의 수집기 패키지를 의존성으로 적어야 한다. 모듈 경계 규칙은 선언한 의존성만 가져오게 하고, 수집기 구현은 패키지의 `src/adapters/`에 두고 `<패키지 이름>/adapters` 진입점으로만 `composition.ts`가 가져오게 한다(`tooling/eslint/module-boundary.js` 머리의 설명).
    - 인스턴스를 부팅할 때의 동작: 백엔드는 모든 인스턴스의 `initialize`를 끝까지 기다린 뒤에 서비스를 시작하며 제한 시간이 없다. `initialize`가 끝나지 않으면 앱이 시작하지 못한다. 만드는 함수가 던지거나 `connectorInstances()`가 `connectorKinds`에 없는 종류를 적으면(`unknown connector kind`) 시작이 중단된다. 한 시간마다의 재점검은 같은 수집기 객체를 다시 `initialize`한다(5장).
    - 범위 등급 매핑을 바꾸려면 `composition.ts`의 `productCalls`가 쓰는 `publicScopeGrading`을 바꾸고, 새 등급을 더하려면 site-setup S08에 적힌 파일들도 고친다.
-2. **수집기에 비밀 값을 건네는 통로가 없다**(#114). 8장.
-3. **설치본이 `site/config/connector-scopes.json`을 읽는 길이 없다**(#115). site-setup S18.
-4. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(#116). 인스턴스의 설정은 부팅 때 `connectorInstances()`가 주고, 설정 화면이나 설정 파일로 인스턴스를 만들 수 있는 곳이 없다. 제품이 등록한 종류는 `site-*` 셋뿐이다(`jsonl-import`는 시험에서만 등록된다). 9장.
+2. **수집기에 비밀 값을 건네는 통로가 없다**(공용 저장소 #114). 8장.
+3. **설치본이 `site/config/connector-scopes.json`을 읽는 길이 없다**(공용 저장소 #115). site-setup S18.
+4. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116). 인스턴스의 설정은 부팅 때 `connectorInstances()`가 주고, 설정 화면이나 설정 파일로 인스턴스를 만들 수 있는 곳이 없다. 제품이 등록한 종류는 `site-*` 셋뿐이다(`jsonl-import`는 시험에서만 등록된다). 9장.
 
 이 항목들은 이 문서가 임의로 정하지 않았다. 포크가 다른 방법을 정했다면 그 방법을 공용 저장소에 알린다([ownership.md 5절](ownership.md)).
 
@@ -557,7 +557,7 @@ site-mail: 미구현, 배포처 후속
 
 파일 하나가 한 원본의 버전을 여럿 담을 수 있어(줄마다 한 버전) 한 번 읽는 동안 같은 정체가 두 번 upsert될 수 있다. 일반 수집기에서는 `duplicate-identity` 위반이다. 계약 묶음에서 이 예외를 켜는 시나리오 필드가 `versionedSources: true`다. **켠 시나리오에서만** revision이 **앞선 것보다 클 때** 같은 정체를 다시 upsert해도 되고, 같거나 낮은 revision의 되풀이는 켜도 위반이다. 이것은 파일의 줄마다 한 버전인 수집기를 위한 것이다. 원 시스템을 읽는 일반 수집기는 켜지 않는다. 켜 두면 한 번 읽는 동안 같은 원본을 여러 번 낸 실수를 잡을 수 없기 때문이다.
 
-### 열린 항목: 파일 인스턴스의 설정과 경로의 제한(#116)
+### 열린 항목: 파일 인스턴스의 설정과 경로의 제한(공용 저장소 #116)
 
 제품에는 `jsonl-import` 파일 인스턴스를 만들 길이 없다. 그 길이 생길 때 `{ path }`를 누가 적는지가 정해져야 하고, 파일 수집기 코드는 그 경로를 **그대로 읽는다.** 경로를 허용 폴더 안으로 가두는 일, 심볼릭 링크를 따라가지 않는 일은 만들지 않았다. 이 문서는 이것이 지켜진다고 말하지 않는다.
 

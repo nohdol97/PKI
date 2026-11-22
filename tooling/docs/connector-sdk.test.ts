@@ -294,21 +294,42 @@ describe("docs.connector-sdk: what the text names exists in the code", () => {
 });
 
 describe("docs.connector-sdk: what the text says is not built stays unbuilt", () => {
+  // A stale-sentence detector, not a safety guard: it catches the usual shapes of a loader (the
+  // folder named whole, or both path segments as separate strings, near a directory read or a
+  // dynamic import in one file). A loader that builds the path some other way escapes it.
+  const readsSiteConnectors = (text: string) =>
+    (text.includes("site/connectors") ||
+      (/["'`]site["'`]/.test(text) && /["'`]connectors["'`]/.test(text))) &&
+    /readdir|glob|import\(|require\(/.test(text);
+
   it("no product code LOADS collectors from site/connectors: no reader of that folder (chapters 7 and 11 say so)", () => {
-    const roots = ["backend/src", "apps/desktop/src", "knowledge-engine/src", "storage/src", "providers/src"];
+    const roots = [
+      "backend/src",
+      "apps/desktop/src",
+      "knowledge-engine/src",
+      "storage/src",
+      "providers/src",
+    ];
     const hits: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(resolve(repoRoot, dir), { withFileTypes: true })) {
         const path = `${dir}/${entry.name}`;
         if (entry.isDirectory()) walk(path);
         else if (/\.tsx?$/.test(entry.name) && !/\.test(-support)?\.tsx?$/.test(entry.name)) {
-          const text = read(path);
-          if (text.includes("site/connectors") && /readdir|glob|import\(|require\(/.test(text)) hits.push(path);
+          if (readsSiteConnectors(read(path))) hits.push(path);
         }
       }
     };
     roots.forEach(walk);
     expect(hits).toEqual([]);
+  });
+
+  it("the loader detector catches the folder named whole and built from parts, not a plain mention", () => {
+    expect(readsSiteConnectors('readdirSync("site/connectors")')).toBe(true);
+    expect(readsSiteConnectors('readdirSync(join(root, "site", "connectors"))')).toBe(true);
+    expect(readsSiteConnectors("await import(`${root}/site/connectors/x.ts`)")).toBe(true);
+    expect(readsSiteConnectors('import { x } from "../../site/connectors/x.ts";')).toBe(false);
+    expect(readsSiteConnectors('readdirSync(join(root, "docs"))')).toBe(false);
   });
 
   it("the product registers no jsonl-import kind: a file instance cannot be configured (chapters 9 and 11)", () => {

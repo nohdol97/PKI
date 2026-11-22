@@ -30,7 +30,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectorKinds, openCanonicalDb } from "./composition.ts";
-import { SYNC_PERIOD } from "./connector-sync-job.ts";
+import { RECHECK_TIMEOUT_MS, SYNC_PERIOD } from "./connector-sync-job.ts";
 import { REJECTED_LIST_LIMIT, SYNC_BACKOFF, siteCheck } from "./connectors.ts";
 import { importContent } from "./imports.ts";
 import type { SqlDriver } from "@pki/storage";
@@ -202,6 +202,11 @@ describe("docs.connector-sdk: the numbers equal the code", () => {
     expect(DOC).toContain("`getChanges`를 `limit` 1000과 1로");
     expect(REJECTED_LIST_LIMIT).toBe(100);
     expect(DOC).toContain("앞의 100건 `REJECTED_LIST_LIMIT`");
+  });
+
+  it("the recheck cap the text gives is the constant", () => {
+    expect(RECHECK_TIMEOUT_MS).toBe(60_000);
+    expect(DOC).toContain("60초(`RECHECK_TIMEOUT_MS`)");
   });
 
   it("the default period of a pulling instance is hourly", () => {
