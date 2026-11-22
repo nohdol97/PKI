@@ -339,3 +339,72 @@ describe("the shell's switch and the failure report (I04-H2 ①)", () => {
     expect(startFailureLine(new UnknownScopePolicyError(true))).toMatch(/is empty/);
   });
 });
+
+describe("the runner's scope does not reach what is not derived (I04-R11, I03-T09 handlers)", () => {
+  const refusing: ScopePolicy = { ...defaultScopePolicy, combinable: () => false };
+  const throwing: ScopePolicy = {
+    ...defaultScopePolicy,
+    combinable: () => {
+      throw new Error("cannot judge");
+    },
+  };
+
+  it.each([
+    ["refusing", refusing],
+    ["throwing", throwing],
+  ])(
+    "closes maintenance and connector-sync normally under a %s policy, their writes run",
+    async (_n, policy) => {
+      db = openCanonicalDb(dir);
+      const manager = {
+        list: () => [{ id: "c1", kind: "scripted", state: "ready" as const }],
+        sync: async () => ({
+          connectorId: "c1",
+          received: 2,
+          created: 2,
+          unchanged: 0,
+          scopeUpdated: 0,
+          stale: 0,
+          staleTombstone: 0,
+          blocked: 0,
+          tombstoned: 0,
+          rejected: [],
+          rejectedCount: 0,
+          rescanned: false,
+          deletionsMayBeMissed: false,
+        }),
+      };
+      const registry = productRegistry({
+        engine: new NullKnowledgeEngine(),
+        vectorIndex: new EmptyVectorIndex(),
+        policy,
+      });
+      const { createConnectorSyncHandler, CONNECTOR_SYNC_KIND } =
+        await import("./connector-sync-job.ts");
+      const { createMaintenanceHandler } = await import("./maintenance.ts");
+      const { MAINTENANCE_KIND } = await import("./scheduler.ts");
+      const { createJobRunner } = await import("./job-runner.ts");
+      const { createCommitScope } = await import("@pki/storage");
+      registerJob(db, { kind: CONNECTOR_SYNC_KIND, target: "c1" });
+      registerJob(db, { kind: MAINTENANCE_KIND, target: "" });
+      runner = createJobRunner({
+        db,
+        handlers: {
+          [CONNECTOR_SYNC_KIND]: createConnectorSyncHandler({ db, manager: () => manager }),
+          [MAINTENANCE_KIND]: createMaintenanceHandler({ db }),
+        },
+        scope: createCommitScope({ policy: registry.policy }),
+      });
+      await runner.wake();
+      expect(db.all("SELECT kind, status FROM jobs ORDER BY kind")).toEqual([
+        { kind: CONNECTOR_SYNC_KIND, status: "succeeded" },
+        { kind: MAINTENANCE_KIND, status: "succeeded" },
+      ]);
+      // their own writes ran: the lease-guarded result counts are stored
+      const counts = db.all("SELECT kind, result_counts FROM jobs ORDER BY kind");
+      expect(JSON.parse(counts[0]?.result_counts as string)).toMatchObject({ created: 2 });
+      expect(counts[1]?.result_counts).not.toBeNull();
+      expect(db.all("SELECT count(*) AS n FROM scope_policy_drops")).toEqual([{ n: 0 }]);
+    },
+  );
+});

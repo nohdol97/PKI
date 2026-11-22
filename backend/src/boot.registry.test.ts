@@ -11,6 +11,8 @@ import {
   createDerivativeRegistry,
   defaultScopePolicy,
   insertItem,
+  readJob,
+  registerJob,
   registerConnectorInstance,
   saveSourceRecord,
   type DerivativeKind,
@@ -149,6 +151,40 @@ describe("the registry boot builds reaches the product paths", () => {
     saveSourceRecord(db, "rv", { externalId: "x", title: "x", body: "본문" });
     await post(routes.syncConnector.path, { connectorId: "rv" });
     expect(changes).toEqual(["access-revoked"]);
+  });
+
+  it("a Connector's sync run through the connector-sync JOB handler (same manager, injected entries)", async () => {
+    const { changes, registry } = spied();
+    const { db } = await boot(registry, {
+      instances: [{ id: "rv", kind: "rv", config: {} }],
+      kinds: { rv: revoking },
+    });
+    registerConnectorInstance(db, "rv", "rv");
+    saveSourceRecord(db, "rv", { externalId: "x", title: "x", body: "본문" });
+    const queued = registerJob(db, { kind: "connector-sync", target: "rv" });
+    if (!queued.registered) throw new Error("expected a new job");
+    void booted?.runner.wake();
+    await vi.waitFor(() => expect(readJob(db, queued.job.id)?.status).toBe("succeeded"));
+    expect(changes).toEqual(["access-revoked"]);
+    // the deletion registered removals inside the page and woke the runner from inside this job:
+    // the sync job ran once, and every removal it registered ends (no double claim, none stuck)
+    expect(readJob(db, queued.job.id)?.attempts).toBe(1);
+    await vi.waitFor(() =>
+      expect(
+        db.all("SELECT status FROM jobs WHERE kind = 'projection-remove' AND target = 'engine'"),
+      ).toEqual([{ status: "succeeded" }]),
+    );
+    // one removal per projection, each claimed once, nothing left running (the vector index's
+    // removal waits in `retry` by T04's own classification, not by this path)
+    expect(
+      db.all(
+        "SELECT kind, target, attempts FROM jobs WHERE kind = 'projection-remove' ORDER BY id",
+      ),
+    ).toEqual([
+      { kind: "projection-remove", target: "engine", attempts: 1 },
+      { kind: "projection-remove", target: "vectorIndex", attempts: 1 },
+    ]);
+    expect(db.all("SELECT count(*) AS n FROM jobs WHERE status = 'running'")[0]?.n).toBe(0);
   });
 
   it("the JSONL import (importer entries)", async () => {
