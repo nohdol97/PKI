@@ -72,8 +72,10 @@ const FORK_SCOPE = "@pki-site/";
 const TEST_FILE = /\.(test|e2e|test-support)\.tsx?$/;
 const ADAPTERS_DIR = "src/adapters";
 /** The files that may pick adapter implementations (this file's header): package name and path in it. */
+const COMPOSITION_ROOT = { pkg: "@pki/backend", file: "src/composition.ts" };
+/** @type {{ pkg: string, file: string, dir?: string }[]} */
 const COMPOSITION_POINTS = [
-  { pkg: "@pki/backend", file: "src/composition.ts" },
+  COMPOSITION_ROOT,
   // the name alone is not enough: only the package at site/composition counts (a collector with that name does not)
   { pkg: "@pki-site/composition", file: "src/registration.ts", dir: "site/composition" },
   { pkg: "@pki/site-example", file: "src/registration.ts" },
@@ -334,7 +336,7 @@ const moduleBoundary = {
     }
     const isApiLayer = ownName === API_LAYER.pkg && ownPath === API_LAYER.file;
     // the backend's composition root alone: a fork's composition point reaches adapters, not the user entry
-    const isRoot = ownName === COMPOSITION_POINTS[0].pkg && ownPath === COMPOSITION_POINTS[0].file;
+    const isRoot = ownName === COMPOSITION_ROOT.pkg && ownPath === COMPOSITION_ROOT.file;
     const mayHoldUserEntry = isRoot || isTest || EXEMPT_PACKAGES.has(ownName);
     const mayWriteRegistry =
       (ownName === GATE_MODULE.pkg && ownPath === GATE_MODULE.file) ||
