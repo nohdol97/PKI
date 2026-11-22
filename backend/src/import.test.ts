@@ -766,6 +766,127 @@ describe("import.legacy-identity", () => {
     expect(count("source_versions")).toBe(2);
   });
 
+  describe("R3-1: an import never reads, writes, tombstones or purges a source of another kind's instance", () => {
+    const foreignRow = (target: SqlDriver) => {
+      registerConnectorInstance(target, "fixtures", "test-fixtures");
+      saveSourceRecord(target, "fixtures", {
+        namespace: "",
+        externalId: "fx-001",
+        title: "fixture",
+        body: "fixture body",
+        revision: 1,
+      });
+    };
+    const inject = line({
+      connector_instance_id: "fixtures",
+      external_id: "fx-001",
+      version: 2,
+      content: "INJECTED body",
+    });
+    const purge = line({
+      connector_instance_id: "fixtures",
+      external_id: "fx-001",
+      version: 3,
+      operation: "delete",
+      content: "",
+    });
+    const foreign = () => ({
+      bodies: db.all(
+        "SELECT body FROM source_versions v JOIN sources s ON s.id = v.source_id WHERE s.connector_instance_id = 'fixtures'",
+      ),
+      tombstones: db.all(
+        "SELECT t.source_id FROM tombstones t JOIN sources s ON s.id = t.source_id WHERE s.connector_instance_id = 'fixtures'",
+      ),
+      removals: db.all(
+        "SELECT count(*) AS n FROM jobs j JOIN sources s ON s.id = j.source_id WHERE j.kind = 'projection-remove' AND s.connector_instance_id = 'fixtures'",
+      )[0]?.n,
+    });
+    const untouched = { bodies: [{ body: "fixture body" }], tombstones: [], removals: 0 };
+
+    it("through the API: the line is stored under the importer's own identity, the foreign source is left as it is", async () => {
+      foreignRow(db);
+      expect(await imported(inject, "mine")).toMatchObject({ created: 1 });
+      expect(foreign()).toEqual(untouched);
+      expect(
+        db.all(
+          "SELECT connector_instance_id AS i, namespace AS n FROM sources WHERE connector_instance_id = 'mine'",
+        ),
+      ).toEqual([{ i: "mine", n: "fixtures" }]);
+      expect(await imported(purge, "mine")).toMatchObject({ tombstoned: 1 });
+      expect(foreign()).toEqual(untouched);
+    });
+
+    it("through the file collector: the same", async () => {
+      foreignRow(db);
+      await sync(await collector(fileOf(`${inject}\n${purge}`), "mine"), "mine");
+      expect(foreign()).toEqual(untouched);
+      expect(
+        db.all("SELECT count(*) AS n FROM sources WHERE connector_instance_id = 'mine'")[0]?.n,
+      ).toBe(1);
+    });
+
+    it("every ordering of API and collector uploads and deletes leaves it as it is", async () => {
+      const ops = (["api", "file"] as const).flatMap((route) =>
+        (["up", "del"] as const).map((kind) => ({ route, kind })),
+      );
+      for (const [n, seq] of ops
+        .flatMap((x) => ops.flatMap((y) => ops.map((z) => [x, y, z])))
+        .entries()) {
+        const target = openCanonicalDb(join(dir, `foreign-${n}`));
+        try {
+          foreignRow(target);
+          for (const { route, kind } of seq) {
+            const text = kind === "up" ? inject : purge;
+            if (route === "api") await importContent(target, "mine", text);
+            else {
+              const m = await createConnectorManager(
+                target,
+                [
+                  {
+                    id: "mine",
+                    kind: JSONL_IMPORT_KIND,
+                    config: { path: fileOf(text, `foreign-${n}.jsonl`) },
+                  },
+                ],
+                { [JSONL_IMPORT_KIND]: createJsonlConnector },
+              );
+              await m.sync("mine");
+            }
+          }
+          const bodies = target.all(
+            "SELECT body FROM source_versions v JOIN sources s ON s.id = v.source_id WHERE s.connector_instance_id = 'fixtures'",
+          );
+          const tomb = target.all(
+            "SELECT 1 FROM tombstones t JOIN sources s ON s.id = t.source_id WHERE s.connector_instance_id = 'fixtures'",
+          );
+          expect([JSON.stringify(seq), bodies, tomb]).toEqual([
+            JSON.stringify(seq),
+            [{ body: "fixture body" }],
+            [],
+          ]);
+        } finally {
+          target.close();
+        }
+      }
+    }, 600_000);
+  });
+
+  it("R3-2: a legacy instance other than the request's is written only under its own lock; busy is a whole-request 409", async () => {
+    seedRow(db);
+    const release = tryLockInstance(db, "ci") as () => void;
+    const before = state();
+    expect(await importContent(db, "other", E1)).toEqual({ error: "instance-busy" });
+    expect(state()).toEqual(before);
+    expect(db.all("SELECT id FROM connector_instances WHERE id = 'other'")).toHaveLength(1);
+    release();
+    expect(await importContent(db, "other", E1)).toMatchObject({ created: 0 });
+    expect(count("sources")).toBe(1);
+    // the extra lock is free again after the request
+    const again = tryLockInstance(db, "ci");
+    expect(again).toBeDefined();
+    again?.();
+  });
+
   describe("(d) no ordering of the routes leaves two sources, or a body beside a tombstone", () => {
     const OPS = (["v02", "api", "file"] as const).flatMap((route) =>
       (["up", "del"] as const).map((kind) => ({ route, kind })),

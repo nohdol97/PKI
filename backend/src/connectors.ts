@@ -37,6 +37,7 @@ import {
   registerConnectorInstance,
   type SqlDriver,
 } from "@pki/storage";
+import { tryLockInstance } from "./instance-lock.ts";
 import { systemClock, type Clock } from "./clock.ts";
 import {
   addPage,
@@ -46,6 +47,7 @@ import {
   type SyncResult,
 } from "./page-store.ts";
 
+export { tryLockInstance } from "./instance-lock.ts";
 export { EXTRACT_JOB_KIND, REJECTED_LIST_LIMIT } from "./page-store.ts";
 export type { RefusalReason, StoredOutcome, SyncResult } from "./page-store.ts";
 
@@ -100,27 +102,6 @@ export interface ConnectorRecheck {
 /** The configuration an instance was made with (shown by no API); the default schedules read it. */
 export interface ConnectorConfigs {
   configOf(id: string): unknown;
-}
-
-const locks = new WeakMap<SqlDriver, Set<string>>();
-
-/**
- * Takes an instance's lock, or returns undefined when it is held (I01-R21): one sync or
- * import per instance at a time. Call the returned function once, in a `finally`, on
- * every path. Locks are kept per database handle, so every taker must hold the same one.
- */
-export function tryLockInstance(db: SqlDriver, instanceId: string): (() => void) | undefined {
-  let held = locks.get(db);
-  if (!held) locks.set(db, (held = new Set()));
-  if (held.has(instanceId)) return undefined;
-  held.add(instanceId);
-  const set = held;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    set.delete(instanceId);
-  };
 }
 
 /** A page, or the code a sync stops with when it cannot be had (I01-R18). */

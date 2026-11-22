@@ -62,7 +62,7 @@ export async function importContent(
         endsRescan: false,
       },
     );
-    if ("stopped" in stored) return { error: "storage-failed" };
+    if ("stopped" in stored) return { error: stored.stopped };
     // the refusals as the file collector lists a page: the lines the parser refused, then the store's
     const all = [
       ...rejected.map((r) => ({ at: `line:${r.line}`, code: r.code })),

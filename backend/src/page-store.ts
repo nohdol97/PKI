@@ -31,6 +31,7 @@ import {
   contentHash,
   finishRescan,
   findSourceId,
+  readConnectorKind,
   readLatestContentHash,
   registerJob,
   writeCursor,
@@ -38,6 +39,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { systemClock, type Clock } from "./clock.ts";
+import { tryLockInstance } from "./instance-lock.ts";
 import type { JobRunner } from "./job-runner.ts";
 
 /** Provisional: refused records listed in a result; `rejectedCount` counts them all. */
@@ -209,7 +211,7 @@ export interface PageTarget {
 export function storePage(
   target: PageTarget,
   page: PageInput,
-): PageResult | { stopped: "storage-failed" } {
+): PageResult | { stopped: "storage-failed" | "instance-busy" } {
   const { db, instanceId, kind, capabilities, options } = target;
   const entries = options.entries ?? defaultEntries;
   const clock = options.clock ?? systemClock;
@@ -238,6 +240,14 @@ export function storePage(
     judged.push({ i, change, seen: expectedContent(raw as object) });
   });
 
+  // the locks of other instances this page writes into (an import's old identity), held until the
+  // page is committed or has failed; a lock that is taken fails the page whole and stores nothing
+  const extraLocks: (() => void)[] = [];
+  const lockLegacy = (other: string) => {
+    const release = tryLockInstance(db, other);
+    if (!release) throw new InstanceBusyAcrossError();
+    extraLocks.push(release);
+  };
   let pageCreated: number;
   try {
     pageCreated = canonicalTransaction(db, (tx) => {
@@ -248,7 +258,9 @@ export function storePage(
           rejected.push({ at: place(i), code: "schema" });
           continue;
         }
-        const at = scopeClaimed ? resolveImported(tx, instanceId, change) : { instanceId, change };
+        const at = scopeClaimed
+          ? resolveImported(tx, instanceId, change, lockLegacy)
+          : { instanceId, change };
         const outcome =
           seen &&
           at.change.kind === "scope-change" &&
@@ -280,10 +292,13 @@ export function storePage(
       return created;
     });
   } catch (error) {
+    for (const release of extraLocks) release();
+    if (error instanceof InstanceBusyAcrossError) return { stopped: "instance-busy" };
     // nothing of this page was stored, and none of its text reaches the result (I01-R4)
     options.onError?.(error);
     return { stopped: "storage-failed" };
   }
+  for (const release of extraLocks) release();
   for (const [change, reason] of refused) options.onRefused?.(change, reason);
   for (const [change, outcome] of stored) options.onStored?.(change, outcome);
   // The runner is woken once the engine has the page's versions, so a proposing
@@ -319,6 +334,9 @@ export function addPage(result: SyncResult, page: PageResult): void {
   }
 }
 
+/** An import's old identity is in an instance that is busy: the page is not stored (I01-R21). */
+class InstanceBusyAcrossError extends Error {}
+
 /**
  * The V02 screen route once stored imported sources under another identity: the line's
  * `connector_instance_id` as the instance and namespace "". Now every route resolves a line as
@@ -333,6 +351,7 @@ function resolveImported(
   tx: CanonicalTx,
   instanceId: string,
   change: Change,
+  lockLegacy: (instanceId: string) => void,
 ): { instanceId: string; change: Change } {
   const namespace = change.kind === "upsert" ? change.record.namespace : change.namespace;
   const externalId = change.kind === "upsert" ? change.record.externalId : change.externalId;
@@ -340,8 +359,14 @@ function resolveImported(
   if (findSourceId(tx, instanceId, namespace, externalId) !== undefined) {
     return { instanceId, change };
   }
-  // the old instance of a source is the line's connector_instance_id, which the namespace carries
+  // Invariant: an import never reads, writes, tombstones or purges a source whose instance is not
+  // `jsonl-import`. The text names the instance (untrusted), and a site Connector's sources are in
+  // namespace "" too, so the old identity is taken only from an instance of the import kind.
+  if (readConnectorKind(tx, namespace) !== JSONL_IMPORT_KIND) return { instanceId, change };
+  // the old identity is the line's `connector_instance_id`, which the namespace carries
   if (findSourceId(tx, namespace, "", externalId) === undefined) return { instanceId, change };
+  // the write goes into that instance, so its lock is held for the page (I01-R21)
+  if (namespace !== instanceId) lockLegacy(namespace);
   return {
     instanceId: namespace,
     change:
