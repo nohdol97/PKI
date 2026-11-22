@@ -8,6 +8,8 @@ import {
   identityKey,
   readChangeSeq,
   readCursor,
+  findSourceId,
+  readTombstoneState,
   registerConnectorInstance,
   saveSourceRecord,
   type SqlDriver,
@@ -869,6 +871,249 @@ describe("import.legacy-identity", () => {
         }
       }
     }, 600_000);
+  });
+
+  describe("(e) sampled orderings of the routes over wider seeds and operations", () => {
+    /*
+     * Invariants, in the spec's terms (I01-R10 step 0, R11, R22, T01 handoff 7, R3-1):
+     * - a foreign-kind instance's source and another jsonl-import instance's source that the lines
+     *   never name are never touched (no version change, no tombstone);
+     * - an instance holds at most one source per external id (namespace "" or the line's, never both);
+     * - `user-deleted` blocks every revision: the source has no version;
+     * - `source-deleted` / `access-revoked` block revisions up to the tombstone's last revision: every
+     *   version that exists has a greater revision (a higher revision afterwards is a NEW version,
+     *   so a tombstoned source may legitimately regain versions above it).
+     */
+    const SEEDS = [
+      "none",
+      "row",
+      "row+deleted",
+      "hash-only tombstone",
+      "row+user-deleted",
+    ] as const;
+    const ROUTES = ["v02", "api-ci", "api-other", "file-other"] as const;
+    const KINDS = ["up1", "up5", "del2", "revoke2", "revoked3"] as const;
+    const IDS = ["e1", "e2"];
+    const CASES_PER_SEED = 80;
+
+    const lineOf = (kind: (typeof KINDS)[number], id: string, ci = "ci") => {
+      const base = { connector_instance_id: ci, external_id: id };
+      switch (kind) {
+        case "up1":
+          return line({ ...base, version: 1 });
+        case "up5":
+          return line({ ...base, version: 5, content: `v5 ${id}` });
+        case "del2":
+          return line({ ...base, operation: "delete", content: "", version: 2 });
+        case "revoke2":
+          return line({ ...base, operation: "revoke", version: 2, access_scope: ["user:writer"] });
+        case "revoked3":
+          return line({ ...base, operation: "access-revoked", version: 3 });
+      }
+    };
+    // a deterministic generator, so the same cases run every time
+    const rng = (seed: number) => () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    it.each(SEEDS)(
+      `seed %s: ${CASES_PER_SEED} sampled orderings of three two-line requests keep every invariant`,
+      async (seed) => {
+        const next = rng(SEEDS.indexOf(seed) + 1);
+        const pick = <T>(xs: readonly T[]) => xs[Math.floor(next() * xs.length)] as T;
+        for (let n = 0; n < CASES_PER_SEED; n++) {
+          const ops = [0, 1, 2].map(() => ({ route: pick(ROUTES), kind: pick(KINDS) }));
+          const target = openCanonicalDb(join(dir, `e-${seed.replace(/\W/g, "")}-${n}`));
+          const where = `${seed} ${JSON.stringify(ops)}`;
+          try {
+            registerConnectorInstance(target, "ci", JSONL_IMPORT_KIND);
+            registerConnectorInstance(target, "ci2", JSONL_IMPORT_KIND);
+            registerConnectorInstance(target, "fx", "test-fixtures");
+            const raw = (inst: string, id: string) =>
+              saveSourceRecord(target, inst, {
+                namespace: "",
+                externalId: id,
+                title: "Synthetic title",
+                body,
+                revision: 1,
+              });
+            raw("fx", "e1");
+            raw("ci2", "e1");
+            const bystander = (inst: string) =>
+              target.all(
+                "SELECT (SELECT count(*) FROM source_versions v WHERE v.source_id = s.id) AS versions, (SELECT count(*) FROM tombstones t WHERE t.source_id = s.id) AS tombs FROM sources s WHERE s.connector_instance_id = ?",
+                [inst],
+              );
+            for (const id of IDS) {
+              if (seed === "row" || seed === "row+deleted" || seed === "row+user-deleted")
+                raw("ci", id);
+              if (seed !== "none" && seed !== "row") {
+                canonicalTransaction(target, (tx) =>
+                  applyTombstone(tx, {
+                    identity: { connectorInstanceId: "ci", namespace: "", externalId: id },
+                    reason: seed === "row+user-deleted" ? "user-deleted" : "source-deleted",
+                    lastRevision: seed === "row+user-deleted" ? null : 2,
+                    at: new Date().toISOString(),
+                  }),
+                );
+              }
+            }
+            for (const { route, kind } of ops) {
+              // each request is two lines (two ids) naming ci, and a third naming the foreign instance
+              const text = [...IDS.map((id) => lineOf(kind, id)), lineOf(kind, "e1", "fx")].join(
+                "\n",
+              );
+              if (route === "v02") await productImporter(target)(text);
+              else if (route === "api-ci") await importContent(target, "ci", text);
+              else if (route === "api-other") await importContent(target, "other", text);
+              else {
+                const m = await createConnectorManager(
+                  target,
+                  [
+                    {
+                      id: "other",
+                      kind: JSONL_IMPORT_KIND,
+                      config: { path: fileOf(text, `e-${n}-${seed.replace(/\W/g, "")}.jsonl`) },
+                    },
+                  ],
+                  { [JSONL_IMPORT_KIND]: createJsonlConnector },
+                );
+                await m.sync("other");
+              }
+            }
+            // foreign kind: untouched
+            expect([where, bystander("fx")]).toEqual([where, [{ versions: 1, tombs: 0 }]]);
+            // a jsonl-import instance the lines never name (they name ci and fx): untouched
+            expect([where, bystander("ci2")]).toEqual([where, [{ versions: 1, tombs: 0 }]]);
+            for (const id of IDS) {
+              const found = (inst: string, ns: string) => findSourceId(target, inst, ns, id);
+              // at most one source per external id in an instance
+              expect([
+                where,
+                id,
+                found("ci", "") !== undefined && found("ci", "ci") !== undefined,
+              ]).toEqual([where, id, false]);
+              // S1: where ci holds the legacy identity (a row or a tombstone), whichever instance the
+              // request names, the lines resolve to it, so the request's own instance gets no source
+              if (seed !== "none") {
+                expect([
+                  where,
+                  id,
+                  "no source in the request's instance",
+                  found("other", "ci"),
+                ]).toEqual([where, id, "no source in the request's instance", undefined]);
+              }
+              // the tombstone rules, per instance (a tombstone fences its own instance's source only), over
+              // the identities that instance's lines could have resolved to
+              for (const identities of [
+                [found("ci", ""), found("ci", "ci")],
+                [found("other", "ci")],
+              ]) {
+                const ids = identities.filter((x): x is number => x !== undefined);
+                const tomb = ids
+                  .map((s) => readTombstoneState(target, s))
+                  .filter((t) => t !== undefined);
+                const userDeleted = tomb.some(
+                  (t) => t.reason === "user-deleted" && t.liftedAt === null,
+                );
+                const lastRev = Math.max(0, ...tomb.map((t) => t.lastRevision ?? 0));
+                const revisions = ids.flatMap((s) =>
+                  target
+                    .all("SELECT revision FROM source_versions WHERE source_id = ?", [s])
+                    .map((r) => r.revision as number),
+                );
+                if (userDeleted)
+                  expect([where, id, "versions", revisions]).toEqual([where, id, "versions", []]);
+                expect([
+                  where,
+                  id,
+                  "above the tombstone",
+                  revisions.filter((r) => r <= lastRev),
+                ]).toEqual([where, id, "above the tombstone", []]);
+              }
+            }
+          } finally {
+            target.close();
+          }
+        }
+      },
+      900_000,
+    );
+  });
+
+  describe("R4-1: a page writing several lines into other instances' legacy rows locks each once and frees it", () => {
+    const seedLegacy = (ci: string, ids: string[]) => {
+      registerConnectorInstance(db, ci, JSONL_IMPORT_KIND);
+      for (const id of ids) {
+        saveSourceRecord(db, ci, {
+          namespace: "",
+          externalId: id,
+          title: "Synthetic title",
+          body,
+          revision: 1,
+        });
+      }
+    };
+    const lines = (ci: string, ids: string[], version = 1) =>
+      ids
+        .map((id) =>
+          line({
+            connector_instance_id: ci,
+            external_id: id,
+            version,
+            content: `v${version} ${id}`,
+          }),
+        )
+        .join("\n");
+    const free = (id: string) => {
+      const release = tryLockInstance(db, id);
+      release?.();
+      return release !== undefined;
+    };
+
+    it("through the API: two ids, then one id at two revisions, are stored and the lock is free", async () => {
+      seedLegacy("ci", ["e1", "e2"]);
+      const two = await importContent(db, "other", lines("ci", ["e1", "e2"], 2));
+      expect(two).toMatchObject({ created: 2 });
+      const versions = await importContent(
+        db,
+        "other",
+        [lines("ci", ["e1"], 3), lines("ci", ["e1"], 4)].join("\n"),
+      );
+      expect(versions).toMatchObject({ created: 2 });
+      expect(count("sources")).toBe(2);
+      expect(free("ci")).toBe(true);
+    });
+
+    it("through the file collector: the sync progresses and the lock is free", async () => {
+      seedLegacy("ci", ["e1", "e2"]);
+      const m = await collector(
+        fileOf([lines("ci", ["e1", "e2"], 2), lines("ci", ["e1"], 3)].join("\n")),
+        "other",
+      );
+      const first = await sync(m, "other");
+      expect(first).toMatchObject({ created: 3 });
+      expect(first.stopped).toBeUndefined();
+      expect(readCursor(db, "other")).not.toBeNull();
+      expect(free("ci")).toBe(true);
+    });
+
+    it("two different legacy instances in one page are both locked and both freed; a busy second stores nothing and frees the first", async () => {
+      seedLegacy("ci-a", ["e1"]);
+      seedLegacy("ci-b", ["e1"]);
+      const text = [lines("ci-a", ["e1"], 2), lines("ci-b", ["e1"], 2)].join("\n");
+      const heldB = tryLockInstance(db, "ci-b") as () => void;
+      const before = state();
+      expect(await importContent(db, "other", text)).toEqual({ error: "instance-busy" });
+      expect(state()).toEqual(before);
+      expect(free("ci-a")).toBe(true);
+      heldB();
+      expect(await importContent(db, "other", text)).toMatchObject({ created: 2 });
+      expect(free("ci-a") && free("ci-b")).toBe(true);
+    });
   });
 
   it("R3-2: a legacy instance other than the request's is written only under its own lock; busy is a whole-request 409", async () => {

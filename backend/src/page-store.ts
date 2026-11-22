@@ -243,7 +243,10 @@ export function storePage(
   // the locks of other instances this page writes into (an import's old identity), held until the
   // page is committed or has failed; a lock that is taken fails the page whole and stores nothing
   const extraLocks: (() => void)[] = [];
+  const lockedHere = new Set<string>(); // the lock is not re-entrant: each instance once per page
   const lockLegacy = (other: string) => {
+    if (lockedHere.has(other)) return;
+    lockedHere.add(other);
     const release = tryLockInstance(db, other);
     if (!release) throw new InstanceBusyAcrossError();
     extraLocks.push(release);

@@ -11,7 +11,7 @@
 // order and the store judges their order (I01-R10): that is more than the Connector
 // contract's one upsert per source per read, which the contract scenarios keep to. The
 // importer of the V02 screen (jsonl-import.ts) hands lines it parsed itself
-// (`{ records }`), in the instance's one namespace "".
+// (`{ records }`); they are in the namespace of their `connector_instance_id` like a file's.
 import {
   CONNECTOR_SDK_VERSION,
   ConnectorError,
