@@ -1,46 +1,31 @@
-// V01-C4 `artifact.gate` (V01-R10, R20, V01-T15): the production build's app folder,
-// launched in Electron the way an installed app starts, with everything that looks
-// like development around it — development-looking environment variables, the
-// source runs' switches, a CLI whose version is not on the verified list on PATH,
-// and a configuration a development build would let run (the CLI as default with
-// consent, background calls on, the unverified warning acknowledged) — still
-// blocks the CLI's user call (the connection test) and its background call (an
-// extraction job of imported data) as a production build: `cli-not-verified`,
-// where a development build answers `unverified-*`. No model call reaches the CLI.
-// The switches are ignored: the canonical DB is in the data directory of the
-// (temporary) HOME, nothing is written where the switches point, no test Connector.
-// Chromium's own `--user-data-dir` keeps its profile out of the real one (T15 6).
-import { _electron, expect, test, type Page } from "@playwright/test";
+// V01-C4 `artifact.gate` (V01-R10, R20, V01-T15): the production build's backend,
+// `backend/shell.js` from the app folder, run by the Electron binary's own Node the
+// way the shell's utility process runs it, over the same parent channel (Node fork
+// IPC, as shell.channel.test does). Around it everything looks like development:
+// development-looking environment variables handed straight to the backend (the
+// shell would pass only BACKEND_ENV_KEYS), a CLI whose version is not on the
+// verified list on PATH, and a configuration set through the API that a
+// development build would act on: the CLI as default with consent, background calls
+// on, the unverified warning acknowledged. The connection test with the fixed
+// synthetic material is still blocked `cli-not-verified` (a development build would
+// run it, marked unverified) and so is the background extraction of imported data
+// (a development build: `unverified-background`). No model call reaches the CLI.
+// The backend takes no switch: `--fixtures` or `--data-dir` stops it before it is
+// ready. The whole app (shell + this backend) starts in artifact.shell.e2e.ts;
+// Playwright cannot drive it, since it refuses the debugging switches Playwright needs.
+import { expect, test } from "@playwright/test";
 import { resolveDataDirectory } from "@pki/storage";
-import { installFakeCli, type FakeCli } from "@pki/testkit";
+import { installFakeCli, send, type FakeCli } from "@pki/testkit";
+import { fork, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { ELECTRON } from "../e2e/launch.ts";
 import { APP_DIR } from "../build/paths.ts";
+import { ELECTRON } from "../e2e/launch.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../../fixtures");
-
-/** A call to the backend through the shell's app://pki proxy, with the preload's session. */
-async function api(page: Page, path: string, body?: unknown) {
-  return page.evaluate(
-    async ({ path, body }) => {
-      const bridge = (window as unknown as { pki: { getSession(): Promise<{ token: string }> } })
-        .pki;
-      const { token } = await bridge.getSession();
-      const response = await fetch(path, {
-        method: body === undefined ? "GET" : "POST",
-        headers: {
-          authorization: `Bearer ${token}`,
-          ...(body === undefined ? {} : { "content-type": "application/json" }),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
-      return { status: response.status, body: (await response.json()) as unknown };
-    },
-    { path, body },
-  );
-}
+const BACKEND = join(APP_DIR, "backend", "shell.js");
 
 let dir: string;
 let cli: FakeCli;
@@ -56,102 +41,132 @@ test.afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("the built app blocks an unlisted CLI in a development-looking setting", async () => {
-  test.skip(process.platform === "win32", "the fake CLI is a shell script (T10 1)");
-  test.setTimeout(90_000);
+/** The development-looking environment, the data directory under a temporary HOME. */
+function environment() {
   const home = join(dir, "home");
   const xdg = join(dir, "xdg");
-  mkdirSync(home);
-  const dataDir = resolveDataDirectory({
-    platform: process.platform,
-    home,
-    env: { XDG_DATA_HOME: xdg },
-  });
-  const switched = { userData: join(dir, "switch-user"), dataDir: join(dir, "switch-data") };
+  mkdirSync(home, { recursive: true });
+  const env: Record<string, string> = {
+    PATH: `${cli.bin}:${process.env.PATH ?? ""}`,
+    HOME: home,
+    XDG_DATA_HOME: xdg,
+    TMPDIR: tmpdir(),
+    ELECTRON_RUN_AS_NODE: "1",
+    NODE_ENV: "development",
+    [["PKI", "BUILD", "KIND"].join("_")]: "development",
+    ELECTRON_IS_DEV: "1",
+    DEBUG: "*",
+  };
+  const dataDir = resolveDataDirectory({ platform: process.platform, home, env });
+  return { env, dataDir };
+}
 
-  const app = await _electron.launch({
-    executablePath: ELECTRON,
-    args: [
-      APP_DIR,
-      `--user-data-dir=${join(dir, "chromium")}`,
-      `--pki-user-data=${switched.userData}`,
-      `--pki-data-dir=${switched.dataDir}`,
-      `--pki-fixtures=${join(FIXTURES, "test-connector.jsonl")}`,
-    ],
-    env: {
-      ...(process.env as Record<string, string>),
-      HOME: home,
-      XDG_DATA_HOME: xdg,
-      PATH: `${cli.bin}:${process.env.PATH ?? ""}`,
-      NODE_ENV: "development",
-      [["PKI", "BUILD", "KIND"].join("_")]: "development",
-      ELECTRON_IS_DEV: "1",
-      DEBUG: "*",
-    },
+function startBackend(args: string[], env: Record<string, string>) {
+  const child = fork(BACKEND, args, { execPath: ELECTRON, env, stdio: "pipe" });
+  child.on("error", () => undefined); // a send after a refused start: the exit decides
+  let stderr = "";
+  child.stderr?.on("data", (d: Buffer) => (stderr += d.toString()));
+  const exited = new Promise<number | null>((r) => child.once("exit", (code) => r(code)));
+  return { child, exited, stderr: () => stderr };
+}
+
+function ready(child: ChildProcess, token: string): Promise<number> {
+  return new Promise((resolvePort, reject) => {
+    child.on("message", (m: { type?: string; port?: number }) => {
+      if (m.type === "ready" && m.port) resolvePort(m.port);
+      if (m.type === "failed") reject(new Error("backend failed"));
+    });
+    child.once("exit", (code) => reject(new Error(`backend exited (${code})`)));
+    child.send({ type: "start", token });
   });
+}
+
+test("the built backend blocks an unlisted CLI in a development-looking setting", async () => {
+  test.skip(process.platform === "win32", "the fake CLI is a shell script (T10 1)");
+  test.setTimeout(60_000);
+  const { env, dataDir } = environment();
+  const token = randomBytes(32).toString("base64url");
+  const backend = startBackend(["--origin", "app://pki"], env);
   try {
-    const page = await app.firstWindow();
-    // the screens and the backend of the app folder answer
-    await expect(page.getByRole("navigation")).toBeVisible();
-    const settings = await api(page, "/api/settings");
-    expect(settings.status).toBe(200);
-    expect((settings.body as { dataDirectory: string }).dataDirectory).toBe(dataDir);
-
-    // no test Connector: the site kinds only
-    const connectors = (await api(page, "/api/connectors")).body as {
-      connectors: { id: string }[];
+    const port = await ready(backend.child, token);
+    const headers = {
+      host: `127.0.0.1:${port}`,
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
     };
-    expect(connectors.connectors.map((c) => c.id).sort()).toEqual([
+    const api = (path: string, body?: unknown) =>
+      send(port, path, headers, body === undefined ? "GET" : "POST", body);
+
+    expect((await api("/api/settings")).body).toMatchObject({ dataDirectory: dataDir });
+    // no test Connector: the site kinds only
+    const { connectors } = (await api("/api/connectors")).body as { connectors: { id: string }[] };
+    expect(connectors.map((c) => c.id).sort()).toEqual([
       "site-mail",
       "site-messenger",
       "site-wiki",
     ]);
 
     // a configuration a development build would run: the CLI, consented, background on
-    expect((await api(page, "/api/providers/default", { providerId: "claude-code" })).status).toBe(
-      200,
-    );
-    const overview = (await api(page, "/api/consents")).body as {
+    expect((await api("/api/providers/default", { providerId: "claude-code" })).status).toBe(200);
+    const overview = (await api("/api/consents")).body as {
       policyVersion: string;
       providers: { providerId: string; destination: string | null }[];
     };
     const shown = overview.providers.find((p) => p.providerId === "claude-code");
-    const granted = await api(page, "/api/consents", {
+    const granted = await api("/api/consents", {
       providerId: "claude-code",
       allowedClasses: ["synthetic", "general"],
       destination: shown?.destination ?? "",
       policyVersion: overview.policyVersion,
     });
     expect(granted.status).toBe(200);
-    expect((await api(page, "/api/settings/execution", { cliBackground: true })).body).toEqual({
+    expect((await api("/api/settings/execution", { cliBackground: true })).body).toEqual({
       cliBackground: true,
     });
 
-    // the user's call, the unverified warning acknowledged
-    expect((await api(page, "/api/connection-test", { acknowledgeUnverified: true })).body).toEqual(
-      { outcome: "blocked", reason: "cli-not-verified", isolation: null },
-    );
+    // the user's call on the fixed synthetic material, the unverified warning acknowledged
+    expect((await api("/api/connection-test", { acknowledgeUnverified: true })).body).toEqual({
+      outcome: "blocked",
+      reason: "cli-not-verified",
+      isolation: null,
+    });
 
     // the background call: an import registers extraction jobs the runner calls
-    const imported = await api(page, "/api/import/jsonl", {
+    const imported = await api("/api/import/jsonl", {
       text: readFileSync(join(FIXTURES, "v02-mail.jsonl"), "utf8"),
     });
     expect(imported.status).toBe(200);
     await expect
       .poll(async () => {
-        const { calls } = (await api(page, "/api/activity")).body as {
+        const { calls } = (await api("/api/activity")).body as {
           calls: { taskKind: string; outcome: string; reason: string | null }[];
         };
         return calls.filter((c) => c.taskKind === "extract").map((c) => [c.outcome, c.reason]);
       })
       .toContainEqual(["blocked", "cli-not-verified"]);
-
     expect(cli.modelCalls()).toBe(0);
   } finally {
-    await app.close();
+    if (backend.child.connected) backend.child.send({ type: "stop" });
+    expect(await backend.exited).toBe(0);
   }
-  // the switches pointed nowhere the app wrote
-  expect(existsSync(switched.userData)).toBe(false);
-  expect(existsSync(switched.dataDir)).toBe(false);
   expect(existsSync(join(dataDir, "pki.sqlite"))).toBe(true);
+});
+
+test.describe("the built backend takes no switch", () => {
+  for (const [flag, value] of [
+    ["--fixtures", join(FIXTURES, "test-connector.jsonl")],
+    ["--data-dir", "switch-data"],
+  ] as const) {
+    test(`${flag} stops it before it is ready`, async () => {
+      const { env, dataDir } = environment();
+      const target = value === "switch-data" ? join(dir, value) : value;
+      const backend = startBackend(["--origin", "app://pki", flag, target], env);
+      await expect(ready(backend.child, randomBytes(32).toString("base64url"))).rejects.toThrow(
+        /exited|failed/,
+      );
+      expect(await backend.exited).not.toBe(0);
+      expect(existsSync(join(dir, "switch-data"))).toBe(false);
+      expect(existsSync(join(dataDir, "pki.sqlite"))).toBe(false);
+    });
+  }
 });

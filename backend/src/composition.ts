@@ -203,8 +203,11 @@ export function productCalls(
     userActions: ledger.redeemer,
     candidates: knowledgeCandidates(db),
     egress,
+    // the pick reaches the gate in a test build only; folded away from any other
     execution: createExecutionGate(
-      options.testBuild === undefined ? { db } : { db, testBuild: options.testBuild },
+      BUILD_KIND === "test" && options.testBuild !== undefined
+        ? { db, testBuild: options.testBuild }
+        : { db },
     ),
     recorder: createCallRecorder(db),
   });
@@ -317,7 +320,13 @@ export function productConnectors(): ConnectorSet {
 
 /** A source run's (development and tests): the product's plus the test Connector replaying `file`. */
 export function fixtureConnectors(file: string): ConnectorSet {
-  return { instances: connectorInstances(file), kinds: fixtureConnectorKinds() };
+  return {
+    instances: [
+      { id: "fixtures", kind: "test-fixtures", config: { file } },
+      ...connectorInstances(),
+    ],
+    kinds: fixtureConnectorKinds(),
+  };
 }
 
 /**
@@ -348,16 +357,7 @@ export function openCanonicalDb(dir: string = dataDirectory()): SqlDriver {
   return db;
 }
 
-/**
- * One instance per site kind (listed as not implemented), plus the test
- * Connector when a synthetic fixtures file is given (development and tests; its
- * kind is in fixtureConnectorKinds() only).
- */
-export function connectorInstances(fixturesFile?: string): ConnectorInstanceConfig[] {
-  return [
-    ...(fixturesFile
-      ? [{ id: "fixtures", kind: "test-fixtures", config: { file: fixturesFile } }]
-      : []),
-    ...SITE_CONNECTOR_KINDS.map((kind) => ({ id: kind, kind, config: {} })),
-  ];
+/** One instance per site kind, listed as not implemented. */
+export function connectorInstances(): ConnectorInstanceConfig[] {
+  return SITE_CONNECTOR_KINDS.map((kind) => ({ id: kind, kind, config: {} }));
 }

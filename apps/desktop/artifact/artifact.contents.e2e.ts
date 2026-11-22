@@ -51,7 +51,8 @@ test("no bundle kept a test-only, development-only or source-run module", () => 
       (m) =>
         m.startsWith("packages/testkit/") ||
         m.startsWith("apps/desktop/e2e/") ||
-        /\.(test|e2e)\.[cm]?[jt]sx?$/.test(m) ||
+        /\.(test|e2e|setup)\.[cm]?[jt]sx?$/.test(m) ||
+        /(^|\/)e2e\//.test(m) ||
         [
           "backend/src/v02-seed.e2e.ts",
           "backend/src/dev.ts",
@@ -98,6 +99,7 @@ test("no file the build wrote carries a double, a test switch or the build value
     "FakeEmbedder",
     "fixtureExtraction",
     "MemoryKnowledgeEngine",
+    "ProposingKnowledgeEngine",
   ];
   const files = ownFiles();
   expect(files.length).toBeGreaterThan(4);

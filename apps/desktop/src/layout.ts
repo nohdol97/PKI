@@ -3,13 +3,17 @@
 // the backend run from its TypeScript source, and the development and test
 // switches --pki-data-dir (the canonical DB folder) and --pki-fixtures (the test
 // Connector's synthetic JSONL). The production build bundles layout.production.ts
-// in place of this module (apps/desktop/build/bundle.ts, V01-T15).
+// in place of this module (apps/desktop/build/bundle.ts, V01-T15), which also
+// refuses the debugging switches (debugging.ts).
 import { fileURLToPath } from "node:url";
 
 export const WEB_ROOT = fileURLToPath(new URL("../../web/dist/", import.meta.url));
 export const BACKEND_ENTRY = fileURLToPath(
   new URL("../../../backend/src/shell.ts", import.meta.url),
 );
+
+/** Source runs keep the debugging switches: Playwright drives the shell through them. */
+export const REFUSE_DEBUGGING: boolean = false;
 
 export interface Switches {
   dataDir?: string | undefined;

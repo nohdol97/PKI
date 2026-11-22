@@ -7,7 +7,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { connectorInstances, fixtureConnectorKinds, openCanonicalDb } from "./composition.ts";
+import {
+  connectorInstances,
+  fixtureConnectorKinds,
+  fixtureConnectors,
+  openCanonicalDb,
+} from "./composition.ts";
 import { createConnectorManager, EXTRACT_JOB_KIND, syncConnector } from "./connectors.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures/test-connector.jsonl");
@@ -58,7 +63,7 @@ describe("sync of the test Connector", () => {
   it("stores every fixture once and does not grow when re-run", async () => {
     const manager = await createConnectorManager(
       db,
-      connectorInstances(FIXTURES),
+      fixtureConnectors(FIXTURES).instances,
       fixtureConnectorKinds(),
     );
     const first = await manager.sync("fixtures");
@@ -76,7 +81,7 @@ describe("sync of the test Connector", () => {
   it("creates no versions on a full rescan of unchanged content (content hash)", async () => {
     const manager = await createConnectorManager(
       db,
-      connectorInstances(FIXTURES),
+      fixtureConnectors(FIXTURES).instances,
       fixtureConnectorKinds(),
     );
     await manager.sync("fixtures");
@@ -104,7 +109,7 @@ describe("sync of the test Connector", () => {
   it("makes the synced records keyword-searchable", async () => {
     const manager = await createConnectorManager(
       db,
-      connectorInstances(FIXTURES),
+      fixtureConnectors(FIXTURES).instances,
       fixtureConnectorKinds(),
     );
     await manager.sync("fixtures");

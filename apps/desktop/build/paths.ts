@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-export const DIST_DIR = resolve(import.meta.dirname, "../dist");
+const DIST_DIR = resolve(import.meta.dirname, "../dist");
 /** The Electron app folder R04 packages. */
 export const APP_DIR = join(DIST_DIR, "app");
 /** Outside the app folder: not shipped. */

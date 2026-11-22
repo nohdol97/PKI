@@ -8,11 +8,11 @@
 // 3. the shell's main and the backend's shell entry, bundled (bundle.ts)
 // 4. the runtime packages the bundles leave external (runtime-packages.ts)
 // 5. the report: the modules each bundle kept and the packages copied
-import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { bundle, EXTERNAL_PACKAGES, REPO_ROOT } from "./bundle.ts";
-import { APP_DIR, DIST_DIR, REPORT_FILE, type BuildReport } from "./paths.ts";
+import { APP_DIR, REPORT_FILE, type BuildReport } from "./paths.ts";
+import { pnpm } from "./pnpm.ts";
 import { copyRuntimePackages, planRuntimePackages } from "./runtime-packages.ts";
 
 const DESKTOP = resolve(import.meta.dirname, "..");
@@ -22,22 +22,24 @@ const DECLARED_IN: Record<(typeof EXTERNAL_PACKAGES)[number], string> = {
   "@huggingface/transformers": join(REPO_ROOT, "providers"),
 };
 
-const pnpm = (...args: string[]) =>
-  execFileSync("pnpm", args, { cwd: REPO_ROOT, stdio: "inherit" });
-
-rmSync(DIST_DIR, { recursive: true, force: true });
+// only what this build writes: dist/ also holds tsc's declaration output (review B-F10)
+rmSync(APP_DIR, { recursive: true, force: true });
+rmSync(REPORT_FILE, { force: true });
 mkdirSync(APP_DIR, { recursive: true });
 
-pnpm("--filter", "@pki/providers", "check:synthetic-manifest");
+pnpm(["--filter", "@pki/providers", "check:synthetic-manifest"], REPO_ROOT);
 pnpm(
-  "--filter",
-  "@pki/web",
-  "exec",
-  "vite",
-  "build",
-  "--outDir",
-  join(APP_DIR, "web"),
-  "--emptyOutDir",
+  [
+    "--filter",
+    "@pki/web",
+    "exec",
+    "vite",
+    "build",
+    "--outDir",
+    join(APP_DIR, "web"),
+    "--emptyOutDir",
+  ],
+  REPO_ROOT,
 );
 
 const bundles: BuildReport["bundles"] = {};

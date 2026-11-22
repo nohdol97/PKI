@@ -17,6 +17,7 @@ import {
   REPO_ROOT,
   TEST_PICK_MARKERS,
 } from "./bundle.ts";
+import { pnpmCommand } from "./pnpm.ts";
 import { planRuntimePackages } from "./runtime-packages.ts";
 
 const out = mkdtempSync(join(tmpdir(), "pki-bundle-test-"));
@@ -77,9 +78,11 @@ describe("folding a production bundle", () => {
     expect(code).toContain("cli-not-verified");
   });
 
-  it("keeps both in a development and a test bundle (the markers are the right ones)", async () => {
+  it("keeps the exception in a development bundle and the pick in a test bundle only", async () => {
     const dev = await bundled(gateEntry(), "development");
     for (const marker of DEVELOPMENT_EXCEPTION_MARKERS) expect(dev.code).toContain(marker);
+    // R10: the test build's pick is in a test bundle only, not a development one (A-F2)
+    for (const marker of TEST_PICK_MARKERS) expect(dev.code, marker).not.toContain(marker);
     const test = await bundled(gateEntry(), "test");
     for (const marker of TEST_PICK_MARKERS) expect(test.code).toContain(marker);
   });
@@ -105,6 +108,12 @@ describe("build check", () => {
     "backend/src/boot.test.ts",
     "apps/web/e2e/screens.e2e.ts",
     "apps/web/src/evidence-view.test.tsx",
+    // by the patterns, whatever later tasks add (V02-T11's doubles and shell entry)
+    "backend/src/v02-double.e2e.ts",
+    "backend/src/v02-double.hook.e2e.ts",
+    "backend/src/v02-shell.e2e.ts",
+    "apps/desktop/e2e/double-main.ts",
+    "apps/web/e2e/helpers/anything.ts",
     ...Object.keys(REPLACEMENTS),
   ])("refuses %s", (path) => {
     expect(forbiddenReason(join(REPO_ROOT, path))).toBeTypeOf("string");
@@ -190,5 +199,26 @@ describe("runtime packages", () => {
     expect(() => planRuntimePackages([{ name: "b", from: join(root, "b") }], "/x")).toThrow(
       /c .*not found/,
     );
+  });
+});
+
+describe("pnpm command (no shell)", () => {
+  it("runs pnpm's JavaScript entry on this Node", () => {
+    expect(pnpmCommand({ npm_execpath: "/x/pnpm.cjs" }, "win32")).toEqual({
+      file: process.execPath,
+      args: ["/x/pnpm.cjs"],
+    });
+  });
+
+  it("runs an executable entry as it is", () => {
+    expect(pnpmCommand({ npm_execpath: "C:\\pnpm\\pnpm.exe" }, "win32")).toEqual({
+      file: "C:\\pnpm\\pnpm.exe",
+      args: [],
+    });
+  });
+
+  it("looks pnpm up on PATH elsewhere, and refuses on Windows without an entry", () => {
+    expect(pnpmCommand({}, "darwin")).toEqual({ file: "pnpm", args: [] });
+    expect(() => pnpmCommand({}, "win32")).toThrow(/through pnpm/);
   });
 });

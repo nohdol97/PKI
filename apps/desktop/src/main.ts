@@ -6,7 +6,8 @@
 // secret store (safeStorage ciphertext in the data directory) and answers the
 // backend's requests for a secret over the parent channel.
 // Switches of source runs (development and tests): --pki-data-dir, --pki-fixtures
-// (layout.ts); the production build has none. Tests move userData with
+// (layout.ts); the production build has none and refuses to start with a
+// debugging switch (debugging.ts). Tests move userData with
 // Chromium's own --user-data-dir (V01-T15).
 import {
   app,
@@ -20,6 +21,7 @@ import {
   utilityProcess,
 } from "electron";
 import { dataDirectory } from "@pki/storage";
+import { url as inspectorUrl } from "node:inspector";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_ORIGIN, APP_SCHEME, createAppHandler } from "./app-protocol.ts";
@@ -27,7 +29,8 @@ import { startBackendProcess, type ForkBackend } from "./backend-process.ts";
 import { superviseBackend, type Supervisor } from "./backend-supervisor.ts";
 import { BRIDGE, createBridgeHandlers, type BridgeFunction } from "./bridge.ts";
 import { createSecretStore, electronCipher } from "./secret-store.ts";
-import { BACKEND_ENTRY, switches, WEB_ROOT } from "./layout.ts";
+import { debuggingRequested } from "./debugging.ts";
+import { BACKEND_ENTRY, REFUSE_DEBUGGING, switches, WEB_ROOT } from "./layout.ts";
 import { lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
@@ -137,8 +140,21 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 
-// The single-instance lock lives in userData (Chromium's --user-data-dir moves both).
-if (!app.requestSingleInstanceLock()) {
+const debugging =
+  REFUSE_DEBUGGING &&
+  debuggingRequested({
+    hasSwitch: (name) => app.commandLine.hasSwitch(name),
+    execArgv: process.execArgv,
+    nodeOptions: process.env.NODE_OPTIONS,
+    inspectorActive: inspectorUrl() !== undefined,
+  });
+
+if (debugging) {
+  // before the window and the backend exist: nothing to reach through the door
+  console.error("PKI: refusing to start with a debugging switch");
+  app.exit(1);
+} else if (!app.requestSingleInstanceLock()) {
+  // The single-instance lock lives in userData (Chromium's --user-data-dir moves both).
   app.exit(0);
 } else {
   app.on("web-contents-created", (_event, contents) => lockDown(contents));

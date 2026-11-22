@@ -27,6 +27,8 @@ export const REPLACEMENTS: Readonly<Record<string, string>> = {
 const FORBIDDEN_PREFIXES = ["packages/testkit/", "apps/desktop/e2e/", "apps/desktop/artifact/"];
 const FORBIDDEN_FILES = ["backend/src/v02-seed.e2e.ts", "backend/src/dev.ts"];
 const TEST_FILE = /\.(test|e2e|setup)\.[cm]?[jt]sx?$/;
+/** Any `e2e/` folder: E2E code and its helpers, whatever their file names. */
+const E2E_FOLDER = /(^|\/)e2e\//;
 /** Reached through the composition root's static import; must not survive tree-shaking. */
 export const DROPPED_MODULES = ["backend/src/adapters/fixture-connector.ts"] as const;
 
@@ -37,8 +39,8 @@ export const DEVELOPMENT_EXCEPTION_MARKERS = [
   "unverified-not-synthetic",
   "unverified-malicious",
 ] as const;
-/** What only the test build's pick has (execution-gate.ts). */
-export const TEST_PICK_MARKERS = ["testBuildDecision"] as const;
+/** What only the test build's pick has (execution-gate.ts, and its forwarding in composition.ts). */
+export const TEST_PICK_MARKERS = ["testBuildDecision", "testBuild"] as const;
 
 const repoPath = (id: string) => relative(REPO_ROOT, id).split(sep).join("/");
 
@@ -50,6 +52,7 @@ export function forbiddenReason(id: string): string | undefined {
     return `${path} is a test-only module`;
   }
   if (TEST_FILE.test(path)) return `${path} is a test-only module (file name)`;
+  if (E2E_FOLDER.test(path)) return `${path} is a test-only module (e2e folder)`;
   if (Object.hasOwn(REPLACEMENTS, path)) return `${path} is a test-only module (source runs)`;
   return undefined;
 }

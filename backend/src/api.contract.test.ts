@@ -19,8 +19,8 @@ import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FakeProvider, ProposingKnowledgeEngine, send } from "@pki/testkit";
 import {
-  connectorInstances,
   fixtureConnectorKinds,
+  fixtureConnectors,
   productAdapters,
   productCalls,
   productEgress,
@@ -141,7 +141,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     const connectors = await createConnectorManager(
       db,
       [
-        ...connectorInstances(FIXTURES),
+        ...fixtureConnectors(FIXTURES).instances,
         { id: "broken", kind: "failing", config: { file: FIXTURES } },
       ],
       { ...fixtureConnectorKinds(), failing },
