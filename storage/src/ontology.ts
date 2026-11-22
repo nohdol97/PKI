@@ -12,13 +12,25 @@
 // A name can come from a source, so no refusal and no history line carries one: a refusal holds
 // counts and fixed codes, a history line numbers and codes (R6). The duplicates a check reports
 // name the stored element, as the spec's `OntologyCheck` does, and are not copied into a refusal.
-import { RESERVED_NAMES } from "@pki/contracts";
+import {
+  DATA_CHECK_NAMES,
+  FACT_VALUE_TYPES,
+  RESERVED_NAMES,
+  type DataCheckName,
+  type FactValueType,
+} from "@pki/contracts";
+import {
+  ANALYTICAL_VALUE_TYPES,
+  REQUIRED_DATA_CHECKS,
+  normalizeValue,
+  type AnalyticalValueType,
+} from "./analytical-types.ts";
 import type { KnowledgeStatus } from "./knowledge.ts";
 import type { Actor, Basis } from "./semantic-lifecycle.ts";
 import type { SqlDriver, SqlRow } from "./sql-driver.ts";
 
 export type ElementKind = "item-type" | "fact-kind" | "relation-type";
-export type ValueType = "date" | "text" | "surface-form" | "identifier";
+export type ValueType = FactValueType;
 /** Where a definition came from (S02-R3): written when it is made and never changed. */
 export type ElementOrigin = "seed" | "user" | "source-proposed";
 export type Cardinality = "one" | "many";
@@ -29,6 +41,8 @@ export type ElementRule =
       itemTypes: readonly string[];
       valueType: ValueType;
       cardinality: Cardinality;
+      /** S03-R13: the checks a row of this kind needs before it can be `verified`; absent or empty means none. */
+      dataChecks?: readonly DataCheckName[] | undefined;
     }
   | {
       elementKind: "relation-type";
@@ -169,7 +183,7 @@ export function readOntologyHistory(db: SqlDriver, id: number): OntologyHistoryL
 
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.]{0,39}$/;
 const KINDS: readonly ElementKind[] = ["item-type", "fact-kind", "relation-type"];
-const VALUE_TYPES: readonly string[] = ["date", "text", "surface-form", "identifier"];
+const VALUE_TYPES: readonly string[] = FACT_VALUE_TYPES;
 const CARDINALITIES: readonly string[] = ["one", "many"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const LIVE = "status NOT IN ('rejected', 'superseded')";
@@ -189,7 +203,11 @@ export const isDate = (value: string): boolean => {
  * and value fix both use it, so the two paths accept and reject the same values.
  */
 export const valueFits = (valueType: ValueType, value: string): boolean =>
-  valueType === "date" ? isDate(value) : value.trim() !== "";
+  valueType === "date"
+    ? isDate(value)
+    : (ANALYTICAL_VALUE_TYPES as readonly string[]).includes(valueType)
+      ? normalizeValue(valueType as AnalyticalValueType, value) !== null
+      : value.trim() !== "";
 
 /**
  * The same check for a fact kind by name, reading the `verified` type definitions: `unregistered`
@@ -224,6 +242,29 @@ function typeListErrors(db: SqlDriver, list: unknown, invalid: string, errors: S
   }
 }
 
+/**
+ * `dataChecks` against the value type (S03-R13): the list is of known names without a repeat, holds every
+ * check the value type requires and none it does not allow. The value type decides, so a kind a user adds
+ * with a calculation-shaped value cannot go without the checks.
+ */
+function dataCheckErrors(rule: Record<string, unknown>, errors: Set<string>): void {
+  const given = rule.dataChecks;
+  if (given !== undefined) {
+    const valid =
+      Array.isArray(given) &&
+      given.every((c) => (DATA_CHECK_NAMES as readonly unknown[]).includes(c)) &&
+      new Set(given).size === given.length;
+    if (!valid) return void errors.add("data-checks-invalid");
+  }
+  if (!VALUE_TYPES.includes(rule.valueType as string)) return;
+  const list = (given ?? []) as readonly DataCheckName[];
+  const need = REQUIRED_DATA_CHECKS[rule.valueType as FactValueType];
+  const required = need?.required ?? [];
+  const allowed = [...required, ...(need?.optional ?? [])];
+  if (!required.every((c) => list.includes(c))) errors.add("data-checks-missing");
+  if (!list.every((c) => allowed.includes(c))) errors.add("data-checks-not-allowed");
+}
+
 /** The shape of a rule of `kind` (R19 step 2). `rule` is untrusted: it may come from JSON. */
 function ruleErrors(db: SqlDriver, kind: ElementKind, rule: unknown, errors: Set<string>): void {
   if (!isObject(rule)) return void errors.add("rule-malformed");
@@ -232,10 +273,16 @@ function ruleErrors(db: SqlDriver, kind: ElementKind, rule: unknown, errors: Set
   if (kind === "item-type") {
     if (keys !== "elementKind") errors.add("rule-malformed");
   } else if (kind === "fact-kind") {
-    if (keys !== "cardinality,elementKind,itemTypes,valueType") errors.add("rule-malformed");
+    if (
+      keys !== "cardinality,elementKind,itemTypes,valueType" &&
+      keys !== "cardinality,dataChecks,elementKind,itemTypes,valueType"
+    ) {
+      errors.add("rule-malformed");
+    }
     typeListErrors(db, rule.itemTypes, "item-types-invalid", errors);
     if (!VALUE_TYPES.includes(rule.valueType as string)) errors.add("value-type-invalid");
     if (!CARDINALITIES.includes(rule.cardinality as string)) errors.add("cardinality-invalid");
+    dataCheckErrors(rule, errors);
   } else {
     if (keys !== "elementKind,objectTypes,subjectTypes,symmetric") errors.add("rule-malformed");
     typeListErrors(db, rule.subjectTypes, "subject-types-invalid", errors);
@@ -254,6 +301,10 @@ export function canonicalRule(rule: ElementRule): ElementRule {
       itemTypes: sortedUnique(rule.itemTypes),
       valueType: rule.valueType,
       cardinality: rule.cardinality,
+      // an empty list is no list: the stored form of a kind without checks stays what S01 and S02 stored
+      ...(rule.dataChecks && rule.dataChecks.length > 0
+        ? { dataChecks: sortedUnique(rule.dataChecks) as DataCheckName[] }
+        : {}),
     };
   }
   return {
@@ -349,8 +400,7 @@ function factViolations(
   );
   const misfits = rows.filter(
     (r) =>
-      !rule.itemTypes.includes(r.type as string) ||
-      (rule.valueType === "date" && !isDate(r.value as string)),
+      !rule.itemTypes.includes(r.type as string) || !valueFits(rule.valueType, r.value as string),
   ).length;
   const crowded =
     rule.cardinality === "one"
