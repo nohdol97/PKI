@@ -21,6 +21,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
+import { setStatusForTest } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { propagateNewVersion } from "./propagation.ts";
 import { purgeSource as deleteSource } from "./purge.test-support.ts";
@@ -203,7 +204,7 @@ describe("deleteSource", () => {
     }).id;
     cite({ factId: rejected }, b1.id, "완료 12-10");
     cite({ factId: rejected }, a1.id, "완료 12-10");
-    db.run("UPDATE facts SET status = 'rejected' WHERE id = ?", [rejected]);
+    setStatusForTest(db, "fact", rejected, "rejected");
     version("b", "완료 12-12");
     propagateNewVersion(db, b1.sourceId);
     expect(db.all("SELECT status FROM facts WHERE id = ?", [f])).toEqual([{ status: "candidate" }]);
@@ -216,6 +217,16 @@ describe("deleteSource", () => {
     ]);
     expect(db.all("SELECT status FROM relations WHERE id = ?", [r])).toEqual([
       { status: "superseded" },
+    ]);
+    // the history line rests on the deleted source and the version its tombstone covers (S01-R6)
+    expect(
+      db.all(
+        "SELECT actor, basis_source_id, basis_version, at FROM fact_history WHERE fact_id = ?",
+        [f],
+      ),
+    ).toEqual([
+      // the line's time is the propagation's own (the deletion's request time), not the clock's
+      { actor: "propagation", basis_source_id: a1.sourceId, basis_version: 1, at: AT },
     ]);
   });
 

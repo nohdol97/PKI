@@ -36,6 +36,7 @@ import {
   fixtureExtraction,
   MemoryKnowledgeEngine,
   ProposingKnowledgeEngine,
+  setStatusForTest,
   type FakeStep,
 } from "@pki/testkit";
 import type { KnowledgeCandidate } from "@pki/contracts";
@@ -50,6 +51,7 @@ import {
   type ExtractHandlerOptions,
 } from "./extraction.ts";
 import { findCandidates, knowledgeCandidates } from "./linking.ts";
+import { propagateNewVersion } from "./propagation.ts";
 import { purgeSource } from "./purge.test-support.ts";
 
 const fixtures = resolve(import.meta.dirname, "../../fixtures");
@@ -800,5 +802,134 @@ describe("egress.derived-grade: a derivative input is graded by its registered l
     });
     expect(result).toEqual({ status: "rejected", reason: "unregistered-derivative" });
     expect(provider.requests).toHaveLength(before);
+  });
+});
+
+describe("semantic history of an extraction (S01-T01: lifecycle.history, epistemic.changes)", () => {
+  const Q1 = "미리내 프로젝트의 완료 목표는 2026-12-05입니다";
+  const answer = (epistemic: "explicit" | "hypothesis", existing: string | null = null): FakeStep =>
+    output({
+      items: [{ ref: "a", type: "Project", name: "미리내 프로젝트", existingItemId: existing }],
+      facts: [{ item: "a", kind: "target_date", value: "2026-12-05", epistemic, quote: Q1 }],
+    });
+  const historyOf = (table: string, fk: string, id: number) =>
+    db.all(`SELECT * FROM ${table} WHERE ${fk} = ? ORDER BY seq`, [id]);
+  const factLines = () => historyOf("fact_history", "fact_id", (facts()[0] as { id: number }).id);
+
+  it("writes a creation line for every item, fact and relation it makes: actor extraction, this version as basis", async () => {
+    const dependsOn = "미리내 프로젝트는 물결 API에 의존한다";
+    setUp([
+      output({
+        items: [
+          { ref: "a", type: "Project", name: "미리내 프로젝트", existingItemId: null },
+          { ref: "b", type: "System", name: "물결 API", existingItemId: null },
+        ],
+        facts: [
+          { item: "a", kind: "target_date", value: "2026-12-05", epistemic: "explicit", quote: Q1 },
+        ],
+        relations: [{ subject: "a", type: DEPENDS_ON, object: "b", quote: dependsOn }],
+      }),
+    ]);
+    const job = imported({ id: "doc", title: "t", content: `${Q1}\n${dependsOn}` });
+    await runNext();
+    const basis = { basis_source_id: job.sourceId, basis_version: job.fenceVersion };
+    for (const [table, fk, rows] of [
+      ["item_history", "item_id", db.all("SELECT id FROM items")],
+      ["fact_history", "fact_id", db.all("SELECT id FROM facts")],
+      ["relation_history", "relation_id", db.all("SELECT id FROM relations")],
+    ] as const) {
+      expect(rows.length, table).toBeGreaterThan(0);
+      for (const { id } of rows) {
+        expect(historyOf(table, fk, id as number), `${table} ${id}`).toMatchObject([
+          {
+            seq: 1,
+            actor: "extraction",
+            action: "created",
+            from_status: null,
+            to_status: "candidate",
+            ...basis,
+          },
+        ]);
+      }
+    }
+  });
+
+  it("writes no line when the same row only gains evidence", async () => {
+    setUp([answer("explicit"), answer("explicit", "1")]);
+    imported({ id: "a", title: "t", content: Q1 });
+    imported({ id: "b", title: "t", content: `다시: ${Q1}` });
+    await runNext();
+    await runNext();
+    expect(listEvidence(db, { factId: (facts()[0] as { id: number }).id })).toHaveLength(2);
+    expect(factLines()).toHaveLength(1);
+  });
+
+  it("lifts a hypothesis fact to explicit when a later source states it as explicit, and leaves it explicit when a third states hypothesis", async () => {
+    setUp([answer("hypothesis"), answer("explicit", "1"), answer("hypothesis", "1")]);
+    imported({ id: "a", title: "t", content: Q1 });
+    imported({ id: "b", title: "t", content: `다시: ${Q1}` });
+    imported({ id: "c", title: "t", content: `또: ${Q1}` });
+    await runNext();
+    expect(db.all("SELECT epistemic FROM facts")).toEqual([{ epistemic: "hypothesis" }]);
+    await runNext();
+    expect(db.all("SELECT epistemic, status FROM facts")).toEqual([
+      { epistemic: "explicit", status: "candidate" },
+    ]);
+    expect(factLines()).toMatchObject([
+      { seq: 1, action: "created", to_epistemic: "hypothesis" },
+      {
+        seq: 2,
+        actor: "extraction",
+        action: "explicit-evidence",
+        from_epistemic: "hypothesis",
+        to_epistemic: "explicit",
+      },
+    ]);
+    await runNext();
+    expect(db.all("SELECT epistemic FROM facts")).toEqual([{ epistemic: "explicit" }]);
+    expect(factLines()).toHaveLength(2); // the hypothesis statement lowered nothing and wrote nothing
+  });
+
+  it("restores a fact a new version superseded to the state it had, not to candidate (V02-R11, S01-R5)", async () => {
+    setUp([answer("explicit"), output({}), answer("explicit", "1")]);
+    const first = imported({ id: "doc", title: "t", content: Q1 });
+    await runNext();
+    const fact = facts()[0] as { id: number };
+    setStatusForTest(db, "fact", fact.id, "verified");
+    imported({ id: "doc", title: "t", content: "이제 날짜가 없다" });
+    propagateNewVersion(db, first.sourceId as number);
+    expect(db.all("SELECT status FROM facts")).toEqual([{ status: "superseded" }]);
+    await runNext();
+    imported({ id: "doc", title: "t", content: Q1 });
+    await runNext();
+    expect(db.all("SELECT status, epistemic FROM facts")).toEqual([
+      { status: "verified", epistemic: "explicit" },
+    ]);
+    const lines = factLines();
+    expect(lines.map((l) => [l.actor, l.action, l.from_status, l.to_status])).toEqual([
+      ["extraction", "created", null, "candidate"],
+      ["user", "test-set", "candidate", "verified"],
+      ["propagation", "supersede", "verified", "superseded"],
+      ["extraction", "evidence-returned", "superseded", "verified"],
+    ]);
+    // the supersede rests on the new version of the source, the restore on the version that returned it
+    expect(lines[2]).toMatchObject({ basis_source_id: first.sourceId, basis_version: 2 });
+    // the extraction's lines carry the handler's clock (T0); propagateNewVersion has none of its own
+    expect(lines[0]?.at).toBe(T0.toISOString());
+    expect(lines[3]?.at).toBe(T0.toISOString());
+    expect(lines[3]).toMatchObject({ basis_source_id: first.sourceId, basis_version: 3 });
+  });
+
+  it("does not restore a fact the user superseded when its evidence returns", async () => {
+    setUp([answer("explicit"), answer("explicit", "1")]);
+    imported({ id: "doc", title: "t", content: Q1 });
+    await runNext();
+    const fact = facts()[0] as { id: number };
+    setStatusForTest(db, "fact", fact.id, "superseded"); // the actor is the user (a value fix)
+    imported({ id: "other", title: "t", content: `다른 곳: ${Q1}` });
+    await runNext();
+    expect(db.all("SELECT status FROM facts")).toEqual([{ status: "superseded" }]);
+    expect(listEvidence(db, { factId: fact.id })).toHaveLength(2);
+    expect(factLines().at(-1)).toMatchObject({ action: "test-set" });
   });
 });
