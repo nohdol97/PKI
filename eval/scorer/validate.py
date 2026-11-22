@@ -24,7 +24,7 @@ RECORD_FIELDS = [
     "source_url", "created_at", "updated_at", "content_hash", "version", "access_scope", "metadata",
     "connector_instance_id", "operation", "schema_version",
 ]
-OPERATIONS = {"upsert", "delete", "revoke"}
+OPERATIONS = {"upsert", "delete", "revoke", "access-revoked"}
 
 # Design section 7
 ENTITY_TYPES = {

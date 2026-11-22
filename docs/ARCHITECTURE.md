@@ -387,7 +387,7 @@ interface ChangeSet { changes: Change[]; nextCursor: string; hasMore: boolean; c
 
 원본의 정체는 `connector_instance_id + namespace + external_id`다. namespace는 한 인스턴스 안에서 원본 식별자가 유일한 범위(위키 공간, 편지함)이고, 범위가 하나면 빈 문자열이다. 인스턴스 ID는 레코드가 아니라 관리 모듈이 동기화하는 인스턴스에서 붙는다. content hash는 한 원본 안에서 새 version을 만들지 판단하는 데만 쓴다. 내용이 같아도 출처·권한·시점이 다르면 따로 보존한다(이슈 #1 설계 분석 2번). `revision`은 원 시스템이 매긴 개정 번호로 도착 순서를 가리는 데만 쓰고, 제품의 version 번호와 섞지 않는다. Connector는 데이터 등급을 정하지 못한다. access_scope를 채울 뿐이고 등급은 Broker가 계산한다. block의 locator는 I02의 위치표와 같은 모양이다.
 
-R05의 골든 데이터는 레코드의 `operation` 필드에 `upsert`, `delete`, `revoke`를 쓴다. JSONL Connector는 `revoke`를 `scope-change`(내용은 그대로, 범위가 좁아짐)로 옮기고, 사용자가 더는 볼 수 없는 경우는 새 값 `access-revoked`로 적는다(I01-R22). 이 대응은 I01-T05가 바꾸며, 그 전까지는 `revoke`를 `access-revoked`로 옮긴다. 공용 저장소는 JSONL import와 테스트 Connector를 구현하고, 실제 메일·메신저·Wiki 수집기는 배포처 포크가 이 계약으로 구현한다.
+R05의 골든 데이터는 레코드의 `operation` 필드에 `upsert`, `delete`, `revoke`를 쓴다. JSONL Connector는 `revoke`를 `scope-change`(내용은 그대로, 범위가 좁아짐)로 옮기고, 사용자가 더는 볼 수 없는 경우는 새 값 `access-revoked`로 적는다(I01-R22). 이 대응은 I01-T05가 바꿨다(`@pki/connector-sdk`의 `changeKindOf`). `POST /api/imports`와 파일 수집기가 같은 해석기와 같은 페이지 저장을 쓴다. 공용 저장소는 JSONL import와 테스트 Connector를 구현하고, 실제 메일·메신저·Wiki 수집기는 배포처 포크가 이 계약으로 구현한다.
 
 ### 5.6 파생물 등록부 — 무효화 계약
 
@@ -588,5 +588,6 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | 2026-11-22 | 5.6절에 "투영 종류(I04-T04, 잠정)" 추가: 엔진·벡터 투영 종류와 `<sourceId>:<version>` 행, 삭제의 1·2단계, 구현의 `permanentlyAbsent`를 구성 지점이 주는 것, 포트와 벡터 ref(원본 version 이름), 감싼 엔진. 6절에 삭제 뒤 투영 제거가 작업이라는 문장 추가 | 5.6절, 6절 | I04-T04 구현(I04 spec "후속" 6) |
 | 2026-11-22 | 6절 순서도의 삭제 통지를 projection-remove 작업 흐름(같은 트랜잭션에서 등록, 커밋 뒤 실행기가 포트로 실행)으로 고침 | 6절 | I04-T04 검토 B-B3 |
 | 2026-11-22 | 5.6절에 `ScopePolicy`의 기본 구현과 `commitDerived`의 범위 거부(정책 오류는 거부)·`scope_policy_drops`·`scope-drop` 종류(일곱 번째)·범위 변경의 Insight 판정과 다시 추출을 반영하고 규격 스케치에 `InvalidationContext.combinable`·등록부의 `policy`·`combinable`을 더함, 상태 API의 `scopePolicyDrops`. 8절 "접근 범위를 넘는 연결"을 `ScopePolicy` 기준으로 고침 | 5.6절, 8절 | I04-T09 구현 |
+| 2026-11-22 | 5.5절의 JSONL `revoke` 대응을 I01-T05가 `scope-change`로 바꿨음을 표시하고 가져오기 API가 같은 해석기·페이지 저장을 쓴다고 적음 | 5.5절 | I01-T05 구현 |
 | 2026-11-22 | 4절 tombstone 장부 행(파일 이름)과 5.6절 래퍼 설명을 I04-T10 구현에 맞춤: 장부는 COMMIT 앞에서 쓰고 시작 때 다시 적용, `SqlDriver`의 `beforeCommit` | 4절, 5.6절 | I04-T10 구현 |
 | 2026-11-22 | 4절 장부 행에 `damaged-<N>`과 전체 삭제 때의 의무(H01 #32)를 적음 | 4절 | I04-T10 검토 B F6 |

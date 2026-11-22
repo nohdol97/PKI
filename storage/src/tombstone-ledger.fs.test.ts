@@ -105,6 +105,41 @@ describe("append", () => {
   });
 });
 
+describe("create", () => {
+  it("writes a temp file, fsyncs it, renames it into place, then fsyncs the directory", () => {
+    const m = memoryFs();
+    createNodeLedgerIo(m.fs, "linux").create(P, "header\nline\n");
+    expect((m.files.get(P) as Buffer).toString()).toBe("header\nline\n");
+    expect(m.files.has(`${P}.tmp`)).toBe(false);
+    expect(m.log.filter((l) => !l.startsWith("write"))).toEqual([
+      `open:${P}.tmp:w`,
+      `fsync:${P}.tmp`,
+      `close:${P}.tmp`,
+      `rename:${P}.tmp->${P}`,
+      "open:/d:r",
+      "fsync:/d",
+      "close:/d",
+    ]);
+  });
+
+  it("a crash before the rename leaves no ledger file, only the temp, and discardTemp removes it", () => {
+    const m = memoryFs();
+    const failing: LedgerFs = {
+      ...m.fs,
+      renameSync: () => {
+        throw new Error("killed before the rename");
+      },
+    };
+    expect(() => createNodeLedgerIo(failing, "linux").create(P, "x\n")).toThrow("killed");
+    expect(m.files.has(P)).toBe(false);
+    expect(m.files.has(`${P}.tmp`)).toBe(true);
+    const io = createNodeLedgerIo(m.fs, "linux");
+    io.discardTemp(P);
+    expect(m.files.has(`${P}.tmp`)).toBe(false);
+    io.discardTemp(P); // none left is fine
+  });
+});
+
 describe("cutToLastNewline", () => {
   it("cuts on bytes: invalid UTF-8 in a whole line does not move the cut", () => {
     const m = memoryFs();

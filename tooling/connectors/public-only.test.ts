@@ -83,10 +83,16 @@ describe("the repository's Connector paths", () => {
       `${ADAPTERS}/jsonl-connector.ts`,
       `${ADAPTERS}/jsonl-connector.test.ts`,
       `${ADAPTERS}/fixture-connector.ts`,
-      "backend/src/jsonl-lines.ts",
     ]) {
       expect(files).toContain(file);
     }
+  });
+
+  it("no file outside the roots is read: the extra-file list is empty since I01-T05", () => {
+    expect(EXTRA_FILES).toEqual([]);
+    expect(
+      inspectedFiles(REPO).every((f) => SCAN_ROOTS.some((root) => f.startsWith(`${root}/`))),
+    ).toBe(true);
   });
 
   it("the temporary copy passes as the repository does", () => {
@@ -212,11 +218,6 @@ describe("the import allow-list", () => {
     expect(codes(FILE, `export * from "./nested/../../connectors.ts";\n`)).toEqual([
       "import-not-allowed:./nested/../../connectors.ts",
     ]);
-    expect(codes(FILE, `export * from "../jsonl-lines.ts";\n`)).toEqual([]);
-    // the extra file is not a root: it may not reach its neighbours
-    expect(codes("backend/src/jsonl-lines.ts", `export * from "./server.ts";\n`)).toContain(
-      "import-not-allowed:./server.ts",
-    );
   });
 
   it("refuses a type-position import()", () => {
@@ -267,29 +268,52 @@ describe("the import allow-list", () => {
     expect(codes(`${ADAPTERS}/data.json`, `{"fetch": "require"}\n`)).toEqual([]);
   });
 
-  it("reads the extra file under the same list", () => {
-    const copy = copyOfRepo();
-    write(
-      copy,
-      "backend/src/jsonl-lines.ts",
-      `export const get = () => fetch("https://synthetic.invalid");\n`,
-    );
-    expect(checkPublicOnly(copy)).toEqual([
-      { file: "backend/src/jsonl-lines.ts", line: 1, code: "network-global", detail: "fetch" },
-    ]);
-  });
+  // the extra-file mechanism, exercised with a synthetic entry now that the list is empty
+  describe("an entry of the extra-file list (a synthetic one)", () => {
+    const EXTRA = "backend/src/synthetic-extra.ts";
+    const withExtra = (
+      extraText: string,
+      readerText = `export * from "../synthetic-extra.ts";\n`,
+    ) => {
+      const copy = copyOfRepo();
+      write(copy, `${ADAPTERS}/reader.ts`, readerText);
+      write(copy, EXTRA, extraText);
+      return copy;
+    };
 
-  it("fails once nothing inspected reads the extra file: the entry is to be removed (I01-T05)", () => {
-    const copy = copyOfRepo();
-    rmSync(join(copy, ADAPTERS), { recursive: true });
-    write(copy, `${ADAPTERS}/only.ts`, `export const one = 1;\n`);
-    expect(checkPublicOnly(copy)).toEqual([
-      { file: "backend/src/jsonl-lines.ts", line: 1, code: "unused-extra-file", detail: "" },
-    ]);
-    rmSync(join(copy, "backend/src/jsonl-lines.ts"));
-    expect(checkPublicOnly(copy)).toEqual([
-      { file: "backend/src/jsonl-lines.ts", line: 1, code: "unused-extra-file", detail: "" },
-    ]);
+    it("is allowed as a relative import of a root's file, and only when listed", () => {
+      const copy = withExtra(`export const one = 1;\n`);
+      expect(checkPublicOnly(copy, [EXTRA])).toEqual([]);
+      expect(checkPublicOnly(copy).map((f) => `${f.code}:${f.detail}`)).toEqual([
+        "import-not-allowed:../synthetic-extra.ts",
+      ]);
+    });
+
+    it("is not a root: it may not reach its neighbours", () => {
+      const copy = withExtra(`export * from "./server.ts";\n`);
+      expect(checkPublicOnly(copy, [EXTRA]).map((f) => `${f.code}:${f.detail}`)).toEqual([
+        "import-not-allowed:./server.ts",
+      ]);
+    });
+
+    it("is read under the same list", () => {
+      const copy = withExtra(`export const get = () => fetch("https://synthetic.invalid");\n`);
+      expect(checkPublicOnly(copy, [EXTRA])).toEqual([
+        { file: EXTRA, line: 1, code: "network-global", detail: "fetch" },
+      ]);
+      expect(inspectedFiles(copy, [EXTRA])).toContain(EXTRA);
+    });
+
+    it("fails once nothing inspected reads it, or it is gone: the entry is to be removed", () => {
+      const copy = withExtra(`export const one = 1;\n`, `export const one = 1;\n`);
+      expect(checkPublicOnly(copy, [EXTRA])).toEqual([
+        { file: EXTRA, line: 1, code: "unused-extra-file", detail: "" },
+      ]);
+      rmSync(join(copy, EXTRA));
+      expect(checkPublicOnly(copy, [EXTRA])).toEqual([
+        { file: EXTRA, line: 1, code: "unused-extra-file", detail: "" },
+      ]);
+    });
   });
 });
 

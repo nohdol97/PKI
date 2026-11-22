@@ -47,7 +47,7 @@ import {
 } from "./composition.ts";
 import { syncConnector, type ConnectorManager } from "./connectors.ts";
 import type { JobRunner } from "./job-runner.ts";
-import { JSONL_CONNECTOR_KIND } from "./jsonl-import.ts";
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { startServer, type RunningServer } from "./server.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
@@ -139,7 +139,7 @@ async function pipeline(engine: KnowledgeEngine, vectorIndex = new MemoryVectorI
 
 // by identity: a purged source's row holds the hash (I04-R7)
 const sourceIdOf = (externalId: string) =>
-  String(findSourceId(db, MAIL.connectorId, "", externalId));
+  String(findSourceId(db, MAIL.connectorId, MAIL.connectorId, externalId));
 const readJobs = (status: string) =>
   db.all("SELECT id FROM jobs WHERE kind = 'projection-remove' AND status = ?", [status]);
 const related = (engine: KnowledgeEngine, text: string) =>
@@ -169,7 +169,9 @@ describe("engine.calls", () => {
 
     const mail = sourceIdOf(MAIL.externalId);
     expect(await related(engine, "윤하람 미리내")).toContain(mail);
-    expect((await post(routes.deleteSource.path, { ...MAIL, namespace: "" })).body).toEqual({
+    expect(
+      (await post(routes.deleteSource.path, { ...MAIL, namespace: MAIL.connectorId })).body,
+    ).toEqual({
       outcome: "deleted",
     });
     // the deletion registered the removal jobs and woke the runner (I04-R12)
@@ -197,7 +199,7 @@ describe("engine.calls", () => {
       changes: [
         {
           kind: "access-revoked",
-          namespace: "",
+          namespace: MAIL.connectorId,
           externalId: MAIL.externalId,
           revision: 2,
           at: "2026-11-21T00:00:00Z",
@@ -208,7 +210,7 @@ describe("engine.calls", () => {
     };
     const revoking: Connector = {
       manifest: {
-        type: JSONL_CONNECTOR_KIND,
+        type: JSONL_IMPORT_KIND,
         schemaVersion: 2,
         capabilities: {
           incremental: true,
@@ -223,7 +225,7 @@ describe("engine.calls", () => {
       getChanges: async () => page,
       getDocument: async () => null,
     };
-    await syncConnector(db, MAIL.connectorId, JSONL_CONNECTOR_KIND, revoking, {
+    await syncConnector(db, MAIL.connectorId, JSONL_IMPORT_KIND, revoking, {
       rescan: true,
       projections,
       runner,
@@ -424,7 +426,7 @@ function gate() {
 function onePage(changes: ChangeSet["changes"]): Connector {
   return {
     manifest: {
-      type: JSONL_CONNECTOR_KIND,
+      type: JSONL_IMPORT_KIND,
       schemaVersion: 2,
       capabilities: {
         incremental: true,
@@ -458,7 +460,7 @@ describe("one page with several versions (review F2)", () => {
     await syncConnector(
       db,
       "conn-page",
-      JSONL_CONNECTOR_KIND,
+      JSONL_IMPORT_KIND,
       onePage([upsert("p1", "page alpha"), upsert("p2", "page beta"), upsert("p3", "page gamma")]),
       { rescan: true, projections: { notify: async (n) => void notified.push(...n) } },
     );
@@ -482,7 +484,7 @@ describe("a failed page (review F4)", () => {
     const vectorIndex = spied(new MemoryVectorIndex());
     const projections = productProjections(db, { engine, vectorIndex, embedder: null });
     const sync = (changes: ChangeSet["changes"]) =>
-      syncConnector(db, "conn-fail", JSONL_CONNECTOR_KIND, onePage(changes), {
+      syncConnector(db, "conn-fail", JSONL_IMPORT_KIND, onePage(changes), {
         rescan: true,
         projections,
       });
@@ -507,7 +509,7 @@ describe("a failed page (review F4)", () => {
 
   it("registers no projection removal for a deletion on a page that fails whole (I04-R12, atomic with the page)", async () => {
     const sync = (changes: ChangeSet["changes"]) =>
-      syncConnector(db, "conn-fail-del", JSONL_CONNECTOR_KIND, onePage(changes), {
+      syncConnector(db, "conn-fail-del", JSONL_IMPORT_KIND, onePage(changes), {
         rescan: true,
       });
     await sync([upsert("d", "stored text", 5)]);

@@ -57,7 +57,7 @@ V01이 만든 Connector 규격(`schemaVersion` 1)의 원본 레코드는 `extern
 - 이 PR에서 정본이 바로 쓰는 것은 정체의 namespace와 레코드의 revision(V02-T04의 `source_versions.revision`)뿐이다. 출처 정보와 block의 저장, revision으로 도착을 가리는 판정, `scope-change`의 저장은 I01-T02가 한다. 그 전까지 `scope-change`를 받으면 그 페이지가 실패하고, tombstone 사건은 V02-T08의 삭제를 그 원본의 최신 제품 version으로 부른다(I01 spec "T01과 T02 사이").
 - 화면의 원본 목록과 삭제 요청도 namespace를 싣는다. 삭제 요청 `{ connectorId, namespace, externalId }`는 namespace가 필수라, 같은 external id가 여러 namespace에 있어도 사용자가 고른 원본 하나만 지운다. 그래서 포크의 수집기가 빈 문자열이 아닌 namespace를 써도 화면에서 지울 수 있다.
 - manifest를 읽을 수 없는 수집기(없음, 던지는 getter)도 `unsupported-sdk-version`으로 그 인스턴스만 멈춘다. 다른 인스턴스는 그대로 돈다.
-- 공용 저장소의 수집기는 인스턴스마다 범위가 하나라서 namespace가 `""`다. JSONL 줄의 `connector_instance_id`를 namespace로 옮기는 일은 가져오기 API와 함께 I01-T05가 한다.
+- 공용 저장소의 수집기는 인스턴스마다 범위가 하나라서 namespace가 `""`다. JSONL 줄의 `connector_instance_id`를 namespace로 옮기는 일은 `@pki/connector-sdk`의 해석기가 한다(I01-T05. 가져오기 API와 파일 수집기가 쓴다). V02의 Sources 화면 경로(`/api/import/jsonl`)는 아직 그 줄을 인스턴스로 보고 namespace를 `""`로 둔다.
 - 레코드 모양이 바뀌었으므로 이미 저장된 원본은 다시 저장되지 않는다. v12 이전 원본은 빈 namespace를 갖고, 같은 수집기가 같은 정체로 다시 보내면 같은 원본으로 찾힌다.
 
 ## 변경 이력

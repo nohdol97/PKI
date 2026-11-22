@@ -21,6 +21,8 @@ import {
   defaultScopePolicy,
   ledgerOf,
   listInvalidations,
+  cancelJob,
+  discardJob,
   purgeEndedJobs,
   type DerivativeRegistry,
   type SqlDriver,
@@ -361,6 +363,12 @@ describe("retention and the re-applied removals", () => {
     const before = open();
     expect(before).toBeGreaterThan(0);
     purgeEndedJobs(restored, Date.parse(AT) + 10 ** 12);
+    expect(open()).toBe(before);
+    // and the user cannot cancel or discard them either: the mark that the projection may still hold the content (I03-T11)
+    for (const job of restored.all("SELECT id FROM jobs WHERE kind = 'projection-remove'")) {
+      expect(cancelJob(restored, job.id as number)).toBe("not-allowed");
+      expect(discardJob(restored, job.id as number)).not.toBe("discarded");
+    }
     expect(open()).toBe(before);
     restored.close();
   });

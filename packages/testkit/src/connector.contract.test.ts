@@ -399,6 +399,28 @@ describe("contract-suite.red", () => {
       ]);
     });
 
+    it("versionedSources lets a source be upserted again with a greater revision, and no other repeat", async () => {
+      const first = upsert(record("", "b", 1, { blocks: BLOCKS }));
+      const v2 = upsert(record("", "b", 2, { body: "body of b, second version" }));
+      const edited = replace(
+        later(),
+        "b",
+        upsert(record("", "b", 3, { body: "third", accessScope: ["team"] })),
+      );
+      const make = (extra: ScriptEntry[], versioned: boolean): ConnectorScenario => ({
+        ...scenario({ initial: [...initial(), ...extra], later: edited }),
+        ...(versioned ? { versionedSources: true } : {}),
+      });
+      const run = (extra: ScriptEntry[], versioned: boolean) =>
+        checkConnector(() => new ScriptedConnector({ capabilities: FULL }), make(extra, versioned));
+      expect(await run([v2], true)).toEqual([]);
+      // without the opt-in it is still a duplicate
+      expect(await run([v2], false)).toContain("duplicate-identity");
+      // an equal revision, or a lower one, is a duplicate even with it
+      expect(await run([first], true)).toContain("duplicate-identity");
+      expect(await run([v2, first], true)).toContain("duplicate-identity");
+    });
+
     it("a read with a duplicate identity is not compared across page sizes", async () => {
       const dup = [upsert(record("", "b", 1, { blocks: BLOCKS })), ...initial()];
       expect(
