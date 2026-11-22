@@ -13,11 +13,16 @@ import type {
   ImportLineError,
   ImportRecord,
 } from "@pki/contracts";
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { readConnectorKind, type SqlDriver } from "@pki/storage";
-import { syncConnector, tryLockInstance, type SyncOptions } from "./connectors.ts";
+import {
+  syncConnector,
+  tryLockInstance,
+  type ConnectorManager,
+  type SyncOptions,
+} from "./connectors.ts";
 import { parseJsonl, splitRounds, type JsonlLine } from "./jsonl-lines.ts";
 
-export const JSONL_CONNECTOR_KIND = "jsonl-import";
 /** Provisional: distinct instances one file may name; each leaves a permanent row. */
 export const MAX_IMPORT_INSTANCES = 32;
 /** Provisional: refused lines listed in an answer; `errorCount` counts them all. */
@@ -44,6 +49,8 @@ export interface ImportOptions extends Pick<
    * `instance-failed`). The error's message may carry file text: log its class only.
    */
   onError?: (error: unknown) => void;
+  /** The configured Connector instances: a line naming the id of one of another kind is `instance-conflict`. */
+  connectors?: Pick<ConnectorManager, "list">;
 }
 
 const externalIdOf = (change: Change) =>
@@ -68,7 +75,7 @@ async function importInstance(
     try {
       const connector = options.createConnector();
       await connector.initialize({ records: round.map((l): ImportRecord => l.record) });
-      const synced = await syncConnector(db, instanceId, JSONL_CONNECTOR_KIND, connector, {
+      const synced = await syncConnector(db, instanceId, JSONL_IMPORT_KIND, connector, {
         ...(options.runner ? { runner: options.runner } : {}),
         ...(options.projections ? { projections: options.projections } : {}),
         ...(options.clock ? { clock: options.clock } : {}),
@@ -83,9 +90,10 @@ async function importInstance(
           done.add(lineOf.get(externalIdOf(change)) as number);
           report.stored(outcome === "created");
         },
+        lockHeld: true,
         onError: (error) => (storageError = error),
       });
-      // a stopped sync is this instance's failure, as a thrown one was (T05 replaces this path)
+      // a stopped sync is this instance's failure, as a thrown one was
       if (synced.stopped) throw storageError ?? new Error(`sync stopped: ${synced.stopped}`);
     } catch (error) {
       options.onError?.(error);
@@ -127,27 +135,36 @@ export async function importJsonl(
   };
   const boundElsewhere = (id: string) => {
     const kind = readConnectorKind(db, id);
-    return kind !== undefined && kind !== JSONL_CONNECTOR_KIND;
+    if (kind !== undefined && kind !== JSONL_IMPORT_KIND) return true;
+    // a configured Connector of another kind that never synced is not bound yet: its id is its own
+    return (
+      options.connectors?.list().some((c) => c.id === id && c.kind !== JSONL_IMPORT_KIND) ?? false
+    );
   };
-  // a running sync or import of an instance the file names refuses the whole request before
-  // any of it is stored (the API answers 409); one that starts after this check is the
-  // instance's failure below. An instance bound to another kind is refused line by line
-  // (`instance-conflict`) whatever its lock says, so it does not make the request a 409.
-  for (const instanceId of instances.keys()) {
-    if (boundElsewhere(instanceId)) continue;
-    const release = tryLockInstance(db, instanceId);
-    if (!release) throw new InstanceBusyError();
-    release();
-  }
-  for (const [instanceId, lines] of instances) {
-    if (boundElsewhere(instanceId)) {
-      for (const { line } of lines) errors.push({ line, reason: "instance-conflict" });
-      continue;
+  // One rule (I01-R21): the request takes the lock of every instance it names, and holds each until it
+  // ends. A running sync or import of any of them refuses the whole request before any of it is stored
+  // (the API answers 409 `instance-busy`; no line is reported `instance-failed` for it). An instance
+  // bound to another kind is refused line by line (`instance-conflict`), takes no lock and is no 409.
+  const held: (() => void)[] = [];
+  try {
+    for (const instanceId of instances.keys()) {
+      if (boundElsewhere(instanceId)) continue;
+      const release = tryLockInstance(db, instanceId);
+      if (!release) throw new InstanceBusyError();
+      held.push(release);
     }
-    const failed = await importInstance(db, instanceId, lines, options, report);
-    // bound to another kind meanwhile (a rebind race), or its sync failed
-    const reason = boundElsewhere(instanceId) ? "instance-conflict" : "instance-failed";
-    for (const line of failed) errors.push({ line, reason });
+    for (const [instanceId, lines] of instances) {
+      if (boundElsewhere(instanceId)) {
+        for (const { line } of lines) errors.push({ line, reason: "instance-conflict" });
+        continue;
+      }
+      const failed = await importInstance(db, instanceId, lines, options, report);
+      // bound to another kind meanwhile (a rebind that did not take the lock), or its sync failed
+      const reason = boundElsewhere(instanceId) ? "instance-conflict" : "instance-failed";
+      for (const line of failed) errors.push({ line, reason });
+    }
+  } finally {
+    for (const release of held) release();
   }
   errors.sort((a, b) => a.line - b.line);
   return {

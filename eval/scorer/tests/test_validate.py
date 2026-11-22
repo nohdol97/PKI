@@ -116,6 +116,16 @@ class TestSchema(ValidateBase):
         self.mutate("sources/mail.jsonl", fn)
         self.assertHasError("operation")
 
+    def test_access_revoked_operation_is_accepted(self):
+        # I01-R22: the operation vocabulary equals the import schema's (ImportRecordSchema)
+        def fn(rows):
+            rows[0]["operation"] = "access-revoked"
+        self.mutate("sources/mail.jsonl", fn)
+        self.assertFalse(any("operation" in e for e in self.errors()), self.errors())
+
+    def test_operations_are_the_import_schemas(self):
+        self.assertEqual(validate.OPERATIONS, {"upsert", "delete", "revoke", "access-revoked"})
+
     def test_missing_record_field(self):
         def fn(rows):
             del rows[0]["connector_instance_id"]

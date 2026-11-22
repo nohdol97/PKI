@@ -40,7 +40,7 @@ eval/golden/
 | `access_scope` | 열람할 수 있는 주체 목록(`org:all`, `group:…`, `channel:…`, `user:…`) |
 | `metadata` | 자유 필드(여기서는 비어 있음) |
 | `connector_instance_id` | 수집한 커넥터 인스턴스. 같은 내용이 다른 커넥터로 다시 들어온 경우를 표현 |
-| `operation` | `upsert`, `delete`(삭제 표시, `content`는 빈 문자열), `revoke`(내용은 그대로, `access_scope`가 좁아짐) |
+| `operation` | `upsert`, `delete`(삭제 표시, `content`는 빈 문자열), `revoke`(내용은 그대로, `access_scope`가 좁아짐), `access-revoked`(이 PC의 사용자가 그 원본을 더는 볼 수 없음. 골든 데이터에는 없고 가져오기 형식(I01-R22)이 더한 값) |
 | `schema_version` | 이 형식의 버전(`"1"`) |
 
 ## 시나리오

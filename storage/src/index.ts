@@ -50,6 +50,7 @@ export {
   normalizeScope,
   raiseLastRevision,
   readConnectorKind,
+  readLatestContentHash,
   readCursor,
   readRescanState,
   readLastRevision,

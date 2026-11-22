@@ -1,12 +1,13 @@
 // V02-R2: a JSONL line is checked alone; a malformed one is refused with its
-// 1-based line number; of one source's lines the newest revision is kept; and
-// `operation` becomes the Connector's change kind through one function.
-import { ImportRecordSchema, type ImportRecord } from "@pki/contracts";
+// 1-based line number; and of one source's lines the newest revision is kept. The
+// operation to change kind function moved to @pki/connector-sdk (I01-T05; its test
+// is packages/connector-sdk/src/jsonl.test.ts, `import.revoke-switch`).
+import type { ImportRecord } from "@pki/contracts";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { changeKindOf, parseJsonl, splitRounds } from "./jsonl-lines.ts";
+import { parseJsonl, splitRounds } from "./jsonl-lines.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const fixture = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8");
@@ -118,24 +119,5 @@ describe("splitRounds", () => {
       [3, 5],
       [4],
     ]);
-  });
-});
-
-describe("operation mapping (V02-R2)", () => {
-  it("maps upsert and delete to the change kinds of the same name", () => {
-    expect(changeKindOf("upsert")).toBe("upsert");
-    expect(changeKindOf("delete")).toBe("delete");
-  });
-
-  // Provisional pending I01: I01 maps revoke to a scope change and adds an
-  // explicit operation for losing access entirely (V02 spec "T04가 넘기는 것").
-  it("maps revoke to access-revoked (provisional, pending I01)", () => {
-    expect(changeKindOf("revoke")).toBe("access-revoked");
-  });
-
-  it("covers every operation the line schema accepts", () => {
-    for (const op of ImportRecordSchema.shape.operation.options) {
-      expect(["upsert", "delete", "access-revoked"]).toContain(changeKindOf(op));
-    }
   });
 });

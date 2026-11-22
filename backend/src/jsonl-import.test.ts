@@ -3,6 +3,7 @@
 // sequence and registers its extraction job in one transaction; importing the same
 // JSONL again changes no count; a greater revision is a new version beside the old;
 // a line the store refuses is reported by its number without aborting the rest.
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import type { ImportLineError, ImportRecord } from "@pki/contracts";
 import { identityKey, readChangeSeq, type SqlDriver } from "@pki/storage";
 import { createHash } from "node:crypto";
@@ -13,12 +14,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedLegacyTombstone } from "@pki/testkit";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { CANONICAL_DB_FILE, openCanonicalDb, productImporter } from "./composition.ts";
-import { EXTRACT_JOB_KIND, type SyncOptions } from "./connectors.ts";
+import { EXTRACT_JOB_KIND, tryLockInstance, type SyncOptions } from "./connectors.ts";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
 import {
   IMPORT_ERROR_LIMIT,
   importJsonl as importJsonlWith,
-  JSONL_CONNECTOR_KIND,
+  InstanceBusyError,
   MAX_IMPORT_INSTANCES,
 } from "./jsonl-import.ts";
 
@@ -83,9 +84,9 @@ describe("importJsonl", () => {
       changeSeq: before.changeSeq + 3,
     });
     expect(db.all("SELECT id, kind FROM connector_instances ORDER BY id")).toEqual([
-      { id: "conn-v02-chat", kind: JSONL_CONNECTOR_KIND },
-      { id: "conn-v02-mail", kind: JSONL_CONNECTOR_KIND },
-      { id: "conn-v02-wiki", kind: JSONL_CONNECTOR_KIND },
+      { id: "conn-v02-chat", kind: JSONL_IMPORT_KIND },
+      { id: "conn-v02-mail", kind: JSONL_IMPORT_KIND },
+      { id: "conn-v02-wiki", kind: JSONL_IMPORT_KIND },
     ]);
     expect(
       db.all(
@@ -198,18 +199,20 @@ describe("importJsonl", () => {
     expect(db.all("SELECT source_id FROM source_versions")).toEqual([{ source_id: 2 }]);
   });
 
-  it("purges a source on its delete line and tombstones a source never stored on its delete or revoke line (I01-R11)", async () => {
+  it("purges a source on its delete line and tombstones a source never stored on its delete or access-revoked line (I01-R11)", async () => {
     await importJsonl(db, line({ external_id: "d" }));
     const result = await importJsonl(
       db,
       [
         line({ external_id: "d", operation: "delete", content: "", version: 2 }),
         line({ external_id: "never", operation: "delete", content: "" }),
-        line({ external_id: "r", operation: "revoke" }),
+        line({ external_id: "r", operation: "access-revoked" }),
+        // a revoke line is a scope change (I01-R22): of a source never stored it is stale, no tombstone
+        line({ external_id: "rv", operation: "revoke" }),
         line({ external_id: "u" }),
       ].join("\n"),
     );
-    expect(result).toEqual(reply({ received: 4, created: 1, errors: [] }));
+    expect(result).toEqual(reply({ received: 5, created: 1, errors: [] }));
     expect(
       db.all(
         "SELECT s.external_id, t.covers_version AS version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id ORDER BY t.source_id",
@@ -218,17 +221,22 @@ describe("importJsonl", () => {
       // source never seen is a hashed row from the start, covering version 0
     ).toEqual([
       {
-        external_id: identityKey(db, MAIL.connector_instance_id, "", "d"),
+        external_id: identityKey(db, MAIL.connector_instance_id, MAIL.connector_instance_id, "d"),
         version: 1,
         reason: "source-deleted",
       },
       {
-        external_id: identityKey(db, MAIL.connector_instance_id, "", "never"),
+        external_id: identityKey(
+          db,
+          MAIL.connector_instance_id,
+          MAIL.connector_instance_id,
+          "never",
+        ),
         version: 0,
         reason: "source-deleted",
       },
       {
-        external_id: identityKey(db, MAIL.connector_instance_id, "", "r"),
+        external_id: identityKey(db, MAIL.connector_instance_id, MAIL.connector_instance_id, "r"),
         version: 0,
         reason: "access-revoked",
       },
@@ -236,6 +244,24 @@ describe("importJsonl", () => {
     expect(
       db.all("SELECT s.external_id FROM source_versions v JOIN sources s ON s.id = v.source_id"),
     ).toEqual([{ external_id: "u" }]);
+  });
+
+  it("reports a revoke line whose content is not the stored latest version's, at its line (I01-R22)", async () => {
+    await importJsonl(db, line({ external_id: "m" }));
+    const result = await importJsonl(
+      db,
+      [
+        line({ external_id: "m", operation: "revoke", version: 2, content: "changed meanwhile" }),
+        line({ external_id: "n" }),
+      ].join("\n"),
+    );
+    expect(result).toEqual(
+      reply({
+        received: 2,
+        created: 1,
+        errors: [{ line: 1, reason: "scope-change-content-mismatch" }],
+      }),
+    );
   });
 
   it("keeps per-source line order across a delete between two upserts in one file", async () => {
@@ -321,13 +347,17 @@ describe("importJsonl", () => {
         .split("\n")
         .filter((l) => l.trim())
         .map((l) => JSON.parse(l) as ImportRecord);
-      const deletions = records.filter((r) => r.operation !== "upsert").length;
+      // a delete tombstones; a revoke narrows the scope and keeps the version (I01-R22)
+      const deletions = records.filter((r) => r.operation === "delete").length;
+      const revokes = records.filter((r) => r.operation === "revoke").length;
       const result = await importJsonl(db, text);
+      // every golden file has a delete line and a revoke line, each checked on its own
       expect(deletions).toBeGreaterThan(0);
+      expect(revokes).toBeGreaterThan(0);
       expect(result.received).toBe(records.length);
-      expect(result.created + deletions + result.errorCount).toBe(records.length);
+      expect(result.created + deletions + revokes + result.errorCount).toBe(records.length);
       expect(result.errors).toEqual([]);
-      // each delete and revoke tombstoned a source the file had stored, and purged it
+      // each delete tombstoned a source the file had stored, and purged it; a revoke did not
       expect(count("tombstones")).toBe(deletions);
       expect(db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'extract'")[0]?.n).toBe(
         result.created,
@@ -373,7 +403,7 @@ describe("importJsonl", () => {
   it("reports a job registration conflict as that instance's failure, keeping the instance before it", async () => {
     db.run(`INSERT INTO connector_instances (id, kind) VALUES (?, ?)`, [
       MAIL.connector_instance_id,
-      JSONL_CONNECTOR_KIND,
+      JSONL_IMPORT_KIND,
     ]);
     db.run(
       "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, '', ?)",
@@ -422,6 +452,66 @@ describe("importJsonl", () => {
     expect(count("source_versions")).toBe(0);
   });
 
+  it("takes every named instance's lock before storing and holds each to the request's end: one busy refuses the whole request, none leaves a partial result", async () => {
+    const text = [
+      line({ connector_instance_id: "inst-a", external_id: "a1" }),
+      line({ connector_instance_id: "inst-b", external_id: "b1" }),
+    ].join("\n");
+    const heldDuring: boolean[] = [];
+    const probing = () => {
+      const connector = createJsonlConnector();
+      return {
+        ...connector,
+        initialize: async (config: unknown) => {
+          // while inst-a's round runs, inst-b (not yet reached) is held by this request already
+          const free = tryLockInstance(db, "inst-b");
+          heldDuring.push(free === undefined);
+          free?.();
+          return connector.initialize(config);
+        },
+      };
+    };
+    await importJsonlWith(db, text, { createConnector: probing });
+    expect(heldDuring[0]).toBe(true);
+    // the locks are free after the request
+    for (const id of ["inst-a", "inst-b"]) {
+      const free = tryLockInstance(db, id);
+      expect(free).toBeDefined();
+      free?.();
+    }
+    // one instance busy: the whole request is a 409 and the other instance stored nothing
+    const text2 = [
+      line({ connector_instance_id: "inst-a", external_id: "a2" }),
+      line({ connector_instance_id: "inst-b", external_id: "b2" }),
+    ].join("\n");
+    const stored = count("source_versions");
+    const release = tryLockInstance(db, "inst-b") as () => void;
+    await expect(
+      importJsonlWith(db, text2, { createConnector: createJsonlConnector }),
+    ).rejects.toThrow(InstanceBusyError);
+    expect(count("source_versions")).toBe(stored);
+    expect(tryLockInstance(db, "inst-a")).toBeDefined(); // inst-a's lock was released again
+    release();
+  });
+
+  it("reports a line naming the id of a configured Connector of another kind as instance-conflict, and binds nothing", async () => {
+    const connectors = {
+      list: () => [{ id: "site-x", kind: "site-mail", state: "ready" as const }],
+    };
+    const result = await importJsonlWith(
+      db,
+      [line({ connector_instance_id: "site-x" }), line({ connector_instance_id: "free-id" })].join(
+        "\n",
+      ),
+      { createConnector: createJsonlConnector, connectors },
+    );
+    expect(result).toMatchObject({
+      created: 1,
+      errors: [{ line: 1, reason: "instance-conflict" }],
+    });
+    expect(db.all("SELECT id FROM connector_instances WHERE id = 'site-x'")).toEqual([]);
+  });
+
   it("wakes the runner once the page with new jobs is committed, and not for unchanged input", async () => {
     // another connection sees only committed rows
     const reader = openBetterSqlite3(join(dir, "data", CANONICAL_DB_FILE));
@@ -443,7 +533,7 @@ describe("importJsonl, review round 2", () => {
   const plantJobConflict = (externalId: string) => {
     db.run("INSERT INTO connector_instances (id, kind) VALUES (?, ?) ON CONFLICT DO NOTHING", [
       MAIL.connector_instance_id,
-      JSONL_CONNECTOR_KIND,
+      JSONL_IMPORT_KIND,
     ]);
     const { lastInsertRowid } = db.run(
       "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, '', ?)",
