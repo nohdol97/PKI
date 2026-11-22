@@ -53,6 +53,11 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   insight_evidence: kind("insight"),
   // the user-input rows an Insight used (S01-R15): the Insight's, deleted with it or with the row
   insight_user_inputs: kind("insight"),
+  // the type definitions with their lineage and history (S01-R22): the registered kind `ontology`
+  // deletes the lineage rows of a deleted source and the candidates left with none
+  ontology_elements: kind("ontology"),
+  ontology_basis: kind("ontology"),
+  ontology_history: kind("ontology"),
   // what the scope policy left out of an extraction (I04-T09): the registered kind `scope-drop` deletes them with their source
   scope_policy_drops: kind("scope-drop"),
   jobs: operational("work queue: a row names a source by id and holds no content"),

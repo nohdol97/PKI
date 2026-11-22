@@ -31,3 +31,25 @@ export function setStatusForTest(
   );
   db.run(`UPDATE ${table} SET status = ? WHERE id = ?`, [status, id]);
 }
+
+/**
+ * Test seed for a type definition (S01-T06): puts an element in a status behind a history line, as
+ * `setStatusForTest` does for a row. The user's approval and rejection are S01-T07's; until they
+ * exist a test that needs a verified or rejected element reaches it here. The edition is kept.
+ */
+export function setOntologyStatusForTest(
+  db: Pick<ContractSqlDriver, "run" | "all">,
+  id: number,
+  status: "candidate" | "verified" | "disputed" | "superseded" | "rejected",
+  actor: "user" | "extraction" | "propagation" | "policy" = "user",
+): void {
+  const row = db.all("SELECT status, edition FROM ontology_elements WHERE id = ?", [id])[0];
+  if (!row) throw new Error(`ontology element ${id} not found`);
+  db.run(
+    `INSERT INTO ontology_history (element_id, seq, at, actor, action, from_status, to_status, from_edition, to_edition)
+     VALUES (?, (SELECT coalesce(max(seq), 0) + 1 FROM ontology_history WHERE element_id = ?),
+       '2026-11-22T00:00:00.000Z', ?, 'test-set', ?, ?, ?, ?)`,
+    [id, id, actor, row.status as string, status, row.edition as number, row.edition as number],
+  );
+  db.run("UPDATE ontology_elements SET status = ? WHERE id = ?", [status, id]);
+}

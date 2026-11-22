@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(20);
-    expect(migrations).toHaveLength(20);
+    expect(schemaVersion(db)).toBe(21);
+    expect(migrations).toHaveLength(21);
   });
 
   it("is idempotent when re-run", () => {
@@ -486,6 +486,9 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "items",
       "jobs",
       "keyword_index",
+      "ontology_basis",
+      "ontology_elements",
+      "ontology_history",
       "provider_calls",
       "relation_history",
       "relations",
@@ -1376,7 +1379,7 @@ describe("schema v17 (I01-T03, I01-R17)", () => {
     migrate(db, migrations.slice(0, 16));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(20);
+    expect(schemaVersion(db)).toBe(21);
     expect(columns("connector_instances")).toEqual(
       expect.arrayContaining(["rescan_pending", "deletions_may_be_missed"]),
     );
@@ -1429,7 +1432,7 @@ describe("schema v18 (I04-T09, I04-R4, R11)", () => {
     migrate(db, migrations.slice(0, 17));
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(20);
+    expect(schemaVersion(db)).toBe(21);
     expect(columns("scope_policy_drops")).toEqual([
       "id",
       "source_id",
@@ -1462,7 +1465,7 @@ describe("schema v19 (I01-T06, I01-R15)", () => {
     migrate(db, migrations.slice(0, 18));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(20);
+    expect(schemaVersion(db)).toBe(21);
     expect(columns("connector_instances")).toContain("configured_scope");
     expect(db.all("SELECT id, kind, cursor, configured_scope FROM connector_instances")).toEqual([
       { id: "c", kind: "k", cursor: "x", configured_scope: null },
@@ -1545,7 +1548,7 @@ describe("schema v20 (S01-T01, S01-R5, R6, R10, R14, R15)", () => {
   it("adds the columns to a v19 database with rows and changes none of their status or epistemic type", () => {
     seedV19();
     migrate(db);
-    expect(schemaVersion(db)).toBe(20);
+    expect(schemaVersion(db)).toBe(21);
     expect(db.all("SELECT name, status, epistemic, confidence, user_authored FROM items")).toEqual([
       { name: "A", status: "candidate", epistemic: "explicit", confidence: null, user_authored: 0 },
       { name: "B", status: "candidate", epistemic: "explicit", confidence: null, user_authored: 0 },
@@ -1796,5 +1799,339 @@ describe("schema v20 (S01-T01, S01-R5, R6, R10, R14, R15)", () => {
     ]);
     db.run("DELETE FROM insights WHERE id = 1");
     expect(db.all("SELECT count(*) AS n FROM insight_user_inputs")).toEqual([{ n: 0 }]);
+  });
+});
+
+describe("schema v21 (S01-T06, S01-R18, R20, R22)", () => {
+  const STAMP = "2026-11-22T00:00:00Z";
+  /** A v20 database with an item, a fact and a history line: what the migration must leave alone. */
+  function seedV20(): void {
+    migrate(db, migrations.slice(0, 20));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', '', 'e')",
+    );
+    db.run(
+      `INSERT INTO items (type, name, epistemic, status, observed_at)
+       VALUES ('Project', 'A', 'explicit', 'candidate', ?)`,
+      [STAMP],
+    );
+    db.run(
+      `INSERT INTO facts (item_id, kind, value, epistemic, status, observed_at)
+       VALUES (1, 'target_date', '2026-12-01', 'user-approved', 'verified', ?)`,
+      [STAMP],
+    );
+    db.run(
+      `INSERT INTO fact_history (fact_id, seq, at, actor, action, from_status, to_status, from_epistemic, to_epistemic)
+       VALUES (1, 1, ?, 'user', 'approve', 'candidate', 'verified', 'explicit', 'user-approved')`,
+      [STAMP],
+    );
+  }
+  const revision = () =>
+    db.all("SELECT knowledge_revision AS r, change_seq AS c FROM revisions")[0] as {
+      r: number;
+      c: number;
+    };
+  const element = (over: Record<string, unknown> = {}) => {
+    const row = {
+      kind: "fact-kind",
+      name: "x_kind",
+      rule: '{"elementKind":"fact-kind"}',
+      status: "candidate",
+      edition: 1,
+      ...over,
+    };
+    return db.run(
+      "INSERT INTO ontology_elements (element_kind, name, rule, status, edition) VALUES (?, ?, ?, ?, ?)",
+      [row.kind, row.name, row.rule, row.status, row.edition] as never,
+    ).lastInsertRowid;
+  };
+  const line = (
+    id: number,
+    seq: number,
+    o: { from?: string; to?: string; fromE?: number; toE?: number; action?: string } = {},
+  ) =>
+    db.run(
+      `INSERT INTO ontology_history (element_id, seq, at, actor, action, from_status, to_status, from_edition, to_edition)
+       VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)`,
+      [
+        id,
+        seq,
+        STAMP,
+        o.action ?? "test",
+        o.from ?? "candidate",
+        o.to ?? "verified",
+        o.fromE ?? 1,
+        o.toE ?? 1,
+      ],
+    );
+
+  // schema.semantic-migration (migration 2)
+  it("adds the three tables to a v20 database and leaves its rows, history and revisions alone", () => {
+    seedV20();
+    const before = revision();
+    migrate(db);
+    expect(schemaVersion(db)).toBe(21);
+    expect(revision()).toEqual(before); // the seed is not a knowledge change an upgrade should show
+    expect(db.all("SELECT name, status, epistemic FROM items")).toEqual([
+      { name: "A", status: "candidate", epistemic: "explicit" },
+    ]);
+    expect(db.all("SELECT kind, value, status FROM facts")).toEqual([
+      { kind: "target_date", value: "2026-12-01", status: "verified" },
+    ]);
+    expect(db.all("SELECT fact_id, seq, action FROM fact_history")).toEqual([
+      { fact_id: 1, seq: 1, action: "approve" },
+    ]);
+    expect(db.all("SELECT count(*) AS n FROM ontology_history")).toEqual([{ n: 0 }]);
+    expect(db.all("SELECT count(*) AS n FROM ontology_basis")).toEqual([{ n: 0 }]);
+  });
+
+  it("does not rebuild the knowledge tables: their history and gate triggers survive", () => {
+    seedV20();
+    migrate(db);
+    expect(db.all("SELECT count(*) AS n FROM fact_history")).toEqual([{ n: 1 }]);
+    const triggers = db
+      .all("SELECT name FROM sqlite_schema WHERE type = 'trigger'")
+      .map((r) => r.name);
+    for (const t of ["items", "facts", "relations"]) {
+      expect(triggers).toContain(`${t}_lifecycle_gate`);
+    }
+    expect(() => db.run("UPDATE facts SET status = 'rejected'")).toThrow(/lifecycle gate/);
+  });
+
+  it("seeds the registry with the code's constants and R4's, verified, edition 1, the same every time", () => {
+    migrate(db);
+    const seed = () =>
+      db.all("SELECT element_kind, name, rule, status, edition FROM ontology_elements ORDER BY id");
+    const dates = {
+      elementKind: "fact-kind",
+      itemTypes: ["Project", "System"],
+      valueType: "date",
+      cardinality: "one",
+    };
+    const form = {
+      elementKind: "fact-kind",
+      itemTypes: ["Concept", "Project", "System"],
+      valueType: "surface-form",
+      cardinality: "many",
+    };
+    expect(
+      seed().map((r) => [
+        r.element_kind,
+        r.name,
+        JSON.parse(r.rule as string),
+        r.status,
+        r.edition,
+      ]),
+    ).toEqual([
+      ["item-type", "Project", { elementKind: "item-type" }, "verified", 1],
+      ["item-type", "System", { elementKind: "item-type" }, "verified", 1],
+      ["item-type", "Concept", { elementKind: "item-type" }, "verified", 1],
+      ["fact-kind", "target_date", dates, "verified", 1],
+      ["fact-kind", "completion_date", dates, "verified", 1],
+      [
+        "fact-kind",
+        "definition",
+        {
+          elementKind: "fact-kind",
+          itemTypes: ["Concept"],
+          valueType: "text",
+          cardinality: "many",
+        },
+        "verified",
+        1,
+      ],
+      ["fact-kind", "alias.synonym", form, "verified", 1],
+      ["fact-kind", "alias.abbreviation", form, "verified", 1],
+      ["fact-kind", "alias.translation", form, "verified", 1],
+      [
+        "relation-type",
+        "DEPENDS_ON",
+        {
+          elementKind: "relation-type",
+          subjectTypes: ["Project", "System"],
+          objectTypes: ["Project", "System"],
+          symmetric: false,
+        },
+        "verified",
+        1,
+      ],
+    ]);
+    const first = seed();
+    db.close();
+    db = openBetterSqlite3(":memory:");
+    migrate(db);
+    expect(seed()).toEqual(first);
+  });
+
+  it("is atomic: a failure after the seed leaves no table, no seed and the old version", () => {
+    seedV20();
+    const failing = [
+      ...migrations.slice(0, 20),
+      (d: SqlDriver) => {
+        (migrations[20] as (d: SqlDriver) => void)(d);
+        throw new Error("broken");
+      },
+    ];
+    expect(() => migrate(db, failing)).toThrow(/broken/);
+    expect(schemaVersion(db)).toBe(20);
+    expect(tables().filter((t) => t.startsWith("ontology_"))).toEqual([]);
+    migrate(db);
+    expect(db.all("SELECT count(*) AS n FROM ontology_elements")).toEqual([{ n: 10 }]);
+  });
+
+  it("refuses a database newer than the build instead of downgrading it", () => {
+    migrate(db);
+    expect(() => migrate(db, migrations.slice(0, 20))).toThrow(/newer than this build/);
+    expect(schemaVersion(db)).toBe(21);
+  });
+
+  it("takes an identifier name of 40 characters at most, a kind of the three, and an edition of 1 or more", () => {
+    migrate(db);
+    element({ name: "a".repeat(40) });
+    element(); // x_kind
+    for (const name of ["", "1abc", "a b", "a-b", "가나", "a".repeat(41), "a'b"]) {
+      expect(() => element({ name }), name).toThrow(/CHECK/);
+    }
+    expect(() => element({ kind: "other", name: "k2" })).toThrow(/CHECK/);
+    expect(() => element({ name: "k3", edition: 0 })).toThrow(/CHECK/);
+    expect(() => element({ name: "k4", rule: "not json" })).toThrow(/CHECK/);
+    expect(() => element({ name: "k5", rule: "[]" })).toThrow(/CHECK/);
+    expect(() => element({ name: "k6", status: "unknown" })).toThrow(/CHECK/);
+    expect(() => element({ name: "x_kind" })).toThrow(/UNIQUE/);
+    element({ kind: "item-type", name: "x_kind" }); // the same name in another kind is another element
+  });
+
+  it("holds no text in the history or the lineage: numbers and codes only", () => {
+    migrate(db);
+    expect(columns("ontology_history")).toEqual([
+      "element_id",
+      "seq",
+      "at",
+      "actor",
+      "action",
+      "from_status",
+      "to_status",
+      "from_edition",
+      "to_edition",
+      "reason",
+      "basis_source_id",
+      "basis_version",
+      "batch",
+      "reverts_seq",
+    ]);
+    expect(columns("ontology_basis")).toEqual(["element_id", "source_id", "version"]);
+    expect(
+      db.all("SELECT \"table\" FROM pragma_foreign_key_list('ontology_basis')").map((r) => r.table),
+    ).toEqual(["ontology_elements"]); // the source version is a number, not a key
+  });
+
+  it("refuses a status, rule or edition change with no history line behind it", () => {
+    migrate(db);
+    const id = element();
+    expect(() => db.run("UPDATE ontology_elements SET status = 'verified'")).toThrow(
+      /ontology gate/,
+    );
+    expect(() => db.run("UPDATE ontology_elements SET edition = 2")).toThrow(/ontology gate/);
+    expect(() => db.run(`UPDATE ontology_elements SET rule = '{"a":1}'`)).toThrow(/ontology gate/);
+    expect(db.all("SELECT status, edition FROM ontology_elements WHERE id = ?", [id])).toEqual([
+      { status: "candidate", edition: 1 },
+    ]);
+  });
+
+  it("lets a change through only when the newest line says that very change, and a rule only with its edition", () => {
+    migrate(db);
+    const id = element({ status: "verified" });
+    line(id, 1, { from: "verified", to: "verified", fromE: 1, toE: 2, action: "change-rule" });
+    // another target, or the right one without the edition, does not pass
+    expect(() => db.run("UPDATE ontology_elements SET edition = 3 WHERE id = ?", [id])).toThrow(
+      /ontology gate/,
+    );
+    expect(() =>
+      db.run(`UPDATE ontology_elements SET rule = '{"b":1}' WHERE id = ?`, [id]),
+    ).toThrow(/ontology gate/); // a rule change that leaves the edition where it was
+    db.run(`UPDATE ontology_elements SET rule = '{"b":1}', edition = 2 WHERE id = ?`, [id]);
+    expect(db.all("SELECT edition FROM ontology_elements WHERE id = ?", [id])).toEqual([
+      { edition: 2 },
+    ]);
+    // the line is spent
+    expect(() =>
+      db.run(`UPDATE ontology_elements SET rule = '{"c":1}', edition = 2 WHERE id = ?`, [id]),
+    ).toThrow(/ontology gate/);
+    // only the newest line counts: line 1 said edition 2, line 2 says a retirement
+    line(id, 2, { from: "verified", to: "superseded", fromE: 2, toE: 3, action: "retire" });
+    expect(() => db.run("UPDATE ontology_elements SET edition = 2, status = 'verified'")).toThrow(
+      /ontology gate/,
+    );
+    db.run("UPDATE ontology_elements SET status = 'superseded', edition = 3 WHERE id = ?", [id]);
+    expect(db.all("SELECT status, edition FROM ontology_elements WHERE id = ?", [id])).toEqual([
+      { status: "superseded", edition: 3 },
+    ]);
+  });
+
+  it("refuses a rule change even behind a line that keeps the edition: a rule changes only with its edition", () => {
+    migrate(db);
+    const id = element({ status: "verified" });
+    line(id, 1, { from: "verified", to: "verified", fromE: 1, toE: 1, action: "change-rule" });
+    expect(() =>
+      db.run(`UPDATE ontology_elements SET rule = '{"b":1}' WHERE id = ?`, [id]),
+    ).toThrow(/ontology gate/);
+    expect(db.all("SELECT rule FROM ontology_elements WHERE id = ?", [id])).toEqual([
+      { rule: '{"elementKind":"fact-kind"}' },
+    ]);
+  });
+
+  it("cannot update a history line or delete it while its element stands; a cascade deletes it with the element", () => {
+    migrate(db);
+    const id = element();
+    line(id, 1);
+    line(id, 2);
+    expect(() => db.run("UPDATE ontology_history SET reason = 'x'")).toThrow(/immutable/);
+    expect(() => db.run("DELETE FROM ontology_history WHERE seq = 2")).toThrow(
+      /only with their row/,
+    );
+    expect(() => db.run("DELETE FROM ontology_history")).toThrow(/only with their row/);
+    db.run("INSERT INTO ontology_basis (element_id, source_id, version) VALUES (?, 1, 1)", [id]);
+    const other = element({ name: "other" });
+    line(other, 1);
+    db.run("DELETE FROM ontology_elements WHERE id = ?", [id]);
+    expect(db.all("SELECT element_id FROM ontology_history")).toEqual([{ element_id: other }]);
+    expect(db.all("SELECT count(*) AS n FROM ontology_basis")).toEqual([{ n: 0 }]);
+  });
+
+  it("numbers a line from 1 without repeats, with an actor from the four and a basis in a pair", () => {
+    migrate(db);
+    const id = element();
+    line(id, 1);
+    expect(() => line(id, 1)).toThrow(/UNIQUE|PRIMARY/);
+    expect(() => line(id, 0)).toThrow(/CHECK/);
+    expect(() =>
+      db.run(
+        `INSERT INTO ontology_history (element_id, seq, at, actor, action, to_status, to_edition)
+         VALUES (?, 9, ?, 'robot', 'x', 'verified', 1)`,
+        [id, STAMP],
+      ),
+    ).toThrow(/CHECK/);
+    expect(() =>
+      db.run(
+        `INSERT INTO ontology_history (element_id, seq, at, actor, action, to_status, to_edition, basis_version)
+         VALUES (?, 9, ?, 'user', 'x', 'verified', 1, 1)`,
+        [id, STAMP],
+      ),
+    ).toThrow(/CHECK/);
+  });
+
+  it("raises the knowledge revision once per changed element row, and not for a line or a lineage row", () => {
+    migrate(db);
+    const start = revision().r;
+    const id = element();
+    expect(revision().r).toBe(start + 1);
+    line(id, 1);
+    db.run("INSERT INTO ontology_basis (element_id, source_id, version) VALUES (?, 1, 1)", [id]);
+    expect(revision().r).toBe(start + 1);
+    db.run("UPDATE ontology_elements SET status = 'verified' WHERE id = ?", [id]);
+    expect(revision().r).toBe(start + 2);
+    db.run("DELETE FROM ontology_elements WHERE id = ?", [id]);
+    expect(revision().r).toBe(start + 3);
   });
 });
