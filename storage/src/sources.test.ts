@@ -8,9 +8,12 @@ import { migrate } from "./migrations.ts";
 import { readChangeSeq } from "./revisions.ts";
 import {
   LATEST_VERSION_SQL,
+  beginRescan,
   contentHash,
+  finishRescan,
   findSourceId,
   readCursor,
+  readRescanState,
   registerConnectorInstance,
   readSourceVersion,
   saveSourceRecord,
@@ -266,5 +269,40 @@ describe("readSourceVersion", () => {
 
   it("returns undefined for a missing version", () => {
     expect(readSourceVersion(db, 404)).toBeUndefined();
+  });
+});
+
+describe("rescan state (I01-R17)", () => {
+  it("is false before a rescan, and for an instance never registered", () => {
+    expect(readRescanState(db, "c1")).toEqual({ pending: false, deletionsMayBeMissed: false });
+    expect(readRescanState(db, "never")).toEqual({ pending: false, deletionsMayBeMissed: false });
+  });
+
+  it("beginRescan drops the cursor and marks the rescan pending, finishRescan ends it and sets the mark as told", () => {
+    writeCursor(db, "c1", "old");
+    beginRescan(db, "c1", true);
+    expect(readCursor(db, "c1")).toBeNull();
+    expect(readRescanState(db, "c1")).toEqual({ pending: true, deletionsMayBeMissed: true });
+    // the other instance is untouched
+    expect(readRescanState(db, "c2")).toEqual({ pending: false, deletionsMayBeMissed: false });
+    finishRescan(db, "c1", true);
+    expect(readRescanState(db, "c1")).toEqual({ pending: false, deletionsMayBeMissed: true });
+    beginRescan(db, "c1", false);
+    finishRescan(db, "c1", false);
+    expect(readRescanState(db, "c1")).toEqual({ pending: false, deletionsMayBeMissed: false });
+  });
+
+  it("beginRescan only raises the deletions mark: it stays until a rescan ends (R17)", () => {
+    beginRescan(db, "c1", true);
+    finishRescan(db, "c1", true);
+    beginRescan(db, "c1", false);
+    expect(readRescanState(db, "c1")).toEqual({ pending: true, deletionsMayBeMissed: true });
+    finishRescan(db, "c1", false);
+    expect(readRescanState(db, "c1")).toEqual({ pending: false, deletionsMayBeMissed: false });
+  });
+
+  it("refuses to mark an instance that is not registered", () => {
+    expect(() => beginRescan(db, "never", true)).toThrow(/not registered/);
+    expect(() => finishRescan(db, "never", true)).toThrow(/not registered/);
   });
 });

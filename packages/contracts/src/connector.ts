@@ -196,6 +196,12 @@ export const ChangeSetSchema = z.strictObject({
   /** What the Connector filtered out itself, by position and code. */
   rejected: z.array(z.strictObject({ at: z.string(), code: z.enum(REJECT_CODES) })).default([]),
 });
+/**
+ * The page's outer shape alone: its changes are judged one by one, so one bad record
+ * refuses itself and not the page (I01-R14).
+ */
+export const ChangeSetEnvelopeSchema = ChangeSetSchema.extend({ changes: z.array(z.unknown()) });
+
 /** What a Connector returns: `rejected` may be left out. */
 export type ChangeSet = z.input<typeof ChangeSetSchema>;
 

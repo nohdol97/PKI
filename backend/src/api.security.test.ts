@@ -23,7 +23,21 @@ const connectors: ConnectorManager = {
   list: () => [],
   sync: async (id) => {
     synced.push(id);
-    return { connectorId: id, received: 0, created: 0 };
+    return {
+      connectorId: id,
+      received: 0,
+      created: 0,
+      unchanged: 0,
+      scopeUpdated: 0,
+      stale: 0,
+      staleTombstone: 0,
+      blocked: 0,
+      tombstoned: 0,
+      rejected: [],
+      rejectedCount: 0,
+      rescanned: false,
+      deletionsMayBeMissed: false,
+    };
   },
 };
 

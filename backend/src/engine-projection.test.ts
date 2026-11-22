@@ -474,10 +474,15 @@ describe("a failed page (review F4)", () => {
     await sync([upsert("r", "first text", 5)]);
     await projections.drain();
     expect(await engine.appliedChangeSeq()).toBe(1);
-    // a new source, then the same revision with other content: refused, the page throws
-    await expect(
-      sync([upsert("s", "rolled back", 1), upsert("r", "other text", 5)]),
-    ).rejects.toThrow(/revision-not-newer/);
+    // a new source stored, then a second one the store cannot take: the page fails whole
+    db.exec(`CREATE TRIGGER refuse_t BEFORE INSERT ON sources WHEN new.external_id = 't'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END`);
+    expect(
+      await sync([upsert("s", "rolled back", 1), upsert("t", "never stored", 1)]),
+    ).toMatchObject({
+      stopped: "storage-failed",
+      created: 0,
+    });
     await projections.drain();
     expect(engine.upsertSource).toHaveBeenCalledTimes(1);
     expect(vectorIndex.remove).toHaveBeenCalledTimes(1);

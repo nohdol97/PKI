@@ -1,0 +1,12 @@
+{
+  "name": "@pki/connector-sdk",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@pki/contracts": "workspace:*"
+  }
+}
