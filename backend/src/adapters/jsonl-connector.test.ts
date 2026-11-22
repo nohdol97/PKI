@@ -54,6 +54,32 @@ connectorContract("jsonl-import (a file)", createJsonlConnector, {
   config: { path: fileOf(ALL) },
   later: { path: fileOf(`${ALL}\n${line({ external_id: "later-1" })}`) },
 });
+// B-F3: a source with several versions in one file (each line a version), and a later state with
+// a line removed, both pass the contract suite for this collector
+connectorContract("jsonl-import (versions of one source, a removed line)", createJsonlConnector, {
+  config: {
+    path: fileOf(
+      [
+        line({ external_id: "v" }),
+        line({ external_id: "w" }),
+        line({ external_id: "v", version: 2, content: "second" }),
+        line({ external_id: "v", version: 3, content: "third" }),
+      ].join("\n"),
+    ),
+  },
+  // w's line is gone, v has a fourth version
+  later: {
+    path: fileOf(
+      [
+        line({ external_id: "v" }),
+        line({ external_id: "v", version: 2, content: "second" }),
+        line({ external_id: "v", version: 3, content: "third" }),
+        line({ external_id: "v", version: 4, content: "fourth" }),
+      ].join("\n"),
+    ),
+  },
+  versionedSources: true,
+});
 connectorContract("jsonl-import (parsed lines)", createJsonlConnector, {
   config: { records: recordsOf(ALL, "conn-v02-chat") },
 });
@@ -108,13 +134,13 @@ describe("JSONL Connector: mapping (I01-R22)", () => {
     });
   });
 
-  it("declares all five capabilities (I01-R23)", () => {
+  it("declares deletionsOnRescan false: a removed line is no deletion (I01-R23)", () => {
     expect(createJsonlConnector().manifest.capabilities).toEqual({
       incremental: true,
       deletes: true,
       accessScope: true,
       fullRescan: true,
-      deletionsOnRescan: true,
+      deletionsOnRescan: false,
     });
   });
 

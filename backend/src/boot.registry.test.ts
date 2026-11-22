@@ -157,6 +157,17 @@ describe("the registry boot builds reaches the product paths", () => {
     expect(changes).toContain("source-deleted");
   });
 
+  it("the local import API (instance importer entries, I01-R24)", async () => {
+    const { changes, registry } = spied();
+    const { post } = await boot(registry);
+    const res = await post(routes.imports.path, {
+      instanceId: "api-registry",
+      content: readFileSync(GOLDEN, "utf8"),
+    });
+    expect(res.status).toBe(200);
+    expect(changes).toContain("source-deleted");
+  });
+
   it("the extraction's candidate lineage (runner registry)", async () => {
     const { lineageKinds, registry } = spied();
     const { db, post } = await boot(registry);

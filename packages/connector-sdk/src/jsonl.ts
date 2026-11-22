@@ -20,15 +20,17 @@ import { createHash } from "node:crypto";
 export const JSONL_IMPORT_KIND = "jsonl-import";
 
 /**
- * What the JSONL Connector declares: all five true (I01-R23). The import API judges its
- * page by the same declaration, so a line is accepted or refused alike on both paths.
+ * What the JSONL Connector declares (I01-R23): `deletionsOnRescan` is false, because a line
+ * removed from a file is no deletion (a deletion is a `delete` line); the rescan of an edited
+ * file therefore raises `deletionsMayBeMissed`. The import API judges its page by the same
+ * declaration, so a line is accepted or refused alike on both paths.
  */
 export const JSONL_CAPABILITIES: ConnectorCapabilities = {
   incremental: true,
   deletes: true,
   accessScope: true,
   fullRescan: true,
-  deletionsOnRescan: true,
+  deletionsOnRescan: false,
 };
 
 /** Provisional (I01-R24): the most a file or a request body may hold. */

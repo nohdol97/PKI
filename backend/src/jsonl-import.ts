@@ -13,11 +13,13 @@ import type {
   ImportLineError,
   ImportRecord,
 } from "@pki/contracts";
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { readConnectorKind, type SqlDriver } from "@pki/storage";
 import { syncConnector, type SyncOptions } from "./connectors.ts";
 import { parseJsonl, splitRounds, type JsonlLine } from "./jsonl-lines.ts";
 
-export const JSONL_CONNECTOR_KIND = "jsonl-import";
+/** The one constant is the SDK's; this name stays for the tests that import it from here. */
+export { JSONL_IMPORT_KIND as JSONL_CONNECTOR_KIND };
 /** Provisional: distinct instances one file may name; each leaves a permanent row. */
 export const MAX_IMPORT_INSTANCES = 32;
 /** Provisional: refused lines listed in an answer; `errorCount` counts them all. */
@@ -60,7 +62,7 @@ async function importInstance(
     try {
       const connector = options.createConnector();
       await connector.initialize({ records: round.map((l): ImportRecord => l.record) });
-      const synced = await syncConnector(db, instanceId, JSONL_CONNECTOR_KIND, connector, {
+      const synced = await syncConnector(db, instanceId, JSONL_IMPORT_KIND, connector, {
         ...(options.runner ? { runner: options.runner } : {}),
         ...(options.projections ? { projections: options.projections } : {}),
         ...(options.clock ? { clock: options.clock } : {}),
@@ -119,7 +121,7 @@ export async function importJsonl(
   };
   const boundElsewhere = (id: string) => {
     const kind = readConnectorKind(db, id);
-    return kind !== undefined && kind !== JSONL_CONNECTOR_KIND;
+    return kind !== undefined && kind !== JSONL_IMPORT_KIND;
   };
   for (const [instanceId, lines] of instances) {
     if (boundElsewhere(instanceId)) {

@@ -5,7 +5,8 @@
 // was made has another hash, which expires the cursor, so the fixed file read again from
 // the start is a full rescan and the store's rules (I01-R10) drop what it holds
 // already. Deletions are lines of the file (`delete`), read again by every rescan, so
-// `deletionsOnRescan` is true; a line removed from the file is no deletion. Each line
+// `deletionsOnRescan` is false: a line removed from the file is no deletion, so the rescan of an
+// edited file raises `deletionsMayBeMissed`. Each line
 // is one version, so a file with several versions of a source hands them on in line
 // order and the store judges their order (I01-R10): that is more than the Connector
 // contract's one upsert per source per read, which the contract scenarios keep to. The

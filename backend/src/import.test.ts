@@ -581,7 +581,7 @@ describe("import.api", () => {
 });
 
 describe("sync.rescan ⑥: the file collector's edited file", () => {
-  it("is rescanned, with no deletionsMayBeMissed, adding only what is new", async () => {
+  it("is rescanned, raises deletionsMayBeMissed (a removed line is no deletion), adding only what is new", async () => {
     const path = fileOf([line({ external_id: "a" }), line({ external_id: "b" })].join("\n"));
     const m = await collector(path);
     expect(await m.sync("file")).toMatchObject({ created: 2, rescanned: false });
@@ -597,13 +597,13 @@ describe("sync.rescan ⑥: the file collector's edited file", () => {
     const second = await sync(m);
     expect(second).toMatchObject({
       rescanned: true,
-      deletionsMayBeMissed: false,
+      deletionsMayBeMissed: true,
       created: 1,
       unchanged: 2,
       tombstoned: 1,
     });
     expect(second.stopped).toBeUndefined();
-    expect(m.list()[0]).not.toHaveProperty("deletionsMayBeMissed");
+    expect(m.list()[0]).toMatchObject({ deletionsMayBeMissed: true });
     // a source a line was removed for stays: only a delete line deletes
     writeFileSync(path, line({ external_id: "a" }));
     const third = await sync(m);

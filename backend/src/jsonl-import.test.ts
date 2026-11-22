@@ -345,7 +345,9 @@ describe("importJsonl", () => {
       const deletions = records.filter((r) => r.operation === "delete").length;
       const revokes = records.filter((r) => r.operation === "revoke").length;
       const result = await importJsonl(db, text);
-      expect(deletions + revokes).toBeGreaterThan(0);
+      // every golden file has a delete line and a revoke line, each checked on its own
+      expect(deletions).toBeGreaterThan(0);
+      expect(revokes).toBeGreaterThan(0);
       expect(result.received).toBe(records.length);
       expect(result.created + deletions + revokes + result.errorCount).toBe(records.length);
       expect(result.errors).toEqual([]);
