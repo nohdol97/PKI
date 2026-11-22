@@ -8,7 +8,8 @@
     ".": "./e2e/launch.ts"
   },
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build": "node build/build.ts"
   },
   "dependencies": {
     "@pki/contracts": "workspace:*",
@@ -16,6 +17,8 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "electron": "45.4.1"
+    "@pki/testkit": "workspace:*",
+    "electron": "45.4.1",
+    "rolldown": "1.2.19"
   }
 }

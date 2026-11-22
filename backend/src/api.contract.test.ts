@@ -19,8 +19,8 @@ import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FakeProvider, ProposingKnowledgeEngine, send } from "@pki/testkit";
 import {
-  connectorInstances,
-  connectorKinds,
+  fixtureConnectorKinds,
+  fixtureConnectors,
   productAdapters,
   productCalls,
   productEgress,
@@ -135,16 +135,16 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     const { broker } = productCalls(db, egress, { providers: [extractor] });
     runner = productRunner(db, broker, { engine: bound, projections });
     const failing = () => ({
-      ...connectorKinds["test-fixtures"](),
+      ...fixtureConnectorKinds()["test-fixtures"](),
       getChanges: () => Promise.reject(new Error("connector broke")),
     });
     const connectors = await createConnectorManager(
       db,
       [
-        ...connectorInstances(FIXTURES),
+        ...fixtureConnectors(FIXTURES).instances,
         { id: "broken", kind: "failing", config: { file: FIXTURES } },
       ],
-      { ...connectorKinds, failing },
+      { ...fixtureConnectorKinds(), failing },
     );
     server = await startServer({
       token: TOKEN,

@@ -203,8 +203,11 @@ export function productCalls(
     userActions: ledger.redeemer,
     candidates: knowledgeCandidates(db),
     egress,
+    // the pick reaches the gate in a test build only; folded away from any other
     execution: createExecutionGate(
-      options.testBuild === undefined ? { db } : { db, testBuild: options.testBuild },
+      BUILD_KIND === "test" && options.testBuild !== undefined
+        ? { db, testBuild: options.testBuild }
+        : { db },
     ),
     recorder: createCallRecorder(db),
   });
@@ -284,12 +287,47 @@ export function releaseOnPolicyChange(
 
 export const CANONICAL_DB_FILE = "pki.sqlite";
 
+/** The product's Connector kinds: the site kinds, listed as not implemented (V01-R18). */
 export const connectorKinds = {
-  "test-fixtures": createFixtureConnector,
   "site-mail": () => createSiteConnector("site-mail"),
   "site-messenger": () => createSiteConnector("site-messenger"),
   "site-wiki": () => createSiteConnector("site-wiki"),
 } satisfies Record<string, ConnectorFactory>;
+
+/**
+ * Source runs and tests only (dev.ts, shell-options.ts): the product's kinds plus
+ * the test Connector. Nothing in the production build calls it, so the bundle
+ * leaves the test Connector out (V01-T15, "T04가 넘기는 것" ③). A function, not a
+ * constant: an unused object spread is kept by the bundler as a possible side effect.
+ */
+export function fixtureConnectorKinds() {
+  return {
+    ...connectorKinds,
+    "test-fixtures": createFixtureConnector,
+  } satisfies Record<string, ConnectorFactory>;
+}
+
+/** The Connector instances a backend starts with and the kinds that build them. */
+export interface ConnectorSet {
+  instances: ConnectorInstanceConfig[];
+  kinds: Record<string, ConnectorFactory>;
+}
+
+/** The product's: one instance per site kind. */
+export function productConnectors(): ConnectorSet {
+  return { instances: connectorInstances(), kinds: connectorKinds };
+}
+
+/** A source run's (development and tests): the product's plus the test Connector replaying `file`. */
+export function fixtureConnectors(file: string): ConnectorSet {
+  return {
+    instances: [
+      { id: "fixtures", kind: "test-fixtures", config: { file } },
+      ...connectorInstances(),
+    ],
+    kinds: fixtureConnectorKinds(),
+  };
+}
 
 /**
  * The Sources screen's JSONL import (V02-R2). `projections` (productProjections)
@@ -319,15 +357,7 @@ export function openCanonicalDb(dir: string = dataDirectory()): SqlDriver {
   return db;
 }
 
-/**
- * One instance per site kind (listed as not implemented), plus the test
- * Connector when a synthetic fixtures file is given (development and tests).
- */
-export function connectorInstances(fixturesFile?: string): ConnectorInstanceConfig[] {
-  return [
-    ...(fixturesFile
-      ? [{ id: "fixtures", kind: "test-fixtures", config: { file: fixturesFile } }]
-      : []),
-    ...SITE_CONNECTOR_KINDS.map((kind) => ({ id: kind, kind, config: {} })),
-  ];
+/** One instance per site kind, listed as not implemented. */
+export function connectorInstances(): ConnectorInstanceConfig[] {
+  return SITE_CONNECTOR_KINDS.map((kind) => ({ id: kind, kind, config: {} }));
 }

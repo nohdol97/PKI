@@ -49,7 +49,7 @@ describe("gate-inputs rule", () => {
         "providers/src/verified-cli.ts",
       ].sort(),
     );
-    expect([...BUNDLER_CONFIGS]).toEqual(["vitest.config.ts"]);
+    expect([...BUNDLER_CONFIGS]).toEqual(["vitest.config.ts", "apps/desktop/build/bundle.ts"]);
   });
 
   ruleTester.run("gate-inputs", gateInputs, {
@@ -67,6 +67,11 @@ describe("gate-inputs rule", () => {
       {
         code: `export default { define: { "import.meta.${NAME}": '"test"' } };`,
         filename: viteConfig,
+      },
+      // the production build's bundler settings (V01-T15)
+      {
+        code: `const define = { "import.meta.${NAME}": JSON.stringify("production") };`,
+        filename: at("apps/desktop/build/bundle.ts"),
       },
       // decision code may use the OS, its own inputs and import.meta.url
       { code: 'import { platform } from "node:os"; platform();', filename: gate },

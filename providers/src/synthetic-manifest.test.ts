@@ -1,11 +1,13 @@
 // V01-R7 synthetic manifest: a build resource holding, for every synthetic item
 // in the repository, one hash binding title and body, with malicious variants
 // flagged. Nothing at runtime (data folder, environment, settings) can extend it.
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import committed from "./synthetic-manifest.json" with { type: "json" };
-import { buildSyntheticManifest } from "./build-synthetic-manifest.ts";
+import { buildSyntheticManifest, manifestIsCurrent } from "./build-synthetic-manifest.ts";
 import * as manifest from "./synthetic-manifest.ts";
 import { lookupSynthetic, syntheticHash } from "./synthetic-manifest.ts";
 
@@ -37,6 +39,40 @@ const material = JSON.parse(
 describe("build", () => {
   it("the committed manifest equals a fresh build from the repository", () => {
     expect(committed).toEqual(buildSyntheticManifest(root));
+  });
+
+  // the production build runs this check and stops on a stale list (V01-T15, T04 ①)
+  describe("check command", () => {
+    const script = resolve(import.meta.dirname, "build-synthetic-manifest.ts");
+    const check = (...args: string[]) =>
+      spawnSync(process.execPath, [script, "--check", ...args], { encoding: "utf8" });
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "pki-manifest-"));
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    it("passes on the committed manifest", () => {
+      expect([check().status, check().stderr]).toEqual([0, ""]);
+    });
+
+    it("fails on a list that differs from a fresh build, and rewrites nothing", () => {
+      const stale = join(dir, "synthetic-manifest.json");
+      const text = `${JSON.stringify(committed.slice(1), null, 2)}\n`;
+      writeFileSync(stale, text);
+      const run = check(stale);
+      expect(run.status).toBe(1);
+      expect(run.stderr).toMatch(/synthetic manifest is stale/);
+      expect(readFileSync(stale, "utf8")).toBe(text);
+      expect(manifestIsCurrent(root, stale)).toBe(false);
+    });
+
+    it("passes on a list equal to a fresh build", () => {
+      const fresh = join(dir, "synthetic-manifest.json");
+      writeFileSync(fresh, `${JSON.stringify(buildSyntheticManifest(root), null, 2)}\n`);
+      expect(check(fresh).status).toBe(0);
+      expect(manifestIsCurrent(root, fresh)).toBe(true);
+    });
   });
 
   it("covers every fixture record, golden source and the connection-test material", () => {

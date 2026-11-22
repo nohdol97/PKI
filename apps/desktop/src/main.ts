@@ -5,7 +5,10 @@
 // else the page might try: Node, other origins, new windows, permissions. It holds the
 // secret store (safeStorage ciphertext in the data directory) and answers the
 // backend's requests for a secret over the parent channel.
-// Switches (development and tests): --pki-user-data, --pki-data-dir, --pki-fixtures.
+// Switches of source runs (development and tests): --pki-data-dir, --pki-fixtures
+// (layout.ts); the production build has none and refuses to start with a
+// debugging switch (debugging.ts). Tests move userData with
+// Chromium's own --user-data-dir (V01-T15).
 import {
   app,
   BrowserWindow,
@@ -18,6 +21,7 @@ import {
   utilityProcess,
 } from "electron";
 import { dataDirectory } from "@pki/storage";
+import { url as inspectorUrl } from "node:inspector";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_ORIGIN, APP_SCHEME, createAppHandler } from "./app-protocol.ts";
@@ -25,17 +29,17 @@ import { startBackendProcess, type ForkBackend } from "./backend-process.ts";
 import { superviseBackend, type Supervisor } from "./backend-supervisor.ts";
 import { BRIDGE, createBridgeHandlers, type BridgeFunction } from "./bridge.ts";
 import { createSecretStore, electronCipher } from "./secret-store.ts";
-import { lockDown, secureWebPreferences } from "./window.ts";
+import { debuggingRequested } from "./debugging.ts";
+import { BACKEND_ENTRY, REFUSE_DEBUGGING, switches, WEB_ROOT } from "./layout.ts";
+import { loadScreens, lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
 
-const WEB_ROOT = fileURLToPath(new URL("../../web/dist/", import.meta.url));
-const BACKEND_ENTRY = fileURLToPath(new URL("../../../backend/src/shell.ts", import.meta.url));
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 /** In the data directory: per OS user, not roaming (ADR 0010). */
 const SECRETS_FILE = "secrets.json";
 /** Restarts of a backend that exited by itself, per shell run (V01-T16, provisional). */
 const MAX_RESTARTS = 3;
 
-const option = (name: string) => app.commandLine.getSwitchValue(name) || undefined;
+const { dataDir, fixtures } = switches((name) => app.commandLine.getSwitchValue(name) || undefined);
 
 const forkUtility: ForkBackend = (entry, args, env) => {
   const child = utilityProcess.fork(entry, args, { env, serviceName: "PKI backend" });
@@ -61,6 +65,8 @@ const forkUtility: ForkBackend = (entry, args, env) => {
 let backend: Supervisor | undefined;
 let window: BrowserWindow | undefined;
 let quitting = false;
+/** A quit was asked for (SIGTERM, the menu), whether or not start-up has finished. */
+let quitRequested = false;
 
 async function run() {
   await app.whenReady();
@@ -68,9 +74,10 @@ async function run() {
     grant(false),
   );
   session.defaultSession.setPermissionCheckHandler(() => false);
+  refuseDownloads(session.defaultSession);
 
   const secrets = createSecretStore({
-    file: join(option("pki-data-dir") ?? dataDirectory(), SECRETS_FILE),
+    file: join(dataDir ?? dataDirectory(), SECRETS_FILE),
     cipher: electronCipher(safeStorage, process.platform),
   });
   backend = await superviseBackend({
@@ -79,8 +86,8 @@ async function run() {
         fork: forkUtility,
         entry: BACKEND_ENTRY,
         origin: APP_ORIGIN,
-        dataDir: option("pki-data-dir"),
-        fixtures: option("pki-fixtures"),
+        dataDir,
+        fixtures,
         secrets,
         token,
       }),
@@ -127,7 +134,7 @@ async function run() {
     webPreferences: secureWebPreferences(PRELOAD),
   });
   window.once("ready-to-show", () => window?.show());
-  await window.loadURL(`${APP_ORIGIN}/`);
+  await loadScreens(window, WEB_ROOT);
 }
 
 // Must precede app ready: the screens' scheme behaves like https (secure, standard origin).
@@ -135,11 +142,21 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 
-// The single-instance lock lives in userData, so the switch must come first.
-const userData = option("pki-user-data");
-if (userData) app.setPath("userData", userData);
+const debugging =
+  REFUSE_DEBUGGING &&
+  debuggingRequested({
+    hasSwitch: (name) => app.commandLine.hasSwitch(name),
+    execArgv: process.execArgv,
+    nodeOptions: process.env.NODE_OPTIONS,
+    inspectorActive: inspectorUrl() !== undefined,
+  });
 
-if (!app.requestSingleInstanceLock()) {
+if (debugging) {
+  // before the window and the backend exist: nothing to reach through the door
+  console.error("PKI: refusing to start with a debugging switch");
+  app.exit(1);
+} else if (!app.requestSingleInstanceLock()) {
+  // The single-instance lock lives in userData (Chromium's --user-data-dir moves both).
   app.exit(0);
 } else {
   app.on("web-contents-created", (_event, contents) => lockDown(contents));
@@ -147,6 +164,7 @@ if (!app.requestSingleInstanceLock()) {
     if (window?.isMinimized()) window.restore();
     window?.focus();
   });
+  app.on("before-quit", () => (quitRequested = true));
   app.on("window-all-closed", () => app.quit());
   app.on("will-quit", (event) => {
     if (quitting || !backend) return;
@@ -158,7 +176,15 @@ if (!app.requestSingleInstanceLock()) {
     void backend.stop().finally(() => setImmediate(() => app.quit()));
   });
   run().catch((error: unknown) => {
-    console.error(`PKI shell failed to start: ${error instanceof Error ? error.message : error}`);
+    // quit while starting (SIGTERM): the backend or the window's load is cut short, not
+    // failed, and a modal error box would hold the quit until someone closes it
+    // (V01-T15 artifact.shell)
+    const why = error instanceof Error ? error.message : error;
+    if (quitRequested || window?.isDestroyed()) {
+      console.error(`PKI shell start stopped by a quit: ${why}`);
+      return;
+    }
+    console.error(`PKI shell failed to start: ${why}`);
     dialog.showErrorBox("PKI", "앱을 시작하지 못했습니다.");
     app.exit(1);
   });

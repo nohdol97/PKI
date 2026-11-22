@@ -691,7 +691,7 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 1. **V02-T04·T08(착수 전)이 I01-T01·T05를 막는다.** 규격 v2는 V02-T04의 JSONL 수집기를 함께 옮겨야 한다. V02-T04를 이 spec의 규칙(`jsonl-import`, `namespace`, `revision`, `POST /api/imports`)대로 만들면 옮기는 일이 줄어든다. 조정자가 V02 세션에 전한다. 합성 등급을 받을 수 있는 종류 목록(`providers/src/broker.ts`, V01 "T07이 넘기는 것" 6)에 이 종류가 들어가는지도 본다.
 2. **V02-T08·T05·T10이 I01-T02·T07을 막는다.** 확인할 것은 tombstone 사건을 넘길 함수, 근거 행을 쓰는 곳, 근거 API의 모양이다.
 3. **I04가 I01-T02·T06을 막는다.** I01-T02는 I04-T05(tombstone 모양 전부)·I04-T07(`identityKey`)·I04-T01(`propagate`)·I04-T05(`applyTombstone`)를, I01-T06은 I04-T09(`ScopePolicy.compare`)를 기다린다. I04-T05는 I01에 기대지 않는다(I04가 반영함).
-4. **V01-T15(머지 전)**: 제품 빌드에서 `test-fixtures`를 빼는 작업이다. I01-T09의 종류 검사는 T15가 정한 제품 구성을 대상으로 한다. T15가 아직 없으면 그 검사는 T15와 함께 들어간다.
+4. **V01-T15(머지 전)**: 제품 빌드에서 `test-fixtures`를 빼는 작업이다. I01-T09의 종류 검사는 T15가 정한 제품 구성을 대상으로 한다. T15가 아직 없으면 그 검사는 T15와 함께 들어간다. (V01-T15가 정한 제품 구성: `backend/src/composition.ts`의 `connectorKinds`·`productConnectors()`, 테스트 Connector는 `fixtureConnectors()`에만. V01 spec "T15가 넘기는 것" 4항)
 5. **I02 spec(아직 `main`에 없음)**: I01-R7의 위치표는 I02 spec "위치표의 모양"(c613fbc)을 옮긴 것이다. I02가 머지될 때 모양이 그대로인지 본다. ADR 0015는 I02가 쓴다.
 
 **사용자가 정하면 바뀌는 것**
@@ -754,3 +754,4 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 | 2026-11-22 | "T01이 넘기는 것" 추가: 규격의 자리와 이름, 이 PR에서 정한 값의 제한, 버전 검사 입구와 `reason`, 스키마 v10(namespace, 기본값 없음), T02 전까지의 동작, 화면 삭제의 빈 namespace, 공용 수집기의 namespace와 능력, 계약 묶음의 v2 검사 | 작업 분해 | I01-T01 구현 |
 | 2026-11-22 | T01 검토 반영: "T01이 넘기는 것" 6을 namespace가 든 목록과 삭제 요청으로 고침, 3에 읽을 수 없는 manifest, 7에 T05가 V02 정체의 원본을 옮길 의무, 후속의 V02 행을 반영함으로 | 작업 분해(T01이 넘기는 것), 후속 | I01-T01 검토 A-S2·A-S3·B-S1·B-S2 |
 | 2026-11-22 | "T01이 넘기는 것" 4의 스키마 번호를 v12로(I04-T01의 v10, I03-T01의 v11 뒤), `jobs`·`invalidations`의 참조 유지 | 작업 분해(T01이 넘기는 것) | origin/main 재기반 |
+| 2026-11-22 | "작업을 막는 것" 4에 V01-T15가 정한 제품 구성의 위치(`connectorKinds`·`productConnectors()`, 테스트 Connector는 `fixtureConnectors()`)를 적음 | 작업을 막는 것 4 | V01-T15 독립 검토 B-F7 |

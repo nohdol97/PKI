@@ -21,7 +21,8 @@ import { relative, resolve, sep } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 export const BUILD_KIND_MODULE = "providers/src/build-kind.ts";
-export const BUNDLER_CONFIGS = new Set(["vitest.config.ts"]);
+// the test runner, and the production build (V01-T15)
+export const BUNDLER_CONFIGS = new Set(["vitest.config.ts", "apps/desktop/build/bundle.ts"]);
 export const DECISION_MODULES = new Set([
   // the egress side (V01-T11): whether and where a Provider request may leave
   "providers/src/adapters/openai-compatible.ts",

@@ -27,6 +27,24 @@ test.afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("the shell's session cancels downloads (V01-T15)", async () => {
+  // refuseDownloads is bound to the session the window uses, and it cancels: a
+  // download the main process itself starts never begins
+  const result = await app.evaluate(async ({ session, webContents }) => {
+    const listeners = session.defaultSession.listenerCount("will-download");
+    const contents = webContents.getAllWebContents()[0];
+    const started = new Promise<string>((resolve) => {
+      session.defaultSession.once("will-download", (_event, item) =>
+        item.once("done", (_e, state) => resolve(state)),
+      );
+      setTimeout(() => resolve("no-download-event"), 5_000);
+    });
+    contents?.downloadURL("app://pki/index.html");
+    return { listeners, state: await started };
+  });
+  expect(result).toEqual({ listeners: 1, state: "cancelled" });
+});
+
 test("the window is sandboxed and isolated from Node", async () => {
   // Electron 45 no longer exposes a window's preferences (getLastWebPreferences), so
   // each setting is shown by its effect; secureWebPreferences pins the values themselves.

@@ -32,7 +32,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend, type BootedBackend } from "./boot.ts";
-import { openCanonicalDb, productAdapters, productCalls, productEgress } from "./composition.ts";
+import {
+  fixtureConnectors,
+  openCanonicalDb,
+  productAdapters,
+  productCalls,
+  productEgress,
+} from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -371,7 +377,7 @@ describe("the product on a PC with no CLI and no network (all five at once)", ()
     try {
       booted = await bootBackend({
         dataDir,
-        fixtures,
+        connectors: fixtureConnectors(fixtures),
         token: TOKEN,
         allowedOrigins: [],
         secrets: NO_SECRET_STORE,

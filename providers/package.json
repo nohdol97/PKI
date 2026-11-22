@@ -8,7 +8,8 @@
     "./adapters": "./src/adapters/index.ts"
   },
   "scripts": {
-    "build:synthetic-manifest": "node src/build-synthetic-manifest.ts"
+    "build:synthetic-manifest": "node src/build-synthetic-manifest.ts",
+    "check:synthetic-manifest": "node src/build-synthetic-manifest.ts --check"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.2",
