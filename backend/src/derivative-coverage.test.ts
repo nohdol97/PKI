@@ -59,6 +59,31 @@ describe("derivatives.schema-coverage", () => {
     db.close();
   });
 
+  it("classifies the four tables S01-T01 adds under the kind of the row they record", () => {
+    const db = freshDb();
+    expect(checkTableCoverage(db, registry)).toEqual([]);
+    expect(
+      Object.fromEntries(
+        ["item_history", "fact_history", "relation_history", "insight_user_inputs"].map((t) => [
+          t,
+          TABLE_CLASSIFICATION[t],
+        ]),
+      ),
+    ).toEqual({
+      item_history: { class: "kind", kind: "item" },
+      fact_history: { class: "kind", kind: "fact" },
+      relation_history: { class: "kind", kind: "relation" },
+      insight_user_inputs: { class: "kind", kind: "insight" },
+    });
+    // each stands or falls with its classification: unclassified, the check names it
+    const rest = Object.fromEntries(
+      Object.entries(TABLE_CLASSIFICATION).filter(([name]) => !name.endsWith("_history")),
+    );
+    const problems = checkTableCoverage(db, registry, rest);
+    expect(problems.filter((p) => p.includes("is not classified"))).toHaveLength(3);
+    db.close();
+  });
+
   it("an unclassified table fails and the message names it and where to classify it", () => {
     const db = freshDb();
     db.exec("CREATE TABLE brand_new (id INTEGER PRIMARY KEY)");
@@ -87,8 +112,12 @@ describe("derivatives.schema-coverage", () => {
   it("a table whose kind is missing from the registry GIVEN fails (not the default registry)", () => {
     const db = freshDb();
     const problems = checkTableCoverage(db, without("fact"));
-    expect(problems).toEqual([expect.stringContaining('"facts"')]);
-    expect(problems[0]).toContain('"fact"');
+    // a fact's history table is classified under the fact kind too (S01-T01)
+    expect(problems).toEqual([
+      expect.stringContaining('"facts"'),
+      expect.stringContaining('"fact_history"'),
+    ]);
+    expect(problems.every((p) => p.includes('"fact"'))).toBe(true);
     db.close();
   });
 
