@@ -561,7 +561,9 @@ const v12: Migration = (db) =>
 // - `last_revision`: the source system's revision at the deletion, empty for the
 //   screen's deletion and for rows from before v13. `lifted_at`: when the user
 //   lifted it, empty while it blocks arrivals.
-// - Every row is copied: nothing a v12 row holds is dropped. The three reasons stay
+// - Both numbers are whole (typeof checks: INTEGER affinity alone keeps 5.5 as it is).
+// - Every row is copied: nothing a v12 row holds is dropped; a v12 row whose version is
+//   not a whole number (only hand-written SQL could store one) fails the whole migration. The three reasons stay
 //   (v9 already turned `deleted` into `user-deleted`, and its CHECK admits no other).
 // - The table is rebuilt under its own name, as in v9 (its CHECK changes). Its
 //   triggers: an insert raises the change sequence, an update only when the cover
@@ -573,8 +575,10 @@ const v13: Migration = (db) =>
     DROP TABLE tombstones;
     CREATE TABLE tombstones (
       source_id INTEGER PRIMARY KEY REFERENCES sources (id),
-      covers_version INTEGER NOT NULL CHECK (covers_version >= 0),
-      last_revision INTEGER CHECK (last_revision IS NULL OR last_revision >= 1),
+      covers_version INTEGER NOT NULL
+        CHECK (typeof(covers_version) = 'integer' AND covers_version >= 0),
+      last_revision INTEGER
+        CHECK (last_revision IS NULL OR (typeof(last_revision) = 'integer' AND last_revision >= 1)),
       at TEXT NOT NULL,
       reason TEXT NOT NULL CHECK (reason IN ('user-deleted', 'source-deleted', 'access-revoked')),
       lifted_at TEXT

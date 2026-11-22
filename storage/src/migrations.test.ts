@@ -1125,6 +1125,14 @@ describe("schema v13 (I04-T05, I04-R9)", () => {
     expect(() => insert(1, "lifted")).toThrow(/CHECK/);
     expect(() => insert(-1, "user-deleted")).toThrow(/CHECK/);
     expect(() => insert(1, "source-deleted", 0)).toThrow(/CHECK/);
+    // whole numbers only: a fraction would be stored as it is (INTEGER affinity keeps 5.5)
+    expect(() => insert(1.5, "source-deleted")).toThrow(/CHECK/);
+    expect(() => insert(1, "source-deleted", 5.5)).toThrow(/CHECK/);
+    expect(() =>
+      db.run(
+        "INSERT INTO tombstones (source_id, covers_version, at, reason) VALUES (4, 'x', 't', 'user-deleted')",
+      ),
+    ).toThrow(/CHECK/);
     expect(() =>
       db.run("INSERT INTO tombstones (source_id, at, reason) VALUES (4, 't', 'user-deleted')"),
     ).toThrow(/NOT NULL/);
