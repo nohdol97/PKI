@@ -11,6 +11,7 @@ import {
   type EmbeddingProvider,
   type EmbeddingStatusEntry,
   type ErrorResponse,
+  type OntologyChangeRequest,
   type LLMProvider,
   type ProviderCheck,
   type ProviderId,
@@ -63,12 +64,17 @@ import {
   listProviderCalls,
   LEGACY_CLEANUP_SETTING,
   readFact,
+  checkOntologyChange,
+  readOntologyHistory,
   readSemanticHistory,
   readSemanticState,
   readSetting,
   schemaVersion,
   writeSetting,
   type DerivativeRegistry,
+  type OntologyActionOutcome,
+  type OntologyChange,
+  type UserChangeOutcome,
   type SqlDriver,
   type UndoResult,
   type UserDecisions,
@@ -648,6 +654,44 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         : { error: "not-found" };
     });
   };
+  /** An outcome as the contract types it: the refusal's code list is a mutable array. */
+  const plainOutcome = (outcome: OntologyActionOutcome | UserChangeOutcome) =>
+    outcome.status === "refused"
+      ? { ...outcome, schemaErrors: [...outcome.schemaErrors] }
+      : outcome;
+  /** The request's one object as the storage's union: the schema's refinement guarantees what each `op` carries. */
+  const changeOf = (c: OntologyChangeRequest): OntologyChange =>
+    c.op === "add"
+      ? { op: "add", name: c.name, rule: c.rule as NonNullable<typeof c.rule> }
+      : c.op === "change-rule"
+        ? {
+            op: "change-rule",
+            name: c.name,
+            elementKind: c.elementKind as NonNullable<typeof c.elementKind>,
+            rule: c.rule as NonNullable<typeof c.rule>,
+          }
+        : {
+            op: "retire",
+            name: c.name,
+            elementKind: c.elementKind as NonNullable<typeof c.elementKind>,
+          };
+  const serverTime = () => new Date(options.now?.() ?? Date.now()).toISOString();
+  /**
+   * One user action on an element, in one transaction with the visibility check: the id's one
+   * not-found is answered before the action, so the action never meets an absent element.
+   */
+  const ontologyAction = (
+    id: number,
+    act: (decisions: UserDecisions, at: string) => OntologyActionOutcome,
+  ): RouteResponse<"ontologyDecide"> | { error: ErrorResponse["error"] } => {
+    const { decisions } = options;
+    if (!decisions) return { error: "not-found" };
+    return options.db.transaction(() => {
+      if (!gate.ontologyShown(id)) return { error: "not-found" as const };
+      const outcome = act(decisions, serverTime());
+      return plainOutcome(outcome);
+    });
+  };
   return {
     status: async () => ({
       backend: { state: "ready" },
@@ -807,6 +851,33 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     semanticCorrect: async ({ correction }) => semanticCorrect(correction),
     semanticUndo: async (ref) =>
       semanticAction(ref, (decisions, at) => decisions.undo(options.db, ref, at)),
+    // S01-R23, T07: the type definitions. The user's operations take the same one entry; an id that is
+    // absent, deleted or hidden is the one same not-found; a refusal is a code with counts in a 200 body.
+    ontology: async () => gate.ontology(),
+    ontologyHistory: async ({ id }) =>
+      gate.ontologyShown(id)
+        ? { lines: readOntologyHistory(options.db, id) }
+        : { error: "not-found" },
+    ontologyCheck: async (change) => {
+      const check = checkOntologyChange(options.db, changeOf(change));
+      return {
+        duplicates: check.duplicates.length,
+        schemaErrors: [...check.schemaErrors],
+        impact: check.impact,
+        applicable: check.applicable,
+      };
+    },
+    ontologyChange: async (change) => {
+      const { decisions } = options;
+      if (!decisions) return { error: "not-found" };
+      return options.db.transaction(() => {
+        return plainOutcome(decisions.ontology.change(options.db, changeOf(change), serverTime()));
+      });
+    },
+    ontologyDecide: async ({ id, action }) =>
+      ontologyAction(id, (decisions, at) => decisions.ontology.decide(options.db, id, action, at)),
+    ontologyUndo: async ({ id }) =>
+      ontologyAction(id, (decisions, at) => decisions.ontology.undo(options.db, id, at)),
   };
 }
 

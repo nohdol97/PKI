@@ -5,21 +5,24 @@
 // snippet, order or error of it reaches the caller. A registry that cannot judge throws and the call fails
 // (the server answers a generic 500): a row is never shown unjudged.
 import { createProductRegistry } from "@pki/knowledge-engine";
-import type { SemanticKind, SemanticList, SourceSummary } from "@pki/contracts";
+import type { RouteResponse, SemanticKind, SemanticList, SourceSummary } from "@pki/contracts";
 import {
   findSources,
   listActiveInsights,
+  listOntologyElements,
   listInsightEvidenceIds,
   listSemanticFacts,
   listSemanticItems,
   listSemanticRelations,
   listSources,
   readEvidenceSource,
+  readOntologyElementById,
   readInsightEvidence,
   readSemanticState,
   type ActiveInsight,
   type DerivativeRegistry,
   type DerivedRef,
+  type ElementRule,
   type EvidenceSourceView,
   type InsightEvidenceRow,
   defaultScopePolicy,
@@ -31,6 +34,14 @@ import {
 export const defaultReadRegistry: DerivativeRegistry = createProductRegistry({
   policy: defaultScopePolicy,
 });
+
+/** A rule as the contract types it: mutable lists. */
+const plain = (rule: ElementRule): RouteResponse<"ontology">["elements"][number]["rule"] =>
+  rule.elementKind === "fact-kind"
+    ? { ...rule, itemTypes: [...rule.itemTypes] }
+    : rule.elementKind === "relation-type"
+      ? { ...rule, subjectTypes: [...rule.subjectTypes], objectTypes: [...rule.objectTypes] }
+      : rule;
 
 export interface ReadGate {
   sources(): SourceSummary[];
@@ -46,6 +57,13 @@ export interface ReadGate {
   semantic(): SemanticList;
   /** Whether the registry row is stored and shown: the one answer for a row that is absent, deleted or hidden. */
   semanticShown(kind: SemanticKind, id: number): boolean;
+  /**
+   * The type definitions shown (S01-R23). A `candidate` or `rejected` element follows its lineage and
+   * is judged like any derived row; a `verified` or retired one has none and is always shown.
+   */
+  ontology(): RouteResponse<"ontology">;
+  /** Whether the element is stored and shown: the one answer for an id that is absent, deleted or hidden. */
+  ontologyShown(id: number): boolean;
 }
 
 export interface ReadGateOptions {
@@ -151,5 +169,12 @@ export function createReadGate(
     },
     semanticShown: (kind, id) =>
       readSemanticState(db, { kind, id }) !== undefined && isShown(kind, id),
+    ontology: () => ({
+      elements: only(listOntologyElements(db), "ontology", (e) => e.id, "display").map((e) => ({
+        ...e,
+        rule: plain(e.rule),
+      })),
+    }),
+    ontologyShown: (id) => readOntologyElementById(db, id) !== undefined && isShown("ontology", id),
   };
 }

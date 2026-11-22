@@ -929,6 +929,60 @@ describe("the user entry and the registry's writes (S01-T02)", () => {
     ).toEqual([]);
   });
 
+  it("fails on a row written into the type definitions' tables outside storage/src/ontology.ts, in any statement form (S01-T07)", async () => {
+    for (const sql of [
+      "INSERT INTO ontology_elements (element_kind, name) VALUES ('item-type', 'X')",
+      "insert  or  ignore\n into ontology_basis(element_id) values (1)",
+      "INSERT INTO ontology_history (element_id) VALUES (1)",
+      "REPLACE INTO ontology_elements (element_kind) VALUES ('item-type')",
+      "INSERT OR REPLACE INTO ontology_basis (element_id) VALUES (1)",
+      'INSERT INTO main."ontology_history" (element_id) VALUES (1)',
+    ]) {
+      const code = `export const q = ${JSON.stringify(sql)};\n`;
+      for (const file of [
+        "backend/src/server.ts",
+        "knowledge-engine/src/canonical-kinds.ts",
+        "storage/src/knowledge.ts",
+        "storage/src/semantic-lifecycle.ts",
+      ]) {
+        expect(await ids(code, file), `${file}: ${sql}`).toEqual(["registryWrite"]);
+      }
+      expect(
+        await ids(`export const q = \`${sql}\`;\n`, "knowledge-engine/src/extraction.ts"),
+      ).toEqual(["registryWrite"]);
+    }
+  });
+
+  it("lets storage/src/ontology.ts, the migration's seed, a test file and the test seed write the type definitions' tables, and a DELETE or a read passes", async () => {
+    const insert = 'export const q = "INSERT INTO ontology_history (element_id) VALUES (1)";\n';
+    expect(await ids(insert, "storage/src/ontology.ts")).toEqual([]);
+    expect(await ids(insert, "storage/src/migrations.ts")).toEqual([]);
+    expect(await ids(insert, "storage/src/ontology-user.test.ts")).toEqual([]);
+    expect(await ids(insert, "packages/testkit/src/knowledge-status-seed.ts")).toEqual([]);
+    // the item tables' gate does not write the type definitions, nor does the ontology module write the item histories
+    expect(
+      await ids(
+        'export const q = "INSERT INTO fact_history (fact_id) VALUES (1)";\n',
+        "storage/src/ontology.ts",
+      ),
+    ).toEqual(["registryWrite"]);
+    for (const sql of [
+      "DELETE FROM ontology_basis WHERE element_id = 1",
+      "DELETE FROM ontology_elements WHERE id = 1",
+      "SELECT * FROM ontology_history",
+      "UPDATE ontology_elements SET status = 'verified' WHERE id = 1",
+      "INSERT INTO ontology_elements_copy SELECT * FROM ontology_elements",
+    ]) {
+      expect(
+        await ids(
+          `export const q = ${JSON.stringify(sql)};\n`,
+          "knowledge-engine/src/canonical-kinds.ts",
+        ),
+        sql,
+      ).toEqual([]);
+    }
+  });
+
   it("lets the gate module, a test file and the test seed write them, and other tables' inserts and replaces pass", async () => {
     const history = 'export const q = "INSERT INTO fact_history (fact_id) VALUES (1)";\n';
     expect(await ids(history, "storage/src/semantic-lifecycle.ts")).toEqual([]);

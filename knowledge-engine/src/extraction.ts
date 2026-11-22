@@ -23,6 +23,10 @@
 // candidates for the same version (V02-R13); they pass the same checks as the
 // answer (the extraction schema, the offered candidate IDs, the exact quote) and
 // are written with it, as candidates. An engine that fails proposes nothing.
+// Before anything is planned each fact and relation is fitted to the type definitions (S01-R21):
+// its item types, fact kind or relation type must be `verified` elements, the value must be of
+// the kind the fact kind's rule names, and a relation's ends must fit its direction; what does not
+// fit is dropped and counted in `other`. A `one` value count does not stop a write (R9 reads it).
 import type { KnowledgeCandidate, KnowledgeEngine, SourceVersionRef } from "@pki/contracts";
 import {
   EXTRACT_SCHEMA_VERSION,
@@ -35,6 +39,8 @@ import {
   automatedLifecycle,
   findSourceVersionId,
   insertItem,
+  listOntologyElements,
+  readItem,
   readSourceVersion,
   BOOKKEEPING_KIND,
   recordExtractionDrops,
@@ -43,6 +49,7 @@ import {
   saveRelation,
   type DerivativeRegistry,
   type DerivedItem,
+  type ElementRule,
   type EvidenceTarget,
   type KnowledgeAttributes,
   type SourceVersionRef as LineageRef,
@@ -128,6 +135,29 @@ async function proposals(
 }
 
 const OUTPUT = TASKS.extract[EXTRACT_SCHEMA_VERSION].output;
+
+/** A value of the kind the fact kind's rule names (S01-R21; the date kind is the old calendar-date check). */
+const valueFits = (valueType: "date" | "text" | "surface-form", value: string): boolean =>
+  valueType === "date" ? isDate(value) : value !== "";
+
+/** The `verified` type definitions, read when an answer is planned: the only ones a write may use. */
+function verifiedRules(db: SqlDriver) {
+  const rules = new Map<string, ElementRule>();
+  for (const e of listOntologyElements(db)) {
+    if (e.status === "verified") rules.set(`${e.elementKind}:${e.name}`, e.rule);
+  }
+  return {
+    itemType: (type: string | undefined) => type !== undefined && rules.has(`item-type:${type}`),
+    factKind: (name: string) => {
+      const rule = rules.get(`fact-kind:${name}`);
+      return rule?.elementKind === "fact-kind" ? rule : undefined;
+    },
+    relationType: (name: string) => {
+      const rule = rules.get(`relation-type:${name}`);
+      return rule?.elementKind === "relation-type" ? rule : undefined;
+    },
+  };
+}
 
 /**
  * The candidates in the answer's shape, each checked against the extraction
@@ -259,6 +289,8 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // carries a combination the policy refuses. The ones left out are counted as dropped.
     const drops = { quotes: 0, other: 0 };
     const candidateLineage = new Map<string, LineageRef[]>();
+    /** The stored type of each candidate item, read with its lineage: a candidate deleted during the call still has one. */
+    const candidateType = new Map<string, string>();
     const together: LineageRef[] = [own];
     const withheld: string[] = [];
     for (const found of findCandidates(db, `${stored.title}\n${stored.body}`)) {
@@ -266,6 +298,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       const lineage = registry.lineage(db, { kind: "item", id });
       if (registry.combinable(db, [...together, ...lineage])) {
         candidateLineage.set(id, lineage);
+        candidateType.set(id, (readItem(db, found) as { type: string }).type);
         together.push(...lineage);
       } else {
         drops.other++;
@@ -306,6 +339,14 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       items.set(item.ref, item);
     }
 
+    // S01-R21: what does not fit the verified type definitions is dropped. An existing item has the type
+    // it is stored with; a new one the type of the answer.
+    const rules = verifiedRules(db);
+    const typeOf = (ref: string): string | undefined => {
+      const item = items.get(ref);
+      if (!item) return undefined;
+      return item.existingItemId === null ? item.type : candidateType.get(item.existingItemId);
+    };
     const planned: Planned[] = [];
     const plan = (refs: string[], quote: string, entry: Omit<Planned, "span" | "quote">) => {
       if (!refs.every((ref) => items.has(ref))) return void drops.other++;
@@ -327,7 +368,14 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     });
     for (const fact of answer.facts) {
       const value = fact.value.trim();
-      if (!isDate(value)) {
+      const rule = rules.factKind(fact.kind);
+      const type = typeOf(fact.item);
+      if (
+        !rule ||
+        !rules.itemType(type) ||
+        !rule.itemTypes.includes(type as string) ||
+        !valueFits(rule.valueType, value)
+      ) {
         drops.other++;
         continue;
       }
@@ -348,6 +396,19 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       });
     }
     for (const relation of answer.relations) {
+      const rule = rules.relationType(relation.type);
+      const subject = typeOf(relation.subject);
+      const object = typeOf(relation.object);
+      if (
+        !rule ||
+        !rules.itemType(subject) ||
+        !rules.itemType(object) ||
+        !rule.subjectTypes.includes(subject as string) ||
+        !rule.objectTypes.includes(object as string)
+      ) {
+        drops.other++;
+        continue;
+      }
       plan([relation.subject, relation.object], relation.quote, {
         kind: "relation",
         key: JSON.stringify([
