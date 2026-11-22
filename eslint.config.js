@@ -26,5 +26,11 @@ export default defineConfig(
     plugins: { pki: { rules: { "module-boundary": moduleBoundary, "gate-inputs": gateInputs } } },
     rules: { "pki/module-boundary": "error", "pki/gate-inputs": "error" },
   },
+  {
+    // a deployment fork's files (and the example the forks copy) cannot switch a rule off or re-configure
+    // it from a comment: `// eslint-disable pki/module-boundary` would open the boundary (I05-T04 review D2)
+    files: ["site/**", "packages/site-example/**"],
+    linterOptions: { noInlineConfig: true },
+  },
   prettier,
 );

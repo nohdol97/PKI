@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "lint": "eslint . && prettier --check .",
+    "lint": "eslint -c eslint.config.js . && prettier --check .",
     "typecheck": "node tooling/workspace/typecheck.ts",
     "test": "vitest run",
     "e2e": "playwright test"
