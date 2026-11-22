@@ -19,9 +19,11 @@ import {
   registerConnectorInstance,
   saveSourceRecord,
   listInvalidations,
+  purgeEndedJobs,
   type DerivativeRegistry,
   type SqlDriver,
 } from "@pki/storage";
+import { EmptyVectorIndex } from "@pki/storage/adapters";
 import { send } from "@pki/testkit";
 import { spawnSync } from "node:child_process";
 import {
@@ -37,7 +39,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
-import { CANONICAL_DB_FILE, openCanonicalDb } from "./composition.ts";
+import {
+  CANONICAL_DB_FILE,
+  openCanonicalDb,
+  productEngine,
+  productRegistry,
+} from "./composition.ts";
+import { reapplyAtStart } from "./ledger-boot.ts";
 import { INTERIM_POLICY } from "./interim-policy.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
@@ -329,5 +337,30 @@ describe("restore.reapply through the backend start", () => {
     });
     expect(res.body).toEqual({ outcome: "deleted" });
     expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toMatch(/"t":"line","seq":1,/);
+  });
+});
+
+describe("retention and the re-applied removals", () => {
+  it("purgeEndedJobs never deletes the open projection-remove jobs a re-applied tombstone registered", () => {
+    const db = seeded();
+    db.exec(`VACUUM INTO '${join(dir, "backup.sqlite")}'`);
+    userDelete(db, identity(), AT);
+    db.close();
+    copyFileSync(join(dir, "backup.sqlite"), join(dir, CANONICAL_DB_FILE));
+    const restored = openCanonicalDb(dir);
+    reapplyAtStart(
+      restored,
+      productRegistry({ engine: productEngine(), vectorIndex: new EmptyVectorIndex() }),
+      Date.parse(AT),
+    );
+    const open = () =>
+      restored.all(
+        "SELECT count(*) AS n FROM jobs WHERE kind = 'projection-remove' AND status NOT IN ('succeeded', 'superseded', 'cancelled', 'dead_letter')",
+      )[0]?.n as number;
+    const before = open();
+    expect(before).toBeGreaterThan(0);
+    purgeEndedJobs(restored, Date.parse(AT) + 10 ** 12);
+    expect(open()).toBe(before);
+    restored.close();
   });
 });

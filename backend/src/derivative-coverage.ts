@@ -136,6 +136,11 @@ export const OPERATIONAL_DATA_ENTRIES: readonly RegExp[] = [
   /^secrets\.json$/, // secret values
   /^secrets\.json\.[^/]*\.tmp$/, // while a secrets write is in flight
   /^cli-runs(\/|$)/, // one temporary folder per CLI run, swept at start
+  // the tombstone ledger (I04-T10, R17): keyed hashes and plain connector instance ids of deleted
+  // sources, no source content. The names set aside beside it are made only when a ledger's key differs
+  // from the database's or its header is damaged.
+  /^tombstone-ledger\.jsonl$/,
+  /^tombstone-ledger\.(other-key|damaged)-[1-9][0-9]*\.jsonl$/,
 ];
 
 /**
