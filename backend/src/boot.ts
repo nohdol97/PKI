@@ -38,7 +38,8 @@ import {
   type ConnectorSet,
 } from "./composition.ts";
 import { systemClock } from "./clock.ts";
-import { createConnectorManager } from "./connectors.ts";
+import { createConnectorManager, type ConnectorManager } from "./connectors.ts";
+import { startCollectorUpkeep } from "./connector-sync-job.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
 import { reapplyAtStart } from "./ledger-boot.ts";
@@ -128,8 +129,13 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   await projections.reconcile();
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")
   const clock = systemClock;
+  // the manager wakes the runner and the runner's `connector-sync` handler calls the manager:
+  // the handler reads it at each run; a run claimed before it is set (a wake can claim before
+  // runner.start) is deferred by the handler, its attempt unspent
+  const late: { manager?: ConnectorManager } = {};
   const runner = productRunner(db, calls.broker, {
     clock,
+    connectors: () => late.manager,
     policyFingerprint: calls.policyFingerprint,
     engine,
     projections,
@@ -147,6 +153,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     clock,
     entries,
   });
+  late.manager = connectors;
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
   // whatever the applied change sequence says (I03-R7); registered before the server serves a deletion or the runner starts
   checkProjectionMarkers(db, { phase: "start", now: clock.now() });
@@ -184,6 +191,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     onRegistered: () => void runner.wake(),
     onError: (error) => log("scheduler-error", { error: errorClass(error) }),
   });
+  // the default periods, the held collectors that are ready now, and the hourly recheck (I03-T09)
+  const collectors = startCollectorUpkeep({ db, manager: connectors, scheduler, runner });
   scheduler.start();
   return {
     server: {
@@ -191,6 +200,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       close: async () => {
         reevaluation.stop();
         scheduler.stop();
+        await collectors.stop();
         await server.close();
         await runner.stop();
         await projections.drain();
