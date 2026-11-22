@@ -243,8 +243,34 @@ export {
   type SemanticRowView,
 } from "./semantic-view.ts";
 export {
+  componentOf,
+  entityGroups,
+  lineageOfItems,
+  linesAmong,
+  notifyMembership,
+  readMergeLine,
+  rejudgeGroups,
+  rootOf,
+  type EntityGroups,
+  type ItemId,
+  type MembershipChange,
+  type MembershipListener,
+  type MergeLine,
+  type MovedRow,
+} from "./entity-groups.ts";
+export type {
+  DistinctResult,
+  EntityDecisions,
+  EntityDecisionsOptions,
+  MergeRefusal,
+  MergeResult,
+  UnmergeResult,
+} from "./entity-decisions.ts";
+export {
+  createUserDecisions,
   userDecisions,
   type AddResult,
+  type HeldCounts,
   type ReplaceResult,
   type UndoResult,
   type UserAction,

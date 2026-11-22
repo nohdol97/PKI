@@ -127,9 +127,23 @@ const TABLES: Record<string, string> = {
   insight: "insights",
   "scope-drop": "scope_policy_drops",
   ontology: "ontology_elements",
+  "entity-merge": "item_merges",
+  "merge-candidate": "merge_candidates",
 };
 const exists = (ref: DerivedRef) =>
-  db.all(`SELECT 1 FROM ${TABLES[ref.kind]} WHERE id = ?`, [Number(ref.id)]).length === 1;
+  ref.kind === "entity-merge" || ref.kind === "merge-candidate"
+    ? pairRowExists(ref)
+    : db.all(`SELECT 1 FROM ${TABLES[ref.kind]} WHERE id = ?`, [Number(ref.id)]).length === 1;
+
+/** The ids of the two entity-resolution kinds: `merge:<id>`, `candidate:<a>:<b>` (canonical-kinds.ts). */
+function pairRowExists(ref: DerivedRef): boolean {
+  const [table, ...key] = ref.id.split(":");
+  const sql =
+    table === "merge"
+      ? "SELECT 1 FROM item_merges WHERE id = ?"
+      : "SELECT 1 FROM merge_candidates WHERE item_a = ? AND item_b = ?";
+  return db.all(sql, key.map(Number)).length === 1;
+}
 
 /**
  * One state holding, for every kind, a row built from `a` only, one from `a` and
@@ -206,10 +220,42 @@ function world() {
   const ontoS = propose("OntoShared", ...lineAB);
   const added = addUserOntologyElementForTest(db, "OntoUser");
 
+  // merge lines and candidates (S02-T04): a pair of items built from `a` only, one from `a` and `b`, and the user's
+  // item with an item that has no evidence (no lineage). The ids of these two kinds are strings (a row of one of
+  // several tables, or a pair).
+  const mergeOf = (member: number, representative: number) =>
+    `merge:${
+      db.run(
+        "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+        [member, representative, AT],
+      ).lastInsertRowid
+    }`;
+  const candidateOf = (a: number, b: number) => {
+    db.run("INSERT INTO merge_candidates (item_a, item_b, signals, at) VALUES (?, ?, '[]', ?)", [
+      Math.min(a, b),
+      Math.max(a, b),
+      AT,
+    ]);
+    return `candidate:${Math.min(a, b)}:${Math.max(a, b)}`;
+  };
   const rows: Record<
     string,
-    { onlyA: number; shared: number | null; withoutLineage: number | null }
+    {
+      onlyA: number | string;
+      shared: number | string | null;
+      withoutLineage: number | string | null;
+    }
   > = {
+    "entity-merge": {
+      onlyA: mergeOf(xA as number, yA as number),
+      shared: mergeOf(xS as number, yS as number),
+      withoutLineage: mergeOf(xN, yN as number),
+    },
+    "merge-candidate": {
+      onlyA: candidateOf(xA as number, yA as number),
+      shared: candidateOf(xS as number, yS as number),
+      withoutLineage: candidateOf(xN, yN as number),
+    },
     source: { onlyA: a.id, shared: null, withoutLineage: null },
     evidence: { onlyA: eA, shared: null, withoutLineage: null },
     fact: { onlyA: fA, shared: fS, withoutLineage: fN },
@@ -279,7 +325,8 @@ function subject(kind: DerivativeKind, has: { shared: boolean; withoutLineage: b
     has,
     setup: () => {
       const w = world();
-      const ref = (id: number | null) => (id === null ? null : { kind: kind.kind, id: String(id) });
+      const ref = (id: number | string | null) =>
+        id === null ? null : { kind: kind.kind, id: String(id) };
       const r = w.rows[kind.kind];
       if (!r) throw new Error(`no fixture rows for ${kind.kind}`);
       return {
@@ -324,7 +371,15 @@ function subject(kind: DerivativeKind, has: { shared: boolean; withoutLineage: b
                 },
               }
             : {
-                ref: { kind: kind.kind, id: String(nextId(TABLES[kind.kind] as string)) },
+                ref: {
+                  kind: kind.kind,
+                  id:
+                    kind.kind === "entity-merge"
+                      ? `merge:${nextId("item_merges")}`
+                      : kind.kind === "merge-candidate"
+                        ? "candidate:9998:9999"
+                        : String(nextId(TABLES[kind.kind] as string)),
+                },
                 attempt: () =>
                   commitDerived(db, {
                     source: w.a,
@@ -368,13 +423,15 @@ const SUBJECTS: Record<string, { shared: boolean; withoutLineage: boolean }> = {
   insight: BOTH,
   "scope-drop": { shared: false, withoutLineage: false },
   ontology: BOTH,
+  "entity-merge": BOTH,
+  "merge-candidate": BOTH,
 };
 for (const kind of CANONICAL_KINDS) {
   derivativeKindContract(`canonical kind ${kind.kind}`, subject(kind, SUBJECTS[kind.kind] ?? BOTH));
 }
 
 describe("the product registry's canonical kinds (I04-R1)", () => {
-  it("registers the eight canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
+  it("registers the ten canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
     expect(derivativeRegistry.kinds.map((k) => [k.kind, k.layer, k.storage])).toEqual([
       ["source", "source", "canonical"],
       ["evidence", "evidence", "canonical"],
@@ -382,6 +439,10 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
       ["relation", "knowledge", "canonical"],
       ["scope-drop", "knowledge", "canonical"],
       ["ontology", "knowledge", "canonical"],
+      // the two entity-resolution kinds point at the items, so they run before the item kind deletes them
+      // and the foreign keys take their lines (S02-R14)
+      ["entity-merge", "item", "canonical"],
+      ["merge-candidate", "item", "canonical"],
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
       ["engine", "projection", "projection"],
@@ -433,6 +494,9 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
       // every record of what the policy left out is collected: its source's re-extraction is queued (I04-R15)
       "scope-drop": [String(rows["scope-drop"]?.onlyA)],
       ontology: [], // a scope change keeps every lineage row (S01-R22)
+      // the merge lines of the items the source reaches are judged again (S02-R13); a candidate is T06's
+      "entity-merge": [String(rows["entity-merge"]?.shared)],
+      "merge-candidate": [],
       insight: [String(rows.insight?.shared)],
     });
 
@@ -447,7 +511,15 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
       {
         id: propagation.invalidationId,
         changeKind: "scope-changed",
-        removedByKind: { source: 0, evidence: 0, fact: 0, relation: 0, item: 0, insight: 0 },
+        removedByKind: {
+          source: 0,
+          evidence: 0,
+          fact: 0,
+          relation: 0,
+          item: 0,
+          "entity-merge": 0,
+          insight: 0,
+        },
       },
     ]);
   });
@@ -548,7 +620,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
-    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(10);
+    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(12);
     expect(log.findLastIndex((e) => e.startsWith("affected:"))).toBeLessThan(firstDelete);
     expect(log.filter((e) => e.startsWith("invalidate:"))).toEqual(
       [
@@ -558,6 +630,8 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         "relation",
         "scope-drop",
         "ontology",
+        "entity-merge",
+        "merge-candidate",
         "item",
         "insight",
         "engine",
@@ -574,6 +648,9 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       relation: 1,
       "scope-drop": 1,
       ontology: 1,
+      // the line and the candidate of the two items only `a` built: gone with them (the chain was mended first)
+      "entity-merge": 1,
+      "merge-candidate": 1,
       item: 2,
       insight: 1,
       engine: 1,
@@ -601,6 +678,8 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           relation: 1,
           "scope-drop": 1,
           ontology: 1,
+          "entity-merge": 1,
+          "merge-candidate": 1,
           item: 2,
           insight: 1,
           engine: 1,
@@ -614,6 +693,8 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           relation: 0,
           "scope-drop": 0,
           ontology: 0,
+          "entity-merge": 0,
+          "merge-candidate": 0,
           item: 0,
           insight: 1,
           engine: 0,

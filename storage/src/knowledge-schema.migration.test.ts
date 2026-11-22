@@ -161,8 +161,9 @@ const catalogueEntries = () =>
 
 describe("schema.catalogue-migration", () => {
   it("is the migration after S01's, one step, and raises the schema to 23", () => {
-    expect(migrations).toHaveLength(PREVIOUS_SCHEMA + 1);
-    migrate(db);
+    // later migrations (S02-T04's v24 and on) come after it: this test takes the catalogue's own step
+    expect(migrations.length).toBeGreaterThanOrEqual(PREVIOUS_SCHEMA + 1);
+    migrate(db, migrations.slice(0, PREVIOUS_SCHEMA + 1));
     expect(schemaVersion(db)).toBe(PREVIOUS_SCHEMA + 1);
   });
 
