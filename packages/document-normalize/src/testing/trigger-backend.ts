@@ -19,7 +19,8 @@ const small = new TextEncoder().encode("# small\n\nA small file.\n");
 async function isolated() {
   const normalizer = createIsolatedNormalizer({
     spawner: createForkSpawner(),
-    timeoutMs: 120_000,
+    // long: on a busy machine the heap limit, not the clock, must be what ends the XLSX
+    timeoutMs: 600_000,
     maxHeapMb,
     maxExternalMemoryBytes: 1_610_612_736,
   });
