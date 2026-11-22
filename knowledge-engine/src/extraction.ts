@@ -28,6 +28,11 @@
 // of the text (the value is the quote, at most 500 code points) with an optional short context tag; the same
 // form is judged by the V02-R7 processing (surface-form.ts). A `confidence` outside 0..1 drops its entry; one
 // inside is written when the row is created and never changed (S01-R10).
+// Schema 4 (S02-R4, R5) adds the thirteen item types and six relations, identifiers (facts of the kinds
+// `identifier.*`: the value must be in its quote; the context tag of an `identifier.key` is written), the
+// `statement` kind of a definition entry, validity input fields (read, written by S02-T08) and `proposedTypes`:
+// each proposal that passes the checks below is handed over as an `ontology` item that enters the candidate
+// entry of the type definitions (S01-R20) with this version as its basis.
 // Before anything is planned each fact and relation is fitted to the type definitions (S01-R21):
 // its item types, fact kind or relation type must be `verified` elements, the value must be of
 // the kind the fact kind's rule names, and a relation's ends must fit its direction; what does not
@@ -37,14 +42,19 @@ import {
   EXTRACT_ALIAS_FACT_KIND,
   EXTRACT_DEFINITION_FACT_KIND,
   EXTRACT_DEFINITION_MAX_CODE_POINTS,
+  EXTRACT_IDENTIFIER_FACT_KINDS,
+  EXTRACT_MAX_PROPOSED_TYPES,
   EXTRACT_SCHEMA_VERSION,
+  EXTRACT_STATEMENT_FACT_KIND,
   TASKS,
   type BrokerResult,
   type ExtractionOutput,
 } from "@pki/providers";
 import {
   addEvidence,
+  applyOntologyChange,
   findSameForm,
+  isElementName,
   normalizeForLinking,
   automatedLifecycle,
   findSourceVersionId,
@@ -123,6 +133,9 @@ interface Planned {
   span: QuoteSpan;
   quote: string;
 }
+
+/** The context tag of an entry: trimmed, null when empty. */
+const tagOf = (raw: string | null | undefined): string | null => raw?.trim() || null;
 
 /** S01-R10: the model's number is 0..1 or absent; an entry with a number outside is dropped. */
 const confidenceInRange = (c: number | null | undefined): boolean =>
@@ -248,9 +261,21 @@ function engineAnswer(
   return out;
 }
 
+/** An answer with its type proposals present (an answer without any has none). */
+type MergedAnswer = Omit<ExtractionOutput, "proposedTypes"> & {
+  proposedTypes: NonNullable<ExtractionOutput["proposedTypes"]>;
+};
+
 /** The answers in one, each answer's refs kept to itself. */
-function merged(answers: readonly ExtractionOutput[]): ExtractionOutput {
-  const out: ExtractionOutput = { items: [], facts: [], relations: [], terms: [], definitions: [] };
+function merged(answers: readonly ExtractionOutput[]): MergedAnswer {
+  const out: MergedAnswer = {
+    items: [],
+    facts: [],
+    relations: [],
+    terms: [],
+    definitions: [],
+    proposedTypes: [],
+  };
   answers.forEach((answer, i) => {
     const ns = (ref: string) => `${i}:${ref}`;
     out.items.push(...answer.items.map((item) => ({ ...item, ref: ns(item.ref) })));
@@ -260,6 +285,7 @@ function merged(answers: readonly ExtractionOutput[]): ExtractionOutput {
     );
     out.terms.push(...answer.terms.map((t) => ({ ...t, item: ns(t.item) })));
     out.definitions.push(...answer.definitions.map((d) => ({ ...d, item: ns(d.item) })));
+    out.proposedTypes.push(...(answer.proposedTypes ?? []));
   });
   return out;
 }
@@ -403,6 +429,20 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         drops.other++;
         continue;
       }
+      // S02-R4: an identifier is written as the document writes it, so the quote must hold it; the context
+      // tag of an `identifier.key` is the system its number belongs to (S01-R3's `context` column)
+      let tag: string | null = null;
+      if ((EXTRACT_IDENTIFIER_FACT_KINDS as readonly string[]).includes(fact.kind)) {
+        if (!fact.quote.includes(value)) {
+          drops.quotes++;
+          continue;
+        }
+        if (fact.kind === "identifier.key") tag = tagOf(fact.context);
+        if (tag !== null && [...tag].length > MAX_CONTEXT_CODE_POINTS) {
+          drops.other++;
+          tag = null;
+        }
+      }
       plan([fact.item], fact.quote, {
         kind: "fact",
         key: JSON.stringify(["fact", items.get(fact.item)?.name, fact.kind, value]),
@@ -413,6 +453,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
             itemId: ids(fact.item),
             kind: fact.kind,
             value,
+            context: tag,
             ...attributes(fact.epistemic, fact.confidence),
           });
           return { target: { factId: saved.id }, created: saved.created };
@@ -499,8 +540,13 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // (trimmed, still a span), at most 500 code points; the tag, when given, is short.
     for (const def of answer.definitions) {
       const value = def.quote.trim();
-      let tag = def.context?.trim() || null;
-      const rule = rules.factKind(EXTRACT_DEFINITION_FACT_KIND);
+      let tag = tagOf(def.context);
+      // S02-R4: the same entry, the same rules; the kind only names the fact kind it is stored as
+      const defKind =
+        def.kind === EXTRACT_STATEMENT_FACT_KIND
+          ? EXTRACT_STATEMENT_FACT_KIND
+          : EXTRACT_DEFINITION_FACT_KIND;
+      const rule = rules.factKind(defKind);
       const type = typeOf(def.item);
       if (
         !confidenceInRange(def.confidence) ||
@@ -520,18 +566,13 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       }
       plan([def.item], value, {
         kind: "fact",
-        key: JSON.stringify([
-          "fact",
-          items.get(def.item)?.name,
-          EXTRACT_DEFINITION_FACT_KIND,
-          value,
-        ]),
+        key: JSON.stringify(["fact", items.get(def.item)?.name, defKind, value]),
         target: { item: def.item },
         explicit: def.epistemic === "explicit",
         save: (tx, ids) => {
           const saved = saveFact(tx, {
             itemId: ids(def.item),
-            kind: EXTRACT_DEFINITION_FACT_KIND,
+            kind: defKind,
             value,
             context: tag,
             ...attributes(def.epistemic, def.confidence),
@@ -540,6 +581,59 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         },
       });
     }
+
+    // S02-R5: a type the answer proposes goes to the candidate entry of the type definitions (S01-R20) with
+    // this version as its basis; the entry records it as a `candidate` of origin `source-proposed`, and a
+    // name that is already a definition (any status) is absorbed there as a duplicate. The code checks first:
+    // at most five entries are looked at, the quote is in the body (it is used for this check only and not
+    // stored), the name has the shape of a type name, and a relation type's ends are `verified` item types.
+    const proposalItems: DerivedItem[] = [];
+    const proposedKeys = new Set<string>();
+    answer.proposedTypes.forEach((proposal, index) => {
+      const ends = (list: readonly string[] | null | undefined) =>
+        list !== undefined && list !== null && list.length > 0 && list.every(rules.itemType)
+          ? [...list]
+          : undefined;
+      const subjectTypes = ends(proposal.subjectTypes);
+      const objectTypes = ends(proposal.objectTypes);
+      if (index >= EXTRACT_MAX_PROPOSED_TYPES) return void drops.other++;
+      if (!proposal.quote.trim() || !body.includes(proposal.quote)) return void drops.quotes++;
+      if (
+        !isElementName(proposal.name) ||
+        (proposal.kind === "relation-type" && (!subjectTypes || !objectTypes))
+      ) {
+        return void drops.other++;
+      }
+      const key = JSON.stringify(["ontology", proposal.kind, proposal.name]);
+      if (proposedKeys.has(key)) return;
+      proposedKeys.add(key);
+      proposalItems.push({
+        kind: "ontology",
+        itemKey: key,
+        lineage: [own],
+        write: (tx) => {
+          applyOntologyChange(
+            tx,
+            {
+              op: "add",
+              name: proposal.name,
+              rule:
+                proposal.kind === "item-type"
+                  ? { elementKind: "item-type" }
+                  : {
+                      elementKind: "relation-type",
+                      subjectTypes: subjectTypes as string[],
+                      objectTypes: objectTypes as string[],
+                      symmetric: false,
+                    },
+            },
+            "extraction",
+            { sourceId: own.sourceId, version: own.version },
+            now().toISOString(),
+          );
+        },
+      });
+    });
 
     // The items share what they create: an item is made for a fact or relation that
     // is kept, once per ref; the rule below recomputes the items they touched.
@@ -630,6 +724,6 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         });
       },
     };
-    return { status: "succeeded", items: [bookkeeping, ...written, rule] };
+    return { status: "succeeded", items: [bookkeeping, ...written, rule, ...proposalItems] };
   };
 }

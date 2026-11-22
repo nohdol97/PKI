@@ -182,6 +182,8 @@ export function readOntologyHistory(db: SqlDriver, id: number): OntologyHistoryL
 }
 
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.]{0,39}$/;
+/** Whether a name has the shape R19 asks of a type definition's name; extraction checks a proposal with it before it offers one (S02-R5). */
+export const isElementName = (name: string): boolean => IDENTIFIER.test(name);
 const KINDS: readonly ElementKind[] = ["item-type", "fact-kind", "relation-type"];
 const VALUE_TYPES: readonly string[] = FACT_VALUE_TYPES;
 const CARDINALITIES: readonly string[] = ["one", "many"];

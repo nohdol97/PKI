@@ -125,6 +125,47 @@ describe("derivatives.schema-coverage", () => {
     db.close();
   });
 
+  it("classifies the two tables S03-T04 adds under the kind `analytical-check`, which is registered", () => {
+    const db = freshDb();
+    expect(checkTableCoverage(db, registry)).toEqual([]);
+    expect(
+      Object.fromEntries(
+        ["dataset_tables", "analytical_checks"].map((t) => [t, TABLE_CLASSIFICATION[t]]),
+      ),
+    ).toEqual({
+      dataset_tables: { class: "kind", kind: "analytical-check" },
+      analytical_checks: { class: "kind", kind: "analytical-check" },
+    });
+    for (const t of ["dataset_tables", "analytical_checks"]) {
+      expect(
+        db.all("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?", [t]),
+        t,
+      ).toHaveLength(1);
+    }
+    // the kind is registered after the fact, relation and item kinds (layer insight), and without it
+    // the two tables fail the check
+    const order = registry.kinds.map((k) => k.kind);
+    for (const before of ["fact", "relation", "item"]) {
+      expect(order.indexOf("analytical-check")).toBeGreaterThan(order.indexOf(before));
+    }
+    const problems = checkTableCoverage(db, without("analytical-check"));
+    expect(problems).toHaveLength(2);
+    expect(problems.every((p) => p.includes('kind "analytical-check"'))).toBe(true);
+    // unclassified, each is named
+    const rest = Object.fromEntries(
+      Object.entries(TABLE_CLASSIFICATION).filter(
+        ([name]) => name !== "dataset_tables" && name !== "analytical_checks",
+      ),
+    );
+    const unclassified = checkTableCoverage(db, registry, rest).filter((p) =>
+      p.includes("is not classified"),
+    );
+    expect(unclassified).toHaveLength(2);
+    expect(unclassified.join("\n")).toContain('"dataset_tables"');
+    expect(unclassified.join("\n")).toContain('"analytical_checks"');
+    db.close();
+  });
+
   it("an unclassified table fails and the message names it and where to classify it", () => {
     const db = freshDb();
     db.exec("CREATE TABLE brand_new (id INTEGER PRIMARY KEY)");
@@ -248,13 +289,17 @@ describe("derivatives.schema-coverage", () => {
     expect(TABLE_CLASSIFICATION.local_file_entries).toEqual({ class: "source" });
     expect(TABLE_CLASSIFICATION.local_locations?.class).toBe("operational");
     expect(TABLE_CLASSIFICATION.local_index_seq?.class).toBe("operational");
-    // the index is not a derivative kind: the registry has the same ten kinds as before it
+    // the index is not a derivative kind: the registry has the same kinds as without it (S02-T04 added the
+    // two entity-resolution kinds, S03-T04 `analytical-check`)
     expect(registry.kinds.map((k) => k.kind).sort()).toEqual([
+      "analytical-check",
       "engine",
+      "entity-merge",
       "evidence",
       "fact",
       "insight",
       "item",
+      "merge-candidate",
       "ontology",
       "relation",
       "scope-drop",

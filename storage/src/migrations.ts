@@ -1255,6 +1255,230 @@ const v23: Migration = (db) => {
   db.run("UPDATE revisions SET knowledge_revision = ?", [revision]);
 };
 
+// Schema v24 (S02-T04, S02-R11, R14, R15, R16): the merge, distinct-mark, candidate and split-move
+// tables of entity resolution. S02's spec calls this its second migration; the number is the next free
+// one when this task merged, and whichever of two tasks adding a migration merges later renumbers
+// (`v24` and its line in `migrations`).
+// - `item_merges` (R11): "the member is the representative's" as one line, no row moved. One line per
+//   member (a member has one representative), so a chain is a path of lines and a group a tree; a line
+//   never points at its own member. `active` is 0 while the group's lineage cannot be put together
+//   (R13: the whole group's lines rest together). Both ends are foreign keys: a deleted item takes its
+//   lines, after the derivative kind `entity-merge` has joined the chain around it (R14).
+// - `item_distinct` (R16): "these two are not the same", the smaller id first, who left it (`user`, or
+//   `link-check` for R8's check) and when.
+// - `merge_candidates` (R10): a pair the product suggests, the smaller id first, the signal codes as a
+//   JSON array of codes, and when. No text. S02-T06 writes it; it is created here with the other three.
+// - `item_split_moves` (R15): one line per fact or relation a split moved, numbers only. S02-T07 writes
+//   it. The three references are foreign keys that cascade, so a deleted item or row takes the line.
+// None holds a name, value or quote; all four belong to the derivative kinds `entity-merge` and
+// `merge-candidate` (backend derivative-coverage.ts).
+const v24: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE item_merges (
+      id INTEGER PRIMARY KEY,
+      member_id INTEGER NOT NULL UNIQUE REFERENCES items (id) ON DELETE CASCADE,
+      representative_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+      at TEXT NOT NULL,
+      CHECK (member_id <> representative_id)
+    );
+    CREATE INDEX item_merges_representative ON item_merges (representative_id);
+
+    CREATE TABLE item_distinct (
+      item_a INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      item_b INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      by TEXT NOT NULL CHECK (by IN ('user', 'link-check')),
+      at TEXT NOT NULL,
+      PRIMARY KEY (item_a, item_b),
+      CHECK (item_a < item_b)
+    ) WITHOUT ROWID;
+    CREATE INDEX item_distinct_b ON item_distinct (item_b);
+
+    CREATE TABLE merge_candidates (
+      item_a INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      item_b INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      signals TEXT NOT NULL CHECK (json_valid(signals) AND json_type(signals) = 'array'),
+      at TEXT NOT NULL,
+      PRIMARY KEY (item_a, item_b),
+      CHECK (item_a < item_b)
+    ) WITHOUT ROWID;
+    CREATE INDEX merge_candidates_b ON merge_candidates (item_b);
+
+    CREATE TABLE item_split_moves (
+      id INTEGER PRIMARY KEY,
+      from_item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      to_item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      fact_id INTEGER REFERENCES facts (id) ON DELETE CASCADE,
+      relation_id INTEGER REFERENCES relations (id) ON DELETE CASCADE,
+      CHECK ((fact_id IS NULL) <> (relation_id IS NULL))
+    );
+    CREATE INDEX item_split_moves_from ON item_split_moves (from_item_id);
+    CREATE INDEX item_split_moves_to ON item_split_moves (to_item_id);
+  `);
+
+// Schema v25 (S03-T04, S03-R1, R2, R13): the two extension tables of the analytical semantic and the
+// analytical type definitions' first rows. The tables hold no knowledge (an item, its facts and its relations
+// are the registry's rows):
+// - `dataset_tables`: which stored table a `Dataset` item stands for, `(source, table key)` unique. The key is
+//   the sheet's name for a workbook and empty for a CSV file. The row goes with its item (the cascade); the
+//   source row is never deleted, so a deleted source's rows are removed by the registered kind
+//   `analytical-check` (backend `TABLE_CLASSIFICATION` classifies the table under it).
+// - `analytical_checks`: the numbers and codes of one data check of one fact: `(fact, check)` unique, the
+//   version it read (and the other table's, for a Join). It goes with its fact or its version (the cascade).
+//   Only counts and codes: no cell of a table is stored here (S03-R18).
+// The rows follow v23's way: a name that already exists (same kind, R19's comparison) is left alone, whatever
+// its status; the rest is `verified`, edition 1, `origin = seed`, with no history line. `definition` and
+// `alias.*` are widened to Metric and Dataset only while the stored rule is S02's seed rule to the letter and
+// `verified`; the lifecycle gate demands a history line for an edition change, so it is dropped for the update
+// and made again with the text it had (v21's, v23's). The knowledge revision does not move.
+// The migration keeps its own copy of the constants (a later edition of the catalogue must not change what
+// an earlier migration does); `ontology.analytical-seeds` compares the copy with `ANALYTICAL_SEED`.
+// The version number is the next free one: whichever of two tasks adding a migration merges later
+// renumbers (`v25` and its line in `migrations`).
+const v25Fact = (
+  name: string,
+  itemType: string,
+  valueType: string,
+  cardinality: string,
+  dataChecks: string[] = [],
+): SeedRow => [
+  "fact-kind",
+  name,
+  {
+    elementKind: "fact-kind",
+    itemTypes: [itemType],
+    valueType,
+    cardinality,
+    ...(dataChecks.length > 0 ? { dataChecks } : {}),
+  },
+];
+const v25Link = (name: string, subject: string, object: string): SeedRow => [
+  "relation-type",
+  name,
+  {
+    elementKind: "relation-type",
+    subjectTypes: [subject],
+    objectTypes: [object],
+    symmetric: false,
+  },
+];
+/** What v25 adds; the lists are sorted as an element's stored rule is. */
+const V25_ADDITIONS: readonly SeedRow[] = [
+  ...["Dataset", "Metric", "Join"].map((name): SeedRow => [
+    "item-type",
+    name,
+    { elementKind: "item-type" },
+  ]),
+  v25Fact("dataset.column", "Dataset", "header", "many"),
+  v25Fact("dataset.role", "Dataset", "dataset-role", "one"),
+  v25Fact("dataset.grain", "Dataset", "column-set", "one", ["grain", "schema"]),
+  v25Fact("dataset.measure", "Dataset", "column", "many", ["schema"]),
+  v25Fact("dataset.dimension", "Dataset", "column", "many", ["schema"]),
+  v25Fact("dataset.time_dimension", "Dataset", "column", "many", ["schema"]),
+  v25Fact("metric.calculation", "Metric", "calculation", "one", ["aggregation", "schema"]),
+  v25Fact("metric.unit", "Metric", "text", "one"),
+  v25Fact("metric.version", "Metric", "text", "one"),
+  v25Fact("metric.currency", "Metric", "currency", "one"),
+  v25Fact("metric.period", "Metric", "period", "one"),
+  v25Fact("join.keys", "Join", "key-pairs", "one", ["schema"]),
+  v25Fact("join.cardinality", "Join", "join-cardinality", "one", ["join-cardinality"]),
+  v25Link("MEASURED_ON", "Metric", "Dataset"),
+  v25Link("JOIN_LEFT", "Join", "Dataset"),
+  v25Link("JOIN_RIGHT", "Join", "Dataset"),
+  v25Link("USES_JOIN", "Metric", "Join"),
+];
+/** The four rules S02 seeded (as S01's ONTOLOGY_SEED stored them) and what they are widened to. */
+const V25_WIDENED: readonly (readonly [
+  name: string,
+  from: readonly string[],
+  to: readonly string[],
+])[] = [
+  ["definition", ["Concept"], ["Concept", "Dataset", "Metric"]],
+  ...["alias.synonym", "alias.abbreviation", "alias.translation"].map(
+    (name) =>
+      [
+        name,
+        ["Concept", "Project", "System"],
+        ["Concept", "Dataset", "Metric", "Project", "System"],
+      ] as const,
+  ),
+];
+const v25: Migration = (db) => {
+  const revision = db.all("SELECT knowledge_revision FROM revisions")[0]
+    ?.knowledge_revision as number;
+  db.exec(`
+    CREATE TABLE dataset_tables (
+      id INTEGER PRIMARY KEY,
+      item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+      source_id INTEGER NOT NULL REFERENCES sources (id),
+      table_key TEXT NOT NULL,
+      row_count INTEGER NOT NULL CHECK (typeof(row_count) = 'integer' AND row_count >= 0),
+      UNIQUE (source_id, table_key)
+    );
+    CREATE INDEX dataset_tables_item ON dataset_tables (item_id);
+    CREATE TABLE analytical_checks (
+      id INTEGER PRIMARY KEY,
+      fact_id INTEGER NOT NULL REFERENCES facts (id) ON DELETE CASCADE,
+      check_name TEXT NOT NULL CHECK (check_name IN ('schema', 'grain', 'join-cardinality', 'aggregation')),
+      passed INTEGER NOT NULL CHECK (passed IN (0, 1)),
+      failure_code TEXT,
+      examined INTEGER NOT NULL CHECK (typeof(examined) = 'integer' AND examined >= 0),
+      violations INTEGER NOT NULL CHECK (typeof(violations) = 'integer' AND violations >= 0),
+      skipped INTEGER NOT NULL CHECK (typeof(skipped) = 'integer' AND skipped >= 0),
+      version_id INTEGER NOT NULL REFERENCES source_versions (id) ON DELETE CASCADE,
+      other_version_id INTEGER REFERENCES source_versions (id) ON DELETE CASCADE,
+      checked_at TEXT NOT NULL,
+      UNIQUE (fact_id, check_name)
+    );
+    CREATE INDEX analytical_checks_version ON analytical_checks (version_id);
+    CREATE INDEX analytical_checks_other_version ON analytical_checks (other_version_id)
+      WHERE other_version_id IS NOT NULL;
+  `);
+  const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
+  const taken = new Set(
+    db
+      .all("SELECT element_kind, name FROM ontology_elements")
+      .map((r) => `${r.element_kind as string}:${squash(r.name as string)}`),
+  );
+  for (const [kind, name, rule] of V25_ADDITIONS) {
+    if (taken.has(`${kind}:${squash(name)}`)) continue;
+    db.run(
+      "INSERT INTO ontology_elements (element_kind, name, rule, status, edition, origin) VALUES (?, ?, ?, 'verified', 1, 'seed')",
+      [kind, name, JSON.stringify(rule)],
+    );
+  }
+  // the lifecycle gate demands a history line for an edition change; a migration writes none
+  db.exec("DROP TRIGGER ontology_elements_lifecycle_gate");
+  for (const [name, from, to] of V25_WIDENED) {
+    const rule = (itemTypes: readonly string[]) =>
+      JSON.stringify({
+        elementKind: "fact-kind",
+        itemTypes,
+        valueType: name === "definition" ? "text" : "surface-form",
+        cardinality: "many",
+      });
+    db.run(
+      `UPDATE ontology_elements SET rule = ?, edition = edition + 1
+       WHERE element_kind = 'fact-kind' AND name = ? AND status = 'verified' AND rule = ?`,
+      [rule(to), name, rule(from)],
+    );
+  }
+  db.exec(`
+    CREATE TRIGGER ontology_elements_lifecycle_gate
+    BEFORE UPDATE OF status, rule, edition ON ontology_elements
+    WHEN (new.status IS NOT old.status OR new.rule IS NOT old.rule OR new.edition IS NOT old.edition)
+      AND ((new.rule IS NOT old.rule AND new.edition IS old.edition)
+        OR NOT EXISTS (
+          SELECT 1 FROM ontology_history h
+          WHERE h.element_id = old.id
+            AND h.seq = (SELECT max(seq) FROM ontology_history WHERE element_id = old.id)
+            AND h.from_status = old.status AND h.to_status = new.status
+            AND h.from_edition = old.edition AND h.to_edition = new.edition))
+    BEGIN SELECT RAISE(ABORT, 'status, rule and edition change only through the ontology gate'); END;
+  `);
+  db.run("UPDATE revisions SET knowledge_revision = ?", [revision]);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1280,6 +1504,8 @@ export const migrations: readonly Migration[] = [
   v21,
   v22,
   v23,
+  v24,
+  v25,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

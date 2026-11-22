@@ -4,14 +4,17 @@
 // is now the `date` kind's), and a relation whose ends do not fit its direction are dropped alone and
 // counted in `other`; a `one` value count does not stop a write. The seed is compared with the
 // prompt's lists. All data is synthetic.
+import { NOT_EXTRACTED_NAMES } from "@pki/contracts";
 import {
   createBroker,
   createUserActionLedger,
   EXTRACT_ALIAS_FACT_KINDS,
   EXTRACT_DEFINITION_FACT_KIND,
   EXTRACT_FACT_KINDS,
+  EXTRACT_IDENTIFIER_FACT_KINDS,
   EXTRACT_ITEM_TYPES,
   EXTRACT_RELATION_TYPES,
+  EXTRACT_STATEMENT_FACT_KIND,
   type Broker,
 } from "@pki/providers";
 import {
@@ -463,8 +466,10 @@ describe("ontology.enforce: a new item type goes through the same devices (S01-R
 });
 
 describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
-  /** The item types S02-R2 adds to the date kinds' and DEPENDS_ON's rules (the prompt lists them from S02-T02). */
+  /** The item types S02-R2 adds to the date kinds' and DEPENDS_ON's rules (S02-T02 puts them into the prompt). */
   const S02_WIDENED = ["Commitment", "Task"];
+  /** The item types a surface form is written on, and a definition (S01-R2, R3). */
+  const FORM_TYPES = ["Concept", "Project", "System"];
   // "Items are projects (Project) or systems (System)" carry the dates and the relation; Concept carries
   // the definitions (S01-R17)
   const WORK = ["Project", "System"];
@@ -487,65 +492,87 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
       });
     }
     for (const name of EXTRACT_ALIAS_FACT_KINDS) {
-      // a surface form is written on any of the item types, as the text it is, any number of them
+      // a surface form is written on any of the item types, as the text it is, any number of them;
+      // S03-R2 widens it to Metric and Dataset (the analytical migration)
       expect(seed("fact-kind").find((e) => e.name === name)?.rule).toEqual({
         elementKind: "fact-kind",
-        itemTypes: [...EXTRACT_ITEM_TYPES].sort(),
+        itemTypes: [...FORM_TYPES, "Dataset", "Metric"].sort(),
         valueType: "surface-form",
         cardinality: "many",
       });
     }
     expect(seed("fact-kind").find((e) => e.name === EXTRACT_DEFINITION_FACT_KIND)?.rule).toEqual({
       elementKind: "fact-kind",
-      itemTypes: ["Concept"],
+      itemTypes: ["Concept", "Dataset", "Metric"], // S03-R2 widens it
       valueType: "text",
       cardinality: "many",
     });
     for (const name of EXTRACT_RELATION_TYPES) {
-      const element = seed("relation-type").find((e) => e.name === name);
-      expect(element?.status).toBe("verified");
-      expect(element?.rule).toEqual({
-        elementKind: "relation-type",
-        subjectTypes: [...WORK, ...S02_WIDENED].sort(),
-        objectTypes: [...WORK, ...S02_WIDENED, "Dependency"].sort(),
-        symmetric: false,
-      });
+      expect(seed("relation-type").find((e) => e.name === name)?.status).toBe("verified");
     }
+    expect(seed("relation-type").find((e) => e.name === "DEPENDS_ON")?.rule).toEqual({
+      elementKind: "relation-type",
+      subjectTypes: [...WORK, ...S02_WIDENED].sort(),
+      objectTypes: [...WORK, ...S02_WIDENED, "Dependency"].sort(),
+      symmetric: false,
+    });
+    // S02-R2: an identifier is a text of its own value type; the key is one per item, the e-mail many
+    expect(seed("fact-kind").find((e) => e.name === "identifier.key")?.rule).toMatchObject({
+      valueType: "identifier",
+      cardinality: "one",
+      itemTypes: [...EXTRACT_ITEM_TYPES].sort(),
+    });
+    expect(seed("fact-kind").find((e) => e.name === "identifier.email")?.rule).toMatchObject({
+      valueType: "identifier",
+      cardinality: "many",
+      itemTypes: ["Organization", "Person"],
+    });
+    expect(
+      seed("fact-kind").find((e) => e.name === EXTRACT_STATEMENT_FACT_KIND)?.rule,
+    ).toMatchObject({ valueType: "text", cardinality: "many" });
   });
 
-  it("is the prompt's lists plus S02's catalogue, a closed list: S01-T08 put Concept, definition and alias.* into the prompt; S02-T02 empties the rest", () => {
-    // S02-T01 seeds the rest of the catalogue (S02-R2); this closed list holds only those names.
+  it("is the prompt's lists plus the seeded names the prompt does not list yet, a closed list: S01-T08 put Concept, definition and alias.* into the prompt, S02-T02 the rest of S02's catalogue", () => {
+    // The seeded names the prompt does not list: S03's analytical names (S03-R2, the analytical migration).
+    // S03-T07 puts them into the prompt and empties this list; every S02 name is in the prompt.
     const notYet = {
-      "item-type": [
-        "Person",
-        "Organization",
-        "Decision",
-        "Task",
-        "Commitment",
-        "Event",
-        "Issue",
-        "Dependency",
-        "BusinessRule",
-        "OpenQuestion",
+      "item-type": ["Dataset", "Metric", "Join"],
+      "fact-kind": [
+        "dataset.role",
+        "dataset.grain",
+        "dataset.measure",
+        "dataset.dimension",
+        "dataset.time_dimension",
+        "metric.calculation",
+        "metric.unit",
+        "metric.version",
+        "metric.currency",
+        "metric.period",
+        "join.keys",
+        "join.cardinality",
       ],
-      "fact-kind": ["identifier.email", "identifier.key", "statement"],
-      "relation-type": ["BELONGS_TO", "RESPONSIBLE_FOR", "RELATED_TO", "DECIDED", "CAUSED_BY"],
+      "relation-type": ["MEASURED_ON", "JOIN_LEFT", "JOIN_RIGHT", "USES_JOIN"],
     };
     const prompt = {
       "item-type": [...EXTRACT_ITEM_TYPES] as string[],
       "fact-kind": [
         ...EXTRACT_FACT_KINDS,
+        ...EXTRACT_IDENTIFIER_FACT_KINDS,
         ...EXTRACT_ALIAS_FACT_KINDS,
         EXTRACT_DEFINITION_FACT_KIND,
+        EXTRACT_STATEMENT_FACT_KIND,
       ] as string[],
       "relation-type": [...EXTRACT_RELATION_TYPES] as string[],
     };
     for (const kind of ["item-type", "fact-kind", "relation-type"] as const) {
-      const names = seed(kind).map((e) => e.name);
+      // `dataset.column` is seeded and never extracted (S03-R2): the catalogue says so
+      const names = seed(kind)
+        .map((e) => e.name)
+        .filter((name) => !NOT_EXTRACTED_NAMES.includes(name));
       expect([...names].sort(), kind).toEqual([...prompt[kind], ...notYet[kind]].sort());
       // a name is in the prompt or in the list, never both
       expect(
-        prompt[kind].filter((n) => (notYet[kind] as string[]).includes(n)),
+        prompt[kind].filter((n) => notYet[kind].includes(n)),
         kind,
       ).toEqual([]);
     }

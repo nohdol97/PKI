@@ -47,6 +47,7 @@ import {
   createConnectorManager,
   type ConnectorManager,
   type ConnectorRebuild,
+  type ConnectorRecheck,
 } from "./connectors.ts";
 import { releaseOnReady, startCollectorUpkeep } from "./connector-sync-job.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
@@ -124,7 +125,7 @@ export interface BootedBackend {
   projections: Pick<Projections, "drain">;
   runner: Pick<JobRunner, "wake">;
   /** The Connector manager (tests read the instances and ask for a rebuild; the API's notice route is T04's). */
-  connectors: ConnectorManager & ConnectorRebuild;
+  connectors: ConnectorManager & ConnectorRebuild & ConnectorRecheck;
   /** The periods' check, started at boot (I03-R22); I03-T09 adds the default periods through it. */
   scheduler: Scheduler;
 }
@@ -259,7 +260,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     }),
     entries,
     registry,
-    decisions: productUserDecisions(),
+    decisions: productUserDecisions(registry),
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),
     jobs: {

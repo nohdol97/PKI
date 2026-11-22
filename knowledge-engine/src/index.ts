@@ -20,6 +20,7 @@ export {
 } from "./ledger-reapply.ts";
 export {
   CANONICAL_KINDS,
+  canonicalKinds,
   createProductRegistry,
   derivativeRegistry,
   RECOMPUTE_PREFIX,
@@ -27,6 +28,14 @@ export {
 } from "./canonical-kinds.ts";
 export { createCanonicalEntries, defaultEntries, type CanonicalEntries } from "./entries.ts";
 export { ENGINE_KIND, VECTOR_KIND, type PermanentlyAbsent } from "./projection-kinds.ts";
+export {
+  createDatasetProfileHandler,
+  DATASET_COLUMN_KIND,
+  DATASET_ITEM_TYPE,
+  type DatasetProfileOptions,
+  type DatasetProfileResult,
+} from "./dataset-profile.ts";
+export { sqlTabularSource, type TabularSource } from "./tabular-source.ts";
 export {
   createExtractHandler,
   EXTRACT_HOLD_TOO_LARGE,

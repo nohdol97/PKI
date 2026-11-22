@@ -148,6 +148,7 @@ export {
   type ProjectionActivity,
 } from "./job-activity.ts";
 export {
+  DATASET_PROFILE_KIND,
   EXTRACT_JOB_KIND,
   PROJECTION_REBUILD_KIND,
   PROJECTION_REMOVE_KIND,
@@ -243,14 +244,53 @@ export {
   type SemanticRowView,
 } from "./semantic-view.ts";
 export {
+  componentOf,
+  entityGroups,
+  lineageOfItems,
+  linesAmong,
+  notifyMembership,
+  readMergeLine,
+  rejudgeGroups,
+  rootOf,
+  type EntityGroups,
+  type ItemId,
+  type MembershipChange,
+  type MembershipListener,
+  type MergeLine,
+  type MovedRow,
+} from "./entity-groups.ts";
+export type {
+  DistinctResult,
+  EntityDecisions,
+  EntityDecisionsOptions,
+  MergeRefusal,
+  MergeResult,
+  UnmergeResult,
+} from "./entity-decisions.ts";
+export {
+  createUserDecisions,
   userDecisions,
   type AddResult,
+  type HeldCounts,
   type ReplaceResult,
   type UndoResult,
   type UserAction,
   type UserDecisions,
   type UserEntry,
 } from "./semantic-user.ts";
+export {
+  ANALYTICAL_MAX_CELLS_SETTING,
+  ANALYTICAL_PROFILE_SETTING,
+  DEFAULT_MAX_CELLS,
+  findDatasetTable,
+  isTabularVersion,
+  readAnalyticalMaxCells,
+  readAnalyticalProfile,
+  registerDatasetProfileJob,
+  saveDatasetTable,
+  setAnalyticalProfile,
+  type DatasetTableRow,
+} from "./analytical.ts";
 export {
   ANALYTICAL_SEED,
   ANALYTICAL_VALUE_TYPES,
@@ -269,6 +309,7 @@ export {
   checkOntologyChange,
   factValueFit,
   isDate,
+  isElementName,
   valueFits,
   listOntologyElements,
   readOntologyElement,

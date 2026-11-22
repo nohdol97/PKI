@@ -33,6 +33,7 @@ import {
   findSourceId,
   readConnectorKind,
   readLatestContentHash,
+  registerDatasetProfileJob,
   registerJob,
   writeCursor,
   type CanonicalTx,
@@ -148,6 +149,12 @@ function storeChange(
       `${instanceId}: an ${EXTRACT_JOB_KIND} job for source ${saved.sourceId} version ${saved.version} exists already (${job.existing.status})`,
     );
   }
+  // S03-R6: a table source's version gets its profile job while `analytical.profile` is ON (OFF: none)
+  registerDatasetProfileJob(tx, {
+    sourceId: saved.sourceId,
+    version: saved.version,
+    at: new Date(clock.now()),
+  });
   return "created";
 }
 

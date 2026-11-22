@@ -180,7 +180,7 @@ const output = (o: object): FakeStep => ({
 describe("extraction schema", () => {
   it("names what the rule reads (dependency-delay.ts)", () => {
     expect([...EXTRACT_FACT_KINDS].sort()).toEqual([COMPLETION_DATE, TARGET_DATE].sort());
-    expect([...EXTRACT_RELATION_TYPES]).toEqual([DEPENDS_ON]);
+    expect(EXTRACT_RELATION_TYPES).toContain(DEPENDS_ON);
     expect(Object.keys(TASKS.extract)).toEqual([String(EXTRACT_SCHEMA_VERSION)]);
   });
 });

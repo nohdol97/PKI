@@ -3,6 +3,7 @@
 // The value lives only in the shell's secret store; nothing here remembers one. Every refusal is the
 // fixed ConnectorCredentialError, so no slot, name or value reaches a message.
 import {
+  CREDENTIAL_RETRY_MIN_MS,
   ConnectorCredentialError,
   isConnectorCredentialSecret,
   SecretReadSchema,
@@ -19,8 +20,8 @@ export const MAX_CREDENTIAL_SLOTS = 8;
 export const CREDENTIAL_SLOT_PATTERN = /^[a-z][a-z0-9-]{0,15}$/;
 /** Provisional (I06-R6), one place: the one limit for the presence answers of all the slots (and for one read). */
 export const CREDENTIAL_CHECK_TIMEOUT_MS = 3_000;
-/** Provisional (I06-R11, R12), one place: the shortest gap between two notice-driven rebuilds of a rejected instance. */
-export const CREDENTIAL_RETRY_MIN_MS = 30_000;
+/** The shortest gap between two notice-driven rebuilds of a rejected instance; one value, in `@pki/contracts` (the screen reads it too). */
+export { CREDENTIAL_RETRY_MIN_MS };
 
 /** What the manager needs of the store: the two calls an accessor and a presence check make. */
 export type CredentialStore = Pick<SecretSource, "read" | "has">;

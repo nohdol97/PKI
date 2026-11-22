@@ -52,6 +52,7 @@ import {
   type CanonicalEntries,
 } from "@pki/knowledge-engine";
 import {
+  ANALYTICAL_MAX_CELLS_SETTING,
   databaseEncryption,
   canonicalTransaction,
   LedgerLineUnwritableError,
@@ -62,13 +63,18 @@ import {
   listInvalidations,
   listProviderCalls,
   LEGACY_CLEANUP_SETTING,
+  readAnalyticalMaxCells,
+  readAnalyticalProfile,
   readFact,
+  setAnalyticalProfile,
   checkOntologyChange,
   factValueFit,
   readOntologyHistory,
+  readMergeLine,
   readSemanticHistory,
   readSemanticState,
   readSetting,
+  rootOf,
   schemaVersion,
   writeSetting,
   type DerivativeRegistry,
@@ -82,7 +88,7 @@ import {
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { ConnectorManager } from "./connectors.ts";
+import type { ConnectorManager, ConnectorRebuild } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import type { InstanceImporter } from "./imports.ts";
 import { InstanceBusyError, type JsonlImporter } from "./jsonl-import.ts";
@@ -119,8 +125,11 @@ export interface ServerOptions {
   vectorIndex: VectorIndex;
   /** Chosen by the composition point; null while no implementation is bound (reported not implemented). */
   embedder: EmbeddingProvider | null;
-  /** Built by the composition point (composition.ts), never here. */
-  connectors: ConnectorManager;
+  /**
+   * Built by the composition point (composition.ts), never here. Its `rebuild` (I06-R12) is what a
+   * change notice calls; a manager without it answers connector-unavailable.
+   */
+  connectors: ConnectorManager & Partial<ConnectorRebuild>;
   /** The migrated canonical DB the screens read from. */
   db: SqlDriver;
   /** The folder holding `db`, shown read-only in Settings. */
@@ -269,6 +278,12 @@ async function connectionTest(
     !found.installed || found.authentication === "unauthenticated" || found.problem !== undefined;
   return guide ? { ...answer, providerCheck: found } : answer;
 }
+
+/** The profile's switch and the size limit as stored (S03-R5, R6). */
+const analyticalSettings = (db: SqlDriver) => ({
+  profile: readAnalyticalProfile(db),
+  maxCells: readAnalyticalMaxCells(db),
+});
 
 function providerList(options: ServerOptions): ProviderList {
   const providers = options.calls?.providers ?? [];
@@ -590,8 +605,9 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       }
       if (outcome.status === "removed") return { status: "removed" as const };
       if (outcome.status === "refused") {
-        return outcome.reason === "not-found"
-          ? { error: "not-found" as const }
+        if (outcome.reason === "not-found") return { error: "not-found" as const };
+        return "held" in outcome
+          ? { status: "refused" as const, reason: outcome.reason, held: outcome.held }
           : { status: "refused" as const, reason: outcome.reason };
       }
       const now = readSemanticState(options.db, ref);
@@ -673,6 +689,21 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         : { error: "not-found" };
     });
   };
+  /**
+   * The user's merge, unmerge and distinct mark (S02-R25), each in one transaction with the visibility checks:
+   * an item that is absent, deleted or hidden, and the top of its group likewise, is the one `not-found`
+   * (404), so a hidden item's existence is not told. The merge's two ends are read as the tops of their
+   * groups by the entry; here both the named items and their tops must be shown.
+   */
+  const shownItems = (ids: readonly number[]) =>
+    ids.every(
+      (id) => gate.semanticShown("item", id) && gate.semanticShown("item", rootOf(options.db, id)),
+    );
+  const entityAction = <T>(act: (decisions: UserDecisions, at: string) => T) => {
+    const { decisions } = options;
+    if (!decisions) return { error: "not-found" as const };
+    return options.db.transaction(() => act(decisions, serverTime()));
+  };
   /** An outcome as the contract types it: the refusal's code list is a mutable array. */
   const plainOutcome = (outcome: OntologyActionOutcome | UserChangeOutcome) =>
     outcome.status === "refused"
@@ -736,6 +767,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),
     syncConnector: (input) => options.connectors.sync(input.connectorId),
+    // I06-R12: the id only; the manager rebuilds the instance and answers its summary (never a value)
+    credentialsChanged: async ({ connectorId }) => {
+      if (!options.connectors.rebuild) return { error: "connector-unavailable" };
+      return (await options.connectors.rebuild(connectorId)) ?? { error: "not-found" };
+    },
     importJsonl: async ({ text }) => {
       if (!options.importer) return { error: "connector-unavailable" };
       try {
@@ -836,6 +872,16 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       );
       return { cliBackground: readCliBackground(options.db) };
     },
+    // S03-R5, R6: the profile's switch (OFF from ON queues nothing, ON queues the tables already stored)
+    analyticalSettings: async () => analyticalSettings(options.db),
+    setAnalyticalSettings: async ({ profile, maxCells }) => {
+      options.db.transaction(() => {
+        writeSetting(options.db, ANALYTICAL_MAX_CELLS_SETTING, String(maxCells));
+        setAnalyticalProfile(options.db, profile, new Date());
+      });
+      options.onRunConditionsChanged?.(); // wakes the runner for the profile jobs the switch queued
+      return analyticalSettings(options.db);
+    },
     providers: async () => providerList(options),
     setDefaultProvider: async ({ providerId }) => {
       const set = releasing(
@@ -870,6 +916,33 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     semanticCorrect: async ({ correction }) => semanticCorrect(correction),
     semanticUndo: async (ref) =>
       semanticAction(ref, (decisions, at) => decisions.undo(options.db, ref, at)),
+    // S02-R25, T04: the user's merge, unmerge and distinct mark through the same one entry
+    entityMerge: async ({ member, into }) =>
+      entityAction((decisions, at) => {
+        if (!shownItems([member, into])) return { error: "not-found" as const };
+        const merged = decisions.entities.merge(options.db, member, into, at);
+        if (merged.status === "applied") return merged;
+        return merged.reason === "not-found"
+          ? { error: "not-found" as const }
+          : { status: "refused" as const, reason: merged.reason };
+      }),
+    entityUnmerge: async ({ mergeId, keepDistinct }) =>
+      entityAction((decisions, at) => {
+        const line = readMergeLine(options.db, mergeId);
+        if (!line || !shownItems([line.memberId, line.representativeId])) {
+          return { error: "not-found" as const };
+        }
+        const done = decisions.entities.unmerge(options.db, mergeId, keepDistinct ?? true, at);
+        return done.status === "applied"
+          ? { status: "applied" as const }
+          : { error: "not-found" as const };
+      }),
+    entityDistinct: async ({ a, b, on }) =>
+      entityAction((decisions, at) => {
+        if (!shownItems([a, b])) return { error: "not-found" as const };
+        const set = decisions.entities.setDistinct(options.db, a, b, on, at);
+        return set.status === "refused" ? { error: "not-found" as const } : set;
+      }),
     // S01-R23, T07: the type definitions. The user's operations take the same one entry; an id that is
     // absent, deleted or hidden is the one same not-found; a refusal is a code with counts in a 200 body.
     knowledgeSchema: async () => gate.knowledgeSchema(),

@@ -92,6 +92,8 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
   // A body for every route that takes one; the schema test below fails for a route missing here.
   const requests: Partial<Record<RouteName, unknown>> = {
     syncConnector: { connectorId: "fixtures" },
+    // I06-R12: the change notice of a credential; the fixture instance declares no slot, so it is rebuilt as it is
+    credentialsChanged: { connectorId: "fixtures" },
     importJsonl: { text: readFileSync(resolve(FIXTURES, "../v02-mail.jsonl"), "utf8") },
     imports: {
       instanceId: "contract-import",
@@ -117,6 +119,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     },
     connectionTest: { acknowledgeUnverified: false },
     setExecutionSettings: { cliBackground: false },
+    setAnalyticalSettings: { profile: false, maxCells: 200_000 },
     setDefaultProvider: { providerId: "claude-code" },
     // The pack does not exist: the preparation starts, then fails without touching disk.
     prepareEmbedding: { source: { kind: "local-pack", path: "/synthetic/missing-pack" } },
@@ -146,11 +149,26 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     ontologyDecide: { id: 1, action: "approve" },
     ontologyUndo: { id: 1 },
     ontologyHistory: { id: 1 },
+    // entity resolution (S02-T04): the bodies are set in beforeAll, after two items of the user's own and a line between them exist
+    entityMerge: { member: 1, into: 1 },
+    entityUnmerge: { mergeId: 1 },
+    entityDistinct: { a: 1, b: 2, on: true },
   };
 
   beforeAll(async () => {
     migrate(db);
     await seedV02(db, ["plain"]);
+    // two items the user made and the line that merges them: the unmerge route's body, and a distinct mark's two ends
+    const made = ["병합 시험 가", "병합 시험 나"].map((name) => {
+      const added = userDecisions.add(db, { kind: "item", type: "Concept", name });
+      if (added.status !== "applied") throw new Error("the user's item");
+      return added.ref.id;
+    }) as [number, number];
+    const merged = userDecisions.entities.merge(db, made[0], made[1]);
+    if (merged.status !== "applied") throw new Error("the merge");
+    requests.entityMerge = { member: made[0], into: made[0] }; // already one: a refusal code in a 200 body
+    requests.entityUnmerge = { mergeId: merged.mergeId };
+    requests.entityDistinct = { a: made[0], b: made[1], on: true };
     const adapters = productAdapters("/synthetic/data");
     const bound = engine();
     projections = productProjections(db, { engine: bound, ...adapters });
@@ -272,6 +290,34 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
         received: 0,
       });
       expect(JSON.stringify(res.body)).not.toContain("connector broke");
+    });
+
+    const changed = routes.credentialsChanged;
+    it.each([
+      ["bad-request", 400, "not json"],
+      ["bad-request", 400, {}],
+      ["bad-request", 400, { connectorId: "" }],
+      ["bad-request", 400, { connectorId: "fixtures", value: "x" }],
+      ["bad-request", 400, { connectorId: "x".repeat(20_000) }],
+      ["not-found", 404, { connectorId: "nope" }],
+    ])("credentials-changed %s rejection (%i)", async (error, status, body) => {
+      const res = await send(server.port, changed.path, valid, changed.method, body);
+      expect(res.status).toBe(status);
+      expect(ErrorResponseSchema.parse(res.body)).toEqual({ error });
+    });
+
+    it("answers a change notice with the instance's summary and what became of the rebuild (I06-R12)", async () => {
+      for (const [connectorId, kind, state] of [
+        ["site-mail", "site-mail", "not-implemented"],
+        ["fixtures", "test-fixtures", "ready"],
+      ] as const) {
+        const res = await send(server.port, changed.path, valid, changed.method, { connectorId });
+        expect(res.status).toBe(200);
+        expect(changed.response.parse(res.body)).toMatchObject({
+          summary: { id: connectorId, kind, state },
+          rebuild: "done",
+        });
+      }
     });
 
     const shownVersion = productEgress(db).policyVersion();

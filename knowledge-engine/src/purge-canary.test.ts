@@ -5,12 +5,17 @@
 import {
   addEvidence,
   canonicalTransaction,
+  closeJob,
+  setAnalyticalProfile,
+  DATASET_PROFILE_KIND,
   findSourceId,
   identityKey,
   insertItem,
+  leaseNextJob,
   prepareCanonicalDb,
   readTombstoneState,
   registerConnectorInstance,
+  registerJob,
   saveFact,
   saveInsight,
   saveSourceRecord,
@@ -26,6 +31,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createDatasetProfileHandler } from "./dataset-profile.ts";
 import { COMPLETION_DATE, DEPENDENCY_DELAY } from "./dependency-delay.ts";
 import { applyTombstone } from "./tombstone-entry.ts";
 
@@ -42,6 +48,9 @@ const CANARY = {
   alias: "vsjalias", // ⑧ a surface form, the value of an `alias.*` fact (S01-R2)
   definition: "ndzdefinition", // ⑧ a definition, the value of a `definition` fact (S01-R3)
   context: "kfbcontext", // ⑧ a definition's context tag (S01-R3)
+  identifier: "rqvidentifier", // ⑨ an identifier, the value of an `identifier.*` fact (S02-R2)
+  statement: "zcwstatement", // ⑨ a statement, the value of a `statement` fact (S02-R2)
+  tag: "tgdtag", // ⑨ the context tag of an `identifier.key` (S02-R4)
 };
 const ALL = Object.values(CANARY);
 const AT = "2026-11-22T00:00:00.000Z";
@@ -74,7 +83,7 @@ const IDENTITY = {
   externalId: CANARY.externalId,
 };
 const OLD_BODY = `값 ${CANARY.old} 입니다`;
-const NEW_BODY = `이제 ${CANARY.body} 와 ${CANARY.word} 그리고 ${CANARY.quote} 입니다 ${CANARY.alias} ${CANARY.definition}`;
+const NEW_BODY = `이제 ${CANARY.body} 와 ${CANARY.word} 그리고 ${CANARY.quote} 입니다 ${CANARY.alias} ${CANARY.definition} ${CANARY.identifier} ${CANARY.statement}`;
 
 /** One source, two versions (the first with the old value), a fact on each, one Insight. */
 function seed() {
@@ -131,6 +140,22 @@ function seed() {
   };
   vocabulary("alias.synonym", CANARY.alias, null);
   vocabulary("definition", CANARY.definition, CANARY.context);
+  // S02-R2: an identifier with its context tag on a person, a statement on a decision, both from the current version
+  const personItem = insertItem(db, { type: "Person", name: "W 사람", ...attrs });
+  const decisionItem = insertItem(db, { type: "Decision", name: "V 결정", ...attrs });
+  const written = (itemId: number, kind: string, value: string, context: string | null) => {
+    const id = saveFact(db, { itemId, kind, value, context, ...attrs }).id;
+    const start = NEW_BODY.indexOf(value);
+    addEvidence(db, {
+      target: { factId: id },
+      sourceVersionId: versionId(2),
+      start,
+      end: start + value.length,
+      quote: value,
+    });
+  };
+  written(personItem, "identifier.key", CANARY.identifier, CANARY.tag);
+  written(decisionItem, "statement", CANARY.statement, null);
   const evidenceOld = fact(x, "2026-12-10", 1, OLD_BODY, CANARY.old);
   const evidenceNew = fact(y, "2026-12-12", 2, NEW_BODY, CANARY.quote);
   saveInsight(
@@ -191,11 +216,40 @@ describe("purge.canary-files", () => {
     }
   });
 
+  it("leaves no identifier, statement or context tag of an identifier in any file after the deletion (S02-R2, R4)", () => {
+    seed();
+    const rows = () =>
+      db.all(
+        "SELECT kind, value, context FROM facts WHERE kind IN ('identifier.key', 'statement') ORDER BY id",
+      );
+    expect(rows()).toEqual([
+      { kind: "identifier.key", value: CANARY.identifier, context: CANARY.tag },
+      { kind: "statement", value: CANARY.statement, context: null },
+    ]);
+    entry("user-deleted");
+    expect(rows()).toEqual([]);
+    expect(db.all("SELECT 1 FROM items WHERE type IN ('Person', 'Decision')")).toEqual([]);
+    const left = residue();
+    for (const canary of [CANARY.identifier, CANARY.statement, CANARY.tag]) {
+      expect(left).not.toContain(canary);
+    }
+  });
+
   it("control: with PRAGMA secure_delete off the current text stays (①)", () => {
     seed();
     db.exec("PRAGMA secure_delete = OFF");
     entry("user-deleted");
     expect(residue()).toContain(CANARY.body);
+  });
+
+  it("control: with PRAGMA secure_delete off the identifier, the statement and the tag stay (the red case of S02's canaries)", () => {
+    seed();
+    db.exec("PRAGMA secure_delete = OFF");
+    entry("user-deleted");
+    const left = residue();
+    for (const canary of [CANARY.identifier, CANARY.statement, CANARY.tag]) {
+      expect(left).toContain(canary);
+    }
   });
 
   it("control: with the FTS secure-delete off the indexed word stays (③)", () => {
@@ -205,6 +259,113 @@ describe("purge.canary-files", () => {
     db.run("INSERT INTO keyword_index (keyword_index, rank) VALUES ('secure-delete', 0)");
     entry("user-deleted");
     expect(residue()).toContain(CANARY.word);
+  });
+});
+
+// S03-R17: the names a table's profile writes (a column name, the sheet's name) are gone with the table's source.
+// The Dataset item is named `title:sheet`, so its name goes with its item, which no other source holds here
+// (the case that another source's row holds it is S03-T05's).
+describe("purge.canary-files: a table source's profile (S03-R17)", () => {
+  const TABLE = {
+    column: "zqkcolumn", // a header cell: a `dataset.column` fact's value and its evidence's quote
+    other: "wvfheader", // a second header cell
+    sheet: "bnmsheet", // the sheet's name: a locator's field, `dataset_tables`'s key, the Dataset item's name
+    title: "ptdtitle", // the source's title: the Dataset item's name
+    cell: "xrlvalue", // a data cell
+    external: "ghsexternal",
+  };
+  const TABLE_CANARIES = Object.values(TABLE);
+  const WORKBOOK_BODY = `${TABLE.column}\t${TABLE.other}\n${TABLE.cell}\t1`;
+
+  /** One workbook of one sheet, profiled: its Dataset, columns and `dataset_tables` row are written. */
+  async function seedTable(): Promise<number> {
+    setAnalyticalProfile(db, true, new Date(AT)); // the job reads the switch when it runs
+    const cell = (text: string, row: number, column: number, start: number) => ({
+      start,
+      end: start + text.length,
+      locator: {
+        format: "xlsx" as const,
+        sheet: TABLE.sheet,
+        cell: `${"AB"[column - 1]}${row}`,
+        row,
+        column,
+      },
+    });
+    const blocks = [
+      cell(TABLE.column, 1, 1, 0),
+      cell(TABLE.other, 1, 2, TABLE.column.length + 1),
+      cell(TABLE.cell, 2, 1, TABLE.column.length + TABLE.other.length + 2),
+      cell("1", 2, 2, TABLE.column.length + TABLE.other.length + TABLE.cell.length + 3),
+    ];
+    const saved = saveSourceRecord(db, "c1", {
+      namespace: "",
+      externalId: TABLE.external,
+      title: TABLE.title,
+      body: WORKBOOK_BODY,
+      blocks,
+    });
+    if (saved.status !== "created") throw new Error("seed");
+    registerJob(db, {
+      kind: DATASET_PROFILE_KIND,
+      sourceId: saved.sourceId,
+      fenceVersion: saved.version,
+      at: new Date(AT),
+    });
+    const job = leaseNextJob(db, {
+      kinds: [DATASET_PROFILE_KIND],
+      now: new Date(AT),
+      leaseMs: 60_000,
+    });
+    if (!job) throw new Error("no job");
+    const result = await createDatasetProfileHandler({ db, now: () => new Date(AT) })(job);
+    if (result.status !== "succeeded" || closeJob(db, job, result, new Date(AT)) !== "succeeded") {
+      throw new Error("profile");
+    }
+    return saved.sourceId;
+  }
+  const tableEntry = (reason: TombstoneReason) =>
+    canonicalTransaction(db, (tx) =>
+      applyTombstone(tx, {
+        identity: { connectorInstanceId: "c1", namespace: "", externalId: TABLE.external },
+        reason,
+        lastRevision: null,
+        at: AT,
+      }),
+    );
+  const left = () => {
+    db.close();
+    const found = canariesLeft(dir, TABLE_CANARIES);
+    db = open();
+    return found;
+  };
+
+  it("every canary is in the file once the table is profiled (else the checks below prove nothing)", async () => {
+    await seedTable();
+    expect(db.all("SELECT table_key, row_count FROM dataset_tables")).toEqual([
+      { table_key: TABLE.sheet, row_count: 1 },
+    ]);
+    expect(db.all("SELECT name FROM items")).toEqual([{ name: `${TABLE.title}:${TABLE.sheet}` }]);
+    expect(left()).toEqual(TABLE_CANARIES);
+  });
+
+  it.each([["source-deleted"], ["access-revoked"], ["user-deleted"]] as const)(
+    "leaves no column name, sheet name, title or cell in any file after a %s deletion, and no Dataset or table row",
+    async (reason) => {
+      await seedTable();
+      tableEntry(reason);
+      expect(left()).toEqual([]);
+      expect(db.all("SELECT 1 FROM items")).toEqual([]);
+      expect(db.all("SELECT 1 FROM facts")).toEqual([]);
+      expect(db.all("SELECT 1 FROM dataset_tables")).toEqual([]);
+    },
+  );
+
+  it("a prose source's deletion leaves a table's names alone", async () => {
+    await seedTable();
+    seed();
+    entry("user-deleted");
+    expect(db.all("SELECT table_key FROM dataset_tables")).toEqual([{ table_key: TABLE.sheet }]);
+    expect(db.all("SELECT type FROM items WHERE type = 'Dataset'")).toHaveLength(1);
   });
 });
 

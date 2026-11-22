@@ -12,7 +12,7 @@ import type {
   RouteResponse,
   SourceSummary,
 } from "@pki/contracts";
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { outcomeText } from "./activity-text.ts";
 import { JobsArea } from "./activity-jobs.tsx";
 import { ApiError, type ApiClient } from "./api.ts";
@@ -20,6 +20,12 @@ import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } f
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { BACKGROUND_EXECUTION_TEXT } from "./background-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
+import {
+  changeCredential,
+  credentialOutcomeText,
+  rereadDelaysMs,
+  type CredentialAction,
+} from "./connector-credential.ts";
 import { ConnectorTable } from "./connector-table.tsx";
 import { nextSyncStops } from "./connector-text.ts";
 import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts";
@@ -211,7 +217,35 @@ function Sources({ api }: { api: ApiClient }) {
   const [deleted, setDeleted] = useState<string>();
   const [error, setError] = useState<string>();
   const [syncStops, setSyncStops] = useState<Record<string, string>>({});
+  const [credentialNotes, setCredentialNotes] = useState<Record<string, string>>({});
+  const rereads = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = rereads.current;
+    return () => timers.forEach(clearTimeout);
+  }, []);
+  const bridge = secretBridge();
   const fail = (e: unknown) => setError(message(e));
+
+  // I06-R14: the value goes to the shell's store, the backend is told which instance changed
+  const changeConnectorCredential = async (
+    connectorId: string,
+    name: string,
+    action: CredentialAction,
+  ) => {
+    if (!bridge) return;
+    const outcome = await changeCredential({ bridge, api }, connectorId, name, action);
+    setCredentialNotes((notes) => ({ ...notes, [connectorId]: credentialOutcomeText(outcome) }));
+    for (const delay of rereadDelaysMs(outcome)) {
+      if (delay === 0) connectors.reload();
+      else {
+        const timer = setTimeout(() => {
+          rereads.current.delete(timer);
+          connectors.reload();
+        }, delay);
+        rereads.current.add(timer);
+      }
+    }
+  };
 
   const importFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -269,6 +303,9 @@ function Sources({ api }: { api: ApiClient }) {
         connectors={connectors.data?.connectors ?? []}
         syncStops={syncStops}
         onSync={sync}
+        canEnterCredentials={bridge !== undefined}
+        credentialNotes={credentialNotes}
+        onCredentialChange={changeConnectorCredential}
       />
       <h2>JSONL 가져오기</h2>
       <input

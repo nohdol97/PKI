@@ -58,8 +58,19 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   ontology_elements: kind("ontology"),
   ontology_basis: kind("ontology"),
   ontology_history: kind("ontology"),
+  // merge lines, distinct marks and split records (S02-R14, R16, R26): numbers only, the registered kind
+  // `entity-merge` joins the chain around a deleted item, removes the rows an item's deletion takes and
+  // rests or wakes a group when a lineage or a scope changes; the candidates are `merge-candidate`'s
+  item_merges: kind("entity-merge"),
+  item_distinct: kind("entity-merge"),
+  item_split_moves: kind("entity-merge"),
+  merge_candidates: kind("merge-candidate"),
   // what the scope policy left out of an extraction (I04-T09): the registered kind `scope-drop` deletes them with their source
   scope_policy_drops: kind("scope-drop"),
+  // the analytical semantic's two tables (S03-R1, R17): the Dataset's tie to a stored table and the numbers
+  // of a data check. The registered kind `analytical-check` deletes the first with its source
+  dataset_tables: kind("analytical-check"),
+  analytical_checks: kind("analytical-check"),
   jobs: operational("work queue: a row names a source by id and holds no content"),
   schedules: operational("periods of the schedule (I03)"),
   consents: operational("the user's consent per Provider"),
