@@ -22,7 +22,20 @@ export type StartFailureReport = {
   line?: number;
 };
 
+/**
+ * Never throws: a thrown value is untrusted (a fork's code can throw anything), and an `instanceof` against a
+ * Proxy with a throwing `getPrototypeOf`, or a field getter that throws, would otherwise stop the failure
+ * message from being posted. Such a value is reported without a reason, as an unknown one.
+ */
 export function startFailureReport(error?: unknown): StartFailureReport {
+  try {
+    return classify(error);
+  } catch {
+    return { type: "failed" };
+  }
+}
+
+function classify(error: unknown): StartFailureReport {
   if (error instanceof LedgerUnavailableError) {
     return { type: "failed", reason: "ledger-unavailable" };
   }

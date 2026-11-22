@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { ESLint, RuleTester } from "eslint";
 import tseslint from "typescript-eslint";
 import { afterAll, describe, expect, it } from "vitest";
@@ -137,6 +137,60 @@ describe("repository lint config enforces module-boundary", () => {
   }, 90_000);
   // ^ lints the whole repository. Measured, 5 runs each: 3.3-3.5 s alone (4.3-4.5 s before only this rule
   // ran), 16.9-19.6 s with the machine 3x oversubscribed (24 busy loops on 8 cores). 90 s is 4.5x that.
+
+  // B1 (I05-T04 delta D2): a fork package cannot switch the rule off or re-configure it from inside a file.
+  // Inline configuration stays available to the public packages.
+  describe("inline ESLint configuration", () => {
+    /** An import of another package's file by path, written as a relative specifier from `file`. */
+    const reach = (file: string, target: string) =>
+      `import { x } from "${relative(dirname(join(repoRoot, file)), join(repoRoot, target))}";\nexport { x };\n`;
+    // every package name a file below could belong to (the root's, when the fork folders do not exist), so the
+    // option would open the import if it took effect
+    const allowList = [
+      "pki",
+      "@pki/backend",
+      "@pki-site/composition",
+      "@pki-site/connector-x",
+      "@pki/site-example",
+    ];
+    const inline = (file: string, target: string) => ({
+      "a disable-next-line comment": `// eslint-disable-next-line pki/module-boundary\n${reach(file, target)}`,
+      "a block disable comment": `/* eslint-disable pki/module-boundary */\n${reach(file, target)}`,
+      "a rule-setting comment that turns the rule off": `/* eslint pki/module-boundary: "off" */\n${reach(file, target)}`,
+      "a rule-setting comment that gives the rule an allow-list": `/* eslint pki/module-boundary: ["error", {"allowRelative": ${JSON.stringify(
+        allowList.map((pkg) => ({ pkg, target: join(repoRoot, target) })),
+      )}}] */\n${reach(file, target)}`,
+    });
+    const forkFiles = [
+      "site/composition/src/registration.ts",
+      "site/connectors/x/src/adapters/impl.ts",
+      "packages/site-example/src/registration.ts",
+    ];
+    const forms = Object.keys(inline("backend/src/index.ts", "providers/src/index.ts"));
+    it.each(forkFiles.flatMap((file) => forms.map((form) => [file, form] as const)))(
+      "%s: %s does not silence the rule",
+      async (file, form) => {
+        const code = inline(file, "backend/src/boot.ts")[form as keyof ReturnType<typeof inline>];
+        const messages = await lintWithRepoConfig(code, file);
+        expect(messages.map((m) => m.messageId)).toEqual(["crossPackageRelative"]);
+      },
+    );
+
+    it("leaves the same comments in force in a public package", async () => {
+      const file = "backend/src/index.ts";
+      for (const code of Object.values(inline(file, "providers/src/index.ts"))) {
+        expect(await lintWithRepoConfig(code, file)).toEqual([]);
+      }
+    });
+
+    it("the same import without a comment is reported in a public package (the cases above are not vacuous)", async () => {
+      const messages = await lintWithRepoConfig(
+        reach("backend/src/index.ts", "providers/src/index.ts"),
+        "backend/src/index.ts",
+      );
+      expect(messages.map((m) => m.messageId)).toEqual(["crossPackageRelative"]);
+    });
+  });
 
   it("allows imports inside the same package and of platform modules", async () => {
     const messages = await lintWithRepoConfig(
@@ -528,6 +582,14 @@ describe("module-boundary: fork packages (I05-C4)", () => {
         filename: at("site/connectors/x/src/index.ts"),
         errors: [{ messageId: "undeclaredDependency" }],
       },
+      // B4 (S01-R7, I05-R4): the fork's composition point is not the composition root that hands the
+      // registry's user entry to the API layer; it is refused the entry too (the storage dependency is
+      // undeclared in this fixture, so that is reported as well)
+      {
+        code: 'import { userDecisions } from "@pki/storage";\nexport { userDecisions };\n',
+        filename: registration,
+        errors: [{ messageId: "userEntryImport" }, { messageId: "undeclaredDependency" }],
+      },
       // D1: nothing of the backend is reached by path or by subpath from a fork-shaped package,
       // in a product file and in a test file alike (bootBackend takes unchecked connectors and policies)
       ...[
@@ -583,6 +645,10 @@ describe("module-boundary: fork packages (I05-C4)", () => {
     ],
     invalid: [registration, exampleShell, compositionTest].flatMap((filename) =>
       [
+        // B2 (I05-T04 delta D3): a file: URL that cannot be read as a path is refused, not mapped into the own package
+        'import { r } from "file://evilhost/site/composition/src/registration.ts";',
+        'import { r } from "file:///site/composition/src/..%2F..%2F..%2Fbackend/src/boot.ts";',
+        'const m = await import("file://evilhost/backend/src/boot.ts");',
         `import { bootBackend } from ${JSON.stringify(absoluteBoot)};`,
         `export { bootBackend } from ${JSON.stringify(absoluteBoot)};`,
         `const m = await import(${JSON.stringify(absoluteBoot)});`,

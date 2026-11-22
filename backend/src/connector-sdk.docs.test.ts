@@ -30,11 +30,19 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { connectorKinds, openCanonicalDb } from "./composition.ts";
+import { connectorKinds, openCanonicalDb, productConnectors } from "./composition.ts";
 import { INITIALIZE_TIMEOUT_MS, RECHECK_LATE_LIMIT } from "./connectors.ts";
 import { RECHECK_TIMEOUT_MS, SYNC_PERIOD } from "./connector-sync-job.ts";
 import { REJECTED_LIST_LIMIT, SYNC_BACKOFF, siteCheck } from "./connectors.ts";
 import { importContent } from "./imports.ts";
+import {
+  checkSiteRegistration,
+  mergeSiteRegistration,
+  stoppingError,
+  type SiteRegistration,
+  type SiteRegistrationCode,
+} from "./site-registration.ts";
+import type { ScopeGrading } from "@pki/providers";
 import type { SqlDriver } from "@pki/storage";
 
 const repo = resolve(import.meta.dirname, "../..");
@@ -401,5 +409,115 @@ describe("docs.connector-sdk: what the prose says of the contracts holds", () =>
       expect(() => new ConnectorRateLimitError("x", { retryAfterMs })).toThrow(RangeError);
     }
     expect(new ConnectorRateLimitError("x", { retryAfterMs: 0 }).retryAfterMs).toBe(0);
+  });
+});
+
+// I05-C19: chapter 7's table of check codes says what the start does with each. The code is asked with a
+// registration that has that violation alone, so a row that names the wrong treatment turns this red.
+describe("docs.connector-sdk (I05): chapter 7's check-code table equals what the start does", () => {
+  const made = (type: string): Connector => {
+    const placeholder = connectorKinds["site-mail"]();
+    return { ...placeholder, manifest: { ...placeholder.manifest, type } };
+  };
+  const kindOf = (name: string) => () => made(name);
+  const base = productConnectors();
+  const cases: { code: SiteRegistrationCode; site: SiteRegistration }[] = [
+    { code: "kind-name-invalid", site: { connectorKinds: { "Bad Name": kindOf("Bad Name") } } },
+    { code: "kind-reserved", site: { connectorKinds: { "jsonl-import": kindOf("jsonl-import") } } },
+    {
+      code: "instance-id-invalid",
+      site: {
+        connectorKinds: { fork: kindOf("fork") },
+        connectorInstances: [{ id: "", kind: "fork", config: {} }],
+      },
+    },
+    {
+      code: "instance-id-duplicate",
+      site: {
+        connectorKinds: { fork: kindOf("fork") },
+        connectorInstances: [
+          { id: "a", kind: "fork", config: { first: true } },
+          { id: "a", kind: "fork", config: { first: false } },
+        ],
+      },
+    },
+    {
+      code: "instance-kind-unknown",
+      site: { connectorInstances: [{ id: "a", kind: "nothing-here", config: {} }] },
+    },
+    {
+      code: "instance-kind-reserved",
+      site: { connectorInstances: [{ id: "a", kind: "jsonl-import", config: {} }] },
+    },
+    {
+      code: "instance-id-reserved",
+      site: {
+        connectorKinds: { fork: kindOf("fork") },
+        connectorInstances: [{ id: "site-mail", kind: "fork", config: {} }],
+      },
+    },
+    {
+      code: "kind-factory-threw",
+      site: {
+        connectorKinds: {
+          fork: () => {
+            throw new Error("x");
+          },
+        },
+      },
+    },
+    { code: "kind-manifest-mismatch", site: { connectorKinds: { fork: kindOf("other") } } },
+    {
+      code: "scope-grading-invalid",
+      site: {
+        scopeGrading: {
+          grade: () => "nope",
+          strictest: () => "nope",
+        } as unknown as ScopeGrading,
+      },
+    },
+  ];
+  const rows = new Map(
+    lines
+      .filter(
+        (l) => /^\| `[a-z-]+` \|/.test(l) && cases.some((c) => l.startsWith(`| \`${c.code}\` |`)),
+      )
+      .map((l) => [/^\| `([a-z-]+)`/.exec(l)?.[1] as string, l]),
+  );
+
+  it("has one row for each of the ten codes", () => {
+    expect([...rows.keys()].sort()).toEqual(cases.map((c) => c.code).sort());
+  });
+
+  it.each(cases)(
+    "$code: the check finds it alone, and the row says what the start does",
+    ({ code, site }) => {
+      expect(checkSiteRegistration(site, base)).toEqual([code]);
+      const row = rows.get(code) as string;
+      const stops = stoppingError([code]) !== undefined;
+      expect(row.includes("**시작을 멈춘다**"), `${code} stops the start`).toBe(stops);
+      const merged = mergeSiteRegistration(site, base);
+      const checkOnly = row.endsWith("검사에서만 |") || row.includes("검사에서만(");
+      expect(merged.violations.includes(code), `${code} is found by the start's merge`).toBe(
+        !checkOnly,
+      );
+    },
+  );
+
+  it("the four that leave their item out do: the merged set lacks it", () => {
+    const merge = (code: SiteRegistrationCode) =>
+      mergeSiteRegistration(
+        (cases.find((c) => c.code === code) as (typeof cases)[number]).site,
+        base,
+      ).connectors;
+    expect(Object.keys(merge("kind-name-invalid").kinds)).not.toContain("Bad Name");
+    expect(Object.keys(merge("kind-reserved").kinds)).not.toContain("jsonl-import");
+    expect(merge("instance-id-invalid").instances.map((i) => i.id)).not.toContain("");
+    // the first one is the one kept ("첫 것만 쓴다")
+    expect(merge("instance-id-duplicate").instances.filter((i) => i.id === "a")).toEqual([
+      { id: "a", kind: "fork", config: { first: true } },
+    ]);
+    // an unknown kind stays in the set (it will be `unavailable`)
+    expect(merge("instance-kind-unknown").instances.map((i) => i.id)).toContain("a");
   });
 });
