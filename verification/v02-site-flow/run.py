@@ -10,6 +10,9 @@ and this runner checks the preconditions, prepares the synthetic input, then cou
   record      refusal checks; counts the DB like v02-flow.e2e; writes the pasteable result.json/result.md and the
               local raw/run-record.windows-installer.json
   summarize   lists the current run records of a folder, ignoring stale, other-commit and malformed ones
+  queue-scenario preflight|prepare|record --scenario kill|sleep|hibernate|clock-forward|clock-back|timezone
+              the queue and scheduler recovery scenarios of I03 (S19, see queue_scenario.py): their own refusals
+              ("배포처 후속", I03-H2 ① outside the Windows installer, ② no manual sleep confirmation record); needs no Provider
   delete-scenario preflight|prepare|record   the deletion scenario of I04 (S22, see delete_scenario.py): its own refusal
               ("배포처 후속", I04-H2 ②) outside the Windows installer; needs no Provider
 
@@ -33,6 +36,7 @@ for _p in (HERE, VERIF):
         sys.path.insert(0, _p)
 
 import delete_scenario  # noqa: E402
+import queue_scenario  # noqa: E402
 import run_record as rr  # noqa: E402
 from common import results  # noqa: E402
 from common.fingerprint import environment_fingerprint  # noqa: E402
@@ -47,6 +51,10 @@ NOTICE_NOT_INSTALLER = ("배포처 후속: S14 Windows 설치본이 아닌 환�
                         "R04의 설치 파일로 설치한 Windows 11에서 실행한다(V02-H2 ②, 이유: {code}).")
 NOTICE_DELETE_NOT_INSTALLER = ("배포처 후속: S22 Windows 설치본이 아닌 환경의 삭제 시나리오는 배포처 결과로 기록하지 않는다. "
                                "미구현, 배포처 후속: 실제 수집기가 있는 배포처 포크에서, R04의 설치 파일로 설치한 Windows 11에서 실행한다(I04-H2 ②, 이유: {code}).")
+NOTICE_QUEUE_NOT_INSTALLER = ("배포처 후속: S19 Windows 설치본이 아닌 환경의 큐·스케줄러 복구 시나리오는 배포처 결과로 기록하지 않는다. "
+                              "미구현, 배포처 후속: R04의 설치 파일로 설치한 Windows 11에서 실행한다(I03-H2 ①, 이유: {code}).")
+NOTICE_SLEEP_RECORD = ("배포처 후속: S19 절전·최대 절전 시나리오의 수동 확인 기록({file})이 없거나 이 실행과 맞지 않아 배포처 결과로 기록하지 않는다. "
+                       "RUNBOOK 9절의 양식으로 PC를 실제로 재운 뒤 적는다(I03-H2 ②, 이유: {code}).")
 # the operator attests these; `launched-installed`: every start was the installed exe (the DB does not say which
 # binary wrote it, and dist\app or source runs use the same data folder)
 OBSERVATIONS = ("launched-installed", "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept")
@@ -184,6 +192,12 @@ def delete_gate(cfg, platform=None, read_uninstall=None, is_file=None, in_git_tr
     """The installer check of the deletion scenario (I04-H2 ②): the same measured inputs, the S22 notice, no Provider."""
     return check_installer(cfg, platform or sys.platform, read_uninstall or read_uninstall_windows, is_file or os.path.isfile,
                            in_git_tree or _in_git_tree, notice=NOTICE_DELETE_NOT_INSTALLER)
+
+
+def queue_gate(cfg, platform=None, read_uninstall=None, is_file=None, in_git_tree=None):
+    """The installer check of the queue scenarios (I03-H2 ①): the same measured inputs, the S19 notice, no Provider."""
+    return check_installer(cfg, platform or sys.platform, read_uninstall or read_uninstall_windows, is_file or os.path.isfile,
+                           in_git_tree or _in_git_tree, notice=NOTICE_QUEUE_NOT_INSTALLER)
 
 
 # ---- prepare / record ------------------------------------------------------------------------------------------------
@@ -357,9 +371,55 @@ def run_delete_scenario(args):
     return 0 if verdict == "PASS" else 1
 
 
+# ---- queue and scheduler recovery scenarios (I03-R25, S19) ------------------------------------------------------------
+
+def run_queue_scenario(args, installer_check=None, db_path=None):
+    """Refusal first, before the config is read: outside Windows nothing else is looked at. `installer_check` and `db_path`
+    are for the tests only (main's keyword arguments, no command-line switch reaches them): a stand-in for "this is the
+    Windows installed build", which lets a development PC reach the second refusal, the missing sleep record."""
+    if installer_check is None and sys.platform != "win32":
+        raise Refusal(NOTICE_QUEUE_NOT_INSTALLER.format(code="not-windows"), "not-windows")
+    cfg = queue_scenario.validate_config(load_json_object(args.config))
+    app_version = (installer_check or queue_gate)(cfg)
+    scenario = args.scenario
+    if args.action == "preflight":
+        print("preflight ok: installed app {}, scenario {}".format(app_version, scenario))
+        return 0
+    if not args.out:
+        raise ConfigError("--out is required for {}".format(args.action))
+    db_path = db_path or site_db_path()
+    if args.action == "prepare":
+        try:
+            queue_scenario.prepare(db_path, args.out, scenario)
+        except queue_scenario.StaleBaseline as exc:
+            raise StaleData(str(exc)) from exc
+        print("wrote {} to --out. Next: RUNBOOK.md section 9 (scenario {}), then `record`.".format(queue_scenario.STATE_FILE, scenario))
+        return 0
+    sleep_path = args.sleep_record or os.path.join(args.out, queue_scenario.SLEEP_RECORD_FILE)
+    needs_sleep = scenario in queue_scenario.SLEEP_SCENARIOS
+    if needs_sleep and not os.path.isfile(sleep_path):
+        raise Refusal(NOTICE_SLEEP_RECORD.format(file=queue_scenario.SLEEP_RECORD_FILE, code="sleep-record-missing"), "sleep-record-missing")
+    started_at, state_scenario, baseline = queue_scenario.load_state(args.out)
+    if state_scenario != scenario:
+        raise ConfigError("the state in --out is of scenario {}: run `prepare --scenario {}` first".format(state_scenario, scenario))
+    window = None
+    if needs_sleep:
+        try:
+            window = queue_scenario.sleep_window(queue_scenario.read_sleep_record(sleep_path, scenario, started_at))
+        except queue_scenario.SleepRecordInvalid as exc:
+            raise Refusal(NOTICE_SLEEP_RECORD.format(file=queue_scenario.SLEEP_RECORD_FILE, code="sleep-record-invalid"),
+                          "sleep-record-invalid") from exc
+    snap = queue_scenario.read_queue_state(db_path, baseline, window)
+    verdict = queue_scenario.judge(scenario, args.observed, snap, cfg["expectedEffectRows"])
+    record = queue_scenario.build_record(cfg, app_version, scenario, snap, verdict, args.observed, started_at, commit=_git("rev-parse", "HEAD"))
+    queue_scenario.write_results(record, verdict, args.observed, args.out, args.redact)
+    print("{} {} (paste only result.json/result.md; never raw/)".format(queue_scenario.CHECK_ID, verdict))
+    return 0 if verdict == "PASS" else 1
+
+
 # ---- entry -----------------------------------------------------------------------------------------------------------
 
-def main(argv=None):
+def main(argv=None, installer_check=None, db_path=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
     for name in ("preflight", "prepare", "record"):
@@ -375,6 +435,14 @@ def main(argv=None):
     sp.add_argument("--config", required=True)
     sp.add_argument("--out")
     sp.add_argument("--observed", action="append", default=[], choices=delete_scenario.OBSERVATIONS)
+    sp.add_argument("--redact", action="append", default=[])
+    sp = sub.add_parser("queue-scenario")
+    sp.add_argument("action", choices=("preflight", "prepare", "record"))
+    sp.add_argument("--scenario", required=True, choices=queue_scenario.SCENARIOS)
+    sp.add_argument("--config", required=True)
+    sp.add_argument("--out")
+    sp.add_argument("--sleep-record", help="the manual sleep confirmation record; default <out>/sleep-confirmation.json")
+    sp.add_argument("--observed", action="append", default=[], choices=queue_scenario.ALL_OBSERVATIONS)
     sp.add_argument("--redact", action="append", default=[])
     sp = sub.add_parser("summarize")
     sp.add_argument("--records", required=True)
@@ -408,6 +476,8 @@ def main(argv=None):
     try:
         if args.command == "delete-scenario":
             return run_delete_scenario(args)
+        if args.command == "queue-scenario":
+            return run_queue_scenario(args, installer_check=installer_check, db_path=db_path)
         cfg = load_config(args.config)
         app_version = gate(cfg)
         if args.command == "preflight":

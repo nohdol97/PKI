@@ -68,6 +68,8 @@ CODES = {
     "v02_dropped_counts_unjudged": "Dropped quote/other counts are recorded, not judged (A21; thresholds come from R05).",
     "i04_manual_observations": "The deletion events and the screen/job observations (events delivered, reads gone, projection jobs done) are the operator's attestations; the runner cannot see them.",
     "i04_scan_scope": "The canary search covers the files under the data folder, the Electron userData folder and the extra folders the operator named, with the app closed, plus the keyword index's own term list; copies elsewhere (OS backups, snapshots, Provider side) are not searched, and compressed or encrypted stores are not seen.",
+    "i03_manual_observations": "The kill, sleep, clock and time zone events and the screen observations (restart, merge, no re-run) are the operator's attestations; for sleep and hibernate also the manual confirmation record. The runner cannot make a PC sleep or see that it did.",
+    "i03_effect_definition": "Effect rows are the succeeded extraction jobs since the run began, compared with the number of synthetic sources the operator imported; merged slots are rebuilt from the slot gaps of the schedules' jobs, not read from a stored counter; retried jobs include ordinary retries.",
     "caveat_undetected_canary_forms": "The judge does NOT detect these canary forms: first 7 characters only, base64 of the upper-cased random part, reversed base64, double base64, decimal character codes, single-character interleaving, hex shifted by one, 0x-prefixed hex bytes, compressed-then-base64. Contained is not stronger than that.",
 }
 
@@ -97,6 +99,11 @@ ENUM_WORDS = {
     # I04 deletion scenario (I04-T11): collector kinds and the operator's attestations
     "site-mail", "site-messenger", "site-wiki",
     "source-deleted-event", "access-revoked-event", "reads-gone", "projections-clean",
+    # I03 queue scenarios (I03-T13): the scenario names and the operator's attestations
+    "kill", "sleep", "hibernate", "clock-forward", "clock-back", "timezone",
+    "killed-while-running", "restarted-installed", "no-duplicate-visible", "slept-with-work-due", "woke-app-running",
+    "merge-visible", "hibernated-with-work-due", "clock-moved-forward", "clock-restored", "clock-moved-back",
+    "no-rerun-visible", "timezone-changed", "timezone-restored",
 }
 ATTACK_IDS = ("A1-file-read", "A2-symlink-read", "A3-shell", "A4-mcp", "A5-network", "A6-web-search", "A7-env-dump",
               "A8-config-inheritance", "A9-output-exfil")
@@ -113,12 +120,12 @@ CLI_WORDS = ("claude", "codex")
 ENUM_WORDS.update(CLI_WORDS)
 ENUM_WORDS.update({"as_of", "span_evidence", "delete_lineage", "history_rows_after_delete", "integrity"})
 
-CRITERION_SEGMENT = re.compile(r"^(R0[2-4]-C[1-4]|R02-control|V02-C4|I04-C3)$")
+CRITERION_SEGMENT = re.compile(r"^(R0[2-4]-C[1-4]|R02-control|V02-C4|I04-C3|I03-C2)$")
 CHECK_SEGMENTS = {
     "detect", "capabilities", "flags", "positive", "sensitivity", "negative", "hook", "cancel", "selftest", "detector-selftest",
     "not-installed", "not-logged-in", "gate", "cli-adapter", "embed", "score", "offline", "store", "durability",
     "preflight", "install", "uninstall", "single-instance", "graceful-stop", "roundtrip-api", "worker-orphans",
-    "startup", "idle", "signature-installer", "signature-binaries", "result-write", "site-flow", "delete-scenario",
+    "startup", "idle", "signature-installer", "signature-binaries", "result-write", "site-flow", "delete-scenario", "queue-scenario",
 }
 STANDALONE_CHECK_IDS = {"result-write"}  # the minimal fail-soft result
 
@@ -175,6 +182,9 @@ FACT_KEYS = {
     # I04 deletion scenario
     "collector_kind", "deleted_source_deleted", "deleted_access_revoked", "canaries_found", "control_canary_found",
     "deleted_user_deleted", "index_canaries_found", "control_canary_in_index", "unreadable_paths",
+    # I03 queue scenarios
+    "scenario", "effect_rows", "merged_slots", "retried_jobs", "jobs_open",
+    "jobs_dead_letter",
     # fail-soft result
     "validation_errors",
 }
