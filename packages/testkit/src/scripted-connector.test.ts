@@ -174,6 +174,18 @@ describe("ScriptedConnector", () => {
     ).rejects.toThrow();
   });
 
+  it("refuses an already aborted call before logging it or calling beforeAnswer", async () => {
+    let asked = 0;
+    const connector = await started({ entries: ENTRIES, beforeAnswer: () => void asked++ });
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(
+      connector.getChanges(null, { limit: 1, signal: aborted.signal }),
+    ).rejects.toThrow();
+    expect(connector.calls).toEqual([]);
+    expect(asked).toBe(0);
+  });
+
   it("returns from getDocument the script folded: highest revision, later scope, null after a tombstone", async () => {
     const connector = await started({
       entries: [

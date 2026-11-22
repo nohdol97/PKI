@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONNECTOR_VIOLATION_CODES,
   checkConnector,
+  type ConnectorCheckCode,
   connectorContract,
   type ConnectorScenario,
   type ConnectorViolationCode,
@@ -469,6 +470,301 @@ describe("contract-suite.red", () => {
     await expect(checkConnector(() => scripted(), { config: { nope: true } })).rejects.toThrow(
       /initialize/,
     );
+  });
+});
+
+/** A Connector that answers only after initialize; the subclass hook for early answers. */
+class Tracked extends ScriptedConnector {
+  ready = false;
+  override async initialize(config: unknown) {
+    await super.initialize(config);
+    this.ready = true;
+  }
+}
+const noTombstones = (entries: ScriptEntry[]): ScriptEntry[] =>
+  entries.filter((e) => e.kind !== "delete" && e.kind !== "access-revoked");
+const overrideDocument = (
+  answer: (ref: { namespace: string; externalId: string }, real: SourceRecord | null) => unknown,
+) =>
+  new (class extends ScriptedConnector {
+    override async getDocument(ref: { namespace: string; externalId: string }) {
+      return answer(ref, await super.getDocument(ref)) as SourceRecord | null;
+    }
+  })({ capabilities: FULL });
+const finalPage = (answer: (page: ChangeSet) => ChangeSet) =>
+  new (class extends ScriptedConnector {
+    override async getChanges(cursor: string | null, opts: { limit: number; signal: AbortSignal }) {
+      const page = await super.getChanges(cursor, opts);
+      if (cursor === null || page.changes.length > 0 || page.hasMore) return page;
+      return answer(page);
+    }
+  })({ capabilities: FULL });
+
+// Each clause of a code's definition (I01-R25, R2, R3, T04 §4·§5) has its own
+// double, so no clause can be dropped while the suite stays green (review F1).
+describe("contract-suite.red, clause by clause", () => {
+  it.each<[string, () => Double, ConnectorCheckCode[]]>([
+    [
+      "a capability that is not a boolean",
+      () => ({
+        create: () => scripted({ incremental: "yes" as unknown as boolean }),
+        scenario: scenario(),
+      }),
+      ["manifest-invalid"],
+    ],
+    [
+      "an empty manifest type",
+      () => ({
+        create: () => new ScriptedConnector({ type: " ", capabilities: FULL }),
+        scenario: scenario(),
+      }),
+      ["manifest-invalid"],
+    ],
+    [
+      "getChanges answering before initialize (getDocument refuses)",
+      () => ({
+        create: () =>
+          new (class extends Tracked {
+            override async getChanges(
+              cursor: string | null,
+              opts: { limit: number; signal: AbortSignal },
+            ): Promise<ChangeSet> {
+              if (!this.ready) return { changes: [], nextCursor: "", hasMore: false };
+              return super.getChanges(cursor, opts);
+            }
+          })({ capabilities: FULL }),
+        scenario: scenario(),
+      }),
+      ["responds-before-init"],
+    ],
+    [
+      "an access scope on a record from a Connector without the capability",
+      () => ({
+        create: () => scripted({ accessScope: false }),
+        scenario: scenario({
+          initial: replace(unscoped(initial()), "c", upsert(record("", "c", 3))),
+          later: unscoped(later()),
+        }),
+      }),
+      ["capability-access-scope"],
+    ],
+    [
+      "an access-revoked event from a Connector without the deletes capability",
+      () => ({
+        create: () => scripted({ deletes: false, deletionsOnRescan: false }),
+        scenario: scenario({
+          initial: [
+            ...noTombstones(initial()),
+            { kind: "access-revoked", namespace: "", externalId: "c", revision: 3, at: AT },
+          ],
+          later: noTombstones(later()),
+        }),
+      }),
+      ["capability-deletes"],
+    ],
+    [
+      "getDocument answering the empty-namespace unknown id",
+      () => ({
+        create: () =>
+          overrideDocument((ref, real) =>
+            ref.externalId === "contract-unknown-external-id"
+              ? record("", ref.externalId, 1)
+              : real,
+          ),
+        scenario: scenario(),
+      }),
+      ["get-document-unknown"],
+    ],
+    [
+      "getDocument answering a deleted source",
+      () => ({
+        create: () =>
+          overrideDocument((ref, real) =>
+            ref.namespace === "" && ref.externalId === "e" ? record("", "e", 1) : real,
+          ),
+        scenario: scenario(),
+      }),
+      ["get-document-mismatch"],
+    ],
+    [
+      "getDocument throwing for a delivered source",
+      () => ({
+        create: () =>
+          overrideDocument((ref, real) => {
+            if (ref.externalId === "c") throw new Error("lookup failed");
+            return real;
+          }),
+        scenario: scenario(),
+      }),
+      ["get-document-mismatch"],
+    ],
+    [
+      "getDocument after a scope change with other content",
+      () => ({
+        create: () =>
+          overrideDocument((ref, real) =>
+            ref.namespace === "" && ref.externalId === "b" && real ? { ...real, title: "x" } : real,
+          ),
+        scenario: scenario(),
+      }),
+      ["get-document-mismatch"],
+    ],
+    [
+      "getDocument after a scope change without the new scope",
+      () => ({
+        create: () =>
+          overrideDocument((ref, real) =>
+            ref.namespace === "" && ref.externalId === "b" && real
+              ? { ...real, accessScope: ["team"] }
+              : real,
+          ),
+        scenario: scenario(),
+      }),
+      ["get-document-mismatch"],
+    ],
+    [
+      "a rescan reporting access-revoked instead of delete",
+      () =>
+        base(
+          scenario({
+            later: later().map((e) =>
+              e.kind === "delete" && e.externalId === "c" ? { ...e, kind: "access-revoked" } : e,
+            ),
+          }),
+        ),
+      ["rescan-deletion-missing"],
+    ],
+    [
+      "the final cursor answering hasMore",
+      () => ({
+        create: () => finalPage((page) => ({ ...page, hasMore: true })),
+        scenario: scenario(),
+      }),
+      ["changes-after-final-cursor"],
+    ],
+    [
+      "the final cursor throwing",
+      () => ({
+        create: () =>
+          finalPage(() => {
+            throw new Error("origin closed");
+          }),
+        scenario: scenario(),
+      }),
+      ["changes-after-final-cursor"],
+    ],
+    [
+      "a malformed tombstone event",
+      () => base(scenario({ initial: [...initial(), tombstone("x", 0)] })),
+      ["record-schema"],
+    ],
+    [
+      "a malformed page",
+      () => ({
+        create: () =>
+          new (class extends ScriptedConnector {
+            override async getChanges(
+              cursor: string | null,
+              opts: { limit: number; signal: AbortSignal },
+            ) {
+              const page = await super.getChanges(cursor, opts);
+              return (cursor === null ? { ...page, extra: true } : page) as ChangeSet;
+            }
+          })({ capabilities: FULL }),
+        scenario: scenario(),
+      }),
+      ["record-schema"],
+    ],
+    [
+      "a tombstone that only a one-change read leaves out",
+      () => ({
+        create: () =>
+          new (class extends ScriptedConnector {
+            override async getChanges(
+              cursor: string | null,
+              opts: { limit: number; signal: AbortSignal },
+            ) {
+              const page = await super.getChanges(cursor, opts);
+              if (opts.limit !== 1) return page;
+              return {
+                ...page,
+                changes: page.changes.filter(
+                  (c) => !(c.kind === "delete" && c.externalId === "gone"),
+                ),
+              };
+            }
+          })({ capabilities: FULL }),
+        scenario: scenario(),
+      }),
+      ["page-size-dependent"],
+    ],
+    [
+      "a stall that repeats the same page is no-progress alone, not a duplicate too",
+      () => ({
+        create: () =>
+          new (class extends ScriptedConnector {
+            override async getChanges(
+              _cursor: string | null,
+              opts: { limit: number; signal: AbortSignal },
+            ) {
+              return super.getChanges(null, opts);
+            }
+          })({ capabilities: FULL }),
+        scenario: scenario(),
+      }),
+      ["no-progress"],
+    ],
+    [
+      "a readable version is reported even when the capabilities are missing",
+      () => ({
+        create: () =>
+          new (class extends ScriptedConnector {
+            override get manifest() {
+              return { type: "scripted", schemaVersion: 1, capabilities: undefined as never };
+            }
+          })(),
+        scenario: scenario(),
+      }),
+      ["manifest-invalid", "sdk-version-mismatch"],
+    ],
+  ])("%s", async (...[, make, codes]) => {
+    const double = make();
+    expect(await checkConnector(double.create, double.scenario)).toEqual(codes);
+  });
+
+  it.each<[string, () => Double]>([
+    [
+      "a tombstone then an upsert of the same source in one read is not a duplicate",
+      () =>
+        base(
+          scenario({
+            initial: [...initial(), tombstone("f", 1), upsert(record("", "f", 2))],
+            later: [...later(), tombstone("f", 2)],
+          }),
+        ),
+    ],
+    [
+      "without deletionsOnRescan, a source that vanishes on rescan without a delete is fine",
+      () => ({
+        create: () => scripted({ deletionsOnRescan: false }),
+        scenario: scenario({
+          later: later().filter((e) => !(e.kind === "delete" && e.externalId === "c")),
+        }),
+      }),
+    ],
+  ])("green: %s", async (_name, make) => {
+    const double = make();
+    expect(await checkConnector(double.create, double.scenario)).toEqual([]);
+  });
+
+  it("a read longer than maxPages throws instead of reporting no-progress", async () => {
+    await expect(checkConnector(() => scripted(), { ...scenario(), maxPages: 3 })).rejects.toThrow(
+      /maxPages/,
+    );
+    const many = Array.from({ length: 40 }, (_, i) => upsert(record("", `m${i}`, 1)));
+    expect(
+      await checkConnector(() => scripted(), { config: { entries: many }, maxPages: 41 }),
+    ).toEqual([]);
   });
 });
 

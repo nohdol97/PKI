@@ -49,6 +49,11 @@ export interface ConnectorScenario {
    * null cursor, as a rescan after a restart.
    */
   later?: unknown;
+  /**
+   * Pages one read may take before the check gives up and throws (a scenario
+   * error, not a violation: unique cursors are progress). PAGE_CAP by default.
+   */
+  maxPages?: number;
 }
 
 type Caps = {
@@ -58,7 +63,7 @@ type Caps = {
   deletionsOnRescan: boolean;
 };
 type Identity = string;
-type Seen = { kind: string; record?: Record<string, unknown> };
+type Seen = { kind: string; record?: Record<string, unknown> | undefined; accessScope?: unknown };
 
 const CAPABILITY_KEYS = [
   "incremental",
@@ -67,6 +72,7 @@ const CAPABILITY_KEYS = [
   "fullRescan",
   "deletionsOnRescan",
 ] as const;
+/** Default bound on the pages of one read (provisional, ConnectorScenario.maxPages). */
 const PAGE_CAP = 10_000;
 const UNKNOWN_ID = "contract-unknown-external-id";
 
@@ -109,8 +115,10 @@ interface Read {
 class Check {
   readonly found = new Set<ConnectorViolationCode>();
   readonly caps: Caps;
-  constructor(caps: Caps) {
+  readonly maxPages: number;
+  constructor(caps: Caps, maxPages: number) {
     this.caps = caps;
+    this.maxPages = maxPages;
   }
 
   add(code: ConnectorViolationCode) {
@@ -130,7 +138,12 @@ class Check {
     const delivered = new Set<Identity>();
     const cursors = new Set<string>();
     let cursor: string | null = null;
-    for (let n = 0; n < PAGE_CAP; n++) {
+    for (let n = 0; ; n++) {
+      if (n >= this.maxPages) {
+        throw new Error(
+          `a contract read took more than ${this.maxPages} pages; raise the scenario's maxPages`,
+        );
+      }
       let page: unknown;
       try {
         page = await connector.getChanges(cursor, { limit, signal: signal() });
@@ -141,6 +154,12 @@ class Check {
       }
       const shaped = this.pageShape(page);
       if (!shaped) return read;
+      const next = shaped.nextCursor;
+      // A page whose next cursor was already seen is the stall itself: its
+      // (repeated) changes are not folded, so they are not duplicates too.
+      if (shaped.hasMore) {
+        if (cursors.has(next) || next === cursor) break;
+      }
       if (shaped.changes.length > limit) {
         this.add("limit-exceeded");
         read.pageFault = true;
@@ -149,13 +168,11 @@ class Check {
       for (const { at } of shaped.rejected) {
         if (!rejectedPositionValid(at)) this.add("rejected-position-invalid");
       }
-      const next = shaped.nextCursor;
       if (!shaped.hasMore) {
         read.finalCursor = next;
         read.complete = true;
         return read;
       }
-      if (cursors.has(next) || next === cursor) break;
       cursors.add(next);
       cursor = next;
     }
@@ -211,7 +228,16 @@ class Check {
     if (!parsed.success || parsed.data.kind === "upsert") return this.add("record-schema");
     const event = parsed.data;
     const identity = identityOf(event) as Identity;
-    read.last.set(identity, { kind: event.kind });
+    read.last.set(
+      identity,
+      event.kind === "scope-change"
+        ? {
+            kind: event.kind,
+            record: read.lastUpsert.get(identity),
+            accessScope: event.accessScope,
+          }
+        : { kind: event.kind },
+    );
     if (event.kind === "scope-change") {
       if (!this.caps.accessScope) this.add("capability-access-scope");
       return;
@@ -243,13 +269,14 @@ export async function checkConnector(
 ): Promise<ConnectorCheckCode[]> {
   const subject = create();
   const manifest = manifestOf(subject);
-  if (!isObject(manifest) || !isObject(manifest.capabilities)) return ["manifest-invalid"];
-  const capabilities = manifest.capabilities;
+  if (!isObject(manifest)) return ["manifest-invalid"];
+  const capabilities = isObject(manifest.capabilities) ? manifest.capabilities : null;
   const manifestFaults: ConnectorViolationCode[] = [];
   // The manifest check does not look at the version (I01-R25 suppression rules).
   if (
     typeof manifest.type !== "string" ||
     !/\S/.test(manifest.type) ||
+    capabilities === null ||
     CAPABILITY_KEYS.some((k) => typeof capabilities[k] !== "boolean") ||
     (capabilities.deletionsOnRescan === true &&
       !(capabilities.deletes === true && capabilities.fullRescan === true))
@@ -260,12 +287,16 @@ export async function checkConnector(
   if (manifest.schemaVersion !== CONNECTOR_SDK_VERSION) {
     return [...manifestFaults, "sdk-version-mismatch"];
   }
-  const check = new Check({
-    incremental: capabilities.incremental === true,
-    deletes: capabilities.deletes === true,
-    accessScope: capabilities.accessScope === true,
-    deletionsOnRescan: capabilities.deletionsOnRescan === true,
-  });
+  if (capabilities === null) return ["manifest-invalid"];
+  const check = new Check(
+    {
+      incremental: capabilities.incremental === true,
+      deletes: capabilities.deletes === true,
+      accessScope: capabilities.accessScope === true,
+      deletionsOnRescan: capabilities.deletionsOnRescan === true,
+    },
+    scenario.maxPages ?? PAGE_CAP,
+  );
   for (const code of manifestFaults) check.add(code);
 
   const fresh = create();
@@ -334,11 +365,9 @@ async function finalCursor(check: Check, connector: Connector, whole: Read) {
 
 async function documents(check: Check, connector: Connector, whole: Read) {
   for (const [identity, seen] of whole.last) {
-    if (seen.kind === "scope-change") continue; // the revision after a scope change is unspecified
     const [namespace, externalId] = JSON.parse(identity) as [string, string];
-    const expected = seen.kind === "upsert" ? canonical(seen.record) : canonical(null);
     try {
-      if (canonical(await connector.getDocument({ namespace, externalId })) !== expected) {
+      if (!documentMatches(seen, await connector.getDocument({ namespace, externalId }))) {
         check.add("get-document-mismatch");
       }
     } catch {
@@ -358,6 +387,22 @@ async function documents(check: Check, connector: Connector, whole: Read) {
       check.add("get-document-unknown");
     }
   }
+}
+
+/**
+ * What getDocument owes for an identity, by its last change: the upsert's record;
+ * null after a tombstone; after a scope change, the last upsert's content (its
+ * revision unspecified) with the event's scope.
+ */
+function documentMatches(seen: Seen, doc: unknown): boolean {
+  if (seen.kind === "upsert") return canonical(doc) === canonical(seen.record);
+  if (seen.kind !== "scope-change") return doc === null;
+  if (!isObject(doc)) return false;
+  if (!seen.record) return true; // a scope change for a source this read never upserted
+  return (
+    content(doc) === content(seen.record) &&
+    canonical(doc.accessScope) === canonical(seen.accessScope)
+  );
 }
 
 /** The record without what may differ at the same revision (scope, R10 `scope-updated`). */
