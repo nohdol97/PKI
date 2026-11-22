@@ -155,8 +155,8 @@ const NAMED_FACTS = [
   { token: "safeStorage", file: "apps/desktop/src/secret-store.ts", holds: "safeStorage" },
   { token: "RECHECK_TIMEOUT_MS", file: "backend/src/connector-sync-job.ts", holds: "export const RECHECK_TIMEOUT_MS = 60_000;" },
   { token: "POST /api/import/jsonl", file: "packages/contracts/src/index.ts", holds: 'path: "/api/import/jsonl"' },
-  { token: "recheck", file: "backend/src/connectors.ts", holds: "async recheck(id) {" },
-  { token: "healthCheck", file: "backend/src/connectors.ts", holds: "(await entry.connector.healthCheck()).state === " },
+  { token: "recheck", file: "backend/src/connectors.ts", holds: "async recheck(id, turn) {" },
+  { token: "healthCheck", file: "backend/src/connectors.ts", holds: "(await connector.healthCheck()).state === " },
   { token: "ChangeSet", file: "packages/contracts/src/connector.ts", holds: "export type ChangeSet = " },
   { token: "cursorExpired", file: "packages/contracts/src/connector.ts", holds: "cursorExpired: z.boolean().optional()," },
   { token: "scope-change-content-mismatch", file: "packages/contracts/src/connector.ts", holds: '"scope-change-content-mismatch",' },
@@ -341,10 +341,16 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     expect(block).not.toContain("JSONL");
   });
 
-  it("boot waits for every initialize and an unknown kind aborts the start (chapter 7)", () => {
+  it("boot waits at most INITIALIZE_TIMEOUT_MS and a failing instance leaves only itself unavailable (chapter 7)", () => {
     const code = read("backend/src/connectors.ts");
-    expect(code).toContain("instances.map(async ({ id, kind, config }) => {");
-    expect(code).toContain("throw new Error(`unknown connector kind: ${kind}`);");
+    expect(code).toContain("export const INITIALIZE_TIMEOUT_MS = 10_000;");
+    expect(code).toContain("export const RECHECK_LATE_LIMIT = 3;");
+    expect(code).toContain("instances.map(async ({ id, kind, config }): Promise<Entry> => {");
+    expect(code).toContain('log("connector-kind-unknown", { id });');
+    expect(code).toContain('log("connector-initialize-timeout", { id });');
+    expect(code).toContain('log("connector-factory-failed", { id });');
+    expect(code).toContain('log("connector-recheck-abandoned", { id: instanceId });');
+    expect(code).not.toContain("unknown connector kind:");
     expect(read("backend/src/connector-sync-job.ts")).toContain("export const RECHECK_TIMEOUT_MS = 60_000;");
   });
 
