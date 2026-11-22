@@ -298,7 +298,9 @@ class ReadState(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "pki.sqlite")
             make_db(path, [sleep_job(48)])
-            window = (T0 + 2 * TEN, T0 + 48 * TEN)  # slept 20 minutes in, woke at the job's slot
+            # Slept 5 minutes in, while the next due (T0 + 10 min) was still ahead, as on a running app; woke at the job's slot.
+            # Only the one period of slack after sleptAt lets this count: with `next_due <= sleptAt` it would be 0.
+            window = (T0 + TEN // 2, T0 + 48 * TEN)
             self.assertEqual(qs.read_queue_state(path, {"maxJobId": 0, "schedules": {"1": BASE1}}, window)["mergedSlots"], 47)
 
     def test_the_database_is_opened_read_only(self):
