@@ -365,6 +365,50 @@ describe("correction.effective: the evidence API's user inputs, relation side an
     expect(shown.insight.evidenceCount).toBe(2);
   });
 
+  it("lists an approved relation when the policy allows it, and counts it", async () => {
+    const a = source("a");
+    const secret = source("secret-doc", SECRET, true);
+    const x = item("X");
+    const y = item("Y");
+    fact(x, "target_date", TARGET, a);
+    fact(y, "completion_date", LATE, a);
+    const rel = dependsOn(x, y, secret);
+    userDecisions.decide(db, { kind: "relation", id: rel }, "approve");
+    recomputeDependencyDelay(db, [x, y]);
+    await start(registryWith(defaultScopePolicy));
+    const [made] = await insights();
+    const shown = await evidenceOf(made?.id as number);
+    expect(shown.userInputs).toEqual([{ target: "relation", id: rel, status: "verified" }]);
+    expect(shown.insight.evidenceCount).toBe(3);
+    expect(made?.evidenceCount).toBe(3);
+  });
+
+  it("hides only the relation the user wrote when one end is an item the user created", async () => {
+    const a = source("a");
+    const secret = source("secret-doc", SECRET);
+    const created = userDecisions.add(db, { kind: "item", type: "Project", name: "내 항목" });
+    if (created.status !== "applied") throw new Error("add");
+    const x = created.ref.id;
+    const y = item("Y");
+    fact(x, "target_date", TARGET, a); // an extraction's fact on the user's item: its lineage is its own
+    fact(y, "completion_date", LATE, secret);
+    const written = userDecisions.add(db, {
+      kind: "relation",
+      subjectId: x,
+      type: "DEPENDS_ON",
+      objectId: y,
+    });
+    if (written.status !== "applied") throw new Error("add");
+    recomputeDependencyDelay(db, [x, y]);
+    await start(registryWith(secretSingle));
+    const [made] = await insights(); // rests on `a` and the secret source together: shown
+    expect(made).toBeDefined();
+    const shown = await evidenceOf(made?.id as number);
+    expect(shown.userInputs).toEqual([]); // the relation's own lineage is the secret source alone
+    expect(shown.evidence).toHaveLength(1); // the completion date's evidence rests on the secret source alone too
+    expect(shown.insight.evidenceCount).toBe(1);
+  });
+
   it("reports the status of a user input that is not verified (a disputed row the user wrote still counts)", async () => {
     const w = pair(EARLY);
     const written = userDecisions.add(db, {
