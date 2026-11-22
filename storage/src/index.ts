@@ -226,6 +226,9 @@ export {
 export {
   applyOntologyChange,
   checkOntologyChange,
+  factValueFit,
+  isDate,
+  valueFits,
   listOntologyElements,
   readOntologyElement,
   readOntologyElementById,

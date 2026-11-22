@@ -47,6 +47,7 @@ import {
   recordWithheldCandidate,
   saveFact,
   saveRelation,
+  valueFits,
   type DerivativeRegistry,
   type DerivedItem,
   type ElementRule,
@@ -57,7 +58,7 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
-import { isDate, recomputeDependencyDelay } from "./dependency-delay.ts";
+import { recomputeDependencyDelay } from "./dependency-delay.ts";
 import { findCandidates } from "./linking.ts";
 import { locateQuote, type QuoteSpan } from "./quote.ts";
 
@@ -135,10 +136,6 @@ async function proposals(
 }
 
 const OUTPUT = TASKS.extract[EXTRACT_SCHEMA_VERSION].output;
-
-/** A value of the kind the fact kind's rule names (S01-R21; the date kind is the old calendar-date check). */
-const valueFits = (valueType: "date" | "text" | "surface-form", value: string): boolean =>
-  valueType === "date" ? isDate(value) : value !== "";
 
 /** The `verified` type definitions, read when an answer is planned: the only ones a write may use. */
 function verifiedRules(db: SqlDriver) {

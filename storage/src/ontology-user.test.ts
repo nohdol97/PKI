@@ -476,6 +476,40 @@ describe("ontology.candidates: a rule change and a retirement leave history (R20
     expect(userOntology.undo(db, id)).toMatchObject({ edition: 5 });
   });
 
+  it("does not bring a retired rule back when the item type it names was retired meanwhile (review F1, P1)", () => {
+    userAdded("Widget");
+    const rule = userAdded("widget_note", fk({ itemTypes: ["Widget"] }));
+    userOntology.change(db, { op: "retire", elementKind: "fact-kind", name: "widget_note" });
+    // a retired rule is not counted, so the type may go
+    expect(
+      userOntology.change(db, { op: "retire", elementKind: "item-type", name: "Widget" }).status,
+    ).toBe("applied");
+    const before = dump();
+    const out = refused(userOntology.undo(db, rule));
+    expect(out).toMatchObject({
+      reason: "schema-invalid",
+      schemaErrors: ["item-type-not-verified"],
+    });
+    expect(JSON.stringify(out)).not.toContain("Widget");
+    expect(dump()).toEqual(before);
+    expect(stateOf(rule)).toEqual({ status: "superseded", edition: 2 });
+  });
+
+  it("does not bring a retired rule back when the item type it names was removed meanwhile, so a re-added type is not bound to it (review F1, P2)", () => {
+    const type = userAdded("Gadget");
+    const rule = userAdded("gadget_note", fk({ itemTypes: ["Gadget"] }));
+    userOntology.change(db, { op: "retire", elementKind: "fact-kind", name: "gadget_note" });
+    expect(userOntology.undo(db, type)).toEqual({ status: "removed", id: type });
+    const before = dump();
+    expect(refused(userOntology.undo(db, rule))).toMatchObject({
+      reason: "schema-invalid",
+      schemaErrors: ["item-type-unknown"],
+    });
+    expect(dump()).toEqual(before);
+    userAdded("Gadget");
+    expect(readOntologyElement(db, "fact-kind", "gadget_note")?.status).toBe("superseded");
+  });
+
   it("undoes the retirement of a seed, which has no creation line", () => {
     const id = idOf("fact-kind", "alias.translation");
     userOntology.change(db, { op: "retire", elementKind: "fact-kind", name: "alias.translation" });

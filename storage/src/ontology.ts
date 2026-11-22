@@ -172,10 +172,36 @@ const LIVE = "status NOT IN ('rejected', 'superseded')";
 /** The comparison of R19's duplicate check: case, `_`, `.` and `-` do not count. */
 const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
 
-const isDate = (value: string): boolean => {
+/** A normalized calendar date (YYYY-MM-DD) that exists; such strings order as dates. The one copy. */
+export const isDate = (value: string): boolean => {
   const time = DATE.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
   return !Number.isNaN(time) && new Date(time).toISOString().startsWith(value);
 };
+
+/**
+ * Whether a value is of the kind a fact kind's rule names (S01-R21): `date` a calendar date, `text`
+ * and `surface-form` not empty (after trimming). The one value check: extraction and the user's add
+ * and value fix both use it, so the two paths accept and reject the same values.
+ */
+export const valueFits = (valueType: ValueType, value: string): boolean =>
+  valueType === "date" ? isDate(value) : value.trim() !== "";
+
+/**
+ * The same check for a fact kind by name, reading the `verified` type definitions: `unregistered`
+ * when no `verified` element names the kind (the user's own paths do not govern such a kind; extraction
+ * drops it).
+ */
+export function factValueFit(
+  db: SqlDriver,
+  kind: string,
+  value: string,
+): "fits" | "misfit" | "unregistered" {
+  const element = readOntologyElement(db, "fact-kind", kind);
+  if (!element || element.status !== "verified" || element.rule.elementKind !== "fact-kind") {
+    return "unregistered";
+  }
+  return valueFits(element.rule.valueType, value) ? "fits" : "misfit";
+}
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -701,6 +727,16 @@ export const userOntology: UserOntologyDecisions = {
         tx.run("DELETE FROM ontology_elements WHERE id = ?", [id]);
         return { status: "removed", id };
       }
+    }
+    if (newest.action === "retire") {
+      // the element comes back in force: its rule is judged again as for an addition (an item type it names
+      // may have been retired or removed while it was retired, and a retired rule is not counted by `inUse`)
+      const schemaErrors = shapeErrors(
+        tx,
+        { op: "add", name: element.name, rule: element.rule },
+        undefined,
+      );
+      if (schemaErrors.length > 0) return refusedWith("schema-invalid", { schemaErrors });
     }
     // a retirement comes back as a new edition: the number only rises
     const edition = newest.action === "retire" ? element.edition + 1 : element.edition;

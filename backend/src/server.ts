@@ -46,13 +46,7 @@ import {
   type ExecutionInput,
   type UserActionIssuer,
 } from "@pki/providers";
-import {
-  COMPLETION_DATE,
-  defaultEntries,
-  isDate,
-  TARGET_DATE,
-  type CanonicalEntries,
-} from "@pki/knowledge-engine";
+import { defaultEntries, type CanonicalEntries } from "@pki/knowledge-engine";
 import {
   databaseEncryption,
   canonicalTransaction,
@@ -65,6 +59,7 @@ import {
   LEGACY_CLEANUP_SETTING,
   readFact,
   checkOntologyChange,
+  factValueFit,
   readOntologyHistory,
   readSemanticHistory,
   readSemanticState,
@@ -598,8 +593,9 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
   ): RouteResponse<"semanticCorrect"> | { error: ErrorResponse["error"] } => {
     const { decisions } = options;
     if (!decisions) return { error: "not-found" };
-    const dateKinds: ReadonlySet<string> = new Set([TARGET_DATE, COMPLETION_DATE]);
-    const badDate = (kind: string, value: string) => dateKinds.has(kind) && !isDate(value);
+    // the value check is the type definitions' (R21), the one extraction uses; a kind no verified element names is not governed here
+    const badValue = (kind: string, value: string) =>
+      factValueFit(options.db, kind, value) === "misfit";
     const state = (ref: { kind: SemanticKind; id: number }) => {
       const now = readSemanticState(options.db, ref);
       return now && { ...ref, status: now.status, epistemic: now.epistemic };
@@ -631,7 +627,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
                 gate.semanticShown("item", entry.objectId)
               : true;
         if (!shown) return { error: "not-found" };
-        if (entry.kind === "fact" && badDate(entry.factKind, entry.value)) {
+        if (entry.kind === "fact" && badValue(entry.factKind, entry.value)) {
           return { error: "bad-request" };
         }
         const added = decisions.add(options.db, entry, at);
@@ -644,7 +640,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       if (!gate.semanticShown("fact", fact.id)) return { error: "not-found" };
       const value = correction.value.trim();
       const kind = readFact(options.db, fact.id)?.kind;
-      if (kind !== undefined && badDate(kind, value)) return { error: "bad-request" };
+      if (kind !== undefined && badValue(kind, value)) return { error: "bad-request" };
       const fixed = decisions.replaceValue(options.db, fact, value, at);
       if (fixed.status === "refused") return refused(fixed.reason, fixed.existing);
       const added = state(fixed.added);

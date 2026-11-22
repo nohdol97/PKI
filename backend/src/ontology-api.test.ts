@@ -421,6 +421,10 @@ describe("validation and the request checks", () => {
     ["an unknown value kind", { op: "add", name: "x", rule: { ...rule, valueType: "number" } }],
     ["an unknown element kind", { op: "retire", elementKind: "other", name: "x" }],
     ["a name over 200 characters", { op: "add", name: "x".repeat(201), rule: TYPE }],
+    [
+      "a rule type name over 200 characters",
+      { op: "add", name: "x", rule: noteKind(["T".repeat(201)]) },
+    ],
     ["no body", undefined],
   ];
   it.each(bad)("answers 400 to %s on check and change, and changes nothing", async (_n, body) => {

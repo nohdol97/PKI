@@ -928,7 +928,8 @@ export const SemanticHistoryResponseSchema = z.object({
  */
 const OntologyKindSchema = z.enum(["item-type", "fact-kind", "relation-type"]);
 const OntologyNameSchema = z.string().max(200);
-const OntologyTypeListSchema = z.array(z.string().max(200)).max(100);
+/** The item type names a rule lists: each as long as a name may be, so a type list cannot carry text. */
+const OntologyTypeListSchema = z.array(OntologyNameSchema).max(100);
 export const OntologyRuleSchema = z.discriminatedUnion("elementKind", [
   z.strictObject({ elementKind: z.literal("item-type") }),
   z.strictObject({

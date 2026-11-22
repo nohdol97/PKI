@@ -239,6 +239,27 @@ describe("ontology.enforce: the registry decides what is written (S01-R21)", () 
     },
   );
 
+  it.each(["text", "surface-form"] as const)(
+    "drops a value that is empty after trimming under the %s kind, and keeps a value with text (review F4)",
+    async (valueType) => {
+      // the prompt's schema takes any string of one character or more, so "   " reaches the check
+      factRule("target_date", { valueType });
+      setUp([
+        answer({
+          items: [project],
+          facts: [
+            fact("p", "target_date", "   ", Q_PROJECT),
+            fact("p", "target_date", "soon", Q_PROJECT),
+          ],
+        }),
+      ]);
+      imported();
+      const job = await run();
+      expect(facts()).toEqual([{ kind: "target_date", value: "soon" }]);
+      expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 0, other: 1 });
+    },
+  );
+
   it("drops a fact whose item type the fact kind's rule does not name, for a new item and for an existing one by its stored type", async () => {
     factRule("target_date", { itemTypes: ["System"] });
     setUp([
