@@ -601,4 +601,23 @@ describe("the product's boot wiring (I04-T04)", () => {
     const { saved } = await bootAndDelete({ engine: bound, vectorIndex: heldVector });
     expect(removed).toEqual([String(saved.sourceId)]);
   });
+
+  it("hands out the engine only as the registry wraps it: the call goes through the registry's judgement, which the policy placeholder fails closed", async () => {
+    const held = new MemoryKnowledgeEngine();
+    await bootAndDelete({ engine: held });
+    const live = booted as NonNullable<typeof booted>;
+    // the double holds a source; the raw engine would return it
+    const kept = saveSourceRecord(live.db, "c", { externalId: "y", title: "y", body: "keeper" });
+    if (kept.status !== "created") throw new Error(kept.status);
+    await held.upsertSource(
+      { ref: { sourceId: String(kept.sourceId), version: 1 }, title: "y", body: "keeper" },
+      { version: 1 },
+      99,
+    );
+    expect(await held.relatedContext({ text: "keeper", limit: 5 })).toHaveLength(1); // the raw one answers
+    // the wrapped one asks the policy, which the product has not configured yet (I04-T09): closed, not open
+    await expect(live.engine.relatedContext({ text: "keeper", limit: 5 })).rejects.toThrow(
+      /scope policy/,
+    );
+  });
 });

@@ -82,6 +82,8 @@ export interface BootedBackend {
   db: SqlDriver;
   /** The Providers the Broker may call (productProviders). */
   providers: readonly LLMProvider[];
+  /** The KnowledgeEngine as the backend holds it: wrapped by the registry (I04-R13). */
+  engine: KnowledgeEngine;
   /** Tests wait on these: the notices queued, the jobs runnable. */
   projections: Pick<Projections, "drain">;
   runner: Pick<JobRunner, "wake">;
@@ -188,6 +190,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     },
     db,
     providers,
+    engine,
     projections,
     runner,
     scheduler,

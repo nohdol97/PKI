@@ -82,6 +82,45 @@ describe("the wrapped engine's relatedContext", () => {
     expect(await wrap().relatedContext({ text: "lighthouse", limit: 10 })).toEqual([]);
   });
 
+  it("drops a covered, a gone and a disallowed hit wherever it stands in the result: first, middle or last", async () => {
+    // the memory engine orders by score, then by source id: more shared words rank first
+    const a = await ingest("a", "lighthouse tower keeper harbor");
+    const b = await ingest("b", "lighthouse tower keeper");
+    const c = await ingest("c", "lighthouse tower");
+    const d = await ingest("d", "lighthouse");
+    const text = "lighthouse tower keeper harbor";
+    const all = await inner.relatedContext({ text, limit: 10 });
+    expect(all.map((h) => h.ref.sourceId)).toEqual([a, b, c, d].map((x) => String(x.sourceId)));
+    seedLegacyTombstone(db, {
+      sourceId: b.sourceId,
+      version: 1,
+      at: "2026-11-22T00:00:00Z",
+      reason: "user-deleted",
+    }); // middle
+    db.run("DELETE FROM source_versions WHERE source_id = ?", [d.sourceId]); // last
+    const hits = await wrap().relatedContext({ text, limit: 10 });
+    expect(hits.map((h) => h.ref.sourceId)).toEqual([String(a.sourceId), String(c.sourceId)]);
+  });
+
+  it("drops a disallowed hit in the middle and at the end, keeping the order of the rest", async () => {
+    const a = await ingest("a", "lighthouse tower keeper", ["ok"]);
+    const b = await ingest("b", "lighthouse tower", ["no"]);
+    const c = await ingest("c", "lighthouse keeper tower harbor", ["ok"]);
+    const d = await ingest("d", "lighthouse", ["no"]);
+    const text = "lighthouse tower keeper";
+    const policy: ScopePolicy = {
+      ...permissive,
+      allows: (scopes) => !JSON.stringify(scopes).includes("no"),
+    };
+    const hits = await wrap(policy).relatedContext({ text, limit: 10 });
+    const expected = (await inner.relatedContext({ text, limit: 10 }))
+      .map((h) => h.ref.sourceId)
+      .filter((id) => id === String(a.sourceId) || id === String(c.sourceId));
+    expect(hits.map((h) => h.ref.sourceId)).toEqual(expected);
+    expect(expected).toHaveLength(2);
+    expect([b.sourceId, d.sourceId].map(String).some((id) => expected.includes(id))).toBe(false);
+  });
+
   it("keeps the engine's score and order for what stays", async () => {
     await ingest("a", "lighthouse");
     await ingest("b", "lighthouse tower keeper");
