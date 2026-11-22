@@ -13,6 +13,7 @@
 // The type definitions' user operations (ontology.ts, S01-T07) travel in the same object, so the
 // one lint-guarded name `userDecisions` is the only way to them.
 import { listEvidence } from "./knowledge.ts";
+import { findSameForm, isSurfaceFormKind } from "./surface-form.ts";
 import {
   applyTransition,
   isUserAction,
@@ -95,17 +96,23 @@ function existingKey(tx: SqlDriver, entry: UserEntry): EntryRef | undefined {
           entry.type,
           entry.name,
         ])[0]
-      : entry.kind === "fact"
-        ? tx.all("SELECT id FROM facts WHERE item_id = ? AND kind = ? AND value = ?", [
-            entry.itemId,
-            entry.factKind,
-            entry.value,
-          ])[0]
-        : tx.all("SELECT id FROM relations WHERE subject_id = ? AND type = ? AND object_id = ?", [
-            entry.subjectId,
-            entry.type,
-            entry.objectId,
-          ])[0];
+      : entry.kind === "fact" && isSurfaceFormKind(entry.factKind)
+        ? // a surface form is the same row by the V02-R7 processing, as extraction judges it (S01-R2)
+          (() => {
+            const id = findSameForm(tx, entry.itemId, entry.factKind, entry.value);
+            return id === undefined ? undefined : { id };
+          })()
+        : entry.kind === "fact"
+          ? tx.all("SELECT id FROM facts WHERE item_id = ? AND kind = ? AND value = ?", [
+              entry.itemId,
+              entry.factKind,
+              entry.value,
+            ])[0]
+          : tx.all("SELECT id FROM relations WHERE subject_id = ? AND type = ? AND object_id = ?", [
+              entry.subjectId,
+              entry.type,
+              entry.objectId,
+            ])[0];
   return found ? { kind: entry.kind, id: found.id as number } : undefined;
 }
 

@@ -501,7 +501,7 @@ site/
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── src/
-│       ├── registration.ts       registration: SiteRegistration
+│       ├── registration.ts       registration: SiteRegistration(범위 파일을 `connectorScopes`로 넘긴다)
 │       ├── registration.test.ts  checkSiteRegistration(registration)이 빈 목록
 │       ├── shell.ts              await runShell(registration)
 │       └── site-check.ts         await runSiteCheck(registration, 인자)
@@ -509,7 +509,7 @@ site/
 │   ├── package.json              exports "./adapters"
 │   ├── tsconfig.json
 │   └── src/adapters/             구현과 계약 테스트
-└── config/                       설정 값
+└── config/                       설정 값: connector-scopes.json(인스턴스 범위. 등록이 가져온다)
 ```
 
 `pnpm-workspace.yaml`의 `packages:` 목록에는 `site/composition`과 `site/connectors/*`가 이미 있다. 공용 저장소에는 그 폴더가 없어도 `pnpm install --frozen-lockfile`이 통과한다. 그래서 포크는 그 파일을 고치지 않는다.
@@ -539,6 +539,8 @@ export const registration: SiteRegistration = {
       id: "example-notes",
       kind: KIND,
 ```
+
+위 발췌의 범위 파일 `import` 줄은 예시 패키지의 경로(`../config/connector-scopes.json`)다. 포크의 `site/composition/src/registration.ts`는 같은 줄을 `import connectorScopes from "../../config/connector-scopes.json" with { type: "json" };`로 적고 `connectorScopes`를 등록의 필드로 넘긴다. **범위 파일은 `site/config/connector-scopes.json`에만 둔다(다른 자리나 다른 이름이면 빌드가 멈추거나 판정을 벗어난다).** 이유와 설정은 아래 "인스턴스 범위 파일"에 있다.
 
 진입점 둘은 각각 몇 줄이다. 공용 저장소가 나중에 진입점을 늘리면 포크는 같은 모양의 파일을 하나 더한다(충돌이 아니라 추가다).
 
@@ -613,11 +615,13 @@ describe("site.example-registration", () => {
 pnpm install
 pnpm lint && pnpm typecheck && pnpm test
 pnpm --filter @pki-site/composition site-check <종류>
+pnpm --filter @pki-site/composition site-check --scopes
 pnpm --filter @pki/desktop build
 ```
 
 - `pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다. 손으로 쓴 파일의 서식이 틀리면 `pnpm exec prettier --write site`로 맞춘다. `pnpm typecheck`는 저장소의 프로젝트와 `site/composition`, `site/connectors/*`의 `tsconfig.json`을 함께 본다. `site/` 아래 패키지에 `tsconfig.json`이 없으면 그 패키지 이름을 적어 실패한다. `pnpm test`는 공용 테스트 파일을 하나도 고치지 않은 채 포크 모양에서도 통과해야 한다(`site/`의 존재로 갈리는 코드는 저장소 루트를 인자로 받는다). **`pnpm e2e`도 포크 모양에서 통과한다(I05-T06, macOS 예행 한 번).** 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 두 모양에서 참이 되도록 고쳐졌다. 다만 `v02-flow`는 포크 모양에서도 공용 이중을 띄우므로 포크의 등록이 아니라 공용 이중을 시험한다. 포크의 등록으로 띄운 앱은 산출물 시험이 본다.
 - 포크의 `site-check <종류>`는 위와 같은 판정을 등록의 종류(자리표시를 대체한 것 포함)에 한다. 모르는 종류는 사용법을 적고 2로 끝난다. 등록이 시작을 멈추는 위반을 가졌으면 그 코드와 건수를 표준 오류에 적고 1로 끝난다. 예시 패키지에서 `pnpm --filter @pki/site-example site-check <종류>`로 같게 돌려 볼 수 있다.
+- 포크의 `site-check --scopes`는 종류 대신 등록의 인스턴스 범위 상태를 알린다. 항목 수와 범위가 있는 항목 수만 적고 범위 값과 인스턴스 ID는 적지 않는다. 등록에 `connectorScopes`가 없으면(`미구현, 배포처 후속`), 객체가 아니면, 틀린 항목이 있으면, 예시의 범위 값이 그대로이면, 범위가 있는 항목이 하나도 없으면 0이 아닌 값으로 끝난다.
 - `pnpm --filter @pki/backend site-check <종류>`는 **공용 저장소의 명령**이다. 조립 패키지가 있는 저장소에서 실행하면 자리표시의 결과를 내지 않고, 그 패키지의 `package.json`의 `name`을 읽어 위의 포크 명령을 알린 뒤 2로 끝난다. 포크가 구현한 종류에 `미구현`이 나오는 오해를 막으려는 것이다.
 - `pnpm --filter @pki/desktop build`는 포크의 진입점을 묶어 설치본을 만든다. Windows 11 설치본으로 만들어 실행하는 확인은 site-setup S27이다.
 
@@ -678,11 +682,32 @@ pnpm --filter @pki/desktop build
 
 **린트가 보지 않는 길이 다섯 있다.** `tsconfig`의 `paths` 별칭, 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`, `package.json`의 `imports`(`#이름`)다. 모두 일부러 해야 닿는 길이고 린트는 막지 않는다. 포크의 코드 검토가 맡는다.
 
+### 인스턴스 범위 파일
+
+`site/config/connector-scopes.json`은 수집기 인스턴스마다 배포처가 정해 두는 접근 범위다(형식과 뜻은 site-setup S18). **이 파일이 설치본에 따로 놓이는 것이 아니라, 등록이 빌드할 때 그 내용을 가져와 백엔드 묶음에 넣는다.** 실행본은 이 파일을 디스크에서 읽지 않고 등록이 건넨 값만 쓴다. 그래서 환경 변수, 명령줄 인자, 현재 폴더, 데이터 폴더나 설치 폴더에 놓은 파일로는 값을 바꿀 수 없고, 바꾸려면 다시 빌드한다. 이렇게 정한 이유는 [ADR 0020](adr/0020-installed-scopes-in-registration.md)에 있다.
+
+- **놓는 자리와 이름.** 범위 파일은 `site/config/connector-scopes.json`에만 둔다. 조립 패키지 안(`site/composition/config/` 등)에 두면 빌드가 `scopes-file-misplaced`로 멈춘다. 다른 이름으로 바꾸거나 `node_modules/` 아래의 JSON을 가져오는 것은 빌드가 보지 못하므로 멈추지 않고 보고서가 `absent`로 통과한다. 그 경우는 받아들인 위험이고, 시작 로그는 `bound`인데 보고서는 `absent`라는 데서 드러난다.
+- **`import` 줄.** 포크의 `registration.ts`는 범위 파일을 정적 `import`로 가져온다. `import` 줄에는 `with { type: "json" }`가 꼭 있어야 한다. 빠져도 타입 검사와 시험은 통과하고 Node의 소스 실행은 `ERR_IMPORT_ATTRIBUTE_MISSING`으로 실패한다. 속성 없는 가져오기의 묶기는 재지 않았다(통과하면 값이 묶음에 들어가 설치본은 정상이고, 실패하면 빌드가 멈춘다. 어느 쪽이든 조용하지 않다).
+- **`tsconfig.json`.** 측정한 모양(`references` 없는 최소 패키지)에서는 `tsconfig.json`에 더할 설정이 없다. `references`가 있는 실제 포크의 `tsconfig.json`은 재지 않았다. 다만 `resolveJsonModule`을 `false`로 두지 않는다(명시로 `false`이면 TypeScript가 JSON 모듈을 찾지 못한다). 포크의 범위 파일은 패키지 밖(`site/config/`)에 있어서 `include`에 더할 것도 없다. 위의 `tsconfig.json` 블록(`include`가 `["src"]`)이 그 모양이다.
+- **모듈 경계 규칙의 예외.** `pnpm lint`의 경계 규칙은 상대 경로가 다른 패키지에 닿으면 막는다. 저장소 루트에 속한 `site/config/connector-scopes.json`은 조립 패키지에서 보면 다른 패키지이므로, 규칙에 **예외 하나**가 있다: 조립 패키지(`@pki-site/composition`)의 `site/composition/src/registration.ts`가 이 파일을 상대 경로의 정적 `import` 선언으로 가져오는 것만 허용된다. 같은 패키지의 다른 파일(시험 파일 포함), `site/config/`의 다른 파일, `export … from`, `import()`, 절대 경로로 같은 파일을 가리키는 것은 지금처럼 막힌다. 앞에서 적은 대로 인라인 설정 주석으로 규칙을 끄는 길도 없다.
+- **빌드가 멈추는 경우.** `pnpm --filter @pki/desktop build`는 백엔드를 묶은 뒤 범위 파일을 판정하고 다음 넷이면 멈춘다. 멈추면 오류의 문구에 이 코드가 적힌다. `scopes-file-misplaced`는 허용된 자리가 아닌 범위 파일이 묶음에 있는 것, `scopes-file-unbound`는 `site/config/connector-scopes.json`이 있는데 등록이 가져오지 않아 묶음에 없는 것, `scopes-file-invalid`는 객체가 아니거나 틀린 항목이 있거나 키 `__proto__`나 두 번 나오는 키가 있는 것, `scopes-file-placeholder`는 예시의 범위 값 `pki-example-scope`가 그대로인 것이다. 파일이 없거나(`absent`) 범위가 있는 항목이 하나도 없는 것(`empty`)은 멈추지 않는다.
+- **판정 결과가 남는 곳.** 통과한 빌드는 마지막 출력 줄을 `connector scopes: <상태>`로 끝내고, `apps/desktop/dist` 폴더의 `build-report.json`에 있는 `connectorScopes`에 상태(`absent`, `empty`, `bound`)와 항목 수, 범위가 있는 항목 수를 적는다. 범위 값과 인스턴스 ID는 어디에도 싣지 않는다. 빌드는 범위 파일을 앱 폴더에 복사하지 않는다.
+- **빌드가 잡지 못하는 것.** 인스턴스 ID를 잘못 적은 항목은 형식이 맞아 드러나지 않는다(S31의 확인이 드러낸다). 가져온 값을 다른 곳에는 쓰면서 `connectorScopes`에는 넘기지 않은 등록도 빌드는 통과시킨다. 이 경우 `site-check --scopes`가 0이 아닌 값으로 끝나고 시작 로그가 `absent`를 남긴다.
+- **적을 수 없는 인스턴스.** 실행 중에 만들어지는 가져오기 인스턴스(I02-B의 `jsonl-file:…`)는 ID를 미리 알 수 없어 범위 파일에 적을 수 없고, 그런 인스턴스는 알 수 없음(닫힌 쪽)이다. 브라우저 개발용 백엔드(`backend/src/dev.ts`)는 등록을 받지 않으므로 포크에서도 모든 인스턴스가 알 수 없음이다.
+
+**예시를 `site/composition/`에 복사하는 포크는 범위 파일 때문에 네 곳을 고친다.** 예시의 범위 파일은 패키지 안(`config/`)에 있고 지어낸 값을 갖기 때문이다. 고치지 않으면 빌드가 멈추거나 `pnpm typecheck`와 `pnpm test`가 실패한다(`import` 경로만 고친 시험 파일은 `pnpm lint`도 실패한다).
+
+1. 복사된 `site/composition/config/connector-scopes.json`(예시의 `packages/site-example/config/connector-scopes.json`)을 `site/config/connector-scopes.json`으로 옮긴다(`site/config/` 폴더를 만든다). `registration.ts`의 `import` 줄은 `../../config/connector-scopes.json`으로 고친다(`with { type: "json" }`는 그대로 둔다). 파일의 값은 예시의 인스턴스 ID(`example-import`)와 범위 값(`pki-example-scope`)이 아닌 포크의 것으로 바꾼다. 옮기지 않으면 빌드가 `scopes-file-misplaced`로, 값을 바꾸지 않으면 `scopes-file-placeholder`로 멈춘다.
+2. 복사한 `site/composition/src/scopes.test.ts`는 범위 파일을 `import`하지 않고 `readFileSync`로 읽도록 고친다. 옛 경로(`../config/connector-scopes.json`)는 타입 검사가 찾지 못하고(`TS2307`), 경로를 `../../config/connector-scopes.json`으로 고쳐 가져오면 경계 규칙이 `registration.ts`가 아닌 파일의 가져오기를 막는다(`pki/module-boundary`). 시험이 가져오기를 넣는 인스턴스와 기대하는 값도 포크의 범위 파일의 것으로 맞춘다.
+3. 복사한 `site/composition/src/registration.test.ts`와 `site/composition/src/shell.boot.test.ts`가 기대하는 수집기 종류와 인스턴스 ID를 포크의 등록에 맞춘다(수집기 종류와 인스턴스를 바꾸지 않았다면 고칠 것이 없다).
+4. 복사한 `tsconfig.json`의 `include`를 `["src"]`로 한다(위 블록). 예시의 `config/*.json`은 범위 파일이 패키지 안에 있을 때만 필요하다.
+
 ### 빌드와 산출물
 
 `pnpm --filter @pki/desktop build`가 고른 진입점을 묶으면 다음이 성립한다.
 
 - 묶음에는 등록과 그 수집기의 모듈이 들어가고, 테스트 파일과 `@pki/testkit`은 들어가지 않는다. 등록이 테스트 모듈에 닿으면 빌드가 실패한다.
+- 범위 파일의 값은 백엔드 묶음 안에만 있다. 앱 폴더에는 `connector-scopes.json`이라는 이름의 파일이 없고, 셸의 묶음(`main.js`)과 화면(`web/`)에도 값이 없다. 공용 진입점을 묶으면 범위 파일도 그 값도 묶음에 없다(위 "인스턴스 범위 파일").
 - 설치본의 백엔드는 `--scope-policy`와 `--fixtures`를 받지 않는다(받으면 시작이 실패한다). 등록에 `scopePolicy`가 있으면 설치본은 언제나 그 정책을 쓰고, 설치본을 공용 기본 정책으로 돌리는 스위치는 없다. 이름으로 정책을 고르는 `PKI_SCOPE_POLICY`(`default`, `site`)는 소스 실행에서만 듣는다.
 - **네이티브 모듈은 지원하지 않는다.** 수집기 패키지의 의존성이 네이티브 코드(패키지 폴더에 `binding.gyp`나 `prebuilds/` 폴더가 있거나 `.node` 파일이 든 것)이면 빌드가 그 패키지 이름을 적어 실패한다. 공용이 앱 폴더에 복사해 주는 `better-sqlite3`와 `@huggingface/transformers`는 이 검사에서 빠진다. 수집기 패키지가 그 이름을 자기 버전으로 선언해도 확인하는 검사는 없고, 실행 때는 공용이 복사한 것을 쓴다.
 - **그 검사에는 빠져나가는 곳이 둘 있다.** 하나는 계산된 이름으로 네이티브 모듈을 불러오고 못 찾으면 순수 JS 코드로 내려가는 패키지다. 번들러가 그 모듈을 풀지 않으므로 검사에 걸리지 않고, 빌드는 조용히 지나가 내려갈 코드가 묶인다. 다른 하나는 검사가 **빌드하는 컴퓨터에 설치된 패키지만 본다**는 것이다. 운영체제마다 다른 선택 의존성(`optionalDependencies`)을 쓰는 패키지는 한 OS에서는 실패하고 다른 OS에서는 통과할 수 있다. 그래서 이 검사 통과는 Windows 설치본에서 동작한다는 증거가 아니다(site-setup S27).
@@ -718,8 +743,7 @@ pnpm --filter @pki/desktop build
 번호(공용 저장소 #114 등)는 **공용(upstream) 저장소**의 추적 이슈다. 포크에서 `#114`는 포크 자신의 이슈를 가리키므로 공용 저장소의 이슈 목록에서 찾는다.
 
 1. **수집기에 비밀 값을 건네는 통로가 없다**(공용 저장소 #114). 8장.
-2. **설치본이 `site/config/connector-scopes.json`을 읽는 길이 없다**(공용 저장소 #115). site-setup S18.
-3. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116). 인스턴스의 설정은 시작할 때 등록의 `connectorInstances`가 주고, 설정 화면이나 설정 파일로 인스턴스를 만들 수 있는 곳이 없다. 제품이 등록한 종류는 `site-*` 셋뿐이다(`jsonl-import`는 시험에서만 등록된다). 9장.
+2. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116). 인스턴스의 설정은 시작할 때 등록의 `connectorInstances`가 주고, 설정 화면이나 설정 파일로 인스턴스를 만들 수 있는 곳이 없다. 제품이 등록한 종류는 `site-*` 셋뿐이다(`jsonl-import`는 시험에서만 등록된다). 9장.
 
 이 항목들은 이 문서가 임의로 정하지 않았다. 포크가 다른 방법을 정했다면 그 방법을 공용 저장소에 알린다([ownership.md 5절](ownership.md)).
 
@@ -734,8 +758,9 @@ pnpm --filter @pki/desktop build
 - 포크는 `site/composition/`에 등록 하나와 진입점 둘을 두고, 빌드가 그 진입점을 고른다. 결합은 빌드할 때의 정적 `import`다.
 - 등록은 사이트 종류와 그 인스턴스만 더한다. 공용 종류에 손을 대는 등록은 시작하지 못하고, 그 밖의 잘못된 항목과 멈추는 수집기는 그 항목만 빠진다.
 - 예시의 `tsconfig.json`은 그대로 복사할 수 없다. 네이티브 모듈 검사와 린트에는 빠져나가는 길이 있다.
+- 인스턴스 범위 파일은 `site/config/connector-scopes.json`에만 두고, 등록이 정적 `import`로 가져와 빌드할 때 백엔드 묶음에 넣는다. 실행본은 그 파일을 읽지 않는다. 자리가 틀리거나 묶이지 않았거나 형식이 틀렸거나 예시 값 그대로이면 빌드가 멈춘다.
 - 포크의 코드는 믿는 코드로 실리고 가둬지지 않는다. 동기 멈춤은 막지 못한다.
-- 명령은 `pnpm install`, `pnpm lint && pnpm typecheck && pnpm test`, `pnpm --filter @pki-site/composition site-check <종류>`, `pnpm --filter @pki/desktop build`다. `site/` 밖에서 달라지는 것은 `pnpm-lock.yaml`이고, 설치 스크립트가 있는 의존성이면 `allowBuilds`의 `false` 줄이 더해진다.
+- 명령은 `pnpm install`, `pnpm lint && pnpm typecheck && pnpm test`, `pnpm --filter @pki-site/composition site-check <종류>`, `pnpm --filter @pki-site/composition site-check --scopes`, `pnpm --filter @pki/desktop build`다. `site/` 밖에서 달라지는 것은 `pnpm-lock.yaml`이고, 설치 스크립트가 있는 의존성이면 `allowBuilds`의 `false` 줄이 더해진다.
 - 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다(#121).
 
 ## 8. 자주 만나는 두 가지: 정수 revision이 없을 때, 자격 증명
@@ -830,7 +855,6 @@ pnpm --filter @pki/desktop build
 | 실제 원 시스템에서의 규격 확인 | 하지 않았다. 요청 한도, cursor 만료, 대량 페이지, 만료된 동안의 삭제, 범위와 revision 채우기는 S18이 배포처에서 확인한다 |
 | 수집기 종류를 뺀 빌드로 복원한 백업에서 건너뛴 삭제를 그 종류가 돌아온 뒤 다시 적용하는 일 | 없다. 건너뛴 줄은 건수로만 남는다. 종류를 뺀 빌드로 백업을 복원하지 않는다(7장, #121) |
 | 수집기에 비밀 값을 건네는 통로 | 없다(8장, #114) |
-| 설치본이 `site/config/connector-scopes.json`을 읽는 길 | 만들지 않았다. 소스 트리에서 실행할 때만 그 파일을 읽는다(site-setup S18, #115) |
 | `jsonl-import` 파일 인스턴스를 제품에서 설정하는 길과 `{ path }`의 경로 제한 | 없다. 수집기 코드는 있고 시험에서만 등록된다. 인스턴스는 시작할 때 등록의 `connectorInstances`가 준 설정으로만 생긴다(9장, #116) |
 | 화면에서 locator 표시 | 없다. 근거를 읽는 정본 함수와 API 응답은 locator를 돌려주지만 화면은 그리지 않는다 |
 | Windows에서의 확인 | 하지 않았다. 이 문서의 명령은 macOS 개발 환경에서 돌려 보았다 |

@@ -27,6 +27,8 @@ export interface NewFact extends KnowledgeAttributes {
   kind: string;
   /** Already normalized by the caller (a date is YYYY-MM-DD). */
   value: string;
+  /** A definition's short context tag (S01-R3); written when the row is created, never changed here. */
+  context?: string | null;
 }
 export interface NewRelation extends KnowledgeAttributes {
   subjectId: number;
@@ -74,10 +76,11 @@ function saveUnique(
   keyColumns: readonly [string, string, string],
   key: readonly [number | string, string, number | string],
   attributes: KnowledgeAttributes,
+  extra: { column: string; value: string | null } | undefined = undefined,
 ): { id: number; created: boolean } {
-  const values = [...key, ...attributeValues(attributes)];
+  const values = [...key, ...attributeValues(attributes), ...(extra ? [extra.value] : [])];
   const { changes } = db.run(
-    `INSERT INTO ${table} (${keyColumns.join(", ")}, ${ATTRIBUTES})
+    `INSERT INTO ${table} (${keyColumns.join(", ")}, ${ATTRIBUTES}${extra ? `, ${extra.column}` : ""})
      VALUES (${values.map(() => "?").join(", ")}) ON CONFLICT DO NOTHING`,
     values,
   );
@@ -95,6 +98,7 @@ export function saveFact(db: SqlDriver, fact: NewFact): { id: number; created: b
     ["item_id", "kind", "value"],
     [fact.itemId, fact.kind, fact.value],
     fact,
+    { column: "context", value: fact.context ?? null },
   );
 }
 

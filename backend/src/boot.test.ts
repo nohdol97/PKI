@@ -317,7 +317,11 @@ describe("bootBackend", () => {
         expect(closed).toBe(false);
         expect(jobsOf(db)).toEqual([{ status: "running", reason: null }]);
 
-        answer(completion(JSON.stringify({ items: [], facts: [], relations: [] })));
+        answer(
+          completion(
+            JSON.stringify({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
+          ),
+        );
         await closing;
         expect(jobsOf(db)).toEqual([{ status: "succeeded", reason: null }]);
         db.close();

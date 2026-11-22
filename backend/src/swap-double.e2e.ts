@@ -18,7 +18,9 @@ export function productProviders(): readonly LLMProvider[] {
       id: "local-model",
       transport: "http",
       answer: (r) =>
-        r.taskKind === "extract" ? { items: [], facts: [], relations: [] } : { reply: "ok" },
+        r.taskKind === "extract"
+          ? { items: [], facts: [], relations: [], terms: [], definitions: [] }
+          : { reply: "ok" },
     }),
   ];
 }

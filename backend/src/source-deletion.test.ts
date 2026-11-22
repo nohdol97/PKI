@@ -87,6 +87,8 @@ function answer(hooks: { during?: ((request: StructuredRequest) => void) | undef
           },
         ],
         facts: [],
+        definitions: [],
+        terms: [],
         relations: [{ subject: "Z", type: "DEPENDS_ON", object: "X", quote: ORPHAN_DEPENDS }],
       };
     }
@@ -111,6 +113,8 @@ function answer(hooks: { during?: ((request: StructuredRequest) => void) | undef
           quote: match[0],
         },
       ],
+      definitions: [],
+      terms: [],
       relations: [{ subject: "X", type: "DEPENDS_ON", object: "Y", quote: DEPENDS }],
     };
   };

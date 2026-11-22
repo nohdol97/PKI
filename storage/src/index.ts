@@ -7,6 +7,7 @@ export type {
   SqlValue,
   TransactionOptions,
 } from "./sql-driver.ts";
+export { findSameForm, isSurfaceFormKind, normalizeForLinking } from "./surface-form.ts";
 export { migrate, migrations, schemaVersion, type Migration } from "./migrations.ts";
 export { searchKeyword } from "./keyword-search.ts";
 export {

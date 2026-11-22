@@ -99,7 +99,9 @@ let broker: ReturnType<typeof createBroker>;
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
   migrate(db);
-  provider = new FakeProvider({ answer: () => ({ items: [], facts: [], relations: [] }) });
+  provider = new FakeProvider({
+    answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
+  });
   ledger = createUserActionLedger();
   candidates = new Map();
   seen = [];
@@ -147,7 +149,7 @@ const extract = (ids: string[], extra: Partial<BrokerRequest> = {}) => ({
   taskKind: "extract" as const,
   sourceVersionIds: ids,
   candidateItemIds: [],
-  schemaVersion: 2,
+  schemaVersion: 3,
   budget: { timeoutMs: 1000 },
   retryable: false,
   ...extra,

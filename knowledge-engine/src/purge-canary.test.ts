@@ -39,6 +39,9 @@ const CANARY = {
   namespace: "lknspace", // ⑦ and its namespace
   author: "wqpauthor", // ⑤ provenance an earlier version holds (I01-R13)
   locator: "hnxlocator", // ⑤ the locator of a block of the current version (I01-R7)
+  alias: "vsjalias", // ⑧ a surface form, the value of an `alias.*` fact (S01-R2)
+  definition: "ndzdefinition", // ⑧ a definition, the value of a `definition` fact (S01-R3)
+  context: "kfbcontext", // ⑧ a definition's context tag (S01-R3)
 };
 const ALL = Object.values(CANARY);
 const AT = "2026-11-22T00:00:00.000Z";
@@ -71,7 +74,7 @@ const IDENTITY = {
   externalId: CANARY.externalId,
 };
 const OLD_BODY = `값 ${CANARY.old} 입니다`;
-const NEW_BODY = `이제 ${CANARY.body} 와 ${CANARY.word} 그리고 ${CANARY.quote} 입니다`;
+const NEW_BODY = `이제 ${CANARY.body} 와 ${CANARY.word} 그리고 ${CANARY.quote} 입니다 ${CANARY.alias} ${CANARY.definition}`;
 
 /** One source, two versions (the first with the old value), a fact on each, one Insight. */
 function seed() {
@@ -113,6 +116,21 @@ function seed() {
       quote,
     });
   };
+  // a concept with a surface form and a definition that has a context tag, both from the current version
+  const concept = insertItem(db, { type: "Concept", name: "Z 개념", ...attrs });
+  const vocabulary = (kind: string, value: string, context: string | null) => {
+    const id = saveFact(db, { itemId: concept, kind, value, context, ...attrs }).id;
+    const start = NEW_BODY.indexOf(value);
+    addEvidence(db, {
+      target: { factId: id },
+      sourceVersionId: versionId(2),
+      start,
+      end: start + value.length,
+      quote: value,
+    });
+  };
+  vocabulary("alias.synonym", CANARY.alias, null);
+  vocabulary("definition", CANARY.definition, CANARY.context);
   const evidenceOld = fact(x, "2026-12-10", 1, OLD_BODY, CANARY.old);
   const evidenceNew = fact(y, "2026-12-12", 2, NEW_BODY, CANARY.quote);
   saveInsight(
@@ -153,6 +171,25 @@ describe("purge.canary-files", () => {
       expect(searchKeyword(db, CANARY.word.toLowerCase())).toEqual([]);
     },
   );
+
+  it("leaves no surface form, definition or context tag in any file after the deletion (S01-R22)", () => {
+    seed();
+    const rows = () =>
+      db.all(
+        "SELECT kind, value, context FROM facts WHERE kind IN ('alias.synonym', 'definition') ORDER BY id",
+      );
+    expect(rows()).toEqual([
+      { kind: "alias.synonym", value: CANARY.alias, context: null },
+      { kind: "definition", value: CANARY.definition, context: CANARY.context },
+    ]);
+    entry("user-deleted");
+    expect(rows()).toEqual([]);
+    expect(db.all("SELECT 1 FROM items WHERE type = 'Concept'")).toEqual([]);
+    const left = residue();
+    for (const canary of [CANARY.alias, CANARY.definition, CANARY.context]) {
+      expect(left).not.toContain(canary);
+    }
+  });
 
   it("control: with PRAGMA secure_delete off the current text stays (①)", () => {
     seed();

@@ -107,6 +107,8 @@ async function viaExtraction(kind: string): Promise<string[]> {
       answer: () => ({
         items: [{ ref: "p", type: "Project", name: `추출 ${i}`, existingItemId: null }],
         facts: [{ item: "p", kind, value, epistemic: "explicit", quote }],
+        definitions: [],
+        terms: [],
         relations: [],
       }),
     });
