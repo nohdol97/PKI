@@ -1,35 +1,13 @@
-// JSONL lines (V02-R2): one line is one version of a source, in the R05 golden
-// SourceRecord shape (`ImportRecordSchema`). A line is checked alone: a malformed
-// one is refused with its 1-based number and the others go on. The JSONL
-// Connector (adapters/jsonl-connector.ts) and the importer (jsonl-import.ts) both
-// read a text through parseJsonl. The fixtures' `malicious` marker is for the
+// JSONL lines of the Sources screen's import (V02-R2): one line is one version of a
+// source, in the R05 golden SourceRecord shape (`ImportRecordSchema`). The checking is
+// @pki/connector-sdk's (I01-R22), the one every import path shares; this file adds what
+// that screen's importer (jsonl-import.ts) needs on top of it: the V02 error reasons, a
+// later line that adds nothing dropped before it is stored, and the rounds that keep one
+// read naming a source once. A line is checked alone: a malformed one is refused with
+// its 1-based number and the others go on. The fixtures' `malicious` marker is for the
 // synthetic manifest only and never reaches a Change.
-import {
-  CONNECTOR_SDK_VERSION,
-  ImportRecordSchema,
-  type Change,
-  type ImportLineError,
-  type ImportRecord,
-} from "@pki/contracts";
-import { createHash } from "node:crypto";
-
-/**
- * The one place a JSONL `operation` becomes a Connector change kind. Provisional
- * for `revoke`: I01-T05 maps it to a scope change (widening this return type) and
- * adds an operation for losing access entirely (V02 spec "T04가 넘기는 것").
- */
-export function changeKindOf(
-  operation: ImportRecord["operation"],
-): Exclude<Change["kind"], "scope-change"> {
-  switch (operation) {
-    case "upsert":
-      return "upsert";
-    case "delete":
-      return "delete";
-    case "revoke":
-      return "access-revoked";
-  }
-}
+import { parseJsonl as parseJsonlLines } from "@pki/connector-sdk";
+import type { ImportLineError, ImportRecord } from "@pki/contracts";
 
 export interface JsonlLine {
   /** 1-based line number in the text. */
@@ -37,30 +15,11 @@ export interface JsonlLine {
   record: ImportRecord;
 }
 
-const FIELDS: ReadonlySet<string> = new Set(Object.keys(ImportRecordSchema.shape));
-const sha256 = (content: string) =>
-  `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
-
-function checkLine(text: string, line: number): JsonlLine | ImportLineError {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return { line, reason: "invalid-json" };
-  }
-  const parsed = ImportRecordSchema.safeParse(value);
-  if (!parsed.success) {
-    // Only a field of the schema is named: an unknown key is text from the file.
-    const field = parsed.error.issues[0]?.path[0];
-    return typeof field === "string" && FIELDS.has(field)
-      ? { line, reason: "invalid-record", field }
-      : { line, reason: "invalid-record" };
-  }
-  if (parsed.data.content_hash !== sha256(parsed.data.content)) {
-    return { line, reason: "content-hash-mismatch" };
-  }
-  return { line, record: parsed.data };
-}
+const REASON = {
+  "invalid-json": "invalid-json",
+  schema: "invalid-record",
+  "content-hash-mismatch": "content-hash-mismatch",
+} as const;
 
 /**
  * Every line checked alone; blank lines and a leading UTF-8 BOM are skipped. Each
@@ -70,26 +29,25 @@ function checkLine(text: string, line: number): JsonlLine | ImportLineError {
  * it differs (the store's rule, sources.ts).
  */
 export function parseJsonl(text: string): { lines: JsonlLine[]; errors: ImportLineError[] } {
+  const parsed = parseJsonlLines(text);
+  const errors: ImportLineError[] = parsed.rejected.map(({ line, code, field }) =>
+    field === undefined ? { line, reason: REASON[code] } : { line, reason: REASON[code], field },
+  );
   const lines: JsonlLine[] = [];
   const last = new Map<string, ImportRecord>();
-  const errors: ImportLineError[] = [];
-  const body = text.startsWith("\uFEFF") ? text.slice(1) : text;
-  body.split("\n").forEach((raw, index) => {
-    const content = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
-    if (!content.trim()) return;
-    const checked = checkLine(content, index + 1);
-    if (!("record" in checked)) return void errors.push(checked);
+  for (const checked of parsed.lines) {
     const { record } = checked;
     const key = sourceKey(record);
     const previous = last.get(key);
     if (previous && record.version <= previous.version) {
       const same = previous.title === record.title && previous.content === record.content;
       if (!same) errors.push({ line: checked.line, reason: "revision-not-newer" });
-      return;
+      continue;
     }
     last.set(key, record);
-    lines.push(checked);
-  });
+    lines.push({ line: checked.line, record });
+  }
+  errors.sort((a, b) => a.line - b.line);
   return { lines, errors };
 }
 
@@ -110,27 +68,4 @@ export function splitRounds(lines: readonly JsonlLine[]): JsonlLine[][] {
     (rounds[k] ??= []).push(line);
   }
   return rounds;
-}
-
-/**
- * The Connector change a line stands for (SDK v2): the line's `version` is the
- * revision, never a product version (I01-R9). Only identity, revision and content
- * are carried, in the instance's one namespace: each `connector_instance_id` is
- * its own instance here. I01-T05 maps the rest of the line (I01-R22).
- */
-export function toChange(record: ImportRecord): Change {
-  const kind = changeKindOf(record.operation);
-  const identity = { namespace: "", externalId: record.external_id, revision: record.version };
-  if (kind === "upsert") {
-    return {
-      kind,
-      record: {
-        ...identity,
-        schemaVersion: CONNECTOR_SDK_VERSION,
-        title: record.title,
-        body: record.content,
-      },
-    };
-  }
-  return { kind, ...identity, at: record.updated_at };
 }

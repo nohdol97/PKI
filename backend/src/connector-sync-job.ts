@@ -24,11 +24,11 @@ import {
 import type { ConnectorSummary, SyncResponse } from "@pki/contracts";
 import { errorClass, log } from "@pki/providers";
 import { recordResultCounts, requeueHeldTarget, type SqlDriver } from "@pki/storage";
-import type { ConnectorManager, ConnectorRecheck } from "./connectors.ts";
+import type { ConnectorConfigs, ConnectorManager, ConnectorRecheck } from "./connectors.ts";
 import { COLLECTOR_HELD_REASONS, HELD_REEVALUATION_MS } from "./held-release.ts";
 import type { JobResult } from "./job-outcomes.ts";
 import type { JobHandler, JobRunner } from "./job-runner.ts";
-import { JSONL_CONNECTOR_KIND } from "./jsonl-import.ts";
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import type { Period } from "./schedule.ts";
 import { MAINTENANCE_KIND, type Scheduler } from "./scheduler.ts";
 
@@ -154,12 +154,18 @@ export function createConnectorSyncHandler(options: {
   };
 }
 
-/** Kinds that take their records from the API, with nothing to pull (I01, `jsonl-import`). */
-const API_ONLY_KINDS: readonly string[] = [JSONL_CONNECTOR_KIND];
+/** A `jsonl-import` instance pulls only when its configuration names a file (I01-R23's `{ path }`). */
+const namesFile = (config: unknown): boolean =>
+  typeof (config as { path?: unknown } | null | undefined)?.path === "string" &&
+  (config as { path: string }).path !== "";
 
-/** An instance that can pull: ready, and not one that only takes what the API hands it (I03-R18). */
-export const canPull = (summary: ConnectorSummary): boolean =>
-  summary.state === "ready" && !API_ONLY_KINDS.includes(summary.kind);
+/**
+ * An instance that can pull: ready, and, of the `jsonl-import` kind, configured with a file. An
+ * instance with no pull configuration only takes what the API hands it (I01-R24, I03-R18).
+ * Decided by the instance's configuration, not by its kind.
+ */
+export const canPull = (summary: ConnectorSummary, config?: unknown): boolean =>
+  summary.state === "ready" && (summary.kind !== JSONL_IMPORT_KIND || namesFile(config));
 
 /**
  * Makes the default periods that do not exist yet: an hourly sync for each instance that can
@@ -169,9 +175,10 @@ export const canPull = (summary: ConnectorSummary): boolean =>
 export function ensureDefaultSchedules(
   scheduler: Pick<Scheduler, "ensureSchedule">,
   summaries: readonly ConnectorSummary[],
+  configOf: (id: string) => unknown = () => undefined,
 ): string[] {
   const made: string[] = [];
-  for (const summary of summaries.filter(canPull)) {
+  for (const summary of summaries.filter((s) => canPull(s, configOf(s.id)))) {
     const { created } = scheduler.ensureSchedule({
       kind: CONNECTOR_SYNC_KIND,
       target: summary.id,
@@ -306,7 +313,8 @@ export async function recheckInstances(options: RecheckOptions): Promise<string[
  */
 export function startCollectorUpkeep(options: {
   db: SqlDriver;
-  manager: Pick<ConnectorManager, "list"> & ConnectorRecheck;
+  /** `configOf` decides which `jsonl-import` instances pull (I01-R23); without it none does. */
+  manager: Pick<ConnectorManager, "list"> & ConnectorRecheck & Partial<ConnectorConfigs>;
   scheduler: Pick<Scheduler, "ensureSchedule">;
   runner: Pick<JobRunner, "wake">;
   intervalMs?: number;
@@ -323,7 +331,7 @@ export function startCollectorUpkeep(options: {
     }
   };
   guarded(() => {
-    ensureDefaultSchedules(scheduler, manager.list());
+    ensureDefaultSchedules(scheduler, manager.list(), (id) => manager.configOf?.(id));
     if (releaseReadyCollectors(db, manager.list()).length > 0) void runner.wake();
   });
   const inFlight = new Set<string>();
@@ -337,7 +345,10 @@ export function startCollectorUpkeep(options: {
         runner,
         inFlight,
         signal: stopping.signal,
-        onUsable: () => guarded(() => ensureDefaultSchedules(scheduler, manager.list())),
+        onUsable: () =>
+          guarded(() =>
+            ensureDefaultSchedules(scheduler, manager.list(), (id) => manager.configOf?.(id)),
+          ),
       });
     } catch (error) {
       onError(error);

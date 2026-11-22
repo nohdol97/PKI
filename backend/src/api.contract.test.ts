@@ -27,6 +27,7 @@ import {
   productEgress,
   productEngine,
   productImporter,
+  productInstanceImporter,
   productProjections,
   productRunner,
 } from "./composition.ts";
@@ -92,6 +93,10 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
   const requests: Partial<Record<RouteName, unknown>> = {
     syncConnector: { connectorId: "fixtures" },
     importJsonl: { text: readFileSync(resolve(FIXTURES, "../v02-mail.jsonl"), "utf8") },
+    imports: {
+      instanceId: "contract-import",
+      content: readFileSync(resolve(FIXTURES, "../v02-wiki.jsonl"), "utf8"),
+    },
     searchSources: { query: "등대" },
     // a record syncConnector stored above, not one the evidence seed below relies on
     deleteSource: { connectorId: "fixtures", namespace: "", externalId: "fx-001" },
@@ -173,6 +178,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
       }),
       ...adapters,
       importer: productImporter(db, { runner, projections }),
+      instanceImporter: productInstanceImporter(db, { runner, projections }),
       jobs: {
         scheduler: createScheduler({ db }),
         actions: createJobActions({ db, runner }),

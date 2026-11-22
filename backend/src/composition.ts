@@ -70,6 +70,7 @@ import {
   EXTRACT_JOB_KIND,
   type ConnectorFactory,
   type ConnectorInstanceConfig,
+  type ConnectorManager,
   type SyncOptions,
 } from "./connectors.ts";
 import type { Clock } from "./clock.ts";
@@ -83,6 +84,7 @@ import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-run
 import { createMaintenanceHandler } from "./maintenance.ts";
 import { MAINTENANCE_KIND } from "./scheduler.ts";
 import { projectionPorts } from "./projection-ports.ts";
+import { importContent, type InstanceImporter } from "./imports.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import {
   projectionHandlers,
@@ -460,6 +462,7 @@ export function productImporter(
   db: SqlDriver,
   options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> & {
     logger?: Logger;
+    connectors?: Pick<ConnectorManager, "list">;
   } = {},
 ): JsonlImporter {
   const { logger = log, ...sync } = options;
@@ -469,6 +472,27 @@ export function productImporter(
       createConnector: createJsonlConnector,
       // the class only: a message can carry the file's text (V01-R13)
       onError: (error) => logger("import-instance-failed", { error: errorClass(error) }),
+    });
+}
+
+/**
+ * The local import API's importer (I01-R24): `productImporter`'s options, one instance and
+ * one text per call. Its lock is the one every sync of `db` takes, so it must be the
+ * same database object as the Connector manager's.
+ */
+export function productInstanceImporter(
+  db: SqlDriver,
+  options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> & {
+    logger?: Logger;
+    connectors?: Pick<ConnectorManager, "list">;
+  } = {},
+): InstanceImporter {
+  const { logger = log, ...sync } = options;
+  return (instanceId, content) =>
+    importContent(db, instanceId, content, {
+      ...sync,
+      // the class only: a message can carry the text's content (V01-R13)
+      onError: (error) => logger("import-storage-failed", { error: errorClass(error) }),
     });
 }
 
