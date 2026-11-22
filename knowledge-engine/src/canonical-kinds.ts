@@ -17,12 +17,12 @@
 // each kind touched and the rule's outcomes); the kinds note those for the entry
 // that runs the registry, by its transaction, beside the counts the record keeps.
 import {
+  automatedLifecycle,
   createDerivativeRegistry,
   defaultScopePolicy,
   EXTRACT_JOB_KIND,
   listEvidence,
   registerJob,
-  setKnowledgeStatus,
   type Affected,
   type DerivativeKind,
   type DerivativeRegistry,
@@ -83,6 +83,15 @@ function supported(change: SourceChange): "new-version" | "scope-changed" | "del
   if (change.kind === "new-version" || change.kind === "scope-changed") return change.kind;
   return "deletion";
 }
+
+/**
+ * The source version a propagation's supersede rests on (S01-R6): the new version, the version a
+ * tombstone covers, or the version a prune keeps.
+ */
+const basisOf = (change: Exclude<SourceChange, { kind: "scope-changed" }>) => ({
+  sourceId: change.sourceId,
+  version: "coversVersion" in change ? change.coversVersion : change.version,
+});
 
 /** A prune takes the versions below the one it keeps; every other deletion takes all of them. */
 const below = (change: SourceChange, column = "") =>
@@ -233,7 +242,7 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
         [change.sourceId],
       );
     },
-    invalidate: (ctx, snapshot) => {
+    invalidate: (ctx, snapshot, change) => {
       const { tx } = ctx;
       const deleted: number[] = [];
       const superseded: number[] = [];
@@ -248,10 +257,16 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
         } else if (
           status !== "superseded" &&
           status !== "rejected" &&
+          change.kind !== "scope-changed" && // nothing is collected for it; narrows the basis
           !evidence.some((e) => e.current)
         ) {
-          setKnowledgeStatus(tx, kind, id, "superseded");
-          superseded.push(id);
+          const outcome = automatedLifecycle.supersede(
+            tx,
+            { kind, id },
+            basisOf(change),
+            running?.at,
+          );
+          if (outcome.status === "applied") superseded.push(id);
         }
       }
       const report = noting(ctx);

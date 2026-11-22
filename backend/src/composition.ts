@@ -96,7 +96,8 @@ import {
 } from "./projection-jobs.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
-import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
+import { createSiteConnector } from "./adapters/site-connectors.ts";
+import { SITE_CONNECTOR_KINDS } from "./public-kinds.ts";
 import type { ServerOptions } from "./server.ts";
 
 /**
@@ -276,8 +277,10 @@ export interface CallsOptions {
    * Broker's grade (I04-R16); default the entries' own (productRegistry in the product).
    */
   registry?: DerivativeRegistry;
-  /** The mapping scope -> class (I01-R15); a test build's own, else the public repository's (a fork replaces it, S08). */
+  /** The mapping scope -> class (I01-R15); a test build's own, else the public repository's. Honoured in a test build only. */
   scopeGrading?: ScopeGrading;
+  /** The deployment's mapping, from its registration (I05-R14, S08): used in every build, before the test build's own. */
+  siteScopeGrading?: ScopeGrading;
 }
 
 /**
@@ -319,11 +322,13 @@ export function productCalls(
     execution,
     recorder: createCallRecorder(db),
     // a claimed scope is compared by the registry's policy, the one every other scope judgment
-    // uses; the mapping scope -> class is the public repository's (a fork replaces it, S08)
+    // uses; the mapping scope -> class is the registration's, else a test build's own, else the public
+    // repository's (I05-R14, S08)
     scope: {
       policy: (options.registry ?? derivativeRegistry).policy,
       grading:
-        BUILD_KIND === "test" && options.scopeGrading ? options.scopeGrading : publicScopeGrading,
+        options.siteScopeGrading ??
+        (BUILD_KIND === "test" && options.scopeGrading ? options.scopeGrading : publicScopeGrading),
     },
   });
   // the verified list the gate decides with: the test build's own, else the build's

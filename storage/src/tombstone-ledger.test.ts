@@ -433,3 +433,11 @@ describe("everything the writer writes the reader reads (round trip)", () => {
     expect(draftReadable(draft())).toBe(true);
   });
 });
+
+describe("the kind rule is one constant (I05-R7)", () => {
+  it("the reader tests a kind with contracts' CONNECTOR_KIND_PATTERN and keeps no second copy of the shape", () => {
+    const source = readFileSync(new URL("./tombstone-ledger.ts", import.meta.url), "utf8");
+    expect(source).toContain("CONNECTOR_KIND_PATTERN.test(");
+    expect(source).not.toContain("a-z0-9-]{0,63}");
+  });
+});

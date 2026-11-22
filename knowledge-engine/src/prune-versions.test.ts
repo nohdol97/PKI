@@ -268,6 +268,15 @@ describe("versions.prune", () => {
       db.all("SELECT status FROM facts WHERE id = ?", [id]).map((r) => r.status);
     expect(status(supported)).toEqual(["candidate"]);
     expect(status(pastOnly)).toEqual(["superseded"]);
+    // the history line rests on the version the prune kept, a number and no text (S01-R6)
+    expect(
+      db.all("SELECT actor, basis_source_id, basis_version FROM fact_history WHERE fact_id = ?", [
+        pastOnly,
+      ]),
+    ).toEqual([{ actor: "propagation", basis_source_id: sourceId, basis_version: 3 }]);
+    expect(db.all("SELECT count(*) AS n FROM fact_history WHERE fact_id = ?", [supported])).toEqual(
+      [{ n: 0 }],
+    );
     expect(db.all("SELECT count(*) AS n FROM evidence WHERE fact_id = ?", [supported])[0]?.n).toBe(
       1,
     );

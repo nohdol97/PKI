@@ -8,9 +8,7 @@ import {
   type Connector,
 } from "@pki/contracts";
 
-export const SITE_CONNECTOR_KINDS = ["site-mail", "site-messenger", "site-wiki"] as const;
-
-export function createSiteConnector(type: (typeof SITE_CONNECTOR_KINDS)[number]): Connector {
+export function createSiteConnector(type: string): Connector {
   const fail = () => Promise.reject(new ConnectorNotImplementedError());
   return {
     manifest: {

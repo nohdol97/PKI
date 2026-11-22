@@ -48,9 +48,16 @@ import type { UserActionRedeemer } from "./user-actions.ts";
 
 /**
  * Connector kinds of the public repository whose records may grade synthetic.
- * Any other kind (site-*, "unknown" from schema v1, a fork's own) never does.
+ * Any other kind (site-*, "unknown" from schema v1, a fork's own) never does. The set stays
+ * private; a frozen copy is exported so the backend's test can hold every one of them to its public
+ * kinds (I05-R7, I05-C14 ①).
  */
 const SYNTHETIC_CONNECTOR_KINDS: ReadonlySet<string> = new Set(["test-fixtures"]);
+
+/** A frozen copy of the set, for a test to hold against the public kinds: a reader cannot add a trusted kind through it. */
+export const SYNTHETIC_CONNECTOR_KIND_LIST: readonly string[] = Object.freeze([
+  ...SYNTHETIC_CONNECTOR_KINDS,
+]);
 const CONNECTION_TEST_DOCUMENT: UntrustedDocument = Object.freeze({
   id: "connection-test-material",
   title: material.title,
