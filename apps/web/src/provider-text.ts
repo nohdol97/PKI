@@ -36,7 +36,7 @@ const RUNS_ROOT =
 const AUTH = {
   authenticated: "로그인됨",
   unauthenticated: "로그인되어 있지 않음",
-  unknown: "로그인 상태를 알 수 없음",
+  unknown: "로그인 상태를 확인할 수 없음",
 } as const;
 
 /** An HTTP Provider has nothing to install: "installed" means an endpoint is set (T11). */

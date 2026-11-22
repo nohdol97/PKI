@@ -6,6 +6,8 @@
 import { execFileSync, fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer as createHttpsServer } from "node:https";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +38,7 @@ const nodeFork: ForkBackend = (entry, args, env) => {
     on: (event, listener) => void child.on(event, listener),
     once: (event, listener) => void child.once(event, (code: number | null) => listener(code ?? 1)),
     kill: () => child.kill(),
+    forceKill: () => void child.kill("SIGKILL"),
   };
 };
 
@@ -52,6 +55,45 @@ function processRecord(pid: number): string | undefined {
     });
   }
   return undefined; // Windows: unverified here (H03)
+}
+
+function hasOpenssl(): boolean {
+  try {
+    execFileSync("openssl", ["version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A throwaway certificate for 127.0.0.1, made per run; nothing of it is kept. */
+function selfSignedLoopbackCert(folder: string) {
+  const keyFile = join(folder, "loopback-key.pem");
+  const file = join(folder, "loopback-cert.pem");
+  execFileSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:prime256v1",
+      "-nodes",
+      "-keyout",
+      keyFile,
+      "-out",
+      file,
+      "-days",
+      "1",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1",
+    ],
+    { stdio: "ignore" },
+  );
+  return { key: readFileSync(keyFile), cert: readFileSync(file), file };
 }
 
 let dir: string;
@@ -167,6 +209,94 @@ describe("shell ↔ backend channel", () => {
     expect(pruned).toHaveLength(2);
     expect(pruned[0]).toBe(keyName);
   });
+
+  // T11 handoff 2·7, moved to T16: the value (read) over the real channel. The forked
+  // backend runs its source as a production build, which sends to `https` only, so
+  // the endpoint is a loopback https server whose throwaway certificate this test
+  // makes; the test's own fork adds that certificate to the child's trust store
+  // (NODE_EXTRA_CA_CERTS, not one of BACKEND_ENV_KEYS: the product never passes it).
+  it.skipIf(!hasOpenssl())(
+    "answers the running backend's read with the value, which reaches only the endpoint",
+    async () => {
+      const cert = selfSignedLoopbackCert(dir);
+      const seen: { path: string; authorization: string | undefined }[] = [];
+      const endpoint = createHttpsServer({ key: cert.key, cert: cert.cert }, (req, res) => {
+        seen.push({ path: req.url ?? "", authorization: req.headers.authorization });
+        req.resume();
+        req.on("end", () => {
+          res.writeHead(200, { "content-type": "application/json" }).end(
+            JSON.stringify({
+              choices: [{ index: 0, message: { role: "assistant", content: '{"reply":"ok"}' } }],
+            }),
+          );
+        });
+      });
+      await new Promise<void>((resolve) => endpoint.listen(0, "127.0.0.1", resolve));
+      const host = `127.0.0.1:${(endpoint.address() as AddressInfo).port}`;
+      const keyName = `openai-compatible.api-key.${createHash("sha256")
+        .update(host)
+        .digest("hex")
+        .slice(0, 32)}`;
+      const canary = `sk-canary-read-${process.pid}-${Date.now()}`;
+      const asked: string[] = [];
+      const trusting: ForkBackend = (entry, args, env) =>
+        recordingFork(entry, args, { ...env, NODE_EXTRA_CA_CERTS: cert.file });
+      try {
+        backend = await startBackendProcess({
+          fork: trusting,
+          entry: ENTRY,
+          origin: ORIGIN,
+          dataDir: join(dir, "data"),
+          secrets: {
+            read: async (name) => (
+              asked.push(`read ${name}`),
+              name === keyName ? { state: "present", value: canary } : { state: "missing" }
+            ),
+            has: async (name) => (
+              asked.push(`has ${name}`),
+              { ok: true, present: name === keyName }
+            ),
+            deleteOthers: async () => ({ ok: true }),
+          },
+        });
+        const call = (path: string, body?: unknown) =>
+          fetch(`${backend?.url}${path}`, {
+            method: body === undefined ? "GET" : "POST",
+            headers: {
+              authorization: `Bearer ${backend?.token}`,
+              origin: ORIGIN,
+              "content-type": "application/json",
+            },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          }).then((r) => r.json() as Promise<Record<string, unknown>>);
+        await call("/api/settings", {
+          openaiCompatible: { baseUrl: `https://${host}/v1`, model: "synthetic-model" },
+        });
+        await call("/api/providers/default", { providerId: "openai-compatible" });
+        const { policyVersion } = await call("/api/consents");
+        await call("/api/consents", {
+          providerId: "openai-compatible",
+          allowedClasses: ["synthetic"],
+          destination: host,
+          policyVersion,
+        });
+        expect(asked.filter((a) => a.startsWith("read"))).toEqual([]);
+        expect(await call("/api/connection-test", { acknowledgeUnverified: false })).toEqual({
+          outcome: "ok",
+          reason: null,
+          isolation: null,
+        });
+        expect(asked.filter((a) => a.startsWith("read"))).toEqual([`read ${keyName}`]);
+        expect(seen).toEqual([{ path: "/v1/chat/completions", authorization: `Bearer ${canary}` }]);
+        expect(JSON.stringify(calls)).not.toContain(canary);
+      } finally {
+        await new Promise((resolve) => {
+          endpoint.closeAllConnections();
+          endpoint.close(resolve);
+        });
+      }
+    },
+  );
 
   it("passes only the allowlisted environment variables", async () => {
     backend = await start();

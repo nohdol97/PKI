@@ -51,7 +51,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const handler = () => createAppHandler({ webRoot, backendUrl, backendAlive: () => true });
+const handler = () => createAppHandler({ webRoot, backendUrl: () => backendUrl });
 const get = (path: string, init?: RequestInit) =>
   handler()(new Request(`${APP_ORIGIN}${path}`, init));
 
@@ -133,7 +133,10 @@ describe("app protocol", () => {
   it("stops forwarding once the backend has exited, even if the port answers again", async () => {
     seen.length = 0;
     let alive = true;
-    const forwarder = createAppHandler({ webRoot, backendUrl, backendAlive: () => alive });
+    const forwarder = createAppHandler({
+      webRoot,
+      backendUrl: () => (alive ? backendUrl : undefined),
+    });
     const call = () =>
       forwarder(
         new Request(`${APP_ORIGIN}/api/settings`, {
@@ -150,12 +153,21 @@ describe("app protocol", () => {
   });
 
   it("answers 502 when the backend cannot be reached", async () => {
-    const down = createAppHandler({
-      webRoot,
-      backendUrl: "http://127.0.0.1:1",
-      backendAlive: () => true,
-    });
+    const down = createAppHandler({ webRoot, backendUrl: () => "http://127.0.0.1:1" });
     const res = await down(new Request(`${APP_ORIGIN}/api/status`));
     expect(res.status).toBe(502);
+  });
+
+  // V01-T16: a restarted backend binds a new port; only that one is the backend now.
+  it("forwards to the restarted backend's address, never the old one", async () => {
+    seen.length = 0;
+    const old = "http://127.0.0.1:1";
+    let current: string | undefined = old;
+    const forwarder = createAppHandler({ webRoot, backendUrl: () => current });
+    current = undefined; // the backend exited; the restart has not reported ready yet
+    expect((await forwarder(new Request(`${APP_ORIGIN}/api/status`))).status).toBe(502);
+    current = backendUrl; // ready again, on its own new port
+    expect((await forwarder(new Request(`${APP_ORIGIN}/api/status`))).status).toBe(201);
+    expect(seen).toHaveLength(1);
   });
 });

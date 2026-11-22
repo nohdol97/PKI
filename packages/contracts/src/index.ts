@@ -66,20 +66,6 @@ const InvalidationSchema = z.object({
 });
 export type InvalidationSummary = z.infer<typeof InvalidationSchema>;
 
-export const StatusResponseSchema = z.object({
-  backend: ComponentStatusSchema,
-  provider: ComponentStatusSchema,
-  embedding: EmbeddingStatusSchema,
-  vectorIndex: ComponentStatusSchema,
-  /**
-   * I04-R4; Activity shows it (I03-T11). `recent`: the latest records, newest
-   * first. I04-T09 adds `scopePolicyDrops` (how many items the scope policy
-   * dropped) beside `recent`, with the table it counts.
-   */
-  invalidations: z.object({ recent: z.array(InvalidationSchema) }),
-});
-export type StatusResponse = z.infer<typeof StatusResponseSchema>;
-
 export const ErrorResponseSchema = z.object({
   error: z.enum([
     "bad-request",
@@ -269,6 +255,43 @@ const ProviderCheckSchema = z.object({
   problem: z.enum(["cli-runs-root-refused"]).optional(),
 });
 export type ProviderCheck = z.infer<typeof ProviderCheckSchema>;
+
+/**
+ * Whether the user's default Provider could take a call now (V01-R5, T16): none is
+ * chosen, its CLI is missing or logged out (with what the two queries found, so
+ * Home can guide), or the egress rules would stop a general document going to it.
+ * `reason` is a code, never Provider text. "ready" decides nothing: every call is
+ * still judged by the Broker.
+ */
+export const ProviderStatusSchema = z.discriminatedUnion("state", [
+  /** `check` only for a CLI whose login could not be confirmed: Home guides as Settings does. */
+  z.object({
+    state: z.literal("ready"),
+    providerId: ProviderIdSchema,
+    check: ProviderCheckSchema.optional(),
+  }),
+  z.object({
+    state: z.literal("unavailable"),
+    providerId: ProviderIdSchema.nullable(),
+    reason: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    check: ProviderCheckSchema.optional(),
+  }),
+]);
+export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
+
+export const StatusResponseSchema = z.object({
+  backend: ComponentStatusSchema,
+  provider: ProviderStatusSchema,
+  embedding: EmbeddingStatusSchema,
+  vectorIndex: ComponentStatusSchema,
+  /**
+   * I04-R4; Activity shows it (I03-T11). `recent`: the latest records, newest
+   * first. I04-T09 adds `scopePolicyDrops` (how many items the scope policy
+   * dropped) beside `recent`, with the table it counts.
+   */
+  invalidations: z.object({ recent: z.array(InvalidationSchema) }),
+});
+export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
 /** A code, never Provider text: a block reason, a Broker rejection. */
 const ReasonCode = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);

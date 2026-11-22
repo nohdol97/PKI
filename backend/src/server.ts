@@ -15,6 +15,7 @@ import {
   type ProviderId,
   type ProviderInfo,
   type ProviderList,
+  type ProviderStatus,
   type PrepareSource,
   type RouteName,
   type RouteRequest,
@@ -116,6 +117,8 @@ export interface ServerOptions {
    * releaseHeldJobs); default none.
    */
   onRunConditionsChanged?: () => void;
+  /** Milliseconds now, for the Provider check's reuse window (tests); default Date.now. */
+  now?: () => number;
 }
 
 export interface RunningServer {
@@ -166,6 +169,7 @@ async function connectionTest(
   calls: ServerOptions["calls"],
   db: SqlDriver,
   acknowledgeUnverified: boolean,
+  check: (provider: LLMProvider) => Promise<ProviderCheck>,
 ): Promise<ConnectionTestResult> {
   if (!calls) return { outcome: "blocked", reason: "broker-not-bound", isolation: null };
   const result = await calls.issuer.during(
@@ -191,10 +195,10 @@ async function connectionTest(
   // R5: a default CLI that is missing or logged out gets its install or login guidance
   const provider = selectProvider(calls.providers ?? [], readDefaultProvider(db));
   if (provider?.transport !== "cli") return answer;
-  const check = await checkProvider(provider);
+  const found = await check(provider);
   const guide =
-    !check.installed || check.authentication === "unauthenticated" || check.problem !== undefined;
-  return guide ? { ...answer, providerCheck: check } : answer;
+    !found.installed || found.authentication === "unauthenticated" || found.problem !== undefined;
+  return guide ? { ...answer, providerCheck: found } : answer;
 }
 
 function providerList(options: ServerOptions): ProviderList {
@@ -218,9 +222,10 @@ function setDefaultProvider(
 }
 
 /**
- * The two queries that need no decision (V01-R9), for each bound Provider, at the
- * user's request only. A Provider that fails to answer is reported not installed;
- * its message stays out.
+ * The two queries that need no decision (V01-R9) for one Provider. Run when the user
+ * asks ("Provider 확인", a connection test's guidance) and, through the reuse window
+ * of `providerChecks`, for the status Home reads (T16). A Provider that fails to
+ * answer is reported not installed; its message stays out.
  */
 async function checkProvider(provider: LLMProvider): Promise<ProviderCheck> {
   const info: ProviderInfo = await Promise.resolve()
@@ -239,6 +244,98 @@ async function checkProvider(provider: LLMProvider): Promise<ProviderCheck> {
     authentication,
     ...(info.problem === "cli-runs-root-refused" ? { problem: info.problem } : {}),
   };
+}
+
+/** How long a check's result answers the status without running the queries again (T16, provisional). */
+export const PROVIDER_CHECK_REUSE_MS = 60_000;
+
+/**
+ * The Provider checks a server shares (T16 handoff 2): `fresh` runs the two queries,
+ * and requests that come while they run share them (one set of processes per
+ * Provider); `recent` answers a CLI with its last result for PROVIDER_CHECK_REUSE_MS,
+ * so Home's status reads, its 1 s polling while a model prepares included, spawn
+ * nothing in between. An HTTP Provider's check reads settings and key presence only
+ * (no process, no network), so it is always read fresh: an endpoint or key the user
+ * just saved shows at once. The user's own check refreshes the result, and `forget`
+ * (a new default, saved provider settings) drops what is kept.
+ */
+function providerChecks(now: () => number) {
+  const running = new Map<ProviderId, Promise<ProviderCheck>>();
+  const last = new Map<ProviderId, { at: number; check: ProviderCheck }>();
+  const fresh = (provider: LLMProvider) => {
+    let check = running.get(provider.id);
+    if (!check) {
+      check = checkProvider(provider)
+        .then((found) => (last.set(provider.id, { at: now(), check: found }), found))
+        .finally(() => running.delete(provider.id));
+      running.set(provider.id, check);
+    }
+    return check;
+  };
+  const recent = (provider: LLMProvider) => {
+    if (provider.transport !== "cli") return fresh(provider);
+    const kept = last.get(provider.id);
+    return kept && now() - kept.at < PROVIDER_CHECK_REUSE_MS
+      ? Promise.resolve(kept.check)
+      : fresh(provider);
+  };
+  return { fresh, recent, forget: () => last.clear() };
+}
+
+/**
+ * Whether the user's default Provider could take a call now (V01-R5, T16), for
+ * Home: none chosen, its two queries (a CLI's version and login status, an HTTP
+ * Provider's settings and key presence; nothing goes over the network) find it
+ * missing or logged out, or the egress rules would stop a general document going
+ * to it. Only the default is checked: a blocked default is never covered by
+ * another Provider (R5), so the others' state is not what Home must show.
+ */
+async function providerStatus(
+  options: ServerOptions,
+  check: (provider: LLMProvider) => Promise<ProviderCheck>,
+): Promise<ProviderStatus> {
+  // one failing read degrades only this row, like the embedding and the index (R5)
+  try {
+    return await readProviderStatus(options, check);
+  } catch {
+    return { state: "unavailable", providerId: null, reason: "status-check-failed" };
+  }
+}
+
+async function readProviderStatus(
+  options: ServerOptions,
+  check: (provider: LLMProvider) => Promise<ProviderCheck>,
+): Promise<ProviderStatus> {
+  const provider = selectProvider(options.calls?.providers ?? [], readDefaultProvider(options.db));
+  if (!provider) return { state: "unavailable", providerId: null, reason: "no-provider" };
+  const found = await check(provider);
+  const cli = provider.transport === "cli";
+  const reason = !found.installed
+    ? cli
+      ? "cli-not-installed"
+      : "destination-unavailable"
+    : (found.problem ??
+      (found.authentication === "unauthenticated"
+        ? cli
+          ? "cli-not-logged-in"
+          : "api-key-missing"
+        : undefined));
+  if (reason !== undefined) {
+    return { state: "unavailable", providerId: provider.id, reason, check: found };
+  }
+  const decision = options.egress.decide({
+    providerId: provider.id,
+    taskKind: "extract",
+    classification: "general",
+  });
+  if (!decision.allowed) {
+    return { state: "unavailable", providerId: provider.id, reason: decision.reason };
+  }
+  // a CLI whose login cannot be read (Claude Code has no status command) may still
+  // work: ready, with the finding so Home guides like Settings does
+  return cli && found.authentication !== "authenticated"
+    ? { state: "ready", providerId: provider.id, check: found }
+    : { state: "ready", providerId: provider.id };
 }
 
 const STATUS_CHECK_FAILED: ComponentStatus = {
@@ -331,7 +428,6 @@ async function prepareEmbedding(
 
 function createHandlers(options: ServerOptions, preparations: Set<AbortController>): Handlers {
   const changed = () => options.onRunConditionsChanged?.();
-  let checking: Promise<RouteResponse<"checkProviders">> | undefined;
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -350,10 +446,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       },
     };
   };
+  const checks = providerChecks(options.now ?? Date.now);
   return {
     status: async () => ({
       backend: { state: "ready" },
-      provider: { state: "not-implemented" },
+      provider: await providerStatus(options, checks.recent),
       embedding: await embeddingState(options.embedder),
       vectorIndex: await vectorIndexState(options.vectorIndex),
       invalidations: {
@@ -398,6 +495,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       }
       writeSetting(options.db, OPENAI_BASE_URL_SETTING, baseUrl);
       writeSetting(options.db, OPENAI_MODEL_SETTING, openaiCompatible.model);
+      checks.forget();
       changed();
       return settings();
     },
@@ -416,7 +514,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       return revoked;
     },
     connectionTest: (input) =>
-      connectionTest(options.calls, options.db, input.acknowledgeUnverified),
+      connectionTest(options.calls, options.db, input.acknowledgeUnverified, checks.fresh),
     executionSettings: async () => ({ cliBackground: readCliBackground(options.db) }),
     setExecutionSettings: async ({ cliBackground }) => {
       writeSetting(options.db, CLI_BACKGROUND_SETTING, cliBackground ? "on" : "off");
@@ -426,16 +524,15 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     providers: async () => providerList(options),
     setDefaultProvider: async ({ providerId }) => {
       const set = setDefaultProvider(options, providerId);
+      checks.forget();
       if (!("error" in set)) changed(); // jobs held for "no-provider" are judged again
       return set;
     },
-    checkProviders: () => {
-      // requests that come while a check runs share it: one set of query processes
-      checking ??= Promise.all((options.calls?.providers ?? []).map(checkProvider))
-        .then((providers) => ({ providers }))
-        .finally(() => (checking = undefined));
-      return checking;
-    },
+    // requests that come while a check runs share it (one set of query processes per
+    // Provider, the status's too); the results refresh what the status reuses
+    checkProviders: async () => ({
+      providers: await Promise.all((options.calls?.providers ?? []).map(checks.fresh)),
+    }),
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
     // V02-R14: only active Insights, and a hidden one's evidence list is not-found. A source
     // opens by evidence id while its rows exist (until T08's purge deletes them).

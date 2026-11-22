@@ -6,6 +6,7 @@ import type {
   ConsentList,
   DataClassification,
   ImportJsonlResponse,
+  PrepareSource,
   ProviderCall,
   ProviderCheck,
   ProviderId,
@@ -21,7 +22,14 @@ import { deleteConfirmText, deletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
-import { componentText, embeddingText } from "./status-text.ts";
+import {
+  componentText,
+  DOWNLOAD_APPROVAL,
+  embeddingText,
+  LOCAL_PACK_HINT,
+  providerStatusText,
+  vectorIndexText,
+} from "./status-text.ts";
 
 const SCREENS = { home: "홈", sources: "원본", activity: "활동", settings: "설정" } as const;
 type Screen = keyof typeof SCREENS;
@@ -83,14 +91,22 @@ function Failure({ error }: { error: string | undefined }) {
 function statusRows(status: RouteResponse<"status">) {
   return [
     ["백엔드", componentText(status.backend)],
-    ["Provider", componentText(status.provider)],
+    ["Provider", providerStatusText(status.provider).text],
     ["Embedding", embeddingText(status.embedding)],
-    ["벡터 색인", componentText(status.vectorIndex)],
+    ["벡터 색인", vectorIndexText(status.vectorIndex)],
   ] as const;
 }
 
 function Home({ api }: { api: ApiClient }) {
-  const { data, error } = useRoute(api, "status");
+  const { data, error, reload } = useRoute(api, "status");
+  const preparing = data?.embedding.state === "preparing";
+  // a preparation runs in the backend; Home reads the state again until it ends
+  useEffect(() => {
+    if (!preparing) return;
+    const timer = setTimeout(reload, 1_000);
+    return () => clearTimeout(timer);
+  }, [preparing, data, reload]);
+  const guidance = data && providerStatusText(data.provider).guidance;
   return (
     <>
       <Insights api={api} />
@@ -107,6 +123,72 @@ function Home({ api }: { api: ApiClient }) {
             ))}
           </tbody>
         </table>
+      )}
+      {guidance && <p>{guidance}</p>}
+      {data && ["model-missing", "unavailable"].includes(data.embedding.state) && (
+        <PrepareModel api={api} onStarted={reload} />
+      )}
+    </>
+  );
+}
+
+/**
+ * V01-R14, T14 handoff 5: the user's approval that starts a model preparation,
+ * from a local pack folder or by the pinned download. Nothing else starts one;
+ * the download asks first and names where the files come from.
+ */
+function PrepareModel({ api, onStarted }: { api: ApiClient; onStarted: () => void }) {
+  const [path, setPath] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  const prepare = (source: PrepareSource) => {
+    setConfirming(false);
+    api("prepareEmbedding", { source }).then(
+      () => {
+        setFailure(undefined);
+        onStarted();
+      },
+      (e: unknown) => setFailure(message(e)),
+    );
+  };
+  const fromPack = (event: FormEvent) => {
+    event.preventDefault();
+    if (path.trim()) prepare({ kind: "local-pack", path: path.trim() });
+  };
+  return (
+    <>
+      <h2>Embedding 모델 준비</h2>
+      <p>
+        모델이 없어도 저장된 원본의 목록과 키워드 검색은 그대로 동작합니다. 모델은 아래에서 고른
+        방법으로만 준비합니다.
+      </p>
+      <Failure error={failure} />
+      <form onSubmit={fromPack}>
+        <p>{LOCAL_PACK_HINT}</p>
+        <input
+          type="text"
+          aria-label="로컬 팩 폴더"
+          maxLength={4096}
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+        />
+        <button type="submit">로컬 팩에서 준비</button>
+      </form>
+      {confirming ? (
+        <div role="alertdialog" aria-labelledby="download-title" aria-describedby="download-body">
+          <h3 id="download-title">모델 내려받기</h3>
+          <p id="download-body">{DOWNLOAD_APPROVAL}</p>
+          <button type="button" onClick={() => prepare({ kind: "download" })}>
+            내려받기 승인
+          </button>
+          <button type="button" onClick={() => setConfirming(false)}>
+            취소
+          </button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setConfirming(true)}>
+          모델 내려받기…
+        </button>
       )}
     </>
   );

@@ -18,6 +18,7 @@ export default defineConfig<{ target: "browser" | "electron" }>({
         "apps/web/e2e/screens.e2e.ts",
         "apps/web/e2e/provider-settings.e2e.ts",
         "apps/web/e2e/evidence.e2e.ts",
+        "apps/web/e2e/degraded.e2e.ts",
         "apps/desktop/e2e/**/*.e2e.{ts,tsx}",
       ],
       dependencies: ["build-web"],
