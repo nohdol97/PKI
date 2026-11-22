@@ -137,7 +137,7 @@ describe("bridge handlers", () => {
   });
 
   it("stores, checks and deletes a Connector credential name, answering without its value (I06-C15 ②③)", async () => {
-    const { bridge, stored, secrets } = handlers();
+    const { bridge, stored } = handlers();
     const name = `connector.${"0123456789abcdef".repeat(2)}.token`;
     const answers = [
       await bridge.setSecret(PAGE, [name, "sk-canary-bridge"]),
@@ -148,7 +148,6 @@ describe("bridge handlers", () => {
     expect(JSON.stringify(answers)).not.toContain("sk-canary-bridge");
     expect(stored.has(name)).toBe(false);
     // no function that reads a value back: the page's whole secret surface is these three
-    expect(Object.keys(secrets).sort()).toEqual(["delete", "has", "set"]);
     expect(
       Object.keys(bridge)
         .filter((k) => /secret/i.test(k))

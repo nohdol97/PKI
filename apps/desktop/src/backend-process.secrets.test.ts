@@ -2,8 +2,12 @@
 // R13): the value goes only to that child, only when asked for a read, only for the
 // names the backend may read (review B3), and never at start.
 import type { SecretRead } from "@pki/contracts";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { startBackendProcess, type BackendChild, type ForkBackend } from "./backend-process.ts";
+import { createSecretStore, type Cipher } from "./secret-store.ts";
 
 const CANARY = "sk-canary-process";
 const KEY_NAME = `openai-compatible.api-key.${"0".repeat(32)}`;
@@ -201,24 +205,27 @@ describe("backend secret requests, Connector credential names", () => {
   });
 
   it.each([
-    ["wrong prefix", `connectors.${"0".repeat(32)}.token`],
-    ["uppercase slot", `connector.${"0".repeat(32)}.Token`],
-    ["17-char slot", `connector.${"0".repeat(32)}.${"a".repeat(17)}`],
-    ["extra dot", `connector.${"0".repeat(32)}.to.ken`],
-    ["short hash", `connector.${"0".repeat(31)}.token`],
-    ["path-like", "connector.../../secrets"],
-    ["Provider-key-like without hash", "openai-compatible.api-key.zzzz"],
-    ["unrelated", "some-other-secret"],
-  ])("gives nothing for %s, in any mode, and never touches the store", async (_label, name) => {
-    for (const mode of ["read", "presence", "prune"] as const) {
-      const secrets = store({ state: "present", value: CANARY });
-      const answer = await ask(secrets, name, mode);
-      // names the request schema itself rejects get no answer at all; the rest "unavailable"
-      expect([UNAVAILABLE, "no answer"], `${name} ${mode}`).toContainEqual(answer);
-      expect(JSON.stringify(answer)).not.toContain(CANARY);
-      expect(secrets.calls).toEqual([]);
-    }
-  });
+    ["wrong prefix", `connectors.${"0".repeat(32)}.token`, UNAVAILABLE],
+    ["uppercase slot", `connector.${"0".repeat(32)}.Token`, "no answer"],
+    ["17-char slot", `connector.${"0".repeat(32)}.${"a".repeat(17)}`, UNAVAILABLE],
+    ["extra dot", `connector.${"0".repeat(32)}.to.ken`, UNAVAILABLE],
+    ["short hash", `connector.${"0".repeat(31)}.token`, UNAVAILABLE],
+    ["path-like", "connector.../../secrets", "no answer"],
+    ["Provider-key-like without hash", "openai-compatible.api-key.zzzz", UNAVAILABLE],
+    ["unrelated", "some-other-secret", UNAVAILABLE],
+  ])(
+    "gives nothing for %s, in any mode, and never touches the store",
+    async (_label, name, expected) => {
+      for (const mode of ["read", "presence", "prune"] as const) {
+        const secrets = store({ state: "present", value: CANARY });
+        const answer = await ask(secrets, name, mode);
+        // names the request schema itself rejects get no answer; the rest "unavailable"
+        expect(answer, `${name} ${mode}`).toEqual(expected);
+        expect(JSON.stringify(answer)).not.toContain(CANARY);
+        expect(secrets.calls).toEqual([]);
+      }
+    },
+  );
 
   it("with the OS protection off, answers `unavailable` to a presence check even for an empty slot, `missing` for a Provider key", async () => {
     const secrets = store({ state: "missing" }, false);
@@ -264,5 +271,63 @@ describe("backend secret requests, Connector credential names", () => {
       state: "missing",
     });
     expect(secrets.calls).toEqual([`prune ${KEY_NAME}`]);
+  });
+});
+
+describe("backend secret requests through the real store (I06-C1 ③⑤)", () => {
+  const PROVIDER_B = `openai-compatible.api-key.${"b".repeat(32)}`;
+  function real(usable: boolean) {
+    const dir = mkdtempSync(join(tmpdir(), "pki-secret-gate-"));
+    const file = join(dir, "secrets.json");
+    const cipher = (available: boolean): Cipher => ({
+      available: async () => available,
+      encrypt: async (text) => Buffer.from(text, "utf8").reverse(),
+      decrypt: async (data) => ({
+        text: Buffer.from(data).reverse().toString("utf8"),
+        reEncrypt: false,
+      }),
+    });
+    return {
+      dir,
+      file,
+      writer: createSecretStore({ file, cipher: cipher(true) }),
+      store: createSecretStore({ file, cipher: cipher(usable) }),
+    };
+  }
+
+  it("a prune that keeps a credential name deletes no Provider key and answers unavailable", async () => {
+    const { dir, file, writer, store } = real(true);
+    try {
+      await writer.set(KEY_NAME, "v-a");
+      await writer.set(PROVIDER_B, "v-b");
+      await writer.set(CONNECTOR_NAME, "v-c");
+      const child = fakeChild();
+      await start(child, store);
+      child.send({ type: "secret-request", id: 9, name: CONNECTOR_NAME, mode: "prune" });
+      await settle();
+      expect(child.posted.at(-1)).toEqual({ type: "secret", id: 9, state: "unavailable" });
+      expect(Object.keys(JSON.parse(readFileSync(file, "utf8")).secrets).sort()).toEqual(
+        [KEY_NAME, PROVIDER_B, CONNECTOR_NAME].sort(),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("without OS protection an empty credential slot is unavailable, a Provider key still missing", async () => {
+    const { dir, store } = real(false);
+    try {
+      const child = fakeChild();
+      await start(child, store);
+      child.send({ type: "secret-request", id: 1, name: CONNECTOR_NAME, mode: "presence" });
+      child.send({ type: "secret-request", id: 2, name: KEY_NAME, mode: "presence" });
+      await settle();
+      await settle();
+      const answers = child.posted.filter((m) => (m as { type?: string }).type === "secret");
+      expect(answers).toContainEqual({ type: "secret", id: 1, state: "unavailable" });
+      expect(answers).toContainEqual({ type: "secret", id: 2, state: "missing" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
