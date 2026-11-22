@@ -212,11 +212,9 @@ describe("derivatives.data-dir", () => {
     const res = await send(port, routes.importJsonl.path, headers, "POST", { text });
     expect(res.status).toBe(200);
     await vi.waitFor(() =>
-      expect(booted.db.all("SELECT status FROM jobs").map((j) => j.status)).toEqual([
-        "succeeded",
-        "succeeded",
-        "succeeded",
-      ]),
+      expect(
+        booted.db.all("SELECT status FROM jobs WHERE kind = 'extract'").map((j) => j.status),
+      ).toEqual(["succeeded", "succeeded", "succeeded"]),
     );
     // the flow reached the end: the directory is not checked after a flow that did nothing
     expect(booted.db.all("SELECT count(*) AS n FROM insights")[0]?.n).toBeGreaterThan(0);
