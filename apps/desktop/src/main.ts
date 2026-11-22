@@ -65,6 +65,8 @@ const forkUtility: ForkBackend = (entry, args, env) => {
 let backend: Supervisor | undefined;
 let window: BrowserWindow | undefined;
 let quitting = false;
+/** A quit was asked for (SIGTERM, the menu), whether or not start-up has finished. */
+let quitRequested = false;
 
 async function run() {
   await app.whenReady();
@@ -162,6 +164,7 @@ if (debugging) {
     if (window?.isMinimized()) window.restore();
     window?.focus();
   });
+  app.on("before-quit", () => (quitRequested = true));
   app.on("window-all-closed", () => app.quit());
   app.on("will-quit", (event) => {
     if (quitting || !backend) return;
@@ -173,6 +176,10 @@ if (debugging) {
     void backend.stop().finally(() => setImmediate(() => app.quit()));
   });
   run().catch((error: unknown) => {
+    // quit while starting (SIGTERM): the backend or the window's load is cut short, not
+    // failed, and a modal error box would hold the quit until someone closes it
+    // (V01-T15 artifact.shell)
+    if (quitRequested || window?.isDestroyed()) return;
     console.error(`PKI shell failed to start: ${error instanceof Error ? error.message : error}`);
     dialog.showErrorBox("PKI", "앱을 시작하지 못했습니다.");
     app.exit(1);

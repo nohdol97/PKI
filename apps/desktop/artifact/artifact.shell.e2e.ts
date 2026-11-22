@@ -94,3 +94,36 @@ test("starts its backend on the user's data directory and ignores the switches",
   expect(existsSync(switched)).toBe(false);
   expect(existsSync(join(dir, "switch-user"))).toBe(false);
 });
+
+/** Resolves as soon as `path` exists: a quit then lands while the window still loads. */
+function appears(path: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolveFound) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (existsSync(path) || Date.now() - started > timeoutMs) {
+        clearInterval(timer);
+        resolveFound(existsSync(path));
+      }
+    }, 5);
+  });
+}
+
+test("quitting while it starts ends the app, with no error box holding it", async () => {
+  test.setTimeout(120_000);
+  // a few starts: the quit must land before the window has loaded at least once
+  for (let attempt = 0; attempt < 3; attempt++) {
+    rmSync(join(dir, "home"), { recursive: true, force: true });
+    rmSync(join(dir, "chromium"), { recursive: true, force: true });
+    const app = launch([]);
+    expect(await appears(join(app.dataDir, "pki.sqlite"), 30_000)).toBe(true);
+    app.child.kill("SIGTERM");
+    const ended = await Promise.race([
+      app.exited.then(() => true),
+      new Promise<false>((r) => setTimeout(() => r(false), 10_000)),
+    ]);
+    if (!ended) app.child.kill("SIGKILL");
+    await app.exited;
+    expect(ended, app.stderr()).toBe(true);
+    expect(app.stderr()).not.toContain("failed to start");
+  }
+});
