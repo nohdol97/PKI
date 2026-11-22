@@ -99,6 +99,12 @@ function namedPaths(text: string): string[] {
   ];
 }
 
+/** True when `text` holds `token` as a whole identifier: `SCOPE_POLICY` is not found inside `PKI_SCOPE_POLICY`. */
+function namesToken(text: string, token: string): boolean {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`).test(text);
+}
+
 /**
  * What the I04 items rely on in the code, by name: the doc must name it, and the file must hold it.
  * `item` says where the doc names it.
@@ -128,12 +134,20 @@ const NAMED_FACTS = [
     file: "storage/src/derivatives.ts",
     holds: "export interface ScopePolicy {",
   },
-  {
-    item: "S21",
-    token: "read-gate.ts",
-    file: "backend/src/read-gate.ts",
-    holds: "visible",
-  },
+  { item: "S21", token: "compare", file: "storage/src/derivatives.ts", holds: "compare(a: AccessScope," },
+  { item: "S21", token: "strictest", file: "storage/src/derivatives.ts", holds: "strictest(scopes:" },
+  { item: "S21", token: "combinable", file: "storage/src/derivatives.ts", holds: "combinable(scopes:" },
+  { item: "S21", token: "allows", file: "storage/src/derivatives.ts", holds: "allows(scopes:" },
+  { item: "S21", token: "createReadGate", file: "backend/src/read-gate.ts", holds: "export function createReadGate(" },
+  { item: "S21", token: "scope_policy_drops", file: "storage/src/migrations.ts", holds: "CREATE TABLE scope_policy_drops" },
+  { item: "S21", token: "scopePolicyDrops", file: "apps/web/src/job-text.ts", holds: "scopePolicyDrops: number" },
+  { item: "S21", token: "invalidationText", file: "apps/web/src/job-text.ts", holds: "export function invalidationText(" },
+  { item: "S21", token: "grade", file: "providers/src/broker.ts", holds: "function grade(" },
+  { item: "S22", token: "extraScanDirs", file: "verification/v02-site-flow/delete_scenario.py", holds: 'cfg.get("extraScanDirs"' },
+  { item: "S22", token: "userDataDir", file: "verification/v02-site-flow/delete_scenario.py", holds: 'cfg.get("userDataDir")' },
+  { item: "S22", token: "fts5vocab", file: "verification/v02-site-flow/delete_scenario.py", holds: "USING fts5vocab(" },
+  { item: "S22", token: "pki-desktop", file: "apps/desktop/build/build.ts", holds: 'name: "pki-desktop"' },
+  { item: "S22", token: "identity_key", file: "storage/src/migrations.ts", holds: "CREATE TABLE identity_key" },
   {
     item: "S22",
     token: "delete-scenario",
@@ -214,7 +228,7 @@ describe("docs.site-setup (I04): what the items name exists", () => {
   });
 
   it.each(NAMED_FACTS)("$item names $token and $file holds it", (fact) => {
-    expect(fact.item === "S21" ? s21 : s22).toContain(fact.token);
+    expect(namesToken(fact.item === "S21" ? s21 : s22, fact.token)).toBe(true);
     expect(readFileSync(resolve(repoRoot, fact.file), "utf8")).toContain(fact.holds);
   });
 
@@ -223,9 +237,23 @@ describe("docs.site-setup (I04): what the items name exists", () => {
     expect(row).toContain("`SCOPE_POLICY`");
   });
 
-  it("fails when a named constant is renamed in the doc", () => {
-    const mutated = siteText.replaceAll("SCOPE_POLICY`", "SCOPE_POLICY_RENAMED`");
-    expect(itemText(mutated, "S21")).not.toContain("`SCOPE_POLICY`");
+  it("a token is matched as a whole identifier, never inside a longer one", () => {
+    expect(namesToken("`PKI_SCOPE_POLICY` only", "SCOPE_POLICY")).toBe(false);
+    expect(namesToken("`SCOPE_POLICY`", "SCOPE_POLICY")).toBe(true);
+    expect(namesToken("SCOPE_POLICY_X", "SCOPE_POLICY")).toBe(false);
+  });
+
+  it("fails when a named constant is renamed inside S21 (PKI_SCOPE_POLICY stays)", () => {
+    const mutated = itemText(siteText, "S21").replace(
+      /(?<![A-Za-z0-9_])SCOPE_POLICY(?![A-Za-z0-9_])/g,
+      "SCOPE_POLICY_RENAMED",
+    );
+    expect(itemText(siteText, "S21")).toContain("PKI_SCOPE_POLICY");
+    expect(namesToken(mutated, "SCOPE_POLICY")).toBe(false);
+  });
+
+  it("fails when the build-time row loses the constant", () => {
+    const mutated = siteText.replaceAll("`SCOPE_POLICY`", "`SCOPE_POLICY_RENAMED`");
     expect(buildTableRow(mutated)).not.toContain("`SCOPE_POLICY`");
   });
 

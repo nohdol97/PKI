@@ -7,6 +7,7 @@ synthetic canaries, then (after the operator closed the app) counts the invalida
 file under the data directory for the canaries.
 """
 import json
+import ntpath
 import os
 import random
 import sqlite3
@@ -22,7 +23,14 @@ COLLECTOR_KINDS = ("site-mail", "site-messenger", "site-wiki")
 # the operator attests these; the runner cannot see the screens or the site's own projection jobs
 OBSERVATIONS = ("launched-installed", "source-deleted-event", "access-revoked-event", "reads-gone", "projections-clean")
 ROLES = ("deleted", "revoked", "kept")  # the source deleted at its origin, the one whose access was lost, the survivor
-EXPECTED_EVENTS = {"source-deleted": 1, "access-revoked": 1}
+# every kind of deleting event the invalidation table records: the two the scenario causes, and the screen's own
+# deletion, which must not have happened (a user deletion would put the same text out of the files for another reason)
+EXPECTED_EVENTS = {"source-deleted": 1, "access-revoked": 1, "user-deleted": 0}
+CANARY_LEN = 24
+# FTS5 stores a term as a SUFFIX when the term before it shares a prefix, so the whole word can be absent from the file
+# while its tail is there. The tail is what is searched: long and random enough to be unique, short enough to survive a
+# shared prefix of CANARY_LEN - TAIL_LEN characters.
+TAIL_LEN = 12
 CHUNK = 1 << 20
 
 
@@ -43,6 +51,10 @@ def validate_config(cfg):
     collector = cfg.get("collector")
     if not (isinstance(collector, dict) and collector.get("kind") in COLLECTOR_KINDS):
         raise ConfigError("config needs collector.kind: one of {}".format(", ".join(COLLECTOR_KINDS)))
+    user_data = cfg.get("userDataDir")
+    if not (isinstance(user_data, str) and _is_abs(ntpath.expandvars(user_data))):
+        raise ConfigError("config needs userDataDir: the absolute folder of the Electron shell's userData (Chromium storage), "
+                          "which lies outside the data folder (site-setup S22)")
     extra = cfg.get("extraScanDirs", [])
     if not (isinstance(extra, list) and all(isinstance(d, str) and _is_abs(d) for d in extra)):
         raise ConfigError("extraScanDirs must be a list of absolute Windows folder paths")
@@ -50,7 +62,6 @@ def validate_config(cfg):
 
 
 def _is_abs(path):
-    import ntpath
     return ntpath.isabs(path)
 
 
@@ -59,7 +70,8 @@ def new_canaries():
     prefix once, so a shared prefix would let one canary's presence hide another's absence."""
     firsts = random.SystemRandom().sample(string.ascii_lowercase, len(ROLES))
     rng = random.SystemRandom()
-    return {role: first + "".join(rng.choice(string.ascii_lowercase) for _ in range(13)) for role, first in zip(ROLES, firsts)}
+    return {role: first + "".join(rng.choice(string.ascii_lowercase) for _ in range(CANARY_LEN - 1))
+            for role, first in zip(ROLES, firsts)}
 
 
 def prepare(db_path, out_dir):
@@ -83,8 +95,10 @@ def load_state(out_dir):
 
 
 def _forms(canary):
-    """The byte forms a store keeps: as written, lowercased (an index keeps the lowercased word), UTF-16LE."""
-    return {w.encode("utf-8") for w in (canary, canary.lower())} | {canary.encode("utf-16-le"), canary.lower().encode("utf-16-le")}
+    """The byte forms searched, all of the LOWERCASED tail of the word (the window is lowercased too, so a store that
+    capitalises or folds case is found): ASCII, UTF-16LE and UTF-16BE."""
+    tail = canary.lower()[-TAIL_LEN:]
+    return {tail.encode("ascii"), tail.encode("utf-16-le"), tail.encode("utf-16-be")}
 
 
 def _file_has(path, forms, overlap):
@@ -94,32 +108,44 @@ def _file_has(path, forms, overlap):
             chunk = fh.read(CHUNK)
             if not chunk:
                 return False
-            window = tail + chunk
+            window = (tail + chunk).lower()  # bytes.lower is ASCII-only: it leaves the zero bytes of UTF-16 alone
             if any(f in window for f in forms):
                 return True
-            tail = window[-overlap:] if overlap else b""
+            tail = (tail + chunk)[-overlap:] if overlap else b""
 
 
 def scan_canaries(dirs, canaries):
-    """{role: 1 if the canary is in any file under any folder, else 0}. Every file is read, whatever its name: the
-    database, -journal/-wal/-shm, the lock-free browser stores of the Electron shell, a projection's own files."""
+    """(found, unreadable): `found` is {role: 1 if the canary's tail is in any file under any folder, else 0}; `unreadable`
+    is how many folders or files could not be read (a count, never a name: the verdict cannot be PASS while it is not 0).
+    Every file is read, whatever its name: the database, -journal/-wal/-shm, a projection's own files, the Chromium
+    storage of the userData folder."""
     forms = {role: _forms(c) for role, c in canaries.items()}
     overlap = max(len(f) for fs in forms.values() for f in fs) - 1
     found = {role: 0 for role in canaries}
+    unreadable = [0]
+
+    def walk_error(_exc):
+        unreadable[0] += 1
+
     for root in dirs:
         if not os.path.isdir(root):
             raise ConfigError("scan folder not found")
-        for base, _dirs, files in os.walk(root):
+        for base, _dirs, files in os.walk(root, onerror=walk_error):
             for name in sorted(files):
                 path = os.path.join(base, name)
                 try:
-                    pending = [role for role in canaries if not found[role]]
-                    for role in pending:
-                        if _file_has(path, forms[role], overlap):
+                    for role in canaries:
+                        if not found[role] and _file_has(path, forms[role], overlap):
                             found[role] = 1
                 except OSError:
-                    raise ConfigError("a file in the scan folder could not be read (close the app and its tray icon)")
-    return found
+                    unreadable[0] += 1
+    return found, unreadable[0]
+
+
+def scan_dirs(cfg, db_path):
+    """The folders the scan reads: the data folder (the DB's), the Electron userData folder (Chromium storage, OUTSIDE the
+    data folder) and the operator's extra folders. %VAR% in the config paths is expanded."""
+    return [ntpath.dirname(db_path), ntpath.expandvars(cfg["userDataDir"])] + [ntpath.expandvars(d) for d in cfg.get("extraScanDirs", [])]
 
 
 def open_ro(db_path):
@@ -139,17 +165,32 @@ def read_delete_counts(db_path):
         db.close()
 
 
-def judge(counts, found, observed):
-    """FAIL: the wrong number of deleting events, or a deleted source's canary is still in a file. INCONCLUSIVE: the
-    survivor's canary is not found (a scan that cannot see a canary proves nothing) or an attestation is missing."""
-    if counts != EXPECTED_EVENTS or found["deleted"] or found["revoked"]:
+def read_index_terms(db_path, canaries):
+    """{role: 1 if the canary is a term of the keyword index}, by `fts5vocab` on a read-only connection (a temp vocabulary
+    table: nothing is written to the file). The byte scan cannot prove the index clean on its own, since a term
+    can be stored as a suffix; this asks the index what terms it holds. Needs the product's `keyword_index` table (schema
+    v1 on) and an SQLite with FTS5 (the product's own better-sqlite3 build has it; Python's sqlite3 usually does)."""
+    db = open_ro(db_path)
+    try:
+        db.execute("CREATE VIRTUAL TABLE temp.pki_canary_vocab USING fts5vocab(main, keyword_index, 'row')")
+        return {role: int(db.execute("SELECT count(*) FROM temp.pki_canary_vocab WHERE term = ?", (c.lower(),)).fetchone()[0] > 0)
+                for role, c in canaries.items()}
+    finally:
+        db.close()
+
+
+def judge(counts, found, observed, index, unreadable):
+    """FAIL: the deleting events are not exactly one of each kind (and no user deletion), or a deleted source's canary is
+    still in a file or in the keyword index. INCONCLUSIVE: some path could not be read, the survivor's canary is not found
+    in the files AND in the index (a scan that cannot see a canary proves nothing), or an attestation is missing."""
+    if counts != EXPECTED_EVENTS or found["deleted"] or found["revoked"] or index["deleted"] or index["revoked"]:
         return "FAIL"
-    if not found["kept"] or set(OBSERVATIONS) - set(observed):
+    if unreadable or not found["kept"] or not index["kept"] or set(OBSERVATIONS) - set(observed):
         return "INCONCLUSIVE"
     return "PASS"
 
 
-def build_record(cfg, app_version, counts, found, verdict, observed, started_at, commit=None):
+def build_record(cfg, app_version, counts, found, verdict, observed, started_at, index, unreadable, commit=None):
     import platform as platform_module
     u = platform_module.uname()
     return {
@@ -157,6 +198,8 @@ def build_record(cfg, app_version, counts, found, verdict, observed, started_at,
         "verdict": verdict, "os": " ".join(x for x in (u.system, u.release, u.version, u.machine) if x),
         "appVersion": app_version, "collectorKind": cfg["collector"]["kind"], "deletedByKind": dict(counts),
         "canariesFound": found["deleted"] + found["revoked"], "controlCanaryFound": bool(found["kept"]),
+        "indexCanariesFound": index["deleted"] + index["revoked"], "controlCanaryInIndex": bool(index["kept"]),
+        "unreadablePaths": unreadable,
         "observed": [w for w in OBSERVATIONS if w in observed],
         "commit": commit if commit and rr.COMMIT_RE.match(commit) else "unknown",
         "startedAt": started_at, "finishedAt": rr.now_iso(),
@@ -170,6 +213,9 @@ def write_results(record, verdict, observed, out_dir, literals):
     facts = {"collector_kind": record["collectorKind"], "app_version": results.normalize_version(record["appVersion"])[0],
              "deleted_source_deleted": record["deletedByKind"]["source-deleted"],
              "deleted_access_revoked": record["deletedByKind"]["access-revoked"],
+             "deleted_user_deleted": record["deletedByKind"]["user-deleted"],
+             "index_canaries_found": record["indexCanariesFound"], "control_canary_in_index": record["controlCanaryInIndex"],
+             "unreadable_paths": record["unreadablePaths"],
              "canaries_found": record["canariesFound"], "control_canary_found": record["controlCanaryFound"],
              "observed": [w for w in OBSERVATIONS if w in observed],
              "kit_commit": record["commit"][:12] if record["commit"] != "unknown" else "unknown"}

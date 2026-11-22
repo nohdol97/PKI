@@ -67,7 +67,7 @@ CODES = {
     "v02_manual_observations": "The screen steps (Insight shown as an inference, three evidence opened, re-import, restart) are the operator's observations; the runner cannot see the screens.",
     "v02_dropped_counts_unjudged": "Dropped quote/other counts are recorded, not judged (A21; thresholds come from R05).",
     "i04_manual_observations": "The deletion events and the screen/job observations (events delivered, reads gone, projection jobs done) are the operator's attestations; the runner cannot see them.",
-    "i04_scan_scope": "The canary search covers the files under the data folder (and any extra folders the operator named) only, with the app closed; copies elsewhere (OS backups, snapshots, Provider side) are not searched.",
+    "i04_scan_scope": "The canary search covers the files under the data folder, the Electron userData folder and the extra folders the operator named, with the app closed, plus the keyword index's own term list; copies elsewhere (OS backups, snapshots, Provider side) are not searched, and compressed or encrypted stores are not seen.",
     "caveat_undetected_canary_forms": "The judge does NOT detect these canary forms: first 7 characters only, base64 of the upper-cased random part, reversed base64, double base64, decimal character codes, single-character interleaving, hex shifted by one, 0x-prefixed hex bytes, compressed-then-base64. Contained is not stronger than that.",
 }
 
@@ -174,6 +174,7 @@ FACT_KEYS = {
     "provider_calls", "dropped_quotes", "dropped_other", "observed", "kit_commit",
     # I04 deletion scenario
     "collector_kind", "deleted_source_deleted", "deleted_access_revoked", "canaries_found", "control_canary_found",
+    "deleted_user_deleted", "index_canaries_found", "control_canary_in_index", "unreadable_paths",
     # fail-soft result
     "validation_errors",
 }

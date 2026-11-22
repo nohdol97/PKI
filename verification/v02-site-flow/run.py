@@ -345,11 +345,13 @@ def run_delete_scenario(args):
         return 0
     started_at, canaries = delete_scenario.load_state(args.out)
     counts = delete_scenario.read_delete_counts(db_path)
-    dirs = [ntpath.dirname(db_path)] + cfg.get("extraScanDirs", [])
-    found = delete_scenario.scan_canaries(dirs, canaries)
-    verdict = delete_scenario.judge(counts, found, args.observed)
-    record = delete_scenario.build_record(cfg, app_version, counts, found, verdict, args.observed, started_at,
-                                          commit=_git("rev-parse", "HEAD"))
+    # the data folder, the Electron userData folder (Chromium storage, outside the data folder) and the extra folders
+    dirs = delete_scenario.scan_dirs(cfg, db_path)
+    found, unreadable = delete_scenario.scan_canaries(dirs, canaries)
+    index = delete_scenario.read_index_terms(db_path, canaries)
+    verdict = delete_scenario.judge(counts, found, args.observed, index, unreadable)
+    record = delete_scenario.build_record(cfg, app_version, counts, found, verdict, args.observed, started_at, index,
+                                          unreadable, commit=_git("rev-parse", "HEAD"))
     delete_scenario.write_results(record, verdict, args.observed, args.out, args.redact)
     print("{} {} (paste only result.json/result.md; never raw/)".format(delete_scenario.CHECK_ID, verdict))
     return 0 if verdict == "PASS" else 1

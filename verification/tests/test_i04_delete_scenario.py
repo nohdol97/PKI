@@ -26,6 +26,11 @@ CANARIES = {"deleted": "qlxhvmtrawbkcn", "revoked": "wgdzpyfjsuoeai", "kept": "z
 ALL_OBSERVED = list(ds.OBSERVATIONS)
 
 
+def read_bytes(path):
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
 def read(path):
     with open(path, encoding="utf-8") as fh:
         return fh.read()
@@ -38,7 +43,7 @@ def run_cli(*args):
 
 def config(**over):
     cfg = {"productName": "PKI", "installedExe": "C:\\Users\\u\\AppData\\Local\\Programs\\PKI\\PKI.exe",
-           "collector": {"kind": "site-mail"}}
+           "collector": {"kind": "site-mail"}, "userDataDir": "C:\\Users\\u\\AppData\\Roaming\\pki-desktop"}
     cfg.update(over)
     return cfg
 
@@ -122,10 +127,27 @@ class DeleteConfig(unittest.TestCase):
         with self.assertRaises(site.ConfigError):
             ds.validate_config({"productName": "PKI", "installedExe": "C:\\x.exe"})
 
+    def test_the_electron_user_data_folder_is_mandatory(self):
+        """Chromium storage lives outside the data folder (roaming %APPDATA%), so the scan must be told where."""
+        cfg = config()
+        del cfg["userDataDir"]
+        with self.assertRaises(site.ConfigError):
+            ds.validate_config(cfg)
+        for bad in ("", "relative\\dir", 3):
+            with self.assertRaises(site.ConfigError, msg=repr(bad)):
+                ds.validate_config(config(userDataDir=bad))
+
     def test_extra_scan_dirs_must_be_absolute_windows_paths(self):
         for bad in (["relative\\dir"], "D:\\engine", [3]):
             with self.assertRaises(site.ConfigError, msg=repr(bad)):
                 ds.validate_config(config(extraScanDirs=bad))
+
+
+class ScanDirs(unittest.TestCase):
+    def test_the_user_data_folder_is_scanned_besides_the_data_folder_and_the_extras(self):
+        cfg = config(extraScanDirs=["D:\\engine"])
+        dirs = ds.scan_dirs(cfg, "C:\\Users\\u\\AppData\\Local\\PKI\\pki.sqlite")
+        self.assertEqual(dirs, ["C:\\Users\\u\\AppData\\Local\\PKI", "C:\\Users\\u\\AppData\\Roaming\\pki-desktop", "D:\\engine"])
 
 
 class CanaryScan(unittest.TestCase):
@@ -138,7 +160,7 @@ class CanaryScan(unittest.TestCase):
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "wb") as fh:
                     fh.write(data)
-            return ds.scan_canaries([d], canaries)
+            return ds.scan_canaries([d], canaries)[0]
 
     def test_nothing_found_in_a_clean_folder(self):
         found = self.scan({"pki.sqlite": b"nothing here", "logs/app.log": b"x"})
@@ -149,15 +171,30 @@ class CanaryScan(unittest.TestCase):
         self.assertEqual(found, {"deleted": 0, "revoked": 1, "kept": 0})
 
     def test_every_file_kind_is_read_including_journal_and_nested(self):
-        for rel in ("pki.sqlite-wal", "pki.sqlite-journal", "pki.sqlite-shm", "Local Storage/leveldb/000003.log", "a/b/c/d.bin"):
+        for rel in ("pki.sqlite-wal", "pki.sqlite-journal", "pki.sqlite-shm", "keyword.idx", "a/b/c/d.bin"):
             found = self.scan({rel: CANARIES["deleted"].encode()})
             self.assertEqual(found["deleted"], 1, rel)
 
-    def test_the_lowercased_and_the_utf16_forms_are_found(self):
-        upper = {k: v.upper() for k, v in CANARIES.items()}
-        self.assertEqual(self.scan({"i": CANARIES["deleted"].upper().encode()}, upper)["deleted"], 1)  # as written
-        self.assertEqual(self.scan({"i": upper["deleted"].lower().encode()}, upper)["deleted"], 1)  # lowercased by an index
-        self.assertEqual(self.scan({"i": CANARIES["deleted"].encode("utf-16-le")})["deleted"], 1)
+    def test_case_and_utf16_forms_are_found(self):
+        word = CANARIES["deleted"]
+        forms = {
+            "as written": word.encode(),
+            "capitalised": word.capitalize().encode(),
+            "upper": word.upper().encode(),
+            "utf-16le": word.encode("utf-16-le"),
+            "utf-16be": word.encode("utf-16-be"),
+            "utf-16le upper": word.upper().encode("utf-16-le"),
+        }
+        for name, data in forms.items():
+            self.assertEqual(self.scan({"i": b"x" + data + b"y"})["deleted"], 1, name)
+
+    def test_only_the_tail_of_the_word_is_stored_when_a_neighbour_shares_a_prefix(self):
+        """FTS5 prefix compression: the file holds a suffix of the term, never the whole word."""
+        tail = CANARIES["deleted"][-ds.TAIL_LEN:]
+        self.assertNotIn(CANARIES["deleted"], tail)
+        self.assertEqual(self.scan({"i": b"..." + tail.encode() + b"..."})["deleted"], 1)
+        shorter = CANARIES["deleted"][-(ds.TAIL_LEN - 1):]
+        self.assertEqual(self.scan({"i": shorter.encode()})["deleted"], 0)  # the tail is the unit searched
 
     def test_a_canary_split_across_the_read_chunks_is_still_found(self):
         pad = b"x" * (ds.CHUNK - 5)
@@ -168,8 +205,28 @@ class CanaryScan(unittest.TestCase):
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
             with open(os.path.join(b, "engine.idx"), "wb") as fh:
                 fh.write(CANARIES["revoked"].encode())
-            found = ds.scan_canaries([a, b], CANARIES)
+            found, _unreadable = ds.scan_canaries([a, b], CANARIES)
         self.assertEqual(found["revoked"], 1)
+
+    @unittest.skipIf(sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0), "needs POSIX permissions and a non-root user")
+    def test_an_unreadable_folder_or_file_is_counted_not_skipped(self):
+        with tempfile.TemporaryDirectory() as d:
+            locked = os.path.join(d, "locked")
+            os.makedirs(locked)
+            with open(os.path.join(locked, "x.db"), "wb") as fh:
+                fh.write(CANARIES["deleted"].encode())
+            with open(os.path.join(d, "kept.db"), "wb") as fh:
+                fh.write(CANARIES["kept"].encode())
+            with open(os.path.join(d, "secret.db"), "wb") as fh:
+                fh.write(b"x")
+            os.chmod(locked, 0)
+            os.chmod(os.path.join(d, "secret.db"), 0)
+            try:
+                found, unreadable = ds.scan_canaries([d], CANARIES)
+            finally:
+                os.chmod(locked, 0o700)
+            self.assertEqual(found, {"deleted": 0, "revoked": 0, "kept": 1})  # the locked folder hid the canary
+            self.assertEqual(unreadable, 2)  # the folder and the file, counted
 
     def test_a_missing_folder_is_an_error_not_a_clean_result(self):
         with self.assertRaises(site.ConfigError):
@@ -185,10 +242,10 @@ class Counts(unittest.TestCase):
 
     def test_counts_by_kind_and_ignores_other_kinds(self):
         got = self.counts(("source-deleted", "access-revoked", "access-revoked", "new-version", "user-deleted"))
-        self.assertEqual(got, {"source-deleted": 1, "access-revoked": 2})
+        self.assertEqual(got, {"source-deleted": 1, "access-revoked": 2, "user-deleted": 1})
 
     def test_missing_kinds_count_zero(self):
-        self.assertEqual(self.counts(()), {"source-deleted": 0, "access-revoked": 0})
+        self.assertEqual(self.counts(()), {"source-deleted": 0, "access-revoked": 0, "user-deleted": 0})
 
     def test_the_database_is_opened_read_only(self):
         with tempfile.TemporaryDirectory() as d:
@@ -200,32 +257,51 @@ class Counts(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(d)), ["pki.sqlite"])
 
 
-GOOD_COUNTS = {"source-deleted": 1, "access-revoked": 1}
+GOOD_COUNTS = {"source-deleted": 1, "access-revoked": 1, "user-deleted": 0}
 NONE_FOUND = {"deleted": 0, "revoked": 0, "kept": 1}
+CLEAN_INDEX = {"deleted": 0, "revoked": 0, "kept": 1}
+
+
+def verdict(counts=GOOD_COUNTS, found=NONE_FOUND, observed=ALL_OBSERVED, index=CLEAN_INDEX, unreadable=0):
+    return ds.judge(counts, found, observed, index, unreadable)
 
 
 class Judge(unittest.TestCase):
     def test_pass_needs_every_part(self):
-        self.assertEqual(ds.judge(GOOD_COUNTS, NONE_FOUND, ALL_OBSERVED), "PASS")
+        self.assertEqual(verdict(), "PASS")
 
     def test_a_remaining_deleted_canary_fails_either_one(self):
         for key in ("deleted", "revoked"):
-            self.assertEqual(ds.judge(GOOD_COUNTS, dict(NONE_FOUND, **{key: 1}), ALL_OBSERVED), "FAIL", key)
+            self.assertEqual(verdict(found=dict(NONE_FOUND, **{key: 1})), "FAIL", key)
 
-    def test_wrong_event_counts_fail(self):
-        for counts in ({"source-deleted": 0, "access-revoked": 1}, {"source-deleted": 1, "access-revoked": 0},
-                       {"source-deleted": 2, "access-revoked": 1}, {"source-deleted": 1, "access-revoked": 2}):
-            self.assertEqual(ds.judge(counts, NONE_FOUND, ALL_OBSERVED), "FAIL", counts)
+    def test_a_deleted_canary_left_in_the_keyword_index_fails_either_one(self):
+        for key in ("deleted", "revoked"):
+            self.assertEqual(verdict(index=dict(CLEAN_INDEX, **{key: 1})), "FAIL", key)
+
+    def test_wrong_event_counts_fail_including_a_user_deletion(self):
+        for counts in ({"source-deleted": 0, "access-revoked": 1, "user-deleted": 0},
+                       {"source-deleted": 1, "access-revoked": 0, "user-deleted": 0},
+                       {"source-deleted": 2, "access-revoked": 1, "user-deleted": 0},
+                       {"source-deleted": 1, "access-revoked": 2, "user-deleted": 0},
+                       {"source-deleted": 1, "access-revoked": 1, "user-deleted": 1}):
+            self.assertEqual(verdict(counts=counts), "FAIL", counts)
 
     def test_a_scan_that_cannot_see_the_kept_canary_proves_nothing(self):
-        self.assertEqual(ds.judge(GOOD_COUNTS, dict(NONE_FOUND, kept=0), ALL_OBSERVED), "INCONCLUSIVE")
+        self.assertEqual(verdict(found=dict(NONE_FOUND, kept=0)), "INCONCLUSIVE")
+
+    def test_the_control_must_also_be_in_the_keyword_index(self):
+        """The kept canary is in the content table too, so only the index shows the index was searched."""
+        self.assertEqual(verdict(index=dict(CLEAN_INDEX, kept=0)), "INCONCLUSIVE")
+
+    def test_an_unreadable_path_is_inconclusive(self):
+        self.assertEqual(verdict(unreadable=1), "INCONCLUSIVE")
 
     def test_a_missing_observation_is_inconclusive_for_each_word(self):
         for word in ALL_OBSERVED:
-            self.assertEqual(ds.judge(GOOD_COUNTS, NONE_FOUND, [w for w in ALL_OBSERVED if w != word]), "INCONCLUSIVE", word)
+            self.assertEqual(verdict(observed=[w for w in ALL_OBSERVED if w != word]), "INCONCLUSIVE", word)
 
     def test_fail_outranks_inconclusive(self):
-        self.assertEqual(ds.judge(GOOD_COUNTS, dict(NONE_FOUND, deleted=1, kept=0), []), "FAIL")
+        self.assertEqual(verdict(found=dict(NONE_FOUND, deleted=1, kept=0), observed=[], unreadable=3), "FAIL")
 
 
 class PrepareState(unittest.TestCase):
@@ -236,7 +312,7 @@ class PrepareState(unittest.TestCase):
             values = list(c.values())
             self.assertEqual(len({v[0] for v in values}), 3)  # no shared first letter, so no shared prefix
             for v in values:
-                self.assertTrue(v.isalpha() and v.islower() and len(v) >= 12, v)
+                self.assertTrue(v.isalpha() and v.islower() and len(v) == ds.CANARY_LEN, v)
 
     def test_prepare_refuses_an_existing_database_and_writes_state(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
@@ -252,13 +328,14 @@ class PrepareState(unittest.TestCase):
 class RecordWriting(unittest.TestCase):
     def write(self, verdict="PASS", counts=None, found=None, out=None):
         record = ds.build_record(config(), "0.1.0", counts or GOOD_COUNTS, found or NONE_FOUND, verdict,
-                                 ALL_OBSERVED, STARTED)
+                                 ALL_OBSERVED, STARTED, CLEAN_INDEX, 0)
         return record, ds.write_results(record, verdict, ALL_OBSERVED, out, [])
 
     def test_the_record_holds_the_r19_fields(self):
         with tempfile.TemporaryDirectory() as out:
             record, _ = self.write(out=out)
-            for key in ("os", "appVersion", "collectorKind", "deletedByKind", "canariesFound"):
+            for key in ("os", "appVersion", "collectorKind", "deletedByKind", "canariesFound", "indexCanariesFound",
+                        "unreadablePaths"):
                 self.assertIn(key, record)
             self.assertEqual(record["collectorKind"], "site-mail")
             self.assertEqual(record["deletedByKind"], GOOD_COUNTS)
@@ -293,10 +370,94 @@ class RecordWriting(unittest.TestCase):
     def test_the_collector_kind_is_an_allowlisted_word(self):
         for kind in ("site-mail", "site-messenger", "site-wiki"):
             with tempfile.TemporaryDirectory() as out:
-                record = ds.build_record(config(collector={"kind": kind}), "0.1.0", GOOD_COUNTS, NONE_FOUND, "PASS", ALL_OBSERVED, STARTED)
+                record = ds.build_record(config(collector={"kind": kind}), "0.1.0", GOOD_COUNTS, NONE_FOUND, "PASS", ALL_OBSERVED,
+                                         STARTED, CLEAN_INDEX, 0)
                 _, md = ds.write_results(record, "PASS", ALL_OBSERVED, out, [])
                 self.assertIn(kind, read(md))
 
 
+PRODUCT_FTS = """
+    CREATE TABLE source_versions (id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL);
+    CREATE VIRTUAL TABLE keyword_index USING fts5 (title, body, content = 'source_versions', content_rowid = 'id');
+    INSERT INTO keyword_index (keyword_index, rank) VALUES ('secure-delete', 1);
+    CREATE TRIGGER source_versions_index AFTER INSERT ON source_versions BEGIN
+      INSERT INTO keyword_index (rowid, title, body) VALUES (new.id, new.title, new.body);
+    END;
+    CREATE TRIGGER source_versions_unindex AFTER DELETE ON source_versions BEGIN
+      INSERT INTO keyword_index (keyword_index, rowid, title, body) VALUES ('delete', old.id, old.title, old.body);
+    END;
+"""  # the product's keyword index: storage/src/migrations.ts v1 and v9 (secure-delete)
+
+
+def make_fts_db(path, bodies):
+    """The product's keyword_index definition in a real SQLite file, holding `bodies` (one source version each)."""
+    db = sqlite3.connect(path)
+    db.executescript("PRAGMA secure_delete = ON;" + PRODUCT_FTS)
+    db.executemany("INSERT INTO source_versions (title, body) VALUES ('t', ?)", [(b,) for b in bodies])
+    db.commit()
+    return db
+
+
+class FtsIndex(unittest.TestCase):
+    """F1: against a real FTS5 table, a deleted term that stays in the index is found although the file does not hold the
+    whole word (the term before it shares a prefix, so FTS stores a suffix)."""
+
+    WORD = CANARIES["deleted"]
+    BODIES = ["meeting qlab notes " + CANARIES["deleted"], "later zbtn notes " + CANARIES["kept"]]
+
+    def build(self, d):
+        path = os.path.join(d, "pki.sqlite")
+        db = make_fts_db(path, self.BODIES)
+        return path, db
+
+    def test_the_file_holds_only_a_suffix_of_a_prefix_sharing_term_and_the_scan_still_finds_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            path, db = self.build(d)
+            # a deletion that reached the content table but not the index (the residue case), then VACUUM so
+            # the content row's bytes are gone and only the index can hold the word
+            db.execute("DROP TRIGGER source_versions_unindex")
+            db.execute("DELETE FROM source_versions WHERE id = 1")
+            db.commit()
+            db.execute("VACUUM")
+            db.close()
+            data = read_bytes(path)
+            self.assertNotIn(self.WORD.encode(), data)  # the whole word is NOT in the file: the F1 blind spot
+            self.assertIn(self.WORD[-ds.TAIL_LEN:].encode(), data)  # its tail is
+            found, unreadable = ds.scan_canaries([d], CANARIES)
+            self.assertEqual((found["deleted"], unreadable), (1, 0))
+            self.assertEqual(ds.read_index_terms(path, CANARIES)["deleted"], 1)
+            self.assertEqual(verdict(found=found, index=ds.read_index_terms(path, CANARIES)), "FAIL")
+
+    def test_index_terms_reads_the_vocabulary_read_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            path, db = self.build(d)
+            db.close()
+            before = os.path.getmtime(path)
+            terms = ds.read_index_terms(path, CANARIES)
+            self.assertEqual(terms, {"deleted": 1, "revoked": 0, "kept": 1})
+            self.assertEqual(os.path.getmtime(path), before)
+            self.assertEqual(sorted(os.listdir(d)), ["pki.sqlite"])
+
+    def test_after_the_product_deletes_the_row_the_term_is_gone_from_both_checks(self):
+        with tempfile.TemporaryDirectory() as d:
+            path, db = self.build(d)
+            db.execute("DELETE FROM source_versions WHERE id = 1")
+            db.commit()
+            db.close()
+            self.assertEqual(ds.read_index_terms(path, CANARIES), {"deleted": 0, "revoked": 0, "kept": 1})
+            found, unreadable = ds.scan_canaries([d], CANARIES)
+            self.assertEqual(found, {"deleted": 0, "revoked": 0, "kept": 1})
+            self.assertEqual(verdict(found=found, index=ds.read_index_terms(path, CANARIES), unreadable=unreadable), "PASS")
+
+    def test_a_deleted_term_still_in_the_index_makes_the_verdict_fail(self):
+        with tempfile.TemporaryDirectory() as d:
+            path, db = self.build(d)
+            db.close()
+            found, unreadable = ds.scan_canaries([d], CANARIES)
+            index = ds.read_index_terms(path, CANARIES)
+            self.assertEqual(verdict(found=found, index=index, unreadable=unreadable), "FAIL")
+
+
 if __name__ == "__main__":
     unittest.main()
+
