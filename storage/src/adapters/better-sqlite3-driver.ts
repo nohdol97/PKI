@@ -18,6 +18,9 @@ export const openBetterSqlite3: OpenSqlDriver = (path, options = {}) => {
   // WAL would keep the purged pages in -wal after commit, and a file remembers WAL
   // across opens, so the rollback journal (deleted at commit) is pinned (review B2).
   db.pragma("journal_mode = DELETE");
+  // A row's history lines go with the row through ON DELETE CASCADE (S01-R6), and every other cascade
+  // of the schema too; the setting is per connection, so it is set here, not left to a compile default.
+  db.pragma("foreign_keys = ON");
   return {
     exec: (sql) => void db.exec(sql),
     run: (sql, params = []) => {

@@ -246,6 +246,7 @@ describe("lifecycle.transitions", () => {
           to_status: before,
           basis_source_id: 7,
           basis_version: 4,
+          reverts_seq: 1, // names the propagation's supersede line it reverts (R6)
         });
       },
     );
@@ -328,6 +329,7 @@ describe("lifecycle.transitions", () => {
         seq: 4,
       });
       expect(read(ref)?.status).toBe("candidate"); // before the propagation's supersede, not before the user's approval
+      expect(lines(ref).at(-1)).toMatchObject({ action: "evidence-returned", reverts_seq: 1 });
     });
 
     it("reads a cancellation as the line before the action it reverted: a user's supersede does not", () => {
@@ -350,6 +352,7 @@ describe("lifecycle.transitions", () => {
       forge(ref, 5, "user", "undo", "verified", "superseded", 4); // made by line 3, which is made by line 1
       expect(automatedLifecycle.evidenceReturned(db, ref, BASIS).status).toBe("applied");
       expect(read(ref)?.status).toBe("candidate");
+      expect(lines(ref).at(-1)).toMatchObject({ action: "evidence-returned", reverts_seq: 1 });
     });
   });
 });
@@ -429,7 +432,7 @@ describe("lifecycle.history", () => {
         basis_source_id: 1,
         basis_version: 3,
         batch: null,
-        reverts_seq: null,
+        reverts_seq: 2,
       },
       {
         fact_id: fact.id,

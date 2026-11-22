@@ -220,10 +220,14 @@ describe("deleteSource", () => {
     ]);
     // the history line rests on the deleted source and the version its tombstone covers (S01-R6)
     expect(
-      db.all("SELECT actor, basis_source_id, basis_version FROM fact_history WHERE fact_id = ?", [
-        f,
-      ]),
-    ).toEqual([{ actor: "propagation", basis_source_id: a1.sourceId, basis_version: 1 }]);
+      db.all(
+        "SELECT actor, basis_source_id, basis_version, at FROM fact_history WHERE fact_id = ?",
+        [f],
+      ),
+    ).toEqual([
+      // the line's time is the propagation's own (the deletion's request time), not the clock's
+      { actor: "propagation", basis_source_id: a1.sourceId, basis_version: 1, at: AT },
+    ]);
   });
 
   it("keeps the status of a row another source's current evidence supports", () => {

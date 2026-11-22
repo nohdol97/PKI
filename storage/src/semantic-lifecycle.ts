@@ -295,6 +295,7 @@ export const automatedLifecycle: AutomatedLifecycle = {
       actor: "extraction",
       action: "evidence-returned",
       basis,
+      revertsSeq: maker?.seq ?? null, // the line that superseded it (R6: a restore names what it reverts)
       at,
     });
     return { status: "applied", seq };

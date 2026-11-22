@@ -914,6 +914,9 @@ describe("semantic history of an extraction (S01-T01: lifecycle.history, epistem
     ]);
     // the supersede rests on the new version of the source, the restore on the version that returned it
     expect(lines[2]).toMatchObject({ basis_source_id: first.sourceId, basis_version: 2 });
+    // the extraction's lines carry the handler's clock (T0); propagateNewVersion has none of its own
+    expect(lines[0]?.at).toBe(T0.toISOString());
+    expect(lines[3]?.at).toBe(T0.toISOString());
     expect(lines[3]).toMatchObject({ basis_source_id: first.sourceId, basis_version: 3 });
   });
 
