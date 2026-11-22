@@ -62,9 +62,11 @@ import {
   defaultScopePolicy,
   ensureDataDirectory,
   prepareCanonicalDb,
+  userDecisions,
   type DerivativeRegistry,
   type ScopePolicy,
   type SqlDriver,
+  type UserDecisions,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
@@ -148,6 +150,15 @@ export function productRegistry(adapters: {
     policy: adapters.policy ?? defaultScopePolicy,
     permanentlyAbsent,
   });
+}
+
+/**
+ * The user's entry to the Semantic registry (S01-R7): the one value that approves, rejects, disputes and
+ * undoes. It goes to the API layer alone (boot.ts passes it to startServer); the module-boundary lint
+ * keeps extraction, propagation and the job runner from importing it.
+ */
+export function productUserDecisions(): UserDecisions {
+  return userDecisions;
 }
 
 /** The entries that store a change, delete a source or lift a tombstone through `registry`. */

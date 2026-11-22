@@ -203,6 +203,19 @@ export {
   type Refusal,
 } from "./semantic-lifecycle.ts";
 export {
+  listSemanticFacts,
+  listSemanticItems,
+  listSemanticRelations,
+  readSemanticHistory,
+  readSemanticState,
+  type SemanticFactView,
+  type SemanticHistoryLine,
+  type SemanticItemView,
+  type SemanticRelationView,
+  type SemanticRowView,
+} from "./semantic-view.ts";
+export { userDecisions, type UserAction, type UserDecisions } from "./semantic-user.ts";
+export {
   findRelation,
   listEvidenceVersions,
   listFactsOfKind,
