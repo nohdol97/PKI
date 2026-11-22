@@ -6,8 +6,10 @@
 import { expect, test } from "@playwright/test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { DEVELOPMENT_EXCEPTION_MARKERS, TEST_PICK_MARKERS } from "../build/bundle.ts";
+import { backendEntry } from "../src/backend-entry.ts";
+import { DEVELOPMENT_EXCEPTION_MARKERS, REPO_ROOT, TEST_PICK_MARKERS } from "../build/bundle.ts";
 import { APP_DIR, readBuildReport, type BuildReport } from "../build/paths.ts";
+import { judgeConnectorScopes } from "../build/scopes-check.ts";
 
 // spelled in pieces: only build-kind.ts and bundler configs may name the build value
 const BUILD_VALUE = ["PKI", "BUILD", "KIND"].join("_");
@@ -18,6 +20,15 @@ function ownFiles(dir = APP_DIR): string[] {
     const path = join(dir, name);
     if (path === join(APP_DIR, "node_modules")) return [];
     return statSync(path).isDirectory() ? ownFiles(path) : [path];
+  });
+}
+
+/** Every file under `dir` with this exact name, nothing read. */
+function filesNamed(dir: string, name: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return filesNamed(path, name);
+    return entry.name === name ? [path] : [];
   });
 }
 
@@ -139,4 +150,52 @@ test("the runtime packages are the bundles' externals only, each with its licens
     n.startsWith("@") ? readdirSync(join(APP_DIR, "node_modules", n)).map((s) => `${n}/${s}`) : [n],
   );
   for (const name of top) expect(names, name).toContain(name);
+});
+
+// I07-C9: the report's scopes state and counts are what the judgment says for this repository's root
+// (a state and two counts; no value and no instance id), and the build's last line names the state
+test("the report carries the scopes file's judgment for the real root and no value or id (I07-C9)", () => {
+  const verdict = judgeConnectorScopes(
+    REPO_ROOT,
+    backendEntry(REPO_ROOT),
+    report.bundles["backend/shell.js"] ?? [],
+  );
+  expect(verdict.ok).toBe(true);
+  expect(report.connectorScopes).toEqual(
+    verdict.ok
+      ? { state: verdict.state, entries: verdict.entries, configured: verdict.configured }
+      : undefined,
+  );
+  expect(Object.keys(report.connectorScopes).sort()).toEqual(["configured", "entries", "state"]);
+  const file = join(REPO_ROOT, "site/config/connector-scopes.json");
+  if (existsSync(file)) {
+    const text = readFileSync(join(APP_DIR, "../build-report.json"), "utf8");
+    // nothing of the file's keys or values leaks into the report
+    for (const [id, held] of Object.entries(JSON.parse(readFileSync(file, "utf8")) as object)) {
+      expect(text.includes(JSON.stringify(id)), "an instance id").toBe(false);
+      for (const scope of Array.isArray(held) ? held : []) {
+        expect(text.includes(JSON.stringify(scope)), "a scope value").toBe(false);
+      }
+    }
+  }
+});
+
+// I07-C12: no file named connector-scopes.json is in the app folder (the runtime packages aside, which are
+// listed), the backend's module list holds the one allowed place exactly when the real root has the file,
+// and the shell's list and the screens carry none. True of the public tree and of a fork-shaped one alike.
+test("no scopes file lies in the app folder; the bundle's list and the root's file agree (I07-C12)", () => {
+  expect(ownFiles().filter((f) => f.endsWith("connector-scopes.json"))).toEqual([]);
+  // the runtime packages' folder too (ownFiles leaves it out): names only
+  expect(filesNamed(join(APP_DIR, "node_modules"), "connector-scopes.json")).toEqual([]);
+  const place = "site/config/connector-scopes.json";
+  const modules = (report.bundles["backend/shell.js"] ?? []).filter((m) =>
+    m.endsWith("connector-scopes.json"),
+  );
+  expect(modules).toEqual(existsSync(join(REPO_ROOT, place)) ? [place] : []);
+  expect(
+    (report.bundles["main.js"] ?? []).filter((m) => m.endsWith("connector-scopes.json")),
+  ).toEqual([]);
+  for (const file of ownFiles().filter((f) => relative(APP_DIR, f).startsWith("web"))) {
+    expect(readFileSync(file, "latin1").includes("connector-scopes.json"), file).toBe(false);
+  }
 });

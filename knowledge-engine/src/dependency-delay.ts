@@ -6,6 +6,7 @@
 // queries of @pki/storage (V02-R8).
 import {
   findRelation,
+  isDate,
   listEvidence,
   listEvidenceVersions,
   listFactsOfKind,
@@ -38,12 +39,8 @@ const currentEvidence = (db: SqlDriver, target: EvidenceTarget): number[] =>
     .filter((e) => e.current)
     .map((e) => e.id);
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-/** A normalized calendar date (YYYY-MM-DD) that exists; such strings order as dates. */
-export function isDate(value: string): boolean {
-  const time = DATE.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
-  return !Number.isNaN(time) && new Date(time).toISOString().startsWith(value);
-}
+/** The one calendar-date check is storage's (ontology.ts); the rule's own reading of a date is the same. */
+export { isDate };
 
 interface DatedRow {
   value: string;
