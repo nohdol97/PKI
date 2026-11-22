@@ -71,6 +71,16 @@ describe("outcome.mapping (I03-R9): a handler's result to the job's closing", ()
 
   const rows: [string, JobResult, object][] = [
     ["the handler's result", { status: "succeeded", write }, { status: "succeeded", write }],
+    [
+      "a skipped projection removal (a success with a code)",
+      { status: "succeeded", write, code: "adapter-unavailable" },
+      { status: "succeeded", write, reason: "adapter-unavailable" },
+    ],
+    [
+      "a success whose code is not a code (the code's fault)",
+      { status: "succeeded", write, code: "Not A Code" },
+      { status: "dead_letter", reason: "invalid-reason" },
+    ],
     ["a handler that found the job stale", { status: "superseded" }, { status: "superseded" }],
     [
       "handler held (an unavailable Connector instance)",

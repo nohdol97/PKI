@@ -37,6 +37,7 @@ import {
   type StoredSchedule,
 } from "@pki/storage";
 import { systemClock, systemTimeZone, type Clock } from "./clock.ts";
+import { checkProjectionMarkers } from "./projection-jobs.ts";
 import {
   BACKOFF_MAX_MS,
   clampRunAt,
@@ -91,6 +92,8 @@ export interface CheckReport {
   /** Stored job run times pulled back to now + the backoff cap. */
   pulledBack: number;
   due: DueReport[];
+  /** Projections whose marks (a given-up or blocked removal) registered a rebuild (I03-R7). */
+  rebuilds: string[];
   /** Schedules whose check threw (`onError` got each); the others were checked. */
   failed: number[];
   backlog: Backlog;
@@ -295,6 +298,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           (at) => clampRunAt(at, now),
           now,
         );
+        // not a period's work, so before them (the flowchart's note): a removal that gave up or
+        // is blocked marks its projection, whatever the projection's applied sequence says
+        const rebuilds: string[] = [];
+        try {
+          for (const job of checkProjectionMarkers(db, { phase: "check", now })) {
+            registered.push(job);
+            rebuilds.push(job.target);
+          }
+        } catch (error) {
+          deps.onError?.(error); // the periods are still checked
+        }
         const due: DueReport[] = [];
         for (const row of listSchedules(db)) {
           if (!row.enabled) continue;
@@ -307,7 +321,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             deps.onError?.(error);
           }
         }
-        return { discontinuity, pulledBack, due, failed, backlog: backlog() };
+        return { discontinuity, pulledBack, due, rebuilds, failed, backlog: backlog() };
       },
       { immediate: true },
     );
