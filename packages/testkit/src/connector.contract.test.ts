@@ -481,6 +481,14 @@ class Tracked extends ScriptedConnector {
     this.ready = true;
   }
 }
+const scopeChange = (externalId: string): ScriptEntry => ({
+  kind: "scope-change",
+  namespace: "",
+  externalId,
+  revision: 1,
+  accessScope: ["team", "guests"],
+  at: AT,
+});
 const noTombstones = (entries: ScriptEntry[]): ScriptEntry[] =>
   entries.filter((e) => e.kind !== "delete" && e.kind !== "access-revoked");
 const overrideDocument = (
@@ -606,6 +614,25 @@ describe("contract-suite.red, clause by clause", () => {
             ref.namespace === "" && ref.externalId === "b" && real ? { ...real, title: "x" } : real,
           ),
         scenario: scenario(),
+      }),
+      ["get-document-mismatch"],
+    ],
+    [
+      "getDocument null after a scope change of a delivered source",
+      () => ({
+        create: () =>
+          overrideDocument((ref, real) =>
+            ref.namespace === "" && ref.externalId === "b" ? null : real,
+          ),
+        scenario: scenario(),
+      }),
+      ["get-document-mismatch"],
+    ],
+    [
+      "getDocument null after a scope change of a source this read never upserted",
+      () => ({
+        create: () => scripted(),
+        scenario: scenario({ initial: [...initial(), scopeChange("z")] }),
       }),
       ["get-document-mismatch"],
     ],
@@ -744,6 +771,48 @@ describe("contract-suite.red, clause by clause", () => {
         ),
     ],
     [
+      "a late scope change after a delete in one read: getDocument stays null",
+      () =>
+        base(
+          scenario({
+            initial: [
+              ...initial(),
+              upsert(record("", "x", 1)),
+              tombstone("x", 1),
+              scopeChange("x"),
+            ],
+          }),
+        ),
+    ],
+    [
+      "a scope change of a source this read never upserted, which getDocument knows",
+      () => ({
+        create: () =>
+          overrideDocument((ref, real) =>
+            ref.namespace === "" && ref.externalId === "z"
+              ? record("", "z", 1, { accessScope: ["team", "guests"] })
+              : real,
+          ),
+        scenario: scenario({ initial: [...initial(), scopeChange("z")] }),
+      }),
+    ],
+    [
+      "a final page that echoes its cursor is not a stall",
+      () => ({
+        create: () =>
+          new (class extends ScriptedConnector {
+            override async getChanges(
+              cursor: string | null,
+              opts: { limit: number; signal: AbortSignal },
+            ) {
+              const page = await super.getChanges(cursor, opts);
+              return cursor !== null && !page.hasMore ? { ...page, nextCursor: cursor } : page;
+            }
+          })({ capabilities: { ...FULL, incremental: false } }),
+        scenario: scenario(),
+      }),
+    ],
+    [
       "without deletionsOnRescan, a source that vanishes on rescan without a delete is fine",
       () => ({
         create: () => scripted({ deletionsOnRescan: false }),
@@ -756,6 +825,15 @@ describe("contract-suite.red, clause by clause", () => {
     const double = make();
     expect(await checkConnector(double.create, double.scenario)).toEqual([]);
   });
+
+  it.each([Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY])(
+    "a maxPages of %s is a scenario error",
+    async (maxPages) => {
+      await expect(checkConnector(() => scripted(), { ...scenario(), maxPages })).rejects.toThrow(
+        /maxPages must be a positive integer/,
+      );
+    },
+  );
 
   it("a read longer than maxPages throws instead of reporting no-progress", async () => {
     await expect(checkConnector(() => scripted(), { ...scenario(), maxPages: 3 })).rejects.toThrow(

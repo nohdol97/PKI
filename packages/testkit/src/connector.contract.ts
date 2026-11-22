@@ -63,7 +63,15 @@ type Caps = {
   deletionsOnRescan: boolean;
 };
 type Identity = string;
-type Seen = { kind: string; record?: Record<string, unknown> | undefined; accessScope?: unknown };
+type Seen = {
+  kind: string;
+  record?: Record<string, unknown> | undefined;
+  accessScope?: unknown;
+  /** A scope change after a tombstone in the same read: the source is still gone. */
+  tombstoned?: boolean;
+};
+const isTombstone = (seen: Seen | undefined) =>
+  seen?.kind === "delete" || seen?.kind === "access-revoked" || seen?.tombstoned === true;
 
 const CAPABILITY_KEYS = [
   "incremental",
@@ -228,6 +236,7 @@ class Check {
     if (!parsed.success || parsed.data.kind === "upsert") return this.add("record-schema");
     const event = parsed.data;
     const identity = identityOf(event) as Identity;
+    const before = read.last.get(identity);
     read.last.set(
       identity,
       event.kind === "scope-change"
@@ -235,6 +244,7 @@ class Check {
             kind: event.kind,
             record: read.lastUpsert.get(identity),
             accessScope: event.accessScope,
+            tombstoned: isTombstone(before),
           }
         : { kind: event.kind },
     );
@@ -267,6 +277,10 @@ export async function checkConnector(
   create: () => Connector,
   scenario: ConnectorScenario,
 ): Promise<ConnectorCheckCode[]> {
+  const { maxPages = PAGE_CAP } = scenario;
+  if (!Number.isSafeInteger(maxPages) || maxPages <= 0) {
+    throw new Error("the scenario's maxPages must be a positive integer");
+  }
   const subject = create();
   const manifest = manifestOf(subject);
   if (!isObject(manifest)) return ["manifest-invalid"];
@@ -295,7 +309,7 @@ export async function checkConnector(
       accessScope: capabilities.accessScope === true,
       deletionsOnRescan: capabilities.deletionsOnRescan === true,
     },
-    scenario.maxPages ?? PAGE_CAP,
+    maxPages,
   );
   for (const code of manifestFaults) check.add(code);
 
@@ -391,12 +405,14 @@ async function documents(check: Check, connector: Connector, whole: Read) {
 
 /**
  * What getDocument owes for an identity, by its last change: the upsert's record;
- * null after a tombstone; after a scope change, the last upsert's content (its
- * revision unspecified) with the event's scope.
+ * null after a tombstone, also when a late scope change follows it; after a
+ * scope change, the last upsert's content (its revision unspecified) with the
+ * event's scope; any record when the read had no upsert of it.
  */
 function documentMatches(seen: Seen, doc: unknown): boolean {
   if (seen.kind === "upsert") return canonical(doc) === canonical(seen.record);
   if (seen.kind !== "scope-change") return doc === null;
+  if (seen.tombstoned) return doc === null; // a late scope change does not revive it
   if (!isObject(doc)) return false;
   if (!seen.record) return true; // a scope change for a source this read never upserted
   return (
@@ -454,9 +470,7 @@ async function rescan(
       continue;
     }
     // Alive at the end of the first read: its last change was not a tombstone.
-    const alive =
-      whole.last.get(identity)?.kind !== "delete" &&
-      whole.last.get(identity)?.kind !== "access-revoked";
+    const alive = !isTombstone(whole.last.get(identity));
     if (check.caps.deletionsOnRescan && alive && !deleted.has(identity)) {
       check.add("rescan-deletion-missing");
     }
