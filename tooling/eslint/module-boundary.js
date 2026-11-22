@@ -41,8 +41,11 @@
 // its history through the cascade, and the new row has no line) fail outside it, tests and
 // @pki/testkit's seed excepted. Both look at the text of string and template literals and at
 // import and export specifiers by name, and a namespace import's member access or destructuring.
-// The tables are the item, fact and relation ones and their histories; the ontology tables are
-// T07's to add.
+// The tables are the item, fact and relation ones and their histories, and (S01-T07) the type
+// definitions' `ontology_elements`, `ontology_basis` and `ontology_history`, whose INSERT and REPLACE
+// are written by storage/src/ontology.ts (and the migration's seed) alone. DELETE is not checked
+// (the derivative kind `ontology` deletes lineage rows and the elements it leaves without lineage), so
+// a direct DELETE of `ontology_basis` outside it is a known gap.
 // Known gaps (not checked):
 // - the user entry reached through `import("@pki/storage")`, `export * from "@pki/storage"` or a
 //   value passed in from a module that may hold it
@@ -138,6 +141,17 @@ const HISTORY_INSERT = new RegExp(
   String.raw`\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+${TABLE}(?:item|fact|relation)_history\b`,
   "i",
 );
+// The type definitions' tables (S01-T07): rows go in through storage/src/ontology.ts alone (the seed
+// is the migration's). A DELETE is not checked: the derivative kind `ontology` deletes lineage rows and
+// the elements they leave without lineage (knowledge-engine canonical-kinds.ts).
+const ONTOLOGY_INSERT = new RegExp(
+  String.raw`\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+${TABLE}ontology_(?:elements|basis|history)\b`,
+  "i",
+);
+const ONTOLOGY_WRITERS = [
+  { pkg: "@pki/storage", file: "src/ontology.ts" },
+  { pkg: "@pki/storage", file: "src/migrations.ts" },
+];
 const ROW_REPLACE = new RegExp(
   String.raw`\bREPLACE\s+INTO\s+${TABLE}(?:items|facts|relations)\b`,
   "i",
@@ -320,7 +334,7 @@ const moduleBoundary = {
       userEntryImport:
         "'{{name}}' is the user's entry to the Semantic registry; only the composition root may import it (the API layer, its type), so extraction and the job runner cannot approve or reject.",
       registryWrite:
-        "History lines and replaced item, fact or relation rows are written only by the lifecycle gate (storage/src/semantic-lifecycle.ts).",
+        "History lines and replaced item, fact or relation rows are written only by the lifecycle gate (storage/src/semantic-lifecycle.ts); the type definitions' rows only by storage/src/ontology.ts.",
     },
   },
   create(context) {
@@ -366,6 +380,10 @@ const moduleBoundary = {
       (ownName === GATE_MODULE.pkg && ownPath === GATE_MODULE.file) ||
       isTest ||
       EXEMPT_PACKAGES.has(ownName);
+    const mayWriteOntology =
+      isTest ||
+      EXEMPT_PACKAGES.has(ownName) ||
+      ONTOLOGY_WRITERS.some((w) => ownName === w.pkg && ownPath === w.file);
     /** Local names of `import * as x from "@pki/storage"`, to catch `x.userDecisions`. */
     const storageNamespaces = new Set();
     /** @param {string} name @param {boolean} typeOnly */
@@ -405,13 +423,16 @@ const moduleBoundary = {
     }
     /** @param {any} node A Literal or TemplateLiteral: SQL text that writes what only the gate writes */
     function registrySql(node) {
-      if (mayWriteRegistry) return;
+      if (mayWriteRegistry && mayWriteOntology) return;
       const text =
         node.type === "TemplateLiteral"
           ? node.quasis.map((/** @type {any} */ q) => q.value.cooked ?? "").join("\0")
           : node.value;
       if (typeof text !== "string") return;
-      if (HISTORY_INSERT.test(text) || ROW_REPLACE.test(text)) {
+      if (
+        (!mayWriteRegistry && (HISTORY_INSERT.test(text) || ROW_REPLACE.test(text))) ||
+        (!mayWriteOntology && ONTOLOGY_INSERT.test(text))
+      ) {
         context.report({ node, messageId: "registryWrite" });
       }
     }
