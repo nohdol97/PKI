@@ -49,14 +49,14 @@ export function deleteSource(
       sourceId,
     ])[0]?.v as number | null;
     if (latest === null) return { outcome: "unchanged" };
+    // one clock for the whole deletion: the tombstone's, the jobs' and the record's
+    const when = new Date(at);
+    if (Number.isNaN(when.getTime())) throw new RangeError(`deletion time is not a date: ${at}`);
     // A stored version is always above the source's tombstone (storage trigger),
     // so the latest version covers every version, past tombstones included.
     if (writeTombstone(db, { sourceId, version: latest, at, reason }) !== "written") {
       throw new Error(`source ${sourceId}: tombstone not moved to version ${latest}`);
     }
-    // one clock for the whole deletion: the tombstone's, the jobs' and the record's
-    const when = new Date(at);
-    if (Number.isNaN(when.getTime())) throw new RangeError(`deletion time is not a date: ${at}`);
     supersedeOpenJobs(db, sourceId, when);
     const { insights, ...purge } = propagateCanonical(
       db,

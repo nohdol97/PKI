@@ -324,4 +324,20 @@ describe("one clock per deletion (I04-T03)", () => {
     ).toThrow(RangeError);
     expect(readTombstone(db, chat.sourceId)).toBeUndefined();
   });
+
+  it("checks the time before its first write, not only by rolling back", () => {
+    const { chat } = lateDependency();
+    const writes: string[] = [];
+    const watched: SqlDriver = {
+      ...db,
+      run: (sql, params) => {
+        writes.push(sql);
+        return db.run(sql, params);
+      },
+    };
+    expect(() =>
+      deleteSource(watched, chat.sourceId, { reason: "source-deleted", at: "later" }),
+    ).toThrow(RangeError);
+    expect(writes).toEqual([]);
+  });
 });
