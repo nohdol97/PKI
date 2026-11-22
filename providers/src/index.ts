@@ -20,7 +20,9 @@ export {
   type ExecutionInput,
   type PrecheckResult,
   type RejectReason,
+  type ScopeGrader,
 } from "./broker.ts";
+export { publicScopeGrading, type ScopeGrading } from "./scope-grading.ts";
 export {
   denyExternalEmbedding,
   embedWithinPolicy,

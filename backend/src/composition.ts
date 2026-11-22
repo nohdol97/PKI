@@ -23,6 +23,7 @@ import {
   log,
   loopbackHttpAllowed,
   PUBLIC_SITE_RULES,
+  publicScopeGrading,
   readDefaultProvider,
   selectProvider,
   type Broker,
@@ -311,6 +312,9 @@ export function productCalls(
     egress,
     execution,
     recorder: createCallRecorder(db),
+    // a claimed scope is compared by the registry's policy, the one every other scope judgment
+    // uses; the mapping scope -> class is the public repository's (a fork replaces it, S08)
+    scope: { policy: (options.registry ?? derivativeRegistry).policy, grading: publicScopeGrading },
   });
   // the verified list the gate decides with: the test build's own, else the build's
   const verified =

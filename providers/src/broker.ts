@@ -25,13 +25,18 @@ import {
   type UntrustedDocument,
 } from "@pki/contracts";
 import {
+  defaultScopePolicy,
+  parseScope,
   readJob,
   readSourceVersion,
   UnregisteredDerivativeError,
+  type ScopePolicy,
   type SqlDriver,
+  type StoredSourceVersion,
 } from "@pki/storage";
 import { randomUUID } from "node:crypto";
 import material from "./connection-test-material.json" with { type: "json" };
+import { publicScopeGrading, type ScopeGrading } from "./scope-grading.ts";
 import { lookupSynthetic } from "./synthetic-manifest.ts";
 import { TASKS, type TaskDefinition } from "./tasks.ts";
 import type { UserActionRedeemer } from "./user-actions.ts";
@@ -46,6 +51,14 @@ const CONNECTION_TEST_DOCUMENT: UntrustedDocument = Object.freeze({
   title: material.title,
   body: material.body,
 });
+
+export type { ScopeGrading } from "./scope-grading.ts";
+
+/** The judge of scopes and the mapping scope -> class (I01-R15); the public repository's own by default. */
+export interface ScopeGrader {
+  policy: ScopePolicy;
+  grading: ScopeGrading;
+}
 
 export interface CandidateItem {
   readonly name: string;
@@ -195,6 +208,8 @@ export interface BrokerDeps {
   egress: EgressPolicy;
   execution: ExecutionGate;
   recorder: CallRecorder;
+  /** How a source's scope becomes a class (I01-R15); the public default grades every scope general. */
+  scope?: ScopeGrader;
   limits?: Partial<BrokerLimits>;
   /** `sleep` may end early when `signal` is cut; the Broker does not depend on that. */
   clock?: { now(): number; sleep(ms: number, signal?: AbortSignal): Promise<void> };
@@ -212,7 +227,9 @@ export type RejectReason =
   | "missing-source"
   | "missing-candidate"
   /** An input names a derivative of a kind the registry does not know: its sources cannot be graded (I04-R16). */
-  | "unregistered-derivative";
+  | "unregistered-derivative"
+  /** The scope policy or the scope -> class mapping could not judge a source's scope: refused, never guessed (I01-R15). */
+  | "scope-unjudged";
 
 export type BrokerResult =
   | {
@@ -248,13 +265,69 @@ interface Prepared {
 type Graded = { classification: DataClassification; malicious: boolean };
 
 /** Synthetic only when the manifest lists exactly this title and body from a trusted origin. */
+function listedSynthetic(title: string, body: string, trustedOrigin: boolean) {
+  return trustedOrigin ? lookupSynthetic(title, body) : undefined;
+}
+
+/** The grade of a text that is not listed: general in the public repository; the fork's mapping decides (S08). */
 function grade(title: string, body: string, trustedOrigin: boolean): Graded {
-  const listed = trustedOrigin ? lookupSynthetic(title, body) : undefined;
-  // The public repository has one general class for every access scope (ADR 0014);
-  // a deployment fork maps access_scope to its own classes here (S08).
+  const listed = listedSynthetic(title, body, trustedOrigin);
   return listed
     ? { classification: "synthetic", malicious: listed.malicious }
     : { classification: "general", malicious: false };
+}
+
+/** A policy or mapping that could not give a usable answer: the request is refused (I01-R15). */
+class ScopeUnjudgedError extends Error {
+  override name = "ScopeUnjudgedError";
+}
+
+const COMPARISONS: ReadonlySet<unknown> = new Set(["stricter", "equal", "looser", "incomparable"]);
+
+/** The answer if it is one of the classes; anything else is no answer. */
+function asClass(answer: unknown): DataClassification {
+  if (answer === "synthetic" || answer === "general") return answer;
+  throw new ScopeUnjudgedError();
+}
+
+/**
+ * The class the scope of a stored source gives (I01-R15). A scope the source system
+ * reported is mapped as it stands. A scope an import claimed is compared with the scope the
+ * deployment configured for the instance: a claim as strict as the configured scope or
+ * stricter has its own class, a looser one the configured scope's, and any doubt (an unknown
+ * claim, an unknown configured scope, incomparable scopes) the strictest class. So a claim
+ * narrows a grade and never widens it. A policy or mapping that throws or answers outside
+ * its closed set judges nothing (`ScopeUnjudgedError`).
+ */
+function scopeClass(stored: StoredSourceVersion, scope: ScopeGrader): DataClassification {
+  try {
+    return judgeScope(stored, scope);
+  } catch {
+    // a policy or mapping that throws judges nothing either; its message stays out
+    throw new ScopeUnjudgedError();
+  }
+}
+
+function judgeScope(
+  stored: StoredSourceVersion,
+  { policy, grading }: ScopeGrader,
+): DataClassification {
+  const own = parseScope(stored.accessScope);
+  if (!stored.scopeClaimed) return asClass(grading.grade(own));
+  const configured = stored.configuredScope;
+  // nothing configured (the public default) or nothing claimed: no comparison can show the claim safe
+  if (own === null || configured === null) return asClass(grading.strictest());
+  const compared: unknown = policy.compare(own, configured);
+  if (!COMPARISONS.has(compared)) throw new ScopeUnjudgedError();
+  switch (compared) {
+    case "stricter":
+    case "equal":
+      return asClass(grading.grade(own));
+    case "looser":
+      return asClass(grading.grade(configured));
+    default:
+      return asClass(grading.strictest());
+  }
 }
 
 const reject = (reason: RejectReason) => ({ status: "rejected", reason }) as const;
@@ -266,18 +339,34 @@ export function strictest(graded: readonly Graded[]): DataClassification {
     : "general";
 }
 
-function readGraded(db: SqlDriver, id: string) {
+function readGraded(db: SqlDriver, id: string, scope: ScopeGrader) {
   const stored = readSourceVersion(db, Number(id));
   if (!stored) return undefined;
   const trusted =
     stored.connectorKind !== null && SYNTHETIC_CONNECTOR_KINDS.has(stored.connectorKind);
-  return {
-    document: { id, title: stored.title, body: stored.body },
-    ...grade(stored.title, stored.body, trusted),
-  };
+  const listed = listedSynthetic(stored.title, stored.body, trusted);
+  const graded: Graded = listed
+    ? { classification: "synthetic", malicious: listed.malicious }
+    : { classification: scopeClass(stored, scope), malicious: false };
+  return { document: { id, title: stored.title, body: stored.body }, ...graded };
 }
 
+const PUBLIC_SCOPE: ScopeGrader = Object.freeze({
+  policy: defaultScopePolicy,
+  grading: publicScopeGrading,
+});
+
 function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectReason } {
+  try {
+    return prepareInputs(deps, raw);
+  } catch (error) {
+    if (error instanceof ScopeUnjudgedError) return { reason: "scope-unjudged" };
+    throw error;
+  }
+}
+
+function prepareInputs(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectReason } {
+  const scope = deps.scope ?? PUBLIC_SCOPE;
   const parsed = BrokerRequestSchema.safeParse(raw);
   if (!parsed.success) return { reason: "invalid-request" };
   const request = parsed.data;
@@ -322,7 +411,7 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
     graded.push(grade(title, body, true));
   }
   for (const id of ids) {
-    const read = readGraded(deps.db, id);
+    const read = readGraded(deps.db, id, scope);
     if (!read) return { reason: "missing-source" };
     documents.push(read.document);
     graded.push(read);
@@ -345,7 +434,7 @@ function prepare(deps: BrokerDeps, raw: unknown): Prepared | { reason: RejectRea
       graded.push({ classification: "general", malicious: false });
     }
     for (const evidenceId of item.evidenceSourceVersionIds) {
-      const read = readGraded(deps.db, evidenceId);
+      const read = readGraded(deps.db, evidenceId, scope);
       if (!read) return { reason: "missing-source" };
       graded.push(read);
     }

@@ -38,6 +38,7 @@ import {
   type ConnectorSet,
 } from "./composition.ts";
 import { systemClock } from "./clock.ts";
+import { applyConfiguredScopes, CONNECTOR_SCOPES } from "./connector-scopes.ts";
 import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
 import { createConnectorManager, type ConnectorManager } from "./connectors.ts";
 import { startCollectorUpkeep } from "./connector-sync-job.ts";
@@ -111,6 +112,11 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // the policy before any file is opened: a name that is not implemented stops the start (I04-H2 ①)
   const policy = productScopePolicy(options.scopePolicy);
   const db = openCanonicalDb(options.dataDir);
+  // the instances' configured scopes follow the build's file before anything is graded (I01-R15)
+  applyConfiguredScopes(db);
+  if (CONNECTOR_SCOPES.rejected > 0) {
+    log("connector-scopes-rejected", { count: CONNECTOR_SCOPES.rejected });
+  }
   await sweepCliRuns(options.dataDir); // what a crashed backend's CLI runs left
   // one egress instance for the consent API, the Broker (T08) and the Providers (T11)
   const egress = productEgress(db);
