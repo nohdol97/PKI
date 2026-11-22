@@ -1,16 +1,20 @@
 // I01-R28 `connectors.public-only`: the public repository holds no real mail,
 // messenger or wiki client. The script files of the Connector paths (SCAN_ROOTS,
 // EXTRA_FILES) import only what the allow-list names, and use no dynamic
-// import(), no require and no network global. Filtering by an allow-list, not by
+// import(), no require, no other module loader (process.getBuiltinModule,
+// process.binding, process.dlopen) and no network global. Those names are
+// refused as an identifier in any position and as a whole string literal (a
+// key, an element access, an argument such as Reflect.get(globalThis, "fetch")). Filtering by an allow-list, not by
 // names, also refuses an SDK package nobody listed. site/ belongs to the fork
 // (ownership.md 3) and is not read, except that the placeholder files the public
 // repository ships there exist and are not scripts.
 // The repository root is a parameter: the tests run the check on a temporary copy.
 // Decisions the spec left open: I01 spec "T09가 넘기는 것".
 // Known gaps (review catches them; this stops a client brought in by mistake, not
-// hidden code): a global reached by a computed name (globalThis["fe" + "tch"]),
-// eval and new Function, sockets or device files opened through the allowed
-// node:fs, symbolic links inside a root (not followed).
+// hidden code): a name assembled at run time (globalThis["fe" + "tch"], a
+// template with a substitution), eval and new Function, sockets or device files
+// opened through the allowed node:fs. A symbolic link inside a root is not
+// followed: it is a finding.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import ts from "typescript";
@@ -24,7 +28,9 @@ export const SCAN_ROOTS = [
 
 /**
  * Packages not on main yet (I01-T08, I01-T05): skipped while the package folder
- * is absent, inspected as soon as it exists. Empty this once both have merged.
+ * is absent. Once the folder exists the root is inspected and the entry itself
+ * is a finding: the PR that lands the package removes its entry, and from then
+ * on a missing root fails.
  */
 export const OPTIONAL_PACKAGES: readonly string[] = [
   "packages/connector-example",
@@ -64,13 +70,18 @@ const SCRIPT_KINDS: Record<string, ts.ScriptKind> = {
 };
 const NETWORK_GLOBALS = new Set(["fetch", "XMLHttpRequest", "WebSocket"]);
 const REQUIRE = "require";
+/** process.getBuiltinModule, process.binding, process.dlopen: a module with no import or require. */
+const MODULE_LOADERS = new Set(["getBuiltinModule", "binding", "dlopen"]);
 
 export type FindingCode =
   | "import-not-allowed"
   | "dynamic-import"
   | "require"
+  | "module-loader"
   | "network-global"
   | "missing-root"
+  | "optional-package-present"
+  | "symlink"
   | "unused-extra-file"
   | "placeholder-missing"
   | "placeholder-is-script";
@@ -83,7 +94,9 @@ export interface Finding {
   detail: string;
 }
 
-const isScript = (path: string): boolean => Object.hasOwn(SCRIPT_KINDS, extname(path));
+/** Lower-cased: Windows and macOS resolve `./m.ts` to a file named `m.TS`. */
+const scriptExtension = (path: string): string => extname(path).toLowerCase();
+const isScript = (path: string): boolean => Object.hasOwn(SCRIPT_KINDS, scriptExtension(path));
 const isFile = (path: string): boolean => existsSync(path) && statSync(path).isFile();
 const isDirectory = (path: string): boolean => existsSync(path) && statSync(path).isDirectory();
 const inside = (dir: string, path: string): boolean => {
@@ -96,6 +109,15 @@ function scriptsIn(dir: string): string[] {
   if (!isDirectory(dir)) return [];
   return readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && isScript(entry.name))
+    .map((entry) => join(entry.parentPath, entry.name))
+    .sort();
+}
+
+/** The symbolic links under `dir` (absolute), to a file or a folder; none is followed. */
+function symlinksIn(dir: string): string[] {
+  if (!isDirectory(dir)) return [];
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isSymbolicLink())
     .map((entry) => join(entry.parentPath, entry.name))
     .sort();
 }
@@ -148,7 +170,7 @@ export function checkPublicOnly(repoRoot: string): Finding[] {
       readFileSync(path, "utf8"),
       ts.ScriptTarget.Latest,
       true,
-      SCRIPT_KINDS[extname(path)],
+      SCRIPT_KINDS[scriptExtension(path)],
     );
     const report = (node: ts.Node, code: FindingCode, detail: string): void => {
       const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
@@ -167,6 +189,7 @@ export function checkPublicOnly(repoRoot: string): Finding[] {
     };
     const named = (node: ts.Node, name: string): void => {
       if (name === REQUIRE) report(node, "require", name);
+      else if (MODULE_LOADERS.has(name)) report(node, "module-loader", name);
       else if (NETWORK_GLOBALS.has(name)) report(node, "network-global", name);
     };
     const visit = (node: ts.Node): void => {
@@ -184,10 +207,8 @@ export function checkPublicOnly(repoRoot: string): Finding[] {
       const dynamic =
         ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword;
       if (dynamic || ts.isImportTypeNode(node)) report(node, "dynamic-import", "import()");
-      if (ts.isIdentifier(node)) named(node, node.text);
-      if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
-        named(node.argumentExpression, node.argumentExpression.text);
-      }
+      // a whole string literal too: a key, an element access, an argument
+      if (ts.isIdentifier(node) || ts.isStringLiteralLike(node)) named(node, node.text);
       ts.forEachChild(node, visit);
     };
     visit(source);
@@ -196,11 +217,17 @@ export function checkPublicOnly(repoRoot: string): Finding[] {
   for (const scanRoot of SCAN_ROOTS) {
     const dir = join(root, scanRoot);
     const files = scriptsIn(dir);
-    const optional = OPTIONAL_PACKAGES.some(
-      (pkg) => scanRoot.startsWith(`${pkg}/`) && !existsSync(join(root, pkg)),
-    );
-    if (files.length === 0 && !optional) {
+    const pkg = OPTIONAL_PACKAGES.find((optional) => scanRoot.startsWith(`${optional}/`));
+    const landed = pkg !== undefined && existsSync(join(root, pkg));
+    if (landed) {
+      findings.push({ file: pkg, line: 1, code: "optional-package-present", detail: "" });
+    }
+    if (files.length === 0 && (pkg === undefined || landed)) {
       findings.push({ file: scanRoot, line: 1, code: "missing-root", detail: "" });
+    }
+    for (const link of symlinksIn(dir)) {
+      const file = relative(root, link).split(sep).join(posix.sep);
+      findings.push({ file, line: 1, code: "symlink", detail: "" });
     }
     for (const file of files) inspect(file, dir);
   }

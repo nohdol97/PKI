@@ -4,7 +4,15 @@
 // placeholder files. Every mutation is written into a copy of the inspected paths
 // under the OS temp directory, never into the repository tree. The kinds check ①
 // is backend/src/connectors.public-only.test.ts (I01 spec "T09가 넘기는 것").
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,6 +21,7 @@ import {
   checkPublicOnly,
   EXTRA_FILES,
   inspectedFiles,
+  OPTIONAL_PACKAGES,
   SCAN_ROOTS,
   SITE_PLACEHOLDERS,
 } from "./public-only.ts";
@@ -284,20 +293,27 @@ describe("the inspected roots", () => {
     );
   });
 
+  it("no package still listed as optional exists in the repository: remove its entry when it lands", () => {
+    expect(OPTIONAL_PACKAGES.filter((pkg) => existsSync(join(REPO, pkg)))).toEqual([]);
+  });
+
   it.each(["packages/connector-example", "packages/connector-sdk"])(
-    "%s is read as soon as the package exists, and then needs its src/",
+    "%s is read as soon as the package exists, needs its src/, and must leave the optional list",
     (pkg) => {
       const copy = copyOfRepo();
       rmSync(join(copy, pkg), { recursive: true, force: true });
       expect(checkPublicOnly(copy)).toEqual([]);
+      const present = { file: pkg, line: 1, code: "optional-package-present", detail: "" };
       write(copy, `${pkg}/package.json`, "{}\n");
       expect(checkPublicOnly(copy)).toEqual([
+        present,
         { file: `${pkg}/src`, line: 1, code: "missing-root", detail: "" },
       ]);
       write(copy, `${pkg}/src/index.ts`, `export const one = 1;\n`);
-      expect(checkPublicOnly(copy)).toEqual([]);
+      expect(checkPublicOnly(copy)).toEqual([present]);
       write(copy, `${pkg}/src/adapters/client.ts`, `import "node:https";\n`);
       expect(checkPublicOnly(copy)).toEqual([
+        present,
         {
           file: `${pkg}/src/adapters/client.ts`,
           line: 1,
@@ -307,9 +323,95 @@ describe("the inspected roots", () => {
       ]);
       // outside src/ (configuration, build output) is not a Connector path
       write(copy, `${pkg}/vitest.config.ts`, `import "vitest/config";\n`);
-      expect(checkPublicOnly(copy)).toHaveLength(1);
+      expect(checkPublicOnly(copy)).toHaveLength(2);
     },
   );
+
+  it("reads a script whatever the case of its extension", () => {
+    for (const name of ["m.TS", "m.Mjs", "m.CTS", "m.Tsx"]) {
+      const path = `${ADAPTERS}/${name}`;
+      expect(withFile(path, `import "node:https";\n`)).toEqual([
+        { file: path, line: 1, code: "import-not-allowed", detail: "node:https" },
+      ]);
+    }
+  });
+
+  // creating a link needs a privilege on Windows
+  it.skipIf(process.platform === "win32")(
+    "refuses a symbolic link inside a root, to a file or to a folder",
+    () => {
+      const copy = copyOfRepo();
+      write(copy, "elsewhere/client.ts", `import "ws";\nexport const get = () => fetch("x");\n`);
+      symlinkSync(join(copy, "elsewhere/client.ts"), join(copy, ADAPTERS, "linked-client.ts"));
+      expect(checkPublicOnly(copy)).toEqual([
+        { file: `${ADAPTERS}/linked-client.ts`, line: 1, code: "symlink", detail: "" },
+      ]);
+      rmSync(join(copy, ADAPTERS, "linked-client.ts"));
+      symlinkSync(join(copy, "elsewhere"), join(copy, ADAPTERS, "linked"));
+      // the link is the finding; Node 24 also lists the files behind a linked folder
+      expect(checkPublicOnly(copy)).toContainEqual({
+        file: `${ADAPTERS}/linked`,
+        line: 1,
+        code: "symlink",
+        detail: "",
+      });
+    },
+  );
+});
+
+describe("loaders and literal names (review round 1)", () => {
+  const FILE = `${ADAPTERS}/extra.ts`;
+  const codes = (text: string) => withFile(FILE, text).map((f) => `${f.code}:${f.detail}`);
+
+  it("refuses process.getBuiltinModule: a builtin loaded with no import or require", () => {
+    expect(codes(`export const https = process.getBuiltinModule("node:https");\n`)).toEqual([
+      "module-loader:getBuiltinModule",
+    ]);
+    expect(codes(`export const { getBuiltinModule } = process;\n`)).toEqual([
+      "module-loader:getBuiltinModule",
+    ]);
+    expect(codes(`export const load = (process as any)["getBuiltinModule"];\n`)).toEqual([
+      "module-loader:getBuiltinModule",
+    ]);
+  });
+
+  it("refuses process.binding", () => {
+    expect(codes(`export const tcp = (process as any).binding("tcp_wrap");\n`)).toEqual([
+      "module-loader:binding",
+    ]);
+  });
+
+  it("refuses process.dlopen", () => {
+    expect(
+      codes(`export const load = () => process.dlopen({ exports: {} }, "client.node");\n`),
+    ).toEqual(["module-loader:dlopen"]);
+  });
+
+  it.each(["fetch", "XMLHttpRequest", "WebSocket", "require", "getBuiltinModule"])(
+    "refuses the literal name %s as a key or an argument",
+    (name) => {
+      const code = ["require"].includes(name)
+        ? "require"
+        : name === "getBuiltinModule"
+          ? "module-loader"
+          : "network-global";
+      for (const text of [
+        `export const a = Reflect.get(globalThis, "${name}");\n`,
+        `export const { "${name}": a } = globalThis as any;\n`,
+        `export const { ["${name}"]: a } = globalThis as any;\n`,
+        `export const a = Object.getOwnPropertyDescriptor(globalThis, \`${name}\`);\n`,
+        `const key = "${name}";\nexport const a = (globalThis as any)[key];\n`,
+      ]) {
+        expect(codes(text), text).toEqual([`${code}:${name}`]);
+      }
+    },
+  );
+
+  it("a longer string that only contains a name is text", () => {
+    expect(
+      codes(`export const a = ["fetch failed", "no require", "getBuiltinModule()"];\n`),
+    ).toEqual([]);
+  });
 });
 
 describe("site/ (I01-C4 ④, ⑤)", () => {
@@ -354,6 +456,10 @@ describe("site/ (I01-C4 ④, ⑤)", () => {
       { file: "site/README.md", line: 1, code: "placeholder-is-script", detail: "#!" },
     ]);
     write(copy, "site/index.mjs", "export {};\n");
+    write(copy, "site/INDEX.MJS", "export {};\n");
+    expect(checkPlaceholders(copy, ["site/INDEX.MJS"])).toEqual([
+      { file: "site/INDEX.MJS", line: 1, code: "placeholder-is-script", detail: ".MJS" },
+    ]);
     write(copy, "site/notes.txt", "synthetic\n");
     expect(checkPlaceholders(copy, ["site/index.mjs", "site/notes.txt"])).toEqual([
       { file: "site/index.mjs", line: 1, code: "placeholder-is-script", detail: ".mjs" },
