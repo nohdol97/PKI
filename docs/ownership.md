@@ -24,13 +24,15 @@
 
 | 규격 | 포크가 하는 일 | 필수 여부 |
 |---|---|---|
-| `Connector` ([ARCHITECTURE 5.5절](ARCHITECTURE.md)) | 수집기마다 하나씩 구현. 변경분 조회, 삭제·권한 철회 사건, cursor 만료 처리, access_scope 채우기 | 실제 수집을 하려면 필수 |
+| `Connector` ([ARCHITECTURE 5.5절](ARCHITECTURE.md), 규격 v2) | 수집기마다 하나씩 구현. 변경분 조회, 삭제·권한 철회 사건, 범위 변경 사건(`scope-change`), cursor 만료 처리, access_scope·revision·namespace 채우기, `deletionsOnRescan` 선언. 공용의 `@pki/connector-sdk`를 쓸 수 있다 | 실제 수집을 하려면 필수 |
 | `LLMProvider` (5.1절) | 배포처의 모델 엔드포인트가 OpenAI 호환이 아닐 때만 구현 | 조건부 |
 | `EmbeddingProvider` (5.2절) | 배포처가 다른 모델·런타임을 써야 할 때만 구현 | 조건부 |
 | `KnowledgeEngine`, `VectorIndex` (5.3~5.4절) | 포크가 구현하지 않는다. 엔진과 저장소 선택은 공용의 결정이다 | 해당 없음 |
 | 설정 파일 | [site-setup.md](site-setup.md)의 형태에 맞춰 값을 채운다 | 필수 |
 
 공용 저장소에는 실제 수집기 자리에 `site-mail`, `site-messenger`, `site-wiki`라는 이름의 **미구현 표시용 구현**이 있다. 실행하면 `미구현, 배포처 후속`을 알리고 실패한다. 포크는 같은 이름으로 실제 구현을 등록해 이것을 대체한다.
+
+Connector를 구현하는 방법(규격, 받아들이는 규칙, 오류와 재시도, 계약 테스트 돌리는 법, 예시 수집기)은 [connector-sdk.md](connector-sdk.md)에 있다.
 
 ## 3. 포크의 코드는 어디에 두는가
 
@@ -41,10 +43,14 @@ site/
 ├── README.md        공용 저장소가 갖는 유일한 파일(이 자리의 용도 안내)
 ├── connectors/      포크: 실제 수집기
 ├── providers/       포크: 필요할 때만
-└── config/          포크: 설정 값
+└── config/          포크: 설정 값(인스턴스 범위 `connector-scopes.json` 포함)
 ```
 
 공용 저장소는 `site/` 아래에 안내문 말고는 아무것도 만들지 않고, 포크는 `site/` 밖의 파일을 고치지 않는 것을 원칙으로 한다. 두 쪽이 같은 파일을 고치지 않으므로 공용의 변경을 받아 갈 때 충돌이 나지 않는다. `site/` 밖을 고쳐야만 하는 일이 생기면 그것은 규격에 빈 곳이 있다는 신호다. 고치지 말고 5절의 방법으로 공용에 알린다.
+
+`site/config/connector-scopes.json`은 수집기 인스턴스마다의 접근 범위를 두는 파일이고, 가져온 범위가 인스턴스에 정해 둔 범위보다 느슨한 등급을 얻지 못하게 하는 기준이다([site-setup.md](site-setup.md) S18). 공용 저장소의 import 검사(수집기 경로가 허용 목록 밖의 패키지나 네트워크를 쓰지 못하게 하는 검사)는 `site/`를 보지 않으므로, 포크의 수집기는 `site/connectors/`에서 자기 시스템의 클라이언트를 쓸 수 있다.
+
+`site/connectors/`에 둔 수집기를 계약 테스트로 확인하는 방법과, 그 수집기를 제품에 연결하는 길이 아직 없다는 점(`site/` 밖의 파일을 고쳐야 연결된다)은 [connector-sdk.md](connector-sdk.md) 7장에 있다.
 
 ## 4. 변경이 흐르는 방향
 
