@@ -241,10 +241,31 @@ function automatedRefusal(
   const refused: Outcome = { status: "refused", reason: "user-override" };
   if (actor === "policy" && to === "disputed") return undefined;
   if (actor !== "propagation" || to !== "superseded") return refused;
+  return written || acceptedWithoutEvidence(standing) ? refused : undefined;
+}
+
+/**
+ * The row's last standing user action is an approval that rested on no current evidence (R12 1, R15):
+ * the user took the value knowing no source of the latest version states it.
+ */
+function acceptedWithoutEvidence(standing: readonly StoredLine[]): boolean {
   const last = standing.at(-1);
-  const acceptedWithoutEvidence =
-    last?.action === "approve" && last.reason === NO_CURRENT_EVIDENCE_APPROVAL;
-  return written || acceptedWithoutEvidence ? refused : undefined;
+  return last?.action === "approve" && last.reason === NO_CURRENT_EVIDENCE_APPROVAL;
+}
+
+/**
+ * How a fact or relation is a user input to the rule (S01-R15): `authored` for a row the user wrote,
+ * `approved` for a verified row whose approval rested on no current evidence while it is the last
+ * standing user action, else null. A row of the second kind that has current evidence again is
+ * the caller's to read as an ordinary one: this does not look at the evidence.
+ */
+export function userInputKind(tx: SqlDriver, ref: EntryRef): "authored" | "approved" | null {
+  if (ref.kind === "item") return null;
+  if (userAuthored(tx, ref)) return "authored";
+  return readRow(tx, ref)?.status === "verified" &&
+    acceptedWithoutEvidence(standingUserActions(linesOf(tx, ref)))
+    ? "approved"
+    : null;
 }
 
 /**
