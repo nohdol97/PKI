@@ -32,6 +32,7 @@ import {
   readJob,
   readSetting,
   type Checkpoint,
+  type CommitScope,
   type JobClosing,
   type SqlDriver,
   type StoredJob,
@@ -115,6 +116,11 @@ export interface JobRunnerOptions {
   testBuild?: RunnerTestBuild;
   /** The policy fingerprint a job held by the Broker is stamped with (I03-R16 ③); none: stamped empty. */
   policyFingerprint?: () => string;
+  /**
+   * The scope policy and its record, handed to every result and checkpoint write (I04-R11, R14:
+   * storage closeJob's `scope`). None: every item passes, as under the default policy.
+   */
+  scope?: CommitScope;
   /** Errors the runner caught (a throwing handler or write, a failing claim). */
   onError?: (error: unknown) => void;
 }
@@ -296,7 +302,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     const close = (closing: JobClosing): JobRun => ({
       jobId: job.id,
       // a lost lease (failed heartbeat) fails closeJob's own token check: nothing is written
-      status: closeJob(db, job, stamped(closing), now()),
+      status: closeJob(db, job, stamped(closing), now(), options.scope),
     });
     const facts = () => ({ attempts: job.attempts, now: clock.now() });
     // stale already: no call is made for a version that is gone
@@ -320,7 +326,13 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
       lastCheckpoint: readCheckpoint(job),
       checkpoint(value, write) {
         const fields = kindSettings[job.kind]?.checkpointFields ?? [];
-        const saved = checkpointJob(db, job, { fields, value, ...(write && { write }) }, now());
+        const saved = checkpointJob(
+          db,
+          job,
+          { fields, value, ...(write && { write }) },
+          now(),
+          options.scope,
+        );
         if (saved !== "saved") {
           closed = saved;
           end(LOST);

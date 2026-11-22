@@ -50,6 +50,7 @@ import {
   listLiftableTombstones,
   findSources,
   listActiveInsights,
+  countScopePolicyDrops,
   listInvalidations,
   listProviderCalls,
   listSources,
@@ -519,6 +520,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
           recomputedByKind: r.recomputedByKind,
           at: r.at,
         })),
+        scopePolicyDrops: countScopePolicyDrops(options.db),
       },
       dataProtection: {
         legacyCleanup:

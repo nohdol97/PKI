@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(17);
-    expect(migrations).toHaveLength(17);
+    expect(schemaVersion(db)).toBe(18);
+    expect(migrations).toHaveLength(18);
   });
 
   it("is idempotent when re-run", () => {
@@ -486,6 +486,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "relations",
       "revisions",
       "schedules",
+      "scope_policy_drops",
       "settings",
       "source_versions",
       "sources",
@@ -1353,7 +1354,7 @@ describe("schema v17 (I01-T03, I01-R17)", () => {
     migrate(db, migrations.slice(0, 16));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(17);
+    expect(schemaVersion(db)).toBe(18);
     expect(columns("connector_instances")).toEqual(
       expect.arrayContaining(["rescan_pending", "deletions_may_be_missed"]),
     );
@@ -1376,5 +1377,60 @@ describe("schema v17 (I01-T03, I01-R17)", () => {
         "SELECT rescan_pending AS p, deletions_may_be_missed AS m FROM connector_instances WHERE id = 'd'",
       ),
     ).toEqual([{ p: 0, m: 0 }]);
+  });
+});
+
+describe("schema v18 (I04-T09, I04-R4, R11)", () => {
+  const source = () => {
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', '', 'e')",
+    );
+    return db.all("SELECT id FROM sources")[0]?.id as number;
+  };
+  const drop = (sourceId: number, over: Record<string, unknown> = {}) => {
+    const row = {
+      source_id: sourceId,
+      version: 1,
+      kind: "fact",
+      hash: "h1",
+      reason: "scope-policy",
+      ...over,
+    };
+    db.run(
+      "INSERT INTO scope_policy_drops (source_id, version, kind, item_key_hash, reason, at) VALUES (?, ?, ?, ?, ?, '2026-11-22T00:00:00Z')",
+      [row.source_id, row.version, row.kind, row.hash, row.reason] as never,
+    );
+  };
+
+  it("adds scope_policy_drops on top of a v17 database without touching its rows", () => {
+    migrate(db, migrations.slice(0, 17));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    migrate(db);
+    expect(schemaVersion(db)).toBe(18);
+    expect(columns("scope_policy_drops")).toEqual([
+      "id",
+      "source_id",
+      "version",
+      "kind",
+      "item_key_hash",
+      "reason",
+      "at",
+    ]);
+    expect(db.all("SELECT id FROM connector_instances")).toEqual([{ id: "c" }]);
+  });
+
+  it("holds one row per refused item, only for a stored source and only with the reason scope-policy", () => {
+    migrate(db);
+    const id = source();
+    drop(id);
+    expect(() => drop(id)).toThrow(); // the same refusal is recorded once
+    drop(id, { hash: "h2" });
+    drop(id, { version: 2 });
+    drop(id, { kind: "relation" });
+    expect(() => drop(id, { reason: "other", hash: "h3" })).toThrow();
+    expect(() => drop(id, { version: 0, hash: "h4" })).toThrow();
+    expect(() => drop(id + 1, { hash: "h5" })).toThrow(); // no such source
+    expect(db.all("SELECT count(*) AS n FROM scope_policy_drops")).toEqual([{ n: 4 }]);
   });
 });

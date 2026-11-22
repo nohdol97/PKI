@@ -18,7 +18,10 @@
 // that runs the registry, by its transaction, beside the counts the record keeps.
 import {
   createDerivativeRegistry,
+  defaultScopePolicy,
+  EXTRACT_JOB_KIND,
   listEvidence,
+  registerJob,
   setKnowledgeStatus,
   type Affected,
   type DerivativeKind,
@@ -130,6 +133,8 @@ const lineageOf: Record<string, (db: SqlDriver, id: number) => SourceVersionRef[
       ),
       [id, id, id],
     ),
+  "scope-drop": (db, id) =>
+    versionsOf(db, "SELECT source_id, version FROM scope_policy_drops WHERE id = ?", [id]),
   insight: (db, id) =>
     versionsOf(
       db,
@@ -280,26 +285,19 @@ const ITEM: DerivativeKind = {
  * An Insight on a collected item: gone with its item (cascade), or judged again
  * by the rule over the collected items that are left, in the same transaction, so
  * an explanation built from the deleted source is rebuilt without it (I04-R5, R8).
- * A scope change (I04-R15) deletes nothing: the Insights whose lineage holds the
- * source are judged again over their own items (the rule's outcome is the same
- * until I04-T09 adds `combinable`, which resolves or revives them).
+ * A scope change (I04-R15) deletes nothing: the Insights on the items the source's
+ * evidence reaches are judged again over their own items, under the policy
+ * (`combinable`): one whose sources can no longer be put together is resolved, and
+ * one that can again is revived in its row. The same judgement runs after a deletion.
  * Counted as recomputed when the rule changed its row.
  */
 const INSIGHT: DerivativeKind = {
   ...base("insight", "insight"),
   affected: (tx, change) => {
     const id = change.sourceId;
-    if (supported(change) === "scope-changed") {
-      return collect(
-        tx,
-        "insight",
-        `SELECT DISTINCT ie.insight_id AS id FROM insight_evidence ie
-           JOIN evidence e ON e.id = ie.evidence_id
-           JOIN source_versions v ON v.id = e.source_version_id
-         WHERE v.source_id = ? ORDER BY id`,
-        [id],
-      );
-    }
+    supported(change);
+    // the Insights on the items the source's evidence reaches, a resolved row included: a scope
+    // change may revive it, and a resolved row has no evidence link of its own to find it by
     return collect(
       tx,
       "insight",
@@ -319,7 +317,7 @@ const INSIGHT: DerivativeKind = {
           )
         : (ctx.collected.get("item") ?? []).map((a) => Number(a.ref.id));
     const remaining = ascending(items.filter((id) => stored(tx, "items", id)));
-    const outcomes = recomputeDependencyDelay(tx, remaining);
+    const outcomes = recomputeDependencyDelay(tx, remaining, ctx);
     const report = noting(ctx);
     if (report) {
       report.remainingItemIds = remaining;
@@ -332,34 +330,74 @@ const INSIGHT: DerivativeKind = {
   },
 };
 
+/**
+ * The records of what the scope policy left out (`scope_policy_drops`, schema v18, I04-R11).
+ * A deleted source's go with it. A scope change keeps them and queues the extraction of the
+ * latest version of every source that has one, since the policy's answer may differ now:
+ * the record does not say which source's scope made the refusal, so each source with a record
+ * is extracted again, and that extraction clears its records (extraction.ts). The job's
+ * target `scope-recompute:<record id>` is new each propagation, because the version's first
+ * extraction holds the key (kind, version, target '') and a second widening without a new
+ * version would find the same change sequence (I04-R15).
+ */
+const SCOPE_DROP: DerivativeKind = {
+  ...base("scope-drop", "knowledge"),
+  affected: (tx, change) => {
+    const mode = supported(change);
+    if (mode === "new-version") return [];
+    const where = mode === "deletion" ? "WHERE source_id = ?" : "";
+    return collect(
+      tx,
+      "scope-drop",
+      `SELECT id FROM scope_policy_drops ${where} ORDER BY id`,
+      mode === "deletion" ? [change.sourceId] : [],
+    );
+  },
+  invalidate: (ctx, snapshot, change) => {
+    const { tx } = ctx;
+    if (change.kind !== "scope-changed") {
+      let removed = 0;
+      for (const { ref } of snapshot) {
+        removed += tx.run("DELETE FROM scope_policy_drops WHERE id = ?", [Number(ref.id)]).changes;
+      }
+      return { removed, recomputed: 0 };
+    }
+    const sources = [
+      ...new Set(snapshot.flatMap(({ lineage }) => lineage.map((v) => v.sourceId))),
+    ].sort((a, b) => a - b);
+    let queued = 0;
+    for (const sourceId of sources) {
+      const latest = tx.all("SELECT max(version) AS v FROM source_versions WHERE source_id = ?", [
+        sourceId,
+      ])[0]?.v as number | null;
+      // a source with no version left has nothing to extract (its records went with it)
+      if (latest === null || latest === undefined) continue;
+      const job = registerJob(tx, {
+        kind: EXTRACT_JOB_KIND,
+        target: `${RECOMPUTE_PREFIX}${ctx.invalidationId}`,
+        sourceId,
+        fenceVersion: latest,
+        at: new Date(running?.at ?? Date.now()),
+      });
+      if (job.registered) queued++;
+    }
+    return { removed: 0, recomputed: queued };
+  },
+};
+
+/** The target of a re-extraction a scope change queued (I04-R15). */
+export const RECOMPUTE_PREFIX = "scope-recompute:";
+
 /** The canonical kinds in their registration order (the registry orders them by layer). */
 export const CANONICAL_KINDS: readonly DerivativeKind[] = Object.freeze([
   SOURCE,
   EVIDENCE,
   knowledgeKind("fact"),
   knowledgeKind("relation"),
+  SCOPE_DROP,
   ITEM,
   INSIGHT,
 ]);
-
-/**
- * No scope policy yet: its default arrives with I04-T09, and nothing reads
- * visible or scopesOf before I04-T08. Propagation does not consult it.
- */
-export const NO_POLICY_YET: ScopePolicy = {
-  compare: () => {
-    throw new Error("the scope policy arrives with I04-T09");
-  },
-  strictest: () => {
-    throw new Error("the scope policy arrives with I04-T09");
-  },
-  combinable: () => {
-    throw new Error("the scope policy arrives with I04-T09");
-  },
-  allows: () => {
-    throw new Error("the scope policy arrives with I04-T09");
-  },
-};
 
 /**
  * A registry of the product's kinds: the six canonical ones and the two projections. Its record's
@@ -388,9 +426,9 @@ export function createProductRegistry(options: {
 
 /**
  * The registry the entries run until the composition root hands them its own (the entries of
- * entries.ts take a registry): the same kinds, with no mark and the placeholder policy.
+ * entries.ts take a registry): the same kinds, with no mark and the default policy.
  */
-export const derivativeRegistry = createProductRegistry({ policy: NO_POLICY_YET });
+export const derivativeRegistry = createProductRegistry({ policy: defaultScopePolicy });
 
 /**
  * Runs the registry in `db`'s current transaction (the caller opens it) and

@@ -6,8 +6,8 @@
 // by no tombstone. assertLineage: every other source version an item came from
 // (a candidate item's evidence, say) is stored and covered by no tombstone; it need
 // not be the latest. A failure of either discards the WHOLE result: it is stale,
-// and the job closes superseded. A scope the policy refuses (`combinable`, I04-R14)
-// is not stale: it leaves out that item only and the rest is written.
+// and the job closes superseded. A scope the policy refuses (`combinable`, I04-R14; a policy that
+// errs refuses) is not stale: it leaves out that item only and the rest is written.
 import {
   scopesOfVersions,
   versionIsLive,
@@ -15,6 +15,7 @@ import {
   type SourceVersionRef,
   type StaleCause,
 } from "./derivatives.ts";
+import { mayCombine } from "./scope-policy.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 /** A result that no longer holds; `cause` is what commitDerived reports. */
@@ -96,8 +97,11 @@ export const commitDerived: CommitDerived = (tx, input) => {
   const dropped = [];
   let written = 0;
   for (const item of input.items) {
-    if (scope && !scope.policy.combinable(scopesOfVersions(tx, item.lineage))) {
-      dropped.push(scope.recordDrop(tx, item));
+    if (scope && !mayCombine(scope.policy, scopesOfVersions(tx, item.lineage))) {
+      // the version the record names: the job's input, else where the item's lineage begins
+      const anchor = input.source ?? item.lineage[0];
+      if (!anchor) throw new RangeError("a refused item has no source version to record it under");
+      dropped.push(scope.recordDrop(tx, item, anchor));
       continue;
     }
     item.write(tx);

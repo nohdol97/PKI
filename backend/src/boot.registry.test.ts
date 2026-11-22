@@ -2,12 +2,14 @@
 // runs it. A registry that differs from the default (one more kind that notes every change it is asked
 // about, and a `lineage` that notes every row it is asked about) is injected into `bootBackend`; each
 // path must show it: the screen's deletion (server entries), a Connector's sync (connector manager
-// entries), the JSONL import (importer entries) and the extraction's candidate lineage (runner registry).
-// Dropping the argument on any of the four leaves the path on the default registry and its test red.
+// entries), the JSONL import (importer entries), the extraction's candidate lineage (runner registry) and
+// the Broker's grade of a candidate by its lineage (I04-R16, I04-T09). Dropping the argument on any of
+// the five leaves the path on the default registry and its test red.
 import { routes, type ChangeSet, type Connector } from "@pki/contracts";
-import { NO_POLICY_YET, createProductRegistry } from "@pki/knowledge-engine";
+import { createProductRegistry } from "@pki/knowledge-engine";
 import {
   createDerivativeRegistry,
+  defaultScopePolicy,
   insertItem,
   registerConnectorInstance,
   saveSourceRecord,
@@ -56,10 +58,10 @@ function spied() {
     },
     invalidate: () => ({ removed: 0, recomputed: 0 }),
   };
-  const base = createProductRegistry({ policy: NO_POLICY_YET });
+  const base = createProductRegistry({ policy: defaultScopePolicy });
   const registry = createDerivativeRegistry({
     kinds: [...base.kinds, spy],
-    policy: NO_POLICY_YET,
+    policy: defaultScopePolicy,
   });
   const wrapped: DerivativeRegistry = {
     ...registry,
@@ -172,5 +174,25 @@ describe("the registry boot builds reaches the product paths", () => {
       text: readFileSync(resolve(FIXTURES, "v02-mail.jsonl"), "utf8"),
     });
     await vi.waitFor(() => expect(lineageKinds).toContain("item"));
+  });
+
+  it("the Broker's grade of a candidate by its lineage (productCalls registry)", async () => {
+    const { lineageKinds, registry } = spied();
+    const { db, post } = await boot(registry);
+    insertItem(db, {
+      type: "Project",
+      name: "미리내 프로젝트",
+      epistemic: "explicit",
+      status: "candidate",
+      validAt: null,
+      observedAt: "2026-11-21T00:00:00Z",
+    });
+    await post(routes.importJsonl.path, {
+      text: readFileSync(resolve(FIXTURES, "v02-mail.jsonl"), "utf8"),
+    });
+    // the extraction asks for the candidate's lineage once and the Broker asks again when it grades the call
+    await vi.waitFor(() =>
+      expect(lineageKinds.filter((k) => k === "item").length).toBeGreaterThanOrEqual(2),
+    );
   });
 });

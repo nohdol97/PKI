@@ -39,6 +39,7 @@ import {
   derivativeKindContract,
   MemoryKnowledgeEngine,
   MemoryVectorIndex,
+  seedLegacyTombstone,
   send,
   type DerivativeContractSubject,
 } from "@pki/testkit";
@@ -602,22 +603,45 @@ describe("the product's boot wiring (I04-T04)", () => {
     expect(removed).toEqual([String(saved.sourceId)]);
   });
 
-  it("hands out the engine only as the registry wraps it: the call goes through the registry's judgement, which the policy placeholder fails closed", async () => {
+  it("hands out the engine only as the registry wraps it: the call goes through the registry's judgement (a source a tombstone covers is not shown)", async () => {
     const held = new MemoryKnowledgeEngine();
     await bootAndDelete({ engine: held });
     const live = booted as NonNullable<typeof booted>;
-    // the double holds a source; the raw engine would return it
-    const kept = saveSourceRecord(live.db, "c", { externalId: "y", title: "y", body: "keeper" });
-    if (kept.status !== "created") throw new Error(kept.status);
-    await held.upsertSource(
-      { ref: { sourceId: String(kept.sourceId), version: 1 }, title: "y", body: "keeper" },
-      { version: 1 },
-      99,
-    );
-    expect(await held.relatedContext({ text: "keeper", limit: 5 })).toHaveLength(1); // the raw one answers
-    // the wrapped one asks the policy, which the product has not configured yet (I04-T09): closed, not open
-    await expect(live.engine.relatedContext({ text: "keeper", limit: 5 })).rejects.toThrow(
-      /scope policy/,
-    );
+    // the double holds two sources, one of them covered by a tombstone that has not been purged yet:
+    // the raw engine would return both
+    const hold = async (externalId: string) => {
+      const saved = saveSourceRecord(live.db, "c", {
+        externalId,
+        title: externalId,
+        body: "keeper",
+      });
+      if (saved.status !== "created") throw new Error(saved.status);
+      await held.upsertSource(
+        {
+          ref: { sourceId: String(saved.sourceId), version: 1 },
+          title: externalId,
+          body: "keeper",
+        },
+        { version: 1 },
+        99,
+      );
+      return saved.sourceId;
+    };
+    const kept = await hold("y");
+    const covered = await hold("z");
+    seedLegacyTombstone(live.db, {
+      sourceId: covered,
+      version: 1,
+      at: "2026-11-22T00:00:00.000Z",
+      reason: "source-deleted",
+    });
+    const ids = (hits: readonly { ref: { sourceId: string } }[]) =>
+      hits.map((h) => h.ref.sourceId).sort();
+    expect(ids(await held.relatedContext({ text: "keeper", limit: 5 }))).toEqual(
+      [String(kept), String(covered)].sort(),
+    ); // the raw one answers with both
+    expect(ids(await live.engine.relatedContext({ text: "keeper", limit: 5 }))).toEqual([
+      String(kept),
+    ]);
   });
 });

@@ -360,10 +360,14 @@ export const StatusResponseSchema = z.object({
   vectorIndex: ComponentStatusSchema,
   /**
    * I04-R4; Activity shows it (I03-T11). `recent`: the latest records, newest
-   * first. I04-T09 adds `scopePolicyDrops` (how many items the scope policy
-   * dropped) beside `recent`, with the table it counts.
+   * first. `scopePolicyDrops` (I04-T09): how many items the scope policy left out
+   * of an extraction and whose source has not been extracted again (the rows of
+   * `scope_policy_drops`; a number, never an item).
    */
-  invalidations: z.object({ recent: z.array(InvalidationSchema) }),
+  invalidations: z.object({
+    recent: z.array(InvalidationSchema),
+    scopePolicyDrops: z.number().int().nonnegative(),
+  }),
   /**
    * I04-R6, the screen's "데이터 보호" item. `legacyCleanup`: `pending` while the
    * one-time clean-up of earlier deletions' traces (FTS optimize + VACUUM) has not

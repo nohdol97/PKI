@@ -140,6 +140,7 @@ describe("invalidate.record", () => {
           at: AT,
         },
       ],
+      scopePolicyDrops: 0,
     });
 
     const record = JSON.stringify(db.all("SELECT * FROM invalidations"));
@@ -153,6 +154,7 @@ describe("invalidate.record", () => {
   it("is an empty list before any propagation", async () => {
     expect(routes.status.response.parse((await status()).body).invalidations).toEqual({
       recent: [],
+      scopePolicyDrops: 0,
     });
   });
 });
