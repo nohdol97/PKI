@@ -78,7 +78,7 @@
 
 ### 수직 흐름
 
-- [ ] **S14 수직 흐름을 설치본과 실제 Provider로 실행.** V02의 흐름(합성 출처 3개 → 일정 위험 Insight → 근거 화면)을 Windows 설치본에서 실제 Provider로 실행한다. 가져오기 뒤의 추출은 백그라운드 실행이므로 Provider는 둘 중 하나여야 한다: API 키 Provider(S05), 또는 목록에 등록되어 있고(S07) 백그라운드 설정을 켠 CLI. 필요한 것: S10이 끝난 환경. 확인: V02의 배포처 검증 실행기가 통과하고, 결과 기록에 Provider 종류가 "실제"로, 그리고 근거 인용문 대조에서 버려진 수가 적힌다(V02-C4, A21).
+- [ ] **S14 수직 흐름을 설치본과 실제 Provider로 실행.** V02의 흐름(합성 출처 3개 → 일정 위험 Insight → 근거 화면)을 Windows 설치본에서 실제 Provider로 실행한다. 가져오기 뒤의 추출은 백그라운드 실행이므로 Provider는 둘 중 하나여야 한다: API 키 Provider(S05), 또는 목록에 등록되어 있고(S07) 백그라운드 설정을 켠 CLI. 필요한 것: S10이 끝난 환경(R04의 설치 파일로 설치하고 데이터 폴더 `%LOCALAPPDATA%\PKI`가 빈 Windows 11), 기본 Provider로 고를 실제 Provider와 그 버전, Python 3. 실행: [verification/v02-site-flow/RUNBOOK.md](../verification/v02-site-flow/RUNBOOK.md)의 순서대로 `python verification\v02-site-flow\run.py preflight --config config.json` → `prepare --config config.json --out v02-result` → 사람이 화면 걸음(가져오기, "추론" 표지, 근거 3개, 재입력, 재시작) → 앱을 닫고 `record --config config.json --out v02-result --observed …`. Provider가 test double이거나 Windows 설치본이 아니면 실행기는 `배포처 후속`으로 시작하는 알림을 내고 3으로 끝난다(V02-H2). 확인: `record`가 `V02-C4:site-flow PASS`를 내고, 붙이는 결과 `v02-result/result.md`에 Provider 종류 `real`, Provider id와 버전, 앱 버전, 인용문 대조에서 버린 수(`dropped_quotes`)가 적힌다. 그 결과를 이슈 #17에 붙이고 `v02-result/raw/`는 붙이지 않는다(V02-C4, A21).
 - [ ] **S15 실제 수집 데이터에서의 품질 확인.** 실제 수집기로 가져온 자료에서 추출과 Insight가 쓸 만한지 배포처 안에서 확인한다. 필요한 것: S01~S04와 S11이 끝난 환경. 확인: 결과는 배포처 안에만 남긴다. 공용 저장소에는 범용 문제만 합성 재현 형태로 알린다([ownership.md 5절](ownership.md)).
 
 ### 문서 가져오기
@@ -88,6 +88,6 @@
 
 ## 3. 결과를 어디에 남기는가
 
-- R02·R03·R04의 실행 기록은 각 이슈(#11, #12, #13)에 남기고, R07(#37)에서 가정 표와 하나씩 대조한다.
+- R02·R03·R04의 실행 기록은 각 이슈(#11, #12, #13)에 남기고, R07(#37)에서 가정 표와 하나씩 대조한다. S14(V02 배포처 검증 실행기)의 결과는 이슈 #17에 남긴다.
 - 공용 이슈에 올릴 수 있는 것은 합성 입력의 결과와 환경의 일반 정보뿐이다. 주소, 계정, 업무 데이터는 올리지 않는다.
 - 실행하지 못한 항목은 "미검증"으로 남긴다. 이 저장소의 문서는 실행하지 않은 것을 통과로 적지 않는다.

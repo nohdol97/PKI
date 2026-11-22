@@ -1,0 +1,11 @@
+{
+  "_notice": "NEVER USED. Example only: copy to config.json after the R04 installer is installed. Values in <angle brackets> are placeholders. productName must equal the DisplayName of the installer's Windows uninstall entry; installedExe must lie under its InstallLocation. provider.kind must be real and provider.id one of openai-compatible, claude-code, codex (the app's default Provider). provider.version: the CLI version, or the model name for openai-compatible.",
+  "productName": "<PRODUCT-DISPLAY-NAME>",
+  "installedExe": "%LOCALAPPDATA%\\Programs\\<PRODUCT-FOLDER>\\<PRODUCT>.exe",
+  "provider": {
+    "kind": "real",
+    "id": "<openai-compatible | claude-code | codex>",
+    "name": "<same as id>",
+    "version": "<CLI VERSION or MODEL NAME>"
+  }
+}
