@@ -4,7 +4,7 @@
 // parser where a case needs a loop, a heap or a Buffer filler (testing/bomb-worker.ts).
 import { fork } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createIsolatedNormalizer,
   type HostHandle,
@@ -14,6 +14,9 @@ import {
 import { createForkSpawner } from "./spawn-node.ts";
 import { generateFixtures } from "./testing/generate-fixtures.ts";
 import { BOMB } from "./testing/time-bombs.ts";
+
+// real processes: a host and its worker take seconds to load on a busy machine
+vi.setConfig({ testTimeout: 90_000 });
 
 const here = (file: string) => fileURLToPath(new URL(file, import.meta.url));
 const BOMB_WORKER = here("./testing/bomb-worker.ts");
@@ -42,6 +45,8 @@ const until = async (condition: () => boolean, ms = 10_000) => {
 };
 
 const opened: HostHandle[] = [];
+/** When each host said it was ready: the clock of a job starts there. */
+const readyAt = new Map<HostHandle, number>();
 const normalizers: IsolatedNormalizer[] = [];
 /** Remembers every host, so a test can look at its process and none is left behind. */
 function watched(inner: HostSpawner): HostSpawner {
@@ -49,6 +54,9 @@ function watched(inner: HostSpawner): HostSpawner {
     spawn: async () => {
       const handle = await inner.spawn();
       opened.push(handle);
+      handle.onMessage((m) => {
+        if ((m as { type?: string }).type === "ready") readyAt.set(handle, performance.now());
+      });
       return handle;
     },
   };
@@ -124,9 +132,9 @@ describe("a loop that never yields (I02B-C16)", () => {
 
   it("is ended by the backend's clock at timeoutMs + 2 s when the host's own main thread is stuck too", async () => {
     const normalizer = make({ hostFile: HUNG_HOST, timeoutMs: 1_000 });
-    const started = performance.now();
     const result = await normalizer.normalize(small);
-    const elapsed = performance.now() - started;
+    const finished = performance.now();
+    const elapsed = finished - (readyAt.get(opened[0] as HostHandle) ?? finished);
     expect(result).toMatchObject({ ok: false, error: { code: "timed-out" } });
     expect(elapsed).toBeGreaterThanOrEqual(2_900);
     expect(elapsed).toBeLessThan(3_500);
@@ -147,7 +155,13 @@ describe("memory and other ends of a job (I02B-C16)", () => {
     const normalizer = make({ workerFile: BOMB_WORKER, timeoutMs: 30_000 });
     const running = normalizer.normalize(bomb(BOMB.wait));
     for (const round of [1, 2]) {
-      expect(await until(() => opened.length >= round)).toBe(true);
+      // the job is running once the host has said it is ready
+      expect(
+        await until(
+          () => opened.length >= round && readyAt.has(opened[round - 1] as HostHandle),
+          60_000,
+        ),
+      ).toBe(true);
       await sleep(300);
       process.kill(opened[round - 1]?.pid ?? 0, "SIGKILL");
     }
@@ -177,7 +191,15 @@ describe("memory and other ends of a job (I02B-C16)", () => {
       serialization: "advanced",
       stdio: ["ignore", "ignore", "ignore", "ipc"],
     });
-    await new Promise((resolve) => child.once("message", resolve));
+    const ready = new Promise((resolve) => child.once("message", resolve));
+    child.send({
+      type: "init",
+      maxHeapMb: 256,
+      maxExternalMemoryBytes: 1024 ** 3,
+      externalPollMs: 250,
+      timeoutMs: 30_000,
+    });
+    await ready;
     const pid = child.pid;
     child.disconnect();
     expect(await until(() => !alive(pid), 2_000)).toBe(true);

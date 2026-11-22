@@ -3,7 +3,7 @@
 // the limits; this file only runs the I02-A normalizer.
 import { parentPort } from "node:worker_threads";
 import { normalizeDocument } from "./normalize.ts";
-import type { WorkerJob, WorkerReply } from "./host-protocol.ts";
+import type { WorkerJob, WorkerReply, WorkerUp } from "./host-protocol.ts";
 
 if (parentPort === null) throw new Error("isolated-worker is a worker file");
 const port = parentPort;
@@ -22,3 +22,6 @@ port.on("message", (job: WorkerJob) => {
     port.postMessage(reply);
   });
 });
+
+// the imports above are evaluated: tell the host this worker can take a job
+port.postMessage({ type: "up" } satisfies WorkerUp);

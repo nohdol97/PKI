@@ -168,9 +168,10 @@ async function g23() {
     let peakTotal = 0;
     let peakExternal = 0;
     const outcome = new Promise<string>((resolve) => {
-      worker.once("message", (m: { result: { ok: boolean } }) =>
-        resolve(m.result.ok ? "finished-ok" : "finished-error"),
-      );
+      worker.on("message", (m: { type: string; result?: { ok: boolean } }) => {
+        // the worker says `up` first; the result is the message after the job
+        if (m.type === "result") resolve(m.result?.ok ? "finished-ok" : "finished-error");
+      });
       worker.once("error", (e: Error & { code?: string }) => resolve(`error:${e.code ?? e.name}`));
     });
     worker.postMessage({ type: "job", id: 1, bytes, name: "trigger.xlsx" });
@@ -209,6 +210,7 @@ async function forkControl() {
   });
   const hello = await new Promise<unknown>((resolve) => {
     child.once("message", resolve);
+    child.send({ type: "init", ...LIMITS, externalPollMs: 250, timeoutMs: 10_000 });
     setTimeout(() => resolve(null), 10_000);
   });
   child.kill("SIGKILL");

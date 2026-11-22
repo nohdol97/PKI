@@ -73,8 +73,8 @@ export interface IsolatedNormalizer {
 
 /** After `timeoutMs` the host ends itself; the backend ends it this much later (I02B-R23). */
 export const BACKSTOP_MS = 2_000;
-/** A host that is not up and ready by then is a spawn failure. */
-export const STARTUP_MS = 10_000;
+/** A host that is not up and ready (its worker has loaded the normalizer) by then is a spawn failure. */
+export const STARTUP_MS = 20_000;
 /** Different files in a row that died without a word before the canary is tried (I02B-R23). */
 export const CANARY_AFTER = 3;
 export const DEFAULT_EXTERNAL_POLL_MS = 250;

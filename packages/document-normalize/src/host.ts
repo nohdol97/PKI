@@ -20,6 +20,7 @@ import {
   type ParentKind,
   type WorkerJob,
   type WorkerReply,
+  type WorkerUp,
 } from "./host-protocol.ts";
 
 interface Channel {
@@ -92,7 +93,7 @@ let config: HostConfig | undefined;
 let worker: Worker | undefined;
 let active: Active | undefined;
 /** [bytes taken so far, when the test worker crossed the memory limit]: a test worker's record only. */
-const progress = new Float64Array(new SharedArrayBuffer(16));
+const progress = new BigInt64Array(new SharedArrayBuffer(16));
 
 /** Ends the job and then the process: every limit event ends the host (I02B-R23). */
 function end(code: HostLimitCode) {
@@ -100,7 +101,7 @@ function end(code: HostLimitCode) {
   if (job === undefined || job.done) return;
   job.done = true;
   clearTimeout(job.timer);
-  const crossedAtMs = progress[1] ?? 0;
+  const crossedAtMs = Number(Atomics.load(progress, 1));
   channel.post({
     type: "limit",
     id: job.id,
@@ -119,7 +120,15 @@ function startWorker(settings: HostConfig): Worker {
       maxExternalMemoryBytes: settings.maxExternalMemoryBytes,
     },
   });
-  next.on("message", (reply: WorkerReply) => {
+  next.on("message", (reply: WorkerReply | WorkerUp) => {
+    // the worker has loaded the normalizer: only now is the host ready, so a slow load is not a job's time
+    if (reply.type === "up") {
+      return channel.post({
+        type: "ready",
+        processType: (process as { type?: string }).type ?? null,
+        parentKind,
+      });
+    }
     if (active === undefined || active.done || reply.id !== active.id) return;
     active.done = true;
     clearTimeout(active.timer);
@@ -179,10 +188,4 @@ channel.onMessage((data) => {
   // a job before the settings, or while another runs, is a backend bug: the backend queues
   if (config === undefined || active !== undefined) return process.exit(1);
   run(message, config);
-});
-
-channel.post({
-  type: "ready",
-  processType: (process as { type?: string }).type ?? null,
-  parentKind,
 });

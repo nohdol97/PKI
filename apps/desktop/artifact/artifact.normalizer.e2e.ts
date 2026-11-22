@@ -203,3 +203,11 @@ test("a heap-filling worker at a small heap limit ends as resource-exceeded and 
     `G21: heap-fill at 128 MB ended ${fill.result.unexplainedDeath ? "with the host aborted (no word, retried)" : "with the worker ended by itself (the host reported it)"} in ${fill.ms} ms`,
   );
 });
+
+test("G23: the trigger XLSX's heap use inside Electron's V8 is recorded", async () => {
+  test.setTimeout(300_000);
+  const r = await run("g23", 280_000);
+  const rows = all(r, "g23");
+  expect(rows).toHaveLength(2);
+  for (const row of rows) expect(row.outcome).toMatch(/finished-ok|error:/);
+});

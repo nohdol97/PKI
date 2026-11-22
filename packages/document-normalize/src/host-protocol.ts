@@ -113,7 +113,10 @@ export function parseFromHost(raw: unknown): FromHost | undefined {
   return undefined;
 }
 
-/** The worker's side: one job in, one result out. */
+/** The worker's side: it says it is loaded (`up`), then one job in, one result out. */
+export interface WorkerUp {
+  type: "up";
+}
 export interface WorkerJob extends HostJob {
   type: "job";
 }

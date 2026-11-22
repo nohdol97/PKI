@@ -4,7 +4,7 @@
 // `--worker <this file>`; the product host never runs it.
 import { parentPort, workerData } from "node:worker_threads";
 import { normalizeDocument } from "../normalize.ts";
-import type { WorkerJob, WorkerReply } from "../host-protocol.ts";
+import type { WorkerJob, WorkerReply, WorkerUp } from "../host-protocol.ts";
 import { BOMB } from "./time-bombs.ts";
 
 if (parentPort === null) throw new Error("bomb-worker is a worker file");
@@ -13,7 +13,7 @@ const { progress, maxExternalMemoryBytes } = workerData as {
   progress: SharedArrayBuffer;
   maxExternalMemoryBytes: number;
 };
-const record = new Float64Array(progress);
+const record = new BigInt64Array(progress);
 
 port.on("message", (job: WorkerJob) => {
   if (job.name === BOMB.loop) {
@@ -33,8 +33,10 @@ port.on("message", (job: WorkerJob) => {
         block.fill(1);
         keep.push(block);
         total += block.length;
-        record[0] = total;
-        if (total > maxExternalMemoryBytes && record[1] === 0) record[1] = Date.now();
+        Atomics.store(record, 0, BigInt(total));
+        if (total > maxExternalMemoryBytes && Atomics.load(record, 1) === 0n) {
+          Atomics.store(record, 1, BigInt(Date.now()));
+        }
       }
     }
   } else if (job.name === BOMB.error) {
@@ -56,3 +58,5 @@ port.on("message", (job: WorkerJob) => {
     });
   }
 });
+
+port.postMessage({ type: "up" } satisfies WorkerUp);

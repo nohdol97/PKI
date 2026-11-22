@@ -8,7 +8,7 @@ import net from "node:net";
 import tls from "node:tls";
 import { parentPort } from "node:worker_threads";
 import { normalizeDocument } from "../normalize.ts";
-import type { WorkerJob, WorkerReply } from "../host-protocol.ts";
+import type { WorkerJob, WorkerReply, WorkerUp } from "../host-protocol.ts";
 
 if (parentPort === null) throw new Error("net-watch-worker is a worker file");
 const port = parentPort;
@@ -57,3 +57,5 @@ port.on("message", (job: WorkerJob) => {
     ...(job.format === undefined ? {} : { format: job.format }),
   }).then((result) => reply(job.id, result));
 });
+
+port.postMessage({ type: "up" } satisfies WorkerUp);
