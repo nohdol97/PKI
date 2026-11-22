@@ -144,8 +144,8 @@ describe("repository lint config enforces module-boundary", () => {
     /** An import of another package's file by path, written as a relative specifier from `file`. */
     const reach = (file: string, target: string) =>
       `import { x } from "${relative(dirname(join(repoRoot, file)), join(repoRoot, target))}";\nexport { x };\n`;
-    // every package name a file below could belong to (the root's, when the fork folders do not exist), so the
-    // option would open the import if it took effect
+    // every package name a file below could belong to (the root's, when the fork folders do not exist), with the
+    // file's own path in its package (an entry names one file), so the option would open the import if it took effect
     const allowList = [
       "pki",
       "@pki/backend",
@@ -158,7 +158,11 @@ describe("repository lint config enforces module-boundary", () => {
       "a block disable comment": `/* eslint-disable pki/module-boundary */\n${reach(file, target)}`,
       "a rule-setting comment that turns the rule off": `/* eslint pki/module-boundary: "off" */\n${reach(file, target)}`,
       "a rule-setting comment that gives the rule an allow-list": `/* eslint pki/module-boundary: ["error", {"allowRelative": ${JSON.stringify(
-        allowList.map((pkg) => ({ pkg, target: join(repoRoot, target) })),
+        allowList.map((pkg) => ({
+          pkg,
+          file: file.slice(file.indexOf("src/")),
+          target: join(repoRoot, target),
+        })),
       )}}] */\n${reach(file, target)}`,
     });
     const forkFiles = [
