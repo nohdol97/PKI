@@ -1,0 +1,411 @@
+"""I03-T13 (I03-R25, I03-H2) `site-verify.refuse`: the queue and scheduler recovery scenarios of the V02 site runner
+refuse outside the Windows installer (case 1) and, with the installer check swapped for a stand-in, without the operator's
+manual sleep-scenario confirmation record (case 2). The judge and the record form are checked on synthetic data. Nothing
+here is site evidence: the Windows branch was never run."""
+import contextlib
+import io
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import unittest
+
+try:
+    from . import _paths
+except ImportError:
+    import _paths
+
+from common import results
+
+KIT = "v02-site-flow"
+site = _paths.load_kit_module(KIT, "run.py", "i03_site_run")
+qs = site.queue_scenario  # the module run.py imported: one set of exception classes
+
+NOTICE = "배포처 후속"
+STARTED = "2026-11-22T01:00:00.000Z"
+SLEPT = "2026-11-22T01:10:00.000Z"
+WOKE = "2026-11-22T01:40:00.000Z"
+INSTALLED = lambda _cfg: "0.1.0"  # noqa: E731 - the stand-in for "this is the Windows installed build"
+
+
+def read(path):
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def write_json(path, obj):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh)
+
+
+def config(**over):
+    cfg = {"productName": "PKI", "installedExe": "C:\\Users\\u\\AppData\\Local\\Programs\\PKI\\PKI.exe", "expectedEffectRows": 3}
+    cfg.update(over)
+    return cfg
+
+
+def make_db(path, jobs=(), schedules=((0, 0),)):
+    """The columns read_queue_state reads (storage/src/migrations.ts v14-v15), as rows.
+    jobs: (kind, status, attempts, source_id, fence_version, schedule_id, slot); schedules: (coalesced, held_coalesced)."""
+    db = sqlite3.connect(path)
+    db.executescript("""
+        CREATE TABLE jobs (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL,
+                           source_id INTEGER, fence_version INTEGER, schedule_id INTEGER, slot INTEGER, target TEXT NOT NULL DEFAULT '');
+        CREATE TABLE schedules (id INTEGER PRIMARY KEY, coalesced_count INTEGER NOT NULL, held_coalesced_count INTEGER NOT NULL);
+    """)
+    db.executemany("INSERT INTO jobs (kind, status, attempts, source_id, fence_version, schedule_id, slot) VALUES (?,?,?,?,?,?,?)", jobs)
+    db.executemany("INSERT INTO schedules (coalesced_count, held_coalesced_count) VALUES (?,?)", schedules)
+    db.commit()
+    db.close()
+
+
+def good_jobs(n=3, attempts=1):
+    return [("extract", "succeeded", attempts if i else 2, i + 1, 1, None, None) for i in range(n)]
+
+
+def restart_at(out, started_at):
+    """Pins the state's start time, so a sleep record dated in 2026-11-22 is compared with a fixed start, not the clock."""
+    path = os.path.join(out, qs.STATE_FILE)
+    state = json.loads(read(path))
+    state["startedAt"] = started_at
+    write_json(path, state)
+
+
+def run_cli(*args):
+    return subprocess.run([sys.executable, os.path.join(_paths.VERIF_DIR, KIT, "run.py")] + list(args),
+                          capture_output=True, text=True, timeout=60)
+
+
+def run_main(argv, **kw):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = site.main(argv, **kw)
+    return code, out.getvalue(), err.getvalue()
+
+
+class SiteVerifyRefuse(unittest.TestCase):
+    """I03-H2 `site-verify.refuse`: one notice starting with `배포처 후속` on stdout, a non-zero exit, per case."""
+
+    def notice_lines(self, stdout):
+        return [l for l in stdout.splitlines() if l.startswith(NOTICE)]
+
+    def test_case_1_outside_a_windows_installer_is_refused_with_one_notice(self):
+        if sys.platform == "win32":
+            self.skipTest("this case needs a machine without the installed product")
+        for scenario in qs.SCENARIOS:
+            res = run_cli("queue-scenario", "record", "--scenario", scenario, "--config",
+                          os.path.join(tempfile.gettempdir(), "no-such-config.json"), "--out", tempfile.gettempdir())
+            self.assertNotEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertEqual(res.returncode, site.NOTICE_EXIT, scenario)
+            lines = self.notice_lines(res.stdout)
+            self.assertEqual(len(lines), 1, res.stdout + res.stderr)
+            self.assertIn("S19", lines[0])
+            self.assertIn("not-windows", lines[0])
+            self.assertEqual([l for l in res.stderr.splitlines() if NOTICE in l], [])
+
+    def test_case_1_every_action_goes_through_the_same_refusal_and_writes_nothing(self):
+        if sys.platform == "win32":
+            self.skipTest("this case needs a machine without the installed product")
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            path = os.path.join(d, "config.json")
+            write_json(path, config())
+            for action in ("preflight", "prepare", "record"):
+                res = run_cli("queue-scenario", action, "--scenario", "kill", "--config", path, "--out", out)
+                self.assertEqual(res.returncode, site.NOTICE_EXIT, action)
+                self.assertEqual(len(self.notice_lines(res.stdout)), 1, action)
+            self.assertEqual(os.listdir(out), [])
+
+    def test_case_2_installed_build_without_the_manual_sleep_record_is_refused_with_one_notice(self):
+        for scenario in qs.SLEEP_SCENARIOS:
+            with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+                path = os.path.join(d, "config.json")
+                write_json(path, config())
+                code, stdout, stderr = run_main(["queue-scenario", "record", "--scenario", scenario, "--config", path, "--out", out],
+                                                installer_check=INSTALLED, db_path=os.path.join(d, "pki.sqlite"))
+                self.assertNotEqual(code, 0, stdout + stderr)
+                self.assertEqual(code, site.NOTICE_EXIT, scenario)
+                lines = self.notice_lines(stdout)
+                self.assertEqual(len(lines), 1, stdout + stderr)
+                self.assertIn("S19", lines[0])
+                self.assertIn("sleep-record-missing", lines[0])
+                self.assertEqual(os.listdir(out), [])  # a refusal writes nothing
+
+    def test_case_2_a_record_that_does_not_fit_this_run_is_refused_too(self):
+        bad = {
+            "wrong-scenario": dict(scenario="hibernate", sleptAt=SLEPT, wokeAt=WOKE),
+            "too-short": dict(scenario="sleep", sleptAt=SLEPT, wokeAt="2026-11-22T01:15:00.000Z"),
+            "before-this-run": dict(scenario="sleep", sleptAt="2026-11-22T00:00:00.000Z", wokeAt="2026-11-22T00:30:00.000Z"),
+            "not-a-time": dict(scenario="sleep", sleptAt="yesterday", wokeAt=WOKE),
+            "extra-key": dict(scenario="sleep", sleptAt=SLEPT, wokeAt=WOKE, note="free text"),
+        }
+        for name, body in bad.items():
+            with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+                path = os.path.join(d, "config.json")
+                write_json(path, config())
+                db = os.path.join(d, "pki.sqlite")
+                make_db(db)
+                qs.prepare(db, out, "sleep")
+                restart_at(out, STARTED)
+                write_json(os.path.join(out, qs.SLEEP_RECORD_FILE), dict(schema=1, **body))
+                code, stdout, _err = run_main(["queue-scenario", "record", "--scenario", "sleep", "--config", path, "--out", out],
+                                              installer_check=INSTALLED, db_path=db)
+                self.assertEqual(code, site.NOTICE_EXIT, name)
+                self.assertEqual(len(self.notice_lines(stdout)), 1, name)
+                self.assertIn("sleep-record-invalid", stdout, name)
+
+    def test_the_other_scenarios_do_not_need_the_sleep_record(self):
+        for scenario in set(qs.SCENARIOS) - set(qs.SLEEP_SCENARIOS):
+            with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+                path = os.path.join(d, "config.json")
+                write_json(path, config())
+                db = os.path.join(d, "pki.sqlite")
+                make_db(db)
+                qs.prepare(db, out, scenario)
+                code, stdout, _err = run_main(["queue-scenario", "record", "--scenario", scenario, "--config", path, "--out", out],
+                                              installer_check=INSTALLED, db_path=db)
+                self.assertNotEqual(code, site.NOTICE_EXIT, scenario + stdout)  # judged INCONCLUSIVE, not refused
+                self.assertEqual(self.notice_lines(stdout), [], scenario)
+
+    def test_on_windows_the_installer_check_is_the_v02_one_with_the_s19_notice(self):
+        entries = [{"DisplayName": "PKI", "InstallLocation": "C:\\Users\\u\\AppData\\Local\\Programs\\PKI", "DisplayVersion": "0.1.0"}]
+        self.assertEqual(site.queue_gate(config(), platform="win32", read_uninstall=lambda: entries, is_file=lambda _p: True,
+                                         in_git_tree=lambda _p: False), "0.1.0")
+        with self.assertRaises(site.Refusal) as ctx:
+            site.queue_gate(config(), platform="win32", read_uninstall=lambda: [], is_file=lambda _p: True, in_git_tree=lambda _p: False)
+        self.assertTrue(ctx.exception.notice.startswith(NOTICE))
+        self.assertIn("S19", ctx.exception.notice)
+        self.assertEqual(ctx.exception.code, "not-installed")
+        with self.assertRaises(site.Refusal) as ctx:
+            site.queue_gate(config(), platform="darwin", read_uninstall=lambda: [], is_file=lambda _p: True, in_git_tree=lambda _p: False)
+        self.assertEqual(ctx.exception.code, "not-windows")
+
+    def test_there_is_no_command_line_way_to_swap_the_installer_check(self):
+        res = run_cli("queue-scenario", "preflight", "--scenario", "kill", "--config", "x.json", "--installer-check", "ok")
+        self.assertEqual(res.returncode, 2, res.stdout + res.stderr)  # argparse: unknown argument
+        self.assertEqual(self.notice_lines(res.stdout), [])
+
+
+class QueueConfig(unittest.TestCase):
+    def test_a_valid_config(self):
+        self.assertEqual(qs.validate_config(config())["expectedEffectRows"], 3)
+
+    def test_bad_configs_are_refused(self):
+        for bad in (config(expectedEffectRows=0), config(expectedEffectRows="3"), config(expectedEffectRows=True),
+                    config(expectedEffectRows=None), {"productName": "PKI"}, [], config(productName=1)):
+            with self.assertRaises(site.ConfigError, msg=repr(bad)):
+                qs.validate_config(bad)
+
+
+class ReadState(unittest.TestCase):
+    def snap(self, jobs, schedules=((0, 0),), baseline=None):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pki.sqlite")
+            make_db(path, jobs, schedules)
+            return qs.read_queue_state(path, baseline or {"maxJobId": 0, "mergedSlots": 0})
+
+    def test_counts_effects_reclaims_and_merges(self):
+        s = self.snap(good_jobs(3), schedules=((4, 1), (2, 0)))
+        self.assertEqual((s["effectRows"], s["reclaimedJobs"], s["mergedSlots"]), (3, 1, 7))
+        self.assertEqual(s["jobsByStatus"], {"succeeded": 3})
+        self.assertEqual((s["duplicateEffects"], s["duplicateSlotJobs"]), (0, 0))
+
+    def test_only_jobs_after_the_baseline_and_merges_above_it_count(self):
+        s = self.snap(good_jobs(3), schedules=((4, 1),), baseline={"maxJobId": 2, "mergedSlots": 4})
+        self.assertEqual((s["effectRows"], s["mergedSlots"]), (1, 1))
+
+    def test_a_source_version_with_two_succeeded_extractions_is_a_duplicate_effect(self):
+        s = self.snap([("extract", "succeeded", 1, 1, 1, None, None), ("extract", "succeeded", 1, 1, 1, None, None)])
+        self.assertEqual((s["effectRows"], s["duplicateEffects"]), (2, 1))
+
+    def test_two_jobs_of_one_schedule_slot_are_a_duplicate_slot(self):
+        s = self.snap([("connector-sync", "succeeded", 1, None, None, 1, 100), ("connector-sync", "succeeded", 1, None, None, 1, 100),
+                       ("connector-sync", "succeeded", 1, None, None, 1, 101)])
+        self.assertEqual(s["duplicateSlotJobs"], 1)
+
+    def test_the_database_is_opened_read_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pki.sqlite")
+            make_db(path, good_jobs())
+            before = os.path.getmtime(path)
+            qs.read_queue_state(path, {"maxJobId": 0, "mergedSlots": 0})
+            self.assertEqual(os.path.getmtime(path), before)
+            self.assertEqual(sorted(os.listdir(d)), ["pki.sqlite"])
+
+
+def snapshot(**over):
+    base = {"jobsByStatus": {"succeeded": 3}, "effectRows": 3, "reclaimedJobs": 1, "mergedSlots": 5, "duplicateEffects": 0,
+            "duplicateSlotJobs": 0}
+    base.update(over)
+    return base
+
+
+def verdict(scenario="kill", snap=None, observed=None, expected=3):
+    return qs.judge(scenario, list(qs.OBSERVATIONS[scenario] if observed is None else observed), snap or snapshot(), expected)
+
+
+class Judge(unittest.TestCase):
+    def test_every_scenario_can_pass(self):
+        for scenario in qs.SCENARIOS:
+            self.assertEqual(verdict(scenario), "PASS", scenario)
+
+    def test_a_wrong_effect_count_or_a_duplicate_fails(self):
+        for scenario in qs.SCENARIOS:
+            for snap in (snapshot(effectRows=4), snapshot(effectRows=2), snapshot(duplicateEffects=1), snapshot(duplicateSlotJobs=1),
+                         snapshot(jobsByStatus={"succeeded": 2, "dead_letter": 1})):
+                self.assertEqual(verdict(scenario, snap), "FAIL", (scenario, snap))
+
+    def test_unfinished_jobs_are_inconclusive(self):
+        for status in ("queued", "running", "retry", "held"):
+            self.assertEqual(verdict(snap=snapshot(jobsByStatus={"succeeded": 3, status: 1})), "INCONCLUSIVE", status)
+
+    def test_a_kill_that_reclaimed_nothing_proves_nothing(self):
+        self.assertEqual(verdict("kill", snapshot(reclaimedJobs=0)), "INCONCLUSIVE")
+
+    def test_a_wake_or_clock_jump_that_merged_nothing_proves_nothing(self):
+        for scenario in ("sleep", "hibernate", "clock-forward"):
+            self.assertEqual(verdict(scenario, snapshot(mergedSlots=0)), "INCONCLUSIVE", scenario)
+
+    def test_a_missing_observation_is_inconclusive_for_each_word_of_each_scenario(self):
+        for scenario in qs.SCENARIOS:
+            words = list(qs.OBSERVATIONS[scenario])
+            self.assertIn("launched-installed", words)
+            for word in words:
+                self.assertEqual(verdict(scenario, observed=[w for w in words if w != word]), "INCONCLUSIVE", (scenario, word))
+
+    def test_fail_outranks_inconclusive(self):
+        self.assertEqual(verdict("kill", snapshot(effectRows=4, reclaimedJobs=0), observed=[]), "FAIL")
+
+    def test_each_scenario_has_its_own_words_and_the_listed_scenarios_are_the_six(self):
+        self.assertEqual(qs.SCENARIOS, ("kill", "sleep", "hibernate", "clock-forward", "clock-back", "timezone"))
+        self.assertEqual(qs.SLEEP_SCENARIOS, ("sleep", "hibernate"))
+
+
+class PrepareState(unittest.TestCase):
+    def test_prepare_writes_the_baseline_and_a_second_prepare_overwrites_it(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            db = os.path.join(d, "pki.sqlite")
+            make_db(db, good_jobs(2), schedules=((3, 1),))
+            qs.prepare(db, out, "sleep")
+            started, scenario, baseline = qs.load_state(out)
+            self.assertEqual((scenario, baseline), ("sleep", {"maxJobId": 2, "mergedSlots": 4}))
+            self.assertTrue(started.endswith("Z"))
+
+    def test_prepare_without_a_database_baselines_zero(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            qs.prepare(os.path.join(d, "none.sqlite"), out, "kill")
+            self.assertEqual(qs.load_state(out)[2], {"maxJobId": 0, "mergedSlots": 0})
+
+    def test_a_state_of_another_scenario_is_refused_at_record_time(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            db = os.path.join(d, "pki.sqlite")
+            make_db(db)
+            qs.prepare(db, out, "kill")
+            path = os.path.join(d, "config.json")
+            write_json(path, config())
+            code, _o, err = run_main(["queue-scenario", "record", "--scenario", "clock-back", "--config", path, "--out", out],
+                                     installer_check=INSTALLED, db_path=db)
+            self.assertEqual(code, site.CONFIG_EXIT, err)
+
+
+class RecordWriting(unittest.TestCase):
+    def write(self, verdict_="PASS", snap=None, out=None, scenario="kill"):
+        words = list(qs.OBSERVATIONS[scenario])
+        record = qs.build_record(config(), "0.1.0", scenario, snap or snapshot(), verdict_, words, STARTED)
+        return record, qs.write_results(record, verdict_, words, out, [])
+
+    def test_the_record_holds_the_r25_fields(self):
+        with tempfile.TemporaryDirectory() as out:
+            record, _ = self.write(out=out)
+            for key in ("os", "appVersion", "scenario", "observed", "effectRows", "mergedSlots"):
+                self.assertIn(key, record)
+            self.assertEqual((record["scenario"], record["effectRows"], record["mergedSlots"], record["appVersion"]),
+                             ("kill", 3, 5, "0.1.0"))
+            self.assertEqual(record["observed"], list(qs.OBSERVATIONS["kill"]))
+
+    def test_the_pasteable_result_validates_and_says_which_check(self):
+        for scenario in qs.SCENARIOS:
+            with tempfile.TemporaryDirectory() as out:
+                _, (json_path, md_path) = self.write(out=out, scenario=scenario)
+                obj = json.loads(read(json_path))
+                self.assertEqual(results.validate_result(obj), [], scenario)
+                check = obj["checks"][0]
+                self.assertEqual(check["id"], "I03-C2:queue-scenario")
+                self.assertEqual(check["verdict"], "PASS")
+                self.assertEqual(check["facts"]["scenario"], scenario)
+                self.assertEqual(check["facts"]["effect_rows"], 3)
+                self.assertIn("unit_tests_not_site_evidence", obj["notes"])
+                self.assertTrue(os.path.exists(os.path.join(out, "raw", "run-record.queue-scenario.{}.json".format(scenario))))
+                self.assertIn(scenario, read(md_path))
+
+    def test_the_runbook_lists_exactly_the_facts_the_runner_writes(self):
+        import re
+        runbook = read(os.path.join(_paths.VERIF_DIR, KIT, "RUNBOOK.md"))
+        section = runbook.split("## 9.", 1)[1]
+        paragraph = section.split("**붙이는 것.**", 1)[1].split("\n\n", 1)[0].split("`raw", 1)[0]
+        listed = set(re.findall(r"`([a-z]+(?:_[a-z]+)*)`", paragraph))
+        with tempfile.TemporaryDirectory() as out:
+            _, (json_path, _md) = self.write(out=out)
+            written = set(json.loads(read(json_path))["checks"][0]["facts"])
+        self.assertEqual(listed, written)
+
+    def test_a_failed_run_is_recorded_as_failed(self):
+        with tempfile.TemporaryDirectory() as out:
+            record, (json_path, _) = self.write("FAIL", snapshot(effectRows=4), out)
+            self.assertEqual(record["status"], "failed")
+            self.assertEqual(json.loads(read(json_path))["checks"][0]["verdict"], "FAIL")
+
+
+class WholeRun(unittest.TestCase):
+    """prepare, then record with the installer stand-in: the pieces line up end to end."""
+
+    def test_a_passing_kill_run(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            db = os.path.join(d, "pki.sqlite")
+            make_db(db)
+            path = os.path.join(d, "config.json")
+            write_json(path, config())
+            code, stdout, err = run_main(["queue-scenario", "prepare", "--scenario", "kill", "--config", path, "--out", out],
+                                         installer_check=INSTALLED, db_path=db)
+            self.assertEqual(code, 0, stdout + err)
+            conn = sqlite3.connect(db)
+            conn.executemany("INSERT INTO jobs (kind, status, attempts, source_id, fence_version) VALUES ('extract', 'succeeded', ?, ?, 1)",
+                             [(2, 1), (1, 2), (1, 3)])
+            conn.commit()
+            conn.close()
+            argv = ["queue-scenario", "record", "--scenario", "kill", "--config", path, "--out", out]
+            for word in qs.OBSERVATIONS["kill"]:
+                argv += ["--observed", word]
+            code, stdout, err = run_main(argv, installer_check=INSTALLED, db_path=db)
+            self.assertEqual(code, 0, stdout + err)
+            self.assertIn("I03-C2:queue-scenario PASS", stdout)
+            obj = json.loads(read(os.path.join(out, "result.json")))
+            self.assertEqual(obj["checks"][0]["verdict"], "PASS")
+
+    def test_a_passing_sleep_run_with_the_manual_record(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            db = os.path.join(d, "pki.sqlite")
+            make_db(db)
+            path = os.path.join(d, "config.json")
+            write_json(path, config())
+            run_main(["queue-scenario", "prepare", "--scenario", "sleep", "--config", path, "--out", out],
+                     installer_check=INSTALLED, db_path=db)
+            conn = sqlite3.connect(db)
+            conn.executemany("INSERT INTO jobs (kind, status, attempts, source_id, fence_version) VALUES ('extract', 'succeeded', 1, ?, 1)",
+                             [(1,), (2,), (3,)])
+            conn.execute("UPDATE schedules SET coalesced_count = 5")
+            conn.commit()
+            conn.close()
+            write_json(os.path.join(out, qs.SLEEP_RECORD_FILE), {"schema": 1, "scenario": "sleep", "sleptAt": SLEPT, "wokeAt": WOKE})
+            restart_at(out, STARTED)  # the run started before the sleep: the record is "after prepare"
+            argv = ["queue-scenario", "record", "--scenario", "sleep", "--config", path, "--out", out]
+            for word in qs.OBSERVATIONS["sleep"]:
+                argv += ["--observed", word]
+            code, stdout, err = run_main(argv, installer_check=INSTALLED, db_path=db)
+            self.assertEqual(code, 0, stdout + err)
+            self.assertIn("PASS", stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

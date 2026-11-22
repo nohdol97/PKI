@@ -103,3 +103,46 @@ C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요
 **붙이는 것.** `v02-result\result.md`만. 허용 목록의 값은 다음 열두 가지입니다: `collector_kind`(수집기 종류), `app_version`, `deleted_source_deleted`·`deleted_access_revoked`·`deleted_user_deleted`(종류별 지운 수), `canaries_found`(파일에서 찾은 지운 카나리 수), `index_canaries_found`(색인에 남은 지운 카나리 수), `control_canary_found`·`control_canary_in_index`(대조군이 파일·색인에서 찾아졌는지), `unreadable_paths`(읽을 수 없던 경로 수), `observed`(관찰 단어), `kit_commit`. `raw\`, `config`, 상태 파일(카나리 단어가 있음)은 붙이지 않습니다. 결과는 이슈 #21에 남깁니다.
 
 **이 절차가 확인하지 못하는 것(미검증으로 둡니다).** 화면과 투영 작업은 사람의 관찰입니다. 찾기는 위 세 곳의 파일 바이트만 봅니다: OS 백업·볼륨 스냅샷, 지운 파일 조각, 임시 폴더, 크래시 덤프, 페이지 파일, Provider 쪽 보관은 보지 않습니다(S11, S05·S08). 파일 안에서도 다음 꼴은 못 봅니다: 압축되었거나 접두 압축된 저장소(엔진의 FST·LZ4, Snappy 등. 그 안의 글자는 바이트로 나타나지 않습니다), 암호화된 저장소, SQLite 페이지 경계에서 둘로 나뉘어 저장된 글, UTF-16 밖의 인코딩(zlib·base64 등). 키워드 색인에 단어가 남았는지는 `fts5vocab`이 논리적으로 묻지만(바이트가 아니라 색인이 가진 단어 목록), 압축된 파일 안의 글자는 그것으로도 보지 못합니다. 엔진·벡터 색인이 이런 형식이면 그 구현의 자체 확인 수단(저장된 단어를 묻는 명령)을 배포처가 따로 씁니다. 알림 영역에서 앱이 꺼졌는지는 사람이 확인합니다. 어느 실행 파일이 DB를 썼는지는 7절과 같이 확인하지 못합니다.
+
+## 9. 큐·스케줄러 복구 시나리오: 강제 종료, 절전·최대 절전, 시계, 시간대 (S19, I03-R25)
+
+> **상태: 작성만 됨 — 실행된 적 없음.** Windows에서 돌려 본 적이 없습니다. 사외에서는 거부 경로와 판정·기록 형식만 합성 자료로 단위 시험했습니다. 그 통과는 배포처 결과가 아닙니다. 스펙: [I03 spec](../../docs/specs/2026-11-21-I03-persistent-queue.md) I03-R25, 배포처 항목: [site-setup.md S19](../../docs/site-setup.md).
+
+**무엇을 증명하나.** 설치된 앱에서 가져오기 뒤의 추출 작업이 도는 도중, 또는 주기 작업이 기다리는 동안 다음 여섯 가지를 겪어도 ① 끝나지 않은 작업이 다시 집혀 끝나고 ② 작업의 결과는 한 번만 남고 ③ 놓친 주기는 작업 하나로 합쳐지고 ④ 포기한 작업이 없다는 것을 정본의 작업 표로 확인합니다. 시나리오는 `kill`(실행 중 강제 종료), `sleep`(절전에서 깨어남), `hibernate`(최대 절전에서 깨어남), `clock-forward`(시계를 앞으로), `clock-back`(시계를 뒤로), `timezone`(시간대 변경)입니다. 하나씩 따로 실행하고 결과도 시나리오마다 따로 남깁니다.
+
+**용어.** *slot*: 주기의 예정 시각 하나(10분 주기면 10분마다 하나). *합쳐진 slot*: 앱이 꺼졌거나 PC가 잠든 사이 놓친 slot을 작업 하나로 합친 수. *효과 행*: 이 실행기가 센 결과의 수. **성공한 추출 작업**이며(원본 버전마다 하나), 파생 지식의 행은 따로 세지 않습니다. 결과가 두 번 남았는지는 같은 원본 버전의 성공한 추출이 둘인지로 봅니다. *다시 집힘*: 끊긴 작업이 임대 기한이 지난 뒤 다시 실행기에 잡혀 시도 횟수 2로 끝난 것.
+
+**준비.** 3절의 준비와 같되 설정은 `queue-config.example.json`을 `v02-result\queue-config.json`으로 복사해 채웁니다(`productName`, `installedExe`, `expectedEffectRows`: 시나리오마다 가져올 합성 원본의 수. 기본 3). 이 실행기는 Provider를 묻지 않지만, 추출이 실제로 돌려면 3절·4절처럼 실제 Provider가 설정되어 있어야 합니다. 시나리오마다 **새 합성 원본 셋**(V02의 `v02-plain.jsonl`의 제목과 본문 문구를 바꾼 것)을 씁니다. 같은 글을 다시 가져오면 중복으로 걸러져 추출이 새로 돌지 않습니다. 데이터 폴더가 비어 있지 않아도 됩니다. 시나리오마다 `prepare` 때의 작업 표 상태를 기준으로 그 뒤의 것만 셉니다.
+
+| 순서 | 할 일 | 확인 |
+|---|---|---|
+| 1 | `python verification\v02-site-flow\run.py queue-scenario preflight --scenario <이름> --config v02-result\queue-config.json` | `preflight ok`. 설치본이 아니거나 Windows가 아니면 `배포처 후속`으로 시작하는 알림과 종료 값 3 |
+| 2 | 같은 명령에서 `preflight`를 `prepare`로 바꾸고 `--out v02-result`를 붙입니다 | `queue-scenario-state.json`이 생김(시나리오 이름과 기준이 들어 있음) |
+| 3 | 아래 시나리오별 절차를 합니다 | 시나리오별 관찰 단어 |
+| 4 | 앱을 켠 채로 작업이 모두 끝나고(활동 화면에 끝나지 않은 작업 0) 앱을 **완전히 닫습니다**(알림 영역 포함) | |
+| 5 | `prepare`를 `record`로 바꾸고 `--observed <단어>`를 확인한 만큼 붙입니다 | `I03-C2:queue-scenario PASS`(종료 값 0). 어긋남은 `FAIL`, 증거가 없거나 관찰이 빠지면 `INCONCLUSIVE`(종료 값 1) |
+
+**시나리오별 절차.** 모든 시나리오는 설치된 exe로만 앱을 켭니다(`launched-installed`). 합성 원본 셋을 가져온 직후, 추출이 도는 동안에 시작합니다.
+
+| 시나리오 | 할 일 | 관찰 단어 |
+|---|---|---|
+| `kill` | 활동 화면에서 작업이 `running`인 것을 본 순간 작업 관리자로 앱과 백엔드 프로세스를 **강제로 끝냅니다**(정상 종료가 아니다). 임대 기한(기본 2분)이 지나도록 기다린 뒤 설치된 exe로 다시 켭니다. 끊긴 작업이 다시 집혀 끝나는 것을 봅니다 | `killed-while-running`, `restarted-installed`, `no-duplicate-visible`(같은 원본에 결과가 둘로 보이지 않음) |
+| `sleep` | 합성 원본을 가져온 뒤 10분 주기의 작업(또는 1시간 주기를 10분 주기로 바꾼 것)이 기다리는 중에 PC를 **절전**으로 보내고 10분 넘게 둡니다. 깨우고, 앱이 켜진 채 살아 있는지 봅니다. 활동 화면의 그 주기에서 합쳐진 수와 놓친 수를 봅니다. **PC를 재우기 전에 아래 수동 확인 기록을 적습니다** | `slept-with-work-due`, `woke-app-running`, `merge-visible` |
+| `hibernate` | `sleep`과 같되 PC를 **최대 절전**으로 보냅니다(`powercfg /a`로 최대 절전이 켜진 것을 먼저 확인) | `hibernated-with-work-due`, `woke-app-running`, `merge-visible` |
+| `clock-forward` | 앱이 켜진 채로 Windows 시계를 **8시간 앞으로** 옮기고(자동 시간 설정을 끈 뒤) 다음 점검(30초)을 기다려 활동 화면의 합쳐진 수를 봅니다. 시계를 **원래대로** 돌립니다 | `clock-moved-forward`, `clock-restored`, `merge-visible` |
+| `clock-back` | 앱이 켜진 채로 시계를 **8시간 뒤로** 옮기고 한 시간 안에 다음 점검을 몇 번 기다립니다. 같은 주기가 같은 시각에 다시 돌지 않는지, 작업이 임대 때문에 영구히 막히지 않는지 봅니다. 시계를 **원래대로** 돌립니다 | `clock-moved-back`, `clock-restored`, `no-rerun-visible` |
+| `timezone` | 앱이 켜진 채로 Windows 시간대를 다른 곳(예: 9시간 이상 차이)으로 바꾸고 다음 점검을 기다립니다. 매일·매주 주기의 다음 실행 시각이 새 시간대로 맞춰지는지, 같은 날 다시 돌지 않는지 봅니다. 바꾼 시간대가 앱에 늦게(다시 켠 뒤에) 반영되면 그것을 기록에 적습니다(가정 I03-A5). 시간대를 **원래대로** 돌립니다 | `timezone-changed`, `timezone-restored`, `no-rerun-visible` |
+
+**절전·최대 절전의 수동 확인 기록.** 실행기는 PC를 재울 수 없고 재웠는지 볼 수도 없습니다. `sleep`과 `hibernate`는 재우기 **전에** 사람이 `v02-result\sleep-confirmation.json`을 적고(`prepare` 뒤에), 깨운 뒤 `wokeAt`을 채웁니다. 이 기록이 없으면 `record`는 `배포처 후속`으로 시작하는 알림을 내고 종료 값 3으로 끝나며(이유 `sleep-record-missing`) 아무것도 쓰지 않습니다. 기록이 이 실행과 맞지 않아도 같습니다(이유 `sleep-record-invalid`): 필드가 정확히 아래 넷이 아님, 시나리오 이름이 다름, 시각이 형식에 맞지 않음, 재운 시각이 `prepare`보다 앞섬, 잔 시간이 10분(가장 짧은 주기)보다 짧음.
+
+```json
+{ "schema": 1, "scenario": "sleep", "sleptAt": "2026-01-01T01:10:00.000Z", "wokeAt": "2026-01-01T01:40:00.000Z" }
+```
+
+(시각은 UTC이며 위는 형식의 예입니다. `hibernate`는 `scenario`를 그 이름으로 씁니다. 이 파일에는 시각 둘 말고 다른 글을 넣지 않습니다. 넣으면 `sleep-record-invalid`입니다.)
+
+**판정.** `PASS`는 시나리오마다 다음을 모두 만족할 때만입니다: 효과 행이 `expectedEffectRows`와 같음, 같은 원본 버전의 성공한 추출이 둘인 것(중복 효과)과 같은 주기·slot의 작업이 둘인 것(중복 slot)이 0, 포기한 작업(`dead_letter`)이 0, 끝나지 않은 작업이 0, 시나리오의 증거가 있음(`kill`: 다시 집혀 끝난 작업이 1개 이상, `sleep`·`hibernate`·`clock-forward`: 합쳐진 slot이 1 이상), 그 시나리오의 관찰 단어가 모두 있음. 효과 행이 다르거나 중복이 있거나 포기한 작업이 있으면 `FAIL`, 끝나지 않은 작업이 남았거나 증거가 없거나 관찰이 빠지면 `INCONCLUSIVE`입니다(종료 값 1). `FAIL`이면 그 작업 표를 배포처 안에서 열어 어느 작업인지 찾습니다. 그 내용은 결과에 적히지 않습니다.
+
+**붙이는 것.** `v02-result\result.md`만. 허용 목록의 값은 다음 열한 가지입니다: `scenario`, `app_version`, `effect_rows`(성공한 추출 작업 수), `merged_slots`(합쳐진 slot 수), `reclaimed_jobs`(다시 집혀 끝난 작업 수), `duplicate_effects`, `duplicate_slot_jobs`, `jobs_open`(끝나지 않은 작업 수), `jobs_dead_letter`(포기한 작업 수), `observed`(관찰 단어), `kit_commit`. `raw\`, `config`, 상태 파일, 수동 확인 기록은 붙이지 않습니다. 결과는 이슈 #20(I03)에 남깁니다. 여섯 시나리오를 모두 실행하기 전에는 S19를 끝났다고 적지 않습니다.
+
+**이 절차가 확인하지 못하는 것(미검증으로 둡니다).** 전원 차단(플러그를 뽑는 것)은 하지 않습니다. 정본 SQLite의 갑작스러운 종료 내성은 A20(S13)의 몫입니다. 화면, 강제 종료, 절전, 시계·시간대 변경은 모두 사람의 관찰이며 실행기는 그 사건을 보지 못합니다. 효과 행은 성공한 추출 작업의 수이고 파생 지식의 행 수가 아닙니다. Provider 호출이 두 번 일어났는지는 이 절차가 보지 않습니다(두 번 호출은 막지 못하며 예산으로 셉니다. I03 spec C1). 절전 중 Broker 시간 제한과 CLI 프로세스 트리 종료(I03-A2)는 `woke-app-running`과 작업이 끝났다는 사실로만 간접히 보입니다. 바꾼 시간대를 프로세스가 바로 따르는지(I03-A5)는 `timezone`의 사람 관찰입니다. 어느 실행 파일이 DB를 썼는지는 7절과 같이 확인하지 못합니다.
