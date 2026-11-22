@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { routes, type RouteName } from "@pki/contracts";
 import { send, sendRaw } from "@pki/testkit";
 import { productAdapters, productEgress } from "./composition.ts";
-import type { ConnectorManager } from "./connectors.ts";
+import type { ConnectorManager, ConnectorRebuild } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
 const TOKEN = "t".repeat(43);
@@ -18,11 +18,17 @@ let server: RunningServer;
 let valid: Record<string, string>;
 const synced: string[] = [];
 const imported: string[] = [];
+const rebuilt: string[] = [];
 const db = openBetterSqlite3(":memory:");
 migrate(db);
 const stores = { db, dataDirectory: "/synthetic/data", egress: productEgress(db) };
-const connectors: ConnectorManager = {
+const connectors: ConnectorManager & ConnectorRebuild = {
   list: () => [],
+  // a double that only records: the route's checks are what is under test (I06-R12)
+  rebuild: async (id) => {
+    rebuilt.push(id);
+    return { summary: { id, kind: "k", state: "ready" }, rebuild: "done" };
+  },
   sync: async (id) => {
     synced.push(id);
     return {
@@ -127,6 +133,25 @@ describe("local API security", () => {
     expect(synced).toEqual([]);
     expect((await send(server.port, "/api/connectors/sync", valid, "POST", body)).status).toBe(200);
     expect(synced).toEqual(["c"]);
+  });
+
+  it("rebuilds a Connector for a change notice only for a request that passes every check (I06-R12, C9 ④)", async () => {
+    const { path, method } = routes.credentialsChanged;
+    const body = { connectorId: "c" };
+    for (const [header, value, status] of [
+      ["authorization", "Bearer wrong", 401],
+      ["host", "evil.example", 403],
+      ["origin", "https://evil.example", 403],
+    ] as const) {
+      const res = await send(server.port, path, { ...valid, [header]: value }, method, body);
+      expect(res.status).toBe(status);
+    }
+    expect((await send(server.port, path, without("authorization"), method, body)).status).toBe(
+      401,
+    );
+    expect(rebuilt).toEqual([]);
+    expect((await send(server.port, path, valid, method, body)).status).toBe(200);
+    expect(rebuilt).toEqual(["c"]);
   });
 
   it("runs an import (POST /api/imports) only for a request that passes every check (I01-R24, import.api ①)", async () => {

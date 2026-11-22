@@ -1,8 +1,15 @@
 // I01-R17: the Sources screen marks a Connector whose rescan may have missed
 // deletions, so that a source gone at the origin but still shown is not a surprise.
-import { SYNC_STOP_CODES } from "@pki/contracts";
+import { CREDENTIAL_REASONS, SYNC_STOP_CODES } from "@pki/contracts";
 import { describe, expect, it } from "vitest";
-import { connectorNote, DELETIONS_MAY_BE_MISSED, syncStopText } from "./connector-text.ts";
+import {
+  CREDENTIAL_REASON_TEXT,
+  CREDENTIAL_SLOT_STATE_TEXT,
+  connectorNote,
+  connectorReasonText,
+  DELETIONS_MAY_BE_MISSED,
+  syncStopText,
+} from "./connector-text.ts";
 
 describe("connectorNote", () => {
   it("says deletions during the expired window may be missed, when the Connector says so", () => {
@@ -25,5 +32,40 @@ describe("syncStopText", () => {
     const texts = SYNC_STOP_CODES.map(syncStopText);
     expect(texts.every((t) => t.length > 0)).toBe(true);
     expect(new Set(texts).size).toBe(SYNC_STOP_CODES.length);
+  });
+});
+
+describe("credential wording (I06-R14, I06-C11 ⑤)", () => {
+  it("has its own text for each of the four reasons, and each says what the user can do", () => {
+    const texts = CREDENTIAL_REASONS.map((reason) => CREDENTIAL_REASON_TEXT[reason]);
+    expect(texts.every((t) => t.length > 0)).toBe(true);
+    expect(new Set(texts).size).toBe(CREDENTIAL_REASONS.length);
+    expect(CREDENTIAL_REASON_TEXT["credential-missing"]).toContain("입력");
+    expect(CREDENTIAL_REASON_TEXT["credential-unreadable"]).toContain("지우고 다시");
+    expect(CREDENTIAL_REASON_TEXT["credential-rejected"]).toContain("거부");
+    expect(CREDENTIAL_REASON_TEXT["credential-store-unavailable"]).toContain("저장소");
+  });
+
+  it("has its own text for each state of a slot", () => {
+    const states = ["present", "missing", "unavailable"] as const;
+    const texts = states.map((state) => CREDENTIAL_SLOT_STATE_TEXT[state]);
+    expect(new Set(texts).size).toBe(3);
+  });
+
+  it("gives a reason's text only for a credential reason, and nothing otherwise", () => {
+    for (const reason of CREDENTIAL_REASONS) {
+      expect(connectorReasonText({ id: "c", kind: "k", state: "unavailable", reason })).toBe(
+        CREDENTIAL_REASON_TEXT[reason],
+      );
+    }
+    expect(connectorReasonText({ id: "c", kind: "k", state: "unavailable" })).toBeUndefined();
+    expect(
+      connectorReasonText({
+        id: "c",
+        kind: "k",
+        state: "unavailable",
+        reason: "unsupported-sdk-version",
+      }),
+    ).toBeUndefined();
   });
 });

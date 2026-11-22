@@ -112,32 +112,47 @@ export type CredentialReason = (typeof CREDENTIAL_REASONS)[number];
 // "not-implemented" is a site Connector placeholder (V01-R18); "unavailable" failed to
 // initialize, or, with reason "unsupported-sdk-version", was never initialized because
 // it implements another Connector SDK version (I01-R1).
+export const ConnectorSummarySchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  state: z.enum(["ready", "not-implemented", "unavailable"]),
+  reason: z.enum(["unsupported-sdk-version", ...CREDENTIAL_REASONS]).optional(),
+  // a Connector that declared slots (I06-R13): the stored name and the last presence check of each, never a value
+  credentials: z
+    .array(
+      z.object({
+        slot: z.string(),
+        name: z.string(),
+        state: z.enum(["present", "missing", "unavailable"]),
+      }),
+    )
+    .optional(),
+  // set (only then) after a rescan of a Connector that does not report deletions on
+  // rescan: sources deleted while the cursor was expired may still be shown (I01-R17)
+  deletionsMayBeMissed: z.boolean().optional(),
+});
 export const ConnectorListResponseSchema = z.object({
-  connectors: z.array(
-    z.object({
-      id: z.string(),
-      kind: z.string(),
-      state: z.enum(["ready", "not-implemented", "unavailable"]),
-      reason: z.enum(["unsupported-sdk-version", ...CREDENTIAL_REASONS]).optional(),
-      // a Connector that declared slots (I06-R13): the stored name and the last presence check of each, never a value
-      credentials: z
-        .array(
-          z.object({
-            slot: z.string(),
-            name: z.string(),
-            state: z.enum(["present", "missing", "unavailable"]),
-          }),
-        )
-        .optional(),
-      // set (only then) after a rescan of a Connector that does not report deletions on
-      // rescan: sources deleted while the cursor was expired may still be shown (I01-R17)
-      deletionsMayBeMissed: z.boolean().optional(),
-    }),
-  ),
+  connectors: z.array(ConnectorSummarySchema),
 });
 export type ConnectorSummary = z.infer<typeof ConnectorListResponseSchema>["connectors"][number];
 
 export const SyncRequestSchema = z.strictObject({ connectorId: z.string().min(1) });
+
+/**
+ * The change notice of a Connector's credential (I06-R12): the instance's ID and nothing else. The value
+ * goes from the screen to the shell's store and never through the API, so the schema has no field for one.
+ */
+export const CredentialsChangedRequestSchema = z.strictObject({ connectorId: z.string().min(1) });
+
+/**
+ * The answer to a change notice: the instance's list summary and what became of the rebuild (I06-R12).
+ * "done": this request ended a rebuild; "queued": one is under way or the gap of a rejected instance holds
+ * it back; "skipped": the instance gave up its rechecks or has nothing to rebuild.
+ */
+export const CredentialsChangedResponseSchema = z.strictObject({
+  summary: ConnectorSummarySchema,
+  rebuild: z.enum(["done", "queued", "skipped"]),
+});
 
 /**
  * Why a sync stopped before its last page (I01-R19's closed list). The pages stored
@@ -1119,6 +1134,12 @@ export const routes = {
     path: "/api/connectors/sync",
     request: SyncRequestSchema,
     response: SyncResponseSchema,
+  },
+  credentialsChanged: {
+    method: "POST",
+    path: "/api/connectors/credentials-changed",
+    request: CredentialsChangedRequestSchema,
+    response: CredentialsChangedResponseSchema,
   },
   importJsonl: {
     method: "POST",

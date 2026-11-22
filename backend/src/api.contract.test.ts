@@ -92,6 +92,8 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
   // A body for every route that takes one; the schema test below fails for a route missing here.
   const requests: Partial<Record<RouteName, unknown>> = {
     syncConnector: { connectorId: "fixtures" },
+    // I06-R12: the change notice of a credential; the fixture instance declares no slot, so it is rebuilt as it is
+    credentialsChanged: { connectorId: "fixtures" },
     importJsonl: { text: readFileSync(resolve(FIXTURES, "../v02-mail.jsonl"), "utf8") },
     imports: {
       instanceId: "contract-import",
@@ -272,6 +274,34 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
         received: 0,
       });
       expect(JSON.stringify(res.body)).not.toContain("connector broke");
+    });
+
+    const changed = routes.credentialsChanged;
+    it.each([
+      ["bad-request", 400, "not json"],
+      ["bad-request", 400, {}],
+      ["bad-request", 400, { connectorId: "" }],
+      ["bad-request", 400, { connectorId: "fixtures", value: "x" }],
+      ["bad-request", 400, { connectorId: "x".repeat(20_000) }],
+      ["not-found", 404, { connectorId: "nope" }],
+    ])("credentials-changed %s rejection (%i)", async (error, status, body) => {
+      const res = await send(server.port, changed.path, valid, changed.method, body);
+      expect(res.status).toBe(status);
+      expect(ErrorResponseSchema.parse(res.body)).toEqual({ error });
+    });
+
+    it("answers a change notice with the instance's summary and what became of the rebuild (I06-R12)", async () => {
+      for (const [connectorId, kind, state] of [
+        ["site-mail", "site-mail", "not-implemented"],
+        ["fixtures", "test-fixtures", "ready"],
+      ] as const) {
+        const res = await send(server.port, changed.path, valid, changed.method, { connectorId });
+        expect(res.status).toBe(200);
+        expect(changed.response.parse(res.body)).toMatchObject({
+          summary: { id: connectorId, kind, state },
+          rebuild: "done",
+        });
+      }
     });
 
     const shownVersion = productEgress(db).policyVersion();

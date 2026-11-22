@@ -82,7 +82,7 @@ import {
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { ConnectorManager } from "./connectors.ts";
+import type { ConnectorManager, ConnectorRebuild } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import type { InstanceImporter } from "./imports.ts";
 import { InstanceBusyError, type JsonlImporter } from "./jsonl-import.ts";
@@ -119,8 +119,11 @@ export interface ServerOptions {
   vectorIndex: VectorIndex;
   /** Chosen by the composition point; null while no implementation is bound (reported not implemented). */
   embedder: EmbeddingProvider | null;
-  /** Built by the composition point (composition.ts), never here. */
-  connectors: ConnectorManager;
+  /**
+   * Built by the composition point (composition.ts), never here. Its `rebuild` (I06-R12) is what a
+   * change notice calls; a manager without it answers connector-unavailable.
+   */
+  connectors: ConnectorManager & Partial<ConnectorRebuild>;
   /** The migrated canonical DB the screens read from. */
   db: SqlDriver;
   /** The folder holding `db`, shown read-only in Settings. */
@@ -736,6 +739,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),
     syncConnector: (input) => options.connectors.sync(input.connectorId),
+    // I06-R12: the id only; the manager rebuilds the instance and answers its summary (never a value)
+    credentialsChanged: async ({ connectorId }) => {
+      if (!options.connectors.rebuild) return { error: "connector-unavailable" };
+      return (await options.connectors.rebuild(connectorId)) ?? { error: "not-found" };
+    },
     importJsonl: async ({ text }) => {
       if (!options.importer) return { error: "connector-unavailable" };
       try {

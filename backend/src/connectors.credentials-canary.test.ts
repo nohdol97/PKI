@@ -1,7 +1,7 @@
 // I06-C14 ①②③④⑤ (I06-R16 to R18): a made-up credential value sits in the store and a Connector leaks it on
 // purpose (into error text, error name, `cause`, the health reason); the backend runs the paths that touch
 // it, and then every place the product writes or answers is searched for the value in its three shapes
-// (plain, base64, percent-encoded). The change notice's API answer is T04's (C14 ③ there). Nothing here is real.
+// (plain, base64, percent-encoded). T04 adds the change notice's API answer to the searched places (C14 ③). Nothing here is real.
 import {
   CONNECTOR_SDK_VERSION,
   ConnectorCredentialError,
@@ -188,6 +188,11 @@ async function exercise(
   await call(routes.connectors.path);
   for (const { id } of instances)
     await call(routes.syncConnector.path, "POST", { connectorId: id });
+  // the change notice of every instance, whatever it leaks (C14 ③): each answer is searched with the rest
+  for (const { id } of instances)
+    await call(routes.credentialsChanged.path, "POST", { connectorId: id });
+  // and the hourly recheck of every instance (those that are not ready make a new object): C14 runs both before the sweep
+  for (const { id } of instances) await booted.connectors.recheck(id);
   // scheduled syncs: the refused, the failed and the one with no value are held or given up with a code
   for (const id of ["sync-refused", "sync-failed", "missing", "ok"]) {
     registerJob(booted.db, { kind: CONNECTOR_SYNC_KIND, target: id });
@@ -254,6 +259,16 @@ describe("connectors.credentials-canary (I06-C14)", () => {
     expect(text).toContain('"stopped":"connector-failed"');
     expect(text).toContain("credential-missing");
     expect(text).toContain("credential-rejected");
+  });
+
+  it("③ the change notice answered for every instance (rebuilt, refused, leaking), and each answer says what became of the rebuild", async () => {
+    const { answers } = await exercise("synthetic body of the record");
+    const notices = answers.filter((text) => text.includes('"rebuild":'));
+    expect(notices).toHaveLength(instances.length);
+    expect(notices.join("\n")).toContain('"rebuild":"done"');
+    for (const shape of shapes(CANARY)) {
+      expect(notices.filter((text) => text.includes(shape))).toEqual([]);
+    }
   });
 
   it("⑤ the same search finds a marker that really is in a record's body (it does search)", async () => {
