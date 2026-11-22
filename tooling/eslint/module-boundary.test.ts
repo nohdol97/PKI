@@ -786,8 +786,8 @@ describe("module-boundary: fork packages (I05-C4)", () => {
         registration,
       ),
       refused(
-        "a dots-named folder is not a relative specifier (.../../../config/...)",
-        'import s from ".../../../config/connector-scopes.json" with { type: "json" };',
+        "a dots-named folder is not a relative specifier (.../../../../config/...)",
+        'import s from ".../../../../config/connector-scopes.json" with { type: "json" };',
         registration,
       ),
       refused(
