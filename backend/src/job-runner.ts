@@ -1,14 +1,18 @@
-// The job runner (V02-R4, R5, I03-R4..R6, R8..R11, R14, ADR 0013 decision 9)
+// The job runner (V02-R4, R5, I03-R4..R6, R8..R11, R13, R14, ADR 0013 decision 9)
 // inside the backend process. It claims a job with an expiring lease, runs the
 // handler of its kind and closes the job with what the handler handed back, by
 // the outcome table (job-outcomes.ts) and behind the three checks of storage's
-// closeJob (lease, cancel request, fence), one job at a time. While the handler
+// closeJob (lease, cancel request, fence), several jobs together within the
+// overall limit and the limits of their concurrency groups (I03-R13; the claim
+// counts them, storage job-concurrency.ts). While the handler
 // runs, a heartbeat extends the lease under the job's token; once it fails (the
 // job was claimed again or closed) the handler's signal is cut and its result is
 // never written. A run over its kind's time limit, measured on the injected
 // monotonic clock, is cut and retried without waiting for its handler; a run that
 // lost its job (a failed heartbeat, a step that met a closed job) ends at once
-// the same way, so a handler ignoring its signal never blocks the queue. A job left
+// the same way, so a handler ignoring its signal never blocks the queue: the
+// run's place in its group and in the overall limit is free again, and whatever
+// the abandoned handler writes later is refused by the lease token. A job left
 // running by a backend that stopped is reclaimed once its lease runs out, at
 // every claim (start, poll, wake). Every stored time is the injected clock's.
 // The runner never decides whether a call may run: a handler calls the Broker
@@ -19,12 +23,14 @@ import { BUILD_KIND } from "@pki/providers";
 import {
   checkpointJob,
   closeJob,
+  DEFAULT_MAX_CONCURRENT,
   heartbeatJob,
   isFenceCurrent,
   JobWriteError,
   leaseNextJob,
   readCheckpoint,
   readJob,
+  readSetting,
   type Checkpoint,
   type JobClosing,
   type SqlDriver,
@@ -101,14 +107,33 @@ export interface JobRunnerOptions {
 }
 
 export interface JobRunner {
-  /** Claims and runs at most one job; undefined when nothing is due. */
+  /**
+   * Claims one job and resolves once it closed, beside the jobs already running;
+   * undefined at once when nothing is due or a limit leaves no job to claim.
+   */
   runOnce(): Promise<JobRun | undefined>;
-  /** Runs jobs until none is due. */
+  /** Runs jobs, as many together as the limits allow, until none is due or running. */
   wake(): Promise<void>;
   /** Wakes now and on every poll. */
   start(): void;
-  /** Stops claiming; resolves when the job running, if any, has closed. */
+  /** Stops claiming; resolves when every running job has closed. */
   stop(): Promise<void>;
+}
+
+/** How many jobs run together overall (I03-R13): a runtime setting, 1 to 4. */
+export const JOBS_MAX_CONCURRENT_SETTING = "jobs.maxConcurrent";
+const MAX_CONCURRENT_VALUES = /^[1-4]$/;
+
+/**
+ * The overall limit, read at every claim so a change applies without a restart.
+ * Provisional: a value that is not a whole number from 1 to 4 is the default,
+ * not the nearest allowed value.
+ */
+export function readMaxConcurrent(db: SqlDriver): number {
+  const value = readSetting(db, JOBS_MAX_CONCURRENT_SETTING);
+  return value !== undefined && MAX_CONCURRENT_VALUES.test(value)
+    ? Number(value)
+    : DEFAULT_MAX_CONCURRENT;
 }
 
 /** The job defaults (I03 "기본값"): the heartbeat keeps a long run's lease. */
@@ -173,10 +198,30 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     ),
   );
 
-  // one job at a time: no job is held while claiming, so none is passed as holding
-  async function step(): Promise<JobRun | undefined> {
-    const job = leaseNextJob(db, { kinds, now, leaseMs, owner, maxAttempts }); // read under the lock
-    return job && run(job);
+  /** The jobs held in memory: each settles, never rejecting, once its run ended. */
+  const held = new Map<number, Promise<void>>();
+  /** Each fairness key's last turn (I03-R13): memory only, empty after a restart. */
+  const lastClaimed = new Map<string, number>();
+  let turn = 0;
+
+  /** Claims one job the limits allow and starts it; undefined when there is none. */
+  function claim(): Promise<JobRun> | undefined {
+    const job = leaseNextJob(db, {
+      kinds,
+      now, // read under the lock
+      leaseMs,
+      owner,
+      holding: [...held.keys()], // their heartbeat keeps them, whatever the wall clock says
+      maxAttempts,
+      maxConcurrent: readMaxConcurrent(db),
+      lastClaimed,
+    });
+    if (!job) return undefined;
+    lastClaimed.set(job.fairnessKey, ++turn);
+    const running = run(job);
+    const settled = () => void held.delete(job.id);
+    held.set(job.id, running.then(settled, settled));
+    return running;
   }
 
   async function run(job: StoredJob): Promise<JobRun> {
@@ -271,33 +316,44 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     }
   }
 
-  // every claim goes through this chain, so one job runs at a time
-  let chain: Promise<unknown> = Promise.resolve();
+  // A claim never runs inside its caller's stack: a caller that wakes the runner
+  // from its own open transaction must not have the claim join that transaction.
+  /** Settles once every runOnce asked for so far has claimed (stop waits for it). */
+  let claims: Promise<unknown> = Promise.resolve();
   function runOnce(): Promise<JobRun | undefined> {
-    const next = chain.then(step);
-    chain = next.catch(() => {});
-    return next;
+    const claimed = claims.then(() => ({ running: claim() }));
+    claims = claimed.catch(() => {});
+    return claimed.then(({ running }) => running);
   }
 
   let stopped = false;
-  let again = false;
+  /** Ends the drain's wait for a running job to close: a wake claims at once. */
+  let woken: (() => void) | undefined;
   let draining: Promise<void> | undefined;
   function wake(): Promise<void> {
     // stopped, the drain body would finish before `draining` is assigned and
     // leave a settled promise there, so no later wake would drain again
     if (stopped) return Promise.resolve();
-    again = true;
+    woken?.();
     draining ??= (async () => {
       try {
-        while (again) {
-          again = false;
-          while (!stopped && (await runOnce())) {
-            // one job closed; claim the next unless stopped
+        await Promise.resolve(); // as runOnce: not in the caller's stack
+        while (!stopped) {
+          for (let running = claim(); running; running = stopped ? undefined : claim()) {
+            // the job stays running and is claimed again when its lease runs out
+            running.catch(onError);
           }
+          if (held.size > 0) {
+            // a job closed (a place may be free) or a wake (new work, a raised
+            // limit, a lease to reclaim): either way, claim again
+            const wakes = new Promise<void>((resolve) => (woken = resolve));
+            await Promise.race([...held.values(), wakes]);
+          } else break; // nothing runs, and no wake can arrive between the claim and here
         }
       } catch (error) {
-        onError(error); // the job stays running and is claimed again when its lease runs out
+        onError(error); // a failing claim, e.g. a locked file: the next wake claims again
       } finally {
+        woken = undefined;
         draining = undefined;
       }
     })();
@@ -317,7 +373,8 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
       stopped = true;
       clearInterval(timer);
       timer = undefined;
-      await chain;
+      await claims;
+      while (held.size > 0) await Promise.all(held.values());
     },
   };
 }

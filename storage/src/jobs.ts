@@ -10,6 +10,7 @@
 // checkpointJob); the fence among them is commitDerived, here in the provisional
 // body I04-T06 replaces.
 import type { CommitDerived, DerivedItem } from "./derivatives.ts";
+import { assertMaxConcurrent, pickDueJob } from "./job-concurrency.ts";
 import { readChangeSeq } from "./revisions.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
 
@@ -303,6 +304,10 @@ export interface LeaseRequest {
   holding?: readonly number[];
   /** Default DEFAULT_MAX_ATTEMPTS. */
   maxAttempts?: AttemptLimits;
+  /** The overall limit over the database's running jobs (I03-R13); default two. */
+  maxConcurrent?: number;
+  /** The runner's memory of each fairness key's last turn (I03-R13); larger is later. */
+  lastClaimed?: ReadonlyMap<string, number>;
 }
 
 const placeholders = (values: readonly unknown[]) => values.map(() => "?").join(", ");
@@ -393,13 +398,14 @@ export function releaseRetryJobs(
  * Claims a job of `kinds` until now + leaseMs, in one immediate transaction
  * (I03-R4): first the leases that ran out are reclaimed (reclaimLeases) and retry
  * jobs released (releaseRetryJobs); queued jobs with a cancel request are closed
- * cancelled, never claimed; then the queued job with the lowest ID whose run-at
- * time came and that has no cancel request is claimed: token and attempts raised,
- * lease end, heartbeat and owner written. A `now` function is read once, after the
- * lock is held. Priority and fairness order are T05's.
+ * cancelled, never claimed; then the queued job whose run-at time came and that
+ * pickDueJob (job-concurrency.ts: the overall and group limits, priority, fairness)
+ * names is claimed: token and attempts raised, lease end, heartbeat and owner
+ * written. A `now` function is read once, after the lock is held.
  */
 export function leaseNextJob(db: SqlDriver, request: LeaseRequest): StoredJob | undefined {
   if (request.kinds.length === 0) return undefined;
+  assertMaxConcurrent(request.maxConcurrent);
   const kinds = `kind IN (${placeholders(request.kinds)})`;
   // cancel-requested jobs were closed just before, in the same transaction
   const due = `status = 'queued' AND run_after <= ?`;
@@ -415,10 +421,12 @@ export function leaseNextJob(db: SqlDriver, request: LeaseRequest): StoredJob | 
           WHERE ${kinds} AND status = 'queued' AND cancel_requested = 1`,
         [...cancel.params, ...request.kinds],
       );
-      const id = db.all(`SELECT id FROM jobs WHERE ${kinds} AND ${due} ORDER BY id LIMIT 1`, [
-        ...request.kinds,
+      const id = pickDueJob(db, {
+        kinds: request.kinds,
         now,
-      ])[0]?.id as number | undefined;
+        maxConcurrent: request.maxConcurrent,
+        lastClaimed: request.lastClaimed,
+      });
       if (id === undefined) return undefined;
       const claim = moving("running", now);
       db.run(
