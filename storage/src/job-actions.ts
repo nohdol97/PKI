@@ -5,11 +5,22 @@
 // run is judged at the next claim (R11 gives the attempt back if it does not).
 // Each function runs in the caller's transaction when there is one, so a setting's
 // write and the release it causes commit together.
-import { moving, readJob, transitionJob } from "./jobs.ts";
+import { PROJECTION_REMOVE_KIND } from "./job-kinds.ts";
+import { moving, OPEN_JOB_STATUSES, readJob, transitionJob, type StoredJob } from "./jobs.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
 
-/** "requested": a running job's request was written, the holder closes it. */
-export type CancelResult = "cancelled" | "requested" | "finished" | "not-cancellable" | "not-found";
+/**
+ * A removal that is not finished or was given up is the stored mark that its projection may
+ * still hold deleted content (I03-R7 "표식"): the user cannot close it by hand. Only the rebuild
+ * that covers it closes it (`closeCoveredRemoves`); trying it again keeps the mark.
+ */
+const isMarkingRemoval = (job: StoredJob): boolean =>
+  job.kind === PROJECTION_REMOVE_KIND &&
+  (job.status === "dead_letter" || (OPEN_JOB_STATUSES as readonly string[]).includes(job.status));
+
+/** "requested": a running job's request was written, the holder closes it. "not-allowed": a removal's mark (see `isMarkingRemoval`). */
+export type CancelResult =
+  "cancelled" | "requested" | "finished" | "not-cancellable" | "not-allowed" | "not-found";
 
 /**
  * Cancels a job (I03-R12 ③). Queued, retrying and held jobs are cancelled now. A
@@ -23,6 +34,7 @@ export function cancelJob(db: SqlDriver, id: number, at: Date = new Date()): Can
     () => {
       const job = readJob(db, id);
       if (!job) return "not-found";
+      if (isMarkingRemoval(job)) return "not-allowed";
       switch (job.status) {
         case "queued":
         case "retry":
@@ -50,8 +62,10 @@ export function discardJob(
   db: SqlDriver,
   id: number,
   at: Date = new Date(),
-): "discarded" | "not-dead-letter" | "not-found" {
-  if (!readJob(db, id)) return "not-found";
+): "discarded" | "not-dead-letter" | "not-allowed" | "not-found" {
+  const job = readJob(db, id);
+  if (!job) return "not-found";
+  if (isMarkingRemoval(job)) return "not-allowed";
   return transitionJob(db, id, { from: "dead_letter", to: "cancelled", at })
     ? "discarded"
     : "not-dead-letter";

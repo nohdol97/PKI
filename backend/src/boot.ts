@@ -43,6 +43,7 @@ import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
 import { createConnectorManager, type ConnectorManager } from "./connectors.ts";
 import { startCollectorUpkeep } from "./connector-sync-job.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
+import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
@@ -179,6 +180,15 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
   // whatever the applied change sequence says (I03-R7); registered before the server serves a deletion or the runner starts
   checkProjectionMarkers(db, { phase: "start", now: clock.now() });
+  // the check at start and every 30 s (started below): due periods, and the run times a clock that
+  // went back left in the future (I03-R22), with or without any period stored. Made before the
+  // server, whose Activity API changes periods through it (I03-R23).
+  const scheduler = createScheduler({
+    db,
+    clock,
+    onRegistered: () => void runner.wake(),
+    onError: (error) => log("scheduler-error", { error: errorClass(error) }),
+  });
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,
@@ -203,6 +213,13 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     registry,
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),
+    jobs: {
+      scheduler,
+      actions: createJobActions({ db, runner, clock }),
+      budgetUsage: calls.broker.budgetUsage,
+      projectionNames: Object.keys(projectionPorts),
+      wake: () => void runner.wake(),
+    },
   });
   releaseOnPolicyChange(db, calls.policyFingerprint(), runner);
   runner.start();
@@ -211,14 +228,6 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     broker: calls.broker,
     runner,
     onError: (error) => log("held-reevaluation-error", { error: errorClass(error) }),
-  });
-  // the check at start and every 30 s: due periods, and the run times a clock that
-  // went back left in the future (I03-R22), with or without any period stored
-  const scheduler = createScheduler({
-    db,
-    clock,
-    onRegistered: () => void runner.wake(),
-    onError: (error) => log("scheduler-error", { error: errorClass(error) }),
   });
   // the default periods, the held collectors that are ready now, and the hourly recheck (I03-T09)
   const collectors = startCollectorUpkeep({ db, manager: connectors, scheduler, runner });

@@ -32,7 +32,9 @@ import {
   productRunner,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
+import { createJobActions } from "./job-actions.ts";
 import type { JobRunner } from "./job-runner.ts";
+import { createScheduler } from "./scheduler.ts";
 import { seedV02 } from "./v02-seed.e2e.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
@@ -119,6 +121,15 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     // the seed below makes Insight 1 with evidence 1..3
     insightEvidence: { insightId: 1 },
     evidenceSource: { evidenceId: 1 },
+    // the job area (I03-R23): bodies for rows that need not exist (an action answers 200 with `not-found`)
+    cancelJob: { id: 999_999 },
+    retryJob: { id: 999_999 },
+    discardJob: { id: 999_999 },
+    changeSchedule: { id: 999_999, period: { kind: "hourly" } },
+    disableSchedule: { id: 999_999 },
+    enableSchedule: { id: 999_999 },
+    runSchedule: { id: 999_999 },
+    rebuildProjection: { projection: "engine" },
   };
 
   beforeAll(async () => {
@@ -168,6 +179,13 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
       ...adapters,
       importer: productImporter(db, { runner, projections }),
       instanceImporter: productInstanceImporter(db, { runner, projections }),
+      jobs: {
+        scheduler: createScheduler({ db }),
+        actions: createJobActions({ db, runner }),
+        budgetUsage: broker.budgetUsage,
+        projectionNames: ["engine"],
+        wake: () => void runner.wake(),
+      },
     });
     valid = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
   });

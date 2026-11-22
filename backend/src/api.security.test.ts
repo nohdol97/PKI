@@ -1,10 +1,11 @@
 // V01-C2 `api.security`: a real server on an ephemeral port rejects each
 // unauthorized request kind and is unreachable from non-loopback addresses.
-import { migrate } from "@pki/storage";
+import { migrate, readJob, registerJob } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { routes, type RouteName } from "@pki/contracts";
 import { send, sendRaw } from "@pki/testkit";
 import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
@@ -147,6 +148,37 @@ describe("local API security", () => {
     expect(imported).toEqual([]);
     expect((await send(server.port, "/api/imports", valid, "POST", body)).status).toBe(400);
     expect(imported).toEqual(["i"]);
+  });
+
+  it("refuses the job and schedule routes of the Activity screen to a request that fails a check, and a job action changes nothing for it (I03-R23)", async () => {
+    const queued = registerJob(db, { kind: "maintenance" });
+    if (!queued.registered) throw new Error("not registered");
+    const id = queued.job.id;
+    const jobRoutes: [RouteName, unknown][] = [
+      ["jobs", undefined],
+      ["cancelJob", { id }],
+      ["retryJob", { id }],
+      ["discardJob", { id }],
+      ["changeSchedule", { id: 1, period: { kind: "hourly" } }],
+      ["disableSchedule", { id: 1 }],
+      ["enableSchedule", { id: 1 }],
+      ["runSchedule", { id: 1 }],
+      ["rebuildProjection", { projection: "engine" }],
+    ];
+    for (const [name, body] of jobRoutes) {
+      const { path, method } = routes[name];
+      for (const [header, value, status] of [
+        ["authorization", "Bearer wrong", 401],
+        ["host", "evil.example", 403],
+        ["origin", "https://evil.example", 403],
+      ] as const) {
+        const res = await send(server.port, path, { ...valid, [header]: value }, method, body);
+        expect([name, res.status]).toEqual([name, status]);
+      }
+      const bare = await send(server.port, path, without("authorization"), method, body);
+      expect([name, bare.status]).toEqual([name, 401]);
+    }
+    expect(readJob(db, id)?.status).toBe("queued");
   });
 
   it("rejects a request carrying more than one Host header", async () => {

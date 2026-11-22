@@ -66,6 +66,7 @@ import type { ConnectorManager } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import type { InstanceImporter } from "./imports.ts";
 import { InstanceBusyError, type JsonlImporter } from "./jsonl-import.ts";
+import { jobsApi, type JobsPort } from "./jobs-view.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -145,6 +146,12 @@ export interface ServerOptions {
    * Default none.
    */
   onRunConditionsChanged?: () => void;
+  /**
+   * The scheduler, the job actions and the budget the Activity screen's job area uses
+   * (jobs-view.ts, I03-R23); boot.ts binds them. Without it the job list still reads the
+   * rows and every action answers `unavailable`.
+   */
+  jobs?: JobsPort;
   /** Milliseconds now, for the Provider check's reuse window (tests); default Date.now. */
   now?: () => number;
 }
@@ -523,6 +530,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     };
   };
   const checks = providerChecks(options.now ?? Date.now);
+  const jobs = jobsApi(options.db, options.jobs);
   return {
     status: async () => ({
       backend: { state: "ready" },
@@ -591,6 +599,15 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         entries.liftTombstone(tx, id, new Date().toISOString()),
       ),
     activity: async () => ({ calls: listProviderCalls(options.db) }),
+    jobs: async () => jobs.read(),
+    cancelJob: async (input) => jobs.cancel(input),
+    retryJob: async (input) => jobs.retry(input),
+    discardJob: async (input) => jobs.discard(input),
+    changeSchedule: async (input) => jobs.changeSchedule(input),
+    disableSchedule: async (input) => jobs.disableSchedule(input),
+    enableSchedule: async (input) => jobs.enableSchedule(input),
+    runSchedule: async (input) => jobs.runSchedule(input),
+    rebuildProjection: async (input) => jobs.rebuildProjection(input),
     settings: async () => settings(),
     writeSettings: async ({ openaiCompatible }) => {
       const baseUrl = storableEndpoint(openaiCompatible.baseUrl);
