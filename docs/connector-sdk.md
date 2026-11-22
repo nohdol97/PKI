@@ -258,7 +258,7 @@ export class ConnectorError extends Error {
 | `no-progress` | `dead_letter` | — | 없음 | 수집기의 규격 위반이다. 다시 돌려도 같다 |
 | `cursor-expired` | `dead_letter` | — | 없음 | 재스캔도 만료되었거나 재스캔할 수 없는 수집기다 |
 | `storage-failed` | `retry`, 시도가 다하면 `dead_letter` | 씀 | 작업 대기열의 대기 시간 | 디스크 사정이면 다시 하면 풀린다. 늘 같은 실패면 시도가 다해 포기한 작업으로 남는다 |
-| 인스턴스가 `unavailable`(초기화 실패, `unsupported-sdk-version`) | `held` | 쓰지 않음 | 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 한 시간마다의 재점검 | 설정이나 수집기가 바뀌어야 풀린다 |
+| 인스턴스가 `unavailable`(초기화 시간 초과, 초기화 실패, 만드는 함수의 예외, 등록에 없는 종류, `unsupported-sdk-version`) | `held` | 쓰지 않음 | 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 한 시간마다의 재점검 | 설정이나 수집기가 바뀌어야 풀린다 |
 | 인스턴스가 `not-implemented`(`site-*`) | `held` | 쓰지 않음 | 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 한 시간마다의 재점검 | 포크가 실제 구현을 등록해야 풀린다 |
 
 표의 `held` 행에 적힌 풀리는 때 가운데 "인스턴스의 설정이 바뀌거나"는 **지금은 일어나지 않는다.** 제품에 인스턴스의 설정을 쓰는 곳이 없기 때문이다(7장). 지금 보류가 풀리는 때는 앱을 시작했을 때 인스턴스가 준비되어 있는 경우(앱 갱신으로 수집기가 동작하게 된 시작을 포함해 모든 시작)와 한 시간마다의 재점검이다. 재점검은 인스턴스마다 60초(`RECHECK_TIMEOUT_MS`) 안에 끝나지 않으면 기다리지 않고 넘어가며, 끝나지 않은 재점검이 있는 인스턴스는 다시 시작하지 않는다. 60초를 넘겨 끝난 재점검의 결과는 성공이든 실패든 버린다. 결과를 받는 것은 그것을 기다리고 있는 차례뿐이어야 "준비됨으로 바뀜"과 "보류된 작업을 풂"이 늘 함께 일어나기 때문이다.
@@ -385,7 +385,7 @@ AssertionError: expected [ 'no-progress' ] to deeply equal []
 
 1. 예시 폴더의 모양을 따른다. 수집기 파일 하나와, 원 시스템을 흉내 내는 지어낸 `config` 둘(`config`, 바뀐 뒤의 `later`), 테스트 파일 하나다. 테스트 한 줄은 위의 `connectorContract(...)`다.
 2. 패키지의 `package.json`은 `@pki/contracts`를 `dependencies`로, `@pki/testkit`을 `devDependencies`로 적는다(둘 다 `workspace:*`). 예시 패키지가 그렇게 되어 있고, 저장소의 모듈 경계 규칙이 `@pki/testkit`을 테스트 파일에서만 쓰게 한다.
-3. **`site/connectors/`에 두려면 워크스페이스에 그 폴더를 알려야 한다.** `pnpm-workspace.yaml`의 `packages:` **목록 안에** `  - site/connectors/*` 한 줄을 더한다(파일 끝에 붙이면 그 아래의 다른 설정 블록에 들어가 `pnpm install`이 실패한다). 그리고 `pnpm install`을 한 번 실행한다. 그러면 `site/connectors/<이름>/` 안의 테스트가 `@pki/testkit`을 찾는다. 이 문서를 쓰면서 예시 수집기를 그 자리에 복사해 이 방법으로 돌려 보았고 계약 묶음이 통과했다. 이 일과 `pnpm install`이 바꾸는 `pnpm-lock.yaml`은 `site/` 밖의 파일을 고치는 일이다. 지금 포크가 `site/` 밖에서 고쳐야 하는 곳 전부는 7장에 목록으로 있고, 그 빈 곳은 #113이 추적한다.
+3. **`site/connectors/<이름>/`에 두는 법.** 워크스페이스에는 `site/composition`과 `site/connectors/*`가 이미 들어 있어 포크는 `pnpm-workspace.yaml`을 고치지 않는다. 수집기 패키지를 그 폴더에 만들고 `pnpm install`을 한 번 실행하면 그 안의 테스트가 `@pki/testkit`을 찾는다. 그때 `site/` 밖에서 달라지는 것은 `pnpm install`이 다시 쓰는 `pnpm-lock.yaml`뿐이다. 이름과 경계 규칙, 제품에 연결하는 길(등록)은 7장에 있다.
 
 ### 일부러 어긴 변형 — 위반 코드가 나오는 것을 보여 주는 것
 
@@ -469,31 +469,255 @@ export function createStuckCursorConnector(): Connector {
 
 ## 7. 수집기를 포크에 두고 제품에 연결하는 법
 
-**이 장은 지금 `main`이 갖고 있지 않은 부분을 가장 많이 담는다.** 코드가 확인해 주는 것과 아직 없는 것을 나눠 쓴다.
+**이 장은 포크가 `site/` 안에 파일을 더하기만 해서 수집기를 제품에 끼우는 방법이다.** 포크는 공용 저장소의 추적 파일을 고치지 않는다. 다만 `pnpm install`이 다시 쓰는 `pnpm-lock.yaml`은 달라지고, 설치 스크립트가 있는 의존성을 쓰면 `pnpm-workspace.yaml`의 `allowBuilds`에도 줄 하나가 더해진다(이 장의 "lockfile과 설치 스크립트"). 이렇게 정한 이유와 기각한 대안은 [ADR 0018](adr/0018-fork-registration-at-build-time.md)에 있다. 코드가 확인해 주는 것과 아직 없는 것을 나눠 쓴다.
 
-**있는 것.**
+### 결합은 빌드할 때 정해진다
 
-- 제품은 수집기를 **종류 이름**으로 만든다. 종류 이름과 만드는 함수의 표가 `backend/src/composition.ts`의 `connectorKinds`이고, 여기에 `site-mail`, `site-messenger`, `site-wiki`가 자리표시 구현으로 올라 있다. 인스턴스(종류, ID, 설정)의 목록은 `connectorInstances()`가 만든다. 부팅이 쓰는 묶음은 `productConnectors()`다.
-- 자리표시 구현은 `createSiteConnector`이고 초기화하면 `ConnectorNotImplementedError`(문구 `미구현, 배포처 후속`)로 실패한다. 포크는 같은 이름으로 실제 구현을 등록해 이것을 대체한다.
-- 등록이 되었는지 보는 명령이 있다. `pnpm --filter @pki/backend site-check <종류>`(`site-mail`, `site-messenger`, `site-wiki`)는 그 종류를 초기화해 보고, 지금은 이렇게 나오고 1로 끝난다.
+- 포크의 코드는 **빌드할 때** 정적 `import`로 제품에 들어간다. 실행 중에 폴더를 훑어 수집기를 찾아 읽어 들이는 코드는 없다. 설치본은 자기 안에 묶인 코드만 실행한다.
+- 포크는 `site/composition/`에 작은 패키지(`@pki-site/composition`)를 둔다. 그 안에 **등록 객체**(`SiteRegistration`) 하나와 **진입점 둘**이 있다. 진입점은 공용 백엔드의 함수(`runShell`, `runSiteCheck`)를 자기 등록으로 부른다. 공용 저장소의 진입점(`backend/src/shell.ts`, `backend/src/site-check.ts`)은 같은 함수를 빈 등록 `publicSite`로 부른다.
+- 빌드와 소스 실행은 `site/composition/package.json`이 있으면 `site/composition/src/shell.ts`를 백엔드의 진입점으로 고르고, 없으면 `backend/src/shell.ts`를 고른다(`backendEntry`). `site/composition/package.json`은 있는데 `site/composition/src/shell.ts`가 없으면 그 경로를 적은 오류로 실패한다. **반대로 `site/composition/src/shell.ts`만 있고 `site/composition/package.json`이 없으면 오류 없이 공용 진입점을 묶는다.** 패키지를 먼저 만든다.
+- 등록은 바탕 묶음(제품의 `productConnectors()`, 소스 실행의 `--fixtures`가 주는 묶음) **위에 합쳐진다.** 등록은 바탕을 바꾸거나 지우지 못하고, 종류와 인스턴스를 더하거나 자리표시 이름(`site-mail`, `site-messenger`, `site-wiki`)을 같은 이름으로 대체할 수 있을 뿐이다.
+- 브라우저 개발용 백엔드(`backend/src/dev.ts`)에는 포크의 수집기를 싣는 진입점이 없다. 포크는 Electron 소스 실행(`pnpm --filter @pki/desktop start`)으로 수집기를 본다.
+
+### 공용 저장소가 주는 것
+
+- 제품은 수집기를 **종류 이름**으로 만든다. 공용 저장소의 종류 이름과 만드는 함수의 표가 `backend/src/composition.ts`의 `connectorKinds`이고, 여기에 `site-mail`, `site-messenger`, `site-wiki`가 **자리표시 구현**(`createSiteConnector`)으로 올라 있다. 부팅이 쓰는 바탕 묶음은 `productConnectors()`다. 자리표시는 초기화하면 `ConnectorNotImplementedError`(문구 `미구현, 배포처 후속`)로 실패한다. 포크는 같은 이름으로 실제 구현을 등록해 이것을 대체한다.
+- 등록이 되었는지 보는 명령이 `site-check`다. 공용 저장소(조립 패키지가 없는 트리)에서 `pnpm --filter @pki/backend site-check <종류>`(`site-mail`, `site-messenger`, `site-wiki`)는 그 종류를 초기화해 보고, 자리표시는 이렇게 나오고 1로 끝난다.
 
 ```text
 site-mail: 미구현, 배포처 후속
 ```
 
 - 초기화가 던진 오류는 그 문구가 그대로 출력된다(위 줄의 `미구현, 배포처 후속`이 그 문구다). 초기화가 성공하면 `<종류>: ok`가 나오고 0으로 끝난다. 규격 버전이 다르면 `<종류>: unsupported-sdk-version`이 나오고 1로 끝난다.
+- `site-check`는 **빈 설정(`{}`)으로** 초기화한다. 설정을 요구하는 수집기는 자기 설정 오류의 문구로 실패하고 1로 끝난다(예시 수집기가 그렇다: `connector-example: invalid config`). 그 결과는 종류가 만들어지고 규격 버전 판정을 통과해 `initialize`까지 갔다는 확인이고, 인스턴스의 실제 설정으로 초기화되는지는 아니다. 그것은 시작할 때 수집기 목록의 `ready`로 본다(site-setup S27).
 
-**없는 것(열린 항목).** 아래는 모두 만들어지지 않았다. 번호(공용 저장소 #113 등)는 **공용(upstream) 저장소**의 추적 이슈다. 포크에서 `#113`은 포크 자신의 이슈를 가리키므로 공용 저장소의 이슈 목록에서 찾는다.
+### 포크가 더하는 파일
 
-1. **`site/` 안에서 수집기를 등록하는 길이 없다**(공용 저장소 #113). 제품은 `site/` 폴더에서 수집기를 찾아 올리지 않는다. 그래서 포크가 지금 `site/` 밖에서 고쳐야 하는 곳은 다음 전부다.
-   - `backend/src/composition.ts`의 `connectorKinds`(종류와 만드는 함수)와 `connectorInstances()`(인스턴스와 설정).
-   - `pnpm-workspace.yaml`의 `packages:` 목록(6장 3번)과, `pnpm install`이 바꾸는 `pnpm-lock.yaml`.
-   - `backend/package.json`: 포크의 수집기 패키지를 의존성으로 적어야 한다. 모듈 경계 규칙은 선언한 의존성만 가져오게 하고, 수집기 구현은 패키지의 `src/adapters/`에 두고 `<패키지 이름>/adapters` 진입점으로만 `composition.ts`가 가져오게 한다(`tooling/eslint/module-boundary.js` 머리의 설명).
-   - 인스턴스를 부팅할 때의 동작: 백엔드는 인스턴스들의 `initialize`를 함께 시작하고 각각 10초(`INITIALIZE_TIMEOUT_MS`)까지만 기다린 뒤에 서비스를 시작한다. 10초 안에 끝나지 않은 인스턴스는 준비되지 않은 것으로 두고, 그 뒤에 끝난 결과는 성공이든 실패든 버린다. 이 제한은 비동기로 기다리는 시간만 재므로 수집기가 동기 코드로 멈추면 막지 못한다. 만드는 함수가 던지거나 `initialize`가 던지거나 인스턴스가 `connectorKinds`에 없는 종류를 적어도(`connector-kind-unknown`) 시작은 계속되고 그 인스턴스만 준비되지 않은 상태가 된다. 그 인스턴스의 동기화는 `connector-unavailable`로 답하고 수집 작업은 보류된다. 로그에는 고정된 코드(`connector-initialize-timeout`, `connector-factory-failed`, `connector-initialize-failed`, `connector-kind-unknown`)와 인스턴스 `id`만 남고 수집기가 던진 글은 남지 않는다. 한 시간마다의 재점검은 새 객체를 만들어 초기화한다(5장).
-   - 범위 등급 매핑을 바꾸려면 `composition.ts`의 `productCalls`가 쓰는 `publicScopeGrading`을 바꾸고, 새 등급을 더하려면 site-setup S08에 적힌 파일들도 고친다.
-2. **수집기에 비밀 값을 건네는 통로가 없다**(공용 저장소 #114). 8장.
-3. **설치본이 `site/config/connector-scopes.json`을 읽는 길이 없다**(공용 저장소 #115). site-setup S18.
-4. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116). 인스턴스의 설정은 부팅 때 `connectorInstances()`가 주고, 설정 화면이나 설정 파일로 인스턴스를 만들 수 있는 곳이 없다. 제품이 등록한 종류는 `site-*` 셋뿐이다(`jsonl-import`는 시험에서만 등록된다). 9장.
+```text
+site/
+├── README.md                     공용 저장소가 갖는 유일한 파일
+├── composition/                  조립 패키지 @pki-site/composition
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── src/
+│       ├── registration.ts       registration: SiteRegistration
+│       ├── registration.test.ts  checkSiteRegistration(registration)이 빈 목록
+│       ├── shell.ts              await runShell(registration)
+│       └── site-check.ts         await runSiteCheck(registration, 인자)
+├── connectors/<이름>/            수집기 패키지 @pki-site/connector-<이름>
+│   ├── package.json              exports "./adapters"
+│   ├── tsconfig.json
+│   └── src/adapters/             구현과 계약 테스트
+└── config/                       설정 값
+```
+
+`pnpm-workspace.yaml`의 `packages:` 목록에는 `site/composition`과 `site/connectors/*`가 이미 있다. 공용 저장소에는 그 폴더가 없어도 `pnpm install --frozen-lockfile`이 통과한다. 그래서 포크는 그 파일을 고치지 않는다.
+
+### 등록 객체: 예시 패키지의 발췌
+
+`packages/site-example/`(`@pki/site-example`)은 포크가 `site/composition/`에 둘 것과 같은 모양의 예시다. 수집기로 6장의 `@pki/connector-example`을 등록한다. 제품에는 들어가지 않고, 다른 공용 패키지는 이것을 의존성, `tsconfig` 참조, `import`에 적지 않는다. 아래 코드 블록은 모두 그 파일의 발췌다.
+
+<!-- excerpt: packages/site-example/src/registration.ts -->
+```ts
+import type { SiteRegistration } from "@pki/backend";
+import { createExampleConnector } from "@pki/connector-example/adapters";
+// The scopes file, imported statically so the build puts its value in the backend bundle (I07-R1). Here it sits in
+// this package (config/), which the build allows for the example's entry only; a fork's file is
+// site/config/connector-scopes.json and its import path is "../../config/connector-scopes.json" (I07-R7, R16).
+// The `with { type: "json" }` is required: without it Node's source run fails.
+import connectorScopes from "../config/connector-scopes.json" with { type: "json" };
+
+/** The collector's kind name is its manifest's `type` (I05-R7). */
+const KIND = "connector-example";
+
+export const registration: SiteRegistration = {
+  connectorScopes,
+  connectorKinds: { [KIND]: createExampleConnector },
+  connectorInstances: [
+    {
+      id: "example-notes",
+      kind: KIND,
+```
+
+진입점 둘은 각각 몇 줄이다. 공용 저장소가 나중에 진입점을 늘리면 포크는 같은 모양의 파일을 하나 더한다(충돌이 아니라 추가다).
+
+<!-- excerpt: packages/site-example/src/shell.ts -->
+```ts
+import { runShell } from "@pki/backend";
+import { registration } from "./registration.ts";
+
+await runShell(registration);
+```
+
+<!-- excerpt: packages/site-example/src/site-check.ts -->
+```ts
+import { runSiteCheck } from "@pki/backend";
+import { registration } from "./registration.ts";
+
+await runSiteCheck(registration, process.argv.slice(2));
+```
+
+<!-- excerpt: packages/site-example/src/registration.test.ts -->
+```ts
+import { checkSiteRegistration } from "@pki/backend";
+import { describe, expect, it } from "vitest";
+import { registration } from "./registration.ts";
+
+describe("site.example-registration", () => {
+  it("has no violation: the check returns an empty list", () => {
+    expect(checkSiteRegistration(registration)).toEqual([]);
+  });
+```
+
+`SiteRegistration`의 필드는 모두 선택이다.
+
+| 필드 | 뜻 | 없을 때 |
+|---|---|---|
+| `connectorKinds` | 종류 이름 → 수집기를 **새로 만들어** 돌려주는 함수(`ConnectorFactory`) | 바탕 묶음의 종류만 |
+| `connectorInstances` | 시작할 때의 인스턴스(`id`, `kind`, `config`) | 바탕 묶음의 인스턴스만 |
+| `scopeGrading` | 접근 범위 → 데이터 등급 매핑(site-setup S08) | `publicScopeGrading` |
+| `scopePolicy` | 접근 범위 정책(site-setup S21). 있으면 설치본은 언제나 이 정책을 쓴다 | 공용 기본 정책 |
+| `connectorScopes` | 인스턴스마다의 접근 범위(site-setup S18) | 모든 인스턴스가 알 수 없음 |
+
+**이름과 인스턴스의 규칙.**
+
+- 종류 이름은 `^[a-z][a-z0-9-]{0,63}$`를 따른다(삭제 장부가 종류에 요구하는 규칙과 같다). 만드는 함수가 돌려준 수집기의 `manifest.type`은 종류 이름과 같아야 한다.
+- **공용 종류는 등록할 수 없다**(`PUBLIC_CONNECTOR_KINDS`. 지금 `jsonl-import`와 `test-fixtures`). 공용 종류는 제품이 따로 지키는 약속(사용자의 경로 승인, 합성 등급)을 갖기 때문이다. 자리표시 이름은 같은 이름으로 등록해 대체한다. 대체하지 않은 자리표시는 그대로 남아 `미구현, 배포처 후속`을 알린다.
+- 인스턴스는 **이 등록이 등록한 종류의 것만** 만들 수 있다. `id`는 1자 이상 128자 이하이고 등록 안에서 서로 달라야 하며 공용 인스턴스의 ID(`isPublicInstanceId`)와 겹치면 안 된다. 공용 종류나 대체하지 않은 자리표시 이름을 `kind`로 적은 인스턴스는 허용되지 않는다.
+
+**등록 검사.** `checkSiteRegistration(registration)`은 위반을 코드의 목록으로 돌려준다(한 위반마다 한 코드. 만드는 함수와 매핑은 검사에서 부르지만 시작할 때는 부르지 않는다). 예시의 `registration.test.ts`처럼 포크도 자기 등록이 빈 목록을 돌려주는 테스트를 둔다. 코드와 시작할 때의 처리는 다음과 같다.
+
+| 코드 | 잡는 것 | 시작할 때 |
+|---|---|---|
+| `kind-name-invalid` | 종류 이름의 모양 위반 | 그 종류를 빼고 계속한다 |
+| `kind-reserved` | 공용 종류의 이름 | 그 종류를 빼고 계속한다(공용 것은 그대로) |
+| `instance-id-invalid` | 인스턴스 `id`가 한도 밖 | 그 인스턴스를 빼고 계속한다 |
+| `instance-id-duplicate` | 같은 `id`가 둘 이상 | 첫 것만 쓰고 계속한다 |
+| `instance-kind-unknown` | 어디에도 없는 종류의 인스턴스 | 그 인스턴스만 `unavailable`로 두고 계속한다 |
+| `instance-kind-reserved` | 공용 종류나 대체하지 않은 자리표시의 인스턴스 | **시작을 멈춘다** |
+| `instance-id-reserved` | 공용 인스턴스의 ID | **시작을 멈춘다** |
+| `kind-factory-threw` | 만드는 함수가 예외를 던짐 | 검사에서만(시작할 때는 인스턴스 단위로 다룬다) |
+| `kind-manifest-mismatch` | `manifest.type`이 종류 이름과 다름 | 검사에서만 |
+| `scope-grading-invalid` | 매핑이 허용된 등급 밖을 답함 | 검사에서만 |
+
+`connectorScopes`에 대한 `connector-scopes-field-invalid`와 `connector-scopes-entry-invalid`도 검사에서만 나온다. 시작을 멈추는 두 위반은 공용이 지키는 약속을 넘으려는 시도이므로 조용히 넘기지 않는다. 그런 등록을 실은 설치본은 켜지지 않는다. 시작 실패는 고정된 사유 `site-registration-invalid`로 알리고, 표준 오류의 한 줄에 코드와 건수만 적는다(등록이 적은 글은 어디에도 싣지 않는다).
+
+### 순서대로: 명령
+
+1. 수집기를 등록하기 전에 그 수집기의 계약 묶음(`connectorContract`, 6장)을 통과시킨다. 이것은 **문서의 절차이고 빌드가 강제하지 않는다.** 계약 묶음에는 수집기마다 지어낸 원 시스템이 필요하고 그것은 수집기 자신의 테스트만 갖는다.
+2. 아래 명령을 차례로 실행한다.
+
+```sh
+pnpm install
+pnpm lint && pnpm typecheck && pnpm test
+pnpm --filter @pki-site/composition site-check <종류>
+pnpm --filter @pki/desktop build
+```
+
+- `pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다. 손으로 쓴 파일의 서식이 틀리면 `pnpm exec prettier --write site`로 맞춘다. `pnpm typecheck`는 저장소의 프로젝트와 `site/composition`, `site/connectors/*`의 `tsconfig.json`을 함께 본다. `site/` 아래 패키지에 `tsconfig.json`이 없으면 그 패키지 이름을 적어 실패한다. `pnpm test`는 공용 테스트 파일을 하나도 고치지 않은 채 포크 모양에서도 통과해야 한다(`site/`의 존재로 갈리는 코드는 저장소 루트를 인자로 받는다). **`pnpm e2e`는 다르다. 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 지금 포크 모양에서 실패한다.** 공용 저장소의 I05-T06이 고친다. 그때까지 포크 모양에서 공용 저장소의 e2e 통과를 기대하지 않는다.
+- 포크의 `site-check <종류>`는 위와 같은 판정을 등록의 종류(자리표시를 대체한 것 포함)에 한다. 모르는 종류는 사용법을 적고 2로 끝난다. 등록이 시작을 멈추는 위반을 가졌으면 그 코드와 건수를 표준 오류에 적고 1로 끝난다. 예시 패키지에서 `pnpm --filter @pki/site-example site-check <종류>`로 같게 돌려 볼 수 있다.
+- `pnpm --filter @pki/backend site-check <종류>`는 **공용 저장소의 명령**이다. 조립 패키지가 있는 저장소에서 실행하면 자리표시의 결과를 내지 않고, 그 패키지의 `package.json`의 `name`을 읽어 위의 포크 명령을 알린 뒤 2로 끝난다. 포크가 구현한 종류에 `미구현`이 나오는 오해를 막으려는 것이다.
+- `pnpm --filter @pki/desktop build`는 포크의 진입점을 묶어 설치본을 만든다. Windows 11 설치본으로 만들어 실행하는 확인은 site-setup S27이다.
+
+### 포크의 패키지를 만들 때
+
+**조립 패키지의 `package.json`.** 이름은 `@pki-site/composition`이어야 한다(다른 이름이면 `pnpm test`의 이름 검사가 실패한다. 수집기 패키지는 `@pki-site/`로 시작하면 된다). 직접 가져오는 패키지는 모두 적는다(pnpm의 엄격한 `node_modules` 때문에 적지 않은 패키지는 실행 때 찾지 못하고, 경계 규칙도 적지 않은 `@pki/*`를 거부한다). 예시의 것을 이름만 바꾼 모양이다. 자기 수집기 패키지는 `dependencies`에 `workspace:*`로 더한다.
+
+```json
+{
+  "name": "@pki-site/composition",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "site-check": "node src/site-check.ts"
+  },
+  "dependencies": {
+    "@pki/backend": "workspace:*",
+    "@pki/connector-example": "workspace:*"
+  },
+  "devDependencies": {
+    "@pki/contracts": "workspace:*",
+    "@pki/testkit": "workspace:*"
+  }
+}
+```
+
+**`tsconfig.json`은 예시를 그대로 복사할 수 없다.** 예시는 `packages/` 안에 있어 형제 패키지를 `../connector-example`처럼 가리키는데, `site/composition/`에서는 같은 패키지가 `../../packages/connector-example`이다. 그대로 두면 참조한 프로젝트를 찾지 못해 `pnpm typecheck`가 실패한다. 의존하는 워크스페이스 패키지는 모두 `references`에 있어야 하고(`tooling/workspace/tsconfig-references.test.ts`), 포크의 수집기 패키지는 `../connectors/<이름>`으로 가리킨다. 저장소 루트의 `tsconfig.base.json`을 확장하는 줄과 `../../backend` 참조는 폴더 깊이가 같아 그대로다. 예시의 `include`에 있는 `config/*.json`은 예시의 범위 파일이 패키지 안에 있어서 필요한 것이고, 포크의 범위 파일은 패키지 밖(`site/config/`)이라 아래 블록은 `["src"]`만 둔다.
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "outDir": "dist"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../backend" },
+    { "path": "../../packages/connector-example" },
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/testkit" },
+    { "path": "../connectors/<이름>" }
+  ]
+}
+```
+
+**수집기 패키지.** 구현은 자기 패키지의 `src/adapters/`에 두고 `exports`의 `"./adapters"` 진입점으로만 내보낸다. 그 진입점을 가져올 수 있는 파일은 `site/composition/src/registration.ts`(예시에서는 `packages/site-example/src/registration.ts`) **하나뿐**이다. 같은 패키지의 다른 파일이 가져오면 린트가 막는다.
+
+**경계 규칙이 막는 것과 막지 않는 것.** `pnpm lint`의 경계 규칙(`tooling/eslint/module-boundary.js`)은 다음을 오류로 알린다.
+
+- 포크 패키지가 `@pki/backend`를 패키지 이름이 아닌 길로 가져오는 것: `backend/src`를 상대 경로, 절대 경로, `file:` 주소로 가져오거나 `@pki/backend/<하위 경로>`로 가져오는 것. 시험 파일도 마찬가지다. 가져올 수 있는 것은 패키지 진입점이 내보내는 `runShell`, `runSiteCheck`, `checkSiteRegistration`, `publicSite`와 타입 `SiteRegistration`·`SiteRegistrationCode`·`ConnectorFactory`·`ConnectorInstanceConfig`뿐이다. `bootBackend`와 서버를 띄우는 `startServer`는 내보내지 않는다. 그 옵션들은 등록 검사를 건너뛰기 때문이다.
+- 공용 패키지가 `@pki-site/*`를 가져오거나 의존성으로 적는 것(방향은 언제나 포크에서 공용으로다).
+- `pnpm lint`는 저장소 루트의 `eslint.config.js` 하나만 쓴다(`eslint -c eslint.config.js`). 포크가 `site/` 아래에 둔 ESLint 설정 파일은 읽히지 않는다. 그렇지 않으면 그 파일이 루트의 규칙을 통째로 대신하고 `pnpm lint`는 여전히 0으로 끝난다.
+- 파일 안의 주석으로 규칙을 끄거나 바꾸는 것. `site/`와 `packages/site-example/`의 파일에서는 인라인 설정(`// eslint-disable pki/module-boundary`, `/* eslint pki/module-boundary: … */`)이 효력이 없다.
+
+**린트가 보지 않는 길이 다섯 있다.** `tsconfig`의 `paths` 별칭, 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`, `package.json`의 `imports`(`#이름`)다. 모두 일부러 해야 닿는 길이고 린트는 막지 않는다. 포크의 코드 검토가 맡는다.
+
+### 빌드와 산출물
+
+`pnpm --filter @pki/desktop build`가 고른 진입점을 묶으면 다음이 성립한다.
+
+- 묶음에는 등록과 그 수집기의 모듈이 들어가고, 테스트 파일과 `@pki/testkit`은 들어가지 않는다. 등록이 테스트 모듈에 닿으면 빌드가 실패한다.
+- 설치본의 백엔드는 `--scope-policy`와 `--fixtures`를 받지 않는다(받으면 시작이 실패한다). 등록에 `scopePolicy`가 있으면 설치본은 언제나 그 정책을 쓰고, 설치본을 공용 기본 정책으로 돌리는 스위치는 없다. 이름으로 정책을 고르는 `PKI_SCOPE_POLICY`(`default`, `site`)는 소스 실행에서만 듣는다.
+- **네이티브 모듈은 지원하지 않는다.** 수집기 패키지의 의존성이 네이티브 코드(패키지 폴더에 `binding.gyp`나 `prebuilds/` 폴더가 있거나 `.node` 파일이 든 것)이면 빌드가 그 패키지 이름을 적어 실패한다. 공용이 앱 폴더에 복사해 주는 `better-sqlite3`와 `@huggingface/transformers`는 이 검사에서 빠진다. 수집기 패키지가 그 이름을 자기 버전으로 선언해도 확인하는 검사는 없고, 실행 때는 공용이 복사한 것을 쓴다.
+- **그 검사에는 빠져나가는 곳이 둘 있다.** 하나는 계산된 이름으로 네이티브 모듈을 불러오고 못 찾으면 순수 JS 코드로 내려가는 패키지다. 번들러가 그 모듈을 풀지 않으므로 검사에 걸리지 않고, 빌드는 조용히 지나가 내려갈 코드가 묶인다. 다른 하나는 검사가 **빌드하는 컴퓨터에 설치된 패키지만 본다**는 것이다. 운영체제마다 다른 선택 의존성(`optionalDependencies`)을 쓰는 패키지는 한 OS에서는 실패하고 다른 OS에서는 통과할 수 있다. 그래서 이 검사 통과는 Windows 설치본에서 동작한다는 증거가 아니다(site-setup S27).
+
+### lockfile과 설치 스크립트
+
+- 수집기 패키지를 더하거나 의존성을 바꾼 뒤에는 `pnpm install`을 실행하고 `pnpm-lock.yaml`의 변경을 commit한다. 그 변경은 포크 패키지의 `importers` 항목과 그 외부 의존성뿐이다. 손으로 고치지 않는다. 이 시험이 붙잡는다: `pnpm-lock.yaml`의 `site/` 항목은 디스크의 포크 패키지와 정확히 같다. 의존성이 하나도 없는 포크 패키지는 `importers`에 빈 항목(`site/connectors/x: {}`)을 남기는데 그 패키지를 지워도 `pnpm install`이 그 항목을 지우지 않는다. 그때는 항목을 손으로 지운다.
+- 공용 변경을 받아 왔을 때 `site/` 밖에서 달라지는 추적 파일은 `pnpm-lock.yaml` 하나다(아래 설치 스크립트 경우는 예외). `git status --porcelain`에 그 밖의 파일이 보이면 `site/` 밖을 고친 것이다. `pnpm-lock.yaml`이 충돌하면 **공용 쪽의 내용을 취하고** `pnpm install`을 다시 실행한다. 포크의 항목이 다시 만들어진다.
+- 수집기의 의존성은 npm 레지스트리에서 받는 것이어야 한다. git·tarball·로컬 주소는 `tooling/workspace/lockfile-registry.test.ts`가 거부하고, 그 시험은 포크에서도 돈다.
+- **설치 스크립트가 있는 의존성**을 더하면 `pnpm install`이 `ERR_PNPM_IGNORED_BUILDS`로 실패하고, 그 실패한 실행이 `pnpm-workspace.yaml`의 `allowBuilds`에 `<패키지>: set this to true or false` 줄을 스스로 써 넣는다. 포크는 그 줄을 `false`로 고친다(스크립트를 돌리지 않는다는 뜻이고, 측정한 것은 이 값뿐이다). 그러면 `site/` 밖에서 달라지는 추적 파일이 `pnpm-lock.yaml`과 `pnpm-workspace.yaml`의 이 줄 둘이 된다(`packages:` 목록은 고치지 않는다). 스크립트가 정말 필요한 의존성(`true`)은 지원하지 않는다. [ownership.md 5절](ownership.md)의 방법으로 공용에 알린다.
+
+### 시작할 때와 재점검
+
+- 백엔드는 인스턴스들의 `initialize`를 함께 시작하고 각각 10초(`INITIALIZE_TIMEOUT_MS`)까지만 기다린 뒤에 서비스를 시작한다. 10초 안에 끝나지 않은 인스턴스는 준비되지 않은 것으로 두고, 그 뒤에 끝난 결과는 성공이든 실패든 버린다. 이 제한은 비동기로 기다리는 시간만 재므로 수집기가 동기 코드로 멈추면 막지 못한다.
+- 만드는 함수가 던지거나 `initialize`가 던지거나 인스턴스가 등록에 없는 종류를 적어도(`connector-kind-unknown`) 시작은 계속되고 그 인스턴스만 준비되지 않은 상태(`unavailable`)가 된다. 그 인스턴스의 동기화는 `connector-unavailable`로 답하고 수집 작업은 보류된다. 로그에는 고정된 코드(`connector-initialize-timeout`, `connector-factory-failed`, `connector-initialize-failed`, `connector-kind-unknown`)와 인스턴스 `id`만 남고 수집기가 던진 글은 남지 않는다.
+- 한 시간마다의 재점검은 만드는 함수를 다시 불러 **새 객체**를 만들어 초기화한다(5장). 제품은 한 객체의 `initialize`를 한 번만 부른다. 그러므로 `initialize`는 같은 설정의 다른 객체가 동시에 초기화 중일 수 있다는 것을 전제로 쓴다. 혼자만 잡는 잠금 파일이나 포트를 쓰지 않는다.
+- 제품은 버린 객체를 닫지 못한다(규격에 닫기가 없다). 늦게 끝나 버려진 객체는 닫히지 않은 채 자원을 쥘 수 있다. 쌓이는 수에 끝을 두려고 60초를 넘겨 끝난 재점검이 연달아 3번이면 그 인스턴스의 재점검을 그만두고 앱을 다시 시작할 때까지 준비되지 않은 채로 둔다(`connector-recheck-abandoned`).
+
+### 믿는 것과 막지 못하는 것
+
+포크의 수집기는 건물에 들어와 일하는 **직원**이지 손님이 아니다. 출입증 검사(등록 검사)와 회의 시간 제한(시간 제한)은 직원의 실수를 잡지만 직원이 마음먹고 하는 일을 막지는 못한다. 다만 비유와 달리 이 직원이 가져오는 서류(수집한 내용, 오류의 글)는 여전히 믿지 않는다. 스키마로 검사하고 오류의 글은 로그와 화면에 싣지 않는다.
+
+- 포크의 코드는 **빌드할 때 포크 소유자가 검토해 넣은, 믿는 코드**다. 백엔드와 같은 프로세스에서 같은 권한으로 돈다. 정본 DB, 비밀 값 통로, 네트워크, 파일에 닿고 **가둬지지 않는다.** 등록 검사와 시간 제한은 실수와 느린 초기화를 잡는 장치이지 격리가 아니다.
+- 막지 못하는 것: 만드는 함수나 `initialize`의 **동기 멈춤**(10초 제한이 끊지 못해 앱이 시작하지 못한다), **포크 모듈을 읽는 도중의 예외**(`runShell`이 불리기 전에 진입점이 끝난다. 셸은 기존의 시작 실패로 알린다), 수집기가 프로세스를 끝내거나 메모리를 다 쓰는 일, 제한을 넘긴 초기화가 뒤에서 계속 도는 일, 악의적인 포크 코드나 그 의존성. 동기 멈춤은 포크의 코드 검토와 site-setup S27이, 포크 모듈을 읽는 도중의 예외는 포크의 `pnpm test`(조립 패키지의 부팅 테스트)와 S27이 맡는다.
+- 데이터 폴더에 파일을 놓아 실행본이 그것을 코드로 읽게 할 길은 없다(실행 중 로더가 없다). 설치 폴더의 파일을 바꿀 수 있는 공격자는 실행본 자체를 바꿀 수 있으므로 이 장치의 범위 밖이다.
+
+### 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다
+
+삭제 장부를 시작할 때 다시 적용하는 단계는 **그 빌드가 아는 종류**의 줄만 적용한다. 아는 종류는 등록이 더한 종류를 포함한다. 그런데 모르는 종류의 줄은 건너뛰면서도 적용 위치를 올린다. 그래서 어떤 종류를 뺀 빌드로 백업을 복원해 띄웠다가 나중에 그 종류를 다시 넣으면, 그 사이에 건너뛴 삭제는 다시 적용되지 않고 지운 자료가 다음 동기화에서 되돌아올 수 있다. 건너뛴 건수는 상태 화면과 장부 이력에 남으므로 조용하지는 않다. 고치는 일은 공용 저장소의 #121이 추적한다. 그때까지는 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다.
+
+### 아직 없는 것
+
+번호(공용 저장소 #114 등)는 **공용(upstream) 저장소**의 추적 이슈다. 포크에서 `#114`는 포크 자신의 이슈를 가리키므로 공용 저장소의 이슈 목록에서 찾는다.
+
+1. **수집기에 비밀 값을 건네는 통로가 없다**(공용 저장소 #114). 8장.
+2. **설치본이 `site/config/connector-scopes.json`을 읽는 길이 없다**(공용 저장소 #115). site-setup S18.
+3. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116). 인스턴스의 설정은 시작할 때 등록의 `connectorInstances`가 주고, 설정 화면이나 설정 파일로 인스턴스를 만들 수 있는 곳이 없다. 제품이 등록한 종류는 `site-*` 셋뿐이다(`jsonl-import`는 시험에서만 등록된다). 9장.
 
 이 항목들은 이 문서가 임의로 정하지 않았다. 포크가 다른 방법을 정했다면 그 방법을 공용 저장소에 알린다([ownership.md 5절](ownership.md)).
 
@@ -505,8 +729,12 @@ site-mail: 미구현, 배포처 후속
 
 ### 이 장을 줄이면
 
-- 종류와 만드는 함수의 표는 `connectorKinds`이고, 확인 명령은 `site-check`다.
-- `site/connectors/`를 읽는 코드와 워크스페이스 항목은 아직 없다. 지금은 `site/` 밖의 파일을 고쳐야 연결된다.
+- 포크는 `site/composition/`에 등록 하나와 진입점 둘을 두고, 빌드가 그 진입점을 고른다. 결합은 빌드할 때의 정적 `import`다.
+- 등록은 사이트 종류와 그 인스턴스만 더한다. 공용 종류에 손을 대는 등록은 시작하지 못하고, 그 밖의 잘못된 항목과 멈추는 수집기는 그 항목만 빠진다.
+- 예시의 `tsconfig.json`은 그대로 복사할 수 없다. 네이티브 모듈 검사와 린트에는 빠져나가는 길이 있다.
+- 포크의 코드는 믿는 코드로 실리고 가둬지지 않는다. 동기 멈춤은 막지 못한다.
+- 명령은 `pnpm install`, `pnpm lint && pnpm typecheck && pnpm test`, `pnpm --filter @pki-site/composition site-check <종류>`, `pnpm --filter @pki/desktop build`다. `site/` 밖에서 달라지는 것은 `pnpm-lock.yaml`이고, 설치 스크립트가 있는 의존성이면 `allowBuilds`의 `false` 줄이 더해진다.
+- 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다(#121).
 
 ## 8. 자주 만나는 두 가지: 정수 revision이 없을 때, 자격 증명
 
@@ -598,9 +826,9 @@ site-mail: 미구현, 배포처 후속
 |---|---|
 | 실제 메일·메신저·Wiki 수집기 | 이 저장소에 없다. 자리표시(`site-mail`, `site-messenger`, `site-wiki`)와 지어낸 자료를 내는 예시뿐이다. 구현은 배포처 포크의 일이다 |
 | 실제 원 시스템에서의 규격 확인 | 하지 않았다. 요청 한도, cursor 만료, 대량 페이지, 만료된 동안의 삭제, 범위와 revision 채우기는 S18이 배포처에서 확인한다 |
-| `site/` 안에서 수집기를 등록하는 길(읽어 들이는 코드, 워크스페이스 항목, 의존성·경계 규칙, 부팅 동작, 등급 매핑 끼우기) | 없다. 지금은 `site/` 밖의 파일을 고쳐야 한다(7장, #113) |
+| 수집기 종류를 뺀 빌드로 복원한 백업에서 건너뛴 삭제를 그 종류가 돌아온 뒤 다시 적용하는 일 | 없다. 건너뛴 줄은 건수로만 남는다. 종류를 뺀 빌드로 백업을 복원하지 않는다(7장, #121) |
 | 수집기에 비밀 값을 건네는 통로 | 없다(8장, #114) |
 | 설치본이 `site/config/connector-scopes.json`을 읽는 길 | 만들지 않았다. 소스 트리에서 실행할 때만 그 파일을 읽는다(site-setup S18, #115) |
-| `jsonl-import` 파일 인스턴스를 제품에서 설정하는 길과 `{ path }`의 경로 제한 | 없다. 수집기 코드는 있고 시험에서만 등록된다. 인스턴스는 부팅 때 `connectorInstances()`가 준 설정으로만 생긴다(9장, #116) |
+| `jsonl-import` 파일 인스턴스를 제품에서 설정하는 길과 `{ path }`의 경로 제한 | 없다. 수집기 코드는 있고 시험에서만 등록된다. 인스턴스는 시작할 때 등록의 `connectorInstances`가 준 설정으로만 생긴다(9장, #116) |
 | 화면에서 locator 표시 | 없다. 근거를 읽는 정본 함수와 API 응답은 locator를 돌려주지만 화면은 그리지 않는다 |
 | Windows에서의 확인 | 하지 않았다. 이 문서의 명령은 macOS 개발 환경에서 돌려 보았다 |

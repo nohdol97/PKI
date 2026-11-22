@@ -13,7 +13,6 @@ describe("the package entry's exports", () => {
       "publicSite",
       "runShell",
       "runSiteCheck",
-      "startServer",
     ]);
   });
 
@@ -21,5 +20,13 @@ describe("the package entry's exports", () => {
     const text = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
     expect(text).not.toMatch(/bootBackend|BootOptions|from "\.\/boot\.ts"/);
     expect(Object.keys(entry)).not.toContain("bootBackend");
+  });
+
+  // I05-T03 review D3: `startServer` is the API layer's assembly function. It skips the registration check,
+  // the ledger re-apply and the policy resolution, and nothing a fork writes needs it, so the entry does not hold it.
+  it("hold neither the server's start function nor its option types", () => {
+    const text = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+    expect(text).not.toMatch(/startServer|ServerOptions|RunningServer|from "\.\/server\.ts"/);
+    expect(Object.keys(entry)).not.toContain("startServer");
   });
 });

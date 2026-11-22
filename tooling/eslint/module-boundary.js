@@ -27,7 +27,10 @@
 // The direction is fork -> public only: a public package may not import "@pki-site/…". A fork-shaped
 // package reaches the backend by its package name alone, so nothing of backend/src (bootBackend takes
 // unchecked connectors and policies) is reached by a path or a subpath, test files included.
-// Absolute paths and file: URLs are resolved and judged like relative specifiers (by the package of their target).
+// Absolute paths and file: URLs are resolved and judged like relative specifiers (by the package of their target);
+// a file: URL that names no readable path (a foreign host, an encoded slash) is refused outright.
+// Inline configuration is closed for the fork's files by eslint.config.js (`noInlineConfig` under site/ and
+// packages/site-example/), not here: a comment cannot switch this rule off or give it an allow-list there.
 // Semantic registry boundary (S01-T02, S01-R5, R7): the user's entry to the registry's lifecycle
 // (USER_ENTRY, exported by @pki/storage) is imported only by the composition root, which hands it to
 // the API layer, and by tests; the API layer (backend/src/server.ts) may name its types but not the
@@ -38,14 +41,18 @@
 // its history through the cascade, and the new row has no line) fail outside it, tests and
 // @pki/testkit's seed excepted. Both look at the text of string and template literals and at
 // import and export specifiers by name, and a namespace import's member access or destructuring.
-// The tables are the item, fact and relation ones and their histories; the ontology tables are
-// T07's to add.
+// The tables are the item, fact and relation ones and their histories, and (S01-T07) the type
+// definitions' `ontology_elements`, `ontology_basis` and `ontology_history`, whose INSERT and REPLACE
+// are written by storage/src/ontology.ts (and the migration's seed) alone. DELETE is not checked
+// (the derivative kind `ontology` deletes lineage rows and the elements it leaves without lineage), so
+// a direct DELETE of `ontology_basis` outside it is a known gap.
 // Known gaps (not checked):
 // - the user entry reached through `import("@pki/storage")`, `export * from "@pki/storage"` or a
 //   value passed in from a module that may hold it
 // - SQL whose table name or verb is assembled at run time (`INSERT INTO ${table}`), or kept outside
 //   a TypeScript string
 // - createRequire(import.meta.url)("...") calls
+// - a fork's tsconfig `paths` alias or a symlink inside its package (both are deliberate acts)
 // - package.json "imports" subpaths ("#name")
 // - import() with a computed specifier (import(`./adapters/${name}.ts`))
 // - an implementation outside src/adapters/ that names no adapter type at all;
@@ -82,12 +89,24 @@ const COMPOSITION_POINTS = [
 ];
 
 /**
- * The one cross-package relative targets a package may import (I05-R4): `{ pkg, target }` allows `pkg` to
- * import the file `resolve(<pkg root>, target)` and no other. The resolved paths are compared, never the
- * specifier text. Empty: the I07 task adds its one entry. The rule option `allowRelative` replaces the table (tests).
- * @type {{ pkg: string, target: string }[]}
+ * The one cross-package relative import a file may make (I05-R4, I07-R16): an entry allows the file `file` of
+ * the package `pkg` (at `dir` when given, like a composition point) to import the file
+ * `resolve(<pkg root>, target)` by a static `import` declaration with a relative specifier and no other way. All of them must hold:
+ * the package, its file, the exact resolved target (never the specifier text, never the working directory or
+ * this rule file's place) and the form: `export ... from`, `import()`, `typeof import()` and an absolute path or `file:` URL naming the same file stay refused.
+ * The fork's one: its composition package's registration takes the scopes file the build binds, at
+ * `<composition package root>/../../site/config/connector-scopes.json`. The rule option `allowRelative`
+ * replaces the table (tests).
+ * @type {{ pkg: string, file: string, target: string, dir?: string }[]}
  */
-const RELATIVE_ALLOWED = [];
+const RELATIVE_ALLOWED = [
+  {
+    pkg: "@pki-site/composition",
+    file: "src/registration.ts",
+    dir: "site/composition",
+    target: "../../site/config/connector-scopes.json",
+  },
+];
 const TEST_SPECIFIER = /\.(test|e2e|test-support)(\.[cm]?[jt]sx?)?$/;
 /** A package's top-level e2e/ folder holds test code only, whatever the file names. */
 const E2E_DIR = "e2e";
@@ -122,6 +141,17 @@ const HISTORY_INSERT = new RegExp(
   String.raw`\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+${TABLE}(?:item|fact|relation)_history\b`,
   "i",
 );
+// The type definitions' tables (S01-T07): rows go in through storage/src/ontology.ts alone (the seed
+// is the migration's). A DELETE is not checked: the derivative kind `ontology` deletes lineage rows and
+// the elements they leave without lineage (knowledge-engine canonical-kinds.ts).
+const ONTOLOGY_INSERT = new RegExp(
+  String.raw`\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+${TABLE}ontology_(?:elements|basis|history)\b`,
+  "i",
+);
+const ONTOLOGY_WRITERS = [
+  { pkg: "@pki/storage", file: "src/ontology.ts" },
+  { pkg: "@pki/storage", file: "src/migrations.ts" },
+];
 const ROW_REPLACE = new RegExp(
   String.raw`\bREPLACE\s+INTO\s+${TABLE}(?:items|facts|relations)\b`,
   "i",
@@ -268,8 +298,13 @@ const moduleBoundary = {
             type: "array",
             items: {
               type: "object",
-              properties: { pkg: { type: "string" }, target: { type: "string" } },
-              required: ["pkg", "target"],
+              properties: {
+                pkg: { type: "string" },
+                file: { type: "string" },
+                dir: { type: "string" },
+                target: { type: "string" },
+              },
+              required: ["pkg", "file", "target"],
               additionalProperties: false,
             },
           },
@@ -299,7 +334,7 @@ const moduleBoundary = {
       userEntryImport:
         "'{{name}}' is the user's entry to the Semantic registry; only the composition root may import it (the API layer, its type), so extraction and the job runner cannot approve or reject.",
       registryWrite:
-        "History lines and replaced item, fact or relation rows are written only by the lifecycle gate (storage/src/semantic-lifecycle.ts).",
+        "History lines and replaced item, fact or relation rows are written only by the lifecycle gate (storage/src/semantic-lifecycle.ts); the type definitions' rows only by storage/src/ontology.ts.",
     },
   },
   create(context) {
@@ -309,27 +344,30 @@ const moduleBoundary = {
     const ownPath = relative(ownRoot, context.filename).split(sep).join("/");
     const isTest = TEST_FILE.test(context.filename) || inE2eDir(context.filename);
     const rootPath = ownRoot.split(sep).join("/");
-    const isComposition = COMPOSITION_POINTS.some(
-      (p) =>
-        ownName === p.pkg &&
-        ownPath === p.file &&
-        (p.dir === undefined || rootPath.endsWith(`/${p.dir}`)),
-    );
-    /** @type {{ pkg: string, target: string }[]} */
+    /** Whether this file is the file `p` names: the package by name, the file in it and, when given, its folder. */
+    const isFileOf = (/** @type {{ pkg: string, file: string, dir?: string }} */ p) =>
+      ownName === p.pkg &&
+      ownPath === p.file &&
+      (p.dir === undefined || rootPath.endsWith(`/${p.dir}`));
+    const isComposition = COMPOSITION_POINTS.some(isFileOf);
+    /** @type {{ pkg: string, file: string, target: string, dir?: string }[]} */
     const allowedRelative = context.options[0]?.allowRelative ?? RELATIVE_ALLOWED;
     const isFork = String(ownName).startsWith(FORK_SCOPE);
     // who may reach an implementation: a composition point, implementations themselves, tests
     const mayReachAdapters =
       isComposition || isTest || inAdapters(ownPath) || EXEMPT_PACKAGES.has(ownName);
 
-    /** The file a relative, absolute or file: URL specifier names; undefined for a package name. */
+    /**
+     * The file a relative, absolute or file: URL specifier names; undefined for a package name; null for a
+     * file: URL that names no readable path (a foreign host, an encoded slash), which is refused outright.
+     */
     function pathOf(/** @type {string} */ source) {
       if (source.startsWith(".")) return resolve(dirname(context.filename), source);
       if (source.startsWith("file:")) {
         try {
           return fileURLToPath(source);
         } catch {
-          return resolve(dirname(context.filename), "_unreadable-file-url");
+          return null;
         }
       }
       return isAbsolute(source) ? resolve(source) : undefined;
@@ -342,6 +380,10 @@ const moduleBoundary = {
       (ownName === GATE_MODULE.pkg && ownPath === GATE_MODULE.file) ||
       isTest ||
       EXEMPT_PACKAGES.has(ownName);
+    const mayWriteOntology =
+      isTest ||
+      EXEMPT_PACKAGES.has(ownName) ||
+      ONTOLOGY_WRITERS.some((w) => ownName === w.pkg && ownPath === w.file);
     /** Local names of `import * as x from "@pki/storage"`, to catch `x.userDecisions`. */
     const storageNamespaces = new Set();
     /** @param {string} name @param {boolean} typeOnly */
@@ -381,19 +423,25 @@ const moduleBoundary = {
     }
     /** @param {any} node A Literal or TemplateLiteral: SQL text that writes what only the gate writes */
     function registrySql(node) {
-      if (mayWriteRegistry) return;
+      if (mayWriteRegistry && mayWriteOntology) return;
       const text =
         node.type === "TemplateLiteral"
           ? node.quasis.map((/** @type {any} */ q) => q.value.cooked ?? "").join("\0")
           : node.value;
       if (typeof text !== "string") return;
-      if (HISTORY_INSERT.test(text) || ROW_REPLACE.test(text)) {
+      if (
+        (!mayWriteRegistry && (HISTORY_INSERT.test(text) || ROW_REPLACE.test(text))) ||
+        (!mayWriteOntology && ONTOLOGY_INSERT.test(text))
+      ) {
         context.report({ node, messageId: "registryWrite" });
       }
     }
 
-    /** @param {any} node A Literal, or an expression-free TemplateLiteral */
-    function check(node) {
+    /**
+     * @param {any} node A Literal, or an expression-free TemplateLiteral
+     * @param {boolean} [staticImport] The node is the source of an `import` declaration (the one form the allowance covers, with a relative specifier)
+     */
+    function check(node, staticImport = false) {
       let source;
       if (node?.type === "Literal" && typeof node.value === "string") source = node.value;
       else if (node?.type === "TemplateLiteral" && node.expressions.length === 0) {
@@ -401,6 +449,10 @@ const moduleBoundary = {
       }
       if (typeof source !== "string") return;
       const target = pathOf(source);
+      if (target === null) {
+        context.report({ node, messageId: "crossPackageRelative", data: { source } });
+        return;
+      }
       if (target !== undefined) {
         // Treat the target as a directory so a specifier naming a package root resolves to it.
         const resolved = target;
@@ -409,9 +461,10 @@ const moduleBoundary = {
           return;
         }
         if (
+          staticImport &&
+          /^\.\.?\//.test(source) &&
           allowedRelative.some(
-            (a) =>
-              a.pkg === ownName && resolved === resolve(/** @type {string} */ (ownRoot), a.target),
+            (a) => isFileOf(a) && resolved === resolve(/** @type {string} */ (ownRoot), a.target),
           )
         ) {
           return;
@@ -540,7 +593,7 @@ const moduleBoundary = {
       TSSatisfiesExpression: typed,
       TSAsExpression: typed,
       ImportDeclaration: (node) => {
-        check(node.source);
+        check(node.source, true);
         userEntry(node);
       },
       ExportNamedDeclaration: (node) => {

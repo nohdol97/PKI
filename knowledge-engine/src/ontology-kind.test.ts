@@ -8,6 +8,7 @@ import {
   migrate,
   registerConnectorInstance,
   saveSourceRecord,
+  userDecisions,
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
@@ -179,5 +180,66 @@ describe("ontology.candidates: a prune of earlier versions (R22)", () => {
     expect(basisOf(kept)).toEqual([[a, 3]]);
     expect(stored(verified)).toEqual(["verified"]);
     expect(basisOf(verified)).toEqual([[a, 3]]);
+  });
+});
+
+// S01-T07 (R20, R22): the user's own approval and undo, with the lineage they leave and a source's
+// deletion between them.
+describe("ontology.candidates: approval, undo and a source's deletion (S01-T07)", () => {
+  /** A candidate proposed from each source in `from`. */
+  function proposed(name: string, from: number[]): number {
+    return element(
+      name,
+      "candidate",
+      from.map((s) => [s, 1] as [number, number]),
+    );
+  }
+  const decide = (id: number, action: "approve" | "reject") =>
+    userDecisions.ontology.decide(db, id, action);
+  const undo = (id: number) => userDecisions.ontology.undo(db, id);
+
+  it("keeps an approved element without lineage, and a deletion of its source takes the lineage rows only; undoing it then removes the element", () => {
+    const a = source("a");
+    const id = proposed("Team", [a]);
+    expect(decide(id, "approve").status).toBe("applied");
+    expect(lineage(id)).toEqual([]);
+    expect(basisOf(id)).toEqual([[a, 1]]);
+    deletion(a);
+    expect(stored(id)).toEqual(["verified"]);
+    expect(basisOf(id)).toEqual([]);
+    expect(undo(id)).toEqual({ status: "removed", id });
+    expect(stored(id)).toEqual([]);
+    expect(history(id)).toBe(0);
+  });
+
+  it("returns an undone approval to the lineage it kept: the candidate is followed again and the source's deletion removes it", () => {
+    const a = source("a");
+    const id = proposed("Team", [a]);
+    decide(id, "approve");
+    expect(undo(id).status).toBe("applied");
+    expect(lineage(id)).toEqual([[a, 1]]);
+    deletion(a);
+    expect(stored(id)).toEqual([]);
+  });
+
+  it("returns an undone approval to candidate with the lineage rows that are left", () => {
+    const a = source("a");
+    const b = source("b");
+    const id = proposed("Team", [a, b]);
+    decide(id, "approve");
+    deletion(a);
+    expect(undo(id).status).toBe("applied");
+    expect(stored(id)).toEqual(["candidate"]);
+    expect(lineage(id)).toEqual([[b, 1]]);
+  });
+
+  it("follows a rejected candidate's lineage, and the undo of the rejection follows it as a candidate", () => {
+    const a = source("a");
+    const id = proposed("Team", [a]);
+    decide(id, "reject");
+    expect(lineage(id)).toEqual([[a, 1]]);
+    undo(id);
+    expect(lineage(id)).toEqual([[a, 1]]);
+    expect(stored(id)).toEqual(["candidate"]);
   });
 });

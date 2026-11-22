@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { ESLint, RuleTester } from "eslint";
 import tseslint from "typescript-eslint";
 import { afterAll, describe, expect, it } from "vitest";
@@ -137,6 +137,64 @@ describe("repository lint config enforces module-boundary", () => {
   }, 90_000);
   // ^ lints the whole repository. Measured, 5 runs each: 3.3-3.5 s alone (4.3-4.5 s before only this rule
   // ran), 16.9-19.6 s with the machine 3x oversubscribed (24 busy loops on 8 cores). 90 s is 4.5x that.
+
+  // B1 (I05-T04 delta D2): a fork package cannot switch the rule off or re-configure it from inside a file.
+  // Inline configuration stays available to the public packages.
+  describe("inline ESLint configuration", () => {
+    /** An import of another package's file by path, written as a relative specifier from `file`. */
+    const reach = (file: string, target: string) =>
+      `import { x } from "${relative(dirname(join(repoRoot, file)), join(repoRoot, target))}";\nexport { x };\n`;
+    // every package name a file below could belong to (the root's, when the fork folders do not exist), with the
+    // file's own path in its package (an entry names one file), so the option would open the import if it took effect
+    const allowList = [
+      "pki",
+      "@pki/backend",
+      "@pki-site/composition",
+      "@pki-site/connector-x",
+      "@pki/site-example",
+    ];
+    const inline = (file: string, target: string) => ({
+      "a disable-next-line comment": `// eslint-disable-next-line pki/module-boundary\n${reach(file, target)}`,
+      "a block disable comment": `/* eslint-disable pki/module-boundary */\n${reach(file, target)}`,
+      "a rule-setting comment that turns the rule off": `/* eslint pki/module-boundary: "off" */\n${reach(file, target)}`,
+      "a rule-setting comment that gives the rule an allow-list": `/* eslint pki/module-boundary: ["error", {"allowRelative": ${JSON.stringify(
+        allowList.map((pkg) => ({
+          pkg,
+          file: file.slice(file.indexOf("src/")),
+          target: join(repoRoot, target),
+        })),
+      )}}] */\n${reach(file, target)}`,
+    });
+    const forkFiles = [
+      "site/composition/src/registration.ts",
+      "site/connectors/x/src/adapters/impl.ts",
+      "packages/site-example/src/registration.ts",
+    ];
+    const forms = Object.keys(inline("backend/src/index.ts", "providers/src/index.ts"));
+    it.each(forkFiles.flatMap((file) => forms.map((form) => [file, form] as const)))(
+      "%s: %s does not silence the rule",
+      async (file, form) => {
+        const code = inline(file, "backend/src/boot.ts")[form as keyof ReturnType<typeof inline>];
+        const messages = await lintWithRepoConfig(code, file);
+        expect(messages.map((m) => m.messageId)).toEqual(["crossPackageRelative"]);
+      },
+    );
+
+    it("leaves the same comments in force in a public package", async () => {
+      const file = "backend/src/index.ts";
+      for (const code of Object.values(inline(file, "providers/src/index.ts"))) {
+        expect(await lintWithRepoConfig(code, file)).toEqual([]);
+      }
+    });
+
+    it("the same import without a comment is reported in a public package (the cases above are not vacuous)", async () => {
+      const messages = await lintWithRepoConfig(
+        reach("backend/src/index.ts", "providers/src/index.ts"),
+        "backend/src/index.ts",
+      );
+      expect(messages.map((m) => m.messageId)).toEqual(["crossPackageRelative"]);
+    });
+  });
 
   it("allows imports inside the same package and of platform modules", async () => {
     const messages = await lintWithRepoConfig(
@@ -528,6 +586,14 @@ describe("module-boundary: fork packages (I05-C4)", () => {
         filename: at("site/connectors/x/src/index.ts"),
         errors: [{ messageId: "undeclaredDependency" }],
       },
+      // B4 (S01-R7, I05-R4): the fork's composition point is not the composition root that hands the
+      // registry's user entry to the API layer; it is refused the entry too (the storage dependency is
+      // undeclared in this fixture, so that is reported as well)
+      {
+        code: 'import { userDecisions } from "@pki/storage";\nexport { userDecisions };\n',
+        filename: registration,
+        errors: [{ messageId: "userEntryImport" }, { messageId: "undeclaredDependency" }],
+      },
       // D1: nothing of the backend is reached by path or by subpath from a fork-shaped package,
       // in a product file and in a test file alike (bootBackend takes unchecked connectors and policies)
       ...[
@@ -583,6 +649,10 @@ describe("module-boundary: fork packages (I05-C4)", () => {
     ],
     invalid: [registration, exampleShell, compositionTest].flatMap((filename) =>
       [
+        // B2 (I05-T04 delta D3): a file: URL that cannot be read as a path is refused, not mapped into the own package
+        'import { r } from "file://evilhost/site/composition/src/registration.ts";',
+        'import { r } from "file:///site/composition/src/..%2F..%2F..%2Fbackend/src/boot.ts";',
+        'const m = await import("file://evilhost/backend/src/boot.ts");',
         `import { bootBackend } from ${JSON.stringify(absoluteBoot)};`,
         `export { bootBackend } from ${JSON.stringify(absoluteBoot)};`,
         `const m = await import(${JSON.stringify(absoluteBoot)});`,
@@ -593,8 +663,15 @@ describe("module-boundary: fork packages (I05-C4)", () => {
     ),
   });
 
-  // B-S2: the allow-list slot for one cross-package relative target; shipped empty, tested with a fixture entry
-  const slot = [{ pkg: "@pki-site/composition", target: "../config/connector-scopes.json" }];
+  // B-S2: the allow-list slot for one cross-package relative target, tested with a fixture entry (the shipped
+  // entry is judged by I07-C18 below)
+  const slot = [
+    {
+      pkg: "@pki-site/composition",
+      file: "src/registration.ts",
+      target: "../config/connector-scopes.json",
+    },
+  ];
   const slotOptions = [{ allowRelative: slot }];
   ruleTester.run("module-boundary (relative allow-list slot)", moduleBoundary, {
     valid: [
@@ -612,10 +689,11 @@ describe("module-boundary: fork packages (I05-C4)", () => {
       },
     ],
     invalid: [
-      // no entry (the shipped table): refused
+      // the entry names a file: another file of the same package is refused
       {
         code: 'import s from "../../config/connector-scopes.json";',
-        filename: registration,
+        filename: compositionShell,
+        options: slotOptions,
         errors: [{ messageId: "crossPackageRelative" }],
       },
       // a sibling file next to the allowed one
@@ -646,6 +724,157 @@ describe("module-boundary: fork packages (I05-C4)", () => {
         options: slotOptions,
         errors: [{ messageId: "crossPackageRelative" }],
       },
+    ],
+  });
+
+  // I07-C18 `module-boundary` (I07-R16): the shipped table's one entry, judged with no option. One passing case
+  // and the refusals, each breaking exactly one narrowing: the package (⑥⑦⑧ and the two that sit where the
+  // target resolves the same), the file (②), the exact target (③④⑤), the form (⑨⑩⑪).
+  const SCOPES = "../../config/connector-scopes.json";
+  const staticImport = `import scopes from ${JSON.stringify(SCOPES)} with { type: "json" };`;
+  const refused = (name: string, code: string, filename: string) => ({
+    name: `refused: ${name}`,
+    code,
+    filename,
+    // the option REPLACES the shipped table: one case gives an empty one
+    ...(name.startsWith("an allowRelative option") ? { options: [{ allowRelative: [] }] } : {}),
+    errors: [{ messageId: "crossPackageRelative" }],
+  });
+  // packages whose root is two folders under the fork root, so the entry's target resolves to the very file
+  // they import: only their package (name or folder) tells them from the composition package
+  forkPkg("site/collector", { name: "@pki-site/collector" });
+  forkPkg("site/impostor", { name: "@pki-site/composition" });
+  forkPkg("packages/other", { name: "@pki/other" });
+  // the folder alone is not enough either: a package at site/composition under another name
+  const renamedRoot = mkdtempSync(join(tmpdir(), "pki-boundary-renamed-"));
+  mkdirSync(join(renamedRoot, "site/composition/src"), { recursive: true });
+  writeFileSync(
+    join(renamedRoot, "site/composition/package.json"),
+    JSON.stringify({ name: "@pki-site/not-composition" }),
+  );
+  afterAll(() => rmSync(renamedRoot, { recursive: true, force: true }));
+  ruleTester.run("module-boundary (the scopes file's one import, I07-R16)", moduleBoundary, {
+    valid: [
+      // ① the composition package's registration, a static import declaration, the resolved target
+      {
+        name: "① the composition package's registration",
+        code: staticImport,
+        filename: registration,
+      },
+      {
+        name: "a ./-prefixed relative specifier of the exact file",
+        code: 'import s from "./../../config/connector-scopes.json" with { type: "json" };',
+        filename: registration,
+      },
+      {
+        name: "a type-only import of the exact file",
+        code: 'import type s from "../../config/connector-scopes.json" with { type: "json" };',
+        filename: registration,
+      },
+      {
+        name: "a side-effect import of the exact file",
+        code: 'import "../../config/connector-scopes.json" with { type: "json" };',
+        filename: registration,
+      },
+      {
+        name: "① the same file written another way",
+        code: 'import s from "../../config/../config/connector-scopes.json";',
+        filename: registration,
+      },
+    ],
+    invalid: [
+      refused("② another file of the same package", staticImport, compositionShell),
+      refused(
+        "③ another JSON of site/config/",
+        'import s from "../../config/other.json" with { type: "json" };',
+        registration,
+      ),
+      refused("④ a .ts of site/config/", 'import s from "../../config/index.ts";', registration),
+      refused(
+        "⑤ a scopes file of another package",
+        'import s from "../../connectors/x/connector-scopes.json" with { type: "json" };',
+        registration,
+      ),
+      refused(
+        "⑥ a fork package that is not the composition package (site/connectors/x)",
+        'import s from "../../../config/connector-scopes.json" with { type: "json" };',
+        at("site/connectors/x/src/registration.ts"),
+      ),
+      refused(
+        "⑥ a fork package whose root makes the target match (site/collector)",
+        staticImport,
+        at("site/collector/src/registration.ts"),
+      ),
+      refused(
+        "⑥ the package's name alone is not enough: the folder must be site/composition",
+        staticImport,
+        at("site/impostor/src/registration.ts"),
+      ),
+      refused(
+        "⑥ the folder alone is not enough: the package must be named @pki-site/composition",
+        staticImport,
+        join(renamedRoot, "site/composition/src/registration.ts"),
+      ),
+      refused(
+        "⑦ the example package's registration, naming the very target",
+        'import s from "../../../site/config/connector-scopes.json" with { type: "json" };',
+        exampleRegistration,
+      ),
+      refused(
+        "⑧ a public package's file (the backend)",
+        'import s from "../../site/config/connector-scopes.json" with { type: "json" };',
+        publicBackend,
+      ),
+      refused(
+        "⑧ a public package whose root makes the target match",
+        staticImport,
+        at("packages/other/src/registration.ts"),
+      ),
+      refused(
+        "⑨ re-exported (export { default } from)",
+        `export { default } from ${JSON.stringify(SCOPES)};`,
+        registration,
+      ),
+      refused(
+        "⑨ re-exported (export * from)",
+        `export * from ${JSON.stringify(SCOPES)};`,
+        registration,
+      ),
+      refused(
+        "⑩ import()",
+        `const s = await import(${JSON.stringify(SCOPES)}, { with: { type: "json" } });`,
+        registration,
+      ),
+      refused(
+        "an absolute path naming the same file (the exemption is for relative specifiers)",
+        `import s from ${JSON.stringify(at("site/config/connector-scopes.json"))} with { type: "json" };`,
+        registration,
+      ),
+      refused(
+        "a dot-named folder is not a relative specifier (.hidden/../../../config/...)",
+        'import s from ".hidden/../../../config/connector-scopes.json" with { type: "json" };',
+        registration,
+      ),
+      refused(
+        "a dots-named folder is not a relative specifier (.../../../../config/...)",
+        'import s from ".../../../../config/connector-scopes.json" with { type: "json" };',
+        registration,
+      ),
+      refused(
+        "a file: URL naming the same file",
+        `import s from ${JSON.stringify(pathToFileURL(at("site/config/connector-scopes.json")).href)} with { type: "json" };`,
+        registration,
+      ),
+      refused(
+        "an allowRelative option replaces the table: an empty one leaves the shipped entry off",
+        staticImport,
+        registration,
+      ),
+      refused(
+        "⑪ typeof import()",
+        `type T = typeof import(${JSON.stringify(SCOPES)}, { with: { "resolution-mode": "import" } });`,
+        registration,
+      ),
     ],
   });
 
@@ -861,6 +1090,60 @@ describe("the user entry and the registry's writes (S01-T02)", () => {
         "knowledge-engine/src/extraction.ts",
       ),
     ).toEqual([]);
+  });
+
+  it("fails on a row written into the type definitions' tables outside storage/src/ontology.ts, in any statement form (S01-T07)", async () => {
+    for (const sql of [
+      "INSERT INTO ontology_elements (element_kind, name) VALUES ('item-type', 'X')",
+      "insert  or  ignore\n into ontology_basis(element_id) values (1)",
+      "INSERT INTO ontology_history (element_id) VALUES (1)",
+      "REPLACE INTO ontology_elements (element_kind) VALUES ('item-type')",
+      "INSERT OR REPLACE INTO ontology_basis (element_id) VALUES (1)",
+      'INSERT INTO main."ontology_history" (element_id) VALUES (1)',
+    ]) {
+      const code = `export const q = ${JSON.stringify(sql)};\n`;
+      for (const file of [
+        "backend/src/server.ts",
+        "knowledge-engine/src/canonical-kinds.ts",
+        "storage/src/knowledge.ts",
+        "storage/src/semantic-lifecycle.ts",
+      ]) {
+        expect(await ids(code, file), `${file}: ${sql}`).toEqual(["registryWrite"]);
+      }
+      expect(
+        await ids(`export const q = \`${sql}\`;\n`, "knowledge-engine/src/extraction.ts"),
+      ).toEqual(["registryWrite"]);
+    }
+  });
+
+  it("lets storage/src/ontology.ts, the migration's seed, a test file and the test seed write the type definitions' tables, and a DELETE or a read passes", async () => {
+    const insert = 'export const q = "INSERT INTO ontology_history (element_id) VALUES (1)";\n';
+    expect(await ids(insert, "storage/src/ontology.ts")).toEqual([]);
+    expect(await ids(insert, "storage/src/migrations.ts")).toEqual([]);
+    expect(await ids(insert, "storage/src/ontology-user.test.ts")).toEqual([]);
+    expect(await ids(insert, "packages/testkit/src/knowledge-status-seed.ts")).toEqual([]);
+    // the item tables' gate does not write the type definitions, nor does the ontology module write the item histories
+    expect(
+      await ids(
+        'export const q = "INSERT INTO fact_history (fact_id) VALUES (1)";\n',
+        "storage/src/ontology.ts",
+      ),
+    ).toEqual(["registryWrite"]);
+    for (const sql of [
+      "DELETE FROM ontology_basis WHERE element_id = 1",
+      "DELETE FROM ontology_elements WHERE id = 1",
+      "SELECT * FROM ontology_history",
+      "UPDATE ontology_elements SET status = 'verified' WHERE id = 1",
+      "INSERT INTO ontology_elements_copy SELECT * FROM ontology_elements",
+    ]) {
+      expect(
+        await ids(
+          `export const q = ${JSON.stringify(sql)};\n`,
+          "knowledge-engine/src/canonical-kinds.ts",
+        ),
+        sql,
+      ).toEqual([]);
+    }
   });
 
   it("lets the gate module, a test file and the test seed write them, and other tables' inserts and replaces pass", async () => {

@@ -5,6 +5,7 @@
 // (`unsupported-sdk-version`); an unknown kind exits 2. In a tree that has a composition package the
 // public command only points at the fork's command (the placeholder's notice would mislead).
 // The repository root is an argument (I05-R25): nothing here reads the real checkout by itself.
+import { EXAMPLE_SCOPE_MARKER } from "@pki/contracts";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { productConnectors } from "./composition.ts";
@@ -29,12 +30,6 @@ const processIo: SiteCheckIo = {
   stderr: (line) => void process.stderr.write(`${line}\n`),
   exitCode: (code) => void (process.exitCode = code),
 };
-
-/**
- * The scope value the example package's range file carries (I07-R8): a made-up value the public code
- * reserves, so a fork that copied the example without filling it in is told. Provisional.
- */
-export const EXAMPLE_SCOPE_MARKER = "pki-example-scope";
 
 /** The command's argument that asks about the registration's instance scopes instead of one kind (I07-R6). */
 const SCOPES_ARG = "--scopes";
