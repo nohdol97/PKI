@@ -146,7 +146,7 @@ export function reconcileNextDue(input: NextDueInput): NextDue {
     latestLegitimate(period, now, lastRunSlot, isLocal(period) ? input.storedZone : zone)
   ) {
     const nextDue = firstSlotAtOrAfter(period, now, zone);
-    return { nextDue, zone, rezoned, regressed: nextDue !== input.nextDue };
+    return { nextDue, zone, rezoned, regressed: true };
   }
   if (!rezoned) return { nextDue: input.nextDue, zone, rezoned, regressed: false };
   const earliest = Math.max(

@@ -486,6 +486,26 @@ describe("clock.regression", () => {
     expect(dailyResult.regressed).toBe(true);
   });
 
+  it("always moves a next due time past the legitimate bound earlier", () => {
+    // Why the regression branch reports `regressed: true` without comparing: the
+    // value it recomputes (the first slot at or after now) is never the stored one.
+    const periods: Period[] = [tenMinutes, hourly, daily(3), daily(1, 30)];
+    for (const period of periods) {
+      for (const zone of ["UTC", "America/New_York", "Asia/Seoul"]) {
+        for (let hours = 0; hours < 72; hours += 7) {
+          const stored = nextSlotAfter(period, now + hours * HOUR, zone);
+          const result = reconcileNextDue({ period, nextDue: stored, storedZone: zone, zone, now });
+          if (stored <= nextSlotAfter(period, now, zone)) {
+            expect(result.regressed).toBe(false);
+            continue;
+          }
+          expect(result.regressed).toBe(true);
+          expect(result.nextDue).toBeLessThan(stored);
+        }
+      }
+    }
+  });
+
   it("keeps the first slot after now", () => {
     const nextDue = at("2026-01-15T13:00:00Z");
     const result = reconcileNextDue({
