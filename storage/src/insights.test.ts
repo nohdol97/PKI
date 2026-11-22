@@ -61,7 +61,42 @@ describe("saveInsight", () => {
       state: "active",
       summary: "A 위험",
       evidenceIds: evidence,
+      userInputs: [],
     });
+  });
+
+  it("stores the user-input rows an Insight used, replaces them on an update and drops them on resolve (S01-R15)", () => {
+    const fact = db.all("SELECT id FROM facts")[0]?.id as number;
+    const relation = saveRelation(db, {
+      subjectId: key.xItemId,
+      type: "DEPENDS_ON",
+      objectId: key.yItemId,
+      ...attrs,
+    }).id;
+    const id = saveInsight(db, key, {
+      state: "active",
+      summary: "s",
+      evidenceIds: [],
+      userInputs: [
+        { kind: "relation", id: relation },
+        { kind: "fact", id: fact },
+      ],
+    });
+    expect(readInsight(db, key)?.userInputs).toEqual([
+      { kind: "fact", id: fact },
+      { kind: "relation", id: relation },
+    ]);
+    saveInsight(db, key, { state: "active", summary: "s", evidenceIds: [] });
+    expect(readInsight(db, key)?.userInputs).toEqual([]);
+    saveInsight(db, key, {
+      state: "active",
+      summary: "s",
+      evidenceIds: [],
+      userInputs: [{ kind: "fact", id: fact }],
+    });
+    saveInsight(db, key, { state: "resolved" });
+    expect(readInsight(db, key)).toMatchObject({ id, state: "resolved", userInputs: [] });
+    expect(db.all("SELECT count(*) AS n FROM insight_user_inputs")).toEqual([{ n: 0 }]);
   });
 
   it("updates the same row for the same key, replacing its evidence", () => {
@@ -87,6 +122,7 @@ describe("saveInsight", () => {
       state: "resolved",
       summary: null,
       evidenceIds: [],
+      userInputs: [],
     });
     expect(saveInsight(db, key, { state: "active", summary: "s", evidenceIds: evidence })).toBe(id);
     expect(db.all("SELECT count(*) AS n FROM insights")).toEqual([{ n: 1 }]);

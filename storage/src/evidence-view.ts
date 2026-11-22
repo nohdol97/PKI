@@ -27,6 +27,16 @@ export interface InsightEvidenceRow {
   locator: NativeLocator | null;
 }
 
+/**
+ * A fact or relation an Insight used that the user wrote or approved with no current evidence (S01-R15):
+ * shown as "사용자 입력" in place of a source span. An id, a target and a status; no text.
+ */
+export interface InsightUserInputRow {
+  target: "fact" | "relation";
+  id: number;
+  status: KnowledgeStatus;
+}
+
 export interface EvidenceSourceView {
   evidenceId: number;
   quote: string;
@@ -52,7 +62,8 @@ function locatorAt(blocksJson: unknown, start: number): NativeLocator | null {
 }
 
 const ACTIVE_INSIGHT = `SELECT i.id, i.epistemic, i.summary,
-    (SELECT count(*) FROM insight_evidence ie WHERE ie.insight_id = i.id) AS evidence_count
+    (SELECT count(*) FROM insight_evidence ie WHERE ie.insight_id = i.id)
+      + (SELECT count(*) FROM insight_user_inputs u WHERE u.insight_id = i.id) AS evidence_count
   FROM insights i WHERE i.state = 'active'`;
 
 const insightOf = (row: SqlRow): ActiveInsight => ({
@@ -74,6 +85,24 @@ export function listInsightEvidenceIds(db: SqlDriver, insightId: number): number
       insightId,
     ])
     .map((r) => r.evidence_id as number);
+}
+
+/** The user-input rows an Insight used, facts before relations (the read gate judges them one by one). */
+export function listInsightUserInputs(db: SqlDriver, insightId: number): InsightUserInputRow[] {
+  return db
+    .all(
+      `SELECT u.fact_id, u.relation_id, coalesce(f.status, r.status) AS status
+       FROM insight_user_inputs u
+       LEFT JOIN facts f ON f.id = u.fact_id
+       LEFT JOIN relations r ON r.id = u.relation_id
+       WHERE u.insight_id = ? ORDER BY u.fact_id IS NULL, u.fact_id, u.relation_id`,
+      [insightId],
+    )
+    .map((u) => ({
+      target: u.fact_id === null ? ("relation" as const) : ("fact" as const),
+      id: (u.fact_id ?? u.relation_id) as number,
+      status: u.status as KnowledgeStatus,
+    }));
 }
 
 /** An active Insight and its evidence in evidence order; undefined if absent or not active. */

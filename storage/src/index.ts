@@ -219,6 +219,7 @@ export {
 } from "./knowledge.ts";
 export {
   automatedLifecycle,
+  userInputKind,
   type Actor,
   type AutomatedLifecycle,
   type Basis,
@@ -226,10 +227,12 @@ export {
   type Outcome,
   type Refusal,
 } from "./semantic-lifecycle.ts";
+export { rowLineage, unionOfVersions } from "./row-lineage.ts";
 export {
   listSemanticFacts,
   listSemanticItems,
   listSemanticRelations,
+  itemsOfEntry,
   readSemanticHistory,
   readSemanticState,
   type SemanticFactView,
@@ -247,6 +250,14 @@ export {
   type UserDecisions,
   type UserEntry,
 } from "./semantic-user.ts";
+export {
+  ANALYTICAL_SEED,
+  ANALYTICAL_VALUE_TYPES,
+  REQUIRED_DATA_CHECKS,
+  normalizeColumnName,
+  normalizeValue,
+  type AnalyticalValueType,
+} from "./analytical-types.ts";
 export {
   describeKnowledgeSchema,
   type KnowledgeSchemaEntry,
@@ -288,9 +299,11 @@ export {
   listRelationPairs,
   readInsight,
   saveInsight,
+  userInputsOf,
   type InsightContent,
   type InsightKey,
   type StoredInsight,
+  type UserInputRef,
 } from "./insights.ts";
 export {
   listLiftableTombstones,
@@ -382,9 +395,11 @@ export { listItemNames } from "./candidates.ts";
 export {
   listActiveInsights,
   listInsightEvidenceIds,
+  listInsightUserInputs,
   readEvidenceSource,
   readInsightEvidence,
   type ActiveInsight,
   type EvidenceSourceView,
   type InsightEvidenceRow,
+  type InsightUserInputRow,
 } from "./evidence-view.ts";

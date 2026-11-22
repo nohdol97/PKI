@@ -4,6 +4,7 @@
 // A rule's Insight is an inference (V02-R9), the only epistemic type written here.
 import type { SourceVersionRef } from "./derivatives.ts";
 import type { KnowledgeStatus } from "./knowledge.ts";
+import type { EntryRef } from "./semantic-lifecycle.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 export interface InsightKey {
@@ -12,8 +13,19 @@ export interface InsightKey {
   yItemId: number;
 }
 
+/**
+ * The facts and relations the Insight used that the user wrote or approved with no current evidence
+ * (S01-R15): they have no evidence of their own to cite, so `insight_user_inputs` ties them to it.
+ */
+export type UserInputRef = EntryRef & { kind: "fact" | "relation" };
+
 export type InsightContent =
-  | { state: "active" | "dirty"; summary: string; evidenceIds: readonly number[] }
+  | {
+      state: "active" | "dirty";
+      summary: string;
+      evidenceIds: readonly number[];
+      userInputs?: readonly UserInputRef[];
+    }
   | { state: "resolved" };
 
 export interface StoredInsight extends InsightKey {
@@ -22,12 +34,13 @@ export interface StoredInsight extends InsightKey {
   state: InsightContent["state"];
   summary: string | null;
   evidenceIds: number[];
+  userInputs: UserInputRef[];
 }
 
 const KEY = "rule = ? AND x_item_id = ? AND y_item_id = ?";
 const keyValues = (k: InsightKey) => [k.rule, k.xItemId, k.yItemId];
 
-/** Creates or updates the key's row and replaces its evidence links; returns its id. */
+/** Creates or updates the key's row and replaces its evidence and user-input links; returns its id. */
 export function saveInsight(db: SqlDriver, key: InsightKey, content: InsightContent): number {
   const summary = content.state === "resolved" ? null : content.summary;
   db.run(
@@ -43,6 +56,14 @@ export function saveInsight(db: SqlDriver, key: InsightKey, content: InsightCont
       id,
       evidenceId,
     ]);
+  }
+  db.run("DELETE FROM insight_user_inputs WHERE insight_id = ?", [id]);
+  for (const input of content.state === "resolved" ? [] : (content.userInputs ?? [])) {
+    db.run(
+      `INSERT INTO insight_user_inputs (insight_id, ${input.kind === "fact" ? "fact_id" : "relation_id"})
+       VALUES (?, ?)`,
+      [id, input.id],
+    );
   }
   return id;
 }
@@ -65,7 +86,23 @@ export function readInsight(db: SqlDriver, key: InsightKey): StoredInsight | und
         id,
       ])
       .map((r) => r.evidence_id as number),
+    userInputs: userInputsOf(db, id),
   };
+}
+
+/** The rows an Insight used that the user wrote or approved with no current evidence, facts before relations. */
+export function userInputsOf(db: SqlDriver, insightId: number): UserInputRef[] {
+  return db
+    .all(
+      `SELECT fact_id, relation_id FROM insight_user_inputs WHERE insight_id = ?
+       ORDER BY relation_id IS NOT NULL, fact_id, relation_id`,
+      [insightId],
+    )
+    .map((r) =>
+      r.fact_id === null
+        ? { kind: "relation" as const, id: r.relation_id as number }
+        : { kind: "fact" as const, id: r.fact_id as number },
+    );
 }
 
 // The fixed reads a rule makes (V02-R8): single tables or depth-1 joins, never a

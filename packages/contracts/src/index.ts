@@ -9,7 +9,7 @@ import {
   ImportRequestSchema,
 } from "./import-record.ts";
 import { REJECT_CODES } from "./connector.ts";
-import { KNOWLEDGE_PLACES } from "./knowledge-schema.ts";
+import { DATA_CHECK_NAMES, FACT_VALUE_TYPES, KNOWLEDGE_PLACES } from "./knowledge-schema.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
@@ -558,9 +558,19 @@ const EvidenceSummarySchema = z.object({
   /** I01-R29: the locator of the block holding the span's start, null without one. */
   locator: NativeLocatorSchema.nullable(),
 });
+/**
+ * A row the Insight used that the user wrote or approved with no current evidence (S01-R15): it has
+ * no source span, so it is listed as "사용자 입력" by its target, id and status, with no text.
+ */
+const UserInputSummarySchema = z.object({
+  target: z.enum(["fact", "relation"]),
+  id: z.int().positive(),
+  status: z.enum(["candidate", "verified", "disputed", "superseded", "rejected"]),
+});
 export const InsightEvidenceResponseSchema = z.object({
   insight: InsightSummarySchema,
   evidence: z.array(EvidenceSummarySchema),
+  userInputs: z.array(UserInputSummarySchema),
 });
 export type EvidenceSummary = z.infer<typeof EvidenceSummarySchema>;
 
@@ -958,8 +968,9 @@ export const OntologyRuleSchema = z.discriminatedUnion("elementKind", [
   z.strictObject({
     elementKind: z.literal("fact-kind"),
     itemTypes: OntologyTypeListSchema,
-    valueType: z.enum(["date", "text", "surface-form", "identifier"]),
+    valueType: z.enum(FACT_VALUE_TYPES),
     cardinality: z.enum(["one", "many"]),
+    dataChecks: z.array(z.enum(DATA_CHECK_NAMES)).optional(),
   }),
   z.strictObject({
     elementKind: z.literal("relation-type"),
