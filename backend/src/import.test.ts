@@ -3,7 +3,15 @@
 // Each describe is one proof test of the spec's table.
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { SyncResponseSchema, type ImportRecord, type SyncResponse } from "@pki/contracts";
-import { identityKey, readChangeSeq, readCursor, type SqlDriver } from "@pki/storage";
+import {
+  canonicalTransaction,
+  identityKey,
+  readChangeSeq,
+  readCursor,
+  registerConnectorInstance,
+  saveSourceRecord,
+  type SqlDriver,
+} from "@pki/storage";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +22,7 @@ import { openCanonicalDb, productImporter } from "./composition.ts";
 import { createConnectorManager, tryLockInstance, type ConnectorManager } from "./connectors.ts";
 import { importContent, type ImportOutcome } from "./imports.ts";
 import { storePage } from "./page-store.ts";
+import { applyTombstone } from "@pki/knowledge-engine";
 import { JSONL_CAPABILITIES, parseJsonl } from "@pki/connector-sdk";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
@@ -624,67 +633,154 @@ describe("sync.rescan ⑥: the file collector's edited file", () => {
   });
 });
 
-describe('import.legacy-identity: sources the V02 screen route stored (namespace "") are the same sources (T01 handoff 7)', () => {
+/**
+ * One identity (I01-R22, T01 handoff 7): every route resolves a line as (instance, namespace = the
+ * line's connector_instance_id, external id), the V02 screen route included. A source stored under the
+ * old V02 identity (the line's connector_instance_id as the instance, namespace "") is found by the
+ * lookup, whichever instance the API names.
+ */
+describe("import.legacy-identity", () => {
   const legacy = (text: string) => productImporter(db)(text);
   const E1 = line({ external_id: "e1", connector_instance_id: "ci" });
-
-  it("a deleted source does not come back when its line is imported by the API", async () => {
-    await legacy(E1);
-    await legacy(
-      line({
-        external_id: "e1",
-        connector_instance_id: "ci",
-        operation: "delete",
-        content: "",
-        version: 2,
+  const DEL1 = line({
+    external_id: "e1",
+    connector_instance_id: "ci",
+    operation: "delete",
+    content: "",
+    version: 2,
+  });
+  const body = "Synthetic body";
+  const seedRow = (target: SqlDriver) => {
+    registerConnectorInstance(target, "ci", JSONL_IMPORT_KIND);
+    saveSourceRecord(target, "ci", {
+      namespace: "",
+      externalId: "e1",
+      title: "Synthetic title",
+      body,
+      revision: 1,
+    });
+  };
+  const seedTombstone = (target: SqlDriver) =>
+    canonicalTransaction(target, (tx) =>
+      applyTombstone(tx, {
+        identity: { connectorInstanceId: "ci", namespace: "", externalId: "e1" },
+        reason: "source-deleted",
+        lastRevision: 2,
+        at: new Date().toISOString(),
       }),
     );
+  const namespaces = () =>
+    db.all("SELECT namespace FROM sources ORDER BY id").map((r) => r.namespace);
+
+  it('the V02 route writes the line\'s connector_instance_id as the namespace, no new namespace ""', async () => {
+    await legacy(E1);
+    expect(namespaces()).toEqual(["ci"]);
+  });
+
+  it("(a) an API delete fences a V02 re-import of the same line", async () => {
+    await imported(E1, "ci");
+    await imported(DEL1, "ci");
+    const result = await legacy(E1);
+    expect(result).toMatchObject({ created: 0 });
     expect(count("source_versions")).toBe(0);
-    const result = await imported(E1, "ci");
+    expect(count("sources")).toBe(1);
+  });
+
+  it("(b) an API import then a V02 import of the same line is one source", async () => {
+    await imported(E1, "ci");
+    await legacy(E1);
+    expect(count("sources")).toBe(1);
+    expect(count("source_versions")).toBe(1);
+  });
+
+  it("(c) a legacy row is updated in place by the V02 route, by the API and by the collector", async () => {
+    seedRow(db);
+    await legacy(E1);
+    await imported(E1, "ci");
+    await sync(await collector(fileOf(E1), "ci"), "ci");
+    expect(count("sources")).toBe(1);
+    expect(count("source_versions")).toBe(1);
+    expect(namespaces()).toEqual([""]);
+    await legacy(
+      line({ external_id: "e1", connector_instance_id: "ci", version: 2, content: "v2" }),
+    );
+    expect(count("sources")).toBe(1);
+    expect(count("source_versions")).toBe(2);
+  });
+
+  it("a legacy tombstone fences every route, and no body comes back", async () => {
+    seedRow(db);
+    seedTombstone(db);
+    expect(count("source_versions")).toBe(0);
+    await legacy(E1);
+    await imported(E1, "ci");
+    await sync(await collector(fileOf(E1), "ci"), "ci");
+    expect(count("source_versions")).toBe(0);
+    expect(count("sources")).toBe(1);
+  });
+
+  it("S1: the lookup is by the line's connector_instance_id, whichever instance the API names", async () => {
+    seedRow(db);
+    seedTombstone(db);
+    const result = await imported(E1, "other");
     expect(result).toMatchObject({ created: 0, blocked: 1 });
     expect(count("source_versions")).toBe(0);
-    expect(count("sources")).toBe(1);
+    expect(db.all("SELECT connector_instance_id AS i FROM sources")).toEqual([{ i: "ci" }]);
   });
 
-  it("re-importing a V02-stored file through the API keeps the source count and adds no version", async () => {
-    await legacy(E1);
-    const result = await imported(E1, "ci");
-    expect(result).toMatchObject({ created: 0, unchanged: 1 });
-    expect(db.all("SELECT namespace FROM sources")).toEqual([{ namespace: "" }]);
-    expect(count("source_versions")).toBe(1);
-    // a newer revision is a new version of the same source, in place
-    expect(
-      await imported(
-        line({ external_id: "e1", connector_instance_id: "ci", version: 2, content: "v2" }),
-        "ci",
-      ),
-    ).toMatchObject({ created: 1 });
-    expect(count("sources")).toBe(1);
-  });
-
-  it("a source that already exists under the line's namespace is the one judged, though a legacy twin exists", async () => {
+  it("a source in the line's own namespace is judged where it is, though a legacy twin exists", async () => {
     await imported(E1, "ci"); // (ci, "ci")
-    await legacy(E1); // (ci, "") twin from before this change
+    seedRow(db); // a twin from before
     expect(await imported(E1, "ci")).toMatchObject({ unchanged: 1, created: 0 });
-    expect(
-      await imported(
-        line({ external_id: "e1", connector_instance_id: "ci", version: 2, content: "v2" }),
-        "ci",
-      ),
-    ).toMatchObject({ created: 1 });
-    expect(
-      db.all(
-        "SELECT s.namespace, count(*) AS n FROM sources s JOIN source_versions v ON v.source_id = s.id GROUP BY s.namespace ORDER BY s.namespace",
-      ),
-    ).toEqual([
-      { namespace: "", n: 1 },
-      { namespace: "ci", n: 2 },
-    ]);
+    expect(count("source_versions")).toBe(2);
   });
 
-  it("a source never stored under the legacy identity keeps the line's namespace", async () => {
-    await imported(E1, "ci");
-    expect(db.all("SELECT namespace FROM sources")).toEqual([{ namespace: "ci" }]);
+  describe("(d) no ordering of the routes leaves two sources, or a body beside a tombstone", () => {
+    const OPS = (["v02", "api", "file"] as const).flatMap((route) =>
+      (["up", "del"] as const).map((kind) => ({ route, kind })),
+    );
+    const sequences = OPS.flatMap((x) => OPS.flatMap((y) => OPS.map((z) => [x, y, z])));
+
+    it.each(["none", "row", "row+tombstone"] as const)(
+      "seed %s, every ordering of three operations",
+      async (seed) => {
+        for (const [n, ops] of sequences.entries()) {
+          const target = openCanonicalDb(join(dir, `p-${seed}-${n}`));
+          try {
+            if (seed !== "none") seedRow(target);
+            if (seed === "row+tombstone") seedTombstone(target);
+            for (const { route, kind } of ops) {
+              const text = kind === "up" ? E1 : DEL1;
+              if (route === "v02") await productImporter(target)(text);
+              else if (route === "api") await importContent(target, "ci", text);
+              else {
+                const m = await createConnectorManager(
+                  target,
+                  [
+                    {
+                      id: "ci",
+                      kind: JSONL_IMPORT_KIND,
+                      config: { path: fileOf(text, `f-${seed}-${n}.jsonl`) },
+                    },
+                  ],
+                  { [JSONL_IMPORT_KIND]: createJsonlConnector },
+                );
+                await m.sync("ci");
+              }
+            }
+            const where = `${seed} ${JSON.stringify(ops)}`;
+            const sources = target.all("SELECT count(*) AS n FROM sources")[0]?.n;
+            const versions = target.all("SELECT count(*) AS n FROM source_versions")[0]?.n;
+            const deleted = seed === "row+tombstone" || ops.some((o) => o.kind === "del");
+            expect([where, sources]).toEqual([where, 1]);
+            expect([where, versions]).toEqual([where, deleted ? 0 : 1]);
+          } finally {
+            target.close();
+          }
+        }
+      },
+      600_000,
+    );
   });
 });
 

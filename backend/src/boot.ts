@@ -174,7 +174,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     egress,
     secrets: options.secrets,
     calls,
-    importer: productImporter(db, { runner, projections, clock, entries }),
+    importer: productImporter(db, { runner, projections, clock, entries, connectors }),
     instanceImporter: productInstanceImporter(db, {
       runner,
       projections,

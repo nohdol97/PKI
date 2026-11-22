@@ -24,10 +24,11 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { ScriptedConnector, send } from "@pki/testkit";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
 import { bootBackend } from "./boot.ts";
 import type { Clock } from "./clock.ts";
 import { openCanonicalDb, type ConnectorSet } from "./composition.ts";
@@ -466,6 +467,25 @@ describe("connector-sync.exclusive (I03-R19, I01-R21): one sync or import per in
     expect(booted.db.all("SELECT id FROM connector_instances WHERE id = 'site-x'")).toEqual([]);
   });
 
+  it("refuses the id of a configured collector of another kind on the V02 route too: instance-conflict per line (I01-T05)", async () => {
+    const gated = gatedConnector();
+    gated.open();
+    booted = await bootBackend({
+      dataDir: join(dir, "boot"),
+      token: "t".repeat(43),
+      allowedOrigins: [],
+      secrets: NO_SECRET_STORE,
+      connectors: {
+        instances: [{ id: "site-x", kind: "site-kind", config: {} }],
+        kinds: { "site-kind": () => gated.connector },
+      },
+    });
+    const res = await post(booted, "site-x");
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ errors: [{ line: 1, reason: "instance-conflict" }] });
+    expect(booted.db.all("SELECT id FROM connector_instances WHERE id = 'site-x'")).toEqual([]);
+  });
+
   it("makes an import's lock hold a collected sync: the job gives the attempt back and runs again a minute later", async () => {
     const gated = gatedConnector();
     gated.open(); // never gates: this case holds the instance from the other side
@@ -659,6 +679,35 @@ describe("connector-sync.held (I03-R16 ②′, R20): a collector that cannot run
       extract.job.id,
     ]);
     expect(releaseHeldCollector(db, "site-x")).toBe(0);
+  });
+});
+
+describe("schedule.defaults through the boot path (I01-T05 N2)", () => {
+  it("a jsonl-import instance with a { path } config gets the hourly sync schedule, one with parsed lines none", async () => {
+    const file = join(dir, "pull.jsonl");
+    writeFileSync(file, "");
+    const connectors: ConnectorSet = {
+      instances: [
+        { id: "file-inst", kind: JSONL_IMPORT_KIND, config: { path: file } },
+        { id: "lines-inst", kind: JSONL_IMPORT_KIND, config: { records: [] } },
+      ],
+      kinds: { [JSONL_IMPORT_KIND]: createJsonlConnector },
+    };
+    const booted = await bootBackend({
+      dataDir: join(dir, "boot-sched"),
+      token: "t".repeat(43),
+      allowedOrigins: [],
+      secrets: NO_SECRET_STORE,
+      connectors,
+    });
+    try {
+      expect(
+        booted.db.all("SELECT kind, target, period FROM schedules WHERE kind = 'connector-sync'"),
+      ).toEqual([{ kind: "connector-sync", target: "file-inst", period: expect.any(String) }]);
+    } finally {
+      await booted.server.close();
+      booted.db.close();
+    }
   });
 });
 

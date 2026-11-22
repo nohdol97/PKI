@@ -221,17 +221,22 @@ describe("importJsonl", () => {
       // source never seen is a hashed row from the start, covering version 0
     ).toEqual([
       {
-        external_id: identityKey(db, MAIL.connector_instance_id, "", "d"),
+        external_id: identityKey(db, MAIL.connector_instance_id, MAIL.connector_instance_id, "d"),
         version: 1,
         reason: "source-deleted",
       },
       {
-        external_id: identityKey(db, MAIL.connector_instance_id, "", "never"),
+        external_id: identityKey(
+          db,
+          MAIL.connector_instance_id,
+          MAIL.connector_instance_id,
+          "never",
+        ),
         version: 0,
         reason: "source-deleted",
       },
       {
-        external_id: identityKey(db, MAIL.connector_instance_id, "", "r"),
+        external_id: identityKey(db, MAIL.connector_instance_id, MAIL.connector_instance_id, "r"),
         version: 0,
         reason: "access-revoked",
       },
@@ -487,6 +492,24 @@ describe("importJsonl", () => {
     expect(count("source_versions")).toBe(stored);
     expect(tryLockInstance(db, "inst-a")).toBeDefined(); // inst-a's lock was released again
     release();
+  });
+
+  it("reports a line naming the id of a configured Connector of another kind as instance-conflict, and binds nothing", async () => {
+    const connectors = {
+      list: () => [{ id: "site-x", kind: "site-mail", state: "ready" as const }],
+    };
+    const result = await importJsonlWith(
+      db,
+      [line({ connector_instance_id: "site-x" }), line({ connector_instance_id: "free-id" })].join(
+        "\n",
+      ),
+      { createConnector: createJsonlConnector, connectors },
+    );
+    expect(result).toMatchObject({
+      created: 1,
+      errors: [{ line: 1, reason: "instance-conflict" }],
+    });
+    expect(db.all("SELECT id FROM connector_instances WHERE id = 'site-x'")).toEqual([]);
   });
 
   it("wakes the runner once the page with new jobs is committed, and not for unchanged input", async () => {

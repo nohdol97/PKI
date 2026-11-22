@@ -139,7 +139,7 @@ async function pipeline(engine: KnowledgeEngine, vectorIndex = new MemoryVectorI
 
 // by identity: a purged source's row holds the hash (I04-R7)
 const sourceIdOf = (externalId: string) =>
-  String(findSourceId(db, MAIL.connectorId, "", externalId));
+  String(findSourceId(db, MAIL.connectorId, MAIL.connectorId, externalId));
 const readJobs = (status: string) =>
   db.all("SELECT id FROM jobs WHERE kind = 'projection-remove' AND status = ?", [status]);
 const related = (engine: KnowledgeEngine, text: string) =>
@@ -169,7 +169,9 @@ describe("engine.calls", () => {
 
     const mail = sourceIdOf(MAIL.externalId);
     expect(await related(engine, "윤하람 미리내")).toContain(mail);
-    expect((await post(routes.deleteSource.path, { ...MAIL, namespace: "" })).body).toEqual({
+    expect(
+      (await post(routes.deleteSource.path, { ...MAIL, namespace: MAIL.connectorId })).body,
+    ).toEqual({
       outcome: "deleted",
     });
     // the deletion registered the removal jobs and woke the runner (I04-R12)
@@ -197,7 +199,7 @@ describe("engine.calls", () => {
       changes: [
         {
           kind: "access-revoked",
-          namespace: "",
+          namespace: MAIL.connectorId,
           externalId: MAIL.externalId,
           revision: 2,
           at: "2026-11-21T00:00:00Z",

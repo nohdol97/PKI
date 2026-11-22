@@ -29,7 +29,7 @@ const REASON = {
  * it differs (the store's rule, sources.ts).
  */
 export function parseJsonl(text: string): { lines: JsonlLine[]; errors: ImportLineError[] } {
-  const parsed = parseJsonlLines(text, { namespace: () => "" });
+  const parsed = parseJsonlLines(text);
   const errors: ImportLineError[] = parsed.rejected.map(({ line, code, field }) =>
     field === undefined ? { line, reason: REASON[code] } : { line, reason: REASON[code], field },
   );

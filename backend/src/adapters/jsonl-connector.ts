@@ -67,7 +67,7 @@ export function createJsonlConnector(): Connector {
     if ("records" in source) {
       cached ??= {
         hash: sha256(JSON.stringify(source.records)),
-        entries: source.records.map((record) => ({ change: recordToChange(record, () => "") })),
+        entries: source.records.map((record) => ({ change: recordToChange(record) })),
       };
       return cached;
     }

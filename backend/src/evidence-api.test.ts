@@ -210,7 +210,7 @@ describe("after a source is deleted (V02-T08)", () => {
     const { path, method } = routes.deleteSource;
     const deleted = await send(server.port, path, valid, method, {
       connectorId: chat.connector_instance_id,
-      namespace: "",
+      namespace: chat.connector_instance_id,
       externalId: chat.external_id,
     });
     expect(deleted.body).toEqual({ outcome: "deleted" });

@@ -15,7 +15,12 @@ import type {
 } from "@pki/contracts";
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { readConnectorKind, type SqlDriver } from "@pki/storage";
-import { syncConnector, tryLockInstance, type SyncOptions } from "./connectors.ts";
+import {
+  syncConnector,
+  tryLockInstance,
+  type ConnectorManager,
+  type SyncOptions,
+} from "./connectors.ts";
 import { parseJsonl, splitRounds, type JsonlLine } from "./jsonl-lines.ts";
 
 /** Provisional: distinct instances one file may name; each leaves a permanent row. */
@@ -44,6 +49,8 @@ export interface ImportOptions extends Pick<
    * `instance-failed`). The error's message may carry file text: log its class only.
    */
   onError?: (error: unknown) => void;
+  /** The configured Connector instances: a line naming the id of one of another kind is `instance-conflict`. */
+  connectors?: Pick<ConnectorManager, "list">;
 }
 
 const externalIdOf = (change: Change) =>
@@ -128,7 +135,11 @@ export async function importJsonl(
   };
   const boundElsewhere = (id: string) => {
     const kind = readConnectorKind(db, id);
-    return kind !== undefined && kind !== JSONL_IMPORT_KIND;
+    if (kind !== undefined && kind !== JSONL_IMPORT_KIND) return true;
+    // a configured Connector of another kind that never synced is not bound yet: its id is its own
+    return (
+      options.connectors?.list().some((c) => c.id === id && c.kind !== JSONL_IMPORT_KIND) ?? false
+    );
   };
   // One rule (I01-R21): the request takes the lock of every instance it names, and holds each until it
   // ends. A running sync or import of any of them refuses the whole request before any of it is stored

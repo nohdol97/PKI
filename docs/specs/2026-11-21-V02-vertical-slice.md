@@ -513,3 +513,4 @@ test double의 결과를 실제 Provider의 결과로 적지 않는다. R07(#37)
 | 2026-11-22 | I04-T04가 삭제 통지(`removed`, `deleteSourceWithNotice`)를 `projection-remove` 작업으로 바꿨음을 "T09가 넘기는 것" 1·"T09: 통지는 이 자리 다음" 7에 표시, 벡터 ref는 원본 version 이름(`vectorRefOf(sourceId, version)`)으로 바뀜(4항) | "T09가 넘기는 것" 1·4, 작업 분해 7 | I04-T04 구현, 검토 B-B7 |
 | 2026-11-22 | "T09가 넘기는 것" 2의 ③(삭제·권한 철회 뒤 호출)에도 I04-T04가 통지를 `projection-remove` 작업으로 바꿨음을 표시 | "T09가 넘기는 것" 2 | I04-T04 재검토 L2 |
 | 2026-11-22 | I01-T05가 "T04가 넘기는 것" 1·2·6항의 줄 검사 자리, `revoke` 대응(`scope-change`), `access_scope` 저장이 바뀌었음을 각 항목에 표시(해석기는 `@pki/connector-sdk`, 이 경로의 오류 사유에 `scope-change-content-mismatch`가 늘었고 화면 문구를 더함) | 작업 분해(T04가 넘기는 것 1·2·6) | I01-T05 구현 |
+| 2026-11-22 | I01-T05 재검토: Sources 화면의 가져오기 경로(`/api/import/jsonl`)가 원본을 namespace `""`가 아니라 줄의 `connector_instance_id`로 저장함(인스턴스는 그대로). "T04가 넘기는 것"과 T02·T08의 `namespace: ""` 설명은 V02 당시의 기록이며 옛 행은 I01이 찾아서 같은 원본으로 판정함 | 작업 분해(T04가 넘기는 것) | I01-T05 재검토 N1 |

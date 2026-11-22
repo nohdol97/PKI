@@ -188,12 +188,15 @@ describe("JSONL Connector: mapping (I01-R22)", () => {
     expect(await connector.getDocument({ namespace: ns, externalId: "unknown" })).toBeNull();
   });
 
-  it("takes parsed lines in the instance's one namespace, and fails to initialize without a path or records", async () => {
+  it("takes parsed lines in the namespace of their connector_instance_id, and fails to initialize without a path or records", async () => {
     const connector = await opened({
       records: recordsOf(fixture("v02-mail.jsonl"), MAIL.connector_instance_id),
     });
     const { changes } = await connector.getChanges(null, { limit: 10, signal: signal() });
-    expect(changes[0]).toMatchObject({ kind: "upsert", record: { namespace: "" } });
+    expect(changes[0]).toMatchObject({
+      kind: "upsert",
+      record: { namespace: MAIL.connector_instance_id },
+    });
     await expect(createJsonlConnector().initialize({ text: "" })).rejects.toThrow();
     await expect(createJsonlConnector().initialize({ path: "" })).rejects.toThrow();
     await expect(createJsonlConnector().initialize(null)).rejects.toThrow();

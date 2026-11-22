@@ -159,9 +159,13 @@ function pipeline(hooks: { during?: ((request: StructuredRequest) => void) | und
 const CONNECTOR_AT = "1999-01-01T00:00:00Z";
 
 /** A Connector of the JSONL kind reporting one change of `externalId`. */
-function reporting(kind: "delete" | "access-revoked", externalId: string): Connector {
+function reporting(
+  kind: "delete" | "access-revoked",
+  externalId: string,
+  namespace: string,
+): Connector {
   const page: ChangeSet = {
-    changes: [{ kind, namespace: "", externalId, revision: 9, at: CONNECTOR_AT }],
+    changes: [{ kind, namespace, externalId, revision: 9, at: CONNECTOR_AT }],
     nextCursor: "1",
     hasMore: false,
   };
@@ -184,7 +188,10 @@ function reporting(kind: "delete" | "access-revoked", externalId: string): Conne
   };
 }
 const report = (instance: string, kind: "delete" | "access-revoked", externalId: string) =>
-  syncConnector(db, instance, JSONL_IMPORT_KIND, reporting(kind, externalId), { rescan: true });
+  // an imported source is in the namespace of its line's connector_instance_id, here the instance's own (I01-R22)
+  syncConnector(db, instance, JSONL_IMPORT_KIND, reporting(kind, externalId, instance), {
+    rescan: true,
+  });
 
 /** The database file and every side file next to it (-journal, -wal, -shm), as bytes. */
 function storedFiles(): [string, Buffer][] {
@@ -221,7 +228,7 @@ function deleteSource(
 const sourceId = (externalId: string) =>
   db
     .all("SELECT DISTINCT connector_instance_id AS id FROM sources")
-    .map((r) => findSourceId(db, r.id as string, "", externalId))
+    .map((r) => findSourceId(db, r.id as string, r.id as string, externalId))
     .find((id) => id !== undefined) as number;
 
 /** Mail (X targets 12-05), then K's v1 (Y completes 12-10) and v2 (12-12), each extracted. */

@@ -444,6 +444,7 @@ export function productImporter(
   db: SqlDriver,
   options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> & {
     logger?: Logger;
+    connectors?: Pick<ConnectorManager, "list">;
   } = {},
 ): JsonlImporter {
   const { logger = log, ...sync } = options;

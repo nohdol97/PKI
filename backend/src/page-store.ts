@@ -248,13 +248,13 @@ export function storePage(
           rejected.push({ at: place(i), code: "schema" });
           continue;
         }
-        const effective = scopeClaimed ? withLegacyIdentity(tx, instanceId, change) : change;
+        const at = scopeClaimed ? resolveImported(tx, instanceId, change) : { instanceId, change };
         const outcome =
           seen &&
-          effective.kind === "scope-change" &&
-          contentMismatch(tx, instanceId, effective, seen)
+          at.change.kind === "scope-change" &&
+          contentMismatch(tx, at.instanceId, at.change, seen)
             ? "content-mismatch"
-            : storeChange(tx, instanceId, effective, notices, clock, entries, scopeClaimed);
+            : storeChange(tx, at.instanceId, at.change, notices, clock, entries, scopeClaimed);
         if (outcome === "blocked") {
           counts.blocked++;
           refused.push([change, "tombstoned"]);
@@ -320,21 +320,35 @@ export function addPage(result: SyncResult, page: PageResult): void {
 }
 
 /**
- * The V02 screen route stored imported sources in namespace "" (one product instance per
- * `connector_instance_id`). A source or a tombstone under that identity, with the same
- * instance and external id, is the same source as the new path's (namespace = the line's
- * `connector_instance_id`): the change is judged against it, so a deleted source stays
- * fenced and a stored one is updated in place, not duplicated. No data is moved.
+ * The V02 screen route once stored imported sources under another identity: the line's
+ * `connector_instance_id` as the instance and namespace "". Now every route resolves a line as
+ * (instance, namespace = the line's `connector_instance_id`, external id) (I01-R22), and a source or
+ * a tombstone under the old identity, found by the line's `connector_instance_id` whichever instance
+ * the import names, is the same source: the change is judged against it, so a deleted source stays
+ * fenced and a stored one is updated in place, not duplicated. No data is moved. The lookup runs for
+ * imported sources only and only in this direction: no route writes namespace "" any more. When the
+ * line's own identity already exists it is the one judged.
  */
-function withLegacyIdentity(tx: CanonicalTx, instanceId: string, change: Change): Change {
+function resolveImported(
+  tx: CanonicalTx,
+  instanceId: string,
+  change: Change,
+): { instanceId: string; change: Change } {
   const namespace = change.kind === "upsert" ? change.record.namespace : change.namespace;
   const externalId = change.kind === "upsert" ? change.record.externalId : change.externalId;
-  if (namespace === "") return change;
-  if (findSourceId(tx, instanceId, namespace, externalId) !== undefined) return change;
-  if (findSourceId(tx, instanceId, "", externalId) === undefined) return change;
-  return change.kind === "upsert"
-    ? { ...change, record: { ...change.record, namespace: "" } }
-    : { ...change, namespace: "" };
+  if (namespace === "") return { instanceId, change };
+  if (findSourceId(tx, instanceId, namespace, externalId) !== undefined) {
+    return { instanceId, change };
+  }
+  // the old instance of a source is the line's connector_instance_id, which the namespace carries
+  if (findSourceId(tx, namespace, "", externalId) === undefined) return { instanceId, change };
+  return {
+    instanceId: namespace,
+    change:
+      change.kind === "upsert"
+        ? { ...change, record: { ...change.record, namespace: "" } }
+        : { ...change, namespace: "" },
+  };
 }
 
 /**
