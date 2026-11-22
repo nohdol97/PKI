@@ -368,7 +368,7 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
   });
 
   it("no code gives a Connector a secret (chapter 8): initialize takes the config only", () => {
-    expect(read("packages/contracts/src/connector.ts")).toContain("initialize(config: unknown): Promise<void>;");
+    expect(read("packages/contracts/src/connector.ts")).toContain("initialize(config: unknown, context?: ConnectorContext): Promise<void>;");
     expect(read("backend/src/connectors.ts")).toContain("await connector.initialize(config);");
   });
 

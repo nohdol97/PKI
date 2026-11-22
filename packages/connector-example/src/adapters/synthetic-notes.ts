@@ -1,5 +1,6 @@
 // Made-up notes (I01-R27): the example's origin system at two moments. Nothing
 // here comes from a real system.
+import type { CredentialedConfig } from "./credentialed-connector.ts";
 import type { ExampleConfig } from "./example-connector.ts";
 
 const NAMESPACE = "example-notes";
@@ -60,3 +61,14 @@ export const LATER: ExampleConfig = {
     },
   ],
 };
+
+/** The token the made-up origin accepts, and one it refuses (I06-R23). Neither is a real credential. */
+export const SYNTHETIC_TOKEN = "synthetic-token-7f3a91c2";
+export const SYNTHETIC_WRONG_TOKEN = "synthetic-token-expired-0000";
+
+/** The same two moments of the origin, now behind a token. */
+export const CREDENTIALED_EARLIER: CredentialedConfig = {
+  ...EARLIER,
+  acceptedToken: SYNTHETIC_TOKEN,
+};
+export const CREDENTIALED_LATER: CredentialedConfig = { ...LATER, acceptedToken: SYNTHETIC_TOKEN };

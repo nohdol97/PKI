@@ -2,9 +2,11 @@
 // out-of-order revisions, tombstones and scope changes in order, so the management
 // module's sync tests (I01-T03) can stage each case.
 import {
+  ConnectorCredentialError,
   ConnectorError,
   ConnectorRateLimitError,
   type Change,
+  type ConnectorContext,
   type SourceRecord,
 } from "@pki/contracts";
 import { describe, expect, it } from "vitest";
@@ -215,5 +217,32 @@ describe("ScriptedConnector", () => {
     expect(await connector.getDocument({ namespace: "", externalId: "c" })).toBeNull();
     expect(await connector.getDocument({ namespace: "", externalId: "d" })).toEqual(record("d", 2));
     expect(await connector.getDocument({ namespace: "other", externalId: "d" })).toBeNull();
+  });
+
+  it("hands the second argument of initialize to the script's onInitialize, and without one hands undefined", async () => {
+    const seen: (ConnectorContext | undefined)[] = [];
+    const context: ConnectorContext = { credentials: { read: async () => "unused" } };
+    const connector = new ScriptedConnector();
+    await connector.initialize(
+      { entries: [], onInitialize: (given: ConnectorContext | undefined) => void seen.push(given) },
+      context,
+    );
+    await started({ entries: [], onInitialize: (given) => void seen.push(given) });
+    expect(seen).toEqual([context, undefined]);
+  });
+
+  it("fails initialize with what onInitialize throws, and stays uninitialized", async () => {
+    const connector = new ScriptedConnector();
+    await expect(
+      connector.initialize({
+        entries: [],
+        onInitialize: () => {
+          throw new ConnectorCredentialError();
+        },
+      }),
+    ).rejects.toBeInstanceOf(ConnectorCredentialError);
+    await expect(connector.getChanges(null, { limit: 1, signal: signal() })).rejects.toBeInstanceOf(
+      ConnectorError,
+    );
   });
 });
