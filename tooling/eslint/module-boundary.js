@@ -131,8 +131,16 @@ const SDK_ALLOWED_IMPORTS = new Set([
   "node:path",
 ]);
 /** What @pki/storage exports as the user's way into the Semantic registry (S01-T02). */
-const USER_ENTRY = new Set(["userDecisions", "UserDecisions", "UserAction"]);
-const USER_ENTRY_VALUE = "userDecisions";
+// S02-T04 adds the entry's constructor and the entity operations' type: merging is the user's alone (S02-R11).
+const USER_ENTRY = new Set([
+  "userDecisions",
+  "createUserDecisions",
+  "UserDecisions",
+  "EntityDecisions",
+  "UserAction",
+]);
+/** The names that hold the entry itself: the API layer may not import these, even as a type-only import. */
+const USER_ENTRY_VALUES = new Set(["userDecisions", "createUserDecisions"]);
 const API_LAYER = { pkg: "@pki/backend", file: "src/server.ts" };
 const GATE_MODULE = { pkg: "@pki/storage", file: "src/semantic-lifecycle.ts" };
 // A table name as SQL may spell it: bare, quoted, or behind a schema (`main."fact_history"`).
@@ -150,6 +158,17 @@ const ONTOLOGY_INSERT = new RegExp(
 );
 const ONTOLOGY_WRITERS = [
   { pkg: "@pki/storage", file: "src/ontology.ts" },
+  { pkg: "@pki/storage", file: "src/migrations.ts" },
+];
+// The merge lines (S02-T04): a line is written by the user's entry alone (storage/src/entity-decisions.ts).
+// A DELETE or an UPDATE is not checked: the derivative kind `entity-merge` joins chains and rests groups
+// (knowledge-engine canonical-kinds.ts, storage entity-groups.ts), which is not a merge.
+const MERGE_INSERT = new RegExp(
+  String.raw`\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+${TABLE}item_merges\b`,
+  "i",
+);
+const MERGE_WRITERS = [
+  { pkg: "@pki/storage", file: "src/entity-decisions.ts" },
   { pkg: "@pki/storage", file: "src/migrations.ts" },
 ];
 const ROW_REPLACE = new RegExp(
@@ -334,7 +353,7 @@ const moduleBoundary = {
       userEntryImport:
         "'{{name}}' is the user's entry to the Semantic registry; only the composition root may import it (the API layer, its type), so extraction and the job runner cannot approve or reject.",
       registryWrite:
-        "History lines and replaced item, fact or relation rows are written only by the lifecycle gate (storage/src/semantic-lifecycle.ts); the type definitions' rows only by storage/src/ontology.ts.",
+        "History lines and replaced item, fact or relation rows are written only by the lifecycle gate (storage/src/semantic-lifecycle.ts); the type definitions' rows only by storage/src/ontology.ts; the merge lines only by storage/src/entity-decisions.ts.",
     },
   },
   create(context) {
@@ -384,11 +403,15 @@ const moduleBoundary = {
       isTest ||
       EXEMPT_PACKAGES.has(ownName) ||
       ONTOLOGY_WRITERS.some((w) => ownName === w.pkg && ownPath === w.file);
+    const mayWriteMerges =
+      isTest ||
+      EXEMPT_PACKAGES.has(ownName) ||
+      MERGE_WRITERS.some((w) => ownName === w.pkg && ownPath === w.file);
     /** Local names of `import * as x from "@pki/storage"`, to catch `x.userDecisions`. */
     const storageNamespaces = new Set();
     /** @param {string} name @param {boolean} typeOnly */
     const userEntryAllowed = (name, typeOnly) =>
-      mayHoldUserEntry || (isApiLayer && typeOnly && name !== USER_ENTRY_VALUE);
+      mayHoldUserEntry || (isApiLayer && typeOnly && !USER_ENTRY_VALUES.has(name));
     /** @param {any} node An import or export declaration with a source */
     function userEntry(node) {
       if (node.source?.value !== "@pki/storage") return;
@@ -423,7 +446,7 @@ const moduleBoundary = {
     }
     /** @param {any} node A Literal or TemplateLiteral: SQL text that writes what only the gate writes */
     function registrySql(node) {
-      if (mayWriteRegistry && mayWriteOntology) return;
+      if (mayWriteRegistry && mayWriteOntology && mayWriteMerges) return;
       const text =
         node.type === "TemplateLiteral"
           ? node.quasis.map((/** @type {any} */ q) => q.value.cooked ?? "").join("\0")
@@ -431,7 +454,8 @@ const moduleBoundary = {
       if (typeof text !== "string") return;
       if (
         (!mayWriteRegistry && (HISTORY_INSERT.test(text) || ROW_REPLACE.test(text))) ||
-        (!mayWriteOntology && ONTOLOGY_INSERT.test(text))
+        (!mayWriteOntology && ONTOLOGY_INSERT.test(text)) ||
+        (!mayWriteMerges && MERGE_INSERT.test(text))
       ) {
         context.report({ node, messageId: "registryWrite" });
       }

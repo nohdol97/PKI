@@ -799,6 +799,8 @@ export const SEMANTIC_REFUSALS = [
   "not-latest",
   "nothing-to-undo",
   "value-exists",
+  /** A direct add's undo while rows, merge lines, distinct marks or split records still name the item (S02-R11). */
+  "existing-data-violation",
 ] as const;
 export const SemanticRefRequestSchema = z.strictObject({
   kind: SemanticKindSchema,
@@ -907,7 +909,18 @@ export const SemanticOutcomeSchema = z
     entry: SemanticStateSchema.optional(),
     /** The gate's refusal (`refused` only). */
     reason: z.enum(SEMANTIC_REFUSALS).optional(),
+    /** What names the item, counts only: with the refusal `existing-data-violation` and no other (S02-R11). */
+    held: z
+      .object({
+        facts: z.int().nonnegative(),
+        relations: z.int().nonnegative(),
+        merges: z.int().nonnegative(),
+        distinct: z.int().nonnegative(),
+        splitMoves: z.int().nonnegative(),
+      })
+      .optional(),
   })
+  .refine((o) => (o.reason === "existing-data-violation") === (o.held !== undefined))
   .refine((o) =>
     o.status === "applied"
       ? o.seq !== undefined && o.entry !== undefined && o.reason === undefined
@@ -918,6 +931,47 @@ export const SemanticOutcomeSchema = z
           : o.seq === undefined && o.entry === undefined && o.reason !== undefined,
   );
 export type SemanticOutcome = z.infer<typeof SemanticOutcomeSchema>;
+
+/**
+ * The user's merge, unmerge and distinct mark (S02-R11, R12, R16, R25). A merge names two items, either of
+ * which may already be a member: both are read as the tops of their groups. A refusal is a code in a 200
+ * body; an item that is absent, deleted or hidden answers the one `not-found` (404), so nothing of a hidden
+ * item shows. No name, value or quote is in any of it.
+ */
+const EntityItemIdSchema = z.int().positive();
+export const EntityMergeRequestSchema = z.strictObject({
+  member: EntityItemIdSchema,
+  into: EntityItemIdSchema,
+});
+export const ENTITY_MERGE_REFUSALS = ["type-mismatch", "already-merged", "scope-refused"] as const;
+export const EntityMergeResponseSchema = z
+  .object({
+    status: z.enum(["applied", "refused"]),
+    /** The line the merge wrote: the number an unmerge names (`applied` only). */
+    mergeId: z.int().positive().optional(),
+    reason: z.enum(ENTITY_MERGE_REFUSALS).optional(),
+  })
+  .refine((o) =>
+    o.status === "applied"
+      ? o.mergeId !== undefined && o.reason === undefined
+      : o.reason !== undefined && o.mergeId === undefined,
+  );
+export type EntityMergeResponse = z.infer<typeof EntityMergeResponseSchema>;
+export const EntityUnmergeRequestSchema = z.strictObject({
+  mergeId: EntityItemIdSchema,
+  /** Whether a distinct mark is left between the two ends; absent means yes (S02-R12). */
+  keepDistinct: z.boolean().optional(),
+});
+export const EntityUnmergeResponseSchema = z.object({ status: z.literal("applied") });
+export const EntityDistinctRequestSchema = z
+  .strictObject({
+    a: EntityItemIdSchema,
+    b: EntityItemIdSchema,
+    /** True leaves the mark (and drops the pair's candidate); false clears it. */
+    on: z.boolean(),
+  })
+  .refine((r) => r.a !== r.b);
+export const EntityDistinctResponseSchema = z.object({ status: z.enum(["applied", "unchanged"]) });
 /**
  * The answer to a direct add or a value fix. `applied`: `entry` is the row the user wrote, and for a
  * fix `replaced` is the old fact as it stands now. `refused` with `value-exists` names the row that
@@ -1323,6 +1377,24 @@ export const routes = {
     path: "/api/semantic/undo",
     request: SemanticRefRequestSchema,
     response: SemanticOutcomeSchema,
+  },
+  entityMerge: {
+    method: "POST",
+    path: "/api/entities/merge",
+    request: EntityMergeRequestSchema,
+    response: EntityMergeResponseSchema,
+  },
+  entityUnmerge: {
+    method: "POST",
+    path: "/api/entities/unmerge",
+    request: EntityUnmergeRequestSchema,
+    response: EntityUnmergeResponseSchema,
+  },
+  entityDistinct: {
+    method: "POST",
+    path: "/api/entities/distinct",
+    request: EntityDistinctRequestSchema,
+    response: EntityDistinctResponseSchema,
   },
   knowledgeSchema: {
     method: "GET",
