@@ -30,7 +30,7 @@ function memoryFs(options: { chunk?: number; stall?: boolean } = {}) {
     existsSync: (p) => files.has(p),
     openSync: (p, flags) => {
       log.push(`open:${p}:${flags}`);
-      if (flags === "a" && !files.has(p)) files.set(p, Buffer.alloc(0));
+      if (flags === "w" || !files.has(p)) files.set(p, Buffer.alloc(0));
       const fd = next++;
       open.set(fd, p);
       return fd;

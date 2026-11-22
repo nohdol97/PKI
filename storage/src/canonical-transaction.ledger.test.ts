@@ -95,7 +95,8 @@ describe("the ledger write", () => {
 
   it("writes and records nothing when no line was queued", () => {
     canonicalTransaction(db, (tx) => writeSetting(tx, "x", "1"));
-    expect(io.log.filter((l) => l.startsWith("append")).length).toBe(1); // the header, at open
+    expect(io.log.filter((l) => l.startsWith("create")).length).toBe(1); // the header, at open
+    expect(io.log.filter((l) => l.startsWith("append")).length).toBe(0); // nothing after it
     expect(readSetting(db, "tombstone-ledger.seq")).toBeUndefined();
   });
 
