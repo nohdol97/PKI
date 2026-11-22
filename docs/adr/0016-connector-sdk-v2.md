@@ -2,6 +2,7 @@
 
 - 날짜: 2026-11-22 / 상태: **잠정 — 배포처 검증 대기**(실제 수집기로 지키는지는 S18에서 확인한다)
 - 관련: [I01 spec](../specs/2026-11-21-I01-connector-sdk.md)(I01-R1~R7, "T01과 T02 사이"), 이슈 #18(I01), [ARCHITECTURE 5.5절](../ARCHITECTURE.md), [ownership.md 7절](../ownership.md), [ADR 0012](0012-upstream-and-fork-ownership.md), [ADR 0013](0013-failure-recovery.md), [ADR 0014](0014-egress-policy-and-consent.md)
+- 후속: 규격 버전은 2 그대로이고, 수집기에 자격 증명을 건네는 선택 항목(`initialize`의 둘째 인자 `context`, `ConnectorCredentialError`, 건강 사유 상수)은 [ADR 0019](0019-connector-credentials.md)가 더했다. 인자 하나만 받는 v2 구현은 고치지 않아도 된다.
 
 ## 맥락
 

@@ -1,6 +1,6 @@
 # Connector SDK 사용 안내 — 수집기를 이 저장소 밖에서 만드는 사람에게
 
-- 날짜: 2026-11-22 / 규격 버전: `CONNECTOR_SDK_VERSION` = 2 / 관련: [I01 spec](specs/2026-11-21-I01-connector-sdk.md), [ADR 0016](adr/0016-connector-sdk-v2.md), [ownership.md](ownership.md), [site-setup.md](site-setup.md)(S18)
+- 날짜: 2026-11-22 / 규격 버전: `CONNECTOR_SDK_VERSION` = 2 / 관련: [I01 spec](specs/2026-11-21-I01-connector-sdk.md), [ADR 0016](adr/0016-connector-sdk-v2.md), [ADR 0019](adr/0019-connector-credentials.md)(자격 증명, 8장), [ownership.md](ownership.md), [site-setup.md](site-setup.md)(S18, S28·S29)
 
 이 문서는 메일·메신저·Wiki 같은 **원 시스템**(자료가 원래 들어 있는 시스템)에서 자료를 가져오는 수집기(Connector)를 새로 만드는 사람을 위한 안내다. 배포처 포크가 실제 수집기를 만들 때와 제3자가 자기 수집기를 만들 때 모두 같다. 이 저장소의 설계 문서를 읽지 않았다고 가정하고 쓴다.
 
@@ -56,7 +56,7 @@ export interface Connector {
 }
 ```
 
-- `initialize(config)`: 설정을 읽고 준비한다. 고칠 수 없는 설정 오류는 `ConnectorError`를 `retryable: false`로 던진다. 초기화 전에 부른 `getChanges`와 `getDocument`는 실패해야 한다(위반 코드 `responds-before-init`).
+- `initialize(config, context?)`: 설정을 읽고 준비한다. 고칠 수 없는 설정 오류는 `ConnectorError`를 `retryable: false`로 던진다. 초기화 전에 부른 `getChanges`와 `getDocument`는 실패해야 한다(위반 코드 `responds-before-init`). 둘째 인자 `context`는 선택 항목이고 자격 증명을 읽는 접근자(`context.credentials`)를 담는다. 인자 하나만 받는 구현은 고치지 않아도 된다(8장).
 - `healthCheck()`: 예외를 던지지 않고 `ok` 또는 `unavailable`(사유)을 돌려준다. 던지면 위반 `health-threw`다.
 - `getChanges`: 한 페이지에 `limit`개를 넘기면 안 되고(위반 `limit-exceeded`), 이미 취소된 `signal`로 불리면 실패해야 한다(위반 `abort-ignored`). 읽는 도중 취소 신호가 오면 제품은 이미 확정된 페이지까지 남기고 `aborted`로 멈춘다.
 - `getDocument({ namespace, externalId })`: 그 원본의 가장 최근 레코드를 돌려주고, 모르거나 지워진 원본이면 `null`을 돌려준다.
@@ -82,6 +82,7 @@ export interface Connector {
 - 메서드 넷을 구현하고, `healthCheck`는 던지지 않으며, 취소 신호를 지킨다.
 - `schemaVersion`이 2가 아니면 제품이 그 수집기를 켜지 않는다.
 - 능력은 약속이다. 지킬 수 없으면 거짓으로 선언한다.
+- 자격 증명이 필요하면 `initialize`의 둘째 인자로 받은 접근자로 읽는다. 값은 설정에 적지 않는다(8장).
 
 ## 3. 레코드와 변경
 
@@ -195,7 +196,7 @@ export interface Connector {
 
 ### 오류를 알리는 법
 
-수집기는 실패를 두 종류의 오류로 알린다.
+수집기는 실패를 아래 오류로 알린다.
 
 <!-- excerpt: packages/contracts/src/connector.ts -->
 ```ts
@@ -212,8 +213,9 @@ export class ConnectorError extends Error {
 - `ConnectorError`: 같은 호출을 다시 해도 되는지(`retryable`)를 담는다.
 - `ConnectorRateLimitError(message, { retryAfterMs })`: 원 시스템이 "나중에 다시 오라"고 했을 때 기다릴 시간(밀리초)을 담는다. 음수·무한·NaN은 `RangeError`로 거부된다.
 - `ConnectorNotImplementedError`: 아직 구현하지 않은 자리표시용이다. 실제 수집기는 쓰지 않는다.
+- `ConnectorCredentialError`: 원 시스템이 자격 증명을 받아 주지 않을 때(인증 실패, 만료, 철회) 던진다. 인자가 없고 문구가 고정이다. 같은 호출을 다시 시도하지 않고 동기화는 `credential-unusable`로 멈춘다. 언제 던지는지는 8장에 있다.
 
-**이 두 오류가 아닌 예외를 던지면** 제품은 다시 해도 되는지 알 수 없다고 보고 `connector-failed`로 멈춘다(다시 시도하지 않는다). 그러니 원 시스템의 일시 장애는 반드시 `ConnectorError`(`retryable: true`)나 `ConnectorRateLimitError`로 감싸서 던진다. 한편 **오류의 문구는 API 응답, 동기화 결과, 로그 어디에도 옮겨지지 않는다.** 문구에 원 시스템의 내용이 섞일 수 있어서 제품은 사유 코드만 남긴다. 오류 문구가 나타날 수 있는 곳과 나타나지 않는 곳을 정확히 적으면 이렇다. 동기화 결과, API 응답, 백엔드 로그, 화면에는 나타나지 않는다. **`site-check` 명령은 예외다.** 그 종류의 `initialize`가 던진 오류의 문구를 그대로 출력한다(7장). 그러니 `initialize`가 던지는 문구에는 비밀 값이나 원 시스템의 내용을 넣지 않는다.
+**`ConnectorError`, `ConnectorRateLimitError`, `ConnectorCredentialError`가 아닌 예외를 던지면** 제품은 다시 해도 되는지 알 수 없다고 보고 `connector-failed`로 멈춘다(다시 시도하지 않는다). 그러니 원 시스템의 일시 장애는 반드시 `ConnectorError`(`retryable: true`)나 `ConnectorRateLimitError`로 감싸서 던진다. 한편 **오류의 문구는 API 응답, 동기화 결과, 로그 어디에도 옮겨지지 않는다.** 문구에 원 시스템의 내용이 섞일 수 있어서 제품은 사유 코드만 남긴다. 오류 문구가 나타날 수 있는 곳과 나타나지 않는 곳을 정확히 적으면 이렇다. 동기화 결과, API 응답, 백엔드 로그, 화면에는 나타나지 않는다. **`site-check` 명령은 예외다.** 그 종류의 `initialize`가 던진 오류의 문구를 그대로 출력한다(7장). 그러니 `initialize`가 던지는 문구에는 비밀 값이나 원 시스템의 내용을 넣지 않는다. 다만 `ConnectorCredentialError`로 끝난 `site-check`는 그 문구도 출력하지 않는다(7장).
 
 ### 재시도의 값
 
@@ -264,10 +266,12 @@ export class ConnectorError extends Error {
 
 표의 `held` 행에 적힌 풀리는 때 가운데 "인스턴스의 설정이 바뀌거나"는 **지금은 일어나지 않는다.** 제품에 인스턴스의 설정을 쓰는 곳이 없기 때문이다(7장). 지금 보류가 풀리는 때는 앱을 시작했을 때 인스턴스가 준비되어 있는 경우(앱 갱신으로 수집기가 동작하게 된 시작을 포함해 모든 시작)와 한 시간마다의 재점검이다. 재점검은 인스턴스마다 60초(`RECHECK_TIMEOUT_MS`) 안에 끝나지 않으면 기다리지 않고 넘어가며, 끝나지 않은 재점검이 있는 인스턴스는 다시 시작하지 않는다. 60초를 넘겨 끝난 재점검의 결과는 성공이든 실패든 버린다. 결과를 받는 것은 그것을 기다리고 있는 차례뿐이어야 "준비됨으로 바뀜"과 "보류된 작업을 풂"이 늘 함께 일어나기 때문이다.
 
+자격 증명 때문에 `unavailable`인 인스턴스(사유 `credential-store-unavailable`, `credential-missing`, `credential-unreadable`, `credential-rejected`)의 수집 작업은 `connector-unavailable`이 아니라 그 인스턴스의 사유로 보류되고, 그 인스턴스가 `ready`가 되면 풀린다. 네 사유와 풀리는 길은 8장에 있다.
+
 수집기를 만드는 사람이 이 표에서 챙길 것은 셋이다.
 
 1. 포기(`dead_letter`)가 되는 `connector-failed`·`invalid-page`·`no-progress`·`cursor-expired`는 **자동으로 다시 시도되지 않는다.** 일시 장애를 `ConnectorError`로 감싸지 않으면 영구 실패로 처리된다.
-2. 인스턴스가 준비되지 않으면(`unavailable`, `not-implemented`) 작업은 시도를 쓰지 않고 보류된다. 제품은 한 시간마다 준비되지 않은 인스턴스의 **만드는 함수를 다시 불러 새 객체를 만들고, 그 객체를 초기화한 뒤 `healthCheck`가 `ok`인지 본다**(`recheck`). 둘 다 되면 인스턴스가 그 새 객체로 바뀌고 준비된 것으로 보며 보류를 푼다. 아니면 새 객체를 버린다. 제품은 한 객체의 `initialize`를 한 번만 부르고, 준비된 인스턴스의 객체는 바꾸지 않는다. 그러므로 `initialize`는 다시 불려도 안전할 필요는 없지만, **같은 설정의 다른 객체가 동시에 초기화 중일 수 있다**는 것을 전제로 해야 한다(시작 때 10초를 넘긴 객체가 아직 도는 중에 첫 재점검이 새 객체를 만든다. 혼자만 잡는 잠금 파일이나 포트를 쓰지 않는다). 제품은 버린 객체를 닫지 못한다(규격에 닫기가 없다). 늦게 끝나 버려진 객체가 쌓이지 않도록, 60초를 넘겨 끝난 재점검이 연달아 3번(`RECHECK_LATE_LIMIT`)이면 그 인스턴스의 재점검을 그만두고 앱을 다시 시작할 때까지 준비되지 않은 채로 둔다. `healthCheck`는 원 시스템이 돌아오면 `ok`를 돌려줘야 한다.
+2. 인스턴스가 준비되지 않으면(`unavailable`, `not-implemented`) 작업은 시도를 쓰지 않고 보류된다. 제품은 한 시간마다 준비되지 않은 인스턴스의 **만드는 함수를 다시 불러 새 객체를 만들고, 그 객체를 초기화한 뒤 `healthCheck`가 `ok`인지 본다**(`recheck`). 둘 다 되면 인스턴스가 그 새 객체로 바뀌고 준비된 것으로 보며 보류를 푼다. 아니면 새 객체를 버린다. 제품은 한 객체의 `initialize`를 한 번만 부르고, 재점검은 준비된 인스턴스의 객체를 바꾸지 않는다(사용자가 자격 증명을 바꿨다는 변경 알림만 예외다. 8장). 그러므로 `initialize`는 다시 불려도 안전할 필요는 없지만, **같은 설정의 다른 객체가 동시에 초기화 중일 수 있다**는 것을 전제로 해야 한다(시작 때 10초를 넘긴 객체가 아직 도는 중에 첫 재점검이 새 객체를 만든다. 혼자만 잡는 잠금 파일이나 포트를 쓰지 않는다). 제품은 버린 객체를 닫지 못한다(규격에 닫기가 없다). 늦게 끝나 버려진 객체가 쌓이지 않도록, 60초를 넘겨 끝난 재점검이 연달아 3번(`RECHECK_LATE_LIMIT`)이면 그 인스턴스의 재점검을 그만두고 앱을 다시 시작할 때까지 준비되지 않은 채로 둔다. `healthCheck`는 원 시스템이 돌아오면 `ok`를 돌려줘야 한다.
 3. 요청 한도가 오는 쪽은 `ConnectorRateLimitError`로 알려야 대기 시간이 반영된다.
 
 ### 이 장을 줄이면
@@ -275,7 +279,8 @@ export class ConnectorError extends Error {
 - 일시 장애는 `ConnectorError(retryable: true)`나 `ConnectorRateLimitError`로 던진다. 그 밖의 예외는 영구 실패로 보인다.
 - 한 페이지의 시도는 3회이고 대기는 30초를 넘지 않는다. 값은 잠정이다.
 - 만료된 cursor는 `cursorExpired`로 알린다. 제품이 처음부터 다시 읽는다.
-- 인스턴스가 준비되지 않으면 한 시간마다 다시 초기화해 본다.
+- 인스턴스가 준비되지 않으면 한 시간마다 다시 초기화해 본다. 다만 원 시스템이 자격 증명을 거부한 인스턴스(`credential-rejected`)는 한 시간마다는 건너뛴다(8장).
+- 자격 증명이 거부되었음은 `ConnectorCredentialError`로 알린다. 그 밖의 예외는 거부로 읽히지 않는다.
 
 ## 6. 계약 테스트와 예시 수집기
 
@@ -294,6 +299,8 @@ export class ConnectorError extends Error {
 | `later` | 선택. 원 시스템이 바뀐 **뒤의** 설정. 있으면 새 인스턴스를 그 설정으로 만들어 처음부터 읽고 재스캔으로 본다. 그래서 삭제 재알림(`deletionsOnRescan`)과 revision이 커지는지를 검사한다 |
 | `maxPages` | 선택. 한 번 읽는 데 가져갈 페이지 수의 상한. 넘으면 위반이 아니라 시나리오 오류로 던진다. 기본 10,000쪽이다 |
 | `versionedSources` | 선택. 파일의 줄마다 한 버전인 수집기(JSONL 파일 수집기)만 켠다(9장) |
+| `credentials` | 선택. 칸 이름 → 지어낸 값. 계약 묶음이 이 값을 읽어 주는 접근자를 만들어 `initialize`의 둘째 인자로 넘기고, 그 값이 수집기가 돌려주거나 던지거나 쓴 것 안에 있는지 본다. 값은 16자 이상이어야 한다(짧으면 위반이 아니라 시나리오의 오류다). 이 필드가 없으면 `initialize`는 인자를 하나만 받는다 |
+| `rejected` | 선택. 지어낸 원 시스템이 자격 증명을 **거부하도록 꾸민** 설정과 값(`{ config, credentials }`). 있으면 계약 묶음이 새 수집기를 그 설정으로 초기화해 한 번 읽고, `initialize`나 첫 `getChanges`가 `ConnectorCredentialError`로 끝나는지 본다 |
 
 ### 예시 수집기 — 이 저장소에서 지금 돌려 볼 수 있다
 
@@ -351,6 +358,20 @@ export class ConnectorError extends Error {
     },
 ```
 
+### 자격 증명을 쓰는 예시와 계약 묶음의 다섯 코드
+
+같은 폴더에 자격 증명을 읽는 예시(`credentialed-connector.ts`의 `createCredentialedConnector`)가 하나 더 있다. 8장의 발췌는 이 파일에서 가져온 것이다. 이 예시의 지어낸 원 시스템은 지어낸 토큰 하나만 받아 주고, 틀린 토큰이면 수집기가 `ConnectorCredentialError`를 던진다. 시나리오에 `credentials`와 `rejected`를 모두 주면 계약 묶음이 위반 없이 통과한다. 이 예시는 `exports`에 올라 있지 않다. 포크는 이 파일을 자기 수집기 패키지로 복사해 모델로 삼는다.
+
+시나리오에 `credentials`나 `rejected`가 있으면 계약 묶음은 위반 코드 다섯을 더 본다. 어느 것도 값이나 문구를 싣지 않고 코드만 돌려준다.
+
+- `credential-in-record`: 값이 `getChanges`나 `getDocument`가 돌려준 것 안에 있다.
+- `credential-in-health`: 값이 `healthCheck`의 답 안에 있다.
+- `credential-in-error`: 값이 수집기가 던진 오류의 문구, 이름, 열거되는 필드, `cause` 사슬 안에 있다.
+- `credential-in-log`: `checkConnector` 한 번이 도는 동안 `console`과 표준 출력·오류로 나간 글 안에 값이 있다.
+- `credential-rejection-unsignalled`: 거부 시나리오인데 `initialize`도 첫 `getChanges`도 `ConnectorCredentialError`로 끝나지 않았다. `healthCheck`가 거부를 알리는 값을 답해도 이 코드를 면하지 않는다. 시작과 동기화에서의 거부는 오류로만 알려지기 때문이다(8장).
+
+값은 원래 글, base64로 바꾼 글, 주소용으로 바꾼 글(percent-encoding) 세 모양으로 찾는다. 가로채기는 `checkConnector` 한 번 동안만 걸고 끝나면 원래대로 돌린다. 값이 든 글은 가로챈 채 내보내지 않으므로 계약 묶음의 출력에도 값이 남지 않는다. 값이 든 시나리오의 확인은 4초(`LOG_TAP_DEADLINE_MS`) 안에 끝나야 한다. 더 느린 수집기는 시험의 제한 시간을 늘려도 그 상한에서 확인이 실패한다. 상한 뒤에 버려진 실행의 뒤늦은 출력은 다음 확인의 것으로 잡히거나 실제 `console`로 나갈 수 있다. 계약 묶음이 재지 않는 누출 모양은 8장의 "막지 못하는 것"에 적었다. 자격 증명을 쓰지 않는 수집기의 시나리오(두 필드가 없는 것)에서는 가로채기가 걸리지 않고 결과가 이 필드가 생기기 전과 같다.
+
 ### 계약 테스트를 돌리는 법
 
 예시 수집기의 테스트 한 줄이 계약 묶음을 부른다. 내 수집기 테스트도 같은 모양이다.
@@ -390,7 +411,7 @@ AssertionError: expected [ 'no-progress' ] to deeply equal []
 
 ### 일부러 어긴 변형 — 위반 코드가 나오는 것을 보여 주는 것
 
-예시 패키지에는 규격을 한 곳만 어긴 변형이 셋 있다. 진행 없는 cursor를 돌려주면 `no-progress`, 능력에서 `deletes`를 거짓으로 선언하고 삭제 사건을 내면 `capability-deletes`, 초기화 전에 `getChanges`에 빈 페이지로 답하면 `responds-before-init`이다. 이 변형들은 모델로 삼으면 안 되고, 어떤 위반이 어떤 코드로 나오는지 보는 용도다. 변형 하나는 이렇게 생겼다.
+예시 패키지에는 규격을 한 곳만 어긴 변형이 여덟 있다. 다섯은 위의 자격 증명 코드를 하나씩만 어기는 변형이고, 나머지 셋은 다음과 같다. 진행 없는 cursor를 돌려주면 `no-progress`, 능력에서 `deletes`를 거짓으로 선언하고 삭제 사건을 내면 `capability-deletes`, 초기화 전에 `getChanges`에 빈 페이지로 답하면 `responds-before-init`이다. 이 변형들은 모델로 삼으면 안 되고, 어떤 위반이 어떤 코드로 나오는지 보는 용도다. 변형 하나는 이렇게 생겼다.
 
 <!-- excerpt: packages/connector-example/src/adapters/violating-connectors.ts -->
 ```ts
@@ -465,6 +486,7 @@ export function createStuckCursorConnector(): Connector {
 
 - 내 수집기 테스트의 핵심은 `connectorContract(이름, 만드는 함수, { config, later })` 한 줄이다.
 - 예시는 `pnpm exec vitest run packages/connector-example`로 지금 돌려 볼 수 있다.
+- 자격 증명을 쓰는 수집기는 시나리오에 `credentials`(지어낸 값)와 `rejected`(거부하는 원 시스템)를 더해 같은 묶음을 돌린다. 값이 레코드, 건강 답, 오류, 로그에 새면 코드 넷이, 거부를 오류로 알리지 않으면 `credential-rejection-unsignalled`가 나온다.
 - 위반 코드는 26개이고 위 표가 전부다. 코드는 위반의 종류만 알려 주고 문구는 없다.
 - 이 검사는 지어낸 원 시스템으로 돌린 것이다. 실제 원 시스템에서의 확인은 S18이다.
 
@@ -577,7 +599,7 @@ describe("site.example-registration", () => {
 | 필드 | 뜻 | 없을 때 |
 |---|---|---|
 | `connectorKinds` | 종류 이름 → 수집기를 **새로 만들어** 돌려주는 함수(`ConnectorFactory`) | 바탕 묶음의 종류만 |
-| `connectorInstances` | 시작할 때의 인스턴스(`id`, `kind`, `config`) | 바탕 묶음의 인스턴스만 |
+| `connectorInstances` | 시작할 때의 인스턴스(`id`, `kind`, `config`와 선택 항목 `credentials`). `credentials`는 그 인스턴스가 필요로 하는 자격 증명의 칸 이름 목록이고 값이 아니다(8장) | 바탕 묶음의 인스턴스만 |
 | `scopeGrading` | 접근 범위 → 데이터 등급 매핑(site-setup S08) | `publicScopeGrading` |
 | `scopePolicy` | 접근 범위 정책(site-setup S21). 있으면 설치본은 언제나 이 정책을 쓴다 | 공용 기본 정책 |
 | `connectorScopes` | 인스턴스마다의 접근 범위(site-setup S18) | 모든 인스턴스가 알 수 없음 |
@@ -724,6 +746,7 @@ pnpm --filter @pki/desktop build
 - 백엔드는 인스턴스들의 `initialize`를 함께 시작하고 각각 10초(`INITIALIZE_TIMEOUT_MS`)까지만 기다린 뒤에 서비스를 시작한다. 10초 안에 끝나지 않은 인스턴스는 준비되지 않은 것으로 두고, 그 뒤에 끝난 결과는 성공이든 실패든 버린다. 이 제한은 비동기로 기다리는 시간만 재므로 수집기가 동기 코드로 멈추면 막지 못한다.
 - 만드는 함수가 던지거나 `initialize`가 던지거나 인스턴스가 등록에 없는 종류를 적어도(`connector-kind-unknown`) 시작은 계속되고 그 인스턴스만 준비되지 않은 상태(`unavailable`)가 된다. 그 인스턴스의 동기화는 `connector-unavailable`로 답하고 수집 작업은 보류된다. 로그에는 고정된 코드(`connector-initialize-timeout`, `connector-factory-failed`, `connector-initialize-failed`, `connector-kind-unknown`)와 인스턴스 `id`만 남고 수집기가 던진 글은 남지 않는다.
 - 한 시간마다의 재점검은 만드는 함수를 다시 불러 **새 객체**를 만들어 초기화한다(5장). 제품은 한 객체의 `initialize`를 한 번만 부른다. 그러므로 `initialize`는 같은 설정의 다른 객체가 동시에 초기화 중일 수 있다는 것을 전제로 쓴다. 혼자만 잡는 잠금 파일이나 포트를 쓰지 않는다.
+- 칸을 선언한 인스턴스는 만드는 함수를 부르기 **전에** 칸마다 값이 있는지 먼저 묻는다. 하나라도 없거나 저장소를 쓸 수 없으면 수집기 객체를 만들지 않고 그 인스턴스를 사유와 함께 `unavailable`로 둔다(8장). 원 시스템이 자격 증명을 거부해 `credential-rejected`가 된 인스턴스는 한 시간마다의 재점검이 건너뛴다.
 - 제품은 버린 객체를 닫지 못한다(규격에 닫기가 없다). 늦게 끝나 버려진 객체는 닫히지 않은 채 자원을 쥘 수 있다. 쌓이는 수에 끝을 두려고 60초를 넘겨 끝난 재점검이 연달아 3번이면 그 인스턴스의 재점검을 그만두고 앱을 다시 시작할 때까지 준비되지 않은 채로 둔다(`connector-recheck-abandoned`).
 
 ### 믿는 것과 막지 못하는 것
@@ -740,12 +763,11 @@ pnpm --filter @pki/desktop build
 
 ### 아직 없는 것
 
-번호(공용 저장소 #114 등)는 **공용(upstream) 저장소**의 추적 이슈다. 포크에서 `#114`는 포크 자신의 이슈를 가리키므로 공용 저장소의 이슈 목록에서 찾는다.
+번호(공용 저장소 #116 등)는 **공용(upstream) 저장소**의 추적 이슈다. 포크에서 `#116`은 포크 자신의 이슈를 가리키므로 공용 저장소의 이슈 목록에서 찾는다.
 
-1. **수집기에 비밀 값을 건네는 통로가 없다**(공용 저장소 #114). 8장.
-2. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116). 인스턴스의 설정은 시작할 때 등록의 `connectorInstances`가 주고, 설정 화면이나 설정 파일로 인스턴스를 만들 수 있는 곳이 없다. 제품이 등록한 종류는 `site-*` 셋뿐이다(`jsonl-import`는 시험에서만 등록된다). 9장.
+1. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116). 인스턴스의 설정은 시작할 때 등록의 `connectorInstances`가 주고, 설정 화면이나 설정 파일로 인스턴스를 만들 수 있는 곳이 없다. 제품이 등록한 종류는 `site-*` 셋뿐이다(`jsonl-import`는 시험에서만 등록된다). 9장.
 
-이 항목들은 이 문서가 임의로 정하지 않았다. 포크가 다른 방법을 정했다면 그 방법을 공용 저장소에 알린다([ownership.md 5절](ownership.md)).
+이 항목은 이 문서가 임의로 정하지 않았다. 포크가 다른 방법을 정했다면 그 방법을 공용 저장소에 알린다([ownership.md 5절](ownership.md)).
 
 ### 포크가 수집기를 만들 때 지킬 것
 
@@ -761,6 +783,7 @@ pnpm --filter @pki/desktop build
 - 인스턴스 범위 파일은 `site/config/connector-scopes.json`에만 두고, 등록이 정적 `import`로 가져와 빌드할 때 백엔드 묶음에 넣는다. 실행본은 그 파일을 읽지 않는다. 자리가 틀리거나 묶이지 않았거나 형식이 틀렸거나 예시 값 그대로이면 빌드가 멈춘다.
 - 포크의 코드는 믿는 코드로 실리고 가둬지지 않는다. 동기 멈춤은 막지 못한다.
 - 명령은 `pnpm install`, `pnpm lint && pnpm typecheck && pnpm test`, `pnpm --filter @pki-site/composition site-check <종류>`, `pnpm --filter @pki-site/composition site-check --scopes`, `pnpm --filter @pki/desktop build`다. `site/` 밖에서 달라지는 것은 `pnpm-lock.yaml`이고, 설치 스크립트가 있는 의존성이면 `allowBuilds`의 `false` 줄이 더해진다.
+- 칸을 선언한 인스턴스의 자격 증명은 화면에서 넣고, 수집기는 `initialize`의 접근자로 읽는다. 포크가 `site/` 밖의 화면을 고치지 않는다(8장).
 - 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다(#121).
 
 ## 8. 자주 만나는 두 가지: 정수 revision이 없을 때, 자격 증명
@@ -774,12 +797,150 @@ pnpm --filter @pki/desktop build
 
 ### 자격 증명
 
-원 시스템에 접근하는 비밀 값(API 키, 토큰, 암호)은 **OS 자격 증명 저장소에 두고, 레코드·설정 파일·로그에 넣지 않는다.** 이유는 레코드와 설정은 제품의 정본과 백업에 남고, 로그와 오류 문구는 그대로 사람이 보거나 옮겨 갈 수 있기 때문이다. 이 저장소의 지침은 [ADR 0010](adr/0010-encryption-at-rest.md)이다. 그 결정은 비밀 값을 Electron의 `safeStorage`로 암호화한 파일에 두고 키를 OS가 지키게 한다. 이 저장소가 지금 그 저장소에 두는 것은 Provider의 키이고, **수집기가 비밀 값을 받는 통로는 아직 없다.** 수집기가 받는 것은 `initialize(config)`의 설정 하나다. 그러므로 포크가 수집기의 자격 증명을 어떻게 읽을지(예: 수집기가 직접 OS 저장소를 부르는 방법)는 포크가 정해야 하고, 그 값을 레코드의 `metadata`나 설정 파일, 던지는 오류의 문구에 넣지 않는다는 것이 이 문서의 규칙이다. 오류의 문구는 동기화 결과·API·로그로는 옮겨지지 않지만 `site-check`는 `initialize` 오류의 문구를 출력하고, 수집기가 자기 로그에 남기는 것은 제품이 막을 수 없다.
+원 시스템에 접근하는 비밀 값(API 키, 토큰, 암호)은 **OS 자격 증명 저장소에 두고, 레코드·설정 파일·로그에 넣지 않는다.** 이유는 레코드와 설정은 제품의 정본과 백업에 남고, 로그와 오류 문구는 그대로 사람이 보거나 옮겨 갈 수 있기 때문이다. 이 저장소의 지침은 [ADR 0010](adr/0010-encryption-at-rest.md)이다. 그 결정은 비밀 값을 Electron의 `safeStorage`로 암호화한 파일에 두고 키를 OS가 지키게 한다. 수집기가 그 값을 받는 길은 [ADR 0019](adr/0019-connector-credentials.md)가 정했다. 새 저장소를 만들지 않고 같은 저장소에 **인스턴스마다의 칸**을 두며, 수집기는 `initialize`가 받는 **접근자**로 읽는다. 아래 순서로 쓴다.
+
+#### 1. 칸을 선언한다
+
+인스턴스가 필요로 하는 자격 증명은 등록의 인스턴스 정의(7장)에 `credentials`로 선언한다. 값이 아니라 칸의 이름이다. `config`에도, 수집기의 `manifest`에도 적지 않는다.
+
+```text
+{ id: "<인스턴스 ID>", kind: "<종류>", config: { ... }, credentials: ["token"] }
+```
+
+- 칸 이름은 `^[a-z][a-z0-9-]{0,15}$`를 따르고, 한 인스턴스 안에서 서로 달라야 하며, 많아야 8개(`MAX_CREDENTIAL_SLOTS`)다.
+- 어기면 등록 검사가 `instance-credentials-invalid`를 돌려주고, 시작할 때는 그 인스턴스를 빼고 계속한다(7장).
+- 칸을 선언하지 않은 인스턴스의 접근자는 무엇을 읽어도 거부한다. 선언은 코드에 남는 것이고 값은 저장소에만 있다.
+
+#### 2. 접근자로 읽는다
+
+제품은 `initialize`를 부를 때 **언제나** 둘째 인자 `context`를 넘긴다. `context.credentials.read(칸)`이 그 칸의 값을 돌려준다. 예시 수집기의 발췌다.
+
+<!-- excerpt: packages/connector-example/src/adapters/credentialed-connector.ts -->
+```ts
+  /** Asks the origin whether it accepts the token now; the value is read here and let go. */
+  async function authenticate() {
+    if (!credentials || acceptedToken === undefined) {
+      throw new ConnectorError("not initialized", { retryable: false });
+    }
+    if ((await credentials.read(SLOT)) !== acceptedToken) throw new ConnectorCredentialError();
+  }
+
+  return {
+    ...notes,
+    async initialize(config: unknown, context?: ConnectorContext) {
+      // A product from before credentials hands no context: the token cannot be read.
+      if (!context) throw new ConnectorCredentialError();
+      credentials = context.credentials;
+```
+
+예시의 지어낸 원 시스템은 설정의 지어낸 토큰 하나만 받아 주고, 읽은 값이 그것과 다르면 수집기가 `ConnectorCredentialError`를 던진다. 실제 수집기는 읽은 값을 원 시스템에 내밀고 그 답으로 같은 판단을 한다.
+
+- `read(칸)`은 **부를 때마다 저장소에서 읽는다.** 제품은 값을 기억해 두지 않는다. 관리 모듈의 인스턴스 표, 목록의 요약, `config`, 로그, 작업의 자료 어디에도 값이 들어가지 않는다.
+- 선언하지 않은 칸을 읽거나, 저장소가 "없음"이나 "쓸 수 없음"으로 답하거나, 3초(`CREDENTIAL_CHECK_TIMEOUT_MS`) 안에 답이 오지 않으면 `read`는 `ConnectorCredentialError`로 거부한다. 그 오류에는 칸 이름도 저장 이름도 실리지 않는다.
+- 제품이 버린 객체(시작 때 제한 시간을 넘긴 것, 실패한 재점검의 것, 새 객체로 바뀐 것)의 접근자는 그때부터 무엇을 읽어도 거부한다.
+- `context`는 이 길이 들어온 뒤의 제품에서는 언제나 있다. 그 앞의 제품은 `context`를 넘기지 않으므로, 자격 증명을 쓰는 수집기는 `context`가 없으면 `ConnectorCredentialError`로 끝낸다(위 발췌의 `if (!context)`). 인자 하나만 받는 기존 `initialize`는 고치지 않아도 그대로 돈다. 규격 버전은 2 그대로다.
+
+#### 3. 수집기가 지킬 것
+
+- **필요한 동안만 쥔다.** 읽은 값을 필드에 오래 담아 두는 것은 제품이 막지 못한다. 쓸 때 읽고 쓰고 나면 놓는다.
+- **값을 어디에도 옮기지 않는다.** 레코드의 본문과 `metadata`, 던지는 오류의 문구와 이름과 `cause`, `healthCheck`의 사유, 수집기 자신의 로그와 파일에 넣지 않는다. 오류의 문구는 제품이 옮기지 않지만 `site-check`는 `initialize`가 던진 문구를 출력한다(7장).
+- **원 시스템이 자격 증명을 받아 주지 않으면**(인증 실패, 만료, 철회) `initialize`나 `getChanges`에서 `ConnectorCredentialError`를 던진다. 접근자가 던진 것을 그대로 흘려보내도 된다. 원 시스템이 준 오류의 이름과 문구를 `Error` 하나로 다시 만들어 던지지 않는다. 이름이 `ConnectorCredentialError`이고 문구가 고정 문구와 같은 오류는 거부로 읽히기 때문이다. 제품은 이 오류를 `instanceof`와 고정된 이름·문구 쌍 **둘 다**로 알아본다(`@pki/contracts`의 `isConnectorCredentialError`). 포크의 번들이 `@pki/contracts`를 한 벌 더 싣더라도 거부가 읽힌다.
+- **`healthCheck`는 던지지 않으므로** 거부를 `{ state: "unavailable", reason: HEALTH_REASON_CREDENTIAL_REJECTED }`로 알린다(값은 `credential-rejected`). 제품은 `healthCheck`의 `reason`을 이 상수와 같은지만 본다. 건강 사유의 값은 재점검과 다시 만들기에서만 읽힌다. 제품은 시작할 때 `healthCheck`를 묻지 않으므로 시작과 동기화에서의 거부는 `ConnectorCredentialError`로 알려야 하고, 건강 사유로만 알리는 수집기는 계약 묶음이 `credential-rejection-unsignalled`로 잡는다. 아래 발췌가 예시의 `healthCheck`다.
+
+<!-- excerpt: packages/connector-example/src/adapters/credentialed-connector.ts -->
+```ts
+    async healthCheck() {
+      try {
+        await authenticate();
+      } catch (error) {
+        if (error instanceof ConnectorCredentialError) {
+          return { state: "unavailable", reason: HEALTH_REASON_CREDENTIAL_REJECTED };
+        }
+        return { state: "unavailable", reason: "not initialized" };
+      }
+      return notes.healthCheck();
+    },
+```
+
+- **`healthCheck`의 그 밖의 `unavailable`은 거부로 읽히지 않고** 한 시간마다 같은 값으로 다시 시도된다. 거부가 아닌 일시 장애(인증 서버의 장애 등)는 `ConnectorError`(`retryable: true`)로 알린다. 거부로 알리면 사용자가 값을 고칠 때까지 한 시간마다의 재점검이 건너뛰기 때문이다.
+- **값을 되쓰는 길은 없다.** 접근자는 읽기만 한다. 원 시스템이 새 토큰을 내어 주며 옛 토큰을 버리는 방식(회전하는 토큰)이면 수집기가 새 값을 저장할 수 없으므로 사용자가 값을 다시 넣어야 한다. 그런 원 시스템이면 공용 저장소에 알린다([ownership.md 5절](ownership.md), site-setup S29).
+- 수집기가 직접 OS 보관함을 부르거나 환경 변수나 파일에서 값을 읽는 길은 두지 않는다. 브라우저 개발용 백엔드(`backend/src/dev.ts`)에는 저장소가 없어 칸을 선언한 인스턴스는 `credential-store-unavailable`이다.
+
+#### 4. 값은 화면에서 넣는다
+
+공용 제품의 출처 화면(수집기 표)이 칸을 선언한 인스턴스마다 칸의 상태(저장됨, 없음, 저장소를 쓸 수 없음), 값 입력란, 저장, 삭제를 보인다. **포크는 화면을 고치지 않는다.**
+
+- 값은 화면에서 셸의 저장소로 곧장 간다(preload의 `setSecret(name, value)`와 `deleteSecret(name)`, 이름은 목록이 준 `name`). 백엔드의 API를 지나지 않는다. 화면에는 값을 되읽는 함수가 없고, 백엔드의 어떤 API도 값을 답에 싣지 않는다.
+- 저장이나 삭제가 성공하면 화면이 `POST /api/connectors/credentials-changed`(`{ connectorId }`)를 한 번 부른다. 이 알림에는 값이 없고 다른 API와 같은 검사(세션 토큰, Origin, Host)를 지난다. 백엔드는 그 인스턴스의 수집기 객체를 **새로 만들어** 다시 초기화한다. 답은 그 인스턴스의 목록 요약과 `rebuild` 하나다: `done`(바로 다시 만들었다), `queued`(진행 중인 재점검이나 간격 때문에 미뤘다), `skipped`(재점검을 그만둔 인스턴스라 하지 않았다). 화면은 `queued`이면 "곧 반영됩니다"를 보이고 목록을 곧바로 한 번, 30초 뒤에 한 번 더 읽으며, `skipped`이면 "앱을 다시 시작해야 반영됩니다"를 보인다.
+- 저장이 실패하면 "자격 증명을 저장할 수 없습니다 (OS 보호 저장소를 쓸 수 없음)."을 보이고 알림을 부르지 않는다. 삭제가 실패하면 "자격 증명을 지우지 못했습니다 (저장소 파일을 읽거나 쓸 수 없음)."을 보이고 알림을 부르지 않으며 칸의 표시를 바꾸지 않는다.
+- **이 화면에서 넣는 자격 증명은 한 줄, 8192자 이하다.** 줄바꿈이 든 값과 8192자를 넘는 값은 저장하지 않고 안내만 보인다(자르지 않는다). 여러 줄 값(PEM, JSON 키)은 이 화면이 받지 않는다. 한 줄로 이어 붙인 PEM만 한도 안에서 된다. 이 입력란에는 알려진 틈이 남아 있다. 비밀번호 관리자가 자동으로 채운 값은 줄바꿈 검사를 지나쳐 브라우저가 줄바꿈을 지운 값이 저장될 수 있고, 끌어 놓기에서 줄바꿈을 놓칠 수 있으며, 설정 화면의 API 키 입력란은 입력하는 동안 값이 화면의 DOM에 실린다. 공용 저장소의 #162가 추적한다.
+- 셸이 없는 브라우저 개발 실행에서는 입력란을 보이지 않고 "이 실행에는 저장소가 없습니다."로 시작하는 안내만 보인다.
+- OS 보호(Windows의 DPAPI)를 쓸 수 없으면 값은 저장되지 않는다. 환경 변수나 설정 파일의 평문으로 조용히 넘어가지 않는다.
+
+#### 5. 네 사유와 풀리는 길
+
+자격 증명 때문에 인스턴스를 쓸 수 없으면 목록의 사유(`reason`)가 다음 넷 가운데 하나다. 상태는 모두 `unavailable`이고, 그 인스턴스의 동기화는 `connector-unavailable`로 답하며 수집 작업은 그 사유로 보류된다.
+
+| 사유 | 뜻 | 사용자가 할 일 | 풀리는 길 |
+|---|---|---|---|
+| `credential-store-unavailable` | 저장소를 쓸 수 없다(셸이 없음, OS 보호를 쓸 수 없음, 파일을 읽을 수 없음, 답이 늦음) | 앱 안에서는 없다(site-setup S11) | 변경 알림이나 한 시간마다의 재점검이 존재 확인만 다시 한다 |
+| `credential-missing` | 선언한 칸 가운데 값이 없는 것이 있다 | 값을 넣는다 | 변경 알림이나 한 시간마다의 재점검 |
+| `credential-unreadable` | 값이 저장되어 있다고 나오는데 읽히지 않는다(암호문을 풀 수 없음, OS의 키가 바뀐 경우 등) | 값을 지우고 다시 넣는다 | 한 시간마다 새 객체로 다시 시도하므로 OS의 키가 돌아오면 저절로 풀린다 |
+| `credential-rejected` | 값은 읽히는데 원 시스템이 받아 주지 않는다(틀림, 만료, 철회) | 값을 고쳐 넣는다 | 변경 알림과 앱을 다시 시작할 때뿐이다 |
+
+- 만료와 거부는 한 사유다. 저장소는 만료 시각을 모르고 사용자가 할 일도 같기 때문이다.
+- 사유는 수집기의 말이 아니라 **저장소가 한 답**으로 정한다. 수집기가 `ConnectorCredentialError`를 던지면 제품이 존재 확인을 다시 묻고, 저장소를 쓸 수 없음, 값이 없음, 읽을 수 없음을 차례로 가려 그 어느 것도 아니면 `credential-rejected`로 한다.
+- 칸을 선언하지 않은 인스턴스나 선언하지 않은 칸을 읽은 수집기가 이 오류를 던지면 넣을 값이 없으므로 사유 없는 `unavailable`이 되고 한 시간마다 다시 시도된다. 쓰이는 것이 OS 로그인 같은 사용자 자신의 신원인 수집기가 여기에 든다.
+- 동기화 도중에 `getChanges`가 `ConnectorCredentialError`를 던지면 그 동기화는 멈춤 코드 `credential-unusable`로 멈춘다. 같은 호출을 다시 시도하지 않고, 앞서 저장한 페이지와 cursor는 남으며, 그 작업은 `held`가 되어 시도를 쓰지 않는다(5장의 표). 인스턴스는 위 판정으로 `unavailable`이 된다.
+- 앱을 시작할 때 값이 없거나 저장소를 쓸 수 없으면 제품은 만드는 함수도 `initialize`도 부르지 않고 수집기 객체를 만들지 않는다.
+- 읽기가 3초 안에 답하지 못하면 `read`는 거부되고 사유는 `credential-unreadable`이다. 선언한 칸의 값이 없는데 저장소도 쓸 수 없으면 사유는 `credential-store-unavailable`이다(저장소를 쓸 수 없음이 먼저다).
+
+#### 6. 거부된 값이 다시 시도되는 횟수
+
+같은 값으로 원 시스템을 되풀이해 두드리면 계정이 잠길 수 있으므로 상한을 둔다.
+
+- **거부된 값은 한 시간마다 다시 시도되지 않는다.** `credential-rejected`인 인스턴스는 한 시간마다의 재점검이 존재 확인도 만드는 함수도 `initialize`도 부르지 않고 건너뛴다.
+- 그 인스턴스가 다시 시도되는 때는 변경 알림과 앱을 다시 시작할 때뿐이다. 알림은 거부된 뒤의 첫 알림이 곧바로 다시 만들고, 그 시작에서 30초(`CREDENTIAL_RETRY_MIN_MS`) 안에 온 알림은 그 시각 뒤의 한 번으로 모은다. 앱을 다시 켜면 거부되었다는 사실을 기억하지 않으므로 한 번 시도한다.
+- 이 상한은 **수집기가 거부를 알렸을 때만** 선다. 위 3의 규칙대로 알리지 않으면 제품은 그것이 거부인지 알 수 없다.
+- 한 인스턴스에서 진행 중인 재점검이나 다시 만들기는 합쳐서 하나다. 진행 중에 온 알림은 잃지 않고 끝난 뒤 한 번 다시 만든다. 다시 만들기가 진행 중인 인스턴스는 한 시간마다의 재점검이 건너뛴다.
+- **값을 바꾸면** 이미 `ready`인 인스턴스도 새 객체로 다시 만든다(옛 값으로 돌던 객체가 새 값을 읽게 할 다른 길이 없다). 돌던 동기화는 옛 객체로 끝까지 가고 끊긴 접근자를 읽으면 `credential-unusable`로 멈출 수 있다. 그 작업은 새 객체로 다시 돈다. 다시 만들기가 60초(`RECHECK_TIMEOUT_MS`)를 넘기면 옛 객체를 버리고 사유 없는 `unavailable`이 되며 다음 재점검이 되살린다. 초기화가 60초 가까이 걸리는 수집기는 값을 바꿀 때마다 길어야 한 시간 멈춘다.
+
+#### 7. 인스턴스가 가리키는 원 시스템을 바꾸면 인스턴스 ID도 바꾼다
+
+한 칸의 저장 이름은 종류와 인스턴스 ID에서 나온다(`connector.<32자리 16진수>.<칸>`). **`config`(원 시스템의 주소)는 이름에 들어가지 않는다.** 제품은 `config`의 어느 필드가 주소인지 모른다. 그래서 같은 종류와 ID를 둔 채 주소만 바꾼 빌드에서는 **옛 값이 새 주소로 건네진다.** 이를 막는 것은 포크의 일이다: 인스턴스가 가리키는 원 시스템을 바꿀 때는 인스턴스 ID도 바꾼다. 그러면 사용자가 값을 다시 넣게 된다(site-setup S28 ⑤).
+
+등록에서 빠진 인스턴스의 값은 저장소에 암호문으로 남는다. 제품은 시작할 때 저장소를 정리하지 않는다. 남은 값은 어느 수집기에도 건네지지 않고, 같은 종류와 ID의 인스턴스가 다시 등록될 때만 다시 쓰인다. 값을 지우는 길은 인스턴스가 있을 때의 삭제 단추와 앱의 데이터를 지우는 기존 절차다.
+
+#### 8. 값이 남지 않는 곳과 막지 못하는 것
+
+제품이 쓰는 어느 곳에도 값이 남지 않는다: 데이터 폴더의 모든 파일(정본 DB와 보조 파일, 삭제 장부, `secrets.json`에는 암호문뿐), 설정 파일, 백엔드와 셸의 로그와 표준 출력·오류, 모든 API 응답과 셸이 화면에 돌려주는 답, 동기화 결과와 작업과 활동 목록, `site-check`의 출력이다. 수집기가 값을 오류의 문구나 건강 사유에 **일부러 실어도** 같다. 제품이 수집기 오류의 문구를 옮기지 않기 때문이다. 백엔드를 띄워 값이 든 자료를 지나가게 한 뒤 이 곳들을 훑는 시험이 저장소에 있다.
+
+다음은 제품이 실행 중에 잡을 수 없다. 누가 맡는지와 함께 적는다.
+
+| 경우 | 왜 못 막는가 | 누가 맡는가 |
+|---|---|---|
+| 수집기가 값을 레코드의 본문이나 `metadata`에 넣어 돌려준다 | 제품은 값을 들고 있지 않아 받은 레코드를 값과 견줄 수 없다 | 계약 묶음의 `credential-in-record`(지어낸 원 시스템에서), S29 |
+| 수집기나 그 의존성이 자기 로그나 파일에 값을 쓴다 | 같은 프로세스의 믿는 코드다 | 계약 묶음의 `credential-in-log`(`console`과 표준 출력·오류로 나간 것만), 위 3의 안내, S29 |
+| 포크의 코드가 다른 인스턴스의 값을 읽는다 | 같은 프로세스의 코드는 셸에 직접 물을 수 있다 | 포크의 검토 |
+| 느린 수집기의 값을 바꾸면 멈춘다 | `ready`인 인스턴스의 다시 만들기가 60초를 넘기면 옛 객체를 버린다 | 길어야 한 시간 `unavailable`이고 한 시간마다의 재점검이 되살린다. 초기화가 영영 끝나지 않으면 앱을 다시 시작할 때까지다. S27·S28에서 드러난다 |
+| 보류된 작업 하나가 한 시간 기다린다(미세한 틈 둘) | 인스턴스가 `ready`가 되는 때와 작업을 닫는 때가 어긋나면 풀 작업이 없다 | 그 작업 하나가 다음 한 시간 재점검까지 보류로 남는다 |
+| 알림을 쉬지 않고 보내는 호출자가 있다 | 간격은 30초이고 `ready`인 인스턴스에는 간격이 없다 | 거부된 값이 한 시간에 120번쯤까지 시도될 수 있고, `ready`인 인스턴스는 알림마다 다시 만들어져 돌던 동기화가 멈춘다. 알림은 세션 토큰을 가진 화면만 보낼 수 있다. 화면의 기존 보호가 맡는다 |
+| 주소만 바꾼 인스턴스가 옛 값을 받는다 | 저장 이름이 `config`를 묶지 않는다 | 포크의 규칙(주소를 바꾸면 ID도 바꾼다), S28 ⑤ |
+| 수집기가 거부를 알리지 않는다(`healthCheck`의 다른 사유, 다른 종류의 오류) | 제품은 그것이 거부인지 알 수 없다. 한 시간마다 같은 값으로 다시 시도된다 | 계약 묶음의 `credential-rejection-unsignalled`, S29의 잠금 정책 확인 |
+| 칸을 선언하지 않은 수집기(OS 로그인에 기대는 것)의 인증 실패 | 넣을 값이 없어 사유 없는 `unavailable`이고 한 시간마다 다시 시도된다 | 포크의 검토, S29 |
+| 화면(렌더러)이 깨져 값을 바꿔 넣거나 지운다 | 화면은 어떤 저장 이름으로든 저장·삭제할 수 있다(읽지는 못한다). 다른 계정의 값으로 바꿔 넣어 그 계정의 자료가 수집되게 할 수 있다 | 화면의 기존 보호(CSP와 preload 검사). 더하지 않았다 |
+
+계약 묶음이 재지 않는 누출 모양도 있다: 둘로 나눠 쓴 글, 16진수, `user:`와 값을 이은 `Basic` base64, 패딩이 없거나 어긋난 base64, 처리되지 않은 약속 거부, 한 바퀴보다 늦게 도는 타이머다. 이 모양으로 새는 수집기는 코드 검토와 S29가 잡는다.
+
+값이 지나는 길은 둘뿐이다. "화면 입력 → 셸의 저장소"와 "셸 → 백엔드 프로세스 → 수집기"다. 셸은 값이 든 답을 백엔드 프로세스에만 보내고, 백엔드에는 Provider 키의 이름과 수집기 자격 증명의 이름 모양만 내어 준다. Provider의 주소를 바꿔 키를 정리할 때 수집기 자격 증명은 지워지지 않는다. 포크의 수집기는 같은 프로세스에서 같은 권한으로 도는 믿는 코드이므로 칸의 제한은 실수를 잡는 장치이지 격리가 아니다(7장).
 
 ### 이 장을 줄이면
 
 - 정수 revision이 없으면 수정 시각의 밀리초를 쓴다. 같은 밀리초의 두 번 수정은 충돌이 된다.
-- 자격 증명은 OS 자격 증명 저장소에만 둔다. 수집기에 비밀 값을 건네는 통로는 아직 없다.
+- 자격 증명은 OS 자격 증명 저장소에만 두고, 인스턴스 정의의 `credentials`로 칸을 선언하며, 수집기는 `initialize`의 `context.credentials.read(칸)`으로 읽는다. 값은 화면에서 넣고 화면으로 돌아오지 않는다.
+- 원 시스템이 거부하면 `ConnectorCredentialError`를 던진다. 없음, 저장소 불가, 읽을 수 없음, 거부가 각각 사유 코드로 보이고 값을 고치면 풀린다. 거부된 값은 한 시간마다 다시 시도되지 않는다.
+- 인스턴스가 가리키는 원 시스템을 바꾸면 인스턴스 ID도 바꾼다. 값을 되쓰는 길은 없다.
+- 수집기가 값을 레코드, 오류, 건강 사유, 자기 로그에 넣는 것은 제품이 막지 못한다. 계약 묶음의 코드 다섯과 S29가 맡는다.
 
 ## 9. JSONL 가져오기 — 수집기를 만들지 않고 파일로 넣는 길
 
@@ -854,7 +1015,10 @@ pnpm --filter @pki/desktop build
 | 실제 메일·메신저·Wiki 수집기 | 이 저장소에 없다. 자리표시(`site-mail`, `site-messenger`, `site-wiki`)와 지어낸 자료를 내는 예시뿐이다. 구현은 배포처 포크의 일이다 |
 | 실제 원 시스템에서의 규격 확인 | 하지 않았다. 요청 한도, cursor 만료, 대량 페이지, 만료된 동안의 삭제, 범위와 revision 채우기는 S18이 배포처에서 확인한다 |
 | 수집기 종류를 뺀 빌드로 복원한 백업에서 건너뛴 삭제를 그 종류가 돌아온 뒤 다시 적용하는 일 | 없다. 건너뛴 줄은 건수로만 남는다. 종류를 뺀 빌드로 백업을 복원하지 않는다(7장, #121) |
-| 수집기에 비밀 값을 건네는 통로 | 없다(8장, #114) |
+| 수집기가 자격 증명 값을 저장소에 되쓰는 길 | 없다. 접근자는 읽기만 하므로 값을 되써야 하는 원 시스템(회전하는 토큰)이면 사용자가 값을 다시 넣는다(8장) |
+| 화면에서 여러 줄 자격 증명을 넣는 일 | 없다. 한 줄, 8192자 이하만 받는다. 이 입력란의 알려진 틈은 #162가 추적한다(8장) |
+| 등록에서 빠진 인스턴스의 자격 증명을 한 번에 정리하는 화면 | 없다. 값은 암호문으로 남고 어느 수집기에도 건네지지 않는다(8장) |
+| Windows의 OS 보호(DPAPI)와 실제 원 시스템에서의 자격 증명 확인 | 하지 않았다. 시험은 암호화 대역과 지어낸 원 시스템을 쓴다. site-setup의 S28·S29가 배포처에서 확인한다(8장) |
 | `jsonl-import` 파일 인스턴스를 제품에서 설정하는 길과 `{ path }`의 경로 제한 | 없다. 수집기 코드는 있고 시험에서만 등록된다. 인스턴스는 시작할 때 등록의 `connectorInstances`가 준 설정으로만 생긴다(9장, #116) |
 | 화면에서 locator 표시 | 없다. 근거를 읽는 정본 함수와 API 응답은 locator를 돌려주지만 화면은 그리지 않는다 |
 | Windows에서의 확인 | 하지 않았다. 이 문서의 명령은 macOS 개발 환경에서 돌려 보았다 |
