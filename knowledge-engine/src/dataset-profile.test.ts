@@ -293,6 +293,30 @@ describe("profile.dataset: what is not a table", () => {
   });
 });
 
+describe("profile.dataset: the switch is read when the job runs", () => {
+  it("writes nothing for a job queued while ON and run after the switch went OFF (retry included)", async () => {
+    arrive(
+      "sales",
+      "주문표",
+      csvVersion([
+        ["a", "b"],
+        ["1", "2"],
+      ]),
+    );
+    setAnalyticalProfile(db, false, T0);
+    expect((await runNext()).status).toBe("succeeded");
+    expect(items()).toEqual([]);
+    expect(columns()).toEqual([]);
+    expect(tables()).toEqual([]);
+    // switched ON again, the same version profiles when it is queued again
+    setAnalyticalProfile(db, true, T0);
+    db.run("DELETE FROM jobs");
+    expect(registerDatasetProfileJob(db, { sourceId: 1, version: 1, at: T0 })).toBe(true);
+    await runNext();
+    expect(tables()).toHaveLength(1);
+  });
+});
+
 describe("profile.dataset: size", () => {
   it("runs on a table far over the extraction's 20,000 code points", async () => {
     const rows: string[][] = [["id", "value"]];

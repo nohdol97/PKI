@@ -16,6 +16,7 @@ import {
   insertItem,
   listOntologyElements,
   readAnalyticalMaxCells,
+  readAnalyticalProfile,
   readSourceVersion,
   saveDatasetTable,
   saveFact,
@@ -68,6 +69,9 @@ export function createDatasetProfileHandler(options: DatasetProfileOptions) {
     if (versionId === undefined || !stored) {
       return { status: "fail", code: "missing-version", retryable: false };
     }
+    // The switch is read now, not when the job was queued: a job left over from before the switch went OFF
+    // (or a retry) writes nothing (dark launch, S03-R6)
+    if (!readAnalyticalProfile(db)) return { status: "succeeded", items: [] };
     const own: LineageRef = { sourceId: sourceId as number, version: fenceVersion as number };
     const read = source.read(db, own, { maxCells: readAnalyticalMaxCells(db) });
     if (read === null) return { status: "succeeded", items: [] };

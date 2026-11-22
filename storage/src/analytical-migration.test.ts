@@ -277,6 +277,33 @@ describe("ontology.analytical-seeds: the migration", () => {
   });
 });
 
+describe("ontology.analytical-seeds: the migration is atomic", () => {
+  it("a failure inside v24 leaves schema v23 as it was: no table, no seed row, the gate and revision intact", () => {
+    const before = {
+      rows: rows(),
+      revision: readKnowledgeRevision(db),
+      gate: db.all("SELECT sql FROM sqlite_master WHERE name = 'ontology_elements_lifecycle_gate'"),
+    };
+    // a row that makes the widening step fail after the tables, the seeds and the gate drop were done
+    db.exec(`CREATE TRIGGER boom BEFORE UPDATE ON ontology_elements
+      BEGIN SELECT RAISE(ABORT, 'injected'); END`);
+    expect(() => upgrade()).toThrow(/injected/);
+    expect(schemaVersion(db)).toBe(S02_SCHEMA);
+    expect(
+      db.all("SELECT 1 FROM sqlite_master WHERE name IN ('dataset_tables', 'analytical_checks')"),
+    ).toEqual([]);
+    expect(rows()).toEqual(before.rows);
+    expect(readKnowledgeRevision(db)).toBe(before.revision);
+    expect(
+      db.all("SELECT sql FROM sqlite_master WHERE name = 'ontology_elements_lifecycle_gate'"),
+    ).toEqual(before.gate);
+    // and without the fault the migration then applies
+    db.exec("DROP TRIGGER boom");
+    upgrade();
+    expect(schemaVersion(db)).toBe(MIGRATION_SCHEMA);
+  });
+});
+
 describe("the two tables of S03-R1", () => {
   beforeEach(upgrade);
   const columns = (table: string) =>

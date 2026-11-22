@@ -6,6 +6,7 @@ import {
   addEvidence,
   canonicalTransaction,
   closeJob,
+  setAnalyticalProfile,
   DATASET_PROFILE_KIND,
   findSourceId,
   identityKey,
@@ -230,6 +231,7 @@ describe("purge.canary-files: a table source's profile (S03-R17)", () => {
 
   /** One workbook of one sheet, profiled: its Dataset, columns and `dataset_tables` row are written. */
   async function seedTable(): Promise<number> {
+    setAnalyticalProfile(db, true, new Date(AT)); // the job reads the switch when it runs
     const cell = (text: string, row: number, column: number, start: number) => ({
       start,
       end: start + text.length,
