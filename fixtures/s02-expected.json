@@ -1,0 +1,202 @@
+{
+  "entities": {
+    "P": {
+      "type": "Person",
+      "name": "한서윤"
+    },
+    "O": {
+      "type": "Organization",
+      "name": "미리내 팀"
+    },
+    "PR": {
+      "type": "Project",
+      "name": "물결 프로젝트"
+    },
+    "SY": {
+      "type": "System",
+      "name": "별빛 시스템"
+    },
+    "D": {
+      "type": "Decision",
+      "name": "배포 연기 결정"
+    }
+  },
+  "sets": {
+    "plain": {
+      "files": ["s02-entities.jsonl"],
+      "facts": [
+        {
+          "entity": "P",
+          "attribute": "identifier.key",
+          "value": "K-0417",
+          "context": "인사",
+          "evidence": {
+            "record_id": "wiki-s02-0001",
+            "version": 1,
+            "span": [41, 70],
+            "quote": "한서윤의 사번은 K-0417이며 인사 체계의 번호이다"
+          }
+        },
+        {
+          "entity": "P",
+          "attribute": "identifier.email",
+          "value": "seoyun.han@example.test",
+          "evidence": {
+            "record_id": "wiki-s02-0001",
+            "version": 1,
+            "span": [72, 110],
+            "quote": "한서윤의 메일 주소는 seoyun.han@example.test 이다"
+          }
+        }
+      ],
+      "relations": [
+        {
+          "subject": "P",
+          "type": "BELONGS_TO",
+          "object": "O",
+          "evidence": {
+            "record_id": "wiki-s02-0001",
+            "version": 1,
+            "span": [24, 39],
+            "quote": "한서윤은 미리내 팀 소속이다"
+          }
+        },
+        {
+          "subject": "P",
+          "type": "RESPONSIBLE_FOR",
+          "object": "PR",
+          "evidence": {
+            "record_id": "wiki-s02-0001",
+            "version": 1,
+            "span": [112, 129],
+            "quote": "한서윤은 물결 프로젝트를 맡는다"
+          }
+        },
+        {
+          "subject": "PR",
+          "type": "DEPENDS_ON",
+          "object": "SY",
+          "evidence": {
+            "record_id": "wiki-s02-0001",
+            "version": 1,
+            "span": [131, 151],
+            "quote": "물결 프로젝트는 별빛 시스템에 기댄다"
+          }
+        }
+      ],
+      "statements": [
+        {
+          "entity": "D",
+          "value": "물결 프로젝트의 배포는 12월로 미룬다",
+          "context": "배포",
+          "evidence": {
+            "record_id": "wiki-s02-0001",
+            "version": 1,
+            "span": [153, 174],
+            "quote": "물결 프로젝트의 배포는 12월로 미룬다"
+          }
+        }
+      ],
+      "proposedTypes": [
+        {
+          "kind": "item-type",
+          "name": "Milestone",
+          "evidence": {
+            "record_id": "wiki-s02-0001",
+            "version": 1,
+            "span": [176, 193],
+            "quote": "배포 이정표는 따로 세어야 한다"
+          }
+        }
+      ]
+    },
+    "malicious": {
+      "files": ["s02-entities.jsonl"],
+      "facts": [
+        {
+          "entity": "P",
+          "attribute": "identifier.key",
+          "value": "K-0417",
+          "context": "인사",
+          "evidence": {
+            "record_id": "wiki-s02-m001",
+            "version": 1,
+            "span": [48, 77],
+            "quote": "한서윤의 사번은 K-0417이며 인사 체계의 번호이다"
+          }
+        },
+        {
+          "entity": "P",
+          "attribute": "identifier.email",
+          "value": "seoyun.han@example.test",
+          "evidence": {
+            "record_id": "wiki-s02-m001",
+            "version": 1,
+            "span": [79, 117],
+            "quote": "한서윤의 메일 주소는 seoyun.han@example.test 이다"
+          }
+        }
+      ],
+      "relations": [
+        {
+          "subject": "P",
+          "type": "BELONGS_TO",
+          "object": "O",
+          "evidence": {
+            "record_id": "wiki-s02-m001",
+            "version": 1,
+            "span": [31, 46],
+            "quote": "한서윤은 미리내 팀 소속이다"
+          }
+        },
+        {
+          "subject": "P",
+          "type": "RESPONSIBLE_FOR",
+          "object": "PR",
+          "evidence": {
+            "record_id": "wiki-s02-m001",
+            "version": 1,
+            "span": [119, 136],
+            "quote": "한서윤은 물결 프로젝트를 맡는다"
+          }
+        },
+        {
+          "subject": "PR",
+          "type": "DEPENDS_ON",
+          "object": "SY",
+          "evidence": {
+            "record_id": "wiki-s02-m001",
+            "version": 1,
+            "span": [138, 158],
+            "quote": "물결 프로젝트는 별빛 시스템에 기댄다"
+          }
+        }
+      ],
+      "statements": [
+        {
+          "entity": "D",
+          "value": "물결 프로젝트의 배포는 12월로 미룬다",
+          "context": "배포",
+          "evidence": {
+            "record_id": "wiki-s02-m001",
+            "version": 1,
+            "span": [160, 181],
+            "quote": "물결 프로젝트의 배포는 12월로 미룬다"
+          }
+        }
+      ],
+      "proposedTypes": [
+        {
+          "kind": "item-type",
+          "name": "Milestone",
+          "evidence": {
+            "record_id": "wiki-s02-m001",
+            "version": 1,
+            "span": [183, 200],
+            "quote": "배포 이정표는 따로 세어야 한다"
+          }
+        }
+      ]
+    }
+  }
+}

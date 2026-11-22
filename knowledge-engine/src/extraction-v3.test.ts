@@ -183,7 +183,7 @@ const ref = (id: number): EntryRef => ({ kind: "fact", id });
 const exact = (n: number, unit: string) => `긴 정의 ${unit.repeat(n - 5)}`;
 
 describe("extract.v3: one call, and what the handler drops", () => {
-  it("asks schema version 3 in one call and writes an item, its forms and its definitions", async () => {
+  it("asks schema version 4 in one call and writes an item, its forms and its definitions", async () => {
     const job = await extract(
       BODY,
       answer({
@@ -196,7 +196,7 @@ describe("extract.v3: one call, and what the handler drops", () => {
       }),
     );
     expect(provider.requests).toHaveLength(1);
-    expect(provider.requests[0]?.schemaVersion).toBe(3);
+    expect(provider.requests[0]?.schemaVersion).toBe(4);
     expect(items()).toEqual([{ id: 1, type: "Concept", name: "미리내 용어" }]);
     expect(
       facts().map((f) => [f.kind, f.value, f.status, f.epistemic, f.confidence, f.context]),
