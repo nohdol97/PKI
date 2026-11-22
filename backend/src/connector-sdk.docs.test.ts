@@ -42,6 +42,7 @@ import {
   type SiteRegistration,
   type SiteRegistrationCode,
 } from "./site-registration.ts";
+import type { ScopeGrading } from "@pki/providers";
 import type { SqlDriver } from "@pki/storage";
 
 const repo = resolve(import.meta.dirname, "../..");
@@ -470,7 +471,7 @@ describe("docs.connector-sdk (I05): chapter 7's check-code table equals what the
         scopeGrading: {
           grade: () => "nope",
           strictest: () => "nope",
-        } as unknown as SiteRegistration["scopeGrading"],
+        } as unknown as ScopeGrading,
       },
     },
   ];

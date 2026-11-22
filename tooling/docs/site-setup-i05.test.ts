@@ -134,6 +134,7 @@ describe("docs.site-setup (I05)", () => {
       "`pnpm install`, `pnpm lint && pnpm typecheck && pnpm test`, `pnpm --filter @pki-site/composition site-check <종류>`를 실행한다.",
       "`tsconfig.json`은 예시를 그대로 복사하지 않는다",
       "공용 변경을 한 번 받아 오고 `git status --porcelain`으로 `site/` 밖에서 달라지거나 충돌한 추적 파일을 센다.",
+      "`site-check`가 등록한 종류마다 `미구현`이나 `unsupported-sdk-version`이 아닌 결과(`<종류>: ok`, 또는 빈 설정으로는 초기화할 수 없는 수집기가 내는 자기 설정 오류의 문구)를 알리고,",
       "공용 테스트 파일을 고치지 않은 채 통과하고, 공용 변경을 받아 온 뒤 `site/` 밖의 충돌이 `pnpm-lock.yaml` 하나뿐이다",
       "`pnpm-workspace.yaml`의 `allowBuilds`에 더한 `false` 줄도 함께 기록한다",
       "`pnpm-lock.yaml`이 충돌하면 공용 쪽 내용을 취하고 `pnpm install`을 다시 실행한다.",

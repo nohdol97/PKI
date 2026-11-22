@@ -592,6 +592,10 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
       ].join("\n"),
     );
     expect(seven).toContain("**문서의 절차이고 빌드가 강제하지 않는다.**");
+    // the check initializes with an empty config, so a collector that needs one ends 1 with its own message
+    expect(seven).toContain("`site-check`는 **빈 설정(`{}`)으로** 초기화한다.");
+    expect(seven).toContain("설정을 요구하는 수집기는 자기 설정 오류의 문구로 실패하고 1로 끝난다");
+    expect(read("backend/src/connectors.ts")).toContain("await initializeConnector(create(), {});");
     expect(JSON.parse(read(`${exampleDir}/package.json`)).scripts["site-check"]).toBe("node src/site-check.ts");
     expect(JSON.parse(read("apps/desktop/package.json")).scripts.build).toBeDefined();
   });
