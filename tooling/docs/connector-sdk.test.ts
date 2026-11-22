@@ -294,15 +294,15 @@ describe("docs.connector-sdk: what the text names exists in the code", () => {
 });
 
 describe("docs.connector-sdk: what the text says is not built stays unbuilt", () => {
-  // A stale-sentence detector, not a safety guard: it catches the usual shapes of a loader (the
-  // folder named whole, or both path segments as separate strings, near a directory read or a
-  // dynamic import in one file). A loader that builds the path some other way escapes it.
-  const readsSiteConnectors = (text: string) =>
-    (text.includes("site/connectors") ||
-      (/["'`]site["'`]/.test(text) && /["'`]connectors["'`]/.test(text))) &&
+  // A stale-sentence detector, not a safety guard (I05-R18, C16): it catches the usual shapes of a loader of
+  // anything under `site/` (the path named whole, or a quoted segment `"site"` as a separate string, near a
+  // directory read, a glob or a dynamic import in one file). A loader that builds the path some other way
+  // escapes it. A fixed path whose existence is checked or whose JSON is read is not a loader.
+  const readsSite = (text: string) =>
+    (/["'`][^"'`\n]*\bsite\/[^"'`\n]*["'`]/.test(text) || /["'`]site["'`]/.test(text)) &&
     /readdir|glob|import\(|require\(/.test(text);
 
-  it("no product code LOADS collectors from site/connectors: no reader of that folder (chapters 7 and 11 say so)", () => {
+  it("no product code LOADS anything from site/: no reader of that folder (chapters 7 and 11 say so)", () => {
     const roots = [
       "backend/src",
       "apps/desktop/src",
@@ -316,7 +316,7 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
         const path = `${dir}/${entry.name}`;
         if (entry.isDirectory()) walk(path);
         else if (/\.tsx?$/.test(entry.name) && !/\.test(-support)?\.tsx?$/.test(entry.name)) {
-          if (readsSiteConnectors(read(path))) hits.push(path);
+          if (readsSite(read(path))) hits.push(path);
         }
       }
     };
@@ -325,11 +325,25 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
   });
 
   it("the loader detector catches the folder named whole and built from parts, not a plain mention", () => {
-    expect(readsSiteConnectors('readdirSync("site/connectors")')).toBe(true);
-    expect(readsSiteConnectors('readdirSync(join(root, "site", "connectors"))')).toBe(true);
-    expect(readsSiteConnectors("await import(`${root}/site/connectors/x.ts`)")).toBe(true);
-    expect(readsSiteConnectors('import { x } from "../../site/connectors/x.ts";')).toBe(false);
-    expect(readsSiteConnectors('readdirSync(join(root, "docs"))')).toBe(false);
+    // positive: under site/ in general, not only site/connectors
+    expect(readsSite('readdirSync("site/connectors")')).toBe(true);
+    expect(readsSite('readdirSync("site")')).toBe(true);
+    expect(readsSite('readdirSync(join(root, "site/composition"))')).toBe(true);
+    expect(readsSite('readdirSync(join(root, "site", "connectors"))')).toBe(true);
+    expect(readsSite('await import(join(root, "site", "composition", "src", "registration.ts"))')).toBe(true);
+    expect(readsSite("await import(`${root}/site/connectors/x.ts`)")).toBe(true);
+    expect(readsSite('const files = glob("site/**/*.ts");')).toBe(true);
+    expect(readsSite('const m = require("../../site/composition/src/registration.ts");')).toBe(true);
+    // negative: a static import, and the two fixed-path shapes the product has (backendEntry, site-check)
+    expect(readsSite('import { x } from "../../site/connectors/x.ts";')).toBe(false);
+    expect(readsSite('readdirSync(join(root, "docs"))')).toBe(false);
+    expect(readsSite('if (!existsSync(join(root, "site/composition/package.json"))) return undefined;')).toBe(false);
+    expect(
+      readsSite('JSON.parse(readFileSync(join(root, "site/composition/package.json"), "utf8")).name'),
+    ).toBe(false);
+    expect(readsSite(read("apps/desktop/src/backend-entry.ts"))).toBe(false);
+    expect(readsSite(read("backend/src/site-check-main.ts"))).toBe(false);
+    expect(readsSite(read("backend/src/connector-scopes.ts"))).toBe(false);
   });
 
   it("the product registers no jsonl-import kind: a file instance cannot be configured (chapters 9 and 11)", () => {

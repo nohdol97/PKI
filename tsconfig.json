@@ -11,6 +11,7 @@
     { "path": "packages/connector-sdk" },
     { "path": "packages/contracts" },
     { "path": "packages/document-normalize" },
+    { "path": "packages/site-example" },
     { "path": "packages/testkit" },
     { "path": "tooling" }
   ]

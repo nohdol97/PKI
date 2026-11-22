@@ -12,7 +12,7 @@ import {
   type RouteName,
 } from "@pki/contracts";
 import { OPENAI_BASE_URL_SETTING, writeDefaultProvider } from "@pki/providers";
-import { migrate } from "@pki/storage";
+import { migrate, userDecisions } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -132,6 +132,10 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     enableSchedule: { id: 999_999 },
     runSchedule: { id: 999_999 },
     rebuildProjection: { projection: "engine" },
+    // the registry's fact 1 is a seeded candidate: a dispute is no user transition of it (a refusal code, nothing written), an undo has no user action to cancel
+    semanticHistory: { kind: "fact", id: 1 },
+    semanticDecide: { kind: "fact", id: 1, action: "dispute" },
+    semanticUndo: { kind: "fact", id: 1 },
   };
 
   beforeAll(async () => {
@@ -179,6 +183,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
         providers: [new FakeProvider({ id: "claude-code", transport: "cli" })],
       }),
       ...adapters,
+      decisions: userDecisions,
       importer: productImporter(db, { runner, projections }),
       instanceImporter: productInstanceImporter(db, { runner, projections }),
       jobs: {

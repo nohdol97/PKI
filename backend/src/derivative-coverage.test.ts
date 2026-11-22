@@ -77,10 +77,51 @@ describe("derivatives.schema-coverage", () => {
     });
     // each stands or falls with its classification: unclassified, the check names it
     const rest = Object.fromEntries(
-      Object.entries(TABLE_CLASSIFICATION).filter(([name]) => !name.endsWith("_history")),
+      Object.entries(TABLE_CLASSIFICATION).filter(
+        ([name]) => !name.endsWith("_history") || name.startsWith("ontology_"),
+      ),
     );
     const problems = checkTableCoverage(db, registry, rest);
     expect(problems.filter((p) => p.includes("is not classified"))).toHaveLength(3);
+    db.close();
+  });
+
+  it("classifies the three tables S01-T06 adds under the new kind `ontology`: seven new tables in all", () => {
+    const db = freshDb();
+    expect(checkTableCoverage(db, registry)).toEqual([]);
+    const added = [
+      "item_history",
+      "fact_history",
+      "relation_history",
+      "insight_user_inputs",
+      "ontology_elements",
+      "ontology_basis",
+      "ontology_history",
+    ];
+    expect(added).toHaveLength(7);
+    expect(Object.fromEntries(added.slice(4).map((t) => [t, TABLE_CLASSIFICATION[t]]))).toEqual({
+      ontology_elements: { class: "kind", kind: "ontology" },
+      ontology_basis: { class: "kind", kind: "ontology" },
+      ontology_history: { class: "kind", kind: "ontology" },
+    });
+    for (const t of added) {
+      expect(
+        db.all("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?", [t]),
+        t,
+      ).toHaveLength(1);
+    }
+    // the kind is registered, and without it the three tables fail the check
+    expect(registry.kinds.map((k) => k.kind)).toContain("ontology");
+    const problems = checkTableCoverage(db, without("ontology"));
+    expect(problems).toHaveLength(3);
+    expect(problems.every((p) => p.includes('kind "ontology"'))).toBe(true);
+    // unclassified, each is named
+    const rest = Object.fromEntries(
+      Object.entries(TABLE_CLASSIFICATION).filter(([name]) => !name.startsWith("ontology_")),
+    );
+    expect(
+      checkTableCoverage(db, registry, rest).filter((p) => p.includes("is not classified")),
+    ).toHaveLength(3);
     db.close();
   });
 

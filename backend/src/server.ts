@@ -21,6 +21,7 @@ import {
   type RouteName,
   type RouteRequest,
   type RouteResponse,
+  type SemanticKind,
   type SecretSource,
   type VectorIndex,
 } from "@pki/contracts";
@@ -54,11 +55,15 @@ import {
   listInvalidations,
   listProviderCalls,
   LEGACY_CLEANUP_SETTING,
+  readSemanticHistory,
+  readSemanticState,
   readSetting,
   schemaVersion,
   writeSetting,
   type DerivativeRegistry,
+  type Outcome,
   type SqlDriver,
+  type UserDecisions,
 } from "@pki/storage";
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -154,6 +159,12 @@ export interface ServerOptions {
    * rows and every action answers `unavailable`.
    */
   jobs?: JobsPort;
+  /**
+   * The user's entry to the Semantic registry (composition.ts `productUserDecisions`): the one place
+   * a status or epistemic type is set by the user's hand (S01-R7). Only this API layer holds it; without
+   * it the approve, reject, dispute and undo routes answer `not-found`.
+   */
+  decisions?: UserDecisions;
   /** Milliseconds now, for the Provider check's reuse window (tests); default Date.now. */
   now?: () => number;
 }
@@ -533,6 +544,33 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
   };
   const checks = providerChecks(options.now ?? Date.now);
   const jobs = jobsApi(options.db, options.jobs);
+  /**
+   * One user action on a registry row, in one transaction with the visibility check: a row that is
+   * absent, deleted or hidden answers `not-found` (the same, so nothing of a hidden row shows); a
+   * refusal of the gate is a code in a 200 body.
+   */
+  const semanticAction = (
+    ref: { kind: SemanticKind; id: number },
+    act: (decisions: UserDecisions, at: string) => Outcome,
+  ): RouteResponse<"semanticDecide"> | { error: ErrorResponse["error"] } => {
+    const { decisions } = options;
+    if (!decisions) return { error: "not-found" };
+    return options.db.transaction(() => {
+      if (!gate.semanticShown(ref.kind, ref.id)) return { error: "not-found" as const };
+      const outcome = act(decisions, new Date(options.now?.() ?? Date.now()).toISOString());
+      if (outcome.status === "refused") {
+        return outcome.reason === "not-found"
+          ? { error: "not-found" as const }
+          : { status: "refused" as const, reason: outcome.reason };
+      }
+      const now = readSemanticState(options.db, ref);
+      if (!now) return { error: "not-found" as const };
+      const entry = { ...ref, status: now.status, epistemic: now.epistemic };
+      return outcome.status === "applied"
+        ? { status: "applied" as const, seq: outcome.seq, entry }
+        : { status: "unchanged" as const, entry };
+    });
+  };
   return {
     status: async () => ({
       backend: { state: "ready" },
@@ -681,6 +719,16 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       gate.insightEvidence(insightId) ?? { error: "not-found" },
     evidenceSource: async ({ evidenceId }) =>
       gate.evidenceSource(evidenceId) ?? { error: "not-found" },
+    // S01-R23: the registry's rows behind the read gate; the user's actions through the one entry
+    semantic: async () => gate.semantic(),
+    semanticHistory: async (ref) =>
+      gate.semanticShown(ref.kind, ref.id)
+        ? { lines: readSemanticHistory(options.db, ref) }
+        : { error: "not-found" },
+    semanticDecide: async ({ action, ...ref }) =>
+      semanticAction(ref, (decisions, at) => decisions.decide(options.db, ref, action, at)),
+    semanticUndo: async (ref) =>
+      semanticAction(ref, (decisions, at) => decisions.undo(options.db, ref, at)),
   };
 }
 

@@ -200,4 +200,22 @@ describe("sync v2 contract (I01-R19, R21, T03)", () => {
     expect(parse({ ...base, deletionsMayBeMissed: true })).toBe(true);
     expect(parse({ ...base, deletionsMayBeMissed: "yes" })).toBe(false);
   });
+  // S01-T02: one object (a contract schema must convert to a JSON Schema object), the shape checked by a refinement
+  it("accepts a Semantic outcome only in the shape of its status", () => {
+    const entry = { kind: "fact", id: 1, status: "verified", epistemic: "user-approved" };
+    const outcome = routes.semanticDecide.response;
+    expect(outcome.safeParse({ status: "applied", seq: 2, entry }).success).toBe(true);
+    expect(outcome.safeParse({ status: "unchanged", entry }).success).toBe(true);
+    expect(outcome.safeParse({ status: "refused", reason: "not-latest" }).success).toBe(true);
+    for (const wrong of [
+      { status: "applied", entry },
+      { status: "applied", seq: 2, entry, reason: "not-latest" },
+      { status: "unchanged", seq: 2, entry },
+      { status: "refused" },
+      { status: "refused", reason: "not-latest", entry },
+      { status: "refused", reason: "a text, not a code" },
+    ]) {
+      expect(outcome.safeParse(wrong).success, JSON.stringify(wrong)).toBe(false);
+    }
+  });
 });

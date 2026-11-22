@@ -6,8 +6,12 @@
 //
 // `automatedLifecycle` is what extraction, propagation and policy code may call (exported from the
 // package index). `applyTransition` takes any actor, the user's included, and is what the user
-// actions of S01-T02 are built on; it is not exported from the index. The transaction is the
-// caller's (commitDerived's write, the propagation), never opened here.
+// actions of `semantic-user.ts` are built on; it is not exported from the index. The transaction is
+// the caller's (commitDerived's write, the propagation), never opened here.
+//
+// The protection of the rows the user decided (S01-R12) is in `applyTransition` and the automated
+// entries, ahead of every same-state shortcut: an automated call on such a row is refused with
+// `user-override` and writes nothing, except the few the rule names.
 //
 // A history line holds numbers and codes only, never a name, value or quote (R6).
 import { listEvidence, type EpistemicType, type KnowledgeStatus } from "./knowledge.ts";
@@ -105,12 +109,12 @@ export const TRANSITIONS: readonly Transition[] = [
 export const NO_CURRENT_EVIDENCE_APPROVAL = "accepted-without-current-evidence";
 const EVIDENCE_LOST = "no-current-evidence";
 
-interface Row {
+export interface Row {
   status: KnowledgeStatus;
   epistemic: EpistemicType;
 }
 
-function readRow(tx: SqlDriver, ref: EntryRef): Row | undefined {
+export function readRow(tx: SqlDriver, ref: EntryRef): Row | undefined {
   const row = tx.all(`SELECT status, epistemic FROM ${TABLES[ref.kind].table} WHERE id = ?`, [
     ref.id,
   ])[0];
@@ -119,7 +123,7 @@ function readRow(tx: SqlDriver, ref: EntryRef): Row | undefined {
     : undefined;
 }
 
-interface Line {
+export interface Line {
   to: Row;
   from: Row | null;
   actor: Actor;
@@ -132,7 +136,7 @@ interface Line {
 }
 
 /** Writes the history line, then the row: the order the schema's gate trigger requires. */
-function write(tx: SqlDriver, ref: EntryRef, line: Line): number {
+export function writeLine(tx: SqlDriver, ref: EntryRef, line: Line): number {
   const { table, history, fk } = TABLES[ref.kind];
   const seq =
     (tx.all(`SELECT coalesce(max(seq), 0) + 1 AS next FROM ${history} WHERE ${fk} = ?`, [ref.id])[0]
@@ -175,11 +179,63 @@ interface TransitionOptions {
 }
 
 /**
- * Moves a row to status `to` by the transition table for `actor`: `unchanged` when it already has
- * that status, `invalid-transition` when the table has no such row for the actor and the kind. A
- * user approval makes the epistemic type `user-approved`; a fact or relation approved with no
- * current evidence carries the reason code `accepted-without-current-evidence` (R7), which the
- * propagation and the rule (R12, R15) read. The user's guards of R12 belong to S01-T02.
+ * What a user action line is: the actions the user takes (S01-R7). A test seed's line is not one.
+ * T03 adds the direct add's creation line (`created` by the user) here.
+ */
+const USER_ACTIONS: ReadonlySet<string> = new Set(["approve", "reject", "dispute", "replace"]);
+export const isUserAction = (l: StoredLine) => l.actor === "user" && USER_ACTIONS.has(l.action);
+
+/**
+ * The user actions on a row that no undo cancelled, oldest first (S01 "사용자가 정한 행"). An undo
+ * line names the line it reverted; undoing is only possible on the newest line, so a cancelled
+ * action is always followed directly by its undo.
+ */
+function standingUserActions(lines: readonly StoredLine[]): StoredLine[] {
+  const cancelled = new Set(lines.filter((l) => l.action === "undo").map((l) => l.revertsSeq));
+  return lines.filter((l) => isUserAction(l) && !cancelled.has(l.seq));
+}
+
+/** Whether the row carries a user action no undo cancelled: automated code may touch it only as R12 lists. */
+export const isUserDecided = (tx: SqlDriver, ref: EntryRef): boolean =>
+  standingUserActions(linesOf(tx, ref)).length > 0;
+
+const userAuthored = (tx: SqlDriver, ref: EntryRef): boolean =>
+  tx.all(`SELECT user_authored FROM ${TABLES[ref.kind].table} WHERE id = ?`, [ref.id])[0]
+    ?.user_authored === 1;
+
+/**
+ * The refusal an automated call on a row gets when the user decided it (S01-R12), undefined when it
+ * may go on. Two calls pass here: the propagation's supersede and a policy's dispute (whose basis
+ * the caller checks). The restore (`evidenceReturned`) does not come through here: it reads the
+ * history itself. The supersede is skipped for a row the user wrote and for a row the user approved
+ * with no current evidence while that approval is the last standing user action (R12 1).
+ */
+function automatedRefusal(
+  tx: SqlDriver,
+  ref: EntryRef,
+  actor: Actor,
+  to: KnowledgeStatus,
+): Outcome | undefined {
+  const standing = standingUserActions(linesOf(tx, ref));
+  const written = userAuthored(tx, ref);
+  if (standing.length === 0 && !written) return undefined;
+  const refused: Outcome = { status: "refused", reason: "user-override" };
+  if (actor === "policy" && to === "disputed") return undefined;
+  if (actor !== "propagation" || to !== "superseded") return refused;
+  const last = standing.at(-1);
+  const acceptedWithoutEvidence =
+    last?.action === "approve" && last.reason === NO_CURRENT_EVIDENCE_APPROVAL;
+  return written || acceptedWithoutEvidence ? refused : undefined;
+}
+
+/**
+ * Moves a row to status `to` by the transition table for `actor`. An automated actor on a row the
+ * user decided is refused first (R12: `user-override`, before the same-state shortcut), then
+ * `unchanged` when the row already has that status, `invalid-transition` when the table has no such
+ * row for the actor and the kind. A policy's dispute needs the source version it rests on. A user
+ * approval makes the epistemic type `user-approved`; a fact or relation approved with no current
+ * evidence carries the reason code `accepted-without-current-evidence` (R7), which the propagation
+ * and the rule (R12, R15) read.
  */
 export function applyTransition(
   tx: SqlDriver,
@@ -188,8 +244,15 @@ export function applyTransition(
   to: KnowledgeStatus,
   options: TransitionOptions = {},
 ): Outcome {
+  if (actor === "policy" && to === "disputed" && !options.basis) {
+    return { status: "refused", reason: "basis-required" };
+  }
   const row = readRow(tx, ref);
   if (!row) return { status: "refused", reason: "not-found" };
+  if (actor !== "user") {
+    const refusal = automatedRefusal(tx, ref, actor, to);
+    if (refusal) return refusal;
+  }
   if (row.status === to) return { status: "unchanged" };
   const found = TRANSITIONS.find(
     (t) => t.from === row.status && t.to === to && t.actor === actor && t.kinds.includes(ref.kind),
@@ -202,7 +265,7 @@ export function applyTransition(
     !listEvidence(tx, ref.kind === "fact" ? { factId: ref.id } : { relationId: ref.id }).some(
       (e) => e.current,
     );
-  const seq = write(tx, ref, {
+  const seq = writeLine(tx, ref, {
     from: row,
     to: { status: to, epistemic: approving ? "user-approved" : row.epistemic },
     actor,
@@ -221,17 +284,18 @@ interface StoredLine {
   seq: number;
   actor: Actor;
   action: string;
+  reason: string | null;
   fromStatus: KnowledgeStatus | null;
   fromEpistemic: EpistemicType | null;
   toStatus: KnowledgeStatus;
   revertsSeq: number | null;
 }
 
-const linesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] => {
+export const linesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] => {
   const { history, fk } = TABLES[ref.kind];
   return tx
     .all(
-      `SELECT seq, actor, action, from_status, from_epistemic, to_status, reverts_seq
+      `SELECT seq, actor, action, reason, from_status, from_epistemic, to_status, reverts_seq
        FROM ${history} WHERE ${fk} = ? ORDER BY seq`,
       [ref.id],
     )
@@ -239,6 +303,7 @@ const linesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] => {
       seq: r.seq as number,
       actor: r.actor as Actor,
       action: r.action as string,
+      reason: r.reason as string | null,
       fromStatus: r.from_status as KnowledgeStatus | null,
       fromEpistemic: r.from_epistemic as EpistemicType | null,
       toStatus: r.to_status as KnowledgeStatus,
@@ -250,12 +315,14 @@ const linesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] => {
  * The line that made the row's current state. A cancellation is read as the line before the
  * action it reverted (R5: the line that made the state it returned to), and so on through
  * cancellations of cancellations. Undefined when no line explains the state (a row from before
- * S01, or one never changed).
+ * S01, or one never changed), "unreadable" for a cancellation that names no line.
  */
-function stateMaker(lines: readonly StoredLine[]): StoredLine | undefined {
+function stateMaker(lines: readonly StoredLine[]): StoredLine | undefined | "unreadable" {
   let line = lines[lines.length - 1];
   while (line?.action === "undo") {
-    const before: number = (line.revertsSeq ?? 1) - 1;
+    // the gate always names the line it reverted; one that does not is no history to restore from
+    if (line.revertsSeq === null) return "unreadable";
+    const before: number = line.revertsSeq - 1;
     line = lines.find((l) => l.seq === before);
   }
   return line;
@@ -268,7 +335,7 @@ export const automatedLifecycle: AutomatedLifecycle = {
   created(tx, ref, actor, basis, at) {
     const row = readRow(tx, ref);
     if (!row) throw new Error(`${ref.kind} ${ref.id} not found`);
-    write(tx, ref, { from: null, to: row, actor, action: "created", basis, at });
+    writeLine(tx, ref, { from: null, to: row, actor, action: "created", basis, at });
   },
 
   supersede: (tx, ref, basis, at) =>
@@ -280,6 +347,7 @@ export const automatedLifecycle: AutomatedLifecycle = {
     if (!row) return { status: "refused", reason: "not-found" };
     if (row.status !== "superseded") return { status: "unchanged" };
     const maker = stateMaker(linesOf(tx, ref));
+    if (maker === "unreadable") return { status: "refused", reason: "invalid-transition" };
     // a row from before S01 has no line: the cautious state is a candidate
     let to: Row = { status: "candidate", epistemic: row.epistemic };
     if (maker) {
@@ -289,7 +357,7 @@ export const automatedLifecycle: AutomatedLifecycle = {
       }
       to = { status: maker.fromStatus, epistemic: maker.fromEpistemic as EpistemicType };
     }
-    const seq = write(tx, ref, {
+    const seq = writeLine(tx, ref, {
       from: row,
       to,
       actor: "extraction",
@@ -305,8 +373,10 @@ export const automatedLifecycle: AutomatedLifecycle = {
     if (!holdsEvidence(ref)) return { status: "refused", reason: "invalid-transition" };
     const row = readRow(tx, ref);
     if (!row) return { status: "refused", reason: "not-found" };
+    // R12: a row the user decided is never raised, and the refusal comes before the shortcut
+    if (isUserDecided(tx, ref)) return { status: "refused", reason: "user-override" };
     if (row.epistemic !== "hypothesis") return { status: "unchanged" };
-    const seq = write(tx, ref, {
+    const seq = writeLine(tx, ref, {
       from: row,
       to: { status: row.status, epistemic: "explicit" },
       actor: "extraction",
@@ -317,8 +387,6 @@ export const automatedLifecycle: AutomatedLifecycle = {
     return { status: "applied", seq };
   },
 
-  raiseDispute(tx, ref, basis, at) {
-    if (!basis) return { status: "refused", reason: "basis-required" };
-    return applyTransition(tx, ref, "policy", "disputed", { basis, at });
-  },
+  raiseDispute: (tx, ref, basis, at) =>
+    applyTransition(tx, ref, "policy", "disputed", { basis, at }),
 };

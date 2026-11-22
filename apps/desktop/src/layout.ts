@@ -6,11 +6,11 @@
 // in place of this module (apps/desktop/build/bundle.ts, V01-T15), which also
 // refuses the debugging switches (debugging.ts).
 import { fileURLToPath } from "node:url";
+import { backendEntry } from "./backend-entry.ts";
 
 export const WEB_ROOT = fileURLToPath(new URL("../../web/dist/", import.meta.url));
-export const BACKEND_ENTRY = fileURLToPath(
-  new URL("../../../backend/src/shell.ts", import.meta.url),
-);
+/** The public entry, or a fork's own where the repository has a composition package (I05-R2). */
+export const BACKEND_ENTRY = backendEntry(fileURLToPath(new URL("../../../", import.meta.url)));
 
 /** Source runs keep the debugging switches: Playwright drives the shell through them. */
 export const REFUSE_DEBUGGING: boolean = false;

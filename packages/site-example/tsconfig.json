@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "outDir": "dist"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../backend" },
+    { "path": "../connector-example" },
+    { "path": "../contracts" },
+    { "path": "../testkit" }
+  ]
+}
