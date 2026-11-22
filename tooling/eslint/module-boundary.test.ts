@@ -692,6 +692,11 @@ describe("module-boundary: fork packages (I05-C4)", () => {
         filename: registration,
       },
       {
+        name: "a ./-prefixed relative specifier of the exact file",
+        code: 'import s from "./../../config/connector-scopes.json" with { type: "json" };',
+        filename: registration,
+      },
+      {
         name: "a type-only import of the exact file",
         code: 'import type s from "../../config/connector-scopes.json" with { type: "json" };',
         filename: registration,
@@ -773,6 +778,16 @@ describe("module-boundary: fork packages (I05-C4)", () => {
       refused(
         "an absolute path naming the same file (the exemption is for relative specifiers)",
         `import s from ${JSON.stringify(at("site/config/connector-scopes.json"))} with { type: "json" };`,
+        registration,
+      ),
+      refused(
+        "a dot-named folder is not a relative specifier (.hidden/../../../config/...)",
+        'import s from ".hidden/../../../config/connector-scopes.json" with { type: "json" };',
+        registration,
+      ),
+      refused(
+        "a dots-named folder is not a relative specifier (.../../../config/...)",
+        'import s from ".../../../config/connector-scopes.json" with { type: "json" };',
         registration,
       ),
       refused(

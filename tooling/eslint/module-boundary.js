@@ -430,7 +430,7 @@ const moduleBoundary = {
         }
         if (
           staticImport &&
-          source.startsWith(".") &&
+          /^\.\.?\//.test(source) &&
           allowedRelative.some(
             (a) => isFileOf(a) && resolved === resolve(/** @type {string} */ (ownRoot), a.target),
           )

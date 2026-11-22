@@ -213,9 +213,12 @@ describe("build.scopes-check: edges of the judgment", () => {
 });
 
 describe("build.scopes-check: the build takes the verdict without swallowing it", () => {
-  it("build.ts calls the judgment step and has no try or catch that could turn its error into a passing build", () => {
+  it("build.ts calls the judgment step as a top-level statement, with nothing that could turn its error into a passing build", () => {
     const build = readFileSync(join(REAL_ROOT, "apps/desktop/build/build.ts"), "utf8");
-    expect(build).toContain("requireConnectorScopes(");
-    expect(build).not.toMatch(/\b(try|catch)\b/);
+    // comments out first: a word in a comment neither trips nor hides the check. build.ts holds none of these
+    // constructs today, so the whole text is judged (a new one for another purpose must be scoped by hand).
+    const code = build.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).toMatch(/^const scopes = requireConnectorScopes\(/m);
+    expect(code).not.toMatch(/\btry\s*\{|\bcatch\s*[({]|\.catch\s*\(|allSettled|\.then\s*\(/);
   });
 });
