@@ -399,9 +399,9 @@ describe("path and identity are two routes; either one saying 'inside' is enough
   });
 
   it("a location whose root cannot be read (an unplugged disk) blocks a new approval as overlapping: its chain is unknown, so fail closed", async () => {
-    const nodes = base();
+    // the stored location's folder (DOCS) is gone
+    const nodes = Object.fromEntries(Object.entries(base()).filter(([path]) => path !== DOCS));
     nodes["/vol/Other"] = { id: [1n, 77n] };
-    delete nodes[DOCS]; // the stored location's folder is gone
     const c = ctx({ fs: stubFs(nodes), rules: "posix", locations: [location] });
     expect((await reject("folder", "/vol/Other", c)).code).toBe("overlaps-location");
   });
