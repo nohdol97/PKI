@@ -213,13 +213,21 @@ export type InitializeOutcome =
 
 /**
  * Initializes a Connector unless it implements another SDK version (I01-R1): that
- * one is never initialized and is unavailable for `unsupported-sdk-version`.
+ * one is never initialized and is unavailable for `unsupported-sdk-version`. So
+ * is one whose manifest cannot be read (missing, or a getter that throws): only
+ * that instance fails, and the thrown text is dropped.
  */
 export async function initializeConnector(
   connector: Connector,
   config: unknown,
 ): Promise<InitializeOutcome> {
-  if (connector.manifest.schemaVersion !== CONNECTOR_SDK_VERSION) {
+  let version: unknown;
+  try {
+    version = connector.manifest.schemaVersion;
+  } catch {
+    version = undefined;
+  }
+  if (version !== CONNECTOR_SDK_VERSION) {
     return { state: "unavailable", reason: "unsupported-sdk-version" };
   }
   try {

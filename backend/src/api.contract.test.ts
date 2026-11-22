@@ -91,7 +91,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     importJsonl: { text: readFileSync(resolve(FIXTURES, "../v02-mail.jsonl"), "utf8") },
     searchSources: { query: "등대" },
     // a record syncConnector stored above, not one the evidence seed below relies on
-    deleteSource: { connectorId: "fixtures", externalId: "fx-001" },
+    deleteSource: { connectorId: "fixtures", namespace: "", externalId: "fx-001" },
     grantConsent: {
       providerId: "codex",
       allowedClasses: ["synthetic"],

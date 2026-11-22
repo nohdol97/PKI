@@ -156,7 +156,9 @@ describe("engine.calls", () => {
     const mail = sourceIdOf(MAIL.externalId);
     const mailVersions = versionIdsOf(MAIL.externalId);
     expect(await related(engine, "윤하람 미리내")).toContain(mail);
-    expect((await post(routes.deleteSource.path, MAIL)).body).toEqual({ outcome: "deleted" });
+    expect((await post(routes.deleteSource.path, { ...MAIL, namespace: "" })).body).toEqual({
+      outcome: "deleted",
+    });
     await projections.drain();
     expect(vi.mocked(engine.removeSource).mock.calls).toEqual([
       [{ sourceId: mail, version: 1 }, { version: 1 }, 4],

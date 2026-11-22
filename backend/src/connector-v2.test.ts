@@ -87,6 +87,39 @@ describe("connector.sdk-version", () => {
     expect(manager.list()).toEqual([{ id: "c", kind: "k", state: "ready" }]);
   });
 
+  // review B-S2: a manifest that cannot be read fails only its own instance, closed
+  it.each([
+    ["missing", () => undefined],
+    [
+      "throwing",
+      () => {
+        throw new Error("SECRET-origin-text");
+      },
+    ],
+  ])("keeps the other instances when one manifest is %s", async (_, manifest) => {
+    const broken = scripted(() => ({ changes: [], nextCursor: "0", hasMore: false }));
+    Object.defineProperty(broken.connector, "manifest", { get: manifest });
+    const good = scripted(() => ({ changes: [], nextCursor: "0", hasMore: false }));
+    const manager = await createConnectorManager(
+      db,
+      [
+        { id: "broken-1", kind: "broken", config: {} },
+        { id: "good-1", kind: "good", config: {} },
+      ],
+      { broken: () => broken.connector, good: () => good.connector },
+    );
+    expect(broken.initialized()).toBe(0);
+    expect(manager.list()).toEqual([
+      { id: "broken-1", kind: "broken", state: "unavailable", reason: "unsupported-sdk-version" },
+      { id: "good-1", kind: "good", state: "ready" },
+    ]);
+    expect(await manager.sync("broken-1")).toEqual({ error: "connector-unavailable" });
+    expect(await manager.sync("good-1")).toMatchObject({ connectorId: "good-1" });
+    const check = await siteCheck("broken", () => broken.connector);
+    expect(check).toEqual({ ok: false, line: "broken: unsupported-sdk-version" });
+    expect(JSON.stringify([manager.list(), check])).not.toContain("SECRET");
+  });
+
   it("shows the reason in site-check, which exits non-zero without initializing", async () => {
     const old = scripted(() => ({ changes: [], nextCursor: "0", hasMore: false }), 1);
     expect(await siteCheck("old", () => old.connector)).toEqual({

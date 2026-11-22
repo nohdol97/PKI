@@ -25,8 +25,8 @@ afterEach(() => {
 describe("listSources", () => {
   it("lists the latest version of each source, newest first", () => {
     expect(listSources(db)).toEqual([
-      { id: 3, connectorId: "c1", externalId: "a", title: "등대 점검 확정" },
-      { id: 2, connectorId: "c1", externalId: "b", title: "Harbor budget" },
+      { id: 3, connectorId: "c1", namespace: "", externalId: "a", title: "등대 점검 확정" },
+      { id: 2, connectorId: "c1", namespace: "", externalId: "b", title: "Harbor budget" },
     ]);
   });
 
@@ -38,11 +38,11 @@ describe("listSources", () => {
 describe("findSources", () => {
   it("returns matching sources by their latest version only", () => {
     expect(findSources(db, "등대")).toEqual([
-      { id: 3, connectorId: "c1", externalId: "a", title: "등대 점검 확정" },
+      { id: 3, connectorId: "c1", namespace: "", externalId: "a", title: "등대 점검 확정" },
     ]);
     expect(findSources(db, "초안")).toEqual([]);
     expect(findSources(db, "pier")).toEqual([
-      { id: 2, connectorId: "c1", externalId: "b", title: "Harbor budget" },
+      { id: 2, connectorId: "c1", namespace: "", externalId: "b", title: "Harbor budget" },
     ]);
   });
 

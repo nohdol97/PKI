@@ -6,7 +6,7 @@ import { matchExpression } from "./keyword-search.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 const COLUMNS =
-  "v.id, s.connector_instance_id AS connectorId, s.external_id AS externalId, v.title";
+  "v.id, s.connector_instance_id AS connectorId, s.namespace, s.external_id AS externalId, v.title";
 const IS_LATEST = "v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id)";
 
 export function listSources(db: SqlDriver, limit = 100): SourceSummary[] {

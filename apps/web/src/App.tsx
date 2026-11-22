@@ -237,14 +237,12 @@ function Sources({ api }: { api: ApiClient }) {
   };
   const remove = (source: SourceSummary) => {
     setConfirming(undefined);
-    api("deleteSource", { connectorId: source.connectorId, externalId: source.externalId }).then(
-      (result) => {
-        setDeleted(deletedText(source.title, result.outcome));
-        setFound(undefined);
-        stored.reload();
-      },
-      fail,
-    );
+    const { connectorId, namespace, externalId } = source;
+    api("deleteSource", { connectorId, namespace, externalId }).then((result) => {
+      setDeleted(deletedText(source.title, result.outcome));
+      setFound(undefined);
+      stored.reload();
+    }, fail);
   };
   const shown = found ?? stored.data?.sources;
 
@@ -320,7 +318,7 @@ function Sources({ api }: { api: ApiClient }) {
               <tr key={s.id}>
                 <td>{s.title}</td>
                 <td>{s.connectorId}</td>
-                <td>{s.externalId}</td>
+                <td>{s.namespace ? `${s.namespace} / ${s.externalId}` : s.externalId}</td>
                 <td>
                   <button
                     type="button"

@@ -29,7 +29,7 @@ V01이 만든 Connector 규격(`schemaVersion` 1)의 원본 레코드는 `extern
 6. **능력 선언**에 `deletionsOnRescan`(재스캔이 그동안의 삭제를 모두 다시 알림)을 더한다. 참이면 `deletes`와 `fullRescan`도 참이어야 한다.
 7. **실패 두 종류**: `ConnectorError`(`retryable`), `ConnectorRateLimitError`(`retryAfterMs`). 관리 모듈은 오류 문구를 옮기지 않고 사유 코드만 남긴다(문구에 원 시스템의 내용이 섞일 수 있다). `ConnectorNotImplementedError`는 그대로다.
 8. **`getDocument`는 `{ namespace, externalId }`를 받는다.**
-9. **정본의 원본 정체는 `connector_instance_id + namespace + external_id`다.** 마이그레이션 v10이 `sources`를 다시 만들어 유일 키를 바꾸고, 이전 원본은 빈 namespace로 옮긴다. namespace에는 기본값을 두지 않는다. 쓰는 쪽이 언제나 이름을 대게 하려는 것이다.
+9. **정본의 원본 정체는 `connector_instance_id + namespace + external_id`다.** 마이그레이션 v12(I04-T01의 v10, I03-T01의 v11 뒤)가 `sources`를 다시 만들어 유일 키를 바꾸고, 이전 원본은 빈 namespace로 옮긴다. namespace에는 기본값을 두지 않는다. 쓰는 쪽이 언제나 이름을 대게 하려는 것이다.
 10. **v1 호환 층은 두지 않는다.** 규격, 그 규격을 쓰는 공용 저장소의 모든 구현(테스트 Connector, JSONL 가져오기, `site-*` 미구현 표시, 테스트 대역), 계약 테스트를 같은 PR에서 옮긴다.
 
 `EvidenceView`(근거 하나를 읽은 모양: version, 코드 포인트 구간, 인용문, locator 또는 null)도 이 규격에 둔다. 값을 채우는 일은 I01-T07이다.
@@ -55,11 +55,15 @@ V01이 만든 Connector 규격(`schemaVersion` 1)의 원본 레코드는 `extern
   5. 다시 시도해도 되는 실패는 `ConnectorError`(`retryable: true`), 요청 한도는 `ConnectorRateLimitError`로 던진다.
   6. 계약 테스트(`@pki/testkit`의 `connectorContract`)를 다시 돌린다. 버전이 2가 아니면 그 테스트가 실패하고, 제품은 그 수집기를 `unsupported-sdk-version`으로 띄우지 않는다.
 - 이 PR에서 정본이 바로 쓰는 것은 정체의 namespace와 레코드의 revision(V02-T04의 `source_versions.revision`)뿐이다. 출처 정보와 block의 저장, revision으로 도착을 가리는 판정, `scope-change`의 저장은 I01-T02가 한다. 그 전까지 `scope-change`를 받으면 그 페이지가 실패하고, tombstone 사건은 V02-T08의 삭제를 그 원본의 최신 제품 version으로 부른다(I01 spec "T01과 T02 사이").
+- 화면의 원본 목록과 삭제 요청도 namespace를 싣는다. 삭제 요청 `{ connectorId, namespace, externalId }`는 namespace가 필수라, 같은 external id가 여러 namespace에 있어도 사용자가 고른 원본 하나만 지운다. 그래서 포크의 수집기가 빈 문자열이 아닌 namespace를 써도 화면에서 지울 수 있다.
+- manifest를 읽을 수 없는 수집기(없음, 던지는 getter)도 `unsupported-sdk-version`으로 그 인스턴스만 멈춘다. 다른 인스턴스는 그대로 돈다.
 - 공용 저장소의 수집기는 인스턴스마다 범위가 하나라서 namespace가 `""`다. JSONL 줄의 `connector_instance_id`를 namespace로 옮기는 일은 가져오기 API와 함께 I01-T05가 한다.
-- 레코드 모양이 바뀌었으므로 이미 저장된 원본은 다시 저장되지 않는다. v10 이전 원본은 빈 namespace를 갖고, 같은 수집기가 같은 정체로 다시 보내면 같은 원본으로 찾힌다.
+- 레코드 모양이 바뀌었으므로 이미 저장된 원본은 다시 저장되지 않는다. v12 이전 원본은 빈 namespace를 갖고, 같은 수집기가 같은 정체로 다시 보내면 같은 원본으로 찾힌다.
 
 ## 변경 이력
 
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-22 | 최초 작성(잠정) | 이 문서 | I01-T01, I01-R1(호환이 깨지는 변경은 ADR에 바뀐 점과 이전 방법을 적는다) |
+| 2026-11-22 | 결과에 화면 목록·삭제 요청의 namespace와 읽을 수 없는 manifest를 더함 | 결과 | I01-T01 검토 A-S1·B-S1·B-S2 |
+| 2026-11-22 | 마이그레이션 번호를 v12로 고침(I04-T01의 v10, I03-T01의 v11이 먼저 머지) | 결정 9, 결과 | origin/main 재기반 |

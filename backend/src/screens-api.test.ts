@@ -84,7 +84,15 @@ describe("screen routes", () => {
   it("lists stored sources", async () => {
     const res = await call(routes.sources.path);
     expect(res.body).toEqual({
-      sources: [{ id: 1, connectorId: "fixtures", externalId: "x1", title: "합성 등대 일지" }],
+      sources: [
+        {
+          id: 1,
+          connectorId: "fixtures",
+          namespace: "",
+          externalId: "x1",
+          title: "합성 등대 일지",
+        },
+      ],
     });
   });
 
@@ -184,7 +192,11 @@ describe("screen routes", () => {
       body: "등대 합성",
     });
     const { path, method } = routes.deleteSource;
-    const res = await call(path, method, { connectorId: "fixtures", externalId: "gone" });
+    const res = await call(path, method, {
+      connectorId: "fixtures",
+      namespace: "",
+      externalId: "gone",
+    });
     expect(res).toMatchObject({ status: 200, body: { outcome: "deleted" } });
     expect(db.all("SELECT reason FROM tombstones")).toEqual([{ reason: "user-deleted" }]);
     expect((await call(routes.sources.path)).body).toEqual({
@@ -193,18 +205,64 @@ describe("screen routes", () => {
     expect((await call(routes.searchSources.path, "POST", { query: "등대" })).body).toEqual({
       sources: [expect.objectContaining({ externalId: "x1" })],
     });
-    const again = await call(path, method, { connectorId: "fixtures", externalId: "gone" });
+    const again = await call(path, method, {
+      connectorId: "fixtures",
+      namespace: "",
+      externalId: "gone",
+    });
     expect(again).toMatchObject({ status: 200, body: { outcome: "already-deleted" } });
   });
 
   it.each([
-    [404, "not-found", { connectorId: "fixtures", externalId: "nope" }],
-    [400, "bad-request", { connectorId: "", externalId: "x1" }],
-    [400, "bad-request", { connectorId: "fixtures", externalId: "x1", extra: 1 }],
+    [404, "not-found", { connectorId: "fixtures", namespace: "", externalId: "nope" }],
+    [404, "not-found", { connectorId: "fixtures", namespace: "other", externalId: "x1" }],
+    // a request naming no namespace is ambiguous once namespaces differ: refused (review B-S1)
+    [400, "bad-request", { connectorId: "fixtures", externalId: "x1" }],
+    [400, "bad-request", { connectorId: "", namespace: "", externalId: "x1" }],
+    [400, "bad-request", { connectorId: "fixtures", namespace: "", externalId: "x1", extra: 1 }],
   ])("answers a delete request with %i %s", async (status, error, body) => {
     const { path, method } = routes.deleteSource;
     const res = await call(path, method, body);
     expect(res.status).toBe(status);
     expect(ErrorResponseSchema.parse(res.body)).toEqual({ error });
+  });
+
+  // I01-R8, review B-S1: one external id in two namespaces is two listed sources,
+  // each deleted by its own identity, the other left as it was.
+  it("lists and deletes each of two sources sharing an external id in different namespaces", async () => {
+    for (const namespace of ["space-a", "space-b"]) {
+      saveSourceRecord(db, "fixtures", {
+        namespace,
+        externalId: "shared",
+        title: `합성 ${namespace}`,
+        body: "공유 합성",
+      });
+    }
+    const listed = async () =>
+      ((await call(routes.sources.path)).body as { sources: Record<string, unknown>[] }).sources
+        .filter((s) => s.externalId === "shared")
+        .map((s) => [s.namespace, s.title]);
+    expect(await listed()).toEqual([
+      ["space-b", "합성 space-b"],
+      ["space-a", "합성 space-a"],
+    ]);
+    const found = (await call(routes.searchSources.path, "POST", { query: "공유" })).body as {
+      sources: { namespace: string }[];
+    };
+    expect(found.sources.map((s) => s.namespace).sort()).toEqual(["space-a", "space-b"]);
+
+    const { path, method } = routes.deleteSource;
+    const del = (namespace: string) =>
+      call(path, method, { connectorId: "fixtures", namespace, externalId: "shared" });
+    expect((await del("")).status).toBe(404);
+    expect((await del("space-b")).body).toEqual({ outcome: "deleted" });
+    expect(await listed()).toEqual([["space-a", "합성 space-a"]]);
+    expect((await del("space-a")).body).toEqual({ outcome: "deleted" });
+    expect(await listed()).toEqual([]);
+    expect(
+      db.all(
+        "SELECT s.namespace FROM tombstones t JOIN sources s ON s.id = t.source_id WHERE s.external_id = 'shared' ORDER BY s.namespace",
+      ),
+    ).toEqual([{ namespace: "space-a" }, { namespace: "space-b" }]);
   });
 });

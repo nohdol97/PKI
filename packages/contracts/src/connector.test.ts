@@ -199,6 +199,25 @@ describe("ChangeSchema (I01-R6)", () => {
     expect(ChangeSchema.safeParse(noNamespace).success).toBe(false);
   });
 
+  // The event time is content-free: only ISO-8601 with a UTC offset (review A-M1).
+  it.each(
+    ["delete", "access-revoked", "scope-change"].flatMap((kind) =>
+      ["x", "2026-11-21T00:00:00", "2026-11-21", "not a time, and not stored", ""].map(
+        (at) => [kind, at] as const,
+      ),
+    ),
+  )("rejects a %s event whose at is %j", (kind, at) => {
+    const change = { kind, ...ref, at, ...(kind === "scope-change" ? { accessScope: ["t"] } : {}) };
+    expect(ChangeSchema.safeParse(change).success).toBe(false);
+  });
+
+  it.each(["2026-11-21T00:00:00Z", "2026-11-21T09:00:00.5+09:00", "2026-11-21T00:00:00-05:30"])(
+    "takes an event at %s",
+    (at) => {
+      expect(ChangeSchema.safeParse({ kind: "delete", ...ref, at }).success).toBe(true);
+    },
+  );
+
   it("rejects a scope change without a scope (losing all access is access-revoked)", () => {
     expect(ChangeSchema.safeParse({ kind: "scope-change", ...ref }).success).toBe(false);
     expect(ChangeSchema.safeParse({ kind: "scope-change", ...ref, accessScope: [] }).success).toBe(
