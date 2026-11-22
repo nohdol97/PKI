@@ -252,9 +252,12 @@ export const PROVIDER_CHECK_REUSE_MS = 60_000;
 /**
  * The Provider checks a server shares (T16 handoff 2): `fresh` runs the two queries,
  * and requests that come while they run share them (one set of processes per
- * Provider); `recent` answers with the last result for PROVIDER_CHECK_REUSE_MS, so
- * Home's status reads, its 1 s polling while a model prepares included, spawn
- * nothing in between. The user's own check refreshes the result.
+ * Provider); `recent` answers a CLI with its last result for PROVIDER_CHECK_REUSE_MS,
+ * so Home's status reads, its 1 s polling while a model prepares included, spawn
+ * nothing in between. An HTTP Provider's check reads settings and key presence only
+ * (no process, no network), so it is always read fresh: an endpoint or key the user
+ * just saved shows at once. The user's own check refreshes the result, and `forget`
+ * (a new default, saved provider settings) drops what is kept.
  */
 function providerChecks(now: () => number) {
   const running = new Map<ProviderId, Promise<ProviderCheck>>();
@@ -270,12 +273,13 @@ function providerChecks(now: () => number) {
     return check;
   };
   const recent = (provider: LLMProvider) => {
+    if (provider.transport !== "cli") return fresh(provider);
     const kept = last.get(provider.id);
     return kept && now() - kept.at < PROVIDER_CHECK_REUSE_MS
       ? Promise.resolve(kept.check)
       : fresh(provider);
   };
-  return { fresh, recent };
+  return { fresh, recent, forget: () => last.clear() };
 }
 
 /**
@@ -491,6 +495,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       }
       writeSetting(options.db, OPENAI_BASE_URL_SETTING, baseUrl);
       writeSetting(options.db, OPENAI_MODEL_SETTING, openaiCompatible.model);
+      checks.forget();
       changed();
       return settings();
     },
@@ -519,6 +524,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     providers: async () => providerList(options),
     setDefaultProvider: async ({ providerId }) => {
       const set = setDefaultProvider(options, providerId);
+      checks.forget();
       if (!("error" in set)) changed(); // jobs held for "no-provider" are judged again
       return set;
     },

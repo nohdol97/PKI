@@ -44,10 +44,12 @@ const TOKEN = "d".repeat(43);
 const ENDPOINT = "https://api.synthetic.example/v1";
 const KEY = openaiKeySecretName("api.synthetic.example");
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
+/** Whether the synthetic key is stored; a test may save it while the server runs. */
+let keyStored = true;
 const keyStore: SecretSource = {
   read: async (n) =>
-    n === KEY ? { state: "present", value: "sk-synthetic" } : { state: "missing" },
-  has: async (n) => (n === KEY ? "present" : "missing"),
+    n === KEY && keyStored ? { state: "present", value: "sk-synthetic" } : { state: "missing" },
+  has: async (n) => (n === KEY && keyStored ? "present" : "missing"),
   deleteOthers: async () => "done",
 };
 
@@ -147,6 +149,7 @@ beforeEach(() => {
   writeSetting(db, DEFAULT_PROVIDER_SETTING, "codex");
   grant("codex");
   fetchCalls = [];
+  keyStored = true;
   vi.stubGlobal(
     "fetch",
     vi.fn((url: unknown) => {
@@ -221,6 +224,8 @@ describe("degraded states (V01-R5)", () => {
     // the product's embedder, its download going through the rejecting fetch
     const { embedder } = productAdapters(join(dir, "data"));
     await start({ embedder });
+    // the first status read runs the default CLI's check; the polls below reuse it
+    expect((await status()).provider.state).toBe("ready");
     const prepared = await post(routes.prepareEmbedding.path, { source: { kind: "download" } });
     expect(prepared.status).toBe(200);
     await expect
@@ -445,5 +450,41 @@ describe("the Provider check behind the status (T16 handoff 2)", () => {
     expect(ran).toBeGreaterThan(0);
     expect((await status()).provider).toMatchObject({ reason: "cli-not-logged-in" });
     expect(queries()).toHaveLength(ran);
+  });
+
+  it("an HTTP default is read fresh: saving its endpoint or key shows at once", async () => {
+    writeSetting(db, DEFAULT_PROVIDER_SETTING, "openai-compatible");
+    await start({ now: () => clock });
+    expect((await status()).provider).toMatchObject({ reason: "destination-unavailable" });
+    const saved = await post(routes.writeSettings.path, {
+      openaiCompatible: { baseUrl: ENDPOINT, model: "synthetic-model" },
+    });
+    expect(saved.status).toBe(200);
+    grant("openai-compatible");
+    expect((await status()).provider).toEqual({ state: "ready", providerId: "openai-compatible" });
+    // a key saved in the shell's store reaches the backend without any API call here
+    keyStored = false;
+    expect((await status()).provider).toMatchObject({ reason: "api-key-missing" });
+    keyStored = true;
+    expect((await status()).provider.state).toBe("ready");
+    expect(fetchCalls).toEqual([]);
+  });
+
+  it("choosing the default again forgets the CLI's kept check", async () => {
+    await start({ now: () => clock });
+    expect((await status()).provider.state).toBe("ready");
+    fake.configure({ auth: "logged-out" });
+    expect((await post(routes.setDefaultProvider.path, { providerId: "codex" })).status).toBe(200);
+    expect((await status()).provider).toMatchObject({ reason: "cli-not-logged-in" });
+  });
+
+  it("saving the provider settings forgets the CLI's kept check too", async () => {
+    await start({ now: () => clock });
+    expect((await status()).provider.state).toBe("ready");
+    fake.configure({ auth: "logged-out" });
+    await post(routes.writeSettings.path, {
+      openaiCompatible: { baseUrl: ENDPOINT, model: "synthetic-model" },
+    });
+    expect((await status()).provider).toMatchObject({ reason: "cli-not-logged-in" });
   });
 });
