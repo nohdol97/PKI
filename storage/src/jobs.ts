@@ -7,9 +7,9 @@
 // raises its lease token), and leaves `running` for the current token only. Only the functions here change a
 // status, and only along JOB_TRANSITIONS. The runner is backend/src/job-runner.ts.
 // A result and a checkpoint are written behind I03-R6's three checks (closeJob,
-// checkpointJob); the fence among them is commitDerived, here in the provisional
-// body I04-T06 replaces.
-import type { CommitDerived, DerivedItem } from "./derivatives.ts";
+// checkpointJob); the fence among them is commitDerived (commit-derived.ts).
+import { commitDerived } from "./commit-derived.ts";
+import type { DerivedItem } from "./derivatives.ts";
 import { assertMaxConcurrent, pickDueJob } from "./job-concurrency.ts";
 import { readChangeSeq } from "./revisions.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
@@ -461,17 +461,6 @@ export function heartbeatJob(
   );
 }
 
-/** The fence holds while the job's version is the source's latest and no tombstone reaches it. */
-export function isFenceCurrent(db: SqlDriver, job: { sourceId: number; fenceVersion: number }) {
-  const row = db.all(
-    `SELECT (SELECT max(version) FROM source_versions WHERE source_id = ?) AS latest,
-            (SELECT covers_version FROM tombstones WHERE source_id = ?) AS tombstone`,
-    [job.sourceId, job.sourceId],
-  )[0];
-  const tombstone = row?.tombstone as number | null;
-  return row?.latest === job.fenceVersion && (tombstone === null || tombstone < job.fenceVersion);
-}
-
 /**
  * How a run leaves `running` (I03-R9, "실행 결과가 가는 곳"). A held job, a yield
  * with progress (`queued`) and a `retry` with `refund` made no outside call: the
@@ -494,43 +483,18 @@ const isLockError = (error: unknown): boolean => {
   return code === "SQLITE_BUSY" || code === "SQLITE_LOCKED";
 };
 
-/**
- * The fence of a result written from a source version (I03-R6 ③, I04-R11), in the
- * provisional body I03-T04 ships: V02's fence alone. A stale source writes
- * nothing. Its cause is `not-latest` when a newer version exists, asked first: a
- * tombstone row below the job's version (a lifted cover, I04-T05) is not why it
- * is stale; else `covered` under a tombstone, else the version is `missing`. A
- * current source, or none, writes every item. I04-T06 replaces this body with
- * assertFresh, assertLineage and combinable; its callers stay as they are.
- */
-export const commitDerived: CommitDerived = (tx, input) => {
-  const { source } = input;
-  if (source && !isFenceCurrent(tx, { sourceId: source.sourceId, fenceVersion: source.version })) {
-    const row = tx.all(
-      `SELECT EXISTS (SELECT 1 FROM source_versions WHERE source_id = ? AND version > ?) AS newer,
-              EXISTS (SELECT 1 FROM tombstones WHERE source_id = ?) AS tombstone`,
-      [source.sourceId, source.version, source.sourceId],
-    )[0];
-    return {
-      status: "stale",
-      cause: row?.newer === 1 ? "not-latest" : row?.tombstone === 1 ? "covered" : "missing",
-    };
-  }
-  for (const item of input.items) item.write(tx);
-  return { status: "committed", written: input.items.length, dropped: [] };
-};
-
 type Lease = Pick<StoredJob, "id" | "leaseToken">;
 
 /**
  * I03-R6's three checks, in their order, inside the caller's immediate
  * transaction: ① the job is running under this lease, else nothing is written
  * ("not-leased"); ② no cancel request, else the job closes cancelled; ③ the fence
- * (commitDerived, which writes `result` once it holds), else the job closes
+ * (commitDerived, which writes `result` once the source and the lineage hold; an
+ * item the scope policy refuses is left out, not stale), else the job closes
  * superseded. Returns the job when all three passed. A lone write function is
- * one derived item of the job's source version (provisional: I04-T06 has handlers
- * hand over their items). A throwing write surfaces as JobWriteError, unless it
- * met a locked file.
+ * one derived item of the job's source version (a job kind that is not an
+ * extraction; an extraction hands over its items). A throwing write surfaces as
+ * JobWriteError, unless it met a locked file.
  */
 function checkedWrite(
   db: SqlDriver,

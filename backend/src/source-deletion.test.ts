@@ -334,7 +334,7 @@ describe("delete.propagate", () => {
     expect([count("items"), count("facts"), count("evidence")]).toEqual([0, 0, 0]);
   });
 
-  it("does not bring back an item deleted between the Provider call and the write (A-W3)", async () => {
+  it("does not bring back an item deleted between the Provider call and the write, and discards the result drawn on it (A-W3, I04-R11)", async () => {
     const hooks: { during?: (request: StructuredRequest) => void } = {};
     const { runner, importer } = pipeline(hooks);
     await importer(read("v02-mail.jsonl"));
@@ -351,17 +351,19 @@ describe("delete.propagate", () => {
     await importer(kVersion(1, CANARY.old, "2026-12-10"));
     await runner.wake();
 
-    // X is not recreated, and its freed id (SQLite reuses the highest rowid) went
-    // to Y, so the relation's stale reference must not have resolved to Y either:
-    // the relation pointed at X and was dropped; Y's fact is K's own and stays
-    expect(db.all("SELECT id, name FROM items")).toEqual([{ id: x?.id, name: Y_NAME }]);
+    // X is not recreated, and its freed id (SQLite reuses the highest rowid) must not
+    // go to Y with the relation's stale reference resolving to it: K's result drew
+    // on the mail through X, whose source is gone, so commitDerived discards all of
+    // it (assertLineage, I04-R11), Y's fact and item included, and the job closes superseded
+    expect(count("items")).toBe(0);
+    expect(count("facts")).toBe(0);
     expect(count("relations")).toBe(0);
-    expect(db.all("SELECT status, dropped_other FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
-      { status: "succeeded", dropped_other: 1 },
+    expect(db.all("SELECT status FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
+      { status: "superseded" },
     ]);
   });
 
-  it("creates no item for a relation dropped because its other end was deleted during the call (B1)", async () => {
+  it("creates no item for a relation whose other end was deleted during the call (B1, I04-R11)", async () => {
     const hooks: { during?: (request: StructuredRequest) => void } = {};
     const { runner, importer } = pipeline(hooks);
     await importer(read("v02-mail.jsonl"));
@@ -374,10 +376,10 @@ describe("delete.propagate", () => {
     await importer(jsonl({ ...K, title: "k", content: `합성. ${ORPHAN_DEPENDS}.` }));
     await runner.wake();
 
-    // X went with the mail, so the relation was dropped and Z was never made
+    // X went with the mail, so the result (a relation on X) is discarded whole and Z was never made
     expect(db.all("SELECT name FROM items")).toEqual([]);
-    expect(db.all("SELECT status, dropped_other FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
-      { status: "succeeded", dropped_other: 1 },
+    expect(db.all("SELECT status FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
+      { status: "superseded" },
     ]);
     deleteSource(db, sourceId("k"), { reason: "user-deleted", at: new Date().toISOString() });
     db.close();

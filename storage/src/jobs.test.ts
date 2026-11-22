@@ -10,12 +10,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
+import { commitDerived } from "./commit-derived.ts";
 import {
   CHECKPOINT_MAX_BYTES,
   checkpointJob,
   closeJob,
   CLOCK_REGRESSION_LEASES,
-  commitDerived,
   DEFAULT_MAX_ATTEMPTS,
   encodeCheckpoint,
   heartbeatJob,
@@ -980,7 +980,7 @@ const running = (): StoredJob => {
 const tombstone = () =>
   writeTombstone(db, { sourceId: 1, version: 1, at: "x", reason: "source-deleted" });
 
-describe("effect.fence-new-version (I03-R6 ③): commitDerived, the provisional body", () => {
+describe("effect.fence-new-version (I03-R6 ③): commitDerived through closeJob", () => {
   const item = (name: string) => ({
     kind: "fact",
     itemKey: name,
