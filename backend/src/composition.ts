@@ -44,6 +44,7 @@ import {
 } from "@pki/providers/adapters";
 import {
   createCanonicalEntries,
+  createDatasetProfileHandler,
   createExtractHandler,
   createProductRegistry,
   createProjections,
@@ -59,6 +60,7 @@ import { createVisibleEngine, NullKnowledgeEngine } from "@pki/knowledge-engine/
 import {
   createCommitScope,
   createUserDecisions,
+  DATASET_PROFILE_KIND,
   dataDirectory,
   defaultScopePolicy,
   ensureDataDirectory,
@@ -447,6 +449,11 @@ export function productRunner(
     },
     handlers: {
       [EXTRACT_JOB_KIND]: handler,
+      // S03-R6: no Provider is called; the version is the job's fence
+      [DATASET_PROFILE_KIND]: createDatasetProfileHandler({
+        db,
+        ...(clock ? { now: () => new Date(clock.now()) } : {}),
+      }),
       [MAINTENANCE_KIND]: createMaintenanceHandler({ db, ...(clock ? { clock } : {}) }),
       ...(options.connectors
         ? {

@@ -52,6 +52,7 @@ import {
   type CanonicalEntries,
 } from "@pki/knowledge-engine";
 import {
+  ANALYTICAL_MAX_CELLS_SETTING,
   databaseEncryption,
   canonicalTransaction,
   LedgerLineUnwritableError,
@@ -62,7 +63,10 @@ import {
   listInvalidations,
   listProviderCalls,
   LEGACY_CLEANUP_SETTING,
+  readAnalyticalMaxCells,
+  readAnalyticalProfile,
   readFact,
+  setAnalyticalProfile,
   checkOntologyChange,
   factValueFit,
   readOntologyHistory,
@@ -274,6 +278,12 @@ async function connectionTest(
     !found.installed || found.authentication === "unauthenticated" || found.problem !== undefined;
   return guide ? { ...answer, providerCheck: found } : answer;
 }
+
+/** The profile's switch and the size limit as stored (S03-R5, R6). */
+const analyticalSettings = (db: SqlDriver) => ({
+  profile: readAnalyticalProfile(db),
+  maxCells: readAnalyticalMaxCells(db),
+});
 
 function providerList(options: ServerOptions): ProviderList {
   const providers = options.calls?.providers ?? [];
@@ -861,6 +871,16 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         writeSetting(options.db, CLI_BACKGROUND_SETTING, cliBackground ? "on" : "off"),
       );
       return { cliBackground: readCliBackground(options.db) };
+    },
+    // S03-R5, R6: the profile's switch (OFF from ON queues nothing, ON queues the tables already stored)
+    analyticalSettings: async () => analyticalSettings(options.db),
+    setAnalyticalSettings: async ({ profile, maxCells }) => {
+      options.db.transaction(() => {
+        writeSetting(options.db, ANALYTICAL_MAX_CELLS_SETTING, String(maxCells));
+        setAnalyticalProfile(options.db, profile, new Date());
+      });
+      options.onRunConditionsChanged?.(); // wakes the runner for the profile jobs the switch queued
+      return analyticalSettings(options.db);
     },
     providers: async () => providerList(options),
     setDefaultProvider: async ({ providerId }) => {

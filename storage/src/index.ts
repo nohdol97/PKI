@@ -148,6 +148,7 @@ export {
   type ProjectionActivity,
 } from "./job-activity.ts";
 export {
+  DATASET_PROFILE_KIND,
   EXTRACT_JOB_KIND,
   PROJECTION_REBUILD_KIND,
   PROJECTION_REMOVE_KIND,
@@ -277,6 +278,19 @@ export {
   type UserDecisions,
   type UserEntry,
 } from "./semantic-user.ts";
+export {
+  ANALYTICAL_MAX_CELLS_SETTING,
+  ANALYTICAL_PROFILE_SETTING,
+  DEFAULT_MAX_CELLS,
+  findDatasetTable,
+  isTabularVersion,
+  readAnalyticalMaxCells,
+  readAnalyticalProfile,
+  registerDatasetProfileJob,
+  saveDatasetTable,
+  setAnalyticalProfile,
+  type DatasetTableRow,
+} from "./analytical.ts";
 export {
   ANALYTICAL_SEED,
   ANALYTICAL_VALUE_TYPES,
