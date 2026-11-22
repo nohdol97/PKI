@@ -15,6 +15,8 @@ export default defineConfig(
       "test-results/**",
       "playwright-report/**",
       "**/dist/**",
+      // scratch input that bundle.test.ts writes and removes while other tests run
+      "apps/desktop/build/.bundle-test-*/**",
     ],
   },
   js.configs.recommended,

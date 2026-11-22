@@ -5,6 +5,8 @@ packages:
   - providers
   - storage
   - packages/*
+  - site/composition
+  - site/connectors/*
 allowBuilds:
   better-sqlite3: false
   # Electron 45 fetches its binary on first use (index.js), not in an install script.

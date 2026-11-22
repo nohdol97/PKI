@@ -4,8 +4,10 @@
 // A package declared only in devDependencies (test code such as @pki/testkit)
 // may be imported only from test files, so it cannot reach production builds (V01-R20).
 // Implementation boundary (V01-T07): adapter implementations live under a
-// package's src/adapters/ and are reached only by the composition root
-// (backend/src/composition.ts), through relative paths in its own package or a
+// package's src/adapters/ and are reached only by a composition point
+// (COMPOSITION_POINTS: the backend's composition root and, for a deployment fork,
+// the registration file of the fork's composition package and of the public
+// example package, I05-R4), through relative paths in its own package or a
 // package's "<name>/adapters" entry. Any other module fails, type-only imports
 // and a public entry re-exporting one included. Test files may reach the
 // implementation they test; product code may not import a test module (it could
@@ -21,6 +23,10 @@
 // parameters constrained to an adapter, and the wrappers in WRAPPERS. Holding or
 // returning a value built elsewhere (`const i: VectorIndex = deps.index`) is
 // allowed, for a function value too (`const f: ConnectorFactory = () => existing`).
+// Deployment fork (I05-R4): a fork's packages are named "@pki-site/…" and are handled like "@pki/…" ones.
+// The direction is fork -> public only: a public package may not import "@pki-site/…". A fork-shaped
+// package reaches the backend by its package name alone, so nothing of backend/src (bootBackend takes
+// unchecked connectors and policies) is reached by a path or a subpath, test files included.
 // Known gaps (not checked):
 // - createRequire(import.meta.url)("...") calls
 // - package.json "imports" subpaths ("#name")
@@ -43,10 +49,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 const SCOPE = "@pki/";
+/** A deployment fork's packages (I05-R4); the letters live here and in tooling/workspace, nowhere in the public packages. */
+const FORK_SCOPE = "@pki-site/";
 /** `*.test-support.ts` is test code too (helpers no product file may import). */
 const TEST_FILE = /\.(test|e2e|test-support)\.tsx?$/;
 const ADAPTERS_DIR = "src/adapters";
-const COMPOSITION_ROOT = { pkg: "@pki/backend", file: "src/composition.ts" };
+/** The files that may pick adapter implementations (this file's header): package name and path in it. */
+const COMPOSITION_POINTS = [
+  { pkg: "@pki/backend", file: "src/composition.ts" },
+  { pkg: "@pki-site/composition", file: "src/registration.ts" },
+  { pkg: "@pki/site-example", file: "src/registration.ts" },
+];
 const TEST_SPECIFIER = /\.(test|e2e|test-support)(\.[cm]?[jt]sx?)?$/;
 /** A package's top-level e2e/ folder holds test code only, whatever the file names. */
 const E2E_DIR = "e2e";
@@ -213,15 +226,17 @@ const moduleBoundary = {
       devOnlyDependency:
         "'{{name}}' is only a devDependency of this package; import it from test files only.",
       adapterImport:
-        "'{{source}}' is an adapter implementation; only the composition root (backend/src/composition.ts) may import it.",
+        "'{{source}}' is an adapter implementation; only a composition point (backend/src/composition.ts, a registration.ts of the fork's composition package or the example) may import it.",
       adapterEntry:
-        "'{{source}}' is an adapter implementation entry; only the composition root (backend/src/composition.ts) may import it.",
+        "'{{source}}' is an adapter implementation entry; only a composition point (backend/src/composition.ts, a registration.ts of the fork's composition package or the example) may import it.",
+      forkImport:
+        "'{{source}}' is a deployment fork package; public packages cannot import it (the direction is fork to public).",
       testModuleImport:
         "'{{source}}' is a test module; product code cannot import it (it may reach adapter implementations).",
       sdkImportNotAllowed:
         "'{{source}}' is not on @pki/connector-sdk's import list (@pki/contracts, zod, node:crypto, node:fs, node:fs/promises, node:path); the SDK is a pure library.",
       adapterOutsideAdapters:
-        "'{{name}}' is implemented outside src/adapters/; adapter implementations live there, behind the composition root.",
+        "'{{name}}' is implemented outside src/adapters/; adapter implementations live there, behind a composition point.",
     },
   },
   create(context) {
@@ -230,8 +245,9 @@ const moduleBoundary = {
     const ownName = JSON.parse(readFileSync(join(ownRoot, "package.json"), "utf8")).name;
     const ownPath = relative(ownRoot, context.filename).split(sep).join("/");
     const isTest = TEST_FILE.test(context.filename) || inE2eDir(context.filename);
-    const isComposition = ownName === COMPOSITION_ROOT.pkg && ownPath === COMPOSITION_ROOT.file;
-    // who may reach an implementation: the root, implementations themselves, tests
+    const isComposition = COMPOSITION_POINTS.some((p) => ownName === p.pkg && ownPath === p.file);
+    const isFork = String(ownName).startsWith(FORK_SCOPE);
+    // who may reach an implementation: a composition point, implementations themselves, tests
     const mayReachAdapters =
       isComposition || isTest || inAdapters(ownPath) || EXEMPT_PACKAGES.has(ownName);
 
@@ -268,7 +284,11 @@ const moduleBoundary = {
         context.report({ node, messageId: "sdkImportNotAllowed", data: { source } });
         return;
       }
-      if (!source.startsWith(SCOPE)) return;
+      if (source.startsWith(FORK_SCOPE) && !isFork) {
+        context.report({ node, messageId: "forkImport", data: { source } });
+        return;
+      }
+      if (!source.startsWith(SCOPE) && !source.startsWith(FORK_SCOPE)) return;
       const name = source.split("/").slice(0, 2).join("/");
       const adaptersEntry = source === `${name}/adapters`;
       if (adaptersEntry && !isComposition && !isTest) {

@@ -395,6 +395,199 @@ describe("module-boundary rule", () => {
   });
 });
 
+// I05-C4 (I05-R4, R20): the fork's packages (`@pki-site/…`, under site/) and the public example package
+// (`@pki/site-example`) on a throwaway workspace. Seven cases and the review's D1: a fork-shaped package
+// reaches no part of the backend by path or by subpath, in a test file as in any other.
+describe("module-boundary: fork packages (I05-C4)", () => {
+  const forkRoot = mkdtempSync(join(tmpdir(), "pki-boundary-fork-"));
+  const forkPkg = (dir: string, manifest: object) => {
+    mkdirSync(join(forkRoot, dir, "src"), { recursive: true });
+    writeFileSync(join(forkRoot, dir, "package.json"), JSON.stringify(manifest));
+  };
+  forkPkg(".", { name: "root" });
+  forkPkg("backend", {
+    name: "@pki/backend",
+    dependencies: { "@pki/contracts": "workspace:*" },
+  });
+  forkPkg("packages/contracts", { name: "@pki/contracts" });
+  forkPkg("storage", { name: "@pki/storage" });
+  forkPkg("packages/connector-example", { name: "@pki/connector-example" });
+  forkPkg("packages/site-example", {
+    name: "@pki/site-example",
+    dependencies: { "@pki/backend": "workspace:*", "@pki/connector-example": "workspace:*" },
+  });
+  forkPkg("site/composition", {
+    name: "@pki-site/composition",
+    dependencies: {
+      "@pki/backend": "workspace:*",
+      "@pki-site/connector-x": "workspace:*",
+    },
+  });
+  forkPkg("site/connectors/x", {
+    name: "@pki-site/connector-x",
+    dependencies: { "@pki/contracts": "workspace:*" },
+  });
+  afterAll(() => rmSync(forkRoot, { recursive: true, force: true }));
+  const at = (rel: string) => join(forkRoot, rel);
+
+  const registration = at("site/composition/src/registration.ts");
+  const compositionShell = at("site/composition/src/shell.ts");
+  const compositionTest = at("site/composition/src/registration.test.ts");
+  const exampleRegistration = at("packages/site-example/src/registration.ts");
+  const exampleShell = at("packages/site-example/src/shell.ts");
+  const collectorModule = at("site/connectors/x/src/impl.ts");
+  const collectorAdapter = at("site/connectors/x/src/adapters/impl.ts");
+  const publicBackend = at("backend/src/server.ts");
+
+  ruleTester.run("module-boundary (fork packages)", moduleBoundary, {
+    valid: [
+      // ① the composition package's registration takes a collector's adapters entry
+      { code: 'import { c } from "@pki-site/connector-x/adapters";', filename: registration },
+      // ⑥ and so does the example's registration, for the example collector
+      {
+        code: 'import { c } from "@pki/connector-example/adapters";',
+        filename: exampleRegistration,
+      },
+      // a fork package imports a public package it declares, by name
+      { code: 'import { runShell } from "@pki/backend";', filename: compositionShell },
+      { code: 'import { runShell } from "@pki/backend";', filename: exampleShell },
+      { code: 'import { r } from "./registration.ts";', filename: compositionShell },
+      // a collector's implementation lives under its src/adapters/
+      { code: "export class C implements Connector {}", filename: collectorAdapter },
+      // a test file may take an adapters entry
+      { code: 'import { c } from "@pki-site/connector-x/adapters";', filename: compositionTest },
+    ],
+    invalid: [
+      // ② any other file of the composition package, or of the example, is refused the entry
+      {
+        code: 'import { c } from "@pki-site/connector-x/adapters";',
+        filename: compositionShell,
+        errors: [{ messageId: "adapterEntry" }],
+      },
+      {
+        code: 'import { c } from "@pki/connector-example/adapters";',
+        filename: exampleShell,
+        errors: [{ messageId: "adapterEntry" }],
+      },
+      // ... and a registration file of one package does not take the other's right
+      {
+        code: 'import { c } from "@pki-site/connector-x/adapters";',
+        filename: at("site/connectors/x/src/registration.ts"),
+        errors: [{ messageId: "adapterEntry" }],
+      },
+      // ③ a collector implements Connector outside its src/adapters/
+      {
+        code: "export class C implements Connector {}",
+        filename: collectorModule,
+        errors: [{ messageId: "adapterOutsideAdapters" }],
+      },
+      // ④ a public package, the example included, imports a fork package
+      {
+        code: 'import { r } from "@pki-site/composition";',
+        filename: publicBackend,
+        errors: [{ messageId: "forkImport" }],
+      },
+      {
+        code: 'import { c } from "@pki-site/connector-x";',
+        filename: exampleRegistration,
+        errors: [{ messageId: "forkImport" }],
+      },
+      {
+        code: 'export * from "@pki-site/connector-x/adapters";',
+        filename: at("backend/src/server.test.ts"),
+        errors: [{ messageId: "forkImport" }],
+      },
+      {
+        code: 'const m = await import("@pki-site/composition");',
+        filename: publicBackend,
+        errors: [{ messageId: "forkImport" }],
+      },
+      // ⑤ a fork package imports a public package it did not declare
+      {
+        code: 'import { s } from "@pki/storage";',
+        filename: registration,
+        errors: [{ messageId: "undeclaredDependency" }],
+      },
+      {
+        code: 'import { s } from "@pki/storage";',
+        filename: at("site/connectors/x/src/adapters/impl.ts"),
+        errors: [{ messageId: "undeclaredDependency" }],
+      },
+      // a fork package imports a fork package it did not declare
+      {
+        code: 'import { c } from "@pki-site/composition";',
+        filename: at("site/connectors/x/src/index.ts"),
+        errors: [{ messageId: "undeclaredDependency" }],
+      },
+      // D1: nothing of the backend is reached by path or by subpath from a fork-shaped package,
+      // in a product file and in a test file alike (bootBackend takes unchecked connectors and policies)
+      ...[
+        registration,
+        compositionShell,
+        compositionTest,
+        exampleRegistration,
+        exampleShell,
+      ].flatMap((filename) => [
+        {
+          code: 'import { bootBackend } from "../../../backend/src/boot.ts";',
+          filename,
+          errors: [{ messageId: "crossPackageRelative" }],
+        },
+        {
+          code: 'import { bootBackend } from "../../../backend/src/boot";',
+          filename,
+          errors: [{ messageId: "crossPackageRelative" }],
+        },
+        {
+          code: "const m = await import(`../../../backend/src/boot.ts`);",
+          filename,
+          errors: [{ messageId: "crossPackageRelative" }],
+        },
+        {
+          code: 'import { bootBackend } from "@pki/backend/src/boot.ts";',
+          filename,
+          errors: [{ messageId: "deepImport" }],
+        },
+        {
+          code: 'export { bootBackend } from "@pki/backend/boot";',
+          filename,
+          errors: [{ messageId: "deepImport" }],
+        },
+      ]),
+    ],
+  });
+
+  it("⑥ the real example package passes the repository's boundary rule with no violation, its registration alone taking the collector's entry", async () => {
+    const eslint = new ESLint({ cwd: repoRoot, ruleFilter: ({ ruleId }) => ruleId === RULE_ID });
+    const results = await eslint.lintFiles(["packages/site-example"]);
+    expect(results.length).toBeGreaterThan(3);
+    expect(results.flatMap((r) => r.messages.map((m) => `${r.filePath}: ${m.message}`))).toEqual(
+      [],
+    );
+    const entry = 'import { c } from "@pki/connector-example/adapters";\nexport { c };\n';
+    const ids = async (file: string) =>
+      (await lintWithRepoConfig(entry, file)).map((m) => m.messageId);
+    expect(await ids("packages/site-example/src/registration.ts")).toEqual([]);
+    expect(await ids("packages/site-example/src/shell.ts")).toEqual(["adapterEntry"]);
+  });
+
+  it("the example package's registration file is a composition point, its other product files are not, its tests may take the entry", async () => {
+    const entry = 'import { c } from "@pki/connector-example/adapters";\nexport { c };\n';
+    const hits = [] as string[];
+    for (const file of [
+      "packages/site-example/src/site-check.ts",
+      "packages/site-example/src/registration.test.ts",
+    ]) {
+      hits.push(`${file}: ${(await lintWithRepoConfig(entry, file)).map((m) => m.messageId)}`);
+    }
+    // the test file may take it (tests reach the implementation they test); the other product file may not
+    expect(hits).toEqual([
+      "packages/site-example/src/site-check.ts: adapterEntry",
+      "packages/site-example/src/registration.test.ts: ",
+    ]);
+  });
+});
+
 // I01-R24, T03: @pki/connector-sdk is a pure library outside the adapter boundary. Any
 // package may import it by name (when it declares it); it imports only @pki/contracts,
 // zod and the node: modules the Connector paths may use (I01-R28's allow-list).

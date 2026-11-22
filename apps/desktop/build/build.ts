@@ -5,11 +5,13 @@
 // 1. the synthetic manifest must equal a fresh build from the repository (it is
 //    checked, never rewritten: "T04가 넘기는 것" 1)
 // 2. the screens (Vite) into app/web
-// 3. the shell's main and the backend's shell entry, bundled (bundle.ts)
+// 3. the shell's main and the backend's shell entry, bundled (bundle.ts); the entry is the public
+//    backend/src/shell.ts, or the fork's own when site/composition exists (backend-entry.ts, I05-R2)
 // 4. the runtime packages the bundles leave external (runtime-packages.ts)
 // 5. the report: the modules each bundle kept and the packages copied
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { backendEntry } from "../src/backend-entry.ts";
 import { bundle, EXTERNAL_PACKAGES, REPO_ROOT } from "./bundle.ts";
 import { APP_DIR, REPORT_FILE, type BuildReport } from "./paths.ts";
 import { pnpm } from "./pnpm.ts";
@@ -45,7 +47,7 @@ pnpm(
 const bundles: BuildReport["bundles"] = {};
 for (const [input, output] of [
   ["apps/desktop/src/main.ts", "main.js"],
-  ["backend/src/shell.ts", "backend/shell.js"],
+  [backendEntry(REPO_ROOT), "backend/shell.js"],
 ] as const) {
   bundles[output] = (
     await bundle({ input, outFile: join(APP_DIR, output), buildKind: "production" })

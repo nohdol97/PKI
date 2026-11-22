@@ -198,6 +198,22 @@ importers:
         specifier: 3.4.0
         version: 3.4.0
 
+  packages/site-example:
+    dependencies:
+      '@pki/backend':
+        specifier: workspace:*
+        version: link:../../backend
+      '@pki/connector-example':
+        specifier: workspace:*
+        version: link:../connector-example
+    devDependencies:
+      '@pki/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@pki/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+
   packages/testkit:
     dependencies:
       '@pki/contracts':
