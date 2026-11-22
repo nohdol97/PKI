@@ -737,6 +737,9 @@ export const userOntology: UserOntologyDecisions = {
         undefined,
       );
       if (schemaErrors.length > 0) return refusedWith("schema-invalid", { schemaErrors });
+      // and against the rows that exist: a user's row of the kind may have been added while it was retired
+      const impact = impactOf(tx, { op: "add", name: element.name, rule: element.rule }, undefined);
+      if (impact.violations > 0) return refusedWith("existing-data-violation", { impact });
     }
     // a retirement comes back as a new edition: the number only rises
     const edition = newest.action === "retire" ? element.edition + 1 : element.edition;

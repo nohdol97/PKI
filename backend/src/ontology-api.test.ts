@@ -395,6 +395,44 @@ describe("POST /api/ontology/decide, /undo and /history", () => {
   });
 });
 
+describe("a user's add under a kind that is not verified (review D2)", () => {
+  const dateKind: ElementRule = {
+    elementKind: "fact-kind",
+    itemTypes: ["Project"],
+    valueType: "date",
+    cardinality: "many",
+  };
+  const add = (itemId: number, factKind: string, value: string) =>
+    call("semanticCorrect", {
+      correction: { action: "add", entry: { kind: "fact", itemId, factKind, value } },
+    });
+
+  it.each(["retired", "candidate"] as const)(
+    "lets the value pass under a %s date kind: it is unregistered, not misfit",
+    async (how) => {
+      const itemId = insertItem(db, {
+        type: "Project",
+        name: "P1",
+        epistemic: "explicit",
+        status: "candidate",
+        validAt: null,
+        observedAt: "2026-11-23T00:00:00Z",
+      });
+      if (how === "candidate") candidate("cand_date", dateKind);
+      else {
+        userDecisions.ontology.change(db, { op: "add", name: "cand_date", rule: dateKind });
+        userDecisions.ontology.change(db, {
+          op: "retire",
+          elementKind: "fact-kind",
+          name: "cand_date",
+        });
+      }
+      await start();
+      expect((await add(itemId, "cand_date", "soon")).body).toMatchObject({ status: "applied" });
+    },
+  );
+});
+
 describe("validation and the request checks", () => {
   const rule = noteKind();
   const bad: [string, unknown][] = [

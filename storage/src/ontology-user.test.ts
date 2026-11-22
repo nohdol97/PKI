@@ -510,6 +510,24 @@ describe("ontology.candidates: a rule change and a retirement leave history (R20
     expect(readOntologyElement(db, "fact-kind", "gadget_note")?.status).toBe("superseded");
   });
 
+  it("does not bring a retired kind back while a row added under it meanwhile violates its rule (review D1, P6)", () => {
+    const id = userAdded(
+      "due_on",
+      fk({ itemTypes: ["Project"], valueType: "date", cardinality: "one" }),
+    );
+    userOntology.change(db, { op: "retire", elementKind: "fact-kind", name: "due_on" });
+    // the kind is not verified now, so a user's add of any value passes
+    const p = insertItem(db, { type: "Project", name: "P1", ...attrs });
+    saveFact(db, { itemId: p, kind: "due_on", value: "soon", ...attrs });
+    const before = dump();
+    expect(refused(userOntology.undo(db, id))).toMatchObject({
+      reason: "existing-data-violation",
+      impact: { liveRows: 1, violations: 1 },
+    });
+    expect(dump()).toEqual(before);
+    expect(stateOf(id)).toEqual({ status: "superseded", edition: 2 });
+  });
+
   it("undoes the retirement of a seed, which has no creation line", () => {
     const id = idOf("fact-kind", "alias.translation");
     userOntology.change(db, { op: "retire", elementKind: "fact-kind", name: "alias.translation" });

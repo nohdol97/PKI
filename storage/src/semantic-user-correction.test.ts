@@ -759,7 +759,7 @@ describe("correction.duplicate-value (S01-R7, provisional decision 13)", () => {
 });
 
 describe("the user entry", () => {
-  it("has the four calls and the type definitions' operations (S01-T07)", () => {
+  it("has the four row calls and the `ontology` member with its three operations (S01-T07)", () => {
     expect(Object.keys(userDecisions).sort()).toEqual([
       "add",
       "decide",
