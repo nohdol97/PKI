@@ -220,7 +220,7 @@ function subject(kind: DerivativeKind, has: { shared: boolean; withoutLineage: b
         },
         // V02's fence (isFenceCurrent, the one closeJob writes a result behind)
         // stands in for commitDerived until I04-T06; a source version arrives
-        // through saveSourceRecord, whose tombstone check refuses it. The write
+        // through saveSourceRecord, whose tombstone door blocks it. The write
         // behind the fence fails if it is ever reached.
         staleInput: () =>
           kind.kind === "source"
@@ -232,7 +232,7 @@ function subject(kind: DerivativeKind, has: { shared: boolean; withoutLineage: b
                     title: "제목 a",
                     body: "늦게 온 본문",
                   });
-                  return saved.status === "refused" ? { status: "stale", cause: "covered" } : saved;
+                  return saved.status === "blocked" ? { status: "stale", cause: "covered" } : saved;
                 },
               }
             : {

@@ -133,7 +133,7 @@ describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)
 
   it("makes no new version for the same revision and content", () => {
     saveSourceRecord(db, "c1", rev(1));
-    expect(saveSourceRecord(db, "c1", rev(1))).toEqual({ status: "unchanged" });
+    expect(saveSourceRecord(db, "c1", rev(1))).toEqual({ status: "unchanged", sourceId: 1 });
     expect(rows()).toHaveLength(1);
   });
 
@@ -152,32 +152,37 @@ describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)
 
   it("makes no new version for a greater revision with the same content", () => {
     saveSourceRecord(db, "c1", rev(1));
-    expect(saveSourceRecord(db, "c1", rev(2))).toEqual({ status: "unchanged" });
+    expect(saveSourceRecord(db, "c1", rev(2))).toEqual({ status: "unchanged", sourceId: 1 });
     expect(rows()).toHaveLength(1);
   });
 
-  it.each([
-    ["equal", 3],
-    ["lower", 2],
-  ])("refuses an %s revision with other content and writes nothing", (_case, revision) => {
+  it("rejects the same revision with other content and writes nothing (I01-R10 step 2)", () => {
     saveSourceRecord(db, "c1", rev(3, "v3"));
     const seq = readChangeSeq(db);
-    expect(saveSourceRecord(db, "c1", rev(revision, "other"))).toEqual({
-      status: "refused",
-      reason: "revision-not-newer",
+    expect(saveSourceRecord(db, "c1", rev(3, "other"))).toEqual({
+      status: "rejected",
+      code: "revision-conflict",
     });
     expect(rows()).toHaveLength(1);
     expect(readChangeSeq(db)).toBe(seq);
   });
 
-  it("leaves an older line already stored (same revision, same content) unchanged (C3 re-import)", () => {
+  it("is stale for a lower revision, whatever its content, and writes nothing (I01-R10 step 1)", () => {
+    saveSourceRecord(db, "c1", rev(3, "v3"));
+    const seq = readChangeSeq(db);
+    expect(saveSourceRecord(db, "c1", rev(2, "other"))).toEqual({ status: "stale" });
+    expect(saveSourceRecord(db, "c1", rev(2, "v3"))).toEqual({ status: "stale" });
+    expect(rows()).toHaveLength(1);
+    expect(readChangeSeq(db)).toBe(seq);
+  });
+
+  it("is stale for an older line already stored (C3 re-import) and rejects the same revision with other content", () => {
     saveSourceRecord(db, "c1", rev(1, "v1"));
     saveSourceRecord(db, "c1", rev(2, "v2"));
-    expect(saveSourceRecord(db, "c1", rev(1, "v1"))).toEqual({ status: "unchanged" });
-    // the same revision with other content is still refused
-    expect(saveSourceRecord(db, "c1", rev(1, "other"))).toEqual({
-      status: "refused",
-      reason: "revision-not-newer",
+    expect(saveSourceRecord(db, "c1", rev(1, "v1"))).toEqual({ status: "stale" });
+    expect(saveSourceRecord(db, "c1", rev(2, "other"))).toEqual({
+      status: "rejected",
+      code: "revision-conflict",
     });
     expect(rows()).toHaveLength(2);
   });
@@ -208,12 +213,7 @@ describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)
     expect(db.all(LATEST_VERSION_SQL, [1])).toMatchObject([{ version: 2, revision: 2 }]);
   });
 
-  it("leaves a lower revision with the latest content as unchanged", () => {
-    saveSourceRecord(db, "c1", rev(3));
-    expect(saveSourceRecord(db, "c1", rev(1))).toEqual({ status: "unchanged" });
-  });
-
-  it("refuses a record the tombstone would block, before the trigger aborts the page", () => {
+  it("blocks a record the tombstone would block, before the trigger aborts the page", () => {
     saveSourceRecord(db, "c1", rev(1, "v1"));
     writeTombstone(db, {
       sourceId: 1,
@@ -223,10 +223,7 @@ describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)
     });
     db.run("DELETE FROM source_versions");
     const seq = readChangeSeq(db);
-    expect(saveSourceRecord(db, "c1", rev(2, "v2"))).toEqual({
-      status: "refused",
-      reason: "tombstoned",
-    });
+    expect(saveSourceRecord(db, "c1", rev(2, "v2"))).toEqual({ status: "blocked" });
     expect(rows()).toEqual([]);
     expect(readChangeSeq(db)).toBe(seq);
   });

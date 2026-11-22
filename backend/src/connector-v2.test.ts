@@ -132,6 +132,8 @@ describe("connector.sdk-version", () => {
   });
 });
 
+// I01-T02 ended the interim of T01: identity, the tombstone events and the scope change now
+// take the arrival judgment (knowledge-engine arrival.test.ts); these check the sync path.
 describe("interim.identity", () => {
   const AT = "2026-11-21T00:00:00Z";
   const upsert = (namespace: string, revision: number, body: string) => ({
@@ -159,7 +161,7 @@ describe("interim.identity", () => {
     ]);
   });
 
-  it("deletes through V02's path at the latest product version, not the event's revision", async () => {
+  it("tombstones at the latest product version, not the event's revision", async () => {
     await syncConnector(
       db,
       "s",
@@ -187,7 +189,7 @@ describe("interim.identity", () => {
     ).toEqual([{ namespace: "b", body: "kept" }]);
   });
 
-  it("leaves an unknown namespace's tombstone event as nothing to delete", async () => {
+  it("tombstones an unknown namespace's source by its hash alone and leaves the others", async () => {
     await syncConnector(db, "s", "scripted", page([upsert("a", 1, "x")], "1"));
     await syncConnector(
       db,
@@ -195,11 +197,22 @@ describe("interim.identity", () => {
       "scripted",
       page([{ kind: "access-revoked", namespace: "z", externalId: "e", revision: 2, at: AT }], "2"),
     );
-    expect(db.all("SELECT count(*) AS n FROM tombstones")).toEqual([{ n: 0 }]);
+    expect(
+      db.all(
+        "SELECT t.covers_version AS version, t.last_revision AS last, s.namespace, s.identity_hashed FROM tombstones t JOIN sources s ON s.id = t.source_id",
+      ),
+    ).toEqual([
+      {
+        version: 0,
+        last: 2,
+        namespace: identityKey(db, "s", "z", "e"),
+        identity_hashed: 1,
+      },
+    ]);
     expect(db.all("SELECT count(*) AS n FROM source_versions")).toEqual([{ n: 1 }]);
   });
 
-  it("fails the page of a scope change, which has no store before I01-T02", async () => {
+  it("stores a scope change on the source row and no version, with the page's cursor", async () => {
     await syncConnector(db, "s", "scripted", page([upsert("a", 1, "x")], "1"));
     const scope = {
       kind: "scope-change" as const,
@@ -209,12 +222,11 @@ describe("interim.identity", () => {
       at: AT,
       accessScope: ["team"],
     };
-    await expect(
-      syncConnector(db, "s", "scripted", page([upsert("b", 1, "y"), scope], "2")),
-    ).rejects.toThrow(/scope-change/);
-    expect(readCursor(db, "s")).toBe("1");
-    expect(db.all("SELECT namespace, access_scope FROM sources")).toEqual([
-      { namespace: "a", access_scope: null },
+    await syncConnector(db, "s", "scripted", page([scope], "2"));
+    expect(readCursor(db, "s")).toBe("2");
+    expect(db.all("SELECT namespace, access_scope, last_revision FROM sources")).toEqual([
+      { namespace: "a", access_scope: '["team"]', last_revision: 2 },
     ]);
+    expect(db.all("SELECT count(*) AS n FROM source_versions")).toEqual([{ n: 1 }]);
   });
 });

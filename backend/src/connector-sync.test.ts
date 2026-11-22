@@ -149,7 +149,7 @@ describe("cursor after save", () => {
     await syncConnector(db, "s", "scripted", page([revised(2, "b")], "1"));
     const jobs = db.all("SELECT count(*) AS n FROM jobs");
     await expect(
-      syncConnector(db, "s", "scripted", page([upsert("a"), revised(1, "older")], "9")),
+      syncConnector(db, "s", "scripted", page([upsert("a"), revised(2, "other")], "9")),
     ).rejects.toThrow(/revision-not-newer/);
     expect(readCursor(db, "s")).toBe("1");
     expect(counts()).toEqual([1, 1]);

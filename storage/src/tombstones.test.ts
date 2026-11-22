@@ -261,8 +261,8 @@ describe("tombstone.rules: recordTombstone", () => {
     record("source-deleted", 4);
     purge();
     expect(nextSourceVersion(db, 1)).toBe(4);
-    // not lifted: the arrival is refused and nothing is written (V02's rule until I01-T02)
-    expect(save("back")).toEqual({ status: "refused", reason: "tombstoned" });
+    // not lifted: a record with no revision to pass the door is blocked, nothing written (I01-R10)
+    expect(save("back")).toEqual({ status: "blocked" });
     recordTombstoneLift(db, 1, LATER);
     expect(save("back")).toEqual({ status: "created", sourceId: 1, version: 4 });
     expect(nextSourceVersion(db, 1)).toBe(5);
@@ -279,10 +279,7 @@ describe("tombstone.rules: recordTombstone", () => {
       tombstone: { sourceId: 2, coversVersion: 0, lastRevision: 3 },
     });
     const record2 = { externalId: "new", title: "t", body: "b" };
-    expect(saveSourceRecord(db, "c1", record2)).toEqual({
-      status: "refused",
-      reason: "tombstoned",
-    });
+    expect(saveSourceRecord(db, "c1", record2)).toEqual({ status: "blocked" });
     recordTombstoneLift(db, 2, LATER);
     expect(saveSourceRecord(db, "c1", record2)).toEqual({
       status: "created",

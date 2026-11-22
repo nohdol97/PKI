@@ -325,9 +325,9 @@ describe("propagation atomicity", () => {
   it("rolls the propagation back with a page that fails after storing the new version", async () => {
     const fact = await evidenced();
     const before = counts();
-    // the edit of "b" is stored and propagated first; the older revision of "other"
-    // is then refused, and without onRefused the whole page fails
-    page = [upsert("b", "B API 12-03", 2), upsert("other", "older", 3)];
+    // the edit of "b" is stored and propagated first; the same revision of "other"
+    // with other content is then refused, and without onRefused the whole page fails
+    page = [upsert("b", "B API 12-03", 2), upsert("other", "older", 5)];
     await expect(syncConnector(db, "s", "scripted", connector, { rescan: true })).rejects.toThrow(
       /revision-not-newer/,
     );

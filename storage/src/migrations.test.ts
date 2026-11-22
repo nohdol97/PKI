@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(15);
-    expect(migrations).toHaveLength(15);
+    expect(schemaVersion(db)).toBe(16);
+    expect(migrations).toHaveLength(16);
   });
 
   it("is idempotent when re-run", () => {
@@ -1228,7 +1228,7 @@ describe("schema v15 (I03-T08)", () => {
       `INSERT INTO jobs (kind, status, run_after, fairness_key, registered_change_seq, created_at, updated_at)
        VALUES ('maintenance', 'queued', 1, 'maintenance', 0, 1, 1)`,
     );
-    migrate(db);
+    migrate(db, migrations.slice(0, 15));
     expect(schemaVersion(db)).toBe(15);
     expect(db.all("SELECT kind, status FROM jobs")).toEqual([
       { kind: "maintenance", status: "queued" },
@@ -1259,5 +1259,85 @@ describe("schema v15 (I03-T08)", () => {
       VALUES ('connector-sync', 'c1', '{}', 'UTC', 1, 1, 1)`;
     db.run(insert);
     expect(() => db.run(insert)).toThrow(/UNIQUE/);
+  });
+});
+
+describe("schema v16 (I01-T02, I01-R9, R13)", () => {
+  const insertSource =
+    "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', '', 'e')";
+  const insertVersion = `INSERT INTO source_versions (source_id, version, content_hash, title, body, revision)
+    VALUES (1, 1, 'h', 't', 'b', 7)`;
+
+  it("adds the last accepted revision and the claimed-scope mark to sources, keeping every row", () => {
+    migrate(db, migrations.slice(0, 15));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run(insertSource);
+    db.run("UPDATE sources SET access_scope = '[\"team\"]'");
+    migrate(db);
+    expect(schemaVersion(db)).toBe(16);
+    expect(columns("sources")).toEqual(expect.arrayContaining(["last_revision", "scope_claimed"]));
+    expect(db.all("SELECT id, access_scope, last_revision, scope_claimed FROM sources")).toEqual([
+      { id: 1, access_scope: '["team"]', last_revision: null, scope_claimed: 0 },
+    ]);
+  });
+
+  it("adds the record schema version, provenance and blocks to source_versions without changing a row", () => {
+    migrate(db, migrations.slice(0, 15));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run(insertSource);
+    db.run(insertVersion);
+    const before = db.all(
+      "SELECT id, source_id, version, content_hash, title, body, revision FROM source_versions",
+    );
+    migrate(db);
+    expect(columns("source_versions")).toEqual(
+      expect.arrayContaining(["record_schema_version", "meta", "blocks"]),
+    );
+    expect(
+      db.all(
+        "SELECT id, source_id, version, content_hash, title, body, revision FROM source_versions",
+      ),
+    ).toEqual(before);
+    expect(db.all("SELECT record_schema_version, meta, blocks FROM source_versions")).toEqual([
+      { record_schema_version: 1, meta: null, blocks: null },
+    ]);
+  });
+
+  it("keeps the immutability, the index and the version triggers on source_versions", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run(insertSource);
+    db.run(insertVersion);
+    expect(() => db.run("UPDATE source_versions SET meta = '{}'")).toThrow(/immutable/);
+    expect(db.all("SELECT rowid FROM keyword_index WHERE keyword_index MATCH 'b'")).toHaveLength(1);
+    expect(() => db.run(insertVersion)).toThrow();
+  });
+
+  it("accepts a whole last revision of 1 or more and no other number", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run(insertSource);
+    db.run("UPDATE sources SET last_revision = 4");
+    expect(() => db.run("UPDATE sources SET last_revision = 0")).toThrow();
+    expect(() => db.run("UPDATE sources SET last_revision = 1.5")).toThrow();
+    expect(() => db.run("UPDATE sources SET last_revision = 'x'")).toThrow();
+    expect(() => db.run("UPDATE sources SET scope_claimed = 2")).toThrow();
+  });
+
+  it("accepts only JSON in meta and blocks and a record schema version of 1 or more", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run(insertSource);
+    const insert = (cols: string, values: string) =>
+      db.run(
+        `INSERT INTO source_versions (source_id, version, content_hash, title, body, ${cols}) VALUES (1, 1, 'h', 't', 'b', ${values})`,
+      );
+    expect(() => insert("meta", "'not json'")).toThrow();
+    expect(() => insert("blocks", "'{'")).toThrow();
+    expect(() => insert("record_schema_version", "0")).toThrow();
+    insert("meta, blocks, record_schema_version", "'{\"author\":\"a\"}', '[]', 2");
+    expect(db.all("SELECT record_schema_version FROM source_versions")).toEqual([
+      { record_schema_version: 2 },
+    ]);
   });
 });
