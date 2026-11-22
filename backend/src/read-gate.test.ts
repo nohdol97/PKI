@@ -9,6 +9,7 @@ import {
   addEvidence,
   createDerivativeRegistry,
   insertItem,
+  recordTombstone,
   registerConnectorInstance,
   saveFact,
   saveInsight,
@@ -78,12 +79,13 @@ function source(externalId: string, accessScope: string[] | null = null, body = 
   return { sourceId: saved.sourceId, versionId: version };
 }
 
-/** A tombstone that covers the source while its version rows are still stored (no purge ran). */
+/** A tombstone that covers the source while its version rows are still stored: the record without the purge. */
 const cover = (sourceId: number) =>
-  db.run(
-    "INSERT INTO tombstones (source_id, covers_version, at, reason) VALUES (?, 1, '2026-11-22T00:00:00Z', 'user-deleted')",
-    [sourceId],
-  );
+  recordTombstone(db, sourceId, {
+    reason: "user-deleted",
+    lastRevision: null,
+    at: "2026-11-22T00:00:00Z",
+  });
 
 const titles = (rows: readonly { title: string }[]) => rows.map((r) => r.title);
 
@@ -167,6 +169,26 @@ describe("read-gate: the Sources list and the keyword search", () => {
   });
 });
 
+describe("read-gate: the window that fills a limit", () => {
+  it("never reads past the cap and judges each row once", () => {
+    for (let i = 0; i < 30; i++) source(`h${i}`, SECRET);
+    const asked: string[] = [];
+    const base = registryOf(policy());
+    const counting: DerivativeRegistry = {
+      ...base,
+      visible: (d, refs, purpose) => {
+        asked.push(...refs.map((r) => r.id));
+        return base.visible(d, refs, purpose);
+      },
+    };
+    const gate = createReadGate(db, counting, { sourcesLimit: 2, maxScan: 20 });
+    expect(gate.sources()).toEqual([]);
+    // windows 2, 8, 20: the cap holds and no row is asked about twice
+    expect(asked).toHaveLength(20);
+    expect(new Set(asked).size).toBe(20);
+  });
+});
+
 describe("read-gate: Home's Insights, their evidence and an evidence row's source", () => {
   it("lists only the Insights whose whole lineage is shown, wherever they stand", () => {
     const a = source("a");
@@ -216,6 +238,9 @@ describe("read-gate: Home's Insights, their evidence and an evidence row's sourc
     const gate = createReadGate(db, registryOf(odd));
     const listed = gate.insightEvidence(mixed.id);
     expect(listed?.evidence.map((e) => e.id)).toEqual([mixed.evidenceIds[0], mixed.evidenceIds[2]]);
+    // the count the API gives is of the rows it returns, never of the stored links (3)
+    expect(listed?.insight.evidenceCount).toBe(2);
+    expect(gate.insights().find((i) => i.id === mixed.id)?.evidenceCount).toBe(2);
   });
 
   it("opens the source of an evidence row only while it is shown", () => {

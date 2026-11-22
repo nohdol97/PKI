@@ -9,6 +9,7 @@ import type { SourceSummary } from "@pki/contracts";
 import {
   findSources,
   listActiveInsights,
+  listInsightEvidenceIds,
   listSources,
   readEvidenceSource,
   readInsightEvidence,
@@ -43,6 +44,8 @@ export interface ReadGateOptions {
   /** How many sources the list and the search return (provisional: the storage reads' own limits). */
   sourcesLimit?: number;
   searchLimit?: number;
+  /** The most rows read to fill a limit (default 10000; a test lowers it). */
+  maxScan?: number;
 }
 
 const SOURCES_LIMIT = 100;
@@ -64,40 +67,59 @@ export function createReadGate(
     );
     return rows.filter((row) => ids.has(String(idOf(row))));
   };
-  /** Reads `limit` rows and, while hidden ones left the answer short, a wider window. */
-  const filled = <T>(read: (n: number) => T[], keep: (rows: T[]) => T[], limit: number): T[] => {
-    for (let n = limit; ; n *= 4) {
+  /**
+   * Reads `limit` rows and, while hidden ones left the answer short, a window fourfold wider, never
+   * past the cap. A row is judged once per call: the wider read repeats the rows already judged.
+   */
+  const filled = <T extends { id: number }>(
+    read: (n: number) => T[],
+    kind: string,
+    purpose: ScopePurpose,
+    limit: number,
+  ): T[] => {
+    const verdict = new Map<number, boolean>();
+    const cap = Math.max(maxScan, 1);
+    for (let n = Math.min(limit, cap); ; n = Math.min(n * 4, cap)) {
       const rows = read(n);
-      const kept = keep(rows);
-      if (kept.length >= limit || rows.length < n || n >= MAX_SCAN) return kept.slice(0, limit);
+      const fresh = rows.filter((row) => !verdict.has(row.id));
+      const ids = shown(
+        fresh.map((row) => ({ kind, id: String(row.id) })),
+        purpose,
+      );
+      for (const row of fresh) verdict.set(row.id, ids.has(String(row.id)));
+      const kept = rows.filter((row) => verdict.get(row.id));
+      if (kept.length >= limit || rows.length < n || n >= cap) return kept.slice(0, limit);
     }
   };
+  /** The evidence ids of an Insight that are shown: the count the API gives is of these, never of the stored links. */
+  const shownEvidence = (insightId: number) => {
+    const ids = listInsightEvidenceIds(db, insightId);
+    const ok = shown(
+      ids.map((id) => ({ kind: "evidence", id: String(id) })),
+      "display",
+    );
+    return ids.filter((id) => ok.has(String(id)));
+  };
+  const maxScan = options.maxScan ?? MAX_SCAN;
   const sourcesLimit = options.sourcesLimit ?? SOURCES_LIMIT;
   const searchLimit = options.searchLimit ?? SEARCH_LIMIT;
   const isShown = (kind: string, id: number) =>
     shown([{ kind, id: String(id) }], "display").has(String(id));
   return {
-    sources: () =>
-      filled(
-        (n) => listSources(db, n),
-        (rows) => only(rows, "source", (s) => s.id, "display"),
-        sourcesLimit,
-      ),
+    sources: () => filled((n) => listSources(db, n), "source", "display", sourcesLimit),
     searchSources: (query) =>
-      filled(
-        (n) => findSources(db, query, n),
-        (rows) => only(rows, "source", (s) => s.id, "search"),
-        searchLimit,
-      ),
-    insights: () => only(listActiveInsights(db), "insight", (i) => i.id, "display"),
+      filled((n) => findSources(db, query, n), "source", "search", searchLimit),
+    insights: () =>
+      only(listActiveInsights(db), "insight", (i) => i.id, "display").map((insight) => ({
+        ...insight,
+        evidenceCount: shownEvidence(insight.id).length,
+      })),
     insightEvidence(insightId) {
       if (!isShown("insight", insightId)) return undefined;
       const read = readInsightEvidence(db, insightId);
       if (!read) return undefined;
-      return {
-        insight: read.insight,
-        evidence: only(read.evidence, "evidence", (e) => e.id, "display"),
-      };
+      const evidence = only(read.evidence, "evidence", (e) => e.id, "display");
+      return { insight: { ...read.insight, evidenceCount: evidence.length }, evidence };
     },
     evidenceSource(evidenceId) {
       return isShown("evidence", evidenceId) ? readEvidenceSource(db, evidenceId) : undefined;

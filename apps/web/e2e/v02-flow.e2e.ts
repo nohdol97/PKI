@@ -351,10 +351,11 @@ test("stale.e2e: after a source is deleted, Home no longer shows its Insight", a
   }
 });
 
-// I04-C1 `read-gate.e2e` (I04-R13, I04-T08): the instant a source is deleted on the Sources screen it is
-// gone from every read surface that shows a derived row, with no wait: the Sources list, the keyword
-// search, Home's Insight list and, on a second page that already holds the Insight's evidence, the
-// evidence source it opens. The keyword the search uses belongs to that one source's body.
+// I04-C1 `read-gate.e2e` (I04-T08): the end-to-end behaviour the user sees. Right after a source is deleted
+// on the Sources screen it is gone from the list, the keyword search, Home and, on a second page that
+// already holds the Insight's evidence, the evidence source. This does not prove the read gate: the
+// deletion purges the rows in the same transaction, so the test stays green without the gate. The gate's
+// own guards are backend/src/read-gate.test.ts and boot.read-gate.test.ts.
 test("read-gate.e2e: right after a source is deleted it is gone from the list, the search, Home and the evidence", async ({
   target,
   playwright,

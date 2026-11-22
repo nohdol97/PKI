@@ -20,7 +20,7 @@ import { send } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
@@ -146,5 +146,49 @@ describe("the registry boot builds reaches the read paths", () => {
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "not-found" });
     expect(asked).toContain("evidence");
+  });
+});
+
+describe("a registry that cannot judge", () => {
+  it("fails the request with the generic 500 and logs the route and an error class only", async () => {
+    const MARKER = "민감한-제목-표식";
+    const logged: string[] = [];
+    const spies = (["error", "warn", "log", "info", "debug"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation((...args: unknown[]) => {
+        logged.push(args.map(String).join(" "));
+      }),
+    );
+    try {
+      const { registry } = hiding();
+      const throwing: DerivativeRegistry = {
+        ...registry,
+        visible: () => {
+          const error = new Error(`${MARKER} 합성 등대`);
+          error.name = MARKER;
+          throw error;
+        },
+      };
+      const { call } = await boot(throwing);
+      for (const [name, body] of [
+        ["sources", undefined],
+        ["searchSources", { query: "등대" }],
+        ["insights", undefined],
+      ] as const) {
+        const res = await call(name, body);
+        expect(res).toMatchObject({ status: 500, body: { error: "internal-error" } });
+      }
+      expect(logged.join("\n")).not.toContain(MARKER);
+      expect(logged.join("\n")).not.toContain("등대");
+      const routesFailed = logged
+        .map((l) => JSON.parse(l) as { event: string; route: string; error: string })
+        .filter((l) => l.event === "route-failed");
+      expect(routesFailed).toEqual([
+        { event: "route-failed", route: "sources", error: "other" },
+        { event: "route-failed", route: "searchSources", error: "other" },
+        { event: "route-failed", route: "insights", error: "other" },
+      ]);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 });
