@@ -20,7 +20,7 @@ export function listVerifiedForms(
 ): { factId: number; itemId: number; form: string }[] {
   return db
     .all(
-      "SELECT id, item_id, value FROM facts WHERE kind LIKE 'alias.%' AND status = 'verified' ORDER BY item_id, id",
+      "SELECT id, item_id, value FROM facts WHERE substr(kind, 1, 6) = 'alias.' AND status = 'verified' ORDER BY item_id, id",
     )
     .map((row) => ({
       factId: row.id as number,

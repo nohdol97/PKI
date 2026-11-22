@@ -21,14 +21,17 @@ export { normalizeForLinking };
 
 /**
  * IDs of the items whose normalized name, or whose normalized `verified` form, the normalized text
- * contains, by id. A form counts only when the policy shows both its row and its item for a search
- * (`registry.visible`): the item's name is what the Provider is offered, so a form the reader may
- * not see must not pull an item into the call. The form's text itself is never sent.
+ * contains, by id. Forms are read only with a registry (without one: names only, as before S01-T09).
+ * A form counts only when (1) the policy shows both its row and its item for a search
+ * (`registry.visible`) and (2) its lineage lies inside its item's lineage: the extract handler's
+ * combinable pre-filter and the Broker's grade read the item's lineage only, so a form from a source
+ * the item's lineage lacks (an extracted form on a user-created item, whose lineage is empty, S01-R22)
+ * would reach the call ungated. The form's text itself is never sent.
  */
 export function findCandidates(
   db: SqlDriver,
   text: string,
-  registry: Pick<DerivativeRegistry, "visible"> = derivativeRegistry,
+  registry?: Pick<DerivativeRegistry, "visible" | "lineage">,
 ): number[] {
   const haystack = normalizeForLinking(text);
   const holds = (value: string) => {
@@ -40,13 +43,18 @@ export function findCandidates(
       .filter(({ name }) => holds(name))
       .map(({ id }) => id),
   );
+  if (!registry) return [...found];
   for (const { factId, itemId, form } of listVerifiedForms(db)) {
     if (found.has(itemId) || !holds(form)) continue;
-    const refs = [
-      { kind: "fact", id: String(factId) },
-      { kind: "item", id: String(itemId) },
-    ];
-    if (registry.visible(db, refs, "search").length === refs.length) found.add(itemId);
+    const fact = { kind: "fact", id: String(factId) };
+    const item = { kind: "item", id: String(itemId) };
+    const itemLineage = new Set(
+      registry.lineage(db, item).map((v) => `${v.sourceId}@${v.version}`),
+    );
+    const inside = registry
+      .lineage(db, fact)
+      .every((v) => itemLineage.has(`${v.sourceId}@${v.version}`));
+    if (inside && registry.visible(db, [fact, item], "search").length === 2) found.add(itemId);
   }
   return [...found].sort((a, b) => a - b);
 }

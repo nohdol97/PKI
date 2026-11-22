@@ -52,6 +52,9 @@ beforeEach(() => {
 });
 afterEach(() => db.close());
 
+const open_ = createProductRegistry({ policy: defaultScopePolicy });
+/** The search as extraction runs it: with the registry (a search without one reads no forms, W3). */
+const find = (text: string) => findCandidates(db, text, open_);
 const item = (name: string) => insertItem(db, { type: "Concept", name, ...attrs });
 const alias = (itemId: number, value: string, kind = "alias.abbreviation") =>
   saveFact(db, { itemId, kind, value, ...attrs }).id;
@@ -72,7 +75,7 @@ describe("linking.verified-forms: which forms the search reads", () => {
     expect(added.status).toBe("applied");
     // the auto-verify that writes this status is S01-T05's: the status alone is forged
     setStatusForTest(db, "fact", alias(c, "BC"), "verified", "policy");
-    expect(findCandidates(db, "mt 와 lazy eval 과 BC")).toEqual([a, b, c]);
+    expect(find("mt 와 lazy eval 과 BC")).toEqual([a, b, c]);
   });
 
   it("finds an item through a verified form of each of the three kinds", () => {
@@ -81,7 +84,7 @@ describe("linking.verified-forms: which forms the search reads", () => {
       alias(a, `표기${i}`, kind),
     );
     for (const id of ids) setStatusForTest(db, "fact", id, "verified");
-    for (let i = 0; i < 3; i++) expect(findCandidates(db, `...표기${i}...`)).toEqual([a]);
+    for (let i = 0; i < 3; i++) expect(find(`...표기${i}...`)).toEqual([a]);
   });
 
   it.each(["candidate", "disputed", "rejected", "superseded"] as const)(
@@ -89,7 +92,7 @@ describe("linking.verified-forms: which forms the search reads", () => {
     (status) => {
       const a = item("멀티테넌시");
       setStatusForTest(db, "fact", alias(a, "MT"), status);
-      expect(findCandidates(db, "MT")).toEqual([]);
+      expect(find("MT")).toEqual([]);
     },
   );
 
@@ -99,32 +102,32 @@ describe("linking.verified-forms: which forms the search reads", () => {
       expect(userDecisions.decide(db, ref(id), action).status).toBe("applied");
     const f = alias(a, "MT");
     decide(f, "approve");
-    expect(findCandidates(db, "MT")).toEqual([a]);
+    expect(find("MT")).toEqual([a]);
     expect(userDecisions.undo(db, ref(f)).status).toBe("applied");
-    expect(findCandidates(db, "MT")).toEqual([]);
+    expect(find("MT")).toEqual([]);
     decide(f, "approve");
     decide(f, "dispute");
-    expect(findCandidates(db, "MT")).toEqual([]);
+    expect(find("MT")).toEqual([]);
     decide(f, "reject");
-    expect(findCandidates(db, "MT")).toEqual([]);
+    expect(find("MT")).toEqual([]);
     decide(f, "approve"); // a rejected form the user approves again
-    expect(findCandidates(db, "MT")).toEqual([a]);
+    expect(find("MT")).toEqual([a]);
 
     const g = alias(a, "QX");
     decide(g, "approve");
     const fixed = userDecisions.replaceValue(db, ref(g), "QY");
     expect(fixed.status).toBe("applied"); // QX is superseded, MTY is the user's own verified row
-    expect(findCandidates(db, "QX")).toEqual([]);
-    expect(findCandidates(db, "QY")).toEqual([a]);
+    expect(find("QX")).toEqual([]);
+    expect(find("QY")).toEqual([a]);
   });
 
   it("matches a form as it matches a name: case, width and white space, and the stored form stays as written", () => {
     const a = item("멀티테넌시");
     const f = alias(a, "Ｍulti  Tenant", "alias.translation");
     setStatusForTest(db, "fact", f, "verified");
-    expect(findCandidates(db, "the MULTI TENANT design")).toEqual([a]);
-    expect(findCandidates(db, "multi\n\ttenant")).toEqual([a]);
-    expect(findCandidates(db, "multitenant")).toEqual([]);
+    expect(find("the MULTI TENANT design")).toEqual([a]);
+    expect(find("multi\n\ttenant")).toEqual([a]);
+    expect(find("multitenant")).toEqual([]);
     expect(db.all("SELECT value FROM facts WHERE id = ?", [f])).toEqual([
       { value: "Ｍulti  Tenant" },
     ]);
@@ -145,16 +148,16 @@ describe("linking.verified-forms: which forms the search reads", () => {
       "verified",
     );
     setStatusForTest(db, "fact", alias(a, "   "), "verified");
-    expect(findCandidates(db, "2026-12-05 정의 문장 아무 글")).toEqual([]);
+    expect(find("2026-12-05 정의 문장 아무 글")).toEqual([]);
   });
 
   it("offers an item once when its name and a form both appear, and keeps the name path as it was", () => {
     const a = item("멀티테넌시");
     setStatusForTest(db, "fact", alias(a, "MT"), "verified");
     const b = item("다른 항목"); // matched by its name only
-    expect(findCandidates(db, "MT 멀티테넌시 다른 항목")).toEqual([a, b]);
+    expect(find("MT 멀티테넌시 다른 항목")).toEqual([a, b]);
     // an item found by a form only comes in id order among the ones found by name
-    expect(findCandidates(db, "MT 다른 항목")).toEqual([a, b]);
+    expect(find("MT 다른 항목")).toEqual([a, b]);
   });
 
   it("offers every item that holds the same verified form, in id order, and merges none", () => {
@@ -163,8 +166,45 @@ describe("linking.verified-forms: which forms the search reads", () => {
     const c = item("연결 안 된 항목");
     setStatusForTest(db, "fact", alias(a, "MT"), "verified");
     setStatusForTest(db, "fact", alias(b, "mt"), "verified");
-    expect(findCandidates(db, "MT")).toEqual([a, b]);
+    expect(find("MT")).toEqual([a, b]);
     expect(db.all("SELECT id FROM items ORDER BY id")).toEqual([{ id: a }, { id: b }, { id: c }]);
+  });
+});
+
+describe("linking.verified-forms: rules the search pins", () => {
+  it("reads no form at all when called without a registry: names only, as before T09 (no ungated path)", () => {
+    const a = item("멀티테넌시");
+    const b = item("지연 평가");
+    setStatusForTest(db, "fact", alias(a, "MT"), "verified");
+    expect(findCandidates(db, "MT 와 지연 평가")).toEqual([b]);
+    expect(find("MT 와 지연 평가")).toEqual([a, b]);
+  });
+
+  it("matches a form as a name is matched: no word boundary and no minimum length", () => {
+    const a = item("인공지능");
+    const k = item("케이");
+    setStatusForTest(db, "fact", alias(a, "AI"), "verified");
+    setStatusForTest(db, "fact", alias(k, "가", "alias.translation"), "verified");
+    expect(find("MAIL 과 fresh air")).toEqual([a]); // inside a longer word
+    expect(find("가나다")).toEqual([k]); // one character
+    const n = item("물결");
+    expect(find("물결무늬")).toEqual([n]); // a name matches inside a longer word too
+  });
+
+  it("does not read a fact whose kind only looks like a form kind in another case", () => {
+    const a = item("대소문자 항목");
+    for (const [factKind, value] of [
+      ["Alias.note", "QQKIND"],
+      ["ALIAS.x", "RRKIND"],
+      ["alias.note", "SSKIND"],
+    ] as const) {
+      expect(userDecisions.add(db, { kind: "fact", itemId: a, factKind, value }).status).toBe(
+        "applied",
+      );
+    }
+    expect(find("QQKIND")).toEqual([]);
+    expect(find("RRKIND")).toEqual([]);
+    expect(find("SSKIND")).toEqual([a]); // the shared definition: starts with `alias.` as written
   });
 });
 
@@ -187,10 +227,10 @@ describe("linking.verified-forms: deletion", () => {
       quote: "MT",
     });
     setStatusForTest(db, "fact", f, "verified");
-    expect(findCandidates(db, "MT")).toEqual([a]);
+    expect(find("MT")).toEqual([a]);
     purgeSource(db, saved.sourceId, { reason: "source-deleted", at: "2026-11-23T00:00:00Z" });
     expect(db.all("SELECT id FROM facts WHERE id = ?", [f])).toEqual([]);
-    expect(findCandidates(db, "MT")).toEqual([]);
+    expect(find("MT")).toEqual([]);
   });
 });
 
@@ -430,6 +470,53 @@ describe("linking.verified-forms: through the extract handler and the Broker", (
     const run = kit(sameScopeOnly);
     await run(sourceIn("doc", "MT 일정 메모", ["team-a"]));
     expect(requests.map((r) => r.candidateItemIds)).toEqual([[]]);
+  });
+
+  /** A user-created item has an empty lineage (S01-R22): a form extraction attached to it brings its own source. */
+  function userItemWithExtractedForm(from: { row: number }) {
+    const added = userDecisions.add(db, { kind: "item", type: "Concept", name: "사용자항목" });
+    if (added.status !== "applied") throw new Error("add");
+    const f = alias(added.ref.id, "ZQXF");
+    quoted(f, from);
+    expect(userDecisions.decide(db, ref(f), "approve").status).toBe("applied");
+    return added.ref.id;
+  }
+
+  it("does not offer a user-created item through a form from a source the policy cannot put together with this one (I04-R14)", async () => {
+    sourceIn("a0", "제목 가", ["team-a"]);
+    userItemWithExtractedForm(sourceIn("b", "제목 나", ["team-b"]));
+    const run = kit(sameScopeOnly);
+    await run(sourceIn("doc", "ZQXF 일정 메모", ["team-a"]));
+    expect(requests.map((r) => r.candidateItemIds)).toEqual([[]]);
+  });
+
+  it("controls: the same form on a regular item is offered when the sources may be put together", async () => {
+    const id = item("일반항목");
+    quoted(
+      saveFact(db, { itemId: id, kind: "target_date", value: "2026-12-01", ...attrs }).id,
+      sourceIn("n", "제목 이름", ["team-a"]),
+    );
+    const f = alias(id, "ZQXF");
+    quoted(f, sourceIn("b", "제목 나", ["team-a"]));
+    userDecisions.decide(db, ref(f), "approve");
+    const run = kit(sameScopeOnly);
+    await run(sourceIn("doc", "ZQXF 일정 메모", ["team-a"]));
+    expect(requests.map((r) => r.candidateItemIds)).toEqual([[String(id)]]);
+  });
+
+  it("controls: a form the user added to a user-created item (empty lineage on both) is offered", async () => {
+    const id = userItemWithExtractedForm(sourceIn("b", "제목 나", ["team-a"]));
+    expect(
+      userDecisions.add(db, {
+        kind: "fact",
+        itemId: id,
+        factKind: "alias.synonym",
+        value: "사용자별칭",
+      }).status,
+    ).toBe("applied");
+    const run = kit(sameScopeOnly);
+    await run(sourceIn("doc", "사용자별칭 일정 메모", ["team-a"]));
+    expect(requests.map((r) => r.candidateItemIds)).toEqual([[String(id)]]);
   });
 
   it("passes the extraction's own registry to the search: a form the policy hides is not offered to the Provider", async () => {
