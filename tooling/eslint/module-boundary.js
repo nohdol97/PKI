@@ -27,7 +27,10 @@
 // The direction is fork -> public only: a public package may not import "@pki-site/…". A fork-shaped
 // package reaches the backend by its package name alone, so nothing of backend/src (bootBackend takes
 // unchecked connectors and policies) is reached by a path or a subpath, test files included.
-// Absolute paths and file: URLs are resolved and judged like relative specifiers (by the package of their target).
+// Absolute paths and file: URLs are resolved and judged like relative specifiers (by the package of their target);
+// a file: URL that names no readable path (a foreign host, an encoded slash) is refused outright.
+// Inline configuration is closed for the fork's files by eslint.config.js (`noInlineConfig` under site/ and
+// packages/site-example/), not here: a comment cannot switch this rule off or give it an allow-list there.
 // Semantic registry boundary (S01-T02, S01-R5, R7): the user's entry to the registry's lifecycle
 // (USER_ENTRY, exported by @pki/storage) is imported only by the composition root, which hands it to
 // the API layer, and by tests; the API layer (backend/src/server.ts) may name its types but not the
@@ -46,6 +49,7 @@
 // - SQL whose table name or verb is assembled at run time (`INSERT INTO ${table}`), or kept outside
 //   a TypeScript string
 // - createRequire(import.meta.url)("...") calls
+// - a fork's tsconfig `paths` alias or a symlink inside its package (both are deliberate acts)
 // - package.json "imports" subpaths ("#name")
 // - import() with a computed specifier (import(`./adapters/${name}.ts`))
 // - an implementation outside src/adapters/ that names no adapter type at all;
@@ -322,14 +326,17 @@ const moduleBoundary = {
     const mayReachAdapters =
       isComposition || isTest || inAdapters(ownPath) || EXEMPT_PACKAGES.has(ownName);
 
-    /** The file a relative, absolute or file: URL specifier names; undefined for a package name. */
+    /**
+     * The file a relative, absolute or file: URL specifier names; undefined for a package name; null for a
+     * file: URL that names no readable path (a foreign host, an encoded slash), which is refused outright.
+     */
     function pathOf(/** @type {string} */ source) {
       if (source.startsWith(".")) return resolve(dirname(context.filename), source);
       if (source.startsWith("file:")) {
         try {
           return fileURLToPath(source);
         } catch {
-          return resolve(dirname(context.filename), "_unreadable-file-url");
+          return null;
         }
       }
       return isAbsolute(source) ? resolve(source) : undefined;
@@ -401,6 +408,10 @@ const moduleBoundary = {
       }
       if (typeof source !== "string") return;
       const target = pathOf(source);
+      if (target === null) {
+        context.report({ node, messageId: "crossPackageRelative", data: { source } });
+        return;
+      }
       if (target !== undefined) {
         // Treat the target as a directory so a specifier naming a package root resolves to it.
         const resolved = target;
