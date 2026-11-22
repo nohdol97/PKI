@@ -83,6 +83,21 @@ describe("docs.poc-record: the I02B-T01 record covers every I02B-R50 row", () =>
     expect(section).toMatch(/external_memory/);
   });
 
+  it("the follow-up measurements B1 to B3 and the option comparison are on record, each with a verdict", () => {
+    for (const heading of ["### 추가 측정 B1", "### 추가 측정 B2", "### 추가 측정 B3"]) {
+      const start = recordText.indexOf(heading);
+      expect(start, heading).toBeGreaterThanOrEqual(0);
+      const next = recordText.slice(start + heading.length).search(/^#{2,3} /m);
+      const body = recordText.slice(start, next < 0 ? undefined : start + heading.length + next);
+      const verdicts = [...body.matchAll(/\*\*판정[^*\n]*\*\*:\s*`([^`]*)`/g)].map((m) => m[1]);
+      expect(verdicts.length, `${heading} verdicts`).toBeGreaterThanOrEqual(2);
+      for (const v of verdicts) expect(VERDICTS, `${heading}: "${v}"`).toContain(v);
+    }
+    const table = recordText.slice(recordText.indexOf("### 선택지 비교"));
+    expect(table, "comparison table").toMatch(/작업자 \+ 힙 밖 계기/);
+    expect(table).toMatch(/main이 띄운 utility process/);
+  });
+
   it("a verdict resting on reading code alone is not allowed to stay a pass", () => {
     // the review turns such a verdict into 판정 불가 (I02B-C46); the record must not say it as its basis
     expect(recordText).not.toMatch(/코드를 읽어 보니/);
