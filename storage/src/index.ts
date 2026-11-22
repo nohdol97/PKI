@@ -17,6 +17,16 @@ export {
 } from "./listing.ts";
 export { deleteConsent, readConsent, saveConsent, type StoredConsent } from "./consents.ts";
 export { readSetting, writeSetting } from "./settings.ts";
+export {
+  IdentityKeyMissingError,
+  ensureTombstoneSource,
+  findHashedSourceId,
+  hashSourceIdentity,
+  identityKey,
+  prepareCanonicalDb,
+  type PreparedCanonicalDb,
+  type SourceIdentity,
+} from "./identity.ts";
 export { databaseEncryption } from "./database-encryption.ts";
 export {
   dataDirectory,

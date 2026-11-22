@@ -4,7 +4,7 @@
 // JSONL again changes no count; a greater revision is a new version beside the old;
 // a line the store refuses is reported by its number without aborting the rest.
 import type { ImportLineError, ImportRecord } from "@pki/contracts";
-import { readChangeSeq, writeTombstone, type SqlDriver } from "@pki/storage";
+import { identityKey, readChangeSeq, writeTombstone, type SqlDriver } from "@pki/storage";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -219,7 +219,14 @@ describe("importJsonl", () => {
       db.all(
         "SELECT s.external_id, t.covers_version AS version, t.reason FROM tombstones t JOIN sources s ON s.id = t.source_id",
       ),
-    ).toEqual([{ external_id: "d", version: 1, reason: "source-deleted" }]);
+      // the purged source's identifier is the keyed hash, no longer "d" (I04-R7)
+    ).toEqual([
+      {
+        external_id: identityKey(db, MAIL.connector_instance_id, "", "d"),
+        version: 1,
+        reason: "source-deleted",
+      },
+    ]);
     expect(
       db.all("SELECT s.external_id FROM source_versions v JOIN sources s ON s.id = v.source_id"),
     ).toEqual([{ external_id: "u" }]);

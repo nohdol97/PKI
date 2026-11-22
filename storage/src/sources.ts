@@ -5,6 +5,7 @@
 // and only orders arrivals (cross-spec decision D1). Callers wrap a page in one
 // transaction.
 import { createHash } from "node:crypto";
+import { findHashedSourceId } from "./identity.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 export interface StoredRecord {
@@ -115,24 +116,31 @@ export function ensureSourceId(
   namespace: string,
   externalId: string,
 ): number {
-  db.run(
-    "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+  // a purged source's row holds the hash, never this plain identity (I04-R7)
+  const found = findSourceId(db, connectorInstanceId, namespace, externalId);
+  if (found !== undefined) return found;
+  return db.run(
+    "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, ?, ?)",
     [connectorInstanceId, namespace, externalId],
-  );
-  return findSourceId(db, connectorInstanceId, namespace, externalId) as number;
+  ).lastInsertRowid;
 }
 
-/** The id of the source an instance names `externalId` in `namespace`, or undefined if never stored. */
+/**
+ * The id of the source an instance names `externalId` in `namespace`, or undefined if
+ * never stored: the plain row first, then the row of a purged source by its keyed
+ * hash (I04-R7; throws `IdentityKeyMissingError` if hashed rows exist and the key is gone).
+ */
 export function findSourceId(
   db: SqlDriver,
   connectorInstanceId: string,
   namespace: string,
   externalId: string,
 ): number | undefined {
-  return db.all(
+  const plain = db.all(
     "SELECT id FROM sources WHERE connector_instance_id = ? AND namespace = ? AND external_id = ?",
     [connectorInstanceId, namespace, externalId],
   )[0]?.id as number | undefined;
+  return plain ?? findHashedSourceId(db, connectorInstanceId, namespace, externalId);
 }
 
 /** The kind an instance is bound to, or undefined before its first sync. */

@@ -49,7 +49,7 @@ import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   dataDirectory,
   ensureDataDirectory,
-  migrate,
+  prepareCanonicalDb,
   readSetting,
   requeueHeldJobs,
   writeSetting,
@@ -364,11 +364,12 @@ export function productImporter(
     });
 }
 
-/** Opens the canonical SQLite inside `dir` (default: the per-user data directory), migrated. */
+/** Opens the canonical SQLite inside `dir` (default: the per-user data directory), migrated and prepared
+ * (identity key, hashed identities, one clean-up: I04-R6, R7). */
 export function openCanonicalDb(dir: string = dataDirectory()): SqlDriver {
   ensureDataDirectory(dir);
   const db = openBetterSqlite3(join(dir, CANONICAL_DB_FILE));
-  migrate(db);
+  prepareCanonicalDb(db);
   return db;
 }
 
