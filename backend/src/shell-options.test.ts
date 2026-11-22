@@ -40,6 +40,7 @@ describe("production build", () => {
   it.each([
     ["--data-dir", "/synthetic/data"],
     ["--fixtures", "/synthetic/f.jsonl"],
+    ["--scope-policy", "default"],
   ])("refuses %s", (flag, value) => {
     expect(() => production(["--origin", "app://pki", flag, value])).toThrow();
   });

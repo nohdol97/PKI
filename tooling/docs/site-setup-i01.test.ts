@@ -119,8 +119,13 @@ const NAMED_FACTS = [
   { item: "S08", token: "DATA_CLASSES", file: "packages/contracts/src/provider.ts", holds: "export const DATA_CLASSES = " },
   { item: "S08", token: "asScopeClass", file: "providers/src/broker.ts", holds: "function asScopeClass(" },
   { item: "S08", token: "scope-unjudged", file: "providers/src/broker.ts", holds: '| "scope-unjudged"' },
-  { item: "S08", token: "publicScopeGrading", file: "backend/src/composition.ts", holds: ": publicScopeGrading," },
+  { item: "S08", token: "publicScopeGrading", file: "providers/src/scope-grading.ts", holds: "export const publicScopeGrading" },
   { item: "S08", token: "productCalls", file: "backend/src/composition.ts", holds: "export function productCalls(" },
+  { item: "S08", token: "productCalls", file: "backend/src/composition.ts", holds: "options.siteScopeGrading ??" },
+  { item: "S08", token: "SiteRegistration", file: "backend/src/site-registration.ts", holds: "export interface SiteRegistration {" },
+  { item: "S08", token: "scopeGrading", file: "backend/src/site-registration.ts", holds: "readonly scopeGrading?: ScopeGrading;" },
+  { item: "S08", token: "checkSiteRegistration", file: "backend/src/site-registration.ts", holds: "export function checkSiteRegistration(" },
+  { item: "S08", token: "scope-grading-invalid", file: "backend/src/site-registration.ts", holds: '| "scope-grading-invalid"' },
   { item: "S18", token: "connector-scopes.json", file: "backend/src/connector-scopes.ts", holds: '"../../site/config/connector-scopes.json"' },
   { item: "S18", token: "configured_scope", file: "storage/src/migrations.ts", holds: "ADD COLUMN configured_scope TEXT" },
   { item: "S18", token: "connector_instances", file: "storage/src/migrations.ts", holds: "CREATE TABLE connector_instances (" },
@@ -236,6 +241,7 @@ describe("docs.site-setup (I01): what S08 and S18 name exists", () => {
       "providers/src/egress-policy.ts",
       "providers/src/execution-gate.ts",
       "backend/src/composition.ts",
+      "backend/src/site-registration.ts",
     ]) {
       expect(s08).toContain(`\`${path}\``);
       expect(existsSync(resolve(repoRoot, path))).toBe(true);

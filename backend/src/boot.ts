@@ -52,12 +52,19 @@ import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.
 import { createScheduler, type Scheduler } from "./scheduler.ts";
 import { productScopePolicy } from "./scope-policy.ts";
 import { startServer, type RunningServer } from "./server.ts";
+import { publicSite, resolveSiteRegistration, type SiteRegistration } from "./site-registration.ts";
 
 export interface BootOptions {
   /** Holds the canonical DB. */
   dataDir: string;
-  /** Default productConnectors(); source runs add the test Connector (fixtureConnectors). */
+  /** The base set; default productConnectors(). Source runs add the test Connector (fixtureConnectors). */
   connectors?: ConnectorSet | undefined;
+  /**
+   * What a deployment fork plugs in (I05-R1, R6): merged onto the base set, its mapping and policy used
+   * as well. Default `publicSite`, nothing. A registration that touches a public kind or instance stops
+   * the start (`SiteRegistrationInvalidError`) before the canonical DB is opened.
+   */
+  site?: SiteRegistration | undefined;
   /** Fresh per run, handed over in-process by the entry. */
   token: string;
   allowedOrigins: readonly string[];
@@ -92,10 +99,11 @@ export interface BootOptions {
   /** The mapping scope -> class for the Broker (I01-R15); honoured in a test build only, like `registry`. */
   scopeGrading?: ScopeGrading;
   /**
-   * The scope policy by name (I04-R14, S21): `default` (also when absent) or `site`, which the public
-   * repository does not implement, so the start stops with `배포처 후속` before anything is opened.
-   * The desktop shell passes it as the backend's `--scope-policy` switch (from its own `PKI_SCOPE_POLICY`),
-   * the development entry reads `PKI_SCOPE_POLICY` (scope-policy.ts scopePolicyFromEnv).
+   * The scope policy by name (I04-R14, I05-R15, S21), for a source run: none gives the registration's
+   * policy (else the public default), `default` the public default, `site` the registration's policy, which
+   * stops the start with `배포처 후속` before anything is opened when none is registered. The production
+   * build passes no name. The desktop shell passes it as the backend's `--scope-policy` switch (from
+   * its own `PKI_SCOPE_POLICY`), the development entry reads `PKI_SCOPE_POLICY` (scope-policy.ts scopePolicyFromEnv).
    */
   scopePolicy?: string | undefined;
 }
@@ -115,8 +123,15 @@ export interface BootedBackend {
 }
 
 export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
+  const site = options.site ?? publicSite;
   // the policy before any file is opened: a name that is not implemented stops the start (I04-H2 ①)
-  const policy = productScopePolicy(options.scopePolicy);
+  const policy = productScopePolicy(options.scopePolicy, site.scopePolicy);
+  // the registration is checked and merged before the canonical DB or the ledger is touched: one that
+  // reaches for a public kind or instance stops the start here (I05-R9, R12)
+  const { instances, kinds } = resolveSiteRegistration(
+    site,
+    options.connectors ?? productConnectors(),
+  );
   const db = openCanonicalDb(options.dataDir);
   // the instances' configured scopes follow the build's file before anything is graded (I01-R15)
   applyConfiguredScopes(db);
@@ -153,6 +168,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     providers,
     registry,
     ...(options.scopeGrading ? { scopeGrading: options.scopeGrading } : {}),
+    ...(site.scopeGrading ? { siteScopeGrading: site.scopeGrading } : {}),
   });
   const entries = productEntries(registry);
   const engine = productVisibleEngine(db, registry, bound);
@@ -167,11 +183,9 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     );
   // R17: the deletions the database has not seen (a restore, a kill before COMMIT) are applied
   // before the API opens and before anything runs; a line that fails stops the start here
-  // an instance a line would register must be of a kind this build knows (a corrupt line cannot bind one to a bogus kind)
-  const knownKinds = new Set([
-    ...Object.keys((options.connectors ?? productConnectors()).kinds),
-    JSONL_IMPORT_KIND,
-  ]);
+  // an instance a line would register must be of a kind this build knows (a corrupt line cannot bind one to a bogus kind):
+  // the merged kinds, a registered one included (I05-R12), and the import's
+  const knownKinds = new Set([...Object.keys(kinds), JSONL_IMPORT_KIND]);
   reapplyAtStart(db, registry, systemClock.now(), (kind) => knownKinds.has(kind));
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
@@ -194,7 +208,6 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       ? { testBuild: options.testBuild.jobs }
       : {}),
   });
-  const { instances, kinds } = options.connectors ?? productConnectors();
   const connectors = await createConnectorManager(db, instances, kinds, {
     runner,
     projections,

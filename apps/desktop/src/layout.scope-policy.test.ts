@@ -1,10 +1,15 @@
-// The scope policy name the shell starts the backend with (I04-R14, S21): the production build's
-// is a build-time value the environment cannot change; a source run reads the environment.
+// The scope policy name the shell starts the backend with (I04-R14, I05-R15, S21): the production
+// build gives no name, so the backend's registration decides (and the environment cannot change that);
+// a source run reads the environment.
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startBackendProcess, type BackendChild, type ForkBackend } from "./backend-process.ts";
 import { scopePolicyName as sourceRun } from "./layout.ts";
-import { SCOPE_POLICY, scopePolicyName as production } from "./layout.production.ts";
+import * as productionLayout from "./layout.production.ts";
+
+const production = productionLayout.scopePolicyName as (
+  env?: Record<string, string>,
+) => string | undefined;
 
 const child = (): BackendChild => {
   let onMessage: (message: unknown) => void = () => undefined;
@@ -26,26 +31,24 @@ async function argsFor(name: string | undefined) {
   return seen[0];
 }
 
-describe("the production build's scope policy is a build-time value", () => {
+describe("the production build gives the backend no policy name (I05-R15, I05-C13)", () => {
   afterEach(() => vi.unstubAllEnvs());
-  it("ignores the process environment itself", () => {
+  it("gives no name, whatever the process environment holds", () => {
     vi.stubEnv("PKI_SCOPE_POLICY", "site");
-    expect(production()).toBe("default");
+    expect(production()).toBeUndefined();
+    expect(production({ PKI_SCOPE_POLICY: "site" })).toBeUndefined();
+    expect(production({})).toBeUndefined();
   });
 
-  it("is `default` in the public repository and ignores the environment, whatever it holds or lacks", () => {
-    expect(SCOPE_POLICY).toBe("default");
-    expect((production as (env?: Record<string, string>) => string)()).toBe("default");
-    expect(
-      (production as (env?: Record<string, string>) => string)({ PKI_SCOPE_POLICY: "site" }),
-    ).toBe("default");
+  it("has no SCOPE_POLICY constant to edit: the policy is the registration's", () => {
+    expect(Object.keys(productionLayout)).not.toContain("SCOPE_POLICY");
   });
 
-  it("reaches the backend as the build-time name even when the environment says site", async () => {
-    const name = (production as (env?: Record<string, string>) => string)({
-      PKI_SCOPE_POLICY: "site",
-    });
-    expect(await argsFor(name)).toEqual(["--origin", "app://pki", "--scope-policy", "default"]);
+  it("starts the backend with no --scope-policy switch", async () => {
+    expect(await argsFor(production({ PKI_SCOPE_POLICY: "site" }))).toEqual([
+      "--origin",
+      "app://pki",
+    ]);
   });
 });
 

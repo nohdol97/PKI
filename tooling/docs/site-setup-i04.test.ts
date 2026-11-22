@@ -82,7 +82,7 @@ function itemText(site: string, number: string): string {
   return [lines[start], ...(end < 0 ? rest : rest.slice(0, end))].join("\n");
 }
 
-/** The build-time table row that names the scope policy constant (site-setup section 2). */
+/** The build-time table row that names the registration's scope policy field (site-setup section 2). */
 function buildTableRow(site: string): string {
   return site.split("\n").find((l) => l.startsWith("| 접근 범위 정책")) ?? "";
 }
@@ -99,7 +99,7 @@ function namedPaths(text: string): string[] {
   ];
 }
 
-/** True when `text` holds `token` as a whole identifier: `SCOPE_POLICY` is not found inside `PKI_SCOPE_POLICY`. */
+/** True when `text` holds `token` as a whole identifier: `scopePolicy` is not found inside `scopePolicyName`. */
 function namesToken(text: string, token: string): boolean {
   const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`).test(text);
@@ -112,9 +112,15 @@ function namesToken(text: string, token: string): boolean {
 const NAMED_FACTS = [
   {
     item: "S21",
-    token: "SCOPE_POLICY",
-    file: "apps/desktop/src/layout.production.ts",
-    holds: 'export const SCOPE_POLICY = "',
+    token: "scopePolicy",
+    file: "backend/src/site-registration.ts",
+    holds: "readonly scopePolicy?: ScopePolicy;",
+  },
+  {
+    item: "S21",
+    token: "SiteRegistration",
+    file: "backend/src/site-registration.ts",
+    holds: "export interface SiteRegistration {",
   },
   {
     item: "S21",
@@ -236,7 +242,7 @@ describe("docs.site-setup (I04): what the items name exists", () => {
   it("finds the two items and the build-time row", () => {
     expect(s21.length).toBeGreaterThan(200);
     expect(s22.length).toBeGreaterThan(200);
-    expect(row).toContain("SCOPE_POLICY");
+    expect(row).toContain("`scopePolicy`");
   });
 
   it("every file path S21, S22 and the build-time row name exists in the repository", () => {
@@ -251,29 +257,37 @@ describe("docs.site-setup (I04): what the items name exists", () => {
     expect(readFileSync(resolve(repoRoot, fact.file), "utf8")).toContain(fact.holds);
   });
 
-  it("the build-time row names the constant the code defines", () => {
-    expect(row).toContain("apps/desktop/src/layout.production.ts");
-    expect(row).toContain("`SCOPE_POLICY`");
+  it("the build-time row names the registration field the code defines", () => {
+    expect(row).toContain("`registration`");
+    expect(row).toContain("backend/src/site-registration.ts");
+    expect(row).toContain("`scopePolicy`");
+    expect(row).not.toContain("layout.production.ts");
+  });
+
+  it("the doc keeps no SCOPE_POLICY constant to edit (the production build has none)", () => {
+    expect(namesToken(siteText, "SCOPE_POLICY")).toBe(false);
+    expect(namesToken(siteText, "PKI_SCOPE_POLICY")).toBe(true);
   });
 
   it("a token is matched as a whole identifier, never inside a longer one", () => {
+    expect(namesToken("`scopePolicyName` only", "scopePolicy")).toBe(false);
+    expect(namesToken("`scopePolicy`", "scopePolicy")).toBe(true);
+    expect(namesToken("scopePolicy_x", "scopePolicy")).toBe(false);
     expect(namesToken("`PKI_SCOPE_POLICY` only", "SCOPE_POLICY")).toBe(false);
-    expect(namesToken("`SCOPE_POLICY`", "SCOPE_POLICY")).toBe(true);
-    expect(namesToken("SCOPE_POLICY_X", "SCOPE_POLICY")).toBe(false);
   });
 
-  it("fails when a named constant is renamed inside S21 (PKI_SCOPE_POLICY stays)", () => {
+  it("fails when a named field is renamed inside S21 (PKI_SCOPE_POLICY stays)", () => {
     const mutated = itemText(siteText, "S21").replace(
-      /(?<![A-Za-z0-9_])SCOPE_POLICY(?![A-Za-z0-9_])/g,
-      "SCOPE_POLICY_RENAMED",
+      /(?<![A-Za-z0-9_])scopePolicy(?![A-Za-z0-9_])/g,
+      "scopePolicyRenamed",
     );
     expect(itemText(siteText, "S21")).toContain("PKI_SCOPE_POLICY");
-    expect(namesToken(mutated, "SCOPE_POLICY")).toBe(false);
+    expect(namesToken(mutated, "scopePolicy")).toBe(false);
   });
 
-  it("fails when the build-time row loses the constant", () => {
-    const mutated = siteText.replaceAll("`SCOPE_POLICY`", "`SCOPE_POLICY_RENAMED`");
-    expect(buildTableRow(mutated)).not.toContain("`SCOPE_POLICY`");
+  it("fails when the build-time row loses the field", () => {
+    const mutated = siteText.replaceAll("`scopePolicy`", "`scopePolicyRenamed`");
+    expect(buildTableRow(mutated)).not.toContain("`scopePolicy`");
   });
 
   it("fails when a file the doc names does not exist", () => {

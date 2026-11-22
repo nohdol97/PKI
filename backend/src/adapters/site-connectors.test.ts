@@ -2,10 +2,13 @@
 // placeholder yields not-implemented instead of violations (I01-R25, R26).
 import { checkConnector } from "@pki/testkit";
 import { expect, it } from "vitest";
-import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./site-connectors.ts";
+import { createSiteConnector } from "./site-connectors.ts";
 
-it.each(SITE_CONNECTOR_KINDS)("%s yields not-implemented from checkConnector", async (kind) => {
-  expect(await checkConnector(() => createSiteConnector(kind), { config: {} })).toEqual([
-    "not-implemented",
-  ]);
-});
+it.each(["site-mail", "site-messenger", "site-wiki"])(
+  "%s yields not-implemented from checkConnector",
+  async (kind) => {
+    expect(await checkConnector(() => createSiteConnector(kind), { config: {} })).toEqual([
+      "not-implemented",
+    ]);
+  },
+);

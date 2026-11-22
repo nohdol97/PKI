@@ -89,7 +89,7 @@ async function run() {
         origin: APP_ORIGIN,
         dataDir,
         fixtures,
-        // a build-time value in a production build, the environment's only in a source run (layout.ts, I04-R14)
+        // none in a production build (the registration's policy applies), the environment's only in a source run (layout.ts, I05-R15)
         scopePolicy: scopePolicyName(process.env),
         secrets,
         token,

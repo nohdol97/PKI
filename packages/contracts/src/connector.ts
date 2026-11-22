@@ -10,6 +10,12 @@ export const CONNECTOR_SDK_VERSION = 2;
 
 export const CONNECTOR_NOT_IMPLEMENTED = "미구현, 배포처 후속";
 
+/**
+ * The shape of a Connector kind name (I05-R7). One constant for the registration check and for the
+ * tombstone ledger's reader: a kind outside it is one whose source could not be deleted durably.
+ */
+export const CONNECTOR_KIND_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
+
 /** Raised by the public repository's placeholders for site Connectors (V01-R18). */
 export class ConnectorNotImplementedError extends Error {
   constructor() {

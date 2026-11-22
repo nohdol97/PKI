@@ -2,7 +2,8 @@
 import { LedgerReapplyError } from "@pki/knowledge-engine";
 import { IdentityKeyMissingError, LedgerUnavailableError } from "@pki/storage";
 import { describe, expect, it } from "vitest";
-import { startFailureReport } from "./start-failure.ts";
+import { SiteRegistrationInvalidError } from "./site-registration.ts";
+import { startFailureLine, startFailureReport } from "./start-failure.ts";
 
 describe("start.identity-key-text: startFailureReport", () => {
   it("names the missing identity key and nothing of the error", () => {
@@ -27,8 +28,58 @@ describe("start.identity-key-text: startFailureReport", () => {
       reason: "ledger-unavailable",
     });
   });
+  it("names a registration that stops the start by one fixed reason; the codes and counts go to the stderr line only (I05-R9)", () => {
+    const error = new SiteRegistrationInvalidError([
+      { code: "instance-kind-reserved", count: 2 },
+      { code: "instance-id-reserved", count: 1 },
+    ]);
+    expect(startFailureReport(error)).toEqual({
+      type: "failed",
+      reason: "site-registration-invalid",
+    });
+    expect(startFailureLine(error)).toBe(
+      "backend start failed: site-registration-invalid instance-kind-reserved=2 instance-id-reserved=1",
+    );
+    // the error's own message carries the same codes and counts, nothing the registration wrote
+    expect(error.message).toBe(
+      "site-registration-invalid instance-kind-reserved=2 instance-id-reserved=1",
+    );
+  });
   it("is the bare failure for any other error or none", () => {
     expect(startFailureReport(new Error("/home/u/secret.db"))).toEqual({ type: "failed" });
     expect(startFailureReport(undefined)).toEqual({ type: "failed" });
+  });
+});
+
+describe("startFailureLine prints no name a thrown value controls (security review W4)", () => {
+  it("names a known class and anything else as `other`", () => {
+    class Crafted extends Error {
+      override name = "AKIA-looking-secret-name";
+    }
+    expect(startFailureLine(new Crafted("x"))).toBe("backend start failed: other");
+    expect(startFailureLine(new TypeError("x"))).toBe("backend start failed: TypeError");
+    expect(startFailureLine("a string")).toBe("backend start failed: string");
+  });
+
+  it("survives a value whose name getter throws or whose prototype trap throws", () => {
+    const getter = Object.assign(new Error("x"), {});
+    Object.defineProperty(getter, "name", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    expect(startFailureLine(getter)).toBe("backend start failed: other");
+    const proxy = new Proxy(new Error("x"), {
+      getPrototypeOf() {
+        throw new Error("boom");
+      },
+    });
+    expect(startFailureLine(proxy)).toBe("backend start failed: other");
+  });
+
+  it("keeps the name of the project's own classes that carry a reason", () => {
+    expect(startFailureLine(new IdentityKeyMissingError())).toBe(
+      "backend start failed: IdentityKeyMissingError",
+    );
   });
 });
