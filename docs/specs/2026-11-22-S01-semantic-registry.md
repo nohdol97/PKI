@@ -1,0 +1,582 @@
+# 스펙: S01 Semantic 등록부·후보 검증·사용자 교정 보존
+
+- 날짜: 2026-11-22 / 상태: 초안
+- 관련: 이슈 #22(S01), 총괄 #1(설계 분석 7·8·9번), Phase 3 #5, 선행 #21(I04), 후속 #23(S02)·#24(S03)·#25(K01)·#29(P03)·#31(X02). [원 설계 6절](../design/original-design.md), [V02 spec](2026-11-21-V02-vertical-slice.md), [I04 spec](2026-11-21-I04-invalidation.md), [ARCHITECTURE.md](../ARCHITECTURE.md), [ADR 0002](../adr/0002-authority-in-product-records.md)·[0003](../adr/0003-phase1-without-engine.md)·[0013](../adr/0013-failure-recovery.md), [site-setup.md](../site-setup.md)
+
+낯선 말은 [ARCHITECTURE 0절](../ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다. 이 spec이 새로 쓰거나 뜻을 좁히는 말은 아래와 같다.
+
+| 말 | 뜻 |
+|---|---|
+| Semantic 등록부 | 제품이 아는 용어·개념·정의·관계와 그 유형 목록을, 각각 "지금 어떤 상태인가"와 함께 적어 둔 정본 기록. 새 저장소가 아니라 V02가 만든 항목·사실·관계 행에 이력과 규칙을 붙인 것이다. I04의 **파생물 등록부**(삭제할 때 무엇을 지울지 등록한 코드 목록)와 다른 것이므로 이 문서는 둘을 언제나 이 이름으로 구분해 부른다 |
+| 등록 행 | Semantic 등록부의 한 줄. 항목 하나, 사실 하나, 관계 하나, 또는 유형 정의 하나 |
+| 인식 유형 | 그 행을 **무엇에 기대어** 아는가. 명시 사실(`explicit`), 사용자 승인(`user-approved`), 추론(`inferred`), 가설(`hypothesis`) 넷. V02가 만든 `epistemic` 열이다 |
+| confidence | 모델이 스스로 매긴 0~1의 숫자. 인식 유형과 다른 열이고 서로 계산하지 않는다 |
+| 상태 | 그 행이 **지금 얼마나 받아들여졌는가**. `candidate`(후보), `verified`(검증됨), `disputed`(이의 있음), `superseded`(대체됨), `rejected`(기각됨) |
+| 입구 | 상태와 인식 유형을 바꾸는 하나뿐인 함수 묶음. 이 밖의 코드는 두 값을 고치지 못한다 |
+| 사용자 조치 | 사용자가 API로 한 승인, 기각, 이의, 값 고치기, 직접 추가, 취소 |
+| 사용자가 정한 행 | 취소되지 않은 사용자 조치가 이력에 하나라도 있는 행. 자동 처리는 이 행을 정해진 몇 가지 방법으로만 건드릴 수 있다 |
+| 사용자가 쓴 행 | 값을 사용자가 직접 입력한 행(`user_authored`). 원본에서 온 글이 아니므로 근거(원본의 한 구간)가 없어도 있을 수 있다 |
+| 표기 | 한 항목을 가리키는 글자열 하나. 동의어, 약어, 한영 표기가 모두 표기다 |
+| 유형 정의(ontology 요소) | "이런 종류의 항목이 있다", "이런 종류의 사실은 날짜 값을 갖는다", "이 관계는 A 유형에서 B 유형으로 향한다" 같은 규칙 하나 |
+
+## 배경
+
+원 설계 6절은 개인별 Semantic 지식을 제품의 핵심 자산으로 두고, 그것이 후보에서 검증으로 자라며, 사용자가 고친 것을 LLM이 근거 없이 덮어쓰지 못하게 하라고 요구한다. 총괄 이슈 #1의 설계 분석 7번은 그것을 세 가지로 좁혔다: 사용자 판단과 모델 confidence를 분리한다, 사용자 교정을 자동 재추출이 덮어쓰지 않는다, 자동 승격 조건을 명시한다.
+
+**지금 있는 것**(origin/main의 코드를 읽어 확인했다. 실행해 본 것은 아니다).
+
+- 항목·사실·관계 테이블은 이미 인식 유형 넷과 상태 다섯, 유효 시각, 관측 시각을 갖는다(`storage/src/migrations.ts`의 v5, `storage/src/knowledge.ts`). 정본 스키마는 v19다.
+- 추출은 모든 것을 `candidate`로 쓴다. 인식 유형은 사실이면 LLM이 고른 `explicit`이나 `hypothesis`, 항목과 관계는 언제나 `explicit`이다(`knowledge-engine/src/extraction.ts`, `providers/src/tasks.ts`).
+- 같은 행(V02-R8)이 다시 추출되면 근거만 더해지고 행의 상태와 인식 유형은 그대로다(`saveFact`·`saveRelation`의 `ON CONFLICT DO NOTHING`).
+- 상태를 바꾸는 코드는 두 곳뿐이다. 새 version이 와서 현재 근거를 잃은 행을 `superseded`로 바꾸는 전파(`knowledge-engine/src/canonical-kinds.ts`의 `setKnowledgeStatus`)와, 근거가 돌아온 `superseded` 행을 `candidate`로 되살리는 추출(`reviveSuperseded`).
+- 파생물 쓰기는 `commitDerived`(fence, 계보, 범위 정책)를 지나고, 삭제는 파생물 등록부의 전파가 맡는다(I04). 테이블마다 어느 종류의 것인지 분류되어 있고, 분류 안 된 테이블은 검사가 막는다(`backend/src/derivative-coverage.ts`).
+
+**없는 것.**
+
+1. **`verified`·`disputed`·`rejected`로 가는 길이 없다.** 사용자가 승인하거나 기각할 API가 없고 자동 승격도 없다. 다섯 상태 가운데 실제로 쓰이는 것은 둘이다.
+2. **변경 이력이 없다.** 상태가 언제, 누구에 의해, 무엇을 근거로 바뀌었는지 남지 않는다. 그래서 사용자 조치를 취소할 수 없다.
+3. **되살리기가 사용자 승인을 지운다.** `reviveSuperseded`는 대체되기 전의 상태를 모르므로 언제나 `candidate`로 되돌린다(V02 "T07이 넘기는 것" 4가 "V02에는 사용자 승인이 없다"며 미뤄 둔 것). 사용자가 승인한 사실은 원본이 한 번 바뀌었다 돌아오면 승인을 잃는다.
+4. **confidence를 둘 자리가 없다.** 어느 테이블에도 그 열이 없다.
+5. **표기와 정의를 둘 자리가 없다.** 항목은 이름 하나만 갖는다(`storage/src/candidates.ts`, V02 미해결 질문 6). 동의어, 약어, 한영 표기, 문맥마다 다른 정의를 기록하지 못한다.
+6. **유형 목록이 코드 상수다.** 항목 유형(`Project`, `System`), 사실 종류(`target_date`, `completion_date`), 관계 유형(`DEPENDS_ON`)이 `providers/src/tasks.ts`에 박혀 있다. 유형을 더하거나 방향·제약을 바꿀 때 기존 데이터가 어떻게 되는지 볼 장치가 없다.
+7. **사용자가 직접 입력한 값의 자리가 없다.** 지금의 삭제 규칙은 근거가 하나도 남지 않은 행을 지운다(I04-R8). 사용자가 쓴 값은 근거가 없으므로, 따로 표시하지 않으면 있을 수 없거나 지워진다. I04 spec의 잠정 결정 9는 이 자리를 S01에 넘겼다.
+
+**선행 작업의 상태.** 이슈 #22의 선행은 #21(I04)이고, #21은 2026-11-22 현재 열려 있다. 이 spec은 I04가 main에 들여온 `commitDerived`, 파생물 등록부, `ScopePolicy`, 읽기 검사(`visible`) 위에 쓴다. 구현 착수는 #21이 닫힌 뒤다(미해결 질문 1).
+
+**엔진 결정과의 관계.** 문서 색인은 Phase 3의 spec을 "R07의 엔진 결정 뒤"에 쓴다고 적어 두었다. R07은 배포처 실행을 기다리고 있어 그 전에 이 spec을 쓴다. ADR 0002가 "교정은 어느 경우든 제품이 갖는다"고 정했으므로 이 spec의 이력·사용자 조치·유형 정의는 엔진 결정과 상관없이 남는다. 항목·사실·관계 테이블 자체가 엔진으로 넘어가면(가정 A09) 요구사항 R1~R4의 저장 자리를 다시 정한다.
+
+## 목표
+
+1. 등록 행 하나의 상태는 정해진 전이로만 바뀌고, 바뀔 때마다 누가·언제·무엇을 근거로 바꿨는지가 남으며, 사용자 조치는 직전 상태로 취소할 수 있다.
+2. 자동으로 `verified`가 되는 조건이 문서와 코드에 한 벌로 적혀 있고, 그 조건을 하나라도 채우지 못한 승격은 이유와 함께 거부된다.
+3. 인식 유형과 confidence가 서로 다른 열에 있고 어느 쪽도 다른 쪽에서 계산되지 않는다.
+4. 사용자가 정한 행을 자동 처리가 근거 없이 바꾸지 못하고, 같은 원본을 몇 번 다시 추출해도 사용자의 승인·기각·고친 값이 그대로다.
+5. 한 항목의 동의어·약어·한영 표기와 문맥마다 다른 정의가 각각의 행으로 남고, 같은 글자의 표기가 서로 다른 항목에 붙어 있어도 합쳐지지 않는다.
+6. 유형·방향·제약을 바꾸려는 변경은 중복 검사, 모양 검사, 기존 데이터 영향 검사를 지나야 적용되고, 사용자가 아닌 쪽이 낸 변경은 후보로만 남는다.
+7. 위 기록은 모두 I04의 삭제·범위·fence 장치 위에 있다. 원본을 지우면 거기서 온 표기·정의·유형 후보도 함께 사라진다.
+
+## 비목표 (배포처에서 후속 진행)
+
+**공용 저장소의 뒤 작업으로 넘기는 것**
+
+- 개체 해소(같은 것을 가리키는 두 항목 찾기·합치기·되돌리기·나누기), 항목 이름 고치기, 동명이인 구분: S02(#23) S02-C2. S01은 유사도를 계산하지 않고 항목을 합치지 않는다.
+- 유형 목록 넓히기(Person, Organization, BusinessRule 등 열여섯 유형과 요청 관계 유형), 추출 지시문의 유형 목록을 등록부에서 만드는 일, LLM이 새 유형을 제안하는 추출 경로: S02(#23) S02-C1. S01은 그 변경이 지나야 하는 검사와 기록을 만든다.
+- 유효 시각의 구간(`valid_from`·`valid_until`), SUPERSEDES·CONTRADICTS·SUPPORTS 관계, 서로 어긋나는 값의 자동 발견, 여러 단계 근거: S02(#23) S02-C3. S01은 "근거를 들고 이의를 제기하는" 입구만 만든다.
+- Dataset·Grain·Measure·Metric·Join 같은 분석용 유형과, 실제 데이터 스키마 없이는 승격할 수 없다는 조건: S03(#24). S01의 자동 승격 조건은 S03이 조건을 더할 수 있는 모양으로 둔다(R9).
+- 여러 근거를 묶어 새로 쓴 정의(추론), Wiki 페이지: K01(#25)·K02(#26). S01의 정의는 원문에 있는 글 그대로다.
+- 사용자별 용어 사용 패턴(원 설계 6.1의 마지막 항목), 피드백으로 순위 바꾸기: P03(#29).
+- Semantic 화면(목록, 승인·기각 단추, 이력 보기): X02(#31). S01은 그 화면이 부를 API와 그 계약 테스트까지 만든다(잠정 결정 7).
+- 백업과 복원에서 사용자 조치 되살리기: H01(#32). 사용자 조치는 정본 SQLite에만 있고 다시 만들 수 없다(ARCHITECTURE 4절).
+
+**하지 않는 것**
+
+- 새 그래프·벡터·기억 엔진, 별도의 Semantic 저장소. 기록은 제품의 SQLite 행이다(ADR 0002, ADR 0003).
+- confidence 숫자로 상태를 정하는 일. 모델이 스스로 매긴 숫자는 보정되지 않았다.
+- 배포처 고유 용어 사전을 미리 넣어 두는 가져오기 기능. 사용자가 API로 추가할 수 있고, 요구가 관측되면 그때 정한다.
+- 여러 사용자. 사용자 조치의 주체는 이 PC의 한 사람이다(ARCHITECTURE 8절의 전제).
+
+**배포처 후속 항목**(1개. [site-setup.md의 배포처 설정 체크리스트](../site-setup.md#배포처-설정-체크리스트)와 번호로 대응한다. S23~S25는 I02-B의 초안이, S26·S27은 I05가 쓰고 있어 그다음 번호를 잡았다. 번호가 겹치게 되면 늦게 합쳐지는 쪽이 다시 매긴다)
+
+| 번호 | 항목 | 왜 배포처인가 |
+|---|---|---|
+| S28 | 설치본과 실제 Provider로 표기·정의 추출을 실행하고, 자동 승격을 켤지 정한다 | 자동 승격은 "믿어도 되는가"를 코드가 대신 판단하는 것이라, 실제 자료에서 틀린 승격이 얼마나 나오는지 재기 전에는 꺼 둔다(R9). 공용 저장소에는 실제 Provider도 실제 자료도 없다 |
+
+## 요구사항
+
+요구사항 번호는 `S01-R<n>`이다. 다른 spec의 번호를 가리킬 때는 `V02-R8`, `I04-R11`처럼 작업 코드를 붙인다.
+
+### 등록부의 모양
+
+- **S01-R1 등록 행은 V02의 행이다.** 항목·사실·관계 행이 곧 Semantic 등록부의 줄이다. 새 지식 테이블을 만들지 않는다. 원 설계 6.7의 필드는 아래처럼 대응한다.
+
+  | 6.7의 필드 | 어디에 있는가 |
+  |---|---|
+  | `id`, `type`, `name` | 항목의 `id`, `type`, `name` |
+  | `definition` | 그 항목의 사실 가운데 종류가 `definition`인 행들(R3) |
+  | `aliases` | 그 항목의 사실 가운데 종류가 `alias.*`인 행들(R2) |
+  | `attributes` | 그 항목의 나머지 사실 |
+  | `confidence` | 새 열 `confidence`(R10) |
+  | `status` | 기존 열 `status` |
+  | `evidence_refs` | 기존 `evidence` 테이블 |
+  | `created_at` | 기존 열 `observed_at` |
+  | `updated_at`, `version` | 이력의 마지막 줄의 시각과 순번(R6). 따로 열을 두지 않는다 |
+  | `valid_from` | 기존 열 `valid_at` |
+  | `valid_until` | 없음. S02가 정한다 |
+
+- **S01-R2 표기.** 한 항목의 다른 이름은 그 항목의 사실로 적는다. 종류는 셋이다: `alias.synonym`(동의어), `alias.abbreviation`(약어), `alias.translation`(다른 언어의 표기). 값은 표기 글자 그대로다.
+  - 표기는 원문에 **글자 그대로** 있어야 하고 그 자리가 근거가 된다. 코드가 인용문 안에 그 표기가 있는지 확인하며, 없으면 버리고 버린 수에 센다.
+  - 같은 항목에 같은 표기가 다시 오면 행을 더하지 않고 근거를 더한다. 같은지는 V02-R7의 가공(유니코드 정규화, 대소문자 통일, 공백 정리)을 거친 값으로 본다.
+  - **같은 글자의 표기가 서로 다른 항목에 붙을 수 있고, 그렇다고 두 항목을 합치지 않는다**(원 설계 6.1의 "같은 명칭이 다른 문맥에 나오면 무조건 합치지 않는다").
+- **S01-R3 개념과 문맥별 정의.** 항목 유형 `Concept`와 사실 종류 `definition`을 둔다. 정의의 값은 원문의 한 구간 그대로이고(값과 인용문이 같다), 길이는 코드 포인트 500 이하다. 넘으면 버린다. 사실 행에 `context` 열(짧은 꼬리표, 없을 수 있음)을 더해 그 정의가 어느 문맥의 것인지 적는다. 한 개념이 정의를 여럿 가질 수 있고, 정의마다 상태와 이력이 따로다.
+- **S01-R4 유형을 가리지 않는다.** 입구, 이력, 사용자 조치, 삭제 규칙은 항목 유형이나 사실 종류의 이름을 보지 않는다. 업무 규칙·프로세스·역할 같은 도메인 지식(원 설계 6.4)은 S02가 유형을 더하면 같은 장치를 그대로 지난다. S01이 더하는 유형은 `Concept`, `definition`, `alias.*`뿐이다.
+
+### 상태, 이력, 취소
+
+- **S01-R5 전이와 하나뿐인 입구.** 상태는 아래 표의 전이로만 바뀐다. 표에 없는 전이는 `invalid-transition`으로 거부된다. 상태와 인식 유형을 바꾸는 코드는 입구 하나이고(`storage`의 한 모듈), 입구를 지나지 않은 `UPDATE`는 스키마가 막는다(방식은 S01-T01이 정한다. 권장: 이력 줄이 먼저 있어야 통과하는 트리거). 지금의 `setKnowledgeStatus`와 `reviveSuperseded`는 입구로 옮기고 지운다.
+
+  | 전이 | 누가 | 조건 |
+  |---|---|---|
+  | `candidate` → `verified` | 사용자(승인) | — |
+  | `candidate` → `verified` | 정책(자동 승격) | R9의 조건 전부 |
+  | `candidate` → `rejected` | 사용자(기각) | — |
+  | `verified` → `disputed` | 사용자(이의) | — |
+  | `verified` → `disputed` | 자동 처리 | 근거로 삼는 원본 version을 넘김(R12) |
+  | `disputed` → `verified` | 사용자(승인) | — |
+  | `disputed` → `rejected` | 사용자(기각) | — |
+  | `candidate`·`verified`·`disputed` → `superseded` | 전파 | 현재 근거가 하나도 없게 됨(V02-R11 그대로) |
+  | `verified` → `superseded` | 사용자(값 고치기) | 고친 값의 행이 같은 조치에서 생김(R7) |
+
+  전이가 아닌 것이 셋 있다. 이들은 새 상태를 정하지 않고 **이력에 적힌 앞 상태를 되돌린다.**
+
+  | 복원 | 누가 | 무엇으로 돌아가는가 |
+  |---|---|---|
+  | 취소 | 사용자 | 그 사용자 조치 직전의 상태와 인식 유형(R8) |
+  | 근거 복귀 | 추출 | `superseded`가 되기 직전의 상태와 인식 유형. 이력이 없는 행(S01 이전의 것)은 `candidate` |
+  | 자동 승격의 근거 상실 | 정책 | 자동 승격 직전의 상태(`candidate`) |
+
+- **S01-R6 이력.** 생성과 모든 전이·복원·인식 유형 변경이 이력 한 줄을 남긴다. 한 줄은 대상 행, 대상 안에서의 순번(1, 2, 3…), 시각, 주체(`user`, `extraction`, `propagation`, `policy`), 조치 이름, 앞뒤 상태, 앞뒤 인식 유형, 이유 코드, 근거로 삼은 원본 version(있으면), 한 조치가 여러 행을 바꿀 때 그것을 묶는 번호, 복원이면 어느 순번을 되돌렸는지를 갖는다.
+  - **이력에는 글이 없다.** 이름, 값, 인용문, 외부 식별자를 담지 않는다. 고친 값은 행 자체에 있다.
+  - 이력은 고치거나 지울 수 없고(트리거), 대상 행이 지워질 때만 함께 지워진다. 그래서 지운 원본의 흔적이 이력에 남지 않는다.
+  - 이력 테이블은 대상의 종류마다 하나다(항목, 사실, 관계, 유형 정의). 파생물 분류에서는 그 대상과 같은 종류에 속한다(R20).
+  - S01 이전에 만들어진 행은 이력이 없다. 마이그레이션은 이력을 지어내지 않는다.
+- **S01-R7 사용자 조치.** 다섯 가지다.
+  - **승인**: `candidate`나 `disputed`를 `verified`로. 인식 유형이 `user-approved`가 된다.
+  - **기각**: `candidate`나 `disputed`를 `rejected`로. 인식 유형은 그대로다.
+  - **이의**: `verified`를 `disputed`로.
+  - **직접 추가**: 사용자가 쓴 행을 만든다(사실, 표기, 정의, 관계, 항목). `verified`, `user-approved`, `user_authored`로 생기고 근거가 없다.
+  - **값 고치기**: 사실 하나의 값을 사용자가 쓴 값으로 바꾼다. 같은 행을 고치지 않는다(같은 행 규칙 V02-R8 때문에 값이 다르면 다른 행이다). 새 값의 행을 "직접 추가"로 만들고, 옛 행을 물린다: `verified`였으면 `superseded`, `candidate`나 `disputed`였으면 `rejected`. 두 행의 변경은 한 조치로 묶인다.
+
+  사용자 조치를 만드는 함수는 API 층만 부를 수 있다. 작업 실행기와 추출 코드는 그 함수에 닿지 못한다(V01-R8의 사용자 조치 기록과 같은 생각이다. 방식은 S01-T02가 정한다. 권장: 저장 패키지의 별도 입구와 모듈 경계 lint).
+- **S01-R8 취소.** 취소는 한 행에 마지막으로 남은 이력이 사용자 조치일 때 그 조치를 되돌린다. 묶인 행이 있으면 함께 되돌린다.
+  - 되돌린 뒤의 상태와 인식 유형은 그 조치의 이력 줄에 적힌 앞 값이다. 새로 계산하지 않는다.
+  - 취소도 이력 한 줄이다(어느 순번을 되돌렸는지 적는다). 지나간 줄을 지우지 않는다.
+  - "직접 추가"의 취소는 그 행을 지운다. 그 사이 추출이 그 행에 근거를 붙였으면 지우지 않고 `candidate`·`hypothesis`로 두고 `user_authored`를 내린다(잠정 결정 6).
+  - 거부: 그 행의 마지막 이력이 사용자 조치가 아니면 `not-latest`(그 뒤에 전파나 다른 변경이 있었다), 이미 취소한 조치면 `nothing-to-undo`. 자동 처리가 한 변경은 취소 대상이 아니다.
+- **S01-R9 자동 승격의 조건.** 아래가 **모두** 참일 때만 정책이 `candidate`를 `verified`로 올린다. 하나라도 거짓이면 올리지 않고, 채우지 못한 조건의 목록을 돌려준다.
+  1. 설정 `semantic.autoVerify`가 켜져 있다. **기본값은 꺼짐이다**(잠정 결정 3).
+  2. 인식 유형이 `explicit`이다. 가설과 추론은 자동으로 승격하지 않는다.
+  3. **서로 다른 원본 둘 이상**의 현재 근거가 있다. 같은 원본의 여러 version, 내용 해시가 같은 두 원본은 하나로 센다. tombstone이 덮은 원본은 세지 않는다.
+  4. 사용자가 정한 행이 아니다.
+  5. 그 행의 유형 정의가 `verified`다(R17).
+  6. 값이 하나여야 하는 종류(유형 정의의 `cardinality`가 `one`)이면, 같은 항목에 같은 종류의 다른 값을 가진 유효한 행이 없다. "유효"는 V02-R9의 뜻이다.
+
+  confidence는 조건에 없다(R10). 판정은 추출이 근거를 붙인 뒤와 전파가 근거를 뗀 뒤, 같은 트랜잭션에서 한다. 자동으로 승격된 행이 조건 3이나 6을 잃으면 정책이 승격 직전의 상태로 되돌린다(R5의 복원). 조건 목록은 닫힌 목록이 아니다: S03은 분석용 유형에 "실제 스키마 검증"을 더한다.
+
+### 인식 유형과 confidence
+
+- **S01-R10 두 값은 따로다.** 항목·사실·관계에 `confidence` 열을 더한다. 0 이상 1 이하의 수이거나 비어 있다. Provider가 추출 응답에 준 숫자를 그대로 적고, 주지 않으면 비운다. 행이 처음 생길 때만 적는다(잠정 결정 5).
+  - 어떤 코드도 confidence에서 인식 유형이나 상태를 계산하지 않고, 인식 유형이나 상태에서 confidence를 계산하지 않는다.
+  - 사용자 승인, 기각, 자동 승격, 복원은 confidence를 바꾸지 않는다.
+  - 사용자가 쓴 행의 confidence는 비어 있다.
+- **S01-R11 인식 유형이 바뀌는 때.** 셋뿐이고 모두 입구를 지나 이력에 남는다. ① 사용자 승인은 `user-approved`로 바꾼다. ② `hypothesis` 행에 추출이 `explicit`이라고 밝힌 근거를 붙이면 `explicit`으로 올린다(사용자가 정한 행은 빼고). ③ 복원은 이력의 앞 값으로 되돌린다. `explicit`을 `hypothesis`로 내리는 자동 경로는 없다.
+
+### 사용자 교정의 보존
+
+- **S01-R12 자동 처리가 사용자가 정한 행에 할 수 있는 것.** 넷뿐이다. 그 밖의 변경은 `user-override`로 거부된다.
+  1. 전파가 현재 근거를 잃은 행을 `superseded`로 바꾼다. 근거는 그 원본의 새 version이다.
+  2. 근거가 돌아왔을 때 `superseded` 직전의 상태로 되돌린다. 사용자가 승인했던 행은 `verified`·`user-approved`로 돌아온다.
+  3. `verified`를 `disputed`로 바꾼다. **근거로 삼는 원본 version을 넘겨야 하고**, 넘기지 않으면 `basis-required`로 거부된다. 값을 바꾸거나 기각하지는 못한다. 결정은 사용자가 한다.
+  4. 원본 삭제의 전파가 행을 지운다(R14).
+- **S01-R13 다시 추출해도 그대로다.** 원본의 새 version이 와서 추출이 다시 돌 때:
+  - 사용자가 승인한 행은 상태, 인식 유형, confidence가 그대로다. 근거만 더해진다.
+  - 사용자가 기각한 행은 같은 값이 다시 추출되어도 `rejected`다.
+  - 사용자가 값을 고쳐 물린 옛 행은 같은 값이 다시 추출되어도 물린 상태 그대로이고, 사용자가 쓴 값의 행도 그대로다.
+  - 원본이 그 내용을 뺐다가 다시 넣으면, 사용자가 승인했던 행은 승인된 상태로 돌아온다(R12의 2).
+- **S01-R14 사용자가 쓴 행과 삭제.** 항목·사실·관계에 `user_authored` 열을 더한다. I04-R8의 재평가를 아래처럼 넓힌다.
+  - 근거가 모두 사라진 행은 지금처럼 지운다. **사용자가 승인만 한 행도 지운다**(I04 잠정 결정 9: 값이 지운 원본에서 왔다).
+  - 사용자가 쓴 행은 근거가 없어도 남는다. 계보가 없는 행이므로 상관없는 원본의 삭제에 걸리지 않는다(I04 계약 ③).
+  - **항목은 원본에서 온 사실이나 관계가 하나도 남지 않으면 지운다. 그 항목에 붙은 사용자가 쓴 행도 함께 지운다.** 항목의 이름이 지운 원본에서 왔기 때문이다. 다만 사용자가 직접 만든 항목(`user_authored`)은 남는다(잠정 결정 4).
+  - 함께 지워진 사용자가 쓴 행의 수는 무효화 기록(I04-R4)의 종류별 수에 들어간다.
+- **S01-R15 고친 값이 실제로 쓰인다.** "의존 업무 지연" 규칙(V02-R9)의 "유효"를 넓힌다: 상태가 `superseded`·`rejected`가 아니고, **현재 근거가 하나 이상이거나 사용자가 쓴 행이다.** Insight의 근거 목록에서 사용자가 쓴 행은 원본 구간 대신 "사용자 입력"이라는 표시로 나온다(글 없음).
+- **S01-R16 연결 후보에 쓰는 표기.** 추출 전의 연결 후보 찾기(V02-R7)는 항목의 이름에 더해 **`verified`인 표기**를 본다. `candidate`·`disputed`·`rejected`·`superseded`인 표기는 보지 않는다. 비교 방식(글자 그대로, 같은 가공)은 그대로다. ADR 0003의 3번 문장("별칭은 이미 기록된 이름과 사용자 교정에서만")을 이것으로 고친다(잠정 결정 8).
+
+### 추출
+
+- **S01-R17 추출 응답 스키마 3.** `extract` 작업의 스키마 version을 3으로 올린다.
+  - 항목 유형에 `Concept`를 더한다.
+  - `terms`: 항목, 표기, 표기의 종류(`synonym`, `abbreviation`, `translation`), 인용문.
+  - `definitions`: 항목, 인용문(이것이 곧 값이다), 문맥 꼬리표(없을 수 있음), 인식 유형(`explicit`이나 `hypothesis`).
+  - 사실·관계·표기·정의에 선택 항목 `confidence`(0~1).
+  - 원본 version 하나에 Provider 호출 1회, 형식 오류 재시도 1회라는 한계(ADR 0003의 1번)는 그대로다. 표기와 정의도 같은 한 번의 응답에서 온다.
+  - 응답 안의 글은 자료일 뿐 지시가 아니다. 인용문 대조, 버린 수의 기록, `commitDerived`를 지나는 쓰기는 V02·I04의 것을 그대로 쓴다.
+
+### 유형 정의(ontology)
+
+- **S01-R18 유형 정의의 기록.** 유형 정의를 정본 테이블에 둔다. 한 줄은 요소의 종류(`item-type`, `fact-kind`, `relation-type`), 이름, 규칙, 상태(같은 다섯), 판 번호(적용된 변경마다 1씩 오른다)를 갖는다.
+  - 이름은 식별자다: 영문자로 시작하고 영문자·숫자·`_`·`.`만 쓰며 40자 이하다. 지금의 `Project`, `DEPENDS_ON`, `target_date`, 새 `alias.synonym`이 모두 여기에 든다. 글이 들어갈 자리를 두지 않는다.
+  - 규칙은 종류마다 정해진 모양이다. 사실 종류: 붙을 수 있는 항목 유형, 값의 종류(`date`, `text`, `surface-form`), 값의 수(`one`, `many`). 관계 유형: 주체가 될 수 있는 항목 유형, 대상이 될 수 있는 항목 유형, 대칭 여부. **방향은 주체 유형에서 대상 유형으로다.**
+  - 처음 값(seed)은 지금 코드 상수에 있는 것과 R4의 것이며 모두 `verified`다. 추출 지시문의 목록(`providers/src/tasks.ts`)과 seed가 어긋나면 테스트가 실패한다.
+  - 유형 정의가 바뀌면 knowledge revision이 오른다.
+- **S01-R19 변경이 지나는 검사.** 유형 정의를 더하거나, 규칙(붙는 유형, 방향, 값의 종류, 값의 수, 대칭)을 바꾸거나, 물리는(`superseded`) 변경은 아래를 차례로 지난다. 검사만 하고 적용하지 않는 호출이 있다(화면이 결과를 먼저 보여 줄 수 있게).
+  1. **중복 검사.** 같은 종류에 같은 이름이 있는가. 대소문자와 `_`·`.`·`-`를 무시하고 비교한다. `rejected`와 `superseded`인 것도 중복이다.
+  2. **모양 검사.** 이름이 식별자인가, 규칙이 그 종류의 모양인가, 규칙이 가리키는 항목 유형이 있고 `verified`인가.
+  3. **기존 데이터 영향 검사.** 그 유형을 쓰는 살아 있는 행(`rejected`·`superseded`가 아닌 것)의 수와, 변경 뒤 규칙에 맞지 않게 될 행의 수를 센다. 방향을 뒤집는 변경은 살아 있는 행 전부를 맞지 않는 것으로 센다(뜻이 모두 뒤집히므로). 물리는 변경도 살아 있는 행 전부를 센다.
+
+  결과는 중복 목록, 모양 오류의 코드 목록, 영향(살아 있는 행 수, 맞지 않는 행 수)이다. **중복이 있거나, 모양 오류가 있거나, 맞지 않는 행이 하나라도 있으면 적용하지 않는다.** 제품은 기존 행을 스스로 고치거나 지우지 않는다. 사용자가 그 행들을 먼저 기각하거나, 다른 이름의 새 유형을 더한다(잠정 결정 9).
+- **S01-R20 사용자가 아닌 쪽이 낸 변경.** 추출 같은 자동 처리가 낸 변경은 검사를 지나도 **적용되지 않고 `candidate` 유형 정의로만 남는다.** 사용자가 승인해야 `verified`가 되어 쓰인다. 유형 정의는 자동 승격하지 않는다.
+  - 자동 처리는 근거로 삼는 원본 version을 넘겨야 하고, 그것이 그 후보의 계보다.
+  - 사용자가 기각한 이름을 자동 처리가 다시 내면 새 후보가 생기지 않는다(중복 검사가 흡수한다. R13과 같은 생각이다).
+  - S01에는 이 길로 변경을 내는 추출 경로가 없다(비목표의 S02). S01은 입구와 그 시험까지 만든다.
+- **S01-R21 쓰기 전에 유형 정의에 맞춘다.** 추출 결과를 쓸 때 항목 유형, 사실 종류, 관계 유형이 `verified`인 유형 정의에 있어야 하고, 사실의 값이 값의 종류에 맞아야 하며(지금 코드의 날짜 검사가 이것이 된다), 관계의 주체·대상 항목 유형이 방향에 맞아야 한다. 맞지 않으면 그것만 버리고 버린 수(`dropped_other`)에 센다. 값의 수 `one`은 쓰기를 막지 않고 자동 승격만 막는다(R9의 6. 어긋나는 값을 푸는 일은 S02다).
+
+### 기존 장치 위에 얹기
+
+- **S01-R22 쓰기, 삭제, 범위, 읽기.**
+  - 자동 처리의 쓰기는 모두 `commitDerived`를 지난다(I04-R11). fence, 계보, 범위 정책을 새로 만들지 않는다. 표기와 정의는 종류 `fact`의 항목이다.
+  - 새 테이블은 모두 `TABLE_CLASSIFICATION`에 분류한다. 이력 테이블은 그 대상의 종류에, 유형 정의 테이블과 그 계보 테이블은 새 종류 `ontology`에 속한다.
+  - 종류 `ontology`를 파생물 등록부에 등록한다(층은 knowledge). 원본이 지워지면 그 원본만이 계보인 `candidate`·`rejected` 유형 정의를 지운다. `verified`인 것은 남기고 계보 줄만 지운다(사용자가 제품의 규칙으로 받아들였고, 이름은 식별자뿐이다). 이 종류는 무효화 계약 묶음 ①~⑥을 통과한다.
+  - 표기, 정의, 문맥 꼬리표는 원본을 지운 뒤 파일에 남지 않는다(I04의 카나리 검사에 더한다).
+  - 새 읽기 API는 `visible`을 지난다(I04-R13). 사용자가 쓴 행의 범위는 그 행이 붙은 항목의 계보에서 계산한다. 사용자가 만든 항목과 거기에만 붙은 행은 계보가 비어 있다.
+- **S01-R23 API.** `packages/contracts`에 경로와 스키마를 더한다. 이름은 잠정이고 S01-T02·T07이 굳힌다.
+
+  | 경로 | 하는 일 |
+  |---|---|
+  | `GET /api/semantic` | 등록 행 목록: 항목과 그 표기·정의·사실·관계, 상태, 인식 유형, confidence, 근거 수, 사용자가 정했는지, 사용자가 썼는지 |
+  | `POST /api/semantic/history` | 행 하나의 이력 |
+  | `POST /api/semantic/decide` | 승인, 기각, 이의 |
+  | `POST /api/semantic/correct` | 직접 추가, 값 고치기 |
+  | `POST /api/semantic/undo` | 취소 |
+  | `GET /api/ontology` | 유형 정의 목록 |
+  | `POST /api/ontology/check` | 변경을 검사만 한다 |
+  | `POST /api/ontology/change` | 변경을 검사하고 적용한다 |
+  | `POST /api/ontology/decide` | 후보 유형 정의의 승인, 기각 |
+
+  거부는 코드로 답한다(`invalid-transition`, `user-override`, `basis-required`, `not-latest`, `nothing-to-undo`, `not-found`, 유형 정의는 `duplicate`, `schema-invalid`, `existing-data-violation`). 오류 응답에 이름·값·인용문을 싣지 않는다.
+
+### 문서와 배포처 경로
+
+- **S01-R24 문서.** 아래를 구현 작업이 자기 PR에서 고친다(이 spec의 커밋은 고치지 않는다).
+  - ARCHITECTURE: 3.2절 표의 "근거·시간·상태·교정 이력 관리" 줄에 입구와 이력을, 4절 표에 유형 정의와 이력을, 5.6절 등록표에 종류 `ontology`와 이력 테이블의 소속을 적는다.
+  - ADR: "Semantic 등록부는 기존 행 위의 이력과 입구이고, 사용자가 정한 행은 자동 처리가 넷으로만 건드린다"를 새 ADR로 남긴다. 번호는 합쳐지는 때의 다음 번호다(I02-B와 I05도 ADR을 더한다). ADR 0003의 3번 문장을 R16으로 고친다.
+  - site-setup.md: `## 배포처 설정 체크리스트` 아래에 S28을 더한다. 무엇을 실행하고 무엇을 기록하는지(표기·정의 추출의 종류별 수, 자동 승격을 켰을 때 조건을 채운 수와 그 가운데 사용자가 틀렸다고 본 수. 글은 기록하지 않는다)를 적는다.
+  - docs/README.md: 이 spec의 상태 칸.
+- **S01-R25 배포처 경로.** S28의 실행 경로(V02 배포처 검증 실행기의 Semantic 시나리오)를 Windows 설치본과 실제 Provider가 아닌 환경에서 실행하면 `배포처 후속`으로 시작하는 알림을 내고 0이 아닌 값으로 끝난다. 조용히 아무것도 하지 않는 일이 없다.
+
+## 인터페이스 / 설계 개요
+
+### 등록 행 하나의 상태
+
+실선은 전이, 꼬리표에 "복원"이 붙은 선은 이력의 앞 상태로 돌아가는 것이다. 어느 상태에서든 원본 삭제의 전파가 행을 지울 수 있다(그림에는 한 번만 그렸다).
+
+```mermaid
+stateDiagram-v2
+  [*] --> candidate: 추출이 씀
+  [*] --> verified: 사용자가 직접 추가
+  candidate --> verified: 사용자 승인 / 자동 승격(조건 전부)
+  candidate --> rejected: 사용자 기각
+  verified --> disputed: 사용자 이의 / 근거를 든 자동 이의
+  disputed --> verified: 사용자 승인
+  disputed --> rejected: 사용자 기각
+  candidate --> superseded: 현재 근거 없음
+  verified --> superseded: 현재 근거 없음 / 사용자가 값을 고침
+  disputed --> superseded: 현재 근거 없음
+  superseded --> candidate: 복원(근거 복귀)
+  superseded --> verified: 복원(근거 복귀)
+  superseded --> disputed: 복원(근거 복귀)
+  verified --> candidate: 복원(자동 승격의 근거 상실)
+  rejected --> [*]: 근거가 모두 사라지면 삭제
+```
+
+사용자 조치의 취소는 그림에 없다. 취소는 어느 화살표든 사용자가 그은 것을 거꾸로 되돌리는 것이고, 이슈 #22의 말대로 전이가 아니라 이력의 직전 상태 복원이다.
+
+### 교정한 뒤 다시 추출될 때
+
+사용자가 사실 하나를 승인하고 다른 하나의 값을 고친 뒤, 같은 원본의 새 version이 와서 추출이 다시 도는 경우다. 무엇이 입구를 지나고 무엇이 거부되는지가 이 spec의 핵심이라 순서로 그렸다.
+
+```mermaid
+sequenceDiagram
+  participant U as 사용자(API)
+  participant G as 입구
+  participant H as 이력
+  participant X as 추출 작업
+  participant C as commitDerived
+  U->>G: 사실 A 승인
+  G->>H: A: candidate→verified, user
+  U->>G: 사실 B의 값을 고침
+  G->>H: B: candidate→rejected, B′ 생성(한 묶음)
+  Note over X: 원본의 새 version 도착
+  X->>C: A·B와 같은 값의 사실, 새 근거
+  C->>G: A에 근거 추가(상태 변경 없음)
+  C->>G: B에 근거 추가(rejected 그대로)
+  X->>G: B′를 바꾸려는 자동 변경
+  G-->>X: 거부 user-override
+  U->>G: A 승인 취소
+  G->>H: A: 순번 2를 되돌림
+  G-->>U: candidate, 앞 인식 유형
+```
+
+### 입구의 모양
+
+이름과 모양은 잠정이다. S01-T01·T02가 코드 타입으로 굳히고 ARCHITECTURE 5.6절 옆에 옮긴다.
+
+```typescript
+type Actor = 'user' | 'extraction' | 'propagation' | 'policy'
+type EntryRef = { kind: 'item' | 'fact' | 'relation' | 'ontology'; id: number }
+type Basis = { sourceId: number; version: number }            // 근거로 삼는 원본 version. 글이 아니다
+type Refusal =
+  | 'invalid-transition' | 'user-override' | 'basis-required'
+  | 'not-latest' | 'nothing-to-undo' | 'not-found'
+type AutoVerifyCondition =
+  | 'disabled' | 'not-explicit' | 'independent-sources' | 'user-decided'
+  | 'type-unverified' | 'conflicting-value'
+type Outcome =
+  | { status: 'applied'; seq: number }                         // 이력의 순번
+  | { status: 'unchanged' }                                    // 이미 그 상태. 이력을 쓰지 않는다
+  | { status: 'refused'; reason: Refusal }
+  | { status: 'refused'; reason: 'auto-verify-unmet'; unmet: readonly AutoVerifyCondition[] }
+
+// 자동 처리가 쓰는 입구. 트랜잭션은 부르는 쪽(commitDerived의 write, 전파)이 연다.
+interface AutomatedLifecycle {
+  created(tx: SqlDriver, ref: EntryRef, actor: Actor, basis: Basis | null): void
+  supersede(tx: SqlDriver, ref: EntryRef, basis: Basis): Outcome            // 전파
+  evidenceReturned(tx: SqlDriver, ref: EntryRef, basis: Basis): Outcome     // 추출: superseded의 복원
+  explicitEvidence(tx: SqlDriver, ref: EntryRef, basis: Basis): Outcome     // 추출: hypothesis → explicit
+  raiseDispute(tx: SqlDriver, ref: EntryRef, basis: Basis | null): Outcome  // basis가 없으면 basis-required
+  assessAutoVerify(tx: SqlDriver, ref: EntryRef): Outcome                   // 정책: 승격하거나 되돌린다
+}
+
+// 사용자 조치의 입구. 구성 지점이 API 층에만 건넨다.
+interface UserDecisions {
+  decide(tx: SqlDriver, ref: EntryRef, action: 'approve' | 'reject' | 'dispute'): Outcome
+  add(tx: SqlDriver, entry: UserEntry): { ref: EntryRef; seq: number }
+  replaceValue(tx: SqlDriver, fact: EntryRef, value: string): { replaced: EntryRef; added: EntryRef } | { status: 'refused'; reason: Refusal }
+  undo(tx: SqlDriver, ref: EntryRef): Outcome
+}
+```
+
+### 유형 정의의 변경이 지나는 길
+
+```mermaid
+flowchart TD
+  P["변경 제안(더하기, 규칙 바꾸기, 물리기)"] --> D{"같은 이름이 있는가"}
+  D -- "있음" --> RD["거부: duplicate"]
+  D -- "없음" --> S{"이름과 규칙의 모양이 맞는가"}
+  S -- "아님" --> RS["거부: schema-invalid"]
+  S -- "맞음" --> I{"맞지 않게 될 기존 행이 있는가"}
+  I -- "있음" --> RI["거부: existing-data-violation(행 수를 알림)"]
+  I -- "없음" --> A{"누가 냈는가"}
+  A -- "사용자" --> OK["적용: verified, 판 번호 +1"]
+  A -- "자동 처리" --> CAND["candidate로만 기록(계보 = 근거 원본)"]
+  CAND --> UA{"사용자가 승인하는가"}
+  UA -- "승인" --> OK
+  UA -- "기각" --> REJ["rejected: 같은 이름의 재제안은 중복으로 흡수"]
+```
+
+```typescript
+type ElementKind = 'item-type' | 'fact-kind' | 'relation-type'
+type ElementRule =
+  | { elementKind: 'item-type' }
+  | { elementKind: 'fact-kind'; itemTypes: readonly string[]; valueType: 'date' | 'text' | 'surface-form'; cardinality: 'one' | 'many' }
+  | { elementKind: 'relation-type'; subjectTypes: readonly string[]; objectTypes: readonly string[]; symmetric: boolean }
+type OntologyChange =
+  | { op: 'add'; name: string; rule: ElementRule }
+  | { op: 'change-rule'; elementKind: ElementKind; name: string; rule: ElementRule }
+  | { op: 'retire'; elementKind: ElementKind; name: string }
+interface OntologyCheck {
+  duplicates: readonly { name: string; status: KnowledgeStatus }[]
+  schemaErrors: readonly string[]                       // 코드. 글이 아니다
+  impact: { liveRows: number; violations: number }
+  applicable: boolean                                   // 셋이 모두 비었을 때만 참
+}
+function checkOntologyChange(db: SqlDriver, change: OntologyChange): OntologyCheck
+```
+
+### 스키마 변경
+
+정본 스키마는 지금 v19다. S01은 마이그레이션을 **둘** 더한다. 번호는 합쳐지는 때의 다음 번호다. I02-B와 I05의 세션도 마이그레이션을 더할 수 있으므로, 늦게 합쳐지는 가지가 번호를 다시 매긴다(`migrations` 배열의 자리와 `migrations.test.ts`의 기대 version).
+
+| 마이그레이션 | 작업 | 내용 |
+|---|---|---|
+| 첫째 | S01-T01 | 항목·사실·관계에 `confidence`, `user_authored`. 사실에 `context`. 이력 테이블 셋(`item_history`, `fact_history`, `relation_history`)과 고칠 수 없게 하는 트리거. 입구를 지나지 않은 상태·인식 유형 변경을 막는 장치 |
+| 둘째 | S01-T06 | `ontology_elements`, `ontology_basis`(계보), `ontology_history`, seed, knowledge revision을 올리는 트리거 |
+
+기존 행은 `confidence` 빈 값, `user_authored` 0, `context` 빈 값으로 옮겨지고 상태와 인식 유형은 바뀌지 않는다.
+
+### 원 설계 6절을 누가 맡는가
+
+| 절 | S01 | 다른 작업 |
+|---|---|---|
+| 6.1 Vocabulary | 동의어, 약어, 한영 표기, 문맥에 따른 뜻의 차이(같은 표기를 합치지 않음), 고유 명칭(표기의 하나로) | 사용자별 사용 패턴: P03 |
+| 6.2 Concept | 개념 이름, 정의, 정의의 근거, 변경 이력 | 관련 용어·상하위 개념·연관 업무·관련 개체(관계 유형): S02 |
+| 6.3 Ontology | 유형 정의의 기록, 방향, 제약, "후보 → 중복 검사 → 유효성 검증", 최소 공통 유형의 seed | 유형 목록 넓히기, LLM의 새 유형 제안 경로: S02 |
+| 6.4 Domain Knowledge | 어떤 유형이든 같은 상태·이력·교정 장치를 지남(R4) | 도메인 유형 목록: S02 |
+| 6.5 Analytical Semantic | — | 전부 S03 |
+| 6.6 Discovery Pipeline | 표기 찾기, 개념·정의 추출, 후보 만들기, 검증, 등록부 갱신 | 개체 추출의 유형 넓히기·기존 지식 찾기·개체 해소·관계 추출: S02 |
+| 6.7 Lifecycle | 전부(다섯 상태, 네 인식 유형, 근거 없는 덮어쓰기 막기, 변경 이력). `valid_until`만 S02 | — |
+
+## 완료 기준 (테스트 가능한 형태)
+
+C1~C3은 이슈 #22의 문장 그대로다. H1·H2는 이 프로젝트가 배포처로 넘어가는 프로젝트라서 spec 양식이 요구하는 두 기준이다. 모든 기준은 저장소 안의 자동 테스트로 판정한다. 손으로 돌린 명령의 출력은 기준을 채운 것으로 치지 않는다.
+
+- [ ] **S01-C1** (R1, R5, R6, R7, R8, R9, R22, R23): 요청된 schema 및 candidate/verified/disputed/superseded/rejected 전이와 변경 감사 이력을 테스트한다. 자동 verified 승격 조건을 명시하고 조건을 채우지 못한 승격은 거부한다. 사용자 조치의 취소는 감사 이력의 직전 상태로 되돌린다.
+- [ ] **S01-C2** (R10, R11, R12, R13, R14, R15): 명시 사실·사용자 승인·추론·가설을 confidence 숫자와 별도로 저장한다. 근거 없는 user override 덮어쓰기를 거부한다.
+- [ ] **S01-C3** (R2, R3, R4, R16, R17, R18, R19, R20, R21, R22): 동의어/약어/한영 표기·문맥별 정의를 보존하고 ontology type/방향/제약 변경에 중복·schema·기존 데이터 영향 검사를 적용한다.
+- [ ] **S01-H1** (R24): 이 spec의 "배포처 후속 항목" 1개에 대해 site-setup.md의 `## 배포처 설정 체크리스트` 아래에 같은 번호의 항목이 있으면 통과하고, 없거나 수가 다르면 문서 대응 테스트가 실패한다.
+- [ ] **S01-H2** (R25): Semantic 시나리오 실행 경로를 Windows 설치본과 실제 Provider가 아닌 환경에서 실행하면 `배포처 후속`으로 시작하는 알림을 출력하고 0이 아닌 값으로 끝난다(경로 1건).
+
+**기준을 읽는 법**
+
+- **C1의 "요청된 schema"**는 원 설계 6.7의 필드이고, R1의 대응표가 그 답이다. `valid_until`은 S02로 넘겼다.
+- **C1의 "거부한다"**는 채우지 못한 조건의 이름이 돌아오는 것까지다. 조건마다 한 경우씩 시험한다.
+- **C2의 "별도로 저장"**은 열이 둘이라는 것과, 한쪽을 바꿔도 다른 쪽이 그대로라는 것, 승격 판정이 confidence를 읽지 않는다는 것이다.
+- **C2의 "근거 없는 덮어쓰기"**는 R12다. 근거가 있어도 자동 처리가 할 수 있는 것은 이의 제기까지다.
+- **C3의 "보존"**은 다시 추출해도, 다른 항목에 같은 표기가 있어도, 한 정의를 승인해도 나머지가 그대로라는 것이다.
+
+### 기준별 증명 테스트
+
+테스트 수준의 뜻은 [V01 spec](2026-11-21-V01-vertical-skeleton.md#기준별-증명-테스트)과 같다. "빨간 경우"는 그 테스트가 지키는 장치를 빼면 실패한다는 것을 테스트 안에서 보이는 경우다. 파일 자리는 예상이며 작업이 굳힌다. LLM을 부르는 테스트는 없다. Provider는 기존 대역(`packages/testkit`의 fixture 추출)을 쓰고 자료는 모두 합성이다.
+
+| 기준 | 테스트 | 수준 | 확인하는 것 |
+|---|---|---|---|
+| C1 | `schema.semantic-migration` | 단위 | v19 데이터베이스(행이 있는)를 올리면 새 열이 빈 값·0이고 상태와 인식 유형이 그대로. 이력 테이블이 비어 있음. 이력 행의 `UPDATE`·`DELETE`가 막힘. `storage/src/migrations.test.ts` |
+| C1 | `lifecycle.transitions` | 단위 | R5의 표를 그대로 돈다: (앞 상태 5) × (뒤 상태 5) × (주체 4)의 모든 조합에서 표에 있는 것만 적용되고 나머지는 `invalid-transition`. 항목·사실·관계 셋 모두. 빨간 경우: 입구를 지나지 않은 `UPDATE … SET status`가 실패함. `storage/src/semantic-lifecycle.test.ts` |
+| C1 | `lifecycle.history` | 단위 | 변경마다 이력이 정확히 한 줄(순번이 1씩 오름, 주체·앞뒤 상태·앞뒤 인식 유형·이유·근거 원본). `unchanged`는 줄을 남기지 않음. 대상 행을 지우면 이력도 사라짐. 이력의 모든 열에 fixture의 이름·값·인용문 문자열이 없음 |
+| C1 | `lifecycle.undo` | 통합 | 승인 → 취소가 `candidate`와 앞 인식 유형으로. 기각 → 취소, 이의 → 취소도 같음. 값 고치기 → 취소가 두 행을 함께 되돌림(새 행은 사라짐). 취소를 두 번 하면 `nothing-to-undo`. 그 뒤에 전파가 지나간 행의 취소는 `not-latest`. 자동 처리의 변경은 취소되지 않음. 근거가 붙은 "직접 추가"의 취소는 행을 남김 |
+| C1 | `autoverify.conditions` | 통합 | 여섯 조건이 모두 참이면 `verified`(주체 `policy`). **조건을 하나씩만 거짓으로 만든 여섯 경우** 각각에서 승격되지 않고 그 조건의 이름이 돌아옴. 같은 원본의 두 version, 내용 해시가 같은 두 원본은 하나로 셈. 근거 원본 하나를 지우면 `candidate`로 복원됨. 설정이 없으면(기본값) 승격이 일어나지 않음. `knowledge-engine/src/auto-verify.test.ts` |
+| C1 | `semantic.api` | 통합 | HTTP로 승인·기각·이의·취소·이력을 부르면 응답이 계약 스키마에 맞고 거부가 코드로 옴. 오류 응답에 fixture의 글이 없음. tombstone이 덮은 원본에서 온 행이 목록에 없음(`visible`). `backend/src/semantic-api.test.ts`, `api.contract` |
+| C1 | `lifecycle.actor-boundary` | 단위 | `knowledge-engine`과 작업 실행기의 코드가 사용자 조치의 입구를 가져오면 lint가 실패(임시 파일로 빨간 경우 1건) |
+| C2 | `epistemic.confidence-independent` | 단위 | 인식 유형 넷 × confidence(빈 값, 0, 0.5, 1)의 모든 조합이 그대로 저장되고 읽힘. 범위 밖의 수는 거부. 승인·기각·복원 뒤 confidence가 그대로. confidence만 0.01과 0.99로 다른 두 행의 자동 승격 판정이 같음. 사용자가 쓴 행의 confidence는 빈 값 |
+| C2 | `epistemic.changes` | 통합 | `hypothesis` 행에 `explicit` 근거가 붙으면 `explicit`으로 오르고 이력에 남음. `explicit` 행에 `hypothesis` 근거가 붙어도 그대로. 사용자가 정한 행은 오르지 않음 |
+| C2 | `user-override.guard` | 단위 | 사용자가 정한 행에 대해: 근거 없는 자동 이의는 `basis-required`. 근거를 넘긴 자동 이의는 `disputed`가 되고 값과 인식 유형은 그대로. 자동 처리의 기각·승격·인식 유형 변경은 `user-override`. 사용자가 정하지 않은 행에서는 같은 호출이 표대로 동작 |
+| C2 | `reextract.preserve` | 통합 | 승인, 기각, 값 고치기, 직접 추가를 한 뒤 같은 원본의 새 version을 다시 추출하면 네 경우 모두 상태·인식 유형·값이 그대로. 물린 옛 값이 `candidate`로 돌아오지 않음. 원본이 내용을 뺐다가 다시 넣으면 승인했던 행이 `verified`·`user-approved`로 돌아옴. 빨간 경우: 복원을 지금의 `reviveSuperseded` 동작(언제나 `candidate`)으로 바꾸면 실패. `knowledge-engine/src/reextract-preserve.test.ts` |
+| C2 | `correction.deletion` | 통합 | 원본을 지우면: 근거가 모두 사라진 사용자 승인 행은 지워짐(I04 `reevaluate` 그대로). 다른 원본의 근거가 남은 항목에 붙은 사용자가 쓴 행은 남음. 원본에서 온 행이 하나도 안 남은 항목과 거기 붙은 사용자가 쓴 행은 지워지고 그 수가 무효화 기록에 있음. 사용자가 만든 항목은 남음. 파일에 지운 원본의 카나리가 없음 |
+| C2 | `correction.effective` | 통합 | Y의 완료일을 사용자가 X의 목표일보다 늦은 날로 고치면 Insight가 생기고, 이른 날로 고치면 해소됨. 취소하면 앞 결과로 돌아감. 근거 API가 그 행을 "사용자 입력"으로 표시하고 원본 구간을 싣지 않음 |
+| C3 | `extract.v3` | 단위·통합 | 스키마 3의 응답이 읽히고 Provider 호출이 1회. 인용문에 없는 표기, 500을 넘는 정의, 범위 밖의 confidence는 그것만 버려지고 버린 수에 셈. `providers`의 스키마 테스트와 `knowledge-engine/src/extraction.test.ts` |
+| C3 | `vocabulary.forms` | 통합 | 동의어·약어·한영 표기가 각자의 종류로 저장되고 근거가 그 자리를 가리킴. 대소문자만 다른 같은 표기는 행이 늘지 않고 근거가 늘어남. **같은 표기가 두 항목에 붙어 있으면 행이 둘이고 항목이 합쳐지지 않음.** 다시 추출해도 행 수가 같음 |
+| C3 | `definition.contexts` | 통합 | 한 개념에 문맥이 다른 정의 둘이 각자의 행으로 남고 꼬리표가 읽힘. 하나를 승인해도 다른 하나는 `candidate`. 하나를 기각한 뒤 다시 추출해도 `rejected`. 정의의 값이 인용문과 같음 |
+| C3 | `linking.verified-forms` | 통합 | 원문에 `verified` 표기가 글자 그대로 있으면 그 항목이 연결 후보로 감. `candidate`·`rejected` 표기만 있으면 가지 않음. V02의 `linking`이 그대로 통과 |
+| C3 | `ontology.checks` | 단위 | 중복: 대소문자·구분자만 다른 이름, `rejected`인 이름. 모양: 식별자가 아닌 이름, 없는 항목 유형을 가리키는 규칙, 닫힌 목록 밖의 값의 종류. 영향: 살아 있는 행이 있는 관계 유형의 방향 뒤집기(행 수가 맞음), 주체 유형 좁히기(맞지 않는 행 수가 맞음), 값의 수 `many`→`one`(값이 둘인 항목 수가 맞음), 살아 있는 행이 있는 유형 물리기. 각각 적용되지 않고 데이터가 그대로. 넓히는 변경은 적용되고 판 번호가 1 오르며 knowledge revision이 오름. 검사만 하는 호출은 아무것도 바꾸지 않음 |
+| C3 | `ontology.candidates` | 통합 | 자동 처리가 낸 변경은 검사를 지나도 `candidate`로만 남고 쓰기에 쓰이지 않음. 근거 원본 없이 내면 거부. 사용자가 승인하면 쓰임. 사용자가 기각한 이름을 다시 내도 새 후보가 생기지 않음. 유형 정의에는 자동 승격이 일어나지 않음 |
+| C3 | `ontology.enforce` | 통합 | 추출 결과 가운데 `verified`가 아닌 유형, 값의 종류에 맞지 않는 값, 방향에 맞지 않는 관계는 그것만 버려지고 버린 수에 셈. seed가 추출 지시문의 목록과 같음(어긋나면 실패). 새 항목 유형을 변경 경로로 더한 뒤 그 유형의 항목이 승인·취소·삭제를 같은 장치로 지남(R4) |
+| C3 | `derivatives.contract`(종류 `ontology`) | 단위·통합 | 종류 `ontology`의 실제 구현이 무효화 계약 묶음 ①~⑥을 통과. 원본을 지우면 그 원본만이 계보인 후보가 사라지고 `verified`인 것은 남음 |
+| C1, C3 | `derivatives.schema-coverage` | 단위 | 새 테이블 여섯이 모두 분류되어 기존 검사가 그대로 통과. `backend/src/derivative-coverage.test.ts` |
+| C3 | `purge.canary-files`(더함) | 통합 | 카나리에 표기, 정의, 문맥 꼬리표를 더해도 삭제 뒤 파일에 없음 |
+| H1 | `docs.site-setup` | 단위 | 비목표 표의 번호 1개가 체크리스트에 있음. `tooling/docs/site-setup-s01.test.ts` |
+| H2 | `site-paths.refuse`(Semantic) | 통합 | 그 경로에서 알림 문자열과 0이 아닌 종료 값 |
+
+### 사외에서 충족할 수 있는 것, 배포처 실행을 기다리는 것
+
+| 기준 | 사외 | 남는 것 |
+|---|---|---|
+| C1 | **충족 가능**(개발 OS, 대역 Provider) | 자동 승격을 실제 자료에서 켰을 때의 정밀도(S28). 화면에서의 조작(X02) |
+| C2 | **충족 가능** | 실제 Provider가 주는 confidence의 분포. 백업 복원 뒤 사용자 조치의 보존(H01) |
+| C3 | **부분.** 저장, 검사, 보존은 충족 가능 | 실제 Provider가 표기와 정의를 인용문 그대로 돌려주는지와 그 품질(S28). LLM이 새 유형을 제안하는 경로(S02) |
+| H1, H2 | **충족 가능** | — |
+
+## 작업 분해
+
+한 작업이 PR 하나다. 모든 작업은 이슈 #21(I04)이 닫힌 뒤에 시작한다. 테스트는 작업마다 먼저 실패하는 것으로 쓰고 구현을 붙인다. 각 작업의 테스트는 그 작업과 그 앞 작업만으로 돈다.
+
+**가장 짧은 끝에서 끝까지의 길은 T01 → T02다.** 이 둘이 끝나면 "추출된 사실 → API로 승인 → 이력 → 취소"가 실제 HTTP 경로로 돈다. 나머지는 그 위에 얹는다.
+
+**함께 진행할 수 있는 것**(각자의 worktree에서). T01 뒤에 T02와 T06이 함께 간다. T02 뒤에는 T03 → T04가, T06 뒤에는 T05와 T07이 함께 가고 T07 뒤에 T08 → T09가 간다. T10은 마지막이다. 두 줄기가 같은 파일을 만지는 자리는 표 아래에 적었다.
+
+```mermaid
+flowchart LR
+  T01["T01 입구, 이력, 마이그레이션 1"] --> T02["T02 사용자 조치, 취소, API"]
+  T01 --> T06["T06 유형 정의, 검사, 마이그레이션 2"]
+  T02 --> T03["T03 직접 추가, 값 고치기, 재추출 보존"]
+  T03 --> T04["T04 삭제 규칙, 고친 값의 효력"]
+  T06 --> T05["T05 자동 승격"]
+  T06 --> T07["T07 쓰기 전 유형 검사, 유형 API"]
+  T07 --> T08["T08 추출 스키마 3: 표기와 정의"]
+  T08 --> T09["T09 연결 후보의 표기"]
+  T04 --> T10["T10 문서와 배포처 경로"]
+  T05 --> T10
+  T09 --> T10
+```
+
+| ID | 내용 | 요구사항 | 기준 | 선행 | 예상 파일·패키지 | 테스트 |
+|---|---|---|---|---|---|---|
+| S01-T01 | **마이그레이션 1**(새 열 셋, 이력 테이블 셋, 변경을 막는 장치). 입구(`AutomatedLifecycle`)와 전이 표. 전파의 `superseded`와 추출의 되살리기를 입구로 옮기고 되살리기를 "직전 상태 복원"으로 바꿈. `setKnowledgeStatus`·`reviveSuperseded` 삭제. 생성 이력. 이력 테이블 분류 | R1, R5, R6, R10(열), R11 | C1, C2 | #21 닫힘 | `storage/src/migrations.ts`, `storage/src/semantic-lifecycle.ts`(새 파일), `storage/src/knowledge.ts`, `knowledge-engine/src/canonical-kinds.ts`, `knowledge-engine/src/extraction.ts`, `backend/src/derivative-coverage.ts` | `schema.semantic-migration`, `lifecycle.transitions`, `lifecycle.history`, `epistemic.confidence-independent`(저장 부분), `epistemic.changes`, `derivatives.schema-coverage`, V02의 `update.recompute`와 I04의 `reevaluate` 유지 |
+| S01-T02 | 사용자 조치 셋(승인, 기각, 이의)과 취소, 사용자가 정한 행의 보호(R12), 사용자 입구를 API 층에만 건네는 장치, 읽기·조치 API와 계약 | R7(셋), R8, R12, R22(읽기), R23 | C1, C2 | S01-T01 | `storage/src/semantic-user.ts`(새 파일), `packages/contracts/src/index.ts`, `backend/src/server.ts`, `backend/src/composition.ts`, `tooling/eslint/module-boundary.js` | `lifecycle.undo`(승인·기각·이의), `user-override.guard`, `semantic.api`, `lifecycle.actor-boundary` |
+| S01-T03 | 직접 추가와 값 고치기(묶음, 취소 포함), 다시 추출해도 그대로임을 고정하는 시험 | R7(둘), R8(묶음), R13 | C1, C2 | S01-T02 | `storage/src/semantic-user.ts`, `backend/src/server.ts`, `packages/contracts/src/index.ts`, `knowledge-engine/src/reextract-preserve.test.ts` | `lifecycle.undo`(값 고치기, 직접 추가), `reextract.preserve` |
+| S01-T04 | 사용자가 쓴 행의 삭제 규칙(재평가와 항목 삭제를 넓힘), 규칙의 "유효"를 넓힘, 근거 API의 "사용자 입력" 표시 | R14, R15 | C2 | S01-T03 | `knowledge-engine/src/canonical-kinds.ts`, `knowledge-engine/src/dependency-delay.ts`, `storage/src/evidence-view.ts`, `packages/contracts/src/index.ts` | `correction.deletion`, `correction.effective`, `purge.canary-files`(유지) |
+| S01-T05 | 자동 승격: 설정 `semantic.autoVerify`(기본 꺼짐)와 설정 API, 여섯 조건, 근거 상실 때의 복원, 추출과 전파 뒤의 판정 호출 | R9 | C1 | S01-T01, S01-T06 | `knowledge-engine/src/auto-verify.ts`(새 파일), `knowledge-engine/src/extraction.ts`, `knowledge-engine/src/canonical-kinds.ts`, `backend/src/server.ts`(설정) | `autoverify.conditions`, `epistemic.confidence-independent`(판정 부분) |
+| S01-T06 | **마이그레이션 2**(유형 정의, 계보, 이력, seed). 변경 검사 셋과 적용, 자동 처리의 후보, 종류 `ontology`의 등록과 분류 | R18, R19, R20, R22(종류) | C3 | S01-T01 | `storage/src/migrations.ts`, `storage/src/ontology.ts`(새 파일), `knowledge-engine/src/canonical-kinds.ts`(등록), `backend/src/derivative-coverage.ts`, `packages/testkit`(계약 묶음에 종류 추가) | `ontology.checks`, `ontology.candidates`, `derivatives.contract`(종류 `ontology`), `derivatives.schema-coverage` |
+| S01-T07 | 추출 결과를 쓰기 전에 유형 정의에 맞춤(지금의 날짜 검사를 값의 종류 검사로), seed와 지시문 목록의 대조, 유형 정의 API | R4, R21, R23(유형) | C3 | S01-T06 | `knowledge-engine/src/extraction.ts`, `packages/contracts/src/index.ts`, `backend/src/server.ts` | `ontology.enforce`, `semantic.api`(유형 경로), V02의 추출 테스트 유지 |
+| S01-T08 | 추출 스키마 3(`Concept`, `terms`, `definitions`, `confidence`), 표기와 정의의 쓰기(인용문 대조, 같은 표기 판정, 문맥 꼬리표), 합성 fixture와 합성 목록 갱신 | R2, R3, R10(쓰기), R17 | C3, C2 | S01-T07 | `providers/src/tasks.ts`, `knowledge-engine/src/extraction.ts`, `packages/testkit/src/fixture-extraction.ts`, `fixtures/`, 합성 목록 | `extract.v3`, `vocabulary.forms`, `definition.contexts`, `purge.canary-files`(더함) |
+| S01-T09 | 연결 후보가 `verified` 표기를 봄. ADR 0003의 3번 문장 고침 | R16 | C3 | S01-T08 | `storage/src/candidates.ts`, `knowledge-engine/src/linking.ts`, `docs/adr/0003-phase1-without-engine.md` | `linking.verified-forms`, V02의 `linking`과 I04의 `egress.derived-grade` 유지 |
+| S01-T10 | 문서(ARCHITECTURE 3.2·4·5.6절, 새 ADR, site-setup S28, 문서 색인), 문서 대응 테스트, 배포처 실행기의 Semantic 시나리오와 거부 | R24, R25 | H1, H2 | S01-T04, S01-T05, S01-T09 | `docs/`, `tooling/docs/site-setup-s01.test.ts`(새 파일), `verification/v02-site-flow/` | `docs.site-setup`, `site-paths.refuse`(Semantic) |
+
+**같은 파일을 만지는 자리**
+
+- `storage/src/migrations.ts`와 `storage/src/migrations.test.ts`: T01과 T06. T01이 먼저 합쳐지므로 S01 안에서는 겹치지 않는다. **다른 세션(I02-B, I05)이 마이그레이션을 더하면 늦게 합쳐지는 쪽이 번호를 다시 매긴다.**
+- `backend/src/derivative-coverage.ts`: T01과 T06(줄을 더할 뿐이다).
+- `packages/contracts/src/index.ts`와 `backend/src/server.ts`: T02, T03, T04, T05, T07. 경로를 더하는 줄이 붙어 있어 리베이스에서 겹칠 수 있다.
+- `knowledge-engine/src/extraction.ts`: T01, T05, T07, T08. T07 → T08은 한 줄기라 차례대로다. T05는 판정 호출 한 줄을 더한다.
+- `knowledge-engine/src/canonical-kinds.ts`: T01, T04, T05, T06.
+
+## 잠정 결정
+
+사용자에게 묻지 않고 정한 것이다. 모두 되돌릴 수 있고, 바꾸는 방법을 함께 적었다.
+
+1. **Semantic 등록부를 새 테이블로 만들지 않고 V02의 항목·사실·관계 행 위에 얹는다.** 이유: 그 행들이 이미 인식 유형과 상태를 갖고, 근거·삭제·범위·fence 장치가 그 행들에 맞춰져 있다. 표기와 정의를 사실의 종류로 두면 근거 테이블을 고치지 않아도 된다. 바꾸려면: R1~R3의 저장 자리를 새 테이블로 옮기고 종류를 파생물 등록부에 새로 등록한다. 입구, 이력, 사용자 조치의 규칙은 그대로다.
+2. **상태 그림은 이슈 #22의 것에 V02가 이미 하는 전이를 더한 것이다.** 이슈의 그림에는 `candidate`·`disputed` → `superseded`와 `superseded`에서 돌아오는 길이 없지만 V02-R11이 그렇게 동작하고 그 테스트가 있다. 돌아오는 길은 "전이"가 아니라 "복원"으로 적어 이슈의 문장("취소는 전이가 아니라 직전 상태 복원")과 같은 생각으로 맞췄다. `verified`에서 바로 `rejected`로 가는 길은 이슈의 그림대로 두지 않았다(이의를 거친다). 바꾸려면: R5의 표에 줄을 더한다.
+3. **자동 승격은 기본값이 꺼짐이다.** 이유: 조건은 결정론이지만 "서로 다른 원본 둘"이 실제 자료에서 충분한지 재 본 적이 없다. 틀린 승격은 사용자가 믿는 표시를 더럽힌다. 조건과 시험은 모두 만들고, 켜는 것은 S28의 측정 뒤로 둔다. 바꾸려면: 설정의 기본값 한 줄.
+4. **사용자가 쓴 행은 그 행이 붙은 항목이 사라지면 함께 사라진다. 사용자가 직접 만든 항목만 남는다.** 이유: 항목의 이름은 원본에서 왔다. 사용자가 쓴 행을 남기려고 그 항목을 남기면 지운 원본의 글(이름)이 남는다. 삭제의 약속(I04-C3)이 교정의 보존보다 앞선다. 영향: 원본을 모두 지운 항목에 사용자가 적어 둔 값은 사라진다(그 수는 무효화 기록에 남는다). 바꾸려면: 사용자가 항목의 이름을 "내 것으로" 확인하는 조치를 더해 그 항목을 `user_authored`로 바꾼다.
+5. **confidence는 행이 처음 생길 때만 적는다.** 이유: 같은 행이 다시 추출될 때 쓰기는 근거만 더한다(V02-R8). 숫자를 갱신하려면 "어느 추출의 숫자가 그 행의 숫자인가"를 정해야 하는데 그것을 쓰는 곳이 아직 없다. 바꾸려면: 근거 줄마다 confidence를 두는 열을 더한다.
+6. **"직접 추가"를 취소할 때 그 사이 근거가 붙었으면 행을 `candidate`·`hypothesis`로 남긴다.** 이유: 근거가 있는 행을 지우면 원본이 말한 것을 잃는다. 추출이 밝힌 인식 유형은 그 행이 이미 있어서 기록되지 않았으므로 가장 조심스러운 값을 쓴다. 다음에 `explicit` 근거가 붙으면 오른다(R11).
+7. **화면은 만들지 않고 API와 계약 테스트까지 만든다.** 이유: Semantic 화면은 X02(#31)의 범위다. 영향: X02 전에는 사용자가 실제로 승인할 길이 API뿐이다. 바꾸려면: Home에 후보 목록과 단추 둘을 더하는 작업을 T02 뒤에 하나 넣는다.
+8. **연결 후보에는 `verified` 표기만 쓴다.** 이유: 후보의 이름은 Provider로 나간다. LLM이 한 번 내놓은 표기로 다른 원본의 추출을 그 항목에 끌어당기면 틀린 표기 하나가 퍼진다. ADR 0003이 "별칭은 기록된 이름과 사용자 교정에서만"이라고 한 뜻을 "사용자가 승인했거나 조건을 채워 승격된 표기"로 옮긴 것이다. 바꾸려면: R16의 상태 목록.
+9. **기존 행을 어기게 만드는 유형 변경은 적용하지 않는다(강제하는 선택지가 없다).** 이유: 방향이나 제약을 바꾸면서 기존 행을 제품이 고치거나 지우면 사용자가 모르는 사이 지식이 바뀐다. 사용자가 그 행들을 먼저 기각하거나 새 이름의 유형을 더하면 된다. 바꾸려면: 영향 받는 행을 함께 물리는 선택지를 R19에 더한다.
+10. **정의는 원문의 글 그대로다.** 이유: 값과 인용문이 같으면 코드가 대조할 수 있고 지어낸 정의가 들어올 길이 없다. 여러 근거를 묶은 정의는 K01·K02의 일이다.
+11. **주체는 넷이다(`user`, `extraction`, `propagation`, `policy`).** 결정론 규칙(V02-R9)은 Insight만 쓰고 등록 행의 상태를 바꾸지 않으므로 주체에 없다. S02가 충돌을 찾는 규칙을 더하면 주체를 더한다.
+
+## 대안과 기각 사유
+
+| 대안 | 기각 사유 |
+|---|---|
+| Semantic 등록부를 별도 테이블 묶음(용어, 개념, 정의)으로 | 근거 테이블이 사실과 관계만 가리킨다. 새 테이블에 근거를 붙이려면 근거 테이블을 다시 만들고, 삭제·범위·fence를 새 종류마다 다시 등록해야 한다. 같은 일을 하는 장치가 둘이 된다 |
+| 이력을 한 테이블에 대상 종류와 ID로 | 외래 키를 걸 수 없어 대상이 지워질 때 이력이 남는다. 지운 원본의 흔적을 손으로 치워야 하고, 테이블 분류가 "한 테이블은 한 종류"라는 지금 규칙에 맞지 않는다 |
+| 이력에 앞뒤 값을 글로 저장 | 지운 원본의 글이 이력에 남는다. 고친 값은 행으로 남으므로 이력에 글이 필요 없다 |
+| 상태를 이력에서 매번 계산(event sourcing) | 읽기마다 이력을 접어야 하고 V02·I04의 모든 질의가 상태 열을 본다. 얻는 것이 없다 |
+| confidence가 문턱을 넘으면 자동 승격 | 모델이 스스로 매긴 숫자는 보정되지 않았고 Provider마다 다르다. 설계 분석 7번이 둘을 분리하라고 했다 |
+| 사용자가 승인한 행은 원본이 바뀌어도 `superseded`로 바꾸지 않음 | 원본이 더는 그렇게 말하지 않는데 "검증됨"으로 남는다. 사용자가 승인한 것은 "원본이 말한 그것"이다. 대신 원본이 다시 말하면 승인된 상태로 돌아오게 했다 |
+| 사용자가 쓴 행은 무엇이 지워져도 남김 | 잠정 결정 4의 이유. 지운 원본의 항목 이름이 남는다 |
+| 유형 정의를 설정 파일이나 코드 상수로 유지 | 변경 이력, 후보 상태, 기존 데이터 영향 검사를 둘 자리가 없다. 원 설계 6.3이 사용자 자료에서 유형이 자란다고 했다 |
+| LLM이 새 유형을 제안하는 추출 경로까지 S01에서 | 지시문의 유형 목록을 넓히는 일(S02-C1)과 한 몸이다. S01은 그 제안이 지나야 하는 입구와 시험을 먼저 만든다 |
+| 지식 엔진(KnowledgeEngine 어댑터 뒤)에 상태와 교정을 맡김 | ADR 0002: 교정은 어느 경우든 제품이 갖는다. 조사에서 사용자 교정 보존은 어느 엔진에서도 평가되지 않았다 |
+
+## 미검증 범위
+
+- **기존 동작에 대한 서술은 origin/main의 코드를 읽은 것이다.** 테스트를 돌려 확인하지 않았다. 특히 "같은 행이 다시 추출되면 상태가 그대로"와 "전파가 `superseded`로 바꾸는 조건"은 `storage/src/knowledge.ts`와 `knowledge-engine/src/canonical-kinds.ts`를 읽은 결과다.
+- **입구를 지나지 않은 `UPDATE`를 스키마로 막는 방식**은 권장만 적었고 SQLite에서 시험하지 않았다. T01이 정한다. 트리거로 되지 않으면 lint와 계약 테스트로 내리고 R5의 문장을 고친다.
+- **실제 Provider가 표기와 정의를 인용문 그대로 돌려주는가**, 스키마 3의 지시문이 한 번의 호출에 들어가는가는 모른다. 대역 Provider로는 알 수 없다(S28).
+- **자동 승격 조건의 정밀도**는 재지 않았다. "서로 다른 원본 둘"이라는 숫자는 근거가 있는 문턱이 아니라 출발값이다.
+- **성능**: 이력 줄이 행마다 붙고 판정이 쓰기마다 돈다. 행 수에 따른 비용을 재지 않았다.
+- **Windows**: 이 spec의 어느 것도 Windows에서 돌려 보지 않았다. 저장소의 테스트는 개발 OS에서 돈다.
+- **X02 전의 사용성**: 화면이 없으므로 사용자가 실제로 승인·취소하는 흐름은 API 시험으로만 본다.
+
+## 미해결 질문
+
+**작업을 막는 것**
+
+1. **이슈 #21(I04)이 열려 있다.** T01은 I04가 넘긴 `commitDerived`, 파생물 등록부, 재평가(`reevaluate`) 위에서 시작한다. I04의 남은 작업이 그 모양을 바꾸면 T01·T04·T06의 범위가 바뀐다.
+
+**막지 않는 것**(잠정 결정으로 진행한다)
+
+2. `verified`를 사용자가 한 번에 기각하는 길이 필요한가(지금은 이의 → 기각의 두 번이다). X02가 화면을 만들 때 다시 본다.
+3. 문맥 꼬리표를 글자열로 둘지, 항목(프로젝트나 조직)을 가리키게 할지. S02가 개체를 넓힌 뒤 다시 본다. 지금은 글자열이고, 같은 정의가 두 문맥에서 나오면 처음의 꼬리표가 남는다.
+4. 배포처 포크가 유형 정의의 seed를 더하는 길이 필요한가. 지금은 사용자의 API 변경뿐이다.
+5. 이 spec의 날짜가 2026-11-22인데 같은 날의 다른 spec 둘(I02-B, I05)과 S 번호, ADR 번호, 마이그레이션 번호가 나란히 늘어난다. 합쳐지는 순서에 따라 이 문서의 S28을 다시 매긴다.
+
+## 후속 — 다른 문서와 다른 작업에 넘기는 변경
+
+이 spec의 커밋은 아래 문서를 고치지 않는다. 표의 작업이 자기 PR에서 고친다.
+
+| 대상 | 고칠 곳 | 담당 |
+|---|---|---|
+| ARCHITECTURE.md | 3.2절 표, 4절 표, 5.6절 등록표(I04 등록표의 "사용자 교정·승인 기록" 줄을 이 spec의 답으로 바꿈: 이력은 대상의 종류에 속하고, 유형 정의는 종류 `ontology`) | S01-T10 |
+| ADR 0003 | 3번 문장(별칭의 출처) | S01-T09 |
+| 새 ADR | 등록부의 저장 자리, 사용자가 정한 행의 보호, 자동 승격을 꺼 둔 이유 | S01-T10 |
+| site-setup.md | S28 | S01-T10 |
+| V02 spec | "T07이 넘기는 것" 4(되살리기는 언제나 `candidate`)가 이 spec의 R5로 바뀐다는 줄 | S01-T01 |
+| I04 spec | 잠정 결정 9와 등록표의 S01 줄이 이 spec의 R14·R22로 굳었다는 줄 | S01-T04 |
+| 이슈 #23(S02), #24(S03) | S02가 유형을 더할 때 R19의 변경 경로를 쓴다는 것, S03이 R9의 조건 목록에 조건을 더한다는 것 | 조정자 |
+
+## 변경 이력
+
+| 날짜 | 변경 내용 | 대상 | 사유 |
+|---|---|---|---|
+| 2026-11-22 | 최초 작성(초안) | 이 문서 | 이슈 #22의 구현 spec. 원 설계 6.1~6.4·6.6·6.7과 이슈의 C1~C3 |
