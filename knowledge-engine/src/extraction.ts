@@ -236,11 +236,21 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // (I04-R11). Read after the call, a deleted item's lineage would be empty. An item
     // whose sources the policy will not let be put together with this version is not
     // offered at all (I04-R14): its name would leave the machine in a call that mixes them.
+    // The check is cumulative, in id order: a candidate is offered only if its sources may be put
+    // together with this version and with every candidate already offered, so one request never
+    // carries a combination the policy refuses. The ones left out are counted as dropped.
+    const drops = { quotes: 0, other: 0 };
     const candidateLineage = new Map<string, LineageRef[]>();
+    const together: LineageRef[] = [own];
     for (const found of findCandidates(db, `${stored.title}\n${stored.body}`)) {
       const id = String(found);
       const lineage = registry.lineage(db, { kind: "item", id });
-      if (registry.combinable(db, [own, ...lineage])) candidateLineage.set(id, lineage);
+      if (registry.combinable(db, [...together, ...lineage])) {
+        candidateLineage.set(id, lineage);
+        together.push(...lineage);
+      } else {
+        drops.other++;
+      }
     }
     const candidates = [...candidateLineage.keys()];
     const ref = { sourceId: String(sourceId), version: fenceVersion as number };
@@ -259,7 +269,6 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     });
     if (result.status !== "ok") return result;
     const body = stored.body;
-    const drops = { quotes: 0, other: 0 };
     // the Broker checked its output against the schema
     const answer = merged([result.output as ExtractionOutput, engineAnswer(proposed, ref, drops)]);
 

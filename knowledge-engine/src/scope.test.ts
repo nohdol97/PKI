@@ -381,3 +381,18 @@ describe("allows: a use the policy refuses is not shown (I04-R13, R14)", () => {
     ).toHaveLength(4);
   });
 });
+
+describe("allows: only true shows a row (fail closed, I04-R13, R14)", () => {
+  it.each([
+    ["a string", "yes"],
+    ["a number", 1],
+    ["a promise", Promise.resolve(false)],
+    ["undefined", undefined],
+  ])("hides every row when the policy answers %s", (_name, answer) => {
+    const a = source("a", "a의 본문", ["open"]);
+    const b = source("b", "b의 본문", ["open"]);
+    const policy = { ...defaultScopePolicy, allows: () => answer } as unknown as ScopePolicy;
+    const refs = [a, b].map((v) => ({ kind: "source", id: String(v.versionRow) }));
+    expect(createProductRegistry({ policy }).visible(db, refs, "search")).toEqual([]);
+  });
+});

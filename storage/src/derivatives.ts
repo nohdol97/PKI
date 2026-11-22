@@ -395,7 +395,8 @@ export function createDerivativeRegistry(options: RegistryOptions): DerivativeRe
       return refs.filter((ref) => {
         const versions = lineage(db, ref);
         if (!versions.every((v) => versionIsLive(db, v))) return false;
-        return options.policy.allows(scopesOfVersions(db, versions), purpose);
+        // only `true` shows the row: any other answer (a promise, a truthy value) hides it; a throw rejects the call
+        return options.policy.allows(scopesOfVersions(db, versions), purpose) === true;
       });
     },
     scopesOf(db, refs) {

@@ -163,6 +163,38 @@ const drops = () =>
     kind: string;
   }[];
 
+describe("scope.policy: one request never carries a refused combination of candidates (I04-R14)", () => {
+  /** Only a and b together are refused; each of them goes with c. */
+  const noAandB: ScopePolicy = {
+    ...defaultScopePolicy,
+    combinable: (scopes) => {
+      const names = new Set(scopes.flatMap((s) => s ?? []));
+      return !(names.has("a") && names.has("b"));
+    },
+  };
+
+  it("offers the first of two candidates that cannot be put together, in id order, and counts the other as dropped", async () => {
+    const a = source("a", "알", ["a"]);
+    const b = source("b", "비", ["b"]);
+    const alpha = knownItem("알파", a);
+    knownItem("베타", b);
+    const c = source("c", "알파와 베타 메모", ["c"]);
+    const { job } = await extract(setUp(noAandB), c);
+    expect(requests.map((r) => r.candidateItemIds)).toEqual([[String(alpha)]]);
+    expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 0, other: 1 });
+  });
+
+  it("offers both when each goes with the source and with the other (control)", async () => {
+    const a = source("a", "알", ["a"]);
+    const a2 = source("a2", "알2", ["a"]);
+    const alpha = knownItem("알파", a);
+    const beta = knownItem("베타", a2);
+    const c = source("c", "알파와 베타 메모", ["c"]);
+    await extract(setUp(noAandB), c);
+    expect(requests.map((r) => r.candidateItemIds)).toEqual([[String(alpha), String(beta)]]);
+  });
+});
+
 describe("scope.policy: candidates the policy would not let be put together are not offered (I04-R14)", () => {
   it("keeps the candidates of the scope of the source and drops the others, whichever place they take", async () => {
     const a = source("a", "알", ["a"]); // lineage of 알파 and 델타
