@@ -386,8 +386,18 @@ const buildUserDecisions = (entities: EntityDecisions): UserDecisions => ({
  * listeners are its own (S02-R13). The module-boundary lint lets the composition root and the API layer's
  * types hold this name and no other code.
  */
-export const createUserDecisions = (options: EntityDecisionsOptions): UserDecisions =>
-  buildUserDecisions(createEntityDecisions(options));
+export const createUserDecisions = (
+  options: Omit<EntityDecisionsOptions, "createItem">,
+): UserDecisions =>
+  buildUserDecisions(
+    createEntityDecisions({
+      ...options,
+      // a split's new item is a direct add; its name may equal the original's (no key stops that), so the
+      // value-exists check of `add` is not asked
+      createItem: (tx, type, name, at) =>
+        insertAuthored(tx, { kind: "item", type, name }, at, null).ref.id,
+    }),
+  );
 
 /** The entry with the public default policy (it refuses nothing) and no listener: what a test without a composition point uses. */
 export const userDecisions: UserDecisions = createUserDecisions({

@@ -328,3 +328,100 @@ describe("the undo of a user-made item inside a merge chain (S02-R11, the review
     expect(mergeLines()).toHaveLength(1);
   });
 });
+
+describe("POST /api/entities/split (S02-R25, R15)", () => {
+  const factOf = (owner: number, value: string) =>
+    saveFact(db, { itemId: owner, kind: "target_date", value, ...attrs }).id;
+
+  it("moves the chosen rows to a new item, answers its number, refuses by code, and the new item's undo is refused", async () => {
+    const a = itemFrom("a");
+    const f2 = factOf(a, "2026-12-06");
+    await start();
+    const done = await call("entitySplit", {
+      itemId: a,
+      rows: [{ kind: "fact", id: f2 }],
+      name: " 분리 ",
+    });
+    const body = routes.entitySplit.response.parse(done.body);
+    expect(body).toMatchObject({ status: "applied", created: expect.any(Number) });
+    expect(db.all("SELECT item_id FROM facts WHERE id = ?", [f2])).toEqual([
+      { item_id: body.created },
+    ]);
+    expect(
+      db.all("SELECT name, user_authored FROM items WHERE id = ?", [body.created as number]),
+    ).toEqual([{ name: "분리", user_authored: 1 }]);
+    expect(db.all("SELECT 1 FROM item_split_moves")).toHaveLength(1);
+    const undo = routes.semanticUndo.response.parse(
+      (await call("semanticUndo", { kind: "item", id: body.created })).body,
+    );
+    expect(undo).toMatchObject({ reason: "existing-data-violation", held: { splitMoves: 1 } });
+    // refusals: a code in a 200 body
+    const rest = db.all("SELECT id FROM facts WHERE item_id = ?", [a]).map((r) => r.id as number);
+    expect((await call("entitySplit", { itemId: a, rows: [], name: "n" })).body).toEqual({
+      status: "refused",
+      reason: "nothing-selected",
+    });
+    expect(
+      (await call("entitySplit", { itemId: a, rows: [{ kind: "fact", id: f2 }], name: "n" })).body,
+    ).toEqual({
+      status: "refused",
+      reason: "row-not-on-item",
+    });
+    expect(
+      (
+        await call("entitySplit", {
+          itemId: a,
+          rows: rest.map((id) => ({ kind: "fact", id })),
+          name: "n",
+        })
+      ).body,
+    ).toEqual({ status: "refused", reason: "nothing-left" });
+    expect(JSON.stringify(done.body)).not.toContain(NAME);
+  });
+
+  it("answers not-found for an absent or hidden item and row-not-on-item for a hidden row; 400 for a bad body", async () => {
+    const open = itemFrom("open");
+    factOf(open, "2026-12-06");
+    const hidden = itemFrom("hidden", ["secret"]);
+    const hiddenFact = db.all("SELECT id FROM facts WHERE item_id = ?", [hidden])[0]?.id as number;
+    const registry = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+      },
+    });
+    await start({ registry });
+    const before = db.all("SELECT * FROM facts ORDER BY id");
+    expect(
+      await call("entitySplit", { itemId: 99_999, rows: [{ kind: "fact", id: 1 }], name: "n" }),
+    ).toEqual(NOT_FOUND);
+    expect(
+      await call("entitySplit", {
+        itemId: hidden,
+        rows: [{ kind: "fact", id: hiddenFact }],
+        name: "n",
+      }),
+    ).toEqual(NOT_FOUND);
+    expect(
+      (
+        await call("entitySplit", {
+          itemId: open,
+          rows: [{ kind: "fact", id: hiddenFact }],
+          name: "n",
+        })
+      ).body,
+    ).toEqual({
+      status: "refused",
+      reason: "row-not-on-item",
+    });
+    expect(db.all("SELECT * FROM facts ORDER BY id")).toEqual(before);
+    for (const body of [
+      { itemId: open },
+      { itemId: open, rows: [], name: "" },
+      { itemId: open, rows: [{ kind: "item", id: 1 }], name: "n" },
+    ]) {
+      expect((await call("entitySplit", body)).status).toBe(400);
+    }
+  });
+});

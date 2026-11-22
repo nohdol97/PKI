@@ -259,12 +259,20 @@ export {
   type MergeLine,
   type MovedRow,
 } from "./entity-groups.ts";
+export {
+  followMovedRow,
+  listSplitMoves,
+  type SplitMove,
+  type SplitMoveFilter,
+} from "./split-moves.ts";
 export type {
   DistinctResult,
   EntityDecisions,
   EntityDecisionsOptions,
   MergeRefusal,
   MergeResult,
+  SplitRefusal,
+  SplitResult,
   UnmergeResult,
 } from "./entity-decisions.ts";
 export {
