@@ -15,6 +15,16 @@ export const BACKEND_ENTRY = fileURLToPath(
 /** Source runs keep the debugging switches: Playwright drives the shell through them. */
 export const REFUSE_DEBUGGING: boolean = false;
 
+/**
+ * The scope policy name the backend is started with (I04-R14). A source run (development and tests)
+ * reads it from the environment (`PKI_SCOPE_POLICY`); the production build bundles layout.production.ts,
+ * which gives the build-time name and ignores the environment (docs/site-setup.md: a build-time value
+ * cannot be changed by an environment variable).
+ */
+export function scopePolicyName(env: Readonly<Record<string, string | undefined>>) {
+  return env["PKI_SCOPE_POLICY"];
+}
+
 export interface Switches {
   dataDir?: string | undefined;
   fixtures?: string | undefined;

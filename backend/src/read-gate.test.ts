@@ -4,7 +4,7 @@
 // version is covered by a tombstone while it is still stored, or whose scopes the policy does not
 // allow, is left out; a registry that cannot judge fails the call. Hidden rows are left out of the
 // answer whole, so nothing of them shows in a count, an ordering or an error.
-import { createProductRegistry, NO_POLICY_YET } from "@pki/knowledge-engine";
+import { createProductRegistry } from "@pki/knowledge-engine";
 import {
   addEvidence,
   createDerivativeRegistry,
@@ -18,6 +18,7 @@ import {
   type ScopePolicy,
   type ScopePurpose,
   type SqlDriver,
+  defaultScopePolicy,
 } from "@pki/storage";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,7 +44,7 @@ const SECRET = ["secret"];
 /** A policy that allows every scope set but the ones naming "secret"; it records each purpose asked. */
 function policy(asked: ScopePurpose[] = []): ScopePolicy {
   return {
-    ...NO_POLICY_YET,
+    ...defaultScopePolicy,
     allows: (scopes, purpose) => {
       asked.push(purpose);
       return !scopes.some((s) => s?.includes("secret"));
@@ -53,13 +54,13 @@ function policy(asked: ScopePurpose[] = []): ScopePolicy {
 
 function registryOf(p: ScopePolicy): DerivativeRegistry {
   return createDerivativeRegistry({
-    kinds: createProductRegistry({ policy: NO_POLICY_YET }).kinds,
+    kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
     policy: p,
   });
 }
 
 const throwing: ScopePolicy = {
-  ...NO_POLICY_YET,
+  ...defaultScopePolicy,
   allows: () => {
     throw new Error("cannot judge");
   },
@@ -232,7 +233,7 @@ describe("read-gate: Home's Insights, their evidence and an evidence row's sourc
       accessScope: bScope,
     });
     const odd: ScopePolicy = {
-      ...NO_POLICY_YET,
+      ...defaultScopePolicy,
       allows: (scopes) => !(scopes.length === 1 && scopes[0]?.[0] === "only-b"),
     };
     const gate = createReadGate(db, registryOf(odd));

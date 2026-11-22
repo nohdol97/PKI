@@ -12,8 +12,8 @@
 // with a quote the body holds exactly once; the code computes the span. Rows are
 // the same row by the tables' keys (V02-R8); a same row gets evidence only, and a
 // superseded same row is revived by it (V02-R11). The result is handed over as
-// items (I04-R11): one per kept fact or relation, then the rule "의존 업무 지연" with
-// the dropped counts. The runner writes them through commitDerived, inside the
+// items (I04-R11): the job's bookkeeping (drop counts, records of earlier refusals), one
+// per kept fact or relation, then the rule "의존 업무 지연". The runner writes them through commitDerived, inside the
 // fence transaction, and only when the source version and every source a kept
 // entry drew on (a candidate item's evidence, read when the item was offered) are
 // still stored and uncovered; otherwise none of it is written.
@@ -33,7 +33,9 @@ import {
   findSourceVersionId,
   insertItem,
   readSourceVersion,
+  BOOKKEEPING_KIND,
   recordExtractionDrops,
+  recordWithheldCandidate,
   reviveSuperseded,
   saveFact,
   saveRelation,
@@ -45,7 +47,7 @@ import {
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
-import { derivativeRegistry } from "./canonical-kinds.ts";
+import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
 import { isDate, recomputeDependencyDelay } from "./dependency-delay.ts";
 import { findCandidates } from "./linking.ts";
 import { locateQuote, type QuoteSpan } from "./quote.ts";
@@ -75,8 +77,11 @@ export interface ExtractHandlerOptions {
    * hold purged text, which a proposed item name could carry back, so it is not asked.
    */
   isEngineStale?: () => boolean;
-  /** The registry that names a candidate item's lineage; default the entries' own (canonical-kinds.ts). */
-  registry?: Pick<DerivativeRegistry, "lineage">;
+  /**
+   * The registry that names a candidate item's lineage and judges, with its policy, which sources
+   * may be put together; default the entries' own (canonical-kinds.ts).
+   */
+  registry?: Pick<DerivativeRegistry, "lineage" | "combinable">;
   now?: () => Date;
 }
 
@@ -227,13 +232,40 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     if ([...stored.title].length + [...stored.body].length > MAX_EXTRACT_CODE_POINTS) {
       return { status: "held", reason: EXTRACT_HOLD_TOO_LARGE };
     }
-    const candidates = findCandidates(db, `${stored.title}\n${stored.body}`).map(String);
+    const own: LineageRef = { sourceId: sourceId as number, version: fenceVersion as number };
+    // A re-extraction queued by a scope change whose records are gone already (another one cleared
+    // them) has nothing to judge again: it ends without a Provider call (I04-R15).
+    if (
+      job.target.startsWith(RECOMPUTE_PREFIX) &&
+      db.all("SELECT 1 FROM scope_policy_drops WHERE source_id = ? LIMIT 1", [own.sourceId])
+        .length === 0
+    ) {
+      return { status: "succeeded", items: [] };
+    }
     // What each candidate item came from, read now, when it is offered: a source it
     // draws on that is gone when the result is written makes the result stale
-    // (I04-R11). Read after the call, a deleted item's lineage would be empty.
-    const candidateLineage = new Map(
-      candidates.map((id) => [id, registry.lineage(db, { kind: "item", id })]),
-    );
+    // (I04-R11). Read after the call, a deleted item's lineage would be empty. An item
+    // whose sources the policy will not let be put together with this version is not
+    // offered at all (I04-R14): its name would leave the machine in a call that mixes them.
+    // The check is cumulative, in id order: a candidate is offered only if its sources may be put
+    // together with this version and with every candidate already offered, so one request never
+    // carries a combination the policy refuses. The ones left out are counted as dropped.
+    const drops = { quotes: 0, other: 0 };
+    const candidateLineage = new Map<string, LineageRef[]>();
+    const together: LineageRef[] = [own];
+    const withheld: string[] = [];
+    for (const found of findCandidates(db, `${stored.title}\n${stored.body}`)) {
+      const id = String(found);
+      const lineage = registry.lineage(db, { kind: "item", id });
+      if (registry.combinable(db, [...together, ...lineage])) {
+        candidateLineage.set(id, lineage);
+        together.push(...lineage);
+      } else {
+        drops.other++;
+        withheld.push(id);
+      }
+    }
+    const candidates = [...candidateLineage.keys()];
     const ref = { sourceId: String(sourceId), version: fenceVersion as number };
     const proposed = await proposals(options, ref);
     const result = await extractOnce(broker, {
@@ -250,7 +282,6 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     });
     if (result.status !== "ok") return result;
     const body = stored.body;
-    const drops = { quotes: 0, other: 0 };
     // the Broker checked its output against the schema
     const answer = merged([result.output as ExtractionOutput, engineAnswer(proposed, ref, drops)]);
 
@@ -335,7 +366,6 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // runs the handler again for a fresh closure, a throwing write closes the job).
     const ids = new Map<string, number>();
     const touched = new Set<number>();
-    const own: LineageRef = { sourceId: sourceId as number, version: fenceVersion as number };
     const lineageOf = (extra: LineageRef[]) => [own, ...extra];
     for (const [ref, item] of items) {
       if (item.existingItemId !== null) ids.set(ref, Number(item.existingItemId));
@@ -375,17 +405,40 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         },
       };
     });
-    // the rule runs last, over what the written items touched, and the drop counts
-    // are recorded with it (also when nothing was kept)
+    // The job's own bookkeeping comes first and rests on this version alone, so a policy that
+    // refuses a mix of sources cannot take it with the item it refuses: the drop counts are
+    // recorded (also when nothing was kept) and the records of what the policy once left out of
+    // this source, which this extraction judges again, are cleared before it records its own
+    // (I04-R15; the records of a version before this one are out of date as well).
+    const bookkeeping: DerivedItem = {
+      kind: BOOKKEEPING_KIND,
+      itemKey: "bookkeeping",
+      lineage: [own],
+      // no source content: a policy that errs must not lose the counts or skip the clean-up
+      unjudged: true as const,
+      write: (tx) => {
+        recordExtractionDrops(tx, job.id, drops);
+        tx.run("DELETE FROM scope_policy_drops WHERE source_id = ? AND version <= ?", [
+          own.sourceId,
+          own.version,
+        ]);
+        // a candidate the policy kept from this call is a record too: a widening extracts this version again
+        for (const id of withheld) recordWithheldCandidate(tx, own, id, now().toISOString());
+      },
+    };
+    // the rule runs last, over what the written items touched; it too judges each Insight's
+    // evidence under the policy, so an Insight that mixes sources the policy will not mix is
+    // not made even when the item as a whole was allowed through
     const rule: DerivedItem = {
       kind: "insight",
       itemKey: "dependency-delay",
       lineage: lineageOf(written.flatMap((w) => w.lineage.slice(1))),
       write: (tx) => {
-        recordExtractionDrops(tx, job.id, drops);
-        recomputeDependencyDelay(tx, [...touched]);
+        recomputeDependencyDelay(tx, [...touched], {
+          combinable: (lineage) => registry.combinable(tx, lineage),
+        });
       },
     };
-    return { status: "succeeded", items: [...written, rule] };
+    return { status: "succeeded", items: [bookkeeping, ...written, rule] };
   };
 }

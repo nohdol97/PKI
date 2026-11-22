@@ -18,14 +18,14 @@ import {
   type DerivedRef,
   type EvidenceSourceView,
   type InsightEvidenceRow,
+  defaultScopePolicy,
   type ScopePurpose,
   type SqlDriver,
 } from "@pki/storage";
-import { INTERIM_POLICY } from "./interim-policy.ts";
 
-/** The registry a server without a composition point runs: the product's kinds, the interim policy. */
+/** The registry a server without a composition point runs: the product's kinds, the default scope policy. */
 export const defaultReadRegistry: DerivativeRegistry = createProductRegistry({
-  policy: INTERIM_POLICY,
+  policy: defaultScopePolicy,
 });
 
 export interface ReadGate {

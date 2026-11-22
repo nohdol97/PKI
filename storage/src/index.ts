@@ -27,6 +27,7 @@ export {
   findHashedSourceId,
   hashSourceIdentity,
   identityKey,
+  keyedTextHash,
   prepareCanonicalDb,
   type PreparedCanonicalDb,
   type SourceIdentity,
@@ -68,6 +69,7 @@ export {
   assertFresh,
   assertLineage,
   commitDerived,
+  UnjudgedItemError,
   isFenceCurrent,
   StaleDerivativeError,
 } from "./commit-derived.ts";
@@ -107,7 +109,12 @@ export {
   type StoredJob,
 } from "./jobs.ts";
 export { purgeEndedJobs } from "./job-retention.ts";
-export { PROJECTION_REBUILD_KIND, PROJECTION_REMOVE_KIND, usesVersionFence } from "./job-kinds.ts";
+export {
+  EXTRACT_JOB_KIND,
+  PROJECTION_REBUILD_KIND,
+  PROJECTION_REMOVE_KIND,
+  usesVersionFence,
+} from "./job-kinds.ts";
 export {
   closeCoveredRemoves,
   COVERED_BY_REBUILD,
@@ -177,6 +184,7 @@ export {
 } from "./knowledge.ts";
 export {
   findRelation,
+  listEvidenceVersions,
   listFactsOfKind,
   listInsightKeys,
   listRelationPairs,
@@ -198,8 +206,10 @@ export {
 export { canonicalTransaction } from "./canonical-transaction.ts";
 export {
   atLeastAsStrict,
+  BOOKKEEPING_KIND,
   createDerivativeRegistry,
   LAYERS,
+  scopesOfVersions,
   UnregisteredDerivativeError,
   type AccessScope,
   type Affected,
@@ -231,13 +241,21 @@ export {
   type TombstoneOutcome,
   type TombstoneWrite,
 } from "./derivatives.ts";
+export { defaultScopePolicy, mayCombine } from "./scope-policy.ts";
+export {
+  clearScopePolicyDrops,
+  countScopePolicyDrops,
+  createCommitScope,
+  recordWithheldCandidate,
+  scopePolicyDropSources,
+} from "./scope-drops.ts";
 export {
   listInvalidations,
   type InvalidationRecord,
   type SourceChangeKind,
 } from "./invalidations.ts";
 export { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
-export { listItemEvidenceVersions, listItemNames } from "./candidates.ts";
+export { listItemNames } from "./candidates.ts";
 export {
   listActiveInsights,
   listInsightEvidenceIds,

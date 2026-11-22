@@ -6,16 +6,26 @@
 // by no tombstone. assertLineage: every other source version an item came from
 // (a candidate item's evidence, say) is stored and covered by no tombstone; it need
 // not be the latest. A failure of either discards the WHOLE result: it is stale,
-// and the job closes superseded. A scope the policy refuses (`combinable`, I04-R14)
-// is not stale: it leaves out that item only and the rest is written.
+// and the job closes superseded. A scope the policy refuses (`combinable`, I04-R14; a policy that
+// errs refuses) is not stale: it leaves out that item only and the rest is written.
 import {
+  BOOKKEEPING_KIND,
   scopesOfVersions,
   versionIsLive,
   type CommitDerived,
   type SourceVersionRef,
   type StaleCause,
 } from "./derivatives.ts";
+import { mayCombine } from "./scope-policy.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+
+/** An item carries the `unjudged` mark without being the bookkeeping item: a programming error, nothing is written. */
+export class UnjudgedItemError extends Error {
+  override name = "UnjudgedItemError";
+  constructor(kind: string) {
+    super(`an item of kind ${kind} may not skip the scope policy`);
+  }
+}
 
 /** A result that no longer holds; `cause` is what commitDerived reports. */
 export class StaleDerivativeError extends Error {
@@ -82,6 +92,13 @@ export function assertLineage(db: SqlDriver, lineage: readonly SourceVersionRef[
  * rolls it back.
  */
 export const commitDerived: CommitDerived = (tx, input) => {
+  // before anything is checked or written: only the bookkeeping item may skip the policy
+  for (const item of input.items) {
+    const mark = (item as { unjudged?: unknown }).unjudged;
+    if (mark !== undefined && (mark !== true || item.kind !== BOOKKEEPING_KIND)) {
+      throw new UnjudgedItemError(item.kind);
+    }
+  }
   try {
     if (input.source) assertFresh(tx, input.source.sourceId, input.source.version);
     assertLineage(
@@ -96,8 +113,20 @@ export const commitDerived: CommitDerived = (tx, input) => {
   const dropped = [];
   let written = 0;
   for (const item of input.items) {
-    if (scope && !scope.policy.combinable(scopesOfVersions(tx, item.lineage))) {
-      dropped.push(scope.recordDrop(tx, item));
+    // The policy is skipped only for the bookkeeping item (`unjudged`) and for a write that has no
+    // source at all (a sourceless job such as maintenance or connector-sync): there is no source
+    // content to judge, so a policy cannot hold such a job `running` (I04-T09). A content item that
+    // names no lineage inside a sourced job is judged by that job's source, never waved through.
+    const lineage = item.lineage.length > 0 ? item.lineage : input.source ? [input.source] : [];
+    if (
+      scope &&
+      item.unjudged !== true &&
+      lineage.length > 0 &&
+      !mayCombine(scope.policy, scopesOfVersions(tx, lineage))
+    ) {
+      // the version the record names: the job's input, else where the item's lineage begins
+      const anchor = input.source ?? (lineage[0] as SourceVersionRef);
+      dropped.push(scope.recordDrop(tx, item, anchor));
       continue;
     }
     item.write(tx);

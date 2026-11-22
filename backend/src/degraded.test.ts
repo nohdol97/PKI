@@ -201,7 +201,7 @@ describe("degraded states (V01-R5)", () => {
       provider: { state: "ready", providerId: "codex" },
       embedding: { state: "ready", egress: "local" },
       vectorIndex: { state: "ready" },
-      invalidations: { recent: [] },
+      invalidations: { recent: [], scopePolicyDrops: 0 },
       dataProtection: { legacyCleanup: "done" },
     });
     await explorationWorks();
@@ -347,7 +347,7 @@ describe("degraded states (V01-R5)", () => {
       provider: { state: "unavailable", providerId: null, reason: "status-check-failed" },
       embedding: { state: "ready", egress: "local" },
       vectorIndex: { state: "ready" },
-      invalidations: { recent: [] },
+      invalidations: { recent: [], scopePolicyDrops: 0 },
       dataProtection: { legacyCleanup: "done" },
     });
     await explorationWorks();
@@ -420,6 +420,7 @@ describe("the product on a PC with no CLI and no network (all five at once)", ()
           recent: [2, 1].map((changeSeq) =>
             expect.objectContaining({ changeSeq, changeKind: "new-version" }),
           ),
+          scopePolicyDrops: 0,
         },
         dataProtection: { legacyCleanup: "done" },
       });
