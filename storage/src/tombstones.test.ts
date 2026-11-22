@@ -2,7 +2,7 @@
 // tombstone holds no content, and every source change raises the sequence exactly once.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
-import { isFenceCurrent } from "./jobs.ts";
+import { isFenceCurrent } from "./commit-derived.ts";
 import { migrate } from "./migrations.ts";
 import { readChangeSeq } from "./revisions.ts";
 import { nextSourceVersion, registerConnectorInstance, saveSourceRecord } from "./sources.ts";

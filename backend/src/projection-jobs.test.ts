@@ -227,6 +227,19 @@ describe("projection.classify", () => {
     expect(rebuildJobs()).toEqual([]);
   });
 
+  it("one malformed marked row does not stop the others or the start: it is logged and skipped", () => {
+    stored("a", "x");
+    stored("b", "y");
+    const bad = deleted("a");
+    deleted("b");
+    db.run("UPDATE jobs SET target = '' WHERE id = ?", [bad.id]); // a row no code writes
+    const marked = () => checkProjectionMarkers(db, { phase: "start", now: wall });
+    expect(() => marked()).not.toThrow();
+    expect(db.all("SELECT target FROM jobs WHERE kind = 'projection-rebuild'")).toEqual([
+      { target: "engine" },
+    ]);
+  });
+
   it("the same error from a kind without the mark (a stopped sidecar) is a retry, not a skip, and the removal stays a marker", async () => {
     const sidecar = new FakeProjection(() => db);
     sidecar.removeFails = new AdapterUnavailableError("sidecar down");

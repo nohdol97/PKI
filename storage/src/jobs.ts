@@ -7,9 +7,9 @@
 // raises its lease token), and leaves `running` for the current token only. Only the functions here change a
 // status, and only along JOB_TRANSITIONS. The runner is backend/src/job-runner.ts.
 // A result and a checkpoint are written behind I03-R6's three checks (closeJob,
-// checkpointJob); the fence among them is commitDerived, here in the provisional
-// body I04-T06 replaces.
-import type { CommitDerived, DerivedItem } from "./derivatives.ts";
+// checkpointJob); the fence among them is commitDerived (commit-derived.ts).
+import { commitDerived } from "./commit-derived.ts";
+import type { DerivedItem } from "./derivatives.ts";
 import { assertMaxConcurrent, pickDueJob } from "./job-concurrency.ts";
 import { FENCE_FREE_KINDS, usesVersionFence } from "./job-kinds.ts";
 import { readChangeSeq } from "./revisions.ts";
@@ -462,17 +462,6 @@ export function heartbeatJob(
   );
 }
 
-/** The fence holds while the job's version is the source's latest and no tombstone reaches it. */
-export function isFenceCurrent(db: SqlDriver, job: { sourceId: number; fenceVersion: number }) {
-  const row = db.all(
-    `SELECT (SELECT max(version) FROM source_versions WHERE source_id = ?) AS latest,
-            (SELECT covers_version FROM tombstones WHERE source_id = ?) AS tombstone`,
-    [job.sourceId, job.sourceId],
-  )[0];
-  const tombstone = row?.tombstone as number | null;
-  return row?.latest === job.fenceVersion && (tombstone === null || tombstone < job.fenceVersion);
-}
-
 /**
  * How a run leaves `running` (I03-R9, "실행 결과가 가는 곳"). A held job, a yield
  * with progress (`queued`) and a `retry` with `refund` made no outside call: the
@@ -496,31 +485,8 @@ const isLockError = (error: unknown): boolean => {
   return code === "SQLITE_BUSY" || code === "SQLITE_LOCKED";
 };
 
-/**
- * The fence of a result written from a source version (I03-R6 ③, I04-R11), in the
- * provisional body I03-T04 ships: V02's fence alone. A stale source writes
- * nothing. Its cause is `not-latest` when a newer version exists, asked first: a
- * tombstone row below the job's version (a lifted cover, I04-T05) is not why it
- * is stale; else `covered` under a tombstone, else the version is `missing`. A
- * current source, or none, writes every item. I04-T06 replaces this body with
- * assertFresh, assertLineage and combinable; its callers stay as they are.
- */
-export const commitDerived: CommitDerived = (tx, input) => {
-  const { source } = input;
-  if (source && !isFenceCurrent(tx, { sourceId: source.sourceId, fenceVersion: source.version })) {
-    const row = tx.all(
-      `SELECT EXISTS (SELECT 1 FROM source_versions WHERE source_id = ? AND version > ?) AS newer,
-              EXISTS (SELECT 1 FROM tombstones WHERE source_id = ?) AS tombstone`,
-      [source.sourceId, source.version, source.sourceId],
-    )[0];
-    return {
-      status: "stale",
-      cause: row?.newer === 1 ? "not-latest" : row?.tombstone === 1 ? "covered" : "missing",
-    };
-  }
-  for (const item of input.items) item.write(tx);
-  return { status: "committed", written: input.items.length, dropped: [] };
-};
+/** The target of the one extraction queued again after a result lost to its lineage (I04-T06). */
+export const LINEAGE_RETRY_PREFIX = "lineage-retry:";
 
 type Lease = Pick<StoredJob, "id" | "leaseToken">;
 
@@ -528,11 +494,12 @@ type Lease = Pick<StoredJob, "id" | "leaseToken">;
  * I03-R6's three checks, in their order, inside the caller's immediate
  * transaction: ① the job is running under this lease, else nothing is written
  * ("not-leased"); ② no cancel request, else the job closes cancelled; ③ the fence
- * (commitDerived, which writes `result` once it holds), else the job closes
+ * (commitDerived, which writes `result` once the source and the lineage hold; an
+ * item the scope policy refuses is left out, not stale), else the job closes
  * superseded. Returns the job when all three passed. A lone write function is
- * one derived item of the job's source version (provisional: I04-T06 has handlers
- * hand over their items). A throwing write surfaces as JobWriteError, unless it
- * met a locked file.
+ * one derived item of the job's source version (a job kind that is not an
+ * extraction; an extraction hands over its items). A throwing write surfaces as
+ * JobWriteError, unless it met a locked file.
  */
 function checkedWrite(
   db: SqlDriver,
@@ -542,8 +509,8 @@ function checkedWrite(
 ): StoredJob | "not-leased" | "cancelled" | "superseded" {
   const job = readJob(db, lease.id);
   if (job?.status !== "running" || job.leaseToken !== lease.leaseToken) return "not-leased";
-  const close = (to: "cancelled" | "superseded") => {
-    transitionJob(db, lease.id, { from: "running", to, leaseToken: lease.leaseToken, at });
+  const close = (to: "cancelled" | "superseded", reason: string | null = null) => {
+    transitionJob(db, lease.id, { from: "running", to, reason, leaseToken: lease.leaseToken, at });
     return to;
   };
   if (job.cancelRequested) return close("cancelled");
@@ -577,7 +544,26 @@ function checkedWrite(
       },
     })),
   });
-  return committed.status === "stale" ? close("superseded") : job;
+  if (committed.status !== "stale") return job;
+  // A result lost to its lineage (a source it drew on went) while its own version
+  // is still current would never be extracted again: the version's job key is
+  // taken. Queue one more extraction under a distinct target, which is not queued
+  // again when it is itself the retry (the loop bound). A newer version, a covered
+  // or missing own version register nothing: that version is gone or replaced.
+  if (committed.cause === "lineage-covered") {
+    if (source && !job.target.startsWith(LINEAGE_RETRY_PREFIX)) {
+      registerJob(db, {
+        kind: job.kind,
+        target: `${LINEAGE_RETRY_PREFIX}${job.id}`,
+        priority: job.priority,
+        sourceId: source.sourceId,
+        fenceVersion: source.version,
+        at,
+      });
+    }
+    return close("superseded", "lineage-covered");
+  }
+  return close("superseded");
 }
 
 /**

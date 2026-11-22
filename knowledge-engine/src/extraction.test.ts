@@ -186,6 +186,16 @@ describe("extraction.calls", () => {
     expect(facts()).toHaveLength(1);
   });
 
+  it("hands over one item per kept fact, then the rule, each with this version as lineage (I04-R11)", async () => {
+    imported(mail);
+    const { job, result } = await runNext();
+    if (result.status !== "succeeded") throw new Error("expected a result");
+    const own = { sourceId: job.sourceId, version: job.fenceVersion };
+    expect(result.items.map((i) => i.kind)).toEqual(["fact", "insight"]);
+    expect(result.items.map((i) => i.lineage)).toEqual([[own], [own]]);
+    expect(facts()).toHaveLength(1);
+  });
+
   it("asks again once on a schema mismatch and hands back the second failure", async () => {
     setUp([{ output: { claims: [] } }, { output: { claims: [] } }, { output: { claims: [] } }]);
     imported(mail);

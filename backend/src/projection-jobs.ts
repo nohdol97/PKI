@@ -37,11 +37,9 @@ import {
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
+import { errorClass, log } from "@pki/providers";
 import type { JobHandler, JobKindSettings } from "./job-runner.ts";
 import type { JobResult } from "./job-outcomes.ts";
-
-/** No port is bound for the job's projection: retried with the backoff, and a rebuild that dies of it is not registered again by a check (storage markedProjections). */
-export const UNKNOWN_PROJECTION = UNKNOWN_PROJECTION_CODE;
 
 /** The code of a skipped removal or rebuild (ARCHITECTURE 5.4). */
 export const ADAPTER_UNAVAILABLE = "adapter-unavailable";
@@ -123,7 +121,7 @@ export function projectionHandlers(options: ProjectionHandlerOptions): Record<st
 
   const remove: JobHandler = async (job, context) => {
     const port = ports[job.target];
-    if (!port) return fail(UNKNOWN_PROJECTION);
+    if (!port) return fail(UNKNOWN_PROJECTION_CODE);
     // the removal names its source and its cover by the row (source_id, fence_version)
     const sourceId = job.sourceId as number;
     const coversVersion = job.fenceVersion as number;
@@ -150,7 +148,7 @@ export function projectionHandlers(options: ProjectionHandlerOptions): Record<st
 
   const rebuild: JobHandler = async (job, context) => {
     const port = ports[job.target];
-    if (!port) return fail(UNKNOWN_PROJECTION);
+    if (!port) return fail(UNKNOWN_PROJECTION_CODE);
     const readSeq = readChangeSeq(db); // before the projection reads the canonical store
     let code: string | undefined;
     try {
@@ -209,8 +207,13 @@ export function checkProjectionMarkers(
   const registered: StoredJob[] = [];
   const marks = check.phase === "start" ? { phase: "start" as const } : check;
   for (const target of markedProjections(db, marks)) {
-    const request = requestProjectionRebuild(db, target, { at: new Date(check.now) });
-    if (request.registered) registered.push(request.job);
+    // a malformed row must not block the start or the other projections (I03-T10 re-review R-L1)
+    try {
+      const request = requestProjectionRebuild(db, target, { at: new Date(check.now) });
+      if (request.registered) registered.push(request.job);
+    } catch (error) {
+      log("projection-marker-failed", { error: errorClass(error) });
+    }
   }
   return registered;
 }

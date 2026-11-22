@@ -11,8 +11,12 @@
 // without a call (no chunking). The answer's facts and relations are kept only
 // with a quote the body holds exactly once; the code computes the span. Rows are
 // the same row by the tables' keys (V02-R8); a same row gets evidence only, and a
-// superseded same row is revived by it (V02-R11). The result is written by the runner inside the fence transaction, with the dropped
-// counts and the rule "의존 업무 지연" over the items written.
+// superseded same row is revived by it (V02-R11). The result is handed over as
+// items (I04-R11): one per kept fact or relation, then the rule "의존 업무 지연" with
+// the dropped counts. The runner writes them through commitDerived, inside the
+// fence transaction, and only when the source version and every source a kept
+// entry drew on (a candidate item's evidence, read when the item was offered) are
+// still stored and uncovered; otherwise none of it is written.
 // Just before the call, an engine with the propose capability is asked for its
 // candidates for the same version (V02-R13); they pass the same checks as the
 // answer (the extraction schema, the offered candidate IDs, the exact quote) and
@@ -28,24 +32,26 @@ import {
   addEvidence,
   findSourceVersionId,
   insertItem,
-  readItem,
   readSourceVersion,
   recordExtractionDrops,
   reviveSuperseded,
   saveFact,
   saveRelation,
+  type DerivedItem,
   type EvidenceTarget,
   type KnowledgeAttributes,
+  type SourceVersionRef as LineageRef,
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
+import { derivativeRegistry } from "./canonical-kinds.ts";
 import { isDate, recomputeDependencyDelay } from "./dependency-delay.ts";
 import { findCandidates } from "./linking.ts";
 import { locateQuote, type QuoteSpan } from "./quote.ts";
 
 /** What the handler hands the runner (a subset of backend job-outcomes.ts JobResult). */
 export type ExtractResult =
-  | { status: "succeeded"; write: () => void }
+  | { status: "succeeded"; items: readonly DerivedItem[] }
   | { status: "held"; reason: string }
   | { status: "fail"; code: string; retryable: false }
   | Exclude<BrokerResult, { status: "ok" }>;
@@ -73,8 +79,12 @@ export interface ExtractHandlerOptions {
 
 type Item = ExtractionOutput["items"][number];
 interface Planned {
+  /** `fact` or `relation`: the registered kind of the row it writes. */
+  kind: "fact" | "relation";
+  /** The same-row key's content, for the item's record (hashed before it is kept, I04-R7). */
+  key: string;
   target: { item: string } | { subject: string; object: string };
-  save: (ids: (ref: string) => number) => EvidenceTarget;
+  save: (tx: SqlDriver, ids: (ref: string) => number) => EvidenceTarget;
   span: QuoteSpan;
   quote: string;
 }
@@ -214,6 +224,12 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       return { status: "held", reason: EXTRACT_HOLD_TOO_LARGE };
     }
     const candidates = findCandidates(db, `${stored.title}\n${stored.body}`).map(String);
+    // What each candidate item came from, read now, when it is offered: a source it
+    // draws on that is gone when the result is written makes the result stale
+    // (I04-R11). Read after the call, a deleted item's lineage would be empty.
+    const candidateLineage = new Map(
+      candidates.map((id) => [id, derivativeRegistry.lineage(db, { kind: "item", id })]),
+    );
     const ref = { sourceId: String(sourceId), version: fenceVersion as number };
     const proposed = await proposals(options, ref);
     const result = await extractOnce(broker, {
@@ -255,6 +271,12 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       if ("dropped" in span) return void drops.quotes++;
       planned.push({ ...entry, span, quote });
     };
+    /** What an entry on these refs draws on besides this version: the candidates it names. */
+    const drawnOn = (refs: string[]): LineageRef[] =>
+      refs.flatMap((ref) => {
+        const id = items.get(ref)?.existingItemId;
+        return id === null || id === undefined ? [] : (candidateLineage.get(id) ?? []);
+      });
     const attributes = (epistemic: KnowledgeAttributes["epistemic"]): KnowledgeAttributes => ({
       epistemic,
       status: "candidate",
@@ -268,9 +290,11 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         continue;
       }
       plan([fact.item], fact.quote, {
+        kind: "fact",
+        key: JSON.stringify(["fact", items.get(fact.item)?.name, fact.kind, value]),
         target: { item: fact.item },
-        save: (ids) => ({
-          factId: saveFact(db, {
+        save: (tx, ids) => ({
+          factId: saveFact(tx, {
             itemId: ids(fact.item),
             kind: fact.kind,
             value,
@@ -281,9 +305,16 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     }
     for (const relation of answer.relations) {
       plan([relation.subject, relation.object], relation.quote, {
+        kind: "relation",
+        key: JSON.stringify([
+          "relation",
+          items.get(relation.subject)?.name,
+          relation.type,
+          items.get(relation.object)?.name,
+        ]),
         target: { subject: relation.subject, object: relation.object },
-        save: (ids) => ({
-          relationId: saveRelation(db, {
+        save: (tx, ids) => ({
+          relationId: saveRelation(tx, {
             subjectId: ids(relation.subject),
             type: relation.type,
             objectId: ids(relation.object),
@@ -293,59 +324,64 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       });
     }
 
-    return {
-      status: "succeeded",
-      write: () => {
-        // An item is created only for a fact or relation that is kept. Existing
-        // items are looked up before any is created: one deleted during the Provider
-        // call (V02-R12) frees its id, which SQLite hands to the next new item, so a
-        // later lookup would find this write's own new item under the stale id.
-        const ids = new Map<string, number>();
-        const gone = new Set<string>();
-        for (const [ref, item] of items) {
-          if (item.existingItemId === null) continue;
-          const id = readItem(db, Number(item.existingItemId))?.id; // deleted meanwhile: undefined
-          if (id === undefined) gone.add(ref);
-          else ids.set(ref, id);
-        }
-        const touched = new Set<number>();
-        // only called for refs not gone: an existing item found above, or a new one
-        const idOf = (ref: string): number => {
-          const known = ids.get(ref);
-          if (known !== undefined) return known;
-          const item = items.get(ref) as Item;
-          const id = insertItem(db, {
-            type: item.type,
-            name: item.name,
-            ...attributes("explicit"),
-          });
-          ids.set(ref, id);
-          return id;
-        };
-        for (const entry of planned) {
-          const refs =
-            "item" in entry.target
-              ? [entry.target.item]
-              : [entry.target.subject, entry.target.object];
-          // drop first: idOf would create a new item for an entry dropped anyway
-          if (refs.some((ref) => gone.has(ref))) {
-            drops.other++;
-            continue;
-          }
+    // The items share what they create: an item is made for a fact or relation that
+    // is kept, once per ref; the rule below recomputes the items they touched.
+    // This state lives for one commit: closeJob calls each item's write once inside its
+    // transaction, and a failed commit is never re-run with these items (a locked file
+    // runs the handler again for a fresh closure, a throwing write closes the job).
+    const ids = new Map<string, number>();
+    const touched = new Set<number>();
+    const own: LineageRef = { sourceId: sourceId as number, version: fenceVersion as number };
+    const lineageOf = (extra: LineageRef[]) => [own, ...extra];
+    for (const [ref, item] of items) {
+      if (item.existingItemId !== null) ids.set(ref, Number(item.existingItemId));
+    }
+    // an existing item's id came from the candidates (checked above); a deleted one
+    // makes the result stale through its lineage before any of this runs
+    const written: DerivedItem[] = planned.map((entry) => {
+      const refs =
+        "item" in entry.target ? [entry.target.item] : [entry.target.subject, entry.target.object];
+      return {
+        kind: entry.kind,
+        itemKey: entry.key,
+        lineage: lineageOf(drawnOn(refs)),
+        write: (tx) => {
+          const idOf = (ref: string): number => {
+            const known = ids.get(ref);
+            if (known !== undefined) return known;
+            const item = items.get(ref) as Item;
+            const id = insertItem(tx, {
+              type: item.type,
+              name: item.name,
+              ...attributes("explicit"),
+            });
+            ids.set(ref, id);
+            return id;
+          };
           for (const id of refs.map(idOf)) touched.add(id);
-          const target = entry.save((ref) => ids.get(ref) as number);
-          addEvidence(db, {
+          const target = entry.save(tx, (ref) => ids.get(ref) as number);
+          addEvidence(tx, {
             target,
             sourceVersionId: versionId,
             ...entry.span,
             quote: entry.quote,
           });
           // the evidence just added is current (the fence held), so a superseded row lives again
-          reviveSuperseded(db, target);
-        }
-        recordExtractionDrops(db, job.id, drops);
-        recomputeDependencyDelay(db, [...touched]);
+          reviveSuperseded(tx, target);
+        },
+      };
+    });
+    // the rule runs last, over what the written items touched, and the drop counts
+    // are recorded with it (also when nothing was kept)
+    const rule: DerivedItem = {
+      kind: "insight",
+      itemKey: "dependency-delay",
+      lineage: lineageOf(written.flatMap((w) => w.lineage.slice(1))),
+      write: (tx) => {
+        recordExtractionDrops(tx, job.id, drops);
+        recomputeDependencyDelay(tx, [...touched]);
       },
     };
+    return { status: "succeeded", items: [...written, rule] };
   };
 }

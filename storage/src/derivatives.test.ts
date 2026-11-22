@@ -571,7 +571,7 @@ derivativeKindContract("SQL double through propagate", {
         writeTombstone(db, { sourceId, version: 1, at: AT, reason: "source-deleted" });
         return counts(sourceId);
       },
-      // the double's own fence (commitDerived's arrives with I04-T06): a covered source is stale
+      // the double's own fence (a double kind has no write through commitDerived): a covered source is stale
       staleInput: () => ({
         ref: { kind: "double", id: "late" },
         attempt: () =>
