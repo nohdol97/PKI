@@ -110,6 +110,12 @@ export {
 } from "./jobs.ts";
 export { purgeEndedJobs } from "./job-retention.ts";
 export {
+  countJobsByStatus,
+  listRecentJobs,
+  projectionActivity,
+  type ProjectionActivity,
+} from "./job-activity.ts";
+export {
   EXTRACT_JOB_KIND,
   PROJECTION_REBUILD_KIND,
   PROJECTION_REMOVE_KIND,
