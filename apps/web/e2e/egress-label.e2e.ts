@@ -3,7 +3,7 @@
 // nowhere; Settings shows "데이터베이스 암호화: 적용 안 됨" read from the canonical
 // file. The consent screen gives and revokes consent, and the egress policy over
 // the same canonical file then decides accordingly: the screen is wired to it.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import { createCallRecorder, createEgressPolicy, OPENAI_BASE_URL_SETTING } from "@pki/providers";
 import { migrate, writeSetting } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
@@ -139,12 +139,24 @@ test("CLI calls show as external egress, consent is given and revoked, encryptio
     expect(decideFor(dataDir, "codex")).toEqual({ allowed: false, reason: "no-consent" });
     await expect(page.getByText("로컬 추론")).toHaveCount(0);
 
-    // the endpoint changes after the screen was shown: the grant is refused, nothing stored
+    // the endpoint changes after the screen was shown: the grant is refused, nothing stored.
+    // The screen reads the consents more than once while it mounts (React StrictMode runs
+    // the effect twice in development), so "one" being on screen does not mean every read
+    // has reached the backend. A read that lands after the endpoint changed would show the
+    // new endpoint and make the grant succeed. The endpoint is changed only once no read
+    // is in flight, so the screen holds "one" whatever the order the reads were served in.
+    let reads = 0;
+    const isRead = (request: Request) =>
+      request.method() === "GET" && new URL(request.url()).pathname === "/api/consents";
+    page.on("request", (request) => isRead(request) && reads++);
+    page.on("requestfinished", (request) => isRead(request) && reads--);
+    page.on("requestfailed", (request) => isRead(request) && reads--);
     setEndpoint(dataDir, "https://one.synthetic.example/v1");
     await page.reload();
     await openScreen(page, "설정");
     const openai = page.getByRole("row", { name: /^openai-compatible/ });
     await expect(openai).toContainText("one.synthetic.example");
+    await expect.poll(() => reads).toBe(0);
     setEndpoint(dataDir, "https://two.synthetic.example/v1");
     await page.getByRole("checkbox", { name: "openai-compatible 일반 허용" }).check();
     await page.getByRole("button", { name: "openai-compatible 동의", exact: true }).click();
