@@ -9,6 +9,7 @@
 import { JSONL_CAPABILITIES, JSONL_IMPORT_KIND, parseJsonl } from "@pki/connector-sdk";
 import type { ErrorResponse, SyncResponse } from "@pki/contracts";
 import { readConnectorKind, registerConnectorInstance, type SqlDriver } from "@pki/storage";
+import { applyConfiguredScope } from "./connector-scopes.ts";
 import { tryLockInstance, type ConnectorManager } from "./connectors.ts";
 import { addPage, emptyResult, storePage, type PageOptions } from "./page-store.ts";
 
@@ -46,7 +47,10 @@ export async function importContent(
   if (!release) return { error: "instance-busy" };
   try {
     const { lines, rejected } = parseJsonl(content);
-    db.transaction(() => registerConnectorInstance(db, instanceId, JSONL_IMPORT_KIND));
+    db.transaction(() => {
+      registerConnectorInstance(db, instanceId, JSONL_IMPORT_KIND);
+      applyConfiguredScope(db, instanceId); // the grade of its sources compares claims with it (I01-R15)
+    });
     const stored = storePage(
       {
         db,

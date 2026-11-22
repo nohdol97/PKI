@@ -16,6 +16,8 @@ import {
   readRescanState,
   registerConnectorInstance,
   readSourceVersion,
+  listConnectorInstanceIds,
+  setConfiguredScope,
   saveSourceRecord,
   writeCursor,
 } from "./sources.ts";
@@ -264,11 +266,47 @@ describe("readSourceVersion", () => {
       body: "본문",
       accessScope: "team",
       connectorKind: "test-fixtures",
+      scopeClaimed: false,
+      configuredScope: null,
     });
+  });
+
+  it("returns whether the scope is a claim and the scope configured for the instance (I01-R15)", () => {
+    saveSourceRecord(db, "c1", record("e1", "제목", "본문"));
+    db.run("UPDATE sources SET scope_claimed = 1 WHERE external_id = 'e1'");
+    setConfiguredScope(db, "c1", ["team", "all", "team"]);
+    expect(readSourceVersion(db, versionId())).toMatchObject({
+      scopeClaimed: true,
+      configuredScope: ["all", "team"],
+    });
+  });
+
+  it("reads a configured scope that is not a JSON array of strings as unknown", () => {
+    saveSourceRecord(db, "c1", record("e1", "제목", "본문"));
+    db.run("UPDATE connector_instances SET configured_scope = '[1]' WHERE id = 'c1'");
+    expect(readSourceVersion(db, versionId())?.configuredScope).toBeNull();
   });
 
   it("returns undefined for a missing version", () => {
     expect(readSourceVersion(db, 404)).toBeUndefined();
+  });
+});
+
+describe("configured scope (I01-R15)", () => {
+  it("is set and cleared per instance, normalized, and setting a missing instance does nothing", () => {
+    setConfiguredScope(db, "c1", ["b", "a", "b"]);
+    const stored = () => db.all("SELECT id, configured_scope FROM connector_instances ORDER BY id");
+    expect(stored()).toEqual([
+      { id: "c1", configured_scope: '["a","b"]' },
+      { id: "c2", configured_scope: null },
+    ]);
+    setConfiguredScope(db, "c1", null);
+    setConfiguredScope(db, "missing", ["x"]);
+    expect(stored()).toEqual([
+      { id: "c1", configured_scope: null },
+      { id: "c2", configured_scope: null },
+    ]);
+    expect(listConnectorInstanceIds(db)).toEqual(["c1", "c2"]);
   });
 });
 

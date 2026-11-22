@@ -392,6 +392,10 @@ export interface StoredSourceVersion {
   accessScope: string | null;
   /** The kind of the Connector instance the source came from; null if no such row. */
   connectorKind: string | null;
+  /** True when the scope is a user's own claim (an import, I01-R15). */
+  scopeClaimed: boolean;
+  /** The scope the deployment configured for the instance (I01-R15); null is unknown. */
+  configuredScope: AccessScope;
 }
 
 /** The row ID of one source's version (a job's source and fence version), or undefined. */
@@ -409,7 +413,7 @@ export function findSourceVersionId(
 /** One stored version with what the Broker needs to grade it, or undefined if absent. */
 export function readSourceVersion(db: SqlDriver, id: number): StoredSourceVersion | undefined {
   const row = db.all(
-    `SELECT v.id, v.title, v.body, s.access_scope, c.kind
+    `SELECT v.id, v.title, v.body, s.access_scope, s.scope_claimed, c.kind, c.configured_scope
        FROM source_versions v
        JOIN sources s ON s.id = v.source_id
        LEFT JOIN connector_instances c ON c.id = s.connector_instance_id
@@ -423,5 +427,34 @@ export function readSourceVersion(db: SqlDriver, id: number): StoredSourceVersio
     body: row.body as string,
     accessScope: row.access_scope as string | null,
     connectorKind: row.kind as string | null,
+    scopeClaimed: row.scope_claimed === 1,
+    configuredScope: parseConfiguredScope(row.configured_scope as string | null),
   };
+}
+
+/** The stored configured scope; anything that is not a JSON array of strings is unknown (null). */
+function parseConfiguredScope(raw: string | null): AccessScope {
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) {
+      return normalizeScope(parsed as string[]);
+    }
+  } catch {
+    // unreadable: unknown
+  }
+  return null;
+}
+
+/** Every instance id (the start applies the configured scopes to all of them, I01-R15). */
+export function listConnectorInstanceIds(db: SqlDriver): string[] {
+  return db.all("SELECT id FROM connector_instances ORDER BY id").map((r) => r.id as string);
+}
+
+/** Sets the scope the deployment configured for an instance (null: unknown); no row, no effect. */
+export function setConfiguredScope(db: SqlDriver, id: string, scope: AccessScope): void {
+  db.run("UPDATE connector_instances SET configured_scope = ? WHERE id = ?", [
+    scope === null ? null : JSON.stringify(normalizeScope(scope)),
+    id,
+  ]);
 }
