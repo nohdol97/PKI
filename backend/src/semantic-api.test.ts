@@ -698,6 +698,23 @@ describe("POST /api/semantic/correct: a direct add and a value fix (S01-T03, R7,
     });
   });
 
+  it("stores an item name trimmed, and catches the untrimmed duplicate", async () => {
+    world();
+    await start();
+    const add = (name: string) =>
+      correct({ action: "add", entry: { kind: "item", type: "Concept", name } });
+    const first = parse(await add("  합성 개념 "));
+    expect(db.all("SELECT name FROM items WHERE id = ?", [first.entry?.id as number])).toEqual([
+      { name: "합성 개념" },
+    ]);
+    expect(parse(await add("합성 개념 "))).toEqual({
+      status: "refused",
+      reason: "value-exists",
+      existing: { kind: "item", id: first.entry?.id },
+    });
+    expect(db.all("SELECT 1 FROM items WHERE type = 'Concept'")).toHaveLength(1);
+  });
+
   it("stores a fixed value trimmed, as an added one", async () => {
     const w = world();
     await start();

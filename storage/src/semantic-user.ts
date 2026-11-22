@@ -235,13 +235,18 @@ function undoBatch(
   // a member deleted since leaves fewer rows than the fix made; one with a later line is not at its fix
   const whole = members.length >= 2 && lines.every((l) => l.newest?.seq === l.m.seq);
   if (!whole) return { status: "refused", reason: "not-latest" };
-  let answer: UndoResult = { status: "refused", reason: "not-latest" };
+  let answer: UndoResult | undefined;
+  // from here a member may already be reverted: a refusal would be committed by a caller that keeps
+  // returned values, so what cannot be reverted throws and the caller's transaction rolls back
   for (const { m, newest: line } of lines) {
     const row = readRow(tx, m.ref);
-    if (!row || !line) return { status: "refused", reason: "not-latest" };
+    if (!row || !line) throw new Error("a row of the batch vanished during its undo");
     const result = revertLine(tx, m.ref, row, line, at);
+    if (result.status === "refused")
+      throw new Error(`a row of the batch cannot be reverted: ${result.reason}`);
     if (m.ref.id === ref.id) answer = result;
   }
+  if (!answer) throw new Error("the requested row is not in its batch");
   return answer;
 }
 

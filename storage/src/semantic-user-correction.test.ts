@@ -578,6 +578,25 @@ describe("lifecycle.undo (value fix) (S01-R8)", () => {
     expect(everything()).toEqual(before);
   });
 
+  it("throws, so a caller's transaction rolls back, when a row of the batch cannot be reverted after another was", () => {
+    const owner = newItem();
+    const old = extracted(owner, "2026-12-05", "verified");
+    const fixed = replaced(old, "2026-12-20");
+    const batch = lines(old).at(-1)?.batch;
+    // a forged third member of the batch whose line cannot be reverted (no state before it); it has the highest id
+    const odd = extracted(owner, "2026-12-09", "candidate");
+    db.run(
+      `INSERT INTO fact_history (fact_id, seq, at, actor, action, from_status, to_status,
+         from_epistemic, to_epistemic, batch)
+       VALUES (?, ?, '2026-11-23T00:00:00Z', 'user', 'replace', NULL, 'candidate', NULL, 'explicit', ?)`,
+      [odd.id, lines(odd).length + 1, batch as number],
+    );
+    const before = everything();
+    expect(() => db.transaction(() => userDecisions.undo(db, old))).toThrow(/cannot be reverted/);
+    expect(everything()).toEqual(before); // the rows reverted before the throw are back
+    expect(stored(fixed.added)).toBeDefined();
+  });
+
   it("hands a candidate the fix rejected back to the propagation once the fix is undone", () => {
     const { old } = setup("candidate", "explicit");
     userDecisions.undo(db, old);
