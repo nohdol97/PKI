@@ -34,7 +34,7 @@ Provider: <result.md의 provider_id> <result.md의 version 또는 model, 해시 
 | 시나리오 | 항목 id | 판정 | 효과 행 / 합쳐진 slot | 관찰 | 충족/미충족 이유 | 미검증 |
 |---|---|---|---|---|---|---|
 | `kill` | `I03-C2:queue-scenario` | <PASS/FAIL/INCONCLUSIVE> | <effect_rows> / <merged_slots> | <observed> | | |
-| `sleep` | `I03-C2:queue-scenario` | | | | | 수동 확인 기록의 잔 시간은 사람이 적은 값 |
+| `sleep` | `I03-C2:queue-scenario` | | | | | 수동 확인 기록의 잔 시간은 사람이 적은 값. 합쳐진 slot은 그 기록의 시간대와 겹치는 간격만 센 값 |
 | `hibernate` | `I03-C2:queue-scenario` | | | | | 같음 |
 | `clock-forward` | `I03-C2:queue-scenario` | | | | | |
 | `clock-back` | `I03-C2:queue-scenario` | | | | | |

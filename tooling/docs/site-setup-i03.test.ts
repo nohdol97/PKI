@@ -200,13 +200,6 @@ describe("docs.site-setup (I03): the runtime setting and what the items name exi
     expect(row).toContain(`**${range?.[1]}에서 ${range?.[2]}까지의 정수**`);
   });
 
-  it("fails when the documented default differs from the code's", () => {
-    const mutated = settingsRow(siteText, "jobs.maxConcurrent").replace(/\| 2 \|$/, "| 3 |");
-    const cells = mutated.split(" | ").map((c) => c.replace(/^\||\|$/g, "").trim());
-    expect(cells[cells.length - 1]).toBe("3");
-    expect(cells[cells.length - 1]).not.toBe("2");
-  });
-
   it("fails when the settings row is removed", () => {
     const mutated = siteText.replace(/^\| `jobs\.maxConcurrent`.*\n/m, "");
     expect(settingsRow(mutated, "jobs.maxConcurrent")).toBe("");

@@ -389,7 +389,10 @@ def run_queue_scenario(args, installer_check=None, db_path=None):
         raise ConfigError("--out is required for {}".format(args.action))
     db_path = db_path or site_db_path()
     if args.action == "prepare":
-        queue_scenario.prepare(db_path, args.out, scenario)
+        try:
+            queue_scenario.prepare(db_path, args.out, scenario)
+        except queue_scenario.StaleBaseline as exc:
+            raise StaleData(str(exc)) from exc
         print("wrote {} to --out. Next: RUNBOOK.md section 9 (scenario {}), then `record`.".format(queue_scenario.STATE_FILE, scenario))
         return 0
     sleep_path = args.sleep_record or os.path.join(args.out, queue_scenario.SLEEP_RECORD_FILE)
@@ -399,13 +402,14 @@ def run_queue_scenario(args, installer_check=None, db_path=None):
     started_at, state_scenario, baseline = queue_scenario.load_state(args.out)
     if state_scenario != scenario:
         raise ConfigError("the state in --out is of scenario {}: run `prepare --scenario {}` first".format(state_scenario, scenario))
+    window = None
     if needs_sleep:
         try:
-            queue_scenario.read_sleep_record(sleep_path, scenario, started_at)
+            window = queue_scenario.sleep_window(queue_scenario.read_sleep_record(sleep_path, scenario, started_at))
         except queue_scenario.SleepRecordInvalid as exc:
             raise Refusal(NOTICE_SLEEP_RECORD.format(file=queue_scenario.SLEEP_RECORD_FILE, code="sleep-record-invalid"),
                           "sleep-record-invalid") from exc
-    snap = queue_scenario.read_queue_state(db_path, baseline)
+    snap = queue_scenario.read_queue_state(db_path, baseline, window)
     verdict = queue_scenario.judge(scenario, args.observed, snap, cfg["expectedEffectRows"])
     record = queue_scenario.build_record(cfg, app_version, scenario, snap, verdict, args.observed, started_at, commit=_git("rev-parse", "HEAD"))
     queue_scenario.write_results(record, verdict, args.observed, args.out, args.redact)

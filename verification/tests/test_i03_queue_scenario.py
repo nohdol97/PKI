@@ -3,6 +3,7 @@ refuse outside the Windows installer (case 1) and, with the installer check swap
 manual sleep-scenario confirmation record (case 2). The judge and the record form are checked on synthetic data. Nothing
 here is site evidence: the Windows branch was never run."""
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 try:
     from . import _paths
@@ -28,6 +30,17 @@ STARTED = "2026-11-22T01:00:00.000Z"
 SLEPT = "2026-11-22T01:10:00.000Z"
 WOKE = "2026-11-22T01:40:00.000Z"
 INSTALLED = lambda _cfg: "0.1.0"  # noqa: E731 - the stand-in for "this is the Windows installed build"
+
+
+def setUpModule():
+    """The fixtures are dated 2023: pin the clock `prepare` reads to just before their first due slot."""
+    global _CLOCK
+    _CLOCK = unittest.mock.patch.object(qs, "now_ms", lambda: T0)
+    _CLOCK.start()
+
+
+def tearDownModule():
+    _CLOCK.stop()
 
 
 def read(path):
@@ -49,6 +62,8 @@ def config(**over):
 TEN = 600_000
 T0 = 1_700_000_000_000 // TEN * TEN  # a slot boundary
 EVERY_10 = json.dumps({"kind": "every-10-minutes"})
+DAILY = json.dumps({"kind": "daily", "at": {"hour": 3, "minute": 0}})
+BASE1 = {"nextDue": T0 + TEN, "lengthMs": TEN}
 
 
 def make_db(path, jobs=(), schedules=((T0 + TEN, EVERY_10),)):
@@ -61,7 +76,7 @@ def make_db(path, jobs=(), schedules=((T0 + TEN, EVERY_10),)):
                            attempts INTEGER NOT NULL, source_id INTEGER, fence_version INTEGER, schedule_id INTEGER, slot INTEGER,
                            CHECK ((source_id IS NULL) = (fence_version IS NULL)), CHECK ((schedule_id IS NULL) = (slot IS NULL)),
                            UNIQUE (kind, target, source_id, fence_version), UNIQUE (schedule_id, slot));
-        CREATE TABLE schedules (id INTEGER PRIMARY KEY, period TEXT NOT NULL, next_due INTEGER NOT NULL,
+        CREATE TABLE schedules (id INTEGER PRIMARY KEY, period TEXT NOT NULL, next_due INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
                                 coalesced_count INTEGER NOT NULL DEFAULT 0, held_coalesced_count INTEGER NOT NULL DEFAULT 0);
     """)
     db.executemany("INSERT INTO jobs (kind, status, attempts, source_id, fence_version, schedule_id, slot) VALUES (?,?,?,?,?,?,?)", jobs)
@@ -79,6 +94,10 @@ def sleep_job(gap_periods):
     """The shape of backend/src/scheduler.test.ts `coalesce.sleep`: next due T0+10min, the machine sleeps, ONE job is
     registered for the latest slot, `coalesced_count` stays 0. gap_periods=48 is the 8-hour sleep (48 due slots)."""
     return ("connector-sync", "succeeded", 1, None, None, 1, T0 + TEN * gap_periods)
+
+
+def iso(ms):
+    return datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def restart_at(out, started_at):
@@ -219,7 +238,7 @@ class ReadState(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "pki.sqlite")
             make_db(path, jobs, schedules)
-            return qs.read_queue_state(path, baseline or {"maxJobId": 0, "schedules": {"1": {"nextDue": T0 + TEN}}})
+            return qs.read_queue_state(path, baseline or {"maxJobId": 0, "schedules": {"1": BASE1}})
 
     def test_counts_effects_and_retries(self):
         s = self.snap(good_jobs(3))
@@ -241,11 +260,46 @@ class ReadState(unittest.TestCase):
         self.assertEqual(self.snap([sleep_job(1), sleep_job(10)])["mergedSlots"], 8)
 
     def test_only_jobs_after_the_baseline_count(self):
-        s = self.snap([sleep_job(48)], baseline={"maxJobId": 1, "schedules": {"1": {"nextDue": T0 + TEN}}})
+        s = self.snap([sleep_job(48)], baseline={"maxJobId": 1, "schedules": {"1": BASE1}})
         self.assertEqual((s["effectRows"], s["mergedSlots"]), (0, 0))
 
     def test_a_schedule_that_did_not_exist_at_the_baseline_adds_nothing(self):
         self.assertEqual(self.snap([sleep_job(48)], baseline={"maxJobId": 0, "schedules": {}})["mergedSlots"], 0)
+
+    def test_the_baseline_period_is_used_even_if_the_period_is_changed_to_daily_before_record(self):
+        """D1: the runbook restores the cleanup schedule to daily before `record`; the 8-hour sleep still counts 47."""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pki.sqlite")
+            make_db(path, [sleep_job(48)], schedules=((T0 + TEN, DAILY),))  # the stored period is daily at record time
+            s = qs.read_queue_state(path, {"maxJobId": 0, "schedules": {"1": BASE1}})
+            self.assertEqual(s["mergedSlots"], 47)
+
+    def test_downtime_merged_by_a_startup_check_is_not_sleep_evidence(self):
+        """D2: app closed 40 minutes, no sleep: the startup check registers one job for the downtime, then normal runs."""
+        jobs = [sleep_job(5), sleep_job(6), sleep_job(7)]  # slots T0+50, +60, +70 min; baseline next due T0+10 min
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pki.sqlite")
+            make_db(path, jobs)
+            base = {"maxJobId": 0, "schedules": {"1": BASE1}}
+            self.assertEqual(qs.read_queue_state(path, base)["mergedSlots"], 4)  # without a window the downtime would count
+            elsewhere = (T0 + TEN * 12, T0 + TEN * 15)  # a sleep record whose window the downtime does not span
+            self.assertEqual(qs.read_queue_state(path, base, elsewhere)["mergedSlots"], 0)
+
+    def test_a_gap_that_began_long_after_the_sleep_started_is_not_that_sleep(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pki.sqlite")
+            make_db(path, [sleep_job(48)])
+            late = {"maxJobId": 0, "schedules": {"1": {"nextDue": T0 + 40 * TEN, "lengthMs": TEN}}}
+            window = (T0 + 2 * TEN, T0 + 48 * TEN)
+            self.assertEqual(qs.read_queue_state(path, late)["mergedSlots"], 8)
+            self.assertEqual(qs.read_queue_state(path, late, window)["mergedSlots"], 0)
+
+    def test_a_gap_that_spans_the_sleep_record_counts(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pki.sqlite")
+            make_db(path, [sleep_job(48)])
+            window = (T0 + 2 * TEN, T0 + 48 * TEN)  # slept 20 minutes in, woke at the job's slot
+            self.assertEqual(qs.read_queue_state(path, {"maxJobId": 0, "schedules": {"1": BASE1}}, window)["mergedSlots"], 47)
 
     def test_the_database_is_opened_read_only(self):
         with tempfile.TemporaryDirectory() as d:
@@ -311,13 +365,41 @@ class PrepareState(unittest.TestCase):
             make_db(db, good_jobs(2))
             qs.prepare(db, out, "sleep")
             started, scenario, baseline = qs.load_state(out)
-            self.assertEqual((scenario, baseline), ("sleep", {"maxJobId": 2, "schedules": {"1": {"nextDue": T0 + TEN}}}))
+            self.assertEqual((scenario, baseline), ("sleep", {"maxJobId": 2, "schedules": {"1": BASE1}}))
             self.assertTrue(started.endswith("Z"))
 
     def test_prepare_without_a_database_baselines_zero(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
             qs.prepare(os.path.join(d, "none.sqlite"), out, "kill")
             self.assertEqual(qs.load_state(out)[2], {"maxJobId": 0, "schedules": {}})
+
+    def test_a_baseline_whose_next_due_is_already_past_is_refused_and_writes_nothing(self):
+        """D2: the app was closed at prepare, its startup check would merge the downtime."""
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            db = os.path.join(d, "pki.sqlite")
+            make_db(db)  # next due T0 + 10 min
+            path = os.path.join(d, "config.json")
+            write_json(path, config())
+            with unittest.mock.patch.object(qs, "now_ms", lambda: T0 + 3 * TEN):
+                code, stdout, err = run_main(["queue-scenario", "prepare", "--scenario", "clock-forward", "--config", path, "--out", out],
+                                             installer_check=INSTALLED, db_path=db)
+            self.assertEqual(code, site.STALE_EXIT, stdout + err)
+            self.assertIn("stale-data", err)
+            self.assertEqual(os.listdir(out), [])
+            with self.assertRaises(qs.StaleBaseline), unittest.mock.patch.object(qs, "now_ms", lambda: T0 + 3 * TEN):
+                qs.prepare(db, out, "kill")
+
+    def test_a_disabled_schedule_does_not_make_the_baseline_stale(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            db = os.path.join(d, "pki.sqlite")
+            make_db(db)
+            conn = sqlite3.connect(db)
+            conn.execute("UPDATE schedules SET enabled = 0")
+            conn.commit()
+            conn.close()
+            with unittest.mock.patch.object(qs, "now_ms", lambda: T0 + 3 * TEN):
+                qs.prepare(db, out, "kill")
+            self.assertEqual(qs.load_state(out)[2]["schedules"], {})
 
     def test_a_state_of_another_scenario_is_refused_at_record_time(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
@@ -422,8 +504,9 @@ class WholeRun(unittest.TestCase):
                          (T0 + TEN * gap_periods,))
             conn.commit()
             conn.close()
-            write_json(os.path.join(out, qs.SLEEP_RECORD_FILE), {"schema": 1, "scenario": "sleep", "sleptAt": SLEPT, "wokeAt": WOKE})
-            restart_at(out, STARTED)  # the run started before the sleep: the record is "after prepare"
+            write_json(os.path.join(out, qs.SLEEP_RECORD_FILE),
+                       {"schema": 1, "scenario": "sleep", "sleptAt": iso(T0 + 2 * TEN), "wokeAt": iso(T0 + max(gap_periods, 3) * TEN)})
+            restart_at(out, iso(T0))  # the run started before the sleep: the record is "after prepare"
             argv = ["queue-scenario", "record", "--scenario", "sleep", "--config", path, "--out", out]
             for word in qs.OBSERVATIONS["sleep"]:
                 argv += ["--observed", word]

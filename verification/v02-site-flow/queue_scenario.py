@@ -11,6 +11,7 @@ record (`sleep-confirmation.json`): the runner cannot make a PC sleep and cannot
 import json
 import os
 import sqlite3
+import time
 from urllib.request import pathname2url
 
 import delete_scenario
@@ -75,41 +76,62 @@ def _period_ms(period_json):
         return None
 
 
+def now_ms():
+    return int(time.time() * 1000)
+
+
+class StaleBaseline(Exception):
+    """A schedule's next due time is already past at `prepare`: the app was closed, so its startup check would merge the
+    downtime and the merge could not be told from the scenario's own."""
+
+
 def read_baseline(db_path):
-    """{maxJobId, schedules} of the canonical DB now: the greatest job id and, per schedule, the next due time; empty when there is no DB yet."""
+    """{maxJobId, schedules} of the canonical DB now: the greatest job id and, per enabled schedule, the next due time and the
+    nominal period length (the jobs registered afterwards were registered under that period, whatever it is changed to);
+    empty when there is no DB yet."""
     if not os.path.exists(db_path):
         return {"maxJobId": 0, "schedules": {}}
     db = open_ro(db_path)
     try:
         max_id = int(db.execute("SELECT coalesce(max(id), 0) FROM jobs").fetchone()[0])
-        schedules = {str(i): {"nextDue": nd} for i, nd in db.execute("SELECT id, next_due FROM schedules")}
+        schedules = {}
+        for i, nd, period in db.execute("SELECT id, next_due, period FROM schedules WHERE enabled = 1"):
+            length = _period_ms(period)
+            if length is not None:
+                schedules[str(i)] = {"nextDue": nd, "lengthMs": length}
         return {"maxJobId": max_id, "schedules": schedules}
     finally:
         db.close()
 
 
-def merged_slots(db, baseline):
+def _ms(iso):
+    return int(round(rr.parse_time(iso).timestamp() * 1000))
+
+
+def merged_slots(db, baseline, window=None):
     """Slots the scheduler folded into one job each, since the baseline. A check that finds several slots due registers ONE
     job for the latest and records the due count (the due slots from the next due time through that slot, both ends in:
     backend/src/scheduler.ts, I03-R20); that count is not stored on the job, so it is rebuilt from the slot gaps of the
     schedule's jobs: from the next due time (the baseline's for the first job, the previous slot + one period after it) to
-    the job's slot there are (slot - next due) / period + 1 due slots, and the slots merged into it are all but the one that ran. Counts of open-job merges
-    (`coalesced_count`) are a different event and are not what this measures."""
+    the job's slot there are (slot - next due) / period + 1 due slots, and the slots merged into it are all but the one that
+    ran. The period length is the baseline's, so changing the period after `prepare` does not change the count. With a
+    `window` (sleptAt, wokeAt in ms; the sleep and hibernate scenarios) only a gap that spans the sleep counts: the job's
+    slot is no earlier than one period before wokeAt and the gap began no later than one period after sleptAt; downtime
+    merged by a startup check elsewhere does not count. Counts of open-job merges (`coalesced_count`) are a different event
+    and are not what this measures."""
     total = 0
-    for sid, period in db.execute("SELECT id, period FROM schedules"):
-        length = _period_ms(period)
-        base = baseline["schedules"].get(str(sid))
-        if length is None or base is None:
-            continue
+    for sid, base in baseline["schedules"].items():
+        length = base["lengthMs"]
         next_due = base["nextDue"]
         for (slot,) in db.execute("SELECT slot FROM jobs WHERE id > ? AND schedule_id = ? ORDER BY slot",
-                                  (baseline["maxJobId"], sid)):
-            total += max(round((slot - next_due) / length), 0)  # due slots (that many + 1) minus the one that ran
+                                  (baseline["maxJobId"], int(sid))):
+            if window is None or (slot >= window[1] - length and next_due <= window[0] + length):
+                total += max(round((slot - next_due) / length), 0)  # due slots (that many + 1) minus the one that ran
             next_due = slot + length
     return total
 
 
-def read_queue_state(db_path, baseline):
+def read_queue_state(db_path, baseline, window=None):
     """What the queue left since `baseline`, read-only. `effectRows` are the succeeded extraction jobs (one per source
     version: the unique keys of the jobs table make a second one impossible, so no duplicate count is read); `retriedJobs`
     are the succeeded jobs that needed more than one attempt (a killed run taken again, but an ordinary retry after a
@@ -123,7 +145,7 @@ def read_queue_state(db_path, baseline):
             "jobsByStatus": by_status,
             "effectRows": one("SELECT count(*) FROM jobs WHERE id > ? AND kind = 'extract' AND status = 'succeeded'", after),
             "retriedJobs": one("SELECT count(*) FROM jobs WHERE id > ? AND status = 'succeeded' AND attempts >= 2", after),
-            "mergedSlots": merged_slots(db, baseline),
+            "mergedSlots": merged_slots(db, baseline, window),
         }
     finally:
         db.close()
@@ -132,9 +154,14 @@ def read_queue_state(db_path, baseline):
 def prepare(db_path, out_dir, scenario):
     """Writes the state (start time, scenario, baseline of the DB as it is now). An existing DB is fine: the six scenarios
     run one after another on one install, and each counts only what came after its own baseline."""
+    baseline = read_baseline(db_path)
+    now = now_ms()
+    if any(v["nextDue"] < now for v in baseline["schedules"].values()):
+        raise StaleBaseline("a schedule's next due time is already past: launch the installed app, wait until the activity "
+                            "screen shows every schedule's next due in the future, then run `prepare` (RUNBOOK step 2)")
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, STATE_FILE), "w", encoding="utf-8") as fh:
-        json.dump({"startedAt": rr.now_iso(), "scenario": scenario, "baseline": read_baseline(db_path)}, fh)
+        json.dump({"startedAt": rr.now_iso(), "scenario": scenario, "baseline": baseline}, fh)
 
 
 def load_state(out_dir):
@@ -143,7 +170,8 @@ def load_state(out_dir):
     base = state["baseline"]
     scheds = base.get("schedules")
     if (state["scenario"] not in SCENARIOS or not isinstance(base.get("maxJobId"), int) or not isinstance(scheds, dict)
-            or not all(isinstance(v, dict) and isinstance(v.get("nextDue"), int) for v in scheds.values())):
+            or not all(isinstance(v, dict) and isinstance(v.get("nextDue"), int) and isinstance(v.get("lengthMs"), int)
+                       for v in scheds.values())):
         raise ConfigError("state file is not a queue-scenario state")
     return state["startedAt"], state["scenario"], {"maxJobId": base["maxJobId"], "schedules": scheds}
 
@@ -169,6 +197,10 @@ def read_sleep_record(path, scenario, started_at):
     if (woke - slept).total_seconds() < MIN_SLEEP_SECONDS:
         raise SleepRecordInvalid("too-short")
     return rec
+
+
+def sleep_window(rec):
+    return _ms(rec["sleptAt"]), _ms(rec["wokeAt"])
 
 
 def judge(scenario, observed, snap, expected_effects):
