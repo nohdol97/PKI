@@ -22,6 +22,7 @@ import {
   type RouteRequest,
   type RouteResponse,
   type SemanticKind,
+  type SemanticCorrection,
   type SecretSource,
   type VectorIndex,
 } from "@pki/contracts";
@@ -44,7 +45,13 @@ import {
   type ExecutionInput,
   type UserActionIssuer,
 } from "@pki/providers";
-import { defaultEntries, type CanonicalEntries } from "@pki/knowledge-engine";
+import {
+  COMPLETION_DATE,
+  defaultEntries,
+  isDate,
+  TARGET_DATE,
+  type CanonicalEntries,
+} from "@pki/knowledge-engine";
 import {
   databaseEncryption,
   canonicalTransaction,
@@ -55,14 +62,15 @@ import {
   listInvalidations,
   listProviderCalls,
   LEGACY_CLEANUP_SETTING,
+  readFact,
   readSemanticHistory,
   readSemanticState,
   readSetting,
   schemaVersion,
   writeSetting,
   type DerivativeRegistry,
-  type Outcome,
   type SqlDriver,
+  type UndoResult,
   type UserDecisions,
 } from "@pki/storage";
 import { timingSafeEqual } from "node:crypto";
@@ -551,13 +559,14 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
    */
   const semanticAction = (
     ref: { kind: SemanticKind; id: number },
-    act: (decisions: UserDecisions, at: string) => Outcome,
+    act: (decisions: UserDecisions, at: string) => UndoResult,
   ): RouteResponse<"semanticDecide"> | { error: ErrorResponse["error"] } => {
     const { decisions } = options;
     if (!decisions) return { error: "not-found" };
     return options.db.transaction(() => {
       if (!gate.semanticShown(ref.kind, ref.id)) return { error: "not-found" as const };
       const outcome = act(decisions, new Date(options.now?.() ?? Date.now()).toISOString());
+      if (outcome.status === "removed") return { status: "removed" as const };
       if (outcome.status === "refused") {
         return outcome.reason === "not-found"
           ? { error: "not-found" as const }
@@ -569,6 +578,74 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       return outcome.status === "applied"
         ? { status: "applied" as const, seq: outcome.seq, entry }
         : { status: "unchanged" as const, entry };
+    });
+  };
+  /**
+   * A direct add or a value fix, in one transaction with the visibility checks. Every row it names
+   * (the item a fact belongs to, a relation's ends, the fact to fix) must be shown, else `not-found`
+   * as for any hidden row. A value the item already has answers `value-exists` with that row's id
+   * only when that row is shown too: a hidden row's existence is not told, the answer is `not-found`
+   * (S01 spec "S01-T03이 넘기는 것"). The shape of a date value is judged after the visibility.
+   */
+  const semanticCorrect = (
+    correction: RouteRequest<"semanticCorrect">["correction"],
+  ): RouteResponse<"semanticCorrect"> | { error: ErrorResponse["error"] } => {
+    const { decisions } = options;
+    if (!decisions) return { error: "not-found" };
+    const dateKinds: ReadonlySet<string> = new Set([TARGET_DATE, COMPLETION_DATE]);
+    const badDate = (kind: string, value: string) => dateKinds.has(kind) && !isDate(value);
+    const state = (ref: { kind: SemanticKind; id: number }) => {
+      const now = readSemanticState(options.db, ref);
+      return now && { ...ref, status: now.status, epistemic: now.epistemic };
+    };
+    return options.db.transaction((): SemanticCorrection | { error: ErrorResponse["error"] } => {
+      const at = new Date(options.now?.() ?? Date.now()).toISOString();
+      const refused = (reason: string, existing?: { kind: SemanticKind; id: number }) => {
+        if (reason === "not-found") return { error: "not-found" as const };
+        if (reason === "value-exists" && existing) {
+          // a hidden row's existence is not told
+          return gate.semanticShown(existing.kind, existing.id)
+            ? { status: "refused" as const, reason: "value-exists" as const, existing }
+            : { error: "not-found" as const };
+        }
+        return { status: "refused" as const, reason: reason as "invalid-transition" };
+      };
+      if (correction.action === "add") {
+        const entry =
+          correction.entry.kind === "item"
+            ? { ...correction.entry, name: correction.entry.name.trim() }
+            : correction.entry.kind === "fact"
+              ? { ...correction.entry, value: correction.entry.value.trim() }
+              : correction.entry;
+        const shown =
+          entry.kind === "fact"
+            ? gate.semanticShown("item", entry.itemId)
+            : entry.kind === "relation"
+              ? gate.semanticShown("item", entry.subjectId) &&
+                gate.semanticShown("item", entry.objectId)
+              : true;
+        if (!shown) return { error: "not-found" };
+        if (entry.kind === "fact" && badDate(entry.factKind, entry.value)) {
+          return { error: "bad-request" };
+        }
+        const added = decisions.add(options.db, entry, at);
+        if (added.status === "refused")
+          return refused(added.reason, "existing" in added ? added.existing : undefined);
+        const row = state(added.ref);
+        return row ? { status: "applied", seq: added.seq, entry: row } : { error: "not-found" };
+      }
+      const fact = { kind: "fact", id: correction.id } as const;
+      if (!gate.semanticShown("fact", fact.id)) return { error: "not-found" };
+      const value = correction.value.trim();
+      const kind = readFact(options.db, fact.id)?.kind;
+      if (kind !== undefined && badDate(kind, value)) return { error: "bad-request" };
+      const fixed = decisions.replaceValue(options.db, fact, value, at);
+      if (fixed.status === "refused") return refused(fixed.reason, fixed.existing);
+      const added = state(fixed.added);
+      const replaced = state(fixed.replaced);
+      return added && replaced
+        ? { status: "applied", seq: fixed.seq, entry: added, replaced }
+        : { error: "not-found" };
     });
   };
   return {
@@ -727,6 +804,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         : { error: "not-found" },
     semanticDecide: async ({ action, ...ref }) =>
       semanticAction(ref, (decisions, at) => decisions.decide(options.db, ref, action, at)),
+    semanticCorrect: async ({ correction }) => semanticCorrect(correction),
     semanticUndo: async (ref) =>
       semanticAction(ref, (decisions, at) => decisions.undo(options.db, ref, at)),
   };
