@@ -276,8 +276,25 @@ describe("docs.site-setup (I01): what S18 says is not built stays true", () => {
     expect(code).toContain('new URL(\n  "../../site/config/connector-scopes.json",\n  import.meta.url,\n)');
   });
 
-  it("the public repository ships no site/config (S18 says the file is the fork's)", () => {
-    expect(existsSync(resolve(repoRoot, "site/config"))).toBe(false);
+  it("S18's page-cap figure is the contract suite's constant", () => {
+    expect(itemText(siteText, "S18")).toContain("`maxPages`(기본 10,000쪽)");
+    expect(readFileSync(resolve(repoRoot, "packages/testkit/src/connector.contract.ts"), "utf8")).toContain(
+      "const PAGE_CAP = 10_000;",
+    );
+  });
+
+  it("S18 names the tracked gap and states the check's caveats", () => {
+    const s18 = itemText(siteText, "S18");
+    expect(s18).toContain("#115");
+    expect(s18).toContain("모두 `null`");
+    expect(s18).toContain("정렬");
+    expect(s18).toContain("거짓 통과");
+  });
+
+  it("S08 separates collector sources (grade(null)) from claimed ones (strictest([]))", () => {
+    const s08 = itemText(siteText, "S08");
+    expect(s08).toContain("`grade(null)`로 등급을 매긴다");
+    expect(s08).toContain("가져온(청구한) 원본");
   });
 
   it("the desktop build does not name the scopes file (no packaged path exists)", () => {

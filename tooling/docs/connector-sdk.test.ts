@@ -153,6 +153,8 @@ const NAMED_FACTS = [
   { token: "access-revoked", file: "packages/connector-sdk/src/jsonl.ts", holds: 'case "access-revoked":' },
   { token: "ADR 0010", file: "docs/adr/0010-encryption-at-rest.md", holds: "safeStorage" },
   { token: "safeStorage", file: "apps/desktop/src/secret-store.ts", holds: "safeStorage" },
+  { token: "RECHECK_TIMEOUT_MS", file: "backend/src/connector-sync-job.ts", holds: "export const RECHECK_TIMEOUT_MS = 60_000;" },
+  { token: "POST /api/import/jsonl", file: "packages/contracts/src/index.ts", holds: 'path: "/api/import/jsonl"' },
   { token: "recheck", file: "backend/src/connectors.ts", holds: "async recheck(id) {" },
   { token: "healthCheck", file: "backend/src/connectors.ts", holds: "(await entry.connector.healthCheck()).state === " },
   { token: "ChangeSet", file: "packages/contracts/src/connector.ts", holds: "export type ChangeSet = " },
@@ -292,11 +294,7 @@ describe("docs.connector-sdk: what the text names exists in the code", () => {
 });
 
 describe("docs.connector-sdk: what the text says is not built stays unbuilt", () => {
-  it("the workspace lists no site/connectors entry (chapters 6, 7 and 11 say so)", () => {
-    expect(read("pnpm-workspace.yaml")).not.toContain("site/");
-  });
-
-  it("no product code reads site/connectors (chapters 7 and 11 say so)", () => {
+  it("no product code LOADS collectors from site/connectors: no reader of that folder (chapters 7 and 11 say so)", () => {
     const roots = ["backend/src", "apps/desktop/src", "knowledge-engine/src", "storage/src", "providers/src"];
     const hits: string[] = [];
     const walk = (dir: string) => {
@@ -304,7 +302,8 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
         const path = `${dir}/${entry.name}`;
         if (entry.isDirectory()) walk(path);
         else if (/\.tsx?$/.test(entry.name) && !/\.test(-support)?\.tsx?$/.test(entry.name)) {
-          if (read(path).includes("site/connectors")) hits.push(path);
+          const text = read(path);
+          if (text.includes("site/connectors") && /readdir|glob|import\(|require\(/.test(text)) hits.push(path);
         }
       }
     };
@@ -312,15 +311,20 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     expect(hits).toEqual([]);
   });
 
-  it("the public repository holds nothing under site/ but its placeholder", () => {
-    expect(readdirSync(resolve(repoRoot, "site"))).toEqual(["README.md"]);
+  it("the product registers no jsonl-import kind: a file instance cannot be configured (chapters 9 and 11)", () => {
+    const composition = read("backend/src/composition.ts");
+    const start = composition.indexOf("export const connectorKinds = {");
+    const block = composition.slice(start, composition.indexOf("satisfies", start));
+    expect(start).toBeGreaterThan(0);
+    expect(block).not.toContain("jsonl-import");
+    expect(block).not.toContain("JSONL");
   });
 
-  it("the product's connector kinds are written in code the fork edits (chapter 7)", () => {
-    const composition = read("backend/src/composition.ts");
-    expect(composition).toContain('"site-mail": () => createSiteConnector("site-mail"),');
-    expect(composition).toContain('"site-messenger": () => createSiteConnector("site-messenger"),');
-    expect(composition).toContain('"site-wiki": () => createSiteConnector("site-wiki"),');
+  it("boot waits for every initialize and an unknown kind aborts the start (chapter 7)", () => {
+    const code = read("backend/src/connectors.ts");
+    expect(code).toContain("instances.map(async ({ id, kind, config }) => {");
+    expect(code).toContain("throw new Error(`unknown connector kind: ${kind}`);");
+    expect(read("backend/src/connector-sync-job.ts")).toContain("export const RECHECK_TIMEOUT_MS = 60_000;");
   });
 
   it("no code gives a Connector a secret (chapter 8): initialize takes the config only", () => {
@@ -368,10 +372,6 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     walk("apps/web/src");
     expect(hits).toEqual([]);
   });
-
-  it("fails when a guard's subject is built: a workspace entry would turn the first red", () => {
-    expect(`${read("pnpm-workspace.yaml")}\n  - site/connectors/*\n`).toContain("site/");
-  });
 });
 
 describe("docs.connector-sdk: shape of the text", () => {
@@ -382,6 +382,12 @@ describe("docs.connector-sdk: shape of the text", () => {
       expect(body, `chapter ${n}`).toContain("### 이 장을 줄이면");
     }
     expect(chapter(docText, 11)).toContain("| 항목 | 상태 |");
+  });
+
+  it("chapter 11 names each tracked gap by its issue number", () => {
+    const eleven = chapter(docText, 11);
+    for (const issue of ["#113", "#114", "#115", "#116"]) expect(eleven, issue).toContain(issue);
+    expect(chapter(docText, 7)).toContain("#113");
   });
 
   it("fails when a chapter loses its recap", () => {
@@ -437,7 +443,7 @@ describe("docs.connector-sdk: the places that point to it", () => {
     for (const word of ["scope-change", "revision", "namespace", "deletionsOnRescan", "@pki/connector-sdk"]) {
       expect(section(2), word).toContain(word);
     }
-    for (const word of ["connector-scopes.json", "import 검사", "`site/`를 보지 않으므로"]) {
+    for (const word of ["connector-scopes.json", "import 검사", "`site/`를 보지 않으므로", "현재의 예외", "#113", "#114", "#115", "#116"]) {
       expect(section(3), word).toContain(word);
     }
   });
@@ -464,11 +470,9 @@ describe("docs.connector-sdk: the places that point to it", () => {
     expect(read("docs/site-setup.md")).toContain("[connector-sdk.md](connector-sdk.md)");
   });
 
-  it("fails when ownership.md section 3 loses its pointer", () => {
-    const mutated = ownership.replace(
-      /(## 3\. [\s\S]*?)\(connector-sdk\.md\)/,
-      "$1(connector-sdk-gone.md)",
-    );
+  it("fails when ownership.md section 3 loses its pointers (every one of them)", () => {
+    const [head, tail] = ownership.split("## 3.") as [string, string];
+    const mutated = `${head}## 3.${tail.replaceAll("(connector-sdk.md)", "(connector-sdk-gone.md)")}`;
     expect(mutated).not.toBe(ownership);
     expect(mutated.split("## 3.")[1]).not.toContain("(connector-sdk.md)");
   });

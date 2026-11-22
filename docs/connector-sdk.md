@@ -4,6 +4,8 @@
 
 이 문서는 메일·메신저·Wiki 같은 **원 시스템**(자료가 원래 들어 있는 시스템)에서 자료를 가져오는 수집기(Connector)를 새로 만드는 사람을 위한 안내다. 배포처 포크가 실제 수집기를 만들 때와 제3자가 자기 수집기를 만들 때 모두 같다. 이 저장소의 설계 문서를 읽지 않았다고 가정하고 쓴다.
 
+**먼저 알아 둘 것: SDK는 아직 따로 내려받는 패키지가 아니다.** `@pki/contracts`, `@pki/testkit`, `@pki/connector-sdk`는 모두 `private`인 이 저장소의 워크스페이스 패키지이고 소스(`index.ts`)를 그대로 내보낸다. 그래서 수집기를 만드는 사람은 이 저장소를 복제한 곳(배포처 포크나 개인 복제본) 안에서 일해야 하고, 저장소 밖의 프로젝트에서 `npm install`로 SDK를 받을 수는 없다. 아래의 "제3자"는 이 저장소를 복제해 쓰는 사람을 뜻한다.
+
 **이 문서가 하는 약속과 하지 않는 약속.** 아래의 모든 사실 문장은 `main`에 있는 코드나 테스트에 기대고 있다. 아직 만들지 않은 것은 만들어졌다고 쓰지 않고 [11장](#11-아직-없는-것)에 모았다. 특히 실제 메일·메신저·Wiki 수집기는 이 저장소에 없다. 있는 것은 "미구현" 표시용 자리와 합성 자료를 내는 예시뿐이다.
 
 낯선 말은 아래처럼 쓴다.
@@ -106,7 +108,7 @@ export interface Connector {
 | `schemaVersion` | 예 | 정수 2, `manifest.schemaVersion`과 같아야 한다 |
 | `title`, `body` | 예 | 제목과 정규화된 본문 |
 | `blocks` | 아니오 | 본문 구간과 원래 형식의 위치(아래) |
-| `accessScope` | 아니오 | 누가 볼 수 있는지를 원 시스템의 말로 적은 문자열 목록. 비어 있지 않은 배열이고 원소도 빈 문자열이 아니다. 없으면 "알 수 없음"이고 가장 엄격하게 다뤄진다 |
+| `accessScope` | 아니오 | 누가 볼 수 있는지를 원 시스템의 말로 적은 문자열 목록. 비어 있지 않은 배열이고 원소도 빈 문자열이 아니다. 없으면 "알 수 없음"(`null`)이고 가장 엄격하게 다뤄진다. 수집기가 낸 원본이 범위가 없을 때는 배포처의 매핑이 `grade(null)`로 등급을 정한다(site-setup S08) |
 | `sourceType`, `sourceUrl`, `author`, `participants`, `threadId` | 아니오 | 출처 정보 |
 | `createdAt`, `updatedAt` | 아니오 | UTC 오프셋이 붙은 ISO-8601(`2026-01-05T09:00:00Z` 또는 `+09:00`) |
 | `metadata` | 아니오 | 문자열 키의 객체 |
@@ -169,7 +171,7 @@ export interface Connector {
 ### 부분 실패
 
 - **레코드 하나만 거부**: 스키마 위반, `revision-conflict`, `invalid-blocks`, `capability-violation`, `scope-change-content-mismatch`. 나머지 레코드는 저장되고 cursor도 그 페이지 뒤로 확정된다. 거부 목록에는 위치와 사유 코드만 들어가고 필드의 값은 들어가지 않는다.
-- **페이지 전체 실패**: `changes`·`nextCursor`·`hasMore`의 겉모양이 스키마에 맞지 않을 때, `limit`보다 많이 돌려줬을 때, 저장 트랜잭션이 실패했을 때. 그 페이지의 어느 것도 저장되지 않고 cursor는 그대로다. 같은 것을 다시 하면 같은 결과가 된다.
+- **페이지 전체 실패**: `changes`·`nextCursor`·`hasMore`의 겉모양이 스키마에 맞지 않을 때(`rejected[].code`가 `REJECT_CODES` 밖의 값인 것도 여기에 든다. 그 한 항목이 페이지 전체를 `invalid-page`로 만든다), `limit`보다 많이 돌려줬을 때, 저장 트랜잭션이 실패했을 때. 그 페이지의 어느 것도 저장되지 않고 cursor는 그대로다. 같은 것을 다시 하면 같은 결과가 된다.
 
 수집기가 스스로 걸러 낸 항목은 `rejected`에 `{ at, code }`로 알릴 수 있다. `at`은 `line:12`처럼 종류와 숫자만 담을 수 있는 모양(`rejectedPositionValid`)이어야 하며, 어긋나면 제품이 `change:<순번>`으로 바꾸고 계약 테스트가 위반 `rejected-position-invalid`로 잡는다.
 
@@ -210,7 +212,7 @@ export class ConnectorError extends Error {
 - `ConnectorRateLimitError(message, { retryAfterMs })`: 원 시스템이 "나중에 다시 오라"고 했을 때 기다릴 시간(밀리초)을 담는다. 음수·무한·NaN은 `RangeError`로 거부된다.
 - `ConnectorNotImplementedError`: 아직 구현하지 않은 자리표시용이다. 실제 수집기는 쓰지 않는다.
 
-**이 두 오류가 아닌 예외를 던지면** 제품은 다시 해도 되는지 알 수 없다고 보고 `connector-failed`로 멈춘다(다시 시도하지 않는다). 그러니 원 시스템의 일시 장애는 반드시 `ConnectorError`(`retryable: true`)나 `ConnectorRateLimitError`로 감싸서 던진다. 한편 **오류의 문구는 API 응답, 동기화 결과, 로그 어디에도 옮겨지지 않는다.** 문구에 원 시스템의 내용이 섞일 수 있어서 제품은 사유 코드만 남긴다. 그러므로 진단용 글을 문구에 넣어도 제품에서는 볼 수 없다.
+**이 두 오류가 아닌 예외를 던지면** 제품은 다시 해도 되는지 알 수 없다고 보고 `connector-failed`로 멈춘다(다시 시도하지 않는다). 그러니 원 시스템의 일시 장애는 반드시 `ConnectorError`(`retryable: true`)나 `ConnectorRateLimitError`로 감싸서 던진다. 한편 **오류의 문구는 API 응답, 동기화 결과, 로그 어디에도 옮겨지지 않는다.** 문구에 원 시스템의 내용이 섞일 수 있어서 제품은 사유 코드만 남긴다. 오류 문구가 나타날 수 있는 곳과 나타나지 않는 곳을 정확히 적으면 이렇다. 동기화 결과, API 응답, 백엔드 로그, 화면에는 나타나지 않는다. **`site-check` 명령은 예외다.** 그 종류의 `initialize`가 던진 오류의 문구를 그대로 출력한다(7장). 그러니 `initialize`가 던지는 문구에는 비밀 값이나 원 시스템의 내용을 넣지 않는다.
 
 ### 재시도의 값
 
@@ -226,9 +228,9 @@ export class ConnectorError extends Error {
 원 시스템이 옛 cursor를 더는 받아 주지 않으면 `{ changes: [], nextCursor: ..., hasMore: false, cursorExpired: true }`를 돌려준다(예시 수집기가 이렇게 한다). 그러면 제품은 cursor를 버리고 **처음부터 다시 읽는다**(전체 재스캔). 규칙은 다음과 같다.
 
 - 동기화 한 번에 전체 재스캔은 한 번뿐이다. 재스캔 중에 또 만료되면 `cursor-expired`로 멈춘다.
-- `fullRescan`이 거짓인 수집기가 만료를 알리면 재스캔하지 않고 `cursor-expired`로 멈춘다.
+- `fullRescan`이 거짓인 수집기가 만료를 알리면 재스캔하지 않고 `cursor-expired`로 멈춘다. **cursor가 `null`인 호출(처음부터 읽는 호출)에 `cursorExpired`를 답해도 같다.** 만료를 알릴 곳이 없으므로 `cursor-expired`로 멈추고, 정해진 동기화에서는 포기(`dead_letter`)가 된다.
 - 다시 받은 원본은 4장의 판정으로 걸러져 늘지 않는다.
-- `deletionsOnRescan`이 거짓이면 그 재스캔의 결과에 `deletionsMayBeMissed: true`가 붙는다. 이 표시는 재스캔을 끝내는 페이지가 저장될 때 내려가고, 앱을 다시 켜도 남아 있다.
+- `deletionsOnRescan`이 거짓이면 그 재스캔의 결과에 `deletionsMayBeMissed: true`가 붙는다. 이 표시는 앱을 다시 켜도 남아 있다. 재스캔이 끝나는 페이지는 표시를 `deletionsOnRescan` 선언대로 다시 쓴다. 그래서 `deletionsOnRescan`이 거짓인 수집기에서는 표시가 한 번 올라가면 **내려가지 않고**(재스캔이 끝날 때마다 다시 올라간다), 재스캔 중에 지워진 원본을 `delete`로 알리는 수집기(`deletionsOnRescan` 참)에서만 재스캔이 끝나면 내려간다.
 
 ### 동기화의 결과와 멈춤 코드
 
@@ -241,7 +243,7 @@ export class ConnectorError extends Error {
 
 ### 정해진 동기화가 일정에서 어떻게 다뤄지는가
 
-주기적으로 끌어오는 동기화는 제품의 작업 대기열(`connector-sync` 작업)에서 돈다. **끌어올 설정이 있는 인스턴스**(준비 상태이고, 파일 수집기라면 `{ path }` 설정이 있는 것)에는 한 시간 주기가 기본으로 만들어진다(`SYNC_PERIOD`). 사용자가 바꾸거나 끈 주기는 그대로 둔다. 동기화가 어떻게 끝났는지에 따라 작업이 아래처럼 처리된다. 이 표는 코드 상수 `SYNC_OUTCOMES`와 같은 것이고, 이 문서의 표가 상수와 어긋나면 테스트가 실패한다.
+주기적으로 끌어오는 동기화는 제품의 작업 대기열(`connector-sync` 작업)에서 돈다. **끌어올 설정이 있는 인스턴스**(준비 상태이고, `jsonl-import` 종류라면 `{ path }` 설정이 있는 것. 다만 지금 제품에는 그런 파일 인스턴스를 만들어 주는 길이 없다. 9장)에는 한 시간 주기가 기본으로 만들어진다(`SYNC_PERIOD`). 사용자가 바꾸거나 끈 주기는 그대로 둔다. 동기화가 어떻게 끝났는지에 따라 작업이 아래처럼 처리된다. 이 표는 코드 상수 `SYNC_OUTCOMES`와 같은 것이고, 이 문서의 표가 상수와 어긋나면 테스트가 실패한다.
 
 | 동기화의 끝 | 작업 결과 | 시도 | 다음 실행 | 이유 |
 |---|---|---|---|---|
@@ -257,6 +259,8 @@ export class ConnectorError extends Error {
 | `storage-failed` | `retry`, 시도가 다하면 `dead_letter` | 씀 | 작업 대기열의 대기 시간 | 디스크 사정이면 다시 하면 풀린다. 늘 같은 실패면 시도가 다해 포기한 작업으로 남는다 |
 | 인스턴스가 `unavailable`(초기화 실패, `unsupported-sdk-version`) | `held` | 쓰지 않음 | 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 한 시간마다의 재점검 | 설정이나 수집기가 바뀌어야 풀린다 |
 | 인스턴스가 `not-implemented`(`site-*`) | `held` | 쓰지 않음 | 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 한 시간마다의 재점검 | 포크가 실제 구현을 등록해야 풀린다 |
+
+표의 `held` 행에 적힌 풀리는 때 가운데 "인스턴스의 설정이 바뀌거나"는 **지금은 일어나지 않는다.** 제품에 인스턴스의 설정을 쓰는 곳이 없기 때문이다(7장). 지금 보류가 풀리는 때는 앱을 시작했을 때 인스턴스가 준비되어 있는 경우(앱 갱신으로 수집기가 동작하게 된 시작을 포함해 모든 시작)와 한 시간마다의 재점검이다. 재점검은 인스턴스마다 60초(`RECHECK_TIMEOUT_MS`) 안에 끝나지 않으면 기다리지 않고 넘어가며, 끝나지 않은 재점검이 있는 인스턴스는 다시 시작하지 않는다.
 
 수집기를 만드는 사람이 이 표에서 챙길 것은 셋이다.
 
@@ -380,7 +384,7 @@ AssertionError: expected [ 'no-progress' ] to deeply equal []
 
 1. 예시 폴더의 모양을 따른다. 수집기 파일 하나와, 원 시스템을 흉내 내는 지어낸 `config` 둘(`config`, 바뀐 뒤의 `later`), 테스트 파일 하나다. 테스트 한 줄은 위의 `connectorContract(...)`다.
 2. 패키지의 `package.json`은 `@pki/contracts`를 `dependencies`로, `@pki/testkit`을 `devDependencies`로 적는다(둘 다 `workspace:*`). 예시 패키지가 그렇게 되어 있고, 저장소의 모듈 경계 규칙이 `@pki/testkit`을 테스트 파일에서만 쓰게 한다.
-3. **`site/connectors/`에 두려면 워크스페이스에 그 폴더를 알려야 한다.** `pnpm-workspace.yaml`의 `packages` 목록에는 `site/connectors/*`가 없다. 이 항목을 더하고 `pnpm install`을 한 번 실행하면 `site/connectors/<이름>/` 안의 테스트가 `@pki/testkit`을 찾는다. 이 문서를 쓰면서 예시 수집기를 그 자리에 복사해 이 방법으로 돌려 보았고 계약 묶음이 통과했다. 이 한 줄은 `site/` 밖의 파일을 고치는 일이라 [ownership.md 3절](ownership.md)의 원칙과 부딪힌다(7장).
+3. **`site/connectors/`에 두려면 워크스페이스에 그 폴더를 알려야 한다.** `pnpm-workspace.yaml`의 `packages:` **목록 안에** `  - site/connectors/*` 한 줄을 더한다(파일 끝에 붙이면 그 아래의 다른 설정 블록에 들어가 `pnpm install`이 실패한다). 그리고 `pnpm install`을 한 번 실행한다. 그러면 `site/connectors/<이름>/` 안의 테스트가 `@pki/testkit`을 찾는다. 이 문서를 쓰면서 예시 수집기를 그 자리에 복사해 이 방법으로 돌려 보았고 계약 묶음이 통과했다. 이 일과 `pnpm install`이 바꾸는 `pnpm-lock.yaml`은 `site/` 밖의 파일을 고치는 일이다. 지금 포크가 `site/` 밖에서 고쳐야 하는 곳 전부는 7장에 목록으로 있고, 그 빈 곳은 #113이 추적한다.
 
 ### 일부러 어긴 변형 — 위반 코드가 나오는 것을 보여 주는 것
 
@@ -416,7 +420,7 @@ export function createStuckCursorConnector(): Connector {
 
 ### 위반 코드 표
 
-`checkConnector`가 돌려주는 코드는 닫힌 목록 21개이고 `CONNECTOR_VIOLATION_CODES`가 같은 순서로 갖고 있다. 구조상 함께 일어나는 위반은 하나만 보고한다(예: `health-threw`가 나면 `unhealthy-after-init`은 보지 않고, 버전이 다르면 `sdk-version-mismatch`만 보고한다).
+`checkConnector`가 돌려주는 코드는 닫힌 목록 21개이고 `CONNECTOR_VIOLATION_CODES`가 같은 순서로 갖고 있다. 구조상 함께 일어나는 위반은 하나만 보고한다(예: `health-threw`가 나면 `unhealthy-after-init`은 보지 않고, 버전이 다르면 그 버전으로 다른 검사를 하지 않고 `sdk-version-mismatch`를 보고한다. manifest의 모양이 함께 틀렸으면 `manifest-invalid`도 같이 나올 수 있다).
 
 | 코드 | 잡는 것 |
 |---|---|
@@ -442,7 +446,7 @@ export function createStuckCursorConnector(): Connector {
 | `get-document-unknown` | 모르는 정체에 `null`이 아님 |
 | `abort-ignored` | 이미 취소된 신호로 부른 `getChanges`가 성공함 |
 
-아직 구현하지 않은 자리표시용(`ConnectorNotImplementedError`로 초기화가 실패하는 것)에 돌리면 위반 대신 `not-implemented` 하나만 돌려준다. 그 밖의 초기화 실패나 읽는 도중의 예외는 위반이 아니라 시나리오가 틀린 것으로 보고 던져진다. 이 검사는 `getChanges`를 `limit` 1000과 1로 두 번 읽어 비교한다. 제품이 쓰는 100은 아니다.
+아직 구현하지 않은 자리표시용(`ConnectorNotImplementedError`로 초기화가 실패하는 것)에 돌리면 위반 대신 `not-implemented` 하나만 돌려준다. 그 밖의 초기화 실패나 읽는 도중의 예외는 위반이 아니라 시나리오가 틀린 것으로 보고 던져진다. 이 검사는 `getChanges`를 `limit` 1000과 1로 두 번 읽어 비교한다. 제품이 쓰는 100은 아니다. 제품과 다르게 보이는 곳이 셋 있다. ① 페이지의 겉모양이 틀린 것은 계약 묶음에서는 `record-schema`이고 제품에서는 `invalid-page`로 멈춘다. ② 묶음의 `no-progress`는 같은 cursor를 되풀이하는 것뿐 아니라 **앞서 본 cursor로 되돌아가는 순환**도 잡는다. 제품은 받은 cursor와 같은 것만 잡는다. ③ 위반이 둘 이상이면 머리 줄의 `expected [ ... ] to deeply equal []`는 줄여 보일 수 있으니 그 아래의 차이(diff)에서 코드를 전부 읽는다.
 
 이 검사가 증명하지 못하는 것이 있다. 지어낸 원 시스템으로 돌린 것이므로 **실제 원 시스템의 요청 한도, cursor 만료, 대량 페이지에서의 동작**은 확인하지 못한다. 그것은 배포처의 S18이 맡는다.
 
@@ -471,15 +475,21 @@ export function createStuckCursorConnector(): Connector {
 site-mail: 미구현, 배포처 후속
 ```
 
-- 초기화가 성공하면 `<종류>: ok`가 나오고 0으로 끝난다. 규격 버전이 다르면 `<종류>: unsupported-sdk-version`이 나오고 1로 끝난다.
+- 초기화가 던진 오류는 그 문구가 그대로 출력된다(위 줄의 `미구현, 배포처 후속`이 그 문구다). 초기화가 성공하면 `<종류>: ok`가 나오고 0으로 끝난다. 규격 버전이 다르면 `<종류>: unsupported-sdk-version`이 나오고 1로 끝난다.
 
-**없는 것(열린 항목).**
+**없는 것(열린 항목).** 아래는 모두 만들어지지 않았다. 번호는 이 저장소의 추적 이슈다.
 
-1. **`site/connectors/`를 읽어 들이는 코드가 없다.** 제품은 `site/` 폴더에서 수집기를 찾아 올리지 않는다. 지금 방법은 `connectorKinds`(와 `connectorInstances()`)가 포크의 수집기를 가리키도록 `backend/src/composition.ts`를 고치는 것인데, 이것은 `site/` 밖의 파일을 고치는 일이다. [ownership.md 3절](ownership.md)은 `site/` 밖을 고쳐야만 하는 일이 생기면 규격에 빈 곳이 있다는 신호라고 적었고, 이 빈 곳을 메우는 장치는 아직 없다.
-2. **`site/connectors/*`가 워크스페이스에 없다.** 6장의 3번 항목이다.
-3. **인스턴스의 설정을 쓰는 곳이 없다.** 인스턴스의 설정은 부팅 때 주어진다. 설정 화면으로 인스턴스를 만드는 길은 없다.
+1. **`site/` 안에서 수집기를 등록하는 길이 없다**(#113). 제품은 `site/` 폴더에서 수집기를 찾아 올리지 않는다. 그래서 포크가 지금 `site/` 밖에서 고쳐야 하는 곳은 다음 전부다.
+   - `backend/src/composition.ts`의 `connectorKinds`(종류와 만드는 함수)와 `connectorInstances()`(인스턴스와 설정).
+   - `pnpm-workspace.yaml`의 `packages:` 목록(6장 3번)과, `pnpm install`이 바꾸는 `pnpm-lock.yaml`.
+   - `backend/package.json`: 포크의 수집기 패키지를 의존성으로 적어야 한다. 모듈 경계 규칙은 선언한 의존성만 가져오게 하고, 수집기 구현은 패키지의 `src/adapters/`에 두고 `<패키지 이름>/adapters` 진입점으로만 `composition.ts`가 가져오게 한다(`tooling/eslint/module-boundary.js` 머리의 설명).
+   - 인스턴스를 부팅할 때의 동작: 백엔드는 모든 인스턴스의 `initialize`를 끝까지 기다린 뒤에 서비스를 시작하며 제한 시간이 없다. `initialize`가 끝나지 않으면 앱이 시작하지 못한다. 만드는 함수가 던지거나 `connectorInstances()`가 `connectorKinds`에 없는 종류를 적으면(`unknown connector kind`) 시작이 중단된다. 한 시간마다의 재점검은 같은 수집기 객체를 다시 `initialize`한다(5장).
+   - 범위 등급 매핑을 바꾸려면 `composition.ts`의 `productCalls`가 쓰는 `publicScopeGrading`을 바꾸고, 새 등급을 더하려면 site-setup S08에 적힌 파일들도 고친다.
+2. **수집기에 비밀 값을 건네는 통로가 없다**(#114). 8장.
+3. **설치본이 `site/config/connector-scopes.json`을 읽는 길이 없다**(#115). site-setup S18.
+4. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(#116). 인스턴스의 설정은 부팅 때 `connectorInstances()`가 주고, 설정 화면이나 설정 파일로 인스턴스를 만들 수 있는 곳이 없다. 제품이 등록한 종류는 `site-*` 셋뿐이다(`jsonl-import`는 시험에서만 등록된다). 9장.
 
-이 세 가지는 이 문서가 임의로 정하지 않았다. 포크가 방법을 정했다면 그 방법을 공용 저장소에 알린다([ownership.md 5절](ownership.md)).
+이 항목들은 이 문서가 임의로 정하지 않았다. 포크가 다른 방법을 정했다면 그 방법을 공용 저장소에 알린다([ownership.md 5절](ownership.md)).
 
 ### 포크가 수집기를 만들 때 지킬 것
 
@@ -503,7 +513,7 @@ site-mail: 미구현, 배포처 후속
 
 ### 자격 증명
 
-원 시스템에 접근하는 비밀 값(API 키, 토큰, 암호)은 **OS 자격 증명 저장소에 두고, 레코드·설정 파일·로그에 넣지 않는다.** 이유는 레코드와 설정은 제품의 정본과 백업에 남고, 로그와 오류 문구는 그대로 사람이 보거나 옮겨 갈 수 있기 때문이다. 이 저장소의 지침은 [ADR 0010](adr/0010-encryption-at-rest.md)이다. 그 결정은 비밀 값을 Electron의 `safeStorage`로 암호화한 파일에 두고 키를 OS가 지키게 한다. 이 저장소가 지금 그 저장소에 두는 것은 Provider의 키이고, **수집기가 비밀 값을 받는 통로는 아직 없다.** 수집기가 받는 것은 `initialize(config)`의 설정 하나다. 그러므로 포크가 수집기의 자격 증명을 어떻게 읽을지(예: 수집기가 직접 OS 저장소를 부르는 방법)는 포크가 정해야 하고, 그 값을 레코드의 `metadata`나 설정 파일, 던지는 오류의 문구에 넣지 않는다는 것이 이 문서의 규칙이다. 오류의 문구는 제품이 옮기지 않지만, 수집기가 자기 로그에 남기는 것은 제품이 막을 수 없다.
+원 시스템에 접근하는 비밀 값(API 키, 토큰, 암호)은 **OS 자격 증명 저장소에 두고, 레코드·설정 파일·로그에 넣지 않는다.** 이유는 레코드와 설정은 제품의 정본과 백업에 남고, 로그와 오류 문구는 그대로 사람이 보거나 옮겨 갈 수 있기 때문이다. 이 저장소의 지침은 [ADR 0010](adr/0010-encryption-at-rest.md)이다. 그 결정은 비밀 값을 Electron의 `safeStorage`로 암호화한 파일에 두고 키를 OS가 지키게 한다. 이 저장소가 지금 그 저장소에 두는 것은 Provider의 키이고, **수집기가 비밀 값을 받는 통로는 아직 없다.** 수집기가 받는 것은 `initialize(config)`의 설정 하나다. 그러므로 포크가 수집기의 자격 증명을 어떻게 읽을지(예: 수집기가 직접 OS 저장소를 부르는 방법)는 포크가 정해야 하고, 그 값을 레코드의 `metadata`나 설정 파일, 던지는 오류의 문구에 넣지 않는다는 것이 이 문서의 규칙이다. 오류의 문구는 동기화 결과·API·로그로는 옮겨지지 않지만 `site-check`는 `initialize` 오류의 문구를 출력하고, 수집기가 자기 로그에 남기는 것은 제품이 막을 수 없다.
 
 ### 이 장을 줄이면
 
@@ -536,8 +546,8 @@ site-mail: 미구현, 배포처 후속
 
 두 줄은 같은 원본(`page-1`)의 version 1과 delete(version 2)다. 두 번째처럼 `delete` 줄의 `content`는 빈 문자열이어야 한다.
 
-- **들어가는 길 둘.** 파일 수집기(종류 `jsonl-import`, 설정 `{ path }`)와 로컬 가져오기 API `POST /api/imports`(요청 `{ instanceId, content }`)가 같은 해석 함수(`parseJsonl`)와 같은 저장 함수를 쓴다. 그래서 한 줄은 어느 길로 들어가도 같은 뜻이다.
-- **한도.** 본문(API)과 파일은 10 MiB(`MAX_JSONL_BYTES`)까지다. 넘으면 API는 413 `payload-too-large`로 답하고 파일 수집기는 재시도할 수 없는 실패(`connector-failed`)가 된다. 줄 하나는 1 MiB 글자(`MAX_JSONL_LINE_CHARS`)를 넘으면 해석하지 않고 `schema`로 거부된다. 줄의 중첩 깊이는 64(`MAX_JSONL_DEPTH`)를 넘으면 `JSON.parse`가 끝난 **뒤에** 세어 `schema`로 거부된다. 세 값은 잠정이다.
+- **지금 제품에서 JSONL이 들어가는 길.** 로컬 가져오기 API `POST /api/imports`(요청 `{ instanceId, content }`)와, 화면의 가져오기가 쓰는 `POST /api/import/jsonl`이다. 파일을 읽는 수집기(종류 `jsonl-import`, 설정 `{ path }`)는 **코드와 계약 시험으로만 있고** 제품에서 인스턴스를 만들어 줄 길은 없다(제품이 등록한 종류는 `site-*` 셋뿐이다. 아래 열린 항목). 파일 수집기와 API는 같은 해석 함수(`parseJsonl`)와 같은 저장 함수를 쓰도록 만들어져 있어서, 한 줄은 어느 길로 들어가도 같은 뜻이다.
+- **한도.** 본문(API)과 파일은 10 MiB(`MAX_JSONL_BYTES`)까지다(API는 JSON 이스케이프 때문에 같은 한도의 파일보다 적게 들어간다). 넘으면 API는 413 `payload-too-large`로 답하고 파일 수집기는 재시도할 수 없는 실패(`connector-failed`)가 된다. 줄 하나는 1 MiB 글자(`MAX_JSONL_LINE_CHARS`, UTF-16 단위로 센다)를 넘으면 해석하지 않고 `schema`로 거부된다. 줄의 중첩 깊이는 64(`MAX_JSONL_DEPTH`)를 넘으면 `JSON.parse`가 끝난 **뒤에** 세어 `schema`로 거부된다. 세 값은 잠정이다.
 - **줄 하나의 거부는 그 줄만 거부한다.** 거부 사유는 `invalid-json`, `schema`, `content-hash-mismatch`이고 위치는 `line:<줄 번호>`(1부터)다. 빈 `access_scope`는 범위를 싣는 줄(`upsert`, `revoke`)에서만 `schema`로 거부한다.
 - **정체는 하나다.** 줄을 (인스턴스, namespace = 줄의 `connector_instance_id`, external id)로 푼다. 그리고 **가져오기는 `jsonl-import`가 아닌 인스턴스의 원본을 읽지도 쓰지도 지우지도 못한다.** 줄이 가리키는 인스턴스가 다른 종류의 것이면 줄은 가져온 쪽의 새 정체로 저장되고, 그 다른 수집기의 원본은 건드려지지 않는다.
 - **범위는 사용자가 적은 값이다.** 가져온 원본은 청구한 범위라는 표시(`scope_claimed`)를 달고, 제품은 그 범위가 배포처가 정한 인스턴스 범위보다 느슨해지지 못하게 등급을 계산한다. 공용 저장소의 등급은 하나라서 결과가 바뀌지 않는다.
@@ -547,9 +557,9 @@ site-mail: 미구현, 배포처 후속
 
 파일 하나가 한 원본의 버전을 여럿 담을 수 있어(줄마다 한 버전) 한 번 읽는 동안 같은 정체가 두 번 upsert될 수 있다. 일반 수집기에서는 `duplicate-identity` 위반이다. 계약 묶음에서 이 예외를 켜는 시나리오 필드가 `versionedSources: true`다. **켠 시나리오에서만** revision이 **앞선 것보다 클 때** 같은 정체를 다시 upsert해도 되고, 같거나 낮은 revision의 되풀이는 켜도 위반이다. 이것은 파일의 줄마다 한 버전인 수집기를 위한 것이다. 원 시스템을 읽는 일반 수집기는 켜지 않는다. 켜 두면 한 번 읽는 동안 같은 원본을 여러 번 낸 실수를 잡을 수 없기 때문이다.
 
-### 열린 항목: 파일 경로의 제한
+### 열린 항목: 파일 인스턴스의 설정과 경로의 제한(#116)
 
-파일 수집기의 `{ path }`는 지금 부팅·`site/` 설정에서만 오며, 제품은 그 경로를 **그대로 읽는다.** 경로를 허용 폴더 안으로 가두는 일, 심볼릭 링크를 따라가지 않는 일은 만들지 않았다. 설정이 인스턴스를 만들 수 있게 되는 때(사용자가 경로를 적는 화면이 생기는 때) 정해야 한다. 이 문서는 이것이 지켜진다고 말하지 않는다.
+제품에는 `jsonl-import` 파일 인스턴스를 만들 길이 없다. 그 길이 생길 때 `{ path }`를 누가 적는지가 정해져야 하고, 파일 수집기 코드는 그 경로를 **그대로 읽는다.** 경로를 허용 폴더 안으로 가두는 일, 심볼릭 링크를 따라가지 않는 일은 만들지 않았다. 이 문서는 이것이 지켜진다고 말하지 않는다.
 
 ### 이 장을 줄이면
 
@@ -582,10 +592,9 @@ site-mail: 미구현, 배포처 후속
 |---|---|
 | 실제 메일·메신저·Wiki 수집기 | 이 저장소에 없다. 자리표시(`site-mail`, `site-messenger`, `site-wiki`)와 지어낸 자료를 내는 예시뿐이다. 구현은 배포처 포크의 일이다 |
 | 실제 원 시스템에서의 규격 확인 | 하지 않았다. 요청 한도, cursor 만료, 대량 페이지, 만료된 동안의 삭제, 범위와 revision 채우기는 S18이 배포처에서 확인한다 |
-| `site/connectors/`를 읽어 들이는 코드와 워크스페이스 항목 | 없다(7장) |
-| 수집기에 비밀 값을 건네는 통로 | 없다(8장) |
-| 설치본이 `site/config/connector-scopes.json`을 읽는 길 | 만들지 않았다. 소스 트리에서 실행할 때만 그 파일을 읽는다(site-setup S18) |
-| 파일 수집기 `{ path }`의 경로 제한 | 없다(9장) |
-| 수집기가 설정 화면에서 만들어지는 길 | 없다. 인스턴스는 부팅 때 주어진 설정으로만 생긴다 |
+| `site/` 안에서 수집기를 등록하는 길(읽어 들이는 코드, 워크스페이스 항목, 의존성·경계 규칙, 부팅 동작, 등급 매핑 끼우기) | 없다. 지금은 `site/` 밖의 파일을 고쳐야 한다(7장, #113) |
+| 수집기에 비밀 값을 건네는 통로 | 없다(8장, #114) |
+| 설치본이 `site/config/connector-scopes.json`을 읽는 길 | 만들지 않았다. 소스 트리에서 실행할 때만 그 파일을 읽는다(site-setup S18, #115) |
+| `jsonl-import` 파일 인스턴스를 제품에서 설정하는 길과 `{ path }`의 경로 제한 | 없다. 수집기 코드는 있고 시험에서만 등록된다. 인스턴스는 부팅 때 `connectorInstances()`가 준 설정으로만 생긴다(9장, #116) |
 | 화면에서 locator 표시 | 없다. 근거를 읽는 정본 함수와 API 응답은 locator를 돌려주지만 화면은 그리지 않는다 |
 | Windows에서의 확인 | 하지 않았다. 이 문서의 명령은 macOS 개발 환경에서 돌려 보았다 |

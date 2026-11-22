@@ -31,7 +31,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectorKinds, openCanonicalDb } from "./composition.ts";
 import { SYNC_PERIOD } from "./connector-sync-job.ts";
-import { SYNC_BACKOFF, siteCheck } from "./connectors.ts";
+import { REJECTED_LIST_LIMIT, SYNC_BACKOFF, siteCheck } from "./connectors.ts";
 import { importContent } from "./imports.ts";
 import type { SqlDriver } from "@pki/storage";
 
@@ -177,7 +177,7 @@ describe("docs.connector-sdk: the numbers equal the code", () => {
     expect(MAX_JSONL_LINE_CHARS).toBe(1024 * 1024);
     expect(MAX_JSONL_DEPTH).toBe(64);
     expect(DOC).toContain("10 MiB(`MAX_JSONL_BYTES`)");
-    expect(DOC).toContain("1 MiB 글자(`MAX_JSONL_LINE_CHARS`)");
+    expect(DOC).toContain("1 MiB 글자(`MAX_JSONL_LINE_CHARS`");
     expect(DOC).toContain("64(`MAX_JSONL_DEPTH`)");
   });
 
@@ -190,6 +190,18 @@ describe("docs.connector-sdk: the numbers equal the code", () => {
       readFileSync(resolve(repo, "packages/testkit/src/connector.contract.ts"), "utf8"),
     ).toContain("const PAGE_CAP = 10_000;");
     expect(DOC).toContain("기본 10,000쪽");
+  });
+
+  it("the contract suite reads with limit 1000 and 1, as the text says, and the list shows 100 rejections", () => {
+    const suite = readFileSync(resolve(repo, "packages/testkit/src/connector.contract.ts"), "utf8");
+    expect(suite.match(/1000/g)).toHaveLength(3);
+    expect(suite).toContain("check.read(subject, 1000, upserts)");
+    expect(suite).toContain("check.read(connector, 1000, upserts)");
+    expect(suite).toContain("{ limit: 1000, signal: signal() }");
+    expect(suite).toContain("{ limit: 1, signal: ");
+    expect(DOC).toContain("`getChanges`를 `limit` 1000과 1로");
+    expect(REJECTED_LIST_LIMIT).toBe(100);
+    expect(DOC).toContain("앞의 100건 `REJECTED_LIST_LIMIT`");
   });
 
   it("the default period of a pulling instance is hourly", () => {
