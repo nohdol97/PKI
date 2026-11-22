@@ -34,6 +34,11 @@
 //   module (except ConnectorFactory), a container other than WRAPPERS, or a type
 //   parameter of a class or a variable: it escapes, and so do its importers;
 //   review catches it
+//   Known and accepted: storage/src/canonical-transaction.ts builds a CanonicalTx
+//   (an interface extending SqlDriver, declared in derivatives.ts) outside
+//   src/adapters/. It is a delegating wrapper of the composition root's driver
+//   that upper code must import (I04 spec, "T05가 넘기는 것" 9). Closing this
+//   gap must exempt that file by name.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 

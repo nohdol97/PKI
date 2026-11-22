@@ -2,6 +2,7 @@
 // tombstone holds no content, and every source change raises the sequence exactly once.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
+import { isFenceCurrent } from "./jobs.ts";
 import { migrate } from "./migrations.ts";
 import { readChangeSeq } from "./revisions.ts";
 import { nextSourceVersion, registerConnectorInstance, saveSourceRecord } from "./sources.ts";
@@ -125,13 +126,18 @@ describe("tombstone.rules: recordTombstone", () => {
       tombstone: { coversVersion: 1, reason: "user-deleted", lastRevision: null, at: LATER },
     });
     const stored = readTombstoneState(db, 1);
-    for (const reason of ["source-deleted", "access-revoked"] as const) {
-      expect(record(reason, 99, "2026-11-24T00:00:00.000Z")).toEqual({
-        outcome: "unchanged",
-        tombstone: stored,
-      });
-    }
-    expect(readTombstoneState(db, 1)).toEqual(stored);
+    // a source event keeps the user's reason and time; a greater revision alone
+    // raises last_revision (I01-R11), an equal, lower or missing one changes nothing
+    const AGAIN = "2026-11-24T00:00:00.000Z";
+    expect(record("source-deleted", 99, AGAIN)).toEqual({
+      outcome: "revision-raised",
+      tombstone: { ...stored, lastRevision: 99 },
+    });
+    expect(record("access-revoked", 99, AGAIN).outcome).toBe("unchanged");
+    expect(record("access-revoked", 98, AGAIN).outcome).toBe("unchanged");
+    expect(record("source-deleted", null, AGAIN).outcome).toBe("unchanged");
+    expect(record("user-deleted", 100, AGAIN).outcome).toBe("unchanged");
+    expect(readTombstoneState(db, 1)).toEqual({ ...stored, lastRevision: 99 });
     // a reason change is no content change
     expect(readChangeSeq(db)).toBe(seq);
     expect(rowCount()).toBe(1);
@@ -283,6 +289,18 @@ describe("tombstone.rules: recordTombstone", () => {
       sourceId: 2,
       version: 1,
     });
+  });
+
+  it("keeps a covered version outside the fence after a lift: a lift uncovers nothing", () => {
+    // the version row is left (covered, not yet purged): only the cover decides
+    record("source-deleted", 2);
+    const job = { sourceId: 1, fenceVersion: 1 };
+    expect(isFenceCurrent(db, job)).toBe(false);
+    recordTombstoneLift(db, 1, LATER);
+    expect(isFenceCurrent(db, job)).toBe(false);
+    // a version above the cover is current again
+    expect(save("b2")).toMatchObject({ status: "created", version: 2 });
+    expect(isFenceCurrent(db, { sourceId: 1, fenceVersion: 2 })).toBe(true);
   });
 
   it("refuses an unknown reason or source", () => {

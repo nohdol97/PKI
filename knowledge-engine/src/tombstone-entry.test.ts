@@ -174,9 +174,18 @@ describe("tombstone.rules: applyTombstone", () => {
       coversVersion: 2,
     });
 
-    // a source reason never overwrites the user's
+    // a source reason never overwrites the user's: a greater revision raises
+    // last_revision alone (I01-R11) and the record names the reason kept
+    expect(apply("source-deleted", 99, AGAIN).outcome).toBe("revision-raised");
+    expect(readTombstoneState(db, chat)).toMatchObject({
+      reason: "user-deleted",
+      lastRevision: 99,
+      at: LATER,
+    });
+    expect(kinds()).toEqual(["source-deleted", "source-deleted", "user-deleted", "user-deleted"]);
     expect(apply("source-deleted", 99, AGAIN).outcome).toBe("unchanged");
-    expect(kinds()).toHaveLength(3);
+    expect(apply("access-revoked", 98, AGAIN).outcome).toBe("unchanged");
+    expect(kinds()).toHaveLength(4);
     // a reason or revision change removes nothing and is no content change
     expect(listInvalidations(db)[0]).toMatchObject({
       removedByKind: { source: 0, evidence: 0, fact: 0 },

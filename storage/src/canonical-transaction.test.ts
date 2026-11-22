@@ -1,9 +1,12 @@
 // canonicalTransaction (I04-R17, I04-T05): the one transaction every write that may
 // reach a tombstone entry opens. It commits when fn returns and rolls back when it
 // throws; a call inside one joins it. The ledger it will write arrives with I04-T10.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
-import { canonicalTransaction } from "./canonical-transaction.ts";
+import { canonicalTransaction, queuedLedgerLines } from "./canonical-transaction.ts";
 import type { CanonicalTx, LedgerLineDraft } from "./derivatives.ts";
 import { migrate } from "./migrations.ts";
 import { readSetting, writeSetting } from "./settings.ts";
@@ -74,6 +77,52 @@ describe("canonicalTransaction", () => {
     expect(seen[2]).toBe(seen[0]);
     expect(readSetting(db, "by-driver")).toBeUndefined();
     expect(readSetting(db, "by-tx")).toBeUndefined();
+  });
+
+  it("undoes a joined call that throws, rows and queued lines, when the outer one catches it", () => {
+    canonicalTransaction(db, (outer) => {
+      writeSetting(outer, "before", "v");
+      outer.queueLedgerLine({ ...line, identityHash: "outer" });
+      expect(() =>
+        canonicalTransaction(outer, (inner) => {
+          // a tombstone written, then its propagation failing (a refused record of a page)
+          writeSetting(inner, "half", "v");
+          inner.queueLedgerLine({ ...line, identityHash: "inner" });
+          throw new Error("inner fails");
+        }),
+      ).toThrow("inner fails");
+      // a joined call that returns keeps its rows and lines
+      canonicalTransaction(db, (inner) => {
+        writeSetting(inner, "after", "v");
+        inner.queueLedgerLine({ ...line, identityHash: "kept" });
+      });
+      expect(queuedLedgerLines(outer).map((l) => l.identityHash)).toEqual(["outer", "kept"]);
+    });
+    expect(readSetting(db, "before")).toBe("v");
+    expect(readSetting(db, "half")).toBeUndefined();
+    expect(readSetting(db, "after")).toBe("v");
+  });
+
+  it("takes the write lock as it begins: another connection cannot write before its first statement", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pki-canonical-"));
+    const first = openBetterSqlite3(join(dir, "canonical.sqlite"));
+    const second = openBetterSqlite3(join(dir, "canonical.sqlite"));
+    try {
+      migrate(first);
+      second.exec("PRAGMA busy_timeout = 0");
+      canonicalTransaction(first, (tx) => {
+        // before its first statement: the lock is the transaction's from BEGIN, so the
+        // entries' read, judgement and write (recordTombstone) see one state
+        expect(() => writeSetting(second, "k", "other")).toThrow(/locked/);
+        expect(readSetting(tx, "k")).toBeUndefined();
+        writeSetting(tx, "k", "mine");
+      });
+      expect(readSetting(second, "k")).toBe("mine");
+    } finally {
+      first.close();
+      second.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("gives each top-level transaction its own tx, also after one that failed inside a join", () => {

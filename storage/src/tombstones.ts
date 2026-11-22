@@ -91,10 +91,14 @@ export function recordTombstone(
   if (written.coversVersion > old.coversVersion) return rewrite("cover-extended");
   // lifted, and deleted again before any new version: whoever deletes, that reason
   if (old.liftedAt !== null) return rewrite("reason-changed");
-  if (old.reason === "user-deleted") return { outcome: "unchanged", tombstone: old };
-  if (event.reason === "user-deleted") return rewrite("reason-changed");
-  // source over source: only a greater revision, and only the revision moves
-  // (provisional: an empty stored revision is below any)
+  if (event.reason === "user-deleted") {
+    return old.reason === "user-deleted"
+      ? { outcome: "unchanged", tombstone: old }
+      : rewrite("reason-changed");
+  }
+  // A source event never takes the reason, the user's included (I01-R11): only a
+  // greater revision moves, and only the revision (provisional: an empty stored
+  // revision is below any)
   if (event.lastRevision !== null && event.lastRevision > (old.lastRevision ?? 0)) {
     db.run("UPDATE tombstones SET last_revision = ? WHERE source_id = ?", [
       event.lastRevision,

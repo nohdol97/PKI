@@ -24,7 +24,7 @@ import { migrate } from "./migrations.ts";
 import { readChangeSeq } from "./revisions.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
-import { writeTombstone } from "./tombstones.ts";
+import { recordTombstoneLift, writeTombstone } from "./tombstones.ts";
 
 const AT = "2026-11-22T00:00:00.000Z";
 const permissive: ScopePolicy = {
@@ -455,6 +455,9 @@ describe("visible (I04-R13) and scopesOf (I04-R14)", () => {
       kind: "relation",
       id,
     }));
+    expect(registry.visible(db, refs, "display").map((r) => r.id)).toEqual(["mine", "of-a"]);
+    // a lift uncovers nothing (I04-R9): what was deleted does not come back
+    expect(recordTombstoneLift(db, c, AT)).toBe("lifted");
     expect(registry.visible(db, refs, "display").map((r) => r.id)).toEqual(["mine", "of-a"]);
   });
 
