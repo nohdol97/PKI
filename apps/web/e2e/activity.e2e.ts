@@ -225,11 +225,14 @@ test("the job area shows counts, reasons, next run, periods, projections, budget
   const stack = await startStack(dir, target, playwright.chromium);
   const { page } = stack;
   try {
+    let realHadDrops = false;
     if (target === "browser") {
-      // I04-T09's count is not in the API of this base: a stub adds it to the real answer
+      // I04-T09's count is not in the API of this base: a stub adds it to the real answer. Once the real
+      // answer carries it, `realHadDrops` fails the test: seed a real value then and delete this stub.
       await page.route("**/api/status", async (route) => {
         const response = await route.fetch();
         const body = (await response.json()) as { invalidations: object };
+        realHadDrops ||= "scopePolicyDrops" in body.invalidations;
         await route.fulfill({
           response,
           json: { ...body, invalidations: { ...body.invalidations, scopePolicyDrops: 4 } },
@@ -275,6 +278,7 @@ test("the job area shows counts, reasons, next run, periods, projections, budget
         { exact: true },
       ),
     ).toBeVisible();
+    expect(realHadDrops).toBe(false);
   } finally {
     await stack.stop();
   }
@@ -350,6 +354,19 @@ test("the user's actions reach the jobs and the screen shows them", async ({
     // an open rebuild exists: the ask is answered, not duplicated
     await page.getByRole("button", { name: "투영 engine 재구축" }).click();
     await expect(message).toHaveText("이 투영의 재구축이 이미 진행 중이거나 대기 중입니다.");
+
+    // a job purged after its 30 days is gone while the screen still lists it: the action says so (review F2)
+    const db = openBetterSqlite3(join(dir, "data", "pki.sqlite"));
+    db.run("DELETE FROM jobs WHERE id = ?", [ID.rebuildDead]);
+    db.close();
+    await jobRow(page, ID.rebuildDead)
+      .getByRole("button", { name: `작업 ${ID.rebuildDead} 버리기` })
+      .click();
+    await ask.getByRole("button", { name: "버리기" }).click();
+    await expect(message).toHaveText(
+      "작업을 찾을 수 없습니다. 끝난 지 30일이 지난 기록은 정리됩니다.",
+    );
+    await expect(jobRow(page, ID.rebuildDead)).toHaveCount(0);
   } finally {
     await stack.stop();
   }

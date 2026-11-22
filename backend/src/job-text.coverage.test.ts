@@ -10,7 +10,12 @@ import { HELD_REASONS } from "./held-release.ts";
 import { JOB_BUDGET_EXHAUSTED } from "./job-outcomes.ts";
 
 const text = readFileSync(resolve(import.meta.dirname, "../../apps/web/src/job-text.ts"), "utf8");
-const worded = (code: string) => text.includes(`"${code}":`) || text.includes(`  ${code}:`);
+// only the reason table: the same words are keys of other tables (outcomes, statuses) of the file
+const table = text.slice(
+  text.indexOf("const REASON"),
+  text.indexOf("\n};", text.indexOf("const REASON")),
+);
+const worded = (code: string) => table.includes(`"${code}":`) || table.includes(`\n  ${code}:`);
 
 describe("job reason words", () => {
   it("has a sentence for every reason a job can be held for", () => {

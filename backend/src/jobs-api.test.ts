@@ -6,6 +6,7 @@
 import { JobsResponseSchema, routes, type RouteName } from "@pki/contracts";
 import {
   migrate,
+  markedProjections,
   readJob,
   registerConnectorInstance,
   registerJob,
@@ -196,6 +197,88 @@ describe("GET /api/jobs", () => {
     expect(body.counts.dead_letter).toBe(1);
     expect((await call("discardJob", { id })).body).toEqual({ outcome: "unavailable" });
     expect(readJob(db, id)?.status).toBe("dead_letter");
+  });
+});
+
+describe("a row the response cannot hold (review A4)", () => {
+  it("leaves it out and counts it, and the rest of the list still answers 200", async () => {
+    const odd = job("maintenance", "x".repeat(300), "succeeded"); // a target over the schema's length
+    const fine = job("maintenance", "ok", "succeeded");
+    await start();
+    const res = await call("jobs");
+    expect(res.status).toBe(200);
+    const body = JobsResponseSchema.parse(res.body);
+    expect(body.jobs.map((j) => j.id)).toEqual([fine]);
+    expect(body.unreadable).toBe(1);
+    // the counts still hold both rows
+    expect(body.counts.succeeded).toBe(2);
+    expect(odd).toBeGreaterThan(0);
+  });
+
+  it("counts nothing unreadable when every row fits", async () => {
+    job("maintenance", "ok", "succeeded");
+    await start();
+    expect(JobsResponseSchema.parse((await call("jobs")).body).unreadable).toBe(0);
+  });
+});
+
+describe("a projection removal's mark (review A1)", () => {
+  /** A removal for `projection` (it names a source of its own), written as `status`. */
+  function removal(projection: string, status: string): number {
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    const n = db.all("SELECT count(*) AS n FROM sources")[0]?.n as number;
+    saveSourceRecord(db, "c1", { externalId: `r${n}`, title: "t", body: "b" });
+    const r = registerJob(db, {
+      kind: "projection-remove",
+      target: projection,
+      sourceId: n + 1,
+      fenceVersion: 1,
+    });
+    if (!r.registered) throw new Error("not registered");
+    db.run("UPDATE jobs SET status = ?, finished_at = ? WHERE id = ?", [
+      status,
+      status === "dead_letter" ? T0 : null,
+      r.job.id,
+    ]);
+    return r.job.id;
+  }
+
+  it("refuses to cancel an open removal and to discard a given-up one, leaves the mark, and the rebuild route is the way out", async () => {
+    const open = removal("engine", "queued");
+    const dead = removal("vector", "dead_letter");
+    await start();
+    expect(markedProjections(db, { phase: "start" })).toEqual(["engine", "vector"]);
+    expect((await call("cancelJob", { id: open })).body).toEqual({ outcome: "not-allowed" });
+    expect((await call("discardJob", { id: dead })).body).toEqual({ outcome: "not-allowed" });
+    expect(readJob(db, open)?.status).toBe("queued");
+    expect(readJob(db, dead)?.status).toBe("dead_letter");
+    expect(markedProjections(db, { phase: "start" })).toEqual(["engine", "vector"]);
+    // a try again keeps it open; the rebuild is what the screen offers
+    expect((await call("retryJob", { id: dead })).body).toEqual({ outcome: "queued" });
+    expect(markedProjections(db, { phase: "start" })).toEqual(["engine", "vector"]);
+    expect((await call("rebuildProjection", { projection: "vector" })).body).toEqual({
+      outcome: "requested",
+    });
+  });
+});
+
+describe("request bodies are strict (review A3)", () => {
+  const period = { kind: "daily", at: { hour: 3, minute: 0 } };
+  it.each([
+    ["cancelJob", { id: 1, extra: 1 }],
+    ["retryJob", { id: 1, extra: 1 }],
+    ["discardJob", { id: 1, extra: 1 }],
+    ["disableSchedule", { id: 1, extra: 1 }],
+    ["enableSchedule", { id: 1, extra: 1 }],
+    ["runSchedule", { id: 1, extra: 1 }],
+    ["rebuildProjection", { projection: "engine", extra: 1 }],
+    ["changeSchedule", { id: 1, period, extra: 1 }],
+    ["changeSchedule", { id: 1, period: { ...period, extra: 1 } }],
+    ["changeSchedule", { id: 1, period: { ...period, at: { hour: 3, minute: 0, second: 1 } } }],
+    ["changeSchedule", { id: 1, period: { kind: "hourly", at: { hour: 3, minute: 0 } } }],
+  ] as const)("%s refuses an unknown key: %j", async (name, body) => {
+    await start();
+    expect((await call(name, body)).status).toBe(400);
   });
 });
 

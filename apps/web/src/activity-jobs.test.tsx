@@ -48,6 +48,7 @@ const response = (over: Partial<JobsResponse> = {}): JobsResponse => ({
   truncated: false,
   schedules: [],
   projections: [],
+  unreadable: 0,
   budget: null,
   backlog: { open: 4, cap: 1000, warning: false },
   ...over,
@@ -111,6 +112,50 @@ describe("JobsView", () => {
       [], // cancelled
       ["다시 시도", "버리기"], // dead_letter
     ]);
+  });
+
+  it("offers no cancel or discard for a projection removal that is open or given up, says why, and keeps try again (review A1)", () => {
+    const html = render(
+      response({
+        jobs: [
+          job({
+            id: 21,
+            kind: "projection-remove",
+            target: "engine",
+            sourceId: 1,
+            status: "queued",
+          }),
+          job({
+            id: 22,
+            kind: "projection-remove",
+            target: "engine",
+            sourceId: 2,
+            status: "dead_letter",
+          }),
+          job({ id: 23, kind: "projection-remove", target: "engine", sourceId: 3, status: "held" }),
+          job({
+            id: 24,
+            kind: "projection-remove",
+            target: "engine",
+            sourceId: 4,
+            status: "succeeded",
+          }),
+        ],
+      }),
+    );
+    for (const id of [21, 22, 23]) {
+      expect(rowOf(html, id)).not.toContain(`aria-label="작업 ${id} 취소"`);
+      expect(rowOf(html, id)).not.toContain(`aria-label="작업 ${id} 버리기"`);
+      expect(rowOf(html, id)).toContain("직접 취소하거나 버릴 수 없습니다");
+    }
+    expect(rowOf(html, 22)).toContain('aria-label="작업 22 다시 시도"');
+    expect(rowOf(html, 23)).toContain('aria-label="작업 23 다시 시도"');
+    expect(rowOf(html, 24)).not.toContain("직접 취소하거나 버릴 수 없습니다");
+  });
+
+  it("says how many rows the answer left out, only when there are some (review A4)", () => {
+    expect(render(response())).not.toContain("읽을 수 없는 항목");
+    expect(render(response({ unreadable: 2 }))).toContain("읽을 수 없는 항목 2건");
   });
 
   it("shows a sync's result counts with the stale-tombstone and blocked counts and the missed-deletions sentence (I01-R19)", () => {

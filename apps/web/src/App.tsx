@@ -353,7 +353,7 @@ function Activity({ api }: { api: ApiClient }) {
   const status = useRoute(api, "status");
   return (
     <>
-      <JobsArea api={api} />
+      <JobsArea api={api} onRefresh={status.reload} />
       <h2>무효화 기록</h2>
       <Failure error={status.error} />
       {status.data && <p>{invalidationText(status.data.invalidations)}</p>}

@@ -3,7 +3,15 @@
 // this module adds none: a source is shown by its internal id (a title is imported text), a
 // reason by its code, a run's counts by whole numbers only. The actions go through the
 // entries the runner and the scheduler already have (job-actions.ts, scheduler.ts).
-import type { JobsResponse, RouteRequest, RouteResponse, ScheduleSummary } from "@pki/contracts";
+import {
+  JobSummarySchema,
+  ProjectionActivitySchema,
+  ScheduleSummarySchema,
+  type JobsResponse,
+  type RouteRequest,
+  type RouteResponse,
+  type ScheduleSummary,
+} from "@pki/contracts";
 import type { BudgetUsage } from "@pki/providers";
 import {
   countJobsByStatus,
@@ -93,16 +101,39 @@ export function scheduleSummary(view: ScheduleView): ScheduleSummary {
   };
 }
 
+/** The rows that fit the response schema, and how many did not: one odd row must not take the whole list down (a 500). */
+function readable<T>(
+  rows: readonly unknown[],
+  schema: { safeParse(v: unknown): { success: boolean; data?: T } },
+) {
+  const kept: T[] = [];
+  for (const row of rows) {
+    const parsed = schema.safeParse(row);
+    if (parsed.success) kept.push(parsed.data as T);
+  }
+  return { kept, unreadable: rows.length - kept.length };
+}
+
 export function readJobsView(db: SqlDriver, port: JobsPort | undefined): JobsResponse {
   const { jobs, truncated } = listRecentJobs(db, JOBS_LISTED);
   const budget = port?.budgetUsage();
   const open = countOpenJobs(db);
+  const listed = readable<JobsResponse["jobs"][number]>(jobs.map(jobSummary), JobSummarySchema);
+  const periods = readable<ScheduleSummary>(
+    (port?.scheduler.list() ?? []).map(scheduleSummary),
+    ScheduleSummarySchema,
+  );
+  const projections = readable<JobsResponse["projections"][number]>(
+    projectionActivity(db),
+    ProjectionActivitySchema,
+  );
   return {
     counts: countJobsByStatus(db),
-    jobs: jobs.map(jobSummary),
+    jobs: listed.kept,
     truncated,
-    schedules: (port?.scheduler.list() ?? []).map(scheduleSummary),
-    projections: projectionActivity(db),
+    schedules: periods.kept,
+    projections: projections.kept,
+    unreadable: listed.unreadable + periods.unreadable + projections.unreadable,
     budget: budget
       ? {
           used: budget.used,

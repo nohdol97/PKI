@@ -2,10 +2,21 @@
 // the screen does not know is shown as itself (it is a code, never a message), and an
 // imported or Provider text has no way in.
 import { describe, expect, it } from "vitest";
-import { SYNC_STOP_CODES } from "@pki/contracts";
+import {
+  CancelJobResponseSchema,
+  DiscardJobResponseSchema,
+  JobStatusSchema,
+  RebuildProjectionResponseSchema,
+  RetryJobResponseSchema,
+  RunScheduleResponseSchema,
+  ScheduleActionResponseSchema,
+  SYNC_STOP_CODES,
+} from "@pki/contracts";
 import { DELETIONS_MAY_BE_MISSED, syncStopText } from "./connector-text.ts";
 import {
   actionText,
+  discardStep,
+  runAction,
   budgetText,
   invalidationText,
   jobNote,
@@ -149,14 +160,65 @@ describe("notes, projections, budget, actions", () => {
     ).toContain("다음 빈 자리 2026-11-21T00:30:00.000Z");
   });
 
-  it("answers every outcome of every action in words, a job that is gone included", () => {
+  it("words every outcome the contract can answer, for every action, and never shows a bare code", () => {
+    const options = {
+      cancel: CancelJobResponseSchema.shape.outcome.options,
+      retry: RetryJobResponseSchema.shape.outcome.options,
+      discard: DiscardJobResponseSchema.shape.outcome.options,
+      runSchedule: RunScheduleResponseSchema.shape.outcome.options,
+      rebuild: RebuildProjectionResponseSchema.shape.outcome.options,
+      schedule: ScheduleActionResponseSchema.shape.outcome.options,
+    } as const;
+    for (const [kind, outcomes] of Object.entries(options)) {
+      for (const outcome of outcomes) {
+        const text = actionText(kind as keyof typeof options, outcome);
+        expect([kind, outcome, text !== outcome]).toEqual([kind, outcome, true]);
+      }
+    }
     expect(actionText("cancel", "requested")).toContain("취소를 요청");
-    expect(actionText("retry", "duplicate-open")).toContain("이미");
-    expect(actionText("discard", "discarded")).toContain("버렸");
     expect(actionText("cancel", "not-found")).toContain("30일");
-    expect(actionText("runSchedule", "already-open")).toContain("이미");
-    expect(actionText("rebuild", "unknown-projection")).toContain("알 수 없는");
     expect(actionText("discard", "unavailable")).toContain("사용할 수 없");
+  });
+
+  it("words a status for every status the contract has", () => {
+    for (const status of JobStatusSchema.options) expect(statusText(status)).not.toBe(status);
+  });
+});
+
+describe("runAction (what an action leaves on the screen)", () => {
+  it("says the outcome, including a job that is gone and a feature that is unavailable", async () => {
+    expect(await runAction("cancel", async () => ({ outcome: "not-found" }))).toEqual({
+      text: actionText("cancel", "not-found"),
+      failed: false,
+    });
+    expect(await runAction("discard", async () => ({ outcome: "unavailable" }))).toEqual({
+      text: "지금은 사용할 수 없습니다.",
+      failed: false,
+    });
+  });
+
+  it("words a failed request as a failed action, not as a load failure, with the error's code", async () => {
+    const result = await runAction("retry", () =>
+      Promise.reject(new Error("API 500: internal-error")),
+    );
+    expect(result).toEqual({ text: "실행하지 못했습니다: API 500: internal-error", failed: true });
+    expect(result.text).not.toContain("불러오지");
+  });
+});
+
+describe("discardStep (the question before a discard)", () => {
+  it("sends nothing when asked, nothing when cancelled, and only the asked job on confirmation", () => {
+    expect(discardStep(undefined, { type: "ask", id: 7 })).toEqual({ next: 7 });
+    expect(discardStep(7, { type: "cancel" })).toEqual({ next: undefined });
+    expect(discardStep(7, { type: "confirm" })).toEqual({ next: undefined, send: 7 });
+    // a confirmation with nothing asked sends nothing
+    expect(discardStep(undefined, { type: "confirm" })).toEqual({ next: undefined });
+    // asking about another job replaces the question: the confirmation is for the latest
+    expect(
+      discardStep(discardStep(undefined, { type: "ask", id: 7 }).next, { type: "ask", id: 9 }),
+    ).toEqual({
+      next: 9,
+    });
   });
 });
 

@@ -7,18 +7,22 @@ import type {
   JobSummary,
   JobsResponse,
   ProjectionActivity,
-  RouteResponse,
   ScheduleSummary,
   SchedulePeriod,
 } from "@pki/contracts";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { ApiClient } from "./api.ts";
 import {
-  actionText,
+  type ActionKind,
+  discardStep,
+  runAction,
   BACKLOG_WARNING,
   budgetText,
   discardConfirmText,
+  isMarkingRemoval,
   jobNote,
+  MARKING_REMOVAL,
+  unreadableText,
   kindText,
   periodText,
   projectionText,
@@ -91,6 +95,7 @@ export function JobsView({ data, actions }: { data: JobsResponse; actions: JobsV
         </table>
       )}
       {data.truncated && <p>최근 작업만 보입니다.</p>}
+      {data.unreadable > 0 && <p role="alert">{unreadableText(data.unreadable)}</p>}
 
       <h3>주기</h3>
       {data.schedules.length === 0 ? (
@@ -154,7 +159,8 @@ function JobRow({ job, actions }: { job: JobSummary; actions: JobsViewActions })
       </td>
       <td>{counts || NONE}</td>
       <td>
-        {CANCELLABLE.includes(job.status) && (
+        {isMarkingRemoval(job) && <p>{MARKING_REMOVAL}</p>}
+        {CANCELLABLE.includes(job.status) && !isMarkingRemoval(job) && (
           <button
             type="button"
             aria-label={`작업 ${job.id} 취소`}
@@ -172,7 +178,7 @@ function JobRow({ job, actions }: { job: JobSummary; actions: JobsViewActions })
             다시 시도
           </button>
         )}
-        {job.status === "dead_letter" && (
+        {job.status === "dead_letter" && !isMarkingRemoval(job) && (
           <button
             type="button"
             aria-label={`작업 ${job.id} 버리기`}
@@ -339,76 +345,73 @@ function ProjectionItem({
 }
 
 /** The area with its data and actions: reads the job API, asks before a discard, says what each action did. */
-export function JobsArea({ api }: { api: ApiClient }) {
+export function JobsArea({ api, onRefresh }: { api: ApiClient; onRefresh?: () => void }) {
   const [data, setData] = useState<JobsResponse>();
-  const [error, setError] = useState<string>();
-  const [message, setMessage] = useState<string>();
+  const [loadError, setLoadError] = useState<string>();
+  const [action, setAction] = useState<{ text: string; failed: boolean }>();
   const [discarding, setDiscarding] = useState<number>();
   const load = useCallback(() => {
     api("jobs").then(
       (next) => {
         setData(next);
-        setError(undefined);
+        setLoadError(undefined);
       },
-      (failure: unknown) => setError(failure instanceof Error ? failure.message : String(failure)),
+      (failure: unknown) =>
+        setLoadError(failure instanceof Error ? failure.message : String(failure)),
     );
   }, [api]);
   useEffect(load, [load]);
 
-  /** Runs one action, says its outcome, and reads the area again: a job may be gone by now. */
-  const act = (run: () => Promise<string>) => {
+  /** Runs one action, says its outcome or why it failed, and reads the area again: a job may be gone by now. */
+  const act = (kind: ActionKind, call: () => Promise<{ outcome: string }>) => {
     setDiscarding(undefined);
-    run().then(
-      (text) => {
-        setMessage(text);
-        load();
-      },
-      (failure: unknown) => {
-        setMessage(undefined);
-        setError(failure instanceof Error ? failure.message : String(failure));
-      },
-    );
+    void runAction(kind, call).then((result) => {
+      setAction(result);
+      load();
+    });
   };
-  const outcome = <T extends { outcome: string }>(
-    kind: Parameters<typeof actionText>[0],
-    call: Promise<T>,
-  ) => call.then((answer) => actionText(kind, answer.outcome));
-  const schedule = (call: Promise<RouteResponse<"disableSchedule">>) => outcome("schedule", call);
+  const step = (event: Parameters<typeof discardStep>[1]) => {
+    const { next, send } = discardStep(discarding, event);
+    setDiscarding(next);
+    if (send !== undefined) act("discard", () => api("discardJob", { id: send }));
+  };
 
   const actions: JobsViewActions = {
-    cancel: (id) => act(() => outcome("cancel", api("cancelJob", { id }))),
-    retry: (id) => act(() => outcome("retry", api("retryJob", { id }))),
+    cancel: (id) => act("cancel", () => api("cancelJob", { id })),
+    retry: (id) => act("retry", () => api("retryJob", { id })),
     askDiscard: (id) => {
-      setMessage(undefined);
-      setDiscarding(id);
+      setAction(undefined);
+      step({ type: "ask", id });
     },
-    runSchedule: (id) => act(() => outcome("runSchedule", api("runSchedule", { id }))),
+    runSchedule: (id) => act("runSchedule", () => api("runSchedule", { id })),
     setScheduleEnabled: (id, enabled) =>
-      act(() => schedule(api(enabled ? "enableSchedule" : "disableSchedule", { id }))),
-    changeSchedule: (id, period) => act(() => schedule(api("changeSchedule", { id, period }))),
-    rebuild: (name) =>
-      act(() => outcome("rebuild", api("rebuildProjection", { projection: name }))),
+      act("schedule", () => api(enabled ? "enableSchedule" : "disableSchedule", { id })),
+    changeSchedule: (id, period) => act("schedule", () => api("changeSchedule", { id, period })),
+    rebuild: (name) => act("rebuild", () => api("rebuildProjection", { projection: name })),
   };
   return (
     <>
       <h2>작업</h2>
       <p>
-        <button type="button" onClick={load}>
+        <button
+          type="button"
+          onClick={() => {
+            load();
+            onRefresh?.();
+          }}
+        >
           새로 고침
         </button>
       </p>
-      {error && <p role="alert">불러오지 못했습니다: {error}</p>}
-      {message && <p role="status">{message}</p>}
+      {loadError && <p role="alert">불러오지 못했습니다: {loadError}</p>}
+      {action && <p role={action.failed ? "alert" : "status"}>{action.text}</p>}
       {discarding !== undefined && (
         <div role="alertdialog" aria-label="작업 버리기 확인">
           <p>{discardConfirmText(discarding)}</p>
-          <button
-            type="button"
-            onClick={() => act(() => outcome("discard", api("discardJob", { id: discarding })))}
-          >
+          <button type="button" onClick={() => step({ type: "confirm" })}>
             버리기
           </button>
-          <button type="button" onClick={() => setDiscarding(undefined)}>
+          <button type="button" onClick={() => step({ type: "cancel" })}>
             취소
           </button>
         </div>

@@ -5,6 +5,7 @@
 import type {
   JobStatusValue,
   JobSummary,
+  RouteResponse,
   JobsResponse,
   ProjectionActivity,
   ScheduleSummary,
@@ -203,17 +204,41 @@ export function budgetText(budget: NonNullable<JobsResponse["budget"]>): string 
 }
 
 export const BACKLOG_WARNING = (open: number, cap: number) =>
-  `끝나지 않은 작업이 ${open}건으로 상한 ${cap}건의 90%를 넘었습니다. 상한에 닿으면 주기 작업이 건너뛰어집니다.`;
+  `끝나지 않은 작업이 ${open}건으로 상한 ${cap}건의 90% 이상입니다. 상한에 닿으면 주기 작업이 건너뛰어집니다.`;
 
-type ActionKind = "cancel" | "retry" | "discard" | "runSchedule" | "rebuild" | "schedule";
+type Outcome<Name extends keyof ActionRoutes> = Exclude<
+  RouteResponse<Name>["outcome"],
+  "unavailable"
+>;
+interface ActionRoutes {
+  cancelJob: unknown;
+  retryJob: unknown;
+  discardJob: unknown;
+  runSchedule: unknown;
+  rebuildProjection: unknown;
+  disableSchedule: unknown;
+}
+export type ActionKind = "cancel" | "retry" | "discard" | "runSchedule" | "rebuild" | "schedule";
 const GONE = "작업을 찾을 수 없습니다. 끝난 지 30일이 지난 기록은 정리됩니다.";
+/** Why a projection's removal has no cancel or discard (I03-R7 "표식"): it is the mark that the projection may still hold deleted content. */
+export const MARKING_REMOVAL =
+  '이 제거 작업은 직접 취소하거나 버릴 수 없습니다. 투영의 "재구축"이 끝나면 닫힙니다.';
 const UNAVAILABLE = "지금은 사용할 수 없습니다.";
-const OUTCOME: Readonly<Record<ActionKind, Readonly<Record<string, string>>>> = {
+/** One sentence per outcome of the contract: a new outcome fails the type check here and the exhaustive test. */
+export const OUTCOME: {
+  cancel: Record<Outcome<"cancelJob">, string>;
+  retry: Record<Outcome<"retryJob">, string>;
+  discard: Record<Outcome<"discardJob">, string>;
+  runSchedule: Record<Outcome<"runSchedule">, string>;
+  rebuild: Record<Outcome<"rebuildProjection">, string>;
+  schedule: Record<Outcome<"disableSchedule">, string>;
+} = {
   cancel: {
     cancelled: "취소했습니다.",
     requested: "취소를 요청했습니다. 실행 중인 작업이 멈추는 대로 반영됩니다.",
     finished: "이미 끝난 작업입니다.",
     "not-cancellable": "취소할 수 없는 상태입니다. 포기한 작업은 버리기를 쓰세요.",
+    "not-allowed": MARKING_REMOVAL,
     "not-found": GONE,
   },
   retry: {
@@ -225,6 +250,7 @@ const OUTCOME: Readonly<Record<ActionKind, Readonly<Record<string, string>>>> = 
   discard: {
     discarded: "버렸습니다.",
     "not-dead-letter": "포기한 작업만 버릴 수 있습니다.",
+    "not-allowed": MARKING_REMOVAL,
     "not-found": GONE,
   },
   runSchedule: {
@@ -241,7 +267,37 @@ const OUTCOME: Readonly<Record<ActionKind, Readonly<Record<string, string>>>> = 
 };
 
 export function actionText(kind: ActionKind, outcome: string): string {
-  return outcome === "unavailable" ? UNAVAILABLE : (OUTCOME[kind][outcome] ?? outcome);
+  const table: Readonly<Record<string, string>> = OUTCOME[kind];
+  return outcome === "unavailable" ? UNAVAILABLE : (table[outcome] ?? outcome);
+}
+
+/** A request that failed (not an outcome: the backend answered an error or did not answer). */
+export const actionFailureText = (error: unknown): string =>
+  `실행하지 못했습니다: ${error instanceof Error ? error.message : String(error)}`;
+
+/** What one action's call leaves on the screen: its sentence, and whether it is a failure. */
+export async function runAction(
+  kind: ActionKind,
+  call: () => Promise<{ outcome: string }>,
+): Promise<{ text: string; failed: boolean }> {
+  try {
+    return { text: actionText(kind, (await call()).outcome), failed: false };
+  } catch (error) {
+    return { text: actionFailureText(error), failed: true };
+  }
+}
+
+/**
+ * The discard question as steps (the screen has no DOM test): asking sends nothing, only a
+ * confirmation sends, and only for the job that was asked about.
+ */
+export function discardStep(
+  asked: number | undefined,
+  event: { type: "ask"; id: number } | { type: "cancel" } | { type: "confirm" },
+): { next: number | undefined; send?: number } {
+  if (event.type === "ask") return { next: event.id };
+  if (event.type === "cancel") return { next: undefined };
+  return asked === undefined ? { next: undefined } : { next: undefined, send: asked };
 }
 
 /** The question before a given-up job is discarded: it cannot be taken back. */
@@ -258,3 +314,16 @@ export function invalidationText(invalidations: {
     ? recent
     : `${recent}, 범위 정책으로 빠진 항목 ${invalidations.scopePolicyDrops}건`;
 }
+
+/** A projection removal that is open or given up: the screen offers no cancel or discard for it (the backend refuses them too). */
+export const isMarkingRemoval = (job: Pick<JobSummary, "kind" | "status">): boolean =>
+  job.kind === "projection-remove" &&
+  (job.status === "dead_letter" ||
+    job.status === "queued" ||
+    job.status === "running" ||
+    job.status === "retry" ||
+    job.status === "held");
+
+/** Rows of the answer the backend left out because they did not fit its schema. */
+export const unreadableText = (count: number): string =>
+  `읽을 수 없는 항목 ${count}건은 목록에서 빠졌습니다.`;

@@ -531,7 +531,7 @@ export const JOB_STATUS_VALUES = [
 export const JobStatusSchema = z.enum(JOB_STATUS_VALUES);
 export type JobStatusValue = z.infer<typeof JobStatusSchema>;
 
-const JobSummarySchema = z.object({
+export const JobSummarySchema = z.object({
   id: z.int().positive(),
   kind: JobCode,
   /** A Connector instance, a projection name, or a re-extraction's target; '' when the kind has none. */
@@ -569,7 +569,7 @@ export const SchedulePeriodSchema = z.discriminatedUnion("kind", [
 ]);
 export type SchedulePeriod = z.infer<typeof SchedulePeriodSchema>;
 
-const ScheduleSummarySchema = z.object({
+export const ScheduleSummarySchema = z.object({
   id: z.int().positive(),
   kind: JobCode,
   target: z.string().max(200),
@@ -599,7 +599,7 @@ const ScheduleSummarySchema = z.object({
 });
 export type ScheduleSummary = z.infer<typeof ScheduleSummarySchema>;
 
-const ProjectionActivitySchema = z.object({
+export const ProjectionActivitySchema = z.object({
   name: z.string().max(100),
   /** Removals not finished (queued, running, retrying, held) and removals given up. */
   openRemoves: z.int().nonnegative(),
@@ -626,6 +626,8 @@ export const JobsResponseSchema = z.object({
       resetsAt: z.string().nullable(),
     })
     .nullable(),
+  /** Rows (jobs, periods, projections) the answer left out because they did not fit this schema; never an error for the whole list. */
+  unreadable: z.int().nonnegative(),
   /** Unfinished jobs of every kind against the cap; `warning` from 90% of it. */
   backlog: z.object({ open: z.int().nonnegative(), cap: z.int().positive(), warning: z.boolean() }),
 });
@@ -639,6 +641,8 @@ export const CancelJobResponseSchema = z.object({
     "requested",
     "finished",
     "not-cancellable",
+    /** A projection removal: only the projection's rebuild closes its mark (I03-R7). */
+    "not-allowed",
     "not-found",
     "unavailable",
   ]),
@@ -647,7 +651,7 @@ export const RetryJobResponseSchema = z.object({
   outcome: z.enum(["queued", "not-retryable", "duplicate-open", "not-found", "unavailable"]),
 });
 export const DiscardJobResponseSchema = z.object({
-  outcome: z.enum(["discarded", "not-dead-letter", "not-found", "unavailable"]),
+  outcome: z.enum(["discarded", "not-dead-letter", "not-allowed", "not-found", "unavailable"]),
 });
 export const ScheduleChangeRequestSchema = z.strictObject({
   id: z.int().positive(),
