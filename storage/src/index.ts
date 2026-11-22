@@ -251,6 +251,14 @@ export {
   type UserEntry,
 } from "./semantic-user.ts";
 export {
+  ANALYTICAL_SEED,
+  ANALYTICAL_VALUE_TYPES,
+  REQUIRED_DATA_CHECKS,
+  normalizeColumnName,
+  normalizeValue,
+  type AnalyticalValueType,
+} from "./analytical-types.ts";
+export {
   describeKnowledgeSchema,
   type KnowledgeSchemaEntry,
   type KnowledgeSchemaList,

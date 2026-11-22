@@ -132,12 +132,32 @@ const canon = (rule: CatalogueRule | ElementRule): unknown =>
 const parse = (row: Stored) => JSON.parse(row.rule) as unknown;
 const historyCount = () => db.all("SELECT count(*) AS n FROM ontology_history")[0]?.n;
 
+/**
+ * The catalogue as edition 1 had it: this migration writes edition 1. The names a later edition added are
+ * left out, and the types it added to a rule (S03-R2 widens `definition` and `alias.*` to Metric and Dataset)
+ * are taken back; the later migration (S03-T04) does those.
+ */
+const EDITION_1_PRODUCT_SEED = PRODUCT_SEED.filter((e) => e.since === 1);
 const catalogueEntries = () =>
   [
     ...KNOWLEDGE_SCHEMA.knowledgeTypes,
     ...KNOWLEDGE_SCHEMA.relationTypes,
     ...KNOWLEDGE_SCHEMA.factKinds,
-  ].flatMap((e) => (e.rule ? [{ name: e.name, rule: e.rule }] : []));
+  ]
+    .filter((e) => e.rule && (e.since ?? 1) === 1)
+    .map((e) => {
+      const rule = e.rule as CatalogueRule;
+      return {
+        name: e.name,
+        rule:
+          e.widenedAt && rule.elementKind === "fact-kind"
+            ? {
+                ...rule,
+                itemTypes: rule.itemTypes.filter((t) => t !== "Metric" && t !== "Dataset"),
+              }
+            : rule,
+      };
+    });
 
 describe("schema.catalogue-migration", () => {
   it("is the migration after S01's, one step, and raises the schema to 23", () => {
@@ -164,8 +184,8 @@ describe("schema.catalogue-migration", () => {
       ),
     ).toEqual(before);
     const rows = stored();
-    expect(rows).toHaveLength(PRODUCT_SEED.length);
-    for (const seed of PRODUCT_SEED) {
+    expect(rows).toHaveLength(EDITION_1_PRODUCT_SEED.length);
+    for (const seed of EDITION_1_PRODUCT_SEED) {
       const row = one(seed.name, seed.elementKind);
       expect(row.status).toBe("verified");
       expect(row.origin).toBe("seed");

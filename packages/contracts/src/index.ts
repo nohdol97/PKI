@@ -9,7 +9,7 @@ import {
   ImportRequestSchema,
 } from "./import-record.ts";
 import { REJECT_CODES } from "./connector.ts";
-import { KNOWLEDGE_PLACES } from "./knowledge-schema.ts";
+import { DATA_CHECK_NAMES, FACT_VALUE_TYPES, KNOWLEDGE_PLACES } from "./knowledge-schema.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
@@ -968,8 +968,9 @@ export const OntologyRuleSchema = z.discriminatedUnion("elementKind", [
   z.strictObject({
     elementKind: z.literal("fact-kind"),
     itemTypes: OntologyTypeListSchema,
-    valueType: z.enum(["date", "text", "surface-form", "identifier"]),
+    valueType: z.enum(FACT_VALUE_TYPES),
     cardinality: z.enum(["one", "many"]),
+    dataChecks: z.array(z.enum(DATA_CHECK_NAMES)).optional(),
   }),
   z.strictObject({
     elementKind: z.literal("relation-type"),

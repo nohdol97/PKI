@@ -15,14 +15,37 @@ export const KNOWLEDGE_PLACES = [
 ] as const;
 export type KnowledgePlace = (typeof KNOWLEDGE_PLACES)[number];
 
+/** The value types a fact kind's rule may name: S01's three, S02's `identifier`, S03-R3's nine. */
+export const FACT_VALUE_TYPES = [
+  "date",
+  "text",
+  "surface-form",
+  "identifier",
+  "header",
+  "column",
+  "column-set",
+  "calculation",
+  "key-pairs",
+  "join-cardinality",
+  "period",
+  "currency",
+  "dataset-role",
+] as const;
+export type FactValueType = (typeof FACT_VALUE_TYPES)[number];
+/** The checks a rule may require of a row before it can be `verified` (S03-R13). */
+export const DATA_CHECK_NAMES = ["schema", "grain", "join-cardinality", "aggregation"] as const;
+export type DataCheckName = (typeof DATA_CHECK_NAMES)[number];
+
 /** A type definition's rule (S01-R18). Plain lists, so the catalogue is data. */
 export type CatalogueRule =
   | { elementKind: "item-type" }
   | {
       elementKind: "fact-kind";
       itemTypes: readonly string[];
-      valueType: "date" | "text" | "surface-form" | "identifier";
+      valueType: FactValueType;
       cardinality: "one" | "many";
+      /** S03-R13: the checks the row needs; absent or empty means none. */
+      dataChecks?: readonly DataCheckName[];
     }
   | {
       elementKind: "relation-type";
@@ -36,6 +59,12 @@ export interface CatalogueEntry {
   place: KnowledgePlace;
   /** The seed rule when the place is a type definition, otherwise null. */
   rule: CatalogueRule | null;
+  /** The edition that added the name; absent means 1. A migration of that edition writes the row. */
+  since?: number;
+  /** The edition that widened the rule of a name an earlier edition added; the migration of that edition does it. */
+  widenedAt?: number;
+  /** The name is seeded but extraction never writes it: the instruction and the response schema leave it out (S03-R2). */
+  notExtracted?: true;
 }
 export interface KnowledgeCatalogue {
   edition: number;
@@ -44,10 +73,11 @@ export interface KnowledgeCatalogue {
   factKinds: readonly CatalogueEntry[];
 }
 
-const itemType = (name: string): CatalogueEntry => ({
+const itemType = (name: string, since?: number): CatalogueEntry => ({
   name,
   place: "type-definition",
   rule: { elementKind: "item-type" },
+  ...(since === undefined ? {} : { since }),
 });
 const elsewhere = (name: string, place: KnowledgePlace): CatalogueEntry => ({
   name,
@@ -59,20 +89,37 @@ const relation = (
   subjectTypes: readonly string[],
   objectTypes: readonly string[],
   symmetric = false,
+  since?: number,
 ): CatalogueEntry => ({
   name,
   place: "type-definition",
   rule: { elementKind: "relation-type", subjectTypes, objectTypes, symmetric },
+  ...(since === undefined ? {} : { since }),
 });
 const factKind = (
   name: string,
   itemTypes: readonly string[],
-  valueType: "date" | "text" | "surface-form" | "identifier",
+  valueType: FactValueType,
   cardinality: "one" | "many",
+  extra: {
+    dataChecks?: readonly DataCheckName[];
+    since?: number;
+    widenedAt?: number;
+    notExtracted?: true;
+  } = {},
 ): CatalogueEntry => ({
   name,
   place: "type-definition",
-  rule: { elementKind: "fact-kind", itemTypes, valueType, cardinality },
+  rule: {
+    elementKind: "fact-kind",
+    itemTypes,
+    valueType,
+    cardinality,
+    ...(extra.dataChecks ? { dataChecks: extra.dataChecks } : {}),
+  },
+  ...(extra.since === undefined ? {} : { since: extra.since }),
+  ...(extra.widenedAt === undefined ? {} : { widenedAt: extra.widenedAt }),
+  ...(extra.notExtracted ? { notExtracted: true as const } : {}),
 });
 
 /** The thirteen item types that are type definitions. */
@@ -103,7 +150,7 @@ const STATEMENT_TYPES = [
 ];
 
 export const KNOWLEDGE_SCHEMA: KnowledgeCatalogue = {
-  edition: 1,
+  edition: 2,
   knowledgeTypes: [
     itemType("Person"),
     itemType("Organization"),
@@ -121,6 +168,9 @@ export const KNOWLEDGE_SCHEMA: KnowledgeCatalogue = {
     itemType("BusinessRule"),
     itemType("OpenQuestion"),
     elsewhere("Insight", "insights"),
+    itemType("Dataset", 2),
+    itemType("Metric", 2),
+    itemType("Join", 2),
   ],
   relationTypes: [
     relation(
@@ -150,17 +200,71 @@ export const KNOWLEDGE_SCHEMA: KnowledgeCatalogue = {
     elsewhere("DERIVED_FROM", "computed"),
     elsewhere("SUPERSEDES", "assertion-links"),
     elsewhere("CONTRADICTS", "assertion-links"),
+    relation("MEASURED_ON", ["Metric"], ["Dataset"], false, 2),
+    relation("JOIN_LEFT", ["Join"], ["Dataset"], false, 2),
+    relation("JOIN_RIGHT", ["Join"], ["Dataset"], false, 2),
+    relation("USES_JOIN", ["Metric"], ["Join"], false, 2),
   ],
   factKinds: [
     factKind("target_date", ["Project", "System", "Task", "Commitment"], "date", "one"),
     factKind("completion_date", ["Project", "System", "Task", "Commitment"], "date", "one"),
-    factKind("definition", ["Concept"], "text", "many"),
-    factKind("alias.synonym", ["Concept", "Project", "System"], "surface-form", "many"),
-    factKind("alias.abbreviation", ["Concept", "Project", "System"], "surface-form", "many"),
-    factKind("alias.translation", ["Concept", "Project", "System"], "surface-form", "many"),
+    factKind("definition", ["Concept", "Metric", "Dataset"], "text", "many", { widenedAt: 2 }),
+    factKind(
+      "alias.synonym",
+      ["Concept", "Project", "System", "Metric", "Dataset"],
+      "surface-form",
+      "many",
+      { widenedAt: 2 },
+    ),
+    factKind(
+      "alias.abbreviation",
+      ["Concept", "Project", "System", "Metric", "Dataset"],
+      "surface-form",
+      "many",
+      { widenedAt: 2 },
+    ),
+    factKind(
+      "alias.translation",
+      ["Concept", "Project", "System", "Metric", "Dataset"],
+      "surface-form",
+      "many",
+      { widenedAt: 2 },
+    ),
     factKind("identifier.email", ["Person", "Organization"], "identifier", "many"),
     factKind("identifier.key", ITEM_TYPES, "identifier", "one"),
     factKind("statement", STATEMENT_TYPES, "text", "many"),
+    // S03-R2 (edition 2): the analytical type definitions
+    factKind("dataset.column", ["Dataset"], "header", "many", { since: 2, notExtracted: true }),
+    factKind("dataset.role", ["Dataset"], "dataset-role", "one", { since: 2 }),
+    factKind("dataset.grain", ["Dataset"], "column-set", "one", {
+      since: 2,
+      dataChecks: ["schema", "grain"],
+    }),
+    factKind("dataset.measure", ["Dataset"], "column", "many", {
+      since: 2,
+      dataChecks: ["schema"],
+    }),
+    factKind("dataset.dimension", ["Dataset"], "column", "many", {
+      since: 2,
+      dataChecks: ["schema"],
+    }),
+    factKind("dataset.time_dimension", ["Dataset"], "column", "many", {
+      since: 2,
+      dataChecks: ["schema"],
+    }),
+    factKind("metric.calculation", ["Metric"], "calculation", "one", {
+      since: 2,
+      dataChecks: ["schema", "aggregation"],
+    }),
+    factKind("metric.unit", ["Metric"], "text", "one", { since: 2 }),
+    factKind("metric.version", ["Metric"], "text", "one", { since: 2 }),
+    factKind("metric.currency", ["Metric"], "currency", "one", { since: 2 }),
+    factKind("metric.period", ["Metric"], "period", "one", { since: 2 }),
+    factKind("join.keys", ["Join"], "key-pairs", "one", { since: 2, dataChecks: ["schema"] }),
+    factKind("join.cardinality", ["Join"], "join-cardinality", "one", {
+      since: 2,
+      dataChecks: ["join-cardinality"],
+    }),
   ],
 };
 
@@ -184,6 +288,9 @@ const REQUIRED_KNOWLEDGE_TYPES = [
   "BusinessRule",
   "OpenQuestion",
   "Insight",
+  "Dataset",
+  "Metric",
+  "Join",
 ];
 const REQUIRED_RELATION_TYPES = [
   "BELONGS_TO",
@@ -197,6 +304,10 @@ const REQUIRED_RELATION_TYPES = [
   "DERIVED_FROM",
   "SUPERSEDES",
   "CONTRADICTS",
+  "MEASURED_ON",
+  "JOIN_LEFT",
+  "JOIN_RIGHT",
+  "USES_JOIN",
 ];
 
 /** The problems of a catalogue as fixed codes with the name: empty when it is sound. */
@@ -228,15 +339,31 @@ export function checkCatalogue(catalogue: KnowledgeCatalogue): string[] {
   return problems;
 }
 
-/** The product seed (S02-R1, R3): every name the product puts into the type definitions, by kind. */
+/**
+ * The product seed (S02-R1, R3): every name the product puts into the type definitions, by kind, with the
+ * edition that added it (`since`, 1 when the catalogue does not say).
+ */
 export const PRODUCT_SEED: readonly {
   elementKind: "item-type" | "fact-kind" | "relation-type";
   name: string;
+  since: number;
 }[] = [KNOWLEDGE_SCHEMA.knowledgeTypes, KNOWLEDGE_SCHEMA.relationTypes, KNOWLEDGE_SCHEMA.factKinds]
   .flat()
   .flatMap((entry) =>
-    entry.rule ? [{ elementKind: entry.rule.elementKind, name: entry.name }] : [],
+    entry.rule
+      ? [{ elementKind: entry.rule.elementKind, name: entry.name, since: entry.since ?? 1 }]
+      : [],
   );
+
+/** The seeded names extraction never writes (S03-R2): left out of the instruction and the response schema. */
+export const NOT_EXTRACTED_NAMES: readonly string[] = [
+  KNOWLEDGE_SCHEMA.knowledgeTypes,
+  KNOWLEDGE_SCHEMA.relationTypes,
+  KNOWLEDGE_SCHEMA.factKinds,
+]
+  .flat()
+  .filter((entry) => entry.notExtracted)
+  .map((entry) => entry.name);
 
 /** The names no type definition may take (S02-R3): those stored or computed elsewhere. */
 export const RESERVED_NAMES: readonly string[] = [
