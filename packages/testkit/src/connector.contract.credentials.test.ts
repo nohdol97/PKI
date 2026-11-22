@@ -14,7 +14,7 @@ import {
   type HealthStatus,
   type SourceRecord,
 } from "@pki/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CONNECTOR_VIOLATION_CODES,
   checkConnector,
@@ -216,6 +216,21 @@ describe("connector.contract.credentials", () => {
       ]);
     });
 
+    it("does not let a revoked Proxy in a returned page escape as a TypeError, and counts it as holding", async () => {
+      class Revoked extends Holding {
+        override async getChanges(
+          cursor: string | null,
+          opts: { limit: number; signal: AbortSignal },
+        ): Promise<ChangeSet> {
+          const { proxy, revoke } = Proxy.revocable({}, {});
+          revoke();
+          return { ...(await super.getChanges(cursor, opts)), unread: proxy } as ChangeSet;
+        }
+      }
+      const codes = await checkConnector(() => new Revoked(), scenario());
+      expect(codes).toContain("credential-in-record");
+    });
+
     it("is not looked for when the scenario has no credentials", async () => {
       const Leaky = leaksInRecord((t) => t);
       expect(await checkConnector(() => new Leaky(), { config: ORIGIN })).toEqual([]);
@@ -288,6 +303,20 @@ describe("connector.contract.credentials", () => {
         throw Object.assign(new ConnectorCredentialError(), { cause: new Error(WRONG) });
       });
       expect(await checkConnector(() => new Leaky(), rejectedOnly)).toEqual([
+        "credential-in-error",
+      ]);
+    });
+
+    it("reports a thrown Proxy whose key listing throws with the value in the trap's own error, as a code", async () => {
+      const Hostile = failsAbortedWith(
+        (t) =>
+          new Proxy(new Error("refused"), {
+            ownKeys() {
+              throw new Error(`trap ${t}`);
+            },
+          }),
+      );
+      expect(await checkConnector(() => new Hostile(), scenario())).toEqual([
         "credential-in-error",
       ]);
     });
@@ -638,6 +667,25 @@ describe("connector.contract.output-clean", () => {
     },
   );
 
+  it("attaches no cause when the error is a Proxy that cannot be read, and the trap's error is not repeated", async () => {
+    class Fails extends ScriptedConnector {
+      override async initialize(): Promise<void> {
+        throw new Proxy(new Error("refused"), {
+          ownKeys() {
+            throw new Error(`trap ${TOKEN}`);
+          },
+        });
+      }
+    }
+    const failure = await checkConnector(() => new Fails(), scenario()).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).cause).toBeUndefined();
+    expect(hasValue(flat(failure))).toBe(false);
+  });
+
   it("keeps the cause of a failure that holds no value", async () => {
     const cause = new ConnectorError("origin down", { retryable: true });
     const text = await failureText(
@@ -764,6 +812,63 @@ describe("connector.contract.output-clean", () => {
         expect(await checkConnector(() => new Hostile(), scenario())).toEqual([]);
       });
       expect(heard).toHaveLength(1);
+    });
+
+    /** Initializes, then logs what `build` makes of the token. */
+    const logging = (build: (token: string) => unknown[]) =>
+      class extends Holding {
+        override async initialize(config: unknown, context?: ConnectorContext) {
+          await super.initialize(config, context);
+          console.log(...build(this.token));
+        }
+      };
+    const unreadable = () =>
+      new Proxy(
+        {},
+        {
+          ownKeys() {
+            throw new Error("keys that cannot be listed");
+          },
+        },
+      );
+
+    it("does not let a logged Proxy whose key listing throws make console.log throw", async () => {
+      const Chatty = logging(() => [unreadable()]);
+      const heard = await recording(async () => {
+        expect(await checkConnector(() => new Chatty(), scenario())).toEqual([]);
+      });
+      expect(heard).toHaveLength(1);
+    });
+
+    it("does not let a logged object nested too deep to walk make console.log throw", async () => {
+      const Chatty = logging(() => {
+        let deep: Record<string, unknown> = {};
+        for (let i = 0; i < 100_000; i++) deep = { deep };
+        return [deep];
+      });
+      const heard = await recording(async () => {
+        expect(await checkConnector(() => new Chatty(), scenario())).toEqual([]);
+      });
+      expect(heard).toHaveLength(1);
+    });
+
+    it("still scans the other arguments when one cannot be read", async () => {
+      const Chatty = logging((token) => [unreadable(), "later argument", token]);
+      expect(await checkConnector(() => new Chatty(), scenario())).toEqual(["credential-in-log"]);
+    });
+
+    it("leaves no deadline timer pending once a check completes", async () => {
+      const set = vi.spyOn(globalThis, "setTimeout");
+      const clear = vi.spyOn(globalThis, "clearTimeout");
+      try {
+        expect(await checkConnector(() => new Holding(), scenario())).toEqual([]);
+        const index = set.mock.calls.findIndex(([, delay]) => delay === 4000);
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(clear).toHaveBeenCalledWith(set.mock.results[index]?.value);
+      } finally {
+        set.mockRestore();
+        clear.mockRestore();
+      }
     });
 
     it("still catches a value that only the formatted text holds, next to such an object", async () => {

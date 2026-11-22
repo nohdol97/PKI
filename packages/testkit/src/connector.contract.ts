@@ -156,24 +156,36 @@ const shapesOf = (value: string) => [
  * array (symbols too, hidden ones such as an Error's `stack` too) and its value and, of an
  * Error, its name, message, `cause` and `errors` as well. With no needles it looks at nothing,
  * so a scenario without credentials never reads a thing the Connector hands back. A property
- * that throws when read is not inspected.
+ * that throws when read is not inspected. An object that cannot be read at all (a revoked
+ * Proxy, a trap that throws) counts as `unreadable`: true by default, which fails closed (an
+ * error nobody could inspect is not attached as a `cause`, a return nobody could inspect is not
+ * called clean); `printsValue` passes false, because a console argument is only forwarded.
  */
-function holds(value: unknown, needles: readonly string[], seen = new Set<object>()): boolean {
+function holds(
+  value: unknown,
+  needles: readonly string[],
+  unreadable = true,
+  seen = new Set<object>(),
+): boolean {
   if (needles.length === 0) return false;
   if (typeof value === "string") return needles.some((needle) => value.includes(needle));
   if (typeof value !== "object" || value === null || seen.has(value)) return false;
   seen.add(value);
   const parts: unknown[] = [];
-  for (const key of Reflect.ownKeys(value)) {
-    try {
-      parts.push(key, (value as Record<PropertyKey, unknown>)[key]);
-    } catch {
-      parts.push(key);
+  try {
+    for (const key of Reflect.ownKeys(value)) {
+      try {
+        parts.push(key, (value as Record<PropertyKey, unknown>)[key]);
+      } catch {
+        parts.push(key);
+      }
     }
+    if (value instanceof Error) parts.push(value.name, value.message, value.cause);
+    if (value instanceof AggregateError) parts.push(value.errors);
+  } catch {
+    return unreadable;
   }
-  if (value instanceof Error) parts.push(value.name, value.message, value.cause);
-  if (value instanceof AggregateError) parts.push(value.errors);
-  return parts.some((part) => holds(part, needles, seen));
+  return parts.some((part) => holds(part, needles, unreadable, seen));
 }
 
 interface Read {
@@ -413,7 +425,8 @@ function printsValue(args: unknown[], needles: readonly string[]): boolean {
     // the text of what cannot be formatted is not looked at
   }
   try {
-    return holds(args, needles) || holds(text, needles);
+    // One argument at a time: one that cannot be read does not stop the scan of the others.
+    return args.some((arg) => holds(arg, needles, false)) || holds(text, needles);
   } catch {
     return holds(text, needles);
   }
