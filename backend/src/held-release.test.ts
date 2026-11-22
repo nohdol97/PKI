@@ -354,6 +354,7 @@ describe("background.gate (I03-R15, C3)", () => {
         requests.push(request);
         return { status: "blocked", requestId: "r", reason: "no-consent" } as const;
       },
+      budgetUsage: () => ({ used: 0, maxCalls: 1, windowMs: 1, resetsAt: null }),
     };
     runner = productRunner(db, broker);
     const importer = productImporter(db, { runner });

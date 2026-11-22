@@ -113,7 +113,7 @@ function closing(result: JobResult, run: ClassifiedRun): JobClosing | undefined 
         : { status: "held", reason: result.reason };
     case "cancelled":
       // a cancel request closes the job cancelled whatever this says (closeJob, I03-R12);
-      // without one it is a failure to retry. Provisional: T07 may close it directly
+      // without one it is a failure to retry (the run was cut by its time limit or a lost lease)
       return failure("cancelled", run);
     case "rejected":
       // a source gone is the fence's answer; any other rejection is the code's fault

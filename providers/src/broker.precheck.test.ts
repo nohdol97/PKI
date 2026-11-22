@@ -53,7 +53,12 @@ function setup(
         return options.run?.(input) ?? { run: true };
       },
     },
-    recorder: { record: (entry) => void records.push(entry) },
+    recorder: {
+      record: (entry) => void records.push(entry),
+      begin: (entry) => (result) => void records.push({ ...entry, ...result }),
+      attemptTimes: () => [],
+      interruptStarted: () => 0,
+    },
     clock: { now: () => now, sleep: async () => undefined },
   });
   return {
