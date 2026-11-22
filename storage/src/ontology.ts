@@ -2,7 +2,8 @@
 // as rows with a rule of a fixed shape, a status and an edition. A change (add, change a rule,
 // retire) passes three checks in order (R19): a duplicate name, the shape of the name and rule, and
 // the effect on the rows that exist; `checkOntologyChange` only reports, `applyOntologyChange`
-// checks and applies. The user's change is applied and is `verified`. What an automated actor
+// (automated) and `applyUserOntologyChange` (package-internal) check and apply.
+// The user's change is applied and is `verified`. What an automated actor
 // proposes is recorded as a `candidate` with the source version it rests on and is never applied
 // (R20); approving, rejecting and undoing it, and the write-time enforcement, are S01-T07.
 //
@@ -389,17 +390,43 @@ const refused = (
   impact: check?.impact ?? { liveRows: 0, violations: 0 },
 });
 
+/** An actor that is not the user: what extraction, propagation and policy code may be. */
+export type AutomatedActor = Exclude<Actor, "user">;
+
 /**
- * R19, R20: checks the change and, when it passes, applies it for the user (`verified`, edition
- * +1 for a rule change or retirement) or records it as a `candidate` for an automated actor, which
- * must name the source version it rests on and may only propose an addition. The transaction is the
- * caller's.
+ * R19, R20: checks the change and records it as a `candidate` for an automated actor, which must
+ * name the source version it rests on and may only propose an addition. This is the only entry
+ * `@pki/storage` exports (S01-R7: the user's change is not reachable from extraction or product
+ * code, as `applyTransition` is not). The type excludes `user`, and a caller that gets past the
+ * type is refused at run time. The transaction is the caller's.
  */
 export function applyOntologyChange(
   tx: SqlDriver,
   change: OntologyChange,
-  actor: Actor,
+  actor: AutomatedActor,
   basis: Basis | null = null,
+  at?: string,
+): OntologyOutcome {
+  if ((actor as Actor) === "user") return refused("invalid-transition");
+  return applyChange(tx, change, actor, basis, at);
+}
+
+/**
+ * The user's change: checked, applied, `verified` (edition +1 for a rule change or retirement).
+ * Package-internal, not exported from the index: S01-T07 hands it to the API layer only, the way
+ * S01-T02 hands the user's row actions.
+ */
+export const applyUserOntologyChange = (
+  tx: SqlDriver,
+  change: OntologyChange,
+  at?: string,
+): OntologyOutcome => applyChange(tx, change, "user", null, at);
+
+function applyChange(
+  tx: SqlDriver,
+  change: OntologyChange,
+  actor: Actor,
+  basis: Basis | null,
   at?: string,
 ): OntologyOutcome {
   const byUser = actor === "user";

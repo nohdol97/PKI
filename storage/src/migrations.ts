@@ -826,6 +826,7 @@ const v20: Migration = (db) =>
 // - `ontology_history` (R6): one line per creation, transition or rule change, numbers and codes
 //   only: the before and after edition, never a name, rule or text. As in v20 it cannot be updated,
 //   and a line is deleted only with its element (the cascade passes: the parent is gone by then).
+// - An element's name and kind never change (a rename would skip every R19 check).
 // - The gate: status, rule and edition change only when the newest history line says that very
 //   change, and a rule changes only together with its edition. An INSERT is not blocked.
 // - The seed (R18): what the code constants held (Project, System, target_date, completion_date,
@@ -932,6 +933,8 @@ const v21: Migration = (db) => {
             AND h.from_status = old.status AND h.to_status = new.status
             AND h.from_edition = old.edition AND h.to_edition = new.edition))
     BEGIN SELECT RAISE(ABORT, 'status, rule and edition change only through the ontology gate'); END;
+    CREATE TRIGGER ontology_elements_identity_fixed BEFORE UPDATE OF name, element_kind ON ontology_elements
+    BEGIN SELECT RAISE(ABORT, 'an element keeps its name and kind'); END;
   `);
   for (const [elementKind, name, rule] of ONTOLOGY_SEED) {
     db.run(

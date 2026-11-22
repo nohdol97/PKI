@@ -40,6 +40,7 @@ import {
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import {
+  addUserOntologyElementForTest,
   derivativeKindContract,
   seedLegacyTombstone,
   setStatusForTest,
@@ -196,12 +197,7 @@ function world() {
   };
   const ontoA = propose("OntoA", lineA[0] as { sourceId: number; version: number });
   const ontoS = propose("OntoShared", ...lineAB);
-  const added = applyOntologyChange(
-    db,
-    { op: "add", name: "OntoUser", rule: { elementKind: "item-type" } },
-    "user",
-  );
-  if (added.status !== "applied") throw new Error(JSON.stringify(added));
+  const added = addUserOntologyElementForTest(db, "OntoUser");
 
   const rows: Record<
     string,
@@ -214,7 +210,7 @@ function world() {
     item: { onlyA: xA as number, shared: xS as number, withoutLineage: xN as number },
     insight: { onlyA: iA, shared: iS, withoutLineage: iN },
     "scope-drop": { onlyA: dropA, shared: null, withoutLineage: null },
-    ontology: { onlyA: ontoA, shared: ontoS, withoutLineage: added.id },
+    ontology: { onlyA: ontoA, shared: ontoS, withoutLineage: added },
   };
   const built = new Map<string, readonly SourceVersionRef[]>();
   for (const [kind, r] of Object.entries(rows)) {

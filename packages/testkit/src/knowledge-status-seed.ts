@@ -53,3 +53,26 @@ export function setOntologyStatusForTest(
   );
   db.run("UPDATE ontology_elements SET status = ? WHERE id = ?", [status, id]);
 }
+
+/**
+ * Test seed for a type definition the user added (S01-T06): a `verified` element of edition 1 with
+ * its creation line and no lineage row, as the user's own add leaves it. The product's user entry
+ * is not exported (S01-R7), so a test outside storage reaches such an element here. Returns its id.
+ */
+export function addUserOntologyElementForTest(
+  db: Pick<ContractSqlDriver, "run" | "all">,
+  name: string,
+  rule: object = { elementKind: "item-type" },
+): number {
+  const kind = (rule as { elementKind: string }).elementKind;
+  const id = db.run(
+    "INSERT INTO ontology_elements (element_kind, name, rule, status, edition) VALUES (?, ?, ?, 'verified', 1)",
+    [kind, name, JSON.stringify(rule)],
+  ).lastInsertRowid;
+  db.run(
+    `INSERT INTO ontology_history (element_id, seq, at, actor, action, from_status, to_status, from_edition, to_edition)
+     VALUES (?, 1, '2026-11-22T00:00:00.000Z', 'user', 'created', NULL, 'verified', NULL, 1)`,
+    [id],
+  );
+  return id;
+}

@@ -221,6 +221,7 @@ export {
   listOntologyElements,
   readOntologyElement,
   verifiedRulesNaming,
+  type AutomatedActor,
   type Cardinality,
   type ElementKind,
   type ElementRule,

@@ -1,6 +1,10 @@
 export { send, sendRaw, type TestResponse } from "./http.ts";
 export { seedLegacyTombstone } from "./tombstone-seed.ts";
-export { setOntologyStatusForTest, setStatusForTest } from "./knowledge-status-seed.ts";
+export {
+  addUserOntologyElementForTest,
+  setOntologyStatusForTest,
+  setStatusForTest,
+} from "./knowledge-status-seed.ts";
 export { canariesLeft, findCanaries, type CanaryHit } from "./canary-files.ts";
 export { sqlDriverContract, type ContractSqlDriver } from "./sql-driver.contract.ts";
 export { knowledgeEngineContract } from "./engine.contract.ts";

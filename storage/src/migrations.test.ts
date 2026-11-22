@@ -2069,6 +2069,40 @@ describe("schema v21 (S01-T06, S01-R18, R20, R22)", () => {
     ]);
   });
 
+  it("does not let a stale line authorize a change the row has since moved past (approve, undo, then a raw UPDATE)", () => {
+    migrate(db);
+    const id = element(); // candidate, edition 1
+    line(id, 1, { from: "candidate", to: "verified", action: "approve" });
+    db.run("UPDATE ontology_elements SET status = 'verified' WHERE id = ?", [id]);
+    line(id, 2, { from: "verified", to: "candidate", action: "undo" });
+    db.run("UPDATE ontology_elements SET status = 'candidate' WHERE id = ?", [id]);
+    // line 1 still says candidate -> verified, but the newest line is line 2
+    expect(() =>
+      db.run("UPDATE ontology_elements SET status = 'verified' WHERE id = ?", [id]),
+    ).toThrow(/ontology gate/);
+    expect(db.all("SELECT status FROM ontology_elements WHERE id = ?", [id])).toEqual([
+      { status: "candidate" },
+    ]);
+  });
+
+  it("never renames an element or changes its kind, with or without a history line", () => {
+    migrate(db);
+    const id = element({ status: "verified" });
+    line(id, 1, { from: "verified", to: "verified" });
+    expect(() =>
+      db.run("UPDATE ontology_elements SET name = 'Renamed' WHERE id = ?", [id]),
+    ).toThrow(/keeps its name and kind/);
+    expect(() =>
+      db.run("UPDATE ontology_elements SET element_kind = 'item-type' WHERE id = ?", [id]),
+    ).toThrow(/keeps its name and kind/);
+    expect(() => db.run("UPDATE ontology_elements SET name = name WHERE id = ?", [id])).toThrow(
+      /keeps its name and kind/,
+    );
+    expect(db.all("SELECT element_kind, name FROM ontology_elements WHERE id = ?", [id])).toEqual([
+      { element_kind: "fact-kind", name: "x_kind" },
+    ]);
+  });
+
   it("refuses a rule change even behind a line that keeps the edition: a rule changes only with its edition", () => {
     migrate(db);
     const id = element({ status: "verified" });

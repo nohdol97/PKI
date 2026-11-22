@@ -8,7 +8,8 @@ import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { insertItem, saveFact, saveRelation, type KnowledgeAttributes } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import {
-  applyOntologyChange,
+  applyOntologyChange as applyAutomated,
+  applyUserOntologyChange,
   checkOntologyChange,
   listOntologyElements,
   readOntologyElement,
@@ -16,6 +17,7 @@ import {
   type OntologyChange,
 } from "./ontology.ts";
 import { readKnowledgeRevision } from "./revisions.ts";
+import type { Actor, Basis } from "./semantic-lifecycle.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -54,6 +56,17 @@ const fk = (
   cardinality: "many",
   ...over,
 });
+/** The user's path is package-internal, the automated one public: a test picks by actor. */
+const applyOntologyChange = (
+  tx: SqlDriver,
+  change: OntologyChange,
+  actor: Actor,
+  basis: Basis | null = null,
+  at?: string,
+) =>
+  actor === "user"
+    ? applyUserOntologyChange(tx, change, at)
+    : applyAutomated(tx, change, actor, basis, at);
 const addUser = (name: string, rule: ElementRule) =>
   applyOntologyChange(db, { op: "add", name, rule }, "user");
 
@@ -372,6 +385,31 @@ describe("ontology.checks: the effect on existing data (R19 step 3)", () => {
     ).toEqual({ liveRows: 3, violations: 1 });
   });
 
+  it("takes only a calendar date for a date value kind: a day that does not exist is a misfit", () => {
+    addUser("when_kind", fk());
+    const p = item("Project", "P");
+    fact(p, "when_kind", "2026-02-28");
+    fact(p, "when_kind", "2026-02-30"); // Date.parse reads it as 2026-03-02; it is not a date
+    fact(p, "when_kind", "2026-13-01");
+    expect(checkOntologyChange(db, change("when_kind", fk({ valueType: "date" }))).impact).toEqual({
+      liveRows: 3,
+      violations: 2,
+    });
+  });
+
+  it("counts neither a superseded nor a rejected row as live", () => {
+    addUser("tag_kind", fk());
+    const p = item("Project", "P");
+    fact(p, "tag_kind", "a");
+    const old = fact(p, "tag_kind", "b");
+    const no = fact(p, "tag_kind", "c");
+    setStatusForTest(db, "fact", old, "superseded");
+    setStatusForTest(db, "fact", no, "rejected");
+    expect(
+      checkOntologyChange(db, { op: "retire", elementKind: "fact-kind", name: "tag_kind" }).impact,
+    ).toEqual({ liveRows: 1, violations: 1 });
+  });
+
   it("counts every live row of a retirement, and the verified rules that name a retired item type", () => {
     addUser("tag_kind", fk());
     fact(item("Project", "A"), "tag_kind", "x");
@@ -594,6 +632,20 @@ describe("ontology.candidates: the automated path at function level (R20)", () =
     expect(dump()).toEqual(before);
   });
 
+  it("the public entry refuses the user, at run time as well as by type, and writes nothing", () => {
+    const before = dump();
+    // the type excludes "user"; this is a caller that got past the type
+    const asUser = "user" as unknown as "extraction";
+    expect(refusalOf(applyAutomated(db, proposal("Sneaky"), asUser, sourceVersion())).reason).toBe(
+      "invalid-transition",
+    );
+    expect(refusalOf(applyAutomated(db, proposal("Sneaky"), asUser, null)).reason).toBe(
+      "invalid-transition",
+    );
+    expect(dump()).toEqual(before);
+    expect(readOntologyElement(db, "item-type", "Sneaky")).toBeUndefined();
+  });
+
   it("proposes only additions: a rule change or a retirement from an automated actor is refused", () => {
     const before = dump();
     const basis = sourceVersion();
@@ -638,8 +690,8 @@ describe("ontology.candidates: the automated path at function level (R20)", () =
     expect(readOntologyElement(db, "item-type", "ZetaCanary")?.status).toBe("rejected");
   });
 
-  it("applies a user add as verified, with no lineage row, whatever source it is given", () => {
-    const outcome = applyOntologyChange(db, proposal("Mine"), "user", sourceVersion());
+  it("applies a user add as verified, with no lineage row", () => {
+    const outcome = applyOntologyChange(db, proposal("Mine"), "user");
     expect(outcome).toMatchObject({ status: "applied", edition: 1, seq: 1 });
     expect(readOntologyElement(db, "item-type", "Mine")?.status).toBe("verified");
     expect(db.all("SELECT count(*) AS n FROM ontology_basis")).toEqual([{ n: 0 }]);

@@ -11,7 +11,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { setOntologyStatusForTest } from "@pki/testkit";
+import { addUserOntologyElementForTest, setOntologyStatusForTest } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CANONICAL_KINDS, propagateCanonical } from "./canonical-kinds.ts";
 
@@ -114,12 +114,7 @@ describe("ontology.candidates: a source's deletion (R22)", () => {
     ]);
     const verified = element("Ver", "verified", [[a, 1]]);
     const retired = element("Ret", "superseded", [[a, 1]]);
-    const user = applyOntologyChange(
-      db,
-      { op: "add", name: "Mine", rule: { elementKind: "item-type" } },
-      "user",
-    );
-    if (user.status !== "applied") throw new Error("setup");
+    const user = addUserOntologyElementForTest(db, "Mine");
 
     const record = deletion(a);
     expect(record.removedByKind.ontology).toBe(2);
@@ -133,7 +128,7 @@ describe("ontology.candidates: a source's deletion (R22)", () => {
     expect([verified, retired].map(stored)).toEqual([["verified"], ["superseded"]]);
     expect([verified, retired].map(basisOf)).toEqual([[], []]);
     expect(history(verified)).toBeGreaterThan(0);
-    expect(stored(user.id)).toEqual(["verified"]);
+    expect(stored(user)).toEqual(["verified"]);
   });
 
   it("leaves a candidate that still has a source and deletes it with the last one", () => {
