@@ -284,7 +284,7 @@ describe("docs.site-setup (I07): S18 and the build-time table say the value is b
     expect(s18).not.toContain("connector-scopes-unreadable");
     expect(s18).not.toContain("#115");
     expect(s18).not.toContain("빌드 자원");
-    expect(siteText).not.toContain("#115");
+    // C16 asks this of S18 only: the results section may name an issue number (e.g. I07-T05's result location)
   });
 
   it("the build-time table has a row for the instance scopes: the field, the file, how it gets in and the public default", () => {
