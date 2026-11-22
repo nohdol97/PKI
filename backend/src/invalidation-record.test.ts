@@ -123,17 +123,19 @@ describe("invalidate.record", () => {
     const res = await status();
     expect(res.status).toBe(200);
     const body = routes.status.response.parse(res.body);
-    expect(body.invalidations).toEqual([
-      {
-        changeSeq,
-        sourceId: saved.sourceId,
-        changeKind: "user-deleted",
-        // relation-double removed all three rows; nothing was left for insight-double
-        removedByKind: { "relation-double": 3, "insight-double": 0 },
-        recomputedByKind: { "relation-double": 0, "insight-double": 1 },
-        at: AT,
-      },
-    ]);
+    expect(body.invalidations).toEqual({
+      recent: [
+        {
+          changeSeq,
+          sourceId: saved.sourceId,
+          changeKind: "user-deleted",
+          // relation-double removed all three rows; nothing was left for insight-double
+          removedByKind: { "relation-double": 3, "insight-double": 0 },
+          recomputedByKind: { "relation-double": 0, "insight-double": 1 },
+          at: AT,
+        },
+      ],
+    });
 
     const record = JSON.stringify(db.all("SELECT * FROM invalidations"));
     const response = JSON.stringify(res.body);
@@ -144,6 +146,8 @@ describe("invalidate.record", () => {
   });
 
   it("is an empty list before any propagation", async () => {
-    expect(routes.status.response.parse((await status()).body).invalidations).toEqual([]);
+    expect(routes.status.response.parse((await status()).body).invalidations).toEqual({
+      recent: [],
+    });
   });
 });

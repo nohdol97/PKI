@@ -221,7 +221,11 @@ export interface RegistryOptions {
   now?: () => string;
 }
 
-/** Layer order, then within a layer a kind before the kinds it references. */
+/**
+ * Canonical kinds first, then projection-storage kinds (their jobs are registered
+ * last, I04-R2, after the tombstone, R12), each in layer order; within a layer a
+ * kind runs before the kinds it references.
+ */
 function phaseOrder(kinds: readonly DerivativeKind[]): DerivativeKind[] {
   const byName = new Map<string, DerivativeKind>();
   for (const k of kinds) {
@@ -241,10 +245,16 @@ function phaseOrder(kinds: readonly DerivativeKind[]): DerivativeKind[] {
       if (target.layer !== k.layer) {
         throw new Error(`derivative kind ${k.kind} references ${r} of another layer`);
       }
+      if (target.storage !== k.storage) {
+        throw new Error(`derivative kind ${k.kind} references ${r} of another storage`);
+      }
     }
   }
-  return LAYERS.flatMap((layer) => {
-    const pending = kinds.filter((k) => k.layer === layer);
+  const stages = (["canonical", "projection"] as const).flatMap((storage) =>
+    LAYERS.map((layer) => ({ storage, layer })),
+  );
+  return stages.flatMap(({ storage, layer }) => {
+    const pending = kinds.filter((k) => k.storage === storage && k.layer === layer);
     const ordered: DerivativeKind[] = [];
     while (pending.length > 0) {
       // ready: no pending kind still points at it

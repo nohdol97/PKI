@@ -405,15 +405,15 @@ function createDerivativeRegistry(o: { kinds: readonly DerivativeKind[]; policy:
 
 `SourceChange`, `ScopePolicy`, `atLeastAsStrict`, `commitDerived`의 모양(`CommitDerived`, `DerivedItem`, `CommitResult`, `ScopePolicyDrop`), `canonicalTransaction`과 `CanonicalTx`, `applyTombstone`·`liftTombstone`의 모양(`ApplyTombstone`, `LiftTombstone`, `TombstoneWrite`, `TombstoneOutcome`)은 spec 블록과 같은 이름·인자로 같은 파일에 타입으로 있다. 본문은 뒤 작업이 채운다: `commitDerived`는 I04-T06(그 전에 I03-T04의 임시 함수가 같은 모양), tombstone 입구와 래퍼는 I04-T05, 장부 줄(`LedgerLineDraft`, 지금은 I04-R17의 목록대로 잠정)은 I04-T10, `ScopePolicy`의 기본 구현은 I04-T09다.
 
-- **등록.** 등록부는 `createDerivativeRegistry`로 한 번 만들고 실행 중에 바뀌지 않는다(목록이 고정된다). 만들 때 이름 중복, 모르는 층, 없는 종류나 다른 층을 가리키는 `references`, 같은 층의 순환, `canonical` 종류의 `permanentlyAbsent`를 거부한다. 실제 종류의 목록과 제품 구성은 I04-T03(정본 종류)·T04(투영 종류)가 만든다.
-- **두 단계 전파.** `propagate`는 받은 트랜잭션만 쓴다. 시작할 때 무효화 기록 한 행을 넣어 ID를 정하고, 1단계에서 모든 종류의 `affected`를 부른 뒤(아무것도 지우기 전), 2단계에서 층 순서대로 `invalidate`를 부른다. 같은 층에서는 다른 종류를 가리키는 종류가 먼저다. 끝나면 종류마다 지운 수와 다시 계산한 수(0 포함)를 그 행에 적는다. 종류가 음수나 정수가 아닌 수를 돌려주면 오류이고, 부르는 쪽의 트랜잭션이 기록까지 되돌린다.
-- **무효화 기록**(스키마 v10 `invalidations`). 변경 순번(전파를 시작할 때의 값), 원본의 내부 ID, 변경 종류(tombstone이면 그 사유), 종류별 수, 시각. 제목·본문·인용문·외부 식별자는 넣지 않는다. 상태 API의 `invalidations`가 최근 20건을 새것부터 돌려준다.
+- **등록.** 등록부는 `createDerivativeRegistry`로 한 번 만들고 실행 중에 바뀌지 않는다(목록이 고정된다). 만들 때 이름 중복, 모르는 층, 없는 종류나 다른 층을 가리키는 `references`, 같은 층의 순환, `canonical` 종류의 `permanentlyAbsent`, 실행 위치가 다른 종류를 가리키는 `references`를 거부한다. 실제 종류의 목록과 제품 구성은 I04-T03(정본 종류)·T04(투영 종류)가 만든다.
+- **두 단계 전파.** `propagate`는 받은 트랜잭션만 쓴다. 시작할 때 무효화 기록 한 행을 넣어 ID를 정하고, 1단계에서 모든 종류의 `affected`를 부른 뒤(아무것도 지우기 전), 2단계에서 `invalidate`를 부른다. 순서는 `canonical` 종류 전부를 층 순서로, 그 다음 `projection` 종류 전부를 층 순서로다(층이 `projection`이 아닌 투영 종류도 정본 종류 뒤). 같은 층·같은 실행 위치 안에서는 다른 종류를 가리키는 종류가 먼저다. 끝나면 종류마다 지운 수와 다시 계산한 수(0 포함)를 그 행에 적는다. 종류가 음수나 정수가 아닌 수를 돌려주면 오류이고, 부르는 쪽의 트랜잭션이 기록까지 되돌린다.
+- **무효화 기록**(스키마 v10 `invalidations`). 변경 순번(전파를 시작할 때의 값), 원본의 내부 ID, 변경 종류(tombstone이면 그 사유), 종류별 수, 시각. 제목·본문·인용문·외부 식별자는 넣지 않는다. 상태 API는 `invalidations: { recent }`로 최근 20건을 새것부터 돌려준다. 범위 정책으로 버린 수 `invalidations.scopePolicyDrops`는 I04-T09가 같은 객체에 더한다.
 - **읽기 검사 `visible`.** 계보의 모든 version이 저장되어 있고 tombstone에 덮이지 않았으며, 계보 원본들의 범위를 `ScopePolicy.allows`가 그 용도에 허용하는 ref만 순서대로 남긴다. 계보가 없는 행은 정책만 본다. 읽기 경로에 붙이는 것은 I04-T08이다.
 - **범위 `scopesOf`.** 파생물의 범위는 저장하지 않고 계보 원본들의 `sources.access_scope`에서 계산하며, 서로 다른 값만 돌려준다. 저장 형식이 아직 글자 하나이므로 JSON 문자열 배열이면 정렬·중복 제거한 배열로, 아니면 그 글 하나의 배열로, 비어 있으면 `null`로 읽는다(잠정. I01이 정규화한 배열의 저장 형식을 정하면 이 읽기를 고친다).
 - **등록되지 않은 종류**의 ref를 `visible`·`scopesOf`·`lineage`에 넘기면 `UnregisteredDerivativeError`로 거부한다.
 - **엔진의 `SourceVersionRef`와 다르다.** 5.3절 KnowledgeEngine 규격의 같은 이름은 어댑터 경계의 모양(`sourceId`가 글자)이고, 등록부의 것은 정본 SQL이 쓰는 숫자 ID다. 투영 종류가 둘 사이를 옮긴다(지금의 `projections.ts`처럼 `String(sourceId)`).
 
-**계약 테스트 묶음**(`packages/testkit`의 `derivativeKindContract`). 모든 종류는 자기 테스트 파일에서 이 묶음을 실행한다. 경우는 I04 spec "무효화 계약 테스트 묶음"의 ①~⑦이다: ① 그 원본만의 계보인 행이 사라짐 ② 다른 원본의 계보가 남은 행은 남음 ③ 계보 없는 행은 남음 ④ 같은 변경을 두 번 부르면 두 번째는 0건 ⑤ `lineage`가 fixture가 기록한 원본과 같음 ⑥ 낡은 입력이 `{ status: 'stale' }`이나 `StaleFenceError`로 거부되고 아무것도 쓰이지 않음 ⑦ `dataPaths` 아래 파일에 카나리가 없음. 종류가 공유 행이나 계보 없는 행을 가질 수 없으면(예: 원본 version은 한 원본의 것) 미리 밝히고, 그 경우와 경로가 없는 종류의 ⑦은 "해당 없음"(건너뜀)으로 보고된다. 통과한 것으로 세지 않는다.
+**계약 테스트 묶음**(`packages/testkit`의 `derivativeKindContract`). 모든 종류는 자기 테스트 파일에서 이 묶음을 실행한다. 경우는 I04 spec "무효화 계약 테스트 묶음"의 ①~⑦이다: ① 그 원본만의 계보인 행이 사라짐 ② 다른 원본의 계보가 남은 행은 남음 ③ 계보 없는 행은 남음 ④ 같은 변경을 두 번 부르면 두 번째는 0건 ⑤ `lineage`가 fixture가 기록한 원본과 같음 ⑥ 낡은 입력이 `{ status: 'stale' }`이나 `StaleFenceError`로 거부되고 아무것도 쓰이지 않음 ⑦ `dataPaths` 아래 파일에 카나리가 없음. 종류가 공유 행이나 계보 없는 행을 가질 수 없으면(예: 원본 version은 한 원본의 것) 미리 밝히고, 그 경우와 경로가 없는 종류의 ⑦은 "해당 없음"(건너뜀)으로 보고된다. 통과한 것으로 세지 않는다. 밝힌 것과 fixture가 어긋나면(없다고 밝히고 행을 주면) 모든 경우가 실패하고, ②·③을 해당 없음으로 밝힐 수 있는 종류는 I04 spec의 닫힌 목록(원본 version·키워드 색인, 근거, 엔진·벡터 투영)뿐이다.
 
 ## 6. 수집에서 Insight까지
 
@@ -540,3 +540,4 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | 2026-11-21 | 사용자 확인 표에 "기본 Provider를 누가 정하는가" 행 추가(위임으로 정한 잠정 결정: 언제나 사용자가 고르고 저절로 고르지 않음, 다시 열 조건 포함)와 표 앞의 한 문장 | 사용자 확인이 필요한 결정 | V01-T10 독립 검토 B F7·D1 |
 | 2026-11-21 | 4절 저장 표에 CLI 실행 임시 폴더(`cli-runs/`) 행 추가 | 4절 | V01-T10 재검토 B R2-1 |
 | 2026-11-22 | 5.6절 "파생물 등록부 — 무효화 계약" 추가(I04-T01에서 확정한 규격: 등록, 두 단계 전파, 무효화 기록, `visible`, `scopesOf`, 계약 테스트 묶음). 5절 머리말에 5.6절의 위치를 적음 | 5절 | I04-R18: 확정된 `DerivativeKind` 규격을 5절 새 소절로 옮긴다 |
+| 2026-11-22 | 5.6절 고침: 투영 종류는 층과 상관없이 정본 종류 뒤에 실행, 실행 위치가 다른 `references` 거부, 상태 API의 모양 `invalidations: { recent }`와 T09의 `scopePolicyDrops`, 계약 묶음의 해당 없음 검사와 닫힌 목록 | 5.6절 | I04-T01 독립 검토 F2·F3·F4 |

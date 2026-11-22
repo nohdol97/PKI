@@ -37,7 +37,7 @@ export interface DerivativeContractFixture<Db> {
   rows: {
     /** Its lineage holds versions of `a` only. */
     onlyA: ContractDerivedRef;
-    /** Its lineage holds versions of `a` and `b`; null exactly where `has.shared` is false. */
+    /** Its lineage holds versions of `a` and `b`; null exactly where `has.shared` is false (checked both ways). */
     shared: ContractDerivedRef | null;
     /** No lineage at all (a user's own value); null exactly where `has.withoutLineage` is false. */
     withoutLineage: ContractDerivedRef | null;
@@ -91,6 +91,12 @@ async function withFixture<Db>(
 ): Promise<void> {
   const fx = await subject.setup();
   try {
+    // a declared-absent row that the fixture does provide would let ② or ③ be skipped
+    for (const name of ["shared", "withoutLineage"] as const) {
+      if (!subject.has[name] && fx.rows[name] !== null) {
+        throw new Error(`the subject declares no ${name} row but its fixture has one`);
+      }
+    }
     await body(fx);
   } finally {
     await fx.close?.();
@@ -229,15 +235,34 @@ export const DERIVATIVE_CONTRACT_CASES: readonly DerivativeContractCase[] = [
   },
 ];
 
+/** The test functions the suite registers with (vitest's, or a recorder in the suite's own tests). */
+export interface ContractRegistrar {
+  describe(title: string, body: () => void): void;
+  it(title: string, body: () => Promise<void>): void;
+  skip(title: string, body: () => never): void;
+}
+
+const VITEST: ContractRegistrar = {
+  describe: (title, body) => describe(title, body),
+  it: (title, body) => it(title, body),
+  skip: (title, body) => it.skip(title, body),
+};
+
 export function derivativeKindContract<Db>(
   name: string,
   subject: DerivativeContractSubject<Db>,
+  registrar: ContractRegistrar = VITEST,
 ): void {
-  describe(`derivatives.contract: ${name} (${subject.kind.kind})`, () => {
+  registrar.describe(`derivatives.contract: ${name} (${subject.kind.kind})`, () => {
     for (const c of DERIVATIVE_CONTRACT_CASES) {
-      if (c.applies(subject)) it(`${c.id} ${c.title}`, () => c.run(subject));
-      // e.g. ⑦ for a kind with only an in-memory implementation: reported, not passed
-      else it.skip(`${c.id} ${c.title}: not applicable`, () => {});
+      if (c.applies(subject)) registrar.it(`${c.id} ${c.title}`, () => c.run(subject));
+      // e.g. ⑦ for a kind with only an in-memory implementation: reported as
+      // skipped, never as passed; the body fails if it is ever run as a test
+      else {
+        registrar.skip(`${c.id} ${c.title}: not applicable`, () => {
+          throw new Error(`${c.id} is not applicable to ${subject.kind.kind}; it must not pass`);
+        });
+      }
     }
   });
 }

@@ -10,6 +10,7 @@ export {
   DERIVATIVE_CONTRACT_CASES,
   derivativeKindContract,
   type ContractDerivativeKind,
+  type ContractRegistrar,
   type ContractDerivedRef,
   type ContractSourceVersionRef,
   type DerivativeContractCase,

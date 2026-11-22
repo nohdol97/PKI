@@ -24,7 +24,7 @@ describe("contract schemas", () => {
         provider: { state: "not-implemented" },
         embedding: { state: "not-implemented" },
         vectorIndex: { state: "not-implemented" },
-        invalidations: [],
+        invalidations: { recent: [] },
       }).success,
     ).toBe(true);
     expect(routes.status.response.safeParse({ backend: { state: "ready" } }).success).toBe(false);
@@ -40,12 +40,15 @@ describe("contract schemas", () => {
       recomputedByKind: { insights: 1 },
       at: "2026-11-22T00:00:00.000Z",
     };
-    expect(invalidations.safeParse([record]).success).toBe(true);
-    expect(invalidations.safeParse([{ ...record, changeKind: "deleted" }]).success).toBe(false);
-    expect(invalidations.safeParse([{ ...record, removedByKind: { facts: -1 } }]).success).toBe(
+    const of = (r: object) => ({ recent: [r] });
+    expect(invalidations.safeParse(of(record)).success).toBe(true);
+    // the list sits under `recent`; I04-T09 adds `scopePolicyDrops` beside it
+    expect(invalidations.safeParse([record]).success).toBe(false);
+    expect(invalidations.safeParse(of({ ...record, changeKind: "deleted" })).success).toBe(false);
+    expect(invalidations.safeParse(of({ ...record, removedByKind: { facts: -1 } })).success).toBe(
       false,
     );
-    expect(invalidations.safeParse([{ ...record, sourceId: 0 }]).success).toBe(false);
+    expect(invalidations.safeParse(of({ ...record, sourceId: 0 })).success).toBe(false);
   });
 
   it("states an unavailable component's reason (V01-R5, R15)", () => {

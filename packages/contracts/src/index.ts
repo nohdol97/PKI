@@ -71,8 +71,12 @@ export const StatusResponseSchema = z.object({
   provider: ComponentStatusSchema,
   embedding: EmbeddingStatusSchema,
   vectorIndex: ComponentStatusSchema,
-  /** The latest invalidation records, newest first (I04-R4; Activity shows them, I03-T11). */
-  invalidations: z.array(InvalidationSchema),
+  /**
+   * I04-R4; Activity shows it (I03-T11). `recent`: the latest records, newest
+   * first. I04-T09 adds `scopePolicyDrops` (how many items the scope policy
+   * dropped) beside `recent`, with the table it counts.
+   */
+  invalidations: z.object({ recent: z.array(InvalidationSchema) }),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 

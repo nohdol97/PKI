@@ -306,6 +306,30 @@ describe("derivative registry: the list is checked once, and fixed", () => {
     expect(make(kinds)).toThrow(message);
   });
 
+  it("runs every projection-storage kind after all canonical kinds, whatever its layer", () => {
+    const registry = make([
+      sqlDouble("engine", "projection"),
+      sqlDouble("graph-index", "knowledge", { storage: "projection" }),
+      sqlDouble("delivery", "delivery"),
+      sqlDouble("relation", "knowledge"),
+    ])();
+    expect(registry.kinds.map((k) => k.kind)).toEqual([
+      "relation",
+      "delivery",
+      "graph-index",
+      "engine",
+    ]);
+  });
+
+  it("refuses a reference between a canonical and a projection kind", () => {
+    expect(
+      make([
+        sqlDouble("graph-index", "knowledge", { storage: "projection", references: ["relation"] }),
+        sqlDouble("relation", "knowledge"),
+      ]),
+    ).toThrow(/storage/);
+  });
+
   it("cannot be changed after it is made", () => {
     const registry = make([sqlDouble("x", "item")])();
     expect(Object.isFrozen(registry.kinds)).toBe(true);
