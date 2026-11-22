@@ -248,6 +248,11 @@ export {
   type UserEntry,
 } from "./semantic-user.ts";
 export {
+  describeKnowledgeSchema,
+  type KnowledgeSchemaEntry,
+  type KnowledgeSchemaList,
+} from "./knowledge-schema.ts";
+export {
   applyOntologyChange,
   checkOntologyChange,
   factValueFit,
@@ -261,6 +266,7 @@ export {
   type AutomatedActor,
   type Cardinality,
   type ElementKind,
+  type ElementOrigin,
   type ElementRule,
   type OntologyAction,
   type OntologyActionOutcome,

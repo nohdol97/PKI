@@ -9,6 +9,7 @@ import {
   ImportRequestSchema,
 } from "./import-record.ts";
 import { REJECT_CODES } from "./connector.ts";
+import { KNOWLEDGE_PLACES } from "./knowledge-schema.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
@@ -18,6 +19,7 @@ export type * from "./vector-index.ts";
 export * from "./cell-grammar.ts";
 export * from "./connector.ts";
 export * from "./import-record.ts";
+export * from "./knowledge-schema.ts";
 export * from "./provider.ts";
 export * from "./secrets.ts";
 export * from "./site-scopes.ts";
@@ -956,7 +958,7 @@ export const OntologyRuleSchema = z.discriminatedUnion("elementKind", [
   z.strictObject({
     elementKind: z.literal("fact-kind"),
     itemTypes: OntologyTypeListSchema,
-    valueType: z.enum(["date", "text", "surface-form"]),
+    valueType: z.enum(["date", "text", "surface-form", "identifier"]),
     cardinality: z.enum(["one", "many"]),
   }),
   z.strictObject({
@@ -1009,6 +1011,7 @@ export const OntologyListResponseSchema = z.object({
       rule: OntologyRuleSchema,
       status: SemanticStatusSchema,
       edition: z.int().positive(),
+      origin: z.enum(["seed", "user", "source-proposed"]),
     }),
   ),
 });
@@ -1067,6 +1070,25 @@ export const OntologyHistoryResponseSchema = z.object({
       basisVersion: z.int().positive().nullable(),
       batch: z.int().positive().nullable(),
       revertsSeq: z.int().positive().nullable(),
+    }),
+  ),
+});
+
+/**
+ * The knowledge-schema catalogue (S02-R25): the edition and, for every name of the catalogue, where it is
+ * stored, whether it can be used now (a `verified` type definition exists; `null` for a name that has no type
+ * definition) and whether the stored rule is the catalogue's (`null` likewise; a missing definition is `false`).
+ * Names only: no source text can be in it.
+ */
+export const KnowledgeSchemaResponseSchema = z.object({
+  edition: z.int().positive(),
+  entries: z.array(
+    z.object({
+      category: z.enum(["knowledge-type", "relation-type", "fact-kind"]),
+      name: z.string(),
+      place: z.enum(KNOWLEDGE_PLACES),
+      usable: z.boolean().nullable(),
+      ruleMatches: z.boolean().nullable(),
     }),
   ),
 });
@@ -1269,6 +1291,11 @@ export const routes = {
     path: "/api/semantic/undo",
     request: SemanticRefRequestSchema,
     response: SemanticOutcomeSchema,
+  },
+  knowledgeSchema: {
+    method: "GET",
+    path: "/api/knowledge-schema",
+    response: KnowledgeSchemaResponseSchema,
   },
   ontology: { method: "GET", path: "/api/ontology", response: OntologyListResponseSchema },
   ontologyCheck: {
