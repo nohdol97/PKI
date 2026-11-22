@@ -456,17 +456,18 @@ describe("docs.connector-sdk: shape of the text", () => {
     expect(chapter(docText, 11)).toContain("| 항목 | 상태 |");
   });
 
-  it("chapter 11 names each tracked gap by its issue number; the fork registration (#113) is built and is no row", () => {
+  it("chapter 11 names each tracked gap by its issue number; the fork registration (#113) and the deferred ledger lines (#121) are built and are no row", () => {
     const eleven = chapter(docText, 11);
-    for (const issue of ["#116", "#121", "#162"]) expect(eleven, issue).toContain(issue);
+    for (const issue of ["#116", "#162"]) expect(eleven, issue).toContain(issue);
     // #114 is built (I06): the way to hand a Connector a credential is no row of chapter 11 any more
     expect(eleven).not.toContain("#114");
+    expect(eleven).not.toContain("#121");
     // #115 is built (I07): neither the chapter 11 table nor chapter 7's list of what is missing names it
     expect(eleven).not.toContain("#115");
     expect(chapter(docText, 7)).not.toContain("#115");
     expect(eleven).not.toContain("#113");
     expect(chapter(docText, 7)).not.toContain("#113");
-    expect(chapter(docText, 7)).toContain("#121");
+    expect(chapter(docText, 7)).not.toContain("#121");
   });
 
   it("fails when a chapter loses its recap", () => {
@@ -795,16 +796,13 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     }
   });
 
-  it("warns against restoring a backup with a build that lacks a kind, and points to the issue that tracks it", () => {
-    for (const sentence of [
-      "### 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다",
-      "모르는 종류의 줄은 건너뛰면서도 적용 위치를 올린다.",
-      "그 사이에 건너뛴 삭제는 다시 적용되지 않고 지운 자료가 다음 동기화에서 되돌아올 수 있다.",
-      "고치는 일은 공용 저장소의 #121이 추적한다.",
-    ]) {
-      expect(seven, sentence).toContain(sentence);
-    }
-    expect(chapter(docText, 11)).toContain("(7장, #121)");
+  it("I04-C12 no longer warns against restoring with a build that lacks a kind: the waiting deletion is applied when the kind returns", () => {
+    expect(seven).not.toContain("수집기 종류를 뺀 빌드로 백업을 복원하지 않는다");
+    expect(seven).not.toContain("#121");
+    expect(chapter(docText, 11)).not.toContain("수집기 종류를 뺀 빌드로 복원한 백업");
+    const sentence = seven.split("\n").find((l) => l.includes("그 종류가 돌아온 빌드를 시작할 때"));
+    expect(sentence).toBeDefined();
+    expect(sentence).toContain("다시 적용한다");
   });
 
   it("lists every cause of `unavailable` in the outcome table's row (chapter 5)", () => {

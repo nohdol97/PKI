@@ -138,7 +138,9 @@ export const dataProtectionText = (status: RouteResponse<"status">["dataProtecti
     );
   }
   if (ledger.unrecoverable > 0) {
-    notes.push(`다시 적용하지 못한 삭제 ${ledger.unrecoverable}건(연결 정보 없음)`);
+    notes.push(
+      `다시 적용하지 못한 삭제 ${ledger.unrecoverable}건(이 빌드에 그 수집기가 없거나 연결 정보가 없습니다. 수집기가 돌아오면 시작할 때 다시 적용합니다)`,
+    );
   }
   if (ledger.ignoredLines > 0) {
     notes.push(`읽지 못해 무시한 삭제 장부 줄 ${ledger.ignoredLines}개`);
