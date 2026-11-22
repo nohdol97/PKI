@@ -3,7 +3,15 @@
 // code point span. The DB is filled by the product pipeline with the fixture
 // double (v02-seed.e2e.ts), so what the routes read is what extraction wrote.
 import { ErrorResponseSchema, routes } from "@pki/contracts";
-import { saveInsight, type SqlDriver } from "@pki/storage";
+import {
+  addEvidence,
+  insertItem,
+  registerConnectorInstance,
+  saveFact,
+  saveInsight,
+  saveSourceRecord,
+  type SqlDriver,
+} from "@pki/storage";
 import { send } from "@pki/testkit";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -253,5 +261,79 @@ describe("request validation", () => {
       });
       expect(res.status).toBe(401);
     }
+  });
+});
+
+// I01-R29 (spec "T07이 넘기는 것"): both evidence answers carry the locator of the
+// block holding the span start. Blocks reach a version through the canonical store
+// (the JSONL path has no blocks until I01-T05), so the rows are written directly.
+describe("evidence locator (I01-T07)", () => {
+  it("returns the block's locator in the Insight's evidence list and the source view, null in a gap", async () => {
+    await start(["plain"]);
+    registerConnectorInstance(db, "c-locator", "test-fixtures");
+    saveSourceRecord(db, "c-locator", {
+      externalId: "doc",
+      title: "합성 PDF",
+      body: "🙂 첫 쪽 본문 둘째 쪽 본문",
+      blocks: [
+        { start: 0, end: 8, locator: { format: "pdf", page: 1 } },
+        { start: 9, end: 16, locator: { format: "pdf", page: 2 } },
+      ],
+    });
+    const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    const attrs = {
+      epistemic: "explicit",
+      status: "candidate",
+      validAt: null,
+      observedAt: "2026-11-21T00:00:00Z",
+    } as const;
+    const x = insertItem(db, { ...attrs, type: "Project", name: "XL" });
+    const y = insertItem(db, { ...attrs, type: "System", name: "YL" });
+    const fact = saveFact(db, { ...attrs, itemId: x, kind: "target_date", value: "2026-12-05" });
+    const onPage2 = addEvidence(db, {
+      target: { factId: fact.id },
+      sourceVersionId: versionId,
+      start: 9,
+      end: 11,
+      quote: "둘째",
+    });
+    const inGap = addEvidence(db, {
+      target: { factId: fact.id },
+      sourceVersionId: versionId,
+      start: 8,
+      end: 9,
+      quote: " ",
+    });
+    saveInsight(
+      db,
+      { rule: "dependency_delay", xItemId: x, yItemId: y },
+      { state: "active", summary: "위험(추론)", evidenceIds: [onPage2, inGap] },
+    );
+    const insights = routes.insights.response.parse((await call("insights")).body).insights;
+    const insight = insights.find((i) => i.summary === "위험(추론)");
+    const { evidence } = routes.insightEvidence.response.parse(
+      (await call("insightEvidence", { insightId: insight?.id })).body,
+    );
+    expect(evidence.map((e) => [e.id, e.locator])).toEqual([
+      [onPage2, { format: "pdf", page: 2 }],
+      [inGap, null],
+    ]);
+    const shown = routes.evidenceSource.response.parse(
+      (await call("evidenceSource", { evidenceId: onPage2 })).body,
+    );
+    expect(shown).toMatchObject({ start: 9, end: 11, locator: { format: "pdf", page: 2 } });
+    const gap = routes.evidenceSource.response.parse(
+      (await call("evidenceSource", { evidenceId: inGap })).body,
+    );
+    expect(gap.locator).toBeNull();
+  });
+
+  it("is null for the fixture evidence, whose versions have no blocks", async () => {
+    await start(["plain"]);
+    const [insight] = routes.insights.response.parse((await call("insights")).body).insights;
+    const { evidence } = routes.insightEvidence.response.parse(
+      (await call("insightEvidence", { insightId: insight?.id })).body,
+    );
+    expect(evidence.map((e) => e.locator)).toEqual([null, null, null]);
   });
 });

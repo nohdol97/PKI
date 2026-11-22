@@ -2,6 +2,7 @@
 // both import these; TypeScript types come from z.infer, JSON Schema from z.toJSONSchema.
 import { z } from "zod";
 import type { EmbeddingEgress } from "./embedding.ts";
+import { NativeLocatorSchema } from "./connector.ts";
 import { ImportJsonlRequestSchema, ImportJsonlResponseSchema } from "./import-record.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
@@ -426,6 +427,8 @@ const EvidenceSummarySchema = z.object({
   sourceVersionId: z.int().positive(),
   version: z.int().positive(),
   current: z.boolean(),
+  /** I01-R29: the locator of the block holding the span's start, null without one. */
+  locator: NativeLocatorSchema.nullable(),
 });
 export const InsightEvidenceResponseSchema = z.object({
   insight: InsightSummarySchema,
@@ -445,6 +448,8 @@ export const EvidenceSourceResponseSchema = z.object({
   quote: z.string(),
   start: z.int().nonnegative(),
   end: z.int().nonnegative(),
+  /** I01-R29: computed on read from the version's blocks; null without blocks or in a gap. */
+  locator: NativeLocatorSchema.nullable(),
   sourceVersion: z.object({
     id: z.int().positive(),
     version: z.int().positive(),

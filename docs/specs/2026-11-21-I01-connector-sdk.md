@@ -587,6 +587,14 @@ flowchart TD
 7. **자리 표시 목록.** `SITE_PLACEHOLDERS`(`site/README.md` 하나). 목록의 파일은 일반 파일이어야 하고, 스크립트 확장자가 아니며, `#!`로 시작하지 않는다. `site/`의 다른 파일은 읽지 않는다.
 8. **변이 넷과 임시 복사본.** 테스트가 검사 대상과 `site/`를 OS 임시 폴더에 복사하고, 그 복사본의 `backend/src/adapters/`에 파일 하나씩을 더해 각각의 코드가 나오는지 본다: 허용 목록 밖 패키지의 정적 import(`import-not-allowed`), 동적 `import()`(`dynamic-import`), `require`(`require`), 전역 `fetch`(`network-global`). 같은 복사본의 `site/connectors/`에 `fetch`와 네트워크 패키지를 쓰는 파일을 두면 통과한다. 저장소 트리에는 쓰지 않는다.
 
+**T07이 넘기는 것**(I01-T07에서 정한 것. **잠정**: spec이 비워 둔 곳을 고른 것이며, 바꿀 때는 이 절과 `storage/src/evidence-view.test.ts`의 "evidence locator"와 `backend/src/evidence-api.test.ts`의 "evidence locator"를 함께 고친다). 테스트 ID `evidence.locator`는 이 두 묶음이다.
+
+1. **정본 함수와 API 응답.** 근거를 읽는 정본 함수는 V02-T10이 둔 `storage/src/evidence-view.ts`의 둘이다. `readEvidenceSource`(근거 하나가 가리키는 version, 구간, 인용문)와 `readInsightEvidence`(Insight의 근거 목록)가 각각 `locator: NativeLocator | null`을 더 돌려준다. API는 `POST /api/evidence/source`의 응답과 `POST /api/insights/evidence`의 근거 줄에 같은 이름의 필드가 생겼다(`@pki/contracts`의 `EvidenceSourceResponseSchema`·`InsightEvidenceResponseSchema`, 둘 다 **필수이고 null 허용**이라 응답 검사에서 빠진 필드는 거부된다). 새 `EvidenceView`(규격 v2 절)의 값(`sourceVersionId`, `version`, `span`, `quote`, `locator`)은 이 두 응답에 이미 흩어져 있어 **모양이 다른 새 읽기 함수를 따로 만들지 않았다**(잠정. 근거의 현재 응답 모양을 바꾸지 않고 필드만 더하는 쪽이 화면과 시험을 덜 흔든다). `EvidenceViewSchema`는 규격 단위의 모양으로 남고 아직 읽는 쪽이 없다.
+2. **계산.** 근거 행의 `source_version_id`가 가리키는 version의 `blocks`(JSON, I01-T02가 더한 열)에서 `start_offset`을 품은 block(`start <= 시작 < end`, 코드 포인트, 끝은 제외)의 locator를 돌려준다. block이 없거나(열이 비어 있음) 시작이 빈틈이면 null이다. 구간이 다음 block으로 이어져도 **시작이 든 block의 것**이다. 근거 행에는 저장하지 않으므로 마이그레이션이 없다(스키마는 v16 그대로). 쓰기 쪽의 정렬·겹침 거부(`invalid-blocks`, `blocksValid`)는 I01-T03(레코드 단위 검증)이 맡는다. 그 전까지 저장소는 block을 받은 그대로 두므로(`saveSourceRecord`) 읽을 때는 다시 검사하지 않고, 겹친 block이 들어오면 처음 맞는 block을 쓴다.
+3. **지난 근거.** 계산은 언제나 **그 근거가 가리키는 version**의 block으로 한다. 새 version이 들어와도 지난 근거의 locator는 이전 version의 block으로 계산된다(원본의 최신 version의 block이 아니다).
+4. **화면.** 화면(`apps/web`)은 locator를 아직 그리지 않는다(잠정. R29는 응답과 정본 함수만 요구한다). 화면 시험의 응답 대역에는 `locator: null`을 더했다. 화면에서 보이려면 V02-T10의 원본 보기에 형식별 문구("3쪽", "시트 요약 B7")를 더하는 작업이 따로 필요하다.
+5. **시험의 한계.** JSONL 가져오기는 T05 전까지 block을 싣지 못하므로 API 시험은 정본 저장 함수(`saveSourceRecord`)로 block 있는 version을 직접 써서 읽는다. 가져오기 fixture 근거는 모두 block이 없어 locator가 null임을 확인한다. 형식 여덟 가지는 저장소 시험이 합성 block으로 각각 확인한다.
+
 같이 진행할 수 있는 작업은 다음과 같다.
 - T01 뒤: T04, T09. T02는 T01과 I04의 tombstone·해시 작업(I04-T05, I04-T07)을 함께 기다린다.
 - T02 뒤: T06(I04-T09도 기다림), T07. T03은 T02와 T04를 함께 기다린다.
@@ -828,3 +836,5 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 | 2026-11-22 | "T02가 넘기는 것" 추가(잠정): 받아들이는 판정의 입구 둘(`saveSourceRecord`·`saveScopeChange`, `acceptChange`)과 결과 이름, 스키마 v16(열만 더함, 번호는 머지 순서), 순서 없는 레코드와 내용 hash의 block 포함, 범위의 `undefined`/`null`과 `created`의 범위 변경은 전파하지 않음, 문을 지난 뒤 tombstone이 남는 것, tombstone 사건의 두 `last_revision`, 동기화 경로의 임시 모양과 V02 가져오기에서 관찰되는 바뀜 셋, 쓰는 곳이 없어진 V02 삭제 경로, 카나리 ⑤ | 작업 분해(T02가 넘기는 것), 스키마 표, 기준별 증명 테스트 | I01-T02 구현 |
 | 2026-11-22 | T02 재작업 반영: 쓰는 곳이 없어진 V02 삭제 경로를 지우고 시험을 `seedLegacyTombstone`·`purgeSource`·`userDeleteWithNotice`로 옮김("T02가 넘기는 것" 10), `acceptChange`가 단일 입구가 아니라 `created` 뒤 전파·통지·작업 등록은 호출한 쪽의 일임을 바로잡음(1), `staleTombstone` 수의 담당을 T03·T05 행과 8항에 적음 | 작업 분해(T02가 넘기는 것, T03·T05 행) | I01-T02 검토 F1·F3·F5 |
 | 2026-11-22 | T02 재작업 2 반영: 시험 지원 파일을 `*.test-support.ts` 이름 규칙으로 옮겨 lint와 묶음 검사가 제품 쪽 import를 막게 함("T02가 넘기는 것" 10) | 작업 분해(T02가 넘기는 것 10) | I01-T02 재검토 R1 |
+| 2026-11-22 | "T07이 넘기는 것" 추가(잠정): 근거를 읽는 정본 함수 둘(`readEvidenceSource`, `readInsightEvidence`)과 근거 API 두 응답에 필수·null 허용 `locator`(시작이 든 block, 빈틈·block 없음은 null, 읽을 때 계산, 마이그레이션 없음), 지난 근거는 가리키는 version의 block으로 계산, 새 `EvidenceView` 읽기 함수는 따로 만들지 않음, 화면은 아직 그리지 않음 | 작업 분해(T07이 넘기는 것) | I01-T07 구현 |
+| 2026-11-22 | T07 검토 반영: "T07이 넘기는 것" 2의 block 검증 책임을 I01-T03으로 바로잡고(그 전까지는 처음 맞는 block), 지난 근거가 목록 읽기에서도 자기 version의 block을 쓰는지와 코드 포인트 경계, `EvidenceView` 모양 일치를 시험으로 고정 | 작업 분해(T07이 넘기는 것 2) | I01-T07 독립 검토 F1~F3, W1 |

@@ -38,6 +38,7 @@ describe("SourceView", () => {
             quote,
             start,
             end,
+            locator: null,
             sourceVersion: {
               id: 1,
               version: 1,
@@ -68,6 +69,7 @@ describe("SourceView", () => {
           quote,
           start,
           end: start + Array.from(quote).length,
+          locator: null,
           sourceVersion: { id: 3, version: 2, latestVersion: 2, title: "제목", body },
         }}
       />,
@@ -85,6 +87,7 @@ describe("SourceView", () => {
           quote: "x",
           start: 5,
           end: 99,
+          locator: null,
           sourceVersion: { id: 3, version: 1, latestVersion: 1, title: "제목", body: "짧은 본문" },
         }}
       />,
@@ -119,6 +122,7 @@ const source = (version: number, latestVersion: number) => ({
   quote: "가",
   start: 0,
   end: 1,
+  locator: null,
   sourceVersion: { id: 3, version, latestVersion, title: "\u202e제목", body: "가나" },
 });
 
@@ -163,6 +167,7 @@ describe("bidi isolation of imported text", () => {
           sourceVersionId: 3,
           version: 2,
           current: true,
+          locator: null,
         }}
         onOpen={() => undefined}
       />,
@@ -181,6 +186,7 @@ describe("evidenceReducer", () => {
     sourceVersionId: 3,
     version: 1,
     current: true,
+    locator: null,
   });
   const evidence = [entry(7), entry(8)];
   const insight = (id: number) => ({
