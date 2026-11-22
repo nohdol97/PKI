@@ -434,8 +434,8 @@ describe("docs.connector-sdk (I05): chapter 7's check-code table equals what the
       site: {
         connectorKinds: { fork: kindOf("fork") },
         connectorInstances: [
-          { id: "a", kind: "fork", config: {} },
-          { id: "a", kind: "fork", config: {} },
+          { id: "a", kind: "fork", config: { first: true } },
+          { id: "a", kind: "fork", config: { first: false } },
         ],
       },
     },
@@ -511,7 +511,10 @@ describe("docs.connector-sdk (I05): chapter 7's check-code table equals what the
     expect(Object.keys(merge("kind-name-invalid").kinds)).not.toContain("Bad Name");
     expect(Object.keys(merge("kind-reserved").kinds)).not.toContain("jsonl-import");
     expect(merge("instance-id-invalid").instances.map((i) => i.id)).not.toContain("");
-    expect(merge("instance-id-duplicate").instances.filter((i) => i.id === "a")).toHaveLength(1);
+    // the first one is the one kept ("첫 것만 쓴다")
+    expect(merge("instance-id-duplicate").instances.filter((i) => i.id === "a")).toEqual([
+      { id: "a", kind: "fork", config: { first: true } },
+    ]);
     // an unknown kind stays in the set (it will be `unavailable`)
     expect(merge("instance-kind-unknown").instances.map((i) => i.id)).toContain("a");
   });

@@ -593,7 +593,7 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     );
     expect(seven).toContain("**문서의 절차이고 빌드가 강제하지 않는다.**");
     expect(seven).toContain("`pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다.");
-    expect(read("package.json")).toContain('"lint": "eslint . && prettier --check ."');
+    expect(read("package.json")).toContain('"lint": "eslint -c eslint.config.js . && prettier --check ."');
     // the check initializes with an empty config, so a collector that needs one ends 1 with its own message
     expect(seven).toContain("`site-check`는 **빈 설정(`{}`)으로** 초기화한다.");
     expect(seven).toContain("설정을 요구하는 수집기는 자기 설정 오류의 문구로 실패하고 1로 끝난다");
@@ -690,7 +690,9 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     for (const sentence of [
       "`backend/src`를 상대 경로, 절대 경로, `file:` 주소로 가져오거나 `@pki/backend/<하위 경로>`로 가져오는 것. 시험 파일도 마찬가지다.",
       "`site/`와 `packages/site-example/`의 파일에서는 인라인 설정(`// eslint-disable pki/module-boundary`, `/* eslint pki/module-boundary: … */`)이 효력이 없다.",
-      "**린트가 보지 않는 길이 넷 있다.** `tsconfig`의 `paths` 별칭, 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`다.",
+      "**린트가 보지 않는 길이 다섯 있다.** `tsconfig`의 `paths` 별칭, 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`, `package.json`의 `imports`(`#이름`)다.",
+      "`pnpm lint`는 저장소 루트의 `eslint.config.js` 하나만 쓴다(`eslint -c eslint.config.js`). 포크가 `site/` 아래에 둔 ESLint 설정 파일은 읽히지 않는다.",
+      "**`pnpm e2e`는 다르다. 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 지금 포크 모양에서 실패한다.** 공용 저장소의 I05-T06이 고친다.",
       "일부러 해야 닿는 길이고 린트는 막지 않는다. 포크의 코드 검토가 맡는다.",
     ]) {
       expect(seven, sentence).toContain(sentence);
@@ -749,6 +751,8 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
   it("states the trust boundary: not sandboxed, what the time limit cannot stop, the concurrent-initialize premise", () => {
     for (const sentence of [
       "정본 DB, 비밀 값 통로, 네트워크, 파일에 닿고 **가둬지지 않는다.**",
+      "데이터 폴더에 파일을 놓아 실행본이 그것을 코드로 읽게 할 길은 없다(실행 중 로더가 없다). 설치 폴더의 파일을 바꿀 수 있는 공격자는 실행본 자체를 바꿀 수 있으므로 이 장치의 범위 밖이다.",
+      "동기 멈춤은 포크의 코드 검토와 site-setup S27이, 포크 모듈을 읽는 도중의 예외는 포크의 `pnpm test`(조립 패키지의 부팅 테스트)와 S27이 맡는다.",
       "등록 검사와 시간 제한은 실수와 느린 초기화를 잡는 장치이지 격리가 아니다.",
       "막지 못하는 것: 만드는 함수나 `initialize`의 **동기 멈춤**",
       "**포크 모듈을 읽는 도중의 예외**",
@@ -819,6 +823,10 @@ describe("docs.connector-sdk (I05): ownership.md section 3 (I05-R23)", () => {
     for (const word of ["`pnpm-lock.yaml`", "`allowBuilds`", "`false` 줄", "#114", "#115", "배포처 전송 규칙", "묶을 Provider", "검증된 CLI 조합 목록", "데이터 등급 목록"]) {
       expect(exception, word).toContain(word);
     }
+    // the whole normative sentence (review F8): a `true`, or a licence to run the scripts, must turn it red
+    expect(exception).toContain(
+      "`pnpm-workspace.yaml`의 `allowBuilds`: 설치 스크립트가 있는 포크 의존성을 위해 더한 `false` 줄뿐이다(스크립트를 돌리지 않는다는 뜻이다). `packages:` 목록은 포함하지 않는다.",
+    );
     expect(exception).toContain("`packages:` 목록은 포함하지 않는다.");
     expect(exception).toContain("[ADR 0018](adr/0018-fork-registration-at-build-time.md)");
   });

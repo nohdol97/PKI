@@ -608,7 +608,7 @@ pnpm --filter @pki-site/composition site-check <종류>
 pnpm --filter @pki/desktop build
 ```
 
-- `pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다. 손으로 쓴 파일의 서식이 틀리면 `pnpm exec prettier --write site`로 맞춘다. `pnpm typecheck`는 저장소의 프로젝트와 `site/composition`, `site/connectors/*`의 `tsconfig.json`을 함께 본다. `site/` 아래 패키지에 `tsconfig.json`이 없으면 그 패키지 이름을 적어 실패한다. `pnpm test`는 공용 테스트 파일을 하나도 고치지 않은 채 포크 모양에서도 통과해야 한다(공용 시험이 `site/`가 있느냐로 갈리지 않게 되어 있다).
+- `pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다. 손으로 쓴 파일의 서식이 틀리면 `pnpm exec prettier --write site`로 맞춘다. `pnpm typecheck`는 저장소의 프로젝트와 `site/composition`, `site/connectors/*`의 `tsconfig.json`을 함께 본다. `site/` 아래 패키지에 `tsconfig.json`이 없으면 그 패키지 이름을 적어 실패한다. `pnpm test`는 공용 테스트 파일을 하나도 고치지 않은 채 포크 모양에서도 통과해야 한다(`site/`의 존재로 갈리는 코드는 저장소 루트를 인자로 받는다). **`pnpm e2e`는 다르다. 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 지금 포크 모양에서 실패한다.** 공용 저장소의 I05-T06이 고친다. 그때까지 포크 모양에서 공용 저장소의 e2e 통과를 기대하지 않는다.
 - 포크의 `site-check <종류>`는 위와 같은 판정을 등록의 종류(자리표시를 대체한 것 포함)에 한다. 모르는 종류는 사용법을 적고 2로 끝난다. 등록이 시작을 멈추는 위반을 가졌으면 그 코드와 건수를 표준 오류에 적고 1로 끝난다. 예시 패키지에서 `pnpm --filter @pki/site-example site-check <종류>`로 같게 돌려 볼 수 있다.
 - `pnpm --filter @pki/backend site-check <종류>`는 **공용 저장소의 명령**이다. 조립 패키지가 있는 저장소에서 실행하면 자리표시의 결과를 내지 않고, 그 패키지의 `package.json`의 `name`을 읽어 위의 포크 명령을 알린 뒤 2로 끝난다. 포크가 구현한 종류에 `미구현`이 나오는 오해를 막으려는 것이다.
 - `pnpm --filter @pki/desktop build`는 포크의 진입점을 묶어 설치본을 만든다. Windows 11 설치본으로 만들어 실행하는 확인은 site-setup S27이다.
@@ -665,9 +665,10 @@ pnpm --filter @pki/desktop build
 
 - 포크 패키지가 `@pki/backend`를 패키지 이름이 아닌 길로 가져오는 것: `backend/src`를 상대 경로, 절대 경로, `file:` 주소로 가져오거나 `@pki/backend/<하위 경로>`로 가져오는 것. 시험 파일도 마찬가지다. 가져올 수 있는 것은 패키지 진입점이 내보내는 `runShell`, `runSiteCheck`, `checkSiteRegistration`, `publicSite`와 타입 `SiteRegistration`·`SiteRegistrationCode`·`ConnectorFactory`·`ConnectorInstanceConfig`뿐이다. `bootBackend`와 서버를 띄우는 `startServer`는 내보내지 않는다. 그 옵션들은 등록 검사를 건너뛰기 때문이다.
 - 공용 패키지가 `@pki-site/*`를 가져오거나 의존성으로 적는 것(방향은 언제나 포크에서 공용으로다).
+- `pnpm lint`는 저장소 루트의 `eslint.config.js` 하나만 쓴다(`eslint -c eslint.config.js`). 포크가 `site/` 아래에 둔 ESLint 설정 파일은 읽히지 않는다. 그렇지 않으면 그 파일이 루트의 규칙을 통째로 대신하고 `pnpm lint`는 여전히 0으로 끝난다.
 - 파일 안의 주석으로 규칙을 끄거나 바꾸는 것. `site/`와 `packages/site-example/`의 파일에서는 인라인 설정(`// eslint-disable pki/module-boundary`, `/* eslint pki/module-boundary: … */`)이 효력이 없다.
 
-**린트가 보지 않는 길이 넷 있다.** `tsconfig`의 `paths` 별칭, 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`다. 모두 일부러 해야 닿는 길이고 린트는 막지 않는다. 포크의 코드 검토가 맡는다.
+**린트가 보지 않는 길이 다섯 있다.** `tsconfig`의 `paths` 별칭, 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`, `package.json`의 `imports`(`#이름`)다. 모두 일부러 해야 닿는 길이고 린트는 막지 않는다. 포크의 코드 검토가 맡는다.
 
 ### 빌드와 산출물
 
@@ -697,8 +698,8 @@ pnpm --filter @pki/desktop build
 포크의 수집기는 건물에 들어와 일하는 **직원**이지 손님이 아니다. 출입증 검사(등록 검사)와 회의 시간 제한(시간 제한)은 직원의 실수를 잡지만 직원이 마음먹고 하는 일을 막지는 못한다. 다만 비유와 달리 이 직원이 가져오는 서류(수집한 내용, 오류의 글)는 여전히 믿지 않는다. 스키마로 검사하고 오류의 글은 로그와 화면에 싣지 않는다.
 
 - 포크의 코드는 **빌드할 때 포크 소유자가 검토해 넣은, 믿는 코드**다. 백엔드와 같은 프로세스에서 같은 권한으로 돈다. 정본 DB, 비밀 값 통로, 네트워크, 파일에 닿고 **가둬지지 않는다.** 등록 검사와 시간 제한은 실수와 느린 초기화를 잡는 장치이지 격리가 아니다.
-- 막지 못하는 것: 만드는 함수나 `initialize`의 **동기 멈춤**(10초 제한이 끊지 못해 앱이 시작하지 못한다), **포크 모듈을 읽는 도중의 예외**(`runShell`이 불리기 전에 진입점이 끝난다. 셸은 기존의 시작 실패로 알린다), 수집기가 프로세스를 끝내거나 메모리를 다 쓰는 일, 제한을 넘긴 초기화가 뒤에서 계속 도는 일, 악의적인 포크 코드나 그 의존성. 앞의 둘은 포크의 `pnpm test`(조립 패키지의 부팅 테스트)와 site-setup S27의 실행 확인이 잡는다.
-- 설치 폴더나 데이터 폴더에 파일을 쓸 수 있는 누군가가 실행본에 코드를 끼워 넣을 길은 없다(실행 중 로더가 없다). 그 폴더 자체를 바꿀 수 있는 공격자는 이 장치의 범위 밖이다.
+- 막지 못하는 것: 만드는 함수나 `initialize`의 **동기 멈춤**(10초 제한이 끊지 못해 앱이 시작하지 못한다), **포크 모듈을 읽는 도중의 예외**(`runShell`이 불리기 전에 진입점이 끝난다. 셸은 기존의 시작 실패로 알린다), 수집기가 프로세스를 끝내거나 메모리를 다 쓰는 일, 제한을 넘긴 초기화가 뒤에서 계속 도는 일, 악의적인 포크 코드나 그 의존성. 동기 멈춤은 포크의 코드 검토와 site-setup S27이, 포크 모듈을 읽는 도중의 예외는 포크의 `pnpm test`(조립 패키지의 부팅 테스트)와 S27이 맡는다.
+- 데이터 폴더에 파일을 놓아 실행본이 그것을 코드로 읽게 할 길은 없다(실행 중 로더가 없다). 설치 폴더의 파일을 바꿀 수 있는 공격자는 실행본 자체를 바꿀 수 있으므로 이 장치의 범위 밖이다.
 
 ### 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다
 

@@ -153,7 +153,7 @@ describe("docs.site-setup (I05)", () => {
       "수집기 목록에 `ready`로 나오고 동기화하면 합성 자료가 원본으로 저장되는지 본다.",
       "`initialize`가 비동기로 끝나지 않는 인스턴스를 하나 더 등록한 빌드로 켜서 앱이 제한 시간(`INITIALIZE_TIMEOUT_MS`, 잠정 10초) 안에 시작하고 그 인스턴스만 `unavailable`인지 본다.",
       "동기 코드로 멈추는 수집기는 이 제한이 끊지 못하므로 일부러 넣지 않고, 수집기 코드 검토로 확인한다.",
-      "배포처에서 10초가 알맞은지 재서 값을 기록한다",
+      "배포처에서 10초가 알맞은지 재서 값을 기록하고, 맞지 않으면 [ownership.md 5절](ownership.md)의 방법으로 공용에 알린다(값은 공용 `backend/src/connectors.ts`의 `INITIALIZE_TIMEOUT_MS`이고 포크가 고치는 파일이 아니다).",
     ]) {
       expect(s27, sentence).toContain(sentence);
     }
