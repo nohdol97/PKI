@@ -3,6 +3,7 @@
 // evidence row points to. Nothing here writes. Resolved (and dirty) Insights are
 // hidden: not listed, and their evidence list is not read. A source is read by
 // evidence id whatever its Insight's state, while the evidence row exists.
+import type { Block, NativeLocator } from "@pki/contracts";
 import type { KnowledgeStatus } from "./knowledge.ts";
 import type { SqlDriver, SqlRow } from "./sql-driver.ts";
 
@@ -22,6 +23,8 @@ export interface InsightEvidenceRow {
   sourceVersionId: number;
   version: number;
   current: boolean;
+  /** I01-R29: the locator of the block of that version holding the span's start, else null. */
+  locator: NativeLocator | null;
 }
 
 export interface EvidenceSourceView {
@@ -30,6 +33,8 @@ export interface EvidenceSourceView {
   /** [start, end) in code points of `sourceVersion.body`. */
   start: number;
   end: number;
+  /** I01-R29: computed on read from the blocks of `sourceVersion`, never stored on the evidence. */
+  locator: NativeLocator | null;
   sourceVersion: {
     id: number;
     version: number;
@@ -37,6 +42,13 @@ export interface EvidenceSourceView {
     title: string;
     body: string;
   };
+}
+
+/** The locator of the block holding code point `start`; null for no blocks or a gap (I01-R29). */
+function locatorAt(blocksJson: unknown, start: number): NativeLocator | null {
+  if (typeof blocksJson !== "string") return null;
+  const blocks = JSON.parse(blocksJson) as Block[];
+  return blocks.find((b) => b.start <= start && start < b.end)?.locator ?? null;
 }
 
 const ACTIVE_INSIGHT = `SELECT i.id, i.epistemic, i.summary,
@@ -64,7 +76,7 @@ export function readInsightEvidence(
   if (!row) return undefined;
   const evidence = db
     .all(
-      `SELECT e.id, e.fact_id, e.quote, e.source_version_id, v.version, v.title,
+      `SELECT e.id, e.fact_id, e.quote, e.source_version_id, e.start_offset, v.version, v.title, v.blocks,
          coalesce(f.status, r.status) AS status,
          v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id) AS current
        FROM insight_evidence ie
@@ -84,6 +96,7 @@ export function readInsightEvidence(
       sourceVersionId: e.source_version_id as number,
       version: e.version as number,
       current: e.current === 1,
+      locator: locatorAt(e.blocks, e.start_offset as number),
     }));
   return { insight: insightOf(row), evidence };
 }
@@ -95,7 +108,7 @@ export function readEvidenceSource(
 ): EvidenceSourceView | undefined {
   const row = db.all(
     `SELECT e.id, e.quote, e.start_offset, e.end_offset, v.id AS version_id, v.version,
-       v.title, v.body,
+       v.title, v.body, v.blocks,
        (SELECT max(version) FROM source_versions WHERE source_id = v.source_id) AS latest
      FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
      WHERE e.id = ?`,
@@ -107,6 +120,7 @@ export function readEvidenceSource(
     quote: row.quote as string,
     start: row.start_offset as number,
     end: row.end_offset as number,
+    locator: locatorAt(row.blocks, row.start_offset as number),
     sourceVersion: {
       id: row.version_id as number,
       version: row.version as number,
