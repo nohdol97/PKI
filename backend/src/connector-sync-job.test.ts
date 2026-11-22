@@ -962,6 +962,23 @@ describe("review rework 1 (I03-T09 reviewer A)", () => {
     expect(job(queued.id).status).toBe("held"); // nothing was released after stop
   });
 
+  it("quit: stop resolves at once even when the recheck of an instance never settles", async () => {
+    const manager = {
+      list: (): ConnectorSummary[] => [{ id: "hung", kind: "k", state: "unavailable" }],
+      recheck: () => new Promise<never>(() => {}),
+    };
+    const upkeep = startCollectorUpkeep({
+      db,
+      manager,
+      scheduler: createScheduler({ db, clock, timeZone: () => "UTC" }),
+      runner: { wake: async () => {} },
+      intervalMs: 3_600_000,
+    });
+    const began = Date.now();
+    await upkeep.stop();
+    expect(Date.now() - began).toBeLessThan(500); // far under STOP_GRACE_MS: the abort ends the pass
+  });
+
   it("B-F3: a pass cut by stop does not go on to release ready instances", async () => {
     const queued = register("ready-one");
     db.run("UPDATE jobs SET status = 'held', reason = 'not-implemented' WHERE id = ?", [queued.id]);

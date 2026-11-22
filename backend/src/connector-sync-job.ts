@@ -219,6 +219,9 @@ export function releaseReadyCollectors(
   return released;
 }
 
+/** The longest `stop` waits for a pass under way. */
+export const STOP_GRACE_MS = 1_000;
+
 /** How long one instance's recheck may take before the pass goes on without it. */
 export const RECHECK_TIMEOUT_MS = 60_000;
 
@@ -351,7 +354,14 @@ export function startCollectorUpkeep(options: {
     stop: async () => {
       clearInterval(timer);
       stopping.abort();
-      await current;
+      // a pass ends at once on the abort; the grace bounds even a pass that does not, so quitting
+      // never waits on a Connector (its late result is dropped: the abort flag blocks every write)
+      let grace: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        current,
+        new Promise((resolve) => (grace = setTimeout(resolve, STOP_GRACE_MS))),
+      ]);
+      clearTimeout(grace);
     },
   };
 }
