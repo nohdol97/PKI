@@ -3,7 +3,7 @@
 // that violation alone; the public kinds are walked from the constant, never named here.
 import { CONNECTOR_SDK_VERSION, type Connector } from "@pki/contracts";
 import { describe, expect, it } from "vitest";
-import { SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
+import { SITE_CONNECTOR_KINDS } from "./public-kinds.ts";
 import { fixtureConnectors, productConnectors, type ConnectorSet } from "./composition.ts";
 import type { ConnectorFactory } from "./connectors.ts";
 import { PUBLIC_CONNECTOR_KINDS } from "./public-kinds.ts";

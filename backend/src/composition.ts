@@ -96,7 +96,8 @@ import {
 } from "./projection-jobs.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
-import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
+import { createSiteConnector } from "./adapters/site-connectors.ts";
+import { SITE_CONNECTOR_KINDS } from "./public-kinds.ts";
 import type { ServerOptions } from "./server.ts";
 
 /**
@@ -425,9 +426,6 @@ export function productRunner(
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";
-
-/** The placeholder kinds the product lists as not implemented; a registration may replace them (I05-R7). */
-export { SITE_CONNECTOR_KINDS };
 
 /** The product's Connector kinds: the site kinds, listed as not implemented (V01-R18). */
 export const connectorKinds = {

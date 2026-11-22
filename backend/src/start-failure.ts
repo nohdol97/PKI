@@ -1,6 +1,7 @@
 // What the backend tells the shell about a refused start (I04-R7): a fixed class,
 // never the error's message (it can carry a path or file text; V01-R13).
 import { LedgerReapplyError } from "@pki/knowledge-engine";
+import { errorClass } from "@pki/providers";
 import { IdentityKeyMissingError, LedgerUnavailableError } from "@pki/storage";
 import { UnregisteredAdapterError } from "./derivative-coverage.ts";
 import { ScopePolicyNotImplementedError, UnknownScopePolicyError } from "./scope-policy.ts";
@@ -51,9 +52,20 @@ export function startFailureReport(error?: unknown): StartFailureReport {
  * a registration that stops the start (fixed words and numbers, I05-R9).
  */
 export function startFailureLine(error: unknown): string {
-  if (error instanceof SiteRegistrationInvalidError)
-    return `backend start failed: ${error.message}`;
-  return error instanceof ScopePolicyNotImplementedError || error instanceof UnknownScopePolicyError
-    ? error.message
-    : `backend start failed: ${error instanceof Error ? error.name : typeof error}`;
+  try {
+    if (error instanceof SiteRegistrationInvalidError) {
+      return `backend start failed: ${error.message}`;
+    }
+    if (
+      error instanceof ScopePolicyNotImplementedError ||
+      error instanceof UnknownScopePolicyError
+    ) {
+      return error.message;
+    }
+    if (!(error instanceof Error)) return `backend start failed: ${typeof error}`;
+    // a project class that carries a reason is named as it is; any other name could be a thrower's own (W4)
+    return `backend start failed: ${startFailureReport(error).reason !== undefined ? error.name : errorClass(error)}`;
+  } catch {
+    return "backend start failed: other";
+  }
 }

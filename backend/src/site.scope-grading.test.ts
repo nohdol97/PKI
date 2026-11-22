@@ -95,6 +95,15 @@ async function importedWith(extra: Record<string, unknown>) {
   expect(res.status).toBe(200);
 }
 
+/** Waits until every job the import registered has left the queue, so "nothing was asked" is read after extraction ran or was held. */
+async function extractionSettled() {
+  await vi.waitFor(() => {
+    const jobs = (booted as NonNullable<typeof booted>).db.all("SELECT kind, status FROM jobs");
+    expect(jobs.length).toBeGreaterThan(0);
+    expect(jobs.every((j) => j.status !== "queued" && j.status !== "running")).toBe(true);
+  });
+}
+
 describe("site.scope-grading: the registration's mapping reaches the booted Broker (I05-R14)", () => {
   it("the Broker of the extraction asks the registration's mapping", async () => {
     await importedWith({ site: { scopeGrading: grading } });
@@ -105,7 +114,7 @@ describe("site.scope-grading: the registration's mapping reaches the booted Brok
   it("a registration without a mapping asks none: the public mapping answers", async () => {
     await importedWith({ site: {} });
     // the extraction ran or was held by now; nothing recorded because no recording mapping is bound
-    await new Promise((r) => setTimeout(r, 200));
+    await extractionSettled();
     expect(asked).toEqual([]);
   });
 

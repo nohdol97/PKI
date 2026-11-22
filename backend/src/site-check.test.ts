@@ -5,7 +5,7 @@
 // checkout gives the same results): the repository root is an argument.
 import { CONNECTOR_SDK_VERSION, type Connector } from "@pki/contracts";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -181,6 +181,37 @@ describe("runSiteCheck (I05-R1): the fork's own entry checks the registration's 
     },
   );
 
+  it("a registration that boot would refuse is not reported ok: the stopping codes and counts, exit 1 (security review W3)", async () => {
+    const { io, seen } = capture();
+    await runSiteCheck(
+      {
+        connectorKinds: { fork: () => connector },
+        connectorInstances: [
+          { id: "fixtures", kind: "fork", config: {} },
+          { id: "b", kind: "jsonl-import", config: {} },
+        ],
+      },
+      ["fork"],
+      io,
+    );
+    expect(seen.stdout).toEqual([]);
+    expect(seen.stderr).toEqual([
+      "site-registration-invalid instance-kind-reserved=1 instance-id-reserved=1",
+    ]);
+    expect(seen.code).toBe(1);
+  });
+
+  it("a registration with only dropped items is still checked as before", async () => {
+    const { io, seen } = capture();
+    await runSiteCheck(
+      { connectorKinds: { fork: () => connector, Bad: () => connector } },
+      ["fork"],
+      io,
+    );
+    expect(seen.stdout).toEqual(["fork: ok"]);
+    expect(seen.code).toBeUndefined();
+  });
+
   it("a kind whose name a public kind holds is not a site-check target", async () => {
     const { io, seen } = capture();
     await runSiteCheck(publicSite, ["test-fixtures"], io);
@@ -189,12 +220,23 @@ describe("runSiteCheck (I05-R1): the fork's own entry checks the registration's 
 });
 
 describe("the entry script", () => {
+  const script = resolve(import.meta.dirname, "site-check.ts");
+  const run = (kind: string) => spawnSync(process.execPath, [script, kind], { encoding: "utf8" });
+
   it("is wired to the decision: an unknown kind exits 2 in either shape of the checkout", () => {
-    const result = spawnSync(
-      process.execPath,
-      [resolve(import.meta.dirname, "site-check.ts"), "site-nope"],
-      { encoding: "utf8" },
-    );
-    expect(result.status).toBe(2);
+    expect(run("site-nope").status).toBe(2);
+  });
+
+  it("passes the kind argument on: a placeholder kind is neither a usage error nor a pass, in either shape (R25)", () => {
+    const result = run("site-mail");
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).not.toMatch(/^usage:/);
+    expect(result.stderr).toMatch(/미구현, 배포처 후속|site\/composition/);
+  });
+
+  it("takes the repository root two folders above itself and the arguments after the script", () => {
+    const text = readFileSync(script, "utf8");
+    expect(text).toContain('resolve(import.meta.dirname, "../..")');
+    expect(text).toContain("process.argv.slice(2)");
   });
 });

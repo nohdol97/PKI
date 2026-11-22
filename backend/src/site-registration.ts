@@ -9,9 +9,13 @@
 import { CONNECTOR_KIND_PATTERN, MAX_INSTANCE_ID_LENGTH, type Connector } from "@pki/contracts";
 import { log, SCOPE_CLASSES, type ScopeGrading } from "@pki/providers";
 import type { ScopePolicy } from "@pki/storage";
-import { productConnectors, SITE_CONNECTOR_KINDS, type ConnectorSet } from "./composition.ts";
+import { productConnectors, type ConnectorSet } from "./composition.ts";
 import type { ConnectorFactory, ConnectorInstanceConfig } from "./connectors.ts";
-import { isPublicInstanceId, PUBLIC_CONNECTOR_KINDS } from "./public-kinds.ts";
+import {
+  isPublicInstanceId,
+  PUBLIC_CONNECTOR_KINDS,
+  SITE_CONNECTOR_KINDS,
+} from "./public-kinds.ts";
 
 /** The fork's part of the product; every field is optional and the empty object is the public repository's. */
 export interface SiteRegistration {
@@ -189,6 +193,27 @@ export function checkSiteRegistration(
   return violations;
 }
 
+/** How many of each of `codes` the violations hold, in the order of `codes`, those with a count only. */
+function countCodes<C extends SiteRegistrationCode>(
+  violations: readonly SiteRegistrationCode[],
+  codes: readonly C[],
+): { code: C; count: number }[] {
+  return codes
+    .map((code) => ({ code, count: violations.filter((v) => v === code).length }))
+    .filter((c) => c.count > 0);
+}
+
+/**
+ * The error a registration that boot would refuse gives, or undefined (`site-check` reports it too, so
+ * a registration that cannot start is never reported ok).
+ */
+export function stoppingError(
+  violations: readonly SiteRegistrationCode[],
+): SiteRegistrationInvalidError | undefined {
+  const stops = countCodes(violations, STOPPING_CODES);
+  return stops.length > 0 ? new SiteRegistrationInvalidError(stops) : undefined;
+}
+
 /**
  * The start's use of a registration (I05-R9, R12): the set to run with. The violations that leave
  * their item out are logged once per code with their count; the two that stop the start log the same and
@@ -196,16 +221,12 @@ export function checkSiteRegistration(
  */
 export function resolveSiteRegistration(site: SiteRegistration, base: ConnectorSet): ConnectorSet {
   const { connectors, violations } = mergeSiteRegistration(site, base);
-  const counted = <C extends SiteRegistrationCode>(codes: readonly C[]) =>
-    codes
-      .map((code) => ({ code, count: violations.filter((v) => v === code).length }))
-      .filter((c) => c.count > 0);
-  const stops = counted(STOPPING_CODES);
+  const stops = countCodes(violations, STOPPING_CODES);
   if (stops.length > 0) {
     for (const { code, count } of stops) log("site-registration-invalid", { code, count });
     throw new SiteRegistrationInvalidError(stops);
   }
-  for (const { code, count } of counted(DROPPED_CODES)) {
+  for (const { code, count } of countCodes(violations, DROPPED_CODES)) {
     log("site-registration-rejected", { code, count });
   }
   return connectors;

@@ -2,14 +2,15 @@
 // come from one module, and every kind or id the public composition points use is in it. A public
 // change that adds a kind or an instance without touching the module fails here.
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
-import { SYNTHETIC_CONNECTOR_KINDS } from "@pki/providers";
+import { SYNTHETIC_CONNECTOR_KIND_LIST } from "@pki/providers";
 import { describe, expect, it } from "vitest";
-import { SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
 import { fixtureConnectors, productConnectors } from "./composition.ts";
+import { readFileSync } from "node:fs";
 import {
   isPublicInstanceId,
   PUBLIC_CONNECTOR_KINDS,
   PUBLIC_INSTANCE_ID_PREFIXES,
+  SITE_CONNECTOR_KINDS,
 } from "./public-kinds.ts";
 
 const isPlaceholder = (name: string) => (SITE_CONNECTOR_KINDS as readonly string[]).includes(name);
@@ -30,8 +31,9 @@ describe("site.public-kinds: the kinds the public code uses are all in PUBLIC_CO
   });
 
   it("every kind the Broker trusts as synthetic", () => {
-    expect([...SYNTHETIC_CONNECTOR_KINDS].length).toBeGreaterThan(0);
-    for (const kind of SYNTHETIC_CONNECTOR_KINDS) expect(PUBLIC_CONNECTOR_KINDS).toContain(kind);
+    expect(SYNTHETIC_CONNECTOR_KIND_LIST.length).toBeGreaterThan(0);
+    for (const kind of SYNTHETIC_CONNECTOR_KIND_LIST)
+      expect(PUBLIC_CONNECTOR_KINDS).toContain(kind);
   });
 
   it("holds no placeholder: a fork may replace those", () => {
@@ -68,5 +70,21 @@ describe("site.public-kinds: the public instance ids are answered by isPublicIns
     expect(isPublicInstanceId("jsonl-file:abc", new Set(), ["jsonl-file:"])).toBe(true);
     expect(isPublicInstanceId("jsonl-fil", new Set(), ["jsonl-file:"])).toBe(false);
     expect(isPublicInstanceId("xjsonl-file:abc", new Set(), ["jsonl-file:"])).toBe(false);
+  });
+});
+
+describe("site.public-kinds: the module is a leaf (security review F3)", () => {
+  const source = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8");
+
+  it("imports nothing from the composition root or an adapter, so a module the root imports can import it", () => {
+    expect(source("./public-kinds.ts")).not.toMatch(/from "\.\/(composition|adapters\/)/);
+  });
+
+  it("is where the placeholder kinds are defined, and the composition root re-exports nothing of them", () => {
+    expect(source("./public-kinds.ts")).toContain("export const SITE_CONNECTOR_KINDS");
+    expect(source("./composition.ts")).not.toMatch(/export \{ SITE_CONNECTOR_KINDS/);
+    expect(source("./adapters/site-connectors.ts")).not.toContain(
+      "export const SITE_CONNECTOR_KINDS",
+    );
   });
 });

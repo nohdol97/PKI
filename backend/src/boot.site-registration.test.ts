@@ -19,7 +19,7 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
+import { SITE_CONNECTOR_KINDS } from "./public-kinds.ts";
 import { bootBackend } from "./boot.ts";
 import { CANONICAL_DB_FILE, fixtureConnectors, openCanonicalDb } from "./composition.ts";
 import type { ConnectorFactory } from "./connectors.ts";

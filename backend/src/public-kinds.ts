@@ -4,7 +4,8 @@
 // they are listed: a public change that adds a kind or an instance adds it here, and
 // public-kinds.test.ts fails when it does not (I05-C14 ①). Placeholders (`site-*`) are not public
 // kinds: a fork replaces them by registering the same name.
-import { SITE_CONNECTOR_KINDS } from "./composition.ts";
+/** The placeholders' names: the fork's collectors go in their place (V01-R18, ownership.md). Here, not in an adapter, so any module can read them. */
+export const SITE_CONNECTOR_KINDS = ["site-mail", "site-messenger", "site-wiki"] as const;
 
 /** Every kind name the public code uses that is not a placeholder: the composition points', the import's, the test kind. */
 export const PUBLIC_CONNECTOR_KINDS: readonly string[] = ["jsonl-import", "test-fixtures"];

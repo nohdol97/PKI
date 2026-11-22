@@ -9,7 +9,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { productConnectors } from "./composition.ts";
 import { siteCheck } from "./connectors.ts";
-import { mergeSiteRegistration, publicSite, type SiteRegistration } from "./site-registration.ts";
+import {
+  mergeSiteRegistration,
+  publicSite,
+  stoppingError,
+  type SiteRegistration,
+} from "./site-registration.ts";
 
 /** Where the lines go and how the exit code is set; the process's own by default, the test's own in tests. */
 export interface SiteCheckIo {
@@ -54,7 +59,14 @@ export async function runSiteCheck(
   args: readonly string[],
   io: SiteCheckIo = processIo,
 ): Promise<void> {
-  const { kinds } = mergeSiteRegistration(site, productConnectors()).connectors;
+  const { connectors, violations } = mergeSiteRegistration(site, productConnectors());
+  const refused = stoppingError(violations);
+  if (refused) {
+    io.stderr(refused.message);
+    io.exitCode(1);
+    return;
+  }
+  const { kinds } = connectors;
   const kind = args[0] ?? "";
   const create = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
   if (!create) {

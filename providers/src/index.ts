@@ -21,7 +21,7 @@ export {
   type PrecheckResult,
   type RejectReason,
   type ScopeGrader,
-  SYNTHETIC_CONNECTOR_KINDS,
+  SYNTHETIC_CONNECTOR_KIND_LIST,
 } from "./broker.ts";
 export {
   publicScopeGrading,

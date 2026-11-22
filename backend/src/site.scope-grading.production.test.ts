@@ -99,6 +99,15 @@ async function importedWith(extra: Record<string, unknown>) {
   expect(res.status).toBe(200);
 }
 
+/** Waits until every job the import registered has left the queue, so "nothing was asked" is read after extraction ran or was held. */
+async function extractionSettled() {
+  await vi.waitFor(() => {
+    const jobs = (booted as NonNullable<typeof booted>).db.all("SELECT kind, status FROM jobs");
+    expect(jobs.length).toBeGreaterThan(0);
+    expect(jobs.every((j) => j.status !== "queued" && j.status !== "running")).toBe(true);
+  });
+}
+
 describe("site.scope-grading in a production build (I05-R14)", () => {
   it("the registration's mapping is asked, and the injection a test build honours is not", async () => {
     const { BUILD_KIND } = await import("@pki/providers");
@@ -110,7 +119,7 @@ describe("site.scope-grading in a production build (I05-R14)", () => {
 
   it("with no registration mapping the injection is ignored too: the public mapping answers", async () => {
     await importedWith({ scopeGrading: testGrading });
-    await new Promise((r) => setTimeout(r, 200));
+    await extractionSettled();
     expect(asked).toEqual([]);
   });
 });

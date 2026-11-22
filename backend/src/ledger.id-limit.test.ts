@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
+import { SITE_CONNECTOR_KINDS } from "./public-kinds.ts";
 import { bootBackend } from "./boot.ts";
 import {
   fixtureConnectorKinds,

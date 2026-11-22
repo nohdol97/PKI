@@ -50,3 +50,36 @@ describe("start.identity-key-text: startFailureReport", () => {
     expect(startFailureReport(undefined)).toEqual({ type: "failed" });
   });
 });
+
+describe("startFailureLine prints no name a thrown value controls (security review W4)", () => {
+  it("names a known class and anything else as `other`", () => {
+    class Crafted extends Error {
+      override name = "AKIA-looking-secret-name";
+    }
+    expect(startFailureLine(new Crafted("x"))).toBe("backend start failed: other");
+    expect(startFailureLine(new TypeError("x"))).toBe("backend start failed: TypeError");
+    expect(startFailureLine("a string")).toBe("backend start failed: string");
+  });
+
+  it("survives a value whose name getter throws or whose prototype trap throws", () => {
+    const getter = Object.assign(new Error("x"), {});
+    Object.defineProperty(getter, "name", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    expect(startFailureLine(getter)).toBe("backend start failed: other");
+    const proxy = new Proxy(new Error("x"), {
+      getPrototypeOf() {
+        throw new Error("boom");
+      },
+    });
+    expect(startFailureLine(proxy)).toBe("backend start failed: other");
+  });
+
+  it("keeps the name of the project's own classes that carry a reason", () => {
+    expect(startFailureLine(new IdentityKeyMissingError())).toBe(
+      "backend start failed: IdentityKeyMissingError",
+    );
+  });
+});
