@@ -116,7 +116,7 @@ export interface ExtractHandlerOptions {
    * The registry that names a candidate item's lineage and judges, with its policy, which sources
    * may be put together; default the entries' own (canonical-kinds.ts).
    */
-  registry?: Pick<DerivativeRegistry, "lineage" | "combinable">;
+  registry?: Pick<DerivativeRegistry, "lineage" | "combinable" | "visible">;
   now?: () => Date;
 }
 
@@ -341,7 +341,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     const candidateType = new Map<string, string>();
     const together: LineageRef[] = [own];
     const withheld: string[] = [];
-    for (const found of findCandidates(db, `${stored.title}\n${stored.body}`)) {
+    for (const found of findCandidates(db, `${stored.title}\n${stored.body}`, registry)) {
       const id = String(found);
       const lineage = registry.lineage(db, { kind: "item", id });
       if (registry.combinable(db, [...together, ...lineage])) {
