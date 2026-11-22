@@ -9,8 +9,8 @@
 // evidence again revives it (extraction.ts). The caller runs this in the
 // transaction that stores the version, right after storing it and before the
 // extraction is registered.
-import type { InsightKey, SqlDriver } from "@pki/storage";
-import { propagateCanonical } from "./canonical-kinds.ts";
+import type { DerivativeRegistry, InsightKey, SqlDriver } from "@pki/storage";
+import { derivativeRegistry, propagateCanonical } from "./canonical-kinds.ts";
 import type { RuleOutcome } from "./dependency-delay.ts";
 
 export interface Propagation {
@@ -21,13 +21,25 @@ export interface Propagation {
   insights: { key: InsightKey; outcome: RuleOutcome }[];
 }
 
-export function propagateNewVersion(db: SqlDriver, sourceId: number): Propagation {
-  return db.transaction(() => {
-    const version = db.all("SELECT max(version) AS v FROM source_versions WHERE source_id = ?", [
-      sourceId,
-    ])[0]?.v as number | null;
-    if (version === null) throw new Error(`source ${sourceId} has no version to propagate`);
-    const { report } = propagateCanonical(db, { kind: "new-version", sourceId, version });
-    return { ...report.superseded, insights: report.insights };
-  });
+export type PropagateNewVersion = (db: SqlDriver, sourceId: number) => Propagation;
+
+/** `propagateNewVersion` over a registry: the one the composition root builds (entries.ts). */
+export function createPropagateNewVersion(registry: DerivativeRegistry): PropagateNewVersion {
+  return (db, sourceId) =>
+    db.transaction(() => {
+      const version = db.all("SELECT max(version) AS v FROM source_versions WHERE source_id = ?", [
+        sourceId,
+      ])[0]?.v as number | null;
+      if (version === null) throw new Error(`source ${sourceId} has no version to propagate`);
+      const { report } = propagateCanonical(
+        db,
+        { kind: "new-version", sourceId, version },
+        undefined,
+        registry,
+      );
+      return { ...report.superseded, insights: report.insights };
+    });
 }
+
+export const propagateNewVersion: PropagateNewVersion =
+  createPropagateNewVersion(derivativeRegistry);

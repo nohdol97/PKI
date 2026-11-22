@@ -2,7 +2,8 @@
 // product (V01-R14, R15): the vector index, the embedder, the canonical storage
 // driver, the Connector kinds, the egress policy, the Providers, the Broker
 // with its execution gate, the job runner with its extract handler, and the
-// KnowledgeEngine with the notifications to it and the vector index. Entry points (dev.ts, shell.ts through boot.ts,
+// KnowledgeEngine with the notifications to it and the vector index, and the derivative registry
+// with the entries that run it (I04-T04). Entry points (dev.ts, shell.ts through boot.ts,
 // site-check.ts) build the backend from these.
 import type {
   EmbeddingProvider,
@@ -40,16 +41,24 @@ import {
   sweepStaleCliRuns,
 } from "@pki/providers/adapters";
 import {
+  createCanonicalEntries,
   createExtractHandler,
+  createProductRegistry,
   createProjections,
+  ENGINE_KIND,
   knowledgeCandidates,
+  NO_POLICY_YET,
+  VECTOR_KIND,
+  type CanonicalEntries,
+  type PermanentlyAbsent,
   type Projections,
 } from "@pki/knowledge-engine";
-import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
+import { createVisibleEngine, NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   dataDirectory,
   ensureDataDirectory,
   prepareCanonicalDb,
+  type DerivativeRegistry,
   type SqlDriver,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
@@ -70,6 +79,7 @@ import { computePolicyFingerprint } from "./held-release.ts";
 import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-runner.ts";
 import { createMaintenanceHandler } from "./maintenance.ts";
 import { MAINTENANCE_KIND } from "./scheduler.ts";
+import { projectionPorts } from "./projection-ports.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import {
   projectionHandlers,
@@ -98,6 +108,54 @@ export const MODELS_DIR = "models";
 /** The product's KnowledgeEngine: none is plugged in during Phase 1 (ADR 0003). */
 export function productEngine(): KnowledgeEngine {
   return new NullKnowledgeEngine();
+}
+
+/**
+ * The derivative registry of the product (I04-R1): the six canonical kinds and the two projections, the
+ * one place that builds it. `permanentlyAbsent` is the implementations' own, static fact: the null
+ * engine and the empty vector index never hold anything, so an unavailable error from them ends a
+ * removal as a skip; any other implementation (a sidecar that may be stopped) does not carry it.
+ * The scope policy is the placeholder until I04-T09 configures it.
+ */
+export function productRegistry(adapters: {
+  engine: KnowledgeEngine;
+  vectorIndex: VectorIndex;
+}): DerivativeRegistry {
+  const permanentlyAbsent: PermanentlyAbsent = {
+    ...(adapters.engine instanceof NullKnowledgeEngine ? { [ENGINE_KIND]: true as const } : {}),
+    ...(adapters.vectorIndex instanceof EmptyVectorIndex ? { [VECTOR_KIND]: true as const } : {}),
+  };
+  return createProductRegistry({ policy: NO_POLICY_YET, permanentlyAbsent });
+}
+
+/** The entries that store a change, delete a source or lift a tombstone through `registry`. */
+export function productEntries(registry: DerivativeRegistry): CanonicalEntries {
+  return createCanonicalEntries(registry);
+}
+
+/**
+ * The engine as the backend holds it (I04-R13): wrapped by the registry, so `relatedContext` shows
+ * only what `visible` allows. Everything that takes the product's engine takes this one.
+ */
+export function productVisibleEngine(
+  db: SqlDriver,
+  registry: DerivativeRegistry,
+  engine: KnowledgeEngine,
+): KnowledgeEngine {
+  return createVisibleEngine(engine, { db, registry });
+}
+
+/**
+ * The registered projection kinds as the ports the runner's `projection-remove` and
+ * `projection-rebuild` handlers run (I03-T10, I04-T04): one per kind of `registry`.
+ */
+export function productProjectionPorts(
+  db: SqlDriver,
+  registry: DerivativeRegistry,
+  adapters: { engine: KnowledgeEngine; vectorIndex: VectorIndex },
+  projections: Pick<Projections, "rebuild">,
+): ProjectionPorts {
+  return projectionPorts({ registry, db, ...adapters, projections });
 }
 
 /**
@@ -267,7 +325,7 @@ export function productRunner(
     /** Stamped on a job the Broker held (productCalls). */
     policyFingerprint?: () => string;
     /**
-     * The registered projection kinds as ports (I04-T04): given, the runner also runs
+     * The registered projection kinds as ports (productProjectionPorts): given, the runner also runs
      * `projection-remove` and `projection-rebuild` (projection-jobs.ts); none, those jobs wait.
      */
     projectionPorts?: ProjectionPorts;
@@ -277,11 +335,14 @@ export function productRunner(
      * `connector-sync`; none, those jobs wait.
      */
     connectors?: () => SyncManager;
+    /** The registry that names a candidate item's lineage (productRegistry); default `derivativeRegistry` (knowledge-engine canonical-kinds.ts). */
+    registry?: DerivativeRegistry;
   } = {},
 ): JobRunner {
   const { clock, engine, projections } = options;
   const handler = createExtractHandler({
     db,
+    ...(options.registry ? { registry: options.registry } : {}),
     ...(clock ? { now: () => new Date(clock.now()) } : {}),
     ...(engine
       ? {
@@ -370,7 +431,9 @@ export function fixtureConnectors(file: string): ConnectorSet {
  */
 export function productImporter(
   db: SqlDriver,
-  options: Pick<SyncOptions, "runner" | "projections" | "clock"> & { logger?: Logger } = {},
+  options: Pick<SyncOptions, "runner" | "projections" | "clock" | "entries"> & {
+    logger?: Logger;
+  } = {},
 ): JsonlImporter {
   const { logger = log, ...sync } = options;
   return (text) =>

@@ -66,7 +66,10 @@ describe("retention (I03-R21): ended jobs past 30 days are deleted", () => {
   });
 
   it("never deletes an unfinished job, however old its registration", () => {
-    const open = ["queued", "running", "retry", "held"].map((s) => job("maintenance", s, 90));
+    const open = [
+      ...["queued", "running", "retry", "held"].map((s) => job("maintenance", s, 90)),
+      ...["queued", "running", "retry", "held"].map((s) => job("projection-remove", s, 90)),
+    ];
     expect(purgeEndedJobs(db, NOW - 30 * DAY)).toBe(0);
     expect(open.every((j) => exists(j.id))).toBe(true);
   });

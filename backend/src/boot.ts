@@ -15,7 +15,7 @@ import type {
 } from "@pki/contracts";
 import type { Projections } from "@pki/knowledge-engine";
 import { BUILD_KIND, errorClass, log } from "@pki/providers";
-import type { SqlDriver } from "@pki/storage";
+import type { DerivativeRegistry, SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
   CANONICAL_DB_FILE,
@@ -25,10 +25,14 @@ import {
   productConnectors,
   productEgress,
   productEngine,
+  productEntries,
   productImporter,
+  productProjectionPorts,
   productProjections,
   productProviders,
+  productRegistry,
   productRunner,
+  productVisibleEngine,
   sweepCliRuns,
   cliRunsRoot,
   type ConnectorSet,
@@ -67,11 +71,13 @@ export interface BootOptions {
   providers?: readonly LLMProvider[];
   embedder?: EmbeddingProvider | null;
   /**
-   * The registered projection kinds as ports, for the runner's `projection-remove` and
-   * `projection-rebuild` handlers (I03-T10). I04-T04 passes the product's; without them
-   * those jobs wait, and the marks still register their rebuilds.
+   * Replaces the product's ports for the runner's `projection-remove` and `projection-rebuild`
+   * handlers (tests: a projection double). Default the registered kinds over the bound engine and
+   * vector index (composition.ts productProjectionPorts).
    */
   projectionPorts?: ProjectionPorts;
+  /** Replaces the product's registry (tests: a registry that differs from the default shows which paths receive it). */
+  registry?: DerivativeRegistry;
 }
 
 export interface BootedBackend {
@@ -79,6 +85,8 @@ export interface BootedBackend {
   db: SqlDriver;
   /** The Providers the Broker may call (productProviders). */
   providers: readonly LLMProvider[];
+  /** The KnowledgeEngine as the backend holds it: wrapped by the registry (I04-R13). */
+  engine: KnowledgeEngine;
   /** Tests wait on these: the notices queued, the jobs runnable. */
   projections: Pick<Projections, "drain">;
   runner: Pick<JobRunner, "wake">;
@@ -95,11 +103,24 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     options.providers ??
     productProviders(db, options.secrets, egress, cliRunsRoot(options.dataDir));
   const calls = productCalls(db, egress, { providers });
-  const engine = options.engine ?? productEngine();
+  const bound = options.engine ?? productEngine();
   const adapters = productAdapters(options.dataDir);
   if (options.vectorIndex) adapters.vectorIndex = options.vectorIndex;
   if (options.embedder !== undefined) adapters.embedder = options.embedder;
+  // the registry is built once, from the implementations bound; the backend holds the engine only as it wraps it (I04-R13)
+  const registry =
+    options.registry ?? productRegistry({ engine: bound, vectorIndex: adapters.vectorIndex });
+  const entries = productEntries(registry);
+  const engine = productVisibleEngine(db, registry, bound);
   const projections = productProjections(db, { engine, ...adapters });
+  const projectionPorts =
+    options.projectionPorts ??
+    productProjectionPorts(
+      db,
+      registry,
+      { engine, vectorIndex: adapters.vectorIndex },
+      projections,
+    );
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")
@@ -113,7 +134,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     policyFingerprint: calls.policyFingerprint,
     engine,
     projections,
-    ...(options.projectionPorts ? { projectionPorts: options.projectionPorts } : {}),
+    projectionPorts,
+    registry,
     // folded away from any other build (V01-T15); the runner honours it in a test build only
     ...(BUILD_KIND === "test" && options.testBuild?.jobs
       ? { testBuild: options.testBuild.jobs }
@@ -124,6 +146,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     runner,
     projections,
     clock,
+    entries,
   });
   late.manager = connectors;
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
@@ -141,8 +164,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     egress,
     secrets: options.secrets,
     calls,
-    importer: productImporter(db, { runner, projections, clock }),
-    projections,
+    importer: productImporter(db, { runner, projections, clock, entries }),
+    entries,
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),
   });
@@ -179,6 +202,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     },
     db,
     providers,
+    engine,
     projections,
     runner,
     scheduler,

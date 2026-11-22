@@ -33,7 +33,10 @@ export class InstanceBusyError extends Error {
 
 export type JsonlImporter = (text: string) => Promise<ImportJsonlResponse>;
 
-export interface ImportOptions extends Pick<SyncOptions, "runner" | "projections" | "clock"> {
+export interface ImportOptions extends Pick<
+  SyncOptions,
+  "runner" | "projections" | "clock" | "entries"
+> {
   /** The JSONL Connector, chosen by the composition point (composition.ts). */
   createConnector: () => Connector;
   /**
@@ -69,6 +72,7 @@ async function importInstance(
         ...(options.runner ? { runner: options.runner } : {}),
         ...(options.projections ? { projections: options.projections } : {}),
         ...(options.clock ? { clock: options.clock } : {}),
+        ...(options.entries ? { entries: options.entries } : {}),
         rescan: true,
         onRefused: (change, reason) => {
           const line = lineOf.get(externalIdOf(change)) as number;

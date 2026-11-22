@@ -125,7 +125,9 @@ function pipeline(hooks: { during?: ((request: StructuredRequest) => void) | und
 }
 
 const count = (table: string) => db.all(`SELECT count(*) AS n FROM ${table}`)[0]?.n as number;
-const jobStatuses = () => db.all("SELECT status, reason FROM jobs ORDER BY id");
+// the extraction jobs: a deletion also registers the projections' removal jobs (I04-R12), which no runner here runs
+const jobStatuses = () =>
+  db.all("SELECT status, reason FROM jobs WHERE kind = 'extract' ORDER BY id");
 const mailId = () =>
   findSourceId(db, MAIL.connector_instance_id as string, "", MAIL.external_id as string) as number;
 const written = () => [count("items"), count("facts"), count("relations"), count("evidence")];
@@ -195,7 +197,7 @@ describe("fence.fresh: the result of an extraction behind commitDerived", () => 
     // one wake drains the queue: K's discarded run, then its re-extraction
     expect(provider.requests).toHaveLength(3);
     const [, first, retry, ...rest] = db.all(
-      "SELECT id, target, status, reason FROM jobs ORDER BY id",
+      "SELECT id, target, status, reason FROM jobs WHERE kind = 'extract' ORDER BY id",
     );
     expect(first).toMatchObject({ status: "superseded", reason: "lineage-covered" });
     // exactly one re-extraction, under a distinct target, run with X gone (no candidate)

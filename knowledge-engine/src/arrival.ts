@@ -15,17 +15,15 @@ import type { Change } from "@pki/contracts";
 import {
   findSourceId,
   raiseLastRevision,
-  readChangeSeq,
   readLastRevision,
   readTombstoneState,
   saveScopeChange,
   saveSourceRecord,
   type CanonicalTx,
-  type SqlDriver,
+  type DerivativeRegistry,
 } from "@pki/storage";
-import { propagateCanonical } from "./canonical-kinds.ts";
-import type { ProjectionNotice } from "./projections.ts";
-import { applyTombstone } from "./tombstone-entry.ts";
+import { derivativeRegistry, propagateCanonical } from "./canonical-kinds.ts";
+import { tombstoneEntries } from "./tombstone-entry.ts";
 
 /** What one change did. Only `created`, `scope-updated` and `tombstoned` wrote anything. */
 export type Accepted =
@@ -33,27 +31,39 @@ export type Accepted =
   | { outcome: "scope-updated"; sourceId: number }
   | { outcome: "unchanged" | "stale" | "blocked" | "stale-tombstone" }
   | { outcome: "rejected"; code: "revision-conflict" }
-  /** `notice` is there when versions were purged (a deletion of nothing stored wakes nobody). */
-  | { outcome: "tombstoned"; sourceId: number; notice?: ProjectionNotice };
+  /** The purge's removals in the projections are jobs the tombstone's transaction registered (I04-R12). */
+  | { outcome: "tombstoned"; sourceId: number };
 
 export interface AcceptOptions {
   /** The change's scope is a user's own claim (an import, I01-R15). */
   scopeClaimed?: boolean;
 }
 
-const versionIdsOf = (db: SqlDriver, sourceId: number | undefined): number[] =>
-  sourceId === undefined
-    ? []
-    : db
-        .all("SELECT id FROM source_versions WHERE source_id = ? ORDER BY version", [sourceId])
-        .map((r) => r.id as number);
-
-export function acceptChange(
+export type AcceptChange = (
   tx: CanonicalTx,
   instanceId: string,
   change: Change,
   at: string,
-  options: AcceptOptions = {},
+  options?: AcceptOptions,
+) => Accepted;
+
+/** `acceptChange` over a registry: the one the composition root builds (entries.ts). */
+export function createAcceptChange(registry: DerivativeRegistry): AcceptChange {
+  const { applyTombstone } = tombstoneEntries(registry);
+  return (tx, instanceId, change, at, options = {}) =>
+    accept(registry, applyTombstone, tx, instanceId, change, at, options);
+}
+
+export const acceptChange: AcceptChange = createAcceptChange(derivativeRegistry);
+
+function accept(
+  registry: DerivativeRegistry,
+  applyTombstone: ReturnType<typeof tombstoneEntries>["applyTombstone"],
+  tx: CanonicalTx,
+  instanceId: string,
+  change: Change,
+  at: string,
+  options: AcceptOptions,
 ): Accepted {
   if (change.kind === "upsert") {
     const { record } = change;
@@ -87,6 +97,7 @@ export function acceptChange(
         tx,
         { kind: "scope-changed", sourceId: saved.sourceId, from: saved.from, to: saved.to },
         at,
+        registry,
       );
       return { outcome: "scope-updated", sourceId: saved.sourceId };
     }
@@ -103,6 +114,7 @@ export function acceptChange(
         tx,
         { kind: "scope-changed", sourceId: saved.sourceId, from: saved.from, to: saved.to },
         at,
+        registry,
       );
       return { outcome: "scope-updated", sourceId: saved.sourceId };
     }
@@ -125,7 +137,6 @@ export function acceptChange(
     last ?? 0,
     (found === undefined ? undefined : readTombstoneState(tx, found)?.lastRevision) ?? 0,
   );
-  const versionIds = versionIdsOf(tx, found);
   const result = applyTombstone(tx, {
     identity,
     reason: change.kind === "delete" ? "source-deleted" : "access-revoked",
@@ -134,19 +145,5 @@ export function acceptChange(
   });
   raiseLastRevision(tx, result.sourceId, lastRevision);
   if (result.outcome === "unchanged") return { outcome: "unchanged" };
-  return {
-    outcome: "tombstoned",
-    sourceId: result.sourceId,
-    ...(versionIds.length === 0
-      ? {}
-      : {
-          notice: {
-            kind: "removed" as const,
-            sourceId: result.sourceId,
-            version: result.coversVersion,
-            versionIds,
-            changeSeq: readChangeSeq(tx),
-          },
-        }),
-  };
+  return { outcome: "tombstoned", sourceId: result.sourceId };
 }

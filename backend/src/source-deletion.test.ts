@@ -6,7 +6,7 @@
 // with its item; a job leased or queued before the purge never writes; the
 // source cannot come back at or below its tombstone.
 import type { ChangeSet, Connector, StructuredRequest } from "@pki/contracts";
-import { userDeleteWithNotice } from "@pki/knowledge-engine";
+import { userDelete } from "@pki/knowledge-engine";
 import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
 import { findSourceId, readTombstoneState, writeSetting, type SqlDriver } from "@pki/storage";
 import { FakeProvider, fixtureExtraction } from "@pki/testkit";
@@ -196,7 +196,7 @@ const canariesIn = () =>
   Object.values(CANARY).filter((c) => storedFiles().some(([, bytes]) => bytes.includes(c)));
 
 const count = (table: string) => db.all(`SELECT count(*) AS n FROM ${table}`)[0]?.n as number;
-/** The user's deletion of the source with this id, as the screen's route does it (userDeleteWithNotice). */
+/** The user's deletion of the source with this id, as the screen's route does it (userDelete). */
 function deleteSource(
   target: SqlDriver,
   id: number,
@@ -206,7 +206,7 @@ function deleteSource(
     "SELECT connector_instance_id AS i, namespace AS n, external_id AS e FROM sources WHERE id = ?",
     [id],
   )[0];
-  return userDeleteWithNotice(
+  return userDelete(
     target,
     {
       connectorInstanceId: row?.i as string,
@@ -335,7 +335,16 @@ describe("delete.propagate", () => {
     await report("conn-v02-mail", "delete", MAIL.external_id as string);
     await runner.wake();
     expect(provider.requests).toHaveLength(0);
-    expect(db.all("SELECT status FROM jobs")).toEqual([{ status: "superseded" }]);
+    expect(db.all("SELECT status FROM jobs WHERE kind = 'extract'")).toEqual([
+      { status: "superseded" },
+    ]);
+    // the purge registered a removal for each projection (I04-R12); this runner has no ports bound, so they wait
+    expect(
+      db.all("SELECT target, status FROM jobs WHERE kind = 'projection-remove' ORDER BY target"),
+    ).toEqual([
+      { target: "engine", status: "queued" },
+      { target: "vectorIndex", status: "queued" },
+    ]);
   });
 
   it("discards the result of a job leased before the purge (its lease closed by the purge)", async () => {
@@ -351,7 +360,7 @@ describe("delete.propagate", () => {
     expect(provider.requests).toHaveLength(1);
     // the purge closed the running job (I04-R12, supersedeOpenJobs): its holder's
     // close no longer holds the lease, so nothing of its result is written
-    expect(db.all("SELECT status, reason FROM jobs")).toEqual([
+    expect(db.all("SELECT status, reason FROM jobs WHERE kind = 'extract'")).toEqual([
       { status: "superseded", reason: "source-closed" },
     ]);
     expect([count("items"), count("facts"), count("evidence")]).toEqual([0, 0, 0]);
@@ -380,7 +389,9 @@ describe("delete.propagate", () => {
     // whose source is gone, so commitDerived discarded all of it (assertLineage,
     // I04-R11) and closed the job superseded (lineage-covered). The one re-extraction
     // it queued ran with X no longer a candidate: K's own result, relation included.
-    const jobs = db.all("SELECT status, reason FROM jobs ORDER BY id DESC LIMIT 2");
+    const jobs = db.all(
+      "SELECT status, reason FROM jobs WHERE kind = 'extract' ORDER BY id DESC LIMIT 2",
+    );
     expect(jobs).toEqual([
       { status: "succeeded", reason: null },
       { status: "superseded", reason: "lineage-covered" },
@@ -415,7 +426,9 @@ describe("delete.propagate", () => {
     // X went with the mail, so the first result (a relation on X) was discarded whole
     // (superseded, lineage-covered); the re-extraction, X no longer a candidate, made
     // Z and a new X for the relation
-    expect(db.all("SELECT status, reason FROM jobs ORDER BY id DESC LIMIT 2")).toEqual([
+    expect(
+      db.all("SELECT status, reason FROM jobs WHERE kind = 'extract' ORDER BY id DESC LIMIT 2"),
+    ).toEqual([
       { status: "succeeded", reason: null },
       { status: "superseded", reason: "lineage-covered" },
     ]);

@@ -8,7 +8,15 @@ export {
 } from "./dependency-delay.ts";
 export { acceptChange, type Accepted, type AcceptOptions } from "./arrival.ts";
 export { applyTombstone, liftTombstone } from "./tombstone-entry.ts";
-export { CANONICAL_KINDS, derivativeRegistry, type CanonicalReport } from "./canonical-kinds.ts";
+export {
+  CANONICAL_KINDS,
+  createProductRegistry,
+  derivativeRegistry,
+  NO_POLICY_YET,
+  type CanonicalReport,
+} from "./canonical-kinds.ts";
+export { createCanonicalEntries, defaultEntries, type CanonicalEntries } from "./entries.ts";
+export { ENGINE_KIND, VECTOR_KIND, type PermanentlyAbsent } from "./projection-kinds.ts";
 export {
   createExtractHandler,
   EXTRACT_HOLD_TOO_LARGE,
@@ -23,7 +31,7 @@ export { propagateNewVersion, type Propagation } from "./propagation.ts";
 export {
   createProjections,
   PROJECTION_STALE_SETTINGS,
-  userDeleteWithNotice,
+  userDelete,
   vectorRefOf,
   versionNotice,
   type ProjectionName,
