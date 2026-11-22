@@ -11,6 +11,7 @@ import {
   ensureTombstoneSource,
   hashSourceIdentity,
   identityKey,
+  readConnectorKind,
   readTombstoneState,
   recordTombstone,
   recordTombstoneLift,
@@ -46,6 +47,7 @@ export function tombstoneEntries(registry: DerivativeRegistry): {
     if (outcome === "unchanged") return { outcome, sourceId, coversVersion };
     tx.queueLedgerLine({
       connectorInstanceId: w.identity.connectorInstanceId,
+      connectorKind: readConnectorKind(tx, w.identity.connectorInstanceId) as string,
       identityHash: identityKey(
         tx,
         w.identity.connectorInstanceId,

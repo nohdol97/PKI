@@ -98,5 +98,32 @@ export const LOCAL_PACK_HINT =
  * of earlier deletions' traces failed at this start (it starts after the backend's
  * database was prepared), and is tried again at the next one.
  */
-export const dataProtectionText = (status: RouteResponse<"status">["dataProtection"]) =>
-  status.legacyCleanup === "pending" ? "이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)" : "정상";
+export const dataProtectionText = (status: RouteResponse<"status">["dataProtection"]) => {
+  const { ledger } = status;
+  const notes: string[] = [];
+  if (status.legacyCleanup === "pending")
+    notes.push("이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)");
+  if (ledger.state === "degraded") {
+    notes.push("삭제 장부를 쓰지 못해 데이터 변경을 막았습니다(앱을 다시 시작하면 풀립니다)");
+  }
+  if (ledger.state === "missing-created") {
+    notes.push(
+      "삭제 장부가 없어 새로 만들었습니다. 백업 뒤의 삭제는 다시 수집해야 반영되며, 수집기가 전체 재스캔에서 삭제를 알리지 못하면 반영되지 않을 수 있습니다",
+    );
+  }
+  if (ledger.setAsideLedgers > 0) {
+    notes.push(
+      `다른 설치의 삭제 장부 ${ledger.setAsideLedgers}개(삭제 ${ledger.setAsideDeletions}건)는 적용하지 않고 옆에 두었습니다`,
+    );
+  }
+  if (ledger.unrecoverable > 0) {
+    notes.push(`다시 적용하지 못한 삭제 ${ledger.unrecoverable}건(연결 정보 없음)`);
+  }
+  if (ledger.ignoredLines > 0) {
+    notes.push(`읽지 못해 무시한 삭제 장부 줄 ${ledger.ignoredLines}개`);
+  }
+  if (ledger.reapplied > 0) {
+    notes.push(`시작할 때 삭제 ${ledger.reapplied}건을 다시 적용했습니다`);
+  }
+  return notes.length === 0 ? "정상" : notes.join(" / ");
+};

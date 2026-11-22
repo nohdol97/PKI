@@ -63,6 +63,7 @@ import type { AddressInfo } from "node:net";
 import type { ConnectorManager } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import { InstanceBusyError, type JsonlImporter } from "./jsonl-import.ts";
+import { ledgerStatus } from "./ledger-status.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -527,6 +528,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       dataProtection: {
         legacyCleanup:
           readSetting(options.db, LEGACY_CLEANUP_SETTING) === "done" ? "done" : "pending",
+        ledger: ledgerStatus(options.db, options.dataDirectory),
       },
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),

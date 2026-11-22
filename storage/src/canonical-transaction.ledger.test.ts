@@ -25,6 +25,7 @@ const P = "/data/tombstone-ledger.jsonl";
 const KEY = new Uint8Array(32).fill(7);
 const draft = (hash: string): LedgerLineDraft => ({
   connectorInstanceId: "c1",
+  connectorKind: "k1",
   identityHash: hash,
   coversVersion: 1,
   lastRevision: null,

@@ -18,6 +18,7 @@ import {
   readTombstoneState,
   registerConnectorInstance,
   saveSourceRecord,
+  ledgerOf,
   listInvalidations,
   purgeEndedJobs,
   type DerivativeRegistry,
@@ -362,5 +363,203 @@ describe("retention and the re-applied removals", () => {
     purgeEndedJobs(restored, Date.parse(AT) + 10 ** 12);
     expect(open()).toBe(before);
     restored.close();
+  });
+});
+
+describe("re-apply onto a database that lacks the line's connector instance", () => {
+  const expectDeletedAndSyncable = () => {
+    const db = live().db;
+    expect(db.all("SELECT count(*) AS n FROM tombstones")[0]?.n).toBe(1);
+    expect(versionsOf(db, "chat")).toBe(0);
+    // the instance is registered with its real kind, so a later sync of the same kind is not refused
+    expect(() => registerConnectorInstance(db, "c1", "test-fixtures")).not.toThrow();
+  };
+
+  it("a fresh database beside a ledger (the ledger's key is adopted): the instance is registered with its real kind and the deletion applies", async () => {
+    const db = seeded();
+    userDelete(db, identity(), AT);
+    db.close();
+    rmSync(join(dir, CANONICAL_DB_FILE));
+
+    await start();
+
+    expectDeletedAndSyncable();
+  });
+
+  it("a backup older than the instance that later had a deletion: the start goes on and the deletion applies", async () => {
+    const early = openCanonicalDb(dir);
+    early.exec(`VACUUM INTO '${join(dir, "backup.sqlite")}'`);
+    early.close();
+    const db = seeded();
+    userDelete(db, identity(), AT);
+    db.close();
+    copyFileSync(join(dir, "backup.sqlite"), join(dir, CANONICAL_DB_FILE));
+
+    await start();
+
+    expectDeletedAndSyncable();
+  });
+
+  it("a line written without a kind for an instance the database does not know is counted, its number taken, and the start goes on", async () => {
+    seeded().close();
+    const header = JSON.stringify({ t: "header", v: 1, key: "" });
+    const real = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n")[0] ?? header;
+    const line = JSON.stringify({
+      t: "line",
+      seq: 1,
+      i: "unknown-instance",
+      h: "00".repeat(32),
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: AT,
+      la: null,
+    });
+    writeFileSync(join(dir, LEDGER_FILE), `${real}\n${line}\n`);
+
+    await start();
+
+    const report = JSON.parse(
+      live().db.all("SELECT value FROM settings WHERE key = 'tombstone-ledger.report'")[0]
+        ?.value as string,
+    ) as { applied: number; unrecoverable: number };
+    expect(report).toMatchObject({ applied: 0, unrecoverable: 1 });
+    expect(readLedgerSeq(live().db)).toBe(1);
+  });
+});
+
+describe("a ledger started over existing tombstones", () => {
+  it("is seeded with them: after the ledger is lost, a later restore of an older database brings the deletion back no more", async () => {
+    const db = seeded();
+    db.exec(`VACUUM INTO '${join(dir, "backup.sqlite")}'`);
+    userDelete(db, identity(), AT);
+    db.close();
+    rmSync(join(dir, LEDGER_FILE));
+
+    await start();
+    expect(readFileSync(join(dir, LEDGER_FILE), "utf8").match(/"t":"line"/g)).toHaveLength(1);
+    await stop();
+    copyFileSync(join(dir, "backup.sqlite"), join(dir, CANONICAL_DB_FILE));
+    await start();
+
+    expect(versionsOf(live().db, "chat")).toBe(0);
+    expect(versionsOf(live().db, "mail")).toBe(1);
+  });
+
+  it("carries a lifted state as it is", async () => {
+    const db = seeded();
+    userDelete(db, identity(), AT);
+    const sourceId = readTombstoneState(db, 1)?.sourceId as number;
+    canonicalTransaction(db, (tx) => liftTombstone(tx, sourceId, "2026-11-23T00:00:00.000Z"));
+    db.close();
+    rmSync(join(dir, LEDGER_FILE));
+    await start();
+    const lines = readFileSync(join(dir, LEDGER_FILE), "utf8").trimEnd().split("\n").slice(1);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] as string)).toMatchObject({
+      la: "2026-11-23T00:00:00.000Z",
+      k: "test-fixtures",
+    });
+  });
+});
+
+describe("the status API's data protection item shows the ledger", () => {
+  const ledgerOfStatus = async () => {
+    const { port } = live().server;
+    const res = await send(port, routes.status.path, {
+      host: `127.0.0.1:${port}`,
+      authorization: `Bearer ${TOKEN}`,
+    });
+    return (res.body as { dataProtection: { ledger: unknown } }).dataProtection.ledger;
+  };
+  const OK = {
+    state: "ok",
+    reapplied: 0,
+    unrecoverable: 0,
+    ignoredLines: 0,
+    setAsideLedgers: 0,
+    setAsideDeletions: 0,
+  };
+
+  it("ok with zeros after an ordinary start", async () => {
+    seeded().close();
+    await start();
+    expect(await ledgerOfStatus()).toEqual(OK);
+  });
+
+  it("missing-created when the ledger file was gone", async () => {
+    seeded().close();
+    rmSync(join(dir, LEDGER_FILE));
+    await start();
+    expect(await ledgerOfStatus()).toEqual({ ...OK, state: "missing-created" });
+  });
+
+  it("the number of deletions re-applied at the start", async () => {
+    const db = seeded();
+    db.exec(`VACUUM INTO '${join(dir, "backup.sqlite")}'`);
+    userDelete(db, identity(), AT);
+    db.close();
+    copyFileSync(join(dir, "backup.sqlite"), join(dir, CANONICAL_DB_FILE));
+    await start();
+    expect(await ledgerOfStatus()).toEqual({ ...OK, reapplied: 1 });
+  });
+
+  it("the set-aside ledgers and their deletions, and still after the next start", async () => {
+    seeded().close();
+    const header = JSON.stringify({ t: "header", v: 1, key: "ab".repeat(32) });
+    const line = JSON.stringify({
+      t: "line",
+      seq: 1,
+      i: "c1",
+      k: "test-fixtures",
+      h: "00".repeat(32),
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: AT,
+      la: null,
+    });
+    writeFileSync(join(dir, LEDGER_FILE), `${header}\n${line}\n`);
+    await start();
+    expect(await ledgerOfStatus()).toMatchObject({ setAsideLedgers: 1, setAsideDeletions: 1 });
+    await stop();
+    await start();
+    expect(await ledgerOfStatus()).toEqual({ ...OK, setAsideLedgers: 1, setAsideDeletions: 1 });
+  });
+
+  it("a cut last line is counted as one ignored line", async () => {
+    seeded().close();
+    writeFileSync(
+      join(dir, LEDGER_FILE),
+      `${readFileSync(join(dir, LEDGER_FILE), "utf8")}{"t":"li`,
+    );
+    await start();
+    expect(await ledgerOfStatus()).toEqual({ ...OK, ignoredLines: 1 });
+  });
+
+  it("degraded while the ledger is locked", async () => {
+    seeded().close();
+    await start();
+    ledgerOf(live().db)?.lock();
+    expect(await ledgerOfStatus()).toEqual({ ...OK, state: "degraded" });
+  });
+
+  it("the unrecoverable lines of a ledger that carries no kind", async () => {
+    seeded().close();
+    const real = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n")[0];
+    const line = JSON.stringify({
+      t: "line",
+      seq: 1,
+      i: "unknown-instance",
+      h: "00".repeat(32),
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: AT,
+      la: null,
+    });
+    writeFileSync(join(dir, LEDGER_FILE), `${real}\n${line}\n`);
+    await start();
+    expect(await ledgerOfStatus()).toEqual({ ...OK, unrecoverable: 1 });
   });
 });

@@ -14,7 +14,9 @@ import {
   hashSourceIdentity,
   ledgerOf,
   LEDGER_REPORT_SETTING,
+  readConnectorKind,
   readLedgerSeq,
+  registerConnectorInstance,
   supersedeOpenJobs,
   writeLedgerSeq,
   writeSetting,
@@ -49,6 +51,8 @@ export interface ReapplyReport {
   applied: number;
   /** Of those, the lifts. */
   lifted: number;
+  /** Lines whose instance this database does not know and that carry no kind to register it with: counted, not applied (their numbers are taken). */
+  unrecoverable: number;
   /** Lines at or below the database's sequence, or repeating a sequence already applied. */
   skipped: number;
   /** The database's applied sequence after the run. */
@@ -66,8 +70,18 @@ export interface ReapplyReport {
 export type LedgerReapply = (db: SqlDriver) => ReapplyReport;
 
 export function createLedgerReapply(registry: DerivativeRegistry): LedgerReapply {
+  let unrecoverable = 0;
   const applyLine = (db: SqlDriver, line: LedgerLine): void =>
     void canonicalTransaction(db, (tx) => {
+      if (readConnectorKind(tx, line.connectorInstanceId) === undefined) {
+        // the source row needs its instance (a foreign key): the real kind, never a placeholder
+        if (line.connectorKind === null) {
+          writeLedgerSeq(tx, line.seq);
+          unrecoverable++;
+          return;
+        }
+        registerConnectorInstance(tx, line.connectorInstanceId, line.connectorKind);
+      }
       const sourceId = ensureSourceByHash(tx, line.connectorInstanceId, line.identityHash);
       const next: TombstoneState = {
         sourceId,
@@ -104,6 +118,7 @@ export function createLedgerReapply(registry: DerivativeRegistry): LedgerReapply
     });
 
   return (db) => {
+    unrecoverable = 0;
     const ledger = ledgerOf(db);
     if (!ledger) throw new LedgerNotAttachedError();
     const contents = ledger.contents();
@@ -111,6 +126,7 @@ export function createLedgerReapply(registry: DerivativeRegistry): LedgerReapply
       applied: 0,
       lifted: 0,
       skipped: 0,
+      unrecoverable: 0,
       canonicalSeq: readLedgerSeq(db),
       truncated: ledger.status.truncated,
       damaged: contents.damaged,
@@ -134,6 +150,8 @@ export function createLedgerReapply(registry: DerivativeRegistry): LedgerReapply
         if (line.liftedAt !== null) report.lifted++;
       }
     });
+    report.unrecoverable = unrecoverable;
+    report.applied -= unrecoverable;
     report.canonicalSeq = readLedgerSeq(db);
     // the data protection item reads this; held apart from the canonical write above
     writeSetting(db, LEDGER_REPORT_SETTING, JSON.stringify(report));

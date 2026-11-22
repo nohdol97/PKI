@@ -98,6 +98,8 @@ export const nodeLedgerIo: LedgerIo = {
 export interface LedgerLine {
   seq: number;
   connectorInstanceId: string;
+  /** null for a line written before the kind was carried: it cannot recreate an unknown instance. */
+  connectorKind: string | null;
   identityHash: string;
   coversVersion: number;
   lastRevision: number | null;
@@ -133,6 +135,7 @@ function readLine(raw: unknown): LedgerLine | undefined {
     !isInt(r.seq) ||
     r.seq < 1 ||
     typeof r.i !== "string" ||
+    !(r.k === undefined || typeof r.k === "string") ||
     typeof r.h !== "string" ||
     !isInt(r.cv) ||
     !(r.lr === null || isInt(r.lr)) ||
@@ -146,6 +149,7 @@ function readLine(raw: unknown): LedgerLine | undefined {
   return {
     seq: r.seq,
     connectorInstanceId: r.i,
+    connectorKind: (r.k as string | undefined) ?? null,
     identityHash: r.h,
     coversVersion: r.cv,
     lastRevision: r.lr as number | null,
@@ -206,6 +210,7 @@ const encodeLine = (seq: number, d: LedgerLineDraft) =>
     t: "line",
     seq,
     i: d.connectorInstanceId,
+    k: d.connectorKind,
     h: d.identityHash,
     cv: d.coversVersion,
     lr: d.lastRevision,
@@ -216,6 +221,8 @@ const encodeLine = (seq: number, d: LedgerLineDraft) =>
 
 /** What opening the ledger found; the start-up reconcile reports it. */
 export interface LedgerOpenStatus {
+  /** A new file was started at this open (missing, or set aside): the database's tombstones are not in it yet. */
+  created: boolean;
   /** No ledger file although the database holds data: deletions after the backup are unknown. */
   missing: boolean;
   /** The file ended in a cut line (a write the process died in); it was cut off, never applied. */
@@ -278,7 +285,12 @@ function freeName(io: LedgerIo, path: string, label: string): string {
 export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
   const { path, key, io = nodeLedgerIo } = options;
   const header = `${JSON.stringify({ t: "header", v: 1, key: hex(key) })}\n`;
-  const status: LedgerOpenStatus = { missing: false, truncated: false, setAside: [] };
+  const status: LedgerOpenStatus = {
+    created: false,
+    missing: false,
+    truncated: false,
+    setAside: [],
+  };
   let lastSeq = 0;
   let locked = false;
   let reconcile = false;
@@ -286,6 +298,7 @@ export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
   const text = io.read(path);
   if (text === undefined) {
     status.missing = options.canonicalSeq > 0 || options.hasData;
+    status.created = true;
     io.append(path, header);
   } else {
     const found = parseLedger(text);
@@ -297,6 +310,7 @@ export function openLedger(options: OpenLedgerOptions): TombstoneLedger {
         deletions: found.lines.length,
         reason: found.key === undefined ? "damaged-header" : "other-key",
       });
+      status.created = true;
       io.append(path, header);
     } else {
       lastSeq = found.maxSeq;

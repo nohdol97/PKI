@@ -129,7 +129,7 @@ export function ensureSourceByHash(
 export function sourceLedgerName(
   db: SqlDriver,
   sourceId: number,
-): { connectorInstanceId: string; identityHash: string } {
+): { connectorInstanceId: string; connectorKind: string; identityHash: string } {
   const row = db.all(
     "SELECT connector_instance_id, namespace, external_id, identity_hashed FROM sources WHERE id = ?",
     [sourceId],
@@ -138,6 +138,8 @@ export function sourceLedgerName(
   const instance = row.connector_instance_id as string;
   return {
     connectorInstanceId: instance,
+    connectorKind: db.all("SELECT kind FROM connector_instances WHERE id = ?", [instance])[0]
+      ?.kind as string,
     identityHash:
       row.identity_hashed === 1
         ? (row.namespace as string)

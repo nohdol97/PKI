@@ -149,6 +149,8 @@ export type CommitDerived = (tx: SqlDriver, input: CommitInput) => CommitResult;
 export interface LedgerLineDraft {
   /** The source's connector instance (plain: the hashed row keeps it too). */
   connectorInstanceId: string;
+  /** The instance's kind: the re-apply registers the real instance before it recreates a source. */
+  connectorKind: string;
   /** The keyed hash of (connector instance, namespace, external id), I04-R7. */
   identityHash: string;
   coversVersion: number;

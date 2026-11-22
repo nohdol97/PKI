@@ -31,7 +31,17 @@ describe("contract schemas", () => {
         embedding: { state: "not-implemented" },
         vectorIndex: { state: "not-implemented" },
         invalidations: { recent: [] },
-        dataProtection: { legacyCleanup: "done" },
+        dataProtection: {
+          legacyCleanup: "done",
+          ledger: {
+            state: "ok",
+            reapplied: 0,
+            unrecoverable: 0,
+            ignoredLines: 0,
+            setAsideLedgers: 0,
+            setAsideDeletions: 0,
+          },
+        },
       }).success,
     ).toBe(true);
     expect(routes.status.response.safeParse({ backend: { state: "ready" } }).success).toBe(false);

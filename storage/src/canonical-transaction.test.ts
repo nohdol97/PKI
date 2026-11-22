@@ -22,6 +22,7 @@ afterEach(() => db.close());
 
 const line: LedgerLineDraft = {
   connectorInstanceId: "c1",
+  connectorKind: "k1",
   identityHash: "h",
   coversVersion: 1,
   lastRevision: null,

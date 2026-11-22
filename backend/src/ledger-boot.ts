@@ -18,6 +18,11 @@ import {
   parseLedger,
   readKey,
   readLedgerSeq,
+  readTombstoneState,
+  sourceLedgerName,
+  writeLedgerSeq,
+  type TombstoneLedger,
+  type TombstoneState,
   type DerivativeRegistry,
   type SqlDriver,
 } from "@pki/storage";
@@ -38,10 +43,39 @@ export function attachDirectoryLedger(db: SqlDriver, dir: string): void {
   const key = readKey(db);
   if (!key) throw new Error("the prepared database has no identity key");
   const hasData = db.all("SELECT 1 FROM sources LIMIT 1").length > 0;
-  attachLedger(
-    db,
-    openLedger({ path: ledgerPath(dir), key, canonicalSeq: readLedgerSeq(db), hasData }),
-  );
+  const ledger = openLedger({
+    path: ledgerPath(dir),
+    key,
+    canonicalSeq: readLedgerSeq(db),
+    hasData,
+  });
+  if (ledger.status.created) seedFromDatabase(db, ledger);
+  attachLedger(db, ledger);
+}
+
+/**
+ * A ledger started over a database that already holds tombstones (the file was missing, or another
+ * installation's was set aside) gets one line per tombstone, states carried as they are, numbered after
+ * the database's number, before anything is served. Otherwise a backup restored later would bring those
+ * deletions back, and nothing in the ledger would apply them again.
+ */
+function seedFromDatabase(db: SqlDriver, ledger: TombstoneLedger): void {
+  const drafts = db.all("SELECT source_id FROM tombstones ORDER BY source_id").map((row) => {
+    const sourceId = row.source_id as number;
+    const state = readTombstoneState(db, sourceId) as TombstoneState;
+    return {
+      ...sourceLedgerName(db, sourceId),
+      coversVersion: state.coversVersion,
+      lastRevision: state.lastRevision,
+      reason: state.reason,
+      at: state.at,
+      liftedAt: state.liftedAt,
+    };
+  });
+  if (drafts.length === 0) return;
+  const seqs = ledger.reserve(drafts.length, readLedgerSeq(db));
+  ledger.append(seqs, drafts);
+  writeLedgerSeq(db, seqs[seqs.length - 1] as number);
 }
 
 /** What forces a rebuild of the projections after the reconcile. */

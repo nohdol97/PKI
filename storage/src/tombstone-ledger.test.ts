@@ -14,6 +14,7 @@ const hex = (k: Uint8Array) => Buffer.from(k).toString("hex");
 const P = "/data/tombstone-ledger.jsonl";
 const draft = (over: Partial<LedgerLineDraft> = {}): LedgerLineDraft => ({
   connectorInstanceId: "c1",
+  connectorKind: "k1",
   identityHash: "h1",
   coversVersion: 2,
   lastRevision: null,
@@ -37,6 +38,7 @@ describe("ledger file format", () => {
       t: "line",
       seq: 1,
       i: "c1",
+      k: "k1",
       h: "h1",
       cv: 2,
       lr: null,
@@ -79,6 +81,42 @@ describe("ledger file format", () => {
     expect(read.lines.map((l) => l.seq)).toEqual([1]);
     expect(read.truncated).toBe(true);
     expect(read.damaged).toBe(1);
+  });
+
+  it("counts a line that parses as JSON but has a field of the wrong type as damaged, field by field, and applies none", () => {
+    const header = `${JSON.stringify({ t: "header", v: 1, key: "k" })}\n`;
+    const base = {
+      t: "line",
+      seq: 1,
+      i: "c",
+      k: "k1",
+      h: "h",
+      cv: 1,
+      lr: null,
+      reason: "user-deleted",
+      at: "a",
+      la: null,
+    };
+    const bad: Record<string, unknown> = {
+      seq: "1",
+      i: 5,
+      k: 5,
+      h: 5,
+      cv: "1",
+      lr: "x",
+      reason: 5,
+      at: 5,
+      la: 5,
+    };
+    for (const [field, value] of Object.entries(bad)) {
+      const read = parseLedger(`${header}${JSON.stringify({ ...base, [field]: value })}\n`);
+      expect([field, read.lines.length, read.damaged]).toEqual([field, 0, 1]);
+    }
+    for (const field of ["seq", "i", "h", "cv", "lr", "reason", "at", "la"]) {
+      const rest = Object.fromEntries(Object.entries(base).filter(([k]) => k !== field));
+      const read = parseLedger(`${header}${JSON.stringify(rest)}\n`);
+      expect([field, read.lines.length, read.damaged]).toEqual([field, 0, 1]);
+    }
   });
 
   it("refuses a line that names an unknown reason or a negative cover", () => {
