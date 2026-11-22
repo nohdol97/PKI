@@ -246,16 +246,17 @@ describe("manual-retry and discard (I03-R12 ① ②, C3)", () => {
   });
 
   describe("manual-retry.revives-schedule-marker (I03-T08 handoff)", () => {
+    let targets = 0;
     const schedule = () =>
       createSchedule(db, {
         kind: "extract",
-        target: "",
+        target: `t${(targets += 1)}`,
         period: "{}",
         zone: "UTC",
         nextDue: 1,
         at: 1,
       }).schedule;
-    const scheduledDeadLetter = (scheduleId: number): StoredJob => {
+    const scheduledJob = (scheduleId: number, status: JobStatus): StoredJob => {
       const r = registerJob(db, {
         kind: "extract",
         sourceId: 1,
@@ -264,9 +265,11 @@ describe("manual-retry and discard (I03-R12 ① ②, C3)", () => {
         at: T0,
       });
       if (!r.registered) throw new Error("expected a new job");
-      db.run("UPDATE jobs SET status = 'dead_letter', finished_at = 1 WHERE id = ?", [r.job.id]);
+      db.run("UPDATE jobs SET status = ?, finished_at = 1 WHERE id = ?", [status, r.job.id]);
       return state(r.job.id);
     };
+    const scheduledDeadLetter = (scheduleId: number): StoredJob =>
+      scheduledJob(scheduleId, "dead_letter");
 
     it("records the revived job on its schedule, in the retry's transaction", () => {
       const { id } = schedule();
@@ -276,11 +279,23 @@ describe("manual-retry and discard (I03-R12 ① ②, C3)", () => {
       expect(readSchedule(db, id)?.revivedJob).toBe(job.id);
     });
 
-    it("writes nothing for a job without a schedule, a held job, or a refused retry", () => {
+    it("writes nothing for a job without a schedule", () => {
       const { id } = schedule();
-      retryJob(db, inStatus("dead_letter").id, at(10));
-      retryJob(db, inStatus("held").id, at(10));
-      retryJob(db, scheduledDeadLetter(id).id + 1000, at(10));
+      expect(retryJob(db, inStatus("dead_letter").id, at(10))).toBe("queued");
+      expect(readSchedule(db, id)?.revivedJob).toBe(0);
+    });
+
+    it("writes nothing for a held job of a schedule (never a dead letter)", () => {
+      const { id } = schedule();
+      const held = scheduledJob(id, "held");
+      expect(retryJob(db, held.id, at(10))).toBe("queued");
+      expect(readSchedule(db, id)?.revivedJob).toBe(0);
+    });
+
+    it("writes nothing when the retry is refused", () => {
+      const { id } = schedule();
+      const done = scheduledJob(id, "succeeded");
+      expect(retryJob(db, done.id, at(10))).toBe("not-retryable");
       expect(readSchedule(db, id)?.revivedJob).toBe(0);
     });
   });
