@@ -55,18 +55,29 @@ export function failure(code: string, run: RunFacts): JobClosing {
   return { status: "retry", reason: code, runAfter: run.now + backoffMs(run.attempts, code) };
 }
 
-function closing(result: JobResult, run: RunFacts & { progressed: boolean }): JobClosing {
+/** The run of a result: `progressed` is asked only for a yield. */
+export type ClassifiedRun = RunFacts & { progressed: () => boolean };
+
+/** The closing of a declared result; undefined for anything else. */
+function closing(result: JobResult, run: ClassifiedRun): JobClosing | undefined {
+  // a handler is untyped at run time: read what it handed back defensively
+  if (typeof result !== "object" || result === null) return undefined;
   switch (result.status) {
     case "succeeded":
+      return ("write" in result && typeof result.write === "function") ||
+        ("items" in result && Array.isArray(result.items))
+        ? result
+        : undefined;
     case "superseded":
-      return result;
+      return { status: "superseded" };
     case "held":
       return { status: "held", reason: result.reason };
     case "yield":
-      return run.progressed
+      return run.progressed()
         ? { status: "queued", runAfter: run.now + YIELD_DELAY_MS }
         : failure("yield-no-progress", run);
     case "fail":
+      if (typeof result.retryable !== "boolean") return undefined;
       return result.retryable
         ? failure(result.code, run)
         : { status: "dead_letter", reason: result.code };
@@ -91,21 +102,23 @@ function closing(result: JobResult, run: RunFacts & { progressed: boolean }): Jo
       return result.error === "invalid-output"
         ? { status: "dead_letter", reason: result.error }
         : failure(result.error, run);
+    default:
+      return undefined;
   }
 }
 
 /**
  * The row of the outcome table `result` falls in. `progressed`: the job's
  * checkpoint moved during the run (a yield without it is a failure, so it cannot
- * repeat forever). A reason that is not a code is never stored: the job is given
- * up with a fixed one.
+ * repeat forever). A result that is none of the declared ones is the retryable
+ * failure `handler-error`, like a handler that threw (I03-R9). A reason that is
+ * missing or not a code is never stored: a missing one is such a result, text
+ * gives the job up with a fixed code.
  */
-export function classifyResult(
-  result: JobResult,
-  run: RunFacts & { progressed: boolean },
-): JobClosing {
+export function classifyResult(result: JobResult, run: ClassifiedRun): JobClosing {
   const to = closing(result, run);
-  return "reason" in to && !isReasonCode(to.reason)
-    ? { status: "dead_letter", reason: "invalid-reason" }
-    : to;
+  if (to === undefined) return failure("handler-error", run);
+  if (!("reason" in to)) return to;
+  if (typeof to.reason !== "string") return failure("handler-error", run);
+  return isReasonCode(to.reason) ? to : { status: "dead_letter", reason: "invalid-reason" };
 }

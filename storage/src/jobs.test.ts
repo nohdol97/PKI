@@ -1004,6 +1004,26 @@ describe("effect.fence-new-version (I03-R6 ③): commitDerived, the provisional 
     expect(effects()).toBe(0);
   });
 
+  it("names the newer version, not a tombstone below it, as the cause (a lifted cover, I04-T05)", () => {
+    tombstone(); // covers version 1
+    newVersion("b2");
+    newVersion("b3");
+    expect(commitDerived(db, { source: { sourceId: 1, version: 2 }, items: [item("a")] })).toEqual({
+      status: "stale",
+      cause: "not-latest",
+    });
+    expect(effects()).toBe(0);
+  });
+
+  it("writes nothing for a version that is not there at all: stale, missing", () => {
+    db.run("DELETE FROM source_versions WHERE source_id = 1");
+    expect(commitDerived(db, { source: { sourceId: 1, version: 1 }, items: [item("a")] })).toEqual({
+      status: "stale",
+      cause: "missing",
+    });
+    expect(effects()).toBe(0);
+  });
+
   it("writes nothing for a source under a tombstone: stale, covered", () => {
     tombstone();
     expect(commitDerived(db, { source: { sourceId: 1, version: 1 }, items: [item("a")] })).toEqual({
@@ -1176,6 +1196,17 @@ describe("attempts.refund (I03-R11): runs that made no outside call spend no att
     expect(releaseRetryJobs(db, request)).toBe(2);
     expect(readJob(db, limited.id)?.status).toBe("dead_letter");
     expect(readJob(db, other.id)?.status).toBe("queued");
+
+    // the kind not named stops at the default, neither sooner nor later
+    const retrying = (attempts: number) =>
+      db.run("UPDATE jobs SET status = 'retry', attempts = ? WHERE id = ?", [attempts, other.id]);
+    retrying(DEFAULT_MAX_ATTEMPTS - 1);
+    releaseRetryJobs(db, request);
+    expect(readJob(db, other.id)?.status).toBe("queued");
+    retrying(DEFAULT_MAX_ATTEMPTS);
+    releaseRetryJobs(db, request);
+    expect(readJob(db, other.id)?.status).toBe("dead_letter");
+    db.run("UPDATE jobs SET status = 'retry', reason = 'timeout'");
 
     db.run("UPDATE jobs SET status = 'running', attempts = 2, lease_until = 0");
     expect(reclaimLeases(db, { ...request, leaseMs: LEASE })).toBe(2);

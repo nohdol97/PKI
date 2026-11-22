@@ -6,7 +6,9 @@
 // runs, a heartbeat extends the lease under the job's token; once it fails (the
 // job was claimed again or closed) the handler's signal is cut and its result is
 // never written. A run over its kind's time limit, measured on the injected
-// monotonic clock, is cut and retried without waiting for its handler. A job left
+// monotonic clock, is cut and retried without waiting for its handler; a run that
+// lost its job (a failed heartbeat, a step that met a closed job) ends at once
+// the same way, so a handler ignoring its signal never blocks the queue. A job left
 // running by a backend that stopped is reclaimed once its lease runs out, at
 // every claim (start, poll, wake). Every stored time is the injected clock's.
 // The runner never decides whether a call may run: a handler calls the Broker
@@ -122,6 +124,9 @@ export interface RunnerSettings {
   handlers?: RunnerTestBuild["handlers"];
 }
 
+/** Why a run stopped waiting for its handler: over its time, or its job is no longer its own. */
+type RunEnd = "run-timeout" | "lost";
+
 const DEFAULT_SETTINGS: RunnerSettings = {
   leaseMs: DEFAULT_LEASE_MS,
   heartbeatMs: DEFAULT_HEARTBEAT_MS,
@@ -175,30 +180,28 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     const cut = new AbortController();
     const started = clock.monotonic();
     const limit = kindSettings[job.kind]?.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
-    let timeOut!: () => void;
-    const timedOut = new Promise<"run-timeout">((resolve) => {
-      timeOut = () => resolve("run-timeout");
+    // Ends the run without its handler: the signal is cut and the run stops waiting.
+    let end!: (why: RunEnd) => void;
+    const ended = new Promise<RunEnd>((resolve) => {
+      end = (why) => {
+        clearInterval(beat);
+        cut.abort();
+        resolve(why);
+      };
     });
     // The runtime's interval wakes the run (a Clock sleep cannot be cancelled once
     // the job closed); what it reads and writes is the injected clock.
     const beat = setInterval(() => {
-      if (clock.monotonic() - started >= limit) {
-        clearInterval(beat);
-        cut.abort(); // over its time (I03-R14): stop the handler and its Broker call
-        timeOut();
-        return;
-      }
+      if (clock.monotonic() - started >= limit) return end("run-timeout"); // I03-R14
       try {
-        if (!heartbeatJob(db, job, { now: now(), leaseMs })) {
-          clearInterval(beat);
-          cut.abort(); // claimed again or closed: stop, and write nothing
-        }
+        // claimed again or closed: stop, and write nothing
+        if (!heartbeatJob(db, job, { now: now(), leaseMs })) end("lost");
       } catch (error) {
         onError(error); // e.g. a locked file: the next heartbeat or the lease decides
       }
     }, heartbeatMs);
     try {
-      return await attempt(job, cut, timedOut);
+      return await attempt(job, cut.signal, ended, end);
     } finally {
       clearInterval(beat);
     }
@@ -206,8 +209,9 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
 
   async function attempt(
     job: StoredJob,
-    cut: AbortController,
-    timedOut: Promise<"run-timeout">,
+    signal: AbortSignal,
+    ended: Promise<RunEnd>,
+    end: (why: RunEnd) => void,
   ): Promise<JobRun> {
     const close = (closing: JobClosing): JobRun => ({
       jobId: job.id,
@@ -224,36 +228,36 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     ) {
       return close({ status: "superseded" });
     }
-    // set once a step's checks closed the job (cancelled, superseded) or found the lease gone
-    let closed: JobRun["status"] | undefined;
+    // what a step's checks answered when they closed the job or found the lease gone
+    let closed: JobRun["status"] = "not-leased";
     const context: JobRunContext = {
-      signal: cut.signal,
+      signal,
       lastCheckpoint: readCheckpoint(job),
       checkpoint(value, write) {
         const fields = kindSettings[job.kind]?.checkpointFields ?? [];
         const saved = checkpointJob(db, job, { fields, value, ...(write && { write }) }, now());
         if (saved !== "saved") {
           closed = saved;
-          cut.abort();
+          end("lost");
         }
         return saved;
       },
     };
     // kinds are the handlers' keys; a handler throwing as it starts is a rejection too
     const handling = Promise.resolve().then(() => (handlers[job.kind] as JobHandler)(job, context));
-    handling.catch(() => {}); // a run that timed out is not waited for: what it does later is dropped
-    let result: JobResult | "run-timeout";
+    handling.catch(() => {}); // an ended run is not waited for: what its handler does later is dropped
+    let result: JobResult | RunEnd;
     try {
-      result = await Promise.race([handling, timedOut]);
+      result = await Promise.race([handling, ended]);
     } catch (error) {
       onError(error);
-      return closed ? { jobId: job.id, status: closed } : close(failure("handler-error", facts()));
+      return close(failure("handler-error", facts()));
     }
-    if (closed) return { jobId: job.id, status: closed };
+    // the job is no longer this run's: nothing is written (closeJob would refuse it anyway)
+    if (result === "lost") return { jobId: job.id, status: closed };
     if (result === "run-timeout") return close(failure("run-timeout", facts()));
     // a yield counts as progress only when the job's checkpoint moved during this run
-    const progressed =
-      result.status === "yield" && readJob(db, job.id)?.checkpoint !== job.checkpoint;
+    const progressed = () => readJob(db, job.id)?.checkpoint !== job.checkpoint;
     try {
       return close(classifyResult(result, { ...facts(), progressed }));
     } catch (error) {

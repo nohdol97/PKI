@@ -6,11 +6,13 @@
 // the run-time limit on the injected monotonic clock) and steps through checkpoints.
 import {
   DEFAULT_MAX_ATTEMPTS,
+  heartbeatJob,
   readJob,
   registerConnectorInstance,
   registerJob,
   requeueHeldJobs,
   saveSourceRecord,
+  supersedeOpenJobs,
   writeTombstone,
   type SqlDriver,
   type StoredJob,
@@ -903,6 +905,69 @@ describe("run-timeout (I03-R14, C3): a run over its time on the monotonic clock"
     gate.resolve({ status: "succeeded", write: marked(db, "in-time") });
     expect(await run).toEqual({ jobId: job.id, status: "succeeded" });
     expect(written(db, "in-time")).toBe(true);
+  });
+});
+
+describe("a run that lost its job ends without its handler (I03-R14, review A-F1)", () => {
+  const never = () => new Promise<never>(() => {}); // ignores its signal
+
+  it("lease lost mid-run: the run ends not-leased, the next job is claimed, stop returns", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const lost = imported("a");
+    const next = imported("b");
+    let signal: AbortSignal | undefined;
+    const handler = vi.fn<JobHandler>((job, context) => {
+      if (job.id !== lost.id) return Promise.resolve({ status: "succeeded", write: () => {} });
+      signal = context.signal;
+      return never();
+    });
+    const r = runner(handler);
+    const run = r.runOnce();
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    supersedeOpenJobs(db, lost.sourceId as number); // the source is deleted: the token is raised
+    await vi.advanceTimersByTimeAsync(LEASE / 4); // the heartbeat fails
+    expect(signal?.aborted).toBe(true);
+    expect(await run).toEqual({ jobId: lost.id, status: "not-leased" });
+    expect(readJob(db, lost.id)).toMatchObject({ status: "superseded", reason: "source-closed" });
+    expect(vi.getTimerCount()).toBe(0);
+
+    expect(await r.runOnce()).toEqual({ jobId: next.id, status: "succeeded" });
+    await r.stop();
+    expect(heartbeatJob(db, lost, { now: clock, leaseMs: LEASE })).toBe(false);
+  });
+
+  it("a step that closed the job: the run ends with the step's answer, the next job is claimed, stop returns", async () => {
+    const cancelled = imported("a");
+    const next = imported("b");
+    let answer: string | undefined;
+    const handler = vi.fn<JobHandler>((job, context) => {
+      if (job.id !== cancelled.id) return Promise.resolve({ status: "succeeded", write: () => {} });
+      db.run("UPDATE jobs SET cancel_requested = 1 WHERE id = ?", [job.id]); // the user cancels
+      answer = context.checkpoint({ step: 1 }, marked(db, "step-1"));
+      return never(); // keeps waiting, whatever the step answered
+    });
+    const r = runner(handler, db, undefined, { checkpointFields: ["step"] });
+    expect(await r.runOnce()).toEqual({ jobId: cancelled.id, status: "cancelled" });
+    expect(answer).toBe("cancelled");
+    expect(written(db, "step-1")).toBe(false);
+    expect(await r.runOnce()).toEqual({ jobId: next.id, status: "succeeded" });
+    await r.stop();
+  });
+});
+
+describe("a result outside the declared ones (I03-R9, review A-F2)", () => {
+  it("is the retryable failure handler-error, the run not rejected and the job not left running", async () => {
+    const outside: unknown[] = [undefined, { status: "done" }, { status: "succeeded" }, "ok"];
+    for (const result of outside) {
+      const job = imported();
+      const run = await runner(async () => result as JobResult).runOnce();
+      expect(run).toEqual({ jobId: job.id, status: "retry" });
+      expect(readJob(db, job.id)).toMatchObject({
+        status: "retry",
+        reason: "handler-error",
+        attempts: 1,
+      });
+    }
   });
 });
 

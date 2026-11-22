@@ -59,7 +59,7 @@ describe("backoff (I03-R10)", () => {
 });
 
 describe("outcome.mapping (I03-R9): a handler's result to the job's closing", () => {
-  const run = { attempts: 2, now: NOW, progressed: false };
+  const run = { attempts: 2, now: NOW, progressed: () => false };
   const write = () => {};
   const retry = (reason: string, wait: number, refund?: true) => ({
     status: "retry",
@@ -141,7 +141,7 @@ describe("outcome.mapping (I03-R9): a handler's result to the job's closing", ()
 
   it("a yield with progress is queued a minute later", () => {
     expect(YIELD_DELAY_MS).toBe(MINUTE);
-    expect(classifyResult({ status: "yield" }, { ...run, progressed: true })).toEqual({
+    expect(classifyResult({ status: "yield" }, { ...run, progressed: () => true })).toEqual({
       status: "queued",
       runAfter: NOW + MINUTE,
     });
@@ -169,6 +169,26 @@ describe("outcome.mapping (I03-R9): a handler's result to the job's closing", ()
         status: "dead_letter",
         reason: "invalid-reason",
       });
+    }
+  });
+
+  it("a result outside the declared ones is the retryable failure handler-error (R9)", () => {
+    const outside: unknown[] = [
+      undefined,
+      null,
+      "succeeded",
+      7,
+      {},
+      { status: "dead_letter", reason: "x" },
+      { status: "succeeded" },
+      { status: "succeeded", write: "not a function" },
+      { status: "succeeded", items: {} },
+      { status: "fail", code: "x" },
+      { status: "held" },
+      { status: "failed" },
+    ];
+    for (const result of outside) {
+      expect(classifyResult(result as JobResult, run)).toEqual(retry("handler-error", MINUTE));
     }
   });
 

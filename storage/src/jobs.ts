@@ -486,16 +486,25 @@ const isLockError = (error: unknown): boolean => {
 
 /**
  * The fence of a result written from a source version (I03-R6 ③, I04-R11), in the
- * provisional body I03-T04 ships: V02's fence alone. A stale source writes nothing
- * (`covered` under a tombstone, else a newer version exists: `not-latest`); a
- * current one, or none, writes every item. I04-T06 replaces this body with
+ * provisional body I03-T04 ships: V02's fence alone. A stale source writes
+ * nothing. Its cause is `not-latest` when a newer version exists, asked first: a
+ * tombstone row below the job's version (a lifted cover, I04-T05) is not why it
+ * is stale; else `covered` under a tombstone, else the version is `missing`. A
+ * current source, or none, writes every item. I04-T06 replaces this body with
  * assertFresh, assertLineage and combinable; its callers stay as they are.
  */
 export const commitDerived: CommitDerived = (tx, input) => {
   const { source } = input;
   if (source && !isFenceCurrent(tx, { sourceId: source.sourceId, fenceVersion: source.version })) {
-    const covered = tx.all("SELECT 1 FROM tombstones WHERE source_id = ?", [source.sourceId]);
-    return { status: "stale", cause: covered.length > 0 ? "covered" : "not-latest" };
+    const row = tx.all(
+      `SELECT EXISTS (SELECT 1 FROM source_versions WHERE source_id = ? AND version > ?) AS newer,
+              EXISTS (SELECT 1 FROM tombstones WHERE source_id = ?) AS tombstone`,
+      [source.sourceId, source.version, source.sourceId],
+    )[0];
+    return {
+      status: "stale",
+      cause: row?.newer === 1 ? "not-latest" : row?.tombstone === 1 ? "covered" : "missing",
+    };
   }
   for (const item of input.items) item.write(tx);
   return { status: "committed", written: input.items.length, dropped: [] };
