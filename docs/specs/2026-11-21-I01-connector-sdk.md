@@ -524,6 +524,31 @@ flowchart TD
 7. **공용 수집기.** `test-fixtures`는 빈 namespace, 줄의 `revision`(없으면 1)을 쓴다. `jsonl-import`는 파일의 `connector_instance_id`마다 제품 인스턴스 하나인 V02 구조가 그대로라 namespace가 `""`이고, 정체·revision·내용만 싣는다(출처 정보와 `accessScope`, I01-R23의 cursor와 능력 다섯 모두 참은 T05). 두 수집기와 `site-*`의 `deletionsOnRescan`은 거짓이다. `changeKindOf`의 반환 타입은 `scope-change`를 뺀 것이며 T05가 넓힌다. **T05가 `connector_instance_id`를 namespace로 옮길 때**, V02·T01 정체(인스턴스 = 줄의 `connector_instance_id`, namespace `""`)로 이미 저장된 원본을 새 정체로 옮기거나 그 정체로 찾아야 한다. 그러지 않으면 같은 파일을 다시 가져올 때 원본이 둘이 되고, 지운 원본의 tombstone이 새 정체의 같은 내용을 막지 못한다. T05는 이 옮기기와 그 테스트(다시 가져와도 원본 수가 그대로, 지운 원본이 되살아나지 않음)를 함께 낸다(검토 A-S2).
 8. **계약 묶음.** `@pki/testkit`의 `connectorContract`는 v1 검사를 v2로 옮긴 것이다: 버전이 `CONNECTOR_SDK_VERSION`, 능력 다섯이 불리언이고 `deletionsOnRescan`이면 `deletes`·`fullRescan`, 한 번 읽는 동안 `namespace + externalId`마다 한 번, 레코드의 `schemaVersion`이 manifest와 같음, `getDocument({namespace, externalId})`가 같은 레코드이고 다른 namespace나 모르는 정체는 `null`. 위반 코드와 `checkConnector`는 T04다.
 
+**T04가 넘기는 것**(I01-T04에서 정한 것. **잠정**: T03·T08이 쓰면서 바꿀 수 있고, 바꿀 때는 이 절과 `packages/testkit/src/connector.contract.test.ts`, `packages/testkit/src/scripted-connector.test.ts`를 함께 고친다).
+
+1. **자리와 이름.** `@pki/testkit`이 `checkConnector`, `connectorContract`, `CONNECTOR_VIOLATION_CODES`(I01-R25 표의 21개, 표의 순서), 타입 `ConnectorViolationCode`·`ConnectorCheckCode`(위반 코드와 `not-implemented`)·`ConnectorScenario`, 대본 수집기 `ScriptedConnector`와 그 대본 타입을 낸다. 자기 테스트가 R25 표를 이 문서에서 읽어 상수와 대조한다.
+2. **시나리오.** `ConnectorScenario`는 `{ config, later? }`다. `later`가 있으면 새 인스턴스를 `create()`로 만들어 그 설정으로 초기화하고 처음부터(cursor `null`) 읽는 것을 재스캔으로 본다. 앱을 다시 켠 뒤의 재스캔과 같은 모양이라, 스스로 대조하는 수집기는 그 기록을 인스턴스 밖(설정이 가리키는 저장소)에 둬야 통과한다. `connectorContract(name, create, scenario)`는 `checkConnector`의 결과가 빈 목록인지 보는 vitest 묶음이다. 기존 호출(`test-fixtures`, `jsonl-import`)은 `{ config }`로 바뀌었다.
+3. **결과.** `checkConnector`는 겹침 없이 `CONNECTOR_VIOLATION_CODES`의 순서로 정렬한 코드 목록을 돌려준다. 문구나 레코드 내용은 싣지 않는다. 초기화가 `ConnectorNotImplementedError`로 실패하면 `["not-implemented"]`만 돌려준다. 그 밖의 초기화 실패나 읽기 도중의 예외는 시나리오가 틀린 것으로 보고 던진다(위반 코드가 아니다).
+4. **검사의 차례와 억제(R25 억제 규칙의 구현).**
+   - manifest를 읽을 수 없거나 `capabilities`가 객체가 아니면 `manifest-invalid` 하나로 끝난다. `schemaVersion`이 2가 아니면 그 버전으로 다른 검사를 하지 않고 `sdk-version-mismatch`(와 버전 밖의 `manifest-invalid`)로 끝난다. 레코드의 `schemaVersion`이 2가 아니거나 manifest와 다르면 `record-schema`가 아니라 `sdk-version-mismatch`다(스키마는 그 필드를 2로 바꿔 놓고 본다).
+   - 읽기는 같은 인스턴스로 두 번(`limit` 1000과 1)이다. 한 읽기 안에서 앞서 본 cursor가 다시 나오면(제자리 포함) `no-progress`이고 그 읽기는 끝나지 않은 것으로 친다. 페이지 모양이 스키마에 맞지 않아도(`record-schema`) 그 읽기는 끝나지 않은 것이다.
+   - `page-size-dependent`는 두 읽기가 모두 끝났고 어느 쪽에도 `limit-exceeded`·`duplicate-identity`·`no-progress`가 없을 때만, 두 읽기의 변경 전체를 순서와 무관하게 비교한다.
+   - `changes-after-final-cursor`, `get-document-*`, "나중 상태" 검사는 `limit` 1000의 읽기가 끝났을 때만 한다. "나중 상태" 검사는 재스캔 읽기도 끝났을 때만 한다.
+5. **판정의 세부(잠정).**
+   - `get-document-mismatch`: 한 정체의 마지막 변경이 upsert면 그 레코드와 같아야 하고(키 순서 무관), tombstone 사건이면 `null`이어야 한다. 마지막 변경이 `scope-change`인 정체는 비교하지 않는다(범위만 바뀐 레코드의 revision을 규격이 정하지 않았다). `getDocument`가 던져도 위반이다.
+   - `get-document-unknown`: 모르는 정체(`""`, `contract-unknown-external-id`)와, 첫 레코드의 externalId를 다른 namespace로 물은 것이 모두 `null`이어야 한다.
+   - `revision-not-increasing`: 처음 읽기와 재스캔에 모두 upsert로 나온 정체에서 `revision`과 `accessScope`를 뺀 레코드가 다르면 revision이 커져야 한다. 범위만 다른 같은 revision은 R10의 `scope-updated`라 위반이 아니다.
+   - `tombstone-revision-below-upsert`: 처음 읽기부터 재스캔까지 이어서, 그 정체로 앞서 낸 마지막 upsert보다 작은 revision의 tombstone 사건.
+   - `rescan-deletion-missing`: `deletionsOnRescan`이면, 처음 읽기 끝에 살아 있던(마지막 변경이 upsert인) 정체가 재스캔에 upsert로도 `delete`로도 나오지 않으면 위반이다. `access-revoked`는 대신하지 않는다.
+   - `abort-ignored`, `responds-before-init`: 이미 취소된 신호로 부른 `getChanges`, 초기화 전의 `getChanges(null)`·`getDocument`는 실패해야 한다(성공하면 위반). 초기화 전 검사는 따로 만든 인스턴스로 한다.
+6. **대본 수집기 `ScriptedConnector`.** 관리 모듈의 동기화 테스트(T03)가 쓰는 대역이다. 제품 구성에 들어가지 않는다(`@pki/testkit`은 개발 의존성뿐).
+   - 생성자는 manifest(`type`, `schemaVersion`, `capabilities`의 일부)를 받고, 대본은 `initialize(config)`의 설정 `{ entries, pageSize?, faults?, beforeAnswer? }`로 받는다. 그래서 `checkConnector`의 `later`에 다른 대본을 줄 수 있다.
+   - `entries`는 `Change`와 거부 항목 `{ kind: "rejected", at, code }`의 차례다. 한 페이지는 `min(pageSize, limit)`개의 항목(기본 `pageSize` 2)이고, 거부 항목은 그 페이지의 `rejected`로 나간다. cursor는 `offset:<n>`이고 모르는 cursor에는 `cursorExpired` 페이지(`changes` 빔, `hasMore` 거짓)로 답한다.
+   - `faults`는 호출을 가로채는 차례 목록이다. 항목마다 맞출 cursor(`cursor` 키가 없으면 아무 cursor), 횟수(`times`, 기본 1), 그리고 던질 오류(`raise`: `ConnectorError`, `ConnectorRateLimitError` 등) 또는 만료(`expire`) 하나를 갖는다. 맞는 첫 항목이 답하고 횟수를 쓴다.
+   - 모든 `getChanges`는 `calls`(cursor, limit)에 남고, 답하기 전에 `beforeAnswer(call)`을 기다린 뒤 신호를 본다. 그래서 테스트가 "둘째 페이지 도중 취소"나 저장 실패의 시점을 정할 수 있다.
+   - `getDocument`는 대본 전체를 접은 상태다: 가장 큰 revision의 upsert(역순 도착의 옛것은 원 시스템의 최신을 바꾸지 않는다, R2), 뒤따른 `scope-change`의 범위, tombstone 뒤에는 `null`(그 뒤의 upsert는 다시 살린다). 그래서 역순을 담은 대본은 `get-document-mismatch`가 날 수 있다. 계약 묶음을 통과하는 대본은 정체마다 revision이 커지는 차례다.
+   - 대본 수집기 자신이 `connectorContract`를 통과하며, 21개 빨간 대역은 이것을 바탕으로 한 곳씩만 어긴 것이다.
+
 같이 진행할 수 있는 작업은 다음과 같다.
 - T01 뒤: T04, T09. T02는 T01과 I04의 tombstone·해시 작업(I04-T05, I04-T07)을 함께 기다린다.
 - T02 뒤: T06(I04-T09도 기다림), T07. T03은 T02와 T04를 함께 기다린다.
@@ -755,3 +780,4 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 | 2026-11-22 | T01 검토 반영: "T01이 넘기는 것" 6을 namespace가 든 목록과 삭제 요청으로 고침, 3에 읽을 수 없는 manifest, 7에 T05가 V02 정체의 원본을 옮길 의무, 후속의 V02 행을 반영함으로 | 작업 분해(T01이 넘기는 것), 후속 | I01-T01 검토 A-S2·A-S3·B-S1·B-S2 |
 | 2026-11-22 | "T01이 넘기는 것" 4의 스키마 번호를 v12로(I04-T01의 v10, I03-T01의 v11 뒤), `jobs`·`invalidations`의 참조 유지 | 작업 분해(T01이 넘기는 것) | origin/main 재기반 |
 | 2026-11-22 | "작업을 막는 것" 4에 V01-T15가 정한 제품 구성의 위치(`connectorKinds`·`productConnectors()`, 테스트 Connector는 `fixtureConnectors()`)를 적음 | 작업을 막는 것 4 | V01-T15 독립 검토 B-F7 |
+| 2026-11-22 | "T04가 넘기는 것" 추가(잠정): 위반 코드 상수와 결과의 모양, 시나리오의 "나중 상태"는 새 인스턴스의 처음부터 읽기, 검사 차례와 억제 규칙의 구현, 판정 세부(마지막 변경이 `scope-change`인 정체는 `getDocument` 비교 제외 등), 대본 수집기의 대본·오류 주입·호출 기록 | 작업 분해(T04가 넘기는 것) | I01-T04 구현 |

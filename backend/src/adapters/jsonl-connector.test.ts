@@ -25,7 +25,7 @@ const recordsOf = (text: string, instance: string) =>
     .filter((r) => r.connector_instance_id === instance);
 
 connectorContract("jsonl-import", createJsonlConnector, {
-  records: recordsOf(ALL, "conn-v02-chat"),
+  config: { records: recordsOf(ALL, "conn-v02-chat") },
 });
 
 const MAIL = JSON.parse(fixture("v02-mail.jsonl").trim()) as ImportRecord;
