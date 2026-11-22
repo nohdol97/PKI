@@ -349,8 +349,21 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     expect(code).toContain('log("connector-kind-unknown", { id });');
     expect(code).toContain('log("connector-initialize-timeout", { id });');
     expect(code).toContain('log("connector-factory-failed", { id });');
+    expect(code).toContain('log("connector-initialize-failed", { id });');
     expect(code).toContain('log("connector-recheck-abandoned", { id: instanceId });');
     expect(code).not.toContain("unknown connector kind:");
+    for (const sentence of [
+      "만드는 함수를 다시 불러 새 객체를 만들고",
+      "같은 설정의 다른 객체가 동시에 초기화 중일 수 있다",
+      "60초를 넘겨 끝난 재점검의 결과는 성공이든 실패든 버린다",
+      "`connector-initialize-failed`",
+      "10초(`INITIALIZE_TIMEOUT_MS`)까지만 기다린",
+    ]) {
+      expect(docText).toContain(sentence);
+    }
+    for (const old of ["같은 수집기 객체로 다시 초기화", "제한 시간이 없다"]) {
+      expect(docText).not.toContain(old);
+    }
     expect(read("backend/src/connector-sync-job.ts")).toContain("export const RECHECK_TIMEOUT_MS = 60_000;");
   });
 

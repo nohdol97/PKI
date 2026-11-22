@@ -10,7 +10,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import { openCanonicalDb, type ConnectorSet } from "./composition.ts";
+import { CONNECTOR_SYNC_KIND, SYNC_PERIOD } from "./connector-sync-job.ts";
+import { systemClock } from "./clock.ts";
 import { INITIALIZE_TIMEOUT_MS } from "./connectors.ts";
+import { createScheduler } from "./scheduler.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "t".repeat(43);
@@ -123,6 +126,11 @@ describe("boot.stored-mismatch (I05-R12, C10 ① ②)", () => {
   it("① a stored instance, period and job that the present set lacks close as instance-not-found, and another instance still syncs", async () => {
     const db = openCanonicalDb(dir);
     registerConnectorInstance(db, "gone", "vanished-kind");
+    createScheduler({ db, clock: systemClock, timeZone: () => "UTC" }).ensureSchedule({
+      kind: CONNECTOR_SYNC_KIND,
+      target: "gone",
+      period: SYNC_PERIOD,
+    });
     const queued = registerJob(db, { kind: "connector-sync", target: "gone" });
     if (!queued.registered) throw new Error("expected a new job");
     db.close();
@@ -153,7 +161,8 @@ describe("boot.stored-mismatch (I05-R12, C10 ① ②)", () => {
       kinds: { fine: () => connector(ok) },
     });
     const first = await api().sync("bound");
-    expect(first.status).not.toBe(200);
+    // the kind binding of the stored data refuses the sync: the existing answer is the API's internal error
+    expect([first.status, first.body]).toEqual([500, { error: "internal-error" }]);
     expect((await api().sync("other")).body).toMatchObject({ connectorId: "other", created: 1 });
     const sources = (await api().get("/api/sources")).body as {
       sources: Array<{ externalId: string; title: string }>;

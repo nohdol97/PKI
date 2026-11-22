@@ -373,6 +373,10 @@ export async function createConnectorManager(
         log("connector-initialize-timeout", { id });
         return entry(unavailable);
       }
+      // the start only: a recheck runs every hour and would repeat it
+      if (opened.connector && opened.outcome.state === "unavailable" && "error" in opened.outcome) {
+        log("connector-initialize-failed", { id });
+      }
       return entry(opened.outcome, opened.connector);
     }),
   );

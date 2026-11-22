@@ -46,6 +46,7 @@ function made(initialize: () => Promise<void> = async () => {}, health: "ok" | "
       },
     },
     initializeCalls: 0,
+    changeCalls: 0,
     initialize: async () => {
       connector.initializeCalls++;
       await initialize();
@@ -54,7 +55,10 @@ function made(initialize: () => Promise<void> = async () => {}, health: "ok" | "
       health === "ok"
         ? { state: "ok" as const }
         : { state: "unavailable" as const, reason: "down" },
-    getChanges: async () => ({ changes: [], nextCursor: null, hasMore: false }),
+    getChanges: async () => {
+      connector.changeCalls++;
+      return { changes: [], nextCursor: null, hasMore: false };
+    },
     getDocument: async () => null,
   };
   return connector;
@@ -136,8 +140,9 @@ describe("connectors.boot-isolated (I05-C9)", () => {
       ["c", "unavailable"],
       ["d", "ready"],
     ]);
-    expect(events()).toEqual([
+    expect(events().sort((x, y) => (x.id ?? "").localeCompare(y.id ?? ""))).toEqual([
       { event: "connector-factory-failed", id: "a" },
+      { event: "connector-initialize-failed", id: "b" },
       { event: "connector-kind-unknown", id: "c" },
     ]);
     expect(lines.join("\n")).not.toContain(secret);
@@ -179,6 +184,9 @@ describe("connectors.recheck-fresh (I05-C11)", () => {
     expect(await manager.recheck("x")).toBe("ready");
     expect(kind.objects).toHaveLength(2);
     expect(kind.objects.map((o) => o.initializeCalls)).toEqual([1, 1]);
+    // the instance now syncs with the new object, never the one whose initialize failed
+    expect(await manager.sync("x")).toMatchObject({ connectorId: "x" });
+    expect(kind.objects.map((o) => o.changeCalls)).toEqual([0, 1]);
     expect(await manager.recheck("x")).toBe("ready");
     expect(kind.objects).toHaveLength(2);
   });
