@@ -175,7 +175,13 @@ export function resultCountsText(
 }
 
 /** A note on a row beyond its status and reason. */
-export function jobNote(job: Pick<JobSummary, "status" | "reason" | "target">): string | undefined {
+export function jobNote(
+  job: Pick<JobSummary, "kind" | "status" | "reason" | "target">,
+): string | undefined {
+  // I04-R15: a scope change re-extracts the version; the target names the record that caused it
+  if (job.kind === "extract" && job.target.startsWith("scope-recompute:")) {
+    return "범위가 바뀌어 다시 추출하는 작업";
+  }
   // I04-T06: the re-extraction was dropped by lineage too, so that version stays unextracted
   return job.status === "superseded" &&
     job.reason === "lineage-covered" &&
@@ -304,15 +310,12 @@ export function discardStep(
 export const discardConfirmText = (id: number): string =>
   `포기한 작업 ${id}번을 버립니다. 버린 작업은 되살릴 수 없고, 다시 하려면 새로 등록되어야 합니다.`;
 
-/** I04-R4: the status API's invalidation records; `scopePolicyDrops` only once I04-T09 supplies it. */
+/** I04-R4: the status API's invalidation records and the items the scope policy dropped. */
 export function invalidationText(invalidations: {
   recent: readonly unknown[];
-  scopePolicyDrops?: number | undefined;
+  scopePolicyDrops: number;
 }): string {
-  const recent = `최근 무효화 기록 ${invalidations.recent.length}건`;
-  return invalidations.scopePolicyDrops === undefined
-    ? recent
-    : `${recent}, 범위 정책으로 빠진 항목 ${invalidations.scopePolicyDrops}건`;
+  return `최근 무효화 기록 ${invalidations.recent.length}건, 범위 정책으로 빠진 항목 ${invalidations.scopePolicyDrops}건`;
 }
 
 /** A projection removal that is open or given up: the screen offers no cancel or discard for it (the backend refuses them too). */

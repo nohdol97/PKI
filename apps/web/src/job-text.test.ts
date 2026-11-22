@@ -123,6 +123,7 @@ describe("notes, projections, budget, actions", () => {
   it("marks a version whose re-extraction was dropped by lineage as not extracted (I04-T06, I03-T07 10)", () => {
     expect(
       jobNote({
+        kind: "extract",
         status: "superseded",
         reason: "lineage-covered",
         target: "lineage-retry:12",
@@ -130,10 +131,15 @@ describe("notes, projections, budget, actions", () => {
     ).toBe("추출되지 않은 version");
     // the first extraction dropped by lineage has a re-extraction registered: no note
     expect(
-      jobNote({ status: "superseded", reason: "lineage-covered", target: "" }),
+      jobNote({ kind: "extract", status: "superseded", reason: "lineage-covered", target: "" }),
     ).toBeUndefined();
     expect(
-      jobNote({ status: "succeeded", reason: "lineage-covered", target: "lineage-retry:12" }),
+      jobNote({
+        kind: "extract",
+        status: "succeeded",
+        reason: "lineage-covered",
+        target: "lineage-retry:12",
+      }),
     ).toBeUndefined();
   });
 
@@ -223,10 +229,30 @@ describe("discardStep (the question before a discard)", () => {
 });
 
 describe("invalidationText (I04-R4)", () => {
-  it("counts the recent records, and the scope policy's drops only when the API sends them", () => {
-    expect(invalidationText({ recent: [1, 2, 3] })).toBe("최근 무효화 기록 3건");
-    expect(invalidationText({ recent: [], scopePolicyDrops: 0 })).toBe(
-      "최근 무효화 기록 0건, 범위 정책으로 빠진 항목 0건",
+  it("counts the recent records and the items the scope policy dropped", () => {
+    expect(invalidationText({ recent: [1, 2, 3], scopePolicyDrops: 0 })).toBe(
+      "최근 무효화 기록 3건, 범위 정책으로 빠진 항목 0건",
     );
+    expect(invalidationText({ recent: [], scopePolicyDrops: 4 })).toBe(
+      "최근 무효화 기록 0건, 범위 정책으로 빠진 항목 4건",
+    );
+  });
+});
+
+describe("a re-extraction a scope change registered (I04-R15)", () => {
+  it("is noted on an extract job with a scope-recompute target, and on no other job", () => {
+    const note = jobNote({
+      kind: "extract",
+      status: "queued",
+      reason: null,
+      target: "scope-recompute:5",
+    });
+    expect(note).toBe("범위가 바뀌어 다시 추출하는 작업");
+    expect(
+      jobNote({ kind: "extract", status: "queued", reason: null, target: "" }),
+    ).toBeUndefined();
+    expect(
+      jobNote({ kind: "maintenance", status: "queued", reason: null, target: "scope-recompute:5" }),
+    ).toBeUndefined();
   });
 });

@@ -6,6 +6,7 @@
 // I03-T04: results go through the outcome table (retry with backoff, refunds,
 // the run-time limit on the injected monotonic clock) and steps through checkpoints.
 import {
+  createCommitScope,
   DEFAULT_MAX_ATTEMPTS,
   heartbeatJob,
   readJob,
@@ -1092,5 +1093,54 @@ describe("jobs.no-content (I03-R2, R8, R9, C1): a job row never holds source tex
     ]);
     expect(JSON.stringify(rows)).not.toContain("CANARY");
     expect(rows.every((r) => r.checkpoint === null)).toBe(true);
+  });
+});
+
+describe("the scope policy reaches the runner's writes (I04-R11, I04-T09)", () => {
+  const refusing = createCommitScope({
+    policy: { combinable: () => false },
+    now: () => T0.toISOString(),
+  });
+  const scoped = (handler: JobHandler, settings?: JobKindSettings) =>
+    createJobRunner({
+      db,
+      handlers: { extract: handler },
+      clock: testClock,
+      testBuild: { leaseMs: LEASE },
+      scope: refusing,
+      ...(settings && { kinds: { extract: settings } }),
+    });
+
+  it("hands the scope to the closing's write: the refused item is left out and the job still succeeds", async () => {
+    const job = imported("a");
+    const run = await scoped(async () => ({
+      status: "succeeded",
+      write: marked(db, "closing"),
+    })).runOnce();
+    expect(run).toEqual({ jobId: job.id, status: "succeeded" });
+    expect(written(db, "closing")).toBe(false);
+    expect(db.all("SELECT count(*) AS n FROM scope_policy_drops")).toEqual([{ n: 1 }]);
+  });
+
+  it("hands the scope to a checkpoint's write too", async () => {
+    const job = imported("a");
+    let answer: string | undefined;
+    const run = await scoped(
+      async (_job, context) => {
+        answer = context.checkpoint({ step: 1 }, marked(db, "step"));
+        return { status: "succeeded", write: () => {} };
+      },
+      { checkpointFields: ["step"] },
+    ).runOnce();
+    expect(run).toEqual({ jobId: job.id, status: "succeeded" });
+    expect(answer).toBe("saved");
+    expect(written(db, "step")).toBe(false);
+    expect(db.all("SELECT count(*) AS n FROM scope_policy_drops")).toEqual([{ n: 1 }]);
+  });
+
+  it("writes everything when no scope is handed over (the default policy)", async () => {
+    imported("a");
+    await runner(async () => ({ status: "succeeded", write: marked(db, "plain") })).runOnce();
+    expect(written(db, "plain")).toBe(true);
   });
 });

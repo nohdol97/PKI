@@ -46,6 +46,8 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   items: kind("item"),
   insights: kind("insight"),
   insight_evidence: kind("insight"),
+  // what the scope policy left out of an extraction (I04-T09): the registered kind `scope-drop` deletes them with their source
+  scope_policy_drops: kind("scope-drop"),
   jobs: operational("work queue: a row names a source by id and holds no content"),
   schedules: operational("periods of the schedule (I03)"),
   consents: operational("the user's consent per Provider"),

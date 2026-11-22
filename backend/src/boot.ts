@@ -46,6 +46,7 @@ import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
+import { productScopePolicy } from "./scope-policy.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
 export interface BootOptions {
@@ -78,8 +79,19 @@ export interface BootOptions {
    * vector index (composition.ts productProjectionPorts).
    */
   projectionPorts?: ProjectionPorts;
-  /** Replaces the product's registry (tests: a registry that differs from the default shows which paths receive it). */
+  /**
+   * Replaces the product's registry (tests: a registry that differs from the default shows which
+   * paths receive it). Honoured in a test build only, like `testBuild`: a production build always
+   * runs the registry the composition point builds, whatever a caller passes.
+   */
   registry?: DerivativeRegistry;
+  /**
+   * The scope policy by name (I04-R14, S21): `default` (also when absent) or `site`, which the public
+   * repository does not implement, so the start stops with `배포처 후속` before anything is opened.
+   * The desktop shell passes it as the backend's `--scope-policy` switch (from its own `PKI_SCOPE_POLICY`),
+   * the development entry reads `PKI_SCOPE_POLICY` (scope-policy.ts scopePolicyFromEnv).
+   */
+  scopePolicy?: string | undefined;
 }
 
 export interface BootedBackend {
@@ -97,6 +109,8 @@ export interface BootedBackend {
 }
 
 export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
+  // the policy before any file is opened: a name that is not implemented stops the start (I04-H2 ①)
+  const policy = productScopePolicy(options.scopePolicy);
   const db = openCanonicalDb(options.dataDir);
   await sweepCliRuns(options.dataDir); // what a crashed backend's CLI runs left
   // one egress instance for the consent API, the Broker (T08) and the Providers (T11)
@@ -104,14 +118,16 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   const providers =
     options.providers ??
     productProviders(db, options.secrets, egress, cliRunsRoot(options.dataDir));
-  const calls = productCalls(db, egress, { providers });
   const bound = options.engine ?? productEngine();
   const adapters = productAdapters(options.dataDir);
   if (options.vectorIndex) adapters.vectorIndex = options.vectorIndex;
   if (options.embedder !== undefined) adapters.embedder = options.embedder;
-  // the registry is built once, from the implementations bound; the backend holds the engine only as it wraps it (I04-R13)
+  // the registry is built once, from the implementations bound; the backend holds the engine only as it wraps it (I04-R13).
+  // The Broker grades a candidate by its lineage (I04-R16), so it takes the registry too
   const registry =
-    options.registry ?? productRegistry({ engine: bound, vectorIndex: adapters.vectorIndex });
+    BUILD_KIND === "test" && options.registry
+      ? options.registry
+      : productRegistry({ engine: bound, vectorIndex: adapters.vectorIndex, policy });
   try {
     // an adapter no registered kind covers would escape a deletion (I04-R3): refuse to start
     assertBoundAdaptersRegistered(registry, { engine: bound, vectorIndex: adapters.vectorIndex });
@@ -119,6 +135,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     db.close();
     throw error;
   }
+  const calls = productCalls(db, egress, { providers, registry });
   const entries = productEntries(registry);
   const engine = productVisibleEngine(db, registry, bound);
   const projections = productProjections(db, { engine, ...adapters });

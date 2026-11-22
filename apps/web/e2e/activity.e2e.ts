@@ -91,6 +91,12 @@ function seedJobs(dataDir: string) {
     "INSERT INTO invalidations (change_seq, source_id, change_kind, at) VALUES (1, 1, 'new-version', ?)",
     [now.toISOString()],
   );
+  for (const hash of ["h1", "h2"]) {
+    db.run(
+      "INSERT INTO scope_policy_drops (source_id, version, kind, item_key_hash, reason, at) VALUES (1, 1, 'extraction', ?, 'scope-policy', ?)",
+      [hash, now.toISOString()],
+    );
+  }
   const far = Date.parse("2100-01-01T00:00:00Z");
   const period = (p: object) => JSON.stringify(p);
   createSchedule(db, {
@@ -225,20 +231,6 @@ test("the job area shows counts, reasons, next run, periods, projections, budget
   const stack = await startStack(dir, target, playwright.chromium);
   const { page } = stack;
   try {
-    let realHadDrops = false;
-    if (target === "browser") {
-      // I04-T09's count is not in the API of this base: a stub adds it to the real answer. Once the real
-      // answer carries it, `realHadDrops` fails the test: seed a real value then and delete this stub.
-      await page.route("**/api/status", async (route) => {
-        const response = await route.fetch();
-        const body = (await response.json()) as { invalidations: object };
-        realHadDrops ||= "scopePolicyDrops" in body.invalidations;
-        await route.fulfill({
-          response,
-          json: { ...body, invalidations: { ...body.invalidations, scopePolicyDrops: 4 } },
-        });
-      });
-    }
     await openActivity(page);
     await expect(page.getByRole("heading", { name: "작업", exact: true })).toBeVisible();
     const counts = page.getByRole("list", { name: "상태별 작업 수" });
@@ -270,15 +262,10 @@ test("the job area shows counts, reasons, next run, periods, projections, budget
         .getByRole("list", { name: "투영 상태" })
         .getByText(/engine: 재구축 반복 중\(투영 사용 불가\)/),
     ).toBeVisible();
+    // the real status answer: one invalidation record, two items the scope policy dropped
     await expect(
-      page.getByText(
-        target === "browser"
-          ? "최근 무효화 기록 1건, 범위 정책으로 빠진 항목 4건"
-          : "최근 무효화 기록 1건",
-        { exact: true },
-      ),
+      page.getByText("최근 무효화 기록 1건, 범위 정책으로 빠진 항목 2건", { exact: true }),
     ).toBeVisible();
-    expect(realHadDrops).toBe(false);
   } finally {
     await stack.stop();
   }

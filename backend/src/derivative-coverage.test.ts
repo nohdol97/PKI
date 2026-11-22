@@ -3,7 +3,7 @@
 // the implementations the composition binds. Each fails closed on what nobody registered.
 import { routes } from "@pki/contracts";
 import { computePolicyVersion, DEFAULT_PROVIDER_SETTING } from "@pki/providers";
-import { createProductRegistry, NO_POLICY_YET } from "@pki/knowledge-engine";
+import { createProductRegistry } from "@pki/knowledge-engine";
 import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   createDerivativeRegistry,
@@ -11,6 +11,7 @@ import {
   saveConsent,
   writeSetting,
   type DerivativeKind,
+  defaultScopePolicy,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { FakeProvider, fixtureExtraction, send } from "@pki/testkit";
@@ -33,8 +34,10 @@ const registry = productRegistry({ engine: productEngine(), vectorIndex: new Emp
 
 const without = (name: string) =>
   createDerivativeRegistry({
-    kinds: createProductRegistry({ policy: NO_POLICY_YET }).kinds.filter((k) => k.kind !== name),
-    policy: NO_POLICY_YET,
+    kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds.filter(
+      (k) => k.kind !== name,
+    ),
+    policy: defaultScopePolicy,
   });
 
 let dir: string;
@@ -238,7 +241,7 @@ describe("derivatives.data-dir", () => {
     writeFileSync(join(dir, "derived/index.bin"), "");
     const reg = createDerivativeRegistry({
       kinds: [...registry.kinds, winKind],
-      policy: NO_POLICY_YET,
+      policy: defaultScopePolicy,
     });
     expect(checkDataDirectory(dir, reg)).toEqual([]);
   });
@@ -278,7 +281,7 @@ describe("derivatives.data-dir", () => {
       invalidate: () => ({ removed: 0, recomputed: 0 }),
     });
     const withKind = (k: DerivativeKind) =>
-      createDerivativeRegistry({ kinds: [...registry.kinds, k], policy: NO_POLICY_YET });
+      createDerivativeRegistry({ kinds: [...registry.kinds, k], policy: defaultScopePolicy });
     mkdirSync(join(dir, "derived"));
     writeFileSync(join(dir, "derived/index.bin"), "");
     writeFileSync(join(dir, "derived/other.bin"), "");

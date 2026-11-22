@@ -7,13 +7,12 @@ import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { closeJob, leaseNextJob, readJob, registerJob } from "./jobs.ts";
 import {
   findSourceVersionId,
-  listItemEvidenceVersions,
   listItemNames,
   readExtractionDrops,
   recordExtractionDrops,
   requeueHeldReasons,
 } from "./index.ts";
-import { addEvidence, insertItem, saveFact, saveRelation } from "./knowledge.ts";
+import { insertItem } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
@@ -62,45 +61,6 @@ describe("linking reads", () => {
       { id: a, name: "미리내 프로젝트" },
       { id: b, name: "물결 API" },
     ]);
-  });
-
-  it("lists the versions behind an item's facts and relations, as subject or object", () => {
-    const mail = stored("mail", "A의 목표는 2026-12-05");
-    const wiki = stored("wiki", "A는 B에 의존");
-    const other = stored("other", "C의 목표는 2026-12-01");
-    const a = insertItem(db, { type: "Project", name: "A", ...attrs });
-    const b = insertItem(db, { type: "System", name: "B", ...attrs });
-    const c = insertItem(db, { type: "Project", name: "C", ...attrs });
-    const fact = saveFact(db, { itemId: a, kind: "target_date", value: "2026-12-05", ...attrs });
-    addEvidence(db, {
-      target: { factId: fact.id },
-      sourceVersionId: versionId(mail.sourceId, 1),
-      start: 7,
-      end: 17,
-      quote: "2026-12-05",
-    });
-    const relation = saveRelation(db, { subjectId: a, type: "DEPENDS_ON", objectId: b, ...attrs });
-    addEvidence(db, {
-      target: { relationId: relation.id },
-      sourceVersionId: versionId(wiki.sourceId, 1),
-      start: 0,
-      end: 8,
-      quote: "A는 B에 의존",
-    });
-    const cFact = saveFact(db, { itemId: c, kind: "target_date", value: "2026-12-01", ...attrs });
-    addEvidence(db, {
-      target: { factId: cFact.id },
-      sourceVersionId: versionId(other.sourceId, 1),
-      start: 7,
-      end: 17,
-      quote: "2026-12-01",
-    });
-    expect(listItemEvidenceVersions(db, a)).toEqual([
-      versionId(mail.sourceId, 1),
-      versionId(wiki.sourceId, 1),
-    ]);
-    expect(listItemEvidenceVersions(db, b)).toEqual([versionId(wiki.sourceId, 1)]);
-    expect(listItemEvidenceVersions(db, 999)).toEqual([]);
   });
 });
 

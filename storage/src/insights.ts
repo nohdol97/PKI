@@ -2,6 +2,7 @@
 // summary and evidence links but keeps the row, so the same row comes back when
 // the condition holds again. Deleting X or Y deletes the row (foreign key cascade).
 // A rule's Insight is an inference (V02-R9), the only epistemic type written here.
+import type { SourceVersionRef } from "./derivatives.ts";
 import type { KnowledgeStatus } from "./knowledge.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -142,4 +143,20 @@ export function listInsightKeys(
       xItemId: row.x_item_id as number,
       yItemId: row.y_item_id as number,
     }));
+}
+
+/** The source versions the evidence rows quote, ascending: the lineage of whatever cites them (I04-R14). */
+export function listEvidenceVersions(
+  db: SqlDriver,
+  evidenceIds: readonly number[],
+): SourceVersionRef[] {
+  if (evidenceIds.length === 0) return [];
+  return db
+    .all(
+      `SELECT DISTINCT v.source_id, v.version FROM evidence e
+         JOIN source_versions v ON v.id = e.source_version_id
+       WHERE e.id IN ${IDS} ORDER BY v.source_id, v.version`,
+      [JSON.stringify(evidenceIds)],
+    )
+    .map((row) => ({ sourceId: row.source_id as number, version: row.version as number }));
 }

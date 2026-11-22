@@ -15,6 +15,9 @@ import {
 } from "@pki/providers";
 import {
   closeJob,
+  createDerivativeRegistry,
+  defaultScopePolicy,
+  insertItem,
   isFenceCurrent,
   leaseNextJob,
   listEvidence,
@@ -47,6 +50,7 @@ import {
   type ExtractHandlerOptions,
 } from "./extraction.ts";
 import { findCandidates, knowledgeCandidates } from "./linking.ts";
+import { purgeSource } from "./purge.test-support.ts";
 
 const fixtures = resolve(import.meta.dirname, "../../fixtures");
 type Line = { id: string; title: string; content: string };
@@ -186,13 +190,13 @@ describe("extraction.calls", () => {
     expect(facts()).toHaveLength(1);
   });
 
-  it("hands over one item per kept fact, then the rule, each with this version as lineage (I04-R11)", async () => {
+  it("hands over the job's bookkeeping, one item per kept fact, then the rule, each with this version as lineage (I04-R11)", async () => {
     imported(mail);
     const { job, result } = await runNext();
     if (result.status !== "succeeded") throw new Error("expected a result");
     const own = { sourceId: job.sourceId, version: job.fenceVersion };
-    expect(result.items.map((i) => i.kind)).toEqual(["fact", "insight"]);
-    expect(result.items.map((i) => i.lineage)).toEqual([[own], [own]]);
+    expect(result.items.map((i) => i.kind)).toEqual(["extraction", "fact", "insight"]);
+    expect(result.items.map((i) => i.lineage)).toEqual([[own], [own], [own]]);
     expect(facts()).toHaveLength(1);
   });
 
@@ -707,5 +711,94 @@ describe("engine proposals (V02-R13)", () => {
     deny = "no-consent";
     expect((await runNext()).status).toBe("blocked");
     expect(facts()).toEqual([]);
+  });
+});
+
+describe("egress.derived-grade: a derivative input is graded by its registered lineage (I04-R16)", () => {
+  const attrs = {
+    epistemic: "explicit",
+    status: "candidate",
+    validAt: null,
+    observedAt: "2026-11-21T00:00:00Z",
+  } as const;
+  const sourceOf = (externalId: string) =>
+    db.all("SELECT id FROM sources WHERE external_id = ?", [externalId])[0]?.id as number;
+
+  it("follows the lineage: general while a general source is in it, synthetic again once that source is gone, absent with the last source", async () => {
+    imported(messenger, "fixtures"); // synthetic on its own: item 1 (물결 API)
+    await runNext();
+    imported({ ...messenger, id: "copy" }); // a general copy joins the item's lineage
+    await runNext();
+    imported(wiki, "fixtures"); // synthetic text naming the item
+    await runNext();
+    expect(provider.requests.at(-1)?.input.candidates.map((c) => c.name)).toEqual(["물결 API"]);
+    expect(egressAsked.at(-1)?.classification).toBe("general");
+
+    // the general copy is deleted: the item's lineage is synthetic only, so is the next call's grade
+    purgeSource(db, sourceOf("copy"), { reason: "source-deleted", at: "2026-11-22T00:00:00Z" });
+    imported({ ...wiki, id: "wiki-2" }, "fixtures");
+    await runNext();
+    // (the wiki itself made 미리내 프로젝트, from synthetic text only)
+    expect(provider.requests.at(-1)?.input.candidates.map((c) => c.name)).toEqual([
+      "물결 API",
+      "미리내 프로젝트",
+    ]);
+    expect(egressAsked.at(-1)?.classification).toBe("synthetic");
+
+    // its last sources are deleted: the item went with them and is no candidate
+    purgeSource(db, sourceOf(messenger.id), {
+      reason: "source-deleted",
+      at: "2026-11-22T00:00:00Z",
+    });
+    purgeSource(db, sourceOf(wiki.id), { reason: "source-deleted", at: "2026-11-22T00:00:00Z" });
+    purgeSource(db, sourceOf("wiki-2"), { reason: "source-deleted", at: "2026-11-22T00:00:00Z" });
+    expect(items()).toEqual([]);
+    imported({ ...wiki, id: "wiki-3" }, "fixtures");
+    await runNext();
+    expect(provider.requests.at(-1)?.input.candidates).toEqual([]);
+    expect(egressAsked.at(-1)?.classification).toBe("synthetic");
+  });
+
+  it("grades an item with no lineage general (fail closed), never as the synthetic source that names it", async () => {
+    insertItem(db, { type: "System", name: "물결 API", ...attrs }); // a user's own item: no evidence
+    imported(messenger, "fixtures");
+    await runNext();
+    expect(provider.requests.at(-1)?.input.candidates.map((c) => c.name)).toEqual(["물결 API"]);
+    expect(egressAsked.at(-1)?.classification).toBe("general");
+  });
+
+  it("refuses the request when the registry does not know the kind of the input", async () => {
+    imported(messenger, "fixtures");
+    await runNext(); // item 1
+    const unaware = createDerivativeRegistry({ kinds: [], policy: defaultScopePolicy });
+    const broker = createBroker({
+      db,
+      provider: () => provider,
+      userActions: createUserActionLedger().redeemer,
+      candidates: knowledgeCandidates(db, unaware),
+      egress: { decide: () => ({ allowed: true, destination: "fake", policyVersion: "pv" }) },
+      execution: { decide: () => ({ run: true }) },
+      recorder: {
+        record: () => undefined,
+        begin: () => () => undefined,
+        attemptTimes: () => [],
+        interruptStarted: () => 0,
+      },
+      clock: { now: () => 0, sleep: async () => undefined },
+    });
+    const job = imported(wiki, "fixtures");
+    const leased = leaseNextJob(db, { kinds: ["extract"], now: T0, leaseMs: 60_000 }) as StoredJob;
+    const before = provider.requests.length;
+    const result = await broker.call({
+      taskKind: "extract",
+      sourceVersionIds: [String(versionOf(job))],
+      candidateItemIds: ["1"],
+      origin: { jobId: String(leased.id), leaseToken: String(leased.leaseToken) },
+      schemaVersion: EXTRACT_SCHEMA_VERSION,
+      budget: { timeoutMs: 1000 },
+      retryable: false,
+    });
+    expect(result).toEqual({ status: "rejected", reason: "unregistered-derivative" });
+    expect(provider.requests).toHaveLength(before);
   });
 });

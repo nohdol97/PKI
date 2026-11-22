@@ -33,6 +33,20 @@ function readKey(db: SqlDriver): Uint8Array | undefined {
   return db.all("SELECT key FROM identity_key WHERE id = 1")[0]?.key as Uint8Array | undefined;
 }
 
+/** HMAC-SHA-256 (hex) over the length-prefixed parts with the installation's key; throws without a key. */
+function keyedMac(db: SqlDriver, parts: readonly string[]): string {
+  const key = readKey(db);
+  if (!key) throw new IdentityKeyMissingError();
+  const mac = createHmac("sha256", key);
+  for (const part of parts) {
+    const bytes = Buffer.from(part, "utf8");
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(bytes.length);
+    mac.update(length).update(bytes);
+  }
+  return mac.digest("hex");
+}
+
 /** The keyed hash (hex) of an identity; throws `IdentityKeyMissingError` without a key. */
 export function identityKey(
   db: SqlDriver,
@@ -40,16 +54,17 @@ export function identityKey(
   namespace: string,
   externalId: string,
 ): string {
-  const key = readKey(db);
-  if (!key) throw new IdentityKeyMissingError();
-  const mac = createHmac("sha256", key);
-  for (const part of [connectorInstanceId, namespace, externalId]) {
-    const bytes = Buffer.from(part, "utf8");
-    const length = Buffer.alloc(4);
-    length.writeUInt32BE(bytes.length);
-    mac.update(length).update(bytes);
-  }
-  return mac.digest("hex");
+  return keyedMac(db, [connectorInstanceId, namespace, externalId]);
+}
+
+/**
+ * The keyed hash (hex) of a record's key text for a content-free operational row
+ * (I04-R7: `scope_policy_drops`). The domain keeps its hashes apart from the
+ * identity hashes made with the same key (an identity always has three parts and
+ * no domain, a keyed text exactly two with the domain first, so no input collides).
+ */
+export function keyedTextHash(db: SqlDriver, domain: string, text: string): string {
+  return keyedMac(db, [domain, text]);
 }
 
 const hasHashedSources = (db: SqlDriver) =>
