@@ -666,6 +666,8 @@ describe("module-boundary: fork packages (I05-C4)", () => {
     name: `refused: ${name}`,
     code,
     filename,
+    // the option REPLACES the shipped table: one case gives an empty one
+    ...(name.startsWith("an allowRelative option") ? { options: [{ allowRelative: [] }] } : {}),
     errors: [{ messageId: "crossPackageRelative" }],
   });
   // packages whose root is two folders under the fork root, so the entry's target resolves to the very file
@@ -687,6 +689,16 @@ describe("module-boundary: fork packages (I05-C4)", () => {
       {
         name: "① the composition package's registration",
         code: staticImport,
+        filename: registration,
+      },
+      {
+        name: "a type-only import of the exact file",
+        code: 'import type s from "../../config/connector-scopes.json" with { type: "json" };',
+        filename: registration,
+      },
+      {
+        name: "a side-effect import of the exact file",
+        code: 'import "../../config/connector-scopes.json" with { type: "json" };',
         filename: registration,
       },
       {
@@ -728,7 +740,11 @@ describe("module-boundary: fork packages (I05-C4)", () => {
         staticImport,
         join(renamedRoot, "site/composition/src/registration.ts"),
       ),
-      refused("⑦ the example package's registration", staticImport, exampleRegistration),
+      refused(
+        "⑦ the example package's registration, naming the very target",
+        'import s from "../../../site/config/connector-scopes.json" with { type: "json" };',
+        exampleRegistration,
+      ),
       refused(
         "⑧ a public package's file (the backend)",
         'import s from "../../site/config/connector-scopes.json" with { type: "json" };',
@@ -752,6 +768,21 @@ describe("module-boundary: fork packages (I05-C4)", () => {
       refused(
         "⑩ import()",
         `const s = await import(${JSON.stringify(SCOPES)}, { with: { type: "json" } });`,
+        registration,
+      ),
+      refused(
+        "an absolute path naming the same file (the exemption is for relative specifiers)",
+        `import s from ${JSON.stringify(at("site/config/connector-scopes.json"))} with { type: "json" };`,
+        registration,
+      ),
+      refused(
+        "a file: URL naming the same file",
+        `import s from ${JSON.stringify(pathToFileURL(at("site/config/connector-scopes.json")).href)} with { type: "json" };`,
+        registration,
+      ),
+      refused(
+        "an allowRelative option replaces the table: an empty one leaves the shipped entry off",
+        staticImport,
         registration,
       ),
       refused(

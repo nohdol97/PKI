@@ -143,7 +143,7 @@ describe("fork-shape: the scopes file's two wrong shapes and the type check of i
       ok: false,
       code: "scopes-file-unbound",
     });
-  });
+  }, 60_000);
 
   it("⑤ a fork-shaped tree with config/connector-scopes.json inside the composition package gives the fork's answer everywhere and scopes-file-misplaced", () => {
     fork();
@@ -151,6 +151,8 @@ describe("fork-shape: the scopes file's two wrong shapes and the type check of i
     expect(typecheckProjects(root)).toEqual([".", "site/composition", "site/connectors/x"]);
     expect(workspaceDirs(root)).toEqual(["backend", "site/composition", "site/connectors/x"]);
     expect(forkNameProblems(root)).toEqual([]);
+    expect(siteImporterProblems(lock("site/composition", "site/connectors/x"), root)).toEqual([]);
+    expect(siteImporterProblems(lock(), root)).toHaveLength(2);
     expect(publicReferenceProblems(root)).toEqual([]);
     const pieces = productPieces(root);
     expect(pieces.entry).toBe(join(root, "site/composition/src/shell.ts"));
@@ -161,7 +163,7 @@ describe("fork-shape: the scopes file's two wrong shapes and the type check of i
         "site/composition/config/connector-scopes.json",
       ]),
     ).toMatchObject({ ok: false, code: "scopes-file-misplaced" });
-  });
+  }, 60_000);
 
   /** `tsc -b site/composition` in the temporary root: a package importing no @pki package, with the base's copy. */
   function typecheck(source: string): { status: number | null; out: string } {

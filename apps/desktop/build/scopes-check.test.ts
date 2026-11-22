@@ -179,3 +179,43 @@ describe("build.scopes-check: what the build does with the verdict (I07-R7)", ()
     });
   });
 });
+
+describe("build.scopes-check: edges of the judgment", () => {
+  it("a module that only ends with the allowed place is misplaced, not absent: the place is matched whole", () => {
+    expect(failure(judge(FORK_ENTRY, ["packages/x/site/config/connector-scopes.json"]))).toBe(
+      "scopes-file-misplaced",
+    );
+  });
+
+  it("the marker is compared exactly: a value that merely contains it, or another case, is a real value", () => {
+    write(
+      ALLOWED,
+      `{"a":["${EXAMPLE_SCOPE_MARKER}-team"],"b":["${EXAMPLE_SCOPE_MARKER.toUpperCase()}"]}`,
+    );
+    expect(judge(FORK_ENTRY, [ALLOWED])).toMatchObject({ ok: true, state: "bound" });
+  });
+
+  it("an invalid entry is judged before the placeholder (the diagram's order)", () => {
+    write(ALLOWED, `{"a":["${EXAMPLE_SCOPE_MARKER}"],"b":"bad"}`);
+    expect(failure(judge(FORK_ENTRY, [ALLOWED]))).toBe("scopes-file-invalid");
+  });
+
+  it("a key holding an escaped quote is judged like any other, not thrown on", () => {
+    write(ALLOWED, '{"a\\"b":["x"],"c":["y"]}');
+    expect(judge(FORK_ENTRY, [ALLOWED])).toMatchObject({ ok: true, state: "bound", entries: 2 });
+    write(ALLOWED, '{"a\\"b":["x"],"a\\"b":["y"]}');
+    expect(failure(judge(FORK_ENTRY, [ALLOWED]))).toBe("scopes-file-invalid");
+  });
+
+  it("a relative entry is refused rather than resolved against the working directory", () => {
+    expect(() => judgeConnectorScopes(root, FORK_ENTRY, [])).toThrow(/absolute/);
+  });
+});
+
+describe("build.scopes-check: the build takes the verdict without swallowing it", () => {
+  it("build.ts calls the judgment step and has no try or catch that could turn its error into a passing build", () => {
+    const build = readFileSync(join(REAL_ROOT, "apps/desktop/build/build.ts"), "utf8");
+    expect(build).toContain("requireConnectorScopes(");
+    expect(build).not.toMatch(/\b(try|catch)\b/);
+  });
+});

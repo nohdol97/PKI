@@ -23,6 +23,15 @@ function ownFiles(dir = APP_DIR): string[] {
   });
 }
 
+/** Every file under `dir` with this exact name, nothing read. */
+function filesNamed(dir: string, name: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return filesNamed(path, name);
+    return entry.name === name ? [path] : [];
+  });
+}
+
 // read when the tests run, after the build-artifact setup: Playwright loads this file first
 let report: BuildReport;
 test.beforeAll(() => {
@@ -176,6 +185,8 @@ test("the report carries the scopes file's judgment for the real root and no val
 // and the shell's list and the screens carry none. True of the public tree and of a fork-shaped one alike.
 test("no scopes file lies in the app folder; the bundle's list and the root's file agree (I07-C12)", () => {
   expect(ownFiles().filter((f) => f.endsWith("connector-scopes.json"))).toEqual([]);
+  // the runtime packages' folder too (ownFiles leaves it out): names only
+  expect(filesNamed(join(APP_DIR, "node_modules"), "connector-scopes.json")).toEqual([]);
   const place = "site/config/connector-scopes.json";
   const modules = (report.bundles["backend/shell.js"] ?? []).filter((m) =>
     m.endsWith("connector-scopes.json"),

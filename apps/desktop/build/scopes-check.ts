@@ -7,7 +7,7 @@
 // docs/specs/2026-11-22-I07-installed-scopes-file.md ("빌드 판정").
 import { EXAMPLE_SCOPE_MARKER } from "@pki/contracts";
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 
 const FILE_NAME = "connector-scopes.json";
 /** The one place of the file for the public entry and a fork's composition package (I07-R7). */
@@ -91,6 +91,8 @@ export function judgeConnectorScopes(
   entry: string,
   modules: readonly string[],
 ): ScopesVerdict {
+  // a relative entry would be resolved against the working directory, which no caller controls
+  if (!isAbsolute(entry)) throw new Error(`the bundled entry must be an absolute path: ${entry}`);
   const entryPath = relative(root, entry).split(sep).join("/");
   const place = entryPath === EXAMPLE_ENTRY ? EXAMPLE_PLACE : FORK_PLACE;
   const outside = modules.filter((m) => m.endsWith(FILE_NAME) && m !== place);

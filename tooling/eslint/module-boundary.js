@@ -84,9 +84,9 @@ const COMPOSITION_POINTS = [
 /**
  * The one cross-package relative import a file may make (I05-R4, I07-R16): an entry allows the file `file` of
  * the package `pkg` (at `dir` when given, like a composition point) to import the file
- * `resolve(<pkg root>, target)` by a static `import` declaration and no other way. All of them must hold:
+ * `resolve(<pkg root>, target)` by a static `import` declaration with a relative specifier and no other way. All of them must hold:
  * the package, its file, the exact resolved target (never the specifier text, never the working directory or
- * this rule file's place) and the form: `export ... from`, `import()` and `typeof import()` stay refused.
+ * this rule file's place) and the form: `export ... from`, `import()`, `typeof import()` and an absolute path or `file:` URL naming the same file stay refused.
  * The fork's one: its composition package's registration takes the scopes file the build binds, at
  * `<composition package root>/../../site/config/connector-scopes.json`. The rule option `allowRelative`
  * replaces the table (tests).
@@ -411,7 +411,7 @@ const moduleBoundary = {
 
     /**
      * @param {any} node A Literal, or an expression-free TemplateLiteral
-     * @param {boolean} [staticImport] The node is the source of an `import` declaration (the one form the relative allowance covers)
+     * @param {boolean} [staticImport] The node is the source of an `import` declaration (the one form the allowance covers, with a relative specifier)
      */
     function check(node, staticImport = false) {
       let source;
@@ -430,6 +430,7 @@ const moduleBoundary = {
         }
         if (
           staticImport &&
+          source.startsWith(".") &&
           allowedRelative.some(
             (a) => isFileOf(a) && resolved === resolve(/** @type {string} */ (ownRoot), a.target),
           )
