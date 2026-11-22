@@ -75,10 +75,10 @@ describe("graph.api (catalogue)", () => {
   it("answers the edition and every name with its place, usable and rule-matching, matching the contract", async () => {
     await start();
     const list = await schema();
-    expect(list.edition).toBe(1);
-    expect(list.entries.filter((e) => e.category === "knowledge-type")).toHaveLength(16);
-    expect(list.entries.filter((e) => e.category === "relation-type")).toHaveLength(11);
-    expect(list.entries.filter((e) => e.category === "fact-kind")).toHaveLength(9);
+    expect(list.edition).toBe(KNOWLEDGE_SCHEMA.edition);
+    expect(list.entries.filter((e) => e.category === "knowledge-type")).toHaveLength(19);
+    expect(list.entries.filter((e) => e.category === "relation-type")).toHaveLength(15);
+    expect(list.entries.filter((e) => e.category === "fact-kind")).toHaveLength(22);
     const catalogued = [
       ...KNOWLEDGE_SCHEMA.knowledgeTypes,
       ...KNOWLEDGE_SCHEMA.relationTypes,
@@ -87,12 +87,16 @@ describe("graph.api (catalogue)", () => {
     expect(list.entries.map((e) => [e.name, e.place])).toEqual(
       catalogued.map((e) => [e.name, e.place]),
     );
-    for (const e of list.entries) {
+    // The database is migrated to edition 1: the edition-2 names have no row until S03-T04's migration, and
+    // the rules edition 2 widened differ from the stored ones until then.
+    for (const [i, e] of list.entries.entries()) {
+      const source = catalogued[i];
       const stored = e.place === "type-definition";
+      const later = (source?.since ?? 1) > 1;
       expect({ name: e.name, usable: e.usable, ruleMatches: e.ruleMatches }).toEqual({
         name: e.name,
-        usable: stored ? true : null,
-        ruleMatches: stored ? true : null,
+        usable: stored ? !later : null,
+        ruleMatches: stored ? !later && source?.widenedAt === undefined : null,
       });
     }
     expect(entryOf(list, "Document")).toMatchObject({ place: "sources" });

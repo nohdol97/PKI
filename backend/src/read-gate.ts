@@ -38,10 +38,19 @@ export const defaultReadRegistry: DerivativeRegistry = createProductRegistry({
   policy: defaultScopePolicy,
 });
 
+const plainFact = ({
+  dataChecks,
+  ...rule
+}: Extract<ElementRule, { elementKind: "fact-kind" }>) => ({
+  ...rule,
+  itemTypes: [...rule.itemTypes],
+  ...(dataChecks ? { dataChecks: [...dataChecks] } : {}),
+});
+
 /** A rule as the contract types it: mutable lists. */
 const plain = (rule: ElementRule): RouteResponse<"ontology">["elements"][number]["rule"] =>
   rule.elementKind === "fact-kind"
-    ? { ...rule, itemTypes: [...rule.itemTypes] }
+    ? plainFact(rule)
     : rule.elementKind === "relation-type"
       ? { ...rule, subjectTypes: [...rule.subjectTypes], objectTypes: [...rule.objectTypes] }
       : rule;
