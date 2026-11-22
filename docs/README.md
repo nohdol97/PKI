@@ -13,11 +13,11 @@
 | [research/2026-11-21-cli-provider-terms-and-isolation.md](research/2026-11-21-cli-provider-terms-and-isolation.md) | Claude Code·Codex CLI를 제품이 호출해도 되는지(약관)와 격리할 수 있는지의 문서 조사 | 문서 조사, 실행 전 |
 | [research/2026-11-21-R00-initial-base.md](research/2026-11-21-R00-initial-base.md) | 빈 저장소에 최초 commit을 올린 절차와 증거 | 보관 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 구성요소, 프로세스, 정본과 투영, 어댑터 규격, 실패 복구, 보안, **가정 표** | 잠정 |
-| [adr/](adr/README.md) | 결정 기록 16건(잠정 11, 확정 4, 미결 1) | 색인 참조 |
+| [adr/](adr/README.md) | 결정 기록 17건(잠정 12, 확정 4, 미결 1. 0017은 I02-B spec이 맡은 번호로 아직 쓰이지 않았다) | 색인 참조 |
 | [REUSE_AND_BUILD.md](REUSE_AND_BUILD.md) | 기능별 재사용·직접 개발·미룸 목록 | 잠정 |
 | [ownership.md](ownership.md) | 공용 저장소와 배포처 포크가 각각 무엇을 갖는가 | 확정(ADR 0012) |
 | [site-setup.md](site-setup.md) | 배포처가 채울 설정의 형태와 체크리스트 | 잠정(설정 키 이름은 V01-T17이 구현과 맞춤. 이름과 값의 형태는 잠정) |
-| [connector-sdk.md](connector-sdk.md) | 수집기(Connector)를 이 저장소 밖에서 만드는 사람을 위한 안내: 규격, 받아들이는 규칙, 오류와 재시도, 계약 테스트, 예시 수집기, 아직 없는 것 | 잠정(규격은 ADR 0016, 실제 원 시스템에서의 확인은 S18) |
+| [connector-sdk.md](connector-sdk.md) | 수집기(Connector)를 이 저장소 밖에서 만드는 사람을 위한 안내: 규격, 받아들이는 규칙, 오류와 재시도, 계약 테스트, 예시 수집기, 아직 없는 것 | 잠정(규격은 ADR 0016, 포크에 두고 연결하는 방식은 ADR 0018, 실제 원 시스템에서의 확인은 S18, 포크 조립은 S26) |
 | [specs/2026-11-21-R01-oss-evaluation.md](specs/2026-11-21-R01-oss-evaluation.md) | OSS 평가 작업(R01)의 요구사항과 완료 기준 | 확정 |
 | [specs/2026-11-21-R06-provisional-architecture.md](specs/2026-11-21-R06-provisional-architecture.md) | 잠정 아키텍처 작업(R06)의 완료 기준과, 기준마다 그것을 충족하는 문서 | 초안 |
 | [specs/2026-11-21-V01-vertical-skeleton.md](specs/2026-11-21-V01-vertical-skeleton.md) | Phase 1 뼈대(V01)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |

@@ -1,6 +1,6 @@
 # 스펙: I05 배포처 수집기를 `site/` 안에서 등록하는 장치
 
-- 날짜: 2026-11-22 / 상태: 확정(잠정 결정 포함)
+- 날짜: 2026-11-22 / 상태: 확정(잠정 결정 포함). 작업 T01~T05는 모두 구현되었다(T05는 문서, ADR, S26·S27, 포크 모양 예행. "I05-T05가 넘기는 것")
 - 관련: 이슈 #113(이 spec), 함께 열린 #114(자격 증명)·#115(설치본의 인스턴스 범위 파일), #116(파일 인스턴스. [I02-B spec](2026-11-22-I02-local-file-import.md)이 흡수한다. 두 spec 모두 합쳐졌다: 이 spec이 PR #119, 그 spec이 PR #120), 선행 #18(I01). [I01 spec](2026-11-21-I01-connector-sdk.md)("T09가 넘기는 것", "T10이 넘기는 것"), [I03 spec](2026-11-21-I03-persistent-queue.md)(보류와 재점검), [I04 spec](2026-11-21-I04-invalidation.md)(I04-R14 접근 범위 정책), [V01 spec](2026-11-21-V01-vertical-skeleton.md)(V01-T15 산출물 검사), [ADR 0012](../adr/0012-upstream-and-fork-ownership.md), [ownership.md](../ownership.md), [connector-sdk.md](../connector-sdk.md), [site-setup.md](../site-setup.md)
 
 낯선 말은 [ARCHITECTURE 0절](../ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다. 이 spec에서 새로 쓰는 말은 아래 표에 있다. `I01-…`·`I03-…`·`I04-…`·`V01-…`·`I02B-…`은 그 spec의 번호, `S…`는 site-setup.md 체크리스트 번호다.
@@ -80,7 +80,7 @@
 
 - **I05-R1 진입점 주입.** 백엔드의 시작 코드는 등록 객체를 인자로 받는 함수가 된다(`runShell(site)`, `runSiteCheck(site, args)`, `bootBackend`의 `site` 옵션). 공용 진입점(`backend/src/shell.ts`, `backend/src/site-check.ts`)은 빈 등록 `publicSite`를 넘겨 그 함수를 부른다. 포크는 조립 패키지에 자기 진입점을 두고 자기 등록을 넘겨 같은 함수를 부른다. 결합은 전부 정적 `import`다.
   - 등록은 **바탕 묶음 위에 합쳐진다.** 바탕은 지금처럼 `options.connectors`가 있으면 그것이고(소스 실행의 `--fixtures`, 시험이 넘기는 묶음) 없으면 `productConnectors()`다. 등록이 바탕을 통째로 바꾸거나 무시되는 일은 없다.
-  - **패키지 진입점의 내보내기.** 포크가 보는 `@pki/backend`(`backend/src/index.ts`)는 포크의 파일이 쓰는 것만 내보낸다: `runShell`, `runSiteCheck`, `checkSiteRegistration`, `publicSite`, 타입 `SiteRegistration`·`SiteRegistrationCode`·`ConnectorFactory`·`ConnectorInstanceConfig`, 그리고 이전부터 있던 `startServer`. **`bootBackend`와 그 옵션 타입은 내보내지 않는다.** 그 옵션(`connectors`, `scopePolicy`, 시험용 대체)은 등록 검사와 "설치본을 `default`로 돌리는 스위치는 없다"(I05-R15)를 건너뛰므로, 포크의 파일에 필요한 것은 진입점 둘뿐인 `runShell`·`runSiteCheck`다. 예시 패키지의 부팅 시험(C1 ①)은 진입점 파일을 경로로 띄워 본다(자식 프로세스). `backend/src`의 파일을 상대 경로로 가져오거나 `@pki/backend/<하위 경로>`로 가져오는 일은 포크 모양의 패키지(`@pki-site/*`와 `@pki/site-example`)에서 막힌다. 시험 파일도 마찬가지이며, 경계 규칙이 이를 붙잡는다(I05-R4, C4 ⑧). 시험이 내보내기 목록을 붙잡는다.
+  - **패키지 진입점의 내보내기.** 포크가 보는 `@pki/backend`(`backend/src/index.ts`)는 포크의 파일이 쓰는 것만 내보낸다: `runShell`, `runSiteCheck`, `checkSiteRegistration`, `publicSite`, 타입 `SiteRegistration`·`SiteRegistrationCode`·`ConnectorFactory`·`ConnectorInstanceConfig`. **`bootBackend`와 그 옵션 타입은 내보내지 않는다. 서버를 띄우는 `startServer`(와 그 옵션·반환 타입)도 내보내지 않는다**(I05-T05. 이 저장소에서 `@pki/backend`로 그것을 가져오는 곳이 없었고, 등록 검사와 장부 재적용과 정책 결정을 건너뛰는 조립 함수라서 포크의 파일에 필요한 것이 아니다). 그 옵션(`connectors`, `scopePolicy`, 시험용 대체)은 등록 검사와 "설치본을 `default`로 돌리는 스위치는 없다"(I05-R15)를 건너뛰므로, 포크의 파일에 필요한 것은 진입점 둘뿐인 `runShell`·`runSiteCheck`다. 예시 패키지의 부팅 시험(C1 ①)은 진입점 파일을 경로로 띄워 본다(자식 프로세스). `backend/src`의 파일을 상대 경로로 가져오거나 `@pki/backend/<하위 경로>`로 가져오는 일은 포크 모양의 패키지(`@pki-site/*`와 `@pki/site-example`)에서 막힌다. 시험 파일도 마찬가지이며, 경계 규칙이 이를 붙잡는다(I05-R4, C4 ⑧). 시험이 내보내기 목록을 붙잡는다.
   - 어떤 이름이 공용 종류인지는 바탕이 아니라 상수(I05-R7)로 판정한다. 그래서 `--fixtures` 없이 띄울 때도 `test-fixtures`는 등록할 수 없다.
 - **I05-R2 진입점 선택.** `backendEntry(root)`가 백엔드 진입점의 경로를 정한다.
   - `site/composition/package.json`이 없으면 `backend/src/shell.ts`다.
@@ -323,6 +323,10 @@ site/
 | **악의적인 포크 코드나 그 의존성** | 믿는 코드로 실었다. 등록 검사는 코드의 행동을 보지 않는다 | 정본, 비밀 값, 네트워크에 모두 닿는다 | 포크의 코드 검토와 의존성 관리. 설치 스크립트는 돌지 않는다. 다만 설치 스크립트가 있는 의존성은 포크가 `pnpm-workspace.yaml`의 `allowBuilds`에 `false`를 적기 전에는 `pnpm install`이 실패한다. 스크립트가 정말 필요한 의존성은 비목표다(I05-R5) |
 | 수집기 패키지가 `EXTERNAL_PACKAGES`의 이름(예: `better-sqlite3`)을 자기 버전으로 선언(소스를 읽은 것, I05-T01) | 그 이름은 묶음에서 빠지고 앱 폴더에는 `build.ts`의 `DECLARED_IN`이 정한 패키지만 복사된다 | 실행 때 수집기는 공용이 복사한 것을 쓰고 이를 확인하는 검사는 없다 | 포크의 검토 |
 | 포크가 계약 묶음을 돌리지 않고 수집기를 등록 | 빌드가 강제하지 않는다(I05-R21) | 규격을 어긴 수집기가 실린다. 돌려준 값의 검사는 그대로 걸린다 | 문서의 절차, S18 |
+| 린트가 보지 않는 길: `tsconfig`의 `paths` 별칭, 패키지 안의 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`(I05-T04 검토 W2·W3) | 모두 일부러 해야 닿는 길이고, 경계 규칙은 글자로 적힌 지정자만 본다 | 별칭과 링크는 번들러가 따라가 `backend/src`의 모듈이 묶일 수 있다. `createRequire`는 소스 실행에서만 닿고 산출물에서는 없는 경로를 부르는 오류가 된다. 계산된 `import()`는 번들러가 폴더 전체로 넓혀 빌드가 실패한다(그 이유는 우연이다) | 포크의 코드 검토. 문서 connector-sdk.md 7장에 적었다 |
+| 네이티브 모듈 검사가 놓치는 것: 계산된 이름으로 네이티브 모듈을 불러오고 JS 코드로 내려가는 패키지, 빌드한 OS에 설치된 패키지만 본다는 것(I05-T04 검토 W1) | 번들러가 풀지 않은 모듈은 검사하지 못하고, 운영체제마다 다른 선택 의존성은 그 컴퓨터에 깔린 것만 있다 | 빌드가 조용히 지나가 내려갈 코드가 묶인다. 한 OS에서는 실패하고 다른 OS에서는 통과할 수 있다 | 포크의 검토, S27(Windows 설치본) |
+| 예시의 `tsconfig.json`을 그대로 복사함(I05-T04 검토 W6) | 참조 경로가 폴더 깊이에 따라 달라진다(`../connector-example` → `../../packages/connector-example`) | `pnpm typecheck`가 참조한 프로젝트를 찾지 못해 실패한다(시끄럽다) | 문서 connector-sdk.md 7장 |
+| `site/composition/package.json` 없이 `src/shell.ts`만 있음(I05-T04 검토 W4) | I05-R2 ①이 그렇게 정했다(패키지가 없으면 공용 진입점) | 오류 없이 공용 진입점이 묶인다. 같은 패키지 이름으로의 `pnpm --filter` 명령은 시끄럽게 실패한다 | 문서 connector-sdk.md 7장 |
 
 ### 인스턴스의 상태
 
@@ -540,7 +544,7 @@ PoC 하나와 구현 묶음 넷이다. 한 행이 PR 하나다. 묶음은 **차�
 |---|---|---|
 | I04 spec | I04-R14의 "이름이 없으면 기본"에 이 spec I05-R15를 가리키는 한 줄 | I05-T03 |
 | I03 spec | "I03-T09가 넘기는 것"의 "재초기화가 안전한지는 수집기 규격이 정하지 않았다"는 잠정 주석에, I05-R13이 새 객체로 풀었고 늦은 재점검 결과를 버리게 되었다는 한 줄 | I05-T02 |
-| I01 spec | "T10이 넘기는 것" 4·5·8항 가운데 이 spec이 닫은 것에 처리 표시 | I05-T05 |
+| I01 spec | "T10이 넘기는 것" 4·5·8항 가운데 이 spec이 닫은 것에 처리 표시 | I05-T05(했다) |
 | I02-B spec과 그 구현 | ① 공용이 더하는 종류(`local-files`)와 시작할 때 만드는 인스턴스의 ID를 공용 종류 모듈에 더한다(잊으면 I05-C14 ①이 실패한다) ② 실행 중에 만드는 인스턴스 ID의 접두사를 공용 인스턴스 ID 판정에 더한다(미해결 질문 5. I02-B spec이 I02B-R51·I02B-C48로 가져갔고 I02B-T06이 맡는다) ③ connector-sdk.md 7장은 나중에 들어오는 작업이 먼저 들어온 것에 맞춰 고친다 | ②는 I02-B의 spec에 반영됨 |
 | 이슈 #115 | 이 spec은 #115를 풀지 않으며, 남기는 것 셋(설계 개요)과 "등록으로 싣는 방법은 후보 하나"라는 점 | 조정자 |
 | 이슈 #113 | 번호 배정(S26·S27, ADR은 I02-B 다음)과 작업 묶음 다섯. 그리고 이슈의 과제 2("공용 파일을 고치지 않고 lockfile이 포크의 추가를 받는다")를 이 spec이 "도구가 다시 만든 `pnpm-lock.yaml`의 차이는 받아들인다"로 좁혔다는 점 | 조정자 |

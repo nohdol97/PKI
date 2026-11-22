@@ -15,6 +15,8 @@ const docsDir = resolve(repoRoot, "docs");
 const read = (path: string) => readFileSync(resolve(repoRoot, path), "utf8");
 /** Files the text names that belong to the deployment fork: the public repository has none of them. */
 const FORK_FILES = new Set(["site/config/connector-scopes.json"]);
+/** A fork's file: the one scopes file, or anything under `site/` (the fork's composition and collector packages). */
+const isForkPath = (path: string) => FORK_FILES.has(path) || path.startsWith("site/");
 const docText = read("docs/connector-sdk.md");
 const ownership = read("docs/ownership.md");
 const readme = read("README.md");
@@ -225,7 +227,7 @@ describe("docs.connector-sdk: what the text names exists in the code", () => {
   it("every file path the text names exists", () => {
     const paths = namedPaths(docText, docsDir);
     expect(paths.length).toBeGreaterThanOrEqual(8);
-    expect(paths.filter((p) => !FORK_FILES.has(p) && !existsSync(resolve(repoRoot, p)))).toEqual([]);
+    expect(paths.filter((p) => !isForkPath(p) && !existsSync(resolve(repoRoot, p)))).toEqual([]);
   });
 
   it("every relative link in the text resolves", () => {
@@ -286,7 +288,7 @@ describe("docs.connector-sdk: what the text names exists in the code", () => {
   it("fails when a file the text names does not exist", () => {
     const mutated = docText.replace("backend/src/composition.ts", "backend/src/gone.ts");
     const missing = namedPaths(mutated, docsDir).filter(
-      (p) => !FORK_FILES.has(p) && !existsSync(resolve(repoRoot, p)),
+      (p) => !isForkPath(p) && !existsSync(resolve(repoRoot, p)),
     );
     expect(docText).toContain("backend/src/composition.ts");
     expect(missing).toEqual(["backend/src/gone.ts"]);
@@ -438,10 +440,12 @@ describe("docs.connector-sdk: shape of the text", () => {
     expect(chapter(docText, 11)).toContain("| 항목 | 상태 |");
   });
 
-  it("chapter 11 names each tracked gap by its issue number", () => {
+  it("chapter 11 names each tracked gap by its issue number; the fork registration (#113) is built and is no row", () => {
     const eleven = chapter(docText, 11);
-    for (const issue of ["#113", "#114", "#115", "#116"]) expect(eleven, issue).toContain(issue);
-    expect(chapter(docText, 7)).toContain("#113");
+    for (const issue of ["#114", "#115", "#116", "#121"]) expect(eleven, issue).toContain(issue);
+    expect(eleven).not.toContain("#113");
+    expect(chapter(docText, 7)).not.toContain("#113");
+    expect(chapter(docText, 7)).toContain("#121");
   });
 
   it("fails when a chapter loses its recap", () => {
@@ -497,7 +501,7 @@ describe("docs.connector-sdk: the places that point to it", () => {
     for (const word of ["scope-change", "revision", "namespace", "deletionsOnRescan", "@pki/connector-sdk"]) {
       expect(section(2), word).toContain(word);
     }
-    for (const word of ["connector-scopes.json", "import 검사", "`site/`를 보지 않으므로", "현재의 예외", "#113", "#114", "#115", "#116"]) {
+    for (const word of ["connector-scopes.json", "import 검사", "`site/`를 보지 않으므로", "현재의 예외", "#114", "#115"]) {
       expect(section(3), word).toContain(word);
     }
   });
@@ -529,5 +533,320 @@ describe("docs.connector-sdk: the places that point to it", () => {
     const mutated = `${head}## 3.${tail.replaceAll("(connector-sdk.md)", "(connector-sdk-gone.md)")}`;
     expect(mutated).not.toBe(ownership);
     expect(mutated.split("## 3.")[1]).not.toContain("(connector-sdk.md)");
+  });
+});
+
+// I05-C19 `docs.connector-sdk` (I05-R22, R23): chapter 7 says how a fork puts its collectors into the product, and
+// each sentence a fork reader relies on is held here, either by the code it describes or as the sentence itself (a
+// reverted sentence turns the test red). A test file in tooling/ cannot import the backend, so what the code holds
+// is read as text. These tests hold with or without a `site/` folder: they read the example package, never `site/`.
+describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
+  const seven = chapter(docText, 7);
+  const exampleDir = "packages/site-example";
+
+  it("lists the files a fork adds, each of the composition package's that the example has too", () => {
+    for (const line of [
+      "├── composition/                  조립 패키지 @pki-site/composition",
+      "│   ├── package.json",
+      "│   ├── tsconfig.json",
+      "│       ├── registration.ts       registration: SiteRegistration",
+      "│       ├── registration.test.ts  checkSiteRegistration(registration)이 빈 목록",
+      "│       ├── shell.ts              await runShell(registration)",
+      "│       └── site-check.ts         await runSiteCheck(registration, 인자)",
+      "├── connectors/<이름>/            수집기 패키지 @pki-site/connector-<이름>",
+      "│   └── src/adapters/             구현과 계약 테스트",
+    ]) {
+      expect(seven, line).toContain(line);
+    }
+    for (const file of ["package.json", "tsconfig.json", "src/registration.ts", "src/registration.test.ts", "src/shell.ts", "src/site-check.ts"]) {
+      expect(existsSync(resolve(repoRoot, exampleDir, file)), file).toBe(true);
+    }
+  });
+
+  it("names a fork file only where the example package has the file it copies", () => {
+    const forkNamed = namedPaths(seven, docsDir).filter((p) => p.startsWith("site/composition/"));
+    expect(forkNamed.length).toBeGreaterThanOrEqual(3);
+    for (const path of forkNamed) {
+      const copy = path.replace("site/composition/", `${exampleDir}/`);
+      expect(existsSync(resolve(repoRoot, copy)), `${path} is the example's ${copy}`).toBe(true);
+    }
+  });
+
+  it("takes its code blocks from the example package: registration, both entries and the registration test", () => {
+    const files = new Set(excerpts(seven).found.map((f) => f.file));
+    for (const file of ["registration.ts", "shell.ts", "site-check.ts", "registration.test.ts"]) {
+      expect(files, file).toContain(`${exampleDir}/src/${file}`);
+    }
+    expect(excerptProblems(seven)).toEqual([]);
+  });
+
+  it("gives the commands of I05-R21, in this order, and says the contract suite is a procedure the build does not enforce", () => {
+    expect(seven).toContain(
+      [
+        "```sh",
+        "pnpm install",
+        "pnpm lint && pnpm typecheck && pnpm test",
+        "pnpm --filter @pki-site/composition site-check <종류>",
+        "pnpm --filter @pki/desktop build",
+        "```",
+      ].join("\n"),
+    );
+    expect(seven).toContain("**문서의 절차이고 빌드가 강제하지 않는다.**");
+    expect(JSON.parse(read(`${exampleDir}/package.json`)).scripts["site-check"]).toBe("node src/site-check.ts");
+    expect(JSON.parse(read("apps/desktop/package.json")).scripts.build).toBeDefined();
+  });
+
+  it("says the public site-check only points at the fork's command where a composition package exists, and the code does that", () => {
+    expect(seven).toContain("조립 패키지가 있는 저장소에서 실행하면 자리표시의 결과를 내지 않고");
+    expect(seven).toContain("그 패키지의 `package.json`의 `name`을 읽어 위의 포크 명령을 알린 뒤 2로 끝난다");
+    const code = read("backend/src/site-check-main.ts");
+    expect(code).toContain('const file = join(root, "site/composition/package.json");');
+    expect(code).toContain("`pnpm --filter ${name} site-check <종류>`");
+  });
+
+  it("says which entry the build picks, with the two edges, and the code picks that way", () => {
+    for (const sentence of [
+      "`site/composition/package.json`이 있으면 `site/composition/src/shell.ts`를 백엔드의 진입점으로 고르고, 없으면 `backend/src/shell.ts`를 고른다",
+      "`site/composition/package.json`은 있는데 `site/composition/src/shell.ts`가 없으면 그 경로를 적은 오류로 실패한다",
+      "**반대로 `site/composition/src/shell.ts`만 있고 `site/composition/package.json`이 없으면 오류 없이 공용 진입점을 묶는다.**",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    const code = read("apps/desktop/src/backend-entry.ts");
+    expect(code).toContain('existsSync(join(root, "site/composition/package.json"))');
+    expect(code).toContain('return join(root, "backend/src/shell.ts");');
+    expect(code).toContain('join(root, "site/composition/src/shell.ts")');
+    expect(code).toContain("has a package.json but no backend entry");
+  });
+
+  it("names exactly what the package entry exports, and says the boot and server functions are not exported", () => {
+    const entry = read("backend/src/index.ts");
+    const exported = [...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)]
+      .flatMap((m) => (m[1] as string).split(","))
+      .map((n) => n.trim().replace(/^type /, ""))
+      .filter(Boolean);
+    expect(exported.length).toBeGreaterThanOrEqual(8);
+    for (const name of exported) expect(namesToken(seven, name), `${name} is named`).toBe(true);
+    expect(entry).not.toMatch(/bootBackend|startServer/);
+    expect(seven).toContain("`bootBackend`와 서버를 띄우는 `startServer`는 내보내지 않는다.");
+  });
+
+  it("lists every registration check code, and which of them stop the start", () => {
+    const code = read("backend/src/site-registration.ts");
+    const union = /export type SiteRegistrationCode =([^;]*);/.exec(code)?.[1] ?? "";
+    const all = [...union.matchAll(/"([a-z-]+)"/g)].map((m) => m[1] as string);
+    expect(all.length).toBe(12);
+    for (const name of all) expect(namesToken(seven, name), name).toBe(true);
+    const stopping = [...(/const STOPPING_CODES = \[([^\]]*)\]/.exec(code)?.[1] ?? "").matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+    const rows = seven.split("\n").filter((l) => /^\| `[a-z-]+` \|/.test(l));
+    const stoppingRows = rows.filter((l) => l.includes("**시작을 멈춘다**")).map((l) => /^\| `([a-z-]+)`/.exec(l)?.[1]);
+    expect(stoppingRows).toEqual(stopping);
+    expect(rows.length).toBe(10);
+  });
+
+  it("names the public kinds and the placeholders the registration cannot or may take, as the code lists them", () => {
+    const kinds = read("backend/src/public-kinds.ts");
+    expect(kinds).toContain('export const PUBLIC_CONNECTOR_KINDS: readonly string[] = ["jsonl-import", "test-fixtures"];');
+    for (const name of ["PUBLIC_CONNECTOR_KINDS", "isPublicInstanceId", "`jsonl-import`", "`test-fixtures`", "`site-mail`", "`site-messenger`", "`site-wiki`"]) {
+      expect(seven, name).toContain(name);
+    }
+    expect(seven).toContain("**공용 종류는 등록할 수 없다**");
+    expect(seven).toContain("인스턴스는 **이 등록이 등록한 종류의 것만** 만들 수 있다.");
+  });
+
+  it("gives the fork's package.json and tsconfig.json as the example's, with the one change tsconfig needs", () => {
+    const blocks = [...seven.matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => JSON.parse(m[1] as string));
+    expect(blocks).toHaveLength(2);
+    const manifest = JSON.parse(read(`${exampleDir}/package.json`));
+    expect(blocks[0]).toEqual({ ...manifest, name: "@pki-site/composition" });
+    const tsconfig = JSON.parse(read(`${exampleDir}/tsconfig.json`));
+    const moved = (tsconfig.references as { path: string }[]).map((r) =>
+      r.path.startsWith("../../") ? r : { path: r.path.replace("../", "../../packages/") },
+    );
+    expect(blocks[1]).toEqual({ ...tsconfig, references: [...moved, { path: "../connectors/<이름>" }] });
+    // the copy is wrong exactly where the references changed: the example's own first three are siblings
+    expect(tsconfig.references.some((r: { path: string }) => /^\.\.\/(?!\.)/.test(r.path))).toBe(true);
+  });
+
+  it("says the example's tsconfig.json cannot be copied as it is, and why", () => {
+    for (const sentence of [
+      "**`tsconfig.json`은 예시를 그대로 복사할 수 없다.**",
+      "`../connector-example`처럼 가리키는데, `site/composition/`에서는 같은 패키지가 `../../packages/connector-example`이다",
+      "그대로 두면 참조한 프로젝트를 찾지 못해 `pnpm typecheck`가 실패한다",
+      "`site/` 아래 패키지에 `tsconfig.json`이 없으면 그 패키지 이름을 적어 실패한다",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    expect(read("tooling/workspace/typecheck.ts")).toContain("has no tsconfig.json: add one");
+  });
+
+  it("states what the lint stops, including inline configuration, and the four ways it does not look", () => {
+    for (const sentence of [
+      "`backend/src`를 상대 경로, 절대 경로, `file:` 주소로 가져오거나 `@pki/backend/<하위 경로>`로 가져오는 것. 시험 파일도 마찬가지다.",
+      "`site/`와 `packages/site-example/`의 파일에서는 인라인 설정(`// eslint-disable pki/module-boundary`, `/* eslint pki/module-boundary: … */`)이 효력이 없다.",
+      "**린트가 보지 않는 길이 넷 있다.** `tsconfig`의 `paths` 별칭, 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`다.",
+      "일부러 해야 닿는 길이고 린트는 막지 않는다. 포크의 코드 검토가 맡는다.",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    const config = read("eslint.config.js");
+    expect(config).toContain('files: ["site/**", "packages/site-example/**"],');
+    expect(config).toContain("linterOptions: { noInlineConfig: true },");
+  });
+
+  it("states what the native-module check misses, and that it depends on the machine that builds", () => {
+    for (const sentence of [
+      "수집기 패키지의 의존성이 네이티브 코드(패키지 폴더에 `binding.gyp`나 `prebuilds/` 폴더가 있거나 `.node` 파일이 든 것)이면 빌드가 그 패키지 이름을 적어 실패한다.",
+      "**그 검사에는 빠져나가는 곳이 둘 있다.** 하나는 계산된 이름으로 네이티브 모듈을 불러오고 못 찾으면 순수 JS 코드로 내려가는 패키지다.",
+      "검사가 **빌드하는 컴퓨터에 설치된 패키지만 본다**는 것이다.",
+      "그래서 이 검사 통과는 Windows 설치본에서 동작한다는 증거가 아니다(site-setup S27).",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    const code = read("apps/desktop/build/bundle.ts");
+    expect(code).toContain('existsSync(join(pkg.dir, "binding.gyp"))');
+    expect(code).toContain('existsSync(join(pkg.dir, "prebuilds"))');
+    expect(code).toContain('export const EXTERNAL_PACKAGES = ["better-sqlite3", "@huggingface/transformers"] as const;');
+  });
+
+  it("says what the installed build refuses and keeps: no source-run switches, the registration's policy always", () => {
+    for (const sentence of [
+      "설치본의 백엔드는 `--scope-policy`와 `--fixtures`를 받지 않는다(받으면 시작이 실패한다).",
+      "설치본을 공용 기본 정책으로 돌리는 스위치는 없다.",
+      "묶음에는 등록과 그 수집기의 모듈이 들어가고, 테스트 파일과 `@pki/testkit`은 들어가지 않는다.",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    const production = read("backend/src/shell-options.production.ts");
+    expect(production).not.toContain("--fixtures");
+    expect(production).toContain("origin: { type: \"string\", multiple: true, default: [] },");
+  });
+
+  it("holds the lockfile procedure: what changes, the conflict rule, the empty importer, the install-script exception", () => {
+    for (const sentence of [
+      "그 변경은 포크 패키지의 `importers` 항목과 그 외부 의존성뿐이다. 손으로 고치지 않는다.",
+      "`pnpm-lock.yaml`이 충돌하면 **공용 쪽의 내용을 취하고** `pnpm install`을 다시 실행한다.",
+      "의존성이 하나도 없는 포크 패키지는 `importers`에 빈 항목(`site/connectors/x: {}`)을 남기는데 그 패키지를 지워도 `pnpm install`이 그 항목을 지우지 않는다. 그때는 항목을 손으로 지운다.",
+      "`tooling/workspace/lockfile-registry.test.ts`가 거부하고, 그 시험은 포크에서도 돈다.",
+      "`pnpm install`이 `ERR_PNPM_IGNORED_BUILDS`로 실패하고, 그 실패한 실행이 `pnpm-workspace.yaml`의 `allowBuilds`에 `<패키지>: set this to true or false` 줄을 스스로 써 넣는다.",
+      "포크는 그 줄을 `false`로 고친다(스크립트를 돌리지 않는다는 뜻이고, 측정한 것은 이 값뿐이다).",
+      "스크립트가 정말 필요한 의존성(`true`)은 지원하지 않는다. [ownership.md 5절](ownership.md)의 방법으로 공용에 알린다.",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    expect(existsSync(resolve(repoRoot, "tooling/workspace/lockfile-registry.test.ts"))).toBe(true);
+    // both workspace lines are in the public file: a fork edits neither
+    expect(read("pnpm-workspace.yaml")).toContain("  - site/composition\n  - site/connectors/*\n");
+    expect(seven).toContain("`pnpm-workspace.yaml`의 `packages:` 목록에는 `site/composition`과 `site/connectors/*`가 이미 있다.");
+  });
+
+  it("states the trust boundary: not sandboxed, what the time limit cannot stop, the concurrent-initialize premise", () => {
+    for (const sentence of [
+      "정본 DB, 비밀 값 통로, 네트워크, 파일에 닿고 **가둬지지 않는다.**",
+      "등록 검사와 시간 제한은 실수와 느린 초기화를 잡는 장치이지 격리가 아니다.",
+      "막지 못하는 것: 만드는 함수나 `initialize`의 **동기 멈춤**",
+      "**포크 모듈을 읽는 도중의 예외**",
+      "그러므로 `initialize`는 같은 설정의 다른 객체가 동시에 초기화 중일 수 있다는 것을 전제로 쓴다. 혼자만 잡는 잠금 파일이나 포트를 쓰지 않는다.",
+      "늦게 끝나 버려진 객체는 닫히지 않은 채 자원을 쥘 수 있다.",
+      "60초를 넘겨 끝난 재점검이 연달아 3번이면 그 인스턴스의 재점검을 그만두고 앱을 다시 시작할 때까지 준비되지 않은 채로 둔다(`connector-recheck-abandoned`).",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+  });
+
+  it("warns against restoring a backup with a build that lacks a kind, and points to the issue that tracks it", () => {
+    for (const sentence of [
+      "### 수집기 종류를 뺀 빌드로 백업을 복원하지 않는다",
+      "모르는 종류의 줄은 건너뛰면서도 적용 위치를 올린다.",
+      "그 사이에 건너뛴 삭제는 다시 적용되지 않고 지운 자료가 다음 동기화에서 되돌아올 수 있다.",
+      "고치는 일은 공용 저장소의 #121이 추적한다.",
+    ]) {
+      expect(seven, sentence).toContain(sentence);
+    }
+    expect(chapter(docText, 11)).toContain("(7장, #121)");
+  });
+
+  it("lists every cause of `unavailable` in the outcome table's row (chapter 5)", () => {
+    const row = docText.split("\n").find((l) => l.startsWith("| 인스턴스가 `unavailable`("));
+    expect(row).toBeDefined();
+    for (const cause of ["초기화 시간 초과", "초기화 실패", "만드는 함수의 예외", "등록에 없는 종류", "`unsupported-sdk-version`"]) {
+      expect(row, cause).toContain(cause);
+    }
+  });
+
+  it("chapter 6 sends a collector to chapter 7 and no longer asks the fork to edit the workspace file", () => {
+    const six = chapter(docText, 6);
+    expect(six).toContain("**`site/connectors/<이름>/`에 두는 법.**");
+    expect(six).toContain("포크는 `pnpm-workspace.yaml`을 고치지 않는다.");
+    expect(six).not.toContain("목록 안에** `  - site/connectors/*`");
+    for (const old of ["지금 포크가 `site/` 밖에서 고쳐야 하는 곳 전부", "그 빈 곳은 #113이 추적한다"]) {
+      expect(docText).not.toContain(old);
+    }
+  });
+
+  it("no longer says the way in does not exist", () => {
+    for (const old of [
+      "`site/` 안에서 수집기를 등록하는 길이 없다",
+      "`site/connectors/`를 읽는 코드와 워크스페이스 항목은 아직 없다",
+      "지금은 `site/` 밖의 파일을 고쳐야 연결된다",
+      "`backend/src/composition.ts`의 `connectorKinds`(종류와 만드는 함수)와 `connectorInstances()`(인스턴스와 설정)",
+    ]) {
+      expect(docText, old).not.toContain(old);
+    }
+  });
+});
+
+describe("docs.connector-sdk (I05): ownership.md section 3 (I05-R23)", () => {
+  const lines = ownership.split("\n");
+  const start = lines.findIndex((l) => l.startsWith("## 3. "));
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => l.startsWith("## "));
+  const three = rest.slice(0, end < 0 ? undefined : end).join("\n");
+  const exception = three.slice(three.indexOf("**현재의 예외.**"), three.indexOf("`site/config/connector-scopes.json`은"));
+
+  it("draws site/composition/ in the folder picture", () => {
+    expect(three).toContain("├── composition/     포크: 조립 패키지(등록 객체 하나와 진입점 둘. 수집기를 제품에 끼운다)");
+  });
+
+  it("leaves only the lockfile, the allowBuilds `false` lines, #114, #115 and the build values in the exception paragraph", () => {
+    expect(exception.length).toBeGreaterThan(300);
+    for (const word of ["`pnpm-lock.yaml`", "`allowBuilds`", "`false` 줄", "#114", "#115", "배포처 전송 규칙", "묶을 Provider", "검증된 CLI 조합 목록", "데이터 등급 목록"]) {
+      expect(exception, word).toContain(word);
+    }
+    expect(exception).toContain("`packages:` 목록은 포함하지 않는다.");
+    expect(exception).toContain("[ADR 0018](adr/0018-fork-registration-at-build-time.md)");
+  });
+
+  it("no longer asks the fork to edit composition.ts, backend/package.json or the workspace list", () => {
+    expect(exception).not.toContain("포크가 `site/` 밖의 다음 파일을 고쳐야 한다");
+    expect(exception).not.toContain("`pnpm-workspace.yaml`의 `packages:` 목록과 `pnpm-lock.yaml`");
+    expect(exception).not.toContain("`backend/package.json`의 의존성");
+    expect(exception).not.toContain("#113");
+    // the one mention of composition.ts says the fork does not edit it
+    expect(exception).toContain("공용의 `backend/src/composition.ts`나 `backend/package.json`을 고치지 않는다");
+  });
+
+  it("points to chapter 7 as the way in, not as a gap", () => {
+    expect(three).toContain("제품에 연결하는 방법은 7장에 있다.");
+    expect(three).not.toContain("제품에 연결하는 길이 아직 없다는 점");
+  });
+});
+
+describe("docs.connector-sdk (I05): the ADR and its index (I05-R24)", () => {
+  it("is listed in the ADR index and in the docs index, and the file exists with the state and the decisions", () => {
+    const adr = read("docs/adr/0018-fork-registration-at-build-time.md");
+    expect(adr).toContain("# ADR 0018: 배포처 수집기는 빌드할 때 진입점 주입으로 등록한다");
+    expect(adr).toContain("상태: **잠정 — 배포처 검증 대기**");
+    expect(read("docs/adr/README.md")).toContain("| [0018](0018-fork-registration-at-build-time.md) |");
+    expect(docsIndex).toContain("결정 기록 17건(잠정 12, 확정 4, 미결 1.");
+    expect(docsIndex).toContain("포크에 두고 연결하는 방식은 ADR 0018");
+    const numbers = readdirSync(resolve(docsDir, "adr")).flatMap((f) => /^(\d{4})-/.exec(f)?.[1] ?? []);
+    expect(numbers).toContain("0018");
+  });
+
+  it("is the one chapter 7, ownership.md and site-setup.md point to", () => {
+    for (const text of [docText, ownership, read("docs/site-setup.md")]) {
+      expect(text).toContain("adr/0018-fork-registration-at-build-time.md");
+    }
   });
 });
