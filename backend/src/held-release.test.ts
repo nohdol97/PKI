@@ -27,6 +27,7 @@ import {
 import type { ConnectorManager } from "./connectors.ts";
 import {
   computePolicyFingerprint,
+  HELD_REASONS,
   HELD_REEVALUATION_MS,
   reevaluateHeldJobs,
   releaseHeldOnEvent,
@@ -181,6 +182,15 @@ describe("held.release (I03-R16 ①, ③)", () => {
     db.run("UPDATE jobs SET reason = 'unverified-background' WHERE id = ?", [b]);
     db.run("UPDATE jobs SET reason = 'unverified-malicious' WHERE id = ?", [c]);
     expect(releaseHeldOnEvent(db, "default-provider")).toBe(3);
+    // every reason of the exception, not only the three set above
+    expect(Object.keys(HELD_REASONS)).toEqual(
+      expect.arrayContaining([
+        "unverified-background",
+        "unverified-not-synthetic",
+        "unverified-malicious",
+        "unverified-ack-required",
+      ]),
+    );
     expect(ids.map((id) => readJob(db, id)?.status)).toEqual(["queued", "queued", "queued"]);
   });
 
