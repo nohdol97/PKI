@@ -18,6 +18,7 @@ import {
   readTombstoneState,
   registerConnectorInstance,
   saveSourceRecord,
+  defaultScopePolicy,
   ledgerOf,
   listInvalidations,
   purgeEndedJobs,
@@ -47,7 +48,6 @@ import {
   productRegistry,
 } from "./composition.ts";
 import { reapplyAtStart } from "./ledger-boot.ts";
-import { INTERIM_POLICY } from "./interim-policy.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "t".repeat(43);
@@ -95,7 +95,7 @@ const start = async (registry?: DerivativeRegistry) =>
   }));
 /** The product's registry that notes each propagation in `order`. */
 function spiedRegistry(order: string[]): DerivativeRegistry {
-  const base = createProductRegistry({ policy: INTERIM_POLICY });
+  const base = createProductRegistry({ policy: defaultScopePolicy });
   return {
     ...base,
     propagate: (tx, change) => {
@@ -182,7 +182,7 @@ describe("ledger.boot-reconcile", () => {
     });
     const listen = vi.spyOn(http.Server.prototype, "listen");
     const failing: DerivativeRegistry = {
-      ...createProductRegistry({ policy: INTERIM_POLICY }),
+      ...createProductRegistry({ policy: defaultScopePolicy }),
       propagate: () => {
         throw new Error("a kind failed");
       },

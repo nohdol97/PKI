@@ -14,6 +14,7 @@ import { parseArgs } from "node:util";
 import { dataDirectory } from "@pki/storage";
 import { bootBackend, closeProviders } from "./boot.ts";
 import { fixtureConnectors } from "./composition.ts";
+import { scopePolicyFromEnv } from "./scope-policy.ts";
 import { envSecrets } from "./secret-sources.ts";
 
 // Development seeds come from the repository's synthetic fixtures (V01-R7).
@@ -37,6 +38,7 @@ const { server, providers } = await bootBackend({
   allowedOrigins: values.origin,
   port: Number(values.port),
   secrets: envSecrets(process.env),
+  scopePolicy: scopePolicyFromEnv(process.env),
 });
 process.stdout.write(`${JSON.stringify({ url: server.url, token })}\n`);
 // stopped by the dev server (SIGTERM) or Ctrl+C: end running CLI trees first (V01-T10)

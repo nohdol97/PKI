@@ -9,6 +9,7 @@
 // A result and a checkpoint are written behind I03-R6's three checks (closeJob,
 // checkpointJob); the fence among them is commitDerived (commit-derived.ts).
 import { commitDerived } from "./commit-derived.ts";
+import type { CommitScope } from "./derivatives.ts";
 import type { DerivedItem } from "./derivatives.ts";
 import { assertMaxConcurrent, pickDueJob } from "./job-concurrency.ts";
 import { FENCE_FREE_KINDS, usesVersionFence } from "./job-kinds.ts";
@@ -506,6 +507,7 @@ function checkedWrite(
   lease: Lease,
   result: readonly DerivedItem[] | (() => void),
   at: Date,
+  scope?: CommitScope,
 ): StoredJob | "not-leased" | "cancelled" | "superseded" {
   const job = readJob(db, lease.id);
   if (job?.status !== "running" || job.leaseToken !== lease.leaseToken) return "not-leased";
@@ -532,6 +534,8 @@ function checkedWrite(
       : result;
   const committed = commitDerived(db, {
     source,
+    // a projection kind's write names no derivative of a source version: no scope question (I04-T09)
+    ...(scope && usesVersionFence(job.kind) ? { scope } : {}),
     items: items.map((item) => ({
       ...item,
       write: (tx: SqlDriver) => {
@@ -572,7 +576,9 @@ function checkedWrite(
  * under that lease (closed already, never claimed, or claimed again) is left as it
  * is and nothing is written; a cancel request discards the closing, whatever it
  * is, and closes the job cancelled; a stale fence discards it and closes the job
- * superseded. Otherwise the closing is applied: the result is written with
+ * superseded. `scope` (I04-T09) is the policy's question and record that commitDerived
+ * asks of each item; an item it refuses is left out and the job closes as it would.
+ * Otherwise the closing is applied: the result is written with
  * `succeeded`; `held`, a yield (`queued`) and a refunded `retry` give the claim's
  * attempt back; `retry` and `queued` set when the job may run again. A file
  * locked by another process fails the close (SQLITE_BUSY) before any result is
@@ -586,6 +592,7 @@ export function closeJob(
   lease: Lease,
   closing: JobClosing,
   at: Date = new Date(),
+  scope?: CommitScope,
 ): JobClosing["status"] | "cancelled" | "not-leased" {
   if ("reason" in closing) assertReason(closing.reason);
   if ("runAfter" in closing && !Number.isSafeInteger(closing.runAfter)) {
@@ -597,7 +604,7 @@ export function closeJob(
     () => {
       const result =
         closing.status !== "succeeded" ? [] : "items" in closing ? closing.items : closing.write;
-      const job = checkedWrite(db, lease, result, at);
+      const job = checkedWrite(db, lease, result, at, scope);
       if (typeof job === "string") return job;
       transitionJob(db, lease.id, {
         from: "running",
@@ -674,11 +681,12 @@ export function checkpointJob(
   lease: Lease,
   step: { fields: readonly string[]; value: Checkpoint; write?: () => void },
   at: Date = new Date(),
+  scope?: CommitScope,
 ): "saved" | "cancelled" | "superseded" | "not-leased" {
   const encoded = encodeCheckpoint(step.fields, step.value);
   return db.transaction(
     () => {
-      const job = checkedWrite(db, lease, step.write ?? [], at);
+      const job = checkedWrite(db, lease, step.write ?? [], at, scope);
       if (typeof job === "string") return job;
       db.run("UPDATE jobs SET checkpoint = ?, updated_at = ? WHERE id = ?", [
         encoded,

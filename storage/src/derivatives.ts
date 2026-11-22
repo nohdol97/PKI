@@ -8,10 +8,12 @@
 // This module also fixes, as types, the names and shapes of the I04 spec's
 // design-overview block that later tasks implement: commitDerived (I04-T06,
 // commit-derived.ts), canonicalTransaction and the tombstone entries (I04-T05,
-// ledger lines I04-T10) and ScopePolicy's default (I04-T09). I01 and I03 cite
-// these names; change the spec block first.
+// ledger lines I04-T10); ScopePolicy's default is scope-policy.ts and the record of
+// what it refused scope-drops.ts (I04-T09). I01 and I03 cite these names; change the
+// spec block first.
 import { startInvalidation, finishInvalidation, type SourceChangeKind } from "./invalidations.ts";
 import { readChangeSeq } from "./revisions.ts";
+import { mayCombine } from "./scope-policy.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 import type { TombstoneReason } from "./tombstones.ts";
 
@@ -60,6 +62,8 @@ export interface InvalidationContext {
   collected: ReadonlyMap<string, Affected>;
   /** This propagation's invalidation record (a re-extraction's `scope-recompute:<id>`, I04-R15). */
   invalidationId: number;
+  /** Whether the registry's policy lets these source versions be put together (false on any doubt, I04-R14). */
+  combinable(lineage: readonly SourceVersionRef[]): boolean;
 }
 
 export interface InvalidationCounts {
@@ -92,15 +96,31 @@ export interface DerivativeKind {
 
 // commitDerived (I04-R11): the only way a derivative is written. The caller (I03's
 // result-writing transaction, I03-R6 ③) opens the transaction.
-export interface DerivedItem {
-  /** A registered kind. */
-  kind: string;
+interface DerivedItemBase {
   /** The same-row key (V02-R8); a record keeps only its keyed hash (I04-R7). */
   itemKey: string;
   lineage: readonly SourceVersionRef[];
   /** Called only for an item that passed the checks. */
   write(tx: SqlDriver): void;
 }
+
+/** The kind of a job's content-free bookkeeping item, the only one the scope policy is not asked about. */
+export const BOOKKEEPING_KIND = "extraction";
+
+export type DerivedItem =
+  | (DerivedItemBase & {
+      /** A registered kind. */
+      kind: string;
+      unjudged?: never;
+    })
+  | (DerivedItemBase & {
+      /**
+       * A content-free item (a job's bookkeeping): the scope policy is not asked about it, so a policy
+       * that errs or refuses cannot take it with it (I04-T09). Only this kind may carry the mark.
+       */
+      kind: typeof BOOKKEEPING_KIND;
+      unjudged: true;
+    });
 
 /** One row of scope_policy_drops (I04-T09); no content. */
 export interface ScopePolicyDrop {
@@ -129,8 +149,11 @@ export type CommitResult =
  */
 export interface CommitScope {
   policy: Pick<ScopePolicy, "combinable">;
-  /** Stores the refused item's content-free record (`scope_policy_drops`) in `tx` and returns it. */
-  recordDrop(tx: SqlDriver, item: DerivedItem): ScopePolicyDrop;
+  /**
+   * Stores the refused item's content-free record (`scope_policy_drops`) in `tx` and returns it.
+   * `source` is the extraction's input version (the job's), else the item's first lineage version.
+   */
+  recordDrop(tx: SqlDriver, item: DerivedItem, source: SourceVersionRef): ScopePolicyDrop;
 }
 
 export interface CommitInput {
@@ -230,6 +253,10 @@ export interface Propagation {
 export interface DerivativeRegistry {
   /** The registered kinds in phase-2 order; frozen. */
   readonly kinds: readonly DerivativeKind[];
+  /** The one judge of scopes the registry was made with (I04-R14); the commit's scope is built from it. */
+  readonly policy: ScopePolicy;
+  /** Whether the policy lets the lineage's sources be put together; a policy that errs refuses. */
+  combinable(db: SqlDriver, lineage: readonly SourceVersionRef[]): boolean;
   /** Both phases in `tx`, the caller's transaction (no BEGIN of its own), with its record. */
   propagate(tx: SqlDriver, change: SourceChange): Propagation;
   lineage(db: SqlDriver, ref: DerivedRef): SourceVersionRef[];
@@ -352,8 +379,12 @@ export function createDerivativeRegistry(options: RegistryOptions): DerivativeRe
     return k;
   };
   const lineage = (db: SqlDriver, ref: DerivedRef) => kindOf(ref).lineage(db, ref);
+  const combinable = (db: SqlDriver, versions: readonly SourceVersionRef[]) =>
+    mayCombine(options.policy, scopesOfVersions(db, versions));
   return {
     kinds,
+    policy: options.policy,
+    combinable,
     propagate(tx, change) {
       const invalidationId = startInvalidation(tx, {
         changeSeq: readChangeSeq(tx),
@@ -364,7 +395,12 @@ export function createDerivativeRegistry(options: RegistryOptions): DerivativeRe
       const collected = new Map(kinds.map((k) => [k.kind, k.affected(tx, change)]));
       const removedByKind: Record<string, number> = {};
       const recomputedByKind: Record<string, number> = {};
-      const ctx = { tx, collected, invalidationId };
+      const ctx = {
+        tx,
+        collected,
+        invalidationId,
+        combinable: (versions: readonly SourceVersionRef[]) => combinable(tx, versions),
+      };
       for (const k of kinds) {
         const { removed, recomputed } = k.invalidate(ctx, collected.get(k.kind) ?? [], change);
         if (!isCount(removed) || !isCount(recomputed)) {
@@ -381,7 +417,8 @@ export function createDerivativeRegistry(options: RegistryOptions): DerivativeRe
       return refs.filter((ref) => {
         const versions = lineage(db, ref);
         if (!versions.every((v) => versionIsLive(db, v))) return false;
-        return options.policy.allows(scopesOfVersions(db, versions), purpose);
+        // only `true` shows the row: any other answer (a promise, a truthy value) hides it; a throw rejects the call
+        return options.policy.allows(scopesOfVersions(db, versions), purpose) === true;
       });
     },
     scopesOf(db, refs) {

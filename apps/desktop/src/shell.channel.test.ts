@@ -120,6 +120,7 @@ const start = () =>
     fork: recordingFork,
     entry: ENTRY,
     origin: ORIGIN,
+    scopePolicy: undefined,
     dataDir: join(dir, "data"),
     env: { ...process.env, PKI_CANARY_ENV: "leak" },
   });
@@ -156,6 +157,7 @@ describe("shell ↔ backend channel", () => {
       fork: recordingFork,
       entry: ENTRY,
       origin: ORIGIN,
+      scopePolicy: undefined,
       dataDir: join(dir, "data"),
       secrets: {
         read: async () => ({ state: "present", value: canary }),
@@ -180,6 +182,7 @@ describe("shell ↔ backend channel", () => {
       fork: recordingFork,
       entry: ENTRY,
       origin: ORIGIN,
+      scopePolicy: undefined,
       dataDir: join(dir, "data"),
       secrets: {
         read: async () => ({ state: "unavailable" }),
@@ -246,6 +249,7 @@ describe("shell ↔ backend channel", () => {
           fork: trusting,
           entry: ENTRY,
           origin: ORIGIN,
+          scopePolicy: undefined,
           dataDir: join(dir, "data"),
           secrets: {
             read: async (name) => (
@@ -346,6 +350,7 @@ describe("shell ↔ backend channel", () => {
         fork: malformed,
         entry: ENTRY,
         origin: ORIGIN,
+        scopePolicy: undefined,
         dataDir: join(dir, "d"),
       }),
     ).rejects.toThrow("backend failed to start");

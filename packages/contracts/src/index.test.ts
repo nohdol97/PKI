@@ -30,7 +30,7 @@ describe("contract schemas", () => {
         provider: { state: "unavailable", providerId: null, reason: "no-provider" },
         embedding: { state: "not-implemented" },
         vectorIndex: { state: "not-implemented" },
-        invalidations: { recent: [] },
+        invalidations: { recent: [], scopePolicyDrops: 0 },
         dataProtection: {
           legacyCleanup: "done",
           ledger: {
@@ -57,10 +57,13 @@ describe("contract schemas", () => {
       recomputedByKind: { insights: 1 },
       at: "2026-11-22T00:00:00.000Z",
     };
-    const of = (r: object) => ({ recent: [r] });
+    const of = (r: object) => ({ recent: [r], scopePolicyDrops: 0 });
     expect(invalidations.safeParse(of(record)).success).toBe(true);
-    // the list sits under `recent`; I04-T09 adds `scopePolicyDrops` beside it
+    // the list sits under `recent`, beside the count of what the scope policy left out (I04-T09)
     expect(invalidations.safeParse([record]).success).toBe(false);
+    expect(invalidations.safeParse({ recent: [record] }).success).toBe(false);
+    expect(invalidations.safeParse({ recent: [], scopePolicyDrops: -1 }).success).toBe(false);
+    expect(invalidations.safeParse({ recent: [], scopePolicyDrops: 1.5 }).success).toBe(false);
     expect(invalidations.safeParse(of({ ...record, changeKind: "deleted" })).success).toBe(false);
     expect(invalidations.safeParse(of({ ...record, removedByKind: { facts: -1 } })).success).toBe(
       false,

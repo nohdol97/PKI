@@ -5,6 +5,7 @@ export {
   TARGET_DATE,
   recomputeDependencyDelay,
   type RuleOutcome,
+  type RuleScope,
 } from "./dependency-delay.ts";
 export { acceptChange, type Accepted, type AcceptOptions } from "./arrival.ts";
 export { applyTombstone, liftTombstone } from "./tombstone-entry.ts";
@@ -20,7 +21,7 @@ export {
   CANONICAL_KINDS,
   createProductRegistry,
   derivativeRegistry,
-  NO_POLICY_YET,
+  RECOMPUTE_PREFIX,
   type CanonicalReport,
 } from "./canonical-kinds.ts";
 export { createCanonicalEntries, defaultEntries, type CanonicalEntries } from "./entries.ts";
