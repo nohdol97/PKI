@@ -21,8 +21,10 @@ import {
   setKnowledgeStatus,
   type Affected,
   type DerivativeKind,
+  type DerivativeRegistry,
   type DerivedRef,
   type InsightKey,
+  type InvalidationContext,
   type Propagation as RegistryPropagation,
   type ScopePolicy,
   type SourceChange,
@@ -46,17 +48,36 @@ export interface CanonicalReport {
   insights: { key: InsightKey; outcome: RuleOutcome }[];
 }
 
-const reports = new WeakMap<SqlDriver, CanonicalReport>();
+/**
+ * The propagation propagateCanonical is running (propagate is synchronous, so
+ * one at a time; a nested one saves and restores it): the report the kinds note
+ * ids in, whatever driver object they are handed, the time of its record, and
+ * the records the kinds were called for (one, or the run fails loudly).
+ */
+interface Run {
+  report: CanonicalReport;
+  at: string;
+  invalidationIds: Set<number>;
+}
+let running: Run | undefined;
+
+function noting(ctx: InvalidationContext): CanonicalReport | undefined {
+  running?.invalidationIds.add(ctx.invalidationId);
+  return running?.report;
+}
 
 const ascending = (values: Iterable<number>) => [...new Set(values)].sort((a, b) => a - b);
 
-/** Changes no kind propagates before the task that produces them. */
-function supported(change: SourceChange): "new-version" | "deletion" {
-  if (change.kind === "new-version") return "new-version";
-  if (change.kind === "scope-changed") throw new Error("scope-changed is propagated from I04-T09");
+/**
+ * The change kinds the canonical kinds propagate. `old-versions-pruned` has no
+ * producer before I04-T12, which defines it; refusing it keeps it from passing
+ * as zero counts.
+ */
+function supported(change: SourceChange): "new-version" | "scope-changed" | "deletion" {
   if (change.kind === "old-versions-pruned") {
     throw new Error("old-versions-pruned is propagated from I04-T12");
   }
+  if (change.kind === "new-version" || change.kind === "scope-changed") return change.kind;
   return "deletion";
 }
 
@@ -132,19 +153,19 @@ const base = (kind: string, layer: DerivativeKind["layer"]) =>
 const SOURCE: DerivativeKind = {
   ...base("source", "source"),
   affected: (tx, change) =>
-    supported(change) === "new-version"
-      ? []
+    supported(change) !== "deletion"
+      ? [] // a new version or a scope change keeps every version (I04-R10, R15)
       : collect(tx, "source", "SELECT id FROM source_versions WHERE source_id = ? ORDER BY id", [
           change.sourceId,
         ]),
   // the delete trigger takes the version's keyword index row; the cascades its
   // evidence and the Insights' links to that evidence
-  invalidate: ({ tx }, snapshot) => {
+  invalidate: (ctx, snapshot) => {
     let removed = 0;
     for (const { ref } of snapshot) {
-      removed += tx.run("DELETE FROM source_versions WHERE id = ?", [Number(ref.id)]).changes;
+      removed += ctx.tx.run("DELETE FROM source_versions WHERE id = ?", [Number(ref.id)]).changes;
     }
-    const report = reports.get(tx);
+    const report = noting(ctx);
     if (report) report.versions += removed;
     return { removed, recomputed: 0 };
   },
@@ -153,7 +174,7 @@ const SOURCE: DerivativeKind = {
 const EVIDENCE: DerivativeKind = {
   ...base("evidence", "evidence"),
   affected: (tx, change) =>
-    supported(change) === "new-version"
+    supported(change) !== "deletion"
       ? [] // evidence is immutable; on an earlier version it becomes past evidence by itself
       : collect(
           tx,
@@ -163,7 +184,9 @@ const EVIDENCE: DerivativeKind = {
           [change.sourceId],
         ),
   // the version delete cascaded it; whatever a schema without the cascade kept goes here
-  invalidate: ({ tx }, snapshot) => {
+  invalidate: (ctx, snapshot) => {
+    noting(ctx);
+    const { tx } = ctx;
     for (const { ref } of snapshot) tx.run("DELETE FROM evidence WHERE id = ?", [Number(ref.id)]);
     return { removed: gone(tx, "evidence", snapshot).length, recomputed: 0 };
   },
@@ -182,8 +205,9 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
   const target = (id: number) => (kind === "fact" ? { factId: id } : { relationId: id });
   return {
     ...base(kind, "knowledge"),
+    // a scope change keeps the content: only Insight-layer kinds recompute (I04-R15)
     affected: (tx, change) => {
-      supported(change);
+      if (supported(change) === "scope-changed") return [];
       return collect(
         tx,
         kind,
@@ -191,7 +215,8 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
         [change.sourceId],
       );
     },
-    invalidate: ({ tx }, snapshot) => {
+    invalidate: (ctx, snapshot) => {
+      const { tx } = ctx;
       const deleted: number[] = [];
       const superseded: number[] = [];
       for (const { ref } of snapshot) {
@@ -211,7 +236,7 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
           superseded.push(id);
         }
       }
-      const report = reports.get(tx);
+      const report = noting(ctx);
       if (report) {
         report[kind === "fact" ? "facts" : "relations"].push(...deleted);
         report.superseded[kind === "fact" ? "facts" : "relations"].push(...superseded);
@@ -225,11 +250,12 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
 const ITEM: DerivativeKind = {
   ...base("item", "item"),
   affected: (tx, change) => {
-    supported(change);
+    if (supported(change) === "scope-changed") return [];
     const id = change.sourceId;
     return collect(tx, "item", `SELECT id FROM (${CITED_ITEMS}) ORDER BY id`, [id, id, id]);
   },
-  invalidate: ({ tx }, snapshot) => {
+  invalidate: (ctx, snapshot) => {
+    const { tx } = ctx;
     const deleted: number[] = [];
     for (const { ref } of snapshot) {
       const id = Number(ref.id);
@@ -243,7 +269,7 @@ const ITEM: DerivativeKind = {
       tx.run("DELETE FROM items WHERE id = ?", [id]);
       deleted.push(id);
     }
-    reports.get(tx)?.items.push(...deleted);
+    noting(ctx)?.items.push(...deleted);
     return { removed: deleted.length, recomputed: 0 };
   },
 };
@@ -252,13 +278,26 @@ const ITEM: DerivativeKind = {
  * An Insight on a collected item: gone with its item (cascade), or judged again
  * by the rule over the collected items that are left, in the same transaction, so
  * an explanation built from the deleted source is rebuilt without it (I04-R5, R8).
+ * A scope change (I04-R15) deletes nothing: the Insights whose lineage holds the
+ * source are judged again over their own items (the rule's outcome is the same
+ * until I04-T09 adds `combinable`, which resolves or revives them).
  * Counted as recomputed when the rule changed its row.
  */
 const INSIGHT: DerivativeKind = {
   ...base("insight", "insight"),
   affected: (tx, change) => {
-    supported(change);
     const id = change.sourceId;
+    if (supported(change) === "scope-changed") {
+      return collect(
+        tx,
+        "insight",
+        `SELECT DISTINCT ie.insight_id AS id FROM insight_evidence ie
+           JOIN evidence e ON e.id = ie.evidence_id
+           JOIN source_versions v ON v.id = e.source_version_id
+         WHERE v.source_id = ? ORDER BY id`,
+        [id],
+      );
+    }
     return collect(
       tx,
       "insight",
@@ -267,11 +306,19 @@ const INSIGHT: DerivativeKind = {
       [id, id, id, id, id, id],
     );
   },
-  invalidate: ({ tx, collected }, snapshot) => {
-    const items = (collected.get("item") ?? []).map((a) => Number(a.ref.id));
+  invalidate: (ctx, snapshot, change) => {
+    const { tx } = ctx;
+    const items =
+      change.kind === "scope-changed"
+        ? snapshot.flatMap(({ ref }) =>
+            tx
+              .all("SELECT x_item_id, y_item_id FROM insights WHERE id = ?", [Number(ref.id)])
+              .flatMap((r) => [r.x_item_id as number, r.y_item_id as number]),
+          )
+        : (ctx.collected.get("item") ?? []).map((a) => Number(a.ref.id));
     const remaining = ascending(items.filter((id) => stored(tx, "items", id)));
     const outcomes = recomputeDependencyDelay(tx, remaining);
-    const report = reports.get(tx);
+    const report = noting(ctx);
     if (report) {
       report.remainingItemIds = remaining;
       report.insights = outcomes;
@@ -312,19 +359,33 @@ const NO_POLICY_YET: ScopePolicy = {
   },
 };
 
-/** The product's derivative registry, made once. */
-export const derivativeRegistry = createDerivativeRegistry({
-  kinds: CANONICAL_KINDS,
-  policy: NO_POLICY_YET,
-});
+/**
+ * A registry of the product's kinds. Its record's time is the running entry's
+ * (a deletion's request time), else the clock's. I04-T04 and I04-T09 build it at
+ * the composition root with the projection kinds and the configured policy (I04
+ * spec "T03이 넘기는 것" 1).
+ */
+export function createProductRegistry(options: { policy: ScopePolicy }): DerivativeRegistry {
+  return createDerivativeRegistry({
+    kinds: CANONICAL_KINDS,
+    policy: options.policy,
+    now: () => running?.at ?? new Date().toISOString(),
+  });
+}
+
+/** The registry V02's entries run until the composition root builds one (provisional). */
+export const derivativeRegistry = createProductRegistry({ policy: NO_POLICY_YET });
 
 /**
  * Runs the registry in `db`'s current transaction (the caller opens it) and
- * gathers what V02's entries report besides the record's counts.
+ * gathers what V02's entries report besides the record's counts. `at` is the
+ * record's time (default now). Fails if the kinds noted any record but this
+ * propagation's, so a report is never silently another's or empty.
  */
 export function propagateCanonical(
   db: SqlDriver,
   change: SourceChange,
+  at: string = new Date().toISOString(),
 ): { propagation: RegistryPropagation; report: CanonicalReport } {
   const report: CanonicalReport = {
     versions: 0,
@@ -335,10 +396,17 @@ export function propagateCanonical(
     remainingItemIds: [],
     insights: [],
   };
-  const outer = reports.get(db);
-  reports.set(db, report);
+  const outer = running;
+  const run: Run = { report, at, invalidationIds: new Set() };
+  running = run;
   try {
     const propagation = derivativeRegistry.propagate(db, change);
+    const noted = [...run.invalidationIds];
+    if (noted.length !== 1 || noted[0] !== propagation.invalidationId) {
+      throw new Error(
+        `the canonical kinds noted records ${noted.join(", ") || "none"}, not ${propagation.invalidationId}`,
+      );
+    }
     return {
       propagation,
       report: {
@@ -353,7 +421,6 @@ export function propagateCanonical(
       },
     };
   } finally {
-    if (outer) reports.set(db, outer);
-    else reports.delete(db);
+    running = outer;
   }
 }

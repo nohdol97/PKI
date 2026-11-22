@@ -54,14 +54,16 @@ export function deleteSource(
     if (writeTombstone(db, { sourceId, version: latest, at, reason }) !== "written") {
       throw new Error(`source ${sourceId}: tombstone not moved to version ${latest}`);
     }
-    supersedeOpenJobs(db, sourceId);
-    const { insights, ...purge } = propagateCanonical(db, {
-      kind: reason,
-      sourceId,
-      coversVersion: latest,
+    // one clock for the whole deletion: the tombstone's, the jobs' and the record's
+    const when = new Date(at);
+    if (Number.isNaN(when.getTime())) throw new RangeError(`deletion time is not a date: ${at}`);
+    supersedeOpenJobs(db, sourceId, when);
+    const { insights, ...purge } = propagateCanonical(
+      db,
       // the tombstone keeps no revision before I04-T05
-      lastRevision: null,
-    }).report;
+      { kind: reason, sourceId, coversVersion: latest, lastRevision: null },
+      at,
+    ).report;
     return { outcome: "deleted", version: latest, purge, insights };
   });
 }

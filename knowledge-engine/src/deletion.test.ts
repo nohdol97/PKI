@@ -296,3 +296,32 @@ describe("purge.idempotent: the purge closes the source's open jobs (I04-R12)", 
     expect(snapshot()).toEqual(before);
   });
 });
+
+describe("one clock per deletion (I04-T03)", () => {
+  it("stamps the closed jobs and the invalidation record with the deletion's time", () => {
+    const { chat } = lateDependency();
+    const r = registerJob(db, {
+      kind: "extract",
+      target: "q",
+      sourceId: chat.sourceId,
+      fenceVersion: 1,
+    });
+    if (!r.registered) throw new Error("not registered");
+
+    deleteSource(db, chat.sourceId, { reason: "source-deleted", at: AT });
+
+    expect(db.all("SELECT updated_at, finished_at FROM jobs WHERE id = ?", [r.job.id])).toEqual([
+      { updated_at: Date.parse(AT), finished_at: Date.parse(AT) },
+    ]);
+    expect(listInvalidations(db)[0]?.at).toBe(AT);
+    expect(readTombstone(db, chat.sourceId)?.at).toBe(AT);
+  });
+
+  it("refuses a deletion time that is not a date, writing nothing", () => {
+    const { chat } = lateDependency();
+    expect(() =>
+      deleteSource(db, chat.sourceId, { reason: "source-deleted", at: "later" }),
+    ).toThrow(RangeError);
+    expect(readTombstone(db, chat.sourceId)).toBeUndefined();
+  });
+});

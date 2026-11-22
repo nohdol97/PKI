@@ -41,7 +41,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CANONICAL_KINDS, derivativeRegistry } from "./canonical-kinds.ts";
+import { CANONICAL_KINDS, derivativeRegistry, propagateCanonical } from "./canonical-kinds.ts";
 import { deleteSource } from "./deletion.ts";
 import {
   COMPLETION_DATE,
@@ -294,16 +294,117 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
     }
   });
 
-  it("refuses a change kind it does not propagate yet instead of skipping it", () => {
+  it("refuses old-versions-pruned until I04-T12 defines it, instead of counting zero", () => {
     const { a } = world();
-    for (const change of [
-      { kind: "scope-changed", sourceId: a.sourceId, from: null, to: ["team"] },
-      { kind: "old-versions-pruned", sourceId: a.sourceId, version: 1 },
-    ] satisfies SourceChange[]) {
-      expect(() => db.transaction(() => derivativeRegistry.propagate(db, change))).toThrow(
-        new RegExp(change.kind),
-      );
-    }
+    const change: SourceChange = { kind: "old-versions-pruned", sourceId: a.sourceId, version: 1 };
+    expect(() => db.transaction(() => derivativeRegistry.propagate(db, change))).toThrow(
+      /old-versions-pruned/,
+    );
+    expect(listInvalidations(db)).toEqual([]);
+  });
+});
+
+describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are judged again", () => {
+  const scopeChange = (sourceId: number): SourceChange => ({
+    kind: "scope-changed",
+    sourceId,
+    from: null,
+    to: ["team"],
+  });
+  const counts = () =>
+    ["source_versions", "evidence", "facts", "relations", "items", "insights"].map(
+      (t) => db.all(`SELECT count(*) AS n FROM ${t}`)[0]?.n,
+    );
+
+  it("collects only the Insights whose lineage holds the source and changes no content", () => {
+    const { b, rows } = world();
+    const before = counts();
+    const statuses = db.all(
+      "SELECT id, status FROM facts UNION ALL SELECT id, status FROM relations",
+    );
+    const seq = readChangeSeq(db);
+    const collected = new Map(
+      CANONICAL_KINDS.map((k) => [
+        k.kind,
+        k.affected(db, scopeChange(b.sourceId)).map((r) => r.ref.id),
+      ]),
+    );
+    expect(Object.fromEntries(collected)).toEqual({
+      source: [],
+      evidence: [],
+      fact: [],
+      relation: [],
+      item: [],
+      insight: [String(rows.insight?.shared)],
+    });
+
+    const { propagation } = db.transaction(() => propagateCanonical(db, scopeChange(b.sourceId)));
+
+    expect(counts()).toEqual(before);
+    expect(
+      db.all("SELECT id, status FROM facts UNION ALL SELECT id, status FROM relations"),
+    ).toEqual(statuses);
+    expect(readChangeSeq(db)).toBe(seq);
+    expect(listInvalidations(db)).toMatchObject([
+      {
+        id: propagation.invalidationId,
+        changeKind: "scope-changed",
+        removedByKind: { source: 0, evidence: 0, fact: 0, relation: 0, item: 0, insight: 0 },
+      },
+    ]);
+  });
+
+  it("recomputes those Insights by the rule, in their own rows", () => {
+    const { b, rows } = world();
+    const id = rows.insight?.shared as number;
+    // the rule resolves the stored row on its items (no completion date on YS)
+    const { propagation } = db.transaction(() => propagateCanonical(db, scopeChange(b.sourceId)));
+    expect(propagation.recomputedByKind.insight).toBe(1);
+    expect(db.all("SELECT id, state, summary FROM insights WHERE id = ?", [id])).toEqual([
+      { id, state: "resolved", summary: null },
+    ]);
+    // judged again with nothing different: nothing to recompute
+    const again = db.transaction(() => propagateCanonical(db, scopeChange(b.sourceId)));
+    expect(again.propagation.recomputedByKind.insight).toBe(0);
+  });
+});
+
+describe("propagateCanonical's report (I04-T03)", () => {
+  it("notes the ids whatever driver object the kinds are handed", () => {
+    const { a, rows } = world();
+    const wrapped: SqlDriver = { ...db };
+    const { report } = db.transaction(() =>
+      propagateCanonical(wrapped, deletionOf(a.sourceId), AT),
+    );
+    expect(report).toMatchObject({
+      versions: 1,
+      facts: [rows.fact?.onlyA],
+      relations: [rows.relation?.onlyA],
+    });
+    expect(listInvalidations(db)[0]?.at).toBe(AT);
+  });
+
+  it("fails, rolling back, when the kinds noted another propagation's record", () => {
+    const { a, b } = world();
+    let nested = false;
+    const meddling: SqlDriver = {
+      ...db,
+      run: (sql, params) => {
+        if (!nested && /^\s*DELETE FROM source_versions/i.test(sql)) {
+          nested = true;
+          derivativeRegistry.propagate(db, {
+            kind: "user-deleted",
+            sourceId: b.sourceId,
+            coversVersion: 1,
+            lastRevision: null,
+          });
+        }
+        return db.run(sql, params);
+      },
+    };
+    expect(() =>
+      db.transaction(() => propagateCanonical(meddling, deletionOf(a.sourceId))),
+    ).toThrow(/noted records/);
     expect(listInvalidations(db)).toEqual([]);
   });
 });
