@@ -146,7 +146,16 @@ export function createConnectorSyncHandler(options: {
       return resultOf(end, undefined, heldReason(summary));
     }
     const end = endOf(answer);
-    const result = resultOf(end, answer, "");
+    // a refused credential holds the job for the instance's own reason as it stands when the job
+    // closes: the manager judged it before it answered (I06-R10); an instance that is `ready` is a newer
+    // object's, so the reason is the plain one and the release after the close runs the job again
+    const result = resultOf(
+      end,
+      answer,
+      end === "credential-unusable"
+        ? heldReason(manager.list().find((s) => s.id === job.target))
+        : "",
+    );
     // a sync that never reached the Connector counted nothing; one that did leaves its counts,
     // under the lease, whether it finished (the write below) or stopped after storing pages
     if (result.status === "succeeded") {
@@ -195,6 +204,21 @@ export function ensureDefaultSchedules(
     made.push(MAINTENANCE_KIND);
   }
   return made;
+}
+
+/**
+ * Right after a `connector-sync` job closed held: when its instance is ready now, the job goes back
+ * (the release of a ready instance, here without waiting for the hourly pass). A sync of an object
+ * that was replaced meanwhile closes held on the plain reason and runs again on the new object (I06-R10).
+ * Returns whether jobs went back; the caller wakes the runner.
+ */
+export function releaseIfReady(
+  db: SqlDriver,
+  manager: Pick<ConnectorManager, "list">,
+  instanceId: string,
+): boolean {
+  const summary = manager.list().find((s) => s.id === instanceId);
+  return summary?.state === "ready" && releaseHeldCollector(db, instanceId) > 0;
 }
 
 /**

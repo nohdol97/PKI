@@ -79,6 +79,7 @@ import type { Clock } from "./clock.ts";
 import {
   CONNECTOR_SYNC_KIND,
   createConnectorSyncHandler,
+  releaseIfReady,
   type SyncManager,
 } from "./connector-sync-job.ts";
 import { computePolicyFingerprint } from "./held-release.ts";
@@ -397,8 +398,20 @@ export function productRunner(
         }
       : {}),
   });
-  return createJobRunner({
+  const runner: JobRunner = createJobRunner({
     db,
+    // a collector job closed held for an instance that is ready by now goes back at once (I06-R10)
+    onClosed: (job, status) => {
+      const manager = options.connectors?.();
+      if (
+        status === "held" &&
+        job.kind === CONNECTOR_SYNC_KIND &&
+        manager &&
+        releaseIfReady(db, manager, job.target)
+      ) {
+        void runner.wake();
+      }
+    },
     handlers: {
       [EXTRACT_JOB_KIND]: handler,
       [MAINTENANCE_KIND]: createMaintenanceHandler({ db, ...(clock ? { clock } : {}) }),
@@ -423,6 +436,7 @@ export function productRunner(
     ...(BUILD_KIND === "test" && options.testBuild ? { testBuild: options.testBuild } : {}),
     onError: (error) => log("job-error", { error: errorClass(error) }),
   });
+  return runner;
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";

@@ -10,6 +10,7 @@ import { CONNECTOR_KIND_PATTERN, MAX_INSTANCE_ID_LENGTH, type Connector } from "
 import { log, SCOPE_CLASSES, type ScopeGrading } from "@pki/providers";
 import type { ScopePolicy } from "@pki/storage";
 import { productConnectors, type ConnectorSet } from "./composition.ts";
+import { credentialSlotsValid } from "./connector-credentials.ts";
 import { bindConnectorScopes } from "./connector-scopes.ts";
 import type { ConnectorFactory, ConnectorInstanceConfig } from "./connectors.ts";
 import {
@@ -39,13 +40,14 @@ export interface SiteRegistration {
 /** The public repository's registration: nothing. */
 export const publicSite: SiteRegistration = Object.freeze({});
 
-/** What a check can find; the first four drop their item at the start and the next two stop it. */
+/** What a check can find; the first five drop their item at the start and the next two stop it. */
 export type SiteRegistrationCode =
   | "kind-name-invalid"
   | "kind-reserved"
   | "instance-id-invalid"
   | "instance-id-duplicate"
   | "instance-kind-unknown"
+  | "instance-credentials-invalid"
   | "instance-kind-reserved"
   | "instance-id-reserved"
   | "kind-factory-threw"
@@ -60,6 +62,7 @@ const DROPPED_CODES = [
   "kind-reserved",
   "instance-id-invalid",
   "instance-id-duplicate",
+  "instance-credentials-invalid",
 ] as const satisfies readonly SiteRegistrationCode[];
 
 /** The violations that stop the start: a try at what the public code keeps for itself. */
@@ -151,6 +154,15 @@ function analyse(site: SiteRegistration, base: ConnectorSet): Analysis {
     if (isPublicInstanceId(id, replaced) || baseIds.has(id)) {
       violations.push("instance-id-reserved");
       stops = true;
+    }
+    // the slots are the fork's code: a declaration that is not well formed drops its instance (I06-R2)
+    if (
+      !stops &&
+      instance.credentials !== undefined &&
+      !credentialSlotsValid(instance.credentials)
+    ) {
+      violations.push("instance-credentials-invalid");
+      continue;
     }
     if (!stops) instances.push(instance);
   }

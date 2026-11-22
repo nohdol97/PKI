@@ -213,6 +213,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     clock,
     entries,
     scopes,
+    secrets: options.secrets,
   });
   late.manager = connectors;
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,

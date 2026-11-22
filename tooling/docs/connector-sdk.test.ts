@@ -156,7 +156,7 @@ const NAMED_FACTS = [
   { token: "RECHECK_TIMEOUT_MS", file: "backend/src/connector-sync-job.ts", holds: "export const RECHECK_TIMEOUT_MS = 60_000;" },
   { token: "POST /api/import/jsonl", file: "packages/contracts/src/index.ts", holds: 'path: "/api/import/jsonl"' },
   { token: "recheck", file: "backend/src/connectors.ts", holds: "async recheck(id, turn) {" },
-  { token: "healthCheck", file: "backend/src/connectors.ts", holds: "(await connector.healthCheck()).state === " },
+  { token: "healthCheck", file: "backend/src/connectors.ts", holds: "const health = await connector.healthCheck();" },
   { token: "ChangeSet", file: "packages/contracts/src/connector.ts", holds: "export type ChangeSet = " },
   { token: "cursorExpired", file: "packages/contracts/src/connector.ts", holds: "cursorExpired: z.boolean().optional()," },
   { token: "scope-change-content-mismatch", file: "packages/contracts/src/connector.ts", holds: '"scope-change-content-mismatch",' },
@@ -345,7 +345,7 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     const code = read("backend/src/connectors.ts");
     expect(code).toContain("export const INITIALIZE_TIMEOUT_MS = 10_000;");
     expect(code).toContain("export const RECHECK_LATE_LIMIT = 3;");
-    expect(code).toContain("instances.map(async ({ id, kind, config }): Promise<Entry> => {");
+    expect(code).toContain("instances.map(async ({ id, kind, config, credentials }): Promise<Entry> => {");
     expect(code).toContain('log("connector-kind-unknown", { id });');
     expect(code).toContain('log("connector-initialize-timeout", { id });');
     expect(code).toContain('log("connector-factory-failed", { id });');
@@ -367,9 +367,9 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     expect(read("backend/src/connector-sync-job.ts")).toContain("export const RECHECK_TIMEOUT_MS = 60_000;");
   });
 
-  it("no code gives a Connector a secret (chapter 8): initialize takes the config only", () => {
+  it("no code gives a Connector a secret (chapter 8): initialize takes the config and the accessor only", () => {
     expect(read("packages/contracts/src/connector.ts")).toContain("initialize(config: unknown, context?: ConnectorContext): Promise<void>;");
-    expect(read("backend/src/connectors.ts")).toContain("await connector.initialize(config);");
+    expect(read("backend/src/connectors.ts")).toContain("await connector.initialize(config, context);");
   });
 
   it("no product code calls getDocument, and healthCheck is called only by the hourly recheck (chapter 1)", () => {

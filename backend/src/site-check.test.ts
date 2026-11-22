@@ -3,7 +3,12 @@
 // that has a composition package the public command points at the fork's command instead. The
 // decisions run in-process on a temporary root (never the real repository root, so a fork-shaped
 // checkout gives the same results): the repository root is an argument.
-import { CONNECTOR_SDK_VERSION, type Connector } from "@pki/contracts";
+import {
+  CONNECTOR_SDK_VERSION,
+  ConnectorCredentialError,
+  type Connector,
+  type ConnectorContext,
+} from "@pki/contracts";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +20,8 @@ import {
   siteCheckGuidance,
   type SiteCheckIo,
 } from "./site-check-main.ts";
+import { connectorKinds } from "./composition.ts";
+import { siteCheck } from "./connectors.ts";
 import { publicSite, type SiteRegistration } from "./site-registration.ts";
 
 let root: string;
@@ -335,4 +342,72 @@ describe("site-check --scopes (I07-R6, I07-C7, I07-H2 ①)", () => {
     expect(seen.code).toBe(2);
     expect(seen.stderr.join("\n")).toContain("@acme-site/composition");
   });
+});
+
+describe("site-check with the credential accessor (I06-R8, I06-C13, I06-H2)", () => {
+  const CANARY = "synthetic-canary-value-0003";
+  const credentialed = (initialize: (c: ConnectorContext) => Promise<void>): SiteRegistration => ({
+    connectorKinds: {
+      fork: () =>
+        ({
+          manifest: { type: "fork", schemaVersion: CONNECTOR_SDK_VERSION, capabilities: {} },
+          initialize: (_config: unknown, context?: ConnectorContext) =>
+            initialize(context as ConnectorContext),
+          healthCheck: async () => ({ state: "ok" }),
+          getChanges: async () => ({ changes: [], nextCursor: "0", hasMore: false }),
+          getDocument: async () => null,
+        }) as unknown as Connector,
+    },
+  });
+
+  it("C13 a kind that reads a slot in initialize is ok (credential-required) with exit 0, and the error's own text is not printed", async () => {
+    const { io, seen } = capture();
+    await runSiteCheck(
+      credentialed(async (c) => {
+        await c.credentials.read("token"); // refused: the accessor of site-check reads nothing
+        throw Object.assign(new ConnectorCredentialError(), { message: CANARY });
+      }),
+      ["fork"],
+      io,
+    );
+    expect(seen.stdout).toEqual(["fork: ok (credential-required)"]);
+    expect(seen.stderr).toEqual([]);
+    expect(seen.code).toBeUndefined();
+  });
+
+  it("C13 a kind that does not read a slot is as before: ok, or the message of its failure", async () => {
+    const ok = capture();
+    await runSiteCheck(
+      credentialed(async () => undefined),
+      ["fork"],
+      ok.io,
+    );
+    expect(ok.seen.stdout).toEqual(["fork: ok"]);
+    const failed = capture();
+    await runSiteCheck(
+      credentialed(async () => Promise.reject(new Error("plain failure"))),
+      ["fork"],
+      failed.io,
+    );
+    expect(failed.seen.stderr).toEqual(["fork: plain failure"]);
+    expect(failed.seen.code).toBe(1);
+  });
+
+  it.each(["site-mail", "site-messenger", "site-wiki"] as const)(
+    "H2 %s is given the accessor and still reports 미구현, 배포처 후속 and fails",
+    async (kind) => {
+      let received: ConnectorContext | undefined;
+      const outcome = await siteCheck(kind, () => {
+        const connector = connectorKinds[kind]();
+        const original = connector.initialize.bind(connector);
+        connector.initialize = (config, context) => {
+          received = context;
+          return original(config, context);
+        };
+        return connector;
+      });
+      expect(received?.credentials).toBeDefined();
+      expect(outcome).toEqual({ ok: false, line: `${kind}: 미구현, 배포처 후속` });
+    },
+  );
 });
