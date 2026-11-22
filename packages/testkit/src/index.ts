@@ -59,3 +59,18 @@ export {
   type FakeCliRun,
 } from "./fake-cli.ts";
 export { memoryLedgerIo, type LedgerIoOperation, type MemoryLedgerIo } from "./memory-ledger-io.ts";
+export {
+  TABULAR_CONTRACT_FIXTURES,
+  csvVersion,
+  tabularContract,
+  type ContractColumn,
+  type ContractTable,
+  type ContractTableRead,
+  type ContractTabularRead,
+  type ContractTabularSource,
+  type ContractVersionRef,
+  type StoredTableVersion,
+  type TabularContractFixture,
+  type TabularContractHarness,
+} from "./tabular.contract.ts";
+export { MemoryTabularSource } from "./memory-tabular-source.ts";
