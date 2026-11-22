@@ -2,7 +2,13 @@
 // CLI structured-output options take JSON Schema built from the same definition.
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { ErrorResponseSchema, routes } from "./index.ts";
+import {
+  ConnectorListResponseSchema,
+  ErrorResponseSchema,
+  routes,
+  SYNC_STOP_CODES,
+  SyncResponseSchema,
+} from "./index.ts";
 
 describe("contract schemas", () => {
   const schemas = [
@@ -112,5 +118,63 @@ describe("contract schemas", () => {
     ]) {
       expect(request.safeParse(body).success).toBe(false);
     }
+  });
+});
+
+describe("sync v2 contract (I01-R19, R21, T03)", () => {
+  const result = {
+    connectorId: "c",
+    received: 3,
+    created: 1,
+    unchanged: 1,
+    scopeUpdated: 0,
+    stale: 0,
+    staleTombstone: 0,
+    blocked: 1,
+    tombstoned: 0,
+    rejected: [{ at: "change:2", code: "schema" }],
+    rejectedCount: 1,
+    rescanned: false,
+    deletionsMayBeMissed: false,
+  };
+
+  it("adds instance-busy and storage-failed to the API error codes", () => {
+    for (const error of ["instance-busy", "storage-failed"]) {
+      expect(ErrorResponseSchema.safeParse({ error }).success, error).toBe(true);
+    }
+  });
+
+  it("states a stop as one code of the closed list and a rate limit's retryAfterMs", () => {
+    expect([...SYNC_STOP_CODES]).toEqual([
+      "invalid-page",
+      "no-progress",
+      "cursor-expired",
+      "rate-limited",
+      "connector-error",
+      "connector-failed",
+      "aborted",
+      "instance-busy",
+      "storage-failed",
+    ]);
+    expect(SyncResponseSchema.safeParse(result).success).toBe(true);
+    expect(
+      SyncResponseSchema.safeParse({ ...result, stopped: "rate-limited", retryAfterMs: 5000 })
+        .success,
+    ).toBe(true);
+    expect(
+      SyncResponseSchema.safeParse({ ...result, stopped: "unsupported-sdk-version" }).success,
+    ).toBe(false);
+    expect(SyncResponseSchema.safeParse({ ...result, retryAfterMs: -1 }).success).toBe(false);
+    expect(
+      SyncResponseSchema.safeParse({ ...result, rejected: [{ at: "x", code: "nope" }] }).success,
+    ).toBe(false);
+  });
+
+  it("lists deletionsMayBeMissed on a Connector, optionally", () => {
+    const base = { id: "c", kind: "k", state: "ready" };
+    const parse = (c: object) => ConnectorListResponseSchema.safeParse({ connectors: [c] }).success;
+    expect(parse(base)).toBe(true);
+    expect(parse({ ...base, deletionsMayBeMissed: true })).toBe(true);
+    expect(parse({ ...base, deletionsMayBeMissed: "yes" })).toBe(false);
   });
 });

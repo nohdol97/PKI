@@ -673,6 +673,21 @@ const v16: Migration = (db) =>
     ALTER TABLE source_versions ADD COLUMN blocks TEXT CHECK (blocks IS NULL OR json_valid(blocks));
   `);
 
+// Schema v17 (I01-T03, I01-R17): the state of a rescan on the instance row.
+// `rescan_pending` is 1 from the moment a sync drops an expired cursor until the page
+// that ends the rescan is stored, so a rescan that did not end in one sync is finished
+// by the next. `deletions_may_be_missed` is 1 after a rescan of a Connector that does not
+// report deletions on rescan; the Sources screen shows it until the next rescan ends
+// (I01-R17). The version number is the next free one: whichever of two tasks adding a
+// migration merges later renumbers (`v17` and its line in `migrations`).
+const v17: Migration = (db) =>
+  db.exec(`
+    ALTER TABLE connector_instances ADD COLUMN rescan_pending INTEGER NOT NULL DEFAULT 0
+      CHECK (rescan_pending IN (0, 1));
+    ALTER TABLE connector_instances ADD COLUMN deletions_may_be_missed INTEGER NOT NULL DEFAULT 0
+      CHECK (deletions_may_be_missed IN (0, 1));
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -691,6 +706,7 @@ export const migrations: readonly Migration[] = [
   v14,
   v15,
   v16,
+  v17,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

@@ -27,7 +27,11 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function scripted(pages: (cursor: string | null) => ChangeSet, schemaVersion = 2) {
+function scripted(
+  pages: (cursor: string | null) => ChangeSet,
+  schemaVersion = 2,
+  accessScope = false,
+) {
   let initialized = 0;
   const connector: Connector = {
     manifest: {
@@ -36,7 +40,7 @@ function scripted(pages: (cursor: string | null) => ChangeSet, schemaVersion = 2
       capabilities: {
         incremental: true,
         deletes: true,
-        accessScope: false,
+        accessScope,
         fullRescan: true,
         deletionsOnRescan: false,
       },
@@ -114,7 +118,9 @@ describe("connector.sdk-version", () => {
       { id: "good-1", kind: "good", state: "ready" },
     ]);
     expect(await manager.sync("broken-1")).toEqual({ error: "connector-unavailable" });
-    expect(await manager.sync("good-1")).toMatchObject({ connectorId: "good-1" });
+    expect(await manager.sync("good-1")).toMatchObject({
+      connectorId: "good-1",
+    });
     const check = await siteCheck("broken", () => broken.connector);
     expect(check).toEqual({ ok: false, line: "broken: unsupported-sdk-version" });
     expect(JSON.stringify([manager.list(), check])).not.toContain("SECRET");
@@ -140,8 +146,8 @@ describe("interim.identity", () => {
     kind: "upsert" as const,
     record: { namespace, externalId: "e", revision, schemaVersion: 2 as const, title: "t", body },
   });
-  const page = (changes: ChangeSet["changes"], nextCursor: string) =>
-    scripted(() => ({ changes, nextCursor, hasMore: false })).connector;
+  const page = (changes: ChangeSet["changes"], nextCursor: string, accessScope = false) =>
+    scripted(() => ({ changes, nextCursor, hasMore: false }), 2, accessScope).connector;
 
   it("keeps one external id in two namespaces as two sources, even with the same content", async () => {
     await syncConnector(
@@ -213,7 +219,10 @@ describe("interim.identity", () => {
   });
 
   it("stores a scope change on the source row and no version, with the page's cursor", async () => {
-    await syncConnector(db, "s", "scripted", page([upsert("a", 1, "x")], "1"));
+    // a Connector that declares accessScope: every upsert carries one, and it may send scope changes
+    const scoped = upsert("a", 1, "x");
+    scoped.record = { ...scoped.record, accessScope: ["wide", "team"] } as typeof scoped.record;
+    await syncConnector(db, "s", "scripted", page([scoped], "1", true));
     const scope = {
       kind: "scope-change" as const,
       namespace: "a",
@@ -222,7 +231,7 @@ describe("interim.identity", () => {
       at: AT,
       accessScope: ["team"],
     };
-    await syncConnector(db, "s", "scripted", page([scope], "2"));
+    await syncConnector(db, "s", "scripted", page([scope], "2", true));
     expect(readCursor(db, "s")).toBe("2");
     expect(db.all("SELECT namespace, access_scope, last_revision FROM sources")).toEqual([
       { namespace: "a", access_scope: '["team"]', last_revision: 2 },

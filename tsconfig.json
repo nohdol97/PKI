@@ -8,6 +8,7 @@
     { "path": "providers" },
     { "path": "storage" },
     { "path": "packages/connector-example" },
+    { "path": "packages/connector-sdk" },
     { "path": "packages/contracts" },
     { "path": "packages/document-normalize" },
     { "path": "packages/testkit" },

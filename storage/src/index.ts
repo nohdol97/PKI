@@ -39,8 +39,10 @@ export {
   type DataDirectoryInput,
 } from "./data-directory.ts";
 export {
+  beginRescan,
   contentHash,
   ensureSourceId,
+  finishRescan,
   findSourceId,
   nextSourceVersion,
   findSourceVersionId,
@@ -48,6 +50,7 @@ export {
   raiseLastRevision,
   readConnectorKind,
   readCursor,
+  readRescanState,
   readLastRevision,
   readSourceVersion,
   registerConnectorInstance,

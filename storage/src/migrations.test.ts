@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(16);
-    expect(migrations).toHaveLength(16);
+    expect(schemaVersion(db)).toBe(17);
+    expect(migrations).toHaveLength(17);
   });
 
   it("is idempotent when re-run", () => {
@@ -225,7 +225,13 @@ describe("schema v2 (V01-T04)", () => {
 
   it("adds connector instances holding kind and cursor", () => {
     migrate(db);
-    expect(columns("connector_instances")).toEqual(["id", "kind", "cursor"]);
+    expect(columns("connector_instances")).toEqual([
+      "id",
+      "kind",
+      "cursor",
+      "rescan_pending", // v17
+      "deletions_may_be_missed", // v17
+    ]);
     expect(notNull("connector_instances", "kind")).toBe(true);
     expect(notNull("connector_instances", "cursor")).toBe(false);
   });
@@ -1273,7 +1279,7 @@ describe("schema v16 (I01-T02, I01-R9, R13)", () => {
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
     db.run(insertSource);
     db.run("UPDATE sources SET access_scope = '[\"team\"]'");
-    migrate(db);
+    migrate(db, migrations.slice(0, 16));
     expect(schemaVersion(db)).toBe(16);
     expect(columns("sources")).toEqual(expect.arrayContaining(["last_revision", "scope_claimed"]));
     expect(db.all("SELECT id, access_scope, last_revision, scope_claimed FROM sources")).toEqual([
@@ -1339,5 +1345,36 @@ describe("schema v16 (I01-T02, I01-R9, R13)", () => {
     expect(db.all("SELECT record_schema_version FROM source_versions")).toEqual([
       { record_schema_version: 2 },
     ]);
+  });
+});
+
+describe("schema v17 (I01-T03, I01-R17)", () => {
+  it("adds the unfinished-rescan mark and the deletions-may-be-missed mark to connector_instances, 0 for every row so far", () => {
+    migrate(db, migrations.slice(0, 16));
+    db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
+    migrate(db);
+    expect(schemaVersion(db)).toBe(17);
+    expect(columns("connector_instances")).toEqual(
+      expect.arrayContaining(["rescan_pending", "deletions_may_be_missed"]),
+    );
+    expect(
+      db.all(
+        "SELECT id, kind, cursor, rescan_pending, deletions_may_be_missed FROM connector_instances",
+      ),
+    ).toEqual([{ id: "c", kind: "k", cursor: "x", rescan_pending: 0, deletions_may_be_missed: 0 }]);
+  });
+
+  it("takes only 0 and 1 in either mark, and registers a new instance with both at 0", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run("UPDATE connector_instances SET rescan_pending = 1, deletions_may_be_missed = 1");
+    expect(() => db.run("UPDATE connector_instances SET rescan_pending = 2")).toThrow();
+    expect(() => db.run("UPDATE connector_instances SET deletions_may_be_missed = -1")).toThrow();
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('d', 'k')");
+    expect(
+      db.all(
+        "SELECT rescan_pending AS p, deletions_may_be_missed AS m FROM connector_instances WHERE id = 'd'",
+      ),
+    ).toEqual([{ p: 0, m: 0 }]);
   });
 });

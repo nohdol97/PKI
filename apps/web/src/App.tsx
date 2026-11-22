@@ -2,7 +2,6 @@
 // the API client; the screens hold labels only, never data.
 import type {
   ConnectionTestResult,
-  ConnectorSummary,
   ConsentList,
   DataClassification,
   ImportJsonlResponse,
@@ -20,6 +19,8 @@ import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } f
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { BACKGROUND_EXECUTION_TEXT } from "./background-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
+import { ConnectorTable } from "./connector-table.tsx";
+import { nextSyncStops } from "./connector-text.ts";
 import { deleteConfirmText, deletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
@@ -198,12 +199,6 @@ function PrepareModel({ api, onStarted }: { api: ApiClient; onStarted: () => voi
   );
 }
 
-const CONNECTOR_STATE: Record<ConnectorSummary["state"], string> = {
-  ready: "사용 가능",
-  "not-implemented": "미구현(배포처 후속)",
-  unavailable: "사용 불가",
-};
-
 function Sources({ api }: { api: ApiClient }) {
   const connectors = useRoute(api, "connectors");
   const stored = useRoute(api, "sources");
@@ -213,6 +208,7 @@ function Sources({ api }: { api: ApiClient }) {
   const [confirming, setConfirming] = useState<SourceSummary>();
   const [deleted, setDeleted] = useState<string>();
   const [error, setError] = useState<string>();
+  const [syncStops, setSyncStops] = useState<Record<string, string>>({});
   const fail = (e: unknown) => setError(message(e));
 
   const importFile = (event: ChangeEvent<HTMLInputElement>) => {
@@ -230,10 +226,17 @@ function Sources({ api }: { api: ApiClient }) {
       }, fail);
   };
   const sync = (connectorId: string) =>
-    api("syncConnector", { connectorId }).then(() => {
-      setFound(undefined);
-      stored.reload();
-    }, fail);
+    api("syncConnector", { connectorId }).then(
+      (result) => {
+        setSyncStops((stops) => nextSyncStops(stops, connectorId, result.stopped));
+        setFound(undefined);
+        stored.reload();
+      },
+      (e: unknown) => {
+        setSyncStops((stops) => nextSyncStops(stops, connectorId, undefined));
+        fail(e);
+      },
+    );
   const search = (event: FormEvent) => {
     event.preventDefault();
     if (!query.trim()) return setFound(undefined);
@@ -254,24 +257,11 @@ function Sources({ api }: { api: ApiClient }) {
     <>
       <Failure error={connectors.error ?? stored.error ?? error} />
       <h2>Connector</h2>
-      <table>
-        <tbody>
-          {connectors.data?.connectors.map((c) => (
-            <tr key={c.id}>
-              <th scope="row">{c.id}</th>
-              <td>{c.kind}</td>
-              <td>{CONNECTOR_STATE[c.state]}</td>
-              <td>
-                {c.state === "ready" && (
-                  <button type="button" aria-label={`${c.id} 동기화`} onClick={() => sync(c.id)}>
-                    동기화
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <ConnectorTable
+        connectors={connectors.data?.connectors ?? []}
+        syncStops={syncStops}
+        onSync={sync}
+      />
       <h2>JSONL 가져오기</h2>
       <input
         type="file"

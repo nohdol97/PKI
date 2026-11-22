@@ -2,7 +2,9 @@
 // both import these; TypeScript types come from z.infer, JSON Schema from z.toJSONSchema.
 import { z } from "zod";
 import type { EmbeddingEgress } from "./embedding.ts";
+import { NativeLocatorSchema } from "./connector.ts";
 import { ImportJsonlRequestSchema, ImportJsonlResponseSchema } from "./import-record.ts";
+import { REJECT_CODES } from "./connector.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
@@ -81,6 +83,8 @@ export const ErrorResponseSchema = z.object({
     "secret-store-unavailable",
     "embedding-not-implemented",
     "embedding-busy",
+    "instance-busy",
+    "storage-failed",
     "internal-error",
   ]),
 });
@@ -96,6 +100,9 @@ export const ConnectorListResponseSchema = z.object({
       kind: z.string(),
       state: z.enum(["ready", "not-implemented", "unavailable"]),
       reason: z.literal("unsupported-sdk-version").optional(),
+      // set (only then) after a rescan of a Connector that does not report deletions on
+      // rescan: sources deleted while the cursor was expired may still be shown (I01-R17)
+      deletionsMayBeMissed: z.boolean().optional(),
     }),
   ),
 });
@@ -103,11 +110,50 @@ export type ConnectorSummary = z.infer<typeof ConnectorListResponseSchema>["conn
 
 export const SyncRequestSchema = z.strictObject({ connectorId: z.string().min(1) });
 
-/** `received` counts changes read; `created` the new source versions (same content makes none). */
+/**
+ * Why a sync stopped before its last page (I01-R19's closed list). The pages stored
+ * before it stay and the cursor is the last stored one. `unsupported-sdk-version` is a
+ * Connector's state, not a stop (I01-R1).
+ */
+export const SYNC_STOP_CODES = [
+  "invalid-page",
+  "no-progress",
+  "cursor-expired",
+  "rate-limited",
+  "connector-error",
+  "connector-failed",
+  "aborted",
+  "instance-busy",
+  "storage-failed",
+] as const;
+export type SyncStopCode = (typeof SYNC_STOP_CODES)[number];
+
+/**
+ * What one sync did (I01-R19). `received` counts changes read from the pages stored;
+ * `created` the new source versions (same content makes none). The other counts say
+ * what became of the rest: `unchanged`, `scopeUpdated`, `stale` (an older revision),
+ * `staleTombstone` (a delete below the revision the store holds: not applied, but
+ * shown), `blocked` (refused at a tombstone's door), `tombstoned` (sources deleted or
+ * revoked). `rejected` lists the first records refused by place and code, never
+ * content; `rejectedCount` counts them all. `stopped` is absent when the last page
+ * was stored; `retryAfterMs` is the origin's last request, for `rate-limited`.
+ */
 export const SyncResponseSchema = z.object({
   connectorId: z.string(),
   received: z.int().nonnegative(),
   created: z.int().nonnegative(),
+  unchanged: z.int().nonnegative(),
+  scopeUpdated: z.int().nonnegative(),
+  stale: z.int().nonnegative(),
+  staleTombstone: z.int().nonnegative(),
+  blocked: z.int().nonnegative(),
+  tombstoned: z.int().nonnegative(),
+  rejected: z.array(z.object({ at: z.string(), code: z.enum(REJECT_CODES) })),
+  rejectedCount: z.int().nonnegative(),
+  rescanned: z.boolean(),
+  deletionsMayBeMissed: z.boolean(),
+  stopped: z.enum(SYNC_STOP_CODES).optional(),
+  retryAfterMs: z.number().nonnegative().optional(),
 });
 export type SyncResponse = z.infer<typeof SyncResponseSchema>;
 
@@ -426,6 +472,8 @@ const EvidenceSummarySchema = z.object({
   sourceVersionId: z.int().positive(),
   version: z.int().positive(),
   current: z.boolean(),
+  /** I01-R29: the locator of the block holding the span's start, null without one. */
+  locator: NativeLocatorSchema.nullable(),
 });
 export const InsightEvidenceResponseSchema = z.object({
   insight: InsightSummarySchema,
@@ -445,6 +493,8 @@ export const EvidenceSourceResponseSchema = z.object({
   quote: z.string(),
   start: z.int().nonnegative(),
   end: z.int().nonnegative(),
+  /** I01-R29: computed on read from the version's blocks; null without blocks or in a gap. */
+  locator: NativeLocatorSchema.nullable(),
   sourceVersion: z.object({
     id: z.int().positive(),
     version: z.int().positive(),

@@ -143,6 +143,12 @@ importers:
         specifier: workspace:*
         version: link:../testkit
 
+  packages/connector-sdk:
+    dependencies:
+      '@pki/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
   packages/contracts:
     dependencies:
       zod:

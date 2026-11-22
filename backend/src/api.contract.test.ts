@@ -6,6 +6,7 @@
 import {
   ErrorResponseSchema,
   routes,
+  SyncResponseSchema,
   type KnowledgeCandidate,
   type KnowledgeEngine,
   type RouteName,
@@ -215,11 +216,21 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
       ["bad-request", 400, { connectorId: "x".repeat(20_000) }],
       ["not-found", 404, { connectorId: "nope" }],
       ["connector-unavailable", 409, { connectorId: "site-mail" }],
-      ["internal-error", 500, { connectorId: "broken" }],
     ])("sync %s rejection (%i)", async (error, status, body) => {
       const res = await send(server.port, sync.path, valid, sync.method, body);
       expect(res.status).toBe(status);
       expect(ErrorResponseSchema.parse(res.body)).toEqual({ error });
+    });
+
+    it("answers a sync that a Connector's exception stopped with the stop code and none of its text (I01-R4, R19)", async () => {
+      const res = await send(server.port, sync.path, valid, sync.method, { connectorId: "broken" });
+      expect(res.status).toBe(200);
+      expect(SyncResponseSchema.parse(res.body)).toMatchObject({
+        connectorId: "broken",
+        stopped: "connector-failed",
+        received: 0,
+      });
+      expect(JSON.stringify(res.body)).not.toContain("connector broke");
     });
 
     const shownVersion = productEgress(db).policyVersion();

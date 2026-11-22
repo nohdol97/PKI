@@ -489,15 +489,38 @@ describe("a failed page (review F4)", () => {
     await sync([upsert("r", "first text", 5)]);
     await projections.drain();
     expect(await engine.appliedChangeSeq()).toBe(1);
-    // a new source, then the same revision with other content: refused, the page throws
-    await expect(
-      sync([upsert("s", "rolled back", 1), upsert("r", "other text", 5)]),
-    ).rejects.toThrow(/revision-not-newer/);
+    // a new source stored, then a second one the store cannot take: the page fails whole
+    db.exec(`CREATE TRIGGER refuse_t BEFORE INSERT ON sources WHEN new.external_id = 't'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END`);
+    expect(
+      await sync([upsert("s", "rolled back", 1), upsert("t", "never stored", 1)]),
+    ).toMatchObject({
+      stopped: "storage-failed",
+      created: 0,
+    });
     await projections.drain();
     expect(engine.upsertSource).toHaveBeenCalledTimes(1);
     expect(vectorIndex.remove).toHaveBeenCalledTimes(1);
     expect(await engine.appliedChangeSeq()).toBe(1);
     expect(readChangeSeq(db)).toBe(1);
+  });
+
+  it("registers no projection removal for a deletion on a page that fails whole (I04-R12, atomic with the page)", async () => {
+    const sync = (changes: ChangeSet["changes"]) =>
+      syncConnector(db, "conn-fail-del", JSONL_CONNECTOR_KIND, onePage(changes), {
+        rescan: true,
+      });
+    await sync([upsert("d", "stored text", 5)]);
+    db.exec(`CREATE TRIGGER refuse_u BEFORE INSERT ON sources WHEN new.external_id = 'u'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END`);
+    const result = await sync([
+      { kind: "delete", namespace: "", externalId: "d", revision: 6, at: "2026-11-21T00:00:00Z" },
+      upsert("u", "never stored", 1),
+    ]);
+    expect(result).toMatchObject({ stopped: "storage-failed", tombstoned: 0 });
+    expect(db.all("SELECT 1 FROM jobs WHERE kind = 'projection-remove'")).toEqual([]);
+    expect(db.all("SELECT 1 FROM tombstones")).toEqual([]);
+    expect(db.all("SELECT 1 FROM source_versions")).toHaveLength(1);
   });
 });
 

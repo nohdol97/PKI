@@ -79,4 +79,34 @@ describe("the runner's wake after a page", () => {
     await syncConnector(db, "c", "k", connector([remove]), { runner });
     expect(runner.wake).toHaveBeenCalledTimes(1);
   });
+
+  it("for a deletion on an earlier page of a sync that then stops, and never for a page that failed", async () => {
+    const runner = { wake: vi.fn(async () => {}) };
+    const base = connector([remove]);
+    let calls = 0;
+    const stopping: Connector = {
+      ...base,
+      getChanges: async () => {
+        if (++calls === 1) return { changes: [remove], nextCursor: "1", hasMore: true };
+        throw new Error("origin down");
+      },
+    };
+    expect(await syncConnector(db, "c", "k", stopping, { runner })).toMatchObject({
+      stopped: "connector-failed",
+      tombstoned: 1,
+    });
+    expect(runner.wake).toHaveBeenCalledTimes(1);
+
+    // a page that fails whole stores no deletion and registers no job: no wake
+    saveSourceRecord(db, "c", { externalId: "y", title: "y", body: "본문" });
+    db.exec(`CREATE TRIGGER refuse_z BEFORE INSERT ON sources WHEN new.external_id = 'z'
+             BEGIN SELECT RAISE(ABORT, 'refused'); END`);
+    const removeY = { ...remove, externalId: "y", revision: 3 };
+    const z = { ...upsert, record: { ...upsert.record, externalId: "z" } };
+    runner.wake.mockClear();
+    expect(await syncConnector(db, "c", "k", connector([removeY, z]), { runner })).toMatchObject({
+      stopped: "storage-failed",
+    });
+    expect(runner.wake).not.toHaveBeenCalled();
+  });
 });

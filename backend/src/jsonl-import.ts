@@ -56,10 +56,11 @@ async function importInstance(
   for (const [k, round] of rounds.entries()) {
     const lineOf = new Map(round.map((l) => [l.record.external_id, l.line]));
     const done = new Set<number>();
+    let storageError: unknown;
     try {
       const connector = options.createConnector();
       await connector.initialize({ records: round.map((l): ImportRecord => l.record) });
-      await syncConnector(db, instanceId, JSONL_CONNECTOR_KIND, connector, {
+      const synced = await syncConnector(db, instanceId, JSONL_CONNECTOR_KIND, connector, {
         ...(options.runner ? { runner: options.runner } : {}),
         ...(options.projections ? { projections: options.projections } : {}),
         ...(options.clock ? { clock: options.clock } : {}),
@@ -74,7 +75,10 @@ async function importInstance(
           done.add(lineOf.get(externalIdOf(change)) as number);
           report.stored(outcome === "created");
         },
+        onError: (error) => (storageError = error),
       });
+      // a stopped sync is this instance's failure, as a thrown one was (T05 replaces this path)
+      if (synced.stopped) throw storageError ?? new Error(`sync stopped: ${synced.stopped}`);
     } catch (error) {
       options.onError?.(error);
       // A failed page stored nothing of itself (one transaction); its lines and
