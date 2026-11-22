@@ -164,8 +164,9 @@ describe("docs.site-setup (I05)", () => {
     expect(section).toContain("### 포크의 조립과 설치본");
     expect(section).toContain("(specs/2026-11-22-I05-site-connector-registration.md)");
     expect(section).toContain("[ADR 0018](adr/0018-fork-registration-at-build-time.md)");
+    // the range note lists the specs in turn (I07 follows I05): the I05 part is held without its closing parenthesis
     expect(section).toContain(
-      "[I05](specs/2026-11-22-I05-site-connector-registration.md) S26~S27)",
+      "[I05](specs/2026-11-22-I05-site-connector-registration.md) S26~S27",
     );
   });
 });
