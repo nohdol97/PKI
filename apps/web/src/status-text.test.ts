@@ -182,7 +182,7 @@ describe("DOWNLOAD_APPROVAL", () => {
   });
 });
 
-describe("dataProtectionText (I04-R6)", () => {
+describe("status.data-protection: dataProtectionText (I04-R6)", () => {
   it("says the clean-up of earlier deletions' traces failed, and that the next start tries again", () => {
     expect(dataProtectionText({ legacyCleanup: "pending" })).toBe(
       "이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)",

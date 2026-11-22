@@ -21,7 +21,7 @@ const start = (report: unknown) =>
     origin: "app://pki",
   });
 
-describe("identity.key start failure text", () => {
+describe("start.identity-key-text: the start failure text (I04-R7)", () => {
   it("carries the reported class from the backend to the failure text", async () => {
     const error = await start({ type: "failed", reason: "identity-key-missing" }).catch(
       (e: unknown) => e,

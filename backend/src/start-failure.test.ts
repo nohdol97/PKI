@@ -3,7 +3,7 @@ import { IdentityKeyMissingError } from "@pki/storage";
 import { describe, expect, it } from "vitest";
 import { startFailureReport } from "./start-failure.ts";
 
-describe("startFailureReport", () => {
+describe("start.identity-key-text: startFailureReport", () => {
   it("names the missing identity key and nothing of the error", () => {
     expect(startFailureReport(new IdentityKeyMissingError())).toEqual({
       type: "failed",
