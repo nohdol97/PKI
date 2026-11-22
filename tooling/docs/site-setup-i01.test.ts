@@ -308,9 +308,15 @@ describe("docs.site-setup (I01): what S18 says is not built stays true", () => {
     expect(s08).toContain("가져온(청구한) 원본");
   });
 
-  it("the desktop build does not name the scopes file (no packaged path exists)", () => {
+  it("the desktop build judges the scopes file and copies none (I07-R7, R9): the place is named in the judgment, never as a file the build writes", () => {
     const build = readFileSync(resolve(repoRoot, "apps/desktop/build/build.ts"), "utf8");
+    const judgment = readFileSync(resolve(repoRoot, "apps/desktop/build/scopes-check.ts"), "utf8");
+    // the build calls the judgment and stops on its failure; the paths live in the judgment alone
+    expect(build).toContain("requireConnectorScopes(");
     expect(build).not.toContain("connector-scopes");
     expect(build).not.toContain("site/config");
+    expect(judgment).toContain("site/config/${FILE_NAME}");
+    // no step of the build copies the file into the app folder
+    expect(build).not.toMatch(/cpSync\([^)]*scopes/);
   });
 });

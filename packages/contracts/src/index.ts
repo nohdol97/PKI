@@ -20,6 +20,7 @@ export * from "./connector.ts";
 export * from "./import-record.ts";
 export * from "./provider.ts";
 export * from "./secrets.ts";
+export * from "./site-scopes.ts";
 
 // Parts that later V01 tasks build report "not-implemented" until then, never a guessed state.
 // "unavailable" names why, so the UI can show what does not work (V01-R5).
