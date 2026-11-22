@@ -12,6 +12,7 @@ import {
   CONNECTOR_SDK_VERSION,
   blocksValid,
   ConnectorCredentialError,
+  isConnectorCredentialError,
   rejectedPositionValid,
   type Connector,
   type ConnectorContext,
@@ -766,7 +767,7 @@ async function rejection(
     });
   } catch (error) {
     check.thrown(error);
-    if (!(error instanceof ConnectorCredentialError)) check.add("credential-rejection-unsignalled");
+    if (!isConnectorCredentialError(error)) check.add("credential-rejection-unsignalled");
     return;
   }
   const signalled = await connector.getChanges(null, { limit: 1, signal: signal() }).then(
@@ -776,7 +777,7 @@ async function rejection(
     },
     (error: unknown) => {
       check.thrown(error);
-      return error instanceof ConnectorCredentialError;
+      return isConnectorCredentialError(error);
     },
   );
   if (!signalled) check.add("credential-rejection-unsignalled");

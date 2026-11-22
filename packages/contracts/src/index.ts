@@ -9,6 +9,7 @@ import {
   ImportRequestSchema,
 } from "./import-record.ts";
 import { REJECT_CODES } from "./connector.ts";
+import { KNOWLEDGE_PLACES } from "./knowledge-schema.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
@@ -18,8 +19,10 @@ export type * from "./vector-index.ts";
 export * from "./cell-grammar.ts";
 export * from "./connector.ts";
 export * from "./import-record.ts";
+export * from "./knowledge-schema.ts";
 export * from "./provider.ts";
 export * from "./secrets.ts";
+export * from "./site-scopes.ts";
 
 // Parts that later V01 tasks build report "not-implemented" until then, never a guessed state.
 // "unavailable" names why, so the UI can show what does not work (V01-R5).
@@ -97,6 +100,15 @@ export const ErrorResponseSchema = z.object({
 });
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 
+/** Why an instance whose credentials cannot be used is unavailable (I06-R9); decided from the store's answers. */
+export const CREDENTIAL_REASONS = [
+  "credential-store-unavailable",
+  "credential-missing",
+  "credential-unreadable",
+  "credential-rejected",
+] as const;
+export type CredentialReason = (typeof CREDENTIAL_REASONS)[number];
+
 // "not-implemented" is a site Connector placeholder (V01-R18); "unavailable" failed to
 // initialize, or, with reason "unsupported-sdk-version", was never initialized because
 // it implements another Connector SDK version (I01-R1).
@@ -106,7 +118,17 @@ export const ConnectorListResponseSchema = z.object({
       id: z.string(),
       kind: z.string(),
       state: z.enum(["ready", "not-implemented", "unavailable"]),
-      reason: z.literal("unsupported-sdk-version").optional(),
+      reason: z.enum(["unsupported-sdk-version", ...CREDENTIAL_REASONS]).optional(),
+      // a Connector that declared slots (I06-R13): the stored name and the last presence check of each, never a value
+      credentials: z
+        .array(
+          z.object({
+            slot: z.string(),
+            name: z.string(),
+            state: z.enum(["present", "missing", "unavailable"]),
+          }),
+        )
+        .optional(),
       // set (only then) after a rescan of a Connector that does not report deletions on
       // rescan: sources deleted while the cursor was expired may still be shown (I01-R17)
       deletionsMayBeMissed: z.boolean().optional(),
@@ -132,6 +154,7 @@ export const SYNC_STOP_CODES = [
   "aborted",
   "instance-busy",
   "storage-failed",
+  "credential-unusable",
 ] as const;
 export type SyncStopCode = (typeof SYNC_STOP_CODES)[number];
 
@@ -535,9 +558,19 @@ const EvidenceSummarySchema = z.object({
   /** I01-R29: the locator of the block holding the span's start, null without one. */
   locator: NativeLocatorSchema.nullable(),
 });
+/**
+ * A row the Insight used that the user wrote or approved with no current evidence (S01-R15): it has
+ * no source span, so it is listed as "사용자 입력" by its target, id and status, with no text.
+ */
+const UserInputSummarySchema = z.object({
+  target: z.enum(["fact", "relation"]),
+  id: z.int().positive(),
+  status: z.enum(["candidate", "verified", "disputed", "superseded", "rejected"]),
+});
 export const InsightEvidenceResponseSchema = z.object({
   insight: InsightSummarySchema,
   evidence: z.array(EvidenceSummarySchema),
+  userInputs: z.array(UserInputSummarySchema),
 });
 export type EvidenceSummary = z.infer<typeof EvidenceSummarySchema>;
 
@@ -920,6 +953,157 @@ export const SemanticHistoryResponseSchema = z.object({
 });
 
 /**
+ * The type definitions' (ontology's) read and user operations (S01-R23, T07). An element is an item
+ * type, a fact kind or a relation type with a rule of a fixed shape, a status and an edition. A refusal
+ * is a code with counts, never a name, a rule or a text (the names can come from a source); an id that
+ * is not stored, was deleted or whose lineage the read gate hides answers one `not-found`. The history
+ * holds numbers and closed codes only (S01-R6).
+ */
+const OntologyKindSchema = z.enum(["item-type", "fact-kind", "relation-type"]);
+const OntologyNameSchema = z.string().max(200);
+/** The item type names a rule lists: each as long as a name may be, so a type list cannot carry text. */
+const OntologyTypeListSchema = z.array(OntologyNameSchema).max(100);
+export const OntologyRuleSchema = z.discriminatedUnion("elementKind", [
+  z.strictObject({ elementKind: z.literal("item-type") }),
+  z.strictObject({
+    elementKind: z.literal("fact-kind"),
+    itemTypes: OntologyTypeListSchema,
+    valueType: z.enum(["date", "text", "surface-form", "identifier"]),
+    cardinality: z.enum(["one", "many"]),
+  }),
+  z.strictObject({
+    elementKind: z.literal("relation-type"),
+    subjectTypes: OntologyTypeListSchema,
+    objectTypes: OntologyTypeListSchema,
+    symmetric: z.boolean(),
+  }),
+]);
+/**
+ * One object (a contract schema must convert to a JSON Schema object); a refinement checks which of
+ * `elementKind` and `rule` each `op` carries: `add` a rule, `change-rule` both, `retire` the kind.
+ */
+export const OntologyChangeSchema = z
+  .strictObject({
+    op: z.enum(["add", "change-rule", "retire"]),
+    name: OntologyNameSchema,
+    elementKind: OntologyKindSchema.optional(),
+    rule: OntologyRuleSchema.optional(),
+  })
+  .refine((c) =>
+    c.op === "add"
+      ? c.rule !== undefined && c.elementKind === undefined
+      : c.op === "change-rule"
+        ? c.rule !== undefined && c.elementKind !== undefined
+        : c.elementKind !== undefined && c.rule === undefined,
+  );
+export type OntologyChangeRequest = z.infer<typeof OntologyChangeSchema>;
+export const OntologyRefRequestSchema = z.strictObject({ id: z.int().positive() });
+export const OntologyDecideRequestSchema = z.strictObject({
+  id: z.int().positive(),
+  action: z.enum(["approve", "reject", "dispute"]),
+});
+export const ONTOLOGY_REFUSALS = [
+  "duplicate",
+  "schema-invalid",
+  "existing-data-violation",
+  "basis-required",
+  "invalid-transition",
+  "not-found",
+  "not-latest",
+  "nothing-to-undo",
+] as const;
+export const OntologyListResponseSchema = z.object({
+  elements: z.array(
+    z.object({
+      id: z.int().positive(),
+      elementKind: OntologyKindSchema,
+      name: z.string(),
+      rule: OntologyRuleSchema,
+      status: SemanticStatusSchema,
+      edition: z.int().positive(),
+      origin: z.enum(["seed", "user", "source-proposed"]),
+    }),
+  ),
+});
+export const OntologyCheckResponseSchema = z.object({
+  /** How many stored elements the name duplicates (their names are not given). */
+  duplicates: z.int().nonnegative(),
+  /** Closed codes. */
+  schemaErrors: z.array(z.string().max(60)),
+  impact: z.object({ liveRows: z.int().nonnegative(), violations: z.int().nonnegative() }),
+  applicable: z.boolean(),
+});
+/**
+ * One object: `applied` carries `id`, `edition` and `seq`; `unchanged` and `removed` carry `id`;
+ * `refused` carries `reason` and the counts that explain it.
+ */
+export const OntologyOutcomeSchema = z
+  .object({
+    status: z.enum(["applied", "unchanged", "removed", "refused"]),
+    id: z.int().positive().optional(),
+    edition: z.int().positive().optional(),
+    seq: z.int().positive().optional(),
+    reason: z.enum(ONTOLOGY_REFUSALS).optional(),
+    duplicates: z.int().nonnegative().optional(),
+    schemaErrors: z.array(z.string().max(60)).optional(),
+    impact: z
+      .object({ liveRows: z.int().nonnegative(), violations: z.int().nonnegative() })
+      .optional(),
+  })
+  .refine((o) =>
+    o.status === "applied"
+      ? o.id !== undefined &&
+        o.edition !== undefined &&
+        o.seq !== undefined &&
+        o.reason === undefined
+      : o.status === "refused"
+        ? o.reason !== undefined &&
+          o.duplicates !== undefined &&
+          o.schemaErrors !== undefined &&
+          o.impact !== undefined &&
+          o.id === undefined
+        : o.id !== undefined && o.reason === undefined && o.seq === undefined,
+  );
+export const OntologyHistoryResponseSchema = z.object({
+  lines: z.array(
+    z.object({
+      seq: z.int().positive(),
+      at: z.string(),
+      actor: z.enum(["user", "extraction", "propagation", "policy"]),
+      action: z.string().max(40),
+      fromStatus: SemanticStatusSchema.nullable(),
+      toStatus: SemanticStatusSchema,
+      fromEdition: z.int().positive().nullable(),
+      toEdition: z.int().positive(),
+      reason: z.string().max(60).nullable(),
+      basisSourceId: z.int().positive().nullable(),
+      basisVersion: z.int().positive().nullable(),
+      batch: z.int().positive().nullable(),
+      revertsSeq: z.int().positive().nullable(),
+    }),
+  ),
+});
+
+/**
+ * The knowledge-schema catalogue (S02-R25): the edition and, for every name of the catalogue, where it is
+ * stored, whether it can be used now (a `verified` type definition exists; `null` for a name that has no type
+ * definition) and whether the stored rule is the catalogue's (`null` likewise; a missing definition is `false`).
+ * Names only: no source text can be in it.
+ */
+export const KnowledgeSchemaResponseSchema = z.object({
+  edition: z.int().positive(),
+  entries: z.array(
+    z.object({
+      category: z.enum(["knowledge-type", "relation-type", "fact-kind"]),
+      name: z.string(),
+      place: z.enum(KNOWLEDGE_PLACES),
+      usable: z.boolean().nullable(),
+      ruleMatches: z.boolean().nullable(),
+    }),
+  ),
+});
+
+/**
  * Where the screens get the backend address and token: the dev server in the browser,
  * the preload in Electron (V01-R3). An empty `baseUrl` means the page's own origin.
  */
@@ -1117,6 +1301,42 @@ export const routes = {
     path: "/api/semantic/undo",
     request: SemanticRefRequestSchema,
     response: SemanticOutcomeSchema,
+  },
+  knowledgeSchema: {
+    method: "GET",
+    path: "/api/knowledge-schema",
+    response: KnowledgeSchemaResponseSchema,
+  },
+  ontology: { method: "GET", path: "/api/ontology", response: OntologyListResponseSchema },
+  ontologyCheck: {
+    method: "POST",
+    path: "/api/ontology/check",
+    request: OntologyChangeSchema,
+    response: OntologyCheckResponseSchema,
+  },
+  ontologyChange: {
+    method: "POST",
+    path: "/api/ontology/change",
+    request: OntologyChangeSchema,
+    response: OntologyOutcomeSchema,
+  },
+  ontologyDecide: {
+    method: "POST",
+    path: "/api/ontology/decide",
+    request: OntologyDecideRequestSchema,
+    response: OntologyOutcomeSchema,
+  },
+  ontologyUndo: {
+    method: "POST",
+    path: "/api/ontology/undo",
+    request: OntologyRefRequestSchema,
+    response: OntologyOutcomeSchema,
+  },
+  ontologyHistory: {
+    method: "POST",
+    path: "/api/ontology/history",
+    request: OntologyRefRequestSchema,
+    response: OntologyHistoryResponseSchema,
   },
 } as const;
 export type RouteName = keyof typeof routes;

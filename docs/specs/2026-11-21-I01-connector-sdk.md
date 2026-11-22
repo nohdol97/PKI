@@ -242,7 +242,7 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
 
   코드는 닫힌 목록이다.
   - **거부**: `invalid-json`, `schema`, `content-hash-mismatch`, `revision-conflict`, `invalid-blocks`, `capability-violation`, `scope-change-content-mismatch`.
-  - **멈춤**: `invalid-page`, `no-progress`, `cursor-expired`, `rate-limited`, `connector-error`, `connector-failed`, `aborted`, `instance-busy`, `storage-failed`. `storage-failed`는 페이지 저장 트랜잭션의 실패(트리거의 거부 포함, I01-R14)다. 그 페이지는 저장되지 않고 cursor는 그대로다.
+  - **멈춤**: `invalid-page`, `no-progress`, `cursor-expired`, `rate-limited`, `connector-error`, `connector-failed`, `aborted`, `instance-busy`, `storage-failed`, `credential-unusable`. `credential-unusable`은 `getChanges`가 `ConnectorCredentialError`를 던진 멈춤이다(I06-R10). 같은 호출을 다시 시도하지 않는다. `storage-failed`는 페이지 저장 트랜잭션의 실패(트리거의 거부 포함, I01-R14)다. 그 페이지는 저장되지 않고 cursor는 그대로다.
 
   `unsupported-sdk-version`은 멈춤 코드가 아니라 인스턴스 상태의 사유다(I01-R1).
 - **I01-R20 정해진 동기화는 I03의 작업이다.** 주기적으로 끌어오는 동기화는 I03의 작업 종류 `connector-sync`로 돌며, 그 작업이 이 관리 모듈의 동기화를 부른다. 멈춤 코드가 I03의 결과로 옮겨지는 표는 **이 spec이 정하고 I03이 가리킨다.** 결과는 `retry`, `held`, `dead_letter`, `done` 넷 가운데 하나이며, 멈춤 코드(I01-R19)와 인스턴스 상태마다 한 행이 있다. `done`은 I03의 `succeeded`로 닫힌다.
@@ -261,6 +261,7 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
   | `storage-failed` | `retry`, 시도가 다하면 `dead_letter` | 씀 | I03 backoff | 디스크 사정이면 다시 하면 풀린다. 트리거의 거부처럼 늘 같은 실패면 시도가 다해 포기한 작업(dead_letter)으로 남아 보인다 |
   | 인스턴스가 `unavailable`(초기화 실패, `unsupported-sdk-version`) | `held` | 쓰지 않음 | 그 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 I03의 시간당 묶음 재점검 | 설정이나 수집기가 바뀌어야 풀린다 |
   | 인스턴스가 `not-implemented`(`site-*`) | `held` | 쓰지 않음 | 그 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 I03의 시간당 묶음 재점검 | 포크가 실제 구현을 등록해야 풀린다 |
+  | `credential-unusable` | `held` | 쓰지 않음 | 그 인스턴스가 `ready`가 될 때(변경 알림, 앱을 다시 시작함, 사유가 `credential-rejected`가 아니면 I03의 시간당 묶음 재점검) | 수집기가 자격 증명을 쓸 수 없다고 알렸다(I06-R10). 값을 고치면 풀린다. 수집기를 불렀지만 `held`로 닫으면 시도는 되돌려진다 |
 
   `held`인 주기는 I03이 "멈춤"과 그 이유로 보인다. 처리기는 I03의 처리기 결과 `held(reason)`를 돌려주며, 이유 코드는 인스턴스 상태의 사유다.
 
@@ -924,3 +925,4 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 | 2026-11-22 | I04-T11(#110)을 합침: I04 spec의 T09 handoff 8·9·14·15는 두 쪽의 문장을 모두 남김, site-setup S21의 Broker 등급 문장을 `scopeClass`·`ScopeGrading`·`BrokerDeps.scope` 기준으로 고치고 `tooling/docs/site-setup-i04.test.ts`의 고정 사실을 맞춤. 재검토 V1(`strictest`의 답은 물은 등급 중 하나), 인스턴스 행이 없는 원본 시험, 시험 전용 문의 변이 불가와 H03 #34 소관을 handoff에 | "T06이 넘기는 것" 4·10, site-setup S21 | I01-T06 재검토 V1·V2 |
 | 2026-11-22 | I01-T10: `docs/connector-sdk.md`(규격, 두 번호와 받아들이는 규칙, 동기화·재시도·결과 표, 계약 테스트와 예시 수집기, 정수 revision이 없을 때, 자격 증명, JSONL, v1에서 옮기는 법, 아직 없는 것), site-setup S18·번호 범위 안내·S08의 등급 매핑 문장·"수집" 절의 규격 v2 문장, ownership.md 2·3절, README·docs 색인 한 줄. 문서의 코드 블록은 시험되는 파일의 발췌로, 표는 상수와 대조해 시험이 붙잡고, "없다"고 쓴 것은 반대가 되면 빨개지는 시험을 둠("T10이 넘기는 것") | "T10이 넘기는 것", T05 12⑧·14①, T06 10③, 이 문서의 문서 영향 표 | I01-T10 구현 |
 | 2026-11-22 | I01-T10 검토 반영 1: "없다" 가드를 제품 코드·빌드만 겨누게 고침(포크가 문서대로 하면 빨개지던 것), 파일 수집기 `{ path }`가 제품에서 설정되지 않는다고 바로잡고 T05 14①·15④와 I03-T09 6항에 정정을 적음, `site-check` 오류 문구·`deletionsMayBeMissed` 수명·S08의 `grade(null)`/`strictest([])` 구분 정정, 포크의 `site/` 밖 수정 목록과 부팅 동작, 추적 이슈 #113~#116, 계약 묶음 대 제품의 차이 | "T10이 넘기는 것" 8, T05 14①·15④, I03-T09 6 | I01-T10 검토 M1·M2·S1~S8 |
+| 2026-11-23 | R19 멈춤 목록과 R20 표에 `credential-unusable`(held, 시도 쓰지 않음, 인스턴스가 `ready`가 될 때) 추가 | I01-R19, I01-R20 | I06-T03(#114)이 `SYNC_OUTCOMES`와 함께 고침. [I06 spec](2026-11-22-I06-connector-credentials.md) I06-R10 |

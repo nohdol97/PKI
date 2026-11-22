@@ -10,7 +10,9 @@
 // collection the cascades took. A new version supersedes what lost its current
 // evidence and recomputes the rule (V02-R11); nothing is deleted and the earlier
 // versions stay (I04-R10). Facts and relations a deletion leaves are judged again
-// by the same rule (I04-R8). The two projection kinds (projection-kinds.ts) follow them in the
+// by the same rule (I04-R8), except the ones the user wrote, which skip it and go only with their item
+// (S01-R14): an item left with no row from a source is deleted, the user's rows on it with it, unless
+// the user created the item. The two projection kinds (projection-kinds.ts) follow them in the
 // product registry; they register the removal jobs after the canonical purge.
 //
 // The entries, applyTombstone and propagateNewVersion, keep their results (the ids
@@ -23,6 +25,9 @@ import {
   EXTRACT_JOB_KIND,
   listEvidence,
   registerJob,
+  rowLineage,
+  unionOfVersions,
+  userInputsOf,
   type Affected,
   type DerivativeKind,
   type DerivativeRegistry,
@@ -135,24 +140,25 @@ const CITED_ITEMS = `
 const lineageOf: Record<string, (db: SqlDriver, id: number) => SourceVersionRef[]> = {
   source: (db, id) => versionsOf(db, VERSIONS("v.id = ?"), [id]),
   evidence: (db, id) => versionsOf(db, EVIDENCE_VERSIONS("e.id = ?"), [id]),
-  fact: (db, id) => versionsOf(db, EVIDENCE_VERSIONS("e.fact_id = ?"), [id]),
-  relation: (db, id) => versionsOf(db, EVIDENCE_VERSIONS("e.relation_id = ?"), [id]),
-  item: (db, id) =>
-    versionsOf(
-      db,
-      EVIDENCE_VERSIONS(
-        `e.fact_id IN (SELECT id FROM facts WHERE item_id = ?)
-         OR e.relation_id IN (SELECT id FROM relations WHERE subject_id = ? OR object_id = ?)`,
-      ),
-      [id, id, id],
-    ),
+  // a row the user wrote has the lineage of the item it is on, and an item the user created none
+  // (S01-R22); the three share one definition with the rule's lineage of a user input (storage)
+  fact: (db, id) => rowLineage(db, { kind: "fact", id }),
+  relation: (db, id) => rowLineage(db, { kind: "relation", id }),
+  item: (db, id) => rowLineage(db, { kind: "item", id }),
   "scope-drop": (db, id) =>
     versionsOf(db, "SELECT source_id, version FROM scope_policy_drops WHERE id = ?", [id]),
+  // the evidence the Insight cites, and the lineage of each user input it used (S01-R15): a row the
+  // user wrote or approved with no current evidence cites nothing, yet its sources are the Insight's
   insight: (db, id) =>
-    versionsOf(
-      db,
-      EVIDENCE_VERSIONS("e.id IN (SELECT evidence_id FROM insight_evidence WHERE insight_id = ?)"),
-      [id],
+    unionOfVersions(
+      versionsOf(
+        db,
+        EVIDENCE_VERSIONS(
+          "e.id IN (SELECT evidence_id FROM insight_evidence WHERE insight_id = ?)",
+        ),
+        [id],
+      ),
+      ...userInputsOf(db, id).map((input) => rowLineage(db, input)),
     ),
   // only a candidate or a rejected type definition follows its source; a verified one (and a retired
   // one, which was verified) is a rule the user accepted and holds no lineage (S01-R20, R22)
@@ -229,11 +235,75 @@ const EVIDENCE: DerivativeKind = {
 };
 
 /**
+ * Whether a row from a source (not one the user wrote, S01-R14) is on the item: its facts, and the
+ * relations it is the subject or the object of, except the rows this propagation deletes (`going`: the
+ * cited rows of the collection that are left with no evidence, which their own kind deletes). The same
+ * answer before and after those deletions, so the kinds before the item kind can judge the item.
+ * Evidence attached to a row the user wrote does not hold the item: it states the user's value, and
+ * the item's name came from the source rows (the deletion guarantee reads first).
+ */
+const SOURCE_ROW_ON_ITEM = `
+  SELECT 1 FROM facts f WHERE f.item_id = ? AND f.user_authored = 0
+    AND f.id NOT IN (SELECT value FROM json_each(?))
+  UNION ALL SELECT 1 FROM relations r
+    WHERE (r.subject_id = ? OR r.object_id = ?) AND r.user_authored = 0
+    AND r.id NOT IN (SELECT value FROM json_each(?)) LIMIT 1`;
+
+/** The collected rows of a kind that a source row left with no evidence: deleted by that kind. */
+function going(ctx: InvalidationContext, kind: "fact" | "relation"): number[] {
+  const table = kind === "fact" ? "facts" : "relations";
+  const target = (id: number) => (kind === "fact" ? { factId: id } : { relationId: id });
+  return (ctx.collected.get(kind) ?? [])
+    .map((a) => Number(a.ref.id))
+    .filter(
+      (id) =>
+        ctx.tx.all(`SELECT 1 FROM ${table} WHERE id = ? AND user_authored = 0`, [id]).length ===
+          1 && listEvidence(ctx.tx, target(id)).length === 0,
+    );
+}
+
+/** The ids of the rows this propagation deletes for lack of evidence, as the JSON lists the query binds. */
+interface Going {
+  facts: string;
+  relations: string;
+}
+const goingOf = (ctx: InvalidationContext): Going => ({
+  facts: JSON.stringify(going(ctx, "fact")),
+  relations: JSON.stringify(going(ctx, "relation")),
+});
+
+/** An item no row from a source holds any more, and the user did not create (a created one stays). */
+function withoutSource(tx: SqlDriver, id: number, leaving: Going): boolean {
+  if (!stored(tx, "items", id)) return false;
+  if (tx.all("SELECT 1 FROM items WHERE id = ? AND user_authored = 1", [id]).length === 1) {
+    return false;
+  }
+  return tx.all(SOURCE_ROW_ON_ITEM, [id, leaving.facts, id, id, leaving.relations]).length === 0;
+}
+
+/**
+ * The collected items a deletion or a prune leaves with no row from a source (S01-R14): the items the
+ * item kind deletes, and whose rows the user wrote go with them. A new version deletes nothing.
+ */
+function doomedItems(ctx: InvalidationContext, change: SourceChange): number[] {
+  const mode = supported(change);
+  if (mode !== "deletion" && mode !== "pruned") return [];
+  const leaving = goingOf(ctx);
+  return (ctx.collected.get("item") ?? [])
+    .map((a) => Number(a.ref.id))
+    .filter((id) => withoutSource(ctx.tx, id, leaving));
+}
+
+/**
  * A fact or relation the source's evidence cites, judged again (V02-R11, I04-R8):
  * left without any evidence it is deleted, whatever its status and epistemic type
  * (a user-approved value came from the deleted source); left with no current
  * evidence it becomes superseded (rejected and superseded rows stay). Its
  * epistemic type never changes. After a new version nothing loses its evidence.
+ * A row the user wrote skips both rules (S01-R14): its value is the user's, not the source's, so it
+ * stays at no evidence and is never superseded. It goes with its item, which is judged by the item
+ * kind: the rows the user wrote on an item left with no row from a source are deleted here, by their
+ * own kind, so the record counts them as facts and relations.
  */
 function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
   const table = kind === "fact" ? "facts" : "relations";
@@ -257,10 +327,12 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
       const superseded: number[] = [];
       for (const { ref } of snapshot) {
         const id = Number(ref.id);
-        const status = tx.all(`SELECT status FROM ${table} WHERE id = ?`, [id])[0]?.status;
-        if (status === undefined) continue;
+        const row = tx.all(`SELECT status, user_authored FROM ${table} WHERE id = ?`, [id])[0];
+        if (row === undefined) continue;
+        const status = row.status;
         const evidence = listEvidence(tx, target(id));
         if (evidence.length === 0) {
+          if (row.user_authored === 1) continue; // the user's value: only its item takes it (R14)
           tx.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
           deleted.push(id);
         } else if (
@@ -278,6 +350,23 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
           if (outcome.status === "applied") superseded.push(id);
         }
       }
+      // the rows the user wrote on an item no source row holds go with the item (R14)
+      const doomed = doomedItems(ctx, change);
+      if (doomed.length > 0) {
+        const where =
+          kind === "fact"
+            ? "item_id IN (SELECT value FROM json_each(?))"
+            : "subject_id IN (SELECT value FROM json_each(?)) OR object_id IN (SELECT value FROM json_each(?))";
+        const ids = JSON.stringify(doomed);
+        const written = tx
+          .all(`SELECT id FROM ${table} WHERE user_authored = 1 AND (${where}) ORDER BY id`, [
+            ids,
+            ...(kind === "fact" ? [] : [ids]),
+          ])
+          .map((r) => r.id as number);
+        for (const id of written) tx.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
+        deleted.push(...written);
+      }
       const report = noting(ctx);
       if (report) {
         report[kind === "fact" ? "facts" : "relations"].push(...deleted);
@@ -288,7 +377,11 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
   };
 }
 
-/** An item a cited row holds: deleted once no fact or relation is left on it (its Insights cascade). */
+/**
+ * An item a cited row holds: deleted once no row from a source is left on it (S01-R14), its Insights
+ * with it (cascade). An item the user created stays, whatever was on it; the rows the user wrote on a
+ * deleted item went with it in their own kinds (above).
+ */
 const ITEM: DerivativeKind = {
   ...base("item", "item"),
   affected: (tx, change) => {
@@ -296,21 +389,10 @@ const ITEM: DerivativeKind = {
     const id = change.sourceId;
     return collect(tx, "item", `SELECT id FROM (${CITED_ITEMS}) ORDER BY id`, [id, id, id]);
   },
-  invalidate: (ctx, snapshot) => {
+  invalidate: (ctx, _snapshot, change) => {
     const { tx } = ctx;
-    const deleted: number[] = [];
-    for (const { ref } of snapshot) {
-      const id = Number(ref.id);
-      if (!stored(tx, "items", id)) continue;
-      const held = tx.all(
-        `SELECT 1 FROM facts WHERE item_id = ?
-         UNION ALL SELECT 1 FROM relations WHERE subject_id = ? OR object_id = ? LIMIT 1`,
-        [id, id, id],
-      );
-      if (held.length > 0) continue;
-      tx.run("DELETE FROM items WHERE id = ?", [id]);
-      deleted.push(id);
-    }
+    const deleted = doomedItems(ctx, change); // none for a new version: nothing is deleted (I04-R10)
+    for (const id of deleted) tx.run("DELETE FROM items WHERE id = ?", [id]);
     noting(ctx)?.items.push(...deleted);
     return { removed: deleted.length, recomputed: 0 };
   },

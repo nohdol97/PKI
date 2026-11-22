@@ -158,7 +158,7 @@ const NAMED_FACTS = [
   { token: "RECHECK_TIMEOUT_MS", file: "backend/src/connector-sync-job.ts", holds: "export const RECHECK_TIMEOUT_MS = 60_000;" },
   { token: "POST /api/import/jsonl", file: "packages/contracts/src/index.ts", holds: 'path: "/api/import/jsonl"' },
   { token: "recheck", file: "backend/src/connectors.ts", holds: "async recheck(id, turn) {" },
-  { token: "healthCheck", file: "backend/src/connectors.ts", holds: "(await connector.healthCheck()).state === " },
+  { token: "healthCheck", file: "backend/src/connectors.ts", holds: "const health = await connector.healthCheck();" },
   { token: "ChangeSet", file: "packages/contracts/src/connector.ts", holds: "export type ChangeSet = " },
   { token: "cursorExpired", file: "packages/contracts/src/connector.ts", holds: "cursorExpired: z.boolean().optional()," },
   { token: "scope-change-content-mismatch", file: "packages/contracts/src/connector.ts", holds: '"scope-change-content-mismatch",' },
@@ -361,7 +361,7 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     const code = read("backend/src/connectors.ts");
     expect(code).toContain("export const INITIALIZE_TIMEOUT_MS = 10_000;");
     expect(code).toContain("export const RECHECK_LATE_LIMIT = 3;");
-    expect(code).toContain("instances.map(async ({ id, kind, config }): Promise<Entry> => {");
+    expect(code).toContain("instances.map(async ({ id, kind, config, credentials }): Promise<Entry> => {");
     expect(code).toContain('log("connector-kind-unknown", { id });');
     expect(code).toContain('log("connector-initialize-timeout", { id });');
     expect(code).toContain('log("connector-factory-failed", { id });');
@@ -383,9 +383,9 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     expect(read("backend/src/connector-sync-job.ts")).toContain("export const RECHECK_TIMEOUT_MS = 60_000;");
   });
 
-  it("no code gives a Connector a secret (chapter 8): initialize takes the config only", () => {
+  it("no code gives a Connector a secret (chapter 8): initialize takes the config and the accessor only", () => {
     expect(read("packages/contracts/src/connector.ts")).toContain("initialize(config: unknown, context?: ConnectorContext): Promise<void>;");
-    expect(read("backend/src/connectors.ts")).toContain("await connector.initialize(config);");
+    expect(read("backend/src/connectors.ts")).toContain("await connector.initialize(config, context);");
   });
 
   it("no product code calls getDocument, and healthCheck is called only by the hourly recheck (chapter 1)", () => {
@@ -597,7 +597,7 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     // the check initializes with an empty config, so a collector that needs one ends 1 with its own message
     expect(seven).toContain("`site-check`는 **빈 설정(`{}`)으로** 초기화한다.");
     expect(seven).toContain("설정을 요구하는 수집기는 자기 설정 오류의 문구로 실패하고 1로 끝난다");
-    expect(read("backend/src/connectors.ts")).toContain("await initializeConnector(create(), {});");
+    expect(read("backend/src/connectors.ts")).toContain("await initializeConnector(create(), {}, { credentials: REFUSING_CREDENTIALS });");
     expect(JSON.parse(read(`${exampleDir}/package.json`)).scripts["site-check"]).toBe("node src/site-check.ts");
     expect(JSON.parse(read("apps/desktop/package.json")).scripts.build).toBeDefined();
   });
@@ -641,13 +641,13 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     const code = read("backend/src/site-registration.ts");
     const union = /export type SiteRegistrationCode =([^;]*);/.exec(code)?.[1] ?? "";
     const all = [...union.matchAll(/"([a-z-]+)"/g)].map((m) => m[1] as string);
-    expect(all.length).toBe(12);
+    expect(all.length).toBe(13);
     for (const name of all) expect(namesToken(seven, name), name).toBe(true);
     const stopping = [...(/const STOPPING_CODES = \[([^\]]*)\]/.exec(code)?.[1] ?? "").matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
     const rows = seven.split("\n").filter((l) => /^\| `[a-z-]+` \|/.test(l));
     const stoppingRows = rows.filter((l) => l.includes("**시작을 멈춘다**")).map((l) => /^\| `([a-z-]+)`/.exec(l)?.[1]);
     expect(stoppingRows).toEqual(stopping);
-    expect(rows.length).toBe(10);
+    expect(rows.length).toBe(11);
   });
 
   it("names the public kinds and the placeholders the registration cannot or may take, as the code lists them", () => {
@@ -669,7 +669,13 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     const moved = (tsconfig.references as { path: string }[]).map((r) =>
       r.path.startsWith("../../") ? r : { path: r.path.replace("../", "../../packages/") },
     );
-    expect(blocks[1]).toEqual({ ...tsconfig, references: [...moved, { path: "../connectors/<이름>" }] });
+    // the example's `include` also lists its in-package scopes file (config/*.json); a fork's file lies outside the package
+    expect(tsconfig.include).toEqual(["src", "config/*.json"]);
+    expect(blocks[1]).toEqual({
+      ...tsconfig,
+      include: ["src"],
+      references: [...moved, { path: "../connectors/<이름>" }],
+    });
     // the copy is wrong exactly where the references changed: the example's own first three are siblings
     expect(tsconfig.references.some((r: { path: string }) => /^\.\.\/(?!\.)/.test(r.path))).toBe(true);
   });
@@ -692,7 +698,7 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
       "`site/`와 `packages/site-example/`의 파일에서는 인라인 설정(`// eslint-disable pki/module-boundary`, `/* eslint pki/module-boundary: … */`)이 효력이 없다.",
       "**린트가 보지 않는 길이 다섯 있다.** `tsconfig`의 `paths` 별칭, 심볼릭 링크, `createRequire(...)`로 부르기, 계산된 이름의 `import()`, `package.json`의 `imports`(`#이름`)다.",
       "`pnpm lint`는 저장소 루트의 `eslint.config.js` 하나만 쓴다(`eslint -c eslint.config.js`). 포크가 `site/` 아래에 둔 ESLint 설정 파일은 읽히지 않는다.",
-      "**`pnpm e2e`는 다르다. 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 지금 포크 모양에서 실패한다.** 공용 저장소의 I05-T06이 고친다.",
+      "**`pnpm e2e`도 포크 모양에서 통과한다(I05-T06, macOS 예행 한 번).** 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 두 모양에서 참이 되도록 고쳐졌다.",
       "일부러 해야 닿는 길이고 린트는 막지 않는다. 포크의 코드 검토가 맡는다.",
     ]) {
       expect(seven, sentence).toContain(sentence);

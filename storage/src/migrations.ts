@@ -954,6 +954,307 @@ const v21: Migration = (db) => {
   );
 };
 
+// Schema v22 (I02B-T02, I02B-R33, D11): the local file index. Three tables and the trigger that
+// scrubs the index when a tombstone is written.
+// - `local_locations`: the places the user approved (an operational table: settings, no source content).
+//   The ids are 22 base64url characters (I02B-R2): a longer id would make the ledger refuse a deletion.
+//   `root_dev`/`root_ino` are decimal text (a 64-bit file number does not fit a JS number).
+// - `local_index_seq`: ONE row, the counter every sequence number comes from. It never goes down and
+//   is never deleted, so the sequence is not derived from the entries' MAX(seq): a revoke that deletes
+//   the greatest row would otherwise hand the number out again, at or below a cursor already given.
+// - `local_file_entries`: one row per file, classified as source identity (not a derivative kind).
+//   Plaintext columns (path, content hash, size, mtime, file number) exist only on the live states;
+//   the keyed hashes are written with the row, so scrubbing is one UPDATE with no key needed.
+// - The trigger: a tombstone row written (inserted, or updated while not lifted) scrubs the entry of
+//   that source in the same transaction, whichever code wrote it. The source row is plain
+//   (namespace = location id, external id = file id) or already the keyed hash (= `identity_hash`). Only
+//   instance `local-files`: a JSONL line's namespace and external id are untrusted text. An entry that
+//   is no longer live (`deleted`, `forgotten`) is left alone, so a collector's own `deleted` write
+//   followed by the `delete` it caused does not take a second sequence number.
+/** Decimal text: digits only (a 64-bit number does not fit a JS number, so it is kept as text). */
+const DECIMAL = (column: string) => `${column} <> '' AND ${column} NOT GLOB '*[^0-9]*'`;
+/** A file number: the inode, or `dev:ino`, each decimal. */
+const FILE_NO = (column: string) =>
+  `${column} GLOB '[0-9]*' AND ${column} NOT GLOB '*[^0-9:]*' AND ${column} NOT GLOB '*:*:*' AND ${column} NOT GLOB '*:'`;
+const LOCAL_ID_SHAPE = (column: string) =>
+  `length(${column}) = 22 AND ${column} NOT GLOB '*[^A-Za-z0-9_-]*'`;
+// The entry a tombstone names, found by index and not by scan: the source row is read once (plain: its
+// namespace and external id are the location id and file id, primary key `external_id`; hashed: its
+// namespace is `identity_hash`, a unique index), so the plan is a MULTI-INDEX OR on those two. The
+// instance is decided once, in the trigger's WHEN, so the tombstone of any other connector costs one
+// primary-key read of `sources`.
+const ofSource = (column: string, hashed: 0 | 1) =>
+  `(SELECT ${column} FROM sources WHERE id = new.source_id AND identity_hashed = ${hashed})`;
+const localEntryOfTombstone = (entry: string) => `
+  ${entry}.state IN ('present', 'skipped')
+  AND ((${entry}.external_id = ${ofSource("external_id", 0)}
+        AND ${entry}.location_id = ${ofSource("namespace", 0)})
+    OR ${entry}.identity_hash = ${ofSource("namespace", 1)})`;
+const v22: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE local_locations (
+      id TEXT PRIMARY KEY CHECK (${LOCAL_ID_SHAPE("id")}),
+      type TEXT NOT NULL CHECK (type IN ('folder', 'file', 'jsonl-file')),
+      display_path TEXT NOT NULL,
+      real_path TEXT NOT NULL,
+      root_dev TEXT NOT NULL CHECK (${DECIMAL("root_dev")}),
+      root_ino TEXT NOT NULL CHECK (${DECIMAL("root_ino")}),
+      state TEXT NOT NULL DEFAULT 'active'
+        CHECK (state IN ('active', 'paused', 'unavailable', 'needs-confirmation', 'revoking')),
+      state_reason TEXT,
+      limit_exceeded INTEGER NOT NULL DEFAULT 0 CHECK (limit_exceeded IN (0, 1)),
+      last_pass_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE local_index_seq (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      value INTEGER NOT NULL CHECK (typeof(value) = 'integer' AND value >= 0)
+    );
+    INSERT INTO local_index_seq (id, value) VALUES (1, 0);
+    CREATE TRIGGER local_index_seq_single BEFORE INSERT ON local_index_seq
+    BEGIN SELECT RAISE(ABORT, 'the local index sequence has one row, made by the migration'); END;
+    CREATE TRIGGER local_index_seq_never_down BEFORE UPDATE ON local_index_seq
+    WHEN new.value < old.value
+    BEGIN SELECT RAISE(ABORT, 'the local index sequence never goes down'); END;
+    CREATE TRIGGER local_index_seq_keep BEFORE DELETE ON local_index_seq
+    BEGIN SELECT RAISE(ABORT, 'the local index sequence row is never deleted'); END;
+    CREATE TABLE local_file_entries (
+      external_id TEXT PRIMARY KEY CHECK (${LOCAL_ID_SHAPE("external_id")}),
+      location_id TEXT NOT NULL REFERENCES local_locations (id),
+      identity_hash TEXT NOT NULL UNIQUE,
+      relative_path TEXT,
+      path_hash TEXT,
+      size INTEGER CHECK (size IS NULL OR (typeof(size) = 'integer' AND size >= 0)),
+      mtime_ns TEXT CHECK (mtime_ns IS NULL OR (${DECIMAL("mtime_ns")})),
+      content_hash TEXT,
+      content_keyed_hash TEXT,
+      file_no TEXT CHECK (file_no IS NULL OR (${FILE_NO("file_no")})),
+      revision INTEGER NOT NULL CHECK (typeof(revision) = 'integer' AND revision >= 1),
+      normalizer_version INTEGER,
+      seq INTEGER NOT NULL UNIQUE CHECK (typeof(seq) = 'integer' AND seq >= 1),
+      state TEXT NOT NULL CHECK (state IN ('present', 'skipped', 'deleted', 'forgotten')),
+      pending_delete INTEGER NOT NULL DEFAULT 0 CHECK (pending_delete IN (0, 1, 2)),
+      skip_reason TEXT,
+      skipped_at TEXT,
+      skip_limits TEXT,
+      CHECK (state IN ('present', 'skipped') OR (relative_path IS NULL AND size IS NULL
+        AND mtime_ns IS NULL AND content_hash IS NULL AND file_no IS NULL)),
+      CHECK (state NOT IN ('present', 'skipped') OR (relative_path IS NOT NULL AND path_hash IS NOT NULL)),
+      CHECK (state <> 'deleted' OR (path_hash IS NULL AND content_keyed_hash IS NULL))
+    );
+    CREATE UNIQUE INDEX local_file_entries_path ON local_file_entries (location_id, relative_path)
+      WHERE relative_path IS NOT NULL;
+    CREATE INDEX local_file_entries_location ON local_file_entries (location_id, seq);
+    CREATE INDEX local_file_entries_forgotten_path ON local_file_entries (location_id, path_hash)
+      WHERE state = 'forgotten';
+    CREATE INDEX local_file_entries_forgotten_content ON local_file_entries (location_id, content_keyed_hash)
+      WHERE state = 'forgotten';
+    ${["INSERT", "UPDATE"]
+      .map(
+        (event) => `
+    CREATE TRIGGER tombstones_local_index_${event.toLowerCase()} AFTER ${event} ON tombstones
+    WHEN new.lifted_at IS NULL AND EXISTS (
+      SELECT 1 FROM sources WHERE id = new.source_id AND connector_instance_id = 'local-files')
+    BEGIN
+      UPDATE local_index_seq SET value = value + 1 WHERE id = 1 AND EXISTS (
+        SELECT 1 FROM local_file_entries e WHERE ${localEntryOfTombstone("e")});
+      UPDATE local_file_entries SET
+        relative_path = NULL, size = NULL, mtime_ns = NULL, content_hash = NULL, file_no = NULL,
+        path_hash = CASE new.reason WHEN 'source-deleted' THEN NULL ELSE path_hash END,
+        content_keyed_hash = CASE new.reason WHEN 'source-deleted' THEN NULL ELSE content_keyed_hash END,
+        revision = CASE new.reason WHEN 'source-deleted' THEN revision + 1 ELSE revision END,
+        state = CASE new.reason WHEN 'source-deleted' THEN 'deleted' ELSE 'forgotten' END,
+        pending_delete = 0, skip_reason = NULL, skipped_at = NULL, skip_limits = NULL,
+        seq = (SELECT value FROM local_index_seq WHERE id = 1)
+       WHERE ${localEntryOfTombstone("local_file_entries")};
+    END;`,
+      )
+      .join("")}
+  `);
+
+// Schema v23 (S02-T01, S02-R2, R3): the knowledge-schema catalogue's first edition.
+// - `ontology_elements.origin` (R3): where a definition came from: `seed` (the product put it there),
+//   `user` (the user added it through the API) or `source-proposed` (an automated actor proposed it from
+//   a source). It is written once, when the row is made, and never changes (a trigger refuses). An added
+//   column needs no table rebuild: the column has a constant default and a CHECK, and the rule stays JSON,
+//   so the new value type `identifier` needs no schema change either (the closed list of value types is in
+//   code, as it was for S01's three).
+// - The fill runs before this migration adds any row, in R3's order: a lineage row, or a creation line by
+//   an automated actor (the lineage row goes with its source, the line stays), means `source-proposed`; a
+//   creation line by the user means `user`; a name (of that kind) in the product seed means `seed` (a row
+//   no user created, which a spec merged earlier may have seeded); the rest is `user`. Then the rows the
+//   catalogue lacks are added as `verified`, edition 1, `origin = seed`, with no history line.
+// - A name that already exists (same kind, R19's comparison) is left alone whatever its status.
+// - The three widened rules (target_date, completion_date, DEPENDS_ON) are widened only while the stored
+//   rule is S01's seed rule to the letter and the status is `verified`; the edition goes up by one and no
+//   history line is written (a migration is not an actor). The lifecycle gate demands such a line, so it is
+//   dropped for the update and made again as v21 made it.
+// - The knowledge revision does not move: this is the seed's kind of write (as in v21).
+// The migration keeps its own copy of the constants (a later edition of the catalogue must not change what
+// an earlier migration does); `schema.catalogue-migration` compares the copy with the catalogue.
+// The version number is the next free one: whichever of two tasks adding a migration merges later
+// renumbers (`v23` and its line in `migrations`).
+type SeedRow = readonly [elementKind: string, name: string, rule: object];
+const V23_ITEM_TYPES = [
+  "Person",
+  "Organization",
+  "Decision",
+  "Task",
+  "Commitment",
+  "Event",
+  "Issue",
+  "Dependency",
+  "BusinessRule",
+  "OpenQuestion",
+];
+const V23_ALL_ITEM_TYPES = [...V23_ITEM_TYPES, "Project", "System", "Concept"];
+const v23Relation = (
+  name: string,
+  subjectTypes: string[],
+  objectTypes: string[],
+  symmetric = false,
+) =>
+  [
+    "relation-type",
+    name,
+    { elementKind: "relation-type", subjectTypes, objectTypes, symmetric },
+  ] as const;
+const v23Fact = (name: string, itemTypes: string[], valueType: string, cardinality: string) =>
+  ["fact-kind", name, { elementKind: "fact-kind", itemTypes, valueType, cardinality }] as const;
+/** What v23 adds; the lists are sorted as an element's stored rule is (the type lists of a rule). */
+const V23_ADDITIONS: readonly SeedRow[] = [
+  ...V23_ITEM_TYPES.map((name) => ["item-type", name, { elementKind: "item-type" }] as const),
+  v23Relation(
+    "BELONGS_TO",
+    ["Organization", "Person", "Project", "System", "Task"],
+    ["Organization", "Project"],
+  ),
+  v23Relation(
+    "RESPONSIBLE_FOR",
+    ["Organization", "Person"],
+    ["Commitment", "Decision", "Issue", "Project", "System", "Task"],
+  ),
+  v23Relation("RELATED_TO", [...V23_ALL_ITEM_TYPES].sort(), [...V23_ALL_ITEM_TYPES].sort(), true),
+  v23Relation("DECIDED", ["Organization", "Person"], ["Decision"]),
+  v23Relation(
+    "CAUSED_BY",
+    ["Decision", "Event", "Issue", "Task"],
+    ["BusinessRule", "Decision", "Dependency", "Event", "Issue"],
+  ),
+  v23Fact("identifier.email", ["Organization", "Person"], "identifier", "many"),
+  v23Fact("identifier.key", [...V23_ALL_ITEM_TYPES].sort(), "identifier", "one"),
+  v23Fact(
+    "statement",
+    [
+      "BusinessRule",
+      "Commitment",
+      "Decision",
+      "Dependency",
+      "Event",
+      "Issue",
+      "OpenQuestion",
+      "Task",
+    ],
+    "text",
+    "many",
+  ),
+];
+/** The widened rules: element, S01's seed rule (the one condition) and the widened rule. */
+const V23_WIDENED: readonly (readonly [kind: string, name: string, to: object])[] = [
+  ...["target_date", "completion_date"].map(
+    (name) =>
+      [
+        "fact-kind",
+        name,
+        {
+          elementKind: "fact-kind",
+          itemTypes: ["Commitment", "Project", "System", "Task"],
+          valueType: "date",
+          cardinality: "one",
+        },
+      ] as const,
+  ),
+  [
+    "relation-type",
+    "DEPENDS_ON",
+    {
+      elementKind: "relation-type",
+      subjectTypes: ["Commitment", "Project", "System", "Task"],
+      objectTypes: ["Commitment", "Dependency", "Project", "System", "Task"],
+      symmetric: false,
+    },
+  ],
+];
+const v23: Migration = (db) => {
+  const revision = db.all("SELECT knowledge_revision FROM revisions")[0]
+    ?.knowledge_revision as number;
+  db.exec(`
+    ALTER TABLE ontology_elements ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'
+      CHECK (origin IN ('seed', 'user', 'source-proposed'));
+  `);
+  const seedKeys = new Set(
+    [...ONTOLOGY_SEED, ...V23_ADDITIONS].map(([kind, name]) => `${kind}:${name}`),
+  );
+  const creation = (id: number) =>
+    db.all(
+      "SELECT actor FROM ontology_history WHERE element_id = ? AND seq = 1 AND action = 'created'",
+      [id],
+    )[0]?.actor as string | undefined;
+  const existing = db.all("SELECT id, element_kind, name FROM ontology_elements");
+  for (const row of existing) {
+    const id = row.id as number;
+    const created = creation(id);
+    const hasLineage =
+      db.all("SELECT 1 AS n FROM ontology_basis WHERE element_id = ? LIMIT 1", [id]).length > 0;
+    const origin =
+      hasLineage || (created !== undefined && created !== "user")
+        ? "source-proposed"
+        : created === "user"
+          ? "user"
+          : seedKeys.has(`${row.element_kind as string}:${row.name as string}`)
+            ? "seed"
+            : "user";
+    db.run("UPDATE ontology_elements SET origin = ? WHERE id = ?", [origin, id]);
+  }
+  const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
+  const taken = new Set(
+    existing.map((r) => `${r.element_kind as string}:${squash(r.name as string)}`),
+  );
+  for (const [kind, name, rule] of V23_ADDITIONS) {
+    if (taken.has(`${kind}:${squash(name)}`)) continue;
+    db.run(
+      "INSERT INTO ontology_elements (element_kind, name, rule, status, edition, origin) VALUES (?, ?, ?, 'verified', 1, 'seed')",
+      [kind, name, JSON.stringify(rule)],
+    );
+  }
+  // the lifecycle gate demands a history line for an edition change; a migration writes none
+  db.exec("DROP TRIGGER ontology_elements_lifecycle_gate");
+  for (const [kind, name, to] of V23_WIDENED) {
+    const from = ONTOLOGY_SEED.find(([k, n]) => k === kind && n === name)?.[2];
+    db.run(
+      `UPDATE ontology_elements SET rule = ?, edition = edition + 1
+       WHERE element_kind = ? AND name = ? AND status = 'verified' AND rule = ?`,
+      [JSON.stringify(to), kind, name, JSON.stringify(from)],
+    );
+  }
+  db.exec(`
+    CREATE TRIGGER ontology_elements_lifecycle_gate
+    BEFORE UPDATE OF status, rule, edition ON ontology_elements
+    WHEN (new.status IS NOT old.status OR new.rule IS NOT old.rule OR new.edition IS NOT old.edition)
+      AND ((new.rule IS NOT old.rule AND new.edition IS old.edition)
+        OR NOT EXISTS (
+          SELECT 1 FROM ontology_history h
+          WHERE h.element_id = old.id
+            AND h.seq = (SELECT max(seq) FROM ontology_history WHERE element_id = old.id)
+            AND h.from_status = old.status AND h.to_status = new.status
+            AND h.from_edition = old.edition AND h.to_edition = new.edition))
+    BEGIN SELECT RAISE(ABORT, 'status, rule and edition change only through the ontology gate'); END;
+    CREATE TRIGGER ontology_elements_origin_fixed BEFORE UPDATE OF origin ON ontology_elements
+    BEGIN SELECT RAISE(ABORT, 'an element keeps its origin'); END;
+  `);
+  db.run("UPDATE revisions SET knowledge_revision = ?", [revision]);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -977,6 +1278,8 @@ export const migrations: readonly Migration[] = [
   v19,
   v20,
   v21,
+  v22,
+  v23,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

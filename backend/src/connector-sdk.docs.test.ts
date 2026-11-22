@@ -105,6 +105,8 @@ describe("docs.connector-sdk: the tables equal the code", () => {
     없음: "none",
     "인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 한 시간마다의 재점검":
       "settings-change-or-hourly-recheck",
+    "그 인스턴스가 `ready`가 될 때(변경 알림, 앱을 다시 시작함, 사유가 `credential-rejected`가 아니면 한 시간마다의 재점검)":
+      "instance-ready",
   };
   const ATTEMPT: Record<string, SyncOutcomeRow["attempt"]> = {
     씀: "spent",
@@ -141,9 +143,9 @@ describe("docs.connector-sdk: the tables equal the code", () => {
     return out;
   }
 
-  it("the sync-outcome table equals SYNC_OUTCOMES, row by row (twelve rows)", () => {
+  it("the sync-outcome table equals SYNC_OUTCOMES, row by row (thirteen rows)", () => {
     const rows = outcomeRows(lines);
-    expect(rows).toHaveLength(12);
+    expect(rows).toHaveLength(13);
     expect(rows).toEqual(SYNC_OUTCOMES);
   });
 

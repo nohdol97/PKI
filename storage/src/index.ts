@@ -32,10 +32,34 @@ export {
   hashSourceIdentity,
   identityKey,
   keyedTextHash,
+  keyedTextHasher,
   prepareCanonicalDb,
   type PreparedCanonicalDb,
   type SourceIdentity,
 } from "./identity.ts";
+export {
+  createLocalFileIndex,
+  insertLocation,
+  listLocations,
+  LOCAL_FILES_INSTANCE_ID,
+  newLocalId,
+  readLocation,
+  setLocationState,
+  WRITABLE_LOCATION_STATES,
+  type EntryFields,
+  type EntryState,
+  type InsertRefusal,
+  type InsertResult,
+  type LocalFileEntry,
+  type LocalFileIndex,
+  type LocalLocation,
+  type LocationState,
+  type LocationType,
+  type NewEntry,
+  type NewLocation,
+  type UpdateResult,
+  type WriteRefusal,
+} from "./local-files.ts";
 export { databaseEncryption } from "./database-encryption.ts";
 export {
   dataDirectory,
@@ -195,6 +219,7 @@ export {
 } from "./knowledge.ts";
 export {
   automatedLifecycle,
+  userInputKind,
   type Actor,
   type AutomatedLifecycle,
   type Basis,
@@ -202,10 +227,12 @@ export {
   type Outcome,
   type Refusal,
 } from "./semantic-lifecycle.ts";
+export { rowLineage, unionOfVersions } from "./row-lineage.ts";
 export {
   listSemanticFacts,
   listSemanticItems,
   listSemanticRelations,
+  itemsOfEntry,
   readSemanticHistory,
   readSemanticState,
   type SemanticFactView,
@@ -224,19 +251,35 @@ export {
   type UserEntry,
 } from "./semantic-user.ts";
 export {
+  describeKnowledgeSchema,
+  type KnowledgeSchemaEntry,
+  type KnowledgeSchemaList,
+} from "./knowledge-schema.ts";
+export {
   applyOntologyChange,
   checkOntologyChange,
+  factValueFit,
+  isDate,
+  valueFits,
   listOntologyElements,
   readOntologyElement,
+  readOntologyElementById,
+  readOntologyHistory,
   verifiedRulesNaming,
   type AutomatedActor,
   type Cardinality,
   type ElementKind,
+  type ElementOrigin,
   type ElementRule,
+  type OntologyAction,
+  type OntologyActionOutcome,
   type OntologyChange,
   type OntologyCheck,
+  type OntologyHistoryLine,
   type OntologyOutcome,
   type OntologyRefusal,
+  type UserChangeOutcome,
+  type UserOntologyDecisions,
   type StoredElement,
   type ValueType,
 } from "./ontology.ts";
@@ -248,9 +291,11 @@ export {
   listRelationPairs,
   readInsight,
   saveInsight,
+  userInputsOf,
   type InsightContent,
   type InsightKey,
   type StoredInsight,
+  type UserInputRef,
 } from "./insights.ts";
 export {
   listLiftableTombstones,
@@ -342,9 +387,11 @@ export { listItemNames } from "./candidates.ts";
 export {
   listActiveInsights,
   listInsightEvidenceIds,
+  listInsightUserInputs,
   readEvidenceSource,
   readInsightEvidence,
   type ActiveInsight,
   type EvidenceSourceView,
   type InsightEvidenceRow,
+  type InsightUserInputRow,
 } from "./evidence-view.ts";

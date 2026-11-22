@@ -10,6 +10,8 @@
 // A direct add makes a row the user wrote (`user_authored`, verified, user-approved, no evidence).
 // A value fix is one batch: the old fact is retired by the user (superseded when it was verified,
 // rejected when it was a candidate or disputed) and the new value is added; one undo takes both back.
+// The type definitions' user operations (ontology.ts, S01-T07) travel in the same object, so the
+// one lint-guarded name `userDecisions` is the only way to them.
 import { listEvidence } from "./knowledge.ts";
 import {
   applyTransition,
@@ -22,6 +24,7 @@ import {
   type Refusal,
   type Row,
 } from "./semantic-lifecycle.ts";
+import { userOntology, type UserOntologyDecisions } from "./ontology.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 export type UserAction = "approve" | "reject" | "dispute";
@@ -77,6 +80,8 @@ export interface UserDecisions {
    * newest, `nothing-to-undo` for a row with no line or whose newest line is an undo.
    */
   undo(tx: SqlDriver, ref: EntryRef, at?: string): UndoResult;
+  /** The type definitions' user operations (S01-T07): change, approve and reject a candidate, undo. */
+  readonly ontology: UserOntologyDecisions;
 }
 
 const TABLE = { item: "items", fact: "facts", relation: "relations" } as const;
@@ -251,6 +256,8 @@ function undoBatch(
 }
 
 export const userDecisions: UserDecisions = {
+  ontology: userOntology,
+
   decide: (tx, ref, action, at) => applyTransition(tx, ref, "user", TARGET[action], { at }),
 
   add(tx, entry, at) {

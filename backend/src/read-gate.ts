@@ -5,23 +5,29 @@
 // snippet, order or error of it reaches the caller. A registry that cannot judge throws and the call fails
 // (the server answers a generic 500): a row is never shown unjudged.
 import { createProductRegistry } from "@pki/knowledge-engine";
-import type { SemanticKind, SemanticList, SourceSummary } from "@pki/contracts";
+import type { RouteResponse, SemanticKind, SemanticList, SourceSummary } from "@pki/contracts";
 import {
+  describeKnowledgeSchema,
   findSources,
   listActiveInsights,
+  listOntologyElements,
   listInsightEvidenceIds,
+  listInsightUserInputs,
   listSemanticFacts,
   listSemanticItems,
   listSemanticRelations,
   listSources,
   readEvidenceSource,
+  readOntologyElementById,
   readInsightEvidence,
   readSemanticState,
   type ActiveInsight,
   type DerivativeRegistry,
   type DerivedRef,
+  type ElementRule,
   type EvidenceSourceView,
   type InsightEvidenceRow,
+  type InsightUserInputRow,
   defaultScopePolicy,
   type ScopePurpose,
   type SqlDriver,
@@ -32,6 +38,14 @@ export const defaultReadRegistry: DerivativeRegistry = createProductRegistry({
   policy: defaultScopePolicy,
 });
 
+/** A rule as the contract types it: mutable lists. */
+const plain = (rule: ElementRule): RouteResponse<"ontology">["elements"][number]["rule"] =>
+  rule.elementKind === "fact-kind"
+    ? { ...rule, itemTypes: [...rule.itemTypes] }
+    : rule.elementKind === "relation-type"
+      ? { ...rule, subjectTypes: [...rule.subjectTypes], objectTypes: [...rule.objectTypes] }
+      : rule;
+
 export interface ReadGate {
   sources(): SourceSummary[];
   searchSources(query: string): SourceSummary[];
@@ -39,13 +53,27 @@ export interface ReadGate {
   /** undefined when the Insight is absent, not active or not shown: the same answer for each. */
   insightEvidence(
     insightId: number,
-  ): { insight: ActiveInsight; evidence: InsightEvidenceRow[] } | undefined;
+  ):
+    | { insight: ActiveInsight; evidence: InsightEvidenceRow[]; userInputs: InsightUserInputRow[] }
+    | undefined;
   /** undefined when the evidence row is absent or not shown. */
   evidenceSource(evidenceId: number): EvidenceSourceView | undefined;
   /** The Semantic registry's items with the facts and relations shown (S01-R23): a hidden row is left out whole. */
   semantic(): SemanticList;
   /** Whether the registry row is stored and shown: the one answer for a row that is absent, deleted or hidden. */
   semanticShown(kind: SemanticKind, id: number): boolean;
+  /**
+   * The type definitions shown (S01-R23). A `candidate` or `rejected` element follows its lineage and
+   * is judged like any derived row; a `verified` or retired one has none and is always shown.
+   */
+  ontology(): RouteResponse<"ontology">;
+  /** Whether the element is stored and shown: the one answer for an id that is absent, deleted or hidden. */
+  ontologyShown(id: number): boolean;
+  /**
+   * The knowledge-schema list (S02-R25): the catalogue against the type definitions shown. A definition the
+   * gate hides counts as absent, so the list does not reveal a candidate of a source the caller may not see.
+   */
+  knowledgeSchema(): RouteResponse<"knowledgeSchema">;
 }
 
 export interface ReadGateOptions {
@@ -112,6 +140,18 @@ export function createReadGate(
     );
     return ids.filter((id) => ok.has(String(id)));
   };
+  /** The user-input rows of an Insight that are shown (S01-R15): a fact or relation is judged under its own lineage. */
+  const shownUserInputs = (insightId: number): InsightUserInputRow[] => {
+    const inputs = listInsightUserInputs(db, insightId);
+    const kept = (target: "fact" | "relation") =>
+      only(
+        inputs.filter((u) => u.target === target),
+        target,
+        (u) => u.id,
+        "display",
+      );
+    return [...kept("fact"), ...kept("relation")];
+  };
   const maxScan = options.maxScan ?? MAX_SCAN;
   const sourcesLimit = options.sourcesLimit ?? SOURCES_LIMIT;
   const searchLimit = options.searchLimit ?? SEARCH_LIMIT;
@@ -125,14 +165,19 @@ export function createReadGate(
     insights: () =>
       only(listActiveInsights(db), "insight", (i) => i.id, "display").map((insight) => ({
         ...insight,
-        evidenceCount: shownEvidence(insight.id).length,
+        evidenceCount: shownEvidence(insight.id).length + shownUserInputs(insight.id).length,
       })),
     insightEvidence(insightId) {
       if (!isShown("insight", insightId)) return undefined;
       const read = readInsightEvidence(db, insightId);
       if (!read) return undefined;
       const evidence = only(read.evidence, "evidence", (e) => e.id, "display");
-      return { insight: { ...read.insight, evidenceCount: evidence.length }, evidence };
+      const userInputs = shownUserInputs(insightId);
+      return {
+        insight: { ...read.insight, evidenceCount: evidence.length + userInputs.length },
+        evidence,
+        userInputs,
+      };
     },
     evidenceSource(evidenceId) {
       return isShown("evidence", evidenceId) ? readEvidenceSource(db, evidenceId) : undefined;
@@ -151,5 +196,14 @@ export function createReadGate(
     },
     semanticShown: (kind, id) =>
       readSemanticState(db, { kind, id }) !== undefined && isShown(kind, id),
+    ontology: () => ({
+      elements: only(listOntologyElements(db), "ontology", (e) => e.id, "display").map((e) => ({
+        ...e,
+        rule: plain(e.rule),
+      })),
+    }),
+    knowledgeSchema: () =>
+      describeKnowledgeSchema(only(listOntologyElements(db), "ontology", (e) => e.id, "display")),
+    ontologyShown: (id) => readOntologyElementById(db, id) !== undefined && isShown("ontology", id),
   };
 }

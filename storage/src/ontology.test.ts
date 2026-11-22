@@ -423,10 +423,10 @@ describe("ontology.checks: the effect on existing data (R19 step 3)", () => {
       liveRows: 2,
       violations: 2,
     });
-    // Concept has no live item, but the definition and the three alias kinds name it
+    // Concept has no live item, but the definition, the three alias kinds, identifier.key and RELATED_TO name it
     expect(checkOntologyChange(db, retire("item-type", "Concept")).impact).toEqual({
       liveRows: 0,
-      violations: 4,
+      violations: 6,
     });
     expect(applyOntologyChange(db, retire("item-type", "Concept"), "user")).toMatchObject({
       status: "refused",
@@ -539,7 +539,7 @@ describe("ontology.checks: the effect on existing data (R19 step 3)", () => {
 
   it("lists nothing and keeps the verified seed for a change that is refused", () => {
     const seeded = listOntologyElements(db);
-    expect(seeded).toHaveLength(10);
+    expect(seeded).toHaveLength(28);
     applyOntologyChange(db, { op: "retire", elementKind: "item-type", name: "Concept" }, "user");
     expect(listOntologyElements(db)).toEqual(seeded);
   });

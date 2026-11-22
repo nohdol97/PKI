@@ -123,6 +123,17 @@ export interface JobRunnerOptions {
   scope?: CommitScope;
   /** Errors the runner caught (a throwing handler or write, a failing claim). */
   onError?: (error: unknown) => void;
+  /**
+   * Called right after every close a run attempts, with the job and what `closeJob` answered (that can
+   * be `not-leased` or `cancelled`, so a caller filters on the status it wants). Connector sync uses it to put a job back that closed held for an instance that
+   * is ready by now (I06-R10). A throw is reported to `onError`.
+   */
+  onClosed?: (job: StoredJob, status: JobRun["status"]) => void;
+  /**
+   * Called when a run is over, whichever way: after a close, and also when the lease was lost and no close
+   * happened. A mark kept for the run (connector sync's replaced-object mark) ends here (I06-R10).
+   */
+  onRunEnded?: (job: StoredJob) => void;
 }
 
 export interface JobRunner {
@@ -285,6 +296,11 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     } finally {
       active.delete(job.id);
       clearInterval(beat);
+      try {
+        options.onRunEnded?.(job);
+      } catch (error) {
+        onError(error);
+      }
     }
   }
 
@@ -299,11 +315,16 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
       closing.status === "held" && options.policyFingerprint
         ? { ...closing, policyFingerprint: options.policyFingerprint() }
         : closing;
-    const close = (closing: JobClosing): JobRun => ({
-      jobId: job.id,
+    const close = (closing: JobClosing): JobRun => {
       // a lost lease (failed heartbeat) fails closeJob's own token check: nothing is written
-      status: closeJob(db, job, stamped(closing), now(), options.scope),
-    });
+      const status = closeJob(db, job, stamped(closing), now(), options.scope);
+      try {
+        options.onClosed?.(job, status);
+      } catch (error) {
+        onError(error);
+      }
+      return { jobId: job.id, status };
+    };
     const facts = () => ({ attempts: job.attempts, now: clock.now() });
     // stale already: no call is made for a version that is gone
     const { sourceId, fenceVersion } = job;

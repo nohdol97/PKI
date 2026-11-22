@@ -4,11 +4,17 @@
 // composition point, I05-R4). It is not part of the product: nothing public imports this package.
 import type { SiteRegistration } from "@pki/backend";
 import { createExampleConnector } from "@pki/connector-example/adapters";
+// The scopes file, imported statically so the build puts its value in the backend bundle (I07-R1). Here it sits in
+// this package (config/), which the build allows for the example's entry only; a fork's file is
+// site/config/connector-scopes.json and its import path is "../../config/connector-scopes.json" (I07-R7, R16).
+// The `with { type: "json" }` is required: without it Node's source run fails.
+import connectorScopes from "../config/connector-scopes.json" with { type: "json" };
 
 /** The collector's kind name is its manifest's `type` (I05-R7). */
 const KIND = "connector-example";
 
 export const registration: SiteRegistration = {
+  connectorScopes,
   connectorKinds: { [KIND]: createExampleConnector },
   connectorInstances: [
     {

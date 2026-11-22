@@ -27,6 +27,8 @@ const NEXT_RUN: Record<string, SyncOutcomeRow["nextRun"]> = {
   없음: "none",
   "그 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 I03의 시간당 묶음 재점검":
     "settings-change-or-hourly-recheck",
+  "그 인스턴스가 `ready`가 될 때(변경 알림, 앱을 다시 시작함, 사유가 `credential-rejected`가 아니면 I03의 시간당 묶음 재점검)":
+    "instance-ready",
 };
 const ATTEMPT: Record<string, SyncOutcomeRow["attempt"]> = {
   씀: "spent",
@@ -72,7 +74,7 @@ function docRows(): SyncOutcomeRow[] {
 describe("sync.outcome-map", () => {
   it("① equals the I01-R20 table of the spec, row by row", () => {
     const rows = docRows();
-    expect(rows).toHaveLength(12);
+    expect(rows).toHaveLength(13);
     expect(SYNC_OUTCOMES).toEqual(rows);
   });
 
@@ -111,6 +113,14 @@ describe("sync.outcome-map", () => {
       result: "retry",
       attempt: "spent",
       exhaustedResult: "dead_letter",
+    });
+  });
+
+  it("⑦ credential-unusable is held, spends no attempt and waits for the instance to be ready (I06-R10)", () => {
+    expect(row("credential-unusable")).toMatchObject({
+      result: "held",
+      attempt: "unspent",
+      nextRun: "instance-ready",
     });
   });
 

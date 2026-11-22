@@ -11,6 +11,7 @@ import {
   type EmbeddingProvider,
   type EmbeddingStatusEntry,
   type ErrorResponse,
+  type OntologyChangeRequest,
   type LLMProvider,
   type ProviderCheck,
   type ProviderId,
@@ -46,10 +47,8 @@ import {
   type UserActionIssuer,
 } from "@pki/providers";
 import {
-  COMPLETION_DATE,
   defaultEntries,
-  isDate,
-  TARGET_DATE,
+  recomputeDependencyDelay,
   type CanonicalEntries,
 } from "@pki/knowledge-engine";
 import {
@@ -57,18 +56,25 @@ import {
   canonicalTransaction,
   LedgerLineUnwritableError,
   findSourceId,
+  itemsOfEntry,
   listLiftableTombstones,
   countScopePolicyDrops,
   listInvalidations,
   listProviderCalls,
   LEGACY_CLEANUP_SETTING,
   readFact,
+  checkOntologyChange,
+  factValueFit,
+  readOntologyHistory,
   readSemanticHistory,
   readSemanticState,
   readSetting,
   schemaVersion,
   writeSetting,
   type DerivativeRegistry,
+  type OntologyActionOutcome,
+  type OntologyChange,
+  type UserChangeOutcome,
   type SqlDriver,
   type UndoResult,
   type UserDecisions,
@@ -531,7 +537,19 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     return result;
   };
   const entries = options.entries ?? defaultEntries;
-  const gate = createReadGate(options.db, options.registry ?? defaultReadRegistry);
+  const registry = options.registry ?? defaultReadRegistry;
+  const gate = createReadGate(options.db, registry);
+  /**
+   * The rule "의존 업무 지연" judged again over the items a user action bore on, in the action's own
+   * transaction (S01-R15): an approval, a rejection, a fix or an undo changes what the rule reads, and
+   * the Insight follows at once instead of at the next source change. The policy judges the sources the
+   * Insight rests on, a user input's included, as it does when extraction runs the rule.
+   */
+  const judgeAgain = (items: readonly number[]) => {
+    recomputeDependencyDelay(options.db, [...new Set(items)], {
+      combinable: (lineage) => registry.combinable(options.db, lineage),
+    });
+  };
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -565,7 +583,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     if (!decisions) return { error: "not-found" };
     return options.db.transaction(() => {
       if (!gate.semanticShown(ref.kind, ref.id)) return { error: "not-found" as const };
+      const before = itemsOfEntry(options.db, ref);
       const outcome = act(decisions, new Date(options.now?.() ?? Date.now()).toISOString());
+      if (outcome.status === "applied" || outcome.status === "removed") {
+        judgeAgain([...before, ...itemsOfEntry(options.db, ref)]);
+      }
       if (outcome.status === "removed") return { status: "removed" as const };
       if (outcome.status === "refused") {
         return outcome.reason === "not-found"
@@ -592,8 +614,9 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
   ): RouteResponse<"semanticCorrect"> | { error: ErrorResponse["error"] } => {
     const { decisions } = options;
     if (!decisions) return { error: "not-found" };
-    const dateKinds: ReadonlySet<string> = new Set([TARGET_DATE, COMPLETION_DATE]);
-    const badDate = (kind: string, value: string) => dateKinds.has(kind) && !isDate(value);
+    // the value check is the type definitions' (R21), the one extraction uses; a kind no verified element names is not governed here
+    const badValue = (kind: string, value: string) =>
+      factValueFit(options.db, kind, value) === "misfit";
     const state = (ref: { kind: SemanticKind; id: number }) => {
       const now = readSemanticState(options.db, ref);
       return now && { ...ref, status: now.status, epistemic: now.epistemic };
@@ -625,12 +648,13 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
                 gate.semanticShown("item", entry.objectId)
               : true;
         if (!shown) return { error: "not-found" };
-        if (entry.kind === "fact" && badDate(entry.factKind, entry.value)) {
+        if (entry.kind === "fact" && badValue(entry.factKind, entry.value)) {
           return { error: "bad-request" };
         }
         const added = decisions.add(options.db, entry, at);
         if (added.status === "refused")
           return refused(added.reason, "existing" in added ? added.existing : undefined);
+        judgeAgain(itemsOfEntry(options.db, added.ref));
         const row = state(added.ref);
         return row ? { status: "applied", seq: added.seq, entry: row } : { error: "not-found" };
       }
@@ -638,14 +662,53 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       if (!gate.semanticShown("fact", fact.id)) return { error: "not-found" };
       const value = correction.value.trim();
       const kind = readFact(options.db, fact.id)?.kind;
-      if (kind !== undefined && badDate(kind, value)) return { error: "bad-request" };
+      if (kind !== undefined && badValue(kind, value)) return { error: "bad-request" };
       const fixed = decisions.replaceValue(options.db, fact, value, at);
       if (fixed.status === "refused") return refused(fixed.reason, fixed.existing);
+      judgeAgain(itemsOfEntry(options.db, fixed.added));
       const added = state(fixed.added);
       const replaced = state(fixed.replaced);
       return added && replaced
         ? { status: "applied", seq: fixed.seq, entry: added, replaced }
         : { error: "not-found" };
+    });
+  };
+  /** An outcome as the contract types it: the refusal's code list is a mutable array. */
+  const plainOutcome = (outcome: OntologyActionOutcome | UserChangeOutcome) =>
+    outcome.status === "refused"
+      ? { ...outcome, schemaErrors: [...outcome.schemaErrors] }
+      : outcome;
+  /** The request's one object as the storage's union: the schema's refinement guarantees what each `op` carries. */
+  const changeOf = (c: OntologyChangeRequest): OntologyChange =>
+    c.op === "add"
+      ? { op: "add", name: c.name, rule: c.rule as NonNullable<typeof c.rule> }
+      : c.op === "change-rule"
+        ? {
+            op: "change-rule",
+            name: c.name,
+            elementKind: c.elementKind as NonNullable<typeof c.elementKind>,
+            rule: c.rule as NonNullable<typeof c.rule>,
+          }
+        : {
+            op: "retire",
+            name: c.name,
+            elementKind: c.elementKind as NonNullable<typeof c.elementKind>,
+          };
+  const serverTime = () => new Date(options.now?.() ?? Date.now()).toISOString();
+  /**
+   * One user action on an element, in one transaction with the visibility check: the id's one
+   * not-found is answered before the action, so the action never meets an absent element.
+   */
+  const ontologyAction = (
+    id: number,
+    act: (decisions: UserDecisions, at: string) => OntologyActionOutcome,
+  ): RouteResponse<"ontologyDecide"> | { error: ErrorResponse["error"] } => {
+    const { decisions } = options;
+    if (!decisions) return { error: "not-found" };
+    return options.db.transaction(() => {
+      if (!gate.ontologyShown(id)) return { error: "not-found" as const };
+      const outcome = act(decisions, serverTime());
+      return plainOutcome(outcome);
     });
   };
   return {
@@ -807,6 +870,34 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     semanticCorrect: async ({ correction }) => semanticCorrect(correction),
     semanticUndo: async (ref) =>
       semanticAction(ref, (decisions, at) => decisions.undo(options.db, ref, at)),
+    // S01-R23, T07: the type definitions. The user's operations take the same one entry; an id that is
+    // absent, deleted or hidden is the one same not-found; a refusal is a code with counts in a 200 body.
+    knowledgeSchema: async () => gate.knowledgeSchema(),
+    ontology: async () => gate.ontology(),
+    ontologyHistory: async ({ id }) =>
+      gate.ontologyShown(id)
+        ? { lines: readOntologyHistory(options.db, id) }
+        : { error: "not-found" },
+    ontologyCheck: async (change) => {
+      const check = checkOntologyChange(options.db, changeOf(change));
+      return {
+        duplicates: check.duplicates.length,
+        schemaErrors: [...check.schemaErrors],
+        impact: check.impact,
+        applicable: check.applicable,
+      };
+    },
+    ontologyChange: async (change) => {
+      const { decisions } = options;
+      if (!decisions) return { error: "not-found" };
+      return options.db.transaction(() => {
+        return plainOutcome(decisions.ontology.change(options.db, changeOf(change), serverTime()));
+      });
+    },
+    ontologyDecide: async ({ id, action }) =>
+      ontologyAction(id, (decisions, at) => decisions.ontology.decide(options.db, id, action, at)),
+    ontologyUndo: async ({ id }) =>
+      ontologyAction(id, (decisions, at) => decisions.ontology.undo(options.db, id, at)),
   };
 }
 

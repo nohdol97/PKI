@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { EXAMPLE_SCOPE_MARKER } from "@pki/contracts";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bundle,
@@ -249,8 +250,27 @@ describe("bundle: the public entry, named directly (I05-C14 ③, R16)", () => {
   });
 });
 
+describe("bundle: the public entry carries no scopes file and no example marker (I07-C10, R9)", () => {
+  it("keeps no module ending in connector-scopes.json, and its text has neither the example marker nor the file name", async () => {
+    const { modules, code } = await bundled("backend/src/shell.ts", "production");
+    expect(modules).toContain("backend/src/shell-main.ts");
+    expect(modules.filter((m) => m.endsWith("connector-scopes.json"))).toEqual([]);
+    expect(code).not.toContain(EXAMPLE_SCOPE_MARKER);
+    expect(code).not.toContain("connector-scopes.json");
+  });
+});
+
 describe("bundle: the example package's entry, as a fork's is (I05-C15, R17)", () => {
   const ENTRY = "packages/site-example/src/shell.ts";
+
+  it("I07-C11 ①②③ keeps the example's scopes file and its marker in the backend bundle, and the shell's bundle has neither", async () => {
+    const backend = await bundled(ENTRY, "production");
+    expect(backend.modules).toContain("packages/site-example/config/connector-scopes.json");
+    expect(backend.code).toContain(EXAMPLE_SCOPE_MARKER);
+    const shell = await bundled("apps/desktop/src/main.ts", "production");
+    expect(shell.modules.filter((m) => m.endsWith("connector-scopes.json"))).toEqual([]);
+    expect(shell.code).not.toContain(EXAMPLE_SCOPE_MARKER);
+  });
 
   it("① keeps the registration and the example collector, ② no test file, testkit or source-run module, ④ no development or test code", async () => {
     const { modules, code } = await bundled(ENTRY, "production");

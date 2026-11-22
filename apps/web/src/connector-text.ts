@@ -19,6 +19,8 @@ export const SYNC_STOP_TEXT: Readonly<Record<SyncStopCode, string>> = {
   aborted: "동기화가 취소되었습니다.",
   "instance-busy": "이 수집기가 이미 동기화 또는 가져오기 중입니다.",
   "storage-failed": "받은 자료를 저장하지 못했습니다.",
+  "credential-unusable":
+    "수집기의 자격 증명을 쓸 수 없어 멈췄습니다. 값을 확인한 뒤 다시 시도하세요.",
 };
 
 export const syncStopText = (code: SyncStopCode): string => SYNC_STOP_TEXT[code];

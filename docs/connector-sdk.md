@@ -238,7 +238,7 @@ export class ConnectorError extends Error {
 결과(`SyncResponse`)는 받은 변경 수(`received`)와 그 갈래(`created`, `unchanged`, `scopeUpdated`, `stale`, `staleTombstone`, `blocked`, `tombstoned`), 거부 목록(위치와 코드, 앞의 100건 `REJECTED_LIST_LIMIT`)과 전체 수(`rejectedCount`), `rescanned`, `deletionsMayBeMissed`를 담는다. 멈췄다면 사유 코드 `stopped`가 붙고, `rate-limited`이면 수집기가 마지막으로 알린 `retryAfterMs`도 붙는다. 코드는 닫힌 목록이다.
 
 - 거부 코드(`REJECT_CODES`): `invalid-json`, `schema`, `content-hash-mismatch`, `revision-conflict`, `invalid-blocks`, `capability-violation`, `scope-change-content-mismatch`.
-- 멈춤 코드(`SYNC_STOP_CODES`): `invalid-page`, `no-progress`, `cursor-expired`, `rate-limited`, `connector-error`, `connector-failed`, `aborted`, `instance-busy`, `storage-failed`.
+- 멈춤 코드(`SYNC_STOP_CODES`): `invalid-page`, `no-progress`, `cursor-expired`, `rate-limited`, `connector-error`, `connector-failed`, `aborted`, `instance-busy`, `storage-failed`, `credential-unusable`.
 
 `no-progress`는 `hasMore`가 참인데 `nextCursor`가 받은 cursor와 같을 때 멈춘다. 제품이 잡는 것은 그 경우뿐이다. cursor를 돌려 가며 끝없이 `hasMore`를 보내는 수집기는 제품이 알아채지 못하고 취소될 때까지 돈다. 알고 있는 한계다.
 
@@ -260,6 +260,7 @@ export class ConnectorError extends Error {
 | `storage-failed` | `retry`, 시도가 다하면 `dead_letter` | 씀 | 작업 대기열의 대기 시간 | 디스크 사정이면 다시 하면 풀린다. 늘 같은 실패면 시도가 다해 포기한 작업으로 남는다 |
 | 인스턴스가 `unavailable`(초기화 시간 초과, 초기화 실패, 만드는 함수의 예외, 등록에 없는 종류, `unsupported-sdk-version`) | `held` | 쓰지 않음 | 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 한 시간마다의 재점검 | 설정이나 수집기가 바뀌어야 풀린다 |
 | 인스턴스가 `not-implemented`(`site-*`) | `held` | 쓰지 않음 | 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 한 시간마다의 재점검 | 포크가 실제 구현을 등록해야 풀린다 |
+| `credential-unusable` | `held` | 쓰지 않음 | 그 인스턴스가 `ready`가 될 때(변경 알림, 앱을 다시 시작함, 사유가 `credential-rejected`가 아니면 한 시간마다의 재점검) | 수집기가 자격 증명을 쓸 수 없다고 알렸다. 값을 고치면 풀린다 |
 
 표의 `held` 행에 적힌 풀리는 때 가운데 "인스턴스의 설정이 바뀌거나"는 **지금은 일어나지 않는다.** 제품에 인스턴스의 설정을 쓰는 곳이 없기 때문이다(7장). 지금 보류가 풀리는 때는 앱을 시작했을 때 인스턴스가 준비되어 있는 경우(앱 갱신으로 수집기가 동작하게 된 시작을 포함해 모든 시작)와 한 시간마다의 재점검이다. 재점검은 인스턴스마다 60초(`RECHECK_TIMEOUT_MS`) 안에 끝나지 않으면 기다리지 않고 넘어가며, 끝나지 않은 재점검이 있는 인스턴스는 다시 시작하지 않는다. 60초를 넘겨 끝난 재점검의 결과는 성공이든 실패든 버린다. 결과를 받는 것은 그것을 기다리고 있는 차례뿐이어야 "준비됨으로 바뀜"과 "보류된 작업을 풂"이 늘 함께 일어나기 때문이다.
 
@@ -488,7 +489,7 @@ export function createStuckCursorConnector(): Connector {
 site-mail: 미구현, 배포처 후속
 ```
 
-- 초기화가 던진 오류는 그 문구가 그대로 출력된다(위 줄의 `미구현, 배포처 후속`이 그 문구다). 초기화가 성공하면 `<종류>: ok`가 나오고 0으로 끝난다. 규격 버전이 다르면 `<종류>: unsupported-sdk-version`이 나오고 1로 끝난다.
+- 초기화가 던진 오류는 그 문구가 그대로 출력된다(위 줄의 `미구현, 배포처 후속`이 그 문구다). 초기화가 성공하면 `<종류>: ok`가 나오고 0으로 끝난다. 이 명령은 무엇을 읽어도 거부하는 접근자를 넘겨 초기화하며, 초기화가 `ConnectorCredentialError`로 끝나면 `<종류>: ok (credential-required)`가 나오고 0으로 끝난다(구현이 있고 자격 증명이 있어야 더 나아간다는 뜻이며, 그 오류의 문구는 출력하지 않는다). 규격 버전이 다르면 `<종류>: unsupported-sdk-version`이 나오고 1로 끝난다.
 - `site-check`는 **빈 설정(`{}`)으로** 초기화한다. 설정을 요구하는 수집기는 자기 설정 오류의 문구로 실패하고 1로 끝난다(예시 수집기가 그렇다: `connector-example: invalid config`). 그 결과는 종류가 만들어지고 규격 버전 판정을 통과해 `initialize`까지 갔다는 확인이고, 인스턴스의 실제 설정으로 초기화되는지는 아니다. 그것은 시작할 때 수집기 목록의 `ready`로 본다(site-setup S27).
 
 ### 포크가 더하는 파일
@@ -521,11 +522,17 @@ site/
 ```ts
 import type { SiteRegistration } from "@pki/backend";
 import { createExampleConnector } from "@pki/connector-example/adapters";
+// The scopes file, imported statically so the build puts its value in the backend bundle (I07-R1). Here it sits in
+// this package (config/), which the build allows for the example's entry only; a fork's file is
+// site/config/connector-scopes.json and its import path is "../../config/connector-scopes.json" (I07-R7, R16).
+// The `with { type: "json" }` is required: without it Node's source run fails.
+import connectorScopes from "../config/connector-scopes.json" with { type: "json" };
 
 /** The collector's kind name is its manifest's `type` (I05-R7). */
 const KIND = "connector-example";
 
 export const registration: SiteRegistration = {
+  connectorScopes,
   connectorKinds: { [KIND]: createExampleConnector },
   connectorInstances: [
     {
@@ -587,6 +594,7 @@ describe("site.example-registration", () => {
 | `kind-reserved` | 공용 종류의 이름 | 그 종류를 빼고 계속한다(공용 것은 그대로) |
 | `instance-id-invalid` | 인스턴스 `id`가 한도 밖 | 그 인스턴스를 빼고 계속한다 |
 | `instance-id-duplicate` | 같은 `id`가 둘 이상 | 첫 것만 쓰고 계속한다 |
+| `instance-credentials-invalid` | 인스턴스의 `credentials`(칸 이름의 목록)가 모양을 벗어남(이름의 모양, 중복, 8개 초과) | 그 인스턴스를 빼고 계속한다 |
 | `instance-kind-unknown` | 어디에도 없는 종류의 인스턴스 | 그 인스턴스만 `unavailable`로 두고 계속한다 |
 | `instance-kind-reserved` | 공용 종류나 대체하지 않은 자리표시의 인스턴스 | **시작을 멈춘다** |
 | `instance-id-reserved` | 공용 인스턴스의 ID | **시작을 멈춘다** |
@@ -608,7 +616,7 @@ pnpm --filter @pki-site/composition site-check <종류>
 pnpm --filter @pki/desktop build
 ```
 
-- `pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다. 손으로 쓴 파일의 서식이 틀리면 `pnpm exec prettier --write site`로 맞춘다. `pnpm typecheck`는 저장소의 프로젝트와 `site/composition`, `site/connectors/*`의 `tsconfig.json`을 함께 본다. `site/` 아래 패키지에 `tsconfig.json`이 없으면 그 패키지 이름을 적어 실패한다. `pnpm test`는 공용 테스트 파일을 하나도 고치지 않은 채 포크 모양에서도 통과해야 한다(`site/`의 존재로 갈리는 코드는 저장소 루트를 인자로 받는다). **`pnpm e2e`는 다르다. 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 지금 포크 모양에서 실패한다.** 공용 저장소의 I05-T06이 고친다. 그때까지 포크 모양에서 공용 저장소의 e2e 통과를 기대하지 않는다.
+- `pnpm lint`는 ESLint와 `prettier --check`를 함께 돌려 `site/`의 파일도 본다. 손으로 쓴 파일의 서식이 틀리면 `pnpm exec prettier --write site`로 맞춘다. `pnpm typecheck`는 저장소의 프로젝트와 `site/composition`, `site/connectors/*`의 `tsconfig.json`을 함께 본다. `site/` 아래 패키지에 `tsconfig.json`이 없으면 그 패키지 이름을 적어 실패한다. `pnpm test`는 공용 테스트 파일을 하나도 고치지 않은 채 포크 모양에서도 통과해야 한다(`site/`의 존재로 갈리는 코드는 저장소 루트를 인자로 받는다). **`pnpm e2e`도 포크 모양에서 통과한다(I05-T06, macOS 예행 한 번).** 공용 시험 다섯(산출물 시험 둘과 `v02-flow` 셋)은 두 모양에서 참이 되도록 고쳐졌다. 다만 `v02-flow`는 포크 모양에서도 공용 이중을 띄우므로 포크의 등록이 아니라 공용 이중을 시험한다. 포크의 등록으로 띄운 앱은 산출물 시험이 본다.
 - 포크의 `site-check <종류>`는 위와 같은 판정을 등록의 종류(자리표시를 대체한 것 포함)에 한다. 모르는 종류는 사용법을 적고 2로 끝난다. 등록이 시작을 멈추는 위반을 가졌으면 그 코드와 건수를 표준 오류에 적고 1로 끝난다. 예시 패키지에서 `pnpm --filter @pki/site-example site-check <종류>`로 같게 돌려 볼 수 있다.
 - `pnpm --filter @pki/backend site-check <종류>`는 **공용 저장소의 명령**이다. 조립 패키지가 있는 저장소에서 실행하면 자리표시의 결과를 내지 않고, 그 패키지의 `package.json`의 `name`을 읽어 위의 포크 명령을 알린 뒤 2로 끝난다. 포크가 구현한 종류에 `미구현`이 나오는 오해를 막으려는 것이다.
 - `pnpm --filter @pki/desktop build`는 포크의 진입점을 묶어 설치본을 만든다. Windows 11 설치본으로 만들어 실행하는 확인은 site-setup S27이다.
@@ -637,7 +645,7 @@ pnpm --filter @pki/desktop build
 }
 ```
 
-**`tsconfig.json`은 예시를 그대로 복사할 수 없다.** 예시는 `packages/` 안에 있어 형제 패키지를 `../connector-example`처럼 가리키는데, `site/composition/`에서는 같은 패키지가 `../../packages/connector-example`이다. 그대로 두면 참조한 프로젝트를 찾지 못해 `pnpm typecheck`가 실패한다. 의존하는 워크스페이스 패키지는 모두 `references`에 있어야 하고(`tooling/workspace/tsconfig-references.test.ts`), 포크의 수집기 패키지는 `../connectors/<이름>`으로 가리킨다. 저장소 루트의 `tsconfig.base.json`을 확장하는 줄과 `../../backend` 참조는 폴더 깊이가 같아 그대로다.
+**`tsconfig.json`은 예시를 그대로 복사할 수 없다.** 예시는 `packages/` 안에 있어 형제 패키지를 `../connector-example`처럼 가리키는데, `site/composition/`에서는 같은 패키지가 `../../packages/connector-example`이다. 그대로 두면 참조한 프로젝트를 찾지 못해 `pnpm typecheck`가 실패한다. 의존하는 워크스페이스 패키지는 모두 `references`에 있어야 하고(`tooling/workspace/tsconfig-references.test.ts`), 포크의 수집기 패키지는 `../connectors/<이름>`으로 가리킨다. 저장소 루트의 `tsconfig.base.json`을 확장하는 줄과 `../../backend` 참조는 폴더 깊이가 같아 그대로다. 예시의 `include`에 있는 `config/*.json`은 예시의 범위 파일이 패키지 안에 있어서 필요한 것이고, 포크의 범위 파일은 패키지 밖(`site/config/`)이라 아래 블록은 `["src"]`만 둔다.
 
 ```json
 {
