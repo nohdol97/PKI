@@ -13,6 +13,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { dataDirectory } from "@pki/storage";
 import { bootBackend, closeProviders } from "./boot.ts";
+import { fixtureConnectors } from "./composition.ts";
 import { envSecrets } from "./secret-sources.ts";
 
 // Development seeds come from the repository's synthetic fixtures (V01-R7).
@@ -31,7 +32,7 @@ const dir = values["data-dir"] ?? `${dataDirectory()}-dev`;
 const token = randomBytes(32).toString("base64url");
 const { server, providers } = await bootBackend({
   dataDir: dir,
-  fixtures: values.fixtures,
+  connectors: fixtureConnectors(values.fixtures),
   token,
   allowedOrigins: values.origin,
   port: Number(values.port),

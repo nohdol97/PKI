@@ -10,7 +10,7 @@ import { CLI_PROFILES } from "./cli-profiles.ts";
 import {
   CLI_BACKGROUND_SETTING,
   createExecutionGate,
-  decisionBuild,
+  testBuildDecision,
   readCliBackground,
 } from "./execution-gate.ts";
 import { VERIFIED_CLI_COMBINATIONS } from "./verified-cli.ts";
@@ -66,26 +66,17 @@ describe("background setting", () => {
 describe("the test build's pick", () => {
   const pick = { decideAs: "development", verified: listed } as const;
 
-  it("is honoured in a test build, production when nothing is picked", () => {
-    expect(decisionBuild("test", pick)).toEqual({ decideAs: "development", verified: listed });
-    expect(decisionBuild("test", undefined)).toEqual({
+  // honoured in a test build only: createExecutionGate enters it when the build kind
+  // is "test", which the bundler folds away from any other build (V01-T15; a
+  // production artifact ignoring it is apps/desktop/artifact/artifact.gate.e2e.ts)
+  it("is honoured, production when nothing is picked", () => {
+    expect(testBuildDecision(pick)).toEqual({ decideAs: "development", verified: listed });
+    expect(testBuildDecision(undefined)).toEqual({
       decideAs: "production",
       verified: VERIFIED_CLI_COMBINATIONS,
     });
-    expect(decisionBuild("test", { verified: [] })).toEqual({
-      decideAs: "production",
-      verified: [],
-    });
+    expect(testBuildDecision({ verified: [] })).toEqual({ decideAs: "production", verified: [] });
   });
-
-  it.each(["production", "development"] as const)(
-    "is ignored by a %s build: it decides as itself with the build's list",
-    (build) => {
-      const decided = decisionBuild(build, pick);
-      expect(decided).toEqual({ decideAs: build, verified: [] });
-      expect(decided.verified).toBe(VERIFIED_CLI_COMBINATIONS);
-    },
-  );
 });
 
 describe("execution gate", () => {

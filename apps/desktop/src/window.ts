@@ -15,7 +15,18 @@ export function secureWebPreferences(preload: string) {
     allowRunningInsecureContent: false,
     webviewTag: false,
     spellcheck: false,
+    // no developer tools, in any run (V01-T15): the screens are debugged in the browser
+    devTools: false,
   };
+}
+
+interface DownloadSession {
+  on(event: "will-download", listener: (event: { preventDefault(): void }) => void): unknown;
+}
+
+/** The shell downloads nothing: every download a page would start is cancelled (V01-T15). */
+export function refuseDownloads(session: DownloadSession): void {
+  session.on("will-download", (event) => event.preventDefault());
 }
 
 interface Preventable {

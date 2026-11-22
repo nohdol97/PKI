@@ -7,13 +7,16 @@
     "emitDeclarationOnly": true,
     "outDir": "dist"
   },
-  "include": ["src", "e2e"],
+  "include": ["src", "e2e", "build", "artifact"],
   "references": [
     {
       "path": "../../packages/contracts"
     },
     {
       "path": "../../storage"
+    },
+    {
+      "path": "../../packages/testkit"
     }
   ]
 }

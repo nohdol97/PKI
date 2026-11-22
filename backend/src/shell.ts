@@ -4,12 +4,13 @@
 // fork (tests) the IPC channel carries the same messages. Secrets come the same way:
 // a Provider asks just before a call (`secret-request`) and the shell answers
 // (`secret`); nothing of them is kept here.
-// `--origin` is the screens' origin (app://pki); `--data-dir` and `--fixtures` as in dev.ts.
+// `--origin` is the screens' origin (app://pki); a source run also takes `--data-dir`
+// and `--fixtures` as in dev.ts, the production build neither (shell-options.ts).
 import { dataDirectory } from "@pki/storage";
-import { parseArgs } from "node:util";
 import type { LLMProvider } from "@pki/contracts";
 import { bootBackend, closeProviders } from "./boot.ts";
 import { channelSecrets } from "./secret-sources.ts";
+import { shellOptions } from "./shell-options.ts";
 import type { RunningServer } from "./server.ts";
 
 type ToBackend = { type: "start"; token: string } | { type: "stop" };
@@ -51,13 +52,7 @@ function parentChannel(): Channel {
   throw new Error("the shell entry needs a parent channel");
 }
 
-const { values } = parseArgs({
-  options: {
-    origin: { type: "string", multiple: true, default: [] },
-    "data-dir": { type: "string" },
-    fixtures: { type: "string" },
-  },
-});
+const options = shellOptions();
 
 const channel = parentChannel();
 const secrets = channelSecrets((message) => channel.post(message));
@@ -65,12 +60,12 @@ let running:
   { server: RunningServer; providers: readonly LLMProvider[]; close(): void } | undefined;
 
 async function start(token: string) {
-  const dataDir = values["data-dir"] ?? dataDirectory();
+  const dataDir = options.dataDir ?? dataDirectory();
   const { server, db, providers } = await bootBackend({
     dataDir,
-    fixtures: values.fixtures,
+    connectors: options.connectors,
     token,
-    allowedOrigins: values.origin,
+    allowedOrigins: options.origins,
     secrets: secrets.source,
   });
   running = { server, providers, close: () => db.close() };

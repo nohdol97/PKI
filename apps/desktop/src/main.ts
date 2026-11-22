@@ -5,7 +5,9 @@
 // else the page might try: Node, other origins, new windows, permissions. It holds the
 // secret store (safeStorage ciphertext in the data directory) and answers the
 // backend's requests for a secret over the parent channel.
-// Switches (development and tests): --pki-user-data, --pki-data-dir, --pki-fixtures.
+// Switches of source runs (development and tests): --pki-data-dir, --pki-fixtures
+// (layout.ts); the production build has none. Tests move userData with
+// Chromium's own --user-data-dir (V01-T15).
 import {
   app,
   BrowserWindow,
@@ -25,17 +27,16 @@ import { startBackendProcess, type ForkBackend } from "./backend-process.ts";
 import { superviseBackend, type Supervisor } from "./backend-supervisor.ts";
 import { BRIDGE, createBridgeHandlers, type BridgeFunction } from "./bridge.ts";
 import { createSecretStore, electronCipher } from "./secret-store.ts";
-import { lockDown, secureWebPreferences } from "./window.ts";
+import { BACKEND_ENTRY, switches, WEB_ROOT } from "./layout.ts";
+import { lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
 
-const WEB_ROOT = fileURLToPath(new URL("../../web/dist/", import.meta.url));
-const BACKEND_ENTRY = fileURLToPath(new URL("../../../backend/src/shell.ts", import.meta.url));
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 /** In the data directory: per OS user, not roaming (ADR 0010). */
 const SECRETS_FILE = "secrets.json";
 /** Restarts of a backend that exited by itself, per shell run (V01-T16, provisional). */
 const MAX_RESTARTS = 3;
 
-const option = (name: string) => app.commandLine.getSwitchValue(name) || undefined;
+const { dataDir, fixtures } = switches((name) => app.commandLine.getSwitchValue(name) || undefined);
 
 const forkUtility: ForkBackend = (entry, args, env) => {
   const child = utilityProcess.fork(entry, args, { env, serviceName: "PKI backend" });
@@ -68,9 +69,10 @@ async function run() {
     grant(false),
   );
   session.defaultSession.setPermissionCheckHandler(() => false);
+  refuseDownloads(session.defaultSession);
 
   const secrets = createSecretStore({
-    file: join(option("pki-data-dir") ?? dataDirectory(), SECRETS_FILE),
+    file: join(dataDir ?? dataDirectory(), SECRETS_FILE),
     cipher: electronCipher(safeStorage, process.platform),
   });
   backend = await superviseBackend({
@@ -79,8 +81,8 @@ async function run() {
         fork: forkUtility,
         entry: BACKEND_ENTRY,
         origin: APP_ORIGIN,
-        dataDir: option("pki-data-dir"),
-        fixtures: option("pki-fixtures"),
+        dataDir,
+        fixtures,
         secrets,
         token,
       }),
@@ -135,10 +137,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 
-// The single-instance lock lives in userData, so the switch must come first.
-const userData = option("pki-user-data");
-if (userData) app.setPath("userData", userData);
-
+// The single-instance lock lives in userData (Chromium's --user-data-dir moves both).
 if (!app.requestSingleInstanceLock()) {
   app.exit(0);
 } else {

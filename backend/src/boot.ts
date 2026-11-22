@@ -12,11 +12,10 @@ import type { SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
   CANONICAL_DB_FILE,
-  connectorInstances,
-  connectorKinds,
   openCanonicalDb,
   productAdapters,
   productCalls,
+  productConnectors,
   productEgress,
   productEngine,
   productImporter,
@@ -27,6 +26,7 @@ import {
   releaseOnPolicyChange,
   sweepCliRuns,
   cliRunsRoot,
+  type ConnectorSet,
 } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
 import type { JobRunner } from "./job-runner.ts";
@@ -35,8 +35,8 @@ import { startServer, type RunningServer } from "./server.ts";
 export interface BootOptions {
   /** Holds the canonical DB. */
   dataDir: string;
-  /** Synthetic JSONL for the test Connector; without it there is none. */
-  fixtures?: string | undefined;
+  /** Default productConnectors(); source runs add the test Connector (fixtureConnectors). */
+  connectors?: ConnectorSet | undefined;
   /** Fresh per run, handed over in-process by the entry. */
   token: string;
   allowedOrigins: readonly string[];
@@ -74,12 +74,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
   const runner = productRunner(db, calls.broker, { engine, projections });
-  const connectors = await createConnectorManager(
-    db,
-    connectorInstances(options.fixtures),
-    connectorKinds,
-    { runner, projections },
-  );
+  const { instances, kinds } = options.connectors ?? productConnectors();
+  const connectors = await createConnectorManager(db, instances, kinds, { runner, projections });
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,

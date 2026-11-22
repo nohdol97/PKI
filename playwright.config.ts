@@ -2,7 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 // `*.e2e.{ts,tsx}` files. The browser project runs them all except the shell's own;
 // the electron project (V01-T06) runs the same screens file inside the shell plus the
-// shell's tests, after building the screens the shell serves.
+// shell's tests, after building the screens the shell serves. The artifact project
+// checks and launches the production build (V01-T15).
 export default defineConfig<{ target: "browser" | "electron" }>({
   projects: [
     {
@@ -31,6 +32,13 @@ export default defineConfig<{ target: "browser" | "electron" }>({
       ],
       dependencies: ["build-web"],
       use: { target: "electron" },
+    },
+    // V01-T15: the production build's app folder, built first, then checked and launched
+    { name: "build-artifact", testMatch: "apps/desktop/artifact/build-artifact.setup.ts" },
+    {
+      name: "artifact",
+      testMatch: "apps/desktop/artifact/**/*.e2e.ts",
+      dependencies: ["build-artifact"],
     },
   ],
 });

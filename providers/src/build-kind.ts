@@ -19,13 +19,15 @@ declare global {
   }
 }
 
-export function parseBuildKind(raw: string | undefined): BuildKind {
-  return raw === "development" || raw === "test" ? raw : "production";
-}
-
-export const BUILD_KIND: BuildKind = parseBuildKind(
-  typeof import.meta.PKI_BUILD_KIND === "string" ? import.meta.PKI_BUILD_KIND : undefined,
-);
+// Compared with string literals only: once the bundler has written the value, this
+// is a constant expression, so a bundle sees a literal and drops the branches of
+// the other kinds (the production build checks it: apps/desktop/build, V01-T15).
+export const BUILD_KIND: BuildKind =
+  import.meta.PKI_BUILD_KIND === "test"
+    ? "test"
+    : import.meta.PKI_BUILD_KIND === "development"
+      ? "development"
+      : "production";
 
 /** `http` to a loopback OpenAI-compatible endpoint (V01-R11): development and test builds only. */
 export function loopbackHttpAllowed(kind: BuildKind): boolean {

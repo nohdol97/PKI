@@ -81,13 +81,13 @@ async function answerSecret(
 
 export interface BackendOptions {
   fork: ForkBackend;
-  /** backend/src/shell.ts */
+  /** backend/src/shell.ts in a source run, backend/shell.js in the app folder (layout.ts). */
   entry: string;
   /** The screens' origin, the only one the backend accepts. */
   origin: string;
   /** The canonical DB folder (default: the backend's per-user data directory). */
   dataDir?: string | undefined;
-  /** Synthetic JSONL for the test Connector (development and tests; T15 removes it). */
+  /** Synthetic JSONL for the test Connector (source runs only: layout.ts, V01-T15). */
   fixtures?: string | undefined;
   /** The shell's environment; only BACKEND_ENV_KEYS pass. */
   env?: Readonly<Record<string, string | undefined>>;

@@ -3,7 +3,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import { APP_ORIGIN } from "./app-protocol.ts";
-import { lockDown, secureWebPreferences } from "./window.ts";
+import { lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
 
 function fakeContents() {
   const emitter = new EventEmitter();
@@ -65,6 +65,17 @@ describe("secureWebPreferences", () => {
       allowRunningInsecureContent: false,
       webviewTag: false,
       spellcheck: false,
+      devTools: false,
     });
+  });
+});
+
+describe("refuseDownloads", () => {
+  it("cancels every download the session would start (V01-T15)", () => {
+    const session = new EventEmitter();
+    refuseDownloads(session);
+    let prevented = false;
+    session.emit("will-download", { preventDefault: () => (prevented = true) });
+    expect(prevented).toBe(true);
   });
 });

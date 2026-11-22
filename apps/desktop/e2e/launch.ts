@@ -1,7 +1,7 @@
 // Launches the Electron shell for E2E. This is the package's import entry ("."):
 // nothing imports the shell at run time (Electron starts package.json "main",
-// src/main.ts), so the only importer is the screens E2E. Test code only; T15
-// keeps it out of the build.
+// src/main.ts), so the only importers are the E2E. Test code only; the production
+// build refuses it (apps/desktop/build/bundle.ts).
 // Each launch gets its own userData folder, so the single-instance lock and Chromium
 // state never collide with another test or with an installed app.
 import { _electron, type ElectronApplication, type Page } from "@playwright/test";
@@ -24,7 +24,8 @@ export interface ShellOptions {
 export function shellArgs({ userData, dataDir, fixtures }: ShellOptions): string[] {
   return [
     DESKTOP_DIR,
-    `--pki-user-data=${userData}`,
+    // Chromium's own switch: userData and the single-instance lock (V01-T15 6)
+    `--user-data-dir=${userData}`,
     ...(dataDir ? [`--pki-data-dir=${dataDir}`] : []),
     ...(fixtures ? [`--pki-fixtures=${fixtures}`] : []),
   ];

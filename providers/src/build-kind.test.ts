@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { BUILD_KIND, loopbackHttpAllowed, parseBuildKind } from "./build-kind.ts";
+import { BUILD_KIND, loopbackHttpAllowed } from "./build-kind.ts";
 
 const MODULE = pathToFileURL(resolve(import.meta.dirname, "build-kind.ts")).href;
 // spelled in pieces: only build-kind.ts and bundler configs may name the build value
@@ -21,13 +21,13 @@ const OLD_GLOBAL = `__${NAME}__`;
  * same process; `nodeOptions` reaches it through NODE_OPTIONS.
  */
 function unbundled(before: string, nodeOptions?: string) {
-  const script = `const NAME = ${JSON.stringify(NAME)};\nconst OLD = ${JSON.stringify(OLD_GLOBAL)};\n${before}\nconst m = await import(${JSON.stringify(MODULE)});\nconsole.log(JSON.stringify([m.BUILD_KIND, m.loopbackHttpAllowed(m.BUILD_KIND), m.parseBuildKind("development")]));`;
+  const script = `const NAME = ${JSON.stringify(NAME)};\nconst OLD = ${JSON.stringify(OLD_GLOBAL)};\n${before}\nconst m = await import(${JSON.stringify(MODULE)});\nconsole.log(JSON.stringify([m.BUILD_KIND, m.loopbackHttpAllowed(m.BUILD_KIND), m.loopbackHttpAllowed("development")]));`;
   const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
     encoding: "utf8",
     env: { PATH: process.env.PATH ?? "", ...(nodeOptions ? { NODE_OPTIONS: nodeOptions } : {}) },
   });
   expect(run.stderr).toBe("");
-  return JSON.parse(run.stdout) as [string, boolean, string];
+  return JSON.parse(run.stdout) as [string, boolean, boolean];
 }
 
 describe("build kind", () => {
@@ -35,19 +35,8 @@ describe("build kind", () => {
     expect(BUILD_KIND).toBe("test");
   });
 
-  it.each([
-    ["production", "production"],
-    ["development", "development"],
-    ["test", "test"],
-    [undefined, "production"],
-    ["", "production"],
-    ["dev", "production"],
-    ["Development", "production"],
-    [" test", "production"],
-  ] as const)("reads %j as %s", (raw, kind) => {
-    expect(parseBuildKind(raw)).toBe(kind);
-  });
-
+  // each value the bundler may write, and none: apps/desktop/build/bundle.test.ts
+  // bundles this module and loads the result (V01-T15)
   it("allows loopback http in development and test builds only (V01-R11)", () => {
     expect(loopbackHttpAllowed("production")).toBe(false);
     expect(loopbackHttpAllowed("development")).toBe(true);
@@ -60,8 +49,8 @@ describe("build kind", () => {
 // an environment variable, a preload) is not the build's value either.
 describe("build kind without a bundler", () => {
   it("is production when nothing supplies a value", () => {
-    // the third value shows the module loaded and parses: the harness is live
-    expect(unbundled("")).toEqual(["production", false, "development"]);
+    // the third value shows the module loaded and runs: the harness is live
+    expect(unbundled("")).toEqual(["production", false, true]);
   });
 
   it.each([
@@ -83,7 +72,7 @@ describe("build kind without a bundler", () => {
       "Object.defineProperty(Object.prototype, NAME, { value: 'development' }); Object.defineProperty(Object.prototype, OLD, { value: 'development' });",
     ],
   ])("ignores %s: still production", (_, before) => {
-    expect(unbundled(before)).toEqual(["production", false, "development"]);
+    expect(unbundled(before)).toEqual(["production", false, true]);
   });
 
   it("ignores a preload through NODE_OPTIONS --import", () => {
@@ -97,7 +86,7 @@ describe("build kind without a bundler", () => {
       expect(unbundled("", `--import=${pathToFileURL(preload).href}`)).toEqual([
         "production",
         false,
-        "development",
+        true,
       ]);
       // the preload did run: the global is there
       expect(

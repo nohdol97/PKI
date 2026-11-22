@@ -2,7 +2,9 @@
 // or send: the test Connector fixtures, the golden sources (R05) and the fixed
 // connection-test material. Run `pnpm --filter @pki/providers build:synthetic-manifest`
 // after changing any of them and commit the result; synthetic-manifest.test.ts
-// fails while the committed file differs from a fresh build.
+// fails while the committed file differs from a fresh build. `--check [FILE]`
+// (`check:synthetic-manifest`, run by the production build, V01-T15) writes
+// nothing and exits 1 while FILE (default: the committed one) differs.
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { syntheticHash } from "./synthetic-manifest.ts";
@@ -86,8 +88,28 @@ export function buildSyntheticManifest(root: string): ManifestEntry[] {
   return [...byHash.values()].sort((a, b) => a.hash.localeCompare(b.hash));
 }
 
+/** The manifest file's text as the build writes it. */
+function render(entries: ManifestEntry[]): string {
+  return `${JSON.stringify(entries, null, 2)}\n`;
+}
+
+/** Whether `file` holds exactly what a fresh build from `root` writes. */
+export function manifestIsCurrent(root: string, file: string): boolean {
+  return readFileSync(file, "utf8") === render(buildSyntheticManifest(root));
+}
+
 if (import.meta.main) {
   const root = resolve(import.meta.dirname, "../..");
   const out = join(import.meta.dirname, "synthetic-manifest.json");
-  writeFileSync(out, `${JSON.stringify(buildSyntheticManifest(root), null, 2)}\n`);
+  const [flag, file = out] = process.argv.slice(2);
+  if (flag === "--check") {
+    if (!manifestIsCurrent(root, file)) {
+      process.stderr.write(
+        "synthetic manifest is stale: run `pnpm --filter @pki/providers build:synthetic-manifest` and commit it\n",
+      );
+      process.exit(1);
+    }
+  } else {
+    writeFileSync(out, render(buildSyntheticManifest(root)));
+  }
 }

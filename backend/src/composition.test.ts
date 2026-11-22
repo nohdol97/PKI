@@ -17,7 +17,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CANONICAL_DB_FILE,
   connectorKinds,
+  fixtureConnectors,
   openCanonicalDb,
+  productConnectors,
   productCalls,
   productEgress,
   productProviders,
@@ -61,6 +63,38 @@ describe("site Connector kinds", () => {
       });
     },
   );
+});
+
+describe("Connectors of the product and of source runs (V01-T15)", () => {
+  it("the product registers the site kinds only: no test Connector (T04 ③)", () => {
+    expect(Object.keys(connectorKinds).sort()).toEqual([
+      "site-mail",
+      "site-messenger",
+      "site-wiki",
+    ]);
+    const product = productConnectors();
+    expect(product.kinds).toBe(connectorKinds);
+    expect(product.instances.map((i) => i.kind)).toEqual([
+      "site-mail",
+      "site-messenger",
+      "site-wiki",
+    ]);
+  });
+
+  it("a source run adds the test Connector replaying the given file", () => {
+    const set = fixtureConnectors("/synthetic/fixtures.jsonl");
+    expect(Object.keys(set.kinds).sort()).toEqual([
+      "site-mail",
+      "site-messenger",
+      "site-wiki",
+      "test-fixtures",
+    ]);
+    expect(set.instances[0]).toEqual({
+      id: "fixtures",
+      kind: "test-fixtures",
+      config: { file: "/synthetic/fixtures.jsonl" },
+    });
+  });
 });
 
 describe("productEgress", () => {
