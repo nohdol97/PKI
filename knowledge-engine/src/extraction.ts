@@ -11,8 +11,14 @@
 // the same row by the tables' keys (V02-R8); a same row gets evidence only, and a
 // superseded same row is revived by it (V02-R11). The result is written by the runner inside the fence transaction, with the dropped
 // counts and the rule "의존 업무 지연" over the items written.
+// Just before the call, an engine with the propose capability is asked for its
+// candidates for the same version (V02-R13); they pass the same checks as the
+// answer (the extraction schema, the offered candidate IDs, the exact quote) and
+// are written with it, as candidates. An engine that fails proposes nothing.
+import type { KnowledgeCandidate, KnowledgeEngine, SourceVersionRef } from "@pki/contracts";
 import {
   EXTRACT_SCHEMA_VERSION,
+  TASKS,
   type Broker,
   type BrokerResult,
   type ExtractionOutput,
@@ -50,6 +56,15 @@ export const EXTRACT_TIMEOUT_MS = 120_000;
 export interface ExtractHandlerOptions {
   db: SqlDriver;
   broker: Pick<Broker, "call">;
+  /** The bound KnowledgeEngine (composition.ts); asked only when it reports the propose capability. */
+  engine?: Pick<KnowledgeEngine, "capabilities" | "proposeKnowledge">;
+  /** An engine error; its message may carry engine text, so log its class only. */
+  onEngineError?: (error: unknown) => void;
+  /**
+   * True while the engine missed a notice (projections.ts isStale): it may still
+   * hold purged text, which a proposed item name could carry back, so it is not asked.
+   */
+  isEngineStale?: () => boolean;
   now?: () => Date;
 }
 
@@ -71,6 +86,110 @@ async function extractOnce(
   return first;
 }
 
+/** The engine's candidates for `ref`; none without the capability or when it fails. */
+async function proposals(
+  options: ExtractHandlerOptions,
+  ref: SourceVersionRef,
+): Promise<readonly KnowledgeCandidate[]> {
+  const { engine } = options;
+  try {
+    if (!engine?.capabilities().propose || options.isEngineStale?.()) return [];
+    const proposed = await engine.proposeKnowledge(ref);
+    return Array.isArray(proposed) ? proposed : [];
+  } catch (error) {
+    options.onEngineError?.(error);
+    return [];
+  }
+}
+
+const OUTPUT = TASKS.extract[EXTRACT_SCHEMA_VERSION].output;
+
+/**
+ * The candidates in the answer's shape, each checked against the extraction
+ * schema like the answer (V02-R6). A candidate for another version, or one the
+ * schema rejects, is dropped. Candidates naming the same item share its ref.
+ */
+function engineAnswer(
+  candidates: readonly KnowledgeCandidate[],
+  ref: SourceVersionRef,
+  drops: { other: number },
+): ExtractionOutput {
+  const out: ExtractionOutput = { items: [], facts: [], relations: [] };
+  const refs = new Map<string, string>();
+  // engine output is untrusted: read defensively, the schema decides
+  for (const c of candidates) {
+    if (c?.ref?.sourceId !== ref.sourceId || c.ref.version !== ref.version) {
+      drops.other++;
+      continue;
+    }
+    // this candidate's new refs, kept only if it passes
+    const pending = new Map<string, string>();
+    const items: unknown[] = [];
+    const refOf = (item: unknown) => {
+      const { type, name, existingItemId } = (item ?? {}) as Record<string, unknown>;
+      const key = JSON.stringify([type, name, existingItemId]);
+      const known = refs.get(key) ?? pending.get(key);
+      if (known) return known;
+      const fresh = `e${refs.size + pending.size}`;
+      pending.set(key, fresh);
+      items.push({ ref: fresh, type, name, existingItemId });
+      return fresh;
+    };
+    const one =
+      c.kind === "fact"
+        ? {
+            facts: [
+              {
+                item: refOf(c.item),
+                kind: c.factKind,
+                value: c.value,
+                epistemic: c.epistemic,
+                quote: c.quote,
+              },
+            ],
+            relations: [],
+          }
+        : c.kind === "relation"
+          ? {
+              facts: [],
+              relations: [
+                {
+                  subject: refOf(c.subject),
+                  type: c.type,
+                  object: refOf(c.object),
+                  quote: c.quote,
+                },
+              ],
+            }
+          : undefined;
+    const parsed = one && OUTPUT.safeParse({ items, ...one });
+    if (!parsed?.success) {
+      drops.other++;
+      continue;
+    }
+    const valid = parsed.data as ExtractionOutput;
+    for (const [key, fresh] of pending) refs.set(key, fresh);
+    out.items.push(...valid.items);
+    out.facts.push(...valid.facts);
+    out.relations.push(...valid.relations);
+  }
+  return out;
+}
+
+/** The answers in one, each answer's refs kept to itself. */
+function merged(answers: readonly ExtractionOutput[]): ExtractionOutput {
+  const out: ExtractionOutput = { items: [], facts: [], relations: [] };
+  answers.forEach((answer, i) => {
+    const ns = (ref: string) => `${i}:${ref}`;
+    out.items.push(...answer.items.map((item) => ({ ...item, ref: ns(item.ref) })));
+    out.facts.push(...answer.facts.map((fact) => ({ ...fact, item: ns(fact.item) })));
+    out.relations.push(
+      ...answer.relations.map((r) => ({ ...r, subject: ns(r.subject), object: ns(r.object) })),
+    );
+  });
+  return out;
+}
+
 export function createExtractHandler(options: ExtractHandlerOptions) {
   const { db, broker } = options;
   const now = options.now ?? (() => new Date());
@@ -83,6 +202,8 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       return { status: "held", reason: EXTRACT_HOLD_TOO_LARGE };
     }
     const candidates = findCandidates(db, `${stored.title}\n${stored.body}`).map(String);
+    const ref = { sourceId: String(job.sourceId), version: job.fenceVersion };
+    const proposed = await proposals(options, ref);
     const result = await extractOnce(broker, {
       taskKind: "extract",
       sourceVersionIds: [String(versionId)],
@@ -101,9 +222,10 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       case "failed":
         return { status: "failed", reason: result.error };
     }
-    const answer = result.output as ExtractionOutput; // the Broker checked it against the schema
     const body = stored.body;
     const drops = { quotes: 0, other: 0 };
+    // the Broker checked its output against the schema
+    const answer = merged([result.output as ExtractionOutput, engineAnswer(proposed, ref, drops)]);
 
     // items of this answer by its refs; an existing ID must be one of the candidates sent
     const items = new Map<string, Item>();

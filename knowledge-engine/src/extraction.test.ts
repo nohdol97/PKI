@@ -27,15 +27,23 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider, fixtureExtraction, type FakeStep } from "@pki/testkit";
+import {
+  FakeProvider,
+  fixtureExtraction,
+  MemoryKnowledgeEngine,
+  ProposingKnowledgeEngine,
+  type FakeStep,
+} from "@pki/testkit";
+import type { KnowledgeCandidate } from "@pki/contracts";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COMPLETION_DATE, DEPENDS_ON, TARGET_DATE } from "./dependency-delay.ts";
 import {
   createExtractHandler,
   EXTRACT_HOLD_TOO_LARGE,
   MAX_EXTRACT_CODE_POINTS,
+  type ExtractHandlerOptions,
 } from "./extraction.ts";
 import { findCandidates, knowledgeCandidates } from "./linking.ts";
 
@@ -58,7 +66,11 @@ let deny: string | undefined;
 let brokerRequests: unknown[];
 let handler: ReturnType<typeof createExtractHandler>;
 
-function setUp(script: FakeStep[] = []) {
+function setUp(
+  script: FakeStep[] = [],
+  engine?: ExtractHandlerOptions["engine"],
+  isEngineStale?: () => boolean,
+) {
   provider = new FakeProvider({ answer: fixtureExtraction(), script });
   const broker = createBroker({
     db,
@@ -86,8 +98,11 @@ function setUp(script: FakeStep[] = []) {
       },
     },
     now: () => T0,
+    ...(engine ? { engine, onEngineError: (error: unknown) => engineErrors.push(error) } : {}),
+    ...(isEngineStale ? { isEngineStale } : {}),
   });
 }
+let engineErrors: unknown[] = [];
 
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
@@ -97,6 +112,7 @@ beforeEach(() => {
   egressAsked = [];
   deny = undefined;
   brokerRequests = [];
+  engineErrors = [];
   setUp();
 });
 afterEach(() => db.close());
@@ -523,5 +539,157 @@ describe("linking", () => {
     expect(provider.requests.at(-1)?.input.candidates.map((c) => c.name)).toEqual(["물결 API"]);
     expect(egressAsked.at(-1)?.classification).toBe("general");
     expect(readItem(db, 1)?.name).toBe("물결 API");
+  });
+});
+
+describe("engine proposals (V02-R13)", () => {
+  const TARGET = "미리내 프로젝트의 완료 목표는 2026-12-05입니다";
+  const proposal = (
+    ref: KnowledgeCandidate["ref"],
+    patch: Partial<Extract<KnowledgeCandidate, { kind: "fact" }>> = {},
+  ): KnowledgeCandidate => ({
+    kind: "fact",
+    ref,
+    item: { type: "Project", name: "미리내 프로젝트", existingItemId: null },
+    factKind: "target_date",
+    value: "2026-12-05",
+    epistemic: "explicit",
+    quote: TARGET,
+    ...patch,
+  });
+  /** An engine proposing `candidates(ref)` for every version it takes, holding mail's version 1. */
+  async function proposing(
+    candidates: (ref: KnowledgeCandidate["ref"]) => KnowledgeCandidate[],
+    line: Line = mail,
+  ) {
+    const engine = new ProposingKnowledgeEngine(({ ref }) => candidates(ref));
+    const job = imported(line);
+    const ref = { sourceId: String(job.sourceId), version: job.fenceVersion };
+    await engine.upsertSource({ ref, title: line.title, body: line.content }, ref, 1);
+    return { engine, ref };
+  }
+
+  it("records a proposal whose quote the body holds once, as a candidate with evidence", async () => {
+    const { engine, ref } = await proposing((r) => [proposal(r)]);
+    const propose = vi.spyOn(engine, "proposeKnowledge");
+    setUp([output({})], engine);
+    const { status, job } = await runNext();
+    expect(status).toBe("done");
+    expect(propose).toHaveBeenCalledWith(ref);
+    expect(items()).toEqual([
+      { id: 1, type: "Project", name: "미리내 프로젝트", status: "candidate" },
+    ]);
+    expect(facts()).toEqual([
+      { id: 1, item_id: 1, kind: "target_date", value: "2026-12-05", status: "candidate" },
+    ]);
+    const [evidence] = listEvidence(db, { factId: 1 });
+    expect(evidence).toMatchObject({ sourceVersionId: versionOf(job), quote: TARGET });
+    expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 0, other: 0 });
+  });
+
+  it("drops a wrong quote, a version not asked for, an ID not offered and a name outside the schema", async () => {
+    const { engine } = await proposing((r) => [
+      proposal(r, { quote: "미리내 프로젝트의 완료 목표는 2026-12-06입니다" }),
+      proposal({ ...r, version: r.version + 1 }),
+      proposal(r, { item: { type: "Project", name: "미리내 프로젝트", existingItemId: "77" } }),
+      proposal(r, { factKind: "start_date" }),
+    ]);
+    setUp([output({})], engine);
+    const { job } = await runNext();
+    expect(items()).toEqual([]);
+    expect(facts()).toEqual([]);
+    // the unoffered ID drops its item and the fact naming it (as for an answer)
+    expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 1, other: 4 });
+  });
+
+  it("keeps the engine's refs apart from the Provider's answer", async () => {
+    const { engine } = await proposing((r) => [proposal(r)]);
+    // the Provider names a different item under the ref the engine's item gets (e0)
+    setUp(
+      [
+        output({
+          items: [{ ref: "e0", type: "System", name: "물결 API", existingItemId: null }],
+          facts: [],
+        }),
+      ],
+      engine,
+    );
+    await runNext();
+    expect(facts()).toMatchObject([{ item_id: 1, kind: "target_date" }]);
+    expect(items()).toMatchObject([{ name: "미리내 프로젝트" }]);
+  });
+
+  it("gives the candidates naming the same item one item, a relation's two ends included", async () => {
+    const x = { type: "Project", name: "미리내 프로젝트", existingItemId: null };
+    const y = { type: "System", name: "물결 API", existingItemId: null };
+    const relation = (ref: KnowledgeCandidate["ref"], quote: string): KnowledgeCandidate => ({
+      kind: "relation",
+      ref,
+      subject: x,
+      type: "DEPENDS_ON",
+      object: y,
+      quote,
+    });
+    const { engine } = await proposing(
+      (r) => [
+        { ...relation(r, "미리내 구조"), object: x }, // first: both ends one new item
+        relation(r, "미리내 프로젝트는 물결 API의 예약 엔드포인트에 의존한다"),
+        relation(r, "물결 API가 준비되기 전에는 연동 테스트를 시작할 수 없다"),
+        relation(r, "없는 인용문"),
+      ],
+      wiki,
+    );
+    setUp([output({})], engine);
+    const { job } = await runNext();
+    expect(items()).toMatchObject([{ name: "미리내 프로젝트" }, { name: "물결 API" }]);
+    const relations = db.all("SELECT id, subject_id, object_id, status FROM relations");
+    expect(relations).toEqual([
+      { id: 1, subject_id: 1, object_id: 1, status: "candidate" },
+      { id: 2, subject_id: 1, object_id: 2, status: "candidate" },
+    ]);
+    expect(listEvidence(db, { relationId: 2 })).toHaveLength(2);
+    expect(readExtractionDrops(db, job.id)).toEqual({ quotes: 1, other: 0 });
+  });
+
+  it("is not asked while the engine is stale: it may still hold purged text (review F5)", async () => {
+    const { engine } = await proposing((r) => [proposal(r)]);
+    const propose = vi.spyOn(engine, "proposeKnowledge");
+    let stale = true;
+    setUp([output({}), output({})], engine, () => stale);
+    expect((await runNext()).status).toBe("done");
+    expect(propose).not.toHaveBeenCalled();
+    expect(facts()).toEqual([]);
+    // rebuilt: asked again
+    stale = false;
+    imported({ id: "again", title: mail.title, content: mail.content });
+    await runNext();
+    expect(propose).toHaveBeenCalledTimes(1);
+  });
+
+  it("is not asked without the propose capability", async () => {
+    const engine = new MemoryKnowledgeEngine();
+    const propose = vi.spyOn(engine, "proposeKnowledge");
+    setUp([output({})], engine);
+    imported(mail);
+    expect((await runNext()).status).toBe("done");
+    expect(propose).not.toHaveBeenCalled();
+    expect(facts()).toEqual([]);
+  });
+
+  it("goes on without proposals when the engine fails", async () => {
+    const { engine } = await proposing((r) => [proposal(r)]);
+    vi.spyOn(engine, "proposeKnowledge").mockRejectedValue(new Error("engine broke"));
+    setUp([output({})], engine);
+    expect((await runNext()).status).toBe("done");
+    expect(facts()).toEqual([]);
+    expect(engineErrors).toHaveLength(1);
+  });
+
+  it("writes nothing of a proposal when the Provider call is blocked", async () => {
+    const { engine } = await proposing((r) => [proposal(r)]);
+    setUp([], engine);
+    deny = "no-consent";
+    expect((await runNext()).status).toBe("held");
+    expect(facts()).toEqual([]);
   });
 });

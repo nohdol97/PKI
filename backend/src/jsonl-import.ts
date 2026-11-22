@@ -25,7 +25,7 @@ export const IMPORT_ERROR_LIMIT = 100;
 
 export type JsonlImporter = (text: string) => Promise<ImportJsonlResponse>;
 
-export interface ImportOptions extends Pick<SyncOptions, "runner"> {
+export interface ImportOptions extends Pick<SyncOptions, "runner" | "projections"> {
   /** The JSONL Connector, chosen by the composition point (composition.ts). */
   createConnector: () => Connector;
   /**
@@ -58,6 +58,7 @@ async function importInstance(
       await connector.initialize({ records: round.map((l): ImportRecord => l.record) });
       await syncConnector(db, instanceId, JSONL_CONNECTOR_KIND, connector, {
         ...(options.runner ? { runner: options.runner } : {}),
+        ...(options.projections ? { projections: options.projections } : {}),
         rescan: true,
         onRefused: (change, reason) => {
           const line = lineOf.get(externalIdOf(change)) as number;

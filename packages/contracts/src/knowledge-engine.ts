@@ -19,11 +19,37 @@ export interface EngineSourceInput {
   readonly body: string;
 }
 
-/** V02 adds the extraction fields; the quote is what the product verifies against the source. */
-export interface KnowledgeCandidate {
-  readonly ref: SourceVersionRef;
-  readonly quote: string;
+/** An item a candidate names: an existing item's ID (one the product offered as a candidate), or a new one. */
+export interface ProposedItem {
+  readonly type: string;
+  readonly name: string;
+  readonly existingItemId: string | null;
 }
+
+/**
+ * A fact or relation an engine proposes for one source version (V02-R13), in the
+ * names of the extraction schema (V02 "추출 응답의 모양"). Untrusted like an LLM
+ * answer: the product checks it against that schema and keeps it only with a
+ * quote the version's body holds exactly once (V02-R6), as a candidate.
+ */
+export type KnowledgeCandidate =
+  | {
+      readonly kind: "fact";
+      readonly ref: SourceVersionRef;
+      readonly item: ProposedItem;
+      readonly factKind: string;
+      readonly value: string;
+      readonly epistemic: string;
+      readonly quote: string;
+    }
+  | {
+      readonly kind: "relation";
+      readonly ref: SourceVersionRef;
+      readonly subject: ProposedItem;
+      readonly type: string;
+      readonly object: ProposedItem;
+      readonly quote: string;
+    };
 
 export interface ContextQuery {
   readonly text: string;

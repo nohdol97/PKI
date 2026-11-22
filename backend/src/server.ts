@@ -39,7 +39,7 @@ import {
   type EgressControls,
   type UserActionIssuer,
 } from "@pki/providers";
-import { deleteSource } from "@pki/knowledge-engine";
+import { deleteSourceWithNotice, type Projections } from "@pki/knowledge-engine";
 import {
   databaseEncryption,
   findSourceId,
@@ -105,6 +105,8 @@ export interface ServerOptions {
   };
   /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
   importer?: JsonlImporter;
+  /** Notified after a deletion from the screen commits (V02-R13; composition.ts productProjections). */
+  projections?: Pick<Projections, "notify">;
   /**
    * Called after the background setting, a consent, the endpoint or the default
    * Provider changed, the conditions that hold jobs (composition.ts
@@ -363,8 +365,13 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       const sourceId = findSourceId(options.db, connectorId, externalId);
       if (sourceId === undefined) return { error: "not-found" };
       const at = new Date().toISOString();
-      const { outcome } = deleteSource(options.db, sourceId, { reason: "user-deleted", at });
-      return { outcome: outcome === "deleted" ? "deleted" : "already-deleted" };
+      const { notice } = deleteSourceWithNotice(options.db, sourceId, {
+        reason: "user-deleted",
+        at,
+      });
+      if (!notice) return { outcome: "already-deleted" };
+      void options.projections?.notify([notice]);
+      return { outcome: "deleted" };
     },
     activity: async () => ({ calls: listProviderCalls(options.db) }),
     settings: async () => settings(),

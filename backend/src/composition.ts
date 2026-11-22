@@ -1,9 +1,16 @@
 // Composition point: the one place that picks adapter implementations for the
 // product (V01-R14, R15): the vector index, the embedder, the canonical storage
 // driver, the Connector kinds, the egress policy, the Providers, the Broker
-// with its execution gate, and the job runner with its extract handler. Entry points (dev.ts, shell.ts through boot.ts,
+// with its execution gate, the job runner with its extract handler, and the
+// KnowledgeEngine with the notifications to it and the vector index. Entry points (dev.ts, shell.ts through boot.ts,
 // site-check.ts) build the backend from these.
-import type { LLMProvider, SecretSource } from "@pki/contracts";
+import type {
+  EmbeddingProvider,
+  KnowledgeEngine,
+  LLMProvider,
+  SecretSource,
+  VectorIndex,
+} from "@pki/contracts";
 import {
   BUILD_KIND,
   createBroker,
@@ -32,9 +39,12 @@ import {
 } from "@pki/providers/adapters";
 import {
   createExtractHandler,
+  createProjections,
   EXTRACT_HOLD_TOO_LARGE,
   knowledgeCandidates,
+  type Projections,
 } from "@pki/knowledge-engine";
+import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   dataDirectory,
   ensureDataDirectory,
@@ -72,6 +82,39 @@ export function productAdapters(dataDir: string): Pick<ServerOptions, "vectorInd
 }
 
 export const MODELS_DIR = "models";
+
+/** The product's KnowledgeEngine: none is plugged in during Phase 1 (ADR 0003). */
+export function productEngine(): KnowledgeEngine {
+  return new NullKnowledgeEngine();
+}
+
+/**
+ * The notifications to the engine and the vector index and their start-up
+ * comparison (V02-R13). A vector index rebuild resets to the embedder's model.
+ * Errors are logged by class only.
+ */
+export function productProjections(
+  db: SqlDriver,
+  adapters: {
+    engine: KnowledgeEngine;
+    vectorIndex: VectorIndex;
+    embedder: Pick<EmbeddingProvider, "describe"> | null;
+  },
+): Projections {
+  const { engine, vectorIndex, embedder } = adapters;
+  return createProjections({
+    db,
+    engine,
+    vectorIndex,
+    embeddingSpace: () => {
+      if (!embedder) return null;
+      const { modelId, revision, dimension } = embedder.describe();
+      return { modelId, revision, dimension };
+    },
+    onError: (projection, error) =>
+      log("projection-error", { projection, error: errorClass(error) }),
+  });
+}
 
 /**
  * The product's consent and egress rules (ADR 0014). The deployment rules are the
@@ -171,17 +214,36 @@ export function productCalls(
 /**
  * The job runner with the product's handlers (V02-R4, R6): extraction of each
  * stored version through `broker`, with origin {jobId, lease} built from the
- * leased job only. Errors are logged by class only.
+ * leased job only, and the proposals of `engine` when it has the capability
+ * (V02-R13). Errors are logged by class only.
  */
 export function productRunner(
   db: SqlDriver,
   broker: Pick<Broker, "call">,
-  options: { now?: () => Date } = {},
+  options: {
+    now?: () => Date;
+    engine?: KnowledgeEngine;
+    /** The engine's notifications; a stale engine is not asked for proposals. */
+    projections?: Pick<Projections, "isStale">;
+  } = {},
 ): JobRunner {
+  const { now, engine, projections } = options;
+  const handler = createExtractHandler({
+    db,
+    broker,
+    ...(now ? { now } : {}),
+    ...(engine
+      ? {
+          engine,
+          onEngineError: (error: unknown) => log("engine-error", { error: errorClass(error) }),
+          ...(projections ? { isEngineStale: () => projections.isStale("engine") } : {}),
+        }
+      : {}),
+  });
   return createJobRunner({
     db,
-    handlers: { [EXTRACT_JOB_KIND]: createExtractHandler({ db, broker, ...options }) },
-    ...(options.now ? { now: options.now } : {}),
+    handlers: { [EXTRACT_JOB_KIND]: handler },
+    ...(now ? { now } : {}),
     onError: (error) => log("job-error", { error: errorClass(error) }),
   });
 }
@@ -230,13 +292,14 @@ export const connectorKinds = {
 } satisfies Record<string, ConnectorFactory>;
 
 /**
- * The Sources screen's JSONL import (V02-R2). `runner` (productRunner) is woken
- * after each page that registered extraction jobs. An instance whose sync failed
+ * The Sources screen's JSONL import (V02-R2). `projections` (productProjections)
+ * are notified after each page commits and `runner` (productRunner) woken after
+ * each page that registered extraction jobs. An instance whose sync failed
  * is logged by its error class (default: the backend's filtered log).
  */
 export function productImporter(
   db: SqlDriver,
-  options: Pick<SyncOptions, "runner"> & { logger?: Logger } = {},
+  options: Pick<SyncOptions, "runner" | "projections"> & { logger?: Logger } = {},
 ): JsonlImporter {
   const { logger = log, ...sync } = options;
   return (text) =>

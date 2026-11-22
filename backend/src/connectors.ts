@@ -6,7 +6,10 @@
 // change sequence rises in the same transaction (storage trigger), and so does a
 // new version's propagation to the knowledge its previous versions supported (V02-R11).
 // A delete or access-revoked change tombstones and purges its source in the
-// page's transaction (V02-R12, knowledge-engine deletion.ts).
+// page's transaction (V02-R12, knowledge-engine deletion.ts). Each stored version
+// and each deletion becomes a notice to the KnowledgeEngine and VectorIndex,
+// built in the page's transaction with the change sequence it reached and
+// delivered after the commit, before the runner is woken (V02-R13).
 import {
   ChangeSetSchema,
   ConnectorNotImplementedError,
@@ -16,7 +19,13 @@ import {
   type ErrorResponse,
   type SyncResponse,
 } from "@pki/contracts";
-import { deleteSource, propagateNewVersion } from "@pki/knowledge-engine";
+import {
+  deleteSourceWithNotice,
+  propagateNewVersion,
+  versionNotice,
+  type ProjectionNotice,
+  type Projections,
+} from "@pki/knowledge-engine";
 import {
   findSourceId,
   readCursor,
@@ -53,6 +62,8 @@ export interface SyncOptions {
   onStored?: (change: Change, outcome: StoredOutcome) => void;
   /** Woken after a page that registered jobs commits (V02-T05 binds the runner). */
   runner?: Pick<JobRunner, "wake">;
+  /** Notified after each page commits, of its stored versions and deletions (V02-R13). */
+  projections?: Pick<Projections, "notify">;
 }
 
 export interface ConnectorInstanceConfig {
@@ -84,18 +95,25 @@ function storeChange(
   db: SqlDriver,
   instanceId: string,
   change: Change,
+  notices: ProjectionNotice[],
 ): StoredOutcome | { refused: RefusalReason } {
   if (change.kind !== "upsert") {
     const sourceId = findSourceId(db, instanceId, change.externalId);
     if (sourceId === undefined) return "unchanged";
     const reason = change.kind === "delete" ? "source-deleted" : "access-revoked";
-    const deleted = deleteSource(db, sourceId, { reason, at: new Date().toISOString() });
-    return deleted.outcome === "deleted" ? "deleted" : "unchanged";
+    const { notice } = deleteSourceWithNotice(db, sourceId, {
+      reason,
+      at: new Date().toISOString(),
+    });
+    if (!notice) return "unchanged";
+    notices.push(notice);
+    return "deleted";
   }
   const saved = saveSourceRecord(db, instanceId, change.record);
   if (saved.status === "refused") return { refused: saved.reason };
   if (saved.status === "unchanged") return "unchanged";
   propagateNewVersion(db, saved.sourceId);
+  notices.push(versionNotice(db, saved.sourceId, saved.version));
   const job = registerJob(db, {
     kind: EXTRACT_JOB_KIND,
     sourceId: saved.sourceId,
@@ -142,10 +160,11 @@ export async function syncConnector(
     }
     const refused: [Change, RefusalReason][] = [];
     const stored: [Change, StoredOutcome][] = [];
+    const notices: ProjectionNotice[] = [];
     const pageCreated = db.transaction(() => {
       let n = 0;
       for (const change of page.changes) {
-        const outcome = storeChange(db, instanceId, change);
+        const outcome = storeChange(db, instanceId, change, notices);
         if (typeof outcome === "object") {
           // A deleted source's upsert is skipped, never a page failure: the
           // tombstone refuses it every time, so failing would stall the cursor and
@@ -164,7 +183,14 @@ export async function syncConnector(
     });
     for (const [change, reason] of refused) options.onRefused?.(change, reason);
     for (const [change, outcome] of stored) options.onStored?.(change, outcome);
-    if (pageCreated > 0) void options.runner?.wake();
+    // A failed page threw above: the notices its changes built are never delivered. The runner is woken once the
+    // engine has the page's versions, so a proposing engine knows what is extracted.
+    const delivered = notices.length > 0 ? options.projections?.notify(notices) : undefined;
+    if (pageCreated > 0) {
+      const runner = options.runner;
+      if (delivered) void delivered.then(() => runner?.wake());
+      else void runner?.wake();
+    }
     created += pageCreated;
     received += page.changes.length;
     cursor = page.nextCursor;
@@ -176,7 +202,7 @@ export async function createConnectorManager(
   db: SqlDriver,
   instances: readonly ConnectorInstanceConfig[],
   kinds: Readonly<Record<string, ConnectorFactory>>,
-  options: Pick<SyncOptions, "runner"> = {},
+  options: Pick<SyncOptions, "runner" | "projections"> = {},
 ): Promise<ConnectorManager> {
   const entries = await Promise.all(
     instances.map(async ({ id, kind, config }) => {
