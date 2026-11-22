@@ -930,6 +930,20 @@ describe("closeJob takes the write lock as it begins (review B-W1)", () => {
     });
   });
 
+  it("lease.reclaim: reclaimLeases on its own also reads a clock function only under the lock", () => {
+    const reads: number[] = [];
+    const clock = () => (reads.push(reads.length), at(10 * LEASE));
+    leaseNextJob(file, { kinds: ["extract"], now: T0, leaseMs: LEASE });
+    other.exec("BEGIN IMMEDIATE; INSERT INTO settings (key, value) VALUES ('lock', 'x')");
+    expect(() => reclaimLeases(file, { kinds: ["extract"], now: clock, leaseMs: LEASE })).toThrow(
+      /locked|busy/i,
+    );
+    expect(reads).toEqual([]);
+    other.exec("COMMIT");
+    expect(reclaimLeases(file, { kinds: ["extract"], now: clock, leaseMs: LEASE })).toBe(1);
+    expect(reads).toEqual([0]);
+  });
+
   it("lease.pick: reads a clock function once, after the lock is held (review RA-1)", () => {
     const reads: number[] = [];
     const clock = () => (reads.push(reads.length), T0);
