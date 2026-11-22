@@ -153,7 +153,11 @@ describe("providerStatusText (V01-R5, T16)", () => {
         providerId: "claude-code",
         reason: "cli-background-off",
       }),
-    ).toEqual({ text: "Claude Code: 실행이 막힘(백그라운드 실행이 꺼져 있음)", guidance: null });
+    ).toEqual({
+      text: "Claude Code: 실행이 막힘(백그라운드 실행이 꺼져 있음)",
+      guidance:
+        '설정 화면에서 "CLI 백그라운드 실행 허용"을 켜면 가져온 자료의 추출이 이 CLI로 실행됩니다. 연결 시험은 켜지 않아도 실행됩니다.',
+    });
     expect(
       providerStatusText({
         state: "unavailable",

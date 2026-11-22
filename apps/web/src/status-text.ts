@@ -49,6 +49,10 @@ export function embeddingText(status: EmbeddingStatusEntry) {
   return egress ? `${text} (${EGRESS_LABEL[egress]})` : text;
 }
 
+/** Where a listed CLI with background calls off is let run imported data's extraction (T17 handoff 1). */
+export const BACKGROUND_OFF_GUIDANCE =
+  '설정 화면에서 "CLI 백그라운드 실행 허용"을 켜면 가져온 자료의 추출이 이 CLI로 실행됩니다. 연결 시험은 켜지 않아도 실행됩니다.';
+
 /** The execution gate's reason codes (providers/src/execution-gate.ts), apart from egress. */
 const EXECUTION_REASON = /^(cli|unverified)-/;
 
@@ -75,7 +79,10 @@ export function providerStatusText(status: ProviderStatus): {
   if (status.state === "ready") return { text: `${name}: 사용 가능`, guidance: null };
   // the execution gate's reasons (T17 handoff 1); the ones a check finds came with it above
   const stopped = EXECUTION_REASON.test(status.reason) ? "실행이 막힘" : "전송이 막힘";
-  return { text: `${name}: ${stopped}(${blockReasonText(status.reason)})`, guidance: null };
+  return {
+    text: `${name}: ${stopped}(${blockReasonText(status.reason)})`,
+    guidance: status.reason === "cli-background-off" ? BACKGROUND_OFF_GUIDANCE : null,
+  };
 }
 
 /** The pinned model the approval is for (T14 handoff 1·2): source host, size, the hash check. */

@@ -542,6 +542,19 @@ describe("the execution conditions behind the status (V01-T17 handoff 1)", () =>
     await explorationWorks();
   });
 
+  it("egress is asked before the gate: without consent the first obstacle is the consent, as the Broker answers", async () => {
+    productEgress(db).revoke("codex");
+    await start({ testBuild: { verified: [] } });
+    expect((await status()).provider).toEqual({
+      state: "unavailable",
+      providerId: "codex",
+      reason: "no-consent",
+    });
+    const test = await post(routes.connectionTest.path, { acknowledgeUnverified: false });
+    expect(test.body).toMatchObject({ outcome: "blocked", reason: "no-consent" });
+    expect(fake.modelCalls()).toBe(0);
+  });
+
   it("a test build that picks nothing decides as production: the shipped list (empty) blocks", async () => {
     await start({ testBuild: {} });
     expect((await status()).provider).toMatchObject({ reason: "cli-not-verified" });

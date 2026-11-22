@@ -31,6 +31,9 @@ function packages(): Manifest[] {
 }
 
 const FILTERED = /pnpm --filter (@pki\/[a-z0-9-]+) ([a-z0-9:-]+)/g;
+/** `line` as a whole command: the script name may not continue (`build` is not `build:fixtures`). */
+const mentions = (text: string, line: string) =>
+  new RegExp(`${line.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}(?![a-z0-9:-])`).test(text);
 const ROOT_COMMAND = /`pnpm ([a-z0-9:-]+)`/g;
 
 function commandProblems(text: string, docs: string, all: Manifest[], root: Manifest) {
@@ -49,7 +52,7 @@ function commandProblems(text: string, docs: string, all: Manifest[], root: Mani
   for (const m of all) {
     for (const script of Object.keys(m.scripts ?? {})) {
       const line = `pnpm --filter ${m.name} ${script}`;
-      if (!text.includes(line) && !docs.includes(line)) problems.push(`not documented: ${line}`);
+      if (!mentions(text, line) && !mentions(docs, line)) problems.push(`not documented: ${line}`);
     }
   }
   for (const script of Object.keys(root.scripts ?? {})) {
@@ -81,6 +84,18 @@ describe("README commands (V01-R19)", () => {
     const dropped = readme.replaceAll("pnpm --filter @pki/backend dev", "");
     expect(commandProblems(dropped, siteSetup, all, root)).toContain(
       "not documented: pnpm --filter @pki/backend dev",
+    );
+  });
+
+  it("fails for a script documented only as the prefix of a longer one", () => {
+    const withBuild = all.map((m) =>
+      m.name === "@pki/document-normalize"
+        ? { ...m, scripts: { ...m.scripts, build: "node build.ts" } }
+        : m,
+    );
+    // README gives `build:fixtures` only: that line does not document `build`
+    expect(commandProblems(readme, siteSetup, withBuild, root)).toContain(
+      "not documented: pnpm --filter @pki/document-normalize build",
     );
   });
 
