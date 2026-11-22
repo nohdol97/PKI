@@ -46,23 +46,39 @@ def config(**over):
     return cfg
 
 
-def make_db(path, jobs=(), schedules=((0, 0),)):
-    """The columns read_queue_state reads (storage/src/migrations.ts v14-v15), as rows.
-    jobs: (kind, status, attempts, source_id, fence_version, schedule_id, slot); schedules: (coalesced, held_coalesced)."""
+TEN = 600_000
+T0 = 1_700_000_000_000 // TEN * TEN  # a slot boundary
+EVERY_10 = json.dumps({"kind": "every-10-minutes"})
+
+
+def make_db(path, jobs=(), schedules=((T0 + TEN, EVERY_10),)):
+    """The columns read_queue_state reads, in the shape of the real tables (storage/src/migrations.ts v14-v15, with the jobs
+    table's UNIQUE keys). jobs: (kind, status, attempts, source_id, fence_version, schedule_id, slot);
+    schedules: (next_due, period JSON)."""
     db = sqlite3.connect(path)
     db.executescript("""
-        CREATE TABLE jobs (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL,
-                           source_id INTEGER, fence_version INTEGER, schedule_id INTEGER, slot INTEGER, target TEXT NOT NULL DEFAULT '');
-        CREATE TABLE schedules (id INTEGER PRIMARY KEY, coalesced_count INTEGER NOT NULL, held_coalesced_count INTEGER NOT NULL);
+        CREATE TABLE jobs (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+                           attempts INTEGER NOT NULL, source_id INTEGER, fence_version INTEGER, schedule_id INTEGER, slot INTEGER,
+                           CHECK ((source_id IS NULL) = (fence_version IS NULL)), CHECK ((schedule_id IS NULL) = (slot IS NULL)),
+                           UNIQUE (kind, target, source_id, fence_version), UNIQUE (schedule_id, slot));
+        CREATE TABLE schedules (id INTEGER PRIMARY KEY, period TEXT NOT NULL, next_due INTEGER NOT NULL,
+                                coalesced_count INTEGER NOT NULL DEFAULT 0, held_coalesced_count INTEGER NOT NULL DEFAULT 0);
     """)
     db.executemany("INSERT INTO jobs (kind, status, attempts, source_id, fence_version, schedule_id, slot) VALUES (?,?,?,?,?,?,?)", jobs)
-    db.executemany("INSERT INTO schedules (coalesced_count, held_coalesced_count) VALUES (?,?)", schedules)
+    db.executemany("INSERT INTO schedules (next_due, period) VALUES (?,?)", schedules)
     db.commit()
     db.close()
 
 
-def good_jobs(n=3, attempts=1):
-    return [("extract", "succeeded", attempts if i else 2, i + 1, 1, None, None) for i in range(n)]
+def good_jobs(n=3):
+    """n succeeded extraction jobs, the first needing a second attempt (a killed run taken again)."""
+    return [("extract", "succeeded", 2 if i == 0 else 1, i + 1, 1, None, None) for i in range(n)]
+
+
+def sleep_job(gap_periods):
+    """The shape of backend/src/scheduler.test.ts `coalesce.sleep`: next due T0+10min, the machine sleeps, ONE job is
+    registered for the latest slot, `coalesced_count` stays 0. gap_periods=48 is the 8-hour sleep (48 due slots)."""
+    return ("connector-sync", "succeeded", 1, None, None, 1, T0 + TEN * gap_periods)
 
 
 def restart_at(out, started_at):
@@ -199,44 +215,50 @@ class QueueConfig(unittest.TestCase):
 
 
 class ReadState(unittest.TestCase):
-    def snap(self, jobs, schedules=((0, 0),), baseline=None):
+    def snap(self, jobs, schedules=((T0 + TEN, EVERY_10),), baseline=None):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "pki.sqlite")
             make_db(path, jobs, schedules)
-            return qs.read_queue_state(path, baseline or {"maxJobId": 0, "mergedSlots": 0})
+            return qs.read_queue_state(path, baseline or {"maxJobId": 0, "schedules": {"1": {"nextDue": T0 + TEN}}})
 
-    def test_counts_effects_reclaims_and_merges(self):
-        s = self.snap(good_jobs(3), schedules=((4, 1), (2, 0)))
-        self.assertEqual((s["effectRows"], s["reclaimedJobs"], s["mergedSlots"]), (3, 1, 7))
+    def test_counts_effects_and_retries(self):
+        s = self.snap(good_jobs(3))
+        self.assertEqual((s["effectRows"], s["retriedJobs"]), (3, 1))
         self.assertEqual(s["jobsByStatus"], {"succeeded": 3})
-        self.assertEqual((s["duplicateEffects"], s["duplicateSlotJobs"]), (0, 0))
 
-    def test_only_jobs_after_the_baseline_and_merges_above_it_count(self):
-        s = self.snap(good_jobs(3), schedules=((4, 1),), baseline={"maxJobId": 2, "mergedSlots": 4})
-        self.assertEqual((s["effectRows"], s["mergedSlots"]), (1, 1))
+    def test_one_job_for_a_48_slot_sleep_counts_47_merged_slots_though_the_counter_stays_zero(self):
+        """F1: the designed sleep path writes one job and leaves coalesced_count at 0; the merge is in the slot gap."""
+        s = self.snap([sleep_job(48)])
+        self.assertEqual(s["mergedSlots"], 47)
 
-    def test_a_source_version_with_two_succeeded_extractions_is_a_duplicate_effect(self):
-        s = self.snap([("extract", "succeeded", 1, 1, 1, None, None), ("extract", "succeeded", 1, 1, 1, None, None)])
-        self.assertEqual((s["effectRows"], s["duplicateEffects"]), (2, 1))
+    def test_no_gap_means_no_merged_slot(self):
+        self.assertEqual(self.snap([sleep_job(1)])["mergedSlots"], 0)  # the first due slot ran on time
+        self.assertEqual(self.snap([])["mergedSlots"], 0)
 
-    def test_two_jobs_of_one_schedule_slot_are_a_duplicate_slot(self):
-        s = self.snap([("connector-sync", "succeeded", 1, None, None, 1, 100), ("connector-sync", "succeeded", 1, None, None, 1, 100),
-                       ("connector-sync", "succeeded", 1, None, None, 1, 101)])
-        self.assertEqual(s["duplicateSlotJobs"], 1)
+    def test_the_next_slot_after_a_job_starts_from_that_slot_plus_one_period(self):
+        jobs = [sleep_job(1), sleep_job(2)]  # the second job's slot is the very next one: nothing missed
+        self.assertEqual(self.snap(jobs)["mergedSlots"], 0)
+        self.assertEqual(self.snap([sleep_job(1), sleep_job(10)])["mergedSlots"], 8)
+
+    def test_only_jobs_after_the_baseline_count(self):
+        s = self.snap([sleep_job(48)], baseline={"maxJobId": 1, "schedules": {"1": {"nextDue": T0 + TEN}}})
+        self.assertEqual((s["effectRows"], s["mergedSlots"]), (0, 0))
+
+    def test_a_schedule_that_did_not_exist_at_the_baseline_adds_nothing(self):
+        self.assertEqual(self.snap([sleep_job(48)], baseline={"maxJobId": 0, "schedules": {}})["mergedSlots"], 0)
 
     def test_the_database_is_opened_read_only(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "pki.sqlite")
             make_db(path, good_jobs())
             before = os.path.getmtime(path)
-            qs.read_queue_state(path, {"maxJobId": 0, "mergedSlots": 0})
+            qs.read_queue_state(path, {"maxJobId": 0, "schedules": {}})
             self.assertEqual(os.path.getmtime(path), before)
             self.assertEqual(sorted(os.listdir(d)), ["pki.sqlite"])
 
 
 def snapshot(**over):
-    base = {"jobsByStatus": {"succeeded": 3}, "effectRows": 3, "reclaimedJobs": 1, "mergedSlots": 5, "duplicateEffects": 0,
-            "duplicateSlotJobs": 0}
+    base = {"jobsByStatus": {"succeeded": 3}, "effectRows": 3, "retriedJobs": 1, "mergedSlots": 5}
     base.update(over)
     return base
 
@@ -250,9 +272,9 @@ class Judge(unittest.TestCase):
         for scenario in qs.SCENARIOS:
             self.assertEqual(verdict(scenario), "PASS", scenario)
 
-    def test_a_wrong_effect_count_or_a_duplicate_fails(self):
+    def test_a_wrong_effect_count_or_a_given_up_job_fails(self):
         for scenario in qs.SCENARIOS:
-            for snap in (snapshot(effectRows=4), snapshot(effectRows=2), snapshot(duplicateEffects=1), snapshot(duplicateSlotJobs=1),
+            for snap in (snapshot(effectRows=4), snapshot(effectRows=2),
                          snapshot(jobsByStatus={"succeeded": 2, "dead_letter": 1})):
                 self.assertEqual(verdict(scenario, snap), "FAIL", (scenario, snap))
 
@@ -260,8 +282,8 @@ class Judge(unittest.TestCase):
         for status in ("queued", "running", "retry", "held"):
             self.assertEqual(verdict(snap=snapshot(jobsByStatus={"succeeded": 3, status: 1})), "INCONCLUSIVE", status)
 
-    def test_a_kill_that_reclaimed_nothing_proves_nothing(self):
-        self.assertEqual(verdict("kill", snapshot(reclaimedJobs=0)), "INCONCLUSIVE")
+    def test_a_kill_with_no_retried_job_proves_nothing(self):
+        self.assertEqual(verdict("kill", snapshot(retriedJobs=0)), "INCONCLUSIVE")
 
     def test_a_wake_or_clock_jump_that_merged_nothing_proves_nothing(self):
         for scenario in ("sleep", "hibernate", "clock-forward"):
@@ -275,7 +297,7 @@ class Judge(unittest.TestCase):
                 self.assertEqual(verdict(scenario, observed=[w for w in words if w != word]), "INCONCLUSIVE", (scenario, word))
 
     def test_fail_outranks_inconclusive(self):
-        self.assertEqual(verdict("kill", snapshot(effectRows=4, reclaimedJobs=0), observed=[]), "FAIL")
+        self.assertEqual(verdict("kill", snapshot(effectRows=4, retriedJobs=0), observed=[]), "FAIL")
 
     def test_each_scenario_has_its_own_words_and_the_listed_scenarios_are_the_six(self):
         self.assertEqual(qs.SCENARIOS, ("kill", "sleep", "hibernate", "clock-forward", "clock-back", "timezone"))
@@ -286,16 +308,16 @@ class PrepareState(unittest.TestCase):
     def test_prepare_writes_the_baseline_and_a_second_prepare_overwrites_it(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
             db = os.path.join(d, "pki.sqlite")
-            make_db(db, good_jobs(2), schedules=((3, 1),))
+            make_db(db, good_jobs(2))
             qs.prepare(db, out, "sleep")
             started, scenario, baseline = qs.load_state(out)
-            self.assertEqual((scenario, baseline), ("sleep", {"maxJobId": 2, "mergedSlots": 4}))
+            self.assertEqual((scenario, baseline), ("sleep", {"maxJobId": 2, "schedules": {"1": {"nextDue": T0 + TEN}}}))
             self.assertTrue(started.endswith("Z"))
 
     def test_prepare_without_a_database_baselines_zero(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
             qs.prepare(os.path.join(d, "none.sqlite"), out, "kill")
-            self.assertEqual(qs.load_state(out)[2], {"maxJobId": 0, "mergedSlots": 0})
+            self.assertEqual(qs.load_state(out)[2], {"maxJobId": 0, "schedules": {}})
 
     def test_a_state_of_another_scenario_is_refused_at_record_time(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
@@ -383,7 +405,9 @@ class WholeRun(unittest.TestCase):
             obj = json.loads(read(os.path.join(out, "result.json")))
             self.assertEqual(obj["checks"][0]["verdict"], "PASS")
 
-    def test_a_passing_sleep_run_with_the_manual_record(self):
+    def sleep_run(self, gap_periods):
+        """prepare, an import's three extractions and one scheduled job registered after a sleep of `gap_periods` periods
+        (coalesced_count stays 0, as the designed path leaves it), the manual record, then record."""
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
             db = os.path.join(d, "pki.sqlite")
             make_db(db)
@@ -394,7 +418,8 @@ class WholeRun(unittest.TestCase):
             conn = sqlite3.connect(db)
             conn.executemany("INSERT INTO jobs (kind, status, attempts, source_id, fence_version) VALUES ('extract', 'succeeded', 1, ?, 1)",
                              [(1,), (2,), (3,)])
-            conn.execute("UPDATE schedules SET coalesced_count = 5")
+            conn.execute("INSERT INTO jobs (kind, status, attempts, schedule_id, slot) VALUES ('connector-sync', 'succeeded', 1, 1, ?)",
+                         (T0 + TEN * gap_periods,))
             conn.commit()
             conn.close()
             write_json(os.path.join(out, qs.SLEEP_RECORD_FILE), {"schema": 1, "scenario": "sleep", "sleptAt": SLEPT, "wokeAt": WOKE})
@@ -402,9 +427,17 @@ class WholeRun(unittest.TestCase):
             argv = ["queue-scenario", "record", "--scenario", "sleep", "--config", path, "--out", out]
             for word in qs.OBSERVATIONS["sleep"]:
                 argv += ["--observed", word]
-            code, stdout, err = run_main(argv, installer_check=INSTALLED, db_path=db)
-            self.assertEqual(code, 0, stdout + err)
-            self.assertIn("PASS", stdout)
+            return run_main(argv, installer_check=INSTALLED, db_path=db)
+
+    def test_a_passing_sleep_run_shaped_like_coalesce_sleep(self):
+        code, stdout, err = self.sleep_run(48)
+        self.assertEqual(code, 0, stdout + err)
+        self.assertIn("PASS", stdout)
+
+    def test_a_sleep_run_with_no_slot_gap_is_inconclusive(self):
+        code, stdout, err = self.sleep_run(1)
+        self.assertEqual(code, 1, stdout + err)
+        self.assertIn("INCONCLUSIVE", stdout)
 
 
 if __name__ == "__main__":

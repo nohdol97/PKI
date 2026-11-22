@@ -69,7 +69,7 @@ CODES = {
     "i04_manual_observations": "The deletion events and the screen/job observations (events delivered, reads gone, projection jobs done) are the operator's attestations; the runner cannot see them.",
     "i04_scan_scope": "The canary search covers the files under the data folder, the Electron userData folder and the extra folders the operator named, with the app closed, plus the keyword index's own term list; copies elsewhere (OS backups, snapshots, Provider side) are not searched, and compressed or encrypted stores are not seen.",
     "i03_manual_observations": "The kill, sleep, clock and time zone events and the screen observations (restart, merge, no re-run) are the operator's attestations; for sleep and hibernate also the manual confirmation record. The runner cannot make a PC sleep or see that it did.",
-    "i03_effect_definition": "Effect rows are the succeeded extraction jobs since the run began, compared with the number of synthetic sources the operator imported; derived rows are not counted separately.",
+    "i03_effect_definition": "Effect rows are the succeeded extraction jobs since the run began, compared with the number of synthetic sources the operator imported; merged slots are rebuilt from the slot gaps of the schedules' jobs, not read from a stored counter; retried jobs include ordinary retries.",
     "caveat_undetected_canary_forms": "The judge does NOT detect these canary forms: first 7 characters only, base64 of the upper-cased random part, reversed base64, double base64, decimal character codes, single-character interleaving, hex shifted by one, 0x-prefixed hex bytes, compressed-then-base64. Contained is not stronger than that.",
 }
 
@@ -183,7 +183,7 @@ FACT_KEYS = {
     "collector_kind", "deleted_source_deleted", "deleted_access_revoked", "canaries_found", "control_canary_found",
     "deleted_user_deleted", "index_canaries_found", "control_canary_in_index", "unreadable_paths",
     # I03 queue scenarios
-    "scenario", "effect_rows", "merged_slots", "reclaimed_jobs", "duplicate_effects", "duplicate_slot_jobs", "jobs_open",
+    "scenario", "effect_rows", "merged_slots", "retried_jobs", "jobs_open",
     "jobs_dead_letter",
     # fail-soft result
     "validation_errors",

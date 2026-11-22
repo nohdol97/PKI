@@ -185,12 +185,26 @@ describe("docs.site-setup (I03): the runtime setting and what the items name exi
   const s19 = itemText(siteText, "S19");
   const s20 = itemText(siteText, "S20");
 
-  it("the runtime-settings table has a `jobs.maxConcurrent` row naming its range and default", () => {
+  it("the `jobs.maxConcurrent` row names the range and the default the code has", () => {
     const row = settingsRow(siteText, "jobs.maxConcurrent");
     expect(row).not.toBe("");
-    expect(row).toContain("1");
-    expect(row).toContain("4");
-    expect(row).toContain("2");
+    const cells = row.split(" | ").map((c) => c.replace(/^\||\|$/g, "").trim());
+    const store = readFileSync(resolve(repoRoot, "storage/src/job-concurrency.ts"), "utf8");
+    const codeDefault = /export const DEFAULT_MAX_CONCURRENT = (\d+);/.exec(store)?.[1];
+    expect(codeDefault).toBeDefined();
+    // the last cell is the whole default, not a row that happens to contain the digit
+    expect(cells[cells.length - 1]).toBe(codeDefault);
+    const code = readFileSync(resolve(repoRoot, "backend/src/job-runner.ts"), "utf8");
+    const range = /const MAX_CONCURRENT_VALUES = \/\^\[(\d)-(\d)\]\$\/;/.exec(code);
+    expect(range).not.toBeNull();
+    expect(row).toContain(`**${range?.[1]}에서 ${range?.[2]}까지의 정수**`);
+  });
+
+  it("fails when the documented default differs from the code's", () => {
+    const mutated = settingsRow(siteText, "jobs.maxConcurrent").replace(/\| 2 \|$/, "| 3 |");
+    const cells = mutated.split(" | ").map((c) => c.replace(/^\||\|$/g, "").trim());
+    expect(cells[cells.length - 1]).toBe("3");
+    expect(cells[cells.length - 1]).not.toBe("2");
   });
 
   it("fails when the settings row is removed", () => {

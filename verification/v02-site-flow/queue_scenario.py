@@ -64,39 +64,66 @@ def open_ro(db_path):
     return sqlite3.connect("file:{}?mode=ro".format(pathname2url(os.path.abspath(db_path))), uri=True)
 
 
+PERIOD_MS = {"every-10-minutes": 600_000, "hourly": 3_600_000, "daily": 86_400_000, "weekly": 604_800_000}
+
+
+def _period_ms(period_json):
+    """The nominal length of a stored period (days and weeks count 24-hour days, as backend/src/schedule.ts does)."""
+    try:
+        return PERIOD_MS[json.loads(period_json)["kind"]]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
 def read_baseline(db_path):
-    """{maxJobId, mergedSlots} of the canonical DB now; zeros when there is no DB yet."""
+    """{maxJobId, schedules} of the canonical DB now: the greatest job id and, per schedule, the next due time; empty when there is no DB yet."""
     if not os.path.exists(db_path):
-        return {"maxJobId": 0, "mergedSlots": 0}
+        return {"maxJobId": 0, "schedules": {}}
     db = open_ro(db_path)
     try:
         max_id = int(db.execute("SELECT coalesce(max(id), 0) FROM jobs").fetchone()[0])
-        merged = int(db.execute("SELECT coalesce(sum(coalesced_count + held_coalesced_count), 0) FROM schedules").fetchone()[0])
-        return {"maxJobId": max_id, "mergedSlots": merged}
+        schedules = {str(i): {"nextDue": nd} for i, nd in db.execute("SELECT id, next_due FROM schedules")}
+        return {"maxJobId": max_id, "schedules": schedules}
     finally:
         db.close()
 
 
+def merged_slots(db, baseline):
+    """Slots the scheduler folded into one job each, since the baseline. A check that finds several slots due registers ONE
+    job for the latest and records the due count (the due slots from the next due time through that slot, both ends in:
+    backend/src/scheduler.ts, I03-R20); that count is not stored on the job, so it is rebuilt from the slot gaps of the
+    schedule's jobs: from the next due time (the baseline's for the first job, the previous slot + one period after it) to
+    the job's slot there are (slot - next due) / period + 1 due slots, and the slots merged into it are all but the one that ran. Counts of open-job merges
+    (`coalesced_count`) are a different event and are not what this measures."""
+    total = 0
+    for sid, period in db.execute("SELECT id, period FROM schedules"):
+        length = _period_ms(period)
+        base = baseline["schedules"].get(str(sid))
+        if length is None or base is None:
+            continue
+        next_due = base["nextDue"]
+        for (slot,) in db.execute("SELECT slot FROM jobs WHERE id > ? AND schedule_id = ? ORDER BY slot",
+                                  (baseline["maxJobId"], sid)):
+            total += max(round((slot - next_due) / length), 0)  # due slots (that many + 1) minus the one that ran
+            next_due = slot + length
+    return total
+
+
 def read_queue_state(db_path, baseline):
     """What the queue left since `baseline`, read-only. `effectRows` are the succeeded extraction jobs (one per source
-    version; the unique keys of the jobs table make a second open one impossible, so a count above the imported number or a
-    (source, version, target) with two is a defect); `reclaimedJobs` are the succeeded jobs that needed more than one attempt (a
-    killed run taken again); `mergedSlots` is the merged-slot counters of the schedules above the baseline."""
+    version: the unique keys of the jobs table make a second one impossible, so no duplicate count is read); `retriedJobs`
+    are the succeeded jobs that needed more than one attempt (a killed run taken again, but an ordinary retry after a
+    failed call counts too); `mergedSlots` is merged_slots()."""
     db = open_ro(db_path)
     try:
         one = lambda sql, *a: int(db.execute(sql, a).fetchone()[0])  # noqa: E731
         after = baseline["maxJobId"]
         by_status = {s: int(n) for s, n in db.execute("SELECT status, count(*) FROM jobs WHERE id > ? GROUP BY status", (after,))}
-        merged = one("SELECT coalesce(sum(coalesced_count + held_coalesced_count), 0) FROM schedules") - baseline["mergedSlots"]
         return {
             "jobsByStatus": by_status,
             "effectRows": one("SELECT count(*) FROM jobs WHERE id > ? AND kind = 'extract' AND status = 'succeeded'", after),
-            "reclaimedJobs": one("SELECT count(*) FROM jobs WHERE id > ? AND status = 'succeeded' AND attempts >= 2", after),
-            "mergedSlots": max(merged, 0),
-            "duplicateEffects": one("SELECT count(*) FROM (SELECT 1 FROM jobs WHERE id > ? AND kind = 'extract' AND status = 'succeeded' "
-                                    "GROUP BY source_id, fence_version, target HAVING count(*) > 1)", after),
-            "duplicateSlotJobs": one("SELECT count(*) FROM (SELECT 1 FROM jobs WHERE id > ? AND schedule_id IS NOT NULL "
-                                     "GROUP BY schedule_id, slot HAVING count(*) > 1)", after),
+            "retriedJobs": one("SELECT count(*) FROM jobs WHERE id > ? AND status = 'succeeded' AND attempts >= 2", after),
+            "mergedSlots": merged_slots(db, baseline),
         }
     finally:
         db.close()
@@ -114,9 +141,11 @@ def load_state(out_dir):
     with open(os.path.join(out_dir, STATE_FILE), encoding="utf-8") as fh:
         state = json.load(fh)
     base = state["baseline"]
-    if state["scenario"] not in SCENARIOS or not all(isinstance(base.get(k), int) for k in ("maxJobId", "mergedSlots")):
+    scheds = base.get("schedules")
+    if (state["scenario"] not in SCENARIOS or not isinstance(base.get("maxJobId"), int) or not isinstance(scheds, dict)
+            or not all(isinstance(v, dict) and isinstance(v.get("nextDue"), int) for v in scheds.values())):
         raise ConfigError("state file is not a queue-scenario state")
-    return state["startedAt"], state["scenario"], {"maxJobId": base["maxJobId"], "mergedSlots": base["mergedSlots"]}
+    return state["startedAt"], state["scenario"], {"maxJobId": base["maxJobId"], "schedules": scheds}
 
 
 def read_sleep_record(path, scenario, started_at):
@@ -143,16 +172,14 @@ def read_sleep_record(path, scenario, started_at):
 
 
 def judge(scenario, observed, snap, expected_effects):
-    """FAIL: the effect rows are not the imported number, an extraction (or a schedule slot) left twice, or a job was given
-    up. INCONCLUSIVE: work is still unfinished, the scenario's event left no trace (a kill that reclaimed nothing, a wake or
+    """FAIL: the effect rows are not the imported number or a job was given up. INCONCLUSIVE: work is still unfinished, the scenario's event left no trace (a kill with no retried job, a wake or
     forward jump that merged nothing), or an attestation is missing."""
     status = snap["jobsByStatus"]
-    if (snap["effectRows"] != expected_effects or snap["duplicateEffects"] or snap["duplicateSlotJobs"]
-            or status.get("dead_letter", 0)):
+    if snap["effectRows"] != expected_effects or status.get("dead_letter", 0):
         return "FAIL"
     if sum(status.get(s, 0) for s in OPEN_STATUSES):
         return "INCONCLUSIVE"
-    if (scenario == "kill" and not snap["reclaimedJobs"]) or (scenario in NEEDS_MERGE and not snap["mergedSlots"]):
+    if (scenario == "kill" and not snap["retriedJobs"]) or (scenario in NEEDS_MERGE and not snap["mergedSlots"]):
         return "INCONCLUSIVE"
     if set(OBSERVATIONS[scenario]) - set(observed):
         return "INCONCLUSIVE"
@@ -170,8 +197,7 @@ def build_record(cfg, app_version, scenario, snap, verdict, observed, started_at
         "observed": [w for w in OBSERVATIONS[scenario] if w in observed],
         "jobsByStatus": dict(snap["jobsByStatus"]), "jobsOpen": open_jobs,
         "expectedEffectRows": cfg["expectedEffectRows"], "effectRows": snap["effectRows"], "mergedSlots": snap["mergedSlots"],
-        "reclaimedJobs": snap["reclaimedJobs"], "duplicateEffects": snap["duplicateEffects"],
-        "duplicateSlotJobs": snap["duplicateSlotJobs"],
+        "retriedJobs": snap["retriedJobs"],
         "commit": commit if commit and rr.COMMIT_RE.match(commit) else "unknown",
         "startedAt": started_at, "finishedAt": rr.now_iso(),
     }
@@ -183,8 +209,7 @@ def write_results(record, verdict, observed, out_dir, literals):
     from common.redact import Redactor
     facts = {"scenario": record["scenario"], "app_version": results.normalize_version(record["appVersion"])[0],
              "effect_rows": record["effectRows"], "merged_slots": record["mergedSlots"],
-             "reclaimed_jobs": record["reclaimedJobs"], "duplicate_effects": record["duplicateEffects"],
-             "duplicate_slot_jobs": record["duplicateSlotJobs"], "jobs_open": record["jobsOpen"],
+             "retried_jobs": record["retriedJobs"], "jobs_open": record["jobsOpen"],
              "jobs_dead_letter": record["jobsByStatus"].get("dead_letter", 0),
              "observed": [w for w in OBSERVATIONS[record["scenario"]] if w in observed],
              "kit_commit": record["commit"][:12] if record["commit"] != "unknown" else "unknown"}
