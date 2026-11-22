@@ -8,8 +8,12 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { send } from "@pki/testkit";
+
+// Every test here starts real processes. Slowest test, 5 runs alone: 0.41 s; 10 runs with the machine
+// 3x oversubscribed (24 busy loops on 8 cores): 3.0 s. 30 s is about 5x the loaded worst case.
+vi.setConfig({ testTimeout: 30_000 });
 
 let home: string;
 let env: Record<string, string | undefined>;
