@@ -67,6 +67,15 @@ export function listActiveInsights(db: SqlDriver): ActiveInsight[] {
   return db.all(`${ACTIVE_INSIGHT} ORDER BY i.id`).map(insightOf);
 }
 
+/** The ids of the evidence an Insight cites, in evidence order (the read gate judges them one by one). */
+export function listInsightEvidenceIds(db: SqlDriver, insightId: number): number[] {
+  return db
+    .all("SELECT evidence_id FROM insight_evidence WHERE insight_id = ? ORDER BY evidence_id", [
+      insightId,
+    ])
+    .map((r) => r.evidence_id as number);
+}
+
 /** An active Insight and its evidence in evidence order; undefined if absent or not active. */
 export function readInsightEvidence(
   db: SqlDriver,
