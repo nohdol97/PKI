@@ -29,6 +29,7 @@ export {
   createProjections,
   deleteSourceWithNotice,
   PROJECTION_STALE_SETTINGS,
+  userDeleteWithNotice,
   vectorRefOf,
   versionNotice,
   type ProjectionName,

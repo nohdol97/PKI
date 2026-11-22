@@ -46,7 +46,12 @@ import {
   type Projections,
 } from "@pki/knowledge-engine";
 import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
-import { dataDirectory, ensureDataDirectory, migrate, type SqlDriver } from "@pki/storage";
+import {
+  dataDirectory,
+  ensureDataDirectory,
+  prepareCanonicalDb,
+  type SqlDriver,
+} from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
 import { join } from "node:path";
 import {
@@ -339,11 +344,15 @@ export function productImporter(
     });
 }
 
-/** Opens the canonical SQLite inside `dir` (default: the per-user data directory), migrated. */
+/** Opens the canonical SQLite inside `dir` (default: the per-user data directory), migrated and prepared
+ * (identity key, hashed identities, one clean-up: I04-R6, R7). */
 export function openCanonicalDb(dir: string = dataDirectory()): SqlDriver {
   ensureDataDirectory(dir);
   const db = openBetterSqlite3(join(dir, CANONICAL_DB_FILE));
-  migrate(db);
+  // a failed clean-up does not stop the start: it stays `pending` in the status API
+  // (dataProtection) and is tried again at the next start; the missing-key error
+  // propagates and no backend starts (the shell logs its class)
+  if (prepareCanonicalDb(db).legacyCleanup === "failed") log("legacy-cleanup-failed", {});
   return db;
 }
 

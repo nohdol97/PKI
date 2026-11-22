@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(14);
-    expect(migrations).toHaveLength(14);
+    expect(schemaVersion(db)).toBe(15);
+    expect(migrations).toHaveLength(15);
   });
 
   it("is idempotent when re-run", () => {
@@ -469,6 +469,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "consents",
       "evidence",
       "facts",
+      "identity_key",
       "insight_evidence",
       "insights",
       "invalidations",
@@ -1186,15 +1187,49 @@ describe("schema v13 (I04-T05, I04-R9)", () => {
   });
 });
 
-describe("schema v14 (I03-T08)", () => {
-  it("adds the schedules table, one period per kind and target, and leaves the jobs alone", () => {
+describe("schema v14 (I04-T07, I04-R7)", () => {
+  it("makes the identity key, one row of 32 bytes, and marks existing sources plain", () => {
     migrate(db, migrations.slice(0, 13));
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    db.run(
+      "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES ('c', '', 'e')",
+    );
+    migrate(db);
+    expect(db.all("SELECT id, length(key) AS n, typeof(key) AS t FROM identity_key")).toEqual([
+      { id: 1, n: 32, t: "blob" },
+    ]);
+    expect(db.all("SELECT external_id, identity_hashed FROM sources")).toEqual([
+      { external_id: "e", identity_hashed: 0 },
+    ]);
+  });
+
+  it("accepts no second key row, a short key or a text key", () => {
+    migrate(db);
+    expect(() => db.run("INSERT INTO identity_key (id, key) VALUES (2, randomblob(32))")).toThrow();
+    expect(() => db.run("UPDATE identity_key SET key = randomblob(8)")).toThrow();
+    expect(() => db.run("UPDATE identity_key SET key = 'x'")).toThrow();
+  });
+
+  it("accepts only 0 or 1 as the hashed mark", () => {
+    migrate(db);
+    db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
+    expect(() =>
+      db.run(
+        "INSERT INTO sources (connector_instance_id, external_id, identity_hashed) VALUES ('c', 'e', 2)",
+      ),
+    ).toThrow();
+  });
+});
+
+describe("schema v15 (I03-T08)", () => {
+  it("adds the schedules table, one period per kind and target, and leaves the jobs alone", () => {
+    migrate(db, migrations.slice(0, 14));
     db.run(
       `INSERT INTO jobs (kind, status, run_after, fairness_key, registered_change_seq, created_at, updated_at)
        VALUES ('maintenance', 'queued', 1, 'maintenance', 0, 1, 1)`,
     );
     migrate(db);
-    expect(schemaVersion(db)).toBe(14);
+    expect(schemaVersion(db)).toBe(15);
     expect(db.all("SELECT kind, status FROM jobs")).toEqual([
       { kind: "maintenance", status: "queued" },
     ]);

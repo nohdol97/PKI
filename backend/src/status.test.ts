@@ -1,7 +1,7 @@
 // V01-T12 / R15: the status API reads the vector index state from the configured
 // VectorIndex, and the product configuration reports it unavailable.
 import { ErrorResponseSchema, routes, type VectorIndex } from "@pki/contracts";
-import { migrate } from "@pki/storage";
+import { migrate, writeSetting } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { MemoryVectorIndex, send } from "@pki/testkit";
 import { describe, expect, it, vi } from "vitest";
@@ -108,5 +108,15 @@ describe("status API: vector index", () => {
       logged.mockRestore();
       await server.close();
     }
+  });
+});
+
+describe("status API: data protection (I04-R6)", () => {
+  it("says the one-time clean-up of earlier deletions is pending until a start finished it", async () => {
+    const pending = routes.status.response.parse((await getStatus(new MemoryVectorIndex())).body);
+    expect(pending.dataProtection).toEqual({ legacyCleanup: "pending" });
+    writeSetting(db, "purge.legacy-cleanup", "done");
+    const done = routes.status.response.parse((await getStatus(new MemoryVectorIndex())).body);
+    expect(done.dataProtection).toEqual({ legacyCleanup: "done" });
   });
 });

@@ -4,9 +4,11 @@
 // finds the source by its identity (creating the row of one never seen, cover 0),
 // lets storage judge the event against the stored tombstone and, on every outcome
 // that changes it, closes the source's open jobs and propagates the change through
-// the product registry, once. `unchanged` writes nothing. Ledger lines: I04-T10.
+// the product registry, once, and hashes the identity of what the purge emptied
+// (I04-R7). `unchanged` writes nothing. Ledger lines: I04-T10.
 import {
-  ensureSourceId,
+  ensureTombstoneSource,
+  hashSourceIdentity,
   recordTombstone,
   recordTombstoneLift,
   supersedeOpenJobs,
@@ -24,8 +26,8 @@ function requestTime(at: string): Date {
 
 export const applyTombstone: ApplyTombstone = (tx, w) => {
   const when = requestTime(w.at);
-  const { connectorInstanceId, namespace, externalId } = w.identity;
-  const sourceId = ensureSourceId(tx, connectorInstanceId, namespace, externalId);
+  // a source never seen gets its row with the keyed hash, never the plain identity (I04-R7)
+  const sourceId = ensureTombstoneSource(tx, w.identity);
   const { outcome, tombstone } = recordTombstone(tx, sourceId, w);
   const { coversVersion } = tombstone;
   if (outcome === "unchanged") return { outcome, sourceId, coversVersion };
@@ -36,6 +38,8 @@ export const applyTombstone: ApplyTombstone = (tx, w) => {
     { kind: tombstone.reason, sourceId, coversVersion, lastRevision: tombstone.lastRevision },
     w.at,
   );
+  // the purge left no version: what names the source is the hash from here on (I04-R7)
+  hashSourceIdentity(tx, sourceId);
   return { outcome, sourceId, coversVersion };
 };
 

@@ -122,7 +122,7 @@ export function recordTombstoneLift(
   return changes === 1 ? "lifted" : "unchanged";
 }
 
-/** V02's tombstone, as deleteSource writes and reads it until I04-T13 and I01-T02 move to the entries. */
+/** V02's tombstone, as deleteSource writes and reads it until I01-T02 moves to the entries. */
 export interface Tombstone {
   sourceId: number;
   version: number;
@@ -145,4 +145,22 @@ export function writeTombstone(db: SqlDriver, t: Tombstone): "written" | "unchan
 export function readTombstone(db: SqlDriver, sourceId: number): Tombstone | undefined {
   const state = readTombstoneState(db, sourceId);
   return state && { sourceId, version: state.coversVersion, at: state.at, reason: state.reason };
+}
+
+/**
+ * The unlifted tombstones, oldest first, with the connector instance of their source:
+ * what the user can lift. The source's own identity is not read (a purged source's is a hash, I04-R7).
+ */
+export function listLiftableTombstones(
+  db: SqlDriver,
+): (TombstoneState & { connectorInstanceId: string })[] {
+  return db
+    .all(
+      `SELECT s.id, s.connector_instance_id FROM tombstones t JOIN sources s ON s.id = t.source_id
+        WHERE t.lifted_at IS NULL ORDER BY t.at, s.id`,
+    )
+    .map((row) => ({
+      ...(readTombstoneState(db, row.id as number) as TombstoneState),
+      connectorInstanceId: row.connector_instance_id as string,
+    }));
 }

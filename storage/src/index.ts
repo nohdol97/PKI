@@ -20,6 +20,17 @@ export {
 } from "./listing.ts";
 export { deleteConsent, readConsent, saveConsent, type StoredConsent } from "./consents.ts";
 export { readSetting, writeSetting } from "./settings.ts";
+export {
+  IdentityKeyMissingError,
+  LEGACY_CLEANUP_SETTING,
+  ensureTombstoneSource,
+  findHashedSourceId,
+  hashSourceIdentity,
+  identityKey,
+  prepareCanonicalDb,
+  type PreparedCanonicalDb,
+  type SourceIdentity,
+} from "./identity.ts";
 export { databaseEncryption } from "./database-encryption.ts";
 export {
   dataDirectory,
@@ -148,6 +159,7 @@ export {
   type StoredInsight,
 } from "./insights.ts";
 export {
+  listLiftableTombstones,
   readTombstone,
   readTombstoneState,
   recordTombstone,
