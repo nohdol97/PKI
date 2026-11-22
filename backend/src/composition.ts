@@ -64,6 +64,11 @@ import type { Clock } from "./clock.ts";
 import { computePolicyFingerprint } from "./held-release.ts";
 import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-runner.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
+import {
+  projectionHandlers,
+  PROJECTION_KIND_SETTINGS,
+  type ProjectionPorts,
+} from "./projection-jobs.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
 import { createSiteConnector, SITE_CONNECTOR_KINDS } from "./adapters/site-connectors.ts";
@@ -254,6 +259,11 @@ export function productRunner(
     testBuild?: RunnerTestBuild;
     /** Stamped on a job the Broker held (productCalls). */
     policyFingerprint?: () => string;
+    /**
+     * The registered projection kinds as ports (I04-T04): given, the runner also runs
+     * `projection-remove` and `projection-rebuild` (projection-jobs.ts); none, those jobs wait.
+     */
+    projectionPorts?: ProjectionPorts;
   } = {},
 ): JobRunner {
   const { clock, engine, projections } = options;
@@ -270,7 +280,18 @@ export function productRunner(
   });
   return createJobRunner({
     db,
-    handlers: { [EXTRACT_JOB_KIND]: handler },
+    handlers: {
+      [EXTRACT_JOB_KIND]: handler,
+      ...(options.projectionPorts
+        ? projectionHandlers({
+            db,
+            ports: options.projectionPorts,
+            ...(clock ? { now: () => new Date(clock.now()) } : {}),
+            onError: (error) => log("projection-job-error", { error: errorClass(error) }),
+          })
+        : {}),
+    },
+    kinds: PROJECTION_KIND_SETTINGS,
     broker,
     ...(clock ? { clock } : {}),
     ...(options.policyFingerprint ? { policyFingerprint: options.policyFingerprint } : {}),

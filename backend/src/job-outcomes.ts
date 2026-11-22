@@ -36,8 +36,9 @@ export function backoffMs(attempt: number, code?: string): number {
  * as the Broker gave it.
  */
 export type JobResult =
-  | { status: "succeeded"; write: () => void }
-  | { status: "succeeded"; items: readonly DerivedItem[] }
+  /** `code`: stored as the job's reason, e.g. `adapter-unavailable` for a skipped removal (I03-R7). */
+  | { status: "succeeded"; write: () => void; code?: string }
+  | { status: "succeeded"; items: readonly DerivedItem[]; code?: string }
   | { status: "superseded" }
   | { status: "yield" }
   | { status: "held"; reason: string }
@@ -80,11 +81,17 @@ function closing(result: JobResult, run: ClassifiedRun): JobClosing | undefined 
   // a handler is untyped at run time: read what it handed back defensively
   if (typeof result !== "object" || result === null) return undefined;
   switch (result.status) {
-    case "succeeded":
-      return ("write" in result && typeof result.write === "function") ||
+    case "succeeded": {
+      if (!(
+        ("write" in result && typeof result.write === "function") ||
         ("items" in result && Array.isArray(result.items))
-        ? result
-        : undefined;
+      )) {
+        return undefined;
+      }
+      // a success may carry a code (a skip): the closing stores it as the reason
+      const { code, ...rest } = result;
+      return code === undefined ? rest : { ...rest, reason: code };
+    }
     case "superseded":
       return { status: "superseded" };
     case "held":

@@ -11,6 +11,7 @@
 // body I04-T06 replaces.
 import type { CommitDerived, DerivedItem } from "./derivatives.ts";
 import { assertMaxConcurrent, pickDueJob } from "./job-concurrency.ts";
+import { usesVersionFence } from "./job-kinds.ts";
 import { readChangeSeq } from "./revisions.ts";
 import type { SqlDriver, SqlValue } from "./sql-driver.ts";
 
@@ -478,8 +479,9 @@ export function isFenceCurrent(db: SqlDriver, job: { sourceId: number; fenceVers
  * attempt the claim raised is given back (I03-R11).
  */
 export type JobClosing =
-  | { status: "succeeded"; write: () => void }
-  | { status: "succeeded"; items: readonly DerivedItem[] }
+  /** `reason`: a code stored with the success, e.g. `adapter-unavailable` for a skip (I03-R7). */
+  | { status: "succeeded"; write: () => void; reason?: string }
+  | { status: "succeeded"; items: readonly DerivedItem[]; reason?: string }
   /** `policyFingerprint`: the policy a held job was judged under (I03-R16 ③); absent is stored as empty. */
   | { status: "held"; reason: string; policyFingerprint?: string }
   | { status: "dead_letter"; reason: string }
@@ -545,9 +547,11 @@ function checkedWrite(
     return to;
   };
   if (job.cancelRequested) return close("cancelled");
-  const { sourceId, fenceVersion } = job; // a sourceless kind has no fence
+  const { sourceId, fenceVersion } = job; // a sourceless kind has no fence, nor a projection kind (I03-R7)
   const source =
-    sourceId === null || fenceVersion === null ? null : { sourceId, version: fenceVersion };
+    sourceId === null || fenceVersion === null || !usesVersionFence(job.kind)
+      ? null
+      : { sourceId, version: fenceVersion };
   const items: readonly DerivedItem[] =
     typeof result === "function"
       ? [

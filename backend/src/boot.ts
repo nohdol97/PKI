@@ -37,6 +37,7 @@ import { systemClock } from "./clock.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
+import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
@@ -64,6 +65,12 @@ export interface BootOptions {
    */
   providers?: readonly LLMProvider[];
   embedder?: EmbeddingProvider | null;
+  /**
+   * The registered projection kinds as ports, for the runner's `projection-remove` and
+   * `projection-rebuild` handlers (I03-T10). I04-T04 passes the product's; without them
+   * those jobs wait, and the marks still register their rebuilds.
+   */
+  projectionPorts?: ProjectionPorts;
 }
 
 export interface BootedBackend {
@@ -101,6 +108,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     policyFingerprint: calls.policyFingerprint,
     engine,
     projections,
+    ...(options.projectionPorts ? { projectionPorts: options.projectionPorts } : {}),
     // folded away from any other build (V01-T15); the runner honours it in a test build only
     ...(BUILD_KIND === "test" && options.testBuild?.jobs
       ? { testBuild: options.testBuild.jobs }
@@ -130,6 +138,9 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     onRunConditionsChanged: () => void runner.wake(),
   });
   releaseOnPolicyChange(db, calls.policyFingerprint(), runner);
+  // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
+  // whatever the applied change sequence says (I03-R7); registered before the runner starts
+  checkProjectionMarkers(db, { phase: "start", now: clock.now() });
   runner.start();
   const reevaluation = startHeldReevaluation({
     db,
