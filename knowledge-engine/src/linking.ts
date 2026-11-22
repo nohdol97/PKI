@@ -7,15 +7,14 @@ import type { CandidateItems } from "@pki/providers";
 import {
   findSourceVersionId,
   listItemNames,
+  normalizeForLinking,
   readItem,
   type DerivativeRegistry,
   type SqlDriver,
 } from "@pki/storage";
 import { derivativeRegistry } from "./canonical-kinds.ts";
 
-/** The comparison form of a name or a text. */
-export const normalizeForLinking = (text: string): string =>
-  text.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
+export { normalizeForLinking };
 
 /** IDs of the items whose normalized name the normalized text contains, by id. */
 export function findCandidates(db: SqlDriver, text: string): number[] {

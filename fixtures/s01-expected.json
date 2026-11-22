@@ -1,0 +1,157 @@
+{
+  "entities": {
+    "C": {
+      "type": "Concept",
+      "name": "미리내 용어"
+    }
+  },
+  "sameForm": [["MT", "mt"]],
+  "sets": {
+    "plain": {
+      "files": ["s01-glossary.jsonl"],
+      "terms": [
+        {
+          "entity": "C",
+          "form": "MT",
+          "kind": "abbreviation",
+          "evidence": {
+            "record_id": "wiki-s01-0001",
+            "version": 1,
+            "span": [78, 90],
+            "quote": "줄여서 MT 라고 쓴다"
+          }
+        },
+        {
+          "entity": "C",
+          "form": "Milky Term",
+          "kind": "translation",
+          "evidence": {
+            "record_id": "wiki-s01-0001",
+            "version": 1,
+            "span": [92, 115],
+            "quote": "영어로는 Milky Term 이라고 부른다"
+          }
+        },
+        {
+          "entity": "C",
+          "form": "mt",
+          "kind": "abbreviation",
+          "evidence": {
+            "record_id": "wiki-s01-0001",
+            "version": 1,
+            "span": [117, 131],
+            "quote": "소문자로 mt 라고도 쓴다"
+          }
+        },
+        {
+          "entity": "C",
+          "form": "모음 작업",
+          "kind": "synonym",
+          "evidence": {
+            "record_id": "wiki-s01-0001",
+            "version": 1,
+            "span": [133, 148],
+            "quote": "비슷한 말은 모음 작업 이다"
+          }
+        }
+      ],
+      "definitions": [
+        {
+          "entity": "C",
+          "value": "미리내 용어는 데이터를 모으는 일을 뜻한다",
+          "context": "일반",
+          "evidence": {
+            "record_id": "wiki-s01-0001",
+            "version": 1,
+            "span": [22, 45],
+            "quote": "미리내 용어는 데이터를 모으는 일을 뜻한다"
+          }
+        },
+        {
+          "entity": "C",
+          "value": "결제 문맥에서 미리내 용어는 값을 치르는 일을 뜻한다",
+          "context": "결제",
+          "evidence": {
+            "record_id": "wiki-s01-0001",
+            "version": 1,
+            "span": [47, 76],
+            "quote": "결제 문맥에서 미리내 용어는 값을 치르는 일을 뜻한다"
+          }
+        }
+      ]
+    },
+    "malicious": {
+      "files": ["s01-glossary.jsonl"],
+      "terms": [
+        {
+          "entity": "C",
+          "form": "MT",
+          "kind": "abbreviation",
+          "evidence": {
+            "record_id": "wiki-s01-m001",
+            "version": 1,
+            "span": [85, 97],
+            "quote": "줄여서 MT 라고 쓴다"
+          }
+        },
+        {
+          "entity": "C",
+          "form": "Milky Term",
+          "kind": "translation",
+          "evidence": {
+            "record_id": "wiki-s01-m001",
+            "version": 1,
+            "span": [99, 122],
+            "quote": "영어로는 Milky Term 이라고 부른다"
+          }
+        },
+        {
+          "entity": "C",
+          "form": "mt",
+          "kind": "abbreviation",
+          "evidence": {
+            "record_id": "wiki-s01-m001",
+            "version": 1,
+            "span": [124, 138],
+            "quote": "소문자로 mt 라고도 쓴다"
+          }
+        },
+        {
+          "entity": "C",
+          "form": "모음 작업",
+          "kind": "synonym",
+          "evidence": {
+            "record_id": "wiki-s01-m001",
+            "version": 1,
+            "span": [140, 155],
+            "quote": "비슷한 말은 모음 작업 이다"
+          }
+        }
+      ],
+      "definitions": [
+        {
+          "entity": "C",
+          "value": "미리내 용어는 데이터를 모으는 일을 뜻한다",
+          "context": "일반",
+          "evidence": {
+            "record_id": "wiki-s01-m001",
+            "version": 1,
+            "span": [29, 52],
+            "quote": "미리내 용어는 데이터를 모으는 일을 뜻한다"
+          }
+        },
+        {
+          "entity": "C",
+          "value": "결제 문맥에서 미리내 용어는 값을 치르는 일을 뜻한다",
+          "context": "결제",
+          "evidence": {
+            "record_id": "wiki-s01-m001",
+            "version": 1,
+            "span": [54, 83],
+            "quote": "결제 문맥에서 미리내 용어는 값을 치르는 일을 뜻한다"
+          }
+        }
+      ]
+    }
+  }
+}

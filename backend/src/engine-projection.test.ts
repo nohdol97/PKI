@@ -254,6 +254,8 @@ describe("engine.restart", () => {
             quote: MAIL_TARGET,
           },
         ],
+        definitions: [],
+        terms: [],
         relations: [],
       }),
     );
@@ -641,7 +643,9 @@ describe("a stale engine through the product's wiring (review R2-1)", () => {
   it("is not asked for proposals by the booted runner after a failed notice", async () => {
     db.close(); // the backend opens the directory itself
     const endpoint = await startFakeOpenAI(() =>
-      completion(JSON.stringify({ items: [], facts: [], relations: [] })),
+      completion(
+        JSON.stringify({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
+      ),
     );
     const key = openaiKeySecretName(endpoint.host);
     const secrets: SecretSource = {

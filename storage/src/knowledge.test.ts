@@ -392,3 +392,45 @@ describe("confidence (S01-R10)", () => {
     expect(readFact(db, fact)).toMatchObject({ status: "rejected", confidence: 0.3 });
   });
 });
+
+describe("fact context (S01-R3)", () => {
+  const contextOf = (id: number) =>
+    db.all("SELECT context FROM facts WHERE id = ?", [id])[0]?.context;
+
+  it("writes the tag the caller gives, and none when it gives none", () => {
+    const b = item("B");
+    const tagged = saveFact(db, {
+      itemId: b,
+      kind: "definition",
+      value: "v1",
+      context: "결제",
+      ...attrs,
+    });
+    const plain = saveFact(db, { itemId: b, kind: "definition", value: "v2", ...attrs });
+    expect(contextOf(tagged.id)).toBe("결제");
+    expect(contextOf(plain.id)).toBeNull();
+  });
+
+  it("keeps the first tag and the first confidence when the same row is saved again (written at creation only)", () => {
+    const b = item("B");
+    const first = saveFact(db, {
+      itemId: b,
+      kind: "definition",
+      value: "v",
+      context: "하나",
+      ...attrs,
+      confidence: 0.2,
+    });
+    const again = saveFact(db, {
+      itemId: b,
+      kind: "definition",
+      value: "v",
+      context: "둘",
+      ...attrs,
+      confidence: 0.9,
+    });
+    expect(again).toEqual({ id: first.id, created: false });
+    expect(contextOf(first.id)).toBe("하나");
+    expect(readFact(db, first.id)?.confidence).toBe(0.2);
+  });
+});

@@ -165,7 +165,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     const extractor = new FakeProvider({
       id: "local-model",
       transport: "http",
-      answer: () => ({ items: [], facts: [], relations: [] }),
+      answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
     });
     const { broker } = productCalls(db, egress, { providers: [extractor] });
     runner = productRunner(db, broker, { engine: bound, projections });

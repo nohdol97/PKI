@@ -1,10 +1,11 @@
-// Per-fixture extraction double (V02-R17, V02-T05): what a Provider of kind
-// `test-double` answers to an extraction request for a V02 fixture. The answer
-// is fixed in fixtures/v02-expected.json: the facts and relations whose evidence
-// is the requested document's record, with their quotes. It names an existing
-// item only by picking it from the candidates the request carried (same name);
-// otherwise the item is new. A document that is no V02 fixture gets an empty
-// answer. It always quotes exactly, so it proves nothing about real extraction (A21).
+// Per-fixture extraction double (V02-R17, V02-T05, S01-T08): what a Provider of kind
+// `test-double` answers to an extraction request for a V02 or S01 fixture. The answer
+// is fixed in fixtures/v02-expected.json (the facts and relations) and fixtures/s01-expected.json
+// (the surface forms and definitions of the glossary) whose evidence is the requested
+// document's record, with their quotes. It names an existing item only by picking it
+// from the candidates the request carried (same name); otherwise the item is new. A
+// document that is no fixture gets an empty answer. It always quotes exactly and gives
+// no confidence, so it proves nothing about real extraction (A21, S32).
 import type { StructuredRequest } from "@pki/contracts";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -26,11 +27,34 @@ interface Expected {
   >;
 }
 
-/** The V02 extraction output (schema version 2, providers/src/tasks.ts). */
+interface ExpectedGlossary {
+  entities: Record<string, { type: string; name: string }>;
+  sets: Record<
+    string,
+    {
+      terms: { entity: string; form: string; kind: string; evidence: Evidence }[];
+      definitions: {
+        entity: string;
+        value: string;
+        context: string;
+        evidence: Evidence;
+      }[];
+    }
+  >;
+}
+
+/** The extraction output (schema version 3, providers/src/tasks.ts). */
 export interface FixtureExtraction {
   items: { ref: string; type: string; name: string; existingItemId: string | null }[];
   facts: { item: string; kind: string; value: string; epistemic: "explicit"; quote: string }[];
   relations: { subject: string; type: string; object: string; quote: string }[];
+  terms: { item: string; form: string; kind: string; quote: string }[];
+  definitions: {
+    item: string;
+    quote: string;
+    context: string;
+    epistemic: "explicit";
+  }[];
 }
 
 function load() {
@@ -39,7 +63,7 @@ function load() {
   ) as Expected;
   /** Fixture content -> record id. */
   const records = new Map<string, string>();
-  for (const file of readdirSync(FIXTURES).filter((f) => /^v02-.*\.jsonl$/.test(f))) {
+  for (const file of readdirSync(FIXTURES).filter((f) => /^(v02|s01)-.*\.jsonl$/.test(f))) {
     for (const line of readFileSync(resolve(FIXTURES, file), "utf8").split("\n")) {
       if (line.trim() === "") continue;
       const record = JSON.parse(line) as { id: string; content: string };
@@ -54,21 +78,38 @@ function load() {
       relations.set(`${r.evidence.record_id}|${r.subject}|${r.type}|${r.object}`, r);
     }
   }
+  const glossary = JSON.parse(
+    readFileSync(resolve(FIXTURES, "s01-expected.json"), "utf8"),
+  ) as ExpectedGlossary;
+  const terms = new Map<string, ExpectedGlossary["sets"][string]["terms"][number]>();
+  const definitions = new Map<string, ExpectedGlossary["sets"][string]["definitions"][number]>();
+  for (const set of Object.values(glossary.sets)) {
+    for (const t of set.terms) terms.set(`${t.evidence.record_id}|${t.entity}|${t.form}`, t);
+    for (const d of set.definitions) definitions.set(`${d.evidence.record_id}|${d.value}`, d);
+  }
   return {
-    entities: expected.entities,
+    entities: { ...expected.entities, ...glossary.entities },
     records,
     facts: [...facts.values()],
     relations: [...relations.values()],
+    terms: [...terms.values()],
+    definitions: [...definitions.values()],
   };
 }
 
 /** The extraction a fixture document gets; use as `new FakeProvider({ answer: fixtureExtraction() })`. */
 export function fixtureExtraction(): (request: StructuredRequest) => FixtureExtraction {
-  const { entities, records, facts, relations } = load();
+  const { entities, records, facts, relations, terms, definitions } = load();
   return (request) => {
     const document = request.input.untrustedDocuments[0];
     const recordId = document && records.get(document.body);
-    const out: FixtureExtraction = { items: [], facts: [], relations: [] };
+    const out: FixtureExtraction = {
+      items: [],
+      facts: [],
+      relations: [],
+      terms: [],
+      definitions: [],
+    };
     if (recordId === undefined) return out;
     const refs = new Set<string>();
     const use = (ref: string) => {
@@ -96,6 +137,19 @@ export function fixtureExtraction(): (request: StructuredRequest) => FixtureExtr
         type: r.type,
         object: r.object,
         quote: r.evidence.quote,
+      });
+    }
+    for (const t of terms.filter((t) => t.evidence.record_id === recordId)) {
+      use(t.entity);
+      out.terms.push({ item: t.entity, form: t.form, kind: t.kind, quote: t.evidence.quote });
+    }
+    for (const d of definitions.filter((d) => d.evidence.record_id === recordId)) {
+      use(d.entity);
+      out.definitions.push({
+        item: d.entity,
+        quote: d.evidence.quote,
+        context: d.context,
+        epistemic: "explicit",
       });
     }
     return out;

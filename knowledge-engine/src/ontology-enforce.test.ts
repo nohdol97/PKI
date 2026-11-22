@@ -7,6 +7,8 @@
 import {
   createBroker,
   createUserActionLedger,
+  EXTRACT_ALIAS_FACT_KINDS,
+  EXTRACT_DEFINITION_FACT_KIND,
   EXTRACT_FACT_KINDS,
   EXTRACT_ITEM_TYPES,
   EXTRACT_RELATION_TYPES,
@@ -45,7 +47,7 @@ let recording: { call(raw: unknown): ReturnType<Broker["call"]> };
 
 function setUp(script: FakeStep[] = []) {
   const provider = new FakeProvider({
-    answer: () => ({ items: [], facts: [], relations: [] }),
+    answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
     script,
   });
   const broker = createBroker({
@@ -115,7 +117,9 @@ async function run(): Promise<StoredJob> {
   closeJob(db, job, result);
   return job;
 }
-const answer = (o: object): FakeStep => ({ output: { items: [], facts: [], relations: [], ...o } });
+const answer = (o: object): FakeStep => ({
+  output: { items: [], facts: [], relations: [], terms: [], definitions: [], ...o },
+});
 const project = { ref: "p", type: "Project", name: "미리내 프로젝트", existingItemId: null };
 const system = { ref: "s", type: "System", name: "물결 시스템", existingItemId: null };
 const fact = (item: string, kind: string, value: string, quote: string) => ({
@@ -461,6 +465,9 @@ describe("ontology.enforce: a new item type goes through the same devices (S01-R
 describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
   /** The item types S02-R2 adds to the date kinds' and DEPENDS_ON's rules (the prompt lists them from S02-T02). */
   const S02_WIDENED = ["Commitment", "Task"];
+  // "Items are projects (Project) or systems (System)" carry the dates and the relation; Concept carries
+  // the definitions (S01-R17)
+  const WORK = ["Project", "System"];
   const seed = (kind: string) =>
     listOntologyElements(db).filter((e) => e.elementKind === kind && e.origin === "seed");
 
@@ -471,34 +478,45 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
     for (const name of EXTRACT_FACT_KINDS) {
       const element = seed("fact-kind").find((e) => e.name === name);
       expect(element?.status).toBe("verified");
-      // "the date as YYYY-MM-DD", one per item, on the item types the prompt lists
+      // "the date as YYYY-MM-DD", one per item; S02-R2 widens it to Task and Commitment
       expect(element?.rule).toEqual({
         elementKind: "fact-kind",
-        // S02-R2 widens the date kinds to Task and Commitment; the prompt names them from S02-T02 on
-        itemTypes: [...EXTRACT_ITEM_TYPES, ...S02_WIDENED].sort(),
+        itemTypes: [...WORK, ...S02_WIDENED].sort(),
         valueType: "date",
         cardinality: "one",
       });
     }
+    for (const name of EXTRACT_ALIAS_FACT_KINDS) {
+      // a surface form is written on any of the item types, as the text it is, any number of them
+      expect(seed("fact-kind").find((e) => e.name === name)?.rule).toEqual({
+        elementKind: "fact-kind",
+        itemTypes: [...EXTRACT_ITEM_TYPES].sort(),
+        valueType: "surface-form",
+        cardinality: "many",
+      });
+    }
+    expect(seed("fact-kind").find((e) => e.name === EXTRACT_DEFINITION_FACT_KIND)?.rule).toEqual({
+      elementKind: "fact-kind",
+      itemTypes: ["Concept"],
+      valueType: "text",
+      cardinality: "many",
+    });
     for (const name of EXTRACT_RELATION_TYPES) {
       const element = seed("relation-type").find((e) => e.name === name);
       expect(element?.status).toBe("verified");
       expect(element?.rule).toEqual({
         elementKind: "relation-type",
-        subjectTypes: [...EXTRACT_ITEM_TYPES, ...S02_WIDENED].sort(),
-        objectTypes: [...EXTRACT_ITEM_TYPES, ...S02_WIDENED, "Dependency"].sort(),
+        subjectTypes: [...WORK, ...S02_WIDENED].sort(),
+        objectTypes: [...WORK, ...S02_WIDENED, "Dependency"].sort(),
         symmetric: false,
       });
     }
   });
 
-  it("differs from the prompt by exactly what S01-T08 has not put into it yet: the seed is a superset until then", () => {
-    // Only the prompt's names are comparable before T08 (R17 adds Concept, terms and definitions to the
-    // prompt); this list is what the seed holds beyond it. T08 empties it and the test then asks for equality.
-    // S02-T01 seeds the rest of the catalogue (S02-R2); S02-T02 puts those into the prompt and empties them.
+  it("is the prompt's lists plus S02's catalogue, a closed list: S01-T08 put Concept, definition and alias.* into the prompt; S02-T02 empties the rest", () => {
+    // S02-T01 seeds the rest of the catalogue (S02-R2); this closed list holds only those names.
     const notYet = {
       "item-type": [
-        "Concept",
         "Person",
         "Organization",
         "Decision",
@@ -510,25 +528,29 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
         "BusinessRule",
         "OpenQuestion",
       ],
-      "fact-kind": [
-        "alias.abbreviation",
-        "alias.synonym",
-        "alias.translation",
-        "definition",
-        "identifier.email",
-        "identifier.key",
-        "statement",
-      ],
+      "fact-kind": ["identifier.email", "identifier.key", "statement"],
       "relation-type": ["BELONGS_TO", "RESPONSIBLE_FOR", "RELATED_TO", "DECIDED", "CAUSED_BY"],
     };
     const prompt = {
       "item-type": [...EXTRACT_ITEM_TYPES] as string[],
-      "fact-kind": [...EXTRACT_FACT_KINDS] as string[],
+      "fact-kind": [
+        ...EXTRACT_FACT_KINDS,
+        ...EXTRACT_ALIAS_FACT_KINDS,
+        EXTRACT_DEFINITION_FACT_KIND,
+      ] as string[],
       "relation-type": [...EXTRACT_RELATION_TYPES] as string[],
     };
     for (const kind of ["item-type", "fact-kind", "relation-type"] as const) {
       const names = seed(kind).map((e) => e.name);
       expect([...names].sort(), kind).toEqual([...prompt[kind], ...notYet[kind]].sort());
+      // a name is in the prompt or in the list, never both
+      expect(
+        prompt[kind].filter((n) => (notYet[kind] as string[]).includes(n)),
+        kind,
+      ).toEqual([]);
+    }
+    for (const name of ["Concept", "definition", ...EXTRACT_ALIAS_FACT_KINDS]) {
+      expect([...prompt["item-type"], ...prompt["fact-kind"]]).toContain(name);
     }
     expect(
       listOntologyElements(db).every((e) => e.status === "verified" && e.origin === "seed"),

@@ -28,7 +28,9 @@ let graded: Record<string, string>;
 beforeEach(() => {
   db = openBetterSqlite3(":memory:");
   migrate(db);
-  provider = new FakeProvider({ answer: () => ({ items: [], facts: [], relations: [] }) });
+  provider = new FakeProvider({
+    answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
+  });
   graded = { open: "restricted", team: "restricted" };
   answerOf = (classes) => classes[0] as string;
 });
@@ -79,7 +81,7 @@ async function call(ids: string[], inputs: string[][] = []) {
       taskKind: "extract",
       sourceVersionIds: ids,
       candidateItemIds: [],
-      schemaVersion: 2,
+      schemaVersion: 3,
       budget: { timeoutMs: 1000 },
       retryable: false,
     }),

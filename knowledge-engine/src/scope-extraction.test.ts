@@ -92,8 +92,10 @@ interface Answer {
   items: object[];
   facts: object[];
   relations: object[];
+  terms?: object[];
+  definitions?: object[];
 }
-const EMPTY: Answer = { items: [], facts: [], relations: [] };
+const EMPTY: Answer = { items: [], facts: [], relations: [], terms: [], definitions: [] };
 
 function setUp(policy: ScopePolicy, answer: (names: Map<string, string>) => Answer = () => EMPTY) {
   const registry = createProductRegistry({ policy });
@@ -101,7 +103,8 @@ function setUp(policy: ScopePolicy, answer: (names: Map<string, string>) => Answ
     answer: (request) => {
       duringCall?.();
       const names = new Map(request.input.candidates.map((c) => [c.name, c.id]));
-      return answer(names);
+      // an answer that found no forms or definitions says so (the schema requires both lists)
+      return { terms: [], definitions: [], ...answer(names) };
     },
   });
   const broker = createBroker({

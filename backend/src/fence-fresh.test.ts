@@ -82,6 +82,8 @@ function answer(hooks: { during?: ((request: StructuredRequest) => void) | undef
           quote: `${"5월"} 기준 ${Y_NAME} 완료는 2026-12-10`,
         },
       ],
+      definitions: [],
+      terms: [],
       relations: [{ subject: "X", type: "DEPENDS_ON", object: "Y", quote: DEPENDS }],
     };
   };
