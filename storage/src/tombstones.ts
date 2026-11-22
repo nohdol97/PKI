@@ -123,6 +123,33 @@ export function recordTombstoneLift(
 }
 
 /**
+ * Sets the source's tombstone to exactly `state` (I04-R17's reconcile): no judging against the
+ * stored one, so a restored database older than the line ends with the line's cover. Returns
+ * the state it replaced, undefined when there was none.
+ */
+export function writeTombstoneAsIs(
+  db: SqlDriver,
+  state: TombstoneState,
+): TombstoneState | undefined {
+  const old = readTombstoneState(db, state.sourceId);
+  const values = [state.coversVersion, state.lastRevision, state.at, state.reason, state.liftedAt];
+  if (!old) {
+    db.run(
+      `INSERT INTO tombstones (source_id, covers_version, last_revision, at, reason, lifted_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [state.sourceId, ...values.slice(0, 4), state.liftedAt],
+    );
+  } else {
+    db.run(
+      `UPDATE tombstones SET covers_version = ?, last_revision = ?, at = ?, reason = ?, lifted_at = ?
+        WHERE source_id = ?`,
+      [...values, state.sourceId] as (string | number | null)[],
+    );
+  }
+  return old;
+}
+
+/**
  * The unlifted tombstones, oldest first, with the connector instance of their source:
  * what the user can lift. The source's own identity is not read (a purged source's is a hash, I04-R7).
  */

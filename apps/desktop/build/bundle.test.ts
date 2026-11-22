@@ -131,6 +131,7 @@ describe("build check", () => {
     "apps/desktop/e2e/launch.ts",
     "backend/src/test-effect.ts",
     "backend/src/job-kill.child.ts",
+    "backend/src/ledger-kill.child.ts",
   ])("refuses %s by its path", (path) => {
     expect(forbiddenReason(join(REPO_ROOT, path))).toBe(`${path} is a test-only module`);
   });

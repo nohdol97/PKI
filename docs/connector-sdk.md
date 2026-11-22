@@ -163,6 +163,7 @@ export interface Connector {
 - `access-revoked`: revision과 상관없이 **언제나 적용한다.** 권한은 순서보다 앞선다.
 - 적용하면 제품은 그 원본의 본문, 작성자, 파생된 지식을 지운다. 처음 보는 원본에 대한 tombstone 사건도 기록해 둔다. 나중에 도착한 옛 upsert를 막기 위해서다.
 - 그래서 tombstone 사건의 revision은 그 정체로 낸 마지막 upsert의 revision 이상이어야 한다(위반 `tombstone-revision-below-upsert`).
+- **삭제 장부.** 제품은 tombstone을 쓰는 같은 트랜잭션이 커밋되기 전에 삭제 장부(데이터 폴더의 파일)에 그 삭제의 줄을 먼저 적고, 적을 수 없으면 **삭제를 적용하지 않고 거부한다**(장부 없이 지운 자료는 백업을 복원할 때 되살아날 수 있기 때문이다). 장부가 적을 수 없는 경우: 그 인스턴스의 ID가 128자를 넘거나 종류가 `^[a-z][a-z0-9-]{0,63}$`가 아닐 때, 그리고 장부가 잠겼을 때다. 가져오기의 `delete`·`access-revoked` 줄은 줄별 사유 `ledger-unwritable`로, 화면의 삭제 API(`POST /api/sources/delete`)는 409 `ledger-unwritable`로 거부된다. 그래서 수집기의 종류 이름은 그 규칙을 따라야 하고 인스턴스 ID는 128자 이내여야 한다.
 
 ### 접근 범위의 변경
 
@@ -548,7 +549,7 @@ site-mail: 미구현, 배포처 후속
 
 - **지금 제품에서 JSONL이 들어가는 길.** 로컬 가져오기 API `POST /api/imports`(요청 `{ instanceId, content }`)와, 화면의 가져오기가 쓰는 `POST /api/import/jsonl`이다. 파일을 읽는 수집기(종류 `jsonl-import`, 설정 `{ path }`)는 **코드와 계약 시험으로만 있고** 제품에서 인스턴스를 만들어 줄 길은 없다(제품이 등록한 종류는 `site-*` 셋뿐이다. 아래 열린 항목). 파일 수집기와 API는 같은 해석 함수(`parseJsonl`)와 같은 저장 함수를 쓰도록 만들어져 있어서, 한 줄은 어느 길로 들어가도 같은 뜻이다.
 - **한도.** 본문(API)과 파일은 10 MiB(`MAX_JSONL_BYTES`)까지다(API는 JSON 이스케이프 때문에 같은 한도의 파일보다 적게 들어간다). 넘으면 API는 413 `payload-too-large`로 답하고 파일 수집기는 재시도할 수 없는 실패(`connector-failed`)가 된다. 줄 하나는 1 MiB 글자(`MAX_JSONL_LINE_CHARS`, UTF-16 단위로 센다)를 넘으면 해석하지 않고 `schema`로 거부된다. 줄의 중첩 깊이는 64(`MAX_JSONL_DEPTH`)를 넘으면 `JSON.parse`가 끝난 **뒤에** 세어 `schema`로 거부된다. 세 값은 잠정이다.
-- **줄 하나의 거부는 그 줄만 거부한다.** 거부 사유는 `invalid-json`, `schema`, `content-hash-mismatch`이고 위치는 `line:<줄 번호>`(1부터)다. 빈 `access_scope`는 범위를 싣는 줄(`upsert`, `revoke`)에서만 `schema`로 거부한다.
+- **인스턴스 ID의 한도.** 줄의 `connector_instance_id`와 가져오기 API의 `instanceId`는 1자 이상 128자 이하(`MAX_INSTANCE_ID_LENGTH`, `@pki/contracts`)다. 한 줄이 넘으면 그 줄만 `schema`(가져오기 응답에서는 `invalid-record`)로 거부된다. 한도를 하나로 둔 까닭은, 삭제 장부가 적을 수 없는 ID의 원본이 생겨 지울 수 없게 되는 일을 막으려는 것이다(아래 "삭제 장부"). 거부 사유는 `invalid-json`, `schema`, `content-hash-mismatch`이고 위치는 `line:<줄 번호>`(1부터)다. 빈 `access_scope`는 범위를 싣는 줄(`upsert`, `revoke`)에서만 `schema`로 거부한다.
 - **정체는 하나다.** 줄을 (인스턴스, namespace = 줄의 `connector_instance_id`, external id)로 푼다. 그리고 **가져오기는 `jsonl-import`가 아닌 인스턴스의 원본을 읽지도 쓰지도 지우지도 못한다.** 줄이 가리키는 인스턴스가 다른 종류의 것이면 줄은 가져온 쪽의 새 정체로 저장되고, 그 다른 수집기의 원본은 건드려지지 않는다.
 - **범위는 사용자가 적은 값이다.** 가져온 원본은 청구한 범위라는 표시(`scope_claimed`)를 달고, 제품은 그 범위가 배포처가 정한 인스턴스 범위보다 느슨해지지 못하게 등급을 계산한다. 공용 저장소의 등급은 하나라서 결과가 바뀌지 않는다.
 - **파일 수집기의 `deletionsOnRescan`은 거짓이다.** 파일에는 이전 상태가 없어 사라진 줄을 삭제로 알릴 수 없기 때문이다. 고친 파일을 다시 넣으면 파일의 sha256이 달라 cursor가 만료되어 전체 재스캔이 되고, 이때 `deletionsMayBeMissed`가 붙는다.

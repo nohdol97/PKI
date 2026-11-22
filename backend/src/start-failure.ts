@@ -1,6 +1,7 @@
 // What the backend tells the shell about a refused start (I04-R7): a fixed class,
 // never the error's message (it can carry a path or file text; V01-R13).
-import { IdentityKeyMissingError } from "@pki/storage";
+import { LedgerReapplyError } from "@pki/knowledge-engine";
+import { IdentityKeyMissingError, LedgerUnavailableError } from "@pki/storage";
 import { UnregisteredAdapterError } from "./derivative-coverage.ts";
 import { ScopePolicyNotImplementedError, UnknownScopePolicyError } from "./scope-policy.ts";
 
@@ -8,10 +9,23 @@ export type StartFailureReason =
   | "identity-key-missing"
   | "scope-policy-not-implemented"
   | "scope-policy-invalid"
-  | "adapter-unregistered";
-export type StartFailureReport = { type: "failed"; reason?: StartFailureReason };
+  | "adapter-unregistered"
+  | "ledger-reapply-failed"
+  | "ledger-unavailable";
+export type StartFailureReport = {
+  type: "failed";
+  reason?: StartFailureReason;
+  /** With `ledger-reapply-failed`: the ledger line number (never its content). */
+  line?: number;
+};
 
 export function startFailureReport(error?: unknown): StartFailureReport {
+  if (error instanceof LedgerUnavailableError) {
+    return { type: "failed", reason: "ledger-unavailable" };
+  }
+  if (error instanceof LedgerReapplyError) {
+    return { type: "failed", reason: "ledger-reapply-failed", line: error.seq };
+  }
   if (error instanceof IdentityKeyMissingError)
     return { type: "failed", reason: "identity-key-missing" };
   if (error instanceof ScopePolicyNotImplementedError) {

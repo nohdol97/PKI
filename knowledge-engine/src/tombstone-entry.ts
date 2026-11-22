@@ -5,12 +5,17 @@
 // lets storage judge the event against the stored tombstone and, on every outcome
 // that changes it, closes the source's open jobs and propagates the change through
 // the product registry, once, and hashes the identity of what the purge emptied
-// (I04-R7). `unchanged` writes nothing. Ledger lines: I04-T10.
+// (I04-R7). `unchanged` writes nothing. Every other outcome, and a lift, queues one ledger line
+// on the transaction (I04-R17); the canonical transaction numbers and writes it before COMMIT.
 import {
   ensureTombstoneSource,
   hashSourceIdentity,
+  identityKey,
+  readConnectorKind,
+  readTombstoneState,
   recordTombstone,
   recordTombstoneLift,
+  sourceLedgerName,
   supersedeOpenJobs,
   type ApplyTombstone,
   type DerivativeRegistry,
@@ -40,6 +45,21 @@ export function tombstoneEntries(registry: DerivativeRegistry): {
     const { outcome, tombstone } = recordTombstone(tx, sourceId, w);
     const { coversVersion } = tombstone;
     if (outcome === "unchanged") return { outcome, sourceId, coversVersion };
+    tx.queueLedgerLine({
+      connectorInstanceId: w.identity.connectorInstanceId,
+      connectorKind: readConnectorKind(tx, w.identity.connectorInstanceId) as string,
+      identityHash: identityKey(
+        tx,
+        w.identity.connectorInstanceId,
+        w.identity.namespace,
+        w.identity.externalId,
+      ),
+      coversVersion,
+      lastRevision: tombstone.lastRevision,
+      reason: tombstone.reason,
+      at: tombstone.at,
+      liftedAt: null,
+    });
     supersedeOpenJobs(tx, sourceId, when);
     // the change is what the tombstone holds now: a raised revision keeps its reason
     propagateCanonical(
@@ -56,7 +76,19 @@ export function tombstoneEntries(registry: DerivativeRegistry): {
   /** A lift deletes and restores nothing: no propagation and no invalidation record. */
   const liftTombstone: LiftTombstone = (tx, sourceId, at) => {
     requestTime(at);
-    return { outcome: recordTombstoneLift(tx, sourceId, at) };
+    const outcome = recordTombstoneLift(tx, sourceId, at);
+    const state = readTombstoneState(tx, sourceId);
+    if (outcome === "lifted" && state) {
+      tx.queueLedgerLine({
+        ...sourceLedgerName(tx, sourceId),
+        coversVersion: state.coversVersion,
+        lastRevision: state.lastRevision,
+        reason: state.reason,
+        at: state.at,
+        liftedAt: at,
+      });
+    }
+    return { outcome };
   };
   return { applyTombstone, liftTombstone };
 }

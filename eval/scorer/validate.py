@@ -25,6 +25,9 @@ RECORD_FIELDS = [
     "connector_instance_id", "operation", "schema_version",
 ]
 OPERATIONS = {"upsert", "delete", "revoke", "access-revoked"}
+# The longest connector instance id: the import schema's MAX_INSTANCE_ID_LENGTH (packages/contracts), kept in parity by
+# providers/src/import-record.test.ts
+MAX_INSTANCE_ID_LENGTH = 128
 
 # Design section 7
 ENTITY_TYPES = {
@@ -121,6 +124,8 @@ def check_record(rec, expected_type, where):
         errors.append("%s: source_type %r does not match file kind %r" % (where, rec["source_type"], expected_type))
     if rec["operation"] not in OPERATIONS:
         errors.append("%s: operation %r not in %s" % (where, rec["operation"], sorted(OPERATIONS)))
+    if not isinstance(rec["connector_instance_id"], str) or not 1 <= len(rec["connector_instance_id"]) <= MAX_INSTANCE_ID_LENGTH:
+        errors.append("%s: connector_instance_id must be 1..%d characters" % (where, MAX_INSTANCE_ID_LENGTH))
     if not isinstance(rec["version"], int) or rec["version"] < 1:
         errors.append("%s: version must be an integer >= 1" % where)
     for f in ("created_at", "updated_at"):
