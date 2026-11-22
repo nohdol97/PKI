@@ -470,6 +470,74 @@ describe("schedule.pause", () => {
     expect(s.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "third" });
   });
 
+  /** Job 1 died and was dismissed, job 2 died and was dismissed; the user retries job 1 by hand. */
+  function revivedFirstJob(s: Scheduler, scheduleId: number): void {
+    wall = T0 + HOUR + 1000;
+    s.check();
+    finish({ status: "dead_letter", reason: "first" });
+    wall += 1000;
+    s.check();
+    s.enable(scheduleId);
+    wall = T0 + 3 * HOUR;
+    s.check();
+    finish({ status: "dead_letter", reason: "second" });
+    wall += 1000;
+    s.check();
+    s.enable(scheduleId);
+    db.run("UPDATE jobs SET status = 'queued', reason = NULL, finished_at = NULL WHERE id = 1");
+    wall += 1000;
+    s.check(); // sees job 1 open: revived
+  }
+
+  it("enable dismisses a revived job that already died again, before any check saw it", () => {
+    const s = scheduler();
+    const { schedule } = s.ensureSchedule({ kind: "connector-sync", target: "c1", period: hourly });
+    revivedFirstJob(s, schedule.id);
+    finish({ status: "dead_letter", reason: "third" }); // no check in between
+    s.enable(schedule.id);
+    wall += 1000;
+    s.check();
+    expect(s.get(schedule.id)?.pause).toBeUndefined();
+  });
+
+  it("enable keeps a revived job that is still open: its later death pauses, with no extra job", () => {
+    const s = scheduler();
+    const { schedule } = s.ensureSchedule({ kind: "connector-sync", target: "c1", period: hourly });
+    revivedFirstJob(s, schedule.id);
+    s.enable(schedule.id); // job 1 is open
+    finish({ status: "dead_letter", reason: "third" });
+    wall = T0 + 6 * HOUR; // a slot is due
+    const report = s.check();
+    expect(s.get(schedule.id)?.pause).toEqual({ kind: "failed", code: "third" });
+    expect(report.due[0]).toMatchObject({ outcome: "paused" });
+    expect(jobsOf(schedule.id)).toHaveLength(2);
+  });
+
+  it("a cleanup warning ends once a later run succeeds, also after a revived job died again", () => {
+    const s = scheduler();
+    const { schedule } = s.ensureSchedule({ kind: "maintenance", period: daily });
+    wall = T0 + 3 * HOUR + 1000;
+    s.check();
+    const dead = finish({ status: "dead_letter", reason: "first" }, "maintenance");
+    wall += 1000;
+    s.check();
+    db.run("UPDATE jobs SET status = 'queued', reason = NULL, finished_at = NULL WHERE id = ?", [
+      dead.id,
+    ]);
+    wall += 1000;
+    s.check(); // revived
+    finish({ status: "dead_letter", reason: "again" }, "maintenance");
+    wall += 1000;
+    s.check();
+    expect(s.get(schedule.id)?.warning).toBe("again");
+    wall = T0 + DAY + 3 * HOUR + 1000;
+    s.check(); // the next slot's job
+    finish(undefined, "maintenance");
+    wall += 1000;
+    s.check();
+    expect(s.get(schedule.id)?.warning).toBeUndefined();
+  });
+
   it("does not pause the maintenance period: it runs the next slot and leaves a warning", () => {
     const s = scheduler();
     const { schedule } = s.ensureSchedule({ kind: "maintenance", period: daily });
