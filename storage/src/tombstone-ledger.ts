@@ -323,6 +323,8 @@ export function draftReadable(d: LedgerLineDraft): boolean {
 export interface LedgerOpenStatus {
   /** A new file was started at this open (missing, or set aside). */
   created: boolean;
+  /** Tombstones the seed left out because their line would not be readable (counted, reported). */
+  unwritable: number;
   /** Lines the new file was created with (one per tombstone the database held); 0 when none or not created. */
   seeded: number;
   /** The last number the seed took; the database records it (the file holds the lines already). */
@@ -392,6 +394,18 @@ function freeName(io: LedgerIo, path: string, label: string): string {
  * and a new one starts; a cut last line is cut off the file (it is reported by the
  * reconcile, which reads the file first).
  */
+/**
+ * A deletion whose ledger line the reader would reject (a kind or instance id outside the line's
+ * rules, say): refused before it commits, so no tombstone exists without a readable line (fail closed).
+ */
+export class LedgerLineUnwritableError extends Error {
+  readonly code = "ledger-line-unwritable";
+  constructor() {
+    super("the tombstone's ledger line would not be readable: the deletion is refused");
+    this.name = "LedgerLineUnwritableError";
+  }
+}
+
 /** The ledger could not be opened or created (unreadable file, no room, no permission): the start stops, the data is untouched. */
 export class LedgerUnavailableError extends Error {
   readonly code = "ledger-unavailable";
@@ -416,6 +430,7 @@ function openLedgerUnchecked(options: OpenLedgerOptions): TombstoneLedger {
   const status: LedgerOpenStatus = {
     created: false,
     seeded: 0,
+    unwritable: 0,
     seededThrough: 0,
     missing: false,
     truncated: false,
@@ -439,7 +454,9 @@ function openLedgerUnchecked(options: OpenLedgerOptions): TombstoneLedger {
   };
 
   const createWithSeed = (): void => {
-    const drafts = (options.seed?.() ?? []).filter(draftReadable);
+    const all = options.seed?.() ?? [];
+    const drafts = all.filter(draftReadable);
+    status.unwritable = all.length - drafts.length;
     const first = options.canonicalSeq + 1;
     io.create(path, header + drafts.map((d, i) => `${encodeLine(first + i, d)}\n`).join(""));
     status.created = true;

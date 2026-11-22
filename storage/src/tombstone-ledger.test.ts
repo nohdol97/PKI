@@ -11,6 +11,7 @@ import {
   LedgerUnavailableError,
   nodeLedgerIo,
   openLedger,
+  draftReadable,
   parseLedger,
 } from "./tombstone-ledger.ts";
 
@@ -391,5 +392,43 @@ describe("a line may not make a start fail: value domains", () => {
     expect(contradiction.damaged).toBe(1);
     const repeat = parseLedger(text(first, first));
     expect([repeat.lines.length, repeat.damaged]).toEqual([2, 0]);
+  });
+});
+
+describe("everything the writer writes the reader reads (round trip)", () => {
+  const variants = (): LedgerLineDraft[] => [
+    draft(),
+    draft({ reason: "source-deleted", lastRevision: 7 }),
+    draft({ reason: "access-revoked", coversVersion: 0 }),
+    draft({ liftedAt: "2026-11-23T00:00:00.000Z" }), // a lift
+    draft({ connectorKind: "site-mail", connectorInstanceId: "i".repeat(256) }),
+  ];
+  it("appended lines (delete, lift), a cancel record, and a seed are all read back", () => {
+    const { io, ledger } = open(memoryLedgerIo(), { seed: variants, hasData: true });
+    const seeded = parseLedger(io.files.get(P) as string).lines;
+    expect(seeded).toHaveLength(variants().length);
+    const seqs = ledger.reserve(variants().length, 0);
+    ledger.append(seqs, variants());
+    ledger.cancel([seqs[0] as number]);
+    const read = parseLedger(io.files.get(P) as string);
+    expect(read.damaged).toBe(0);
+    expect(read.lines).toHaveLength(variants().length * 2 - 1);
+    expect(read.lines.map((l) => l.liftedAt !== null)).toContain(true);
+  });
+  it("a draft the reader would reject is recognised as such, field by field", () => {
+    const bad: Partial<LedgerLineDraft>[] = [
+      { connectorKind: "corp_mail" },
+      { connectorKind: "Site-Mail" },
+      { connectorKind: "k".repeat(65) },
+      { connectorKind: "" },
+      { connectorInstanceId: "" },
+      { connectorInstanceId: "i".repeat(257) },
+      { identityHash: hh("x").toUpperCase() },
+      { identityHash: "abc" },
+      { at: "not a date" },
+      { coversVersion: -1 },
+    ];
+    for (const over of bad) expect([over, draftReadable(draft(over))]).toEqual([over, false]);
+    expect(draftReadable(draft())).toBe(true);
   });
 });

@@ -53,6 +53,8 @@ export interface ReapplyReport {
   lifted: number;
   /** Lines whose instance this database does not know and that carry no kind to register it with: counted, not applied (their numbers are taken). */
   unrecoverable: number;
+  /** Tombstones the seed or the heal left out because their line would not be readable. */
+  unwritable: number;
   /** Lines written to the ledger for tombstones it had no line for (a seed that was lost). */
   healed: number;
   /** Lines at or below the database's sequence, or repeating a sequence already applied. */
@@ -77,7 +79,7 @@ export interface ReapplyOptions {
   /** Whether a connector kind is one the composition knows; a line naming another is never used to register an instance. */
   knownKind?: (kind: string) => boolean;
   /** Runs once the lines are applied (the database and the ledger agree up to the file's highest); returns lines written. */
-  afterReconcile?: (db: SqlDriver) => number;
+  afterReconcile?: (db: SqlDriver) => { healed: number; unwritable: number };
 }
 
 export function createLedgerReapply(
@@ -146,6 +148,7 @@ export function createLedgerReapply(
       damaged: contents.damaged,
       seeded: ledger.status.seeded,
       healed: 0,
+      unwritable: 0,
       missing: ledger.status.missing,
       setAside: ledger.status.setAside,
     };
@@ -166,7 +169,10 @@ export function createLedgerReapply(
         if (line.liftedAt !== null) report.lifted++;
       }
     });
-    report.healed = options.afterReconcile?.(db) ?? 0;
+    const after = options.afterReconcile?.(db) ?? { healed: 0, unwritable: 0 };
+    report.healed = after.healed;
+    // a ledger just created counted its tombstones in the seed; the heal sees the same ones again
+    report.unwritable = ledger.status.created ? ledger.status.unwritable : after.unwritable;
     report.unrecoverable = unrecoverable;
     report.applied -= unrecoverable;
     report.canonicalSeq = readLedgerSeq(db);

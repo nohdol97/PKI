@@ -397,6 +397,8 @@ export const StatusResponseSchema = z.object({
       state: z.enum(["ok", "missing-created", "degraded"]),
       reapplied: z.int().nonnegative(),
       unrecoverable: z.int().nonnegative(),
+      /** Tombstones left out of a new or completed ledger because their line would not be readable. */
+      unwritable: z.int().nonnegative(),
       ignoredLines: z.int().nonnegative(),
       setAsideLedgers: z.int().nonnegative(),
       setAsideDeletions: z.int().nonnegative(),

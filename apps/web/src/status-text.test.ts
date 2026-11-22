@@ -189,6 +189,7 @@ const OK: LedgerStatus = {
   state: "ok",
   reapplied: 0,
   unrecoverable: 0,
+  unwritable: 0,
   ignoredLines: 0,
   setAsideLedgers: 0,
   setAsideDeletions: 0,
@@ -212,8 +213,13 @@ describe("status.data-protection: dataProtectionText (I04-R6, I04-R17)", () => {
     expect(protection({})).toBe("정상");
   });
   it("does not say normal when the ledger is degraded, and says what is blocked and what lifts it", () => {
-    expect(protection({ state: "degraded" })).toContain("변경을 막았습니다");
+    expect(protection({ state: "degraded" })).toContain("변경을 막고 있습니다");
     expect(protection({ state: "degraded" })).toContain("다시 시작");
+    // what degraded means and what to check; never the promise that a restart alone lifts it
+    expect(protection({ state: "degraded" })).toContain("삭제가 하나도 사라지지 않도록");
+    expect(protection({ state: "degraded" })).toContain("빈 공간");
+    expect(protection({ state: "degraded" })).toContain("쓰기 권한");
+    expect(protection({ state: "degraded" })).not.toContain("풀립니다");
     expect(protection({ state: "degraded" })).not.toContain("정상");
   });
   it("says a missing ledger was made anew, that deletions after a backup must be collected again, and the rescan limit", () => {
@@ -234,12 +240,17 @@ describe("status.data-protection: dataProtectionText (I04-R6, I04-R17)", () => {
     expect(protection({ ignoredLines: 2 })).toContain("읽지 못해 무시한 삭제 장부 줄 2개");
     expect(protection({ reapplied: 4 })).toContain("시작할 때 삭제 4건을 다시 적용했습니다");
   });
+  it("shows the tombstones that could not be written to the ledger, as a count", () => {
+    expect(protection({ unwritable: 2 })).toContain("장부에 적을 수 없는 상태의 삭제 2건");
+  });
   it("explains what the ledger is once, before the first note about it, in plain words", () => {
     const text = protection({ state: "degraded", unrecoverable: 1 });
     expect(text.match(/삭제 장부는 지운 자료가/g)).toHaveLength(1);
     expect(text).toContain("되살아나지 않도록");
     expect(text).toContain("자료의 내용은 적지 않습니다");
-    expect(text.indexOf("삭제 장부는 지운 자료가")).toBeLessThan(text.indexOf("변경을 막았습니다"));
+    expect(text.indexOf("삭제 장부는 지운 자료가")).toBeLessThan(
+      text.indexOf("변경을 막고 있습니다"),
+    );
     expect(protection({})).not.toContain("삭제 장부는 지운 자료가");
   });
   it("lists every note when several hold, the clean-up first", () => {
@@ -248,7 +259,7 @@ describe("status.data-protection: dataProtectionText (I04-R6, I04-R17)", () => {
       "pending",
     );
     expect(text.startsWith("이전 삭제")).toBe(true);
-    expect(text).toContain("변경을 막았습니다");
+    expect(text).toContain("변경을 막고 있습니다");
     expect(text).toContain("옆에 두었습니다");
   });
   it("keeps what happened at earlier starts after the current state is ok, with the date of the last time", () => {

@@ -98,17 +98,20 @@ export function attachDirectoryLedger(db: SqlDriver, dir: string): void {
  * only once every line of the file has been applied. Never before. Returns the lines written; if the
  * ledger cannot take them it locks (writes are refused, the status says degraded) and the start goes on.
  */
-export function healFromDatabase(db: SqlDriver, ledger: TombstoneLedger): number {
+export function healFromDatabase(
+  db: SqlDriver,
+  ledger: TombstoneLedger,
+): { healed: number; unwritable: number } {
   const contents = ledger.contents();
   const applied = readLedgerSeq(db);
   const held = new Set(contents.lines.map((l) => `${l.connectorInstanceId}\0${l.identityHash}`));
-  const missing = tombstoneDrafts(db).filter(
-    (d) =>
-      !held.has(`${d.connectorInstanceId}\0${d.identityHash}`) &&
-      // a value the reader would reject is not written (it would be written again at every start)
-      draftReadable(d),
+  const lacking = tombstoneDrafts(db).filter(
+    (d) => !held.has(`${d.connectorInstanceId}\0${d.identityHash}`),
   );
-  if (missing.length === 0) return 0;
+  // a value the reader would reject is not written (it would be written again at every start): counted instead
+  const missing = lacking.filter(draftReadable);
+  const unwritable = lacking.length - missing.length;
+  if (missing.length === 0) return { healed: 0, unwritable };
   try {
     // the guard: a line the database has not applied must not be passed over by the number written below
     if (contents.lines.some((l) => l.seq > applied)) {
@@ -117,10 +120,10 @@ export function healFromDatabase(db: SqlDriver, ledger: TombstoneLedger): number
     const seqs = ledger.reserve(missing.length, applied);
     ledger.append(seqs, missing);
     writeLedgerSeq(db, seqs[seqs.length - 1] as number);
-    return missing.length;
+    return { healed: missing.length, unwritable };
   } catch {
     ledger.lock();
-    return 0;
+    return { healed: 0, unwritable };
   }
 }
 
@@ -163,7 +166,7 @@ export function reapplyAtStart(
   const ledger = ledgerOf(db);
   const report = createLedgerReapply(registry, {
     ...(knownKind && { knownKind }),
-    afterReconcile: (d) => (ledger ? healFromDatabase(d, ledger) : 0),
+    afterReconcile: (d) => (ledger ? healFromDatabase(d, ledger) : { healed: 0, unwritable: 0 }),
   })(db);
   // an instance the re-apply registered gets the scope the deployment configured, like every other path (I01-R15)
   applyConfiguredScopes(db, scopes);

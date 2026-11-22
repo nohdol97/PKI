@@ -20,6 +20,11 @@ import {
   saveSourceRecord,
   defaultScopePolicy,
   LedgerDegradedError,
+  LedgerLineUnwritableError,
+  createNodeLedgerIo,
+  openLedger,
+  readKey,
+  realLedgerFs,
   ledgerOf,
   listInvalidations,
   cancelJob,
@@ -492,6 +497,7 @@ describe("the status API's data protection item shows the ledger", () => {
     state: "ok",
     reapplied: 0,
     unrecoverable: 0,
+    unwritable: 0,
     ignoredLines: 0,
     setAsideLedgers: 0,
     setAsideDeletions: 0,
@@ -765,6 +771,22 @@ describe("the heal comes after the re-apply", () => {
     writeFileSync(join(dir, LEDGER_FILE), `${header}\n`);
     await start();
     expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toBe(`${header}\n`);
+    // counted, not silently dropped: in the report and in the status API
+    expect(
+      JSON.parse(
+        live().db.all("SELECT value FROM settings WHERE key = 'tombstone-ledger.report'")[0]
+          ?.value as string,
+      ),
+    ).toMatchObject({ unwritable: 1, healed: 0 });
+    const { port } = live().server;
+    const res = await send(port, routes.status.path, {
+      host: `127.0.0.1:${port}`,
+      authorization: `Bearer ${TOKEN}`,
+    });
+    expect(
+      (res.body as { dataProtection: { ledger: { unwritable: number } } }).dataProtection.ledger
+        .unwritable,
+    ).toBe(1);
     await stop();
     await start();
     expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toBe(`${header}\n`);
@@ -880,7 +902,7 @@ describe("the heal's own guards", () => {
     const restored = openCanonicalDb(dir);
     const before = readFileSync(join(dir, LEDGER_FILE), "utf8");
     const ledger = ledgerOf(restored) as NonNullable<ReturnType<typeof ledgerOf>>;
-    expect(healFromDatabase(restored, ledger)).toBe(0);
+    expect(healFromDatabase(restored, ledger)).toEqual({ healed: 0, unwritable: 0 });
     expect(ledger.isLocked()).toBe(true);
     expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toBe(before);
     expect(readLedgerSeq(restored)).toBeLessThan(7);
@@ -898,5 +920,70 @@ describe("the heal's own guards", () => {
     const lines = readFileSync(join(dir, LEDGER_FILE), "utf8").match(/"t":"line"/g) ?? [];
     expect(lines).toHaveLength(1); // mail's only
     reopened.close();
+  });
+});
+
+describe("the writer writes only what the reader accepts (fail closed)", () => {
+  it("a deletion on an instance whose kind the reader rejects is refused: no tombstone, nothing purged, no line", () => {
+    const db = seeded();
+    registerConnectorInstance(db, "corp-inst", "corp_mail"); // underscore: not a kind the reader accepts
+    saveSourceRecord(db, "corp-inst", {
+      namespace: "n",
+      externalId: "x",
+      title: "t",
+      body: "b 본문",
+    });
+    const before = readFileSync(join(dir, LEDGER_FILE), "utf8");
+    expect(() =>
+      userDelete(db, { connectorInstanceId: "corp-inst", namespace: "n", externalId: "x" }, AT),
+    ).toThrow(LedgerLineUnwritableError);
+    expect(db.all("SELECT count(*) AS n FROM tombstones")[0]?.n).toBe(0);
+    expect(versionsOf(db, "x")).toBe(1);
+    expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toBe(before);
+    // an ordinary deletion still works
+    userDelete(db, identity(), AT);
+    expect(versionsOf(db, "chat")).toBe(0);
+    db.close();
+  });
+
+  it("the heal's write failing through the fs port (no chmod, runs everywhere) locks the ledger and the start can go on", () => {
+    const db = seeded();
+    userDelete(db, identity(), AT);
+    db.close();
+    const [header] = readFileSync(join(dir, LEDGER_FILE), "utf8").split("\n");
+    writeFileSync(join(dir, LEDGER_FILE), `${header}\n`);
+    const restored = openCanonicalDb(dir);
+    const failing = createNodeLedgerIo({
+      ...realLedgerFs,
+      writeSync: (fd, buffer, offset, length) => {
+        if (Buffer.from(buffer).toString().includes('"t":"line"')) throw new Error("disk full");
+        return realLedgerFs.writeSync(fd, buffer, offset, length);
+      },
+    });
+    const ledger = openLedger({
+      path: join(dir, LEDGER_FILE),
+      key: readKey(restored) as Uint8Array,
+      canonicalSeq: readLedgerSeq(restored),
+      hasData: true,
+      io: failing,
+    });
+    expect(healFromDatabase(restored, ledger)).toEqual({ healed: 0, unwritable: 0 });
+    expect(ledger.isLocked()).toBe(true);
+    expect(readFileSync(join(dir, LEDGER_FILE), "utf8")).toBe(`${header}\n`);
+    restored.close();
+  });
+
+  it("tombstones the seed or the heal leaves out are counted in the report", async () => {
+    const db = seeded();
+    userDelete(db, identity(), AT);
+    db.run("UPDATE tombstones SET at = 'not a date'");
+    db.close();
+    rmSync(join(dir, LEDGER_FILE));
+    await start();
+    const report = JSON.parse(
+      live().db.all("SELECT value FROM settings WHERE key = 'tombstone-ledger.report'")[0]
+        ?.value as string,
+    ) as { unwritable: number };
+    expect(report.unwritable).toBe(1);
   });
 });

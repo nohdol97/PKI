@@ -14,7 +14,13 @@
 import type { CanonicalTransaction, CanonicalTx, LedgerLineDraft } from "./derivatives.ts";
 import { readSetting, writeSetting } from "./settings.ts";
 import type { SqlDriver } from "./sql-driver.ts";
-import { LEDGER_SEQ_SETTING, LedgerDegradedError, ledgerOf } from "./tombstone-ledger.ts";
+import {
+  LEDGER_SEQ_SETTING,
+  LedgerDegradedError,
+  LedgerLineUnwritableError,
+  draftReadable,
+  ledgerOf,
+} from "./tombstone-ledger.ts";
 
 /** The last ledger sequence the database has applied or written (0 before any). */
 export function readLedgerSeq(db: SqlDriver): number {
@@ -73,6 +79,8 @@ export const canonicalTransaction: CanonicalTransaction = (db, fn) => {
       ...(ledger && {
         beforeCommit: () => {
           if (lines.length === 0) return;
+          // the reader's own validation: no tombstone without a line the reader accepts (fail closed)
+          if (!lines.every(draftReadable)) throw new LedgerLineUnwritableError();
           assigned = ledger.reserve(lines.length, readLedgerSeq(tx));
           ledger.append(assigned, lines);
           writeLedgerSeq(tx, assigned[assigned.length - 1] as number);

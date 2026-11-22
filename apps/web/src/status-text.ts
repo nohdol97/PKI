@@ -118,7 +118,9 @@ export const dataProtectionText = (status: RouteResponse<"status">["dataProtecti
     notes.push("이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)");
   const legacyNotes = notes.length;
   if (ledger.state === "degraded") {
-    notes.push("삭제 장부를 쓰지 못해 데이터 변경을 막았습니다(앱을 다시 시작하면 풀립니다)");
+    notes.push(
+      "삭제 장부에 적지 못해 삭제가 하나도 사라지지 않도록 데이터 변경을 막고 있습니다. 데이터 폴더의 빈 공간과 쓰기 권한을 확인한 뒤 앱을 다시 시작하세요",
+    );
   }
   if (ledger.state === "missing-created") {
     notes.push(
@@ -128,6 +130,11 @@ export const dataProtectionText = (status: RouteResponse<"status">["dataProtecti
   if (ledger.setAsideLedgers > 0) {
     notes.push(
       `다른 설치의 삭제 장부 ${ledger.setAsideLedgers}개(삭제 ${ledger.setAsideDeletions}건)는 적용하지 않고 옆에 두었습니다`,
+    );
+  }
+  if (ledger.unwritable > 0) {
+    notes.push(
+      `장부에 적을 수 없는 상태의 삭제 ${ledger.unwritable}건(백업을 복원하면 되살아날 수 있습니다)`,
     );
   }
   if (ledger.unrecoverable > 0) {

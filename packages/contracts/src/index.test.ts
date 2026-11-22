@@ -37,6 +37,7 @@ describe("contract schemas", () => {
             state: "ok",
             reapplied: 0,
             unrecoverable: 0,
+            unwritable: 0,
             ignoredLines: 0,
             setAsideLedgers: 0,
             setAsideDeletions: 0,

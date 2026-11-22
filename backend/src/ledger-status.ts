@@ -62,6 +62,7 @@ export function ledgerStatus(db: SqlDriver, dataDir: string): LedgerStatus {
         : "ok",
     reapplied: count(report.applied),
     unrecoverable: count(report.unrecoverable),
+    unwritable: count(report.unwritable),
     ignoredLines: count(report.damaged) + (report.truncated === true ? 1 : 0),
     setAsideLedgers: setAside.ledgers,
     setAsideDeletions: setAside.deletions,

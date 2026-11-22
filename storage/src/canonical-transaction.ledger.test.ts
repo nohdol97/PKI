@@ -17,6 +17,7 @@ import type { SqlDriver } from "./sql-driver.ts";
 import {
   attachLedger,
   LedgerDegradedError,
+  LedgerLineUnwritableError as LedgerUnwritableLine,
   openLedger,
   parseLedger,
   type TombstoneLedger,
@@ -327,5 +328,24 @@ describe("COMMIT meets a busy file", () => {
     expect(readSetting(writer, "w")).toBeUndefined();
     raw.close();
     writer.close();
+  });
+});
+
+describe("a line the reader would reject refuses the deletion (fail closed)", () => {
+  it.each([
+    ["a kind outside the rules", { connectorKind: "corp_mail" }],
+    ["an empty instance id", { connectorInstanceId: "" }],
+    ["an uppercase hash", { identityHash: hh("a").toUpperCase() }],
+  ])("%s: the transaction is undone, nothing is written, no number is taken", (_name, over) => {
+    expect(() =>
+      canonicalTransaction(db, (tx) => {
+        writeSetting(tx, "w", "1");
+        tx.queueLedgerLine({ ...draft("a"), ...over });
+      }),
+    ).toThrow(LedgerUnwritableLine);
+    expect(readSetting(db, "w")).toBeUndefined();
+    expect(file().lines).toEqual([]);
+    canonicalTransaction(db, (tx) => tx.queueLedgerLine(draft("b")));
+    expect(seqs()).toEqual([1]);
   });
 });
