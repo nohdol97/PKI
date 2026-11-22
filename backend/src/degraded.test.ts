@@ -176,6 +176,7 @@ describe("degraded states (V01-R5)", () => {
       provider: { state: "ready", providerId: "codex" },
       embedding: { state: "ready", egress: "local" },
       vectorIndex: { state: "ready" },
+      invalidations: { recent: [] },
     });
     await explorationWorks();
   });
@@ -320,6 +321,7 @@ describe("degraded states (V01-R5)", () => {
       provider: { state: "unavailable", providerId: null, reason: "status-check-failed" },
       embedding: { state: "ready", egress: "local" },
       vectorIndex: { state: "ready" },
+      invalidations: { recent: [] },
     });
     await explorationWorks();
   });
@@ -386,6 +388,7 @@ describe("the product on a PC with no CLI and no network (all five at once)", ()
         provider: { state: "unavailable", providerId: null, reason: "no-provider" },
         embedding: { state: "model-missing", egress: "local" },
         vectorIndex: { state: "unavailable", reason: "no vector index module in this build" },
+        invalidations: { recent: [] },
       });
       await call(routes.setDefaultProvider.path, { providerId: "claude-code" });
       expect((await read()).provider).toMatchObject({
