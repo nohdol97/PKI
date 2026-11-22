@@ -29,6 +29,10 @@ const KNOWLEDGE_TYPES = [
   "BusinessRule",
   "OpenQuestion",
   "Insight",
+  // edition 2 (S03-R2)
+  "Dataset",
+  "Metric",
+  "Join",
 ];
 const RELATION_TYPES = [
   "BELONGS_TO",
@@ -42,6 +46,11 @@ const RELATION_TYPES = [
   "DERIVED_FROM",
   "SUPERSEDES",
   "CONTRADICTS",
+  // edition 2 (S03-R2)
+  "MEASURED_ON",
+  "JOIN_LEFT",
+  "JOIN_RIGHT",
+  "USES_JOIN",
 ];
 type Mutable = { -readonly [K in keyof KnowledgeCatalogue]: Mutable2<KnowledgeCatalogue[K]> };
 type Mutable2<T> = T extends readonly (infer E)[] ? E[] : T;
@@ -53,12 +62,12 @@ const clone = (): Mutable => ({
 });
 
 describe("schema.catalogue", () => {
-  it("is edition 1 with exactly sixteen knowledge types and eleven relation types", () => {
-    expect(KNOWLEDGE_SCHEMA.edition).toBe(1);
+  it("is edition 2 with exactly nineteen knowledge types and fifteen relation types", () => {
+    expect(KNOWLEDGE_SCHEMA.edition).toBe(2);
     expect(KNOWLEDGE_SCHEMA.knowledgeTypes.map((e) => e.name)).toEqual(KNOWLEDGE_TYPES);
     expect(KNOWLEDGE_SCHEMA.relationTypes.map((e) => e.name)).toEqual(RELATION_TYPES);
-    expect(KNOWLEDGE_SCHEMA.knowledgeTypes).toHaveLength(16);
-    expect(KNOWLEDGE_SCHEMA.relationTypes).toHaveLength(11);
+    expect(KNOWLEDGE_SCHEMA.knowledgeTypes).toHaveLength(19);
+    expect(KNOWLEDGE_SCHEMA.relationTypes).toHaveLength(15);
   });
 
   it("gives every name a place, and the places the spec's tables name", () => {
@@ -68,7 +77,7 @@ describe("schema.catalogue", () => {
     expect(types.Document).toBe("sources");
     expect(types.Fact).toBe("facts");
     expect(types.Insight).toBe("insights");
-    expect(Object.values(types).filter((p) => p === "type-definition")).toHaveLength(13);
+    expect(Object.values(types).filter((p) => p === "type-definition")).toHaveLength(16);
     const relations = place(KNOWLEDGE_SCHEMA.relationTypes);
     for (const name of RELATION_TYPES.slice(0, 6)) expect(relations[name]).toBe("type-definition");
     expect(relations.MENTIONS).toBe("computed");
@@ -101,8 +110,8 @@ describe("schema.catalogue", () => {
   it("derives the product seed and the reserved names from the catalogue alone", () => {
     const seeded = PRODUCT_SEED.map((e) => `${e.elementKind}:${e.name}`);
     expect(new Set(seeded).size).toBe(seeded.length);
-    expect(PRODUCT_SEED.filter((e) => e.elementKind === "item-type")).toHaveLength(13);
-    expect(PRODUCT_SEED.filter((e) => e.elementKind === "relation-type")).toHaveLength(6);
+    expect(PRODUCT_SEED.filter((e) => e.elementKind === "item-type")).toHaveLength(16);
+    expect(PRODUCT_SEED.filter((e) => e.elementKind === "relation-type")).toHaveLength(10);
     expect(PRODUCT_SEED.filter((e) => e.elementKind === "fact-kind").map((e) => e.name)).toEqual([
       "target_date",
       "completion_date",
@@ -113,6 +122,19 @@ describe("schema.catalogue", () => {
       "identifier.email",
       "identifier.key",
       "statement",
+      "dataset.column",
+      "dataset.role",
+      "dataset.grain",
+      "dataset.measure",
+      "dataset.dimension",
+      "dataset.time_dimension",
+      "metric.calculation",
+      "metric.unit",
+      "metric.version",
+      "metric.currency",
+      "metric.period",
+      "join.keys",
+      "join.cardinality",
     ]);
     expect([...RESERVED_NAMES].sort()).toEqual(
       [
