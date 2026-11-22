@@ -2,7 +2,7 @@
 
 이 디렉터리의 문서를 한곳에 모은 목록이다. 제품 코드는 아직 없고, 여기 있는 것은 설계·조사·결정·구현 기준이다. 처음 읽는다면 위에서 아래 순서를 권한다.
 
-**읽기 전에**: 이 문서들은 아무것도 설치하거나 실행하지 않고 썼다. "잠정"이라고 적힌 결정은 배포처에서 실행해 확인하기 전의 것이며, 그 확인은 R07(이슈 #37)에서 한다. spec의 "확정"은 구현할 기준이 고정되었다는 뜻이지 그 기준이 충족되었다는 뜻이 아니다. 낯선 말은 [ARCHITECTURE 0절](ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다.
+**읽기 전에**: 이 문서들은 아무것도 설치하거나 실행하지 않고 썼다(실제로 돌려 잰 기록인 [research/2026-11-22-I02B-T01-poc.md](research/2026-11-22-I02B-T01-poc.md)는 예외이고, 그것도 macOS 한정이다). "잠정"이라고 적힌 결정은 배포처에서 실행해 확인하기 전의 것이며, 그 확인은 R07(이슈 #37)에서 한다. spec의 "확정"은 구현할 기준이 고정되었다는 뜻이지 그 기준이 충족되었다는 뜻이 아니다. 낯선 말은 [ARCHITECTURE 0절](ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다.
 
 ## 구조
 
@@ -12,6 +12,7 @@
 | [OSS_EVALUATION.md](OSS_EVALUATION.md) | 재사용할 오픈소스 엔진과 스택의 비교, 채택·보류·기각 판정 | 소스 읽기 결과, 실행 전 |
 | [research/2026-11-21-cli-provider-terms-and-isolation.md](research/2026-11-21-cli-provider-terms-and-isolation.md) | Claude Code·Codex CLI를 제품이 호출해도 되는지(약관)와 격리할 수 있는지의 문서 조사 | 문서 조사, 실행 전 |
 | [research/2026-11-21-R00-initial-base.md](research/2026-11-21-R00-initial-base.md) | 빈 저장소에 최초 commit을 올린 절차와 증거 | 보관 |
+| [research/2026-11-22-I02B-T01-poc.md](research/2026-11-22-I02B-T01-poc.md) | I02-B 착수 전 측정(I02B-T01): 격리 실행기·경로 경계·철회 묶음이 기대는 가정을 macOS에서 실제로 돌려 적은 판정 기록(Windows·Linux 제외) | 측정 완료, 검토 전 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 구성요소, 프로세스, 정본과 투영, 어댑터 규격, 실패 복구, 보안, **가정 표** | 잠정 |
 | [adr/](adr/README.md) | 결정 기록 16건(잠정 11, 확정 4, 미결 1) | 색인 참조 |
 | [REUSE_AND_BUILD.md](REUSE_AND_BUILD.md) | 기능별 재사용·직접 개발·미룸 목록 | 잠정 |

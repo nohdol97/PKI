@@ -5,6 +5,7 @@
     "checkJs": true,
     "types": ["node"]
   },
+  "exclude": ["poc/**"],
   "include": [
     "**/*.ts",
     "**/*.js",
