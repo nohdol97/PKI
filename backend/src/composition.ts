@@ -69,9 +69,16 @@ import {
   type SyncOptions,
 } from "./connectors.ts";
 import type { Clock } from "./clock.ts";
+import {
+  CONNECTOR_SYNC_KIND,
+  createConnectorSyncHandler,
+  type SyncManager,
+} from "./connector-sync-job.ts";
 import { computePolicyFingerprint } from "./held-release.ts";
 import { INTERIM_POLICY } from "./interim-policy.ts";
 import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-runner.ts";
+import { createMaintenanceHandler } from "./maintenance.ts";
+import { MAINTENANCE_KIND } from "./scheduler.ts";
 import { projectionPorts } from "./projection-ports.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import {
@@ -322,6 +329,12 @@ export function productRunner(
      * `projection-remove` and `projection-rebuild` (projection-jobs.ts); none, those jobs wait.
      */
     projectionPorts?: ProjectionPorts;
+    /**
+     * The Connector manager the `connector-sync` handler calls, read at each run (the manager
+     * is made after the runner, as it wakes it; I03-T09). Given, the runner also runs
+     * `connector-sync`; none, those jobs wait.
+     */
+    connectors?: () => SyncManager | undefined;
     /** The registry that names a candidate item's lineage (productRegistry); default `derivativeRegistry` (knowledge-engine canonical-kinds.ts). */
     registry?: DerivativeRegistry;
   } = {},
@@ -343,6 +356,10 @@ export function productRunner(
     db,
     handlers: {
       [EXTRACT_JOB_KIND]: handler,
+      [MAINTENANCE_KIND]: createMaintenanceHandler({ db, ...(clock ? { clock } : {}) }),
+      ...(options.connectors
+        ? { [CONNECTOR_SYNC_KIND]: createConnectorSyncHandler({ db, manager: options.connectors }) }
+        : {}),
       ...(options.projectionPorts
         ? projectionHandlers({
             db,

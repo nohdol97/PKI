@@ -125,6 +125,23 @@ export function heldGroups(db: SqlDriver): { reason: string; kind: string; count
     .map((r) => ({ reason: r.reason as string, kind: r.kind as string, count: r.count as number }));
 }
 
+/**
+ * Puts the held jobs of one kind and target (a Connector instance) for these reasons back in
+ * the queue: a collector held for what its instance's state said (I03-R16 ②′).
+ */
+export function requeueHeldTarget(
+  db: SqlDriver,
+  options: { kind: string; target: string; reasons: readonly string[]; at?: Date },
+): number {
+  if (options.reasons.length === 0) return 0;
+  return requeue(
+    db,
+    `kind = ? AND target = ? AND reason IN (${inList(options.reasons)})`,
+    [options.kind, options.target, ...options.reasons],
+    options.at ?? new Date(),
+  );
+}
+
 /** Puts the held jobs of these reasons (of one kind, if given) back in the queue. */
 export function requeueHeldReasons(
   db: SqlDriver,
