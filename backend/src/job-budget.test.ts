@@ -3,6 +3,7 @@
 // whole-window budget is a retry whose attempt is given back and whose next run
 // time is the one `budgetUsage()` names (`budget.restart`, with a Broker restarted
 // over the same history). A Broker `cancelled` is not an answer.
+import { ProviderError } from "@pki/contracts";
 import {
   createBroker,
   createCallRecorder,
@@ -22,28 +23,32 @@ import { FakeProvider } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Clock } from "./clock.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { BACKOFF_MAX_MS } from "./schedule.ts";
-import { classifyResult } from "./job-outcomes.ts";
+import { classifyResult, DEFAULT_RUN_TIMEOUT_MS } from "./job-outcomes.ts";
 import { jobBroker } from "./job-broker.ts";
-import { createJobRunner, type JobHandler } from "./job-runner.ts";
+import { createJobRunner, DEFAULT_HEARTBEAT_MS, type JobHandler } from "./job-runner.ts";
 
 const T0 = Date.parse("2026-11-21T00:00:00.000Z");
 const HOUR = DEFAULT_LIMITS.callBudget.windowMs;
 let dir: string;
 let db: SqlDriver;
 let wall = T0;
-const testClock: Clock = { now: () => wall, sleep: async () => {}, monotonic: () => 0 };
+/** The monotonic reading of the injected clock, moved by the tests alone. */
+let mono = 0;
+const testClock: Clock = { now: () => wall, sleep: async () => {}, monotonic: () => mono };
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-job-budget-"));
   db = openCanonicalDb(join(dir, "data"));
   wall = T0;
+  mono = 0;
   registerConnectorInstance(db, "c", "test-fixtures");
 });
 afterEach(() => {
+  vi.useRealTimers();
   db.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -62,7 +67,12 @@ function imported(): StoredJob {
   return r.job;
 }
 
-function brokerOver(on: SqlDriver, provider: FakeProvider, maxCalls = 60) {
+function brokerOver(
+  on: SqlDriver,
+  provider: FakeProvider,
+  maxCalls = 60,
+  sleep: Clock["sleep"] = testClock.sleep,
+) {
   return createBroker({
     db: on,
     provider: () => provider,
@@ -72,7 +82,7 @@ function brokerOver(on: SqlDriver, provider: FakeProvider, maxCalls = 60) {
     execution: { decide: () => ({ run: true }) },
     recorder: createCallRecorder(on, () => new Date(wall)),
     limits: { callBudget: { maxCalls, windowMs: HOUR } },
-    clock: testClock,
+    clock: { now: testClock.now, sleep },
   });
 }
 
@@ -203,6 +213,44 @@ describe("budget.job (I03-R14, C3): the request budget of one run", () => {
   });
 });
 
+describe("cancel.broker-retry at the runner (I03-R14, C3): the run's own signal reaches the Broker", () => {
+  // a Broker in its retry wait (its clock's sleep hangs and ignores the signal);
+  // the run ends while it waits: the wrapped Broker must be cut by the run's signal
+  it.each([
+    ["the run time limit", "run-timeout"],
+    ["a lost lease", undefined],
+  ] as const)(
+    "%s ends the Broker's retry wait: cancelled, no second Provider call",
+    async (_why, reason) => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      const provider = new FakeProvider({
+        script: [{ error: new ProviderError("busy", { retryable: true }) }],
+      });
+      let waiting = false;
+      const broker = brokerOver(db, provider, 60, () => {
+        waiting = true;
+        return new Promise<void>(() => {});
+      });
+      const job = imported();
+      let result: BrokerResult | undefined;
+      const r = runnerFor(async (j, context) => {
+        result = await context.broker.call({ ...extractRequest(j), retryable: true });
+        return { status: "fail", code: "after-cancel", retryable: true };
+      }, broker);
+      void r.runOnce();
+      await vi.waitFor(() => expect(waiting).toBe(true));
+      expect(provider.requests).toHaveLength(1);
+
+      if (reason) mono = DEFAULT_RUN_TIMEOUT_MS;
+      else db.run("UPDATE jobs SET lease_token = lease_token + 1 WHERE id = ?", [job.id]);
+      await vi.advanceTimersByTimeAsync(DEFAULT_HEARTBEAT_MS);
+      await vi.waitFor(() => expect(result).toEqual({ status: "cancelled" }));
+      expect(provider.requests).toHaveLength(1);
+      if (reason) expect(readJob(db, job.id)).toMatchObject({ status: "retry", reason });
+    },
+  );
+});
+
 describe("budget.restart (I03-R14, C3): a spent window budget is a retry that gives the attempt back", () => {
   it("after a restart over the same history the job retries when budgetUsage() says", async () => {
     const provider = new FakeProvider();
@@ -259,9 +307,11 @@ describe("classifyResult: Broker results the Broker's budget adds (I03-R14)", ()
   });
 
   it("a Broker cancelled is a retry with its attempt spent (a cancel request closes it cancelled)", () => {
-    expect(classifyResult({ status: "cancelled" }, run)).toMatchObject({
+    // exactly this: no refund, so the attempt stays spent
+    expect(classifyResult({ status: "cancelled" }, run)).toEqual({
       status: "retry",
       reason: "cancelled",
+      runAfter: T0 + 60_000, // 30 s × 2^(2 − 1), the backoff of the run's second attempt
     });
   });
 

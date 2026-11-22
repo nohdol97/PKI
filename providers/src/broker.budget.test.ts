@@ -34,6 +34,7 @@ function rig(
   clock: { t: number },
   provider: FakeProvider = new FakeProvider(),
   sleep: (ms: number, signal?: AbortSignal) => Promise<void> = async () => {},
+  onDecide: () => void = () => {},
 ) {
   const ledger = createUserActionLedger();
   const asked: string[] = [];
@@ -45,6 +46,7 @@ function rig(
     egress: {
       decide: (input) => {
         asked.push(input.taskKind);
+        onDecide();
         return ALLOW;
       },
     },
@@ -89,6 +91,17 @@ describe("broker.cancelled-outcome (I03-R14, C3)", () => {
     expect(provider.signals[0]?.aborted).toBe(true);
     expect(provider.cancelled).toEqual([provider.requests[0]?.requestId]);
     expect(broker.budgetUsage()).toMatchObject({ used: 1 });
+  });
+
+  it("a signal cut inside the egress decision sends nothing and leaves no row", async () => {
+    const db = newDb();
+    const provider = new FakeProvider();
+    const ac = new AbortController();
+    const { broker, call } = rig(db, { t: T0 }, provider, undefined, () => ac.abort());
+    expect(await call({}, ac.signal)).toEqual({ status: "cancelled" });
+    expect(provider.requests).toEqual([]);
+    expect(listProviderCalls(db)).toEqual([]);
+    expect(broker.budgetUsage()).toMatchObject({ used: 0 });
   });
 
   it("the Broker's own time limit is still a timeout", async () => {
