@@ -124,6 +124,8 @@ test("no CLI, no model, no vector index: Home says so and guides; sources still 
     await expect(row(/벡터 색인/)).toContainText(
       "사용 불가: 이 빌드에는 벡터 색인이 없음, 키워드 검색으로 동작",
     );
+    // status.data-protection (I04-R6): nothing pending on a start whose clean-up finished
+    await expect(row(/데이터 보호/)).toContainText("정상");
 
     // CLI 없음: the chosen default CLI is missing, and Home shows how to install it
     await chooseDefault(page, "Claude Code");

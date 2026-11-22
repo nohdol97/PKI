@@ -25,6 +25,7 @@ import { url as inspectorUrl } from "node:inspector";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_ORIGIN, APP_SCHEME, createAppHandler } from "./app-protocol.ts";
+import { startFailureText } from "./start-failure-text.ts";
 import { startBackendProcess, type ForkBackend } from "./backend-process.ts";
 import { superviseBackend, type Supervisor } from "./backend-supervisor.ts";
 import { BRIDGE, createBridgeHandlers, type BridgeFunction } from "./bridge.ts";
@@ -185,7 +186,7 @@ if (debugging) {
       return;
     }
     console.error(`PKI shell failed to start: ${why}`);
-    dialog.showErrorBox("PKI", "앱을 시작하지 못했습니다.");
+    dialog.showErrorBox("PKI", startFailureText(error));
     app.exit(1);
   });
 }

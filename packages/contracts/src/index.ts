@@ -141,6 +141,27 @@ export const SourceDeleteResponseSchema = z.object({
 });
 
 /**
+ * The user's way back (I04-R9): the sources a tombstone blocks and the lift of one.
+ * Only the user's request lifts. A purged source's identity is no longer kept in
+ * the clear (I04-R7), so the list names a source by an opaque `id` (the local
+ * handle the lift takes), its connector instance, the reason and when. A lift
+ * deletes and restores nothing: the source can only be received again.
+ * `unchanged`: already lifted, no tombstone, or no such id.
+ */
+const TombstonedSourceSchema = z.object({
+  id: z.int().positive(),
+  connectorId: z.string(),
+  reason: z.enum(["user-deleted", "source-deleted", "access-revoked"]),
+  coversVersion: z.int().nonnegative(),
+  at: z.string(),
+});
+export const TombstoneListResponseSchema = z.object({
+  tombstones: z.array(TombstonedSourceSchema),
+});
+export const TombstoneLiftRequestSchema = z.strictObject({ id: z.int().positive() });
+export const TombstoneLiftResponseSchema = z.object({ outcome: z.enum(["lifted", "unchanged"]) });
+
+/**
  * One provider call attempt (ADR 0014: no body, prompt, response or secret).
  * `destination` and `policyVersion` are null for an attempt blocked before the
  * egress decision named them; `reason` is the code of a blocked attempt.
@@ -297,6 +318,13 @@ export const StatusResponseSchema = z.object({
    * dropped) beside `recent`, with the table it counts.
    */
   invalidations: z.object({ recent: z.array(InvalidationSchema) }),
+  /**
+   * I04-R6, the screen's "데이터 보호" item. `legacyCleanup`: `pending` while the
+   * one-time clean-up of earlier deletions' traces (FTS optimize + VACUUM) has not
+   * finished, e.g. no room for the VACUUM copy: the item reads "이전 삭제의 흔적
+   * 정리 실패" and the next start tries again. The text is I04-T13's.
+   */
+  dataProtection: z.object({ legacyCleanup: z.enum(["done", "pending"]) }),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
@@ -461,6 +489,13 @@ export const routes = {
     path: "/api/sources/delete",
     request: SourceDeleteRequestSchema,
     response: SourceDeleteResponseSchema,
+  },
+  tombstones: { method: "GET", path: "/api/tombstones", response: TombstoneListResponseSchema },
+  liftTombstone: {
+    method: "POST",
+    path: "/api/tombstones/lift",
+    request: TombstoneLiftRequestSchema,
+    response: TombstoneLiftResponseSchema,
   },
   activity: { method: "GET", path: "/api/activity", response: ActivityResponseSchema },
   settings: { method: "GET", path: "/api/settings", response: SettingsResponseSchema },

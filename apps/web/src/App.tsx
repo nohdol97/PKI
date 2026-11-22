@@ -26,6 +26,7 @@ import { connectionTestGuidance, providerCheckText, providerName } from "./provi
 import {
   componentText,
   DOWNLOAD_APPROVAL,
+  dataProtectionText,
   embeddingText,
   LOCAL_PACK_HINT,
   providerStatusText,
@@ -95,6 +96,7 @@ function statusRows(status: RouteResponse<"status">) {
     ["Provider", providerStatusText(status.provider).text],
     ["Embedding", embeddingText(status.embedding)],
     ["벡터 색인", vectorIndexText(status.vectorIndex)],
+    ["데이터 보호", dataProtectionText(status.dataProtection)],
   ] as const;
 }
 

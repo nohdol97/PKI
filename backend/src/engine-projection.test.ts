@@ -15,7 +15,7 @@ import {
 } from "@pki/contracts";
 import { vectorRefOf, type ProjectionNotice } from "@pki/knowledge-engine";
 import { openaiKeySecretName, writeDefaultProvider, type EgressControls } from "@pki/providers";
-import { readChangeSeq, saveSourceRecord, type SqlDriver } from "@pki/storage";
+import { findSourceId, readChangeSeq, saveSourceRecord, type SqlDriver } from "@pki/storage";
 import {
   completion,
   FakeProvider,
@@ -119,8 +119,9 @@ async function pipeline(engine: KnowledgeEngine, vectorIndex = new MemoryVectorI
   return { provider, runner, projections, post };
 }
 
+// by identity: a purged source's row holds the hash (I04-R7)
 const sourceIdOf = (externalId: string) =>
-  String(db.all("SELECT id FROM sources WHERE external_id = ?", [externalId])[0]?.id);
+  String(findSourceId(db, MAIL.connectorId, "", externalId));
 const versionIdsOf = (externalId: string) =>
   db
     .all(
