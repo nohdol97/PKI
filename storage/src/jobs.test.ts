@@ -1058,6 +1058,68 @@ describe("effect.fence-new-version (I03-R6 ③): commitDerived through closeJob"
   });
 });
 
+describe("fence.fresh lineage-retry (I04-T06): a result lost to its lineage is extracted once more", () => {
+  // a second source whose version the result draws on, then covered
+  const drawnOn = () => {
+    const saved = saveSourceRecord(db, "c1", { externalId: "e2", title: "t", body: "b2" });
+    if (saved.status !== "created") throw new Error("expected a version");
+    const ref = { sourceId: saved.sourceId, version: saved.version };
+    writeTombstone(db, {
+      sourceId: ref.sourceId,
+      version: ref.version,
+      at: "x",
+      reason: "source-deleted",
+    });
+    return ref;
+  };
+  const lineageItem = (ref: { sourceId: number; version: number }) => ({
+    kind: "fact",
+    itemKey: "a",
+    lineage: [{ sourceId: 1, version: 1 }, ref],
+    write: effect("a"),
+  });
+  const jobs = () => db.all("SELECT id, target, status, reason FROM jobs ORDER BY id");
+
+  it("registers one extraction of the same version, with a distinct target, and names the reason", () => {
+    const job = running();
+    expect(
+      closeJob(db, held(job.id), { status: "succeeded", items: [lineageItem(drawnOn())] }),
+    ).toBe("superseded");
+    expect(effects()).toBe(0);
+    expect(jobs()).toEqual([
+      { id: job.id, target: "", status: "superseded", reason: "lineage-covered" },
+      { id: job.id + 1, target: `lineage-retry:${job.id}`, status: "queued", reason: null },
+    ]);
+    expect(readJob(db, job.id + 1)).toMatchObject({
+      sourceId: 1,
+      fenceVersion: 1,
+      kind: "extract",
+    });
+  });
+
+  it("registers nothing for a job that is itself a lineage retry (the loop bound)", () => {
+    const first = running();
+    const covered = drawnOn();
+    closeJob(db, held(first.id), { status: "succeeded", items: [lineageItem(covered)] }, T0);
+    const retry = claimed();
+    expect(retry.target).toBe(`lineage-retry:${first.id}`);
+    expect(
+      closeJob(db, held(retry.id), { status: "succeeded", items: [lineageItem(covered)] }),
+    ).toBe("superseded");
+    expect(jobs().map((j) => j.status)).toEqual(["superseded", "superseded"]);
+    expect(jobs()[1]).toMatchObject({ reason: "lineage-covered" });
+  });
+
+  it("registers nothing, and gives no reason, for a job a newer version superseded", () => {
+    const job = running();
+    newVersion("b2");
+    expect(
+      closeJob(db, held(job.id), { status: "succeeded", items: [lineageItem(drawnOn())] }),
+    ).toBe("superseded");
+    expect(jobs()).toEqual([{ id: job.id, target: "", status: "superseded", reason: null }]);
+  });
+});
+
 describe("outcome.mapping (I03-R6, R9, R11): what closeJob stores for each closing", () => {
   const RUN_AT = at(30_000).getTime();
   const closings: [JobClosing, Partial<StoredJob>][] = [

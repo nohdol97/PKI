@@ -483,6 +483,9 @@ const isLockError = (error: unknown): boolean => {
   return code === "SQLITE_BUSY" || code === "SQLITE_LOCKED";
 };
 
+/** The target of the one extraction queued again after a result lost to its lineage (I04-T06). */
+export const LINEAGE_RETRY_PREFIX = "lineage-retry:";
+
 type Lease = Pick<StoredJob, "id" | "leaseToken">;
 
 /**
@@ -504,8 +507,8 @@ function checkedWrite(
 ): StoredJob | "not-leased" | "cancelled" | "superseded" {
   const job = readJob(db, lease.id);
   if (job?.status !== "running" || job.leaseToken !== lease.leaseToken) return "not-leased";
-  const close = (to: "cancelled" | "superseded") => {
-    transitionJob(db, lease.id, { from: "running", to, leaseToken: lease.leaseToken, at });
+  const close = (to: "cancelled" | "superseded", reason: string | null = null) => {
+    transitionJob(db, lease.id, { from: "running", to, reason, leaseToken: lease.leaseToken, at });
     return to;
   };
   if (job.cancelRequested) return close("cancelled");
@@ -537,7 +540,26 @@ function checkedWrite(
       },
     })),
   });
-  return committed.status === "stale" ? close("superseded") : job;
+  if (committed.status !== "stale") return job;
+  // A result lost to its lineage (a source it drew on went) while its own version
+  // is still current would never be extracted again: the version's job key is
+  // taken. Queue one more extraction under a distinct target, which is not queued
+  // again when it is itself the retry (the loop bound). A newer version, a covered
+  // or missing own version register nothing: that version is gone or replaced.
+  if (committed.cause === "lineage-covered") {
+    if (source && !job.target.startsWith(LINEAGE_RETRY_PREFIX)) {
+      registerJob(db, {
+        kind: job.kind,
+        target: `${LINEAGE_RETRY_PREFIX}${job.id}`,
+        priority: job.priority,
+        sourceId: source.sourceId,
+        fenceVersion: source.version,
+        at,
+      });
+    }
+    return close("superseded", "lineage-covered");
+  }
+  return close("superseded");
 }
 
 /**

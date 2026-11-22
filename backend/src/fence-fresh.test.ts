@@ -54,7 +54,7 @@ const kLine = (revision: number, content: string) =>
   });
 const K_BODY = `합성 자료. 5월 기준 ${Y_NAME} 완료는 2026-12-10입니다. ${DEPENDS}.`;
 
-function answer(hooks: { during?: (request: StructuredRequest) => void }) {
+function answer(hooks: { during?: ((request: StructuredRequest) => void) | undefined }) {
   const fixture = fixtureExtraction();
   return (request: StructuredRequest): unknown => {
     hooks.during?.(request);
@@ -108,7 +108,7 @@ function consent(egress: EgressControls) {
   if ("error" in granted) throw new Error(granted.error);
 }
 
-function pipeline(hooks: { during?: (request: StructuredRequest) => void } = {}) {
+function pipeline(hooks: { during?: ((request: StructuredRequest) => void) | undefined } = {}) {
   const provider = new FakeProvider({
     id: "local-model",
     transport: "http",
@@ -160,28 +160,36 @@ describe("fence.fresh: the result of an extraction behind commitDerived", () => 
     expect(written()).toEqual([0, 0, 0, 0]);
   });
 
-  it("④ discards the whole result when only a source it drew on (a candidate item's evidence) is deleted", async () => {
-    const hooks: { during?: (request: StructuredRequest) => void } = {};
+  it("④ discards the whole result when only a source it drew on (a candidate item's evidence) is deleted, then extracts the version once more", async () => {
+    const hooks: { during?: ((request: StructuredRequest) => void) | undefined } = {};
     const { provider, runner, importer } = pipeline(hooks);
     await importer(read("v02-mail.jsonl"));
     await runner.wake();
     const before = written();
     expect(before[0]).toBeGreaterThan(0);
     const [x] = db.all("SELECT id FROM items");
-    // the mail's item X is a candidate for K; the mail goes while K is extracted
+    // the mail's item X is a candidate for K; the mail goes while K is extracted (once)
     hooks.during = (request) => {
+      hooks.during = undefined;
       expect(request.input.candidates.map((c) => c.id)).toContain(String(x?.id));
       deleteSource(db, mailId(), { reason: "user-deleted", at: new Date().toISOString() });
     };
     await importer(kLine(1, K_BODY));
     await runner.wake();
 
-    expect(provider.requests).toHaveLength(2);
-    // K's own fact and its new item Y went with the relation on X: all or nothing
-    expect(db.all("SELECT status, reason FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
-      { status: "superseded", reason: null },
+    // one wake drains the queue: K's discarded run, then its re-extraction
+    expect(provider.requests).toHaveLength(3);
+    const [, first, retry, ...rest] = db.all(
+      "SELECT id, target, status, reason FROM jobs ORDER BY id",
+    );
+    expect(first).toMatchObject({ status: "superseded", reason: "lineage-covered" });
+    // exactly one re-extraction, under a distinct target, run with X gone (no candidate)
+    expect(retry).toMatchObject({ target: `lineage-retry:${first?.id}`, status: "succeeded" });
+    expect(rest).toEqual([]);
+    expect(db.all("SELECT kind, value FROM facts")).toEqual([
+      { kind: "completion_date", value: "2026-12-10" },
     ]);
-    expect(written()).toEqual([0, 0, 0, 0]);
+    expect(db.all("SELECT name FROM items ORDER BY id").map((r) => r.name)).toContain(Y_NAME);
   });
 
   it("⑤ writes nothing for a dead job retried after its source was deleted", async () => {

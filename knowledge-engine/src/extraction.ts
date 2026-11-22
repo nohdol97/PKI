@@ -326,6 +326,9 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
 
     // The items share what they create: an item is made for a fact or relation that
     // is kept, once per ref; the rule below recomputes the items they touched.
+    // This state lives for one commit: closeJob calls each item's write once inside its
+    // transaction, and a failed commit is never re-run with these items (a locked file
+    // runs the handler again for a fresh closure, a throwing write closes the job).
     const ids = new Map<string, number>();
     const touched = new Set<number>();
     const own: LineageRef = { sourceId: sourceId as number, version: fenceVersion as number };

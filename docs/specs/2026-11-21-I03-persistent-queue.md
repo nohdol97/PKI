@@ -203,7 +203,7 @@ A가 이미 Provider를 불렀다면 그 호출은 일어난 것이고 예산에
 | 어느 결과든 취소 요청 표시가 있음(Broker `cancelled` 포함) | cancelled | 씀 | R12. 아래 행보다 먼저 본다 |
 | Broker `cancelled`, 취소 요청 표시 없음(실행 시간 초과·임대 상실로 신호가 끊긴 실행) | retry(`cancelled`) | 씀 | 그 실행의 결과는 실행기가 버리므로 행에는 닿지 않는다. I03-T06이 정하고 I03-T07이 확인 |
 | 처리기 `held(사유)`(`connector-sync`의 인스턴스 `unavailable`·`not-implemented`) | held(그 사유) | 되돌림 | R16 ②′, I01 대응표 |
-| `commitDerived`의 fence 불통과(새 version이 왔거나, 원본이 지워졌거나 덮임, I04-T06 뒤에는 계보의 다른 원본도), 또는 Broker `rejected: missing-source` | superseded | 씀 | R6 ③ |
+| `commitDerived`의 fence 불통과(새 version이 왔거나, 원본이 지워졌거나 덮임, I04-T06 뒤에는 계보의 다른 원본도), 또는 Broker `rejected: missing-source` | superseded(사유 없음. **계보 때문이면 사유 `lineage-covered`이고 그 version의 추출이 `lineage-retry:<ID>` 대상으로 한 번 다시 등록된다**, I04-T06) | 씀 | R6 ③ |
 | 결과 쓰기에서 취소 요청을 봄 | cancelled | 씀 | R6 ② |
 | 결과 쓰기에서 상태·토큰 불일치 | (쓰지 않음) | — | 다른 실행이 잡았거나 닫힘 |
 | Broker `blocked`(동의 없음, 전송 거부, `cli-*`, `unverified-*`, `no-provider`, 구조화 출력 없음, 기능 조회 실패) | held(그 사유) | **되돌림** | R15, R16. 다른 Provider로 넘기지 않음 |
@@ -273,6 +273,7 @@ I03-T04의 임시 본문은 `source`가 있으면 V02의 `isFenceCurrent`만 적
 |---|---|---|---|---|
 | `extract`(V02) | 빈 문자열 | 원본 / 등록 때의 version | `knowledge` | V02-T04(가져오기), `connector-sync` |
 | `extract`(범위가 넓어진 뒤 다시 추출) | `scope-recompute:<무효화 기록 ID>` | 원본 / 그 원본의 지금 최신 version | `knowledge` | I04-T09(범위 변경 전파). 범위 정책으로 빠졌던 항목의 기록은 I04의 테이블(`scope_policy_drops`)에 있고 작업 행에 없으므로 I03의 보존이 지우지 않는다. 우선순위는 `scheduled`. 범위가 잇달아 두 번 바뀌면 같은 version에 작업이 둘 생겨 차례로 돌고 두 번째는 쓸모가 없지만, 결과는 `commitDerived`의 같은 행 판정으로 한 번만 남으므로 받아들인다 |
+| `extract`(결과가 계보 때문에 버려진 뒤 다시 추출) | `lineage-retry:<버려진 작업 ID>` | 원본 / 버려진 작업과 같은 version | `knowledge` | I04-T06(`closeJob`의 `checkedWrite`). 계보의 다른 원본이 지워져 결과 전체가 버려졌는데 이 작업의 version은 아직 최신이면 같은 트랜잭션에서 한 번 등록한다. 우선순위는 버려진 작업과 같다. 이 작업 자신이 `lineage-retry:` 대상이면 또 등록하지 않는다(한 번으로 끝, 잠정). 버려진 작업은 사유 `lineage-covered`의 `superseded`다 |
 | `projection-remove` | 투영 이름(`engine`, `vector`) | 원본 / tombstone의 `covers_version` | `projection` | I04-T03·T04(삭제 트랜잭션) |
 | `projection-rebuild` | 투영 이름 | 없음 | `projection` | I03-T10(표식), `requestProjectionRebuild` |
 | `connector-sync` | Connector 인스턴스 ID | 없음 | 인스턴스마다 | I03-T09(주기, 지금 실행) |
@@ -691,3 +692,4 @@ C1~C3은 이슈 #20의 문장 그대로다. H1·H2는 이 프로젝트가 배포
 | 2026-11-22 | I04-T06 구현 반영: "I03-T04가 넘기는 것" 5항의 임시 `commitDerived`를 I04-T06이 바꿈(`storage/src/commit-derived.ts`, 원인 순서 덮음 → 없음 → 최신 아님, 계보 검사 추가, 추출은 `items`), `isFenceCurrent`도 그 파일로 옮김. 부르는 자리(`closeJob`, `checkpointJob`)와 이름·인자는 그대로 | 넘기는 것(I03-T04 5항), 인터페이스(`commitDerived`) | I04-T06 구현. 새 마이그레이션 없음 |
 | 2026-11-22 | 보류 해제 표의 개발 예외 사유 네 개(`unverified-*`)를 배포 빌드가 아닐 때만 넣음(잠정: 개발 빌드가 남긴 그 사유의 보류 작업은 배포 빌드에서 보류로 남음). 표가 그 문자열을 배포 번들에 남겨 `artifact.contents`(V01-T15)가 실패하던 것을 고침 | 보류 해제 표(`backend/src/held-release.ts`) | I03-T07 머지 뒤 main에서 `pnpm e2e`의 artifact 검사 실패 |
 | 2026-11-22 | I03-T12 구현: 설정 화면 "백그라운드 실행" 설명을 R17의 문구 예 그대로 `apps/web/src/background-text.ts`의 상수로 두고 `BackgroundExecution`이 그 상수를 그림(잠정: 컴포넌트를 `App.tsx`에서 내보내 정적 렌더로 시험. 낡은 문장 사본이 화면에 남으면 시험이 실패한다). 동의 안내(`consent-text.ts`)와 CLI 상태 안내(`status-text.ts`)는 지금 추출만 말하며 R17의 범위 밖이라 고치지 않음(주기 작업이 실제로 도는 T09 이후 그 문구가 낡는지는 T09가 본다). 시험 `settings.background-text`(`apps/web/src/background-text.test.tsx`) | "I03-T12", R17, 증명 테스트 | I03-T12 구현 |
+| 2026-11-22 | I04-T06 재작업(잠정): 계보 때문에 결과가 버려지면 `superseded` 사유 `lineage-covered`와 같은 version의 재추출 등록(대상 `lineage-retry:<작업 ID>`, 한 번만)을 작업 대상 표와 결과 표에 더함 | 작업 종류·대상 표, 실행 결과가 가는 곳 표 | I04-T06 독립 검토 F1: 계보로 버려진 version이 영영 추출되지 않음 |

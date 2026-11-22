@@ -68,7 +68,7 @@ const kVersion = (revision: number, marker: string, date: string) =>
  * their quotes, X and Y picked from the request's candidates when there.
  * `during` runs inside the Provider call, between the lease and the write.
  */
-function answer(hooks: { during?: (request: StructuredRequest) => void }) {
+function answer(hooks: { during?: ((request: StructuredRequest) => void) | undefined }) {
   const fixture = fixtureExtraction();
   return (request: StructuredRequest): unknown => {
     hooks.during?.(request);
@@ -140,7 +140,7 @@ function consent(egress: EgressControls) {
   if ("error" in granted) throw new Error(granted.error);
 }
 
-function pipeline(hooks: { during?: (request: StructuredRequest) => void } = {}) {
+function pipeline(hooks: { during?: ((request: StructuredRequest) => void) | undefined } = {}) {
   const provider = new FakeProvider({
     id: "local-model",
     transport: "http",
@@ -335,13 +335,14 @@ describe("delete.propagate", () => {
   });
 
   it("does not bring back an item deleted between the Provider call and the write, and discards the result drawn on it (A-W3, I04-R11)", async () => {
-    const hooks: { during?: (request: StructuredRequest) => void } = {};
+    const hooks: { during?: ((request: StructuredRequest) => void) | undefined } = {};
     const { runner, importer } = pipeline(hooks);
     await importer(read("v02-mail.jsonl"));
     await runner.wake();
     const [x] = db.all("SELECT id FROM items");
     // K names X, a candidate whose only source (the mail) goes while K is extracted
     hooks.during = (request) => {
+      hooks.during = undefined; // once: the re-extraction must not delete again
       expect(request.input.candidates.map((c) => c.id)).toContain(String(x?.id));
       deleteSource(db, sourceId(MAIL.external_id as string), {
         reason: "user-deleted",
@@ -351,20 +352,32 @@ describe("delete.propagate", () => {
     await importer(kVersion(1, CANARY.old, "2026-12-10"));
     await runner.wake();
 
-    // X is not recreated, and its freed id (SQLite reuses the highest rowid) must not
-    // go to Y with the relation's stale reference resolving to it: K's result drew
-    // on the mail through X, whose source is gone, so commitDerived discards all of
-    // it (assertLineage, I04-R11), Y's fact and item included, and the job closes superseded
-    expect(count("items")).toBe(0);
-    expect(count("facts")).toBe(0);
-    expect(count("relations")).toBe(0);
-    expect(db.all("SELECT status FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
-      { status: "superseded" },
+    // X is not brought back through its stale id (SQLite reuses the highest rowid, so
+    // that id would have resolved to Y): K's first result drew on the mail through X,
+    // whose source is gone, so commitDerived discarded all of it (assertLineage,
+    // I04-R11) and closed the job superseded (lineage-covered). The one re-extraction
+    // it queued ran with X no longer a candidate: K's own result, relation included.
+    const jobs = db.all("SELECT status, reason FROM jobs ORDER BY id DESC LIMIT 2");
+    expect(jobs).toEqual([
+      { status: "succeeded", reason: null },
+      { status: "superseded", reason: "lineage-covered" },
     ]);
+    expect(db.all("SELECT name FROM items ORDER BY name").map((r) => r.name)).toEqual(
+      ["미리내 프로젝트", Y_NAME].sort(),
+    );
+    expect(count("facts")).toBe(1);
+    expect(count("relations")).toBe(1);
+    // the relation joins the two items of this extraction: nothing points at a freed id
+    expect(
+      db.all(
+        `SELECT s.name AS subject, o.name AS object FROM relations r
+           JOIN items s ON s.id = r.subject_id JOIN items o ON o.id = r.object_id`,
+      ),
+    ).toEqual([{ subject: "미리내 프로젝트", object: Y_NAME }]);
   });
 
-  it("creates no item for a relation whose other end was deleted during the call (B1, I04-R11)", async () => {
-    const hooks: { during?: (request: StructuredRequest) => void } = {};
+  it("keeps no orphan item from a relation whose other end was deleted during the call (B1, I04-R11)", async () => {
+    const hooks: { during?: ((request: StructuredRequest) => void) | undefined } = {};
     const { runner, importer } = pipeline(hooks);
     await importer(read("v02-mail.jsonl"));
     await runner.wake();
@@ -376,11 +389,16 @@ describe("delete.propagate", () => {
     await importer(jsonl({ ...K, title: "k", content: `합성. ${ORPHAN_DEPENDS}.` }));
     await runner.wake();
 
-    // X went with the mail, so the result (a relation on X) is discarded whole and Z was never made
-    expect(db.all("SELECT name FROM items")).toEqual([]);
-    expect(db.all("SELECT status FROM jobs ORDER BY id DESC LIMIT 1")).toEqual([
-      { status: "superseded" },
+    // X went with the mail, so the first result (a relation on X) was discarded whole
+    // (superseded, lineage-covered); the re-extraction, X no longer a candidate, made
+    // Z and a new X for the relation
+    expect(db.all("SELECT status, reason FROM jobs ORDER BY id DESC LIMIT 2")).toEqual([
+      { status: "succeeded", reason: null },
+      { status: "superseded", reason: "lineage-covered" },
     ]);
+    expect(db.all("SELECT name FROM items ORDER BY name").map((r) => r.name)).toEqual(
+      ["미리내 프로젝트", ORPHAN_NAME].sort(),
+    );
     deleteSource(db, sourceId("k"), { reason: "user-deleted", at: new Date().toISOString() });
     db.close();
     const left = storedFiles().filter(([, bytes]) => bytes.includes("orphcanary"));
