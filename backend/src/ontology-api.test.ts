@@ -113,14 +113,14 @@ describe("GET /api/ontology", () => {
   it("lists the seed, verified, with each rule", async () => {
     await start();
     const elements = await list();
-    expect(elements).toHaveLength(10);
-    expect(elements.every((e) => e.status === "verified" && e.edition === 1)).toBe(true);
+    expect(elements).toHaveLength(28);
+    expect(elements.every((e) => e.status === "verified" && e.origin === "seed")).toBe(true);
     expect(elements.find((e) => e.name === "DEPENDS_ON")).toMatchObject({
       elementKind: "relation-type",
       rule: {
         elementKind: "relation-type",
-        subjectTypes: ["Project", "System"],
-        objectTypes: ["Project", "System"],
+        subjectTypes: ["Commitment", "Project", "System", "Task"],
+        objectTypes: ["Commitment", "Dependency", "Project", "System", "Task"],
         symmetric: false,
       },
     });
@@ -190,7 +190,7 @@ describe("POST /api/ontology/check", () => {
     });
     expect(routes.ontologyCheck.response.parse(retire.body)).toMatchObject({
       applicable: false,
-      impact: { liveRows: 0, violations: 6 },
+      impact: { liveRows: 0, violations: 10 },
     });
     expect(dump()).toEqual(before);
   });
@@ -254,7 +254,7 @@ describe("POST /api/ontology/change", () => {
         {
           status: "refused",
           reason: "existing-data-violation",
-          impact: { liveRows: 1, violations: 7 },
+          impact: { liveRows: 1, violations: 11 },
         },
       ],
       [

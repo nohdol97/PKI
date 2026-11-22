@@ -459,8 +459,10 @@ describe("ontology.enforce: a new item type goes through the same devices (S01-R
 });
 
 describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
+  /** The item types S02-R2 adds to the date kinds' and DEPENDS_ON's rules (the prompt lists them from S02-T02). */
+  const S02_WIDENED = ["Commitment", "Task"];
   const seed = (kind: string) =>
-    listOntologyElements(db).filter((e) => e.elementKind === kind && e.edition === 1);
+    listOntologyElements(db).filter((e) => e.elementKind === kind && e.origin === "seed");
 
   it("holds every name the prompt lists, verified, with the shape the prompt's instructions describe", () => {
     for (const type of EXTRACT_ITEM_TYPES) {
@@ -472,7 +474,8 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
       // "the date as YYYY-MM-DD", one per item, on the item types the prompt lists
       expect(element?.rule).toEqual({
         elementKind: "fact-kind",
-        itemTypes: [...EXTRACT_ITEM_TYPES].sort(),
+        // S02-R2 widens the date kinds to Task and Commitment; the prompt names them from S02-T02 on
+        itemTypes: [...EXTRACT_ITEM_TYPES, ...S02_WIDENED].sort(),
         valueType: "date",
         cardinality: "one",
       });
@@ -482,8 +485,8 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
       expect(element?.status).toBe("verified");
       expect(element?.rule).toEqual({
         elementKind: "relation-type",
-        subjectTypes: [...EXTRACT_ITEM_TYPES].sort(),
-        objectTypes: [...EXTRACT_ITEM_TYPES].sort(),
+        subjectTypes: [...EXTRACT_ITEM_TYPES, ...S02_WIDENED].sort(),
+        objectTypes: [...EXTRACT_ITEM_TYPES, ...S02_WIDENED, "Dependency"].sort(),
         symmetric: false,
       });
     }
@@ -492,10 +495,31 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
   it("differs from the prompt by exactly what S01-T08 has not put into it yet: the seed is a superset until then", () => {
     // Only the prompt's names are comparable before T08 (R17 adds Concept, terms and definitions to the
     // prompt); this list is what the seed holds beyond it. T08 empties it and the test then asks for equality.
+    // S02-T01 seeds the rest of the catalogue (S02-R2); S02-T02 puts those into the prompt and empties them.
     const notYet = {
-      "item-type": ["Concept"],
-      "fact-kind": ["alias.abbreviation", "alias.synonym", "alias.translation", "definition"],
-      "relation-type": [] as string[],
+      "item-type": [
+        "Concept",
+        "Person",
+        "Organization",
+        "Decision",
+        "Task",
+        "Commitment",
+        "Event",
+        "Issue",
+        "Dependency",
+        "BusinessRule",
+        "OpenQuestion",
+      ],
+      "fact-kind": [
+        "alias.abbreviation",
+        "alias.synonym",
+        "alias.translation",
+        "definition",
+        "identifier.email",
+        "identifier.key",
+        "statement",
+      ],
+      "relation-type": ["BELONGS_TO", "RESPONSIBLE_FOR", "RELATED_TO", "DECIDED", "CAUSED_BY"],
     };
     const prompt = {
       "item-type": [...EXTRACT_ITEM_TYPES] as string[],
@@ -506,8 +530,8 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
       const names = seed(kind).map((e) => e.name);
       expect([...names].sort(), kind).toEqual([...prompt[kind], ...notYet[kind]].sort());
     }
-    expect(listOntologyElements(db).every((e) => e.status === "verified" && e.edition === 1)).toBe(
-      true,
-    );
+    expect(
+      listOntologyElements(db).every((e) => e.status === "verified" && e.origin === "seed"),
+    ).toBe(true);
   });
 });

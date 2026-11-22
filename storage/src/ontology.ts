@@ -12,12 +12,15 @@
 // A name can come from a source, so no refusal and no history line carries one: a refusal holds
 // counts and fixed codes, a history line numbers and codes (R6). The duplicates a check reports
 // name the stored element, as the spec's `OntologyCheck` does, and are not copied into a refusal.
+import { RESERVED_NAMES } from "@pki/contracts";
 import type { KnowledgeStatus } from "./knowledge.ts";
 import type { Actor, Basis } from "./semantic-lifecycle.ts";
 import type { SqlDriver, SqlRow } from "./sql-driver.ts";
 
 export type ElementKind = "item-type" | "fact-kind" | "relation-type";
-export type ValueType = "date" | "text" | "surface-form";
+export type ValueType = "date" | "text" | "surface-form" | "identifier";
+/** Where a definition came from (S02-R3): written when it is made and never changed. */
+export type ElementOrigin = "seed" | "user" | "source-proposed";
 export type Cardinality = "one" | "many";
 export type ElementRule =
   | { elementKind: "item-type" }
@@ -54,6 +57,7 @@ export interface StoredElement {
   rule: ElementRule;
   status: KnowledgeStatus;
   edition: number;
+  origin: ElementOrigin;
 }
 
 export type OntologyRefusal =
@@ -89,7 +93,7 @@ export type OntologyActionOutcome =
   /** An undo took away the element itself (an add of the user's, or an approval with no lineage left). */
   | { status: "removed"; id: number };
 
-const COLUMNS = "id, element_kind, name, rule, status, edition";
+const COLUMNS = "id, element_kind, name, rule, status, edition, origin";
 const toElement = (row: SqlRow): StoredElement => ({
   id: row.id as number,
   elementKind: row.element_kind as ElementKind,
@@ -97,6 +101,7 @@ const toElement = (row: SqlRow): StoredElement => ({
   rule: JSON.parse(row.rule as string) as ElementRule,
   status: row.status as KnowledgeStatus,
   edition: row.edition as number,
+  origin: row.origin as ElementOrigin,
 });
 
 /** Every element in the order they were added. */
@@ -164,13 +169,13 @@ export function readOntologyHistory(db: SqlDriver, id: number): OntologyHistoryL
 
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.]{0,39}$/;
 const KINDS: readonly ElementKind[] = ["item-type", "fact-kind", "relation-type"];
-const VALUE_TYPES: readonly string[] = ["date", "text", "surface-form"];
+const VALUE_TYPES: readonly string[] = ["date", "text", "surface-form", "identifier"];
 const CARDINALITIES: readonly string[] = ["one", "many"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const LIVE = "status NOT IN ('rejected', 'superseded')";
 
 /** The comparison of R19's duplicate check: case, `_`, `.` and `-` do not count. */
-const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
+export const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
 
 /** A normalized calendar date (YYYY-MM-DD) that exists; such strings order as dates. The one copy. */
 export const isDate = (value: string): boolean => {
@@ -179,8 +184,8 @@ export const isDate = (value: string): boolean => {
 };
 
 /**
- * Whether a value is of the kind a fact kind's rule names (S01-R21): `date` a calendar date, `text`
- * and `surface-form` not empty (after trimming). The one value check: extraction and the user's add
+ * Whether a value is of the kind a fact kind's rule names (S01-R21): `date` a calendar date, `text`,
+ * `surface-form` and `identifier` (S02-R2) not empty (after trimming). The one value check: extraction and the user's add
  * and value fix both use it, so the two paths accept and reject the same values.
  */
 export const valueFits = (valueType: ValueType, value: string): boolean =>
@@ -241,7 +246,7 @@ function ruleErrors(db: SqlDriver, kind: ElementKind, rule: unknown, errors: Set
 
 const sortedUnique = (list: readonly string[]) => [...new Set(list)].sort();
 /** A valid rule in its stored form: the type lists sorted and without repeats, the keys in a fixed order. */
-function canonical(rule: ElementRule): ElementRule {
+export function canonicalRule(rule: ElementRule): ElementRule {
   if (rule.elementKind === "item-type") return { elementKind: "item-type" };
   if (rule.elementKind === "fact-kind") {
     return {
@@ -263,11 +268,21 @@ function shapeErrors(
   db: SqlDriver,
   change: OntologyChange,
   target: StoredElement | undefined,
+  /** The row already exists (an undo of a retirement): a reserved name it took before S02-R3 stays its. */
+  existing = false,
 ): string[] {
   const errors = new Set<string>();
   if (change.op === "add") {
     if (typeof change.name !== "string" || !IDENTIFIER.test(change.name)) {
       errors.add("name-not-identifier");
+    }
+    // a name stored or computed elsewhere (S02-R3): compared as the duplicate check compares
+    if (
+      !existing &&
+      typeof change.name === "string" &&
+      RESERVED_NAMES.some((reserved) => squash(reserved) === squash(change.name))
+    ) {
+      errors.add("reserved-name");
     }
     const kind = isObject(change.rule) ? change.rule.elementKind : undefined;
     if (!KINDS.includes(kind as ElementKind)) errors.add("rule-kind-unknown");
@@ -284,7 +299,7 @@ function shapeErrors(
       if (
         errors.size === 0 &&
         target &&
-        JSON.stringify(canonical(change.rule)) === JSON.stringify(target.rule)
+        JSON.stringify(canonicalRule(change.rule)) === JSON.stringify(target.rule)
       ) {
         errors.add("rule-unchanged");
       }
@@ -392,7 +407,7 @@ function impactOf(
     const stranded = kind === "item-type" ? verifiedRulesNaming(db, change.name) : 0;
     return { liveRows, violations: liveRows + stranded };
   }
-  const rule = canonical(change.rule);
+  const rule = canonicalRule(change.rule);
   if (rule.elementKind === "fact-kind") {
     return { liveRows, violations: factViolations(db, change.name, rule) };
   }
@@ -542,8 +557,14 @@ function applyChange(
   if (change.op === "add") {
     const status: KnowledgeStatus = byUser ? "verified" : "candidate";
     const id = tx.run(
-      "INSERT INTO ontology_elements (element_kind, name, rule, status, edition) VALUES (?, ?, ?, ?, 1)",
-      [change.rule.elementKind, change.name, JSON.stringify(canonical(change.rule)), status],
+      "INSERT INTO ontology_elements (element_kind, name, rule, status, edition, origin) VALUES (?, ?, ?, ?, 1, ?)",
+      [
+        change.rule.elementKind,
+        change.name,
+        JSON.stringify(canonicalRule(change.rule)),
+        status,
+        byUser ? "user" : "source-proposed",
+      ],
     ).lastInsertRowid;
     if (!byUser && basis) {
       tx.run("INSERT INTO ontology_basis (element_id, source_id, version) VALUES (?, ?, ?)", [
@@ -584,7 +605,7 @@ function applyChange(
     ]);
   } else {
     tx.run("UPDATE ontology_elements SET rule = ?, edition = ? WHERE id = ?", [
-      JSON.stringify(canonical(change.rule)),
+      JSON.stringify(canonicalRule(change.rule)),
       edition,
       target.id,
     ]);
@@ -735,6 +756,7 @@ export const userOntology: UserOntologyDecisions = {
         tx,
         { op: "add", name: element.name, rule: element.rule },
         undefined,
+        true,
       );
       if (schemaErrors.length > 0) return refusedWith("schema-invalid", { schemaErrors });
       // and against the rows that exist: a user's row of the kind may have been added while it was retired
