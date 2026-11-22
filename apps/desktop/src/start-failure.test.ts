@@ -102,3 +102,13 @@ describe("the policy name crosses the process boundary as a switch, not as envir
     expect(backendEnv({ PATH: "/bin", PKI_SCOPE_POLICY: "site" })).toEqual({ PATH: "/bin" });
   });
 });
+
+describe("an adapter no kind covers refuses the start with its own text (I04-R3)", () => {
+  it("shows the unregistered-adapter text, without a path or name", async () => {
+    const error = await start({ type: "failed", reason: "adapter-unregistered" }).catch(
+      (e: unknown) => e,
+    );
+    expect(startFailureText(error)).toContain("삭제 규칙에 등록되어 있지 않아");
+    expect(startFailureText(error)).not.toBe("앱을 시작하지 못했습니다.");
+  });
+});

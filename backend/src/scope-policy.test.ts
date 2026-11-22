@@ -333,6 +333,14 @@ describe("the shell's switch and the failure report (I04-H2 ①)", () => {
       type: "failed",
       reason: "scope-policy-invalid",
     });
+    const { UnregisteredAdapterError } = await import("./derivative-coverage.ts");
+    const unregistered = new UnregisteredAdapterError(["engine"], "fixed text");
+    expect(startFailureReport(unregistered)).toEqual({
+      type: "failed",
+      reason: "adapter-unregistered",
+    });
+    // the log line keeps the error's name, which carries the adapter kinds
+    expect(startFailureLine(unregistered)).toBe(`backend start failed: ${unregistered.name}`);
     expect(startFailureLine(new ScopePolicyNotImplementedError()).startsWith("배포처 후속")).toBe(
       true,
     );

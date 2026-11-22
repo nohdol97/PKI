@@ -1,10 +1,14 @@
 // What the backend tells the shell about a refused start (I04-R7): a fixed class,
 // never the error's message (it can carry a path or file text; V01-R13).
 import { IdentityKeyMissingError } from "@pki/storage";
+import { UnregisteredAdapterError } from "./derivative-coverage.ts";
 import { ScopePolicyNotImplementedError, UnknownScopePolicyError } from "./scope-policy.ts";
 
 export type StartFailureReason =
-  "identity-key-missing" | "scope-policy-not-implemented" | "scope-policy-invalid";
+  | "identity-key-missing"
+  | "scope-policy-not-implemented"
+  | "scope-policy-invalid"
+  | "adapter-unregistered";
 export type StartFailureReport = { type: "failed"; reason?: StartFailureReason };
 
 export function startFailureReport(error?: unknown): StartFailureReport {
@@ -15,6 +19,9 @@ export function startFailureReport(error?: unknown): StartFailureReport {
   }
   if (error instanceof UnknownScopePolicyError)
     return { type: "failed", reason: "scope-policy-invalid" };
+  if (error instanceof UnregisteredAdapterError) {
+    return { type: "failed", reason: "adapter-unregistered" };
+  }
   return { type: "failed" };
 }
 

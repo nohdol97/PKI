@@ -49,7 +49,10 @@ export function backendEnv(env: Readonly<Record<string, string | undefined>>) {
 }
 
 export type StartFailureReason =
-  "identity-key-missing" | "scope-policy-not-implemented" | "scope-policy-invalid";
+  | "identity-key-missing"
+  | "scope-policy-not-implemented"
+  | "scope-policy-invalid"
+  | "adapter-unregistered";
 
 /** A start the backend refused; `reason` is a fixed class it reported (I04-R7), never its message. */
 export class BackendStartError extends Error {
@@ -66,7 +69,12 @@ const FromBackend = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("failed"),
     reason: z
-      .enum(["identity-key-missing", "scope-policy-not-implemented", "scope-policy-invalid"])
+      .enum([
+        "identity-key-missing",
+        "scope-policy-not-implemented",
+        "scope-policy-invalid",
+        "adapter-unregistered",
+      ])
       .optional(),
   }),
   z.strictObject({

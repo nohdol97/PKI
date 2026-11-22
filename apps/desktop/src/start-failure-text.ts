@@ -11,6 +11,8 @@ const REASON_TEXT = {
     "배포처 후속: 접근 범위 정책 `site`는 이 공용 빌드에 구현되어 있지 않아 시작하지 않았습니다. 배포처 구현을 설치하거나 PKI_SCOPE_POLICY 설정을 지운 뒤 다시 시작하세요.",
   "scope-policy-invalid":
     "접근 범위 정책 설정(PKI_SCOPE_POLICY)이 비어 있거나 알 수 없는 이름이라 시작하지 않았습니다. 설정을 지우거나 `default`로 바꾼 뒤 다시 시작하세요.",
+  "adapter-unregistered":
+    "이 빌드에 묶인 엔진이나 벡터 구현이 삭제 규칙에 등록되어 있지 않아 시작하지 않았습니다. 지운 자료가 그 구현에 남을 수 있어 막았습니다. 구현을 등록한 빌드로 다시 시작하세요.",
 } as const;
 
 export function startFailureText(error: unknown): string {
