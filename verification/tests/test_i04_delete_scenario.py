@@ -190,6 +190,23 @@ class CanaryScan(unittest.TestCase):
             found = self.scan({rel: CANARIES["deleted"].encode()})
             self.assertEqual(found["deleted"], 1, rel)
 
+    def test_the_tombstone_ledger_files_are_read_too_including_the_set_aside_names(self):
+        """I04-T10: the ledger and the ledgers set aside beside it are files of the data folder like any other."""
+        for rel in ("tombstone-ledger.jsonl", "tombstone-ledger.other-key-1.jsonl",
+                    "tombstone-ledger.damaged-2.jsonl", "tombstone-ledger.jsonl.tmp"):
+            found = self.scan({rel: b'{"t":"line","note":"' + CANARIES["deleted"].encode() + b'"}\n'})
+            self.assertEqual(found["deleted"], 1, rel)
+
+    def test_a_real_ledger_line_cannot_match_a_canary(self):
+        """A line holds the plain connector instance id and kind and a 64-hex keyed hash: no source text."""
+        import hashlib
+        line = ('{"t":"line","seq":3,"i":"api-inst","k":"jsonl-import","h":"%s","cv":2,"lr":null,'
+                '"reason":"source-deleted","at":"2026-11-22T00:00:00.000Z","la":null}\n'
+                % hashlib.sha256(b"x").hexdigest())
+        header = '{"t":"header","v":1,"key":"%s"}\n' % hashlib.sha256(b"k").hexdigest()
+        found = self.scan({"tombstone-ledger.jsonl": (header + line).encode()})
+        self.assertEqual(found, {"deleted": 0, "revoked": 0, "kept": 0})
+
     def test_case_and_utf16_forms_are_found(self):
         word = CANARIES["deleted"]
         forms = {

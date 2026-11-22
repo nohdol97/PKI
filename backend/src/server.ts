@@ -47,6 +47,7 @@ import { defaultEntries, type CanonicalEntries } from "@pki/knowledge-engine";
 import {
   databaseEncryption,
   canonicalTransaction,
+  LedgerLineUnwritableError,
   findSourceId,
   listLiftableTombstones,
   countScopePolicyDrops,
@@ -66,6 +67,7 @@ import type { ConnectorManager } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import type { InstanceImporter } from "./imports.ts";
 import { InstanceBusyError, type JsonlImporter } from "./jsonl-import.ts";
+import { ledgerStatus } from "./ledger-status.ts";
 import { jobsApi, type JobsPort } from "./jobs-view.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { matchRoute } from "./routing.ts";
@@ -551,6 +553,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       dataProtection: {
         legacyCleanup:
           readSetting(options.db, LEGACY_CLEANUP_SETTING) === "done" ? "done" : "pending",
+        ledger: ledgerStatus(options.db, options.dataDirectory),
       },
     }),
     connectors: async () => ({ connectors: options.connectors.list() }),
@@ -707,7 +710,14 @@ async function handle(
     if (!parsed.success) return reject(res, 400, "bad-request");
     input = parsed.data;
   }
-  const result = await (handlers[name] as (input: unknown) => Promise<unknown>)(input);
+  let result: unknown;
+  try {
+    result = await (handlers[name] as (input: unknown) => Promise<unknown>)(input);
+  } catch (error) {
+    // fail closed, with its own answer: no tombstone without a readable ledger line
+    if (error instanceof LedgerLineUnwritableError) return reject(res, 409, "ledger-unwritable");
+    throw error;
+  }
   if (typeof result === "object" && result !== null && "error" in result) {
     const { error } = result as ErrorResponse;
     return reject(res, errorStatus[error] ?? 500, error);

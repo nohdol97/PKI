@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ImportRecordSchema } from "@pki/contracts";
+import { ImportRecordSchema, MAX_INSTANCE_ID_LENGTH } from "@pki/contracts";
 
 const sources = resolve(import.meta.dirname, "../../eval/golden/sources");
 const golden = ["mail", "wiki", "messenger"].flatMap((name) =>
@@ -60,6 +60,26 @@ describe("ImportRecordSchema", () => {
     const names = [...declared.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
     expect(names.length).toBeGreaterThan(0);
     expect([...names].sort()).toEqual([...ImportRecordSchema.shape.operation.options].sort());
+  });
+
+  it("caps a connector instance id at the one limit, which the golden checker shares", () => {
+    const max = "i".repeat(MAX_INSTANCE_ID_LENGTH);
+    expect(ImportRecordSchema.safeParse({ ...record, connector_instance_id: max }).success).toBe(
+      true,
+    );
+    expect(
+      ImportRecordSchema.safeParse({ ...record, connector_instance_id: `${max}i` }).success,
+    ).toBe(false);
+    expect(ImportRecordSchema.safeParse({ ...record, connector_instance_id: "" }).success).toBe(
+      false,
+    );
+    const checker = readFileSync(
+      resolve(import.meta.dirname, "../../eval/scorer/validate.py"),
+      "utf8",
+    );
+    expect(Number(/^MAX_INSTANCE_ID_LENGTH = (\d+)$/m.exec(checker)?.[1])).toBe(
+      MAX_INSTANCE_ID_LENGTH,
+    );
   });
 
   it("requires a delete line to carry empty content", () => {

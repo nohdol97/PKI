@@ -114,9 +114,47 @@ describe("status API: vector index", () => {
 describe("status API: data protection (I04-R6)", () => {
   it("says the one-time clean-up of earlier deletions is pending until a start finished it", async () => {
     const pending = routes.status.response.parse((await getStatus(new MemoryVectorIndex())).body);
-    expect(pending.dataProtection).toEqual({ legacyCleanup: "pending" });
+    expect(pending.dataProtection).toEqual({
+      legacyCleanup: "pending",
+      ledger: {
+        state: "ok",
+        reapplied: 0,
+        unrecoverable: 0,
+        unwritable: 0,
+        ignoredLines: 0,
+        setAsideLedgers: 0,
+        setAsideDeletions: 0,
+        history: {
+          missingCreated: { total: 0, last: null },
+          setAside: { total: 0, last: null },
+          unrecoverable: { total: 0, last: null },
+          ignoredLines: { total: 0, last: null },
+          reapplied: { total: 0, last: null },
+          seeded: { total: 0, last: null },
+        },
+      },
+    });
     writeSetting(db, "purge.legacy-cleanup", "done");
     const done = routes.status.response.parse((await getStatus(new MemoryVectorIndex())).body);
-    expect(done.dataProtection).toEqual({ legacyCleanup: "done" });
+    expect(done.dataProtection).toEqual({
+      legacyCleanup: "done",
+      ledger: {
+        state: "ok",
+        reapplied: 0,
+        unrecoverable: 0,
+        unwritable: 0,
+        ignoredLines: 0,
+        setAsideLedgers: 0,
+        setAsideDeletions: 0,
+        history: {
+          missingCreated: { total: 0, last: null },
+          setAside: { total: 0, last: null },
+          unrecoverable: { total: 0, last: null },
+          ignoredLines: { total: 0, last: null },
+          reapplied: { total: 0, last: null },
+          seeded: { total: 0, last: null },
+        },
+      },
+    });
   });
 });

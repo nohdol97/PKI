@@ -11,6 +11,8 @@ const REASON: Record<ImportLineError["reason"], string> = {
   "instance-conflict": "다른 종류의 Connector가 쓰는 connector_instance_id입니다",
   "too-many-instances": "한 파일에 든 connector_instance_id가 너무 많습니다",
   "instance-failed": "이 connector_instance_id의 저장이 실패해 저장하지 않았습니다",
+  "ledger-unwritable":
+    "이 줄의 삭제를 삭제 장부에 적을 수 없는 형식의 연결 정보라 삭제하지 않았습니다(원본은 그대로입니다)",
 };
 
 export function importSummaryText({

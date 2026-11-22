@@ -155,6 +155,7 @@ const NAMED_FACTS = [
     file: "providers/src/scope-grading.ts",
     holds: "export const publicScopeGrading",
   },
+  { item: "S22", token: "tombstone-ledger", file: "storage/src/tombstone-ledger.ts", holds: 'LEDGER_FILE = "tombstone-ledger.jsonl"' },
   { item: "S22", token: "extraScanDirs", file: "verification/v02-site-flow/delete_scenario.py", holds: 'cfg.get("extraScanDirs"' },
   { item: "S22", token: "userDataDir", file: "verification/v02-site-flow/delete_scenario.py", holds: 'cfg.get("userDataDir")' },
   { item: "S22", token: "fts5vocab", file: "verification/v02-site-flow/delete_scenario.py", holds: "USING fts5vocab(" },

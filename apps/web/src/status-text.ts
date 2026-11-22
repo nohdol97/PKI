@@ -93,10 +93,78 @@ export const DOWNLOAD_APPROVAL =
 export const LOCAL_PACK_HINT =
   "로컬 팩: 모델 파일 4개가 든 폴더의 절대 경로입니다. 파일은 네트워크 없이 이 PC에서 읽고, 해시가 맞을 때만 설치합니다.";
 
+/** Said once, before the first note about the ledger: what it is, in plain words. */
+const LEDGER_EXPLAINED =
+  "삭제 장부는 지운 자료가 백업을 복원한 뒤에 되살아나지 않도록, 삭제했다는 사실만 데이터 폴더에 따로 적어 두는 파일입니다(자료의 내용은 적지 않습니다)";
+
+const HISTORY_TEXT = [
+  ["missingCreated", "삭제 장부가 없어 새로 만듦"],
+  ["setAside", "다른 설치의 장부를 옆에 둠"],
+  ["unrecoverable", "다시 적용하지 못한 삭제"],
+  ["ignoredLines", "읽지 못해 무시한 장부 줄"],
+  ["reapplied", "시작 때 다시 적용한 삭제"],
+  ["seeded", "장부에 뒤늦게 채운 삭제"],
+] as const;
+
 /**
  * The data-protection item (I04-R6): `pending` on a running backend means the clean-up
  * of earlier deletions' traces failed at this start (it starts after the backend's
  * database was prepared), and is tried again at the next one.
  */
-export const dataProtectionText = (status: RouteResponse<"status">["dataProtection"]) =>
-  status.legacyCleanup === "pending" ? "이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)" : "정상";
+export const dataProtectionText = (status: RouteResponse<"status">["dataProtection"]) => {
+  const { ledger } = status;
+  const notes: string[] = [];
+  if (status.legacyCleanup === "pending")
+    notes.push("이전 삭제의 흔적 정리 실패(다음 시작에 다시 시도)");
+  const legacyNotes = notes.length;
+  if (ledger.state === "degraded") {
+    notes.push(
+      "삭제 장부에 적지 못해 삭제가 하나도 사라지지 않도록 데이터 변경을 막고 있습니다. 데이터 폴더의 빈 공간과 쓰기 권한을 확인한 뒤 앱을 다시 시작하세요",
+    );
+  }
+  if (ledger.state === "missing-created") {
+    notes.push(
+      "삭제 장부가 없어 새로 만들었습니다. 백업 뒤의 삭제는 다시 수집해야 반영되며, 수집기가 전체 재스캔에서 삭제를 알리지 못하면 반영되지 않을 수 있습니다",
+    );
+  }
+  if (ledger.setAsideLedgers > 0) {
+    notes.push(
+      `다른 설치의 삭제 장부 ${ledger.setAsideLedgers}개(삭제 ${ledger.setAsideDeletions}건)는 적용하지 않고 옆에 두었습니다`,
+    );
+  }
+  if (ledger.unwritable > 0) {
+    notes.push(
+      `장부에 적을 수 없는 상태의 삭제 ${ledger.unwritable}건(백업을 복원하면 되살아날 수 있습니다)`,
+    );
+  }
+  if (ledger.unrecoverable > 0) {
+    notes.push(`다시 적용하지 못한 삭제 ${ledger.unrecoverable}건(연결 정보 없음)`);
+  }
+  if (ledger.ignoredLines > 0) {
+    notes.push(`읽지 못해 무시한 삭제 장부 줄 ${ledger.ignoredLines}개`);
+  }
+  if (ledger.reapplied > 0) {
+    notes.push(`시작할 때 삭제 ${ledger.reapplied}건을 다시 적용했습니다`);
+  }
+  const ledgerNotes = notes.slice(legacyNotes);
+  const head =
+    notes.length === 0
+      ? "정상"
+      : [
+          ...notes.slice(0, legacyNotes),
+          ...(ledgerNotes.length > 0 ? [LEDGER_EXPLAINED, ...ledgerNotes] : []),
+        ].join(" / ");
+  // what happened at earlier starts does not vanish when the current state is ok again
+  const past = HISTORY_TEXT.flatMap(([name, label]) => {
+    const entry = ledger.history[name];
+    return entry.total > 0 && entry.last !== null
+      ? [
+          `${label} ${entry.total}${name === "missingCreated" ? "번" : "건"}(마지막 발생: ${entry.last.slice(0, 10)})`,
+        ]
+      : [];
+  });
+  if (past.length === 0) return head;
+  // the history is about the ledger too: explain it once if no current note already did
+  const explain = ledgerNotes.length > 0 ? "" : `${LEDGER_EXPLAINED}. `;
+  return `${head} · ${explain}지난 기록: ${past.join(", ")}`;
+};

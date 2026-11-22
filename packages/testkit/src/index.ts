@@ -57,3 +57,4 @@ export {
   type FakeCliMode,
   type FakeCliRun,
 } from "./fake-cli.ts";
+export { memoryLedgerIo, type LedgerIoOperation, type MemoryLedgerIo } from "./memory-ledger-io.ts";

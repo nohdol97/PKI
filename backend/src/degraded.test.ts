@@ -202,7 +202,26 @@ describe("degraded states (V01-R5)", () => {
       embedding: { state: "ready", egress: "local" },
       vectorIndex: { state: "ready" },
       invalidations: { recent: [], scopePolicyDrops: 0 },
-      dataProtection: { legacyCleanup: "done" },
+      dataProtection: {
+        legacyCleanup: "done",
+        ledger: {
+          state: "ok",
+          reapplied: 0,
+          unrecoverable: 0,
+          unwritable: 0,
+          ignoredLines: 0,
+          setAsideLedgers: 0,
+          setAsideDeletions: 0,
+          history: {
+            missingCreated: { total: 0, last: null },
+            setAside: { total: 0, last: null },
+            unrecoverable: { total: 0, last: null },
+            ignoredLines: { total: 0, last: null },
+            reapplied: { total: 0, last: null },
+            seeded: { total: 0, last: null },
+          },
+        },
+      },
     });
     await explorationWorks();
   });
@@ -348,7 +367,26 @@ describe("degraded states (V01-R5)", () => {
       embedding: { state: "ready", egress: "local" },
       vectorIndex: { state: "ready" },
       invalidations: { recent: [], scopePolicyDrops: 0 },
-      dataProtection: { legacyCleanup: "done" },
+      dataProtection: {
+        legacyCleanup: "done",
+        ledger: {
+          state: "ok",
+          reapplied: 0,
+          unrecoverable: 0,
+          unwritable: 0,
+          ignoredLines: 0,
+          setAsideLedgers: 0,
+          setAsideDeletions: 0,
+          history: {
+            missingCreated: { total: 0, last: null },
+            setAside: { total: 0, last: null },
+            unrecoverable: { total: 0, last: null },
+            ignoredLines: { total: 0, last: null },
+            reapplied: { total: 0, last: null },
+            seeded: { total: 0, last: null },
+          },
+        },
+      },
     });
     await explorationWorks();
   });
@@ -422,7 +460,26 @@ describe("the product on a PC with no CLI and no network (all five at once)", ()
           ),
           scopePolicyDrops: 0,
         },
-        dataProtection: { legacyCleanup: "done" },
+        dataProtection: {
+          legacyCleanup: "done",
+          ledger: {
+            state: "ok",
+            reapplied: 0,
+            unrecoverable: 0,
+            unwritable: 0,
+            ignoredLines: 0,
+            setAsideLedgers: 0,
+            setAsideDeletions: 0,
+            history: {
+              missingCreated: { total: 0, last: null },
+              setAside: { total: 0, last: null },
+              unrecoverable: { total: 0, last: null },
+              ignoredLines: { total: 0, last: null },
+              reapplied: { total: 0, last: null },
+              seeded: { total: 0, last: null },
+            },
+          },
+        },
       });
       await call(routes.setDefaultProvider.path, { providerId: "claude-code" });
       expect((await read()).provider).toMatchObject({
