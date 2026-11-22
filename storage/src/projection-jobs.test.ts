@@ -3,6 +3,7 @@
 // the change sequence it read, the latest canonical version a stale removal is re-sent
 // with, and the kinds that carry no version fence. The handlers are backend's
 // (projection-jobs.test.ts: `projection.*`).
+import { seedLegacyTombstone } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { closeJob, leaseNextJob, readJob, registerJob, type StoredJob } from "./jobs.ts";
@@ -17,7 +18,6 @@ import {
 } from "./projection-jobs.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
-import { writeTombstone } from "./tombstones.ts";
 
 let db: SqlDriver;
 beforeEach(() => {
@@ -35,7 +35,7 @@ let n = 0;
 function removal(target: string, at = T0): StoredJob {
   const saved = saveSourceRecord(db, "c1", { externalId: `e${(n += 1)}`, title: "t", body: "b" });
   if (saved.status !== "created") throw new Error("expected a version");
-  writeTombstone(db, {
+  seedLegacyTombstone(db, {
     sourceId: saved.sourceId,
     version: saved.version,
     at: "x",
@@ -169,7 +169,12 @@ describe("projection.stale-reissue (storage latest version)", () => {
     if (saved.status !== "created") throw new Error("expected a version");
     saveSourceRecord(db, "c1", { externalId: "lv", title: "t", body: "2" });
     expect(latestCanonicalVersion(db, saved.sourceId)).toBe(2);
-    writeTombstone(db, { sourceId: saved.sourceId, version: 2, at: "x", reason: "user-deleted" });
+    seedLegacyTombstone(db, {
+      sourceId: saved.sourceId,
+      version: 2,
+      at: "x",
+      reason: "user-deleted",
+    });
     db.run("DELETE FROM source_versions WHERE source_id = ?", [saved.sourceId]);
     expect(latestCanonicalVersion(db, saved.sourceId)).toBe(2);
   });
