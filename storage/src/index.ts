@@ -97,6 +97,21 @@ export {
   type RetryResult,
 } from "./job-actions.ts";
 export {
+  countOpenJobs,
+  createSchedule,
+  hasSucceededAfter,
+  jobOfSlot,
+  latestDeadLetterAfter,
+  listSchedules,
+  openJobOfSchedule,
+  pullBackRunAfter,
+  readSchedule,
+  updateSchedule,
+  type ScheduleCounts,
+  type SchedulePatch,
+  type StoredSchedule,
+} from "./schedules.ts";
+export {
   addEvidence,
   insertItem,
   listEvidence,

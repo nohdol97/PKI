@@ -478,6 +478,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "provider_calls",
       "relations",
       "revisions",
+      "schedules",
       "settings",
       "source_versions",
       "sources",
@@ -1182,5 +1183,45 @@ describe("schema v13 (I04-T05, I04-R9)", () => {
       { source_id: 4, version: 1 },
       { source_id: 4, version: 2 },
     ]);
+  });
+});
+
+describe("schema v14 (I03-T08)", () => {
+  it("adds the schedules table, one period per kind and target, and leaves the jobs alone", () => {
+    migrate(db, migrations.slice(0, 13));
+    db.run(
+      `INSERT INTO jobs (kind, status, run_after, fairness_key, registered_change_seq, created_at, updated_at)
+       VALUES ('maintenance', 'queued', 1, 'maintenance', 0, 1, 1)`,
+    );
+    migrate(db);
+    expect(schemaVersion(db)).toBe(14);
+    expect(db.all("SELECT kind, status FROM jobs")).toEqual([
+      { kind: "maintenance", status: "queued" },
+    ]);
+    expect(columns("schedules")).toEqual([
+      "id",
+      "kind",
+      "target",
+      "period",
+      "zone",
+      "enabled",
+      "next_due",
+      "last_run_slot",
+      "paused_code",
+      "failure_seen_at",
+      "warning",
+      "last_missed",
+      "registered_count",
+      "coalesced_count",
+      "held_coalesced_count",
+      "skipped_count",
+      "already_ran_count",
+      "created_at",
+      "updated_at",
+    ]);
+    const insert = `INSERT INTO schedules (kind, target, period, zone, next_due, created_at, updated_at)
+      VALUES ('connector-sync', 'c1', '{}', 'UTC', 1, 1, 1)`;
+    db.run(insert);
+    expect(() => db.run(insert)).toThrow(/UNIQUE/);
   });
 });

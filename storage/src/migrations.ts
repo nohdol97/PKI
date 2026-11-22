@@ -599,6 +599,38 @@ const v13: Migration = (db) =>
     BEGIN SELECT RAISE(ABORT, 'a source version must be greater than its tombstone'); END;
   `);
 
+// Schema v14 (I03-T08, I03-R18): the schedule table. One row per (kind, target), the
+// period as the JSON of the backend's Period (opaque here) with the zone its daily
+// and weekly slots were computed in, the next due time, the slot of the last run,
+// the pause code, and the counters the activity screen shows. jobs.schedule_id
+// points here by value (no reference: v11 left the column plain and a schedule is
+// never deleted). No default schedule is written: I03-T09 creates them.
+const v14: Migration = (db) =>
+  db.exec(`
+    CREATE TABLE schedules (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL,
+      target TEXT NOT NULL DEFAULT '',
+      period TEXT NOT NULL,
+      zone TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+      next_due INTEGER NOT NULL,
+      last_run_slot INTEGER,
+      paused_code TEXT,
+      failure_seen_at INTEGER NOT NULL DEFAULT 0,
+      warning TEXT,
+      last_missed INTEGER NOT NULL DEFAULT 0,
+      registered_count INTEGER NOT NULL DEFAULT 0,
+      coalesced_count INTEGER NOT NULL DEFAULT 0,
+      held_coalesced_count INTEGER NOT NULL DEFAULT 0,
+      skipped_count INTEGER NOT NULL DEFAULT 0,
+      already_ran_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE (kind, target)
+    );
+  `);
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -614,6 +646,7 @@ export const migrations: readonly Migration[] = [
   v11,
   v12,
   v13,
+  v14,
 ];
 
 export function schemaVersion(db: SqlDriver): number {
