@@ -6,12 +6,6 @@ export {
   recomputeDependencyDelay,
   type RuleOutcome,
 } from "./dependency-delay.ts";
-export {
-  deleteSource,
-  type DeletionRequest,
-  type PurgeResult,
-  type SourceDeletion,
-} from "./deletion.ts";
 export { acceptChange, type Accepted, type AcceptOptions } from "./arrival.ts";
 export { applyTombstone, liftTombstone } from "./tombstone-entry.ts";
 export { CANONICAL_KINDS, derivativeRegistry, type CanonicalReport } from "./canonical-kinds.ts";
@@ -28,7 +22,6 @@ export { locateQuote, type QuoteDrop, type QuoteSpan } from "./quote.ts";
 export { propagateNewVersion, type Propagation } from "./propagation.ts";
 export {
   createProjections,
-  deleteSourceWithNotice,
   PROJECTION_STALE_SETTINGS,
   userDeleteWithNotice,
   vectorRefOf,

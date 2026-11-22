@@ -4,12 +4,13 @@
 // JSONL again changes no count; a greater revision is a new version beside the old;
 // a line the store refuses is reported by its number without aborting the rest.
 import type { ImportLineError, ImportRecord } from "@pki/contracts";
-import { identityKey, readChangeSeq, writeTombstone, type SqlDriver } from "@pki/storage";
+import { identityKey, readChangeSeq, type SqlDriver } from "@pki/storage";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedLegacyTombstone } from "@pki/testkit";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { CANONICAL_DB_FILE, openCanonicalDb, productImporter } from "./composition.ts";
 import { EXTRACT_JOB_KIND, type SyncOptions } from "./connectors.ts";
@@ -174,7 +175,7 @@ describe("importJsonl", () => {
   // Provisional (T04): a source the tombstone blocks is a line error, not a failed import.
   it("reports a re-imported record the tombstone blocks as a line error, storing the other lines", async () => {
     await importJsonl(db, line({ content: "v1" }));
-    writeTombstone(db, {
+    seedLegacyTombstone(db, {
       sourceId: 1,
       version: 1,
       at: "2026-11-21T00:00:00Z",

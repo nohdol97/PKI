@@ -167,12 +167,9 @@ export {
 } from "./insights.ts";
 export {
   listLiftableTombstones,
-  readTombstone,
   readTombstoneState,
   recordTombstone,
   recordTombstoneLift,
-  writeTombstone,
-  type Tombstone,
   type TombstoneEvent,
   type TombstoneReason,
   type TombstoneState,

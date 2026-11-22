@@ -14,11 +14,10 @@ import {
   readChangeSeq,
   readTombstoneState,
   registerConnectorInstance,
-  writeTombstone,
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { canariesLeft } from "@pki/testkit";
+import { canariesLeft, seedLegacyTombstone } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -201,7 +200,7 @@ describe("arrival.decision: the tombstone door and what follows", () => {
   it("④ blocks everything after a tombstone from before v13 has no revision", () => {
     upsert(1);
     // V02's write names no revision
-    writeTombstone(db, { sourceId: sid(), version: 1, at: AT, reason: "source-deleted" });
+    seedLegacyTombstone(db, { sourceId: sid(), version: 1, at: AT, reason: "source-deleted" });
     db.run("DELETE FROM source_versions");
     expect(upsert(50, { body: "x" })).toEqual({ outcome: "blocked" });
     expect(count("source_versions")).toBe(0);

@@ -2,9 +2,9 @@
 // (I01-R8), the same content makes no new version, and each instance keeps its
 // kind and cursor.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { seedLegacyTombstone } from "@pki/testkit";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { migrate } from "./migrations.ts";
-import { writeTombstone } from "./tombstones.ts";
 import { readChangeSeq } from "./revisions.ts";
 import {
   LATEST_VERSION_SQL,
@@ -215,7 +215,7 @@ describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)
 
   it("blocks a record the tombstone would block, before the trigger aborts the page", () => {
     saveSourceRecord(db, "c1", rev(1, "v1"));
-    writeTombstone(db, {
+    seedLegacyTombstone(db, {
       sourceId: 1,
       version: 1,
       at: "2026-11-21T00:00:00Z",

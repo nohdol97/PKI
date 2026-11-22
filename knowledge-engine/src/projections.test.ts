@@ -22,12 +22,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NullKnowledgeEngine } from "./adapters/null-knowledge-engine.ts";
 import {
   createProjections,
-  deleteSourceWithNotice,
   PROJECTION_STALE_SETTINGS,
   vectorRefOf,
   versionNotice,
   type ProjectionNotice,
 } from "./projections.ts";
+import { purgeSource } from "./test-purge.ts";
 
 const SPACE = { modelId: "fake", revision: "r1", dimension: 3 };
 const AT = "2026-11-22T00:00:00.000Z";
@@ -117,11 +117,11 @@ describe("notices", () => {
     store("a", "alpha");
     store("a", "alpha two");
     const ids = versionIds("a");
-    const { deletion, notice } = deleteSourceWithNotice(db, sourceIdOf("a"), {
+    const { outcome, notice } = purgeSource(db, sourceIdOf("a"), {
       reason: "source-deleted",
       at: AT,
     });
-    expect(deletion.outcome).toBe("deleted");
+    expect(outcome).toBe("deleted");
     expect(notice).toEqual({
       kind: "removed",
       sourceId: sourceIdOf("a"),
@@ -131,9 +131,10 @@ describe("notices", () => {
     });
     expect(versionIds("a")).toEqual([]);
     // nothing to delete: no notice
-    expect(deleteSourceWithNotice(db, sourceIdOf("a"), { reason: "user-deleted", at: AT })).toEqual(
-      { deletion: { outcome: "unchanged" } },
-    );
+    expect(purgeSource(db, sourceIdOf("a"), { reason: "source-deleted", at: AT })).toEqual({
+      outcome: "unchanged",
+      version: 2,
+    });
   });
 });
 
@@ -172,7 +173,7 @@ describe("delivery", () => {
     await vectorIndex.reset(SPACE);
     await projections.notify([store("a", "jwxcanary shared"), store("b", "beta shared")]);
     const ids = versionIds("a");
-    const { notice } = deleteSourceWithNotice(db, sourceIdOf("a"), {
+    const { notice } = purgeSource(db, sourceIdOf("a"), {
       reason: "user-deleted",
       at: AT,
     });
@@ -191,7 +192,7 @@ describe("delivery", () => {
   it("does not hand the engine a version purged before its notice was delivered", async () => {
     const { engine, projections } = setup();
     const stored = store("a", "jwxcanary");
-    const { notice } = deleteSourceWithNotice(db, sourceIdOf("a"), {
+    const { notice } = purgeSource(db, sourceIdOf("a"), {
       reason: "source-deleted",
       at: AT,
     });
@@ -244,7 +245,7 @@ describe("delivery", () => {
       .mockImplementation(remove);
     const { projections, errors } = setup(engine, new EmptyVectorIndex());
     await projections.notify([store("a", "jwxcanary secret"), store("b", "beta")]);
-    const { notice } = deleteSourceWithNotice(db, sourceIdOf("a"), {
+    const { notice } = purgeSource(db, sourceIdOf("a"), {
       reason: "user-deleted",
       at: AT,
     });
@@ -364,7 +365,7 @@ describe("rebuild input", () => {
     store("a", "alpha two");
     store("b", "beta");
     store("c", "jwxcanary");
-    deleteSourceWithNotice(db, sourceIdOf("c"), { reason: "source-deleted", at: AT });
+    purgeSource(db, sourceIdOf("c"), { reason: "source-deleted", at: AT });
     const engine = new MemoryKnowledgeEngine();
     const seen: unknown[] = [];
     const rebuild = engine.rebuild.bind(engine);

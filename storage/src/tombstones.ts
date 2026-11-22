@@ -122,31 +122,6 @@ export function recordTombstoneLift(
   return changes === 1 ? "lifted" : "unchanged";
 }
 
-/** V02's tombstone, as deleteSource writes and reads it until I01-T02 moves to the entries. */
-export interface Tombstone {
-  sourceId: number;
-  version: number;
-  at: string;
-  reason: TombstoneReason;
-}
-
-/** V02's write: the caller names the version, and only a higher one moves the tombstone. */
-export function writeTombstone(db: SqlDriver, t: Tombstone): "written" | "unchanged" {
-  const { changes } = db.run(
-    `INSERT INTO tombstones (source_id, covers_version, at, reason) VALUES (?, ?, ?, ?)
-     ON CONFLICT (source_id) DO UPDATE SET covers_version = excluded.covers_version,
-       at = excluded.at, reason = excluded.reason, last_revision = NULL, lifted_at = NULL
-     WHERE excluded.covers_version > tombstones.covers_version`,
-    [t.sourceId, t.version, t.at, t.reason],
-  );
-  return changes === 1 ? "written" : "unchanged";
-}
-
-export function readTombstone(db: SqlDriver, sourceId: number): Tombstone | undefined {
-  const state = readTombstoneState(db, sourceId);
-  return state && { sourceId, version: state.coversVersion, at: state.at, reason: state.reason };
-}
-
 /**
  * The unlifted tombstones, oldest first, with the connector instance of their source:
  * what the user can lift. The source's own identity is not read (a purged source's is a hash, I04-R7).

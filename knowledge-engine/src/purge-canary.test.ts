@@ -26,7 +26,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deleteSource } from "./deletion.ts";
 import { COMPLETION_DATE, DEPENDENCY_DELAY } from "./dependency-delay.ts";
 import { applyTombstone } from "./tombstone-entry.ts";
 
@@ -154,12 +153,6 @@ describe("purge.canary-files", () => {
       expect(searchKeyword(db, CANARY.word.toLowerCase())).toEqual([]);
     },
   );
-
-  it("is the same for the V02 entry, deleteSource", () => {
-    const sourceId = seed();
-    deleteSource(db, sourceId, { reason: "user-deleted", at: AT });
-    expect(residue()).toEqual([]);
-  });
 
   it("control: with PRAGMA secure_delete off the current text stays (①)", () => {
     seed();

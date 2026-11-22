@@ -4,7 +4,7 @@
 // at another of its layer first), inside the caller's transaction. Also the
 // registry's checks, its invalidation record, `visible` and `scopesOf`, and a SQL
 // double run through the testkit contract suite.
-import { derivativeKindContract } from "@pki/testkit";
+import { derivativeKindContract, seedLegacyTombstone } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
@@ -24,7 +24,7 @@ import { migrate } from "./migrations.ts";
 import { readChangeSeq } from "./revisions.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
-import { recordTombstoneLift, writeTombstone } from "./tombstones.ts";
+import { recordTombstoneLift } from "./tombstones.ts";
 
 const AT = "2026-11-22T00:00:00.000Z";
 const permissive: ScopePolicy = {
@@ -141,7 +141,7 @@ function deletion(sourceId: number): SourceChange {
 
 function remove(registry: ReturnType<typeof createDerivativeRegistry>, sourceId: number) {
   return db.transaction(() => {
-    writeTombstone(db, { sourceId, version: 1, at: AT, reason: "source-deleted" });
+    seedLegacyTombstone(db, { sourceId, version: 1, at: AT, reason: "source-deleted" });
     return registry.propagate(db, deletion(sourceId));
   });
 }
@@ -449,7 +449,7 @@ describe("visible (I04-R13) and scopesOf (I04-R14)", () => {
     ]);
     row("relation", "mine", []);
     // covered but not yet purged: the tombstone alone hides it
-    writeTombstone(db, { sourceId: c, version: 1, at: AT, reason: "access-revoked" });
+    seedLegacyTombstone(db, { sourceId: c, version: 1, at: AT, reason: "access-revoked" });
     const registry = createDerivativeRegistry({ kinds: [relation], policy: permissive });
     const refs = ["mine", "of-c", "of-a", "of-b-v2", "of-a-and-c"].map((id) => ({
       kind: "relation",
@@ -568,7 +568,7 @@ derivativeKindContract("SQL double through propagate", {
       builtFrom: (r) => built[r.id] ?? [],
       exists,
       remove: (sourceId) => {
-        writeTombstone(db, { sourceId, version: 1, at: AT, reason: "source-deleted" });
+        seedLegacyTombstone(db, { sourceId, version: 1, at: AT, reason: "source-deleted" });
         return counts(sourceId);
       },
       // the double's own fence (commitDerived's arrives with I04-T06): a covered source is stale

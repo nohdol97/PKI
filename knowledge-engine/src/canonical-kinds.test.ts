@@ -3,9 +3,11 @@
 // (`derivatives.contract`, real implementations), with the closed list of the
 // cases a kind may declare not applicable; `propagate.two-phase` over the
 // schema's own cascades (I04-R2); and `reevaluate` (I04-R8, C3). A deletion and
-// a new version reach the kinds only through V02's entries, deleteSource and
-// propagateNewVersion, which now run the registry (behaviour kept: their own
-// tests in deletion.test.ts and propagation.test.ts are unchanged).
+// a new version reach the kinds only through the entries, applyTombstone and
+// propagateNewVersion, which run the registry (their own tests are
+// tombstone-entry.test.ts, deletion.test.ts and propagation.test.ts). Here a
+// deletion is run through the registry directly (`deleteSource` below) so a test
+// can read the registry's report, which the entry does not return.
 import {
   addEvidence,
   insertItem,
@@ -16,7 +18,7 @@ import {
   readChangeSeq,
   readInsight,
   readKnowledgeRevision,
-  readTombstone,
+  readTombstoneState,
   registerConnectorInstance,
   saveFact,
   saveInsight,
@@ -24,7 +26,6 @@ import {
   saveSourceRecord,
   searchKeyword,
   setKnowledgeStatus,
-  writeTombstone,
   createDerivativeRegistry,
   type DerivativeKind,
   type DerivedRef,
@@ -34,15 +35,24 @@ import {
   type SourceChange,
   type SourceVersionRef,
   type SqlDriver,
+  type TombstoneReason,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { derivativeKindContract, type DerivativeContractSubject } from "@pki/testkit";
+import {
+  derivativeKindContract,
+  seedLegacyTombstone,
+  type DerivativeContractSubject,
+} from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CANONICAL_KINDS, derivativeRegistry, propagateCanonical } from "./canonical-kinds.ts";
-import { deleteSource } from "./deletion.ts";
+import {
+  CANONICAL_KINDS,
+  derivativeRegistry,
+  propagateCanonical,
+  type CanonicalReport,
+} from "./canonical-kinds.ts";
 import {
   COMPLETION_DATE,
   DEPENDENCY_DELAY,
@@ -172,11 +182,44 @@ function world() {
   return { a, b, rows, built };
 }
 
-/** A tombstone change covering the source's versions, as deleteSource writes it. */
+/**
+ * A source's deletion as the entry does it, minus the entry's own steps (jobs,
+ * hashing): the tombstone covering its latest version, then the registry's
+ * propagation, whose report the entry does not return. Nothing to do once no
+ * version is left.
+ */
+function deleteSource(
+  target: SqlDriver,
+  sourceId: number,
+  { reason, at }: { reason: TombstoneReason; at: string },
+):
+  | { outcome: "unchanged" }
+  | {
+      outcome: "deleted";
+      version: number;
+      purge: Omit<CanonicalReport, "insights">;
+      insights: CanonicalReport["insights"];
+    } {
+  return target.transaction(() => {
+    const latest = target.all("SELECT max(version) AS v FROM source_versions WHERE source_id = ?", [
+      sourceId,
+    ])[0]?.v as number | null;
+    if (latest === null) return { outcome: "unchanged" as const };
+    seedLegacyTombstone(target, { sourceId, version: latest, at, reason });
+    const { insights, ...purge } = propagateCanonical(
+      target,
+      { kind: reason, sourceId, coversVersion: latest, lastRevision: null },
+      at,
+    ).report;
+    return { outcome: "deleted" as const, version: latest, purge, insights };
+  });
+}
+
+/** A tombstone change covering the source's versions, as the entry writes it. */
 const deletionOf = (sourceId: number): SourceChange => ({
   kind: "source-deleted",
   sourceId,
-  coversVersion: readTombstone(db, sourceId)?.version ?? 0,
+  coversVersion: readTombstoneState(db, sourceId)?.coversVersion ?? 0,
   lastRevision: null,
 });
 
@@ -203,7 +246,7 @@ function subject(kind: DerivativeKind, has: { shared: boolean; withoutLineage: b
         },
         builtFrom: (row: DerivedRef) => w.built.get(`${row.kind}:${row.id}`) ?? [],
         exists,
-        // The real deletion path (deleteSource, which runs the registry) and this
+        // The deletion through the registry (deleteSource above) and this
         // kind's counts from the record it left. A source deleteSource finds purged
         // already is left unchanged without propagating, so applying the same change
         // again goes through the registry itself (④ asks the kind, not the entry).
@@ -441,7 +484,12 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
     const registry = createDerivativeRegistry({ kinds, policy: permissive });
     expect(registry.kinds.map((k) => k.kind)).toEqual(derivativeRegistry.kinds.map((k) => k.kind));
     const result = db.transaction(() => {
-      writeTombstone(db, { sourceId: a.sourceId, version: 1, at: AT, reason: "source-deleted" });
+      seedLegacyTombstone(db, {
+        sourceId: a.sourceId,
+        version: 1,
+        at: AT,
+        reason: "source-deleted",
+      });
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
@@ -490,7 +538,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
     expect(
       ["source_versions", "evidence", "facts", "relations", "items", "insights"].map(ids),
     ).toEqual(before);
-    expect(readTombstone(db, a.sourceId)).toBeUndefined();
+    expect(readTombstoneState(db, a.sourceId)).toBeUndefined();
     expect(listInvalidations(db)).toEqual([]);
     expect(readChangeSeq(db)).toBe(seq);
   });
@@ -519,7 +567,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
 });
 
 // Ported from storage purge.test.ts (purgeSourceContent, V02-R12 "T02가 넘기는 것"
-// 5), now the canonical kinds' work behind deleteSource; the assertions are kept.
+// 5), now the canonical kinds' work behind the tombstone entry; the assertions are kept.
 describe("a source's purge through the canonical kinds (V02-R12)", () => {
   const count = (table: string) => db.all(`SELECT count(*) AS n FROM ${table}`)[0]?.n as number;
   const purge = (sourceId: number) => {
