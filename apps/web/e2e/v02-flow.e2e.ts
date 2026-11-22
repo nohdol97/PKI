@@ -38,11 +38,13 @@ import {
 type Target = "browser" | "electron";
 const test = base.extend<{ target: Target }>({ target: ["browser", { option: true }] });
 
-/** The Provider the preload binds (backend/src/v02-double.e2e.ts): the record's one source. */
+/** The Provider the preload binds (backend/src/v02-double.e2e.ts): the record's one source.
+ * The double is this commit's code, so its version is "workspace" (run record v1, V02 "T12가 넘기는 것" 4). */
 const PROVIDER = {
   kind: "test-double",
   id: "local-model",
   name: "@pki/testkit FakeProvider + fixtureExtraction",
+  version: "workspace",
 } as const;
 /** The dev backend takes the double's preload by --import; Electron starts on the
  * test main that makes the shell fork the double's backend entry. */
@@ -187,9 +189,11 @@ function countRows(dir: string) {
       activeInsights: one("SELECT count(*) AS n FROM insights WHERE state = 'active'"),
       jobsNotSucceeded: one("SELECT count(*) AS n FROM jobs WHERE status <> 'succeeded'"),
       providerCalls: Number(
-        db.all("SELECT count(*) AS n FROM provider_calls WHERE provider = ? AND outcome = 'ok'", [
-          PROVIDER.id,
-        ])[0]?.n,
+        // ok extraction calls, as the site runner counts them (a connection test is not one)
+        db.all(
+          "SELECT count(*) AS n FROM provider_calls WHERE provider = ? AND outcome = 'ok' AND task_kind = 'extract'",
+          [PROVIDER.id],
+        )[0]?.n,
       ),
       droppedQuotes: one("SELECT coalesce(sum(dropped_quotes), 0) AS n FROM jobs"),
       droppedOther: one("SELECT coalesce(sum(dropped_other), 0) AS n FROM jobs"),
@@ -269,12 +273,15 @@ test("v02-flow.e2e: import → extraction → Insight → evidence, re-import, r
   expect(afterRestart).toEqual(want);
   expect(requested.filter(remote)).toEqual([]);
 
+  // run record v1 (verification/v02-site-flow/run_record.py checks it; a source run has no app version)
   const record = {
+    schema: 1,
     record: "v02-flow.e2e",
     status: "passed",
     provider: PROVIDER,
     target,
     os: `${platform()} ${release()} ${arch()}`,
+    appVersion: "source",
     node: process.versions.node,
     electron: stack.electron ?? null,
     commit: git("rev-parse", "HEAD"),

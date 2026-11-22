@@ -24,7 +24,7 @@ import re
 from .redact import RedactionError, Redactor
 
 SCHEMA_VERSION = 2
-KITS = ("r02-cli-isolation", "r03-engine-comparison", "r04-windows-installer", "test-kit")
+KITS = ("r02-cli-isolation", "r03-engine-comparison", "r04-windows-installer", "v02-site-flow", "test-kit")
 MODES = ("real", "dry-run")
 VERDICTS = ("PASS", "FAIL", "BLOCKED", "INCONCLUSIVE", "NOT_RUN", "NOT_APPLICABLE")
 UNITS = ("", "ms", "s", "bytes", "MB", "KB", "files", "processes", "runs", "calls", "pct", "count")
@@ -64,6 +64,8 @@ CODES = {
     "version_unrecognized": "A CLI/tool version string did not match the strict pattern and was recorded as unknown (raw output keeps it).",
     "result_write_failed": "The full result failed validation or the redaction check; this minimal result replaces it and the run is kept under raw/.",
     "output_truncated": "A run's output exceeded the capture limit, so a canary could have been cut off: the run is INCONCLUSIVE.",
+    "v02_manual_observations": "The screen steps (Insight shown as an inference, three evidence opened, re-import, restart) are the operator's observations; the runner cannot see the screens.",
+    "v02_dropped_counts_unjudged": "Dropped quote/other counts are recorded, not judged (A21; thresholds come from R05).",
     "caveat_undetected_canary_forms": "The judge does NOT detect these canary forms: first 7 characters only, base64 of the upper-cased random part, reversed base64, double base64, decimal character codes, single-character interleaving, hex shifted by one, 0x-prefixed hex bytes, compressed-then-base64. Contained is not stronger than that.",
 }
 
@@ -87,6 +89,9 @@ ENUM_WORDS = {
     "crash", "concurrent", "single-writer", "sqlite", "cortexdb",
     "Valid", "NotSigned", "UnknownError", "HashMismatch", "NotTrusted", "Incompatible", "NotSupportedFileFormat",
     "ko", "en", "mixed", "bge-m3", "e5-base", "lightrag", "cognee", "sage-wiki",
+    # V02 site runner (V02-T12): Provider kinds and ids, the target, the operator's screen observations
+    "real", "test-double", "openai-compatible", "claude-code", "windows-installer",
+    "launched-installed", "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept",
 }
 ATTACK_IDS = ("A1-file-read", "A2-symlink-read", "A3-shell", "A4-mcp", "A5-network", "A6-web-search", "A7-env-dump",
               "A8-config-inheritance", "A9-output-exfil")
@@ -103,12 +108,12 @@ CLI_WORDS = ("claude", "codex")
 ENUM_WORDS.update(CLI_WORDS)
 ENUM_WORDS.update({"as_of", "span_evidence", "delete_lineage", "history_rows_after_delete", "integrity"})
 
-CRITERION_SEGMENT = re.compile(r"^(R0[2-4]-C[1-4]|R02-control)$")
+CRITERION_SEGMENT = re.compile(r"^(R0[2-4]-C[1-4]|R02-control|V02-C4)$")
 CHECK_SEGMENTS = {
     "detect", "capabilities", "flags", "positive", "sensitivity", "negative", "hook", "cancel", "selftest", "detector-selftest",
     "not-installed", "not-logged-in", "gate", "cli-adapter", "embed", "score", "offline", "store", "durability",
     "preflight", "install", "uninstall", "single-instance", "graceful-stop", "roundtrip-api", "worker-orphans",
-    "startup", "idle", "signature-installer", "signature-binaries", "result-write",
+    "startup", "idle", "signature-installer", "signature-binaries", "result-write", "site-flow",
 }
 STANDALONE_CHECK_IDS = {"result-write"}  # the minimal fail-soft result
 
@@ -159,6 +164,9 @@ FACT_KEYS = {
     "new_uninstall_keys", "new_startmenu_entries", "product_processes_left", "other_new_folder_entries", "user_data_folders_left",
     "new_process_names_vs_before", "status", "has_signer", "has_timestamp", "files_checked", "status_counts", "not_valid_count",
     "http_status", "response_bytes", "expected_text_present", "elapsed_ms", "had_error",
+    # V02 site runner
+    "provider_kind", "provider_id", "app_version", "source_versions", "insights", "active_insights", "jobs_not_succeeded",
+    "provider_calls", "dropped_quotes", "dropped_other", "observed", "kit_commit",
     # fail-soft result
     "validation_errors",
 }
@@ -171,7 +179,7 @@ HASH_RE = re.compile(r"^h:[0-9a-f]{12}$")
 MODEL_TOKENS = {"claude", "opus", "sonnet", "haiku", "gpt", "codex", "mini", "nano", "turbo", "preview", "latest", "high", "medium", "low"}
 MODEL_FIRST = {"claude", "gpt", "codex"}
 _MODEL_NUM = re.compile(r"^(\d{1,8}([.]\d{1,3})?[a-z]?|o\d)$")
-VALUE_KINDS = {"version": "version", "cli_version": "version", "model": "model", "license_file_hashes": "hash"}
+VALUE_KINDS = {"version": "version", "cli_version": "version", "app_version": "version", "kit_commit": "commit12", "model": "model", "license_file_hashes": "hash"}
 ENV_VALUES = {
     "os": re.compile(r"^(Windows|Darwin|Linux)$"),
     "os_release": re.compile(r"^(\d{1,5}(\.\d{1,5}){0,3}|Microsoft Windows \d{1,2}( (Home|Pro|Enterprise|Education|N)){0,2})$"),
@@ -222,6 +230,8 @@ def string_allowed(value, key=None):
         return model_ok(value) or bool(HASH_RE.match(value))
     if kind == "hash":
         return bool(HASH_RE.match(value))
+    if kind == "commit12":  # a commit's first 12 hex (the redactor masks 40-hex runs as tokens)
+        return bool(re.match(r"^[0-9a-f]{12}$", value)) or value == "unknown"
     return False
 
 

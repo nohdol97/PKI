@@ -17,6 +17,7 @@
 | 2 | `r03-engine-comparison/` | [RUNBOOK](r03-engine-comparison/RUNBOOK.md) | 엔진 시나리오, 임베딩, 저장소 비교, 내구성. **R02 결과가 먼저 필요**(엔진의 CLI 호출은 R02 통과 프로필만) | #12 |
 | 3 | `r04-windows-installer/` | [RUNBOOK](r04-windows-installer/RUNBOOK.md) | 설치 파일 측정·점검. **V01 skeleton 설치 파일이 있어야 함** | #13 |
 | 4 | (사람) | 각 이슈 + #37 | 결과를 잠정 ADR의 가정과 대조(R07) | #37 |
+| 5 | `v02-site-flow/` | [RUNBOOK](v02-site-flow/RUNBOOK.md) | V02 흐름을 R04 설치 파일로 설치한 앱과 실제 Provider로 실행하고 기록(S14). **R04 설치 파일이 있어야 함**. test double이거나 설치본이 아니면 `배포처 후속` 알림(종료 값 3) | #17 |
 
 R02(약관 확인 포함)와 R04는 서로 독립이라 병행할 수 있습니다. R03의 엔진 시나리오만 R02가 끝나야 하고, R04는 V01 설치 파일만 있으면 되며 R04-C2만 R03 통과 후보가 필요합니다.
 
@@ -76,6 +77,7 @@ R02(약관 확인 포함)와 R04는 서로 독립이라 병행할 수 있습니�
 | `r03-engine-comparison/embedding_bench.py`, `embed_workers/*.py` | 임베딩 벤치 러너, 워커 뼈대 2종 | 러너는 작성만 됨, 워커는 뼈대 — 실행된 적 없음 |
 | `r04-windows-installer/run.py`, `sanitize_result.py` | 순서 안내, 결과 2차 마스킹 | 작성만 됨 — 실행된 적 없음 |
 | `r04-windows-installer/scripts/01..08-*.ps1`, `common.ps1` | 설치·측정·점검 PowerShell | 작성만 됨 — 실행된 적 없음, **구문 검사도 못 함** |
+| `v02-site-flow/run.py`, `run_record.py` | V02 배포처 검증 실행기(`preflight`/`prepare`/`record`/`summarize`)와 실행 기록 양식 v1 | 작성만 됨 — 실행된 적 없음 (거부 경로와 기록 양식만 단위 테스트, Windows 분기 미실행) |
 | `tests/` | 위 코드의 단위 테스트(가짜 CLI, 가짜 엔진, 가짜 워커) | 사외 기기에서 통과 — 배포처 증거 아님 |
 
 ## 사외 단위 테스트 실행
