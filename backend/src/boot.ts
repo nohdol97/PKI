@@ -431,7 +431,7 @@ async function startBackend(
       open: openSqlFile,
       vectorIndex: adapters.vectorIndex,
       tickets: localFiles.tickets,
-      buildKind: BUILD_KIND,
+      buildKind: options.localFiles?.typedPaths ? "development" : BUILD_KIND,
       ...(BUILD_KIND === "test" && options.backupScrypt ? { scrypt: options.backupScrypt } : {}),
     }),
     decisions: productUserDecisions(registry),
