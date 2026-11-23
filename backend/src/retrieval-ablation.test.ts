@@ -24,9 +24,11 @@ const jsonl = (file: string) =>
     .filter(Boolean)
     .map((l) => JSON.parse(l) as Record<string, unknown>);
 const devInstances = new Set(
-  (JSON.parse(readFileSync(resolve(GOLDEN, "splits.json"), "utf8")) as {
-    splits: { dev: string[] };
-  }).splits.dev,
+  (
+    JSON.parse(readFileSync(resolve(GOLDEN, "splits.json"), "utf8")) as {
+      splits: { dev: string[] };
+    }
+  ).splits.dev,
 );
 const sample = jsonl("labels/qa.jsonl")
   .filter((q) => q.answerable === true && devInstances.has(q.scenario_instance as string))
