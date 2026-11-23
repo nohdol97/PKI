@@ -12,7 +12,7 @@ import {
   relation,
   storeVersion,
 } from "./analytical-check-lines.test-support.ts";
-import { listCheckLines } from "./analytical-check-lines.ts";
+import { listCheckLines, saveCheckLine } from "./analytical-check-lines.ts";
 import { readFact } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { userDecisions } from "./semantic-user.ts";
@@ -167,5 +167,53 @@ describe("gate.lost", () => {
       "applied",
     );
     expect(readFact(db, w.calc)?.status).toBe("verified");
+  });
+
+  /** The `schema` line replaced by a current failing one that read the same table version. */
+  const failSchema = (w: ReturnType<typeof world>) =>
+    saveCheckLine(db, {
+      factId: w.calc,
+      check: "schema",
+      passed: false,
+      failure: "column-missing",
+      examined: 1,
+      violations: 1,
+      skipped: 0,
+      versionId: w.table.versionId,
+      otherVersionId: null,
+      at: "2026-11-23T00:00:00.000Z",
+    });
+
+  it("F209-C3: cancelling a dispute of a verified calculation whose check now fails leaves it disputed by one policy line, with the cancel, the value and the failed line kept", () => {
+    const w = world("verified");
+    expect(userDecisions.decide(db, { kind: "fact", id: w.calc }, "dispute").status).toBe(
+      "applied",
+    ); // the job does not judge a disputed row: the line fails unseen
+    failSchema(w);
+    expect(userDecisions.undo(db, { kind: "fact", id: w.calc }).status).toBe("applied");
+    expect(readFact(db, w.calc)).toMatchObject({ status: "disputed", value: CALC });
+    const lines = history(w.calc);
+    expect(lines.at(-2)).toMatchObject({ actor: "user", action: "undo", to_status: "verified" });
+    expect(lines.at(-1)).toMatchObject({
+      actor: "policy",
+      from_status: "verified",
+      to_status: "disputed",
+      reason: "data-check-failed",
+      basis_source_id: w.table.sourceId,
+      basis_version: w.table.version,
+    });
+    expect(listCheckLines(db, w.calc).find((l) => l.check === "schema")?.passed).toBe(false);
+    expect(userDecisions.undo(db, { kind: "fact", id: w.calc })).toEqual({
+      status: "refused",
+      reason: "not-latest",
+    });
+  });
+
+  it("F209-C3: cancelling the dispute of a calculation whose lines pass returns it to verified with no policy line", () => {
+    const w = world("verified");
+    userDecisions.decide(db, { kind: "fact", id: w.calc }, "dispute");
+    expect(userDecisions.undo(db, { kind: "fact", id: w.calc }).status).toBe("applied");
+    expect(readFact(db, w.calc)?.status).toBe("verified");
+    expect(history(w.calc).filter((l) => l.actor === "policy")).toEqual([]);
   });
 });

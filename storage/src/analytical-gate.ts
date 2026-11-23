@@ -248,6 +248,26 @@ function tableBasis(tx: SqlDriver, datasetId: number): SourceVersionRef | undefi
 const itemOf = (tx: SqlDriver, factId: number) =>
   tx.all("SELECT item_id FROM facts WHERE id = ?", [factId])[0]?.item_id as number | undefined;
 
+/** A `verified` fact with a current failed line of a required check loses its standing on the version that line read. */
+function judgeFailedLine(tx: SqlDriver, factId: number, at: string | undefined): void {
+  const row = tx.all("SELECT kind, status FROM facts WHERE id = ?", [factId])[0];
+  if (!row || row.status !== "verified") return;
+  const checks = requiredChecks(tx, row.kind as string);
+  const failing = listCheckLines(tx, factId).find(
+    (l) => checks.includes(l.check) && l.current && !l.passed,
+  );
+  if (failing) lose(tx, factId, "data-check-failed", versionRef(tx, failing.versionId), at);
+}
+
+/**
+ * A user's cancel gave a fact its `verified` back (S03 decision 36 ③): the same failed-line judgement as the
+ * check job's, in the cancel's transaction. Nothing is read until a table was ever profiled (dark launch).
+ */
+export function judgeRestored(tx: SqlDriver, factId: number, at?: string): void {
+  if (!anyTable(tx)) return;
+  judgeFailedLine(tx, factId, at);
+}
+
 /**
  * The check job's closing transaction (S03-R16, ids only): a `verified` fact of `facts` with a current failed
  * line of a required check loses its standing on the version that line read; a `verified` fact of `splitMoved`
@@ -263,15 +283,7 @@ export function judgeCheckJob(
   },
 ): void {
   const at = handOver.at.toISOString();
-  for (const factId of ascending(handOver.facts)) {
-    const row = tx.all("SELECT kind, status FROM facts WHERE id = ?", [factId])[0];
-    if (!row || row.status !== "verified") continue;
-    const checks = requiredChecks(tx, row.kind as string);
-    const failing = listCheckLines(tx, factId).find(
-      (l) => checks.includes(l.check) && l.current && !l.passed,
-    );
-    if (failing) lose(tx, factId, "data-check-failed", versionRef(tx, failing.versionId), at);
-  }
+  for (const factId of ascending(handOver.facts)) judgeFailedLine(tx, factId, at);
   if (handOver.splitMoved.length === 0) return;
   const waiting = waitingItems(tx);
   for (const factId of ascending(handOver.splitMoved)) {

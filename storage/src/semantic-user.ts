@@ -13,6 +13,7 @@
 // The type definitions' user operations (ontology.ts, S01-T07) and entity resolution's (entity-decisions.ts,
 // S02-T04: merge, unmerge, the distinct mark) travel in the same object, so the one lint-guarded name
 // `userDecisions` (and its constructor `createUserDecisions`, which the composition root calls) is the only way to them.
+import { judgeRestored } from "./analytical-gate.ts";
 import { insertAssertionLink } from "./assertion-links.ts";
 import { eraseChecksReading, queueChecksAround } from "./analytical-check-lines.ts";
 import {
@@ -298,6 +299,8 @@ function revertLine(
     revertsSeq: newest.seq,
     at,
   });
+  // a restored `verified` of a check-needing fact is judged where it comes back (S03 decision 36 ③)
+  if (ref.kind === "fact" && newest.fromStatus === "verified") judgeRestored(tx, ref.id, at);
   return { status: "applied", seq };
 }
 

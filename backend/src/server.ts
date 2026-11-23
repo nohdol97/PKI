@@ -709,11 +709,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
           return {
             status: "refused" as const,
             reason: outcome.reason,
-            unmet: [...outcome.unmet],
+            unmet: [...gate.dataUnmetShown(ref.id)],
           };
         }
         return "held" in outcome
-          ? { status: "refused" as const, reason: outcome.reason, held: outcome.held }
+          ? { status: "refused" as const, reason: outcome.reason, held: gate.heldShown(ref.id) }
           : { status: "refused" as const, reason: outcome.reason };
       }
       const now = readSemanticState(options.db, ref);
