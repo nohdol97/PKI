@@ -2,7 +2,7 @@
 // (a page title with markup) only as text, never as elements.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { PageView, type PageViewProps } from "./wiki.tsx";
+import { buildState, PageView, type PageViewProps } from "./wiki.tsx";
 
 const noop = () => undefined;
 const props: PageViewProps = {
@@ -60,5 +60,13 @@ describe("PageView", () => {
     );
     expect(html).toContain("다시 보이기");
     expect(html).toContain("2026-12-05");
+  });
+});
+
+describe("buildState (#220)", () => {
+  it("stops polling and reports failure once the build job is dead, and polls while it is only stale", () => {
+    expect(buildState({ stale: true, buildDead: false }, undefined)).toBe("building");
+    expect(buildState({ stale: true, buildDead: true }, { stale: true })).toBe("dead");
+    expect(buildState({ stale: false, buildDead: false }, { stale: false })).toBe("idle");
   });
 });

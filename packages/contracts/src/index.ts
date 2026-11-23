@@ -1452,9 +1452,13 @@ const WikiNoteSchema = z.object({
   text: z.string(),
   at: z.string(),
 });
-/** `stale`: a table the pages read changed since the last build caught up (K01-R7). */
+/**
+ * `stale`: a table the pages read changed since the last build caught up (K01-R7). `buildDead`: stale, and the
+ * last build job gave up, so nothing is retrying until the input changes or the user rebuilds (K01-R5, R16).
+ */
 export const WikiIndexResponseSchema = z.object({
   stale: z.boolean(),
+  buildDead: z.boolean(),
   kinds: z.array(
     z.object({
       kind: z.string(),

@@ -65,6 +65,8 @@ export interface InvalidationContext {
   invalidationId: number;
   /** Whether the registry's policy lets these source versions be put together (false on any doubt, I04-R14). */
   combinable(lineage: readonly SourceVersionRef[]): boolean;
+  /** The registry's clock (ISO time), so a kind stamps what it writes with the injected time. */
+  now(): string;
 }
 
 export interface InvalidationCounts {
@@ -401,6 +403,7 @@ export function createDerivativeRegistry(options: RegistryOptions): DerivativeRe
         collected,
         invalidationId,
         combinable: (versions: readonly SourceVersionRef[]) => combinable(tx, versions),
+        now,
       };
       for (const k of kinds) {
         const { removed, recomputed } = k.invalidate(ctx, collected.get(k.kind) ?? [], change);

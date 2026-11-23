@@ -161,6 +161,7 @@ export {
 export {
   addWikiNote,
   advanceWikiState,
+  isWikiBuildDead,
   isWikiStale,
   lineageOfWikiPage,
   listStoredWikiPages,
@@ -174,6 +175,7 @@ export {
   readWikiState,
   readWikiSummary,
   removeWikiNote,
+  endWikiItemIncarnation,
   removeWikiPage,
   requestWikiBuild,
   requestWikiRebuild,

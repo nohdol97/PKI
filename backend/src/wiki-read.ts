@@ -12,6 +12,7 @@ import {
   addWikiNote,
   effectiveUntil,
   entityGroups,
+  isWikiBuildDead,
   isWikiStale,
   listStoredWikiPages,
   listWikiBacklinks,
@@ -40,14 +41,17 @@ type Edit = RouteRequest<"wikiEdit">;
 const INDEX_LOG_LINES = 50;
 const PAGE_HISTORY_LINES = 100;
 
-/** A log line as the API gives it: no row id. */
-const logLine = (l: WikiLogLine) => ({
+/**
+ * A log line as the API gives it: no row id. The counts come from the stored page, so they count claims the
+ * caller may not see; they are given only when `exact` (K01-D19), else zero.
+ */
+const logLine = (l: WikiLogLine, exact: boolean) => ({
   pageKey: l.pageKey,
   action: l.action,
   knowledgeRevision: l.knowledgeRevision,
   changeSeq: l.changeSeq,
-  added: l.added,
-  removed: l.removed,
+  added: exact ? l.added : 0,
+  removed: exact ? l.removed : 0,
   at: l.at,
 });
 
@@ -128,6 +132,19 @@ export function createWikiReads(
     db
       .all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [id])
       .flatMap((r) => [r.x as number, r.y as number]);
+  /**
+   * Whether the caller sees every claim the page holds (K01-D19): then the change counts, made from the stored
+   * page, name nothing the caller cannot see. A claim of an item outside the caller's group view or a row the
+   * gate hides makes them unknowable per caller, so they are not given.
+   */
+  const countsExact = (stored: StoredWikiPage): boolean => {
+    if (stored.kind === "syntheses") return true;
+    const group = groupOf(Number(stored.target));
+    return (JSON.parse(stored.body) as WikiPageBody).claims.every((c) => {
+      const owner = ownerOf(c.ref.kind, c.ref.id);
+      return owner !== undefined && group.has(owner) && gate.semanticShown(c.ref.kind, c.ref.id);
+    });
+  };
   /** The stored page under `key` when its target is shown. */
   const shownPage = (key: string): StoredWikiPage | undefined => {
     const stored = readStoredWikiPage(db, key);
@@ -172,14 +189,25 @@ export function createWikiReads(
         kinds.set(p.kind, list);
       }
       const shownKeys = new Set(pages.map((p) => p.key));
+      const exact = new Map<string, boolean>();
+      const exactOf = (key: string) => {
+        let ok = exact.get(key);
+        if (ok === undefined) {
+          const page = pages.find((p) => p.key === key);
+          ok = page !== undefined && countsExact(page);
+          exact.set(key, ok);
+        }
+        return ok;
+      };
       const stored = new Set(db.all("SELECT key FROM wiki_pages").map((r) => r.key as string));
       return {
         stale: isWikiStale(db),
+        buildDead: isWikiBuildDead(db),
         kinds: [...kinds].map(([kind, list]) => ({ kind, pages: list })),
         log: listWikiLog(db, { limit: INDEX_LOG_LINES * 4 })
           .filter((l) => shownKeys.has(l.pageKey))
           .slice(0, INDEX_LOG_LINES)
-          .map(logLine),
+          .map((l) => logLine(l, exactOf(l.pageKey))),
         orphanNotes: listWikiNotes(db)
           .filter((n) => !stored.has(n.pageKey))
           .map((n) => ({ id: n.id, pageKey: n.pageKey, text: n.text, at: n.at })),
@@ -324,7 +352,7 @@ export function createWikiReads(
         notes: listWikiNotes(db, key).map((n) => ({ id: n.id, text: n.text, at: n.at })),
         history: listWikiLog(db, { pageKey: key, limit: PAGE_HISTORY_LINES })
           .reverse()
-          .map(logLine),
+          .map((l) => logLine(l, countsExact(stored))),
         summary: summaryOf(stored),
       };
     },

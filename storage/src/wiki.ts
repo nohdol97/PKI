@@ -205,12 +205,65 @@ export function writeWikiSummary(
 
 /** Deletes a page with its lineage and outgoing links, in the caller's transaction, and logs it. */
 export function removeWikiPage(tx: SqlDriver, key: string, at: string): boolean {
-  const stored = tx.all("SELECT body FROM wiki_pages WHERE key = ?", [key])[0];
+  const stored = tx.all("SELECT body, kind, target FROM wiki_pages WHERE key = ?", [key])[0];
   if (!stored) return false;
   const removed = claimKeys(stored.body as string).size;
   tx.run("DELETE FROM wiki_pages WHERE key = ?", [key]);
-  appendLog(tx, { key, action: "removed", added: 0, removed }, at);
+  const table = stored.kind === "syntheses" ? "insights" : "items";
+  if (tx.all(`SELECT 1 FROM ${table} WHERE id = ?`, [Number(stored.target)]).length === 0) {
+    endWikiIncarnation(tx, key);
+  } else {
+    appendLog(tx, { key, action: "removed", added: 0, removed }, at);
+  }
   return true;
+}
+
+/**
+ * The target of a page key is gone for good, and its row id may be handed to an unrelated new row (plain
+ * rowid, no AUTOINCREMENT): the key's change lines go, and the user's notes on it stay as notes on no page
+ * under a key nothing is built for (K01-D20, K01-D7).
+ */
+export function endWikiIncarnation(tx: SqlDriver, key: string): void {
+  tx.run("DELETE FROM wiki_log WHERE page_key = ?", [key]);
+  tx.run(
+    "UPDATE wiki_edits SET page_key = page_key || '#gone' WHERE op = 'note' AND page_key = ?",
+    [key],
+  );
+}
+
+/**
+ * An item row was deleted: ends the incarnation of every item page key naming it, stored or not, and of every
+ * `syntheses/<id>` key whose Insight went with the item (cascade), whether or not its page was still stored.
+ */
+export function endWikiItemIncarnation(tx: SqlDriver, itemId: number): void {
+  const keys = new Set<string>();
+  for (const sql of [
+    "SELECT page_key AS k FROM wiki_log WHERE page_key LIKE ?",
+    "SELECT page_key AS k FROM wiki_edits WHERE op = 'note' AND page_key LIKE ?",
+  ]) {
+    for (const r of tx.all(sql, [`%/${itemId}`])) keys.add(r.k as string);
+  }
+  for (const r of tx.all("SELECT key FROM wiki_pages WHERE target = ? AND kind <> 'syntheses'", [
+    String(itemId),
+  ])) {
+    keys.add(r.key as string);
+  }
+  for (const key of keys) if (!key.startsWith("syntheses/")) endWikiIncarnation(tx, key);
+  for (const sql of [
+    "SELECT page_key AS k FROM wiki_log WHERE page_key LIKE 'syntheses/%'",
+    "SELECT page_key AS k FROM wiki_edits WHERE op = 'note' AND page_key LIKE 'syntheses/%'",
+  ]) {
+    for (const r of tx.all(sql)) {
+      const key = r.k as string;
+      if (
+        /^syntheses\/\d+$/.test(key) &&
+        tx.all("SELECT 1 FROM insights WHERE id = ?", [Number(key.slice("syntheses/".length))])
+          .length === 0
+      ) {
+        endWikiIncarnation(tx, key);
+      }
+    }
+  }
 }
 
 export interface WikiLogLine {
@@ -328,6 +381,22 @@ export type WikiBuildRequest =
 
 const TARGET_PREFIX = "seq:";
 
+const isDeadAt = (db: SqlDriver, inputSeq: number): boolean => {
+  const last = db.all("SELECT status, target FROM jobs WHERE kind = ? ORDER BY id DESC LIMIT 1", [
+    WIKI_BUILD_KIND,
+  ])[0];
+  return (
+    last?.status === "dead_letter" &&
+    Number((last.target as string).slice(TARGET_PREFIX.length)) >= inputSeq
+  );
+};
+
+/** Whether the Wiki is behind and the last build gave up on the input as it stands (K01-R5): nothing is retrying. */
+export const isWikiBuildDead = (db: SqlDriver): boolean => {
+  const { inputSeq, builtSeq } = readWikiState(db);
+  return inputSeq > builtSeq && isDeadAt(db, inputSeq);
+};
+
 /**
  * Queues the one `wiki-build` job when the Wiki is stale (K01-R5). The job's target names the input
  * sequence it was asked at, so a dead letter is read against the sequence now. Call it in the transaction
@@ -345,15 +414,7 @@ export function requestWikiBuild(db: SqlDriver, at: Date = new Date()): WikiBuil
     ) {
       return { status: "open" } as const;
     }
-    const last = db.all("SELECT status, target FROM jobs WHERE kind = ? ORDER BY id DESC LIMIT 1", [
-      WIKI_BUILD_KIND,
-    ])[0];
-    if (
-      last?.status === "dead_letter" &&
-      Number((last.target as string).slice(TARGET_PREFIX.length)) >= inputSeq
-    ) {
-      return { status: "dead" } as const;
-    }
+    if (isDeadAt(db, inputSeq)) return { status: "dead" } as const;
     const registered = registerJob(db, {
       kind: WIKI_BUILD_KIND,
       target: `${TARGET_PREFIX}${inputSeq}`,
