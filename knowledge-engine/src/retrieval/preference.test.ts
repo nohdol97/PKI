@@ -31,7 +31,7 @@ const attrs = {
 const TABLES = ["items", "facts", "relations", "evidence", "feedback"];
 
 /** Six sources with the probe word; an item with a fact resting on the 3rd-ranked one. Feedback is not yet recorded. */
-async function plant(reg: typeof registry = registry) {
+async function plant(reg: typeof registry = registry, groupMate = false) {
   const db: SqlDriver = openBetterSqlite3(":memory:");
   migrate(db);
   registerConnectorInstance(db, "c1", "test-fixtures");
@@ -54,12 +54,22 @@ async function plant(reg: typeof registry = registry) {
     end: [...body].length,
     quote: body,
   });
+  // groupMate: the preference sits on a second item merged under the first (ids 1 and 2), the one a test hides
+  const liked = groupMate
+    ? insertItem(db, { type: "Project", name: "묶음구성원", ...attrs })
+    : item;
+  if (groupMate)
+    db.run("INSERT INTO item_merges (member_id, representative_id, at) VALUES (?, ?, ?)", [
+      liked,
+      item,
+      "2026-11-23T00:00:00.000Z",
+    ]);
   // the base is taken after the item exists (the hit's `related` changes with it) and before the feedback
   const base = await retrieve(db, reg, "프로브낱말");
   recordFeedback(
     db,
     userDecisions,
-    { target: { kind: "item", id: item }, kind: "important" },
+    { target: { kind: "item", id: liked }, kind: "important" },
     "2026-11-23T00:00:00.000Z",
   );
   const counts = () => TABLES.map((t) => db.all(`SELECT count(*) AS n FROM ${t}`)[0]?.n);
@@ -107,6 +117,27 @@ describe("X01-C5b a hidden item's preference moves no hit", () => {
           .filter((r) => !(purpose === "search" && r.kind === "item")),
     };
     const w = await plant(hiding);
+    writeSetting(w.db, FEEDBACK_LEARNED_SETTING, "on");
+    const found = await retrieve(
+      w.db,
+      hiding,
+      "프로브낱말",
+      {},
+      { preference: feedbackPreference(w.db, hiding) },
+    );
+    expect(found.hits).toEqual(w.base.hits);
+    w.db.close();
+  });
+
+  it("also leaves them when only a group mate of the evidenced item is hidden", async () => {
+    const hiding: typeof registry = {
+      ...registry,
+      visible: (db, refs, purpose) =>
+        registry
+          .visible(db, refs, purpose)
+          .filter((r) => !(purpose === "search" && r.kind === "item" && r.id === "2")),
+    };
+    const w = await plant(hiding, true);
     writeSetting(w.db, FEEDBACK_LEARNED_SETTING, "on");
     const found = await retrieve(
       w.db,
