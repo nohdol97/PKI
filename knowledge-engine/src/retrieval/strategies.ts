@@ -135,30 +135,49 @@ export function graphIds(reading: Reading, items: readonly number[]): number[] {
   );
 }
 
-const FACT_WINDOW = 200;
+/** RSP-D1: the dated facts are read in pages of `size`, at most `pages` pages. */
+export const TEMPORAL_PAGING = { size: 200, pages: 5 } as const;
 
 /**
  * `temporal`: the shown, valid facts that carry a time (of the matched items when there are any), narrowed to the
  * dates the question names, newest first; a question about a change puts the facts that replaced another first.
- * The sources are the current evidence of those facts.
+ * The sources are the current evidence of those facts. The facts are read page by page and each page goes through
+ * `admit` (R12 visibility, then the conditions) on its sources before the cut, so a hidden fact takes no place; the
+ * read stops at STRATEGY_LIST_LIMIT admitted sources, at the last page or at the page limit (RSP-R1). The
+ * change-first order runs over the facts read.
  */
-export function temporalIds(reading: Reading, items: readonly number[]): number[] {
+export function temporalIds(
+  reading: Reading,
+  items: readonly number[],
+  admit: (ids: readonly number[]) => number[],
+  paging: { size: number; pages: number } = TEMPORAL_PAGING,
+): number[] {
   const { db, registry, judge, question } = reading;
   const members =
     items.length > 0 ? items.flatMap((id) => entityGroups.membersOf(db, id)) : undefined;
   const factRef = (id: number): DerivedRef => ({ kind: "fact", id: String(id) });
-  const dated = listDatedFacts(db, members, FACT_WINDOW).filter((f) =>
-    isValidRow(db, { kind: "fact", id: f.id }, f.status),
-  );
-  const shown = judge.shown(dated.map((f) => factRef(f.id)));
   const dates = explicitDates(question);
-  const facts = dated
-    .filter((f) => shown.has(refKey(factRef(f.id))))
-    .filter(
-      (f) =>
-        dates.length === 0 ||
-        dates.some((d) => (f.validAt ?? "").startsWith(d) || (f.validUntil ?? "").startsWith(d)),
-    );
+  const sourcesOf = (factId: number) =>
+    listEvidence(db, { factId })
+      .sort((a, b) => Number(b.current) - Number(a.current) || b.id - a.id)
+      .map((e) => e.sourceVersionId);
+  const facts: { id: number }[] = [];
+  const admitted = new Set<number>();
+  for (let page = 0; page < paging.pages; page++) {
+    const rows = listDatedFacts(db, members, paging.size, page * paging.size);
+    const dated = rows.filter((f) => isValidRow(db, { kind: "fact", id: f.id }, f.status));
+    const shown = judge.shown(dated.map((f) => factRef(f.id)));
+    const kept = dated
+      .filter((f) => shown.has(refKey(factRef(f.id))))
+      .filter(
+        (f) =>
+          dates.length === 0 ||
+          dates.some((d) => (f.validAt ?? "").startsWith(d) || (f.validUntil ?? "").startsWith(d)),
+      );
+    facts.push(...kept);
+    for (const id of admit(kept.flatMap((f) => sourcesOf(f.id)))) admitted.add(id);
+    if (admitted.size >= STRATEGY_LIST_LIMIT || rows.length < paging.size) break;
+  }
   const replacing = new Set(
     visibleLinks(
       db,
@@ -174,12 +193,7 @@ export function temporalIds(reading: Reading, items: readonly number[]): number[
   );
   const first = hasChangeWord(question) ? (id: number) => (replacing.has(id) ? 0 : 1) : () => 0;
   const ordered = [...facts].sort((a, b) => first(a.id) - first(b.id));
-  const refs = ordered.flatMap((f) =>
-    listEvidence(db, { factId: f.id })
-      .sort((a, b) => Number(b.current) - Number(a.current) || b.id - a.id)
-      .map((e) => e.sourceVersionId),
-  );
-  return [...new Set(refs)];
+  return [...new Set(ordered.flatMap((f) => sourcesOf(f.id)))];
 }
 
 /** `wiki`: the sources the matched items' Wiki pages rest on (a page that is absent or not shown gives none; D11: the page text is a clue, never evidence). */
@@ -215,14 +229,21 @@ async function statusOf<T>(
   }
 }
 
+/** RSP-D3: the index is asked for `k` = 50, then doubled each time, at most `rounds` asks (50, 100, 200, 400). */
+export const VECTOR_GROWTH = { k: STRATEGY_LIST_LIMIT, rounds: 4 } as const;
+
 /**
- * `vector`: the query embedded and searched through the adapters as they are. Not ready, missing or rebuilding is
+ * `vector`: the query embedded once and searched through the adapters as they are. Not ready, missing or rebuilding is
  * `unavailable` with the adapter's own reason; nothing is faked and nothing falls back to another strategy (D4, D6).
+ * While fewer than STRATEGY_LIST_LIMIT of the answers pass `admit` and the index gave all `k` it was asked for, it is
+ * asked again with `k` doubled, up to the round limit, so hidden sources do not take the places (RSP-R2).
  */
 export async function vectorIds(
   { db, question }: Reading,
   deps: VectorDeps | undefined,
   signal: AbortSignal | undefined,
+  admit: (ids: readonly number[]) => number[],
+  growth: { k: number; rounds: number } = VECTOR_GROWTH,
 ): Promise<VectorOutcome> {
   if (!deps)
     return { status: "unavailable", reason: "no embedding provider or vector index is configured" };
@@ -245,12 +266,17 @@ export async function vectorIds(
     const [query] = await deps.embedding.embed([question], "query", signal);
     if (!query)
       return { status: "unavailable", reason: "the embedding provider returned no vector" };
-    const found = await deps.index.search(query, STRATEGY_LIST_LIMIT);
-    const refs = found.flatMap(({ ref }) => {
-      const m = VECTOR_REF.exec(ref);
-      return m ? [{ sourceId: Number(m[1]), version: Number(m[2]) }] : [];
-    });
-    return { status: "ok", ids: versionIds(db, refs) };
+    let ids: number[] = [];
+    for (let round = 0, k = growth.k; round < growth.rounds; round++, k *= 2) {
+      const found = await deps.index.search(query, k);
+      const refs = found.flatMap(({ ref }) => {
+        const m = VECTOR_REF.exec(ref);
+        return m ? [{ sourceId: Number(m[1]), version: Number(m[2]) }] : [];
+      });
+      ids = versionIds(db, refs);
+      if (found.length < k || admit(ids).length >= STRATEGY_LIST_LIMIT) break;
+    }
+    return { status: "ok", ids };
   } catch (e) {
     if (e instanceof AdapterUnavailableError) return { status: "unavailable", reason: e.message };
     throw e;

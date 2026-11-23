@@ -97,4 +97,34 @@ describe("SqliteVectorIndex file", () => {
     expect(await recovered.embeddingSpace()).toBeNull();
     recovered.close();
   });
+
+  it("throws and keeps the file when opening fails for a reason other than another schema (RSP-C6)", async () => {
+    const path = freshPath();
+    const first = open(path);
+    const build = await first.beginRebuild(SPACE);
+    await build.upsert([{ ref: "a", vector: v(1, 0) }], 1);
+    await build.activate(["a"], 1);
+    first.close();
+
+    let closed = false;
+    const busy = (target: string) => {
+      const db = openBetterSqlite3(target);
+      return {
+        ...db,
+        all: () => {
+          throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+        },
+        close: () => {
+          closed = true;
+          db.close();
+        },
+      };
+    };
+    expect(() => new SqliteVectorIndex(path, busy)).toThrow("database is locked");
+    expect(closed).toBe(true);
+    const again = open(path);
+    expect(await again.status()).toBe("ready");
+    expect((await again.search(v(1, 0), 5)).map((hit) => hit.ref)).toEqual(["a"]);
+    again.close();
+  });
 });

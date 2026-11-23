@@ -494,3 +494,104 @@ describe("X01-R7 RVF-R2 a related link follows only a merge line the search show
     expect(await linkOf(registry)).toEqual([b]);
   });
 });
+
+describe("RSP-C4 RSP-C5 a related link follows only shown evidence and a shown evidenced item", () => {
+  const hide = (hidden: (r: { kind: string; id: string }) => boolean): typeof registry => ({
+    ...registry,
+    visible: (db, refs, purpose) =>
+      registry.visible(db, refs, purpose).filter((r) => !(purpose === "search" && hidden(r))),
+  });
+  /** One source whose only evidence is one fact of item A; `merged` puts A under a second item B. */
+  const plantEvidence = (merged: boolean) => {
+    const db: SqlDriver = openBetterSqlite3(":memory:");
+    migrate(db);
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    const body = "프로브낱말 근거문장";
+    saveSourceRecord(db, "c1", { externalId: "e", title: "t", body, accessScope: ["open"] });
+    const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    const a = insertItem(db, { type: "Project", name: "근거항목", ...attrs });
+    const factId = saveFact(db, { itemId: a, kind: "memo", value: "값", ...attrs }).id;
+    addEvidence(db, {
+      target: { factId },
+      sourceVersionId: versionId,
+      start: 0,
+      end: [...body].length,
+      quote: body,
+    });
+    const b = insertItem(db, { type: "Project", name: "위항목", ...attrs });
+    if (merged)
+      db.run(
+        "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+        [a, b, "2026-11-24T00:00:00.000Z"],
+      );
+    const links = async (reg: typeof registry) =>
+      (await retrieve(db, reg, "프로브낱말")).hits[0]?.related.map((l) => l.itemId);
+    return { a, b, links };
+  };
+
+  it("C4 gives no link when the one fact joining the hit to the item is hidden", async () => {
+    const w = plantEvidence(false);
+    expect(await w.links(registry)).toEqual([w.a]);
+    expect(await w.links(hide((r) => r.kind === "fact"))).toEqual([]);
+  });
+
+  it("C5 gives no link to B when the evidenced item A is hidden, though the merge line and B are shown", async () => {
+    const w = plantEvidence(true);
+    expect(await w.links(registry)).toEqual([w.b]);
+    expect(await w.links(hide((r) => r.kind === "item" && r.id === String(w.a)))).toEqual([]);
+  });
+});
+
+describe("RSP-C2 vector asks the index for more until enough visible sources pass the check", () => {
+  it("embeds once and asks k=50, then 100, when the top 50 are hidden and a visible source follows", async () => {
+    const denying = createProductRegistry({
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) => !scopes.some((s) => s?.includes("denied")),
+      },
+    });
+    const db: SqlDriver = openBetterSqlite3(":memory:");
+    migrate(db);
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    for (let i = 0; i < 60; i++)
+      saveSourceRecord(db, "c1", {
+        externalId: `d${i}`,
+        title: `d${i}`,
+        body: "가려짐",
+        accessScope: ["denied"],
+      });
+    saveSourceRecord(db, "c1", {
+      externalId: "o",
+      title: "o",
+      body: "열림",
+      accessScope: ["open"],
+    });
+    const openId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    const refs = db
+      .all("SELECT source_id, version FROM source_versions ORDER BY id")
+      .map((r) => `source-version:${String(r.source_id)}:${String(r.version)}`);
+    const asked: number[] = [];
+    let embedded = 0;
+    const vector = {
+      embedding: {
+        status: async () => "ready" as const,
+        embed: async () => {
+          embedded++;
+          return [new Float32Array([1])];
+        },
+      },
+      index: {
+        status: async () => "ready" as const,
+        search: async (_q: Float32Array, k: number) => {
+          asked.push(k);
+          return refs.slice(0, k).map((ref) => ({ ref, score: 1 }));
+        },
+      },
+    };
+    const found = await retrieve(db, denying, "무관한 문장", {}, { enabled: ["vector"], vector });
+    expect(found.hits.map((h) => h.versionId)).toEqual([openId]);
+    expect(asked).toEqual([50, 100]);
+    expect(embedded).toBe(1);
+    db.close();
+  });
+});
