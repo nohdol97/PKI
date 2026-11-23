@@ -1894,7 +1894,7 @@ const v33: Migration = (db) => {
       insight_changed_at TEXT,
       status TEXT NOT NULL
         CHECK (status IN ('sent', 'digest', 'deferred', 'dismissed', 'withdrawn')),
-      reason TEXT CHECK (reason IN ('low-confidence', 'below-threshold', 'repeat')),
+      reason TEXT CHECK (reason IN ('low-confidence', 'below-threshold', 'repeat', 'muted')),
       not_before TEXT,
       window_start TEXT,
       window_end TEXT,

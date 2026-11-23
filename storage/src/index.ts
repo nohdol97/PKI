@@ -661,6 +661,7 @@ export {
   countInsightLinesIn,
   DEFAULT_QUIET_HOURS,
   deferNotification,
+  demoteNotificationToDigest,
   dueDeferredNotifications,
   firstInsightLineAt,
   immediateLinesSince,

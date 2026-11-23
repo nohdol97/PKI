@@ -14,6 +14,8 @@ export const NOTIFY_SCAN_LIMIT = 200;
 
 export interface NotifySignal extends RankingSignals {
   insightId: number;
+  /** What the user's feedback says (P03 `preferenceSignals`); none is neither hidden nor muted. */
+  feedback?: { hidden: boolean; muted: boolean };
 }
 
 /** A line already made: whether it told the Insight immediately, and when. */
@@ -24,13 +26,17 @@ export interface PastLine {
   at: string;
 }
 
-export type NotifyDecision = { status: "sent" } | { status: "digest"; reason: NotificationReason };
+export type NotifyDecision =
+  { status: "sent" } | { status: "withdrawn" } | { status: "digest"; reason: NotificationReason };
 
 export function decideNotification(
   signal: NotifySignal,
   past: readonly PastLine[],
   now: Date,
 ): NotifyDecision {
+  // the user's own word comes first: hidden leaves the feed, digest and counts; muted is told in the digest only
+  if (signal.feedback?.hidden) return { status: "withdrawn" };
+  if (signal.feedback?.muted) return { status: "digest", reason: "muted" };
   if (isAutoNotifyExcluded(signal.confidence))
     return { status: "digest", reason: "low-confidence" };
   if (rankInsight(signal, now).score < NOTIFY_THRESHOLD) {

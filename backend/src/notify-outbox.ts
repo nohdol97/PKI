@@ -1,12 +1,13 @@
 // The OS channel of the notifications (P02-R6, R8, R9, R10): the backend's side of the toast. `flush` takes the
-// lines whose OS message waits (`queued`), settles the ones that must not go (closed, read, or no longer holding,
-// P02-R7), keeps the rest in quiet hours and under a snooze, and otherwise writes `handed` for them in a committed
+// lines whose OS message waits (`queued`), settles the ones that must not go (closed, read, no longer holding or muted by
+// the user, P02-R7), keeps the rest in quiet hours and under a snooze, and otherwise writes `handed` for them in a committed
 // transaction and only then posts one message to the shell. That order is the whole of "at most once": a process
 // cut between the two leaves the lines `handed` and never repeats the message (P02-D9). The message holds a kind
 // and two counts, never a name or a sentence; the shell owns the words (P02-R9). The shell's answer is recorded by
 // `acknowledge`. Without a shell, or with the setting off, the lines end `unavailable` and the feed is untouched.
-import { insightHolds, mayDeliver } from "@pki/knowledge-engine";
+import { deliveryVerdict, lineShown } from "@pki/knowledge-engine";
 import {
+  demoteNotificationToDigest,
   listNotifications,
   queuedNotifications,
   readNotifySettings,
@@ -99,7 +100,7 @@ export function unreadCount(db: SqlDriver, registry: Pick<DerivativeRegistry, "v
       n.kind === "insight" &&
       n.status === "sent" &&
       n.readAt === null &&
-      insightHolds(db, registry, {
+      lineShown(db, registry, {
         insightId: n.insightId as number,
         insightChangedAt: n.insightChangedAt,
       }),
@@ -124,12 +125,14 @@ export function createNotifyOutbox(deps: NotifyOutboxDeps): NotifyOutbox {
             setOsState(db, [line.id], "queued", "cancelled");
             continue;
           }
-          const ok = mayDeliver(db, registry, {
+          const verdict = deliveryVerdict(db, registry, {
             insightId: line.insightId as number,
             insightChangedAt: line.insightChangedAt,
           });
-          if (!ok) {
-            withdrawNotification(db, line.id);
+          if (verdict !== "ok") {
+            // a muted Insight stays in the digest; any other refusal leaves the feed (R7, P03)
+            if (verdict === "digest") demoteNotificationToDigest(db, line.id);
+            else withdrawNotification(db, line.id);
             continue;
           }
         }
@@ -147,7 +150,7 @@ export function createNotifyOutbox(deps: NotifyOutboxDeps): NotifyOutbox {
         n.status !== "withdrawn" &&
         n.createdAt >= (line.windowStart as string) &&
         n.createdAt < (line.windowEnd as string) &&
-        insightHolds(db, registry, {
+        lineShown(db, registry, {
           insightId: n.insightId as number,
           insightChangedAt: n.insightChangedAt,
         }),

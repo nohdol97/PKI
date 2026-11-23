@@ -185,7 +185,15 @@ export {
   type NotifySignal,
   type PastLine,
 } from "./notify-rules.ts";
-export { insightHolds, mayDeliver, type DeliveryLine } from "./notify-gate.ts";
+export {
+  deliveryVerdict,
+  insightHolds,
+  insightPreference,
+  lineShown,
+  mayDeliver,
+  type DeliveryLine,
+  type DeliveryVerdict,
+} from "./notify-gate.ts";
 export {
   createNotifyHandler,
   planNotify,

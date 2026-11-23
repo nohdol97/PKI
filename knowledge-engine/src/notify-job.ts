@@ -7,6 +7,7 @@
 // content (P02-R1), a digest's its kind and window start.
 import {
   countInsightLinesIn,
+  demoteNotificationToDigest,
   dueDeferredNotifications,
   firstInsightLineAt,
   immediateLinesSince,
@@ -24,7 +25,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { derivativeRegistry } from "./canonical-kinds.ts";
-import { mayDeliver } from "./notify-gate.ts";
+import { deliveryVerdict, insightPreference } from "./notify-gate.ts";
 import { NOTIFICATION_KIND_NAME } from "./notify-kind.ts";
 import { decideNotification, NOTIFY_REPEAT_WINDOW_MS, NOTIFY_SCAN_LIMIT } from "./notify-rules.ts";
 
@@ -97,31 +98,35 @@ function scan(
         userInputCount: insight.userInputs.length,
         impact: insight.interpretation?.impact ?? null,
         actionability: insight.interpretation?.actionability ?? null,
+        feedback: insightPreference(tx, registry, id),
       },
       immediateLinesSince(tx, id, since),
       at,
     );
     // R7: a line goes to the feed only through the check that stands before every delivery
-    const sent =
-      decision.status === "sent" &&
-      mayDeliver(tx, registry, { insightId: id, insightChangedAt: changedAt });
-    const status = decision.status === "digest" ? "digest" : sent ? "sent" : "withdrawn";
-    insertInsightNotification(tx, {
-      insightId: id,
-      changedAt,
-      status,
-      reason: decision.status === "digest" ? decision.reason : null,
-      at: now,
-    });
+    let status: "sent" | "digest" | "withdrawn" = decision.status;
+    let reason = decision.status === "digest" ? decision.reason : null;
+    if (decision.status === "sent") {
+      const verdict = deliveryVerdict(tx, registry, { insightId: id, insightChangedAt: changedAt });
+      status = verdict === "ok" ? "sent" : verdict === "digest" ? "digest" : "withdrawn";
+      reason = verdict === "digest" ? "muted" : null;
+    }
+    insertInsightNotification(tx, { insightId: id, changedAt, status, reason, at: now });
     counts[status]++;
   }
   for (const line of dueDeferredNotifications(tx, now)) {
-    const ok = mayDeliver(tx, registry, {
+    const verdict = deliveryVerdict(tx, registry, {
       insightId: line.insightId as number,
       insightChangedAt: line.insightChangedAt,
     });
-    if (ok ? returnNotification(tx, line.id) : withdrawNotification(tx, line.id)) {
-      counts[ok ? "returned" : "withdrawn"]++;
+    if (verdict === "ok") {
+      if (returnNotification(tx, line.id)) counts.returned++;
+    } else if (
+      verdict === "digest"
+        ? demoteNotificationToDigest(tx, line.id)
+        : withdrawNotification(tx, line.id)
+    ) {
+      counts[verdict === "digest" ? "digest" : "withdrawn"]++;
     }
   }
   return counts;

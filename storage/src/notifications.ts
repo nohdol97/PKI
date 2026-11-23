@@ -8,7 +8,7 @@ import { readSetting } from "./settings.ts";
 
 export type NotificationKind = "insight" | "daily" | "weekly";
 export type NotificationStatus = "sent" | "digest" | "deferred" | "dismissed" | "withdrawn";
-export type NotificationReason = "low-confidence" | "below-threshold" | "repeat";
+export type NotificationReason = "low-confidence" | "below-threshold" | "repeat" | "muted";
 export type OsState =
   "none" | "queued" | "handed" | "shown" | "unavailable" | "failed" | "cancelled";
 
@@ -190,6 +190,19 @@ export function withdrawNotification(db: SqlDriver, id: number): boolean {
       `UPDATE notifications SET status = 'withdrawn', not_before = NULL,
          os_state = CASE WHEN os_state = 'queued' THEN 'cancelled' ELSE os_state END
         WHERE id = ? AND status <> 'withdrawn'`,
+      [id],
+    ).changes === 1;
+  if (done) touch(db);
+  return done;
+}
+
+/** The user muted the Insight after the line was made: it stays in the digest only, its OS message is cancelled (P02-R7). */
+export function demoteNotificationToDigest(db: SqlDriver, id: number): boolean {
+  const done =
+    db.run(
+      `UPDATE notifications SET status = 'digest', reason = 'muted', not_before = NULL,
+         os_state = CASE WHEN os_state = 'queued' THEN 'cancelled' ELSE os_state END
+        WHERE id = ? AND status IN ('sent', 'deferred') AND kind = 'insight'`,
       [id],
     ).changes === 1;
   if (done) touch(db);

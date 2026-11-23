@@ -42,6 +42,8 @@ P01이 Insight마다 순위(여섯 축)와 신뢰도, "자동 알림 제외" 표
 
 | 순서 | 조건 | 결과(상태 / 사유) |
 |---|---|---|
+| 0a | P03의 `preferenceSignals`가 `hidden`(관련 없음·이미 앎·확인함) | `withdrawn`(줄은 남기되 피드·요약·건수에 나오지 않음) |
+| 0b | 같은 신호가 `muted`(다시 알리지 않기) | `digest` / `muted` |
 | 1 | P01의 `isAutoNotifyExcluded`가 참 | `digest` / `low-confidence` |
 | 2 | `rankInsight` 점수가 문턱(잠정 70) 미만 | `digest` / `below-threshold` |
 | 3 | 같은 Insight를 지난 24시간 안에 즉시 알렸다 | `digest` / `repeat` |
@@ -54,7 +56,7 @@ P01이 Insight마다 순위(여섯 축)와 신뢰도, "자동 알림 제외" 표
 ### 전달
 
 - **P02-R6 피드가 기본 통로다.** `sent` 줄은 OS 통로의 상태와 무관하게 피드에 있다. 사용자 설정 `notifications.os`가 꺼졌거나, 쉘이 없거나(브라우저), OS가 알림을 지원하지 않거나 띄우기에 실패하면 OS 통로만 `unavailable`·`failed`로 끝나고 오류는 내지 않는다.
-- **P02-R7 전하기 직전 확인.** 함수 하나(`mayDeliver`)가 ① 줄의 Insight가 지금 활성이고 `changed_at`이 줄의 것과 같으며 ② 등록부의 `visible(…, "notify")`가 그 Insight를 허용하고 ③ 알림 제외 표시가 서지 않았는지를 본다. 피드에 올릴 때(R4), 다시 알림에서 되돌릴 때, OS로 넘길 때(R8) 모두 이 함수를 지난다. 통과하지 못한 줄은 `withdrawn`이 되고 피드·요약·타임라인에 나오지 않는다. 읽기 경로도 같은 문(용도 `display`)을 지난다.
+- **P02-R7 전하기 직전 확인.** 함수 하나(`mayDeliver`)가 ① 줄의 Insight가 지금 활성이고 `changed_at`이 줄의 것과 같으며 ② 등록부의 `visible(…, "notify")`가 그 Insight를 허용하고 ③ 알림 제외 표시가 서지 않았고 P03의 `preferenceSignals`(용도 `notify`)가 `hidden`·`muted`가 아닌지를 본다(`hidden`이면 철회, `muted`이면 요약으로만 내리고 OS 통로를 취소한다). 피드에 올릴 때(R4), 다시 알림에서 되돌릴 때, OS로 넘길 때(R8) 모두 이 함수를 지난다. 통과하지 못한 줄은 `withdrawn`이 되고 피드·요약·타임라인에 나오지 않는다. 읽기 경로도 같은 문(용도 `display`)을 지난다.
 - **P02-R8 OS 통로는 많아야 한 번이다.** 백엔드의 내보내기 함수가 `queued` 줄을 모아 R7을 확인하고, **한 트랜잭션에서 `handed`로 바꾼 뒤에** 쉘에 메시지 하나를 보낸다. `handed`인 줄은 재시작·재시도 뒤에도 다시 보내지 않는다(놓치는 쪽을 택한다. 피드에 남아 있다). 쉘은 띄운 결과(`shown`·`unavailable`·`failed`)를 답한다.
 - **P02-R9 잠금 화면에 내용이 없다.** 백엔드가 쉘로 보내는 메시지는 `{ type: "notify", id, kind: "insight"|"daily"|"weekly", count, unread }`뿐이고 쉘이 키와 값을 정확히 검사한다(다른 키가 있으면 버린다). 문구는 쉘이 가진 고정 틀 셋에 수만 넣는다(예: "확인할 변경이 3건 있습니다"). 항목 이름·Insight 문장·원본 이름은 어떤 경로로도 OS 알림과 트레이에 가지 않는다.
 - **P02-R10 조용한 시간과 전체 일시 중지.** 설정 `notifications.quietHours`(잠정 기본 22:00~08:00, 끌 수 있음)의 시간대와 `notifications.snoozeUntil` 이전에는 내보내기 함수가 `queued` 줄을 그대로 둔다. 시간이 지나면 쌓인 줄을 **메시지 하나**(건수)로 보낸다. 피드는 이 동안에도 쌓인다.
@@ -84,7 +86,7 @@ P01이 Insight마다 순위(여섯 축)와 신뢰도, "자동 알림 제외" 표
 ```mermaid
 stateDiagram-v2
     [*] --> sent: 판정 4(중요, 직전 확인 통과)
-    [*] --> digest: 판정 1~3(요약으로만)
+    [*] --> digest: 판정 0b·1~3(요약으로만)
     sent --> deferred: 사용자 다시 알림
     deferred --> sent: 시각이 지남(직전 확인 통과) 또는 취소
     sent --> dismissed: 사용자 닫기
@@ -132,7 +134,7 @@ sequenceDiagram
 - **P02-C2b** (R9·R12) 쉘의 알림 모듈에 가짜 Electron 객체를 주면 ① 올바른 메시지에 토스트 한 번이 고정 문구와 수로 뜨고 트레이 툴팁이 읽지 않은 수다. ② 키가 하나 더 있는 메시지(예: `summary`)는 토스트 없이 버려진다. ③ 알림 미지원이면 `unavailable`을 답하고 던지지 않는다. → `apps/desktop/src/notifier.test.ts`
 - **P02-C2c** (R6·R10·R11) ① 조용한 시간 안에서는 `sent` 줄 둘이 피드에 있고 쉘로 간 메시지가 0건이며, 시각을 조용한 시간 뒤로 옮기면 건수 2인 메시지 하나가 간다. ② 쉘이 `unavailable`을 답하거나 쉘이 없어도 피드의 줄은 그대로다. ③ 다시 알림한 줄은 시각 전에는 피드에 없고 지나면 돌아온다. → `backend/src/notify-outbox.test.ts` **[T1 충족]**
 - **P02-C3a** (R1·R8) ① `scan`을 두 번 돌리거나 실패 뒤 다시 돌려도 Insight 하나에 알림 줄이 하나다. ② `handed`를 적은 뒤 메시지를 보내기 전에 끊고 새 프로세스로 내보내기를 돌리면 메시지가 0건이다. `queued`인 채로 끊겼으면 한 번 간다. → `knowledge-engine/src/notify-job.test.ts`, `backend/src/notify-outbox.test.ts` **[T1 충족]**
-- **P02-C3b** (R7·R13) ① 판정 뒤, 내보내기 전에 받치던 원본을 지우면 메시지가 가지 않고 줄이 피드·요약·타임라인에 없으며, 공통 계약(`derivativeKindContract`)이 `notification`에 대해 통과한다. ② 용도 `notify`를 거부하는 범위 정책에서는 줄이 `withdrawn`이고 메시지가 0건이다. **변이**: `mayDeliver`의 범위 확인을 빼면 ②가, 활성 확인을 빼면 ①이 빨개진다. → `backend/src/notify-gate.test.ts`, `knowledge-engine/src/notify-kind.test.ts` **[T1 충족: 변이 둘이 각각 `notify-gate.test.ts`를 빨갛게 함을 확인]**
+- **P02-C3b** (R7·R13) ① 판정 뒤, 내보내기 전에 받치던 원본을 지우면 메시지가 가지 않고 줄이 피드·요약·타임라인에 없으며, 공통 계약(`derivativeKindContract`)이 `notification`에 대해 통과한다. ② 용도 `notify`를 거부하는 범위 정책에서는 줄이 `withdrawn`이고 메시지가 0건이다. ③ (P03 인계) Insight에 `mute` 피드백이 있으면 스캔에서 즉시 보내지 않고 요약으로만 가며, 줄을 큐에 넣은 뒤 `mute`가 오면 내보내기가 OS 통로를 취소한다. **변이**: `mayDeliver`의 범위 확인을 빼면 ②가, 활성 확인을 빼면 ①이 빨개진다. → `backend/src/notify-gate.test.ts`, `knowledge-engine/src/notify-kind.test.ts` **[T1 충족: 변이 둘이 각각 `notify-gate.test.ts`를 빨갛게 함을 확인]**
 - **P02-C3c** (비목표 "앱 밖", R3·R11) ① 호출되면 던지는 Broker를 준 채로 `notify` 작업 셋이 성공한다(Provider 호출 0건). ② `act`의 `op`는 넷뿐이고 그 밖의 값은 400이다. ③ 알림 모듈들(`notify-*.ts`, `notifier.ts`)은 네트워크·Connector·Broker 모듈을 들여오지 않는다(들여오기 대조 시험). → `backend/src/notify-no-egress.test.ts` **[T1 충족: ①·③. ②는 T2]**
 
 ## 미해결 질문 / 검증하지 않은 범위
@@ -164,6 +166,7 @@ sequenceDiagram
 | P02-D14 | 열린 화면의 새로 고침은 5초마다의 순번 읽기다 | 새 전송 통로 없이 브라우저와 쉘에서 같다 | `useChanges` 훅의 구현을 바꾼다 |
 | P02-D15 | 철회되었거나 보이지 않는 Insight의 줄은 타임라인에서도 뺀다 | "없음"과 "가려짐"이 같은 답이어야 한다(기존 읽기 문과 같다) | 글 없이 "해소됨"만 보인다 |
 | P02-D16 | 다시 알림은 정해진 세 값(1시간·4시간·하루)이다 | 입력 검사가 닫힌 목록이다 | 계약의 값 목록 |
+| P02-D17 | 사용자 피드백으로 막는 방식: `hidden`은 `withdrawn`, `muted`만이면 요약으로만(`digest` / `muted`). 줄이 이미 `sent`·`deferred`이거나 OS 통로 `queued`였어도 직전 확인(`deliveryVerdict`)이 같은 규칙으로 내린다 | P03 스펙의 "둘 중 하나라도 참이면 보내지 않는다"를 지키되, 사용자가 숨긴 것은 어디에도 세지 않고 알리지만 않기를 원한 것은 하루 요약에서 볼 수 있게 한다. 한 곳(직전 확인)이 스캔·되돌림·내보내기를 모두 막는다 | `notify-gate.ts`의 `deliveryVerdict`에서 `digest`를 `withdraw`로 바꾸면 `muted`도 철회한다 |
 
 **가정(P01-T03이 합쳐진 뒤 다시 확인).** ① Insight 응답 스키마가 유형·사실 줄·이유 요약·순위(축과 점수)·알림 제외를 갖고 다른 응답에 끼워 쓸 수 있게 내보내진다. ② 읽기 문이 Insight 하나를 ID로 그 모양으로 돌려준다(없으면 `notify-read.ts`가 목록에서 고른다). ③ 순위 입력(해석 열 포함)을 모으는 도우미가 있으면 그것을 쓰고, 없으면 P02가 하나 만들어 T03의 읽기와 같은 값을 내는지 시험한다. ④ 홈은 `useChanges`를 붙이는 한 줄만 고친다. K02-T3(LLM 의견)은 쓰지 않는다. 파일만 겹친다(`composition.ts`, `job-kinds.ts`, `job-text.ts`, `site-setup.md`).
 
@@ -192,3 +195,4 @@ sequenceDiagram
 |---|---|---|---|
 | 2026-11-23 | 초안 작성 | 이 문서 | 이슈 #28 착수(P01-T03·K02-T3 머지 전이라 문서만) |
 | 2026-11-23 | T1 구현 반영: 완료 기준 상태 표시, 계보 없는 행의 공통 계약 통과 확인(D6 대안 불필요), 문턱 70의 도달 범위 측정 기록, 마이그레이션 v33(P03이 v32를 먼저 씀) | 이 문서 | P02-T1(백엔드) 구현. 문턱 값은 도달 가능하여 바꾸지 않음 |
+| 2026-11-23 | P03 반영(rebase): 마이그레이션 v33, 판정 표에 0a·0b(`hidden`·`muted`), R7 ③에 피드백 확인, 결정 D17 | 이 문서 | P03(#253)이 v32·S36을 먼저 합치고 "P02에게" 인계에서 알림 전 `muted` 확인을 P02의 완료 기준으로 넘김 |
