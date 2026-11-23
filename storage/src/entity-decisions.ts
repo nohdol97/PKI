@@ -42,6 +42,10 @@ export type UnmergeResult =
 export type DistinctResult =
   { status: "applied" | "unchanged" } | { status: "refused"; reason: "not-found" | "same-item" };
 
+export type ValidityResult =
+  | { status: "applied"; seq: number; previous: { from: string | null; until: string | null } }
+  | { status: "refused"; reason: "not-found" };
+
 export type SplitRefusal = "not-found" | "row-not-on-item" | "nothing-selected" | "nothing-left";
 
 export type SplitResult =
@@ -80,6 +84,18 @@ export interface EntityDecisions {
     name: string,
     at?: string,
   ): SplitResult;
+  /**
+   * Sets both ends of a fact's or relation's valid interval (S02-R17): one `set-validity` history line (actor
+   * `user`, the two states the same, no dates) and the two columns. `observed_at` is never touched. Returns
+   * the interval it replaced; `not-found` for a row not stored. The caller checks the dates.
+   */
+  setValidity(
+    tx: SqlDriver,
+    row: { kind: "fact" | "relation"; id: number },
+    from: string | null,
+    until: string | null,
+    at?: string,
+  ): ValidityResult;
   /** Sets or clears the distinct mark of a pair (R16); setting it also drops the pair's candidate. */
   setDistinct(tx: SqlDriver, a: ItemId, b: ItemId, on: boolean, at?: string): DistinctResult;
 }
@@ -182,6 +198,30 @@ export function createEntityDecisions(options: EntityDecisionsOptions): EntityDe
       const reached = new Set([...componentOf(tx, member), ...componentOf(tx, representative)]);
       notifyMembership(tx, options.listeners, { items: [...reached], movedRows: [] }, scopeIn(tx));
       return { status: "applied", member, representative };
+    },
+
+    setValidity(tx, row, from, until, at) {
+      const table = row.kind === "fact" ? "facts" : "relations";
+      const old = tx.all(`SELECT valid_at, valid_until FROM ${table} WHERE id = ?`, [row.id])[0];
+      const state = readRow(tx, row);
+      if (!old || !state) return { status: "refused", reason: "not-found" };
+      const seq = writeLine(tx, row, {
+        from: state,
+        to: state,
+        actor: "user",
+        action: "set-validity",
+        at,
+      });
+      tx.run(`UPDATE ${table} SET valid_at = ?, valid_until = ? WHERE id = ?`, [
+        from,
+        until,
+        row.id,
+      ]);
+      return {
+        status: "applied",
+        seq,
+        previous: { from: old.valid_at as string | null, until: old.valid_until as string | null },
+      };
     },
 
     split(tx, item, rows, name, at) {
