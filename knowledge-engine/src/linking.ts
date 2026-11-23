@@ -108,6 +108,8 @@ export function knowledgeCandidates(
       if (!item) return undefined;
       return {
         name: item.name,
+        // the name sent is the representative's own text: no lineage of its own means no known origin, whatever its members' sources
+        nameUnsourced: registry.lineage(db, { kind: "item", id }).length === 0,
         evidenceSourceVersionIds: groupLineage(db, registry, Number(id))
           // a version row the lineage names but the store lacks is an id the Broker cannot read: it refuses the call
           .map((v) => String(findSourceVersionId(db, v.sourceId, v.version) ?? 0)),

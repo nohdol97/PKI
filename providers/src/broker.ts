@@ -75,6 +75,8 @@ export interface ScopeGrader {
 export interface CandidateItem {
   readonly name: string;
   readonly evidenceSourceVersionIds: readonly string[];
+  /** The name itself has no source of its own (a user-authored item): it is graded as unsourced even when `evidenceSourceVersionIds` names a group's sources. */
+  readonly nameUnsourced?: boolean;
 }
 
 /** Existing knowledge items (V02 builds the store). V01 has none: every ID is missing. */
@@ -323,11 +325,20 @@ function scopeClass(stored: StoredSourceVersion, scope: ScopeGrader): ScopeClass
   }
 }
 
+/** The strictest class there is (`strictest([])`); a mapping that throws or answers outside the set judges nothing. */
+function strictestOfNone(grading: ScopeGrading): ScopeClass {
+  try {
+    return asScopeClass(grading.strictest([]));
+  } catch {
+    throw new ScopeUnjudgedError();
+  }
+}
+
 function judgeScope(stored: StoredSourceVersion, { policy, grading }: ScopeGrader): ScopeClass {
   const own = parseScope(stored.accessScope);
   if (!stored.scopeClaimed) return asScopeClass(grading.grade(own));
   const configured = stored.configuredScope;
-  const strictestClass = () => asScopeClass(grading.strictest([]));
+  const strictestClass = () => strictestOfNone(grading);
   // nothing configured (the public default) or nothing claimed: no comparison can show the claim safe
   if (own === null || configured === null) return strictestClass();
   const compared: unknown = policy.compare(own, configured);
@@ -440,9 +451,10 @@ function prepareInputs(deps: BrokerDeps, raw: unknown): Prepared | { reason: Rej
     }
     if (!item) return { reason: "missing-candidate" };
     candidates.push({ id, name: item.name });
-    // a name with no evidence source has no known origin: general (fail closed)
-    if (item.evidenceSourceVersionIds.length === 0) {
-      graded.push({ classification: "general", malicious: false });
+    // a name with no source of its own has no known origin: the mapping's strictest class (R6-2, fail
+    // closed), also when a group's sources are attached to a name the user typed
+    if (item.nameUnsourced === true || item.evidenceSourceVersionIds.length === 0) {
+      graded.push({ classification: strictestOfNone(scope.grading), malicious: false });
     }
     for (const evidenceId of item.evidenceSourceVersionIds) {
       const read = readGraded(deps.db, evidenceId, scope);
