@@ -127,6 +127,8 @@ const idOfFileNo = (fileNo: string): { dev: string; ino: string } => {
   return { dev, ino };
 };
 
+type RootProblem = "root-missing" | "root-not-readable" | "root-changed";
+
 interface WalkedFile {
   path: string;
   size: number;
@@ -233,18 +235,25 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     return now - before.at >= settleMs && now - msOf(f.mtimeNs) > settleMs;
   }
 
-  /** The location is still the folder that was approved (I02B-R7); otherwise nothing is read or deleted. */
-  async function rootIntact(fs: BoundaryFs, location: LocalLocationView): Promise<boolean> {
+  /**
+   * Why the location is not the folder that was approved, or null when it is (I02B-R7): it cannot be
+   * opened, or its real path or identity (`dev`, `ino`) differs. Nothing is read or deleted otherwise.
+   */
+  async function rootProblem(
+    fs: BoundaryFs,
+    location: LocalLocationView,
+  ): Promise<RootProblem | null> {
     try {
-      if ((await fs.realpath(location.realPath)) !== location.realPath) return false;
+      if ((await fs.realpath(location.realPath)) !== location.realPath) return "root-changed";
       const stat = await fs.stat(location.realPath);
-      return (
-        stat.isDirectory() &&
+      return stat.isDirectory() &&
         String(stat.dev) === location.rootDev &&
         String(stat.ino) === location.rootIno
-      );
-    } catch {
-      return false;
+        ? null
+        : "root-changed";
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      return code === "EACCES" || code === "EPERM" ? "root-not-readable" : "root-missing";
     }
   }
 
@@ -269,10 +278,17 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       rootUnavailable: false,
     };
     pass.reports.set(location.id, report);
-    if (!(await rootIntact(fs, location))) {
+    const problem = await rootProblem(fs, location);
+    if (problem !== null) {
       report.rootUnavailable = true;
+      if (location.state !== "unavailable" || location.stateReason !== problem) {
+        p.setLocationState(location.id, "unavailable", problem);
+      }
       return;
     }
+    // a root that was away and fits again is read again; one whose identity changed waits for the
+    // user's relink (I02B-R7, R9)
+    if (location.state === "unavailable") p.setLocationState(location.id, "active", null);
 
     // walk; a thrown traversal rejects the sync and nothing is written as deleted (D7)
     const files: WalkedFile[] = [];
@@ -556,7 +572,8 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     }
     for (const location of p.locations()) {
       if (location.type !== "folder") continue;
-      if (!isRead(location)) continue;
+      if (location.state === "unavailable" && location.stateReason === "root-changed") continue;
+      if (!isRead(location) && location.state !== "unavailable") continue;
       signal.throwIfAborted();
       await scanLocation(p, pass, location, full, signal);
     }

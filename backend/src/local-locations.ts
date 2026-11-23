@@ -6,6 +6,7 @@ import { checkApproval, type ApprovalContext, type BoundaryFs } from "@pki/conne
 import type {
   LocalApprovalRejectionCode,
   LocalApprovalRequest,
+  LocalRelinkRequest,
   LocalFilesSettings,
   LocalFilesSettingsPatch,
   LocalLocationInfo,
@@ -18,6 +19,7 @@ import {
   listLocations,
   newLocalId,
   readSetting,
+  relinkLocation,
   writeSetting,
   type LocalFileIndex,
   type LocalLocation,
@@ -140,8 +142,16 @@ export function locationTicket(
 export type ApprovalAnswer =
   LocalLocationInfo | { error: "approval-rejected"; code: LocalApprovalRejectionCode };
 
+/** A relink's answer: the location, a refused check, an unknown location, or one that is not in a state that relinks (I02B-R9). */
+export type RelinkAnswer =
+  | LocalLocationInfo
+  | { error: "approval-rejected"; code: LocalApprovalRejectionCode }
+  | { error: "not-found" }
+  | { error: "bad-request" };
+
 export interface LocalLocations {
   approve(request: LocalApprovalRequest): Promise<ApprovalAnswer>;
+  relink(request: LocalRelinkRequest): Promise<RelinkAnswer>;
   list(): LocalLocationList;
   settings(): LocalFilesSettings;
   writeSettings(
@@ -176,11 +186,14 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     code,
   });
 
+  /** The path a request stands for: a ticket's, or a typed one only where the build has an input field for it (I02B-R37). */
+  function pathOf(request: { ticket?: string | undefined; path?: string | undefined }) {
+    if (request.ticket !== undefined) return options.tickets.redeem(request.ticket, "folder");
+    return options.buildKind !== "production" ? request.path : undefined;
+  }
+
   async function approveOne(request: LocalApprovalRequest): Promise<ApprovalAnswer> {
-    let path: string | undefined;
-    if (request.ticket !== undefined) path = options.tickets.redeem(request.ticket, request.type);
-    // a typed path only where the build has an input field for one (development, test)
-    else if (options.buildKind !== "production") path = request.path;
+    const path = pathOf(request);
     if (path === undefined) return rejected("ticket-required");
 
     const context: ApprovalContext = {
@@ -211,6 +224,40 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     }
     const stored = listLocations(db).find((l) => l.id === id) as LocalLocation;
     return view(stored);
+  }
+
+  async function relinkOne(request: LocalRelinkRequest): Promise<RelinkAnswer> {
+    const location = listLocations(db).find((l) => l.id === request.locationId);
+    if (!location) return { error: "not-found" };
+    if (location.state !== "unavailable" && location.state !== "needs-confirmation") {
+      return { error: "bad-request" };
+    }
+    const path = pathOf(request);
+    if (path === undefined) return rejected("ticket-required");
+    // the same checks as an approval; the location itself is left out of the overlap check (I02B-R9)
+    const checked = await checkApproval(
+      { kind: "folder", path },
+      {
+        forbidden: options.forbidden,
+        locations: listLocations(db),
+        ignoreLocationId: location.id,
+        isDocumentFile: () => false,
+        ...(options.fs ? { fs: options.fs } : {}),
+      },
+    );
+    if (!checked.ok) return rejected(checked.code);
+    relinkLocation(db, location.id, {
+      displayPath: checked.displayPath,
+      realPath: checked.realPath,
+      rootDev: checked.dev,
+      rootIno: checked.ino,
+    });
+    try {
+      options.onApproved();
+    } catch (error) {
+      log("local-sync-register-failed", { error: errorClass(error) });
+    }
+    return view(listLocations(db).find((l) => l.id === location.id) as LocalLocation);
   }
 
   function view(location: LocalLocation): LocalLocationInfo {
@@ -245,6 +292,11 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     approve(request) {
       // one approval at a time: two requests for the same place cannot both pass the overlap check
       const run = queue.then(() => approveOne(request));
+      queue = run.catch(() => undefined);
+      return run;
+    },
+    relink(request) {
+      const run = queue.then(() => relinkOne(request));
       queue = run.catch(() => undefined);
       return run;
     },

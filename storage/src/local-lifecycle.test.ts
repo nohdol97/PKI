@@ -10,7 +10,7 @@ import {
   type EntryFields,
   type NewEntry,
 } from "./local-files.ts";
-import { closeLocation, reopenLocation } from "./local-lifecycle.ts";
+import { closeLocation, relinkLocation, reopenLocation } from "./local-lifecycle.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
@@ -97,5 +97,39 @@ describe("reopenLocation", () => {
     expect(after[announced.externalId]).toBe(before[announced.externalId]);
     for (const e of [behind, never, gone]) expect(after[e.externalId]).toBeGreaterThan(mark);
     expect(index.lastSeq()).toBe(mark + 3);
+  });
+});
+
+describe("relinkLocation", () => {
+  it("writes the new path and identity under the same id, lets go of held deletions and reads the location again", () => {
+    const index = createLocalFileIndex(db);
+    const held = present("a.md");
+    index.insertEntry(held, []);
+    const e = index.entryOf(held.externalId)!;
+    index.updateEntry(e.externalId, e.seq, { ...(e as unknown as EntryFields), pendingDelete: 1 });
+    closeLocation(db, loc, "unavailable", "root-changed");
+
+    expect(
+      relinkLocation(db, loc, { displayPath: "/y", realPath: "/y", rootDev: "3", rootIno: "4" }),
+    ).toBe(true);
+
+    expect(readLocation(db, loc)).toMatchObject({
+      id: loc,
+      displayPath: "/y",
+      realPath: "/y",
+      rootDev: "3",
+      rootIno: "4",
+      state: "active",
+      stateReason: null,
+    });
+    expect(index.entryOf(held.externalId)).toMatchObject({ pendingDelete: 0 });
+    expect(
+      relinkLocation(db, newLocalId(), {
+        displayPath: "/z",
+        realPath: "/z",
+        rootDev: "1",
+        rootIno: "1",
+      }),
+    ).toBe(false);
   });
 });

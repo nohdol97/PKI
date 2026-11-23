@@ -65,3 +65,34 @@ export function reopenLocation(db: SqlDriver, id: string, reason: string | null 
     { immediate: true },
   );
 }
+
+/** The folder a relink gives the location (I02B-R9): what the user chose and what the OS resolved. */
+export interface RelinkTarget {
+  displayPath: string;
+  realPath: string;
+  rootDev: string;
+  rootIno: string;
+}
+
+/**
+ * The location is the folder `target` now, under the same id: the path and identity are written, held
+ * deletions are let go (the next pass judges them again against the new folder) and the location is
+ * read again. False when there is no such location.
+ */
+export function relinkLocation(db: SqlDriver, id: string, target: RelinkTarget): boolean {
+  return db.transaction(
+    () => {
+      const changed = db.run(
+        "UPDATE local_locations SET display_path = ?, real_path = ?, root_dev = ?, root_ino = ? WHERE id = ?",
+        [target.displayPath, target.realPath, target.rootDev, target.rootIno, id],
+      ).changes;
+      if (changed !== 1) return false;
+      db.run(
+        "UPDATE local_file_entries SET pending_delete = 0 WHERE location_id = ? AND pending_delete = 1",
+        [id],
+      );
+      return reopenLocation(db, id);
+    },
+    { immediate: true },
+  );
+}

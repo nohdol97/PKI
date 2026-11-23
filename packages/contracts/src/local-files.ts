@@ -128,6 +128,8 @@ export interface LocalLocationView {
   rootDev: string;
   rootIno: string;
   state: "active" | "paused" | "unavailable" | "needs-confirmation" | "revoking";
+  /** Why the state is what it is (`root-missing`, `root-changed`, ...), null for none. */
+  stateReason: string | null;
 }
 
 /** The part of the isolated normalizer's result the connector reads. */
