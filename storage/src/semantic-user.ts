@@ -43,7 +43,7 @@ import { scopesOfVersions } from "./derivatives.ts";
 import { defaultScopePolicy, mayCombine } from "./scope-policy.ts";
 import { userOntology, type UserOntologyDecisions } from "./ontology.ts";
 import type { SqlDriver } from "./sql-driver.ts";
-import { endWikiItemIncarnation } from "./wiki.ts";
+import { endWikiItemIncarnation, removeWikiItemPages } from "./wiki.ts";
 
 export type UserAction = "approve" | "reject" | "dispute";
 
@@ -254,6 +254,7 @@ function undoCreated(
     }
     tx.run("DELETE FROM items WHERE id = ?", [ref.id]);
     endWikiItemIncarnation(tx, ref.id); // the id may be reused: nothing of the page's history follows it
+    removeWikiItemPages(tx, ref.id); // and neither does the stored page, which a build would only replace later
     return { status: "removed" };
   }
   const held =
