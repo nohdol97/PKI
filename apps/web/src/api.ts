@@ -17,11 +17,14 @@ export const DEV_SESSION_PATH = "/__pki/session";
 export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
-  constructor(code: string, status: number) {
+  /** An approval's refusal reason (the body's `code`), which the error schema does not name (I02B-R5). */
+  readonly detail: string | undefined;
+  constructor(code: string, status: number, detail?: string) {
     super(`API ${status}: ${code}`);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -47,7 +50,14 @@ export function createApiClient(session: Session, fetchImpl: typeof fetch = fetc
     const body: unknown = await res.json();
     if (!res.ok) {
       const parsed = ErrorResponseSchema.safeParse(body);
-      throw new ApiError(parsed.success ? parsed.data.error : "internal-error", res.status);
+      const detail = (body as { code?: unknown } | null)?.code;
+      throw new ApiError(
+        parsed.success ? parsed.data.error : "internal-error",
+        res.status,
+        parsed.success && parsed.data.error === "approval-rejected" && typeof detail === "string"
+          ? detail
+          : undefined,
+      );
     }
     return route.response.parse(body) as RouteResponse<typeof name>;
   };

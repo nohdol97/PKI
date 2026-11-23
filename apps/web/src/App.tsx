@@ -34,6 +34,7 @@ import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts
 import { Insights } from "./evidence-view.tsx";
 import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
+import { LocalLocations } from "./local-locations.tsx";
 import { invalidationText } from "./job-text.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
 import {
@@ -486,6 +487,7 @@ function Settings({ api }: { api: ApiClient }) {
       <Consents api={api} />
       <ConnectionTest api={api} />
       <BackgroundExecution api={api} />
+      <LocalLocations api={api} />
     </>
   );
 }
