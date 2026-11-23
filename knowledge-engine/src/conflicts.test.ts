@@ -80,7 +80,9 @@ function fact(itemId: number, { value, from, until, observedAt, status, source }
   });
   return saved.id;
 }
-const allow = { combinable: (_lineage: readonly SourceVersionRef[]) => true };
+const allow: { combinable(lineage: readonly SourceVersionRef[]): boolean } = {
+  combinable: () => true,
+};
 const refresh = (items: number[], scope = allow) =>
   db.transaction(() => refreshConflicts(db, items, scope, { at: T }));
 const links = () =>

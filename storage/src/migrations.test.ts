@@ -2252,7 +2252,9 @@ describe("schema v26 (S02-T08, S02-R17, R18)", () => {
     ]);
     expect(db.all("SELECT valid_until FROM relations")).toEqual([{ valid_until: null }]);
     const strip = (rows: Record<string, unknown>[]) =>
-      rows.map(({ valid_until: _gone, ...rest }) => rest);
+      rows.map((row) =>
+        Object.fromEntries(Object.entries(row).filter(([k]) => k !== "valid_until")),
+      );
     expect(strip(db.all("SELECT * FROM facts ORDER BY id"))).toEqual(strip(before));
     expect(strip(db.all("SELECT * FROM relations"))).toEqual(strip(relationBefore));
     expect(db.all("SELECT dropped_validity FROM jobs")).toEqual([]);
