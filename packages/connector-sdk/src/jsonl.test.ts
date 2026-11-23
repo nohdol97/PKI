@@ -44,6 +44,27 @@ const line = (patch: Record<string, unknown> = {}) => {
   return JSON.stringify(record);
 };
 
+describe("import.attachments: the optional attachments field (I02C-C3)", () => {
+  const att = { name: "plan.pdf", media_type: "application/pdf", size: 10 };
+
+  it("carries attachments to the change with mediaType, and a line without it has none", () => {
+    const { lines } = parseJsonl([line({ attachments: [att] }), line()].join("\n"));
+    const first = lines[0]?.change;
+    const second = lines[1]?.change;
+    expect(first?.kind === "upsert" && first.record.attachments).toEqual([
+      { name: "plan.pdf", mediaType: "application/pdf", size: 10 },
+    ]);
+    expect(second?.kind === "upsert" && second.record.attachments).toBeUndefined();
+  });
+
+  it("refuses a name with a backslash on that line only, naming the field", () => {
+    const text = [line({ attachments: [{ ...att, name: "a\\b.pdf" }] }), line()].join("\n");
+    const { lines, rejected } = parseJsonl(text);
+    expect(rejected).toEqual([{ line: 1, code: "schema", field: "attachments" }]);
+    expect(lines.map((l) => l.line)).toEqual([2]);
+  });
+});
+
 describe("import.revoke-switch: the operation to change kind function (V02-T04's, switched)", () => {
   it("maps revoke to scope-change and access-revoked to access-revoked", () => {
     expect(changeKindOf("upsert")).toBe("upsert");

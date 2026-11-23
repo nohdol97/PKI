@@ -358,6 +358,30 @@ describe("contract-suite.red", () => {
       "sdk-version-mismatch",
     ],
     [
+      "a block naming an attachment past the record's list",
+      () =>
+        base(
+          scenario({
+            initial: replace(
+              initial(),
+              "c",
+              upsert(
+                record("", "c", 3, {
+                  attachments: [
+                    { name: "a.pdf", mediaType: "application/pdf", size: 1 },
+                    { name: "b.pdf", mediaType: "application/pdf", size: 2 },
+                  ],
+                  blocks: [
+                    { start: 0, end: 4, attachment: 2, locator: { format: "pdf", page: 1 } },
+                  ],
+                }),
+              ),
+            ),
+          }),
+        ),
+      "invalid-blocks",
+    ],
+    [
       "a record naming its own instance fails the schema",
       () =>
         base(
