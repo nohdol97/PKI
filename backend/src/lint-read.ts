@@ -4,7 +4,13 @@
 // be put together (`combinable`). The counts are of the shown findings alone, so a hidden finding leaves no
 // trace in a number. A finding the caller may not see answers `not-found`, as for any hidden row.
 import type { RouteRequest, RouteResponse } from "@pki/contracts";
-import { decideFinding, hasRuleShape, reportMissed, type LintEntries } from "@pki/knowledge-engine";
+import {
+  decideFinding,
+  hasRuleShape,
+  itemsOfFinding,
+  reportMissed,
+  type LintEntries,
+} from "@pki/knowledge-engine";
 import {
   countDirty,
   lineageOfFinding,
@@ -23,6 +29,8 @@ type Finding = Lint["findings"][number];
 
 /** Provisional: evidence ids one finding lists. */
 const EVIDENCE_PER_FINDING = 10;
+
+class HiddenReport extends Error {}
 
 export interface LintReads {
   list(): Lint;
@@ -49,9 +57,21 @@ export function createLintReads(
       ? [t.a, ...(t.b === null ? [] : [t.b])].map((id) => ({ kind: "item" as const, id }))
       : [{ kind: t.kind, id: t.a }];
 
+  /**
+   * Every row of the target and every item it sits on is stored and shown: a fact's or relation's lineage is
+   * a part of its item's, so the row can be shown while the item it names is not (the graph read asks both).
+   */
+  const targetShown = (t: FindingTarget): boolean => {
+    const items = itemsOfFinding(db, t);
+    return (
+      items !== undefined &&
+      rowsOf(t).every((r) => gate.semanticShown(r.kind, r.id)) &&
+      items.every((i) => gate.semanticShown("item", i))
+    );
+  };
   /** The one judgement every read goes through. */
   const shown = (f: StoredFinding): boolean =>
-    rowsOf(f.target).every((r) => gate.semanticShown(r.kind, r.id)) &&
+    targetShown(f.target) &&
     registry.visible(db, [{ kind: "lint-finding", id: String(f.id) }], "display").length === 1 &&
     registry.combinable(db, lineageOfFinding(db, f.id));
 
@@ -179,15 +199,19 @@ export function createLintReads(
       const target: FindingTarget = { kind: request.kind, a: request.a, b: request.b ?? null };
       if (!hasRuleShape(request.rule, target)) return { error: "bad-request" };
       // a row that is absent, deleted or hidden: the one answer
-      if (!rowsOf(target).every((r) => gate.semanticShown(r.kind, r.id))) {
-        return { status: "not-found" };
+      if (!targetShown(target)) return { status: "not-found" };
+      // a report the caller could not see afterwards is rolled back whole, not left stored
+      try {
+        return db.transaction(() => {
+          const done = reportMissed(db, { rule: request.rule, target }, at);
+          if (done.status === "refused") return { status: "not-found" as const };
+          if (!shown(done.finding)) throw new HiddenReport();
+          return { status: done.status, finding: view(done.finding) };
+        });
+      } catch (error) {
+        if (error instanceof HiddenReport) return { status: "not-found" };
+        throw error;
       }
-      return db.transaction(() => {
-        const done = reportMissed(db, { rule: request.rule, target }, at);
-        if (done.status === "refused" || !shown(done.finding))
-          return { status: "not-found" as const };
-        return { status: done.status, finding: view(done.finding) };
-      });
     },
   };
 }

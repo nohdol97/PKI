@@ -19,7 +19,7 @@ import {
   type SourceChange,
   type SqlDriver,
 } from "@pki/storage";
-import { itemsOfFinding, lintFindings } from "./lint-rules.ts";
+import { itemsOfFinding, lineageOfTarget, lintFindings } from "./lint-rules.ts";
 
 export const LINT_FINDING_KIND_NAME = "lint-finding";
 
@@ -57,7 +57,19 @@ export const LINT_FINDING_KIND: DerivativeKind = {
     for (const { ref } of [...snapshot].sort((a, b) => Number(a.ref.id) - Number(b.ref.id))) {
       const finding = readFinding(tx, Number(ref.id));
       if (!finding) continue;
-      const items = itemsOfFinding(tx, finding.target) ?? [];
+      const items = itemsOfFinding(tx, finding.target);
+      // a finding whose target row is gone goes; what the user said (a reported miss, an accepted finding)
+      // stays while its targets do, with the lineage that is left (R13)
+      if (items === undefined) {
+        if (removeFinding(tx, finding.id)) removed++;
+        continue;
+      }
+      if (finding.origin === "user" || finding.status === "accepted") {
+        if (replaceFindingLineage(tx, finding.id, lineageOfTarget(tx, finding.target, items))) {
+          recomputed++;
+        }
+        continue;
+      }
       const groups = [...new Set(items.map((i) => entityGroups.representativeOf(tx, i)))];
       const again = lintFindings(tx, groups, at).find(
         (f) => fingerprintOf(f.rule, f.target) === finding.fingerprint,

@@ -22,6 +22,7 @@ import {
 } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { derivativeRegistry, propagateCanonical } from "./canonical-kinds.ts";
+import { reportMissed } from "./lint-decide.ts";
 import { LINT_FINDING_KIND } from "./lint-kind.ts";
 import { reflectNow, NOW } from "./lint.test-support.ts";
 import { addFact, addItem, addSource, cite } from "./wiki.test-support.ts";
@@ -169,5 +170,57 @@ describe("lint.kind: a deleted source leaves no finding or lineage row that rest
         Number(w.rows.shared),
       ]),
     ).toEqual([{ source_id: w.b.sourceId }]);
+  });
+});
+
+describe("lint.kind: what the user said stays while its targets do, and a finding does not outlive its targets (K02-R13)", () => {
+  it("keeps a reported miss through the deletion of a source of its lineage, with the lineage that is left", () => {
+    const s1 = addSource(db, "s1", "s1 본문");
+    const s2 = addSource(db, "s2", "s2 본문");
+    const s3 = addSource(db, "s3", "s3 본문");
+    const x = addItem(db, "Project", "X");
+    const y = addItem(db, "Project", "Y");
+    cite(db, { factId: addFact(db, x, "memo", "x1") }, s1.id);
+    cite(db, { factId: addFact(db, x, "memo", "x2") }, s2.id);
+    cite(db, { factId: addFact(db, y, "memo", "y1") }, s1.id);
+    cite(db, { factId: addFact(db, y, "memo", "y3") }, s3.id);
+    const done = reportMissed(
+      db,
+      { rule: "missing-link", target: { kind: "item", a: x, b: y } },
+      NOW,
+    );
+    expect(done.status).toBe("applied");
+
+    deleteSource(s3.sourceId);
+
+    expect(listFindings(db).map((f) => `${f.origin}:${f.status}`)).toEqual(["user:open"]);
+    expect(
+      db.all("SELECT DISTINCT source_id FROM lint_finding_lineage ORDER BY source_id"),
+    ).toEqual([{ source_id: s1.sourceId }, { source_id: s2.sourceId }]);
+  });
+
+  it("deletes a missing-link finding when a source that is not one of the shared ones takes its item", () => {
+    const s1 = addSource(db, "s1", "s1 본문");
+    const s2 = addSource(db, "s2", "s2 본문");
+    const s3 = addSource(db, "s3", "s3 본문");
+    const a = addItem(db, "Project", "A");
+    const m = addItem(db, "Project", "M");
+    const b = addItem(db, "Project", "B");
+    cite(db, { factId: addFact(db, a, "memo", "a") }, s3.id);
+    cite(db, { factId: addFact(db, m, "memo", "m1") }, s1.id);
+    cite(db, { factId: addFact(db, m, "memo", "m2") }, s2.id);
+    cite(db, { factId: addFact(db, b, "memo", "b1") }, s1.id);
+    cite(db, { factId: addFact(db, b, "memo", "b2") }, s2.id);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [m, a],
+    );
+    reflectNow(db);
+    const found = listFindings(db).filter((f) => f.rule === "missing-link");
+    expect(found).toHaveLength(1);
+
+    deleteSource(s3.sourceId); // takes item A, which only s3 built
+
+    expect(listFindings(db).filter((f) => f.rule === "missing-link")).toEqual([]);
   });
 });

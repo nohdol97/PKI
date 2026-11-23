@@ -144,3 +144,85 @@ describe("lint.gate: what the policy refuses is not in the answer (K02-C3b ③)"
     expect(lint.decide({ id: 999_999, op: "dismiss" }, AT)).toEqual({ status: "not-found" });
   });
 });
+
+/** A source of `scope` with its own body; the id of its stored version row. */
+function sourceOf(name: string, scope: string, body = `${name} 본문`) {
+  const saved = saveSourceRecord(db, "c1", {
+    externalId: name,
+    title: name,
+    body,
+    accessScope: [scope],
+  });
+  if (saved.status !== "created") throw new Error(saved.status);
+  return db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+}
+function cited(itemId: number, kind: string, value: string, versionId: number) {
+  const factId = saveFact(db, { itemId, kind, value, ...attrs }).id;
+  const body = db.all("SELECT body FROM source_versions WHERE id = ?", [versionId])[0]
+    ?.body as string;
+  addEvidence(db, {
+    target: { factId },
+    sourceVersionId: versionId,
+    start: 0,
+    end: [...body].length,
+    quote: body,
+  });
+  return factId;
+}
+
+describe("lint.gate: a finding does not name an item the caller may not see (K02 review B-F1)", () => {
+  it("shows no stale finding of a hidden item, and a report on its fact answers not-found and stores nothing", () => {
+    const secret = sourceOf("secret", "secret");
+    sourceOf("pub", "open", "공개 본문 하나");
+    saveSourceRecord(db, "c1", {
+      externalId: "pub",
+      title: "pub",
+      body: "공개 본문 둘",
+      accessScope: ["open"],
+    });
+    const oldVersion = db.all("SELECT id FROM source_versions WHERE body = '공개 본문 하나'")[0]
+      ?.id as number;
+    const hidden = insertItem(db, { type: "Person", name: `${SECRET} 사람`, ...attrs });
+    cited(hidden, "memo", "비밀 값", secret); // this fact's source hides the item
+    const old = cited(hidden, "memo", "지난 값", oldVersion); // stale: only an old version of a public source
+    const lint = reads(refuseSecret);
+
+    const reported = lint.report({ rule: "stale", kind: "fact", a: old }, AT);
+    expect(reported).toEqual({ status: "not-found" });
+    expect(db.all("SELECT count(*) AS n FROM lint_findings")[0]?.n).toBe(0);
+
+    reflect();
+    expect(db.all("SELECT rule FROM lint_findings")).toEqual([{ rule: "stale" }]);
+    expect(JSON.stringify(lint.list())).not.toContain(SECRET);
+    expect(lint.list().findings).toEqual([]);
+  });
+
+  it("shows no synonym finding whose group has a member of the refused scope (the lineage conjuncts of the gate)", () => {
+    const open = sourceOf("open", "open");
+    const secret = sourceOf("secret", "secret");
+    const x = insertItem(db, { type: "Project", name: "물결 가", ...attrs });
+    const y = insertItem(db, { type: "Project", name: "물결 나", ...attrs });
+    const z = insertItem(db, { type: "Project", name: "다른 이름", ...attrs });
+    cited(x, "memo", "공개 가", open);
+    cited(y, "memo", "공개 나", open);
+    cited(y, "alias.name", "물결 가", open); // an alias that is not verified: the synonym rule's case
+    cited(z, "memo", "비밀 값", secret);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [z, x],
+    );
+    reflect();
+    expect(db.all("SELECT rule FROM lint_findings WHERE rule = 'synonym'")).toHaveLength(1);
+
+    expect(
+      reads(allowAll)
+        .list()
+        .findings.filter((f) => f.rule === "synonym"),
+    ).toHaveLength(1);
+    expect(
+      reads(refuseSecret)
+        .list()
+        .findings.filter((f) => f.rule === "synonym"),
+    ).toEqual([]);
+  });
+});

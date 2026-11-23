@@ -5,21 +5,17 @@
 // "different thing" mark). A report of something the rules missed is stored as an open finding of origin
 // `user`. The visibility of the rows is the caller's check (the read gate), as for every user entry.
 import {
-  entityGroups,
   fingerprintOf,
   findFinding,
   insertFinding,
   readFinding,
-  rowLineage,
   setFindingStatus,
-  unionOfVersions,
   type FindingTarget,
   type LintRule,
-  type SourceVersionRef,
   type SqlDriver,
   type StoredFinding,
 } from "@pki/storage";
-import { itemsOfFinding } from "./lint-rules.ts";
+import { itemsOfFinding, lineageOfTarget } from "./lint-rules.ts";
 
 export type LintOp = "accept" | "dismiss" | "reopen";
 
@@ -160,10 +156,7 @@ export function reportMissed(
   if (!items) return { status: "refused", reason: "not-found" };
   const existing = findFinding(tx, fingerprintOf(rule, target));
   if (existing) return { status: "exists", finding: existing };
-  const lineage: SourceVersionRef[] =
-    target.kind === "item"
-      ? unionOfVersions(...items.map((i) => entityGroups.lineageOf(tx, i)))
-      : rowLineage(tx, { kind: target.kind, id: target.a });
+  const lineage = lineageOfTarget(tx, target, items);
   const id = insertFinding(tx, { rule, target, origin: "user", status: "open", lineage, at });
   return { status: "applied", finding: readFinding(tx, id) as StoredFinding };
 }

@@ -186,17 +186,15 @@ function missingLinks(db: SqlDriver, reps: readonly number[]): LintFinding[] {
       )
       .sort((x, y) => y.shared.length - x.shared.length || x.other - y.other)
       .slice(0, MISSING_LINK_PAIRS_PER_GROUP);
-    for (const { other, shared } of scored) {
+    for (const { other } of scored) {
       const [a, b] = ordered(rep, other);
       if (seen.has(`${a}:${b}`)) continue;
       seen.add(`${a}:${b}`);
       found.push({
         rule: "missing-link",
         target: { kind: "item", a, b },
-        // the versions the two groups came together in: those of the sources they share
-        lineage: unionOfVersions(lineageOfGroup(a), lineageOfGroup(b)).filter((v) =>
-          shared.includes(v.sourceId),
-        ),
+        // R7: the union of the two groups' lineage, so a deletion that takes either item reaches the finding
+        lineage: unionOfVersions(lineageOfGroup(a), lineageOfGroup(b)),
       });
     }
   }
@@ -221,6 +219,17 @@ export function itemsOfFinding(db: SqlDriver, t: FindingTarget): number[] | unde
     JSON.stringify(ends),
   ]).length;
   return stored === new Set(ends).size ? ends : undefined;
+}
+
+/** The lineage of a finding's target rows: the groups' of two items, the row's own for a fact or relation (R7). */
+export function lineageOfTarget(
+  db: SqlDriver,
+  t: FindingTarget,
+  items: readonly number[],
+): SourceVersionRef[] {
+  return t.kind === "item"
+    ? unionOfVersions(...items.map((i) => entityGroups.lineageOf(db, i)))
+    : rowLineage(db, { kind: t.kind, id: t.a });
 }
 
 /** Every rule over the groups `reps` (representatives, ascending), each finding once. */

@@ -232,6 +232,19 @@ function reconcile(
       !inRange(stored)
     )
       continue;
+    // a pair stands from either side's best partners: the run that sees one group does not close it (R8)
+    if (stored.rule === "missing-link") {
+      const sides = (itemsOfFinding(tx, stored.target) ?? []).map((i) =>
+        entityGroups.representativeOf(tx, i),
+      );
+      if (
+        lintFindings(tx, [...new Set(sides)], at).some(
+          (f) => fingerprintOf(f.rule, f.target) === stored.fingerprint,
+        )
+      ) {
+        continue;
+      }
+    }
     setFindingStatus(tx, stored.id, "resolved", at);
     bump(counts, `${camel(stored.rule)}Resolved`);
   }

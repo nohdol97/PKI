@@ -1594,7 +1594,7 @@ export const LintDecideRequestSchema = z.strictObject({
   id: z.int().positive(),
   op: z.enum(["accept", "dismiss", "reopen"]),
   /** `missing-link` accepted: the relation type the user chose. */
-  relationType: z.string().trim().min(1).max(100).optional(),
+  relationType: SemanticIdentifierSchema.optional(),
 });
 /**
  * `refused`: the existing entry's own code (`type-mismatch`, `value-exists`, `scope-refused`…) or ours.

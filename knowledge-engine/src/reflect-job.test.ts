@@ -145,3 +145,39 @@ describe("reflect.job: a bounded run goes on where it stopped (K02-C2b)", () => 
     expect(listDirty(db).map((m) => m.itemId)).toEqual([items[2]]);
   });
 });
+
+describe("reflect.job: a pair that stands from one side is not closed by a run of the other (K02-C2a ③, R8)", () => {
+  it("keeps a missing link open and unflipped through runs that see only A, then only B", () => {
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    const sources = ["a", "b", "c"].map((n) => addSource(db, n, `합성 본문 ${n}`));
+    const cited = (item: number, from: number) => {
+      for (const src of sources.slice(0, from)) {
+        cite(db, { factId: addFact(db, item, `memo.${src.id}`, "값") }, src.id);
+      }
+    };
+    // A shares three sources with each of five others and two with B: A's five best partners leave B out,
+    // while B's best partners (two shared with each of them, ties by id) include A
+    const a = addItem(db, "Project", "A");
+    const b = addItem(db, "Project", "B");
+    cited(a, 3);
+    cited(b, 2);
+    for (const n of ["1", "2", "3", "4", "5"]) cited(addItem(db, "Project", `P${n}`), 3);
+    reflectNow(db);
+    const pair = () => {
+      const found = listFindings(db).find(
+        (f) => f.rule === "missing-link" && f.target.a === a && f.target.b === b,
+      );
+      if (!found) throw new Error("no pair finding");
+      return `${found.status}:${found.flips}`;
+    };
+    expect(pair()).toBe("open:0");
+
+    const states: string[] = [];
+    for (const item of [a, b, a, b]) {
+      touch(item);
+      reflectNow(db);
+      states.push(pair());
+    }
+    expect(states).toEqual(["open:0", "open:0", "open:0", "open:0"]);
+  });
+});

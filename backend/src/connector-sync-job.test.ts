@@ -801,6 +801,8 @@ describe("the product's composition (bootBackend)", () => {
     expect(schedules.map((s) => `${s.kind}:${s.target}`).sort()).toEqual([
       `${CONNECTOR_SYNC_KIND}:pull`,
       `${MAINTENANCE_KIND}:`,
+      "reflect:daily", // K02-R2: the re-review's two periods
+      "reflect:weekly",
     ]);
     const sync = schedules.find((s) => s.kind === CONNECTOR_SYNC_KIND);
     const ran = booted.scheduler.runNow(sync?.id as number);

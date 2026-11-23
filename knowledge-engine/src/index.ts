@@ -147,7 +147,7 @@ export {
   type WikiPageBody,
 } from "./wiki-render.ts";
 export { LINT_FINDING_KIND, LINT_FINDING_KIND_NAME } from "./lint-kind.ts";
-export { lintFindings, type LintFinding } from "./lint-rules.ts";
+export { itemsOfFinding, lintFindings, type LintFinding } from "./lint-rules.ts";
 export {
   createReflectHandler,
   planReflect,
