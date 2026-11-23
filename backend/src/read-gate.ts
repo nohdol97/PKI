@@ -314,6 +314,7 @@ export function createReadGate(
       const kept: ReturnType<typeof semanticItem>[] = [];
       let cursor = after ?? 0;
       let scanned = 0;
+      let reachedEnd = false;
       // read on until a page and one more are kept: the one more says `next` exists
       while (kept.length <= EXPLORE_PAGE_SIZE && scanned < maxScan) {
         const rows = listSemanticItems(db, SEMANTIC_BATCH, cursor);
@@ -324,13 +325,16 @@ export function createReadGate(
         }
         cursor = rows.at(-1)?.id ?? cursor;
         scanned += rows.length;
-        if (rows.length < SEMANTIC_BATCH) break;
+        if (rows.length < SEMANTIC_BATCH) {
+          reachedEnd = true;
+          break;
+        }
       }
       const page = kept.slice(0, EXPLORE_PAGE_SIZE);
-      return {
-        items: page,
-        next: kept.length > EXPLORE_PAGE_SIZE ? (page.at(-1)?.id ?? null) : null,
-      };
+      // the scan stopped at the cap with rows left: the page may be short or empty, and `next` is where the scan stopped
+      const next =
+        kept.length > EXPLORE_PAGE_SIZE ? (page.at(-1)?.id ?? null) : reachedEnd ? null : cursor;
+      return { items: page, next };
     },
     sourcesPage({ before }) {
       const rows = filled(

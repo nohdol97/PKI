@@ -194,6 +194,21 @@ describe("read-gate: the window that fills a limit", () => {
   });
 });
 
+describe("read-gate: the status-filtered knowledge page at the scan cap (X02B-R3)", () => {
+  it("answers a short page whose `next` is where the scan stopped, so a match beyond the cap is reached by following it", () => {
+    for (let i = 0; i < 120; i++)
+      insertItem(db, { ...attrs, status: "verified", type: "Project", name: `검증 ${i}` });
+    const wanted = insertItem(db, { ...attrs, type: "Project", name: "뒤의 후보" });
+    const gate = createReadGate(db, registryOf(policy()), { maxScan: 100 });
+    const first = gate.semanticPage({ status: "candidate" });
+    expect(first.items).toEqual([]);
+    expect(first.next).not.toBeNull();
+    const second = gate.semanticPage({ status: "candidate", after: first.next as number });
+    expect(second.items.map((i) => i.id)).toEqual([wanted]);
+    expect(second.next).toBeNull();
+  });
+});
+
 describe("read-gate: Home's Insights, their evidence and an evidence row's source", () => {
   it("lists only the Insights whose whole lineage is shown, wherever they stand", () => {
     const a = source("a");
