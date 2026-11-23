@@ -91,22 +91,21 @@ export async function runShell(site: SiteRegistration): Promise<void> {
     // built apart so the boot call stays a literal with no spread (entries.swap.test.ts, V01-R17)
     const excluded = options.userData ? [options.userData] : [];
     const localFiles = { shellHost: normalizerHosts.spawner, excluded };
-    const { server, providers, tickets, notifyOutbox, revealPath, resumed, db } = await bootBackend(
-      {
-        dataDir,
-        connectors: options.connectors,
-        site,
-        token,
-        allowedOrigins: options.origins,
-        secrets: secrets.source,
-        scopePolicy: options.scopePolicy,
-        // the normalizer host is started by the shell for a utility process (I02B-R22, adapter ⓑ)
-        // and the shell's user-data folder is no place for a location (I02B-R48)
-        localFiles,
-        // the count-only message of an OS toast goes to the shell over this channel; its answer comes back below (P02-R8, R9)
-        notifyChannel: { send: (message) => channel.post(message) },
-      },
-    );
+    const booted = await bootBackend({
+      dataDir,
+      connectors: options.connectors,
+      site,
+      token,
+      allowedOrigins: options.origins,
+      secrets: secrets.source,
+      scopePolicy: options.scopePolicy,
+      // the normalizer host is started by the shell for a utility process (I02B-R22, adapter ⓑ)
+      // and the shell's user-data folder is no place for a location (I02B-R48)
+      localFiles,
+      // the count-only message of an OS toast goes to the shell over this channel; its answer comes back below (P02-R8, R9)
+      notifyChannel: { send: (message) => channel.post(message) },
+    });
+    const { server, providers, tickets, notifyOutbox, revealPath, resumed, db } = booted;
     running = {
       server,
       providers,
