@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(30);
-    expect(migrations).toHaveLength(30);
+    expect(schemaVersion(db)).toBe(31);
+    expect(migrations).toHaveLength(31);
   });
 
   it("is idempotent when re-run", () => {

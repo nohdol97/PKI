@@ -47,8 +47,9 @@ export const LINT_FINDING_KIND: DerivativeKind = {
     );
   },
   lineage: (db, ref) => lineageOfFinding(db, Number(ref.id)),
-  invalidate: ({ tx }, snapshot) => {
-    const at = new Date().toISOString();
+  invalidate: (ctx, snapshot) => {
+    const { tx } = ctx;
+    const at = ctx.now();
     let removed = 0;
     let recomputed = 0;
     // the dirty marks name items by id: one the deletion took has nothing left to look at
