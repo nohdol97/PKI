@@ -282,7 +282,10 @@ export function relationPaths(
     kept.push(...next);
     reached = next;
     // paths are cut shortest first, so once the matching ones pass the cap no deeper level can be shown
-    if (kept.filter((w) => target === undefined || w.tops.at(-1) === target).length > GRAPH_PATH_LIMIT) break;
+    if (
+      kept.filter((w) => target === undefined || w.tops.at(-1) === target).length > GRAPH_PATH_LIMIT
+    )
+      break;
   }
   const order = (a: number[], b: number[]) => {
     for (let i = 0; i < Math.min(a.length, b.length); i++) {
