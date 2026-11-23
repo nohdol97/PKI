@@ -198,6 +198,19 @@ function threads(comments: Comment[], parents: Map<string, string>): Comment[][]
     .sort((a, b) => byTime(a[0] as Comment, b[0] as Comment));
 }
 
+/** What the host protocol accepts of `metadata.participants`: names of at most this many code units, at most this many names. */
+const MAX_PARTICIPANT_UNITS = 1_024;
+const MAX_PARTICIPANTS = 10_000;
+
+/** A name cut to the protocol's length without splitting a surrogate pair. */
+function boundedName(name: string): string {
+  if (name.length <= MAX_PARTICIPANT_UNITS) return name;
+  const end = /[\ud800-\udbff]/.test(name[MAX_PARTICIPANT_UNITS - 1] ?? "")
+    ? MAX_PARTICIPANT_UNITS - 1
+    : MAX_PARTICIPANT_UNITS;
+  return name.slice(0, end);
+}
+
 /** The comments after the body: a head (author and time) and a text block each, `\n\n` after the body. */
 function appendComments(
   builder: TextBuilder,
@@ -206,6 +219,7 @@ function appendComments(
 ): string[] {
   const comments = readComments(entryText(pkg, "word/comments.xml"));
   const participants: string[] = [];
+  const seen = new Set<string>();
   let first = true;
   threads(comments, readParents(entryText(pkg, "word/commentsExtended.xml"))).forEach((thread, t) =>
     thread.forEach((comment, index) => {
@@ -219,8 +233,10 @@ function appendComments(
       builder.block(head, at("head"), first ? "\n\n" : "\n");
       builder.block(comment.text, at("text"));
       first = false;
-      if (comment.author !== undefined && !participants.includes(comment.author)) {
-        participants.push(comment.author);
+      const name = comment.author === undefined ? undefined : boundedName(comment.author);
+      if (name !== undefined && participants.length < MAX_PARTICIPANTS && !seen.has(name)) {
+        seen.add(name);
+        participants.push(name);
       }
     }),
   );

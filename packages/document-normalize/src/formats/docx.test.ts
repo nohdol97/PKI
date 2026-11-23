@@ -256,6 +256,14 @@ describe("C32 comment threads (I02B-R30)", () => {
     expect(parseNormalizeResult(result, resultCaps(resolveLimits()))).toEqual(result);
   });
 
+  it("cutting a long author never leaves half of a surrogate pair", async () => {
+    const doc = await parse({
+      body: [{ text: "본문", commentIds: [0] }],
+      comments: [{ text: "메모", author: `${"a".repeat(1_023)}😀` }],
+    });
+    expect(doc.metadata.participants).toEqual(["a".repeat(1_023)]);
+  });
+
   it("a document without comments has no comment section and no participants", async () => {
     const doc = await parse({ body: [{ text: "본문" }] });
     expect(doc.text).toBe("본문");
