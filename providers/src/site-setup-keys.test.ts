@@ -35,6 +35,11 @@ const OTHER_PACKAGE_KEYS = [
     file: "../../knowledge-engine/src/auto-verify.ts",
     holds: 'AUTO_VERIFY_SETTING = "semantic.autoVerify"',
   },
+  {
+    key: "semantic.autoDispute",
+    file: "../../knowledge-engine/src/conflicts.ts",
+    holds: 'AUTO_DISPUTE_SETTING = "semantic.autoDispute"',
+  },
 ] as const;
 
 const implemented = Object.entries(entry)
