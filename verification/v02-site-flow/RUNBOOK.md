@@ -217,3 +217,38 @@ C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요
 **붙이기.** 두 파일의 숫자와, 켤지 정한 결과(켠다·끈 채로 둔다·더 잰다)를 이슈 #23(S02)에 남깁니다. 글, 값, 항목 이름, 설정 파일은 붙이지 않습니다.
 
 **이 절차가 확인하지 못하는 것(미검증으로 둡니다).** 이 실행기는 Windows에서 돌려 본 적이 없습니다. 설치본의 정본 경로가 `%LOCALAPPDATA%\PKI\pki.sqlite`와 같은지(포크의 빌드에서)와 실제 Provider가 유효 기간을 맞게 돌려주는지는 확인하지 못했습니다. 합치기 후보가 "맞았는지"는 사용자의 합치기·물리치기에서만 오고, 훑지 않은 후보는 맞은 것으로도 틀린 것으로도 세지 않습니다. 숫자가 작으면(수십 건 미만) 정밀도로 읽을 수 없습니다.
+
+
+## 12. 분석 의미 실측 (S34, S03-R20)
+
+> **상태: 작성만 됨 — 실행된 적 없음.** Windows에서 돌려 본 적이 없습니다. 사외에서는 거부 경로와 숫자를 세는 부분만 합성 SQLite로 단위 시험했습니다. 그 통과는 배포처 결과가 아닙니다. 스펙: [S03 spec](../../docs/specs/2026-11-22-S03-analytical-semantic.md) S03-R20·R21, 배포처 항목: [site-setup.md S34](../../docs/site-setup.md).
+
+**무엇을 하나.** 표 파일(CSV·XLSX)과 분석 의미(Dataset·Metric·Join과 검사)가 실제 자료에서 얼마나 나오는지, 표 프로파일(`analytical.profile`)을 켠 뒤 정본의 숫자를 읽기 전용으로 셉니다. **통과·실패를 판정하지 않습니다.** 프로파일은 꺼진 채로 나가고, 켤지는 이 숫자를 보고 사람이 정합니다. 결과 파일은 숫자와 코드 이름(항목 유형, 사실 종류, 검사 이름)만 담고 글, 값, 항목 이름은 담지 않습니다. 단계가 하나뿐이라 `--phase`가 없습니다(꺼진 상태에는 잴 것이 없습니다).
+
+**준비.** 10절과 같습니다(설정은 `config.example.json`을 그대로 씁니다). **실제 자료**(표가 든 폴더나 가져오기)를 쓰므로 결과 폴더의 파일을 공용 이슈에 올릴 때는 아래 "붙이기"의 숫자만 옮깁니다.
+
+| 순서 | 할 일 | 확인 |
+|---|---|---|
+| 1 | `python verification\v02-site-flow\run.py analytical-scenario preflight --config v02-result\config.json` | `preflight ok`. 설치본이 아니거나 Windows가 아니거나 test double Provider이면 `배포처 후속`으로 시작하는 알림과 종료 값 3 |
+| 2 | 설치된 exe로 설정 `analytical.profile`을 켭니다(쓰는 길은 `POST /api/settings/analytical`이고 화면에는 없습니다. 본문은 `{ "profile": true, "maxCells": 200000 }`처럼 두 키가 모두 있어야 하며, 한도를 따로 정하지 않았으면 기본값 200000을 보냅니다). 켜면 이미 있는 표 자료의 프로파일 작업이 쌓입니다 | 활동 화면에서 작업이 끝남 |
+| 3 | 실제 Provider로 표를 설명하는 문서를 추출하고, `GET /api/analytical`로 목록을 봅니다. 맞지 않는 표나 행은 되돌립니다. 앱을 완전히 닫습니다(알림 영역 포함) | |
+| 4 | `... analytical-scenario record --config v02-result\config.json --out v02-result` | `analytical-counts.json`이 생김, 종료 값 0. 저장된 `analytical.profile`이 `on`이 아니면 표준 오류에 `warning:` 한 줄(막지는 않음) |
+
+**숫자의 뜻.** 모두 **지금 상태의 행**을 센 것입니다.
+
+| 이름 | 뜻 |
+|---|---|
+| `setting` | 저장된 `analytical.profile`. `on`, `off`, `unset`(한 번도 쓰지 않음), `other` |
+| `maxCells` | 저장된 `analytical.maxCells`(숫자). 쓰지 않았으면 `unset` |
+| `tableSources` | 지금 판의 블록에 csv·xlsx 위치가 있는, 지워지지 않은 출처의 수 |
+| `tables` | 표 행(`dataset_tables`)의 수 |
+| `sourcesWithoutTable` | 표 출처인데 표 행이 없는 수. **왜 없는지(표가 아님, 한도 초과 등)는 제품이 이유를 저장하지 않아 나누어 세지 않습니다** |
+| `datasetsRejected` | 표를 가진 Dataset 가운데 사용자가 물리친 수. 표가 아닌 것을 표로 잘못 본 정도의 근거입니다 |
+| `items` | Dataset·Metric·Join을 상태별로 센 수 |
+| `facts` | 분석 사실을 종류(seed 열세 개)별로 센 수. 그 밖의 종류(사용자가 만든 종류 포함)는 이름 없이 `other`로 셉니다 |
+| `checks` | 검사 줄을 검사 이름(`schema`, `grain`, `join-cardinality`, `aggregation`)별로 통과·실패로 센 수 |
+| `largest` | 행이 가장 많은 표의 `rowCount`와 프로파일·검사 작업의 `profileMs`·`checkMs`. **작업이 큐에서 기다린 시간을 포함한 상한**입니다(작업에 시작 시각이 없음). 작업이 없으면 `null` |
+
+**붙이기.** 파일의 숫자와, 프로파일을 켤지 정한 결과(켠다·끈 채로 둔다·더 잰다)를 이슈 #24(S03)에 남깁니다. 글, 값, 항목 이름, 설정 파일은 붙이지 않습니다.
+
+**이 절차가 확인하지 못하는 것(미검증으로 둡니다).** 이 실행기는 Windows에서 돌려 본 적이 없습니다. 설치본의 정본 경로가 `%LOCALAPPDATA%\PKI\pki.sqlite`와 같은지(포크의 빌드에서)와 실제 Provider가 열 이름·집계를 맞게 돌려주는지는 확인하지 못했습니다. 표가 아닌 것의 이유별 수는 세지 않습니다. 숫자가 작으면 정밀도로 읽을 수 없습니다.

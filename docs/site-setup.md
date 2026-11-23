@@ -55,7 +55,7 @@
 
 ## 배포처 설정 체크리스트
 
-항목마다 무엇을 하는지, 어떤 종류의 값이 필요한지, 끝났다는 것을 무엇으로 확인하는지 적었다. 번호(`S01` 등)는 구현 spec의 비목표 항목과 일대일로 대응한다([V01](specs/2026-11-21-V01-vertical-skeleton.md) S01~S13, [V02](specs/2026-11-21-V02-vertical-slice.md) S14~S15, [I02-A](specs/2026-11-21-I02-document-normalization.md) S16~S17, [I01](specs/2026-11-21-I01-connector-sdk.md) S18, [I03](specs/2026-11-21-I03-persistent-queue.md) S19~S20, [I04](specs/2026-11-21-I04-invalidation.md) S21~S22, [I05](specs/2026-11-22-I05-site-connector-registration.md) S26~S27, [I06](specs/2026-11-22-I06-connector-credentials.md) S28~S29, [I07](specs/2026-11-22-I07-installed-scopes-file.md) S30~S31). 이어서 [S01](specs/2026-11-22-S01-semantic-registry.md) S32. 이어서 [S02](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) S33. 이어서 [K01](specs/2026-11-23-K01-wiki-projection.md) S35.
+항목마다 무엇을 하는지, 어떤 종류의 값이 필요한지, 끝났다는 것을 무엇으로 확인하는지 적었다. 번호(`S01` 등)는 구현 spec의 비목표 항목과 일대일로 대응한다([V01](specs/2026-11-21-V01-vertical-skeleton.md) S01~S13, [V02](specs/2026-11-21-V02-vertical-slice.md) S14~S15, [I02-A](specs/2026-11-21-I02-document-normalization.md) S16~S17, [I01](specs/2026-11-21-I01-connector-sdk.md) S18, [I03](specs/2026-11-21-I03-persistent-queue.md) S19~S20, [I04](specs/2026-11-21-I04-invalidation.md) S21~S22, [I05](specs/2026-11-22-I05-site-connector-registration.md) S26~S27, [I06](specs/2026-11-22-I06-connector-credentials.md) S28~S29, [I07](specs/2026-11-22-I07-installed-scopes-file.md) S30~S31). 이어서 [S01](specs/2026-11-22-S01-semantic-registry.md) S32. 이어서 [S02](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) S33. 이어서 [S03](specs/2026-11-22-S03-analytical-semantic.md) S34. 이어서 [K01](specs/2026-11-23-K01-wiki-projection.md) S35.
 
 ### 수집
 
@@ -144,6 +144,17 @@
 
 - [ ] **S33 설치본과 실제 Provider로 넓힌 유형의 추출과 합치기 후보를 실행하고, 자동 이의를 켤지 정해 기록.** 공용 저장소는 이 추출과 후보, 자동 이의를 test double Provider와 합성 자료로만 시험했다(macOS). 후보가 실제 자료에서 얼마나 맞는지, 실제 Provider가 준 유효 기간이 얼마나 틀리는지는 확인하지 못했다. 필요한 것: 설치 파일을 만드는 절차(S10)와 깨끗한 Windows 11, 실제 Provider(S05·S07), 추출할 실제 자료(S01~S04의 수집기나 문서 폴더), 저장 데이터 보호 확인(S11). 하는 일: ① `semantic.autoDispute`를 한 번도 쓰지 않은 채로 실제 자료를 추출하고 합치기 후보를 훑어 받아들이거나 물리친 뒤 앱을 닫고, 검증 실행기의 `entity-scenario record --phase off`를 실행한다. ② `semantic.autoDispute`를 `on`으로 쓰고(설정 화면은 아직 없다) 다음 추출이 행에 닿게 한 뒤(켜도 이미 있는 행을 훑지 않는다) 충돌 목록(`GET /api/conflicts`)에서 정책이 이의를 건 사실을 확인해 틀린 것을 되돌린다. 앱을 닫고 `entity-scenario record --phase on`을 실행한다. ③ 두 측정을 견주어 자동 이의를 켤지 정한다. 이 실행기(`entity-scenario preflight|record`, [RUNBOOK](../verification/v02-site-flow/RUNBOOK.md) 11절)를 Windows 설치본과 실제 Provider가 아닌 환경에서 실행하면 `배포처 후속`으로 시작하는 알림을 내고 0이 아닌 값(3)으로 끝난다. 확인: 실행기가 0으로 끝나고 `--out`에 `entity-counts.off.json`과 `entity-counts.on.json`이 쓰인다. 이 파일은 측정이고 통과·실패 판정이 아니다. 수는 변경 이력의 줄이 아니라 지금 상태의 행을 센다. 기록할 것: 항목 유형별 수, 합치기 후보의 수, 합치기 줄의 수(적용 중과 쉬는 중)와 구분 표시의 수(남긴 쪽별: 사용자, `link-check`=`links_refused`), 유효 구간이 붙은 사실의 수와 그 가운데 사용자가 구간을 고친 수, 자동 이의를 켰을 때의 이의 수, 켤지 정한 결과. 합치기 줄이 후보에서 왔는지 사용자가 직접 골랐는지는 저장되지 않아 "후보 가운데 받아들인 수"는 따로 적을 수 없다. 글·값·항목 이름은 기록하지 않는다. 결과는 이슈 #23(S02)에 남기고 공용 이슈에는 숫자만 올린다. 켜는 것은 릴리스 단계이고 이 항목의 기록이 그 근거다([ADR 0022](adr/0022-entity-resolution-and-conflicts.md)).
 
+### 분석 의미의 실측과 프로파일
+
+이 절의 한 항목은 [S03 spec](specs/2026-11-22-S03-analytical-semantic.md)의 배포처 후속 항목이다. 용어: **표 프로파일**은 가져온 CSV·XLSX에서 머리 행과 열 이름, 행 수를 읽어 Dataset 항목과 표 행을 만드는 일이고, **데이터 검사**는 사용자가 적은 Grain(행을 구별하는 열)과 계산 기준이 실제 표와 맞는지 세어 보는 일이다. 제품은 값을 계산하지 않는다. 왜 프로파일이 꺼진 채로 나가는지는 [ADR 0023](adr/0023-analytical-semantic-rows-and-data-checks.md) 결정 5에 있고, 설정 두 개는 아래 표에 적는다(「실행 중 설정」 표에는 아직 없다. 그 표의 키 목록을 대조하는 시험이 `providers/` 안에 있어, 두 키를 그 표로 옮기는 일은 그 시험에 두 줄을 더하는 것과 함께 한다).
+
+| 키 | 뜻 | 기본값 |
+|---|---|---|
+| `analytical.profile` | `on` 또는 `off`(정확히 `on`일 때만 켬). 가져온 표 원본(CSV·XLSX)에서 머리 행과 열 이름을 읽어 Dataset 항목·표 행·열 사실을 만드는 **표 프로파일**을 켤지([S03 spec R6](specs/2026-11-22-S03-analytical-semantic.md), [ADR 0023](adr/0023-analytical-semantic-rows-and-data-checks.md) 결정 5). 켜면 이미 있는 표 원본마다 프로파일 작업이 쌓이고, 켜기 전에 가져온 표는 그때 함께 훑는다. 모든 표에서 머리 행을 짐작하는 규칙이라 표가 아닌 자료를 표로 잡을 수 있으므로 **켜기 전에 S34로 얼마나 나오는지 잰다**. 설정 API `POST /api/settings/analytical`(`{ "profile": true, "maxCells": 200000 }`)으로 바꾸며 설정 화면에는 없다 | 끔 |
+| `analytical.maxCells` | 표 하나의 칸 수(열 수 × (자료 행 수 + 머리 행 1))의 상한인 양의 정수. 넘는 표는 표로 만들지 않는다. 범위 밖이거나 정수가 아닌 값은 기본값으로 읽는다. 배포처의 실제 표 크기와 PC의 성능에 맞춰 S34로 정한다. 설정 API는 `analytical.profile`과 같다 | 200000 |
+
+- [ ] **S34 설치본과 실제 Provider로 표 자료의 분석 의미 추출·Dataset 프로파일·데이터 검사를 실행하고, 프로파일을 켤지와 한도 값을 정해 기록.** 공용 저장소는 이 경로를 합성 표 파일, test double Provider, 개발 OS(macOS)로만 시험했다. 실제 스프레드시트에서 표가 아닌 것을 표로 잡는 비율과 큰 시트에서 걸리는 시간은 재지 못했다. 필요한 것: 설치 파일을 만드는 절차(S10)와 깨끗한 Windows 11, 실제 Provider(S05·S07), 실제 표 자료(S01~S04의 수집기나 문서 폴더에 든 CSV·XLSX)와 그 표를 설명하는 문서, 저장 데이터 보호 확인(S11). 하는 일: ① 설치된 exe로 `POST /api/settings/analytical`에 `{ "profile": true, "maxCells": 200000 }`을 보내 `analytical.profile`을 켜고(설정 화면은 없다. 두 키 모두 필수이며, 한도를 따로 정하지 않았으면 기본값 200000을 보낸다) 표 자료와 설명 문서를 추출한 뒤 `GET /api/analytical`로 목록을 보며 맞지 않는 표와 행을 되돌리고 앱을 닫는다. ② 검증 실행기의 `analytical-scenario record`를 실행한다. 이 실행기(`analytical-scenario preflight|record`, [RUNBOOK](../verification/v02-site-flow/RUNBOOK.md) 12절)를 Windows 설치본과 실제 Provider가 아닌 환경에서 실행하면 `배포처 후속`으로 시작하는 알림을 내고 종료 값 3으로 끝나며 아무것도 쓰지 않는다. ③ 숫자를 보고 `analytical.profile`을 켤지와 `analytical.maxCells`의 값을 정한다. 확인: `preflight`가 `preflight ok`로 끝나고 `record`가 `analytical-counts.json`을 쓴다. 파일에는 표 원본·표 행의 수, 표가 없는 표 원본의 수, 사용자가 물리친 Dataset의 수, 분석용 항목·사실의 종류별 수, 검사 이름별 통과·실패 수, 가장 큰 표의 행 수와 프로파일·검사 작업 시간이 들어간다(글은 없다). 기록할 것: 이 숫자들(글, 값, 항목 이름은 기록하지 않는다)과 정한 값. **표로 보지 않은 사유별 수는 제품이 사유를 저장하지 않아 기록되지 않고, 시간은 작업이 큐에서 기다린 시간을 포함한 상한이다.** 이 실행기는 Windows에서 돌려 본 적이 없다. 결과는 이슈 #24(S03)에 남긴다.
+
 ### Wiki 투영의 실측
 
 이 절의 한 항목은 [K01 spec](specs/2026-11-23-K01-wiki-projection.md)의 배포처 후속 항목이다. 용어: **Wiki 페이지**는 정본의 항목 묶음 하나(또는 Insight 하나)에 대해 사실·관계와 그 근거를 모아 놓은 사본이고, 언제든 정본에서 다시 만들 수 있다. **계보**는 그 페이지가 어느 원본 version에서 나왔는지의 목록이고, 페이지를 보여도 되는지는 이 계보의 접근 범위로 읽을 때마다 정한다. **다시 만들기**는 화면의 "위키" 아래 버튼으로 모든 페이지를 다시 쓰게 하는 것이다.
@@ -152,6 +163,6 @@
 
 ## 3. 결과를 어디에 남기는가
 
-- R02·R03·R04의 실행 기록은 각 이슈(#11, #12, #13)에 남기고, R07(#37)에서 가정 표와 하나씩 대조한다. S14(V02 배포처 검증 실행기)의 결과는 이슈 #17에 남긴다. S19(큐·스케줄러 복구 시나리오)의 결과는 이슈 #20(I03)에 남긴다. S22(삭제 시나리오)의 결과는 이슈 #21(I04)에 남긴다. S32의 결과는 이슈 #22(S01)에 남긴다. S33(개체 해소 실측)의 결과는 이슈 #23(S02)에 남긴다.
+- R02·R03·R04의 실행 기록은 각 이슈(#11, #12, #13)에 남기고, R07(#37)에서 가정 표와 하나씩 대조한다. S14(V02 배포처 검증 실행기)의 결과는 이슈 #17에 남긴다. S19(큐·스케줄러 복구 시나리오)의 결과는 이슈 #20(I03)에 남긴다. S22(삭제 시나리오)의 결과는 이슈 #21(I04)에 남긴다. S32의 결과는 이슈 #22(S01)에 남긴다. S33(개체 해소 실측)의 결과는 이슈 #23(S02)에 남긴다. S34(분석 의미 실측)의 결과는 이슈 #24(S03)에 남긴다.
 - 공용 이슈에 올릴 수 있는 것은 합성 입력의 결과와 환경의 일반 정보뿐이다. 주소, 계정, 업무 데이터는 올리지 않는다.
 - 실행하지 못한 항목은 "미검증"으로 남긴다. 이 저장소의 문서는 실행하지 않은 것을 통과로 적지 않는다.
