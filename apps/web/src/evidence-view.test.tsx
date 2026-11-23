@@ -245,6 +245,7 @@ describe("bidi isolation of imported text", () => {
         evidence={{
           id: 7,
           target: "fact",
+          targetId: 7,
           status: "candidate",
           quote: "가",
           sourceTitle: `${RLO}제목`,
@@ -264,6 +265,7 @@ describe("evidenceReducer", () => {
   const entry = (id: number) => ({
     id,
     target: "fact" as const,
+    targetId: id,
     status: "candidate" as const,
     quote: `인용 ${id}`,
     sourceTitle: `제목 ${id}`,
@@ -294,6 +296,16 @@ describe("evidenceReducer", () => {
   it("drops the Insight from the list, with its evidence and source, when it is gone", () => {
     const next = evidenceReducer(open, { type: "failed", what: "insight", id: 1, error: notFound });
     expect(next).toEqual({ insights: [insight(2)], opens: 2, notice: INSIGHT_GONE });
+  });
+
+  // P5F-R3: a late 404 of another Insight closes nothing that is open
+  it("drops only that Insight from the list when it is not the open one, keeping the evidence and source", () => {
+    const next = evidenceReducer(open, { type: "failed", what: "insight", id: 2, error: notFound });
+    expect(next.insights).toEqual([insight(1)]);
+    expect(next.opened).toEqual(open.opened);
+    expect(next.source).toEqual(open.source);
+    expect(next.opens).toBe(open.opens);
+    expect(next.notice).toBe(INSIGHT_GONE);
   });
 
   it("keeps what is shown on another failure", () => {

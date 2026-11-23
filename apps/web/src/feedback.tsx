@@ -1,9 +1,15 @@
 // Feedback on Home's Insights (P03-R15): a button for each kind the table allows on an Insight, and the
 // "최근 피드백" list where a line is cancelled. Both tell the caller after each change so the Insight list is
 // read again. Labels are the Insights' own text (imported data), so they reach the page as React text nodes
-// inside <bdi> only (V02-R15). A correction (wrong info, wrong relation) is not offered here: an Insight's
-// evidence rows carry no fact or relation id yet (P03-D10).
-import { INSIGHT_FEEDBACK_KINDS, type FeedbackLine, type FeedbackKind } from "@pki/contracts";
+// inside <bdi> only (V02-R15). A correction (wrong info, wrong relation, confirmed) is offered on an evidence row
+// through `RowFeedback`, by the row's `targetId` (P5F-R6).
+import {
+  INSIGHT_FEEDBACK_KINDS,
+  rowFeedbackKinds,
+  type FeedbackLine,
+  type FeedbackKind,
+  type FeedbackTarget,
+} from "@pki/contracts";
 import { useEffect, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import {
@@ -20,18 +26,11 @@ import {
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const gone = (error: unknown) => error instanceof ApiError && error.status === 404;
 
-export function InsightFeedback({
-  api,
-  insight,
-  onChange,
-}: {
-  api: ApiClient;
-  insight: { id: number; summary: string };
-  onChange: () => void;
-}) {
+/** The record call every button makes: the refusal or failure text it leaves, and the press itself. */
+function useRecord(api: ApiClient, target: FeedbackTarget, onChange: () => void) {
   const [notice, setNotice] = useState<string>();
   const press = (kind: FeedbackKind) =>
-    api("feedbackRecord", { target: { kind: "insight", id: insight.id }, kind }).then(
+    api("feedbackRecord", { target, kind }).then(
       (r) => {
         setNotice(r.status === "refused" ? feedbackRefusalText(r.reason) : undefined);
         onChange();
@@ -41,6 +40,19 @@ export function InsightFeedback({
         if (gone(error)) onChange();
       },
     );
+  return { notice, press };
+}
+
+export function InsightFeedback({
+  api,
+  insight,
+  onChange,
+}: {
+  api: ApiClient;
+  insight: { id: number; summary: string };
+  onChange: () => void;
+}) {
+  const { notice, press } = useRecord(api, { kind: "insight", id: insight.id }, onChange);
   return (
     <>
       <div role="group" aria-label={`피드백: ${insight.summary}`}>
@@ -50,6 +62,38 @@ export function InsightFeedback({
             type="button"
             title={insightHint(kind)}
             aria-label={feedbackButtonName(kind, insight.summary)}
+            onClick={() => void press(kind)}
+          >
+            {feedbackLabel(kind)}
+          </button>
+        ))}
+      </div>
+      {notice && <p role="alert">{notice}</p>}
+    </>
+  );
+}
+
+/** The corrections the table allows on an evidence row's fact or relation; `label` (its quote) names each button. */
+export function RowFeedback({
+  api,
+  target,
+  label,
+  onChange,
+}: {
+  api: ApiClient;
+  target: { kind: "fact" | "relation"; id: number };
+  label: string;
+  onChange: () => void;
+}) {
+  const { notice, press } = useRecord(api, target, onChange);
+  return (
+    <>
+      <div role="group" aria-label={`교정: ${label}`}>
+        {rowFeedbackKinds(target.kind).map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            aria-label={feedbackButtonName(kind, label)}
             onClick={() => void press(kind)}
           >
             {feedbackLabel(kind)}
