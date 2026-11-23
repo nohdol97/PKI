@@ -396,13 +396,18 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // S02-R8 2: a link to an existing item X is checked before anything is written. When the key the answer
     // gives it under a tag is none of the keys X's group holds under that tag, the link is refused: the item is
     // made new (the answer's type and name), and a mark between it and X is written below. The type half of R8
-    // is not checked (spec decision 29).
+    // is not checked (spec decision 29). Only keys the write path below keeps count: quote located, confidence in range.
     const refused: { ref: string; existing: number }[] = [];
     for (const [ref, item] of items) {
       if (item.existingItemId === null) continue;
       const keys = answer.facts
         .filter(
-          (f) => f.item === ref && f.kind === "identifier.key" && f.quote.includes(f.value.trim()),
+          (f) =>
+            f.item === ref &&
+            f.kind === "identifier.key" &&
+            f.quote.includes(f.value.trim()) &&
+            confidenceInRange(f.confidence) &&
+            !("dropped" in locateQuote(body, f.quote)), // only a key the write path will keep
         )
         .map((f) => {
           const tag = tagOf(f.context);
