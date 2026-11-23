@@ -25,7 +25,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { inProcessNormalizer } from "./local-normalizer.test-support.ts";
-import { createApprovalTickets, createLocalLocations, TICKET_TTL_MS } from "./local-locations.ts";
+import {
+  createApprovalTickets,
+  createLocalLocations,
+  locationTicket,
+  TICKET_TTL_MS,
+} from "./local-locations.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "l".repeat(43);
@@ -132,10 +137,83 @@ describe("approval (I02B-R5, R37; I02B-C3 at the API, C43)", () => {
     expect(tickets.redeem("f".repeat(32), "folder")).toBe(docs);
   });
 
+  it("a picked file travels as a ticket of its own kind: the shell's message is read, and the table gives the path back for that kind only", () => {
+    const message = (kind: string) => ({
+      type: "location-ticket",
+      ticket: "m".repeat(32),
+      kind,
+      path: join(docs, "a.jsonl"),
+    });
+    for (const kind of ["folder", "file", "jsonl-file"]) {
+      expect(locationTicket(message(kind))).toEqual({
+        ticket: "m".repeat(32),
+        type: kind,
+        path: join(docs, "a.jsonl"),
+      });
+    }
+    expect(locationTicket(message("socket"))).toBeUndefined();
+    const tickets = createApprovalTickets();
+    tickets.register({ ticket: "n".repeat(32), type: "jsonl-file", path: join(docs, "a.jsonl") });
+    expect(tickets.redeem("n".repeat(32), "folder")).toBeUndefined();
+    tickets.register({ ticket: "o".repeat(32), type: "jsonl-file", path: join(docs, "a.jsonl") });
+    expect(tickets.redeem("o".repeat(32), "jsonl-file")).toBe(join(docs, "a.jsonl"));
+  });
+
   it("the route's code list is the SDK's plus the ticket's", () => {
     expect([...LOCAL_APPROVAL_REJECTION_CODES].sort()).toEqual(
       [...APPROVAL_REJECTION_CODES, "ticket-required"].sort(),
     );
+  });
+});
+
+describe("the file kinds and the network location (I02B-R3, R5; I02B-C34, H2 ②)", () => {
+  it("a document file is approved as a `file`, a .jsonl file as a `jsonl-file`, and a file of the wrong format for its kind is refused", async () => {
+    const { db, locations } = handler();
+    try {
+      writeFileSync(join(docs, "a.md"), "# a\n");
+      writeFileSync(join(docs, "b.hwp"), "x");
+      writeFileSync(join(docs, "c.jsonl"), "{}\n");
+      const doc = await locations.approve({ type: "file", path: join(docs, "a.md") });
+      expect(doc).toMatchObject({ type: "file", displayPath: join(docs, "a.md"), state: "active" });
+      const jsonl = await locations.approve({ type: "jsonl-file", path: join(docs, "c.jsonl") });
+      expect(jsonl).toMatchObject({ type: "jsonl-file", state: "active" });
+      expect(rowCount(db)).toBe(2);
+
+      expect(await locations.approve({ type: "file", path: join(docs, "b.hwp") })).toEqual({
+        error: "approval-rejected",
+        code: "unsupported-format",
+      });
+      expect(await locations.approve({ type: "file", path: join(docs, "c.jsonl") })).toEqual({
+        error: "approval-rejected",
+        code: "unsupported-format",
+      });
+      expect(rowCount(db)).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("a UNC path is refused as network-location and stores nothing (S25)", async () => {
+    const db = openCanonicalDb(data);
+    try {
+      const locations = createLocalLocations({
+        db,
+        index: createLocalFileIndex(db),
+        forbidden: [data],
+        buildKind: "test",
+        tickets: createApprovalTickets(),
+        onApproved: vi.fn(),
+        normalizerUnavailable: () => false,
+        rules: "win32",
+      });
+      expect(await locations.approve({ type: "folder", path: "\\\\server\\share\\docs" })).toEqual({
+        error: "approval-rejected",
+        code: "network-location",
+      });
+      expect(rowCount(db)).toBe(0);
+    } finally {
+      db.close();
+    }
   });
 });
 

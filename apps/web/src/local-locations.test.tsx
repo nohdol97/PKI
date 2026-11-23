@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient } from "./api.ts";
 import { ConfirmDialog } from "./local-location-actions.tsx";
-import { LocationList, pickAndAdd } from "./local-locations.tsx";
+import { LocalLocations, LocationList, pickAndAdd } from "./local-locations.tsx";
 import {
   APPROVAL_REJECTION_TEXT,
   NORMALIZER_UNAVAILABLE_TEXT,
@@ -70,6 +70,30 @@ describe("the shell's folder picker", () => {
       await pickAndAdd(untouched as unknown as ApiClient, async () => ({ ticket: null })),
     ).toBeUndefined();
     expect(untouched).not.toHaveBeenCalled();
+  });
+});
+
+describe("adding a file (I02B-T06, C34)", () => {
+  it("each kind goes to the shell's picker as its own kind and is approved with the ticket", async () => {
+    const api = vi.fn(async () => ({}));
+    for (const type of ["file", "jsonl-file"] as const) {
+      const pick = vi.fn(async () => ({ ticket: "t".repeat(40) }));
+      expect(await pickAndAdd(api as unknown as ApiClient, pick, type)).toEqual({ added: true });
+      expect(pick).toHaveBeenCalledWith(type);
+      expect(api).toHaveBeenLastCalledWith("approveLocalLocation", {
+        type,
+        ticket: "t".repeat(40),
+      });
+    }
+  });
+
+  it("the Settings section offers 폴더 추가, 파일 추가 and JSONL 파일 추가 as buttons", () => {
+    const markup = renderToStaticMarkup(
+      <LocalLocations api={vi.fn() as unknown as ApiClient} bridge={{ pickLocation: vi.fn() }} />,
+    );
+    for (const name of ["폴더 추가", "파일 추가", "JSONL 파일 추가"]) {
+      expect(markup).toMatch(new RegExp(`<button[^>]*>${name}</button>`));
+    }
   });
 });
 

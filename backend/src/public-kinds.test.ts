@@ -5,13 +5,16 @@ import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { SYNTHETIC_CONNECTOR_KIND_LIST } from "@pki/providers";
 import { describe, expect, it } from "vitest";
 import { fixtureConnectors, productConnectors } from "./composition.ts";
+import { createSiteConnector } from "./adapters/site-connectors.ts";
 import { readFileSync } from "node:fs";
 import {
   isPublicInstanceId,
+  JSONL_FILE_INSTANCE_PREFIX,
   PUBLIC_CONNECTOR_KINDS,
   PUBLIC_INSTANCE_ID_PREFIXES,
   SITE_CONNECTOR_KINDS,
 } from "./public-kinds.ts";
+import { checkSiteRegistration } from "./site-registration.ts";
 
 const isPlaceholder = (name: string) => (SITE_CONNECTOR_KINDS as readonly string[]).includes(name);
 const sets = [
@@ -76,6 +79,29 @@ describe("site.public-kinds: the public instance ids are answered by isPublicIns
     expect(isPublicInstanceId("jsonl-file:abc", new Set(), ["jsonl-file:"])).toBe(true);
     expect(isPublicInstanceId("jsonl-fil", new Set(), ["jsonl-file:"])).toBe(false);
     expect(isPublicInstanceId("xjsonl-file:abc", new Set(), ["jsonl-file:"])).toBe(false);
+  });
+});
+
+describe("site.public-kinds: the jsonl-file: prefix is public (I02B-R51, C48)", () => {
+  it("any id after the prefix is public, and a registration that names one is refused as instance-id-reserved", () => {
+    expect(JSONL_FILE_INSTANCE_PREFIX).toBe("jsonl-file:");
+    for (const id of ["jsonl-file:", "jsonl-file:AAAAAAAAAAAAAAAAAAAAAA", "jsonl-file:x y/é"]) {
+      expect(isPublicInstanceId(id), id).toBe(true);
+    }
+    const base = productConnectors();
+    const site = {
+      connectorKinds: { "my-kind": () => createSiteConnector("my-kind") },
+      connectorInstances: [{ id: "jsonl-file:x", kind: "my-kind", config: {} }],
+    };
+    expect(checkSiteRegistration(site, base)).toEqual(["instance-id-reserved"]);
+  });
+
+  it("the code that makes the instance id from a row and the predicate share the one prefix constant", () => {
+    const source = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8");
+    expect(source("./public-kinds.ts").match(/jsonl-file:/g)).toHaveLength(1);
+    const maker = source("./jsonl-file-instances.ts");
+    expect(maker).toContain("JSONL_FILE_INSTANCE_PREFIX");
+    expect(maker).not.toContain("jsonl-file:");
   });
 });
 
