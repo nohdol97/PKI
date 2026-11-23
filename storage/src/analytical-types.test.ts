@@ -517,8 +517,8 @@ describe("ontology.analytical-seeds: the constants and the catalogue", () => {
     }
   });
 
-  it("is the catalogue's edition 2: the same names, rules and checks, `dataset.column` not extracted", () => {
-    expect(KNOWLEDGE_SCHEMA.edition).toBe(2);
+  it("has edition 2's names, rules and checks in the catalogue, `dataset.column` not extracted", () => {
+    expect(KNOWLEDGE_SCHEMA.edition).toBeGreaterThanOrEqual(2);
     const entries = [
       ...KNOWLEDGE_SCHEMA.knowledgeTypes,
       ...KNOWLEDGE_SCHEMA.relationTypes,

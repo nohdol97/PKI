@@ -113,7 +113,7 @@ describe("GET /api/ontology", () => {
   it("lists the seed, verified, with each rule", async () => {
     await start();
     const elements = await list();
-    expect(elements).toHaveLength(48);
+    expect(elements).toHaveLength(51);
     expect(elements.every((e) => e.status === "verified" && e.origin === "seed")).toBe(true);
     expect(elements.find((e) => e.name === "DEPENDS_ON")).toMatchObject({
       elementKind: "relation-type",

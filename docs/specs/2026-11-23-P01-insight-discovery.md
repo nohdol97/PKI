@@ -44,11 +44,11 @@ V02가 규칙 하나("의존 업무 지연")와 Insight 행(`insights`, 키 `(ru
 | 일정 충돌 | `schedule_conflict` | 코드 | 한 묶음의 완료일 > 자기 목표일 | 지원(T02) |
 | 충돌 | `conflict` | 코드 | 한 묶음의 유효한 두 사실 사이 `CONTRADICTS` 연결 | 지원(T02) |
 | 중요 변경 | `important_change` | 코드(변경 감지) | 날짜 종류 사실의 `SUPERSEDES` 연결(대신한 쪽이 유효) | 지원(T02, 날짜 종류만) |
-| 의사결정 변경 | `decision_change` | 코드 | Decision의 한 값 종류가 대체됨 | 미지원: 결정의 진술(`statement`)은 여러 값 종류라 대체 연결이 없다(T05) |
-| 정책 변화 | `policy_change` | 코드 | BusinessRule의 한 값 종류가 대체됨 | 미지원: 위와 같음(T05) |
-| 미처리 요청 | `pending_request` | 코드 | 요청의 상태·기한 | 미지원: 상태 종류가 없다(T05) |
-| 미해결 이슈 | `open_issue` | 코드 | Issue의 상태 | 미지원: 상태 종류가 없다(T05) |
-| 새 관계 | `new_relation` | 코드 | 최근에 처음 관측된 관계 | 미지원(T05) |
+| 의사결정 변경 | `decision_change` | 코드(변경 감지) | Decision 묶음의 `conclusion` 사실 사이 `SUPERSEDES` 연결(대신한 쪽이 유효) | 지원(T05) |
+| 정책 변화 | `policy_change` | 코드(변경 감지) | BusinessRule 묶음의 `conclusion` 사실 사이 같은 연결 | 지원(T05) |
+| 미처리 요청 | `pending_request` | 코드 | Request 묶음의 유효한 `status`가 하나 이상이고 모두 열린 값(`open`·`in_progress`) | 지원(T05) |
+| 미해결 이슈 | `open_issue` | 코드 | Issue 묶음의 유효한 `status`가 하나 이상이고 모두 열린 값 | 지원(T05) |
+| 새 관계 | `new_relation` | 코드 | 이미 있던 두 항목 사이에 뒤늦게 관측된, 아직 `candidate`인 유효한 관계 | 지원(T05) |
 | 기회 | `opportunity` | LLM 해석 | 해석 작업이 낸 후보를 코드가 근거·중복·상태를 정해 저장 | 지원(T04). 설정 `insight.interpret`이 켜져 있을 때만 생긴다 |
 | 유사 해결 | `similar_resolution` | 검색 | — | 미지원: 유사도 검색 없음(X01) |
 | 관련 문서 | `related_document` | 검색 | — | 미지원: 검색 없음(X01) |
@@ -78,6 +78,16 @@ V02가 규칙 하나("의존 업무 지연")와 Insight 행(`insights`, 키 `(ru
 - **P01-R8 지문으로 통합.** 지문은 (유형, X 대표, Y 대표)이고 기존 유일 키가 지킨다. 항목 하나에 대한 유형은 X = Y다. 같은 항목의 어긋남 여러 쌍, 변경 여러 건은 Insight 한 건의 사실 줄 여러 개가 된다. 묶음이 합쳐지면 대표의 키 한 행으로 모인다(S02-R13과 같다).
 - **P01-R9 갱신과 철회.** 다시 판정한 결과가 저장된 것과 다르면 그 행을 고치고(`updated`), 조건이 깨지면 철회하고(`resolved`), 다시 서면 같은 행을 되살린다(`revived`). 같으면 쓰지 않는다. `changed_at`은 만들어지거나 되살아나거나 추론 문장·사실 줄이 바뀔 때만 바뀐다.
 - **P01-R10 신뢰도와 알림 제외 표시.** 신뢰도는 판정에 쓴 행들의 값 중 **가장 낮은 것**이다: 사용자 입력·`verified` 100, `disputed` 30, `candidate`는 행의 `confidence`×100(없으면 50). 신뢰도가 50 미만이면 `autoNotifyExcluded`가 참이다(함수 하나가 판정, P02가 읽는다).
+- **P01-R11 새 종류(T05).** 유형 목록(`KNOWLEDGE_SCHEMA`)을 3판으로 올린다.
+  - 항목 유형 `Request`(요청). `target_date`·`statement`와, 모든 항목 유형을 받는 `identifier.key`·`RELATED_TO`가 `Request`로 넓어진다.
+  - 사실 종류 `status`: 값 유형 `work-status`(닫힌 네 값 `open`·`in_progress`·`done`·`cancelled`, 대소문자는 소문자로 저장), 값 하나, 대상 Task·Commitment·Issue·Request.
+  - 사실 종류 `conclusion`(결정·규칙의 현재 내용): `text`, 값 하나, 대상 Decision·BusinessRule. 값은 인용문 안에 그대로 있는 글이고 500자 이하다(아니면 그 항목만 버린다).
+  - 추출 스키마는 6판이 된다: `items.type`에 `Request`, `facts.kind`에 `status`·`conclusion`(둘 다 `validFrom`·`validUntil`을 가질 수 있다). 한 번의 추출이 쓰는 행은 모두 같은 `observed_at`을 갖는다(R12의 `new_relation`이 같은 문서에서 항목과 함께 들어온 관계를 거르는 데 쓴다).
+  - 두 종류는 값이 하나라서 S02의 기존 판정이 `SUPERSEDES`·`CONTRADICTS` 연결을 만든다. 연결을 만드는 새 코드는 없다. 마이그레이션 v30이 seed 행을 쓰고 규칙을 넓힌다(v25의 방식).
+- **P01-R12 남은 코드 유형(T05).** 조건은 유형 표와 같고, 다섯 규칙 모두 현재 시각을 읽지 않는다.
+  - `decision_change`·`policy_change`: `important_change`의 판정을 종류(`conclusion`)와 항목 유형만 바꿔 쓴다(공통 함수 하나). 시급 날짜는 대신한 사실의 `valid_at`이다(없으면 없음).
+  - `pending_request`·`open_issue`: 유효한 `status` 중 닫힌 값(`done`·`cancelled`)이 하나라도 있으면 서지 않는다(두 값의 어긋남은 `conflict`가 맡는다). `pending_request`의 시급 날짜는 가장 이른 유효한 `target_date`(사실 줄과 근거로 인용)이고 `open_issue`는 없다.
+  - `new_relation`: 키는 (주어 묶음 대표, 목적어 묶음 대표). 관계 유형은 `DEPENDS_ON`·`RESPONSIBLE_FOR`·`BELONGS_TO`·`DECIDED`·`CAUSED_BY`. 관계의 `observed_at`이 양 끝 항목 행의 `observed_at`보다 늦고 상태가 `candidate`일 때 선다. 사용자가 그 관계를 승인하거나 거부하면 철회된다. 한 쌍의 관계 여러 개는 사실 줄 여러 개다.
 
 ## 인터페이스 / 설계 개요
 
@@ -110,6 +120,7 @@ stateDiagram-v2
 - [ ] **P01-C1** — 중요 변경/일정 충돌/의존 업무 지연/의사결정 변경/충돌/미처리 요청/미해결 이슈/유사 해결/관련 문서/기회/정책 변화/새 관계/놓친 정보의 fixture와 지원 상태를 갖춘다.
   - **C1a** (R1, R6): 지원 유형의 fixture를 넣고 판정하면 기대한 Insight 한 건(유형, 사실 줄, 근거 인용문)이 생기고, 조건을 깨는 변형에서는 생기지 않는다.
   - **C1b** (R1): fixture와 유형 표가 같은 13개 유형을 갖고, 미지원 유형은 사유가 있으며 그 유형의 Insight가 만들어지지 않는다.
+  - **C1a 추가** (T05, R11, R12): 새 지원 유형 다섯의 fixture를 넣고 판정하면 기대한 Insight 한 건이 생기고 조건을 깨는 변형에서는 생기지 않으며, `fixtures/p01-status.jsonl`을 가져오기(추출 double v6)로 넣으면 `pending_request`·`open_issue`가 한 건씩 생긴다.
   - **C1a 추가** (T04, R1): `opportunity`는 해석 응답이 후보를 내면 부모 Insight의 근거를 그대로 가진 한 건이 생기고, 부모 내용이 바뀌면 철회된다.
 - [ ] **P01-C2** — Insight schema·evidence·reasoning_summary·사실/추론 구분·관련성/영향/시급/신규/신뢰/행동성 ranking을 검증한다. 모델 내부 사고과정을 저장하지 않는다.
   - **C2a** (R2, R3): 규칙이 만든 활성 Insight는 사실 줄·추론 문장·이유 요약·신뢰도와 근거(또는 사용자 입력) 하나 이상을 갖고, 철회하면 글·신뢰도·날짜·근거 연결이 모두 비워진다.
@@ -131,6 +142,8 @@ stateDiagram-v2
 | C2b | `knowledge-engine/src/insight-ranking.test.ts`: 축·점수, 날짜와 신뢰도 대표 사례 | T01 |
 | C2c | `storage/src/insights.test.ts`: 501자 이유 요약 거부 / (T04) `providers/src/broker.insight-interpret.test.ts`: 다른 키·501자 응답은 `invalid-output` | T01·T04 |
 | C3a | C1a의 테스트가 Provider 없이 돈다 / (T04) `knowledge-engine/src/insight-interpret.test.ts`(해석 열 셋만 바뀜·`unchanged`·`opportunity`)와 `backend/src/insight-interpret-flow.test.ts`(동의 없으면 `held`) | T02·T04 |
+| C1a(T05) | `knowledge-engine/src/insight-code-rules.test.ts`: 다섯 유형의 시나리오와 변형 / `knowledge-engine/src/insight-import.test.ts`: `fixtures/p01-status.jsonl`에서 한 건씩 / `knowledge-engine/src/extraction-v6.test.ts`: `status` 소문자, `conclusion` 인용문·500자 검사, 한 번의 추출은 한 `observed_at` | T05 |
+| C1b(T05) | `storage/src/knowledge-schema.migration.test.ts`: 3판 seed가 유형 목록과 같고 사용자가 바꾼 규칙은 그대로 / `packages/contracts/src/insight-types.test.ts`: 지원 유형 목록 | T05 |
 | C1a(`opportunity`) | (T04) `knowledge-engine/src/insight-interpret.test.ts`: 부모 근거를 가진 한 건, 부모가 바뀌면 철회 | T04 |
 | C3b | `knowledge-engine/src/insight-code-rules.test.ts`: 어긋남 두 쌍 → 한 건, 재판정 `unchanged` | T02 |
 | C3c | `knowledge-engine/src/insight-rules.test.ts`: `updated`·`resolved`·`revived`와 같은 id | T01 |
@@ -173,6 +186,13 @@ stateDiagram-v2
 - **P01-D17 응답 스키마 v1은 모든 단계에서 엄격하다.** `{ reasoningSummary: 1~500자, impact: 0~100 정수, actionability: 0~100 정수, opportunity: { statement: 1~200자 } | null }`. 다른 키나 긴 글은 Broker의 `invalid-output`이고 처리기는 다시 묻지 않는다(`retryable: false`). 부분 수용을 하려면 길이 검사를 처리기로 옮겨야 한다.
 - **P01-D18 `opportunity`는 해석 응답이 제안하고 나머지는 코드가 정한다.** 키는 부모의 `(opportunity, X, Y)`다. 처리기가 문장을 `summary`로(추론), 부모의 사실 줄·근거·사용자 입력·연결·시급 날짜를 그대로 복사해 쓰고, 신뢰도는 `min(부모, 40)`이라 늘 자동 알림 제외다. 활성 행이 이미 있으면 제안은 버린다. 규칙(`opportunityRule`)은 같은 키에 사실 줄·입력이 같은 활성 Insight가 있는 동안만 유지하고 아니면 철회하며, 철회된 행은 규칙이 되살리지 않는다(글이 없다). 모델의 인용문과 새 근거 행은 만들지 않는다(근거는 사실·관계에 매인다). `opportunity` 행은 다시 해석하지 않는다. 상한은 상수 하나다.
 - **P01-D19 유형 표는 `opportunity`를 지원으로 올린다.** 설정이 켜져야만 생기지만 R1이 "구현된 만큼"을 지원으로 정하기 때문이다. 보고서에 "지원(꺼짐)"이 필요하면 세 번째 상태를 더한다.
+- **P01-D20 요청은 새 항목 유형 `Request`다.** 약속(Commitment)·할 일(Task)과 뜻이 달라 섞지 않는다. Commitment로 판정하려면 `pending_request` 규칙의 항목 유형 상수 하나를 바꾼다.
+- **P01-D21 상태 값은 닫힌 네 개이고 열린 값은 `open`·`in_progress`다.** 값 유형의 값 목록(`WORK_STATUSES`)과 규칙 파일의 `OPEN_STATUSES`다. 값을 더하려면 두 상수를 고친다.
+- **P01-D22 결정·규칙의 "현재 내용"은 새 종류 `conclusion`(값 하나)이다.** `statement`는 여러 값인 채로 둔다(여러 값 종류는 대체 연결이 없다). 변경으로 볼 종류를 바꾸려면 두 변경 규칙의 종류 상수를 고친다.
+- **P01-D23 상태 유형의 조건에 기한 경과를 넣지 않는다.** 규칙이 현재 시각을 읽으면 날이 바뀔 때 다시 판정할 작업이 필요해진다. 기한은 시급 날짜로 순위에 반영된다.
+- **P01-D24 "새 관계"는 이미 있던 두 항목 사이의 아직 확인되지 않은 관계다.** 기간으로 철회하지 않는다(D23과 같은 이유). 한 문서가 항목과 관계를 함께 처음 들여올 때는 서지 않아야 하므로, 한 번의 추출이 쓰는 행은 모두 같은 `observed_at`을 갖는다. 관계 유형 목록은 규칙 파일의 `NEW_RELATION_TYPES`다. `new_relation`은 문서를 나눠 가져오는 기존 시험 흐름에서 새 Insight를 만들 수 있다(범위 정책 시험 한 곳의 기대값이 바뀜).
+- **P01-D25 T05는 마이그레이션 하나(v30)를 쓴다.** 유형 목록 3판의 seed와 넓힘뿐이고 열은 더하지 않는다. 번호는 합칠 때 비어 있는 다음 번호다.
+- **P01-D26 D16의 보정: `insight:<id>` 후보의 글은 항목 이름도 담으므로 등급을 Insight 계보와 X·Y 묶음 계보의 합집합으로 매긴다.** X·Y 항목 계보가 없는 Insight(사용자가 만든 항목)는 출처 없는 이름으로 가장 엄격한 등급이다. 처리기는 범위 정책(`combinable`)도 같은 합집합에 묻는다. 보내는 원본 version은 그대로 Insight 계보뿐이다. 독립 리뷰가 D16의 계보만으로는 다른 원본에만 나오는 항목 이름이 약한 등급으로 나갈 수 있다고 지적했다(Broker 요청에는 X·Y 후보도 실리지만 정책 질의는 Insight 계보에만 했다).
 
 ## 미해결 질문 / 검증하지 않은 범위
 
@@ -190,3 +210,4 @@ stateDiagram-v2
 | 2026-11-23 | 상태를 초안에서 확정으로 바꿈(잠정 결정 D1~D11 그대로 수용) | 이 문서 | 오케스트레이터가 계획을 수용하고 구현 착수 |
 | 2026-11-23 | T04 설계 반영: 해석 열 셋, 설정 insight.interpret, opportunity 지원, D12~D19 | R1·R5·R7·C1a·C2c·C3a·작업 분해 | P01-T04 구현 |
 | 2026-11-23 | D13·D14 보강: 원본 삭제·정리·범위 변경 때 해석 열과 opportunity를 지우고, 이미 시도한 기준은 상태와 무관하게 다시 큐에 넣지 않음 | D13·D14 | P01-T04 독립 리뷰 지적 반영(재시도 폭주, 삭제된 원본에서 나온 글의 잔존) |
+| 2026-11-23 | T05 설계 추가: R11·R12(새 종류와 남은 코드 유형 다섯), 유형 표의 다섯 유형을 지원으로, C1a·C1b 추가 행, D20~D25, D16 보정(D26: Insight 후보를 항목 계보까지 합쳐 등급) | 요구사항·완료 기준·잠정 결정 | P01-T05 구현과 독립 리뷰 M1 반영 |

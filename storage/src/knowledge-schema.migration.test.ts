@@ -149,15 +149,21 @@ const catalogueEntries = () =>
     .filter((e) => e.rule && (e.since ?? 1) === 1)
     .map((e) => {
       const rule = e.rule as CatalogueRule;
+      // the types a later edition added (edition 2's Metric and Dataset, edition 3's Request) are taken back
+      const later = (list: readonly string[]) =>
+        list.filter((t) => t !== "Metric" && t !== "Dataset" && t !== "Request");
       return {
         name: e.name,
         rule:
-          e.widenedAt && rule.elementKind === "fact-kind"
-            ? {
-                ...rule,
-                itemTypes: rule.itemTypes.filter((t) => t !== "Metric" && t !== "Dataset"),
-              }
-            : rule,
+          rule.elementKind === "fact-kind"
+            ? { ...rule, itemTypes: later(rule.itemTypes) }
+            : rule.elementKind === "relation-type"
+              ? {
+                  ...rule,
+                  subjectTypes: later(rule.subjectTypes),
+                  objectTypes: later(rule.objectTypes),
+                }
+              : rule,
       };
     });
 
@@ -518,5 +524,72 @@ describe("schema.reserved-names: a row that existed before the rule", () => {
       schemaErrors: ["reserved-name"],
     });
     expect(one("Insight").status).toBe("candidate");
+  });
+});
+
+// P01-T05 (P01-R11, C1b): the migration of catalogue edition 3 on a database of schema v28.
+describe("schema.catalogue-edition-3: the migration", () => {
+  const BEFORE = 28;
+  const withEdition3 = () => {
+    const fresh = openBetterSqlite3(":memory:");
+    migrate(fresh, migrations.slice(0, BEFORE));
+    return fresh;
+  };
+
+  it("seeds Request, status and conclusion and widens the four rules: the list matches the catalogue", () => {
+    const old = withEdition3();
+    try {
+      const before = describeKnowledgeSchema(listOntologyElements(old)).entries;
+      for (const name of ["Request", "status", "conclusion"]) {
+        expect(before.find((e) => e.name === name)?.usable, name).toBe(false);
+      }
+      migrate(old, migrations);
+      const after = describeKnowledgeSchema(listOntologyElements(old)).entries;
+      expect(after.filter((e) => e.usable === false || e.ruleMatches === false)).toEqual([]);
+      const row = (name: string) =>
+        old.all("SELECT status, edition, origin FROM ontology_elements WHERE name = ?", [name]);
+      expect(row("Request")).toEqual([{ status: "verified", edition: 1, origin: "seed" }]);
+      expect(row("status")).toEqual([{ status: "verified", edition: 1, origin: "seed" }]);
+      // target_date was widened once by v23 (edition 2): this is its third
+      expect(row("target_date")).toEqual([{ status: "verified", edition: 3, origin: "seed" }]);
+      expect(old.all("SELECT count(*) AS n FROM ontology_history")[0]?.n).toBe(0);
+    } finally {
+      old.close();
+    }
+  });
+
+  it("leaves a rule the user changed alone", () => {
+    const old = withEdition3();
+    try {
+      const target = old.all(
+        "SELECT id, rule FROM ontology_elements WHERE name = 'target_date'",
+      )[0];
+      const mine = JSON.stringify({
+        elementKind: "fact-kind",
+        itemTypes: ["Project"],
+        valueType: "date",
+        cardinality: "one",
+      });
+      old.run(
+        `INSERT INTO ontology_history (element_id, seq, at, actor, action, from_status, to_status, from_edition, to_edition)
+         VALUES (?, 1, ?, 'user', 'change-rule', 'verified', 'verified', 2, 3)`,
+        [target?.id as number, AT],
+      );
+      old.run("UPDATE ontology_elements SET rule = ?, edition = 3 WHERE id = ?", [
+        mine,
+        target?.id as number,
+      ]);
+      migrate(old, migrations);
+      expect(
+        old.all("SELECT rule, edition FROM ontology_elements WHERE name = 'target_date'"),
+      ).toEqual([{ rule: mine, edition: 3 }]);
+      expect(
+        describeKnowledgeSchema(listOntologyElements(old)).entries.find(
+          (e) => e.name === "target_date",
+        )?.ruleMatches,
+      ).toBe(false);
+    } finally {
+      old.close();
+    }
   });
 });

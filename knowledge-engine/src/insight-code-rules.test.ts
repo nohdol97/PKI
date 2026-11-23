@@ -18,6 +18,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
+import { setStatusForTest } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { refreshConflicts } from "./conflicts.ts";
 import { INSIGHT_RULES, recomputeInsights } from "./insight-code-rules.ts";
@@ -36,12 +37,20 @@ interface Scenario {
   items: { ref: string; type: string; name: string }[];
   sources: { ref: string; body: string }[];
   facts: FactSpec[];
-  relations: { subject: string; type: string; object: string; source: string; quote: string }[];
+  relations: RelationSpec[];
+}
+interface RelationSpec {
+  subject: string;
+  type: string;
+  object: string;
+  source: string;
+  quote: string;
+  observedAt?: string;
 }
 interface TypeEntry {
   support: "supported" | "unsupported";
   scenario?: Scenario;
-  variant?: { facts: FactSpec[] };
+  variant?: { facts?: FactSpec[]; relations?: RelationSpec[] };
   expected?: { x: string; y: string; factLines: string[]; evidenceQuotes: string[] };
 }
 const fixture = JSON.parse(
@@ -66,7 +75,12 @@ const attrs = (over: Partial<KnowledgeAttributes> = {}): KnowledgeAttributes => 
 });
 
 /** Writes the scenario (with `facts` replaced for a variant); returns the item id of each ref. */
-function seed(scenario: Scenario, facts: FactSpec[] = scenario.facts): Map<string, number> {
+function seed(
+  scenario: Scenario,
+  over: { facts?: FactSpec[]; relations?: RelationSpec[] } = {},
+): Map<string, number> {
+  const facts = over.facts ?? scenario.facts;
+  const relations = over.relations ?? scenario.relations;
   const items = new Map(
     scenario.items.map((i) => [i.ref, insertItem(db, { type: i.type, name: i.name, ...attrs() })]),
   );
@@ -98,12 +112,12 @@ function seed(scenario: Scenario, facts: FactSpec[] = scenario.facts): Map<strin
     });
     cite({ factId: id }, f.source, f.quote);
   }
-  for (const r of scenario.relations) {
+  for (const r of relations) {
     const { id } = saveRelation(db, {
       subjectId: items.get(r.subject) as number,
       type: r.type,
       objectId: items.get(r.object) as number,
-      ...attrs(),
+      ...attrs(r.observedAt === undefined ? {} : { observedAt: r.observedAt }),
     });
     cite({ relationId: id }, r.source, r.quote);
   }
@@ -155,7 +169,7 @@ describe("the code rules over the fixture scenarios (P01-C1a, C3a)", () => {
       db = openBetterSqlite3(":memory:");
       migrate(db);
       registerConnectorInstance(db, "c1", "test-fixtures");
-      judge(seed(scenario, variant.facts));
+      judge(seed(scenario, variant));
       expect(insightsOf(type)).toEqual([]);
     },
   );
@@ -239,5 +253,55 @@ describe("one Insight per item (P01-R8, C3b)", () => {
     expect(insight?.factLines).toHaveLength(2);
     expect(judge(items).filter((o) => o.outcome !== "unchanged")).toEqual([]);
     expect(readInsight(db, found[0] as InsightKey)?.id).toBe(insight?.id);
+  });
+});
+
+describe("the status and relation rules in detail (P01-R12)", () => {
+  const scenarioOf = (type: string) => (fixture.types[type] as Required<TypeEntry>).scenario;
+  const insightOf = (type: string, items: Map<string, number>, ref: string) => {
+    const id = items.get(ref) as number;
+    return readInsight(db, { rule: type, xItemId: id, yItemId: id });
+  };
+
+  it("pending_request: the earliest valid target date is the urgency; a closed status makes it stand down", () => {
+    const items = seed(scenarioOf("pending_request"));
+    judge(items);
+    expect(insightOf("pending_request", items, "r")?.urgencyDate).toBe("2026-12-10");
+    // a second, closed status on the same item: the conflict rule's business, this one stands down
+    const closed = db.run(
+      `INSERT INTO facts (item_id, kind, value, epistemic, status, observed_at)
+       VALUES (?, 'status', 'done', 'explicit', 'candidate', '2026-11-21T00:00:00Z')`,
+      [items.get("r") as number],
+    ).lastInsertRowid;
+    addEvidence(db, {
+      target: { factId: closed },
+      sourceVersionId: 1,
+      start: 0,
+      end: 4,
+      quote: "결제 연",
+    });
+    const outcomes = recomputeInsights(db, [items.get("r") as number], {
+      scope: allow,
+      at: "2026-11-23T00:00:00.000Z",
+    });
+    expect(outcomes.filter((o) => o.key.rule === "pending_request")).toMatchObject([
+      { outcome: "resolved" },
+    ]);
+  });
+
+  it("new_relation: a user's approval of the relation takes the Insight back", () => {
+    const items = seed(scenarioOf("new_relation"));
+    judge(items);
+    expect(insightsOf("new_relation")).toHaveLength(1);
+    setStatusForTest(db, "relation", 1, "verified");
+    judge(items);
+    expect(insightsOf("new_relation")).toEqual([]);
+  });
+
+  it("a status written with another case still counts as its value", () => {
+    const entry = scenarioOf("open_issue");
+    const items = seed(entry, { facts: [{ ...entry.facts[0], value: "In_Progress" } as FactSpec] });
+    judge(items);
+    expect(insightsOf("open_issue")).toHaveLength(1);
   });
 });

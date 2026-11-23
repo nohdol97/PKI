@@ -1,0 +1,89 @@
+{
+  "entities": {
+    "P01R": {
+      "type": "Request",
+      "name": "결제 연동 요청"
+    },
+    "P01I": {
+      "type": "Issue",
+      "name": "정산 오류 이슈"
+    }
+  },
+  "sets": {
+    "base": {
+      "files": ["p01-status.jsonl"],
+      "facts": [
+        {
+          "entity": "P01R",
+          "attribute": "status",
+          "value": "open",
+          "evidence": {
+            "record_id": "wiki-p01-0001",
+            "version": 1,
+            "span": [23, 43],
+            "quote": "결제 연동 요청의 상태는 open이다"
+          }
+        },
+        {
+          "entity": "P01R",
+          "attribute": "target_date",
+          "value": "2026-12-10",
+          "evidence": {
+            "record_id": "wiki-p01-0001",
+            "version": 1,
+            "span": [45, 72],
+            "quote": "결제 연동 요청의 목표일은 2026-12-10이다"
+          }
+        },
+        {
+          "entity": "P01I",
+          "attribute": "status",
+          "value": "in_progress",
+          "evidence": {
+            "record_id": "wiki-p01-0002",
+            "version": 1,
+            "span": [23, 50],
+            "quote": "정산 오류 이슈의 상태는 in_progress이다"
+          }
+        }
+      ],
+      "relations": [],
+      "insights": [
+        {
+          "rule": "pending_request",
+          "x": "P01R",
+          "y": "P01R",
+          "is_inference": true,
+          "evidence": [
+            {
+              "record_id": "wiki-p01-0001",
+              "version": 1,
+              "span": [23, 43],
+              "quote": "결제 연동 요청의 상태는 open이다"
+            },
+            {
+              "record_id": "wiki-p01-0001",
+              "version": 1,
+              "span": [45, 72],
+              "quote": "결제 연동 요청의 목표일은 2026-12-10이다"
+            }
+          ]
+        },
+        {
+          "rule": "open_issue",
+          "x": "P01I",
+          "y": "P01I",
+          "is_inference": true,
+          "evidence": [
+            {
+              "record_id": "wiki-p01-0002",
+              "version": 1,
+              "span": [23, 50],
+              "quote": "정산 오류 이슈의 상태는 in_progress이다"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -525,6 +525,11 @@
     "source": "fixtures/s01-glossary.jsonl"
   },
   {
+    "hash": "9eeb36a4bef971ebce1b7cff12e9bf253cc856df09307c3921c55ccd7bc31ed6",
+    "malicious": false,
+    "source": "fixtures/p01-status.jsonl"
+  },
+  {
     "hash": "a1bc9a52b8fd98daf22c337d873137a8e518d6a3b6020620d93b95f81d137f2a",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
@@ -783,6 +788,11 @@
     "hash": "eaf58e7ce7d8a06a9dcd3e9d02ca7c97a3e49a85527535baaa2424f51421f9c3",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "f0264c9d96fd58b14e6216a4c34d49a99f60ec7f929383cecb843d3e4ace3df2",
+    "malicious": false,
+    "source": "fixtures/p01-status.jsonl"
   },
   {
     "hash": "f13cfa3af6a9f10e06d6d30fc9f9b2d921e83b92442fbc66391ffaadcc9017db",

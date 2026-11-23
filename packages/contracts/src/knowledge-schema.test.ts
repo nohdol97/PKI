@@ -33,6 +33,8 @@ const KNOWLEDGE_TYPES = [
   "Dataset",
   "Metric",
   "Join",
+  // edition 3 (P01-R11)
+  "Request",
 ];
 const RELATION_TYPES = [
   "BELONGS_TO",
@@ -62,11 +64,11 @@ const clone = (): Mutable => ({
 });
 
 describe("schema.catalogue", () => {
-  it("is edition 2 with exactly nineteen knowledge types and fifteen relation types", () => {
-    expect(KNOWLEDGE_SCHEMA.edition).toBe(2);
+  it("is edition 3 with exactly twenty knowledge types and fifteen relation types", () => {
+    expect(KNOWLEDGE_SCHEMA.edition).toBe(3);
     expect(KNOWLEDGE_SCHEMA.knowledgeTypes.map((e) => e.name)).toEqual(KNOWLEDGE_TYPES);
     expect(KNOWLEDGE_SCHEMA.relationTypes.map((e) => e.name)).toEqual(RELATION_TYPES);
-    expect(KNOWLEDGE_SCHEMA.knowledgeTypes).toHaveLength(19);
+    expect(KNOWLEDGE_SCHEMA.knowledgeTypes).toHaveLength(20);
     expect(KNOWLEDGE_SCHEMA.relationTypes).toHaveLength(15);
   });
 
@@ -77,7 +79,7 @@ describe("schema.catalogue", () => {
     expect(types.Document).toBe("sources");
     expect(types.Fact).toBe("facts");
     expect(types.Insight).toBe("insights");
-    expect(Object.values(types).filter((p) => p === "type-definition")).toHaveLength(16);
+    expect(Object.values(types).filter((p) => p === "type-definition")).toHaveLength(17);
     const relations = place(KNOWLEDGE_SCHEMA.relationTypes);
     for (const name of RELATION_TYPES.slice(0, 6)) expect(relations[name]).toBe("type-definition");
     expect(relations.MENTIONS).toBe("computed");
@@ -110,7 +112,7 @@ describe("schema.catalogue", () => {
   it("derives the product seed and the reserved names from the catalogue alone", () => {
     const seeded = PRODUCT_SEED.map((e) => `${e.elementKind}:${e.name}`);
     expect(new Set(seeded).size).toBe(seeded.length);
-    expect(PRODUCT_SEED.filter((e) => e.elementKind === "item-type")).toHaveLength(16);
+    expect(PRODUCT_SEED.filter((e) => e.elementKind === "item-type")).toHaveLength(17);
     expect(PRODUCT_SEED.filter((e) => e.elementKind === "relation-type")).toHaveLength(10);
     expect(PRODUCT_SEED.filter((e) => e.elementKind === "fact-kind").map((e) => e.name)).toEqual([
       "target_date",
@@ -135,6 +137,8 @@ describe("schema.catalogue", () => {
       "metric.period",
       "join.keys",
       "join.cardinality",
+      "status",
+      "conclusion",
     ]);
     expect([...RESERVED_NAMES].sort()).toEqual(
       [
@@ -150,6 +154,33 @@ describe("schema.catalogue", () => {
     );
     // a name that has a place outside the type definitions is never seeded
     expect(seeded.some((s) => RESERVED_NAMES.includes(s.split(":")[1] as string))).toBe(false);
+  });
+
+  it("is edition 3's Request, status and conclusion, with the widened rules (P01-R11)", () => {
+    const rule = (list: readonly { name: string; rule: unknown }[], name: string) =>
+      list.find((e) => e.name === name)?.rule;
+    expect(rule(KNOWLEDGE_SCHEMA.factKinds, "status")).toEqual({
+      elementKind: "fact-kind",
+      itemTypes: ["Task", "Commitment", "Issue", "Request"],
+      valueType: "work-status",
+      cardinality: "one",
+    });
+    expect(rule(KNOWLEDGE_SCHEMA.factKinds, "conclusion")).toEqual({
+      elementKind: "fact-kind",
+      itemTypes: ["Decision", "BusinessRule"],
+      valueType: "text",
+      cardinality: "one",
+    });
+    for (const name of ["target_date", "statement", "identifier.key"]) {
+      expect(rule(KNOWLEDGE_SCHEMA.factKinds, name), name).toMatchObject({
+        itemTypes: expect.arrayContaining(["Request"]),
+      });
+    }
+    expect(rule(KNOWLEDGE_SCHEMA.relationTypes, "RELATED_TO")).toMatchObject({
+      subjectTypes: expect.arrayContaining(["Request"]),
+      objectTypes: expect.arrayContaining(["Request"]),
+    });
+    expect(KNOWLEDGE_SCHEMA.knowledgeTypes.find((e) => e.name === "Request")?.since).toBe(3);
   });
 
   it("fails when a name is dropped (red case)", () => {

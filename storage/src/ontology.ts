@@ -15,6 +15,7 @@
 import {
   DATA_CHECK_NAMES,
   FACT_VALUE_TYPES,
+  WORK_STATUSES,
   RESERVED_NAMES,
   type DataCheckName,
   type FactValueType,
@@ -201,15 +202,17 @@ export const isDate = (value: string): boolean => {
 
 /**
  * Whether a value is of the kind a fact kind's rule names (S01-R21): `date` a calendar date, `text`,
- * `surface-form` and `identifier` (S02-R2) not empty (after trimming). The one value check: extraction and the user's add
+ * `surface-form` and `identifier` (S02-R2) not empty (after trimming), `work-status` (P01-R11) one of its four values (case aside). The one value check: extraction and the user's add
  * and value fix both use it, so the two paths accept and reject the same values.
  */
 export const valueFits = (valueType: ValueType, value: string): boolean =>
   valueType === "date"
     ? isDate(value)
-    : (ANALYTICAL_VALUE_TYPES as readonly string[]).includes(valueType)
-      ? normalizeValue(valueType as AnalyticalValueType, value) !== null
-      : value.trim() !== "";
+    : valueType === "work-status"
+      ? (WORK_STATUSES as readonly string[]).includes(value.trim().toLowerCase())
+      : (ANALYTICAL_VALUE_TYPES as readonly string[]).includes(valueType)
+        ? normalizeValue(valueType as AnalyticalValueType, value) !== null
+        : value.trim() !== "";
 
 /**
  * The same check for a fact kind by name, reading the `verified` type definitions: `unregistered`

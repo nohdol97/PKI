@@ -205,7 +205,7 @@ describe("extract.v4: one call, thirteen types, six relations", () => {
       }),
     );
     expect(provider.requests).toHaveLength(1);
-    expect(provider.requests[0]?.schemaVersion).toBe(5);
+    expect(provider.requests[0]?.schemaVersion).toBe(6);
     expect(relations()).toEqual([
       { subject: "한서윤", type: "BELONGS_TO", object: "미리내 팀" },
       { subject: "한서윤", type: "RESPONSIBLE_FOR", object: "물결 프로젝트" },
