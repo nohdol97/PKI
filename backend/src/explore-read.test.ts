@@ -75,7 +75,7 @@ function item(name: string, versionId: number, value = "값") {
   return id;
 }
 const reads = (maxScan?: number) =>
-  createExploreReads(db, registry, createReadGate(db, registry), { maxScan });
+  createExploreReads(db, registry, createReadGate(db, registry), maxScan ? { maxScan } : {});
 
 describe("explore-read items at the scan cap (X02F-C1)", () => {
   it("answers `next` as the last shown number, never the hidden row read after it, and following it reaches the shown items beyond the cap", () => {

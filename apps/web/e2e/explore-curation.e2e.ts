@@ -72,10 +72,19 @@ test("explore-curation.e2e: find an item, see the graph, merge another Project i
   await curate.getByLabel("합칠 항목 이름").fill("새별");
   await curate.getByRole("button", { name: "합칠 항목 찾기" }).click();
   await expect(page.getByRole("list", { name: "합칠 항목 후보" })).toBeVisible();
-  await page.getByRole("button", { name: `중심 항목에 합치기: ${MEMBER}` }).click();
+  // X02F-C6: the answer is slow and the button is pressed twice: one request goes out and no refusal shows
+  let merges = 0;
+  await page.route("**/api/entities/merge", async (route) => {
+    merges += 1;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.continue();
+  });
+  await page.getByRole("button", { name: `중심 항목에 합치기: ${MEMBER}` }).dblclick();
 
   const members = page.getByRole("list", { name: "구성원 목록" });
   await expect(members).toContainText(MEMBER);
+  expect(merges).toBe(1);
+  await expect(curate.getByRole("alert")).toHaveCount(0);
 
   await page.getByRole("button", { name: `합치기 되돌리기: ${MEMBER}` }).click();
   await expect(page.getByRole("list", { name: "구성원 목록" })).toHaveCount(0);
