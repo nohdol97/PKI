@@ -95,23 +95,36 @@ export function App({ api }: { api: ApiClient }) {
   }[screen];
   return (
     <NavProvider screen={screen} onScreen={setScreen}>
-      <nav>
-        {(Object.keys(SCREENS) as Screen[]).map((id) => (
-          <button
-            key={id}
-            type="button"
-            aria-current={screen === id ? "page" : undefined}
-            onClick={() => setScreen(id)}
-          >
-            {SCREENS[id]}
-            {id === "notifications" && unreadBadge(changes.unread)}
-          </button>
-        ))}
-      </nav>
-      <main>
-        <h1>{SCREENS[screen]}</h1>
-        {shown()}
-      </main>
+      <div className="app">
+        <div className="side">
+          <div className="wordmark">PKI</div>
+          <nav>
+            {(Object.keys(SCREENS) as Screen[]).map((id) => (
+              <button
+                key={id}
+                type="button"
+                aria-current={screen === id ? "page" : undefined}
+                onClick={() => setScreen(id)}
+              >
+                {SCREENS[id]}
+                {id === "notifications" && unreadBadge(changes.unread)}
+              </button>
+            ))}
+          </nav>
+        </div>
+        <main className="screen" data-screen={screen}>
+          <div className="pane-list">
+            <h1>{SCREENS[screen]}</h1>
+            {shown()}
+          </div>
+        </main>
+        <footer className="statusbar">
+          <span>{SCREENS[screen]}</span>
+          {changes.unread > 0 && (
+            <span className="end">{`읽지 않은 알림 ${changes.unread}건`}</span>
+          )}
+        </footer>
+      </div>
     </NavProvider>
   );
 }
@@ -475,38 +488,40 @@ function Activity({ api }: { api: ApiClient }) {
       <Failure error={error} />
       {data?.calls.length === 0 && <p>Provider 호출 기록이 없습니다.</p>}
       {data && data.calls.length > 0 && (
-        <table aria-label="Provider 호출 기록">
-          <thead>
-            <tr>
-              <th>시각</th>
-              <th>Provider</th>
-              <th>전송</th>
-              <th>목적지</th>
-              <th>작업</th>
-              <th>등급</th>
-              <th>정책 버전</th>
-              <th>결과</th>
-              <th>사유</th>
-              <th>소요(ms)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.calls.map((c) => (
-              <tr key={`${c.requestId}/${c.attempt}`}>
-                <td>{c.createdAt}</td>
-                <td>{c.provider}</td>
-                <td>{EGRESS_LABEL[c.egress]}</td>
-                <td>{c.destination ?? NONE}</td>
-                <td>{c.taskKind}</td>
-                <td>{c.classification}</td>
-                <td>{c.policyVersion ?? NONE}</td>
-                <td>{outcomeText(c.outcome)}</td>
-                <td>{c.reason ?? NONE}</td>
-                <td>{c.durationMs ?? NONE}</td>
+        <div className="scroll-x">
+          <table aria-label="Provider 호출 기록">
+            <thead>
+              <tr>
+                <th>시각</th>
+                <th>Provider</th>
+                <th>전송</th>
+                <th>목적지</th>
+                <th>작업</th>
+                <th>등급</th>
+                <th>정책 버전</th>
+                <th>결과</th>
+                <th>사유</th>
+                <th>소요(ms)</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.calls.map((c) => (
+                <tr key={`${c.requestId}/${c.attempt}`}>
+                  <td>{c.createdAt}</td>
+                  <td>{c.provider}</td>
+                  <td>{EGRESS_LABEL[c.egress]}</td>
+                  <td>{c.destination ?? NONE}</td>
+                  <td>{c.taskKind}</td>
+                  <td>{c.classification}</td>
+                  <td>{c.policyVersion ?? NONE}</td>
+                  <td>{outcomeText(c.outcome)}</td>
+                  <td>{c.reason ?? NONE}</td>
+                  <td>{c.durationMs ?? NONE}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       <MoreButton
         next={calls.shown?.next ?? null}

@@ -91,3 +91,12 @@
 .state-none {
   color: var(--none);
 }
+
+/* a wide table scrolls inside its pane instead of widening the page */
+.scroll-x {
+  overflow-x: auto;
+  margin: 0 0 var(--sp-3);
+}
+.scroll-x > table {
+  margin: 0;
+}
