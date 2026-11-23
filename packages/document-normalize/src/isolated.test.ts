@@ -46,9 +46,11 @@ class FakeHost implements HostHandle {
   onGone(l: () => void) {
     this.gone.push(l);
   }
+  /** A host whose process never reports its end after kill(). */
+  stuck = false;
   kill() {
     this.killed = true;
-    queueMicrotask(() => this.die());
+    if (!this.stuck) queueMicrotask(() => this.die());
   }
   die() {
     for (const l of this.gone.splice(0)) l();
@@ -201,6 +203,42 @@ describe("the host is not trusted (I02B-R23)", () => {
   });
 });
 
+describe("the host's result is held to the job's own limits (I02B-R23)", () => {
+  const textResult = (id: number, length: number) => ({
+    type: "result",
+    id,
+    result: {
+      ok: true,
+      document: {
+        format: "txt",
+        text: "x".repeat(length),
+        blocks: [],
+        metadata: {},
+        limitations: [],
+      },
+    },
+  });
+  const limits = { maxFileBytes: 1_000, zip: { maxTotalBytes: 1_000 } };
+
+  it("a text within what the job may produce passes and a longer one is worker-failed", async () => {
+    const { spawner } = spawnerOf(
+      () => new FakeHost((job) => textResult(job.id, job.name === "long.txt" ? 1_001 : 1_000)),
+    );
+    const n = createIsolatedNormalizer({ spawner, ...LIMITS });
+    expect((await n.normalize({ ...file(1), name: "ok.txt" }, { limits })).ok).toBe(true);
+    expect(await n.normalize({ ...file(2), name: "long.txt" }, { limits })).toMatchObject({
+      ok: false,
+      error: { code: "worker-failed" },
+    });
+  });
+
+  it("with the default limits the same long text is fine: the cap is the job's, not a constant", async () => {
+    const { spawner } = spawnerOf(() => new FakeHost((job) => textResult(job.id, 1_001)));
+    const n = createIsolatedNormalizer({ spawner, ...LIMITS });
+    expect((await n.normalize(file(1))).ok).toBe(true);
+  });
+});
+
 describe("the size limit comes first (I02B-R22)", () => {
   it("a file over maxFileBytes is too-large without a host: nothing is spawned or copied", async () => {
     const { spawner, hosts } = spawnerOf(() => new FakeHost(ok));
@@ -247,6 +285,25 @@ describe("close and recheck", () => {
     const running = n.normalize(file(1));
     await vi.waitFor(() => expect(hosts).toHaveLength(1));
     await n.close();
+    expect(await running).toMatchObject({ ok: false, error: { code: "worker-failed" } });
+    expect(hosts[0]?.killed).toBe(true);
+  });
+
+  it("close during the ready wait does not wait out the start-up time when kill() never reports the host gone", async () => {
+    vi.useFakeTimers();
+    const { spawner, hosts } = spawnerOf(() => {
+      const host = new FakeHost(ok, false);
+      host.stuck = true;
+      return host;
+    });
+    const n = createIsolatedNormalizer({ spawner, ...LIMITS });
+    const running = n.normalize(file(1));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(hosts).toHaveLength(1);
+    const closing = n.close();
+    // far less than STARTUP_MS: the dropped host is gone as far as the wait is concerned
+    await vi.advanceTimersByTimeAsync(100);
+    await closing;
     expect(await running).toMatchObject({ ok: false, error: { code: "worker-failed" } });
     expect(hosts[0]?.killed).toBe(true);
   });

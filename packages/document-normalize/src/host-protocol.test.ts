@@ -2,9 +2,19 @@
 // caps, and a misfit is `invalid`. The cases are the reviewer's: an object with an injected field and a
 // 16 MiB string, plus every kind of wrong shape.
 import { describe, expect, it } from "vitest";
-import { parseFromHost, parseNormalizeResult } from "./host-protocol.ts";
+import {
+  parseFromHost,
+  parseNormalizeResult,
+  resultCaps,
+  type ResultCaps,
+} from "./host-protocol.ts";
+import { DEFAULT_LIMITS, resolveLimits } from "./limits.ts";
 import { normalizeDocument } from "./normalize.ts";
 import { generateFixtures } from "./testing/generate-fixtures.ts";
+
+const CAPS = resultCaps(DEFAULT_LIMITS);
+const parse = (raw: unknown, caps: ResultCaps = CAPS) => parseNormalizeResult(raw, caps);
+const parseHost = (raw: unknown, caps: ResultCaps = CAPS) => parseFromHost(raw, caps);
 
 const doc = (over: Record<string, unknown> = {}) => ({
   format: "markdown",
@@ -21,20 +31,18 @@ describe("parseNormalizeResult", () => {
     let seen = 0;
     for (const [name, bytes] of generateFixtures()) {
       const result = await normalizeDocument({ kind: "bytes", bytes, name });
-      expect(parseNormalizeResult(result), name).toEqual(result);
+      expect(parse(result), name).toEqual(result);
       seen++;
     }
     expect(seen).toBeGreaterThan(20);
   });
 
   it("carries no field the shape does not have: an injected field is a misfit, not a pass-through", () => {
+    expect(parse({ ...ok(doc()), injected: { path: "/etc/passwd" } })).toBeUndefined();
+    expect(parse(ok(doc({ injected: 1 })))).toBeUndefined();
+    expect(parse(ok(doc({ metadata: { extra: "x" } })))).toBeUndefined();
     expect(
-      parseNormalizeResult({ ...ok(doc()), injected: { path: "/etc/passwd" } }),
-    ).toBeUndefined();
-    expect(parseNormalizeResult(ok(doc({ injected: 1 })))).toBeUndefined();
-    expect(parseNormalizeResult(ok(doc({ metadata: { extra: "x" } })))).toBeUndefined();
-    expect(
-      parseNormalizeResult(
+      parse(
         ok(
           doc({
             blocks: [
@@ -45,13 +53,13 @@ describe("parseNormalizeResult", () => {
       ),
     ).toBeUndefined();
     expect(
-      parseNormalizeResult({ ok: false, error: { code: "corrupt", message: "m", path: "/etc" } }),
+      parse({ ok: false, error: { code: "corrupt", message: "m", path: "/etc" } }),
     ).toBeUndefined();
   });
 
   it("rebuilds the result: what comes back is a new object", () => {
     const raw = ok(doc());
-    const parsed = parseNormalizeResult(raw);
+    const parsed = parse(raw);
     expect(parsed).toEqual(raw);
     expect(parsed).not.toBe(raw);
   });
@@ -74,43 +82,135 @@ describe("parseNormalizeResult", () => {
     ["null", null],
     ["a string", "ok"],
   ])("rejects %s", (_name, raw) => {
-    expect(parseNormalizeResult(raw)).toBeUndefined();
+    expect(parse(raw)).toBeUndefined();
   });
 
-  it("bounds sizes: a 16 MiB string where a short one belongs, a text over the input limit, too many blocks", () => {
+  it("bounds sizes: a 16 MiB string where a short one belongs", () => {
     const sixteen = "x".repeat(16 * 1024 ** 2);
-    expect(parseNormalizeResult(ok(doc({ metadata: { title: sixteen } })))).toBeUndefined();
+    expect(parse(ok(doc({ metadata: { title: sixteen } })))).toBeUndefined();
+    expect(parse({ ok: false, error: { code: "corrupt", message: sixteen } })).toBeUndefined();
     expect(
-      parseNormalizeResult({ ok: false, error: { code: "corrupt", message: sixteen } }),
-    ).toBeUndefined();
-    expect(
-      parseNormalizeResult(
+      parse(
         ok(doc({ blocks: [{ start: 0, end: 1, locator: { format: "xlsx", sheet: sixteen } }] })),
       ),
     ).toBeUndefined();
-    expect(parseNormalizeResult(ok(doc({ text: "x".repeat(52_428_801) })))).toBeUndefined();
     // a text up to the normalizer's own input limit is a legitimate output
-    expect(parseNormalizeResult(ok(doc({ text: sixteen })))).toBeDefined();
+    expect(parse(ok(doc({ text: sixteen })))).toBeDefined();
   });
 });
 
 describe("parseFromHost", () => {
   it("a result message with a misfit result is `invalid`, not a result and not dropped silently", () => {
     expect(
-      parseFromHost({ type: "result", id: 1, result: { ok: true, document: { blocks: "x" } } }),
+      parseHost({ type: "result", id: 1, result: { ok: true, document: { blocks: "x" } } }),
     ).toEqual({
       type: "invalid",
     });
-    expect(parseFromHost({ type: "result", id: "1", result: ok(doc()) })).toEqual({
+    expect(parseHost({ type: "result", id: "1", result: ok(doc()) })).toEqual({
       type: "invalid",
     });
   });
 
   it("a result message that fits carries only the rebuilt result", () => {
-    expect(parseFromHost({ type: "result", id: 3, result: ok(doc()), extra: 1 })).toEqual({
+    expect(parseHost({ type: "result", id: 3, result: ok(doc()), extra: 1 })).toEqual({
       type: "result",
       id: 3,
       result: ok(doc()),
     });
+  });
+});
+
+const block = (start: number, end: number) => ({
+  start,
+  end,
+  locator: { format: "txt", line: 1 },
+});
+
+describe("the caps follow the job's limits (I02B-R23)", () => {
+  it("the text cap is what the job may read in or inflate: the larger of maxFileBytes and zip.maxTotalBytes", () => {
+    const small = resultCaps(resolveLimits({ maxFileBytes: 1_000, zip: { maxTotalBytes: 2_000 } }));
+    expect(small.maxText).toBe(2_000);
+    expect(
+      resultCaps(resolveLimits({ maxFileBytes: 3_000, zip: { maxTotalBytes: 2_000 } })).maxText,
+    ).toBe(3_000);
+    const text = (n: number) => ok(doc({ format: "txt", text: "x".repeat(n), blocks: [] }));
+    expect(parse(text(2_000), small)).toBeDefined();
+    expect(parse(text(2_001), small)).toBeUndefined();
+  });
+
+  it("a legitimate maximum for raised limits passes: a 51 MiB single line with maxFileBytes 60 MiB; the default cap refuses it only for the default job", () => {
+    const line = "x".repeat(51 * 1024 ** 2);
+    const result = ok(doc({ format: "txt", text: line, blocks: [block(0, line.length)] }));
+    expect(
+      parse(result, resultCaps(resolveLimits({ maxFileBytes: 60 * 1024 ** 2 }))),
+    ).toBeDefined();
+  });
+
+  it("a text longer than anything the limits let in is refused: just over the cap fails", () => {
+    const caps = resultCaps(resolveLimits({ maxFileBytes: 10, zip: { maxTotalBytes: 10 } }));
+    expect(parse(ok(doc({ format: "txt", text: "x".repeat(10), blocks: [] })), caps)).toBeDefined();
+    expect(
+      parse(ok(doc({ format: "txt", text: "x".repeat(11), blocks: [] })), caps),
+    ).toBeUndefined();
+  });
+
+  it("the number of blocks follows the text, not a constant: one block per code unit passes, one more fails", () => {
+    const n = 5_000;
+    const text = "x".repeat(n);
+    const blocks = Array.from({ length: n }, (_, i) => block(i, i + 1));
+    expect(parse(ok(doc({ format: "txt", text, blocks })))).toBeDefined();
+    // one block more than the text has code units, plus one for an empty document's single empty block
+    const tooMany = [...blocks, block(0, 0), block(0, 0)];
+    expect(parse(ok(doc({ format: "txt", text, blocks: tooMany })))).toBeUndefined();
+  });
+
+  it("the block cap is not a fixed number: more than four million one-character lines pass for a text that long (scaled-down limit)", () => {
+    // 4,000,001 blocks of one code unit need a 4,000,001-character text; the cap follows the text
+    const n = 4_000_001;
+    const text = "x".repeat(n);
+    const blocks = Array.from({ length: n }, (_, i) => block(i, i + 1));
+    expect(parse(ok(doc({ format: "txt", text, blocks })))).toBeDefined();
+  });
+});
+
+describe("blocks and arrays are checked for sense (I02B-R23)", () => {
+  it("a block needs start <= end <= the text's length (code points are never more than code units)", () => {
+    const withBlock = (b: unknown) => ok(doc({ format: "txt", text: "abc", blocks: [b] }));
+    expect(parse(withBlock(block(0, 3)))).toBeDefined();
+    expect(parse(withBlock(block(2, 1)))).toBeUndefined();
+    expect(parse(withBlock(block(0, 4)))).toBeUndefined();
+    expect(parse(withBlock(block(9e15, 5)))).toBeUndefined();
+  });
+
+  it("a sparse array is refused: holes in sheetNames and in the pages of a limitation", () => {
+    // eslint-disable-next-line no-sparse-arrays
+    const holes = ["a", , "c"];
+    expect(parse(ok(doc({ metadata: { sheetNames: holes } })))).toBeUndefined();
+    expect(
+      parse(ok(doc({ limitations: [{ code: "pdf.page-without-text", pages: [1, , 3] }] }))),
+    ).toBeUndefined();
+    expect(parse(ok(doc({ metadata: { sheetNames: ["a", "b"] } })))).toBeDefined();
+  });
+});
+
+describe("the cost of the check (I02B-R22: the backend's event loop is not held)", () => {
+  // PROVISIONAL threshold: the check of a large but legitimate result (a spreadsheet of 250,000 cells) is
+  // synchronous in the backend's main thread; it must not hold it for long. Measured cost in the PR.
+  const BLOCKS = 250_000;
+  const THRESHOLD_MS = 500;
+
+  it("validating a result of 250,000 blocks holds the event loop for less than the threshold", () => {
+    const text = "x".repeat(BLOCKS);
+    const blocks = Array.from({ length: BLOCKS }, (_, i) => ({
+      start: i,
+      end: i + 1,
+      locator: { format: "xlsx", sheet: "S1", cell: `A${i}`, row: i, column: 1 },
+    }));
+    const result = ok(doc({ format: "xlsx", text, blocks }));
+    const started = performance.now();
+    const parsed = parse(result);
+    const ms = performance.now() - started;
+    expect(parsed).toBeDefined();
+    expect(ms).toBeLessThan(THRESHOLD_MS);
   });
 });

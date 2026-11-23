@@ -7,8 +7,14 @@
 // What starts the host (`child_process.fork`, or Electron's main process on request) is the
 // `HostSpawner`; nothing here knows which.
 import { createHash } from "node:crypto";
-import { parseFromHost, type FromHost, type HostLimitCode } from "./host-protocol.ts";
-import { resolveLimits, type PartialLimits } from "./limits.ts";
+import {
+  parseFromHost,
+  resultCaps,
+  type FromHost,
+  type HostLimitCode,
+  type ResultCaps,
+} from "./host-protocol.ts";
+import { DEFAULT_LIMITS, resolveLimits, type PartialLimits } from "./limits.ts";
 import type {
   DocumentFormat,
   NormalizedDocument,
@@ -118,6 +124,8 @@ interface Conn {
   gone: boolean;
   /** Takes the next event of this host; one waiter at a time. */
   waiter: ((event: FromHost | "gone") => void) | undefined;
+  /** What the current job's result may hold (its resolved limits): the host's reply is checked against it. */
+  caps: ResultCaps;
 }
 
 export function createIsolatedNormalizer(options: IsolatedNormalizerOptions): IsolatedNormalizer {
@@ -145,6 +153,11 @@ export function createIsolatedNormalizer(options: IsolatedNormalizerOptions): Is
     } catch {
       // already gone
     }
+    // dropped is gone as far as anyone waiting on it is concerned: a host that does not report its end
+    // must not hold a waiter (a close during the ready wait) until the start-up time runs out
+    const waiting = c.waiter;
+    c.waiter = undefined;
+    waiting?.("gone");
   }
 
   /** A host that is up and has said it is ready; a new one when there is none. */
@@ -173,9 +186,9 @@ export function createIsolatedNormalizer(options: IsolatedNormalizerOptions): Is
         handle.kill();
         throw new Error("closed");
       }
-      const c: Conn = { handle, gone: false, waiter: undefined };
+      const c: Conn = { handle, gone: false, waiter: undefined, caps: resultCaps(DEFAULT_LIMITS) };
       handle.onMessage((raw) => {
-        const message = parseFromHost(raw);
+        const message = parseFromHost(raw, c.caps);
         if (message === undefined || c.gone) return;
         const waiting = c.waiter;
         c.waiter = undefined;
@@ -230,6 +243,7 @@ export function createIsolatedNormalizer(options: IsolatedNormalizerOptions): Is
     } catch {
       return { kind: "no-host" };
     }
+    c.caps = resultCaps(resolveLimits(job.limits));
     c.handle.post({
       type: "job",
       id: job.id,

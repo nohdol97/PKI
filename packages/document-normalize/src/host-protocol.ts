@@ -6,7 +6,7 @@
 // the host sending a large message: it is copied into backend memory before any check (spec threat
 // model). The job carries bytes, a name and a format only: no path crosses (I02B-C18).
 import type { PartialLimits } from "./limits.ts";
-import { DEFAULT_LIMITS } from "./limits.ts";
+import type { Limits } from "./limits.ts";
 import {
   DOCUMENT_FORMATS,
   LIMITATION_CODES,
@@ -91,7 +91,8 @@ export function parseToHost(raw: unknown): ToHost | undefined {
 
 const LIMIT_CODES: readonly unknown[] = ["timed-out", "resource-exceeded", "worker-failed"];
 
-export function parseFromHost(raw: unknown): FromHost | undefined {
+/** `caps`: what the current job's result may hold (`resultCaps` of its limits). */
+export function parseFromHost(raw: unknown, caps: ResultCaps): FromHost | undefined {
   if (!isRecord(raw)) return undefined;
   if (raw.type === "ready") {
     const { processType, parentKind } = raw;
@@ -103,7 +104,7 @@ export function parseFromHost(raw: unknown): FromHost | undefined {
   }
   if (raw.type === "result") {
     if (!Number.isSafeInteger(raw.id)) return { type: "invalid" };
-    const result = parseNormalizeResult(raw.result);
+    const result = parseNormalizeResult(raw.result, caps);
     return result === undefined
       ? { type: "invalid" }
       : { type: "result", id: raw.id as number, result };
@@ -127,126 +128,153 @@ export function parseFromHost(raw: unknown): FromHost | undefined {
 
 // --- the host's result, rebuilt (I02B-R23) ---
 
-/** Caps: the text and the blocks follow the normalizer's own input limit; names and paths are short. */
-const CAP = {
-  text: DEFAULT_LIMITS.maxFileBytes,
-  blocks: 4_000_000,
-  short: 1_024,
-  meta: 65_536,
-  list: 10_000,
-  detail: 16,
-};
+/**
+ * What the result of one job may hold, from that job's resolved limits: the text of a document is at most
+ * what the normalizer can read in (`maxFileBytes`) or inflate from a zip (`zip.maxTotalBytes`), whichever is
+ * larger, and a block spans at least one code unit, so there are at most `text.length + 1` blocks.
+ */
+export interface ResultCaps {
+  /** The longest `text`, in UTF-16 code units. */
+  maxText: number;
+}
+
+export function resultCaps(limits: Limits): ResultCaps {
+  return { maxText: Math.max(limits.maxFileBytes, limits.zip.maxTotalBytes) };
+}
+
+/** The other caps: names and paths are short, metadata and lists bounded (a producer never comes near them). */
+const CAP = { short: 1_024, meta: 65_536, list: 10_000, detail: 16 };
 
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
 const int = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
-/** `raw` has no key outside `allowed`, and every key of `required`. */
-function keys(raw: Record<string, unknown>, required: string[], optional: string[] = []): boolean {
-  const all = new Set([...required, ...optional]);
-  return Object.keys(raw).every((k) => all.has(k)) && required.every((k) => k in raw);
+
+/**
+ * `raw` has only keys of `allowed`, and every one of the first `required` of them. A loop over the object,
+ * no allocation: it runs once per block.
+ */
+function shaped(
+  raw: Record<string, unknown>,
+  allowed: readonly string[],
+  required: number,
+): boolean {
+  let seen = 0;
+  for (const k in raw) {
+    const at = allowed.indexOf(k);
+    if (at < 0) return false;
+    if (at < required) seen++;
+  }
+  return seen === required;
 }
 
 type Locator = Extract<NormalizeResult, { ok: true }>["document"]["blocks"][number]["locator"];
 
+const optStr = (v: unknown) => v === undefined || str(v, CAP.short);
+const optInt = (v: unknown) => v === undefined || int(v);
+
+/** A copy of `raw` limited to `names`, those that are present. */
+function copyOf(raw: Record<string, unknown>, names: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of names) if (raw[k] !== undefined) out[k] = raw[k];
+  return out;
+}
+
+const PDF = ["format", "page"] as const;
+const DOCX = ["format", "paragraph", "style", "headingLevel", "table"] as const;
+const XLSX = ["format", "sheet", "cell", "row", "column"] as const;
+const CSV = ["format", "record", "line", "field"] as const;
+const HTML = ["format", "path", "line"] as const;
+const MARKDOWN = ["format", "line", "node", "depth"] as const;
+const LINE = ["format", "line"] as const;
+const TABLE = ["index", "row", "cell"] as const;
+
 function parseLocator(raw: unknown): Locator | undefined {
-  if (!isRecord(raw) || typeof raw.format !== "string") return undefined;
-  const optStr = (k: string) => raw[k] === undefined || str(raw[k], CAP.short);
-  const optInt = (k: string) => raw[k] === undefined || int(raw[k]);
-  const pick = <K extends string>(names: readonly K[]) =>
-    Object.fromEntries(names.filter((k) => raw[k] !== undefined).map((k) => [k, raw[k]]));
+  if (!isRecord(raw)) return undefined;
   switch (raw.format) {
     case "pdf":
-      return keys(raw, ["format", "page"]) && int(raw.page)
-        ? ({ format: "pdf", page: raw.page } as Locator)
-        : undefined;
+      return shaped(raw, PDF, 2) && int(raw.page) ? (copyOf(raw, PDF) as Locator) : undefined;
     case "docx": {
       const t = raw.table;
-      const table =
-        t === undefined ||
-        (isRecord(t) &&
-          keys(t, ["index", "row", "cell"]) &&
-          int(t.index) &&
-          int(t.row) &&
-          int(t.cell));
-      return keys(raw, ["format", "paragraph"], ["style", "headingLevel", "table"]) &&
-        int(raw.paragraph) &&
-        optStr("style") &&
-        optInt("headingLevel") &&
-        table
-        ? ({
-            format: "docx",
-            ...pick(["paragraph", "style", "headingLevel"]),
-            ...(t === undefined
-              ? {}
-              : {
-                  table: {
-                    index: (t as Record<string, number>).index,
-                    row: (t as Record<string, number>).row,
-                    cell: (t as Record<string, number>).cell,
-                  },
-                }),
-          } as Locator)
-        : undefined;
+      if (
+        !shaped(raw, DOCX, 2) ||
+        !int(raw.paragraph) ||
+        !optStr(raw.style) ||
+        !optInt(raw.headingLevel)
+      ) {
+        return undefined;
+      }
+      if (t === undefined) return copyOf(raw, DOCX) as Locator;
+      if (!isRecord(t) || !shaped(t, TABLE, 3) || !int(t.index) || !int(t.row) || !int(t.cell)) {
+        return undefined;
+      }
+      return { ...copyOf(raw, DOCX), table: copyOf(t, TABLE) } as Locator;
     }
     case "xlsx":
-      return keys(raw, ["format", "sheet"], ["cell", "row", "column"]) &&
+      return shaped(raw, XLSX, 2) &&
         str(raw.sheet, CAP.short) &&
-        optStr("cell") &&
-        optInt("row") &&
-        optInt("column")
-        ? ({ format: "xlsx", ...pick(["sheet", "cell", "row", "column"]) } as Locator)
+        optStr(raw.cell) &&
+        optInt(raw.row) &&
+        optInt(raw.column)
+        ? (copyOf(raw, XLSX) as Locator)
         : undefined;
     case "csv":
-      return keys(raw, ["format", "record", "line", "field"]) &&
-        int(raw.record) &&
-        int(raw.line) &&
-        int(raw.field)
-        ? ({ format: "csv", ...pick(["record", "line", "field"]) } as Locator)
+      return shaped(raw, CSV, 4) && int(raw.record) && int(raw.line) && int(raw.field)
+        ? (copyOf(raw, CSV) as Locator)
         : undefined;
     case "html":
-      return keys(raw, ["format", "path", "line"]) && str(raw.path, CAP.meta) && int(raw.line)
-        ? ({ format: "html", ...pick(["path", "line"]) } as Locator)
+      return shaped(raw, HTML, 3) && str(raw.path, CAP.meta) && int(raw.line)
+        ? (copyOf(raw, HTML) as Locator)
         : undefined;
     case "markdown":
-      return keys(raw, ["format", "line", "node"], ["depth"]) &&
+      return shaped(raw, MARKDOWN, 3) &&
         int(raw.line) &&
         str(raw.node, CAP.short) &&
-        optInt("depth")
-        ? ({ format: "markdown", ...pick(["line", "node", "depth"]) } as Locator)
+        optInt(raw.depth)
+        ? (copyOf(raw, MARKDOWN) as Locator)
         : undefined;
     case "txt":
     case "json":
-      return keys(raw, ["format", "line"]) && int(raw.line)
-        ? ({ format: raw.format, line: raw.line } as Locator)
-        : undefined;
+      return shaped(raw, LINE, 2) && int(raw.line) ? (copyOf(raw, LINE) as Locator) : undefined;
     default:
       return undefined;
   }
 }
 
-function parseDocument(raw: Record<string, unknown>) {
-  if (!keys(raw, ["format", "text", "blocks", "metadata", "limitations"], ["encoding"]))
-    return undefined;
+/** Elements of `list`, each of which `ok` accepts; a hole in the array is an element that `ok` refuses. */
+function everyElement(list: unknown, max: number, ok: (v: unknown) => boolean): list is unknown[] {
+  if (!Array.isArray(list) || list.length > max) return false;
+  for (let i = 0; i < list.length; i++) if (!ok(list[i])) return false;
+  return true;
+}
+
+const DOCUMENT = ["format", "text", "blocks", "metadata", "limitations", "encoding"] as const;
+const BLOCK = ["start", "end", "locator"] as const;
+const META = ["title", "author", "created", "modified", "pageCount", "sheetNames"] as const;
+const LIMITATION = ["code", "count", "pages"] as const;
+const ENCODING_NAMES: readonly unknown[] = ["utf-8", "utf-16le", "utf-16be", "euc-kr"];
+const ENCODING_METHODS: readonly unknown[] = ["bom", "strict", "fallback"];
+
+function parseDocument(raw: Record<string, unknown>, caps: ResultCaps) {
+  if (!shaped(raw, DOCUMENT, 5)) return undefined;
   if (!(DOCUMENT_FORMATS as readonly unknown[]).includes(raw.format)) return undefined;
-  if (!str(raw.text, CAP.text)) return undefined;
-  if (!Array.isArray(raw.blocks) || raw.blocks.length > CAP.blocks) return undefined;
-  const blocks = [];
-  for (const b of raw.blocks as unknown[]) {
-    if (!isRecord(b) || !keys(b, ["start", "end", "locator"]) || !int(b.start) || !int(b.end)) {
-      return undefined;
-    }
+  if (!str(raw.text, caps.maxText)) return undefined;
+  const textLength = raw.text.length;
+  // a block spans at least one code unit, so the blocks of a text are fewer than its length + 1
+  if (!Array.isArray(raw.blocks) || raw.blocks.length > textLength + 1) return undefined;
+  const blocks = new Array<unknown>(raw.blocks.length);
+  for (let i = 0; i < raw.blocks.length; i++) {
+    const b = raw.blocks[i] as unknown;
+    // start <= end <= the text's length: the normalizer counts code points (I02A-R9), which are never
+    // more than the code units `length` counts, so the code-unit length is a bound every real block meets
+    if (!isRecord(b) || !shaped(b, BLOCK, 3) || !int(b.start) || !int(b.end)) return undefined;
+    if (b.start > b.end || b.end > textLength) return undefined;
     const locator = parseLocator(b.locator);
     if (locator === undefined) return undefined;
-    blocks.push({ start: b.start, end: b.end, locator });
+    blocks[i] = { start: b.start, end: b.end, locator };
   }
   const meta = raw.metadata;
-  if (
-    !isRecord(meta) ||
-    !keys(meta, [], ["title", "author", "created", "modified", "pageCount", "sheetNames"])
-  ) {
-    return undefined;
-  }
+  if (!isRecord(meta) || !shaped(meta, META, 0)) return undefined;
   const metadata: Record<string, unknown> = {};
-  for (const k of ["title", "author", "created", "modified"]) {
+  for (const k of ["title", "author", "created", "modified"] as const) {
     if (meta[k] === undefined) continue;
     if (!str(meta[k], CAP.meta)) return undefined;
     metadata[k] = meta[k];
@@ -256,43 +284,30 @@ function parseDocument(raw: Record<string, unknown>) {
     metadata.pageCount = meta.pageCount;
   }
   if (meta.sheetNames !== undefined) {
-    const names = meta.sheetNames;
-    if (
-      !Array.isArray(names) ||
-      names.length > CAP.list ||
-      !names.every((n) => str(n, CAP.short))
-    ) {
-      return undefined;
-    }
-    metadata.sheetNames = [...names];
+    if (!everyElement(meta.sheetNames, CAP.list, (n) => str(n, CAP.short))) return undefined;
+    metadata.sheetNames = [...meta.sheetNames];
   }
   let encoding;
   if (raw.encoding !== undefined) {
     const e = raw.encoding;
-    const names: readonly unknown[] = ["utf-8", "utf-16le", "utf-16be", "euc-kr"];
-    const methods: readonly unknown[] = ["bom", "strict", "fallback"];
     if (
       !isRecord(e) ||
-      !keys(e, ["name", "method"]) ||
-      !names.includes(e.name) ||
-      !methods.includes(e.method)
+      !shaped(e, ["name", "method"], 2) ||
+      !ENCODING_NAMES.includes(e.name) ||
+      !ENCODING_METHODS.includes(e.method)
     ) {
       return undefined;
     }
     encoding = { name: e.name, method: e.method };
   }
-  if (!Array.isArray(raw.limitations) || raw.limitations.length > CAP.list) return undefined;
   const limitations = [];
-  for (const l of raw.limitations as unknown[]) {
-    if (!isRecord(l) || !keys(l, ["code"], ["count", "pages"])) return undefined;
+  if (!Array.isArray(raw.limitations) || raw.limitations.length > CAP.list) return undefined;
+  for (let i = 0; i < raw.limitations.length; i++) {
+    const l = raw.limitations[i] as unknown;
+    if (!isRecord(l) || !shaped(l, LIMITATION, 1)) return undefined;
     if (!(LIMITATION_CODES as readonly unknown[]).includes(l.code)) return undefined;
     if (l.count !== undefined && !int(l.count)) return undefined;
-    if (
-      l.pages !== undefined &&
-      (!Array.isArray(l.pages) || l.pages.length > CAP.list || !l.pages.every(int))
-    ) {
-      return undefined;
-    }
+    if (l.pages !== undefined && !everyElement(l.pages, CAP.list, int)) return undefined;
     limitations.push({
       code: l.code,
       ...(l.count === undefined ? {} : { count: l.count }),
@@ -310,16 +325,17 @@ function parseDocument(raw: Record<string, unknown>) {
 }
 
 /** The host's result as a NormalizeResult built here, or undefined when it does not fit (I02B-R23). */
-export function parseNormalizeResult(raw: unknown): NormalizeResult | undefined {
+export function parseNormalizeResult(raw: unknown, caps: ResultCaps): NormalizeResult | undefined {
   if (!isRecord(raw)) return undefined;
   if (raw.ok === true) {
-    if (!keys(raw, ["ok", "document"]) || !isRecord(raw.document)) return undefined;
-    const document = parseDocument(raw.document);
+    if (!shaped(raw, ["ok", "document"], 2) || !isRecord(raw.document)) return undefined;
+    const document = parseDocument(raw.document, caps);
     return document === undefined ? undefined : ({ ok: true, document } as NormalizeResult);
   }
-  if (raw.ok !== false || !keys(raw, ["ok", "error"]) || !isRecord(raw.error)) return undefined;
+  if (raw.ok !== false || !shaped(raw, ["ok", "error"], 2) || !isRecord(raw.error))
+    return undefined;
   const e = raw.error;
-  if (!keys(e, ["code", "message"], ["detail"])) return undefined;
+  if (!shaped(e, ["code", "message", "detail"], 2)) return undefined;
   if (
     !(NORMALIZE_ERROR_CODES as readonly unknown[]).includes(e.code) ||
     !str(e.message, CAP.short)

@@ -104,6 +104,8 @@ interface Live {
   host: HostProcess;
   exited: Promise<void>;
   gone: boolean;
+  /** The ending in progress, when one is. */
+  ending: Promise<boolean> | undefined;
 }
 
 export function createNormalizerHostBroker(options: BrokerOptions): NormalizerHostBroker {
@@ -129,17 +131,24 @@ export function createNormalizerHostBroker(options: BrokerOptions): NormalizerHo
     ]);
 
   /**
-   * Ends the live host and says whether it is gone. A host that is still there after kill() and
-   * forceKill() (or one that cannot be forced: no pid) is not gone: the caller starts no next host over it.
+   * Ends the host the broker holds and says whether it is gone. The host stays held until its `exit`
+   * event, not until the kill is sent: a host that survived kill() and forceKill() (or one that cannot be
+   * forced: no pid) is still held, so the next request finds it and no second host is started over it.
+   * One ending runs at a time, whoever asked (a request to end, or a start).
    */
-  async function endLive(): Promise<boolean> {
+  function endLive(): Promise<boolean> {
     const current = live;
-    if (current === undefined) return true;
-    live = undefined;
-    current.host.kill();
-    if (await exitsWithin(current, killAfterMs)) return true;
-    current.host.forceKill?.();
-    return exitsWithin(current, killAfterMs);
+    if (current === undefined || current.gone) return Promise.resolve(true);
+    current.ending ??= (async () => {
+      current.host.kill();
+      if (await exitsWithin(current, killAfterMs)) return true;
+      current.host.forceKill?.();
+      return exitsWithin(current, killAfterMs);
+    })().finally(() => {
+      // a host that is still there may be ended again by the next request
+      current.ending = undefined;
+    });
+    return current.ending;
   }
 
   async function serve(id: number) {
@@ -155,10 +164,12 @@ export function createNormalizerHostBroker(options: BrokerOptions): NormalizerHo
         id,
         host,
         gone: false,
+        ending: undefined,
         exited: new Promise<void>((resolve) =>
           host.once("exit", () => {
             current.gone = true;
             if (live === current) live = undefined;
+            current.ending = undefined;
             // tells the backend which host went; one that was ended on purpose is old news to it
             tell({ type: "normalizer-host-gone", id });
             resolve();

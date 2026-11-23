@@ -39,9 +39,13 @@ class FakeHost implements HostProcess {
     if (how === "at-once") this.exit();
     else setTimeout(() => this.exit(), how);
   }
+  /** Set: kill() only works from this call on (a host that ignores the first SIGTERM). */
+  workingKillFrom = 1;
+  kills = 0;
   kill() {
     this.killed = true;
-    this.endAfter(this.afterKill);
+    this.kills++;
+    if (this.kills >= this.workingKillFrom) this.endAfter(this.afterKill);
     return true;
   }
   forceKill() {
@@ -149,6 +153,108 @@ describe("normalizer host broker", () => {
     await new Promise((r) => setTimeout(r, 250));
     expect(hosts).toHaveLength(1);
     expect(toBackend.at(-1)?.message).toEqual({ type: "normalizer-host-failed", id: 2 });
+  });
+
+  it("a host that cannot be killed stays held: start, start, start never has a second host, and every later start is answered failed", async () => {
+    const { broker, hosts, toBackend, maxAlive } = setup({
+      afterKill: "never",
+      afterForce: "never",
+    });
+    broker.start(1);
+    await tick();
+    broker.start(2);
+    await new Promise((r) => setTimeout(r, 250));
+    broker.start(3);
+    await new Promise((r) => setTimeout(r, 250));
+    expect(hosts).toHaveLength(1);
+    expect(maxAlive()).toBe(1);
+    const failed = toBackend.filter(
+      (m) => (m.message as { type: string }).type === "normalizer-host-failed",
+    );
+    expect(failed.map((m) => (m.message as { id: number }).id)).toEqual([2, 3]);
+  });
+
+  it("a host without a pid is held the same way across several requests", async () => {
+    const { broker, hosts, maxAlive } = setup({ afterKill: "never", afterForce: "never" });
+    broker.start(1);
+    await tick();
+    if (hosts[0]) hosts[0].pid = undefined;
+    for (const id of [2, 3, 4]) {
+      broker.start(id);
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    expect(hosts).toHaveLength(1);
+    expect(maxAlive()).toBe(1);
+  });
+
+  it("end then start, with a host that exits late: the new host is told about only after the old one's exit", async () => {
+    const { broker, hosts, toBackend, maxAlive } = setup({ afterKill: 40 });
+    broker.start(1);
+    await tick();
+    broker.end(1);
+    broker.start(2);
+    await new Promise((r) => setTimeout(r, 250));
+    const order = toBackend.map(
+      (m) => `${(m.message as { type: string }).type}:${(m.message as { id: number }).id}`,
+    );
+    expect(order).toEqual(["normalizer-host:1", "normalizer-host-gone:1", "normalizer-host:2"]);
+    expect(hosts).toHaveLength(2);
+    expect(maxAlive()).toBe(1);
+  });
+
+  it("end then start, with a host that cannot be killed: no second host, the start is answered failed", async () => {
+    const { broker, hosts, toBackend, maxAlive } = setup({
+      afterKill: "never",
+      afterForce: "never",
+    });
+    broker.start(1);
+    await tick();
+    broker.end(1);
+    broker.start(2);
+    await new Promise((r) => setTimeout(r, 250));
+    expect(hosts).toHaveLength(1);
+    expect(maxAlive()).toBe(1);
+    expect(toBackend.at(-1)?.message).toEqual({ type: "normalizer-host-failed", id: 2 });
+  });
+
+  it("a later request tries to end a host that survived the first ending again, and starts the next host once it is gone", async () => {
+    const hosts: FakeHost[] = [];
+    const toBackend: unknown[] = [];
+    const broker = createNormalizerHostBroker({
+      forkHost: () => {
+        const host = new FakeHost("at-once", "never");
+        host.workingKillFrom = 2;
+        hosts.push(host);
+        return host;
+      },
+      newChannel: () => ({ port1: {}, port2: {} }),
+      backend: { postMessage: (m) => toBackend.push(m) },
+      killTimeoutMs: 50,
+    });
+    broker.start(1);
+    await tick();
+    broker.start(2);
+    await new Promise((r) => setTimeout(r, 200));
+    // the first ending failed: the host is still held, the start was answered failed
+    expect(hosts).toHaveLength(1);
+    broker.start(3);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(hosts[0]?.kills).toBe(2);
+    expect(hosts).toHaveLength(2);
+  });
+
+  it("a host that exits after a failed ending lets the next start through", async () => {
+    const { broker, hosts, toBackend } = setup({ afterKill: "never", afterForce: 400 });
+    broker.start(1);
+    await tick();
+    broker.start(2);
+    // the wait after forceKill (50 ms) ends before the host does (400 ms): failed
+    await new Promise((r) => setTimeout(r, 200));
+    expect(toBackend.at(-1)?.message).toEqual({ type: "normalizer-host-failed", id: 2 });
+    await new Promise((r) => setTimeout(r, 400));
+    broker.start(3);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(hosts).toHaveLength(2);
   });
 
   it("when the host cannot be forked the port pair that was made is closed", async () => {

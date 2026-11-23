@@ -31,18 +31,19 @@ port.on("message", (job: WorkerJob) => {
     for (;;) {
       if (total < maxExternalMemoryBytes * 3) {
         const block = Buffer.allocUnsafe(16 * 1024 ** 2);
-        block.fill(1);
-        keep.push(block);
-        total += block.length;
-        Atomics.store(record, 0, BigInt(total));
-        // the crossing is recorded in the quantity the host reads (this isolate's external_memory,
-        // which also holds the worker's own baseline), not in this loop's own total
+        // the crossing is recorded right after the allocation raised external_memory, in the quantity the
+        // host reads (this isolate's external_memory, which also holds the worker's own baseline), before
+        // the fill that takes time: the host cannot see the limit crossed and find nothing recorded
         if (
           getHeapStatistics().external_memory > maxExternalMemoryBytes &&
           Atomics.load(record, 1) === 0n
         ) {
           Atomics.store(record, 1, BigInt(Date.now()));
         }
+        block.fill(1);
+        keep.push(block);
+        total += block.length;
+        Atomics.store(record, 0, BigInt(total));
       }
     }
   } else if (job.name === BOMB.error) {
