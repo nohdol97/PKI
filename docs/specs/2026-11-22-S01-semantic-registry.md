@@ -102,7 +102,7 @@
   | `created_at` | 기존 열 `observed_at` |
   | `updated_at`, `version` | 이력의 마지막 줄의 시각과 순번(R6). 따로 열을 두지 않는다 |
   | `valid_from` | 기존 열 `valid_at` |
-  | `valid_until` | 없음. S02가 정한다 |
+  | `valid_until` | S02-T08의 마이그레이션 v26이 `facts`·`relations`에 더한다(항목에는 없음) |
 
 - **S01-R2 표기.** 한 항목의 다른 이름은 그 항목의 사실로 적는다. 종류는 셋이다: `alias.synonym`(동의어), `alias.abbreviation`(약어), `alias.translation`(다른 언어의 표기). 값은 표기 글자 그대로다.
   - 표기는 원문에 **글자 그대로** 있어야 하고 그 자리가 근거가 된다. 코드가 인용문 안에 그 표기가 있는지 확인하며, 없으면 버리고 버린 수에 센다.

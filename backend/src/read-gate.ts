@@ -33,6 +33,10 @@ import {
   defaultScopePolicy,
   type ScopePurpose,
   type SqlDriver,
+  effectiveUntil,
+  listAssertionLinks,
+  supersedingStands,
+  readFact,
 } from "@pki/storage";
 
 /** The registry a server without a composition point runs: the product's kinds, the default scope policy. */
@@ -76,6 +80,11 @@ export interface ReadGate {
    * R24's path check on this list is S02-T09's.
    */
   mergeCandidates(): RouteResponse<"entityCandidates">;
+  /**
+   * The conflict list (S02-R19, R24, R25): a link is listed only when it and both its facts are shown and the policy lets their sources be put together; each fact's
+   * effective end is computed from the listed SUPERSEDES links alone, so nothing of a hidden side shows.
+   */
+  conflicts(): RouteResponse<"conflicts">;
   /** Whether the registry row is stored and shown: the one answer for a row that is absent, deleted or hidden. */
   semanticShown(kind: SemanticKind, id: number): boolean;
   /**
@@ -252,6 +261,58 @@ export function createReadGate(
           };
         }
       }
+    },
+    conflicts() {
+      const read = listAssertionLinks(db, Math.max(maxScan, 1));
+      const linkOk = shown(
+        read.map((l) => ({ kind: "assertion-link", id: String(l.id) })),
+        "display",
+      );
+      const factOk = shown(
+        [...new Set(read.flatMap((l) => [l.fromFactId, l.toFactId]))].map((id) => ({
+          kind: "fact",
+          id: String(id),
+        })),
+        "display",
+      );
+      // the link's lineage is both facts' together: the policy must also let the two be put together (S02-R24)
+      const together = (id: number) =>
+        registry.combinable(db, registry.lineage(db, { kind: "assertion-link", id: String(id) }));
+      const listed = read.filter(
+        (l) =>
+          linkOk.has(String(l.id)) &&
+          together(l.id) &&
+          factOk.has(String(l.fromFactId)) &&
+          factOk.has(String(l.toFactId)),
+      );
+      const facts = new Map(
+        [...new Set(listed.flatMap((l) => [l.fromFactId, l.toFactId]))].flatMap((id) => {
+          const fact = readFact(db, id);
+          return fact ? [[id, fact] as const] : [];
+        }),
+      );
+      const end = (factId: number) =>
+        effectiveUntil(
+          facts.get(factId)?.validUntil ?? null,
+          listed
+            .filter((l) => l.toFactId === factId && supersedingStands(db, l))
+            .map((l) => facts.get(l.fromFactId)?.validAt ?? null),
+        );
+      const side = (factId: number) => ({
+        factId,
+        itemId: facts.get(factId)?.itemId as number,
+        effectiveUntil: end(factId),
+      });
+      return {
+        links: listed.slice(0, semanticLimit).map((l) => ({
+          id: l.id,
+          type: l.type,
+          createdBy: l.createdBy,
+          from: side(l.fromFactId),
+          to: side(l.toFactId),
+        })),
+        truncated: listed.length > semanticLimit,
+      };
     },
     semanticShown: (kind, id) =>
       readSemanticState(db, { kind, id }) !== undefined && isShown(kind, id),

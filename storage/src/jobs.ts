@@ -722,18 +722,19 @@ export function supersedeOpenJobs(db: SqlDriver, sourceId: number, at: Date = ne
 export interface ExtractionDrops {
   quotes: number;
   other: number;
+  /** Rows kept with their validity interval emptied because the dates were unreal or not in order (S02-R17). */
+  validity?: number;
 }
 
 /** Records the dropped counts on the job, inside the transaction writing its result. */
 export function recordExtractionDrops(db: SqlDriver, jobId: number, drops: ExtractionDrops): void {
-  for (const n of [drops.quotes, drops.other]) {
+  for (const n of [drops.quotes, drops.other, drops.validity ?? 0]) {
     if (!Number.isInteger(n) || n < 0) throw new RangeError("a dropped count is a whole number");
   }
-  const { changes } = db.run("UPDATE jobs SET dropped_quotes = ?, dropped_other = ? WHERE id = ?", [
-    drops.quotes,
-    drops.other,
-    jobId,
-  ]);
+  const { changes } = db.run(
+    "UPDATE jobs SET dropped_quotes = ?, dropped_other = ?, dropped_validity = ? WHERE id = ?",
+    [drops.quotes, drops.other, drops.validity ?? null, jobId],
+  );
   if (changes !== 1) throw new Error(`job ${jobId} not found`);
 }
 
@@ -741,4 +742,11 @@ export function readExtractionDrops(db: SqlDriver, jobId: number): ExtractionDro
   const row = db.all("SELECT dropped_quotes, dropped_other FROM jobs WHERE id = ?", [jobId])[0];
   if (row?.dropped_quotes == null || row.dropped_other == null) return undefined;
   return { quotes: row.dropped_quotes as number, other: row.dropped_other as number };
+}
+
+/** The rows an extraction kept with an emptied validity interval (S02-R17); undefined when none was recorded. */
+export function readDroppedValidity(db: SqlDriver, jobId: number): number | undefined {
+  const value = db.all("SELECT dropped_validity FROM jobs WHERE id = ?", [jobId])[0]
+    ?.dropped_validity;
+  return value == null ? undefined : (value as number);
 }

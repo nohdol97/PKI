@@ -44,7 +44,7 @@ const rows = (): Stored[] =>
     .map((r) => r as unknown as Stored);
 const named = (name: string): Stored[] => rows().filter((r) => r.name === name);
 const historyCount = () => db.all("SELECT count(*) AS n FROM ontology_history")[0]?.n;
-const upgrade = () => migrate(db);
+const upgrade = () => migrate(db, migrations.slice(0, MIGRATION_SCHEMA));
 
 /** The rules as R2's table states them, written out here: the migration's copy is compared with this. */
 const EXPECTED_CHECKS: Record<string, string[]> = {
@@ -60,7 +60,7 @@ const SEEDED_NAMES = ANALYTICAL_SEED.map((e) => e.name);
 
 describe("ontology.analytical-seeds: the migration", () => {
   it("is the migration after S02's: one step, and the schema goes up by one", () => {
-    expect(migrations).toHaveLength(MIGRATION_SCHEMA);
+    expect(migrations.length).toBeGreaterThanOrEqual(MIGRATION_SCHEMA);
     expect(schemaVersion(db)).toBe(S02_SCHEMA);
     upgrade();
     expect(schemaVersion(db)).toBe(MIGRATION_SCHEMA);

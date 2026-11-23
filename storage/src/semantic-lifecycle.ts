@@ -56,7 +56,13 @@ export interface AutomatedLifecycle {
   /** Extraction: a hypothesis row that gets evidence stated as explicit becomes explicit. */
   explicitEvidence(tx: SqlDriver, ref: EntryRef, basis: Basis, at?: string): Outcome;
   /** Policy: verified becomes disputed; needs the source version it rests on. */
-  raiseDispute(tx: SqlDriver, ref: EntryRef, basis: Basis | null, at?: string): Outcome;
+  raiseDispute(
+    tx: SqlDriver,
+    ref: EntryRef,
+    basis: Basis | null,
+    at?: string,
+    reason?: string,
+  ): Outcome;
   /**
    * Policy (S01-R9): a candidate fact or relation becomes verified. The conditions are the caller's
    * (knowledge-engine/auto-verify.ts); the gate refuses an item, a row that is not a candidate, and a
@@ -207,6 +213,8 @@ interface TransitionOptions {
   at?: string | undefined;
   /** Picks the table row of this action when several rows share the pair (the value fix's `replace`). */
   action?: string;
+  /** The line's reason code when the transition sets none of its own (a policy dispute's `contradiction`). */
+  reason?: string;
 }
 
 /**
@@ -324,7 +332,7 @@ export function applyTransition(
   to: KnowledgeStatus,
   options: TransitionOptions = {},
 ): Outcome {
-  const { action: wanted, ...lineOptions } = options;
+  const { action: wanted, reason: given, ...lineOptions } = options;
   if (actor === "policy" && to === "disputed" && !options.basis) {
     return { status: "refused", reason: "basis-required" };
   }
@@ -370,7 +378,7 @@ export function applyTransition(
       ? NO_CURRENT_EVIDENCE_APPROVAL
       : found.action === "supersede"
         ? EVIDENCE_LOST
-        : null,
+        : (given ?? null),
     ...lineOptions,
   });
   return { status: "applied", seq };
@@ -506,8 +514,8 @@ export const automatedLifecycle: AutomatedLifecycle = {
     return { status: "applied", seq };
   },
 
-  raiseDispute: (tx, ref, basis, at) =>
-    applyTransition(tx, ref, "policy", "disputed", { basis, at }),
+  raiseDispute: (tx, ref, basis, at, reason) =>
+    applyTransition(tx, ref, "policy", "disputed", { basis, at, ...(reason ? { reason } : {}) }),
 
   autoVerify: (tx, ref, at) => applyTransition(tx, ref, "policy", "verified", { at }),
 

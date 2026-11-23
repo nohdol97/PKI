@@ -12,6 +12,7 @@ import {
   leaseNextJob,
   listOntologyElements,
   migrate,
+  readDroppedValidity,
   readExtractionDrops,
   readOntologyHistory,
   registerConnectorInstance,
@@ -418,8 +419,8 @@ describe("extract.v4: statements and the validity input fields", () => {
     expect(facts().map((f) => f.kind)).toEqual(["definition"]);
   });
 
-  it("takes validFrom and validUntil on facts and relations and writes no interval yet (S02-T08 writes it)", async () => {
-    await extract(
+  it("writes validFrom/validUntil on a new row; an unreal date or from >= until keeps the row, empties the interval and counts dropped_validity; a stored empty interval is filled, a stored one is kept (S02-R17)", async () => {
+    const first = await extract(
       BODY,
       answer({
         items: [person, org],
@@ -428,13 +429,63 @@ describe("extract.v4: statements and the validity input fields", () => {
             validFrom: "2026-01-01",
             validUntil: "2026-12-31",
           }),
+          // an unreal date: the row stays, the interval is empty, one count
+          idFact("identifier.email", "seoyun.han@example.test", Q.mail, {
+            validFrom: "2026-02-30",
+            validUntil: "2026-12-31",
+          }),
         ],
         relations: [{ ...relation("p", "BELONGS_TO", "o", Q.org), validFrom: "2026-01-01" }],
       }),
     );
-    expect(facts()).toHaveLength(1);
-    expect(relations()).toHaveLength(1);
-    expect(db.all("SELECT valid_at FROM facts").map((r) => r.valid_at)).toEqual([null]);
+    expect(
+      db.all("SELECT kind, valid_at, valid_until, observed_at FROM facts ORDER BY id"),
+    ).toEqual([
+      {
+        kind: "identifier.key",
+        valid_at: "2026-01-01",
+        valid_until: "2026-12-31",
+        observed_at: T0.toISOString(),
+      },
+      {
+        kind: "identifier.email",
+        valid_at: null,
+        valid_until: null,
+        observed_at: T0.toISOString(),
+      },
+    ]);
+    expect(db.all("SELECT valid_at, valid_until FROM relations")).toEqual([
+      { valid_at: "2026-01-01", valid_until: null },
+    ]);
+    expect(readDroppedValidity(db, first.id)).toBe(1);
+
+    // the same row again from a new version: the empty interval is filled, the stored one is kept
+    setUp([
+      answer({
+        items: [
+          {
+            ...person,
+            existingItemId: String(db.all("SELECT id FROM items WHERE name = '한서윤'")[0]?.id),
+          },
+        ],
+        facts: [
+          idFact("identifier.key", "K-0417", Q.key, {
+            validFrom: "2027-01-01",
+            validUntil: "2027-12-31",
+          }),
+          idFact("identifier.email", "seoyun.han@example.test", Q.mail, {
+            validFrom: "2026-03-01",
+            validUntil: "2026-09-01",
+          }),
+        ],
+      }),
+    ]);
+    store(BODY);
+    await runNext();
+    expect(db.all("SELECT kind, valid_at, valid_until FROM facts ORDER BY id")).toEqual([
+      { kind: "identifier.key", valid_at: "2026-01-01", valid_until: "2026-12-31" },
+      { kind: "identifier.email", valid_at: "2026-03-01", valid_until: "2026-09-01" },
+    ]);
   });
 });
 

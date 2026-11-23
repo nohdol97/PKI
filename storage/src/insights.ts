@@ -25,6 +25,8 @@ export type InsightContent =
       summary: string;
       evidenceIds: readonly number[];
       userInputs?: readonly UserInputRef[];
+      /** The SUPERSEDES links that took a value out of the rule's reading (S02-R19). */
+      linkIds?: readonly number[];
     }
   | { state: "resolved" };
 
@@ -35,6 +37,7 @@ export interface StoredInsight extends InsightKey {
   summary: string | null;
   evidenceIds: number[];
   userInputs: UserInputRef[];
+  linkIds: number[];
 }
 
 const KEY = "rule = ? AND x_item_id = ? AND y_item_id = ?";
@@ -65,6 +68,10 @@ export function saveInsight(db: SqlDriver, key: InsightKey, content: InsightCont
       [id, input.id],
     );
   }
+  db.run("DELETE FROM insight_link_inputs WHERE insight_id = ?", [id]);
+  for (const linkId of content.state === "resolved" ? [] : (content.linkIds ?? [])) {
+    db.run("INSERT INTO insight_link_inputs (insight_id, link_id) VALUES (?, ?)", [id, linkId]);
+  }
   return id;
 }
 
@@ -87,6 +94,9 @@ export function readInsight(db: SqlDriver, key: InsightKey): StoredInsight | und
       ])
       .map((r) => r.evidence_id as number),
     userInputs: userInputsOf(db, id),
+    linkIds: db
+      .all("SELECT link_id FROM insight_link_inputs WHERE insight_id = ? ORDER BY link_id", [id])
+      .map((r) => r.link_id as number),
   };
 }
 

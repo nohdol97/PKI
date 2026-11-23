@@ -13,6 +13,7 @@
 // The type definitions' user operations (ontology.ts, S01-T07) and entity resolution's (entity-decisions.ts,
 // S02-T04: merge, unmerge, the distinct mark) travel in the same object, so the one lint-guarded name
 // `userDecisions` (and its constructor `createUserDecisions`, which the composition root calls) is the only way to them.
+import { insertAssertionLink } from "./assertion-links.ts";
 import { eraseChecksReading, queueChecksAround } from "./analytical-check-lines.ts";
 import { listEvidence } from "./knowledge.ts";
 import { findSameForm, isSurfaceFormKind } from "./surface-form.ts";
@@ -301,6 +302,12 @@ function undoBatch(
   // a member deleted since leaves fewer rows than the fix made; one with a later line is not at its fix
   const whole = members.length >= 2 && lines.every((l) => l.newest?.seq === l.m.seq);
   if (!whole) return { status: "refused", reason: "not-latest" };
+  // the authored row can outlive its undo (an extraction attached evidence), so the cascade alone leaves the link
+  tx.run(
+    `DELETE FROM assertion_links WHERE created_by = 'user' AND type = 'SUPERSEDES'
+       AND from_fact_id IN (SELECT value FROM json_each(?)) AND to_fact_id IN (SELECT value FROM json_each(?))`,
+    [JSON.stringify(members.map((m) => m.ref.id)), JSON.stringify(members.map((m) => m.ref.id))],
+  );
   let answer: UndoResult | undefined;
   // from here a member may already be reverted: a refusal would be committed by a caller that keeps
   // returned values, so what cannot be reverted throws and the caller's transaction rolls back
@@ -365,6 +372,14 @@ const buildUserDecisions = (entities: EntityDecisions): UserDecisions => ({
       };
     }
     const added = insertAuthored(tx, entry, at, batch);
+    // the new value supersedes the old one in the user's own link (S02-R19); no scope question: both rows are on one item
+    insertAssertionLink(tx, {
+      type: "SUPERSEDES",
+      fromFactId: added.ref.id,
+      toFactId: fact.id,
+      createdBy: "user",
+      at: at ?? new Date().toISOString(),
+    });
     return { status: "applied", replaced: fact, added: added.ref, seq: added.seq };
   },
 

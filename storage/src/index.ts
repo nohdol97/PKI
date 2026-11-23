@@ -121,6 +121,7 @@ export {
   leaseNextJob,
   OPEN_JOB_STATUSES,
   readCheckpoint,
+  readDroppedValidity,
   readExtractionDrops,
   readJob,
   reclaimLeases,
@@ -233,6 +234,7 @@ export {
   type Refusal,
 } from "./semantic-lifecycle.ts";
 export { rowLineage, unionOfVersions } from "./row-lineage.ts";
+export { INVALID, isValidRow, validRow, type ValidRow } from "./valid-row.ts";
 export {
   listSemanticFacts,
   listSemanticItems,
@@ -281,6 +283,7 @@ export type {
   MergeResult,
   SplitRefusal,
   SplitResult,
+  ValidityResult,
   UnmergeResult,
 } from "./entity-decisions.ts";
 export {
@@ -481,3 +484,22 @@ export {
   type InsightEvidenceRow,
   type InsightUserInputRow,
 } from "./evidence-view.ts";
+export {
+  deleteAssertionLinks,
+  effectiveUntil,
+  insertAssertionLink,
+  linksOfFacts,
+  listAssertionLinks,
+  oneValueKind,
+  otherValidValues,
+  slotRivals,
+  supersededAmong,
+  supersedingStands,
+  supersededByVersion,
+  type ConflictReach,
+  type LinkMaker,
+  type LinkType,
+  type NewAssertionLink,
+  type StoredAssertionLink,
+} from "./assertion-links.ts";
+export { fillValidity, validitySetByUser } from "./valid-time.ts";

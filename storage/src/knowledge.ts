@@ -30,11 +30,15 @@ export interface NewFact extends KnowledgeAttributes {
   value: string;
   /** A definition's short context tag (S01-R3); written when the row is created, never changed here. */
   context?: string | null;
+  /** The end of the valid interval `[validAt, validUntil)` (S02-R17); null when unknown. */
+  validUntil?: string | null;
 }
 export interface NewRelation extends KnowledgeAttributes {
   subjectId: number;
   type: string;
   objectId: number;
+  /** The end of the valid interval `[validAt, validUntil)` (S02-R17); null when unknown. */
+  validUntil?: string | null;
 }
 export type StoredItem = NewItem & { id: number };
 export type StoredFact = NewFact & { id: number };
@@ -77,11 +81,13 @@ function saveUnique(
   keyColumns: readonly [string, string, string],
   key: readonly [number | string, string, number | string],
   attributes: KnowledgeAttributes,
-  extra: { column: string; value: string | null } | undefined = undefined,
+  extras: readonly { column: string; value: string | null }[] = [],
 ): { id: number; created: boolean } {
-  const values = [...key, ...attributeValues(attributes), ...(extra ? [extra.value] : [])];
+  // `valid_until` (v26) is written only when stated, so a row written before it existed needs no column of it
+  const stated = extras.filter((e) => e.column !== "valid_until" || e.value !== null);
+  const values = [...key, ...attributeValues(attributes), ...stated.map((e) => e.value)];
   const { changes } = db.run(
-    `INSERT INTO ${table} (${keyColumns.join(", ")}, ${ATTRIBUTES}${extra ? `, ${extra.column}` : ""})
+    `INSERT INTO ${table} (${keyColumns.join(", ")}, ${ATTRIBUTES}${stated.map((e) => `, ${e.column}`).join("")})
      VALUES (${values.map(() => "?").join(", ")}) ON CONFLICT DO NOTHING`,
     values,
   );
@@ -99,18 +105,25 @@ export function saveFact(db: SqlDriver, fact: NewFact): { id: number; created: b
     ["item_id", "kind", "value"],
     [fact.itemId, fact.kind, fact.value],
     fact,
-    { column: "context", value: fact.context ?? null },
+    [
+      { column: "context", value: fact.context ?? null },
+      { column: "valid_until", value: fact.validUntil ?? null },
+    ],
   );
 }
 
 export function readFact(db: SqlDriver, id: number): StoredFact | undefined {
-  const row = db.all(`SELECT item_id, kind, value, ${ATTRIBUTES} FROM facts WHERE id = ?`, [id])[0];
+  const row = db.all(
+    `SELECT item_id, kind, value, valid_until, ${ATTRIBUTES} FROM facts WHERE id = ?`,
+    [id],
+  )[0];
   if (!row) return undefined;
   return {
     id,
     itemId: row.item_id as number,
     kind: row.kind as string,
     value: row.value as string,
+    validUntil: row.valid_until as string | null,
     ...attributesOf(row),
   };
 }
@@ -125,12 +138,13 @@ export function saveRelation(
     ["subject_id", "type", "object_id"],
     [relation.subjectId, relation.type, relation.objectId],
     relation,
+    [{ column: "valid_until", value: relation.validUntil ?? null }],
   );
 }
 
 export function readRelation(db: SqlDriver, id: number): StoredRelation | undefined {
   const row = db.all(
-    `SELECT subject_id, type, object_id, ${ATTRIBUTES} FROM relations WHERE id = ?`,
+    `SELECT subject_id, type, object_id, valid_until, ${ATTRIBUTES} FROM relations WHERE id = ?`,
     [id],
   )[0];
   if (!row) return undefined;
@@ -139,6 +153,7 @@ export function readRelation(db: SqlDriver, id: number): StoredRelation | undefi
     subjectId: row.subject_id as number,
     type: row.type as string,
     objectId: row.object_id as number,
+    validUntil: row.valid_until as string | null,
     ...attributesOf(row),
   };
 }

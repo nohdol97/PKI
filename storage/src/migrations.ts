@@ -1479,6 +1479,38 @@ const v25: Migration = (db) => {
   db.run("UPDATE revisions SET knowledge_revision = ?", [revision]);
 };
 
+// Schema v26 (S02-T08, S02-R17, R18): additive only. A valid interval's end on facts and
+// relations, the assertion links between two facts, the links an Insight rests on, and
+// the count of validity dates an extraction dropped. No stored row is rewritten.
+const v26: Migration = (db) => {
+  db.exec(`
+    ALTER TABLE facts ADD COLUMN valid_until TEXT;
+    ALTER TABLE relations ADD COLUMN valid_until TEXT;
+    ALTER TABLE jobs ADD COLUMN dropped_validity INTEGER CHECK (dropped_validity >= 0);
+    CREATE TABLE assertion_links (
+      id INTEGER PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN ('SUPERSEDES', 'CONTRADICTS')),
+      from_fact_id INTEGER NOT NULL REFERENCES facts (id) ON DELETE CASCADE,
+      to_fact_id INTEGER NOT NULL REFERENCES facts (id) ON DELETE CASCADE,
+      created_by TEXT NOT NULL CHECK (created_by IN ('rule', 'propagation', 'user')),
+      basis_source_id INTEGER,
+      basis_version INTEGER,
+      at TEXT NOT NULL,
+      CHECK (from_fact_id <> to_fact_id),
+      CHECK (type <> 'CONTRADICTS' OR from_fact_id < to_fact_id),
+      CHECK ((basis_source_id IS NULL) = (basis_version IS NULL)),
+      UNIQUE (type, from_fact_id, to_fact_id)
+    );
+    CREATE INDEX assertion_links_to ON assertion_links (to_fact_id);
+    CREATE TABLE insight_link_inputs (
+      insight_id INTEGER NOT NULL REFERENCES insights (id) ON DELETE CASCADE,
+      link_id INTEGER NOT NULL REFERENCES assertion_links (id) ON DELETE CASCADE,
+      PRIMARY KEY (insight_id, link_id)
+    ) WITHOUT ROWID;
+    CREATE INDEX insight_link_inputs_link ON insight_link_inputs (link_id);
+  `);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1506,6 +1538,7 @@ export const migrations: readonly Migration[] = [
   v23,
   v24,
   v25,
+  v26,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

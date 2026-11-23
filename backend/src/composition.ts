@@ -54,6 +54,7 @@ import {
 } from "@pki/providers/adapters";
 import {
   candidatesReceiver,
+  conflictsReceiver,
   createCanonicalEntries,
   createAnalyticalCheckHandler,
   createDatasetProfileHandler,
@@ -169,11 +170,13 @@ export function productEngine(): KnowledgeEngine {
  * unmerge, a group resting or waking and a split announce to in their own transaction. Both users of the
  * list, the user's entry and the derivative kind `entity-merge`, are built from this one constant. A receiver
  * deletes or recomputes what rests on an item and never throws in a deletion's propagation (a throw rolls
- * that propagation back). The rule's receiver (the Insight, S02-T05) is first, then S03's (erases check lines
+ * that propagation back). The conflicts' (S02-T08, the links of the slots of the groups reached) is first, because
+ * the rule reads supersession in the same transaction; then the rule's (the Insight, S02-T05), then S03's (erases check lines
  * and queues the check job, S03-T05), then the candidates' (S02-T06, recomputes the candidates of the groups
- * reached); S02-T08 (conflicts) adds its own here, at review.
+ * reached).
  */
 export const MEMBERSHIP_LISTENERS: readonly MembershipListener[] = Object.freeze([
+  conflictsReceiver,
   dependencyDelayReceiver,
   onMembershipChanged,
   candidatesReceiver,

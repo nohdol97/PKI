@@ -89,3 +89,10 @@ export {
   type ProjectionsOptions,
   type ReconcileOutcome,
 } from "./projections.ts";
+export {
+  AUTO_DISPUTE_SETTING,
+  conflictsReceiver,
+  readAutoDispute,
+  refreshConflicts,
+  type ConflictOutcome,
+} from "./conflicts.ts";

@@ -50,6 +50,7 @@ import {
   withGroups,
 } from "@pki/storage";
 import { assessAfterPropagation } from "./auto-verify.ts";
+import { refreshConflicts } from "./conflicts.ts";
 import { recomputeDependencyDelay, type RuleOutcome } from "./dependency-delay.ts";
 import { refreshCandidates } from "./entity-resolution.ts";
 import { projectionKinds, type PermanentlyAbsent } from "./projection-kinds.ts";
@@ -177,6 +178,10 @@ const lineageOf: Record<string, (db: SqlDriver, id: number) => SourceVersionRef[
         [id],
       ),
       ...userInputsOf(db, id).map((input) => rowLineage(db, input)),
+      // the links that took a value out of the rule's reading (S02-R19)
+      ...db
+        .all("SELECT link_id FROM insight_link_inputs WHERE insight_id = ?", [id])
+        .map((r) => linkLineage(db, r.link_id as number)),
     ),
   // only a candidate or a rejected type definition follows its source; a verified one (and a retired
   // one, which was verified) is a rule the user accepted and holds no lineage (S01-R20, R22)
@@ -409,6 +414,66 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
     },
   };
 }
+
+/** The two facts of a link: its lineage is both facts' lineage together (S02-R18). */
+const linkLineage = (db: SqlDriver, id: number): SourceVersionRef[] => {
+  const link = db.all("SELECT from_fact_id, to_fact_id FROM assertion_links WHERE id = ?", [id])[0];
+  if (!link) return [];
+  return unionOfVersions(
+    rowLineage(db, { kind: "fact", id: link.from_fact_id as number }),
+    rowLineage(db, { kind: "fact", id: link.to_fact_id as number }),
+  );
+};
+
+/**
+ * The links between two facts (`assertion_links`, schema v26; S02-R18, R19). The ones the source's evidence
+ * reaches are collected (a link with a fact it cites, for every change kind: a scope change may let a pair
+ * be put together or not). A fact deleted by the fact kind took its links with it (cascade); the `rule`
+ * links of the items the change reached are judged again over the state the lower layers left, so a value
+ * that lost its evidence no longer stands against another, and a fact whose superseding value went is no
+ * longer superseded. When the links changed, the automatic promotion judges the reached items again (its
+ * condition 5 reads supersession). Counted as removed: the collected rows no longer stored; as recomputed:
+ * the links created.
+ */
+const ASSERTION_LINK: DerivativeKind = {
+  ...base("assertion-link", "knowledge"),
+  lineage: (db, ref) => linkLineage(db, Number(ref.id)),
+  affected: (tx, change) => {
+    supported(change);
+    return collect(
+      tx,
+      "assertion-link",
+      `SELECT id FROM assertion_links
+       WHERE from_fact_id IN (${CITED("fact_id")}) OR to_fact_id IN (${CITED("fact_id")}) ORDER BY id`,
+      [change.sourceId, change.sourceId],
+    );
+  },
+  invalidate: (ctx, snapshot, change) => {
+    noting(ctx);
+    const { tx } = ctx;
+    const reached = new Set<number>((ctx.collected.get("item") ?? []).map((a) => Number(a.ref.id)));
+    if (change.kind === "scope-changed") {
+      for (const id of reachedItems(tx, change.sourceId)) reached.add(id);
+    }
+    const items = ascending([...reached].filter((id) => stored(tx, "items", id)));
+    const refreshed = refreshConflicts(
+      tx,
+      items,
+      { combinable: (lineage) => ctx.combinable(lineage) },
+      {
+        ...(running ? { at: running.at } : {}),
+      },
+    );
+    const removed = gone(tx, "assertion_links", snapshot).length;
+    if (removed + refreshed.created + refreshed.removed > 0) {
+      assessAfterPropagation(tx, { itemIds: items, relationIds: [] }, running?.at);
+    }
+    return {
+      removed,
+      recomputed: refreshed.created + (running?.byReceivers.get("assertion-link") ?? 0),
+    };
+  },
+};
 
 /**
  * An item a cited row holds: deleted once no row from a source is left on it (S01-R14), its Insights
@@ -1061,6 +1126,7 @@ export const canonicalKinds = (
     EVIDENCE,
     knowledgeKind("fact"),
     knowledgeKind("relation"),
+    ASSERTION_LINK,
     SCOPE_DROP,
     ONTOLOGY,
     ITEM,

@@ -12,6 +12,7 @@ import {
   addEvidence,
   applyOntologyChange,
   commitDerived,
+  insertAssertionLink,
   insertItem,
   listInvalidations,
   migrate,
@@ -130,6 +131,7 @@ const TABLES: Record<string, string> = {
   ontology: "ontology_elements",
   "entity-merge": "item_merges",
   "merge-candidate": "merge_candidates",
+  "assertion-link": "assertion_links",
   "analytical-check": "dataset_tables",
 };
 const exists = (ref: DerivedRef) =>
@@ -180,6 +182,18 @@ function world() {
   const fNa = fact(xN, TARGET_DATE, "2026-12-08");
   cite({ factId: fNa }, a.id);
   const rN = relation(xN, yN as number);
+  // the links of S02-T08: between two facts from `a` only, two with `b` among their sources, two that cite nothing
+  const fS2 = fact(xS as number, TARGET_DATE, "2026-12-16");
+  cite({ factId: fS2 }, b.id);
+  const fN2 = fact(xN, TARGET_DATE, "2026-12-17");
+  const linkOf = (from: number, to: number) =>
+    insertAssertionLink(db, {
+      type: "SUPERSEDES",
+      fromFactId: from,
+      toFactId: to,
+      createdBy: "user",
+      at: AT,
+    }).id;
   // the support of the three candidates below (S02-R10): one email on both items of the pair, on items of
   // their own because a candidate is never between two items of one group. The extraction's rows cite the
   // source versions the pair is built from; the user's pair has none.
@@ -299,6 +313,11 @@ function world() {
     relation: { onlyA: rA, shared: rS, withoutLineage: rN },
     item: { onlyA: xA as number, shared: xS as number, withoutLineage: xN },
     insight: { onlyA: iA, shared: iS, withoutLineage: iN },
+    "assertion-link": {
+      onlyA: linkOf(fNa, fA),
+      shared: linkOf(fS2, fS),
+      withoutLineage: linkOf(fN2, fN),
+    },
     "scope-drop": { onlyA: dropA, shared: null, withoutLineage: null },
     ontology: { onlyA: ontoA, shared: ontoS, withoutLineage: added },
     "analytical-check": { onlyA: `table:${tableA}`, shared: null, withoutLineage: null },
@@ -465,6 +484,7 @@ const SUBJECTS: Record<string, { shared: boolean; withoutLineage: boolean }> = {
   ontology: BOTH,
   "entity-merge": BOTH,
   "merge-candidate": BOTH,
+  "assertion-link": BOTH,
   "analytical-check": { shared: false, withoutLineage: false },
 };
 for (const kind of CANONICAL_KINDS) {
@@ -472,12 +492,14 @@ for (const kind of CANONICAL_KINDS) {
 }
 
 describe("the product registry's canonical kinds (I04-R1)", () => {
-  it("registers the eleven canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
+  it("registers the twelve canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
     expect(derivativeRegistry.kinds.map((k) => [k.kind, k.layer, k.storage])).toEqual([
       ["source", "source", "canonical"],
       ["evidence", "evidence", "canonical"],
       ["fact", "knowledge", "canonical"],
       ["relation", "knowledge", "canonical"],
+      // the rule's links are judged after the fact kind deleted or superseded the rows they stand between
+      ["assertion-link", "knowledge", "canonical"],
       ["scope-drop", "knowledge", "canonical"],
       ["ontology", "knowledge", "canonical"],
       // the two entity-resolution kinds point at the items, so they run before the item kind deletes them
@@ -532,6 +554,8 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
       evidence: [],
       fact: [],
       relation: [],
+      // the link with a fact `b` cites: the rule's links over the items the source reaches are judged again (S02-R19)
+      "assertion-link": [String(rows["assertion-link"]?.shared)],
       item: [],
       // every record of what the policy left out is collected: its source's re-extraction is queued (I04-R15)
       "scope-drop": [String(rows["scope-drop"]?.onlyA)],
@@ -664,7 +688,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
-    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(13);
+    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(14);
     expect(log.findLastIndex((e) => e.startsWith("affected:"))).toBeLessThan(firstDelete);
     expect(log.filter((e) => e.startsWith("invalidate:"))).toEqual(
       [
@@ -672,6 +696,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         "evidence",
         "fact",
         "relation",
+        "assertion-link",
         "scope-drop",
         "ontology",
         "entity-merge",
@@ -691,6 +716,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       evidence: 9, // fNa's too, and the four of the candidates' emails that cite `a`
       fact: 4, // fA, fNa and the two emails of a's candidate
       relation: 1,
+      "assertion-link": 1, // the link between fNa and fA, gone with them
       "scope-drop": 1,
       ontology: 1,
       // the line and the candidate of the two items only `a` built: gone with them (the chain was mended first)
@@ -722,6 +748,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           evidence: 9,
           fact: 4,
           relation: 1,
+          "assertion-link": 1,
           "scope-drop": 1,
           ontology: 1,
           "entity-merge": 1,
@@ -738,6 +765,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           evidence: 0,
           fact: 0,
           relation: 0,
+          "assertion-link": 0,
           "scope-drop": 0,
           ontology: 0,
           "entity-merge": 0,
@@ -1096,5 +1124,41 @@ describe("reevaluate (I04-R8, C3)", () => {
     expect(after).toMatchObject({ id: before?.id, state: "active" });
     expect(after?.summary).toContain("2026-12-10");
     expect(after?.summary).not.toContain("2026-12-12");
+  });
+});
+
+describe("an assertion link under a deletion (S02-R19, C3)", () => {
+  it("deleting the superseding fact's source recomputes the Insight with the date that had been superseded", () => {
+    const [x, y] = [item("X"), item("Y")] as [number, number];
+    const oldSource = version("old", "old 목표일");
+    const newSource = version("new", "new 목표일");
+    const dep = version("dep", "x가 y에 기댄다");
+    const done = version("done", "y 완료일");
+    const old = fact(x, TARGET_DATE, "2026-12-01");
+    cite({ factId: old }, oldSource.id);
+    const next = fact(x, TARGET_DATE, "2026-12-05");
+    cite({ factId: next }, newSource.id);
+    cite({ relationId: relation(x, y) }, dep.id);
+    const completion = fact(y, COMPLETION_DATE, "2026-12-10");
+    cite({ factId: completion }, done.id);
+    const link = insertAssertionLink(db, {
+      type: "SUPERSEDES",
+      fromFactId: next,
+      toFactId: old,
+      createdBy: "rule",
+      at: AT,
+    }).id;
+    recomputeDependencyDelay(db, [x, y]);
+    const key = { rule: DEPENDENCY_DELAY, xItemId: x, yItemId: y };
+    expect(readInsight(db, key)).toMatchObject({ linkIds: [link] });
+    expect(readInsight(db, key)?.summary).toContain("2026-12-05");
+
+    deleteSource(db, newSource.sourceId, { reason: "user-deleted", at: AT });
+
+    // the link went with its fact; the old date is valid again and the Insight is read from it
+    expect(db.all("SELECT count(*) AS n FROM assertion_links")).toEqual([{ n: 0 }]);
+    const after = readInsight(db, key);
+    expect(after).toMatchObject({ state: "active", linkIds: [] });
+    expect(after?.summary).toContain("2026-12-01");
   });
 });

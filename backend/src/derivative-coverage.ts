@@ -53,6 +53,11 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   insight_evidence: kind("insight"),
   // the user-input rows an Insight used (S01-R15): the Insight's, deleted with it or with the row
   insight_user_inputs: kind("insight"),
+  // the links an Insight rested on (S02-R19): the Insight's, deleted with it or with the link
+  insight_link_inputs: kind("insight"),
+  // links between two facts (S02-R18): numbers and codes only; the registered kind `assertion-link`
+  // recomputes the rule's and drops those whose fact is gone (the foreign keys cascade)
+  assertion_links: kind("assertion-link"),
   // the type definitions with their lineage and history (S01-R22): the registered kind `ontology`
   // deletes the lineage rows of a deleted source and the candidates left with none
   ontology_elements: kind("ontology"),
