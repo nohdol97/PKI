@@ -186,16 +186,21 @@ export interface BootedBackend {
   tickets: ApprovalTickets;
 }
 
-export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
+export function bootBackend(options: BootOptions): Promise<BootedBackend> {
   const holder: { restore?: RestoreRun } = {};
-  try {
-    return await startBackend(options, holder);
-  } catch (error) {
-    // H01-R13: a start that fails between the swap and the finish commit puts the previous database back
+  const started = startBackend(options, holder);
+  // H01-R13: a start that fails between the swap and the finish commit puts the previous database back. A side
+  // reaction of the same promise, not a wrapper around it: the caller sees the start's own timing and error
+  started.catch(() => {
     const { restore } = holder;
-    if (restore?.applied && !restore.finished) rollbackRestore(restore);
-    throw error;
-  }
+    if (!restore?.applied || restore.finished) return;
+    try {
+      rollbackRestore(restore);
+    } catch (error) {
+      log("restore-rollback-failed", { error: errorClass(error) });
+    }
+  });
+  return started;
 }
 
 async function startBackend(

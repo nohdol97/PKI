@@ -294,9 +294,14 @@ describe("restore.rollback (H01-R13)", () => {
       allowedOrigins: [],
       secrets: NO_SECRET_STORE,
     };
-    await expect(bootBackend({ ...options, registry: failing })).rejects.toBeInstanceOf(
-      LedgerReapplyError,
+    // the rollback is done before the rejection reaches the caller's own handler (it is the first reaction)
+    const started = bootBackend({ ...options, registry: failing });
+    const seenByCaller = started.then(
+      () => "started",
+      () => sha(live()),
     );
+    await expect(started).rejects.toBeInstanceOf(LedgerReapplyError);
+    expect(await seenByCaller).toBe(hash);
     // the previous database, byte for byte, and no copy of anything left behind
     expect(sha(live())).toBe(hash);
     expect(readPending(data)).toEqual({ state: "failed", code: "start-failed" });

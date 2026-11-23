@@ -110,7 +110,7 @@
 
 - `storage/src/backup-file.ts`: 파일 형식(머리, scrypt, 조각 암호화·복호화, 오류 코드). 순수 함수와 스트림.
 - `storage/src/backup.ts`: `createSnapshot(db, dir)`(R1), `readManifestFacts(file)`(R3), `stageRestore(...)`(R9의 검사와 `migrate`). 표식 읽기·쓰기.
-- `backend/src/restore-boot.ts`: `applyPendingRestore(dataDir, open)`(R11), `finishRestore(db, run, report)`(R12), `rollbackRestore(run)`(R13), `readIndexFacts(vectorIndex)`(R3·R12가 쓰는 색인의 답. 이 빌드가 묶는 색인은 "없음"을 던져서 답하므로 던짐을 `null`로 읽는다). `boot.ts`에는 호출 셋과 try/catch 하나(`bootBackend`가 `startBackend`를 감싼다), `driver.start`의 인자 한 곳이 더해진다. 저장소 경계 규칙(어댑터는 조립 지점만 닿음) 때문에 `composition.ts`에 SQLite 파일을 여는 `openSqlFile` 한 줄을 더해 저널 점검과 사본 읽기가 쓴다.
+- `backend/src/restore-boot.ts`: `applyPendingRestore(dataDir, open)`(R11), `finishRestore(db, run, report)`(R12), `rollbackRestore(run)`(R13), `readIndexFacts(vectorIndex)`(R3·R12가 쓰는 색인의 답. 이 빌드가 묶는 색인은 "없음"을 던져서 답하므로 던짐을 `null`로 읽는다). `boot.ts`에는 호출 셋과 실패 반응 하나, `driver.start`의 인자 한 곳이 더해진다. 실패 반응은 `bootBackend`가 본문(`startBackend`)의 같은 promise에 곁가지 `catch`로 붙는 것이다: 감싸는 `async` 함수를 두면 시작이 끝나는 시점이 몇 틱 늦어져, 시작 도중 러너가 잡은 작업이 호출자의 `booted` 대입보다 먼저 도는 기존 시험(`projection-jobs.test.ts`)이 깨진다. 저장소 경계 규칙(어댑터는 조립 지점만 닿음) 때문에 `composition.ts`에 SQLite 파일을 여는 `openSqlFile` 한 줄을 더해 저널 점검과 사본 읽기가 쓴다.
 - `backend/src/backup-api.ts`: 여섯 경로의 처리기. `server.ts`에는 import·조립·처리기 줄만.
 
 ```mermaid
@@ -203,5 +203,6 @@ PR 하나로 간다. T1 뒤에 T2·T3을 나란히, T3 뒤에 T4·T5를 나란�
 | 날짜 | 변경 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-23 | 처음 씀, 확정 | 전체 | 이슈 #32 착수. X01이 진행 중이라 C3은 뒤 단위로 넘기고 C1·C2를 한 PR로 묶음. 정본 암호화는 ADR 0010의 현재 결정을 유지 |
+| 2026-11-23 | 설계 개요: 시작 실패 반응을 곁가지 catch로 | 설계 개요(boot.ts) | 전체 스위트가 잡음: 감싸는 async 함수가 시작의 완료 시점을 늦춰 projection-jobs 시험 둘이 빨개짐(변경 범위 시험으로는 안 보였음) |
 | 2026-11-23 | R3: 목록표에 `installation`(설치 지문) 추가; R15: 거절은 200 응답의 코드, `backupScrypt` 시험 틈 | R3, R15 | T3 구현 중 확인: R8의 "같은 설치인지"를 복호화 전에 가를 값이 목록표에 없었고, 계약 시험이 객체 응답만 받음 |
 | 2026-11-23 | R11·R12·R13: `rolling-back` 표식, `restore.last`에 `stagedAt`, 뜨겁지 않은 저널의 이동; 설계: `readIndexFacts`, `openSqlFile` | R11~R13, 설계 개요, T2 표 | T2 구현 중 확인: 되돌림 도중 꺼짐을 표식이 구분하지 못했고, 마무리 커밋 뒤 꺼짐을 가릴 기록이 필요했으며, 이 빌드의 `EmptyVectorIndex.embeddingSpace()`는 null이 아니라 던지고, 어댑터는 조립 지점에서만 열 수 있음 |
