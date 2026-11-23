@@ -111,7 +111,7 @@ stateDiagram-v2
 - **K02-C3a** (R1·R2·R3) ① 사실 하나를 고치면 그 항목만 dirty다. ② 시작하면 `reflect`의 daily·weekly 주기가 있다. ③ 무관한 항목이 많은 DB에서 daily는 dirty 묶음만 보고(결과 수), weekly는 열린 발견의 대상을 더 보되 전체를 보지 않는다. → `storage/src/reflection.test.ts`, `backend/src/lint-flow.test.ts`
 - **K02-C3b** (R12·R13·R14) ① 닫기 한 번과 "놓친 것" 한 번 뒤 그 규칙의 오탐 1·미탐 1이 응답에 있다. ② 발견을 받치던 원본을 지우면 그 트랜잭션 직후 발견과 계보 줄이 없고, 공통 계약(`derivativeKindContract`)이 `lint-finding`에 대해 통과한다. ③ 한 범위를 거부하는 정책으로 읽으면 그 범위 원본에 기댄 발견이 목록과 수에 없다. **변이**: 읽기 문의 걸러 내기를 빼면 ③이 빨개진다. → `knowledge-engine/src/lint-kind.test.ts`, `backend/src/lint-gate.test.ts`
 - **K02-C3c** (R15) 사용자가 "점검"에서 발견을 보고, 근거를 열고, 하나를 닫으면 다시 열어도 닫혀 있고 오탐 수가 1이다. → `apps/web/e2e/lint.e2e.ts`(브라우저 하나)
-- **K02-C4** (R16·R17, 이 spec이 더함) ① 설정을 켜고 fake Provider로 돌리면 인용문이 원문에 있는 판정만 의견으로 저장되고 발견의 상태와 `evidence`·`facts`의 행 수가 그대로다. ② 동의가 없으면 작업이 `held`이고 Provider 호출 기록에 시도가 없다. ③ 설정이 꺼져 있으면 작업이 생기지 않는다. → `knowledge-engine/src/reflection-refine-job.test.ts`, `providers/src/broker.reflection-refine.test.ts`
+- **K02-C4** (R16·R17, 이 spec이 더함) ① 설정을 켜고 fake Provider로 돌리면 인용문이 원문에 있는 판정만 의견으로 저장되고 발견의 상태와 `evidence`·`facts`의 행 수가 그대로다. ② 동의가 없으면 작업이 `held`이고 Provider 호출 기록에 시도가 없다. ③ 설정이 꺼져 있으면 작업이 생기지 않는다. → `knowledge-engine/src/reflection-refine-job.test.ts`, `providers/src/broker.reflection-refine.test.ts`. **상태: 구현됨(T3)**
 
 ## 미해결 질문 / 검증하지 않은 범위
 
@@ -141,6 +141,8 @@ stateDiagram-v2
 | K02-D17 | 재검토는 저장된 `missing-link` 발견을 한쪽 묶음만이 아니라 두 묶음 모두로 다시 판정해, 어느 쪽이든 내면 그대로 둔다 | 한쪽의 상위 5쌍에만 드는 쌍이 반대쪽 항목만 바뀐 실행에서 닫혔다 열렸다 하며 거짓 `oscillating`이 되는 것을 막는다 | 상위 5쌍을 양쪽에서 계산하는 규칙으로 바꾼다 |
 | K02-D14 | `lint-finding`은 층 `projection`·위치 `canonical`로 등록한다(같은 층 안 순서 제약 없음) | 항목·사실·관계·합치기 후보 종류가 모두 끝난 상태를 읽어야 다시 판정이 맞다. Wiki·Insight 테이블은 읽지 않는다 | 층을 `insight`로 낮추고 `merge-candidate` 뒤에 두는 순서 제약을 더한다 |
 | K02-D15 | `missing-link` 받아들이기는 관계 유형을 받아 `userDecisions.add`를 부르고, 방향은 작은 ID에서 큰 ID로 한다. 이 입구는 `not-found`(끝 항목이 없음)와 `value-exists`(같은 관계가 어느 상태로든 있음)만 거절하며 코드를 그대로 응답에 싣는다. 유형이 온톨로지에 있는지는 화면이 검증된 관계 유형만 보여 주는 것으로 갈음한다 | 입구 코드를 건드리지 않고 거절을 그대로 전한다 | 서버에서 유형·끝 유형 허용을 검사한다 |
+| K02-D18 | 의견은 판정 하나와 그 근거로 든 문서 하나·인용문 하나다. 저장하는 것은 판정과 인용문의 위치(원본 ID·version·시작·끝)이고 인용문 글은 저장하지 않는다. 화면과 API는 판정만 보인다 | 이름·값·인용문을 발견에 두지 않는 R7과 같은 모양이고 스키마가 작다 | 응답에 인용문 배열을 허용하고 위치를 여럿 저장한다 |
+| K02-D19 | 의견 작업은 `weekly` 재검토가 성공으로 끝난 뒤 넣는다. 작업의 대상은 `<발견 ID>#<계보 해시>`이고, 같은 대상을 이미 물었거나(상태 무관) 같은 계보의 의견이 있는 발견, 원본 version이 8개를 넘는 발견은 다시 넣지 않는다. 쓸 때 발견이 열려 있고 계보가 그대로일 때만 쓴다 | R16의 "같은 발견·같은 계보로 이미 물은 것은 다시 넣지 않음"을 Wiki 요약·Insight 해석(K01-D13, P01-D14)의 방식으로 채운다. 8은 그 둘의 값을 따랐다 | 계보 해시 대신 시각을 쓰거나 한도를 바꾼다 |
 | K02-D16 | 재검토가 자기 쓰기(`assertion_links`)로 낸 dirty 줄은 읽은 순번보다 크므로 남고, 다음 실행이 한 번 더 본 뒤 변화가 없어 멈춘다 | 읽은 순번 이하만 지운다는 R4를 단순하게 지킨다 | 실행 끝에서 자기 쓰기의 순번까지 지운다 |
 
 ## 작업 분해
@@ -151,7 +153,7 @@ T1과 T2는 **PR 하나, 구현 한 번**으로 간다(T1만으로는 사용자�
 |---|---|---|---|
 | K02-T1 | 마이그레이션·트리거, 저장, 규칙 넷, 작업 `reflect`와 주기, 종류 `lint-finding` 등록과 분류, fixture | C1a, C2a(①·②·④), C2b, C3a, C3b(②) | 없음(오늘의 main) |
 | K02-T2 | 결정 경로(기존 입구 호출)와 왔다 갔다 막기, 오탐·미탐 수, 읽기 문, API 셋, "점검" 화면, 브라우저 E2E | C1b, C2a(③), C3b(①·③), C3c | T1(같은 PR) |
-| K02-T3 | LLM 다듬기(`reflection-refine` 작업·Broker 작업 정의·설정)와 문서: ARCHITECTURE 저장 표, I04 등록표, 문서 색인, site-setup 항목, README | C4 | T1·T2 머지, P01-T04 머지(`providers/src/tasks.ts`) |
+| K02-T3 | LLM 다듬기(`reflection-refine` 작업·Broker 작업 정의·설정)와 문서: ARCHITECTURE 저장 표, I04 등록표, 문서 색인, site-setup 항목, README | C4 | T1·T2 머지, P01-T04 머지(`providers/src/tasks.ts`). **상태: 구현됨(PR 대기)** |
 
 ## 배포처 후속
 
@@ -170,3 +172,4 @@ T1과 T2는 **PR 하나, 구현 한 번**으로 간다(T1만으로는 사용자�
 | 2026-11-23 | 확정. 잠정 결정 D1~D12를 그대로 채택 | 상태 | 조율 세션 검토: 기준 8개가 이슈 #26의 C1~C3을 덮고 기존 입구만 씀 |
 | 2026-11-23 | T1·T2 구현 중 열린 지점 정리: R5에 재호출이 더 보는 것과 `recomputeInsights` 호출을, R10에 점검 규칙만 금지 대상임을, R13에 층과 `reflection_dirty` 분류를 적고 D13~D16 추가, "미해결 질문"에서 `recomputeInsights` 항목 제거 | R5·R10·R13, 결정, 미해결 질문 | 코드 확인 결과를 spec에 반영. 마이그레이션은 rebase 뒤 v31(main이 v30까지 씀) |
 | 2026-11-23 | 검토 반영: R7·R13에 발견 계보는 대상 행 계보의 합집합이며 사용자가 말한 것(놓친 것 신고·`accepted`)은 대상이 남는 한 지우지 않음을, R14에 항목 이름 가림을, R15에 관계 유형 형식을 적고 D17 추가. 마이그레이션 v31 | R7·R13·R14·R15, 결정 | 독립 검토 must-fix: 거짓 닫힘·거짓 반복됨, 사용자 신고 삭제, 항목 이름 노출, 공유 원본만의 계보 |
+| 2026-11-23 | T3 구현: D18(의견의 모양)·D19(작업을 넣는 때와 중복 방지) 추가, T3·C4에 구현 상태를 적음. 배포처 후속 항목 번호는 S43 | 결정, 작업 분해, 완료 기준 | K02-T3 구현. 설정 `reflection.refine`을 `docs/site-setup.md` 표와 키 대조 시험에 더함 |
