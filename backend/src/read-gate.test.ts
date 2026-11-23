@@ -121,7 +121,7 @@ function insight(name: string, sourceVersionIds: number[]) {
     { state: "active", summary: `요약 ${name}`, evidenceIds },
   );
   const id = db.all("SELECT id FROM insights WHERE summary = ?", [`요약 ${name}`])[0]?.id as number;
-  return { id, evidenceIds };
+  return { id, evidenceIds, x };
 }
 
 describe("read-gate: the Sources list and the keyword search", () => {
@@ -261,6 +261,31 @@ describe("read-gate: Home's Insights, their evidence and an evidence row's sourc
     expect(gate.evidenceSource(hidden.evidenceIds[0] as number)).toBeUndefined();
     expect(gate.evidenceSource(gone.evidenceIds[0] as number)).toBeUndefined();
     expect(gate.evidenceSource(9999)).toBeUndefined();
+  });
+
+  it("hides an Insight whose end item has a fact from a hidden source, though its own lineage is shown (P01-C2e)", () => {
+    const a = source("a");
+    const b = source("b", SECRET);
+    const shown = insight("a", [a.versionId]);
+    const hidden = insight("h", [a.versionId]);
+    // the Insight's own evidence is all shown; its X item now also holds a fact quoted from the hidden source
+    const extra = saveFact(db, {
+      ...attrs,
+      itemId: hidden.x,
+      kind: "target_date",
+      value: "2026-12-10",
+    });
+    addEvidence(db, {
+      target: { factId: extra.id },
+      sourceVersionId: b.versionId,
+      start: 0,
+      end: 2,
+      quote: "합성",
+    });
+    const gate = createReadGate(db, registryOf(policy()));
+    expect(gate.insights().map((i) => i.summary)).toEqual(["요약 a"]);
+    expect(gate.insightEvidence(hidden.id)).toBeUndefined();
+    expect(gate.insightEvidence(shown.id)).toBeDefined();
   });
 
   it("asks for the purpose display on each of the three", () => {
