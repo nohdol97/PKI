@@ -1,4 +1,3 @@
-/* eslint-disable pki/module-boundary -- the smoke test of the measurement script next to it (S03 decision 35 ⑥) */
 // The measurement script runs end to end on a small world: every list has its items, nothing is truncated, and the
 // median and the maximum are finite positive numbers. The real number (200 of each) is the script's own run.
 import { describe, expect, it } from "vitest";

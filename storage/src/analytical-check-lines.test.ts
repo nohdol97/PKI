@@ -200,6 +200,7 @@ describe("analytical_checks lines", () => {
     ]);
     expect(listCheckLines(db, f)).toEqual([
       {
+        id: expect.any(Number),
         check: "grain",
         passed: false,
         failure: "grain-duplicate",
