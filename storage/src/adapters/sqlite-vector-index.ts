@@ -90,7 +90,15 @@ export class SqliteVectorIndex implements VectorIndex {
         db = open(path);
         const version = Number(db.all("PRAGMA user_version")[0]?.user_version);
         const tables = db.all("SELECT count(*) AS n FROM sqlite_master")[0]?.n;
-        if (version === SCHEMA_VERSION) return db;
+        if (version === SCHEMA_VERSION) {
+          // RVF-R4: the same number over other tables is another schema: read the columns this class uses
+          db.all(
+            "SELECT id, model_id, revision, dimension, state, applied_seq FROM generations LIMIT 0",
+          );
+          db.all("SELECT generation_id, ref, vector FROM vectors LIMIT 0");
+          db.all("SELECT generation_id, ref, change_seq FROM marks LIMIT 0");
+          return db;
+        }
         if (version === 0 && tables === 0) {
           db.exec(SCHEMA);
           return db;

@@ -37,6 +37,7 @@ import {
   productImporter,
   productInstanceImporter,
   productProjectionPorts,
+  embedderSpace,
   productProjections,
   productProviders,
   productRegistry,
@@ -101,7 +102,6 @@ import { createScheduler, type Scheduler } from "./scheduler.ts";
 import {
   applyPendingRestore,
   finishRestore,
-  readIndexFacts,
   rollbackRestore,
   type RestoreRun,
 } from "./restore-boot.ts";
@@ -319,7 +319,7 @@ async function startBackend(
   if (restore.applied) {
     finishRestore(db, restore, {
       reapplied: reapplied.applied,
-      embeddingSpace: (await readIndexFacts(adapters.vectorIndex)).embeddingSpace,
+      embeddingSpace: embedderSpace(adapters.embedder),
       now: new Date(systemClock.now()),
     });
   }

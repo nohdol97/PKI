@@ -33,5 +33,5 @@
 - 원본 version 하나에 벡터 하나다. 긴 문서는 모델의 한도에서 잘린다(조각 나누기는 3.2절이 엔진의 일로 둔다).
 - 만들던 세대는 이어 만들지 않는다. 재구축 작업의 실행 한도(60분) 안에 끝나지 않는 코퍼스는 전환하지 못한다. 실제 크기의 시간은 재지 않았다.
 - 색인 파일은 암호화하지 않는다(ADR 0010의 현재 결정과 같다). 지운 자리는 드라이버의 `secure_delete`가 덮는다.
-- 질의를 embedding하는 자리는 `embedWithinPolicy`를 지나지 않는다(후속 이슈). 지금 묶인 embedder는 로컬이라 나가는 것이 없다.
+- 질의를 embedding하는 자리는 `backend/src/ask.ts`에서 `embedWithinPolicy`를 지난다(RVF-R1). 외부 embedder는 호출되지 않고 `vector`가 `unavailable`이다.
 - 배포처 S39가 옵션과 `askStrategies`를 함께 켜고 실제 모델로 만들기·찾기·삭제 뒤 부재·교체와 시간을 확인한다.

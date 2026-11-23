@@ -295,7 +295,7 @@ export function productProjectionPorts(
   return projectionPorts({ registry, db, ...adapters, projections });
 }
 
-function embedderSpace(
+export function embedderSpace(
   embedder: Pick<EmbeddingProvider, "describe"> | null,
 ): EmbeddingSpace | null {
   if (!embedder) return null;
