@@ -15,11 +15,12 @@ import {
   writeSetting,
   type KnowledgeAttributes,
   type KnowledgeStatus,
+  type SourceVersionRef,
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AUTO_DISPUTE_SETTING, refreshConflicts } from "./conflicts.ts";
+import { AUTO_DISPUTE_SETTING, linkPropagationSupersedes, refreshConflicts } from "./conflicts.ts";
 
 const T = "2026-11-23T00:00:00.000Z";
 let db: SqlDriver;
@@ -79,7 +80,7 @@ function fact(itemId: number, { value, from, until, observedAt, status, source }
   });
   return saved.id;
 }
-const allow = { combinable: () => true };
+const allow = { combinable: (_lineage: readonly SourceVersionRef[]) => true };
 const refresh = (items: number[], scope = allow) =>
   db.transaction(() => refreshConflicts(db, items, scope, { at: T }));
 const links = () =>
@@ -144,7 +145,7 @@ describe("conflict.scope (S02-R19, I04-R14)", () => {
     fact(owner, { value: "2026-12-02", source: "open" });
     const secretId = db.all("SELECT id FROM sources WHERE external_id = 'secret'")[0]?.id as number;
     const scope = {
-      combinable: (lineage: readonly { sourceId: number }[]) =>
+      combinable: (lineage: readonly SourceVersionRef[]) =>
         !lineage.some((v) => v.sourceId === secretId) ||
         lineage.every((v) => v.sourceId === secretId),
     };
@@ -199,5 +200,45 @@ describe("conflict.auto-dispute (S02-R20)", () => {
     );
     expect(refresh([left])).toMatchObject({ created: 1, disputesRaised: 0 });
     expect(readFact(db, e)?.status).toBe("verified");
+  });
+});
+
+describe("conflict.supersede-links: propagation (S02-R19)", () => {
+  it("the same source's new version supersedes the old value by a propagation link resting on that version; another source's value gets none", () => {
+    const owner = item();
+    const old = fact(owner, { value: "2026-12-01", source: "doc" });
+    // the source's second version: the propagation superseded the old value on it (basis = the new version)
+    saveSourceRecord(db, "c1", { externalId: "doc", title: "doc", body: "newer body" });
+    const sourceId = db.all("SELECT id FROM sources WHERE external_id = 'doc'")[0]?.id as number;
+    const own = { sourceId, version: 2 };
+    expect(automatedLifecycle.supersede(db, { kind: "fact", id: old }, own, T)).toMatchObject({
+      status: "applied",
+    });
+    // the new version's own fact (an extraction wrote it), and a fact of another source in the same slot
+    const next = saveFact(db, {
+      itemId: owner,
+      kind: "target_date",
+      value: "2026-12-09",
+      ...attrs(),
+    }).id;
+    addEvidence(db, {
+      target: { factId: next },
+      sourceVersionId: db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number,
+      start: 0,
+      end: 5,
+      quote: "newer",
+    });
+    const other = fact(owner, { value: "2026-12-20", source: "elsewhere" });
+    const made = db.transaction(() => linkPropagationSupersedes(db, [next, other], own, allow, T));
+    expect(made).toBe(1);
+    expect(listAssertionLinks(db)).toEqual([
+      expect.objectContaining({
+        type: "SUPERSEDES",
+        fromFactId: next,
+        toFactId: old,
+        createdBy: "propagation",
+        basis: own,
+      }),
+    ]);
   });
 });
