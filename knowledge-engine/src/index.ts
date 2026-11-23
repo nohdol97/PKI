@@ -121,6 +121,12 @@ export {
 } from "./wiki-build-job.ts";
 export { WIKI_PAGE_KIND, WIKI_PAGE_KIND_NAME } from "./wiki-kind.ts";
 export {
+  createWikiSummaryHandler,
+  WIKI_SUMMARY_MAX_SENTENCES,
+  type WikiSummaryHandlerOptions,
+  type WikiSummaryResult,
+} from "./wiki-summary-job.ts";
+export {
   PAGE_KINDS,
   pageKindOfType,
   renderWikiPages,

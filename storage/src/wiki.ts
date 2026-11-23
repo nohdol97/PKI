@@ -5,16 +5,23 @@
 // The user's edits live in `wiki_edits`, beside the pages, and are laid over a page when it is read.
 import type { SourceVersionRef } from "./derivatives.ts";
 import { registerJob, type StoredJob } from "./jobs.ts";
-import { WIKI_BUILD_KIND } from "./job-kinds.ts";
+import { WIKI_BUILD_KIND, WIKI_SUMMARY_KIND } from "./job-kinds.ts";
 import { readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
+import { readSetting, writeSetting } from "./settings.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
-export { WIKI_BUILD_KIND } from "./job-kinds.ts";
+export { WIKI_BUILD_KIND, WIKI_SUMMARY_KIND } from "./job-kinds.ts";
 
 /** Provisional (K01-D5): pages one build writes; past it the sequence is not caught up and the next run goes on. */
 export const WIKI_PAGE_CAP = 500;
 /** Provisional (K01-R6): change-log lines kept, the oldest dropped first. */
 export const WIKI_LOG_MAX = 1000;
+/** Provisional (K01-D8): the source versions of a page's lineage a summary call may carry; a page with more is not summarized. */
+export const WIKI_SUMMARY_MAX_VERSIONS = 8;
+/** Provisional (K01-D11): summary jobs one request queues. */
+export const WIKI_SUMMARY_BATCH = 50;
+/** The user's switch for the LLM summary (K01-R12); anything but `on` is OFF. */
+export const WIKI_SUMMARY_SETTING = "wiki.summary";
 /** The longest note a user may attach (characters). */
 export const WIKI_NOTE_MAX = 2000;
 
@@ -126,7 +133,8 @@ function appendLog(
 
 /**
  * Writes one page with its lineage and links, in the caller's transaction (the job's result). A page whose
- * hash is unchanged is left as it is (its time and log too); the summary columns are never touched here.
+ * hash is unchanged is left as it is (its time, log and summary too). A page whose content changed has its
+ * summary cleared: the hash covers the lineage, so no sentence drawn from a deleted source stays at rest (K01-R13).
  */
 export function writeWikiPage(
   tx: SqlDriver,
@@ -137,7 +145,8 @@ export function writeWikiPage(
   if (stored?.content_hash === page.contentHash) return "unchanged";
   if (stored) {
     tx.run(
-      "UPDATE wiki_pages SET kind = ?, target = ?, title = ?, body = ?, content_hash = ?, updated_at = ? WHERE key = ?",
+      `UPDATE wiki_pages SET kind = ?, target = ?, title = ?, body = ?, content_hash = ?, updated_at = ?,
+         summary = NULL, summary_hash = NULL WHERE key = ?`,
       [page.kind, page.target, page.title, page.body, page.contentHash, at, page.key],
     );
     tx.run("DELETE FROM wiki_page_lineage WHERE page_key = ?", [page.key]);
@@ -174,6 +183,24 @@ export function writeWikiPage(
     at,
   );
   return stored ? "changed" : "created";
+}
+
+/**
+ * Stores a page's summary (`[{sentence, sourceId, version, start, end}]` as JSON) with the content hash it was
+ * made for, in the caller's transaction. A page that changed while the call ran (another hash) is not written.
+ */
+export function writeWikiSummary(
+  tx: SqlDriver,
+  key: string,
+  contentHash: string,
+  summaryJson: string,
+): boolean {
+  return (
+    tx.run(
+      "UPDATE wiki_pages SET summary = ?, summary_hash = ? WHERE key = ? AND content_hash = ?",
+      [summaryJson, contentHash, key, contentHash],
+    ).changes === 1
+  );
 }
 
 /** Deletes a page with its lineage and outgoing links, in the caller's transaction, and logs it. */
@@ -406,3 +433,63 @@ export const listWikiHidden = (db: SqlDriver): WikiClaimRef[] =>
         ? { kind: "fact" as const, id: r.fact_id as number }
         : { kind: "relation" as const, id: r.relation_id as number },
     );
+
+// ---- the LLM summary (K01-R12) ---------------------------------------------------------------------
+
+export const readWikiSummary = (db: SqlDriver): boolean =>
+  readSetting(db, WIKI_SUMMARY_SETTING) === "on";
+
+/** Whether a `wiki-summary` job for `key` is held (a condition, such as consent, stops it). */
+export const wikiSummaryHeld = (db: SqlDriver, key: string): boolean =>
+  db.all(
+    "SELECT 1 FROM jobs WHERE kind = ? AND status = 'held' AND substr(target, 1, length(?) + 1) = ? || '#'",
+    [WIKI_SUMMARY_KIND, key, key],
+  ).length > 0;
+
+/**
+ * Queues one `wiki-summary` job per page whose summary is not of its current content (K01-R12), at most
+ * WIKI_SUMMARY_BATCH, and returns how many. The job's target is `<key>#<content hash>`: ids only, and the
+ * mark of the attempt. A page is left out when it is an Insight page, has no lineage or more than
+ * WIKI_SUMMARY_MAX_VERSIONS versions, has an open job already, or was tried at this content (any status).
+ * Nothing is queued while the setting is off.
+ */
+export function requestWikiSummaries(db: SqlDriver, at: Date = new Date()): number {
+  if (!readWikiSummary(db)) return 0;
+  return db.transaction(() => {
+    const pages = db.all(
+      `SELECT p.key AS key, p.content_hash AS hash FROM wiki_pages p
+        WHERE p.kind <> 'syntheses'
+          AND p.summary_hash IS NOT p.content_hash
+          AND (SELECT count(*) FROM wiki_page_lineage l WHERE l.page_key = p.key) BETWEEN 1 AND ?
+          AND NOT EXISTS (SELECT 1 FROM jobs j
+                           WHERE j.kind = ? AND substr(j.target, 1, length(p.key) + 1) = p.key || '#'
+                             AND (j.status IN ('queued', 'running', 'retry', 'held')
+                                  OR j.target = p.key || '#' || p.content_hash))
+        ORDER BY p.key LIMIT ?`,
+      [WIKI_SUMMARY_MAX_VERSIONS, WIKI_SUMMARY_KIND, WIKI_SUMMARY_BATCH],
+    );
+    let queued = 0;
+    for (const row of pages) {
+      const registered = registerJob(db, {
+        kind: WIKI_SUMMARY_KIND,
+        target: `${row.key as string}#${row.hash as string}`,
+        priority: "maintenance",
+        at,
+      });
+      if (registered.registered) queued++;
+    }
+    return queued;
+  });
+}
+
+/**
+ * Stores the switch. From OFF to ON it queues the pages' summary jobs in the same transaction; ON to ON and
+ * OFF queue nothing. Returns the jobs queued.
+ */
+export function setWikiSummary(db: SqlDriver, on: boolean, at: Date): number {
+  return db.transaction(() => {
+    const was = readWikiSummary(db);
+    writeSetting(db, WIKI_SUMMARY_SETTING, on ? "on" : "off");
+    return on && !was ? requestWikiSummaries(db, at) : 0;
+  });
+}
