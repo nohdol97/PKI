@@ -315,10 +315,13 @@ export function createReadGate(
       let cursor = after ?? 0;
       let scanned = 0;
       let reachedEnd = false;
+      // the last shown number read, whatever its status: a hidden row's number is never answered
+      let lastShown: number | null = null;
       // read on until a page and one more are kept: the one more says `next` exists
       while (kept.length <= EXPLORE_PAGE_SIZE && scanned < maxScan) {
         const rows = listSemanticItems(db, SEMANTIC_BATCH, cursor);
         for (const row of only(rows, "item", (i) => i.id, "display")) {
+          lastShown = row.id;
           const view = semanticItem(row);
           if (status === undefined || hasStatus(view, status)) kept.push(view);
           if (kept.length > EXPLORE_PAGE_SIZE) break;
@@ -331,9 +334,9 @@ export function createReadGate(
         }
       }
       const page = kept.slice(0, EXPLORE_PAGE_SIZE);
-      // the scan stopped at the cap with rows left: the page may be short or empty, and `next` is where the scan stopped
+      // the scan stopped at the cap with rows left: the page may be short or empty, and `next` is the last shown number it read
       const next =
-        kept.length > EXPLORE_PAGE_SIZE ? (page.at(-1)?.id ?? null) : reachedEnd ? null : cursor;
+        kept.length > EXPLORE_PAGE_SIZE ? (page.at(-1)?.id ?? null) : reachedEnd ? null : lastShown;
       return { items: page, next };
     },
     sourcesPage({ before }) {
