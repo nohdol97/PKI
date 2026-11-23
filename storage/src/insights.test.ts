@@ -63,6 +63,11 @@ describe("saveInsight", () => {
       evidenceIds: evidence,
       userInputs: [],
       linkIds: [],
+      factLines: [],
+      reasoningSummary: null,
+      confidence: null,
+      urgencyDate: null,
+      changedAt: null,
     });
   });
 
@@ -125,6 +130,11 @@ describe("saveInsight", () => {
       evidenceIds: [],
       userInputs: [],
       linkIds: [],
+      factLines: [],
+      reasoningSummary: null,
+      confidence: null,
+      urgencyDate: null,
+      changedAt: null,
     });
     expect(saveInsight(db, key, { state: "active", summary: "s", evidenceIds: evidence })).toBe(id);
     expect(db.all("SELECT count(*) AS n FROM insights")).toEqual([{ n: 1 }]);
