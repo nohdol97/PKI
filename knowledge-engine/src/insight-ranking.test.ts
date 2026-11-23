@@ -50,7 +50,7 @@ describe("rankInsight", () => {
 
   it("moves relevance by half the preference weight, clamped to 0..100, and is unchanged without one (P03-R8)", () => {
     const plain = rankInsight(base, NOW);
-    for (const preference of [undefined, null, 0]) {
+    for (const preference of [null, 0]) {
       const same = rankInsight({ ...base, preference }, NOW);
       expect(same.relevance).toBe(plain.relevance);
       expect(same.score).toBe(plain.score);

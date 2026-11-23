@@ -84,7 +84,7 @@ const record = (target: FeedbackTarget, kind: FeedbackKind, time = at(1)) =>
 const undo = (id: number, time = at(30)) =>
   db.transaction(() => undoFeedback(db, userDecisions, id, time));
 const signal = (target: FeedbackTarget, options = {}) =>
-  preferenceSignals(db, [target], options)[0];
+  preferenceSignals(db, [target], options)[0] as PreferenceSignal;
 const live = () => db.all("SELECT id FROM feedback WHERE undone_at IS NULL").length;
 const statusOf = (kind: "fact" | "relation" | "item", id: number) =>
   readRow(db, { kind, id })?.status;

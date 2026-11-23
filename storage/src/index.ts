@@ -316,6 +316,7 @@ export {
   preferenceSignals,
   recordFeedback,
   undoFeedback,
+  type FeedbackEntries,
   type FeedbackInput,
   type FeedbackOptions,
   type PreferenceSignal,

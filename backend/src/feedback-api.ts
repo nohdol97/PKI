@@ -20,9 +20,9 @@ import {
   recordFeedback,
   undoFeedback,
   type EntryRef,
+  type FeedbackEntries,
   type SqlDriver,
   type StoredFeedback,
-  type UserDecisions,
 } from "@pki/storage";
 import type { ReadGate } from "./read-gate.ts";
 
@@ -43,7 +43,7 @@ export interface FeedbackApi {
 export function createFeedbackApi(
   db: SqlDriver,
   gate: ReadGate,
-  decisions: () => UserDecisions | undefined,
+  decisions: () => FeedbackEntries | undefined,
   /** Called in the transaction of a correction, with the row it changed (conflict links, Insights and candidates follow). */
   afterCorrection: (ref: EntryRef, at: string) => void,
 ): FeedbackApi {

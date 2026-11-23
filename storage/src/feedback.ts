@@ -58,6 +58,9 @@ export interface StoredFeedback {
   appliedSeq: number | null;
 }
 
+/** The two operations of the user's entry that feedback calls; what the API layer may name in place of the entry itself. */
+export type FeedbackEntries = Pick<UserDecisions, "decide" | "undo">;
+
 export interface FeedbackInput {
   target: FeedbackTarget;
   kind: FeedbackKind;
@@ -104,7 +107,7 @@ const exists = (db: SqlDriver, t: FeedbackTarget) =>
 /** Writes (or answers) one line. The correction path is the only one that reaches the user's entry. */
 export function recordFeedback(
   tx: SqlDriver,
-  decisions: UserDecisions,
+  decisions: FeedbackEntries,
   input: FeedbackInput,
   at: string,
   options: FeedbackOptions = {},
@@ -154,8 +157,8 @@ export function recordFeedback(
     `INSERT INTO feedback (kind, ${COLUMN[target.kind]}, created_at, applied_seq) VALUES (?, ?, ?, ?)`,
     [kind, target.id, at, seq],
   ).lastInsertRowid;
-  const stored = rowOf(tx.all("SELECT * FROM feedback WHERE id = ?", [id])[0]);
-  return { status: "applied", feedback: stored, created: true, touched };
+  const stored = tx.all("SELECT * FROM feedback WHERE id = ?", [id])[0] as Record<string, unknown>;
+  return { status: "applied", feedback: rowOf(stored), created: true, touched };
 }
 
 /**
@@ -165,7 +168,7 @@ export function recordFeedback(
  */
 export function undoFeedback(
   tx: SqlDriver,
-  decisions: UserDecisions,
+  decisions: FeedbackEntries,
   id: number,
   at: string,
   options: FeedbackOptions = {},
