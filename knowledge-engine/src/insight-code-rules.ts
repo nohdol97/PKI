@@ -4,13 +4,19 @@
 //
 // The three single-item rules below judge one merge group (S02-R13): the key is (representative, representative)
 // and rows are read over every member (P01-R8). Dates and links are compared by this code; no LLM is called.
+import { WORK_STATUSES } from "@pki/contracts";
 import {
   entityGroups,
   INVALID,
   linksOfFacts,
   OPPORTUNITY_RULE,
   readInsight,
+  listFactsOfKind,
+  listRelationPairs,
+  listRelationsBetween,
   readItem,
+  readRelation,
+  supersededAmong,
   supersedingStands,
   validRow,
   type InsightKey,
@@ -37,6 +43,19 @@ import {
 
 /** The fact kinds whose replacement is an "important change" (P01-D4); a rule-file constant. */
 export const CHANGE_KINDS: readonly string[] = [TARGET_DATE, COMPLETION_DATE];
+/** The fact kind of a decision's or rule's current content, the kind of a work item's status (P01-D13, D14). */
+export const CONCLUSION_KIND = "conclusion";
+export const STATUS_KIND = "status";
+/** The `status` values that mean the work is not done (P01-D13); a rule-file constant next to the value type's list. */
+export const OPEN_STATUSES: readonly string[] = ["open", "in_progress"];
+/** The relation types a "new relation" is looked for among (P01-D16); a rule-file constant. */
+export const NEW_RELATION_TYPES: readonly string[] = [
+  "DEPENDS_ON",
+  "RESPONSIBLE_FOR",
+  "BELONGS_TO",
+  "DECIDED",
+  "CAUSED_BY",
+];
 /** A value in a fact line is cut at this many code points. */
 const LINE_VALUE_LIMIT = 80;
 const cut = (value: string) => {
@@ -53,6 +72,10 @@ const ownCandidates = (db: SqlDriver, items: readonly number[]) =>
     yItemId: id,
   }));
 
+/** The same, for a type that exists only for items of one type (the group's representative decides). */
+const ownCandidatesOfType = (itemType: string) => (db: SqlDriver, items: readonly number[]) =>
+  ownCandidates(db, items).filter((c) => readItem(db, c.xItemId)?.type === itemType);
+
 /** The members of the key's group, or none when the key is not one group's own (a merge made it stale). */
 function ownMembers(db: SqlDriver, key: InsightKey): readonly number[] {
   const { xItemId } = key;
@@ -66,12 +89,14 @@ interface Fact {
   kind: string;
   value: string;
   status: KnowledgeStatus;
+  /** the day the fact starts to hold (`valid_at`), when it has one */
+  validAt: string | null;
 }
 const factsOf = (db: SqlDriver, items: readonly number[]): Map<number, Fact> =>
   new Map(
     db
       .all(
-        `SELECT id, kind, value, status FROM facts
+        `SELECT id, kind, value, status, valid_at FROM facts
          WHERE item_id IN (SELECT value FROM json_each(?)) ORDER BY id`,
         [JSON.stringify(items)],
       )
@@ -82,6 +107,7 @@ const factsOf = (db: SqlDriver, items: readonly number[]): Map<number, Fact> =>
           kind: r.kind as string,
           value: r.value as string,
           status: r.status as KnowledgeStatus,
+          validAt: r.valid_at as string | null,
         },
       ]),
   );
@@ -177,48 +203,277 @@ export const conflictRule: InsightRule = {
   },
 };
 
+/**
+ * A replaced fact of one of `kinds` on an item of `itemType` (any when null): a SUPERSEDES link whose newer side
+ * stands. The three change types differ only in what they look at and how they word it (P01-R12).
+ */
+function changeRule(spec: {
+  type: string;
+  kinds: readonly string[];
+  itemType: string | null;
+  summary: (x: string | undefined, count: number) => string;
+  reasoningSummary: string;
+  /** the day the newest change is about, or null */
+  urgency: (newer: readonly Fact[]) => string | null;
+}): InsightRule {
+  return {
+    type: spec.type,
+    candidates: spec.itemType === null ? ownCandidates : ownCandidatesOfType(spec.itemType),
+    evaluate(db, key): Desired {
+      const members = ownMembers(db, key);
+      if (members.length === 0) return { state: "resolved" };
+      if (spec.itemType !== null && readItem(db, key.xItemId)?.type !== spec.itemType) {
+        return { state: "resolved" };
+      }
+      const facts = factsOf(db, members);
+      const rows: (ValidRow & { ref: UserInputRef })[] = [];
+      const lines: string[] = [];
+      const linkIds: number[] = [];
+      const newer: Fact[] = [];
+      const x = readItem(db, key.xItemId)?.name;
+      for (const link of linksOfFacts(db, [...facts.keys()])) {
+        const to = facts.get(link.fromFactId);
+        const older = facts.get(link.toFactId);
+        if (
+          link.type !== "SUPERSEDES" ||
+          !to ||
+          !older ||
+          !spec.kinds.includes(to.kind) ||
+          !supersedingStands(db, link)
+        ) {
+          continue;
+        }
+        const stands = validFact(db, to);
+        if (!stands) continue;
+        const before = validFact(db, older);
+        rows.push(stands, ...(before ? [before] : []));
+        linkIds.push(link.id);
+        lines.push(`${x}의 ${to.kind}: ${cut(older.value)} → ${cut(to.value)}`);
+        newer.push(to);
+      }
+      if (lines.length === 0) return { state: "resolved" };
+      return {
+        state: "active",
+        summary: spec.summary(x, lines.length),
+        factLines: lines,
+        reasoningSummary: spec.reasoningSummary,
+        ...gather(rows, linkIds),
+        urgencyDate: spec.urgency(newer),
+      };
+    },
+  };
+}
+
 /** 중요 변경 (P01-D4): a date-kind fact replaced by another through a SUPERSEDES link whose newer side stands. */
-export const importantChangeRule: InsightRule = {
+export const importantChangeRule = changeRule({
   type: "important_change",
-  candidates: ownCandidates,
-  evaluate(db, key): Desired {
-    const members = ownMembers(db, key);
-    if (members.length === 0) return { state: "resolved" };
-    const facts = factsOf(db, members);
+  kinds: CHANGE_KINDS,
+  itemType: null,
+  summary: (x, count) => `${x}의 일정 값이 ${count}건 바뀌었습니다(추론).`,
+  reasoningSummary:
+    "같은 항목의 날짜 값을 새 값이 대신한다고 코드가 기록한 대체 연결을 모았습니다.",
+  urgency: (newer) =>
+    newer
+      .map((f) => f.value)
+      .filter(isDate)
+      .sort()
+      .at(-1) ?? null,
+});
+
+/** The day the newest superseding fact starts to hold; the change types without a date value read it (P01-R12). */
+const startOfNewest = (newer: readonly Fact[]): string | null =>
+  newer
+    .map((f) => f.validAt)
+    .filter((d): d is string => d !== null && isDate(d))
+    .sort()
+    .at(-1) ?? null;
+
+/** 의사결정 변경 (P01-D14): a Decision's `conclusion` replaced through a SUPERSEDES link whose newer side stands. */
+export const decisionChangeRule = changeRule({
+  type: "decision_change",
+  kinds: [CONCLUSION_KIND],
+  itemType: "Decision",
+  summary: (x, count) => `${x}의 결정 내용이 ${count}건 바뀌었습니다(추론).`,
+  reasoningSummary:
+    "같은 결정의 현재 내용을 새 내용이 대신한다고 코드가 기록한 대체 연결을 모았습니다.",
+  urgency: startOfNewest,
+});
+
+/** 정책 변화 (P01-D14): a BusinessRule's `conclusion` replaced through a SUPERSEDES link whose newer side stands. */
+export const policyChangeRule = changeRule({
+  type: "policy_change",
+  kinds: [CONCLUSION_KIND],
+  itemType: "BusinessRule",
+  summary: (x, count) => `${x}의 규칙 내용이 ${count}건 바뀌었습니다(추론).`,
+  reasoningSummary:
+    "같은 업무 규칙의 현재 내용을 새 내용이 대신한다고 코드가 기록한 대체 연결을 모았습니다.",
+  urgency: startOfNewest,
+});
+
+/** The valid `status` rows of a group, a value another case writes read as its value, without a replaced one. */
+function validStatuses(db: SqlDriver, members: readonly number[]) {
+  const candidates = members.flatMap((itemId) =>
+    listFactsOfKind(db, itemId, STATUS_KIND).flatMap((f) => {
+      const value = f.value.trim().toLowerCase();
+      if (INVALID.has(f.status) || !(WORK_STATUSES as readonly string[]).includes(value)) return [];
+      const row = validRow(db, { kind: "fact", id: f.id });
+      return row ? [{ id: f.id, value, ...row }] : [];
+    }),
+  );
+  const superseded = supersededAmong(
+    db,
+    candidates.map((c) => c.id),
+  );
+  const out = new Set(superseded.map((o) => o.factId));
+  return {
+    rows: candidates
+      .filter((c) => !out.has(c.id))
+      .map(({ id, value, evidenceIds, input }) => ({
+        value,
+        evidenceIds,
+        input,
+        ref: { kind: "fact", id } as UserInputRef,
+      })),
+    linkIds: superseded.map((o) => o.linkId),
+  };
+}
+
+/**
+ * 미처리 요청·미해결 이슈 (P01-D13): a group of `itemType` with at least one valid `status` and every one an
+ * open value (`OPEN_STATUSES`). A closed value, or a closed and an open one at once, makes it stand down (the
+ * latter is the conflict type's). A request's earliest valid target date is the urgency; it is cited as a row.
+ */
+function openWorkRule(spec: {
+  type: string;
+  itemType: string;
+  withTargetDate: boolean;
+  summary: (x: string | undefined) => string;
+  reasoningSummary: string;
+}): InsightRule {
+  return {
+    type: spec.type,
+    candidates: ownCandidatesOfType(spec.itemType),
+    evaluate(db, key): Desired {
+      const members = ownMembers(db, key);
+      if (members.length === 0 || readItem(db, key.xItemId)?.type !== spec.itemType) {
+        return { state: "resolved" };
+      }
+      const statuses = validStatuses(db, members);
+      if (
+        statuses.rows.length === 0 ||
+        !statuses.rows.every((r) => OPEN_STATUSES.includes(r.value))
+      ) {
+        return { state: "resolved" };
+      }
+      const x = readItem(db, key.xItemId)?.name;
+      const rows: (ValidRow & { ref: UserInputRef })[] = [...statuses.rows];
+      const lines = statuses.rows.map((r) => `${x}의 상태: ${r.value}`);
+      const linkIds = [...statuses.linkIds];
+      let urgencyDate: string | null = null;
+      if (spec.withTargetDate) {
+        const targets = validDates(db, members, TARGET_DATE);
+        const earliest = targets.rows.reduce<DatedRow | undefined>(
+          (min, f) => (min && min.value <= f.value ? min : f),
+          undefined,
+        );
+        if (earliest) {
+          rows.push(earliest);
+          lines.push(`${x}의 목표일: ${earliest.value}`);
+          linkIds.push(...targets.linkIds);
+          urgencyDate = earliest.value;
+        }
+      }
+      return {
+        state: "active",
+        summary: spec.summary(x),
+        factLines: lines,
+        reasoningSummary: spec.reasoningSummary,
+        ...gather(rows, linkIds),
+        urgencyDate,
+      };
+    },
+  };
+}
+
+export const pendingRequestRule = openWorkRule({
+  type: "pending_request",
+  itemType: "Request",
+  withTargetDate: true,
+  summary: (x) => `${x} 요청이 아직 처리되지 않았습니다(추론).`,
+  reasoningSummary:
+    "요청의 유효한 상태 값이 모두 열린 값임을 코드가 확인했습니다. 닫힌 값이 하나라도 있으면 성립하지 않습니다.",
+});
+
+export const openIssueRule = openWorkRule({
+  type: "open_issue",
+  itemType: "Issue",
+  withTargetDate: false,
+  summary: (x) => `${x} 이슈가 아직 해결되지 않았습니다(추론).`,
+  reasoningSummary:
+    "이슈의 유효한 상태 값이 모두 열린 값임을 코드가 확인했습니다. 닫힌 값이 하나라도 있으면 성립하지 않습니다.",
+});
+
+/** The pairs a relation of the new-relation types names, as the groups' representatives (a pair of one group is none). */
+function newRelationCandidates(db: SqlDriver, items: readonly number[]) {
+  const pairs: { xItemId: number; yItemId: number }[] = [];
+  for (const type of NEW_RELATION_TYPES) {
+    for (const p of listRelationPairs(db, type, items)) {
+      const x = entityGroups.representativeOf(db, p.xItemId);
+      const y = entityGroups.representativeOf(db, p.yItemId);
+      if (x !== y) pairs.push({ xItemId: x, yItemId: y });
+    }
+  }
+  return pairs;
+}
+
+const instant = (value: string) => Date.parse(value);
+
+/**
+ * 새 관계 (P01-D16): a still-`candidate`, valid relation of a new-relation type between two groups whose
+ * `observed_at` is later than that of both end items: the items were known before the relation was seen. The
+ * rule never reads the clock; the ranking's novelty axis lowers an old one.
+ */
+export const newRelationRule: InsightRule = {
+  type: "new_relation",
+  candidates: newRelationCandidates,
+  evaluate(db, { xItemId, yItemId }): Desired {
+    const rx = entityGroups.representativeOf(db, xItemId);
+    const ry = entityGroups.representativeOf(db, yItemId);
+    if (rx !== xItemId || ry !== yItemId || rx === ry) return { state: "resolved" };
+    const xs = entityGroups.membersOf(db, xItemId);
+    const ys = entityGroups.membersOf(db, yItemId);
     const rows: (ValidRow & { ref: UserInputRef })[] = [];
     const lines: string[] = [];
-    const linkIds: number[] = [];
-    const dates: string[] = [];
-    const x = readItem(db, key.xItemId)?.name;
-    for (const link of linksOfFacts(db, [...facts.keys()])) {
-      const newer = facts.get(link.fromFactId);
-      const older = facts.get(link.toFactId);
-      if (
-        link.type !== "SUPERSEDES" ||
-        !newer ||
-        !older ||
-        !CHANGE_KINDS.includes(newer.kind) ||
-        !supersedingStands(db, link)
-      ) {
-        continue;
+    const x = readItem(db, xItemId)?.name;
+    const y = readItem(db, yItemId)?.name;
+    for (const type of NEW_RELATION_TYPES) {
+      for (const { id } of listRelationsBetween(db, type, xs, ys)) {
+        const relation = readRelation(db, id);
+        const from = relation && readItem(db, relation.subjectId);
+        const to = relation && readItem(db, relation.objectId);
+        if (!relation || !from || !to || relation.status !== "candidate") continue;
+        if (!(
+          instant(relation.observedAt) > instant(from.observedAt) &&
+          instant(relation.observedAt) > instant(to.observedAt)
+        )) {
+          continue;
+        }
+        const ref: UserInputRef = { kind: "relation", id };
+        const row = validRow(db, ref);
+        if (!row) continue;
+        rows.push({ ...row, ref });
+        lines.push(`${x} → ${y} 관계(${type})`);
       }
-      const stands = validFact(db, newer);
-      if (!stands) continue;
-      const before = validFact(db, older);
-      rows.push(stands, ...(before ? [before] : []));
-      linkIds.push(link.id);
-      lines.push(`${x}의 ${newer.kind}: ${cut(older.value)} → ${cut(newer.value)}`);
-      if (isDate(newer.value)) dates.push(newer.value);
     }
     if (lines.length === 0) return { state: "resolved" };
     return {
       state: "active",
-      summary: `${x}의 일정 값이 ${lines.length}건 바뀌었습니다(추론).`,
+      summary: `${x}와(과) ${y} 사이에 새로 관측된, 아직 확인되지 않은 관계가 ${lines.length}건 있습니다(추론).`,
       factLines: lines,
       reasoningSummary:
-        "같은 항목의 날짜 값을 새 값이 대신한다고 코드가 기록한 대체 연결을 모았습니다.",
-      ...gather(rows, linkIds),
-      urgencyDate: dates.sort().at(-1) ?? null,
+        "이미 있던 두 항목 사이에 뒤늦게 관측되어 아직 확인되지 않은 관계임을, 코드가 관측 시각을 비교해 확인했습니다.",
+      ...gather(rows, []),
+      urgencyDate: null,
     };
   },
 };
@@ -279,6 +534,11 @@ export const INSIGHT_RULES: readonly InsightRule[] = [
   scheduleConflictRule,
   conflictRule,
   importantChangeRule,
+  decisionChangeRule,
+  policyChangeRule,
+  pendingRequestRule,
+  openIssueRule,
+  newRelationRule,
   opportunityRule,
 ];
 

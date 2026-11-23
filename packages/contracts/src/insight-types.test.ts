@@ -22,8 +22,19 @@ describe("INSIGHT_TYPES (P01-R1)", () => {
       "important_change",
       "schedule_conflict",
       "dependency_delay",
+      "decision_change",
       "conflict",
+      "pending_request",
+      "open_issue",
       "opportunity",
+      "policy_change",
+      "new_relation",
+    ]);
+    // opportunity is the interpretation job's (P01-T04); the rest of the unsupported need search or feedback
+    expect(INSIGHT_TYPES.filter((t) => t.status === "unsupported").map((t) => t.type)).toEqual([
+      "similar_resolution",
+      "related_document",
+      "missed_information",
     ]);
   });
 });

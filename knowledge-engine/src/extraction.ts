@@ -518,6 +518,9 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         const id = items.get(ref)?.existingItemId;
         return id === null || id === undefined ? [] : (candidateLineage.get(id) ?? []);
       });
+    // every row of this run is observed at one time: a relation brought in with its items is no later than they
+    // are, which is what tells P01's "new relation" (a relation seen after its items) from it
+    const observedAt = now().toISOString();
     const attributes = (
       epistemic: KnowledgeAttributes["epistemic"],
       confidence: number | null | undefined,
@@ -525,7 +528,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       epistemic,
       status: "candidate",
       validAt: null,
-      observedAt: now().toISOString(),
+      observedAt,
       confidence: confidence ?? null,
     });
     for (const fact of answer.facts) {

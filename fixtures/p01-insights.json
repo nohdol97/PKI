@@ -214,7 +214,65 @@
       }
     },
     "decision_change": {
-      "support": "unsupported"
+      "support": "supported",
+      "scenario": {
+        "items": [
+          {
+            "ref": "d",
+            "type": "Decision",
+            "name": "정산 마감 방식"
+          }
+        ],
+        "sources": [
+          {
+            "ref": "s1",
+            "body": "결정: 정산은 주 단위로 마감한다."
+          },
+          {
+            "ref": "s2",
+            "body": "변경 결정: 정산은 월 단위로 마감한다."
+          }
+        ],
+        "facts": [
+          {
+            "item": "d",
+            "kind": "conclusion",
+            "value": "정산은 주 단위로 마감한다",
+            "source": "s1",
+            "quote": "정산은 주 단위로 마감한다",
+            "validAt": "2026-11-01"
+          },
+          {
+            "item": "d",
+            "kind": "conclusion",
+            "value": "정산은 월 단위로 마감한다",
+            "source": "s2",
+            "quote": "정산은 월 단위로 마감한다",
+            "validAt": "2026-11-15"
+          }
+        ],
+        "relations": []
+      },
+      "variant": {
+        "facts": [
+          {
+            "item": "d",
+            "kind": "conclusion",
+            "value": "정산은 월 단위로 마감한다",
+            "source": "s2",
+            "quote": "정산은 월 단위로 마감한다",
+            "validAt": "2026-11-15"
+          }
+        ]
+      },
+      "expected": {
+        "x": "d",
+        "y": "d",
+        "factLines": [
+          "정산 마감 방식의 conclusion: 정산은 주 단위로 마감한다 → 정산은 월 단위로 마감한다"
+        ],
+        "evidenceQuotes": ["정산은 주 단위로 마감한다", "정산은 월 단위로 마감한다"]
+      }
     },
     "conflict": {
       "support": "supported",
@@ -273,10 +331,112 @@
       }
     },
     "pending_request": {
-      "support": "unsupported"
+      "support": "supported",
+      "scenario": {
+        "items": [
+          {
+            "ref": "r",
+            "type": "Request",
+            "name": "결제 연동 요청"
+          }
+        ],
+        "sources": [
+          {
+            "ref": "s1",
+            "body": "결제 연동 요청의 상태는 open 이다."
+          },
+          {
+            "ref": "s2",
+            "body": "결제 연동 요청의 목표일은 2026-12-10 이다."
+          }
+        ],
+        "facts": [
+          {
+            "item": "r",
+            "kind": "status",
+            "value": "open",
+            "source": "s1",
+            "quote": "상태는 open"
+          },
+          {
+            "item": "r",
+            "kind": "target_date",
+            "value": "2026-12-10",
+            "source": "s2",
+            "quote": "목표일은 2026-12-10"
+          }
+        ],
+        "relations": []
+      },
+      "variant": {
+        "facts": [
+          {
+            "item": "r",
+            "kind": "status",
+            "value": "done",
+            "source": "s1",
+            "quote": "결제 연동 요청의 상태는"
+          },
+          {
+            "item": "r",
+            "kind": "target_date",
+            "value": "2026-12-10",
+            "source": "s2",
+            "quote": "목표일은 2026-12-10"
+          }
+        ]
+      },
+      "expected": {
+        "x": "r",
+        "y": "r",
+        "factLines": ["결제 연동 요청의 상태: open", "결제 연동 요청의 목표일: 2026-12-10"],
+        "evidenceQuotes": ["상태는 open", "목표일은 2026-12-10"]
+      }
     },
     "open_issue": {
-      "support": "unsupported"
+      "support": "supported",
+      "scenario": {
+        "items": [
+          {
+            "ref": "i",
+            "type": "Issue",
+            "name": "정산 오류"
+          }
+        ],
+        "sources": [
+          {
+            "ref": "s1",
+            "body": "정산 오류 이슈는 in_progress 상태다."
+          }
+        ],
+        "facts": [
+          {
+            "item": "i",
+            "kind": "status",
+            "value": "in_progress",
+            "source": "s1",
+            "quote": "in_progress 상태"
+          }
+        ],
+        "relations": []
+      },
+      "variant": {
+        "facts": [
+          {
+            "item": "i",
+            "kind": "status",
+            "value": "cancelled",
+            "source": "s1",
+            "quote": "정산 오류 이슈는"
+          }
+        ]
+      },
+      "expected": {
+        "x": "i",
+        "y": "i",
+        "factLines": ["정산 오류의 상태: in_progress"],
+        "evidenceQuotes": ["in_progress 상태"]
+      }
     },
     "similar_resolution": {
       "support": "unsupported"
@@ -289,10 +449,118 @@
       "judgedBy": "llm"
     },
     "policy_change": {
-      "support": "unsupported"
+      "support": "supported",
+      "scenario": {
+        "items": [
+          {
+            "ref": "d",
+            "type": "BusinessRule",
+            "name": "환불 정책"
+          }
+        ],
+        "sources": [
+          {
+            "ref": "s1",
+            "body": "정책: 환불은 7일 이내에 신청한다."
+          },
+          {
+            "ref": "s2",
+            "body": "개정 정책: 환불은 14일 이내에 신청한다."
+          }
+        ],
+        "facts": [
+          {
+            "item": "d",
+            "kind": "conclusion",
+            "value": "환불은 7일 이내에 신청한다",
+            "source": "s1",
+            "quote": "환불은 7일 이내에 신청한다",
+            "validAt": "2026-11-01"
+          },
+          {
+            "item": "d",
+            "kind": "conclusion",
+            "value": "환불은 14일 이내에 신청한다",
+            "source": "s2",
+            "quote": "환불은 14일 이내에 신청한다",
+            "validAt": "2026-11-15"
+          }
+        ],
+        "relations": []
+      },
+      "variant": {
+        "facts": [
+          {
+            "item": "d",
+            "kind": "conclusion",
+            "value": "환불은 14일 이내에 신청한다",
+            "source": "s2",
+            "quote": "환불은 14일 이내에 신청한다",
+            "validAt": "2026-11-15"
+          }
+        ]
+      },
+      "expected": {
+        "x": "d",
+        "y": "d",
+        "factLines": [
+          "환불 정책의 conclusion: 환불은 7일 이내에 신청한다 → 환불은 14일 이내에 신청한다"
+        ],
+        "evidenceQuotes": ["환불은 7일 이내에 신청한다", "환불은 14일 이내에 신청한다"]
+      }
     },
     "new_relation": {
-      "support": "unsupported"
+      "support": "supported",
+      "scenario": {
+        "items": [
+          {
+            "ref": "p",
+            "type": "Project",
+            "name": "미리내 프로젝트"
+          },
+          {
+            "ref": "y",
+            "type": "System",
+            "name": "물결 API"
+          }
+        ],
+        "sources": [
+          {
+            "ref": "s1",
+            "body": "미리내 프로젝트는 물결 API에 의존합니다."
+          }
+        ],
+        "facts": [],
+        "relations": [
+          {
+            "subject": "p",
+            "type": "DEPENDS_ON",
+            "object": "y",
+            "source": "s1",
+            "quote": "물결 API에 의존합니다",
+            "observedAt": "2026-11-22T00:00:00Z"
+          }
+        ]
+      },
+      "variant": {
+        "facts": [],
+        "relations": [
+          {
+            "subject": "p",
+            "type": "DEPENDS_ON",
+            "object": "y",
+            "source": "s1",
+            "quote": "물결 API에 의존합니다",
+            "observedAt": "2026-11-21T00:00:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "x": "p",
+        "y": "y",
+        "factLines": ["미리내 프로젝트 → 물결 API 관계(DEPENDS_ON)"],
+        "evidenceQuotes": ["물결 API에 의존합니다"]
+      }
     },
     "missed_information": {
       "support": "unsupported"

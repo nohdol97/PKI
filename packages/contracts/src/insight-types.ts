@@ -65,26 +65,16 @@ export const INSIGHT_TYPES: readonly InsightTypeInfo[] = [
   supported("important_change", "중요 변경", 60, 40),
   supported("schedule_conflict", "일정 충돌", 70, 70),
   supported("dependency_delay", "의존 업무 지연", 80, 70),
-  unsupported(
-    "decision_change",
-    "의사결정 변경",
-    "code",
-    "결정의 진술(statement)은 여러 값 종류라 대체 연결이 없다",
-  ),
+  supported("decision_change", "의사결정 변경", 70, 50),
   supported("conflict", "충돌", 60, 80),
-  unsupported("pending_request", "미처리 요청", "code", "요청의 상태 종류가 없다"),
-  unsupported("open_issue", "미해결 이슈", "code", "이슈의 상태 종류가 없다"),
+  supported("pending_request", "미처리 요청", 60, 80),
+  supported("open_issue", "미해결 이슈", 60, 60),
   unsupported("similar_resolution", "유사 해결", "code", "유사도 검색이 없다"),
   unsupported("related_document", "관련 문서", "code", "검색이 없다"),
   // judged by the interpretation job (P01-T04, D19): supported although it appears only while `insight.interpret` is on
   { ...supported("opportunity", "기회", 50, 50), judgedBy: "llm" },
-  unsupported(
-    "policy_change",
-    "정책 변화",
-    "code",
-    "업무 규칙의 진술은 여러 값 종류라 대체 연결이 없다",
-  ),
-  unsupported("new_relation", "새 관계", "code", "최근에 처음 관측된 관계를 가려내는 판정이 없다"),
+  supported("policy_change", "정책 변화", 70, 50),
+  supported("new_relation", "새 관계", 40, 40),
   unsupported("missed_information", "놓친 정보", "code", "열람·피드백 기록이 없다"),
 ];
 

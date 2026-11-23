@@ -26,6 +26,8 @@ let db: SqlDriver;
 let provider: FakeProvider;
 let handler: ReturnType<typeof createExtractHandler>;
 let externalIds = 0;
+/** The clock moves a millisecond on every read, as a real one does between two writes. */
+let tick = 0;
 
 function setUp(script: FakeStep[]) {
   provider = new FakeProvider({
@@ -47,10 +49,11 @@ function setUp(script: FakeStep[]) {
     },
     clock: { now: () => 0, sleep: async () => undefined },
   });
-  handler = createExtractHandler({ db, now: () => T0 });
+  handler = createExtractHandler({ db, now: () => new Date(T0.getTime() + tick++) });
   return { call: (raw: unknown) => broker.call(raw) };
 }
 beforeEach(() => {
+  tick = 0;
   db = openBetterSqlite3(":memory:");
   migrate(db);
   registerConnectorInstance(db, "imported", "jsonl-import");
@@ -167,5 +170,40 @@ describe("extract.v6: a request's status and a decision's conclusion (P01-R11)",
     ]);
     // the outside conclusion is a quote drop; the bad status and the long conclusion are other drops
     expect(drops(job)).toEqual({ quotes: 1, other: 2 });
+  });
+});
+
+describe("extract.v6: a new relation is one seen after its items (P01-D16)", () => {
+  const newRelations = () =>
+    db.all(
+      "SELECT x_item_id, y_item_id FROM insights WHERE rule = 'new_relation' AND state = 'active'",
+    );
+
+  it("stamps a run's rows with one observation time, so a relation brought in with its items is not new, and one between known items is", async () => {
+    const sameDocument = "미리내 프로젝트는 물결 프로젝트에 의존합니다.";
+    await extract(
+      answer({
+        items: [item("a", "Project", "미리내 프로젝트"), item("b", "Project", "물결 프로젝트")],
+        relations: [{ subject: "a", type: "DEPENDS_ON", object: "b", quote: sameDocument }],
+      }),
+      { body: sameDocument },
+    );
+    const stamps = db.all("SELECT observed_at FROM items UNION SELECT observed_at FROM relations");
+    expect(stamps).toHaveLength(1);
+    expect(newRelations()).toEqual([]);
+
+    const ids = db.all("SELECT id FROM items ORDER BY id").map((r) => String(r.id));
+    const laterDocument = "물결 프로젝트의 책임은 미리내 프로젝트가 진다.";
+    await extract(
+      answer({
+        items: [
+          item("a", "Project", "미리내 프로젝트", ids[0]),
+          item("b", "Project", "물결 프로젝트", ids[1]),
+        ],
+        relations: [{ subject: "a", type: "BELONGS_TO", object: "b", quote: laterDocument }],
+      }),
+      { body: laterDocument },
+    );
+    expect(newRelations()).toHaveLength(1);
   });
 });
