@@ -10,6 +10,7 @@ import { readAskEvents } from "./ask-stream.ts";
 import { createLatest } from "./latest.ts";
 import { citationSource, SourceView } from "./evidence-view.tsx";
 import { useNav, type Nav } from "./nav.tsx";
+import { PaneHead } from "./panes.tsx";
 import {
   answerText,
   ASK_ALL_CONNECTORS,
@@ -135,11 +136,14 @@ export interface OpenedCitation {
 export function AskResults({
   state,
   running,
+  question,
   opened,
   onOpenSource,
 }: {
   state: AskState;
   running: boolean;
+  /** The question that was asked, shown as the title (UI01-D16). */
+  question?: string | undefined;
   opened?: OpenedCitation | undefined;
   onOpenSource?: ((index: number) => void) | undefined;
 }) {
@@ -151,9 +155,14 @@ export function AskResults({
   const said = answer ? answerText(answer.status, answer.reason) : null;
   return (
     <>
+      {question !== undefined && (
+        <h2 className="detail-title">
+          <bdi>{question}</bdi>
+        </h2>
+      )}
       {route && (
-        <section aria-label="고른 길">
-          <h2>고른 길</h2>
+        <section className="ask-route" aria-label="고른 길">
+          <span className="ask-label">고른 길</span>
           <ul aria-label="전략별 상태">
             {Object.entries(route).map(([name, entry]) => (
               <li key={name}>
@@ -164,9 +173,55 @@ export function AskResults({
           </ul>
         </section>
       )}
+      {running && hits && !answer && <p role="status">{ASK_WAITING}</p>}
+      {(answer?.status === "started" || sentences.length > 0) && (
+        <section className="ask-answer" aria-label="답">
+          {done && sentences.length === 0 && <p role="status">{ASK_NO_SENTENCES}</p>}
+          {sentences.length > 0 && (
+            <ol aria-label="답 문장">
+              {sentences.map((s, i) => (
+                <li key={i}>
+                  {s.text}
+                  <sup>{`[${i + 1}]`}</sup>
+                </li>
+              ))}
+            </ol>
+          )}
+          {done !== undefined && done.dropped > 0 && (
+            <p role="status">{droppedText(done.dropped)}</p>
+          )}
+        </section>
+      )}
+      {said !== null && <p role="status">{said}</p>}
+      {sentences.length > 0 && (
+        <section className="ask-cites" aria-label="인용한 원본">
+          <h3 className="ask-label">인용한 원본 {sentences.length}건</h3>
+          <ol aria-label="인용한 원본">
+            {sentences.map((s, i) => (
+              <li key={i} className="cite-card">
+                <p className="cite-quote">
+                  <strong>{`[${i + 1}]`}</strong> <bdi>{s.citation.quote}</bdi>
+                </p>
+                <p className="src">
+                  <bdi>{titleOf(s.citation.versionId) ?? ""}</bdi> (version {s.citation.version},
+                  위치 {s.citation.start}–{s.citation.end})
+                </p>
+                <button type="button" onClick={() => onOpenSource?.(i)}>
+                  원본 보기
+                </button>
+                {opened?.index === i && (
+                  <section aria-label="인용 원본">
+                    <SourceView source={opened.source} />
+                  </section>
+                )}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
       {hits && (
-        <section aria-label="적중">
-          <h2>적중</h2>
+        <section className="ask-hits" aria-label="적중">
+          <h3 className="ask-label">적중</h3>
           {hits.notes.some((n) => n.kind === "insufficient") && <p role="status">{ASK_NO_HITS}</p>}
           {hits.notes.some((n) => n.kind === "conflict") && <p role="status">{ASK_CONFLICT}</p>}
           {hits.hits.length > 0 && (
@@ -207,41 +262,6 @@ export function AskResults({
           )}
         </section>
       )}
-      {running && hits && !answer && <p role="status">{ASK_WAITING}</p>}
-      {(answer?.status === "started" || sentences.length > 0) && (
-        <section aria-label="답">
-          <h2>답</h2>
-          {done && sentences.length === 0 && <p role="status">{ASK_NO_SENTENCES}</p>}
-          {sentences.length > 0 && (
-            <ol aria-label="답 문장">
-              {sentences.map((s, i) => (
-                <li key={i}>
-                  <p>{s.text}</p>
-                  <blockquote>
-                    <bdi>{s.citation.quote}</bdi>
-                  </blockquote>
-                  <small>
-                    출처: <bdi>{titleOf(s.citation.versionId) ?? ""}</bdi> (version{" "}
-                    {s.citation.version}, 위치 {s.citation.start}–{s.citation.end})
-                  </small>{" "}
-                  <button type="button" onClick={() => onOpenSource?.(i)}>
-                    원본 보기
-                  </button>
-                  {opened?.index === i && (
-                    <section aria-label="인용 원본">
-                      <SourceView source={opened.source} />
-                    </section>
-                  )}
-                </li>
-              ))}
-            </ol>
-          )}
-          {done !== undefined && done.dropped > 0 && (
-            <p role="status">{droppedText(done.dropped)}</p>
-          )}
-        </section>
-      )}
-      {said !== null && <p role="status">{said}</p>}
     </>
   );
 }
@@ -260,6 +280,8 @@ export function Ask({ api }: { api: ApiClient }) {
   const [cancelled, setCancelled] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [opened, setOpened] = useState<OpenedCitation>();
+  /** The question that was last sent, shown as the title (UI01-D16): display only, nothing is stored. */
+  const [asked, setAsked] = useState<string>();
   const controller = useRef<AbortController>(undefined);
 
   useEffect(() => {
@@ -290,6 +312,7 @@ export function Ask({ api }: { api: ApiClient }) {
     const mine = new AbortController();
     controller.current = mine;
     setState(INITIAL_ASK);
+    setAsked(form.question.trim());
     setCancelled(false);
     setFailure(undefined);
     setOpened(undefined);
@@ -320,22 +343,22 @@ export function Ask({ api }: { api: ApiClient }) {
   };
 
   return (
-    <>
-      <p>{ASK_INTRO}</p>
-      <form onSubmit={(e) => void submit(e)}>
-        <p>
-          <label>
-            {ASK_QUESTION}
-            <br />
-            <textarea
-              rows={3}
-              cols={60}
-              value={form.question}
-              onChange={(e) => setForm({ ...form, question: e.target.value })}
-            />
-          </label>
-        </p>
-        <p>
+    <div className="pane-wide pane-read">
+      <PaneHead title="질문" as="h1" />
+      <div className="pane-body">
+        {asked === undefined && <p>{ASK_INTRO}</p>}
+        {failure && <p role="alert">{failure}</p>}
+        {cancelled && <p role="status">{ASK_CANCELLED}</p>}
+        <AskResults
+          state={state}
+          running={running}
+          question={asked}
+          opened={opened}
+          onOpenSource={openSource}
+        />
+      </div>
+      <form className="ask-bar" onSubmit={(e) => void submit(e)}>
+        <div className="ask-filters">
           <label>
             {ASK_CONNECTOR}{" "}
             <select
@@ -349,7 +372,7 @@ export function Ask({ api }: { api: ApiClient }) {
                 </option>
               ))}
             </select>
-          </label>{" "}
+          </label>
           <label>
             {ASK_FROM}{" "}
             <input
@@ -357,7 +380,7 @@ export function Ask({ api }: { api: ApiClient }) {
               value={form.from}
               onChange={(e) => setForm({ ...form, from: e.target.value })}
             />
-          </label>{" "}
+          </label>
           <label>
             {ASK_TO}{" "}
             <input
@@ -366,42 +389,50 @@ export function Ask({ api }: { api: ApiClient }) {
               onChange={(e) => setForm({ ...form, to: e.target.value })}
             />
           </label>
-        </p>
-        <p>
           <label>
             <input
               type="checkbox"
               checked={form.answer}
               onChange={(e) => setForm({ ...form, answer: e.target.checked })}
-            />{" "}
+            />
             {ASK_WANT_ANSWER}
           </label>
           {needsAck && (
             <label>
-              {" "}
               <input
                 type="checkbox"
                 checked={form.acknowledgeUnverified === true}
                 onChange={(e) => setForm({ ...form, acknowledgeUnverified: e.target.checked })}
-              />{" "}
+              />
               {ASK_UNVERIFIED_ACK}
             </label>
           )}
-        </p>
-        <p>
-          <button type="submit" disabled={running || form.question.trim() === ""}>
-            {ASK_SUBMIT}
-          </button>
-          {running && (
-            <button type="button" onClick={() => controller.current?.abort()}>
-              {ASK_CANCEL}
+        </div>
+        <div className="ask-compose">
+          <label>
+            <span className="sr-only">{ASK_QUESTION}</span>
+            <textarea
+              rows={2}
+              value={form.question}
+              onChange={(e) => setForm({ ...form, question: e.target.value })}
+            />
+          </label>
+          <div className="ask-buttons">
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={running || form.question.trim() === ""}
+            >
+              {ASK_SUBMIT}
             </button>
-          )}
-        </p>
+            {running && (
+              <button type="button" onClick={() => controller.current?.abort()}>
+                {ASK_CANCEL}
+              </button>
+            )}
+          </div>
+        </div>
       </form>
-      {failure && <p role="alert">{failure}</p>}
-      {cancelled && <p role="status">{ASK_CANCELLED}</p>}
-      <AskResults state={state} running={running} opened={opened} onOpenSource={openSource} />
-    </>
+    </div>
   );
 }

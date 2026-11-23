@@ -6,6 +6,8 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/components.css";
+import "./styles/ask.css";
+import "./styles/explore.css";
 import "./screens.css";
 
 // Electron takes the session from the preload, browser development from the dev

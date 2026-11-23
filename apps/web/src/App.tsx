@@ -94,9 +94,11 @@ export function App({ api }: { api: ApiClient }) {
     activity: () => <Activity api={api} />,
     settings: () => <Settings api={api} />,
   }[screen];
-  // the four screens with a list and a detail draw their own panes; the others are one pane under a head bar
+  // the screens with a list and a detail draw their own panes, 질문 draws its own pane (the input bar is pinned in
+  // it); the others are one pane under a head bar
   const split =
     screen === "home" || screen === "notifications" || screen === "wiki" || screen === "lint";
+  const own = screen === "ask";
   return (
     <NavProvider screen={screen} onScreen={setScreen}>
       <div className="app">
@@ -122,6 +124,10 @@ export function App({ api }: { api: ApiClient }) {
         {split ? (
           <main className="screen screen-split" data-screen={screen}>
             {screen === "home" && <h1 className="sr-only">{SCREENS[screen]}</h1>}
+            {shown()}
+          </main>
+        ) : own ? (
+          <main className="screen" data-screen={screen}>
             {shown()}
           </main>
         ) : (
