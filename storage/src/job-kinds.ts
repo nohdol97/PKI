@@ -14,6 +14,8 @@ export const WIKI_BUILD_KIND = "wiki-build";
 export const WIKI_SUMMARY_KIND = "wiki-summary";
 /** The job that asks a Provider to interpret one Insight (P01-R7): sourceless, so no version fence. */
 export const INSIGHT_INTERPRET_KIND = "insight-interpret";
+/** The scheduled re-review (K02-R2): target `daily` or `weekly`; reads the DB only, no Provider call, no source. */
+export const REFLECT_JOB_KIND = "reflect";
 export const PROJECTION_REMOVE_KIND = "projection-remove";
 export const PROJECTION_REBUILD_KIND = "projection-rebuild";
 
@@ -28,6 +30,7 @@ export const FENCE_FREE_KINDS: readonly string[] = [
   WIKI_BUILD_KIND,
   WIKI_SUMMARY_KIND,
   INSIGHT_INTERPRET_KIND,
+  REFLECT_JOB_KIND,
 ];
 
 /** False for the projection kinds: their source and version are a name and a cover, not a fence. */

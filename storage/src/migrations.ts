@@ -1754,6 +1754,97 @@ const v30: Migration = (db) => {
   db.run("UPDATE revisions SET knowledge_revision = ?", [revision]);
 };
 
+// Schema v31 (K02-T1, K02-R1, R7, D12): reflection and knowledge lint. Additive only. The dirty marks the
+// triggers write (an item id with the sequence of its last change), the one-row state, the findings with their
+// lineage, and the LLM opinion columns (K02-D12). The number is the next one free on main when this merges:
+// renumber `v31` and its line in `migrations` on a rebase over another v31. The tables whose changes mark an
+// item dirty are REFLECTION_DIRTY_TABLES, each with the SQL that names the items a changed row bears on.
+export const REFLECTION_DIRTY_TABLES: Readonly<Record<string, (row: string) => string>> = {
+  items: (r) => `SELECT ${r}.id AS item_id`,
+  facts: (r) => `SELECT ${r}.item_id AS item_id`,
+  relations: (r) => `SELECT ${r}.subject_id AS item_id UNION SELECT ${r}.object_id`,
+  evidence: (r) =>
+    `SELECT item_id FROM facts WHERE id = ${r}.fact_id
+     UNION SELECT subject_id FROM relations WHERE id = ${r}.relation_id
+     UNION SELECT object_id FROM relations WHERE id = ${r}.relation_id`,
+  assertion_links: (r) =>
+    `SELECT item_id FROM facts WHERE id IN (${r}.from_fact_id, ${r}.to_fact_id)`,
+  item_merges: (r) => `SELECT ${r}.member_id AS item_id UNION SELECT ${r}.representative_id`,
+  // a version that came or went changes which of its source's rows are current
+  source_versions: (r) =>
+    `SELECT f.item_id FROM evidence e
+       JOIN source_versions v ON v.id = e.source_version_id JOIN facts f ON f.id = e.fact_id
+      WHERE v.source_id = ${r}.source_id
+     UNION SELECT rel.subject_id FROM evidence e
+       JOIN source_versions v ON v.id = e.source_version_id JOIN relations rel ON rel.id = e.relation_id
+      WHERE v.source_id = ${r}.source_id
+     UNION SELECT rel.object_id FROM evidence e
+       JOIN source_versions v ON v.id = e.source_version_id JOIN relations rel ON rel.id = e.relation_id
+      WHERE v.source_id = ${r}.source_id`,
+};
+const REFLECTION_EVENTS = { INSERT: ["NEW"], UPDATE: ["NEW", "OLD"], DELETE: ["OLD"] } as const;
+const v31: Migration = (db) => {
+  db.exec(`
+    CREATE TABLE reflection_dirty (
+      item_id INTEGER PRIMARY KEY,
+      seq INTEGER NOT NULL
+    );
+    CREATE TABLE reflection_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      dirty_seq INTEGER NOT NULL DEFAULT 0,
+      last_daily_at TEXT,
+      last_weekly_at TEXT,
+      weekly_cursor INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO reflection_state (id, dirty_seq)
+      VALUES (1, CASE WHEN EXISTS (SELECT 1 FROM items) THEN 1 ELSE 0 END);
+    INSERT INTO reflection_dirty (item_id, seq) SELECT id, 1 FROM items;
+    CREATE TABLE lint_findings (
+      id INTEGER PRIMARY KEY,
+      rule TEXT NOT NULL CHECK (rule IN ('synonym', 'stale', 'overdue-work', 'missing-link')),
+      fingerprint TEXT NOT NULL UNIQUE,
+      target_kind TEXT NOT NULL CHECK (target_kind IN ('item', 'fact', 'relation')),
+      target_a INTEGER NOT NULL,
+      target_b INTEGER,
+      origin TEXT NOT NULL CHECK (origin IN ('rule', 'user')),
+      status TEXT NOT NULL
+        CHECK (status IN ('open', 'accepted', 'dismissed', 'resolved', 'oscillating')),
+      flips INTEGER NOT NULL DEFAULT 0 CHECK (flips >= 0),
+      opinion TEXT CHECK (opinion IS NULL OR json_valid(opinion)),
+      opinion_lineage_hash TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK ((rule IN ('synonym', 'missing-link')) = (target_b IS NOT NULL)),
+      CHECK ((rule = 'stale') = (target_kind <> 'item'))
+    );
+    CREATE TABLE lint_finding_lineage (
+      finding_id INTEGER NOT NULL REFERENCES lint_findings (id) ON DELETE CASCADE,
+      source_id INTEGER NOT NULL,
+      version INTEGER NOT NULL,
+      PRIMARY KEY (finding_id, source_id, version)
+    ) WITHOUT ROWID;
+    CREATE INDEX lint_finding_lineage_source ON lint_finding_lineage (source_id, version);
+    ${Object.entries(REFLECTION_DIRTY_TABLES)
+      .flatMap(([table, items]) =>
+        Object.entries(REFLECTION_EVENTS).map(
+          ([event, rows]) => `
+    CREATE TRIGGER reflection_dirty_${table}_${event.toLowerCase()} AFTER ${event} ON ${table} BEGIN
+      UPDATE reflection_state SET dirty_seq = dirty_seq + 1;${rows
+        .map(
+          (r) => `
+      INSERT INTO reflection_dirty (item_id, seq)
+        SELECT item_id, (SELECT dirty_seq FROM reflection_state) FROM (${items(r)})
+        WHERE item_id IS NOT NULL
+        ON CONFLICT (item_id) DO UPDATE SET seq = excluded.seq;`,
+        )
+        .join("")}
+    END;`,
+        ),
+      )
+      .join("")}
+  `);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1786,6 +1877,7 @@ export const migrations: readonly Migration[] = [
   v28,
   v29,
   v30,
+  v31,
 ];
 
 export function schemaVersion(db: SqlDriver): number {
