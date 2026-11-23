@@ -288,6 +288,28 @@ describe("backup.api refusals (H01-C2a)", () => {
     expect(existsSync(join(live.data, RESTORE_DIR))).toBe(false);
   });
 
+  it("an unreadable restore marker is shown as a failure code and blocks a new staging, deleting nothing (M2)", async () => {
+    const live = await boot("live");
+    await chooseFolder(live);
+    const own = await makeBackup(live);
+    mkdirSync(join(live.data, RESTORE_DIR));
+    const marker = join(live.data, RESTORE_DIR, "pending.json");
+    writeFileSync(marker, '{"state":"sta');
+    const status = (await live.call(routes.backupStatus.path, "GET")).body as {
+      failure: string | null;
+      pending: unknown;
+    };
+    expect(status).toMatchObject({ failure: "restore-marker-unreadable", pending: null });
+    const res = await live.call(routes.restoreBackup.path, "POST", {
+      fileName: own.fileName,
+      passphrase: PASSPHRASE,
+      confirmBackupId: own.summary.backupId,
+    });
+    expect(res.body).toEqual({ status: "refused", code: "already-pending" });
+    expect((await live.call(routes.cancelRestore.path, "DELETE")).body).toEqual({ status: "none" });
+    expect(readFileSync(marker, "utf8")).toBe('{"state":"sta');
+  });
+
   it("an older schema is lifted by the staging: the restart opens it at this build's number", async () => {
     const live = await boot("live");
     await chooseFolder(live);

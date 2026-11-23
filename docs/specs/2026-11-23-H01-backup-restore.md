@@ -71,12 +71,16 @@
 
 | 표식 | 파일 상태 | 하는 일 |
 |---|---|---|
-| 없음 | `restore/`나 `backup-tmp/`가 남음 | 지운다(준비 중 꺼짐) |
+| 없음(파일·폴더가 없음) | `restore/`나 `backup-tmp/`가 남음 | 지운다(준비 중 꺼짐). 단 `before-restore`가 있으면 아무것도 지우지 않고 시작을 명시적 오류(`restore-before-orphaned`)로 끝낸다 |
+| 읽을 수 없음(읽기 오류, 해석 불가, 모르는 상태) | — | 없음으로 보지 않는다. 아무것도 지우지 않고 시작을 `RestoreMarkerError`로 끝낸다. 상태 API는 실패 코드 `restore-marker-unreadable`을 보이고 새 준비는 `already-pending`으로 거절한다 |
 | `staged` | 준비 파일 있음, 옛 자리 없음 | 지금 파일을 `pki.sqlite.before-restore`로 이름 바꿈 → 준비 파일을 `pki.sqlite`로 이름 바꿈 → 표식 `swapped` |
 | `staged` | 준비 파일과 `before-restore`가 다 있음 | 준비 파일을 `pki.sqlite`로 이름 바꿈 → `swapped` (두 이름 바꾸기 사이에 꺼짐) |
 | `staged` | 준비 파일 없음, `before-restore` 있음 | `swapped`로 적는다(표식을 고치기 전에 꺼짐) |
+| `swapped` | 정본 `pki.sqlite`가 없음 | 아무것도 지우지 않고 표식을 `failed`(`restore-live-missing`)로 적은 뒤 시작을 오류로 끝낸다 |
 | `swapped` | — | 그대로 연다. 마무리(R12)가 이미 끝났으면 남은 파일과 표식만 지운다 |
 | `rolling-back` | — | 되돌림 도중 꺼짐. `before-restore`가 있으면 `pki.sqlite`를 지우고 되돌린 뒤 `failed`로 적는다(R13) |
+| `staged` | 준비 파일·`before-restore`·`pki.sqlite`가 다 있음, 또는 준비 파일만 있고 `pki.sqlite`가 없음 | 아무것도 지우지 않고 `failed`(`restore-state-inconsistent`·`restore-live-missing`)로 적은 뒤 시작을 오류로 끝낸다 |
+| `failed` | 정본이 없는데 `before-restore`가 있음 | 빈 정본을 만들지 않고 시작을 `restore-live-missing`으로 끝낸다 |
 | `failed` | — | 평소 시작. 상태 API가 실패 코드를 보인다 |
 
   지금 파일 옆에 `pki.sqlite-journal`이 남아 있으면(지난 실행이 쓰다 꺼짐) 이름을 바꾸기 전에 지금 파일을 한 번 열었다 닫아 SQLite가 되감게 한다. 남의 저널이 새 파일에 적용되면 안 된다. 어느 순간에 꺼져도 `pki.sqlite`와 `before-restore`는 각각 온전한 한 파일이다.
@@ -88,6 +92,7 @@
   5. 설정 `restore.last`에 결과를 적는다: `backupId`, 준비 시각(`stagedAt`), 적용 시각, 백업 시각, 다시 적용한 삭제 수, 멈춘 폴더 수, 지운 동의 수, embedding 공간이 달랐는지. `backupId`와 `stagedAt`이 표식과 같은 기록이 이미 있으면 마무리가 이미 커밋된 것이다(그 시작에서 꺼진 경우): 남은 파일과 표식만 지운다.
   
   `boot.ts`의 `driver.start` 인자는 그대로 두고(장부 재적용이 있을 때의 기존 경로), 복원의 멈춤은 위 4가 한 곳에서 한다. 스케줄은 손대지 않는다. 지나간 주기는 기존 점검이 주기마다 작업 하나로 접는다(`backend/src/scheduler.ts:261`). 마무리가 커밋되면 `before-restore`를 지우고 표식을 지운다. 이것이 "복원 확인"이다.
+- **H01-R13a 지우기의 조건.** 시작 중 어느 길도, 완전한 대체 파일이 있음을 확인하기 전에는 정본 `pki.sqlite`를 지우지 않는다. 되돌림은 `before-restore`가 SQLite 파일의 머리(`SQLite format 3`)를 가진 때만 정본을 지우고 이름을 바꾼다. 아니면 `restore-previous-unverified`로 멈춘다.
 - **H01-R13 되돌림.** 바꾼 뒤 마무리 커밋 전에 시작이 예외로 끝나면(준비 실패, 장부의 줄을 적용하지 못함 등) 정본을 닫고 표식을 `rolling-back`으로 적은 뒤 `before-restore`를 `pki.sqlite`로 되돌리고 표식을 `failed`(코드만)로 적고 그 시작은 실패로 끝낸다. 다음 시작은 이전 데이터로 뜬다.
 - **H01-R14 되살아나지 않는 것.**
 
@@ -205,6 +210,7 @@ PR 하나로 간다. T1 뒤에 T2·T3을 나란히, T3 뒤에 T4·T5를 나란�
 |---|---|---|---|
 | 2026-11-23 | 처음 씀, 확정 | 전체 | 이슈 #32 착수. X01이 진행 중이라 C3은 뒤 단위로 넘기고 C1·C2를 한 PR로 묶음. 정본 암호화는 ADR 0010의 현재 결정을 유지 |
 | 2026-11-24 | R12: 폴더 멈춤을 마무리 트랜잭션 안으로(4번), `driver.start` 인자 제거; 순서도에 rolling-back | R12, 순서도 H·X2 | 독립 정확성 검토 M1: 마무리 커밋과 구동기 시작 사이에 꺼지면 표식이 없어 폴더가 읽히는 채로 남고 `pausedLocations`가 거짓이 됐음 |
+| 2026-11-24 | R11 표: 읽을 수 없는 표식·고아 `before-restore`·모순 상태는 지우지 않고 명시적 오류, R13a | R11, R13a | 독립 정확성 검토 M2: 읽을 수 없는 표식을 "없음"으로 보고 `restore/`를 지운 뒤 모순 상태에서 정본이 지워질 수 있었음 |
 | 2026-11-24 | R9 ⑥ 스키마 객체 비교와 거절 코드 `foreign-schema` | R9 | 독립 보안 검토 S1: 백업에 실린 트리거가 정본에서 살아남아 D9의 동의 지움을 되돌릴 수 있었음 |
 | 2026-11-23 | 설계 개요: 시작 실패 반응을 곁가지 catch로 | 설계 개요(boot.ts) | 전체 스위트가 잡음: 감싸는 async 함수가 시작의 완료 시점을 늦춰 projection-jobs 시험 둘이 빨개짐(변경 범위 시험으로는 안 보였음) |
 | 2026-11-23 | R3: 목록표에 `installation`(설치 지문) 추가; R15: 거절은 200 응답의 코드, `backupScrypt` 시험 틈 | R3, R15 | T3 구현 중 확인: R8의 "같은 설치인지"를 복호화 전에 가를 값이 목록표에 없었고, 계약 시험이 객체 응답만 받음 |

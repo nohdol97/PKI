@@ -26,6 +26,7 @@ import {
   listBackups,
   installationFingerprint,
   readPending,
+  RestoreMarkerError,
   readSnapshotFacts,
   removeRestoreArtifacts,
   stageRestore,
@@ -304,8 +305,26 @@ describe("restore.stage (H01-C2a, storage half)", () => {
     odd.exec("CREATE VIEW sneaky AS SELECT * FROM consents");
     const viewed = make(odd, { now: new Date("2026-11-23T02:00:00Z") });
     odd.close();
-    expect(stage(viewed.fileName, {}, empty)).toEqual({ status: "refused", code: "foreign-schema" });
+    expect(stage(viewed.fileName, {}, empty)).toEqual({
+      status: "refused",
+      code: "foreign-schema",
+    });
     empty.close();
+  });
+
+  it("readPending answers undefined only for a marker that is not there; an unreadable one is an error (M2)", () => {
+    expect(readPending(data)).toBeUndefined();
+    mkdirSync(join(data, RESTORE_DIR));
+    expect(readPending(data)).toBeUndefined();
+    writeFileSync(join(data, RESTORE_DIR, PENDING_FILE), '{"state":"sta');
+    expect(() => readPending(data)).toThrow(RestoreMarkerError);
+    // a marker that exists but cannot be read (here: a folder in its place) is no "none" either
+    rmSync(join(data, RESTORE_DIR, PENDING_FILE));
+    mkdirSync(join(data, RESTORE_DIR, PENDING_FILE));
+    expect(() => readPending(data)).toThrow(RestoreMarkerError);
+    rmSync(join(data, RESTORE_DIR, PENDING_FILE), { recursive: true });
+    writeFileSync(join(data, RESTORE_DIR, PENDING_FILE), '{"state":"nonsense"}');
+    expect(() => readPending(data)).toThrow(RestoreMarkerError);
   });
 
   it("lifts a backup of an older schema to this build's number while staging", () => {

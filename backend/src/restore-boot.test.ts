@@ -25,6 +25,7 @@ import {
   newLocalId,
   openManifest,
   readPending,
+  RestoreMarkerError,
   readSetting,
   registerConnectorInstance,
   registerJob,
@@ -44,6 +45,8 @@ import { bootBackend } from "./boot.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 import {
   RestoreCrash,
+  RestoreStateError,
+  rollbackRestore,
   applyPendingRestore,
   finishRestore,
   type RestoreStep,
@@ -306,6 +309,59 @@ describe("restore.pause (H01-R12, M1)", () => {
     await booted.server.close();
     booted.db.close();
     expect(states).toEqual([["paused", "restored"]]);
+  });
+});
+
+describe("restore.marker states that cannot be trusted (H01-R11, M2)", () => {
+  const before = () => join(data, BEFORE_RESTORE_FILE);
+  const staged = () => join(data, RESTORE_DIR, STAGED_FILE);
+  const marker = () => join(data, RESTORE_DIR, "pending.json");
+
+  it("an unreadable marker stops the start explicitly and deletes nothing (a torn write between the renames)", () => {
+    expect(() =>
+      applyPendingRestore(data, openBetterSqlite3, { crashAfter: "first-rename" }),
+    ).toThrow(RestoreCrash);
+    writeFileSync(marker(), '{"state":"sta');
+    expect(() => applyPendingRestore(data, openBetterSqlite3)).toThrow(RestoreMarkerError);
+    expect(existsSync(before())).toBe(true);
+    expect(existsSync(staged())).toBe(true);
+  });
+
+  it("no marker but a previous-database file left: the start fails explicitly and deletes nothing", () => {
+    expect(() =>
+      applyPendingRestore(data, openBetterSqlite3, { crashAfter: "first-rename" }),
+    ).toThrow(RestoreCrash);
+    rmSync(marker());
+    expect(() => applyPendingRestore(data, openBetterSqlite3)).toThrow(RestoreStateError);
+    expect(existsSync(before())).toBe(true);
+    expect(existsSync(staged())).toBe(true);
+  });
+
+  it("a live file beside a previous-database file and a staged one is never removed: the marker is marked failed", () => {
+    copyFileSync(live(), before());
+    const hash = sha(live());
+    expect(() => applyPendingRestore(data, openBetterSqlite3)).toThrow(RestoreStateError);
+    expect(sha(live())).toBe(hash);
+    expect(existsSync(before())).toBe(true);
+    expect(readPending(data)).toMatchObject({ state: "failed" });
+  });
+
+  it("a swapped restore whose live file is missing is marked failed and the previous file is kept", () => {
+    expect(applyPendingRestore(data, openBetterSqlite3).applied).toBe(true);
+    rmSync(live());
+    expect(() => applyPendingRestore(data, openBetterSqlite3)).toThrow(RestoreStateError);
+    expect(existsSync(before())).toBe(true);
+    expect(readPending(data)).toMatchObject({ state: "failed" });
+  });
+
+  it("an undo does not remove the live file when the previous file is not a complete database", () => {
+    expect(applyPendingRestore(data, openBetterSqlite3).applied).toBe(true);
+    writeFileSync(before(), "not a database");
+    const hash = sha(live());
+    expect(() =>
+      rollbackRestore({ dataDir: data, applied: true, finished: false }, "start-failed"),
+    ).toThrow(RestoreStateError);
+    expect(sha(live())).toBe(hash);
   });
 });
 

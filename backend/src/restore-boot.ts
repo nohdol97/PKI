@@ -24,7 +24,7 @@ import {
   type RestoreSummary,
   type SqlDriver,
 } from "@pki/storage";
-import { existsSync, renameSync, rmSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { isReadable } from "./local-files-driver.ts";
 import { requestProjectionRebuild } from "./projection-jobs.ts";
@@ -73,6 +73,36 @@ export interface RestoreRun {
   failedCode?: string;
 }
 
+/** A state the restore cannot go on from without risking the user's data: the start fails, nothing is deleted. */
+export class RestoreStateError extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    super(code);
+    this.name = "RestoreStateError";
+    this.code = code;
+  }
+}
+
+const SQLITE_MAGIC = "SQLite format 3\0";
+
+/** A file that is at least the start of a SQLite database: the only thing that may stand in for the live file. */
+function looksLikeDatabase(path: string): boolean {
+  try {
+    const fd = openSync(path, "r");
+    try {
+      const head = Buffer.alloc(SQLITE_MAGIC.length);
+      return (
+        readSync(fd, head, 0, head.length, 0) === head.length &&
+        head.toString("latin1") === SQLITE_MAGIC
+      );
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
 const paths = (dataDir: string) => ({
   live: join(dataDir, DB_FILE),
   before: join(dataDir, BEFORE_RESTORE_FILE),
@@ -100,6 +130,8 @@ function settleJournal(dataDir: string, open: OpenSqlDriver): void {
 function undoSwap(dataDir: string): void {
   const { live, before, staged, liveJournal } = paths(dataDir);
   if (existsSync(before)) {
+    // the live file goes only when a complete replacement is there to take its name
+    if (!looksLikeDatabase(before)) throw new RestoreStateError("restore-previous-unverified");
     rmSync(live, { force: true });
     rmSync(liveJournal, { force: true });
     renameSync(before, live);
@@ -130,8 +162,11 @@ export function applyPendingRestore(
 ): RestoreRun {
   const run: RestoreRun = { dataDir, applied: false, finished: false };
   removeBackupTmp(dataDir); // a snapshot a killed backup left: plaintext, never kept
-  const marker = readPending(dataDir);
+  const marker = readPending(dataDir); // an unreadable one throws: not "no restore"
+  const { live, before } = paths(dataDir);
   if (!marker) {
+    // a previous database with no marker to say why: the only copy of the user's data may be that file
+    if (existsSync(before)) throw new RestoreStateError("restore-before-orphaned");
     removeRestoreArtifacts(dataDir); // a staging that was cut off
     return run;
   }
@@ -140,12 +175,17 @@ export function applyPendingRestore(
       undoSwap(dataDir);
       writePending(dataDir, { state: "failed", code: marker.code });
     }
+    // a start must not go on to make an empty database while the previous one waits beside it
+    if (!existsSync(live) && existsSync(before))
+      throw new RestoreStateError("restore-live-missing");
     return { ...run, failedCode: marker.code };
   }
   const { state, ...summary } = marker;
   run.summary = summary;
   reach(hooks, "marker-read");
   try {
+    if (state === "swapped" && !existsSync(live))
+      throw new RestoreStateError("restore-live-missing");
     if (state === "staged" && !swap(dataDir, open, hooks)) {
       writePending(dataDir, { state: "failed", code: "staged-missing" });
       return { dataDir, applied: false, finished: false, failedCode: "staged-missing" };
@@ -154,6 +194,11 @@ export function applyPendingRestore(
     return run;
   } catch (error) {
     if (error instanceof RestoreCrash) throw error;
+    if (error instanceof RestoreStateError) {
+      // nothing is moved or deleted: the marker says so and the start fails
+      writePending(dataDir, { state: "failed", code: error.code });
+      throw error;
+    }
     rollbackRestore(run, "swap-failed");
     throw error;
   }
@@ -172,7 +217,9 @@ function swap(dataDir: string, open: OpenSqlDriver, hooks: RestoreHooks | undefi
       syncPath(dataDir);
       reach(hooks, "first-rename");
     } else if (beforeHere && existsSync(live)) {
-      throw new Error("restore-state-inconsistent");
+      throw new RestoreStateError("restore-state-inconsistent");
+    } else if (!beforeHere && !existsSync(live)) {
+      throw new RestoreStateError("restore-live-missing");
     }
     renameSync(staged, live);
     syncPath(dataDir);

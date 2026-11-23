@@ -15,6 +15,7 @@ import {
   listBackups,
   readBackupManifest,
   readPending,
+  RestoreMarkerError,
   readSetting,
   removeRestoreArtifacts,
   schemaVersion,
@@ -88,6 +89,16 @@ const realOrResolved = (path: string): string => {
   }
 };
 
+/** The marker, or `"unreadable"` when it cannot be read: the screen says so, nothing is deleted. */
+function markerOf(dataDir: string): ReturnType<typeof readPending> | "unreadable" {
+  try {
+    return readPending(dataDir);
+  } catch (error) {
+    if (error instanceof RestoreMarkerError) return "unreadable";
+    throw error;
+  }
+}
+
 const usable = (folder: string): boolean => {
   try {
     if (!statSync(folder).isDirectory()) return false;
@@ -120,13 +131,13 @@ export function createBackupApi(options: BackupApiOptions): BackupApi {
     status() {
       const folder = folderOf() ?? null;
       const folderUsable = folder !== null && usable(folder);
-      const marker = readPending(dataDir);
+      const marker = markerOf(dataDir);
       return {
         folder,
         folderUsable,
         files: folderUsable ? listBackups(folder) : [],
         pending:
-          marker?.state === "staged"
+          typeof marker === "object" && marker.state === "staged"
             ? {
                 backupId: marker.backupId,
                 backupCreatedAt: marker.backupCreatedAt,
@@ -135,7 +146,12 @@ export function createBackupApi(options: BackupApiOptions): BackupApi {
               }
             : null,
         last: readRestoreLast(db) ?? null,
-        failure: marker?.state === "failed" ? marker.code : null,
+        failure:
+          marker === "unreadable"
+            ? "restore-marker-unreadable"
+            : marker?.state === "failed"
+              ? marker.code
+              : null,
         minPassphraseLength: MIN_PASSPHRASE_LENGTH,
       };
     },
@@ -245,7 +261,8 @@ export function createBackupApi(options: BackupApiOptions): BackupApi {
     },
 
     cancel() {
-      const marker = readPending(dataDir);
+      const marker = markerOf(dataDir);
+      if (marker === "unreadable") return { status: "none" };
       if (marker?.state !== "staged" && marker?.state !== "failed") return { status: "none" };
       removeRestoreArtifacts(dataDir);
       return { status: "cancelled" };

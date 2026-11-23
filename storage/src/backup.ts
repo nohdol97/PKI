@@ -277,17 +277,34 @@ export type RestoreMarker =
   | { state: "failed"; code: string }
   | { state: "rolling-back"; code: string };
 
-export function readPending(dataDir: string): RestoreMarker | undefined {
-  try {
-    const marker = JSON.parse(
-      readFileSync(join(dataDir, RESTORE_DIR, PENDING_FILE), "utf8"),
-    ) as RestoreMarker;
-    return ["staged", "swapped", "failed", "rolling-back"].includes(marker?.state)
-      ? marker
-      : undefined;
-  } catch {
-    return undefined;
+/** The marker file exists but cannot be read as a marker: the restore's state is unknown (H01-R11). */
+export class RestoreMarkerError extends Error {
+  constructor() {
+    super("restore-marker-unreadable");
+    this.name = "RestoreMarkerError";
   }
+}
+
+/**
+ * The marker, or undefined when there is none (no file, no folder). A file that cannot be read or parsed is an
+ * error, never "no restore": the files beside it may be the only copy of the user's data.
+ */
+export function readPending(dataDir: string): RestoreMarker | undefined {
+  let text: string;
+  try {
+    text = readFileSync(join(dataDir, RESTORE_DIR, PENDING_FILE), "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    throw new RestoreMarkerError();
+  }
+  try {
+    const marker = JSON.parse(text) as RestoreMarker;
+    if (["staged", "swapped", "failed", "rolling-back"].includes(marker?.state)) return marker;
+  } catch {
+    // falls through
+  }
+  throw new RestoreMarkerError();
 }
 
 /** Written to a temporary name, synced, then renamed: a reader sees the old marker or the new one whole. */
@@ -404,7 +421,13 @@ const refused = (code: RestoreRefusal): StageResult => ({ status: "refused", cod
  */
 export function stageRestore(input: StageInput): StageResult {
   const { dataDir } = input;
-  const existing = readPending(dataDir);
+  let existing: RestoreMarker | undefined;
+  try {
+    existing = readPending(dataDir);
+  } catch (error) {
+    if (error instanceof RestoreMarkerError) return refused("already-pending"); // its files are not ours to clear
+    throw error;
+  }
   if (existing && existing.state !== "failed") return refused("already-pending");
   let manifest: BackupManifest;
   let opened: OpenedBackup;
