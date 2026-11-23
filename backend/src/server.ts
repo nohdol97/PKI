@@ -52,7 +52,10 @@ import {
   defaultEntries,
   readAutoVerify,
   recomputeDependencyDelay,
+  readAutoDispute,
   refreshCandidates,
+  refreshConflicts,
+  AUTO_DISPUTE_SETTING,
   type CanonicalEntries,
 } from "@pki/knowledge-engine";
 import {
@@ -61,6 +64,7 @@ import {
   canonicalTransaction,
   LedgerLineUnwritableError,
   findSourceId,
+  isDate,
   itemsOfEntry,
   listLiftableTombstones,
   countScopePolicyDrops,
@@ -572,6 +576,12 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
    * Insight rests on, a user input's included, as it does when extraction runs the rule.
    */
   const judgeAgain = (items: readonly number[], rows: readonly EntryRef[] = [], at?: string) => {
+    const scope = {
+      combinable: (lineage: Parameters<typeof registry.combinable>[1]) =>
+        registry.combinable(options.db, lineage),
+    };
+    // S02-R19: the conflict links first (the promotion and the rule read supersession), over the items' groups
+    refreshConflicts(options.db, [...new Set(items)], scope, at === undefined ? {} : { at });
     // S01-R9: a value the user wrote or approved is valid (R15), so it can end a promoted sibling's single value;
     // an undo can give a row back to the policy. Nothing happens while the setting was never written.
     assessAfterUserAction(
@@ -582,10 +592,6 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       },
       at,
     );
-    const scope = {
-      combinable: (lineage: Parameters<typeof registry.combinable>[1]) =>
-        registry.combinable(options.db, lineage),
-    };
     recomputeDependencyDelay(options.db, [...new Set(items)], scope);
     // S02-R10: what supported or opposed a candidate may have changed with the user's action
     refreshCandidates(options.db, [...new Set(items)], scope);
@@ -916,11 +922,17 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       options.localLocations?.settings() ?? { error: "connector-unavailable" },
     setLocalFilesSettings: async (patch) =>
       options.localLocations?.writeSettings(patch) ?? { error: "connector-unavailable" },
-    semanticSettings: async () => ({ autoVerify: readAutoVerify(options.db) }),
-    setSemanticSettings: async ({ autoVerify }) => {
-      // no held job waits on this setting, so nothing is released with it (cf. `releasing`)
+    semanticSettings: async () => ({
+      autoVerify: readAutoVerify(options.db),
+      autoDispute: readAutoDispute(options.db),
+    }),
+    setSemanticSettings: async ({ autoVerify, autoDispute }) => {
+      // no held job waits on these settings, so nothing is released with them (cf. `releasing`)
       writeSetting(options.db, AUTO_VERIFY_SETTING, autoVerify ? "on" : "off");
-      return { autoVerify: readAutoVerify(options.db) };
+      if (autoDispute !== undefined) {
+        writeSetting(options.db, AUTO_DISPUTE_SETTING, autoDispute ? "on" : "off");
+      }
+      return { autoVerify: readAutoVerify(options.db), autoDispute: readAutoDispute(options.db) };
     },
     providers: async () => providerList(options),
     setDefaultProvider: async ({ providerId }) => {
@@ -954,6 +966,26 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     semanticDecide: async ({ action, ...ref }) =>
       semanticAction(ref, (decisions, at) => decisions.decide(options.db, ref, action, at)),
     semanticCorrect: async ({ correction }) => semanticCorrect(correction),
+    // S02-R17: the user's fix of a row's valid interval, behind the visibility check; the dates are judged after it
+    semanticValidity: async ({ kind, id, from, until }) => {
+      const { decisions } = options;
+      if (!decisions) return { error: "not-found" };
+      return options.db.transaction(() => {
+        const ref = { kind, id } as const;
+        if (!gate.semanticShown(kind, id)) return { error: "not-found" as const };
+        const unreal = [from, until].some((d) => d !== null && !isDate(d));
+        if (unreal || (from !== null && until !== null && from >= until)) {
+          return { error: "bad-request" as const };
+        }
+        const at = new Date(options.now?.() ?? Date.now()).toISOString();
+        const before = itemsOfEntry(options.db, ref);
+        const done = decisions.entities.setValidity(options.db, ref, from, until, at);
+        if (done.status === "refused") return { error: "not-found" as const };
+        judgeAgain(before, [ref], at);
+        return { status: "applied" as const, seq: done.seq, previous: done.previous };
+      });
+    },
+    conflicts: async () => gate.conflicts(),
     semanticUndo: async (ref) =>
       semanticAction(ref, (decisions, at) => decisions.undo(options.db, ref, at)),
     // S02-R25, T04: the user's merge, unmerge and distinct mark through the same one entry

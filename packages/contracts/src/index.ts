@@ -515,8 +515,17 @@ export const ExecutionSettingsSchema = z.strictObject({ cliBackground: z.boolean
 export type ExecutionSettings = z.infer<typeof ExecutionSettingsSchema>;
 
 /** The Semantic setting (site-setup.md `semantic.autoVerify`, S01-R9): automatic promotion, default off. */
-export const SemanticSettingsSchema = z.strictObject({ autoVerify: z.boolean() });
+export const SemanticSettingsSchema = z.strictObject({
+  autoVerify: z.boolean(),
+  /** `semantic.autoDispute` (S02-R20): the policy disputes a verified fact on a new contradiction, default off. */
+  autoDispute: z.boolean(),
+});
 export type SemanticSettings = z.infer<typeof SemanticSettingsSchema>;
+/** The write: `autoDispute` left out means unchanged. */
+export const SemanticSettingsRequestSchema = z.strictObject({
+  autoVerify: z.boolean(),
+  autoDispute: z.boolean().optional(),
+});
 
 /**
  * The analytical semantic's runtime settings (S03-R5, R6, site-setup.md): `profile` is the switch of the
@@ -1039,6 +1048,41 @@ export const EntityDistinctRequestSchema = z
   })
   .refine((r) => r.a !== r.b);
 export const EntityDistinctResponseSchema = z.object({ status: z.enum(["applied", "unchanged"]) });
+/** A valid-interval end: `YYYY-MM-DD` in shape; the API judges that the day exists (S02-R17). */
+const ValidityDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const SemanticValidityRequestSchema = z.strictObject({
+  kind: z.enum(["fact", "relation"]),
+  id: z.int().positive(),
+  from: ValidityDateSchema.nullable(),
+  until: ValidityDateSchema.nullable(),
+});
+export const SemanticValidityResponseSchema = z.object({
+  status: z.literal("applied"),
+  seq: z.int().positive(),
+  /** The interval the fix replaced, so a caller can put it back (S02-R17: a fix is not undone). */
+  previous: z.object({ from: z.string().nullable(), until: z.string().nullable() }),
+});
+/**
+ * The conflict list (S02-R19, R25): numbers, codes and dates only. `effectiveUntil` is computed at read from the
+ * links the list shows: the fact's own end or the earliest start of a fact that supersedes it.
+ */
+const ConflictSideSchema = z.object({
+  factId: z.int().positive(),
+  itemId: z.int().positive(),
+  effectiveUntil: z.string().nullable(),
+});
+export const ConflictsResponseSchema = z.object({
+  links: z.array(
+    z.object({
+      id: z.int().positive(),
+      type: z.enum(["SUPERSEDES", "CONTRADICTS"]),
+      createdBy: z.enum(["rule", "propagation", "user"]),
+      from: ConflictSideSchema,
+      to: ConflictSideSchema,
+    }),
+  ),
+  truncated: z.boolean(),
+});
 /**
  * The merge candidates (S02-R10, R25): two item ids (the smaller first) and the signal codes that make the
  * pair a candidate. A row names no text. `truncated` says the list was cut at the limit.
@@ -1455,7 +1499,7 @@ export const routes = {
   setSemanticSettings: {
     method: "POST",
     path: "/api/settings/semantic",
-    request: SemanticSettingsSchema,
+    request: SemanticSettingsRequestSchema,
     response: SemanticSettingsSchema,
   },
   providers: { method: "GET", path: "/api/providers", response: ProviderListResponseSchema },
@@ -1514,6 +1558,13 @@ export const routes = {
     request: SemanticRefRequestSchema,
     response: SemanticOutcomeSchema,
   },
+  semanticValidity: {
+    method: "POST",
+    path: "/api/semantic/validity",
+    request: SemanticValidityRequestSchema,
+    response: SemanticValidityResponseSchema,
+  },
+  conflicts: { method: "GET", path: "/api/conflicts", response: ConflictsResponseSchema },
   entityMerge: {
     method: "POST",
     path: "/api/entities/merge",

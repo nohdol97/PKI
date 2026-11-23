@@ -5,6 +5,7 @@ import { routes } from "@pki/contracts";
 import { computePolicyVersion, DEFAULT_PROVIDER_SETTING } from "@pki/providers";
 import {
   candidatesReceiver,
+  conflictsReceiver,
   createProductRegistry,
   dependencyDelayReceiver,
 } from "@pki/knowledge-engine";
@@ -66,6 +67,7 @@ describe("resolution.group-reads: the membership receivers (S02-R13)", () => {
   it("are one fixed list with the rule's receiver first and the candidates' last, and both the registry and the user's entry are built from it", () => {
     expect(Object.isFrozen(MEMBERSHIP_LISTENERS)).toBe(true);
     expect(MEMBERSHIP_LISTENERS).toEqual([
+      conflictsReceiver,
       dependencyDelayReceiver,
       onMembershipChanged,
       candidatesReceiver,
@@ -314,6 +316,7 @@ describe("derivatives.schema-coverage", () => {
     // two entity-resolution kinds, S03-T04 `analytical-check`)
     expect(registry.kinds.map((k) => k.kind).sort()).toEqual([
       "analytical-check",
+      "assertion-link",
       "engine",
       "entity-merge",
       "evidence",
