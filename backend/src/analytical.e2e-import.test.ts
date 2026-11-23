@@ -160,6 +160,9 @@ it("analytical.e2e-import: a CSV from an approved folder becomes a Dataset, the 
     expect(m?.columns).toEqual([{ column: "amount", factId: expect.any(Number), missing: null }]);
     expect(m?.calculations[0]?.checks.every((c) => c.passed)).toBe(true);
     expect(m?.calculations[0]?.checks.length).toBeGreaterThan(0);
+    const grain = (await analytical()).datasets[0]?.grain[0];
+    expect(grain?.checks.length).toBeGreaterThan(0);
+    expect(grain?.checks.every((c) => c.passed)).toBe(true);
   });
 
   // 4. the user approves what the gate names until the calculation is verified
@@ -175,7 +178,10 @@ it("analytical.e2e-import: a CSV from an approved folder becomes a Dataset, the 
     ).body as { status: string; unmet?: string[] };
     if (outcome.status === "applied" || outcome.status === "unchanged") break;
     const grain = (await analytical()).datasets[0]?.grain[0]?.id as number;
-    await call(routes.semanticDecide.path, "POST", { kind: "fact", id: grain, action: "approve" });
+    const grainOutcome = (
+      await call(routes.semanticDecide.path, "POST", { kind: "fact", id: grain, action: "approve" })
+    ).body as { status: string };
+    expect(["applied", "unchanged"]).toContain(grainOutcome.status);
   }
   expect((await analytical()).metrics[0]?.calculations[0]?.status).toBe("verified");
 
@@ -190,5 +196,6 @@ it("analytical.e2e-import: a CSV from an approved folder becomes a Dataset, the 
     expect(list.datasets[0]?.tables).toEqual([]);
     expect(list.metrics[0]?.calculations[0]?.status).toBe("disputed");
     expect(list.metrics[0]?.calculations[0]?.checks).toEqual([]);
+    expect(list.datasets[0]?.grain[0]?.checks).toEqual([]);
   });
 });
