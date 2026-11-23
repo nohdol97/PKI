@@ -77,7 +77,7 @@ const withState = (state: LocalLocationList["locations"][number]["state"], pendi
   list({
     locations: [
       {
-        ...list().locations[0]!,
+        ...(list().locations[0] as LocalLocationList["locations"][number]),
         state,
         counts: { tracked: 3, skipped: 1, ignored: 2, pendingDeletes: pending, sources: 7 },
       },

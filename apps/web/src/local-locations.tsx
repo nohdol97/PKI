@@ -193,7 +193,7 @@ export function LocalLocations({
   const pick = bridge?.pickLocation?.bind(bridge);
 
   async function openSkipped(locationId: string) {
-    const page = await api("localSkipped", { locationId });
+    const page = await api("localSkipped", { locationId, offset: 0, limit: 100 });
     setSkipped({ locationId, page });
   }
 
