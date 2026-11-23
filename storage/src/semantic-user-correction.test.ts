@@ -780,6 +780,7 @@ describe("the user entry", () => {
     expect(Object.keys(userDecisions.entities).sort()).toEqual([
       "merge",
       "setDistinct",
+      "setValidity",
       "split",
       "unmerge",
     ]);

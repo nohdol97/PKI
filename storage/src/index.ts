@@ -282,6 +282,7 @@ export type {
   MergeResult,
   SplitRefusal,
   SplitResult,
+  ValidityResult,
   UnmergeResult,
 } from "./entity-decisions.ts";
 export {
@@ -497,3 +498,4 @@ export {
   type NewAssertionLink,
   type StoredAssertionLink,
 } from "./assertion-links.ts";
+export { fillValidity, validitySetByUser } from "./valid-time.ts";

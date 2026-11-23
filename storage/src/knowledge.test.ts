@@ -103,6 +103,7 @@ describe("facts and relations", () => {
       value: "2026-12-05",
       ...attrs,
       confidence: null,
+      validUntil: null,
     });
     const other = saveFact(db, { itemId: a, kind: "target-date", value: "2026-12-10", ...attrs });
     expect(other.created).toBe(true);
@@ -127,6 +128,7 @@ describe("facts and relations", () => {
       objectId: b,
       ...attrs,
       confidence: null,
+      validUntil: null,
     });
   });
 
