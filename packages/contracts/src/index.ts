@@ -45,6 +45,7 @@ import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
 export * from "./analytical-types.ts";
+export * from "./ask.ts";
 export type * from "./embedding.ts";
 export type * from "./knowledge-engine.ts";
 export type * from "./vector-index.ts";

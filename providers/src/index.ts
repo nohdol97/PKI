@@ -113,3 +113,4 @@ export {
   type TaskDefinition,
   type WikiSummaryOutput,
 } from "./tasks.ts";
+export { ANSWER_MAX_SENTENCES, ANSWER_SCHEMA_VERSION, type AnswerOutput } from "./tasks.ts";

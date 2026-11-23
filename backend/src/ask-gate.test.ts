@@ -20,7 +20,7 @@ import {
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { FakeProvider, memoryDbTemplate, seedLegacyTombstone } from "@pki/testkit";
-import type { AskEvent } from "@pki/contracts";
+import type { AskEvent, StructuredRequest } from "@pki/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ask } from "./ask.ts";
 import { askQuestions, withAskQuestions } from "./ask-questions.ts";
@@ -72,7 +72,7 @@ function consent(egress: EgressControls) {
 }
 
 /** The product's Broker composition over `db` with a Provider that cites every document it is given whole. */
-function backend() {
+function backend(answer?: (request: StructuredRequest) => unknown) {
   const registry = createProductRegistry({ policy });
   const egress = productEgress(db);
   writeSetting(db, DEFAULT_PROVIDER_SETTING, "local-model");
@@ -80,14 +80,16 @@ function backend() {
   const provider = new FakeProvider({
     id: "local-model",
     transport: "http",
-    answer: (request) => ({
-      sentences: request.input.untrustedDocuments.map((d) => ({
-        text: "답 문장",
-        documentId: d.id,
-        quote: d.body,
+    answer:
+      answer ??
+      ((request) => ({
+        sentences: request.input.untrustedDocuments.map((d) => ({
+          text: "답 문장",
+          documentId: d.id,
+          quote: d.body,
+        })),
+        insufficient: false,
       })),
-      insufficient: false,
-    }),
   });
   const calls = productCalls(db, egress, { providers: [provider], registry });
   return {
@@ -172,6 +174,40 @@ describe("ask.gate: a document the policy or a tombstone hides leaves no trace (
     expect(hitIds(events).sort()).toEqual([shown.id, searchOnly.id].sort());
     expect(documentIds(provider)).toEqual([String(shown.id)]);
     expect(JSON.stringify(provider.requests)).not.toContain(searchOnly.mark);
+  });
+});
+
+describe("ask.gate: the judgement after the Provider answered (X01-R9, R14)", () => {
+  it("drops the sentence of a document deleted while the Provider worked, and one whose quote is not in the document", async () => {
+    const live = source("자홍빛", ["open"]);
+    const going = source("남색빛", ["open"]);
+    const { deps } = backend((request) => {
+      // the deletion lands between the call and its answer
+      seedLegacyTombstone(db, {
+        sourceId: going.sourceId,
+        version: 1,
+        at: "2026-11-23T00:00:00.000Z",
+        reason: "user-deleted",
+      });
+      return {
+        sentences: [
+          ...request.input.untrustedDocuments.map((d) => ({
+            text: "답 문장",
+            documentId: d.id,
+            quote: d.body,
+          })),
+          { text: "지어낸 문장", documentId: String(live.id), quote: "본문에 없는 글" },
+        ],
+        insufficient: false,
+      };
+    });
+
+    const events = await run(deps);
+
+    const sentences = events.filter((e) => e.type === "sentence");
+    expect(sentences.map((e) => e.citation.versionId)).toEqual([live.id]);
+    expect(JSON.stringify(sentences)).not.toContain(going.mark); // it was a hit when the search ran
+    expect(events.at(-1)).toMatchObject({ type: "done", sentences: 1, dropped: 1 });
   });
 });
 

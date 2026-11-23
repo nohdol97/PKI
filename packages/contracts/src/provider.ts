@@ -28,6 +28,7 @@ export const TASK_KINDS = [
   "connection-test",
   "wiki-summary",
   "insight-interpret",
+  "answer",
 ] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
