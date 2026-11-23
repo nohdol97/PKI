@@ -384,12 +384,13 @@ export function readBackupManifest(file: string, passphrase: string): BackupMani
 
 type SchemaRow = string;
 
-/** The schema objects of a database as comparable lines: type, name, table and the exact SQL text. */
+/**
+ * Every row of the schema table as a comparable line: type, name, table and the exact SQL text. No name is left
+ * out: SQLite refuses `sqlite_` names only in CREATE, not in rows it reads from a file.
+ */
 function schemaLines(db: SqlDriver): SchemaRow[] {
   return db
-    .all(
-      "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
-    )
+    .all("SELECT type, name, tbl_name, sql FROM sqlite_master")
     .map((r) => JSON.stringify([r.type, r.name, r.tbl_name, r.sql]))
     .sort();
 }

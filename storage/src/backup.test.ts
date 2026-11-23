@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
@@ -325,6 +326,41 @@ describe("restore.stage (H01-C2a, storage half)", () => {
     rmSync(join(data, RESTORE_DIR, PENDING_FILE), { recursive: true });
     writeFileSync(join(data, RESTORE_DIR, PENDING_FILE), '{"state":"nonsense"}');
     expect(() => readPending(data)).toThrow(RestoreMarkerError);
+  });
+
+  it("refuses a trigger whose name starts with sqlite_ (written into the schema table directly) (S1-D1)", () => {
+    const file = join(root, "sqlitename.sqlite");
+    const crafted = seeded(file);
+    crafted.close();
+    // SQLite refuses `sqlite_` names in CREATE, not in the rows it reads: the row is written with the schema unlocked
+    const raw = new Database(file);
+    raw.unsafeMode(true);
+    raw.pragma("writable_schema = ON");
+    raw
+      .prepare(
+        "INSERT INTO sqlite_master (type, name, tbl_name, rootpage, sql) VALUES ('trigger', 'sqlite_keep', 'consents', 0, ?)",
+      )
+      .run(
+        `CREATE TRIGGER sqlite_keep AFTER DELETE ON consents BEGIN
+          INSERT INTO consents (provider, destination, policy_version, allowed_classes, granted_at)
+          VALUES (old.provider, old.destination, old.policy_version, old.allowed_classes, old.granted_at); END`,
+      );
+    raw.pragma("writable_schema = OFF");
+    raw.pragma("schema_version = 12345");
+    raw.close();
+    const reopened = openBetterSqlite3(file);
+    expect(reopened.all("SELECT name FROM sqlite_master WHERE name = 'sqlite_keep'")).toHaveLength(
+      1,
+    );
+    const { fileName } = make(reopened);
+    reopened.close();
+    const empty = emptyInstall();
+    prepareCanonicalDb(empty);
+    const before = sha(join(root, "empty.sqlite"));
+    expect(stage(fileName, {}, empty)).toEqual({ status: "refused", code: "foreign-schema" });
+    expect(sha(join(root, "empty.sqlite"))).toBe(before);
+    expect(existsSync(join(data, RESTORE_DIR))).toBe(false);
+    empty.close();
   });
 
   it("lifts a backup of an older schema to this build's number while staging", () => {
