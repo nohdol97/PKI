@@ -552,6 +552,8 @@ describe("import.api", () => {
     expect(await importContent(db, id, deletion)).toEqual({ error: "bad-request" });
     expect(state()).toEqual(before);
     expect(readCursor(db, id)).toBeNull();
+    // an id that only resembles the reserved one still imports
+    expect(await importContent(db, "loc-1", line())).toMatchObject({ created: 1 });
   });
 
   it("① an instance taken by a sync or an import answers instance-busy and stores nothing; the lock is released after", async () => {

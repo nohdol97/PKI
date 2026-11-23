@@ -350,7 +350,7 @@ I02-A는 파일 하나를 글과 위치표로 바꾸는 순수 모듈(`@pki/docu
   - **다른 위치의 원본을 건드리지 못한다.** JSONL 줄의 `connector_instance_id`는 믿을 수 없는 글이고, 가져오기에는 그 값이 가리키는 옛 인스턴스의 namespace 없는(`""`) 원본으로 쓰기를 옮기는 길이 있다(`backend/src/page-store.ts`). `jsonl-file:*` 인스턴스는 이 spec 뒤에 처음 생기므로 namespace 없는 원본을 갖지 않는다. 그래서 한 `jsonl-file` 위치의 줄이 다른 `jsonl-file` 위치의 원본에 닿을 수 없다. 이 불변식을 테스트로 고정한다(I02B-C33).
   - **옛 인스턴스로 옮기는 길을 쓰지 않는다.** 위의 길은 `jsonl-file:*`가 아닌 옛 `jsonl-import` 인스턴스(API 가져오기가 만든 것)에 namespace 없는 원본이 있으면 여전히 열려 있다: 파일의 줄이 그 인스턴스의 ID를 적으면 쓰기가 그쪽 원본으로 간다. 사용자 자신의 자료이긴 하지만, 승인한 파일 하나가 다른 인스턴스의 원본을 고치거나 지울 수 있게 된다. 그래서 **`jsonl-file:*` 인스턴스의 동기화에서는 그 길을 쓰지 않는다.** 줄은 언제나 자기 인스턴스 안에(namespace는 줄이 적은 값 그대로) 들어간다. 화면의 붙여넣기 가져오기와 API 가져오기의 동작은 바뀌지 않는다.
 - **I02B-R51 `jsonl-file:` 접두사는 공용의 것이다.** I05 spec은 포크의 등록이 공용 인스턴스의 ID를 쓰지 못하게 하고(`instance-id-reserved`), 무엇이 공용 ID인지는 판정 함수 하나(`isPublicInstanceId`, 잠정 이름. I05-T03이 만든다)가 답한다. `jsonl-file:`로 시작하는 ID는 그 판정에서 공용이어야 한다. 포크가 `jsonl-file:<무엇>`을 자기 인스턴스의 ID로 등록하면, 사용자의 승인 없이 그 이름의 원본을 만들거나 뒤에 승인되는 위치의 인스턴스와 겹칠 수 있기 때문이다. 접두사를 그 판정에 더하는 일은 I02B-T06이 한다(그래서 T06은 I05-T03이 들어온 뒤에 한다). I05의 자체 검사(I05-C14)는 시작할 때 만들어지는 ID만 보므로 실행 중에 생기는 이 ID를 잡지 못한다. 그래서 이 spec이 기준을 둔다(I02B-C48).
-- **I02B-R52 붙여넣기·API 가져오기는 `jsonl-file:` ID를 쓰지 못한다.** 호출자가 적은 `connector_instance_id`가 공용 접두사(`PUBLIC_INSTANCE_ID_PREFIXES`, R51)로 시작하면 그 줄은 쓰지 않고 `instance-conflict`로 돌려준다. 승인 위치의 인스턴스에 쓰고 cursor를 덮는 길을 닫는다(#258 F3). 위치 승인이 안에서 만드는 `jsonl-file:<id>` 인스턴스는 그대로 동작한다. 폴더·파일 위치는 위치마다 인스턴스를 만들지 않으므로(`local-files` 하나) 예약할 접두사가 더 없다.
+- **I02B-R52 붙여넣기·API 가져오기(`importJsonl`과 `POST /api/imports`의 `importContent`)는 `jsonl-file:` ID를 쓰지 못한다.** 호출자가 적은 `connector_instance_id`가 공용 접두사(`PUBLIC_INSTANCE_ID_PREFIXES`, R51)로 시작하면 그 줄은 쓰지 않고 `instance-conflict`로 돌려준다(`importContent`는 `bad-request`로 거부하고 잠금도 잡지 않는다). 승인 위치의 인스턴스에 쓰고 cursor를 덮는 길을 닫는다(#258 F3). 위치 승인이 안에서 만드는 `jsonl-file:<id>` 인스턴스는 그대로 동작한다. 폴더·파일 위치는 위치마다 인스턴스를 만들지 않으므로(`local-files` 하나) 예약할 접두사가 더 없다.
 - **I02B-R53 시작할 때 사라진 `jsonl-file` 인스턴스의 주기를 끈다.** 철회의 마지막 트랜잭션 뒤 `revoked()` 전에 프로세스가 죽으면 위치 행은 없는데 `jsonl-file:<id>` 동기화 주기가 켜진 채 남아 `instance-not-found` 실패가 쌓인다. 시작할 때, 대응하는 `jsonl-file` 위치 행이 없거나 `revoking`인 `jsonl-file:` 대상의 동기화 주기를 끈다(`revoked()`와 같은 방식. 지우지 않는다). `revoking`이 이어지면 철회 끝에서 `revoked()`가 한 번 더 끈다(#258 F2).
 - **I02B-R54 검증 실행기의 `record`는 경로를 퍼센트 인코딩해 sqlite URI를 만든다.** 경로에 `?`, `#`, `%`가 있어도 열린다(#258 F6).
 - **I02B-R42 폴더 안의 `.jsonl`.** `folder` 위치 안에서 만난 `.jsonl` 파일은 문서로 읽지 않는다. `unsupported-format`으로 건너뛰고 사유 문구가 "JSONL 파일 추가"를 안내한다. 형식 전환 스위치는 두지 않는다. 한 파일을 읽는 길은 종류마다 하나다.
@@ -741,7 +741,7 @@ stateDiagram-v2
 | D34 | 가져오기의 종류 `jsonl-import`는 `connectorKinds`가 아니라 백엔드를 시작할 때 `withJsonlFilePorts`가 더한다(이미 있으면 그대로) | 제품의 종류 목록은 `local-files`와 `site-*`뿐이라는 기존 시험과 I05의 한 목록(C43)을 건드리지 않는다 | 시험이 `connectors` 옵션으로 자기 `jsonl-import`를 주면 그것이 이긴다 | `connectorKinds`에 더하고 두 시험을 고친다 |
 | D35 | 셸의 선택 창과 티켓이 세 종류(`folder`, `file`, `jsonl-file`)를 나른다. 파일 선택은 `openFile`, JSONL은 `.jsonl` 필터를 걸지만 판정은 백엔드가 한다 | 설치본에서 "파일 추가"가 입력란 없이 동작해야 한다(R37) | 선택 창의 필터는 사용자 편의일 뿐 우회해도 승인 검사가 거부한다 | `main.ts`의 `pickLocation` |
 | D36 | Windows 검증 실행기의 판정: 정본에서 판단할 수 있는 것은 W1·W2뿐이고 나머지는 사람이 `answers.json`에 적는다. 앱 버전은 `resources\app\package.json`에서 읽는다 | W3~W12는 OS·디스크·전원 상태라 정본의 수로 판정할 수 없다. 설치본의 구조는 이 저장소에서 확인하지 못했다 | 적지 않은 항목은 판정 불가다 | `run.py`의 `_decide`와 `app_version` |
-| D37 | 가져오기의 예약 접두사 검사는 `boundElsewhere`와 같은 자리에서 줄별 `instance-conflict`로 하고, 목록은 `PUBLIC_INSTANCE_ID_PREFIXES`에서 끌어온다. 등록 검사(I05)는 이미 막고 있어 그대로 둔다. `local-files` 같은 정확한 이름은 종류가 달라 기존 `boundElsewhere`가 이미 막는다 | 새 오류 코드·모양을 만들지 않고 한 목록만 읽는다 | 새 접두사를 그 목록에 더하면 자동으로 막힌다 | 검사 한 줄을 뺀다 |
+| D37 | 가져오기의 예약 접두사 검사는 `boundElsewhere`와 같은 자리에서 줄별 `instance-conflict`로 하고(`importContent`는 잠금 전에 `bad-request`. 그 길이 이미 쓰는 "이 인스턴스는 이 길의 것이 아님" 코드), 목록은 `PUBLIC_INSTANCE_ID_PREFIXES`에서 끌어온다. 등록 검사(I05)는 이미 막고 있어 그대로 둔다. `local-files` 같은 정확한 이름은 종류가 달라 기존 `boundElsewhere`가 이미 막는다 | 새 오류 코드·모양을 만들지 않고 한 목록만 읽는다 | 새 접두사를 그 목록에 더하면 자동으로 막힌다 | 검사 한 줄을 뺀다 |
 | D38 | 시작할 때 쓸어 끄는 규칙은 "행이 없거나 `revoking`"이고 스케줄러 생성 직후 `boot.ts`에서 한 번 부른다 | 죽은 시점이 어디든 같은 규칙이 덮는다. `revoking`은 인스턴스를 만들지 않으므로(R41) 주기가 있어도 실패만 쌓인다 | 일시 중지 위치는 행이 있으므로 그대로다 | `disableOrphanJsonlFileSchedules` 호출을 뺀다 |
 
 ### 대안과 기각 사유
@@ -874,7 +874,7 @@ flowchart LR
 
 ## 완료 기준 (테스트 가능한 형태)
 
-I02B-C1~C52는 이 조각의 기준이고, H1·H2는 배포처로 넘어가는 프로젝트의 두 기준이다. 모든 기준의 테스트는 저장소 안에 남는다(손으로 돌려 본 결과는 기준의 충족이 아니다). 번호는 생긴 순서이며 C37부터가 검토 뒤에 더한 것이다. Windows에서만 확인되는 것은 기준이 아니라 S23의 W 항목이고, 맨 아래 표가 기준마다 확인되지 않는 범위를 적는다.
+I02B-C1~C55는 이 조각의 기준이고, H1·H2는 배포처로 넘어가는 프로젝트의 두 기준이다. 모든 기준의 테스트는 저장소 안에 남는다(손으로 돌려 본 결과는 기준의 충족이 아니다). 번호는 생긴 순서이며 C37부터가 검토 뒤에 더한 것이다. Windows에서만 확인되는 것은 기준이 아니라 S23의 W 항목이고, 맨 아래 표가 기준마다 확인되지 않는 범위를 적는다.
 
 **모양과 대응**
 
@@ -984,7 +984,7 @@ I02B-C1~C52는 이 조각의 기준이고, H1·H2는 배포처로 넘어가는 �
 
 ### 사외에서 충족할 수 있는 것, 배포처 실행을 기다리는 것
 
-C1~C52와 H1, H2는 모두 개발 OS(macOS, Linux)와 저장소가 고정한 Node 24에서 저장소 안의 자동 테스트로 닫는다. 아래 표는 그 가운데 **Windows에서의 같은 성질을 말하지 않는** 기준과, 말하지 않는 범위다. 그 범위는 S23이 맡는다.
+C1~C55와 H1, H2는 모두 개발 OS(macOS, Linux)와 저장소가 고정한 Node 24에서 저장소 안의 자동 테스트로 닫는다. 아래 표는 그 가운데 **Windows에서의 같은 성질을 말하지 않는** 기준과, 말하지 않는 범위다. 그 범위는 S23이 맡는다.
 
 | 기준 | 저장소 안의 테스트가 말하는 것 | 말하지 않는 것(`site-verify`) |
 |---|---|---|

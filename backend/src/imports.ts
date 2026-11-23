@@ -12,6 +12,7 @@ import { readConnectorKind, registerConnectorInstance, type SqlDriver } from "@p
 import { applyConfiguredScope, NO_SCOPES, type ConnectorScopes } from "./connector-scopes.ts";
 import { tryLockInstance, type ConnectorManager } from "./connectors.ts";
 import { addPage, emptyResult, storePage, type PageOptions } from "./page-store.ts";
+import { PUBLIC_INSTANCE_ID_PREFIXES } from "./public-kinds.ts";
 
 export type ImportOptions = Pick<
   PageOptions,
@@ -36,6 +37,10 @@ export async function importContent(
   content: string,
   options: ImportOptions = {},
 ): Promise<ImportOutcome> {
+  // an id the public code makes while running (an approved JSONL file location's instance) is never the caller's to name (I02B-R52)
+  if (PUBLIC_INSTANCE_ID_PREFIXES.some((prefix) => instanceId.startsWith(prefix))) {
+    return { error: "bad-request" };
+  }
   // an instance bound to another kind is not this path's (V01's registerConnectorInstance rule);
   // nothing awaits between this check and the lock, so no sync can bind it meanwhile
   const kind = readConnectorKind(db, instanceId);
