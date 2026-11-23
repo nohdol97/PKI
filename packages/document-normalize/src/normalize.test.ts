@@ -9,6 +9,7 @@ import { FORMAT_MODULES, normalizeDocument } from "./normalize.ts";
 import { DEFAULT_LIMITS } from "./limits.ts";
 import { formatFailure, formatSuccess, verbatimLineBlocks } from "./text-builder.ts";
 import { DOCUMENT_FORMATS, LIMITATION_CODES, NORMALIZE_ERROR_CODES } from "./types.ts";
+import { NORMALIZER_VERSION } from "./version.ts";
 import type { FormatResult, NormalizeInput } from "./types.ts";
 
 afterEach(() => vi.restoreAllMocks());
@@ -274,6 +275,10 @@ describe("failures are results", () => {
 });
 
 describe("constants", () => {
+  it("the normalizer version is 2: DOCX comments, participants and the limitation-code swap change what the same bytes give (I02B-R14)", () => {
+    expect(NORMALIZER_VERSION).toBe(2);
+  });
+
   it("lists 14 limitation codes without duplicates", () => {
     expect(LIMITATION_CODES).toHaveLength(14);
     expect(new Set(LIMITATION_CODES).size).toBe(14);

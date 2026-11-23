@@ -6,6 +6,7 @@ import { buildDocx, buildZip, heading } from "../testing/ooxml-builder.ts";
 import type { DocxSpec } from "../testing/ooxml-builder.ts";
 import { codePointLength, codePointSlice } from "../text-builder.ts";
 import type { Block, FormatResult, ParsedDocument } from "../types.ts";
+import { parseNormalizeResult, resultCaps } from "../host-protocol.ts";
 import { docxModule } from "./docx.ts";
 
 const mammothSpy = vi.hoisted(() => vi.fn());
@@ -243,6 +244,16 @@ describe("C32 comment threads (I02B-R30)", () => {
     expect(slices(doc).slice(2, 4)).toEqual(["나 2026-03-01T09:00:00Z", "Y 첫 메모"]);
     expect(doc.metadata.participants).toEqual(["나", "가", "다"]);
     expect(doc.limitations).toEqual([]);
+  });
+
+  it("participants stay inside what the host protocol accepts: a very long author is cut, so the file still imports", async () => {
+    const doc = await parse({
+      body: [{ text: "본문", commentIds: [0] }],
+      comments: [{ text: "메모", author: "가".repeat(3_000), date: "2026-03-01T09:00:00Z" }],
+    });
+    expect(doc.metadata.participants?.[0]?.length).toBeLessThanOrEqual(1_024);
+    const result = { ok: true, document: { format: "docx", ...doc } };
+    expect(parseNormalizeResult(result, resultCaps(resolveLimits()))).toEqual(result);
   });
 
   it("a document without comments has no comment section and no participants", async () => {
