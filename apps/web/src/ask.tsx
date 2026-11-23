@@ -3,10 +3,12 @@
 // from the stream. Titles and quotes are imported text, so they reach the page as React text nodes inside <bdi>
 // only (V02-R15). Nothing is stored here: the question and the answer live in this component until the user
 // leaves the screen (X01-R15). Cancel closes the connection; what already arrived stays on screen.
-import type { AskEvent, AskRequest, RouteResponse } from "@pki/contracts";
+import type { AskEvent, AskRequest, EvidenceSource, RouteResponse } from "@pki/contracts";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { connectionOf, type ApiClient } from "./api.ts";
 import { readAskEvents } from "./ask-stream.ts";
+import { citationSource, SourceView } from "./evidence-view.tsx";
+import { useNav, type Nav } from "./nav.tsx";
 import {
   answerText,
   ASK_ALL_CONNECTORS,
@@ -19,7 +21,6 @@ import {
   ASK_NO_HITS,
   ASK_NO_SENTENCES,
   ASK_QUESTION,
-  ASK_RELATED_PENDING,
   ASK_SUBMIT,
   ASK_TO,
   ASK_UNVERIFIED_ACK,
@@ -32,6 +33,21 @@ import {
 } from "./ask-text.ts";
 
 type Of<T extends AskEvent["type"]> = Extract<AskEvent, { type: T }>;
+type Citation = Of<"sentence">["citation"];
+type Related = Of<"hits">["hits"][number]["related"][number];
+
+/** What a related-knowledge entry opens: its item in 탐색, and its page in 위키 when it has one (X02-R5). */
+export const relatedActions = (go: Nav["go"], related: Related) => ({
+  openItem: () => go("explore", { itemId: related.itemId }),
+  openWiki:
+    related.wikiKey === null ? undefined : () => go("wiki", { wikiKey: related.wikiKey as string }),
+});
+
+/** The version a citation points to, as the source view takes it: read by its version number, the span marked. */
+export async function openCitation(api: ApiClient, c: Citation): Promise<EvidenceSource> {
+  const { sourceVersion } = await api("exploreSource", { versionId: c.versionId });
+  return citationSource(sourceVersion, c);
+}
 
 export interface AskState {
   route?: Of<"route">["route"];
@@ -79,13 +95,29 @@ export function buildRequest(form: AskForm): AskRequest {
   };
 }
 
-export function AskResults({ state, running }: { state: AskState; running: boolean }) {
+export interface OpenedCitation {
+  /** The index of the sentence whose source is shown. */
+  index: number;
+  source: EvidenceSource;
+}
+
+export function AskResults({
+  state,
+  running,
+  opened,
+  onOpenSource,
+}: {
+  state: AskState;
+  running: boolean;
+  opened?: OpenedCitation | undefined;
+  onOpenSource?: ((index: number) => void) | undefined;
+}) {
+  const { go } = useNav();
   const { route, hits, answer, sentences, done } = state;
   const marked = (kind: "stale" | "conflict", versionId: number) =>
     hits?.notes.some((n) => n.kind === kind && "versionId" in n && n.versionId === versionId);
   const titleOf = (versionId: number) => hits?.hits.find((h) => h.versionId === versionId)?.title;
   const said = answer ? answerText(answer.status, answer.reason) : null;
-  const anyRelated = hits?.hits.some((h) => h.related.length > 0);
   return (
     <>
       {route && (
@@ -117,24 +149,31 @@ export function AskResults({ state, running }: { state: AskState; running: boole
                   <span>찾은 전략: {h.strategies.map(strategyText).join(", ")}</span>
                   {h.related.length > 0 && (
                     <ul aria-label="관련 지식">
-                      {h.related.map((r) => (
-                        <li key={r.itemId}>
-                          <bdi>{r.name}</bdi>
-                          {r.wikiTitle !== null && (
-                            <>
-                              {" "}
-                              · 위키: <bdi>{r.wikiTitle}</bdi>
-                            </>
-                          )}
-                        </li>
-                      ))}
+                      {h.related.map((r) => {
+                        const actions = relatedActions(go, r);
+                        return (
+                          <li key={r.itemId}>
+                            <button type="button" onClick={actions.openItem}>
+                              <bdi>{r.name}</bdi>
+                            </button>
+                            {r.wikiTitle !== null && (
+                              <>
+                                {" "}
+                                · 위키:{" "}
+                                <button type="button" onClick={actions.openWiki}>
+                                  <bdi>{r.wikiTitle}</bdi>
+                                </button>
+                              </>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </li>
               ))}
             </ol>
           )}
-          {anyRelated && <p>{ASK_RELATED_PENDING}</p>}
         </section>
       )}
       {running && hits && !answer && <p role="status">{ASK_WAITING}</p>}
@@ -153,7 +192,15 @@ export function AskResults({ state, running }: { state: AskState; running: boole
                   <small>
                     출처: <bdi>{titleOf(s.citation.versionId) ?? ""}</bdi> (version{" "}
                     {s.citation.version}, 위치 {s.citation.start}–{s.citation.end})
-                  </small>
+                  </small>{" "}
+                  <button type="button" onClick={() => onOpenSource?.(i)}>
+                    원본 보기
+                  </button>
+                  {opened?.index === i && (
+                    <section aria-label="인용 원본">
+                      <SourceView source={opened.source} />
+                    </section>
+                  )}
                 </li>
               ))}
             </ol>
@@ -183,6 +230,7 @@ export function Ask({ api }: { api: ApiClient }) {
   const [running, setRunning] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [failure, setFailure] = useState<string>();
+  const [opened, setOpened] = useState<OpenedCitation>();
   const controller = useRef<AbortController>(undefined);
 
   useEffect(() => {
@@ -206,6 +254,7 @@ export function Ask({ api }: { api: ApiClient }) {
     setState(INITIAL_ASK);
     setCancelled(false);
     setFailure(undefined);
+    setOpened(undefined);
     setRunning(true);
     const request = buildRequest(form);
     setForm((f) => ({ ...f, acknowledgeUnverified: false })); // consent covers this one call only
@@ -224,6 +273,15 @@ export function Ask({ api }: { api: ApiClient }) {
     } finally {
       setRunning(false);
     }
+  };
+
+  const openSource = (index: number) => {
+    const citation = state.sentences[index]?.citation;
+    if (!citation) return;
+    openCitation(api, citation).then(
+      (source) => setOpened({ index, source }),
+      (error: unknown) => setFailure(failureText(message(error))),
+    );
   };
 
   return (
@@ -308,7 +366,7 @@ export function Ask({ api }: { api: ApiClient }) {
       </form>
       {failure && <p role="alert">{failure}</p>}
       {cancelled && <p role="status">{ASK_CANCELLED}</p>}
-      <AskResults state={state} running={running} />
+      <AskResults state={state} running={running} opened={opened} onOpenSource={openSource} />
     </>
   );
 }

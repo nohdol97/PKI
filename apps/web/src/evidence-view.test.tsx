@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api.ts";
 import {
+  citationSource,
   EvidenceEntry,
   evidenceReducer,
   InsightSummary,
@@ -377,5 +378,30 @@ describe("SourceView of a local file", () => {
       />,
     );
     expect(html).not.toContain("지금 위치");
+  });
+});
+
+describe("citationSource (X02-R5)", () => {
+  it("marks the cited span of a version read by its number, as text", () => {
+    const out = renderToStaticMarkup(
+      <SourceView
+        source={citationSource(
+          { id: 4, version: 1, latestVersion: 1, title: "<b>제목</b>", body: "가나다라" },
+          { quote: "나다", start: 1, end: 3 },
+        )}
+      />,
+    );
+    expect(out).toContain("<mark>나다</mark>");
+    expect(out).toContain("&lt;b&gt;제목");
+    expect(out).not.toContain("<b>");
+  });
+
+  it("carries no locator and no attachment, since a citation has no evidence row", () => {
+    const source = citationSource(
+      { id: 4, version: 1, latestVersion: 1, title: "제목", body: "가나다라" },
+      { quote: "나다", start: 1, end: 3 },
+    );
+    expect(source.locator).toBeNull();
+    expect(source.attachment).toBeNull();
   });
 });

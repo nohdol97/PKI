@@ -188,6 +188,10 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     // the graph reads (S02-T09): set in beforeAll, an item of the user's own, which is shown and has no rows yet
     graphTrace: { kind: "item", id: 1 },
     graphPaths: { from: 1, depth: 2 },
+    // the Explore reads (X02-T1): the item is set in beforeAll like the graph reads; version 1 is the seed's first source version
+    exploreItems: {},
+    exploreItem: { itemId: 1, depth: 2 },
+    exploreSource: { versionId: 1 },
     // the Wiki (K01-T1): the page and the note's key are set in beforeAll, once the seed's pages are built
     wikiPage: { key: "" },
     wikiEdit: { op: "note-add", key: "", text: "합성 메모" },
@@ -222,6 +226,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     requests.entityDistinct = { a: made[0], b: made[1], on: true };
     requests.graphTrace = { kind: "item", id: made[0] };
     requests.graphPaths = { from: made[0], depth: 2 };
+    requests.exploreItem = { itemId: made[0], depth: 2 };
     const facts = ["2026-12-05", "2026-12-06"].map((value) => {
       const f = userDecisions.add(db, {
         kind: "fact",

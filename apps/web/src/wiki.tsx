@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState, type FormEvent, type Ref } from "reac
 import { ApiError, type ApiClient } from "./api.ts";
 import { SOURCE_GONE } from "./evidence-text.ts";
 import { SourceView, useFocusOn } from "./evidence-view.tsx";
+import { useNav } from "./nav.tsx";
 import {
   claimMarks,
   epistemicText,
@@ -297,6 +298,11 @@ export function Wiki({ api }: { api: ApiClient }) {
   );
 
   useEffect(() => void readIndex(), [readIndex]);
+  // another screen sent the user to a page (X02-R5)
+  const wanted = useNav().target("wiki")?.wikiKey;
+  useEffect(() => {
+    if (wanted !== undefined) void readPage(wanted, true);
+  }, [wanted, readPage]);
   const pageKey = page?.key;
   const state = buildState(index, page);
   const pending = state === "building";

@@ -20,7 +20,6 @@ export const ASK_NO_SENTENCES = "근거가 확인된 문장이 없습니다.";
 export const ASK_INSUFFICIENT = "근거가 부족합니다. 찾은 원본으로는 답을 만들 수 없습니다.";
 export const ASK_CONFLICT =
   "서로 어긋나는 사실에 기댄 원본이 함께 찾혔습니다. 어느 쪽이 맞는지 원본을 확인하세요.";
-export const ASK_RELATED_PENDING = "관련 지식 화면으로 가는 연결은 다음 단계(X02)에서 더합니다.";
 
 const STRATEGY: Readonly<Record<string, string>> = {
   keyword: "키워드",
