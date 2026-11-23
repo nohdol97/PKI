@@ -43,6 +43,7 @@ import {
   sweepStaleCliRuns,
 } from "@pki/providers/adapters";
 import {
+  candidatesReceiver,
   createCanonicalEntries,
   createAnalyticalCheckHandler,
   createDatasetProfileHandler,
@@ -145,11 +146,13 @@ export function productEngine(): KnowledgeEngine {
  * list, the user's entry and the derivative kind `entity-merge`, are built from this one constant. A receiver
  * deletes or recomputes what rests on an item and never throws in a deletion's propagation (a throw rolls
  * that propagation back). The rule's receiver (the Insight, S02-T05) is first, then S03's (erases check lines
- * and queues the check job, S03-T05); S02-T06 (candidates) and S02-T08 (conflicts) add theirs here, at review.
+ * and queues the check job, S03-T05), then the candidates' (S02-T06, recomputes the candidates of the groups
+ * reached); S02-T08 (conflicts) adds its own here, at review.
  */
 export const MEMBERSHIP_LISTENERS: readonly MembershipListener[] = Object.freeze([
   dependencyDelayReceiver,
   onMembershipChanged,
+  candidatesReceiver,
 ]);
 
 /**

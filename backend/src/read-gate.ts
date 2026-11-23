@@ -4,7 +4,7 @@
 // uncovered, or whose scopes the policy does not allow, is left out of the answer whole: no count, title,
 // snippet, order or error of it reaches the caller. A registry that cannot judge throws and the call fails
 // (the server answers a generic 500): a row is never shown unjudged.
-import { createProductRegistry } from "@pki/knowledge-engine";
+import { createProductRegistry, listMergeCandidates } from "@pki/knowledge-engine";
 import type { RouteResponse, SemanticKind, SemanticList, SourceSummary } from "@pki/contracts";
 import {
   describeKnowledgeSchema,
@@ -71,6 +71,11 @@ export interface ReadGate {
   evidenceSource(evidenceId: number): EvidenceSourceView | undefined;
   /** The Semantic registry's items with the facts and relations shown (S01-R23): a hidden row is left out whole. */
   semantic(): SemanticList;
+  /**
+   * The merge candidates whose two items are both shown (S02-R25): a pair with a hidden end is left out whole.
+   * R24's path check on this list is S02-T09's.
+   */
+  mergeCandidates(): RouteResponse<"entityCandidates">;
   /** Whether the registry row is stored and shown: the one answer for a row that is absent, deleted or hidden. */
   semanticShown(kind: SemanticKind, id: number): boolean;
   /**
@@ -225,6 +230,28 @@ export function createReadGate(
         })),
         truncated: items.length > semanticLimit,
       };
+    },
+    mergeCandidates() {
+      // one more than the limit tells whether the list was cut; a wider read while hidden pairs left it short
+      const cap = Math.max(maxScan, 1);
+      const limit = semanticLimit + 1;
+      for (let n = Math.min(limit, cap); ; n = Math.min(n * 4, cap)) {
+        const rows = listMergeCandidates(db, n);
+        const ids = shown(
+          [...new Set(rows.flatMap((r) => [r.a, r.b]))].map((id) => ({
+            kind: "item",
+            id: String(id),
+          })),
+          "display",
+        );
+        const kept = rows.filter((r) => ids.has(String(r.a)) && ids.has(String(r.b)));
+        if (kept.length >= limit || rows.length < n || n >= cap) {
+          return {
+            candidates: kept.slice(0, semanticLimit),
+            truncated: kept.length > semanticLimit,
+          };
+        }
+      }
     },
     semanticShown: (kind, id) =>
       readSemanticState(db, { kind, id }) !== undefined && isShown(kind, id),

@@ -3,7 +3,11 @@
 // the implementations the composition binds. Each fails closed on what nobody registered.
 import { routes } from "@pki/contracts";
 import { computePolicyVersion, DEFAULT_PROVIDER_SETTING } from "@pki/providers";
-import { createProductRegistry, dependencyDelayReceiver } from "@pki/knowledge-engine";
+import {
+  candidatesReceiver,
+  createProductRegistry,
+  dependencyDelayReceiver,
+} from "@pki/knowledge-engine";
 import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   createDerivativeRegistry,
@@ -59,9 +63,13 @@ function freshDb() {
 }
 
 describe("resolution.group-reads: the membership receivers (S02-R13)", () => {
-  it("are one fixed list with the rule's receiver first, and both the registry and the user's entry are built from it", () => {
+  it("are one fixed list with the rule's receiver first and the candidates' last, and both the registry and the user's entry are built from it", () => {
     expect(Object.isFrozen(MEMBERSHIP_LISTENERS)).toBe(true);
-    expect(MEMBERSHIP_LISTENERS).toEqual([dependencyDelayReceiver, onMembershipChanged]);
+    expect(MEMBERSHIP_LISTENERS).toEqual([
+      dependencyDelayReceiver,
+      onMembershipChanged,
+      candidatesReceiver,
+    ]);
   });
 });
 

@@ -1031,6 +1031,31 @@ export const EntityDistinctRequestSchema = z
   .refine((r) => r.a !== r.b);
 export const EntityDistinctResponseSchema = z.object({ status: z.enum(["applied", "unchanged"]) });
 /**
+ * The merge candidates (S02-R10, R25): two item ids (the smaller first) and the signal codes that make the
+ * pair a candidate. A row names no text. `truncated` says the list was cut at the limit.
+ */
+export const EntityCandidatesResponseSchema = z.object({
+  candidates: z.array(
+    z.object({
+      a: z.number().int().positive(),
+      b: z.number().int().positive(),
+      signals: z.array(
+        z.enum([
+          "same-type",
+          "name-match",
+          "identifier-match",
+          "identifier-mismatch",
+          "organization-match",
+          "organization-mismatch",
+          "project-match",
+          "shared-neighbor",
+        ]),
+      ),
+    }),
+  ),
+  truncated: z.boolean(),
+});
+/**
  * The answer to a direct add or a value fix. `applied`: `entry` is the row the user wrote, and for a
  * fix `replaced` is the old fact as it stands now. `refused` with `value-exists` names the row that
  * has the value (`existing`); approving it is the next step. A row that is absent or hidden is the
@@ -1481,6 +1506,11 @@ export const routes = {
     path: "/api/entities/distinct",
     request: EntityDistinctRequestSchema,
     response: EntityDistinctResponseSchema,
+  },
+  entityCandidates: {
+    method: "GET",
+    path: "/api/entities/candidates",
+    response: EntityCandidatesResponseSchema,
   },
   knowledgeSchema: {
     method: "GET",

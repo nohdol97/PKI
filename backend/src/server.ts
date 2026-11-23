@@ -52,6 +52,7 @@ import {
   defaultEntries,
   readAutoVerify,
   recomputeDependencyDelay,
+  refreshCandidates,
   type CanonicalEntries,
 } from "@pki/knowledge-engine";
 import {
@@ -575,9 +576,13 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       },
       at,
     );
-    recomputeDependencyDelay(options.db, [...new Set(items)], {
-      combinable: (lineage) => registry.combinable(options.db, lineage),
-    });
+    const scope = {
+      combinable: (lineage: Parameters<typeof registry.combinable>[1]) =>
+        registry.combinable(options.db, lineage),
+    };
+    recomputeDependencyDelay(options.db, [...new Set(items)], scope);
+    // S02-R10: what supported or opposed a candidate may have changed with the user's action
+    refreshCandidates(options.db, [...new Set(items)], scope);
   };
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
@@ -990,6 +995,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       }),
     // S01-R23, T07: the type definitions. The user's operations take the same one entry; an id that is
     // absent, deleted or hidden is the one same not-found; a refusal is a code with counts in a 200 body.
+    entityCandidates: async () => gate.mergeCandidates(),
     knowledgeSchema: async () => gate.knowledgeSchema(),
     ontology: async () => gate.ontology(),
     ontologyHistory: async ({ id }) =>
