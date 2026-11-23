@@ -82,7 +82,7 @@ import {
 import { assessAfterExtraction } from "./auto-verify.ts";
 import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
 import { recomputeDependencyDelay } from "./dependency-delay.ts";
-import { findCandidates } from "./linking.ts";
+import { findCandidates, groupLineage } from "./linking.ts";
 import { locateQuote, type QuoteSpan } from "./quote.ts";
 
 /** What the handler hands the runner (a subset of backend job-outcomes.ts JobResult). */
@@ -343,7 +343,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     const withheld: string[] = [];
     for (const found of findCandidates(db, `${stored.title}\n${stored.body}`, registry)) {
       const id = String(found);
-      const lineage = registry.lineage(db, { kind: "item", id });
+      const lineage = groupLineage(db, registry, found);
       if (registry.combinable(db, [...together, ...lineage])) {
         candidateLineage.set(id, lineage);
         candidateType.set(id, (readItem(db, found) as { type: string }).type);
