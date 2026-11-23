@@ -36,7 +36,7 @@ Phase 5의 세 작업(P01 Insight, P02 알림, P03 피드백)은 검토에서 "�
 - **P5F-R1 충돌 Insight는 유효한 값끼리의 어긋남만 든다.** `conflict` 규칙은 `CONTRADICTS` 연결의 두 끝 가운데 하나라도 **서 있는 `SUPERSEDES` 연결로 대체된 사실**이면 그 연결을 세지 않는다(`validDates`가 쓰는 `supersededAmong`과 같은 판정). 남는 연결이 없으면 Insight는 철회된다.
 - **P5F-R2 그래프 추적도 끝 항목을 묻는다.** `graphTrace`의 시작이 Insight이고 그 끝 항목(X·Y) 가운데 하나라도 보이지 않으면, 없는 Insight와 같은 `not-found`다(P01-R15, `ReadGate.insightEndsShown`).
 - **P5F-R3 늦은 404는 자기 Insight만 닫는다.** Insight 조회가 404로 끝나면 그 Insight를 목록에서 빼고, **열려 있는 근거가 그 Insight의 것일 때만** 근거와 원본을 닫는다.
-- **P5F-R4 선호가 순위에 들어간다.** Insight를 API가 보일 때(목록, 근거 조회, 알림 줄) 그 Insight의 선호 신호 `weight`를 `rankInsight`의 `preference`로 넘긴다. 응답의 순위에 쓴 `preference`를 싣는다. 관련성 축은 정수로 반올림한다(유형 단계의 홀수 가중이 반 점을 만들어 응답 검증에 걸리지 않게).
+- **P5F-R4 선호가 순위에 들어간다.** Insight를 API가 보일 때(목록, 근거 조회, 알림 줄) 그 Insight의 선호 신호 `weight`를 `rankInsight`의 `preference`로 넘긴다. 응답의 순위에 쓴 `preference`를 싣는다. 관련성 축은 정수로 반올림한다(유형 단계의 홀수 가중이 반 점을 만들어 응답 검증에 걸리지 않게). 유형 단계는 목록·근거 조회·알림 모두 읽기 관문이 보이는 모든 Insight(`gate.insights()`, 피드에서 숨긴 것 포함)의 줄을 세어 같은 Insight가 어느 응답에서나 같은 `preference`를 받는다.
 - **P5F-R5 유형 단계 스위치.** `GET /api/feedback/settings` → `{ learned }`, `POST /api/feedback/settings` `{ learned }` → `{ learned }`가 설정 `feedback.learned`를 읽고 쓴다. 설정 화면에 체크박스 하나를 둔다. 유형 단계는 Insight마다 **가장 새 호오 줄 하나**만 센다(P03-D9와 같은 기준).
 - **P5F-R6 근거 줄에서 교정.** Insight 근거 줄이 가리키는 사실·관계의 ID(`targetId`)를 응답에 싣고, 홈의 근거 목록은 줄마다 그 대상에 허용된 교정 버튼(사실: 잘못된 정보·확인 완료, 관계: 잘못된 관계·확인 완료)을 낸다. 누르면 기존 `POST /api/feedback`을 그대로 부르고, 결과는 "최근 피드백"에서 취소할 수 있다. 대상이 보이는지의 판정은 기존 피드백 경로의 것을 그대로 쓴다(P03-R10).
 
@@ -104,3 +104,4 @@ PR 하나. 묶음 셋의 파일은 서로 겹치지 않는다. 자세한 그래�
 |---|---|---|---|
 | 2026-11-24 | 처음 씀(초안) | 전체 | 이슈 #221·#232·#238·#251·#252·#257의 남은 항목을 코드와 대조해 결함 3건과 넘긴 기능 3건을 한 묶음으로 정함 |
 | 2026-11-24 | 상태 초안 → 확정 | 머리말 | 구현 착수 전 확정(잠정 결정 D1~D8은 그대로) |
+| 2026-11-24 | R4에 유형 단계가 세는 집합 한 문장 추가 | P5F-R4 | 리뷰 M1: 피드 가시 집합·단일 Insight로 세면 숨긴 형제의 부정 줄이 빠지고 목록·근거 응답이 어긋남 |

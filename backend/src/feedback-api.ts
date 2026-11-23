@@ -41,7 +41,11 @@ export interface FeedbackApi {
   list(): RouteResponse<"feedbackList">;
   /** The Insights the user has not hidden from the feed (P03-R9), in the order given. */
   visibleInsights<T extends { id: number }>(insights: readonly T[]): T[];
-  /** The preference weight of each Insight, −100..100 (P5F-R4); the lines of a target not shown count for nothing. */
+  /**
+   * The preference weight of each requested Insight, −100..100 (P5F-R4). The type step counts the lines of every
+   * Insight the read gate shows (`gate.insights()`, the set `visibleInsights` takes, hidden-from-feed ones
+   * included) so the list and the evidence answer agree; a target the gate does not show counts for nothing.
+   */
   preferences(insights: readonly { id: number }[]): ReadonlyMap<number, number>;
   /** `feedback.learned`, the type step's switch (P5F-R5). */
   settings(): RouteResponse<"feedbackSettings">;
@@ -162,8 +166,12 @@ export function createFeedbackApi(
     },
 
     preferences(insights) {
-      const signals = signalsOf(insights);
-      return new Map(insights.map((insight, at) => [insight.id, signals[at]?.weight ?? 0]));
+      const shownInsights = gate.insights();
+      const signals = signalsOf(shownInsights);
+      const weights = new Map(
+        shownInsights.map((insight, at) => [insight.id, signals[at]?.weight ?? 0]),
+      );
+      return new Map(insights.map((insight) => [insight.id, weights.get(insight.id) ?? 0]));
     },
 
     settings: () => ({ learned: feedbackLearned(db) }),

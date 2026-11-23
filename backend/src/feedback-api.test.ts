@@ -221,6 +221,28 @@ describe("feedback.api: the preference reaches the ranking (P5F-R4, P5F-C4)", ()
   });
 });
 
+describe("feedback.api: the type step counts over the gate-shown Insights (P5F-R4, P03-R10)", () => {
+  it("gives an Insight with no opinion of its own the same -25 in the list and in the evidence answer when a hidden sibling was disliked", async () => {
+    const s = world("s");
+    const b = world("b");
+    await start();
+    await call("setFeedbackSettings", { learned: true });
+    for (const kind of ["useful", "irrelevant"] as const) {
+      await call("feedbackRecord", { target: { kind: "insight", id: s.insight }, kind });
+    }
+    expect(await feed()).toEqual([b.insight]);
+
+    const listed = routes.insights.response
+      .parse((await call("insights")).body)
+      .insights.find((i) => i.id === b.insight);
+    const evidence = routes.insightEvidence.response.parse(
+      (await call("insightEvidence", { insightId: b.insight })).body,
+    );
+    expect(listed?.ranking.preference).toBe(-25);
+    expect("insight" in evidence && evidence.insight.ranking.preference).toBe(-25);
+  });
+});
+
 describe("feedback.api: the type-step switch (P5F-R5, P5F-C5)", () => {
   it("reads and writes feedback.learned through the settings pair", async () => {
     await start();
