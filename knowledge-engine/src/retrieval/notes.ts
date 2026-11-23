@@ -3,7 +3,6 @@
 import {
   factsEvidencedBy,
   isValidRow,
-  itemsEvidencedBy,
   linksOfFacts,
   readItem,
   readStoredWikiPage,
@@ -16,6 +15,7 @@ import {
 import { groupView, visibleLinks, type GraphJudge } from "../graph-read.ts";
 import { WIKI_PAGE_KIND_NAME } from "../wiki-kind.ts";
 import { pageKindOfType } from "../wiki-render.ts";
+import { shownItemsEvidencedBy } from "./evidenced.ts";
 import { RELATED_LIMIT, type GapNote, type RelatedLink } from "./types.ts";
 
 const key = (r: DerivedRef) => `${r.kind}:${r.id}`;
@@ -96,7 +96,7 @@ export function relatedLinks(
 ): Map<number, RelatedLink[]> {
   const groups = groupView(db, judge);
   const representatives = new Map<number, number>();
-  const rows = itemsEvidencedBy(db, shown).map(({ versionId, itemId }) => {
+  const rows = shownItemsEvidencedBy(db, judge, shown).map(({ versionId, itemId }) => {
     const rep = representatives.get(itemId) ?? groups.topOf(itemId);
     representatives.set(itemId, rep);
     return { versionId, itemId: rep };

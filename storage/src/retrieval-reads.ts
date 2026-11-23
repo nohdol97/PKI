@@ -65,25 +65,33 @@ export function factsEvidencedBy(
     }));
 }
 
-/** The items a source version supports: the owner of a fact and either end of a relation whose evidence is in it. */
+/**
+ * The items a source version supports: the owner of a fact and either end of a relation whose evidence is in it.
+ * Each row names the one fact or relation it went through (the other id is null), so a caller can judge it.
+ */
 export function itemsEvidencedBy(
   db: SqlDriver,
   versionIds: readonly number[],
-): { versionId: number; itemId: number }[] {
+): { versionId: number; itemId: number; factId: number | null; relationId: number | null }[] {
   if (versionIds.length === 0) return [];
   return db
     .all(
-      `SELECT v, item FROM (
-         SELECT e.source_version_id AS v, f.item_id AS item FROM evidence e
+      `SELECT v, item, fact, relation FROM (
+         SELECT e.source_version_id AS v, f.item_id AS item, f.id AS fact, NULL AS relation FROM evidence e
            JOIN facts f ON f.id = e.fact_id WHERE e.source_version_id IN ${IDS}
-         UNION SELECT e.source_version_id, r.subject_id FROM evidence e
+         UNION SELECT e.source_version_id, r.subject_id, NULL, r.id FROM evidence e
            JOIN relations r ON r.id = e.relation_id WHERE e.source_version_id IN ${IDS}
-         UNION SELECT e.source_version_id, r.object_id FROM evidence e
+         UNION SELECT e.source_version_id, r.object_id, NULL, r.id FROM evidence e
            JOIN relations r ON r.id = e.relation_id WHERE e.source_version_id IN ${IDS}
-       ) ORDER BY v, item`,
+       ) ORDER BY v, item, fact, relation`,
       [JSON.stringify(versionIds), JSON.stringify(versionIds), JSON.stringify(versionIds)],
     )
-    .map((r) => ({ versionId: r.v as number, itemId: r.item as number }));
+    .map((r) => ({
+      versionId: r.v as number,
+      itemId: r.item as number,
+      factId: r.fact as number | null,
+      relationId: r.relation as number | null,
+    }));
 }
 
 /**
