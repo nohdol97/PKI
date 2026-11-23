@@ -732,7 +732,7 @@ flowchart LR
 
 1. **S 번호는 S32 그대로다.** S23~S25(I02-B의 예약)와 S26~S31(I05~I07)이 이미 있고 S33·S34는 S02·S03이 잡아 두었다. 바꾸려면 spec, site-setup, 시험, 실행기의 알림 두 문장, ADR 0021, ADR 색인 줄을 함께 고친다.
 2. **Semantic 시나리오는 `preflight`와 숫자를 세는 `record`뿐이다(R25).** `prepare`가 없는 까닭은 S32가 배포처의 실제 자료를 재는 것이지 합성 입력을 심는 것이 아니기 때문이고, 통과·실패 판정이 없는 까닭은 결과가 사람이 켤지 정하는 근거이기 때문이다. 알림은 둘이고 모두 `배포처 후속: S32`로 시작한다(실제 Provider가 아님: 이유 `test-double`, Windows 설치본이 아님: `not-windows` 등 V02의 이유 코드). Windows가 아니면 설정을 읽기 전에 거부하고(삭제·큐 시나리오와 같다), Windows에서는 Provider를 먼저 본다. 바꾸려면 `run.py`의 `run_semantic_scenario`와 `semantic_gate`.
-3. **`record`의 숫자(결정 3의 W1·W4·W5가 요구한 것).** 이력 줄이 아니라 지금 상태의 행을 센다: `forms`(seed 표기 종류 셋별·상태별. 그 밖의 `alias.*` 종류는 사용자가 만든 것까지 `other`), `definitions`(상태별), `promoted`(정책 주체의 `auto-verify` 줄이 있는 사실·관계, 행마다 한 번), `promotedStanding`(그 가운데 지금 `verified`), `promotedJudgedWrong`(그 가운데 지금 `disputed`·`rejected`·`superseded`이고 가장 새 상태 줄의 주체가 사용자인 것. 정책이 낸 이의와, 이의를 내고 취소해 `verified`로 돌아온 행은 세지 않는다). 파일에는 숫자와 코드 이름만 있다(seed가 아닌 종류 이름은 `other`로 센다. "S01 후속(#173)이 넘기는 것" 참조). 결과 파일은 `common/results`의 `result.json`이 아니다(그 등록부는 기준 번호가 붙은 통과·실패 판정을 다루고 판정 없는 측정을 위한 칸이 없다). 바꾸려면 `semantic_scenario.py`의 `_promoted`.
+3. **`record`의 숫자(결정 3의 W1·W4·W5가 요구한 것).** 이력 줄이 아니라 지금 상태의 행을 센다: `forms`(seed 표기 종류 셋별·상태별. 그 밖의 `alias.*` 종류는 사용자가 만든 것까지 `other`), `definitions`(상태별), `promoted`(정책 주체의 `auto-verify` 줄이 있는 사실·관계, 행마다 한 번), `promotedStanding`(그 가운데 지금 `verified`), `promotedJudgedWrong`(그 가운데 지금 `disputed`·`rejected`·`superseded`이고 그 상태를 만든 줄(취소·근거 복귀를 거슬러 읽음)의 주체가 사용자인 것. 정책이 낸 이의와, 이의를 내고 취소해 `verified`로 돌아온 행은 세지 않는다). 파일에는 숫자와 코드 이름만 있다(seed가 아닌 종류 이름은 `other`로 센다. "S01 후속(#173)이 넘기는 것" 참조). 결과 파일은 `common/results`의 `result.json`이 아니다(그 등록부는 기준 번호가 붙은 통과·실패 판정을 다루고 판정 없는 측정을 위한 칸이 없다). 바꾸려면 `semantic_scenario.py`의 `_promoted`.
 4. **`--phase off|on`은 파일 이름과 `phase` 칸을 정할 뿐이다.** 저장된 설정과 어긋나면 표준 오류에 한 줄을 내고 막지 않는다. 바꾸려면 `phase_warning`의 결과를 설정 오류로 돌린다.
 5. **이 spec의 상태 칸은 "확정(잠정 결정 포함)"으로 둔다**(R24). 잠정 결정이 S32 전까지 서 있기 때문이다. 바뀐 것은 `docs/README.md`의 로드맵 줄(구현이 끝났다, S32를 기다린다)이다.
 6. **알려진 것.** ARCHITECTURE 5.6절의 종류 수("여덟", "일곱 번째·여덟 번째")는 S02가 `entity-merge`·`merge-candidate`를 등록한 뒤로 낡았다. T10은 새 문장에 총수를 적지 않았고 그 줄은 S02-T10이 고친다. 시험은 합성 SQLite로 숫자의 정의를 확인했고 제품이 쓴 DB로는 돌리지 않았다. Windows의 분기와 `record`는 실행된 적이 없다.
@@ -741,7 +741,7 @@ flowchart LR
 
 요구사항
 
-- **F173-R1** `promotedJudgedWrong`은 정책이 올린 행 가운데 지금 `disputed`·`rejected`·`superseded`이고 **가장 새 상태 줄의 주체가 사용자**인 행만 센다. 정책이 낸 이의(주체 `policy`)는 사용자의 판단이 아니므로 세지 않는다.
+- **F173-R1** `promotedJudgedWrong`은 정책이 올린 행 가운데 지금 `disputed`·`rejected`·`superseded`이고 **그 상태를 만든 줄의 주체가 사용자**인 행만 센다. 상태를 만든 줄은 가장 새 상태 줄에서 시작해, 취소(`undo`)·근거 복귀(`evidence-returned`)이면 그 줄이 되돌린 줄의 앞 줄로 거슬러 읽는다(제품의 `stateMaker`·`policyVerifiedLine`과 같다). 정책이 낸 이의(주체 `policy`)는 사용자의 판단이 아니므로, 뒤에 사용자의 승인과 취소가 와도 세지 않는다.
 - **F173-R2** 집계 파일의 `forms`에 이름이 나가는 종류는 seed 표기 종류 셋(`alias.synonym`·`alias.abbreviation`·`alias.translation`)뿐이다. 그 밖의 `alias.*` 종류는 사용자가 지은 이름일 수 있으므로 `other`로만 센다.
 - **F173-R3** 집계가 여는 연결은 쓰기를 거부한다.
 - **F173-R4** `linking.verified-forms`의 "정책이 올린 표기" 사례는 testkit이 만든 상태가 아니라 설정을 켠 뒤 `assessAutoVerify`가 올린 행으로 확인한다.
@@ -759,7 +759,7 @@ flowchart LR
 
 잠정 결정
 
-1. **F173-R1은 세 상태에 같은 규칙 하나를 쓴다**(가장 새 상태 줄의 주체). 그래서 정책이 이의를 낸 뒤 사용자가 기각한 행은 세고, 사용자가 이의를 낸 뒤 전파가 `superseded`로 만든 행은 세지 않는다(T10 때와 같다). 바꾸려면 `semantic_scenario.py`의 `_promoted`.
+1. **F173-R1은 세 상태에 같은 규칙 하나를 쓴다**(상태를 만든 줄의 주체, 취소·근거 복귀를 거슬러 읽는다). 그래서 정책이 이의를 낸 뒤 사용자가 기각한 행은 세고, 사용자가 이의를 낸 뒤 전파가 `superseded`로 만든 행은 세지 않는다(T10 때와 같다). 바꾸려면 `semantic_scenario.py`의 `_promoted`.
 2. **seed 종류 셋은 실행기에 상수로 적었다**(`SEED_FORM_KINDS`). 실행기는 제품 코드를 읽지 않는다. seed에 표기 종류가 더해지면 `other`로 세어질 뿐 이름이 새지 않으며(안전한 쪽으로 낡는다), 그때 상수와 RUNBOOK 10절을 함께 고친다.
 3. **F173-C4는 추출 핸들러가 아니라 게이트 `assessAutoVerify`를 직접 부른다.** 추출 뒤 판정(`assessAfterExtraction`)이 게이트를 부르는 것은 `auto-verify-flow.test.ts`가 이미 시험한다.
 4. **R5·R6은 문장만 고치므로 기준이 없다.**

@@ -32,18 +32,37 @@ def _by_status(rows):
     return counts
 
 
+def _state_maker_actor(lines):
+    """Actor of the line that made the row's current state, read as the product does (storage/src/semantic-lifecycle.ts
+    stateMaker, policyVerifiedLine): from the newest state line, an `undo` or `evidence-returned` line is read as the
+    line before the line it reverted. `lines` are (seq, actor, action, reverts_seq), state-neutral lines excluded."""
+    while lines:
+        _, actor, action, reverts = lines[-1]
+        if action not in ("undo", "evidence-returned"):
+            return actor
+        if reverts is None:
+            return None
+        lines = [line for line in lines if line[0] < reverts]
+    return None
+
+
 def _promoted(db, table, history, fk):
     """(promoted, still verified, judged wrong) of one table: rows with a policy `auto-verify` line, counted once each.
-    Judged wrong = now disputed/rejected/superseded AND the newest state line is the user's (a policy dispute is not)."""
+    Judged wrong = now disputed/rejected/superseded AND the line that made that state is the user's (a policy dispute
+    is not, even when an approve and an undo came after it)."""
     neutral = ",".join("'{}'".format(a) for a in STATE_NEUTRAL)
     promoted = "EXISTS (SELECT 1 FROM {h} h WHERE h.{fk} = t.id AND h.actor = 'policy' AND h.action = 'auto-verify')".format(
         h=history, fk=fk)
-    newest_actor = ("(SELECT h.actor FROM {h} h WHERE h.{fk} = t.id AND h.action NOT IN ({n}) "
-                    "ORDER BY h.seq DESC LIMIT 1)").format(h=history, fk=fk, n=neutral)
-    query = ("SELECT count(*), coalesce(sum(t.status = 'verified'), 0), "
-             "coalesce(sum(t.status IN ('disputed', 'rejected', 'superseded') AND {actor} = 'user'), 0) "
-             "FROM {t} t WHERE {promoted}").format(t=table, promoted=promoted, actor=newest_actor)
-    return tuple(int(x) for x in db.execute(query).fetchone())
+    total = standing = wrong = 0
+    for row_id, status in db.execute("SELECT t.id, t.status FROM {t} t WHERE {p}".format(t=table, p=promoted)).fetchall():
+        total += 1
+        standing += status == "verified"
+        if status in ("disputed", "rejected", "superseded"):
+            lines = db.execute(
+                "SELECT seq, actor, action, reverts_seq FROM {h} WHERE {fk} = ? AND action NOT IN ({n}) ORDER BY seq".format(
+                    h=history, fk=fk, n=neutral), (row_id,)).fetchall()
+            wrong += _state_maker_actor(lines) == "user"
+    return total, standing, wrong
 
 
 def read_counts(db_path, phase):
