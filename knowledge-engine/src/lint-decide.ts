@@ -5,6 +5,7 @@
 // "different thing" mark). A report of something the rules missed is stored as an open finding of origin
 // `user`. The visibility of the rows is the caller's check (the read gate), as for every user entry.
 import {
+  entityGroups,
   fingerprintOf,
   findFinding,
   insertFinding,
@@ -147,11 +148,16 @@ export function reportMissed(
 ): ReportOutcome {
   const { rule } = input;
   if (!hasRuleShape(rule, input.target)) return { status: "refused", reason: "bad-target" };
-  // two items are named smaller id first, as the rules name them: one fingerprint for one pair
+  // an item is named by its group's representative and two items smaller id first, as the rules name them:
+  // one fingerprint for one pair (KF-R2)
+  let { a, b } = input.target;
+  if (input.target.kind === "item") {
+    a = entityGroups.representativeOf(tx, a);
+    if (b !== null) b = entityGroups.representativeOf(tx, b);
+    if (a === b) return { status: "refused", reason: "bad-target" };
+  }
   const target: FindingTarget =
-    input.target.b !== null && input.target.a > input.target.b
-      ? { kind: "item", a: input.target.b, b: input.target.a }
-      : input.target;
+    b !== null && a > b ? { kind: "item", a: b, b: a } : { ...input.target, a, b };
   const items = itemsOfFinding(tx, target);
   if (!items) return { status: "refused", reason: "not-found" };
   const existing = findFinding(tx, fingerprintOf(rule, target));

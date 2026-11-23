@@ -2,7 +2,7 @@
 // changes, the one-row state of the re-review, and the findings (a rule's name and the ids of the rows it
 // bears on, never a name, value or quote) with their lineage. A finding is a candidate: it is written only by
 // the `reflect` job's result and by the user's decision, and deleted by the registered kind `lint-finding`
-// in a deletion's own transaction. Its scope is never stored; the lineage says it.
+// in a deletion's own transaction, or, when its target row is gone, by the sweep of dangling findings. Its scope is never stored; the lineage says it.
 import type { SourceVersionRef } from "./derivatives.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -159,6 +159,20 @@ export function setFindingStatus(
 /** Deletes a finding with its lineage rows (the foreign key's cascade). */
 export const removeFinding = (tx: SqlDriver, id: number): boolean =>
   tx.run("DELETE FROM lint_findings WHERE id = ?", [id]).changes === 1;
+
+/**
+ * Deletes every finding whose target row (an item, a fact or a relation) no longer exists, whatever its origin
+ * or status, and returns how many went; the lineage rows follow by the cascade. Ids are reused, so a finding
+ * left on an absent row would be inherited by an unrelated new row (KF-R1).
+ */
+export const removeDanglingFindings = (tx: SqlDriver): number =>
+  tx.run(
+    `DELETE FROM lint_findings WHERE
+       (target_kind = 'item' AND (target_a NOT IN (SELECT id FROM items)
+          OR (target_b IS NOT NULL AND target_b NOT IN (SELECT id FROM items))))
+       OR (target_kind = 'fact' AND target_a NOT IN (SELECT id FROM facts))
+       OR (target_kind = 'relation' AND target_a NOT IN (SELECT id FROM relations))`,
+  ).changes;
 
 /** The findings whose lineage holds a version of `sourceId` (below `below` when given), ascending. */
 export const findingIdsOfSource = (db: SqlDriver, sourceId: number, below?: number): number[] =>
