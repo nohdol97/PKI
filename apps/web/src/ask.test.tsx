@@ -185,6 +185,22 @@ describe("ask view: a sentence's source (X02-C1a ②)", () => {
     expect(out).toContain("<mark>배포일은 12월 10일이다</mark>");
   });
 
+  it("passes a refusal of the read on, so a hidden or deleted version shows as a failure and no source", async () => {
+    const api = vi.fn(async () => {
+      throw new Error("API 404: not-found");
+    });
+    await expect(
+      openCitation(api as unknown as ApiClient, {
+        versionId: 4,
+        sourceId: 2,
+        version: 1,
+        start: 0,
+        end: 1,
+        quote: "가",
+      }),
+    ).rejects.toThrow("not-found");
+  });
+
   it("offers the source and the related knowledge as buttons, with no leftover pending note", () => {
     const answered = fold(
       route,
