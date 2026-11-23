@@ -28,7 +28,9 @@ describe("a local source's present location", () => {
       state: "active",
       notFound: false,
     });
-    expect(revealPathOf(w.db, versionId)).toBe(join(w.root, "docs/a.md"));
+    expect(revealPathOf(w.db, versionId, () => true)).toBe(join(w.root, "docs/a.md"));
+    // I02F-C2: a version the read gate does not show has no path to reveal
+    expect(revealPathOf(w.db, versionId, () => false)).toBeUndefined();
     // the answer the page gets holds no absolute path
     expect(JSON.stringify(sourceInfoOf(w.db, versionId))).not.toContain(w.root);
 
@@ -41,7 +43,7 @@ describe("a local source's present location", () => {
   it("an index path that leaves the folder is never revealed", async () => {
     const { w, versionId } = await seeded();
     w.db.run("UPDATE local_file_entries SET relative_path = '../outside.md', path_hash = 'x'");
-    expect(revealPathOf(w.db, versionId)).toBeUndefined();
+    expect(revealPathOf(w.db, versionId, () => true)).toBeUndefined();
   });
 
   it("a source of another connector, or an unknown version, is not local and has nothing to reveal", async () => {
@@ -56,7 +58,7 @@ describe("a local source's present location", () => {
         state: null,
         notFound: false,
       });
-      expect(revealPathOf(w.db, id)).toBeUndefined();
+      expect(revealPathOf(w.db, id, () => true)).toBeUndefined();
     }
   });
 });

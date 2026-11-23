@@ -46,6 +46,9 @@ import {
   withLocalFilesPorts,
   type ConnectorSet,
 } from "./composition.ts";
+import { tryLockInstance } from "./instance-lock.ts";
+import { createReadGate } from "./read-gate.ts";
+import { revealPathOf } from "./local-reveal.ts";
 import { readLocalFilesSettings, type ApprovalTickets } from "./local-locations.ts";
 import { createBackupApi } from "./backup-api.ts";
 import { systemClock } from "./clock.ts";
@@ -196,6 +199,8 @@ export interface BootedBackend {
   tickets: ApprovalTickets;
   /** The OS channel of the notifications: the shell's answer goes to `acknowledge` (P02-R8). */
   notifyOutbox: NotifyOutbox;
+  /** The file path of a local source for the shell's "show in folder": undefined unless the read gate shows the version (I02F-R2). */
+  revealPath(sourceVersionId: number): string | undefined;
 }
 
 export function bootBackend(options: BootOptions): Promise<BootedBackend> {
@@ -349,10 +354,17 @@ async function startBackend(
       wake: () => void runner.wake(),
     }),
     // every location is walked from the start by the next sync (I02B-R13)
-    rescan: () =>
+    // answered false when the instance lock is held; the probe, its release and the sync stay in one
+    // synchronous block, because the manager takes the lock before its first await (I02F-R4)
+    rescan: () => {
+      const probe = tryLockInstance(db, LOCAL_FILES_INSTANCE_ID);
+      if (!probe) return false;
+      probe();
       void late.manager
         ?.sync(LOCAL_FILES_INSTANCE_ID, { rescan: true })
-        .catch((error) => log("local-rescan-failed", { error: errorClass(error) })),
+        .catch((error) => log("local-rescan-failed", { error: errorClass(error) }));
+      return true;
+    },
     onApproved: registerLocalSync,
   });
   const notifyOutbox = createNotifyOutbox({ db, registry, channel: options.notifyChannel ?? null });
@@ -489,6 +501,7 @@ async function startBackend(
   ensureNotifySchedules(scheduler); // P02-R3: the notification job's three periods
   const collectors = startCollectorUpkeep({ db, manager: connectors, scheduler, runner });
   scheduler.start();
+  const revealGate = createReadGate(db, registry);
   return {
     server: {
       ...server,
@@ -512,6 +525,7 @@ async function startBackend(
     scheduler,
     tickets: localFiles.tickets,
     notifyOutbox,
+    revealPath: (id) => revealPathOf(db, id, revealGate.sourceShown),
   };
 }
 
