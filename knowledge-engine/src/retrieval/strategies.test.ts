@@ -166,7 +166,7 @@ describe("RVS-C1 the strategies widen a matched item only by the merge lines the
       judge: createJudge(db, reg, "search", false),
       question: "무관",
     };
-    const admit = (ids: readonly number[]) => ids;
+    const admit = (ids: readonly number[]) => [...ids];
     return { reading, rep, member, admit };
   }
 
