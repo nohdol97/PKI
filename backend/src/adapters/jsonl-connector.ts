@@ -175,7 +175,7 @@ export function createJsonlConnector(ports?: () => JsonlFilePorts | undefined): 
       if (!read) return { changes: [], nextCursor: cursor ?? "", hasMore: false };
       const { hash, entries } = read;
       let start = 0;
-      if (cursor !== null && cursor !== "") {
+      if (cursor !== null) {
         const match = /^([0-9a-f]{64}):(\d+)$/.exec(cursor);
         start = match ? Number(match[2]) : Number.NaN;
         if (!match || match[1] !== hash || !(start <= entries.length)) {

@@ -271,5 +271,13 @@ describe("jsonl-file location (I02B-C33): the life of the instance", () => {
       expect(r.body).toEqual({ error: "approval-rejected", code });
     }
     expect((await t.instances()).some((i) => i.id.startsWith("jsonl-file:"))).toBe(false);
+    // the booted backend knows the document formats: a document file is approved as a `file` (I02B-C34)
+    const doc = file("a.md", "# a\n");
+    const approved = await t.call(routes.approveLocalLocation.path, "POST", {
+      type: "file",
+      path: doc,
+    });
+    expect(approved.status).toBe(200);
+    expect(approved.body).toMatchObject({ type: "file", displayPath: doc });
   });
 });

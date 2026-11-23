@@ -22,6 +22,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isDocumentFileName } from "./adapters/local-files-connector.ts";
 import { bootBackend } from "./boot.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { inProcessNormalizer } from "./local-normalizer.test-support.ts";
@@ -64,6 +65,7 @@ function handler(over: { buildKind?: "production" | "test" } = {}) {
     index: createLocalFileIndex(db),
     forbidden: [data],
     buildKind: over.buildKind ?? "test",
+    isDocumentFile: isDocumentFileName,
     tickets,
     onApproved: approved,
     normalizerUnavailable: () => false,

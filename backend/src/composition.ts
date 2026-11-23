@@ -142,6 +142,7 @@ import { createJsonlConnector, type JsonlFilePorts } from "./adapters/jsonl-conn
 import type { JsonlFileHooks } from "./jsonl-file-instances.ts";
 import {
   createLocalFilesConnector,
+  isDocumentFileName,
   type LocalFilesPorts,
 } from "./adapters/local-files-connector.ts";
 import {
@@ -843,6 +844,7 @@ export function productLocalFiles(
       forbidden,
       buildKind: options.typedPaths ? "development" : BUILD_KIND,
       tickets,
+      isDocumentFile: isDocumentFileName,
       onApproved: options.onApproved,
       normalizerUnavailable: () => normalizer.unavailable(),
       lastReport: () => last,

@@ -27,7 +27,6 @@ import type {
   LocalPassReport,
 } from "@pki/contracts";
 import { errorClass, log, type BuildKind } from "@pki/providers";
-import { isDocumentFileName } from "./adapters/local-files-connector.ts";
 import type { JsonlFileHooks } from "./jsonl-file-instances.ts";
 import { sourceInfoOf } from "./local-reveal.ts";
 import { sourceScopeOf, type LocalRevoke, type RevokeAnswer } from "./local-revoke.ts";
@@ -258,6 +257,8 @@ export interface LocalLocationsOptions {
   rescan?: () => void;
   /** The running instances of JSONL file locations (I02B-R41); without it an approval stores the row only. */
   jsonlFile?: JsonlFileHooks;
+  /** Whether a file name is a document format a `file` location may be (the connector knows the list; the composition point passes it). */
+  isDocumentFile?: (fileName: string) => boolean;
   now?: () => number;
   fs?: BoundaryFs;
   /** The OS rules for path shapes; the host's by default (a test sets another to meet a Windows-only shape). */
@@ -299,7 +300,7 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     const context: ApprovalContext = {
       forbidden: options.forbidden,
       locations: listLocations(db),
-      isDocumentFile: isDocumentFileName,
+      isDocumentFile: options.isDocumentFile ?? (() => false),
       ...(options.fs ? { fs: options.fs } : {}),
       ...(options.rules ? { rules: options.rules } : {}),
     };
@@ -346,7 +347,7 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
         forbidden: options.forbidden,
         locations: listLocations(db),
         ignoreLocationId: location.id,
-        isDocumentFile: isDocumentFileName,
+        isDocumentFile: options.isDocumentFile ?? (() => false),
         ...(options.fs ? { fs: options.fs } : {}),
         ...(options.rules ? { rules: options.rules } : {}),
       },
