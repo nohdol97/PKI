@@ -17,9 +17,9 @@ const events: AskEvent[] = [
 
 /** A fetch answering with `bytes` cut at the given offsets. */
 function fetchOf(bytes: Uint8Array, cuts: number[], init: { status: number; type: string }) {
-  const seen: { url: string; init: RequestInit }[] = [];
-  const fetchImpl = ((url: string, requestInit: RequestInit) => {
-    seen.push({ url, init: requestInit });
+  const seen: { url: string; init: RequestInit; self: unknown }[] = [];
+  const fetchImpl = function (this: unknown, url: string, requestInit: RequestInit) {
+    seen.push({ url, init: requestInit, self: this });
     const parts = [0, ...cuts, bytes.length].flatMap((at, i, all) =>
       i === 0 ? [] : [bytes.slice(all[i - 1], at)],
     );
@@ -32,7 +32,7 @@ function fetchOf(bytes: Uint8Array, cuts: number[], init: { status: number; type
     return Promise.resolve(
       new Response(body, { status: init.status, headers: { "content-type": init.type } }),
     );
-  }) as typeof fetch;
+  } as typeof fetch;
   return { fetchImpl, seen };
 }
 const ndjson = (lines: unknown[]) =>
@@ -60,6 +60,7 @@ describe("ask-stream: reading the events", () => {
 
     expect(read).toEqual(events);
     expect(seen[0]?.url).toBe(`${session.baseUrl}${askRoute.path}`);
+    expect(seen[0]?.self).not.toBe(connection); // the browser's fetch throws when called as a method of another object
     expect(seen[0]?.init.method).toBe("POST");
     expect(seen[0]?.init.headers).toMatchObject({ authorization: `Bearer ${session.token}` });
     expect(JSON.parse(seen[0]?.init.body as string)).toEqual(request);
