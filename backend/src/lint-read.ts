@@ -18,6 +18,7 @@ import {
   listFindings,
   LINT_RULES,
   readFinding,
+  rootOf,
   type DerivativeRegistry,
   type FindingTarget,
   type SqlDriver,
@@ -182,6 +183,16 @@ export function createLintReads(
       const d = decisions();
       const found = readFinding(db, request.id);
       if (!d || !found || !shown(found)) return { status: "not-found" };
+      // a merge reads each end as its group's top, resting lines included: that top must be shown too
+      if (
+        request.op === "accept" &&
+        found.rule === "synonym" &&
+        [found.target.a, found.target.b].some(
+          (id) => id === null || !gate.semanticShown("item", rootOf(db, id)),
+        )
+      ) {
+        return { status: "not-found" };
+      }
       return db.transaction(() => {
         const done = decideFinding(
           db,
@@ -194,7 +205,19 @@ export function createLintReads(
           at,
         );
         if (done.status === "not-found") return { status: "not-found" as const };
-        if (done.status === "refused") return { status: "refused" as const, reason: done.reason };
+        if (done.status === "refused") {
+          // an existing relation the caller may not see is not announced: the direct add's answer
+          if (done.reason === "value-exists" && found.rule === "missing-link") {
+            const rel = db.all(
+              "SELECT id FROM relations WHERE subject_id = ? AND type = ? AND object_id = ?",
+              [found.target.a, request.relationType ?? null, found.target.b],
+            )[0];
+            if (!rel || !gate.semanticShown("relation", rel.id as number)) {
+              return { status: "not-found" as const };
+            }
+          }
+          return { status: "refused" as const, reason: done.reason };
+        }
         if (request.op === "accept") {
           afterEntry(rowsOf(found.target), at);
         }

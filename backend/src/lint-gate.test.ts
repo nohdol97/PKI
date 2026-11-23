@@ -9,6 +9,7 @@ import {
   migrate,
   registerConnectorInstance,
   saveFact,
+  saveRelation,
   saveSourceRecord,
   userDecisions,
   type DerivativeRegistry,
@@ -224,5 +225,71 @@ describe("lint.gate: a finding does not name an item the caller may not see (K02
         .list()
         .findings.filter((f) => f.rule === "synonym"),
     ).toEqual([]);
+  });
+});
+
+describe("lint.gate: accepting a finding does not reach what the caller may not see (P4F-C1, C2)", () => {
+  it("C1: a synonym accept whose item rests under a hidden representative answers not-found and merges nothing", () => {
+    const open = sourceOf("open", "open");
+    const secret = sourceOf("secret", "secret");
+    const x = insertItem(db, { type: "Project", name: "물결 가", ...attrs });
+    const y = insertItem(db, { type: "Project", name: "물결 나", ...attrs });
+    const z = insertItem(db, { type: "Project", name: "다른 이름", ...attrs });
+    cited(x, "memo", "공개 가", open);
+    cited(y, "memo", "공개 나", open);
+    cited(y, "alias.name", "물결 가", open);
+    cited(z, "memo", "비밀 값", secret);
+    // x rests under the hidden z: a line the policy switched off, so x still stands alone and shows
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 0, 'x')",
+      [x, z],
+    );
+    reflect();
+    const id = db.all("SELECT id FROM lint_findings WHERE rule = 'synonym'")[0]?.id as number;
+    const lines = () => db.all("SELECT count(*) AS n FROM item_merges")[0]?.n;
+    const before = lines();
+
+    const hidden = reads(refuseSecret);
+    expect(hidden.list().findings.filter((f) => f.id === id)).toHaveLength(1); // the finding itself is shown
+    expect(hidden.decide({ id, op: "accept" }, AT)).toEqual({ status: "not-found" });
+    expect(lines()).toBe(before);
+    expect(db.all("SELECT status FROM lint_findings WHERE id = ?", [id])[0]?.status).toBe("open");
+
+    expect(reads(allowAll).decide({ id, op: "accept" }, AT).status).toBe("applied");
+  });
+
+  it("C2: a missing-link accept that meets a hidden relation answers not-found, not value-exists", () => {
+    const secret = sourceOf("secret", "secret");
+    // items the user added carry no lineage; the relation extraction added later has its own
+    const added = (name: string) => {
+      const done = userDecisions.add(db, { kind: "item", type: "Project", name }, AT);
+      if (done.status !== "applied") throw new Error(done.status);
+      return done.ref.id;
+    };
+    const a = added("하늘");
+    const c = added("바람");
+    const rel = saveRelation(db, { subjectId: a, type: "DEPENDS_ON", objectId: c, ...attrs }).id;
+    addEvidence(db, {
+      target: { relationId: rel },
+      sourceVersionId: secret,
+      start: 0,
+      end: 2,
+      quote: "se",
+    });
+    const made = reads(allowAll).report({ rule: "missing-link", kind: "item", a, b: c }, AT);
+    expect(made).toMatchObject({ status: "applied" });
+    const id = db.all("SELECT id FROM lint_findings WHERE rule = 'missing-link'")[0]?.id as number;
+    const relations = () => db.all("SELECT count(*) AS n FROM relations")[0]?.n;
+    const before = relations();
+    const accept = { id, op: "accept", relationType: "DEPENDS_ON" } as const;
+
+    expect(reads(refuseSecret).decide(accept, AT)).toEqual({ status: "not-found" });
+    expect(relations()).toBe(before);
+    expect(db.all("SELECT status FROM lint_findings WHERE id = ?", [id])[0]?.status).toBe("open");
+
+    expect(reads(allowAll).decide(accept, AT)).toEqual({
+      status: "refused",
+      reason: "value-exists",
+    });
   });
 });
