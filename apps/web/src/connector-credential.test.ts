@@ -4,11 +4,10 @@
 import { CREDENTIAL_RETRY_MIN_MS, SecretValueSchema, type RouteResponse } from "@pki/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createApiClient } from "./api.ts";
+import { MAX_SECRET_LENGTH, checkSecretValue } from "./api-key.ts";
 import {
   changeCredential,
-  checkCredentialValue,
   credentialOutcomeText,
-  MAX_CREDENTIAL_LENGTH,
   rereadDelaysMs,
   type CredentialOutcome,
 } from "./connector-credential.ts";
@@ -128,9 +127,9 @@ describe("connector-credential (I06-C11)", () => {
   });
 
   it("F3 the limit is the shell's: a value of exactly that many characters is stored whole, one more is refused, never cut", async () => {
-    expect(SecretValueSchema.safeParse("x".repeat(MAX_CREDENTIAL_LENGTH)).success).toBe(true);
-    expect(SecretValueSchema.safeParse("x".repeat(MAX_CREDENTIAL_LENGTH + 1)).success).toBe(false);
-    const whole = "x".repeat(MAX_CREDENTIAL_LENGTH);
+    expect(SecretValueSchema.safeParse("x".repeat(MAX_SECRET_LENGTH)).success).toBe(true);
+    expect(SecretValueSchema.safeParse("x".repeat(MAX_SECRET_LENGTH + 1)).success).toBe(false);
+    const whole = "x".repeat(MAX_SECRET_LENGTH);
     const ok = harness();
     await changeCredential(ok.deps, "mail-1", NAME, { kind: "save", value: whole });
     expect(ok.bridge.setSecret).toHaveBeenCalledWith(NAME, whole);
@@ -142,8 +141,8 @@ describe("connector-credential (I06-C11)", () => {
     expect(outcome).toEqual({ status: "refused", reason: "too-long" });
     expect(refused.bridge.setSecret).not.toHaveBeenCalled();
     expect(refused.requests).toEqual([]);
-    expect(credentialOutcomeText(outcome)).toContain(String(MAX_CREDENTIAL_LENGTH));
-    expect(checkCredentialValue(whole)).toBeUndefined();
+    expect(credentialOutcomeText(outcome)).toContain(String(MAX_SECRET_LENGTH));
+    expect(checkSecretValue(whole)).toBeUndefined();
   });
 
   it("F3 a value with a line break is refused whatever its kind of break: nothing stored, no notice, fixed words", async () => {
@@ -156,6 +155,24 @@ describe("connector-credential (I06-C11)", () => {
       expect(credentialOutcomeText(outcome)).toContain("한 줄 값만 넣을 수 있습니다");
       expect(credentialOutcomeText(outcome)).not.toContain(CANARY);
     }
+  });
+
+  it("I06F-C1 ④ the same two refusals come back from changeCredential with their own words, no store, no notice, no value", async () => {
+    const texts: string[] = [];
+    for (const [value, reason] of [
+      [`a\n${CANARY}`, "line-break"],
+      [`a\r${CANARY}`, "line-break"],
+      ["x".repeat(MAX_SECRET_LENGTH + 1), "too-long"],
+    ] as const) {
+      const { bridge, requests, deps } = harness();
+      const outcome = await changeCredential(deps, "mail-1", NAME, { kind: "save", value });
+      expect(outcome).toEqual({ status: "refused", reason });
+      expect(bridge.setSecret).not.toHaveBeenCalled();
+      expect(requests).toEqual([]);
+      texts.push(credentialOutcomeText(outcome));
+      expect(texts.at(-1)).not.toContain(CANARY);
+    }
+    expect(texts[0]).not.toBe(texts[2]);
   });
 
   it("F3 a paste the screen refused is an action too: its words, no store, no notice", async () => {

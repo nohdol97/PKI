@@ -1302,8 +1302,9 @@ describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a creden
     expect(connectors).toContain('if (entry.summary.reason === "credential-rejected" || entry.slot) return entry.summary.state;');
     expect(connectors).toContain('return { stop: "credential-unusable" }; // the same call is not tried again (I06-R10)');
     const screen = read("apps/web/src/connector-credential.ts");
-    expect(screen).toContain("export const MAX_CREDENTIAL_LENGTH = 8192;");
-    expect(screen).toContain('if (/[\\r\\n]/.test(value)) return "line-break";');
+    const secretCheck = read("apps/web/src/api-key.ts");
+    expect(secretCheck).toContain("export const MAX_SECRET_LENGTH = 8192;");
+    expect(secretCheck).toContain('if (/[\\r\\n]/.test(value)) return "line-break";');
     expect(read("apps/web/src/connector-text.ts")).toContain('"이 실행에는 저장소가 없습니다.');
     expect(screen).toContain('queued: "곧 반영됩니다."');
     expect(screen).toContain('skipped: "앱을 다시 시작해야 반영됩니다."');
