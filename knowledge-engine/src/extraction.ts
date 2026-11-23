@@ -96,7 +96,7 @@ import {
 import { linkPropagationSupersedes, refreshConflicts } from "./conflicts.ts";
 import { assessAfterExtraction } from "./auto-verify.ts";
 import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
-import { recomputeDependencyDelay } from "./dependency-delay.ts";
+import { recomputeInsights } from "./insight-code-rules.ts";
 import {
   linkRefused,
   markLinkRefused,
@@ -869,8 +869,9 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       itemKey: "dependency-delay",
       lineage: lineageOf(written.flatMap((w) => w.lineage.slice(1))),
       write: (tx) => {
-        recomputeDependencyDelay(tx, [...touched], {
-          combinable: (lineage) => registry.combinable(tx, lineage),
+        recomputeInsights(tx, [...touched], {
+          scope: { combinable: (lineage) => registry.combinable(tx, lineage) },
+          at: now().toISOString(),
         });
       },
     };
