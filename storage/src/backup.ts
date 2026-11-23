@@ -519,7 +519,10 @@ function keepLocalSettings(live: SqlDriver, staged: SqlDriver): void {
   staged.transaction(() => {
     staged.run(`DELETE FROM settings WHERE ${keptSetting} OR key = ?`, [RESTORE_LAST_SETTING]);
     for (const row of mine) {
-      staged.run("INSERT INTO settings (key, value) VALUES (?, ?)", [row.key, row.value]);
+      staged.run("INSERT INTO settings (key, value) VALUES (?, ?)", [
+        row.key ?? null,
+        row.value ?? null,
+      ]);
     }
   });
 }

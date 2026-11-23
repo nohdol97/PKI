@@ -71,6 +71,8 @@ export const BackupStatusSchema = z.object({
   last: RestoreLastSchema.nullable(),
   /** The code of a restore that failed at start and was put back (R13); null when none. */
   failure: z.string().nullable(),
+  /** The previous-data copy a swap left is still beside the live file (H01F-R2). */
+  previousCopy: z.boolean(),
   minPassphraseLength: z.int().positive(),
 });
 
@@ -195,4 +197,6 @@ export const RestoreResponseSchema = z
     { message: "staged carries the summary, refused a code" },
   );
 
-export const CancelRestoreResponseSchema = z.object({ status: z.enum(["cancelled", "none"]) });
+export const CancelRestoreResponseSchema = z.object({
+  status: z.enum(["cancelled", "none", "refused"]),
+});

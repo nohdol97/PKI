@@ -4,6 +4,7 @@
 import { routes } from "@pki/contracts";
 import {
   BACKUP_FOLDER_SETTING,
+  BEFORE_RESTORE_FILE,
   RESTORE_DIR,
   createBackup,
   migrations,
@@ -190,7 +191,7 @@ describe("backup.api (H01-C1c)", () => {
     expect(readdirSync(again.data)).not.toContain("backup-tmp");
   });
 
-  it("restores onto an installation that has no secrets: the knowledge reads, and the key answers 'missing' as before", async () => {
+  it("restores onto an installation that has no secrets: the knowledge reads, and the backup's provider address is not applied (H01F-R6)", async () => {
     const a = await boot("a");
     addSource(a, "keep", BODY);
     await a.call(routes.writeSettings.path, "POST", {
@@ -213,9 +214,9 @@ describe("backup.api (H01-C1c)", () => {
     const restored = await boot("b");
     expect(await shown(restored)).toEqual(["keep"]);
     const settings = (await restored.call(routes.settings.path, "GET")).body as {
-      openaiCompatible: { key: string };
+      openaiCompatible: { baseUrl: string | null };
     };
-    expect(settings.openaiCompatible.key).toBe("missing");
+    expect(settings.openaiCompatible.baseUrl).toBeNull();
   });
 });
 
@@ -306,8 +307,50 @@ describe("backup.api refusals (H01-C2a)", () => {
       confirmBackupId: own.summary.backupId,
     });
     expect(res.body).toEqual({ status: "refused", code: "already-pending" });
-    expect((await live.call(routes.cancelRestore.path, "DELETE")).body).toEqual({ status: "none" });
     expect(readFileSync(marker, "utf8")).toBe('{"state":"sta');
+  });
+
+  it("H01F-C2: with no previous-data copy, cancel clears an unreadable marker and a new staging is accepted", async () => {
+    const live = await boot("live");
+    await chooseFolder(live);
+    const own = await makeBackup(live);
+    mkdirSync(join(live.data, RESTORE_DIR));
+    writeFileSync(join(live.data, RESTORE_DIR, "pending.json"), '{"state":"sta');
+    expect((await live.call(routes.cancelRestore.path, "DELETE")).body).toEqual({
+      status: "cancelled",
+    });
+    expect(existsSync(join(live.data, RESTORE_DIR))).toBe(false);
+    const res = await live.call(routes.restoreBackup.path, "POST", {
+      fileName: own.fileName,
+      passphrase: PASSPHRASE,
+      confirmBackupId: own.summary.backupId,
+    });
+    expect(res.body).toMatchObject({ status: "staged" });
+  });
+
+  it("H01F-C2: a previous-data copy makes cancel and a new staging refuse, deleting nothing, and the status shows it", async () => {
+    const live = await boot("live");
+    await chooseFolder(live);
+    const own = await makeBackup(live);
+    mkdirSync(join(live.data, RESTORE_DIR));
+    const marker = join(live.data, RESTORE_DIR, "pending.json");
+    writeFileSync(marker, JSON.stringify({ state: "failed", code: "start-failed" }));
+    const before = join(live.data, BEFORE_RESTORE_FILE);
+    writeFileSync(before, "previous data");
+    expect((await live.call(routes.backupStatus.path, "GET")).body).toMatchObject({
+      previousCopy: true,
+    });
+    expect((await live.call(routes.cancelRestore.path, "DELETE")).body).toEqual({
+      status: "refused",
+    });
+    const res = await live.call(routes.restoreBackup.path, "POST", {
+      fileName: own.fileName,
+      passphrase: PASSPHRASE,
+      confirmBackupId: own.summary.backupId,
+    });
+    expect(res.body).toEqual({ status: "refused", code: "already-pending" });
+    expect(existsSync(marker)).toBe(true);
+    expect(readFileSync(before, "utf8")).toBe("previous data");
   });
 
   it("an older schema is lifted by the staging: the restart opens it at this build's number", async () => {

@@ -7,6 +7,7 @@ import { errorClass, log, type BuildKind } from "@pki/providers";
 import {
   BACKUP_EXTENSION,
   BACKUP_FOLDER_SETTING,
+  BEFORE_RESTORE_FILE,
   BackupExistsError,
   BackupFileError,
   MIN_PASSPHRASE_LENGTH,
@@ -113,6 +114,8 @@ export function createBackupApi(options: BackupApiOptions): BackupApi {
   const { db, dataDir } = options;
   const now = options.now ?? Date.now;
   const folderOf = () => readSetting(db, BACKUP_FOLDER_SETTING);
+  /** The copy a swap left of the previous data: while it is there, a cancel or a new staging would orphan it (H01F-R2). */
+  const previousCopy = () => existsSync(join(dataDir, BEFORE_RESTORE_FILE));
 
   /** The path of a file by its bare name inside the chosen folder, or the refusal. */
   const fileIn = (
@@ -152,6 +155,7 @@ export function createBackupApi(options: BackupApiOptions): BackupApi {
             : marker?.state === "failed"
               ? marker.code
               : null,
+        previousCopy: previousCopy(),
         minPassphraseLength: MIN_PASSPHRASE_LENGTH,
       };
     },
@@ -246,6 +250,7 @@ export function createBackupApi(options: BackupApiOptions): BackupApi {
     async restore({ fileName, passphrase, confirmBackupId }) {
       const file = fileIn(fileName);
       if ("code" in file) return { status: "refused", code: file.code };
+      if (previousCopy()) return { status: "refused", code: "already-pending" };
       const result = stageRestore({
         db,
         open: options.open,
@@ -261,9 +266,11 @@ export function createBackupApi(options: BackupApiOptions): BackupApi {
     },
 
     cancel() {
+      if (previousCopy()) return { status: "refused" };
       const marker = markerOf(dataDir);
-      if (marker === "unreadable") return { status: "none" };
-      if (marker?.state !== "staged" && marker?.state !== "failed") return { status: "none" };
+      if (marker !== "unreadable" && marker?.state !== "staged" && marker?.state !== "failed") {
+        return { status: "none" };
+      }
       removeRestoreArtifacts(dataDir);
       return { status: "cancelled" };
     },
