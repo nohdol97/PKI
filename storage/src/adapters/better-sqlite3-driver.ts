@@ -4,6 +4,9 @@ import type { OpenSqlDriver, SqlRow } from "../sql-driver.ts";
 const blockingSleep = (ms: number) =>
   void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
+/** Prepared statements kept per connection; SQL with a varying `IN (?, ...)` list must not grow the map without end. */
+const STATEMENT_CACHE_LIMIT = 256;
+
 export const openBetterSqlite3: OpenSqlDriver = (path, options = {}) => {
   const {
     busyTimeoutMs = 5000,
@@ -21,13 +24,24 @@ export const openBetterSqlite3: OpenSqlDriver = (path, options = {}) => {
   // A row's history lines go with the row through ON DELETE CASCADE (S01-R6), and every other cascade
   // of the schema too; the setting is per connection, so it is set here, not left to a compile default.
   db.pragma("foreign_keys = ON");
+  const statements = new Map<string, Database.Statement>();
+  const statement = (sql: string): Database.Statement => {
+    const kept = statements.get(sql);
+    if (kept) return kept;
+    const prepared = db.prepare(sql);
+    if (statements.size >= STATEMENT_CACHE_LIMIT) {
+      statements.delete(statements.keys().next().value as string);
+    }
+    statements.set(sql, prepared);
+    return prepared;
+  };
   return {
     exec: (sql) => void db.exec(sql),
     run: (sql, params = []) => {
-      const { changes, lastInsertRowid } = db.prepare(sql).run(...params);
+      const { changes, lastInsertRowid } = statement(sql).run(...params);
       return { changes, lastInsertRowid: Number(lastInsertRowid) };
     },
-    all: (sql, params = []) => db.prepare(sql).all(...params) as SqlRow[],
+    all: (sql, params = []) => statement(sql).all(...params) as SqlRow[],
     transaction: (fn, txOptions) => {
       const { beforeCommit } = txOptions ?? {};
       if (!beforeCommit) {
@@ -58,6 +72,9 @@ export const openBetterSqlite3: OpenSqlDriver = (path, options = {}) => {
         throw error;
       }
     },
-    close: () => void db.close(),
+    close: () => {
+      statements.clear();
+      db.close();
+    },
   };
 };
