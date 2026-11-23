@@ -23,6 +23,7 @@ import os
 import platform as platform_module
 import sqlite3
 import sys
+from urllib.parse import quote
 
 OK_EXIT, WRITE_EXIT, CONFIG_EXIT, NOTICE_EXIT = 0, 1, 2, 3
 NOTICE = ("배포처 후속: S23 Windows 11 설치본이 아닌 환경의 실행은 배포처 결과로 기록하지 않는다. "
@@ -130,7 +131,7 @@ def _decide(db, key, entry):
 
 def record(state, db_path, answers, environment):
     """The record: one verdict per scenario and the environment. A verdict the database can give wins over an answer."""
-    con = sqlite3.connect("file:%s?mode=ro" % db_path.replace("\\", "/"), uri=True)
+    con = sqlite3.connect("file:%s?mode=ro" % quote(db_path.replace("\\", "/"), safe="/:"), uri=True)
     try:
         items = {}
         for key in SCENARIOS:
