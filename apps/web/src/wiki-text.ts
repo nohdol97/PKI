@@ -65,6 +65,8 @@ export function claimMarks(claim: WikiClaim): string[] {
 export const WIKI_EMPTY = "아직 만들어진 페이지가 없습니다.";
 export const WIKI_STALE =
   "지식이 바뀌어 페이지를 다시 만드는 중이거나 곧 만듭니다. 보이는 내용이 최신이 아닐 수 있습니다.";
+export const WIKI_BUILD_DEAD =
+  "페이지를 만드는 작업이 실패해 멈췄습니다. 지식이 다시 바뀌거나 '다시 만들기'를 누르면 다시 시도합니다.";
 export const WIKI_PAGE_GONE = "이 페이지는 더 이상 없습니다. 근거 원본이 지워졌을 수 있습니다.";
 export const WIKI_CLAIM_NO_EVIDENCE = "보여 줄 수 있는 근거가 없습니다.";
 export const WIKI_NOT_FACT = "페이지는 정본에서 모아 만든 사본이며, 그 자체는 근거가 아닙니다.";

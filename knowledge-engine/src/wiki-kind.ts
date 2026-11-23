@@ -54,7 +54,7 @@ export const WIKI_PAGE_KIND: DerivativeKind = {
     const { tx } = ctx;
     const keys = new Set(snapshot.map(({ ref }) => ref.id));
     const rendered = new Map(renderWikiPages(tx, keys).map((page) => [page.key, page]));
-    const at = new Date().toISOString();
+    const at = ctx.now();
     let removed = 0;
     let recomputed = 0;
     for (const key of [...keys].sort()) {

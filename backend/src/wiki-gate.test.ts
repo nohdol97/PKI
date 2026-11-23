@@ -390,3 +390,41 @@ describe("wiki.hidden: a hidden claim stays reachable for the way back (K01-R11,
     expect(JSON.stringify(guarded)).not.toContain(SECRET);
   });
 });
+
+describe("wiki.gate: change counts do not reveal claims the caller cannot see (#220, K01-D19)", () => {
+  it("zeroes the added and removed counts of a page that holds a refused claim, in its history and in the index log", () => {
+    const open = source("open", "공개 본문", ["open"]);
+    const secret = source("secret", `${SECRET} 본문`, ["secret"]);
+    const item = insertItem(db, { type: "Project", name: "공개 항목", ...attrs });
+    citedFact(item, "공개 값", open);
+    const build = (at: string) =>
+      db.transaction(() =>
+        commitDerived(db, { source: null, items: planWikiBuild(db, { at }).items }),
+      );
+    build("2026-11-23T00:00:00.000Z");
+    const alias = insertItem(db, { type: "Project", name: `${SECRET} 별칭`, ...attrs });
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [alias, item],
+    );
+    citedFact(alias, `${SECRET} 값`, secret);
+    build("2026-11-23T00:01:00.000Z");
+    const key = `projects/${item}`;
+    const readsOf = (p: ScopePolicy) => {
+      const registry = createProductRegistry({ policy: p });
+      return createWikiReads(db, registry, createReadGate(db, registry));
+    };
+    const counts = (reads: ReturnType<typeof readsOf>) => ({
+      history: reads.page(key)?.history.map((h) => h.added),
+      log: reads.index().log.map((l) => l.added),
+    });
+
+    expect(counts(readsOf({ ...policy, allows: () => true }))).toEqual({
+      history: [1, 1],
+      log: [1, 1],
+    });
+    const restricted = counts(readsOf(policy));
+    expect(restricted.history).toEqual([0, 0]);
+    expect(restricted.log).toEqual([0, 0]);
+  });
+});

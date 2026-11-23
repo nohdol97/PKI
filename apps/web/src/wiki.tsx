@@ -14,6 +14,7 @@ import {
   pageKindText,
   rebuildText,
   validityText,
+  WIKI_BUILD_DEAD,
   WIKI_CLAIM_NO_EVIDENCE,
   WIKI_EMPTY,
   WIKI_NOT_FACT,
@@ -244,6 +245,17 @@ export function PageView(props: PageViewProps) {
   );
 }
 
+/** `dead`: the last build gave up, so reading again cannot catch up and the screen says so instead of polling. */
+export const buildState = (
+  index: Pick<Index, "stale" | "buildDead"> | undefined,
+  page: Pick<Page, "stale"> | undefined,
+): "idle" | "building" | "dead" =>
+  index?.buildDead === true
+    ? "dead"
+    : index?.stale === true || page?.stale === true
+      ? "building"
+      : "idle";
+
 export function Wiki({ api }: { api: ApiClient }) {
   const [index, setIndex] = useState<Index>();
   const [page, setPage] = useState<Page>();
@@ -286,7 +298,8 @@ export function Wiki({ api }: { api: ApiClient }) {
 
   useEffect(() => void readIndex(), [readIndex]);
   const pageKey = page?.key;
-  const pending = index?.stale === true || page?.stale === true;
+  const state = buildState(index, page);
+  const pending = state === "building";
   // a build runs in the background; the screen reads again until it has caught up
   useEffect(() => {
     if (!pending) return;
@@ -330,7 +343,11 @@ export function Wiki({ api }: { api: ApiClient }) {
         </button>{" "}
         {rebuilding && <span role="status">{rebuilding}</span>}
       </p>
-      {index?.stale && <p role="status">{WIKI_STALE}</p>}
+      {state === "dead" ? (
+        <p role="alert">{WIKI_BUILD_DEAD}</p>
+      ) : (
+        index?.stale && <p role="status">{WIKI_STALE}</p>
+      )}
       <h2>페이지</h2>
       {index && index.kinds.length === 0 && <p>{WIKI_EMPTY}</p>}
       {index?.kinds.map((k) => (

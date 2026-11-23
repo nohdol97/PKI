@@ -10,7 +10,7 @@ import { FakeProvider, fixtureExtraction, send } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   openCanonicalDb,
   productAdapters,
@@ -233,5 +233,34 @@ describe("wiki.summary-flow: the setting, consent and the state a page shows (K0
     const { summary } = (await call("wikiPage", { key })).body;
     expect(summary.state).toBe("ready");
     expect(summary.sentences?.[0]?.text).toBe("요약 문장");
+  });
+});
+
+describe("wiki.flow: a failing after-write hook (#220)", () => {
+  it("answers a committed write with its own result and logs the route and an error class only", async () => {
+    const { call, importIn } = await backend();
+    await importIn(read("v02-mail.jsonl"));
+    const key = db.all("SELECT key FROM wiki_pages ORDER BY key")[0]?.key as string;
+    db.exec("DELETE FROM wiki_state"); // the hook's read of the Wiki state now throws
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    });
+    try {
+      const res = await call("wikiEdit", { op: "note-add", key, text: "내 메모" });
+      expect(res.status).toBe(200);
+      expect(db.all("SELECT note FROM wiki_edits")).toHaveLength(1);
+      const failed = logged.map(
+        (l) => JSON.parse(l) as { event: string; route?: string; error?: string },
+      );
+      expect(failed).toContainEqual({
+        event: "after-write-failed",
+        route: "wikiEdit",
+        error: "TypeError",
+      });
+      expect(logged.join("\n")).not.toContain("내 메모");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

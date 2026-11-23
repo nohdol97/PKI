@@ -1193,7 +1193,14 @@ async function handle(
     });
   }
   // a write that succeeded may have left the Wiki's pages behind (K01-R5)
-  if (route.method === "POST") afterWrite();
+  // the write is committed: a hook that throws must not turn it into a failed request
+  if (route.method === "POST") {
+    try {
+      afterWrite();
+    } catch (error) {
+      log("after-write-failed", { route: name, error: errorClass(error) });
+    }
+  }
   // Responses are checked against the shared schema before they leave.
   reply(res, 200, routes[name].response.parse(result));
 }
