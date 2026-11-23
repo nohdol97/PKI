@@ -111,6 +111,26 @@ test("Settings saves the endpoint, shows the key by presence, and asks again for
 
 // review N2: the key leaves the page as soon as it is handed to the preload. The
 // browser stands in a recording preload (no real store, no keychain).
+async function recordingPreload(page: Page) {
+  await page.addInitScript(() => {
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      pkiCalls: calls,
+      pki: {
+        getSession: () => fetch("/__pki/session").then((r) => r.json()),
+        // records the length only: the value stays out of the page's state
+        setSecret: async (name: string, value: string) => (
+          calls.push(["set", name, value.length]),
+          { ok: true }
+        ),
+        deleteSecret: async (name: string) => (calls.push(["delete", name]), { ok: true }),
+      },
+    });
+  });
+}
+const preloadCalls = (page: Page) =>
+  page.evaluate(() => (window as unknown as { pkiCalls: unknown[] }).pkiCalls);
+
 test("the key field hands the key to the preload under the host's name, then clears", async ({
   target,
   playwright,
@@ -119,31 +139,66 @@ test("the key field hands the key to the preload under the host's name, then cle
   const dir = mkdtempSync(join(tmpdir(), "pki-e2e-provider-key-"));
   const { page, stop } = await open(target, dir, playwright.chromium);
   try {
-    await page.addInitScript(() => {
-      const calls: unknown[] = [];
-      Object.assign(window, {
-        pkiCalls: calls,
-        pki: {
-          getSession: () => fetch("/__pki/session").then((r) => r.json()),
-          // records the length only: the value stays out of the page's state
-          setSecret: async (name: string, value: string) => (
-            calls.push(["set", name, value.length]),
-            { ok: true }
-          ),
-          deleteSecret: async (name: string) => (calls.push(["delete", name]), { ok: true }),
-        },
-      });
-    });
+    await recordingPreload(page);
     await page.reload();
     await page.getByRole("navigation").getByRole("button", { name: "설정" }).click();
     await saveEndpoint(page, "https://one.synthetic.example/v1");
     const field = page.getByLabel("one.synthetic.example에 쓸 API 키");
     await field.fill("sk-e2e-typed");
+    // I06F-C7 ①: while typing, the key is in the field only: not in the DOM's value attribute, not in the page
+    expect((await field.getAttribute("value")) ?? "").not.toContain("sk-e2e-typed");
+    expect(await page.content()).not.toContain("sk-e2e-typed");
     await page.getByRole("button", { name: "키 저장" }).click();
     await expect(field).toHaveValue("");
-    expect(
-      await page.evaluate(() => (window as unknown as { pkiCalls: unknown[] }).pkiCalls),
-    ).toEqual([["set", openaiKeySecretName("one.synthetic.example"), "sk-e2e-typed".length]]);
+    expect(await preloadCalls(page)).toEqual([
+      ["set", openaiKeySecretName("one.synthetic.example"), "sk-e2e-typed".length],
+    ]);
+    expect(await page.content()).not.toContain("sk-e2e-typed");
+  } finally {
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// I06F-C8: the key field refuses what the Sources screen's slot refuses, in the same words, in the alert place
+// (not as "OS 보호 저장소"), and never asks the preload.
+test("the key field refuses a pasted line break and a key over the limit in words, without asking the preload", async ({
+  target,
+  playwright,
+}) => {
+  test.skip(target !== "browser", "the Electron preload would reach the real keychain");
+  const dir = mkdtempSync(join(tmpdir(), "pki-e2e-provider-refuse-"));
+  const { page, stop } = await open(target, dir, playwright.chromium);
+  try {
+    await recordingPreload(page);
+    await page.reload();
+    await page.getByRole("navigation").getByRole("button", { name: "설정" }).click();
+    await saveEndpoint(page, "https://one.synthetic.example/v1");
+    const field = page.getByLabel("one.synthetic.example에 쓸 API 키");
+    const alert = page.getByRole("alert");
+
+    // C8 ①: a paste with a line break is cancelled, and what was typed stays
+    await field.fill("abc");
+    const letThrough = await field.evaluate((input) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "line1\nline2");
+      return input.dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+      );
+    });
+    expect(letThrough).toBe(false);
+    await expect(alert).toContainText("한 줄 값만 넣을 수 있습니다");
+    await expect(field).toHaveValue("abc");
+
+    // C8 ②: over the limit is refused as the limit, never as the store's failure
+    await field.fill("x".repeat(8193));
+    await field.press("Enter");
+    await expect(alert).toContainText("8192");
+    await expect(alert).not.toContainText("OS 보호 저장소");
+    await expect(field).toHaveValue("");
+
+    // C8 ③
+    expect(await preloadCalls(page)).toEqual([]);
   } finally {
     await stop();
     rmSync(dir, { recursive: true, force: true });

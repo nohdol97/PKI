@@ -22,12 +22,38 @@ export function secretBridge(
 
 const isOk = (result: unknown) => (result as { ok?: unknown } | null)?.ok === true;
 
-/** "saved", or "unavailable" when the shell could not store it (no OS protection). */
+/** Why a value was refused before it reached the shell: it would have been changed or cut (I06-T04 decision, F3). */
+export type SecretRefusal = "line-break" | "too-long";
+
+/** What a secret input hands over: a value to store, a delete, or an insertion the field itself refused. */
+export type SecretAction =
+  { kind: "save"; value: string } | { kind: "delete" } | { kind: "refused"; reason: SecretRefusal };
+
+/** The shell's limit (`SecretValueSchema`), in UTF-16 code units; a longer value is refused, never cut. */
+export const MAX_SECRET_LENGTH = 8192;
+
+/** A secret entered on a screen is one line of at most `MAX_SECRET_LENGTH` characters. */
+export function checkSecretValue(value: string): SecretRefusal | undefined {
+  if (/[\r\n]/.test(value)) return "line-break";
+  return value.length > MAX_SECRET_LENGTH ? "too-long" : undefined;
+}
+
+export const SECRET_REFUSAL_TEXT = {
+  "line-break": "한 줄 값만 넣을 수 있습니다. 여러 줄 값(PEM, JSON)은 이 화면에서 받지 않습니다.",
+  "too-long": `값이 너무 깁니다. ${MAX_SECRET_LENGTH}자까지 넣을 수 있고, 저장하지 않았습니다.`,
+} as const satisfies Record<SecretRefusal, string>;
+
+/**
+ * "saved", "unavailable" when the shell could not store it (no OS protection), or the refusal of the value
+ * itself: checked here, in the one function that asks the shell, so no screen can skip it (I06F-R5).
+ */
 export async function saveApiKey(
   bridge: SecretBridge,
   keyName: string,
   value: string,
-): Promise<"saved" | "unavailable"> {
+): Promise<"saved" | "unavailable" | SecretRefusal> {
+  const refusal = checkSecretValue(value);
+  if (refusal) return refusal;
   return isOk(await bridge.setSecret(keyName, value)) ? "saved" : "unavailable";
 }
 

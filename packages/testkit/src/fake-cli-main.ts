@@ -15,6 +15,13 @@ import type { FakeCliConfig } from "./fake-cli.ts";
 const [stateDir = "", name = "", ...args] = process.argv.slice(2);
 const config = JSON.parse(readFileSync(join(stateDir, "config.json"), "utf8")) as FakeCliConfig;
 
+if (config.startDelayMs !== undefined) {
+  // a slow start: nothing is recorded yet and SIGTERM simply ends the process
+  process.once("SIGTERM", () => process.exit(143));
+  await new Promise((resolve) => setTimeout(resolve, config.startDelayMs));
+  process.removeAllListeners("SIGTERM");
+}
+
 const flags = JSON.parse(
   readFileSync(
     resolve(import.meta.dirname, "../../../verification/r02-cli-isolation/profiles.json"),

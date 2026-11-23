@@ -36,6 +36,8 @@ interface Backend {
   rebuild: "done" | "queued" | "skipped";
   lists: number;
   notices: { url: string; body: string }[];
+  /** When set, the notice is answered only once this promise settles (a slow backend). */
+  hold?: Promise<void>;
 }
 
 /** Answers the list and the change notice; every request body is kept for the search for the value. */
@@ -53,7 +55,8 @@ async function stubBackend(page: Page, backend: Backend) {
       json: { connectors: [summary(), { id: "plain", kind: "fork", state: "ready" }] },
     });
   });
-  await page.route(NOTICE_PATH, (route: Route) => {
+  await page.route(NOTICE_PATH, async (route: Route) => {
+    await backend.hold;
     backend.notices.push({
       url: route.request().url(),
       body: route.request().postData() ?? "",
@@ -272,6 +275,150 @@ test("a queued notice says it will be reflected soon and reads the list again af
     await page.getByLabel("mail-1 token 값").fill(CANARY);
     await page.getByRole("button", { name: "mail-1 token 저장" }).click();
     await expect(page.getByRole("status")).toContainText("앱을 다시 시작해야 반영됩니다.");
+  } finally {
+    await stop();
+  }
+});
+
+// I06F-C3/C4: the three ways text arrives that a script can see before the field takes it. Each carries a line
+// break; each must be cancelled (the event's dispatch returns false) and answered with the fixed words.
+const BROKEN = "-----BEGIN-----\nsynthetic\n-----END-----";
+const REFUSED = "한 줄 값만 넣을 수 있습니다";
+
+type Way = "keyboard" | "paste" | "drop" | "beforeinput-drop";
+const WAYS: readonly Way[] = ["keyboard", "paste", "drop", "beforeinput-drop"];
+
+/** Puts `text` into the field by `way`; true when the page let the event through (did not cancel it). */
+async function insert(page: Page, way: Way, text: string): Promise<boolean> {
+  const field = page.getByLabel("mail-1 token 값");
+  if (way === "keyboard") {
+    // the keyboard path is the browser's own insertion; the event is the real beforeinput
+    await field.focus();
+    await page.keyboard.insertText(text);
+    return true;
+  }
+  return field.evaluate(
+    (input, { way, text }) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      const event =
+        way === "paste"
+          ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true })
+          : way === "drop"
+            ? new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true })
+            : // a drop as the editing layer reports it: no `data`, the text only in `dataTransfer`
+              new InputEvent("beforeinput", {
+                inputType: "insertFromDrop",
+                dataTransfer: data,
+                bubbles: true,
+                cancelable: true,
+              });
+      return input.dispatchEvent(event);
+    },
+    { way, text },
+  );
+}
+
+for (const way of ["drop", "beforeinput-drop"] as const) {
+  test(`I06F-C3 a ${way} with a line break is cancelled and answered in words; without a break it is let through; nothing reaches the preload or the backend`, async ({
+    page,
+  }) => {
+    const backend = fresh();
+    await recordingPreload(page, true);
+    const { show, stop } = await open(page, backend);
+    try {
+      await show();
+      const status = page.getByRole("status");
+      expect(await insert(page, way, "no-break-here"), "without a break").toBe(true);
+      await expect(status).toHaveCount(0);
+      expect(await insert(page, way, BROKEN), "with a break").toBe(false);
+      await expect(status).toContainText(REFUSED);
+      expect(await preloadCalls(page)).toEqual([]);
+      expect(backend.notices).toEqual([]);
+    } finally {
+      await stop();
+    }
+  });
+}
+
+for (const way of WAYS.filter((w) => w !== "beforeinput-drop")) {
+  test(`I06F-C4 a refused ${way} with a line break leaves what was typed: same value, save still on, Enter stores it`, async ({
+    page,
+  }) => {
+    const backend = fresh();
+    await recordingPreload(page, true);
+    const { show, stop } = await open(page, backend);
+    try {
+      await show();
+      const field = page.getByLabel("mail-1 token 값");
+      await field.fill("abc");
+      await insert(page, way, BROKEN);
+      await expect(page.getByRole("status")).toContainText(REFUSED);
+      await expect(field).toHaveValue("abc");
+      await expect(page.getByRole("button", { name: "mail-1 token 저장" })).toBeEnabled();
+      await field.press("Enter");
+      await expect(page.getByRole("status")).toContainText("반영했습니다.");
+      expect(await preloadCalls(page)).toEqual([["set", NAME, 3]]);
+    } finally {
+      await stop();
+    }
+  });
+}
+
+test("I06F-C5 the focus is not taken back from where the user moved while the notice was pending", async ({
+  page,
+}) => {
+  let release = () => {};
+  const backend = fresh({ hold: new Promise<void>((resolve) => (release = resolve)) });
+  await recordingPreload(page, true);
+  const { show, stop } = await open(page, backend);
+  try {
+    await show();
+    const field = page.getByLabel("mail-1 token 값");
+    await field.fill(CANARY);
+    await field.press("Enter");
+    const other = page.getByRole("button", { name: "plain 동기화" });
+    await other.focus();
+    release();
+    await expect(page.getByRole("status")).toContainText("반영했습니다.");
+    await page.waitForTimeout(150); // the refocus, if any, runs just after the words appear
+    await expect(other).toBeFocused();
+  } finally {
+    await stop();
+  }
+});
+
+test("I06F-C6 KNOWN LIMIT: a value put in by code arrives with its line breaks already removed, so the screen cannot tell and stores it", async ({
+  page,
+}) => {
+  // This records a limit, not a wish: a password field removes CR and LF (the HTML value sanitization) before
+  // any script can read the value. The screen has no way to know a break was there; what remains is stored and
+  // "반영했습니다." is shown. The length check still holds on this path (R5, R6).
+  const backend = fresh();
+  await recordingPreload(page, true);
+  const { show, stop } = await open(page, backend);
+  try {
+    await show();
+    const field = page.getByLabel("mail-1 token 값");
+    // as an autofill does: the browser's own value setter, then an input event
+    const put = (value: string) =>
+      field.evaluate((input: HTMLInputElement, value) => {
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        set?.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return input.value;
+      }, value);
+    const seen = await put("ab\ncd\r\nef");
+    expect(seen).not.toMatch(/[\r\n]/); // 1
+    expect(seen).toBe("abcdef"); // measured in Chromium: the breaks are removed, not turned into spaces
+    await field.press("Enter");
+    await expect(page.getByRole("status")).toContainText("반영했습니다."); // 2
+    expect(await preloadCalls(page)).toEqual([["set", NAME, seen.length]]);
+
+    await put("z".repeat(8193));
+    await field.press("Enter");
+    await expect(page.getByRole("status")).toContainText("8192"); // 3
+    expect(await preloadCalls(page)).toEqual([["set", NAME, seen.length]]);
   } finally {
     await stop();
   }
