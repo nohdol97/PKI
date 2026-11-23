@@ -366,7 +366,7 @@ describe("ask.flow: cancel (X01-C2b)", () => {
     const { port, headers, calls } = await backend({ provider });
 
     const s = stream(port, headers, { question: "배포일", answer: true });
-    await waitFor(() => provider.requests.length === 1);
+    await waitFor(() => provider.requests.length === 1 && s.lines.length === 2);
     expect(s.events().map((e) => e.type)).toEqual(["route", "hits"]); // delivered while the call is pending
     expect(provider.signals[0]?.aborted).toBe(false);
 
