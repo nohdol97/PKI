@@ -1,6 +1,6 @@
 # 스펙: X01 — 질문별 Hybrid Retrieval·근거 Q&A
 
-- 날짜: 2026-11-23 / 상태: 초안(잠정 결정 포함)
+- 날짜: 2026-11-23 / 상태: 확정(잠정 결정 포함)
 - 관련: 이슈 #30(X01), 총괄 #1(원 설계 13절·14절 Ask·18절), Phase 6 #8, 선행 #23(S02)·#25(K01)·#29(P03, 미착수), 후속 #31(X02). [I04 spec](2026-11-21-I04-invalidation.md)(R13 읽기 검사, R14 범위 승계, R16 전송 등급, 등록표), [S02 spec](2026-11-22-S02-entity-resolution-temporal-graph.md)(R23·R24 경로 검사), [K01 spec](2026-11-23-K01-wiki-projection.md), [R05 spec](2026-11-21-R05-golden-dataset.md)·[EVALUATION.md](../EVALUATION.md)(지표, ablation 5개), [ADR 0004](../adr/0004-embedded-storage.md)(벡터는 어댑터 뒤)·[0006](../adr/0006-embedding.md)·[0014](../adr/0014-egress-policy-and-consent.md)
 - 번호: 요구사항 `X01-R<n>`, 결정 `X01-D<n>`, 작업 `X01-T<n>`. 완료 기준 `X01-C1`~`C4`는 이슈 #30의 번호 그대로이고 그 아래를 `a`·`b`·`c`로 나눈다. **마이그레이션은 없다**(X01-D3). 구현 중 필요해지면 합쳐지는 때 main의 다음 번호를 쓰고, 나중에 합치는 쪽이 번호를 옮긴다. 새 ADR 번호와 `site-setup.md` 항목 번호도 같은 규칙이다.
 
