@@ -20,6 +20,7 @@ import {
   DEV_KEY_HINT,
   deleteApiKey,
   keyStatusText,
+  SECRET_REFUSAL_TEXT,
   saveApiKey,
   secretBridge,
   type SecretAction,
@@ -33,6 +34,7 @@ import {
   rereadDelaysMs,
 } from "./connector-credential.ts";
 import { ConnectorTable } from "./connector-table.tsx";
+import { SecretField } from "./secret-field.tsx";
 import { nextSyncStops } from "./connector-text.ts";
 import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
@@ -673,7 +675,6 @@ function OpenAICompatible({
   const current = settings.openaiCompatible;
   const [baseUrl, setBaseUrl] = useState(current.baseUrl ?? "");
   const [model, setModel] = useState(current.model ?? "");
-  const [key, setKey] = useState("");
   const [failure, setFailure] = useState<string>();
   const bridge = secretBridge();
   const saveEndpoint = (event: FormEvent) => {
@@ -683,18 +684,18 @@ function OpenAICompatible({
       (e: unknown) => setFailure(message(e)),
     );
   };
-  const saveKey = (event: FormEvent) => {
-    event.preventDefault();
+  // the field has cleared the value before this runs; what is left to say is what became of it
+  const changeKey = async (action: SecretAction) => {
     if (!bridge || current.keyName === null) return;
-    void saveApiKey(bridge, current.keyName, key).then((result) => {
-      setKey(""); // the value leaves the page as soon as it is handed over
-      setFailure(result === "saved" ? undefined : "키를 저장할 수 없습니다 (OS 보호 저장소)");
-      reload();
-    });
-  };
-  const removeKey = () => {
-    if (!bridge || current.keyName === null) return;
-    void deleteApiKey(bridge, current.keyName).then(reload);
+    if (action.kind === "refused") return setFailure(SECRET_REFUSAL_TEXT[action.reason]);
+    if (action.kind === "delete") {
+      await deleteApiKey(bridge, current.keyName);
+      return reload();
+    }
+    const result = await saveApiKey(bridge, current.keyName, action.value);
+    if (result === "line-break" || result === "too-long") setFailure(SECRET_REFUSAL_TEXT[result]);
+    else setFailure(result === "saved" ? undefined : "키를 저장할 수 없습니다 (OS 보호 저장소)");
+    reload();
   };
   return (
     <>
@@ -722,26 +723,14 @@ function OpenAICompatible({
         </tbody>
       </table>
       {bridge ? (
-        <form onSubmit={saveKey}>
-          <label>
-            {current.host === null ? "API 키" : `${current.host}에 쓸 API 키`}
-            <input
-              type="password"
-              autoComplete="off"
-              value={key}
-              disabled={current.keyName === null}
-              onChange={(e) => setKey(e.target.value)}
-            />
-          </label>
-          <button type="submit" disabled={current.keyName === null || key === ""}>
-            키 저장
-          </button>
-          {current.key === "present" && (
-            <button type="button" onClick={removeKey}>
-              키 삭제
-            </button>
-          )}
-        </form>
+        <SecretField
+          inputLabel={current.host === null ? "API 키" : `${current.host}에 쓸 API 키`}
+          showLabel
+          saveText="키 저장"
+          remove={current.key === "present" ? { text: "키 삭제" } : undefined}
+          disabled={current.keyName === null}
+          onAction={changeKey}
+        />
       ) : (
         <p>{DEV_KEY_HINT}</p>
       )}
