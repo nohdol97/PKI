@@ -170,6 +170,16 @@ const NAMED_FACTS = [
   { token: "ChangeSet", file: "packages/contracts/src/connector.ts", holds: "export type ChangeSet = " },
   { token: "cursorExpired", file: "packages/contracts/src/connector.ts", holds: "cursorExpired: z.boolean().optional()," },
   { token: "scope-change-content-mismatch", file: "packages/contracts/src/connector.ts", holds: '"scope-change-content-mismatch",' },
+  { token: "ConnectorCredentialError", file: "packages/contracts/src/connector.ts", holds: "export class ConnectorCredentialError extends Error" },
+  { token: "HEALTH_REASON_CREDENTIAL_REJECTED", file: "packages/contracts/src/connector.ts", holds: 'export const HEALTH_REASON_CREDENTIAL_REJECTED = "credential-rejected";' },
+  { token: "MAX_CREDENTIAL_SLOTS", file: "backend/src/connector-credentials.ts", holds: "export const MAX_CREDENTIAL_SLOTS = 8;" },
+  { token: "CREDENTIAL_CHECK_TIMEOUT_MS", file: "backend/src/connector-credentials.ts", holds: "export const CREDENTIAL_CHECK_TIMEOUT_MS = 3_000;" },
+  { token: "CREDENTIAL_RETRY_MIN_MS", file: "packages/contracts/src/secrets.ts", holds: "export const CREDENTIAL_RETRY_MIN_MS = 30_000;" },
+  { token: "LOG_TAP_DEADLINE_MS", file: "packages/testkit/src/connector.contract.ts", holds: "const LOG_TAP_DEADLINE_MS = 4000;" },
+  { token: "POST /api/connectors/credentials-changed", file: "packages/contracts/src/index.ts", holds: 'path: "/api/connectors/credentials-changed"' },
+  { token: "instance-credentials-invalid", file: "backend/src/site-registration.ts", holds: '"instance-credentials-invalid"' },
+  { token: "credential-unusable", file: "packages/contracts/src/index.ts", holds: '"credential-unusable",' },
+  { token: "credential-rejection-unsignalled", file: "packages/testkit/src/connector.contract.ts", holds: '"credential-rejection-unsignalled",' },
 ] as const;
 
 describe("docs.connector-sdk: the code blocks are the code", () => {
@@ -448,7 +458,9 @@ describe("docs.connector-sdk: shape of the text", () => {
 
   it("chapter 11 names each tracked gap by its issue number; the fork registration (#113) is built and is no row", () => {
     const eleven = chapter(docText, 11);
-    for (const issue of ["#114", "#116", "#121"]) expect(eleven, issue).toContain(issue);
+    for (const issue of ["#116", "#121", "#162"]) expect(eleven, issue).toContain(issue);
+    // #114 is built (I06): the way to hand a Connector a credential is no row of chapter 11 any more
+    expect(eleven).not.toContain("#114");
     // #115 is built (I07): neither the chapter 11 table nor chapter 7's list of what is missing names it
     expect(eleven).not.toContain("#115");
     expect(chapter(docText, 7)).not.toContain("#115");
@@ -510,10 +522,12 @@ describe("docs.connector-sdk: the places that point to it", () => {
     for (const word of ["scope-change", "revision", "namespace", "deletionsOnRescan", "@pki/connector-sdk"]) {
       expect(section(2), word).toContain(word);
     }
-    for (const word of ["connector-scopes.json", "import 검사", "`site/`를 보지 않으므로", "현재의 예외", "#114"]) {
+    for (const word of ["connector-scopes.json", "import 검사", "`site/`를 보지 않으므로", "현재의 예외"]) {
       expect(section(3), word).toContain(word);
     }
+    // #115 is closed by I07 and #114 by I06: neither number stays in section 3 (I06-R25)
     expect(section(3)).not.toContain("#115");
+    expect(section(3)).not.toContain("#114");
   });
 
   it("site-setup says once that its Connector specification is v2 (the lines before S01)", () => {
@@ -835,13 +849,19 @@ describe("docs.connector-sdk (I05): ownership.md section 3 (I05-R23)", () => {
     expect(three).toContain("├── composition/     포크: 조립 패키지(등록 객체 하나와 진입점 둘. 수집기를 제품에 끼운다)");
   });
 
-  it("leaves only the lockfile, the allowBuilds `false` lines, #114 and the build values in the exception paragraph (#115 is closed by I07)", () => {
+  it("leaves only the lockfile, the allowBuilds `false` lines and the build values in the exception paragraph (#115 is closed by I07, #114 by I06)", () => {
     expect(exception.length).toBeGreaterThan(300);
-    for (const word of ["`pnpm-lock.yaml`", "`allowBuilds`", "`false` 줄", "#114", "배포처 전송 규칙", "묶을 Provider", "검증된 CLI 조합 목록", "데이터 등급 목록"]) {
+    for (const word of ["`pnpm-lock.yaml`", "`allowBuilds`", "`false` 줄", "배포처 전송 규칙", "묶을 Provider", "검증된 CLI 조합 목록", "데이터 등급 목록"]) {
       expect(exception, word).toContain(word);
     }
     expect(exception).not.toContain("#115");
-    expect(exception).toContain("번호(#114)는 공용 저장소의 이슈다.");
+    expect(exception).not.toContain("#114");
+    // the sentence that named the issue numbers goes with them: no issue is named here any more (I06-R25)
+    expect(exception).not.toContain("공용 저장소의 이슈다.");
+    expect(exception).not.toContain("수집기에 비밀 값을 건네는 길");
+    expect(exception).toContain(
+      "- 아직 메우지 못한 빌드 값: 배포처 전송 규칙·묶을 Provider·검증된 CLI 조합 목록·데이터 등급 목록. 각각 정책 판단이 따로 필요해 등록 객체로 옮기지 않았고, 포크가 공용 파일을 고쳐야 하는 값이다",
+    );
     // the whole normative sentence (review F8): a `true`, or a licence to run the scripts, must turn it red
     expect(exception).toContain(
       "`pnpm-workspace.yaml`의 `allowBuilds`: 설치 스크립트가 있는 포크 의존성을 위해 더한 `false` 줄뿐이다(스크립트를 돌리지 않는다는 뜻이다). `packages:` 목록은 포함하지 않는다.",
@@ -871,7 +891,7 @@ describe("docs.connector-sdk (I05): the ADR and its index (I05-R24)", () => {
     expect(adr).toContain("# ADR 0018: 배포처 수집기는 빌드할 때 진입점 주입으로 등록한다");
     expect(adr).toContain("상태: **잠정 — 배포처 검증 대기**");
     expect(read("docs/adr/README.md")).toContain("| [0018](0018-fork-registration-at-build-time.md) |");
-    expect(docsIndex).toContain("결정 기록 18건(잠정 13, 확정 4, 미결 1.");
+    expect(docsIndex).toContain("결정 기록 19건(잠정 14, 확정 4, 미결 1.");
     expect(docsIndex).toContain("포크에 두고 연결하는 방식은 ADR 0018");
     const numbers = readdirSync(resolve(docsDir, "adr")).flatMap((f) => /^(\d{4})-/.exec(f)?.[1] ?? []);
     expect(numbers).toContain("0018");
@@ -1062,15 +1082,17 @@ describe("docs.connector-sdk (I07): the scopes file in chapter 7 (I07-R15)", () 
 });
 
 describe("docs.connector-sdk (I07): chapters 7 and 11 no longer list the installed build's gap, ownership.md says the registration binds the file (I07-R15)", () => {
-  it("chapter 7's list of what is missing keeps #114 and #116, in two items, without the scopes file", () => {
+  it("chapter 7's list of what is missing keeps #116 alone, as item 1 (#114 is built by I06, the scopes file by I07)", () => {
     const seven = chapter(docText, 7);
     const at = seven.indexOf("### 아직 없는 것");
     const list = seven.slice(at, seven.indexOf("### 포크가 수집기를 만들 때 지킬 것"));
-    expect(list).toContain("1. **수집기에 비밀 값을 건네는 통로가 없다**(공용 저장소 #114). 8장.");
-    expect(list).toContain("2. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116).");
-    expect(list).not.toContain("3. ");
+    expect(list).toContain("1. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116).");
+    expect(list).not.toContain("2. ");
+    expect(list).toContain("번호(공용 저장소 #116 등)는 **공용(upstream) 저장소**의 추적 이슈다. 포크에서 `#116`은 포크 자신의 이슈를 가리키므로");
     expect(list).not.toContain("connector-scopes.json");
     expect(list).not.toContain("#115");
+    expect(list).not.toContain("#114");
+    expect(list).not.toContain("비밀 값을 건네는 통로");
   });
 
   it("chapter 11's table has no row for the scopes file and no 'only the source tree reads it' sentence", () => {
@@ -1102,16 +1124,23 @@ describe("docs.connector-sdk (I07): the ADR and its index (I07-R15)", () => {
     expect(adr).toContain("상태: **잠정 — 배포처 검증 대기**");
     expect(read("docs/adr/README.md")).toContain("| [0020](0020-installed-scopes-in-registration.md) |");
     expect(docsIndex).toContain("인스턴스 범위 파일은 ADR 0020과 S30·S31");
-    expect(docsIndex).toContain("결정 기록 18건(잠정 13, 확정 4, 미결 1.");
+    expect(docsIndex).toContain("결정 기록 19건(잠정 14, 확정 4, 미결 1.");
   });
 
-  it("the ADR index links only files that exist (0017 and 0019 stay reserved for I02-B and I06: no link to a file not written yet)", () => {
+  it("the ADR index links only files that exist (0017 stays reserved for I02-B: no link to a file not written yet; 0019 is written by I06)", () => {
     const index = read("docs/adr/README.md");
     const links = [...index.matchAll(/\]\((\d{4}-[a-z0-9-]+\.md)\)/g)].map((m) => m[1] as string);
-    expect(links.length).toBeGreaterThanOrEqual(17);
+    expect(links.length).toBeGreaterThanOrEqual(18);
     expect(links.filter((l) => !existsSync(resolve(docsDir, "adr", l)))).toEqual([]);
     const numbers = readdirSync(resolve(docsDir, "adr")).flatMap((f) => /^(\d{4})-/.exec(f)?.[1] ?? []);
     expect(numbers).toContain("0020");
+    expect(numbers).toContain("0019");
+    // 0017 is not written: neither a file nor a row of the index may imply it exists
+    expect(numbers).not.toContain("0017");
+    expect(links.filter((l) => l.startsWith("0017-"))).toEqual([]);
+    expect(index).not.toContain("| [0017]");
+    expect(index).toContain("0017은 I02-B spec이 정해 둔 번호이고 아직 쓰이지 않았다.");
+    expect(index).not.toContain("0019는 I06 spec이 정해 둔 번호");
   });
 
   it("the ADR points to the chapter, the checklist and the spec, and names its eight decisions", () => {
@@ -1121,5 +1150,293 @@ describe("docs.connector-sdk (I07): the ADR and its index (I07-R15)", () => {
     }
     for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) expect(adr).toContain(`\n${n}. **`);
     expect(adr).not.toContain("\n9. **");
+  });
+});
+
+describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a credential (I06-R24, C19)", () => {
+  const eight = chapter(docText, 8);
+  const connectors = read("backend/src/connectors.ts");
+
+  it("takes exactly two code blocks, both from the example that reads its token, and they are that file's lines", () => {
+    const blocks = excerpts(eight).found;
+    expect(blocks.map((b) => b.file)).toEqual([
+      "packages/connector-example/src/adapters/credentialed-connector.ts",
+      "packages/connector-example/src/adapters/credentialed-connector.ts",
+    ]);
+    expect(excerptProblems(eight)).toEqual([]);
+    // the first block holds the read and the refusal, the second the health answer
+    expect(blocks[0]?.lines.join("\n")).toContain("if ((await credentials.read(SLOT)) !== acceptedToken) throw new ConnectorCredentialError();");
+    expect(blocks[1]?.lines.join("\n")).toContain('return { state: "unavailable", reason: HEALTH_REASON_CREDENTIAL_REJECTED };');
+  });
+
+  it("says how to declare a slot: in the registration's instance, never the config or the manifest, and what the check says", () => {
+    for (const sentence of [
+      "인스턴스가 필요로 하는 자격 증명은 등록의 인스턴스 정의(7장)에 `credentials`로 선언한다. 값이 아니라 칸의 이름이다. `config`에도, 수집기의 `manifest`에도 적지 않는다.",
+      "- 칸 이름은 `^[a-z][a-z0-9-]{0,15}$`를 따르고, 한 인스턴스 안에서 서로 달라야 하며, 많아야 8개(`MAX_CREDENTIAL_SLOTS`)다.",
+      "- 어기면 등록 검사가 `instance-credentials-invalid`를 돌려주고, 시작할 때는 그 인스턴스를 빼고 계속한다(7장).",
+      "- 칸을 선언하지 않은 인스턴스의 접근자는 무엇을 읽어도 거부한다.",
+    ]) {
+      expect(eight, sentence).toContain(sentence);
+    }
+    expect(read("backend/src/connector-credentials.ts")).toContain("export const CREDENTIAL_SLOT_PATTERN = /^[a-z][a-z0-9-]{0,15}$/;");
+  });
+
+  it("says what the accessor does and what the product keeps, as full sentences", () => {
+    for (const sentence of [
+      "제품은 `initialize`를 부를 때 **언제나** 둘째 인자 `context`를 넘긴다.",
+      "- `read(칸)`은 **부를 때마다 저장소에서 읽는다.** 제품은 값을 기억해 두지 않는다.",
+      "- 선언하지 않은 칸을 읽거나, 저장소가 \"없음\"이나 \"쓸 수 없음\"으로 답하거나, 3초(`CREDENTIAL_CHECK_TIMEOUT_MS`) 안에 답이 오지 않으면 `read`는 `ConnectorCredentialError`로 거부한다. 그 오류에는 칸 이름도 저장 이름도 실리지 않는다.",
+      "- 제품이 버린 객체(시작 때 제한 시간을 넘긴 것, 실패한 재점검의 것, 새 객체로 바뀐 것)의 접근자는 그때부터 무엇을 읽어도 거부한다.",
+      "- `context`는 이 길이 들어온 뒤의 제품에서는 언제나 있다. 그 앞의 제품은 `context`를 넘기지 않으므로, 자격 증명을 쓰는 수집기는 `context`가 없으면 `ConnectorCredentialError`로 끝낸다(위 발췌의 `if (!context)`).",
+      "인자 하나만 받는 기존 `initialize`는 고치지 않아도 그대로 돈다. 규격 버전은 2 그대로다.",
+    ]) {
+      expect(eight, sentence).toContain(sentence);
+    }
+  });
+
+  it("tells the Connector's author what to hold, what never to write, when to throw and how health says a refusal", () => {
+    for (const sentence of [
+      "- **필요한 동안만 쥔다.** 읽은 값을 필드에 오래 담아 두는 것은 제품이 막지 못한다. 쓸 때 읽고 쓰고 나면 놓는다.",
+      "- **값을 어디에도 옮기지 않는다.** 레코드의 본문과 `metadata`, 던지는 오류의 문구와 이름과 `cause`, `healthCheck`의 사유, 수집기 자신의 로그와 파일에 넣지 않는다.",
+      "- **원 시스템이 자격 증명을 받아 주지 않으면**(인증 실패, 만료, 철회) `initialize`나 `getChanges`에서 `ConnectorCredentialError`를 던진다.",
+      "원 시스템이 준 오류의 이름과 문구를 `Error` 하나로 다시 만들어 던지지 않는다. 이름이 `ConnectorCredentialError`이고 문구가 고정 문구와 같은 오류는 거부로 읽히기 때문이다.",
+      "- **`healthCheck`는 던지지 않으므로** 거부를 `{ state: \"unavailable\", reason: HEALTH_REASON_CREDENTIAL_REJECTED }`로 알린다(값은 `credential-rejected`). 제품은 `healthCheck`의 `reason`을 이 상수와 같은지만 본다. 건강 사유의 값은 재점검과 다시 만들기에서만 읽힌다.",
+      "제품은 시작할 때 `healthCheck`를 묻지 않으므로 시작과 동기화에서의 거부는 `ConnectorCredentialError`로 알려야 하고, 건강 사유로만 알리는 수집기는 계약 묶음이 `credential-rejection-unsignalled`로 잡는다.",
+      "제품은 이 오류를 `instanceof`와 고정된 이름·문구 쌍 **둘 다**로 알아본다(`@pki/contracts`의 `isConnectorCredentialError`). 포크의 번들이 `@pki/contracts`를 한 벌 더 싣더라도 거부가 읽힌다.",
+      "- **`healthCheck`의 그 밖의 `unavailable`은 거부로 읽히지 않고** 한 시간마다 같은 값으로 다시 시도된다.",
+      "- **값을 되쓰는 길은 없다.** 접근자는 읽기만 한다.",
+    ]) {
+      expect(eight, sentence).toContain(sentence);
+    }
+  });
+
+  it("says where the value is put in, the one line and 8192 characters, and what the screen does after a save", () => {
+    for (const sentence of [
+      "**포크는 화면을 고치지 않는다.**",
+      "- 값은 화면에서 셸의 저장소로 곧장 간다(preload의 `setSecret(name, value)`와 `deleteSecret(name)`, 이름은 목록이 준 `name`). 백엔드의 API를 지나지 않는다. 화면에는 값을 되읽는 함수가 없고, 백엔드의 어떤 API도 값을 답에 싣지 않는다.",
+      "- 저장이나 삭제가 성공하면 화면이 `POST /api/connectors/credentials-changed`(`{ connectorId }`)를 한 번 부른다. 이 알림에는 값이 없고 다른 API와 같은 검사(세션 토큰, Origin, Host)를 지난다.",
+      "답은 그 인스턴스의 목록 요약과 `rebuild` 하나다: `done`(바로 다시 만들었다), `queued`(진행 중인 재점검이나 간격 때문에 미뤘다), `skipped`(재점검을 그만둔 인스턴스이거나 만드는 함수가 없는 종류, 읽을 수 없는 선언의 인스턴스라 하지 않았다).",
+      "- **이 화면에서 넣는 자격 증명은 한 줄, 8192자 이하다.** 길이는 UTF-16 코드 단위로 세므로 기본 다국어 평면 밖의 글자는 둘로 센다. 줄바꿈이 든 값과 8192자를 넘는 값은 저장하지 않고 안내만 보인다(자르지 않는다). 여러 줄 값(PEM, JSON 키)은 이 화면이 받지 않는다. 한 줄로 이어 붙인 PEM만 한도 안에서 된다.",
+      "공용 저장소의 #162가 추적한다.",
+      "- OS 보호(Windows의 DPAPI)를 쓸 수 없으면 값은 저장되지 않는다. 환경 변수나 설정 파일의 평문으로 조용히 넘어가지 않는다.",
+    ]) {
+      expect(eight, sentence).toContain(sentence);
+    }
+  });
+
+  it("says what each way of a refusal ends in: the four reasons, the stop code, and what is not retried", () => {
+    for (const sentence of [
+      "- 만료와 거부는 한 사유다. 저장소는 만료 시각을 모르고 사용자가 할 일도 같기 때문이다.",
+      "- 사유는 수집기의 말이 아니라 **저장소가 한 답**으로 정한다.",
+      "- 칸을 선언하지 않은 인스턴스나 선언하지 않은 칸을 읽은 수집기가 이 오류를 던지면 넣을 값이 없으므로 사유 없는 `unavailable`이 되고 한 시간마다 다시 시도된다.",
+      "- 동기화 도중에 `getChanges`가 `ConnectorCredentialError`를 던지면 그 동기화는 멈춤 코드 `credential-unusable`로 멈춘다. 같은 호출을 다시 시도하지 않고, 앞서 저장한 페이지와 cursor는 남으며, 그 작업은 `held`가 되어 시도를 쓰지 않는다(5장의 표).",
+      "- 앱을 시작할 때 값이 없거나 저장소를 쓸 수 없으면 제품은 만드는 함수도 `initialize`도 부르지 않고 수집기 객체를 만들지 않는다.",
+      "- 읽기가 3초 안에 답하지 못하면 `read`는 거부되고 사유는 `credential-unreadable`이다. 선언한 칸의 값이 없는데 저장소도 쓸 수 없으면 사유는 `credential-store-unavailable`이다(저장소를 쓸 수 없음이 먼저다).",
+      "다시 만들기가 진행 중인 인스턴스는 한 시간마다의 재점검이 건너뛴다.",
+      "- **거부된 값은 한 시간마다 다시 시도되지 않는다.** `credential-rejected`인 인스턴스는 한 시간마다의 재점검이 존재 확인도 만드는 함수도 `initialize`도 부르지 않고 건너뛴다.",
+      "- 그 인스턴스가 다시 시도되는 때는 변경 알림과 앱을 다시 시작할 때뿐이다.",
+      "30초(`CREDENTIAL_RETRY_MIN_MS`) 안에 온 알림은 그 시각 뒤의 한 번으로 모은다.",
+      "- 이 상한은 **수집기가 거부를 알렸을 때만** 선다.",
+      "다시 만들기가 60초(`RECHECK_TIMEOUT_MS`)를 넘기면 옛 객체를 버리고 사유 없는 `unavailable`이 되며 다음 재점검이 되살린다.",
+    ]) {
+      expect(eight, sentence).toContain(sentence);
+    }
+  });
+
+  it("says the address is not in the stored name, so a changed origin changes the instance ID, and what stays when an instance leaves", () => {
+    for (const sentence of [
+      "**`config`(원 시스템의 주소)는 이름에 들어가지 않는다.**",
+      "그래서 같은 종류와 ID를 둔 채 주소만 바꾼 빌드에서는 **옛 값이 새 주소로 건네진다.** 이를 막는 것은 포크의 일이다: 인스턴스가 가리키는 원 시스템을 바꿀 때는 인스턴스 ID도 바꾼다. 그러면 사용자가 값을 다시 넣게 된다(site-setup S28 ⑤).",
+      "등록에서 빠진 인스턴스의 값은 저장소에 암호문으로 남는다. 제품은 시작할 때 저장소를 정리하지 않는다.",
+    ]) {
+      expect(eight, sentence).toContain(sentence);
+    }
+  });
+
+  it("lists the ten things the product cannot catch, each with who owns it, and says nothing is left in the places it writes", () => {
+    const rows = eight
+      .split("\n")
+      .filter((l) => l.startsWith("| ") && !l.startsWith("| 경우 ") && !l.startsWith("| 사유 "))
+      .filter((l) => !l.startsWith("| `credential-"))
+      .map((l) => l.split("|")[1]?.trim());
+    expect(rows).toEqual([
+      "수집기가 값을 레코드의 본문이나 `metadata`에 넣어 돌려준다",
+      "수집기나 그 의존성이 자기 로그나 파일에 값을 쓴다",
+      "포크의 코드가 다른 인스턴스의 값을 읽는다",
+      "느린 수집기의 값을 바꾸면 멈춘다",
+      "보류된 작업 하나가 한 시간 기다린다(미세한 틈 둘)",
+      "알림을 쉬지 않고 보내는 호출자가 있다",
+      "주소만 바꾼 인스턴스가 옛 값을 받는다",
+      "수집기가 거부를 알리지 않는다(`healthCheck`의 다른 사유, 다른 종류의 오류)",
+      "칸을 선언하지 않은 수집기(OS 로그인에 기대는 것)의 인증 실패",
+      "화면(렌더러)이 깨져 값을 바꿔 넣거나 지운다",
+    ]);
+    for (const sentence of [
+      "제품이 쓰는 어느 곳에도 값이 남지 않는다: 데이터 폴더의 모든 파일(정본 DB와 보조 파일, 삭제 장부, `secrets.json`에는 암호문뿐), 설정 파일, 백엔드와 셸의 로그와 표준 출력·오류, 모든 API 응답과 셸이 화면에 돌려주는 답, 동기화 결과와 작업과 활동 목록, `site-check`의 출력이다.",
+      "수집기가 값을 오류의 문구나 건강 사유에 **일부러 실어도** 같다.",
+      "계약 묶음이 재지 않는 누출 모양도 있다: 둘로 나눠 쓴 글, 16진수, `user:`와 값을 이은 `Basic` base64, 패딩이 없거나 어긋난 base64, 처리되지 않은 약속 거부, 한 바퀴보다 늦게 도는 타이머다.",
+      "값이 지나는 길은 둘뿐이다. \"화면 입력 → 셸의 저장소\"와 \"셸 → 백엔드 프로세스 → 수집기\"다.",
+      "포크의 수집기는 같은 프로세스에서 같은 권한으로 도는 믿는 코드이므로 칸의 제한은 실수를 잡는 장치이지 격리가 아니다(7장).",
+    ]) {
+      expect(eight, sentence).toContain(sentence);
+    }
+  });
+
+  it("no longer says the way does not exist, nor leaves the fork to choose the way", () => {
+    for (const old of [
+      "수집기가 비밀 값을 받는 통로는 아직 없다",
+      "수집기에 비밀 값을 건네는 통로는 아직 없다",
+      "그러므로 포크가 수집기의 자격 증명을 어떻게 읽을지",
+      "포크가 정해야 하고",
+    ]) {
+      expect(docText, old).not.toContain(old);
+    }
+    expect(eight).toContain("OS 자격 증명 저장소");
+  });
+
+  it("is true to the code: one place makes the object, asks the slots first, reads only the fixed health reason, skips the rejected hourly", () => {
+    const open = connectors.slice(connectors.indexOf("async function openConnector("));
+    const body = open.slice(0, open.indexOf("\n}\n"));
+    expect(body.indexOf("reasonOfPresence(await access.check())")).toBeGreaterThan(0);
+    expect(body.indexOf("reasonOfPresence(await access.check())")).toBeLessThan(body.indexOf("connector = factory();"));
+    expect(body.indexOf("connector = factory();")).toBeLessThan(body.indexOf("initializeConnector(connector, config, { credentials: access.credentials })"));
+    expect(connectors).toContain("return health.reason === HEALTH_REASON_CREDENTIAL_REJECTED ? \"rejected\" : \"down\";");
+    expect(connectors).toContain('if (entry.summary.reason === "credential-rejected" || entry.slot) return entry.summary.state;');
+    expect(connectors).toContain('return { stop: "credential-unusable" }; // the same call is not tried again (I06-R10)');
+    const screen = read("apps/web/src/connector-credential.ts");
+    expect(screen).toContain("export const MAX_CREDENTIAL_LENGTH = 8192;");
+    expect(screen).toContain('if (/[\\r\\n]/.test(value)) return "line-break";');
+    expect(read("apps/web/src/connector-text.ts")).toContain('"이 실행에는 저장소가 없습니다.');
+    expect(screen).toContain('queued: "곧 반영됩니다."');
+    expect(screen).toContain('skipped: "앱을 다시 시작해야 반영됩니다."');
+    expect(screen).toContain('return "자격 증명을 저장할 수 없습니다 (OS 보호 저장소를 쓸 수 없음).";');
+    expect(screen).toContain('return "자격 증명을 지우지 못했습니다 (저장소 파일을 읽거나 쓸 수 없음).";');
+    // the preload has no function that reads a value back
+    const bridge = read("apps/desktop/src/bridge.ts");
+    expect(bridge).not.toMatch(/getSecret|readSecret/);
+    for (const fn of ["setSecret", "hasSecret", "deleteSecret"]) expect(bridge, fn).toContain(`${fn}: checked(`);
+  });
+});
+
+describe("docs.connector-sdk (I06): chapters 2, 5, 6 and 7 carry what the credential path adds (I06-R24)", () => {
+  it("chapter 2 gives initialize its optional second argument and says an old one-argument implementation needs no change", () => {
+    const two = chapter(docText, 2);
+    expect(two).toContain("- `initialize(config, context?)`: 설정을 읽고 준비한다.");
+    expect(two).toContain(
+      "둘째 인자 `context`는 선택 항목이고 자격 증명을 읽는 접근자(`context.credentials`)를 담는다. 인자 하나만 받는 구현은 고치지 않아도 된다(8장).",
+    );
+    expect(two).toContain("- 자격 증명이 필요하면 `initialize`의 둘째 인자로 받은 접근자로 읽는다. 값은 설정에 적지 않는다(8장).");
+  });
+
+  it("chapter 5 names ConnectorCredentialError as an error to throw, says it stops the sync and is not retried, and the one exception to 'a ready object is not replaced'", () => {
+    const five = chapter(docText, 5);
+    for (const sentence of [
+      "- `ConnectorCredentialError`: 원 시스템이 자격 증명을 받아 주지 않을 때(인증 실패, 만료, 철회) 던진다. 인자가 없고 문구가 고정이다. 같은 호출을 다시 시도하지 않고 동기화는 `credential-unusable`로 멈춘다. 언제 던지는지는 8장에 있다.",
+      "**`ConnectorError`, `ConnectorRateLimitError`, `ConnectorCredentialError`가 아닌 예외를 던지면** 제품은",
+      "다만 `ConnectorCredentialError`로 끝난 `site-check`는 그 문구도 출력하지 않는다(7장).",
+      "자격 증명 때문에 `unavailable`인 인스턴스(사유 `credential-store-unavailable`, `credential-missing`, `credential-unreadable`, `credential-rejected`)의 수집 작업은 `connector-unavailable`이 아니라 그 인스턴스의 사유로 보류되고, 그 인스턴스가 `ready`가 되면 풀린다.",
+      "재점검은 준비된 인스턴스의 객체를 바꾸지 않는다(사용자가 자격 증명을 바꿨다는 변경 알림만 예외다. 8장).",
+      "다만 원 시스템이 자격 증명을 거부한 인스턴스(`credential-rejected`)는 한 시간마다는 건너뛴다(8장).",
+    ]) {
+      expect(five, sentence).toContain(sentence);
+    }
+    expect(five).not.toContain("수집기는 실패를 두 종류의 오류로 알린다.");
+  });
+
+  it("chapter 6 lists the two scenario fields and the five codes they open, with the 4 second limit, as the testkit has them", () => {
+    const six = chapter(docText, 6);
+    const testkit = read("packages/testkit/src/connector.contract.ts");
+    expect(testkit).toContain("credentials?: Record<string, string>;");
+    expect(testkit).toContain("rejected?: { config: unknown; credentials: Record<string, string> };");
+    const rows = six.split("\n").filter((l) => /^\| `(credentials|rejected)` \|/.test(l));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain("값은 16자 이상이어야 한다(짧으면 위반이 아니라 시나리오의 오류다).");
+    expect(testkit).toContain("const MIN_CREDENTIAL_LENGTH = 16;");
+    for (const sentence of [
+      "시나리오에 `credentials`나 `rejected`가 있으면 계약 묶음은 위반 코드 다섯을 더 본다. 어느 것도 값이나 문구를 싣지 않고 코드만 돌려준다.",
+      "값은 원래 글, base64로 바꾼 글, 주소용으로 바꾼 글(percent-encoding) 세 모양으로 찾는다.",
+      "값이 든 시나리오의 확인은 4초(`LOG_TAP_DEADLINE_MS`) 안에 끝나야 한다. 더 느린 수집기는 시험의 제한 시간을 늘려도 그 상한에서 확인이 실패한다. 상한 뒤에 버려진 실행의 뒤늦은 출력은 다음 확인의 것으로 잡히거나 실제 `console`로 나갈 수 있다.",
+      "이 예시는 `exports`에 올라 있지 않다. 포크는 이 파일과 그것이 가져오는 `example-connector.ts`, 계약 시험이 쓰는 `synthetic-notes.ts`를 자기 수집기 패키지로 복사해 모델로 삼는다.",
+      "예시 패키지에는 규격을 한 곳만 어긴 변형이 여덟 있다.",
+    ]) {
+      expect(six, sentence).toContain(sentence);
+    }
+    // the example is not exported (the doc says so) and the eight variants are in the file
+    expect(JSON.parse(read("packages/connector-example/package.json")).exports).toEqual({ "./adapters": "./src/adapters/example-connector.ts" });
+    const variants = read("packages/connector-example/src/adapters/violating-connectors.ts").match(/^export function create\w+Connector\(\)/gm) ?? [];
+    expect(variants).toHaveLength(8);
+  });
+
+  it("chapter 7 lists the optional `credentials` of an instance and says the slots are asked for before the factory is called", () => {
+    const seven = chapter(docText, 7);
+    expect(seven).toContain(
+      "| `connectorInstances` | 시작할 때의 인스턴스(`id`, `kind`, `config`와 선택 항목 `credentials`). `credentials`는 그 인스턴스가 필요로 하는 자격 증명의 칸 이름 목록이고 값이 아니다(8장) |",
+    );
+    expect(seven).toContain(
+      "- 칸을 선언한 인스턴스는 만드는 함수를 부르기 **전에** 칸마다 값이 있는지 먼저 묻는다. 하나라도 없거나 저장소를 쓸 수 없으면 수집기 객체를 만들지 않고 그 인스턴스를 사유와 함께 `unavailable`로 둔다(8장).",
+    );
+    expect(seven).toContain("원 시스템이 자격 증명을 거부해 `credential-rejected`가 된 인스턴스는 한 시간마다의 재점검이 건너뛴다.");
+    expect(seven).toContain("- 칸을 선언한 인스턴스의 자격 증명은 화면에서 넣고, 수집기는 `initialize`의 접근자로 읽는다. 포크가 `site/` 밖의 화면을 고치지 않는다(8장).");
+  });
+
+  it("chapter 11 has a row for what is still missing of the credential path, and none that says the path is missing", () => {
+    const eleven = chapter(docText, 11);
+    const rows = eleven.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| 항목 "));
+    const firsts = rows.map((l) => l.split("|")[1]?.trim());
+    for (const row of [
+      "수집기가 자격 증명 값을 저장소에 되쓰는 길",
+      "화면에서 여러 줄 자격 증명을 넣는 일",
+      "등록에서 빠진 인스턴스의 자격 증명을 한 번에 정리하는 화면",
+      "Windows의 OS 보호(DPAPI)와 실제 원 시스템에서의 자격 증명 확인",
+    ]) {
+      expect(firsts, row).toContain(row);
+    }
+    expect(eleven).not.toContain("수집기에 비밀 값을 건네는 통로");
+    expect(eleven).toContain("한 줄, 8192자 이하만 받는다. 이 입력란의 알려진 틈은 #162가 추적한다(8장)");
+    expect(eleven).toContain("site-setup의 S28·S29가 배포처에서 확인한다(8장)");
+  });
+});
+
+describe("docs.connector-sdk (I06): ownership.md and the ADR (I06-R25)", () => {
+  const lines = ownership.split("\n");
+  const start = lines.findIndex((l) => l.startsWith("## 3. "));
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => l.startsWith("## "));
+  const three = rest.slice(0, end < 0 ? undefined : end).join("\n");
+
+  it("ownership.md section 3 says credentials are not kept under site/, the fork declares slots and the screen and the store are the public repository's", () => {
+    expect(three).toContain(
+      "수집기가 원 시스템에 낼 자격 증명은 `site/`에 두지 않는다. 포크는 필요한 칸의 이름을 등록의 인스턴스 정의(`credentials`)에 선언하고 수집기가 `initialize`의 접근자로 읽게 할 뿐이고, 값은 앱의 출처 화면에서 사용자가 넣어 OS가 보호하는 저장소에만 남는다. 값을 넣는 화면과 저장소는 공용 저장소의 것이라 포크는 화면을 고치지 않는다.",
+    );
+    expect(three).toContain("[ADR 0019](adr/0019-connector-credentials.md)");
+    expect(ownership).toContain("자격 증명이 필요하면 칸의 선언과 접근자로 읽기.");
+  });
+
+  it("ADR 0019 exists with its title and state, is in both indexes, and ADR 0010 and 0016 point to it", () => {
+    const adr = read("docs/adr/0019-connector-credentials.md");
+    expect(adr).toContain("# ADR 0019: 수집기 자격 증명은 V01의 비밀 값 저장소에 두고 접근자로 건넨다");
+    expect(adr).toContain("상태: **잠정 — 배포처 검증 대기**");
+    expect(read("docs/adr/README.md")).toContain("| [0019](0019-connector-credentials.md) |");
+    expect(docsIndex).toContain("수집기 자격 증명은 ADR 0019와 S28·S29");
+    expect(read("docs/adr/0010-encryption-at-rest.md")).toContain("[ADR 0019](0019-connector-credentials.md)");
+    expect(read("docs/adr/0016-connector-sdk-v2.md")).toContain("[ADR 0019](0019-connector-credentials.md)");
+    expect(docText).toContain("adr/0019-connector-credentials.md");
+    expect(read("docs/site-setup.md")).toContain("adr/0019-connector-credentials.md");
+  });
+
+  it("the ADR points to the chapter, the checklist and the spec, names its ten decisions, and carries the way the value goes in the same words", () => {
+    const adr = read("docs/adr/0019-connector-credentials.md");
+    for (const ref of ["../specs/2026-11-22-I06-connector-credentials.md", "../connector-sdk.md", "../site-setup.md", "0010-encryption-at-rest.md", "0016-connector-sdk-v2.md", "0018-fork-registration-at-build-time.md"]) {
+      expect(adr, ref).toContain(ref);
+    }
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) expect(adr).toContain(`\n${n}. **`);
+    expect(adr).not.toContain("\n11. **");
+    expect(adr).toContain("값이 지나는 길은 둘뿐이다. \"화면 입력 → 셸의 저장소\"와 \"셸 → 백엔드 프로세스 → 수집기\"다.");
+    // the public surface T01 asked the ADR to name
+    for (const name of ["CONNECTOR_CREDENTIAL_MESSAGE", "onInitialize", "isConnectorCredentialError", "HEALTH_REASON_CREDENTIAL_REJECTED", "instance-credentials-invalid", "credential-unusable"]) {
+      expect(adr, name).toContain(name);
+    }
+    expect(read("packages/contracts/src/connector.ts")).toContain('export const CONNECTOR_CREDENTIAL_MESSAGE = "connector credential unusable";');
+    expect(read("packages/testkit/src/scripted-connector.ts")).toContain("onInitialize");
   });
 });

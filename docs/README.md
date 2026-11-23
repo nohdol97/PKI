@@ -14,11 +14,11 @@
 | [research/2026-11-21-R00-initial-base.md](research/2026-11-21-R00-initial-base.md) | 빈 저장소에 최초 commit을 올린 절차와 증거 | 보관 |
 | [research/2026-11-22-I02B-T01-poc.md](research/2026-11-22-I02B-T01-poc.md) | I02-B 착수 전 측정(I02B-T01): 격리 실행기·경로 경계·철회 묶음이 기대는 가정을 macOS에서 실제로 돌려 적은 판정 기록(Windows·Linux 제외) | 측정 완료, 검토 반영 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 구성요소, 프로세스, 정본과 투영, 어댑터 규격, 실패 복구, 보안, **가정 표** | 잠정 |
-| [adr/](adr/README.md) | 결정 기록 18건(잠정 13, 확정 4, 미결 1. 0017은 I02-B spec이, 0019는 I06 spec이 맡은 번호로 아직 쓰이지 않았다) | 색인 참조 |
+| [adr/](adr/README.md) | 결정 기록 19건(잠정 14, 확정 4, 미결 1. 0017은 I02-B spec이 맡은 번호로 아직 쓰이지 않았다) | 색인 참조 |
 | [REUSE_AND_BUILD.md](REUSE_AND_BUILD.md) | 기능별 재사용·직접 개발·미룸 목록 | 잠정 |
 | [ownership.md](ownership.md) | 공용 저장소와 배포처 포크가 각각 무엇을 갖는가 | 확정(ADR 0012) |
 | [site-setup.md](site-setup.md) | 배포처가 채울 설정의 형태와 체크리스트 | 잠정(설정 키 이름은 V01-T17이 구현과 맞춤. 이름과 값의 형태는 잠정) |
-| [connector-sdk.md](connector-sdk.md) | 수집기(Connector)를 이 저장소 밖에서 만드는 사람을 위한 안내: 규격, 받아들이는 규칙, 오류와 재시도, 계약 테스트, 예시 수집기, 아직 없는 것 | 잠정(규격은 ADR 0016, 포크에 두고 연결하는 방식은 ADR 0018, 실제 원 시스템에서의 확인은 S18, 포크 조립은 S26, 인스턴스 범위 파일은 ADR 0020과 S30·S31) |
+| [connector-sdk.md](connector-sdk.md) | 수집기(Connector)를 이 저장소 밖에서 만드는 사람을 위한 안내: 규격, 받아들이는 규칙, 오류와 재시도, 계약 테스트, 예시 수집기, 아직 없는 것 | 잠정(규격은 ADR 0016, 포크에 두고 연결하는 방식은 ADR 0018, 실제 원 시스템에서의 확인은 S18, 포크 조립은 S26, 수집기 자격 증명은 ADR 0019와 S28·S29, 인스턴스 범위 파일은 ADR 0020과 S30·S31) |
 | [specs/2026-11-21-R01-oss-evaluation.md](specs/2026-11-21-R01-oss-evaluation.md) | OSS 평가 작업(R01)의 요구사항과 완료 기준 | 확정 |
 | [specs/2026-11-21-R06-provisional-architecture.md](specs/2026-11-21-R06-provisional-architecture.md) | 잠정 아키텍처 작업(R06)의 완료 기준과, 기준마다 그것을 충족하는 문서 | 초안 |
 | [specs/2026-11-21-V01-vertical-skeleton.md](specs/2026-11-21-V01-vertical-skeleton.md) | Phase 1 뼈대(V01)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |

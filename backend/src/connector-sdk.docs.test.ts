@@ -17,10 +17,13 @@ import {
   blocksValid,
   ChangeSchema,
   CONNECTOR_SDK_VERSION,
+  CREDENTIAL_REASONS,
+  CREDENTIAL_RETRY_MIN_MS,
   MAX_INSTANCE_ID_LENGTH,
   ConnectorRateLimitError,
   REJECT_CODES,
   rejectedPositionValid,
+  SecretValueSchema,
   SourceRecordSchema,
   SYNC_STOP_CODES,
   type Connector,
@@ -31,6 +34,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectorKinds, openCanonicalDb, productConnectors } from "./composition.ts";
+import {
+  CREDENTIAL_CHECK_TIMEOUT_MS,
+  CREDENTIAL_SLOT_PATTERN,
+  connectorCredentialName,
+  credentialSlotsValid,
+  MAX_CREDENTIAL_SLOTS,
+} from "./connector-credentials.ts";
 import { INITIALIZE_TIMEOUT_MS, RECHECK_LATE_LIMIT } from "./connectors.ts";
 import { RECHECK_TIMEOUT_MS, SYNC_PERIOD } from "./connector-sync-job.ts";
 import { REJECTED_LIST_LIMIT, SYNC_BACKOFF, siteCheck } from "./connectors.ts";
@@ -519,5 +529,83 @@ describe("docs.connector-sdk (I05): chapter 7's check-code table equals what the
     ]);
     // an unknown kind stays in the set (it will be `unavailable`)
     expect(merge("instance-kind-unknown").instances.map((i) => i.id)).toContain("a");
+  });
+});
+
+describe("docs.connector-sdk (I06): chapter 8 and chapter 6 equal the code", () => {
+  const eight = DOC.slice(DOC.indexOf("## 8. "), DOC.indexOf("## 9. "));
+  const six = DOC.slice(DOC.indexOf("## 6. "), DOC.indexOf("## 7. "));
+  const eightLines = eight.split("\n");
+
+  it("the table of the four reasons lists CREDENTIAL_REASONS, in order, each with the user's action and the way out", () => {
+    const rows = tableAfter("#### 5. 네 사유와 풀리는 길", eightLines);
+    expect(rows.map((r) => (r[0] as string).replaceAll("`", ""))).toEqual([...CREDENTIAL_REASONS]);
+    for (const row of rows) expect(row, String(row[0])).toHaveLength(4);
+    expect(rows[3]?.[3]).toBe("변경 알림과 앱을 다시 시작할 때뿐이다");
+  });
+
+  it("fails when a reason is missing from the table", () => {
+    const dropped = eightLines.filter((l) => !l.startsWith("| `credential-unreadable` |"));
+    const rows = tableAfter("#### 5. 네 사유와 풀리는 길", dropped);
+    expect(rows.map((r) => (r[0] as string).replaceAll("`", ""))).not.toEqual([
+      ...CREDENTIAL_REASONS,
+    ]);
+  });
+
+  it("the numbers chapter 8 writes are the constants: eight slots, the slot shape, three seconds, thirty seconds, one line of 8192", () => {
+    expect(MAX_CREDENTIAL_SLOTS).toBe(8);
+    expect(CREDENTIAL_CHECK_TIMEOUT_MS).toBe(3_000);
+    expect(CREDENTIAL_RETRY_MIN_MS).toBe(30_000);
+    expect(RECHECK_TIMEOUT_MS).toBe(60_000);
+    expect(CREDENTIAL_SLOT_PATTERN.source).toBe("^[a-z][a-z0-9-]{0,15}$");
+    expect(eight).toContain("`^[a-z][a-z0-9-]{0,15}$`");
+    expect(eight).toContain("많아야 8개(`MAX_CREDENTIAL_SLOTS`)");
+    expect(eight).toContain("3초(`CREDENTIAL_CHECK_TIMEOUT_MS`)");
+    expect(eight).toContain("30초(`CREDENTIAL_RETRY_MIN_MS`)");
+    expect(eight).toContain("60초(`RECHECK_TIMEOUT_MS`)");
+    // the shell's limit is the one the screen says: 8192 passes, 8193 does not
+    expect(SecretValueSchema.safeParse("a".repeat(8192)).success).toBe(true);
+    expect(SecretValueSchema.safeParse("a".repeat(8193)).success).toBe(false);
+    expect(eight).toContain("한 줄, 8192자 이하다");
+    // eight slots are a valid declaration, nine are not, and a duplicate or a bad shape is not
+    const slots = (n: number) => Array.from({ length: n }, (_, i) => `slot${i}`);
+    expect(credentialSlotsValid(slots(8))).toBe(true);
+    expect(credentialSlotsValid(slots(9))).toBe(false);
+    expect(credentialSlotsValid(["token", "token"])).toBe(false);
+    expect(credentialSlotsValid(["Token"])).toBe(false);
+  });
+
+  it("the stored name has the shape chapter 8 gives and does not hold the address", () => {
+    expect(eight).toContain("`connector.<32자리 16진수>.<칸>`");
+    const name = connectorCredentialName("kind-a", "instance-a", "token");
+    expect(name).toMatch(/^connector\.[0-9a-f]{32}\.token$/);
+    // the config is no input of the name: kind, instance ID and slot are the whole of it
+    expect(connectorCredentialName.length).toBe(3);
+    expect(connectorCredentialName("kind-a", "instance-a", "token")).toBe(name);
+    expect(connectorCredentialName("kind-a", "instance-b", "token")).not.toBe(name);
+  });
+
+  it("chapter 6 lists the five codes the credential scenarios open, in the order and under the names CONNECTOR_VIOLATION_CODES has them", () => {
+    const five = CONNECTOR_VIOLATION_CODES.slice(-5);
+    expect([...five]).toEqual([
+      "credential-in-record",
+      "credential-in-health",
+      "credential-in-error",
+      "credential-in-log",
+      "credential-rejection-unsignalled",
+    ]);
+    const bullets = six
+      .split("\n")
+      .filter((l) => /^- `credential-[a-z-]+`: /.test(l))
+      .map((l) => /^- `([a-z-]+)`/.exec(l)?.[1]);
+    expect(bullets).toEqual([...five]);
+  });
+
+  it("every credential violation code chapter 8 names is one the contract suite has", () => {
+    const named = [...eight.matchAll(/`(credential-(?:in-[a-z]+|rejection-unsignalled))`/g)].map(
+      (m) => m[1] as string,
+    );
+    expect(named.length).toBeGreaterThanOrEqual(3);
+    for (const code of named) expect([...CONNECTOR_VIOLATION_CODES], code).toContain(code);
   });
 });

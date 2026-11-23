@@ -1,6 +1,6 @@
 # 스펙: I06 수집기에 자격 증명을 넘기는 경로
 
-- 날짜: 2026-11-22 / 상태: 확정(잠정 결정 포함)
+- 날짜: 2026-11-22 / 상태: 확정(잠정 결정 포함). 작업 T01~T05가 구현되었다(T05는 문서, ADR 0019, S28·S29). 기준 C1~C19와 H1·H2 가운데 이 spec이 닫지 못하는 것은 I02B-T06이 닫기로 한 C4 ⑦ 하나다(I02-B의 실행 중 인스턴스 입구가 아직 없다). 남은 것은 "I06-T05가 넘기는 것"의 "검증하지 않은 것"(Windows, 실제 OS 보호, 실제 수집기와 원 시스템. S28·S29가 배포처에서 확인한다)이다
 - 관련: 이슈 #114(이 spec), 함께 열린 #113([I05 spec](2026-11-22-I05-site-connector-registration.md). spec과 I05-T01(PoC), I05-T02(시작과 재점검. PR #125)가 합쳐졌다. I05-T03~T05는 아직 없다)·#115(설치본의 인스턴스 범위 파일. [I07 spec](2026-11-22-I07-installed-scopes-file.md). spec은 합쳐졌다)·#116([I02-B spec](2026-11-22-I02-local-file-import.md). spec은 합쳐졌다), 선행 #18(I01)·#16(V01의 비밀 값 저장). [I01 spec](2026-11-21-I01-connector-sdk.md)(I01-R4 오류, R19 멈춤 코드, R20 결과 표, R25 계약 묶음), [I03 spec](2026-11-21-I03-persistent-queue.md)(I03-R16 보류와 재점검), [V01 spec](2026-11-21-V01-vertical-skeleton.md)(V01-R13 비밀 값), [ADR 0010](../adr/0010-encryption-at-rest.md), [ADR 0016](../adr/0016-connector-sdk-v2.md), [connector-sdk.md](../connector-sdk.md) 8장 "자격 증명", [site-setup.md](../site-setup.md) S04·S11, [ownership.md](../ownership.md)
 
 낯선 말은 [ARCHITECTURE 0절](../ARCHITECTURE.md#0-처음-나오는-말)에 풀이가 있다. 이 spec에서 새로 쓰는 말은 아래 표에 있다. `I01-…`·`I02B-…`·`I03-…`·`I05-…`·`I07-…`·`V01-…`은 그 spec의 번호, `S…`는 site-setup.md 체크리스트 번호다.
@@ -444,6 +444,49 @@ stateDiagram-v2
 - 화면: `apps/web/src/connector-credential.ts`(저장·삭제·알림과 문구), `connector-table.tsx`의 `SlotEntry`(칸마다 상태, 값 입력란, 저장, 저장된 칸의 삭제), `connector-text.ts`(사유 넷과 칸 상태 문구). 입력란은 `type="password"`, `autoComplete="off"`이며 값을 React 상태나 DOM의 `value` 속성에 두지 않는 비제어 입력란이다(제출할 때 `ref`로 읽고 곧 비운다). 줄바꿈 붙여넣기와 8192자 초과는 거부한다(결정표). 제출 뒤 초점은 입력란에 남는다. 접근 가능한 이름은 `<인스턴스> <칸> 값`·`저장`·`삭제`이다. 값은 저장 단추(또는 Enter)를 누르는 즉시 입력란에서 비워지고, 저장소가 거부해도 다시 채워지지 않는다. 같은 방식으로 고칠 곳이 하나 남았다: 설정 화면의 API 키 입력란(`App.tsx`의 `OpenAICompatible`)은 제어 입력란이라 입력하는 동안 키가 DOM의 `value` 속성에 있다. 이 PR은 건드리지 않았고 후속으로 넘긴다. 셸이 없으면 입력란 없이 `NO_CREDENTIAL_STORE_TEXT`만 보인다.
 - 문서(T05): 위 API와 화면의 동작은 connector-sdk.md 8장의 "화면에서 값을 넣는 곳"에 적는다. 값이 지나는 길(한 문단)은 `docs`의 ADR에도 같은 낱말로 적는다.
 
+**T05가 넘기는 것**(이 spec의 마지막 작업이다. 뒤에 같은 곳을 고치는 작업이 알아야 하는 사실만 적는다)
+
+I06-T05(#114)가 문서, ADR, S28·S29를 끝냈다. 기준은 `origin/main`의 751c786(I06-T04와 I07-T04가 합쳐진 뒤)이다. 로그는 `_workspace/pki-phase2h/i06_t05_*`(이 저장소에는 올라가지 않는 로컬 기록)에 있다.
+
+- **고친 곳.** [connector-sdk.md](../connector-sdk.md)(2장 `initialize` 서명 아래 문장, 5장 오류 목록과 두 문장과 요약, 6장 시나리오 필드 두 행과 "자격 증명을 쓰는 예시와 계약 묶음의 다섯 코드", 7장 필드 표의 `credentials`와 시작 절의 한 줄과 "아직 없는 것", 8장 "자격 증명"을 새로 씀, 11장), [site-setup.md](../site-setup.md)("실행 중 설정"의 행, S04의 문장, 번호 범위 안내, 새 "수집기 자격 증명" 절의 S28·S29), [ownership.md](../ownership.md)(2절 표의 `Connector` 행에 한 문장, 3절의 예외 문단에서 #114 삭제와 자격 증명 문단), 새 [ADR 0019](../adr/0019-connector-credentials.md), ADR 0010·0016의 가리키는 줄, 두 색인(`docs/README.md`, `docs/adr/README.md`), I01 spec과 I05 spec의 처리 표시, 문서 대응 시험(새 `tooling/docs/site-setup-i06.test.ts`, `connector-sdk.test.ts`의 I06 묶음 셋과 고친 단언, `backend/src/connector-sdk.docs.test.ts`의 새 묶음).
+- **ADR 번호.** 0019를 썼다. 0017(I02-B)은 아직 쓰이지 않았고 색인은 0017 행도 링크도 두지 않는다. 시험이 0017 파일이 없음, 색인에 0017 행이나 링크가 없음, "0017은 I02-B spec이 정해 둔 번호이고 아직 쓰이지 않았다." 문장이 있음을 본다. I02-B의 ADR이 들어오면 그쪽이 색인의 자기 행과 그 문장, 시험의 그 세 단언, `docs/README.md`의 "결정 기록 N건" 문구(시험이 `결정 기록 19건(잠정 14, 확정 4, 미결 1.`을 `connector-sdk.test.ts`의 두 곳에서 붙잡으므로 둘 다)를 함께 고친다.
+- **바꾼 단언과 이유.** 모두 `tooling/docs/connector-sdk.test.ts`다. 문장을 느슨하게 만든 것은 없고, #114가 문서에서 없어져 낡아진 단언을 같은 뜻의 더 센 단언으로 바꾸었다.
+
+  | 단언 | 전 | 후 | 이유 |
+  |---|---|---|---|
+  | 11장의 추적 이슈 번호 | `#114`, `#116`, `#121`이 있음 | `#116`, `#121`, `#162`가 있고 `#114`가 없음 | #114 행이 11장에서 빠졌다. #162(입력란의 알려진 틈)가 새 행에 있다 |
+  | ownership.md 3절 낱말 목록 | `#114`가 있음 | 목록에서 빼고 3절에 `#114`도 `#115`도 없음 | I06-R25가 요구한 것. I07-T04가 `#115`에 한 것과 같다 |
+  | I05의 예외 문단 묶음 | 낱말에 `#114`, 문장 "번호(#114)는 공용 저장소의 이슈다." | `#114`와 "공용 저장소의 이슈다."와 "수집기에 비밀 값을 건네는 길"이 없고, 남은 줄 "- 아직 메우지 못한 빌드 값: 배포처 전송 규칙·묶을 Provider·검증된 CLI 조합 목록·데이터 등급 목록. 각각 정책 판단이 따로 필요해 …"가 통째로 있음 | I05-T05가 만든 단언이 #114를 요구했다(I05 spec의 후속 표). 문단이 이슈 번호를 더는 적지 않으므로 그 안내 문장도 함께 간다 |
+  | ADR 건수 두 곳 | `결정 기록 18건(잠정 13, 확정 4, 미결 1.` | `결정 기록 19건(잠정 14, 확정 4, 미결 1.` | 0019가 잠정으로 들어왔다 |
+  | 7장 "아직 없는 것" | 두 항목, `#114`와 `#116`이 각각 | 한 항목(`1. ` #116), `2. `가 없고 `#114`와 "비밀 값을 건네는 통로"가 없음 | #114 항목이 빠졌고 번호가 당겨졌다. 소개 문장의 번호 예(`#116 등`)도 고침 |
+  | ADR 색인 | 0017과 0019가 예약, 링크 17개 이상 | 0019가 있음, 0017은 파일·행·링크가 없음, 링크 18개 이상 | 색인이 없는 파일을 가리키지 않고 0017이 있다고 내비치지 않음을 더 센 단언으로 |
+
+  `site-setup-i05.test.ts`의 범위 단언(닫는 괄호를 붙이지 않는 `S26~S27`)과 `site-setup-i07.test.ts`의 범위 단언(`S30~S31)`)은 고치지 않았다. 새 안내는 `… S26~S27, [I06](…) S28~S29, [I07](…) S30~S31)`이라 둘 다 그대로 서고, I05의 범위를 S28까지 넓히면 I05 시험이 빨개진다(변이 m32b).
+- **8장이 적는 것과 적지 않은 것.** 여덟 소절(칸 선언, 접근자, 수집기가 지킬 것, 화면에서 넣는 곳, 네 사유, 다시 시도되는 횟수, 인스턴스가 가리키는 원 시스템을 바꿀 때, 막지 못하는 것)과 요약이다. 위에서 T01·T03이 T05에 넘긴 문장은 모두 적었다: 4초 상한과 뒤늦은 출력, 계약 묶음이 재지 않는 누출 모양 여섯, `isConnectorCredentialError`와 번들이 한 벌 더인 경우, 읽기의 3초와 사유, 저장소 불가가 없음보다 먼저, 다시 만들기 중인 인스턴스는 한 시간 재점검이 건너뜀. T04의 한 줄·8192자와 #162. 적지 않은 것: 인스턴스 잠금이 판정 동안 잡혀 다른 동기화 요청이 `instance-busy`가 되는 것(T04가 넘긴 사실이지만 수집기 작성자가 할 일이 없다), 변경 알림이 관리 모듈보다 먼저 올 수 없다는 것.
+- **포크 절차의 실행(예행 한 번, macOS).** 버리는 트리(`git archive`로 이 브랜치의 내용을 풀어 `_workspace/pki-phase2h/i06_t05_steps/tree`에 만들었다. git 메타데이터를 건드리지 않는다)에서, 공용 예시 수집기 파일 셋을 `site/connectors/credentialed-notes/`로 복사해 수집기 패키지로 삼고 `site/composition/`에 칸 `token`을 선언한 인스턴스 하나의 등록과 계약 시험 한 줄(`credentials`와 `rejected` 시나리오)을 더했다. 제품 코드는 고치지 않았다. 종료 코드는 각 명령 바로 뒤의 `.exit` 파일에서 읽었다.
+
+  | 단계 | 명령 | 종료 | 파일(`i06_t05_steps/`) |
+  |---|---|---|---|
+  | 의존성 | `pnpm install --frozen-lockfile`(풀어 놓은 트리) | 0 | `s01_install.exit` |
+  | 포크 패키지를 더한 뒤 | `pnpm install` | 0 | `s02_install.exit` |
+  | 린트 | `pnpm lint` | 0 | `s03_lint.exit` |
+  | 타입 검사 | `pnpm typecheck`(`site/` 아래 패키지의 `tsconfig.json`을 함께 본다) | 0 | `s04_typecheck.exit` |
+  | 공용·포크 시험 | `pnpm exec vitest run site`(21 파일, 330 통과) | 0 | `s05_vitest_site.exit` |
+  | 포크의 계약 묶음과 등록 검사 | `pnpm exec vitest run site/connectors/credentialed-notes site/composition --reporter=verbose`(2 통과: 위반 없음, 등록 검사가 빈 목록) | 0 | `s07_vitest_fork.exit` |
+  | `site-check`(빈 설정) | `pnpm --filter @pki-site/composition site-check connector-example` | 1(`connector-example: not initialized`) | `s06_sitecheck.exit`, `s06_sitecheck.log` |
+  | `site-check`(읽는 것이 먼저인 수집기로 고쳐서) | 같은 명령, `initialize`가 설정을 보기 전에 `read`를 부르게 한 사본 | 0(`connector-example: ok (credential-required)`) | `s08_sitecheck_reads_first.exit` |
+  | 칸 이름을 `Token`으로 | `pnpm exec vitest run site/composition` | 1(`instance-credentials-invalid`) | `n1_badslot.exit` |
+  | 수집기가 토큰을 `console`에 씀 | `pnpm exec vitest run site/connectors/credentialed-notes` | 1(`credential-in-log`) | `n2_logleak.exit` |
+  | 거부를 일반 오류로 알림 | 같은 명령 | 1(`credential-rejection-unsignalled`) | `n3_unsignalled.exit` |
+  | 되돌린 뒤 | 같은 두 시험 | 0 | `n4_restored.exit`, `s09_restored.exit` |
+
+  이 예행이 문서에 넣게 한 것: 빈 설정으로 도는 `site-check`는 칸을 읽기 전에 설정을 보는 수집기를 `ok (credential-required)`로 알리지 않는다. 예시 수집기가 그렇다(설정에 `acceptedToken`이 없으면 `not initialized`로 끝난다). 그래서 S28 ②가 둘을 나누어 적었다(7장은 두 동작을 이미 각각 적고 있었다). 이것은 예시의 결함이 아니라 `site-check`의 정해진 동작이다(I06-R8, C13).
+- **문서와 코드·spec 사이에서 찾은 어긋남.** ① C19의 "I06-R19의 표에 든 아홉 경우"는 표가 열 행이 되어 낡았다. 검토 S1에 따라 "열 경우"로 고쳤고 문서(8장)와 시험은 열 행을 본다. ② 일을 받은 글에는 슬롯을 `manifest`에 선언한다고 적혔으나 spec(R2)과 코드(`ConnectorInstanceConfig.credentials`)는 인스턴스 정의다. 문서는 코드를 따랐고 8장이 "`manifest`에도 적지 않는다"를 적는다. ③ 공용 `@pki/connector-example`의 `exports`에는 자격 증명 예시가 없다(`./adapters`는 `example-connector.ts` 하나). 그래서 포크는 그 파일을 복사한다고 적었다(R23의 "문서의 코드 블록은 이 예시의 발췌"는 그대로다). 제품 결함은 찾지 못했다.
+- **#114를 닫는 근거.** 이슈의 과제 셋(규격과 평문 없음, 없음·만료의 상태와 보류 사유, 계약 묶음의 위반 코드)은 T01~T04의 시험으로 닫혔다. 이 PR이 C19와 H1을 닫는다. 닫히지 않은 기준은 C4 ⑦(I02B-T06의 실행 중 인스턴스 입구가 `openConnector`를 부르는 시험) 하나이고 이 spec이 닫는 것이 아니다. 배포처에서만 확인되는 S28·S29는 이슈의 과제가 아니다.
+- **알려진 한계·검증하지 않은 것.** Windows와 Windows의 OS 보호(DPAPI), 설치본, 실제 수집기와 그 의존성, 실제 원 시스템의 거부·만료·잠금(S28·S29). 예행의 포크는 공용 예시를 복사한 것이고 수집기는 예시 수집기다. `references`가 있는 실제 포크의 `tsconfig.json`은 예행의 모양(수집기 패키지 하나를 가리키는 것)으로만 재었다. 예행은 빌드(`pnpm --filter @pki/desktop build`)와 `scopes` 파일을 쓰지 않았다(I05·I07의 예행이 이미 잰 부분이다). 입력란의 알려진 틈은 #162가 추적한다.
+- **알아 둘 것(고치지 않음).** 7장은 `site/connectors/<이름>/`의 `tsconfig.json`이 깊이 3의 `../../../tsconfig.base.json`을 확장해야 한다는 것을 적지 않는다(독립 검토 W1. 7장의 그 부분은 I05가 쓴 글이다).
+- **같은 곳을 고치는 뒤 작업.** I07-T05는 S31의 문장과 `site-setup-i07.test.ts`의 한 시험을 고친다. 이 작업은 그 줄들을 건드리지 않았다(S28·S29 절은 S31 절 앞에 따로 있다). I02-B의 문서 작업은 위의 ADR 색인과 건수, `site-setup.md`의 번호 범위 안내(I02-B S23~S25가 아직 이 안내에 없다)를 고친다.
+
 **이 절을 줄이면**: 규격에 선택 인자 하나, 오류 하나, 건강 사유의 값 하나를 더하고, 값은 접근자로 넘긴다. 경계는 칸의 선언과 `ConnectorContext`이고, 계약 묶음의 코드 다섯과 예시 수집기로 공용에서 증명한다. 제품은 값을 기억하지 않으며, 사유는 저장소가 한 답으로 정한다.
 
 ## 완료 기준 (테스트 가능한 형태)
@@ -469,7 +512,7 @@ stateDiagram-v2
 - [ ] **I06-C17** (R22): canary를 오류의 문구에 싣는 수집기 셋(초기화에서, 나중 설정의 초기화에서, 읽는 도중의 `getChanges`에서 던진다) 각각으로 `checkConnector`를 부르면, 던져진 오류를 문구·`cause` 사슬·`stack`까지 펼친 글에 canary가 없다. 값이 `stack`에만 있거나 심볼 키의 필드에만 있는 오류도 세 곳 모두에서 `cause`가 달리지 않는다. canary를 `console`에 쓰는 수집기로 불렀을 때 시험이 모은 표준 출력·표준 오류에 canary가 없다. `connectorContract`로 감싼 묶음의 실패 보고에 실리는 값(기대한 목록과 받은 목록)은 코드뿐이다.
 - [ ] **I06-C18** (R23): 자격 증명을 쓰는 예시 수집기가 ① `credentials` 시나리오와 `rejected` 시나리오로 계약 묶음의 결과가 빈 목록이고 ② 틀린 토큰에 `ConnectorCredentialError`를 던지며 ③ 예시 패키지의 어느 파일에도 실제처럼 보이는 값이 아니라 지어낸 값임이 드러나는 토큰(`synthetic-`으로 시작)만 있다.
 - [ ] **I06-C19** (R24, R25): 문서 대응 테스트가 다음을 판정한다.
-  - connector-sdk.md 8장이 칸의 선언, 접근자로 읽는 발췌(표지가 가리키는 예시 파일에 그대로 있음), `ConnectorCredentialError`를 던지는 때와 건강 사유의 상수, "건강 사유의 값은 재점검에서만 읽힌다", 네 사유의 이름, "거부된 값은 한 시간마다 다시 시도되지 않는다", "원 시스템을 바꾸면 인스턴스 ID도 바꾼다", I06-R19의 표에 든 아홉 경우, "값을 되쓰는 길은 없다", "`context`가 없으면"의 안내를 갖고, "통로는 아직 없다"는 문장을 더는 갖지 않는다. 11장에 #114 행이 없다.
+  - connector-sdk.md 8장이 칸의 선언, 접근자로 읽는 발췌(표지가 가리키는 예시 파일에 그대로 있음), `ConnectorCredentialError`를 던지는 때와 건강 사유의 상수, "건강 사유의 값은 재점검에서만 읽힌다", 네 사유의 이름, "거부된 값은 한 시간마다 다시 시도되지 않는다", "원 시스템을 바꾸면 인스턴스 ID도 바꾼다", I06-R19의 표에 든 열 경우, "값을 되쓰는 길은 없다", "`context`가 없으면"의 안내를 갖고, "통로는 아직 없다"는 문장을 더는 갖지 않는다. 11장에 #114 행이 없다.
   - connector-sdk.md 5장의 결과 표와 6장의 코드 표가 상수(`SYNC_OUTCOMES`, `CONNECTOR_VIOLATION_CODES`)와 같고, 7장의 `site-check` 출력 문장이 `ok (credential-required)`를 적는다.
   - site-setup.md의 "실행 중 설정" 표에 수집기 자격 증명 행이 있고 그 행이 "설정 파일에 두지 않는다"를 적는다.
   - ownership.md 3절의 예외 문단이 #114를 더는 적지 않는다. 그 문단에 #114가 있다고 단언하던 시험 둘(`tooling/docs/connector-sdk.test.ts`의 3절 낱말 목록, I05-T05의 문서 대응 테스트)이 그 단언 없이 통과한다.
@@ -573,3 +616,5 @@ stateDiagram-v2
 | 2026-11-23 | 델타 검토 반영: R19에 끝나지 않는 `initialize`의 한계 문구와 보류된 작업이 한 시간 기다릴 수 있는 틈 둘(객체 세대를 닫을 때 견주는 것이 바꾸는 자리)을 적음, R12에 간격은 직전 다시 만들기의 시작에서 잼을 적음. 코드: 교체 표시를 실행(임대)마다 키로 두고 실행이 끝나면 지움, `bootBackend`가 `connectors`를 돌려줌 | I06 spec | I06-T03 델타 검토 B·C |
 | 2026-11-23 | I06-T04 구현에 맞춰 고침: "T04가 넘기는 것"과 결정 세 행(저장소 불가 칸의 입력란, 목록을 다시 읽는 때, 저장은 되고 알림이 실패한 문구)을 더함. `CREDENTIAL_RETRY_MIN_MS`를 `@pki/contracts`로 옮김. T03의 `rebuild`가 `credentials`가 빠진 요약을 돌려주던 것을 R12·R13에 맞게 고침 | 이 문서 | I06-T04 구현. 뒤 작업(T05)이 알아야 하는 API 모양과 화면의 접근성 이름 |
 | 2026-11-23 | I06-T04 독립 검토 반영: 한 줄 8192자 결정 행, 입력란을 비제어로(입력 중 DOM에 값이 없음), 초점 유지, 알림이 관리 모듈보다 먼저 올 수 없다는 답, 설정 화면 API 키 입력란은 후속 | 이 문서 | I06-T04 검토 F2·F3·F4·F8 |
+| 2026-11-23 | I06-T05: 문서(connector-sdk.md 2·5·6·7·8·11장, site-setup S28·S29와 "실행 중 설정"의 행, ownership.md), ADR 0019, 색인 둘, ADR 0010·0016의 가리키는 줄, I01·I05 spec의 처리 표시, 문서 대응 시험을 "I06-T05가 넘기는 것" 절에 기록(바꾼 단언, 포크 절차의 예행과 종료 코드, 문서와 코드·spec의 어긋남 셋, 닫히지 않은 C4 ⑦). 상태 줄에 T01~T05 구현을 적음. 요구사항·기준·작업 표의 글자는 고치지 않았다 | 이 문서 | I06-T05(#114). 예행에서 `site-check`가 칸을 읽기 전에 설정을 보는 수집기를 `ok (credential-required)`로 알리지 않는다는 것이 드러나 문서가 둘을 나누어 적음 |
+| 2026-11-24 | C19의 경우 수를 R19 표(열 행)에 맞춤(아홉 → 열). 요구 내용은 바꾸지 않음. "T05가 넘기는 것"의 어긋남 ①을 "고쳤다"로, 알아 둘 것(7장 `tsconfig` 깊이)을 더함 | I06-C19, "T05가 넘기는 것" | I06-T05 독립 검토 S1·W1 |
