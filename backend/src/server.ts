@@ -113,6 +113,7 @@ import { jobsApi, type JobsPort } from "./jobs-view.ts";
 import type { LocalLocations } from "./local-locations.ts";
 import { createAnalyticalApi } from "./analytical-api.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
+import { createLintReads } from "./lint-read.ts";
 import { createWikiReads } from "./wiki-read.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -623,6 +624,19 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     // S02-R10: what supported or opposed a candidate may have changed with the user's action
     refreshCandidates(options.db, [...new Set(items)], scope);
   };
+  /** K02-R11: an accepted finding calls the existing entry; the rules that read its rows follow, as after any user entry. */
+  const lint = createLintReads(
+    options.db,
+    registry,
+    gate,
+    () => options.decisions,
+    (rows, at) =>
+      judgeAgain(
+        rows.flatMap((r) => (r.kind === "item" ? [r.id] : itemsOfEntry(options.db, r))),
+        rows.filter((r) => r.kind !== "item"),
+        at,
+      ),
+  );
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -1152,6 +1166,10 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       return wiki.page(key) ?? { error: "not-found" as const };
     },
     wikiEdit: async (edit) => wiki.edit(edit, serverTime()),
+    // K02-R15: the lint. A decision runs in the transaction of the entry it calls
+    lint: async () => lint.list(),
+    lintDecide: async (request) => lint.decide(request, serverTime()),
+    lintReport: async (request) => lint.report(request, serverTime()),
     wikiRebuild: async () => {
       const requested = requestWikiRebuild(options.db);
       if (requested.status === "registered") options.onRunConditionsChanged?.();

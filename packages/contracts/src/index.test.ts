@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   ConnectorListResponseSchema,
   ErrorResponseSchema,
+  LintDecideRequestSchema,
   routes,
   SYNC_STOP_CODES,
   SyncResponseSchema,
@@ -228,5 +229,14 @@ describe("sync v2 contract (I01-R19, R21, T03)", () => {
     ]) {
       expect(outcome.safeParse(wrong).success, JSON.stringify(wrong)).toBe(false);
     }
+  });
+});
+
+describe("lint decide request (K02-R15)", () => {
+  it("takes a relation type only in the identifier form the direct relation add takes", () => {
+    const ask = (relationType: string) =>
+      LintDecideRequestSchema.safeParse({ id: 1, op: "accept", relationType }).success;
+    expect(ask("RELATED_TO")).toBe(true);
+    expect(ask("아무 글 <b>x</b>\n# 제목")).toBe(false);
   });
 });

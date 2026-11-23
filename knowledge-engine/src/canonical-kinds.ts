@@ -59,6 +59,7 @@ import { recomputeInsights } from "./insight-code-rules.ts";
 import type { RuleOutcome } from "./insight-rules.ts";
 import { refreshCandidates } from "./entity-resolution.ts";
 import { projectionKinds, type PermanentlyAbsent } from "./projection-kinds.ts";
+import { LINT_FINDING_KIND } from "./lint-kind.ts";
 import { WIKI_PAGE_KIND } from "./wiki-kind.ts";
 
 /** What one propagation did, by id, for V02's entries (ascending ids). */
@@ -1192,6 +1193,7 @@ export function createProductRegistry(options: {
     kinds: [
       ...canonicalKinds(options.membershipListeners),
       WIKI_PAGE_KIND,
+      LINT_FINDING_KIND,
       ...projectionKinds({
         at: now,
         ...(options.permanentlyAbsent ? { permanentlyAbsent: options.permanentlyAbsent } : {}),

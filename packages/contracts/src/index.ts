@@ -1553,6 +1553,70 @@ export const WikiRebuildRequestSchema = z.strictObject({});
 /** `queued`: a build was queued; `open`: one was open already and will do it. */
 export const WikiRebuildResponseSchema = z.object({ status: z.enum(["queued", "open"]) });
 
+// K02 (R15): reflection and knowledge lint. A finding is a candidate: the rule, the rows it bears on and the
+// evidence ids the existing evidence view opens; the words on the screen are the screen's.
+const LintRuleSchema = z.enum(["synonym", "stale", "overdue-work", "missing-link"]);
+const LintTargetKindSchema = z.enum(["item", "fact", "relation"]);
+export const LintFindingSchema = z.object({
+  id: z.int().positive(),
+  rule: LintRuleSchema,
+  status: z.enum(["open", "accepted", "dismissed", "resolved", "oscillating"]),
+  /** `user`: the user reported it as missed (K02-R12). */
+  origin: z.enum(["rule", "user"]),
+  flips: z.int().nonnegative(),
+  /** The rows it bears on, with the words the rows hold (shown only while every row is). */
+  targets: z.array(
+    z.object({ kind: LintTargetKindSchema, id: z.int().positive(), label: z.string() }),
+  ),
+  evidence: z.array(z.int().positive()),
+});
+export const LintResponseSchema = z.object({
+  findings: z.array(LintFindingSchema),
+  /** The shown findings counted by rule (K02-R12). */
+  counts: z.array(
+    z.object({
+      rule: LintRuleSchema,
+      open: z.int().nonnegative(),
+      accepted: z.int().nonnegative(),
+      falsePositive: z.int().nonnegative(),
+      missed: z.int().nonnegative(),
+      oscillating: z.int().nonnegative(),
+    }),
+  ),
+  /** The latest finished `reflect` job's time and result counts; null before the first run. */
+  lastRun: z
+    .object({ at: z.string(), counts: z.record(z.string(), z.int().nonnegative()) })
+    .nullable(),
+  /** Items still marked for the next run. */
+  dirty: z.int().nonnegative(),
+});
+export const LintDecideRequestSchema = z.strictObject({
+  id: z.int().positive(),
+  op: z.enum(["accept", "dismiss", "reopen"]),
+  /** `missing-link` accepted: the relation type the user chose. */
+  relationType: SemanticIdentifierSchema.optional(),
+});
+/**
+ * `refused`: the existing entry's own code (`type-mismatch`, `value-exists`, `scope-refused`…) or ours.
+ * `not-found`: no such finding, or not one the caller may see (the one answer for both).
+ */
+export const LintDecideResponseSchema = z.object({
+  status: z.enum(["applied", "refused", "not-found"]),
+  reason: z.string().optional(),
+  finding: LintFindingSchema.optional(),
+});
+export const LintReportRequestSchema = z.strictObject({
+  rule: LintRuleSchema,
+  kind: LintTargetKindSchema,
+  a: z.int().positive(),
+  b: z.int().positive().optional(),
+});
+export const LintReportResponseSchema = z.object({
+  /** `exists`: the rules had found it already; `not-found`: a target row is gone or not shown. */
+  status: z.enum(["applied", "exists", "not-found"]),
+  finding: LintFindingSchema.optional(),
+});
+
 export const routes = {
   status: { method: "GET", path: "/api/status", response: StatusResponseSchema },
   connectors: { method: "GET", path: "/api/connectors", response: ConnectorListResponseSchema },
@@ -1959,6 +2023,20 @@ export const routes = {
     path: "/api/wiki/rebuild",
     request: WikiRebuildRequestSchema,
     response: WikiRebuildResponseSchema,
+  },
+  // K02 (R15): reflection and knowledge lint
+  lint: { method: "GET", path: "/api/lint", response: LintResponseSchema },
+  lintDecide: {
+    method: "POST",
+    path: "/api/lint/decide",
+    request: LintDecideRequestSchema,
+    response: LintDecideResponseSchema,
+  },
+  lintReport: {
+    method: "POST",
+    path: "/api/lint/report",
+    request: LintReportRequestSchema,
+    response: LintReportResponseSchema,
   },
 } as const;
 export type RouteName = keyof typeof routes;

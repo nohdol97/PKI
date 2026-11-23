@@ -146,3 +146,27 @@ export {
   type WikiClaim,
   type WikiPageBody,
 } from "./wiki-render.ts";
+export { LINT_FINDING_KIND, LINT_FINDING_KIND_NAME } from "./lint-kind.ts";
+export { itemsOfFinding, lintFindings, type LintFinding } from "./lint-rules.ts";
+export {
+  createReflectHandler,
+  planReflect,
+  type ReflectCounts,
+  type ReflectHandlerOptions,
+  type ReflectOptions,
+  type ReflectPlan,
+  type ReflectResult,
+  type ReflectTarget,
+} from "./reflect-job.ts";
+export {
+  decideFinding,
+  hasRuleShape,
+  NO_ENTRY,
+  NOT_IN_STATE,
+  reportMissed,
+  TYPE_REQUIRED,
+  type DecideOutcome,
+  type LintEntries,
+  type LintOp,
+  type ReportOutcome,
+} from "./lint-decide.ts";

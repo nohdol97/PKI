@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(30);
-    expect(migrations).toHaveLength(30);
+    expect(schemaVersion(db)).toBe(31);
+    expect(migrations).toHaveLength(31);
   });
 
   it("is idempotent when re-run", () => {
@@ -493,6 +493,8 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "items",
       "jobs",
       "keyword_index",
+      "lint_finding_lineage",
+      "lint_findings",
       "local_file_entries",
       "local_index_seq",
       "local_locations",
@@ -501,6 +503,8 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "ontology_elements",
       "ontology_history",
       "provider_calls",
+      "reflection_dirty",
+      "reflection_state",
       "relation_history",
       "relations",
       "revisions",

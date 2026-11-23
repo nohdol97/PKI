@@ -61,6 +61,7 @@ import {
   createExtractHandler,
   createProductRegistry,
   createProjections,
+  createReflectHandler,
   createWikiBuildHandler,
   createInsightInterpretHandler,
   createWikiSummaryHandler,
@@ -93,6 +94,7 @@ import {
   requestInsightInterpretations,
   requestWikiBuild,
   requestWikiSummaries,
+  REFLECT_JOB_KIND,
   WIKI_BUILD_KIND,
   WIKI_SUMMARY_KIND,
   type DerivativeRegistry,
@@ -519,6 +521,12 @@ export function productRunner(
       // K01-R4: no Provider is called; no source, so no fence
       [WIKI_BUILD_KIND]: createWikiBuildHandler({
         db,
+        ...(clock ? { now: () => new Date(clock.now()) } : {}),
+      }),
+      // K02-R2: reads the DB only, no Provider is called; no source, so no fence
+      [REFLECT_JOB_KIND]: createReflectHandler({
+        db,
+        ...(options.registry ? { registry: options.registry } : {}),
         ...(clock ? { now: () => new Date(clock.now()) } : {}),
       }),
       // K01-R12: one Broker call per page, IDs only; the Broker asks consent and egress, the page is a projection
