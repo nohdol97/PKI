@@ -5,6 +5,8 @@
 import {
   listNotifications,
   deferNotification,
+  dismissNotification,
+  markNotificationRead,
   migrate,
   registerConnectorInstance,
   writeSetting,
@@ -152,5 +154,29 @@ describe("notify.outbox: at most once (P02-C3a ②)", () => {
     outbox.flush();
     outbox.flush();
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe("notify.outbox: a read or closed daily line is not handed over (reviewer FU2 of T1)", () => {
+  it("cancels the waiting message of a read or dismissed daily line at the flush, and the Insight line's message still goes", () => {
+    seedInsight(db, { name: "하나" });
+    notifyNow(db, "scan", "2026-11-23T12:00:00.000Z");
+    notifyNow(db, "daily", "2026-11-24T09:00:00.000Z");
+    notifyNow(db, "weekly", "2026-11-30T09:10:00.000Z");
+    const [daily, weekly] = ["daily", "weekly"].map((k) =>
+      listNotifications(db).find((n) => n.kind === k),
+    );
+    markNotificationRead(db, daily?.id as number, "2026-11-24T09:05:00.000Z");
+    dismissNotification(db, weekly?.id as number, "2026-11-30T09:15:00.000Z");
+    const { channel, sent } = fakeChannel();
+
+    outboxAt(channel, () => "2026-11-30T12:00:00.000Z").flush();
+
+    expect(sent.map((m) => m.kind)).toEqual(["insight"]);
+    expect(listNotifications(db).map((n) => `${n.kind}:${n.status}/${n.osState}`)).toEqual([
+      "insight:sent/handed",
+      "daily:sent/cancelled",
+      "weekly:dismissed/cancelled",
+    ]);
   });
 });
