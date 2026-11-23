@@ -343,3 +343,51 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* rows of a list inside a group box (지식 검토, 유형 정의): a line, its status as a dot and word, its actions */
+.pane-head .head-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-sub);
+}
+.pane-head .head-filter select {
+  min-height: calc(var(--control-h) - var(--sp-2));
+}
+.knowledge-list,
+.line-list {
+  margin: 0 0 var(--sp-3);
+  padding: 0;
+  list-style: none;
+}
+.knowledge-list > li {
+  margin: 0;
+  padding: var(--sp-3) 0;
+  border-top: var(--border);
+}
+.knowledge-list > li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.knowledge-list h3 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-body);
+}
+.line-list > li {
+  margin: 0;
+  padding: var(--sp-2) 0;
+  border-top: var(--border);
+}
+.line-list > li:first-child {
+  border-top: 0;
+}
+.line-list.spread > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+}
+.line-list.spread > li > span:last-child {
+  margin-left: auto;
+}

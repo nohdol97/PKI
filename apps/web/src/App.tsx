@@ -102,7 +102,7 @@ export function App({ api }: { api: ApiClient }) {
     screen === "wiki" ||
     screen === "lint" ||
     screen === "explore";
-  const own = screen === "ask";
+  const own = screen === "ask" || screen === "semantic";
   return (
     <NavProvider screen={screen} onScreen={setScreen}>
       <div className="app">

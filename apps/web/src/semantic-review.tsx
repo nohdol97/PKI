@@ -8,6 +8,7 @@ import type { ApiClient } from "./api.ts";
 import { markDistinct, mergeInto } from "./entity-curation.tsx";
 import { createBusy } from "./latest.ts";
 import { useNav } from "./nav.tsx";
+import { PaneHead } from "./panes.tsx";
 import {
   CONFLICT_TYPE_TEXT,
   CONFLICTS_EMPTY,
@@ -24,6 +25,7 @@ import {
   REVIEW_MORE,
   REVIEW_REREAD_FAILED,
   STATUS_ORDER,
+  STATUS_CLASS,
   STATUS_TEXT,
 } from "./semantic-text.ts";
 
@@ -277,6 +279,9 @@ export function ReviewView({
       ? [{ item, entries }]
       : [];
   });
+  const state = (status: Status) => (
+    <span className={`state ${STATUS_CLASS[status]}`}>{STATUS_TEXT[status]}</span>
+  );
   const side = (factId: number, itemId: number) => {
     const fact = factOf(factId);
     const itemName = nameOf(itemId);
@@ -295,11 +300,9 @@ export function ReviewView({
     );
   };
   return (
-    <>
-      <p>{REVIEW_INTRO}</p>
-      {notice && <p role="alert">{notice}</p>}
-      <p>
-        <label>
+    <div className="pane-wide">
+      <PaneHead title="지식 검토" as="h1">
+        <label className="head-filter">
           상태{" "}
           <select value={filter} onChange={(e) => onFilter(e.target.value as Status | "all")}>
             {STATUS_ORDER.map((s) => (
@@ -310,125 +313,135 @@ export function ReviewView({
             <option value="all">{FILTER_ALL}</option>
           </select>
         </label>
-      </p>
-      {loading && <p role="status">{REVIEW_LOADING}</p>}
-      {!loading && shown.length === 0 && review.list.next === null && <p>{REVIEW_EMPTY}</p>}
-      <ul aria-label="지식 목록">
-        {shown.map(({ item, entries }) => (
-          <li key={item.id}>
-            <h3>
-              <bdi>{item.name}</bdi> ({item.type}){" "}
-              <button type="button" onClick={() => go("explore", { itemId: item.id })}>
-                탐색에서 보기
-              </button>
-            </h3>
-            <ul>
-              {entries.item && (
-                <li>
-                  항목 · {STATUS_TEXT[item.status]} · {EPISTEMIC_TEXT[item.epistemic]}{" "}
-                  <SemanticRowActions
-                    kind="item"
-                    id={item.id}
-                    name={`항목 ${item.name}`}
-                    onAct={onAct}
-                  />
-                </li>
-              )}
-              {entries.facts.map((f) => (
-                <li key={`f${f.id}`}>
-                  사실 · {f.kind}: <bdi>{f.value}</bdi> · {STATUS_TEXT[f.status]} ·{" "}
-                  {EPISTEMIC_TEXT[f.epistemic]} · 근거 {f.evidenceCount}{" "}
-                  <SemanticRowActions
-                    kind="fact"
-                    id={f.id}
-                    name={`사실 ${f.kind} ${f.value}`}
-                    onAct={onAct}
-                  />
-                </li>
-              ))}
-              {entries.relations.map((r) => (
-                <li key={`r${r.id}`}>
-                  관계 · {r.type} → <bdi>{nameOf(r.objectId) ?? `항목 ${r.objectId}`}</bdi> ·{" "}
-                  {STATUS_TEXT[r.status]} · {EPISTEMIC_TEXT[r.epistemic]} · 근거 {r.evidenceCount}{" "}
-                  <SemanticRowActions
-                    kind="relation"
-                    id={r.id}
-                    name={`관계 ${r.type} ${r.id}`}
-                    onAct={onAct}
-                  />
-                </li>
-              ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
-      {review.list.next !== null && (
-        <button type="button" disabled={loading} onClick={onMore}>
-          {REVIEW_MORE}
-        </button>
-      )}
-      <h2>{PAIRS_HEADING}</h2>
-      {review.pairs.length === 0 && <p>{PAIRS_EMPTY}</p>}
-      <ul aria-label="합치기 후보 목록">
-        {review.pairs.map((p) => (
-          <li key={`${p.a.id}-${p.b.id}`}>
-            <bdi>{p.a.name}</bdi> · <bdi>{p.b.name}</bdi>{" "}
-            <button
-              type="button"
-              aria-label={`${p.b.name}을(를) ${p.a.name}에 합치기`}
-              onClick={() => onPair({ type: "merge", member: p.b.id, into: p.a.id })}
-            >
-              <bdi>{p.a.name}</bdi>에 합치기
-            </button>{" "}
-            <button
-              type="button"
-              aria-label={`${p.a.name}을(를) ${p.b.name}에 합치기`}
-              onClick={() => onPair({ type: "merge", member: p.a.id, into: p.b.id })}
-            >
-              <bdi>{p.b.name}</bdi>에 합치기
-            </button>{" "}
-            <button
-              type="button"
-              aria-label={`다른 것: ${p.a.name}, ${p.b.name}`}
-              onClick={() => onPair({ type: "distinct", a: p.a.id, b: p.b.id })}
-            >
-              다른 것
+      </PaneHead>
+      <div className="pane-body">
+        <p>{REVIEW_INTRO}</p>
+        {notice && <p role="alert">{notice}</p>}
+        <div className="group">
+          {loading && <p role="status">{REVIEW_LOADING}</p>}
+          {!loading && shown.length === 0 && review.list.next === null && <p>{REVIEW_EMPTY}</p>}
+          <ul className="knowledge-list" aria-label="지식 목록">
+            {shown.map(({ item, entries }) => (
+              <li key={item.id}>
+                <h3>
+                  <bdi>{item.name}</bdi> ({item.type}){" "}
+                  <button type="button" onClick={() => go("explore", { itemId: item.id })}>
+                    탐색에서 보기
+                  </button>
+                </h3>
+                <ul className="line-list spread">
+                  {entries.item && (
+                    <li>
+                      항목 · {state(item.status)} · {EPISTEMIC_TEXT[item.epistemic]}{" "}
+                      <SemanticRowActions
+                        kind="item"
+                        id={item.id}
+                        name={`항목 ${item.name}`}
+                        onAct={onAct}
+                      />
+                    </li>
+                  )}
+                  {entries.facts.map((f) => (
+                    <li key={`f${f.id}`}>
+                      사실 · {f.kind}: <bdi>{f.value}</bdi> · {state(f.status)} ·{" "}
+                      {EPISTEMIC_TEXT[f.epistemic]} · 근거 {f.evidenceCount}{" "}
+                      <SemanticRowActions
+                        kind="fact"
+                        id={f.id}
+                        name={`사실 ${f.kind} ${f.value}`}
+                        onAct={onAct}
+                      />
+                    </li>
+                  ))}
+                  {entries.relations.map((r) => (
+                    <li key={`r${r.id}`}>
+                      관계 · {r.type} → <bdi>{nameOf(r.objectId) ?? `항목 ${r.objectId}`}</bdi> ·{" "}
+                      {state(r.status)} · {EPISTEMIC_TEXT[r.epistemic]} · 근거 {r.evidenceCount}{" "}
+                      <SemanticRowActions
+                        kind="relation"
+                        id={r.id}
+                        name={`관계 ${r.type} ${r.id}`}
+                        onAct={onAct}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+          {review.list.next !== null && (
+            <button type="button" disabled={loading} onClick={onMore}>
+              {REVIEW_MORE}
             </button>
-          </li>
-        ))}
-      </ul>
-      <h2>충돌</h2>
-      {review.conflicts.truncated && <p role="status">{CONFLICTS_TRUNCATED}</p>}
-      {review.conflicts.links.length === 0 && <p>{CONFLICTS_EMPTY}</p>}
-      <ul aria-label="충돌 목록">
-        {review.conflicts.links.map((l) => (
-          <li key={l.id}>
-            {CONFLICT_TYPE_TEXT[l.type]} ({CREATED_BY_TEXT[l.createdBy]}):{" "}
-            {side(l.from.factId, l.from.itemId)}
-            {" ↔ "}
-            {side(l.to.factId, l.to.itemId)}{" "}
-            <button
-              type="button"
-              aria-label={`기각: 사실 ${l.from.factId}`}
-              onClick={() =>
-                onAct({ type: "decide", kind: "fact", id: l.from.factId, action: "reject" })
-              }
-            >
-              앞 사실 기각
-            </button>{" "}
-            <button
-              type="button"
-              aria-label={`기각: 사실 ${l.to.factId}`}
-              onClick={() =>
-                onAct({ type: "decide", kind: "fact", id: l.to.factId, action: "reject" })
-              }
-            >
-              뒤 사실 기각
-            </button>
-          </li>
-        ))}
-      </ul>
-    </>
+          )}
+        </div>
+        <div className="group">
+          <h2>{PAIRS_HEADING}</h2>
+          {review.pairs.length === 0 && <p>{PAIRS_EMPTY}</p>}
+          <ul className="line-list" aria-label="합치기 후보 목록">
+            {review.pairs.map((p) => (
+              <li key={`${p.a.id}-${p.b.id}`}>
+                <bdi>{p.a.name}</bdi> · <bdi>{p.b.name}</bdi>{" "}
+                <button
+                  type="button"
+                  aria-label={`${p.b.name}을(를) ${p.a.name}에 합치기`}
+                  onClick={() => onPair({ type: "merge", member: p.b.id, into: p.a.id })}
+                >
+                  <bdi>{p.a.name}</bdi>에 합치기
+                </button>{" "}
+                <button
+                  type="button"
+                  aria-label={`${p.a.name}을(를) ${p.b.name}에 합치기`}
+                  onClick={() => onPair({ type: "merge", member: p.a.id, into: p.b.id })}
+                >
+                  <bdi>{p.b.name}</bdi>에 합치기
+                </button>{" "}
+                <button
+                  type="button"
+                  aria-label={`다른 것: ${p.a.name}, ${p.b.name}`}
+                  onClick={() => onPair({ type: "distinct", a: p.a.id, b: p.b.id })}
+                >
+                  다른 것
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="group">
+          <h2>충돌</h2>
+          {review.conflicts.truncated && <p role="status">{CONFLICTS_TRUNCATED}</p>}
+          {review.conflicts.links.length === 0 && <p>{CONFLICTS_EMPTY}</p>}
+          <ul className="line-list" aria-label="충돌 목록">
+            {review.conflicts.links.map((l) => (
+              <li key={l.id}>
+                {CONFLICT_TYPE_TEXT[l.type]} ({CREATED_BY_TEXT[l.createdBy]}):{" "}
+                {side(l.from.factId, l.from.itemId)}
+                {" ↔ "}
+                {side(l.to.factId, l.to.itemId)}{" "}
+                <button
+                  type="button"
+                  aria-label={`기각: 사실 ${l.from.factId}`}
+                  onClick={() =>
+                    onAct({ type: "decide", kind: "fact", id: l.from.factId, action: "reject" })
+                  }
+                >
+                  앞 사실 기각
+                </button>{" "}
+                <button
+                  type="button"
+                  aria-label={`기각: 사실 ${l.to.factId}`}
+                  onClick={() =>
+                    onAct({ type: "decide", kind: "fact", id: l.to.factId, action: "reject" })
+                  }
+                >
+                  뒤 사실 기각
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -487,8 +500,16 @@ export function SemanticReview({ api }: { api: ApiClient }) {
       );
     return accepted;
   };
-  if (failure) return <p role="alert">{failure}</p>;
-  if (!review) return <p role="status">{REVIEW_LOADING}</p>;
+  if (failure || !review) {
+    return (
+      <div className="pane-wide">
+        <PaneHead title="지식 검토" as="h1" />
+        <div className="pane-body">
+          {failure ? <p role="alert">{failure}</p> : <p role="status">{REVIEW_LOADING}</p>}
+        </div>
+      </div>
+    );
+  }
   return (
     <ReviewView
       review={review}
