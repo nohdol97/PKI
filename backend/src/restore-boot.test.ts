@@ -40,7 +40,12 @@ import {
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CANONICAL_DB_FILE, openCanonicalDb } from "./composition.ts";
-import { LedgerReapplyError, createProductRegistry, userDelete } from "@pki/knowledge-engine";
+import {
+  LedgerReapplyError,
+  PROJECTION_STALE_SETTINGS,
+  createProductRegistry,
+  userDelete,
+} from "@pki/knowledge-engine";
 import { bootBackend } from "./boot.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 import {
@@ -282,6 +287,8 @@ describe("restore.finish (H01-R12)", () => {
     ).toHaveLength(2);
     expect(last).toMatchObject({ reapplied: 4, clearedConsents: 1, pausedLocations: 1 });
     expect(JSON.parse(readSetting(db, RESTORE_LAST_SETTING) as string)).toEqual(last);
+    // H01C3-R10: a restore takes the number issuance back, so a vector ref of before may name another source now
+    expect(readSetting(db, PROJECTION_STALE_SETTINGS.vectorIndex)).toBe("1");
     db.close();
   });
 });
