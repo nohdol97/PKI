@@ -1,6 +1,8 @@
 // The data-folder lock (R04L, spec 2026-11-23-R04-data-dir-lock): one shell per data
 // folder, whatever its userData. SQLite's exclusive lock on instance.lock is an OS file
 // lock, so a holder that dies (even by SIGKILL) frees it and no stale-lock guess is needed.
+// "Obtained" means the lock file was also written to (LKH-R1, spec 2026-11-24-LKH-lock-hardening):
+// a read-only file is no lock. The module keeps the connection until close() (LKH-R3).
 import { ensureDataDirectory } from "@pki/storage";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
@@ -43,4 +45,27 @@ export function lockDataDirectory(dir: string): DataLock | undefined {
       if (db.isOpen) db.close();
     },
   };
+}
+
+/**
+ * The shell's start decision (LKH-R4), apart from Electron so a test can drive it: works out
+ * the data folder and locks it. A location that cannot be worked out, a folder in use and a
+ * lock that cannot be taken each give the one line for standard error; the shell then exits 1.
+ */
+export function openDataFolder(
+  resolve: () => string,
+  lock: (dir: string) => DataLock | undefined = lockDataDirectory,
+): { dir: string; lock: DataLock } | { line: string } {
+  let dir: string;
+  try {
+    dir = resolve();
+  } catch (error) {
+    return { line: `PKI: could not work out the data folder: ${(error as Error).message}` };
+  }
+  try {
+    const taken = lock(dir);
+    return taken === undefined ? { line: DATA_IN_USE } : { dir, lock: taken };
+  } catch (error) {
+    return { line: `PKI: could not lock the data folder: ${(error as Error).message}` };
+  }
 }

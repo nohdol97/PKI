@@ -31,17 +31,26 @@ const isFile = (path: string) => {
 
 export function removeUserData(input: {
   choice: string | undefined;
-  dir: string;
+  /** Called after `keep` is ruled out: keep needs no location, so a location that cannot be worked out is no failure there. */
+  dir: () => string;
   lock: (dir: string) => DataLock | undefined;
   disableAutostart: () => void;
 }): RemovalResult {
-  const { choice, dir } = input;
+  const { choice } = input;
   if (choice !== "keep" && choice !== "delete") {
     return refuse("--pki-uninstall-data takes keep or delete; nothing was removed");
   }
   input.disableAutostart();
   if (choice === "keep") return { code: 0, line: "" };
 
+  let dir: string;
+  try {
+    dir = input.dir();
+  } catch (error) {
+    return refuse(
+      `could not work out the data folder (${(error as Error).message}); nothing was removed`,
+    );
+  }
   let stat;
   try {
     stat = lstatSync(dir);

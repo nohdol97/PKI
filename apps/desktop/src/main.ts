@@ -30,7 +30,7 @@ import {
 } from "electron";
 import { dataDirectory } from "@pki/storage";
 import { autostartMenuItem } from "./autostart.ts";
-import { DATA_IN_USE, lockDataDirectory, type DataLock } from "./data-lock.ts";
+import { lockDataDirectory, openDataFolder } from "./data-lock.ts";
 import { removeUserData, UNINSTALL_SWITCH } from "./data-removal.ts";
 import { url as inspectorUrl } from "node:inspector";
 import { join } from "node:path";
@@ -65,9 +65,10 @@ const MAX_RESTARTS = 3;
 
 const { dataDir, fixtures } = switches((name) => app.commandLine.getSwitchValue(name) || undefined);
 
-const dataPath = dataDir ?? dataDirectory();
-/** Held until the process ends: the OS frees it, and collecting it would free it early. */
-let dataLock: DataLock | undefined;
+/** Worked out when used, inside the callers' guards: it throws where the OS gives no per-user folder (LKH-R4). */
+const resolveDataPath = (): string => dataDir ?? dataDirectory();
+/** The folder the shell locked at start (set before run()); the lock itself is held by data-lock.ts until the process ends. */
+let dataPath = "";
 
 const forkUtility: ForkBackend = (entry, args, env) => {
   const child = utilityProcess.fork(entry, args, { env, serviceName: "PKI backend" });
@@ -251,16 +252,15 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 
-/** The lock that keeps a second userData off this data folder (R04L); false = do not start. */
+/** Works out and locks the data folder (R04L, LKH-R4); false = do not start. */
 function takeDataLock(): boolean {
-  try {
-    dataLock = lockDataDirectory(dataPath);
-  } catch (error) {
-    console.error(`PKI: could not lock the data folder: ${(error as Error).message}`);
+  const opened = openDataFolder(resolveDataPath);
+  if ("line" in opened) {
+    console.error(opened.line);
     return false;
   }
-  if (dataLock === undefined) console.error(DATA_IN_USE);
-  return dataLock !== undefined;
+  dataPath = opened.dir;
+  return true;
 }
 
 /** The installer's call (H02A-R6): decide about the data folder, print, exit. No window, no backend. */
@@ -269,7 +269,7 @@ function uninstallData(): void {
   void app.whenReady().then(() => {
     const { code, line } = removeUserData({
       choice: app.commandLine.getSwitchValue(UNINSTALL_SWITCH),
-      dir: dataPath,
+      dir: resolveDataPath,
       lock: lockDataDirectory,
       disableAutostart: () => app.setLoginItemSettings({ openAtLogin: false }),
     });
