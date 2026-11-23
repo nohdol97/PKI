@@ -457,6 +457,53 @@ describe("check.job: the run's end", () => {
     expect(db.all("SELECT kind FROM scope_policy_drops")).not.toEqual([]);
   });
 
+  // a policy that refuses the one-scope lineage [own] but passes the two-scope Join line
+  function refuseOwnWorld() {
+    const a = arrive("sales", SALES, ["x"]);
+    const b = arrive("customers", CUSTOMERS, ["y"]);
+    const d = bind("sales", a.sourceId);
+    const d2 = bind("customers", b.sourceId);
+    const join = item("Join", "j");
+    const keys = fact(join, "join.keys", '[["k","k"]]');
+    rel(join, "JOIN_LEFT", d);
+    rel(join, "JOIN_RIGHT", d2);
+    const scope = createCommitScope({
+      policy: { combinable: (scopes: readonly unknown[]) => scopes.length !== 1 } as never,
+      now: () => T0.toISOString(),
+    });
+    return { a, keys, scope };
+  }
+
+  it("F182-C1: a policy that refuses [own] still lets the sweep detect a change: no stale line is written and the job is queued again", async () => {
+    const w = refuseOwnWorld();
+    await run(w.a.sourceId, { scope: w.scope, between: () => void item("Concept", "late") });
+    expect(db.all("SELECT 1 FROM analytical_checks")).toEqual([]);
+    expect(
+      db.all("SELECT target, status FROM jobs WHERE kind = ? ORDER BY id", [
+        ANALYTICAL_CHECK_JOB_KIND,
+      ]),
+    ).toEqual([
+      { target: "run:1", status: "succeeded" },
+      { target: "run:2", status: "queued" },
+    ]);
+  });
+
+  it("F182-C2: a policy that refuses [own] still erases the line of a check that is no longer computed", async () => {
+    const w = world();
+    rel(w.metric, "MEASURED_ON", w.d2); // two targets: the metric's checks are not computed
+    db.run(
+      `INSERT INTO analytical_checks (fact_id, check_name, passed, examined, violations, skipped, version_id, checked_at)
+       VALUES (?, 'schema', 1, 0, 0, 0, ?, 't')`,
+      [w.calc, w.a.versionId],
+    );
+    const scope = createCommitScope({
+      policy: { combinable: (scopes: readonly unknown[]) => scopes.length !== 1 } as never,
+      now: () => T0.toISOString(),
+    });
+    await run(w.a.sourceId, { scope });
+    expect(names(w.calc)).toEqual([]);
+  });
+
   it("check.staleness: a line of the previous version is not current after a new version, and current again after the job of the new version ran", async () => {
     const w = world();
     await run(w.a.sourceId);

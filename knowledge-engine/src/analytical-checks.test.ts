@@ -43,6 +43,10 @@ describe("checks.schema", () => {
       skipped: 0,
     });
   });
+  it("an empty column list passes with examined 0 (a column-less count)", () => {
+    const r = checkSchema(t, []);
+    expect([r.passed, r.examined]).toEqual([true, 0]);
+  });
   it("fails column-missing and counts the missing ones", () => {
     const r = checkSchema(t, ["id", "nope", "gone"]);
     expect(pass(r)).toEqual([false, "column-missing"]);
@@ -279,8 +283,19 @@ describe("checks.aggregation", () => {
     ]);
   });
   it("count needs no column but the grain; a named column must exist", () => {
-    expect(pass(run(sales(["1"]), "count", undefined))).toEqual([true, null]);
+    expect(pass(run(sales(["1"]), "count", undefined, { column: undefined }))).toEqual([
+      true,
+      null,
+    ]);
     expect(pass(run(sales(["1"]), "sum", "zz"))).toEqual([false, "column-missing"]);
+    expect(pass(run(sales(["1"]), "sum", undefined, { column: undefined }))).toEqual([
+      false,
+      "column-missing",
+    ]);
+    expect(pass(run(sales(["1"]), "max", undefined, { column: undefined }))).toEqual([
+      false,
+      "column-missing",
+    ]);
     expect(pass(run(undefined, "sum"))).toEqual([false, "no-table"]);
     expect(pass(run(notTable("too-large"), "sum"))).toEqual([false, "too-large"]);
   });
