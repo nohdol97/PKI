@@ -41,9 +41,9 @@ const LOG_ACTION: Readonly<Record<string, string>> = {
 };
 export const logActionText = (action: string): string => LOG_ACTION[action] ?? action;
 
-/** One history line: what happened and how many claims came and went. */
-export const historyText = (line: { action: string; added: number; removed: number; at: string }) =>
-  `${line.at} ${logActionText(line.action)} (주장 +${line.added} −${line.removed})`;
+/** One history line: what happened and how many claims were added (removed ones cannot be counted, K01-R18). */
+export const historyText = (line: { action: string; added: number; at: string }) =>
+  `${line.at} ${logActionText(line.action)} (주장 +${line.added})`;
 
 /** The period a claim holds for; empty when it states none. */
 export function validityText(claim: Pick<WikiClaim, "validAt" | "validUntil">): string {

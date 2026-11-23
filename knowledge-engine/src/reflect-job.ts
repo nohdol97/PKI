@@ -19,6 +19,7 @@ import {
   readReflectionState,
   recordReflectionRun,
   recordResultCounts,
+  removeDanglingFindings,
   REFLECT_DAILY_CAP,
   REFLECT_WEEKLY_CAP,
   replaceFindingLineage,
@@ -148,6 +149,7 @@ export function planReflect(
     itemKey: `reflect:${target}`,
     lineage: [],
     write: (tx) => {
+      removeDanglingFindings(tx); // KF-R1: a finding on a row that is gone is not carried on
       const scope = {
         combinable: (lineage: Parameters<typeof registry.combinable>[1]) =>
           registry.combinable(tx, lineage),
@@ -196,9 +198,7 @@ function reconcile(
   const scope = new Set(groups);
   const inRange = (f: StoredFinding) => {
     const items = itemsOfFinding(tx, f.target);
-    return (
-      items === undefined || items.some((i) => scope.has(entityGroups.representativeOf(tx, i)))
-    );
+    return items?.some((i) => scope.has(entityGroups.representativeOf(tx, i))) ?? false;
   };
   const standing = new Set<string>();
   for (const f of found) {

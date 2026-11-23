@@ -194,6 +194,7 @@ export {
   REFLECT_DAILY_CAP,
   REFLECT_WEEKLY_CAP,
   removeFinding,
+  removeDanglingFindings,
   replaceFindingLineage,
   setFindingStatus,
   type DirtyMark,
