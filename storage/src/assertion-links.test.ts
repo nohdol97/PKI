@@ -2,7 +2,12 @@
 // All data is synthetic.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
-import { insertAssertionLink, otherValidValues, supersededAmong } from "./assertion-links.ts";
+import {
+  insertAssertionLink,
+  listAssertionLinks,
+  otherValidValues,
+  supersededAmong,
+} from "./assertion-links.ts";
 import { addEvidence, insertItem, saveFact, type KnowledgeAttributes } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { automatedLifecycle } from "./semantic-lifecycle.ts";
@@ -91,5 +96,24 @@ describe("otherValidValues (S02-R20)", () => {
     const many = fact(a, "x@example.test", "identifier.email");
     fact(a, "y@example.test", "identifier.email");
     expect(otherValidValues(db, many, "item")).toEqual([]);
+  });
+});
+
+describe("conflict.supersede-links: the user's value fix (S02-R19)", () => {
+  it("links the new row to the old one (SUPERSEDES, user) and its undo removes the link", () => {
+    const old = fact(item(), "2026-12-01");
+    const fix = userDecisions.replaceValue(db, { kind: "fact", id: old }, "2026-12-09", AT);
+    if (fix.status !== "applied") throw new Error(fix.status);
+    expect(listAssertionLinks(db)).toEqual([
+      expect.objectContaining({
+        type: "SUPERSEDES",
+        fromFactId: fix.added.id,
+        toFactId: old,
+        createdBy: "user",
+        basis: null,
+      }),
+    ]);
+    expect(userDecisions.undo(db, fix.added, AT)).toMatchObject({ status: "removed" });
+    expect(listAssertionLinks(db)).toEqual([]);
   });
 });
