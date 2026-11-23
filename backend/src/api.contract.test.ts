@@ -145,6 +145,8 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     runSchedule: { id: 999_999 },
     rebuildProjection: { projection: "engine" },
     // the registry's fact 1 is a seeded candidate: a dispute is no user transition of it (a refusal code, nothing written), an undo has no user action to cancel
+    // an item the seed holds: no table reaches it, so the check request answers an empty job list
+    analyticalCheck: { itemId: 1 },
     semanticHistory: { kind: "fact", id: 1 },
     semanticDecide: { kind: "fact", id: 1, action: "dispute" },
     semanticUndo: { kind: "fact", id: 1 },

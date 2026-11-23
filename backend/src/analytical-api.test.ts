@@ -2,8 +2,14 @@
 // unmet data condition is a code in a 200 body (`data-check-unmet`) with the names of every unmet condition,
 // never a text; the body parses with the contract. T08 adds the read side to this file. All data is synthetic.
 import { routes, type RouteName } from "@pki/contracts";
+import { createProductRegistry } from "@pki/knowledge-engine";
 import {
   addEvidence,
+  automatedLifecycle,
+  createDerivativeRegistry,
+  defaultScopePolicy,
+  saveCheckLine,
+  saveDatasetTable,
   insertItem,
   registerConnectorInstance,
   saveFact,
@@ -15,7 +21,7 @@ import { send } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openCanonicalDb, productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -103,5 +109,164 @@ describe("POST /api/semantic/decide (analytical gate)", () => {
       { status: "candidate" },
     ]);
     expect(db.all("SELECT 1 FROM fact_history WHERE fact_id = ?", [calc])).toEqual([]);
+  });
+});
+
+// S03-T08 Phase B: the read, the check request and the /correct pieces through the booted server, real storage and
+// a real registry. The tables have a header cell and a fixture of synthetic text only.
+describe("analytical routes (S03-R19)", () => {
+  const attrs = {
+    epistemic: "explicit",
+    status: "candidate",
+    validAt: null,
+    observedAt: "2026-11-23T00:00:00Z",
+  } as const;
+  const blocks = [
+    { start: 0, end: 2, locator: { format: "csv", record: 1, line: 1, field: 1 } },
+    { start: 3, end: 9, locator: { format: "csv", record: 1, line: 1, field: 2 } },
+  ];
+  const CALC = '{"aggregation":"sum","column":"amount"}';
+  const woken = vi.fn();
+
+  async function start(registry?: ReturnType<typeof createDerivativeRegistry>) {
+    server = await startServer({
+      token: TOKEN,
+      allowedOrigins: [],
+      connectors,
+      db,
+      dataDirectory: dir,
+      egress: productEgress(db),
+      ...productAdapters(dir),
+      decisions: userDecisions,
+      onRunConditionsChanged: woken,
+      ...(registry ? { registry } : {}),
+    });
+  }
+  const restricting = () =>
+    createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+      },
+    });
+
+  /** A Metric on a Dataset bound to a table source (restricted to `scope`), with a column fact and a check line. */
+  function world(scope: string[] | null) {
+    const saved = saveSourceRecord(db, "c", {
+      namespace: "",
+      externalId: "orders",
+      title: "orders",
+      body: "id\tamount\n1\t10",
+      blocks,
+      accessScope: scope,
+    } as Parameters<typeof saveSourceRecord>[2]);
+    if (saved.status !== "created") throw new Error(saved.status);
+    const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    const dataset = insertItem(db, { type: "Dataset", name: "orders", ...attrs });
+    const metric = insertItem(db, { type: "Metric", name: "매출", ...attrs });
+    for (const id of [dataset, metric])
+      automatedLifecycle.created(db, { kind: "item", id }, "extraction", null);
+    saveDatasetTable(db, { itemId: dataset, sourceId: saved.sourceId, key: "", rowCount: 1 });
+    const column = saveFact(db, {
+      itemId: dataset,
+      kind: "dataset.column",
+      value: "amount",
+      ...attrs,
+    }).id;
+    addEvidence(db, {
+      target: { factId: column },
+      sourceVersionId: versionId,
+      start: 3,
+      end: 9,
+      quote: "amount",
+    });
+    const calc = saveFact(db, {
+      itemId: metric,
+      kind: "metric.calculation",
+      value: CALC,
+      ...attrs,
+    }).id;
+    saveCheckLine(db, {
+      factId: calc,
+      check: "schema",
+      passed: true,
+      failure: null,
+      examined: 1,
+      violations: 0,
+      skipped: 0,
+      versionId,
+      otherVersionId: null,
+      at: "2026-11-23T00:00:00.000Z",
+    });
+    db.run(
+      "INSERT INTO relations (subject_id, type, object_id, status, epistemic, valid_at, observed_at) VALUES (?, 'MEASURED_ON', ?, 'candidate', 'explicit', NULL, 't')",
+      [metric, dataset],
+    );
+    return { dataset, metric, calc, sourceId: saved.sourceId };
+  }
+
+  it("GET /api/analytical parses with the contract and shows the link; a table source the policy hides takes its Dataset's table and check results out", async () => {
+    const w = world(null);
+    await start(restricting());
+    const open = await call("analytical");
+    expect(open.status).toBe(200);
+    expect(routes.analytical.response.parse(open.body)).toEqual(open.body);
+    const metric = (
+      open.body as {
+        metrics: { calculations: { checks: unknown[] }[]; datasets: { tables: unknown[] }[] }[];
+      }
+    ).metrics[0];
+    expect(metric?.datasets[0]?.tables).toHaveLength(1);
+    expect(metric?.calculations[0]?.checks).toHaveLength(1);
+    await server?.close();
+
+    db.run("UPDATE sources SET access_scope = ? WHERE id = ?", [
+      JSON.stringify(["secret"]),
+      w.sourceId,
+    ]);
+    await start(restricting());
+    const hidden = await call("analytical");
+    const text = JSON.stringify(hidden.body);
+    expect(text).not.toContain('"schema"');
+    expect(text).not.toContain('"tableId"');
+  });
+
+  it("POST /api/analytical/check queues the job, answers its id and wakes the runner; an absent item is a bare not-found", async () => {
+    const w = world(null);
+    await start();
+    const res = await call("analyticalCheck", { itemId: w.dataset });
+    expect(routes.analyticalCheck.response.parse(res.body)).toEqual({
+      jobIds: [expect.any(Number)],
+    });
+    expect(woken).toHaveBeenCalled();
+    const missing = await call("analyticalCheck", { itemId: 99999 });
+    expect(missing).toEqual({ status: 404, body: { error: "not-found" } });
+    const extra = await call("analyticalCheck", { itemId: w.dataset, query: "sum(amount)" });
+    expect(extra.status).toBe(400);
+  });
+
+  it("POST /api/semantic/correct stores pieces as the canonical text and answers value-exists for the same value in another order and case", async () => {
+    const w = world(null);
+    await start();
+    const add = (value: unknown) =>
+      call("semanticCorrect", {
+        correction: {
+          action: "add",
+          entry: { kind: "fact", itemId: w.metric, factKind: "metric.calculation", value },
+        },
+      });
+    const first = await add({ column: " Amount ", aggregation: "count_distinct" });
+    expect(first.body).toMatchObject({ status: "applied" });
+    expect(
+      db.all("SELECT value FROM facts WHERE kind = 'metric.calculation' ORDER BY id DESC")[0],
+    ).toEqual({
+      value: '{"aggregation":"count_distinct","column":"amount"}',
+    });
+    const again = await add({ aggregation: "count_distinct", column: "AMOUNT" });
+    expect(again.body).toMatchObject({ status: "refused", reason: "value-exists" });
+    const bad = await add(["sum", "amount"]);
+    expect(bad).toEqual({ status: 400, body: { error: "bad-request" } });
+    expect(JSON.stringify(bad.body)).not.toContain("amount");
   });
 });

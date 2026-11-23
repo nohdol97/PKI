@@ -72,11 +72,12 @@ import {
   listProviderCalls,
   LEGACY_CLEANUP_SETTING,
   readAnalyticalMaxCells,
+  listAnalytical,
+  normalizeUserValue,
   readAnalyticalProfile,
   readFact,
   setAnalyticalProfile,
   checkOntologyChange,
-  factValueFit,
   readOntologyHistory,
   readMergeLine,
   readSemanticHistory,
@@ -109,6 +110,7 @@ import { InstanceBusyError, type JsonlImporter } from "./jsonl-import.ts";
 import { ledgerStatus } from "./ledger-status.ts";
 import { jobsApi, type JobsPort } from "./jobs-view.ts";
 import type { LocalLocations } from "./local-locations.ts";
+import { createAnalyticalApi } from "./analytical-api.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { createWikiReads } from "./wiki-read.ts";
 import { matchRoute } from "./routing.ts";
@@ -575,6 +577,12 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
   const entries = options.entries ?? defaultEntries;
   const registry = options.registry ?? defaultReadRegistry;
   const gate = createReadGate(options.db, registry);
+  const analytical = createAnalyticalApi({
+    db: options.db,
+    shown: (kind, id) => registry.visible(options.db, [{ kind, id }], "display").length > 0,
+    views: { listAnalytical },
+    now: () => new Date(options.now?.() ?? Date.now()),
+  });
   const wiki = createWikiReads(options.db, registry, gate);
   /** K01-R5: a Wiki read finds the pages behind and queues the one build; the runner is woken for it. */
   const queueWikiBuild = () => {
@@ -683,9 +691,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
   ): RouteResponse<"semanticCorrect"> | { error: ErrorResponse["error"] } => {
     const { decisions } = options;
     if (!decisions) return { error: "not-found" };
-    // the value check is the type definitions' (R21), the one extraction uses; a kind no verified element names is not governed here
-    const badValue = (kind: string, value: string) =>
-      factValueFit(options.db, kind, value) === "misfit";
+    // the value is the type definitions' (R21, S03-R3): the one extraction uses, text or pieces, stored canonical; a kind no verified element names is not governed here
     const state = (ref: { kind: SemanticKind; id: number }) => {
       const now = readSemanticState(options.db, ref);
       return now && { ...ref, status: now.status, epistemic: now.epistemic };
@@ -703,12 +709,13 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         return { status: "refused" as const, reason: reason as "invalid-transition" };
       };
       if (correction.action === "add") {
+        const raw = correction.entry;
         const entry =
-          correction.entry.kind === "item"
-            ? { ...correction.entry, name: correction.entry.name.trim() }
-            : correction.entry.kind === "fact"
-              ? { ...correction.entry, value: correction.entry.value.trim() }
-              : correction.entry;
+          raw.kind === "item"
+            ? { ...raw, name: raw.name.trim() }
+            : raw.kind === "fact"
+              ? { ...raw, value: "" }
+              : raw;
         const shown =
           entry.kind === "fact"
             ? gate.semanticShown("item", entry.itemId)
@@ -717,8 +724,10 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
                 gate.semanticShown("item", entry.objectId)
               : true;
         if (!shown) return { error: "not-found" };
-        if (entry.kind === "fact" && badValue(entry.factKind, entry.value)) {
-          return { error: "bad-request" };
+        if (entry.kind === "fact" && raw.kind === "fact") {
+          const fit = normalizeUserValue(options.db, entry.factKind, raw.value);
+          if (fit.status === "misfit") return { error: "bad-request" };
+          entry.value = fit.value;
         }
         const added = decisions.add(options.db, entry, at);
         if (added.status === "refused")
@@ -729,10 +738,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       }
       const fact = { kind: "fact", id: correction.id } as const;
       if (!gate.semanticShown("fact", fact.id)) return { error: "not-found" };
-      const value = correction.value.trim();
       const kind = readFact(options.db, fact.id)?.kind;
-      if (kind !== undefined && badValue(kind, value)) return { error: "bad-request" };
-      const fixed = decisions.replaceValue(options.db, fact, value, at);
+      if (kind === undefined) return { error: "not-found" };
+      const fit = normalizeUserValue(options.db, kind, correction.value);
+      if (fit.status === "misfit") return { error: "bad-request" };
+      const fixed = decisions.replaceValue(options.db, fact, fit.value, at);
       if (fixed.status === "refused") return refused(fixed.reason, fixed.existing);
       judgeAgain(itemsOfEntry(options.db, fixed.added), [fixed.added, fixed.replaced], at);
       const added = state(fixed.added);
@@ -926,6 +936,12 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       return { cliBackground: readCliBackground(options.db) };
     },
     // S03-R5, R6: the profile's switch (OFF from ON queues nothing, ON queues the tables already stored)
+    analytical: async () => analytical.list(),
+    analyticalCheck: async (input) => {
+      const queued = analytical.check(input);
+      if ("jobIds" in queued) options.onRunConditionsChanged?.(); // wakes the runner for the jobs queued
+      return queued;
+    },
     analyticalSettings: async () => analyticalSettings(options.db),
     setAnalyticalSettings: async ({ profile, maxCells }) => {
       options.db.transaction(() => {

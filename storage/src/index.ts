@@ -375,6 +375,18 @@ export {
   type StoredCheckLine,
 } from "./analytical-check-lines.ts";
 export {
+  listAnalytical,
+  listMetricViews,
+  SHOW_ALL,
+  type AnalyticalList,
+  type DatasetView,
+  type FactRowView,
+  type JoinView,
+  type MetricView,
+  type Visibility,
+} from "./analytical-views.ts";
+export { normalizeUserValue, type UserValue } from "./analytical-values.ts";
+export {
   dataChecksUnmet,
   judgeCheckJob,
   judgeClaims,
