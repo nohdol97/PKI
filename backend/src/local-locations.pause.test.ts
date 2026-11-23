@@ -2,6 +2,7 @@
 // A paused location is not read: a file edited and one deleted give no change in two syncs, and both
 // arrive after the resume. The confirmation of held deletions is by the count the user saw.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { closeLocation } from "@pki/storage";
 import { unlinkSync } from "node:fs";
 import { createLocalLocations, createApprovalTickets } from "./local-locations.ts";
 import {
@@ -59,5 +60,11 @@ describe("pause and resume", () => {
     expect(locations.confirmDeletions({ locationId: w.locationId, count: 0 })).toMatchObject({
       state: "active",
     });
+  });
+
+  it("an unavailable location can be paused too (I02B-R7)", () => {
+    const { w, locations } = make();
+    closeLocation(w.db, w.locationId, "unavailable", "root-missing");
+    expect(locations.pause({ locationId: w.locationId })).toMatchObject({ state: "paused" });
   });
 });

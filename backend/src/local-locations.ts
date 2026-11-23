@@ -6,6 +6,8 @@ import { checkApproval, type ApprovalContext, type BoundaryFs } from "@pki/conne
 import type {
   LocalApprovalRejectionCode,
   LocalApprovalRequest,
+  LocalConfirmDeletionsRequest,
+  LocalLocationIdRequest,
   LocalRelinkRequest,
   LocalFilesSettings,
   LocalFilesSettingsPatch,
@@ -15,11 +17,14 @@ import type {
 } from "@pki/contracts";
 import { errorClass, log, type BuildKind } from "@pki/providers";
 import {
+  closeLocation,
+  confirmDeletions,
   insertLocation,
   listLocations,
   newLocalId,
   readSetting,
   relinkLocation,
+  reopenLocation,
   writeSetting,
   type LocalFileIndex,
   type LocalLocation,
@@ -161,9 +166,22 @@ export type RelinkAnswer =
   | { error: "not-found" }
   | { error: "bad-request" };
 
+/** What a lifecycle action answers: the location as the list shows it, or why nothing changed. */
+export type ActionAnswer =
+  | LocalLocationInfo
+  | { error: "not-found" }
+  | { error: "bad-request" }
+  | { error: "count-mismatch" };
+
 export interface LocalLocations {
   approve(request: LocalApprovalRequest): Promise<ApprovalAnswer>;
   relink(request: LocalRelinkRequest): Promise<RelinkAnswer>;
+  /** The location is not read (I02B-R10); from `active`, `unavailable` and `needs-confirmation`. */
+  pause(request: LocalLocationIdRequest): ActionAnswer;
+  /** A paused location is read again; the next pass decides its state (I02B-R7). */
+  resume(request: LocalLocationIdRequest): ActionAnswer;
+  /** The held deletions are confirmed by the count the user saw (I02B-R8). */
+  confirmDeletions(request: LocalConfirmDeletionsRequest): ActionAnswer;
   list(): LocalLocationList;
   settings(): LocalFilesSettings;
   writeSettings(
@@ -272,6 +290,19 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     return view(listLocations(db).find((l) => l.id === location.id) as LocalLocation);
   }
 
+  /** Runs a change on a location in one of `states`; the answer is the location afterwards. */
+  function act(
+    id: string,
+    states: readonly LocalLocation["state"][] | undefined,
+    change: () => unknown,
+  ): ActionAnswer {
+    const location = listLocations(db).find((l) => l.id === id);
+    if (!location) return { error: "not-found" };
+    if (states && !states.includes(location.state)) return { error: "bad-request" };
+    if (change() === "count-mismatch") return { error: "count-mismatch" };
+    return view(listLocations(db).find((l) => l.id === id) as LocalLocation);
+  }
+
   function view(location: LocalLocation): LocalLocationInfo {
     const entries = index.entriesOfLocation(location.id);
     const report = options.lastReport?.()?.locations.find((r) => r.locationId === location.id);
@@ -312,6 +343,17 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
       queue = run.catch(() => undefined);
       return run;
     },
+    pause: ({ locationId }) =>
+      act(locationId, ["active", "unavailable", "needs-confirmation"], () =>
+        closeLocation(db, locationId, "paused", null),
+      ),
+    resume: ({ locationId }) => act(locationId, ["paused"], () => reopenLocation(db, locationId)),
+    confirmDeletions: ({ locationId, count }) =>
+      act(
+        locationId,
+        undefined,
+        () => confirmDeletions(db, locationId, count).ok || "count-mismatch",
+      ),
     list: () => ({
       locations: listLocations(db).map(view),
       normalizerUnavailable: options.normalizerUnavailable(),

@@ -250,6 +250,19 @@ export const LocalRelinkRequestSchema = z
   });
 export type LocalRelinkRequest = z.infer<typeof LocalRelinkRequestSchema>;
 
+/** A request about one location: pause, resume, rescan. */
+export const LocalLocationIdRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+});
+export type LocalLocationIdRequest = z.infer<typeof LocalLocationIdRequestSchema>;
+
+/** The held deletions are confirmed by the count the user saw (I02B-R8): another count is refused. */
+export const LocalConfirmDeletionsRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+  count: z.int().nonnegative(),
+});
+export type LocalConfirmDeletionsRequest = z.infer<typeof LocalConfirmDeletionsRequestSchema>;
+
 const PositiveInt = z.int().positive();
 const walkShape = {
   maxFilesPerLocation: PositiveInt,
