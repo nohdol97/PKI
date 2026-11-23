@@ -1,5 +1,5 @@
 // X01-C6a ② `keywordIds` reads in pages: the pages are admitted (visibility, conditions) before the cut, and the
-// read stops at the page limit.
+// read stops at the page limit (X01-D19). The paging is a parameter so two pages of two stand in for 5 of 100.
 import {
   defaultScopePolicy,
   migrate,
