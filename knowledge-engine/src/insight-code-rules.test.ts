@@ -7,6 +7,7 @@ import {
   addEvidence,
   insertItem,
   listInsightKeys,
+  type InsightKey,
   migrate,
   readInsight,
   registerConnectorInstance,
@@ -139,7 +140,7 @@ describe("the code rules over the fixture scenarios (P01-C1a, C3a)", () => {
         xItemId: items.get(expected.x),
         yItemId: items.get(expected.y),
       });
-      const insight = readInsight(db, found[0]!);
+      const insight = readInsight(db, found[0] as InsightKey);
       expect(insight?.factLines).toEqual(expected.factLines);
       expect(quotesOf(insight?.evidenceIds ?? [])).toEqual([...expected.evidenceQuotes].sort());
       expect(insight?.reasoningSummary).toBeTruthy();
@@ -223,9 +224,9 @@ describe("one Insight per item (P01-R8, C3b)", () => {
     judge(items);
     const found = insightsOf("conflict");
     expect(found).toHaveLength(1);
-    const insight = readInsight(db, found[0]!);
+    const insight = readInsight(db, found[0] as InsightKey);
     expect(insight?.factLines).toHaveLength(2);
     expect(judge(items).filter((o) => o.outcome !== "unchanged")).toEqual([]);
-    expect(readInsight(db, found[0]!)?.id).toBe(insight?.id);
+    expect(readInsight(db, found[0] as InsightKey)?.id).toBe(insight?.id);
   });
 });
