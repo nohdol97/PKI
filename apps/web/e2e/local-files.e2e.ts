@@ -118,10 +118,10 @@ test("local-files.e2e: approve a folder → sources → Insight evidence with a 
   await test.step("approve the folder on the Settings screen", async () => {
     await go(page, "설정");
     if (target === "browser") {
-      await page.getByLabel("폴더 경로(개발용)").fill(docs);
+      await page.getByLabel("경로(개발용)").fill(docs);
     } else {
       // a built screen has no path input (C30)
-      await expect(page.getByLabel("폴더 경로(개발용)")).toHaveCount(0);
+      await expect(page.getByLabel("경로(개발용)")).toHaveCount(0);
     }
     await page.getByRole("button", { name: "폴더 추가" }).click();
     const table = page.getByRole("table", { name: "로컬 자료 위치" });
@@ -220,7 +220,7 @@ test("local-files.e2e: pause → resume → revoke through the confirm dialog, t
 
   await test.step("approve, then read the files into sources", async () => {
     await go(page, "설정");
-    await page.getByLabel("폴더 경로(개발용)").fill(docs);
+    await page.getByLabel("경로(개발용)").fill(docs);
     await page.getByRole("button", { name: "폴더 추가" }).click();
     await expect(table).toContainText(docs);
     await page.waitForTimeout(2_500);

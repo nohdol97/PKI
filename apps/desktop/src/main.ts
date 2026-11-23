@@ -149,8 +149,17 @@ async function run() {
       return answer.response === 0;
     },
     openExternal: (href) => shell.openExternal(href),
-    pickLocation: async () => {
-      const options = { properties: ["openDirectory" as const] };
+    pickLocation: async (type) => {
+      // a folder, or one file: a JSONL file is picked among .jsonl files (the backend checks what was picked)
+      const options =
+        type === "folder"
+          ? { properties: ["openDirectory" as const] }
+          : {
+              properties: ["openFile" as const],
+              ...(type === "jsonl-file"
+                ? { filters: [{ name: "JSONL", extensions: ["jsonl"] }] }
+                : {}),
+            };
       const picked = window
         ? await dialog.showOpenDialog(window, options)
         : await dialog.showOpenDialog(options);

@@ -27,13 +27,17 @@ function isPlainHttps(value: string): boolean {
 }
 const ExternalUrl = z.string().max(2048).refine(isPlainHttps);
 
+/** What a picked path is approved as: a folder, a document file or a JSONL file (I02B-R3). */
+const LocationKindSchema = z.enum(["folder", "file", "jsonl-file"]);
+export type LocationKind = z.infer<typeof LocationKindSchema>;
+
 const INPUTS = {
   getSession: z.tuple([]),
   setSecret: z.tuple([SecretNameSchema, SecretValueSchema]),
   hasSecret: z.tuple([SecretNameSchema]),
   deleteSecret: z.tuple([SecretNameSchema]),
   openExternal: z.tuple([ExternalUrl]),
-  pickLocation: z.tuple([z.literal("folder")]),
+  pickLocation: z.tuple([LocationKindSchema]),
   // a source version id, never a path: the main process asks the backend where the file is (I02B-R39)
   revealSource: z.tuple([z.int().positive()]),
 } satisfies Record<BridgeFunction, z.ZodType>;
@@ -54,10 +58,10 @@ export interface BridgeDeps {
   confirmExternal(target: ExternalTarget): Promise<boolean>;
   /** Hands the same normalised href to the OS browser. */
   openExternal(href: string): Promise<void>;
-  /** The OS folder picker: the path the user chose, undefined when cancelled (I02B-R37). */
-  pickLocation(type: "folder"): Promise<string | undefined>;
+  /** The OS picker of that kind: the path the user chose, undefined when cancelled (I02B-R37). */
+  pickLocation(type: LocationKind): Promise<string | undefined>;
   /** Gives the backend the picked path under a ticket; false when no backend is running. */
-  registerLocationTicket(input: { ticket: string; kind: "folder"; path: string }): boolean;
+  registerLocationTicket(input: { ticket: string; kind: LocationKind; path: string }): boolean;
   /** Asks the backend for the absolute path of a local source's file; undefined when there is none to show. */
   revealPath(sourceVersionId: number): Promise<string | undefined>;
   /** Shows the file in the OS file manager (`shell.showItemInFolder`); never opens it. */

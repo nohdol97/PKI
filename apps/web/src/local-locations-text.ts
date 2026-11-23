@@ -11,18 +11,20 @@ export const APPROVAL_REJECTION_TEXT: Record<LocalApprovalRejectionCode, string>
   "not-absolute":
     "전체 경로(맨 앞이 폴더 이름이 아니라 드라이브나 / 로 시작하는 경로)를 적어야 합니다.",
   "unsupported-path-form": "이 경로 모양은 지원하지 않습니다. 평범한 폴더 경로를 골라 주세요.",
-  "not-found": "그 폴더를 찾을 수 없습니다.",
-  "not-readable": "그 폴더를 읽을 수 없습니다. 읽기 권한을 확인해 주세요.",
+  "not-found": "그 경로를 찾을 수 없습니다.",
+  "not-readable": "그 경로를 읽을 수 없습니다. 읽기 권한을 확인해 주세요.",
   "location-unreachable":
     "이미 추가한 위치 가운데 지금 열 수 없는 곳이 있어(예: 뽑아 둔 디스크) 겹치는지 확인할 수 없습니다. 그 디스크를 다시 연결한 뒤 다시 시도해 주세요.",
-  "wrong-type": "폴더가 아닙니다. 폴더를 골라 주세요.",
-  "identity-unavailable": "이 폴더를 안정적으로 알아볼 수 없어 추가하지 않았습니다.",
+  "wrong-type":
+    "고른 항목의 종류가 맞지 않습니다. 폴더 추가에는 폴더를, 파일 추가에는 파일을 골라 주세요.",
+  "identity-unavailable": "이 폴더나 파일을 안정적으로 알아볼 수 없어 추가하지 않았습니다.",
   "filesystem-root": "디스크 전체는 추가할 수 없습니다. 그 안의 폴더를 골라 주세요.",
   "inside-data-directory": "이 앱의 데이터 폴더 안은 추가할 수 없습니다.",
   "overlaps-location": "이미 추가한 위치와 겹칩니다.",
-  "network-location": "네트워크 위치는 추가할 수 없습니다.",
-  "unsupported-format": "이 형식은 지원하지 않습니다.",
-  "ticket-required": "폴더 선택 창에서 고른 폴더만 추가할 수 있습니다. 다시 선택해 주세요.",
+  "network-location": "네트워크 위치는 추가할 수 없습니다(미구현, 배포처 후속).",
+  "unsupported-format":
+    "이 형식은 지원하지 않습니다. 파일 추가에는 문서 파일을, JSONL 파일 추가에는 .jsonl 파일을 골라 주세요.",
+  "ticket-required": "선택 창에서 고른 것만 추가할 수 있습니다. 다시 선택해 주세요.",
 };
 
 export const LOCATION_STATE_TEXT: Record<LocalLocationInfo["state"], string> = {
@@ -38,7 +40,8 @@ export const NOT_WATCHING_TEXT = "실시간 감시 없음";
 
 /** One text per skip reason (I02B-R16, R38); the key set is the contract's list, a test pins the runtime keys. */
 export const SKIP_REASON_TEXT: Record<LocalSkipReason, string> = {
-  "unsupported-format": "지원하지 않는 형식입니다.",
+  "unsupported-format":
+    '지원하지 않는 형식입니다. JSONL 파일은 폴더 안이 아니라 "JSONL 파일 추가"로 따로 추가해 주세요.',
   "format-mismatch": "확장자와 실제 내용의 형식이 다릅니다.",
   "outside-root": "승인한 폴더 밖을 가리켜 읽지 않았습니다.",
   "not-a-file": "파일이 아닙니다.",
