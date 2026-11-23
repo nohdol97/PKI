@@ -47,7 +47,7 @@ async function start() {
   await call(routes.setLocalFilesSettings.path, { settleMs: 1 });
   const approved = (await call(routes.approveLocalLocation.path, { type: "folder", path: docs }))
     .body as LocalLocationInfo;
-  // a sync answers `instance-busy` while the settle-triggered one holds the lock (by design), so sync
+  // a sync answers `instance-busy` while the job the approval or the watcher registered holds the lock (by design), so sync
   // until one runs, then wait for the import to be committed: the source is the observable condition
   await vi.waitFor(
     async () => {
