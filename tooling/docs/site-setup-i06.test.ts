@@ -150,11 +150,12 @@ describe("docs.site-setup (I06): S28 and S29 say what the fork runs, records and
       "(라) Windows의 OS 보호를 쓸 수 없는 계정에서는 값이 저장되지 않고 인스턴스가 \"저장소를 쓸 수 없음\"(`credential-store-unavailable`)으로 보인다.",
       "(마) 인스턴스가 가리키는 원 시스템의 주소를 바꿀 때는 인스턴스 ID도 바꾼다는 규칙을 포크의 등록이 지키는지 본다. 주소와 ID를 함께 바꾸면 그 인스턴스는 `credential-missing`이 되고 값을 다시 넣게 된다.",
       "이 화면에서 넣는 값은 한 줄, 8192자 이하이고 여러 줄 값(PEM, JSON 키)은 받지 않는다.",
-      "이 화면의 알려진 틈은 공용 저장소의 #162가 추적한다.",
+      "이 화면에 남은 한계(코드가 넣은 값의 줄바꿈은 알 수 없다)는 connector-sdk.md 8장에 있다.",
       "값과 계정 정보는 기록하지 않는다.",
     ]) {
       expect(s28, sentence).toContain(sentence);
     }
+    expect(s28).not.toContain("#162");
   });
 
   it("S29 says what the contract suite cannot see, what to look for, the rejection signal, the lockout figures and the rotating token", () => {

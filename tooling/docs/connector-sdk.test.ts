@@ -458,7 +458,8 @@ describe("docs.connector-sdk: shape of the text", () => {
 
   it("chapter 11 names each tracked gap by its issue number; the fork registration (#113) and the deferred ledger lines (#121) are built and are no row", () => {
     const eleven = chapter(docText, 11);
-    for (const issue of ["#116", "#162"]) expect(eleven, issue).toContain(issue);
+    expect(eleven).toContain("#116");
+    expect(eleven).not.toContain("#162"); // closed by I06F: the gaps are fixed, one limit is stated (8장)
     // #114 is built (I06): the way to hand a Connector a credential is no row of chapter 11 any more
     expect(eleven).not.toContain("#114");
     expect(eleven).not.toContain("#121");
@@ -1215,11 +1216,12 @@ describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a creden
       "- 저장이나 삭제가 성공하면 화면이 `POST /api/connectors/credentials-changed`(`{ connectorId }`)를 한 번 부른다. 이 알림에는 값이 없고 다른 API와 같은 검사(세션 토큰, Origin, Host)를 지난다.",
       "답은 그 인스턴스의 목록 요약과 `rebuild` 하나다: `done`(바로 다시 만들었다), `queued`(진행 중인 재점검이나 간격 때문에 미뤘다), `skipped`(재점검을 그만둔 인스턴스이거나 만드는 함수가 없는 종류, 읽을 수 없는 선언의 인스턴스라 하지 않았다).",
       "- **이 화면에서 넣는 자격 증명은 한 줄, 8192자 이하다.** 길이는 UTF-16 코드 단위로 세므로 기본 다국어 평면 밖의 글자는 둘로 센다. 줄바꿈이 든 값과 8192자를 넘는 값은 저장하지 않고 안내만 보인다(자르지 않는다). 여러 줄 값(PEM, JSON 키)은 이 화면이 받지 않는다. 한 줄로 이어 붙인 PEM만 한도 안에서 된다.",
-      "공용 저장소의 #162가 추적한다.",
+      "이 입력란에 남은 한계는 하나다. 코드가 넣은 값(비밀번호 관리자의 자동 채움, 스크립트)은 브라우저가 줄바꿈을 지운 뒤에야 화면에 닿으므로, 화면은 그 값에 줄바꿈이 있었는지 알 수 없고 지워진 값이 저장된다.",
       "- OS 보호(Windows의 DPAPI)를 쓸 수 없으면 값은 저장되지 않는다. 환경 변수나 설정 파일의 평문으로 조용히 넘어가지 않는다.",
     ]) {
       expect(eight, sentence).toContain(sentence);
     }
+    expect(eight).not.toContain("#162");
   });
 
   it("says what each way of a refusal ends in: the four reasons, the stop code, and what is not retried", () => {
@@ -1397,7 +1399,7 @@ describe("docs.connector-sdk (I06): chapters 2, 5, 6 and 7 carry what the creden
       expect(firsts, row).toContain(row);
     }
     expect(eleven).not.toContain("수집기에 비밀 값을 건네는 통로");
-    expect(eleven).toContain("한 줄, 8192자 이하만 받는다. 이 입력란의 알려진 틈은 #162가 추적한다(8장)");
+    expect(eleven).toContain("한 줄, 8192자 이하만 받는다. 코드가 넣은 값의 줄바꿈은 화면이 알 수 없다(8장)");
     expect(eleven).toContain("site-setup의 S28·S29가 배포처에서 확인한다(8장)");
   });
 });
