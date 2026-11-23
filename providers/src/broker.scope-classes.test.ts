@@ -134,7 +134,10 @@ describe("egress.type-names: a name with no source is graded by the mapping's st
 
   it("refuses the call when the mapping's strictest([]) is no class of the set; the Provider receives nothing", async () => {
     answerOf = (classes) => classes[0] ?? "nope";
-    expect(await call([sourceId()], [], unsourced)).toEqual({ status: "rejected", reason: "scope-unjudged" });
+    expect(await call([sourceId()], [], unsourced)).toEqual({
+      status: "rejected",
+      reason: "scope-unjudged",
+    });
     expect(provider.requests).toEqual([]);
   });
 });

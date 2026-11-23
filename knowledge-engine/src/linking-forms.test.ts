@@ -600,11 +600,15 @@ describe("linking.verified-forms: through the extract handler and the Broker", (
   });
 
   it("egress.type-names: a user-made representative's name is never graded by its members' sources alone", async () => {
-    const { rep } = group(
-      stored(fixture("v02-mail.jsonl")),
+    const added = userDecisions.add(db, { kind: "item", type: "Concept", name: "검증 모듈" });
+    if (added.status !== "applied") throw new Error("add");
+    const rep = Number(added.ref.id); // the name is the user's own text: no lineage of its own
+    const member = item("연동 테스트");
+    quoted(
+      saveFact(db, { itemId: member, kind: "target_date", value: "2026-12-02", ...attrs }).id,
       stored(fixture("v02-messenger.jsonl")),
     );
-    db.run("UPDATE items SET user_authored = 1 WHERE id = ?", [rep]); // the name is the user's own text
+    line(member, rep);
     const run = kit();
     await run(stored(fixture("v02-wiki.jsonl")));
     expect(requests.map((r) => r.candidateItemIds)).toEqual([[String(rep)]]);
