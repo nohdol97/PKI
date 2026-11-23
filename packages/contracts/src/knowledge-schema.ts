@@ -15,7 +15,7 @@ export const KNOWLEDGE_PLACES = [
 ] as const;
 export type KnowledgePlace = (typeof KNOWLEDGE_PLACES)[number];
 
-/** The value types a fact kind's rule may name: S01's three, S02's `identifier`, S03-R3's nine. */
+/** The value types a fact kind's rule may name: S01's three, S02's `identifier`, S03-R3's nine, P01-R11's `work-status`. */
 export const FACT_VALUE_TYPES = [
   "date",
   "text",
@@ -30,8 +30,12 @@ export const FACT_VALUE_TYPES = [
   "period",
   "currency",
   "dataset-role",
+  "work-status",
 ] as const;
 export type FactValueType = (typeof FACT_VALUE_TYPES)[number];
+/** The four values of `work-status` (P01-R11), as the stored fact writes them: lower-case. */
+export const WORK_STATUSES = ["open", "in_progress", "done", "cancelled"] as const;
+export type WorkStatus = (typeof WORK_STATUSES)[number];
 /** The checks a rule may require of a row before it can be `verified` (S03-R13). */
 export const DATA_CHECK_NAMES = ["schema", "grain", "join-cardinality", "aggregation"] as const;
 export type DataCheckName = (typeof DATA_CHECK_NAMES)[number];
@@ -90,11 +94,13 @@ const relation = (
   objectTypes: readonly string[],
   symmetric = false,
   since?: number,
+  widenedAt?: number,
 ): CatalogueEntry => ({
   name,
   place: "type-definition",
   rule: { elementKind: "relation-type", subjectTypes, objectTypes, symmetric },
   ...(since === undefined ? {} : { since }),
+  ...(widenedAt === undefined ? {} : { widenedAt }),
 });
 const factKind = (
   name: string,
@@ -122,7 +128,7 @@ const factKind = (
   ...(extra.notExtracted ? { notExtracted: true as const } : {}),
 });
 
-/** The thirteen item types that are type definitions. */
+/** The fourteen item types that are type definitions (edition 3 added Request). */
 const ITEM_TYPES = [
   "Person",
   "Organization",
@@ -137,6 +143,7 @@ const ITEM_TYPES = [
   "Dependency",
   "BusinessRule",
   "OpenQuestion",
+  "Request",
 ] as const;
 const STATEMENT_TYPES = [
   "Decision",
@@ -147,10 +154,11 @@ const STATEMENT_TYPES = [
   "Dependency",
   "BusinessRule",
   "OpenQuestion",
+  "Request",
 ];
 
 export const KNOWLEDGE_SCHEMA: KnowledgeCatalogue = {
-  edition: 2,
+  edition: 3,
   knowledgeTypes: [
     itemType("Person"),
     itemType("Organization"),
@@ -171,6 +179,7 @@ export const KNOWLEDGE_SCHEMA: KnowledgeCatalogue = {
     itemType("Dataset", 2),
     itemType("Metric", 2),
     itemType("Join", 2),
+    itemType("Request", 3),
   ],
   relationTypes: [
     relation(
@@ -188,7 +197,7 @@ export const KNOWLEDGE_SCHEMA: KnowledgeCatalogue = {
       ["Project", "System", "Task", "Commitment"],
       ["Project", "System", "Task", "Commitment", "Dependency"],
     ),
-    relation("RELATED_TO", ITEM_TYPES, ITEM_TYPES, true),
+    relation("RELATED_TO", ITEM_TYPES, ITEM_TYPES, true, undefined, 3),
     relation("DECIDED", ["Person", "Organization"], ["Decision"]),
     relation(
       "CAUSED_BY",
@@ -206,7 +215,9 @@ export const KNOWLEDGE_SCHEMA: KnowledgeCatalogue = {
     relation("USES_JOIN", ["Metric"], ["Join"], false, 2),
   ],
   factKinds: [
-    factKind("target_date", ["Project", "System", "Task", "Commitment"], "date", "one"),
+    factKind("target_date", ["Project", "System", "Task", "Commitment", "Request"], "date", "one", {
+      widenedAt: 3,
+    }),
     factKind("completion_date", ["Project", "System", "Task", "Commitment"], "date", "one"),
     factKind("definition", ["Concept", "Metric", "Dataset"], "text", "many", { widenedAt: 2 }),
     factKind(
@@ -231,8 +242,8 @@ export const KNOWLEDGE_SCHEMA: KnowledgeCatalogue = {
       { widenedAt: 2 },
     ),
     factKind("identifier.email", ["Person", "Organization"], "identifier", "many"),
-    factKind("identifier.key", ITEM_TYPES, "identifier", "one"),
-    factKind("statement", STATEMENT_TYPES, "text", "many"),
+    factKind("identifier.key", ITEM_TYPES, "identifier", "one", { widenedAt: 3 }),
+    factKind("statement", STATEMENT_TYPES, "text", "many", { widenedAt: 3 }),
     // S03-R2 (edition 2): the analytical type definitions
     factKind("dataset.column", ["Dataset"], "header", "many", { since: 2, notExtracted: true }),
     factKind("dataset.role", ["Dataset"], "dataset-role", "one", { since: 2 }),
@@ -265,6 +276,11 @@ export const KNOWLEDGE_SCHEMA: KnowledgeCatalogue = {
       since: 2,
       dataChecks: ["join-cardinality"],
     }),
+    // P01-R11 (edition 3): the work status and the current content of a decision or rule
+    factKind("status", ["Task", "Commitment", "Issue", "Request"], "work-status", "one", {
+      since: 3,
+    }),
+    factKind("conclusion", ["Decision", "BusinessRule"], "text", "one", { since: 3 }),
   ],
 };
 
@@ -291,6 +307,7 @@ const REQUIRED_KNOWLEDGE_TYPES = [
   "Dataset",
   "Metric",
   "Join",
+  "Request",
 ];
 const REQUIRED_RELATION_TYPES = [
   "BELONGS_TO",

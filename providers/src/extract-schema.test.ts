@@ -1,5 +1,5 @@
-// S01-T08 `extract.v3`, S02-T02 `extract.v4` and S03-T07 `extract.v5` (schema part; S01-R17, S02-R4, S03-R7): the
-// extraction answer of schema version 5 holds items (thirteen types and the analytical Dataset, Metric, Join),
+// S01-T08 `extract.v3`, S02-T02 `extract.v4` and S03-T07 `extract.v5`, P01-T05 `extract.v6` (schema part; S01-R17, S02-R4, S03-R7, P01-R11): the
+// extraction answer of schema version 6 holds items (fourteen types and the analytical Dataset, Metric, Join),
 // facts (the dates, the identifiers and the analytical kinds, with the validity interval and the context tag),
 // the six relations and the four analytical ones, `terms` (surface forms), `definitions`
 // (of the kind definition or statement) and `proposedTypes`, and every fact, relation, term and
@@ -25,6 +25,7 @@ import {
   EXTRACT_SCHEMA_VERSION,
   EXTRACT_STATEMENT_FACT_KIND,
   EXTRACT_TERM_KINDS,
+  EXTRACT_WORK_FACT_KINDS,
   TASKS,
   type ExtractionOutput,
 } from "./index.ts";
@@ -42,10 +43,10 @@ const v3 = {
   ],
 };
 
-describe("extract.v5: the schema", () => {
-  it("is version 5, the only extract version listed (a request for 4 is an unlisted version)", () => {
-    expect(EXTRACT_SCHEMA_VERSION).toBe(5);
-    expect(Object.keys(TASKS.extract)).toEqual(["5"]);
+describe("extract.v6: the schema", () => {
+  it("is version 6, the only extract version listed (a request for 5 is an unlisted version)", () => {
+    expect(EXTRACT_SCHEMA_VERSION).toBe(6);
+    expect(Object.keys(TASKS.extract)).toEqual(["6"]);
     expect(EXTRACT_DEFINITION_MAX_CODE_POINTS).toBe(500);
   });
 
@@ -86,10 +87,12 @@ describe("extract.v5: the schema", () => {
         "Project",
         "System",
         "Task",
+        "Request",
       ].sort(),
     );
     expect([...EXTRACT_FACT_KINDS].sort()).toEqual(["completion_date", "target_date"]);
     expect([...EXTRACT_IDENTIFIER_FACT_KINDS]).toEqual(["identifier.email", "identifier.key"]);
+    expect([...EXTRACT_WORK_FACT_KINDS]).toEqual(["status", "conclusion"]);
     expect([...EXTRACT_RELATION_TYPES].sort()).toEqual(
       ["BELONGS_TO", "CAUSED_BY", "DECIDED", "DEPENDS_ON", "RELATED_TO", "RESPONSIBLE_FOR"].sort(),
     );
@@ -127,6 +130,30 @@ describe("extract.v5: the schema", () => {
       "JOIN_RIGHT",
       "USES_JOIN",
     ]);
+  });
+
+  it("reads a Request with a status and a Decision with a conclusion, and refuses an unlisted kind (P01-R11)", () => {
+    const answer = {
+      ...v3,
+      items: [
+        { ref: "r", type: "Request", name: "결제 연동 요청", existingItemId: null },
+        { ref: "d", type: "Decision", name: "마감 주기", existingItemId: null },
+      ],
+      facts: [
+        { item: "r", kind: "status", value: "open", epistemic: "explicit", quote: "열린 요청" },
+        {
+          item: "d",
+          kind: "conclusion",
+          value: "월 마감",
+          epistemic: "explicit",
+          quote: "월 마감",
+        },
+      ],
+    };
+    expect(parse(answer).success).toBe(true);
+    expect(parse({ ...answer, facts: [{ ...answer.facts[0], kind: "state" }] }).success).toBe(
+      false,
+    );
   });
 
   it("takes confidence where S01-R17 puts it, and leaves its range to the handler", () => {
@@ -229,6 +256,7 @@ const factKindNames = [
   ...EXTRACT_ALIAS_FACT_KINDS,
   EXTRACT_DEFINITION_FACT_KIND,
   EXTRACT_STATEMENT_FACT_KIND,
+  ...EXTRACT_WORK_FACT_KINDS,
   ...EXTRACT_ANALYTICAL_FACT_KINDS,
 ];
 const itemTypeNames = [...EXTRACT_ITEM_TYPES, ...EXTRACT_ANALYTICAL_ITEM_TYPES];
@@ -243,7 +271,7 @@ interface JsonSchema {
 }
 const schema = task.outputJsonSchema as unknown as JsonSchema;
 
-describe("extract.v5: the instruction, the response schema, the catalogue and the seed are one list", () => {
+describe("extract.v6: the instruction, the response schema, the catalogue and the seed are one list", () => {
   it("lists in the instruction every seeded name extraction writes, and no more than the seed's", () => {
     const text = task.instructions;
     for (const name of [
@@ -253,6 +281,7 @@ describe("extract.v5: the instruction, the response schema, the catalogue and th
       ...EXTRACT_FACT_KINDS,
       ...EXTRACT_ANALYTICAL_FACT_KINDS,
       EXTRACT_STATEMENT_FACT_KIND,
+      ...EXTRACT_WORK_FACT_KINDS,
     ]) {
       expect(text, name).toContain(name);
     }
@@ -271,6 +300,7 @@ describe("extract.v5: the instruction, the response schema, the catalogue and th
       [
         ...EXTRACT_FACT_KINDS,
         ...EXTRACT_IDENTIFIER_FACT_KINDS,
+        ...EXTRACT_WORK_FACT_KINDS,
         ...EXTRACT_ANALYTICAL_FACT_KINDS,
       ].sort(),
     );

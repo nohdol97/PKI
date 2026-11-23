@@ -196,7 +196,7 @@ describe("extract.v3: one call, and what the handler drops", () => {
       }),
     );
     expect(provider.requests).toHaveLength(1);
-    expect(provider.requests[0]?.schemaVersion).toBe(5);
+    expect(provider.requests[0]?.schemaVersion).toBe(6);
     expect(items()).toEqual([{ id: 1, type: "Concept", name: "미리내 용어" }]);
     expect(
       facts().map((f) => [f.kind, f.value, f.status, f.epistemic, f.confidence, f.context]),

@@ -87,7 +87,7 @@ async function call(
       taskKind: "extract",
       sourceVersionIds: ids,
       candidateItemIds: Object.keys(candidates),
-      schemaVersion: 5,
+      schemaVersion: 6,
       budget: { timeoutMs: 1000 },
       retryable: false,
     }),

@@ -539,7 +539,7 @@ describe("ontology.checks: the effect on existing data (R19 step 3)", () => {
 
   it("lists nothing and keeps the verified seed for a change that is refused", () => {
     const seeded = listOntologyElements(db);
-    expect(seeded).toHaveLength(48);
+    expect(seeded).toHaveLength(51);
     applyOntologyChange(db, { op: "retire", elementKind: "item-type", name: "Concept" }, "user");
     expect(listOntologyElements(db)).toEqual(seeded);
   });

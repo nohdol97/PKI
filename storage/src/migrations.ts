@@ -1635,6 +1635,125 @@ const v29: Migration = (db) => {
   `);
 };
 
+// Schema v30 (P01-T05, P01-R11, D23): catalogue edition 3. The item
+// type `Request`, the fact kinds `status` and `conclusion` are seeded `verified`, edition 1, `origin = seed`
+// (a name that exists, by R19's comparison, is left alone); `target_date`, `statement`, `identifier.key` and
+// `RELATED_TO` are widened to `Request` only while the stored rule is the one v23 left, `verified`, edition
+// +1, no history line (the lifecycle gate is dropped for the update and made again with the text it had).
+// The knowledge revision does not move. The migration keeps its own copy of the constants. The number is the
+// next one free when this merges: it is renumbered on a rebase over another v30.
+const V30_ALL_TYPES = [
+  "BusinessRule",
+  "Commitment",
+  "Concept",
+  "Decision",
+  "Dependency",
+  "Event",
+  "Issue",
+  "OpenQuestion",
+  "Organization",
+  "Person",
+  "Project",
+  "System",
+  "Task",
+];
+const V30_STATEMENT_TYPES = [
+  "BusinessRule",
+  "Commitment",
+  "Decision",
+  "Dependency",
+  "Event",
+  "Issue",
+  "OpenQuestion",
+  "Task",
+];
+const V30_ADDITIONS: readonly SeedRow[] = [
+  ["item-type", "Request", { elementKind: "item-type" }],
+  [
+    "fact-kind",
+    "status",
+    {
+      elementKind: "fact-kind",
+      itemTypes: ["Commitment", "Issue", "Request", "Task"],
+      valueType: "work-status",
+      cardinality: "one",
+    },
+  ],
+  [
+    "fact-kind",
+    "conclusion",
+    {
+      elementKind: "fact-kind",
+      itemTypes: ["BusinessRule", "Decision"],
+      valueType: "text",
+      cardinality: "one",
+    },
+  ],
+];
+const v30Fact = (name: string, types: readonly string[], valueType: string, cardinality: string) =>
+  [
+    "fact-kind",
+    name,
+    { elementKind: "fact-kind", itemTypes: types, valueType, cardinality },
+  ] as const;
+const v30Related = (types: readonly string[]) =>
+  [
+    "relation-type",
+    "RELATED_TO",
+    { elementKind: "relation-type", subjectTypes: types, objectTypes: types, symmetric: true },
+  ] as const;
+const withRequest = (types: readonly string[]) => [...types, "Request"].sort();
+/** The widened rules: element, the rule v23 left (the one condition) and the rule of edition 3. */
+const V30_WIDENED: readonly (readonly [
+  from: readonly [kind: string, name: string, rule: object],
+  to: readonly [kind: string, name: string, rule: object],
+])[] = [
+  [
+    v30Fact("target_date", ["Commitment", "Project", "System", "Task"], "date", "one"),
+    v30Fact("target_date", withRequest(["Commitment", "Project", "System", "Task"]), "date", "one"),
+  ],
+  [
+    v30Fact("statement", V30_STATEMENT_TYPES, "text", "many"),
+    v30Fact("statement", withRequest(V30_STATEMENT_TYPES), "text", "many"),
+  ],
+  [
+    v30Fact("identifier.key", V30_ALL_TYPES, "identifier", "one"),
+    v30Fact("identifier.key", withRequest(V30_ALL_TYPES), "identifier", "one"),
+  ],
+  [v30Related(V30_ALL_TYPES), v30Related(withRequest(V30_ALL_TYPES))],
+];
+const v30: Migration = (db) => {
+  const revision = db.all("SELECT knowledge_revision FROM revisions")[0]
+    ?.knowledge_revision as number;
+  const squash = (name: string) => name.toLowerCase().replace(/[_.-]/g, "");
+  const taken = new Set(
+    db
+      .all("SELECT element_kind, name FROM ontology_elements")
+      .map((r) => `${r.element_kind as string}:${squash(r.name as string)}`),
+  );
+  for (const [kind, name, rule] of V30_ADDITIONS) {
+    if (taken.has(`${kind}:${squash(name)}`)) continue;
+    db.run(
+      "INSERT INTO ontology_elements (element_kind, name, rule, status, edition, origin) VALUES (?, ?, ?, 'verified', 1, 'seed')",
+      [kind, name, JSON.stringify(rule)],
+    );
+  }
+  // the lifecycle gate demands a history line for an edition change; a migration writes none
+  const gate = db.all(
+    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'ontology_elements_lifecycle_gate'",
+  )[0]?.sql as string;
+  db.exec("DROP TRIGGER ontology_elements_lifecycle_gate");
+  for (const [[kind, name, from], [, , to]] of V30_WIDENED) {
+    db.run(
+      `UPDATE ontology_elements SET rule = ?, edition = edition + 1
+       WHERE element_kind = ? AND name = ? AND status = 'verified' AND rule = ?`,
+      [JSON.stringify(to), kind, name, JSON.stringify(from)],
+    );
+  }
+  db.exec(gate);
+  db.run("UPDATE revisions SET knowledge_revision = ?", [revision]);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1666,6 +1785,7 @@ export const migrations: readonly Migration[] = [
   v27,
   v28,
   v29,
+  v30,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

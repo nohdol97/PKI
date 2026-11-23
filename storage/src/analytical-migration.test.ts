@@ -98,7 +98,7 @@ describe("ontology.analytical-seeds: the migration", () => {
   it("matches the catalogue's edition 2 names and rules, and the list reports them usable", () => {
     const before = describeKnowledgeSchema(listOntologyElements(db)).entries;
     // the catalogue's edition 2 is these names: the list says so before and after
-    expect(KNOWLEDGE_SCHEMA.edition).toBe(2);
+    expect(KNOWLEDGE_SCHEMA.edition).toBeGreaterThanOrEqual(2);
     for (const name of SEEDED_NAMES) {
       const entry = before.find((e) => e.name === name);
       expect({ name, usable: entry?.usable }).toEqual({ name, usable: false });
@@ -120,8 +120,9 @@ describe("ontology.analytical-seeds: the migration", () => {
     for (const name of ["definition", "alias.synonym", "alias.abbreviation", "alias.translation"]) {
       expect(after.find((e) => e.name === name)?.ruleMatches, name).toBe(true);
     }
-    // nothing the catalogue lists is left unusable
-    expect(after.filter((e) => e.usable === false)).toEqual([]);
+    // nothing the catalogue lists up to edition 2 is left unusable (edition 3's names come with a later migration)
+    const edition3 = ["Request", "status", "conclusion"];
+    expect(after.filter((e) => e.usable === false && !edition3.includes(e.name))).toEqual([]);
   });
 
   it("writes no history line and does not move the knowledge revision", () => {

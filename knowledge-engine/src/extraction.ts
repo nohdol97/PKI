@@ -47,6 +47,7 @@ import {
   EXTRACT_ALIAS_FACT_KIND,
   EXTRACT_ANALYTICAL_ITEM_TYPES,
   EXTRACT_ANALYTICAL_MAX_TEXT_CODE_POINTS,
+  EXTRACT_CONCLUSION_MAX_CODE_POINTS,
   EXTRACT_DEFINITION_FACT_KIND,
   EXTRACT_DEFINITION_MAX_CODE_POINTS,
   EXTRACT_IDENTIFIER_FACT_KINDS,
@@ -175,8 +176,12 @@ interface Planned {
   quote: string;
 }
 
-/** The analytical facts whose value is a span of the document, not a normalized one (S03-R7). */
-const QUOTED_TEXT_FACT_KINDS: readonly string[] = ["metric.unit", "metric.version"];
+/** The facts whose value is a span of the document, not a normalized one, and the most code points of it (S03-R7, P01-R11). */
+const QUOTED_TEXT_FACT_MAX: Readonly<Record<string, number>> = {
+  "metric.unit": EXTRACT_ANALYTICAL_MAX_TEXT_CODE_POINTS,
+  "metric.version": EXTRACT_ANALYTICAL_MAX_TEXT_CODE_POINTS,
+  conclusion: EXTRACT_CONCLUSION_MAX_CODE_POINTS,
+};
 
 /** The column names a stored analytical value holds, in the processed form; none for a value naming no column. */
 function columnNames(valueType: AnalyticalValueType, stored: string): string[] {
@@ -542,15 +547,18 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       // naming columns is the answer's explicit only when the quote holds every column name
       let stored = value;
       let epistemic = fact.epistemic;
-      if (QUOTED_TEXT_FACT_KINDS.includes(fact.kind)) {
+      const quotedMax = QUOTED_TEXT_FACT_MAX[fact.kind];
+      if (quotedMax !== undefined) {
         if (!fact.quote.includes(value)) {
           drops.quotes++;
           continue;
         }
-        if ([...value].length > EXTRACT_ANALYTICAL_MAX_TEXT_CODE_POINTS) {
+        if ([...value].length > quotedMax) {
           drops.other++;
           continue;
         }
+      } else if (rule.valueType === "work-status") {
+        stored = value.toLowerCase(); // valueFits said it is one of the four, case aside
       } else if ((ANALYTICAL_VALUE_TYPES as readonly string[]).includes(rule.valueType)) {
         const valueType = rule.valueType as AnalyticalValueType;
         stored = normalizeValue(valueType, value) as string; // valueFits said it is one

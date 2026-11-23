@@ -16,6 +16,7 @@ import {
   EXTRACT_FACT_KINDS,
   EXTRACT_IDENTIFIER_FACT_KINDS,
   EXTRACT_ITEM_TYPES,
+  EXTRACT_WORK_FACT_KINDS,
   EXTRACT_RELATION_TYPES,
   EXTRACT_STATEMENT_FACT_KIND,
   type Broker,
@@ -487,9 +488,10 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
       const element = seed("fact-kind").find((e) => e.name === name);
       expect(element?.status).toBe("verified");
       // "the date as YYYY-MM-DD", one per item; S02-R2 widens it to Task and Commitment
+      // P01-R11 widens `target_date` to Request (not `completion_date`)
       expect(element?.rule).toEqual({
         elementKind: "fact-kind",
-        itemTypes: [...WORK, ...S02_WIDENED].sort(),
+        itemTypes: [...WORK, ...S02_WIDENED, ...(name === "target_date" ? ["Request"] : [])].sort(),
         valueType: "date",
         cardinality: "one",
       });
@@ -545,6 +547,7 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
         ...EXTRACT_ALIAS_FACT_KINDS,
         EXTRACT_DEFINITION_FACT_KIND,
         EXTRACT_STATEMENT_FACT_KIND,
+        ...EXTRACT_WORK_FACT_KINDS,
         ...EXTRACT_ANALYTICAL_FACT_KINDS,
       ] as string[],
       "relation-type": [
