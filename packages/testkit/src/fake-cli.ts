@@ -35,6 +35,11 @@ export interface FakeCliConfig {
   floodStream?: "stdout" | "stderr";
   /** A model call that answers also leaves a grandchild running. */
   leaveGrandchild?: boolean;
+  /**
+   * Waits this long before recording anything, as a Node process slow to start does. A SIGTERM inside the
+   * wait ends it with no record. Default: no wait.
+   */
+  startDelayMs?: number;
 }
 
 export interface FakeCliRun {

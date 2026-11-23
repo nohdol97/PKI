@@ -73,6 +73,40 @@ const failure = (p: Promise<unknown>) =>
     (e: unknown) => e,
   );
 
+/** A version query's limits, tried in turn (the first is the usual one); the sum stays inside the test limit. */
+const VERSION_LADDER_MS = [1_500, 5_000, 15_000];
+/** What the query may take beyond its limit: the kill grace and the reaper. */
+const VERSION_SLACK_MS = 2_500;
+
+/**
+ * A hung version query ends itself within its limit and takes the fake's whole tree with it. The fake can start
+ * so late that the limit is up before it recorded its PID: that attempt proves nothing either way (the CLI was
+ * not there to end), so it is not a failure and the next, longer limit is tried. Only an attempt with a record is
+ * judged. Returns the limit it was judged on; fails, loudly, when no attempt ever recorded.
+ */
+async function versionQueryEndsItself(
+  id: (typeof PROVIDERS)[number]["id"],
+  create: (typeof PROVIDERS)[number]["create"],
+  ladder: readonly number[] = VERSION_LADDER_MS,
+): Promise<number> {
+  for (const limit of ladder) {
+    fake.reset();
+    const started = Date.now();
+    const info = await create({
+      env: { PATH: fake.bin },
+      versionTimeoutMs: limit,
+      killGraceMs: 200,
+    }).detect();
+    expect(info).toEqual({ installed: true, path: fake.path(id === "codex" ? "codex" : "claude") });
+    const elapsed = Date.now() - started;
+    if (fake.spawned().length === 0) continue; // undecided: the fake never got to record itself
+    expect(elapsed).toBeLessThan(limit + VERSION_SLACK_MS);
+    await treeGone();
+    return limit;
+  }
+  throw new Error(`the fake CLI never recorded itself within any limit of ${ladder.join(", ")} ms`);
+}
+
 describe.skipIf(process.platform === "win32").each(PROVIDERS)("cli-kill: $id", ({ id, create }) => {
   const provider = () => create({ env: { PATH: fake.bin }, killGraceMs: 200, runsRoot: runs });
   const request = (requestId: string, timeoutMs = 60_000): StructuredRequest => ({
@@ -127,15 +161,7 @@ describe.skipIf(process.platform === "win32").each(PROVIDERS)("cli-kill: $id", (
 
   it("ends a hung version query itself, reporting no version", async () => {
     fake.configure({ versionMode: "hang" }); // long enough for the fake to start and record itself
-    const started = Date.now();
-    const info = await create({
-      env: { PATH: fake.bin },
-      versionTimeoutMs: 1_500,
-      killGraceMs: 200,
-    }).detect();
-    expect(info).toEqual({ installed: true, path: fake.path(id === "codex" ? "codex" : "claude") });
-    expect(Date.now() - started).toBeLessThan(4_000);
-    await treeGone();
+    await versionQueryEndsItself(id, create);
   });
 
   it.each(["stdout", "stderr"] as const)(
@@ -224,6 +250,22 @@ describe.skipIf(process.platform === "win32").each(PROVIDERS)("cli-kill: $id", (
     await p.cancel("early:1");
     expect(await call).toBeInstanceOf(ProviderError);
     expect(fake.modelCalls()).toBe(0);
+  });
+});
+
+describe("cli-kill: the version query's judging", () => {
+  it("I06F-C10 judges the version query's limit on an attempt the slow-starting fake recorded in, not on one it had not", async () => {
+    fake.configure({ versionMode: "hang", startDelayMs: 2_000 }); // later than the first rung of the ladder
+    const judged = await versionQueryEndsItself("claude-code", createClaudeCodeProvider);
+    expect(judged).toBeGreaterThan(VERSION_LADDER_MS[0] ?? 0); // the first attempt was undecided
+  }, 60_000);
+
+  it("I06F-C10 fails by name, not silently, when no attempt of the ladder recorded the fake", async () => {
+    fake.configure({ versionMode: "hang", startDelayMs: 5_000 }); // later than every rung below
+    const short = [300, 600]; // 0.9 s in all
+    await expect(versionQueryEndsItself("claude-code", createClaudeCodeProvider, short)).rejects.toThrow(
+      "never recorded itself",
+    );
   });
 });
 
