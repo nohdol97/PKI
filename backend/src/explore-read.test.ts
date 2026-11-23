@@ -96,6 +96,34 @@ describe("explore-read items at the scan cap (X02F-C1)", () => {
     expect(seen).toEqual([first, ...beyond]);
   });
 
+  it("does not answer as `next` the number of a shown item that the query reaches only through a hidden alias fact", () => {
+    for (let i = 0; i < 99; i++) item(`별칭 가림 ${i}`, versions.secret);
+    // a user-made item has no lineage of its own, so it is shown while its alias fact (citing the secret source) is not
+    const added = productUserDecisions(registry).add(db, {
+      kind: "item",
+      type: "Project",
+      name: "엑스",
+    });
+    if (added.status !== "applied") throw new Error("add");
+    const fact = saveFact(db, {
+      itemId: added.ref.id,
+      kind: "alias.name",
+      value: "별칭비밀",
+      ...attrs,
+    }).id;
+    automatedLifecycle.created(db, { kind: "fact", id: fact }, "extraction", null);
+    addEvidence(db, {
+      target: { factId: fact },
+      sourceVersionId: versions.secret,
+      start: 0,
+      end: 2,
+      quote: "본문",
+    });
+    for (let i = 0; i < 3; i++) item(`별칭 뒤 ${i}`, versions.open);
+    // the window of 100 rows holds only hidden rows and that item: nothing in it may be named
+    expect(reads(100).items({ query: "별칭" })).toEqual({ items: [], next: null });
+  });
+
   it("answers `next` null once the store has been read to its end", () => {
     item("끝 하나", versions.open);
     expect(reads(100).items({ query: "끝" }).next).toBeNull();

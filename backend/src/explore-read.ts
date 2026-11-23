@@ -1,7 +1,7 @@
 // The Explore screen's reads (X02-R1..R4). Each is answered from rows the read gate shows (I04-R13, purpose
 // `display`): a hidden item, fact, relation or source version is left out whole, and a number asked for that is
 // hidden is the same `undefined` (the server's `not-found`) as one nothing is stored under. Visibility is applied
-// before paging, so a hidden item neither shortens a page nor moves `next`. Nothing is stored here (X02-D2).
+// before paging, so a hidden item neither shortens a page nor moves `next`; at the scan cap `next` is the last item the page could hold. Nothing is stored here (X02-D2).
 import { EXPLORE_PAGE_SIZE, type RouteRequest, type RouteResponse } from "@pki/contracts";
 import { pageKindOfType, WIKI_PAGE_KIND_NAME } from "@pki/knowledge-engine";
 import {
@@ -65,7 +65,7 @@ export function createExploreReads(
       let cursor = after ?? 0;
       let scanned = 0;
       let reachedEnd = false;
-      // the last shown number read, kept or not: a hidden row's number is never answered (X02F-R1)
+      // the last number that went into the answer: a hidden row's, or a shown item's that only a hidden alias matched, is never answered (X02F-R1)
       let lastShown: number | null = null;
       // read on until a page and one more are shown (or the store ends): the one more says `next` exists
       while (kept.length <= EXPLORE_PAGE_SIZE && scanned < maxScan) {
@@ -73,12 +73,14 @@ export function createExploreReads(
         for (const row of rows) {
           cursor = row.id;
           if (!gate.semanticShown("item", row.id)) continue;
-          lastShown = row.id;
           // an alias counts only when its own fact is shown (X02B-R6 2): the first such value is the one answered
           const alias = row.nameMatch
             ? null
             : (row.aliases.find((a) => gate.semanticShown("fact", a.id))?.value ?? undefined);
-          if (alias !== undefined) kept.push({ id: row.id, type: row.type, name: row.name, alias });
+          if (alias !== undefined) {
+            kept.push({ id: row.id, type: row.type, name: row.name, alias });
+            lastShown = row.id;
+          }
           if (kept.length > EXPLORE_PAGE_SIZE) break;
         }
         scanned += rows.length;
