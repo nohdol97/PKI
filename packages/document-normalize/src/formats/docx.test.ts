@@ -264,6 +264,14 @@ describe("C32 comment threads (I02B-R30)", () => {
     expect(doc.metadata.participants).toEqual(["a".repeat(1_023)]);
   });
 
+  it("a first comment with neither author nor time still follows the body after a blank line (I02B-C58)", async () => {
+    const doc = await parse({
+      body: [{ text: "본문", commentIds: [0] }],
+      comments: [{ text: "메모" }],
+    });
+    expect(doc.text).toBe("본문\n\n메모");
+  });
+
   it("a document without comments has no comment section and no participants", async () => {
     const doc = await parse({ body: [{ text: "본문" }] });
     expect(doc.text).toBe("본문");
