@@ -20,6 +20,9 @@ and this runner checks the preconditions, prepares the synthetic input, then cou
   entity-scenario preflight|record --phase off|on   the entity-resolution measurement of S02 (S33, see entity_scenario.py): its own
               refusal ("배포처 후속", S02-H2) under the same two conditions; `--phase` is the state of `semantic.autoDispute`;
               `record` writes counts, no verdict
+  analytical-scenario preflight|record   the analytical-semantic measurement of S03 (S34, see analytical_scenario.py): its own
+              refusal ("배포처 후속", S03-H2) under the same two conditions; no `--phase` (with the profile OFF there is nothing to
+              measure); `record` writes counts, no verdict
 
 Exit values: 0 ok/PASS, 1 FAIL or INCONCLUSIVE or a write refusal, 2 config error, 3 `배포처 후속` notice, 4 stale data.
 """
@@ -40,6 +43,7 @@ for _p in (HERE, VERIF):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import analytical_scenario  # noqa: E402
 import delete_scenario  # noqa: E402
 import entity_scenario  # noqa: E402
 import queue_scenario  # noqa: E402
@@ -70,6 +74,10 @@ NOTICE_ENTITY_DOUBLE = ("배포처 후속: S33 test double Provider(또는 설�
                         "실제 Provider(openai-compatible, claude-code, codex)를 설정하고 Windows 설치본에서 다시 실행한다(S02-H2, 이유: test-double).")
 NOTICE_ENTITY_NOT_INSTALLER = ("배포처 후속: S33 Windows 설치본이 아닌 환경에서는 넓힌 유형의 추출과 합치기 후보를 배포처 결과로 재지 않는다. "
                                "R04의 설치 파일로 설치한 Windows 11에서 실제 Provider로 실행한다(S02-H2, 이유: {code}).")
+NOTICE_ANALYTICAL_DOUBLE = ("배포처 후속: S34 test double Provider(또는 설정과 다른 Provider)로는 표와 분석 의미 추출을 배포처 결과로 재지 않는다. "
+                            "실제 Provider(openai-compatible, claude-code, codex)를 설정하고 Windows 설치본에서 다시 실행한다(S03-H2, 이유: test-double).")
+NOTICE_ANALYTICAL_NOT_INSTALLER = ("배포처 후속: S34 Windows 설치본이 아닌 환경에서는 표 가져오기와 분석 의미 검사를 배포처 결과로 재지 않는다. "
+                                   "R04의 설치 파일로 설치한 Windows 11에서 실제 Provider로 실행한다(S03-H2, 이유: {code}).")
 # the operator attests these; `launched-installed`: every start was the installed exe (the DB does not say which
 # binary wrote it, and dist\app or source runs use the same data folder)
 OBSERVATIONS = ("launched-installed", "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept")
@@ -234,6 +242,16 @@ def entity_gate(cfg, platform=None, read_uninstall=None, is_file=None, in_git_tr
         raise Refusal(NOTICE_ENTITY_DOUBLE, "test-double")
     return check_installer(cfg, platform or sys.platform, read_uninstall or read_uninstall_windows, is_file or os.path.isfile,
                            in_git_tree or _in_git_tree, notice=NOTICE_ENTITY_NOT_INSTALLER)
+
+
+def analytical_gate(cfg, platform=None, read_uninstall=None, is_file=None, in_git_tree=None):
+    """The two conditions of the analytical scenario (S03-H2), the same as the Semantic one with the S34 notices."""
+    try:
+        check_provider(cfg)
+    except Refusal:
+        raise Refusal(NOTICE_ANALYTICAL_DOUBLE, "test-double")
+    return check_installer(cfg, platform or sys.platform, read_uninstall or read_uninstall_windows, is_file or os.path.isfile,
+                           in_git_tree or _in_git_tree, notice=NOTICE_ANALYTICAL_NOT_INSTALLER)
 
 
 # ---- prepare / record ------------------------------------------------------------------------------------------------
@@ -451,6 +469,28 @@ def run_entity_scenario(args):
     return 0
 
 
+# ---- Analytical-semantic measurement (S03-R20, R21, S34) --------------------------------------------------------------
+
+def run_analytical_scenario(args):
+    """Refusal first, before the config is read: outside Windows nothing else is looked at. Raises like the other commands."""
+    if sys.platform != "win32":
+        raise Refusal(NOTICE_ANALYTICAL_NOT_INSTALLER.format(code="not-windows"), "not-windows")
+    cfg = load_config(args.config)
+    app_version = analytical_gate(cfg)
+    if args.action == "preflight":
+        print("preflight ok: installed app {}, provider {}".format(app_version, cfg["provider"]["id"]))
+        return 0
+    if not args.out:
+        raise ConfigError("--out is required for record")
+    counts = analytical_scenario.read_counts(site_db_path())
+    warning = analytical_scenario.setting_warning(counts)
+    if warning:
+        print("warning: {}".format(warning), file=sys.stderr)
+    path = analytical_scenario.write_counts(counts, args.out)
+    print("wrote {} (counts only, no text; this is a measurement, not a verdict)".format(os.path.basename(path)))
+    return 0
+
+
 # ---- queue and scheduler recovery scenarios (I03-R25, S19) ------------------------------------------------------------
 
 def run_queue_scenario(args, installer_check=None, db_path=None):
@@ -526,6 +566,10 @@ def main(argv=None, installer_check=None, db_path=None):
     sp.add_argument("--config", required=True)
     sp.add_argument("--out")
     sp.add_argument("--phase", choices=entity_scenario.PHASES)
+    sp = sub.add_parser("analytical-scenario")
+    sp.add_argument("action", choices=("preflight", "record"))
+    sp.add_argument("--config", required=True)
+    sp.add_argument("--out")
     sp = sub.add_parser("queue-scenario")
     sp.add_argument("action", choices=("preflight", "prepare", "record"))
     sp.add_argument("--scenario", required=True, choices=queue_scenario.SCENARIOS)
@@ -570,6 +614,8 @@ def main(argv=None, installer_check=None, db_path=None):
             return run_semantic_scenario(args)
         if args.command == "entity-scenario":
             return run_entity_scenario(args)
+        if args.command == "analytical-scenario":
+            return run_analytical_scenario(args)
         if args.command == "queue-scenario":
             return run_queue_scenario(args, installer_check=installer_check, db_path=db_path)
         cfg = load_config(args.config)
