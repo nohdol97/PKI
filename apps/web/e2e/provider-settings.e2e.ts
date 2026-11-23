@@ -154,6 +154,16 @@ test("the key field hands the key to the preload under the host's name, then cle
       ["set", openaiKeySecretName("one.synthetic.example"), "sk-e2e-typed".length],
     ]);
     expect(await page.content()).not.toContain("sk-e2e-typed");
+    // I06F-C12: a key typed for one host is gone when another host is saved, and is not sent anywhere
+    await field.fill("sk-e2e-stale");
+    await saveEndpoint(page, "https://two.synthetic.example/v1");
+    const next = page.getByLabel("two.synthetic.example에 쓸 API 키");
+    await expect(next).toHaveValue("");
+    await expect(page.getByRole("button", { name: "키 저장" })).toBeDisabled();
+    expect(await preloadCalls(page)).toEqual([
+      ["set", openaiKeySecretName("one.synthetic.example"), "sk-e2e-typed".length],
+    ]);
+    expect(await page.content()).not.toContain("sk-e2e-stale");
   } finally {
     await stop();
     rmSync(dir, { recursive: true, force: true });
