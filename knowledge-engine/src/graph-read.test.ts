@@ -314,6 +314,7 @@ describe("graph.paths cap cost (S02 decision 31 ④)", () => {
     const t0 = Date.now();
     const read = relationPaths(k.db, open, { from: ids[0] as number, depth: 3 }, "display");
     expect(read).toMatchObject({ status: "ok", truncated: true });
-    expect(Date.now() - t0).toBeLessThan(3000);
-  });
+    // ~2 s idle; the bound leaves room for a loaded machine and still fails the uncapped walk (22.9 s).
+    expect(Date.now() - t0).toBeLessThan(10_000);
+  }, 30_000);
 });
