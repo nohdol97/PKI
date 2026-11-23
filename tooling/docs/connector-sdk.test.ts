@@ -377,7 +377,8 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     const code = read("backend/src/connectors.ts");
     expect(code).toContain("export const INITIALIZE_TIMEOUT_MS = 10_000;");
     expect(code).toContain("export const RECHECK_LATE_LIMIT = 3;");
-    expect(code).toContain("instances.map(async ({ id, kind, config, credentials }): Promise<Entry> => {");
+    expect(code).toContain("async function makeEntry(given: ConnectorInstanceConfig): Promise<Entry> {");
+    expect(code).toContain("await Promise.all(instances.map(makeEntry))");
     expect(code).toContain('log("connector-kind-unknown", { id });');
     expect(code).toContain('log("connector-initialize-timeout", { id });');
     expect(code).toContain('log("connector-factory-failed", { id });');
@@ -424,10 +425,11 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     expect(read("backend/src/connectors.ts").match(/\.healthCheck\(/g)).toHaveLength(1);
   });
 
-  it("the file collector reads its path as given (chapter 9's open item)", () => {
+  it("the file collector opens an approved location's file through the path boundary and reads a plain { path } as given (chapter 9)", () => {
     const collector = read("backend/src/adapters/jsonl-connector.ts");
+    expect(collector).toContain("readLocationFile({");
     expect(collector).toContain("statSync(source.path)");
-    expect(collector).not.toMatch(/realpath|symlink|lstat/i);
+    expect(docText).toContain("### 승인한 JSONL 파일 위치(공용 저장소 #116)");
   });
 
   it("only the evidence screen draws a locator (chapter 11, I02B-R39)", () => {
@@ -1083,17 +1085,13 @@ describe("docs.connector-sdk (I07): the scopes file in chapter 7 (I07-R15)", () 
 });
 
 describe("docs.connector-sdk (I07): chapters 7 and 11 no longer list the installed build's gap, ownership.md says the registration binds the file (I07-R15)", () => {
-  it("chapter 7's list of what is missing keeps #116 alone, as item 1 (#114 is built by I06, the scopes file by I07)", () => {
+  it("chapter 7 has no list of what is missing any more: #116 is built by I02B-T06 (#114 by I06, the scopes file by I07)", () => {
     const seven = chapter(docText, 7);
-    const at = seven.indexOf("### 아직 없는 것");
-    const list = seven.slice(at, seven.indexOf("### 포크가 수집기를 만들 때 지킬 것"));
-    expect(list).toContain("1. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116).");
-    expect(list).not.toContain("2. ");
-    expect(list).toContain("번호(공용 저장소 #116 등)는 **공용(upstream) 저장소**의 추적 이슈다. 포크에서 `#116`은 포크 자신의 이슈를 가리키므로");
-    expect(list).not.toContain("connector-scopes.json");
-    expect(list).not.toContain("#115");
-    expect(list).not.toContain("#114");
-    expect(list).not.toContain("비밀 값을 건네는 통로");
+    expect(seven).not.toContain("### 아직 없는 것");
+    expect(seven).not.toContain("#116");
+    expect(seven).not.toContain("#115");
+    expect(seven).not.toContain("#114");
+    expect(seven).not.toContain("비밀 값을 건네는 통로");
   });
 
   it("chapter 11's table has no row for the scopes file and no 'only the source tree reads it' sentence", () => {

@@ -482,12 +482,8 @@ export async function createConnectorManager(
    * I06-R6). The start makes every configured instance here and `addInstance` makes one more while the backend runs, so
    * there is one way to open a Connector.
    */
-  async function makeEntry({
-    id,
-    kind,
-    config,
-    credentials,
-  }: ConnectorInstanceConfig): Promise<Entry> {
+  async function makeEntry(given: ConnectorInstanceConfig): Promise<Entry> {
+    const { id, kind, config, credentials } = given;
     const factory = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
     const declared = declareCredentials(kind, id, credentials);
     const slots = declared === "invalid" ? undefined : declared;
