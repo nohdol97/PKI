@@ -140,7 +140,7 @@ export async function retrieve(
     else skipped("graph");
   }
   if (enabled.has("temporal")) {
-    if (wants.temporal) ran("temporal", temporalIds(reading, items));
+    if (wants.temporal) ran("temporal", temporalIds(reading, items, admit));
     else skipped("temporal");
   }
   if (enabled.has("wiki")) {

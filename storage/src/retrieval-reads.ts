@@ -95,13 +95,14 @@ export function itemsEvidencedBy(
 }
 
 /**
- * The facts that carry a time (a start or an end of their valid interval), newest start first, at most `limit`;
- * `itemIds` narrows to the facts of those items.
+ * The facts that carry a time (a start or an end of their valid interval), newest start first, at most `limit`
+ * after skipping `offset`; `itemIds` narrows to the facts of those items.
  */
 export function listDatedFacts(
   db: SqlDriver,
   itemIds: readonly number[] | undefined,
   limit: number,
+  offset = 0,
 ): {
   id: number;
   itemId: number;
@@ -114,8 +115,8 @@ export function listDatedFacts(
       `SELECT id, item_id, valid_at, valid_until, status FROM facts
         WHERE (valid_at IS NOT NULL OR valid_until IS NOT NULL)
           ${itemIds === undefined ? "" : `AND item_id IN ${IDS}`}
-        ORDER BY coalesce(valid_at, valid_until) DESC, id DESC LIMIT ?`,
-      itemIds === undefined ? [limit] : [JSON.stringify(itemIds), limit],
+        ORDER BY coalesce(valid_at, valid_until) DESC, id DESC LIMIT ? OFFSET ?`,
+      itemIds === undefined ? [limit, offset] : [JSON.stringify(itemIds), limit, offset],
     )
     .map((r) => ({
       id: r.id as number,

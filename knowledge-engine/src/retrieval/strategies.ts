@@ -135,30 +135,49 @@ export function graphIds(reading: Reading, items: readonly number[]): number[] {
   );
 }
 
-const FACT_WINDOW = 200;
+/** RSP-D1: the dated facts are read in pages of `size`, at most `pages` pages. */
+export const TEMPORAL_PAGING = { size: 200, pages: 5 } as const;
 
 /**
  * `temporal`: the shown, valid facts that carry a time (of the matched items when there are any), narrowed to the
  * dates the question names, newest first; a question about a change puts the facts that replaced another first.
- * The sources are the current evidence of those facts.
+ * The sources are the current evidence of those facts. The facts are read page by page and each page goes through
+ * `admit` (R12 visibility, then the conditions) on its sources before the cut, so a hidden fact takes no place; the
+ * read stops at STRATEGY_LIST_LIMIT admitted sources, at the last page or at the page limit (RSP-R1). The
+ * change-first order runs over the facts read.
  */
-export function temporalIds(reading: Reading, items: readonly number[]): number[] {
+export function temporalIds(
+  reading: Reading,
+  items: readonly number[],
+  admit: (ids: readonly number[]) => number[],
+  paging: { size: number; pages: number } = TEMPORAL_PAGING,
+): number[] {
   const { db, registry, judge, question } = reading;
   const members =
     items.length > 0 ? items.flatMap((id) => entityGroups.membersOf(db, id)) : undefined;
   const factRef = (id: number): DerivedRef => ({ kind: "fact", id: String(id) });
-  const dated = listDatedFacts(db, members, FACT_WINDOW).filter((f) =>
-    isValidRow(db, { kind: "fact", id: f.id }, f.status),
-  );
-  const shown = judge.shown(dated.map((f) => factRef(f.id)));
   const dates = explicitDates(question);
-  const facts = dated
-    .filter((f) => shown.has(refKey(factRef(f.id))))
-    .filter(
-      (f) =>
-        dates.length === 0 ||
-        dates.some((d) => (f.validAt ?? "").startsWith(d) || (f.validUntil ?? "").startsWith(d)),
-    );
+  const sourcesOf = (factId: number) =>
+    listEvidence(db, { factId })
+      .sort((a, b) => Number(b.current) - Number(a.current) || b.id - a.id)
+      .map((e) => e.sourceVersionId);
+  const facts: { id: number }[] = [];
+  const admitted = new Set<number>();
+  for (let page = 0; page < paging.pages; page++) {
+    const rows = listDatedFacts(db, members, paging.size, page * paging.size);
+    const dated = rows.filter((f) => isValidRow(db, { kind: "fact", id: f.id }, f.status));
+    const shown = judge.shown(dated.map((f) => factRef(f.id)));
+    const kept = dated
+      .filter((f) => shown.has(refKey(factRef(f.id))))
+      .filter(
+        (f) =>
+          dates.length === 0 ||
+          dates.some((d) => (f.validAt ?? "").startsWith(d) || (f.validUntil ?? "").startsWith(d)),
+      );
+    facts.push(...kept);
+    for (const id of admit(kept.flatMap((f) => sourcesOf(f.id)))) admitted.add(id);
+    if (admitted.size >= STRATEGY_LIST_LIMIT || rows.length < paging.size) break;
+  }
   const replacing = new Set(
     visibleLinks(
       db,
@@ -174,12 +193,7 @@ export function temporalIds(reading: Reading, items: readonly number[]): number[
   );
   const first = hasChangeWord(question) ? (id: number) => (replacing.has(id) ? 0 : 1) : () => 0;
   const ordered = [...facts].sort((a, b) => first(a.id) - first(b.id));
-  const refs = ordered.flatMap((f) =>
-    listEvidence(db, { factId: f.id })
-      .sort((a, b) => Number(b.current) - Number(a.current) || b.id - a.id)
-      .map((e) => e.sourceVersionId),
-  );
-  return [...new Set(refs)];
+  return [...new Set(ordered.flatMap((f) => sourcesOf(f.id)))];
 }
 
 /** `wiki`: the sources the matched items' Wiki pages rest on (a page that is absent or not shown gives none; D11: the page text is a clue, never evidence). */
