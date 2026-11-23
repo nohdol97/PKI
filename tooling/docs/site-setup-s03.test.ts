@@ -98,7 +98,7 @@ describe("docs.site-setup (S03): the checklist and the spec correspond", () => {
 });
 
 describe("docs.site-setup (S03): S34 names what exists", () => {
-  it("S34 names the runner subcommand, both settings and the RUNBOOK section, all present; the settings rows name S34; ADR 0023 is linked", () => {
+  it("S34 names the runner subcommand, both settings and the RUNBOOK section, all present; the two settings rows sit in the S34 section; ADR 0023 is linked", () => {
     const s34 = item(siteText, "S34");
     expect(s34.length).toBeGreaterThan(300);
     for (const word of [
@@ -120,7 +120,8 @@ describe("docs.site-setup (S03): S34 names what exists", () => {
     expect(read("verification/v02-site-flow/RUNBOOK.md")).toContain("## 12. 분석 의미 실측 (S34");
     for (const key of ["analytical.profile", "analytical.maxCells"]) {
       const row = siteText.split("\n").find((l) => l.startsWith(`| \`${key}\``));
-      expect(row, key).toContain("S34");
+      expect(row, key).toBeDefined();
+      expect(siteText.indexOf(row ?? "")).toBeGreaterThan(siteText.indexOf("### 분석 의미의 실측과 프로파일"));
     }
     expect(readdirSync(resolve(docsDir, "adr")).filter((f) => f.startsWith("0023-"))).toHaveLength(1);
     expect(archText).toContain("adr/0023-analytical-semantic-rows-and-data-checks.md");
