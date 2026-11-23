@@ -11,6 +11,8 @@ import {
   registerConnectorInstance,
   commitDerived,
   userDecisions,
+  addWikiNote,
+  listWikiNotes,
   type DerivedRef,
   type SourceChange,
   type SqlDriver,
@@ -209,5 +211,38 @@ describe("wiki.kind: the page of an item the user wrote carries the sources of t
     const committed = db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
     expect(committed.status).toBe("stale");
     expect(wikiText()).not.toContain(CANARY);
+  });
+});
+
+describe("wiki.kind: the rewrite is stamped with the registry's clock (#220)", () => {
+  it("writes the page's time and its log line with the injected time", () => {
+    const w = world();
+    db.exec("UPDATE facts SET value = '바뀐 값' WHERE value = '남는 값'");
+    const FIXED = "2031-01-02T03:04:05.000Z";
+    WIKI_PAGE_KIND.invalidate(
+      { tx: db, collected: new Map(), invalidationId: 0, combinable: () => true, now: () => FIXED },
+      [{ ref: ref(w.keys.shared), lineage: [] }],
+      deletionOf(w.b.sourceId),
+    );
+    expect(db.all("SELECT updated_at FROM wiki_pages WHERE key = ?", [w.keys.shared])[0]).toEqual({
+      updated_at: FIXED,
+    });
+    expect(db.all("SELECT at FROM wiki_log ORDER BY id DESC LIMIT 1")[0]).toEqual({ at: FIXED });
+  });
+});
+
+describe("wiki.kind: a deleted item's key does not carry its notes and history to a reused id (#220)", () => {
+  it("keeps the note as one on no page and drops the key's change lines when the item goes with its source", () => {
+    const w = world();
+    const key = w.keys.onlyA;
+    addWikiNote(db, key, "내 메모", AT);
+    expect(db.all("SELECT 1 FROM wiki_log WHERE page_key = ?", [key]).length).toBeGreaterThan(0);
+
+    deleteSource(w.a.sourceId);
+
+    expect(db.all("SELECT 1 FROM wiki_pages WHERE key = ?", [key])).toHaveLength(0);
+    expect(db.all("SELECT 1 FROM wiki_log WHERE page_key = ?", [key])).toHaveLength(0);
+    expect(listWikiNotes(db, key)).toHaveLength(0);
+    expect(listWikiNotes(db, `${key}#gone`).map((n) => n.text)).toEqual(["내 메모"]);
   });
 });

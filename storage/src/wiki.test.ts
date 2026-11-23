@@ -6,6 +6,7 @@ import { insertItem, saveFact } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import {
+  isWikiBuildDead,
   isWikiStale,
   listWikiLog,
   readWikiState,
@@ -97,7 +98,9 @@ describe("wiki.request: one open build, and a dead one is not asked again for th
     if (!job) throw new Error("no job leased");
     closeJob(db, job, { status: "dead_letter", reason: "write-error" });
     expect(requestWikiBuild(db).status).toBe("dead");
+    expect(isWikiBuildDead(db)).toBe(true);
     insertItem(db, { type: "Project", name: "나", ...attrs });
+    expect(isWikiBuildDead(db)).toBe(false);
     expect(requestWikiBuild(db).status).toBe("registered");
     const again = lease();
     if (!again) throw new Error("no job leased");
@@ -110,6 +113,7 @@ describe("wiki.request: one open build, and a dead one is not asked again for th
 
 describe("wiki.log: a line per page change, the newest lines kept (K01-R6)", () => {
   it("logs create, change and remove, and drops the oldest past the limit", () => {
+    insertItem(db, { type: "Project", name: "가", ...attrs }); // the page's target (id 1) stays
     writeWikiPage(db, page("projects/1"), AT);
     writeWikiPage(db, { ...page("projects/1"), contentHash: "h2" }, AT);
     removeWikiPage(db, "projects/1", AT);

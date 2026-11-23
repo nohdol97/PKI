@@ -51,6 +51,7 @@ import {
   type SqlDriver,
   type SqlValue,
   withGroups,
+  endWikiItemIncarnation,
 } from "@pki/storage";
 import { assessAfterPropagation } from "./auto-verify.ts";
 import { refreshConflicts } from "./conflicts.ts";
@@ -495,7 +496,10 @@ const ITEM: DerivativeKind = {
   invalidate: (ctx, _snapshot, change) => {
     const { tx } = ctx;
     const deleted = doomedItems(ctx, change); // none for a new version: nothing is deleted (I04-R10)
-    for (const id of deleted) tx.run("DELETE FROM items WHERE id = ?", [id]);
+    for (const id of deleted) {
+      tx.run("DELETE FROM items WHERE id = ?", [id]);
+      endWikiItemIncarnation(tx, id);
+    }
     noting(ctx)?.items.push(...deleted);
     return { removed: deleted.length, recomputed: 0 };
   },
