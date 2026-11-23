@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { nodeBoundaryFs } from "@pki/connector-sdk";
-import { insertLocation, newLocalId } from "@pki/storage";
+import { insertLocation, listLocations, newLocalId } from "@pki/storage";
 import { afterEach, describe, expect, it } from "vitest";
 import { deletes, upserts, world, type World } from "./local-files-connector.test-support.ts";
 import { isDocumentFileName } from "./adapters/local-files-connector.ts";
@@ -84,6 +84,35 @@ describe("C34 the file kind", () => {
     expect(
       w.index.entriesOfLocation(w.locationId).map((e) => [e.relativePath, e.state, e.skipReason]),
     ).toEqual([["note.md", "skipped", "identity-unavailable"]]);
+  });
+
+  it("another volume at the same place is no deletion: a gone name on a parent of another dev, or a present file of another dev, makes the location unavailable", async () => {
+    const fakeDev = (real: Awaited<ReturnType<typeof nodeBoundaryFs.stat>>) => ({
+      dev: real.dev + 1n,
+      ino: real.ino,
+      size: real.size,
+      mtimeNs: real.mtimeNs,
+      isFile: () => real.isFile(),
+      isDirectory: () => real.isDirectory(),
+      isSymbolicLink: () => real.isSymbolicLink(),
+    });
+    for (const present of [false, true]) {
+      const w = fileWorld("note.md");
+      const first = upserts(await w.settle());
+      expect(first).toHaveLength(1);
+      if (!present) unlinkSync(join(w.root, "note.md"));
+      const real = w.ports.fs ?? nodeBoundaryFs;
+      const other = present ? join(w.root, "note.md") : w.root;
+      w.ports.fs = {
+        ...real,
+        stat: async (path) => {
+          const stat = await real.stat(path);
+          return path === other ? fakeDev(stat) : stat;
+        },
+      };
+      expect(deletes(await w.sync()), `present ${present}`).toEqual([]);
+      expect(listLocations(w.db).find((l) => l.id === w.locationId)?.state).toBe("unavailable");
+    }
   });
 
   it("knows a document file by its extension (the eight formats), and a .jsonl file is none", () => {
