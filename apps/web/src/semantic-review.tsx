@@ -265,7 +265,7 @@ export function ReviewView({
         </label>
       </p>
       {loading && <p role="status">{REVIEW_LOADING}</p>}
-      {!loading && shown.length === 0 && <p>{REVIEW_EMPTY}</p>}
+      {!loading && shown.length === 0 && review.list.next === null && <p>{REVIEW_EMPTY}</p>}
       <ul aria-label="지식 목록">
         {shown.map(({ item, entries }) => (
           <li key={item.id}>
@@ -316,7 +316,7 @@ export function ReviewView({
         ))}
       </ul>
       {review.list.next !== null && (
-        <button type="button" onClick={onMore}>
+        <button type="button" disabled={loading} onClick={onMore}>
           {REVIEW_MORE}
         </button>
       )}

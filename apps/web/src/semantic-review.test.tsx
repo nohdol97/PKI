@@ -192,6 +192,26 @@ describe("지식 검토 (X02-C2c)", () => {
     );
   });
 
+  it("disables 더 보기 while a page is being read, and keeps it when a page is short or empty but `next` is set (X02B-R3)", () => {
+    const held: Review = { list: { items: [], next: 7 }, conflicts: noConflicts, pairs: [] };
+    const idle = view(held, "candidate");
+    expect(idle).toContain("더 보기");
+    expect(idle).not.toContain("보여 줄 지식이 없습니다");
+    expect(idle).not.toMatch(/<button[^>]*disabled[^>]*>더 보기/);
+    const busy = renderToStaticMarkup(
+      <ReviewView
+        review={held}
+        filter="candidate"
+        loading
+        onAct={() => undefined}
+        onPair={() => undefined}
+        onFilter={() => undefined}
+        onMore={() => undefined}
+      />,
+    );
+    expect(busy).toMatch(/<button[^>]*disabled[^>]*>더 보기/);
+  });
+
   it("shows a merge-candidate pair by two names, marks it 다른 것 and reads again without it (X02B-C5 ②)", async () => {
     let marked = false;
     const { api, calls } = fake({
