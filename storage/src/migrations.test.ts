@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(31);
-    expect(migrations).toHaveLength(31);
+    expect(schemaVersion(db)).toBe(32);
+    expect(migrations).toHaveLength(32);
   });
 
   it("is idempotent when re-run", () => {
@@ -480,6 +480,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "evidence",
       "fact_history",
       "facts",
+      "feedback",
       "identity_key",
       "insight_evidence",
       "insight_link_inputs",

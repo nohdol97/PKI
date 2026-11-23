@@ -1845,6 +1845,43 @@ const v31: Migration = (db) => {
   `);
 };
 
+/**
+ * P03-R2, R11: the feedback record. Numbers and codes only: a kind, the one row it is about, the times and the
+ * history line a correction wrote. The four target columns point at their rows with `ON DELETE CASCADE`, so a
+ * deletion that removes a row removes its feedback in the same transaction. A live line (not undone) is unique
+ * per kind and target. The kind list is this migration's own copy: a later kind is a later migration.
+ */
+const v32: Migration = (db) => {
+  db.exec(`
+    CREATE TABLE feedback (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('useful', 'important', 'irrelevant', 'already_known',
+        'mute', 'confirmed', 'wrong_info', 'wrong_relation')),
+      insight_id INTEGER REFERENCES insights (id) ON DELETE CASCADE,
+      item_id INTEGER REFERENCES items (id) ON DELETE CASCADE,
+      fact_id INTEGER REFERENCES facts (id) ON DELETE CASCADE,
+      relation_id INTEGER REFERENCES relations (id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      undone_at TEXT,
+      applied_seq INTEGER,
+      CHECK ((insight_id IS NOT NULL) + (item_id IS NOT NULL) + (fact_id IS NOT NULL)
+        + (relation_id IS NOT NULL) = 1)
+    );
+    CREATE UNIQUE INDEX feedback_live_insight ON feedback (kind, insight_id)
+      WHERE undone_at IS NULL AND insight_id IS NOT NULL;
+    CREATE UNIQUE INDEX feedback_live_item ON feedback (kind, item_id)
+      WHERE undone_at IS NULL AND item_id IS NOT NULL;
+    CREATE UNIQUE INDEX feedback_live_fact ON feedback (kind, fact_id)
+      WHERE undone_at IS NULL AND fact_id IS NOT NULL;
+    CREATE UNIQUE INDEX feedback_live_relation ON feedback (kind, relation_id)
+      WHERE undone_at IS NULL AND relation_id IS NOT NULL;
+    CREATE INDEX feedback_insight ON feedback (insight_id) WHERE insight_id IS NOT NULL;
+    CREATE INDEX feedback_item ON feedback (item_id) WHERE item_id IS NOT NULL;
+    CREATE INDEX feedback_fact ON feedback (fact_id) WHERE fact_id IS NOT NULL;
+    CREATE INDEX feedback_relation ON feedback (relation_id) WHERE relation_id IS NOT NULL;
+  `);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1878,6 +1915,7 @@ export const migrations: readonly Migration[] = [
   v29,
   v30,
   v31,
+  v32,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

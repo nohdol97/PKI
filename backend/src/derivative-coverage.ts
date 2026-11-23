@@ -55,6 +55,9 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   insight_user_inputs: kind("insight"),
   // the links an Insight rested on (S02-R19): the Insight's, deleted with it or with the link
   insight_link_inputs: kind("insight"),
+  // the user's feedback (P03-R11, D5): numbers and codes only, every row names an item or a row that hangs on
+  // one; the foreign keys delete it with its target, so the kind `item` has nothing more to do for it
+  feedback: kind("item"),
   // links between two facts (S02-R18): numbers and codes only; the registered kind `assertion-link`
   // recomputes the rule's and drops those whose fact is gone (the foreign keys cascade)
   assertion_links: kind("assertion-link"),

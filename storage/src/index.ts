@@ -309,6 +309,22 @@ export {
   type Outcome,
   type Refusal,
 } from "./semantic-lifecycle.ts";
+export {
+  feedbackLearned,
+  FEEDBACK_LEARNED_SETTING,
+  listFeedback,
+  preferenceSignals,
+  recordFeedback,
+  undoFeedback,
+  type FeedbackEntries,
+  type FeedbackInput,
+  type FeedbackOptions,
+  type PreferenceSignal,
+  type RecordResult,
+  type SignalOptions,
+  type StoredFeedback,
+  type UndoFeedbackResult,
+} from "./feedback.ts";
 export { rowLineage, unionOfVersions } from "./row-lineage.ts";
 export { INVALID, isValidRow, validRow, type ValidRow } from "./valid-row.ts";
 export {

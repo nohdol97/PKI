@@ -11,6 +11,7 @@ import type {
 } from "@pki/contracts";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
+import { InsightFeedback, RecentFeedback } from "./feedback.tsx";
 import {
   evidenceVersionText,
   INSIGHT_EPISTEMIC,
@@ -202,6 +203,8 @@ export function Insights({
   const [local, setLocal] = useState<LocalSourceInfo>();
   const [revealFailed, setRevealFailed] = useState(false);
   const [state, dispatch] = useReducer(evidenceReducer, { opens: 0 });
+  const [feedbackVersion, setFeedbackVersion] = useState(0);
+  const feedbackChanged = () => setFeedbackVersion((n) => n + 1);
   const { insights, opened, source, notice } = state;
   const evidenceHeading = useFocusOn(state.opens, opened !== undefined && source === undefined);
   const sourceHeading = useFocusOn(state.opens, source !== undefined);
@@ -211,7 +214,7 @@ export function Insights({
       (r) => dispatch({ type: "insights-loaded", insights: r.insights }),
       (e: unknown) => setLoadError(message(e)),
     );
-  }, [api]);
+  }, [api, feedbackVersion]);
 
   const openInsight = (insightId: number) =>
     api("insightEvidence", { insightId }).then(
@@ -246,10 +249,12 @@ export function Insights({
               <button type="button" onClick={() => openInsight(insight.id)}>
                 근거 보기 ({insight.evidenceCount})
               </button>
+              <InsightFeedback api={api} insight={insight} onChange={feedbackChanged} />
             </li>
           ))}
         </ul>
       )}
+      <RecentFeedback api={api} version={feedbackVersion} onChange={feedbackChanged} />
       {notice && <p role="alert">{notice}</p>}
       {opened && (
         <section aria-labelledby="evidence-heading">

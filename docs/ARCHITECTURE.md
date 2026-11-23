@@ -192,7 +192,7 @@ flowchart TB
 | 합치기 줄(`item_merges`)·구분 표시(`item_distinct`)·나누기 기록(`item_split_moves`), 합치기 후보(`merge_candidates`), 주장 연결(`assertion_links`, Insight가 입력으로 쓴 줄은 `insight_link_inputs`)(S02). 번호와 코드만 있고 글이 없다 | 정본 SQLite | **정본** | 사용자의 합치기·구분 표시·나누기는 복구 불가. 후보와 규칙이 만든 주장 연결은 다시 계산 |
 | 분석 의미의 표 행(`dataset_tables`: Dataset 항목, 표 원본, 표 키, 행 수)과 검사 줄(`analytical_checks`: 사실, 검사 이름, 통과 여부, 센 수. S03). 사실의 값과 원문 글은 없지만, 표 키는 XLSX 시트 이름이라 사용자의 글이다 | 정본 SQLite | **정본**(표 행은 표 원본에서, 검사 줄은 표와 사실에서 다시 만들 수 있다) | 표 원본을 다시 프로파일하고 검사를 다시 돌린다. 사용자의 승인은 행에 남아 있다 |
 | 사용자의 교정·승인·기각·직접 추가: 따로 테이블을 두지 않고 대상 행(`user_authored`, 인식 유형 `user-approved`)과 위 이력 행의 줄이며, Insight가 입력으로 쓴 사용자 행은 `insight_user_inputs`로 그 Insight와 잇는다(S01-T02·T03·T04). 입력 화면은 아직 없고 API로만 한다 | 정본 SQLite | **정본** | 복구 불가 |
-| 피드백·선호 | 아직 없다(Phase 5 P03에서 정한다) | — | — |
+| 피드백(`feedback`, P03-T1, 스키마 v32): 종류(여덟 코드), 대상 하나(Insight·항목·사실·관계 가운데 정확히 하나의 외래 키, `ON DELETE CASCADE`), 만든 시각, 취소 시각, 교정이 쓴 이력 줄 번호. 글·이름·값은 없다. 교정("이 지식은 틀렸다/맞다")은 이 테이블에 상태를 두지 않고 위 사용자 교정 입구를 지나 대상 행과 이력 행에 쓰며, 선호("나에게 쓸모 있다/없다")는 이 테이블에만 쓴다. 순위의 선호 입력·피드 숨김·알림 억제 신호는 저장하지 않고 읽을 때 계산한다(`preferenceSignals`). 같은 유형의 피드백에서 미루어 가중하는 유형 단계는 설정 `feedback.learned`(기본 끔) 뒤에 있다([P03 spec](specs/2026-11-23-P03-feedback-learning.md)) | 정본 SQLite | **정본** | 복구 불가. 대상 행이 지워지면 함께 지워진다 |
 | Insight(P01: 유형 이름 `rule`, 사실 줄 `fact_lines`, 이유 요약 `reasoning_summary`, 신뢰도 `confidence`, 시급 기준 날짜 `urgency_date`, 내용이 바뀐 시각 `changed_at`, 설정을 켰을 때만 채워지는 LLM 해석 열 셋 `llm_reasoning_summary`·`llm_impact`·`llm_actionability`(P01-T04). 순위는 저장하지 않고 읽을 때 계산) | 정본 SQLite | **정본**. 내용은 규칙으로 다시 계산할 수 있다 | 재계산 |
 | 작업(job)과 스케줄 상태 | 정본 SQLite | **정본**(운영 상태) | 미완료 작업을 원본에서 다시 등록 |
 | 설정, 동의 기록, 전송 정책 | 정본 SQLite | **정본** | 사용자가 다시 설정 |
@@ -634,3 +634,4 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | 2026-11-23 | 5.6절 "투영 종류"에 `wiki-page`(K01)가 정본 종류 12개와 별도로 그 뒤에 등록되는 세 번째 종류이고 층 `projection`·실행 위치 `canonical`이라 삭제 트랜잭션 안에서 실행된다는 문장을 더함 | 5.6절 | K01-T1 구현. 정본 종류 수는 `canonicalKinds()`의 12개 그대로 |
 | 2026-11-23 | 4절 Insight 행에 P01의 열 다섯과 "순위는 읽을 때 계산"을 적음 | 4절 | P01-T01·T02 구현 |
 | 2026-11-23 | 3.2절 표에 "분석 의미와 데이터 검사" 줄, 4절 표에 `dataset_tables`·`analytical_checks` 줄, 5.6절에 "분석 의미와 데이터 검사(S03)" 문단(종류 `analytical-check`, 작업 종류 `dataset-profile`·`analytical-check`)을 더함. 정본 종류 수는 그대로 12개 | 3.2·4·5.6절 | S03-T10 구현(S03-R20). ADR 0023 |
+| 2026-11-23 | 4절 저장 표의 "피드백·선호" 줄을 확정(테이블 `feedback`, 스키마 v32, 교정은 사용자 교정 입구·선호는 이 테이블, 신호는 읽을 때 계산) | 4절 | P03-T5 구현. ADR은 새 엔진·파생물 종류가 없어 쓰지 않음(P03-D14) |

@@ -34,6 +34,13 @@ import {
   LocalSourceInfoRequestSchema,
   LocalSourceInfoResponseSchema,
 } from "./local-files.ts";
+import {
+  FeedbackListResponseSchema,
+  FeedbackRecordRequestSchema,
+  FeedbackRecordResponseSchema,
+  FeedbackUndoRequestSchema,
+  FeedbackUndoResponseSchema,
+} from "./feedback-types.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
@@ -43,6 +50,7 @@ export type * from "./knowledge-engine.ts";
 export type * from "./vector-index.ts";
 export * from "./cell-grammar.ts";
 export * from "./connector.ts";
+export * from "./feedback-types.ts";
 export * from "./import-record.ts";
 export * from "./insight-types.ts";
 export * from "./knowledge-schema.ts";
@@ -2037,6 +2045,20 @@ export const routes = {
     path: "/api/lint/report",
     request: LintReportRequestSchema,
     response: LintReportResponseSchema,
+  },
+  // P03 (R14): feedback on an Insight or a knowledge row, its undo and the live list
+  feedbackList: { method: "GET", path: "/api/feedback", response: FeedbackListResponseSchema },
+  feedbackRecord: {
+    method: "POST",
+    path: "/api/feedback",
+    request: FeedbackRecordRequestSchema,
+    response: FeedbackRecordResponseSchema,
+  },
+  feedbackUndo: {
+    method: "POST",
+    path: "/api/feedback/undo",
+    request: FeedbackUndoRequestSchema,
+    response: FeedbackUndoResponseSchema,
   },
 } as const;
 export type RouteName = keyof typeof routes;

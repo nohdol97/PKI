@@ -195,6 +195,9 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     // reflection and knowledge lint (K02-T2): rows that need not exist (an answer of 200 with `not-found`)
     lintDecide: { id: 999_999, op: "dismiss" },
     lintReport: { rule: "stale", kind: "fact", a: 999_999 },
+    // feedback (P03-T3): a preference on the seed's Insight 1 and, routes running in contract order, the undo of that line
+    feedbackRecord: { target: { kind: "insight", id: 1 }, kind: "useful" },
+    feedbackUndo: { id: 1 },
   };
 
   beforeAll(async () => {
