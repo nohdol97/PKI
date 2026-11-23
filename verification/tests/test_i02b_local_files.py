@@ -70,6 +70,33 @@ class Refusals(unittest.TestCase):
             run.gate(app, platform="win32")  # an installed executable: no refusal
 
 
+class CommandLine(unittest.TestCase):
+    def test_on_an_installed_app_prepare_and_record_run_end_to_end_and_print_no_file_name(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            app = os.path.join(tmp, "app")
+            os.mkdir(app)
+            open(os.path.join(app, "PKI.exe"), "w").close()
+            folder = os.path.join(tmp, "docs")
+            data = os.path.join(tmp, "data")
+            os.mkdir(data)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(run.main(["prepare", "--app", app, "--folder", folder], platform="win32"), 0)
+            self.assertTrue(os.path.isfile(folder + ".local-files-state.json"))
+            for name in names_under(folder):
+                self.assertNotIn(name, out.getvalue())
+            con = sqlite3.connect(os.path.join(data, "pki.sqlite"))
+            con.executescript(SCHEMA)
+            con.close()
+            result = os.path.join(tmp, "result.json")
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(run.main(["record", "--app", app, "--folder", folder, "--data-dir", data, "--out", result], platform="win32"), 0)
+            with open(result, encoding="utf-8") as handle:
+                self.assertEqual(set(json.load(handle)["items"]), {"W%d" % n for n in range(1, 13)})
+
+
 class PrepareAndRecord(unittest.TestCase):
     def test_prepare_makes_every_scenario_and_the_record_names_no_file_and_carries_no_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
