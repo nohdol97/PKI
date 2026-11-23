@@ -443,7 +443,7 @@ export {
   type SourceChangeKind,
 } from "./invalidations.ts";
 export { raiseChangeSeq, readChangeSeq, readKnowledgeRevision } from "./revisions.ts";
-export { listItemNames } from "./candidates.ts";
+export { listItemNames, listVerifiedForms } from "./candidates.ts";
 export {
   listActiveInsights,
   listInsightEvidenceIds,
