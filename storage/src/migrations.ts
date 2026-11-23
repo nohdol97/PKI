@@ -1621,6 +1621,20 @@ const v28: Migration = (db) => {
   `);
 };
 
+// v29 (P01-T04, P01-R7, D12): the Insight's LLM interpretation lives in three columns of its own, NULL until
+// an interpretation is stored and emptied by every code write of the row; the code-written
+// `reasoning_summary` is never overwritten.
+const v29: Migration = (db) => {
+  db.exec(`
+    ALTER TABLE insights ADD COLUMN llm_reasoning_summary TEXT
+      CHECK (llm_reasoning_summary IS NULL OR length(llm_reasoning_summary) <= 500);
+    ALTER TABLE insights ADD COLUMN llm_impact INTEGER
+      CHECK (llm_impact IS NULL OR (llm_impact BETWEEN 0 AND 100));
+    ALTER TABLE insights ADD COLUMN llm_actionability INTEGER
+      CHECK (llm_actionability IS NULL OR (llm_actionability BETWEEN 0 AND 100));
+  `);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1651,6 +1665,7 @@ export const migrations: readonly Migration[] = [
   v26,
   v27,
   v28,
+  v29,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

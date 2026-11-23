@@ -452,6 +452,18 @@ export {
   type UserInputRef,
 } from "./insights.ts";
 export {
+  INSIGHT_INTERPRET_BATCH,
+  INSIGHT_INTERPRET_KIND,
+  INSIGHT_INTERPRET_SETTING,
+  OPPORTUNITY_RULE,
+  insightBasis,
+  readInsightById,
+  readInsightInterpret,
+  requestInsightInterpretations,
+  setInsightInterpret,
+  writeInsightInterpretation,
+} from "./insight-interpretation.ts";
+export {
   listLiftableTombstones,
   readTombstoneState,
   recordTombstone,

@@ -68,6 +68,7 @@ describe("saveInsight", () => {
       confidence: null,
       urgencyDate: null,
       changedAt: null,
+      interpretation: null,
     });
   });
 
@@ -135,6 +136,7 @@ describe("saveInsight", () => {
       confidence: null,
       urgencyDate: null,
       changedAt: null,
+      interpretation: null,
     });
     expect(saveInsight(db, key, { state: "active", summary: "s", evidenceIds: evidence })).toBe(id);
     expect(db.all("SELECT count(*) AS n FROM insights")).toEqual([{ n: 1 }]);
@@ -280,6 +282,7 @@ describe("the P01 columns (P01-R2, R3, R5)", () => {
       confidence: null,
       urgencyDate: null,
       changedAt: null,
+      interpretation: null,
     });
   });
 

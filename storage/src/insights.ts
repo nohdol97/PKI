@@ -53,12 +53,23 @@ export interface StoredInsight extends InsightKey {
   confidence: number | null;
   urgencyDate: string | null;
   changedAt: string | null;
+  /** The LLM's reading, held in columns of its own and emptied by every `saveInsight` (P01-R7, D12, D13); null when none. */
+  interpretation: InsightInterpretation | null;
+}
+
+export interface InsightInterpretation {
+  reasoningSummary: string;
+  impact: number;
+  actionability: number;
 }
 
 const KEY = "rule = ? AND x_item_id = ? AND y_item_id = ?";
 const keyValues = (k: InsightKey) => [k.rule, k.xItemId, k.yItemId];
 
-/** Creates or updates the key's row and replaces its evidence and user-input links; returns its id. */
+/**
+ * Creates or updates the key's row and replaces its evidence and user-input links; returns its id. Every
+ * write empties the LLM interpretation: a reading of content that has changed or gone must not linger (P01-R3, D13).
+ */
 export function saveInsight(db: SqlDriver, key: InsightKey, content: InsightContent): number {
   const live = content.state === "resolved" ? undefined : content;
   // Resolving empties every text and number column: they hold values taken from sources (P01-R3).
@@ -71,6 +82,7 @@ export function saveInsight(db: SqlDriver, key: InsightKey, content: InsightCont
        summary = excluded.summary, fact_lines = excluded.fact_lines,
        reasoning_summary = excluded.reasoning_summary, confidence = excluded.confidence,
        urgency_date = excluded.urgency_date,
+       llm_reasoning_summary = NULL, llm_impact = NULL, llm_actionability = NULL,
        changed_at = CASE WHEN excluded.state = 'resolved' THEN NULL
          ELSE coalesce(excluded.changed_at, insights.changed_at) END`,
     [
@@ -109,7 +121,8 @@ export function saveInsight(db: SqlDriver, key: InsightKey, content: InsightCont
 
 export function readInsight(db: SqlDriver, key: InsightKey): StoredInsight | undefined {
   const row = db.all(
-    `SELECT id, epistemic, state, summary, fact_lines, reasoning_summary, confidence, urgency_date, changed_at
+    `SELECT id, epistemic, state, summary, fact_lines, reasoning_summary, confidence, urgency_date, changed_at,
+            llm_reasoning_summary, llm_impact, llm_actionability
      FROM insights WHERE ${KEY}`,
     keyValues(key),
   )[0];
@@ -126,6 +139,14 @@ export function readInsight(db: SqlDriver, key: InsightKey): StoredInsight | und
     confidence: row.confidence as number | null,
     urgencyDate: row.urgency_date as string | null,
     changedAt: row.changed_at as string | null,
+    interpretation:
+      row.llm_reasoning_summary === null
+        ? null
+        : {
+            reasoningSummary: row.llm_reasoning_summary as string,
+            impact: row.llm_impact as number,
+            actionability: row.llm_actionability as number,
+          },
     evidenceIds: db
       .all("SELECT evidence_id FROM insight_evidence WHERE insight_id = ? ORDER BY evidence_id", [
         id,

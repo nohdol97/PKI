@@ -12,11 +12,13 @@ export const ANALYTICAL_CHECK_JOB_KIND = "analytical-check";
 export const WIKI_BUILD_KIND = "wiki-build";
 /** The job that asks a Provider for one Wiki page's summary (K01-R12): sourceless, so no version fence. */
 export const WIKI_SUMMARY_KIND = "wiki-summary";
+/** The job that asks a Provider to interpret one Insight (P01-R7): sourceless, so no version fence. */
+export const INSIGHT_INTERPRET_KIND = "insight-interpret";
 export const PROJECTION_REMOVE_KIND = "projection-remove";
 export const PROJECTION_REBUILD_KIND = "projection-rebuild";
 
 /**
- * The wiki build and the page summary join them (K01-R4, R12): they have no source, and the pages it writes are a projection of the
+ * The wiki build, the page summary and the Insight interpretation join them (K01-R4, R12, P01-R7): they have no source, and the pages it writes are a projection of the
  * knowledge tables, so the scope policy is asked at read (`wiki-page`'s lineage), not at the write, where a
  * refusal would leave the content-free drop record that queues a source's re-extraction.
  */
@@ -25,6 +27,7 @@ export const FENCE_FREE_KINDS: readonly string[] = [
   PROJECTION_REBUILD_KIND,
   WIKI_BUILD_KIND,
   WIKI_SUMMARY_KIND,
+  INSIGHT_INTERPRET_KIND,
 ];
 
 /** False for the projection kinds: their source and version are a name and a cover, not a fence. */
