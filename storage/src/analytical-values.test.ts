@@ -13,7 +13,7 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe("analytical.api: /correct pieces", () => {
-  it("C3: a calculation and a column set given as pieces become the canonical text, the same as the text form; a formula is a misfit", () => {
+  it("C3: a calculation and a column set given as pieces become the canonical text, the same as the text form; a value that is not the type's shape is a misfit", () => {
     expect(
       normalizeUserValue(db, "metric.calculation", { column: " Amount ", aggregation: "sum" }),
     ).toEqual({ status: "ok", value: '{"aggregation":"sum","column":"amount"}' });
@@ -24,6 +24,8 @@ describe("analytical.api: /correct pieces", () => {
       status: "ok",
       value: '["day","id"]',
     });
+    // `a+b` is accepted as a column name, as extraction's normaliser accepts it: a formula is refused by
+    // `analytical.value-types` (the shape of the pieces), not here (S03 decision 35 ⑤)
     expect(
       normalizeUserValue(db, "metric.calculation", { aggregation: "sum", column: "a+b" }),
     ).toEqual({
@@ -33,6 +35,13 @@ describe("analytical.api: /correct pieces", () => {
     expect(normalizeUserValue(db, "metric.calculation", ["sum", "a"])).toEqual({
       status: "misfit",
     });
+    // P2: the 500-code-point cap is on the canonical text, so 200 ligatures that expand to 600 are refused
+    expect(
+      normalizeUserValue(db, "metric.calculation", {
+        aggregation: "sum",
+        column: "\uFB03".repeat(200),
+      }),
+    ).toEqual({ status: "misfit" });
     expect(normalizeUserValue(db, "definition", ["not", "text"])).toEqual({ status: "misfit" });
     expect(normalizeUserValue(db, "ungoverned.kind", " plain ")).toEqual({
       status: "ok",

@@ -33,7 +33,7 @@ TABLE_SOURCES = """
 
 
 def open_ro(db_path):
-    """A read-only connection: never creates the file, never writes."""
+    """A read-only connection: never creates the database and writes no content. On a WAL database SQLite may create empty -shm/-wal files."""
     return sqlite3.connect("file:{}?mode=ro".format(pathname2url(os.path.abspath(db_path))), uri=True)
 
 
@@ -65,7 +65,9 @@ def read_counts(db_path):
             if kind in ITEM_TYPES:
                 items.setdefault(kind, {})[status] = int(n)
         facts = {}
-        for kind, n in db.execute("SELECT kind, count(*) FROM facts GROUP BY kind"):
+        # the facts of Dataset, Metric and Join items only: a fact of any other item type is not an analytical fact
+        for kind, n in db.execute("SELECT f.kind, count(*) FROM facts f JOIN items i ON i.id = f.item_id "
+                                  "WHERE i.type IN ({}) GROUP BY f.kind".format(", ".join("?" * len(ITEM_TYPES))), ITEM_TYPES):
             key = kind if kind in SEED_FACT_KINDS else "other"
             facts[key] = facts.get(key, 0) + int(n)
         checks = {}

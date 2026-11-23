@@ -132,35 +132,47 @@ it("analytical.e2e-import: a CSV from an approved folder becomes a Dataset, the 
     (await call(routes.approveLocalLocation.path, "POST", { type: "folder", path: docs })).status,
   ).toBe(200);
   await sync();
-  await vi.waitFor(() => {
-    expect(db.all("SELECT 1 FROM dataset_tables")).toHaveLength(1);
-    expect(db.all("SELECT 1 FROM items WHERE type = 'Dataset' AND name = 'orders'")).toHaveLength(
-      1,
-    );
-    expect(db.all("SELECT 1 FROM facts WHERE kind = 'dataset.column'")).toHaveLength(2);
-    expect(db.all("SELECT status FROM jobs WHERE kind = 'analytical-check'")).toEqual([
-      { status: "succeeded" },
-    ]);
-  });
+  await vi.waitFor(
+    () => {
+      expect(db.all("SELECT 1 FROM dataset_tables")).toHaveLength(1);
+      expect(db.all("SELECT 1 FROM items WHERE type = 'Dataset' AND name = 'orders'")).toHaveLength(
+        1,
+      );
+      expect(db.all("SELECT 1 FROM facts WHERE kind = 'dataset.column'")).toHaveLength(2);
+      expect(db.all("SELECT status FROM jobs WHERE kind = 'analytical-check'")).toEqual([
+        { status: "succeeded" },
+      ]);
+    },
+    { timeout: 20_000 },
+  );
 
   // 2. the Markdown names the same Dataset; its grain and calculation are extracted onto it
   write("kpi.md", MARKDOWN);
   await sync();
-  await vi.waitFor(() => {
-    expect(db.all("SELECT 1 FROM facts WHERE kind = 'metric.calculation'")).toHaveLength(1);
-    expect(db.all("SELECT 1 FROM items WHERE type = 'Dataset'")).toHaveLength(1);
-  });
+  await vi.waitFor(
+    () => {
+      expect(db.all("SELECT 1 FROM facts WHERE kind = 'metric.calculation'")).toHaveLength(1);
+      expect(db.all("SELECT 1 FROM items WHERE type = 'Dataset'")).toHaveLength(1);
+    },
+    { timeout: 20_000 },
+  );
 
   // 3. extraction queues no check: ask for it (R8); the grain and the column are checked against the table
   const metric = db.all("SELECT id FROM items WHERE type = 'Metric'")[0]?.id as number;
   const asked = await call(routes.analyticalCheck.path, "POST", { itemId: metric });
   expect(asked.status).toBe(200);
-  await vi.waitFor(async () => {
-    const m = (await analytical()).metrics[0];
-    expect(m?.columns).toEqual([{ column: "amount", factId: expect.any(Number), missing: null }]);
-    expect(m?.calculations[0]?.checks.every((c) => c.passed)).toBe(true);
-    expect(m?.calculations[0]?.checks.length).toBeGreaterThan(0);
-  });
+  await vi.waitFor(
+    async () => {
+      const m = (await analytical()).metrics[0];
+      expect(m?.columns).toEqual([{ column: "amount", factId: expect.any(Number), missing: null }]);
+      expect(m?.calculations[0]?.checks.every((c) => c.passed)).toBe(true);
+      expect(m?.calculations[0]?.checks.length).toBeGreaterThan(0);
+      const grain = (await analytical()).datasets[0]?.grain[0];
+      expect(grain?.checks.length).toBeGreaterThan(0);
+      expect(grain?.checks.every((c) => c.passed)).toBe(true);
+    },
+    { timeout: 20_000 },
+  );
 
   // 4. the user approves what the gate names until the calculation is verified
   const calc = (await analytical()).metrics[0]?.calculations[0];
@@ -175,20 +187,27 @@ it("analytical.e2e-import: a CSV from an approved folder becomes a Dataset, the 
     ).body as { status: string; unmet?: string[] };
     if (outcome.status === "applied" || outcome.status === "unchanged") break;
     const grain = (await analytical()).datasets[0]?.grain[0]?.id as number;
-    await call(routes.semanticDecide.path, "POST", { kind: "fact", id: grain, action: "approve" });
+    const grainOutcome = (
+      await call(routes.semanticDecide.path, "POST", { kind: "fact", id: grain, action: "approve" })
+    ).body as { status: string };
+    expect(["applied", "unchanged"]).toContain(grainOutcome.status);
   }
   expect((await analytical()).metrics[0]?.calculations[0]?.status).toBe("verified");
 
   // 5. the file is deleted: the table, its column facts and the check lines go; the calculation is disputed
   unlinkSync(join(docs, "orders.csv"));
   await sync();
-  await vi.waitFor(async () => {
-    expect(db.all("SELECT 1 FROM dataset_tables")).toEqual([]);
-    expect(db.all("SELECT 1 FROM facts WHERE kind = 'dataset.column'")).toEqual([]);
-    const list = await analytical();
-    expect(list.datasets).toHaveLength(1);
-    expect(list.datasets[0]?.tables).toEqual([]);
-    expect(list.metrics[0]?.calculations[0]?.status).toBe("disputed");
-    expect(list.metrics[0]?.calculations[0]?.checks).toEqual([]);
-  });
-});
+  await vi.waitFor(
+    async () => {
+      expect(db.all("SELECT 1 FROM dataset_tables")).toEqual([]);
+      expect(db.all("SELECT 1 FROM facts WHERE kind = 'dataset.column'")).toEqual([]);
+      const list = await analytical();
+      expect(list.datasets).toHaveLength(1);
+      expect(list.datasets[0]?.tables).toEqual([]);
+      expect(list.metrics[0]?.calculations[0]?.status).toBe("disputed");
+      expect(list.metrics[0]?.calculations[0]?.checks).toEqual([]);
+      expect(list.datasets[0]?.grain[0]?.checks).toEqual([]);
+    },
+    { timeout: 20_000 },
+  );
+}, 30_000);

@@ -24,7 +24,7 @@ DISTINCT_MAKERS = ("user", "link-check")
 
 
 def open_ro(db_path):
-    """A read-only connection: never creates the file, never writes."""
+    """A read-only connection: never creates the database and writes no content. On a WAL database SQLite may create empty -shm/-wal files."""
     return sqlite3.connect("file:{}?mode=ro".format(pathname2url(os.path.abspath(db_path))), uri=True)
 
 
