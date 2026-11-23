@@ -140,7 +140,8 @@ function recordHistory(db: SqlDriver, report: ReapplyReport, at: string): void {
   };
   bump("missingCreated", report.missing ? 1 : 0);
   bump("setAside", report.setAside.length);
-  bump("unrecoverable", report.unrecoverable);
+  // only a line that began to wait: the others were counted at the start that deferred them, and a line applied later does not lower it
+  bump("unrecoverable", report.newlyDeferred);
   bump("reapplied", report.applied);
   bump("seeded", report.seeded + report.healed);
   // a cut line is gone once cut; an unreadable complete line stays in the file, so only a rise is new

@@ -235,10 +235,17 @@ describe("status.data-protection: dataProtectionText (I04-R6, I04-R17)", () => {
   });
   it("shows the lines that could not be applied or read, and the ones applied again", () => {
     expect(protection({ unrecoverable: 3 })).toContain(
-      "다시 적용하지 못한 삭제 3건(연결 정보 없음)",
+      "다시 적용하지 못한 삭제 3건(이 빌드에 그 수집기가 없거나 연결 정보가 없습니다. 수집기가 돌아오면 시작할 때 다시 적용합니다)",
     );
     expect(protection({ ignoredLines: 2 })).toContain("읽지 못해 무시한 삭제 장부 줄 2개");
     expect(protection({ reapplied: 4 })).toContain("시작할 때 삭제 4건을 다시 적용했습니다");
+  });
+  it("I04-C11 a deletion that waits is not shown as normal, says the kind's return applies it, and is absent at zero", () => {
+    const waiting = protection({ unrecoverable: 1 });
+    expect(waiting).toContain("수집기가 돌아오면 시작할 때 다시 적용합니다");
+    expect(waiting).not.toBe("정상");
+    expect(waiting.startsWith("정상")).toBe(false);
+    expect(protection({ unrecoverable: 0 })).not.toContain("시작할 때 다시 적용합니다");
   });
   it("shows the tombstones that could not be written to the ledger, as a count", () => {
     expect(protection({ unwritable: 2 })).toContain("장부에 적을 수 없는 상태의 삭제 2건");
