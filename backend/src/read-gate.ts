@@ -35,6 +35,7 @@ import {
   type SqlDriver,
   effectiveUntil,
   listAssertionLinks,
+  supersedingStands,
   readFact,
 } from "@pki/storage";
 
@@ -80,7 +81,7 @@ export interface ReadGate {
    */
   mergeCandidates(): RouteResponse<"entityCandidates">;
   /**
-   * The conflict list (S02-R19, R24 1, R25): a link is listed only when it and both its facts are shown; each fact's
+   * The conflict list (S02-R19, R24, R25): a link is listed only when it and both its facts are shown and the policy lets their sources be put together; each fact's
    * effective end is computed from the listed SUPERSEDES links alone, so nothing of a hidden side shows.
    */
   conflicts(): RouteResponse<"conflicts">;
@@ -274,9 +275,13 @@ export function createReadGate(
         })),
         "display",
       );
+      // the link's lineage is both facts' together: the policy must also let the two be put together (S02-R24)
+      const together = (id: number) =>
+        registry.combinable(db, registry.lineage(db, { kind: "assertion-link", id: String(id) }));
       const listed = read.filter(
         (l) =>
           linkOk.has(String(l.id)) &&
+          together(l.id) &&
           factOk.has(String(l.fromFactId)) &&
           factOk.has(String(l.toFactId)),
       );
@@ -290,7 +295,7 @@ export function createReadGate(
         effectiveUntil(
           facts.get(factId)?.validUntil ?? null,
           listed
-            .filter((l) => l.type === "SUPERSEDES" && l.toFactId === factId)
+            .filter((l) => l.toFactId === factId && supersedingStands(db, l))
             .map((l) => facts.get(l.fromFactId)?.validAt ?? null),
         );
       const side = (factId: number) => ({

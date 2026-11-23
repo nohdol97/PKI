@@ -97,7 +97,25 @@ export function linksOfFacts(db: SqlDriver, factIds: readonly number[]): StoredA
     .map(linkOf);
 }
 
-/** Of these facts, the ones that are the superseded end of a SUPERSEDES link, with that link's id. */
+/**
+ * Whether a SUPERSEDES link counts: its superseding (`from`) fact is valid (S01-R15). A propagation link is never
+ * removed, so one can outlive the restore of the fact it replaced: a superseder that is itself superseded,
+ * rejected or without evidence replaces nothing. The link stays stored; it stops counting. The one test every
+ * reader of supersession uses.
+ */
+export function supersedingStands(
+  db: SqlDriver,
+  link: Pick<StoredAssertionLink, "type" | "fromFactId">,
+): boolean {
+  if (link.type !== "SUPERSEDES") return false;
+  const status = db.all("SELECT status FROM facts WHERE id = ?", [link.fromFactId])[0]?.status;
+  return (
+    status !== undefined &&
+    isValidRow(db, { kind: "fact", id: link.fromFactId }, status as KnowledgeStatus)
+  );
+}
+
+/** Of these facts, the ones that are the superseded end of a counting SUPERSEDES link, with that link's id. */
 export function supersededAmong(
   db: SqlDriver,
   factIds: readonly number[],
@@ -105,11 +123,13 @@ export function supersededAmong(
   if (factIds.length === 0) return [];
   return db
     .all(
-      `SELECT id, to_fact_id FROM assertion_links
+      `SELECT ${LINK_COLUMNS} FROM assertion_links
        WHERE type = 'SUPERSEDES' AND to_fact_id IN ${IDS} ORDER BY id`,
       [JSON.stringify(factIds)],
     )
-    .map((r) => ({ factId: r.to_fact_id as number, linkId: r.id as number }));
+    .map(linkOf)
+    .filter((l) => supersedingStands(db, l))
+    .map((l) => ({ factId: l.toFactId, linkId: l.id }));
 }
 
 /** The earliest of the fact's own end and the starts of the facts superseding it; an empty start contributes nothing. */
@@ -168,12 +188,9 @@ export function otherValidValues(
   if (rivals.length === 0) return rivals;
   const superseded = new Set(supersededAmong(db, rivals).map((s) => s.factId));
   const supersedes = new Set(
-    db
-      .all(
-        "SELECT from_fact_id FROM assertion_links WHERE type = 'SUPERSEDES' AND to_fact_id = ?",
-        [fact],
-      )
-      .map((r) => r.from_fact_id as number),
+    linksOfFacts(db, [fact])
+      .filter((l) => l.toFactId === fact && supersedingStands(db, l))
+      .map((l) => l.fromFactId),
   );
   return rivals.filter((id) => !superseded.has(id) && !supersedes.has(id));
 }

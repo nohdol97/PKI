@@ -206,4 +206,25 @@ describe("GET /api/conflicts (S02-R25)", () => {
     db.run("DELETE FROM facts WHERE id = ?", [hidden]);
     expect(await call("conflicts")).toEqual(withHidden);
   });
+
+  it("leaves out a link whose two facts the policy displays but will not put together (S02-R24)", async () => {
+    const owner = item();
+    const a = fact(owner, "2026-12-01", { accessScope: ["team-a"] });
+    const b = fact(owner, "2026-12-02", { accessScope: ["team-b"] });
+    link("CONTRADICTS", a, b);
+    await start({
+      registry: createDerivativeRegistry({
+        kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+        policy: {
+          ...defaultScopePolicy,
+          allows: () => true,
+          combinable: (scopes) =>
+            !(
+              scopes.some((s) => s?.includes("team-a")) && scopes.some((s) => s?.includes("team-b"))
+            ),
+        },
+      }),
+    });
+    expect(await call("conflicts")).toEqual({ status: 200, body: { links: [], truncated: false } });
+  });
 });

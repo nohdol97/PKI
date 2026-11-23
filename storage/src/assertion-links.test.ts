@@ -93,6 +93,14 @@ describe("otherValidValues (S02-R20)", () => {
     expect(supersededAmong(db, [early, late, third])).toEqual([
       { factId: early, linkId: expect.any(Number) },
     ]);
+    expect(otherValidValues(db, early, "item")).toEqual([third]);
+    // A -> B -> A (propagation links of two versions): B is itself superseded, so its link no longer counts
+    expect(
+      automatedLifecycle.supersede(db, { kind: "fact", id: late }, { sourceId: 1, version: 1 }),
+    ).toMatchObject({ status: "applied" });
+    link("SUPERSEDES", early, late);
+    // the first link (late over early) stops counting; only the later one (early over late) does
+    expect(supersededAmong(db, [early, late]).map((s) => s.factId)).toEqual([late]);
     const many = fact(a, "x@example.test", "identifier.email");
     fact(a, "y@example.test", "identifier.email");
     expect(otherValidValues(db, many, "item")).toEqual([]);
