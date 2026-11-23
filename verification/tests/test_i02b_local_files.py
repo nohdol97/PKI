@@ -146,6 +146,21 @@ class PrepareAndRecord(unittest.TestCase):
             self.assertEqual(os.stat(db).st_mtime_ns, before)
             self.assertEqual(run.record(state, db, answers={"W2": "pass"}, environment={})["items"]["W2"], "fail")
 
+    def test_record_opens_a_database_whose_path_holds_uri_special_characters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = os.path.join(tmp, "docs")
+            os.mkdir(folder)
+            state = run.prepare(folder)
+            odd = os.path.join(tmp, "a?b#c%d")
+            os.mkdir(odd)
+            db = os.path.join(odd, "pki.sqlite")
+            con = sqlite3.connect(db)
+            con.executescript(SCHEMA)
+            con.commit()
+            con.close()
+            result = run.record(state, db, answers={}, environment={})
+            self.assertIn(result["items"]["W1"], ("pass", "fail", "inconclusive"))
+
 
 if __name__ == "__main__":
     unittest.main()

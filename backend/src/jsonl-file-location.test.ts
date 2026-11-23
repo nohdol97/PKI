@@ -172,6 +172,33 @@ describe("jsonl-file location (I02B-C33): the life of the instance", () => {
     ).toBe(2);
   });
 
+  it("a restart turns off the period of a jsonl-file instance whose location row is gone, and keeps the live one's (I02B-R53, #258 F2)", async () => {
+    const t = await start();
+    const goneId = await t.approve(file("gone.jsonl", lines(line({ external_id: "g1" }))));
+    const liveId = await t.approve(
+      file("live.jsonl", lines(line({ external_id: "l1", id: "r2" }))),
+    );
+    const period = (running: NonNullable<typeof booted>, id: string) =>
+      running.scheduler
+        .list()
+        .find((s) => s.kind === CONNECTOR_SYNC_KIND && s.target === `jsonl-file:${id}`);
+    expect(period(booted as NonNullable<typeof booted>, goneId)?.enabled).toBe(true);
+    // the process died after the revocation's last transaction (the row is gone) and before `revoked()`
+    t.db.run("DELETE FROM local_locations WHERE id = ?", [goneId]);
+    // and a location still `revoking` at the start has no instance either
+    const revokingId = await t.approve(
+      file("rev.jsonl", lines(line({ external_id: "v1", id: "r3" }))),
+    );
+    t.db.run("UPDATE local_locations SET state = 'revoking' WHERE id = ?", [revokingId]);
+
+    const again = await restart();
+    void again;
+    const running = booted as NonNullable<typeof booted>;
+    expect(period(running, goneId)?.enabled).toBe(false);
+    expect(period(running, liveId)?.enabled).toBe(true);
+    expect(period(running, revokingId)?.enabled).toBe(false);
+  });
+
   it("refuses a path that was swapped for a symlink or for another file, and reads nothing from it", async () => {
     const t = await start();
     const path = file("a.jsonl", lines(line({ external_id: "e1" })));

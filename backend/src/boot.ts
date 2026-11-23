@@ -77,7 +77,11 @@ import {
   nodeWatch,
   type LocalFilesDriver,
 } from "./local-files-driver.ts";
-import { createJsonlFileHooks, jsonlFileInstances } from "./jsonl-file-instances.ts";
+import {
+  createJsonlFileHooks,
+  disableOrphanJsonlFileSchedules,
+  jsonlFileInstances,
+} from "./jsonl-file-instances.ts";
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { ensureReflectionSchedules } from "./reflection-schedules.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
@@ -347,6 +351,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     onError: (error) => log("scheduler-error", { error: errorClass(error) }),
   });
   late.scheduler = scheduler;
+  disableOrphanJsonlFileSchedules(db, scheduler); // I02B-R53
   // I02B-R20: the restore pause, the revocation left half done, the first sync and the watchers, in this order
   const driver = createLocalFilesDriver({
     db,
