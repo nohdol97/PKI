@@ -40,6 +40,11 @@ const OTHER_PACKAGE_KEYS = [
     file: "../../knowledge-engine/src/conflicts.ts",
     holds: 'AUTO_DISPUTE_SETTING = "semantic.autoDispute"',
   },
+  {
+    key: "wiki.summary",
+    file: "../../storage/src/wiki.ts",
+    holds: 'WIKI_SUMMARY_SETTING = "wiki.summary"',
+  },
 ] as const;
 
 const implemented = Object.entries(entry)

@@ -62,6 +62,7 @@ import {
   createProductRegistry,
   createProjections,
   createWikiBuildHandler,
+  createWikiSummaryHandler,
   insightsReceiver,
   derivativeRegistry,
   ENGINE_KIND,
@@ -86,7 +87,9 @@ import {
   listLocations,
   prepareCanonicalDb,
   requestWikiBuild,
+  requestWikiSummaries,
   WIKI_BUILD_KIND,
+  WIKI_SUMMARY_KIND,
   type DerivativeRegistry,
   type MembershipListener,
   type ScopePolicy,
@@ -476,7 +479,9 @@ export function productRunner(
     onRunEnded: (job) => void replaced.delete(replacedKey(job)), // a mark does not outlive its run
     onClosed: (job, status) => {
       // K01-R5: a job that closed may have left the Wiki's pages behind: queue the one build; the drain claims it
-      if (requestWikiBuild(db).status === "registered") void runner.wake();
+      const built = requestWikiBuild(db).status === "registered";
+      // K01-R12: pages whose summary is not of their content get a job; the one that closed may have left some
+      if (requestWikiSummaries(db) > 0 || built) void runner.wake();
       const manager = options.connectors?.();
       const stoppedOnReplaced = replaced.delete(replacedKey(job));
       if (
@@ -506,6 +511,11 @@ export function productRunner(
       [WIKI_BUILD_KIND]: createWikiBuildHandler({
         db,
         ...(clock ? { now: () => new Date(clock.now()) } : {}),
+      }),
+      // K01-R12: one Broker call per page, IDs only; the Broker asks consent and egress, the page is a projection
+      [WIKI_SUMMARY_KIND]: createWikiSummaryHandler({
+        db,
+        ...(options.registry ? { registry: options.registry } : {}),
       }),
       ...(options.connectors
         ? {

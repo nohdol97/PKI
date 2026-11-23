@@ -19,6 +19,8 @@ import {
   WIKI_NOT_FACT,
   WIKI_PAGE_GONE,
   WIKI_STALE,
+  WIKI_SUMMARY_HELD,
+  WIKI_SUMMARY_LABEL,
 } from "./wiki-text.ts";
 
 type Index = RouteResponse<"wiki">;
@@ -102,6 +104,20 @@ export function PageView(props: PageViewProps) {
           <p>{evidenceButtons(page.insight.evidence, page.title)}</p>
         </>
       )}
+
+      {page.summary.state === "ready" && (
+        <section aria-label={WIKI_SUMMARY_LABEL}>
+          <h3>{WIKI_SUMMARY_LABEL}</h3>
+          <ul>
+            {page.summary.sentences?.map((s) => (
+              <li key={`${s.sourceId}:${s.version}:${s.start}`}>
+                <bdi>{s.text}</bdi>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {page.summary.state === "held" && <p role="status">{WIKI_SUMMARY_HELD}</p>}
 
       <h3>주장</h3>
       {page.claims.length === 0 && <p>보여 줄 주장이 없습니다.</p>}

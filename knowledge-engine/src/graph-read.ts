@@ -107,7 +107,7 @@ export function visibleLinks(
  * The merge groups as this read sees them (S02-R24 item 4): only what is shown counts. An item whose line
  * or upper item is not shown is a lone item here, and a line that rests is not followed.
  */
-function groupView(db: SqlDriver, judge: GraphJudge) {
+export function groupView(db: SqlDriver, judge: GraphJudge) {
   const isShown = (r: DerivedRef) => judge.shown([r]).has(key(r));
   const topOf = (item: number): number => {
     const seen = new Set([item]);

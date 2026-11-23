@@ -82,7 +82,9 @@ import {
   readSemanticHistory,
   readSemanticState,
   readSetting,
+  readWikiSummary,
   requestWikiBuild,
+  setWikiSummary,
   requestWikiRebuild,
   rootOf,
   schemaVersion,
@@ -944,14 +946,23 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     semanticSettings: async () => ({
       autoVerify: readAutoVerify(options.db),
       autoDispute: readAutoDispute(options.db),
+      wikiSummary: readWikiSummary(options.db),
     }),
-    setSemanticSettings: async ({ autoVerify, autoDispute }) => {
+    setSemanticSettings: async ({ autoVerify, autoDispute, wikiSummary }) => {
       // no held job waits on these settings, so nothing is released with them (cf. `releasing`)
       writeSetting(options.db, AUTO_VERIFY_SETTING, autoVerify ? "on" : "off");
       if (autoDispute !== undefined) {
         writeSetting(options.db, AUTO_DISPUTE_SETTING, autoDispute ? "on" : "off");
       }
-      return { autoVerify: readAutoVerify(options.db), autoDispute: readAutoDispute(options.db) };
+      if (wikiSummary !== undefined) {
+        setWikiSummary(options.db, wikiSummary, new Date());
+        options.onRunConditionsChanged?.(); // wakes the runner for the summary jobs the switch queued
+      }
+      return {
+        autoVerify: readAutoVerify(options.db),
+        autoDispute: readAutoDispute(options.db),
+        wikiSummary: readWikiSummary(options.db),
+      };
     },
     providers: async () => providerList(options),
     setDefaultProvider: async ({ providerId }) => {

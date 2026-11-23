@@ -9,7 +9,9 @@ import {
   migrate,
   registerConnectorInstance,
   saveFact,
+  saveRelation,
   saveSourceRecord,
+  setWikiSummary,
   type KnowledgeAttributes,
   type ScopePolicy,
   type SqlDriver,
@@ -109,6 +111,54 @@ describe("wiki.gate: what the policy refuses is not in the Wiki's answer", () =>
   });
 });
 
+describe("wiki.gate: a stored summary is shown only when the whole lineage is (K01-R9, C4)", () => {
+  it("answers `ready` with the sentences under a policy that allows every scope, and `none` without them when one scope is refused", () => {
+    const open = source("open", "공개 본문", ["open"]);
+    const secret = source("secret", `${SECRET} 본문`, ["secret"]);
+    const shown = insertItem(db, { type: "Project", name: "공개 항목", ...attrs });
+    const alias = insertItem(db, { type: "Project", name: `${SECRET} 별칭`, ...attrs });
+    citedFact(shown, "공개 값", open);
+    citedFact(alias, `${SECRET} 값`, secret);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [alias, shown],
+    );
+    const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+    const key = `projects/${shown}`;
+    const sentence = { sentence: `${SECRET} 요약`, sourceId: 1, version: 1, start: 0, end: 2 };
+    setWikiSummary(db, true, new Date());
+    db.run("UPDATE wiki_pages SET summary = ?, summary_hash = content_hash WHERE key = ?", [
+      JSON.stringify([sentence]),
+      key,
+    ]);
+
+    const allowAll = createProductRegistry({
+      policy: { ...policy, allows: () => true },
+    });
+    const everything = createWikiReads(db, allowAll, createReadGate(db, allowAll));
+    expect(everything.page(key)?.summary.state).toBe("ready");
+
+    // every scope allowed but the two not to be put together: the summary mixes them, so it is not shown
+    const apart = createProductRegistry({
+      policy: {
+        ...policy,
+        allows: () => true,
+        combinable: (scopes) => new Set(scopes.map((s) => JSON.stringify(s))).size <= 1,
+      },
+    });
+    expect(createWikiReads(db, apart, createReadGate(db, apart)).page(key)?.summary).toEqual({
+      state: "none",
+    });
+
+    const registry = createProductRegistry({ policy });
+    const reads = createWikiReads(db, registry, createReadGate(db, registry));
+    const page = reads.page(key);
+    expect(page?.summary).toEqual({ state: "none" });
+    expect(JSON.stringify(page)).not.toContain(`${SECRET} 요약`);
+  });
+});
+
 describe("wiki.gate: what a link between two facts may disclose", () => {
   const link = (type: "SUPERSEDES" | "CONTRADICTS", from: number, to: number) =>
     db.run(
@@ -152,10 +202,8 @@ describe("wiki.gate: what a link between two facts may disclose", () => {
     const a = source("a", "가 본문", ["A"]);
     const b = source("b", "나 본문", ["B"]);
     const x = insertItem(db, { type: "Project", name: "항목", ...attrs });
-    const y = insertItem(db, { type: "Project", name: "별칭", ...attrs });
-    merge(y, x);
     const fa = citedFact(x, "가 값", a);
-    const fb = citedFact(y, "나 값", b);
+    const fb = citedFact(x, "나 값", b);
     const fc = citedFact(x, "가 새 값", a, { validAt: "2031-08-08" });
     link("CONTRADICTS", fa, fb);
     link("SUPERSEDES", fc, fb);
@@ -179,6 +227,126 @@ describe("wiki.gate: what a link between two facts may disclose", () => {
     expect(page?.claims.map((c) => c.ref.id)).toEqual([fa, fb, fc]);
     expect(page?.claims.flatMap((c) => [...c.contradicts, ...c.supersedes])).toEqual([]);
     expect(page?.claims.find((c) => c.ref.id === fb)?.validUntil).toBeNull();
+  });
+});
+
+describe("wiki.gate: a merge line the caller cannot see is not a group (S02-R24 4, K01-R9)", () => {
+  /** Shows each scope alone but refuses the two sources of one merge line together, so the line is hidden. */
+  const crossing: ScopePolicy = {
+    ...policy,
+    allows: (scopes) =>
+      !(scopes.some((s) => s?.includes("A")) && scopes.some((s) => s?.includes("B"))),
+  };
+  const mergeLine = (member: number, representative: number) =>
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [member, representative],
+    );
+
+  it("shows neither the other member's name, claims nor the backlink derived through it", () => {
+    const a = source("a", "가 본문", ["A"]);
+    const b = source("b", "나 본문", ["B"]);
+    const rep = insertItem(db, { type: "Project", name: "대표 항목", ...attrs });
+    const member = insertItem(db, { type: "Project", name: "숨은별칭", ...attrs });
+    const target = insertItem(db, { type: "Project", name: "대상 항목", ...attrs });
+    const repFact = citedFact(rep, "가 값", a);
+    citedFact(member, "나비밀값", b);
+    mergeLine(member, rep);
+    // the member's relation reaches `target`: a backlink on its page would name the representative's page
+    const rel = saveRelation(db, {
+      subjectId: member,
+      type: "USES",
+      objectId: target,
+      ...attrs,
+    }).id;
+    addEvidence(db, {
+      target: { relationId: rel },
+      sourceVersionId: b,
+      start: 0,
+      end: 1,
+      quote: "나",
+    });
+    const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+
+    const registry = createProductRegistry({ policy: crossing });
+    const reads = createWikiReads(db, registry, createReadGate(db, registry));
+    const page = reads.page(`projects/${rep}`);
+    expect(page?.claims.map((c) => c.ref)).toEqual([{ kind: "fact", id: repFact }]);
+    expect(page?.members.map((m) => m.name)).toEqual(["대표 항목"]);
+    expect(JSON.stringify(page)).not.toContain("숨은별칭");
+    expect(JSON.stringify(page)).not.toContain("나비밀값");
+    expect(page?.links).toEqual([]);
+    expect(reads.page(`projects/${target}`)?.backlinks).toEqual([]);
+
+    // the same rows read by one who may put the two together show the group
+    const open = createProductRegistry({ policy });
+    const together = createWikiReads(db, open, createReadGate(db, open));
+    expect(together.page(`projects/${rep}`)?.members.map((m) => m.name)).toEqual([
+      "대표 항목",
+      "숨은별칭",
+    ]);
+    expect(together.page(`projects/${target}`)?.backlinks.map((l) => l.fromKey)).toEqual([
+      `projects/${rep}`,
+    ]);
+  });
+});
+
+describe("wiki.gate: the object side of a relation and an Insight's ends read the same group view (S02-R24 4, K01-R9)", () => {
+  const crossing: ScopePolicy = {
+    ...policy,
+    allows: (scopes) =>
+      !(scopes.some((s) => s?.includes("A")) && scopes.some((s) => s?.includes("B"))),
+  };
+
+  it("names no page and no backlink that would show a hidden merge member's page is the representative's", () => {
+    const a = source("a", "가 본문", ["A"]);
+    const b = source("b", "나 본문", ["B"]);
+    const rep = insertItem(db, { type: "Project", name: "대표 항목", ...attrs });
+    const member = insertItem(db, { type: "Project", name: "숨은별칭", ...attrs });
+    const x = insertItem(db, { type: "Project", name: "다른 항목", ...attrs });
+    citedFact(rep, "가 값", a);
+    citedFact(member, "나 값", b);
+    citedFact(x, "엑스 값", a);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [member, rep],
+    );
+    // X's relation ends at the hidden member; an Insight joins X and the same member
+    const rel = saveRelation(db, { subjectId: x, type: "USES", objectId: member, ...attrs }).id;
+    addEvidence(db, {
+      target: { relationId: rel },
+      sourceVersionId: a,
+      start: 0,
+      end: 1,
+      quote: "가",
+    });
+    db.run(
+      "INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary) VALUES ('r', ?, ?, 'explicit', 'active', '요약')",
+      [x, member],
+    );
+    const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+
+    const registry = createProductRegistry({ policy: crossing });
+    const reads = createWikiReads(db, registry, createReadGate(db, registry));
+    const xPage = reads.page(`projects/${x}`);
+    expect(xPage?.claims.filter((c) => c.ref.kind === "relation")).toEqual([]);
+    expect(xPage?.links.map((l) => l.key)).not.toContain(`projects/${rep}`);
+    expect(reads.page(`projects/${rep}`)?.backlinks).toEqual([]);
+    const insightPage = reads.page("syntheses/1");
+    expect(insightPage?.links.map((l) => l.key)).toEqual([`projects/${x}`]);
+
+    // read by one who may put the two together, the same rows show
+    const open = createProductRegistry({ policy });
+    const together = createWikiReads(db, open, createReadGate(db, open));
+    expect(
+      together
+        .page(`projects/${rep}`)
+        ?.backlinks.map((l) => l.basisKind)
+        .sort(),
+    ).toEqual(["insight", "relation"]);
+    expect(together.page("syntheses/1")?.links.map((l) => l.key)).toContain(`projects/${rep}`);
   });
 });
 

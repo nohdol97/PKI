@@ -6,23 +6,28 @@
 // name likewise, a backlink only when the page it comes from and the row it rests on are. The user's edits are
 // laid over at this read: a hidden claim is left out of `claims` and listed in `hidden` (judged by the same rules), the notes are attached (K01-R11).
 import type { RouteRequest, RouteResponse } from "@pki/contracts";
+import { createJudge, groupView } from "@pki/knowledge-engine";
 import type { ClaimRef, WikiPageBody } from "@pki/knowledge-engine";
 import {
   addWikiNote,
   effectiveUntil,
+  entityGroups,
   isWikiStale,
   listStoredWikiPages,
   listWikiBacklinks,
   listWikiHidden,
   listWikiLog,
   listWikiNotes,
+  lineageOfWikiPage,
   readStoredWikiPage,
+  readWikiSummary,
   removeWikiNote,
   setWikiHide,
   unionOfVersions,
   type DerivativeRegistry,
   type SqlDriver,
   type StoredWikiPage,
+  wikiSummaryHeld,
   type WikiLogLine,
 } from "@pki/storage";
 import type { ReadGate } from "./read-gate.ts";
@@ -89,10 +94,72 @@ export function createWikiReads(
     page.kind === "syntheses"
       ? insightShown(Number(page.target))
       : gate.semanticShown("item", Number(page.target));
+  /**
+   * The items whose rows the page of representative `root` may carry: the group as the caller's read sees it
+   * (S02-R24 4). A member whose merge line, or whose own item, is not shown is no member here, and a group whose
+   * shown sources the policy will not put together is the representative alone.
+   */
+  const groupOf = (root: number): ReadonlySet<number> => {
+    const judge = createJudge(db, registry, "display", true);
+    const view = groupView(db, judge);
+    const members = view.membersOfTop(root);
+    return members.length > 1 && !judge.together(view.groupLineage(root))
+      ? new Set([root])
+      : new Set(members);
+  };
+  /** The item a claim row hangs on (a fact's item, a relation's subject); undefined when no row is stored. */
+  const ownerOf = (kind: "fact" | "relation", id: number): number | undefined =>
+    db.all(
+      kind === "fact"
+        ? "SELECT item_id AS owner FROM facts WHERE id = ?"
+        : "SELECT subject_id AS owner FROM relations WHERE id = ?",
+      [id],
+    )[0]?.owner as number | undefined;
+  /**
+   * Whether `item`, as an end of a relation or an Insight, is part of the group view of the page it resolves to
+   * (its representative's page): a hidden merge member's end would otherwise show that its page is that one.
+   */
+  const endInView = (item: number): boolean =>
+    groupOf(entityGroups.representativeOf(db, item)).has(item);
+  const inView = (item: number | undefined): boolean => item !== undefined && endInView(item);
+  const relationObject = (id: number): number | undefined =>
+    db.all("SELECT object_id AS o FROM relations WHERE id = ?", [id])[0]?.o as number | undefined;
+  const insightEnds = (id: number): number[] =>
+    db
+      .all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [id])
+      .flatMap((r) => [r.x as number, r.y as number]);
   /** The stored page under `key` when its target is shown. */
   const shownPage = (key: string): StoredWikiPage | undefined => {
     const stored = readStoredWikiPage(db, key);
     return stored && targetShown(stored) ? stored : undefined;
+  };
+
+  /**
+   * The summary's state (K01-R14). Sentences go out only while the whole lineage is shown and the policy lets
+   * it be put together (R9): a page's stored summary was made from all of its sources, so one source the caller
+   * may not see makes the whole summary not theirs.
+   */
+  const summaryOf = (stored: StoredWikiPage): Page["summary"] => {
+    if (!readWikiSummary(db)) return { state: "off" };
+    if (stored.summaryHash === stored.contentHash && stored.summary !== null) {
+      const sentences = (
+        JSON.parse(stored.summary) as {
+          sentence: string;
+          sourceId: number;
+          version: number;
+          start: number;
+          end: number;
+        }[]
+      ).map(({ sentence, ...span }) => ({ text: sentence, ...span }));
+      if (
+        sentences.length > 0 &&
+        registry.visible(db, [{ kind: "wiki-page", id: stored.key }], "display").length === 1 &&
+        registry.combinable(db, lineageOfWikiPage(db, stored.key))
+      ) {
+        return { state: "ready", sentences };
+      }
+    }
+    return wikiSummaryHeld(db, stored.key) ? { state: "held" } : { state: "none" };
   };
 
   return {
@@ -126,7 +193,13 @@ export function createWikiReads(
       const hiddenKeys = new Set(listWikiHidden(db).map((h) => `${h.kind}:${h.id}`));
       const isHidden = (c: { ref: { kind: string; id: number } }) =>
         hiddenKeys.has(`${c.ref.kind}:${c.ref.id}`);
-      const claims = document.claims.filter((c) => !isHidden(c));
+      // a claim from an item outside the caller's view of the group is not on the page (S02-R24 4, K01-R9)
+      const group = stored.kind === "syntheses" ? undefined : groupOf(Number(stored.target));
+      const inGroup = (c: { ref: ClaimRef }) => {
+        const owner = group && ownerOf(c.ref.kind, c.ref.id);
+        return group === undefined || (owner !== undefined && group.has(owner));
+      };
+      const claims = document.claims.filter((c) => inGroup(c) && !isHidden(c));
       // each row is stored and shown; a relation also needs the page at its other end to be shown
       const shownRows = {
         fact: new Set(claims.filter((c) => c.ref.kind === "fact").map((c) => c.ref.id)),
@@ -161,6 +234,10 @@ export function createWikiReads(
         list
           .filter((c) => own(c.ref))
           .filter((c) => c.to === undefined || shownPage(c.to) !== undefined)
+          .filter((c) => {
+            const object = c.ref.kind === "relation" ? relationObject(c.ref.id) : undefined;
+            return c.ref.kind !== "relation" || (object !== undefined && endInView(object));
+          })
           .map(({ supersededBy, ...c }) => ({
             ...c,
             // the end counts the superseders the caller may see, together with this fact, and no others
@@ -168,7 +245,10 @@ export function createWikiReads(
               c.validUntil,
               supersededBy
                 .filter(
-                  (s) => gate.semanticShown("fact", s.ref.id) && combinable(c.ref.id, s.ref.id),
+                  (s) =>
+                    inGroup(s) &&
+                    gate.semanticShown("fact", s.ref.id) &&
+                    combinable(c.ref.id, s.ref.id),
                 )
                 .map((s) => s.validAt),
             ),
@@ -177,15 +257,23 @@ export function createWikiReads(
             supersedes: c.supersedes.filter((r) => keptRef(r) && combinable(c.ref.id, r.id)),
           }));
       const kept = shape(claims, keptRef);
-      const hidden = shape(document.claims.filter(isHidden), (r) =>
-        gate.semanticShown(r.kind, r.id),
+      const hidden = shape(
+        document.claims.filter((c) => inGroup(c) && isHidden(c)),
+        (r) => gate.semanticShown(r.kind, r.id),
       );
       const toTitle = (toKey: string) => shownPage(toKey)?.title;
+      // an Insight's end names the page its item resolves to only while the item is in that page's group view
+      const insightEndKeys =
+        document.insight === undefined
+          ? []
+          : document.insight.ends.filter((k) => {
+              const target = shownPage(k)?.target;
+              return insightEnds(Number(stored.target)).some(
+                (e) => String(entityGroups.representativeOf(db, e)) === target && endInView(e),
+              );
+            });
       const linkKeys = [
-        ...new Set([
-          ...kept.flatMap((c) => (c.to === undefined ? [] : [c.to])),
-          ...(document.insight?.ends ?? []),
-        ]),
+        ...new Set([...kept.flatMap((c) => (c.to === undefined ? [] : [c.to])), ...insightEndKeys]),
       ].sort();
       const linkedPages = linkKeys.flatMap((k) => {
         const title = toTitle(k);
@@ -196,8 +284,18 @@ export function createWikiReads(
         const from = shownPage(l.fromKey);
         const rowShown =
           l.basisKind === "relation"
-            ? gate.semanticShown("relation", l.basisId) && !hiddenKeys.has(`relation:${l.basisId}`)
-            : true; // the Insight page that carries it was judged as `from`
+            ? gate.semanticShown("relation", l.basisId) &&
+              !hiddenKeys.has(`relation:${l.basisId}`) &&
+              // the relation rests on an item the page's own group view lets through
+              from !== undefined &&
+              groupOf(Number(from.target)).has(ownerOf("relation", l.basisId) ?? -1) &&
+              // and its object is in the group view of this page (the page the object resolves to)
+              inView(relationObject(l.basisId))
+            : // the Insight page that carries it was judged as `from`; its end must be in this page's view
+              insightEnds(l.basisId).some(
+                (e) =>
+                  String(entityGroups.representativeOf(db, e)) === stored.target && endInView(e),
+              );
         return from && rowShown
           ? [{ fromKey: l.fromKey, title: from.title, basisKind: l.basisKind, basisId: l.basisId }]
           : [];
@@ -207,7 +305,9 @@ export function createWikiReads(
         kind: stored.kind,
         title: stored.title,
         stale: isWikiStale(db),
-        members: document.members.filter((m) => gate.semanticShown("item", m.id)),
+        members: document.members.filter(
+          (m) => (group === undefined || group.has(m.id)) && gate.semanticShown("item", m.id),
+        ),
         claims: kept,
         hidden,
         links: linkedPages,
@@ -225,7 +325,7 @@ export function createWikiReads(
         history: listWikiLog(db, { pageKey: key, limit: PAGE_HISTORY_LINES })
           .reverse()
           .map(logLine),
-        summary: { state: "off" },
+        summary: summaryOf(stored),
       };
     },
 

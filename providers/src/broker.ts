@@ -399,7 +399,7 @@ function prepareInputs(deps: BrokerDeps, raw: unknown): Prepared | { reason: Rej
   if (!task) return { reason: "unknown-task-version" };
   const ids = request.sourceVersionIds;
   if (new Set(ids).size !== ids.length) return { reason: "invalid-request" };
-  if (request.taskKind === "extract" && ids.length === 0) return { reason: "no-documents" };
+  if (request.taskKind !== "connection-test" && ids.length === 0) return { reason: "no-documents" };
   if (request.taskKind === "connection-test" && ids.length + request.candidateItemIds.length > 0) {
     return { reason: "unexpected-ids" };
   }

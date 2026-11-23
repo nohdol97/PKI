@@ -66,7 +66,10 @@ describe("semantic settings API", () => {
       path: "/api/settings/semantic",
     });
     const res = await read();
-    expect(res).toEqual({ status: 200, body: { autoVerify: false, autoDispute: false } });
+    expect(res).toEqual({
+      status: 200,
+      body: { autoVerify: false, autoDispute: false, wikiSummary: false },
+    });
     expect(readSetting(db, AUTO_VERIFY_SETTING)).toBeUndefined();
   });
 
@@ -76,27 +79,47 @@ describe("semantic settings API", () => {
     expect(routes.setSemanticSettings.response.parse(on.body)).toEqual({
       autoVerify: true,
       autoDispute: false,
+      wikiSummary: false,
     });
     expect(readSetting(db, AUTO_VERIFY_SETTING)).toBe("on");
-    expect((await read()).body).toEqual({ autoVerify: true, autoDispute: false });
+    expect((await read()).body).toEqual({
+      autoVerify: true,
+      autoDispute: false,
+      wikiSummary: false,
+    });
     expect((await write({ autoVerify: false })).body).toEqual({
       autoVerify: false,
       autoDispute: false,
+      wikiSummary: false,
     });
     expect(readSetting(db, AUTO_VERIFY_SETTING)).toBe("off");
-    expect((await read()).body).toEqual({ autoVerify: false, autoDispute: false });
+    expect((await read()).body).toEqual({
+      autoVerify: false,
+      autoDispute: false,
+      wikiSummary: false,
+    });
   });
 
   it("autoDispute (S02-R20) is off by default, round-trips, and is left alone when the request omits it", async () => {
     expect((await write({ autoVerify: false, autoDispute: true })).body).toEqual({
       autoVerify: false,
       autoDispute: true,
+      wikiSummary: false,
     });
     expect(readSetting(db, "semantic.autoDispute")).toBe("on");
     expect((await write({ autoVerify: true })).body).toEqual({
       autoVerify: true,
       autoDispute: true,
+      wikiSummary: false,
     });
+  });
+
+  it("wikiSummary (K01-R15) is off by default, round-trips, and is left alone when the request omits it", async () => {
+    expect((await write({ autoVerify: false, wikiSummary: true })).body).toMatchObject({
+      wikiSummary: true,
+    });
+    expect(readSetting(db, "wiki.summary")).toBe("on");
+    expect((await write({ autoVerify: false })).body).toMatchObject({ wikiSummary: true });
   });
 
   it("is still on after the app restarts", async () => {
@@ -104,7 +127,11 @@ describe("semantic settings API", () => {
     await server.close();
     db.close();
     await boot();
-    expect((await read()).body).toEqual({ autoVerify: true, autoDispute: false });
+    expect((await read()).body).toEqual({
+      autoVerify: true,
+      autoDispute: false,
+      wikiSummary: false,
+    });
   });
 
   it.each([
