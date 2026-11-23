@@ -29,10 +29,12 @@ import {
   lineageOfItems,
   listEvidence,
   notifyMembership,
+  OPPORTUNITY_RULE,
   queueChecksAround,
   registerJob,
   rejudgeGroups,
   rowLineage,
+  saveInsight,
   unionOfVersions,
   userInputsOf,
   type Affected,
@@ -530,6 +532,29 @@ const INSIGHT: DerivativeKind = {
   },
   invalidate: (ctx, snapshot, change) => {
     const { tx } = ctx;
+    // P01-D13: an LLM reading was made from the lineage as it was, and an unchanged Insight is not rewritten, so
+    // a deletion, prune or scope change (not a new version: a changed Insight is rewritten, which empties it) empties the reading of every collected Insight and resolves its opportunity
+    for (const { ref } of supported(change) === "new-version" ? [] : snapshot) {
+      tx.run(
+        "UPDATE insights SET llm_reasoning_summary = NULL, llm_impact = NULL, llm_actionability = NULL WHERE id = ?",
+        [Number(ref.id)],
+      );
+      const row = tx.all(
+        "SELECT rule, x_item_id, y_item_id FROM insights WHERE id = ? AND state = 'active'",
+        [Number(ref.id)],
+      )[0];
+      if (row?.rule === OPPORTUNITY_RULE) {
+        saveInsight(
+          tx,
+          {
+            rule: OPPORTUNITY_RULE,
+            xItemId: row.x_item_id as number,
+            yItemId: row.y_item_id as number,
+          },
+          { state: "resolved" },
+        );
+      }
+    }
     const items =
       change.kind === "scope-changed"
         ? snapshot.flatMap(({ ref }) =>

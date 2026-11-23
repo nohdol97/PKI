@@ -10,10 +10,11 @@ describe("INSIGHT_TYPES (P01-R1)", () => {
     expect(insightType("nope")).toBeUndefined();
   });
 
-  it("gives every unsupported type a reason and makes every supported type code-judged", () => {
+  it("gives every unsupported type a reason and makes every supported type code-judged but opportunity", () => {
     for (const t of INSIGHT_TYPES) {
       if (t.status === "unsupported") expect(t.reason).toBeTruthy();
-      else expect([t.judgedBy, t.reason]).toEqual(["code", null]);
+      else
+        expect([t.judgedBy, t.reason]).toEqual([t.type === "opportunity" ? "llm" : "code", null]);
       expect(t.impact).toBeGreaterThanOrEqual(0);
       expect(t.actionability).toBeLessThanOrEqual(100);
     }
@@ -22,6 +23,7 @@ describe("INSIGHT_TYPES (P01-R1)", () => {
       "schedule_conflict",
       "dependency_delay",
       "conflict",
+      "opportunity",
     ]);
   });
 });

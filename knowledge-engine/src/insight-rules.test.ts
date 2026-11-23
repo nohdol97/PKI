@@ -86,7 +86,7 @@ describe("runInsightRules — an active Insight (P01-R2, C2a)", () => {
 
   it("makes no Insight for a rule whose type the table does not support (P01-R1)", () => {
     scenario();
-    const unsupported: InsightRule = { ...dependencyDelayRule, type: "opportunity" };
+    const unsupported: InsightRule = { ...dependencyDelayRule, type: "new_relation" };
     expect(runInsightRules(db, [x], [unsupported], { at: T1 })).toEqual([]);
     expect(db.all("SELECT count(*) AS n FROM insights")).toEqual([{ n: 0 }]);
   });

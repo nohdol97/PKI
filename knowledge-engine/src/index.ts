@@ -12,7 +12,17 @@ export {
   type RuleOutcome,
   type RuleScope,
 } from "./insight-rules.ts";
-export { INSIGHT_RULES, insightsReceiver, recomputeInsights } from "./insight-code-rules.ts";
+export {
+  INSIGHT_RULES,
+  insightsReceiver,
+  OPPORTUNITY_CONFIDENCE_CAP,
+  recomputeInsights,
+} from "./insight-code-rules.ts";
+export {
+  createInsightInterpretHandler,
+  type InsightInterpretHandlerOptions,
+  type InsightInterpretResult,
+} from "./insight-interpret.ts";
 export { rankInsight, type InsightRanking, type RankingSignals } from "./insight-ranking.ts";
 export {
   candidatesReceiver,

@@ -285,7 +285,8 @@
       "support": "unsupported"
     },
     "opportunity": {
-      "support": "unsupported"
+      "support": "supported",
+      "judgedBy": "llm"
     },
     "policy_change": {
       "support": "unsupported"

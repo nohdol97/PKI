@@ -43,6 +43,8 @@ export type Desired =
       /** every fact and relation the judgement read: the confidence is the lowest of them */
       usedRows: UserInputRef[];
       urgencyDate: string | null;
+      /** the confidence is at most this (the opportunity's cap, P01-D18); absent: no cap */
+      confidenceCap?: number;
     }
   | { state: "resolved" };
 
@@ -142,6 +144,7 @@ export function runInsightRules(
           ...desired.usedRows.map((r) =>
             inputs.has(`${r.kind}:${r.id}`) ? 100 : rowConfidence(db, r),
           ),
+          ...(desired.confidenceCap === undefined ? [] : [desired.confidenceCap]),
         );
         const userInputs = inOrder(desired.userInputs);
         const textChanged =

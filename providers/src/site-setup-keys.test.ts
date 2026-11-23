@@ -45,6 +45,11 @@ const OTHER_PACKAGE_KEYS = [
     file: "../../storage/src/wiki.ts",
     holds: 'WIKI_SUMMARY_SETTING = "wiki.summary"',
   },
+  {
+    key: "insight.interpret",
+    file: "../../storage/src/insight-interpretation.ts",
+    holds: 'INSIGHT_INTERPRET_SETTING = "insight.interpret"',
+  },
 ] as const;
 
 const implemented = Object.entries(entry)
