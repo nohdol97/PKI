@@ -7,6 +7,7 @@ import {
   commitDerived,
   countDirty,
   listDirty,
+  insertFinding,
   listFindings,
   migrate,
   registerConnectorInstance,
@@ -179,5 +180,26 @@ describe("reflect.job: a pair that stands from one side is not closed by a run o
       states.push(pair());
     }
     expect(states).toEqual(["open:0", "open:0", "open:0", "open:0"]);
+  });
+});
+
+describe("reflect.job: a finding whose target row is gone is removed by the run (KF-C2)", () => {
+  it("drops the one on an absent fact and keeps the fixture's findings", () => {
+    loadLintFixture(db);
+    reflectNow(db);
+    const kept = listFindings(db).map((f) => f.fingerprint);
+    insertFinding(db, {
+      rule: "stale",
+      target: { kind: "fact", a: 999999, b: null },
+      origin: "rule",
+      status: "dismissed",
+      lineage: [],
+      at: NOW,
+    });
+    expect(listFindings(db)).toHaveLength(kept.length + 1);
+
+    reflectNow(db, "daily");
+
+    expect(listFindings(db).map((f) => f.fingerprint)).toEqual(kept);
   });
 });

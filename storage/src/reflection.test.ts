@@ -5,7 +5,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { insertItem, saveFact } from "./knowledge.ts";
 import { migrate, REFLECTION_DIRTY_TABLES } from "./migrations.ts";
-import { clearDirty, countDirty, listDirty, readReflectionState } from "./reflection.ts";
+import {
+  clearDirty,
+  countDirty,
+  fingerprintOf,
+  findFinding,
+  insertFinding,
+  listDirty,
+  listFindings,
+  readReflectionState,
+} from "./reflection.ts";
+import { userDecisions } from "./semantic-user.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 const attrs = {
@@ -71,5 +81,50 @@ describe("reflection.triggers: the constant names every trigger (K02-R1)", () =>
       .map((r) => r.tbl_name as string)
       .filter((t) => /^(lint_|reflection_|wiki_|insight)/.test(t));
     expect(excluded).toEqual([]);
+  });
+});
+
+describe("reflection.dangling: a finding goes with the row the user's undo removed (KF-C1)", () => {
+  const AT = "2026-11-24T00:00:00Z";
+  const lineage = [{ sourceId: 1, version: 1 }];
+
+  it("leaves no finding or lineage for a taken-back item, and the reused id inherits nothing", () => {
+    const added = userDecisions.add(db, { kind: "item", type: "Project", name: "옛 이름" });
+    if (added.status !== "applied" || added.ref.kind !== "item") throw new Error(added.status);
+    const target = { kind: "item", a: added.ref.id, b: null } as const;
+    insertFinding(db, {
+      rule: "overdue-work",
+      target,
+      origin: "rule",
+      status: "dismissed",
+      lineage,
+      at: AT,
+    });
+
+    expect(db.transaction(() => userDecisions.undo(db, added.ref))).toEqual({ status: "removed" });
+
+    expect(listFindings(db)).toEqual([]);
+    expect(db.all("SELECT finding_id FROM lint_finding_lineage")).toEqual([]);
+    const again = userDecisions.add(db, { kind: "item", type: "Project", name: "새 이름" });
+    if (again.status !== "applied" || again.ref.kind !== "item") throw new Error(again.status);
+    expect(again.ref.id).toBe(added.ref.id);
+    expect(findFinding(db, fingerprintOf("overdue-work", target))).toBeUndefined();
+  });
+
+  it("removes a user's stale report on a taken-back fact", () => {
+    const item = insertItem(db, { type: "Project", name: "가", ...attrs });
+    const added = userDecisions.add(db, {
+      kind: "fact",
+      itemId: item,
+      factKind: "memo",
+      value: "값",
+    });
+    if (added.status !== "applied") throw new Error(added.status);
+    const target = { kind: "fact", a: added.ref.id, b: null } as const;
+    insertFinding(db, { rule: "stale", target, origin: "user", status: "open", lineage, at: AT });
+
+    expect(db.transaction(() => userDecisions.undo(db, added.ref))).toEqual({ status: "removed" });
+
+    expect(listFindings(db)).toEqual([]);
   });
 });

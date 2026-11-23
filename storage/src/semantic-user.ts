@@ -44,6 +44,7 @@ import { scopesOfVersions } from "./derivatives.ts";
 import { defaultScopePolicy, mayCombine } from "./scope-policy.ts";
 import { userOntology, type UserOntologyDecisions } from "./ontology.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+import { removeDanglingFindings } from "./reflection.ts";
 import { endWikiItemIncarnation, removeWikiItemPages } from "./wiki.ts";
 
 export type UserAction = "approve" | "reject" | "dispute";
@@ -256,6 +257,7 @@ function undoCreated(
     tx.run("DELETE FROM items WHERE id = ?", [ref.id]);
     endWikiItemIncarnation(tx, ref.id); // the id may be reused: nothing of the page's history follows it
     removeWikiItemPages(tx, ref.id); // and neither does the stored page, which a build would only replace later
+    removeDanglingFindings(tx); // nor a finding on it, which the id's next owner would inherit (KF-R1)
     return { status: "removed" };
   }
   const held =
@@ -265,6 +267,7 @@ function undoCreated(
     const around = eraseChecksReading(tx, ref);
     tx.run(`DELETE FROM ${TABLE[ref.kind]} WHERE id = ?`, [ref.id]);
     queueChecksAround(tx, around);
+    removeDanglingFindings(tx);
     return { status: "removed" };
   }
   const seq = writeLine(tx, ref, {
