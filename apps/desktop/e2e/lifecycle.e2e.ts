@@ -109,6 +109,21 @@ test("start, single instance, and quit with a live backend", async () => {
     // the first instance's backend is untouched (the second instance's own exit before
     // it starts anything is main.ts's app.exit(0) ahead of run(), held by the exit code)
     expect(await backendPids(app)).toEqual([pid]);
+
+    // R04L-C3: another userData on the same data folder is refused by the data lock.
+    const other = spawn(ELECTRON, shellArgs({ ...options, userData: join(dir, "u2") }), {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    other.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    const timer = setTimeout(() => other.kill("SIGKILL"), 20_000);
+    const otherCode = await new Promise<number | string | null>((resolve) =>
+      other.once("exit", (c, signal) => resolve(c ?? signal)),
+    );
+    clearTimeout(timer);
+    expect(otherCode).toBe(1);
+    expect(stderr).toContain("PKI: this data folder is already in use by another running PKI");
+    expect(await backendPids(app)).toEqual([pid]);
     await window.getByRole("navigation").getByRole("button", { name: "설정" }).click();
     await expect(window.getByRole("row", { name: /데이터 폴더/ })).toContainText(options.dataDir);
 
