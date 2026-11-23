@@ -7,6 +7,7 @@
 // site-check.ts) build the backend from these.
 import type {
   EmbeddingProvider,
+  EmbeddingSpace,
   KnowledgeEngine,
   LLMProvider,
   LocalNormalizerPort,
@@ -36,6 +37,8 @@ import {
   publicScopeGrading,
   readDefaultProvider,
   selectProvider,
+  denyExternalEmbedding,
+  embedWithinPolicy,
   type Broker,
   type EgressControls,
   type ExecutionGate,
@@ -110,7 +113,7 @@ import {
   type SqlDriver,
   type UserDecisions,
 } from "@pki/storage";
-import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
+import { EmptyVectorIndex, openBetterSqlite3, SqliteVectorIndex } from "@pki/storage/adapters";
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { join } from "node:path";
 import {
@@ -136,11 +139,13 @@ import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-run
 import { createMaintenanceHandler } from "./maintenance.ts";
 import { MAINTENANCE_KIND } from "./scheduler.ts";
 import { projectionPorts } from "./projection-ports.ts";
+import { servedVectorIndex } from "./vector-serving.ts";
 import { importContent, type InstanceImporter } from "./imports.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import {
   projectionHandlers,
   PROJECTION_KIND_SETTINGS,
+  requestProjectionRebuild,
   type ProjectionPorts,
 } from "./projection-jobs.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
@@ -166,16 +171,25 @@ import type { ServerOptions } from "./server.ts";
 /**
  * The product's adapters inside a data directory. The embedder is the local
  * Transformers.js one; its models install under `<dataDir>/models` only when the
- * user prepares one, so binding it creates nothing and downloads nothing.
+ * user prepares one, so binding it creates nothing and downloads nothing. The vector index is the empty
+ * one unless `vectorIndexing` (BootOptions, H01C3-R11) binds the real one in `<dataDir>/vectors`.
  */
-export function productAdapters(dataDir: string): Pick<ServerOptions, "vectorIndex" | "embedder"> {
+export function productAdapters(
+  dataDir: string,
+  options: { vectorIndexing?: boolean } = {},
+): Pick<ServerOptions, "vectorIndex" | "embedder"> {
   return {
-    vectorIndex: new EmptyVectorIndex(),
+    vectorIndex: options.vectorIndexing
+      ? new SqliteVectorIndex(join(dataDir, VECTORS_DIR, VECTOR_INDEX_FILE), openBetterSqlite3)
+      : new EmptyVectorIndex(),
     embedder: createLocalEmbedder(join(dataDir, MODELS_DIR)),
   };
 }
 
 export const MODELS_DIR = "models";
+/** The real vector index's folder in the data directory: a projection, removed at a start without `vectorIndexing`. */
+export const VECTORS_DIR = "vectors";
+const VECTOR_INDEX_FILE = "index.sqlite";
 
 /**
  * The implementations that never hold anything: the ones `productRegistry` marks `permanentlyAbsent`
@@ -227,6 +241,9 @@ export function productRegistry(adapters: {
   return createProductRegistry({
     policy: adapters.policy ?? defaultScopePolicy,
     permanentlyAbsent,
+    ...(adapters.vectorIndex instanceof SqliteVectorIndex
+      ? { projectionDataPaths: { [VECTOR_KIND]: [VECTORS_DIR] } }
+      : {}),
     membershipListeners: MEMBERSHIP_LISTENERS,
   });
 }
@@ -275,29 +292,56 @@ export function productProjectionPorts(
   return projectionPorts({ registry, db, ...adapters, projections });
 }
 
+function embedderSpace(
+  embedder: Pick<EmbeddingProvider, "describe"> | null,
+): EmbeddingSpace | null {
+  if (!embedder) return null;
+  const { modelId, revision, dimension } = embedder.describe();
+  return { modelId, revision, dimension };
+}
+
+/** The vector index as the server reads it: the bound one with the stale mark and the embedding space laid over its status (H01C3-R8). */
+export function productServedVectorIndex(
+  adapters: { vectorIndex: VectorIndex; embedder: Pick<EmbeddingProvider, "describe"> | null },
+  projections: Pick<Projections, "isStale">,
+): VectorIndex {
+  return servedVectorIndex(adapters.vectorIndex, {
+    isStale: () => projections.isStale(VECTOR_KIND),
+    embeddingSpace: () => embedderSpace(adapters.embedder),
+  });
+}
+
 /**
  * The notifications to the engine and the vector index and their start-up
- * comparison (V02-R13). A vector index rebuild resets to the embedder's model.
- * Errors are logged by class only.
+ * comparison (V02-R13). A vector index rebuild builds in the embedder's model. With `vectorIndexing`
+ * the vector write path is bound (H01C3): documents reach the embedder only through the embedding
+ * egress policy, and a start that finds the index behind registers a `projection-rebuild` job instead
+ * of embedding. Errors are logged by class only.
  */
 export function productProjections(
   db: SqlDriver,
   adapters: {
     engine: KnowledgeEngine;
     vectorIndex: VectorIndex;
-    embedder: Pick<EmbeddingProvider, "describe"> | null;
+    embedder: EmbeddingProvider | null;
   },
+  options: { vectorIndexing?: boolean } = {},
 ): Projections {
   const { engine, vectorIndex, embedder } = adapters;
   return createProjections({
     db,
     engine,
     vectorIndex,
-    embeddingSpace: () => {
-      if (!embedder) return null;
-      const { modelId, revision, dimension } = embedder.describe();
-      return { modelId, revision, dimension };
-    },
+    embeddingSpace: () => embedderSpace(embedder),
+    ...(options.vectorIndexing && embedder
+      ? {
+          vectors: {
+            embed: (texts, signal) =>
+              embedWithinPolicy(embedder, denyExternalEmbedding, texts, "document", signal),
+            requestRebuild: (name) => void requestProjectionRebuild(db, name),
+          },
+        }
+      : {}),
     onError: (projection, error) =>
       log("projection-error", { projection, error: errorClass(error) }),
   });

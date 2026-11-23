@@ -3,7 +3,7 @@
 import { ErrorResponseSchema, routes, type VectorIndex } from "@pki/contracts";
 import { migrate, writeSetting } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { MemoryVectorIndex, send, memoryDbTemplate } from "@pki/testkit";
+import { activateEmpty, MemoryVectorIndex, send, memoryDbTemplate } from "@pki/testkit";
 import { describe, expect, it, vi } from "vitest";
 import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
@@ -49,6 +49,7 @@ describe("status API: vector index", () => {
 
   it("reports what the configured index says", async () => {
     const ready = new MemoryVectorIndex();
+    await activateEmpty(ready, { modelId: "m", revision: "r", dimension: 3 });
     const rebuilding = Object.assign(new MemoryVectorIndex(), {
       status: async () => "rebuilding" as const,
     });

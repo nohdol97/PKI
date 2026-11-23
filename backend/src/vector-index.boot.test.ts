@@ -94,7 +94,6 @@ describe("vectorIndexing on", () => {
   it("rebuilds in a job after a start that found it behind, serves, and loses a deleted source's ref", async () => {
     const embedder = await ready();
     const first = await boot({ vectorIndexing: true, embedder });
-    await Promise.race([first.status()]);
     await expect.poll(async () => (await first.status()).vectorIndex).toEqual({ state: "ready" });
     registerConnectorInstance(first.db, "c1", "test-fixtures");
     saveSourceRecord(first.db, "c1", { externalId: "x1", title: "첫째", body: "alpha" });
@@ -131,7 +130,12 @@ describe("vectorIndexing on", () => {
   it("never calls an embedder that is not local, and builds nothing", async () => {
     const embedder = new FakeEmbedder({ egress: "external" });
     await embedder.prepare({ kind: "download" }, new AbortController().signal);
-    const started = await boot({ vectorIndexing: true, embedder });
+    const first = await boot({ vectorIndexing: true, embedder });
+    registerConnectorInstance(first.db, "c1", "test-fixtures");
+    saveSourceRecord(first.db, "c1", { externalId: "x1", title: "첫째", body: "alpha" });
+    await stop();
+
+    const second = await boot({ vectorIndexing: true, embedder });
     probe = openBetterSqlite3(join(dir, CANONICAL_DB_FILE));
     await expect
       .poll(
@@ -142,7 +146,8 @@ describe("vectorIndexing on", () => {
       )
       .toBeGreaterThanOrEqual(1);
     expect(embedder.calls.embed).toEqual([]);
-    expect((await started.status()).vectorIndex.state).not.toBe("ready");
+    expect(indexRefs()).toEqual([]);
+    expect((await second.status()).vectorIndex.state).not.toBe("ready");
   });
 });
 

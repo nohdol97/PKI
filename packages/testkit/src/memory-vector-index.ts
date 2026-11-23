@@ -29,7 +29,10 @@ class Generation {
   readonly vectors = new Map<IndexedRef, Float32Array>();
   /** Change sequence of each ref's last upsert or removal. */
   readonly marks = new Map<IndexedRef, number>();
-  constructor(readonly space: EmbeddingSpace) {}
+  readonly space: EmbeddingSpace;
+  constructor(space: EmbeddingSpace) {
+    this.space = space;
+  }
 
   checkDimension(vector: Float32Array) {
     if (vector.length !== this.space.dimension) {

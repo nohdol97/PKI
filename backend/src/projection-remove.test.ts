@@ -595,7 +595,7 @@ describe("the product's boot wiring (I04-T04)", () => {
   it("with an engine and a vector index that hold content: the booted runner's removal job reaches the bound engine", async () => {
     const heldEngine = new MemoryKnowledgeEngine();
     const heldVector = new MemoryVectorIndex();
-    await heldVector.reset(SPACE);
+    await activateEmpty(heldVector, SPACE);
     const bound = overriding<KnowledgeEngine>(heldEngine, {
       // the booted backend's removal reaches the bound engine
       removeSource: async (...args: Parameters<KnowledgeEngine["removeSource"]>) => {

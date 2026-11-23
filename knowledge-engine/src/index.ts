@@ -102,7 +102,7 @@ export {
   type ProjectionsOptions,
   type ReconcileOutcome,
 } from "./projections.ts";
-export { type VectorWrites } from "./vector-build.ts";
+export { sameSpace, type VectorWrites } from "./vector-build.ts";
 export {
   AUTO_DISPUTE_SETTING,
   conflictsReceiver,

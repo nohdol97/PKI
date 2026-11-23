@@ -4,7 +4,7 @@
 // previous file back. The marker's state, not memory, says where a cut-off start stands, so every step can be
 // run again. Only `pki.sqlite` changes: the lock, the ledger and the secrets file are not touched.
 import type { EmbeddingSpace, VectorIndex } from "@pki/contracts";
-import { ENGINE_KIND, VECTOR_KIND } from "@pki/knowledge-engine";
+import { ENGINE_KIND, PROJECTION_STALE_SETTINGS, VECTOR_KIND } from "@pki/knowledge-engine";
 import {
   BEFORE_RESTORE_FILE,
   RESTORE_DIR,
@@ -314,6 +314,8 @@ export function finishRestore(
         for (const target of [ENGINE_KIND, VECTOR_KIND]) {
           requestProjectionRebuild(db, target, { at: report.now });
         }
+        // a restore takes the number issuance back: a vector ref of before may name another source now (H01C3-R10)
+        writeSetting(db, PROJECTION_STALE_SETTINGS.vectorIndex, "1");
         const recorded: RestoreLast = {
           backupId: summary.backupId,
           stagedAt: summary.stagedAt,

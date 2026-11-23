@@ -19,12 +19,15 @@ import type { Projections } from "@pki/knowledge-engine";
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { BUILD_KIND, errorClass, log, type ScopeGrading } from "@pki/providers";
 import type { DerivativeRegistry, ScryptCost, SqlDriver } from "@pki/storage";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   CANONICAL_DB_FILE,
   openCanonicalDb,
   openSqlFile,
   productAdapters,
+  productServedVectorIndex,
+  VECTORS_DIR,
   productCalls,
   productConnectors,
   productEgress,
@@ -125,6 +128,12 @@ export interface BootOptions {
   engine?: KnowledgeEngine;
   /** Replaces the composition point's VectorIndex (tests). */
   vectorIndex?: VectorIndex;
+  /**
+   * Binds the real vector index (`<dataDir>/vectors`) and its write path: documents are embedded into it by a
+   * `projection-rebuild` job and by each new version. Default off (H01C3-R11): the empty index stays bound, the
+   * `vector` strategy stays off, and a `vectors` folder left by an earlier run is removed at the start.
+   */
+  vectorIndexing?: boolean;
   /** The test build's job lease, poll and test kinds (job-runner.ts); ignored by any other build. */
   testBuild?: { jobs?: RunnerTestBuild };
   /**
@@ -246,7 +255,12 @@ async function startBackend(
     options.providers ??
     productProviders(db, options.secrets, egress, cliRunsRoot(options.dataDir));
   const bound = options.engine ?? productEngine();
-  const adapters = productAdapters(options.dataDir);
+  // derived data a deletion notice would not reach is not kept while the index is not bound (H01C3-R11)
+  if (!options.vectorIndexing)
+    rmSync(join(options.dataDir, VECTORS_DIR), { recursive: true, force: true });
+  const adapters = productAdapters(options.dataDir, {
+    ...(options.vectorIndexing ? { vectorIndexing: true } : {}),
+  });
   if (options.vectorIndex) adapters.vectorIndex = options.vectorIndex;
   if (options.embedder !== undefined) adapters.embedder = options.embedder;
   // the registry is built once, from the implementations bound; the backend holds the engine only as it wraps it (I04-R13).
@@ -270,7 +284,11 @@ async function startBackend(
   });
   const entries = productEntries(registry);
   const engine = productVisibleEngine(db, registry, bound);
-  const projections = productProjections(db, { engine, ...adapters });
+  const projections = productProjections(
+    db,
+    { engine, ...adapters },
+    { ...(options.vectorIndexing ? { vectorIndexing: true } : {}) },
+  );
   const projectionPorts =
     options.projectionPorts ??
     productProjectionPorts(
@@ -437,6 +455,8 @@ async function startBackend(
     allowedOrigins: options.allowedOrigins,
     port: options.port ?? 0,
     ...adapters,
+    // the server reads the index with the stale mark and the embedding space laid over its status (H01C3-R8)
+    vectorIndex: productServedVectorIndex(adapters, projections),
     connectors,
     db,
     dataDirectory: options.dataDir,
@@ -501,6 +521,7 @@ async function startBackend(
         await runner.stop();
         await projections.drain();
         await localFiles.close();
+        (adapters.vectorIndex as { close?: () => void }).close?.();
       },
     },
     db,
