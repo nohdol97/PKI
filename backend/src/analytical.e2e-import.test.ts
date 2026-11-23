@@ -101,12 +101,17 @@ it("analytical.e2e-import: a CSV from an approved folder becomes a Dataset, the 
   const call = (path: string, method = "GET", body?: unknown) =>
     send(server.port, path, headers, method, body);
   const sync = async () => {
-    for (let i = 0; i < 2; i++) {
-      await new Promise((r) => setTimeout(r, 10));
-      expect(
-        (await call(routes.syncConnector.path, "POST", { connectorId: "local-files" })).status,
-      ).toBe(200);
-    }
+    // `instance-busy` is the lock held by the settle-triggered sync (by design): sync until one runs
+    await vi.waitFor(
+      async () => {
+        const synced = await call(routes.syncConnector.path, "POST", {
+          connectorId: "local-files",
+        });
+        expect(synced.status).toBe(200);
+        expect((synced.body as { stopped?: string }).stopped).not.toBe("instance-busy");
+      },
+      { timeout: 20_000, interval: 50 },
+    );
   };
   const analytical = async () => (await call(routes.analytical.path)).body as AnalyticalList;
 
