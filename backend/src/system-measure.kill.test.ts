@@ -25,6 +25,8 @@ describe.skipIf(process.platform === "win32")("system-measure kill (H03-C2, C3)"
     expect(value.duplicateItems).toBe(0);
     expect(value.firstJobAfterRestartMs).toBeGreaterThan(0);
     expect(value.allJobsDoneMs).toBeGreaterThanOrEqual(value.firstJobAfterRestartMs);
+    expect(value.note).toContain("reclaims at its start"); // P7F-R2: no longer "waits for its lease"
+    expect(value.note).not.toContain("waits for its lease");
     expect(value.leaseSource).toBe("test build override");
     expect(value.leaseMs).toBe(1000);
     for (const pid of trace.pids) expect(alive(pid)).toBe(false);

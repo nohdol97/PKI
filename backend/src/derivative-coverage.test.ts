@@ -461,6 +461,8 @@ describe("derivatives.data-dir", () => {
     writeFileSync(join(dir, "restore/pending.json"), "");
     mkdirSync(join(dir, "backup-tmp"));
     writeFileSync(join(dir, "backup-tmp/x.sqlite"), "");
+    // P7F-R1: the backend's process lock and its journal while held
+    for (const f of ["backend.lock", "backend.lock-journal"]) writeFileSync(join(dir, f), "");
     expect(checkDataDirectory(dir, registry)).toEqual([]);
   });
 

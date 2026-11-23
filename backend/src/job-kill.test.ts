@@ -78,11 +78,12 @@ const posixOnly = describe.skipIf(process.platform === "win32");
 /**
  * Starts the backend; `pause` lists the targets whose test-effect jobs wait to be
  * killed before their result, `pauseInWrite` those that stop inside the result
- * transaction.
+ * transaction; `leaseMs` is the child's job lease.
  */
 async function start(
   pause: readonly string[] = [],
   pauseInWrite: readonly string[] = [],
+  leaseMs: number = LEASE_MS,
 ): Promise<Backend> {
   const ready = join(dir, `ready-${live.length}`);
   const child = spawn(process.execPath, [VITEST, "run", "--config", CHILD_CONFIG, "--root", ROOT], {
@@ -97,7 +98,7 @@ async function start(
       PKI_KILL_RUN_LOG: runLog,
       PKI_KILL_PAUSE: pause.join(","),
       PKI_KILL_PAUSE_WRITE: pauseInWrite.join(","),
-      PKI_KILL_LEASE_MS: String(LEASE_MS),
+      PKI_KILL_LEASE_MS: String(leaseMs),
       PKI_KILL_READY: ready,
     },
   });
@@ -176,6 +177,32 @@ posixOnly("kill.resume (I03-R24, C1)", () => {
     expect(runsOf(b).map((r) => r.attempt)).toEqual([1, 2]);
     expect(runsOf(c)).toHaveLength(1);
     expect(withDb((db) => readJob(db, b)?.attempts)).toBe(2);
+  }, 90_000);
+});
+
+posixOnly("kill.reclaim-at-start (P7F-C1)", () => {
+  it("finishes every job within 20 s of the restart with a 60 s lease, the killed one run twice, every effect once", async () => {
+    const [a, b, c] = register("a", "b", "c") as [number, number, number];
+    const first = await start(["b"], [], 60_000);
+    await until("job b to run", () => runsOf(b).length === 1, first.child);
+    await kill(first);
+
+    const restarted = Date.now();
+    const second = await start([], [], 60_000);
+    await until(
+      "every job to finish",
+      () => statuses([a, b, c]).every((s) => s === "succeeded"),
+      second.child,
+    );
+    // the killed job's lease (60 s) had not run out: the new backend took it at its start
+    expect(Date.now() - restarted).toBeLessThan(20_000);
+    await kill(second);
+
+    const effects = withDb(readTestEffects);
+    expect([a, b, c].map((id) => effects.get(id))).toEqual([1, 1, 1]);
+    expect(runsOf(a)).toHaveLength(1);
+    expect(runsOf(b).map((r) => r.attempt)).toEqual([1, 2]);
+    expect(runsOf(c)).toHaveLength(1);
   }, 90_000);
 });
 

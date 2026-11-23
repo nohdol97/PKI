@@ -80,6 +80,7 @@ import {
   NOTIFY_JOB_KIND,
   REFLECT_JOB_KIND,
 } from "@pki/storage";
+import { reclaimAtStart, takeBackendLock, type BackendLock } from "./backend-lock.ts";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
 import { needsRebuild, reapplyAtStart } from "./ledger-boot.ts";
@@ -228,8 +229,13 @@ export function bootBackend(options: BootOptions): Promise<BootedBackend> {
       log("restore-rollback-failed", { error: errorClass(error) });
     }
   });
+  // P7F-R1: a failed start frees the backend lock it took
+  started.catch(() => locks.get(holder)?.close());
   return started;
 }
+
+/** The backend lock of each start, by its holder: freed on close and on a failed start (P7F-R1). */
+const locks = new WeakMap<object, BackendLock>();
 
 async function startBackend(
   options: BootOptions,
@@ -324,6 +330,13 @@ async function startBackend(
       embeddingSpace: embedderSpace(adapters.embedder),
       now: new Date(systemClock.now()),
     });
+  }
+  // P7F-R1, R2: the one backend of this folder has no live holder of a lease: what is `running` is a dead
+  // backend's and is reclaimed now, before the runner exists. Without the lock nothing is taken
+  const lock = takeBackendLock(options.dataDir);
+  if (lock) {
+    locks.set(holder, lock);
+    reclaimAtStart(db, new Date(systemClock.now()));
   }
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
@@ -538,6 +551,7 @@ async function startBackend(
         await projections.drain();
         await localFiles.close();
         (adapters.vectorIndex as { close?: () => void }).close?.();
+        locks.get(holder)?.close();
       },
     },
     db,

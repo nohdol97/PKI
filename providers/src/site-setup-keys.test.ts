@@ -67,6 +67,7 @@ describe("site-setup runtime setting keys (V01-R19)", () => {
 
   it("the entry exports the settings the product reads", () => {
     expect(implemented).toEqual([
+      "providers.callBudget.maxCalls",
       "providers.cli.background",
       "providers.default",
       "providers.openaiCompatible.baseUrl",

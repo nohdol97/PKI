@@ -4,6 +4,7 @@
 import { CONNECTOR_NOT_IMPLEMENTED } from "@pki/contracts";
 import {
   BUILD_KIND,
+  CALL_BUDGET_MAX_CALLS_SETTING,
   DEFAULT_PROVIDER_SETTING,
   OPENAI_BASE_URL_SETTING,
   OPENAI_MODEL_SETTING,
@@ -257,6 +258,23 @@ describe("productCalls", () => {
         status: "blocked",
         reason: "no-provider",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("takes the call budget from the setting: 500 is 500, none or 0 is the default 60 (P7F-C3)", () => {
+    const db = openCanonicalDb(join(root, "PKI"));
+    try {
+      const maxCalls = () =>
+        productCalls(db, productEgress(db), { providers: [] }).broker.budgetUsage().maxCalls;
+      expect(maxCalls()).toBe(60);
+      writeSetting(db, CALL_BUDGET_MAX_CALLS_SETTING, "500");
+      expect(maxCalls()).toBe(500);
+      for (const outside of ["0", "10001", "1.5"]) {
+        writeSetting(db, CALL_BUDGET_MAX_CALLS_SETTING, outside);
+        expect(maxCalls()).toBe(60);
+      }
     } finally {
       db.close();
     }

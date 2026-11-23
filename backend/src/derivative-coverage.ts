@@ -231,6 +231,7 @@ export const OPERATIONAL_DATA_ENTRIES: readonly RegExp[] = [
   /^pki\.sqlite\.before-restore$/,
   /^restore(\/|$)/,
   /^backup-tmp(\/|$)/,
+  /^backend\.lock(-journal)?$/, // the backend's own process lock (P7F-R1), empty; the journal lives while it is held
 ];
 
 /**

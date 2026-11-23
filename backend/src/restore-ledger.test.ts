@@ -122,7 +122,7 @@ const importLine = (patch: Record<string, unknown>) => {
 const importLines = (text: string) =>
   call(routes.imports.path, { instanceId: "api-inst", content: text });
 
-/** What a data folder holds before the first start: two sources, a consent and a running job. */
+/** What a data folder holds before the first start: two sources, a consent and a job that is due. */
 function seed(): void {
   const db = openCanonicalDb(data);
   registerConnectorInstance(db, "c1", "jsonl-import");
@@ -140,12 +140,19 @@ function seed(): void {
     allowedClasses: ["public"],
     grantedAt: "2026-11-23T00:00:00.000Z",
   });
-  // a job a handler of the old process held: its lease is alive in the copy that goes into the backup
   registerJob(db, { kind: "zz-held-job", at: new Date(Date.now() - 1000) });
-  const at = new Date();
-  expect(leaseNextJob(db, { kinds: ["zz-held-job"], now: at, leaseMs: 3_600_000 })).toBeDefined();
-  expect(db.all("SELECT count(*) AS n FROM jobs WHERE status = 'running'")[0]?.n).toBe(1);
   db.close();
+}
+
+/** A job a handler of this process holds: its lease is alive in the copy that goes into the backup. */
+function holdJob(db: SqlDriver): void {
+  expect(
+    leaseNextJob(db, { kinds: ["zz-held-job"], now: new Date(), leaseMs: 3_600_000 }),
+  ).toBeDefined();
+  expect(
+    db.all("SELECT count(*) AS n FROM jobs WHERE kind = 'zz-held-job' AND status = 'running'")[0]
+      ?.n,
+  ).toBe(1);
 }
 
 /** Backs up the running backend's database, then stages that file for the next start. */
@@ -184,6 +191,7 @@ describe("restore.ledger (H01-C2c)", () => {
   it("a deleted source, a revoked access and a withdrawn consent stay gone after an older backup is restored; the running job and the read folder are taken back", async () => {
     seed();
     await start();
+    holdJob(live().db); // after the start: a start reclaims what a dead backend left running (P7F-R2)
     expect((await importLines(importLine({ content: `접근 본문 ${REVOKED}` }))).status).toBe(200);
     const approved = await call(routes.approveLocalLocation.path, {
       type: "folder",
