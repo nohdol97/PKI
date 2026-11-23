@@ -8,7 +8,8 @@
 // backend's requests for a secret over the parent channel.
 // Switches of source runs (development and tests): --pki-data-dir, --pki-fixtures
 // (layout.ts); the production build has none and refuses to start with a
-// debugging switch (debugging.ts). Tests move userData with
+// debugging switch (debugging.ts). One switch is the installer's, in every build:
+// --pki-uninstall-data=keep|delete (data-removal.ts), judged before Electron's lock. Tests move userData with
 // Chromium's own --user-data-dir (V01-T15).
 import {
   app,
@@ -19,6 +20,7 @@ import {
   MessageChannelMain,
   nativeImage,
   Notification,
+  powerMonitor,
   protocol,
   safeStorage,
   session,
@@ -27,7 +29,9 @@ import {
   utilityProcess,
 } from "electron";
 import { dataDirectory } from "@pki/storage";
+import { autostartMenuItem } from "./autostart.ts";
 import { DATA_IN_USE, lockDataDirectory, type DataLock } from "./data-lock.ts";
+import { removeUserData } from "./data-removal.ts";
 import { url as inspectorUrl } from "node:inspector";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,6 +127,11 @@ function createTray() {
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: "열기", click: bringToFront },
+        autostartMenuItem({
+          packaged: app.isPackaged,
+          get: () => app.getLoginItemSettings().openAtLogin,
+          set: (enabled) => app.setLoginItemSettings({ openAtLogin: enabled }),
+        }),
         { label: "종료", click: () => app.quit() },
       ]),
     );
@@ -175,6 +184,8 @@ async function run() {
     onGiveUp: (code) => console.error(`PKI backend exited (${code}); not restarted again`),
   });
   const supervisor = backend;
+  // the OS woke from sleep: the backend checks its periods now (H02A-R11)
+  powerMonitor.on("resume", () => supervisor.resumed());
   protocol.handle(
     APP_SCHEME,
     createAppHandler({ webRoot: WEB_ROOT, backendUrl: () => supervisor.url() }),
@@ -252,6 +263,23 @@ function takeDataLock(): boolean {
   return dataLock !== undefined;
 }
 
+const UNINSTALL_SWITCH = "pki-uninstall-data";
+
+/** The installer's call (H02A-R6): decide about the data folder, print, exit. No window, no backend. */
+function uninstallData(): void {
+  // the OS registration is switched off once Electron is ready; no window is made either way
+  void app.whenReady().then(() => {
+    const { code, line } = removeUserData({
+      choice: app.commandLine.getSwitchValue(UNINSTALL_SWITCH),
+      dir: dataPath,
+      lock: lockDataDirectory,
+      disableAutostart: () => app.setLoginItemSettings({ openAtLogin: false }),
+    });
+    if (line) console.error(line);
+    app.exit(code);
+  });
+}
+
 const debugging =
   REFUSE_DEBUGGING &&
   debuggingRequested({
@@ -265,6 +293,9 @@ if (debugging) {
   // before the window and the backend exist: nothing to reach through the door
   console.error("PKI: refusing to start with a debugging switch");
   app.exit(1);
+} else if (app.commandLine.hasSwitch(UNINSTALL_SWITCH)) {
+  // before Electron's lock: a PKI running on the same userData must answer 1, not be "handed over" as 0
+  uninstallData();
 } else if (!app.requestSingleInstanceLock()) {
   // Electron's lock lives in userData: it only hands focus to the first run.
   app.exit(0);
