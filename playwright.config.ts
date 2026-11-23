@@ -15,6 +15,7 @@ export default defineConfig<{ target: "browser" | "electron" }>({
       testIgnore: [
         "apps/desktop/**",
         "backend/src/v02-seed.e2e.ts",
+        "backend/src/data-dir-check.e2e.ts",
         "backend/src/v02-double.e2e.ts",
         "backend/src/v02-double.hook.e2e.ts",
         "backend/src/v02-shell.e2e.ts",
@@ -30,6 +31,7 @@ export default defineConfig<{ target: "browser" | "electron" }>({
         "apps/web/e2e/provider-settings.e2e.ts",
         "apps/web/e2e/evidence.e2e.ts",
         "apps/web/e2e/v02-flow.e2e.ts",
+        "apps/web/e2e/local-files.e2e.ts",
         "apps/desktop/e2e/**/*.e2e.{ts,tsx}",
       ],
       dependencies: ["build-web"],
