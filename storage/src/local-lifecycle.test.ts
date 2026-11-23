@@ -10,7 +10,7 @@ import {
   type EntryFields,
   type NewEntry,
 } from "./local-files.ts";
-import { closeLocation, relinkLocation, reopenLocation } from "./local-lifecycle.ts";
+import { closeLocation, reimportEntry, relinkLocation, reopenLocation } from "./local-lifecycle.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
@@ -131,5 +131,26 @@ describe("relinkLocation", () => {
         rootIno: "1",
       }),
     ).toBe(false);
+  });
+});
+
+describe("reimportEntry", () => {
+  it("makes a skipped entry to look at again with a higher revision and a new sequence; an unknown path is not found", () => {
+    const index = createLocalFileIndex(db);
+    const skipped: NewEntry = {
+      ...present("s.pdf"),
+      state: "skipped",
+      skipReason: "corrupt",
+      skippedAt: AT,
+    };
+    index.insertEntry(skipped, []);
+    const before = index.entryOf(skipped.externalId)!;
+
+    expect(reimportEntry(db, loc, "s.pdf")).toEqual({ ok: true });
+
+    const after = index.entryOf(skipped.externalId)!;
+    expect(after).toMatchObject({ state: "skipped", mtimeNs: null, size: null, revision: 2 });
+    expect(after.seq).toBeGreaterThan(before.seq);
+    expect(reimportEntry(db, loc, "nope.pdf")).toEqual({ ok: false, reason: "not-found" });
   });
 });

@@ -8,6 +8,9 @@ import type {
   LocalApprovalRequest,
   LocalConfirmDeletionsRequest,
   LocalLocationIdRequest,
+  LocalReimportRequest,
+  LocalSkippedRequest,
+  LocalSkippedResponse,
   LocalRelinkRequest,
   LocalFilesSettings,
   LocalFilesSettingsPatch,
@@ -23,6 +26,7 @@ import {
   listLocations,
   newLocalId,
   readSetting,
+  reimportEntry,
   relinkLocation,
   reopenLocation,
   writeSetting,
@@ -178,6 +182,9 @@ export type ActionAnswer =
   | { error: "bad-request" }
   | { error: "count-mismatch" };
 
+export type ReimportAnswer =
+  { outcome: "queued" } | { error: "not-found" } | { error: "not-lifted" };
+
 export interface LocalLocations {
   approve(request: LocalApprovalRequest): Promise<ApprovalAnswer>;
   relink(request: LocalRelinkRequest): Promise<RelinkAnswer>;
@@ -185,6 +192,10 @@ export interface LocalLocations {
   pause(request: LocalLocationIdRequest): ActionAnswer;
   /** A paused location is read again; the next pass decides its state (I02B-R7). */
   resume(request: LocalLocationIdRequest): ActionAnswer;
+  /** The skipped files of a location, with the user's deletions from the last pass (I02B-R33, R36). */
+  skipped(request: LocalSkippedRequest): LocalSkippedResponse | { error: "not-found" };
+  /** A skipped or user-deleted file is read again; a user deletion needs its tombstone lifted (I02B-R33). */
+  reimport(request: LocalReimportRequest): ReimportAnswer;
   /** The held deletions are confirmed by the count the user saw (I02B-R8). */
   confirmDeletions(request: LocalConfirmDeletionsRequest): ActionAnswer;
   list(): LocalLocationList;
@@ -359,6 +370,38 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
         undefined,
         () => confirmDeletions(db, locationId, count).ok || "count-mismatch",
       ),
+    skipped({ locationId, offset = 0, limit = 100 }) {
+      if (!listLocations(db).some((l) => l.id === locationId)) return { error: "not-found" };
+      // a user deletion keeps no path in the index (R33): the last pass's report is where it is named
+      const forgotten = (options.lastReport?.()?.locations ?? [])
+        .filter((r) => r.locationId === locationId)
+        .flatMap((r) => r.forgottenPaths)
+        .map((relativePath) => ({ relativePath, reason: "user-deleted" as const, since: null }));
+      const skipped = index
+        .entriesOfLocation(locationId)
+        .filter((e) => e.state === "skipped" && e.relativePath !== null)
+        .map((e) => ({
+          relativePath: e.relativePath as string,
+          reason: e.skipReason as LocalSkippedResponse["items"][number]["reason"],
+          since: e.skippedAt,
+        }));
+      const all = [...skipped, ...forgotten].sort((a, b) =>
+        a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0,
+      );
+      return { items: all.slice(offset, offset + limit), total: all.length };
+    },
+    reimport({ locationId, relativePath }) {
+      const result = reimportEntry(db, locationId, relativePath);
+      if (result.ok) {
+        try {
+          options.onApproved(); // a sync reads it: the same registration an approval makes
+        } catch (error) {
+          log("local-sync-register-failed", { error: errorClass(error) });
+        }
+        return { outcome: "queued" };
+      }
+      return { error: result.reason };
+    },
     list: () => ({
       locations: listLocations(db).map(view),
       normalizerUnavailable: options.normalizerUnavailable(),

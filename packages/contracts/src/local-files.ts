@@ -190,6 +190,11 @@ export interface LocalLocationReport {
   limitExceeded: boolean;
   /** The root was missing or was not the folder approved: nothing was read or deleted (I02B-R7). */
   rootUnavailable: boolean;
+  /**
+   * Paths of files the user deleted from the product that are still in the location (I02B-R33). Only
+   * the walk knows them (the index keeps a keyed hash), so the skipped list reads them from here.
+   */
+  forgottenPaths: string[];
 }
 
 export interface LocalPassReport {
@@ -278,6 +283,37 @@ export const LocalRevokeResponseSchema = z.union([
   z.strictObject({ state: z.literal("revoking"), remaining: z.int().positive() }),
 ]);
 export type LocalRevokeResponse = z.infer<typeof LocalRevokeResponseSchema>;
+
+/** One page of the skipped list of a location (I02B-R36). */
+export const LocalSkippedRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().min(1).max(500).default(100),
+});
+export type LocalSkippedRequest = z.input<typeof LocalSkippedRequestSchema>;
+
+/** A skip reason, or `user-deleted` for a file the user removed from the product. */
+export const LocalSkippedReasonSchema = z.enum([...LOCAL_SKIP_REASON_CODES, "user-deleted"]);
+export const LocalSkippedResponseSchema = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      relativePath: z.string(),
+      reason: LocalSkippedReasonSchema,
+      /** ISO time the file was first skipped for this reason; null for a user deletion (not stored). */
+      since: z.string().nullable(),
+    }),
+  ),
+  total: z.int().nonnegative(),
+});
+export type LocalSkippedResponse = z.infer<typeof LocalSkippedResponseSchema>;
+
+/** A skipped file read again: the location and the path the list showed (I02B-R33). */
+export const LocalReimportRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+  relativePath: z.string().min(1).max(4096),
+});
+export type LocalReimportRequest = z.infer<typeof LocalReimportRequestSchema>;
+export const LocalReimportResponseSchema = z.strictObject({ outcome: z.literal("queued") });
 
 const PositiveInt = z.int().positive();
 const walkShape = {

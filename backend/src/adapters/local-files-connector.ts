@@ -276,6 +276,7 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       pending: 0,
       limitExceeded: false,
       rootUnavailable: false,
+      forgottenPaths: [],
     };
     pass.reports.set(location.id, report);
     const problem = await rootProblem(fs, location);
@@ -362,8 +363,10 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       const e = byPath.get(f.path);
       if (!e) {
         const forgotten = p.index.findByPath(location.id, f.path);
-        if (forgotten?.state === "forgotten") report.skipped += 1;
-        else fresh.push(f);
+        if (forgotten?.state === "forgotten") {
+          report.skipped += 1;
+          report.forgottenPaths.push(f.path);
+        } else fresh.push(f);
         continue;
       }
       if (e.contentHash !== null) hashed.set(f.path, e.contentHash);
@@ -563,7 +566,10 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
         },
         hash === null ? [] : sameContentPaths(hash),
       );
-      if (!result.applied && result.reason === "forgotten") report.skipped += 1;
+      if (!result.applied && result.reason === "forgotten") {
+        report.skipped += 1;
+        report.forgottenPaths.push(f.path);
+      }
     }
     for (const [path, reason] of skips) {
       const kept = byPath.get(path);

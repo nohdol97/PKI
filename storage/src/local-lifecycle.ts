@@ -9,6 +9,7 @@ import {
   takeLocalSeq,
   type LocationState,
 } from "./local-files.ts";
+import { keyedTextHash } from "./identity.ts";
 import { findSourceId, readLastRevision } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 import { readTombstoneState } from "./tombstones.ts";
@@ -186,4 +187,55 @@ export function revokeBatch(
     setLocationState(tx, id, "revoking", null);
   }
   return { deleted: batch.length, remaining, done };
+}
+
+export type ReimportResult = { ok: true } | { ok: false; reason: "not-found" | "not-lifted" };
+
+/**
+ * A skipped file is read again (I02B-R33): the entry is made "to look at" with a revision above the
+ * last, so the next pass reads it and announces it. A file the user deleted is a `forgotten` entry; it is
+ * read again only when its source's tombstone was lifted, judged in this transaction, and then it is a
+ * new version of the same source (the entry keeps its id). The path is written to the row only then.
+ */
+export function reimportEntry(
+  db: SqlDriver,
+  locationId: string,
+  relativePath: string,
+): ReimportResult {
+  return db.transaction(
+    () => {
+      const pathHash = keyedTextHash(db, "local-path", `${locationId}\n${relativePath}`);
+      const row =
+        db.all("SELECT * FROM local_file_entries WHERE location_id = ? AND relative_path = ?", [
+          locationId,
+          relativePath,
+        ])[0] ??
+        db.all(
+          "SELECT * FROM local_file_entries WHERE location_id = ? AND state = 'forgotten' AND path_hash = ?",
+          [locationId, pathHash],
+        )[0];
+      if (!row) return { ok: false, reason: "not-found" };
+      const externalId = row.external_id as string;
+      if (row.state === "forgotten") {
+        const sourceId = findSourceId(db, LOCAL_FILES_INSTANCE_ID, locationId, externalId);
+        const tombstone = sourceId === undefined ? undefined : readTombstoneState(db, sourceId);
+        if (tombstone && tombstone.liftedAt === null) return { ok: false, reason: "not-lifted" };
+        db.run(
+          `UPDATE local_file_entries SET state = 'present', relative_path = ?, path_hash = ?,
+             size = NULL, mtime_ns = NULL, content_hash = NULL, content_keyed_hash = NULL, file_no = NULL,
+             revision = ?, pending_delete = 0, skip_reason = NULL, skipped_at = NULL, skip_limits = NULL,
+             seq = ? WHERE external_id = ?`,
+          [relativePath, pathHash, (row.revision as number) + 1, takeLocalSeq(db), externalId],
+        );
+        return { ok: true };
+      }
+      if (row.state !== "skipped") return { ok: false, reason: "not-found" };
+      db.run(
+        "UPDATE local_file_entries SET size = NULL, mtime_ns = NULL, revision = ?, seq = ? WHERE external_id = ?",
+        [(row.revision as number) + 1, takeLocalSeq(db), externalId],
+      );
+      return { ok: true };
+    },
+    { immediate: true },
+  );
 }
