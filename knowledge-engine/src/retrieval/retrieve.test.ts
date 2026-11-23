@@ -348,3 +348,21 @@ describe("X01-R12 what a search hides takes no hit slot", () => {
     expect(await hitsWith(10)).toEqual(without);
   });
 });
+
+describe("X01-R6 R12 a hidden newer version leaves no trace in the marks", () => {
+  it("does not mark a visible past version stale because a newer version the registry hides exists", async () => {
+    const w = world();
+    const newer = String(w.version.get("mail-x01-0004-v2"));
+    const hiding: typeof registry = {
+      ...registry,
+      visible: (db, refs, purpose) =>
+        registry
+          .visible(db, refs, purpose)
+          .filter((r) => !(purpose === "search" && r.kind === "source" && r.id === newer)),
+    };
+    const found = await retrieve(w.db, hiding, expected.questions.releaseDate?.text as string, {});
+    expect(found.hits.map((h) => h.versionId)).toContain(w.version.get("mail-x01-0004"));
+    expect(found.hits.map((h) => h.versionId)).not.toContain(Number(newer));
+    expect(found.notes.filter((n) => n.kind === "stale")).toEqual([]);
+  });
+});
