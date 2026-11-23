@@ -72,7 +72,7 @@
 
 ## 배포처 설정 체크리스트
 
-항목마다 무엇을 하는지, 어떤 종류의 값이 필요한지, 끝났다는 것을 무엇으로 확인하는지 적었다. 번호(`S01` 등)는 구현 spec의 비목표 항목과 일대일로 대응한다([V01](specs/2026-11-21-V01-vertical-skeleton.md) S01~S13, [V02](specs/2026-11-21-V02-vertical-slice.md) S14~S15, [I02-A](specs/2026-11-21-I02-document-normalization.md) S16~S17, [I01](specs/2026-11-21-I01-connector-sdk.md) S18, [I03](specs/2026-11-21-I03-persistent-queue.md) S19~S20, [I04](specs/2026-11-21-I04-invalidation.md) S21~S22, [I05](specs/2026-11-22-I05-site-connector-registration.md) S26~S27, [I06](specs/2026-11-22-I06-connector-credentials.md) S28~S29, [I07](specs/2026-11-22-I07-installed-scopes-file.md) S30~S31). 이어서 [S01](specs/2026-11-22-S01-semantic-registry.md) S32. 이어서 [S02](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) S33. 이어서 [S03](specs/2026-11-22-S03-analytical-semantic.md) S34. 이어서 [K01](specs/2026-11-23-K01-wiki-projection.md) S35. 이어서 [X01](specs/2026-11-23-X01-retrieval-qa.md) S37~S41(S36은 P03). 이어서 [I02-B](specs/2026-11-22-I02-local-file-import.md) S23~S25. 이어서 [X02](specs/2026-11-23-X02-explore-ux.md) S42.
+항목마다 무엇을 하는지, 어떤 종류의 값이 필요한지, 끝났다는 것을 무엇으로 확인하는지 적었다. 번호(`S01` 등)는 구현 spec의 비목표 항목과 일대일로 대응한다([V01](specs/2026-11-21-V01-vertical-skeleton.md) S01~S13, [V02](specs/2026-11-21-V02-vertical-slice.md) S14~S15, [I02-A](specs/2026-11-21-I02-document-normalization.md) S16~S17, [I01](specs/2026-11-21-I01-connector-sdk.md) S18, [I03](specs/2026-11-21-I03-persistent-queue.md) S19~S20, [I04](specs/2026-11-21-I04-invalidation.md) S21~S22, [I05](specs/2026-11-22-I05-site-connector-registration.md) S26~S27, [I06](specs/2026-11-22-I06-connector-credentials.md) S28~S29, [I07](specs/2026-11-22-I07-installed-scopes-file.md) S30~S31). 이어서 [S01](specs/2026-11-22-S01-semantic-registry.md) S32. 이어서 [S02](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) S33. 이어서 [S03](specs/2026-11-22-S03-analytical-semantic.md) S34. 이어서 [K01](specs/2026-11-23-K01-wiki-projection.md) S35. 이어서 [X01](specs/2026-11-23-X01-retrieval-qa.md) S37~S41(S36은 P03). 이어서 [I02-B](specs/2026-11-22-I02-local-file-import.md) S23~S25. 이어서 [X02](specs/2026-11-23-X02-explore-ux.md) S42. 이어서 [P02](specs/2026-11-23-P02-notifications-digest-timeline.md) S44.
 
 ### 수집
 
@@ -215,6 +215,20 @@
 이 절의 한 항목은 [K02 spec](specs/2026-11-23-K02-reflection-consolidation.md)의 배포처 후속 항목이다. 용어: **점검 발견**은 규칙이 "고쳐 볼 만하다"고 알리는 후보이며 지식이 아니고, 받아들이거나 닫는 것은 사용자다. **오탐**은 사용자가 닫은 발견, **미탐**은 사용자가 "놓친 것"으로 알린 것이다. **LLM 의견**은 발견 하나에 Provider가 붙이는 판정(같음·관련·무관)이다.
 
 - [ ] **S43 실제 자료에서 점검 규칙의 오탐·미탐을 모으고, 배포처 범위 정책을 건 채로 "점검"을 열어 보고, LLM 의견을 켜기 전에 전송 정책과 호출 예산을 확인하고, 실제 규모에서 재검토 시간을 재어 기록.** 공용 저장소는 점검을 합성 자료와 개발 OS(macOS)에서만 시험했고, 범위 정책은 한 범위를 거부하는 시험용 정책으로만 걸어 보았으며, LLM 의견은 test double Provider로만 시험했다. 필요한 것: 실제 수집기로 쌓은 자료(S01~S04), S21의 범위 정책(`ScopePolicy`)을 단 설치본, 의견을 켜 볼 때는 실제 Provider와 그 전송 정책(S05~S07). 하는 일: ① 점검을 한 주기 이상 돌리며 규칙별 오탐·미탐 수("점검" 화면의 규칙별 수)를 모아 문턱(K02-D5·R6의 상한과 `missing-link`의 원본 2개·5쌍)을 정한다. ② 배포처 범위 정책을 건 채로 "점검"을 열어, 허용되지 않은 범위 원본에 기댄 발견이 목록과 수에 나오지 않는지 본다(합성 시험의 K02-C3b ③을 실제 정책으로 되풀이하는 것이다). ③ `reflection.refine`을 켜기 전에, 의견에 실리는 원본의 등급이 배포처 전송 정책에서 허용되는지, 호출 예산(S20)이 추출을 밀어내지 않는지 잰다. 켜는 API·화면이 없어 저장소의 설정 쓰기 경로로 `on`을 쓴다. ④ 실제 규모의 정본에서 정본을 바꾸는 가져오기에 dirty 트리거가 더하는 시간과, 재검토 한 번의 시간(일간·주간)을 잰다. 확인: 정책이 거부한 범위의 원본에서만 나온 발견은 목록에도 수에도 없고 결정 요청은 없는 발견과 같은 답이며, 의견이 켜진 뒤 동의·전송 정책이 막으면 의견 작업은 `held`로 남고 발견은 의견 없이 그대로 보인다. 기록할 것: 규칙별 열림·받아들임·오탐·미탐 수, 재검토 한 번의 시간과 본 묶음 수, 가져오기 시간의 증가, 의견 호출 수. 글·항목 이름은 기록하지 않는다. 공용 이슈에는 숫자만 올린다.
+
+### 알림과 OS 통로의 실측
+
+이 절의 한 항목은 [P02 spec](specs/2026-11-23-P02-notifications-digest-timeline.md)의 배포처 후속 항목이다. 용어: **피드**는 앱 안의 알림 목록이고 OS 권한과 무관하게 항상 쌓인다. **OS 알림**은 Electron 쉘만 띄우는, 건수만 적힌 고정 문구의 토스트다. **조용한 시간**은 OS 알림만 미루는 시간대다.
+
+| 키 | 뜻 | 기본값 |
+|---|---|---|
+| `notifications.os` | `on` 또는 `off`(정확히 `off`일 때만 끔). 끄면 OS 통로만 `unavailable`로 끝나고 피드는 그대로 쌓인다. 설정 화면의 "알림 설정"과 `POST /api/settings/notifications`로 바꾼다 | 켬 |
+| `notifications.quietHours` | `{"enabled":true,"start":"22:00","end":"08:00"}` 꼴의 JSON. 이 시간대에는 OS 알림을 띄우지 않고 쌓아 두었다가 끝나면 건수 하나로 보낸다. 시각은 실행하는 PC의 시간대다. 값이 틀리면 기본값으로 읽는다 | 22:00~08:00, 켬 |
+| `notifications.snoozeUntil` | 이 시각(ISO)까지 모든 OS 알림을 보류한다. 비어 있거나 틀리면 일시 중지가 없다 | 없음 |
+
+작업 `notify`의 세 주기(`scan` 10분마다, `daily` 매일 09:00, `weekly` 월요일 09:10)는 활동 화면의 주기 목록에서 끄거나 바꾼다.
+
+- [ ] **S44 Windows 11 설치본에서 OS 알림과 트레이를 확인하고, 배포처 범위 정책이 용도 `notify`에 답하는 값을 정하고, 실제 자료로 한 주 이상 돌려 문턱과 시각을 정해 기록.** 공용 저장소는 알림을 합성 자료와 개발 OS(macOS)에서, 쉘 쪽은 가짜 Electron 객체의 단위 시험으로만 확인했고 실제 토스트는 한 번도 띄우지 않았다. 필요한 것: 설치 파일을 만드는 절차(S10)와 깨끗한 Windows 11, S21의 범위 정책(`ScopePolicy`)을 단 설치본, 실제 수집기로 쌓은 자료(S01~S04)와 Insight가 생길 만큼의 사용 기간. 하는 일: ① 설치본에서 즉시 알림 하나를 만들어(문턱 이상의 Insight) 토스트가 뜨는지, 잠금 화면과 알림 센터에 "확인할 변경이 N건 있습니다" 꼴의 건수 문구만 보이는지(Insight의 이름·문장이 없는지), 트레이 아이콘의 툴팁이 읽지 않은 수인지 본다. 앱 ID(AppUserModelID)가 없을 때 토스트가 뜨지 않거나 보낸 곳 이름이 이상하게 나오면 설치본 작업(S10·H02)에 넘긴다. ② 집중 지원(방해 금지)을 켰을 때와 Windows 설정에서 이 앱의 알림 권한을 끈 때 피드는 그대로 쌓이고 오류가 나지 않는지 본다. 권한을 끈 채로 `show`가 실패를 알리는지는 확인한 적이 없고, 알리지 않으면 그 줄의 OS 통로 상태가 `handed`로 남는다(재시작해도 다시 보내지 않는다). ③ 배포처 범위 정책을 건 채로 허용되지 않은 범위 원본에 기댄 Insight가 피드·요약·OS 알림의 건수에 들지 않는지 본다(합성 시험의 P02-C3b ②를 실제 정책으로 되풀이하는 것이다). 정책이 용도 `notify`에 무엇을 답하는지(허용·거부)를 정해 적는다. ④ 한 주 이상 돌려 하루 즉시 알림의 수와 요약의 크기를 재고 문턱(점수 70)과 시각(요약 09:00, 조용한 시간)을 정한다. 확인: ① 토스트에 건수 문구만 있고 ② 피드의 줄이 그대로이며 ③ 거부된 범위의 Insight가 어느 건수에도 없다. 기록할 것: 하루 즉시 알림 수의 분포, 요약 줄 수, 정한 문턱과 시각, 정책의 답, 확인한 결과. 글·Insight 요약·원본 이름은 기록하지 않는다. 배포처가 메일·메신저로 알림을 보내려면 별도 spec과 사용자 승인이 먼저다. 이 저장소에는 그 통로가 없다.
 
 ## 3. 결과를 어디에 남기는가
 
