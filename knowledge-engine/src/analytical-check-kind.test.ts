@@ -446,3 +446,37 @@ describe("derivatives.contract (analytical-check, review round 1)", () => {
     ).toEqual([table]);
   });
 });
+
+describe("gate.lost (analytical-check, the deletion's judgement, S03-R16 ①, G-C4)", () => {
+  it("G-C4 (①): deleting the table source of a verified calculation's Dataset disputes it in the deletion's transaction with data-basis-lost and the covered version as the basis", () => {
+    const table = source("table");
+    const d = dataset(table, "");
+    const metric = insertItem(db, { type: "Metric", name: "m", ...attrs });
+    saveRelation(db, { subjectId: metric, type: "MEASURED_ON", objectId: d, ...attrs });
+    const calc = saveFact(db, {
+      itemId: metric,
+      kind: "metric.calculation",
+      value: '{"aggregation":"count"}',
+      ...attrs,
+      status: "verified",
+    }).id;
+    deletion(table);
+    expect(db.all("SELECT status FROM facts WHERE id = ?", [calc])).toEqual([
+      { status: "disputed" },
+    ]);
+    expect(
+      db.all(
+        "SELECT actor, action, reason, basis_source_id, basis_version FROM fact_history WHERE fact_id = ? ORDER BY seq DESC LIMIT 1",
+        [calc],
+      ),
+    ).toEqual([
+      {
+        actor: "policy",
+        action: "dispute",
+        reason: "data-basis-lost",
+        basis_source_id: table,
+        basis_version: 1,
+      },
+    ]);
+  });
+});

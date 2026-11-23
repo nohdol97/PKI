@@ -1,6 +1,6 @@
 // Automatic promotion to `verified` (S01-R9, provisional decision 3): the one place that decides
 // whether a candidate fact or relation is promoted, and whether a promotion the policy made is taken
-// back. The conditions are the spec's five; confidence is not one of them and is never read here
+// back. The conditions are the spec's five and S03's sixth; confidence is not one of them and is never read here
 // (R10). Every status change goes through the lifecycle gate's two policy entries
 // (`automatedLifecycle.autoVerify` and `autoVerifyLost`), which write the history line; this file
 // writes no row. The transaction is the caller's (the extract write, the propagation).
@@ -15,6 +15,9 @@
 //   4. the row's type definition (fact kind or relation type) is `verified`
 //   5. a fact kind whose value count is `one` has no other value in a valid row of the item (the
 //      rule's "유효", S01-R15: not superseded or rejected, and current evidence or a user input)
+//   6. `data-checks` (S03-R15): a check-needing fact has no unmet data condition (`dataChecksUnmet`). Asked
+//      when promoting only: a promoted row that later loses it stays verified, and the check job's judgement
+//      (S03-R16) moves it when a check fails or its table is lost.
 //
 // A promoted row is taken back to the state it had before (the gate reads it from the history) when
 // condition 3 or 5 no longer holds. Not when the setting is switched off, not when the type
@@ -22,6 +25,7 @@
 // decided or wrote (R12: `user-override`, answered before any condition is looked at).
 import {
   automatedLifecycle,
+  dataChecksUnmet,
   isUserDecided,
   otherValidValues,
   listOntologyElements,
@@ -38,7 +42,12 @@ import {
 export const AUTO_VERIFY_SETTING = "semantic.autoVerify";
 
 export type AutoVerifyCondition =
-  "disabled" | "not-explicit" | "independent-sources" | "type-unverified" | "conflicting-value";
+  | "disabled"
+  | "not-explicit"
+  | "independent-sources"
+  | "type-unverified"
+  | "conflicting-value"
+  | "data-checks";
 
 /** The gate's outcomes, and the answer that names the conditions a candidate did not meet. */
 export type AutoVerifyOutcome =
@@ -141,6 +150,9 @@ export function assessAutoVerify(tx: SqlDriver, ref: EntryRef, at?: string): Aut
     ...(sources >= 2 ? [] : (["independent-sources"] as const)),
     ...(definition ? [] : (["type-unverified"] as const)),
     ...(conflict ? (["conflicting-value"] as const) : []),
+    ...(ref.kind === "fact" && dataChecksUnmet(tx, ref).length > 0
+      ? (["data-checks"] as const)
+      : []),
   ];
   return missing.length > 0 ? unmet(...missing) : automatedLifecycle.autoVerify(tx, ref, at);
 }
@@ -166,6 +178,18 @@ export function assessAfterExtraction(
   }
   for (const { itemId, kind } of groups.values()) assessItemFacts(tx, [itemId], at, kind);
   assessRelations(tx, written.relationIds, at);
+}
+
+/**
+ * After the check job wrote lines and judged them (S03-R12): the facts it reached are judged again, so a
+ * candidate whose sixth condition just became true is promoted in the job's transaction. Does nothing while the
+ * key was never written.
+ */
+export function assessAfterChecks(tx: SqlDriver, factIds: readonly number[], at?: string): void {
+  if (!everEnabled(tx)) return;
+  for (const id of [...new Set(factIds)].sort((a, b) => a - b)) {
+    assessAutoVerify(tx, { kind: "fact", id }, at);
+  }
 }
 
 /** The rows a change reached: the facts of these items (all kinds) and these relations, as far as still stored. */

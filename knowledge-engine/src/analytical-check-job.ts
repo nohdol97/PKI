@@ -6,12 +6,16 @@
 // discards the result and queues the job again (provisional decision D5). No Provider is called: the handler
 // has no Broker. A check whose input cannot be fixed to one row is not computed and writes no line; a stored
 // value the pure functions would misjudge (an aggregation with no column, an empty or unreadable column list)
-// fails with `column-missing` and never passes (D4). The judgement of the lines (S03-R15, R16) is S03-T06's:
-// the handler hands the results to `judge`, which that task supplies, in the closing transaction.
+// fails with `column-missing` and never passes (D4). The closing transaction then judges (S03-R15, R16): a
+// `verified` fact with a current failing line, or one a split left without its table, loses its standing, and
+// the facts the job reached are assessed for the automatic promotion again. That item is bookkeeping, not source
+// content: it is handed fact ids only and reads stored pass/fail flags and row states, so the scope policy is not
+// asked (a refused lineage must not leave a `verified` row over a failing line).
 import {
   BOOKKEEPING_KIND,
   findSourceVersionId,
   isFenceCurrent,
+  judgeCheckJob,
   listOntologyElements,
   normalizeValue,
   readAnalyticalMaxCells,
@@ -26,6 +30,7 @@ import {
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
+import { assessAfterChecks } from "./auto-verify.ts";
 import {
   checkAggregation,
   checkGrain,
@@ -51,30 +56,11 @@ export type AnalyticalCheckResult =
   | { status: "superseded" }
   | { status: "fail"; code: string; retryable: false };
 
-/** One computed line: the fact, the check, its result and the table versions it read. */
-export interface CheckLineOutcome {
-  factId: number;
-  check: DataCheck;
-  result: CheckResult;
-  versions: readonly SourceVersionRef[];
-}
-
-/** What the closing transaction hands the judgement (S03-T06): the results and the split record's facts. */
-export interface CheckJobHandOver {
-  source: SourceVersionRef;
-  results: readonly CheckLineOutcome[];
-  /** The `verified` check-needing facts the split record names for this source (read only). */
-  splitMoved: readonly number[];
-  at: Date;
-}
-
 export interface AnalyticalCheckOptions {
   db: SqlDriver;
   /** The port the tables are read through; default the one that reads the stored version. */
   source?: TabularSource;
   now?: () => Date;
-  /** Called in the closing transaction after the lines are written; S03-T06 supplies it. */
-  judge?: (tx: SqlDriver, handOver: CheckJobHandOver) => void;
 }
 
 const LIVE = "status NOT IN ('superseded', 'rejected')";
@@ -409,18 +395,11 @@ export function createAnalyticalCheckHandler(options: AnalyticalCheckOptions) {
         ]);
       },
     };
-    const results: CheckLineOutcome[] = [];
     const lineItems: DerivedItem[] = outcomes.map(({ fact, computed }) => {
       const { result, touched } = computed;
       const read = [...touched.values()];
       const [primary, ...others] = read;
       const distinct = others.filter((t) => t.versionId !== primary?.versionId);
-      results.push({
-        factId: fact.id,
-        check: result.check,
-        result,
-        versions: read.map((t) => t.ref),
-      });
       return {
         kind: DATASET_TABLE_ITEM_KIND,
         itemKey: JSON.stringify(["check", fact.id, result.check]),
@@ -445,24 +424,25 @@ export function createAnalyticalCheckHandler(options: AnalyticalCheckOptions) {
         },
       };
     });
-    const handOver: DerivedItem[] = options.judge
-      ? [
-          {
-            kind: DATASET_TABLE_ITEM_KIND,
-            itemKey: JSON.stringify(["check-judge", sourceId]),
-            lineage: [own],
-            write: (tx) => {
-              if (stale) return;
-              options.judge?.(tx, {
-                source: own,
-                results,
-                splitMoved: splitMovedClaims(tx, own.sourceId),
-                at: now(),
-              });
-            },
-          },
-        ]
-      : [];
-    return { status: "succeeded", items: [sweep, ...lineItems, ...handOver] };
+    // the judgement of the lines just written, in the same transaction (S03-R15, R16); bookkeeping like the sweep
+    const judgement: DerivedItem = {
+      kind: BOOKKEEPING_KIND,
+      unjudged: true as const,
+      itemKey: JSON.stringify(["check-judge", sourceId]),
+      lineage: [own],
+      write: (tx) => {
+        if (stale) return;
+        const at = now();
+        const reached = reach.map((f) => f.id);
+        judgeCheckJob(tx, {
+          source: own,
+          facts: reached,
+          splitMoved: splitMovedClaims(tx, own.sourceId),
+          at,
+        });
+        assessAfterChecks(tx, reached, at.toISOString());
+      },
+    };
+    return { status: "succeeded", items: [sweep, ...lineItems, judgement] };
   };
 }

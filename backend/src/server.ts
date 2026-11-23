@@ -90,6 +90,7 @@ import {
   type OntologyChange,
   type UserChangeOutcome,
   type SqlDriver,
+  type DecideResult,
   type UndoResult,
   type EntryRef,
   type UserDecisions,
@@ -623,7 +624,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
    */
   const semanticAction = (
     ref: { kind: SemanticKind; id: number },
-    act: (decisions: UserDecisions, at: string) => UndoResult,
+    act: (decisions: UserDecisions, at: string) => UndoResult | DecideResult,
   ): RouteResponse<"semanticDecide"> | { error: ErrorResponse["error"] } => {
     const { decisions } = options;
     if (!decisions) return { error: "not-found" };
@@ -638,6 +639,13 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       if (outcome.status === "removed") return { status: "removed" as const };
       if (outcome.status === "refused") {
         if (outcome.reason === "not-found") return { error: "not-found" as const };
+        if ("unmet" in outcome) {
+          return {
+            status: "refused" as const,
+            reason: outcome.reason,
+            unmet: [...outcome.unmet],
+          };
+        }
         return "held" in outcome
           ? { status: "refused" as const, reason: outcome.reason, held: outcome.held }
           : { status: "refused" as const, reason: outcome.reason };

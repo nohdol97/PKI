@@ -14,6 +14,7 @@ import {
   type EgressInput,
 } from "@pki/providers";
 import {
+  addEvidence,
   closeJob,
   createDerivativeRegistry,
   defaultScopePolicy,
@@ -26,6 +27,9 @@ import {
   readItem,
   registerConnectorInstance,
   registerJob,
+  saveDatasetTable,
+  saveFact,
+  saveRelation,
   saveSourceRecord,
   userDecisions,
   type SqlDriver,
@@ -1003,5 +1007,72 @@ describe("semantic history of an extraction (S01-T01: lifecycle.history, epistem
     expect(db.all("SELECT status FROM facts")).toEqual([{ status: "superseded" }]);
     expect(listEvidence(db, { factId: fact.id })).toHaveLength(2);
     expect(factLines().at(-1)).toMatchObject({ action: "test-set" });
+  });
+});
+
+describe("gate.lost (S03-R16 ③, G-C4): the extraction of the source a path relation waits on", () => {
+  it("G-C4 (③): a verified calculation whose MEASURED_ON a new version superseded is disputed in the transaction of that source's extraction that does not state the relation, and not before", async () => {
+    setUp([output({}), output({})]);
+    const first = imported({ id: "doc", title: "t", content: "표 목록은 매출 표 하나다" });
+    await runNext();
+    const table = saveSourceRecord(db, "imported", { externalId: "tbl", title: "tbl", body: "x" });
+    if (table.status !== "created") throw new Error(table.status);
+    const attrs = {
+      epistemic: "explicit",
+      status: "candidate",
+      validAt: null,
+      observedAt: "t",
+    } as const;
+    const dataset = insertItem(db, { type: "Dataset", name: "매출", ...attrs });
+    saveDatasetTable(db, { itemId: dataset, sourceId: table.sourceId, key: "", rowCount: 1 });
+    const metric = insertItem(db, { type: "Metric", name: "합계", ...attrs });
+    const path = saveRelation(db, {
+      subjectId: metric,
+      type: "MEASURED_ON",
+      objectId: dataset,
+      ...attrs,
+    }).id;
+    addEvidence(db, {
+      target: { relationId: path },
+      sourceVersionId: versionOf(first),
+      start: 0,
+      end: 5,
+      quote: "표 목록은",
+    });
+    const calc = saveFact(db, {
+      itemId: metric,
+      kind: "metric.calculation",
+      value: '{"aggregation":"count"}',
+      ...attrs,
+      status: "verified",
+    }).id;
+
+    imported({ id: "doc", title: "t", content: "이제 표 이야기가 없다" });
+    propagateNewVersion(db, first.sourceId as number);
+    expect(db.all("SELECT status FROM relations WHERE id = ?", [path])).toEqual([
+      { status: "superseded" },
+    ]);
+    expect(db.all("SELECT status FROM facts WHERE id = ?", [calc])).toEqual([
+      { status: "verified" },
+    ]);
+
+    await runNext();
+    expect(db.all("SELECT status FROM facts WHERE id = ?", [calc])).toEqual([
+      { status: "disputed" },
+    ]);
+    expect(
+      db.all(
+        "SELECT actor, action, reason, basis_source_id, basis_version FROM fact_history WHERE fact_id = ? ORDER BY seq DESC LIMIT 1",
+        [calc],
+      ),
+    ).toEqual([
+      {
+        actor: "policy",
+        action: "dispute",
+        reason: "data-basis-lost",
+        basis_source_id: table.sourceId,
+        basis_version: 1,
+      },
+    ]);
   });
 });

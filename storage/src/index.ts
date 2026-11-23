@@ -290,6 +290,7 @@ export {
   createUserDecisions,
   userDecisions,
   type AddResult,
+  type DecideResult,
   type HeldCounts,
   type ReplaceResult,
   type UndoResult,
@@ -330,6 +331,15 @@ export {
   type NewCheckLine,
   type StoredCheckLine,
 } from "./analytical-check-lines.ts";
+export {
+  dataChecksUnmet,
+  judgeCheckJob,
+  judgeClaims,
+  judgePathCut,
+  judgeWaitingOn,
+  type DataCheckReason,
+  type DataCheckUnmet,
+} from "./analytical-gate.ts";
 export {
   ANALYTICAL_SEED,
   ANALYTICAL_VALUE_TYPES,

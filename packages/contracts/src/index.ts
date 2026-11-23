@@ -839,6 +839,18 @@ export const SEMANTIC_REFUSALS = [
   "value-exists",
   /** A direct add's undo while rows, merge lines, distinct marks or split records still name the item (S02-R11). */
   "existing-data-violation",
+  /** An approval of a check-needing fact whose data conditions are not all met (S03-R14); the names are in `unmet`. */
+  "data-check-unmet",
+] as const;
+/** The data conditions an approval can name as unmet: the three set conditions, then a failed check (S03-R14). */
+export const DATA_CHECK_UNMET = [
+  "no-dataset",
+  "spec-conflict",
+  "check-missing",
+  "schema",
+  "grain",
+  "join-cardinality",
+  "aggregation",
 ] as const;
 export const SemanticRefRequestSchema = z.strictObject({
   kind: SemanticKindSchema,
@@ -968,8 +980,11 @@ export const SemanticOutcomeSchema = z
         splitMoves: z.int().nonnegative(),
       })
       .optional(),
+    /** Every unmet data condition, with the refusal `data-check-unmet` and no other (S03-R14). Names only. */
+    unmet: z.array(z.enum(DATA_CHECK_UNMET)).min(1).optional(),
   })
   .refine((o) => (o.reason === "existing-data-violation") === (o.held !== undefined))
+  .refine((o) => (o.reason === "data-check-unmet") === (o.unmet !== undefined))
   .refine((o) =>
     o.status === "applied"
       ? o.seq !== undefined && o.entry !== undefined && o.reason === undefined

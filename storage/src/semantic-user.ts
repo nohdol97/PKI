@@ -15,6 +15,12 @@
 // `userDecisions` (and its constructor `createUserDecisions`, which the composition root calls) is the only way to them.
 import { insertAssertionLink } from "./assertion-links.ts";
 import { eraseChecksReading, queueChecksAround } from "./analytical-check-lines.ts";
+import {
+  dataChecksUnmet,
+  judgePathCut,
+  needsDataChecks,
+  type DataCheckUnmet,
+} from "./analytical-gate.ts";
 import { listEvidence } from "./knowledge.ts";
 import { findSameForm, isSurfaceFormKind } from "./surface-form.ts";
 import {
@@ -51,6 +57,13 @@ export type UserEntry =
   | { kind: "fact"; itemId: number; factKind: string; value: string }
   | { kind: "relation"; subjectId: number; type: string; objectId: number };
 
+/**
+ * An approval is an `Outcome`, or the gate's answer that a check-needing fact still has unmet data conditions
+ * (S03-R14): every unmet name, and nothing was written.
+ */
+export type DecideResult =
+  Outcome | { status: "refused"; reason: "data-check-unmet"; unmet: readonly DataCheckUnmet[] };
+
 export type AddResult =
   | { status: "applied"; ref: EntryRef; seq: number }
   /** The row with that key exists in any status: nothing was written; approving `existing` is the next step. */
@@ -83,9 +96,10 @@ export type UndoResult =
 /** The user's entry (the interface of the S01 spec). */
 export interface UserDecisions {
   /** Approve, reject or dispute one row by the user's rows of the transition table. */
-  decide(tx: SqlDriver, ref: EntryRef, action: UserAction, at?: string): Outcome;
+  decide(tx: SqlDriver, ref: EntryRef, action: UserAction, at?: string): DecideResult;
   /**
-   * Adds a row the user wrote: verified, user-approved, user_authored, no evidence (S01-R7). The
+   * Adds a row the user wrote: verified, user-approved, user_authored, no evidence (S01-R7); a fact of a kind
+   * with `dataChecks` is a candidate hypothesis instead (S03-R14). The
    * key of the row (the item's type and name, a fact's item, kind and value, a relation's triple)
    * must be free in every status; otherwise `value-exists` with the row that has it.
    */
@@ -153,7 +167,12 @@ function insertAuthored(
   at: string | undefined,
   batch: number | null,
 ) {
-  const common = ["'user-approved'", "'verified'", "NULL", NOW, "NULL", "1"];
+  // a fact whose kind demands data checks is a candidate hypothesis until the conditions are met (S03-R14)
+  const unproven = entry.kind === "fact" && needsDataChecks(tx, entry.factKind);
+  const to: Row = unproven
+    ? { status: "candidate", epistemic: "hypothesis" }
+    : { status: "verified", epistemic: "user-approved" };
+  const common = [`'${to.epistemic}'`, `'${to.status}'`, "NULL", NOW, "NULL", "1"];
   const columns = "epistemic, status, valid_at, observed_at, confidence, user_authored";
   const id = (
     entry.kind === "item"
@@ -176,7 +195,7 @@ function insertAuthored(
   const ref: EntryRef = { kind: entry.kind, id };
   const seq = writeLine(tx, ref, {
     from: null,
-    to: { status: "verified", epistemic: "user-approved" },
+    to,
     actor: "user",
     action: "created",
     batch,
@@ -327,7 +346,17 @@ const buildUserDecisions = (entities: EntityDecisions): UserDecisions => ({
   ontology: userOntology,
   entities,
 
-  decide: (tx, ref, action, at) => applyTransition(tx, ref, "user", TARGET[action], { at }),
+  decide(tx, ref, action, at) {
+    // S03-R14: a check-needing fact is approved only when its data conditions hold (an approved row is not asked again)
+    if (action === "approve" && ref.kind === "fact" && readRow(tx, ref)?.status !== "verified") {
+      const unmet = dataChecksUnmet(tx, ref);
+      if (unmet.length > 0) return { status: "refused", reason: "data-check-unmet", unmet };
+    }
+    const ends = pathEnds(tx, ref);
+    const outcome = applyTransition(tx, ref, "user", TARGET[action], { at });
+    if (outcome.status === "applied" && ends) judgePathCut(tx, ends, at);
+    return outcome;
+  },
 
   add(tx, entry, at) {
     const stored =
@@ -384,21 +413,41 @@ const buildUserDecisions = (entities: EntityDecisions): UserDecisions => ({
   },
 
   undo(tx, ref, at) {
-    const row = readRow(tx, ref);
-    if (!row) return { status: "refused", reason: "not-found" };
-    // a merge, an unmerge, a split or a validity fix is read past (S02-R11): it is no state to go back to
-    const newest = stateLinesOf(tx, ref).at(-1);
-    if (!newest || newest.action === "undo")
-      return { status: "refused", reason: "nothing-to-undo" };
-    if (!isUserAction(newest)) return { status: "refused", reason: "not-latest" };
-    if (newest.batch !== null) return undoBatch(tx, ref, newest, at);
-    if (newest.action !== "created" && !UNDOABLE.has(newest.action)) {
-      // a `replace` line with no batch is no value fix this entry made
-      return { status: "refused", reason: "invalid-transition" };
+    const ends = pathEnds(tx, ref);
+    const result = undoRow(tx, ref, at);
+    if ((result.status === "applied" || result.status === "removed") && ends) {
+      judgePathCut(tx, ends, at);
     }
-    return revertLine(tx, ref, row, newest, at);
+    return result;
   },
 });
+
+/** The two ends of a relation, read before an action on it (an undo may delete the row). */
+function pathEnds(
+  tx: SqlDriver,
+  ref: EntryRef,
+): { subjectId: number; objectId: number } | undefined {
+  if (ref.kind !== "relation") return undefined;
+  const row = tx.all("SELECT subject_id, object_id FROM relations WHERE id = ?", [ref.id])[0];
+  return row
+    ? { subjectId: row.subject_id as number, objectId: row.object_id as number }
+    : undefined;
+}
+
+function undoRow(tx: SqlDriver, ref: EntryRef, at: string | undefined): UndoResult {
+  const row = readRow(tx, ref);
+  if (!row) return { status: "refused", reason: "not-found" };
+  // a merge, an unmerge, a split or a validity fix is read past (S02-R11): it is no state to go back to
+  const newest = stateLinesOf(tx, ref).at(-1);
+  if (!newest || newest.action === "undo") return { status: "refused", reason: "nothing-to-undo" };
+  if (!isUserAction(newest)) return { status: "refused", reason: "not-latest" };
+  if (newest.batch !== null) return undoBatch(tx, ref, newest, at);
+  if (newest.action !== "created" && !UNDOABLE.has(newest.action)) {
+    // a `replace` line with no batch is no value fix this entry made
+    return { status: "refused", reason: "invalid-transition" };
+  }
+  return revertLine(tx, ref, row, newest, at);
+}
 
 /**
  * The user's entry as the composition root builds it: the scope policy and the fixed list of membership

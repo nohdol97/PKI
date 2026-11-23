@@ -22,6 +22,7 @@ import {
   automatedLifecycle,
   checkLinesReading,
   claimCandidates,
+  judgeClaims,
   createDerivativeRegistry,
   defaultScopePolicy,
   EXTRACT_JOB_KIND,
@@ -1070,12 +1071,12 @@ const ANALYTICAL_CHECK: DerivativeKind = {
       })),
     ];
   },
-  invalidate: (ctx, snapshot) => {
+  invalidate: (ctx, snapshot, change) => {
     const { tx } = ctx;
     noting(ctx);
     const table = { table: "dataset_tables", check: "analytical_checks" } as const;
     let removed = 0;
-    const claims: number[] = [];
+    const claims: { factId: number; basis: readonly SourceVersionRef[] }[] = [];
     // the facts whose lines this kind erases: their sources are checked again (S03-R12 ②), read before the lines go
     const lineIds = snapshot
       .filter(({ ref }) => ref.id.startsWith("check:"))
@@ -1087,22 +1088,27 @@ const ANALYTICAL_CHECK: DerivativeKind = {
         [JSON.stringify(lineIds)],
       )
       .map((r) => r.item_id as number);
-    for (const { ref } of snapshot) {
+    for (const { ref, lineage } of snapshot) {
       const [prefix, rest] = ref.id.split(":");
       const id = Number(rest);
       if (prefix === "claim") {
-        claims.push(id);
+        claims.push({ factId: id, basis: lineage });
         continue;
       }
       const name = table[prefix as keyof typeof table];
       tx.run(`DELETE FROM ${name} WHERE id = ?`, [id]);
       if (!stored(tx, name, id)) removed++;
     }
-    // S03-T06 judges the claims here (S03-R16): a `verified` row the change took its table from. Until then the
-    // sources the claims still reach are checked again.
+    // S03-R16: a `verified` row the change took its table from loses its standing (the check-needing facts the
+    // phase-1 collection named, with the basis they were collected with); the sources the claims still reach are
+    // checked again
+    const mode = supported(change);
+    if (mode === "deletion" || mode === "pruned") {
+      judgeClaims(tx, claims, { sourceId: change.sourceId, mode });
+    }
     const items = tx
       .all("SELECT DISTINCT item_id FROM facts WHERE id IN (SELECT value FROM json_each(?))", [
-        JSON.stringify(claims),
+        JSON.stringify(claims.map((c) => c.factId)),
       ])
       .map((r) => r.item_id as number);
     queueChecksAround(tx, [...new Set([...items, ...erased])]);

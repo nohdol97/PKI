@@ -62,8 +62,6 @@ export {
   createAnalyticalCheckHandler,
   type AnalyticalCheckOptions,
   type AnalyticalCheckResult,
-  type CheckJobHandOver,
-  type CheckLineOutcome,
 } from "./analytical-check-job.ts";
 export { sqlTabularSource, type TabularSource } from "./tabular-source.ts";
 export {
