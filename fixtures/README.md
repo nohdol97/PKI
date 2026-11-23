@@ -23,6 +23,7 @@
 - `p01-insights.json`: P01(Insight 발견)의 규칙 층 시나리오([P01 spec](../docs/specs/2026-11-23-P01-insight-discovery.md) D8). 13개 유형마다 `support`(`supported`·`unsupported`)가 있고, 지원 유형은 항목·원본·사실·관계로 된 `scenario`, 조건을 깨는 `variant`(사실 또는 관계만 바꿈), 기대 결과(`expected`: Insight의 항목, 사실 줄, 근거 인용문)를 갖는다. 관계에는 `observedAt`을 줄 수 있다(항목은 2026-11-21): "새 관계"는 관계가 항목보다 늦게 관측될 때만 선다. 미지원 유형은 `support`만 둔다. 가져오기를 지나지 않는 JSON이라 합성 목록(`.jsonl`만 읽음)에 넣지 않는다. 유형 표와 같은 13개인지는 `knowledge-engine/src/insight-code-rules.test.ts`가 대조한다.
 - `p01-status.jsonl`: P01-T05의 가져오기 원본(스펙 R11·R12). 한 줄이 원본 version 하나이고 모양은 `v02-*.jsonl`과 같다. 요청(Request) "결제 연동 요청"의 상태 `open`과 목표일(`wiki-p01-0001`), 이슈(Issue) "정산 오류 이슈"의 상태 `in_progress`(`wiki-p01-0002`)다. 가져오면 "미처리 요청"과 "미해결 이슈"가 한 건씩 생긴다.
 - `p01-expected.json`: 위 원본의 기대 결과(`base`). 항목, 사실(값, 근거), Insight와 각 근거(코드 포인트 `[시작, 끝)`, 인용문). 인용문은 자기 원본에 정확히 한 번 나온다. 추출 double(`fixtureExtraction`)이 `v02-expected.json`과 같은 모양으로 읽고, `knowledge-engine/src/insight-import.test.ts`가 대조한다.
+- `p03-personalization.json`: P03(피드백 학습)의 전후 비교 시나리오([P03 spec](../docs/specs/2026-11-23-P03-feedback-learning.md) R13). Insight 신호 열네 건(`insights`: 유형·신뢰도·긴급 날짜·바뀐 시각), 사용자가 그 가운데 여섯 건에 준 피드백(`feedback`), 피드백을 주지 않은 여덟 건의 "이 사용자에게 관련 있음" 라벨(`relevant`)이다. `knowledge-engine/src/feedback-eval.test.ts`가 피드백 없는 Insight의 순위를 선호 신호 없이(전), 신호와 `feedback.learned`를 켜고(후) 계산해 상위 3건의 관련 비율과 관련 있음 평균 순위를 출력한다. 가져오기를 지나지 않는 JSON이라 합성 목록에 넣지 않는다. 장치가 식대로 도는지 보이는 합성 자료이고, 개인화가 실제로 쓸모 있다는 증거가 아니다.
 
 ## documents/
 

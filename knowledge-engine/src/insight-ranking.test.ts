@@ -47,4 +47,21 @@ describe("rankInsight", () => {
     expect(read.score).not.toBe(plain.score);
     expect(rankInsight({ ...base, impact: null, actionability: null }, NOW)).toEqual(plain);
   });
+
+  it("moves relevance by half the preference weight, clamped to 0..100, and is unchanged without one (P03-R8)", () => {
+    const plain = rankInsight(base, NOW);
+    for (const preference of [undefined, null, 0]) {
+      const same = rankInsight({ ...base, preference }, NOW);
+      expect(same.relevance).toBe(plain.relevance);
+      expect(same.score).toBe(plain.score);
+    }
+    const liked = rankInsight({ ...base, preference: 50 }, NOW);
+    expect(liked).toMatchObject({ relevance: 75, preference: 50 });
+    // relevance carries weight 0.15: +25 relevance is +3.75 of the sum, rounded with the rest
+    expect(liked.score - plain.score).toBeGreaterThanOrEqual(3);
+    expect(liked.score - plain.score).toBeLessThanOrEqual(4);
+    expect(rankInsight({ ...base, preference: -100 }, NOW).relevance).toBe(0);
+    expect(rankInsight({ ...base, userInputCount: 1, preference: 100 }, NOW).relevance).toBe(100);
+    expect(plain.preference).toBe(0);
+  });
 });

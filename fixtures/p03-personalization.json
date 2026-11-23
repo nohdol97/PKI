@@ -1,0 +1,158 @@
+{
+  "description": "P03-R13 synthetic personalization fixture. `insights` are Insight signals (the ranking's inputs); `feedback` is what the user pressed on some of them; `relevant` is the label 'this Insight is relevant to this user' (null where feedback was given: those Insights are not part of the metric). Synthetic: not evidence that personalization helps.",
+  "now": "2026-11-23T00:00:00.000Z",
+  "insights": [
+    {
+      "key": "liked-1",
+      "type": "open_issue",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": null
+    },
+    {
+      "key": "liked-2",
+      "type": "open_issue",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": null
+    },
+    {
+      "key": "liked-3",
+      "type": "open_issue",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": null
+    },
+    {
+      "key": "disliked-1",
+      "type": "dependency_delay",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": null
+    },
+    {
+      "key": "disliked-2",
+      "type": "dependency_delay",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": null
+    },
+    {
+      "key": "disliked-3",
+      "type": "dependency_delay",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": null
+    },
+    {
+      "key": "dep-1",
+      "type": "dependency_delay",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": false
+    },
+    {
+      "key": "dep-2",
+      "type": "dependency_delay",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": false
+    },
+    {
+      "key": "dep-3",
+      "type": "dependency_delay",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": false
+    },
+    {
+      "key": "conflict-1",
+      "type": "conflict",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": false
+    },
+    {
+      "key": "conflict-2",
+      "type": "conflict",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": false
+    },
+    {
+      "key": "issue-1",
+      "type": "open_issue",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": true
+    },
+    {
+      "key": "issue-2",
+      "type": "open_issue",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": true
+    },
+    {
+      "key": "issue-3",
+      "type": "open_issue",
+      "confidence": 70,
+      "urgencyDate": "2026-12-20",
+      "changedAt": "2026-11-10T00:00:00.000Z",
+      "userInputCount": 0,
+      "relevant": true
+    }
+  ],
+  "feedback": [
+    {
+      "insight": "liked-1",
+      "kind": "useful"
+    },
+    {
+      "insight": "liked-2",
+      "kind": "useful"
+    },
+    {
+      "insight": "liked-3",
+      "kind": "useful"
+    },
+    {
+      "insight": "disliked-1",
+      "kind": "irrelevant"
+    },
+    {
+      "insight": "disliked-2",
+      "kind": "irrelevant"
+    },
+    {
+      "insight": "disliked-3",
+      "kind": "irrelevant"
+    }
+  ]
+}
