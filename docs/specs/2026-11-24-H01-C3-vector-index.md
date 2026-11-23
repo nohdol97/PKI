@@ -41,7 +41,7 @@
 
 ### 저장
 
-- **H01C3-R1 색인 파일.** 새 구현 `SqliteVectorIndex`는 데이터 폴더의 `vectors/index.sqlite`(정본과 다른 파일, 같은 드라이버)에 세대 표(모델 ID·판·차원·상태 `building`/`active`·반영한 변경 순번), 세대별 벡터, ref별 순서 표시를 둔다. 검색은 활성 세대의 벡터를 모두 읽어 코사인 값으로 줄 세운다. 이 파일의 스키마가 빌드와 다르면 파일을 지우고 빈 색인으로 시작한다(다시 만들 수 있는 투영이라 올리지 않는다).
+- **H01C3-R1 색인 파일.** 새 구현 `SqliteVectorIndex`는 데이터 폴더의 `vectors/index.sqlite`(정본과 다른 파일, 같은 드라이버)에 세대 표(모델 ID·판·차원·상태 `building`/`active`·반영한 변경 순번), 세대별 벡터, ref별 순서 표시를 둔다. 검색은 활성 세대의 벡터를 모두 읽어 코사인 값으로 줄 세운다. 이 파일이 DB가 아니거나(`SQLITE_NOTADB`)·깨졌거나(`SQLITE_CORRUPT`)·스키마가 빌드와 달라 표·열이 없으면 파일을 지우고 빈 색인으로 시작한다(다시 만들 수 있는 투영이라 올리지 않는다). 잠금 대기 초과(`SQLITE_BUSY`) 같은 그 밖의 오류는 파일을 두고 그대로 던진다(RSP-R6).
 - **H01C3-R2 규격.** `VectorIndex`에서 `reset`을 없애고 `beginRebuild(space)`를 둔다. 돌려받는 손잡이로 `refs()`, `upsert(items, changeSeq)`, `activate(expectedRefs, appliedChangeSeq)`, `discard()`를 부른다.
   - `status`·`embeddingSpace`·`appliedChangeSeq`·`search`·색인의 `upsert`는 **활성 세대만** 본다. 활성 세대가 없으면 `status`는 만드는 세대가 있을 때 `rebuilding`, 없을 때 `unavailable`이고 `upsert`는 거절한다.
   - `remove`는 **모든 세대**에서 지우고, 세대가 하나도 없으면 지울 것 없이 성공한다.
@@ -124,7 +124,7 @@ flowchart TD
 - **H01C3-D9 검증은 "ref 집합이 대상 집합과 같다"와 "공간이 embedder와 같다" 둘이다.** 건수 일치는 집합 일치에 들어 있고 차원은 넣을 때 검사한다. 검색 품질 검증은 하지 않는다.
 - **H01C3-D10 낡음으로 표시된 색인은 답하지 않는다.** 놓친 통지나 복원 뒤의 색인은 다른 원본을 가리킬 수 있다. 낡은 채로 답하게 하려면 R8의 첫 조건을 뺀다.
 - **H01C3-D11 재구축은 지금처럼 통지와 한 줄로 선다**(`projections.ts:144`). 만드는 동안 새 version의 통지는 기다렸다가 전환 뒤 새 세대에 들어간다. 삭제 작업도 같은 동시 실행 묶음이라 재구축 뒤에 돈다(`storage/src/job-concurrency.ts:16`). 그래서 R7의 전환 전 맞추기가 필요하다.
-- **H01C3-D12 색인 파일은 암호화하지 않는다.** ADR 0010의 현재 결정(정본도 평문)과 같다. 지운 자리는 드라이버의 `secure_delete`가 덮는다(`storage/src/adapters/better-sqlite3-driver.ts:20`).
+- **H01C3-D12 색인 파일은 암호화하지 않는다.** ADR 0010의 현재 결정(정본도 평문)과 같다. 지운 자리는 드라이버의 `secure_delete`가 덮는다(`storage/src/adapters/better-sqlite3-driver.ts:20`). 파일째 지울 때(다른 스키마·옵션 끔·복원 뒤 시작)는 파일 시스템의 지운 파일 자리가 덮이지 않아 디스크에 잔여가 남을 수 있다.
 
 ## 미해결 질문 / 검증하지 않은 범위
 
@@ -162,3 +162,4 @@ PR 하나, 한 구현자가 차례로 한다. T4는 T2·T3과 파일이 겹치�
 | 2026-11-24 | 확정으로 올림. R8: 묶인 색인이 `ready`가 아니면 그 상태를 그대로 둠(빈 색인이 낡음 표시로 `rebuilding`이 되면 기본 설치의 상태가 바뀜). R10: 결과 `requested`. C5·T3: 복원의 낡음 표시 단언을 `restore-boot.test.ts`로(`restore-ledger.test.ts`의 부팅은 빈 색인이 스스로 표시를 써서 가르지 못함), 새 파일 `knowledge-engine/src/adapters/served-vector-index.ts`(모듈 경계 lint가 색인 구현을 `adapters/` 밖에 두지 못하게 하고, `backend/src/adapters`는 수집기 경로 검사의 대상이라 감싼 엔진 `createVisibleEngine`처럼 knowledge-engine의 어댑터에 둠) | R8, R10, C5, T3 | 구현 중 발견(H01C3-T3) |
 | 2026-11-24 | R10: 복원이 적용된 시작은 `vectors/`를 지움(독립 검토 F1: 복원 전 세대가 남으면 복원 뒤 삭제가 cover 위 version과 더 새 순번 표시의 ref를 못 지우고 작업은 성공으로 끝남). 검증하지 않은 범위에 복원 기록의 공간 필드 설명 추가 | R10, 검증하지 않은 범위 | 독립 검토 F1 |
 | 2026-11-24 | 넘기는 것의 전송 정책 항목을 해소로 고침, 복원 기록의 공간 설명을 묶인 embedder와 견주는 것으로 고침("백업에 공간이 있었다면 참"은 낡음) | 넘기는 것, 검증하지 않은 범위 | 검색·벡터 후속 RVF(#254 #285) |
+| 2026-11-24 | R1: 파일을 지우는 경우를 DB 아님·깨짐·표/열 없음으로 한정하고 잠금 등은 던짐. D12: 파일째 지울 때의 디스크 잔여 한 문장 | R1, D12 | 검색 전략 선행 조건 RSP(#291) R6 |
