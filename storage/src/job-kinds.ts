@@ -6,6 +6,8 @@
 export const EXTRACT_JOB_KIND = "extract";
 /** The job a table source's version gets while `analytical.profile` is ON (S03-R6): no Provider call, version fence. */
 export const DATASET_PROFILE_KIND = "dataset-profile";
+/** The job that re-checks the facts that rest on one table source (S03-R12): no Provider call, version fence. */
+export const ANALYTICAL_CHECK_JOB_KIND = "analytical-check";
 export const PROJECTION_REMOVE_KIND = "projection-remove";
 export const PROJECTION_REBUILD_KIND = "projection-rebuild";
 

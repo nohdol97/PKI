@@ -148,6 +148,7 @@ export {
   type ProjectionActivity,
 } from "./job-activity.ts";
 export {
+  ANALYTICAL_CHECK_JOB_KIND,
   DATASET_PROFILE_KIND,
   EXTRACT_JOB_KIND,
   PROJECTION_REBUILD_KIND,
@@ -301,11 +302,22 @@ export {
   isTabularVersion,
   readAnalyticalMaxCells,
   readAnalyticalProfile,
+  registerAnalyticalCheckJob,
   registerDatasetProfileJob,
   saveDatasetTable,
   setAnalyticalProfile,
   type DatasetTableRow,
 } from "./analytical.ts";
+export {
+  PATH_TYPES,
+  listCheckLines,
+  saveCheckLine,
+  tableSourcesOf,
+  type CheckName,
+  type Following,
+  type NewCheckLine,
+  type StoredCheckLine,
+} from "./analytical-check-lines.ts";
 export {
   ANALYTICAL_SEED,
   ANALYTICAL_VALUE_TYPES,

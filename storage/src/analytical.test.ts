@@ -14,7 +14,7 @@ import {
   saveDatasetTable,
   setAnalyticalProfile,
 } from "./analytical.ts";
-import { DATASET_PROFILE_KIND } from "./job-kinds.ts";
+import { ANALYTICAL_CHECK_JOB_KIND, DATASET_PROFILE_KIND } from "./job-kinds.ts";
 import { insertItem } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
@@ -120,6 +120,44 @@ describe("registerDatasetProfileJob: a new version", () => {
     // the same version again is no second job and no error
     expect(registerDatasetProfileJob(db, { ...csv, at: AT })).toBe(false);
     expect(jobs()).toHaveLength(1);
+  });
+});
+
+describe("registerDatasetProfileJob: the check job fallback", () => {
+  const checkJobs = () =>
+    db.all("SELECT source_id, fence_version FROM jobs WHERE kind = ? ORDER BY id", [
+      ANALYTICAL_CHECK_JOB_KIND,
+    ]);
+  const bind = (sourceId: number) => {
+    const item = insertItem(db, {
+      type: "Dataset",
+      name: `d${sourceId}`,
+      epistemic: "explicit",
+      status: "candidate",
+      validAt: null,
+      observedAt: "t",
+    });
+    saveDatasetTable(db, { itemId: item, sourceId, key: "", rowCount: 1 });
+  };
+
+  it("check.job: with the profile OFF, a new version of a source that has a bound table queues the check job of that version; a source with none queues nothing", () => {
+    const bound = store("a", "a\tb", csvBlocks);
+    const bare = store("b", "a\tb", csvBlocks);
+    bind(bound.sourceId);
+    const next = store("a", "a\tc", csvBlocks);
+    expect(registerDatasetProfileJob(db, { ...next, at: AT })).toBe(false);
+    expect(registerDatasetProfileJob(db, { ...bare, at: AT })).toBe(false);
+    expect(jobs()).toEqual([]);
+    expect(checkJobs()).toEqual([{ source_id: next.sourceId, fence_version: next.version }]);
+  });
+
+  it("check.job: with the profile ON and a table version, the profile job is queued and no check job", () => {
+    writeSetting(db, "analytical.profile", "on");
+    const bound = store("a", "a\tb", csvBlocks);
+    bind(bound.sourceId);
+    const next = store("a", "a\tc", csvBlocks);
+    expect(registerDatasetProfileJob(db, { ...next, at: AT })).toBe(true);
+    expect(checkJobs()).toEqual([]);
   });
 });
 
