@@ -123,7 +123,11 @@ describe("탐색 목록 (X02-C3a ①, ②)", () => {
     );
     expect(loading).toContain('role="status"');
     const empty = renderToStaticMarkup(
-      <ItemList state={{ status: "ready", items: [], next: null }} onOpen={noop} onMore={noop} />,
+      <ItemList
+        state={{ status: "ready", items: [], next: null, query: "" }}
+        onOpen={noop}
+        onMore={noop}
+      />,
     );
     expect(empty).toContain("찾은 항목이 없습니다");
     const failed = renderToStaticMarkup(

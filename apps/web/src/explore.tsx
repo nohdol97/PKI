@@ -41,6 +41,8 @@ type Edge = Read["edges"][number];
 export interface ItemsPage {
   items: RouteResponse<"exploreItems">["items"];
   next: number | null;
+  /** The submitted query that made this list; "더 보기" continues with it. */
+  query: string;
 }
 export type ListState =
   { status: "loading" } | { status: "failed"; error: string } | ({ status: "ready" } & ItemsPage);
@@ -69,8 +71,12 @@ export async function searchPage(
     ...(text ? { query: text } : {}),
     ...(current?.next ? { after: current.next } : {}),
   });
-  return { items: [...(current?.items ?? []), ...page.items], next: page.next };
+  return { items: [...(current?.items ?? []), ...page.items], next: page.next, query };
 }
+
+/** The page after `list`, for the query that made it (not the input's current text). */
+export const searchMore = (api: ApiClient, list: ItemsPage): Promise<ItemsPage> =>
+  searchPage(api, list.query, list);
 
 /** The lines the relation-type filter leaves on (the screen filters; the API does not). */
 export const shownEdges = (edges: readonly Edge[], off: ReadonlySet<string>): Edge[] =>
@@ -441,7 +447,7 @@ export function Explore({ api }: { api: ApiClient }) {
         onOpen={open}
         onMore={() => {
           if (list.status !== "ready") return;
-          searchPage(api, query, list).then(
+          searchMore(api, list).then(
             (page) => setList({ status: "ready", ...page }),
             (error: unknown) => setList({ status: "failed", error: message(error) }),
           );
