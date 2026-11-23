@@ -29,8 +29,9 @@ const MAX_HEADER_BYTES = 4096;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const KEY_CHECK_LABEL = "pki-backup-key-check-v1";
-/** A header's cost values are read from the file: bounded so a forged one cannot ask for gigabytes. */
-const MAX_SCRYPT_MEMORY = 1024 ** 3;
+/** A header's cost values are read from the file: bounded (twice the product's memory, four times its work). */
+const MAX_SCRYPT_MEMORY = 256 * 1024 ** 2;
+const MAX_SCRYPT_WORK = 2 ** 22;
 
 export interface ScryptCost {
   N: number;
@@ -74,16 +75,19 @@ export interface WriteBackupInput {
 const damaged = () => new BackupFileError("damaged");
 
 function costOk(cost: ScryptCost): boolean {
+  if (Object.keys(cost).some((key) => key !== "N" && key !== "r" && key !== "p")) return false;
   const { N, r, p } = cost;
   if (![N, r, p].every(Number.isInteger)) return false;
   if (N < 2 ** 10 || N > 2 ** 20 || (N & (N - 1)) !== 0) return false;
   if (r < 1 || r > 16 || p < 1 || p > 16) return false;
-  return 128 * N * r <= MAX_SCRYPT_MEMORY;
+  return 128 * N * r <= MAX_SCRYPT_MEMORY && N * r * p <= MAX_SCRYPT_WORK;
 }
 
 function deriveKey(passphrase: string, salt: Buffer, cost: ScryptCost): Buffer {
   return scryptSync(passphrase.normalize("NFKC"), salt, 32, {
-    ...cost,
+    N: cost.N,
+    r: cost.r,
+    p: cost.p,
     maxmem: 128 * cost.N * cost.r + 128 * cost.r * cost.p + 16 * 1024 * 1024,
   });
 }

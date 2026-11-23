@@ -191,6 +191,8 @@ export function applyPendingRestore(
       return { dataDir, applied: false, finished: false, failedCode: "staged-missing" };
     }
     run.applied = true;
+    // the finish may have committed before the last start died: that restore is done, not to be undone (H01F-R7)
+    if (state === "swapped") run.finished = finishCommitted(live, summary, open);
     return run;
   } catch (error) {
     if (error instanceof RestoreCrash) throw error;
@@ -201,6 +203,25 @@ export function applyPendingRestore(
     }
     rollbackRestore(run, "swap-failed");
     throw error;
+  }
+}
+
+/** Whether the live file already holds the finish's record of this very restore. Unreadable: not finished. */
+function finishCommitted(
+  live: string,
+  summary: { backupId: string; stagedAt: string },
+  open: OpenSqlDriver,
+): boolean {
+  try {
+    const db = open(live);
+    try {
+      const last = readRestoreLast(db);
+      return last?.backupId === summary.backupId && last.stagedAt === summary.stagedAt;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return false;
   }
 }
 

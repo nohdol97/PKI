@@ -63,7 +63,12 @@ export type StartFailureReason =
   | "adapter-unregistered"
   | "ledger-reapply-failed"
   | "ledger-unavailable"
-  | "site-registration-invalid";
+  | "site-registration-invalid"
+  | "restore-marker-unreadable"
+  | "restore-before-orphaned"
+  | "restore-live-missing"
+  | "restore-state-inconsistent"
+  | "restore-previous-unverified";
 
 /** A start the backend refused; `reason` is a fixed class it reported (I04-R7), never its message. */
 export class BackendStartError extends Error {
@@ -91,6 +96,11 @@ const FromBackend = z.discriminatedUnion("type", [
         "ledger-reapply-failed",
         "ledger-unavailable",
         "site-registration-invalid",
+        "restore-marker-unreadable",
+        "restore-before-orphaned",
+        "restore-live-missing",
+        "restore-state-inconsistent",
+        "restore-previous-unverified",
       ])
       .optional(),
     line: z.int().positive().optional(),

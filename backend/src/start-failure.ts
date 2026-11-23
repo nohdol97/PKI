@@ -2,8 +2,9 @@
 // never the error's message (it can carry a path or file text; V01-R13).
 import { LedgerReapplyError } from "@pki/knowledge-engine";
 import { errorClass } from "@pki/providers";
-import { IdentityKeyMissingError, LedgerUnavailableError } from "@pki/storage";
+import { IdentityKeyMissingError, LedgerUnavailableError, RestoreMarkerError } from "@pki/storage";
 import { UnregisteredAdapterError } from "./derivative-coverage.ts";
+import { RestoreStateError } from "./restore-boot.ts";
 import { ScopePolicyNotImplementedError, UnknownScopePolicyError } from "./scope-policy.ts";
 import { SiteRegistrationInvalidError } from "./site-registration.ts";
 
@@ -14,7 +15,19 @@ export type StartFailureReason =
   | "adapter-unregistered"
   | "ledger-reapply-failed"
   | "ledger-unavailable"
-  | "site-registration-invalid";
+  | "site-registration-invalid"
+  | "restore-marker-unreadable"
+  | "restore-before-orphaned"
+  | "restore-live-missing"
+  | "restore-state-inconsistent"
+  | "restore-previous-unverified";
+
+const RESTORE_STATE_REASONS: readonly string[] = [
+  "restore-before-orphaned",
+  "restore-live-missing",
+  "restore-state-inconsistent",
+  "restore-previous-unverified",
+];
 export type StartFailureReport = {
   type: "failed";
   reason?: StartFailureReason;
@@ -54,6 +67,12 @@ function classify(error: unknown): StartFailureReport {
   }
   if (error instanceof SiteRegistrationInvalidError) {
     return { type: "failed", reason: "site-registration-invalid" };
+  }
+  if (error instanceof RestoreMarkerError) {
+    return { type: "failed", reason: "restore-marker-unreadable" };
+  }
+  if (error instanceof RestoreStateError && RESTORE_STATE_REASONS.includes(error.code)) {
+    return { type: "failed", reason: error.code as StartFailureReason };
   }
   return { type: "failed" };
 }

@@ -1,7 +1,8 @@
 // I04-R7: what the backend tells the shell about a refused start is a fixed class.
 import { LedgerReapplyError } from "@pki/knowledge-engine";
-import { IdentityKeyMissingError, LedgerUnavailableError } from "@pki/storage";
+import { IdentityKeyMissingError, LedgerUnavailableError, RestoreMarkerError } from "@pki/storage";
 import { describe, expect, it } from "vitest";
+import { RestoreStateError } from "./restore-boot.ts";
 import { SiteRegistrationInvalidError } from "./site-registration.ts";
 import { startFailureLine, startFailureReport } from "./start-failure.ts";
 
@@ -44,6 +45,17 @@ describe("start.identity-key-text: startFailureReport", () => {
     expect(error.message).toBe(
       "site-registration-invalid instance-kind-reserved=2 instance-id-reserved=1",
     );
+  });
+  it("H01F-C1: a restore state that stops the start, or an unreadable marker, is named; an unknown code is not", () => {
+    expect(startFailureReport(new RestoreStateError("restore-live-missing"))).toEqual({
+      type: "failed",
+      reason: "restore-live-missing",
+    });
+    expect(startFailureReport(new RestoreMarkerError())).toEqual({
+      type: "failed",
+      reason: "restore-marker-unreadable",
+    });
+    expect(startFailureReport(new RestoreStateError("something-else"))).toEqual({ type: "failed" });
   });
   it("is the bare failure for any other error or none", () => {
     expect(startFailureReport(new Error("/home/u/secret.db"))).toEqual({ type: "failed" });
