@@ -93,6 +93,11 @@ export interface SyncOptions extends PageOptions {
    * first names it; default none, every instance unknown.
    */
   scopes?: ConnectorScopes;
+  /**
+   * Asked after each stored page that is not the last: true leaves the sync there with `yielded` set and the
+   * cursor kept (I02B-R21). Only a caller that runs under a time limit passes it (the `connector-sync` job).
+   */
+  shouldYield?: () => boolean;
 }
 
 export interface ConnectorInstanceConfig {
@@ -111,14 +116,18 @@ export const INITIALIZE_TIMEOUT_MS = 10_000;
 /** Provisional (I05-R13), one place: rechecks in a row that ended late before an instance's are given up. */
 export const RECHECK_LATE_LIMIT = 3;
 
+/** A sync's answer; `yielded` is set only for one that left at a page boundary on its caller's ask (I02B-R21). */
+export type SyncedResponse = SyncResponse & { yielded?: true };
+
 export interface ConnectorManager {
   list(): ConnectorSummary[];
 
   sync(
     id: string,
-    options?: Pick<SyncOptions, "signal" | "rescan">,
+    options?: Pick<SyncOptions, "signal" | "rescan" | "shouldYield">,
   ): Promise<
-    SyncResponse | { error: Extract<ErrorResponse["error"], "not-found" | "connector-unavailable"> }
+    | SyncedResponse
+    | { error: Extract<ErrorResponse["error"], "not-found" | "connector-unavailable"> }
   >;
 }
 
@@ -266,6 +275,15 @@ async function runSync(
         ...result,
         rescanned: rescanning,
         deletionsMayBeMissed: rescanning && !capabilities.deletionsOnRescan,
+      };
+    }
+    // a page boundary with pages to come: the caller's time is nearly used, so the sync leaves here (I02B-R21)
+    if (options.shouldYield?.()) {
+      return {
+        ...result,
+        rescanned: rescanning,
+        deletionsMayBeMissed: rescanning && !capabilities.deletionsOnRescan,
+        yielded: true,
       };
     }
   }

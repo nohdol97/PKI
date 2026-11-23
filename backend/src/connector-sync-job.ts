@@ -35,12 +35,15 @@ import type {
 import { isReplacedStop } from "./connectors.ts";
 import { COLLECTOR_HELD_REASONS, HELD_REEVALUATION_MS } from "./held-release.ts";
 import type { JobResult } from "./job-outcomes.ts";
-import type { JobHandler, JobRunner } from "./job-runner.ts";
+import type { JobHandler, JobKindSettings, JobRunner } from "./job-runner.ts";
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import type { Period } from "./schedule.ts";
 import { MAINTENANCE_KIND, type Scheduler } from "./scheduler.ts";
 
 export const CONNECTOR_SYNC_KIND = "connector-sync";
+
+/** The checkpoint of a `connector-sync` job: how many yields it made, so a yield is told to have moved (I03-R14). */
+export const CONNECTOR_SYNC_SETTINGS: JobKindSettings = { checkpointFields: ["yields"] };
 
 /** The default period of an instance that can pull (I03-R18). */
 export const SYNC_PERIOD: Period = { kind: "hourly" };
@@ -57,6 +60,7 @@ export const INSTANCE_NOT_FOUND = "instance-not-found";
 export type SyncManager = Pick<ConnectorManager, "sync" | "list">;
 
 type SyncAnswer = Awaited<ReturnType<ConnectorManager["sync"]>>;
+type SyncedAnswer = Extract<SyncAnswer, { connectorId: string }>;
 
 /** What a sync that stopped (or did not) counted, as the whole numbers a job row may hold. */
 function countsOf(sync: SyncResponse): Record<string, number> {
@@ -81,8 +85,9 @@ function heldReason(summary: ConnectorSummary | undefined): string {
   return summary?.reason ?? "connector-unavailable";
 }
 
-/** The end of a sync for I01's table: the stop code, or `completed`. */
-const endOf = (sync: SyncResponse): SyncEnd => sync.stopped ?? "completed";
+/** The end of a sync for I01's table: a yield, the stop code, or `completed`. */
+const endOf = (sync: SyncedAnswer): SyncEnd =>
+  sync.yielded ? "yield" : (sync.stopped ?? "completed");
 
 /** The wait of each `nextRun` that an unspent retry can have (I01-R20); only one-minute exists. */
 const UNSPENT_RETRY_DELAYS: Readonly<Partial<Record<SyncOutcomeRow["nextRun"], number>>> = {
@@ -104,6 +109,8 @@ function resultOf(end: SyncEnd, sync: SyncResponse | undefined, reason: string):
       return { status: "held", reason };
     case "dead_letter":
       return { status: "fail", code: end, retryable: false };
+    case "yield":
+      return { status: "yield" };
     case "retry":
       if (row.attempt === "unspent") {
         // the wait is the row's `nextRun`; a value this map does not know is not guessed
@@ -143,7 +150,10 @@ export function createConnectorSyncHandler(options: {
     if (!manager) {
       return { status: "defer", code: "manager-not-ready", delayMs: MANAGER_NOT_READY_RETRY_MS };
     }
-    const answer: SyncAnswer = await manager.sync(job.target, { signal: context.signal });
+    const answer: SyncAnswer = await manager.sync(job.target, {
+      signal: context.signal,
+      shouldYield: context.shouldYield,
+    });
     if ("error" in answer) {
       // the instance left the configuration: nothing to retry until the user fixes it
       if (answer.error === "not-found") {
@@ -166,6 +176,12 @@ export function createConnectorSyncHandler(options: {
         ? heldReason(manager.list().find((s) => s.id === job.target))
         : "",
     );
+    // a yield counts as progress for I03 only when the checkpoint moved (R14): the pages it stored are the
+    // progress, and this mark is what says so. A yield no other write closes needs the lease: a lost one ends here
+    if (end === "yield") {
+      const saved = context.checkpoint({ yields: (context.lastCheckpoint?.yields ?? 0) + 1 });
+      if (saved !== "saved") return { status: "superseded" };
+    }
     // a sync that never reached the Connector counted nothing; one that did leaves its counts,
     // under the lease, whether it finished (the write below) or stopped after storing pages
     if (result.status === "succeeded") {

@@ -144,7 +144,9 @@ describe("connector-sync.stop-codes (I03-R19, I01-R20): each end of a sync, by I
   > = {
     completed: { answer: () => ({ connectorId: "c1", ...ZERO, received: 3, created: 2 }) },
     // the run-time cap's yield (I02B-R21): the sync stored a page and left at its boundary
-    yield: { answer: () => ({ connectorId: "c1", ...ZERO, received: 1, created: 1, yielded: true }) },
+    yield: {
+      answer: () => ({ connectorId: "c1", ...ZERO, received: 1, created: 1, yielded: true }),
+    },
     "rate-limited": {
       answer: () => ({
         connectorId: "c1",
@@ -195,7 +197,11 @@ describe("connector-sync.stop-codes (I03-R19, I01-R20): each end of a sync, by I
         break;
       case "yield":
         // a yield that stored a page: queued a minute later, its attempt given back (I03-R14)
-        expect(after).toMatchObject({ status: "queued", attempts: 0, runAfter: T0 + INSTANCE_BUSY_RETRY_MS });
+        expect(after).toMatchObject({
+          status: "queued",
+          attempts: 0,
+          runAfter: T0 + INSTANCE_BUSY_RETRY_MS,
+        });
         break;
       case "held":
         // the reason is the instance's own: never the Connector's text

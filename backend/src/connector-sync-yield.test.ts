@@ -11,7 +11,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Clock } from "./clock.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
-import { CONNECTOR_SYNC_KIND, CONNECTOR_SYNC_SETTINGS, createConnectorSyncHandler } from "./connector-sync-job.ts";
+import {
+  CONNECTOR_SYNC_KIND,
+  CONNECTOR_SYNC_SETTINGS,
+  createConnectorSyncHandler,
+} from "./connector-sync-job.ts";
 import { DEFAULT_RUN_TIMEOUT_MS, YIELD_DELAY_MS } from "./job-outcomes.ts";
 import { createJobRunner } from "./job-runner.ts";
 
@@ -99,14 +103,20 @@ describe("connector-sync.yield (I02B-C35): a long sync yields at a page boundary
       if (after?.status === "succeeded") break;
       yields++;
       // yielded: queued again a minute later, the attempt given back, never near the cap
-      expect(after).toMatchObject({ status: "queued", attempts: 0, runAfter: wall + YIELD_DELAY_MS });
+      expect(after).toMatchObject({
+        status: "queued",
+        attempts: 0,
+        runAfter: wall + YIELD_DELAY_MS,
+      });
       expect(mono).toBeLessThan(DEFAULT_RUN_TIMEOUT_MS);
       expect(readCursor(db, "c1")).not.toBeNull(); // the stored cursor stays
       wall += YIELD_DELAY_MS;
     }
     expect(yields).toBeGreaterThan(0);
     expect(readJob(db, id)?.status).toBe("succeeded");
-    expect(db.all("SELECT COUNT(*) AS n FROM sources WHERE connector_instance_id = 'c1'")[0]?.n).toBe(PAGES);
+    expect(
+      db.all("SELECT COUNT(*) AS n FROM sources WHERE connector_instance_id = 'c1'")[0]?.n,
+    ).toBe(PAGES);
     expect(db.all("SELECT COUNT(*) AS n FROM jobs WHERE status = 'dead_letter'")[0]?.n).toBe(0);
   });
 

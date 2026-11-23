@@ -65,8 +65,11 @@ export type RefusalReason = "revision-not-newer" | "tombstoned" | "scope-change-
 export type StoredOutcome =
   "created" | "unchanged" | "deleted" | "scope-updated" | "stale" | "stale-tombstone";
 
-/** What one sync did; the API adds the instance's id (SyncResponse). */
-export type SyncResult = Omit<SyncResponse, "connectorId">;
+/**
+ * What one sync did; the API adds the instance's id (SyncResponse). `yielded` is set only for a sync that
+ * left at a page boundary because its caller asked to (`shouldYield`, I02B-R21): it stopped for no fault.
+ */
+export type SyncResult = Omit<SyncResponse, "connectorId"> & { yielded?: true };
 
 /** What a page store reports to and asks of its caller; a sync's options are these and more. */
 export interface PageOptions {

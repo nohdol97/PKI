@@ -116,6 +116,7 @@ import { withAskQuestions } from "./ask-questions.ts";
 import type { Clock } from "./clock.ts";
 import {
   CONNECTOR_SYNC_KIND,
+  CONNECTOR_SYNC_SETTINGS,
   createConnectorSyncHandler,
   releaseIfReady,
   replacedKey,
@@ -559,7 +560,7 @@ export function productRunner(
           })
         : {}),
     },
-    kinds: PROJECTION_KIND_SETTINGS,
+    kinds: { ...PROJECTION_KIND_SETTINGS, [CONNECTOR_SYNC_KIND]: CONNECTOR_SYNC_SETTINGS },
     scope,
     broker,
     ...(clock ? { clock } : {}),

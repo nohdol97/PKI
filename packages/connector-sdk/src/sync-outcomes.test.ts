@@ -127,7 +127,11 @@ describe("sync.outcome-map", () => {
   });
 
   it("⑧ a yield spends no attempt, runs again a minute later and sits after the credential-unusable row (I02B-C35)", () => {
-    expect(row("yield")).toMatchObject({ result: "yield", attempt: "unspent", nextRun: "one-minute" });
+    expect(row("yield")).toMatchObject({
+      result: "yield",
+      attempt: "unspent",
+      nextRun: "one-minute",
+    });
     const ends = SYNC_OUTCOMES.map((r) => r.end);
     expect(ends.indexOf("yield")).toBe(ends.indexOf("credential-unusable") + 1);
   });
