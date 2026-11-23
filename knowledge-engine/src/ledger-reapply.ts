@@ -131,6 +131,7 @@ export function createLedgerReapply(
     line: LedgerLine,
     waiting: ReadonlySet<number>,
     wasWaiting: boolean,
+    plainIndex: Map<string, Map<string, number>>,
   ): Outcome =>
     canonicalTransaction(db, (tx): Outcome => {
       let registered = false;
@@ -145,7 +146,12 @@ export function createLedgerReapply(
         registerConnectorInstance(tx, line.connectorInstanceId, line.connectorKind);
         registered = true;
       }
-      const sourceId = ensureSourceByHash(tx, line.connectorInstanceId, line.identityHash);
+      const sourceId = ensureSourceByHash(
+        tx,
+        line.connectorInstanceId,
+        line.identityHash,
+        plainIndex,
+      );
       const next: TombstoneState = {
         sourceId,
         coversVersion: line.coversVersion,
@@ -264,11 +270,13 @@ export function createLedgerReapply(
           (o) => o.seq > line.seq && o.seq <= applied && !waiting.has(o.seq),
         );
       };
+      // the plain sources' hashes, built on a first miss and dropped with the run (F123-R2)
+      const plainIndex = new Map<string, Map<string, number>>();
       let registered = false;
       const carry = (line: LedgerLine, wasWaiting: boolean): void => {
         let outcome: Outcome;
         try {
-          outcome = applyLine(db, line, waiting, wasWaiting);
+          outcome = applyLine(db, line, waiting, wasWaiting, plainIndex);
         } catch (error) {
           throw new LedgerReapplyError(line.seq, error);
         }

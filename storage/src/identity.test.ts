@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
   IdentityKeyMissingError,
+  ensureSourceByHash,
   ensureTombstoneSource,
   hashSourceIdentity,
   identityKey,
@@ -216,5 +217,69 @@ describe("purge.legacy-residue", () => {
     expect(prepareCanonicalDb(db)).toEqual({ legacyCleanup: "skipped" });
     db.close();
     expect(canariesLeft(dir, [LEGACY.old])).toEqual([LEGACY.old]);
+  });
+});
+
+describe("identity.ledger-lookup (F123)", () => {
+  const plain = (externalId: string, instance = "c1") => {
+    const saved = saveSourceRecord(db, instance, {
+      namespace: "ns",
+      externalId,
+      title: "t",
+      body: "b",
+    });
+    if (saved.status !== "created") throw new Error(saved.status);
+    return saved.sourceId;
+  };
+  const count = () => db.all("SELECT count(*) AS n FROM sources")[0]?.n;
+
+  it("F123-C2 finds a plain source, a hashed row and an unseen identity through one shared index", () => {
+    const index = new Map<string, Map<string, number>>();
+    const a = plain("a");
+    const hashedId = purged("b");
+    hashSourceIdentity(db, hashedId);
+    expect(ensureSourceByHash(db, "c1", identityKey(db, "c1", "ns", "a"), index)).toBe(a);
+    expect(ensureSourceByHash(db, "c1", identityKey(db, "c1", "ns", "b"), index)).toBe(hashedId);
+
+    const before = count();
+    const unseen = identityKey(db, "c1", "ns", "never");
+    const made = ensureSourceByHash(db, "c1", unseen, index);
+    expect(row(made)).toEqual({ namespace: unseen, external_id: unseen, identity_hashed: 1 });
+    expect(count()).toBe((before as number) + 1);
+    expect(ensureSourceByHash(db, "c1", unseen, index)).toBe(made);
+    expect(count()).toBe((before as number) + 1);
+
+    // the same namespace and external id under another instance is another identity
+    registerConnectorInstance(db, "c2", "test-fixtures");
+    const other = plain("a", "c2");
+    expect(ensureSourceByHash(db, "c2", identityKey(db, "c1", "ns", "a"), index)).not.toBe(a);
+    expect(ensureSourceByHash(db, "c2", identityKey(db, "c2", "ns", "a"), index)).toBe(other);
+  });
+
+  it("F123-C2 reads no key for an instance with no plain source", () => {
+    const index = new Map<string, Map<string, number>>();
+    db.run("DELETE FROM identity_key");
+    expect(() => ensureSourceByHash(db, "c1", "f".repeat(64), index)).not.toThrow();
+    // a plain source appears (a hashed row is already there, so the row is written directly)
+    db.run("INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, ?, ?)", [
+      "c1",
+      "ns",
+      "a",
+    ]);
+    expect(() => ensureSourceByHash(db, "c1", "e".repeat(64), new Map())).toThrow(
+      IdentityKeyMissingError,
+    );
+  });
+
+  it("F123-C3 still finds a source the run hashed after the index was built", () => {
+    const index = new Map<string, Map<string, number>>();
+    const id = purged("a");
+    const hash = identityKey(db, "c1", "ns", "a");
+    // a miss builds the index while the source is still plain
+    ensureSourceByHash(db, "c1", identityKey(db, "c1", "ns", "other"), index);
+    expect(hashSourceIdentity(db, id)).toBe(true);
+    const before = count();
+    expect(ensureSourceByHash(db, "c1", hash, index)).toBe(id);
+    expect(count()).toBe(before);
   });
 });
