@@ -194,6 +194,20 @@ class SemanticCounts(unittest.TestCase):
         c = self.counts()
         self.assertEqual((c["promoted"], c["promotedStanding"], c["promotedJudgedWrong"]), (2, 0, 2))
 
+    def test_a_dispute_the_policy_raised_is_not_judged_wrong_but_the_users_is(self):
+        add(self.db, "facts", 1, "disputed", [EXTRACT, PROMOTE, ("policy", "dispute", "disputed")])
+        add(self.db, "facts", 2, "disputed", [EXTRACT, PROMOTE, ("user", "dispute", "disputed")])
+        c = self.counts()
+        self.assertEqual((c["promoted"], c["promotedStanding"], c["promotedJudgedWrong"]), (2, 0, 1))
+
+    def test_the_connection_open_ro_returns_refuses_a_write(self):
+        db = ss.open_ro(self.db)
+        try:
+            with self.assertRaises(sqlite3.OperationalError):
+                db.execute("CREATE TABLE x (a)")
+        finally:
+            db.close()
+
     def test_a_promoted_value_the_user_replaced_is_judged_wrong_but_one_propagation_superseded_is_not(self):
         add(self.db, "facts", 1, "superseded", [EXTRACT, PROMOTE, ("user", "replace", "superseded")])
         add(self.db, "facts", 2, "superseded", [EXTRACT, PROMOTE, ("propagation", "supersede", "superseded")])
@@ -245,8 +259,12 @@ class SemanticCounts(unittest.TestCase):
     def test_the_written_json_holds_numbers_and_code_names_only(self):
         add(self.db, "facts", 1, "verified", [EXTRACT, PROMOTE], kind="alias.synonym")
         add(self.db, "facts", 2, "candidate", [EXTRACT], kind="alias.x secret term")  # an odd kind is not echoed
+        add(self.db, "facts", 3, "candidate", [EXTRACT], kind="alias.codename")  # a well-formed user-made kind is not echoed
         path = ss.write_counts(self.counts("on"), self.dir.name)
         self.assertEqual(os.path.basename(path), "semantic-counts.on.json")
+        with open(path, encoding="utf-8") as fh:
+            self.assertNotIn("alias.codename", fh.read())
+        self.assertEqual(self.counts("on")["forms"]["other"]["candidate"], 2)
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         allowed = set(STATUSES) | {"on", "off", "unset", "other", "alias.synonym", "alias.abbreviation", "alias.translation",
