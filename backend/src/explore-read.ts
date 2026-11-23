@@ -30,6 +30,8 @@ export interface ExploreReads {
   items(request: RouteRequest<"exploreItems">): Items;
   /** undefined when the item is absent or not shown: the one answer for each. */
   item(request: RouteRequest<"exploreItem">): Item | undefined;
+  /** The names of the items by number; an absent or hidden number is left out, not refused (X02B-R2). */
+  names(request: RouteRequest<"exploreNames">): RouteResponse<"exploreNames">;
   /** undefined when the version is absent or not shown. */
   source(request: RouteRequest<"exploreSource">): RouteResponse<"exploreSource"> | undefined;
 }
@@ -52,7 +54,7 @@ export function createExploreReads(
   };
   return {
     items({ query, after }) {
-      const kept: { id: number; type: string; name: string }[] = [];
+      const kept: Items["items"] = [];
       let cursor = after ?? 0;
       let scanned = 0;
       // read on until a page and one more are shown (or the store ends): the one more says `next` exists
@@ -60,7 +62,12 @@ export function createExploreReads(
         const rows = listExploreItems(db, { after: cursor, query, limit: BATCH });
         for (const row of rows) {
           cursor = row.id;
-          if (gate.semanticShown("item", row.id)) kept.push(row);
+          if (!gate.semanticShown("item", row.id)) continue;
+          // an alias counts only when its own fact is shown (X02B-R6 2): the first such value is the one answered
+          const alias = row.nameMatch
+            ? null
+            : (row.aliases.find((a) => gate.semanticShown("fact", a.id))?.value ?? undefined);
+          if (alias !== undefined) kept.push({ id: row.id, type: row.type, name: row.name, alias });
           if (kept.length > EXPLORE_PAGE_SIZE) break;
         }
         scanned += rows.length;
@@ -85,12 +92,10 @@ export function createExploreReads(
       if (paths.status === "refused") return { status: "refused", reason: "depth-exceeded" };
       const walks = paths.paths ?? [];
       // the item's own rows and those of its shown members (S02-R13), each row judged by itself
-      const owners = [
-        itemId,
-        ...listSemanticMembers(db, itemId)
-          .map((m) => m.id)
-          .filter((id) => gate.semanticShown("item", id)),
-      ];
+      const members = listSemanticMembers(db, itemId).filter((m) =>
+        gate.semanticShown("item", m.id),
+      );
+      const owners = [itemId, ...members.map((m) => m.id)];
       const facts = owners
         .flatMap((id) => listSemanticFacts(db, id))
         .filter((f) => gate.semanticShown("fact", f.id));
@@ -132,6 +137,12 @@ export function createExploreReads(
         center: {
           ...center,
           wikiKey: wikiKeyOf(itemId, center.type),
+          members: members.map((m) => ({
+            id: m.id,
+            type: m.type,
+            name: m.name,
+            mergeId: m.mergeId,
+          })),
           facts: facts.map((f) => ({ ...f, ...(factTimes.get(f.id) ?? empty) })),
           relations: relations.map((r) => ({ ...r, ...(relationTimes.get(r.id) ?? empty) })),
         },
@@ -150,10 +161,16 @@ export function createExploreReads(
         truncated: paths.truncated ?? false,
       };
     },
-    source({ versionId }) {
+    names({ ids }) {
+      return {
+        items: [...new Set(ids)].flatMap((id) =>
+          gate.semanticShown("item", id) ? (refOf(id) ?? []) : [],
+        ),
+      };
+    },
+    source({ versionId, start }) {
       if (!gate.sourceShown(versionId)) return undefined;
-      const sourceVersion = readSourceVersionView(db, versionId);
-      return sourceVersion ? { sourceVersion } : undefined;
+      return readSourceVersionView(db, versionId, start);
     },
   };
 }

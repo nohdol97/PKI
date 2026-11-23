@@ -68,7 +68,12 @@ const item = (name: string, type = "Project") => {
   automatedLifecycle.created(db, { kind: "item", id }, "extraction", null);
   return id;
 };
-const fact = (itemId: number, kind: string, value: string, status: "verified" | "candidate") => {
+const fact = (
+  itemId: number,
+  kind: string,
+  value: string,
+  status: "verified" | "candidate" | "rejected",
+) => {
   const id = saveFact(db, { itemId, kind, value, ...attrs, status }).id;
   automatedLifecycle.created(db, { kind: "fact", id }, "extraction", null);
   return id;
@@ -90,8 +95,7 @@ describe("curation.api (X02B-C1)", () => {
   it("finds an item by an alias and says which alias; a name match carries a null alias", async () => {
     const wave = item("물결");
     fact(wave, "alias.synonym", "파도타기", "verified");
-    fact(item("먼 항목"), "alias.synonym", "기각된별칭", "candidate");
-    db.run("UPDATE facts SET status = 'rejected' WHERE value = '기각된별칭'");
+    fact(item("먼 항목"), "alias.synonym", "기각된별칭", "rejected");
     await start();
     const byAlias = routes.exploreItems.response.parse(
       (await call("exploreItems", { query: "파도" })).body,
@@ -131,11 +135,10 @@ describe("curation.api (X02B-C1)", () => {
   it("lists a merged item as a member with its merge line, and names two items and skips a missing number", async () => {
     const rep = item("대표");
     const member = item("구성원");
-    db.run("INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)", [
-      member,
-      rep,
-      "2026-11-24T00:00:00Z",
-    ]);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+      [member, rep, "2026-11-24T00:00:00Z"],
+    );
     const mergeId = db.all("SELECT id FROM item_merges")[0]?.id as number;
     await start();
     const centre = routes.exploreItem.response.parse(
@@ -160,10 +163,10 @@ describe("curation.api (X02B-C1)", () => {
         requestId: `r${i}`,
         attempt: 1,
         provider: "local-test",
-        destination: null,
+        destination: "local",
         taskKind: "extract",
         classification: "public",
-        policyVersion: null,
+        policyVersion: "p1",
         outcome: "succeeded",
         reason: null,
         durationMs: 1,

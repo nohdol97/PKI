@@ -12,6 +12,7 @@ import {
   traceChains,
   visibleLinks,
 } from "@pki/knowledge-engine";
+import { EXPLORE_PAGE_SIZE, LIST_PAGE_SIZE } from "@pki/contracts";
 import type {
   RouteRequest,
   RouteResponse,
@@ -48,6 +49,7 @@ import {
   type InsightUserInputRow,
   defaultScopePolicy,
   type ScopePurpose,
+  type SemanticItemView,
   type SqlDriver,
   effectiveUntil,
   entityGroups,
@@ -97,6 +99,14 @@ export interface ReadGate {
   sourceShown(versionId: number): boolean;
   /** The Semantic registry's items with the facts and relations shown (S01-R23): a hidden row is left out whole. */
   semantic(): SemanticList;
+  /**
+   * One page of the Semantic list by status (X02B-R3): representatives only, ascending, 50 a page. With a `status`, an
+   * item stays when its own row, a shown member's or a shown fact or relation of either has that status; hidden rows
+   * count for nothing, and a hidden item takes no slot of the page or place of `next`.
+   */
+  semanticPage(request: RouteRequest<"semanticPage">): RouteResponse<"semanticPage">;
+  /** One page of the source list, newest first, over the sources shown (X02B-R4). */
+  sourcesPage(request: RouteRequest<"sourcesPage">): RouteResponse<"sourcesPage">;
   /**
    * The merge candidates (S02-R24, R25): a pair is listed only when both items and every member of their two groups
    * are shown and the policy lets the two groups' sources be put together; one with a hidden end is left out whole.
@@ -148,6 +158,8 @@ const SOURCES_LIMIT = 100;
 const SEARCH_LIMIT = 50;
 /** Provisional (S01-T02): the Semantic list's items per answer; `truncated` says more exist. */
 const SEMANTIC_LIMIT = 100;
+/** Items read per round while filling a page of `semanticPage`. */
+const SEMANTIC_BATCH = 100;
 /** The most rows read to fill a limit when many are hidden (the window grows fourfold until then). */
 const MAX_SCAN = 10_000;
 
@@ -216,6 +228,34 @@ export function createReadGate(
   const semanticLimit = options.semanticLimit ?? SEMANTIC_LIMIT;
   const isShown = (kind: string, id: number) =>
     shown([{ kind, id: String(id) }], "display").has(String(id));
+  const rowsOf = <T extends { id: number }>(item: T) => ({
+    ...item,
+    facts: only(listSemanticFacts(db, item.id), "fact", (f) => f.id, "display"),
+    relations: only(listSemanticRelations(db, item.id), "relation", (r) => r.id, "display"),
+  });
+  // `mergedInto` is the nearest item along the chain the caller may see: a hidden item is named nowhere,
+  // and a member with none visible is left out
+  const nearestShown = <T extends { mergedInto: number }>(members: T[]): T[] =>
+    members.flatMap((m) => {
+      for (let at: number | undefined = m.mergedInto, n = 0; at !== undefined && n < 1000; n++) {
+        if (isShown("item", at)) return [{ ...m, mergedInto: at }];
+        at = mergedIntoOf(db, at);
+      }
+      return [];
+    });
+  const semanticItem = (item: SemanticItemView) => ({
+    ...rowsOf(item),
+    members: nearestShown(
+      only(listSemanticMembers(db, item.id), "item", (m) => m.id, "display"),
+    ).map(rowsOf),
+  });
+  const hasStatus = (view: ReturnType<typeof semanticItem>, status: string) =>
+    [view, ...view.members].some(
+      (row) =>
+        row.status === status ||
+        row.facts.some((f) => f.status === status) ||
+        row.relations.some((r) => r.status === status),
+    );
   const endsShown = (x: number, y: number) => isShown("item", x) && isShown("item", y);
   return {
     sources: () => filled((n) => listSources(db, n), "source", "display", sourcesLimit),
@@ -263,35 +303,46 @@ export function createReadGate(
     sourceShown: (versionId) => isShown("source", versionId),
     semantic() {
       // one more than the limit tells whether the list was cut
-      const rowsOf = <T extends { id: number }>(item: T) => ({
-        ...item,
-        facts: only(listSemanticFacts(db, item.id), "fact", (f) => f.id, "display"),
-        relations: only(listSemanticRelations(db, item.id), "relation", (r) => r.id, "display"),
-      });
-      // `mergedInto` is the nearest item along the chain the caller may see: a hidden item is named nowhere,
-      // and a member with none visible is left out
-      const nearestShown = <T extends { mergedInto: number }>(members: T[]): T[] =>
-        members.flatMap((m) => {
-          for (
-            let at: number | undefined = m.mergedInto, n = 0;
-            at !== undefined && n < 1000;
-            n++
-          ) {
-            if (isShown("item", at)) return [{ ...m, mergedInto: at }];
-            at = mergedIntoOf(db, at);
-          }
-          return [];
-        });
       // a member is listed under its representative, not as an entry of its own (S02-R13)
       const items = filled((n) => listSemanticItems(db, n), "item", "display", semanticLimit + 1);
       return {
-        items: items.slice(0, semanticLimit).map((item) => ({
-          ...rowsOf(item),
-          members: nearestShown(
-            only(listSemanticMembers(db, item.id), "item", (m) => m.id, "display"),
-          ).map(rowsOf),
-        })),
+        items: items.slice(0, semanticLimit).map(semanticItem),
         truncated: items.length > semanticLimit,
+      };
+    },
+    semanticPage({ status, after }) {
+      const kept: ReturnType<typeof semanticItem>[] = [];
+      let cursor = after ?? 0;
+      let scanned = 0;
+      // read on until a page and one more are kept: the one more says `next` exists
+      while (kept.length <= EXPLORE_PAGE_SIZE && scanned < maxScan) {
+        const rows = listSemanticItems(db, SEMANTIC_BATCH, cursor);
+        for (const row of only(rows, "item", (i) => i.id, "display")) {
+          const view = semanticItem(row);
+          if (status === undefined || hasStatus(view, status)) kept.push(view);
+          if (kept.length > EXPLORE_PAGE_SIZE) break;
+        }
+        cursor = rows.at(-1)?.id ?? cursor;
+        scanned += rows.length;
+        if (rows.length < SEMANTIC_BATCH) break;
+      }
+      const page = kept.slice(0, EXPLORE_PAGE_SIZE);
+      return {
+        items: page,
+        next: kept.length > EXPLORE_PAGE_SIZE ? (page.at(-1)?.id ?? null) : null,
+      };
+    },
+    sourcesPage({ before }) {
+      const rows = filled(
+        (n) => listSources(db, n, before),
+        "source",
+        "display",
+        LIST_PAGE_SIZE + 1,
+      );
+      const page = rows.slice(0, LIST_PAGE_SIZE);
+      return {
+        sources: page,
+        next: rows.length > LIST_PAGE_SIZE ? (page.at(-1)?.id ?? null) : null,
       };
     },
     mergeCandidates() {

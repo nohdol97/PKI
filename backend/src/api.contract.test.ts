@@ -192,6 +192,11 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     exploreItems: {},
     exploreItem: { itemId: 1, depth: 2 },
     exploreSource: { versionId: 1 },
+    // X02B: the curation reads
+    exploreNames: { ids: [1] },
+    semanticPage: {},
+    sourcesPage: {},
+    activityPage: {},
     sourceThread: { versionId: 1 },
     // the Wiki (K01-T1): the page and the note's key are set in beforeAll, once the seed's pages are built
     wikiPage: { key: "" },

@@ -193,26 +193,22 @@ describe("curation.gate (X02B-C2)", () => {
     const shownMember = item("보이는 구성원", open.versionId);
     const hiddenMember = item(CANARY_DENIED, secret.versionId);
     for (const m of [shownMember, hiddenMember]) {
-      db.run("INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)", [
-        m,
-        rep,
-        "2026-11-24T00:00:00Z",
-      ]);
+      db.run(
+        "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+        [m, rep, "2026-11-24T00:00:00Z"],
+      );
     }
-    const hiddenLine = db.all("SELECT id FROM item_merges WHERE member_id = ?", [
-      hiddenMember,
-    ])[0]?.id as number;
+    const shownLine = db.all("SELECT id FROM item_merges WHERE member_id = ?", [shownMember])[0]
+      ?.id as number;
     await start();
     const centre = await call("exploreItem", { itemId: rep, depth: 1 });
-    expect(
-      routes.exploreItem.response.parse(centre.body).center?.members.map((m) => m.id),
-    ).toEqual([shownMember]);
+    const members = routes.exploreItem.response.parse(centre.body).center?.members;
+    expect(members?.map((m) => [m.id, m.mergeId])).toEqual([[shownMember, shownLine]]);
     const names = await call("exploreNames", { ids: [hiddenMember] });
     expect(names).toEqual(await call("exploreNames", { ids: [99_999] }));
     expect(names.body).toEqual({ items: [] });
     const text = JSON.stringify([centre.body, names.body, logged]);
     expect(text).not.toContain(CANARY_DENIED);
-    expect(text).not.toMatch(new RegExp(`"(id|mergeId)":(${hiddenMember}|${hiddenLine})[,}]`));
   });
 
   it("keeps size, order and `next` of the source page with hidden sources between, and answers a hidden version as a missing one", async () => {

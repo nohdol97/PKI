@@ -16,6 +16,7 @@ export {
   insertProviderCall,
   interruptStartedCalls,
   listAttemptTimes,
+  listProviderCallPage,
   listProviderCalls,
   listSources,
   type ProviderCallRow,

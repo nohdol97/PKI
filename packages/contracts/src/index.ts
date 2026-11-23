@@ -44,6 +44,8 @@ import {
 import { INSIGHT_TYPE_NAMES } from "./insight-types.ts";
 import {
   ExploreItemRequestSchema,
+  ExploreNamesRequestSchema,
+  ExploreNamesResponseSchema,
   ExploreItemResponseSchema,
   ExploreItemsRequestSchema,
   ExploreItemsResponseSchema,
@@ -270,6 +272,16 @@ const SourceSummarySchema = z.object({
 export const SourceListResponseSchema = z.object({ sources: z.array(SourceSummarySchema) });
 export type SourceSummary = z.infer<typeof SourceSummarySchema>;
 
+/** X02B-D11: rows per page of the source and provider-call lists. */
+export const LIST_PAGE_SIZE = 50;
+export const SourcePageRequestSchema = z.strictObject({
+  /** The previous answer's `next`: only versions below it are read. */
+  before: z.int().positive().optional(),
+});
+export const SourcePageResponseSchema = SourceListResponseSchema.extend({
+  next: z.int().positive().nullable(),
+});
+
 export const SourceSearchRequestSchema = z.strictObject({ query: z.string().min(1).max(200) });
 
 /**
@@ -342,6 +354,10 @@ const ProviderCallSchema = z.object({
 });
 export const ActivityResponseSchema = z.object({ calls: z.array(ProviderCallSchema) });
 export type ProviderCall = z.infer<typeof ProviderCallSchema>;
+export const ActivityPageRequestSchema = SourcePageRequestSchema;
+export const ActivityPageResponseSchema = ActivityResponseSchema.extend({
+  next: z.int().positive().nullable(),
+});
 
 /**
  * `databaseEncryption` is what the canonical file is, read from the file itself
@@ -1038,6 +1054,15 @@ export const SemanticListResponseSchema = z.object({
   truncated: z.boolean(),
 });
 export type SemanticList = z.infer<typeof SemanticListResponseSchema>;
+/** X02B-R3: the review list by status, a page of representatives at a time; no total is answered. */
+export const SemanticPageRequestSchema = z.strictObject({
+  status: SemanticStatusSchema.optional(),
+  after: z.int().nonnegative().optional(),
+});
+export const SemanticPageResponseSchema = z.object({
+  items: z.array(SemanticItemSchema),
+  next: z.int().positive().nullable(),
+});
 const SemanticStateSchema = z.object({
   kind: SemanticKindSchema,
   id: z.int().positive(),
@@ -2219,6 +2244,31 @@ export const routes = {
     path: "/api/explore/source",
     request: ExploreSourceRequestSchema,
     response: ExploreSourceResponseSchema,
+  },
+  // X02B (R2-R4): item names by number and the paged reads of the review, source and activity lists.
+  exploreNames: {
+    method: "POST",
+    path: "/api/explore/names",
+    request: ExploreNamesRequestSchema,
+    response: ExploreNamesResponseSchema,
+  },
+  semanticPage: {
+    method: "POST",
+    path: "/api/semantic/page",
+    request: SemanticPageRequestSchema,
+    response: SemanticPageResponseSchema,
+  },
+  sourcesPage: {
+    method: "POST",
+    path: "/api/sources/page",
+    request: SourcePageRequestSchema,
+    response: SourcePageResponseSchema,
+  },
+  activityPage: {
+    method: "POST",
+    path: "/api/activity/page",
+    request: ActivityPageRequestSchema,
+    response: ActivityPageResponseSchema,
   },
   // I02-B (R55): the thread a source version belongs to. A POST with the version number in the body, as the other by-number reads are.
   sourceThread: {
