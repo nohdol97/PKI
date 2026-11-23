@@ -3,10 +3,7 @@
 // The items' own sentences are held (S30, S31), so are the sentences S18 and the "built at build time" table carry
 // about the scopes file, and what they name in the code still exists. A separate file from the other site-setup
 // tests so the specs' tests do not touch the same file.
-// I07-T05 owns the flip of one guard here: S31 says `scopes-check` is not in the repository yet, and the test
-// "S31 says the runner's command is not written yet" reads the verification folder. When I07-T05 lands the
-// runner, that sentence is stale and the test turns red: replace the sentence and the guard together.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -78,23 +75,6 @@ function item(site: string, n: string): string {
   if (at < 0) return "";
   const end = lines.findIndex((l, i) => i > at && (l.startsWith("- [") || l.startsWith("#")));
   return lines.slice(at, end < 0 ? undefined : end).join("\n");
-}
-
-/** Every file under `dir` (relative to the repository root) whose text holds `needle`. */
-function filesHolding(dir: string, needle: string): string[] {
-  const hits: string[] = [];
-  const walk = (rel: string) => {
-    for (const entry of readdirSync(resolve(repoRoot, rel), { withFileTypes: true })) {
-      const path = `${rel}/${entry.name}`;
-      if (entry.isDirectory()) {
-        if (entry.name !== "node_modules" && entry.name !== "__pycache__") walk(path);
-      } else if (/\.(py|md|json|toml|txt)$/.test(entry.name) && read(path).includes(needle)) {
-        hits.push(path);
-      }
-    }
-  };
-  walk(dir);
-  return hits;
 }
 
 describe("docs.site-setup (I07): the checklist and the spec correspond", () => {
@@ -224,9 +204,9 @@ describe("docs.site-setup (I07): S31", () => {
     }
   });
 
-  it("says how to compare by hand until the runner exists, and the three ways a comparison proves nothing", () => {
+  it("says how to compare by hand without the runner, and the three ways a comparison proves nothing", () => {
     for (const sentence of [
-      "그 전에는 정본 `pki.sqlite`를 읽기 전용으로 열어 `SELECT id, configured_scope FROM connector_instances`의 값을 범위 파일의 값과 손으로 견준다.",
+      "실행기를 쓸 수 없으면 정본 `pki.sqlite`를 읽기 전용으로 열어 `SELECT id, configured_scope FROM connector_instances`의 값을 범위 파일의 값과 손으로 견준다.",
       "확인: 범위가 있는 인스턴스마다 정본의 `configured_scope`가 범위 파일의 값과 같다.",
       "정본에는 정렬하고 중복을 없앤 값이 저장되므로 파일의 값도 정렬해서 견준다.",
       "정본의 값이 `null`이면 읽히지 않은 것이다.",
@@ -242,12 +222,25 @@ describe("docs.site-setup (I07): S31", () => {
     expect(read("backend/src/connector-scopes.ts")).toContain("normalizeScope(values as string[])");
   });
 
-  it("S31 says the runner's command is not written yet, and `scopes-check` is in no file of the verification folder", () => {
+  it("S31 gives the runner's command, its three verdicts and the record's fields, and the runner holds the name", () => {
     expect(s31).toContain(
-      "③ 검증 실행기의 `scopes-check`를 실행한다. 이 명령은 I07-T05가 이 항목에 적는다(`scopes-check`는 아직 저장소에 없다).",
+      "③ 검증 실행기의 `scopes-check`를 실행한다: `python verification\\v02-site-flow\\run.py scopes-check --config v02-result\\config.json --expected site\\config\\connector-scopes.json --out v02-result`(절차는 `verification/v02-site-flow/RUNBOOK.md` 13절).",
     );
-    expect(s31).toContain("판정의 이름과 결과 파일의 모양은 I07-T05가 이 항목에 더한다.");
-    expect(filesHolding("verification", "scopes-check")).toEqual([]);
+    expect(s31).toContain(
+      "판정은 `PASS`·`FAIL`·`INCONCLUSIVE`이고, 결과 파일 `scopes-check-result.json`에는 OS, 앱 버전, 판정, 견준 수·같은 수·다른 수·정본에 없는 수만 담긴다(범위 값과 인스턴스 ID는 담기지 않는다).",
+    );
+    expect(read("verification/v02-site-flow/run.py")).toContain('"scopes-check"');
+  });
+});
+
+describe("docs.verification (I07-C15): the runner's RUNBOOK and README row name the check as written, never run", () => {
+  it("the RUNBOOK has a section for scopes-check and the README table a row marked unexecuted", () => {
+    expect(read("verification/v02-site-flow/RUNBOOK.md")).toMatch(/^## 13\. .*scopes-check.*S31/m);
+    const row = read("verification/README.md")
+      .split("\n")
+      .find((l) => l.startsWith("| `v02-site-flow/scopes_check.py`"));
+    expect(row, "README row").toBeDefined();
+    expect(row).toContain("작성만 됨 — 실행된 적 없음");
   });
 });
 
