@@ -76,6 +76,8 @@ interface Run {
   invalidationIds: Set<number>;
   /** Rows of a kind that a membership receiver changed inside this propagation (the kind's own count adds them). */
   byReceivers: Map<string, number>;
+  /** The items the `insight` kind's collection reached with their groups, as they were before anything changed. */
+  groupBefore: number[];
 }
 let running: Run | undefined;
 
@@ -444,7 +446,9 @@ const INSIGHT: DerivativeKind = {
     // the Insights on the items the source's evidence reaches and on every member of their groups, as
     // the groups are before anything changes (S02-R13), a resolved row included: a scope change may
     // revive it, and a resolved row has no evidence link of its own to find it by
-    const group = JSON.stringify(withGroups(tx, reachedItems(tx, id)));
+    const before = withGroups(tx, reachedItems(tx, id));
+    if (running) running.groupBefore = before;
+    const group = JSON.stringify(before);
     return collect(
       tx,
       "insight",
@@ -474,9 +478,12 @@ const INSIGHT: DerivativeKind = {
         .filter((ends) => !ends.some((end) => reached.has(end)))
         .flat(),
     );
+    // the members that survive of the groups as they were before the change: a deleted representative
+    // took its Insight with it (cascade), and the survivors' own Insight is keyed by the new top (R13)
+    const survivors = (running?.groupBefore ?? []).filter((id) => stored(tx, "items", id));
     const outcomes = recomputeDependencyDelay(
       tx,
-      ascending([...remaining, ...viaGroup.filter((id) => stored(tx, "items", id))]),
+      ascending([...remaining, ...survivors, ...viaGroup.filter((id) => stored(tx, "items", id))]),
       ctx,
     );
     const report = noting(ctx);
@@ -946,7 +953,13 @@ export function propagateCanonical(
     insights: [],
   };
   const outer = running;
-  const run: Run = { report, at, invalidationIds: new Set(), byReceivers: new Map() };
+  const run: Run = {
+    report,
+    at,
+    invalidationIds: new Set(),
+    byReceivers: new Map(),
+    groupBefore: [],
+  };
   running = run;
   try {
     const propagation = registry.propagate(db, change);

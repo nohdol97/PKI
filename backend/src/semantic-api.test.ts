@@ -328,6 +328,23 @@ describe("GET /api/semantic: members under their representative (S02-R13)", () =
     expect(members?.[0]?.facts.map((f) => f.id)).toEqual([shown.fact]);
   });
 
+  it("a chain with a hidden middle lists the visible end under the representative and names no hidden item: mergedInto is the nearest visible item", async () => {
+    const policy: ScopePolicy = {
+      ...defaultScopePolicy,
+      allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+    };
+    const hiding = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy,
+    });
+    const [a, b, c] = [world("a"), world("b", SECRET), world("c")] as const;
+    const first = mergeInto(a.item, b.item);
+    mergeInto(b.item, c.item);
+    await start({ registry: hiding });
+    const members = (await list()).items.find((i) => i.id === c.item)?.members;
+    expect(members?.map((m) => [m.id, m.mergeId, m.mergedInto])).toEqual([[a.item, first, c.item]]);
+  });
+
   it("counts representatives against the limit: members do not make the list truncated", async () => {
     const [a, b] = [world("a"), world("b")] as const;
     mergeInto(a.item, b.item);

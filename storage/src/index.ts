@@ -237,6 +237,7 @@ export {
   listSemanticItems,
   listSemanticMembers,
   listSemanticRelations,
+  mergedIntoOf,
   itemsOfEntry,
   readSemanticHistory,
   readSemanticState,

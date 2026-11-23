@@ -345,6 +345,19 @@ describe("resolution.group-reads: a member's source goes (S02-R13)", () => {
     },
   );
 
+  it("deleting the representative's only source keeps the surviving member's Insight: it is keyed by the member afterwards", () => {
+    const [x, y, yPrime] = [item("X"), item("Y"), item("Y′")] as const;
+    fact(x, TARGET_DATE, "2026-12-05", "s-target");
+    dependsOn(x, yPrime, "s-dep");
+    fact(yPrime, COMPLETION_DATE, "2026-12-10", "s-completion");
+    fact(y, "note", "Y only", "s-y");
+    mergeThrough(entryUnder(defaultScopePolicy), yPrime, y);
+    expect(live()).toEqual([{ x_item_id: x, y_item_id: y, state: "active" }]);
+    deleteSource(sourceId("s-y"));
+    expect(db.all("SELECT 1 FROM items WHERE id = ?", [y])).toEqual([]);
+    expect(live()).toEqual([{ x_item_id: x, y_item_id: yPrime, state: "active" }]);
+  });
+
   it("does the same when an old version's prune takes the member's date", () => {
     const { x, y } = mergedWorld();
     const next = saveSourceRecord(db, "c1", {

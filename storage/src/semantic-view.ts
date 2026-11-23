@@ -75,6 +75,11 @@ export interface SemanticMemberView extends SemanticItemView {
   mergedInto: number;
 }
 
+/** The item an active merge line makes `item` a member of, if any: one step up a chain. */
+export const mergedIntoOf = (db: SqlDriver, item: number): number | undefined =>
+  db.all("SELECT representative_id FROM item_merges WHERE member_id = ? AND active = 1", [item])[0]
+    ?.representative_id as number | undefined;
+
 /** The active members of the representative's group, ascending by id, each with its own line's number. */
 export function listSemanticMembers(db: SqlDriver, representativeId: number): SemanticMemberView[] {
   return entityGroups
