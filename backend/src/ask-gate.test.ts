@@ -8,11 +8,14 @@ import { createProductRegistry } from "@pki/knowledge-engine";
 import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
 import {
   addEvidence,
+  FEEDBACK_LEARNED_SETTING,
   insertItem,
   migrate,
   registerConnectorInstance,
   saveFact,
+  recordFeedback,
   saveSourceRecord,
+  userDecisions,
   writeSetting,
   type KnowledgeAttributes,
   type ScopePolicy,
@@ -329,5 +332,41 @@ describe("ask.questions: the one-shot question token (X01-R8, D10)", () => {
     expect(candidates.lookup(token)).toBeUndefined(); // gone with the request
     expect(candidates.lookup("question:guess")).toBeUndefined();
     expect(candidates.lookup("7")?.name).toBe("항목"); // anything else is the inner lookup's
+  });
+});
+
+describe("ask.gate: the item preference reaches the ranking (X01-C5c)", () => {
+  it("lifts the hit resting on a preferred item only when feedback.learned is on", async () => {
+    for (let i = 0; i < 5; i++) source(`표식${i}`, ["open"]);
+    const { deps } = backend();
+    const rank = async () => {
+      const events: AskEvent[] = [];
+      for await (const e of ask(deps, { question: QUERY, answer: false })) events.push(e);
+      return hitIds(events);
+    };
+    const target = (await rank())[2] as number;
+    const body = db.all("SELECT body FROM source_versions WHERE id = ?", [target])[0]
+      ?.body as string;
+    const item = insertItem(db, { type: "Project", name: "선호항목큐", ...attrs });
+    const factId = saveFact(db, { itemId: item, kind: "memo", value: "값", ...attrs }).id;
+    addEvidence(db, {
+      target: { factId },
+      sourceVersionId: target,
+      start: 0,
+      end: [...body].length,
+      quote: body,
+    });
+    const before = await rank();
+    recordFeedback(
+      db,
+      userDecisions,
+      { target: { kind: "item", id: item }, kind: "important" },
+      "2026-11-23T00:00:00.000Z",
+    );
+    expect(await rank()).toEqual(before);
+    writeSetting(db, FEEDBACK_LEARNED_SETTING, "on");
+    const after = await rank();
+    expect(after[0]).toBe(target);
+    expect([...after].sort()).toEqual([...before].sort());
   });
 });
