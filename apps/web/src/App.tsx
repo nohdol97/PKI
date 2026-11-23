@@ -18,10 +18,8 @@ import { JobsArea } from "./activity-jobs.tsx";
 import { ApiError, type ApiClient } from "./api.ts";
 import {
   DEV_KEY_HINT,
-  deleteApiKey,
+  changeApiKey,
   keyStatusText,
-  SECRET_REFUSAL_TEXT,
-  saveApiKey,
   secretBridge,
   type SecretAction,
 } from "./api-key.ts";
@@ -683,15 +681,8 @@ function OpenAICompatible({
   // the field has cleared the value before this runs; what is left to say is what became of it
   const changeKey = async (action: SecretAction) => {
     if (!bridge || current.keyName === null) return;
-    if (action.kind === "refused") return setFailure(SECRET_REFUSAL_TEXT[action.reason]);
-    if (action.kind === "delete") {
-      await deleteApiKey(bridge, current.keyName);
-      return reload();
-    }
-    const result = await saveApiKey(bridge, current.keyName, action.value);
-    if (result === "line-break" || result === "too-long") setFailure(SECRET_REFUSAL_TEXT[result]);
-    else setFailure(result === "saved" ? undefined : "키를 저장할 수 없습니다 (OS 보호 저장소)");
-    reload();
+    setFailure(await changeApiKey(bridge, current.keyName, action));
+    if (action.kind !== "refused") reload();
   };
   return (
     <>
@@ -720,6 +711,7 @@ function OpenAICompatible({
       </table>
       {bridge ? (
         <SecretField
+          key={current.keyName}
           inputLabel={current.host === null ? "API 키" : `${current.host}에 쓸 API 키`}
           showLabel
           saveText="키 저장"

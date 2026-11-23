@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  changeApiKey,
   deleteApiKey,
   keyStatusText,
   MAX_SECRET_LENGTH,
@@ -59,5 +60,25 @@ describe("API key entry", () => {
     expect(
       keyStatusText({ baseUrl: null, model: null, host: null, keyName: null, key: null }),
     ).toBe("주소를 먼저 저장하세요");
+  });
+
+  // I06F-C13: the result of a save or delete is one text or undefined, and the call never throws
+  it("I06F-C13 turns a rejected save or a failed delete into a text, and a good delete into undefined", async () => {
+    const bridge = {
+      setSecret: vi.fn().mockRejectedValue(new Error("forbidden-sender")),
+      deleteSecret: vi.fn(async () => ({ ok: true })),
+    };
+    expect(await changeApiKey(bridge, NAME, { kind: "save", value: "sk-x" })).toContain(
+      "키를 저장할 수 없습니다",
+    );
+    expect(await changeApiKey(bridge, NAME, { kind: "delete" })).toBeUndefined();
+    bridge.deleteSecret.mockResolvedValueOnce({ ok: false } as never);
+    expect(await changeApiKey(bridge, NAME, { kind: "delete" })).toContain(
+      "키를 지우지 못했습니다",
+    );
+    bridge.deleteSecret.mockRejectedValueOnce(new Error("invalid-input"));
+    expect(await changeApiKey(bridge, NAME, { kind: "delete" })).toContain(
+      "키를 지우지 못했습니다",
+    );
   });
 });
