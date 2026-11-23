@@ -16,7 +16,14 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEv
 import { outcomeText } from "./activity-text.ts";
 import { JobsArea } from "./activity-jobs.tsx";
 import { ApiError, type ApiClient } from "./api.ts";
-import { DEV_KEY_HINT, deleteApiKey, keyStatusText, saveApiKey, secretBridge } from "./api-key.ts";
+import {
+  DEV_KEY_HINT,
+  deleteApiKey,
+  keyStatusText,
+  saveApiKey,
+  secretBridge,
+  type SecretAction,
+} from "./api-key.ts";
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { BACKGROUND_EXECUTION_TEXT } from "./background-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
@@ -24,7 +31,6 @@ import {
   changeCredential,
   credentialOutcomeText,
   rereadDelaysMs,
-  type CredentialAction,
 } from "./connector-credential.ts";
 import { ConnectorTable } from "./connector-table.tsx";
 import { nextSyncStops } from "./connector-text.ts";
@@ -230,7 +236,7 @@ function Sources({ api }: { api: ApiClient }) {
   const changeConnectorCredential = async (
     connectorId: string,
     name: string,
-    action: CredentialAction,
+    action: SecretAction,
   ) => {
     if (!bridge) return;
     const outcome = await changeCredential({ bridge, api }, connectorId, name, action);
