@@ -70,6 +70,52 @@ async function startStack(set: string, target: Target, chromium: BrowserType): P
   };
 }
 
+/**
+ * UI01-C7: Home is the mockup's composition. The first Insight is open on its own; the two head bars are
+ * 48px high and level, the detail pane is right of the list; the chosen row has the accent bar on a white
+ * ground; the title is 24px; the action bar stays at the pane's bottom edge while the body scrolls; the main
+ * action is filled.
+ */
+async function homeLooksLikeTheMockup(page: Page) {
+  const detail = page.getByRole("region", { name: "Insight 상세" });
+  await expect(detail.getByRole("heading", { name: "근거", exact: true })).toBeVisible();
+  const box = async (selector: string) =>
+    (await page.locator(selector).first().boundingBox()) as NonNullable<
+      Awaited<ReturnType<ReturnType<Page["locator"]>["boundingBox"]>>
+    >;
+  const [listHead, detailHead, list] = [
+    await box(".pane-list .pane-head"),
+    await box(".pane-detail .pane-head"),
+    await box(".pane-list"),
+  ];
+  expect([listHead.height, detailHead.height]).toEqual([48, 48]);
+  expect(detailHead.y).toBe(listHead.y);
+  expect(detailHead.x).toBeGreaterThanOrEqual(list.x + list.width);
+
+  const style = (selector: string, property: string) =>
+    page
+      .locator(selector)
+      .first()
+      .evaluate((e, p) => getComputedStyle(e).getPropertyValue(p), property);
+  const row = '.rows .row[aria-current="true"]';
+  await expect(page.locator(row)).toHaveCount(1);
+  expect(await style(row, "border-left-color")).toBe("rgb(30, 58, 95)");
+  expect(await style(row, "background-color")).toBe("rgb(255, 255, 255)");
+  expect(await style(".pane-detail .detail-title", "font-size")).toBe("24px");
+  expect(await style(".pane-detail .actions .btn-primary", "background-color")).toBe(
+    "rgb(30, 58, 95)",
+  );
+
+  const barBottomGap = async () => {
+    const [pane, bar] = [await box(".pane-detail"), await box(".pane-detail .actions")];
+    return pane.y + pane.height - (bar.y + bar.height);
+  };
+  expect(Math.abs(await barBottomGap())).toBeLessThanOrEqual(1);
+  await page.locator(".pane-detail .pane-body").evaluate((e) => (e.scrollTop = e.scrollHeight));
+  expect(Math.abs(await barBottomGap())).toBeLessThanOrEqual(1);
+  await page.locator(".pane-detail .pane-body").evaluate((e) => (e.scrollTop = 0));
+}
+
 test("evidence.e2e: the Insight's three evidence open their source version and span", async ({
   target,
   playwright,
@@ -80,7 +126,9 @@ test("evidence.e2e: the Insight's three evidence open their source version and s
   );
   const stack = await startStack("plain", target, playwright.chromium);
   try {
-    await stack.page.setViewportSize({ width: 1280, height: 800 });
+    const { page } = stack;
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await homeLooksLikeTheMockup(page);
     const source = await openEvidence(stack.page, "plain");
     // UI01-C7: at 1280px the opened source sits in the column to the right of the Insight list
     const insights = stack.page.getByRole("list", { name: "Insight 목록" });
@@ -105,13 +153,15 @@ test("insight.e2e: Home shows the Insight's type, fact lines, reasoning and rank
     await expect(insightItems(page)).toHaveCount(1);
     const item = insightItems(page).first();
     await expect(item).toContainText("의존 업무 지연");
-    const lines = item.getByRole("list", { name: "사실 줄" }).getByRole("listitem");
+    // the fact lines, the reason and the ranking are in the detail pane (the first Insight is open)
+    const detail = page.getByRole("region", { name: "Insight 상세" });
+    const lines = detail.getByRole("list", { name: "사실 줄" }).getByRole("listitem");
     await expect(lines).toHaveCount(3);
     await expect(lines.filter({ hasText: "2026-12-05" })).not.toHaveCount(0);
     await expect(lines.filter({ hasText: "2026-12-10" })).not.toHaveCount(0);
     // the notification mark is not asserted: the fixture double's candidate confidence is not pinned
-    await expect(item).toContainText("코드가 비교해");
-    await expect(item).toContainText(/순위 \d+/);
+    await expect(detail).toContainText("코드가 비교해");
+    await expect(detail).toContainText(/순위 \d+/);
 
     await page.getByText("Insight 유형 지원 상태").click();
     const types = page.getByRole("list", { name: "Insight 유형" }).getByRole("listitem");

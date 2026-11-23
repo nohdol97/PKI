@@ -54,4 +54,6 @@
   --nav-w: 208px;
   --list-w: clamp(320px, 32vw, 408px);
   --status-h: 30px;
+  --pane-head-h: 48px;
+  --row-accent-w: 3px;
 }

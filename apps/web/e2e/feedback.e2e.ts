@@ -46,7 +46,11 @@ test("feedback.e2e: mark an Insight irrelevant, see it leave Home, cancel the fe
   const insights = insightItems(page);
   await expect(insights).toHaveCount(1);
 
-  await insights.getByRole("button", { name: /^관련 없음/ }).click();
+  // the action bar of the detail pane (Home opens the first Insight on its own)
+  await page
+    .getByRole("region", { name: "Insight 상세" })
+    .getByRole("button", { name: /^관련 없음/ })
+    .click();
   await expect(insights).toHaveCount(0);
   await expect(page.getByText("보여 줄 Insight가 없습니다.")).toBeVisible();
 

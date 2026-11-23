@@ -170,6 +170,8 @@ for (const config of configs) {
         );
 
         await openScreen(page, "원본");
+        // UI01-C6: the one-pane screens have the same 48px head bar
+        expect((await page.locator(".pane-head").first().boundingBox())?.height).toBe(48);
         for (const kind of ["site-mail", "site-messenger", "site-wiki"]) {
           await expect(page.getByRole("row", { name: new RegExp(kind) })).toContainText(
             "미구현(배포처 후속)",
@@ -207,6 +209,8 @@ for (const config of configs) {
  * of the content and the status line under both; in the shell no inline style at all.
  */
 async function frameLooksRight(page: Page, target: Target) {
+  // the status line carries the backend's own words about each part
+  await expect(page.locator("footer")).toContainText("백엔드 준비됨");
   const frame = await page.evaluate(async () => {
     await document.fonts.load('16px "Pretendard Variable"');
     const box = (selector: string) => {
@@ -224,9 +228,15 @@ async function frameLooksRight(page: Page, target: Target) {
       nav: box("nav"),
       main: box("main"),
       status: box("footer"),
+      icon: (() => {
+        const icons = document.querySelectorAll("nav button svg");
+        const r = (icons[0] as Element).getBoundingClientRect();
+        return { width: r.width, height: r.height, count: icons.length };
+      })(),
       inlineStyles: document.querySelectorAll("[style], style").length,
     };
   });
+  expect(frame.icon).toEqual({ width: 16, height: 16, count: 11 });
   expect(frame.family.startsWith('"Pretendard Variable"')).toBe(true);
   expect(frame.checked && frame.loaded).toBe(true);
   expect(frame.background).toBe("rgb(246, 245, 242)");

@@ -65,7 +65,10 @@ export async function openEvidence(page: Page, set: string) {
   await expect(insights).toHaveCount(1);
   const insight = insights.first();
   await expect(insight.getByText("추론", { exact: true })).toBeVisible();
-  await expect(insight).toContainText("확정 사실이 아닙니다");
+  // the Insight's own view (with the not-confirmed sentence) is in the detail pane, which Home fills on its own
+  await expect(page.getByRole("region", { name: "Insight 상세" })).toContainText(
+    "확정 사실이 아닙니다",
+  );
   await expect(page.getByText("확정", { exact: true })).toHaveCount(0);
 
   const open = insight.getByRole("button", { name: /근거 보기/ });

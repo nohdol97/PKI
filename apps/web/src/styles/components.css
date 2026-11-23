@@ -1,7 +1,129 @@
-/* Pieces that need a class (UI01-R2): row lists, view switch, button rows, quiet text, status word with a dot. */
+/* Pieces that need a class (UI01-R5, R6, R8): head bars, rows, the properties grid, quotes, the action bar. */
 
-/* a list of rows in one bordered group */
-.cards {
+/* a pane's head bar */
+.pane-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  height: var(--pane-head-h);
+  padding: 0 20px;
+  border-bottom: var(--border);
+}
+.pane-detail .pane-head {
+  padding: 0 var(--sp-6);
+}
+.pane-wide .pane-head {
+  padding: 0 var(--sp-6);
+  background: var(--surface-quiet);
+}
+.pane-head .pane-title {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  margin: 0;
+  font-size: var(--fs-sub);
+  font-weight: 700;
+}
+.pane-head .pane-title span {
+  color: var(--ink-meta);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* the view switch (buttons that carry aria-pressed) */
+.tabs {
+  display: flex;
+  gap: 2px;
+}
+.tabs button {
+  min-height: 0;
+  padding: var(--sp-1) 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+}
+.tabs button + button {
+  margin-left: 0;
+}
+.tabs button[aria-pressed="true"] {
+  background: var(--accent-quiet);
+  color: var(--accent);
+}
+
+/* list rows: the whole row is one button */
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rows > li {
+  margin: 0;
+}
+.row {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  padding: 14px 20px 14px calc(20px - var(--row-accent-w));
+  border: 0;
+  border-left: var(--row-accent-w) solid transparent;
+  border-bottom: var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 400;
+  text-align: left;
+}
+.rows .row:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: transparent;
+  border-bottom-color: var(--line);
+}
+.rows .row[aria-current="true"],
+.rows .row[aria-current="true"]:hover:not(:disabled) {
+  background: var(--surface);
+  border-left-color: var(--accent);
+}
+.row-line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: var(--sp-3);
+  align-items: baseline;
+}
+.row-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.row-time {
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.row-meta {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+}
+.group-label {
+  margin: var(--sp-4) 0 var(--sp-1);
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+
+/* a bordered list of free-form entries */
+.plain-list {
   margin: 0 0 var(--sp-4);
   padding: 0;
   list-style: none;
@@ -9,50 +131,158 @@
   border-radius: var(--radius);
   background: var(--surface);
 }
-.cards > li {
+.plain-list > li {
   margin: 0;
   padding: var(--sp-3) var(--sp-4);
 }
-.cards > li + li {
+.plain-list > li + li {
   border-top: var(--border);
 }
-.cards > li > :last-child {
+.plain-list > li > :last-child {
   margin-bottom: 0;
 }
 
-/* the view switch (buttons that carry aria-pressed) */
-.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-1);
-  margin: 0 0 var(--sp-4);
+/* detail pane: title, properties, sections, quotes */
+.pane-detail .detail-title {
+  margin: 0;
+  font-size: var(--fs-h1);
+  line-height: 1.4;
 }
-.tabs button {
-  min-height: calc(var(--control-h) - var(--sp-2));
-  border-color: transparent;
-  background: transparent;
+.props {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 var(--sp-6);
+  margin: 20px 0 28px;
+  padding: var(--sp-4) 0;
+  border-top: var(--border);
+  border-bottom: var(--border);
+}
+.props > div {
+  display: flex;
+  gap: 14px;
+  padding: 5px 0;
+  font-size: var(--fs-sub);
+}
+.props > div:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+.props dt {
+  flex: none;
+  width: 56px;
+  padding-top: 1px;
   color: var(--ink-meta);
   font-size: var(--fs-meta);
 }
-
-.tabs button[aria-pressed="true"] {
-  background: var(--accent-quiet);
-  color: var(--accent);
+.props dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
 }
-
-/* a row of buttons */
-.actions {
+.sec {
+  margin-top: 30px;
+}
+.pane-detail .sec > h3,
+.pane-detail .sec > h4 {
+  margin: 0 0 var(--sp-2);
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+.sec > p {
+  font-size: var(--fs-lead);
+  line-height: 1.65;
+}
+.meta {
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+}
+.link-list {
+  margin: 0 0 var(--sp-3);
+  padding: 0;
+  list-style: none;
+}
+.hint {
+  color: var(--ink-meta);
+}
+.quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.quotes > li {
+  margin: 0;
+}
+.quote {
+  margin: 0 0 var(--sp-2);
+  padding: 1px 0 1px var(--sp-4);
+  border-left: 3px solid var(--line-strong);
+}
+.quote p {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.6;
+}
+.quote .src {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+}
+.row-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
-  margin: var(--sp-2) 0;
+  margin: var(--sp-2) 0 0;
 }
-.actions button {
+.row-actions button {
   min-height: calc(var(--control-h) - var(--sp-2));
   font-size: var(--fs-meta);
 }
+.row-actions button + button {
+  margin-left: 0;
+}
+
+/* the action bar pinned under the detail */
+.actions {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 14px var(--sp-6);
+  border-top: var(--border);
+  background: var(--surface);
+}
 .actions button + button {
   margin-left: 0;
+}
+.actions label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.actions textarea {
+  flex: 1;
+  min-height: var(--control-h);
+  height: var(--control-h);
+  resize: vertical;
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.rows .btn-primary:hover,
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  opacity: 0.9;
 }
 
 /* a state shown as a colour dot plus its word; the dot never carries the meaning alone */
@@ -83,11 +313,33 @@
   color: var(--none);
 }
 
-/* a wide table scrolls inside its pane instead of widening the page */
+/* 원본, 활동, 설정: one white box per section */
+.group {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  border: var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.group > :first-child {
+  margin-top: 0;
+}
+.group > :last-child {
+  margin-bottom: 0;
+}
 .scroll-x {
   overflow-x: auto;
   margin: 0 0 var(--sp-3);
 }
 .scroll-x > table {
   margin: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

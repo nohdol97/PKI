@@ -57,8 +57,8 @@ describe("the navigation", () => {
     const out = renderToStaticMarkup(
       <App api={(() => new Promise(() => undefined)) as unknown as ApiClient} />,
     );
-    expect(out).toMatch(/<button[^>]*>지식 검토<\/button>/);
-    expect(out).toMatch(/<button[^>]*>탐색<\/button>/);
-    expect(out).toMatch(/<button[^>]*>질문<\/button>/);
+    expect(out).toMatch(/<button[^>]*>(<svg[\s\S]*?<\/svg>)?지식 검토<\/button>/);
+    expect(out).toMatch(/<button[^>]*>(<svg[\s\S]*?<\/svg>)?탐색<\/button>/);
+    expect(out).toMatch(/<button[^>]*>(<svg[\s\S]*?<\/svg>)?질문<\/button>/);
   });
 });

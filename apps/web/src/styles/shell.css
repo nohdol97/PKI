@@ -1,8 +1,7 @@
 /*
- * The frame (UI01-R3, R5): menu on the left, content, status line below.
- * `.pane-detail` stays where the screen draws it in the DOM; this file places it in the right-hand
- * column of `main` (position: absolute against `main`). No element between `main` and `.pane-detail`
- * may set `position` or `transform`, or the detail would be placed against that element instead.
+ * The frame (UI01-R3, R5, R6, R8): menu on the left, the content in the middle, the status line below.
+ * A screen with a list and a detail is two panes side by side (`.screen-split`); any other screen is one pane
+ * (`.pane-wide`). Each pane scrolls on its own; head bars, the action bar and the status line stay in place.
  */
 
 .app {
@@ -21,7 +20,7 @@
   gap: var(--sp-4);
   min-height: 0;
   overflow-y: auto;
-  padding: var(--sp-5) var(--sp-3);
+  padding: 20px var(--sp-3);
   background: var(--bg-side);
   border-right: var(--border);
 }
@@ -38,30 +37,55 @@
   gap: 2px;
 }
 .side nav button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   min-height: var(--control-h);
-  padding: 0 var(--sp-3);
-  border: 1px solid transparent;
+  padding: 0 10px;
+  border: 0;
   border-radius: var(--radius);
   background: transparent;
   color: var(--ink-2);
-  font-size: var(--fs-body);
+  font-size: var(--fs-sub);
   font-weight: 500;
   text-align: left;
 }
 .side nav button + button {
   margin-left: 0;
 }
-.side nav button:hover {
+.side nav button:hover:not([aria-current="page"]) {
   background: var(--surface-quiet);
-  border-color: var(--line);
+  border-color: transparent;
 }
 .side nav button[aria-current="page"] {
   background: var(--accent-quiet);
-  border-color: transparent;
   color: var(--accent);
   font-weight: 600;
+}
+.side nav svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.badge {
+  min-width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--attn);
+  color: var(--on-accent);
+  font-size: var(--fs-meta);
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 /* content */
@@ -72,40 +96,65 @@
   min-width: 0;
   min-height: 0;
 }
-.pane-list {
-  height: 100%;
-  overflow-y: auto;
-  padding: var(--sp-5) var(--sp-6);
+.screen-split {
+  display: grid;
+  grid-template-columns: var(--list-w) minmax(0, 1fr);
 }
-.screen:has(.pane-detail) .pane-list {
-  width: var(--list-w);
-  padding: var(--sp-5) var(--sp-4);
+.pane-list,
+.pane-detail,
+.pane-wide {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.pane-list {
   background: var(--surface-quiet);
   border-right: var(--border);
 }
 .pane-detail {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: var(--list-w);
-  overflow-y: auto;
-  padding: var(--sp-5) var(--sp-6);
   background: var(--surface);
 }
-.pane-detail > * {
-  max-width: 720px;
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
-.pane-detail > :first-child > :first-child {
-  margin-top: 0;
+
+/* list pane: rows run edge to edge, anything else keeps the pane's margin */
+.pane-list .pane-body {
+  padding: 0 20px 20px;
 }
-.pane-detail section + section {
-  margin-top: var(--sp-5);
-  padding-top: var(--sp-4);
-  border-top: var(--border);
+.pane-list .pane-body > :first-child:not(.rows) {
+  margin-top: var(--sp-4);
 }
-.pane-detail li {
-  margin-bottom: var(--sp-3);
+.pane-list .rows {
+  margin: 0 -20px var(--sp-4);
+}
+
+.pane-list th {
+  white-space: nowrap;
+}
+
+/* detail pane: the body is a reading column, the action bar is pinned under it */
+.pane-detail .pane-body {
+  padding: var(--sp-6) var(--sp-6) var(--sp-5);
+}
+.pane-detail .pane-body > * {
+  max-width: 700px;
+}
+.pane-detail > [role="alert"] {
+  flex: none;
+  margin: 0 var(--sp-6) var(--sp-2);
+}
+
+/* one pane: the group boxes of 원본, 활동 and 설정 */
+.pane-wide {
+  background: var(--bg);
+}
+.pane-wide .pane-body {
+  padding: var(--sp-5) var(--sp-6);
 }
 
 /* status line */
@@ -115,30 +164,46 @@
   display: flex;
   align-items: center;
   gap: var(--sp-5);
-  padding: 0 var(--sp-5);
+  padding: 0 20px;
   background: var(--bg-side);
   border-top: var(--border);
   font-size: var(--fs-meta);
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
 }
+.statusbar > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.statusbar .state {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+.statusbar .state-ok::before {
+  background: var(--ok);
+}
+.statusbar .state-attn::before {
+  background: var(--attn);
+}
 .statusbar .end {
+  flex: none;
   margin-left: auto;
 }
 
 /* narrow window: the detail follows the list */
 @media (max-width: 959px) {
-  .screen:has(.pane-detail) .pane-list {
-    width: auto;
-    padding: var(--sp-5) var(--sp-6);
-    background: transparent;
-    border-right: 0;
+  .screen-split {
+    display: block;
+    overflow-y: auto;
   }
+  .pane-list,
   .pane-detail {
-    position: static;
-    margin-top: var(--sp-4);
-    padding: var(--sp-4);
-    border: var(--border);
-    border-radius: var(--radius);
+    height: auto;
+  }
+  .pane-list {
+    border-right: 0;
+    border-bottom: var(--border);
   }
 }

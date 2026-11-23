@@ -1,7 +1,8 @@
 // The 알림 screen (P02-R15, R16): one answer of the backend shown three ways — the feed (what to look at now),
 // the digests (the daily summary and the weekly report, their content computed when opened) and the timeline (every
-// line by date, with how it was told and why). A card is the Insight's own view (a 추론 mark, the type, the fact
-// lines, the reason and the ranking), the evidence in the source view the other screens use, and the four actions.
+// line by date, with how it was told and why). A row of the feed or the timeline chooses a notification: its Insight's
+// view (a 추론 mark, the type, the fact lines, the reason and the ranking) and its evidence open in the detail pane, with
+// the notification's actions in the bar under it.
 // The Insight's words are imported or rule-made text: they reach the page as React text nodes inside <bdi> only
 // (V02-R15). The screen reads again when `refresh` changes (`useChanges`); a line, an Insight or a source that went
 // away shows its plain sentence instead of staying on screen.
@@ -9,7 +10,10 @@ import type { NotificationLine, RouteRequest, RouteResponse } from "@pki/contrac
 import { useEffect, useReducer, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import { countsText, ruleText } from "./lint-text.ts";
-import { EvidencePanel, evidenceReducer, InsightSummary } from "./evidence-view.tsx";
+import { evidenceReducer, InsightDetail, InsightRow } from "./evidence-view.tsx";
+import { PaneHead, Row as PaneRow } from "./panes.tsx";
+import { insightType } from "@pki/contracts";
+import { INSIGHT_EPISTEMIC } from "./evidence-text.ts";
 import {
   DIGEST_EMPTY,
   DIGEST_KIND,
@@ -84,71 +88,97 @@ export function Notifications({ api, refresh }: { api: ApiClient; refresh: strin
     );
 
   const feed = list?.lines.filter((l) => l.status === "sent") ?? [];
+  // the chosen notification is the one whose Insight's evidence is open (the feed's line first)
+  const selected =
+    openedId === undefined
+      ? undefined
+      : (feed.find((l) => l.insight.id === openedId) ??
+        list?.lines.find((l) => l.insight.id === openedId));
+  const at = selected ? feed.indexOf(selected) : -1;
   return (
     <>
-      <p>{NOTIFICATIONS_NOT_FACT}</p>
-      {failure && <p role="alert">불러오지 못했습니다: {failure}</p>}
-      <div className="tabs" role="group" aria-label="알림 보기">
-        {(Object.keys(TABS) as Tab[]).map((id) => (
-          <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>
-            {TABS[id]}
-          </button>
-        ))}
-      </div>
-      {tab === "feed" && list && (
-        <>
-          {feed.length === 0 && <p>{FEED_EMPTY}</p>}
-          {feed.length > 0 && (
-            <ul className="cards" aria-label="알림 피드">
-              {feed.map((line) => (
-                <li key={line.id}>
-                  <Card line={line} onAct={act} onOpenEvidence={openEvidence} />
-                </li>
-              ))}
-            </ul>
+      <div className="pane-list">
+        <PaneHead title="알림" as="h1" count={tab === "feed" ? feed.length : undefined}>
+          <div className="tabs" role="group" aria-label="알림 보기">
+            {(Object.keys(TABS) as Tab[]).map((id) => (
+              <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>
+                {TABS[id]}
+              </button>
+            ))}
+          </div>
+        </PaneHead>
+        <div className="pane-body">
+          <p>{NOTIFICATIONS_NOT_FACT}</p>
+          {failure && <p role="alert">불러오지 못했습니다: {failure}</p>}
+          {tab === "feed" && list && (
+            <>
+              {feed.length === 0 && <p>{FEED_EMPTY}</p>}
+              {feed.length > 0 && (
+                <ul className="rows" aria-label="알림 피드">
+                  {feed.map((line) => (
+                    <li key={line.id}>
+                      <InsightRow
+                        insight={line.insight}
+                        selected={line.insight.id === openedId}
+                        onOpen={() => void openEvidence(line.insight.id)}
+                        time={timeText(line.createdAt)}
+                        note={line.readAt === null ? "읽지 않음" : undefined}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
-        </>
-      )}
-      {tab === "digest" && list && (
-        <Digests
-          rows={list.digests}
-          open={digestId}
-          digest={digest}
-          onOpen={(id) => (setDigest(undefined), setDigestId(id))}
-          onAct={act}
-        />
-      )}
-      {tab === "timeline" && list && <Timeline lines={list.lines} onOpenEvidence={openEvidence} />}
-      {evidence.notice && <p role="alert">{evidence.notice}</p>}
-      <EvidencePanel state={evidence} onOpenSource={openSource} />
-      <Settings api={api} />
+          {tab === "digest" && list && (
+            <Digests
+              rows={list.digests}
+              open={digestId}
+              digest={digest}
+              onOpen={(id) => (setDigest(undefined), setDigestId(id))}
+              onAct={act}
+            />
+          )}
+          {tab === "timeline" && (
+            <Timeline lines={list?.lines ?? []} openedId={openedId} onOpenEvidence={openEvidence} />
+          )}
+          {evidence.notice && <p role="alert">{evidence.notice}</p>}
+          <Settings api={api} />
+        </div>
+      </div>
+      <InsightDetail
+        insight={selected?.insight}
+        position={selected && at >= 0 ? `${at + 1} / ${feed.length}` : undefined}
+        lead={
+          selected && (
+            <>
+              {selected.reason !== null && <p>{reasonText(selected.reason)}</p>}
+              {selected.readAt === null && selected.status === "sent" && <p>읽지 않음</p>}
+            </>
+          )
+        }
+        actions={selected && <LineActions line={selected} onAct={act} />}
+        evidence={{ state: evidence, onOpenSource: openSource }}
+      />
     </>
   );
 }
 
-function Card({
+/** The actions of the chosen notification, in the bar under the detail; the first one offered is the main one. */
+function LineActions({
   line,
   onAct,
-  onOpenEvidence,
 }: {
   line: NotificationLine;
   onAct: (request: RouteRequest<"notificationAct">) => void;
-  onOpenEvidence: (insightId: number) => void;
 }) {
   const name = line.insight.summary;
   return (
-    <>
-      <InsightSummary insight={line.insight} />
-      {line.reason !== null && <p>{reasonText(line.reason)}</p>}
-      {line.readAt === null && line.status === "sent" && <p>읽지 않음</p>}
-      {line.actions.includes("evidence") && (
-        <button type="button" onClick={() => onOpenEvidence(line.insight.id)}>
-          근거 보기 ({line.insight.evidenceCount})
-        </button>
-      )}
+    <div className="actions" role="group" aria-label={`알림 조치: ${name}`}>
       {line.actions.includes("read") && (
         <button
           type="button"
+          className="btn-primary"
           aria-label={`읽음: ${name}`}
           onClick={() => onAct({ id: line.id, op: "read" })}
         >
@@ -184,7 +214,7 @@ function Card({
           닫기
         </button>
       )}
-    </>
+    </div>
   );
 }
 
@@ -204,7 +234,7 @@ function Digests({
   if (rows.length === 0) return <p>{DIGEST_EMPTY}</p>;
   return (
     <>
-      <ul className="cards" aria-label="요약 목록">
+      <ul className="plain-list" aria-label="요약 목록">
         {rows.map((row) => (
           <li key={row.id}>
             <strong>{DIGEST_KIND[row.kind]}</strong> {dateText(row.windowStart)} ~{" "}
@@ -246,7 +276,13 @@ function Digests({
             <ul aria-label="요약 내용">
               {digest.lines.map((line) => (
                 <li key={line.id}>
-                  <InsightSummary insight={line.insight} />
+                  <p>
+                    <strong>{INSIGHT_EPISTEMIC[line.insight.epistemic]}</strong>{" "}
+                    <bdi>{line.insight.summary}</bdi>
+                  </p>
+                  <p className="meta">
+                    {insightType(line.insight.type)?.label ?? line.insight.type}
+                  </p>
                   <p>{wayText(line)}</p>
                 </li>
               ))}
@@ -272,9 +308,11 @@ function Digests({
 
 function Timeline({
   lines,
+  openedId,
   onOpenEvidence,
 }: {
   lines: readonly NotificationLine[];
+  openedId: number | undefined;
   onOpenEvidence: (insightId: number) => void;
 }) {
   if (lines.length === 0) return <p>{TIMELINE_EMPTY}</p>;
@@ -288,20 +326,22 @@ function Timeline({
       {[...days].map(([day, dayLines]) => (
         <section key={day}>
           <h3>{day}</h3>
-          <ul className="cards" aria-label={`알림 타임라인 ${day}`}>
+          <ul className="rows" aria-label={`알림 타임라인 ${day}`}>
             {dayLines.map((line) => (
               <li key={line.id}>
-                <p>
-                  <bdi>{line.insight.summary}</bdi>
-                </p>
-                <p>
-                  {timeText(line.createdAt)} · {wayText(line)}
-                </p>
-                {line.actions.includes("evidence") && (
-                  <button type="button" onClick={() => onOpenEvidence(line.insight.id)}>
-                    근거 보기 ({line.insight.evidenceCount})
-                  </button>
-                )}
+                <PaneRow
+                  prefix={
+                    line.actions.includes("evidence")
+                      ? `근거 보기 (${line.insight.evidenceCount}): `
+                      : undefined
+                  }
+                  title={<bdi>{line.insight.summary}</bdi>}
+                  meta={`${timeText(line.createdAt)} · ${wayText(line)}`}
+                  selected={line.insight.id === openedId}
+                  onClick={() =>
+                    line.actions.includes("evidence") && onOpenEvidence(line.insight.id)
+                  }
+                />
               </li>
             ))}
           </ul>

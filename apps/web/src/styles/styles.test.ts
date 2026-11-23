@@ -60,6 +60,8 @@ const TOKEN_NAMES = [
   "nav-w",
   "list-w",
   "status-h",
+  "pane-head-h",
+  "row-accent-w",
 ];
 
 const defined = (name: string) => new RegExp(`--${name}\\s*:`).test(tokens);
@@ -101,6 +103,7 @@ describe("UI01-C1 styles are files, tokens are in one file", () => {
     for (const [f, text] of tsx) {
       expect(text, f).not.toMatch(/\bstyle\s*=/);
       expect(text, f).not.toMatch(/<style/i);
+      expect(text, f).not.toMatch(/<img[\s>]/);
     }
     const html = read(resolve(src, "../index.html"));
     expect(html).not.toMatch(/<style|\sstyle\s*=|<link/i);

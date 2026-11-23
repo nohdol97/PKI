@@ -9,9 +9,10 @@ import { ApiError, type ApiClient } from "./api.ts";
 import {
   citationSource,
   EvidenceEntry,
-  EvidencePanel,
+  InsightBody,
+  InsightDetail,
+  InsightRow as InsightRowView,
   evidenceReducer,
-  InsightSummary,
   openThreadMessage,
   SameThread,
   SourceView,
@@ -137,10 +138,10 @@ describe("SourceView", () => {
   });
 });
 
-describe("InsightSummary", () => {
+describe("InsightBody (the Insight in the detail pane)", () => {
   it("labels the Insight as an inference and never as confirmed", () => {
     const html = renderToStaticMarkup(
-      <InsightSummary insight={row({ summary: "<img src=x>위험(추론)" })} />,
+      <InsightBody insight={row({ summary: "<img src=x>위험(추론)" })} />,
     );
     expect(html).toContain(">추론<");
     expect(html).toContain("확정 사실이 아닙니다");
@@ -155,14 +156,14 @@ describe("InsightSummary", () => {
       reasoningBy: "llm",
       autoNotifyExcluded: true,
     });
-    const html = renderToStaticMarkup(<InsightSummary insight={insight} />);
+    const html = renderToStaticMarkup(<InsightBody insight={insight} />);
     expect(html).toContain("의존 업무 지연");
     expect(html).toContain("<li><bdi>X 목표일: 2026-12-05</bdi></li>");
     expect(html).toContain("<li><bdi>&lt;b&gt;Y&lt;/b&gt; 완료일: 2026-12-10</bdi></li>");
     expect(html).toContain(`${REASONING_BY.llm}: <bdi>해석 이유</bdi>`);
     expect(html).toContain(rankingText(insight.ranking));
     expect(html).toContain(AUTO_NOTIFY_EXCLUDED);
-    const plain = renderToStaticMarkup(<InsightSummary insight={row()} />);
+    const plain = renderToStaticMarkup(<InsightBody insight={row()} />);
     expect(plain).not.toContain(AUTO_NOTIFY_EXCLUDED);
     expect(plain).not.toContain("사실 줄");
   });
@@ -233,11 +234,14 @@ describe("SourceView labels", () => {
 
 describe("bidi isolation of imported text", () => {
   const RLO = "\u202e";
-  it("wraps the Insight summary in <bdi>", () => {
-    const html = renderToStaticMarkup(
-      <InsightSummary insight={row({ summary: `${RLO}위험(추론)` })} />,
+  it("wraps the Insight summary in <bdi>, in the detail title and in the list row", () => {
+    const insight = row({ summary: `${RLO}위험(추론)` });
+    const html = renderToStaticMarkup(<InsightBody insight={insight} />);
+    expect(html).toContain(`<h3 class="detail-title"><bdi>${RLO}위험(추론)</bdi></h3>`);
+    const listed = renderToStaticMarkup(
+      <InsightRowView insight={insight} selected={false} onOpen={() => undefined} />,
     );
-    expect(html).toContain(`<strong>추론</strong> <bdi>${RLO}위험(추론)</bdi>`);
+    expect(listed).toContain(`<bdi>${RLO}위험(추론)</bdi>`);
   });
 
   it("wraps the evidence list's source title in <bdi>, before the product's label", () => {
@@ -258,7 +262,7 @@ describe("bidi isolation of imported text", () => {
         onOpen={() => undefined}
       />,
     );
-    expect(html).toContain(`<p><bdi>${RLO}제목</bdi> · version 2</p>`);
+    expect(html).toContain(`<div class="src"><bdi>${RLO}제목</bdi> · version 2</div>`);
   });
 });
 
@@ -469,32 +473,77 @@ describe("same-thread list (I02B-C56)", () => {
   });
 });
 
-// UI01-C5 (R5, R6): what a screen opens (the evidence, the source view) sits in one role-less
-// div.pane-detail, which the stylesheet places in the right-hand column; nothing open, no wrapper.
-describe("EvidencePanel's detail column", () => {
-  const evidence = {
-    id: 7,
+// UI01-C5 (R5, R6, R7, R10): the list row is one short button, the detail pane holds the Insight's own view,
+// its evidence with the source line, and the action bar; with nothing chosen the pane is one guidance line.
+describe("Insight rows and detail pane", () => {
+  const evidence = (id: number) => ({
+    id,
     target: "fact" as const,
-    targetId: 7,
+    targetId: id,
     status: "candidate" as const,
-    quote: "인용 7",
-    sourceTitle: "제목 7",
+    quote: `인용 ${id}`,
+    sourceTitle: `제목 ${id}`,
     sourceVersionId: 3,
     version: 1,
     current: true,
     locator: null,
-  };
-  const render = (state: EvidenceState) =>
-    renderToStaticMarkup(<EvidencePanel state={state} onOpenSource={() => undefined} />);
+  });
+  const one = row({
+    id: 1,
+    summary: "요약 하나 <b>",
+    factLines: ["사실 줄 하나"],
+    evidenceCount: 2,
+    reasoningSummary: "해석 이유",
+    reasoningBy: "code",
+  });
+  const detail = (over: Partial<Parameters<typeof InsightDetail>[0]> = {}) =>
+    renderToStaticMarkup(
+      <InsightDetail
+        insight={one}
+        position="1 / 2"
+        evidence={{
+          state: { opened: { insightId: 1, evidence: [evidence(7), evidence(8)] }, opens: 1 },
+          onOpenSource: () => undefined,
+        }}
+        actions={<div className="actions">조치</div>}
+        {...over}
+      />,
+    );
 
-  it("wraps what is open in one div.pane-detail with no role or name", () => {
-    const html = render({ opened: { insightId: 1, evidence: [evidence] }, opens: 1 });
-    expect(html.match(/pane-detail/g)).toHaveLength(1);
-    expect(html).toMatch(/^<div class="pane-detail"><section aria-labelledby="evidence-heading">/);
-    expect(html).toMatch(/<\/section><\/div>$/);
+  it("draws a row as one button named from its words, with summary, type and mark, and nothing more", () => {
+    const rows = [one, row({ id: 2, evidenceCount: 1 })].map((insight) =>
+      renderToStaticMarkup(
+        <InsightRowView insight={insight} selected={insight.id === 1} onOpen={() => undefined} />,
+      ),
+    );
+    expect(rows[0]?.match(/<button/g)).toHaveLength(1);
+    expect(rows[0]).toMatch(/<span class="sr-only">근거 보기 \(2\): <\/span>/);
+    expect(rows[0]).toContain("&lt;b&gt;");
+    expect(rows[0]).toContain("의존 업무 지연 · 근거 2건 · <span>추론</span>");
+    expect(rows[0]).not.toMatch(/사실 줄|순위|피드백|유용함/);
+    expect(rows[0]).toContain('aria-current="true"');
+    expect(rows[1]).not.toContain("aria-current");
   });
 
-  it("draws no pane-detail when nothing is open", () => {
-    expect(render({ opens: 0 })).not.toContain("pane-detail");
+  it("shows the title, the properties, the fact lines, the reason, and each evidence with its source line", () => {
+    const html = detail();
+    expect(html).toMatch(/^<section class="pane-detail" aria-label="Insight 상세">/);
+    expect(html).toContain("Insight<span> 1 / 2</span>");
+    expect(html).toContain('<h3 class="detail-title"><bdi>요약 하나 &lt;b&gt;</bdi></h3>');
+    expect(html).toMatch(/<dt>유형<\/dt><dd>의존 업무 지연 · <strong>추론<\/strong><\/dd>/);
+    expect(html).toContain("<dt>근거</dt><dd>2건</dd>");
+    expect(html).toContain(rankingText(one.ranking));
+    expect(html).toContain("확정 사실이 아닙니다");
+    expect(html).toContain("<li><bdi>사실 줄 하나</bdi></li>");
+    expect(html).toContain(`${REASONING_BY.code}: <bdi>해석 이유</bdi>`);
+    expect(html).toContain('<div class="src"><bdi>제목 7</bdi> · version 1</div>');
+    expect(html).toContain('<div class="src"><bdi>제목 8</bdi> · version 1</div>');
+    expect(html.indexOf("근거</h3>")).toBeLessThan(html.indexOf('<div class="actions">'));
+  });
+
+  it("is one guidance line, no evidence and no action bar, when nothing is chosen", () => {
+    const html = detail({ insight: undefined, actions: undefined });
+    expect(html).toContain("왼쪽 목록에서 고르면 여기에 보입니다.");
+    expect(html).not.toMatch(/evidence-heading|detail-title|class="actions"/);
   });
 });

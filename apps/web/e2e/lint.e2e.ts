@@ -59,12 +59,19 @@ test("lint.e2e: see a finding, open its evidence, close it, and find it closed w
   await expect(item).toHaveCount(1);
   await expect(item).toContainText("열림");
 
+  // choosing the row opens the finding in the detail pane to its right (UI01-C8)
+  await item.getByRole("button").click();
+  await expect(item.getByRole("button")).toHaveAttribute("aria-current", "true");
+  const detail = page.getByRole("region", { name: "발견 상세" });
+  const [listBox, detailBox] = [await list.boundingBox(), await detail.boundingBox()];
+  expect(detailBox?.x).toBeGreaterThanOrEqual((listBox?.x ?? 0) + (listBox?.width ?? 0));
+
   // its evidence opens in the source view with the quote marked
-  await item.getByRole("button", { name: /근거 보기/ }).click();
+  await detail.getByRole("button", { name: /근거 보기/ }).click();
   await expect(page.getByRole("region", { name: "원본 보기" }).locator("mark")).toHaveText(QUOTE);
 
   // closing it counts one false positive
-  await item.getByRole("button", { name: `닫기: ${TASK}` }).click();
+  await detail.getByRole("button", { name: `닫기: ${TASK}` }).click();
   await expect(item).toContainText("닫음");
   await expect(page.getByText(/오탐 1/)).toBeVisible();
 
