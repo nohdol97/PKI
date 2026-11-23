@@ -156,11 +156,14 @@ function insightCandidate(
   const itemUnsourced = [insight.xItemId, insight.yItemId].some(
     (item) => registry.lineage(db, { kind: "item", id: String(item) }).length === 0,
   );
+  const versionIds = insightGradingLineage(db, registry, insight).map((v) =>
+    findSourceVersionId(db, v.sourceId, v.version),
+  );
+  // a version the lineage names but the store lacks has no id to send: the candidate is not looked up at all
+  if (versionIds.some((v) => v === undefined)) return undefined;
   return {
     name: `[${insight.rule}] ${insight.summary ?? ""} | ${insight.factLines.join(" | ")}`,
     nameUnsourced: insight.userInputs.length > 0 || itemUnsourced,
-    evidenceSourceVersionIds: insightGradingLineage(db, registry, insight).map((v) =>
-      String(findSourceVersionId(db, v.sourceId, v.version) ?? 0),
-    ),
+    evidenceSourceVersionIds: versionIds.map(String),
   };
 }
