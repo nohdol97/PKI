@@ -229,14 +229,21 @@ async function statusOf<T>(
   }
 }
 
+/** RSP-D3: the index is asked for `k` = 50, then doubled each time, at most `rounds` asks (50, 100, 200, 400). */
+export const VECTOR_GROWTH = { k: STRATEGY_LIST_LIMIT, rounds: 4 } as const;
+
 /**
- * `vector`: the query embedded and searched through the adapters as they are. Not ready, missing or rebuilding is
+ * `vector`: the query embedded once and searched through the adapters as they are. Not ready, missing or rebuilding is
  * `unavailable` with the adapter's own reason; nothing is faked and nothing falls back to another strategy (D4, D6).
+ * While fewer than STRATEGY_LIST_LIMIT of the answers pass `admit` and the index gave all `k` it was asked for, it is
+ * asked again with `k` doubled, up to the round limit, so hidden sources do not take the places (RSP-R2).
  */
 export async function vectorIds(
   { db, question }: Reading,
   deps: VectorDeps | undefined,
   signal: AbortSignal | undefined,
+  admit: (ids: readonly number[]) => number[],
+  growth: { k: number; rounds: number } = VECTOR_GROWTH,
 ): Promise<VectorOutcome> {
   if (!deps)
     return { status: "unavailable", reason: "no embedding provider or vector index is configured" };
@@ -259,12 +266,17 @@ export async function vectorIds(
     const [query] = await deps.embedding.embed([question], "query", signal);
     if (!query)
       return { status: "unavailable", reason: "the embedding provider returned no vector" };
-    const found = await deps.index.search(query, STRATEGY_LIST_LIMIT);
-    const refs = found.flatMap(({ ref }) => {
-      const m = VECTOR_REF.exec(ref);
-      return m ? [{ sourceId: Number(m[1]), version: Number(m[2]) }] : [];
-    });
-    return { status: "ok", ids: versionIds(db, refs) };
+    let ids: number[] = [];
+    for (let round = 0, k = growth.k; round < growth.rounds; round++, k *= 2) {
+      const found = await deps.index.search(query, k);
+      const refs = found.flatMap(({ ref }) => {
+        const m = VECTOR_REF.exec(ref);
+        return m ? [{ sourceId: Number(m[1]), version: Number(m[2]) }] : [];
+      });
+      ids = versionIds(db, refs);
+      if (found.length < k || admit(ids).length >= STRATEGY_LIST_LIMIT) break;
+    }
+    return { status: "ok", ids };
   } catch (e) {
     if (e instanceof AdapterUnavailableError) return { status: "unavailable", reason: e.message };
     throw e;

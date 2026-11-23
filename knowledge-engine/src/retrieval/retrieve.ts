@@ -148,7 +148,7 @@ export async function retrieve(
     else skipped("wiki");
   }
   if (enabled.has("vector")) {
-    const outcome = await vectorIds(reading, options.vector, options.signal);
+    const outcome = await vectorIds(reading, options.vector, options.signal, admit);
     if (outcome.status === "ok") ran("vector", outcome.ids);
     else route.vector = outcome;
   }
