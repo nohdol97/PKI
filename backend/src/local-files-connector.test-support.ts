@@ -16,6 +16,7 @@ import {
   recordTombstone,
   registerConnectorInstance,
   saveSourceRecord,
+  setLocationState,
   type LocalFileIndex,
   type SqlDriver,
 } from "@pki/storage";
@@ -101,6 +102,10 @@ export interface World {
   sync(opts?: { limit?: number; cursor?: string | null }): Promise<Change[]>;
   /** Two syncs: a new or changed file passes the settle condition (I02B-R15). */
   settle(): Promise<Change[]>;
+  /** The location leaves the readable states, as the user's pause does (I02B-R10). */
+  pause(): void;
+  /** The location is read again. */
+  resume(): void;
   close(): void;
 }
 
@@ -224,6 +229,12 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
     await w.sync();
     return w.sync();
   };
+  w.pause = () => {
+    setLocationState(db, locationId, "paused", null);
+  };
+  w.resume = () => {
+    setLocationState(db, locationId, "active", null);
+  };
   w.close = () => {
     db.close();
     rmSync(base, { recursive: true, force: true });
@@ -234,6 +245,19 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
 export const upserts = (changes: readonly Change[]): SourceRecord[] =>
   changes.flatMap((c) => (c.kind === "upsert" ? [SourceRecordSchema.parse(c.record)] : []));
 export const deletes = (changes: readonly Change[]) => changes.filter((c) => c.kind === "delete");
+
+/** What the sync job does with an announced upsert: the source row, with the record's revision. */
+export function storeUpserts(w: World, changes: readonly Change[]): void {
+  for (const r of upserts(changes)) {
+    saveSourceRecord(w.db, "local-files", {
+      namespace: r.namespace,
+      externalId: r.externalId,
+      title: r.title,
+      body: r.body,
+      revision: r.revision,
+    });
+  }
+}
 
 /** The source row a sync would store for the entry, then the user's deletion of it (the tombstone trigger scrubs). */
 export function userDeletes(w: World, externalId: string): void {
