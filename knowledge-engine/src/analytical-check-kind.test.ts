@@ -394,3 +394,55 @@ describe("derivatives.contract (analytical-check, the receiver in a propagation,
     },
   );
 });
+
+describe("derivatives.contract (analytical-check, review round 1)", () => {
+  /** A table with a Dataset, a Metric measured on it, a Grain fact and the Metric's aggregation line. */
+  function measured(tag = "table") {
+    const table = source(tag);
+    const d = dataset(table, "");
+    const metric = insertItem(db, { type: "Metric", name: "m", ...attrs });
+    const calc = factOn(metric, "metric.calculation", '{"aggregation":"count"}');
+    const grain = factOn(d, "dataset.grain", '["k"]');
+    saveRelation(db, { subjectId: metric, type: "MEASURED_ON", objectId: d, ...attrs });
+    // the line is written after the citing: adding evidence to a row a check reads erases that check's line
+    const writeLine = () => lineOf(calc, "aggregation", versionIdOf(table));
+    return { table, calc, grain, writeLine };
+  }
+
+  it("a prune that keeps version 2 keeps the lines resting on rows cited only on version 2", () => {
+    const { calc, grain, writeLine } = measured();
+    const doc = source("doc", 2);
+    cite({ factId: grain }, doc, 2);
+    writeLine();
+    run({ kind: "old-versions-pruned", sourceId: doc, version: 2 });
+    expect(lineKeys()).toEqual([`${calc}:aggregation`]);
+    // a row cited on the pruned version too is still collected
+    const { calc: calc2, grain: grain2, writeLine: write2 } = measured("table-two");
+    const docB = source("doc-b", 2);
+    cite({ factId: grain2 }, docB, 1);
+    write2();
+    expect(
+      kind
+        .affected(db, { kind: "old-versions-pruned", sourceId: docB, version: 2 })
+        .map((a) => a.ref.id),
+    ).toContain(
+      `check:${db.all("SELECT id FROM analytical_checks WHERE fact_id = ?", [calc2])[0]?.id}`,
+    );
+  });
+
+  it("a line erased because a deleted source's evidence left a row it reads queues the check job of its table", () => {
+    const { table, grain, writeLine } = measured();
+    const docD = source("doc-d");
+    const docE = source("doc-e");
+    cite({ factId: grain }, docD);
+    cite({ factId: grain }, docE); // the Grain fact stays: only the evidence of D goes
+    writeLine();
+    db.run("DELETE FROM jobs");
+    deletion(docD);
+    expect(db.all("SELECT 1 FROM facts WHERE id = ?", [grain])).toHaveLength(1);
+    expect(lineKeys()).toEqual([]); // erased: the Grain fact it read lost the evidence of D
+    expect(
+      db.all("SELECT source_id FROM jobs WHERE kind = 'analytical-check'").map((r) => r.source_id),
+    ).toEqual([table]);
+  });
+});

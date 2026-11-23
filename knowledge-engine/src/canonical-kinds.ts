@@ -140,15 +140,19 @@ const VERSIONS = (where: string) =>
    ORDER BY v.source_id, v.version`;
 const EVIDENCE_VERSIONS = (where: string) =>
   VERSIONS(`v.id IN (SELECT e.source_version_id FROM evidence e WHERE ${where})`);
-/** Facts and relations some evidence on a version of the source cites. */
-const CITED = (column: "fact_id" | "relation_id") =>
+/**
+ * Facts and relations some evidence on a version of the source cites. `limit` narrows the versions (a prune
+ * takes only those below the one it keeps: `below(change, "v.")`, its parameters after the source's).
+ */
+const CITED = (column: "fact_id" | "relation_id", limit = "") =>
   `SELECT e.${column} FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
-   WHERE v.source_id = ? AND e.${column} IS NOT NULL`;
+   WHERE v.source_id = ? ${limit} AND e.${column} IS NOT NULL`;
 /** Items of those rows: a fact's item, a relation's subject and object. */
-const CITED_ITEMS = `
-  SELECT item_id AS id FROM facts WHERE id IN (${CITED("fact_id")})
-  UNION SELECT subject_id FROM relations WHERE id IN (${CITED("relation_id")})
-  UNION SELECT object_id FROM relations WHERE id IN (${CITED("relation_id")})`;
+const citedItems = (limit = "") => `
+  SELECT item_id AS id FROM facts WHERE id IN (${CITED("fact_id", limit)})
+  UNION SELECT subject_id FROM relations WHERE id IN (${CITED("relation_id", limit)})
+  UNION SELECT object_id FROM relations WHERE id IN (${CITED("relation_id", limit)})`;
+const CITED_ITEMS = citedItems();
 
 const lineageOf: Record<string, (db: SqlDriver, id: number) => SourceVersionRef[]> = {
   source: (db, id) => versionsOf(db, VERSIONS("v.id = ?"), [id]),
@@ -923,24 +927,29 @@ const ANALYTICAL_CHECK: DerivativeKind = {
       );
       // rows the evidence of this source cites go with their evidence without a history line, and the user's
       // rows on or touching the cited items go with their items: the lines that read them are stale
+      // a prune takes the evidence on the versions below the kept one only: a row cited on the kept version too
+      // is judged by the rows' own kinds and stays
+      const limit = below(change, "v.");
+      const p = belowParams(change);
+      const items = citedItems(limit);
       const cited = [
         ...tx
-          .all(`SELECT id FROM facts WHERE id IN (${CITED("fact_id")})`, [id])
+          .all(`SELECT id FROM facts WHERE id IN (${CITED("fact_id", limit)})`, [id, ...p])
           .map((r) => ({ kind: "fact" as const, id: r.id as number })),
         ...tx
-          .all(`SELECT id FROM relations WHERE id IN (${CITED("relation_id")})`, [id])
+          .all(`SELECT id FROM relations WHERE id IN (${CITED("relation_id", limit)})`, [id, ...p])
           .map((r) => ({ kind: "relation" as const, id: r.id as number })),
         ...tx
           .all(
-            `SELECT id FROM facts WHERE user_authored = 1 AND item_id IN (SELECT id FROM (${CITED_ITEMS}))`,
-            [id, id, id],
+            `SELECT id FROM facts WHERE user_authored = 1 AND item_id IN (SELECT id FROM (${items}))`,
+            [id, ...p, id, ...p, id, ...p],
           )
           .map((r) => ({ kind: "fact" as const, id: r.id as number })),
         ...tx
           .all(
             `SELECT id FROM relations WHERE user_authored = 1
-               AND (subject_id IN (SELECT id FROM (${CITED_ITEMS})) OR object_id IN (SELECT id FROM (${CITED_ITEMS})))`,
-            [id, id, id, id, id, id],
+               AND (subject_id IN (SELECT id FROM (${items})) OR object_id IN (SELECT id FROM (${items})))`,
+            [id, ...p, id, ...p, id, ...p, id, ...p, id, ...p, id, ...p],
           )
           .map((r) => ({ kind: "relation" as const, id: r.id as number })),
       ];
@@ -983,6 +992,17 @@ const ANALYTICAL_CHECK: DerivativeKind = {
     const table = { table: "dataset_tables", check: "analytical_checks" } as const;
     let removed = 0;
     const claims: number[] = [];
+    // the facts whose lines this kind erases: their sources are checked again (S03-R12 ②), read before the lines go
+    const lineIds = snapshot
+      .filter(({ ref }) => ref.id.startsWith("check:"))
+      .map(({ ref }) => Number(ref.id.slice("check:".length)));
+    const erased = tx
+      .all(
+        `SELECT DISTINCT f.item_id FROM analytical_checks c JOIN facts f ON f.id = c.fact_id
+          WHERE c.id IN (SELECT value FROM json_each(?))`,
+        [JSON.stringify(lineIds)],
+      )
+      .map((r) => r.item_id as number);
     for (const { ref } of snapshot) {
       const [prefix, rest] = ref.id.split(":");
       const id = Number(rest);
@@ -1001,7 +1021,7 @@ const ANALYTICAL_CHECK: DerivativeKind = {
         JSON.stringify(claims),
       ])
       .map((r) => r.item_id as number);
-    queueChecksAround(tx, items);
+    queueChecksAround(tx, [...new Set([...items, ...erased])]);
     return { removed, recomputed: 0 };
   },
 };
