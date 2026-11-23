@@ -2,7 +2,6 @@
 // paused as `restored` and no sync registered, a revocation left `revoking` is finished by the start, and
 // an ordinary restart leaves the states. Real boots over one data directory; the backup is VACUUM INTO.
 import { routes, type LocalLocationInfo } from "@pki/contracts";
-import { LEDGER_FILE } from "@pki/storage";
 import { findCanaries, send } from "@pki/testkit";
 import {
   copyFileSync,
@@ -132,15 +131,17 @@ describe("C41 a restored database", () => {
     first = await boot();
 
     expect(Number(first.db.all("SELECT count(*) AS n FROM tombstones")[0]?.n)).toBe(3);
+    // the entries of the three hold no plaintext path or content hash
     expect(
       first.db.all(
-        "SELECT relative_path, content_hash FROM local_file_entries WHERE state <> 'present' AND state <> 'skipped'",
+        "SELECT 1 FROM local_file_entries WHERE state = 'forgotten' AND relative_path IS NULL",
       ),
-    ).toEqual(
-      first.db
-        .all("SELECT 1 FROM local_file_entries WHERE state = 'forgotten' OR state = 'deleted'")
-        .map(() => ({ relative_path: null, content_hash: null })),
-    );
+    ).toHaveLength(3);
+    expect(
+      first.db.all(
+        "SELECT 1 FROM local_file_entries WHERE state IN ('forgotten', 'deleted') AND (relative_path IS NOT NULL OR content_hash IS NOT NULL)",
+      ),
+    ).toEqual([]);
     const states = (await first.locations()).map((l) => [l.id, l.state, l.stateReason]);
     expect(states.sort()).toEqual(
       [
@@ -160,18 +161,19 @@ describe("C41 a restored database", () => {
     await first.call(routes.resumeLocalLocation.path, { locationId: b.id });
     await first.sync();
     expect(liveIn(first.db, b.id)).toBe(1);
-    // the two files the user and the revocation deleted do not come back
+    // the files the user and the revocation deleted stay out when their locations are read again
+    await first.call(routes.resumeLocalLocation.path, { locationId: a.id });
+    await first.sync();
     expect(liveIn(first.db, a.id)).toBe(0);
+    expect(liveIn(first.db, b.id)).toBe(1);
+    const skipped = (await first.call(routes.localSkipped.path, { locationId: a.id })).body as {
+      items: { reason: string }[];
+    };
+    expect(skipped.items.map((i) => i.reason)).toEqual(["user-deleted"]);
     await stop();
     expect(
-      findCanaries(
-        data,
-        ["a-canary-path-7731", "b-canary-path-7731", "c-canary-path-7731"].filter(
-          (c) => c !== "b-canary-path-7731",
-        ),
-      ),
+      findCanaries(data, ["a-canary-path-7731", "b-canary-path-7731", "c-canary-path-7731"]),
     ).toEqual([]);
-    void LEDGER_FILE;
   });
 
   it("an ordinary restart leaves the states as they were, and a location left revoking is finished by the start", async () => {
