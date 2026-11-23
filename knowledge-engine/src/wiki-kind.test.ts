@@ -23,6 +23,7 @@ import {
 } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { derivativeRegistry, propagateCanonical } from "./canonical-kinds.ts";
+import { planWikiBuild } from "./wiki-build-job.ts";
 import { WIKI_PAGE_KIND } from "./wiki-kind.ts";
 import { AT, addFact, addItem, addSource, buildWiki, cite } from "./wiki.test-support.ts";
 
@@ -173,6 +174,40 @@ describe("wiki.kind: a deleted source leaves nothing of its text in the Wiki", (
     expect(isWikiStale(db)).toBe(true); // the deletion changed the input; the next build only catches up
     buildWiki(db);
     expect(listStoredWikiPages(db)).toEqual(pages);
+    expect(wikiText()).not.toContain(CANARY);
+  });
+});
+
+describe("wiki.kind: the page of an item the user wrote carries the sources of the facts attached to it", () => {
+  const wikiText = () =>
+    db
+      .all(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'wiki\\_%' ESCAPE '\\'",
+      )
+      .map((t) => JSON.stringify(db.all(`SELECT * FROM ${String(t.name)}`)))
+      .join("\n");
+  function authoredWithExtractedFact() {
+    const b = addSource(db, "b", `b의 본문 ${CANARY}`);
+    const made = userDecisions.add(db, { kind: "item", type: "Project", name: "직접 쓴 항목" });
+    if (made.status !== "applied") throw new Error("the user's item");
+    cite(db, { factId: addFact(db, made.ref.id, "memo", `${CANARY} 값`) }, b.id);
+    return { b, key: `projects/${made.ref.id}` };
+  }
+
+  it("empties every Wiki table of the canary in the deletion's transaction", () => {
+    const { b } = authoredWithExtractedFact();
+    buildWiki(db);
+    expect(wikiText()).toContain(CANARY);
+    deleteSource(b.sourceId);
+    expect(wikiText()).not.toContain(CANARY);
+  });
+
+  it("discards a build planned before the deletion that commits after it", () => {
+    const { b } = authoredWithExtractedFact();
+    const plan = planWikiBuild(db, { at: AT });
+    deleteSource(b.sourceId);
+    const committed = db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+    expect(committed.status).toBe("stale");
     expect(wikiText()).not.toContain(CANARY);
   });
 });

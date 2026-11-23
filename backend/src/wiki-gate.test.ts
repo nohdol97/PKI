@@ -53,8 +53,13 @@ function source(externalId: string, body: string, accessScope: string[]) {
   if (saved.status !== "created") throw new Error(saved.status);
   return db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
 }
-function citedFact(itemId: number, value: string, versionId: number): number {
-  const factId = saveFact(db, { itemId, kind: "memo", value, ...attrs }).id;
+function citedFact(
+  itemId: number,
+  value: string,
+  versionId: number,
+  extra: Partial<KnowledgeAttributes> = {},
+): number {
+  const factId = saveFact(db, { itemId, kind: "memo", value, ...attrs, ...extra }).id;
   const body = db.all("SELECT body FROM source_versions WHERE id = ?", [versionId])[0]
     ?.body as string;
   addEvidence(db, {
@@ -101,5 +106,78 @@ describe("wiki.gate: what the policy refuses is not in the Wiki's answer", () =>
     const index = reads.index();
     expect(index.kinds.flatMap((k) => k.pages.map((p) => p.key))).toEqual([`projects/${shown}`]);
     expect(JSON.stringify(index)).not.toContain(SECRET);
+  });
+});
+
+describe("wiki.gate: what a link between two facts may disclose", () => {
+  const link = (type: "SUPERSEDES" | "CONTRADICTS", from: number, to: number) =>
+    db.run(
+      "INSERT INTO assertion_links (type, from_fact_id, to_fact_id, created_by, at) VALUES (?, ?, ?, 'rule', 'x')",
+      [type, from, to],
+    );
+  const merge = (member: number, representative: number) =>
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [member, representative],
+    );
+  const build = () => {
+    const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+  };
+  const readsOf = (policyOf: ScopePolicy) => {
+    const registry = createProductRegistry({ policy: policyOf });
+    return createWikiReads(db, registry, createReadGate(db, registry));
+  };
+
+  it("does not carry the date of a superseding fact the caller cannot see (S02-R24 1)", () => {
+    const open = source("open", "공개 본문", ["open"]);
+    const secret = source("secret", `${SECRET} 본문`, ["secret"]);
+    const shown = insertItem(db, { type: "Project", name: "공개 항목", ...attrs });
+    const alias = insertItem(db, { type: "Project", name: `${SECRET} 별칭`, ...attrs });
+    merge(alias, shown);
+    const old = citedFact(shown, "옛 값", open);
+    const next = citedFact(alias, `${SECRET} 값`, secret, { validAt: "2031-07-07" });
+    link("SUPERSEDES", next, old);
+    build();
+
+    const page = readsOf(policy).page(`projects/${shown}`);
+    expect(page?.claims.map((c) => [c.ref.id, c.validUntil])).toEqual([[old, null]]);
+    expect(JSON.stringify(page)).not.toContain("2031-07-07");
+    // the same link read by one who may see both ends does end the old value
+    const open2 = readsOf({ ...policy, allows: () => true }).page(`projects/${shown}`);
+    expect(open2?.claims.find((c) => c.ref.id === old)?.validUntil).toBe("2031-07-07");
+  });
+
+  it("keeps no contradicts/supersedes link and no superseder-derived end when the policy refuses the two ends together (S02-R24)", () => {
+    const a = source("a", "가 본문", ["A"]);
+    const b = source("b", "나 본문", ["B"]);
+    const x = insertItem(db, { type: "Project", name: "항목", ...attrs });
+    const y = insertItem(db, { type: "Project", name: "별칭", ...attrs });
+    merge(y, x);
+    const fa = citedFact(x, "가 값", a);
+    const fb = citedFact(y, "나 값", b);
+    const fc = citedFact(x, "가 새 값", a, { validAt: "2031-08-08" });
+    link("CONTRADICTS", fa, fb);
+    link("SUPERSEDES", fc, fb);
+    build();
+    const noAB: ScopePolicy = {
+      ...policy,
+      combinable: (scopes) =>
+        !(scopes.some((s) => s?.includes("A")) && scopes.some((s) => s?.includes("B"))),
+    };
+
+    const together = readsOf(policy).page(`projects/${x}`);
+    expect(together?.claims.find((c) => c.ref.id === fa)?.contradicts).toEqual([
+      { kind: "fact", id: fb },
+    ]);
+    expect(together?.claims.find((c) => c.ref.id === fc)?.supersedes).toEqual([
+      { kind: "fact", id: fb },
+    ]);
+    expect(together?.claims.find((c) => c.ref.id === fb)?.validUntil).toBe("2031-08-08");
+
+    const page = readsOf(noAB).page(`projects/${x}`);
+    expect(page?.claims.map((c) => c.ref.id)).toEqual([fa, fb, fc]);
+    expect(page?.claims.flatMap((c) => [...c.contradicts, ...c.supersedes])).toEqual([]);
+    expect(page?.claims.find((c) => c.ref.id === fb)?.validUntil).toBeNull();
   });
 });
