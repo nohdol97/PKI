@@ -4,7 +4,7 @@
 // the version in the store). A version is a table source when its blocks carry a `csv` or
 // `xlsx` locator. If I02 changes the block shape (the locator's fields, the separator
 // between cells), this file is the one place to change.
-import { BlockSchema, isDateText, isNumberText } from "@pki/contracts";
+import { BlockSchema, isDateText, isNumberText, limitationCodes } from "@pki/contracts";
 import type { SqlDriver } from "@pki/storage";
 import { normalizeForLinking } from "./linking.ts";
 
@@ -71,13 +71,6 @@ function codePointReader(body: string): {
   offsets.push(body.length);
   return { length, text: (start, end) => body.slice(offsets[start], offsets[end]) };
 }
-
-const limitationCodes = (meta: string | null): string[] => {
-  if (meta === null) return [];
-  const found = (JSON.parse(meta) as { metadata?: { limitations?: unknown } } | null)?.metadata
-    ?.limitations;
-  return Array.isArray(found) ? found.filter((c): c is string => typeof c === "string") : [];
-};
 
 /** Rows of cells by sheet (CSV: one sheet, ""), from the blocks that carry a table position. */
 function readGrids(
@@ -170,7 +163,7 @@ export const sqlTabularSource: TabularSource = {
     if (grids === null) return null;
     return {
       tables: [...grids].map(([key, rows]) => tableOf(key, rows, limits.maxCells)),
-      limitations: limitationCodes(typeof stored.meta === "string" ? stored.meta : null),
+      limitations: limitationCodes(stored.meta),
     };
   },
 };

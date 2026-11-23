@@ -6,6 +6,7 @@ import {
   AnalyticalCheckResponseSchema,
   AnalyticalListSchema,
   ANALYTICAL_UNMET,
+  limitationCodes,
   SemanticPiecesSchema,
 } from "./analytical-types.ts";
 import { DATA_CHECK_UNMET } from "./index.ts";
@@ -61,6 +62,7 @@ const metric = {
   periods: [],
   versions: [],
   relations: [],
+  members: [],
 };
 
 describe("analytical.api (contract)", () => {
@@ -74,6 +76,39 @@ describe("analytical.api (contract)", () => {
       AnalyticalCheckRequestSchema.safeParse({ itemId: 2, query: "sum(amount)" }).success,
     ).toBe(false);
     expect(AnalyticalCheckResponseSchema.parse({ jobIds: [9] })).toEqual({ jobIds: [9] });
+  });
+
+  it("U3: a Metric and a Join parse with a member listed under them; a member's own members must be empty", () => {
+    const member = { ...metric, itemId: 3 };
+    const nested = { ...metric, members: [{ ...member, members: [member] }] };
+    const list = {
+      datasets: [],
+      metrics: [{ ...metric, members: [member] }],
+      joins: [],
+      truncated: false,
+    };
+    expect(AnalyticalListSchema.safeParse(list).success).toBe(true);
+    expect(AnalyticalListSchema.safeParse({ ...list, metrics: [nested] }).success).toBe(false);
+    const join = {
+      ...item,
+      itemId: 9,
+      name: "j",
+      left: [],
+      right: [],
+      keys: [],
+      cardinality: [],
+      relations: [],
+    };
+    const joins = [{ ...join, members: [{ ...join, itemId: 10, members: [] }] }];
+    expect(AnalyticalListSchema.safeParse({ ...list, joins }).success).toBe(true);
+  });
+
+  it("U4: limitation codes are the unique sorted strings of meta.metadata.limitations; anything else is none", () => {
+    const meta = JSON.stringify({ metadata: { limitations: ["b", "a", "b", 3] } });
+    expect(limitationCodes(meta)).toEqual(["a", "b"]);
+    for (const bad of ["{broken", "null", '"x"', "{}", null, undefined, 5]) {
+      expect(limitationCodes(bad)).toEqual([]);
+    }
   });
 
   it("C3: the unmet names equal the refusal's list; pieces of a calculation or a column set parse, a number does not", () => {

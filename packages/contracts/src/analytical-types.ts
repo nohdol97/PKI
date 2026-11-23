@@ -97,7 +97,21 @@ const ItemBase = {
 };
 const Named = z.strictObject({ itemId: Id, name: z.string() });
 
-export const AnalyticalMetricSchema = z.strictObject({
+/** The limitation codes of a source version's stored `meta` (S03-R4): unique, sorted; a `meta` that is not text, not JSON or carries none gives none. */
+export function limitationCodes(meta: unknown): string[] {
+  if (typeof meta !== "string") return [];
+  try {
+    const found = (JSON.parse(meta) as { metadata?: { limitations?: unknown } } | null)?.metadata
+      ?.limitations;
+    return Array.isArray(found)
+      ? [...new Set(found.filter((c): c is string => typeof c === "string"))].sort()
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+const metricShape = {
   ...ItemBase,
   terms: z.array(AnalyticalFactSchema),
   definitions: z.array(AnalyticalFactSchema),
@@ -112,6 +126,11 @@ export const AnalyticalMetricSchema = z.strictObject({
   periods: z.array(AnalyticalFactSchema),
   versions: z.array(AnalyticalFactSchema),
   relations: z.array(AnalyticalRelationSchema),
+};
+export const AnalyticalMetricSchema = z.strictObject({
+  ...metricShape,
+  /** The group's members under their representative; a member's own `members` is empty. */
+  members: z.array(z.strictObject({ ...metricShape, members: z.array(z.never()) })),
 });
 const datasetShape = {
   ...ItemBase,
@@ -130,13 +149,17 @@ export const AnalyticalDatasetSchema = z.strictObject({
   /** The group's members under their representative (S02-R13); a member's own `members` is empty. */
   members: z.array(z.strictObject({ ...datasetShape, members: z.array(z.never()) })),
 });
-export const AnalyticalJoinSchema = z.strictObject({
+const joinShape = {
   ...ItemBase,
   left: z.array(Named),
   right: z.array(Named),
   keys: z.array(AnalyticalFactSchema),
   cardinality: z.array(AnalyticalFactSchema),
   relations: z.array(AnalyticalRelationSchema),
+};
+export const AnalyticalJoinSchema = z.strictObject({
+  ...joinShape,
+  members: z.array(z.strictObject({ ...joinShape, members: z.array(z.never()) })),
 });
 export const AnalyticalListSchema = z.strictObject({
   datasets: z.array(AnalyticalDatasetSchema),

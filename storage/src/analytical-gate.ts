@@ -45,79 +45,112 @@ export const needsDataChecks = (tx: SqlDriver, factKind: string): boolean =>
 const anyTable = (tx: SqlDriver): boolean =>
   tx.all("SELECT 1 FROM dataset_tables LIMIT 1").length > 0;
 
-const objectsOf = (tx: SqlDriver, itemId: number, type: string): number[] =>
+/**
+ * What the judgement may read: a row the caller does not see counts as absent (`seen(kind, id)` with the
+ * registry's kinds). Without it every row is read, which is what an approval and a promotion judge.
+ */
+export type Seen = (kind: string, id: string) => boolean;
+
+const objectsOf = (tx: SqlDriver, itemId: number, type: string, seen?: Seen): number[] =>
   tx
     .all(
-      `SELECT DISTINCT object_id FROM relations WHERE subject_id = ? AND type = ? AND ${LIVE} ORDER BY object_id`,
+      `SELECT DISTINCT id, object_id FROM relations WHERE subject_id = ? AND type = ? AND ${LIVE} ORDER BY object_id, id`,
       [itemId, type],
     )
-    .map((r) => r.object_id as number);
+    .filter((r) => !seen || (seen("relation", String(r.id)) && seen("item", String(r.object_id))))
+    .map((r) => r.object_id as number)
+    .filter((id, i, all) => all.indexOf(id) === i);
 
 /**
  * The Datasets a fact's checks read, by the item's type as the check job reads it: a Dataset is its own,
  * a Join has its left and right objects (both sides are required), any other item its `MEASURED_ON` objects.
  */
-function targetsOf(tx: SqlDriver, itemId: number): number[] {
+function targetsOf(tx: SqlDriver, itemId: number, seen?: Seen): number[] {
   const type = tx.all("SELECT type FROM items WHERE id = ?", [itemId])[0]?.type;
   if (type === "Dataset") return [itemId];
   if (type === "Join")
-    return [...objectsOf(tx, itemId, "JOIN_LEFT"), ...objectsOf(tx, itemId, "JOIN_RIGHT")];
-  return objectsOf(tx, itemId, "MEASURED_ON");
+    return [
+      ...objectsOf(tx, itemId, "JOIN_LEFT", seen),
+      ...objectsOf(tx, itemId, "JOIN_RIGHT", seen),
+    ];
+  return objectsOf(tx, itemId, "MEASURED_ON", seen);
 }
 
 /** A Dataset bound to a table of a source that still has a version no tombstone covers. */
-const bound = (tx: SqlDriver, datasetId: number): boolean =>
-  tx.all(
-    `SELECT 1 FROM dataset_tables t WHERE t.item_id = ? AND EXISTS (
+const bound = (tx: SqlDriver, datasetId: number, seen?: Seen): boolean =>
+  tx
+    .all(
+      `SELECT t.id FROM dataset_tables t WHERE t.item_id = ? AND EXISTS (
        SELECT 1 FROM source_versions v WHERE v.source_id = t.source_id
-          AND NOT EXISTS (SELECT 1 FROM tombstones x WHERE x.source_id = v.source_id AND x.covers_version >= v.version))
-     LIMIT 1`,
-    [datasetId],
-  ).length > 0;
+          AND NOT EXISTS (SELECT 1 FROM tombstones x WHERE x.source_id = v.source_id AND x.covers_version >= v.version))`,
+      [datasetId],
+    )
+    .some((t) => !seen || seen("analytical-check", `table:${t.id}`));
 
 /** No table: a required side has no live target bound to a table (an extra unbound target is a conflict, not a loss). */
-function noDataset(tx: SqlDriver, itemId: number): boolean {
+function noDataset(tx: SqlDriver, itemId: number, seen?: Seen): boolean {
   const type = tx.all("SELECT type FROM items WHERE id = ?", [itemId])[0]?.type;
   const sides =
     type === "Dataset"
       ? [[itemId]]
       : type === "Join"
-        ? [objectsOf(tx, itemId, "JOIN_LEFT"), objectsOf(tx, itemId, "JOIN_RIGHT")]
-        : [objectsOf(tx, itemId, "MEASURED_ON")];
-  return sides.some((side) => !side.some((t) => bound(tx, t)));
+        ? [objectsOf(tx, itemId, "JOIN_LEFT", seen), objectsOf(tx, itemId, "JOIN_RIGHT", seen)]
+        : [objectsOf(tx, itemId, "MEASURED_ON", seen)];
+  return sides.some((side) => !side.some((t) => bound(tx, t, seen)));
 }
 
 /** The relation types that name a table of this item: two live objects on one of them leave no table to choose. */
-const ambiguousPath = (tx: SqlDriver, itemId: number): boolean =>
-  WAITING_TYPES.some((type) => objectsOf(tx, itemId, type).length > 1);
+const ambiguousPath = (tx: SqlDriver, itemId: number, seen?: Seen): boolean =>
+  WAITING_TYPES.some((type) => objectsOf(tx, itemId, type, seen).length > 1);
 
 /** A valid fact of the item (optionally of a role) states a different value in its slot. */
-function rivalled(tx: SqlDriver, itemId: number, asked?: number, only?: (kind: string) => boolean) {
-  if (asked !== undefined && otherValidValues(tx, asked, "item").length > 0) return true;
+function rivalled(
+  tx: SqlDriver,
+  itemId: number,
+  asked?: number,
+  only?: (kind: string) => boolean,
+  seen?: Seen,
+) {
+  const rivals = (id: number) =>
+    otherValidValues(tx, id, "item").filter((x) => !seen || seen("fact", String(x)));
+  if (asked !== undefined && rivals(asked).length > 0) return true;
   return tx
     .all("SELECT id, kind, status FROM facts WHERE item_id = ? ORDER BY id", [itemId])
+    .filter((r) => !seen || seen("fact", String(r.id)))
     .filter((r) => (only ? only(r.kind as string) : true))
     .filter((r) =>
       isValidRow(tx, { kind: "fact", id: r.id as number }, r.status as KnowledgeStatus),
     )
-    .some((r) => otherValidValues(tx, r.id as number, "item").length > 0);
+    .some((r) => rivals(r.id as number).length > 0);
 }
 
-function specConflict(tx: SqlDriver, factId: number, itemId: number, checks: readonly CheckName[]) {
-  if (rivalled(tx, itemId, factId) || ambiguousPath(tx, itemId)) return true;
+function specConflict(
+  tx: SqlDriver,
+  factId: number,
+  itemId: number,
+  checks: readonly CheckName[],
+  seen?: Seen,
+) {
+  if (rivalled(tx, itemId, factId, undefined, seen) || ambiguousPath(tx, itemId, seen)) return true;
   if (!checks.includes("aggregation")) return false;
   // the Grain facts of each target Dataset (S03-R14 (c)): two valid grains leave the aggregation no row key
-  return targetsOf(tx, itemId).some((dataset) =>
-    rivalled(tx, dataset, undefined, (kind) => requiredChecks(tx, kind).includes("grain")),
+  return targetsOf(tx, itemId, seen).some((dataset) =>
+    rivalled(tx, dataset, undefined, (kind) => requiredChecks(tx, kind).includes("grain"), seen),
   );
 }
 
 /**
  * The data conditions of S03-R14 a check-needing fact does not meet, in a fixed order: `no-dataset`,
  * `spec-conflict`, `check-missing`, then each failed check by its name in the rule's order. `[]` for a fact whose
- * kind has no `dataChecks`, for an item or a relation, and for a fact that is not stored.
+ * kind has no `dataChecks`, for an item or a relation, and for a fact that is not stored. With `seen` the
+ * conditions are re-judged over the rows that caller sees (a hidden relation, item, table, rival fact or check
+ * line is absent, so it is `no-dataset`, no `spec-conflict`, or `check-missing`, never its name; S03 decision 35).
  */
-export function dataChecksUnmet(tx: SqlDriver, ref: EntryRef): readonly DataCheckUnmet[] {
+export function dataChecksUnmet(
+  tx: SqlDriver,
+  ref: EntryRef,
+  seen?: Seen,
+): readonly DataCheckUnmet[] {
   if (ref.kind !== "fact") return [];
   const own = tx.all("SELECT item_id, kind FROM facts WHERE id = ?", [ref.id])[0];
   if (!own) return [];
@@ -126,11 +159,13 @@ export function dataChecksUnmet(tx: SqlDriver, ref: EntryRef): readonly DataChec
   const itemId = own.item_id as number;
   // a line needs a table: until one was ever profiled nothing of the analytical tables is read (dark launch)
   const stored = new Map(
-    (anyTable(tx) ? listCheckLines(tx, ref.id) : []).map((l) => [l.check, l] as const),
+    (anyTable(tx) ? listCheckLines(tx, ref.id) : [])
+      .filter((l) => !seen || seen("analytical-check", `check:${l.id}`))
+      .map((l) => [l.check, l] as const),
   );
   return [
-    ...(noDataset(tx, itemId) ? (["no-dataset"] as const) : []),
-    ...(specConflict(tx, ref.id, itemId, checks) ? (["spec-conflict"] as const) : []),
+    ...(noDataset(tx, itemId, seen) ? (["no-dataset"] as const) : []),
+    ...(specConflict(tx, ref.id, itemId, checks, seen) ? (["spec-conflict"] as const) : []),
     ...(checks.some((c) => !stored.get(c)?.current) ? (["check-missing"] as const) : []),
     ...checks.filter((c) => {
       const line = stored.get(c);

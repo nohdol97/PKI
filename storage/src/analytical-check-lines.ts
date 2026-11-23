@@ -107,6 +107,8 @@ export function saveCheckLine(tx: SqlDriver, line: NewCheckLine): void {
 }
 
 export interface StoredCheckLine extends Omit<NewCheckLine, "factId"> {
+  /** The line's row id: the registry names a line `check:<id>`. */
+  id: number;
   /** Every version it read is its source's latest and no tombstone covers it (S03-R11); else as good as absent. */
   current: boolean;
 }
@@ -121,13 +123,14 @@ const CURRENT = (column: string) => `(${column} IS NULL OR EXISTS (
 export function listCheckLines(tx: SqlDriver, factId: number): StoredCheckLine[] {
   return tx
     .all(
-      `SELECT c.check_name, c.passed, c.failure_code, c.examined, c.violations, c.skipped, c.version_id,
+      `SELECT c.id, c.check_name, c.passed, c.failure_code, c.examined, c.violations, c.skipped, c.version_id,
               c.other_version_id, c.checked_at,
               (${CURRENT("c.version_id")} AND ${CURRENT("c.other_version_id")}) AS current
          FROM analytical_checks c WHERE c.fact_id = ? ORDER BY c.check_name`,
       [factId],
     )
     .map((r) => ({
+      id: r.id as number,
       check: r.check_name as CheckName,
       passed: r.passed === 1,
       failure: r.failure_code as string | null,

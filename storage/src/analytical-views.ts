@@ -4,6 +4,7 @@
 // line, ids (S03-R18). What the caller may not see is judged by `Visibility`, the read gate's `visible` as a
 // predicate, so a row it hides, a check line it hides and a table it hides are absent whole, as is anything that
 // would name them (a count, an id in a conflict list). Storage never imports the registry.
+import { limitationCodes } from "@pki/contracts";
 import { otherValidValues } from "./assertion-links.ts";
 import { dataChecksUnmet, needsDataChecks, type DataCheckUnmet } from "./analytical-gate.ts";
 import { listCheckLines, waitingRelations, type CheckName } from "./analytical-check-lines.ts";
@@ -86,7 +87,7 @@ interface ItemBase {
   userAuthored: boolean;
   conflicts: ConflictView[];
 }
-export interface MetricView extends ItemBase {
+interface MetricBody extends ItemBase {
   terms: FactRowView[];
   definitions: FactRowView[];
   calculations: FactRowView[];
@@ -102,6 +103,13 @@ export interface MetricView extends ItemBase {
   periods: FactRowView[];
   versions: FactRowView[];
   relations: RelationRowView[];
+}
+/** A member of a group: listed under its representative, with no members of its own. */
+export interface MetricMemberView extends MetricBody {
+  members: never[];
+}
+export interface MetricView extends MetricBody {
+  members: MetricMemberView[];
 }
 interface DatasetBody extends ItemBase {
   tables: TableView[];
@@ -121,12 +129,18 @@ export interface DatasetMemberView extends DatasetBody {
 export interface DatasetView extends DatasetBody {
   members: DatasetMemberView[];
 }
-export interface JoinView extends ItemBase {
+interface JoinBody extends ItemBase {
   left: { itemId: number; name: string }[];
   right: { itemId: number; name: string }[];
   keys: FactRowView[];
   cardinality: FactRowView[];
   relations: RelationRowView[];
+}
+export interface JoinMemberView extends JoinBody {
+  members: never[];
+}
+export interface JoinView extends JoinBody {
+  members: JoinMemberView[];
 }
 export interface AnalyticalList {
   datasets: DatasetView[];
@@ -183,16 +197,9 @@ class Reader {
   factRow(f: SemanticFactView): FactRowView {
     const needed = needsDataChecks(this.db, f.kind);
     const ids = this.evidenceIds({ factId: f.id });
-    const lineIds = new Map(
-      this.db
-        .all("SELECT id, check_name FROM analytical_checks WHERE fact_id = ?", [f.id])
-        .map((r) => [r.check_name as string, r.id as number] as const),
-    );
     const checks = needed
       ? listCheckLines(this.db, f.id)
-          .filter(
-            (l) => l.current && this.shown("analytical-check", `check:${lineIds.get(l.check)}`),
-          )
+          .filter((l) => l.current && this.shown("analytical-check", `check:${l.id}`))
           .map(({ check, passed, failure, examined, violations, skipped }) => ({
             check,
             passed,
@@ -210,28 +217,11 @@ class Reader {
       evidenceCount: ids.length,
       checkNeeded: needed,
       checks,
-      unmet: needed ? this.unmet(f.id, lineIds) : [],
+      unmet: needed
+        ? [...dataChecksUnmet(this.db, { kind: "fact", id: f.id }, this.vis.shown)]
+        : [],
       awaitingSourceIds: needed ? this.waitingSources(itemId) : [],
     };
-  }
-
-  /** The unmet conditions as this caller sees them: a hidden line is absent, so it is `check-missing`, never its name. */
-  private unmet(factId: number, lineIds: ReadonlyMap<string, number>): DataCheckUnmet[] {
-    const hidden = new Set(
-      [...lineIds]
-        .filter(([, id]) => !this.shown("analytical-check", `check:${id}`))
-        .map(([n]) => n),
-    );
-    const raw = dataChecksUnmet(this.db, { kind: "fact", id: factId });
-    if (hidden.size === 0) return [...raw];
-    const kept = raw.filter((u) => !hidden.has(u));
-    return kept.includes("check-missing")
-      ? kept
-      : [
-          ...kept.filter((u) => u === "no-dataset" || u === "spec-conflict"),
-          "check-missing" as const,
-          ...kept.filter((u) => u !== "no-dataset" && u !== "spec-conflict"),
-        ];
   }
 
   facts(itemId: number): FactRowView[] {
@@ -275,7 +265,7 @@ class Reader {
         tableId: r.id as number,
         sourceId: r.source_id as number,
         rowCount: r.row_count as number,
-        limitations: limitations(r.meta),
+        limitations: limitationCodes(r.meta),
       }));
   }
 
@@ -357,15 +347,6 @@ class Reader {
   }
 }
 
-const limitations = (meta: unknown): string[] => {
-  if (typeof meta !== "string") return [];
-  const found = (JSON.parse(meta) as { metadata?: { limitations?: unknown } } | null)?.metadata
-    ?.limitations;
-  return Array.isArray(found)
-    ? [...new Set(found.filter((c): c is string => typeof c === "string"))].sort()
-    : [];
-};
-
 const ofKind = (rows: readonly FactRowView[], ...kinds: string[]) =>
   rows.filter((r) => kinds.includes(r.kind));
 
@@ -417,7 +398,7 @@ function matchColumn(
     : { column, factId: id, missing: null };
 }
 
-function metricView(r: Reader, id: number): MetricView | undefined {
+function metricBody(r: Reader, id: number): MetricBody | undefined {
   const name = r.name(id);
   if (name === undefined) return undefined;
   const head = base(r, id, name, "Metric");
@@ -456,6 +437,27 @@ function metricView(r: Reader, id: number): MetricView | undefined {
   };
 }
 
+/** The body of an item and, when it is a group's representative, the bodies of the other members under it. */
+function withMembers<B>(
+  r: Reader,
+  id: number,
+  body: (r: Reader, id: number) => B | undefined,
+  members = true,
+): (B & { members: (B & { members: never[] })[] }) | undefined {
+  const head = body(r, id);
+  if (!head) return undefined;
+  const under = members
+    ? entityGroups
+        .membersOf(r.db, id)
+        .filter((m) => m !== id)
+        .flatMap((m) => {
+          const member = body(r, m);
+          return member ? [{ ...member, members: [] as never[] }] : [];
+        })
+    : [];
+  return { ...head, members: under };
+}
+
 /**
  * The items of a type the caller sees, at the top level: a member of a group is listed under its representative
  * unless that representative is hidden, then it stands on its own (F4). Visibility is judged before the limit
@@ -484,7 +486,7 @@ export function listMetricViews(
   limit = DEFAULT_LIMIT,
 ): MetricView[] {
   const r = new Reader(db, vis);
-  return itemIds(r, "Metric", limit).ids.flatMap((id) => metricView(r, id) ?? []);
+  return itemIds(r, "Metric", limit).ids.flatMap((id) => withMembers(r, id, metricBody) ?? []);
 }
 
 function datasetBody(r: Reader, id: number): DatasetBody | undefined {
@@ -508,22 +510,7 @@ function datasetBody(r: Reader, id: number): DatasetBody | undefined {
   };
 }
 
-function datasetView(r: Reader, id: number, withMembers: boolean): DatasetView | undefined {
-  const body = datasetBody(r, id);
-  if (!body) return undefined;
-  const members = withMembers
-    ? entityGroups
-        .membersOf(r.db, id)
-        .filter((m) => m !== id)
-        .flatMap((m) => {
-          const member = datasetBody(r, m);
-          return member ? [{ ...member, members: [] as never[] }] : [];
-        })
-    : [];
-  return { ...body, members };
-}
-
-function joinView(r: Reader, id: number): JoinView | undefined {
+function joinBody(r: Reader, id: number): JoinBody | undefined {
   const name = r.name(id);
   if (name === undefined) return undefined;
   const head = base(r, id, name, "Join");
@@ -555,9 +542,9 @@ export function listAnalytical(
   const metrics = itemIds(r, "Metric", limit);
   const joins = itemIds(r, "Join", limit);
   return {
-    datasets: datasets.ids.flatMap((id) => datasetView(r, id, true) ?? []),
-    metrics: metrics.ids.flatMap((id) => metricView(r, id) ?? []),
-    joins: joins.ids.flatMap((id) => joinView(r, id) ?? []),
+    datasets: datasets.ids.flatMap((id) => withMembers(r, id, datasetBody) ?? []),
+    metrics: metrics.ids.flatMap((id) => withMembers(r, id, metricBody) ?? []),
+    joins: joins.ids.flatMap((id) => withMembers(r, id, joinBody) ?? []),
     truncated: datasets.truncated || metrics.truncated || joins.truncated,
   };
 }

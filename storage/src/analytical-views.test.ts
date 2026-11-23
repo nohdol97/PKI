@@ -73,6 +73,7 @@ describe("metrics.view", () => {
         "grain",
         "itemId",
         "joins",
+        "members",
         "name",
         "periods",
         "relations",
@@ -254,6 +255,55 @@ describe("rework 1: visibility of paths, unmet, limit and group members", () => 
     )[0]?.calculations[0]?.unmet;
     expect(hidden).not.toContain("schema");
     expect(hidden).toContain("check-missing");
+  });
+
+  it("U1: unmet is judged over the rows the caller sees: a hidden relation gives no-dataset, a hidden rival no spec-conflict", () => {
+    const w = world();
+    line(db, w.calc, "aggregation", w.table.versionId);
+    const unmet = (vis?: Visibility) => listMetricViews(db, vis)[0]?.calculations[0]?.unmet;
+    expect(unmet()).toEqual([]);
+    const rel = db.all("SELECT id FROM relations WHERE type = 'MEASURED_ON'")[0]?.id as number;
+    expect(unmet(hiding((k, id) => k === "relation" && id === String(rel)))).toContain(
+      "no-dataset",
+    );
+
+    const cite = (factId: number) =>
+      addEvidence(db, {
+        target: { factId },
+        sourceVersionId: w.table.versionId,
+        start: 0,
+        end: 1,
+        quote: "a",
+      });
+    cite(w.calc);
+    const rival = fact(
+      db,
+      w.metric,
+      "metric.calculation",
+      '{"aggregation":"max","column":"amount"}',
+    );
+    cite(rival);
+    expect(unmet()).toContain("spec-conflict");
+    expect(unmet(hiding((k, id) => k === "fact" && id === String(rival)))).not.toContain(
+      "spec-conflict",
+    );
+  });
+
+  it("U3: two merged Metrics list the member under the representative, with its own calculation; the member is not at the top level", () => {
+    const a = item(db, "Metric", "매출");
+    const b = item(db, "Metric", "revenue");
+    fact(db, a, "metric.calculation", CALC);
+    const memberCalc = fact(db, b, "metric.calculation", '{"aggregation":"max","column":"amount"}');
+    db.transaction(() => userDecisions.entities.merge(db, a, b, "2026-11-23T00:00:00.000Z"));
+    const { metrics } = listAnalytical(db);
+    expect(metrics).toHaveLength(1);
+    const top = metrics[0];
+    const memberId = top?.itemId === a ? b : a;
+    expect(top?.members.map((m) => m.itemId)).toEqual([memberId]);
+    const member = top?.members[0];
+    expect(member?.members).toEqual([]);
+    if (memberId === b) expect(member?.calculations.map((c) => c.id)).toEqual([memberCalc]);
+    expect(listMetricViews(db).map((m) => m.itemId)).toEqual([top?.itemId]);
   });
 
   it("F3: hidden low-id items do not use up the limit and do not set truncated", () => {
