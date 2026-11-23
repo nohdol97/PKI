@@ -9,6 +9,7 @@ import {
   migrate,
   registerConnectorInstance,
   saveFact,
+  saveRelation,
   saveSourceRecord,
   type KnowledgeAttributes,
   type ScopePolicy,
@@ -179,6 +180,67 @@ describe("wiki.gate: what a link between two facts may disclose", () => {
     expect(page?.claims.map((c) => c.ref.id)).toEqual([fa, fb, fc]);
     expect(page?.claims.flatMap((c) => [...c.contradicts, ...c.supersedes])).toEqual([]);
     expect(page?.claims.find((c) => c.ref.id === fb)?.validUntil).toBeNull();
+  });
+});
+
+describe("wiki.gate: a merge line the caller cannot see is not a group (S02-R24 4, K01-R9)", () => {
+  /** Shows each scope alone but refuses the two sources of one merge line together, so the line is hidden. */
+  const crossing: ScopePolicy = {
+    ...policy,
+    allows: (scopes) => !(scopes.some((s) => s === "A") && scopes.some((s) => s === "B")),
+  };
+  const mergeLine = (member: number, representative: number) =>
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [member, representative],
+    );
+
+  it("shows neither the other member's name, claims nor the backlink derived through it", () => {
+    const a = source("a", "가 본문", ["A"]);
+    const b = source("b", "나 본문", ["B"]);
+    const rep = insertItem(db, { type: "Project", name: "대표 항목", ...attrs });
+    const member = insertItem(db, { type: "Project", name: "숨은별칭", ...attrs });
+    const target = insertItem(db, { type: "Project", name: "대상 항목", ...attrs });
+    const repFact = citedFact(rep, "가 값", a);
+    citedFact(member, "나비밀값", b);
+    mergeLine(member, rep);
+    // the member's relation reaches `target`: a backlink on its page would name the representative's page
+    const rel = saveRelation(db, {
+      subjectId: member,
+      type: "USES",
+      objectId: target,
+      ...attrs,
+    }).id;
+    addEvidence(db, {
+      target: { relationId: rel },
+      sourceVersionId: b,
+      start: 0,
+      end: 1,
+      quote: "나",
+    });
+    const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+
+    const registry = createProductRegistry({ policy: crossing });
+    const reads = createWikiReads(db, registry, createReadGate(db, registry));
+    const page = reads.page(`projects/${rep}`);
+    expect(page?.claims.map((c) => c.ref)).toEqual([{ kind: "fact", id: repFact }]);
+    expect(page?.members.map((m) => m.name)).toEqual(["대표 항목"]);
+    expect(JSON.stringify(page)).not.toContain("숨은별칭");
+    expect(JSON.stringify(page)).not.toContain("나비밀값");
+    expect(page?.links).toEqual([]);
+    expect(reads.page(`projects/${target}`)?.backlinks).toEqual([]);
+
+    // the same rows read by one who may put the two together show the group
+    const open = createProductRegistry({ policy });
+    const together = createWikiReads(db, open, createReadGate(db, open));
+    expect(together.page(`projects/${rep}`)?.members.map((m) => m.name)).toEqual([
+      "대표 항목",
+      "숨은별칭",
+    ]);
+    expect(together.page(`projects/${target}`)?.backlinks.map((l) => l.fromKey)).toEqual([
+      `projects/${rep}`,
+    ]);
   });
 });
 
