@@ -134,6 +134,8 @@ export interface BootOptions {
     underElectron?: boolean;
     excluded?: readonly string[];
     normalizer?: LocalNormalizerPort;
+    /** Browser development (dev.ts) only: a typed path is approved as in a test build (I02B-R37). */
+    typedPaths?: boolean;
   };
 }
 

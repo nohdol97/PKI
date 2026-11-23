@@ -13,6 +13,7 @@ import type { LLMProvider } from "@pki/contracts";
 import { bootBackend, closeProviders } from "./boot.ts";
 import { electronHostChannel } from "./normalizer-host-electron.ts";
 import { channelSecrets } from "./secret-sources.ts";
+import { locationTicket, type ApprovalTickets } from "./local-locations.ts";
 import { shellOptions } from "./shell-options.ts";
 import type { RunningServer } from "./server.ts";
 import type { SiteRegistration } from "./site-registration.ts";
@@ -69,11 +70,17 @@ export async function runShell(site: SiteRegistration): Promise<void> {
   // the shell starts the normalizer host for this backend when asked (I02B-R22, adapter ⓑ)
   const normalizerHosts = electronHostChannel((message) => channel.post(message));
   let running:
-    { server: RunningServer; providers: readonly LLMProvider[]; close(): void } | undefined;
+    {
+      server: RunningServer;
+      providers: readonly LLMProvider[];
+      tickets: ApprovalTickets;
+      close(): void;
+    }
+    | undefined;
 
   async function start(token: string) {
     const dataDir = options.dataDir ?? dataDirectory();
-    const { server, db, providers } = await bootBackend({
+    const { server, db, providers, tickets } = await bootBackend({
       dataDir,
       connectors: options.connectors,
       site,
@@ -82,9 +89,13 @@ export async function runShell(site: SiteRegistration): Promise<void> {
       secrets: secrets.source,
       scopePolicy: options.scopePolicy,
       // the normalizer host is started by the shell for a utility process (I02B-R22, adapter ⓑ)
-      localFiles: { shellHost: normalizerHosts.spawner },
+      // and the shell's user-data folder is no place for a location (I02B-R48)
+      localFiles: {
+        shellHost: normalizerHosts.spawner,
+        ...(options.userData ? { excluded: [options.userData] } : {}),
+      },
     });
-    running = { server, providers, close: () => db.close() };
+    running = { server, providers, tickets, close: () => db.close() };
     return server.port;
   }
 
@@ -123,6 +134,9 @@ export async function runShell(site: SiteRegistration): Promise<void> {
   channel.onMessage((data, ports) => {
     if (secrets.deliver(data)) return;
     if (normalizerHosts.deliver(data, ports)) return;
+    // a path the user picked, under a ticket the shell made; dropped while no backend runs (I02B-R37)
+    const picked = locationTicket(data);
+    if (picked) return void running?.tickets.register(picked);
     const message = parse(data);
     if (message?.type === "stop") return void stop();
     if (starting) return; // one start per process; later messages are ignored

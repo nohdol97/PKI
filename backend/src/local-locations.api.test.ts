@@ -25,7 +25,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { inProcessNormalizer } from "./local-normalizer.test-support.ts";
-import { createApprovalTickets, createLocalLocations } from "./local-locations.ts";
+import {
+  createApprovalTickets,
+  createLocalLocations,
+  TICKET_TTL_MS,
+} from "./local-locations.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "l".repeat(43);
@@ -119,6 +123,17 @@ describe("approval (I02B-R5, R37; I02B-C3 at the API, C43)", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("an expired ticket is refused (S4, FU-2)", () => {
+    let at = 1_000;
+    const tickets = createApprovalTickets({ now: () => at });
+    tickets.register({ ticket: "e".repeat(32), type: "folder", path: docs });
+    at += TICKET_TTL_MS + 1;
+    expect(tickets.redeem("e".repeat(32), "folder")).toBeUndefined();
+    tickets.register({ ticket: "f".repeat(32), type: "folder", path: docs });
+    at += TICKET_TTL_MS - 1;
+    expect(tickets.redeem("f".repeat(32), "folder")).toBe(docs);
   });
 
   it("the route's code list is the SDK's plus the ticket's", () => {

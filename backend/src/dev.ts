@@ -39,6 +39,8 @@ const { server, providers } = await bootBackend({
   port: Number(values.port),
   secrets: envSecrets(process.env),
   scopePolicy: scopePolicyFromEnv(process.env),
+  // the screens' path input exists only in development, never in a build (I02B-R37)
+  localFiles: { typedPaths: true },
 });
 process.stdout.write(`${JSON.stringify({ url: server.url, token })}\n`);
 // stopped by the dev server (SIGTERM) or Ctrl+C: end running CLI trees first (V01-T10)
