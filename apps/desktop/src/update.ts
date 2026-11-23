@@ -18,8 +18,10 @@ export interface UpdateManifest {
 export type UpdateRefusal = "bad-signature" | "malformed" | "not-newer";
 
 export class UpdateError extends Error {
-  constructor(readonly reason: UpdateRefusal) {
+  readonly reason: UpdateRefusal;
+  constructor(reason: UpdateRefusal) {
     super(reason);
+    this.reason = reason;
   }
 }
 

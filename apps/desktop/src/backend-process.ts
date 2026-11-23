@@ -220,6 +220,8 @@ export interface Backend {
    * undefined when the backend has no path to show, ends, or does not answer in time.
    */
   revealPath(sourceVersionId: number): Promise<string | undefined>;
+  /** Tells the backend the OS woke from sleep (H02A-R11), one way; nothing once the process has ended. */
+  resumed(): void;
   /**
    * Asks the backend to close, kills it if it has not ended in time, force-kills it
    * if that is ignored too, and returns within stopTimeoutMs + 2 × killTimeoutMs
@@ -318,6 +320,9 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
       if (ended) return false;
       child.postMessage({ type: "location-ticket", ...input });
       return true;
+    },
+    resumed() {
+      if (!ended) child.postMessage({ type: "resumed" });
     },
     revealPath(sourceVersionId) {
       if (ended) return Promise.resolve(undefined);

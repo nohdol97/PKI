@@ -210,6 +210,8 @@ export interface BootedBackend {
   notifyOutbox: NotifyOutbox;
   /** The file path of a local source for the shell's "show in folder": undefined unless the read gate shows the version (I02F-R2). */
   revealPath(sourceVersionId: number): string | undefined;
+  /** The OS woke from sleep: check the periods now and wake the runner, not at the next 30-second check (H02A-R11). */
+  resumed(): void;
 }
 
 export function bootBackend(options: BootOptions): Promise<BootedBackend> {
@@ -548,6 +550,14 @@ async function startBackend(
     tickets: localFiles.tickets,
     notifyOutbox,
     revealPath: (id) => revealPathOf(db, id, revealGate.sourceShown),
+    resumed() {
+      try {
+        scheduler.check();
+      } catch (error) {
+        log("resume-check-error", { error: errorClass(error) });
+      }
+      void runner.wake();
+    },
   };
 }
 

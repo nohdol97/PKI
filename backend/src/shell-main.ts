@@ -19,14 +19,15 @@ import { shellOptions } from "./shell-options.ts";
 import type { RunningServer } from "./server.ts";
 import type { SiteRegistration } from "./site-registration.ts";
 
-type ToBackend = { type: "start"; token: string } | { type: "stop" };
+type ToBackend = { type: "start"; token: string } | { type: "stop" } | { type: "resumed" };
 
-/** The shell's two messages, exactly; anything else is undefined. */
+/** The shell's three messages, exactly; anything else is undefined. */
 function parse(data: unknown): ToBackend | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const keys = Object.keys(data).sort().join(",");
   const { type, token } = data as { type?: unknown; token?: unknown };
   if (type === "stop" && keys === "type") return { type };
+  if (type === "resumed" && keys === "type") return { type };
   const tokenOk = typeof token === "string" && token.length >= 32 && token.length <= 512;
   if (type === "start" && keys === "token,type" && tokenOk) return { type, token };
   return undefined;
@@ -77,6 +78,8 @@ export async function runShell(site: SiteRegistration): Promise<void> {
         tickets: ApprovalTickets;
         /** The absolute path of a local source's file, for the shell only (P6). */
         revealPath(sourceVersionId: number): string | undefined;
+        /** The OS woke from sleep (H02A-R11). */
+        resumed(): void;
         /** The shell's answer to a notify message (P02-R8). */
         notifyAck(data: unknown): boolean;
         close(): void;
@@ -88,25 +91,28 @@ export async function runShell(site: SiteRegistration): Promise<void> {
     // built apart so the boot call stays a literal with no spread (entries.swap.test.ts, V01-R17)
     const excluded = options.userData ? [options.userData] : [];
     const localFiles = { shellHost: normalizerHosts.spawner, excluded };
-    const { server, providers, tickets, notifyOutbox, revealPath, db } = await bootBackend({
-      dataDir,
-      connectors: options.connectors,
-      site,
-      token,
-      allowedOrigins: options.origins,
-      secrets: secrets.source,
-      scopePolicy: options.scopePolicy,
-      // the normalizer host is started by the shell for a utility process (I02B-R22, adapter ⓑ)
-      // and the shell's user-data folder is no place for a location (I02B-R48)
-      localFiles,
-      // the count-only message of an OS toast goes to the shell over this channel; its answer comes back below (P02-R8, R9)
-      notifyChannel: { send: (message) => channel.post(message) },
-    });
+    const { server, providers, tickets, notifyOutbox, revealPath, resumed, db } = await bootBackend(
+      {
+        dataDir,
+        connectors: options.connectors,
+        site,
+        token,
+        allowedOrigins: options.origins,
+        secrets: secrets.source,
+        scopePolicy: options.scopePolicy,
+        // the normalizer host is started by the shell for a utility process (I02B-R22, adapter ⓑ)
+        // and the shell's user-data folder is no place for a location (I02B-R48)
+        localFiles,
+        // the count-only message of an OS toast goes to the shell over this channel; its answer comes back below (P02-R8, R9)
+        notifyChannel: { send: (message) => channel.post(message) },
+      },
+    );
     running = {
       server,
       providers,
       tickets,
       revealPath,
+      resumed,
       notifyAck: (data) => notifyOutbox.acknowledge(data),
       close: () => db.close(),
     };
@@ -161,6 +167,8 @@ export async function runShell(site: SiteRegistration): Promise<void> {
     }
     const message = parse(data);
     if (message?.type === "stop") return void stop();
+    // dropped while no backend runs (H02A-R11)
+    if (message?.type === "resumed") return void running?.resumed();
     if (starting) return; // one start per process; later messages are ignored
     // A malformed start is not echoed: it may still carry the token.
     if (message?.type !== "start") return failed();

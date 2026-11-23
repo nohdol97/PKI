@@ -50,7 +50,7 @@ describe("verifyManifest", () => {
     const { publicKey, privateKey } = keys();
     const good = signed(manifestFor("1.2.0"), privateKey);
     const tampered = Buffer.from(good.bytes);
-    tampered[tampered.length - 2] ^= 1;
+    tampered.writeUInt8(tampered.readUInt8(tampered.length - 2) ^ 1, tampered.length - 2);
     const reason = (input: Parameters<typeof verifyManifest>[0]) => {
       try {
         verifyManifest(input);
