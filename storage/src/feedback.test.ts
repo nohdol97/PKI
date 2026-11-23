@@ -115,7 +115,7 @@ describe("feedback.kinds-and-targets (P03-C1a)", () => {
           : { kind: "insight", id: insight };
     for (const kind of FEEDBACK_KINDS) applied(record(target(kind), kind));
     expect(live()).toBe(8);
-    const again = applied(record({ kind: "insight", id: insight }, "useful", at(9)));
+    const again = applied(record({ kind: "insight", id: insight }, "irrelevant", at(9)));
     expect(again.created).toBe(false);
     expect(live()).toBe(8);
   });
@@ -173,6 +173,34 @@ describe("feedback.undo (P03-C1b)", () => {
     expect(undo(feedback.id)).toEqual({ status: "refused", reason: "not-latest" });
     expect(statusOf("fact", fact)).toBe("verified");
     expect(db.all("SELECT undone_at FROM feedback")).toEqual([{ undone_at: null }]);
+  });
+});
+
+describe("feedback.rerecord: a line whose effect is gone is replaced, not answered", () => {
+  it("a correction asked again after the row moved on changes the state again, and its undo works", () => {
+    const first = applied(record({ kind: "fact", id: fact }, "wrong_info", at(1)));
+    db.transaction(() => userDecisions.decide(db, { kind: "fact", id: fact }, "approve", at(2)));
+    expect(statusOf("fact", fact)).toBe("verified");
+    const second = applied(record({ kind: "fact", id: fact }, "wrong_info", at(3)));
+    expect(second.created).toBe(true);
+    expect(second.feedback.id).not.toBe(first.feedback.id);
+    expect(statusOf("fact", fact)).toBe("disputed");
+    expect(undo(second.feedback.id, at(4))).toMatchObject({ status: "applied" });
+    expect(statusOf("fact", fact)).toBe("verified");
+    // the replaced line stays cancelled; no live line is left
+    expect(live()).toBe(0);
+  });
+
+  it("a like asked again after another opinion counts as the newest opinion", () => {
+    const target: FeedbackTarget = { kind: "insight", id: insight };
+    applied(record(target, "useful", at(1)));
+    applied(record(target, "important", at(2)));
+    const third = applied(record(target, "useful", at(3)));
+    expect(third.created).toBe(true);
+    expect(signal(target).weight).toBe(50);
+    // cancelling the newest brings back the opinion before it, not the replaced line
+    undo(third.feedback.id, at(4));
+    expect(signal(target).weight).toBe(100);
   });
 });
 

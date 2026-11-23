@@ -118,20 +118,13 @@ export function recordFeedback(
   if (!exists(tx, target) || options.shown?.(target) === false) {
     return { status: "refused", reason: "not-found" };
   }
-  const live = tx.all(
-    `SELECT * FROM feedback WHERE kind = ? AND ${COLUMN[target.kind]} = ? AND undone_at IS NULL`,
-    [kind, target.id],
-  )[0];
-  if (live) {
-    return { status: "applied", feedback: rowOf(live), created: false, touched: null };
-  }
-  let seq: number | null = null;
-  let touched: EntryRef | null = null;
-  if (cls === "correction") {
-    const ref: EntryRef = { kind: target.kind as EntryRef["kind"], id: target.id };
-    const status = readRow(tx, ref)?.status;
-    const action =
-      FEEDBACK_TABLE[kind].action === "approve"
+  const ref: EntryRef = { kind: target.kind as EntryRef["kind"], id: target.id };
+  // what a correction asks of the entry now: nothing when the row is already where the kind wants it
+  const status = cls === "correction" ? readRow(tx, ref)?.status : undefined;
+  const action =
+    cls !== "correction"
+      ? null
+      : FEEDBACK_TABLE[kind].action === "approve"
         ? status === "verified"
           ? null
           : "approve"
@@ -140,6 +133,36 @@ export function recordFeedback(
           : status === "candidate"
             ? "reject"
             : null;
+  const live = tx.all(
+    `SELECT * FROM feedback WHERE kind = ? AND ${COLUMN[target.kind]} = ? AND undone_at IS NULL`,
+    [kind, target.id],
+  )[0];
+  let stale: StoredFeedback | undefined;
+  if (live) {
+    const line = rowOf(live);
+    // A live line is answered as it is only while its effect holds: a preference always; a like or dislike while
+    // it is still the newest of the three (D9); a correction while its history line is still the row's newest, or,
+    // with no line, while the row still needs no action. Otherwise it is cancelled below, once the entry has accepted
+    // the new one (a refusal leaves everything as it was), and a new line is written.
+    const holds =
+      cls === "correction"
+        ? line.appliedSeq === null
+          ? action === null
+          : stateLinesOf(tx, ref).at(-1)?.seq === line.appliedSeq
+        : !OPINIONS.includes(kind) ||
+          (
+            tx.all(
+              `SELECT id FROM feedback WHERE ${COLUMN[target.kind]} = ? AND undone_at IS NULL
+                AND kind IN (${placeholders(OPINIONS)}) ORDER BY id DESC LIMIT 1`,
+              [target.id, ...OPINIONS],
+            )[0] as { id: number }
+          ).id === line.id;
+    if (holds) return { status: "applied", feedback: line, created: false, touched: null };
+    stale = line;
+  }
+  let seq: number | null = null;
+  let touched: EntryRef | null = null;
+  if (cls === "correction") {
     if (action) {
       const outcome = decisions.decide(tx, ref, action, at);
       if (outcome.status === "refused") {
@@ -153,6 +176,7 @@ export function recordFeedback(
       }
     }
   }
+  if (stale) tx.run("UPDATE feedback SET undone_at = ? WHERE id = ?", [at, stale.id]);
   const id = tx.run(
     `INSERT INTO feedback (kind, ${COLUMN[target.kind]}, created_at, applied_seq) VALUES (?, ?, ?, ?)`,
     [kind, target.id, at, seq],
