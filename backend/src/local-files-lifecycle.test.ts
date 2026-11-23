@@ -1,6 +1,12 @@
 // I02B-T04 T0 (F1, FU7): what a location that is not read owes the connector when it is read again.
 // One representative case per clause; the connector runs over the canonical index on an in-memory database.
-import { confirmDeletions, listLocations, relinkLocation, type LocalLocation } from "@pki/storage";
+import {
+  closeLocation,
+  confirmDeletions,
+  listLocations,
+  relinkLocation,
+  type LocalLocation,
+} from "@pki/storage";
 import { chmodSync, utimesSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -112,6 +118,28 @@ describe("C11: the root of a location", () => {
     expect(present(w)).toHaveLength(2);
   });
 
+  it("a pause made after the pass took its snapshot is not overwritten by the return from unavailable (R10)", async () => {
+    const w = make();
+    w.write("a.md", "# a\n\nbody of a\n");
+    storeUpserts(w, await w.settle());
+    renameSync(w.root, `${w.root}-away`);
+    await w.sync();
+    expect(stateOf(w)).toEqual(["unavailable", "root-missing"]);
+    renameSync(`${w.root}-away`, w.root);
+    w.write("later.md", "# later\n\nbody of later\n");
+    // the user's pause lands between the pass's reading of the rows and its own write
+    let once = true;
+    w.ports.locations = () => {
+      const snapshot = listLocations(w.db);
+      if (once) closeLocation(w.db, w.locationId, "paused", null);
+      once = false;
+      return snapshot;
+    };
+    const during = [...(await w.sync()), ...(await w.sync())];
+    expect(stateOf(w)).toEqual(["paused", null]);
+    expect(upserts(during)).toHaveLength(0);
+  });
+
   it("another folder at the same path is root-changed, stays so, and a relink to it keeps the internal ids", async () => {
     const w = make();
     w.write("a.md", "# a\n\nbody of a\n");
@@ -169,6 +197,22 @@ describe("C12: the deletion brake", () => {
     expect(confirmDeletions(w.db, w.locationId, 25)).toMatchObject({ ok: true });
     expect(deletes(await w.sync())).toHaveLength(25);
     expect(stateOf(w)).toBe("active");
+  }, 30_000);
+
+  it("held deletions survive a folder that went away and came back: the location returns as needs-confirmation with the same count (C11)", async () => {
+    const w = make();
+    await seed(w, 40);
+    remove(w, 0, 25);
+    await w.sync();
+    await w.sync();
+    expect(stateOf(w)).toBe("needs-confirmation");
+    renameSync(w.root, `${w.root}-away`);
+    await w.sync();
+    expect(stateOf(w)).toBe("unavailable");
+    renameSync(`${w.root}-away`, w.root);
+    await w.sync();
+    expect(stateOf(w)).toBe("needs-confirmation");
+    expect(held(w)).toBe(25);
   }, 30_000);
 
   it("50 files with 20 gone (ratio short) and 30 with 19 gone (count short) are deleted at once", async () => {

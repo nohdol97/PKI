@@ -135,7 +135,7 @@ describe("C15 the driver", () => {
 });
 
 describe("C41 the start after a restore (M8)", () => {
-  it("pauses every read location as restored before any sync, continues a revocation, and an ordinary start leaves states", () => {
+  it("pauses every read or returning location as restored before any sync, continues a revocation, and an ordinary start leaves states", () => {
     const w = make();
     const other = newLocalId();
     insertLocation(w.db, {
@@ -157,7 +157,8 @@ describe("C41 the start after a restore (M8)", () => {
     const restored = driverOver(w, { revoked: () => void (resumed += 1) });
     restored.driver.start(true);
     expect(stateOf(w)).toMatchObject({ state: "paused", stateReason: "restored" });
-    expect(stateOf(w, other).state).toBe("unavailable"); // not read, so not the driver's to pause
+    // an unplugged disk comes back by itself at the next pass, so a restored start stops it too (R34)
+    expect(stateOf(w, other)).toMatchObject({ state: "paused", stateReason: "restored" });
     expect(restored.registered).toHaveLength(0);
     expect(resumed).toBe(2);
   });
