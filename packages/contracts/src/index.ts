@@ -43,6 +43,7 @@ export type * from "./knowledge-engine.ts";
 export type * from "./vector-index.ts";
 export * from "./cell-grammar.ts";
 export * from "./connector.ts";
+export * from "./feedback-types.ts";
 export * from "./import-record.ts";
 export * from "./insight-types.ts";
 export * from "./knowledge-schema.ts";
