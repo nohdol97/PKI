@@ -7,8 +7,10 @@ import {
   leaseNextJob,
   listStoredWikiPages,
   migrate,
+  readWikiState,
   registerConnectorInstance,
   requestWikiBuild,
+  requestWikiRebuild,
   WIKI_BUILD_KIND,
   type SqlDriver,
   type StoredJob,
@@ -17,7 +19,7 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createWikiBuildHandler } from "./wiki-build-job.ts";
 import { renderWikiPages } from "./wiki-render.ts";
-import { addFact, addItem, addSource, cite } from "./wiki.test-support.ts";
+import { addFact, addItem, addSource, buildWiki, cite } from "./wiki.test-support.ts";
 
 let db: SqlDriver;
 beforeEach(() => {
@@ -97,5 +99,25 @@ describe("wiki.build-job: a failing write leaves nothing half written", () => {
     db.run("DELETE FROM items WHERE id = ?", [y]);
     await run();
     expect(Object.keys(hashes())).toEqual([`projects/${x}`]);
+  });
+});
+
+describe("wiki.build-job: a forced rebuild is not cut by the page cap (K01-R10)", () => {
+  it("finishes in one run with more pages than the cap and catches the state up", () => {
+    const a = addSource(db, "a", "합성 본문 가");
+    for (const name of ["가", "나", "다"]) {
+      cite(db, { factId: addFact(db, addItem(db, "Project", `항목 ${name}`), "memo", "값") }, a.id);
+    }
+    expect(buildWiki(db, { cap: 5 }).plan.complete).toBe(true);
+    requestWikiRebuild(db);
+    const state = readWikiState(db);
+    expect(state.forceSeq).toBeGreaterThan(state.forcedSeq);
+
+    const { plan } = buildWiki(db, { cap: 2 });
+    expect(plan.complete).toBe(true);
+    const after = readWikiState(db);
+    expect(after.forcedSeq).toBe(after.forceSeq);
+    expect(after.builtSeq).toBe(after.inputSeq);
+    expect(isWikiStale(db)).toBe(false);
   });
 });

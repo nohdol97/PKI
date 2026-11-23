@@ -28,11 +28,11 @@ const props: PageViewProps = {
     ],
     links: [],
     backlinks: [],
+    hidden: [],
     notes: [],
     history: [],
     summary: { state: "off" },
   },
-  hidden: [],
   source: undefined,
   headingRef: null,
   sourceHeadingRef: null,
@@ -51,5 +51,14 @@ describe("PageView", () => {
     expect(html).toContain("최신이 아닐 수 있습니다");
     expect(html).not.toMatch(/<img/i);
     expect(html).toContain("&lt;img");
+  });
+
+  it("lists the page's hidden claims with a way back", () => {
+    const claim = props.page.claims[0] as NonNullable<(typeof props.page.claims)[number]>;
+    const html = renderToStaticMarkup(
+      <PageView {...props} page={{ ...props.page, claims: [], hidden: [claim] }} />,
+    );
+    expect(html).toContain("다시 보이기");
+    expect(html).toContain("2026-12-05");
   });
 });

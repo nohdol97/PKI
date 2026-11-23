@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { insertItem, saveFact } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
+import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import {
   isWikiStale,
   listWikiLog,
@@ -63,6 +64,14 @@ describe("wiki.state: stale is the input sequence ahead of the built one (K01-R5
       "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
       [insertItem(db, { type: "Project", name: "나", ...attrs }), item],
     );
+    expect(isWikiStale(db)).toBe(true);
+    db.run("UPDATE wiki_state SET built_seq = input_seq");
+    expect(isWikiStale(db)).toBe(false);
+    // the pages keep only evidence on the latest version: a new version changes what they would say
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    saveSourceRecord(db, "c1", { externalId: "s", title: "t", body: "가" });
+    db.run("UPDATE wiki_state SET built_seq = input_seq");
+    saveSourceRecord(db, "c1", { externalId: "s", title: "t", body: "나" });
     expect(isWikiStale(db)).toBe(true);
   });
 });

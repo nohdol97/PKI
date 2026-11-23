@@ -181,3 +181,44 @@ describe("wiki.gate: what a link between two facts may disclose", () => {
     expect(page?.claims.find((c) => c.ref.id === fb)?.validUntil).toBeNull();
   });
 });
+
+describe("wiki.hidden: a hidden claim stays reachable for the way back (K01-R11, R15)", () => {
+  it("is listed in `hidden` and not in `claims` on a later read, back in `claims` after unhide, and judged by the same gate", () => {
+    const open = source("open", "공개 본문", ["open"]);
+    const secret = source("secret", `${SECRET} 본문`, ["secret"]);
+    const item = insertItem(db, { type: "Project", name: "공개 항목", ...attrs });
+    const keep = citedFact(item, "남는 값", open);
+    const gone = citedFact(item, "숨길 값", open);
+    const alias = insertItem(db, { type: "Project", name: `${SECRET} 별칭`, ...attrs });
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [alias, item],
+    );
+    const refused = citedFact(alias, `${SECRET} 값`, secret);
+    const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+    const key = `projects/${item}`;
+    const registry = createProductRegistry({ policy: { ...policy, allows: () => true } });
+    const reads = createWikiReads(db, registry, createReadGate(db, registry));
+
+    for (const id of [gone, refused]) {
+      expect(reads.edit({ op: "hide", claim: { kind: "fact", id } }, "x")).toEqual({
+        status: "applied",
+      });
+    }
+    const hidden = reads.page(key);
+    expect(hidden?.claims.map((c) => c.ref.id)).toEqual([keep]);
+    expect(hidden?.hidden.map((c) => c.ref.id)).toEqual([gone, refused]);
+
+    reads.edit({ op: "unhide", claim: { kind: "fact", id: gone } }, "x");
+    const back = reads.page(key);
+    expect(back?.claims.map((c) => c.ref.id)).toEqual([keep, gone]);
+    expect(back?.hidden.map((c) => c.ref.id)).toEqual([refused]);
+
+    // a hidden claim the policy refuses is not listed either
+    const refusing = createProductRegistry({ policy });
+    const guarded = createWikiReads(db, refusing, createReadGate(db, refusing)).page(key);
+    expect(guarded?.hidden).toEqual([]);
+    expect(JSON.stringify(guarded)).not.toContain(SECRET);
+  });
+});
