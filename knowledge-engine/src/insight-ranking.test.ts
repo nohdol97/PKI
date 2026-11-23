@@ -64,4 +64,10 @@ describe("rankInsight", () => {
     expect(rankInsight({ ...base, userInputCount: 1, preference: 100 }, NOW).relevance).toBe(100);
     expect(plain.preference).toBe(0);
   });
+
+  it("keeps relevance an integer when the preference weight is odd (P5F-R4)", () => {
+    const odd = rankInsight({ ...base, preference: 25 }, NOW);
+    expect(Number.isInteger(odd.relevance)).toBe(true);
+    expect(odd.relevance).toBe(63);
+  });
 });

@@ -329,6 +329,9 @@ describe("read-gate: Home's Insights, their evidence and an evidence row's sourc
     expect(gate.insights().map((i) => i.summary)).toEqual(["요약 a"]);
     expect(gate.insightEvidence(hidden.id)).toBeUndefined();
     expect(gate.insightEvidence(shown.id)).toBeDefined();
+    // P5F-C2: the graph trace answers the same not-found, so it is no existence oracle for the hidden Insight
+    expect(gate.graphTrace({ kind: "insight", id: hidden.id })).toBeUndefined();
+    expect(gate.graphTrace({ kind: "insight", id: shown.id })).toBeDefined();
   });
 
   it("asks for the purpose display on each of the three", () => {

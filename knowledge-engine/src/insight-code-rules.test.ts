@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { INSIGHT_TYPE_NAMES, INSIGHT_TYPES } from "@pki/contracts";
 import {
   addEvidence,
+  insertAssertionLink,
   insertItem,
   listInsightKeys,
   type InsightKey,
@@ -260,6 +261,61 @@ describe("one Insight per item (P01-R8, C3b)", () => {
     expect(insight?.factLines).toHaveLength(2);
     expect(judge(items).filter((o) => o.outcome !== "unchanged")).toEqual([]);
     expect(readInsight(db, found[0] as InsightKey)?.id).toBe(insight?.id);
+  });
+});
+
+describe("a conflict skips a replaced end (P5F-R1, P5F-C1)", () => {
+  // One slot with values A, B, C, D (no links yet: the links are written by hand so the shape is exact).
+  const values = ["2026-12-05", "2026-12-12", "2026-12-20", "2026-12-30"];
+  const scenario: Scenario = {
+    items: [{ ref: "p", type: "Project", name: "미리내 프로젝트" }],
+    sources: [{ ref: "a", body: values.map((v) => `목표일은 ${v}`).join(" / ") }],
+    facts: values.map((v) => ({
+      item: "p",
+      kind: "target_date",
+      value: v,
+      source: "a",
+      quote: `목표일은 ${v}`,
+    })),
+    relations: [],
+  };
+  const link = (type: "CONTRADICTS" | "SUPERSEDES", from: number, to: number) =>
+    insertAssertionLink(db, {
+      type,
+      fromFactId: from,
+      toFactId: to,
+      createdBy: "rule",
+      at: "2026-11-23T00:00:00.000Z",
+    }).id;
+  const run = (items: Map<string, number>) =>
+    recomputeInsights(db, [...items.values()], { scope: allow, at: "2026-11-23T00:00:00.000Z" });
+  const factIds = () => db.all("SELECT id FROM facts ORDER BY id").map((r) => r.id as number);
+
+  it("drops the pair whose end is replaced and keeps the rest, citing the standing replacement link", () => {
+    const items = seed(scenario);
+    const [a, b, c, d] = factIds() as [number, number, number, number];
+    link("CONTRADICTS", a, b);
+    link("CONTRADICTS", a, d);
+    const supersedes = link("SUPERSEDES", c, b);
+    run(items);
+    const found = insightsOf("conflict");
+    expect(found).toHaveLength(1);
+    const insight = readInsight(db, found[0] as InsightKey);
+    expect(insight?.factLines).toHaveLength(1);
+    expect(insight?.factLines.join()).toContain(values[3]);
+    expect(insight?.factLines.join()).not.toContain(values[1]);
+    expect(insight?.linkIds).toContain(supersedes);
+  });
+
+  it("holds no Insight when every contradiction ends in a replaced fact; without the replacement it stands", () => {
+    const items = seed(scenario);
+    const [a, b, c] = factIds() as [number, number, number];
+    link("CONTRADICTS", a, b);
+    run(items);
+    expect(insightsOf("conflict")).toHaveLength(1);
+    link("SUPERSEDES", c, b);
+    run(items);
+    expect(insightsOf("conflict")).toEqual([]);
   });
 });
 
