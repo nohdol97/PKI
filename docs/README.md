@@ -39,6 +39,7 @@
 | [specs/2026-11-22-S02-entity-resolution-temporal-graph.md](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) | 개체 해소·시간 그래프·충돌 처리(S02, #23): 지식 유형 16과 관계 유형 11의 판 번호 있는 목록, 식별자·조직·프로젝트·이웃·시간 신호로 만드는 합치기 후보와 동명이인 확인, 행을 옮기지 않는 합치기와 풀기·나누기, 유효 구간과 관측 시각의 분리, SUPERSEDES·CONTRADICTS와 근거를 든 자동 이의, 근거 사슬과 깊이 3의 관계 경로, 범위가 엇갈리는 길의 차단, Provider로 나가는 이름의 등급 | 확정(잠정 결정 포함). 구현은 T01~T10이 끝났고 자동 이의를 켤지는 배포처 S33을 기다린다 |
 | [specs/2026-11-23-S02F-followups.md](specs/2026-11-23-S02F-followups.md) | S02 후속(#183·#193·#199·#210): 맞대신 쌍은 나중 줄만 세기, 조직 신호는 끝이 조직일 때만, 구분 표시를 끄면 후보 다시 계산, 항목 시작 사슬의 `HAS` 행 보임 검사, 범위를 지키는 가드 시험 여섯 | 확정(잠정 결정 포함) |
 | [specs/2026-11-22-S03-analytical-semantic.md](specs/2026-11-22-S03-analytical-semantic.md) | 분석 의미(S03, #24): Dataset·Metric·Join을 등록 행으로 적기, 표 원본에서 실제 스키마 읽기(Dataset 프로파일), 데이터 검사 넷(스키마·Grain·Join cardinality·집계)과 그것을 지나야 하는 승격, 단위·통화·기간·version 충돌, 값을 계산하지 않음, 검토 API 계약, 작업 분해. S02 spec(개체 해소·시간 그래프·충돌) 위에 쓴다 | 확정(잠정 결정 포함) |
+| [specs/2026-11-23-P01-insight-discovery.md](specs/2026-11-23-P01-insight-discovery.md) | Insight 발견·변경 감지·설명 가능한 순위(P01, #27): 13개 유형 표와 지원 상태, Insight의 사실 줄·이유 요약·신뢰도, 규칙 틀 `recomputeInsights`, 여섯 축 순위(읽을 때 계산), 알림 제외 표시, 작업 분해(첫 묶음 T01+T02) | 확정(잠정 결정 포함) |
 
 ## 동작 방식
 
