@@ -61,7 +61,7 @@ function seed(n: number): void {
   }
 }
 
-function measure(n: number): { asked: string[]; queries: number; listed: number } {
+function measure(n: number): { asked: string[]; keys: string[]; queries: number; listed: number } {
   seed(n);
   const asked: string[] = [];
   const vis: Visibility = {
@@ -71,23 +71,31 @@ function measure(n: number): { asked: string[]; queries: number; listed: number 
     },
   };
   let queries = 0;
+  const keys: string[] = [];
   const counting: SqlDriver = {
     ...db,
     all: (sql, params) => {
       queries++;
+      keys.push(`${sql}\u0000${JSON.stringify(params ?? [])}`);
       return db.all(sql, params);
     },
   };
   const list = listAnalytical(counting, vis, 1000);
-  return { asked, queries, listed: list.datasets.length + list.metrics.length + list.joins.length };
+  return {
+    asked,
+    keys,
+    queries,
+    listed: list.datasets.length + list.metrics.length + list.joins.length,
+  };
 }
 
 describe("analytical read cost", () => {
-  it("AR-C3: no (kind, id) is asked twice, and the query count is linear with a small constant", () => {
+  it("AR-C3: no (kind, id) is asked twice, no (sql, params) is sent twice, and the query count is linear with a small constant", () => {
     const four = measure(4);
     expect(four.listed).toBe(12);
     expect(four.asked.length).toBe(new Set(four.asked).size);
-    expect(four.queries).toBeLessThanOrEqual(300 * 4 + 20);
+    expect(four.keys.length).toBe(new Set(four.keys).size);
+    expect(four.queries).toBeLessThanOrEqual(150 * 4 + 20);
   });
 
   it("AR-C3: doubling the items at most doubles the queries", () => {
