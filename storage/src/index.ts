@@ -310,9 +310,15 @@ export {
 } from "./analytical.ts";
 export {
   PATH_TYPES,
+  analyticalRowChanged,
+  checkLinesReading,
+  eraseChecksReading,
   listCheckLines,
+  onMembershipChanged,
+  queueChecksAround,
   saveCheckLine,
   tableSourcesOf,
+  type AnalyticalRowRef,
   type CheckName,
   type Following,
   type NewCheckLine,

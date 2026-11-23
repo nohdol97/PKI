@@ -14,6 +14,7 @@
 // `user-override` and writes nothing, except the few the rule names.
 //
 // A history line holds numbers and codes only, never a name, value or quote (R6).
+import { analyticalRowChanged } from "./analytical-check-lines.ts";
 import { listEvidence, type EpistemicType, type KnowledgeStatus } from "./knowledge.ts";
 import type { SqlDriver, SqlRow } from "./sql-driver.ts";
 
@@ -195,6 +196,8 @@ export function writeLine(tx: SqlDriver, ref: EntryRef, line: Line): number {
       ],
     );
   }
+  // a fact or relation a check line reads was made or changed state: erase what read it, queue what reaches it
+  if (ref.kind !== "item") analyticalRowChanged(tx, ref, line.at ? new Date(line.at) : undefined);
   return seq;
 }
 

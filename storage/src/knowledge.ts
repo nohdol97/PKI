@@ -2,6 +2,7 @@
 // evidence tying a fact or relation to a span of one immutable source version.
 // Same-row rules (V02-R8) are the tables' unique keys: saving the same row again
 // returns the stored one unchanged, so a caller only adds evidence to it.
+import { analyticalRowChanged } from "./analytical-check-lines.ts";
 import type { SqlDriver, SqlRow } from "./sql-driver.ts";
 
 export type EpistemicType = "explicit" | "user-approved" | "inferred" | "hypothesis";
@@ -183,11 +184,20 @@ export function addEvidence(db: SqlDriver, evidence: NewEvidence): number {
     throw new Error(`span [${start}, ${end}) does not select the quote`);
   }
   const target = targetValues(evidence.target);
-  db.run(
+  const added = db.run(
     `INSERT INTO evidence (source_version_id, fact_id, relation_id, start_offset, end_offset, quote)
      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
     [sourceVersionId, ...target, start, end, quote],
   );
+  // a row a check line reads gained evidence (S03-R11); the same evidence again changes nothing
+  if (added.changes === 1) {
+    analyticalRowChanged(
+      db,
+      "factId" in evidence.target
+        ? { kind: "fact", id: evidence.target.factId }
+        : { kind: "relation", id: evidence.target.relationId },
+    );
+  }
   return db.all(
     `SELECT id FROM evidence WHERE source_version_id = ? AND fact_id IS ? AND relation_id IS ?
        AND start_offset = ? AND end_offset = ?`,
