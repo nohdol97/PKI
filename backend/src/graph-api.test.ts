@@ -121,7 +121,7 @@ describe("graph.api (S02-R25)", () => {
     expect(paths.status).toBe(200);
     const parsed = routes.graphPaths.response.parse(paths.body);
     expect(parsed).toMatchObject({ status: "ok", truncated: false });
-    expect(parsed.status === "ok" ? parsed.paths.map((p) => p.length) : []).toEqual([1, 2]);
+    expect(parsed.paths?.map((p) => p.length)).toEqual([1, 2]);
     const trace = await call("graphTrace", { kind: "item", id: a });
     expect(trace.status).toBe(200);
     const chains = routes.graphTrace.response.parse(trace.body).chains;
