@@ -163,6 +163,7 @@ for (const config of configs) {
       try {
         await expect(page.getByRole("row", { name: /백엔드/ })).toContainText("준비됨");
         await expect(page.getByRole("row", { name: /벡터 색인/ })).toContainText("사용 불가");
+        await frameLooksRight(page, target);
         // The product binds the local embedder (V01-T14); no model is prepared by itself.
         await expect(page.getByRole("row", { name: /Embedding/ })).toContainText(
           "모델 없음, 키워드 검색으로 동작 (로컬 계산)",
@@ -198,6 +199,41 @@ for (const config of configs) {
       }
     });
   }
+}
+
+/**
+ * UI01-C6: the shared frame and the bundled font, in the browser and under the shell's CSP:
+ * the body is set in Pretendard (the font file was loaded, not just named), menu on the left
+ * of the content and the status line under both; in the shell no inline style at all.
+ */
+async function frameLooksRight(page: Page, target: Target) {
+  const frame = await page.evaluate(async () => {
+    await document.fonts.load('16px "Pretendard Variable"');
+    const box = (selector: string) => {
+      const r = (document.querySelector(selector) as Element).getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    };
+    const body = getComputedStyle(document.body);
+    return {
+      family: body.fontFamily,
+      background: body.backgroundColor,
+      checked: document.fonts.check('16px "Pretendard Variable"'),
+      loaded: [...document.fonts].some(
+        (f) => f.family.includes("Pretendard Variable") && f.status === "loaded",
+      ),
+      nav: box("nav"),
+      main: box("main"),
+      status: box("footer"),
+      inlineStyles: document.querySelectorAll("[style], style").length,
+    };
+  });
+  expect(frame.family.startsWith('"Pretendard Variable"')).toBe(true);
+  expect(frame.checked && frame.loaded).toBe(true);
+  expect(frame.background).toBe("rgb(246, 245, 242)");
+  expect(frame.nav.right).toBeLessThanOrEqual(frame.main.left);
+  expect(frame.status.top).toBeGreaterThanOrEqual(Math.max(frame.nav.bottom, frame.main.bottom));
+  // the dev server injects its stylesheets as <style>, so only the shell's build is checked
+  if (target === "electron") expect(frame.inlineStyles).toBe(0);
 }
 
 /**

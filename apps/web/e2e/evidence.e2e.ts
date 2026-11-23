@@ -80,7 +80,14 @@ test("evidence.e2e: the Insight's three evidence open their source version and s
   );
   const stack = await startStack("plain", target, playwright.chromium);
   try {
-    await openEvidence(stack.page, "plain");
+    await stack.page.setViewportSize({ width: 1280, height: 800 });
+    const source = await openEvidence(stack.page, "plain");
+    // UI01-C7: at 1280px the opened source sits in the column to the right of the Insight list
+    const insights = stack.page.getByRole("list", { name: "Insight 목록" });
+    await expect(source).toBeVisible();
+    await expect(insights).toBeVisible();
+    const [listBox, sourceBox] = [await insights.boundingBox(), await source.boundingBox()];
+    expect(sourceBox?.x).toBeGreaterThan((listBox?.x ?? 0) + (listBox?.width ?? 0));
     expect(stack.requested.filter(remote)).toEqual([]);
   } finally {
     await stack.stop();
