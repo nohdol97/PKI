@@ -41,6 +41,7 @@
 | [specs/2026-11-22-S03-analytical-semantic.md](specs/2026-11-22-S03-analytical-semantic.md) | 분석 의미(S03, #24): Dataset·Metric·Join을 등록 행으로 적기, 표 원본에서 실제 스키마 읽기(Dataset 프로파일), 데이터 검사 넷(스키마·Grain·Join cardinality·집계)과 그것을 지나야 하는 승격, 단위·통화·기간·version 충돌, 값을 계산하지 않음, 검토 API 계약, 작업 분해. S02 spec(개체 해소·시간 그래프·충돌) 위에 쓴다 | 확정(잠정 결정 포함). 구현은 T01~T10이 끝났고 프로파일을 켤지는 배포처 S34가 정한다 |
 | [specs/2026-11-23-K01-wiki-projection.md](specs/2026-11-23-K01-wiki-projection.md) | 근거 기반 Wiki 투영(K01, #25): 종류별 페이지·index·log를 정본 SQLite의 투영으로 만들기, backlink, 원본 삭제·범위 승계, 다시 만들기, 메모·숨김 편집 레이어, 선택 LLM 요약, API와 "위키" 화면. Wiki OSS는 들이지 않는다 | 확정(잠정 결정 포함) |
 | [specs/2026-11-23-P01-insight-discovery.md](specs/2026-11-23-P01-insight-discovery.md) | Insight 발견·변경 감지·설명 가능한 순위(P01, #27): 13개 유형 표와 지원 상태, Insight의 사실 줄·이유 요약·신뢰도, 규칙 틀 `recomputeInsights`, 여섯 축 순위(읽을 때 계산), 알림 제외 표시, 작업 분해(첫 묶음 T01+T02) | 확정(잠정 결정 포함) |
+| [specs/2026-11-23-P03-feedback-learning.md](specs/2026-11-23-P03-feedback-learning.md) | Feedback Learning(P03, #29): 여덟 가지 피드백의 종류 표와 기록 하나(`feedback`), 교정은 S01의 사용자 입구로·선호는 선호 신호로 가르기, 줄 단위 취소, 선호 신호 `preferenceSignals`(순위·피드 숨김·알림 억제·검색이 읽는 한 함수), 재추출·재검토 뒤 유지와 삭제 전파, 합성 자료의 개인화 전후 비교, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-23-analytical-read-performance.md](specs/2026-11-23-analytical-read-performance.md) | 분석 읽기 속도(#233, #227 R1): 드라이버가 준비한 문장을 다시 쓰고, 한 읽기 안에서 보임 판정과 사실 행을 기억함. 질의 수로 검증, 200개×3목록 중앙값 3분의 1 이하 목표. 묶음의 구성원은 대표 아래에만 | 확정 |
 
 ## 동작 방식
