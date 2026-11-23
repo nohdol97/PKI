@@ -62,6 +62,7 @@ describe("saveInsight", () => {
       summary: "A 위험",
       evidenceIds: evidence,
       userInputs: [],
+      linkIds: [],
     });
   });
 
@@ -123,6 +124,7 @@ describe("saveInsight", () => {
       summary: null,
       evidenceIds: [],
       userInputs: [],
+      linkIds: [],
     });
     expect(saveInsight(db, key, { state: "active", summary: "s", evidenceIds: evidence })).toBe(id);
     expect(db.all("SELECT count(*) AS n FROM insights")).toEqual([{ n: 1 }]);
