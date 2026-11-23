@@ -115,7 +115,8 @@ describe("C13 revoke", () => {
       revoked: 3,
     });
     expect([live(w), entries(w), rows(w).length, tombstones(w)]).toEqual([0, 0, 0, 3]);
-    expect(count(w, "SELECT count(*) AS n FROM source_versions")).toBe(0);
+    // only the other location's source keeps a version
+    expect(count(w, "SELECT count(*) AS n FROM source_versions")).toBe(1);
     expect([live(w, other), rows(w, other).length]).toEqual([1, 1]);
     // the same folder approved again is a new location id: its sources are not blocked
     const again = saveSourceRecord(w.db, "local-files", {

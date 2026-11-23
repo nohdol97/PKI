@@ -174,6 +174,8 @@ export interface LocalFilesLimits {
   normalize: { maxHeapMb: number; maxExternalMemoryBytes: number };
   /** A walk that finds at least `minFiles` files gone, and at least `ratio` of the tracked ones, holds them (I02B-R8). */
   deletionBrake: { ratio: number; minFiles: number };
+  /** A revocation deletes `maxPerTransaction` sources per transaction and waits `lockWaitMs` for a running sync (I02B-R49). */
+  revoke: { maxPerTransaction: number; lockWaitMs: number };
 }
 
 /** What one pass learned about a location, for the location list (I02B-R36, R38). */
@@ -263,12 +265,27 @@ export const LocalConfirmDeletionsRequestSchema = z.strictObject({
 });
 export type LocalConfirmDeletionsRequest = z.infer<typeof LocalConfirmDeletionsRequestSchema>;
 
+/** A revocation (I02B-R10): the location and the number of sources the user was shown (I02B-R49); the same call with the remaining count continues one. */
+export const LocalRevokeRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+  count: z.int().nonnegative(),
+});
+export type LocalRevokeRequest = z.infer<typeof LocalRevokeRequestSchema>;
+
+/** Done in one transaction, or begun: `remaining` sources are still to go (the location lists as `revoking`). */
+export const LocalRevokeResponseSchema = z.union([
+  z.strictObject({ state: z.literal("revoked"), revoked: z.int().nonnegative() }),
+  z.strictObject({ state: z.literal("revoking"), remaining: z.int().positive() }),
+]);
+export type LocalRevokeResponse = z.infer<typeof LocalRevokeResponseSchema>;
+
 const PositiveInt = z.int().positive();
 const walkShape = {
   maxFilesPerLocation: PositiveInt,
   maxDepth: PositiveInt,
   maxRelativePathChars: PositiveInt,
 };
+const revokeShape = { maxPerTransaction: z.int().positive(), lockWaitMs: z.int().positive() };
 const brakeShape = { ratio: z.number().positive(), minFiles: PositiveInt };
 const normalizeShape = {
   timeoutMs: PositiveInt,
@@ -284,6 +301,7 @@ export const LocalFilesSettingsSchema = z.strictObject({
   walk: z.strictObject(walkShape),
   normalize: z.strictObject(normalizeShape),
   deletionBrake: z.strictObject(brakeShape),
+  revoke: z.strictObject(revokeShape),
 });
 export type LocalFilesSettings = z.infer<typeof LocalFilesSettingsSchema>;
 
@@ -295,6 +313,7 @@ export const LocalFilesSettingsPatchSchema = z.strictObject({
   walk: z.strictObject(walkShape).partial().optional(),
   normalize: z.strictObject(normalizeShape).partial().optional(),
   deletionBrake: z.strictObject(brakeShape).partial().optional(),
+  revoke: z.strictObject(revokeShape).partial().optional(),
 });
 export type LocalFilesSettingsPatch = z.infer<typeof LocalFilesSettingsPatchSchema>;
 

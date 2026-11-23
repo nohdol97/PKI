@@ -128,3 +128,62 @@ export function confirmDeletions(db: SqlDriver, id: string, expectedCount: numbe
     { immediate: true },
   );
 }
+
+/** The sources of the location that are still whole: plain identity, in its namespace (a purged source's identity is hashed). */
+export function liveSourceCount(db: SqlDriver, id: string): number {
+  return Number(
+    db.all(
+      "SELECT count(*) AS n FROM sources WHERE connector_instance_id = ? AND namespace = ? AND identity_hashed = 0",
+      [LOCAL_FILES_INSTANCE_ID, id],
+    )[0]?.n,
+  );
+}
+
+export interface RevokeBatchResult {
+  deleted: number;
+  /** Live sources of the location after the batch. */
+  remaining: number;
+  /** Nothing was left alive: the location's rows are gone with this batch. */
+  done: boolean;
+}
+
+/**
+ * One batch of a revocation (I02B-R10, R49), inside the caller's canonical transaction: up to `max`
+ * live sources are deleted by the user's deletion (`deleteSource`, the entry that queues the ledger
+ * line) and their index rows go. When none is left alive, the remaining index rows and the location
+ * row go in the same transaction; otherwise the location is `revoking`. Nothing here commits: a
+ * refusing ledger rolls the whole batch back.
+ */
+export function revokeBatch(
+  tx: SqlDriver,
+  id: string,
+  max: number,
+  deleteSource: (identity: {
+    connectorInstanceId: string;
+    namespace: string;
+    externalId: string;
+  }) => void,
+): RevokeBatchResult {
+  const batch = tx.all(
+    `SELECT external_id FROM sources
+     WHERE connector_instance_id = ? AND namespace = ? AND identity_hashed = 0 ORDER BY id LIMIT ?`,
+    [LOCAL_FILES_INSTANCE_ID, id, max],
+  );
+  for (const row of batch) {
+    const externalId = row.external_id as string;
+    deleteSource({ connectorInstanceId: LOCAL_FILES_INSTANCE_ID, namespace: id, externalId });
+    tx.run("DELETE FROM local_file_entries WHERE location_id = ? AND external_id = ?", [
+      id,
+      externalId,
+    ]);
+  }
+  const remaining = liveSourceCount(tx, id);
+  const done = remaining === 0;
+  if (done) {
+    tx.run("DELETE FROM local_file_entries WHERE location_id = ?", [id]);
+    tx.run("DELETE FROM local_locations WHERE id = ?", [id]);
+  } else {
+    setLocationState(tx, id, "revoking", null);
+  }
+  return { deleted: batch.length, remaining, done };
+}

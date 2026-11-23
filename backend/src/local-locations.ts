@@ -42,6 +42,7 @@ export const LOCAL_FILES_DEFAULTS: LocalFilesSettings = {
   walk: { maxFilesPerLocation: 50_000, maxDepth: 32, maxRelativePathChars: 1_024 },
   normalize: { timeoutMs: 60_000, maxHeapMb: 1_536, maxExternalMemoryBytes: 1_610_612_736 },
   deletionBrake: { ratio: 0.5, minFiles: 20 },
+  revoke: { maxPerTransaction: 100, lockWaitMs: 5_000 },
 };
 
 const KEY = "localFiles.";
@@ -84,6 +85,10 @@ export function readLocalFilesSettings(db: SqlDriver): LocalFilesSettings {
       ratio: positiveDecimal(readSetting(db, `${KEY}deletionBrake.ratio`)) ?? d.deletionBrake.ratio,
       minFiles: read("deletionBrake.minFiles", d.deletionBrake.minFiles),
     },
+    revoke: {
+      maxPerTransaction: read("revoke.maxPerTransaction", d.revoke.maxPerTransaction),
+      lockWaitMs: read("revoke.lockWaitMs", d.revoke.lockWaitMs),
+    },
   };
 }
 
@@ -94,7 +99,7 @@ function changes(patch: LocalFilesSettingsPatch): [string, number][] {
     const value = patch[name];
     if (value !== undefined) out.push([name, value]);
   }
-  for (const group of ["walk", "normalize", "deletionBrake"] as const) {
+  for (const group of ["walk", "normalize", "deletionBrake", "revoke"] as const) {
     for (const [name, value] of Object.entries(patch[group] ?? {})) {
       if (value !== undefined) out.push([`${group}.${name}`, value]);
     }
