@@ -4,8 +4,21 @@
 // uncovered, or whose scopes the policy does not allow, is left out of the answer whole: no count, title,
 // snippet, order or error of it reaches the caller. A registry that cannot judge throws and the call fails
 // (the server answers a generic 500): a row is never shown unjudged.
-import { createProductRegistry, listMergeCandidates } from "@pki/knowledge-engine";
-import type { RouteResponse, SemanticKind, SemanticList, SourceSummary } from "@pki/contracts";
+import {
+  createJudge,
+  createProductRegistry,
+  listMergeCandidates,
+  relationPaths,
+  traceChains,
+  visibleLinks,
+} from "@pki/knowledge-engine";
+import type {
+  RouteRequest,
+  RouteResponse,
+  SemanticKind,
+  SemanticList,
+  SourceSummary,
+} from "@pki/contracts";
 import {
   describeKnowledgeSchema,
   findSources,
@@ -34,9 +47,11 @@ import {
   type ScopePurpose,
   type SqlDriver,
   effectiveUntil,
+  entityGroups,
   listAssertionLinks,
   supersedingStands,
   readFact,
+  unionOfVersions,
 } from "@pki/storage";
 
 /** The registry a server without a composition point runs: the product's kinds, the default scope policy. */
@@ -76,8 +91,8 @@ export interface ReadGate {
   /** The Semantic registry's items with the facts and relations shown (S01-R23): a hidden row is left out whole. */
   semantic(): SemanticList;
   /**
-   * The merge candidates whose two items are both shown (S02-R25): a pair with a hidden end is left out whole.
-   * R24's path check on this list is S02-T09's.
+   * The merge candidates (S02-R24, R25): a pair is listed only when both items and every member of their two groups
+   * are shown and the policy lets the two groups' sources be put together; one with a hidden end is left out whole.
    */
   mergeCandidates(): RouteResponse<"entityCandidates">;
   /**
@@ -85,6 +100,10 @@ export interface ReadGate {
    * effective end is computed from the listed SUPERSEDES links alone, so nothing of a hidden side shows.
    */
   conflicts(): RouteResponse<"conflicts">;
+  /** S02-R21, R24: undefined when the start is absent, not active or not shown. */
+  graphTrace(start: RouteRequest<"graphTrace">): RouteResponse<"graphTrace"> | undefined;
+  /** S02-R22, R24: undefined when an end is absent or not shown; the depth refusal is an answer. */
+  graphPaths(query: RouteRequest<"graphPaths">): RouteResponse<"graphPaths"> | undefined;
   /** Whether the registry row is stored and shown: the one answer for a row that is absent, deleted or hidden. */
   semanticShown(kind: SemanticKind, id: number): boolean;
   /**
@@ -253,7 +272,29 @@ export function createReadGate(
           })),
           "display",
         );
-        const kept = rows.filter((r) => ids.has(String(r.a)) && ids.has(String(r.b)));
+        const groups = new Map(
+          [...new Set(rows.flatMap((r) => [r.a, r.b]))].map((id) => [
+            id,
+            entityGroups.membersOf(db, id),
+          ]),
+        );
+        const memberIds = shown(
+          [...new Set([...groups.values()].flat())].map((id) => ({ kind: "item", id: String(id) })),
+          "display",
+        );
+        // the two groups' sources together must be allowed too (R24): a signal may come from any member
+        const kept = rows.filter(
+          (r) =>
+            ids.has(String(r.a)) &&
+            ids.has(String(r.b)) &&
+            [...(groups.get(r.a) ?? []), ...(groups.get(r.b) ?? [])].every((m) =>
+              memberIds.has(String(m)),
+            ) &&
+            registry.combinable(
+              db,
+              unionOfVersions(entityGroups.lineageOf(db, r.a), entityGroups.lineageOf(db, r.b)),
+            ),
+        );
         if (kept.length >= limit || rows.length < n || n >= cap) {
           return {
             candidates: kept.slice(0, semanticLimit),
@@ -264,27 +305,8 @@ export function createReadGate(
     },
     conflicts() {
       const read = listAssertionLinks(db, Math.max(maxScan, 1));
-      const linkOk = shown(
-        read.map((l) => ({ kind: "assertion-link", id: String(l.id) })),
-        "display",
-      );
-      const factOk = shown(
-        [...new Set(read.flatMap((l) => [l.fromFactId, l.toFactId]))].map((id) => ({
-          kind: "fact",
-          id: String(id),
-        })),
-        "display",
-      );
       // the link's lineage is both facts' together: the policy must also let the two be put together (S02-R24)
-      const together = (id: number) =>
-        registry.combinable(db, registry.lineage(db, { kind: "assertion-link", id: String(id) }));
-      const listed = read.filter(
-        (l) =>
-          linkOk.has(String(l.id)) &&
-          together(l.id) &&
-          factOk.has(String(l.fromFactId)) &&
-          factOk.has(String(l.toFactId)),
-      );
+      const listed = visibleLinks(db, registry, createJudge(db, registry, "display", false), read);
       const facts = new Map(
         [...new Set(listed.flatMap((l) => [l.fromFactId, l.toFactId]))].flatMap((id) => {
           const fact = readFact(db, id);
@@ -314,6 +336,8 @@ export function createReadGate(
         truncated: listed.length > semanticLimit,
       };
     },
+    graphTrace: (start) => traceChains(db, registry, start, "display"),
+    graphPaths: (query) => relationPaths(db, registry, query, "display"),
     semanticShown: (kind, id) =>
       readSemanticState(db, { kind, id }) !== undefined && isShown(kind, id),
     ontology: () => ({

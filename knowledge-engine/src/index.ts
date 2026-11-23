@@ -96,3 +96,15 @@ export {
   refreshConflicts,
   type ConflictOutcome,
 } from "./conflicts.ts";
+export {
+  createJudge,
+  GRAPH_CHAIN_LIMIT,
+  GRAPH_EXPANSION_LIMIT,
+  GRAPH_PATH_LIMIT,
+  relationPaths,
+  traceChains,
+  visibleLinks,
+  type GraphJudge,
+  type PathQuery,
+  type TraceStart,
+} from "./graph-read.ts";

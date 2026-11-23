@@ -1108,6 +1108,77 @@ export const EntityCandidatesResponseSchema = z.object({
   ),
   truncated: z.boolean(),
 });
+/** S02-R21, R22, R25 (decision 31). Numbers, codes, spans and dates only: no name, value or quote. */
+export const GRAPH_MAX_DEPTH = 3;
+const GraphIdSchema = z.int().positive();
+
+export const GraphTraceRequestSchema = z.strictObject({
+  kind: z.enum(["insight", "fact", "item"]),
+  id: GraphIdSchema,
+});
+const GraphNodeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("insight"), id: GraphIdSchema }),
+  z.object({ kind: z.literal("item"), id: GraphIdSchema }),
+  z.object({ kind: z.literal("fact"), id: GraphIdSchema, effectiveUntil: z.string().nullable() }),
+  z.object({ kind: z.literal("relation"), id: GraphIdSchema }),
+  z.object({
+    kind: z.literal("evidence"),
+    id: GraphIdSchema,
+    start: z.int().nonnegative(),
+    end: z.int().positive(),
+  }),
+  z.object({ kind: z.literal("source-version"), id: GraphIdSchema }),
+  z.object({ kind: z.literal("user-input") }),
+]);
+export const GRAPH_TRACE_EDGES = [
+  "DERIVED_FROM",
+  "SUPPORTS",
+  "SUPERSEDES",
+  "CONTRADICTS",
+  "MENTIONS",
+  "SAME_AS",
+  "HAS",
+] as const;
+const GraphTraceHopSchema = z.object({
+  edge: z.enum(GRAPH_TRACE_EDGES),
+  from: GraphNodeSchema,
+  to: GraphNodeSchema,
+  /** SUPERSEDES / CONTRADICTS only: the assertion link, and whether the hop runs the way the link is stored. */
+  linkId: GraphIdSchema.optional(),
+  direction: z.enum(["forward", "backward"]).optional(),
+});
+export const GraphTraceResponseSchema = z.object({
+  chains: z.array(z.array(GraphTraceHopSchema)),
+  truncated: z.boolean(),
+});
+
+export const GraphPathsRequestSchema = z.strictObject({
+  from: GraphIdSchema,
+  to: GraphIdSchema.optional(),
+  /** Any positive int parses; above GRAPH_MAX_DEPTH the answer is the `depth-exceeded` refusal, not a 400. */
+  depth: z.int().positive(),
+});
+const GraphPathHopSchema = z.object({
+  relationId: GraphIdSchema,
+  type: z.string(),
+  /** forward: `from` is the stored subject's representative. */
+  direction: z.enum(["forward", "backward"]),
+  from: GraphIdSchema,
+  to: GraphIdSchema,
+});
+/** `ok` carries `paths` and `truncated`; `refused` carries `reason` (a refusal is a code in a 200 body). */
+export const GraphPathsResponseSchema = z
+  .object({
+    status: z.enum(["ok", "refused"]),
+    paths: z.array(z.array(GraphPathHopSchema)).optional(),
+    truncated: z.boolean().optional(),
+    reason: z.literal("depth-exceeded").optional(),
+  })
+  .refine((o) =>
+    o.status === "ok"
+      ? o.paths !== undefined && o.truncated !== undefined && o.reason === undefined
+      : o.reason !== undefined && o.paths === undefined && o.truncated === undefined,
+  );
 /**
  * The answer to a direct add or a value fix. `applied`: `entry` is the row the user wrote, and for a
  * fix `replaced` is the old fact as it stands now. `refused` with `value-exists` names the row that
@@ -1593,6 +1664,18 @@ export const routes = {
     method: "GET",
     path: "/api/entities/candidates",
     response: EntityCandidatesResponseSchema,
+  },
+  graphTrace: {
+    method: "POST",
+    path: "/api/graph/trace",
+    request: GraphTraceRequestSchema,
+    response: GraphTraceResponseSchema,
+  },
+  graphPaths: {
+    method: "POST",
+    path: "/api/graph/paths",
+    request: GraphPathsRequestSchema,
+    response: GraphPathsResponseSchema,
   },
   knowledgeSchema: {
     method: "GET",
