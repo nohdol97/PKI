@@ -64,7 +64,6 @@ function setUp(registry?: ReturnType<typeof createProductRegistry>) {
   handler = createWikiSummaryHandler({
     db,
     ...(registry ? { registry } : {}),
-    now: () => new Date(AT),
   });
   return broker;
 }
@@ -159,5 +158,25 @@ describe("wiki.summary-job: only located sentences are kept (K01-C4 ①)", () =>
     setWikiSummary(db, true, new Date(AT));
     await run(setUp());
     expect(provider.requests).toEqual([]);
+  });
+
+  it("clears the summary when the page is written again with other content, and keeps it when the hash is unchanged (R13)", async () => {
+    const item = addItem(db, "Project", "미리내");
+    const a = addSource(db, "s0", BODY_A);
+    cite(db, { factId: addFact(db, item, "memo", "값") }, a.id);
+    buildWiki(db);
+    const key = `projects/${item}`;
+    setWikiSummary(db, true, new Date(AT));
+    await run(setUp());
+    expect(readStoredWikiPage(db, key)?.summary).not.toBeNull();
+
+    buildWiki(db, { force: true }); // same content, same hash
+    expect(readStoredWikiPage(db, key)?.summary).not.toBeNull();
+
+    cite(db, { factId: addFact(db, item, "memo", "새 값") }, a.id);
+    buildWiki(db);
+    const changed = readStoredWikiPage(db, key);
+    expect(changed?.summary).toBeNull();
+    expect(changed?.summaryHash).toBeNull();
   });
 });
