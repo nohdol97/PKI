@@ -39,6 +39,7 @@ import {
 import {
   derivativeKindContract,
   MemoryKnowledgeEngine,
+  activateEmpty,
   MemoryVectorIndex,
   send,
   type DerivativeContractSubject,
@@ -87,7 +88,7 @@ beforeEach(async () => {
   registerConnectorInstance(db, "c", "test-fixtures");
   engine = new MemoryKnowledgeEngine();
   vector = new MemoryVectorIndex();
-  await vector.reset(SPACE);
+  await activateEmpty(vector, SPACE);
 });
 afterEach(() => {
   db.close();
@@ -195,7 +196,7 @@ describe("derivatives.contract: the projection kinds, on the product's wiring", 
         registerConnectorInstance(db, "c", "test-fixtures");
         engine = new MemoryKnowledgeEngine();
         vector = new MemoryVectorIndex();
-        await vector.reset(SPACE);
+        await activateEmpty(vector, SPACE);
         current = wiring();
         const a = await ingest("a", "alpha qzcanary");
         const b = await ingest("b", "bravo");
@@ -594,7 +595,7 @@ describe("the product's boot wiring (I04-T04)", () => {
   it("with an engine and a vector index that hold content: the booted runner's removal job reaches the bound engine", async () => {
     const heldEngine = new MemoryKnowledgeEngine();
     const heldVector = new MemoryVectorIndex();
-    await heldVector.reset(SPACE);
+    await activateEmpty(heldVector, SPACE);
     const bound = overriding<KnowledgeEngine>(heldEngine, {
       // the booted backend's removal reaches the bound engine
       removeSource: async (...args: Parameters<KnowledgeEngine["removeSource"]>) => {

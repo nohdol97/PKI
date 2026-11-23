@@ -17,7 +17,7 @@ describe("EmptyVectorIndex", () => {
   it.each([
     ["embeddingSpace", () => index.embeddingSpace()],
     ["appliedChangeSeq", () => index.appliedChangeSeq()],
-    ["reset", () => index.reset(space)],
+    ["beginRebuild", () => index.beginRebuild(space)],
     ["upsert", () => index.upsert([{ ref: "a", vector }], 1)],
     ["remove", () => index.remove(["a"], 1)],
     ["search", () => index.search(vector, 1)],

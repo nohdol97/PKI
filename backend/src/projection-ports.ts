@@ -63,7 +63,7 @@ export function projectionPorts(options: ProjectionPortsOptions): ProjectionPort
         }
       }
     },
-    rebuild: ({ readSeq }) => projections.rebuild(VECTOR_KIND, readSeq),
+    rebuild: ({ readSeq, signal }) => projections.rebuild(VECTOR_KIND, readSeq, signal),
   };
 
   return { [ENGINE_KIND]: enginePort, [VECTOR_KIND]: vectorPort };

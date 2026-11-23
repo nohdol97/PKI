@@ -35,6 +35,7 @@ import { EmptyVectorIndex } from "@pki/storage/adapters";
 import {
   FakeEmbedder,
   installFakeCli,
+  activateEmpty,
   MemoryVectorIndex,
   send,
   type FakeCli,
@@ -112,6 +113,9 @@ async function start(parts: Parts = {}) {
     new OpenAICompatibleProvider({ db, secrets: keyStore, allowLoopbackHttp: false, egress }),
   ];
   const embedder = parts.embedder === undefined ? await readyEmbedder() : parts.embedder;
+  const vectorIndex = parts.vectorIndex ?? new MemoryVectorIndex();
+  if (!parts.vectorIndex)
+    await activateEmpty(vectorIndex, { modelId: "m", revision: "r", dimension: 3 });
   server = await startServer({
     token: TOKEN,
     allowedOrigins: [],
@@ -121,7 +125,7 @@ async function start(parts: Parts = {}) {
     egress,
     secrets: keyStore,
     calls: productCalls(db, egress, { providers, testBuild: parts.testBuild ?? HEALTHY }),
-    vectorIndex: parts.vectorIndex ?? new MemoryVectorIndex(),
+    vectorIndex,
     embedder,
     ...(parts.now ? { now: parts.now } : {}),
   });

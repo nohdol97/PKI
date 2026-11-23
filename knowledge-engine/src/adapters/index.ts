@@ -2,3 +2,4 @@
 // this entry (module-boundary, V01-T07).
 export { NullKnowledgeEngine } from "./null-knowledge-engine.ts";
 export { createVisibleEngine } from "./visible-engine.ts";
+export { servedVectorIndex } from "./served-vector-index.ts";

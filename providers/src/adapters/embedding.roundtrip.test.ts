@@ -10,7 +10,7 @@
 // holds the matching files is reused). The default `pnpm test` skips all of this and
 // stays offline.
 import type { PrepareSource } from "@pki/contracts";
-import { embeddingContract, MemoryVectorIndex } from "@pki/testkit";
+import { activateEmpty, embeddingContract, MemoryVectorIndex } from "@pki/testkit";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { BGE_M3_INT8 } from "./bge-m3.ts";
 import { TransformersEmbedder } from "./transformers-embedder.ts";
@@ -84,7 +84,7 @@ describe.runIf(enabled)("embedding.roundtrip (real bge-m3)", () => {
 
   it("finds each synthetic sentence by a query about it, offline", async () => {
     const { modelId, revision, dimension } = embedder.describe();
-    await index.reset({ modelId, revision, dimension });
+    await activateEmpty(index, { modelId, revision, dimension });
     const refs = Object.keys(DOCUMENTS);
     const vectors = await embedder.embed(Object.values(DOCUMENTS), "document");
     await index.upsert(
