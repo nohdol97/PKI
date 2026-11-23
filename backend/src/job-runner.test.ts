@@ -22,7 +22,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { seedLegacyTombstone } from "@pki/testkit";
+import { seedLegacyTombstone, dirTemplate } from "@pki/testkit";
 import type { Clock } from "./clock.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { DEFAULT_RUN_TIMEOUT_MS } from "./job-outcomes.ts";
@@ -35,6 +35,8 @@ import {
   type JobKindSettings,
   type JobResult,
 } from "./job-runner.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 let dir: string;
 let db: SqlDriver;
@@ -60,6 +62,7 @@ function reopen(): SqlDriver {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-jobs-"));
+  seedDataDir(join(dir, "data"));
   db = reopen();
   clock = T0;
   mono = 0;

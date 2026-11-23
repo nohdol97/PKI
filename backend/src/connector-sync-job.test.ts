@@ -23,7 +23,7 @@ import {
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
-import { ScriptedConnector, send } from "@pki/testkit";
+import { ScriptedConnector, send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -50,6 +50,8 @@ import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 import { createScheduler, MAINTENANCE_KIND } from "./scheduler.ts";
 
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
+
 /** One line of the synthetic mail fixture: a valid JSONL record to import. */
 const MAIL_LINE = JSON.parse(
   readFileSync(resolve(import.meta.dirname, "../../fixtures/v02-mail.jsonl"), "utf8").split(
@@ -73,6 +75,7 @@ const clock: Clock = {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-sync-job-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
   wall = T0;
 });

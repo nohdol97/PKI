@@ -28,7 +28,7 @@ import {
   SYNC_STOP_CODES,
   type Connector,
 } from "@pki/contracts";
-import { CONNECTOR_VIOLATION_CODES } from "@pki/testkit";
+import { CONNECTOR_VIOLATION_CODES, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -54,6 +54,8 @@ import {
 } from "./site-registration.ts";
 import type { ScopeGrading } from "@pki/providers";
 import type { SqlDriver } from "@pki/storage";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const repo = resolve(import.meta.dirname, "../..");
 const DOC = readFileSync(resolve(repo, "docs/connector-sdk.md"), "utf8");
@@ -281,6 +283,7 @@ describe("docs.connector-sdk: the sample and the commands run", () => {
   let db: SqlDriver;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "pki-doc-sdk-"));
+    seedDataDir(join(dir, "data"));
     db = openCanonicalDb(join(dir, "data"));
   });
   afterEach(() => {

@@ -14,6 +14,9 @@ import { openCanonicalDb } from "./composition.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { importContent } from "./imports.ts";
 import { storePage } from "./page-store.ts";
+import { dirTemplate } from "@pki/testkit";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 vi.mock("@pki/connector-sdk", async (original) => {
   const real = await original<typeof import("@pki/connector-sdk")>();
@@ -28,6 +31,7 @@ let dir: string;
 let db: SqlDriver;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-import-same-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
   vi.mocked(parseJsonl).mockClear();
   vi.mocked(storePage).mockClear();

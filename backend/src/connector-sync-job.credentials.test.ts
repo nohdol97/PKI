@@ -13,11 +13,15 @@ import { connectorCredentialName } from "./connector-credentials.ts";
 import { CONNECTOR_SYNC_KIND, recheckInstances, releaseOnReady } from "./connector-sync-job.ts";
 import { createConnectorManager, type ConnectorFactory } from "./connectors.ts";
 import type { JobRunner } from "./job-runner.ts";
+import { dirTemplate } from "@pki/testkit";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 let dir: string;
 let db: SqlDriver;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-sync-cred-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
 });
 afterEach(() => {

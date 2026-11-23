@@ -16,7 +16,7 @@ import {
   saveSourceRecord,
   type SqlDriver,
 } from "@pki/storage";
-import { FakeProvider, send } from "@pki/testkit";
+import { FakeProvider, send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +25,8 @@ import { bootBackend } from "./boot.ts";
 import { openCanonicalDb, productUserDecisions } from "./composition.ts";
 import { storePage } from "./page-store.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const TOKEN = "t".repeat(43);
 const AT = "2026-11-23T01:02:03.000Z";
@@ -114,6 +116,7 @@ describe("check.job: through the product runner", () => {
 describe("check.job: the receiver in the fixed list and the new-version fallback", () => {
   let db: SqlDriver;
   beforeEach(() => {
+    seedDataDir(dir);
     db = openCanonicalDb(dir);
     registerConnectorInstance(db, "inst", "test-fixtures");
   });

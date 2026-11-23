@@ -12,7 +12,7 @@ import {
   saveSourceRecord,
   type SqlDriver,
 } from "@pki/storage";
-import { FakeProvider, send } from "@pki/testkit";
+import { FakeProvider, send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,8 @@ import { bootBackend } from "./boot.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { storePage } from "./page-store.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const TOKEN = "t".repeat(43);
 let dir: string;
@@ -96,6 +98,7 @@ function store(db: SqlDriver, ...changes: object[]) {
 describe("profile.dataset: the page store registers the job of a new version", () => {
   let db: SqlDriver;
   beforeEach(() => {
+    seedDataDir(dir);
     db = openCanonicalDb(dir);
     registerConnectorInstance(db, "inst", "test-fixtures");
   });

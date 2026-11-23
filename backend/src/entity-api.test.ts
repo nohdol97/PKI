@@ -26,7 +26,7 @@ import {
   type UserDecisions,
 } from "@pki/storage";
 import { EmptyVectorIndex } from "@pki/storage/adapters";
-import { send } from "@pki/testkit";
+import { send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,6 +42,8 @@ import {
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
+
 const TOKEN = "s".repeat(43);
 const ORIGIN = "http://localhost:5173";
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
@@ -54,6 +56,7 @@ let valid: Record<string, string>;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-entity-api-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
   registerConnectorInstance(db, "c", "test-fixtures");
 });

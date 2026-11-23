@@ -6,7 +6,7 @@ import { routes, type ProviderCall } from "@pki/contracts";
 import { createClaudeCodeProvider, createCodexProvider } from "@pki/providers/adapters";
 import { writeSetting, type SqlDriver } from "@pki/storage";
 import { DEFAULT_PROVIDER_SETTING } from "@pki/providers";
-import { installFakeCli, send, type FakeCli } from "@pki/testkit";
+import { installFakeCli, send, type FakeCli, dirTemplate } from "@pki/testkit";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openCanonicalDb, productAdapters, productCalls, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 // every fake CLI run is a Node start: slow when the whole suite runs in parallel
 vi.setConfig({ testTimeout: 30_000 });
@@ -51,6 +53,7 @@ const connectionTest = () => post(routes.connectionTest.path, { acknowledgeUnver
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "pki-providers-api-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
   fake = installFakeCli({ auth: "logged-in" }, dir);
   await start(fake.bin);

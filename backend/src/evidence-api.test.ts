@@ -12,7 +12,7 @@ import {
   saveSourceRecord,
   type SqlDriver,
 } from "@pki/storage";
-import { send } from "@pki/testkit";
+import { send, dirTemplate } from "@pki/testkit";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +22,8 @@ import { openCanonicalDb, productAdapters, productEgress, productImporter } from
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
 import { seedV02 } from "./v02-seed.e2e.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const read = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8");
@@ -59,6 +61,7 @@ async function start(sets: readonly string[]) {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-evidence-api-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
 });
 afterEach(async () => {

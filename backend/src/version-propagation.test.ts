@@ -17,7 +17,7 @@ import {
   writeSetting,
   type SqlDriver,
 } from "@pki/storage";
-import { FakeProvider, fixtureExtraction } from "@pki/testkit";
+import { FakeProvider, fixtureExtraction, dirTemplate } from "@pki/testkit";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,6 +33,8 @@ import {
 import { releaseHeldOnEvent } from "./held-release.ts";
 import { syncConnector } from "./connectors.ts";
 import type { JobRunner } from "./job-runner.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const read = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8").trim();
@@ -87,6 +89,7 @@ let runner: JobRunner | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-propagation-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
 });
 afterEach(async () => {

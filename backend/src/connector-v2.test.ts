@@ -13,12 +13,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
 import { createConnectorManager, siteCheck, syncConnector } from "./connectors.ts";
+import { dirTemplate } from "@pki/testkit";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 let dir: string;
 let db: SqlDriver;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-connector-v2-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
 });
 

@@ -19,6 +19,9 @@ import type { Clock } from "./clock.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { BACKOFF_MAX_MS, type Period } from "./schedule.ts";
 import { createScheduler, OPEN_JOB_CAP, OPEN_JOB_WARN_RATIO, type Scheduler } from "./scheduler.ts";
+import { dirTemplate } from "@pki/testkit";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -49,6 +52,7 @@ function scheduler(options: Partial<Parameters<typeof createScheduler>[0]> = {})
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-scheduler-"));
+  seedDataDir(join(dir, "data"));
   db = reopen();
   wall = T0;
 });
