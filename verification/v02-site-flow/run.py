@@ -23,6 +23,9 @@ and this runner checks the preconditions, prepares the synthetic input, then cou
   analytical-scenario preflight|record   the analytical-semantic measurement of S03 (S34, see analytical_scenario.py): its own
               refusal ("배포처 후속", S03-H2) under the same two conditions; no `--phase` (with the profile OFF there is nothing to
               measure); `record` writes counts, no verdict
+  scopes-check --config --expected --out   the installed-build check of the instance scopes of I07 (S31, see scopes_check.py): its
+              own refusal ("배포처 후속", I07-H2 ②) outside the Windows installer; compares the canonical DB with the fork's scopes
+              file read-only, writes `scopes-check-result.json` (a verdict and four counts, no value, no id); needs no Provider
 
 Exit values: 0 ok/PASS, 1 FAIL or INCONCLUSIVE or a write refusal, 2 config error, 3 `배포처 후속` notice, 4 stale data.
 """
@@ -47,6 +50,7 @@ import analytical_scenario  # noqa: E402
 import delete_scenario  # noqa: E402
 import entity_scenario  # noqa: E402
 import queue_scenario  # noqa: E402
+import scopes_check  # noqa: E402
 import semantic_scenario  # noqa: E402
 import run_record as rr  # noqa: E402
 from common import results  # noqa: E402
@@ -78,6 +82,8 @@ NOTICE_ANALYTICAL_DOUBLE = ("배포처 후속: S34 test double Provider(또는 �
                             "실제 Provider(openai-compatible, claude-code, codex)를 설정하고 Windows 설치본에서 다시 실행한다(S03-H2, 이유: test-double).")
 NOTICE_ANALYTICAL_NOT_INSTALLER = ("배포처 후속: S34 Windows 설치본이 아닌 환경에서는 표 가져오기와 분석 의미 검사를 배포처 결과로 재지 않는다. "
                                    "R04의 설치 파일로 설치한 Windows 11에서 실제 Provider로 실행한다(S03-H2, 이유: {code}).")
+NOTICE_SCOPES_NOT_INSTALLER = ("배포처 후속: S31 Windows 설치본이 아닌 환경에서는 설치본의 인스턴스 범위 확인(scopes-check)을 배포처 결과로 기록하지 않는다. "
+                               "미구현, 배포처 후속: 포크의 빌드를 R04의 설치 파일로 설치한 Windows 11에서 실행한다(I07-H2 ②, 이유: {code}).")
 # the operator attests these; `launched-installed`: every start was the installed exe (the DB does not say which
 # binary wrote it, and dist\app or source runs use the same data folder)
 OBSERVATIONS = ("launched-installed", "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept")
@@ -252,6 +258,12 @@ def analytical_gate(cfg, platform=None, read_uninstall=None, is_file=None, in_gi
         raise Refusal(NOTICE_ANALYTICAL_DOUBLE, "test-double")
     return check_installer(cfg, platform or sys.platform, read_uninstall or read_uninstall_windows, is_file or os.path.isfile,
                            in_git_tree or _in_git_tree, notice=NOTICE_ANALYTICAL_NOT_INSTALLER)
+
+
+def scopes_gate(cfg, platform=None, read_uninstall=None, is_file=None, in_git_tree=None):
+    """The installer check of `scopes-check` (I07-H2 2): the same measured inputs, the S31 notice, no Provider."""
+    return check_installer(cfg, platform or sys.platform, read_uninstall or read_uninstall_windows, is_file or os.path.isfile,
+                           in_git_tree or _in_git_tree, notice=NOTICE_SCOPES_NOT_INSTALLER)
 
 
 # ---- prepare / record ------------------------------------------------------------------------------------------------
@@ -491,6 +503,27 @@ def run_analytical_scenario(args):
     return 0
 
 
+# ---- installed-build scopes check (I07-R12, S31) ---------------------------------------------------------------------------
+
+def run_scopes_check(args, installer_check=None, db_path=None):
+    """Refusal first, before the config is read. `installer_check` and `db_path` are for the tests only (main's keyword
+    arguments, no command-line switch reaches them), as for the queue scenarios."""
+    if installer_check is None and sys.platform != "win32":
+        raise Refusal(NOTICE_SCOPES_NOT_INSTALLER.format(code="not-windows"), "not-windows")
+    cfg = load_json_object(args.config)
+    if not (isinstance(cfg.get("productName"), str) and isinstance(cfg.get("installedExe"), str)):
+        raise ConfigError("config needs productName and installedExe strings")
+    app_version = (installer_check or scopes_gate)(cfg)
+    expected = scopes_check.load_expected(args.expected)
+    counts = scopes_check.compare(expected, scopes_check.read_stored(db_path or site_db_path()))
+    verdict = scopes_check.judge(counts)
+    scopes_check.write_result(scopes_check.build_record(app_version, counts, verdict), args.out)
+    print("I07-S31:scopes-check {} compared={compared} same={same} different={different} missing={missing} "
+          "(paste only {}; this proves the value reached the canonical DB, not that the Broker uses it)"
+          .format(verdict, scopes_check.RESULT_FILE, **counts))
+    return 0 if verdict == "PASS" else 1
+
+
 # ---- queue and scheduler recovery scenarios (I03-R25, S19) ------------------------------------------------------------
 
 def run_queue_scenario(args, installer_check=None, db_path=None):
@@ -570,6 +603,10 @@ def main(argv=None, installer_check=None, db_path=None):
     sp.add_argument("action", choices=("preflight", "record"))
     sp.add_argument("--config", required=True)
     sp.add_argument("--out")
+    sp = sub.add_parser("scopes-check")
+    sp.add_argument("--config", required=True)
+    sp.add_argument("--expected", required=True, help="the fork's scopes file (site/config/connector-scopes.json)")
+    sp.add_argument("--out", required=True)
     sp = sub.add_parser("queue-scenario")
     sp.add_argument("action", choices=("preflight", "prepare", "record"))
     sp.add_argument("--scenario", required=True, choices=queue_scenario.SCENARIOS)
@@ -616,6 +653,8 @@ def main(argv=None, installer_check=None, db_path=None):
             return run_entity_scenario(args)
         if args.command == "analytical-scenario":
             return run_analytical_scenario(args)
+        if args.command == "scopes-check":
+            return run_scopes_check(args, installer_check=installer_check, db_path=db_path)
         if args.command == "queue-scenario":
             return run_queue_scenario(args, installer_check=installer_check, db_path=db_path)
         cfg = load_config(args.config)

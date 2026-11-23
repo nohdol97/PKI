@@ -55,6 +55,9 @@ class ScopesCheckCase(unittest.TestCase):
         return path
 
     def check(self, expected_text, rows):
+        for stale in (self.db, os.path.join(self.out, RESULT)):
+            if os.path.exists(stale):
+                os.remove(stale)
         make_db(self.db, rows)
         expected = self.write("expected.json", expected_text)
         with open(self.db, "rb") as fh:
