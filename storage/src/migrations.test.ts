@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(25);
-    expect(migrations).toHaveLength(25);
+    expect(schemaVersion(db)).toBe(26);
+    expect(migrations).toHaveLength(26);
   });
 
   it("is idempotent when re-run", () => {
@@ -473,6 +473,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
     migrate(db);
     expect(tables().filter((t) => !t.startsWith("keyword_index_"))).toEqual([
       "analytical_checks",
+      "assertion_links",
       "connector_instances",
       "consents",
       "dataset_tables",
@@ -481,6 +482,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "facts",
       "identity_key",
       "insight_evidence",
+      "insight_link_inputs",
       "insight_user_inputs",
       "insights",
       "invalidations",
@@ -521,6 +523,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       ...attributes,
       ...registry,
       "context",
+      "valid_until",
     ]);
     expect(columns("relations")).toEqual([
       "id",
@@ -529,6 +532,7 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "object_id",
       ...attributes,
       ...registry,
+      "valid_until",
     ]);
     expect(columns("evidence")).toEqual([
       "id",
@@ -1388,7 +1392,7 @@ describe("schema v17 (I01-T03, I01-R17)", () => {
     migrate(db, migrations.slice(0, 16));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(25);
+    expect(schemaVersion(db)).toBe(26);
     expect(columns("connector_instances")).toEqual(
       expect.arrayContaining(["rescan_pending", "deletions_may_be_missed"]),
     );
@@ -1441,7 +1445,7 @@ describe("schema v18 (I04-T09, I04-R4, R11)", () => {
     migrate(db, migrations.slice(0, 17));
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('c', 'k')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(25);
+    expect(schemaVersion(db)).toBe(26);
     expect(columns("scope_policy_drops")).toEqual([
       "id",
       "source_id",
@@ -1474,7 +1478,7 @@ describe("schema v19 (I01-T06, I01-R15)", () => {
     migrate(db, migrations.slice(0, 18));
     db.run("INSERT INTO connector_instances (id, kind, cursor) VALUES ('c', 'k', 'x')");
     migrate(db);
-    expect(schemaVersion(db)).toBe(25);
+    expect(schemaVersion(db)).toBe(26);
     expect(columns("connector_instances")).toContain("configured_scope");
     expect(db.all("SELECT id, kind, cursor, configured_scope FROM connector_instances")).toEqual([
       { id: "c", kind: "k", cursor: "x", configured_scope: null },
@@ -1557,7 +1561,7 @@ describe("schema v20 (S01-T01, S01-R5, R6, R10, R14, R15)", () => {
   it("adds the columns to a v19 database with rows and changes none of their status or epistemic type", () => {
     seedV19();
     migrate(db);
-    expect(schemaVersion(db)).toBe(25);
+    expect(schemaVersion(db)).toBe(26);
     expect(db.all("SELECT name, status, epistemic, confidence, user_authored FROM items")).toEqual([
       { name: "A", status: "candidate", epistemic: "explicit", confidence: null, user_authored: 0 },
       { name: "B", status: "candidate", epistemic: "explicit", confidence: null, user_authored: 0 },
@@ -1880,7 +1884,7 @@ describe("schema v21 (S01-T06, S01-R18, R20, R22)", () => {
     seedV20();
     const before = revision();
     migrate(db);
-    expect(schemaVersion(db)).toBe(25);
+    expect(schemaVersion(db)).toBe(26);
     expect(revision()).toEqual(before); // the seed is not a knowledge change an upgrade should show
     expect(db.all("SELECT name, status, epistemic FROM items")).toEqual([
       { name: "A", status: "candidate", epistemic: "explicit" },
@@ -1992,7 +1996,7 @@ describe("schema v21 (S01-T06, S01-R18, R20, R22)", () => {
   it("refuses a database newer than the build instead of downgrading it", () => {
     migrate(db);
     expect(() => migrate(db, migrations.slice(0, 20))).toThrow(/newer than this build/);
-    expect(schemaVersion(db)).toBe(25);
+    expect(schemaVersion(db)).toBe(26);
   });
 
   it("takes an identifier name of 40 characters at most, a kind of the three, and an edition of 1 or more", () => {
@@ -2191,7 +2195,7 @@ describe("schema v22 (I02B-T02, I02B-R33)", () => {
     );
     const key = db.all("SELECT key FROM identity_key")[0]?.key;
     migrate(db);
-    expect(schemaVersion(db)).toBe(25);
+    expect(schemaVersion(db)).toBe(26);
     expect(tables().filter((t) => t.startsWith("local_"))).toEqual([
       "local_file_entries",
       "local_index_seq",
@@ -2212,5 +2216,62 @@ describe("schema v22 (I02B-T02, I02B-R33)", () => {
       "tombstones_local_index_update",
       "tombstones_update",
     ]);
+  });
+});
+
+describe("schema v26 (S02-T08, S02-R17, R18)", () => {
+  it("adds valid_until and the two assertion tables without touching stored rows", () => {
+    migrate(db, migrations.slice(0, 25));
+    const at = "2026-01-01T00:00:00Z";
+    for (const name of ["a", "b"]) {
+      db.run(
+        "INSERT INTO items (type, name, epistemic, status, observed_at) VALUES ('p', ?, 'explicit', 'candidate', ?)",
+        [name, at],
+      );
+    }
+    db.run(
+      `INSERT INTO facts (item_id, kind, value, epistemic, status, valid_at, observed_at)
+       VALUES (1, 'k', 'v1', 'explicit', 'candidate', '2026-02-01', ?), (1, 'k', 'v2', 'explicit', 'candidate', NULL, ?)`,
+      [at, at],
+    );
+    db.run(
+      `INSERT INTO relations (subject_id, type, object_id, epistemic, status, valid_at, observed_at)
+       VALUES (1, 'RELATED_TO', 2, 'explicit', 'candidate', '2026-03-01', ?)`,
+      [at],
+    );
+    db.run(
+      "INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary) VALUES ('r', 1, 2, 'inferred', 'active', 's')",
+    );
+    const before = db.all("SELECT * FROM facts ORDER BY id");
+    const relationBefore = db.all("SELECT * FROM relations");
+    migrate(db);
+    expect(schemaVersion(db)).toBe(26);
+    expect(db.all("SELECT valid_until FROM facts ORDER BY id")).toEqual([
+      { valid_until: null },
+      { valid_until: null },
+    ]);
+    expect(db.all("SELECT valid_until FROM relations")).toEqual([{ valid_until: null }]);
+    const strip = (rows: Record<string, unknown>[]) =>
+      rows.map(({ valid_until: _gone, ...rest }) => rest);
+    expect(strip(db.all("SELECT * FROM facts ORDER BY id"))).toEqual(strip(before));
+    expect(strip(db.all("SELECT * FROM relations"))).toEqual(strip(relationBefore));
+    expect(db.all("SELECT dropped_validity FROM jobs")).toEqual([]);
+    expect(db.all("SELECT count(*) AS n FROM assertion_links")).toEqual([{ n: 0 }]);
+    db.run(
+      `INSERT INTO assertion_links (type, from_fact_id, to_fact_id, created_by, at)
+       VALUES ('CONTRADICTS', 1, 2, 'rule', ?)`,
+      [at],
+    );
+    expect(() =>
+      db.run(
+        `INSERT INTO assertion_links (type, from_fact_id, to_fact_id, created_by, at)
+         VALUES ('CONTRADICTS', 2, 1, 'rule', ?)`,
+        [at],
+      ),
+    ).toThrow(/CHECK/);
+    db.run("INSERT INTO insight_link_inputs (insight_id, link_id) VALUES (1, 1)");
+    db.run("DELETE FROM facts WHERE id = 2");
+    expect(db.all("SELECT count(*) AS n FROM assertion_links")).toEqual([{ n: 0 }]);
+    expect(db.all("SELECT count(*) AS n FROM insight_link_inputs")).toEqual([{ n: 0 }]);
   });
 });
