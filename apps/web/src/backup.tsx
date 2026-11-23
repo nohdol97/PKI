@@ -11,7 +11,9 @@ import {
   BACKUP_FOLDER_REFUSAL_TEXT,
   BACKUP_REFUSAL_TEXT,
   BACKUP_WARNINGS,
+  PREVIOUS_COPY_TEXT,
   RESTORE_REFUSAL_TEXT,
+  failureNotice,
   restoreResultText,
 } from "./backup-text.ts";
 import type { PickerBridge } from "./local-locations.tsx";
@@ -148,10 +150,12 @@ export function BackupRestore({
 
   const cancelRestore = () =>
     run(async () => {
-      await api("cancelRestore");
-      setNotice("복원을 취소했습니다.");
+      const answer = await api("cancelRestore");
+      if (answer.status === "refused") setRefusal(PREVIOUS_COPY_TEXT);
+      else setNotice("복원을 취소했습니다.");
     });
 
+  const stuck = status ? failureNotice(status.failure, status.previousCopy) : null;
   const last = status?.last;
   const showLast = last && last.appliedAt !== resultShown;
   const dismissLast = () => {
@@ -174,12 +178,14 @@ export function BackupRestore({
           {restoreResultText(last)} <button onClick={dismissLast}>확인</button>
         </p>
       )}
-      {status?.failure && (
+      {stuck && (
         <p role="alert">
-          지난 복원은 시작하지 못해 이전 데이터로 되돌렸습니다(코드: {status.failure}).{" "}
-          <button disabled={busy} onClick={() => void cancelRestore()}>
-            알림 닫기
-          </button>
+          {stuck.text}{" "}
+          {stuck.closable && (
+            <button disabled={busy} onClick={() => void cancelRestore()}>
+              알림 닫기
+            </button>
+          )}
         </p>
       )}
 

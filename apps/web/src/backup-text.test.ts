@@ -7,6 +7,7 @@ import {
   BACKUP_REFUSAL_TEXT,
   BACKUP_WARNINGS,
   RESTORE_REFUSAL_TEXT,
+  failureNotice,
   restoreResultText,
 } from "./backup-text.ts";
 
@@ -40,4 +41,16 @@ it("reports what the restore did in its own numbers", () => {
   expect(text).toContain("폴더 2곳");
   expect(text).toContain("동의 1건");
   expect(text).toContain("임베딩");
+});
+
+it("H01F-C2: a previous-data copy is warned about and cannot be dismissed; a rolled-back start says so only for the codes that rolled back", () => {
+  const copy = failureNotice("restore-marker-unreadable", true);
+  expect(copy?.closable).toBe(false);
+  expect(copy?.text).toContain("이전 데이터 사본");
+  expect(copy?.text).not.toContain("이전 데이터로 되돌렸습니다");
+  expect(failureNotice(null, true)?.closable).toBe(false);
+  expect(failureNotice("start-failed", false)).toMatchObject({ closable: true });
+  expect(failureNotice("start-failed", false)?.text).toContain("이전 데이터로 되돌렸습니다");
+  expect(failureNotice("staged-missing", false)?.text).not.toContain("이전 데이터로 되돌렸습니다");
+  expect(failureNotice(null, false)).toBeNull();
 });

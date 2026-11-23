@@ -184,3 +184,17 @@ describe("a registration that stops the start has its own text (I05-R9)", () => 
     expect((error as Error).message).toBe("backend sent an unexpected message");
   });
 });
+
+describe("restore start failures reach the dialog (H01F-C1, R1)", () => {
+  it("accepts a restore reason from the backend and names the previous-data copy file, without telling the user to delete", async () => {
+    const error = await start({ type: "failed", reason: "restore-before-orphaned" }).catch(
+      (e: unknown) => e,
+    );
+    expect((error as Error).message).toBe("backend failed to start");
+    const text = startFailureText(error);
+    expect(text).not.toBe("앱을 시작하지 못했습니다.");
+    expect(text).toContain("pki.sqlite.before-restore");
+    expect(text).toContain("먼저 복사");
+    expect(text).not.toContain("지우");
+  });
+});

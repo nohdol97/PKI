@@ -61,3 +61,27 @@ export function restoreResultText(last: RestoreLast): string {
   }
   return parts.join(" ");
 }
+
+const ROLLED_BACK_CODES = ["start-failed", "swap-failed"];
+
+export const PREVIOUS_COPY_TEXT =
+  "이전 데이터 사본(pki.sqlite.before-restore)이 데이터 폴더에 남아 있고, 그 뒤에 지운 자료는 이 사본에 반영되지 않았습니다. 앱을 끄고 데이터 폴더를 먼저 복사한 뒤 파일을 삭제하지 말고 옮기세요. 이전 데이터로 돌아가려면 pki.sqlite를 밖으로 옮기고 사본의 이름을 pki.sqlite로 바꾼 뒤 restore 폴더를 밖으로 옮깁니다. 빈 데이터에서 다시 복원하려면 세 가지를 모두 밖으로 옮깁니다.";
+
+/**
+ * The notice a failed or stuck restore owes the user (H01F-R2): a copy of the previous data takes the recovery
+ * text and no close button; "rolled back" is said only of the codes that did roll back.
+ */
+export function failureNotice(
+  failure: string | null,
+  previousCopy: boolean,
+): { text: string; closable: boolean } | null {
+  const code = failure === null ? "" : `(코드: ${failure})`;
+  if (previousCopy) return { text: `${PREVIOUS_COPY_TEXT} ${code}`.trim(), closable: false };
+  if (failure === null) return null;
+  return {
+    text: ROLLED_BACK_CODES.includes(failure)
+      ? `지난 복원은 시작하지 못해 이전 데이터로 되돌렸습니다${code}.`
+      : `지난 복원이 끝나지 않았습니다${code}.`,
+    closable: true,
+  };
+}
