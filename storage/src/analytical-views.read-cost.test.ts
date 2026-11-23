@@ -2,7 +2,14 @@
 // linearly with the items, at a constant well below the pre-memo 348 per Dataset+Metric+Join triple.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
-import { dataset, fact, item, line, relation, storeVersion } from "./analytical-check-lines.test-support.ts";
+import {
+  dataset,
+  fact,
+  item,
+  line,
+  relation,
+  storeVersion,
+} from "./analytical-check-lines.test-support.ts";
 import { listAnalytical, type Visibility } from "./analytical-views.ts";
 import { addEvidence } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
@@ -20,7 +27,13 @@ afterEach(() => db.close());
 /** The shape of the bench world (tooling/poc/s03/analytical-read-latency.ts): `n` Dataset+Metric+Join triples. */
 function seed(n: number): void {
   const cite = (factId: number, versionId: number) =>
-    addEvidence(db, { target: { factId }, sourceVersionId: versionId, start: 0, end: 1, quote: "a" });
+    addEvidence(db, {
+      target: { factId },
+      sourceVersionId: versionId,
+      start: 0,
+      end: 1,
+      quote: "a",
+    });
   for (let i = 1; i <= n; i++) {
     const table = storeVersion(db, `ds-${i}`);
     const d = dataset(db, `ds-${i}`, table.sourceId);

@@ -308,7 +308,9 @@ describe("rework 1: visibility of paths, unmet, limit and group members", () => 
   });
 
   it("AR-C5: a visible member whose representative is hidden lists no members of its own", () => {
-    const [a, b, c] = ["m1", "m2", "m3"].map((n) => item(db, "Metric", n));
+    const a = item(db, "Metric", "m1");
+    const b = item(db, "Metric", "m2");
+    const c = item(db, "Metric", "m3");
     const at = "2026-11-23T00:00:00.000Z";
     db.transaction(() => userDecisions.entities.merge(db, a, b, at));
     db.transaction(() => userDecisions.entities.merge(db, a, c, at));

@@ -234,9 +234,7 @@ class Reader {
       evidenceCount: ids.length,
       checkNeeded: needed,
       checks,
-      unmet: needed
-        ? [...dataChecksUnmet(this.db, { kind: "fact", id: f.id }, this.shown)]
-        : [],
+      unmet: needed ? [...dataChecksUnmet(this.db, { kind: "fact", id: f.id }, this.shown)] : [],
       awaitingSourceIds: needed ? this.waitingSources(itemId) : [],
     };
   }
