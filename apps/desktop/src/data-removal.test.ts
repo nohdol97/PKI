@@ -1,0 +1,91 @@
+// H02A-C4: what the uninstall switch may delete (spec 2026-11-24-H02-common, R6-R9).
+// Real temp folders; the held lock is a second connection in this process.
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { lockDataDirectory } from "./data-lock.ts";
+import { removeUserData } from "./data-removal.ts";
+
+let root: string;
+let data: string;
+let beside: string;
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "pki-removal-"));
+  data = join(root, "PKI");
+  beside = join(root, "beside");
+  mkdirSync(data);
+  mkdirSync(beside);
+  writeFileSync(join(beside, "keep.txt"), "beside");
+});
+afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+const run = (choice: string | undefined, dir = data) => {
+  const disableAutostart = vi.fn();
+  const result = removeUserData({ choice, dir, lock: lockDataDirectory, disableAutostart });
+  return { result, disableAutostart };
+};
+const withDatabase = () => {
+  writeFileSync(join(data, "pki.sqlite"), "db");
+  mkdirSync(join(data, "sub"));
+  writeFileSync(join(data, "sub", "x"), "x");
+  symlinkSync(beside, join(data, "link"));
+};
+
+describe("removeUserData", () => {
+  it("H02A-C4: delete removes the data folder (a link is removed, not followed) and leaves its neighbours", () => {
+    withDatabase();
+    const { result, disableAutostart } = run("delete");
+    expect(result.code).toBe(0);
+    expect(existsSync(data)).toBe(false);
+    expect(readFileSync(join(beside, "keep.txt"), "utf8")).toBe("beside");
+    expect(disableAutostart).toHaveBeenCalledTimes(1);
+  });
+
+  it("H02A-C4: keep leaves every byte and still switches autostart off", () => {
+    withDatabase();
+    const { result, disableAutostart } = run("keep");
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(data, "pki.sqlite"), "utf8")).toBe("db");
+    expect(disableAutostart).toHaveBeenCalledTimes(1);
+  });
+
+  it("H02A-C4: a missing data folder is success and nothing is created", () => {
+    const missing = join(root, "none");
+    expect(run("delete", missing).result.code).toBe(0);
+    expect(existsSync(missing)).toBe(false);
+  });
+
+  it("H02A-C4: a folder another PKI holds is not touched, code 1", () => {
+    withDatabase();
+    const held = lockDataDirectory(data);
+    try {
+      const { result, disableAutostart } = run("delete");
+      expect(result.code).toBe(1);
+      expect(result.line).toMatch(/\S/);
+      expect(readFileSync(join(data, "pki.sqlite"), "utf8")).toBe("db");
+      expect(disableAutostart).toHaveBeenCalledTimes(1);
+    } finally {
+      held?.close();
+    }
+  });
+
+  it("H02A-C4: a folder without pki.sqlite or instance.lock is not touched, code 1", () => {
+    writeFileSync(join(data, "report.docx"), "mine");
+    const { result } = run("delete");
+    expect(result.code).toBe(1);
+    expect(readFileSync(join(data, "report.docx"), "utf8")).toBe("mine");
+    expect(existsSync(join(data, "instance.lock"))).toBe(false);
+  });
+
+  it("H02A-C4: a value other than keep or delete deletes nothing, code 1, autostart untouched", () => {
+    withDatabase();
+    for (const choice of ["DELETE", "yes", "", undefined]) {
+      const { result, disableAutostart } = run(choice);
+      expect(result.code, String(choice)).toBe(1);
+      expect(disableAutostart).not.toHaveBeenCalled();
+    }
+    expect(readFileSync(join(data, "pki.sqlite"), "utf8")).toBe("db");
+  });
+});
