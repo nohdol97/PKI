@@ -2,6 +2,12 @@
 // both import these; TypeScript types come from z.infer, JSON Schema from z.toJSONSchema.
 import { z } from "zod";
 import type { EmbeddingEgress } from "./embedding.ts";
+import {
+  AnalyticalCheckRequestSchema,
+  AnalyticalCheckResponseSchema,
+  AnalyticalListSchema,
+  SemanticPiecesSchema,
+} from "./analytical-types.ts";
 import { NativeLocatorSchema } from "./connector.ts";
 import {
   ImportJsonlRequestSchema,
@@ -20,6 +26,7 @@ import {
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
+export * from "./analytical-types.ts";
 export type * from "./embedding.ts";
 export type * from "./knowledge-engine.ts";
 export type * from "./vector-index.ts";
@@ -888,7 +895,8 @@ export const SemanticUserEntrySchema = z.discriminatedUnion("kind", [
     kind: z.literal("fact"),
     itemId: SemanticIdSchema,
     factKind: SemanticIdentifierSchema,
-    value: SemanticTextSchema,
+    /** Text, or the pieces of a value of several (S03-R3). */
+    value: z.union([SemanticTextSchema, SemanticPiecesSchema]),
   }),
   z.strictObject({
     kind: z.literal("relation"),
@@ -905,7 +913,7 @@ export const SemanticCorrectRequestSchema = z.strictObject({
     z.strictObject({
       action: z.literal("replace"),
       id: SemanticIdSchema,
-      value: SemanticTextSchema,
+      value: z.union([SemanticTextSchema, SemanticPiecesSchema]),
     }),
   ]),
 });
@@ -1679,6 +1687,13 @@ export const routes = {
     path: "/api/settings/analytical",
     request: AnalyticalSettingsSchema,
     response: AnalyticalSettingsSchema,
+  },
+  analytical: { method: "GET", path: "/api/analytical", response: AnalyticalListSchema },
+  analyticalCheck: {
+    method: "POST",
+    path: "/api/analytical/check",
+    request: AnalyticalCheckRequestSchema,
+    response: AnalyticalCheckResponseSchema,
   },
   localLocations: {
     method: "GET",

@@ -57,7 +57,7 @@ function visibleTableSources(db: SqlDriver, shown: AnalyticalVisibility["shown"]
         `SELECT id, object_id FROM relations WHERE subject_id = ? AND type IN (SELECT value FROM json_each(?)) AND ${LIVE}`,
         [subject, JSON.stringify(types)],
       )
-      .filter((r) => shown("relation", String(r.id)))
+      .filter((r) => shown("relation", String(r.id)) && shown("item", String(r.object_id)))
       .map((r) => r.object_id as number);
   const datasets = new Set<number>([
     itemId,

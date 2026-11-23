@@ -8,7 +8,7 @@ import { otherValidValues } from "./assertion-links.ts";
 import { dataChecksUnmet, needsDataChecks, type DataCheckUnmet } from "./analytical-gate.ts";
 import { listCheckLines, waitingRelations, type CheckName } from "./analytical-check-lines.ts";
 import { entityGroups } from "./entity-groups.ts";
-import { listEvidence } from "./knowledge.ts";
+import { listEvidence, type EpistemicType, type KnowledgeStatus } from "./knowledge.ts";
 import { isUserDecided } from "./semantic-lifecycle.ts";
 import {
   listSemanticFacts,
@@ -80,8 +80,8 @@ export interface ColumnMatchView {
 interface ItemBase {
   itemId: number;
   name: string;
-  status: string;
-  epistemic: string;
+  status: KnowledgeStatus;
+  epistemic: EpistemicType;
   userDecided: boolean;
   userAuthored: boolean;
   conflicts: ConflictView[];
@@ -103,7 +103,7 @@ export interface MetricView extends ItemBase {
   versions: FactRowView[];
   relations: RelationRowView[];
 }
-export interface DatasetView extends ItemBase {
+interface DatasetBody extends ItemBase {
   tables: TableView[];
   columns: FactRowView[];
   roles: FactRowView[];
@@ -113,7 +113,13 @@ export interface DatasetView extends ItemBase {
   timeDimensions: FactRowView[];
   groupTableItemIds: number[];
   representativeLacksTable: boolean;
-  members: DatasetView[];
+}
+/** A member of a group: listed under its representative, with no members of its own. */
+export interface DatasetMemberView extends DatasetBody {
+  members: never[];
+}
+export interface DatasetView extends DatasetBody {
+  members: DatasetMemberView[];
 }
 export interface JoinView extends ItemBase {
   left: { itemId: number; name: string }[];
@@ -369,8 +375,8 @@ function base(r: Reader, id: number, name: string, type: string): ItemBase | und
   return {
     itemId: id,
     name,
-    status: row.status as string,
-    epistemic: row.epistemic as string,
+    status: row.status as KnowledgeStatus,
+    epistemic: row.epistemic as EpistemicType,
     userDecided: isUserDecided(r.db, { kind: "item", id }),
     userAuthored: row.user_authored === 1,
     conflicts: r.conflicts(id, type),
@@ -481,7 +487,7 @@ export function listMetricViews(
   return itemIds(r, "Metric", limit).ids.flatMap((id) => metricView(r, id) ?? []);
 }
 
-function datasetView(r: Reader, id: number, withMembers: boolean): DatasetView | undefined {
+function datasetBody(r: Reader, id: number): DatasetBody | undefined {
   const name = r.name(id);
   if (name === undefined) return undefined;
   const head = base(r, id, name, "Dataset");
@@ -499,13 +505,22 @@ function datasetView(r: Reader, id: number, withMembers: boolean): DatasetView |
     timeDimensions: ofKind(facts, "dataset.time_dimension"),
     groupTableItemIds: ref.groupTableItemIds,
     representativeLacksTable: ref.representativeLacksTable,
-    members: withMembers
-      ? entityGroups
-          .membersOf(r.db, id)
-          .filter((m) => m !== id)
-          .flatMap((m) => datasetView(r, m, false) ?? [])
-      : [],
   };
+}
+
+function datasetView(r: Reader, id: number, withMembers: boolean): DatasetView | undefined {
+  const body = datasetBody(r, id);
+  if (!body) return undefined;
+  const members = withMembers
+    ? entityGroups
+        .membersOf(r.db, id)
+        .filter((m) => m !== id)
+        .flatMap((m) => {
+          const member = datasetBody(r, m);
+          return member ? [{ ...member, members: [] as never[] }] : [];
+        })
+    : [];
+  return { ...body, members };
 }
 
 function joinView(r: Reader, id: number): JoinView | undefined {

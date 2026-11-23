@@ -107,4 +107,20 @@ describe("analytical.api (handlers)", () => {
     expect(hidden.check({ itemId: metric })).toEqual({ jobIds: [] });
     expect(api().check({ itemId: metric })).toEqual({ jobIds: [expect.any(Number)] });
   });
+
+  it("D1: a path through a hidden intermediate Dataset or Join queues nothing", () => {
+    const t = table("orders");
+    const metric = insertItem(db, { type: "Metric", name: "m", ...attrs });
+    saveRelation(db, { subjectId: metric, type: "MEASURED_ON", objectId: t.item, ...attrs });
+    const join = insertItem(db, { type: "Join", name: "j", ...attrs });
+    const other = table("customers");
+    saveRelation(db, { subjectId: metric, type: "USES_JOIN", objectId: join, ...attrs });
+    saveRelation(db, { subjectId: join, type: "JOIN_RIGHT", objectId: other.item, ...attrs });
+    const hideDataset = api((k, id) => !(k === "item" && id === String(t.item)));
+    expect(hideDataset.check({ itemId: metric })).toEqual({ jobIds: [expect.any(Number)] });
+    const hideJoin = api(
+      (k, id) => !(k === "item" && (id === String(join) || id === String(t.item))),
+    );
+    expect(hideJoin.check({ itemId: metric })).toEqual({ jobIds: [] });
+  });
 });

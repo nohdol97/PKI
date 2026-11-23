@@ -6,7 +6,7 @@ import {
   AnalyticalCheckResponseSchema,
   AnalyticalListSchema,
   ANALYTICAL_UNMET,
-  SemanticPiecesValueSchema,
+  SemanticPiecesSchema,
 } from "./analytical-types.ts";
 import { DATA_CHECK_UNMET } from "./index.ts";
 
@@ -78,10 +78,9 @@ describe("analytical.api (contract)", () => {
 
   it("C3: the unmet names equal the refusal's list; pieces of a calculation or a column set parse, a number does not", () => {
     expect([...ANALYTICAL_UNMET]).toEqual([...DATA_CHECK_UNMET]);
-    expect(SemanticPiecesValueSchema.safeParse({ aggregation: "sum", column: "a" }).success).toBe(
-      true,
-    );
-    expect(SemanticPiecesValueSchema.safeParse(["a", "b"]).success).toBe(true);
-    expect(SemanticPiecesValueSchema.safeParse(7).success).toBe(false);
+    expect(SemanticPiecesSchema.safeParse({ aggregation: "sum", column: "a" }).success).toBe(true);
+    expect(SemanticPiecesSchema.safeParse(["a", "b"]).success).toBe(true);
+    expect(SemanticPiecesSchema.safeParse(7).success).toBe(false);
+    expect(SemanticPiecesSchema.safeParse("text").success).toBe(false);
   });
 });

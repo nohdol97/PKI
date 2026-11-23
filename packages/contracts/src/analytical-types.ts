@@ -154,10 +154,9 @@ export const AnalyticalCheckResponseSchema = z.strictObject({ jobIds: z.array(Id
 /**
  * A value of a kind of several pieces, as the pieces: a column set or key pairs as a list, a calculation as an
  * object. The server normalises it by the kind's value type (S03-R3) and stores the canonical text; a value that
- * is not one of the type is `bad-request`. A plain text stays accepted as before.
+ * is not one of the type is `bad-request`. A plain text is the older form and stays in the request schemas.
  */
-export const SemanticPiecesValueSchema = z.union([
-  z.string(),
+export const SemanticPiecesSchema = z.union([
   z.array(z.unknown()).max(50),
   z.record(z.string(), z.unknown()),
 ]);
