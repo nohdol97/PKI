@@ -26,6 +26,7 @@ const KIND: Readonly<Record<string, string>> = {
   "wiki-summary": "위키 요약",
   "insight-interpret": "Insight 해석",
   reflect: "재검토",
+  "reflection-refine": "점검 의견",
 };
 export const kindText = (kind: string): string => KIND[kind] ?? kind;
 
