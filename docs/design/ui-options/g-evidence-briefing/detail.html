@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>결제 모듈 이관 일정 · 한 건 상세 · PKI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="detail.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">PKI</div>
+    <nav class="nav" aria-label="주 메뉴">
+      <a href="home.html" aria-current="page">오늘의 브리핑</a>
+      <a href="followups.html">후속 목록 <span class="count">3</span></a>
+      <a href="ask.html">질문</a>
+      <a href="sources.html">설정</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="checked"><span class="dot"></span><span><strong>08:30 기준</strong> · 메일·메신저·Wiki 확인함 · 이 PC에서만 처리</span></div>
+    <button class="textsize" type="button">글자 크기 가 ▾</button>
+  </header>
+  <main class="page">
+    <div class="wrap">
+      <div class="crumb">
+        <a class="back" href="home.html">← 오늘의 브리핑</a>
+        <span class="pos">1 / 1 · 결정 필요</span>
+      </div>
+      <div class="kind"><span class="tag attn">결정 필요</span><span>참고용이 아니라 조치가 필요한 사안입니다.</span></div>
+      <h1>‘결제 모듈 이관’ 마감(12/5)이 선행 작업 ‘인증 서버 교체’ 완료 예정(12/9)보다 4일 빠릅니다</h1>
+
+      <div class="body">
+        <section class="report" aria-label="보고">
+          <div class="sec">
+            <h2 class="label">현황</h2>
+            <ul class="status">
+              <li>‘결제 모듈 이관’ 마감: 12월 5일 (11월 18일 확정)</li>
+              <li>선행 작업 ‘인증 서버 교체’ 완료 예정: 12월 9일쯤 (11월 20일 언급)</li>
+            </ul>
+          </div>
+
+          <div class="sec">
+            <h2 class="label">문제점</h2>
+            <div class="chain">
+              <p class="chain-title">원문 → 추출된 사실 → 계산</p>
+
+              <div class="step">
+                <div class="step-name"><b>1</b> 원문</div>
+                <div class="quotes">
+                  <figure class="quote">
+                    <p>결제 모듈 이관은 <mark>12월 5일까지 완료</mark>하는 것으로 확정합니다.</p>
+                    <figcaption class="src"><b>김서연</b><span>메일 · “[결제] 이관 일정 확정”</span><span>11월 18일</span></figcaption>
+                  </figure>
+                  <figure class="quote">
+                    <p class="ctx">최유나: “검증 환경은 언제부터 쓸 수 있어요?”</p>
+                    <p>인증 서버 교체는 <mark>12월 9일쯤 끝날 것</mark> 같습니다. 그 전에는 결제 쪽 검증 환경을 못 띄워요.</p>
+                    <p class="ctx">김서연: “알겠습니다. 일정 영향은 제가 정리해 볼게요.”</p>
+                    <figcaption class="src"><b>이하준</b><span>메신저 · #infra-migration</span><span>11월 20일</span></figcaption>
+                  </figure>
+                </div>
+              </div>
+
+              <div class="arrow" aria-hidden="true">↓</div>
+
+              <div class="step">
+                <div class="step-name"><b>2</b> 추출된 사실</div>
+                <ul class="facts">
+                  <li><span class="fact">마감 12월 5일</span><span class="how">명시됨</span><button class="fix" type="button">고치기</button></li>
+                  <li><span class="fact">완료 예정 12월 9일쯤</span><span class="how">명시됨</span><button class="fix" type="button">고치기</button></li>
+                  <li class="link"><span class="fact">선후 관계: 인증 서버 교체 → 결제 모듈 이관</span><span class="how">추론됨</span>
+                    <span class="why">Wiki “결제 모듈 이관 계획” v7 · 박도윤 · 11월 19일 — “선행 조건: <mark>인증 서버 교체 완료</mark>”</span></li>
+                </ul>
+              </div>
+
+              <div class="arrow" aria-hidden="true">↓</div>
+
+              <div class="step">
+                <div class="step-name"><b>3</b> 계산</div>
+                <p class="calc"><span class="fact">12월 9일 − 12월 5일 = 4일</span><span class="how calc">계산</span><span class="note">날짜 비교는 규칙으로 계산했습니다.</span></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <h2 class="label">틀릴 수 있는 경우</h2>
+            <div>
+              <p>이하준의 ‘12월 9일쯤’은 추정 표현입니다. 11월 20일 이후 일정이 다시 정해졌다면 이 화면에 반영되지 않았을 수 있습니다.</p>
+              <p>두 진술이 같은 ‘결제 모듈 이관’을 가리키는지는 문서 제목과 대화방 이름으로 판단했습니다.</p>
+            </div>
+          </div>
+
+          <div class="sec">
+            <h2 class="label">권고 조치</h2>
+            <p>담당자 확인이 먼저 필요합니다. 일정 조정 여부는 12월 1일(월) 주간 사업 점검 회의에서 정할 수 있습니다.</p>
+          </div>
+        </section>
+
+        <aside class="card actions" aria-label="다음 조치">
+          <h2 class="a-head">다음 조치</h2>
+          <button class="btn primary full" type="button">박도윤에게 확인 요청</button>
+          <div class="preview">
+            <p class="p-title">보낼 내용</p>
+            <p>결제 모듈 이관 마감(12/5)과 인증 서버 교체 완료 예정(12/9쯤)이 4일 어긋나 보입니다. 확인 부탁드립니다.</p>
+            <p class="pq">“결제 모듈 이관은 <mark>12월 5일까지 완료</mark>하는 것으로 확정합니다.” — 김서연 · 메일 · 11월 18일</p>
+            <p class="pq">“인증 서버 교체는 <mark>12월 9일쯤 끝날 것</mark> 같습니다.” — 이하준 · 메신저 · 11월 20일</p>
+            <p class="p-note">보내기 전에 한 번 더 확인합니다.</p>
+          </div>
+          <div class="alts">
+            <button class="btn full" type="button">12/1 회의 안건에 추가</button>
+            <button class="btn full" type="button">참모에게 조사 맡기기</button>
+            <button class="btn quiet" type="button">지켜보기</button>
+          </div>
+          <div class="dismiss">
+            <p class="d-head">치우기 <span class="meta">이유를 고르면 바로 치워집니다</span></p>
+            <ul class="menu" aria-label="치우는 이유">
+              <li><button type="button">충돌 아님</button></li>
+              <li><button type="button">이미 처리됨</button></li>
+              <li><button type="button">날짜가 틀림 <span>(원문을 열어 고칩니다)</span></button></li>
+              <li><button type="button">나중에 <span>— 내일 아침 다시 보기</span></button></li>
+            </ul>
+          </div>
+          <p class="foot meta">독립 출처 3건 · 11월 20일 이후 같은 주제의 더 늦은 메시지 없음<br><a href="#">한 장으로 내보내기 · 인쇄</a></p>
+        </aside>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

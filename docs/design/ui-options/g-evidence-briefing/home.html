@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>오늘의 브리핑</title>
+<link rel="stylesheet" href="base.css"><link rel="stylesheet" href="home.css"></head><body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">PKI</div>
+    <nav class="nav" aria-label="주 메뉴">
+      <a href="home.html" aria-current="page">오늘의 브리핑</a>
+      <a href="followups.html">후속 목록 <span class="count">3</span></a>
+      <a href="ask.html">질문</a>
+      <a href="sources.html">설정</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="checked"><span class="dot"></span><span><strong>08:30 기준</strong> · 메일·메신저·Wiki 확인함 · 이 PC에서만 처리</span></div>
+    <button class="textsize" type="button">글자 크기 가 ▾</button>
+  </header>
+  <main class="page"><div class="wrap">
+    <div class="head"><h1>11월 24일 화요일 브리핑</h1><p>확인·결정이 필요한 사안 1건, 지켜보는 사안 4건입니다.</p></div>
+    <section class="left" aria-labelledby="l1">
+      <h2 class="lane" id="l1">확인·결정 필요</h2>
+      <article class="card item">
+        <div class="toprow"><span class="tag attn">결정 필요</span><span class="next">다음 관련 일정 · 12월 1일(월) 주간 사업 점검 회의</span></div>
+        <h3>‘결제 모듈 이관’ 마감(12/5)이 선행 작업 ‘인증 서버 교체’ 완료 예정(12/9)보다 4일 빠릅니다</h3>
+        <div class="pair">
+          <div class="stmt"><div class="label">마감</div><div class="val"><strong>12월 5일</strong><span class="how">명시됨</span></div>
+            <blockquote class="quote"><p>결제 모듈 이관은 <mark>12월 5일까지 완료</mark>하는 것으로 확정합니다.</p><div class="src"><span>메일 · “[결제] 이관 일정 확정”</span><span><b>김서연</b> · 11월 18일</span></div></blockquote></div>
+          <div class="stmt"><div class="label">선행 작업 완료 예정</div><div class="val"><strong>12월 9일쯤</strong><span class="how">명시됨</span></div>
+            <blockquote class="quote"><p>인증 서버 교체는 <mark>12월 9일쯤 끝날 것</mark> 같습니다. 그 전에는 결제 쪽 검증 환경을 못 띄워요.</p><div class="src"><span>메신저 · #infra-migration</span><span><b>이하준</b> · 11월 20일</span></div></blockquote></div>
+        </div>
+        <div class="calc-row">
+          <div><span class="label">두 작업의 선후 관계</span> <span class="how">추론됨</span> <span class="wiki">Wiki “결제 모듈 이관 계획” v7 · 박도윤 · 11월 19일 — “선행 조건: <mark>인증 서버 교체 완료</mark>”</span></div>
+          <div><span class="label">차이 4일</span> <span class="how calc">계산</span> <span class="wiki">12월 9일 − 12월 5일</span></div>
+        </div>
+        <p class="indep">독립 출처 3건 · 11월 20일 이후 같은 주제의 더 늦은 메시지 없음</p>
+        <div class="wrong"><div class="label">틀릴 수 있는 경우</div><p>이하준의 ‘12월 9일쯤’은 추정 표현입니다. 11월 20일 이후 일정이 다시 정해졌다면 이 화면에 반영되지 않았을 수 있습니다.</p></div>
+        <div class="actions"><button class="btn primary" type="button">박도윤에게 확인 요청</button><button class="btn" type="button">12/1 회의 안건에 추가</button><button class="btn" type="button">지켜보기</button><span class="grow"></span><button class="btn quiet" type="button">치우기 ▾</button><a class="more" href="detail.html">자세히 보기 →</a></div>
+      </article>
+      <form class="ask" aria-label="브리핑에 대해 묻기">
+        <div class="ask-row"><input type="text" placeholder="이 브리핑에 대해 묻기…" aria-label="질문 입력"><button class="btn primary" type="button">묻기</button></div>
+        <div class="sugg"><button class="btn small" type="button">한 줄 결론은?</button><button class="btn small" type="button">근거가 된 원문은?</button><button class="btn small" type="button">다음에 할 일은?</button></div>
+      </form>
+    </section>
+    <aside class="right">
+      <section aria-labelledby="l2"><h2 class="lane" id="l2">지켜보는 사안 4건</h2>
+        <ul class="watch">
+          <li><span class="tag warn">주의</span><div><p>배포 일자가 문서마다 다릅니다 — Wiki 12월 12일, 메신저 공지 12월 15일</p><p class="chg">어제 새로 발견</p></div></li>
+          <li><span class="tag warn">주의</span><div><p>‘정산 배치’ 담당자가 박도윤에서 이하준으로 바뀌었습니다</p><p class="chg">어제 변경</p></div></li>
+          <li><span class="tag none">정보 부족</span><div><p>QA 일정에 회귀 시험 기간이 보이지 않습니다 — 근거 1건뿐</p><p class="chg">11월 21일부터 변동 없음</p></div></li>
+          <li><span class="tag none">정보 부족</span><div><p>‘스테이징 DB 접근 권한’ 문의가 세 번 반복됐습니다</p><p class="chg">11월 20일부터 변동 없음</p></div></li>
+        </ul></section>
+      <section aria-labelledby="l3"><div class="lanehead"><h2 class="lane" id="l3">후속 목록 3건</h2><a class="more" href="followups.html">모두 보기 →</a></div>
+        <ul class="fu">
+          <li><strong>배포 일자 확정</strong><span>김서연에게 확인 요청함 · 어제 · 답 대기</span></li>
+          <li><strong>정산 배치 인수인계 범위</strong><span>12/1 회의 안건에 추가됨</span></li>
+          <li><strong>스테이징 DB 권한 절차</strong><span>참모(비서실 정민재)에게 조사 맡김 · 11월 21일</span></li>
+        </ul></section>
+    </aside>
+  </div></main>
+</div></body></html>

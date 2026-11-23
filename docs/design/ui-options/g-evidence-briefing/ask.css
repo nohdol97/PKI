@@ -1,0 +1,28 @@
+.wrap { width: 100%; max-width: 1360px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; gap: 14px; }
+.head h1 { font-size: var(--fs-h1); line-height: 1.3; font-weight: 700; }
+.basis { font-size: var(--fs-sub); color: var(--ink-2); margin-top: 4px; line-height: 1.4; }
+.rows { flex: none; }
+.colhead, .row { display: grid; grid-template-columns: 46fr 54fr; }
+.colhead { padding: 8px 24px; background: var(--surface-quiet); border-bottom: 1px solid var(--line-strong); border-radius: var(--radius) var(--radius) 0 0; }
+.colhead .label:last-child { padding-left: 24px; }
+.row { border-top: 1px solid var(--line); }
+.colhead + .row { border-top: 0; }
+.claim { padding: 16px 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.claim p { font-size: var(--fs-lead); font-weight: 600; line-height: 1.45; max-width: 40em; }
+.ev { padding: 16px 24px; border-left: 1px solid var(--line); display: flex; align-items: center; }
+.ev > * { width: 100%; }
+.quote p { line-height: 1.5; }
+.quote p.ctx { font-size: var(--fs-sub); color: var(--ink-2); line-height: 1.4; }
+.quote .src { margin-top: 4px; }
+.quote .src a { margin-left: auto; font-weight: 600; }
+.computed { font-size: var(--fs-body); color: var(--ink); border-left: 4px dashed var(--line-strong); padding-left: 16px; }
+.empty { border: 2px dashed var(--warn); border-radius: 8px; padding: 10px 16px; color: var(--warn); background: var(--warn-bg); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.empty p { font-weight: 600; line-height: 1.45; }
+.btn.small { min-height: 36px; padding: 0 14px; font-size: var(--fs-sub); flex: none; color: var(--ink); }
+.actions { display: flex; justify-content: space-between; gap: 16px; }
+.actions .group { display: flex; gap: 10px; }
+.askbar { display: flex; gap: 10px; margin-top: auto; }
+.askbar input { flex: 1; height: var(--target); padding: 0 16px; font: inherit; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); }
+.prev { display: flex; align-items: baseline; gap: 20px; font-size: var(--fs-sub); }
+.prev ul { display: flex; gap: 28px; }
+.prev a { color: var(--ink-2); }

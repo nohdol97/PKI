@@ -1,0 +1,109 @@
+/* G: evidence-first executive briefing — shared tokens and app shell.
+   Every page links base.css first, then its own page stylesheet. No inline styles anywhere. */
+@font-face {
+  font-family: "Pretendard Variable";
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: block;
+  src: url("fonts/PretendardVariable.woff2") format("woff2-variations");
+}
+:root {
+  /* type: KRDS body 17px, line-height >= 1.5; only weights 400/600/700 */
+  --font: "Pretendard Variable", "Malgun Gothic", sans-serif;
+  --fs-meta: 13px;   /* not-required-reading meta only */
+  --fs-sub: 15px;
+  --fs-body: 17px;
+  --fs-lead: 19px;
+  --fs-h2: 22px;
+  --fs-h1: 28px;
+  --lh: 1.6;
+  /* colour: calm neutrals; saturation only where attention is needed. Body text >= 7:1 on its surface. */
+  --bg: #F6F5F2;
+  --surface: #FFFFFF;
+  --surface-quiet: #FBFAF8;
+  --ink: #1B1F24;        /* ~16:1 on white */
+  --ink-2: #454B54;      /* ~8.8:1 on white */
+  --ink-meta: #5A616B;   /* ~6.2:1, meta only */
+  --line: #DAD7D0;
+  --line-strong: #B9B5AC;
+  --accent: #1E3A5F;     /* primary action, selection */
+  --accent-quiet: #E9EEF4;
+  --attn: #8F2F1F;       /* needs attention now, text-safe */
+  --attn-bg: #FBEDE9;
+  --warn: #7A5200;       /* watch */
+  --warn-bg: #FBF3DD;
+  --ok: #2B5B45;
+  --none: #6B7079;       /* no current information */
+  --mark: #FBEFC2;       /* quoted key phrase */
+  --radius: 10px;
+  --target: 44px;        /* primary controls; minimum control height elsewhere 32px */
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--font); font-size: var(--fs-body); line-height: var(--lh);
+  color: var(--ink); background: var(--bg);
+  word-break: keep-all; overflow-wrap: anywhere; letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p, ul, ol, blockquote, figure { margin: 0; padding: 0; }
+ul, ol { list-style: none; }
+a { color: var(--accent); text-underline-offset: 3px; }
+button { font: inherit; color: inherit; cursor: pointer; }
+mark { background: var(--mark); color: inherit; padding: 1px 2px; border-radius: 3px; font-weight: 600; }
+
+/* app shell: four top-level destinations, text labels, no hover-only controls */
+.shell { display: grid; grid-template-rows: 60px 1fr; height: 100vh; }
+.topbar {
+  display: flex; align-items: center; gap: 32px; padding: 0 40px;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 700; font-size: 20px; letter-spacing: 0.04em; color: var(--accent); }
+.nav { display: flex; gap: 4px; height: 100%; }
+.nav a {
+  display: flex; align-items: center; gap: 8px; padding: 0 18px; height: 100%;
+  color: var(--ink-2); text-decoration: none; font-weight: 600; border-bottom: 3px solid transparent;
+}
+.nav a[aria-current="page"] { color: var(--accent); border-bottom-color: var(--accent); }
+.nav .count {
+  min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: var(--accent-quiet);
+  color: var(--accent); font-size: var(--fs-meta); font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+}
+.topbar .spacer { flex: 1; }
+/* always-visible provenance line: when and which sources were checked, and where data stays */
+.checked { font-size: var(--fs-sub); color: var(--ink-2); display: flex; align-items: center; gap: 10px; }
+.checked .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); flex: none; }
+.checked .dot.fail { background: var(--attn); }
+.checked strong { font-weight: 600; color: var(--ink); }
+.textsize {
+  height: 36px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+  font-size: var(--fs-sub); color: var(--ink-2);
+}
+.page { overflow: hidden; padding: 28px 40px 32px; }
+
+/* shared pieces */
+.btn {
+  min-height: var(--target); padding: 0 20px; border-radius: 8px; border: 1px solid var(--line-strong);
+  background: var(--surface); font-weight: 600; font-size: var(--fs-body); display: inline-flex; align-items: center; gap: 8px;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+.tag {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px;
+  font-size: var(--fs-meta); font-weight: 700; border: 1px solid transparent;
+}
+.tag.attn { color: var(--attn); background: var(--attn-bg); border-color: #E9C4BB; }
+.tag.warn { color: var(--warn); background: var(--warn-bg); border-color: #E6D29B; }
+.tag.none { color: var(--none); background: #EFEEEB; border-color: var(--line); }
+.tag.plain { color: var(--ink-2); background: var(--surface-quiet); border-color: var(--line); font-weight: 600; }
+/* how a fact was obtained: stated in a source / assembled by the model / computed by a rule */
+.how { font-size: var(--fs-meta); font-weight: 700; padding: 1px 8px; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--ink-2); background: var(--surface); white-space: nowrap; }
+.how.calc { border-style: dashed; }
+/* a quote is content, not a footnote: text first, then who / where / when */
+.quote { border-left: 4px solid var(--line-strong); padding: 2px 0 2px 16px; }
+.quote p { font-size: var(--fs-body); color: var(--ink); }
+.quote .src { margin-top: 6px; font-size: var(--fs-sub); color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.quote .src b { font-weight: 600; color: var(--ink); }
+.label { font-size: var(--fs-sub); font-weight: 700; color: var(--ink-2); }
+.meta { font-size: var(--fs-meta); color: var(--ink-meta); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
