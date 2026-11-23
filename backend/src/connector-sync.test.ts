@@ -134,6 +134,7 @@ describe("sync of the test Connector", () => {
       ["site-mail", "not-implemented"],
       ["site-messenger", "not-implemented"],
       ["site-wiki", "not-implemented"],
+      ["local-files", "ready"],
     ]);
     expect(await manager.sync("site-mail")).toEqual({ error: "connector-unavailable" });
     expect(await manager.sync("nope")).toEqual({ error: "not-found" });

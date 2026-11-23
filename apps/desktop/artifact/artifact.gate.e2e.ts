@@ -108,13 +108,14 @@ test("the built backend blocks an unlisted CLI in a development-looking setting"
     };
     expect(connectors.map((c) => c.id)).not.toContain("fixtures");
     expect(connectors.map((c) => c.kind)).not.toContain("test-fixtures");
-    // a public-shaped tree (the build chose the public entry): the three placeholders and nothing else;
+    // a public-shaped tree (the build chose the public entry): the three placeholders and the one local-files instance, nothing else;
     // a fork's registration adds its own instances
     const publicShaped = backendEntry(ROOT) === join(ROOT, "backend/src/shell.ts");
     // the shape is read a second way, so a wrong `backendEntry` cannot switch the exact list off unseen
     expect(publicShaped, "shape").toBe(!existsSync(join(ROOT, "site/composition/package.json")));
     if (publicShaped) {
       expect(connectors.map((c) => c.id).sort()).toEqual([
+        "local-files",
         "site-mail",
         "site-messenger",
         "site-wiki",
