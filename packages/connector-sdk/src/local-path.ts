@@ -204,6 +204,27 @@ async function identityChain(
   }
 }
 
+/**
+ * The identities from the nearest ancestor of `real` that can be read up to the top of the volume;
+ * undefined when none can. Used when an approved location's own chain cannot be read (its disk is gone):
+ * what lies above the readable part is still known, what lies below it is not.
+ */
+async function nearestReadableChain(
+  fs: BoundaryFs,
+  real: string,
+  rules: PathRules,
+): Promise<FileId[] | undefined> {
+  const api = apiOf(rules);
+  let current = real;
+  for (;;) {
+    const chain = await identityChain(fs, current, rules);
+    if (chain) return chain;
+    const up = api.dirname(current);
+    if (up === current) return undefined;
+    current = up;
+  }
+}
+
 /** A folder the product never reads: the data directory, the shell's user-data folder. */
 export interface ExcludedFolder {
   /** Its folded paths: as given and as the OS resolved it. */
@@ -243,6 +264,7 @@ export const APPROVAL_REJECTION_CODES = [
   "unsupported-path-form",
   "not-found",
   "not-readable",
+  "location-unreachable",
   "wrong-type",
   "identity-unavailable",
   "filesystem-root",
@@ -364,7 +386,17 @@ export async function checkApproval(
     // the other way round: the candidate lies above the location. A location whose chain cannot be
     // read (its disk is gone) is not "elsewhere": fail closed, as for the candidate's own chain
     const above = await identityChain(fs, location.realPath, rules);
-    if (!above || above.some((a) => sameId(a, id))) return rejected("overlaps-location");
+    if (above) {
+      if (above.some((a) => sameId(a, id))) return rejected("overlaps-location");
+    } else {
+      // the location's disk is gone: only its nearest readable ancestor can be compared. A candidate
+      // above that is an overlap; any other cannot be told from one inside the unreadable part, so it is
+      // refused, never approved
+      const readable = await nearestReadableChain(fs, location.realPath, rules);
+      return rejected(
+        readable?.some((a) => sameId(a, id)) ? "overlaps-location" : "location-unreachable",
+      );
+    }
   }
 
   const name = api.basename(real);
