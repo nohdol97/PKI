@@ -12,7 +12,6 @@ import {
   routes,
   type Connector,
   type ConnectorSummary,
-  type SyncResponse,
 } from "@pki/contracts";
 import {
   closeJob,
@@ -32,10 +31,16 @@ import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
 import { bootBackend } from "./boot.ts";
 import type { Clock } from "./clock.ts";
 import { openCanonicalDb, type ConnectorSet } from "./composition.ts";
-import { createConnectorManager, tryLockInstance, type ConnectorManager } from "./connectors.ts";
+import {
+  createConnectorManager,
+  tryLockInstance,
+  type ConnectorManager,
+  type SyncedResponse,
+} from "./connectors.ts";
 import {
   CLEANUP_PERIOD,
   CONNECTOR_SYNC_KIND,
+  CONNECTOR_SYNC_SETTINGS,
   createConnectorSyncHandler,
   ensureDefaultSchedules,
   recheckInstances,
@@ -101,7 +106,7 @@ const ZERO = {
 
 /** A manager double: one instance, answering with what the test says. */
 function fakeManager(
-  answer: () => SyncResponse | { error: "not-found" | "connector-unavailable" },
+  answer: () => SyncedResponse | { error: "not-found" | "connector-unavailable" },
   summary: Partial<ConnectorSummary> = {},
 ): Pick<ConnectorManager, "sync" | "list"> & { calls: number } {
   const manager = {
@@ -119,6 +124,7 @@ function runnerOf(manager: Pick<ConnectorManager, "sync" | "list">) {
   return createJobRunner({
     db,
     clock,
+    kinds: { [CONNECTOR_SYNC_KIND]: CONNECTOR_SYNC_SETTINGS },
     handlers: { [CONNECTOR_SYNC_KIND]: createConnectorSyncHandler({ db, manager: () => manager }) },
   });
 }
@@ -134,9 +140,11 @@ describe("connector-sync.stop-codes (I03-R19, I01-R20): each end of a sync, by I
   /** What a sync that ends this way answers, and the instance it answers about. */
   const endings: Record<
     string,
-    { answer: () => SyncResponse | { error: "connector-unavailable" }; summary?: object }
+    { answer: () => SyncedResponse | { error: "connector-unavailable" }; summary?: object }
   > = {
     completed: { answer: () => ({ connectorId: "c1", ...ZERO, received: 3, created: 2 }) },
+    // the run-time cap's yield (I02B-R21): the sync stored a page and left at its boundary
+    yield: { answer: () => ({ connectorId: "c1", ...ZERO, received: 1, created: 1, yielded: true }) },
     "rate-limited": {
       answer: () => ({
         connectorId: "c1",
@@ -156,13 +164,13 @@ describe("connector-sync.stop-codes (I03-R19, I01-R20): each end of a sync, by I
   };
   const ending = (end: string) =>
     endings[end] ?? {
-      answer: (): SyncResponse => ({ connectorId: "c1", ...ZERO, stopped: end as never }),
+      answer: (): SyncedResponse => ({ connectorId: "c1", ...ZERO, stopped: end as never }),
     };
 
   it("has a case for every row of I01's constant, and the constant has every row of the spec table", () => {
     const covered = SYNC_OUTCOMES.map((row) => row.end);
     expect(new Set(covered).size).toBe(covered.length);
-    expect(covered).toHaveLength(13);
+    expect(covered).toHaveLength(14);
   });
 
   for (const row of SYNC_OUTCOMES) {
@@ -184,6 +192,10 @@ describe("connector-sync.stop-codes (I03-R19, I01-R20): each end of a sync, by I
         break;
       case "dead_letter":
         expect(after).toMatchObject({ status: "dead_letter", reason: row.end });
+        break;
+      case "yield":
+        // a yield that stored a page: queued a minute later, its attempt given back (I03-R14)
+        expect(after).toMatchObject({ status: "queued", attempts: 0, runAfter: T0 + INSTANCE_BUSY_RETRY_MS });
         break;
       case "held":
         // the reason is the instance's own: never the Connector's text
