@@ -25,11 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import { openCanonicalDb } from "./composition.ts";
 import { inProcessNormalizer } from "./local-normalizer.test-support.ts";
-import {
-  createApprovalTickets,
-  createLocalLocations,
-  TICKET_TTL_MS,
-} from "./local-locations.ts";
+import { createApprovalTickets, createLocalLocations, TICKET_TTL_MS } from "./local-locations.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "l".repeat(43);

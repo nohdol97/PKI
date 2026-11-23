@@ -34,7 +34,14 @@ function handlers(confirm = true, picked: string | null = "/picked/folder") {
 describe("bridge handlers", () => {
   it("names exactly the spec's preload functions", () => {
     expect(Object.keys(BRIDGE).sort()).toEqual(
-      ["deleteSecret", "getSession", "hasSecret", "openExternal", "pickLocation", "setSecret"].sort(),
+      [
+        "deleteSecret",
+        "getSession",
+        "hasSecret",
+        "openExternal",
+        "pickLocation",
+        "setSecret",
+      ].sort(),
     );
     expect(Object.keys(handlers().bridge).sort()).toEqual(Object.keys(BRIDGE).sort());
   });

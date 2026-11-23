@@ -70,12 +70,12 @@ export async function runShell(site: SiteRegistration): Promise<void> {
   // the shell starts the normalizer host for this backend when asked (I02B-R22, adapter ⓑ)
   const normalizerHosts = electronHostChannel((message) => channel.post(message));
   let running:
-    {
-      server: RunningServer;
-      providers: readonly LLMProvider[];
-      tickets: ApprovalTickets;
-      close(): void;
-    }
+    | {
+        server: RunningServer;
+        providers: readonly LLMProvider[];
+        tickets: ApprovalTickets;
+        close(): void;
+      }
     | undefined;
 
   async function start(token: string) {

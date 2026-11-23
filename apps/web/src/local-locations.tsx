@@ -1,7 +1,8 @@
 // Settings' "로컬 자료" section (I02B-R36, R37, R38): the approved locations and one way to add a folder.
 // In the Electron shell the button opens the OS folder picker through the preload and approves with the
 // one-time ticket it returns; the page never holds the path. In browser development (Vite dev server) a
-// labelled input takes a typed absolute path instead; the built screens do not contain that input.
+// labelled input takes a typed absolute path instead; the branch tests the compile-time `import.meta.env.DEV`,
+// so the production build drops it and its label (bundle check: apps/desktop/e2e/build-web.setup.ts).
 import type { LocalApprovalRejectionCode, LocalLocationList } from "@pki/contracts";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
@@ -89,11 +90,9 @@ export function LocationList({ list }: { list: LocalLocationList }) {
 export function LocalLocations({
   api,
   bridge = (globalThis as { pki?: PickerBridge }).pki,
-  typedPath = import.meta.env.DEV,
 }: {
   api: ApiClient;
   bridge?: PickerBridge | undefined;
-  typedPath?: boolean;
 }) {
   const [list, setList] = useState<LocalLocationList>();
   const [refusal, setRefusal] = useState<string>();
@@ -127,7 +126,7 @@ export function LocalLocations({
     <section aria-labelledby="local-locations-heading">
       <h2 id="local-locations-heading">로컬 자료</h2>
       <div aria-live="polite">{list && <LocationList list={list} />}</div>
-      {typedPath ? (
+      {import.meta.env.DEV ? (
         <form onSubmit={submitTyped}>
           <label>
             폴더 경로(개발용)
@@ -139,7 +138,11 @@ export function LocalLocations({
         </form>
       ) : (
         pick && (
-          <button type="button" disabled={busy} onClick={() => void run(() => pickAndAdd(api, pick))}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void run(() => pickAndAdd(api, pick))}
+          >
             폴더 추가
           </button>
         )

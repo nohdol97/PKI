@@ -4,7 +4,8 @@
 import type { LocalApprovalRejectionCode, LocalLocationInfo } from "@pki/contracts";
 
 export const APPROVAL_REJECTION_TEXT: Record<LocalApprovalRejectionCode, string> = {
-  "not-absolute": "전체 경로(맨 앞이 폴더 이름이 아니라 드라이브나 / 로 시작하는 경로)를 적어야 합니다.",
+  "not-absolute":
+    "전체 경로(맨 앞이 폴더 이름이 아니라 드라이브나 / 로 시작하는 경로)를 적어야 합니다.",
   "unsupported-path-form": "이 경로 모양은 지원하지 않습니다. 평범한 폴더 경로를 골라 주세요.",
   "not-found": "그 폴더를 찾을 수 없습니다.",
   "not-readable": "그 폴더를 읽을 수 없습니다. 읽기 권한을 확인해 주세요.",

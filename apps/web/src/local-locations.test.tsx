@@ -33,7 +33,9 @@ const list = (over: Partial<LocalLocationList> = {}): LocalLocationList => ({
 
 describe("the location list", () => {
   it("shows the stopped-normalizer text only when the backend says so, and the no-watching mark (C52)", () => {
-    const stopped = renderToStaticMarkup(<LocationList list={list({ normalizerUnavailable: true })} />);
+    const stopped = renderToStaticMarkup(
+      <LocationList list={list({ normalizerUnavailable: true })} />,
+    );
     expect(stopped).toContain(NORMALIZER_UNAVAILABLE_TEXT);
     const fine = renderToStaticMarkup(<LocationList list={list()} />);
     expect(fine).not.toContain(NORMALIZER_UNAVAILABLE_TEXT);
@@ -45,7 +47,9 @@ describe("the location list", () => {
 describe("the shell's folder picker", () => {
   it("approves with the ticket, never a path; a refusal gives its text; a cancel does nothing", async () => {
     const api = vi.fn(async () => ({}));
-    const added = await pickAndAdd(api as unknown as ApiClient, async () => ({ ticket: "t".repeat(40) }));
+    const added = await pickAndAdd(api as unknown as ApiClient, async () => ({
+      ticket: "t".repeat(40),
+    }));
     expect(added).toEqual({ added: true });
     expect(api).toHaveBeenCalledWith("approveLocalLocation", {
       type: "folder",
@@ -60,7 +64,9 @@ describe("the shell's folder picker", () => {
     ).toEqual({ added: false, text: APPROVAL_REJECTION_TEXT["overlaps-location"] });
 
     const untouched = vi.fn();
-    expect(await pickAndAdd(untouched as unknown as ApiClient, async () => ({ ticket: null }))).toBeUndefined();
+    expect(
+      await pickAndAdd(untouched as unknown as ApiClient, async () => ({ ticket: null })),
+    ).toBeUndefined();
     expect(untouched).not.toHaveBeenCalled();
   });
 });

@@ -37,6 +37,13 @@ describe("production build", () => {
     expect(connectorKinds).not.toHaveProperty("test-fixtures");
   });
 
+  it("maps --user-data to userData (I02B-R48)", () => {
+    expect(production(["--origin", "app://pki", "--user-data", "/u"])).toEqual({
+      origins: ["app://pki"],
+      userData: "/u",
+    });
+  });
+
   it.each([
     ["--data-dir", "/synthetic/data"],
     ["--fixtures", "/synthetic/f.jsonl"],
