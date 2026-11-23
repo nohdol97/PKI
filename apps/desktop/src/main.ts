@@ -15,11 +15,15 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   MessageChannelMain,
+  nativeImage,
+  Notification,
   protocol,
   safeStorage,
   session,
   shell,
+  Tray,
   utilityProcess,
 } from "electron";
 import { dataDirectory } from "@pki/storage";
@@ -42,12 +46,16 @@ import {
   switches,
   WEB_ROOT,
 } from "./layout.ts";
+import { createNotifier } from "./notifier.ts";
 import { createProductNormalizerHostBroker } from "./normalizer-host.ts";
 import { loadScreens, lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 /** In the data directory: per OS user, not roaming (ADR 0010). */
 const SECRETS_FILE = "secrets.json";
+/** The tray icon: a small embedded image, since the repository holds no icon asset (P02-D12). */
+const TRAY_ICON =
+  "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAO0lEQVR4nGNgoAXQz3/7HxumSDNRhhDSjNcQYjVjNYRUzRiGjBpABQMojkaqJCRiDcGrmZAhRGkmFQAA31mMKCzj5f4AAAAASUVORK5CYII=";
 /** Restarts of a backend that exited by itself, per shell run (V01-T16, provisional). */
 const MAX_RESTARTS = 3;
 
@@ -81,12 +89,53 @@ const forkUtility: ForkBackend = (entry, args, env) => {
 
 let backend: Supervisor | undefined;
 let window: BrowserWindow | undefined;
+/** One tray icon while the app runs; none where the platform cannot make one (P02-R12). */
+let tray: Tray | undefined;
 let quitting = false;
 /** A quit was asked for (SIGTERM, the menu), whether or not start-up has finished. */
 let quitRequested = false;
 
+/** A toast's click and the tray bring the window to the front; they go nowhere else (P02-D13). */
+function bringToFront() {
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+/** The OS toast of the backend's count-only messages; Electron's objects are handed in (notifier.ts). */
+const notifier = createNotifier({
+  notification: {
+    isSupported: () => Notification.isSupported(),
+    create: (options) => new Notification(options),
+  },
+  get tray() {
+    return tray;
+  },
+  focusWindow: bringToFront,
+});
+
+function createTray() {
+  try {
+    tray = new Tray(nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON}`));
+    tray.setToolTip("PKI");
+    tray.on("click", bringToFront);
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: "열기", click: bringToFront },
+        { label: "종료", click: () => app.quit() },
+      ]),
+    );
+  } catch (error) {
+    // a platform without a tray keeps the toast and the feed
+    console.error(`PKI tray unavailable: ${error instanceof Error ? error.message : error}`);
+    tray = undefined;
+  }
+}
+
 async function run() {
   await app.whenReady();
+  createTray();
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, grant) =>
     grant(false),
   );
@@ -111,6 +160,7 @@ async function run() {
         scopePolicy: scopePolicyName(process.env),
         secrets,
         token,
+        notify: (message) => notifier.show(message),
         normalizerHost: (backendChild) =>
           // the bundled host entry, no arguments, no environment (I02B-R22, I02B-C50)
           createProductNormalizerHostBroker({

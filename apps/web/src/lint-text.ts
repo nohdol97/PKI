@@ -41,6 +41,13 @@ export const LINT_EMPTY = "지금 보여 줄 점검 결과가 없습니다.";
 export const LINT_OSCILLATING =
   "같은 지적이 여러 번 열렸다 닫혀 멈췄습니다. 받아들이거나 닫아야 끝납니다.";
 export const LINT_NO_EVIDENCE = "보여 줄 수 있는 근거가 없습니다.";
+const OPINION: Readonly<Record<string, string>> = {
+  same: "같은 대상으로 보임",
+  related: "관련은 있으나 같지 않음",
+  unrelated: "관련 없어 보임",
+};
+/** The LLM opinion line (K02-R17): a hint beside the finding, never a decision. */
+export const opinionText = (verdict: string): string => `LLM 의견: ${OPINION[verdict] ?? verdict}`;
 export const LINT_RELATION_TYPE = "관계 유형";
 export const LINT_PICK_TYPE = "유형을 고르세요";
 export const LINT_NO_TYPES = "고를 수 있는 관계 유형이 없습니다.";

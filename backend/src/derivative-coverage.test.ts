@@ -325,6 +325,7 @@ describe("derivatives.schema-coverage", () => {
       "item",
       "lint-finding",
       "merge-candidate",
+      "notification",
       "ontology",
       "relation",
       "scope-drop",

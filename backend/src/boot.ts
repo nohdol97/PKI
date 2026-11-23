@@ -69,6 +69,9 @@ import {
   requestInsightInterpretations,
   requestWikiBuild,
   requestWikiSummaries,
+  EXTRACT_JOB_KIND,
+  NOTIFY_JOB_KIND,
+  REFLECT_JOB_KIND,
 } from "@pki/storage";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
@@ -86,6 +89,8 @@ import {
 } from "./jsonl-file-instances.ts";
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { ensureReflectionSchedules } from "./reflection-schedules.ts";
+import { createNotifyOutbox, type NotifyChannel, type NotifyOutbox } from "./notify-outbox.ts";
+import { ensureNotifySchedules, wakeNotifyScan } from "./notify-schedules.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
 import {
   applyPendingRestore,
@@ -166,6 +171,11 @@ export interface BootOptions {
     /** Browser development (dev.ts) only: a typed path is approved as in a test build (I02B-R37). */
     typedPaths?: boolean;
   };
+  /**
+   * The Electron shell's side of the OS notification (P02-R8): the backend posts one count-only message
+   * through it. None (browser development, tests) ends the OS channel as `unavailable`; the feed is untouched.
+   */
+  notifyChannel?: NotifyChannel;
 }
 
 export interface BootedBackend {
@@ -184,6 +194,8 @@ export interface BootedBackend {
   scheduler: Scheduler;
   /** The one-time tickets the shell registers a picked path under (I02B-R37). */
   tickets: ApprovalTickets;
+  /** The OS channel of the notifications: the shell's answer goes to `acknowledge` (P02-R8). */
+  notifyOutbox: NotifyOutbox;
 }
 
 export function bootBackend(options: BootOptions): Promise<BootedBackend> {
@@ -343,8 +355,22 @@ async function startBackend(
         .catch((error) => log("local-rescan-failed", { error: errorClass(error) })),
     onApproved: registerLocalSync,
   });
+  const notifyOutbox = createNotifyOutbox({ db, registry, channel: options.notifyChannel ?? null });
   const runner = productRunner(db, calls.broker, {
     clock,
+    // P02-R3, R8: a closed extraction or re-review wakes the scan; a closed notify job hands the waiting lines to the shell
+    onJobClosed: (job, status) => {
+      if (status !== "succeeded") return;
+      if (job.kind === NOTIFY_JOB_KIND) {
+        try {
+          notifyOutbox.flush();
+        } catch (error) {
+          log("notify-flush-error", { error: errorClass(error) });
+        }
+      } else if (job.kind === EXTRACT_JOB_KIND || job.kind === REFLECT_JOB_KIND) {
+        if (late.scheduler && wakeNotifyScan(late.scheduler)) void runner.wake();
+      }
+    },
     connectors: () => late.manager,
     policyFingerprint: calls.policyFingerprint,
     engine,
@@ -460,6 +486,7 @@ async function startBackend(
   });
   // the default periods, the held collectors that are ready now, and the hourly recheck (I03-T09)
   ensureReflectionSchedules(scheduler); // K02-R2: the re-review's two periods
+  ensureNotifySchedules(scheduler); // P02-R3: the notification job's three periods
   const collectors = startCollectorUpkeep({ db, manager: connectors, scheduler, runner });
   scheduler.start();
   return {
@@ -484,6 +511,7 @@ async function startBackend(
     connectors,
     scheduler,
     tickets: localFiles.tickets,
+    notifyOutbox,
   };
 }
 

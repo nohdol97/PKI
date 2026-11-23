@@ -5,11 +5,14 @@
 import {
   commitDerived,
   listFindings,
+  lineageHash,
+  lineageOfFinding,
   listInvalidations,
   migrate,
   readTombstoneState,
   registerConnectorInstance,
   userDecisions,
+  writeFindingOpinion,
   type DerivedRef,
   type SourceChange,
   type SqlDriver,
@@ -170,6 +173,25 @@ describe("lint.kind: a deleted source leaves no finding or lineage row that rest
         Number(w.rows.shared),
       ]),
     ).toEqual([{ source_id: w.b.sourceId }]);
+  });
+});
+
+describe("lint.kind: an LLM opinion does not outlive the lineage it was asked at (K02-D19)", () => {
+  it("clears the opinion columns in the deletion's transaction when the finding stays with a smaller lineage", () => {
+    const w = world();
+    const id = Number(w.rows.shared);
+    const opinion = JSON.stringify({ verdict: "same", sourceId: 1, version: 1, start: 0, end: 1 });
+    db.transaction(() =>
+      writeFindingOpinion(db, id, lineageHash(lineageOfFinding(db, id)), opinion),
+    );
+    expect(listFindings(db).find((f) => f.id === id)?.opinion).toBe(opinion);
+
+    deleteSource(w.a.sourceId);
+
+    const kept = listFindings(db).find((f) => f.id === id);
+    expect(kept?.status).toBe("open");
+    expect(kept?.opinion).toBeNull();
+    expect(kept?.opinionLineageHash).toBeNull();
   });
 });
 

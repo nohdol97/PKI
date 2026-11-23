@@ -7,6 +7,7 @@ import {
   addEvidence,
   automatedLifecycle,
   createDerivativeRegistry,
+  dataChecksUnmet,
   defaultScopePolicy,
   saveCheckLine,
   saveDatasetTable,
@@ -271,5 +272,148 @@ describe("analytical routes (S03-R19)", () => {
     const bad = await add(["sum", "amount"]);
     expect(bad).toEqual({ status: 400, body: { error: "bad-request" } });
     expect(JSON.stringify(bad.body)).not.toContain("amount");
+  });
+
+  // #209 B-F1 (F209-R1, R2): a refusal answers over the rows the caller sees; blocking is over every row.
+  describe("refusal answers over shown rows (F209-C1, C2)", () => {
+    const secret = (externalId: string) => {
+      const saved = saveSourceRecord(db, "c", {
+        externalId,
+        title: externalId,
+        body: "hidden text",
+        accessScope: ["secret"],
+      });
+      if (saved.status !== "created") throw new Error(saved.status);
+      return db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    };
+    const unmetOf = async (calc: number) => {
+      const read = routes.analytical.response.parse((await call("analytical")).body);
+      return read.metrics.flatMap((m) => m.calculations).find((c) => c.id === calc)?.unmet;
+    };
+    const approve = async (calc: number) =>
+      routes.semanticDecide.response.parse(
+        (await call("semanticDecide", { kind: "fact", id: calc, action: "approve" })).body,
+      );
+    const failSchema = (calc: number) =>
+      db.run(
+        "UPDATE analytical_checks SET passed = 0, failure_code = 'column-missing' WHERE fact_id = ? AND check_name = 'schema'",
+        [calc],
+      );
+
+    it("F209-C1 (가): the refusal of the approval of a calculation whose failed line is hidden lists what the read lists, never the hidden line's name, on both seats", async () => {
+      const w = world(["secret"]);
+      failSchema(w.calc);
+      expect(dataChecksUnmet(db, { kind: "fact", id: w.calc })).toContain("schema"); // the premise: all rows block with it
+      await start(restricting());
+      const read = await unmetOf(w.calc);
+      expect(read).toBeDefined();
+      expect(read).not.toContain("schema");
+      expect(await approve(w.calc)).toEqual({
+        status: "refused",
+        reason: "data-check-unmet",
+        unmet: read,
+      });
+      const feedback = await call("feedbackRecord", {
+        target: { kind: "fact", id: w.calc },
+        kind: "confirmed",
+      });
+      expect(routes.feedbackRecord.response.parse(feedback.body)).toEqual({
+        status: "refused",
+        reason: "data-check-unmet",
+        unmet: read,
+      });
+      expect(db.all("SELECT status FROM facts WHERE id = ?", [w.calc])).toEqual([
+        { status: "candidate" },
+      ]);
+      expect(db.all("SELECT 1 FROM fact_history WHERE fact_id = ?", [w.calc])).toEqual([]);
+    });
+
+    it("F209-C1 (나): when only a hidden rival blocks, the read lists nothing and the refusal answers check-missing alone", async () => {
+      const w = world(null);
+      // an item the user wrote has no lineage of its own, so this Metric stays shown while its relation is hidden
+      const made = userDecisions.add(db, { kind: "item", type: "Metric", name: "회수율" });
+      if (made.status !== "applied") throw new Error("not added");
+      const metric = made.ref.id;
+      const calc = saveFact(db, {
+        itemId: metric,
+        kind: "metric.calculation",
+        value: CALC,
+        ...attrs,
+      }).id;
+      const link = (object: number) =>
+        db.run(
+          "INSERT INTO relations (subject_id, type, object_id, status, epistemic, valid_at, observed_at) VALUES (?, 'MEASURED_ON', ?, 'candidate', 'explicit', NULL, 't')",
+          [metric, object],
+        ).lastInsertRowid as number;
+      link(w.dataset);
+      const rival = link(insertItem(db, { type: "Dataset", name: "other", ...attrs }));
+      addEvidence(db, {
+        target: { relationId: rival },
+        sourceVersionId: secret("hidden-rival"),
+        start: 0,
+        end: 6,
+        quote: "hidden",
+      });
+      // a relation's evidence erases the lines it makes stale: the passing lines are written last
+      const table = db.all("SELECT max(id) AS id FROM source_versions WHERE source_id = ?", [
+        w.sourceId,
+      ])[0]?.id as number;
+      for (const check of ["schema", "aggregation"] as const)
+        saveCheckLine(db, {
+          factId: calc,
+          check,
+          passed: true,
+          failure: null,
+          examined: 1,
+          violations: 0,
+          skipped: 0,
+          versionId: table,
+          otherVersionId: null,
+          at: "2026-11-23T00:00:00.000Z",
+        });
+      expect(dataChecksUnmet(db, { kind: "fact", id: calc })).toEqual(["spec-conflict"]); // the premise
+      await start(restricting());
+      expect(await unmetOf(calc)).toEqual([]);
+      expect(await approve(calc)).toEqual({
+        status: "refused",
+        reason: "data-check-unmet",
+        unmet: ["check-missing"],
+      });
+      expect(db.all("SELECT status FROM facts WHERE id = ?", [calc])).toEqual([
+        { status: "candidate" },
+      ]);
+    });
+
+    it("F209-C2: the undo of a directly added item counts only the facts the caller sees in held", async () => {
+      await start(restricting());
+      const added = routes.semanticCorrect.response.parse(
+        (
+          await call("semanticCorrect", {
+            correction: { action: "add", entry: { kind: "item", type: "Metric", name: "새 항목" } },
+          })
+        ).body,
+      );
+      if (added.status !== "applied" || !added.entry) throw new Error("not added");
+      saveFact(db, { itemId: added.entry.id, kind: "note", value: "open", ...attrs });
+      const hidden = saveFact(db, {
+        itemId: added.entry.id,
+        kind: "note",
+        value: "closed",
+        ...attrs,
+      }).id;
+      addEvidence(db, {
+        target: { factId: hidden },
+        sourceVersionId: secret("hidden-fact"),
+        start: 0,
+        end: 6,
+        quote: "hidden",
+      });
+      const undone = await call("semanticUndo", { kind: "item", id: added.entry.id });
+      expect(routes.semanticUndo.response.parse(undone.body)).toEqual({
+        status: "refused",
+        reason: "existing-data-violation",
+        held: { facts: 1, relations: 0, merges: 0, distinct: 0, splitMoves: 0 },
+      });
+    });
   });
 });

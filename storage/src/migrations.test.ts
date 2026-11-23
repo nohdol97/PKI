@@ -41,8 +41,8 @@ describe("migrate", () => {
   it("brings a fresh database to the latest version and records it", () => {
     expect(schemaVersion(db)).toBe(0);
     migrate(db);
-    expect(schemaVersion(db)).toBe(32);
-    expect(migrations).toHaveLength(32);
+    expect(schemaVersion(db)).toBe(33);
+    expect(migrations).toHaveLength(33);
   });
 
   it("is idempotent when re-run", () => {
@@ -500,6 +500,8 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "local_index_seq",
       "local_locations",
       "merge_candidates",
+      "notifications",
+      "notify_state",
       "ontology_basis",
       "ontology_elements",
       "ontology_history",

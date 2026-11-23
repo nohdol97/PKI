@@ -42,7 +42,9 @@
 | [specs/2026-11-23-S02F-followups.md](specs/2026-11-23-S02F-followups.md) | S02 후속(#183·#193·#199·#210): 맞대신 쌍은 나중 줄만 세기, 조직 신호는 끝이 조직일 때만, 구분 표시를 끄면 후보 다시 계산, 항목 시작 사슬의 `HAS` 행 보임 검사, 범위를 지키는 가드 시험 여섯 | 확정(잠정 결정 포함) |
 | [specs/2026-11-22-S03-analytical-semantic.md](specs/2026-11-22-S03-analytical-semantic.md) | 분석 의미(S03, #24): Dataset·Metric·Join을 등록 행으로 적기, 표 원본에서 실제 스키마 읽기(Dataset 프로파일), 데이터 검사 넷(스키마·Grain·Join cardinality·집계)과 그것을 지나야 하는 승격, 단위·통화·기간·version 충돌, 값을 계산하지 않음, 검토 API 계약, 작업 분해. S02 spec(개체 해소·시간 그래프·충돌) 위에 쓴다 | 확정(잠정 결정 포함). 구현은 T01~T10이 끝났고 프로파일을 켤지는 배포처 S34가 정한다 |
 | [specs/2026-11-23-K01-wiki-projection.md](specs/2026-11-23-K01-wiki-projection.md) | 근거 기반 Wiki 투영(K01, #25): 종류별 페이지·index·log를 정본 SQLite의 투영으로 만들기, backlink, 원본 삭제·범위 승계, 다시 만들기, 메모·숨김 편집 레이어, 선택 LLM 요약, API와 "위키" 화면. Wiki OSS는 들이지 않는다 | 확정(잠정 결정 포함) |
+| [specs/2026-11-23-K02-reflection-consolidation.md](specs/2026-11-23-K02-reflection-consolidation.md) | Reflection·Consolidation·Knowledge Lint(K02, #26): dirty 표시와 주기 재검토(`reflect`), 점검 규칙 넷과 발견의 상태·왔다 갔다 막기, 결정은 기존 입구로, 오탐·미탐 수, 읽기 문, "점검" 화면, 선택적 LLM 의견(`reflection.refine`) | 확정 |
 | [specs/2026-11-23-P01-insight-discovery.md](specs/2026-11-23-P01-insight-discovery.md) | Insight 발견·변경 감지·설명 가능한 순위(P01, #27): 13개 유형 표와 지원 상태, Insight의 사실 줄·이유 요약·신뢰도, 규칙 틀 `recomputeInsights`, 여섯 축 순위(읽을 때 계산), 알림 제외 표시, 작업 분해(첫 묶음 T01+T02) | 확정(잠정 결정 포함) |
+| [specs/2026-11-23-P02-notifications-digest-timeline.md](specs/2026-11-23-P02-notifications-digest-timeline.md) | 알림·Digest·Timeline과 반복 억제(P02, #28): 알림 줄 하나(`notifications`)와 순수 판정 함수, 작업 `notify`(scan·daily·weekly), 피드가 기본 통로·OS 토스트는 건수만 든 고정 문구의 at-most-once, 전하기 직전 확인(`mayDeliver`), 조용한 시간·다시 알림, 요약·리포트는 읽을 때 계산, 열린 화면의 5초 순번 읽기, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-23-P03-feedback-learning.md](specs/2026-11-23-P03-feedback-learning.md) | Feedback Learning(P03, #29): 여덟 가지 피드백의 종류 표와 기록 하나(`feedback`), 교정은 S01의 사용자 입구로·선호는 선호 신호로 가르기, 줄 단위 취소, 선호 신호 `preferenceSignals`(순위·피드 숨김·알림 억제·검색이 읽는 한 함수), 재추출·재검토 뒤 유지와 삭제 전파, 합성 자료의 개인화 전후 비교, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-23-X01-retrieval-qa.md](specs/2026-11-23-X01-retrieval-qa.md) | 질문별 Hybrid Retrieval·근거 Q&A(X01, #30): 키워드·메타데이터·항목·그래프·시간·Wiki·벡터 전략과 합치기, 길 고르기, 부족·충돌·낡음 표시, 읽기 검사 세 번과 최소 문맥, 문장마다 원본 인용, NDJSON 흘려보내기와 취소, "질문" 화면, 질문·답을 저장하지 않음, 다섯 구성 ablation과 [ADR 0025](adr/0025-retrieval-strategies.md) | 확정(잠정 결정 포함). 구현은 T1~T6이 끝났고 실제 Provider·벡터·Windows 확인과 T1 재측정은 배포처 S37~S41 |
 | [specs/2026-11-23-X02-explore-ux.md](specs/2026-11-23-X02-explore-ux.md) | 전체 탐색 UX(X02, #31): "탐색"(이름 찾기·이웃 표·타임라인·근거 원본)과 "지식 검토"(승인·기각·값 고치기·충돌) 화면, 화면 사이 이동, 새 읽기 세 경로(항목 찾기·이웃·원본 version)와 읽기 문, 저장하는 것 없음 | 확정(잠정 결정 포함). 구현은 T1~T6. 실제 수집기 자료의 화면 확인은 배포처 S42 |
@@ -62,7 +64,7 @@
 
 ## 앞으로 쓸 spec
 
-구현 spec은 그 작업을 시작할 때 쓴다(이슈 #15 R06-C1). 지금은 Phase 1의 둘(V01, V02)과 Phase 2의 I01, I03, I04, I05, I06, 그리고 I02의 두 조각(I02-A, I02-B), Phase 4의 K01, Phase 6의 X01, X02가 있다.
+구현 spec은 그 작업을 시작할 때 쓴다(이슈 #15 R06-C1). 지금은 Phase 1의 둘(V01, V02)과 Phase 2의 I01, I03, I04, I05, I06, 그리고 I02의 두 조각(I02-A, I02-B), Phase 4의 K01, K02, Phase 6의 X01, X02가 있다.
 
 | 작업 | 이슈 | spec을 쓰는 때 |
 |---|---|---|
@@ -71,7 +73,8 @@
 | I01~I04(Phase 2 수집) | #18~#21 | I01, I03, I04와 I02-A, I02-B는 spec이 있다 |
 | S01~S03(Phase 3 Semantic) | #22~#24 | S01은 구현이 끝났다(T01~T10. spec은 R07의 엔진 결정 전에 썼고, 그 결정에 걸리는 부분은 spec의 배경에 적었다). 자동 승격을 켤지는 배포처 S32를 기다린다. S02는 구현이 끝났다(T01~T10. 자동 이의를 켤지는 배포처 S33을 기다린다). S03은 구현이 끝났다(T01~T10. 프로파일을 켤지는 배포처 S34를 기다린다) |
 | K01(Phase 4 Wiki) | #25 | spec이 확정됐다(S02·S03 위에 썼고, Wiki OSS를 들이지 않는 결정과 LLM 요약을 뒤 작업 K01-T2로 미루는 것을 spec에 적었다) |
-| K02(Phase 4), P01~P03(Phase 5), H01~H03(Phase 7) | #26~#29, #32~#34 | 각 작업 착수 시 |
+| K02(Phase 4 Reflection·Lint) | #26 | 구현이 끝났다(T1~T3. LLM 의견은 기본 끔이고, 켤지는 배포처 S43을 기다린다) |
+| P01~P03(Phase 5), H01~H03(Phase 7) | #27~#29, #32~#34 | 각 작업 착수 시 |
 | X02(Phase 6 전체 탐색 UX) | #31 | spec이 확정됐다(저장하는 것 없이 새 읽기 세 경로와 화면 둘을 더하고 읽기 문으로 거른다) |
 | X01(Phase 6 질문) | #30 | spec이 확정됐다(근거 Q&A를 단계별 NDJSON으로 흘리고, 벡터는 찾는 쪽만 부르며 기본 끈다) |
 

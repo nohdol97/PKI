@@ -232,6 +232,18 @@ export function endWikiIncarnation(tx: SqlDriver, key: string): void {
 }
 
 /**
+ * An item row was deleted outside a source deletion (the user's undo): the pages stored for it go now, and those
+ * of the Insights that went with it (K01-R19). Lineage and outgoing links follow by the foreign key. No log line:
+ * `endWikiItemIncarnation` ends the key's history. Call it after the item row is deleted.
+ */
+export function removeWikiItemPages(tx: SqlDriver, itemId: number): void {
+  tx.run("DELETE FROM wiki_pages WHERE kind <> 'syntheses' AND target = ?", [String(itemId)]);
+  tx.run(
+    "DELETE FROM wiki_pages WHERE kind = 'syntheses' AND CAST(target AS INTEGER) NOT IN (SELECT id FROM insights)",
+  );
+}
+
+/**
  * An item row was deleted: ends the incarnation of every item page key naming it, stored or not, and of every
  * `syntheses/<id>` key whose Insight went with the item (cascade), whether or not its page was still stored.
  */

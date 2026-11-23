@@ -47,7 +47,13 @@ function byCodePoints(a: string, b: string): number {
  * The latest versions of the instance's sources with this `threadId`, oldest first (I02B-R29).
  * A source a tombstone covers is left out. The caller passes the result through the read gate.
  */
-export function readThread(db: SqlDriver, connectorInstanceId: string, threadId: string): Thread {
+export function readThread(
+  db: SqlDriver,
+  connectorInstanceId: string,
+  threadId: string,
+  /** The read gate's verdict on one message; a message it refuses is dropped before order and participants are built. */
+  shown: (message: ThreadMessage) => boolean = () => true,
+): Thread {
   const rows = db.all(
     `SELECT v.id, s.id AS sourceId, s.namespace, s.external_id AS externalId, v.title, v.body, v.meta
        FROM source_versions v JOIN sources s ON s.id = v.source_id
@@ -57,7 +63,7 @@ export function readThread(db: SqlDriver, connectorInstanceId: string, threadId:
         AND NOT EXISTS (SELECT 1 FROM tombstones t WHERE t.source_id = s.id AND t.covers_version >= v.version)`,
     [connectorInstanceId, threadId],
   );
-  const entries = rows.map((row) => {
+  const entries = rows.flatMap((row) => {
     const meta = JSON.parse(row.meta as string) as {
       author?: string;
       participants?: string[];
@@ -73,11 +79,15 @@ export function readThread(db: SqlDriver, connectorInstanceId: string, threadId:
       ...(meta.author === undefined ? {} : { author: meta.author }),
       ...(meta.createdAt === undefined ? {} : { createdAt: meta.createdAt }),
     };
-    return {
-      message,
-      at: instantNs(meta.createdAt),
-      people: [meta.author, ...(meta.participants ?? [])],
-    };
+    return shown(message)
+      ? [
+          {
+            message,
+            at: instantNs(meta.createdAt),
+            people: [meta.author, ...(meta.participants ?? [])],
+          },
+        ]
+      : [];
   });
   entries.sort((a, b) => {
     if (a.at !== undefined && b.at !== undefined && a.at !== b.at) return a.at < b.at ? -1 : 1;
@@ -94,4 +104,19 @@ export function readThread(db: SqlDriver, connectorInstanceId: string, threadId:
     }
   }
   return { messages: entries.map((e) => e.message), participants };
+}
+
+/** The instance and thread a source version belongs to; undefined when the version is absent or has no thread. */
+export function threadOfVersion(
+  db: SqlDriver,
+  versionId: number,
+): { connectorInstanceId: string; threadId: string } | undefined {
+  const row = db.all(
+    `SELECT s.connector_instance_id AS instance, json_extract(v.meta, '$.threadId') AS thread
+       FROM source_versions v JOIN sources s ON s.id = v.source_id WHERE v.id = ?`,
+    [versionId],
+  )[0];
+  return typeof row?.thread === "string"
+    ? { connectorInstanceId: row.instance as string, threadId: row.thread }
+    : undefined;
 }

@@ -193,6 +193,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     exploreItems: {},
     exploreItem: { itemId: 1, depth: 2 },
     exploreSource: { versionId: 1 },
+    sourceThread: { versionId: 1 },
     // the Wiki (K01-T1): the page and the note's key are set in beforeAll, once the seed's pages are built
     wikiPage: { key: "" },
     wikiEdit: { op: "note-add", key: "", text: "합성 메모" },
@@ -208,6 +209,10 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     createBackup: { passphrase: "short" },
     inspectRestore: { fileName: "pki-backup-x.pkibak", passphrase: "short" },
     restoreBackup: { fileName: "pki-backup-x.pkibak", passphrase: "short", confirmBackupId: "x" },
+    // notifications (P02-T2): a line that need not exist (an answer of 200 with `not-found`), and a settings write of nothing
+    notificationDigest: { id: 999_999 },
+    notificationAct: { id: 999_999, op: "read" },
+    setNotificationSettings: {},
   };
 
   beforeAll(async () => {

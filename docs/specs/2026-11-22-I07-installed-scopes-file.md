@@ -1,6 +1,6 @@
 # 스펙: I07 설치본이 인스턴스 범위(`site/config/connector-scopes.json`)를 얻는 길
 
-- 날짜: 2026-11-22 / 상태: 확정(잠정 결정 포함). 작업 T01~T04가 구현되었다. 남은 것은 T05(검증 실행기의 `scopes-check`와 그 문서. 바깥 선행을 기다린다)와 그 절의 "검증하지 않은 것"(Windows, 설치본, 실제 포크)("I07-T04가 넘기는 것")
+- 날짜: 2026-11-22 / 상태: 확정(잠정 결정 포함). 작업 T01~T05가 구현되었다(T05는 사외에서 작성만 됨 — 실행된 적 없음). 남은 것은 S31의 실제 실행과 그 절의 "검증하지 않은 것"(Windows, 설치본, 실제 포크)("I07-T04가 넘기는 것")
 - 관련: 이슈 #115(이 spec), 함께 열린 #113([I05 spec](2026-11-22-I05-site-connector-registration.md). "#114와 #115에 남기는 것")·#114(자격 증명, I06), 선행 #18([I01 spec](2026-11-21-I01-connector-sdk.md) "T06이 넘기는 것" 3·10②), #33(H02 Windows 배포), [ADR 0012](../adr/0012-upstream-and-fork-ownership.md), [ownership.md](../ownership.md), [site-setup.md](../site-setup.md) S08·S18, [connector-sdk.md](../connector-sdk.md) 7·11장
 
 낯선 말은 [ARCHITECTURE 0절](../ARCHITECTURE.md#0-처음-나오는-말)과 I05 spec 머리의 표에 풀이가 있다. 이 spec에서 새로 쓰는 말은 아래 표에 있다. `I01-…`·`I05-…`는 그 spec의 번호, `S…`는 site-setup.md 체크리스트 번호다.
@@ -146,6 +146,12 @@ I01-T06은 인스턴스 범위를 범위 파일에서 읽게 했다. 지금의 �
   - **기록**: OS, 앱 버전, 판정, 견준 수·같은 수·다른 수·정본에 없는 수. **범위 값과 인스턴스 ID는 결과 파일에 싣지 않는다.**
   - 이 절차가 증명하는 것은 "값이 정본까지 복사되었다"까지다. Broker가 그 값을 쓰는지는 공용 저장소의 시험이 본다(S18의 기존 문장 그대로).
 - **I07-R13 실행기 문서.** 실행 절차를 실행기의 RUNBOOK에 한 절로 적고, `verification/README.md`의 표에 한 행을 "작성만 됨 — 실행된 적 없음"으로 더한다. 어떤 환경에서도 지어낸 정본으로 돌린 결과를 배포처 검증으로 기록하지 않는다.
+
+- **I07-R17 `scopes-check`의 모양(잠정).** R12가 열어 둔 명령의 모양을 기존 실행기의 관례대로 정한다.
+  - 명령: `run.py scopes-check --config <설정> --expected <기대 값 파일> --out <결과 폴더>`. 설정은 기존 `config.example.json`과 같은 `productName`·`installedExe`를 쓰며 Provider는 요구하지 않는다(예시: `scopes-config.example.json`). 절차의 모듈은 `v02-site-flow/scopes_check.py`다.
+  - 종료 값은 실행기의 기존 값을 그대로 쓴다: `PASS` 0, `FAIL`·`INCONCLUSIVE` 1, 설정 오류 2, 거부 3. 정본의 위치는 다른 시나리오와 같이 `%LOCALAPPDATA%\PKI\pki.sqlite`다.
+  - 결과는 `--out`의 `scopes-check-result.json` 하나다. 항목은 OS, 앱 버전, 판정, 수 넷(`compared` 범위가 있는 기대 항목 수, `same`, `different`(정본이 `NULL`인 것 포함), `missing`)이다. 다른 시나리오의 허용 목록 결과 파일(`result.json`)은 쓰지 않는다(숫자만 적는 `analytical-counts.json`과 같은 자리).
+  - 바꾸려면: 이 항목과 `scopes_check.py`의 상수·`run.py`의 하위 명령을 함께 고친다. 허용 목록 결과 파일로 옮기려면 `common/results.py`의 등록부(검사 id, 사실 키, 코드)에 항목을 더해야 한다.
 
 ### 문서
 
@@ -543,3 +549,4 @@ I07-T04(#115)가 문서, ADR, S30·S31을 끝냈다. 기준은 `origin/main`의 
 | 2026-11-23 | I07-T03 검토 반영. ① R16: 상대 지정자만 허용(절대 경로·`file:` 주소 거부), `import type`·부수효과 `import` 허용, C18을 통과 넷·거부 열여덟로(이후 델타 검토에서 점 이름 폴더 두 건과 `./` 통과 한 건을 더해 다섯·스물), ⑦은 실제 대상으로 ② 판정이 상대 `entry`를 거절, `build.ts`가 판정을 삼키지 않음, 빌드·백엔드 기준의 일치 시험, C12 ①의 `node_modules` 훑기 ③ I05-T05가 정할 것(`site/` 아래 `eslint.config.*`), 폴더 조건·실패한 빌드의 앱 폴더·미끼 e2e의 한계를 적음 | 이 문서 | I07-T03 독립 검토 두 건(A-F1~F5, W1~W3 / B-F1~F3, W1~W3). 요구사항 R16과 C18의 글자는 위 ①만 고쳤다 |
 | 2026-11-23 | I05-T05가 합쳐진 뒤 맞춤. connector-sdk.md 7장의 `registration.ts` 발췌와 포크용 `tsconfig.json` 블록, 그 문서 대응 단언 하나, I05-T05의 인라인 `allowRelative` 시험의 `file` 필드("I07-T03이 넘기는 것") | 이 문서, `docs/connector-sdk.md`, `tooling/docs/connector-sdk.test.ts`, `tooling/eslint/module-boundary.test.ts` | I07-T03(#115)의 예시 패키지 변경이 I05-T05의 글자 그대로 발췌와 경계 규칙 옵션 모양에 닿음 |
 | 2026-11-23 | I07-T04: 문서·ADR·S30·S31을 "I07-T04가 넘기는 것" 절에 기록(고친 곳, ADR 번호, S31에서 T05가 더할 것과 그 표시, 포크 절차의 예행과 그것이 찾은 문서의 빈 곳, 한계, I06-T05와 겹치는 곳). 상태 줄에 T01~T04 구현을 적음. 요구사항·기준·작업 표의 글자는 고치지 않았다 | 이 문서 | I07-T04(#115). 예행에서 복사한 `shell.boot.test.ts`도 인스턴스 ID를 적는다는 것이 드러나 문서가 그 파일도 적게 함 |
+| 2026-11-24 | I07-T05: 검증 실행기의 `scopes-check`와 그 문서. R12가 열어 둔 명령의 모양을 새 I07-R17(잠정)에 적음. 상태 줄에 T05 구현을 적음. 기존 요구사항·기준·작업 표의 글자는 고치지 않았다 | 이 문서, `verification/v02-site-flow/`, `verification/README.md`, `docs/site-setup.md` S31 | I07-T05(#115). 실행기의 관례(시나리오별 하위 명령, 숫자만 적는 결과 파일)를 따랐고 Windows·설치본에서는 실행하지 않았다 |

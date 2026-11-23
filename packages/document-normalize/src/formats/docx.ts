@@ -230,9 +230,11 @@ function appendComments(
         comment: { thread: t, index, part },
       });
       const head = [comment.author, comment.date].filter((v) => v !== undefined).join(" ");
+      // the first block drawn after the body takes the blank line, whichever of the two it is
       builder.block(head, at("head"), first ? "\n\n" : "\n");
-      builder.block(comment.text, at("text"));
-      first = false;
+      if (head !== "") first = false;
+      builder.block(comment.text, at("text"), first ? "\n\n" : "\n");
+      if (comment.text !== "") first = false;
       const name = comment.author === undefined ? undefined : boundedName(comment.author);
       if (name !== undefined && participants.length < MAX_PARTICIPANTS && !seen.has(name)) {
         seen.add(name);

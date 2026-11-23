@@ -172,6 +172,7 @@ export {
   usesVersionFence,
   WIKI_BUILD_KIND,
   WIKI_SUMMARY_KIND,
+  NOTIFY_JOB_KIND,
 } from "./job-kinds.ts";
 export {
   clearDirty,
@@ -201,6 +202,17 @@ export {
   type ReflectionState,
   type StoredFinding,
 } from "./reflection.ts";
+export {
+  lineageHash,
+  readReflectionRefine,
+  REFLECTION_REFINE_BATCH,
+  REFLECTION_REFINE_KIND,
+  REFLECTION_REFINE_MAX_VERSIONS,
+  REFLECTION_REFINE_SETTING,
+  requestReflectionRefinements,
+  setReflectionRefine,
+  writeFindingOpinion,
+} from "./reflection-refine.ts";
 export {
   addWikiNote,
   advanceWikiState,
@@ -657,3 +669,33 @@ export {
   readVersionHeads,
   type VersionHead,
 } from "./retrieval-reads.ts";
+export {
+  countInsightLinesIn,
+  DEFAULT_QUIET_HOURS,
+  deferNotification,
+  demoteNotificationToDigest,
+  dismissNotification,
+  dueDeferredNotifications,
+  firstInsightLineAt,
+  immediateLinesSince,
+  insertDigestNotification,
+  insertInsightNotification,
+  lastDigestEnd,
+  listNotifications,
+  markNotificationRead,
+  NOTIFY_SETTING_KEYS,
+  queuedNotifications,
+  readNotifySeq,
+  readNotifySettings,
+  readNotification,
+  returnNotification,
+  setOsState,
+  unnotifiedActiveInsightIds,
+  withdrawNotification,
+  type NotificationKind,
+  type NotificationReason,
+  type NotificationStatus,
+  type NotifySettings,
+  type OsState,
+  type StoredNotification,
+} from "./notifications.ts";

@@ -20,6 +20,7 @@ import type {
   SourceSummary,
 } from "@pki/contracts";
 import {
+  dataChecksUnmet,
   describeKnowledgeSchema,
   findSources,
   listActiveInsights,
@@ -37,8 +38,10 @@ import {
   readInsightEvidence,
   readSemanticState,
   type ActiveInsight,
+  type DataCheckUnmet,
   type DerivativeRegistry,
   type DerivedRef,
+  type HeldCounts,
   type ElementRule,
   type EvidenceSourceView,
   type InsightEvidenceRow,
@@ -110,6 +113,13 @@ export interface ReadGate {
   graphPaths(query: RouteRequest<"graphPaths">): RouteResponse<"graphPaths"> | undefined;
   /** Whether the registry row is stored and shown: the one answer for a row that is absent, deleted or hidden. */
   semanticShown(kind: SemanticKind, id: number): boolean;
+  /**
+   * The unmet data conditions of a refused approval as the caller sees them (S03 decision 36 ①): judged over the
+   * rows shown; `check-missing` alone when only hidden rows block.
+   */
+  dataUnmetShown(factId: number): readonly DataCheckUnmet[];
+  /** What hangs on an item, counting shown rows only (S03 decision 36 ②). */
+  heldShown(itemId: number): HeldCounts;
   /**
    * The type definitions shown (S01-R23). A `candidate` or `rejected` element follows its lineage and
    * is judged like any derived row; a `verified` or retired one has none and is always shown.
@@ -365,6 +375,39 @@ export function createReadGate(
     graphPaths: (query) => relationPaths(db, registry, query, "display"),
     semanticShown: (kind, id) =>
       readSemanticState(db, { kind, id }) !== undefined && isShown(kind, id),
+    dataUnmetShown: (factId) => {
+      const list = dataChecksUnmet(db, { kind: "fact", id: factId }, (kind, id) =>
+        shown([{ kind, id }], "display").has(id),
+      );
+      return list.length > 0 ? list : ["check-missing"];
+    },
+    heldShown: (itemId) => {
+      const ids = (sql: string, params: number[]) => db.all(sql, params).map((r) => r.id as number);
+      // a merge line, distinct mark or split record counts when the other item it names is shown
+      const others = (sql: string) =>
+        db.all(sql, [itemId, itemId]).filter((r) => {
+          const other = (r.a as number) === itemId ? (r.b as number) : (r.a as number);
+          return isShown("item", other);
+        }).length;
+      return {
+        facts: ids("SELECT id FROM facts WHERE item_id = ?", [itemId]).filter((id) =>
+          isShown("fact", id),
+        ).length,
+        relations: ids("SELECT id FROM relations WHERE subject_id = ? OR object_id = ?", [
+          itemId,
+          itemId,
+        ]).filter((id) => isShown("relation", id)).length,
+        merges: others(
+          "SELECT member_id AS a, representative_id AS b FROM item_merges WHERE member_id = ? OR representative_id = ?",
+        ),
+        distinct: others(
+          "SELECT item_a AS a, item_b AS b FROM item_distinct WHERE item_a = ? OR item_b = ?",
+        ),
+        splitMoves: others(
+          "SELECT from_item_id AS a, to_item_id AS b FROM item_split_moves WHERE from_item_id = ? OR to_item_id = ?",
+        ),
+      };
+    },
     ontology: () => ({
       elements: only(listOntologyElements(db), "ontology", (e) => e.id, "display").map((e) => ({
         ...e,

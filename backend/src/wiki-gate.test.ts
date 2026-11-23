@@ -299,7 +299,8 @@ describe("wiki.gate: the object side of a relation and an Insight's ends read th
       !(scopes.some((s) => s?.includes("A")) && scopes.some((s) => s?.includes("B"))),
   };
 
-  it("names no page and no backlink that would show a hidden merge member's page is the representative's", () => {
+  /** The C3b ⑥ world: X relates to a merge member whose source is in scope B, X itself is in scope A. */
+  const relationWorld = () => {
     const a = source("a", "가 본문", ["A"]);
     const b = source("b", "나 본문", ["B"]);
     const rep = insertItem(db, { type: "Project", name: "대표 항목", ...attrs });
@@ -327,6 +328,11 @@ describe("wiki.gate: the object side of a relation and an Insight's ends read th
     );
     const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
     db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+    return { x, rep };
+  };
+
+  it("names no page and no backlink that would show a hidden merge member's page is the representative's", () => {
+    const { x, rep } = relationWorld();
 
     const registry = createProductRegistry({ policy: crossing });
     const reads = createWikiReads(db, registry, createReadGate(db, registry));
@@ -347,6 +353,29 @@ describe("wiki.gate: the object side of a relation and an Insight's ends read th
         .sort(),
     ).toEqual(["insight", "relation"]);
     expect(together.page("syntheses/1")?.links.map((l) => l.key)).toContain(`projects/${rep}`);
+  });
+
+  it("gives no change count for a page whose relation claim names an end the reader cannot see (K01-R18 2, C6)", () => {
+    const { x } = relationWorld();
+    const key = `projects/${x}`;
+    const readsOf = (p: ScopePolicy) => {
+      const registry = createProductRegistry({ policy: p });
+      return createWikiReads(db, registry, createReadGate(db, registry));
+    };
+    const narrow = readsOf(crossing);
+    expect(narrow.page(key)?.history.map((h) => h.added)).toEqual([0]);
+    expect(
+      narrow
+        .index()
+        .log.filter((l) => l.pageKey === key)
+        .map((l) => l.added),
+    ).toEqual([0]);
+    // read by one who may put the two together: a fact and a relation
+    expect(
+      readsOf(policy)
+        .page(key)
+        ?.history.map((h) => h.added),
+    ).toEqual([2]);
   });
 });
 
@@ -449,5 +478,54 @@ describe("wiki.gate: change counts do not reveal claims the caller cannot see (#
     const restricted = counts(readsOf(policy));
     expect(restricted.history).toEqual([0, 0]);
     expect(restricted.log).toEqual([0, 0]);
+  });
+
+  it("gives a line's added count only while no later line of the page removed a claim, and never a removed count (K01-R18 1, C5)", () => {
+    const open = source("open", "공개 본문", ["open"]);
+    const secret = source("secret", `${SECRET} 본문`, ["secret"]);
+    const item = insertItem(db, { type: "Project", name: "공개 항목", ...attrs });
+    citedFact(item, "공개 값", open);
+    const build = (at: string) =>
+      db.transaction(() =>
+        commitDerived(db, { source: null, items: planWikiBuild(db, { at }).items }),
+      );
+    const key = `projects/${item}`;
+    build("2026-11-23T00:00:00.000Z");
+    const alias = insertItem(db, { type: "Project", name: `${SECRET} 별칭`, ...attrs });
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [alias, item],
+    );
+    const hiddenFact = citedFact(alias, `${SECRET} 값`, secret);
+    build("2026-11-23T00:01:00.000Z");
+    // the refused claim leaves the page: the merge that brought it in is undone (a direct status change is
+    // refused by the lifecycle gate)
+    db.run("UPDATE item_merges SET active = 0 WHERE member_id = ?", [alias]);
+    build("2026-11-23T00:02:00.000Z");
+    const stored = db.all("SELECT body FROM wiki_pages WHERE key = ?", [key])[0]?.body as string;
+    expect(stored).not.toContain(`"id":${hiddenFact}`);
+    expect(
+      db.all("SELECT removed FROM wiki_log WHERE page_key = ? ORDER BY id DESC", [key])[0]?.removed,
+    ).toBe(1);
+    citedFact(item, "공개 값 2", open);
+    build("2026-11-23T00:03:00.000Z");
+
+    for (const p of [policy, { ...policy, allows: () => true }]) {
+      const registry = createProductRegistry({ policy: p });
+      const reads = createWikiReads(db, registry, createReadGate(db, registry));
+      const pairs = (l: { added: number; removed: number }[]) => l.map((h) => [h.added, h.removed]);
+      expect(pairs(reads.page(key)?.history ?? [])).toEqual([
+        [0, 0],
+        [0, 0],
+        [0, 0],
+        [1, 0],
+      ]);
+      expect(pairs(reads.index().log.filter((l) => l.pageKey === key))).toEqual([
+        [1, 0],
+        [0, 0],
+        [0, 0],
+        [0, 0],
+      ]);
+    }
   });
 });

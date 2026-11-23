@@ -62,6 +62,7 @@ import {
   createProductRegistry,
   createProjections,
   createReflectHandler,
+  createReflectionRefineHandler,
   createWikiBuildHandler,
   createInsightInterpretHandler,
   createWikiSummaryHandler,
@@ -70,6 +71,7 @@ import {
   ENGINE_KIND,
   knowledgeCandidates,
   VECTOR_KIND,
+  createNotifyHandler,
   type CanonicalEntries,
   type PermanentlyAbsent,
   type Projections,
@@ -96,8 +98,11 @@ import {
   requestWikiBuild,
   requestWikiSummaries,
   REFLECT_JOB_KIND,
+  REFLECTION_REFINE_KIND,
+  requestReflectionRefinements,
   WIKI_BUILD_KIND,
   WIKI_SUMMARY_KIND,
+  NOTIFY_JOB_KIND,
   type DerivativeRegistry,
   type MembershipListener,
   type ScopePolicy,
@@ -467,6 +472,8 @@ export function productRunner(
     connectors?: () => SyncManager | undefined;
     /** The registry that names a candidate item's lineage (productRegistry); default `derivativeRegistry` (knowledge-engine canonical-kinds.ts). */
     registry?: DerivativeRegistry;
+    /** Called after a job closed, with its kind and what the close answered (P02: wakes the notification scan, flushes the OS channel). */
+    onJobClosed?: (job: { kind: string }, status: string) => void;
   } = {},
 ): JobRunner {
   const { clock, engine, projections } = options;
@@ -499,7 +506,14 @@ export function productRunner(
       const summaries = requestWikiSummaries(db) > 0;
       // P01-R7: Insights whose content changed (or that were never read) get an interpretation job, setting on only
       const interpretations = requestInsightInterpretations(db) > 0;
-      if (summaries || interpretations || built) void runner.wake();
+      // K02-R16: a `weekly` re-review that finished leaves open findings; with the setting on they get an opinion job
+      const refinements =
+        job.kind === REFLECT_JOB_KIND &&
+        job.target === "weekly" &&
+        status === "succeeded" &&
+        requestReflectionRefinements(db) > 0;
+      if (summaries || interpretations || refinements || built) void runner.wake();
+      options.onJobClosed?.(job, status);
       const manager = options.connectors?.();
       const stoppedOnReplaced = replaced.delete(replacedKey(job));
       if (
@@ -536,6 +550,11 @@ export function productRunner(
         ...(options.registry ? { registry: options.registry } : {}),
         ...(clock ? { now: () => new Date(clock.now()) } : {}),
       }),
+      // K02-R16: one Broker call per finding, IDs only; the Broker asks consent and egress, the finding keeps its status
+      [REFLECTION_REFINE_KIND]: createReflectionRefineHandler({
+        db,
+        ...(options.registry ? { registry: options.registry } : {}),
+      }),
       // K01-R12: one Broker call per page, IDs only; the Broker asks consent and egress, the page is a projection
       [WIKI_SUMMARY_KIND]: createWikiSummaryHandler({
         db,
@@ -543,6 +562,12 @@ export function productRunner(
       }),
       // P01-R7: one Broker call per Insight, IDs only; the Broker asks consent and egress, the row keeps its code content
       [INSIGHT_INTERPRET_KIND]: createInsightInterpretHandler({
+        db,
+        ...(options.registry ? { registry: options.registry } : {}),
+        ...(clock ? { now: () => new Date(clock.now()) } : {}),
+      }),
+      // P02-R3: reads the DB only, no Provider is called; no source, so no fence
+      [NOTIFY_JOB_KIND]: createNotifyHandler({
         db,
         ...(options.registry ? { registry: options.registry } : {}),
         ...(clock ? { now: () => new Date(clock.now()) } : {}),

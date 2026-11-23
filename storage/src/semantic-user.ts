@@ -13,6 +13,7 @@
 // The type definitions' user operations (ontology.ts, S01-T07) and entity resolution's (entity-decisions.ts,
 // S02-T04: merge, unmerge, the distinct mark) travel in the same object, so the one lint-guarded name
 // `userDecisions` (and its constructor `createUserDecisions`, which the composition root calls) is the only way to them.
+import { judgeRestored } from "./analytical-gate.ts";
 import { insertAssertionLink } from "./assertion-links.ts";
 import { eraseChecksReading, queueChecksAround } from "./analytical-check-lines.ts";
 import {
@@ -43,7 +44,7 @@ import { scopesOfVersions } from "./derivatives.ts";
 import { defaultScopePolicy, mayCombine } from "./scope-policy.ts";
 import { userOntology, type UserOntologyDecisions } from "./ontology.ts";
 import type { SqlDriver } from "./sql-driver.ts";
-import { endWikiItemIncarnation } from "./wiki.ts";
+import { endWikiItemIncarnation, removeWikiItemPages } from "./wiki.ts";
 
 export type UserAction = "approve" | "reject" | "dispute";
 
@@ -254,6 +255,7 @@ function undoCreated(
     }
     tx.run("DELETE FROM items WHERE id = ?", [ref.id]);
     endWikiItemIncarnation(tx, ref.id); // the id may be reused: nothing of the page's history follows it
+    removeWikiItemPages(tx, ref.id); // and neither does the stored page, which a build would only replace later
     return { status: "removed" };
   }
   const held =
@@ -297,6 +299,8 @@ function revertLine(
     revertsSeq: newest.seq,
     at,
   });
+  // a restored `verified` of a check-needing fact is judged where it comes back (S03 decision 36 ③)
+  if (ref.kind === "fact" && newest.fromStatus === "verified") judgeRestored(tx, ref.id, at);
   return { status: "applied", seq };
 }
 

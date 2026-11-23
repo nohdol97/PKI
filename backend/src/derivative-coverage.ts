@@ -97,6 +97,10 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   reflection_state: operational(
     "one row: the dirty sequence, the last run times, the weekly cursor (K02-R4)",
   ),
+  // notification lines (P02-T1): ids, codes and times, no text; the registered kind `notification` deletes the
+  // line of an Insight a deletion took (foreign key) and withdraws the line of one that no longer holds (P02-R13)
+  notifications: kind("notification"),
+  notify_state: operational("one row: the notification lines' change sequence number (P02-R14)"),
   jobs: operational("work queue: a row names a source by id and holds no content"),
   schedules: operational("periods of the schedule (I03)"),
   consents: operational("the user's consent per Provider"),

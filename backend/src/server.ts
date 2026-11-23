@@ -124,8 +124,10 @@ import {
 } from "./insight-view.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { createFeedbackApi } from "./feedback-api.ts";
+import { createNotifyRead } from "./notify-read.ts";
 import { createLintReads } from "./lint-read.ts";
 import { createExploreReads } from "./explore-read.ts";
+import { readSourceThread } from "./thread-read.ts";
 import { createWikiReads } from "./wiki-read.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -662,6 +664,8 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     () => options.decisions,
     (ref, at) => judgeAgain(itemsOfEntry(options.db, ref), [ref], at),
   );
+  /** P02-R14: the notification lines and the user's actions on them, through the same gate as every other read. */
+  const notify = createNotifyRead(options.db, registry, gate, feedback, lint, clock);
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -708,11 +712,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
           return {
             status: "refused" as const,
             reason: outcome.reason,
-            unmet: [...outcome.unmet],
+            unmet: [...gate.dataUnmetShown(ref.id)],
           };
         }
         return "held" in outcome
-          ? { status: "refused" as const, reason: outcome.reason, held: outcome.held }
+          ? { status: "refused" as const, reason: outcome.reason, held: gate.heldShown(ref.id) }
           : { status: "refused" as const, reason: outcome.reason };
       }
       const now = readSemanticState(options.db, ref);
@@ -1208,6 +1212,8 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     exploreItems: async (request) => explore.items(request),
     exploreItem: async (request) => explore.item(request) ?? { error: "not-found" as const },
     exploreSource: async (request) => explore.source(request) ?? { error: "not-found" as const },
+    sourceThread: async ({ versionId }) =>
+      readSourceThread(options.db, gate, versionId) ?? { error: "not-found" as const },
     // K02-R15: the lint. A decision runs in the transaction of the entry it calls
     lint: async () => lint.list(),
     lintDecide: async (request) => lint.decide(request, serverTime()),
@@ -1227,6 +1233,13 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     restoreBackup: async (input) =>
       options.backup?.restore(input) ?? { error: "connector-unavailable" },
     cancelRestore: async () => options.backup?.cancel() ?? { error: "connector-unavailable" },
+    // P02-R14, R16: notifications, their settings and the poll of change numbers
+    notifications: async () => notify.list(),
+    notificationDigest: async ({ id }) => notify.digest(id),
+    notificationAct: async (request) => notify.act(request, serverTime()),
+    notificationSettings: async () => notify.settings(),
+    setNotificationSettings: async (patch) => notify.writeSettings(patch),
+    changes: async () => notify.changes(),
     wikiRebuild: async () => {
       const requested = requestWikiRebuild(options.db);
       if (requested.status === "registered") options.onRunConditionsChanged?.();
