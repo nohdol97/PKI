@@ -12,6 +12,7 @@ import {
   entityGroups,
   rejudgeGroups,
   rootOf,
+  withGroups,
   type MembershipChange,
 } from "./entity-groups.ts";
 import {
@@ -568,6 +569,42 @@ describe("resolution.merge-unmerge: the membership notification (S02-R13)", () =
   });
 });
 
+describe("resolution.group-reads: the notification carries the action's own scope (S02-R13)", () => {
+  it("hands every listener the action's scope: combinable answers what the entry's policy answers, for merge, unmerge and split", () => {
+    const refused = { sourceId: 9999, version: 1 };
+    const allowed = { sourceId: 1, version: 1 };
+    const answers: [boolean, boolean][] = [];
+    const entry = createUserDecisions({
+      combinable: (_tx, lineage) => !lineage.some((v) => v.sourceId === refused.sourceId),
+      listeners: [
+        (_tx, _change, scope) =>
+          answers.push([scope.combinable([refused]), scope.combinable([allowed])]),
+      ],
+    });
+    const [a, b] = [extractedItem(), extractedItem()] as [number, number];
+    const merged = db.transaction(() => entry.entities.merge(db, a, b, AT));
+    if (merged.status !== "applied") throw new Error("merge");
+    db.transaction(() => entry.entities.unmerge(db, merged.mergeId, true, AT));
+    saveFact(db, { itemId: a, kind: "target_date", value: "2026-12-07", ...attrs });
+    const moved = saveFact(db, {
+      itemId: a,
+      kind: "target_date",
+      value: "2026-12-06",
+      ...attrs,
+    }).id;
+    expect(
+      db.transaction(() =>
+        entry.entities.split(db, a, [{ kind: "fact", id: moved }], "new item", AT),
+      ),
+    ).toMatchObject({ status: "applied" });
+    expect(answers).toEqual([
+      [false, true],
+      [false, true],
+      [false, true],
+    ]);
+  });
+});
+
 describe("resolution.scope (merge part): the scope policy and the group's resting (S02-R11, R13)", () => {
   /** A policy that will not put a source of scope "secret" together with any other scope. */
   const apart: ScopePolicy = {
@@ -690,5 +727,30 @@ describe("the S01 assumptions this task rests on, as they are in the code (S02 s
     expect(applyTransition(db, { kind: "fact", id: fact }, "user", "verified")).toMatchObject({
       status: "applied",
     });
+  });
+});
+
+describe("resolution.group-reads: withGroups finds the groups of a list in one read (S02-R13)", () => {
+  it("adds the members of every item's active group, once, ascending, and leaves lone items and resting groups alone", () => {
+    const [a, b, c, lone, p, q] = [1, 2, 3, 4, 5, 6].map(() => extractedItem()) as number[] as [
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+    ];
+    const entry = createUserDecisions({ combinable: () => true, listeners: [] });
+    for (const [m, r] of [
+      [a, b],
+      [b, c],
+      [p, q],
+    ] as const) {
+      db.transaction(() => entry.entities.merge(db, m, r, AT));
+    }
+    expect(withGroups(db, [c, lone, c])).toEqual([a, b, c, lone]);
+    expect(withGroups(db, [])).toEqual([]);
+    db.run("UPDATE item_merges SET active = 0 WHERE member_id = ?", [p]);
+    expect(withGroups(db, [q])).toEqual([q]);
   });
 });

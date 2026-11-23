@@ -48,6 +48,7 @@ import {
   createExtractHandler,
   createProductRegistry,
   createProjections,
+  dependencyDelayReceiver,
   derivativeRegistry,
   ENGINE_KIND,
   knowledgeCandidates,
@@ -140,10 +141,12 @@ export function productEngine(): KnowledgeEngine {
  * unmerge, a group resting or waking and a split announce to in their own transaction. Both users of the
  * list, the user's entry and the derivative kind `entity-merge`, are built from this one constant. A receiver
  * deletes or recomputes what rests on an item and never throws in a deletion's propagation (a throw rolls
- * that propagation back); S02-T05 (the rule's Insight), S02-T06 (candidates), S02-T08 (conflicts) and S03
- * (the check lines) add theirs here, at review. Empty until a receiver exists.
+ * that propagation). The rule's receiver (the Insight, S02-T05) is first; S02-T06 (candidates), S02-T08
+ * (conflicts) and S03 (the check lines) add theirs here, at review.
  */
-export const MEMBERSHIP_LISTENERS: readonly MembershipListener[] = Object.freeze([]);
+export const MEMBERSHIP_LISTENERS: readonly MembershipListener[] = Object.freeze([
+  dependencyDelayReceiver,
+]);
 
 /**
  * The derivative registry of the product (I04-R1): the ten canonical kinds and the two projections, the

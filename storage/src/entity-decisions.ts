@@ -20,6 +20,7 @@ import {
   lineageOfItems,
   linesAmong,
   notifyMembership,
+  type MembershipScope,
   rejudgeGroups,
   rootOf,
   type ItemId,
@@ -116,6 +117,7 @@ const ordered = (a: ItemId, b: ItemId): [ItemId, ItemId] => (a < b ? [a, b] : [b
 export function createEntityDecisions(options: EntityDecisionsOptions): EntityDecisions {
   const combinableIn = (tx: SqlDriver) => (lineage: readonly SourceVersionRef[]) =>
     options.combinable(tx, lineage);
+  const scopeIn = (tx: SqlDriver): MembershipScope => ({ combinable: combinableIn(tx) });
   return {
     merge(tx, member, into, at) {
       const memberType = typeOf(tx, member);
@@ -154,7 +156,7 @@ export function createEntityDecisions(options: EntityDecisionsOptions): EntityDe
       for (const line of linesAmong(tx, group)) {
         if (!line.active) tx.run("UPDATE item_merges SET active = 1 WHERE id = ?", [line.id]);
       }
-      notifyMembership(tx, options.listeners, { items: group, movedRows: [] });
+      notifyMembership(tx, options.listeners, { items: group, movedRows: [] }, scopeIn(tx));
       return { status: "applied", mergeId };
     },
 
@@ -178,7 +180,7 @@ export function createEntityDecisions(options: EntityDecisionsOptions): EntityDe
       // the two halves are groups of their own now; each is judged again
       rejudgeGroups(tx, [member, representative], combinableIn(tx));
       const reached = new Set([...componentOf(tx, member), ...componentOf(tx, representative)]);
-      notifyMembership(tx, options.listeners, { items: [...reached], movedRows: [] });
+      notifyMembership(tx, options.listeners, { items: [...reached], movedRows: [] }, scopeIn(tx));
       return { status: "applied", member, representative };
     },
 
@@ -235,13 +237,18 @@ export function createEntityDecisions(options: EntityDecisionsOptions): EntityDe
       );
       writeMergeLine(tx, item, "split", null, at);
       writeMergeLine(tx, created, "split", null, at);
-      notifyMembership(tx, options.listeners, {
-        items: [item, created],
-        movedRows: [
-          ...facts.map((id) => ({ kind: "fact" as const, id })),
-          ...relations.map((id) => ({ kind: "relation" as const, id })),
-        ],
-      });
+      notifyMembership(
+        tx,
+        options.listeners,
+        {
+          items: [item, created],
+          movedRows: [
+            ...facts.map((id) => ({ kind: "fact" as const, id })),
+            ...relations.map((id) => ({ kind: "relation" as const, id })),
+          ],
+        },
+        scopeIn(tx),
+      );
       return { status: "applied", created, movedFacts: facts, movedRelations: relations };
     },
 

@@ -271,6 +271,34 @@ describe("resolution.scope (merge part): a group rests and wakes with the scope 
     expect(db.all("SELECT count(*) AS n FROM facts")[0]?.n).toBe(3);
   });
 
+  it("hands the listeners the propagation's scope when a group rests or wakes: combinable answers what the registry's policy answers", () => {
+    const [open, other] = [itemFrom("open"), itemFrom("other")] as const;
+    merge(open.item, other.item);
+    const answers: boolean[][] = [];
+    const asking: MembershipListener = (_tx, _change, scope) =>
+      answers.push([
+        scope.combinable([{ sourceId: open.sourceId, version: open.version }]),
+        scope.combinable([
+          { sourceId: open.sourceId, version: open.version },
+          { sourceId: other.sourceId, version: other.version },
+        ]),
+      ]);
+    db.run("UPDATE sources SET access_scope = ? WHERE id = ?", [
+      JSON.stringify(["secret"]),
+      other.sourceId,
+    ]);
+    db.transaction(() =>
+      propagateCanonical(
+        db,
+        { kind: "scope-changed", sourceId: other.sourceId, from: null, to: ["secret"] },
+        AT,
+        registryOf(apart, [asking]),
+      ),
+    );
+    // one source alone is combinable; two with a secret one are not, by the policy `apart`
+    expect(answers).toEqual([[true, false]]);
+  });
+
   it.each(["source-deleted", "access-revoked", "user-deleted"] as const)(
     "wakes A and B of a resting {A, B, C} in the same propagation that deletes C's source (%s), and tells the listeners",
     (reason) => {

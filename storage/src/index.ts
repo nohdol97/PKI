@@ -235,13 +235,16 @@ export { rowLineage, unionOfVersions } from "./row-lineage.ts";
 export {
   listSemanticFacts,
   listSemanticItems,
+  listSemanticMembers,
   listSemanticRelations,
+  mergedIntoOf,
   itemsOfEntry,
   readSemanticHistory,
   readSemanticState,
   type SemanticFactView,
   type SemanticHistoryLine,
   type SemanticItemView,
+  type SemanticMemberView,
   type SemanticRelationView,
   type SemanticRowView,
 } from "./semantic-view.ts";
@@ -254,10 +257,12 @@ export {
   readMergeLine,
   rejudgeGroups,
   rootOf,
+  withGroups,
   type EntityGroups,
   type ItemId,
   type MembershipChange,
   type MembershipListener,
+  type MembershipScope,
   type MergeLine,
   type MovedRow,
 } from "./entity-groups.ts";
@@ -344,7 +349,7 @@ export {
   type ValueType,
 } from "./ontology.ts";
 export {
-  findRelation,
+  listRelationsBetween,
   listEvidenceVersions,
   listFactsOfKind,
   listInsightKeys,

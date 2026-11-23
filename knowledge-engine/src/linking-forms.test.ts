@@ -171,6 +171,42 @@ describe("linking.verified-forms: which forms the search reads", () => {
   });
 });
 
+/** A merge line as the user's entry leaves it: the member is the representative's; `active = 0` is a resting line. */
+const line = (member: number, representative: number, active = 1) =>
+  db.run("INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, ?, ?)", [
+    member,
+    representative,
+    active,
+    "2026-11-23T00:00:00.000Z",
+  ]);
+
+describe("resolution.group-reads: a member's name sends the representative (S02-R13)", () => {
+  it("finds the representative when only a member's name is in the text, once when both names are, with and without a registry", () => {
+    const [rep, member] = [item("대표 항목"), item("구성원 항목")] as const;
+    line(member, rep);
+    expect(find("구성원 항목 만")).toEqual([rep]);
+    expect(find("구성원 항목 과 대표 항목")).toEqual([rep]);
+    expect(findCandidates(db, "구성원 항목 만")).toEqual([rep]);
+    expect(findCandidates(db, "대표 항목 만")).toEqual([rep]);
+  });
+
+  it("finds the representative through a member's verified form, and not through a candidate-status one", () => {
+    const [rep, member] = [item("대표 항목"), item("구성원 항목")] as const;
+    line(member, rep);
+    setStatusForTest(db, "fact", alias(member, "MT"), "verified");
+    alias(member, "CANDIDATE"); // stays a candidate
+    expect(find("MT")).toEqual([rep]);
+    expect(find("CANDIDATE")).toEqual([]);
+  });
+
+  it("finds the member itself while its group rests, and sends each of them as it is", () => {
+    const [rep, member] = [item("대표 항목"), item("구성원 항목")] as const;
+    line(member, rep, 0);
+    expect(find("구성원 항목 만")).toEqual([member]);
+    expect(find("구성원 항목 과 대표 항목")).toEqual([rep, member]);
+  });
+});
+
 describe("linking.verified-forms: rules the search pins", () => {
   it("reads no form at all when called without a registry: names only, as before T09 (no ungated path)", () => {
     const a = item("멀티테넌시");
@@ -517,6 +553,67 @@ describe("linking.verified-forms: through the extract handler and the Broker", (
     const run = kit(sameScopeOnly);
     await run(sourceIn("doc", "사용자별칭 일정 메모", ["team-a"]));
     expect(requests.map((r) => r.candidateItemIds)).toEqual([[String(id)]]);
+  });
+
+  /** A representative named "검증 모듈" from `repFrom`, and its member named "연동 테스트" (the wiki fixture's wording) from `memberFrom`. */
+  function group(repFrom: { row: number }, memberFrom: { row: number }) {
+    const rep = item("검증 모듈");
+    quoted(
+      saveFact(db, { itemId: rep, kind: "target_date", value: "2026-12-01", ...attrs }).id,
+      repFrom,
+    );
+    const member = item("연동 테스트");
+    quoted(
+      saveFact(db, { itemId: member, kind: "target_date", value: "2026-12-02", ...attrs }).id,
+      memberFrom,
+    );
+    line(member, rep);
+    return { rep, member };
+  }
+
+  it("resolution.group-reads: offers the representative's id and name to the Provider as the only candidate, never the member's", async () => {
+    const { rep } = group(
+      stored(fixture("v02-mail.jsonl")),
+      stored(fixture("v02-messenger.jsonl")),
+    );
+    const run = kit();
+    await run(stored(fixture("v02-wiki.jsonl"))); // the text names the member
+    expect(requests.map((r) => r.candidateItemIds)).toEqual([[String(rep)]]);
+    expect(provider.requests.map((r) => r.input.candidates)).toEqual([
+      [{ id: String(rep), name: "검증 모듈" }],
+    ]);
+  });
+
+  it("resolution.group-reads: grades the call by the whole group's lineage, not the representative's own", async () => {
+    // the representative's sources are synthetic; the member's is a general one
+    group(stored(fixture("v02-mail.jsonl")), sourceIn("gen", "제목 일반", ["team"]));
+    const run = kit();
+    await run(stored(fixture("v02-wiki.jsonl")));
+    expect(egressAsked.at(-1)?.classification).toBe("general");
+  });
+
+  it("resolution.group-reads: keeps the call synthetic when every member's source is synthetic (control)", async () => {
+    group(stored(fixture("v02-mail.jsonl")), stored(fixture("v02-messenger.jsonl")));
+    const run = kit();
+    await run(stored(fixture("v02-wiki.jsonl")));
+    expect(egressAsked.at(-1)?.classification).toBe("synthetic");
+  });
+
+  it("resolution.group-reads: offers no representative when a member's source cannot be put together with this document", async () => {
+    const rep = item("멀티테넌시");
+    quoted(
+      saveFact(db, { itemId: rep, kind: "target_date", value: "2026-12-01", ...attrs }).id,
+      sourceIn("a", "제목 가", ["team-a"]),
+    );
+    const member = item("다중 임차");
+    quoted(
+      saveFact(db, { itemId: member, kind: "target_date", value: "2026-12-02", ...attrs }).id,
+      sourceIn("b", "제목 나", ["team-b"]),
+    );
+    line(member, rep);
+    const run = kit(sameScopeOnly);
+    await run(sourceIn("doc", "다중 임차 일정 메모", ["team-a"]));
+    expect(requests.map((r) => r.candidateItemIds)).toEqual([[]]);
   });
 
   it("passes the extraction's own registry to the search: a form the policy hides is not offered to the Provider", async () => {

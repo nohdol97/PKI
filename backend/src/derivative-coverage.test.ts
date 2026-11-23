@@ -3,7 +3,7 @@
 // the implementations the composition binds. Each fails closed on what nobody registered.
 import { routes } from "@pki/contracts";
 import { computePolicyVersion, DEFAULT_PROVIDER_SETTING } from "@pki/providers";
-import { createProductRegistry } from "@pki/knowledge-engine";
+import { createProductRegistry, dependencyDelayReceiver } from "@pki/knowledge-engine";
 import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   createDerivativeRegistry,
@@ -20,7 +20,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
-import { openCanonicalDb, productEngine, productRegistry } from "./composition.ts";
+import {
+  MEMBERSHIP_LISTENERS,
+  openCanonicalDb,
+  productEngine,
+  productRegistry,
+} from "./composition.ts";
 import {
   checkBoundAdapters,
   checkDataDirectory,
@@ -51,6 +56,13 @@ function freshDb() {
   migrate(db);
   return db;
 }
+
+describe("resolution.group-reads: the membership receivers (S02-R13)", () => {
+  it("are one fixed list with the rule's receiver first, and both the registry and the user's entry are built from it", () => {
+    expect(Object.isFrozen(MEMBERSHIP_LISTENERS)).toBe(true);
+    expect(MEMBERSHIP_LISTENERS).toEqual([dependencyDelayReceiver]);
+  });
+});
 
 describe("derivatives.schema-coverage", () => {
   it("every table of the migrated schema is classified, and nothing classified is missing", () => {
