@@ -185,12 +185,18 @@ describe("jsonl-file location (I02B-C33): the life of the instance", () => {
     expect(period(booted as NonNullable<typeof booted>, goneId)?.enabled).toBe(true);
     // the process died after the revocation's last transaction (the row is gone) and before `revoked()`
     t.db.run("DELETE FROM local_locations WHERE id = ?", [goneId]);
+    // and a location still `revoking` at the start has no instance either
+    const revokingId = await t.approve(
+      file("rev.jsonl", lines(line({ external_id: "v1", id: "r3" }))),
+    );
+    t.db.run("UPDATE local_locations SET state = 'revoking' WHERE id = ?", [revokingId]);
 
     const again = await restart();
     void again;
     const running = booted as NonNullable<typeof booted>;
     expect(period(running, goneId)?.enabled).toBe(false);
     expect(period(running, liveId)?.enabled).toBe(true);
+    expect(period(running, revokingId)?.enabled).toBe(false);
   });
 
   it("refuses a path that was swapped for a symlink or for another file, and reads nothing from it", async () => {

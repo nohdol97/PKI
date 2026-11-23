@@ -38,7 +38,7 @@ export function jsonlFileInstances(db: SqlDriver): ConnectorInstanceConfig[] {
 }
 
 /**
- * The start's sweep (I02B-R53): the period of a `jsonl-file:` instance whose location row is gone (the process died
+ * The start's sweep (I02B-R53): the period of an approved JSONL file location's instance whose location row is gone (the process died
  * between the revocation's last transaction and `revoked()`) or is `revoking` (it has no instance, see above) is
  * turned off, as `revoked()` does; it would only pile up `instance-not-found` dead letters.
  */
