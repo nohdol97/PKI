@@ -16,6 +16,7 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { CANONICAL_DB_FILE, openCanonicalDb, productImporter } from "./composition.ts";
 import { EXTRACT_JOB_KIND, tryLockInstance, type SyncOptions } from "./connectors.ts";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
+import { JSONL_FILE_INSTANCE_PREFIX } from "./public-kinds.ts";
 import {
   IMPORT_ERROR_LIMIT,
   importJsonl as importJsonlWith,
@@ -321,6 +322,22 @@ describe("importJsonl", () => {
     expect(db.all("SELECT kind FROM connector_instances WHERE id = 'site-mail'")).toEqual([
       { kind: "site-mail" },
     ]);
+  });
+
+  it("refuses a line that names a `jsonl-file:` instance id and writes nothing for it (I02B-R52, #258 F3)", async () => {
+    const result = await importJsonl(
+      db,
+      [
+        line({ connector_instance_id: `${JSONL_FILE_INSTANCE_PREFIX}loc-1` }),
+        line({ external_id: "ok" }),
+      ].join("\n"),
+    );
+    expect(result).toEqual(
+      reply({ received: 1, created: 1, errors: [{ line: 1, reason: "instance-conflict" }] }),
+    );
+    expect(
+      db.all("SELECT id FROM connector_instances WHERE id LIKE 'jsonl-file:%'"),
+    ).toEqual([]);
   });
 
   it("stores v1 and v2 of one source in one file as two versions with two jobs (R2, review A-M1)", async () => {
