@@ -33,7 +33,9 @@ const CANARY = "CANARY-import-text-5530";
 
 // The ordering cases open hundreds of throwaway DBs. Migrating a fresh file DB costs ~200 ms
 // (fsync-bound); a copy of one already-migrated directory costs ~20 ms. Every case still opens
-// through the product's `openCanonicalDb`, so nothing but the migration time is shared.
+// through the product's `openCanonicalDb`. Besides the migration, every case shares the
+// template's random identity key and the deletion ledger beside it (which records that key),
+// so the same identity hashes to the same value in every case.
 let templateRoot: string;
 let templateDir: string;
 beforeAll(() => {
