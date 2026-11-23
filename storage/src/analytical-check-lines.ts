@@ -6,6 +6,7 @@
 import { registerAnalyticalCheckJob } from "./analytical.ts";
 import type { SourceVersionRef } from "./derivatives.ts";
 import type { MembershipListener } from "./entity-groups.ts";
+import type { EntryRef } from "./semantic-lifecycle.ts";
 import { listSplitMoves } from "./split-moves.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -142,11 +143,8 @@ export function listCheckLines(tx: SqlDriver, factId: number): StoredCheckLine[]
 
 // ---- erasing the lines another row's change makes stale (S03-R11) ------------------------------------------
 
-/** One row of the registry, as the analytical code names it: a fact or a relation. */
-export interface AnalyticalRowRef {
-  kind: "fact" | "relation";
-  id: number;
-}
+/** A row of the registry; an item is not an analytical row and is answered as such (no lines, no jobs). */
+export type AnalyticalRowRef = EntryRef;
 
 /** Whether any table was ever profiled: until then the analytical hooks read nothing else (dark launch, root 13-5). */
 const anyTable = (tx: SqlDriver): boolean =>
@@ -244,6 +242,7 @@ function readersOf(
   tx: SqlDriver,
   ref: AnalyticalRowRef,
 ): { item: number; readers: readonly Reader[]; except?: number } | undefined {
+  if (ref.kind === "item") return undefined;
   if (ref.kind === "fact") {
     const row = tx.all("SELECT item_id, kind FROM facts WHERE id = ?", [ref.id])[0];
     if (!row) return undefined;
@@ -274,7 +273,7 @@ const deleteLines = (tx: SqlDriver, ids: readonly number[]) =>
  * table was ever profiled.
  */
 export function eraseChecksReading(tx: SqlDriver, ref: AnalyticalRowRef): number[] {
-  if (!anyTable(tx)) return [];
+  if (ref.kind === "item" || !anyTable(tx)) return [];
   const found = readersOf(tx, ref);
   if (!found) return [];
   deleteLines(tx, linesOf(tx, found.readers, found.item, found.except));

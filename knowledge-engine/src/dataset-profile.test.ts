@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { normalizeDocument } from "@pki/document-normalize";
 import {
+  ANALYTICAL_CHECK_JOB_KIND,
   closeJob,
   DATASET_PROFILE_KIND,
   findDatasetTable,
@@ -314,6 +315,43 @@ describe("profile.dataset: the switch is read when the job runs", () => {
     expect(registerDatasetProfileJob(db, { sourceId: 1, version: 1, at: T0 })).toBe(true);
     await runNext();
     expect(tables()).toHaveLength(1);
+  });
+});
+
+describe("check.job: the profile hands over to the check job", () => {
+  const checkJobs = () =>
+    db.all("SELECT source_id, fence_version, status FROM jobs WHERE kind = ?", [
+      ANALYTICAL_CHECK_JOB_KIND,
+    ]);
+
+  it("check.job: the profile's closing transaction queues the check job of its source", async () => {
+    const ref = arrive(
+      "sales",
+      "주문표",
+      csvVersion([
+        ["a", "b"],
+        ["1", "2"],
+      ]),
+    );
+    expect(checkJobs()).toEqual([]);
+    await runNext();
+    expect(checkJobs()).toEqual([
+      { source_id: ref.sourceId, fence_version: ref.version, status: "queued" },
+    ]);
+  });
+
+  it("check.job: a profile that writes nothing because the switch is OFF queues none", async () => {
+    arrive(
+      "sales",
+      "주문표",
+      csvVersion([
+        ["a", "b"],
+        ["1", "2"],
+      ]),
+    );
+    setAnalyticalProfile(db, false, T0);
+    await runNext();
+    expect(checkJobs()).toEqual([]);
   });
 });
 

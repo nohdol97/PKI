@@ -197,7 +197,7 @@ export function writeLine(tx: SqlDriver, ref: EntryRef, line: Line): number {
     );
   }
   // a fact or relation a check line reads was made or changed state: erase what read it, queue what reaches it
-  if (ref.kind !== "item") analyticalRowChanged(tx, ref, line.at ? new Date(line.at) : undefined);
+  analyticalRowChanged(tx, ref, line.at ? new Date(line.at) : undefined);
   return seq;
 }
 
