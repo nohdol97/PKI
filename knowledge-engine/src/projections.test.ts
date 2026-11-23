@@ -17,7 +17,12 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
-import { MemoryKnowledgeEngine, MemoryVectorIndex, memoryDbTemplate } from "@pki/testkit";
+import {
+  activateEmpty,
+  MemoryKnowledgeEngine,
+  MemoryVectorIndex,
+  memoryDbTemplate,
+} from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NullKnowledgeEngine } from "./adapters/null-knowledge-engine.ts";
 import {
@@ -144,7 +149,7 @@ describe("notices", () => {
 describe("delivery", () => {
   it("upserts each stored version and removes the replaced one, in the engine and the index", async () => {
     const { engine, vectorIndex, projections } = setup();
-    await vectorIndex.reset(SPACE);
+    await activateEmpty(vectorIndex, SPACE);
     await projections.notify([store("a", "alpha"), store("b", "beta")]);
     await projections.notify([store("a", "gamma")]);
     const a = String(sourceIdOf("a"));
@@ -303,11 +308,11 @@ describe("reconcile (start-up comparison)", () => {
 
   it("does not rebuild a projection that applied the canonical change sequence", async () => {
     const { engine, vectorIndex, projections } = setup();
-    await vectorIndex.reset(SPACE);
+    await activateEmpty(vectorIndex, SPACE);
     await projections.notify([store("a", "alpha")]);
     expect(await projections.reconcile()).toEqual({ engine: "current", vectorIndex: "current" });
     expect(engine.rebuild).not.toHaveBeenCalled();
-    expect(vectorIndex.reset).toHaveBeenCalledTimes(1); // the test's own
+    expect(vectorIndex.beginRebuild).toHaveBeenCalledTimes(1); // the test's own
   });
 
   it("rebuilds the null engine on every start, whatever the change sequence (no kind check)", async () => {
@@ -323,7 +328,7 @@ describe("reconcile (start-up comparison)", () => {
     store("a", "alpha");
     const { vectorIndex, projections } = setup();
     expect(await projections.reconcile()).toMatchObject({ vectorIndex: "rebuilt" });
-    expect(vectorIndex.reset).toHaveBeenCalledWith(SPACE);
+    expect(vectorIndex.beginRebuild).toHaveBeenCalledWith(SPACE);
     expect(await vectorIndex.appliedChangeSeq()).toBe(1);
     expect(await projections.reconcile()).toMatchObject({ vectorIndex: "current" });
   });

@@ -53,7 +53,7 @@ const spaceOf = (embedder: FakeEmbedder): EmbeddingSpace => {
   return { modelId, revision, dimension };
 };
 
-function setup(
+async function setup(
   options: {
     embedder?: FakeEmbedder;
     index?: VectorIndex;
@@ -64,6 +64,7 @@ function setup(
 ) {
   const embedder = options.embedder ?? new FakeEmbedder();
   const index = options.index ?? new MemoryVectorIndex();
+  await embedder.prepare({ kind: "download" }, new AbortController().signal);
   const requested: string[] = [];
   let calls = 0;
   const projections = createProjections({
@@ -99,7 +100,7 @@ describe("rebuild and notice (H01C3-C2)", () => {
     store("a", "alpha");
     store("a", "alpha two");
     store("b", "beta");
-    const { embedder, index, projections } = setup();
+    const { embedder, index, projections } = await setup();
     await projections.rebuild("vectorIndex", readChangeSeq(db));
 
     const [a, b] = [sourceIdOf("a"), sourceIdOf("b")];
@@ -119,7 +120,7 @@ describe("rebuild and notice (H01C3-C2)", () => {
   it("never calls an embedder whose egress is not local, on rebuild or on a notice", async () => {
     store("a", "alpha");
     const embedder = new FakeEmbedder({ egress: "external" });
-    const { index, projections } = setup({ embedder });
+    const { index, projections } = await setup({ embedder });
     await expect(projections.rebuild("vectorIndex", readChangeSeq(db))).rejects.toThrow(
       /egress denied/,
     );
@@ -134,7 +135,7 @@ describe("a source deleted while the index is being built (H01C3-C3)", () => {
     store("a", "alpha");
     store("b", "beta");
     store("c", "gamma");
-    const { embedder, index, projections } = setup({
+    const { embedder, index, projections } = await setup({
       batchSize: 1,
       // the first batch is already in the building generation when `a` is deleted: only its removal job, which
       // waits behind the rebuild, would reach the index
@@ -165,7 +166,7 @@ describe("replacing the embedding (H01C3-C4)", () => {
       return build;
     };
     const embedderA = new FakeEmbedder({ modelId: "model-a" });
-    await setup({ embedder: embedderA, index }).projections.rebuild("vectorIndex", 3);
+    await (await setup({ embedder: embedderA, index })).projections.rebuild("vectorIndex", 3);
     builds.length = 0;
     return { index, embedderA, builds };
   }
@@ -182,7 +183,7 @@ describe("replacing the embedding (H01C3-C4)", () => {
     const { index, embedderA, builds } = await activeWithModelA();
     const before = await nearest(embedderA, index, "a", "alpha");
     const controller = new AbortController();
-    const { projections } = setup({
+    const { projections } = await setup({
       embedder: modelB(),
       index,
       batchSize: 1,
@@ -204,7 +205,7 @@ describe("replacing the embedding (H01C3-C4)", () => {
   it("switches to the new space at the sequence it read when the rebuild finishes", async () => {
     const { index } = await activeWithModelA();
     const embedderB = modelB();
-    const { projections } = setup({ embedder: embedderB, index, batchSize: 2 });
+    const { projections } = await setup({ embedder: embedderB, index, batchSize: 2 });
     await projections.rebuild("vectorIndex", 3);
     expect(await index.embeddingSpace()).toEqual(spaceOf(embedderB));
     expect(await index.appliedChangeSeq()).toBe(3);
@@ -215,7 +216,7 @@ describe("replacing the embedding (H01C3-C4)", () => {
 describe("the start comparison (H01C3-R10)", () => {
   it("asks for a rebuild job when the index is behind or in another space, and embeds nothing itself", async () => {
     store("a", "alpha");
-    const { embedder, index, projections, requested } = setup();
+    const { embedder, index, projections, requested } = await setup();
     expect(await projections.reconcile()).toMatchObject({ vectorIndex: "requested" });
     expect(requested).toEqual(["vectorIndex"]);
     expect(projections.isStale("vectorIndex")).toBe(true);
@@ -225,7 +226,7 @@ describe("the start comparison (H01C3-R10)", () => {
     expect(await projections.reconcile()).toMatchObject({ vectorIndex: "current" });
     expect(requested).toHaveLength(1);
 
-    const other = setup({ embedder: new FakeEmbedder({ modelId: "model-b" }), index });
+    const other = await setup({ embedder: new FakeEmbedder({ modelId: "model-b" }), index });
     expect(await other.projections.reconcile()).toMatchObject({ vectorIndex: "requested" });
     expect(embedder.calls.embed).toHaveLength(1); // the one rebuild above, none from either start
   });
