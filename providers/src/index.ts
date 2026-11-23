@@ -102,6 +102,8 @@ export {
   EXTRACT_STATEMENT_FACT_KIND,
   EXTRACT_TERM_KINDS,
   TASKS,
+  WIKI_SUMMARY_SCHEMA_VERSION,
   type ExtractionOutput,
   type TaskDefinition,
+  type WikiSummaryOutput,
 } from "./tasks.ts";

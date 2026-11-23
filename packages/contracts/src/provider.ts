@@ -23,7 +23,7 @@ export function providerEgress(provider: string): "external" | "local" {
   return provider === "local-model" ? "local" : "external";
 }
 
-export const TASK_KINDS = ["extract", "connection-test"] as const;
+export const TASK_KINDS = ["extract", "connection-test", "wiki-summary"] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
 /** A canonical-store row ID as the API carries it: a positive decimal integer. */
