@@ -1,0 +1,300 @@
+{
+  "types": {
+    "important_change": {
+      "support": "supported",
+      "scenario": {
+        "items": [
+          {
+            "ref": "p",
+            "type": "Project",
+            "name": "미리내 프로젝트"
+          }
+        ],
+        "sources": [
+          {
+            "ref": "s1",
+            "body": "목표일은 2026-12-05 입니다."
+          },
+          {
+            "ref": "s2",
+            "body": "일정이 바뀌어 목표일은 2026-12-12 입니다."
+          }
+        ],
+        "facts": [
+          {
+            "item": "p",
+            "kind": "target_date",
+            "value": "2026-12-05",
+            "source": "s1",
+            "quote": "목표일은 2026-12-05",
+            "validAt": "2026-11-01"
+          },
+          {
+            "item": "p",
+            "kind": "target_date",
+            "value": "2026-12-12",
+            "source": "s2",
+            "quote": "목표일은 2026-12-12",
+            "validAt": "2026-11-15"
+          }
+        ],
+        "relations": []
+      },
+      "variant": {
+        "facts": [
+          {
+            "item": "p",
+            "kind": "target_date",
+            "value": "2026-12-12",
+            "source": "s2",
+            "quote": "목표일은 2026-12-12",
+            "validAt": "2026-11-15"
+          }
+        ]
+      },
+      "expected": {
+        "x": "p",
+        "y": "p",
+        "factLines": ["미리내 프로젝트의 target_date: 2026-12-05 → 2026-12-12"],
+        "evidenceQuotes": ["목표일은 2026-12-05", "목표일은 2026-12-12"]
+      }
+    },
+    "schedule_conflict": {
+      "support": "supported",
+      "scenario": {
+        "items": [
+          {
+            "ref": "p",
+            "type": "Project",
+            "name": "미리내 프로젝트"
+          }
+        ],
+        "sources": [
+          {
+            "ref": "s1",
+            "body": "목표일은 2026-12-05 입니다."
+          },
+          {
+            "ref": "s2",
+            "body": "완료 예정일은 2026-12-10 입니다."
+          }
+        ],
+        "facts": [
+          {
+            "item": "p",
+            "kind": "target_date",
+            "value": "2026-12-05",
+            "source": "s1",
+            "quote": "목표일은 2026-12-05"
+          },
+          {
+            "item": "p",
+            "kind": "completion_date",
+            "value": "2026-12-10",
+            "source": "s2",
+            "quote": "완료 예정일은 2026-12-10"
+          }
+        ],
+        "relations": []
+      },
+      "variant": {
+        "facts": [
+          {
+            "item": "p",
+            "kind": "target_date",
+            "value": "2026-12-05",
+            "source": "s1",
+            "quote": "목표일은 2026-12-05"
+          },
+          {
+            "item": "p",
+            "kind": "completion_date",
+            "value": "2026-12-03",
+            "source": "s2",
+            "quote": "완료 예정일은"
+          }
+        ]
+      },
+      "expected": {
+        "x": "p",
+        "y": "p",
+        "factLines": [
+          "미리내 프로젝트의 목표일: 2026-12-05",
+          "미리내 프로젝트의 완료일: 2026-12-10"
+        ],
+        "evidenceQuotes": ["목표일은 2026-12-05", "완료 예정일은 2026-12-10"]
+      }
+    },
+    "dependency_delay": {
+      "support": "supported",
+      "scenario": {
+        "items": [
+          {
+            "ref": "x",
+            "type": "Project",
+            "name": "미리내 프로젝트"
+          },
+          {
+            "ref": "y",
+            "type": "System",
+            "name": "물결 API"
+          }
+        ],
+        "sources": [
+          {
+            "ref": "s1",
+            "body": "목표일은 2026-12-05 입니다."
+          },
+          {
+            "ref": "s2",
+            "body": "미리내 프로젝트는 물결 API에 의존합니다."
+          },
+          {
+            "ref": "s3",
+            "body": "물결 API 완료 예정일은 2026-12-10 입니다."
+          }
+        ],
+        "facts": [
+          {
+            "item": "x",
+            "kind": "target_date",
+            "value": "2026-12-05",
+            "source": "s1",
+            "quote": "목표일은 2026-12-05"
+          },
+          {
+            "item": "y",
+            "kind": "completion_date",
+            "value": "2026-12-10",
+            "source": "s3",
+            "quote": "완료 예정일은 2026-12-10"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "x",
+            "type": "DEPENDS_ON",
+            "object": "y",
+            "source": "s2",
+            "quote": "물결 API에 의존합니다"
+          }
+        ]
+      },
+      "variant": {
+        "facts": [
+          {
+            "item": "x",
+            "kind": "target_date",
+            "value": "2026-12-05",
+            "source": "s1",
+            "quote": "목표일은 2026-12-05"
+          },
+          {
+            "item": "y",
+            "kind": "completion_date",
+            "value": "2026-12-03",
+            "source": "s3",
+            "quote": "완료 예정일은"
+          }
+        ]
+      },
+      "expected": {
+        "x": "x",
+        "y": "y",
+        "factLines": [
+          "미리내 프로젝트의 목표일: 2026-12-05",
+          "미리내 프로젝트 → 물결 API 의존(DEPENDS_ON)",
+          "물결 API의 예상 완료일: 2026-12-10"
+        ],
+        "evidenceQuotes": [
+          "목표일은 2026-12-05",
+          "물결 API에 의존합니다",
+          "완료 예정일은 2026-12-10"
+        ]
+      }
+    },
+    "decision_change": {
+      "support": "unsupported"
+    },
+    "conflict": {
+      "support": "supported",
+      "scenario": {
+        "items": [
+          {
+            "ref": "p",
+            "type": "Project",
+            "name": "미리내 프로젝트"
+          }
+        ],
+        "sources": [
+          {
+            "ref": "s1",
+            "body": "목표일은 2026-12-05 입니다."
+          },
+          {
+            "ref": "s2",
+            "body": "다른 문서에는 목표일이 2026-12-12 라고 적혀 있습니다."
+          }
+        ],
+        "facts": [
+          {
+            "item": "p",
+            "kind": "target_date",
+            "value": "2026-12-05",
+            "source": "s1",
+            "quote": "목표일은 2026-12-05"
+          },
+          {
+            "item": "p",
+            "kind": "target_date",
+            "value": "2026-12-12",
+            "source": "s2",
+            "quote": "목표일이 2026-12-12"
+          }
+        ],
+        "relations": []
+      },
+      "variant": {
+        "facts": [
+          {
+            "item": "p",
+            "kind": "target_date",
+            "value": "2026-12-05",
+            "source": "s1",
+            "quote": "목표일은 2026-12-05"
+          }
+        ]
+      },
+      "expected": {
+        "x": "p",
+        "y": "p",
+        "factLines": ["미리내 프로젝트의 target_date: \"2026-12-05\" ↔ \"2026-12-12\""],
+        "evidenceQuotes": ["목표일은 2026-12-05", "목표일이 2026-12-12"]
+      }
+    },
+    "pending_request": {
+      "support": "unsupported"
+    },
+    "open_issue": {
+      "support": "unsupported"
+    },
+    "similar_resolution": {
+      "support": "unsupported"
+    },
+    "related_document": {
+      "support": "unsupported"
+    },
+    "opportunity": {
+      "support": "unsupported"
+    },
+    "policy_change": {
+      "support": "unsupported"
+    },
+    "new_relation": {
+      "support": "unsupported"
+    },
+    "missed_information": {
+      "support": "unsupported"
+    }
+  }
+}
