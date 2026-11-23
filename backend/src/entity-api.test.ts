@@ -638,6 +638,17 @@ describe("GET /api/entities/candidates (S02-R25) and the candidates' upkeep (S02
     });
   });
 
+  it("a candidate whose two groups may not be put together is not listed (S02-R24, decision 31 ⑧)", async () => {
+    pair(["a", "b"], [["x"], ["y"]]);
+    expect(stored()).toHaveLength(1);
+    const registry = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: { ...defaultScopePolicy, combinable: (scopes) => scopes.length <= 1 },
+    });
+    await start({ registry });
+    expect((await call("entityCandidates")).body).toEqual({ candidates: [], truncated: false });
+  });
+
   it("accepting merges and clears the row; an unmerge without a mark brings it back; dismissing clears it and it does not come back", async () => {
     const { a, b } = pair(["a", "b"]);
     const registry = createProductRegistry({ policy: defaultScopePolicy });
