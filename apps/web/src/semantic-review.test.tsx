@@ -167,12 +167,13 @@ describe("지식 검토 (X02-C2c)", () => {
   });
 
   it("reads the chosen status from the server and appends the next page after `after` (X02B-C5 ①)", async () => {
-    const item = (id: number) => ({ ...list("verified").items[0]!, id, name: `항목${id}` });
+    const item = (id: number) =>
+      list("verified").items.map((i) => ({ ...i, id, name: `항목${id}` }));
     const { api, calls } = fake({
       semanticPage: (request) =>
         (request as { after?: number }).after === undefined
-          ? { items: [item(1)], next: 1 }
-          : { items: [item(2)], next: null },
+          ? { items: item(1), next: 1 }
+          : { items: item(2), next: null },
       conflicts: () => noConflicts,
       entityCandidates: () => ({ candidates: [], truncated: false }),
     });
