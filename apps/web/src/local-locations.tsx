@@ -3,19 +3,44 @@
 // one-time ticket it returns; the page never holds the path. In browser development (Vite dev server) a
 // labelled input takes a typed absolute path instead; the branch tests the compile-time `import.meta.env.DEV`,
 // so the production build drops it and its label (bundle check: apps/desktop/e2e/build-web.setup.ts).
-import type { LocalApprovalRejectionCode, LocalLocationList } from "@pki/contracts";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import type {
+  LocalApprovalRejectionCode,
+  LocalLocationInfo,
+  LocalLocationList,
+  LocalSkippedResponse,
+} from "@pki/contracts";
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import {
+  ConfirmDialog,
+  LocationActions,
+  SkippedList,
+  type LocationAction,
+} from "./local-location-actions.tsx";
+import {
+  ACTION_REFUSAL_TEXT,
   APPROVAL_REJECTION_TEXT,
+  CONFIRM_DELETIONS_WARNING_TEXT,
   LOCATION_STATE_TEXT,
   NORMALIZER_UNAVAILABLE_TEXT,
   NOT_WATCHING_TEXT,
+  REVOKE_WARNING_TEXT,
 } from "./local-locations-text.ts";
 
 /** The part of the Electron preload's `window.pki` this section uses. */
 export interface PickerBridge {
   pickLocation?(type: "folder"): Promise<{ ticket: string | null }>;
+}
+
+const noAction = () => undefined;
+
+/** A refused or failed action as the text the user reads. */
+export function actionFailure(error: unknown): string {
+  if (error instanceof ApiError) {
+    const text = ACTION_REFUSAL_TEXT[error.code];
+    if (text !== undefined) return text;
+  }
+  return `하지 못했습니다: ${error instanceof Error ? error.message : String(error)}`;
 }
 
 export type AddResult = { added: true } | { added: false; text: string };
@@ -49,7 +74,18 @@ export async function pickAndAdd(
   return ticket === null ? undefined : addFolder(api, { type: "folder", ticket });
 }
 
-export function LocationList({ list }: { list: LocalLocationList }) {
+export function LocationList({
+  list,
+  onAction = noAction,
+  skipped,
+  onReimport = noAction,
+}: {
+  list: LocalLocationList;
+  onAction?: (action: LocationAction, location: LocalLocationInfo) => void;
+  /** The open skipped list, with the location it belongs to. */
+  skipped?: { locationId: string; page: LocalSkippedResponse } | undefined;
+  onReimport?: (locationId: string, relativePath: string) => void;
+}) {
   return (
     <>
       {list.normalizerUnavailable && <p role="alert">{NORMALIZER_UNAVAILABLE_TEXT}</p>}
@@ -63,22 +99,41 @@ export function LocationList({ list }: { list: LocalLocationList }) {
               <th scope="col">상태</th>
               <th scope="col">읽은 파일 / 건너뜀 / 무시</th>
               <th scope="col">마지막 훑기</th>
+              <th scope="col">동작</th>
             </tr>
           </thead>
           <tbody>
             {list.locations.map((l) => (
-              <tr key={l.id}>
-                <td>
-                  <bdi>{l.displayPath}</bdi>
-                </td>
-                <td>
-                  {LOCATION_STATE_TEXT[l.state]} · {NOT_WATCHING_TEXT}
-                </td>
-                <td>
-                  {l.counts.tracked} / {l.counts.skipped} / {l.counts.ignored}
-                </td>
-                <td>{l.lastPassAt ?? "아직 없음"}</td>
-              </tr>
+              <Fragment key={l.id}>
+                <tr>
+                  <td>
+                    <bdi>{l.displayPath}</bdi>
+                  </td>
+                  <td>
+                    {LOCATION_STATE_TEXT[l.state]}
+                    {l.state === "revoking" && ` · 남은 원본 ${l.counts.sources}개`}
+                    {" · "}
+                    {l.watching ? "실시간 감시 중" : NOT_WATCHING_TEXT}
+                  </td>
+                  <td>
+                    {l.counts.tracked} / {l.counts.skipped} / {l.counts.ignored}
+                  </td>
+                  <td>{l.lastPassAt ?? "아직 없음"}</td>
+                  <td>
+                    <LocationActions location={l} onAction={onAction} />
+                  </td>
+                </tr>
+                {skipped?.locationId === l.id && (
+                  <tr>
+                    <td colSpan={5}>
+                      <SkippedList
+                        page={skipped.page}
+                        onReimport={(path) => onReimport(l.id, path)}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -98,6 +153,11 @@ export function LocalLocations({
   const [refusal, setRefusal] = useState<string>();
   const [path, setPath] = useState("");
   const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState<{
+    kind: "revoke" | "confirm";
+    location: LocalLocationInfo;
+  }>();
+  const [skipped, setSkipped] = useState<{ locationId: string; page: LocalSkippedResponse }>();
 
   const load = useCallback(() => {
     api("localLocations").then(setList, () => undefined);
@@ -116,7 +176,74 @@ export function LocalLocations({
     }
   }
 
+  /** One backend action; a refusal becomes its text, and the list is reloaded either way. */
+  async function act(task: () => Promise<unknown>) {
+    setBusy(true);
+    setRefusal(undefined);
+    try {
+      await task();
+    } catch (error) {
+      setRefusal(actionFailure(error));
+    } finally {
+      setBusy(false);
+      load();
+    }
+  }
+
   const pick = bridge?.pickLocation?.bind(bridge);
+
+  async function openSkipped(locationId: string) {
+    const page = await api("localSkipped", { locationId });
+    setSkipped({ locationId, page });
+  }
+
+  function onAction(action: LocationAction, location: LocalLocationInfo) {
+    const locationId = location.id;
+    switch (action) {
+      case "pause":
+        return void act(() => api("pauseLocalLocation", { locationId }));
+      case "resume":
+        return void act(() => api("resumeLocalLocation", { locationId }));
+      case "rescan":
+        return void act(() => api("rescanLocalLocation", { locationId }));
+      case "relink":
+        return void act(async () => {
+          if (import.meta.env.DEV) {
+            await api("relinkLocalLocation", { locationId, path });
+          } else if (pick) {
+            const { ticket } = await pick("folder");
+            if (ticket !== null) await api("relinkLocalLocation", { locationId, ticket });
+          }
+        });
+      case "confirm":
+      case "revoke":
+        return setDialog({ kind: action, location });
+      case "revokeContinue":
+        return void act(() =>
+          api("revokeLocalLocation", { locationId, count: location.counts.sources }),
+        );
+      case "skipped":
+        return void act(async () => {
+          if (skipped?.locationId === locationId) setSkipped(undefined);
+          else await openSkipped(locationId);
+        });
+    }
+  }
+
+  function confirmDialog() {
+    if (!dialog) return;
+    const { kind, location } = dialog;
+    setDialog(undefined);
+    void act(() =>
+      kind === "revoke"
+        ? api("revokeLocalLocation", { locationId: location.id, count: location.counts.sources })
+        : api("confirmLocalDeletions", {
+            locationId: location.id,
+            count: location.counts.pendingDeletes,
+          }),
+    );
+  }
+
   const submitTyped = (event: FormEvent) => {
     event.preventDefault();
     void run(() => addFolder(api, { type: "folder", path }));
@@ -125,7 +252,36 @@ export function LocalLocations({
   return (
     <section aria-labelledby="local-locations-heading">
       <h2 id="local-locations-heading">로컬 자료</h2>
-      <div aria-live="polite">{list && <LocationList list={list} />}</div>
+      <div aria-live="polite">
+        {list && (
+          <LocationList
+            list={list}
+            onAction={onAction}
+            skipped={skipped}
+            onReimport={(locationId, relativePath) =>
+              void act(async () => {
+                await api("reimportLocalFile", { locationId, relativePath });
+                await openSkipped(locationId);
+              })
+            }
+          />
+        )}
+      </div>
+      {dialog && (
+        <ConfirmDialog
+          title={dialog.kind === "revoke" ? "승인 철회" : "삭제 반영"}
+          count={
+            dialog.kind === "revoke"
+              ? dialog.location.counts.sources
+              : dialog.location.counts.pendingDeletes
+          }
+          countLabel={dialog.kind === "revoke" ? "지워질 원본" : "삭제를 반영할 파일"}
+          warning={dialog.kind === "revoke" ? REVOKE_WARNING_TEXT : CONFIRM_DELETIONS_WARNING_TEXT}
+          confirmLabel={dialog.kind === "revoke" ? "철회" : "반영"}
+          onConfirm={confirmDialog}
+          onCancel={() => setDialog(undefined)}
+        />
+      )}
       {import.meta.env.DEV ? (
         <form onSubmit={submitTyped}>
           <label>

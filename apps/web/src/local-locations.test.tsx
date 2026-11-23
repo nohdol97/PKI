@@ -5,7 +5,8 @@ import type { LocalLocationList } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient } from "./api.ts";
-import { ConfirmDialog, LocationList, pickAndAdd } from "./local-locations.tsx";
+import { ConfirmDialog } from "./local-location-actions.tsx";
+import { LocationList, pickAndAdd } from "./local-locations.tsx";
 import {
   APPROVAL_REJECTION_TEXT,
   NORMALIZER_UNAVAILABLE_TEXT,
@@ -94,10 +95,12 @@ describe("location actions (C28)", () => {
         expect(tag.replace(/<[^>]*>/g, "").length).toBeGreaterThan(0);
       }
     }
-    expect(renderToStaticMarkup(<LocationList list={withState("paused")} />)).toContain("다시 켜기");
-    expect(renderToStaticMarkup(<LocationList list={withState("needs-confirmation", 2)} />)).toContain(
-      "삭제 반영",
+    expect(renderToStaticMarkup(<LocationList list={withState("paused")} />)).toContain(
+      "다시 켜기",
     );
+    expect(
+      renderToStaticMarkup(<LocationList list={withState("needs-confirmation", 2)} />),
+    ).toContain("삭제 반영");
   });
 
   it("a revoking row shows the state, the remaining count and a continue button", () => {

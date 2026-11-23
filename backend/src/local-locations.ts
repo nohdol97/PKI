@@ -26,6 +26,7 @@ import {
   confirmDeletions,
   insertLocation,
   listLocations,
+  liveSourceCount,
   newLocalId,
   readSetting,
   reimportEntry,
@@ -364,6 +365,7 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
         skipped: entries.filter((e) => e.state === "skipped" || e.state === "forgotten").length,
         ignored: report?.ignored ?? 0,
         pendingDeletes: entries.filter((e) => e.pendingDelete === 1).length,
+        sources: liveSourceCount(db, location.id),
       },
       limitExceeded: report?.limitExceeded ?? location.limitExceeded,
       lastPassAt:

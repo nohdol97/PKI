@@ -375,6 +375,8 @@ export const LocalLocationSchema = z.object({
     skipped: z.int().nonnegative(),
     ignored: z.int().nonnegative(),
     pendingDeletes: z.int().nonnegative(),
+    /** Sources of the location that are still whole: what a revocation deletes, and what is left while it runs (I02B-R36). */
+    sources: z.int().nonnegative(),
   }),
   limitExceeded: z.boolean(),
   /** ISO time of the last finished pass, null before the first. */
