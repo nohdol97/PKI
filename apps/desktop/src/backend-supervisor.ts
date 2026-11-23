@@ -21,6 +21,8 @@ export interface Supervisor {
   token: string;
   /** The running backend's address, or undefined while none is running. */
   url(): string | undefined;
+  /** Forwards a picked path and its ticket to the running backend; false when none is running. */
+  registerLocationTicket(input: Parameters<Backend["registerLocationTicket"]>[0]): boolean;
   /** Stops the backend (or the one starting) and restarts nothing after it. */
   stop(): Promise<void>;
 }
@@ -61,6 +63,7 @@ export async function superviseBackend(options: SupervisorOptions): Promise<Supe
   return {
     token,
     url: () => running?.url,
+    registerLocationTicket: (input) => running?.registerLocationTicket(input) ?? false,
     async stop() {
       stopping = true;
       await starting;

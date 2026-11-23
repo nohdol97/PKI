@@ -104,6 +104,8 @@ async function run() {
         entry: BACKEND_ENTRY,
         origin: APP_ORIGIN,
         dataDir,
+        // no location may be or lie in the shell's own user-data folder (I02B-R48)
+        userData: app.getPath("userData"),
         fixtures,
         // none in a production build (the registration's policy applies), the environment's only in a source run (layout.ts, I05-R15)
         scopePolicy: scopePolicyName(process.env),
@@ -147,6 +149,14 @@ async function run() {
       return answer.response === 0;
     },
     openExternal: (href) => shell.openExternal(href),
+    pickLocation: async () => {
+      const options = { properties: ["openDirectory" as const] };
+      const picked = window
+        ? await dialog.showOpenDialog(window, options)
+        : await dialog.showOpenDialog(options);
+      return picked.canceled ? undefined : picked.filePaths[0];
+    },
+    registerLocationTicket: (input) => supervisor.registerLocationTicket(input),
   });
   for (const name of Object.keys(BRIDGE) as BridgeFunction[]) {
     ipcMain.handle(BRIDGE[name], (event, ...args: unknown[]) =>

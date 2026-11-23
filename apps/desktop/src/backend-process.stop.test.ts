@@ -66,6 +66,7 @@ describe("backend stop time limit", () => {
       fork: nodeFork,
       entry,
       origin: "app://pki",
+      userData: "/u",
       scopePolicy: undefined,
       stopTimeoutMs: 300,
       killTimeoutMs: 300,
@@ -96,6 +97,7 @@ describe("backend stop time limit", () => {
       fork: () => child,
       entry: "unused",
       origin: "app://pki",
+      userData: "/u",
       scopePolicy: undefined,
       stopTimeoutMs: 50,
       killTimeoutMs: 50,
@@ -127,6 +129,7 @@ describe("backend stop time limit", () => {
       fork: () => child,
       entry: "unused",
       origin: "app://pki",
+      userData: "/u",
       scopePolicy: undefined,
       token,
     });

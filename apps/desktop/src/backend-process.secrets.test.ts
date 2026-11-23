@@ -63,9 +63,21 @@ const start = (
     fork: child.fork,
     entry: "x",
     origin: "app://pki",
+    userData: "/u",
     scopePolicy: undefined,
     secrets,
   });
+
+describe("the shell's folder for the backend", () => {
+  it("passes --user-data and hands a picked path to the backend under its ticket (U3)", async () => {
+    const child = fakeChild();
+    const backend = await start(child);
+    expect(child.started[0]?.args).toEqual(expect.arrayContaining(["--user-data", "/u"]));
+    const input = { ticket: "t".repeat(43), kind: "folder" as const, path: "/picked" };
+    expect(backend.registerLocationTicket(input)).toBe(true);
+    expect(child.posted).toContainEqual({ type: "location-ticket", ...input });
+  });
+});
 
 describe("backend secret requests", () => {
   it("answers a read with the stored value, matched by ID", async () => {

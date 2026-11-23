@@ -138,6 +138,11 @@ export interface BackendOptions {
   origin: string;
   /** The canonical DB folder (default: the backend's per-user data directory). */
   dataDir?: string | undefined;
+  /**
+   * The shell's user-data folder, passed as the backend's `--user-data` switch: no location may be or lie in
+   * it (I02B-R48). Required, so a caller cannot forget it.
+   */
+  userData: string;
   /** Synthetic JSONL for the test Connector (source runs only: layout.ts, V01-T15). */
   fixtures?: string | undefined;
   /**
@@ -176,6 +181,11 @@ export interface Backend {
   /** Resolves with the exit code whenever the process ends, asked to or not. */
   exited: Promise<number>;
   /**
+   * Hands the backend a path the user picked under a ticket the shell made (I02B-R37), one way, no
+   * answer. False when the process has ended.
+   */
+  registerLocationTicket(input: { ticket: string; kind: "folder"; path: string }): boolean;
+  /**
    * Asks the backend to close, kills it if it has not ended in time, force-kills it
    * if that is ignored too, and returns within stopTimeoutMs + 2 × killTimeoutMs
    * even if no exit is ever reported.
@@ -188,6 +198,8 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
   const args = [
     "--origin",
     options.origin,
+    "--user-data",
+    options.userData,
     ...(options.dataDir ? ["--data-dir", options.dataDir] : []),
     ...(options.fixtures ? ["--fixtures", options.fixtures] : []),
     ...(options.scopePolicy !== undefined ? ["--scope-policy", options.scopePolicy] : []),
@@ -250,6 +262,11 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
     token,
     pid: child.pid,
     exited,
+    registerLocationTicket(input) {
+      if (ended) return false;
+      child.postMessage({ type: "location-ticket", ...input });
+      return true;
+    },
     async stop() {
       if (ended) return;
       const endsWithin = (ms: number) =>

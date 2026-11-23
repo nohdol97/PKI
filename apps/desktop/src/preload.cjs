@@ -19,4 +19,5 @@ contextBridge.exposeInMainWorld("pki", {
   hasSecret: call("pki:has-secret"),
   deleteSecret: call("pki:delete-secret"),
   openExternal: call("pki:open-external"),
+  pickLocation: call("pki:pick-location"),
 });

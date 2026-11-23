@@ -85,6 +85,7 @@ void app.whenReady().then(async () => {
     },
     entry: join(appDir, "backend", "stand-in.js"),
     origin: "app://pki",
+    userData: "/u",
     scopePolicy: undefined,
     normalizerHost: (backendChild) =>
       createNormalizerHostBroker({

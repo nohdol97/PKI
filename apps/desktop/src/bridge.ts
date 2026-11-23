@@ -4,6 +4,7 @@
 // arguments through unchanged; every call is checked here against its sender and its
 // schema before anything happens.
 import { SecretNameSchema, SecretValueSchema, type Session } from "@pki/contracts";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { onAppOrigin } from "./app-protocol.ts";
 import type { SecretStore } from "./secret-store.ts";
@@ -14,6 +15,7 @@ export const BRIDGE = {
   hasSecret: "pki:has-secret",
   deleteSecret: "pki:delete-secret",
   openExternal: "pki:open-external",
+  pickLocation: "pki:pick-location",
 } as const;
 export type BridgeFunction = keyof typeof BRIDGE;
 
@@ -30,6 +32,7 @@ const INPUTS = {
   hasSecret: z.tuple([SecretNameSchema]),
   deleteSecret: z.tuple([SecretNameSchema]),
   openExternal: z.tuple([ExternalUrl]),
+  pickLocation: z.tuple([z.literal("folder")]),
 } satisfies Record<BridgeFunction, z.ZodType>;
 
 export interface ExternalTarget {
@@ -48,6 +51,10 @@ export interface BridgeDeps {
   confirmExternal(target: ExternalTarget): Promise<boolean>;
   /** Hands the same normalised href to the OS browser. */
   openExternal(href: string): Promise<void>;
+  /** The OS folder picker: the path the user chose, undefined when cancelled (I02B-R37). */
+  pickLocation(type: "folder"): Promise<string | undefined>;
+  /** Gives the backend the picked path under a ticket; false when no backend is running. */
+  registerLocationTicket(input: { ticket: string; kind: "folder"; path: string }): boolean;
 }
 
 /** Each takes the sender frame's URL and the page's arguments as received. */
@@ -81,6 +88,13 @@ export function createBridgeHandlers(deps: BridgeDeps): BridgeHandlers {
       if (!(await deps.confirmExternal({ href, hostname }))) return { opened: false };
       await deps.openExternal(href);
       return { opened: true };
+    }),
+    // the page gets a one-time ticket, never the path; the backend gets the path from here only (I02B-R37)
+    pickLocation: checked("pickLocation", async ([type]) => {
+      const path = await deps.pickLocation(type);
+      if (path === undefined) return { ticket: null };
+      const ticket = randomBytes(32).toString("base64url");
+      return { ticket: deps.registerLocationTicket({ ticket, kind: type, path }) ? ticket : null };
     }),
   };
 }

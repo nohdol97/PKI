@@ -124,6 +124,7 @@ const start = () =>
     fork: recordingFork,
     entry: ENTRY,
     origin: ORIGIN,
+    userData: "/u",
     scopePolicy: undefined,
     dataDir: join(dir, "data"),
     env: { ...process.env, PKI_CANARY_ENV: "leak" },
@@ -146,7 +147,14 @@ describe("shell ↔ backend channel", () => {
 
     const [call] = calls;
     expect(JSON.stringify(call)).not.toContain(backend.token);
-    expect(call?.args).toEqual(["--origin", ORIGIN, "--data-dir", join(dir, "data")]);
+    expect(call?.args).toEqual([
+      "--origin",
+      ORIGIN,
+      "--user-data",
+      "/u",
+      "--data-dir",
+      join(dir, "data"),
+    ]);
 
     const record = processRecord(backend.pid ?? 0);
     if (record !== undefined) {
@@ -161,6 +169,7 @@ describe("shell ↔ backend channel", () => {
       fork: recordingFork,
       entry: ENTRY,
       origin: ORIGIN,
+      userData: "/u",
       scopePolicy: undefined,
       dataDir: join(dir, "data"),
       secrets: {
@@ -187,6 +196,7 @@ describe("shell ↔ backend channel", () => {
       fork: recordingFork,
       entry: ENTRY,
       origin: ORIGIN,
+      userData: "/u",
       scopePolicy: undefined,
       dataDir: join(dir, "data"),
       secrets: {
@@ -255,6 +265,7 @@ describe("shell ↔ backend channel", () => {
           fork: trusting,
           entry: ENTRY,
           origin: ORIGIN,
+          userData: "/u",
           scopePolicy: undefined,
           dataDir: join(dir, "data"),
           secrets: {
@@ -357,6 +368,7 @@ describe("shell ↔ backend channel", () => {
         fork: malformed,
         entry: ENTRY,
         origin: ORIGIN,
+        userData: "/u",
         scopePolicy: undefined,
         dataDir: join(dir, "d"),
       }),
