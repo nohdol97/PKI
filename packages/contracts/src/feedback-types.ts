@@ -121,6 +121,10 @@ export const INSIGHT_FEEDBACK_KINDS: readonly FeedbackKind[] = FEEDBACK_KINDS.fi
   (kind) => feedbackClass(kind, "insight") !== undefined,
 );
 
+/** The correction kinds the screen offers on an evidence row's fact or relation, in the table's order (P5F-R6). */
+export const rowFeedbackKinds = (target: "fact" | "relation"): readonly FeedbackKind[] =>
+  FEEDBACK_KINDS.filter((kind) => feedbackClass(kind, target) === "correction");
+
 const FeedbackKindSchema = z.enum(FEEDBACK_KINDS);
 const FeedbackTargetSchema = z.strictObject({
   kind: z.enum(["insight", "item", "fact", "relation"]),
@@ -180,3 +184,7 @@ export const FeedbackUndoResponseSchema = FeedbackOutcomeSchema;
 
 /** The live lines, newest first, 100 at most. */
 export const FeedbackListResponseSchema = z.object({ feedback: z.array(FeedbackLineSchema) });
+
+/** `feedback.learned`, the type step's switch (P5F-R5); a write answers the value as it now is. */
+export const FeedbackSettingsSchema = z.strictObject({ learned: z.boolean() });
+export const FeedbackSettingsRequestSchema = z.strictObject({ learned: z.boolean() });

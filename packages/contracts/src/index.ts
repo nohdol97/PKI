@@ -38,6 +38,8 @@ import {
   FeedbackListResponseSchema,
   FeedbackRecordRequestSchema,
   FeedbackRecordResponseSchema,
+  FeedbackSettingsRequestSchema,
+  FeedbackSettingsSchema,
   FeedbackUndoRequestSchema,
   FeedbackUndoResponseSchema,
 } from "./feedback-types.ts";
@@ -670,6 +672,8 @@ const InsightRankingSchema = z.object({
   confidence: RankAxisSchema,
   actionability: RankAxisSchema,
   score: RankAxisSchema,
+  /** The feedback weight the relevance axis used, −100..100 (P5F-R4); absent from an answer that predates it. */
+  preference: z.int().min(-100).max(100).optional(),
 });
 export const InsightSummarySchema = z.object({
   id: z.int().positive(),
@@ -715,6 +719,8 @@ export const InsightEvidenceRequestSchema = z.strictObject({ insightId: z.int().
 const EvidenceSummarySchema = z.object({
   id: z.int().positive(),
   target: z.enum(["fact", "relation"]),
+  /** The id of that fact or relation, for a correction from this row (P5F-R6). */
+  targetId: z.int().positive(),
   status: z.enum(["candidate", "verified", "disputed", "superseded", "rejected"]),
   quote: z.string(),
   sourceTitle: z.string(),
@@ -2329,6 +2335,18 @@ export const routes = {
     path: "/api/feedback/undo",
     request: FeedbackUndoRequestSchema,
     response: FeedbackUndoResponseSchema,
+  },
+  // P5F (R5): the type step's switch
+  feedbackSettings: {
+    method: "GET",
+    path: "/api/feedback/settings",
+    response: FeedbackSettingsSchema,
+  },
+  setFeedbackSettings: {
+    method: "POST",
+    path: "/api/feedback/settings",
+    request: FeedbackSettingsRequestSchema,
+    response: FeedbackSettingsSchema,
   },
   // H01 (R15): backup files and the restore that the next start applies
   backupStatus: { method: "GET", path: "/api/backup", response: BackupStatusSchema },

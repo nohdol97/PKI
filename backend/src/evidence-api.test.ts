@@ -112,6 +112,10 @@ describe.each(["plain", "malicious"])("evidence routes on the %s set", (set) => 
         sourceTitle: titles.get(fixture.record_id),
       });
 
+      // P5F-C6: the row names the fact or relation it supports
+      const owner = db.all("SELECT fact_id, relation_id FROM evidence WHERE id = ?", [row.id])[0];
+      expect(row.targetId).toBe((owner?.fact_id ?? owner?.relation_id) as number);
+
       const source = await call("evidenceSource", { evidenceId: row.id });
       expect(source.status).toBe(200);
       const shown = routes.evidenceSource.response.parse(source.body);

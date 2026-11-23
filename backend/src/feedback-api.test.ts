@@ -8,6 +8,7 @@ import {
   createDerivativeRegistry,
   defaultScopePolicy,
   insertItem,
+  readSetting,
   recordFeedback,
   registerConnectorInstance,
   saveFact,
@@ -186,6 +187,54 @@ describe("feedback.api: the contract (P03-C1c)", () => {
       kind: "useful",
     });
     expect(bad).toMatchObject({ status: 400, body: { error: "bad-request" } });
+  });
+});
+
+describe("feedback.api: the preference reaches the ranking (P5F-R4, P5F-C4)", () => {
+  const ranked = async () =>
+    routes.insights.response.parse((await call("insights")).body).insights.map((i) => ({
+      id: i.id,
+      preference: i.ranking.preference,
+    }));
+
+  it("puts the liked Insight first among equals, names the weight it used, and takes it back on undo", async () => {
+    const a = world("a");
+    const b = world("b");
+    await start();
+    expect((await ranked()).map((r) => r.id)).toEqual([a.insight, b.insight]);
+
+    const done = routes.feedbackRecord.response.parse(
+      (
+        await call("feedbackRecord", {
+          target: { kind: "insight", id: b.insight },
+          kind: "important",
+        })
+      ).body,
+    );
+    expect(await ranked()).toEqual([
+      { id: b.insight, preference: 100 },
+      { id: a.insight, preference: 0 },
+    ]);
+
+    await call("feedbackUndo", { id: done.feedback?.id });
+    expect((await ranked()).map((r) => r.id)).toEqual([a.insight, b.insight]);
+  });
+});
+
+describe("feedback.api: the type-step switch (P5F-R5, P5F-C5)", () => {
+  it("reads and writes feedback.learned through the settings pair", async () => {
+    await start();
+    expect(routes.feedbackSettings.response.parse((await call("feedbackSettings")).body)).toEqual({
+      learned: false,
+    });
+    const on = await call("setFeedbackSettings", { learned: true });
+    expect(routes.setFeedbackSettings.response.parse(on.body)).toEqual({ learned: true });
+    expect(readSetting(db, "feedback.learned")).toBe("on");
+    expect(routes.feedbackSettings.response.parse((await call("feedbackSettings")).body)).toEqual({
+      learned: true,
+    });
+    await call("setFeedbackSettings", { learned: false });
+    expect(readSetting(db, "feedback.learned")).toBe("off");
   });
 });
 

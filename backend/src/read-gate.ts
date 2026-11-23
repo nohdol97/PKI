@@ -433,7 +433,9 @@ export function createReadGate(
       // an Insight whose end items are not shown is not-found here too (P5F-R2, P01-R15)
       const ends =
         start.kind === "insight"
-          ? db.all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [start.id])[0]
+          ? db.all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [
+              start.id,
+            ])[0]
           : undefined;
       if (start.kind === "insight" && !(ends && endsShown(ends.x as number, ends.y as number))) {
         return undefined;
