@@ -68,6 +68,10 @@ describe("locatorText", () => {
   const cases: [NativeLocator, string][] = [
     [{ format: "pdf", page: 3 }, "3쪽"],
     [{ format: "docx", paragraph: 4 }, "문단 5"],
+    [
+      { format: "docx", paragraph: 4, comment: { thread: 1, index: 0, part: "head" } },
+      "문단 5 · 메모 2의 1번째 글(머리)",
+    ],
     [{ format: "docx", paragraph: 0, table: { index: 0, row: 1, cell: 2 } }, "표 1의 2행 3열"],
     [{ format: "xlsx", sheet: "집계", cell: "B3" }, "시트 '집계' B3 칸"],
     [{ format: "xlsx", sheet: "집계", row: 4 }, "시트 '집계' 4행"],

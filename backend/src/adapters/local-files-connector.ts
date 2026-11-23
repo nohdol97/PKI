@@ -614,14 +614,16 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       const vanished = missing.filter((m) => m.state === "present" && m.pendingDelete !== 2);
       const { ratio, minFiles } = limits.deletionBrake;
       const brake = vanished.length >= minFiles && vanished.length / tracked >= ratio;
+      // a held file stays held until the user confirms, it comes back, or the folder is relinked (I02F-R1)
+      const stillHeld = vanished.some((m) => m.pendingDelete === 1);
       for (const m of missing) {
-        if (m.state === "present" && m.pendingDelete !== 2 && brake) {
+        if (m.state === "present" && m.pendingDelete !== 2 && (brake || m.pendingDelete === 1)) {
           if (m.pendingDelete === 0) {
             p.index.updateEntry(m.externalId, m.seq, { ...fieldsOf(m), pendingDelete: 1 });
           }
         } else gone(m);
       }
-      if (brake && state === "active") {
+      if ((brake || stillHeld) && state === "active") {
         if (p.setLocationState(location.id, "needs-confirmation", null, "active")) {
           state = "needs-confirmation";
         }

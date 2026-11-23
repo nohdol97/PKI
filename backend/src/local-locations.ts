@@ -220,10 +220,12 @@ export interface LocalLocations {
   /** A skipped or user-deleted file is read again; a user deletion needs its tombstone lifted (I02B-R33). */
   reimport(request: LocalReimportRequest): ReimportAnswer;
   /** Every location is walked from the start at the next sync (I02B-R13); instance-wide, whichever location is named. */
-  rescan(request: LocalLocationIdRequest): { outcome: "queued" } | { error: "not-found" };
+  rescan(
+    request: LocalLocationIdRequest,
+  ): { outcome: "queued" } | { error: "not-found" | "instance-busy" };
   /** The approval is withdrawn: every source of the location is deleted as the user's deletion (I02B-R10, R49). */
   revoke(request: LocalRevokeRequest): Promise<RevokeAnswer | { error: "connector-unavailable" }>;
-  /** The held deletions are confirmed by the count the user saw (I02B-R8). */
+  /** The held deletions are confirmed by the count the user saw (I02B-R8); a location not read (paused, revoking) refuses (I02F-R3). */
   confirmDeletions(request: LocalConfirmDeletionsRequest): ActionAnswer;
   /** Where a source version is now, for the evidence screen; answered after the read gate (I02B-R39). */
   sourceInfo(request: LocalSourceInfoRequest): LocalSourceInfo;
@@ -253,8 +255,8 @@ export interface LocalLocationsOptions {
   watching?: (locationId: string) => boolean;
   /** Told after a change of the set of read locations, so the driver places its watchers. */
   changed?: () => void;
-  /** Starts a full sync of the `local-files` instance; the composition point binds the manager. */
-  rescan?: () => void;
+  /** Starts a full sync of the `local-files` instance; false when it could not start (lock held, I02F-R4). */
+  rescan?: () => boolean;
   /** The running instances of JSONL file locations (I02B-R41); without it an approval stores the row only. */
   jsonlFile?: JsonlFileHooks;
   /** Whether a file name is a document format a `file` location may be (the connector knows the list; the composition point passes it). */
@@ -432,12 +434,12 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     confirmDeletions: ({ locationId, count }) =>
       act(
         locationId,
-        undefined,
+        ["active", "unavailable", "needs-confirmation"],
         () => confirmDeletions(db, locationId, count).ok || "count-mismatch",
       ),
     rescan({ locationId }) {
       if (!listLocations(db).some((l) => l.id === locationId)) return { error: "not-found" };
-      options.rescan?.();
+      if (options.rescan?.() === false) return { error: "instance-busy" };
       return { outcome: "queued" };
     },
     async revoke(request) {
