@@ -24,7 +24,7 @@ afterEach(async () => {
 
 describe("BootedBackend.resumed", () => {
   it("H02A-C7: registers the job of an overdue period without waiting for the next check", async () => {
-    booted = await bootBackend({
+    const backend = await bootBackend({
       dataDir: dir,
       token: "t".repeat(43),
       allowedOrigins: [],
@@ -33,15 +33,16 @@ describe("BootedBackend.resumed", () => {
         new FakeProvider({ id: "local-model", transport: "http", answer: fixtureExtraction() }),
       ],
     });
-    const { schedule } = booted.scheduler.ensureSchedule({
+    booted = backend;
+    const { schedule } = backend.scheduler.ensureSchedule({
       kind: "resume-probe",
       target: "t",
       period: { kind: "hourly" },
     });
-    const jobs = () => booted!.db.all("SELECT id FROM jobs WHERE kind = 'resume-probe'");
+    const jobs = () => backend.db.all("SELECT id FROM jobs WHERE kind = 'resume-probe'");
     expect(jobs()).toHaveLength(0);
-    updateSchedule(booted.db, schedule.id, { nextDue: Date.now() - 3 * 3_600_000 }, Date.now());
-    booted.resumed();
+    updateSchedule(backend.db, schedule.id, { nextDue: Date.now() - 3 * 3_600_000 }, Date.now());
+    backend.resumed();
     expect(jobs()).toHaveLength(1);
   });
 });
