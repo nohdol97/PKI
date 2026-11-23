@@ -18,8 +18,9 @@ export type StrategyName = (typeof STRATEGIES)[number];
 export const ALWAYS_ON: readonly StrategyName[] = ["keyword", "metadata", "rerank"];
 
 /**
- * X01-R5, D8: the strategies on by default. Before the X01-T4 measurement only the always-on ones; T4 adds the
- * strategies whose gain the measurement shows (with the ADR). Not settable by a request.
+ * X01-R5, D8: the strategies on by default. ADR 0025 (the X01-T4 measurement) turned on none of the others, so it is
+ * the always-on ones; a strategy is added only with a measurement that meets the keep rule and the ADR's list in the
+ * same commit (a test compares them). Not settable by a request.
  */
 export const DEFAULT_ENABLED_STRATEGIES: readonly StrategyName[] = ALWAYS_ON;
 

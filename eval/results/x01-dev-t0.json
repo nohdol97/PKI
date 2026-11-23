@@ -1,0 +1,321 @@
+{
+  "task": "X01-T4 (issue #30)",
+  "split": "dev",
+  "corpus": {
+    "tier": "T0",
+    "note": "the whole golden corpus (155 source lines) and no background documents; only dev questions are asked",
+    "lines": 155,
+    "received": 155,
+    "importErrors": 0
+  },
+  "questions": {
+    "asked": 27,
+    "answerable": 23,
+    "k": 5
+  },
+  "seededKnowledge": {
+    "note": "planted from the dev labels with no Provider: the figures of C3-C5 are the upper bound when extraction is perfect",
+    "items": 45,
+    "relations": 12,
+    "facts": 27,
+    "aliases": 12,
+    "replacements": 5,
+    "evidence": 58,
+    "skipped": {
+      "evidence-not-in-stored-text": 20,
+      "alias-without-evidence": 2,
+      "relation-must-not-link": 6,
+      "fact-removed": 2,
+      "fact-restricted": 2
+    }
+  },
+  "environment": {
+    "ranAt": "2026-11-23T12:51:27.362Z",
+    "hardware": {
+      "cpu": "Apple M1",
+      "logicalCores": 8,
+      "ramGiB": 8,
+      "os": "Darwin 27.0.0 arm64",
+      "gpu": "none used (CPU runtime)",
+      "storage": "not recorded",
+      "grade": "neither A nor B (EVALUATION 4.4 names Windows 11 machines); latency here is indicative only"
+    },
+    "node": "v24.22.3",
+    "python": "Python 3.14.6",
+    "embeddingModel": {
+      "modelId": "onnx-community/bge-m3-ONNX:int8",
+      "revision": "25b9af8e87a38eb120cfe87125383677b9cd309e",
+      "dimension": 1024,
+      "maxTokens": 8192,
+      "license": "MIT",
+      "egress": "local"
+    },
+    "productCommit": "1c38597f6db0944a3393d5903b72cb85d034310c",
+    "datasetCommit": "c879c0f49425758e81819cbf2df29052a281b036",
+    "workingTreeClean": true
+  },
+  "commands": [
+    "pnpm exec node backend/src/retrieval-ablation.main.test-support.ts --out eval/results --name x01-dev-t0 --pack <local pack folder>",
+    "python3 -I eval/scorer/score.py eval/golden eval/results/x01-dev-t0-predictions/<C>.jsonl --split dev --k 5",
+    "python3 -I eval/scorer/score.py eval/golden eval/results/x01-dev-t0-predictions/<C>.jsonl --split dev --k 10"
+  ],
+  "configs": [
+    {
+      "id": "C1",
+      "name": "Keyword",
+      "status": "measured",
+      "strategies": [
+        "keyword"
+      ],
+      "predictions": "eval/results/x01-dev-t0-predictions/C1.jsonl",
+      "retrieval": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.8405797101449275,
+        "precision_at_k": 0.24347826086956523,
+        "mrr": 0.8478260869565217
+      },
+      "retrievalAt10": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.8623188405797101,
+        "precision_at_k": 0.12608695652173915,
+        "mrr": 0.8478260869565217
+      },
+      "latency": {
+        "queries": 27,
+        "p50Ms": 10.693499999993946,
+        "p95Ms": 67.16641700000037
+      },
+      "routeUsed": {
+        "keyword": 27,
+        "rerank": 27
+      },
+      "keepRule": null
+    },
+    {
+      "id": "C2",
+      "name": "Keyword + Vector",
+      "status": "measured",
+      "strategies": [
+        "keyword",
+        "vector"
+      ],
+      "predictions": "eval/results/x01-dev-t0-predictions/C2.jsonl",
+      "retrieval": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.9275362318840579,
+        "precision_at_k": 0.26956521739130435,
+        "mrr": 0.9
+      },
+      "retrievalAt10": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.9565217391304348,
+        "precision_at_k": 0.14347826086956522,
+        "mrr": 0.9
+      },
+      "latency": {
+        "queries": 27,
+        "p50Ms": 271.4948749999967,
+        "p95Ms": 733.4856250000012
+      },
+      "routeUsed": {
+        "keyword": 27,
+        "vector": 27,
+        "rerank": 27
+      },
+      "keepRule": {
+        "comparedWith": "C1",
+        "A_gain": {
+          "recallDelta": 0.08695652173913038,
+          "mrrDelta": 0.05217391304347829,
+          "improvedQuestions": 5,
+          "worsenedQuestions": 0,
+          "net": 5,
+          "passes": true
+        },
+        "B_noRegression": "not measured: no answers or citations exist without a Provider",
+        "C_cost": {
+          "p95RatioToBase": 10.920422106184363,
+          "passesTwiceBase": false,
+          "absoluteCapChecked": false
+        }
+      }
+    },
+    {
+      "id": "C3",
+      "name": "+ Graph",
+      "status": "measured",
+      "strategies": [
+        "keyword",
+        "vector",
+        "graph"
+      ],
+      "predictions": "eval/results/x01-dev-t0-predictions/C3.jsonl",
+      "retrieval": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.9275362318840579,
+        "precision_at_k": 0.26956521739130435,
+        "mrr": 0.9
+      },
+      "retrievalAt10": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.9565217391304348,
+        "precision_at_k": 0.14347826086956522,
+        "mrr": 0.9
+      },
+      "latency": {
+        "queries": 27,
+        "p50Ms": 222.03741699999955,
+        "p95Ms": 609.1244169999991
+      },
+      "routeUsed": {
+        "keyword": 27,
+        "graph": 7,
+        "vector": 27,
+        "rerank": 27
+      },
+      "keepRule": {
+        "comparedWith": "C2",
+        "A_gain": {
+          "recallDelta": 0,
+          "mrrDelta": 0,
+          "improvedQuestions": 0,
+          "worsenedQuestions": 0,
+          "net": 0,
+          "passes": false
+        },
+        "B_noRegression": "not measured: no answers or citations exist without a Provider",
+        "C_cost": {
+          "p95RatioToBase": 0.8304517447086958,
+          "passesTwiceBase": true,
+          "absoluteCapChecked": false
+        }
+      }
+    },
+    {
+      "id": "C4",
+      "name": "+ Semantic",
+      "status": "measured",
+      "strategies": [
+        "keyword",
+        "vector",
+        "graph",
+        "concept",
+        "temporal"
+      ],
+      "predictions": "eval/results/x01-dev-t0-predictions/C4.jsonl",
+      "retrieval": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.9710144927536232,
+        "precision_at_k": 0.2956521739130435,
+        "mrr": 0.9144927536231885
+      },
+      "retrievalAt10": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.9710144927536232,
+        "precision_at_k": 0.14782608695652175,
+        "mrr": 0.9144927536231885
+      },
+      "latency": {
+        "queries": 27,
+        "p50Ms": 360.6091250000027,
+        "p95Ms": 727.5469589999993
+      },
+      "routeUsed": {
+        "keyword": 27,
+        "concept": 18,
+        "graph": 7,
+        "vector": 27,
+        "rerank": 27,
+        "temporal": 7
+      },
+      "keepRule": {
+        "comparedWith": "C3",
+        "A_gain": {
+          "recallDelta": 0.0434782608695653,
+          "mrrDelta": 0.01449275362318847,
+          "improvedQuestions": 4,
+          "worsenedQuestions": 2,
+          "net": 2,
+          "passes": true
+        },
+        "B_noRegression": "not measured: no answers or citations exist without a Provider",
+        "C_cost": {
+          "p95RatioToBase": 1.1944143736401893,
+          "passesTwiceBase": true,
+          "absoluteCapChecked": false
+        }
+      }
+    },
+    {
+      "id": "C5",
+      "name": "+ Wiki",
+      "status": "measured",
+      "strategies": [
+        "keyword",
+        "vector",
+        "graph",
+        "concept",
+        "temporal",
+        "wiki"
+      ],
+      "predictions": "eval/results/x01-dev-t0-predictions/C5.jsonl",
+      "retrieval": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.9710144927536232,
+        "precision_at_k": 0.2956521739130435,
+        "mrr": 0.9144927536231885
+      },
+      "retrievalAt10": {
+        "n_queries": 23,
+        "missing_predictions": 0,
+        "recall_at_k": 0.9710144927536232,
+        "precision_at_k": 0.14782608695652175,
+        "mrr": 0.9144927536231885
+      },
+      "latency": {
+        "queries": 27,
+        "p50Ms": 206.37291600000754,
+        "p95Ms": 324.3495410000032
+      },
+      "routeUsed": {
+        "keyword": 27,
+        "concept": 18,
+        "graph": 7,
+        "vector": 27,
+        "rerank": 27,
+        "wiki": 1,
+        "temporal": 7
+      },
+      "keepRule": {
+        "comparedWith": "C4",
+        "A_gain": {
+          "recallDelta": 0,
+          "mrrDelta": 0,
+          "improvedQuestions": 0,
+          "worsenedQuestions": 0,
+          "net": 0,
+          "passes": false
+        },
+        "B_noRegression": "not measured: no answers or citations exist without a Provider",
+        "C_cost": {
+          "p95RatioToBase": 0.4458125169622261,
+          "passesTwiceBase": true,
+          "absoluteCapChecked": false
+        }
+      }
+    }
+  ],
+  "notMeasured": [
+    "Answer Groundedness and Citation Accuracy: no Provider answers exist here (a fake's answer is not a measurement)",
+    "T1 and T2 corpora (background documents), retrieval latency against the absolute caps, the eval split"
+  ]
+}

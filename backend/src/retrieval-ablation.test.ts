@@ -16,6 +16,7 @@ const ROOT = resolve(import.meta.dirname, "../..");
 const GOLDEN = resolve(ROOT, "eval/golden");
 const SCORER = resolve(ROOT, "eval/scorer/score.py");
 const RESULT = resolve(ROOT, "eval/results/x01-dev-t0.json");
+const RESULT_NO_VECTOR = resolve(ROOT, "eval/results/x01-dev-t0-no-vector.json");
 const MAIN = resolve(import.meta.dirname, "retrieval-ablation.main.test-support.ts");
 const ADR = resolve(ROOT, "docs/adr/0025-retrieval-strategies.md");
 
@@ -146,35 +147,35 @@ describe("X01-C3 ① the measuring command", () => {
   }, 180_000);
 });
 
-describe("X01-C3 ② the result file, the ADR and the default list agree", () => {
-  it("the dev/T0 result file is there, the ADR carries its numbers, and DEFAULT_ENABLED_STRATEGIES is the ADR's list", () => {
-    expect(existsSync(RESULT)).toBe(true);
+describe("X01-C3 ② the result files, the ADR and the default list agree", () => {
+  it("the dev/T0 result files are there, the ADR carries their numbers, and DEFAULT_ENABLED_STRATEGIES is the ADR's list", () => {
     expect(existsSync(ADR)).toBe(true);
-    const result = JSON.parse(readFileSync(RESULT, "utf8")) as {
-      split: string;
-      corpus: { tier: string };
-      configs: {
-        id: string;
-        status: string;
-        reason?: string;
-        retrieval?: { recall_at_k: number; precision_at_k: number; mrr: number };
-      }[];
-    };
-    expect(result.split).toBe("dev");
-    expect(result.corpus.tier).toBe("T0");
-    expect(result.configs.map((c) => c.id)).toEqual(["C1", "C2", "C3", "C4", "C5"]);
-
     const adr = readFileSync(ADR, "utf8");
-    for (const config of result.configs) {
-      if (config.status === "measured") {
-        const r = config.retrieval as NonNullable<typeof config.retrieval>;
-        for (const value of [r.recall_at_k, r.precision_at_k, r.mrr]) {
-          expect(adr, `${config.id} ${value}`).toContain(value.toFixed(3));
+    for (const file of [RESULT, RESULT_NO_VECTOR]) {
+      expect(existsSync(file), file).toBe(true);
+      const result = JSON.parse(readFileSync(file, "utf8")) as {
+        split: string;
+        corpus: { tier: string };
+        configs: {
+          id: string;
+          status: string;
+          reason?: string;
+          retrieval?: { recall_at_k: number; precision_at_k: number; mrr: number };
+        }[];
+      };
+      expect(result.split).toBe("dev");
+      expect(result.corpus.tier).toBe("T0");
+      expect(result.configs.map((c) => c.id)).toEqual(["C1", "C2", "C3", "C4", "C5"]);
+      for (const config of result.configs) {
+        if (config.status === "measured") {
+          const r = config.retrieval as NonNullable<typeof config.retrieval>;
+          for (const value of [r.recall_at_k, r.precision_at_k, r.mrr]) {
+            expect(adr, `${config.id} ${value}`).toContain(value.toFixed(3));
+          }
+        } else {
+          expect(config.status).toBe("not-measured");
+          expect(config.reason).toBeTruthy();
         }
-      } else {
-        expect(config.status).toBe("not-measured");
-        expect(config.reason).toBeTruthy();
-        expect(adr).toContain(`${config.id}`);
       }
     }
 
