@@ -299,6 +299,31 @@ describe("X01-R1 R2 R5 the other strategies", () => {
     });
   });
 
+  it("C6b ② answers with the other strategies when the embedding status check throws", async () => {
+    const w = world();
+    const vector = {
+      embedding: {
+        status: async () => {
+          throw new Error("boom /secret/path");
+        },
+        embed: async () => [new Float32Array([1])],
+      },
+      index: { status: async () => "ready" as const, search: async () => [] },
+    };
+    const found = await retrieve(
+      w.db,
+      registry,
+      "별빛 시스템",
+      {},
+      { enabled: ["vector"], vector },
+    );
+    expect(found.route.vector).toEqual({
+      status: "unavailable",
+      reason: "embedding model: status check failed",
+    });
+    expect(found.hits.length).toBeGreaterThan(0);
+  });
+
   it("metadata filters every list by collector and by the origin system's time", async () => {
     const w = world();
     const mail = await retrieve(w.db, registry, "물결 프로젝트", {
