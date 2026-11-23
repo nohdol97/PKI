@@ -14,6 +14,7 @@ import {
   storeVersion,
 } from "./analytical-check-lines.test-support.ts";
 import { listAnalytical, listMetricViews, type Visibility } from "./analytical-views.ts";
+import { entityGroups } from "./entity-groups.ts";
 import { addEvidence } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { userDecisions } from "./semantic-user.ts";
@@ -304,6 +305,19 @@ describe("rework 1: visibility of paths, unmet, limit and group members", () => 
     expect(member?.members).toEqual([]);
     if (memberId === b) expect(member?.calculations.map((c) => c.id)).toEqual([memberCalc]);
     expect(listMetricViews(db).map((m) => m.itemId)).toEqual([top?.itemId]);
+  });
+
+  it("AR-C5: a visible member whose representative is hidden lists no members of its own", () => {
+    const [a, b, c] = ["m1", "m2", "m3"].map((n) => item(db, "Metric", n));
+    const at = "2026-11-23T00:00:00.000Z";
+    db.transaction(() => userDecisions.entities.merge(db, a, b, at));
+    db.transaction(() => userDecisions.entities.merge(db, a, c, at));
+    const rep = [a, b, c].find((id) => entityGroups.representativeOf(db, id) === id) as number;
+    const vis = hiding((k, id) => k === "item" && id === String(rep));
+    for (const metrics of [listAnalytical(db, vis).metrics, listMetricViews(db, vis)]) {
+      expect(metrics).toHaveLength(2);
+      expect(metrics.map((m) => m.members)).toEqual([[], []]);
+    }
   });
 
   it("F3: hidden low-id items do not use up the limit and do not set truncated", () => {

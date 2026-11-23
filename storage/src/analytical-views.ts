@@ -162,7 +162,24 @@ class Reader {
     this.vis = vis;
   }
 
-  shown = (kind: string, id: number | string) => this.vis.shown(kind, String(id));
+  private readonly seen = new Map<string, boolean>();
+  /** One visibility question per (kind, id) for the life of this read. */
+  shown = (kind: string, id: number | string): boolean => {
+    const key = `${kind}:${id}`;
+    let answer = this.seen.get(key);
+    if (answer === undefined) {
+      answer = this.vis.shown(kind, String(id));
+      this.seen.set(key, answer);
+    }
+    return answer;
+  };
+
+  private readonly memo = new Map<string, unknown>();
+  /** A value built once per read. The value is shared by its readers, who only serialise it. */
+  private once<T>(key: string, make: () => T): T {
+    if (!this.memo.has(key)) this.memo.set(key, make());
+    return this.memo.get(key) as T;
+  }
 
   private awaiting?: Map<number, number[]>;
   /** The sources a relation's subject waits on, by item (read once per call). */
@@ -195,7 +212,7 @@ class Reader {
   }
 
   factRow(f: SemanticFactView): FactRowView {
-    const needed = needsDataChecks(this.db, f.kind);
+    const needed = this.once(`needs:${f.kind}`, () => needsDataChecks(this.db, f.kind));
     const ids = this.evidenceIds({ factId: f.id });
     const checks = needed
       ? listCheckLines(this.db, f.id)
@@ -218,16 +235,18 @@ class Reader {
       checkNeeded: needed,
       checks,
       unmet: needed
-        ? [...dataChecksUnmet(this.db, { kind: "fact", id: f.id }, this.vis.shown)]
+        ? [...dataChecksUnmet(this.db, { kind: "fact", id: f.id }, this.shown)]
         : [],
       awaitingSourceIds: needed ? this.waitingSources(itemId) : [],
     };
   }
 
   facts(itemId: number): FactRowView[] {
-    return listSemanticFacts(this.db, itemId)
-      .filter((f) => this.shown("fact", f.id))
-      .map((f) => this.factRow(f));
+    return this.once(`facts:${itemId}`, () =>
+      listSemanticFacts(this.db, itemId)
+        .filter((f) => this.shown("fact", f.id))
+        .map((f) => this.factRow(f)),
+    );
   }
 
   relations(itemId: number): RelationRowView[] {
@@ -248,6 +267,10 @@ class Reader {
 
   /** The Dataset's real tables: a table row whose source has a version no tombstone covers and the caller may see. */
   tables(datasetId: number): TableView[] {
+    return this.once(`tables:${datasetId}`, () => this.readTables(datasetId));
+  }
+
+  private readTables(datasetId: number): TableView[] {
     return this.db
       .all(
         `SELECT t.id, t.source_id, t.row_count,
@@ -442,19 +465,21 @@ function withMembers<B>(
   r: Reader,
   id: number,
   body: (r: Reader, id: number) => B | undefined,
-  members = true,
 ): (B & { members: (B & { members: never[] })[] }) | undefined {
   const head = body(r, id);
   if (!head) return undefined;
-  const under = members
-    ? entityGroups
-        .membersOf(r.db, id)
-        .filter((m) => m !== id)
-        .flatMap((m) => {
-          const member = body(r, m);
-          return member ? [{ ...member, members: [] as never[] }] : [];
-        })
-    : [];
+  // R1 (#227): members go under the representative only; a member standing alone (its representative hidden)
+  // has none, so two visible members never list each other.
+  const under =
+    entityGroups.representativeOf(r.db, id) === id
+      ? entityGroups
+          .membersOf(r.db, id)
+          .filter((m) => m !== id)
+          .flatMap((m) => {
+            const member = body(r, m);
+            return member ? [{ ...member, members: [] as never[] }] : [];
+          })
+      : [];
   return { ...head, members: under };
 }
 
