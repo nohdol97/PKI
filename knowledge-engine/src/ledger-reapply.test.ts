@@ -369,6 +369,42 @@ describe("restore.reapply", () => {
     expect(reapplyLedger(old)).toMatchObject({ applied: 1, canonicalSeq: 2 });
     expect(readTombstoneState(old, mail)).toMatchObject({ coversVersion: 1 });
   });
+
+  it("F123-C1 does not read the instance's plain sources again for each line of a source never seen", () => {
+    const M = 300;
+    const N = 20;
+    for (let i = 0; i < M; i++) {
+      db.run(
+        "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, ?, ?)",
+        ["c1", "n", `plain-${i}`],
+      );
+    }
+    const old = backup(db);
+    for (let i = 0; i < N; i++) {
+      canonicalTransaction(db, (tx) =>
+        applyTombstone(tx, {
+          identity: { connectorInstanceId: "c1", namespace: "n", externalId: `never-${i}` },
+          reason: "user-deleted",
+          lastRevision: null,
+          at: AT,
+        }),
+      );
+    }
+    restart(old);
+    let returned = 0;
+    const all = old.all.bind(old);
+    old.all = (sql, params) => {
+      const found = all(sql, params);
+      returned += found.length;
+      return found;
+    };
+
+    const report = reapplyLedger(old);
+
+    expect(report.applied).toBe(N);
+    // one pass over the M plain sources, not one per line (base: at least M * N)
+    expect(returned).toBeLessThan(3 * M);
+  });
 });
 
 describe("under a scope policy (I04-T09)", () => {

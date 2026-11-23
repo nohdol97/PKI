@@ -33,10 +33,8 @@ export function readKey(db: SqlDriver): Uint8Array | undefined {
   return db.all("SELECT key FROM identity_key WHERE id = 1")[0]?.key as Uint8Array | undefined;
 }
 
-/** HMAC-SHA-256 (hex) over the length-prefixed parts with the installation's key; throws without a key. */
-function keyedMac(db: SqlDriver, parts: readonly string[]): string {
-  const key = readKey(db);
-  if (!key) throw new IdentityKeyMissingError();
+/** HMAC-SHA-256 (hex) over the length-prefixed parts with a key already read. */
+function macWith(key: Uint8Array, parts: readonly string[]): string {
   const mac = createHmac("sha256", key);
   for (const part of parts) {
     const bytes = Buffer.from(part, "utf8");
@@ -45,6 +43,13 @@ function keyedMac(db: SqlDriver, parts: readonly string[]): string {
     mac.update(length).update(bytes);
   }
   return mac.digest("hex");
+}
+
+/** HMAC-SHA-256 (hex) over the length-prefixed parts with the installation's key; throws without a key. */
+function keyedMac(db: SqlDriver, parts: readonly string[]): string {
+  const key = readKey(db);
+  if (!key) throw new IdentityKeyMissingError();
+  return macWith(key, parts);
 }
 
 /** The keyed hash (hex) of an identity; throws `IdentityKeyMissingError` without a key. */
@@ -71,16 +76,7 @@ export function keyedTextHash(db: SqlDriver, domain: string, text: string): stri
 export function keyedTextHasher(db: SqlDriver, domain: string): (text: string) => string {
   const key = readKey(db);
   if (!key) throw new IdentityKeyMissingError();
-  return (text) => {
-    const mac = createHmac("sha256", key);
-    for (const part of [domain, text]) {
-      const bytes = Buffer.from(part, "utf8");
-      const length = Buffer.alloc(4);
-      length.writeUInt32BE(bytes.length);
-      mac.update(length).update(bytes);
-    }
-    return mac.digest("hex");
-  };
+  return (text) => macWith(key, [domain, text]);
 }
 
 const hasHashedSources = (db: SqlDriver) =>
@@ -124,32 +120,44 @@ export function ensureTombstoneSource(db: SqlDriver, identity: SourceIdentity): 
 
 /**
  * The source of a ledger line (I04-R17): the connector instance and the keyed hash of its identity.
- * A hashed row holds the hash itself; a source still held plain is found by hashing the plain
- * identities of that instance (a restored database older than the deletion). A source never seen
- * gets its hashed row, as a tombstone for an unseen source does.
+ * A hashed row holds the hash itself; a source still held plain (a restored database older than the
+ * deletion) is found in `plainIndex`, the hashes of that instance's plain sources, made once on the
+ * first miss and kept by the caller for one run. A source never seen gets its hashed row, as a
+ * tombstone for an unseen source does. The index needs no upkeep during a run: a plain source that
+ * is hashed, and a row inserted here, are found by the hashed-row lookup first, with the same id.
  */
 export function ensureSourceByHash(
   db: SqlDriver,
   connectorInstanceId: string,
   hash: string,
+  plainIndex: Map<string, Map<string, number>> = new Map(),
 ): number {
   const hashed = db.all(
     "SELECT id FROM sources WHERE connector_instance_id = ? AND namespace = ? AND external_id = ? AND identity_hashed = 1",
     [connectorInstanceId, hash, hash],
   )[0]?.id as number | undefined;
   if (hashed !== undefined) return hashed;
-  for (const row of db.all(
-    "SELECT id, namespace, external_id FROM sources WHERE connector_instance_id = ? AND identity_hashed = 0",
-    [connectorInstanceId],
-  )) {
-    const identity = identityKey(
-      db,
-      connectorInstanceId,
-      row.namespace as string,
-      row.external_id as string,
+  let hashes = plainIndex.get(connectorInstanceId);
+  if (hashes === undefined) {
+    hashes = new Map();
+    const plain = db.all(
+      "SELECT id, namespace, external_id FROM sources WHERE connector_instance_id = ? AND identity_hashed = 0",
+      [connectorInstanceId],
     );
-    if (identity === hash) return row.id as number;
+    if (plain.length > 0) {
+      const key = readKey(db);
+      if (!key) throw new IdentityKeyMissingError();
+      for (const row of plain) {
+        hashes.set(
+          macWith(key, [connectorInstanceId, row.namespace as string, row.external_id as string]),
+          row.id as number,
+        );
+      }
+    }
+    plainIndex.set(connectorInstanceId, hashes);
   }
+  const found = hashes.get(hash);
+  if (found !== undefined) return found;
   return db.run(
     "INSERT INTO sources (connector_instance_id, namespace, external_id, identity_hashed) VALUES (?, ?, ?, 1)",
     [connectorInstanceId, hash, hash],
