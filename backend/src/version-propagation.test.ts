@@ -121,7 +121,9 @@ function pipeline(failing = { on: false }) {
 
 const completionFacts = () =>
   db.all("SELECT id, value, status FROM facts WHERE kind = 'completion_date' ORDER BY id");
-const insight = () => db.all("SELECT id, state, summary FROM insights");
+// the dependency Insight; the replaced completion date is an `important_change` Insight beside it (P01)
+const insight = () =>
+  db.all("SELECT id, state, summary FROM insights WHERE rule = 'dependency_delay'");
 /** Each evidence of a fact with the chat source's version number it points at. */
 const evidenceOf = (factId: number) =>
   db.all(
@@ -167,9 +169,12 @@ describe("update.recompute", () => {
     const [again] = insight();
     expect(again).toMatchObject({ id: first?.id, state: "active" });
     expect(again?.summary).toContain("2026-12-12");
-    expect(db.all("SELECT count(*) AS n FROM insights")).toEqual([{ n: 1 }]);
+    expect(db.all("SELECT count(*) AS n FROM insights WHERE rule = 'dependency_delay'")).toEqual([
+      { n: 1 },
+    ]);
     const evidence = db.all(
       `SELECT v.version, e.quote FROM insight_evidence ie JOIN evidence e ON e.id = ie.evidence_id
+       JOIN insights i ON i.id = ie.insight_id AND i.rule = 'dependency_delay'
        JOIN source_versions v ON v.id = e.source_version_id JOIN sources s ON s.id = v.source_id
        WHERE s.external_id = 'ch-mulgyeol/v02-delay'`,
     );
