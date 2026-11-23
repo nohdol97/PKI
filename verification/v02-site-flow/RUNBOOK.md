@@ -171,11 +171,11 @@ C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요
 | 이름 | 뜻 |
 |---|---|
 | `setting` | 저장된 설정. `on`, `off`, `unset`(한 번도 쓰지 않음), `other` |
-| `forms` | 종류(`alias.synonym` 등)별로 표기 사실의 상태별 수 |
+| `forms` | 종류(seed 종류 `alias.synonym`·`alias.abbreviation`·`alias.translation`)별로 표기 사실의 상태별 수. 그 밖의 종류(사용자가 만든 종류 포함)는 이름 없이 `other`로 셉니다 |
 | `definitions` | 정의 사실의 상태별 수 |
 | `promoted` | 정책이 `auto-verify`로 올린 적이 있는 사실·관계의 수 |
 | `promotedStanding` | 그 가운데 지금 `verified`인 수 |
-| `promotedJudgedWrong` | 그 가운데 사용자가 틀렸다고 본 수: 지금 `disputed`·`rejected`이거나, 사용자의 값 고치기로 `superseded`가 된 것. 이의를 낸 뒤 취소해 `verified`로 돌아온 행은 세지 않습니다 |
+| `promotedJudgedWrong` | 그 가운데 사용자가 틀렸다고 본 수: 사용자의 이의·기각으로 지금 `disputed`·`rejected`이거나, 사용자의 값 고치기로 `superseded`가 된 것. 정책이 낸 이의(그 상태를 만든 줄의 주체가 정책. 취소·근거 복귀는 되돌린 줄 앞으로 거슬러 읽습니다)와 이의를 낸 뒤 취소해 `verified`로 돌아온 행은 세지 않습니다 |
 
 `--phase`는 파일 이름과 `phase` 칸만 정합니다. 저장된 설정과 어긋나면(`off`인데 설정이 `on`, `on`인데 `on`이 아님) 표준 오류에 `warning:` 한 줄을 내지만 막지 않습니다.
 

@@ -125,9 +125,9 @@ def make_db(path, with_settings=True):
         CREATE TABLE facts (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL);
         CREATE TABLE relations (id INTEGER PRIMARY KEY, status TEXT NOT NULL);
         CREATE TABLE fact_history (fact_id INTEGER NOT NULL, seq INTEGER NOT NULL, actor TEXT NOT NULL,
-                                   action TEXT NOT NULL, to_status TEXT NOT NULL, PRIMARY KEY (fact_id, seq));
+                                   action TEXT NOT NULL, to_status TEXT NOT NULL, reverts_seq INTEGER, PRIMARY KEY (fact_id, seq));
         CREATE TABLE relation_history (relation_id INTEGER NOT NULL, seq INTEGER NOT NULL, actor TEXT NOT NULL,
-                                       action TEXT NOT NULL, to_status TEXT NOT NULL, PRIMARY KEY (relation_id, seq));
+                                       action TEXT NOT NULL, to_status TEXT NOT NULL, reverts_seq INTEGER, PRIMARY KEY (relation_id, seq));
         CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     """)
     db.commit()
@@ -135,7 +135,7 @@ def make_db(path, with_settings=True):
 
 
 def add(path, table, row_id, status, lines=(), kind="alias.synonym"):
-    """One fact or relation row and its history lines (actor, action, to_status), seq from 1."""
+    """One fact or relation row and its history lines (actor, action, to_status[, reverts_seq]), seq from 1."""
     db = sqlite3.connect(path)
     if table == "facts":
         db.execute("INSERT INTO facts (id, item_id, kind, status) VALUES (?, 1, ?, ?)", (row_id, kind, status))
@@ -143,9 +143,9 @@ def add(path, table, row_id, status, lines=(), kind="alias.synonym"):
     else:
         db.execute("INSERT INTO relations (id, status) VALUES (?, ?)", (row_id, status))
         fk, history = "relation_id", "relation_history"
-    for seq, (actor, action, to) in enumerate(lines, start=1):
-        db.execute("INSERT INTO {} ({}, seq, actor, action, to_status) VALUES (?, ?, ?, ?, ?)".format(history, fk),
-                   (row_id, seq, actor, action, to))
+    for seq, (actor, action, to, *reverts) in enumerate(lines, start=1):
+        db.execute("INSERT INTO {} ({}, seq, actor, action, to_status, reverts_seq) VALUES (?, ?, ?, ?, ?, ?)".format(history, fk),
+                   (row_id, seq, actor, action, to, reverts[0] if reverts else None))
     db.commit()
     db.close()
 
@@ -193,6 +193,31 @@ class SemanticCounts(unittest.TestCase):
         add(self.db, "facts", 2, "rejected", [EXTRACT, PROMOTE, ("user", "dispute", "disputed"), ("user", "reject", "rejected")])
         c = self.counts()
         self.assertEqual((c["promoted"], c["promotedStanding"], c["promotedJudgedWrong"]), (2, 0, 2))
+
+    def test_a_dispute_the_policy_raised_is_not_judged_wrong_but_the_users_is(self):
+        add(self.db, "facts", 1, "disputed", [EXTRACT, PROMOTE, ("policy", "dispute", "disputed")])
+        add(self.db, "facts", 2, "disputed", [EXTRACT, PROMOTE, ("user", "dispute", "disputed")])
+        c = self.counts()
+        self.assertEqual((c["promoted"], c["promotedStanding"], c["promotedJudgedWrong"]), (2, 0, 1))
+
+    def test_a_user_dispute_that_propagation_superseded_and_evidence_restored_is_still_judged_wrong(self):
+        add(self.db, "facts", 1, "disputed", [EXTRACT, PROMOTE, ("user", "dispute", "disputed"),
+                                              ("propagation", "supersede", "superseded"),
+                                              ("extraction", "evidence-returned", "disputed", 4)])
+        self.assertEqual(self.counts()["promotedJudgedWrong"], 1)
+
+    def test_a_policy_dispute_the_user_approved_and_undid_is_not_judged_wrong(self):
+        add(self.db, "facts", 1, "disputed", [EXTRACT, PROMOTE, ("policy", "dispute", "disputed"),
+                                              ("user", "approve", "verified"), ("user", "undo", "disputed", 4)])
+        self.assertEqual(self.counts()["promotedJudgedWrong"], 0)
+
+    def test_the_connection_open_ro_returns_refuses_a_write(self):
+        db = ss.open_ro(self.db)
+        try:
+            with self.assertRaises(sqlite3.OperationalError):
+                db.execute("CREATE TABLE x (a)")
+        finally:
+            db.close()
 
     def test_a_promoted_value_the_user_replaced_is_judged_wrong_but_one_propagation_superseded_is_not(self):
         add(self.db, "facts", 1, "superseded", [EXTRACT, PROMOTE, ("user", "replace", "superseded")])
@@ -245,8 +270,12 @@ class SemanticCounts(unittest.TestCase):
     def test_the_written_json_holds_numbers_and_code_names_only(self):
         add(self.db, "facts", 1, "verified", [EXTRACT, PROMOTE], kind="alias.synonym")
         add(self.db, "facts", 2, "candidate", [EXTRACT], kind="alias.x secret term")  # an odd kind is not echoed
+        add(self.db, "facts", 3, "candidate", [EXTRACT], kind="alias.codename")  # a well-formed user-made kind is not echoed
         path = ss.write_counts(self.counts("on"), self.dir.name)
         self.assertEqual(os.path.basename(path), "semantic-counts.on.json")
+        with open(path, encoding="utf-8") as fh:
+            self.assertNotIn("alias.codename", fh.read())
+        self.assertEqual(self.counts("on")["forms"]["other"]["candidate"], 2)
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         allowed = set(STATUSES) | {"on", "off", "unset", "other", "alias.synonym", "alias.abbreviation", "alias.translation",
@@ -265,7 +294,7 @@ class SemanticCounts(unittest.TestCase):
 
         walk(data)
         self.assertEqual(data["phase"], "on")
-        self.assertEqual(data["forms"]["other"]["candidate"], 1)
+        self.assertEqual(data["forms"]["other"]["candidate"], 2)
 
     def test_a_phase_that_disagrees_with_the_stored_setting_is_reported(self):
         self.assertEqual(ss.phase_warning(self.counts("on")), "phase on, but the stored setting is unset")
