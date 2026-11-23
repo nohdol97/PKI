@@ -35,6 +35,11 @@
   font-size: var(--fs-meta);
 }
 
+.tabs button[aria-pressed="true"] {
+  background: var(--accent-quiet);
+  color: var(--accent);
+}
+
 /* a row of buttons */
 .actions {
   display: flex;
@@ -46,22 +51,8 @@
   min-height: calc(var(--control-h) - var(--sp-2));
   font-size: var(--fs-meta);
 }
-
-.btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-}
-.btn-primary:hover:not(:disabled) {
-  background: var(--accent);
-  border-color: var(--accent);
-  opacity: 0.9;
-}
-
-/* helper text */
-.meta {
-  font-size: var(--fs-meta);
-  color: var(--ink-meta);
+.actions button + button {
+  margin-left: 0;
 }
 
 /* a state shown as a colour dot plus its word; the dot never carries the meaning alone */

@@ -110,7 +110,8 @@ textarea {
 
 button {
   min-height: var(--control-h);
-  padding: 0 var(--sp-3);
+  padding: var(--sp-1) var(--sp-3);
+  text-align: left;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--surface);
@@ -118,6 +119,9 @@ button {
   font-size: var(--fs-sub);
   font-weight: 600;
   cursor: pointer;
+}
+button + button {
+  margin-left: var(--sp-2);
 }
 button:hover:not(:disabled) {
   background: var(--accent-quiet);
@@ -178,15 +182,10 @@ label > select {
 }
 
 form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--sp-2) var(--sp-3);
   margin: 0 0 var(--sp-3);
 }
-form > p,
-form > label {
-  margin: 0;
+form button {
+  margin-top: var(--sp-1);
 }
 
 fieldset {
