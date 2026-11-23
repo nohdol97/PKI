@@ -88,4 +88,22 @@ describe("removeUserData", () => {
     }
     expect(readFileSync(join(data, "pki.sqlite"), "utf8")).toBe("db");
   });
+
+  it("H02A-C4: while the lock is held no instance.lock* file is removed (an open journal cannot be deleted on Windows)", () => {
+    withDatabase();
+    let journalAtClose: boolean | undefined;
+    const lock = (dir: string) => {
+      writeFileSync(join(dir, "instance.lock"), "");
+      writeFileSync(join(dir, "instance.lock-journal"), "");
+      return {
+        close: () => {
+          journalAtClose = existsSync(join(dir, "instance.lock-journal"));
+        },
+      };
+    };
+    const result = removeUserData({ choice: "delete", dir: data, lock, disableAutostart: vi.fn() });
+    expect(journalAtClose).toBe(true);
+    expect(result.code).toBe(0);
+    expect(existsSync(data)).toBe(false);
+  });
 });

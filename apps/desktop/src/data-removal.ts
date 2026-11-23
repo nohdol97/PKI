@@ -67,7 +67,9 @@ export function removeUserData(input: {
 
   try {
     for (const name of readdirSync(dir)) {
-      if (name !== DATA_LOCK_FILE) rmSync(join(dir, name), { recursive: true, force: true });
+      // SQLite keeps instance.lock-journal open while the lock is held; it goes after close
+      if (!name.startsWith(DATA_LOCK_FILE))
+        rmSync(join(dir, name), { recursive: true, force: true });
     }
   } catch (error) {
     return refuse(`removal stopped (${(error as Error).message}); the data folder may be partial`);
