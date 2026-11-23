@@ -69,7 +69,7 @@ test("backup.e2e: set the folder → make a backup → it is listed → look at 
 
   await test.step("set the folder; a backup needs the passphrase typed twice", async () => {
     await expect(section.getByRole("button", { name: "백업 만들기" })).toBeDisabled();
-    await section.getByLabel("백업 폴더 경로(개발용)").fill(backups);
+    await section.getByLabel("백업을 둘 폴더(개발용)").fill(backups);
     await section.getByRole("button", { name: "폴더 정하기" }).click();
     await expect(section).toContainText(backups);
     await section.getByLabel("암호구", { exact: true }).fill(PASSPHRASE);

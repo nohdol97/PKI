@@ -195,7 +195,7 @@ export function BackupRestore({
           }}
         >
           <label>
-            백업 폴더 경로(개발용)
+            백업을 둘 폴더(개발용)
             <input type="text" value={path} onChange={(e) => setPath(e.target.value)} />
           </label>
           <button type="submit" disabled={busy || path === ""}>
