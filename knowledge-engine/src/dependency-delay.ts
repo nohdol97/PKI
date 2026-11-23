@@ -7,8 +7,9 @@
 // queries of @pki/storage (V02-R8).
 import {
   entityGroups,
+  INVALID,
   isDate,
-  listEvidence,
+  isValidRow,
   listEvidenceVersions,
   listFactsOfKind,
   listInsightKeys,
@@ -19,15 +20,14 @@ import {
   rowLineage,
   saveInsight,
   unionOfVersions,
-  userInputKind,
+  validRow,
   withGroups,
-  type EvidenceTarget,
   type InsightKey,
-  type KnowledgeStatus,
   type MembershipListener,
   type SourceVersionRef,
   type SqlDriver,
   type UserInputRef,
+  type ValidRow,
 } from "@pki/storage";
 
 /** The rule name, the golden labels' `insight_type` (fixtures/v02-expected.json). */
@@ -39,49 +39,11 @@ export const DEPENDS_ON = "DEPENDS_ON";
 
 export type RuleOutcome = "created" | "updated" | "revived" | "resolved" | "unchanged";
 
-/**
- * "유효" (S01-R15): neither superseded nor rejected (candidate counts), and some current evidence,
- * or a user input: a row the user wrote, or one the user approved with no current evidence.
- */
-const INVALID: ReadonlySet<KnowledgeStatus> = new Set(["superseded", "rejected"]);
-
-const currentEvidence = (db: SqlDriver, target: EvidenceTarget): number[] =>
-  listEvidence(db, target)
-    .filter((e) => e.current)
-    .map((e) => e.id);
-
 /** The one calendar-date check is storage's (ontology.ts); the rule's own reading of a date is the same. */
 export { isDate };
 
-/**
- * A valid fact or relation the rule reads. `evidenceIds` are the current evidence it cites; `input` is
- * set when it stands as a user input instead (nothing of its evidence is cited, the user's row is tied
- * to the Insight by `insight_user_inputs`). A row the user wrote is an input whatever evidence an
- * extraction attached; a row the user approved with no current evidence is one only while it has none.
- */
-interface ValidRow {
-  evidenceIds: number[];
-  input: UserInputRef | null;
-}
-
-function validRow(db: SqlDriver, ref: UserInputRef): ValidRow | undefined {
-  const evidenceIds = currentEvidence(
-    db,
-    ref.kind === "fact" ? { factId: ref.id } : { relationId: ref.id },
-  );
-  const kind = userInputKind(db, ref);
-  const input = kind === "authored" || (kind === "approved" && evidenceIds.length === 0);
-  if (input) return { evidenceIds: [], input: ref };
-  return evidenceIds.length > 0 ? { evidenceIds, input: null } : undefined;
-}
-
-/**
- * Whether a fact or relation of this status is "valid" (S01-R15) — the predicate the rule reads, which
- * the automatic promotion's condition 5 asks too (S01-T04 hand-off 10): not superseded or rejected,
- * and current evidence or a user input.
- */
-export const isValidRow = (db: SqlDriver, ref: UserInputRef, status: KnowledgeStatus): boolean =>
-  !INVALID.has(status) && validRow(db, ref) !== undefined;
+/** The valid-row predicate is storage's (valid-row.ts); the promotion's condition 5 and other callers import it from here too. */
+export { isValidRow };
 
 interface DatedRow extends ValidRow {
   value: string;
