@@ -1,17 +1,19 @@
 // Deterministic rule "의존 업무 지연" (V02-R9) and the upkeep of its Insight rows
-// (V02-R10). X has a target date, X depends on Y, Y has an expected completion
+// (V02-R10). An item here is its merge group (S02-R13): the key is the representative, the dates and
+// the dependency are read over every member. X has a target date, X depends on Y, Y has an expected completion
 // date strictly later than X's target, and all three rows are valid: then one
 // inferred Insight per (rule, X, Y) carries the three rows' current evidence.
 // The comparison is this code's; no LLM is called. Reads are the fixed depth-1
 // queries of @pki/storage (V02-R8).
 import {
-  findRelation,
+  entityGroups,
   isDate,
   listEvidence,
   listEvidenceVersions,
   listFactsOfKind,
   listInsightKeys,
   listRelationPairs,
+  listRelationsBetween,
   readInsight,
   readItem,
   rowLineage,
@@ -83,13 +85,15 @@ interface DatedRow extends ValidRow {
   value: string;
 }
 
-function validDates(db: SqlDriver, itemId: number, kind: string): DatedRow[] {
-  return listFactsOfKind(db, itemId, kind)
-    .filter((f) => !INVALID.has(f.status) && isDate(f.value))
-    .flatMap((f) => {
-      const row = validRow(db, { kind: "fact", id: f.id });
-      return row ? [{ value: f.value, ...row }] : [];
-    });
+function validDates(db: SqlDriver, itemIds: readonly number[], kind: string): DatedRow[] {
+  return itemIds.flatMap((itemId) =>
+    listFactsOfKind(db, itemId, kind)
+      .filter((f) => !INVALID.has(f.status) && isDate(f.value))
+      .flatMap((f) => {
+        const row = validRow(db, { kind: "fact", id: f.id });
+        return row ? [{ value: f.value, ...row }] : [];
+      }),
+  );
 }
 
 type Desired =
@@ -105,21 +109,28 @@ export interface RuleScope {
 }
 
 /**
- * What the pair's row should hold. With several valid dates (different values are
- * different rows, V02-R8) the earliest target and the latest completion decide,
- * (one row per item, kind and value, so no ties); the condition holds iff some pair is late.
+ * What the pair's row should hold. The pair is two groups (S02-R13): X and Y are their representatives,
+ * and a key whose end is a member of a group, or whose two ends are one group, holds nothing. Dates and
+ * the dependency are read over every member of the group. With several valid dates (different values are
+ * different rows, V02-R8) the earliest target and the latest completion decide, (one row per item, kind
+ * and value, so no ties); the condition holds iff some pair is late. Of several valid relations from X's
+ * group to Y's, the one with the lowest id is the one cited.
  */
 function evaluate(db: SqlDriver, { xItemId, yItemId }: InsightKey, scope?: RuleScope): Desired {
-  const relation = findRelation(db, xItemId, DEPENDS_ON, yItemId);
-  const dependency =
-    relation && !INVALID.has(relation.status)
-      ? validRow(db, { kind: "relation", id: relation.id })
-      : undefined;
-  const target = validDates(db, xItemId, TARGET_DATE).reduce<DatedRow | undefined>(
+  const rx = entityGroups.representativeOf(db, xItemId);
+  const ry = entityGroups.representativeOf(db, yItemId);
+  if (rx !== xItemId || ry !== yItemId || rx === ry) return { state: "resolved" };
+  const xs = entityGroups.membersOf(db, xItemId);
+  const ys = entityGroups.membersOf(db, yItemId);
+  const dependency = listRelationsBetween(db, DEPENDS_ON, xs, ys)
+    .filter((r) => !INVALID.has(r.status))
+    .map((r) => validRow(db, { kind: "relation", id: r.id }))
+    .find((row) => row !== undefined);
+  const target = validDates(db, xs, TARGET_DATE).reduce<DatedRow | undefined>(
     (min, f) => (min && min.value <= f.value ? min : f),
     undefined,
   );
-  const completion = validDates(db, yItemId, COMPLETION_DATE).reduce<DatedRow | undefined>(
+  const completion = validDates(db, ys, COMPLETION_DATE).reduce<DatedRow | undefined>(
     (max, f) => (max && max.value >= f.value ? max : f),
     undefined,
   );
@@ -157,7 +168,7 @@ const inOrder = (inputs: readonly UserInputRef[]) =>
   [...inputs].sort((p, q) => (p.kind === q.kind ? p.id - q.id : p.kind === "fact" ? -1 : 1));
 
 /**
- * Re-evaluates every (X, Y) pair that one of `itemIds` takes part in, through a
+ * Re-evaluates every (X, Y) pair that one of `itemIds` or a member of its group takes part in, through a
  * DEPENDS_ON relation or an existing Insight row, in one transaction. Writes only
  * what differs: no row is created for a pair that does not hold, an unchanged
  * row is not written, a broken one is resolved (summary and evidence emptied,
@@ -172,18 +183,20 @@ export function recomputeDependencyDelay(
   scope?: RuleScope,
 ): { key: InsightKey; outcome: RuleOutcome }[] {
   return db.transaction(() => {
+    const all = [...new Set(itemIds.flatMap((id) => entityGroups.membersOf(db, id)))];
     const pairs = new Map<string, InsightKey>();
-    for (const p of [
-      ...listRelationPairs(db, DEPENDS_ON, itemIds),
-      ...listInsightKeys(db, DEPENDENCY_DELAY, itemIds),
-    ]) {
-      // A self-dependency is no other work being late (잠정): skipped, never stored.
-      if (p.xItemId === p.yItemId) continue;
-      pairs.set(`${p.xItemId}:${p.yItemId}`, {
-        rule: DEPENDENCY_DELAY,
-        xItemId: p.xItemId,
-        yItemId: p.yItemId,
-      });
+    const keep = (xItemId: number, yItemId: number) =>
+      pairs.set(`${xItemId}:${yItemId}`, { rule: DEPENDENCY_DELAY, xItemId, yItemId });
+    for (const p of listRelationPairs(db, DEPENDS_ON, all)) {
+      // The key is the groups' representatives (S02-R13). A self-dependency, or two ends of one group, is
+      // no other work being late (잠정): skipped, never stored.
+      const x = entityGroups.representativeOf(db, p.xItemId);
+      const y = entityGroups.representativeOf(db, p.yItemId);
+      if (x !== y) keep(x, y);
+    }
+    // A stored key as it is stored: one a merge made stale is found here, to be resolved.
+    for (const p of listInsightKeys(db, DEPENDENCY_DELAY, all)) {
+      if (p.xItemId !== p.yItemId) keep(p.xItemId, p.yItemId);
     }
     const results: { key: InsightKey; outcome: RuleOutcome }[] = [];
     for (const key of pairs.values()) {

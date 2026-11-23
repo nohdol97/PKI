@@ -344,7 +344,7 @@ export {
   type ValueType,
 } from "./ontology.ts";
 export {
-  findRelation,
+  listRelationsBetween,
   listEvidenceVersions,
   listFactsOfKind,
   listInsightKeys,
