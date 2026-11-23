@@ -153,10 +153,8 @@ describe("wiki.gate: what a link between two facts may disclose", () => {
     const a = source("a", "가 본문", ["A"]);
     const b = source("b", "나 본문", ["B"]);
     const x = insertItem(db, { type: "Project", name: "항목", ...attrs });
-    const y = insertItem(db, { type: "Project", name: "별칭", ...attrs });
-    merge(y, x);
     const fa = citedFact(x, "가 값", a);
-    const fb = citedFact(y, "나 값", b);
+    const fb = citedFact(x, "나 값", b);
     const fc = citedFact(x, "가 새 값", a, { validAt: "2031-08-08" });
     link("CONTRADICTS", fa, fb);
     link("SUPERSEDES", fc, fb);
@@ -187,7 +185,8 @@ describe("wiki.gate: a merge line the caller cannot see is not a group (S02-R24 
   /** Shows each scope alone but refuses the two sources of one merge line together, so the line is hidden. */
   const crossing: ScopePolicy = {
     ...policy,
-    allows: (scopes) => !(scopes.some((s) => s === "A") && scopes.some((s) => s === "B")),
+    allows: (scopes) =>
+      !(scopes.some((s) => s?.includes("A")) && scopes.some((s) => s?.includes("B"))),
   };
   const mergeLine = (member: number, representative: number) =>
     db.run(

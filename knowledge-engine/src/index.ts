@@ -104,6 +104,7 @@ export {
   GRAPH_CHAIN_LIMIT,
   GRAPH_EXPANSION_LIMIT,
   GRAPH_PATH_LIMIT,
+  groupView,
   relationPaths,
   traceChains,
   visibleLinks,
