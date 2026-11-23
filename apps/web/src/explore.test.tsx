@@ -187,7 +187,7 @@ describe("이웃과 타임라인 (X02-C3a ③~⑤)", () => {
   it("draws the neighbours as a picture above the table and gives each line its own detail controls", () => {
     const out = neighbourhood();
     expect(out.indexOf('role="img"')).toBeLessThan(out.indexOf('aria-label="이웃 표"'));
-    expect(out).toContain('aria-label="이력 보기: 사실 memo 처음"');
+    expect(out).toContain('aria-label="이력 보기: 사실 memo: 처음"');
     expect(out).toContain('aria-label="이력 보기: 항목 ');
   });
 
