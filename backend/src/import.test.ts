@@ -24,6 +24,7 @@ import { openCanonicalDb, productImporter } from "./composition.ts";
 import { createConnectorManager, tryLockInstance, type ConnectorManager } from "./connectors.ts";
 import { importContent, type ImportOutcome } from "./imports.ts";
 import { storePage } from "./page-store.ts";
+import { JSONL_FILE_INSTANCE_PREFIX } from "./public-kinds.ts";
 import { applyTombstone } from "@pki/knowledge-engine";
 import { dirTemplate } from "@pki/testkit";
 import { JSONL_CAPABILITIES, parseJsonl } from "@pki/connector-sdk";
@@ -529,6 +530,28 @@ describe("import.api", () => {
     db.run("INSERT INTO connector_instances (id, kind) VALUES ('other', 'test-fixtures')");
     expect(await importContent(db, "other", line())).toEqual({ error: "bad-request" });
     expect(state()).toMatchObject({ sources: 0, versions: 0 });
+  });
+
+  it("an instance id of an approved JSONL file location is refused with bad-request and nothing is written for it (I02B-R52, #258 M1)", async () => {
+    const id = `${JSONL_FILE_INSTANCE_PREFIX}loc-1`;
+    registerConnectorInstance(db, id, JSONL_IMPORT_KIND);
+    saveSourceRecord(db, id, {
+      namespace: "",
+      externalId: "ext-file",
+      revision: 1,
+      title: "t",
+      body: "file body",
+    });
+    const before = state();
+    const deletion = line({
+      external_id: "ext-file",
+      version: 9,
+      content: "",
+      operation: "delete",
+    });
+    expect(await importContent(db, id, deletion)).toEqual({ error: "bad-request" });
+    expect(state()).toEqual(before);
+    expect(readCursor(db, id)).toBeNull();
   });
 
   it("① an instance taken by a sync or an import answers instance-busy and stores nothing; the lock is released after", async () => {
