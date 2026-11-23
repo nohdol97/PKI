@@ -13,7 +13,7 @@
 // hold the quit past the shell's time limit.
 import { expect, test } from "@playwright/test";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,6 +130,36 @@ test("start, single instance, and quit with a live backend", async () => {
     // V01-C3: quitting with the backend running leaves no backend process.
     await app.close();
     await expect.poll(() => alive(pid), { timeout: 10_000 }).toBe(false);
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// H02A-C5: the uninstall switch is judged before Electron's single-instance lock, so a
+// run on the same userData and data folder is refused (1), not handed over (0), and the
+// data folder goes only once nothing holds it.
+test("--pki-uninstall-data=delete is refused while PKI runs, and deletes once it has quit", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pki-lifecycle-"));
+  const options = { userData: join(dir, "u"), dataDir: join(dir, "d") };
+  const uninstall = async () => {
+    const child = spawn(ELECTRON, [...shellArgs(options), "--pki-uninstall-data=delete"], {
+      stdio: "ignore",
+    });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
+    const code = await new Promise<number | string | null>((resolve) =>
+      child.once("exit", (c, signal) => resolve(c ?? signal)),
+    );
+    clearTimeout(timer);
+    return code;
+  };
+  const { app } = await startedShell(options);
+  try {
+    expect(await uninstall()).toBe(1);
+    expect(existsSync(join(options.dataDir, "pki.sqlite"))).toBe(true);
+    await app.close();
+    expect(await uninstall()).toBe(0);
+    expect(existsSync(options.dataDir)).toBe(false);
   } finally {
     await app.close().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });

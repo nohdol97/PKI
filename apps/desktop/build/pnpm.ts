@@ -24,3 +24,14 @@ export function pnpm(args: readonly string[], cwd: string): void {
   const command = pnpmCommand();
   execFileSync(command.file, [...command.args, ...args], { cwd, stdio: "inherit" });
 }
+
+/** Like `pnpm`, but returns what the command wrote to standard output. */
+export function pnpmOutput(args: readonly string[], cwd: string): string {
+  const command = pnpmCommand();
+  return execFileSync(command.file, [...command.args, ...args], {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+}

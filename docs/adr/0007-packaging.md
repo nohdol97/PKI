@@ -31,5 +31,6 @@
 
 - 패키징 구성과 배포처 실행 절차서는 R04(#13)의 사외 준비물이다. V01의 Electron 쉘이 그 입력이다.
 - 설치 파일 크기, 압축률, 유휴 자원 사용량은 빌드해서 재기 전에는 모른다(4.6절).
+- manifest 서명 검증(Ed25519, `apps/desktop/src/update.ts`)은 Authenticode(electron-updater의 게시자 검사)와 별개의 층이다. 어느 한쪽이 다른 쪽을 대신하지 않는다([H02 spec](../specs/2026-11-24-H02-common.md)).
 - 번들한 `.dll`·`.node`가 기본으로 서명되는지, 서명 없는 바이너리를 Windows가 막는지는 확인이 필요하다(4.7절 4번, A14).
 - electron-builder v27에 호환성이 깨지는 변경이 예고되어 있다(4.1절). 버전을 고정한다.

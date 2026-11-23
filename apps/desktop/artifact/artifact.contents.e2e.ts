@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { backendEntry } from "../src/backend-entry.ts";
 import { DEVELOPMENT_EXCEPTION_MARKERS, REPO_ROOT, TEST_PICK_MARKERS } from "../build/bundle.ts";
-import { APP_DIR, readBuildReport, type BuildReport } from "../build/paths.ts";
+import { APP_DIR, readBuildReport, SBOM_FILE, type BuildReport } from "../build/paths.ts";
 import { judgeConnectorScopes } from "../build/scopes-check.ts";
 
 // spelled in pieces: only build-kind.ts and bundler configs may name the build value
@@ -208,6 +208,18 @@ test("the runtime packages are the bundles' externals only, each with its licens
     n.startsWith("@") ? readdirSync(join(APP_DIR, "node_modules", n)).map((s) => `${n}/${s}`) : [n],
   );
   for (const name of top) expect(names, name).toContain(name);
+});
+
+// H02A-C1: the SBOM lists every package the report says was copied, and Electron
+test("sbom.cdx.json lists every copied runtime package and Electron (H02A-C1)", () => {
+  const sbom = JSON.parse(readFileSync(SBOM_FILE, "utf8")) as {
+    components: { name: string; purl: string }[];
+  };
+  const purls = new Set(sbom.components.map((c) => c.purl));
+  for (const p of report.packages) {
+    expect(purls, p.name).toContain(`pkg:npm/${p.name.replace(/^@/, "%40")}@${p.version}`);
+  }
+  expect(sbom.components.map((c) => c.name)).toContain("electron");
 });
 
 // I07-C9: the report's scopes state and counts are what the judgment says for this repository's root

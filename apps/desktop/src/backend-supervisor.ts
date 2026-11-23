@@ -25,6 +25,8 @@ export interface Supervisor {
   registerLocationTicket(input: Parameters<Backend["registerLocationTicket"]>[0]): boolean;
   /** Asks the running backend where a local source's file is; undefined when none is running or none to show. */
   revealPath(sourceVersionId: number): Promise<string | undefined>;
+  /** Tells the running backend the OS woke from sleep; nothing when none is running. */
+  resumed(): void;
   /** Stops the backend (or the one starting) and restarts nothing after it. */
   stop(): Promise<void>;
 }
@@ -67,6 +69,7 @@ export async function superviseBackend(options: SupervisorOptions): Promise<Supe
     url: () => running?.url,
     registerLocationTicket: (input) => running?.registerLocationTicket(input) ?? false,
     revealPath: async (sourceVersionId) => running?.revealPath(sourceVersionId),
+    resumed: () => running?.resumed(),
     async stop() {
       stopping = true;
       await starting;

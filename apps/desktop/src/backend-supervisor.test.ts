@@ -28,6 +28,7 @@ function fakeStarts(options: { fail?: (n: number) => boolean } = {}) {
       exited,
       registerLocationTicket: () => true,
       revealPath: async () => undefined,
+      resumed: () => undefined,
       stopped: false,
       crash: () => exit(1),
       async stop() {
