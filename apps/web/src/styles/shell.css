@@ -1,0 +1,133 @@
+/*
+ * The frame (UI01-R3, R5): menu on the left, content, status line below.
+ * `.pane-detail` stays where the screen draws it in the DOM; this file places it in the right-hand
+ * column of `main` (position: absolute against `main`). No element between `main` and `.pane-detail`
+ * may set `position` or `transform`, or the detail would be placed against that element instead.
+ */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--nav-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--status-h);
+  height: 100vh;
+}
+
+/* menu */
+.side {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-5) var(--sp-3);
+  background: var(--bg-side);
+  border-right: var(--border);
+}
+.wordmark {
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-h2);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.side nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.side nav button {
+  display: block;
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0 var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  text-align: left;
+}
+.side nav button:hover {
+  background: var(--surface-quiet);
+  border-color: var(--line);
+}
+.side nav button[aria-current="page"] {
+  background: var(--accent-quiet);
+  border-color: transparent;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* content */
+.screen {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.pane-list {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--sp-5) var(--sp-6);
+}
+.screen:has(.pane-detail) .pane-list {
+  width: var(--list-w);
+  padding: var(--sp-5) var(--sp-4);
+  background: var(--surface-quiet);
+  border-right: var(--border);
+}
+.pane-detail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--list-w);
+  overflow-y: auto;
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--surface);
+}
+.pane-detail > * {
+  max-width: 720px;
+}
+.pane-detail > :first-child > :first-child {
+  margin-top: 0;
+}
+
+/* status line */
+.statusbar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: 0 var(--sp-5);
+  background: var(--bg-side);
+  border-top: var(--border);
+  font-size: var(--fs-meta);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.statusbar .end {
+  margin-left: auto;
+}
+
+/* narrow window: the detail follows the list */
+@media (max-width: 959px) {
+  .screen:has(.pane-detail) .pane-list {
+    width: auto;
+    padding: var(--sp-5) var(--sp-6);
+    background: transparent;
+    border-right: 0;
+  }
+  .pane-detail {
+    position: static;
+    margin-top: var(--sp-4);
+    padding: var(--sp-4);
+    border: var(--border);
+    border-radius: var(--radius);
+  }
+}

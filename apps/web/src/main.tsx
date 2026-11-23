@@ -2,6 +2,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createApiClient, loadSession } from "./api.ts";
 import { App } from "./App.tsx";
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/shell.css";
+import "./styles/components.css";
 import "./screens.css";
 
 // Electron takes the session from the preload, browser development from the dev

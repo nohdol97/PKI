@@ -56,3 +56,5 @@ Phase 1의 골격(V01: 화면, 로컬 API, Electron 쉘, 정본 저장, Provider
 ## 라이선스
 
 [MIT](LICENSE)
+
+번들 글꼴: [Pretendard](https://github.com/orioncactus/pretendard) 1.3.9 (SIL OFL 1.1) — 원본 그대로 `apps/web/public/fonts/`에 두며 전문은 [OFL.txt](apps/web/public/fonts/OFL.txt), 출처와 해시는 [NOTICE.txt](apps/web/public/fonts/NOTICE.txt)에 있습니다.

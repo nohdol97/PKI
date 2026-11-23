@@ -1,0 +1,93 @@
+/* Pieces that need a class (UI01-R2): row lists, view switch, button rows, quiet text, status word with a dot. */
+
+/* a list of rows in one bordered group */
+.cards {
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  list-style: none;
+  border: var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.cards > li {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+}
+.cards > li + li {
+  border-top: var(--border);
+}
+.cards > li > :last-child {
+  margin-bottom: 0;
+}
+
+/* the view switch (buttons that carry aria-pressed) */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-4);
+}
+.tabs button {
+  min-height: calc(var(--control-h) - var(--sp-2));
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+}
+
+/* a row of buttons */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0;
+}
+.actions button {
+  min-height: calc(var(--control-h) - var(--sp-2));
+  font-size: var(--fs-meta);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  opacity: 0.9;
+}
+
+/* helper text */
+.meta {
+  font-size: var(--fs-meta);
+  color: var(--ink-meta);
+}
+
+/* a state shown as a colour dot plus its word; the dot never carries the meaning alone */
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 600;
+}
+.state::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: currentcolor;
+}
+.state-attn {
+  color: var(--attn);
+}
+.state-warn {
+  color: var(--warn);
+}
+.state-ok {
+  color: var(--ok);
+}
+.state-none {
+  color: var(--none);
+}

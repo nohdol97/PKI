@@ -1,0 +1,57 @@
+/* Design tokens (UI01-R2): the one place that holds colour, type size and spacing values. */
+
+@font-face {
+  font-family: "Pretendard Variable";
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/PretendardVariable.woff2") format("woff2-variations");
+}
+
+:root {
+  --font: "Pretendard Variable", "Malgun Gothic", sans-serif;
+
+  --fs-meta: 13px;
+  --fs-sub: 15px;
+  --fs-body: 16px;
+  --fs-lead: 17px;
+  --fs-h3: 18px;
+  --fs-h2: 20px;
+  --fs-h1: 24px;
+  --lh: 1.6;
+
+  --bg: #f6f5f2;
+  --bg-side: #efede8;
+  --surface: #ffffff;
+  --surface-quiet: #fbfaf8;
+  --ink: #1b1f24;
+  --ink-2: #454b54;
+  --ink-meta: #5a616b;
+  --line: #dad7d0;
+  --line-strong: #b9b5ac;
+  --accent: #1e3a5f;
+  --accent-quiet: #e9eef4;
+  --on-accent: #ffffff;
+  --attn: #8f2f1f;
+  --attn-bg: #fbede9;
+  --warn: #7a5200;
+  --warn-bg: #fbf3dd;
+  --ok: #2b5b45;
+  --none: #6b7079;
+  --mark: #fbefc2;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --border: 1px solid var(--line);
+  --control-h: 36px;
+  --nav-w: 208px;
+  --list-w: clamp(320px, 32vw, 408px);
+  --status-h: 30px;
+}
