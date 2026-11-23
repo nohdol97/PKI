@@ -1,0 +1,42 @@
+// P01-R4 (C2b): the six axes and the score, a pure function of the stored signals and the time.
+import { describe, expect, it } from "vitest";
+import { rankInsight, type RankingSignals } from "./insight-ranking.ts";
+
+const NOW = new Date("2026-11-23T00:00:00.000Z");
+const base: RankingSignals = {
+  type: "dependency_delay",
+  confidence: 90,
+  urgencyDate: "2026-11-28",
+  changedAt: "2026-11-22T12:00:00.000Z",
+  userInputCount: 0,
+};
+
+describe("rankInsight", () => {
+  it("returns six axes in 0..100 and the same values for the same input and time", () => {
+    const a = rankInsight(base, NOW);
+    expect(rankInsight(base, NOW)).toEqual(a);
+    for (const axis of [
+      "relevance",
+      "impact",
+      "urgency",
+      "novelty",
+      "confidence",
+      "actionability",
+    ] as const) {
+      expect(Number.isInteger(a[axis])).toBe(true);
+      expect(a[axis]).toBeGreaterThanOrEqual(0);
+      expect(a[axis]).toBeLessThanOrEqual(100);
+    }
+    expect(a).toMatchObject({ urgency: 100, novelty: 100, confidence: 90, relevance: 50 });
+    expect(rankInsight({ ...base, userInputCount: 1 }, NOW).relevance).toBe(100);
+  });
+
+  it("ranks a nearer date as more urgent and a lower confidence as a lower score", () => {
+    const near = rankInsight({ ...base, urgencyDate: "2026-11-28" }, NOW);
+    const far = rankInsight({ ...base, urgencyDate: "2027-02-01" }, NOW);
+    expect(near.urgency).toBeGreaterThan(far.urgency);
+    expect(rankInsight({ ...base, confidence: 30 }, NOW).score).toBeLessThan(
+      rankInsight({ ...base, confidence: 90 }, NOW).score,
+    );
+  });
+});
