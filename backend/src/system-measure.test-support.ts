@@ -818,7 +818,7 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       lostDocs,
       failedJobs,
       duplicateItems: Math.max(0, names - 1),
-      note: "firstJobAfterRestartMs is the time from the restart to the first job to run (any job); allJobsDoneMs to every job finished, the interrupted job included, which waits for its lease to run out",
+      note: "firstJobAfterRestartMs is the time from the restart to the first job to run (any job); allJobsDoneMs to every job finished, the interrupted job included, which the restarted backend reclaims at its start whatever its lease end",
     };
   } finally {
     if (backend) await stopBackend(backend);
