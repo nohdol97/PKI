@@ -5,10 +5,11 @@
 // public-kinds module, never typed here.
 import { routes, CONNECTOR_SDK_VERSION, type Connector } from "@pki/contracts";
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
-import { userDelete } from "@pki/knowledge-engine";
+import { ENGINE_KIND, VECTOR_KIND, userDelete } from "@pki/knowledge-engine";
 import {
   LEDGER_FILE,
   readLedgerSeq,
+  readSetting,
   registerConnectorInstance,
   saveSourceRecord,
   type SqlDriver,
@@ -430,6 +431,96 @@ describe("boot.site-registration-ledger: the ledger's re-apply knows the merged 
     expect(tombstones(db)).toBe(0);
     expect(db.all("SELECT id FROM connector_instances WHERE id = 'fork-1'")).toEqual([]);
     expect(readLedgerHistory(db).unrecoverable.total).toBe(1);
+  });
+
+  describe("a deletion the kind-less build could not apply waits and is applied when the kind returns (I04-R20, #121)", () => {
+    const stop = async () => {
+      await booted?.server.close();
+      booted?.db.close();
+      booted = undefined;
+    };
+    const status = async () => {
+      const port = (booted as NonNullable<typeof booted>).server.port;
+      const res = await send(port, routes.status.path, {
+        host: `127.0.0.1:${port}`,
+        authorization: `Bearer ${TOKEN}`,
+      });
+      return (
+        res.body as {
+          dataProtection: { ledger: { state: string; unrecoverable: number; reapplied: number } };
+        }
+      ).dataProtection.ledger;
+    };
+    const live = () => (booted as NonNullable<typeof booted>).db;
+    const deferred = () => readSetting(live(), "tombstone-ledger.deferred");
+    const rebuilds = () =>
+      live().all("SELECT target FROM jobs WHERE kind = 'projection-rebuild' ORDER BY target");
+    const records = () => live().all("SELECT count(*) AS n FROM invalidations")[0]?.n;
+
+    it("C4 the kind-less start defers the line; the start that knows the kind applies it before the API opens", async () => {
+      restored().close();
+
+      await boot();
+      expect(tombstones(live())).toBe(0);
+      expect(live().all("SELECT id FROM connector_instances WHERE id = 'fork-1'")).toEqual([]);
+      expect(readLedgerSeq(live())).toBe(1);
+      expect(deferred()).toBe("[1]");
+      expect(await status()).toMatchObject({ unrecoverable: 1, reapplied: 0 });
+      await stop();
+
+      await boot({ connectorKinds: { "fork-kind": kindOf("fork-kind") } });
+      expect(tombstones(live())).toBe(1);
+      expect(live().all("SELECT kind FROM connector_instances WHERE id = 'fork-1'")).toEqual([
+        { kind: "fork-kind" },
+      ]);
+      expect(deferred()).toBe("[]");
+      expect(readLedgerSeq(live())).toBe(1);
+      expect(await status()).toMatchObject({ unrecoverable: 0, reapplied: 1 });
+      expect(readLedgerHistory(live()).unrecoverable.total).toBe(1);
+      expect(readLedgerHistory(live()).reapplied.total).toBe(1);
+      expect(rebuilds()).toEqual([{ target: ENGINE_KIND }, { target: VECTOR_KIND }]);
+    });
+
+    it("C9 a database an older build left without a list finds the waiting line again, and the history does not count it twice", async () => {
+      restored().close();
+      await boot();
+      await stop();
+      const raw = openCanonicalDb(dir);
+      raw.run("DELETE FROM settings WHERE key = 'tombstone-ledger.deferred'");
+      raw.close();
+
+      await boot({ connectorKinds: { "fork-kind": kindOf("fork-kind") } });
+      expect(tombstones(live())).toBe(1);
+      expect(deferred()).toBe("[]");
+      expect(readLedgerHistory(live()).unrecoverable.total).toBe(1);
+      expect(readLedgerHistory(live()).reapplied.total).toBe(1);
+    });
+
+    it("C5 a) starts that still lack the kind change nothing and ask for no rebuild; b) the start after the re-apply is a no-op", async () => {
+      restored().close();
+      await boot();
+      expect(rebuilds()).toEqual([]);
+      await stop();
+      for (let i = 0; i < 2; i++) {
+        await boot();
+        expect(deferred()).toBe("[1]");
+        expect(readLedgerSeq(live())).toBe(1);
+        expect(readLedgerHistory(live()).unrecoverable.total).toBe(1);
+        expect(await status()).toMatchObject({ state: "ok", unrecoverable: 1, reapplied: 0 });
+        expect(rebuilds()).toEqual([]);
+        await stop();
+      }
+      const site = { connectorKinds: { "fork-kind": kindOf("fork-kind") } };
+      await boot(site);
+      expect(tombstones(live())).toBe(1);
+      const before = { records: records(), rebuilds: rebuilds() };
+      await stop();
+      await boot(site);
+      expect(await status()).toMatchObject({ state: "ok", unrecoverable: 0, reapplied: 0 });
+      expect(tombstones(live())).toBe(1);
+      expect(records()).toBe(before.records);
+      expect(rebuilds()).toEqual(before.rebuilds);
+    });
   });
 
   it("a public kind the registration tried to register is not known either: a refused name does not bind an instance", async () => {

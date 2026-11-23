@@ -27,6 +27,7 @@ import {
   saveFact,
   saveSourceRecord,
   writeLedgerSeq,
+  writeSetting,
   type KnowledgeAttributes,
   type SqlDriver,
   type TombstoneLedger,
@@ -524,5 +525,262 @@ describe("what the ledger and the database say about each other", () => {
     migrate(bare);
     expect(() => reapplyLedger(bare)).toThrow(/no tombstone ledger/);
     expect(readSetting(bare, LEDGER_SEQ_SETTING)).toBeUndefined();
+  });
+});
+
+describe("lines the build could not apply wait and are applied when the kind returns (I04-R20, #121)", () => {
+  const DEFERRED = "tombstone-ledger.deferred";
+  const F = "f1";
+  const fid = (externalId: string) => ({
+    connectorInstanceId: F,
+    namespace: "n",
+    externalId,
+  });
+  /** A build that does not know the fork's kind, and one that does. */
+  const without = () => createLedgerReapply(derivativeRegistry, { knownKind: () => false });
+  const withKind = () => createLedgerReapply(derivativeRegistry, { knownKind: () => true });
+  const listOf = (d: SqlDriver) => readSetting(d, DEFERRED);
+  const tombstoneCount = (d: SqlDriver) => rows(d, "tombstones");
+
+  /** Instance F of a kind only a fork has, a source of it deleted: the line is in the ledger, the backup has none of it. */
+  function forkDeletion(externalId = "doc"): SqlDriver {
+    const old = backup(db);
+    registerConnectorInstance(db, F, "fork-kind");
+    saveSourceRecord(db, F, { namespace: "n", externalId, title: "t", body: "본문" });
+    canonicalTransaction(db, (tx) =>
+      applyTombstone(tx, {
+        identity: fid(externalId),
+        reason: "user-deleted",
+        lastRevision: null,
+        at: AT,
+      }),
+    );
+    return old;
+  }
+  /** The line of this sequence loses its kind, as a line of the first ledger format has none. */
+  function dropKind(seq: number): void {
+    const text = io.files.get(P) as string;
+    io.files.set(
+      P,
+      text
+        .split("\n")
+        .map((piece) => {
+          const r = piece.startsWith("{") ? (JSON.parse(piece) as Record<string, unknown>) : {};
+          if (r.t !== "line" || r.seq !== seq) return piece;
+          return JSON.stringify({ ...r, k: null });
+        })
+        .join("\n"),
+    );
+  }
+
+  it("C5 b) keeps the position and the list while the kind is unknown, applies once it is known, and then does nothing", () => {
+    const old = forkDeletion();
+    restart(old);
+
+    expect(without()(old)).toMatchObject({
+      applied: 0,
+      unrecoverable: 1,
+      newlyDeferred: 1,
+      canonicalSeq: 1,
+    });
+    expect(listOf(old)).toBe("[1]");
+    expect(tombstoneCount(old)).toBe(0);
+
+    expect(without()(old)).toMatchObject({
+      applied: 0,
+      unrecoverable: 1,
+      newlyDeferred: 0,
+      canonicalSeq: 1,
+      skipped: 0,
+    });
+    expect(listOf(old)).toBe("[1]");
+
+    expect(withKind()(old)).toMatchObject({
+      applied: 1,
+      unrecoverable: 0,
+      newlyDeferred: 0,
+      canonicalSeq: 1,
+    });
+    expect(listOf(old)).toBe("[]");
+    expect(tombstoneCount(old)).toBe(1);
+    expect(old.all("SELECT kind FROM connector_instances WHERE id = ?", [F])).toEqual([
+      { kind: "fork-kind" },
+    ]);
+    const records = listInvalidations(old).length;
+
+    expect(withKind()(old)).toMatchObject({ applied: 0, unrecoverable: 0, skipped: 1 });
+    expect(tombstoneCount(old)).toBe(1);
+    expect(listInvalidations(old)).toHaveLength(records);
+  });
+
+  it("C6 the applied position is never lowered by a deferred line, and the next deletion is numbered after it", () => {
+    const mail = seedSecond(db);
+    const old = forkDeletion();
+    del(db); // line 2: chat, an instance the database knows
+    restart(old);
+
+    expect(without()(old)).toMatchObject({ applied: 1, unrecoverable: 1, canonicalSeq: 2 });
+    expect(listOf(old)).toBe("[1]");
+    expect(withKind()(old)).toMatchObject({ applied: 1, unrecoverable: 0, canonicalSeq: 2 });
+    expect(readLedgerSeq(old)).toBe(2);
+    expect(listOf(old)).toBe("[]");
+
+    canonicalTransaction(old, (tx) =>
+      applyTombstone(tx, {
+        identity: mailIdentity,
+        reason: "user-deleted",
+        lastRevision: null,
+        at: LATER,
+      }),
+    );
+    expect(file().lines.map((l) => l.seq)).toEqual([1, 2, 3]);
+    expect(readLedgerSeq(old)).toBe(3);
+    expect(readTombstoneState(old, mail)).toBeDefined();
+  });
+
+  it("C7 a later line of the same source that is already reflected wins: the deferred line is dropped, not applied", () => {
+    const old = backup(db);
+    registerConnectorInstance(db, F, "fork-kind");
+    const doc = saveSourceRecord(db, F, {
+      namespace: "n",
+      externalId: "doc",
+      title: "t",
+      body: "본문",
+    });
+    if (doc.status !== "created") throw new Error(doc.status);
+    canonicalTransaction(db, (tx) =>
+      applyTombstone(tx, {
+        identity: fid("doc"),
+        reason: "user-deleted",
+        lastRevision: null,
+        at: AT,
+      }),
+    );
+    lift(db, doc.sourceId, LATER);
+    expect(file().lines.map((l) => [l.seq, l.liftedAt !== null])).toEqual([
+      [1, false],
+      [2, true],
+    ]);
+    restart(old);
+    expect(withKind()(old)).toMatchObject({ applied: 2, lifted: 1, canonicalSeq: 2 });
+    // after the lift a new version arrives
+    const again = saveSourceRecord(old, F, {
+      namespace: "n",
+      externalId: "doc",
+      title: "t",
+      body: "해제 뒤 본문",
+    });
+    expect(again.status).toBe("created");
+    const versions = () =>
+      old.all("SELECT count(*) AS n FROM source_versions WHERE source_id = ?", [doc.sourceId])[0]
+        ?.n;
+    const kept = versions();
+    expect(kept).toBeGreaterThan(0);
+    // the list still names line 1 (set by hand: the list as it stands between the two passes of a start where the deletion line ahead was deferred and the lift behind it registered the instance; the second pass would drop it)
+    writeSetting(old, DEFERRED, "[1]");
+
+    const report = withKind()(old);
+    // the version received after the lift survives, and the tombstone stays lifted
+    expect(versions()).toBe(kept);
+    expect(readTombstoneState(old, doc.sourceId)).toMatchObject({ liftedAt: LATER });
+    expect(report).toMatchObject({ applied: 0, unrecoverable: 0, skipped: 2 });
+    expect(listOf(old)).toBe("[]");
+  });
+
+  it("C8 an old kind-less line ahead of a kinded line of the same instance is applied in the same start", () => {
+    const old = backup(db);
+    registerConnectorInstance(db, F, "fork-kind");
+    for (const externalId of ["a", "b"]) {
+      saveSourceRecord(db, F, { namespace: "n", externalId, title: externalId, body: "본문" });
+      canonicalTransaction(db, (tx) =>
+        applyTombstone(tx, {
+          identity: fid(externalId),
+          reason: "user-deleted",
+          lastRevision: null,
+          at: AT,
+        }),
+      );
+    }
+    dropKind(1);
+    restart(old);
+
+    expect(withKind()(old)).toMatchObject({ applied: 2, unrecoverable: 0, canonicalSeq: 2 });
+    expect(listOf(old)).toBe("[]");
+    expect(tombstoneCount(old)).toBe(2);
+  });
+
+  it("C9 without a list, the lines below the position whose instance is unknown are found again; a known instance's lines are not applied twice", () => {
+    for (const row of [undefined, "not json"]) {
+      const old = forkDeletion(`doc${n}`);
+      del(db); // line 2: chat, known
+      restart(old);
+      without()(old);
+      expect(listOf(old)).toBe("[1]");
+      // what a build before this one left behind: the position past the line, no list (or one that cannot be read)
+      const breakList = () =>
+        row === undefined
+          ? old.run("DELETE FROM settings WHERE key = ?", [DEFERRED])
+          : writeSetting(old, DEFERRED, row);
+      breakList();
+      const records = listInvalidations(old).length;
+
+      expect(without()(old)).toMatchObject({ applied: 0, unrecoverable: 1, newlyDeferred: 0 });
+      expect(listOf(old)).toBe("[1]");
+
+      breakList();
+      expect(withKind()(old)).toMatchObject({ applied: 1, unrecoverable: 0, newlyDeferred: 0 });
+      expect(listOf(old)).toBe("[]");
+      expect(listInvalidations(old).length).toBeGreaterThan(records);
+      // line 2 (known instance, at or below the position) is not carried again
+      expect(withKind()(old)).toMatchObject({ applied: 0 });
+      // the next case starts from a new ledger
+      io = memoryLedgerIo();
+      db = fresh();
+      migrate(db);
+      registerConnectorInstance(db, "c1", "test-fixtures");
+      prepareCanonicalDb(db);
+      attach(db);
+      chat = seed(db);
+    }
+  });
+
+  it("a deferred line whose number is not in the file any more is dropped and counted as skipped", () => {
+    const old = forkDeletion();
+    restart(old);
+    without()(old);
+    io.files.set(P, `${io.files.get(P)}${JSON.stringify({ t: "cancel", seqs: [1] })}\n`);
+    expect(without()(old)).toMatchObject({ applied: 0, unrecoverable: 0, skipped: 1 });
+    expect(listOf(old)).toBe("[]");
+  });
+
+  it("C10 a deferred line that fails when applied stops the start on it, stays in the list, and is applied by the next start", () => {
+    const old = forkDeletion();
+    restart(old);
+    without()(old);
+    const failing = createLedgerReapply(
+      {
+        ...derivativeRegistry,
+        propagate: () => {
+          throw new Error("kind failed");
+        },
+      },
+      { knownKind: () => true },
+    );
+
+    let error: unknown;
+    try {
+      failing(old);
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).toBeInstanceOf(LedgerReapplyError);
+    expect((error as LedgerReapplyError).seq).toBe(1);
+    expect(listOf(old)).toBe("[1]");
+    expect(tombstoneCount(old)).toBe(0);
+    expect(old.all("SELECT id FROM connector_instances WHERE id = ?", [F])).toEqual([]);
+    expect(withKind()(old)).toMatchObject({ applied: 1 });
+    expect(listOf(old)).toBe("[]");
+    expect(tombstoneCount(old)).toBe(1);
   });
 });
