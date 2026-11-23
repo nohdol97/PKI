@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,7 +39,7 @@ import { prepareCanonicalDb, readKey } from "./identity.ts";
 import { insertItem, saveFact, saveRelation, type KnowledgeAttributes } from "./knowledge.ts";
 import { migrate, migrations, schemaVersion } from "./migrations.ts";
 import { registerJob } from "./jobs.ts";
-import { readSetting } from "./settings.ts";
+import { readSetting, writeSetting } from "./settings.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -188,6 +189,34 @@ describe("backup.manifest and snapshot (H01-C1a)", () => {
     expect(() => make()).toThrow();
     expect(readdirSync(folder).filter((n) => n.endsWith(".partial"))).toEqual([]);
     expect(readdirSync(join(data, BACKUP_TMP_DIR))).toEqual([]);
+  });
+
+  it("H01F-C4: the manifest's byte count and SHA-256 are those of the unpacked copy over several chunks, and only a stale partial of the backup name is cleared", () => {
+    for (const [name, ageHours] of [
+      ["pki-backup-20200101T000000Z.pkibak.partial", 2],
+      ["pki-backup-20200102T000000Z.pkibak.partial", 0],
+      ["other.pkibak.partial", 2],
+      ["notes.txt", 2],
+    ] as const) {
+      const path = join(folder, name);
+      writeFileSync(path, "x");
+      const when = new Date(Date.now() - ageHours * 3600_000);
+      utimesSync(path, when, when);
+    }
+    const { fileName, manifest } = make(live, { chunkBytes: 4096 });
+    expect(manifest.snapshotBytes).toBeGreaterThan(4096 * 2);
+    const out = join(root, "unpacked.sqlite");
+    const done = decryptSnapshot(join(folder, fileName), PASSPHRASE, out);
+    expect(manifest.snapshotBytes).toBe(done.bytes);
+    expect(manifest.snapshotSha256).toBe(done.sha256);
+    expect(readdirSync(folder).sort()).toEqual(
+      [
+        "notes.txt",
+        "other.pkibak.partial",
+        "pki-backup-20200102T000000Z.pkibak.partial",
+        fileName,
+      ].sort(),
+    );
   });
 });
 
@@ -375,5 +404,43 @@ describe("restore.stage (H01-C2a, storage half)", () => {
     expect(schemaVersion(staged)).toBe(migrations.length);
     staged.close();
     expect(existsSync(join(data, RESTORE_DIR, PENDING_FILE))).toBe(true);
+  });
+
+  it("H01F-C5: a backup whose copy holds no identity key is another installation onto data that holds sources, but is taken onto an empty one", () => {
+    const keyless = seeded(join(root, "keyless.sqlite"));
+    keyless.run("DELETE FROM identity_key");
+    const { fileName } = make(keyless);
+    keyless.close();
+    expect(stage(fileName)).toEqual({ status: "refused", code: "other-installation" });
+    expect(existsSync(join(data, RESTORE_DIR))).toBe(false);
+    const empty = emptyInstall();
+    prepareCanonicalDb(empty);
+    expect(stage(fileName, {}, empty).status).toBe("staged");
+    empty.close();
+  });
+
+  it("H01F-C6: the staged file keeps this PC's folder and provider address, drops restore.last, and leaves any other setting as the backup had it", () => {
+    const other = seeded(join(root, "same.sqlite"));
+    writeSetting(other, "backup.folder", "/their/folder");
+    writeSetting(other, "providers.openaiCompatible.baseUrl", "https://their.example/v1");
+    writeSetting(other, "restore.last", '{"backupId":"x"}');
+    writeSetting(other, "wiki.summary", "their-value");
+    other.close();
+    writeSetting(live, "backup.folder", "/my/folder");
+    writeSetting(live, "providers.openaiCompatible.baseUrl", "https://mine.example/v1");
+    // the same installation: the backup is of this very database's key
+    const mine = openBetterSqlite3(join(root, "same.sqlite"));
+    mine.run("UPDATE identity_key SET key = ?", [readKey(live) as Uint8Array]);
+    const { fileName } = make(mine);
+    mine.close();
+    expect(stage(fileName).status).toBe("staged");
+    const staged = openBetterSqlite3(join(data, RESTORE_DIR, STAGED_FILE));
+    expect(readSetting(staged, "backup.folder")).toBe("/my/folder");
+    expect(readSetting(staged, "providers.openaiCompatible.baseUrl")).toBe(
+      "https://mine.example/v1",
+    );
+    expect(readSetting(staged, "restore.last")).toBeUndefined();
+    expect(readSetting(staged, "wiki.summary")).toBe("their-value");
+    staged.close();
   });
 });

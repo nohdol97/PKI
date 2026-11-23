@@ -8,6 +8,7 @@ import {
   BackupFileError,
   DEFAULT_SCRYPT,
   decryptSnapshot,
+  openBackup,
   openManifest,
   readBackupHeader,
   writeBackupFile,
@@ -143,6 +144,44 @@ describe("backup file", () => {
     const forged = join(dir, "forged.pkibak");
     writeFileSync(forged, Buffer.concat([file.subarray(0, 8), lenField, newer, rest]));
     expect(codeOf(() => decryptSnapshot(forged, PASSPHRASE, out()))).toBe("unsupported-format");
+  });
+
+  it("H01F-C3: a header whose scrypt cost is over the read bound, or that carries an extra key, is damaged before scrypt runs; a default-cost file reads", () => {
+    const path = write();
+    const file = readFileSync(path);
+    const header = JSON.parse(file.subarray(12, 12 + file.readUInt32BE(8)).toString("utf8"));
+    const forge = (name: string, scrypt: unknown) => {
+      const bytes = Buffer.from(JSON.stringify({ ...header, scrypt }));
+      const lenField = Buffer.alloc(4);
+      lenField.writeUInt32BE(bytes.length);
+      const forged = join(dir, name);
+      writeFileSync(
+        forged,
+        Buffer.concat([
+          file.subarray(0, 8),
+          lenField,
+          bytes,
+          file.subarray(12 + file.readUInt32BE(8)),
+        ]),
+      );
+      return forged;
+    };
+    const huge = forge("huge.pkibak", { N: 2 ** 20, r: 8, p: 1 });
+    const extra = forge("extra.pkibak", { ...FAST, cost: 5 });
+    for (const forged of [huge, extra]) {
+      expect(codeOf(() => readBackupHeader(forged))).toBe("damaged");
+      expect(codeOf(() => openBackup(forged, PASSPHRASE))).toBe("damaged");
+    }
+    const product = join(dir, "product.pkibak");
+    writeBackupFile(product, {
+      passphrase: PASSPHRASE,
+      createdAt: "2026-11-23T00:00:00.000Z",
+      schemaVersion: 32,
+      manifest: {},
+      snapshotPath: snapshot,
+      scrypt: DEFAULT_SCRYPT,
+    });
+    expect(readBackupHeader(product).scrypt).toEqual(DEFAULT_SCRYPT);
   });
 
   it("refuses a short passphrase and a name that exists, and never puts the passphrase in an error", () => {

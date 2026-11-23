@@ -1,0 +1,246 @@
+{
+  "schemaVersion": 1,
+  "ranAt": "2026-11-23T22:13:55.131Z",
+  "productCommit": "720e0c6035b2e50337ad44a9af45bec5786eaf1e",
+  "workingTreeClean": true,
+  "mode": "source-run",
+  "environment": {
+    "cpu": "Apple M1",
+    "logicalCores": 8,
+    "ramGiB": 8,
+    "os": "Darwin 27.0.0 arm64",
+    "node": "v24.22.3",
+    "grade": "neither A nor B (EVALUATION 4.4 names Windows 11 machines): the values here are references, not a verdict"
+  },
+  "args": {
+    "sources": 200,
+    "docBytes": 10000,
+    "queries": 220,
+    "warmupQueries": 20,
+    "idleSeconds": 30,
+    "soakSeconds": 0,
+    "skipKill": false,
+    "stubDelayMs": 50,
+    "jobLeaseMs": 120000,
+    "seed": 1
+  },
+  "provider": {
+    "kind": "stub",
+    "meaning": "a test double answers every extraction with one fixed, schema-valid knowledge line quoting the document; call counts and extraction times are the stub's, not a real model's"
+  },
+  "judgement": "none: thresholds are EVALUATION 4.4's, copied beside each value; they are judged only on grade A hardware with corpus T2 and a real Provider (D2)",
+  "brokerBudget": {
+    "maxCalls": 60,
+    "windowMs": 3600000,
+    "extractionTimedForDocs": 60,
+    "extractionWaitingForBudget": 140
+  },
+  "metrics": {
+    "installerSize": {
+      "status": "not-measured",
+      "reason": "no installer is built in this run",
+      "threshold": {
+        "label": "설치 파일 크기",
+        "text": "≤ 600 MB (모델 별도면 합계 ≤ 1.2 GB)"
+      }
+    },
+    "idleCpu": {
+      "status": "measured",
+      "percentOfAllCores": 0,
+      "observedSeconds": 30.091666874999998,
+      "note": "observed 30 s; EVALUATION asks for a 10-minute idle, so this is shorter than the reference; the sample is CPU time over wall time across all logical cores",
+      "threshold": {
+        "label": "유휴 CPU",
+        "text": "≤ 2 %"
+      }
+    },
+    "idleRss": {
+      "status": "measured",
+      "minMiB": 57.671875,
+      "medianMiB": 179.515625,
+      "maxMiB": 180.21875,
+      "observedSeconds": 30.091666874999998,
+      "note": "observed 30 s; EVALUATION asks for a 10-minute idle, so this is shorter than the reference; the embedding model is not loaded in this run",
+      "threshold": {
+        "label": "유휴 메모리",
+        "text": "≤ 1.5 GB"
+      }
+    },
+    "processingSearchable": {
+      "status": "measured",
+      "samples": 200,
+      "p50Ms": 23.269874999999956,
+      "p95Ms": 51.84045900000092,
+      "definition": "from sending the document to the import API until a keyword search returns it",
+      "threshold": {
+        "label": "신규 문서 처리(검색 가능까지, LLM 제외)",
+        "text": "p95 ≤ 3 s (10 KB 문서)"
+      }
+    },
+    "processingExtracted": {
+      "status": "measured",
+      "samples": 60,
+      "p50Ms": 85.72062499999993,
+      "p95Ms": 93.65666599999986,
+      "definition": "from sending the document until every job is done (the stub answers after the stated delay); documents are sent one at a time, so no queue wait is in it",
+      "threshold": {
+        "label": "신규 문서 처리(지식 추출까지, LLM 포함)",
+        "text": "p95 ≤ 90 s (대기열 제외)"
+      }
+    },
+    "search": {
+      "status": "measured",
+      "samples": 200,
+      "p50Ms": 1.225958000000901,
+      "p95Ms": 2.3789170000000013,
+      "warmupDiscarded": 20,
+      "definition": "one keyword-search request over HTTP, timed only when the query's own document is in the results",
+      "threshold": {
+        "label": "검색 응답(LLM 답변 제외)",
+        "text": "p50 ≤ 300 ms, p95 ≤ 1.0 s (코퍼스 T2)"
+      }
+    },
+    "llmCalls": {
+      "status": "measured",
+      "total": 200,
+      "byTaskKind": {
+        "extract": 200
+      },
+      "byOutcome": {
+        "budget-exhausted": 140,
+        "ok": 60
+      },
+      "perDocAvg": 1,
+      "answeredBy": "stub",
+      "maxPerDoc": {
+        "status": "not-measured",
+        "reason": "the call history carries no document number (D8)"
+      },
+      "perQaQuestion": {
+        "status": "not-measured",
+        "reason": "Q&A needs an answer double of its own (D8)"
+      },
+      "daily": {
+        "status": "not-measured",
+        "reason": "no day of use was run (D8)"
+      },
+      "threshold": {
+        "label": "LLM 호출",
+        "text": "신규 문서당 평균 ≤ 3, 최대 ≤ 8, Q&A 1건당 ≤ 1"
+      }
+    },
+    "storage": {
+      "status": "measured",
+      "points": [
+        {
+          "sources": 20,
+          "dataDirBytes": 905310,
+          "rawBytes": 200080
+        },
+        {
+          "sources": 40,
+          "dataDirBytes": 1220702,
+          "rawBytes": 400160
+        },
+        {
+          "sources": 60,
+          "dataDirBytes": 1540190,
+          "rawBytes": 600240
+        },
+        {
+          "sources": 80,
+          "dataDirBytes": 1867870,
+          "rawBytes": 800320
+        },
+        {
+          "sources": 100,
+          "dataDirBytes": 2154590,
+          "rawBytes": 1000400
+        },
+        {
+          "sources": 120,
+          "dataDirBytes": 2465886,
+          "rawBytes": 1200480
+        },
+        {
+          "sources": 140,
+          "dataDirBytes": 2752606,
+          "rawBytes": 1400560
+        },
+        {
+          "sources": 160,
+          "dataDirBytes": 3092574,
+          "rawBytes": 1600640
+        },
+        {
+          "sources": 180,
+          "dataDirBytes": 3362910,
+          "rawBytes": 1800720
+        },
+        {
+          "sources": 200,
+          "dataDirBytes": 3666014,
+          "rawBytes": 2000800
+        }
+      ],
+      "emptyDataDirBytes": 598110,
+      "growthRatio": 0.8322740903638545,
+      "definition": "(data folder bytes - raw text bytes) / raw text bytes at the last point; raw and derived data share one SQLite file, so the folder stands for the derived data (D7)",
+      "threshold": {
+        "label": "파생 저장 공간",
+        "text": "≤ 원문 텍스트의 3배"
+      }
+    },
+    "killRecover": {
+      "status": "measured",
+      "leaseMs": 120000,
+      "leaseSource": "product default",
+      "docs": 10,
+      "runningAtKill": 1,
+      "firstJobAfterRestartMs": 119923.28375,
+      "allJobsDoneMs": 130256.48329100001,
+      "lostDocs": 0,
+      "failedJobs": {},
+      "duplicateItems": 0,
+      "note": "firstJobAfterRestartMs is the time from the restart to the first job to run (any job); allJobsDoneMs to every job finished, the interrupted job included, which waits for its lease to run out",
+      "threshold": {
+        "label": "강제 종료 후 복구",
+        "text": "재시작 후 ≤ 60 s에 작업 재개, 유실 0건, 중복 지식 항목 0건 (하드)"
+      }
+    },
+    "soak": {
+      "status": "not-measured",
+      "reason": "soak seconds is 0 (the default): a soak is run on request (--soak-seconds)",
+      "threshold": {
+        "label": "72시간 연속 가동",
+        "text": "충돌 0회, RSS 증가 ≤ 20 %"
+      }
+    }
+  },
+  "unverified": [
+    {
+      "item": "installer size",
+      "reason": "no installer is built here; the R04 kit and H03-C3 measure it (#33, #37)"
+    },
+    {
+      "item": "Windows 11 installed build",
+      "reason": "this run is a source run on the host machine, not the installed Windows build"
+    },
+    {
+      "item": "real Provider",
+      "reason": "call counts and extraction times are the stub's; a real model's retries and latency are unknown"
+    },
+    {
+      "item": "multi-hour soak",
+      "reason": "a soak of 72 hours, or even one hour, was not run"
+    },
+    {
+      "item": "extraction past the Broker's call budget",
+      "reason": "the Broker allows 60 Provider attempts per 60 minutes, so only the first 60 of 200 documents were extracted and timed; the others wait for the window (storage growth and call counts are of those 60's knowledge only)"
+    },
+    {
+      "item": "soak run",
+      "reason": "soak seconds is 0 (the default): a soak is run on request (--soak-seconds)"
+    }
+  ]
+}
