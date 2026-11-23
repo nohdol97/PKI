@@ -31,6 +31,8 @@ export const RESTORE_REFUSAL_TEXT: Record<RestoreRefusalCode, string> = {
     "다른 설치의 백업입니다. 이미 원본이나 삭제 기록이 있는 이 설치에는 복원할 수 없습니다.",
   "migration-failed":
     "옛 버전의 백업을 지금 버전으로 올리지 못했습니다. 지금 데이터는 그대로입니다.",
+  "foreign-schema":
+    "백업 안의 데이터베이스 구조가 이 앱이 만드는 것과 다릅니다(추가된 트리거나 뷰 등). 복원하지 않았고 지금 데이터는 그대로입니다.",
   "already-pending": "이미 적용을 기다리는 복원이 있습니다. 먼저 그 복원을 취소해 주세요.",
   "no-folder": "백업 폴더를 먼저 정해 주세요.",
   "bad-file-name": "백업 파일 이름이 올바르지 않습니다.",

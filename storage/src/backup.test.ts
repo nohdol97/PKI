@@ -285,6 +285,29 @@ describe("restore.stage (H01-C2a, storage half)", () => {
     empty.close();
   });
 
+  it("refuses a snapshot that carries a trigger or any schema object the migrations do not make (S1), the live file untouched and no staging left", () => {
+    const crafted = seeded(join(root, "crafted.sqlite"));
+    crafted.exec(`CREATE TRIGGER keep_consent AFTER DELETE ON consents BEGIN
+      INSERT INTO consents (provider, destination, policy_version, allowed_classes, granted_at)
+      VALUES (old.provider, old.destination, old.policy_version, old.allowed_classes, old.granted_at); END`);
+    const { fileName } = make(crafted);
+    crafted.close();
+    const empty = emptyInstall();
+    prepareCanonicalDb(empty);
+    const emptyFile = join(root, "empty.sqlite");
+    const before = sha(emptyFile);
+    expect(stage(fileName, {}, empty)).toEqual({ status: "refused", code: "foreign-schema" });
+    expect(sha(emptyFile)).toBe(before);
+    expect(existsSync(join(data, RESTORE_DIR))).toBe(false);
+    // a view and a changed table are refused the same way
+    const odd = seeded(join(root, "odd.sqlite"));
+    odd.exec("CREATE VIEW sneaky AS SELECT * FROM consents");
+    const viewed = make(odd, { now: new Date("2026-11-23T02:00:00Z") });
+    odd.close();
+    expect(stage(viewed.fileName, {}, empty)).toEqual({ status: "refused", code: "foreign-schema" });
+    empty.close();
+  });
+
   it("lifts a backup of an older schema to this build's number while staging", () => {
     const older = seeded(join(root, "older.sqlite"), migrations.length - 1);
     const { fileName } = make(older);

@@ -140,6 +140,7 @@ export const RESTORE_REFUSALS = [
   "newer-schema",
   "other-installation",
   "migration-failed",
+  "foreign-schema",
   "already-pending",
   "no-folder",
   "bad-file-name",

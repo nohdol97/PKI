@@ -325,6 +325,7 @@ export type RestoreRefusal =
   | "newer-schema"
   | "other-installation"
   | "migration-failed"
+  | "foreign-schema"
   | "already-pending";
 
 export type StageResult =
@@ -362,6 +363,37 @@ function asManifest(value: unknown): BackupManifest {
 /** The manifest chunk of a file, checked for its shape; the codes of an unreadable file as `BackupFileError`. */
 export function readBackupManifest(file: string, passphrase: string): BackupManifest {
   return asManifest(openBackup(file, passphrase).manifest);
+}
+
+type SchemaRow = string;
+
+/** The schema objects of a database as comparable lines: type, name, table and the exact SQL text. */
+function schemaLines(db: SqlDriver): SchemaRow[] {
+  return db
+    .all(
+      "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+    )
+    .map((r) => JSON.stringify([r.type, r.name, r.tbl_name, r.sql]))
+    .sort();
+}
+
+let referenceSchema: SchemaRow[] | undefined;
+
+/**
+ * What the migrations of this build make, from a fresh in-memory database. A genuine backup, taken at this
+ * schema or taken at an older one and lifted by the same migrations, has exactly these objects with the same
+ * SQL text (an older file went through the same earlier steps, so even an `ALTER TABLE` rewrites the same way).
+ */
+function reference(open: OpenSqlDriver): SchemaRow[] {
+  if (referenceSchema) return referenceSchema;
+  const db = open(":memory:");
+  try {
+    migrate(db);
+    referenceSchema = schemaLines(db);
+  } finally {
+    db.close();
+  }
+  return referenceSchema;
 }
 
 const refused = (code: RestoreRefusal): StageResult => ({ status: "refused", code });
@@ -458,6 +490,13 @@ function checkAndLift(
       } catch {
         return "migration-failed";
       }
+    }
+    // ⑥ the staged file holds the schema this build makes and nothing else: a trigger, view or changed table
+    // a snapshot carries would run in the live database (it could undo the finish's clearing, or swallow deletes)
+    const expected = reference(input.open);
+    const found = schemaLines(staged);
+    if (found.length !== expected.length || found.some((line, i) => line !== expected[i])) {
+      return "foreign-schema";
     }
     return undefined;
   } finally {
