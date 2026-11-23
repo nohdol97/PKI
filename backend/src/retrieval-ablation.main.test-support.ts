@@ -4,7 +4,9 @@
 // vector index (a test double), which only a composition point or a test file may.
 //
 //   pnpm exec node backend/src/retrieval-ablation.main.test-support.ts \
-//     --out eval/results [--pack <absolute folder of the pinned bge-m3 files>]
+//     --out eval/results [--name x01-dev-t0] [--pack <absolute folder of the pinned bge-m3 files>] [--without-vector]
+//
+// `--without-vector` leaves C2 out on purpose, so C3-C5 are the chain without the vector (the default list has none).
 import { createLocalEmbedder } from "@pki/providers/adapters";
 import { MemoryVectorIndex } from "@pki/testkit";
 import { spawnSync } from "node:child_process";
@@ -20,9 +22,11 @@ const flag = (name: string) => {
 };
 const outDir = resolve(flag("--out") ?? join(ROOT, "eval/results"));
 const pack = flag("--pack");
+const withoutVector = process.argv.includes("--without-vector");
+const name = flag("--name") ?? "x01-dev-t0";
 const GOLDEN = join(ROOT, "eval/golden");
 const SCORER = join(ROOT, "eval/scorer/score.py");
-const PREDICTIONS_DIR = join(outDir, "x01-dev-t0-predictions");
+const PREDICTIONS_DIR = join(outDir, `${name}-predictions`);
 
 const run$ = (command: string, args: string[]) =>
   spawnSync(command, args, { encoding: "utf8", cwd: ROOT });
@@ -36,7 +40,10 @@ const modelsDir = mkdtempSync(join(tmpdir(), "pki-ablation-models-"));
 let vector: AblationVector | undefined;
 let vectorNotMeasured: string | undefined;
 let embeddingModel: unknown = null;
-if (pack === undefined) {
+if (withoutVector) {
+  vectorNotMeasured =
+    "left out on purpose: the chain without the vector (the default list has none)";
+} else if (pack === undefined) {
   vectorNotMeasured = "no local model pack was given (--pack); nothing was downloaded";
 } else {
   const embedding = createLocalEmbedder(modelsDir);
@@ -119,7 +126,7 @@ const configs = result.configs.map((config) => {
     name: config.name,
     status: config.status,
     strategies: config.strategies,
-    predictions: `eval/results/x01-dev-t0-predictions/${config.id}.jsonl`,
+    predictions: `eval/results/${name}-predictions/${config.id}.jsonl`,
     retrieval: at5,
     retrievalAt10: at10,
     latency,
@@ -164,9 +171,9 @@ const out = {
     workingTreeClean: git("status", "--porcelain", "--", ".", ":!eval/results") === "",
   },
   commands: [
-    `pnpm exec node backend/src/retrieval-ablation.main.test-support.ts --out eval/results${pack ? " --pack <local pack folder>" : ""}`,
-    "python3 -I eval/scorer/score.py eval/golden eval/results/x01-dev-t0-predictions/<C>.jsonl --split dev --k 5",
-    "python3 -I eval/scorer/score.py eval/golden eval/results/x01-dev-t0-predictions/<C>.jsonl --split dev --k 10",
+    `pnpm exec node backend/src/retrieval-ablation.main.test-support.ts --out eval/results --name ${name}${withoutVector ? " --without-vector" : pack ? " --pack <local pack folder>" : ""}`,
+    `python3 -I eval/scorer/score.py eval/golden eval/results/${name}-predictions/<C>.jsonl --split dev --k 5`,
+    `python3 -I eval/scorer/score.py eval/golden eval/results/${name}-predictions/<C>.jsonl --split dev --k 10`,
   ],
   configs,
   notMeasured: [
@@ -174,4 +181,4 @@ const out = {
     "T1 and T2 corpora (background documents), retrieval latency against the absolute caps, the eval split",
   ],
 };
-writeFileSync(join(outDir, "x01-dev-t0.json"), `${JSON.stringify(out, null, 2)}\n`);
+writeFileSync(join(outDir, `${name}.json`), `${JSON.stringify(out, null, 2)}\n`);

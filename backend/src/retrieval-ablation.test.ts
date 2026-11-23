@@ -16,6 +16,7 @@ const ROOT = resolve(import.meta.dirname, "../..");
 const GOLDEN = resolve(ROOT, "eval/golden");
 const SCORER = resolve(ROOT, "eval/scorer/score.py");
 const RESULT = resolve(ROOT, "eval/results/x01-dev-t0.json");
+const MAIN = resolve(import.meta.dirname, "retrieval-ablation.main.test-support.ts");
 const ADR = resolve(ROOT, "docs/adr/0025-retrieval-strategies.md");
 
 const jsonl = (file: string) =>
@@ -114,6 +115,35 @@ describe("X01-C3 ① the ablation runner", () => {
       runAblation({ goldenDir: GOLDEN, split: "eval" as never, questionIds: sample }),
     ).rejects.toThrow(/sealed/);
   });
+});
+
+describe("X01-C3 ① the measuring command", () => {
+  it("writes a result file and a predictions file per configuration; `--without-vector` leaves C2 out on purpose", () => {
+    const out = mkdtempSync(join(tmpdir(), "pki-ablation-main-"));
+    try {
+      const ran = spawnSync(
+        process.execPath,
+        [MAIN, "--out", out, "--name", "smoke", "--without-vector"],
+        { encoding: "utf8", cwd: ROOT, timeout: 170_000 },
+      );
+      expect(ran.status, ran.stderr).toBe(0);
+      const result = JSON.parse(readFileSync(join(out, "smoke.json"), "utf8")) as {
+        configs: { status: string; reason?: string; retrieval?: { n_queries: number } }[];
+      };
+      expect(result.configs.map((c) => c.status)).toEqual([
+        "measured",
+        "not-measured",
+        "measured",
+        "measured",
+        "measured",
+      ]);
+      expect(result.configs[1]?.reason).toContain("left out on purpose");
+      expect(result.configs[0]?.retrieval?.n_queries).toBe(23);
+      expect(existsSync(join(out, "smoke-predictions", "C5.jsonl"))).toBe(true);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 180_000);
 });
 
 describe("X01-C3 ② the result file, the ADR and the default list agree", () => {
