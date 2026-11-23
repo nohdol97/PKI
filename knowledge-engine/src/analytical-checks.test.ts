@@ -283,10 +283,19 @@ describe("checks.aggregation", () => {
     ]);
   });
   it("count needs no column but the grain; a named column must exist", () => {
-    expect(pass(run(sales(["1"]), "count", undefined))).toEqual([true, null]);
+    expect(pass(run(sales(["1"]), "count", undefined, { column: undefined }))).toEqual([
+      true,
+      null,
+    ]);
     expect(pass(run(sales(["1"]), "sum", "zz"))).toEqual([false, "column-missing"]);
-    expect(pass(run(sales(["1"]), "sum", undefined))).toEqual([false, "column-missing"]);
-    expect(pass(run(sales(["1"]), "max", undefined))).toEqual([false, "column-missing"]);
+    expect(pass(run(sales(["1"]), "sum", undefined, { column: undefined }))).toEqual([
+      false,
+      "column-missing",
+    ]);
+    expect(pass(run(sales(["1"]), "max", undefined, { column: undefined }))).toEqual([
+      false,
+      "column-missing",
+    ]);
     expect(pass(run(undefined, "sum"))).toEqual([false, "no-table"]);
     expect(pass(run(notTable("too-large"), "sum"))).toEqual([false, "too-large"]);
   });

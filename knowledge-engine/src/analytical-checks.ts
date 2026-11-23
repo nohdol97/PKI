@@ -75,7 +75,10 @@ function keyRepeats(table: Table, at: readonly number[]) {
   return { examined, skipped, duplicates };
 }
 
-/** `schema`: every named (processed) column is in the table's header row. */
+/**
+ * `schema`: every named (processed) column is in the table's header row. An empty list passes: a column-less
+ * `count` calls it so; that a list is required is the caller's knowledge (`normalizeValue`).
+ */
 export function checkSchema(read: TableRead | undefined, columns: readonly string[]): CheckResult {
   const table = tableOf(read);
   if (typeof table === "string") return result("schema", table);
@@ -189,6 +192,9 @@ const NUMERIC_AGGREGATIONS: ReadonlySet<Aggregation> = new Set(["sum", "avg", "m
 export function checkAggregation(input: AggregationInput): CheckResult {
   const table = tableOf(input.table);
   if (typeof table === "string") return result("aggregation", table);
+  if (input.column === undefined && input.aggregation !== "count") {
+    return result("aggregation", "column-missing");
+  }
   let at: number | undefined;
   if (input.column !== undefined) {
     at = positions(table, [input.column])?.[0];

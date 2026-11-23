@@ -9,6 +9,7 @@
 // fails with `column-missing` and never passes (D4). The judgement of the lines (S03-R15, R16) is S03-T06's:
 // the handler hands the results to `judge`, which that task supplies, in the closing transaction.
 import {
+  BOOKKEEPING_KIND,
   findSourceVersionId,
   isFenceCurrent,
   listOntologyElements,
@@ -388,8 +389,11 @@ export function createAnalyticalCheckHandler(options: AnalyticalCheckOptions) {
     const ownVersionId = findSourceVersionId(db, own.sourceId, own.version) as number;
     let stale = false;
 
+    // bookkeeping, not source content (it compares a number, deletes rows, queues a job): the scope policy is
+    // not asked, so a refused lineage can neither hide a change nor skip the erase (#182)
     const sweep: DerivedItem = {
-      kind: DATASET_TABLE_ITEM_KIND,
+      kind: BOOKKEEPING_KIND,
+      unjudged: true as const,
       itemKey: JSON.stringify(["check-sweep", sourceId]),
       lineage: [own],
       write: (tx) => {
