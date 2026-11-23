@@ -28,11 +28,7 @@ import {
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { BACKGROUND_EXECUTION_TEXT } from "./background-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
-import {
-  changeCredential,
-  credentialOutcomeText,
-  rereadDelaysMs,
-} from "./connector-credential.ts";
+import { changeCredential, credentialOutcomeText, rereadDelaysMs } from "./connector-credential.ts";
 import { ConnectorTable } from "./connector-table.tsx";
 import { SecretField } from "./secret-field.tsx";
 import { nextSyncStops } from "./connector-text.ts";
@@ -727,7 +723,7 @@ function OpenAICompatible({
           inputLabel={current.host === null ? "API 키" : `${current.host}에 쓸 API 키`}
           showLabel
           saveText="키 저장"
-          remove={current.key === "present" ? { text: "키 삭제" } : undefined}
+          {...(current.key === "present" && { remove: { text: "키 삭제" } })}
           disabled={current.keyName === null}
           onAction={changeKey}
         />

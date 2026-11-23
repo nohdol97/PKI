@@ -263,9 +263,9 @@ describe("cli-kill: the version query's judging", () => {
   it("I06F-C10 fails by name, not silently, when no attempt of the ladder recorded the fake", async () => {
     fake.configure({ versionMode: "hang", startDelayMs: 5_000 }); // later than every rung below
     const short = [300, 600]; // 0.9 s in all
-    await expect(versionQueryEndsItself("claude-code", createClaudeCodeProvider, short)).rejects.toThrow(
-      "never recorded itself",
-    );
+    await expect(
+      versionQueryEndsItself("claude-code", createClaudeCodeProvider, short),
+    ).rejects.toThrow("never recorded itself");
   });
 });
 

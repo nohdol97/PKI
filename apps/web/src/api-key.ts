@@ -27,9 +27,7 @@ export type SecretRefusal = "line-break" | "too-long";
 
 /** What a secret input hands over: a value to store, a delete, or an insertion the field itself refused. */
 export type SecretAction =
-  | { kind: "save"; value: string }
-  | { kind: "delete" }
-  | { kind: "refused"; reason: SecretRefusal };
+  { kind: "save"; value: string } | { kind: "delete" } | { kind: "refused"; reason: SecretRefusal };
 
 /** The shell's limit (`SecretValueSchema`), in UTF-16 code units; a longer value is refused, never cut. */
 export const MAX_SECRET_LENGTH = 8192;

@@ -37,8 +37,11 @@ export async function changeCredential(
   let stored: boolean;
   if (action.kind === "save") {
     // a refused call of the preload (invalid input, wrong sender) is no store either
-    const result = await saveApiKey(deps.bridge, name, action.value).catch(() => "unavailable" as const);
-    if (result === "line-break" || result === "too-long") return { status: "refused", reason: result };
+    const result = await saveApiKey(deps.bridge, name, action.value).catch(
+      () => "unavailable" as const,
+    );
+    if (result === "line-break" || result === "too-long")
+      return { status: "refused", reason: result };
     stored = result === "saved";
   } else {
     stored = await deleteApiKey(deps.bridge, name).catch(() => false);

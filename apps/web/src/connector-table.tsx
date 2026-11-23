@@ -40,7 +40,7 @@ function SlotEntry({
           inputLabel={`${label} 값`}
           saveLabel={`${label} 저장`}
           saveText="저장"
-          remove={slot.state === "present" ? { label: `${label} 삭제`, text: "삭제" } : undefined}
+          {...(slot.state === "present" && { remove: { label: `${label} 삭제`, text: "삭제" } })}
           onAction={(action) => onChange(connectorId, slot.name, action)}
         />
       )}
