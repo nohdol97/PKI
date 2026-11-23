@@ -321,10 +321,12 @@ describe("scope.policy and scope.changed through the product's runner", () => {
       db.all("SELECT status FROM jobs WHERE kind <> 'wiki-build' ORDER BY id").map((j) => j.status),
     ).toEqual(["succeeded"]);
     expect(count("relations")).toBe(1);
-    // the dependency Insight, and a `conflict` one: 알파 now holds two target dates (P01)
+    // the dependency Insight, a `conflict` one (알파 now holds two target dates, P01) and a `new_relation`: the
+    // relation this re-extraction writes is seen after both of its items were known (P01-T05)
     expect(db.all("SELECT rule FROM insights ORDER BY id")).toEqual([
       { rule: "dependency_delay" },
       { rule: "conflict" },
+      { rule: "new_relation" },
     ]);
     expect(count("scope_policy_drops")).toBe(0);
     expect((await status()).scopePolicyDrops).toBe(0);

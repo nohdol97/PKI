@@ -76,9 +76,9 @@ describe("graph.api (catalogue)", () => {
     await start();
     const list = await schema();
     expect(list.edition).toBe(KNOWLEDGE_SCHEMA.edition);
-    expect(list.entries.filter((e) => e.category === "knowledge-type")).toHaveLength(19);
+    expect(list.entries.filter((e) => e.category === "knowledge-type")).toHaveLength(20);
     expect(list.entries.filter((e) => e.category === "relation-type")).toHaveLength(15);
-    expect(list.entries.filter((e) => e.category === "fact-kind")).toHaveLength(22);
+    expect(list.entries.filter((e) => e.category === "fact-kind")).toHaveLength(24);
     const catalogued = [
       ...KNOWLEDGE_SCHEMA.knowledgeTypes,
       ...KNOWLEDGE_SCHEMA.relationTypes,
