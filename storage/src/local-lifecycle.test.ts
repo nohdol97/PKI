@@ -8,6 +8,7 @@ import {
   newLocalId,
   readLocation,
   type EntryFields,
+  type LocalFileEntry,
   type NewEntry,
 } from "./local-files.ts";
 import { closeLocation, reimportEntry, relinkLocation, reopenLocation } from "./local-lifecycle.ts";
@@ -73,9 +74,9 @@ describe("reopenLocation", () => {
     stored(behind.externalId, 1);
     stored(gone.externalId, 1);
     // b was changed to revision 2 and d was deleted after their sources were stored
-    const b = index.entryOf(behind.externalId)!;
+    const b = index.entryOf(behind.externalId) as LocalFileEntry;
     index.updateEntry(b.externalId, b.seq, { ...(b as unknown as EntryFields), revision: 2 });
-    const d = index.entryOf(gone.externalId)!;
+    const d = index.entryOf(gone.externalId) as LocalFileEntry;
     index.updateEntry(d.externalId, d.seq, {
       ...(d as unknown as EntryFields),
       relativePath: "d.md",
@@ -105,7 +106,7 @@ describe("relinkLocation", () => {
     const index = createLocalFileIndex(db);
     const held = present("a.md");
     index.insertEntry(held, []);
-    const e = index.entryOf(held.externalId)!;
+    const e = index.entryOf(held.externalId) as LocalFileEntry;
     index.updateEntry(e.externalId, e.seq, { ...(e as unknown as EntryFields), pendingDelete: 1 });
     closeLocation(db, loc, "unavailable", "root-changed");
 
@@ -144,11 +145,11 @@ describe("reimportEntry", () => {
       skippedAt: AT,
     };
     index.insertEntry(skipped, []);
-    const before = index.entryOf(skipped.externalId)!;
+    const before = index.entryOf(skipped.externalId) as LocalFileEntry;
 
     expect(reimportEntry(db, loc, "s.pdf")).toEqual({ ok: true });
 
-    const after = index.entryOf(skipped.externalId)!;
+    const after = index.entryOf(skipped.externalId) as LocalFileEntry;
     expect(after).toMatchObject({ state: "skipped", mtimeNs: null, size: null, revision: 2 });
     expect(after.seq).toBeGreaterThan(before.seq);
     expect(reimportEntry(db, loc, "nope.pdf")).toEqual({ ok: false, reason: "not-found" });

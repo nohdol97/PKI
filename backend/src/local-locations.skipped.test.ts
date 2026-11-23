@@ -3,6 +3,7 @@
 // imported again only after its tombstone is lifted, on the same source row.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { findSourceId, recordTombstoneLift } from "@pki/storage";
+import type { LocalIndexEntry } from "@pki/contracts";
 import { createApprovalTickets, createLocalLocations } from "./local-locations.ts";
 import {
   storeUpserts,
@@ -39,7 +40,9 @@ describe("the skipped list", () => {
     w.write("a.md", "# a\n\nbody of a\n");
     w.write("old.hwp", "x");
     await w.settle();
-    const a = w.index.entriesOfLocation(w.locationId).find((e) => e.relativePath === "a.md")!;
+    const a = w.index
+      .entriesOfLocation(w.locationId)
+      .find((e) => e.relativePath === "a.md") as LocalIndexEntry;
     userDeletes(w, a.externalId);
     await w.sync();
 
@@ -61,7 +64,9 @@ describe("C26 reimport", () => {
     const { w, locations } = make();
     w.write("a.md", "# a\n\nbody of a\n");
     await w.settle();
-    const a = w.index.entriesOfLocation(w.locationId).find((e) => e.relativePath === "a.md")!;
+    const a = w.index
+      .entriesOfLocation(w.locationId)
+      .find((e) => e.relativePath === "a.md") as LocalIndexEntry;
     userDeletes(w, a.externalId);
     await w.sync();
 

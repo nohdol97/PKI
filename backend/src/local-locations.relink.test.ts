@@ -7,6 +7,7 @@ import {
   listLocations,
   insertLocation,
   registerConnectorInstance,
+  type LocalLocation,
   type SqlDriver,
 } from "@pki/storage";
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
@@ -61,7 +62,8 @@ function setup(buildKind: "production" | "test") {
   };
   return { db, id, locations, tickets, moved, rename };
 }
-const row = (db: SqlDriver, id: string) => listLocations(db).find((l) => l.id === id)!;
+const row = (db: SqlDriver, id: string) =>
+  listLocations(db).find((l) => l.id === id) as LocalLocation;
 
 describe("relink", () => {
   it("an unavailable location is relinked to the renamed folder: the id stays, the path and identity are new, it is active", async () => {

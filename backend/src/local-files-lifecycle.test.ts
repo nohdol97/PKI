@@ -1,6 +1,6 @@
 // I02B-T04 T0 (F1, FU7): what a location that is not read owes the connector when it is read again.
 // One representative case per clause; the connector runs over the canonical index on an in-memory database.
-import { confirmDeletions, listLocations, relinkLocation } from "@pki/storage";
+import { confirmDeletions, listLocations, relinkLocation, type LocalLocation } from "@pki/storage";
 import { chmodSync, utimesSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -80,7 +80,10 @@ describe("F1: a location read again announces what it was not read for", () => {
     w.write("a.md", "# a\n\nbody of a\n");
     const [record] = upserts(await w.settle());
     const ask = () =>
-      w.connector.getDocument?.({ namespace: w.locationId, externalId: record!.externalId });
+      w.connector.getDocument?.({
+        namespace: w.locationId,
+        externalId: (record as { externalId: string }).externalId,
+      });
     expect(await ask()).not.toBeNull();
     w.pause();
     expect(await ask()).toBeNull();
@@ -89,7 +92,7 @@ describe("F1: a location read again announces what it was not read for", () => {
 
 describe("C11: the root of a location", () => {
   const stateOf = (w: World) => {
-    const l = listLocations(w.db).find((x) => x.id === w.locationId)!;
+    const l = listLocations(w.db).find((x) => x.id === w.locationId) as LocalLocation;
     return [l.state, l.stateReason];
   };
   const present = (w: World) =>
@@ -142,7 +145,8 @@ describe("C12: the deletion brake", () => {
   const remove = (w: World, from: number, count: number) => {
     for (const name of names(from + count).slice(from)) unlinkSync(`${w.root}/${name}`);
   };
-  const stateOf = (w: World) => listLocations(w.db).find((x) => x.id === w.locationId)!.state;
+  const stateOf = (w: World) =>
+    (listLocations(w.db).find((x) => x.id === w.locationId) as LocalLocation).state;
   const held = (w: World) =>
     w.index.entriesOfLocation(w.locationId).filter((e) => e.pendingDelete === 1).length;
 

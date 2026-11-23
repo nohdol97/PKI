@@ -2,7 +2,13 @@
 // "walk soon": debounced into at most one registered sync per `watch.maxWaitMs`; one at the start when a
 // location is read; a location that cannot be watched is shown unwatched. Whatever the signals do, the
 // final full walk gives the same sources (C8). Fake clock, fake timers, a fake watcher.
-import { insertLocation, newLocalId, listLocations, closeLocation } from "@pki/storage";
+import {
+  closeLocation,
+  insertLocation,
+  listLocations,
+  newLocalId,
+  type LocalLocation,
+} from "@pki/storage";
 import { afterEach, describe, expect, it } from "vitest";
 import { createLocalFilesDriver } from "./local-files-driver.ts";
 import { deletes, upserts, world, type World } from "./local-files-connector.test-support.ts";
@@ -81,7 +87,8 @@ function driverOver(w: World, over: { refuse?: Set<string>; revoked?: () => void
   });
   return { driver, time, watcher, registered };
 }
-const stateOf = (w: World, id = w.locationId) => listLocations(w.db).find((l) => l.id === id)!;
+const stateOf = (w: World, id = w.locationId) =>
+  listLocations(w.db).find((l) => l.id === id) as LocalLocation;
 
 describe("C15 the driver", () => {
   it("100 signals closer than quietMs register at most one sync per maxWaitMs", () => {
