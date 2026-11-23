@@ -202,10 +202,10 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
     excluded: () => [dataDir],
     limits: () => w.limits,
     now: () => clock.t,
-    setLocationState: (id, state, reason) =>
-      void (state === "active"
-        ? reopenLocation(db, id, reason)
-        : closeLocation(db, id, state, reason)),
+    setLocationState: (id, state, reason, expected) =>
+      state === "active"
+        ? reopenLocation(db, id, reason, expected)
+        : closeLocation(db, id, state, reason, expected),
     report: (r) => reports.push(r),
     fs: hookedFs(hooks),
   };

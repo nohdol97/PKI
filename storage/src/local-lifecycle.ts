@@ -20,8 +20,9 @@ export function closeLocation(
   id: string,
   state: Exclude<LocationState, "active">,
   reason: string | null,
+  expected?: LocationState,
 ): boolean {
-  return setLocationState(db, id, state, reason);
+  return setLocationState(db, id, state, reason, expected);
 }
 
 /** Whether a tombstone still blocks the source's arrivals. */
@@ -35,10 +36,15 @@ const blocked = (db: SqlDriver, sourceId: number): boolean => {
  * entry's) and deletions whose source still lives get a new sequence number from the counter, so they
  * come after the cursor again; an entry already announced keeps its number.
  */
-export function reopenLocation(db: SqlDriver, id: string, reason: string | null = null): boolean {
+export function reopenLocation(
+  db: SqlDriver,
+  id: string,
+  reason: string | null = null,
+  expected?: LocationState,
+): boolean {
   return db.transaction(
     () => {
-      if (!setLocationState(db, id, "active", reason)) return false;
+      if (!setLocationState(db, id, "active", reason, expected)) return false;
       const rows = db.all(
         `SELECT external_id, revision, state FROM local_file_entries
          WHERE location_id = ? AND pending_delete = 0

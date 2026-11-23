@@ -799,10 +799,10 @@ export function productLocalFiles(
       excluded: () => forbidden,
       limits: () => readLocalFilesSettings(db),
       now: () => options.clock.now(),
-      setLocationState: (id, state, reason) =>
-        void (state === "active"
-          ? reopenLocation(db, id, reason)
-          : closeLocation(db, id, state, reason)),
+      setLocationState: (id, state, reason, expected) =>
+        state === "active"
+          ? reopenLocation(db, id, reason, expected)
+          : closeLocation(db, id, state, reason, expected),
       report: (report) => void (last = report),
     },
     locations: createLocalLocations({

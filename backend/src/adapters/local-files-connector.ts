@@ -56,12 +56,16 @@ export interface LocalFilesPorts {
   limits: () => LocalFilesLimits;
   /** Milliseconds, the wall clock. */
   now: () => number;
-  /** Moves a location to a state the pass found it in (I02B-R7); `active` is a reopening. */
+  /**
+   * Moves a location to a state the pass found it in (I02B-R7); `active` is a reopening. Only from `expected`,
+   * the state the pass decided from: false when the user changed it meanwhile (a pause is not overwritten).
+   */
   setLocationState: (
     id: string,
     state: "active" | "paused" | "unavailable" | "needs-confirmation" | "revoking",
     reason: string | null,
-  ) => void;
+    expected: "active" | "paused" | "unavailable" | "needs-confirmation" | "revoking",
+  ) => boolean;
   /** Told what a finished sync learned, for the location list. */
   report?: (report: LocalPassReport) => void;
   fs?: BoundaryFs;
@@ -283,13 +287,19 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     if (problem !== null) {
       report.rootUnavailable = true;
       if (location.state !== "unavailable" || location.stateReason !== problem) {
-        p.setLocationState(location.id, "unavailable", problem);
+        p.setLocationState(location.id, "unavailable", problem, location.state);
       }
       return;
     }
     // a root that was away and fits again is read again; one whose identity changed waits for the
     // user's relink (I02B-R7, R9)
-    if (location.state === "unavailable") p.setLocationState(location.id, "active", null);
+    // the state the pass decides from from here on: a return makes it `active`, so held deletions put the
+    // location back to `needs-confirmation` in this pass (I02B-R7); a user's change since the snapshot ends the pass
+    let state = location.state;
+    if (state === "unavailable") {
+      if (!p.setLocationState(location.id, "active", null, "unavailable")) return;
+      state = "active";
+    }
 
     // walk; a thrown traversal rejects the sync and nothing is written as deleted (D7)
     const files: WalkedFile[] = [];
@@ -533,16 +543,18 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
           }
         } else gone(m);
       }
-      if (brake && location.state === "active") {
-        p.setLocationState(location.id, "needs-confirmation", null);
+      if (brake && state === "active") {
+        if (p.setLocationState(location.id, "needs-confirmation", null, "active")) {
+          state = "needs-confirmation";
+        }
       }
     }
     // a location waiting for a confirmation that nothing is held for any more is active again
     if (
-      location.state === "needs-confirmation" &&
+      state === "needs-confirmation" &&
       !p.index.entriesOfLocation(location.id).some((e) => e.pendingDelete === 1)
     ) {
-      p.setLocationState(location.id, "active", null);
+      p.setLocationState(location.id, "active", null, "needs-confirmation");
     }
 
     for (const { f, hash, reason } of inserts) {

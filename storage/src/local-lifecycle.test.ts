@@ -155,3 +155,14 @@ describe("reimportEntry", () => {
     expect(reimportEntry(db, loc, "nope.pdf")).toEqual({ ok: false, reason: "not-found" });
   });
 });
+
+describe("a state write that names the state it decided from", () => {
+  it("is refused when the location is no longer in that state (a pause is kept), and goes through when it is", () => {
+    closeLocation(db, loc, "paused", null);
+    expect(reopenLocation(db, loc, null, "unavailable")).toBe(false);
+    expect(closeLocation(db, loc, "needs-confirmation", null, "active")).toBe(false);
+    expect(readLocation(db, loc)?.state).toBe("paused");
+    expect(reopenLocation(db, loc, null, "paused")).toBe(true);
+    expect(readLocation(db, loc)?.state).toBe("active");
+  });
+});

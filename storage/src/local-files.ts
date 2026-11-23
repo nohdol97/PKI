@@ -85,19 +85,22 @@ export function listLocations(db: SqlDriver): LocalLocation[] {
   return db.all("SELECT * FROM local_locations ORDER BY created_at, id").map(locationOf);
 }
 
-/** Moves a location to a state; false when there is no such location. */
+/**
+ * Moves a location to a state; false when there is no such location, or, given `expected`, when it is no
+ * longer in that state (a pass writes only from the state it decided from, so a user's change is kept).
+ */
 export function setLocationState(
   db: SqlDriver,
   id: string,
   state: LocationState,
   reason: string | null,
+  expected?: LocationState,
 ): boolean {
   return (
-    db.run("UPDATE local_locations SET state = ?, state_reason = ? WHERE id = ?", [
-      state,
-      reason,
-      id,
-    ]).changes === 1
+    db.run(
+      `UPDATE local_locations SET state = ?, state_reason = ? WHERE id = ?${expected ? " AND state = ?" : ""}`,
+      expected ? [state, reason, id, expected] : [state, reason, id],
+    ).changes === 1
   );
 }
 

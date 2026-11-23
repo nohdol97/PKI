@@ -53,6 +53,11 @@ export interface LocalFilesDriver {
   stop(): void;
 }
 
+/** A location that is read, or that returns to being read by itself at the next pass. */
+const isReadable = (l: LocalLocation) =>
+  l.type === "folder" &&
+  (l.state === "active" || l.state === "needs-confirmation" || l.state === "unavailable");
+
 const isRead = (l: LocalLocation) =>
   l.type === "folder" && (l.state === "active" || l.state === "needs-confirmation");
 
@@ -119,7 +124,7 @@ export function createLocalFilesDriver(options: LocalFilesDriverOptions): LocalF
       if (restored) {
         // before any sync is registered: the restored rows are `active`, the folders may be revoked ones
         for (const location of listLocations(db)) {
-          if (isRead(location)) closeLocation(db, location.id, "paused", "restored");
+          if (isReadable(location)) closeLocation(db, location.id, "paused", "restored");
         }
       }
       options.revoke.resume();
