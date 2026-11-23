@@ -55,7 +55,7 @@ export function rankInsight(signals: RankingSignals, now: Date): InsightRanking 
   const since = signals.changedAt === null ? NaN : Date.parse(signals.changedAt);
   const preference = signals.preference ?? 0;
   const axes = {
-    relevance: clamp((signals.userInputCount > 0 ? 100 : 50) + preference / 2),
+    relevance: clamp(Math.round((signals.userInputCount > 0 ? 100 : 50) + preference / 2)),
     impact: signals.impact ?? info?.impact ?? 50,
     urgency: Number.isNaN(until)
       ? 30

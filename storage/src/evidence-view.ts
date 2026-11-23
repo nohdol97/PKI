@@ -33,6 +33,8 @@ export interface ActiveInsight {
 export interface InsightEvidenceRow {
   id: number;
   target: "fact" | "relation";
+  /** The id of that fact or relation. */
+  targetId: number;
   status: KnowledgeStatus;
   quote: string;
   sourceTitle: string;
@@ -163,7 +165,7 @@ export function readInsightEvidence(
   if (!row) return undefined;
   const evidence = db
     .all(
-      `SELECT e.id, e.fact_id, e.quote, e.source_version_id, e.start_offset, v.version, v.title, v.blocks,
+      `SELECT e.id, e.fact_id, e.relation_id, e.quote, e.source_version_id, e.start_offset, v.version, v.title, v.blocks,
          coalesce(f.status, r.status) AS status,
          v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id) AS current
        FROM insight_evidence ie
@@ -177,6 +179,7 @@ export function readInsightEvidence(
     .map((e) => ({
       id: e.id as number,
       target: e.fact_id === null ? ("relation" as const) : ("fact" as const),
+      targetId: (e.fact_id ?? e.relation_id) as number,
       status: e.status as KnowledgeStatus,
       quote: e.quote as string,
       sourceTitle: e.title as string,

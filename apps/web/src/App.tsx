@@ -48,6 +48,7 @@ import { SemanticReview } from "./semantic-review.tsx";
 import { Ontology } from "./ontology.tsx";
 import { MoreButton, usePaged } from "./paged-list.tsx";
 import { invalidationText } from "./job-text.ts";
+import { FeedbackLearnedSetting } from "./feedback-settings.tsx";
 import { writeInsightInterpret } from "./insight-settings.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
 import {
@@ -548,6 +549,7 @@ function Settings({ api }: { api: ApiClient }) {
       <ConnectionTest api={api} />
       <BackgroundExecution api={api} />
       <InsightInterpretSetting api={api} />
+      <FeedbackLearnedSetting api={api} />
       <LocalLocations api={api} />
       <BackupRestore api={api} />
     </>

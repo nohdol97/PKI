@@ -209,6 +209,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     // feedback (P03-T3): a preference on the seed's Insight 1 and, routes running in contract order, the undo of that line
     feedbackRecord: { target: { kind: "insight", id: 1 }, kind: "useful" },
     feedbackUndo: { id: 1 },
+    setFeedbackSettings: { learned: false },
     // backup and restore (H01-T3): requests that end in a refusal code, none of which touches the disk
     setBackupFolder: { path: "/synthetic/not-a-folder" },
     createBackup: { passphrase: "short" },

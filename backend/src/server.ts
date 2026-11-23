@@ -1074,14 +1074,22 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
     // V02-R14: only active Insights, and a hidden one's evidence list is not-found. A source
     // opens by evidence id while its rows exist (until T08's purge deletes them).
-    insights: async () => ({
-      insights: rankedInsightViews(feedback.visibleInsights(gate.insights()), clock()),
-    }),
+    insights: async () => {
+      const visible = feedback.visibleInsights(gate.insights());
+      return { insights: rankedInsightViews(visible, clock(), feedback.preferences(visible)) };
+    },
     insightTypes: async () => insightTypeList(),
     insightEvidence: async ({ insightId }) => {
       const read = gate.insightEvidence(insightId);
       return read && knownInsightType(read.insight)
-        ? { ...read, insight: insightView(read.insight, clock()) }
+        ? {
+            ...read,
+            insight: insightView(
+              read.insight,
+              clock(),
+              feedback.preferences([read.insight]).get(read.insight.id),
+            ),
+          }
         : { error: "not-found" };
     },
     evidenceSource: async ({ evidenceId }) =>
@@ -1247,6 +1255,8 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     notificationSettings: async () => notify.settings(),
     setNotificationSettings: async (patch) => notify.writeSettings(patch),
     changes: async () => notify.changes(),
+    feedbackSettings: async () => feedback.settings(),
+    setFeedbackSettings: async (request) => feedback.writeSettings(request),
     wikiRebuild: async () => {
       const requested = requestWikiRebuild(options.db);
       if (requested.status === "registered") options.onRunConditionsChanged?.();

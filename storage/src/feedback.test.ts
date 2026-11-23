@@ -371,6 +371,14 @@ describe("feedback.signal (P03-C2b)", () => {
     expect(signal(insightTarget())).toEqual(NEUTRAL);
   });
 
+  it("the type step counts one line per Insight, the newest (P5F-R5, P03-D9)", () => {
+    writeSetting(db, "feedback.learned", "on");
+    applied(record(insightTarget(sibling), "useful", at(1)));
+    applied(record(insightTarget(sibling), "irrelevant", at(2)));
+    // the sibling stands as one negative line: round(100 * (0 - 1) / (1 + 3)) = -25 (two lines would net to 0)
+    expect(signal(insightTarget())).toMatchObject({ weight: -25, source: "type" });
+  });
+
   it("a target the caller refuses contributes no line to any step", () => {
     applied(record(insightTarget(), "irrelevant"));
     applied(record({ kind: "item", id: x }, "useful"));

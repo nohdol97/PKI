@@ -429,7 +429,19 @@ export function createReadGate(
         truncated: listed.length > semanticLimit,
       };
     },
-    graphTrace: (start) => traceChains(db, registry, start, "display"),
+    graphTrace: (start) => {
+      // an Insight whose end items are not shown is not-found here too (P5F-R2, P01-R15)
+      const ends =
+        start.kind === "insight"
+          ? db.all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [
+              start.id,
+            ])[0]
+          : undefined;
+      if (start.kind === "insight" && !(ends && endsShown(ends.x as number, ends.y as number))) {
+        return undefined;
+      }
+      return traceChains(db, registry, start, "display");
+    },
     graphPaths: (query) => relationPaths(db, registry, query, "display"),
     semanticShown: (kind, id) =>
       readSemanticState(db, { kind, id }) !== undefined && isShown(kind, id),

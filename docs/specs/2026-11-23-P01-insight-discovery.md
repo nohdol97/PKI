@@ -42,7 +42,7 @@ V02가 규칙 하나("의존 업무 지연")와 Insight 행(`insights`, 키 `(ru
 |---|---|---|---|---|
 | 의존 업무 지연 | `dependency_delay` | 코드 | X가 Y에 의존, Y의 완료일 > X의 목표일 | 지원(V02, T01이 새 틀로 옮김) |
 | 일정 충돌 | `schedule_conflict` | 코드 | 한 묶음의 완료일 > 자기 목표일 | 지원(T02) |
-| 충돌 | `conflict` | 코드 | 한 묶음의 유효한 두 사실 사이 `CONTRADICTS` 연결 | 지원(T02) |
+| 충돌 | `conflict` | 코드 | 한 묶음의 유효한 두 사실 사이 `CONTRADICTS` 연결(한 끝이 대체된 사실이면 세지 않음: [Phase 5 후속 spec](2026-11-24-P5-followups.md) R1) | 지원(T02) |
 | 중요 변경 | `important_change` | 코드(변경 감지) | 날짜 종류 사실의 `SUPERSEDES` 연결(대신한 쪽이 유효) | 지원(T02, 날짜 종류만) |
 | 의사결정 변경 | `decision_change` | 코드(변경 감지) | Decision 묶음의 `conclusion` 사실 사이 `SUPERSEDES` 연결(대신한 쪽이 유효) | 지원(T05) |
 | 정책 변화 | `policy_change` | 코드(변경 감지) | BusinessRule 묶음의 `conclusion` 사실 사이 같은 연결 | 지원(T05) |
@@ -93,7 +93,7 @@ V02가 규칙 하나("의존 업무 지연")와 Insight 행(`insights`, 키 `(ru
 
 - **P01-R13 Insight 응답.** `GET /api/insights`와 `POST /api/insights/evidence`의 Insight는 기존 필드에 더해 유형(`type`), 사실 줄(`factLines`), 이유 요약(`reasoningSummary`: 해석이 있으면 해석의 글, 없으면 코드의 글, D12)과 그 글을 쓴 쪽(`reasoningBy`: `code`·`llm`), 신뢰도(`confidence`), 순위(`ranking`: 여섯 축과 점수), 알림 제외 표시(`autoNotifyExcluded`)를 갖는다. 순위는 응답을 만들 때 `rankInsight`로 계산하고(R4) 해석의 두 숫자가 있으면 그것을 쓴다.
 - **P01-R14 목록 순서.** 목록은 활성 Insight만, 점수가 높은 순서로 준다. 철회된 Insight는 목록에도 근거 조회에도 없다.
-- **P01-R15 읽기 문.** Insight는 **자기 계보와 양 끝 항목(X·Y)이 모두 보일 때만** 응답에 들어간다. 하나라도 숨겨졌으면 행 전체가 빠진다: 추론·사실 줄·이유 요약·개수 어느 것도 나가지 않고, 근거 조회는 없는 Insight와 같은 `not-found`다. 사실 줄과 추론 문장이 항목 이름을 담기 때문이다(D26과 같은 이유).
+- **P01-R15 읽기 문.** Insight는 **자기 계보와 양 끝 항목(X·Y)이 모두 보일 때만** 응답에 들어간다. 그래프 추적(`graphTrace`)의 Insight 시작도 같다([Phase 5 후속 spec](2026-11-24-P5-followups.md) R2). 하나라도 숨겨졌으면 행 전체가 빠진다: 추론·사실 줄·이유 요약·개수 어느 것도 나가지 않고, 근거 조회는 없는 Insight와 같은 `not-found`다. 사실 줄과 추론 문장이 항목 이름을 담기 때문이다(D26과 같은 이유).
 - **P01-R16 유형 보고와 Home.** `GET /api/insights/types`는 13개 유형 모두의 이름·한글 이름·판정 주체·지원 상태·미지원 사유를 준다. Home은 Insight마다 유형 이름, 추론, 사실 줄, 이유 요약, 순위(점수와 여섯 축), 알림 제외 표시를 보이고, 유형별 지원 상태를 접힌 목록으로 보인다. 가져온 자료에서 온 글은 지금처럼 텍스트 노드와 `<bdi>`로만 나간다.
 - **P01-R17 해석 스위치.** `/api/settings/semantic`의 읽기·쓰기에 `insightInterpret`을 더한다(기본 꺼짐, 요청에서 빠지면 그대로). 쓰기는 `setInsightInterpret`을 부르고 작업 실행기를 깨운다. 설정 화면에 체크박스 하나를 둔다.
 
@@ -248,3 +248,4 @@ stateDiagram-v2
 | 2026-11-23 | D26 보강: 커밋 때 범위 정책 재확인도 호출 전과 같은 합집합(Insight 계보 + X·Y 묶음 계보)에 묻는다. X≠Y 시험 추가 | D26 | 이슈 #238 F1·F2 |
 | 2026-11-23 | T03 설계 추가: R13~R17(Insight 응답·순서·읽기 문·유형 보고·해석 스위치), 기준 C1c·C2d·e·f·C3e와 증명 시험, D27~D36, 작업 표의 T03 줄 | 요구사항·완료 기준·작업 분해·잠정 결정 | P01-T03 구현 착수, 이슈 #232 첫 항목 |
 | 2026-11-23 | R5 문구에 `llm_*` 열·opportunity 요약 반영, C1a·D18의 opportunity 철회 조건을 코드와 같게(사실 줄·근거·입력·연결), D30의 Wiki Insight 페이지 검사 반영, D37 추가 | R5·C1a·D18·D30·D37 | 이슈 #232 U2·S2, #257 F4, #238 F4 |
+| 2026-11-24 | `conflict` 유형 표에 대체된 끝 건너뛰기, R15에 `graphTrace`의 끝 항목 검사를 가리키는 문장을 더함. 요구사항·기준은 그대로 | 유형 표, R15 | 이슈 #221 F1, #257 N-3을 [Phase 5 후속 spec](2026-11-24-P5-followups.md)가 처리 |

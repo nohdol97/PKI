@@ -59,3 +59,26 @@ test("feedback.e2e: mark an Insight irrelevant, see it leave Home, cancel the fe
   await expect(insights).toHaveCount(1);
   await expect(recent.getByText("최근 피드백이 없습니다.")).toBeVisible();
 });
+
+test("feedback.e2e: correct a fact from an evidence row, see it in the recent list, cancel it (P5F-C6)", async ({
+  page,
+}) => {
+  await page.goto(`http://127.0.0.1:${port}`);
+  await insightItems(page)
+    .getByRole("button", { name: /^근거 보기/ })
+    .click();
+  const rows = page.getByRole("list", { name: "근거 목록" }).locator(":scope > li");
+  await expect(rows.first()).toBeVisible();
+
+  await rows
+    .getByRole("button", { name: /^잘못된 정보/ })
+    .first()
+    .click();
+  const recent = page.getByRole("region", { name: "최근 피드백" });
+  const line = recent.getByRole("listitem");
+  await expect(line).toHaveCount(1);
+  await expect(line).toContainText("잘못된 정보");
+
+  await line.getByRole("button", { name: /^취소/ }).click();
+  await expect(recent.getByText("최근 피드백이 없습니다.")).toBeVisible();
+});

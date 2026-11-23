@@ -12,9 +12,9 @@ import {
   type LocalSourceInfo,
   type SourceThreadResponse,
 } from "@pki/contracts";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
-import { InsightFeedback, RecentFeedback } from "./feedback.tsx";
+import { InsightFeedback, RecentFeedback, RowFeedback } from "./feedback.tsx";
 import {
   AUTO_NOTIFY_EXCLUDED,
   evidenceVersionText,
@@ -272,7 +272,14 @@ export function evidenceReducer(state: EvidenceState, action: EvidenceAction): E
       const { id } = action;
       if (action.what === "insight") {
         const left = state.insights?.filter((i) => i.id !== id);
-        return { ...(left && { insights: left }), opens, notice: INSIGHT_GONE };
+        // a late 404 of another Insight leaves the open evidence and source alone (P5F-R3)
+        const keepOpen = state.opened !== undefined && state.opened.insightId !== id;
+        return {
+          ...(left && { insights: left }),
+          ...(keepOpen && { ...opened, ...(state.source && { source: state.source }) }),
+          opens,
+          notice: INSIGHT_GONE,
+        };
       }
       const evidence = state.opened?.evidence.filter((e) => e.id !== id);
       return {
@@ -306,6 +313,7 @@ export function EvidencePanel({
   onReveal,
   thread,
   onOpenMessage,
+  rowActions,
 }: {
   state: EvidenceState;
   onOpenSource: (evidenceId: number) => void;
@@ -315,6 +323,8 @@ export function EvidencePanel({
   /** The other messages of the open source's thread (I02B), where the screen reads them. */
   thread?: SourceThreadResponse | undefined;
   onOpenMessage?: ((versionId: number) => void) | undefined;
+  /** What a screen adds under each evidence row, such as the correction buttons (P5F-R6); none where not given. */
+  rowActions?: ((evidence: EvidenceSummary) => ReactNode) | undefined;
 }) {
   const { opened, source } = state;
   const evidenceHeading = useFocusOn(state.opens, opened !== undefined && source === undefined);
@@ -331,6 +341,7 @@ export function EvidencePanel({
             {opened.evidence.map((e) => (
               <li key={e.id}>
                 <EvidenceEntry evidence={e} onOpen={() => onOpenSource(e.id)} />
+                {rowActions?.(e)}
               </li>
             ))}
           </ol>
@@ -489,6 +500,14 @@ export function Insights({
         }
         thread={thread}
         onOpenMessage={(id) => void openMessage(id)}
+        rowActions={(e) => (
+          <RowFeedback
+            api={api}
+            target={{ kind: e.target, id: e.targetId }}
+            label={e.quote}
+            onChange={feedbackChanged}
+          />
+        )}
       />
     </section>
   );

@@ -294,10 +294,13 @@ export function preferenceSignals(
         (
           db.all(
             `SELECT f.kind, f.insight_id FROM feedback f JOIN insights i ON i.id = f.insight_id
-              WHERE i.rule = ? AND f.undone_at IS NULL AND f.kind IN (${placeholders(OPINIONS)})`,
+              WHERE i.rule = ? AND f.undone_at IS NULL AND f.kind IN (${placeholders(OPINIONS)})
+              ORDER BY f.id DESC`,
             [rule, ...OPINIONS],
           ) as { kind: FeedbackKind; insight_id: number }[]
         )
+          // one line per Insight, the newest (P5F-R5, P03-D9)
+          .filter((r, i, all) => all.findIndex((o) => o.insight_id === r.insight_id) === i)
           .filter((r) => usable({ kind: "insight", id: r.insight_id }))
           .map((r) => ({ kind: r.kind, insight: r.insight_id })),
       );

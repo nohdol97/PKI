@@ -13,12 +13,15 @@ import {
   type RouteResponse,
 } from "@pki/contracts";
 import {
+  FEEDBACK_LEARNED_SETTING,
+  feedbackLearned,
   itemsOfEntry,
   listFeedback,
   preferenceSignals,
   readSemanticState,
   recordFeedback,
   undoFeedback,
+  writeSetting,
   type EntryRef,
   type FeedbackEntries,
   type SqlDriver,
@@ -38,6 +41,15 @@ export interface FeedbackApi {
   list(): RouteResponse<"feedbackList">;
   /** The Insights the user has not hidden from the feed (P03-R9), in the order given. */
   visibleInsights<T extends { id: number }>(insights: readonly T[]): T[];
+  /**
+   * The preference weight of each requested Insight, −100..100 (P5F-R4). The type step counts the lines of every
+   * Insight the read gate shows (`gate.insights()`, the set `visibleInsights` takes, hidden-from-feed ones
+   * included) so the list and the evidence answer agree; a target the gate does not show counts for nothing.
+   */
+  preferences(insights: readonly { id: number }[]): ReadonlyMap<number, number>;
+  /** `feedback.learned`, the type step's switch (P5F-R5). */
+  settings(): RouteResponse<"feedbackSettings">;
+  writeSettings(request: RouteRequest<"setFeedbackSettings">): RouteResponse<"feedbackSettings">;
 }
 
 export function createFeedbackApi(
@@ -85,6 +97,16 @@ export function createFeedbackApi(
   const entryOf = (ref: EntryRef | null) => {
     const now = ref && readSemanticState(db, ref);
     return ref && now ? { entry: { ...ref, status: now.status, epistemic: now.epistemic } } : {};
+  };
+
+  const signalsOf = (insights: readonly { id: number }[]) => {
+    const ids = new Set(insights.map((i) => i.id));
+    const usable = (t: FeedbackTarget) => (t.kind === "insight" ? ids.has(t.id) : shown(t));
+    return preferenceSignals(
+      db,
+      insights.map((i) => ({ kind: "insight", id: i.id }) as const),
+      { usable },
+    );
   };
 
   return {
@@ -139,14 +161,24 @@ export function createFeedbackApi(
     },
 
     visibleInsights(insights) {
-      const ids = new Set(insights.map((i) => i.id));
-      const usable = (t: FeedbackTarget) => (t.kind === "insight" ? ids.has(t.id) : shown(t));
-      const signals = preferenceSignals(
-        db,
-        insights.map((i) => ({ kind: "insight", id: i.id }) as const),
-        { usable },
-      );
+      const signals = signalsOf(insights);
       return insights.filter((_, at) => !signals[at]?.hidden);
+    },
+
+    preferences(insights) {
+      const shownInsights = gate.insights();
+      const signals = signalsOf(shownInsights);
+      const weights = new Map(
+        shownInsights.map((insight, at) => [insight.id, signals[at]?.weight ?? 0]),
+      );
+      return new Map(insights.map((insight) => [insight.id, weights.get(insight.id) ?? 0]));
+    },
+
+    settings: () => ({ learned: feedbackLearned(db) }),
+
+    writeSettings({ learned }) {
+      writeSetting(db, FEEDBACK_LEARNED_SETTING, learned ? "on" : "off");
+      return { learned: feedbackLearned(db) };
     },
   };
 }

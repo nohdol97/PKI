@@ -179,10 +179,18 @@ export const conflictRule: InsightRule = {
     const lines: string[] = [];
     const linkIds: number[] = [];
     const x = readItem(db, key.xItemId)?.name;
+    // a fact a standing SUPERSEDES link replaced is no longer a valid value (P5F-R1, as validDates reads it)
+    const replaced = supersededAmong(db, [...facts.keys()]);
+    const skipped: number[] = [];
     for (const link of linksOfFacts(db, [...facts.keys()])) {
       const from = facts.get(link.fromFactId);
       const to = facts.get(link.toFactId);
       if (link.type !== "CONTRADICTS" || !from || !to) continue;
+      const cause = replaced.filter((r) => r.factId === from.id || r.factId === to.id);
+      if (cause.length > 0) {
+        skipped.push(...cause.map((r) => r.linkId));
+        continue;
+      }
       const a = validFact(db, from);
       const b = validFact(db, to);
       if (!a || !b) continue;
@@ -197,7 +205,7 @@ export const conflictRule: InsightRule = {
       factLines: lines,
       reasoningSummary:
         "같은 항목의 같은 자리에 서로 다른 유효한 값이 있다고 코드가 기록한 어긋남 연결을 모았습니다.",
-      ...gather(rows, linkIds),
+      ...gather(rows, [...linkIds, ...skipped]),
       urgencyDate: null,
     };
   },

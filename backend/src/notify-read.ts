@@ -80,7 +80,11 @@ export function createNotifyRead(
   };
 
   /** The line as shown, from its Insight as the gate shows it; undefined when the line is not shown. */
-  const lineOf = (n: StoredNotification, insight: ActiveInsight | undefined): Line | undefined => {
+  const lineOf = (
+    n: StoredNotification,
+    insight: ActiveInsight | undefined,
+    preference = 0,
+  ): Line | undefined => {
     if (n.kind !== "insight" || n.status === "withdrawn" || insight === undefined) return undefined;
     if ((insight.changedAt ?? "") !== (n.insightChangedAt ?? "")) return undefined;
     return {
@@ -91,18 +95,22 @@ export function createNotifyRead(
       createdAt: n.createdAt,
       readAt: n.readAt,
       actions: actionsOf(n),
-      insight: insightView(insight, clock()),
+      insight: insightView(insight, clock(), preference),
     };
   };
 
   /** Every Insight line that is shown now, newest first: one read of the gate for the whole answer. */
   const shownLines = (): Line[] => {
-    const insights = new Map(
-      feedback.visibleInsights(gate.insights()).map((insight) => [insight.id, insight]),
-    );
+    const visible = feedback.visibleInsights(gate.insights());
+    const insights = new Map(visible.map((insight) => [insight.id, insight]));
+    const preferences = feedback.preferences(visible);
     return listNotifications(db)
       .filter((n) => n.kind === "insight")
-      .flatMap((n) => lineOf(n, insights.get(n.insightId as number)) ?? [])
+      .flatMap(
+        (n) =>
+          lineOf(n, insights.get(n.insightId as number), preferences.get(n.insightId as number)) ??
+          [],
+      )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id);
   };
 

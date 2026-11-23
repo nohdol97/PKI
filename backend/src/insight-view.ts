@@ -12,7 +12,7 @@ import { isAutoNotifyExcluded, rankInsight } from "@pki/knowledge-engine";
 import type { ActiveInsight } from "@pki/storage";
 
 /** One gated row as the API shows it; the ranking is computed at `now`. Built field by field: the row's item ids stay inside. */
-export function insightView(row: ActiveInsight, now: Date): InsightSummary {
+export function insightView(row: ActiveInsight, now: Date, preference = 0): InsightSummary {
   const reasoningSummary = row.llmReasoningSummary ?? row.reasoningSummary;
   return {
     id: row.id,
@@ -34,6 +34,7 @@ export function insightView(row: ActiveInsight, now: Date): InsightSummary {
         userInputCount: row.userInputCount,
         impact: row.llmImpact,
         actionability: row.llmActionability,
+        preference,
       },
       now,
     ),
@@ -46,12 +47,16 @@ export const knownInsightType = (row: Pick<ActiveInsight, "type">): boolean =>
   (INSIGHT_TYPE_NAMES as readonly string[]).includes(row.type);
 
 /** Views by score, then the later change first (none last), then the lower id (P01-D28). */
-export function rankedInsightViews(rows: readonly ActiveInsight[], now: Date): InsightSummary[] {
+export function rankedInsightViews(
+  rows: readonly ActiveInsight[],
+  now: Date,
+  preferences: ReadonlyMap<number, number> = new Map(),
+): InsightSummary[] {
   const changed = (row: ActiveInsight) =>
     row.changedAt === null ? -Infinity : Date.parse(row.changedAt);
   return rows
     .filter(knownInsightType)
-    .map((row) => ({ row, view: insightView(row, now) }))
+    .map((row) => ({ row, view: insightView(row, now, preferences.get(row.id)) }))
     .sort(
       (a, b) =>
         b.view.ranking.score - a.view.ranking.score ||
