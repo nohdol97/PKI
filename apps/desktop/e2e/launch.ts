@@ -2,8 +2,9 @@
 // nothing imports the shell at run time (Electron starts package.json "main",
 // src/main.ts), so the only importers are the E2E. Test code only; the production
 // build refuses it (apps/desktop/build/bundle.ts).
-// Each launch gets its own userData folder, so the single-instance lock and Chromium
-// state never collide with another test or with an installed app.
+// Each launch gets its own userData folder, so Chromium state and Electron's
+// single-instance lock never collide with another test or with an installed app. The
+// data folder has its own lock: tests that share one share it deliberately.
 import { _electron, type ElectronApplication, type Page } from "@playwright/test";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -24,7 +25,7 @@ export interface ShellOptions {
 export function shellArgs({ userData, dataDir, fixtures }: ShellOptions): string[] {
   return [
     DESKTOP_DIR,
-    // Chromium's own switch: userData and the single-instance lock (V01-T15 6)
+    // Chromium's own switch: userData and Electron's single-instance lock (V01-T15 6)
     `--user-data-dir=${userData}`,
     ...(dataDir ? [`--pki-data-dir=${dataDir}`] : []),
     ...(fixtures ? [`--pki-fixtures=${fixtures}`] : []),

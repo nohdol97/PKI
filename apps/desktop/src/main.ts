@@ -1,6 +1,7 @@
 // Electron main (V01-R4, ADR 0008). The shell starts and stops the backend (and
 // restarts one that exits by itself, a bounded number of times: V01-T16), keeps one
-// instance, serves the built screens from app://pki (the backend's only allowed
+// instance (Electron's lock in userData, and a lock on the data folder itself:
+// data-lock.ts), serves the built screens from app://pki (the backend's only allowed
 // Origin), gives the page its session through the preload, and blocks everything
 // else the page might try: Node, other origins, new windows, permissions. It holds the
 // secret store (safeStorage ciphertext in the data directory) and answers the
@@ -22,6 +23,7 @@ import {
   utilityProcess,
 } from "electron";
 import { dataDirectory } from "@pki/storage";
+import { DATA_IN_USE, lockDataDirectory, type DataLock } from "./data-lock.ts";
 import { url as inspectorUrl } from "node:inspector";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +52,10 @@ const SECRETS_FILE = "secrets.json";
 const MAX_RESTARTS = 3;
 
 const { dataDir, fixtures } = switches((name) => app.commandLine.getSwitchValue(name) || undefined);
+
+const dataPath = dataDir ?? dataDirectory();
+/** Held until the process ends: the OS frees it, and collecting it would free it early. */
+let dataLock: DataLock | undefined;
 
 const forkUtility: ForkBackend = (entry, args, env) => {
   const child = utilityProcess.fork(entry, args, { env, serviceName: "PKI backend" });
@@ -88,7 +94,7 @@ async function run() {
   refuseDownloads(session.defaultSession);
 
   const secrets = createSecretStore({
-    file: join(dataDir ?? dataDirectory(), SECRETS_FILE),
+    file: join(dataPath, SECRETS_FILE),
     cipher: electronCipher(safeStorage, process.platform),
   });
   backend = await superviseBackend({
@@ -163,6 +169,18 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 
+/** The lock that keeps a second userData off this data folder (R04L); false = do not start. */
+function takeDataLock(): boolean {
+  try {
+    dataLock = lockDataDirectory(dataPath);
+  } catch (error) {
+    console.error(`PKI: could not lock the data folder: ${(error as Error).message}`);
+    return false;
+  }
+  if (dataLock === undefined) console.error(DATA_IN_USE);
+  return dataLock !== undefined;
+}
+
 const debugging =
   REFUSE_DEBUGGING &&
   debuggingRequested({
@@ -177,8 +195,10 @@ if (debugging) {
   console.error("PKI: refusing to start with a debugging switch");
   app.exit(1);
 } else if (!app.requestSingleInstanceLock()) {
-  // The single-instance lock lives in userData (Chromium's --user-data-dir moves both).
+  // Electron's lock lives in userData: it only hands focus to the first run.
   app.exit(0);
+} else if (!takeDataLock()) {
+  app.exit(1);
 } else {
   app.on("web-contents-created", (_event, contents) => lockDown(contents));
   app.on("second-instance", () => {
