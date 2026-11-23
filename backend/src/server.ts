@@ -1050,6 +1050,9 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     // S01-R23, T07: the type definitions. The user's operations take the same one entry; an id that is
     // absent, deleted or hidden is the one same not-found; a refusal is a code with counts in a 200 body.
     entityCandidates: async () => gate.mergeCandidates(),
+    // S02-R21, R22, R25 (T09): the evidence chain and the relation paths; an absent or hidden start is the one not-found.
+    graphTrace: async (start) => gate.graphTrace(start) ?? { error: "not-found" },
+    graphPaths: async (query) => gate.graphPaths(query) ?? { error: "not-found" },
     knowledgeSchema: async () => gate.knowledgeSchema(),
     ontology: async () => gate.ontology(),
     ontologyHistory: async ({ id }) =>
