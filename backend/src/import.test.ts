@@ -15,10 +15,10 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
 import { openCanonicalDb, productImporter } from "./composition.ts";
 import { createConnectorManager, tryLockInstance, type ConnectorManager } from "./connectors.ts";
@@ -30,6 +30,24 @@ import { JSONL_CAPABILITIES, parseJsonl } from "@pki/connector-sdk";
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const GOLDEN_DIR = resolve(import.meta.dirname, "../../eval/golden/sources");
 const CANARY = "CANARY-import-text-5530";
+
+// The ordering cases open hundreds of throwaway DBs. Migrating a fresh file DB costs ~200 ms
+// (fsync-bound); a copy of one already-migrated directory costs ~20 ms. Every case still opens
+// through the product's `openCanonicalDb`, so nothing but the migration time is shared.
+let templateRoot: string;
+let templateDir: string;
+beforeAll(() => {
+  templateRoot = mkdtempSync(join(tmpdir(), "pki-import-template-"));
+  templateDir = join(templateRoot, "data");
+  openCanonicalDb(templateDir).close();
+});
+afterAll(() => {
+  rmSync(templateRoot, { recursive: true, force: true });
+});
+const caseDb = (path: string): SqlDriver => {
+  cpSync(templateDir, path, { recursive: true });
+  return openCanonicalDb(path);
+};
 
 let dir: string;
 let db: SqlDriver;
@@ -834,7 +852,7 @@ describe("import.legacy-identity", () => {
       for (const [n, seq] of ops
         .flatMap((x) => ops.flatMap((y) => ops.map((z) => [x, y, z])))
         .entries()) {
-        const target = openCanonicalDb(join(dir, `foreign-${n}`));
+        const target = caseDb(join(dir, `foreign-${n}`));
         try {
           foreignRow(target);
           for (const { route, kind } of seq) {
@@ -931,7 +949,7 @@ describe("import.legacy-identity", () => {
         const pick = <T>(xs: readonly T[]) => xs[Math.floor(next() * xs.length)] as T;
         for (let n = 0; n < CASES_PER_SEED; n++) {
           const ops = [0, 1, 2].map(() => ({ route: pick(ROUTES), kind: pick(KINDS) }));
-          const target = openCanonicalDb(join(dir, `e-${seed.replace(/\W/g, "")}-${n}`));
+          const target = caseDb(join(dir, `e-${seed.replace(/\W/g, "")}-${n}`));
           const where = `${seed} ${JSON.stringify(ops)}`;
           try {
             registerConnectorInstance(target, "ci", JSONL_IMPORT_KIND);
@@ -1187,7 +1205,7 @@ describe("import.legacy-identity", () => {
       "seed %s, every ordering of three operations",
       async (seed) => {
         for (const [n, ops] of sequences.entries()) {
-          const target = openCanonicalDb(join(dir, `p-${seed}-${n}`));
+          const target = caseDb(join(dir, `p-${seed}-${n}`));
           try {
             if (seed !== "none") seedRow(target);
             if (seed === "row+tombstone") seedTombstone(target);

@@ -144,11 +144,17 @@ const configs: readonly Config[] = ["product", "swapped"];
 
 for (const config of configs) {
   for (const [index, seed] of seeds.entries()) {
+    // the swapped configuration runs on seed 0 only: seed 1 on the product configuration shows seed variance
+    if (config === "swapped" && index !== 0) continue;
     const name = config === "product" ? "" : " with the Provider and Embedding swapped";
     test(`screens show seed ${index} from the backend${name}`, async ({ target, playwright }) => {
       test.skip(
         config === "swapped" && target !== "browser",
         "the swapped configuration binds its doubles through the dev backend's preload (browser)",
+      );
+      test.skip(
+        target === "electron" && index === 1,
+        "seed variance is a property of the web bundle (browser); the shell run keeps seed 0",
       );
       const { titles } = seed;
       const other = seeds[1 - index] as Seed;

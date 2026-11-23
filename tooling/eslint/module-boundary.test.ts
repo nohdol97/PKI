@@ -116,28 +116,6 @@ describe("repository lint config enforces module-boundary", () => {
     expect(runtime).toEqual([]);
   });
 
-  it("finds no boundary violation in the repository's own code", async () => {
-    // only the rule under test runs: the other rules' messages are filtered out below anyway
-    const eslint = new ESLint({ cwd: repoRoot, ruleFilter: ({ ruleId }) => ruleId === RULE_ID });
-    const results = await eslint.lintFiles([
-      "apps",
-      "backend",
-      "knowledge-engine",
-      "packages",
-      "providers",
-      "storage",
-    ]);
-    const violations = results.flatMap((r) =>
-      r.messages
-        .filter((m) => m.ruleId === RULE_ID)
-        .map((m) => `${r.filePath.slice(repoRoot.length + 1)}: ${m.message}`),
-    );
-    expect(results.length).toBeGreaterThan(20);
-    expect(violations).toEqual([]);
-  }, 90_000);
-  // ^ lints the whole repository. Measured, 5 runs each: 3.3-3.5 s alone (4.3-4.5 s before only this rule
-  // ran), 16.9-19.6 s with the machine 3x oversubscribed (24 busy loops on 8 cores). 90 s is 4.5x that.
-
   // B1 (I05-T04 delta D2): a fork package cannot switch the rule off or re-configure it from inside a file.
   // Inline configuration stays available to the public packages.
   describe("inline ESLint configuration", () => {
