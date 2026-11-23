@@ -9,6 +9,8 @@ import {
   fixValidity,
   HistoryView,
   loadHistory,
+  previousKey,
+  rememberPrevious,
   RowDetail,
   validityFailure,
 } from "./row-detail.tsx";
@@ -71,11 +73,28 @@ describe("줄 상세 (X02B-C4 ①②)", () => {
         id={5}
         name="사실 memo 메모"
         validity={{ from: "2026-01-01", until: null }}
+        previous={{ from: "2025-01-01", until: null }}
         onChanged={() => undefined}
       />,
     );
     expect(out).toContain('aria-label="기간 고치기: 사실 memo 메모"');
     expect(out).toContain('aria-label="이력 보기: 사실 memo 메모"');
+    expect(out).toContain('aria-label="이전 기간으로 되돌리기: 사실 memo 메모"');
+  });
+
+  it("keeps a row's previous interval by kind and id, apart from the line that mounts and unmounts (X02B-R8)", () => {
+    const old = { from: null, until: null };
+    const held = rememberPrevious(new Map(), previousKey("fact", 5), old);
+    // a row set from no dates still has its previous (empty) interval to go back to
+    expect(held.get("fact:5")).toEqual(old);
+    expect(held.has(previousKey("relation", 5))).toBe(false);
+    const next = rememberPrevious(held, previousKey("fact", 5), {
+      from: "2026-01-01",
+      until: null,
+    });
+    expect(next.get("fact:5")).toEqual({ from: "2026-01-01", until: null });
+    expect(held.get("fact:5")).toEqual(old); // the held map is not changed
+    expect(rememberPrevious(next, "fact:5", undefined).has("fact:5")).toBe(false);
   });
 
   it("reads the history of the row and shows it in time order, known codes in words, unknown as they are", async () => {

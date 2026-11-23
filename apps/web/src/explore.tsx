@@ -26,7 +26,7 @@ import {
 } from "./explore-text.ts";
 import { NeighbourGraph } from "./neighbour-graph.tsx";
 import { useNav } from "./nav.tsx";
-import { RowDetail } from "./row-detail.tsx";
+import { previousKey, rememberPrevious, RowDetail, type Previous } from "./row-detail.tsx";
 import { SemanticRowActions, act, type ReviewAction } from "./semantic-review.tsx";
 import { EPISTEMIC_TEXT, STATUS_TEXT } from "./semantic-text.ts";
 
@@ -213,6 +213,8 @@ export function Neighbourhood({
   onWiki: (key: string) => void;
 }) {
   const { center } = read;
+  /** Each row's replaced interval lives here, not in its line: a re-read can move the line between timeline groups and mount it anew. */
+  const [previous, setPrevious] = useState<ReadonlyMap<string, Previous>>(new Map());
   const nameOf = (id: number) =>
     id === center.id ? center.name : (read.items.find((i) => i.id === id)?.name ?? `항목 ${id}`);
   const types = [...new Set(read.edges.map((e) => e.type))].sort();
@@ -257,6 +259,10 @@ export function Neighbourhood({
             id={e.id}
             name={`${e.kind === "fact" ? "사실" : "관계"} ${label}`}
             validity={{ from: row.validAt, until: row.validUntil }}
+            previous={previous.get(previousKey(e.kind, e.id))}
+            onPrevious={(p) =>
+              setPrevious((held) => rememberPrevious(held, previousKey(e.kind, e.id), p))
+            }
             onChanged={onChanged}
           />
         )}
@@ -279,6 +285,7 @@ export function Neighbourhood({
         )}
       </p>
       <RowDetail
+        key={center.id}
         api={api}
         kind="item"
         id={center.id}

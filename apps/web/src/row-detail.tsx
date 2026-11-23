@@ -22,6 +22,23 @@ import { STATUS_TEXT } from "./semantic-text.ts";
 type HistoryLine = RouteResponse<"semanticHistory">["lines"][number];
 type Validity = RouteResponse<"semanticValidity">;
 type Kind = "item" | "fact" | "relation";
+/** The interval a fix replaced, as the answer reports it. */
+export type Previous = Validity["previous"];
+
+/** The key a row's previous interval is kept under, above the timeline that re-reads it. */
+export const previousKey = (kind: Kind, id: number) => `${kind}:${id}`;
+
+/** The map with one row's previous interval set, or dropped when `previous` is absent; the input is untouched. */
+export function rememberPrevious(
+  held: ReadonlyMap<string, Previous>,
+  key: string,
+  previous: Previous | undefined,
+): ReadonlyMap<string, Previous> {
+  const next = new Map(held);
+  if (previous === undefined) next.delete(key);
+  else next.set(key, previous);
+  return next;
+}
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -71,6 +88,8 @@ export function RowDetail({
   id,
   name,
   validity,
+  previous,
+  onPrevious,
   onChanged,
 }: {
   api: ApiClient;
@@ -80,27 +99,39 @@ export function RowDetail({
   name: string;
   /** The row's interval now; absent for an item, which has none to fix. */
   validity?: { from: string | null; until: string | null } | undefined;
+  /** The interval the last fix replaced. Held by the caller: a re-read can move this row and mount it anew. */
+  previous?: Previous | undefined;
+  onPrevious?: ((previous: Previous | undefined) => void) | undefined;
   onChanged: () => void;
 }) {
   const [from, setFrom] = useState(validity?.from ?? "");
   const [until, setUntil] = useState(validity?.until ?? "");
-  const [previous, setPrevious] = useState<Validity["previous"]>();
+  const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [history, setHistory] = useState<HistoryLine[] | "loading">();
   const latest = useRef(0);
+  /** A second request while one is out is refused: its answer would overwrite `previous` with the interval just set. */
+  const inFlight = useRef(false);
 
   const save = (next: { from: string; until: string }, keepPrevious: boolean) => {
-    if (kind === "item") return;
-    fixValidity(api, kind, id, next.from, next.until).then(
-      (done) => {
-        setFailure(undefined);
-        setFrom(next.from);
-        setUntil(next.until);
-        setPrevious(keepPrevious ? done.previous : undefined);
-        onChanged();
-      },
-      (error: unknown) => setFailure(validityFailure(error)),
-    );
+    if (kind === "item" || inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    fixValidity(api, kind, id, next.from, next.until)
+      .then(
+        (done) => {
+          setFailure(undefined);
+          setFrom(next.from);
+          setUntil(next.until);
+          onPrevious?.(keepPrevious ? done.previous : undefined);
+          onChanged();
+        },
+        (error: unknown) => setFailure(validityFailure(error)),
+      )
+      .finally(() => {
+        inFlight.current = false;
+        setBusy(false);
+      });
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -141,7 +172,7 @@ export function RowDetail({
               onChange={(e) => setUntil(e.target.value)}
             />
           </label>{" "}
-          <button type="submit" aria-label={`${DETAIL_VALIDITY_SAVE}: ${name}`}>
+          <button type="submit" disabled={busy} aria-label={`${DETAIL_VALIDITY_SAVE}: ${name}`}>
             {DETAIL_VALIDITY_SAVE}
           </button>
           {previous !== undefined && (
@@ -149,6 +180,7 @@ export function RowDetail({
               {" "}
               <button
                 type="button"
+                disabled={busy}
                 aria-label={`${DETAIL_VALIDITY_REVERT}: ${name}`}
                 onClick={() =>
                   save({ from: previous.from ?? "", until: previous.until ?? "" }, false)
