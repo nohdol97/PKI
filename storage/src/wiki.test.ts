@@ -171,7 +171,7 @@ describe("wiki.incarnation: an Insight that goes with its item (#220, K01-D20)",
 });
 
 describe("wiki.undo: the pages of an item the user took back go with it (#235, K01-R19)", () => {
-  it("leaves no page row and no lineage row for the item or for the Insight that went with it", () => {
+  it("leaves no page, lineage or link row for the item or for the Insight that went with it", () => {
     const added = userDecisions.add(db, { kind: "item", type: "Project", name: "옛 이름" });
     if (added.status !== "applied" || added.ref.kind !== "item") throw new Error(added.status);
     const id = added.ref.id;
@@ -189,7 +189,13 @@ describe("wiki.undo: the pages of an item the user took back go with it (#235, K
     );
     writeWikiPage(
       db,
-      { ...page(`syntheses/${insight}`), kind: "syntheses", target: String(insight), lineage },
+      {
+        ...page(`syntheses/${insight}`),
+        kind: "syntheses",
+        target: String(insight),
+        lineage,
+        links: [{ toKey: `projects/${id}`, basisKind: "insight", basisId: Number(insight) }],
+      },
       AT,
     );
     expect(db.all("SELECT key FROM wiki_pages")).toHaveLength(2);
@@ -198,5 +204,6 @@ describe("wiki.undo: the pages of an item the user took back go with it (#235, K
 
     expect(db.all("SELECT key FROM wiki_pages")).toEqual([]);
     expect(db.all("SELECT page_key FROM wiki_page_lineage")).toEqual([]);
+    expect(db.all("SELECT from_key FROM wiki_links")).toEqual([]);
   });
 });

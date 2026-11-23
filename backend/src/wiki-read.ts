@@ -42,18 +42,34 @@ const INDEX_LOG_LINES = 50;
 const PAGE_HISTORY_LINES = 100;
 
 /**
- * A log line as the API gives it: no row id. The counts come from the stored page, so they count claims the
- * caller may not see; they are given only when `exact` (K01-D19), else zero.
+ * A log line as the API gives it: no row id. A line stores no claim ids, so only `added` can be given at all,
+ * and only when the caller is known to see every claim it counted (`give`, K01-R18); `removed` is always 0,
+ * for a removed claim is no longer in the page to ask about.
  */
-const logLine = (l: WikiLogLine, exact: boolean) => ({
+const logLine = (l: WikiLogLine, give: boolean) => ({
   pageKey: l.pageKey,
   action: l.action,
   knowledgeRevision: l.knowledgeRevision,
   changeSeq: l.changeSeq,
-  added: exact ? l.added : 0,
-  removed: exact ? l.removed : 0,
+  added: give ? l.added : 0,
+  removed: 0,
   at: l.at,
 });
+
+/**
+ * The lines as the API gives them, `lines` newest first and the same order out. A line's `added` is given when
+ * `exact(its page)` and no later line of that page removed a claim: with none removed later every claim it
+ * added is still in the page body, which `exact` has judged (K01-R18, D22). A line's own removal masks only the
+ * lines before it.
+ */
+const countedLines = (lines: readonly WikiLogLine[], exact: (pageKey: string) => boolean) => {
+  const lost = new Set<string>();
+  return lines.map((l) => {
+    const out = logLine(l, exact(l.pageKey) && !lost.has(l.pageKey));
+    if (l.removed > 0) lost.add(l.pageKey);
+    return out;
+  });
+};
 
 export interface WikiReads {
   /** The index: the shown pages by kind, the latest log lines of shown pages, notes without a page. */
@@ -133,23 +149,36 @@ export function createWikiReads(
     db
       .all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [id])
       .flatMap((r) => [r.x as number, r.y as number]);
+  /** The stored page under `key` when its target is shown. */
+  const shownPage = (key: string): StoredWikiPage | undefined => {
+    const stored = readStoredWikiPage(db, key);
+    return stored && targetShown(stored) ? stored : undefined;
+  };
+  /**
+   * Whether the other end of a claim may be named (K01-R9): the page it points to is shown, and a relation's
+   * object is in the group view of the page it resolves to. The page's claim filter and `countsExact` share it.
+   */
+  const endShown = (c: WikiPageBody["claims"][number]): boolean =>
+    (c.to === undefined || shownPage(c.to) !== undefined) &&
+    (c.ref.kind !== "relation" || inView(relationObject(c.ref.id)));
   /**
    * Whether the caller sees every claim the page holds (K01-D19): then the change counts, made from the stored
-   * page, name nothing the caller cannot see. A claim of an item outside the caller's group view or a row the
-   * gate hides makes them unknowable per caller, so they are not given.
+   * page, name nothing the caller cannot see. A claim of an item outside the caller's group view, a row the
+   * gate hides, or a relation end the page would not name makes them unknowable per caller, so they are not
+   * given.
    */
   const countsExact = (stored: StoredWikiPage): boolean => {
     if (stored.kind === "syntheses") return true;
     const group = groupOf(Number(stored.target));
     return (JSON.parse(stored.body) as WikiPageBody).claims.every((c) => {
       const owner = ownerOf(c.ref.kind, c.ref.id);
-      return owner !== undefined && group.has(owner) && gate.semanticShown(c.ref.kind, c.ref.id);
+      return (
+        owner !== undefined &&
+        group.has(owner) &&
+        gate.semanticShown(c.ref.kind, c.ref.id) &&
+        endShown(c)
+      );
     });
-  };
-  /** The stored page under `key` when its target is shown. */
-  const shownPage = (key: string): StoredWikiPage | undefined => {
-    const stored = readStoredWikiPage(db, key);
-    return stored && targetShown(stored) ? stored : undefined;
   };
 
   /**
@@ -205,10 +234,10 @@ export function createWikiReads(
         stale: isWikiStale(db),
         buildDead: isWikiBuildDead(db),
         kinds: [...kinds].map(([kind, list]) => ({ kind, pages: list })),
-        log: listWikiLog(db, { limit: INDEX_LOG_LINES * 4 })
-          .filter((l) => shownKeys.has(l.pageKey))
-          .slice(0, INDEX_LOG_LINES)
-          .map((l) => logLine(l, exactOf(l.pageKey))),
+        log: countedLines(
+          listWikiLog(db, { limit: INDEX_LOG_LINES * 4 }).filter((l) => shownKeys.has(l.pageKey)),
+          exactOf,
+        ).slice(0, INDEX_LOG_LINES),
         orphanNotes: listWikiNotes(db)
           .filter((n) => !stored.has(n.pageKey))
           .map((n) => ({ id: n.id, pageKey: n.pageKey, text: n.text, at: n.at })),
@@ -218,6 +247,7 @@ export function createWikiReads(
     page(key) {
       const stored = shownPage(key);
       if (!stored) return undefined;
+      const exact = countsExact(stored);
       const document = JSON.parse(stored.body) as WikiPageBody;
       const hiddenKeys = new Set(listWikiHidden(db).map((h) => `${h.kind}:${h.id}`));
       const isHidden = (c: { ref: { kind: string; id: number } }) =>
@@ -262,11 +292,7 @@ export function createWikiReads(
       const shape = (list: WikiPageBody["claims"], own: (r: ClaimRef) => boolean) =>
         list
           .filter((c) => own(c.ref))
-          .filter((c) => c.to === undefined || shownPage(c.to) !== undefined)
-          .filter((c) => {
-            const object = c.ref.kind === "relation" ? relationObject(c.ref.id) : undefined;
-            return c.ref.kind !== "relation" || (object !== undefined && endInView(object));
-          })
+          .filter(endShown)
           .map(({ supersededBy, ...c }) => ({
             ...c,
             // the end counts the superseders the caller may see, together with this fact, and no others
@@ -351,9 +377,10 @@ export function createWikiReads(
             }
           : {}),
         notes: listWikiNotes(db, key).map((n) => ({ id: n.id, text: n.text, at: n.at })),
-        history: listWikiLog(db, { pageKey: key, limit: PAGE_HISTORY_LINES })
-          .reverse()
-          .map((l) => logLine(l, countsExact(stored))),
+        history: countedLines(
+          listWikiLog(db, { pageKey: key, limit: PAGE_HISTORY_LINES }),
+          () => exact,
+        ).reverse(),
         summary: summaryOf(stored),
       };
     },
