@@ -283,7 +283,7 @@ class SemanticCounts(unittest.TestCase):
 
         walk(data)
         self.assertEqual(data["phase"], "on")
-        self.assertEqual(data["forms"]["other"]["candidate"], 1)
+        self.assertEqual(data["forms"]["other"]["candidate"], 2)
 
     def test_a_phase_that_disagrees_with_the_stored_setting_is_reported(self):
         self.assertEqual(ss.phase_warning(self.counts("on")), "phase on, but the stored setting is unset")

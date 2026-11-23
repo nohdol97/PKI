@@ -7,14 +7,14 @@ row), and writes numbers and code names only. No text, value or item name is rea
 """
 import json
 import os
-import re
 import sqlite3
 from urllib.request import pathname2url
 
 SETTING_KEY = "semantic.autoVerify"  # knowledge-engine/src/auto-verify.ts AUTO_VERIFY_SETTING
 STATUSES = ("candidate", "verified", "disputed", "rejected", "superseded")
 PHASES = ("off", "on")
-FORM_KIND = re.compile(r"^alias\.[a-z][a-z-]{0,31}$")  # an odd fact kind is counted under "other", never echoed
+# storage/src/migrations.ts seed form kinds; any other kind (a user-made one included) is counted under "other", never echoed
+SEED_FORM_KINDS = ("alias.synonym", "alias.abbreviation", "alias.translation")
 # history actions that change neither a status nor an epistemic type (storage/src/semantic-lifecycle.ts STATE_NEUTRAL_ACTIONS)
 STATE_NEUTRAL = ("merge", "unmerge", "split", "set-validity")
 
@@ -33,14 +33,15 @@ def _by_status(rows):
 
 
 def _promoted(db, table, history, fk):
-    """(promoted, still verified, judged wrong) of one table: rows with a policy `auto-verify` line, counted once each."""
+    """(promoted, still verified, judged wrong) of one table: rows with a policy `auto-verify` line, counted once each.
+    Judged wrong = now disputed/rejected/superseded AND the newest state line is the user's (a policy dispute is not)."""
     neutral = ",".join("'{}'".format(a) for a in STATE_NEUTRAL)
     promoted = "EXISTS (SELECT 1 FROM {h} h WHERE h.{fk} = t.id AND h.actor = 'policy' AND h.action = 'auto-verify')".format(
         h=history, fk=fk)
     newest_actor = ("(SELECT h.actor FROM {h} h WHERE h.{fk} = t.id AND h.action NOT IN ({n}) "
                     "ORDER BY h.seq DESC LIMIT 1)").format(h=history, fk=fk, n=neutral)
     query = ("SELECT count(*), coalesce(sum(t.status = 'verified'), 0), "
-             "coalesce(sum(t.status IN ('disputed', 'rejected') OR (t.status = 'superseded' AND {actor} = 'user')), 0) "
+             "coalesce(sum(t.status IN ('disputed', 'rejected', 'superseded') AND {actor} = 'user'), 0) "
              "FROM {t} t WHERE {promoted}").format(t=table, promoted=promoted, actor=newest_actor)
     return tuple(int(x) for x in db.execute(query).fetchone())
 
@@ -52,7 +53,7 @@ def read_counts(db_path, phase):
         forms = {}
         for kind, status, n in db.execute(
                 "SELECT kind, status, count(*) FROM facts WHERE substr(kind, 1, 6) = 'alias.' GROUP BY kind, status"):
-            key = kind if FORM_KIND.match(kind) else "other"
+            key = kind if kind in SEED_FORM_KINDS else "other"
             bucket = forms.setdefault(key, {s: 0 for s in STATUSES})
             if status in bucket:
                 bucket[status] += int(n)
