@@ -10,14 +10,16 @@
 //    site/composition exists (backend-entry.ts, I05-R2)
 // 4. the judgment of the instance scopes file against the backend bundle's modules (scopes-check.ts, I07-R7)
 // 5. the runtime packages the bundles leave external (runtime-packages.ts)
-// 6. the report: the modules each bundle kept, the scopes file's state and the packages copied
+// 6. the SBOM of what the installed product holds (sbom.ts, H02A-R1)
+// 7. the report: the modules each bundle kept, the scopes file's state and the packages copied
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { backendEntry } from "../src/backend-entry.ts";
 import { bundle, EXTERNAL_PACKAGES, REPO_ROOT } from "./bundle.ts";
-import { APP_DIR, REPORT_FILE, type BuildReport } from "./paths.ts";
-import { pnpm } from "./pnpm.ts";
+import { APP_DIR, REPORT_FILE, SBOM_FILE, type BuildReport } from "./paths.ts";
+import { pnpm, pnpmOutput } from "./pnpm.ts";
 import { copyRuntimePackages, planRuntimePackages } from "./runtime-packages.ts";
+import { completeSbom, hasNativeCode } from "./sbom.ts";
 import { requireConnectorScopes } from "./scopes-check.ts";
 
 const DESKTOP = resolve(import.meta.dirname, "..");
@@ -30,6 +32,7 @@ const DECLARED_IN: Record<(typeof EXTERNAL_PACKAGES)[number], string> = {
 // only what this build writes: dist/ also holds tsc's declaration output (review B-F10)
 rmSync(APP_DIR, { recursive: true, force: true });
 rmSync(REPORT_FILE, { force: true });
+rmSync(SBOM_FILE, { force: true });
 mkdirSync(APP_DIR, { recursive: true });
 
 pnpm(["--filter", "@pki/providers", "check:synthetic-manifest"], REPO_ROOT);
@@ -89,6 +92,15 @@ const plan = planRuntimePackages(
   join(APP_DIR, "node_modules"),
 );
 copyRuntimePackages(plan);
+
+const sbom = completeSbom(
+  JSON.parse(pnpmOutput(["sbom", "--sbom-format", "cyclonedx", "--prod"], REPO_ROOT)),
+  {
+    electronVersion: desktop.devDependencies.electron,
+    runtime: plan.map((p) => ({ name: p.name, version: p.version, native: hasNativeCode(p.dest) })),
+  },
+);
+writeFileSync(SBOM_FILE, `${JSON.stringify(sbom, null, 2)}\n`);
 
 const report: BuildReport = {
   bundles,

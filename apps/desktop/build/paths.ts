@@ -8,6 +8,8 @@ const DIST_DIR = resolve(import.meta.dirname, "../dist");
 export const APP_DIR = join(DIST_DIR, "app");
 /** Outside the app folder: not shipped. */
 export const REPORT_FILE = join(DIST_DIR, "build-report.json");
+/** Outside the app folder: not shipped (H02A-D2). */
+export const SBOM_FILE = join(DIST_DIR, "sbom.cdx.json");
 
 export interface BuildReport {
   /**
