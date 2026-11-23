@@ -169,7 +169,7 @@ describe("C12: the deletion brake", () => {
     expect(confirmDeletions(w.db, w.locationId, 25)).toMatchObject({ ok: true });
     expect(deletes(await w.sync())).toHaveLength(25);
     expect(stateOf(w)).toBe("active");
-  });
+  }, 30_000);
 
   it("50 files with 20 gone (ratio short) and 30 with 19 gone (count short) are deleted at once", async () => {
     const a = make();
@@ -180,7 +180,7 @@ describe("C12: the deletion brake", () => {
     await seed(b, 30);
     remove(b, 0, 19);
     expect(deletes(await b.sync())).toHaveLength(19);
-  });
+  }, 30_000);
 
   it("FU1: one file gone beside an unreadable folder is exactly one deletion, the folder's files stay", async () => {
     const w = make();

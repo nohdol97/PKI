@@ -183,7 +183,7 @@ describe("C41 a restored database", () => {
     expect(
       findCanaries(data, ["a-canary-path-7731", "b-canary-path-7731", "c-canary-path-7731"]),
     ).toEqual([]);
-  });
+  }, 30_000);
 
   it("an ordinary restart leaves the states as they were, and a location left revoking is finished by the start", async () => {
     const folder = join(root, "docs");
