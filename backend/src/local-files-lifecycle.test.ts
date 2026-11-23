@@ -1,7 +1,7 @@
 // I02B-T04 T0 (F1, FU7): what a location that is not read owes the connector when it is read again.
 // One representative case per clause; the connector runs over the canonical index on an in-memory database.
-import { listLocations, relinkLocation } from "@pki/storage";
-import { mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { confirmDeletions, listLocations, relinkLocation } from "@pki/storage";
+import { chmodSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -129,5 +129,69 @@ describe("C11: the root of a location", () => {
     expect(deletes([...(await w.sync()), ...(await w.sync())])).toHaveLength(0);
     expect(stateOf(w)).toEqual(["active", null]);
     expect(present(w).map((e) => e.externalId)).toEqual(idsBefore);
+  });
+});
+
+describe("C12: the deletion brake", () => {
+  const names = (n: number) =>
+    Array.from({ length: n }, (_, i) => `f${String(i).padStart(2, "0")}.md`);
+  const seed = async (w: World, n: number) => {
+    for (const name of names(n)) w.write(name, `# ${name}\n\nbody of ${name}\n`);
+    storeUpserts(w, await w.settle());
+  };
+  const remove = (w: World, from: number, count: number) => {
+    for (const name of names(from + count).slice(from)) unlinkSync(`${w.root}/${name}`);
+  };
+  const stateOf = (w: World) => listLocations(w.db).find((x) => x.id === w.locationId)!.state;
+  const held = (w: World) =>
+    w.index.entriesOfLocation(w.locationId).filter((e) => e.pendingDelete === 1).length;
+
+  it("25 of 40 gone is held, a new file still arrives, the confirmation is by count and then 25 deletions are announced", async () => {
+    const w = make();
+    await seed(w, 40);
+    remove(w, 0, 25);
+    w.write("new.md", "# new\n\nbody of new\n");
+    const during = [...(await w.sync()), ...(await w.sync())];
+    expect(deletes(during)).toHaveLength(0);
+    expect(upserts(during)).toHaveLength(1);
+    expect(stateOf(w)).toBe("needs-confirmation");
+    expect(held(w)).toBe(25);
+
+    expect(confirmDeletions(w.db, w.locationId, 24)).toMatchObject({
+      ok: false,
+      reason: "count-mismatch",
+    });
+    expect(held(w)).toBe(25);
+    expect(confirmDeletions(w.db, w.locationId, 25)).toMatchObject({ ok: true });
+    expect(deletes(await w.sync())).toHaveLength(25);
+    expect(stateOf(w)).toBe("active");
+  });
+
+  it("50 files with 20 gone (ratio short) and 30 with 19 gone (count short) are deleted at once", async () => {
+    const a = make();
+    await seed(a, 50);
+    remove(a, 0, 20);
+    expect(deletes(await a.sync())).toHaveLength(20);
+    const b = make();
+    await seed(b, 30);
+    remove(b, 0, 19);
+    expect(deletes(await b.sync())).toHaveLength(19);
+  });
+
+  it("FU1: one file gone beside an unreadable folder is exactly one deletion, the folder's files stay", async () => {
+    const w = make();
+    w.write("a.md", "# a\n\nbody of a\n");
+    w.write("sub/s.md", "# s\n\nbody of s\n");
+    storeUpserts(w, await w.settle());
+    unlinkSync(`${w.root}/a.md`);
+    chmodSync(`${w.root}/sub`, 0o000);
+    try {
+      expect(deletes(await w.sync())).toHaveLength(1);
+    } finally {
+      chmodSync(`${w.root}/sub`, 0o755);
+    }
+    expect(
+      w.index.entriesOfLocation(w.locationId).filter((e) => e.state === "present"),
+    ).toHaveLength(1);
   });
 });
