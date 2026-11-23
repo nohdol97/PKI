@@ -1,10 +1,10 @@
 {
   "entities": {
-    "M": {
+    "S03M": {
       "type": "Metric",
       "name": "월간 매출"
     },
-    "D": {
+    "S03D": {
       "type": "Dataset",
       "name": "월별 매출표"
     }
@@ -14,7 +14,7 @@
       "files": ["s03-analytical.jsonl"],
       "facts": [
         {
-          "entity": "M",
+          "entity": "S03M",
           "attribute": "metric.calculation",
           "value": "{\"aggregation\":\"sum\",\"column\":\"매출액\"}",
           "evidence": {
@@ -25,7 +25,7 @@
           }
         },
         {
-          "entity": "M",
+          "entity": "S03M",
           "attribute": "metric.unit",
           "value": "원",
           "evidence": {
@@ -36,7 +36,7 @@
           }
         },
         {
-          "entity": "M",
+          "entity": "S03M",
           "attribute": "metric.currency",
           "value": "KRW",
           "evidence": {
@@ -47,7 +47,7 @@
           }
         },
         {
-          "entity": "M",
+          "entity": "S03M",
           "attribute": "metric.period",
           "value": "month",
           "evidence": {
@@ -58,7 +58,7 @@
           }
         },
         {
-          "entity": "M",
+          "entity": "S03M",
           "attribute": "metric.version",
           "value": "v1",
           "evidence": {
@@ -71,9 +71,9 @@
       ],
       "relations": [
         {
-          "subject": "M",
+          "subject": "S03M",
           "type": "MEASURED_ON",
-          "object": "D",
+          "object": "S03D",
           "evidence": {
             "record_id": "wiki-s03-0001",
             "version": 1,
@@ -87,7 +87,7 @@
       "files": ["s03-analytical.jsonl"],
       "facts": [
         {
-          "entity": "M",
+          "entity": "S03M",
           "attribute": "metric.unit",
           "value": "천원",
           "evidence": {
@@ -104,7 +104,7 @@
       "files": ["s03-analytical.jsonl"],
       "facts": [
         {
-          "entity": "M",
+          "entity": "S03M",
           "attribute": "metric.currency",
           "value": "USD",
           "evidence": {
@@ -121,7 +121,7 @@
       "files": ["s03-analytical.jsonl"],
       "facts": [
         {
-          "entity": "M",
+          "entity": "S03M",
           "attribute": "metric.period",
           "value": "quarter",
           "evidence": {
@@ -138,7 +138,7 @@
       "files": ["s03-analytical.jsonl"],
       "facts": [
         {
-          "entity": "M",
+          "entity": "S03M",
           "attribute": "metric.version",
           "value": "v2",
           "evidence": {

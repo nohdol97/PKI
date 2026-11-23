@@ -34,6 +34,10 @@
 // `statement` kind of a definition entry, validity input fields (read, written by S02-T08) and `proposedTypes`:
 // each proposal that passes the checks below is handed over as an `ontology` item that enters the candidate
 // entry of the type definitions (S01-R20) with this version as its basis.
+// Schema 5 (S03-R7) adds the analytical item types, fact kinds and relations. A value of an analytical type is
+// stored in its normalized form; a `metric.unit` or `metric.version` must be verbatim in its quote (at most 40 code
+// points), and a value naming columns that are not all in its quote is a hypothesis whatever the answer says. The
+// extraction of a table source drops its analytical items and everything pointing at them: the profile owns them.
 // Before anything is planned each fact and relation is fitted to the type definitions (S01-R21):
 // its item types, fact kind or relation type must be `verified` elements, the value must be of
 // the kind the fact kind's rule names, and a relation's ends must fit its direction; what does not
@@ -41,6 +45,8 @@
 import type { KnowledgeCandidate, KnowledgeEngine, SourceVersionRef } from "@pki/contracts";
 import {
   EXTRACT_ALIAS_FACT_KIND,
+  EXTRACT_ANALYTICAL_ITEM_TYPES,
+  EXTRACT_ANALYTICAL_MAX_TEXT_CODE_POINTS,
   EXTRACT_DEFINITION_FACT_KIND,
   EXTRACT_DEFINITION_MAX_CODE_POINTS,
   EXTRACT_IDENTIFIER_FACT_KINDS,
@@ -52,6 +58,7 @@ import {
   type ExtractionOutput,
 } from "@pki/providers";
 import {
+  ANALYTICAL_VALUE_TYPES,
   addEvidence,
   applyOntologyChange,
   findSameForm,
@@ -69,12 +76,16 @@ import {
   fillValidity,
   followMovedRow,
   isDate,
+  isTabularVersion,
   judgeWaitingOn,
+  normalizeColumnName,
+  normalizeValue,
   saveFact,
   saveRelation,
   valueFits,
   type DerivativeRegistry,
   type DerivedItem,
+  type AnalyticalValueType,
   type ElementRule,
   type EvidenceTarget,
   type KnowledgeAttributes,
@@ -162,6 +173,27 @@ interface Planned {
   validity?: { from: string | null; until: string | null; dropped: boolean };
   span: QuoteSpan;
   quote: string;
+}
+
+/** The analytical facts whose value is a span of the document, not a normalized one (S03-R7). */
+const QUOTED_TEXT_FACT_KINDS: readonly string[] = ["metric.unit", "metric.version"];
+
+/** The column names a stored analytical value holds, in the processed form; none for a value naming no column. */
+function columnNames(valueType: AnalyticalValueType, stored: string): string[] {
+  switch (valueType) {
+    case "column":
+      return [stored];
+    case "column-set":
+      return JSON.parse(stored) as string[];
+    case "calculation": {
+      const { column } = JSON.parse(stored) as { column?: string };
+      return column === undefined ? [] : [column];
+    }
+    case "key-pairs":
+      return (JSON.parse(stored) as string[][]).flat();
+    default:
+      return [];
+  }
 }
 
 /** The context tag of an entry: trimmed, null when empty. */
@@ -403,11 +435,23 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // items of this answer by its refs; an existing ID must be one of the candidates sent
     const items = new Map<string, Item>();
     const seen = new Set<string>();
+    // S03-R7: a table source's own extraction writes no analytical item (the profile does); what points at a
+    // dropped item has no item to point at and is dropped below by the checks every entry passes
+    const tabular = isTabularVersion(db, own.sourceId, own.version);
     for (const item of answer.items) {
       // the first entry of a ref decides it: a ref whose first entry was dropped stays dropped
       if (seen.has(item.ref)) continue;
       seen.add(item.ref);
       if (item.existingItemId !== null && !candidates.includes(item.existingItemId)) {
+        drops.other++;
+        continue;
+      }
+      const type =
+        item.existingItemId === null ? item.type : candidateType.get(item.existingItemId);
+      if (
+        tabular &&
+        (EXTRACT_ANALYTICAL_ITEM_TYPES as readonly string[]).includes(type as string)
+      ) {
         drops.other++;
         continue;
       }
@@ -488,6 +532,27 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         drops.other++;
         continue;
       }
+      // S03-R7: an analytical value is stored normalized; a unit or version is a span of the quote; a value
+      // naming columns is the answer's explicit only when the quote holds every column name
+      let stored = value;
+      let epistemic = fact.epistemic;
+      if (QUOTED_TEXT_FACT_KINDS.includes(fact.kind)) {
+        if (!fact.quote.includes(value)) {
+          drops.quotes++;
+          continue;
+        }
+        if ([...value].length > EXTRACT_ANALYTICAL_MAX_TEXT_CODE_POINTS) {
+          drops.other++;
+          continue;
+        }
+      } else if ((ANALYTICAL_VALUE_TYPES as readonly string[]).includes(rule.valueType)) {
+        const valueType = rule.valueType as AnalyticalValueType;
+        stored = normalizeValue(valueType, value) as string; // valueFits said it is one
+        const quoted = normalizeColumnName(fact.quote);
+        if (!columnNames(valueType, stored).every((name) => quoted.includes(name))) {
+          epistemic = "hypothesis";
+        }
+      }
       // S02-R4: an identifier is written as the document writes it, so the quote must hold it; the context
       // tag of an `identifier.key` is the system its number belongs to (S01-R3's `context` column)
       let tag: string | null = null;
@@ -504,17 +569,17 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       }
       plan([fact.item], fact.quote, {
         kind: "fact",
-        key: JSON.stringify(["fact", items.get(fact.item)?.name, fact.kind, value]),
+        key: JSON.stringify(["fact", items.get(fact.item)?.name, fact.kind, stored]),
         target: { item: fact.item },
-        explicit: fact.epistemic === "explicit",
+        explicit: epistemic === "explicit",
         validity,
         save: (tx, ids) => {
           const saved = saveFact(tx, {
             itemId: ids(fact.item),
             kind: fact.kind,
-            value,
+            value: stored,
             context: tag,
-            ...attributes(fact.epistemic, fact.confidence),
+            ...attributes(epistemic, fact.confidence),
             validAt: validity.from,
             validUntil: validity.until,
           });
