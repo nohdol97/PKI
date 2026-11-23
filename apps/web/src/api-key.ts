@@ -61,6 +61,27 @@ export async function deleteApiKey(bridge: SecretBridge, keyName: string): Promi
   return isOk(await bridge.deleteSecret(keyName));
 }
 
+/**
+ * What the Settings screen says after a save or delete: the failure text, or undefined on success.
+ * A rejected preload call counts as the shell being unavailable; it never throws (I06F-R14).
+ */
+export async function changeApiKey(
+  bridge: SecretBridge,
+  keyName: string,
+  action: SecretAction,
+): Promise<string | undefined> {
+  if (action.kind === "refused") return SECRET_REFUSAL_TEXT[action.reason];
+  if (action.kind === "delete") {
+    const deleted = await deleteApiKey(bridge, keyName).catch(() => false);
+    return deleted ? undefined : "키를 지우지 못했습니다 (저장소 파일을 읽거나 쓸 수 없음)";
+  }
+  const result = await saveApiKey(bridge, keyName, action.value).catch(
+    () => "unavailable" as const,
+  );
+  if (result === "line-break" || result === "too-long") return SECRET_REFUSAL_TEXT[result];
+  return result === "saved" ? undefined : "키를 저장할 수 없습니다 (OS 보호 저장소)";
+}
+
 type OpenAISettings = RouteResponse<"settings">["openaiCompatible"];
 
 export function keyStatusText({ host, key }: OpenAISettings): string {

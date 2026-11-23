@@ -219,6 +219,7 @@ test("a value the screen cannot take whole is refused in words, never stored cut
     await field.focus();
     await page.keyboard.insertText("line1\nline2");
     await expect(status).toContainText(refused);
+    // empty before the refusal too (the test started with an empty field); I06F-C4 checks that leading characters are kept
     await expect(field).toHaveValue("");
 
     // a paste with a line break
@@ -231,6 +232,7 @@ test("a value the screen cannot take whole is refused in words, never stored cut
     });
     expect(notPrevented).toBe(false); // the paste itself was cancelled, not just answered with the words
     await expect(status).toContainText(refused);
+    // empty before the refusal too (the test started with an empty field); I06F-C4 checks that leading characters are kept
     await expect(field).toHaveValue("");
 
     // longer than the shell takes: refused at submit, not cut to 8192 and not reported as reflected
