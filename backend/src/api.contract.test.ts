@@ -163,6 +163,9 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     entityUnmerge: { mergeId: 1 },
     entityDistinct: { a: 1, b: 2, on: true },
     entitySplit: { itemId: 1, rows: [], name: "x" }, // set in beforeAll: an item with two facts of the user's
+    // the graph reads (S02-T09): set in beforeAll, an item of the user's own, which is shown and has no rows yet
+    graphTrace: { kind: "item", id: 1 },
+    graphPaths: { from: 1, depth: 2 },
   };
 
   beforeAll(async () => {
@@ -179,6 +182,8 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     requests.entityMerge = { member: made[0], into: made[0] }; // already one: a refusal code in a 200 body
     requests.entityUnmerge = { mergeId: merged.mergeId };
     requests.entityDistinct = { a: made[0], b: made[1], on: true };
+    requests.graphTrace = { kind: "item", id: made[0] };
+    requests.graphPaths = { from: made[0], depth: 2 };
     const facts = ["2026-12-05", "2026-12-06"].map((value) => {
       const f = userDecisions.add(db, {
         kind: "fact",
