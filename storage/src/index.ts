@@ -494,6 +494,7 @@ export {
   otherValidValues,
   slotRivals,
   supersededAmong,
+  supersedingStands,
   supersededByVersion,
   type ConflictReach,
   type LinkMaker,
