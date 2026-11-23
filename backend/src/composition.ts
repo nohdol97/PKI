@@ -101,6 +101,7 @@ import {
   type DerivativeRegistry,
   type MembershipListener,
   type ScopePolicy,
+  type OpenSqlDriver,
   type SqlDriver,
   type UserDecisions,
 } from "@pki/storage";
@@ -577,6 +578,9 @@ export function productRunner(
 }
 
 export const CANONICAL_DB_FILE = "pki.sqlite";
+
+/** Opens a SQLite file with the product's driver, for code outside this composition point (the restore's journal check, H01-R11). */
+export const openSqlFile: OpenSqlDriver = openBetterSqlite3;
 
 /**
  * The product's Connector kinds: the site kinds, listed as not implemented (V01-R18), and `local-files`

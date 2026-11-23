@@ -453,6 +453,13 @@ describe("derivatives.data-dir", () => {
       writeFileSync(join(dir, f), "");
     writeFileSync(join(dir, "secrets.json"), "");
     writeFileSync(join(dir, "secrets.json.1a2b.tmp"), "");
+    // H01: the previous database while a restore is applied, the staged restore, the plain snapshot of a backup
+    writeFileSync(join(dir, "pki.sqlite.before-restore"), "");
+    mkdirSync(join(dir, "restore"));
+    writeFileSync(join(dir, "restore/staged.sqlite"), "");
+    writeFileSync(join(dir, "restore/pending.json"), "");
+    mkdirSync(join(dir, "backup-tmp"));
+    writeFileSync(join(dir, "backup-tmp/x.sqlite"), "");
     expect(checkDataDirectory(dir, registry)).toEqual([]);
   });
 

@@ -76,6 +76,7 @@
 | `staged` | 준비 파일과 `before-restore`가 다 있음 | 준비 파일을 `pki.sqlite`로 이름 바꿈 → `swapped` (두 이름 바꾸기 사이에 꺼짐) |
 | `staged` | 준비 파일 없음, `before-restore` 있음 | `swapped`로 적는다(표식을 고치기 전에 꺼짐) |
 | `swapped` | — | 그대로 연다. 마무리(R12)가 이미 끝났으면 남은 파일과 표식만 지운다 |
+| `rolling-back` | — | 되돌림 도중 꺼짐. `before-restore`가 있으면 `pki.sqlite`를 지우고 되돌린 뒤 `failed`로 적는다(R13) |
 | `failed` | — | 평소 시작. 상태 API가 실패 코드를 보인다 |
 
   지금 파일 옆에 `pki.sqlite-journal`이 남아 있으면(지난 실행이 쓰다 꺼짐) 이름을 바꾸기 전에 지금 파일을 한 번 열었다 닫아 SQLite가 되감게 한다. 남의 저널이 새 파일에 적용되면 안 된다. 어느 순간에 꺼져도 `pki.sqlite`와 `before-restore`는 각각 온전한 한 파일이다.
@@ -83,10 +84,10 @@
   1. `running`인 작업을 lease 끝과 상관없이 기존 회수 규칙으로 돌린다(`storage/src/jobs.ts:336`의 세 갈래, 토큰 올림). 사본 속의 lease가 살아 있는 것처럼 이어지지 않는다.
   2. `consents` 행을 모두 지운다(D9). 백업 뒤에 거둔 전송 동의가 되살아나지 않는다.
   3. 엔진·벡터 투영의 재구축을 순번과 상관없이 요청한다(`requestProjectionRebuild`, I04 "T10이 넘기는 것" 11 ①의 의무).
-  4. 설정 `restore.last`에 결과를 적는다: `backupId`, 적용 시각, 백업 시각, 다시 적용한 삭제 수, 멈춘 폴더 수, 지운 동의 수, embedding 공간이 달랐는지.
+  4. 설정 `restore.last`에 결과를 적는다: `backupId`, 준비 시각(`stagedAt`), 적용 시각, 백업 시각, 다시 적용한 삭제 수, 멈춘 폴더 수, 지운 동의 수, embedding 공간이 달랐는지. `backupId`와 `stagedAt`이 표식과 같은 기록이 이미 있으면 마무리가 이미 커밋된 것이다(그 시작에서 꺼진 경우): 남은 파일과 표식만 지운다.
   
   그리고 로컬 파일 구동기를 "복원됨"으로 시작한다(`boot.ts:347`의 인자에 이 사실을 더한다. I02B-R34: 읽던 위치를 모두 `paused`·`restored`로). 스케줄은 손대지 않는다. 지나간 주기는 기존 점검이 주기마다 작업 하나로 접는다(`backend/src/scheduler.ts:261`). 마무리가 커밋되면 `before-restore`를 지우고 표식을 지운다. 이것이 "복원 확인"이다.
-- **H01-R13 되돌림.** 바꾼 뒤 마무리 커밋 전에 시작이 예외로 끝나면(준비 실패, 장부의 줄을 적용하지 못함 등) 정본을 닫고 `before-restore`를 `pki.sqlite`로 되돌린 뒤 표식을 `failed`(코드만)로 적고 그 시작은 실패로 끝낸다. 다음 시작은 이전 데이터로 뜬다.
+- **H01-R13 되돌림.** 바꾼 뒤 마무리 커밋 전에 시작이 예외로 끝나면(준비 실패, 장부의 줄을 적용하지 못함 등) 정본을 닫고 표식을 `rolling-back`으로 적은 뒤 `before-restore`를 `pki.sqlite`로 되돌리고 표식을 `failed`(코드만)로 적고 그 시작은 실패로 끝낸다. 다음 시작은 이전 데이터로 뜬다.
 - **H01-R14 되살아나지 않는 것.**
 
 | 백업 뒤에 한 일 | 복원 뒤 | 장치 |
@@ -109,7 +110,7 @@
 
 - `storage/src/backup-file.ts`: 파일 형식(머리, scrypt, 조각 암호화·복호화, 오류 코드). 순수 함수와 스트림.
 - `storage/src/backup.ts`: `createSnapshot(db, dir)`(R1), `readManifestFacts(file)`(R3), `stageRestore(...)`(R9의 검사와 `migrate`). 표식 읽기·쓰기.
-- `backend/src/restore-boot.ts`: `applyPendingRestore(dataDir)`(R11), `finishRestore(db, run, report)`(R12), `rollbackRestore(run)`(R13). `boot.ts`에는 호출 셋과 try/catch 하나, `driver.start`의 인자 한 곳이 더해진다.
+- `backend/src/restore-boot.ts`: `applyPendingRestore(dataDir, open)`(R11), `finishRestore(db, run, report)`(R12), `rollbackRestore(run)`(R13), `readIndexFacts(vectorIndex)`(R3·R12가 쓰는 색인의 답. 이 빌드가 묶는 색인은 "없음"을 던져서 답하므로 던짐을 `null`로 읽는다). `boot.ts`에는 호출 셋과 try/catch 하나(`bootBackend`가 `startBackend`를 감싼다), `driver.start`의 인자 한 곳이 더해진다. 저장소 경계 규칙(어댑터는 조립 지점만 닿음) 때문에 `composition.ts`에 SQLite 파일을 여는 `openSqlFile` 한 줄을 더해 저널 점검과 사본 읽기가 쓴다.
 - `backend/src/backup-api.ts`: 여섯 경로의 처리기. `server.ts`에는 import·조립·처리기 줄만.
 
 ```mermaid
@@ -183,7 +184,7 @@ PR 하나로 간다. T1 뒤에 T2·T3을 나란히, T3 뒤에 T4·T5를 나란�
 | 작업 | 산출물 | 기준 | 선행 | 건드리는 파일 | 검증 증거 |
 |---|---|---|---|---|---|
 | H01-T1 | 저장: 파일 형식, 사본·목록표, 준비와 검사, 표식, 작업 회수의 "만료를 보지 않음" 선택 | C1a, C1b, C2a(저장) | 없음 | 새 파일 `storage/src/backup-file.ts`·`backup.ts`와 두 시험 / 덧붙임 `storage/src/index.ts`(export), `storage/src/jobs.ts`(선택 인자 하나) | `backup-file.test.ts`, `backup.test.ts`, `jobs.test.ts` 통과 출력 |
-| H01-T2 | 시작: 바꿔치기·마무리·되돌림, `boot.ts` 연결, 데이터 폴더 항목 | C2b, C2c | T1 | 새 파일 `backend/src/restore-boot.ts`·`restore-boot.test.ts`·`restore-ledger.test.ts` / 덧붙임 `backend/src/boot.ts`(호출 셋, try/catch, 인자 한 곳), `backend/src/derivative-coverage.ts`(목록 세 줄) | 두 시험과 `ledger.boot-reconcile.test.ts`·`local-restore.test.ts` 통과 출력, C2c 변이 셋의 빨간 출력 |
+| H01-T2 | 시작: 바꿔치기·마무리·되돌림, `boot.ts` 연결, 데이터 폴더 항목 | C2b, C2c | T1 | 새 파일 `backend/src/restore-boot.ts`·`restore-boot.test.ts`·`restore-ledger.test.ts` / 덧붙임 `backend/src/boot.ts`(호출 셋, try/catch, 인자 한 곳), `backend/src/derivative-coverage.ts`(목록 세 줄), `backend/src/composition.ts`(`openSqlFile` 한 줄), `backend/src/local-files-driver.ts`(`isReadable` export) | 두 시험과 `ledger.boot-reconcile.test.ts`·`local-restore.test.ts` 통과 출력, C2c 변이 셋의 빨간 출력 |
 | H01-T3 | API: 계약과 여섯 경로, 폴더 설정, 서버 조립 | C1c, C2a(API) | T1 | 새 파일 `packages/contracts/src/backup-types.ts`, `backend/src/backup-api.ts`·`backup-api.test.ts` / 덧붙임 `packages/contracts/src/index.ts`(export·경로), `backend/src/server.ts`(import·조립·처리기), `backend/src/boot.ts`(조립 인자 한 줄) | `backup-api.test.ts`, `api.contract.test.ts` 통과 출력 |
 | H01-T4 | 화면: 설정의 "백업·복원", 브라우저 E2E 하나 | C1d | T3 | 새 파일 `apps/web/src/backup.tsx`·`backup-text.ts`, `apps/web/e2e/backup.e2e.ts` / 덧붙임 `apps/web/src/App.tsx`(import와 한 줄) | `pnpm e2e`의 `backup.e2e.ts` 통과 출력 |
 | H01-T5 | 문서: ADR 0010 한 줄, ARCHITECTURE 4절·7절의 백업 줄, site-setup 항목 하나 | (문서) | T3 | `docs/adr/0010-encryption-at-rest.md`, `docs/ARCHITECTURE.md`, `docs/site-setup.md`(줄 더하기) | `pnpm lint` 통과, 문서의 파일 이름·설정 키가 코드 상수와 같음 |
@@ -202,3 +203,4 @@ PR 하나로 간다. T1 뒤에 T2·T3을 나란히, T3 뒤에 T4·T5를 나란�
 | 날짜 | 변경 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-23 | 처음 씀, 확정 | 전체 | 이슈 #32 착수. X01이 진행 중이라 C3은 뒤 단위로 넘기고 C1·C2를 한 PR로 묶음. 정본 암호화는 ADR 0010의 현재 결정을 유지 |
+| 2026-11-23 | R11·R12·R13: `rolling-back` 표식, `restore.last`에 `stagedAt`, 뜨겁지 않은 저널의 이동; 설계: `readIndexFacts`, `openSqlFile` | R11~R13, 설계 개요, T2 표 | T2 구현 중 확인: 되돌림 도중 꺼짐을 표식이 구분하지 못했고, 마무리 커밋 뒤 꺼짐을 가릴 기록이 필요했으며, 이 빌드의 `EmptyVectorIndex.embeddingSpace()`는 null이 아니라 던지고, 어댑터는 조립 지점에서만 열 수 있음 |

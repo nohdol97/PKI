@@ -23,6 +23,7 @@ import { join } from "node:path";
 import {
   CANONICAL_DB_FILE,
   openCanonicalDb,
+  openSqlFile,
   productAdapters,
   productCalls,
   productConnectors,
@@ -85,6 +86,13 @@ import {
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { ensureReflectionSchedules } from "./reflection-schedules.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
+import {
+  applyPendingRestore,
+  finishRestore,
+  readIndexFacts,
+  rollbackRestore,
+  type RestoreRun,
+} from "./restore-boot.ts";
 import { productScopePolicy } from "./scope-policy.ts";
 import { startServer, type RunningServer } from "./server.ts";
 import { publicSite, resolveSiteRegistration, type SiteRegistration } from "./site-registration.ts";
@@ -176,6 +184,21 @@ export interface BootedBackend {
 }
 
 export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
+  const holder: { restore?: RestoreRun } = {};
+  try {
+    return await startBackend(options, holder);
+  } catch (error) {
+    // H01-R13: a start that fails between the swap and the finish commit puts the previous database back
+    const { restore } = holder;
+    if (restore?.applied && !restore.finished) rollbackRestore(restore);
+    throw error;
+  }
+}
+
+async function startBackend(
+  options: BootOptions,
+  holder: { restore?: RestoreRun },
+): Promise<BootedBackend> {
   const site = options.site ?? publicSite;
   // the policy before any file is opened: a name that is not implemented stops the start (I04-H2 ①)
   const policy = productScopePolicy(options.scopePolicy, site.scopePolicy);
@@ -185,7 +208,10 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     site,
     options.connectors ?? productConnectors(),
   );
+  // H01-R11: a staged restore is swapped in before the database is opened
+  const restore = (holder.restore = applyPendingRestore(options.dataDir, openSqlFile));
   const db = openCanonicalDb(options.dataDir);
+  restore.db = db;
   // the instances' configured scopes follow the registration's value before anything is graded (I01-R15);
   // one table, handed to every place that copies it (I07-R2). It never stops the start: what is bad is unknown
   const { scopes, state, configured, rejected } = bindConnectorScopes(site.connectorScopes);
@@ -245,6 +271,14 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     (kind) => knownKinds.has(kind),
     scopes,
   );
+  // H01-R12: the restore's finish, in one transaction, before the server or the runner exist
+  if (restore.applied) {
+    finishRestore(db, restore, {
+      reapplied: reapplied.applied,
+      embeddingSpace: (await readIndexFacts(adapters.vectorIndex)).embeddingSpace,
+      now: new Date(systemClock.now()),
+    });
+  }
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")
@@ -363,7 +397,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     limits: () => readLocalFilesSettings(db).watch,
   });
   late.driver = driver;
-  driver.start(needsRebuild(reapplied));
+  driver.start(needsRebuild(reapplied) || restore.applied);
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,

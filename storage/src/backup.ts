@@ -132,7 +132,7 @@ const stamp = (now: Date) =>
     .replace(/[-:]/g, "")
     .replace(/\.\d+Z$/, "Z");
 
-function syncPath(path: string): void {
+export function syncPath(path: string): void {
   try {
     const fd = openSync(path, "r");
     try {
@@ -254,15 +254,24 @@ export interface RestoreSummary {
   embeddingSpace: EmbeddingSpace | null;
 }
 
+/**
+ * `rolling-back` is the step between a swap that has to be undone and the `failed` mark: a start that is cut
+ * off while undoing it finds the mark and finishes the undoing (H01-R13).
+ */
 export type RestoreMarker =
-  ({ state: "staged" | "swapped" } & RestoreSummary) | { state: "failed"; code: string };
+  | ({ state: "staged" } & RestoreSummary)
+  | ({ state: "swapped" } & RestoreSummary)
+  | { state: "failed"; code: string }
+  | { state: "rolling-back"; code: string };
 
 export function readPending(dataDir: string): RestoreMarker | undefined {
   try {
     const marker = JSON.parse(
       readFileSync(join(dataDir, RESTORE_DIR, PENDING_FILE), "utf8"),
     ) as RestoreMarker;
-    return ["staged", "swapped", "failed"].includes(marker?.state) ? marker : undefined;
+    return ["staged", "swapped", "failed", "rolling-back"].includes(marker?.state)
+      ? marker
+      : undefined;
   } catch {
     return undefined;
   }

@@ -222,6 +222,11 @@ export const OPERATIONAL_DATA_ENTRIES: readonly RegExp[] = [
   // from the database's or its header is damaged.
   /^tombstone-ledger\.jsonl(\.tmp)?$/, // the ledger; `.tmp` is a new one a crash left before its rename
   /^tombstone-ledger\.(other-key|damaged)-[1-9][0-9]*\.jsonl$/,
+  // a restore (H01): the previous database while it is applied, the staged restore and its marker, and the
+  // plain snapshot of a backup in the making. Each is removed by the start that finds it.
+  /^pki\.sqlite\.before-restore$/,
+  /^restore(\/|$)/,
+  /^backup-tmp(\/|$)/,
 ];
 
 /**
