@@ -191,6 +191,27 @@ describe("feedback.rerecord: a line whose effect is gone is replaced, not answer
     expect(live()).toBe(0);
   });
 
+  it("already_known asked again after the Insight changed hides it again with a new line", () => {
+    const target: FeedbackTarget = { kind: "insight", id: insight };
+    applied(record(target, "already_known", "2026-11-22T12:00:00.000Z"));
+    expect(signal(target).hidden).toBe(true);
+    saveInsight(
+      db,
+      { rule: "dependency_delay", xItemId: x, yItemId: y },
+      {
+        state: "active",
+        summary: "changed",
+        evidenceIds: [],
+        changedAt: "2026-11-24T00:00:00.000Z",
+      },
+    );
+    expect(signal(target).hidden).toBe(false);
+    const again = applied(record(target, "already_known", "2026-11-24T06:00:00.000Z"));
+    expect(again.created).toBe(true);
+    expect(signal(target).hidden).toBe(true);
+    expect(live()).toBe(1);
+  });
+
   it("a like asked again after another opinion counts as the newest opinion", () => {
     const target: FeedbackTarget = { kind: "insight", id: insight };
     applied(record(target, "useful", at(1)));

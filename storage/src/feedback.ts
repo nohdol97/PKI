@@ -30,6 +30,10 @@ export const FEEDBACK_LEARNED_SETTING = "feedback.learned";
 /** The type step shrinks toward 0 while lines are few: `round(100 × (pos − neg) / (pos + neg + K))` (P03-D7). */
 const TYPE_SMOOTHING = 3;
 
+/** A hide-until-changed line still counts while it is at or after the Insight's `changed_at`; no change time counts (P03-D4). */
+const inEffectSince = (createdAt: string, changedAt: unknown): boolean =>
+  Date.parse(createdAt) >= (changedAt === null ? -Infinity : Date.parse(changedAt as string));
+
 const COLUMN: Record<FeedbackTargetKind, string> = {
   insight: "insight_id",
   item: "item_id",
@@ -141,7 +145,8 @@ export function recordFeedback(
   if (live) {
     const line = rowOf(live);
     // A live line is answered as it is only while its effect holds: a preference always; a like or dislike while
-    // it is still the newest of the three (D9); a correction while its history line is still the row's newest, or,
+    // it is still the newest of the three (D9); an Insight's already_known or confirmed while it is at or after the
+    // Insight's changed_at (D4, the hide predicate's own); a correction while its history line is still the row's newest, or,
     // with no line, while the row still needs no action. Otherwise it is cancelled below, once the entry has accepted
     // the new one (a refusal leaves everything as it was), and a new line is written.
     const holds =
@@ -149,14 +154,19 @@ export function recordFeedback(
         ? line.appliedSeq === null
           ? action === null
           : stateLinesOf(tx, ref).at(-1)?.seq === line.appliedSeq
-        : !OPINIONS.includes(kind) ||
-          (
-            tx.all(
-              `SELECT id FROM feedback WHERE ${COLUMN[target.kind]} = ? AND undone_at IS NULL
+        : target.kind === "insight" && HIDE_UNTIL_CHANGED.includes(kind)
+          ? inEffectSince(
+              line.createdAt,
+              tx.all("SELECT changed_at FROM insights WHERE id = ?", [target.id])[0]?.changed_at,
+            )
+          : !OPINIONS.includes(kind) ||
+            (
+              tx.all(
+                `SELECT id FROM feedback WHERE ${COLUMN[target.kind]} = ? AND undone_at IS NULL
                 AND kind IN (${placeholders(OPINIONS)}) ORDER BY id DESC LIMIT 1`,
-              [target.id, ...OPINIONS],
-            )[0] as { id: number }
-          ).id === line.id;
+                [target.id, ...OPINIONS],
+              )[0] as { id: number }
+            ).id === line.id;
     if (holds) return { status: "applied", feedback: line, created: false, touched: null };
     stale = line;
   }
@@ -312,10 +322,11 @@ export function preferenceSignals(
       (id): FeedbackTarget => ({ kind: "item", id }),
     );
     const own = opinion(target);
-    const changedAt = row.changed_at === null ? -Infinity : Date.parse(row.changed_at as string);
     const unchangedSince =
       usable(target) &&
-      liveLines(target, HIDE_UNTIL_CHANGED).some((l) => Date.parse(l.created_at) >= changedAt);
+      liveLines(target, HIDE_UNTIL_CHANGED).some((l) =>
+        inEffectSince(l.created_at, row.changed_at),
+      );
     const hidden = own === "irrelevant" || unchangedSince;
     const muted = hidden || muteOn(target) || bundle.some(muteOn);
 
