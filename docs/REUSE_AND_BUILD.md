@@ -28,7 +28,7 @@
 | 지식 엔진(추출 보강, 개체 해소, 관련 문맥 검색) | LightRAG, cognee, sage-wiki 중 실행을 통과한 것 | **보류**(5.1절) | `KnowledgeEngine` 어댑터 뒤. Phase 1에는 꽂지 않는다([ADR 0003](adr/0003-phase1-without-engine.md)) |
 | 시간 그래프 저장 | cortexdb | **보류**(5.1절). 제품의 SQLite 스키마와 R03-C4에서 비교 | 채택되면 어댑터 뒤 |
 | 그래프 저장소 | LadybugDB | 필요할 때 어댑터 뒤에서만(4.7절 3번, 4.8절) | Phase 1에는 없다 |
-| LLM Wiki | sage-wiki(엔진과 함께 얻는 경우), llm-wiki-compiler | 둘 다 **보류**(5.1절). 뒤쪽은 K01에서 재평가 | Phase 4(K01)에서 결정 |
+| LLM Wiki | sage-wiki(엔진과 함께 얻는 경우), llm-wiki-compiler | sage-wiki는 **보류**(5.1절). llm-wiki-compiler는 K01에서 다시 보고 **도입하지 않았다**(K01-D1) | 제품이 직접 만든다: 정본 SQLite 안의 투영 테이블([K01 spec](specs/2026-11-23-K01-wiki-projection.md)). 만들기만 어댑터로 바꿀 수 있게 읽기 API 뒤에 둔다 |
 | 문서 파싱 | unpdf(PDF), mammoth(DOCX), read-excel-file(XLSX), parse5(HTML), mdast-util-from-markdown(Markdown), csv-parse(CSV), 압축 검사 yauzl·fflate, 인코딩 iconv-lite(CP949). Docling은 선택적 사이드카로 남긴다 | **잠정 결정**([ADR 0015](adr/0015-document-parsing-stack.md)). 배포처의 S16·S17 결과로 확정하거나 고친다 | 형식별 순수 JavaScript 파서, 압축 검사를 파서 앞에 둔다 |
 | Python 런타임 번들 | python-build-standalone | 사이드카가 필요할 때만(4.6절, 4.8절) | [ADR 0011](adr/0011-sidecar-language.md)이 미결 |
 
@@ -77,7 +77,7 @@ jina-embeddings v3/v4/v5, PyMuPDF, FalkorDBLite. EmbeddingGemma는 조건부이�
 | outbox | 벡터에 실제 지식을 색인하는 작업 | Phase 1의 투영은 재구축 비용이 없어 통지와 변경 순번 비교로 충분하다([ADR 0013](adr/0013-failure-recovery.md)) |
 | 파일 형식별 파싱, 폴더 감시 | I02(#19) | Phase 1은 JSONL만 다룬다 |
 | 개체 해소, 시간 그래프, 충돌 처리 | S02(#23) | 엔진 선정에 달려 있다 |
-| LLM Wiki, Backlink, 재생성 | K01(#25) | Wiki 계층 후보가 보류다 |
+| LLM Wiki 요약, 주제 묶기 | K01-T2(#25), K02(#26) | Wiki 자체(페이지, Backlink, 재생성)는 K01-T1이 정본 SQLite의 투영으로 만들었다. LLM 요약은 Broker 작업이 들어온 뒤, 주제 묶기는 K02 |
 | Reflection, Knowledge Lint | K02(#26) | Phase 4 |
 | 알림, Digest, Timeline | P02(#28) | Phase 5 |
 | Hybrid Retrieval, 질의응답 | X01(#30) | Phase 6. Phase 1은 벡터 색인에 지식을 넣지 않는다 |

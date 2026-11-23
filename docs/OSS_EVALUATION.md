@@ -450,7 +450,7 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 | cortexdb (Go, MIT) | **보류** | 시간 그래프 저장 계층 후보, R03-C4에서 제품 소유 SQLite 스키마와 비교 |
 | tigerless-labs/agent-memory | **기각**(엔진·구성요소로는 채택하지 않음) | 참고 용도: `claude -p`/`codex exec` 어댑터와 격리 플래그(R02 입력). 대안: 보류 후보 3개 |
 | Hyper-Extract | **기각**(엔진·구성요소로는 채택하지 않음) | 참고 용도: 원본 단위 정확 제거 설계. 대안: 보류 후보 3개 |
-| llm-wiki-compiler (TS, MIT) | **보류** | K01에서 재평가 |
+| llm-wiki-compiler (TS, MIT) | **미도입**(K01에서 재평가, K01-D1) | 제품이 같은 구조(종류별 페이지, index, log)를 정본 SQLite의 투영으로 만들었다. 이유는 아래 Wiki 계층 대안 |
 
 **LightRAG: 보류 — R03 실행 후보 1.**
 - 강점: 호출 가능한 LLM·embedding·tokenizer 주입(E3.2, E3.3), MIT(E3.1), Windows 전용 코드 경로(E3.8), 추출 캐시로 영향받은 항목을 재구성하는 삭제(E3.5).
@@ -480,7 +480,7 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 
 **ddsyasas/llm-wiki: 기각(기반으로).**
 - 이유: 임베딩이 없고(E5.2), 삭제 라우트가 파생 페이지를 남기며(E5.5), 90일간 commit이 없다(E5.6). 탈락 조건 ③에 걸린다.
-- Wiki 계층 대안: llm-wiki-compiler(TypeScript, MIT)는 **보류**하고 K01에서 재평가한다(`rm`이 원본과 파생 페이지를 함께 지운다고 문서에 적혀 있으나 실행하지 않음, 시간 모델 없음, Node >=24 요구). 엔진 후보 중 sage-wiki가 R03를 통과하면 Wiki 계층도 함께 얻는다.
+- Wiki 계층 대안: llm-wiki-compiler(TypeScript, MIT)는 K01에서 다시 보았고 **도입하지 않았다**(K01-D1). 이 문서의 근거는 그대로다: `rm`이 원본과 파생 페이지를 함께 지운다고 문서에 적혀 있으나 실행하지 않았고, 시간 모델이 없고, Node >=24를 요구한다. 거기에 페이지 파일이 두 번째 정본이 되어 정본 SQLite와 같은 트랜잭션으로 지울 수 없다는 점이 더해져, 제품이 직접 만든다([K01 spec](specs/2026-11-23-K01-wiki-projection.md)). 이 후보를 실행해 본 것은 아니다. 엔진 후보 중 sage-wiki가 R03를 통과하면 Wiki 계층도 함께 얻는다.
 
 **Astro-Han/karpathy-llm-wiki: 기각(엔진·구성요소로는 채택하지 않음).** 참고 용도만 남긴다. 대안(엔진): 보류 후보 3개, (Wiki 계층): llm-wiki-compiler. 증거 확인 스크립트(`Raw` 필드와 근거 문자열 대조) 아이디어만 참고한다(E6.1, E6.3). 삭제와 증분 갱신은 의도적으로 범위 밖이다.
 
@@ -564,7 +564,7 @@ HTML/CSV/JSON/TXT/MD는 전용 구성요소 없이 표준 라이브러리와 파
 **agent-memory (R02 입력)**
 - [ ] 격리 플래그가 현재 CLI 버전에서 실제로 격리하는지(R02 부정 테스트). 완전 삭제 경로 존재 여부, Windows 지원.
 
-**llm-wiki-compiler (K01)**
+**llm-wiki-compiler (K01에서 도입하지 않아 확인하지 않음)**
 - [ ] `runWithProviderOverride`가 공개 SDK에서 닿는지, Node >=24와 Electron 번들 Node의 호환, `rm` 연쇄 삭제.
 
 **스택**
