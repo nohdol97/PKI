@@ -177,6 +177,40 @@ describe("ask.gate: a document the policy or a tombstone hides leaves no trace (
   });
 });
 
+describe("ask.gate: hidden documents take no hit slot and no rank (X01-C4a, R12)", () => {
+  /** The titles of the hits for QUERY over a database holding 25 visible documents and `hidden` denied ones ranked above them. */
+  async function titlesWith(hidden: number) {
+    const own = freshDb();
+    registerConnectorInstance(own, "c1", "test-fixtures");
+    const add = (mark: string, scope: string[], extra: string) =>
+      saveSourceRecord(own, "c1", {
+        externalId: `own-${mark}`,
+        title: `제목-${mark}`,
+        body: `${QUERY} ${mark} ${extra}`.trim(),
+        accessScope: scope,
+      });
+    for (let i = 0; i < 25; i++) add(`보임${String(i).padStart(2, "0")}`, ["open"], "");
+    // the denied bodies repeat the query word, so they rank above every visible one
+    for (let i = 0; i < hidden; i++) add(`숨김${i}`, ["denied"], `${QUERY} ${QUERY} ${QUERY}`);
+    const events: AskEvent[] = [];
+    const registry = createProductRegistry({ policy });
+    for await (const e of ask({ db: own, registry }, { question: QUERY, answer: false })) {
+      events.push(e);
+    }
+    own.close();
+    return events.flatMap((e) => (e.type === "hits" ? e.hits.map((h) => h.title) : []));
+  }
+
+  it("returns as many hits and in the same order as a run without the hidden documents", async () => {
+    const without = await titlesWith(0);
+    const withHidden = await titlesWith(10);
+
+    expect(without).toHaveLength(20);
+    expect(withHidden).toEqual(without);
+    expect(withHidden.join()).not.toContain("숨김");
+  });
+});
+
 describe("ask.gate: the judgement after the Provider answered (X01-R9, R14)", () => {
   it("drops the sentence of a document deleted while the Provider worked, and one whose quote is not in the document", async () => {
     const live = source("자홍빛", ["open"]);
