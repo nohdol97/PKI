@@ -148,6 +148,22 @@ describe("Insight API", () => {
     expect((await list()).map((r) => r.id)).toEqual([p.id]);
   });
 
+  it("leaves out an Insight whose stored rule is none of the 13 types, and answers its evidence as not-found", async () => {
+    const version = versionId();
+    const ok = seed("new_relation", "ok", version, { factLines: ["줄"], confidence: 30 });
+    const odd = seed("no_such_type", "odd", version, { factLines: ["줄"], confidence: 30 });
+    expect((await list()).map((r) => r.id)).toEqual([ok.id]);
+    const evidence = routes.insightEvidence;
+    const res = await send(
+      server.port,
+      evidence.path,
+      { ...good(), "content-type": "application/json", origin: ORIGIN },
+      evidence.method,
+      { insightId: odd.id },
+    );
+    expect(res.status).toBe(404);
+  });
+
   it("reports the 13 types, with a reason for each unsupported one (C1c)", async () => {
     const res = await send(
       server.port,

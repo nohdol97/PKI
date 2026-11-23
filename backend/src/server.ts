@@ -115,7 +115,12 @@ import { ledgerStatus } from "./ledger-status.ts";
 import { jobsApi, type JobsPort } from "./jobs-view.ts";
 import type { LocalLocations } from "./local-locations.ts";
 import { createAnalyticalApi } from "./analytical-api.ts";
-import { insightTypeList, insightView, rankedInsightViews } from "./insight-view.ts";
+import {
+  insightTypeList,
+  insightView,
+  knownInsightType,
+  rankedInsightViews,
+} from "./insight-view.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { createFeedbackApi } from "./feedback-api.ts";
 import { createLintReads } from "./lint-read.ts";
@@ -1030,7 +1035,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         options.onRunConditionsChanged?.(); // wakes the runner for the summary jobs the switch queued
       }
       if (insightInterpret !== undefined) {
-        setInsightInterpret(options.db, insightInterpret, new Date());
+        setInsightInterpret(options.db, insightInterpret, clock());
         options.onRunConditionsChanged?.(); // wakes the runner for the interpretation jobs the switch queued
       }
       return {
@@ -1064,7 +1069,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     insightTypes: async () => insightTypeList(),
     insightEvidence: async ({ insightId }) => {
       const read = gate.insightEvidence(insightId);
-      return read
+      return read && knownInsightType(read.insight)
         ? { ...read, insight: insightView(read.insight, clock()) }
         : { error: "not-found" };
     },
