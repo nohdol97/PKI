@@ -303,7 +303,10 @@ export function createEntityDecisions(options: EntityDecisionsOptions): EntityDe
           low,
           high,
         ]).changes;
-        return { status: removed > 0 ? "applied" : "unchanged" };
+        if (removed === 0) return { status: "unchanged" };
+        // the pair may qualify again: its candidate is recomputed in this transaction (S02F-R3)
+        notifyMembership(tx, options.listeners, { items: [low, high], movedRows: [] }, scopeIn(tx));
+        return { status: "applied" };
       }
       const marked = tx.run(
         `INSERT OR IGNORE INTO item_distinct (item_a, item_b, by, at) VALUES (?, ?, 'user', ${NOW})`,

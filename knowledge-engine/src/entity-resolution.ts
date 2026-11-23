@@ -120,7 +120,7 @@ function profileOf(db: SqlDriver, item: number): Profile {
     const mine = members.includes(r.subject_id as number);
     const other = entityGroups.representativeOf(db, (mine ? r.object_id : r.subject_id) as number);
     const seen = profile.links.get(other) ?? { belongs: false };
-    if (mine && r.type === BELONGS_TO) {
+    if (mine && r.type === BELONGS_TO && typeOf(db, other) === "Organization") {
       seen.belongs = true;
       profile.belongings.set(other, [
         ...(profile.belongings.get(other) ?? []),

@@ -189,6 +189,50 @@ describe("graph.trace (S02-R21)", () => {
   });
 });
 
+describe("graph.trace over a merge group seen through a policy (S02F-R5-1, R5-2)", () => {
+  /** An extracted item (it has the lineage of the sources its facts rest on). */
+  const extracted = (k: ReturnType<typeof fresh>, name: string, scope: Scope) => {
+    const id = insertItem(k.db, { type: "Project", name, ...attrs });
+    k.fact(id, "2026-12-05", scope);
+    return id;
+  };
+  const mentions = (chains: { edge: string; from: unknown; to: unknown }[][], id: number) =>
+    chains.some((c) =>
+      c.some((h) => [h.from, h.to].some((n) => JSON.stringify(n).includes(`"item","id":${id}`))),
+    );
+
+  it("a member whose representative is hidden reads as a lone item; a hidden member is not in the representative's group", () => {
+    const k = fresh();
+    const hiddenRep = extracted(k, "R", ["secret"]);
+    const member = k.item("M");
+    k.fact(member, "2026-12-06");
+    k.merge(member, hiddenRep);
+    const lone = traceChains(k.db, hiding, { kind: "item", id: member }, "display");
+    expect(lone?.chains.length).toBeGreaterThan(0);
+    expect(mentions(lone?.chains ?? [], hiddenRep)).toBe(false);
+
+    const rep = k.item("R2");
+    k.fact(rep, "2026-12-07");
+    const hiddenMember = extracted(k, "H", ["secret"]);
+    k.merge(hiddenMember, rep);
+    const group = traceChains(k.db, hiding, { kind: "item", id: rep }, "display");
+    expect(group?.chains.length).toBeGreaterThan(0);
+    expect(group?.chains.some((c) => c.some((h) => h.edge === "SAME_AS"))).toBe(false);
+  });
+
+  it("members that may not be combined: the chain through SAME_AS is gone, the representative's own chain stays", () => {
+    const k = fresh();
+    const rep = extracted(k, "R", ["x"]);
+    const member = extracted(k, "M", ["y"]);
+    k.merge(member, rep);
+    const open_ = traceChains(k.db, open, { kind: "item", id: rep }, "display");
+    expect(open_?.chains.some((c) => c.some((h) => h.edge === "SAME_AS"))).toBe(true);
+    const crossed = traceChains(k.db, exclusive, { kind: "item", id: rep }, "display");
+    expect(crossed?.chains.length).toBeGreaterThan(0);
+    expect(crossed?.chains.some((c) => c.some((h) => h.edge === "SAME_AS"))).toBe(false);
+  });
+});
+
 describe("graph.paths (S02-R22)", () => {
   it("A-B-C-D by depth, with the order, the walk's direction and the refusal", () => {
     const k = fresh();

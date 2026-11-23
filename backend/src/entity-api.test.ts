@@ -669,6 +669,41 @@ describe("GET /api/entities/candidates (S02-R25) and the candidates' upkeep (S02
     expect(stored()).toEqual([]);
   });
 
+  it("clearing a distinct mark brings the pair's candidate back in the same request (S02F-R3)", async () => {
+    const { a, b } = pair(["a", "b"]);
+    const derived = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: defaultScopePolicy,
+    });
+    await start({ registry: derived, decisions: productUserDecisions(derived) });
+    await call("entityDistinct", { a, b, on: true });
+    expect((await call("entityCandidates")).body).toEqual({ candidates: [], truncated: false });
+    await call("entityDistinct", { a, b, on: false });
+    expect((await call("entityCandidates")).body).toEqual({
+      candidates: [{ a, b, signals: ["same-type", "identifier-match"] }],
+      truncated: false,
+    });
+  });
+
+  it("a candidate whose group holds a hidden member is not listed even when both representatives are visible (S02F-R5-3)", async () => {
+    const { a } = pair(["a", "b"]);
+    const hidden = itemFrom("h", ["secret"]);
+    expect(
+      db.transaction(() => userDecisions.entities.merge(db, hidden, a, "2026-11-23T01:02:03.000Z"))
+        .status,
+    ).toBe("applied");
+    expect(stored()).toHaveLength(1);
+    const registry = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+      },
+    });
+    await start({ registry });
+    expect((await call("entityCandidates")).body).toEqual({ candidates: [], truncated: false });
+  });
+
   it("rejecting the supporting fact removes the candidate in that request", async () => {
     const { emails } = pair(["a", "b"]);
     await start();

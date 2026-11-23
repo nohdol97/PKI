@@ -207,6 +207,24 @@ describe("resolution.link-guard (S02-R8)", () => {
     expect(countLinksRefused(db)).toBe(0);
   });
 
+  it("a key whose confidence is outside 0..1 is dropped, so it does not refuse the link either (S02F-R5-5)", async () => {
+    const x = stored("한서윤", "K-0001");
+    await extract(
+      BODY,
+      answer({
+        items: [
+          { ref: "x", type: "Person", name: "한서윤", existingItemId: String(x) },
+          { ref: "o", type: "Organization", name: "미리내 팀", existingItemId: null },
+        ],
+        facts: [{ ...key("x", "K-0002", Q_KEY), confidence: 1.5 }], // quote located, value differs from X's
+        relations: [{ subject: "x", type: "BELONGS_TO", object: "o", quote: Q_ORG }],
+      }),
+    );
+    expect(itemsNamed()).toEqual([x]);
+    expect(marks()).toEqual([]);
+    expect(countLinksRefused(db)).toBe(0);
+  });
+
   it("reads the group: a differing key on a member refuses the link to the representative", async () => {
     const rep = stored("한서윤", null);
     const member = stored("서윤", "K-0001");

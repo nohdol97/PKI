@@ -277,6 +277,49 @@ describe("scope.policy: candidates the policy would not let be put together are 
   });
 });
 
+describe("scope.policy: a candidate pair the policy refuses leaves a content-free record (S02F-R5-6)", () => {
+  it("records one merge-candidate drop for the pair and keeps no candidate row", async () => {
+    const a = source("a", "알 K-0007", ["a"]);
+    const known = knownItem("알파", a);
+    const shared = saveFact(db, {
+      itemId: known,
+      kind: "identifier.key",
+      value: "K-0007",
+      context: "인사",
+      ...attrs,
+    }).id;
+    addEvidence(db, {
+      target: { factId: shared },
+      sourceVersionId: a.row,
+      start: 2,
+      end: 8,
+      quote: "K-0007",
+    });
+    const b = source("b", "베타의 사번은 K-0007입니다", ["b"]);
+    await extract(
+      setUp(sameScopeOnly, () => ({
+        items: [{ ref: "N", type: "Project", name: "베타", existingItemId: null }],
+        facts: [
+          {
+            item: "N",
+            kind: "identifier.key",
+            value: "K-0007",
+            context: "인사",
+            epistemic: "explicit",
+            quote: "사번은 K-0007",
+          },
+        ],
+        relations: [],
+      })),
+      b,
+    );
+    expect(drops().filter((d) => d.kind === "merge-candidate")).toEqual([
+      { source_id: b.sourceId, version: b.version, kind: "merge-candidate" },
+    ]);
+    expect(count("merge_candidates")).toBe(0);
+  });
+});
+
 const BODY =
   "알파 일정. 알파의 목표일은 2026-12-05입니다. 새것의 완료는 2026-12-10입니다. 알파는 새것에 의존한다.";
 const refusedAtCommit = (names: Map<string, string>): Answer => ({

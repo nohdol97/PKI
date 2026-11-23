@@ -510,7 +510,7 @@ export function traceChains(
           ...extend(
             chainOf(
               [...prefixHops, { edge: "HAS", from: { kind: "item", id: m }, to: node(kind, id) }],
-              prefixRows,
+              [...prefixRows, ref(kind, id)],
               lineage,
             ),
             tail(kind, id),
