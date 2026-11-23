@@ -62,7 +62,12 @@ describe("항목 정리 (X02B-C3)", () => {
     await unmerge(api, 4, true);
     expect(calls[0]).toEqual(["entityUnmerge", { mergeId: 4, keepDistinct: true }]);
     const out = renderToStaticMarkup(
-      <EntityCuration api={api} center={center} onChanged={() => undefined} onOpen={() => undefined} />,
+      <EntityCuration
+        api={api}
+        center={center}
+        onChanged={() => undefined}
+        onOpen={() => undefined}
+      />,
     );
     expect(out).toContain("합치기 되돌리기: 미리내 별칭 &lt;b&gt;");
     expect(out).not.toContain("<b>");

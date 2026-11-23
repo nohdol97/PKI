@@ -5,7 +5,13 @@ import type { RouteName } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient } from "./api.ts";
-import { fixValidity, HistoryView, loadHistory, RowDetail, validityFailure } from "./row-detail.tsx";
+import {
+  fixValidity,
+  HistoryView,
+  loadHistory,
+  RowDetail,
+  validityFailure,
+} from "./row-detail.tsx";
 
 function fake(handlers: Partial<Record<RouteName, (request: unknown) => unknown>>) {
   const calls: [string, unknown][] = [];
@@ -75,7 +81,10 @@ describe("줄 상세 (X02B-C4 ①②)", () => {
   it("reads the history of the row and shows it in time order, known codes in words, unknown as they are", async () => {
     const { api, calls } = fake({
       semanticHistory: () => ({
-        lines: [line(2, "2026-02-01T00:00:00Z", "approve"), line(1, "2026-01-01T00:00:00Z", "zz-new")],
+        lines: [
+          line(2, "2026-02-01T00:00:00Z", "approve"),
+          line(1, "2026-01-01T00:00:00Z", "zz-new"),
+        ],
       }),
     });
     const lines = await loadHistory(api, "item", 1);
