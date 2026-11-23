@@ -1,6 +1,7 @@
 // The preload's functions reach the main process only through these handlers, and
 // every call is checked here (V01-R4, ADR 0008): the sender must be the app's own
 // page and the arguments must match the function's schema exactly.
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { APP_ORIGIN } from "./app-protocol.ts";
 import { BRIDGE, createBridgeHandlers, type ExternalTarget } from "./bridge.ts";
@@ -8,7 +9,11 @@ import { BRIDGE, createBridgeHandlers, type ExternalTarget } from "./bridge.ts";
 const SESSION = { baseUrl: "", token: "t".repeat(43) };
 const PAGE = `${APP_ORIGIN}/`;
 
-function handlers(confirm = true, picked: string | null = "/picked/folder") {
+function handlers(
+  confirm = true,
+  picked: string | null = "/picked/folder",
+  revealed: string | undefined = "/docs/a.md",
+) {
   const opened: string[] = [];
   const confirmExternal = vi.fn<(target: ExternalTarget) => Promise<boolean>>(async () => confirm);
   const stored = new Map<string, string>();
@@ -19,6 +24,8 @@ function handlers(confirm = true, picked: string | null = "/picked/folder") {
     has: vi.fn(async (name: string) => ({ ok: true as const, present: stored.has(name) })),
     delete: vi.fn(async (name: string) => (stored.delete(name), { ok: true as const })),
   };
+  const asked: number[] = [];
+  const shown: string[] = [];
   const registered: { ticket: string; kind: "folder"; path: string }[] = [];
   const bridge = createBridgeHandlers({
     session: SESSION,
@@ -27,8 +34,10 @@ function handlers(confirm = true, picked: string | null = "/picked/folder") {
     openExternal: async (url) => void opened.push(url),
     pickLocation: async () => picked ?? undefined,
     registerLocationTicket: (input) => (registered.push(input), true),
+    revealPath: async (id) => (asked.push(id), revealed),
+    showInFolder: (path) => void shown.push(path),
   });
-  return { bridge, opened, confirmExternal, secrets, stored, registered };
+  return { bridge, opened, confirmExternal, secrets, stored, registered, asked, shown };
 }
 
 describe("bridge handlers", () => {
@@ -40,6 +49,7 @@ describe("bridge handlers", () => {
         "hasSecret",
         "openExternal",
         "pickLocation",
+        "revealSource",
         "setSecret",
       ].sort(),
     );
@@ -66,6 +76,32 @@ describe("bridge handlers", () => {
     );
     await expect(foreign.bridge.pickLocation(PAGE, ["/etc"])).rejects.toThrow("invalid-input");
     expect(foreign.registered).toEqual([]);
+  });
+
+  it("revealSource takes a version id only, asks the backend for the path, shows it in the folder, and never opens the file (C29)", async () => {
+    const { bridge, asked, shown } = handlers();
+    expect(await bridge.revealSource(PAGE, [7])).toEqual({ revealed: true });
+    expect(asked).toEqual([7]);
+    expect(shown).toEqual(["/docs/a.md"]);
+
+    const gone = handlers(true, "/p", undefined);
+    expect(await gone.bridge.revealSource(PAGE, [7])).toEqual({ revealed: false });
+    expect(gone.shown).toEqual([]);
+
+    const refused = handlers();
+    await expect(refused.bridge.revealSource(PAGE, ["/etc/passwd"])).rejects.toThrow("invalid-input");
+    await expect(refused.bridge.revealSource(PAGE, [7, "/x"])).rejects.toThrow("invalid-input");
+    await expect(refused.bridge.revealSource("https://evil.example/", [7])).rejects.toThrow(
+      "forbidden-sender",
+    );
+    expect(refused.asked).toEqual([]);
+    expect(refused.shown).toEqual([]);
+
+    // no call that would open a file with its associated program (I02-C3)
+    const dir = new URL(".", import.meta.url);
+    for (const name of readdirSync(dir).filter((f) => /\.(ts|cjs)$/.test(f) && !f.includes(".test."))) {
+      expect(readFileSync(new URL(name, dir), "utf8"), name).not.toContain("openPath");
+    }
   });
 
   it("gives the app page its session", async () => {
