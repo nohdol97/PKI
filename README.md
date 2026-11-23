@@ -37,6 +37,8 @@ Phase 1의 골격(V01: 화면, 로컬 API, Electron 쉘, 정본 저장, Provider
 
 화면의 "질문"에서 말로 물으면 키워드와 메타데이터 필터로 원본을 찾아(그 밖의 전략은 만들어 두었지만 측정 전까지 꺼 둡니다) 보여 주고(`POST /api/ask`, 한 줄에 사건 하나인 NDJSON), Provider가 정해져 있으면 문장마다 원본 인용이 붙은 답을 줍니다. 질문과 답은 저장하지 않으며 벡터 검색은 아직 쓰지 않습니다([X01 spec](docs/specs/2026-11-23-X01-retrieval-qa.md)).
 
+화면의 "탐색"에서 항목 하나를 이름으로 찾아 이웃 관계, 시간순 사실, 근거 원본을 보고 그 항목의 위키 페이지로 넘어가며, "지식 검토"에서 후보를 승인·기각·값 고치기하고 충돌을 검토합니다. 두 화면은 읽기 문을 지난 것만 보여 주고 아무것도 저장하지 않습니다([X02 spec](docs/specs/2026-11-23-X02-explore-ux.md)).
+
 배포처 설정: [docs/site-setup.md](docs/site-setup.md) · 저장소 배치: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## 작업 방식
