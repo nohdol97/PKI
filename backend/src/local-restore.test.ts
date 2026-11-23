@@ -54,9 +54,10 @@ async function boot() {
   const h = { host: `127.0.0.1:${started.server.port}`, authorization: `Bearer ${TOKEN}` };
   const call = (path: string, body?: unknown) => send(started.server.port, path, h, "POST", body);
   const get = (path: string) => send(started.server.port, path, h, "GET");
-  const sync = async () => {
-    for (let i = 0; i < 2; i++) {
-      await new Promise((r) => setTimeout(r, 10));
+  /** Syncs until `done` holds (a sync the approval registered may hold the instance; a new file needs two looks). */
+  const sync = async (done: () => boolean = () => false, min = 2) => {
+    for (let i = 0; i < 20 && (i < min || !done()); i++) {
+      await new Promise((r) => setTimeout(r, 15));
       await call(routes.syncConnector.path, { connectorId: "local-files" });
     }
   };
@@ -99,20 +100,28 @@ describe("C41 a restored database", () => {
     const b = (
       await first.call(routes.approveLocalLocation.path, { type: "folder", path: folderB })
     ).body as LocalLocationInfo;
-    await first.sync();
+    await first.sync(() => liveIn(first.db, a.id) + liveIn(first.db, b.id) === 3);
     expect(liveIn(first.db, a.id) + liveIn(first.db, b.id)).toBe(3);
     const backup = join(root, "backup.sqlite");
     first.db.exec(`VACUUM INTO '${backup}'`);
 
     // later: one deleted from the disk, one deleted by the user, the other folder revoked
     unlinkSync(join(folderA, "a-canary-path-7731.md"));
-    await first.sync();
+    await first.sync(() => liveIn(first.db, a.id) === 1);
     const sources = (await first.get(routes.sources.path)).body as {
       sources: { connectorId: string; namespace: string; externalId: string; title: string }[];
     };
     const mine = sources.sources.filter((s) => s.connectorId === "local-files");
-    const userDeleted = mine.find((s) => s.namespace === a.id) as (typeof mine)[number];
-    await first.call(routes.deleteSource.path, userDeleted);
+    const userDeleted = mine.find((s) => s.title.includes("b-canary")) as (typeof mine)[number];
+    expect(
+      (
+        await first.call(routes.deleteSource.path, {
+          connectorId: userDeleted.connectorId,
+          namespace: userDeleted.namespace,
+          externalId: userDeleted.externalId,
+        })
+      ).status,
+    ).toBe(200);
     expect(
       (await first.call(routes.revokeLocalLocation.path, { locationId: b.id, count: 1 })).body,
     ).toEqual({
@@ -131,10 +140,10 @@ describe("C41 a restored database", () => {
     first = await boot();
 
     expect(Number(first.db.all("SELECT count(*) AS n FROM tombstones")[0]?.n)).toBe(3);
-    // the entries of the three hold no plaintext path or content hash
+    // the entries of the three (deleted on disk, user-deleted, revoked) hold no plaintext path or content hash
     expect(
       first.db.all(
-        "SELECT 1 FROM local_file_entries WHERE state = 'forgotten' AND relative_path IS NULL",
+        "SELECT state FROM local_file_entries WHERE relative_path IS NULL AND content_hash IS NULL AND size IS NULL",
       ),
     ).toHaveLength(3);
     expect(
@@ -156,14 +165,14 @@ describe("C41 a restored database", () => {
 
     // a file made in the folder that was revoked is not read until the user turns the location on
     put(folderB, "new-7731.md", "ZQBODY-new-8842");
-    await first.sync();
+    await first.sync(() => liveIn(first.db, b.id) === 0, 4);
     expect(liveIn(first.db, b.id)).toBe(0);
     await first.call(routes.resumeLocalLocation.path, { locationId: b.id });
-    await first.sync();
+    await first.sync(() => liveIn(first.db, b.id) === 1);
     expect(liveIn(first.db, b.id)).toBe(1);
     // the files the user and the revocation deleted stay out when their locations are read again
     await first.call(routes.resumeLocalLocation.path, { locationId: a.id });
-    await first.sync();
+    await first.sync(() => liveIn(first.db, a.id) === 0, 4);
     expect(liveIn(first.db, a.id)).toBe(0);
     expect(liveIn(first.db, b.id)).toBe(1);
     const skipped = (await first.call(routes.localSkipped.path, { locationId: a.id })).body as {
@@ -188,7 +197,7 @@ describe("C41 a restored database", () => {
     const loc = (
       await started.call(routes.approveLocalLocation.path, { type: "folder", path: folder })
     ).body as LocalLocationInfo;
-    await started.sync();
+    await started.sync(() => liveIn(started.db, loc.id) === 5);
     expect(liveIn(started.db, loc.id)).toBe(5);
     await stop();
 

@@ -44,7 +44,7 @@ import {
   withLocalFilesPorts,
   type ConnectorSet,
 } from "./composition.ts";
-import type { ApprovalTickets } from "./local-locations.ts";
+import { readLocalFilesSettings, type ApprovalTickets } from "./local-locations.ts";
 import { systemClock } from "./clock.ts";
 import { applyConfiguredScopes, bindConnectorScopes } from "./connector-scopes.ts";
 import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
@@ -69,7 +69,13 @@ import {
 } from "@pki/storage";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
-import { reapplyAtStart } from "./ledger-boot.ts";
+import { needsRebuild, reapplyAtStart } from "./ledger-boot.ts";
+import {
+  createLocalFilesDriver,
+  nodeTimers,
+  nodeWatch,
+  type LocalFilesDriver,
+} from "./local-files-driver.ts";
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
 import { productScopePolicy } from "./scope-policy.ts";
@@ -225,7 +231,13 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // an instance a line would register must be of a kind this build knows (a corrupt line cannot bind one to a bogus kind):
   // the merged kinds, a registered one included (I05-R12), and the import's
   const knownKinds = new Set([...Object.keys(kinds), JSONL_IMPORT_KIND]);
-  reapplyAtStart(db, registry, systemClock.now(), (kind) => knownKinds.has(kind), scopes);
+  const reapplied = reapplyAtStart(
+    db,
+    registry,
+    systemClock.now(),
+    (kind) => knownKinds.has(kind),
+    scopes,
+  );
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")
@@ -233,13 +245,31 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // the manager wakes the runner and the runner's `connector-sync` handler calls the manager:
   // the handler reads it at each run; a run claimed before it is set (a wake can claim before
   // runner.start) is deferred by the handler, its attempt unspent
-  const late: { manager?: ConnectorManager; scheduler?: Scheduler } = {};
+  const late: {
+    manager?: ConnectorManager;
+    scheduler?: Scheduler;
+    driver?: LocalFilesDriver;
+  } = {};
+  // one sync of the `local-files` instance now: what an approval, a start and a watch signal register
+  const registerLocalSync = () => {
+    const scheduler = late.scheduler;
+    if (!scheduler) return;
+    const { schedule } = scheduler.ensureSchedule({
+      kind: CONNECTOR_SYNC_KIND,
+      target: LOCAL_FILES_INSTANCE_ID,
+      period: SYNC_PERIOD,
+    });
+    scheduler.runNow(schedule.id);
+    void runner.wake();
+  };
   // the location API and the `local-files` ports (I02B-R4): an approval registers one sync now
   const localFiles = productLocalFiles(db, {
     dataDir: options.dataDir,
     clock,
     ...options.localFiles,
     entries,
+    watching: (id) => late.driver?.watching(id) ?? false,
+    changed: () => late.driver?.refresh(),
     // a revocation needs the instance lock: the running sync is asked to stop (it continues from its cursor)
     cancelSync: () => {
       for (const row of db.all(
@@ -254,17 +284,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       void late.manager
         ?.sync(LOCAL_FILES_INSTANCE_ID, { rescan: true })
         .catch((error) => log("local-rescan-failed", { error: errorClass(error) })),
-    onApproved: () => {
-      const scheduler = late.scheduler;
-      if (!scheduler) return;
-      const { schedule } = scheduler.ensureSchedule({
-        kind: CONNECTOR_SYNC_KIND,
-        target: LOCAL_FILES_INSTANCE_ID,
-        period: SYNC_PERIOD,
-      });
-      scheduler.runNow(schedule.id);
-      void runner.wake();
-    },
+    onApproved: registerLocalSync,
   });
   const runner = productRunner(db, calls.broker, {
     clock,
@@ -312,6 +332,18 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     onError: (error) => log("scheduler-error", { error: errorClass(error) }),
   });
   late.scheduler = scheduler;
+  // I02B-R20: the restore pause, the revocation left half done, the first sync and the watchers, in this order
+  const driver = createLocalFilesDriver({
+    db,
+    registerSync: registerLocalSync,
+    revoke: localFiles.revoker,
+    watch: nodeWatch,
+    timers: nodeTimers,
+    now: () => clock.now(),
+    limits: () => readLocalFilesSettings(db).watch,
+  });
+  late.driver = driver;
+  driver.start(needsRebuild(reapplied));
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,
@@ -362,6 +394,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     server: {
       ...server,
       close: async () => {
+        driver.stop();
         reevaluation.stop();
         scheduler.stop();
         await collectors.stop();

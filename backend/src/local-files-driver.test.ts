@@ -188,7 +188,7 @@ describe("C8 the signals never change the result", () => {
           body: r.body,
         });
       }
-      for (const d of deletes(changes)) sources.delete(d.externalId);
+      for (const d of deletes(changes)) if (d.kind === "delete") sources.delete(d.externalId);
     };
     const onDisk = (name: string) => join(w.root, name);
     const exists = (name: string) => {

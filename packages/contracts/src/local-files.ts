@@ -176,6 +176,8 @@ export interface LocalFilesLimits {
   deletionBrake: { ratio: number; minFiles: number };
   /** A revocation deletes `maxPerTransaction` sources per transaction and waits `lockWaitMs` for a running sync (I02B-R49). */
   revoke: { maxPerTransaction: number; lockWaitMs: number };
+  /** A watch signal registers a sync once it has been quiet `quietMs`, and at the latest `maxWaitMs` after the first (I02B-R20). */
+  watch: { quietMs: number; maxWaitMs: number };
 }
 
 /** What one pass learned about a location, for the location list (I02B-R36, R38). */
@@ -326,6 +328,7 @@ const walkShape = {
   maxDepth: PositiveInt,
   maxRelativePathChars: PositiveInt,
 };
+const watchShape = { quietMs: z.int().positive(), maxWaitMs: z.int().positive() };
 const revokeShape = { maxPerTransaction: z.int().positive(), lockWaitMs: z.int().positive() };
 const brakeShape = { ratio: z.number().positive(), minFiles: PositiveInt };
 const normalizeShape = {
@@ -343,6 +346,7 @@ export const LocalFilesSettingsSchema = z.strictObject({
   normalize: z.strictObject(normalizeShape),
   deletionBrake: z.strictObject(brakeShape),
   revoke: z.strictObject(revokeShape),
+  watch: z.strictObject(watchShape),
 });
 export type LocalFilesSettings = z.infer<typeof LocalFilesSettingsSchema>;
 
@@ -355,6 +359,7 @@ export const LocalFilesSettingsPatchSchema = z.strictObject({
   normalize: z.strictObject(normalizeShape).partial().optional(),
   deletionBrake: z.strictObject(brakeShape).partial().optional(),
   revoke: z.strictObject(revokeShape).partial().optional(),
+  watch: z.strictObject(watchShape).partial().optional(),
 });
 export type LocalFilesSettingsPatch = z.infer<typeof LocalFilesSettingsPatchSchema>;
 

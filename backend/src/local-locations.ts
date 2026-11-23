@@ -49,6 +49,7 @@ export const LOCAL_FILES_DEFAULTS: LocalFilesSettings = {
   normalize: { timeoutMs: 60_000, maxHeapMb: 1_536, maxExternalMemoryBytes: 1_610_612_736 },
   deletionBrake: { ratio: 0.5, minFiles: 20 },
   revoke: { maxPerTransaction: 100, lockWaitMs: 5_000 },
+  watch: { quietMs: 2_000, maxWaitMs: 30_000 },
 };
 
 const KEY = "localFiles.";
@@ -95,6 +96,10 @@ export function readLocalFilesSettings(db: SqlDriver): LocalFilesSettings {
       maxPerTransaction: read("revoke.maxPerTransaction", d.revoke.maxPerTransaction),
       lockWaitMs: read("revoke.lockWaitMs", d.revoke.lockWaitMs),
     },
+    watch: {
+      quietMs: read("watch.quietMs", d.watch.quietMs),
+      maxWaitMs: read("watch.maxWaitMs", d.watch.maxWaitMs),
+    },
   };
 }
 
@@ -105,7 +110,7 @@ function changes(patch: LocalFilesSettingsPatch): [string, number][] {
     const value = patch[name];
     if (value !== undefined) out.push([name, value]);
   }
-  for (const group of ["walk", "normalize", "deletionBrake", "revoke"] as const) {
+  for (const group of ["walk", "normalize", "deletionBrake", "revoke", "watch"] as const) {
     for (const [name, value] of Object.entries(patch[group] ?? {})) {
       if (value !== undefined) out.push([`${group}.${name}`, value]);
     }
@@ -226,6 +231,10 @@ export interface LocalLocationsOptions {
   lastReport?: () => LocalPassReport | undefined;
   /** The revocation (local-revoke.ts); without it a revoke answers connector-unavailable. */
   revoker?: LocalRevoke;
+  /** Whether the driver watches the location (I02B-R20, R38); without a driver none is. */
+  watching?: (locationId: string) => boolean;
+  /** Told after a change of the set of read locations, so the driver places its watchers. */
+  changed?: () => void;
   /** Starts a full sync of the `local-files` instance; the composition point binds the manager. */
   rescan?: () => void;
   now?: () => number;
@@ -236,6 +245,14 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
   const { db, index } = options;
   const now = options.now ?? Date.now;
   let queue: Promise<unknown> = Promise.resolve();
+  /** The driver places its watchers for the new set of read locations; its failure is no failure of the change. */
+  const changed = () => {
+    try {
+      options.changed?.();
+    } catch (error) {
+      log("local-watch-refresh-failed", { error: errorClass(error) });
+    }
+  };
 
   const rejected = (code: LocalApprovalRejectionCode): ApprovalAnswer => ({
     error: "approval-rejected",
@@ -279,6 +296,7 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
       log("local-sync-register-failed", { error: errorClass(error) });
     }
     const stored = listLocations(db).find((l) => l.id === id) as LocalLocation;
+    changed();
     return view(stored);
   }
 
@@ -313,6 +331,7 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     } catch (error) {
       log("local-sync-register-failed", { error: errorClass(error) });
     }
+    changed();
     return view(listLocations(db).find((l) => l.id === location.id) as LocalLocation);
   }
 
@@ -326,6 +345,7 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     if (!location) return { error: "not-found" };
     if (states && !states.includes(location.state)) return { error: "bad-request" };
     if (change() === "count-mismatch") return { error: "count-mismatch" };
+    changed();
     return view(listLocations(db).find((l) => l.id === id) as LocalLocation);
   }
 
@@ -348,7 +368,7 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
       limitExceeded: report?.limitExceeded ?? location.limitExceeded,
       lastPassAt:
         location.lastPassAt ?? (report && at !== undefined ? new Date(at).toISOString() : null),
-      watching: false,
+      watching: options.watching?.(location.id) ?? false,
     };
   }
 
@@ -386,7 +406,10 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
       return { outcome: "queued" };
     },
     async revoke(request) {
-      return options.revoker ? options.revoker.revoke(request) : { error: "connector-unavailable" };
+      if (!options.revoker) return { error: "connector-unavailable" };
+      const answer = await options.revoker.revoke(request);
+      changed();
+      return answer;
     },
     skipped({ locationId, offset = 0, limit = 100 }) {
       if (!listLocations(db).some((l) => l.id === locationId)) return { error: "not-found" };

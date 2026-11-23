@@ -47,6 +47,7 @@ export const DEFAULT_LIMITS: LocalFilesLimits = {
   normalize: { maxHeapMb: 256, maxExternalMemoryBytes: 512 * 1024 ** 2 },
   deletionBrake: { ratio: 0.5, minFiles: 20 },
   revoke: { maxPerTransaction: 100, lockWaitMs: 5_000 },
+  watch: { quietMs: 2_000, maxWaitMs: 30_000 },
 };
 
 /** What a test hooks into the file system calls (lstat, open) of the path boundary. */
@@ -153,6 +154,7 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
     normalize: { ...DEFAULT_LIMITS.normalize },
     deletionBrake: { ...DEFAULT_LIMITS.deletionBrake },
     revoke: { ...DEFAULT_LIMITS.revoke },
+    watch: { ...DEFAULT_LIMITS.watch },
     ...options.limits,
   };
   const nth = new Map<string, number>();
