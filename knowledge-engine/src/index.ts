@@ -4,6 +4,7 @@ export {
   DEPENDS_ON,
   isDate,
   TARGET_DATE,
+  dependencyDelayReceiver,
   recomputeDependencyDelay,
   type RuleOutcome,
   type RuleScope,

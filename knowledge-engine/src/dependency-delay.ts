@@ -20,9 +20,11 @@ import {
   saveInsight,
   unionOfVersions,
   userInputKind,
+  withGroups,
   type EvidenceTarget,
   type InsightKey,
   type KnowledgeStatus,
+  type MembershipListener,
   type SourceVersionRef,
   type SqlDriver,
   type UserInputRef,
@@ -183,7 +185,7 @@ export function recomputeDependencyDelay(
   scope?: RuleScope,
 ): { key: InsightKey; outcome: RuleOutcome }[] {
   return db.transaction(() => {
-    const all = [...new Set(itemIds.flatMap((id) => entityGroups.membersOf(db, id)))];
+    const all = withGroups(db, itemIds);
     const pairs = new Map<string, InsightKey>();
     const keep = (xItemId: number, yItemId: number) =>
       pairs.set(`${xItemId}:${yItemId}`, { rule: DEPENDENCY_DELAY, xItemId, yItemId });
@@ -224,3 +226,12 @@ export function recomputeDependencyDelay(
     return results;
   });
 }
+
+/**
+ * The rule's receiver of a changed membership (S02-R13): it recomputes the groups the action reached, over
+ * the scope the action handed it. A split's moved rows need no separate reach: every pair they touch has
+ * the original or the new item as one end, and both are in `change.items`. It only recomputes.
+ */
+export const dependencyDelayReceiver: MembershipListener = (tx, change, scope) => {
+  recomputeDependencyDelay(tx, change.items, scope);
+};

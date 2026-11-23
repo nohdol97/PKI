@@ -605,7 +605,7 @@ function entityMergeKind(listeners: readonly MembershipListener[]): DerivativeKi
       const judged = rejudgeGroups(tx, survivors, (lineage) => ctx.combinable(lineage));
       recomputed += judged.changedLines;
       // a group that rested or woke is a membership change; a relink alone moves no row's item
-      notifyMembership(tx, listeners, { items: judged.items, movedRows: [] });
+      notifyMembership(tx, listeners, { items: judged.items, movedRows: [] }, ctx);
       return {
         removed: snapshot.filter(({ ref }) => !refExists(tx, ref.id)).length,
         recomputed,

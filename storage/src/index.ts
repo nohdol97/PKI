@@ -254,10 +254,12 @@ export {
   readMergeLine,
   rejudgeGroups,
   rootOf,
+  withGroups,
   type EntityGroups,
   type ItemId,
   type MembershipChange,
   type MembershipListener,
+  type MembershipScope,
   type MergeLine,
   type MovedRow,
 } from "./entity-groups.ts";

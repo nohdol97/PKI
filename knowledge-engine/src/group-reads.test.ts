@@ -3,6 +3,8 @@
 // entry where it is about the notification. All data is synthetic.
 import {
   addEvidence,
+  automatedLifecycle,
+  createUserDecisions,
   insertItem,
   migrate,
   readInsight,
@@ -12,6 +14,7 @@ import {
   saveSourceRecord,
   type KnowledgeAttributes,
   type SqlDriver,
+  type UserDecisions,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -20,6 +23,7 @@ import {
   DEPENDENCY_DELAY,
   DEPENDS_ON,
   TARGET_DATE,
+  dependencyDelayReceiver,
   recomputeDependencyDelay,
 } from "./dependency-delay.ts";
 
@@ -38,7 +42,11 @@ beforeEach(() => {
 });
 afterEach(() => db.close());
 
-const item = (name: string) => insertItem(db, { type: "Project", name, ...attrs });
+const item = (name: string) => {
+  const id = insertItem(db, { type: "Project", name, ...attrs });
+  automatedLifecycle.created(db, { kind: "item", id }, "extraction", { sourceId: 1, version: 1 });
+  return id;
+};
 
 /** Stores `body` as the next version of source `externalId`; returns that version's row id. */
 function version(externalId: string, body: string): number {
@@ -185,5 +193,75 @@ describe("resolution.group-reads: the rule reads a group as one item (S02-R13)",
     fact(y, COMPLETION_DATE, "2026-12-10", "s-completion");
     expect(recomputeDependencyDelay(db, [x])).toEqual([{ key: key(x, y), outcome: "created" }]);
     expect(recomputeDependencyDelay(db, [y])).toEqual([{ key: key(x, y), outcome: "unchanged" }]);
+  });
+});
+
+const AT = "2026-11-23T00:00:00.000Z";
+/** The user's entry with the rule's receiver, the way the composition root builds it; `combinable` is its scope policy. */
+const entryWith = (combinable: (lineageSize: number) => boolean = () => true): UserDecisions =>
+  createUserDecisions({
+    combinable: (_tx, lineage) => combinable(lineage.length),
+    listeners: [dependencyDelayReceiver],
+  });
+const mergeThrough = (entry: UserDecisions, member: number, into: number) => {
+  const done = db.transaction(() => entry.entities.merge(db, member, into, AT));
+  if (done.status !== "applied") throw new Error(`merge: ${done.reason}`);
+  return done.mergeId;
+};
+
+describe("resolution.group-reads: merge and unmerge recompute the rule (S02-R13)", () => {
+  it("merging Y′ into Y makes the Insight keyed by the representative, in the merge's own transaction", () => {
+    const { x, y, yPrime } = lateThroughMember();
+    expect(rows()).toEqual([]);
+    mergeThrough(entryWith(), yPrime, y);
+    expect(rows()).toEqual([{ x_item_id: x, y_item_id: y, state: "active" }]);
+  });
+
+  it("unmerging resolves it and the resolved row stays", () => {
+    const { x, y, yPrime } = lateThroughMember();
+    const entry = entryWith();
+    const id = mergeThrough(entry, yPrime, y);
+    db.transaction(() => entry.entities.unmerge(db, id, true, AT));
+    expect(rows()).toEqual([{ x_item_id: x, y_item_id: y, state: "resolved" }]);
+    expect(readInsight(db, key(x, y))?.evidenceIds).toEqual([]);
+  });
+
+  it("a split's moved rows: the Insight that relied on them is resolved and one is made for the new item when it holds", () => {
+    const [x, y] = [item("X"), item("Y")] as const;
+    const target = fact(x, TARGET_DATE, "2026-12-05", "s-target");
+    const dep = dependsOn(x, y, "s-dep");
+    fact(y, COMPLETION_DATE, "2026-12-10", "s-completion");
+    fact(x, "note", "stays on X", "s-note"); // a split leaves the item something
+    recomputeDependencyDelay(db, [x]);
+    expect(rows()).toEqual([{ x_item_id: x, y_item_id: y, state: "active" }]);
+    const done = db.transaction(() =>
+      entryWith().entities.split(
+        db,
+        x,
+        [
+          { kind: "fact", id: target },
+          { kind: "relation", id: dep },
+        ],
+        "X′",
+        AT,
+      ),
+    );
+    if (done.status !== "applied") throw new Error(done.reason);
+    expect(rows()).toEqual([
+      { x_item_id: x, y_item_id: y, state: "resolved" },
+      { x_item_id: done.created, y_item_id: y, state: "active" },
+    ]);
+  });
+
+  it("a receiver is handed the action's scope: sources the policy will not put together make no Insight (the merge itself is allowed)", () => {
+    const { yPrime, y } = lateThroughMember();
+    // the merge's group lineage is at most two source versions; the Insight's evidence quotes three
+    mergeThrough(
+      entryWith((size) => size <= 2),
+      yPrime,
+      y,
+    );
+    expect(db.all("SELECT count(*) AS n FROM item_merges")[0]?.n).toBe(1);
+    expect(rows()).toEqual([]);
   });
 });
