@@ -10,6 +10,7 @@ import {
   type InsightSummary as InsightRow,
   type InsightTypeListResponse,
   type LocalSourceInfo,
+  type SourceThreadResponse,
 } from "@pki/contracts";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
@@ -136,6 +137,54 @@ export const citationSource = (
   span: { quote: string; start: number; end: number },
 ): EvidenceSource => ({ evidenceId: 0, ...span, locator: null, attachment: null, sourceVersion });
 
+/** Another message of the source's thread, read by its version number like an Ask citation's source. */
+export async function openThreadMessage(
+  api: ApiClient,
+  versionId: number,
+): Promise<EvidenceSource> {
+  const { sourceVersion } = await api("exploreSource", { versionId });
+  return citationSource(sourceVersion, { quote: "", start: 0, end: 0 });
+}
+
+/** The "같은 스레드" list of the open source (I02B-R55). Titles and names are imported text: text nodes inside <bdi>. */
+export function SameThread({
+  thread,
+  currentVersionId,
+  onOpen,
+}: {
+  thread: SourceThreadResponse;
+  currentVersionId: number;
+  onOpen: (versionId: number) => void;
+}) {
+  if (thread.messages.length < 2) return null;
+  return (
+    <>
+      <h4>같은 스레드</h4>
+      <ol aria-label="같은 스레드">
+        {thread.messages.map((m) => (
+          <li key={m.versionId}>
+            <bdi>{m.title}</bdi>
+            {m.author !== undefined && (
+              <>
+                {" "}
+                · <bdi>{m.author}</bdi>
+              </>
+            )}
+            {m.createdAt !== undefined && <> · {m.createdAt}</>}{" "}
+            {m.versionId === currentVersionId ? (
+              <span>(보는 중)</span>
+            ) : (
+              <button type="button" onClick={() => onOpen(m.versionId)}>
+                열기
+              </button>
+            )}
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
 /** One entry of an Insight's evidence list. */
 export function EvidenceEntry({
   evidence: e,
@@ -238,6 +287,7 @@ export function Insights({
   const [types, setTypes] = useState<InsightTypeListResponse["types"]>();
   const [local, setLocal] = useState<LocalSourceInfo>();
   const [revealFailed, setRevealFailed] = useState(false);
+  const [thread, setThread] = useState<SourceThreadResponse>();
   const [state, dispatch] = useReducer(evidenceReducer, { opens: 0 });
   const [feedbackVersion, setFeedbackVersion] = useState(0);
   const feedbackChanged = () => setFeedbackVersion((n) => n + 1);
@@ -264,12 +314,29 @@ export function Insights({
       (r) => dispatch({ type: "insight-opened", insightId, evidence: r.evidence }),
       (error: unknown) => dispatch({ type: "failed", what: "insight", id: insightId, error }),
     );
+  const showThread = (versionId: number) => {
+    setThread(undefined);
+    // a failure or a source without a thread only leaves the list out
+    api("sourceThread", { versionId }).then(setThread, () => undefined);
+  };
+  const openMessage = (versionId: number) =>
+    openThreadMessage(api, versionId).then(
+      (s) => {
+        setLocal(undefined);
+        dispatch({ type: "source-opened", source: s });
+        showThread(versionId);
+      },
+      (error: unknown) =>
+        // id 0 names no evidence entry, so only the notice changes
+        dispatch({ type: "failed", what: "source", id: 0, error }),
+    );
   const openSource = (evidenceId: number) =>
     api("evidenceSource", { evidenceId }).then(
       (s) => {
         setLocal(undefined);
         setRevealFailed(false);
         dispatch({ type: "source-opened", source: s });
+        showThread(s.sourceVersion.id);
         // where the file is now: a failure only leaves this line out, the stored text is shown anyway
         api("localSourceInfo", { sourceVersionId: s.sourceVersion.id }).then(
           setLocal,
@@ -345,6 +412,13 @@ export function Insights({
                 : undefined
             }
           />
+          {thread && (
+            <SameThread
+              thread={thread}
+              currentVersionId={source.sourceVersion.id}
+              onOpen={(id) => void openMessage(id)}
+            />
+          )}
         </section>
       )}
     </section>

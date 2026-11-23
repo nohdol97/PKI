@@ -418,7 +418,9 @@ describe("same-thread list (I02B-C56)", () => {
   };
 
   it("draws each message as bdi text, never as elements, and marks the open one", () => {
-    const html = renderToStaticMarkup(<SameThread thread={thread} currentVersionId={4} onOpen={() => undefined} />);
+    const html = renderToStaticMarkup(
+      <SameThread thread={thread} currentVersionId={4} onOpen={() => undefined} />,
+    );
     expect(html).not.toMatch(/<script/i);
     expect(html).toContain("<bdi>&lt;script&gt;alert(1)&lt;/script&gt;</bdi>");
     expect(html).toContain("<bdi>답장</bdi>");

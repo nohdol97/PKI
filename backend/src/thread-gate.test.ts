@@ -64,7 +64,7 @@ function message(id: string, author: string, createdAt: string, thread: string, 
   return db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
 }
 async function call(name: RouteName, body: unknown) {
-  server = await startServer({
+  server ??= await startServer({
     token: TOKEN,
     allowedOrigins: ["http://localhost:5173"],
     connectors,
@@ -105,10 +105,8 @@ describe("sources.thread (I02B-C56, C57)", () => {
     expect(routes.sourceThread.response.parse(shown.body).messages).toHaveLength(1);
     expect(text).not.toContain("비밀인");
     expect(text).not.toContain("제목 m2");
-    await server?.close();
     for (const versionId of [hiddenOnly, plain, 99_999]) {
       expect(await call("sourceThread", { versionId })).toEqual(NOT_FOUND);
-      await server?.close();
     }
   });
 });

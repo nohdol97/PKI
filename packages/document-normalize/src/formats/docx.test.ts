@@ -267,7 +267,7 @@ describe("C32 comment threads (I02B-R30)", () => {
   it("a first comment with neither author nor time still follows the body after a blank line (I02B-C58)", async () => {
     const doc = await parse({
       body: [{ text: "본문", commentIds: [0] }],
-      comments: [{ text: "메모" }],
+      comments: [{ text: "메모", author: "" }],
     });
     expect(doc.text).toBe("본문\n\n메모");
   });
