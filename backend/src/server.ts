@@ -84,8 +84,10 @@ import {
   readSemanticHistory,
   readSemanticState,
   readSetting,
+  readInsightInterpret,
   readWikiSummary,
   requestWikiBuild,
+  setInsightInterpret,
   setWikiSummary,
   requestWikiRebuild,
   rootOf,
@@ -1013,8 +1015,9 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       autoVerify: readAutoVerify(options.db),
       autoDispute: readAutoDispute(options.db),
       wikiSummary: readWikiSummary(options.db),
+      insightInterpret: readInsightInterpret(options.db),
     }),
-    setSemanticSettings: async ({ autoVerify, autoDispute, wikiSummary }) => {
+    setSemanticSettings: async ({ autoVerify, autoDispute, wikiSummary, insightInterpret }) => {
       // no held job waits on these settings, so nothing is released with them (cf. `releasing`)
       writeSetting(options.db, AUTO_VERIFY_SETTING, autoVerify ? "on" : "off");
       if (autoDispute !== undefined) {
@@ -1024,10 +1027,15 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         setWikiSummary(options.db, wikiSummary, new Date());
         options.onRunConditionsChanged?.(); // wakes the runner for the summary jobs the switch queued
       }
+      if (insightInterpret !== undefined) {
+        setInsightInterpret(options.db, insightInterpret, new Date());
+        options.onRunConditionsChanged?.(); // wakes the runner for the interpretation jobs the switch queued
+      }
       return {
         autoVerify: readAutoVerify(options.db),
         autoDispute: readAutoDispute(options.db),
         wikiSummary: readWikiSummary(options.db),
+        insightInterpret: readInsightInterpret(options.db),
       };
     },
     providers: async () => providerList(options),

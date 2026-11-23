@@ -71,7 +71,12 @@ describe("semantic settings API", () => {
     const res = await read();
     expect(res).toEqual({
       status: 200,
-      body: { autoVerify: false, autoDispute: false, wikiSummary: false },
+      body: {
+        autoVerify: false,
+        autoDispute: false,
+        wikiSummary: false,
+        insightInterpret: false,
+      },
     });
     expect(readSetting(db, AUTO_VERIFY_SETTING)).toBeUndefined();
   });
@@ -83,23 +88,27 @@ describe("semantic settings API", () => {
       autoVerify: true,
       autoDispute: false,
       wikiSummary: false,
+      insightInterpret: false,
     });
     expect(readSetting(db, AUTO_VERIFY_SETTING)).toBe("on");
     expect((await read()).body).toEqual({
       autoVerify: true,
       autoDispute: false,
       wikiSummary: false,
+      insightInterpret: false,
     });
     expect((await write({ autoVerify: false })).body).toEqual({
       autoVerify: false,
       autoDispute: false,
       wikiSummary: false,
+      insightInterpret: false,
     });
     expect(readSetting(db, AUTO_VERIFY_SETTING)).toBe("off");
     expect((await read()).body).toEqual({
       autoVerify: false,
       autoDispute: false,
       wikiSummary: false,
+      insightInterpret: false,
     });
   });
 
@@ -108,12 +117,14 @@ describe("semantic settings API", () => {
       autoVerify: false,
       autoDispute: true,
       wikiSummary: false,
+      insightInterpret: false,
     });
     expect(readSetting(db, "semantic.autoDispute")).toBe("on");
     expect((await write({ autoVerify: true })).body).toEqual({
       autoVerify: true,
       autoDispute: true,
       wikiSummary: false,
+      insightInterpret: false,
     });
   });
 
@@ -125,6 +136,15 @@ describe("semantic settings API", () => {
     expect((await write({ autoVerify: false })).body).toMatchObject({ wikiSummary: true });
   });
 
+  it("insightInterpret (P01-R17) is off by default, round-trips, and is left alone when the request omits it", async () => {
+    expect((await read()).body).toMatchObject({ insightInterpret: false });
+    expect((await write({ autoVerify: false, insightInterpret: true })).body).toMatchObject({
+      insightInterpret: true,
+    });
+    expect(readSetting(db, "insight.interpret")).toBe("on");
+    expect((await write({ autoVerify: false })).body).toMatchObject({ insightInterpret: true });
+  });
+
   it("is still on after the app restarts", async () => {
     await write({ autoVerify: true });
     await server.close();
@@ -134,6 +154,7 @@ describe("semantic settings API", () => {
       autoVerify: true,
       autoDispute: false,
       wikiSummary: false,
+      insightInterpret: false,
     });
   });
 

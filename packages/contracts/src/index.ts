@@ -552,6 +552,8 @@ export const SemanticSettingsSchema = z.strictObject({
   autoDispute: z.boolean(),
   /** `wiki.summary` (K01-R12, R15): the Wiki's LLM summary, default off. */
   wikiSummary: z.boolean(),
+  /** `insight.interpret` (P01-R17): the LLM interpretation of active Insights, default off. */
+  insightInterpret: z.boolean(),
 });
 export type SemanticSettings = z.infer<typeof SemanticSettingsSchema>;
 /** The write: `autoDispute` left out means unchanged. */
@@ -559,6 +561,7 @@ export const SemanticSettingsRequestSchema = z.strictObject({
   autoVerify: z.boolean(),
   autoDispute: z.boolean().optional(),
   wikiSummary: z.boolean().optional(),
+  insightInterpret: z.boolean().optional(),
 });
 
 /**
