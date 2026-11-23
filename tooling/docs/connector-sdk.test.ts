@@ -1341,6 +1341,12 @@ describe("docs.connector-sdk (I06): chapters 2, 5, 6 and 7 carry what the creden
     expect(five).not.toContain("수집기는 실패를 두 종류의 오류로 알린다.");
   });
 
+  it("chapter 5 says a mismatched instance id is unavailable, never made, and its job held (I05F-R8, C7)", () => {
+    expect(chapter(docText, 5)).toContain(
+      "등록의 인스턴스 ID가 정본에 다른 종류로 묶여 있으면 그 인스턴스는 `unavailable`(사유 `instance-kind-mismatch`)이고, 제품은 그 수집기를 만들지도 초기화하지도 않는다. 그 수집 작업은 그 사유로 보류되며, 등록의 ID나 종류를 고쳐 다시 시작해 어긋남이 없어지면 풀린다.",
+    );
+  });
+
   it("chapter 6 lists the two scenario fields and the five codes they open, with the 4 second limit, as the testkit has them", () => {
     const six = chapter(docText, 6);
     const testkit = read("packages/testkit/src/connector.contract.ts");
