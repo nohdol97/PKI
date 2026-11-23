@@ -9,6 +9,7 @@ import type { ApiClient } from "./api.ts";
 import {
   ItemList,
   createExploreSession,
+  type ListState,
   Neighbourhood,
   searchMore,
   searchPage,

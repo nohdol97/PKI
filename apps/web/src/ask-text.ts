@@ -65,3 +65,5 @@ export function answerText(status: string, reason: string | null): string | null
 export const droppedText = (n: number): string =>
   `원문에서 인용을 확인하지 못해 버린 문장이 ${n}개 있습니다.`;
 export const failureText = (code: string): string => `질문을 처리하지 못했습니다: ${code}`;
+export const sourceFailureText = (reason: string): string =>
+  `원본을 불러오지 못했습니다: ${reason}`;

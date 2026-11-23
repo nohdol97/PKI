@@ -60,7 +60,7 @@ const ACTION_TEXT: Record<string, string> = {
 };
 /** A known action code in words; an unknown one as the code itself. */
 export const actionText = (action: string): string =>
-  Object.hasOwn(ACTION_TEXT, action) ? ACTION_TEXT[action] : action;
+  (Object.hasOwn(ACTION_TEXT, action) && ACTION_TEXT[action]) || action;
 
 export const ACTOR_TEXT = {
   user: "사용자",
