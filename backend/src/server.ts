@@ -107,6 +107,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { ASK_PATH, createAskRoute, type AskDeps } from "./ask-route.ts";
+import type { BackupApi } from "./backup-api.ts";
 import type { ConnectorManager, ConnectorRebuild } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import type { InstanceImporter } from "./imports.ts";
@@ -223,6 +224,8 @@ export interface ServerOptions {
    * it the approve, reject, dispute and undo routes answer `not-found`.
    */
   decisions?: UserDecisions;
+  /** The backup and restore routes' handlers (backup-api.ts, H01); without it they answer connector-unavailable. */
+  backup?: BackupApi;
   /** Milliseconds now, for the Provider check's reuse window (tests); default Date.now. */
   now?: () => number;
   /** X01-R5: the strategies the Ask route runs besides the always-on ones; default the code's list. A test passes another. */
@@ -1219,6 +1222,17 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     feedbackList: async () => feedback.list(),
     feedbackRecord: async (request) => feedback.record(request, serverTime()),
     feedbackUndo: async (request) => feedback.undo(request, serverTime()),
+    // H01-R15: backup files and the restore the next start applies
+    backupStatus: async () => options.backup?.status() ?? { error: "connector-unavailable" },
+    setBackupFolder: async (input) =>
+      options.backup?.setFolder(input) ?? { error: "connector-unavailable" },
+    createBackup: async (input) =>
+      options.backup?.create(input) ?? { error: "connector-unavailable" },
+    inspectRestore: async (input) =>
+      options.backup?.inspect(input) ?? { error: "connector-unavailable" },
+    restoreBackup: async (input) =>
+      options.backup?.restore(input) ?? { error: "connector-unavailable" },
+    cancelRestore: async () => options.backup?.cancel() ?? { error: "connector-unavailable" },
     // P02-R14, R16: notifications, their settings and the poll of change numbers
     notifications: async () => notify.list(),
     notificationDigest: async ({ id }) => notify.digest(id),

@@ -64,6 +64,18 @@ export {
 export * from "./local-lifecycle.ts";
 export * from "./thread.ts";
 export { databaseEncryption } from "./database-encryption.ts";
+export * from "./backup.ts";
+export {
+  BACKUP_EXTENSION,
+  BackupFileError,
+  MIN_PASSPHRASE_LENGTH,
+  openBackup,
+  openManifest,
+  readBackupHeader,
+  type BackupFileErrorCode,
+  type BackupHeader,
+  type ScryptCost,
+} from "./backup-file.ts";
 export {
   dataDirectory,
   ensureDataDirectory,
