@@ -109,6 +109,7 @@ export interface Connector {
 | `schemaVersion` | 예 | 정수 2, `manifest.schemaVersion`과 같아야 한다 |
 | `title`, `body` | 예 | 제목과 정규화된 본문 |
 | `blocks` | 아니오 | 본문 구간과 원래 형식의 위치(아래) |
+| `attachments` | 아니오 | 메일 첨부의 metadata 목록, 0~100개. 원소는 `{ name, mediaType, size }`: `name`은 1~255자로 제어 문자와 `/`, `\`를 담지 못하고(경로가 아니라 마지막 조각만 싣는다), `mediaType`은 127자 이하의 소문자 `type/subtype`(매개변수 없음), `size`는 0 이상의 정수 바이트다. 첨부의 **내용물은 싣지 않는다.** 한도를 넘으면 잘리지 않고 그 레코드가 `schema`로 거부된다. 제품은 `size`와 `mediaType`을 확인하지 않고 글자로만 보여 준다 |
 | `accessScope` | 아니오 | 누가 볼 수 있는지를 원 시스템의 말로 적은 문자열 목록. 비어 있지 않은 배열이고 원소도 빈 문자열이 아니다. 없으면 "알 수 없음"(`null`)이고 가장 엄격하게 다뤄진다. 수집기가 낸 원본이 범위가 없을 때는 배포처의 매핑이 `grade(null)`로 등급을 정한다(site-setup S08) |
 | `sourceType`, `sourceUrl`, `author`, `participants`, `threadId` | 아니오 | 출처 정보 |
 | `createdAt`, `updatedAt` | 아니오 | UTC 오프셋이 붙은 ISO-8601(`2026-01-05T09:00:00Z` 또는 `+09:00`) |
@@ -118,7 +119,7 @@ export interface Connector {
 
 ### block과 locator
 
-`blocks`는 본문의 **코드 포인트 구간** `[start, end)`과 원래 문서에서의 위치(locator)를 짝지은 목록이다. PDF 몇 쪽, 엑셀 어느 칸처럼 "근거를 원문에서 찾아 가는 데" 쓴다. 규칙은 구간이 `0 ≤ start < end ≤ 본문의 코드 포인트 수`이고, `start` 순으로 정렬되며, 서로 겹치지 않는 것이다(빈틈은 허용한다). 어기면 그 레코드가 `invalid-blocks`로 거부된다(`blocksValid`). locator는 `format`으로 여덟 형식(`pdf`, `docx`, `xlsx`, `csv`, `html`, `markdown`, `txt`, `json`)이 갈린다(`NativeLocatorSchema`). 메일·메신저·Wiki 글처럼 원래 자리가 따로 없으면 `blocks`를 생략한다. 그러면 근거는 본문의 구간만 갖는다.
+`blocks`는 본문의 **코드 포인트 구간** `[start, end)`과 원래 문서에서의 위치(locator)를 짝지은 목록이다. PDF 몇 쪽, 엑셀 어느 칸처럼 "근거를 원문에서 찾아 가는 데" 쓴다. 규칙은 구간이 `0 ≤ start < end ≤ 본문의 코드 포인트 수`이고, `start` 순으로 정렬되며, 서로 겹치지 않는 것이다(빈틈은 허용한다). 어기면 그 레코드가 `invalid-blocks`로 거부된다(`blocksValid`). locator는 `format`으로 여덟 형식(`pdf`, `docx`, `xlsx`, `csv`, `html`, `markdown`, `txt`, `json`)이 갈린다(`NativeLocatorSchema`). block에 `attachment`(0 이상의 정수)를 적으면 그 구간의 글이 `attachments`의 몇 번째 첨부에서 왔다는 뜻이고, locator는 그 첨부 **안에서의** 위치(예: PDF 3쪽)다. 순번이 목록 길이 이상이거나 `attachments`가 없으면 그 레코드가 `invalid-blocks`로 거부된다(`blocksValid`). 첨부의 글을 본문에 넣을지와 block으로 나눌지는 수집기가 정하며, 제품은 첨부 파일을 받지도 두지도 않는다. 메일·메신저·Wiki 글처럼 원래 자리가 따로 없으면 `blocks`를 생략한다. 그러면 근거는 본문의 구간만 갖는다.
 
 ### 이 장을 줄이면
 
@@ -949,6 +950,7 @@ pnpm --filter @pki/desktop build
 | `title`, `content` | `title`, `body` |
 | `access_scope` | `accessScope`(가져온 범위) |
 | `source_type`, `source_url`, `author`, `participants`, `thread_id`, `created_at`, `updated_at`, `metadata` | 같은 이름의 camelCase |
+| `attachments`(원소 `{ name, media_type, size }`) | `attachments`(원소 `{ name, mediaType, size }`). JSONL에는 block이 없으므로 첨부 안의 위치는 없다 |
 | `operation` | `Change.kind` |
 
 `operation`은 `upsert`, `delete`, `revoke`, `access-revoked` 넷이다. **`revoke`와 `access-revoked`는 다르다.** `revoke`는 `scope-change`(내용은 그대로이고 범위만 좁아짐)가 되어 원본을 지우지 않고, `access-revoked`는 tombstone이 되어 원본의 내용을 지운다. 사용자가 더는 볼 수 없는 원본은 `access-revoked`로 적는다. 줄이 사라진 것은 삭제가 아니다. 원본을 지우려면 `delete` 줄을 적어야 하고, 줄만 지우면 그 원본은 남는다.
