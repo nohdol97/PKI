@@ -320,8 +320,11 @@ describe("bundle: the example package's entry, as a fork's is (I05-C15, R17)", (
     const { modules, code } = await bundled(ENTRY, "production");
     expect(modules).toContain("backend/src/shell-options.production.ts");
     expect(modules).not.toContain("backend/src/shell-options.ts");
-    // the options the entry's argument parser knows: the origin only, no policy name and no test fixtures
-    expect(code).toMatch(/options: \{ origin: \{/);
+    // the options the entry's argument parser knows: the origin and the shell's user-data folder
+    // (I02B-R48), no policy name and no test fixtures; esbuild keeps the source's line breaks, so \s*
+    expect(code).toMatch(
+      /options: \{\s*origin: \{[^}]*\},\s*"user-data": \{ type: "string" \}\s*\}/,
+    );
     expect(code).not.toMatch(/"scope-policy": \{/);
     expect(code).not.toMatch(/fixtures: \{/);
     for (const text of ["fixtureConnectors", "createFixtureConnector"]) {

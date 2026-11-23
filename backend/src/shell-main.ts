@@ -80,6 +80,9 @@ export async function runShell(site: SiteRegistration): Promise<void> {
 
   async function start(token: string) {
     const dataDir = options.dataDir ?? dataDirectory();
+    // built apart so the boot call stays a literal with no spread (entries.swap.test.ts, V01-R17)
+    const excluded = options.userData ? [options.userData] : [];
+    const localFiles = { shellHost: normalizerHosts.spawner, excluded };
     const { server, db, providers, tickets } = await bootBackend({
       dataDir,
       connectors: options.connectors,
@@ -90,10 +93,7 @@ export async function runShell(site: SiteRegistration): Promise<void> {
       scopePolicy: options.scopePolicy,
       // the normalizer host is started by the shell for a utility process (I02B-R22, adapter ⓑ)
       // and the shell's user-data folder is no place for a location (I02B-R48)
-      localFiles: {
-        shellHost: normalizerHosts.spawner,
-        ...(options.userData ? { excluded: [options.userData] } : {}),
-      },
+      localFiles,
     });
     running = { server, providers, tickets, close: () => db.close() };
     return server.port;
