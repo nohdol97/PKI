@@ -85,8 +85,20 @@ function world() {
     cite({ factId: saved.id }, from);
     return saved.id;
   };
-  const relation = (subjectId: number, type: string, objectId: number) => {
-    const saved = saveRelation(db, { subjectId, type, objectId, ...attrs });
+  const relation = (
+    subjectId: number,
+    type: string,
+    objectId: number,
+    interval: { from: string | null; until: string | null } = { from: null, until: null },
+  ) => {
+    const saved = saveRelation(db, {
+      subjectId,
+      type,
+      objectId,
+      ...attrs,
+      validAt: interval.from,
+      validUntil: interval.until,
+    });
     cite({ relationId: saved.id }, from);
     return saved.id;
   };
@@ -224,6 +236,34 @@ describe("resolution.signals (S02-R9)", () => {
     const [a, b] = [w.person("Alpha"), w.item("Project", "Alpha")];
     w.fact(b, "role", "x");
     expect(signalsBetween(db, a, b)).toEqual([]);
+  });
+
+  it("organization-mismatch needs two known overlapping intervals: different organizations at the same time are a mismatch, at different times or with one interval unknown they are not (S02-R9, ⑦)", () => {
+    const w = world();
+    const [orgA, orgB] = [w.item("Organization", "Acme"), w.item("Organization", "Beta")];
+    const belongs = (person: number, org: number, from: string | null, until: string | null) =>
+      w.relation(person, "BELONGS_TO", org, { from, until });
+    const pair = (a: [string | null, string | null], b: [string | null, string | null]) => {
+      const [p, q] = [w.person("Kim"), w.person("Kim")];
+      belongs(p, orgA, ...a);
+      belongs(q, orgB, ...b);
+      return signalsBetween(db, p, q);
+    };
+    expect(pair(["2026-01-01", "2026-12-31"], ["2026-06-01", null])).toContain(
+      "organization-mismatch",
+    );
+    // [2026-01-01, 2026-06-01) and [2026-06-01, ...) share no day
+    expect(pair(["2026-01-01", "2026-06-01"], ["2026-06-01", null])).not.toContain(
+      "organization-mismatch",
+    );
+    expect(pair([null, null], ["2026-06-01", null])).not.toContain("organization-mismatch");
+    // the same organization at disjoint times is not a match either; with one interval unknown it is
+    const [p, q, r] = [w.person("Kim"), w.person("Kim"), w.person("Kim")];
+    belongs(p, orgA, "2026-01-01", "2026-03-01");
+    belongs(q, orgA, "2026-06-01", null);
+    belongs(r, orgA, null, null);
+    expect(signalsBetween(db, p, q)).not.toContain("organization-match");
+    expect(signalsBetween(db, p, r)).toContain("organization-match");
   });
 
   it("an interval overlaps another only when both are known and share a day (the stored-row cases are S02-T08's)", () => {
