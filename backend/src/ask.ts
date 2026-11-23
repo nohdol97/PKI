@@ -29,6 +29,8 @@ import {
   type UserActionIssuer,
 } from "@pki/providers";
 import type { DerivativeRegistry, SqlDriver } from "@pki/storage";
+import type { EmbeddingProvider } from "@pki/contracts";
+import { queryEmbedding } from "./ask-embedding.ts";
 import { createAskReads } from "./ask-read.ts";
 import { askQuestions } from "./ask-questions.ts";
 
@@ -44,7 +46,11 @@ export interface AskDeps {
   broker?: Pick<Broker, "call"> | undefined;
   issuer?: UserActionIssuer | undefined;
   /** The embedding provider and the vector index as the server holds them; none reports `vector` unavailable. */
-  vector?: VectorDeps | undefined;
+  vector?:
+    | (Omit<VectorDeps, "embedding"> & {
+        embedding: Pick<EmbeddingProvider, "status" | "embed" | "describe">;
+      })
+    | undefined;
   /** X01-R5: not the request's to set; a test or the evaluation runner passes another list. */
   enabled?: readonly StrategyName[] | undefined;
 }
@@ -65,7 +71,10 @@ export async function* ask(
     { connectorIds: request.connectorIds, from: request.from, to: request.to },
     {
       enabled: deps.enabled,
-      vector: deps.vector,
+      vector: deps.vector && {
+        ...deps.vector,
+        embedding: queryEmbedding(deps.vector.embedding),
+      },
       signal,
       preference: feedbackPreference(db, registry),
     },

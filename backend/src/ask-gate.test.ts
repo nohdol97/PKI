@@ -27,7 +27,14 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider, memoryDbTemplate, seedLegacyTombstone } from "@pki/testkit";
+import {
+  activateEmpty,
+  FakeEmbedder,
+  FakeProvider,
+  MemoryVectorIndex,
+  memoryDbTemplate,
+  seedLegacyTombstone,
+} from "@pki/testkit";
 import type { AskEvent, StructuredRequest } from "@pki/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ask } from "./ask.ts";
@@ -407,5 +414,40 @@ describe("ask.gate: the item preference reaches the ranking (X01-C5c)", () => {
     const after = await rank();
     expect(after[0]).toBe(target);
     expect([...after].sort()).toEqual([...before].sort());
+  });
+});
+
+describe("ask.gate: the question's embedding passes the egress policy (RVF-C1)", () => {
+  async function routeWith(egress: "local" | "external") {
+    const shown = source("자홍빛", ["open"]);
+    const embedder = new FakeEmbedder({ egress });
+    await embedder.prepare({ kind: "download" }, new AbortController().signal);
+    const index = new MemoryVectorIndex();
+    const { modelId, revision, dimension } = embedder.describe();
+    await activateEmpty(index, { modelId, revision, dimension });
+    const { deps } = backend();
+    const events = await run({
+      ...deps,
+      enabled: ["vector"],
+      vector: { embedding: embedder, index },
+    } as typeof deps);
+    const route = events.find((e) => e.type === "route");
+    return { embedder, shown, events, route: route?.type === "route" ? route.route : {} };
+  }
+
+  it("never calls an external embedder: `vector` is unavailable with the fixed reason and the keyword hits stay", async () => {
+    const { embedder, shown, events, route } = await routeWith("external");
+    expect(embedder.calls.embed).toHaveLength(0);
+    expect(route.vector).toMatchObject({
+      status: "unavailable",
+      reason: expect.stringContaining("embedding egress denied"),
+    });
+    expect(hitIds(events)).toEqual([shown.id]);
+  });
+
+  it("uses a local embedder", async () => {
+    const { embedder, route } = await routeWith("local");
+    expect(embedder.calls.embed).toHaveLength(1);
+    expect(route.vector).toMatchObject({ status: "used" });
   });
 });
