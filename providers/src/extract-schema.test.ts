@@ -1,15 +1,19 @@
-// S01-T08 `extract.v3` and S02-T02 `extract.v4` (schema part; S01-R17, S02-R4): the extraction answer
-// of schema version 4 holds items (thirteen types), facts (the dates and the identifiers, with the
-// validity interval and the context tag), the six relations, `terms` (surface forms), `definitions`
+// S01-T08 `extract.v3`, S02-T02 `extract.v4` and S03-T07 `extract.v5` (schema part; S01-R17, S02-R4, S03-R7): the
+// extraction answer of schema version 5 holds items (thirteen types and the analytical Dataset, Metric, Join),
+// facts (the dates, the identifiers and the analytical kinds, with the validity interval and the context tag),
+// the six relations and the four analytical ones, `terms` (surface forms), `definitions`
 // (of the kind definition or statement) and `proposedTypes`, and every fact, relation, term and
 // definition may carry a `confidence`. The schema checks the shape only; what the numbers and quotes
 // mean is judged by the handler (knowledge-engine). The names the instruction lists, the response
 // schema's closed lists, the knowledge-schema catalogue and the seed are compared here. All data is
 // synthetic.
-import { KNOWLEDGE_SCHEMA } from "@pki/contracts";
+import { KNOWLEDGE_SCHEMA, NOT_EXTRACTED_NAMES } from "@pki/contracts";
 import { describe, expect, it } from "vitest";
 import {
   EXTRACT_ALIAS_FACT_KINDS,
+  EXTRACT_ANALYTICAL_FACT_KINDS,
+  EXTRACT_ANALYTICAL_ITEM_TYPES,
+  EXTRACT_ANALYTICAL_RELATION_TYPES,
   EXTRACT_DEFINITION_FACT_KIND,
   EXTRACT_DEFINITION_KINDS,
   EXTRACT_DEFINITION_MAX_CODE_POINTS,
@@ -38,10 +42,10 @@ const v3 = {
   ],
 };
 
-describe("extract.v4: the schema", () => {
-  it("is version 4, the only extract version listed (a request for 3 is an unlisted version)", () => {
-    expect(EXTRACT_SCHEMA_VERSION).toBe(4);
-    expect(Object.keys(TASKS.extract)).toEqual(["4"]);
+describe("extract.v5: the schema", () => {
+  it("is version 5, the only extract version listed (a request for 4 is an unlisted version)", () => {
+    expect(EXTRACT_SCHEMA_VERSION).toBe(5);
+    expect(Object.keys(TASKS.extract)).toEqual(["5"]);
     expect(EXTRACT_DEFINITION_MAX_CODE_POINTS).toBe(500);
   });
 
@@ -99,6 +103,30 @@ describe("extract.v4: the schema", () => {
     expect(EXTRACT_STATEMENT_FACT_KIND).toBe("statement");
     expect([...EXTRACT_DEFINITION_KINDS]).toEqual(["definition", "statement"]);
     expect(EXTRACT_MAX_PROPOSED_TYPES).toBe(5);
+    // S03-R7: the analytical names are constants of their own (the table-source drop reads them)
+    expect([...EXTRACT_ANALYTICAL_ITEM_TYPES]).toEqual(["Dataset", "Metric", "Join"]);
+    expect([...EXTRACT_ANALYTICAL_FACT_KINDS].sort()).toEqual(
+      [
+        "dataset.role",
+        "dataset.grain",
+        "dataset.measure",
+        "dataset.dimension",
+        "dataset.time_dimension",
+        "metric.calculation",
+        "metric.unit",
+        "metric.version",
+        "metric.currency",
+        "metric.period",
+        "join.keys",
+        "join.cardinality",
+      ].sort(),
+    );
+    expect([...EXTRACT_ANALYTICAL_RELATION_TYPES]).toEqual([
+      "MEASURED_ON",
+      "JOIN_LEFT",
+      "JOIN_RIGHT",
+      "USES_JOIN",
+    ]);
   });
 
   it("takes confidence where S01-R17 puts it, and leaves its range to the handler", () => {
@@ -144,7 +172,7 @@ describe("extract.v4: the schema", () => {
       "a definition whose context is not text",
       { definitions: [{ ...v3.definitions[0], context: 3 }] },
     ],
-    ["an item type the prompt does not list", { items: [{ ...concept, type: "Metric" }] }],
+    ["an item type the prompt does not list", { items: [{ ...concept, type: "Milestone" }] }],
     [
       "a fact kind the facts array does not list",
       {
@@ -175,7 +203,17 @@ describe("extract.v4: the schema", () => {
 
   it("tells the Provider about the surface forms, the definitions and their limits", () => {
     const text = task.instructions;
-    for (const needle of ["Concept", "terms", "definitions", "500", "confidence", "data"]) {
+    for (const needle of [
+      "Concept",
+      "terms",
+      "definitions",
+      "500",
+      "confidence",
+      "data",
+      "JSON",
+      "verbatim",
+      "Metric",
+    ]) {
       expect(text).toContain(needle);
     }
   });
@@ -183,15 +221,18 @@ describe("extract.v4: the schema", () => {
 
 // S02-R4: what the instruction lists, what the response schema allows, the catalogue and the seed are the
 // same names. The catalogue's entries of edition 1 that extraction writes are the seed this schema names.
-const seedNames = (list: readonly { name: string; since?: number; notExtracted?: true }[]) =>
-  list.filter((e) => (e.since ?? 1) <= 1 && !e.notExtracted).map((e) => e.name);
+const seedNames = (list: readonly { name: string; notExtracted?: true }[]) =>
+  list.filter((e) => !e.notExtracted).map((e) => e.name);
 const factKindNames = [
   ...EXTRACT_FACT_KINDS,
   ...EXTRACT_IDENTIFIER_FACT_KINDS,
   ...EXTRACT_ALIAS_FACT_KINDS,
   EXTRACT_DEFINITION_FACT_KIND,
   EXTRACT_STATEMENT_FACT_KIND,
+  ...EXTRACT_ANALYTICAL_FACT_KINDS,
 ];
+const itemTypeNames = [...EXTRACT_ITEM_TYPES, ...EXTRACT_ANALYTICAL_ITEM_TYPES];
+const relationTypeNames = [...EXTRACT_RELATION_TYPES, ...EXTRACT_ANALYTICAL_RELATION_TYPES];
 interface JsonSchema {
   properties: Record<
     string,
@@ -202,53 +243,53 @@ interface JsonSchema {
 }
 const schema = task.outputJsonSchema as unknown as JsonSchema;
 
-describe("extract.v4: the instruction, the response schema, the catalogue and the seed are one list", () => {
+describe("extract.v5: the instruction, the response schema, the catalogue and the seed are one list", () => {
   it("lists in the instruction every seeded name extraction writes, and no more than the seed's", () => {
     const text = task.instructions;
     for (const name of [
-      ...EXTRACT_ITEM_TYPES,
-      ...EXTRACT_RELATION_TYPES,
+      ...itemTypeNames,
+      ...relationTypeNames,
       ...EXTRACT_IDENTIFIER_FACT_KINDS,
       ...EXTRACT_FACT_KINDS,
+      ...EXTRACT_ANALYTICAL_FACT_KINDS,
       EXTRACT_STATEMENT_FACT_KIND,
     ]) {
       expect(text, name).toContain(name);
     }
-    // a name of the catalogue that extraction does not write (S03's analytical types) is not in it
-    for (const e of [
-      ...KNOWLEDGE_SCHEMA.knowledgeTypes,
-      ...KNOWLEDGE_SCHEMA.relationTypes,
-      ...KNOWLEDGE_SCHEMA.factKinds,
-    ].filter((e) => (e.since ?? 1) > 1)) {
-      expect(text, e.name).not.toContain(e.name);
-    }
+    // a name of the catalogue that extraction never writes (`dataset.column`, S03-R2) is not in it
+    expect(NOT_EXTRACTED_NAMES.length).toBeGreaterThan(0);
+    for (const name of NOT_EXTRACTED_NAMES) expect(text, name).not.toContain(name);
   });
 
   it("closes the response schema's item types, relation types and fact kinds on the same names", () => {
     const items = schema.properties.items?.items?.properties.type?.enum;
     const relations = schema.properties.relations?.items?.properties.type?.enum;
     const facts = schema.properties.facts?.items?.properties.kind?.enum;
-    expect([...(items ?? [])].sort()).toEqual([...EXTRACT_ITEM_TYPES].sort());
-    expect([...(relations ?? [])].sort()).toEqual([...EXTRACT_RELATION_TYPES].sort());
+    expect([...(items ?? [])].sort()).toEqual([...itemTypeNames].sort());
+    expect([...(relations ?? [])].sort()).toEqual([...relationTypeNames].sort());
     expect([...(facts ?? [])].sort()).toEqual(
-      [...EXTRACT_FACT_KINDS, ...EXTRACT_IDENTIFIER_FACT_KINDS].sort(),
+      [
+        ...EXTRACT_FACT_KINDS,
+        ...EXTRACT_IDENTIFIER_FACT_KINDS,
+        ...EXTRACT_ANALYTICAL_FACT_KINDS,
+      ].sort(),
     );
   });
 
-  it("equals the catalogue's names of edition 1 that extraction writes, which are the seed (S01-R18)", () => {
-    expect([...EXTRACT_ITEM_TYPES].sort()).toEqual(
+  it("equals the catalogue's names that extraction writes, which are the seed (S01-R18, S03-R7)", () => {
+    expect([...itemTypeNames].sort()).toEqual(
       seedNames(
         KNOWLEDGE_SCHEMA.knowledgeTypes.filter((e) => e.place === "type-definition"),
       ).sort(),
     );
-    expect([...EXTRACT_RELATION_TYPES].sort()).toEqual(
+    expect([...relationTypeNames].sort()).toEqual(
       seedNames(KNOWLEDGE_SCHEMA.relationTypes.filter((e) => e.place === "type-definition")).sort(),
     );
     expect([...factKindNames].sort()).toEqual(seedNames(KNOWLEDGE_SCHEMA.factKinds).sort());
   });
 });
 
-describe("extract.v4: the new fields", () => {
+describe("extract.v5: the new fields", () => {
   const person = { ref: "p", type: "Person", name: "한서윤", existingItemId: null };
   const key = {
     item: "p",
@@ -324,7 +365,7 @@ describe("extract.v4: the new fields", () => {
       { relations: [{ subject: "p", type: "MENTIONS", object: "p", quote: "q" }] },
     ],
     ["a validity end that is not text", { facts: [{ ...key, validUntil: 2026 }] }],
-    ["an item type of S03", { items: [{ ...person, type: "Dataset" }] }],
+    ["an item type the prompt does not list", { items: [{ ...person, type: "Milestone" }] }],
   ])("rejects %s", (_name, patch) => {
     expect(parse({ ...base, ...patch }).success).toBe(false);
   });

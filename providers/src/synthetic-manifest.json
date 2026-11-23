@@ -90,6 +90,11 @@
     "source": "eval/golden/sources/wiki.jsonl"
   },
   {
+    "hash": "25bf7707a5691e601c29ec79d51ac1450559b45b937c36a3b3db4d1379162058",
+    "malicious": false,
+    "source": "fixtures/s03-analytical.jsonl"
+  },
+  {
     "hash": "26009ea7165c9a4de8cd341fb86a624701851f4751bfa2006dcc99fff72ca7bc",
     "malicious": false,
     "source": "eval/golden/sources/mail.jsonl"
@@ -213,6 +218,11 @@
     "hash": "403b82df75cdec329c7243b6ea4bbb2e8689f58268180c32f67566d76e51f023",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "406a20841fd166c4292c01ab6f51dad891b8b05aded003ef1b5feedc5581b659",
+    "malicious": false,
+    "source": "fixtures/s03-analytical.jsonl"
   },
   {
     "hash": "4321ae8ed18affec68afa0848ce3e7869668adc2dbf3299293e049dc9b741742",
@@ -460,6 +470,11 @@
     "source": "eval/golden/sources/mail.jsonl"
   },
   {
+    "hash": "8ccb8b65d13a58107ff290f1fdf07a159bb4a682be1f86a9b79cda78c2d2f4eb",
+    "malicious": false,
+    "source": "fixtures/s03-analytical.jsonl"
+  },
+  {
     "hash": "8d96ff42b036dcce0c7b978a5bc8e2d6bd47fa5ed9e007eb1d533ce7591e0644",
     "malicious": false,
     "source": "eval/golden/sources/mail.jsonl"
@@ -528,6 +543,11 @@
     "hash": "a37d59380762a5ef93c3a88803d3ad78aba91c75914e63a1487d70bd3c3b1ee5",
     "malicious": false,
     "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "a3b50a6ab5b04f52e95b4877ca09431b562492f1d2b79f09bba9287ab252f0cc",
+    "malicious": false,
+    "source": "fixtures/s03-analytical.jsonl"
   },
   {
     "hash": "a3e2a7f0843cd0713c7e4a04da0ee795caa9a7bf62e8ad17748a6fd097758521",
@@ -653,6 +673,11 @@
     "hash": "c7ed82117351f9593ab346e043b8e30fc088769728ba5355db04bccc591ccd0a",
     "malicious": false,
     "source": "eval/golden/sources/wiki.jsonl"
+  },
+  {
+    "hash": "c8506a81be53801d092c74e5eb979eff6bb8415f82970ebb29deb28193b651c2",
+    "malicious": false,
+    "source": "fixtures/s03-analytical.jsonl"
   },
   {
     "hash": "cd3769f7551d76d86389b243a5e6f44603322a73b512c1511f2ef24ea0bfdca7",

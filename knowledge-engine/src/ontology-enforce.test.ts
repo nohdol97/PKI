@@ -9,6 +9,9 @@ import {
   createBroker,
   createUserActionLedger,
   EXTRACT_ALIAS_FACT_KINDS,
+  EXTRACT_ANALYTICAL_FACT_KINDS,
+  EXTRACT_ANALYTICAL_ITEM_TYPES,
+  EXTRACT_ANALYTICAL_RELATION_TYPES,
   EXTRACT_DEFINITION_FACT_KIND,
   EXTRACT_FACT_KINDS,
   EXTRACT_IDENTIFIER_FACT_KINDS,
@@ -532,49 +535,28 @@ describe("ontology.enforce: the seed and the prompt's lists (S01-R18)", () => {
     ).toMatchObject({ valueType: "text", cardinality: "many" });
   });
 
-  it("is the prompt's lists plus the seeded names the prompt does not list yet, a closed list: S01-T08 put Concept, definition and alias.* into the prompt, S02-T02 the rest of S02's catalogue", () => {
-    // The seeded names the prompt does not list: S03's analytical names (S03-R2, the analytical migration).
-    // S03-T07 puts them into the prompt and empties this list; every S02 name is in the prompt.
-    const notYet = {
-      "item-type": ["Dataset", "Metric", "Join"],
-      "fact-kind": [
-        "dataset.role",
-        "dataset.grain",
-        "dataset.measure",
-        "dataset.dimension",
-        "dataset.time_dimension",
-        "metric.calculation",
-        "metric.unit",
-        "metric.version",
-        "metric.currency",
-        "metric.period",
-        "join.keys",
-        "join.cardinality",
-      ],
-      "relation-type": ["MEASURED_ON", "JOIN_LEFT", "JOIN_RIGHT", "USES_JOIN"],
-    };
+  it("is the prompt's lists, a closed list: S01-T08 put Concept, definition and alias.* into the prompt, S02-T02 the rest of S02's catalogue, S03-T07 the analytical names", () => {
+    // `dataset.column` is seeded and never extracted (S03-R2): the catalogue says so
     const prompt = {
-      "item-type": [...EXTRACT_ITEM_TYPES] as string[],
+      "item-type": [...EXTRACT_ITEM_TYPES, ...EXTRACT_ANALYTICAL_ITEM_TYPES] as string[],
       "fact-kind": [
         ...EXTRACT_FACT_KINDS,
         ...EXTRACT_IDENTIFIER_FACT_KINDS,
         ...EXTRACT_ALIAS_FACT_KINDS,
         EXTRACT_DEFINITION_FACT_KIND,
         EXTRACT_STATEMENT_FACT_KIND,
+        ...EXTRACT_ANALYTICAL_FACT_KINDS,
       ] as string[],
-      "relation-type": [...EXTRACT_RELATION_TYPES] as string[],
+      "relation-type": [
+        ...EXTRACT_RELATION_TYPES,
+        ...EXTRACT_ANALYTICAL_RELATION_TYPES,
+      ] as string[],
     };
     for (const kind of ["item-type", "fact-kind", "relation-type"] as const) {
-      // `dataset.column` is seeded and never extracted (S03-R2): the catalogue says so
       const names = seed(kind)
         .map((e) => e.name)
         .filter((name) => !NOT_EXTRACTED_NAMES.includes(name));
-      expect([...names].sort(), kind).toEqual([...prompt[kind], ...notYet[kind]].sort());
-      // a name is in the prompt or in the list, never both
-      expect(
-        prompt[kind].filter((n) => notYet[kind].includes(n)),
-        kind,
-      ).toEqual([]);
+      expect([...names].sort(), kind).toEqual([...prompt[kind]].sort());
     }
     for (const name of ["Concept", "definition", ...EXTRACT_ALIAS_FACT_KINDS]) {
       expect([...prompt["item-type"], ...prompt["fact-kind"]]).toContain(name);
