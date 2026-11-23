@@ -303,3 +303,16 @@ describe("graph.scope-crossing (S02-R24)", () => {
     ).not.toThrow();
   });
 });
+
+describe("graph.paths cap cost (S02 decision 31 ④)", () => {
+  it("a 40-item clique at depth 3 is cut at the cap and answers in bounded time", () => {
+    const k = fresh();
+    const ids = Array.from({ length: 40 }, (_, i) => k.item(`n${i}`));
+    for (let i = 0; i < ids.length; i++)
+      for (let j = i + 1; j < ids.length; j++) k.relation(ids[i] as number, "RELATES_TO", ids[j] as number);
+    const t0 = Date.now();
+    const read = relationPaths(k.db, open, { from: ids[0] as number, depth: 3 }, "display");
+    expect(read).toMatchObject({ status: "ok", truncated: true });
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+});

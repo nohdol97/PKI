@@ -134,9 +134,14 @@ function groupView(db: SqlDriver, judge: GraphJudge) {
     entityGroups
       .membersOf(db, top)
       .filter((m) => topOf(m) === top && (m === top || isShown(ref("item", m))));
+  const lineages = new Map<number, SourceVersionRef[]>();
   const groupLineage = (top: number): SourceVersionRef[] => {
+    const known = lineages.get(top);
+    if (known) return known;
     const members = membersOfTop(top);
-    return members.length > 1 ? lineageOfItems(db, members) : [];
+    const read = members.length > 1 ? lineageOfItems(db, members) : [];
+    lineages.set(top, read);
+    return read;
   };
   return { topOf, membersOfTop, groupLineage };
 }
@@ -276,6 +281,8 @@ export function relationPaths(
     }
     kept.push(...next);
     reached = next;
+    // paths are cut shortest first, so once the matching ones pass the cap no deeper level can be shown
+    if (kept.filter((w) => target === undefined || w.tops.at(-1) === target).length > GRAPH_PATH_LIMIT) break;
   }
   const order = (a: number[], b: number[]) => {
     for (let i = 0; i < Math.min(a.length, b.length); i++) {
