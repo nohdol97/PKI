@@ -293,7 +293,10 @@ describe("engine.restart", () => {
       });
       await post(routes.importJsonl.path, { text: read("v02-mail.jsonl") });
       await booted.runner.wake(); // no drain: the close below delivers what is queued
-      expect(booted.db.all("SELECT status FROM jobs")).toEqual([{ status: "succeeded" }]);
+      // K01: the Wiki's own `wiki-build` jobs are not the extraction jobs counted here
+      expect(booted.db.all("SELECT status FROM jobs WHERE kind <> 'wiki-build'")).toEqual([
+        { status: "succeeded" },
+      ]);
       expect(booted.db.all("SELECT value FROM facts")).toEqual([{ value: "2026-12-05" }]);
       await booted.server.close();
       booted.db.close();
@@ -694,7 +697,10 @@ describe("a stale engine through the product's wiring (review R2-1)", () => {
       await post(routes.importJsonl.path, { text: read("v02-mail.jsonl") });
       await booted.projections.drain(); // the upsert failed: the engine is stale now
       await booted.runner.wake();
-      expect(db.all("SELECT status FROM jobs")).toEqual([{ status: "succeeded" }]);
+      // K01: the Wiki's own `wiki-build` jobs are not the extraction jobs counted here
+      expect(db.all("SELECT status FROM jobs WHERE kind <> 'wiki-build'")).toEqual([
+        { status: "succeeded" },
+      ]);
       expect(endpoint.completions()).toBe(1); // extraction ran
       expect(propose).not.toHaveBeenCalled();
       expect(db.all("SELECT count(*) AS n FROM facts")).toEqual([{ n: 0 }]);

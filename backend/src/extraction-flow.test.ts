@@ -107,7 +107,8 @@ const cliDouble = () =>
     detect: async () => ({ installed: true, version: VERSION }),
     answer: fixtureExtraction(),
   });
-const jobs = () => db.all("SELECT status, reason FROM jobs ORDER BY id");
+// K01: the Wiki's own `wiki-build` jobs are not what this file's jobs are about
+const jobs = () => db.all("SELECT status, reason FROM jobs WHERE kind <> 'wiki-build' ORDER BY id");
 
 describe("flow.insight", () => {
   it("links A and B across the three imported sources into one inferred Insight with three evidence", async () => {
@@ -198,7 +199,7 @@ describe("held extraction", () => {
     await runner.wake(); // the release woke it already; this waits for the drain
     expect(provider.requests).toHaveLength(3);
     expect(jobs().map((j) => j.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
-    expect(db.all("SELECT count(*) AS n FROM jobs")).toEqual([{ n: 3 }]); // same rows
+    expect(db.all("SELECT count(*) AS n FROM jobs WHERE kind <> 'wiki-build'")).toEqual([{ n: 3 }]); // same rows
     expect(db.all("SELECT state FROM insights")).toEqual([{ state: "active" }]);
   });
 

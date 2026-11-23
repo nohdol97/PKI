@@ -116,8 +116,11 @@ function cliDouble(counter?: { queries: number }) {
     answer: fixtureExtraction(),
   });
 }
-const jobs = () => db.all("SELECT status, reason, attempts FROM jobs ORDER BY id");
-const ids = () => db.all("SELECT id FROM jobs ORDER BY id").map((r) => r.id as number);
+// K01: the Wiki's own `wiki-build` jobs are not what this file's jobs are about
+const jobs = () =>
+  db.all("SELECT status, reason, attempts FROM jobs WHERE kind <> 'wiki-build' ORDER BY id");
+const ids = () =>
+  db.all("SELECT id FROM jobs WHERE kind <> 'wiki-build' ORDER BY id").map((r) => r.id as number);
 
 async function api(pipe: ReturnType<typeof pipeline>, wake = true) {
   server = await startServer({

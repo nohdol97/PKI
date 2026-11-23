@@ -106,3 +106,21 @@ export {
   type PathQuery,
   type TraceStart,
 } from "./graph-read.ts";
+export {
+  createWikiBuildHandler,
+  planWikiBuild,
+  type WikiBuildOptions,
+  type WikiBuildPlan,
+  type WikiBuildResult,
+} from "./wiki-build-job.ts";
+export { WIKI_PAGE_KIND, WIKI_PAGE_KIND_NAME } from "./wiki-kind.ts";
+export {
+  PAGE_KINDS,
+  pageKindOfType,
+  renderWikiPages,
+  type ClaimRef,
+  type PageKind,
+  type RenderedWikiPage,
+  type WikiClaim,
+  type WikiPageBody,
+} from "./wiki-render.ts";

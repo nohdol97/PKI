@@ -32,6 +32,7 @@ import { SecretField } from "./secret-field.tsx";
 import { nextSyncStops } from "./connector-text.ts";
 import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
+import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { invalidationText } from "./job-text.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
@@ -45,12 +46,24 @@ import {
   vectorIndexText,
 } from "./status-text.ts";
 
-const SCREENS = { home: "홈", sources: "원본", activity: "활동", settings: "설정" } as const;
+const SCREENS = {
+  home: "홈",
+  sources: "원본",
+  wiki: "위키",
+  activity: "활동",
+  settings: "설정",
+} as const;
 type Screen = keyof typeof SCREENS;
 
 export function App({ api }: { api: ApiClient }) {
   const [screen, setScreen] = useState<Screen>("home");
-  const Current = { home: Home, sources: Sources, activity: Activity, settings: Settings }[screen];
+  const Current = {
+    home: Home,
+    sources: Sources,
+    wiki: Wiki,
+    activity: Activity,
+    settings: Settings,
+  }[screen];
   return (
     <>
       <nav>

@@ -82,6 +82,8 @@ import {
   readSemanticHistory,
   readSemanticState,
   readSetting,
+  requestWikiBuild,
+  requestWikiRebuild,
   rootOf,
   schemaVersion,
   writeSetting,
@@ -106,6 +108,7 @@ import { ledgerStatus } from "./ledger-status.ts";
 import { jobsApi, type JobsPort } from "./jobs-view.ts";
 import type { LocalLocations } from "./local-locations.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
+import { createWikiReads } from "./wiki-read.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
@@ -570,6 +573,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
   const entries = options.entries ?? defaultEntries;
   const registry = options.registry ?? defaultReadRegistry;
   const gate = createReadGate(options.db, registry);
+  const wiki = createWikiReads(options.db, registry, gate);
+  /** K01-R5: a Wiki read finds the pages behind and queues the one build; the runner is woken for it. */
+  const queueWikiBuild = () => {
+    if (requestWikiBuild(options.db).status === "registered") options.onRunConditionsChanged?.();
+  };
   /**
    * The rule "의존 업무 지연" judged again over the items a user action bore on, in the action's own
    * transaction (S01-R15): an approval, a rejection, a fix or an undo changes what the rule reads, and
@@ -1079,6 +1087,23 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       ontologyAction(id, (decisions, at) => decisions.ontology.decide(options.db, id, action, at)),
     ontologyUndo: async ({ id }) =>
       ontologyAction(id, (decisions, at) => decisions.ontology.undo(options.db, id, at)),
+    // K01-R15: the Wiki. A read queues the build when pages are behind; an edit lays over the pages at read
+    wiki: async () => {
+      queueWikiBuild();
+      return wiki.index();
+    },
+    wikiPage: async ({ key }) => {
+      queueWikiBuild();
+      return wiki.page(key) ?? { error: "not-found" as const };
+    },
+    wikiEdit: async (edit) => wiki.edit(edit, serverTime()),
+    wikiRebuild: async () => {
+      const requested = requestWikiRebuild(options.db);
+      if (requested.status === "registered") options.onRunConditionsChanged?.();
+      return {
+        status: requested.status === "registered" ? ("queued" as const) : ("open" as const),
+      };
+    },
   };
 }
 
@@ -1109,6 +1134,7 @@ async function handle(
   name: RouteName,
   req: IncomingMessage,
   res: ServerResponse,
+  afterWrite: () => void,
 ) {
   const route = routes[name];
   let input: unknown;
@@ -1136,6 +1162,8 @@ async function handle(
       ...(error === "approval-rejected" && typeof code === "string" ? { code } : {}),
     });
   }
+  // a write that succeeded may have left the Wiki's pages behind (K01-R5)
+  if (route.method === "POST") afterWrite();
   // Responses are checked against the shared schema before they leave.
   reply(res, 200, routes[name].response.parse(result));
 }
@@ -1162,6 +1190,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // Preparations still running when the server closes are aborted; an aborted one leaves no model.
   const preparations = new Set<AbortController>();
   const handlers = createHandlers(options, preparations);
+  // K01-R5: queued without a wake: a write's own route wakes the runner when it should (the import waits for the
+  // engine's delivery, review F6), and a wake here would claim the import's extraction before the proposal exists
+  const afterWrite = () => void requestWikiBuild(options.db);
   let selfHost = "";
 
   const server = createServer((req, res) => {
@@ -1186,7 +1217,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     }
     // Last resort: any handler failure answers a generic 500. The log names the route
     // and a known error class only; messages can carry content (ADR 0008, V01-R13).
-    handle(handlers, match, req, res).catch((error: unknown) => {
+    handle(handlers, match, req, res, afterWrite).catch((error: unknown) => {
       log("route-failed", { route: match, error: errorClass(error) });
       reject(res, 500, "internal-error");
     });

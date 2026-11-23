@@ -12,7 +12,8 @@ import {
   type RouteName,
 } from "@pki/contracts";
 import { OPENAI_BASE_URL_SETTING, writeDefaultProvider } from "@pki/providers";
-import { migrate, userDecisions } from "@pki/storage";
+import { planWikiBuild } from "@pki/knowledge-engine";
+import { commitDerived, migrate, userDecisions } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -166,11 +167,21 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     // the graph reads (S02-T09): set in beforeAll, an item of the user's own, which is shown and has no rows yet
     graphTrace: { kind: "item", id: 1 },
     graphPaths: { from: 1, depth: 2 },
+    // the Wiki (K01-T1): the page and the note's key are set in beforeAll, once the seed's pages are built
+    wikiPage: { key: "" },
+    wikiEdit: { op: "note-add", key: "", text: "합성 메모" },
+    wikiRebuild: {},
   };
 
   beforeAll(async () => {
     migrate(db);
     await seedV02(db, ["plain"]);
+    // the pages of the seed: the Wiki routes read what the build wrote
+    const built = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: built.items }));
+    const pageKey = db.all("SELECT key FROM wiki_pages ORDER BY key LIMIT 1")[0]?.key as string;
+    requests.wikiPage = { key: pageKey };
+    requests.wikiEdit = { op: "note-add", key: pageKey, text: "합성 메모" };
     // two items the user made and the line that merges them: the unmerge route's body, and a distinct mark's two ends
     const made = ["병합 시험 가", "병합 시험 나"].map((name) => {
       const added = userDecisions.add(db, { kind: "item", type: "Concept", name });

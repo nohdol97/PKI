@@ -22,6 +22,7 @@ const KIND: Readonly<Record<string, string>> = {
   maintenance: "정리",
   "projection-remove": "투영 제거",
   "projection-rebuild": "투영 재구축",
+  "wiki-build": "위키 만들기",
 };
 export const kindText = (kind: string): string => KIND[kind] ?? kind;
 

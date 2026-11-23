@@ -61,6 +61,7 @@ import {
   createExtractHandler,
   createProductRegistry,
   createProjections,
+  createWikiBuildHandler,
   dependencyDelayReceiver,
   derivativeRegistry,
   ENGINE_KIND,
@@ -84,6 +85,8 @@ import {
   onMembershipChanged,
   listLocations,
   prepareCanonicalDb,
+  requestWikiBuild,
+  WIKI_BUILD_KIND,
   type DerivativeRegistry,
   type MembershipListener,
   type ScopePolicy,
@@ -472,6 +475,8 @@ export function productRunner(
     // a collector job whose sync stopped on a replaced object goes back at once, on the new one (I06-R10)
     onRunEnded: (job) => void replaced.delete(replacedKey(job)), // a mark does not outlive its run
     onClosed: (job, status) => {
+      // K01-R5: a job that closed may have left the Wiki's pages behind: queue the one build; the drain claims it
+      if (requestWikiBuild(db).status === "registered") void runner.wake();
       const manager = options.connectors?.();
       const stoppedOnReplaced = replaced.delete(replacedKey(job));
       if (
@@ -497,6 +502,11 @@ export function productRunner(
         ...(clock ? { now: () => new Date(clock.now()) } : {}),
       }),
       [MAINTENANCE_KIND]: createMaintenanceHandler({ db, ...(clock ? { clock } : {}) }),
+      // K01-R4: no Provider is called; no source, so no fence
+      [WIKI_BUILD_KIND]: createWikiBuildHandler({
+        db,
+        ...(clock ? { now: () => new Date(clock.now()) } : {}),
+      }),
       ...(options.connectors
         ? {
             [CONNECTOR_SYNC_KIND]: createConnectorSyncHandler({

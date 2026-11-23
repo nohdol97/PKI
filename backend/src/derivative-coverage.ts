@@ -76,6 +76,15 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   // of a data check. The registered kind `analytical-check` deletes the first with its source
   dataset_tables: kind("analytical-check"),
   analytical_checks: kind("analytical-check"),
+  // the Wiki projection (K01-T1): pages, their lineage, links and the user's edits are the registered kind
+  // `wiki-page`'s (a deletion rewrites or deletes them in its own transaction; a hide goes with its fact by
+  // the foreign key); the change log and the one-row state hold no content and name no row of a kind
+  wiki_pages: kind("wiki-page"),
+  wiki_page_lineage: kind("wiki-page"),
+  wiki_links: kind("wiki-page"),
+  wiki_edits: kind("wiki-page"),
+  wiki_log: operational("page keys, counts and times of the Wiki's changes, no content (K01-R6)"),
+  wiki_state: operational("one row: the Wiki's input and built sequence numbers (K01-R5)"),
   jobs: operational("work queue: a row names a source by id and holds no content"),
   schedules: operational("periods of the schedule (I03)"),
   consents: operational("the user's consent per Provider"),
