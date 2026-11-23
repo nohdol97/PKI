@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
 import {
   ItemList,
+  createExploreSession,
   Neighbourhood,
   searchMore,
   searchPage,
@@ -46,6 +47,7 @@ const center: Center = {
   facts: [
     {
       id: 5,
+      itemId: 1,
       kind: "memo",
       value: "나중",
       context: null,
@@ -55,6 +57,7 @@ const center: Center = {
     },
     {
       id: 4,
+      itemId: 1,
       kind: "memo",
       value: "처음",
       context: null,
@@ -64,11 +67,22 @@ const center: Center = {
     },
     {
       id: 6,
+      itemId: 1,
       kind: "memo",
       value: "시점 모름",
       context: null,
       validAt: null,
       validUntil: null,
+      ...row,
+    },
+    {
+      id: 7,
+      itemId: 1,
+      kind: "memo",
+      value: "끝만 있음",
+      context: null,
+      validAt: null,
+      validUntil: "2026-12-31",
       ...row,
     },
   ],
@@ -196,12 +210,37 @@ describe("이웃과 타임라인 (X02-C3a ③~⑤)", () => {
       "fact4",
       "relation8",
       "fact5",
+      "fact7",
       "fact6",
     ]);
     const out = neighbourhood();
     expect(out.indexOf("처음")).toBeLessThan(out.indexOf("나중"));
     expect(out.indexOf("나중")).toBeLessThan(out.indexOf("시점 모름"));
     expect(out).toContain("시점 없음");
+  });
+
+  it("shows a row with only an end date with its 까지 date, after the dated rows and outside 시점 없음 (X02F-C3)", () => {
+    const out = neighbourhood();
+    expect(out).toContain("2026-12-31까지");
+    expect(out.indexOf("나중")).toBeLessThan(out.indexOf("끝만 있음"));
+    expect(out.indexOf("끝만 있음")).toBeLessThan(out.indexOf("시점 없음"));
+  });
+
+  it("shows the alias of a found item next to its name as text (X02F-C3)", () => {
+    const out = renderToStaticMarkup(
+      <ItemList
+        state={{
+          status: "ready",
+          items: [{ id: 1, type: "Project", name: "미리내", alias: "<i>별칭</i>" }],
+          next: null,
+          query: "별",
+        }}
+        onOpen={noop}
+        onMore={noop}
+      />,
+    );
+    expect(out).toContain("&lt;i&gt;별칭&lt;/i&gt;");
+    expect(out).not.toContain("<i>");
   });
 
   it("puts the chosen item's name in a heading focus can be sent to, as text, with a way to its Wiki page", () => {
@@ -282,5 +321,101 @@ describe("근거 보기 (R6 ④)", () => {
     expect(calls.filter(([name]) => name === "evidenceSource")).toEqual([
       ["evidenceSource", { evidenceId: 21 }],
     ]);
+  });
+});
+
+/** A promise a test settles by hand: the answers arrive in the order the test chooses. */
+function later<T>() {
+  let settle: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolve) => (settle = resolve));
+  return { promise, settle };
+}
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+function recorder() {
+  const seen = {
+    lists: [] as ListState[],
+    reads: [] as (Read | undefined)[],
+    evidence: [] as unknown[],
+    notices: [] as (string | undefined)[],
+  };
+  const show = {
+    list: (state: ListState) => seen.lists.push(state),
+    read: (r: Read | undefined) => seen.reads.push(r),
+    evidence: (e: unknown) => seen.evidence.push(e),
+    notice: (text: string | undefined) => seen.notices.push(text),
+  };
+  return { seen, show };
+}
+const okRead = (id: number) => ({ ...read, center: { ...center, id } });
+
+describe("늦은 응답 (X02F-C4)", () => {
+  it("keeps the list of the newest search when a slower 더 보기 answers after it", async () => {
+    const slow = later<unknown>();
+    const { api } = fake({
+      exploreItems: (request) => {
+        const { query, after } = request as { query?: string; after?: number };
+        if (after !== undefined) return slow.promise;
+        return {
+          items: [{ id: query === "새" ? 7 : 1, type: "Project", name: query ?? "", alias: null }],
+          next: query === "새" ? null : 1,
+        };
+      },
+    });
+    const { seen, show } = recorder();
+    const session = createExploreSession(api, show);
+    session.search("옛");
+    await flush();
+    const first = seen.lists.at(-1) as ListState & { status: "ready" };
+    session.more(first);
+    session.search("새");
+    await flush();
+    slow.settle({ items: [{ id: 2, type: "Project", name: "옛 뒤", alias: null }], next: null });
+    await flush();
+    const last = seen.lists.at(-1) as ListState & { status: "ready" };
+    expect(last.items.map((i) => i.id)).toEqual([7]);
+  });
+
+  it("drops the evidence of a line when another item was opened before its read ended", async () => {
+    const trace = later<unknown>();
+    const { api } = fake({
+      exploreItem: (request) => ({ ...okRead((request as { itemId: number }).itemId) }),
+      graphTrace: () => trace.promise,
+    });
+    const { seen, show } = recorder();
+    const session = createExploreSession(api, show);
+    session.open(1);
+    await flush();
+    session.evidence({ kind: "fact", id: 4 }, "사실");
+    session.open(2);
+    await flush();
+    trace.settle({ truncated: false, chains: [] });
+    await flush();
+    expect(seen.evidence).toEqual([]);
+  });
+
+  it("does not read item A again after an action on A when B was opened before the action ended", async () => {
+    const done = later<unknown>();
+    const { api, calls } = fake({
+      exploreItem: (request) => okRead((request as { itemId: number }).itemId),
+      semanticDecide: () => done.promise,
+    });
+    const { show } = recorder();
+    const session = createExploreSession(api, show);
+    session.open(1);
+    await flush();
+    session.act({ type: "decide", kind: "fact", id: 4, action: "approve" }, 1);
+    session.open(2);
+    await flush();
+    done.settle({ status: "applied" });
+    await flush();
+    expect(
+      calls
+        .filter(([name]) => name === "exploreItem")
+        .map(([, r]) => (r as { itemId: number }).itemId),
+    ).toEqual([1, 2]);
+    // an action that ends while its item is still open is read again
+    session.act({ type: "decide", kind: "fact", id: 4, action: "approve" }, 2);
+    await flush();
+    expect(calls.filter(([name]) => name === "exploreItem")).toHaveLength(3);
   });
 });

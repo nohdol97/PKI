@@ -3,7 +3,7 @@
 // imported text: React text nodes inside <bdi> only (V02-R15). Nothing is stored: the search, the chosen item and
 // the filters live in this component until the user leaves the screen (X02-D2).
 import type { EvidenceSource, RouteResponse } from "@pki/contracts";
-import { useCallback, useEffect, useRef, useState, type FormEvent, type Ref } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type Ref } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import { EntityCuration } from "./entity-curation.tsx";
 import { SOURCE_GONE } from "./evidence-text.ts";
@@ -24,6 +24,7 @@ import {
   OPEN_WIKI,
   TIMELINE_NONE,
 } from "./explore-text.ts";
+import { createLatest } from "./latest.ts";
 import { NeighbourGraph } from "./neighbour-graph.tsx";
 import { useNav } from "./nav.tsx";
 import { previousKey, rememberPrevious, RowDetail, type Previous } from "./row-detail.tsx";
@@ -91,7 +92,10 @@ export interface TimelineEntry {
   validAt: string | null;
   validUntil: string | null;
 }
-/** Facts and relations with a valid start by start date, then those without one (ties by kind and number). */
+/**
+ * Facts and relations with a valid start by start date, then those with only an end date, then those with
+ * neither (ties by kind and number).
+ */
 export function timelineOf(center: Center): TimelineEntry[] {
   const entries: TimelineEntry[] = [
     ...center.facts.map((f) => ({
@@ -107,10 +111,12 @@ export function timelineOf(center: Center): TimelineEntry[] {
       validUntil: r.validUntil,
     })),
   ];
+  const group = (e: TimelineEntry) => (e.validAt !== null ? 0 : e.validUntil !== null ? 1 : 2);
   return entries.sort((a, b) => {
-    if ((a.validAt === null) !== (b.validAt === null)) return a.validAt === null ? 1 : -1;
     return (
+      group(a) - group(b) ||
       (a.validAt ?? "").localeCompare(b.validAt ?? "") ||
+      (a.validUntil ?? "").localeCompare(b.validUntil ?? "") ||
       a.kind.localeCompare(b.kind) ||
       a.id - b.id
     );
@@ -168,6 +174,12 @@ export function ItemList({
               <bdi>{i.name}</bdi>
             </button>{" "}
             ({i.type})
+            {i.alias !== null && (
+              <>
+                {" "}
+                · <bdi>{i.alias}</bdi>
+              </>
+            )}
           </li>
         ))}
       </ul>
@@ -269,8 +281,8 @@ export function Neighbourhood({
       </li>
     );
   };
-  const dated = timeline.filter((e) => e.validAt !== null);
-  const undated = timeline.filter((e) => e.validAt === null);
+  const dated = timeline.filter((e) => e.validAt !== null || e.validUntil !== null);
+  const undated = timeline.filter((e) => e.validAt === null && e.validUntil === null);
   return (
     <section aria-label="선택한 항목">
       <h2 tabIndex={-1} ref={headingRef}>
@@ -395,12 +407,98 @@ export function Neighbourhood({
   );
 }
 
+/** What the session hands back to the screen: it draws, the session decides which answers still count. */
+export interface ExploreShow {
+  list(state: ListState): void;
+  /** `fresh` is an item the user just chose (focus, and nothing carried over). */
+  read(read: Read | undefined, fresh: boolean): void;
+  evidence(evidence: OpenEvidence | undefined): void;
+  notice(text: string | undefined): void;
+}
+
+/**
+ * The 탐색 screen's requests and what each answer may do (X02F-R4). Out of the component so the rules are
+ * reachable without a DOM (X02F-D5): the newest search wins; an item read answers only while it is the newest;
+ * an evidence read answers only while no other item or line was opened after it; a re-read after an action
+ * happens only while the item the action was made on is still the open one.
+ */
+export function createExploreSession(api: ApiClient, show: ExploreShow) {
+  const lists = createLatest();
+  const reads = createLatest();
+  const evidences = createLatest();
+  let current: { id: number; depth: number } | undefined;
+
+  const load = (id: number, depth: number, fresh: boolean) => {
+    const newest = reads.begin();
+    return api("exploreItem", { itemId: id, depth }).then(
+      (r) => {
+        if (!newest() || r.status !== "ok") return;
+        show.read(r as Read, fresh);
+      },
+      (error: unknown) => {
+        if (!newest()) return;
+        show.read(undefined, false);
+        show.notice(gone(error) ? EXPLORE_GONE : `불러오지 못했습니다: ${message(error)}`);
+      },
+    );
+  };
+  const reload = (forId: number) => {
+    if (current?.id === forId) void load(forId, current.depth, false);
+  };
+  const listed = (read: () => Promise<ItemsPage>) => {
+    const newest = lists.begin();
+    read().then(
+      (page) => newest() && show.list({ status: "ready", ...page }),
+      (error: unknown) => newest() && show.list({ status: "failed", error: message(error) }),
+    );
+  };
+  return {
+    search(text: string) {
+      show.list({ status: "loading" });
+      listed(() => searchPage(api, text));
+    },
+    more(list: ListState) {
+      if (list.status === "ready") listed(() => searchMore(api, list));
+    },
+    open(id: number) {
+      current = { id, depth: 1 };
+      evidences.begin();
+      void load(id, 1, true);
+    },
+    depth(depth: number) {
+      if (!current) return;
+      current = { ...current, depth };
+      void load(current.id, depth, false);
+    },
+    evidence(row: Row, label: string) {
+      if (!current) return;
+      const newest = evidences.begin();
+      traceEvidence(api, row, current.id).then(
+        (sources) => newest() && show.evidence({ label, sources }),
+        (error: unknown) =>
+          newest() &&
+          show.notice(gone(error) ? SOURCE_GONE : `불러오지 못했습니다: ${message(error)}`),
+      );
+    },
+    act(action: ReviewAction, forId: number) {
+      return act(api, action).then(
+        (refusal) => {
+          show.notice(refusal);
+          reload(forId);
+        },
+        (error: unknown) => show.notice(`조치하지 못했습니다: ${message(error)}`),
+      );
+    },
+    /** A curation or detail change was made on item `forId`. */
+    changed: reload,
+  };
+}
+
 export function Explore({ api }: { api: ApiClient }) {
   const nav = useNav();
   const wanted = nav.target("explore")?.itemId;
   const [query, setQuery] = useState("");
   const [list, setList] = useState<ListState>({ status: "loading" });
-  const [itemId, setItemId] = useState<number>();
   const [depth, setDepth] = useState(1);
   const [read, setRead] = useState<Read>();
   const [off, setOff] = useState<ReadonlySet<string>>(new Set());
@@ -408,83 +506,42 @@ export function Explore({ api }: { api: ApiClient }) {
   const [notice, setNotice] = useState<string>();
   const [opens, setOpens] = useState(0);
   const [sourceOpens, setSourceOpens] = useState(0);
-  /** The newest neighbourhood read: an older answer arriving later is dropped (last request wins). */
-  const newest = useRef(0);
   const headingRef = useFocusOn(opens, read !== undefined);
   const sourceHeadingRef = useFocusOn(sourceOpens, evidence !== undefined);
-
-  const search = useCallback(
-    (text: string) => {
-      setList({ status: "loading" });
-      searchPage(api, text).then(
-        (page) => setList({ status: "ready", ...page }),
-        (error: unknown) => setList({ status: "failed", error: message(error) }),
-      );
-    },
+  const session = useMemo(
+    () =>
+      createExploreSession(api, {
+        list: setList,
+        read(next, fresh) {
+          setRead(next);
+          if (!fresh) return;
+          setEvidence(undefined);
+          setNotice(undefined);
+          setOff(new Set());
+          setOpens((n) => n + 1);
+        },
+        evidence(next) {
+          setEvidence(next);
+          setSourceOpens((n) => n + 1);
+        },
+        notice: setNotice,
+      }),
     [api],
   );
-  useEffect(() => search(""), [search]);
+  useEffect(() => session.search(""), [session]);
 
-  /** Reads the neighbourhood of `id`; `fresh` is an item the user just chose (focus, and nothing carried over). */
-  const load = useCallback(
-    (id: number, at: number, fresh: boolean) => {
-      const turn = ++newest.current;
-      return api("exploreItem", { itemId: id, depth: at }).then(
-        (r) => {
-          if (turn !== newest.current || r.status !== "ok") return;
-          setRead(r as Read);
-          if (fresh) {
-            setEvidence(undefined);
-            setNotice(undefined);
-            setOff(new Set());
-            setOpens((n) => n + 1);
-          }
-        },
-        (error: unknown) => {
-          if (turn !== newest.current) return;
-          setRead(undefined);
-          setNotice(gone(error) ? EXPLORE_GONE : `불러오지 못했습니다: ${message(error)}`);
-        },
-      );
-    },
-    [api],
-  );
   const open = (id: number) => {
-    setItemId(id);
     setDepth(1);
-    void load(id, 1, true);
+    session.open(id);
   };
   useEffect(() => {
     if (wanted !== undefined) open(wanted);
     // the target alone starts it: `open` only sets state and reads
   }, [wanted]);
 
-  const changeDepth = (next: number) => {
-    setDepth(next);
-    if (itemId !== undefined) void load(itemId, next, false);
-  };
-  const showEvidence = (row: Row, label: string) => {
-    if (!read) return;
-    traceEvidence(api, row, read.center.id).then(
-      (sources) => {
-        setEvidence({ label, sources });
-        setSourceOpens((n) => n + 1);
-      },
-      (error: unknown) =>
-        setNotice(gone(error) ? SOURCE_GONE : `불러오지 못했습니다: ${message(error)}`),
-    );
-  };
-  const run = (action: ReviewAction) =>
-    act(api, action).then(
-      (refusal) => {
-        setNotice(refusal);
-        if (itemId !== undefined) void load(itemId, depth, false);
-      },
-      (error: unknown) => setNotice(`조치하지 못했습니다: ${message(error)}`),
-    );
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    search(query);
+    session.search(query);
   };
   return (
     <>
@@ -495,17 +552,7 @@ export function Explore({ api }: { api: ApiClient }) {
         </label>{" "}
         <button type="submit">{EXPLORE_SEARCH_SUBMIT}</button>
       </form>
-      <ItemList
-        state={list}
-        onOpen={open}
-        onMore={() => {
-          if (list.status !== "ready") return;
-          searchMore(api, list).then(
-            (page) => setList({ status: "ready", ...page }),
-            (error: unknown) => setList({ status: "failed", error: message(error) }),
-          );
-        }}
-      />
+      <ItemList state={list} onOpen={open} onMore={() => session.more(list)} />
       {notice && <p role="alert">{notice}</p>}
       {read && (
         <Neighbourhood
@@ -516,7 +563,10 @@ export function Explore({ api }: { api: ApiClient }) {
           headingRef={headingRef}
           sourceHeadingRef={sourceHeadingRef}
           evidence={evidence}
-          onDepth={changeDepth}
+          onDepth={(next) => {
+            setDepth(next);
+            session.depth(next);
+          }}
           onToggleType={(type) =>
             setOff((s) => {
               const next = new Set(s);
@@ -525,9 +575,9 @@ export function Explore({ api }: { api: ApiClient }) {
             })
           }
           onOpen={open}
-          onEvidence={showEvidence}
-          onAct={(a) => void run(a)}
-          onChanged={() => itemId !== undefined && void load(itemId, depth, false)}
+          onEvidence={session.evidence}
+          onAct={(a) => void session.act(a, read.center.id)}
+          onChanged={() => session.changed(read.center.id)}
           onWiki={(key) => nav.go("wiki", { wikiKey: key })}
         />
       )}

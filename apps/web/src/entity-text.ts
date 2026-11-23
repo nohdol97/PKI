@@ -59,7 +59,8 @@ const ACTION_TEXT: Record<string, string> = {
   "set-validity": "유효 기간 고치기",
 };
 /** A known action code in words; an unknown one as the code itself. */
-export const actionText = (action: string): string => ACTION_TEXT[action] ?? action;
+export const actionText = (action: string): string =>
+  Object.hasOwn(ACTION_TEXT, action) ? ACTION_TEXT[action] : action;
 
 export const ACTOR_TEXT = {
   user: "사용자",

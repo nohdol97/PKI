@@ -24,6 +24,7 @@ import {
   SPLIT_REFUSAL_TEXT,
 } from "./entity-text.ts";
 import type { Center } from "./explore.tsx";
+import { createBusy } from "./latest.ts";
 
 export interface SplitRow {
   kind: "fact" | "relation";
@@ -62,6 +63,16 @@ export async function splitOff(
 
 export const markDistinct = (api: ApiClient, a: number, b: number, on: boolean) =>
   api("entityDistinct", { a, b, on });
+
+/** The centre's own fact and relation lines, which are the ones a split may take (members' lines are not its own). */
+export const splitRowsOf = (center: Center) => [
+  ...center.facts
+    .filter((f) => f.itemId === center.id)
+    .map((f) => ({ kind: "fact" as const, id: f.id, label: `사실 ${f.kind} ${f.value}` })),
+  ...center.relations
+    .filter((r) => r.subjectId === center.id || r.objectId === center.id)
+    .map((r) => ({ kind: "relation" as const, id: r.id, label: `관계 ${r.type} ${r.id}` })),
+];
 
 export function SplitResult({
   created,
@@ -103,8 +114,10 @@ export function EntityCuration({
   const [marked, setMarked] = useState<{ id: number; name: string }>();
   const latest = useRef(0);
 
+  // one action out at a time: a second press before the answer is not sent (X02F-R6)
+  const [busy] = useState(createBusy);
   const attempt = (work: () => Promise<void>) =>
-    work().catch((error: unknown) => setNotice(`${CURATE_FAILED}: ${message(error)}`));
+    busy(() => work().catch((error: unknown) => setNotice(`${CURATE_FAILED}: ${message(error)}`)));
   const find = (event: FormEvent) => {
     event.preventDefault();
     const turn = ++latest.current;
@@ -136,10 +149,9 @@ export function EntityCuration({
     });
   const split = (event: FormEvent) => {
     event.preventDefault();
-    const rows = [
-      ...center.facts.map((f) => ({ kind: "fact" as const, id: f.id })),
-      ...center.relations.map((r) => ({ kind: "relation" as const, id: r.id })),
-    ].filter((r) => chosen.has(rowKey(r)));
+    const rows = splitRowsOf(center)
+      .filter((r) => chosen.has(rowKey(r)))
+      .map(({ kind, id }) => ({ kind, id }));
     void attempt(async () => {
       const done = await splitOff(api, center.id, rows, splitName.trim());
       if ("created" in done) {
@@ -157,18 +169,7 @@ export function EntityCuration({
       if (!next.delete(rowKey(r))) next.add(rowKey(r));
       return next;
     });
-  const rows = [
-    ...center.facts.map((f) => ({
-      kind: "fact" as const,
-      id: f.id,
-      label: `사실 ${f.kind} ${f.value}`,
-    })),
-    ...center.relations.map((r) => ({
-      kind: "relation" as const,
-      id: r.id,
-      label: `관계 ${r.type} ${r.id}`,
-    })),
-  ];
+  const rows = splitRowsOf(center);
   return (
     <section aria-label={CURATE_HEADING}>
       <h3>{CURATE_HEADING}</h3>
@@ -190,19 +191,21 @@ export function EntityCuration({
             {center.members.map((m) => (
               <li key={m.id}>
                 <bdi>{m.name}</bdi> ({m.type}){" "}
-                <button
-                  type="button"
-                  aria-label={`합치기 되돌리기: ${m.name}`}
-                  onClick={() =>
-                    void attempt(async () => {
-                      await unmerge(api, m.mergeId, keepDistinct);
-                      setNotice(undefined);
-                      onChanged();
-                    })
-                  }
-                >
-                  합치기 되돌리기
-                </button>
+                {m.mergeId !== null && (
+                  <button
+                    type="button"
+                    aria-label={`합치기 되돌리기: ${m.name}`}
+                    onClick={() =>
+                      void attempt(async () => {
+                        await unmerge(api, m.mergeId as number, keepDistinct);
+                        setNotice(undefined);
+                        onChanged();
+                      })
+                    }
+                  >
+                    합치기 되돌리기
+                  </button>
+                )}
               </li>
             ))}
           </ul>
