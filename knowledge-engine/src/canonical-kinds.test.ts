@@ -492,7 +492,7 @@ for (const kind of CANONICAL_KINDS) {
 }
 
 describe("the product registry's canonical kinds (I04-R1)", () => {
-  it("registers the twelve canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
+  it("registers the canonical kinds in phase-2 order, each in the canonical transaction, before the projections (I04-T04)", () => {
     expect(derivativeRegistry.kinds.map((k) => [k.kind, k.layer, k.storage])).toEqual([
       ["source", "source", "canonical"],
       ["evidence", "evidence", "canonical"],
@@ -509,6 +509,8 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
       ["analytical-check", "insight", "canonical"],
+      // the notification lines rest on the Insights: after them, still in the canonical transaction (P02-R13)
+      ["notification", "delivery", "canonical"],
       // the Wiki's pages rest on every knowledge layer: after all of them, still in the canonical transaction (K01-D3)
       ["wiki-page", "projection", "canonical"],
       // the lint findings rest on the same layers and are judged again from what they left (K02-R13)
@@ -520,9 +522,14 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
   });
 
   it("declares not applicable only what the closed list allows, for every registered kind", () => {
-    // the wiki-page and lint-finding kinds have their own contract runs (wiki-kind.test.ts, lint-kind.test.ts)
+    // the wiki-page, lint-finding and notification kinds have their own contract runs (wiki-kind.test.ts,
+    // lint-kind.test.ts, notify-kind.test.ts)
     const canonical = derivativeRegistry.kinds.filter(
-      (k) => k.storage === "canonical" && k.kind !== "wiki-page" && k.kind !== "lint-finding",
+      (k) =>
+        k.storage === "canonical" &&
+        k.kind !== "wiki-page" &&
+        k.kind !== "lint-finding" &&
+        k.kind !== "notification",
     );
     expect(Object.keys(SUBJECTS).sort()).toEqual(canonical.map((k) => k.kind).sort());
     for (const k of canonical) {
