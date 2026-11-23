@@ -159,6 +159,8 @@ async function extract(
   return { job, result, status };
 }
 const count = (table: string) => db.all(`SELECT count(*) AS n FROM ${table}`)[0]?.n as number;
+const delays = () =>
+  db.all("SELECT count(*) AS n FROM insights WHERE rule = 'dependency_delay'")[0]?.n as number;
 const drops = () =>
   db.all("SELECT source_id, version, kind FROM scope_policy_drops ORDER BY id") as {
     source_id: number;
@@ -388,7 +390,10 @@ describe("scope.changed: the re-extraction a scope change queues clears the reco
     ]);
     expect(count("scope_policy_drops")).toBe(0);
     // the Insight stands again: its three evidence come from b and a
-    expect(db.all("SELECT state FROM insights")).toEqual([{ state: "active" }]);
+    // (the two target dates on 알파 are a `conflict` Insight beside it, P01)
+    expect(db.all("SELECT state FROM insights WHERE rule = 'dependency_delay'")).toEqual([
+      { state: "active" },
+    ]);
   });
 
   it("clears a source's older records when a later extraction of it runs, and only that source's", async () => {
@@ -454,7 +459,8 @@ describe("scope.policy: the rule judges an Insight's evidence under the policy a
     expect(run.status).toBe("succeeded");
     // the fact on T is written (a and b share a scope) and the rule ran, but a pair resting on d is no Insight
     expect(count("facts")).toBe(3);
-    expect(count("insights")).toBe(0);
+    // (the `conflict` on 티's two target dates rests on a and b, which share a scope: it stands, P01)
+    expect(delays()).toBe(0);
     expect(drops()).toEqual([]);
 
     // the control: under the default policy the same extraction makes the Insight
@@ -464,7 +470,7 @@ describe("scope.policy: the rule judges an Insight's evidence under the policy a
       source("b2", "티의 목표일은 2026-11-30입니다", ["s"]),
     );
     expect(control.status).toBe("succeeded");
-    expect(count("insights")).toBe(1);
+    expect(delays()).toBe(1);
   });
 });
 
