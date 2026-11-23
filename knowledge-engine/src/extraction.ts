@@ -65,6 +65,7 @@ import {
   BOOKKEEPING_KIND,
   recordExtractionDrops,
   recordWithheldCandidate,
+  followMovedRow,
   saveFact,
   saveRelation,
   valueFits,
@@ -671,7 +672,12 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
             return id;
           };
           for (const id of refs.map(idOf)) touched.add(id);
-          const { target, created } = entry.save(tx, (ref) => ids.get(ref) as number);
+          // a row the user split away from this item is not made again by this source's re-extraction (S02-R15)
+          const { target, created } = followMovedRow(
+            tx,
+            entry.save(tx, (ref) => ids.get(ref) as number),
+            own.sourceId,
+          );
           const row =
             "factId" in target
               ? ({ kind: "fact", id: target.factId } as const)

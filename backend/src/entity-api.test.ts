@@ -3,7 +3,7 @@
 // hangs on the item. A refusal is a code in a 200 body; an item that is absent, deleted or hidden (or whose group's top
 // is) answers the one 404 `not-found`; no name, value or quote is in any answer. All data is synthetic.
 import { routes, type RouteName } from "@pki/contracts";
-import { createProductRegistry } from "@pki/knowledge-engine";
+import { createProductRegistry, recomputeDependencyDelay } from "@pki/knowledge-engine";
 import {
   addEvidence,
   automatedLifecycle,
@@ -13,6 +13,7 @@ import {
   insertItem,
   registerConnectorInstance,
   saveFact,
+  saveRelation,
   saveSourceRecord,
   userDecisions,
   type DerivativeRegistry,
@@ -326,5 +327,172 @@ describe("the undo of a user-made item inside a merge chain (S02-R11, the review
       entry: { kind: "item", id: a, status: "candidate" },
     });
     expect(mergeLines()).toHaveLength(1);
+  });
+});
+
+describe("POST /api/entities/split (S02-R25, R15)", () => {
+  const factOf = (owner: number, value: string) =>
+    saveFact(db, { itemId: owner, kind: "target_date", value, ...attrs }).id;
+
+  it("moves the chosen rows to a new item, answers its number, refuses by code, and the new item's undo is refused", async () => {
+    const a = itemFrom("a");
+    const f2 = factOf(a, "2026-12-06");
+    await start();
+    const done = await call("entitySplit", {
+      itemId: a,
+      rows: [{ kind: "fact", id: f2 }],
+      name: " 분리 ",
+    });
+    const body = routes.entitySplit.response.parse(done.body);
+    expect(body).toMatchObject({ status: "applied", created: expect.any(Number) });
+    expect(db.all("SELECT item_id FROM facts WHERE id = ?", [f2])).toEqual([
+      { item_id: body.created },
+    ]);
+    expect(
+      db.all("SELECT name, user_authored FROM items WHERE id = ?", [body.created as number]),
+    ).toEqual([{ name: "분리", user_authored: 1 }]);
+    expect(db.all("SELECT 1 FROM item_split_moves")).toHaveLength(1);
+    const undo = routes.semanticUndo.response.parse(
+      (await call("semanticUndo", { kind: "item", id: body.created })).body,
+    );
+    expect(undo).toMatchObject({ reason: "existing-data-violation", held: { splitMoves: 1 } });
+    // refusals: a code in a 200 body
+    const rest = db.all("SELECT id FROM facts WHERE item_id = ?", [a]).map((r) => r.id as number);
+    expect((await call("entitySplit", { itemId: a, rows: [], name: "n" })).body).toEqual({
+      status: "refused",
+      reason: "nothing-selected",
+    });
+    expect(
+      (await call("entitySplit", { itemId: a, rows: [{ kind: "fact", id: f2 }], name: "n" })).body,
+    ).toEqual({
+      status: "refused",
+      reason: "row-not-on-item",
+    });
+    expect(
+      (
+        await call("entitySplit", {
+          itemId: a,
+          rows: rest.map((id) => ({ kind: "fact", id })),
+          name: "n",
+        })
+      ).body,
+    ).toEqual({ status: "refused", reason: "nothing-left" });
+    expect(JSON.stringify(done.body)).not.toContain(NAME);
+  });
+
+  it("answers not-found for an absent or hidden item and row-not-on-item for a hidden row; 400 for a bad body", async () => {
+    const open = itemFrom("open");
+    factOf(open, "2026-12-06");
+    const hidden = itemFrom("hidden", ["secret"]);
+    const hiddenFact = db.all("SELECT id FROM facts WHERE item_id = ?", [hidden])[0]?.id as number;
+    const registry = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+      },
+    });
+    await start({ registry });
+    const before = db.all("SELECT * FROM facts ORDER BY id");
+    expect(
+      await call("entitySplit", { itemId: 99_999, rows: [{ kind: "fact", id: 1 }], name: "n" }),
+    ).toEqual(NOT_FOUND);
+    expect(
+      await call("entitySplit", {
+        itemId: hidden,
+        rows: [{ kind: "fact", id: hiddenFact }],
+        name: "n",
+      }),
+    ).toEqual(NOT_FOUND);
+    expect(
+      (
+        await call("entitySplit", {
+          itemId: open,
+          rows: [{ kind: "fact", id: hiddenFact }],
+          name: "n",
+        })
+      ).body,
+    ).toEqual({
+      status: "refused",
+      reason: "row-not-on-item",
+    });
+    expect(db.all("SELECT * FROM facts ORDER BY id")).toEqual(before);
+    for (const body of [
+      { itemId: open },
+      { itemId: open, rows: [], name: "" },
+      { itemId: open, rows: [{ kind: "item", id: 1 }], name: "n" },
+    ]) {
+      expect((await call("entitySplit", body)).status).toBe(400);
+    }
+  });
+
+  /** Evidence for `target` quoting the NAME of a version row. */
+  const cite = (target: { factId: number } | { relationId: number }, versionId: number) =>
+    addEvidence(db, {
+      target,
+      sourceVersionId: versionId,
+      start: 0,
+      end: [...NAME].length,
+      quote: NAME,
+    });
+  const versionOf = (externalId: string) =>
+    db.all(
+      `SELECT v.id FROM source_versions v JOIN sources s ON s.id = v.source_id
+       WHERE s.external_id = ? ORDER BY v.id DESC`,
+      [externalId],
+    )[0]?.id as number;
+
+  it("answers row-not-on-item and changes nothing for a fact of a hidden source on a visible item", async () => {
+    const open = itemFrom("open");
+    const secretFact = factOf(open, "2026-12-09");
+    itemFrom("secret", ["secret"]);
+    cite({ factId: secretFact }, versionOf("secret"));
+    const alone: ScopePolicy = {
+      ...defaultScopePolicy,
+      allows: (scopes) => !(scopes.length === 1 && scopes[0]?.includes("secret")),
+    };
+    await start({
+      registry: createDerivativeRegistry({
+        kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+        policy: alone,
+      }),
+    });
+    // the item is shown (its lineage has two scopes) while the fact rests on the secret source alone
+    expect((await call("semanticHistory", { kind: "item", id: open })).status).toBe(200);
+    expect(await call("semanticHistory", { kind: "fact", id: secretFact })).toEqual(NOT_FOUND);
+    const before = {
+      facts: db.all("SELECT * FROM facts ORDER BY id"),
+      items: db.all("SELECT id FROM items"),
+    };
+    const res = await call("entitySplit", {
+      itemId: open,
+      rows: [{ kind: "fact", id: secretFact }],
+      name: "n",
+    });
+    expect(res).toEqual({ status: 200, body: { status: "refused", reason: "row-not-on-item" } });
+    expect(db.all("SELECT * FROM facts ORDER BY id")).toEqual(before.facts);
+    expect(db.all("SELECT id FROM items")).toEqual(before.items);
+    expect(db.all("SELECT 1 FROM item_split_moves")).toEqual([]);
+  });
+
+  it("resolves a dependency-delay Insight that relied on a moved row, in the split's own request", async () => {
+    const x = itemFrom("x"); // target date 2026-12-05
+    const y = itemFrom("y");
+    db.run("UPDATE facts SET kind = 'completion_date', value = '2026-12-20' WHERE item_id = ?", [
+      y,
+    ]);
+    const rel = saveRelation(db, { subjectId: x, type: "DEPENDS_ON", objectId: y, ...attrs }).id;
+    cite({ relationId: rel }, versionOf("x"));
+    recomputeDependencyDelay(db, [x, y], { combinable: () => true });
+    expect(db.all("SELECT state FROM insights")).toEqual([{ state: "active" }]);
+    await start();
+    // x keeps its target date; the relation goes to a new item, so x no longer depends on y
+    const res = await call("entitySplit", {
+      itemId: x,
+      rows: [{ kind: "relation", id: rel }],
+      name: "다른 것",
+    });
+    expect(routes.entitySplit.response.parse(res.body)).toMatchObject({ status: "applied" });
+    expect(db.all("SELECT state FROM insights")).toEqual([{ state: "resolved" }]);
   });
 });

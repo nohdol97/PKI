@@ -777,6 +777,11 @@ describe("the user entry", () => {
       "undo",
     ]);
     expect(Object.keys(userDecisions.ontology).sort()).toEqual(["change", "decide", "undo"]);
-    expect(Object.keys(userDecisions.entities).sort()).toEqual(["merge", "setDistinct", "unmerge"]);
+    expect(Object.keys(userDecisions.entities).sort()).toEqual([
+      "merge",
+      "setDistinct",
+      "split",
+      "unmerge",
+    ]);
   });
 });

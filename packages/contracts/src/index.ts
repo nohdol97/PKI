@@ -975,6 +975,33 @@ export const EntityUnmergeRequestSchema = z.strictObject({
   keepDistinct: z.boolean().optional(),
 });
 export const EntityUnmergeResponseSchema = z.object({ status: z.literal("applied") });
+/**
+ * A split (S02-R15): the chosen facts and relations of an item go to a new item the user names. `created` is
+ * the new item; a refusal is a code and writes nothing; an item that is absent or hidden is the 404.
+ */
+export const ENTITY_SPLIT_REFUSALS = [
+  "row-not-on-item",
+  "nothing-selected",
+  "nothing-left",
+] as const;
+export const EntitySplitRequestSchema = z.strictObject({
+  itemId: EntityItemIdSchema,
+  rows: z
+    .array(z.strictObject({ kind: z.enum(["fact", "relation"]), id: EntityItemIdSchema }))
+    .max(500),
+  name: SemanticTextSchema,
+});
+export const EntitySplitResponseSchema = z
+  .object({
+    status: z.enum(["applied", "refused"]),
+    created: z.int().positive().optional(),
+    reason: z.enum(ENTITY_SPLIT_REFUSALS).optional(),
+  })
+  .refine((o) =>
+    o.status === "applied"
+      ? o.created !== undefined && o.reason === undefined
+      : o.reason !== undefined && o.created === undefined,
+  );
 export const EntityDistinctRequestSchema = z
   .strictObject({
     a: EntityItemIdSchema,
@@ -1412,6 +1439,12 @@ export const routes = {
     path: "/api/entities/unmerge",
     request: EntityUnmergeRequestSchema,
     response: EntityUnmergeResponseSchema,
+  },
+  entitySplit: {
+    method: "POST",
+    path: "/api/entities/split",
+    request: EntitySplitRequestSchema,
+    response: EntitySplitResponseSchema,
   },
   entityDistinct: {
     method: "POST",

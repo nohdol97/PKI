@@ -153,6 +153,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     entityMerge: { member: 1, into: 1 },
     entityUnmerge: { mergeId: 1 },
     entityDistinct: { a: 1, b: 2, on: true },
+    entitySplit: { itemId: 1, rows: [], name: "x" }, // set in beforeAll: an item with two facts of the user's
   };
 
   beforeAll(async () => {
@@ -169,6 +170,21 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     requests.entityMerge = { member: made[0], into: made[0] }; // already one: a refusal code in a 200 body
     requests.entityUnmerge = { mergeId: merged.mergeId };
     requests.entityDistinct = { a: made[0], b: made[1], on: true };
+    const facts = ["2026-12-05", "2026-12-06"].map((value) => {
+      const f = userDecisions.add(db, {
+        kind: "fact",
+        itemId: made[0],
+        factKind: "target_date",
+        value,
+      });
+      if (f.status !== "applied") throw new Error("the user's fact");
+      return f.ref.id;
+    });
+    requests.entitySplit = {
+      itemId: made[0],
+      rows: [{ kind: "fact", id: facts[1] as number }],
+      name: "나눈 항목",
+    };
     const adapters = productAdapters("/synthetic/data");
     const bound = engine();
     projections = productProjections(db, { engine: bound, ...adapters });

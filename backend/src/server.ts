@@ -937,6 +937,26 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
           ? { status: "applied" as const }
           : { error: "not-found" as const };
       }),
+    entitySplit: async ({ itemId, rows, name }) =>
+      entityAction((decisions, at) => {
+        if (!shownItems([itemId])) return { error: "not-found" as const };
+        // a row that is hidden is no row of the item: the same refusal as one that is not stored
+        if (rows.some((r) => !gate.semanticShown(r.kind, r.id))) {
+          return { status: "refused" as const, reason: "row-not-on-item" as const };
+        }
+        const ends = rows.flatMap((r) =>
+          r.kind === "relation" ? itemsOfEntry(options.db, r) : [],
+        );
+        const done = decisions.entities.split(options.db, itemId, rows, name.trim(), at);
+        if (done.status === "refused") {
+          return done.reason === "not-found"
+            ? { error: "not-found" as const }
+            : { status: "refused" as const, reason: done.reason };
+        }
+        // the rule over what the moved rows left and reached (T05 moves this to the membership receivers)
+        judgeAgain([itemId, done.created, ...ends]);
+        return { status: "applied" as const, created: done.created };
+      }),
     entityDistinct: async ({ a, b, on }) =>
       entityAction((decisions, at) => {
         if (!shownItems([a, b])) return { error: "not-found" as const };
