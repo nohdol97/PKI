@@ -150,3 +150,29 @@ describe("X01-C5b a hidden item's preference moves no hit", () => {
     w.db.close();
   });
 });
+
+describe("RSP-C3 RSP-C4 the preference follows only a shown merge line and a shown fact", () => {
+  const hiding = (kind: string): typeof registry => ({
+    ...registry,
+    visible: (db, refs, purpose) =>
+      registry.visible(db, refs, purpose).filter((r) => !(purpose === "search" && r.kind === kind)),
+  });
+  const read = (w: Awaited<ReturnType<typeof plant>>, reg: typeof registry) => {
+    writeSetting(w.db, FEEDBACK_LEARNED_SETTING, "on");
+    return retrieve(w.db, reg, "프로브낱말", {}, { preference: feedbackPreference(w.db, reg) });
+  };
+
+  it("C3 keeps the order a hidden merge line gives, and lifts the source when the line is shown", async () => {
+    const hidden = hiding("entity-merge");
+    const w = await plant(hidden, true);
+    expect((await read(w, hidden)).hits).toEqual(w.base.hits);
+    const shown = await plant(registry, true);
+    expect((await read(shown, registry)).hits[0]?.versionId).toBe(shown.target);
+  });
+
+  it("C4 keeps the order when the one fact joining the source to the liked item is hidden", async () => {
+    const hidden = hiding("fact");
+    const w = await plant(hidden);
+    expect((await read(w, hidden)).hits).toEqual(w.base.hits);
+  });
+});
