@@ -26,6 +26,12 @@ describe("site.public-kinds: the kinds the public code uses are all in PUBLIC_CO
     }
   });
 
+  it("local-files is a public kind and its one instance a public id, in the product's one list (I02B-C43)", () => {
+    expect(PUBLIC_CONNECTOR_KINDS).toContain("local-files");
+    expect(isPublicInstanceId("local-files")).toBe(true);
+    expect(Object.keys(productConnectors().kinds)).toContain("local-files");
+  });
+
   it("the kind the import writes to the canonical DB", () => {
     expect(PUBLIC_CONNECTOR_KINDS).toContain(JSONL_IMPORT_KIND);
   });

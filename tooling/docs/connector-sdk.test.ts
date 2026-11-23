@@ -678,8 +678,10 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
 
   it("names the public kinds and the placeholders the registration cannot or may take, as the code lists them", () => {
     const kinds = read("backend/src/public-kinds.ts");
-    expect(kinds).toContain('export const PUBLIC_CONNECTOR_KINDS: readonly string[] = ["jsonl-import", "test-fixtures"];');
-    for (const name of ["PUBLIC_CONNECTOR_KINDS", "isPublicInstanceId", "`jsonl-import`", "`test-fixtures`", "`site-mail`", "`site-messenger`", "`site-wiki`"]) {
+    expect(kinds).toMatch(
+      /export const PUBLIC_CONNECTOR_KINDS: readonly string\[\] = \[\s*"jsonl-import",\s*"local-files",\s*"test-fixtures",?\s*\];/,
+    );
+    for (const name of ["PUBLIC_CONNECTOR_KINDS", "isPublicInstanceId", "`jsonl-import`", "`local-files`", "`test-fixtures`", "`site-mail`", "`site-messenger`", "`site-wiki`"]) {
       expect(seven, name).toContain(name);
     }
     expect(seven).toContain("**공용 종류는 등록할 수 없다**");

@@ -4,6 +4,7 @@
 // the index and of the normalizer it is handed are written here, structurally: the canonical index
 // (`@pki/storage`) and the isolated normalizer (`@pki/document-normalize`) satisfy them without either
 // package knowing this file (the composition point and the tests check the assignment).
+import { z } from "zod";
 import type { Block } from "./connector.ts";
 
 /** Every reason a file is kept in the index as skipped, never sent as a Connector `rejected` (I02B-R16). */
@@ -190,3 +191,103 @@ export interface LocalPassReport {
   normalizerUnavailable: boolean;
   locations: LocalLocationReport[];
 }
+
+// --- the location API (I02B-R36, R40) -------------------------------------------------------------
+
+/** The codes an approval is refused with (I02B-R5), as the screen's text keys them. The connector SDK's own list must equal it (a test). */
+export const LOCAL_APPROVAL_REJECTION_CODES = [
+  "not-absolute",
+  "unsupported-path-form",
+  "not-found",
+  "not-readable",
+  "location-unreachable",
+  "wrong-type",
+  "identity-unavailable",
+  "filesystem-root",
+  "inside-data-directory",
+  "overlaps-location",
+  "network-location",
+  "unsupported-format",
+  // not a path check: the request had no ticket from the shell's picker where one is required (I02B-R37)
+  "ticket-required",
+] as const;
+export type LocalApprovalRejectionCode = (typeof LOCAL_APPROVAL_REJECTION_CODES)[number];
+
+const LocationTypeSchema = z.enum(["folder", "file", "jsonl-file"]);
+
+/**
+ * An approval: the kind and either a typed path (the development and test builds) or the one-time
+ * ticket the shell's picker made (I02B-R37). Both, or neither, is a bad request. Only `folder` is
+ * accepted until the file kinds have their own walk and API (I02B-D2, T06).
+ */
+export const LocalApprovalRequestSchema = z
+  .strictObject({
+    type: z.literal("folder"),
+    path: z.string().min(1).max(4096).optional(),
+    ticket: z.string().min(16).max(256).optional(),
+  })
+  .refine((r) => (r.path === undefined) !== (r.ticket === undefined), {
+    message: "exactly one of path and ticket",
+  });
+export type LocalApprovalRequest = z.infer<typeof LocalApprovalRequestSchema>;
+
+const PositiveInt = z.int().positive();
+const walkShape = {
+  maxFilesPerLocation: PositiveInt,
+  maxDepth: PositiveInt,
+  maxRelativePathChars: PositiveInt,
+};
+const normalizeShape = {
+  timeoutMs: PositiveInt,
+  maxHeapMb: PositiveInt,
+  maxExternalMemoryBytes: PositiveInt,
+};
+
+/** The limits the location API reads and writes (I02B-R40): every one a positive whole number. */
+export const LocalFilesSettingsSchema = z.strictObject({
+  maxFileBytes: PositiveInt,
+  settleMs: PositiveInt,
+  pageBudgetMs: PositiveInt,
+  walk: z.strictObject(walkShape),
+  normalize: z.strictObject(normalizeShape),
+});
+export type LocalFilesSettings = z.infer<typeof LocalFilesSettingsSchema>;
+
+/** A write names the limits it changes; the others stay. */
+export const LocalFilesSettingsPatchSchema = z.strictObject({
+  maxFileBytes: PositiveInt.optional(),
+  settleMs: PositiveInt.optional(),
+  pageBudgetMs: PositiveInt.optional(),
+  walk: z.strictObject(walkShape).partial().optional(),
+  normalize: z.strictObject(normalizeShape).partial().optional(),
+});
+export type LocalFilesSettingsPatch = z.infer<typeof LocalFilesSettingsPatchSchema>;
+
+/** One approved location as the list shows it. The path is the one the user chose; no file content is here. */
+export const LocalLocationSchema = z.object({
+  id: z.string(),
+  type: LocationTypeSchema,
+  displayPath: z.string(),
+  state: z.enum(["active", "paused", "unavailable", "needs-confirmation", "revoking"]),
+  stateReason: z.string().nullable(),
+  counts: z.strictObject({
+    tracked: z.int().nonnegative(),
+    skipped: z.int().nonnegative(),
+    ignored: z.int().nonnegative(),
+    pendingDeletes: z.int().nonnegative(),
+  }),
+  limitExceeded: z.boolean(),
+  /** ISO time of the last finished pass, null before the first. */
+  lastPassAt: z.string().nullable(),
+  /** No watcher in this release: the list says so (I02B-R38). */
+  watching: z.boolean(),
+});
+export type LocalLocationInfo = z.infer<typeof LocalLocationSchema>;
+
+export const LocalLocationListSchema = z.object({
+  locations: z.array(LocalLocationSchema),
+  /** The normalizer host is broken and normalizing stopped (I02B-R23, R36). */
+  normalizerUnavailable: z.boolean(),
+  limits: LocalFilesSettingsSchema,
+});
+export type LocalLocationList = z.infer<typeof LocalLocationListSchema>;
