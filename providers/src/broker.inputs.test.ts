@@ -18,13 +18,15 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createBroker, type CandidateItem, type ExecutionInput } from "./broker.ts";
 import { TASKS } from "./tasks.ts";
 import { createUserActionLedger } from "./user-actions.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const fixtures = readFileSync(
   resolve(import.meta.dirname, "../../fixtures/test-connector.jsonl"),
@@ -50,8 +52,7 @@ let execution: ExecutionInput[];
 let broker: ReturnType<typeof createBroker>;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   provider = new FakeProvider({
     answer: (r) =>
       r.taskKind === "extract"

@@ -2,7 +2,7 @@
 // automated actor's candidate path at function level. `ontology.checks` walks the three checks of
 // R19; `ontology.candidates` (the parts T06 owns) the R20 rule that an automated change is a
 // candidate and needs its source. Approving, rejecting and undoing are T07's and are not tested here.
-import { setOntologyStatusForTest, setStatusForTest } from "@pki/testkit";
+import { setOntologyStatusForTest, setStatusForTest, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { insertItem, saveFact, saveRelation, type KnowledgeAttributes } from "./knowledge.ts";
@@ -21,10 +21,11 @@ import type { Actor, Basis } from "./semantic-lifecycle.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());
