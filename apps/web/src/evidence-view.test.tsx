@@ -13,7 +13,39 @@ import {
   SourceView,
   type EvidenceState,
 } from "./evidence-view.tsx";
-import { INSIGHT_GONE, SOURCE_GONE, UNTRUSTED_BADGE } from "./evidence-text.ts";
+import {
+  AUTO_NOTIFY_EXCLUDED,
+  INSIGHT_GONE,
+  rankingText,
+  REASONING_BY,
+  SOURCE_GONE,
+  UNTRUSTED_BADGE,
+} from "./evidence-text.ts";
+import type { InsightSummary as InsightRow } from "@pki/contracts";
+
+/** An Insight row as the API now gives it (P01-R13); a test overrides what it reads. */
+const row = (over: Partial<InsightRow> = {}): InsightRow => ({
+  id: 1,
+  epistemic: "inferred",
+  summary: "위험(추론)",
+  evidenceCount: 3,
+  type: "dependency_delay",
+  factLines: [],
+  reasoningSummary: null,
+  reasoningBy: null,
+  confidence: null,
+  ranking: {
+    relevance: 50,
+    impact: 80,
+    urgency: 100,
+    novelty: 100,
+    confidence: 50,
+    actionability: 70,
+    score: 72,
+  },
+  autoNotifyExcluded: false,
+  ...over,
+});
 
 const malicious = readFileSync(
   resolve(import.meta.dirname, "../../../fixtures/v02-malicious.jsonl"),
@@ -101,19 +133,31 @@ describe("SourceView", () => {
 describe("InsightSummary", () => {
   it("labels the Insight as an inference and never as confirmed", () => {
     const html = renderToStaticMarkup(
-      <InsightSummary
-        insight={{
-          id: 1,
-          epistemic: "inferred",
-          summary: "<img src=x>위험(추론)",
-          evidenceCount: 3,
-        }}
-      />,
+      <InsightSummary insight={row({ summary: "<img src=x>위험(추론)" })} />,
     );
     expect(html).toContain(">추론<");
     expect(html).toContain("확정 사실이 아닙니다");
     expect(html).not.toMatch(/>확정</);
     expect(html).not.toMatch(/<img/);
+  });
+
+  it("shows the type, fact lines in <bdi>, who wrote the reason, the ranking and the notification mark (P01-C2d)", () => {
+    const insight = row({
+      factLines: ["X 목표일: 2026-12-05", "<b>Y</b> 완료일: 2026-12-10"],
+      reasoningSummary: "해석 이유",
+      reasoningBy: "llm",
+      autoNotifyExcluded: true,
+    });
+    const html = renderToStaticMarkup(<InsightSummary insight={insight} />);
+    expect(html).toContain("의존 업무 지연");
+    expect(html).toContain("<li><bdi>X 목표일: 2026-12-05</bdi></li>");
+    expect(html).toContain("<li><bdi>&lt;b&gt;Y&lt;/b&gt; 완료일: 2026-12-10</bdi></li>");
+    expect(html).toContain(`${REASONING_BY.llm}: <bdi>해석 이유</bdi>`);
+    expect(html).toContain(rankingText(insight.ranking));
+    expect(html).toContain(AUTO_NOTIFY_EXCLUDED);
+    const plain = renderToStaticMarkup(<InsightSummary insight={row()} />);
+    expect(plain).not.toContain(AUTO_NOTIFY_EXCLUDED);
+    expect(plain).not.toContain("사실 줄");
   });
 });
 
@@ -148,9 +192,7 @@ describe("bidi isolation of imported text", () => {
   const RLO = "\u202e";
   it("wraps the Insight summary in <bdi>", () => {
     const html = renderToStaticMarkup(
-      <InsightSummary
-        insight={{ id: 1, epistemic: "inferred", summary: `${RLO}위험(추론)`, evidenceCount: 3 }}
-      />,
+      <InsightSummary insight={row({ summary: `${RLO}위험(추론)` })} />,
     );
     expect(html).toContain(`<strong>추론</strong> <bdi>${RLO}위험(추론)</bdi>`);
   });
@@ -189,12 +231,7 @@ describe("evidenceReducer", () => {
     locator: null,
   });
   const evidence = [entry(7), entry(8)];
-  const insight = (id: number) => ({
-    id,
-    epistemic: "inferred" as const,
-    summary: `위험 ${id}(추론)`,
-    evidenceCount: 2,
-  });
+  const insight = (id: number) => row({ id, summary: `위험 ${id}(추론)`, evidenceCount: 2 });
   const open: EvidenceState = {
     insights: [insight(1), insight(2)],
     opened: { insightId: 1, evidence },

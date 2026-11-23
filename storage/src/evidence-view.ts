@@ -12,6 +12,22 @@ export interface ActiveInsight {
   epistemic: "inferred";
   summary: string;
   evidenceCount: number;
+  /** `insights.rule` (P01-R13) */
+  type: string;
+  xItemId: number;
+  yItemId: number;
+  /** `fact_lines`; a legacy row (NULL) gives [] */
+  factLines: string[];
+  /** the code's reason */
+  reasoningSummary: string | null;
+  /** the interpretation's reason, impact and actionability (P01-D12), null without one */
+  llmReasoningSummary: string | null;
+  llmImpact: number | null;
+  llmActionability: number | null;
+  confidence: number | null;
+  urgencyDate: string | null;
+  changedAt: string | null;
+  userInputCount: number;
 }
 
 export interface InsightEvidenceRow {
@@ -61,7 +77,10 @@ function locatorAt(blocksJson: unknown, start: number): NativeLocator | null {
   return blocks.find((b) => b.start <= start && start < b.end)?.locator ?? null;
 }
 
-const ACTIVE_INSIGHT = `SELECT i.id, i.epistemic, i.summary,
+const ACTIVE_INSIGHT = `SELECT i.id, i.epistemic, i.summary, i.rule, i.x_item_id, i.y_item_id, i.fact_lines,
+    i.reasoning_summary, i.llm_reasoning_summary, i.llm_impact, i.llm_actionability, i.confidence,
+    i.urgency_date, i.changed_at,
+    (SELECT count(*) FROM insight_user_inputs u WHERE u.insight_id = i.id) AS user_input_count,
     (SELECT count(*) FROM insight_evidence ie WHERE ie.insight_id = i.id)
       + (SELECT count(*) FROM insight_user_inputs u WHERE u.insight_id = i.id) AS evidence_count
   FROM insights i WHERE i.state = 'active'`;
@@ -71,6 +90,18 @@ const insightOf = (row: SqlRow): ActiveInsight => ({
   epistemic: row.epistemic as "inferred",
   summary: row.summary as string,
   evidenceCount: row.evidence_count as number,
+  type: row.rule as string,
+  xItemId: row.x_item_id as number,
+  yItemId: row.y_item_id as number,
+  factLines: row.fact_lines === null ? [] : (JSON.parse(row.fact_lines as string) as string[]),
+  reasoningSummary: row.reasoning_summary as string | null,
+  llmReasoningSummary: row.llm_reasoning_summary as string | null,
+  llmImpact: row.llm_impact as number | null,
+  llmActionability: row.llm_actionability as number | null,
+  confidence: row.confidence as number | null,
+  urgencyDate: row.urgency_date as string | null,
+  changedAt: row.changed_at as string | null,
+  userInputCount: row.user_input_count as number,
 });
 
 /** Active Insights, oldest first. */

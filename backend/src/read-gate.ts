@@ -208,15 +208,30 @@ export function createReadGate(
     sources: () => filled((n) => listSources(db, n), "source", "display", sourcesLimit),
     searchSources: (query) =>
       filled((n) => findSources(db, query, n), "source", "search", searchLimit),
-    insights: () =>
-      only(listActiveInsights(db), "insight", (i) => i.id, "display").map((insight) => ({
-        ...insight,
-        evidenceCount: shownEvidence(insight.id).length + shownUserInputs(insight.id).length,
-      })),
+    insights() {
+      const rows = only(listActiveInsights(db), "insight", (i) => i.id, "display");
+      // P01-R15: an end item with a fact from a hidden source hides the Insight too
+      const items = shown(
+        rows.flatMap((i) => [
+          { kind: "item", id: String(i.xItemId) },
+          { kind: "item", id: String(i.yItemId) },
+        ]),
+        "display",
+      );
+      return rows
+        .filter((i) => items.has(String(i.xItemId)) && items.has(String(i.yItemId)))
+        .map((insight) => ({
+          ...insight,
+          evidenceCount: shownEvidence(insight.id).length + shownUserInputs(insight.id).length,
+        }));
+    },
     insightEvidence(insightId) {
       if (!isShown("insight", insightId)) return undefined;
       const read = readInsightEvidence(db, insightId);
       if (!read) return undefined;
+      if (!isShown("item", read.insight.xItemId) || !isShown("item", read.insight.yItemId)) {
+        return undefined;
+      }
       const evidence = only(read.evidence, "evidence", (e) => e.id, "display");
       const userInputs = shownUserInputs(insightId);
       return {

@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "vite";
 import { webConfig } from "../dev/dev-server.ts";
-import { freePort, openEvidence, remote, ROOT } from "./v02-screens.ts";
+import { freePort, insightItems, openEvidence, remote, ROOT } from "./v02-screens.ts";
 
 type Target = "browser" | "electron";
 const test = base.extend<{ target: Target }>({ target: ["browser", { option: true }] });
@@ -81,6 +81,47 @@ test("evidence.e2e: the Insight's three evidence open their source version and s
   const stack = await startStack("plain", target, playwright.chromium);
   try {
     await openEvidence(stack.page, "plain");
+    expect(stack.requested.filter(remote)).toEqual([]);
+  } finally {
+    await stack.stop();
+  }
+});
+
+test("insight.e2e: Home shows the Insight's type, fact lines, reasoning and ranking; the type list and the interpret switch", async ({
+  target,
+  playwright,
+}) => {
+  test.skip(target !== "browser", "browser only (P01 spec, D36)");
+  const stack = await startStack("plain", target, playwright.chromium);
+  const { page } = stack;
+  try {
+    await expect(insightItems(page)).toHaveCount(1);
+    const item = insightItems(page).first();
+    await expect(item).toContainText("의존 업무 지연");
+    const lines = item.getByRole("list", { name: "사실 줄" }).getByRole("listitem");
+    await expect(lines).toHaveCount(3);
+    await expect(lines.filter({ hasText: "2026-12-05" })).not.toHaveCount(0);
+    await expect(lines.filter({ hasText: "2026-12-10" })).not.toHaveCount(0);
+    // the notification mark is not asserted: the fixture double's candidate confidence is not pinned
+    await expect(item).toContainText("코드가 비교해");
+    await expect(item).toContainText(/순위 \d+/);
+
+    await page.getByText("Insight 유형 지원 상태").click();
+    const types = page.getByRole("list", { name: "Insight 유형" }).getByRole("listitem");
+    await expect(types).toHaveCount(13);
+    const similar = types.filter({ hasText: "유사 해결" });
+    await expect(similar).toContainText("미지원");
+    await expect(similar).toContainText("유사도 검색이 없다");
+
+    // last on purpose: turning the switch on queues an interpretation job that waits without a Provider
+    const nav = page.getByRole("navigation");
+    await nav.getByRole("button", { name: "설정" }).click();
+    const box = page.getByRole("checkbox", { name: "Insight LLM 해석 사용" });
+    await expect(box).not.toBeChecked();
+    await box.click();
+    await nav.getByRole("button", { name: "홈" }).click();
+    await nav.getByRole("button", { name: "설정" }).click();
+    await expect(box).toBeChecked();
     expect(stack.requested.filter(remote)).toEqual([]);
   } finally {
     await stack.stop();

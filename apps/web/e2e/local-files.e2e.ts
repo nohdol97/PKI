@@ -137,17 +137,18 @@ test("local-files.e2e: approve a folder → sources → Insight evidence with a 
     await go(page, "원본");
     await page.getByRole("button", { name: "local-files 동기화" }).click();
     // Home rereads when entered: enter it until the sync and the extraction have ended
-    const insight = page.getByRole("list", { name: "Insight 목록" }).getByRole("listitem");
+    // the files also make a new-relation Insight (P01-D24), so the dependency-delay row is picked by its sentence
+    const insight = page
+      .getByRole("list", { name: "Insight 목록" })
+      .locator(":scope > li")
+      .filter({ hasText: "의존 업무의 지연" });
     await expect(async () => {
       await go(page, "원본");
       await go(page, "홈");
       await expect(insight).toHaveCount(1, { timeout: 1_000 });
     }).toPass({ timeout: 60_000 });
     const evidence = page.waitForResponse((r) => r.url().endsWith("/api/insights/evidence"));
-    await insight
-      .first()
-      .getByRole("button", { name: /근거 보기/ })
-      .click();
+    await insight.getByRole("button", { name: /근거 보기/ }).click();
     const body = (await (await evidence).json()) as {
       evidence: { quote: string; locator: { format: string; line: number } | null }[];
     };

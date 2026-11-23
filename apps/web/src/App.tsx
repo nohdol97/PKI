@@ -31,6 +31,7 @@ import { ConnectorTable } from "./connector-table.tsx";
 import { SecretField } from "./secret-field.tsx";
 import { nextSyncStops } from "./connector-text.ts";
 import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts";
+import { INSIGHT_INTERPRET_TEXT } from "./evidence-text.ts";
 import { Insights } from "./evidence-view.tsx";
 import { Lint } from "./lint.tsx";
 import { Wiki } from "./wiki.tsx";
@@ -98,6 +99,7 @@ type ReadRoute =
   | "settings"
   | "consents"
   | "executionSettings"
+  | "semanticSettings"
   | "providers";
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -490,6 +492,7 @@ function Settings({ api }: { api: ApiClient }) {
       <Consents api={api} />
       <ConnectionTest api={api} />
       <BackgroundExecution api={api} />
+      <InsightInterpretSetting api={api} />
       <LocalLocations api={api} />
     </>
   );
@@ -664,6 +667,37 @@ export function BackgroundExecution({ api }: { api: ApiClient }) {
             onChange={(e) => set(e.target.checked)}
           />
           CLI 백그라운드 실행 허용
+        </label>
+      )}
+    </>
+  );
+}
+
+/** P01-R17: the LLM interpretation of Insights, off until the user turns it on. */
+export function InsightInterpretSetting({ api }: { api: ApiClient }) {
+  const { data, error, reload } = useRoute(api, "semanticSettings");
+  const [failure, setFailure] = useState<string>();
+  const set = (insightInterpret: boolean) =>
+    api("setSemanticSettings", { autoVerify: data?.autoVerify ?? false, insightInterpret }).then(
+      () => {
+        setFailure(undefined);
+        reload();
+      },
+      (e: unknown) => setFailure(message(e)),
+    );
+  return (
+    <>
+      <h2>Insight 해석</h2>
+      <Failure error={error ?? failure} />
+      <p>{INSIGHT_INTERPRET_TEXT}</p>
+      {data && (
+        <label>
+          <input
+            type="checkbox"
+            checked={data.insightInterpret}
+            onChange={(e) => set(e.target.checked)}
+          />
+          Insight LLM 해석 사용
         </label>
       )}
     </>

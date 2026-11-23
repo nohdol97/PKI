@@ -7,6 +7,31 @@ export const INSIGHT_EPISTEMIC: Record<InsightSummary["epistemic"], string> = { 
 /** Provisional wording: an Insight is never shown as a confirmed fact (V02-C2). */
 export const INSIGHT_NOT_CONFIRMED = "규칙이 근거에서 이끌어 낸 추론이며 확정 사실이 아닙니다.";
 
+/** Who wrote an Insight's reason text (P01-R13, D31). */
+export const REASONING_BY: Record<"code" | "llm", string> = {
+  code: "이유(코드 판정)",
+  llm: "해석(LLM)",
+};
+
+export const AUTO_NOTIFY_EXCLUDED = "자동 알림 제외(신뢰도 낮음)";
+
+/** Provisional wording (P01-R17, D33): the switch is a dark launch, off by default. */
+export const INSIGHT_INTERPRET_TEXT =
+  "켜면 활성 Insight마다 LLM 해석 작업이 생깁니다. Provider와 전송 동의가 없으면 작업은 대기합니다. 기본은 꺼짐입니다.";
+
+/** "순위 72 · 관련 50 · 영향 80 · 시급 100 · 신규 100 · 신뢰 50 · 행동 70" */
+export function rankingText(r: InsightSummary["ranking"]): string {
+  return `순위 ${r.score} · 관련 ${r.relevance} · 영향 ${r.impact} · 시급 ${r.urgency} · 신규 ${r.novelty} · 신뢰 ${r.confidence} · 행동 ${r.actionability}`;
+}
+
+/** "지원" or "미지원: <reason>" (P01-R16). */
+export function typeStatusText(t: {
+  status: "supported" | "unsupported";
+  reason: string | null;
+}): string {
+  return t.status === "supported" ? "지원" : `미지원: ${t.reason ?? ""}`;
+}
+
 export const UNTRUSTED_BADGE = "가져온 자료(신뢰하지 않음)";
 
 /** Provisional wording (spec "T10이 넘기는 것" 7): shown instead of the API's 404 code. */

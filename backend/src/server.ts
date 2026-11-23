@@ -84,8 +84,10 @@ import {
   readSemanticHistory,
   readSemanticState,
   readSetting,
+  readInsightInterpret,
   readWikiSummary,
   requestWikiBuild,
+  setInsightInterpret,
   setWikiSummary,
   requestWikiRebuild,
   rootOf,
@@ -113,6 +115,7 @@ import { ledgerStatus } from "./ledger-status.ts";
 import { jobsApi, type JobsPort } from "./jobs-view.ts";
 import type { LocalLocations } from "./local-locations.ts";
 import { createAnalyticalApi } from "./analytical-api.ts";
+import { insightTypeList, insightView, rankedInsightViews } from "./insight-view.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { createFeedbackApi } from "./feedback-api.ts";
 import { createLintReads } from "./lint-read.ts";
@@ -587,6 +590,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
   const entries = options.entries ?? defaultEntries;
   const registry = options.registry ?? defaultReadRegistry;
   const gate = createReadGate(options.db, registry);
+  const clock = () => new Date(options.now?.() ?? Date.now());
   const analytical = createAnalyticalApi({
     db: options.db,
     shown: (kind, id) => registry.visible(options.db, [{ kind, id }], "display").length > 0,
@@ -1013,8 +1017,9 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       autoVerify: readAutoVerify(options.db),
       autoDispute: readAutoDispute(options.db),
       wikiSummary: readWikiSummary(options.db),
+      insightInterpret: readInsightInterpret(options.db),
     }),
-    setSemanticSettings: async ({ autoVerify, autoDispute, wikiSummary }) => {
+    setSemanticSettings: async ({ autoVerify, autoDispute, wikiSummary, insightInterpret }) => {
       // no held job waits on these settings, so nothing is released with them (cf. `releasing`)
       writeSetting(options.db, AUTO_VERIFY_SETTING, autoVerify ? "on" : "off");
       if (autoDispute !== undefined) {
@@ -1024,10 +1029,15 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         setWikiSummary(options.db, wikiSummary, new Date());
         options.onRunConditionsChanged?.(); // wakes the runner for the summary jobs the switch queued
       }
+      if (insightInterpret !== undefined) {
+        setInsightInterpret(options.db, insightInterpret, new Date());
+        options.onRunConditionsChanged?.(); // wakes the runner for the interpretation jobs the switch queued
+      }
       return {
         autoVerify: readAutoVerify(options.db),
         autoDispute: readAutoDispute(options.db),
         wikiSummary: readWikiSummary(options.db),
+        insightInterpret: readInsightInterpret(options.db),
       };
     },
     providers: async () => providerList(options),
@@ -1048,9 +1058,16 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
     // V02-R14: only active Insights, and a hidden one's evidence list is not-found. A source
     // opens by evidence id while its rows exist (until T08's purge deletes them).
-    insights: async () => ({ insights: feedback.visibleInsights(gate.insights()) }),
-    insightEvidence: async ({ insightId }) =>
-      gate.insightEvidence(insightId) ?? { error: "not-found" },
+    insights: async () => ({
+      insights: rankedInsightViews(feedback.visibleInsights(gate.insights()), clock()),
+    }),
+    insightTypes: async () => insightTypeList(),
+    insightEvidence: async ({ insightId }) => {
+      const read = gate.insightEvidence(insightId);
+      return read
+        ? { ...read, insight: insightView(read.insight, clock()) }
+        : { error: "not-found" };
+    },
     evidenceSource: async ({ evidenceId }) =>
       gate.evidenceSource(evidenceId) ?? { error: "not-found" },
     // S01-R23: the registry's rows behind the read gate; the user's actions through the one entry
