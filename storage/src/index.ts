@@ -69,10 +69,12 @@ export {
   BACKUP_EXTENSION,
   BackupFileError,
   MIN_PASSPHRASE_LENGTH,
+  openBackup,
   openManifest,
   readBackupHeader,
   type BackupFileErrorCode,
   type BackupHeader,
+  type ScryptCost,
 } from "./backup-file.ts";
 export {
   dataDirectory,

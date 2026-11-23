@@ -248,20 +248,45 @@ function nextRecord(fd: number, at: number): { payload: Buffer; end: number } {
   return { payload: readAt(fd, at + 4, length), end: at + 4 + length };
 }
 
+export interface OpenedBackup {
+  header: BackupHeader;
+  manifest: unknown;
+  /**
+   * Decrypts the whole snapshot to `outPath` with the key this open derived (one scrypt run per request),
+   * checking every chunk, the last-chunk mark and the end of the file. Returns the bytes written and their
+   * SHA-256. On any failure the partial output is removed.
+   */
+  extract(outPath: string): { bytes: number; sha256: string };
+}
+
+/**
+ * The header and the manifest chunk of a file, after the passphrase's key has been checked (R8). The key stays
+ * in this call's closure; nothing of it or of the passphrase is kept beyond the returned object's life.
+ */
+export function openBackup(path: string, passphrase: string): OpenedBackup {
+  const fd = openSync(path, "r");
+  try {
+    const { header, hash, chunksAt } = readHeader(fd);
+    const key = keyFor(header, passphrase);
+    const first = nextRecord(fd, chunksAt);
+    const manifest = parseJson(open(key, hash, 0, false, first.payload));
+    return {
+      header,
+      manifest,
+      extract: (outPath) => extractChunks(path, key, hash, first.end, outPath),
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Only the manifest chunk, for a look at a file (R8). */
 export function openManifest(
   path: string,
   passphrase: string,
 ): { header: BackupHeader; manifest: unknown } {
-  const fd = openSync(path, "r");
-  try {
-    const { header, hash, chunksAt } = readHeader(fd);
-    const key = keyFor(header, passphrase);
-    const plain = open(key, hash, 0, false, nextRecord(fd, chunksAt).payload);
-    return { header, manifest: parseJson(plain) };
-  } finally {
-    closeSync(fd);
-  }
+  const { header, manifest } = openBackup(path, passphrase);
+  return { header, manifest };
 }
 
 function parseJson(plain: Buffer): unknown {
@@ -272,28 +297,21 @@ function parseJson(plain: Buffer): unknown {
   }
 }
 
-/**
- * Decrypts the whole snapshot to `outPath` (a new file, mode 0600), checking every chunk, the last-chunk mark
- * and the end of the file. Returns the manifest, the bytes written and their SHA-256. On any failure the
- * partial output is removed.
- */
-export function decryptSnapshot(
+function extractChunks(
   path: string,
-  passphrase: string,
+  key: Buffer,
+  hash: Buffer,
+  firstEnd: number,
   outPath: string,
-): { header: BackupHeader; manifest: unknown; bytes: number; sha256: string } {
+): { bytes: number; sha256: string } {
   const fd = openSync(path, "r");
   let out: number | undefined;
   try {
-    const { header, hash, chunksAt } = readHeader(fd);
-    const key = keyFor(header, passphrase);
     const size = fstatSync(fd).size;
-    const first = nextRecord(fd, chunksAt);
-    const manifest = parseJson(open(key, hash, 0, false, first.payload));
     out = openSync(outPath, "w", 0o600);
     const digest = createHash("sha256");
     let bytes = 0;
-    let at = first.end;
+    let at = firstEnd;
     for (let index = 1; ; index++) {
       if (at >= size) throw damaged(); // the last-chunk mark never came: the end was cut
       const record = nextRecord(fd, at);
@@ -306,7 +324,7 @@ export function decryptSnapshot(
       if (last) break;
     }
     fsyncSync(out);
-    return { header, manifest, bytes, sha256: digest.digest("hex") };
+    return { bytes, sha256: digest.digest("hex") };
   } catch (error) {
     if (out !== undefined) {
       closeSync(out);
@@ -318,4 +336,14 @@ export function decryptSnapshot(
     if (out !== undefined) closeSync(out);
     closeSync(fd);
   }
+}
+
+/** The whole snapshot of a file to `outPath`: `openBackup` and `extract` in one call. */
+export function decryptSnapshot(
+  path: string,
+  passphrase: string,
+  outPath: string,
+): { header: BackupHeader; manifest: unknown; bytes: number; sha256: string } {
+  const opened = openBackup(path, passphrase);
+  return { header: opened.header, manifest: opened.manifest, ...opened.extract(outPath) };
 }

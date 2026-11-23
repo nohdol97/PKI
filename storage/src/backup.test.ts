@@ -24,6 +24,7 @@ import {
   createBackup,
   createSnapshot,
   listBackups,
+  installationFingerprint,
   readPending,
   readSnapshotFacts,
   removeRestoreArtifacts,
@@ -31,7 +32,7 @@ import {
   type BackupManifest,
 } from "./backup.ts";
 import { decryptSnapshot, openManifest, writeBackupFile } from "./backup-file.ts";
-import { prepareCanonicalDb } from "./identity.ts";
+import { prepareCanonicalDb, readKey } from "./identity.ts";
 import { insertItem, saveFact, saveRelation, type KnowledgeAttributes } from "./knowledge.ts";
 import { migrate, migrations, schemaVersion } from "./migrations.ts";
 import { registerJob } from "./jobs.ts";
@@ -142,6 +143,12 @@ describe("backup.manifest and snapshot (H01-C1a)", () => {
         feedback: 0,
       },
     });
+    // the installation is named by a keyed fingerprint, never by the identity key itself
+    expect(manifest.installation).toBe(installationFingerprint(live));
+    expect(manifest.installation).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(manifest)).not.toContain(
+      Buffer.from(readKey(live) as Uint8Array).toString("hex"),
+    );
     // the snapshot is the file the manifest says: unpack it and read it again
     const out = join(root, "unpacked.sqlite");
     const done = decryptSnapshot(join(folder, fileName), PASSPHRASE, out);

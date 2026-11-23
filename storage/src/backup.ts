@@ -2,7 +2,7 @@
 // by `VACUUM INTO` through the driver, its manifest read from the copy, the encrypted file written beside a
 // `.partial` name, and the staging of a file for the next start (checks first, nothing live touched).
 // The swap itself is the backend's (restore-boot.ts), before the database is opened.
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -23,8 +23,8 @@ import {
   BACKUP_FORMAT,
   BackupFileError,
   MIN_PASSPHRASE_LENGTH,
-  decryptSnapshot,
-  openManifest,
+  openBackup,
+  type OpenedBackup,
   readBackupHeader,
   writeBackupFile,
   type ScryptCost,
@@ -74,6 +74,8 @@ export interface BackupManifest extends SnapshotFacts {
   snapshotSha256: string;
   embeddingSpace: EmbeddingSpace | null;
   vectorIndexSeq: number | null;
+  /** Names the installation the snapshot came from without carrying its identity key (R8); null for a keyless schema. */
+  installation: string | null;
 }
 
 export class BackupExistsError extends Error {
@@ -113,6 +115,14 @@ export function readSnapshotFacts(db: SqlDriver): SnapshotFacts {
     ledgerSeq: hasTable(db, "settings") ? readLedgerSeq(db) : 0,
     counts,
   };
+}
+
+/** A keyed digest of a fixed label: equal for one installation, no way back to the key. */
+const keyOf = (db: SqlDriver) => (hasTable(db, "identity_key") ? readKey(db) : undefined);
+
+export function installationFingerprint(db: SqlDriver): string | null {
+  const key = keyOf(db);
+  return key ? createHmac("sha256", key).update("pki-backup-installation-v1").digest("hex") : null;
 }
 
 const quote = (path: string) => `'${path.replaceAll("'", "''")}'`;
@@ -172,8 +182,10 @@ export function createBackup(input: CreateBackupInput): {
   try {
     const copy = input.open(snapshot);
     let facts: SnapshotFacts;
+    let installation: string | null;
     try {
       facts = readSnapshotFacts(copy);
+      installation = installationFingerprint(copy);
     } finally {
       copy.close();
     }
@@ -187,6 +199,7 @@ export function createBackup(input: CreateBackupInput): {
       snapshotSha256: createHash("sha256").update(bytes).digest("hex"),
       embeddingSpace: input.embeddingSpace,
       vectorIndexSeq: input.vectorIndexSeq,
+      installation,
     };
     const fileName = `pki-backup-${stamp(input.now)}${BACKUP_EXTENSION}`;
     const target = join(input.folder, fileName);
@@ -346,6 +359,11 @@ function asManifest(value: unknown): BackupManifest {
   return m as BackupManifest;
 }
 
+/** The manifest chunk of a file, checked for its shape; the codes of an unreadable file as `BackupFileError`. */
+export function readBackupManifest(file: string, passphrase: string): BackupManifest {
+  return asManifest(openBackup(file, passphrase).manifest);
+}
+
 const refused = (code: RestoreRefusal): StageResult => ({ status: "refused", code });
 
 /**
@@ -357,8 +375,10 @@ export function stageRestore(input: StageInput): StageResult {
   const existing = readPending(dataDir);
   if (existing && existing.state !== "failed") return refused("already-pending");
   let manifest: BackupManifest;
+  let opened: OpenedBackup;
   try {
-    manifest = asManifest(openManifest(input.file, input.passphrase).manifest);
+    opened = openBackup(input.file, input.passphrase);
+    manifest = asManifest(opened.manifest);
   } catch (error) {
     if (error instanceof BackupFileError && error.code !== "weak-passphrase") {
       return refused(error.code);
@@ -372,7 +392,7 @@ export function stageRestore(input: StageInput): StageResult {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const stagedPath = join(dir, STAGED_FILE);
   try {
-    const verdict = checkAndLift(input, manifest, stagedPath);
+    const verdict = checkAndLift(input, opened, manifest, stagedPath);
     if (verdict) {
       removeRestoreArtifacts(dataDir);
       return refused(verdict);
@@ -400,11 +420,12 @@ export function stageRestore(input: StageInput): StageResult {
 /** The checks of R9 in order on the unpacked file; the code of the first that fails, or undefined. */
 function checkAndLift(
   input: StageInput,
+  opened: OpenedBackup,
   manifest: BackupManifest,
   stagedPath: string,
 ): RestoreRefusal | undefined {
   // ① every chunk's authentication, the byte count and the SHA-256
-  const done = decryptSnapshot(input.file, input.passphrase, stagedPath);
+  const done = opened.extract(stagedPath);
   if (done.bytes !== manifest.snapshotBytes || done.sha256 !== manifest.snapshotSha256) {
     return "damaged";
   }
@@ -422,8 +443,8 @@ function checkAndLift(
     // ③ a schema this build does not know
     if (schemaVersion(staged) > migrations.length) return "newer-schema";
     // ④ another installation's data over one that holds sources or deletions (H01-D8)
-    const theirs = readKey(staged);
-    const mine = readKey(input.db);
+    const theirs = keyOf(staged);
+    const mine = keyOf(input.db);
     const differs =
       theirs !== undefined && (mine === undefined || Buffer.compare(theirs, mine) !== 0);
     if (differs) {

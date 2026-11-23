@@ -18,7 +18,7 @@ import type { HostSpawner } from "@pki/document-normalize";
 import type { Projections } from "@pki/knowledge-engine";
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { BUILD_KIND, errorClass, log, type ScopeGrading } from "@pki/providers";
-import type { DerivativeRegistry, SqlDriver } from "@pki/storage";
+import type { DerivativeRegistry, ScryptCost, SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
   CANONICAL_DB_FILE,
@@ -47,6 +47,7 @@ import {
   type ConnectorSet,
 } from "./composition.ts";
 import { readLocalFilesSettings, type ApprovalTickets } from "./local-locations.ts";
+import { createBackupApi } from "./backup-api.ts";
 import { systemClock } from "./clock.ts";
 import { applyConfiguredScopes, bindConnectorScopes } from "./connector-scopes.ts";
 import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
@@ -141,6 +142,8 @@ export interface BootOptions {
   registry?: DerivativeRegistry;
   /** The mapping scope -> class for the Broker (I01-R15); honoured in a test build only, like `registry`. */
   scopeGrading?: ScopeGrading;
+  /** A lower scrypt cost for the backup files the API makes (H01-D5); honoured in a test build only. */
+  backupScrypt?: ScryptCost;
   /**
    * The scope policy by name (I04-R14, I05-R15, S21), for a source run: none gives the registration's
    * policy (else the public default), `default` the public default, `site` the registration's policy, which
@@ -422,6 +425,15 @@ async function startBackend(
     entries,
     registry,
     localLocations: localFiles.locations,
+    backup: createBackupApi({
+      db,
+      dataDir: options.dataDir,
+      open: openSqlFile,
+      vectorIndex: adapters.vectorIndex,
+      tickets: localFiles.tickets,
+      buildKind: BUILD_KIND,
+      ...(BUILD_KIND === "test" && options.backupScrypt ? { scrypt: options.backupScrypt } : {}),
+    }),
     decisions: productUserDecisions(registry),
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),

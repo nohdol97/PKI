@@ -53,7 +53,7 @@
 | 뺀다 | `models/`, `cli-runs/`, `instance.lock`, `backup-tmp/`, `restore/` | 캐시·임시·잠금 |
 | 뺀다 | 엔진·벡터 투영 | 정본에서 다시 만든다(R11) |
 
-- **H01-R3 목록표.** `backupId`(무작위), 만든 시각, 형식 판 `1`, 스키마 번호, 변경 순번, 장부 순번, 사본의 바이트 수와 SHA-256, 건수(원본·원본 version·항목·사실·관계·근거·열린 작업·스케줄·피드백·tombstone), embedding 공간(`modelId`·`revision`·`dimension`, 없으면 `null`), 벡터 색인이 반영한 변경 순번(없으면 `null`). 건수와 번호는 **사본 파일을 읽어** 적는다(정본이 그 사이 바뀌어도 목록표와 내용이 어긋나지 않는다).
+- **H01-R3 목록표.** `backupId`(무작위), 만든 시각, 형식 판 `1`, 스키마 번호, 변경 순번, 장부 순번, 사본의 바이트 수와 SHA-256, 건수(원본·원본 version·항목·사실·관계·근거·열린 작업·스케줄·피드백·tombstone), embedding 공간(`modelId`·`revision`·`dimension`, 없으면 `null`), 벡터 색인이 반영한 변경 순번(없으면 `null`), 설치 지문(`installation`: 식별자 키로 고정 문구를 서명한 값. 키 자체를 싣지 않고 R8이 같은 설치인지 가르는 데 쓴다). 건수와 번호는 **사본 파일을 읽어** 적는다(정본이 그 사이 바뀌어도 목록표와 내용이 어긋나지 않는다).
 - **H01-R4 암호화.** Node 내장 `node:crypto`만 쓴다. 키는 암호구와 파일마다 새 salt에서 scrypt로 만든다(값은 머리에 적는다). 본문은 목록표 조각 하나와 사본 조각들을 AES-256-GCM으로 암호화하고, 조각 번호와 마지막 조각 표시를 인증 자료에 넣어 잘림·순서 바뀜·바꿔 끼움을 잡는다. 평문 머리에는 형식 판, 만든 시각, 스키마 번호, scrypt 값, salt, 키 확인값만 있다. 암호구는 12자 이상이다.
 - **H01-R5 읽지 못할 때의 답.** 키 확인값이 맞지 않으면 `wrong-passphrase`, 맞는데 조각 인증·해시·크기가 어긋나면 `damaged`, 형식 판을 모르면 `unsupported-format`이다. 어느 경우에도 평문을 내놓지 않고 지금 데이터를 건드리지 않는다. 암호구를 잃으면 그 파일은 읽을 수 없고 되찾는 길이 없다(화면이 만들 때 알린다).
 - **H01-R6 암호구의 자리.** 암호구와 만든 키는 요청을 처리하는 동안만 메모리에 있다. 설정·작업 행·로그·오류 문구·응답에 남기지 않는다.
@@ -101,7 +101,7 @@
 
 ### API와 화면
 
-- **H01-R15 API.** `GET /api/backup`(폴더, 폴더 안 백업 파일의 머리 정보, 대기 중 복원, `restore.last`, 실패 코드), `PUT /api/backup/folder`, `POST /api/backup`(암호구 → 파일 이름과 목록표 요약), `POST /api/restore/inspect`(R8), `POST /api/restore`(R9), `DELETE /api/restore`(R10). 스키마는 새 파일 `packages/contracts/src/backup-types.ts`에 두고 `index.ts`에는 export와 경로만 더한다.
+- **H01-R15 API.** `GET /api/backup`(폴더, 폴더 안 백업 파일의 머리 정보, 대기 중 복원, `restore.last`, 실패 코드), `PUT /api/backup/folder`, `POST /api/backup`(암호구 → 파일 이름과 목록표 요약), `POST /api/restore/inspect`(R8), `POST /api/restore`(R9), `DELETE /api/restore`(R10). 스키마는 새 파일 `packages/contracts/src/backup-types.ts`에 두고 `index.ts`에는 export와 경로만 더한다. 거절은 오류 응답이 아니라 `status: "refused"`와 코드를 담은 200 응답이다(화면이 말로 알리도록). 계약 시험이 "경로마다 JSON Schema 객체"를 요구하므로 응답은 판별 합집합이 아니라 한 객체와 검증식이다. 시험 빌드는 `bootBackend`의 `backupScrypt`로 scrypt 비용을 낮춘다(제품 값은 D5 그대로).
 - **H01-R16 화면.** 설정에 "백업·복원" 묶음 하나. 폴더 고르기, 암호구(두 번 입력)로 백업 만들기, 파일 목록, 살펴보기 결과와 확인 뒤 복원. 알릴 것: 암호구를 잃으면 못 읽는다, 비밀 값(API 키 등)은 백업에 없다, 복원은 다시 시작해야 적용되고 그때까지의 변경은 사라진다, 지운 이전 version은 되살아날 수 있다, 복원 전에 지금 데이터를 백업하라. 복원이 끝난 뒤에는 `restore.last`의 수를 한 번 보인다.
 
 ## 인터페이스 / 설계 개요
@@ -203,4 +203,5 @@ PR 하나로 간다. T1 뒤에 T2·T3을 나란히, T3 뒤에 T4·T5를 나란�
 | 날짜 | 변경 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-23 | 처음 씀, 확정 | 전체 | 이슈 #32 착수. X01이 진행 중이라 C3은 뒤 단위로 넘기고 C1·C2를 한 PR로 묶음. 정본 암호화는 ADR 0010의 현재 결정을 유지 |
+| 2026-11-23 | R3: 목록표에 `installation`(설치 지문) 추가; R15: 거절은 200 응답의 코드, `backupScrypt` 시험 틈 | R3, R15 | T3 구현 중 확인: R8의 "같은 설치인지"를 복호화 전에 가를 값이 목록표에 없었고, 계약 시험이 객체 응답만 받음 |
 | 2026-11-23 | R11·R12·R13: `rolling-back` 표식, `restore.last`에 `stagedAt`, 뜨겁지 않은 저널의 이동; 설계: `readIndexFacts`, `openSqlFile` | R11~R13, 설계 개요, T2 표 | T2 구현 중 확인: 되돌림 도중 꺼짐을 표식이 구분하지 못했고, 마무리 커밋 뒤 꺼짐을 가릴 기록이 필요했으며, 이 빌드의 `EmptyVectorIndex.embeddingSpace()`는 null이 아니라 던지고, 어댑터는 조립 지점에서만 열 수 있음 |
