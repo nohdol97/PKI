@@ -140,7 +140,7 @@ export type LocalNormalizeResult =
         format: string;
         text: string;
         blocks: Block[];
-        metadata: { title?: string; author?: string; created?: string };
+        metadata: { title?: string; author?: string; created?: string; participants?: string[] };
         encoding?: { name: string; method: string };
         limitations: { code: string }[];
       };

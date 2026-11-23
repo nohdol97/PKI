@@ -110,6 +110,7 @@ describe("blocks and locators (I01-R7)", () => {
       headingLevel: 1,
       table: { index: 0, row: 0, cell: 0 },
     },
+    { format: "docx", paragraph: 2, comment: { thread: 0, index: 1, part: "text" } },
     { format: "xlsx", sheet: "시트1", cell: "B3", row: 3, column: 2 },
     { format: "csv", record: 1, line: 2, field: 1 },
     { format: "html", path: "body>div[1]>p[2]", line: 1 },
@@ -137,6 +138,10 @@ describe("blocks and locators (I01-R7)", () => {
     ["a markdown locator without a node", { format: "markdown", line: 1 }],
     ["a fractional line", { format: "txt", line: 1.5 }],
     ["another format's field", { format: "pdf", page: 1, sheet: "s" }],
+    [
+      "a comment part that is neither head nor text",
+      { format: "docx", paragraph: 0, comment: { thread: 0, index: 0, part: "x" } },
+    ],
   ])("rejects %s", (_, locator) => {
     expect(NativeLocatorSchema.safeParse(locator).success).toBe(false);
   });

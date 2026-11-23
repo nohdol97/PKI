@@ -76,7 +76,7 @@
 **형식별 추출**(위치표의 모양은 아래 "인터페이스"의 표가 기준이다)
 
 - **I02A-R10 PDF.** 쪽마다 글자 층의 글을 뽑는다. 한 쪽의 글은 글 조각을 차례로 잇고 줄 끝 표시가 있는 조각 뒤에 `\n`을 둔다. 블록은 쪽 하나이며 위치표는 1부터 세는 쪽 번호다. 글자 층이 없는 쪽은 블록을 만들지 않고 한계 표시 `pdf.page-without-text`에 그 쪽 번호들을 적는다. 암호가 걸린 PDF는 `encrypted`다. PDF 라이브러리는 `eval`을 쓰지 않게 하고 글꼴·주소를 내려받지 않게 연다.
-- **I02A-R11 DOCX.** 본문의 문단을 문서 순서대로(표 안의 문단 포함) 뽑는다. 블록은 문단 하나이고 위치표는 본문 안의 문단 번호(0부터, 빈 문단 포함해 센다), 스타일 이름, 제목 수준(스타일이 "heading N"이면 N), 표 안이면 표 번호·행·칸(0부터)이다. 머리글·바닥글·각주·메모·그림은 넣지 않으며, 문서에 그것들이 있으면 각각 한계 표시를 단다.
+- **I02A-R11 DOCX.** 본문의 문단을 문서 순서대로(표 안의 문단 포함) 뽑는다. 블록은 문단 하나이고 위치표는 본문 안의 문단 번호(0부터, 빈 문단 포함해 센다), 스타일 이름, 제목 수준(스타일이 "heading N"이면 N), 표 안이면 표 번호·행·칸(0부터)이다. 머리글·바닥글·각주·그림은 넣지 않으며, 문서에 그것들이 있으면 각각 한계 표시를 단다. 메모는 I02B-R30이 본문 뒤에 되살린다.
 - **I02A-R12 XLSX.** 모든 시트를 통합 문서의 순서대로 뽑는다. 시트마다 시트 이름을 블록 하나로 먼저 두고, 그 뒤 값이 있는 칸마다 블록 하나를 둔다. 위치표는 시트 이름, A1 형식의 칸 주소, 1부터 세는 행·열 번호다. 값은 문자열은 그대로, 수는 JavaScript의 기본 수 표기로, 참·거짓은 `TRUE`·`FALSE`로, 날짜는 ISO-8601로 적는다. 수식은 파일에 저장된 마지막 계산값을 쓴다. 수식·병합된 칸·숨긴 시트가 있으면 각각 한계 표시를 단다.
 - **I02A-R13 CSV.** 인코딩 사다리로 푼 뒤 레코드마다 값이 있는 칸(비어 있지 않고 공백뿐이지 않은 칸)을 `\t`로 이어 한 줄로 둔다. 빈 칸과 공백뿐인 칸은 글에도 탭에도 넣지 않고, 값 있는 칸이 하나도 없는 레코드는 줄을 만들지 않는다(XLSX가 빈 칸을 건너뛰는 것과 같다). 칸 번호는 원래 자리의 번호를 그대로 쓴다. 블록은 값이 있는 칸 하나이며 위치표는 1부터 세는 레코드 번호, 그 레코드가 시작하는 원문의 줄 번호, 칸 번호다. 첫 줄을 머리글로 따로 다루지 않는다. 레코드마다 칸 수가 다르면 한계 표시를 단다. 닫히지 않은 따옴표처럼 해석할 수 없는 CSV는 `corrupt`다.
 - **I02A-R14 HTML.** 문서 나무를 만들되 실행하지 않고, R6에서 뺀 요소를 건너뛰며 글을 모은다. 블록은 블록 수준 요소(문단, 제목, 목록 항목, 표의 칸, `div` 등) 하나에 직접 속한 글의 덩어리이며, 연속된 공백은 하나로 줄인다(`pre` 안은 그대로). 위치표는 요소 경로(`body>div[1]>p[2]`처럼 같은 이름의 형제 가운데 몇 번째인지)와 그 글이 시작하는 원문의 줄 번호다. 뺀 요소가 있거나 외부 주소가 있으면 그 수를 한계 표시로 단다.
@@ -141,7 +141,7 @@ function codePointSlice(text: string, start: number, end: number): string;  // �
 | 형식 | 위치표 | 번호의 기준 |
 |---|---|---|
 | PDF | `{ format: "pdf", page }` | 쪽 1부터 |
-| DOCX | `{ format: "docx", paragraph, style?, headingLevel?, table?: { index, row, cell } }` | 문단·표·행·칸 0부터 |
+| DOCX | `{ format: "docx", paragraph, style?, headingLevel?, table?: { index, row, cell }, comment?: { thread, index, part } }` | 문단·표·행·칸 0부터. `comment`는 복원한 메모(I02B-R30): 스레드·스레드 안 번호 0부터, `part`는 `head` 또는 `text` |
 | XLSX | `{ format: "xlsx", sheet, cell?, row?, column? }` (시트 이름 블록은 `cell` 없음) | `cell`은 `A1` 형식, 행·열 1부터 |
 | CSV | `{ format: "csv", record, line, field }` | 모두 1부터 |
 | HTML | `{ format: "html", path, line }` | 경로의 형제 번호와 줄 1부터 |
@@ -174,10 +174,10 @@ function codePointSlice(text: string, start: number, end: number): string;  // �
 | `docx.images-omitted` | DOCX | 그림이 있을 때 | 글상자·도형 안의 글, 변경 추적은 보장하지 않는다 |
 | `docx.headers-footers-omitted` | DOCX | 머리글·바닥글이 있을 때 | |
 | `docx.notes-omitted` | DOCX | 각주·미주가 있을 때 | |
-| `docx.comments-omitted` | DOCX | 메모가 있을 때(댓글 순서 복원은 I02-B) | |
 | `xlsx.formula-cached-value` | XLSX | 수식 칸이 있을 때 | 수의 표시 형식(쉼표, 통화)은 남지 않는다. 그림·차트 없음 |
 | `xlsx.merged-cells` | XLSX | 병합된 칸이 있을 때(값은 왼쪽 위 칸에만) | |
 | `xlsx.hidden-sheet` | XLSX | 숨긴 시트가 있을 때(그 시트도 글에 들어간다) | |
+| `xlsx.comments-omitted` | XLSX | 칸 메모·스레드 메모가 있을 때(복원하지 않는다. I02B-R30) | |
 | `csv.ragged-rows` | CSV | 레코드마다 칸 수가 다를 때 | 머리글을 따로 알아보지 않는다 |
 | `html.elements-removed` | HTML | R6의 요소를 뺐을 때(`count`) | 화면에 숨긴 글(CSS)도 글에 들어간다 |
 | `html.external-references-ignored` | HTML | 외부 주소가 있을 때(`count`) | |
@@ -339,3 +339,4 @@ T07의 문서 대응 테스트는 V01의 `tooling/docs/site-setup.test.ts`를 �
 | 2026-11-21 | R4에 그림·포함 개체를 다시 묶은 압축에서 뺀다는 것을 적음. 큰 XLSX(시트 4×30 MiB)의 처리 시간이 약 35 s로 늘어난 측정은 "I02-B에서 다시 확인할 것" 4번(시간 상한)과 같은 대응을 받음 | R4 | 재작업 1의 B3 변경이 spec에 빠져 있었음(오케스트레이터 대조) |
 | 2026-11-21 | 재검토 반영(2차): 한도 표 아래에 낮춘 기본값에서 4×30 MiB 시트 XLSX의 최대 상주 메모리가 1.04 GiB(표집은 423 MiB)임을 적고 위험 6번에 같은 수치를 더한다. "I02-B에서 다시 확인할 것"의 번호를 1~5로 잇고(옛 5·6번이 4·5번) 이 문서 안의 참조를 맞춘다. `markdown.external-references-ignored`의 `count`가 정의와 참조를 따로 센다고 적고, "I01은 아직 시작 전"을 I01 spec이 들어왔다는 것으로 고친다. 스캐너(R11·R12의 한계 검사)가 처리 명령(`?>`로 끝남), DOCTYPE(따옴표 글자와 내부 부분 집합 안의 `>`), CDATA(글로 취급), 속성값의 문자 참조(다섯 기본 개체와 숫자 참조)를 읽도록 고쳤다(코드 `ooxml-core.ts`의 변경이고 요구사항 문구는 그대로다) | 한도 표, 위험 6번, I02-B에서 다시 확인할 것, R15, 배경 | 검토 B D1·D2·D3, 검토 A N1·N2. 한 문서에서 유효한 XML이 `xlsx.hidden-sheet`와 `docx.headers-footers-omitted`를 숨길 수 있었다 |
 | 2026-11-23 | "I02-B에서 다시 확인할 것"에 6번을 더한다: 블록의 구분자와 CSV·XLSX 위치표를 읽는 쪽이 하나 더 생겼다(`TabularSource`) | "I02-B에서 다시 확인할 것" 6번 | S03 spec의 후속 문서 변경 표(담당 S03-T02) |
+| 2026-11-24 | 위치표의 DOCX 행에 선택 필드 `comment`를 더하고, 한계 표시 `docx.comments-omitted`를 없애고 `xlsx.comments-omitted`를 더한다(코드는 14개 그대로). DOCX의 메모는 I02B-R30이 되살린다 | "위치표의 모양", "한계 표시 코드", R11 | I02B-T05(#19). I02B-R30이 약속한 같은 PR의 표 갱신 |

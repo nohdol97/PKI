@@ -36,10 +36,10 @@ export const LIMITATION_CODES = [
   "docx.images-omitted",
   "docx.headers-footers-omitted",
   "docx.notes-omitted",
-  "docx.comments-omitted",
   "xlsx.formula-cached-value",
   "xlsx.merged-cells",
   "xlsx.hidden-sheet",
+  "xlsx.comments-omitted",
   "csv.ragged-rows",
   "html.elements-removed",
   "html.external-references-ignored",
@@ -56,6 +56,8 @@ export type Locator =
       style?: string;
       headingLevel?: number;
       table?: { index: number; row: number; cell: number };
+      /** A comment block: its thread, its place in the thread (both from 0) and which part it is (I02B-R30). */
+      comment?: { thread: number; index: number; part: "head" | "text" };
     }
   | { format: "xlsx"; sheet: string; cell?: string; row?: number; column?: number }
   | { format: "csv"; record: number; line: number; field: number }
@@ -77,6 +79,8 @@ export interface DocumentMetadata {
   modified?: string;
   pageCount?: number;
   sheetNames?: string[];
+  /** The authors of a DOCX's comments in the order they are written out (I02B-R30). */
+  participants?: string[];
 }
 
 export interface EncodingInfo {

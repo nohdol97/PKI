@@ -113,6 +113,10 @@ export const NativeLocatorSchema = z.discriminatedUnion("format", [
     style: z.string().optional(),
     headingLevel: fromZero.optional(),
     table: z.strictObject({ index: fromZero, row: fromZero, cell: fromZero }).optional(),
+    /** A restored comment (I02B-R30): its thread and place in it, and the head or the text of it. */
+    comment: z
+      .strictObject({ thread: fromZero, index: fromZero, part: z.enum(["head", "text"]) })
+      .optional(),
   }),
   z.strictObject({
     format: z.literal("xlsx"),

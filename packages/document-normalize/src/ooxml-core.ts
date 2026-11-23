@@ -75,7 +75,7 @@ function declarationEnd(xml: string, from: number): number {
 const PREDEFINED: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
 
 /** Decodes the five predefined entities and numeric character references; others stay as written. */
-function decodeReferences(value: string): string {
+export function decodeReferences(value: string): string {
   return value.replace(
     /&(?:#[xX]([0-9a-fA-F]{1,8})|#([0-9]{1,8})|(amp|lt|gt|quot|apos));/g,
     (whole, hex, dec, name) => {

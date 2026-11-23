@@ -6,6 +6,7 @@ import { buildDocx, buildZip, heading } from "../testing/ooxml-builder.ts";
 import type { DocxSpec } from "../testing/ooxml-builder.ts";
 import { codePointLength, codePointSlice } from "../text-builder.ts";
 import type { Block, FormatResult, ParsedDocument } from "../types.ts";
+import { parseNormalizeResult, resultCaps } from "../host-protocol.ts";
 import { docxModule } from "./docx.ts";
 
 const mammothSpy = vi.hoisted(() => vi.fn());
@@ -182,10 +183,8 @@ describe("C9 limitation codes", () => {
     ]);
     expect(await codes({ body: [{ text: "x" }], separatorNotes: true })).toEqual([]);
   });
-  it("docx.comments-omitted", async () => {
-    expect(await codes({ body: [{ text: "x" }], comments: ["메모"] })).toEqual([
-      "docx.comments-omitted",
-    ]);
+  it("a comment is restored, not reported as omitted (I02B-R30)", async () => {
+    expect(await codes({ body: [{ text: "x" }], comments: ["메모"] })).toEqual([]);
   });
   it("reports several at once and keeps their text out of the result", async () => {
     const doc = await parse({
@@ -196,12 +195,79 @@ describe("C9 limitation codes", () => {
       images: 2,
     });
     expect(doc.limitations.map((l) => l.code).sort()).toEqual([
-      "docx.comments-omitted",
       "docx.headers-footers-omitted",
       "docx.images-omitted",
       "docx.notes-omitted",
     ]);
+    expect(doc.text).toBe("본문\n\n작성자\nCOMMENT-TEXT");
+  });
+});
+
+describe("C32 comment threads (I02B-R30)", () => {
+  const spec: DocxSpec = {
+    body: [
+      { text: "본문 첫 문단", commentIds: [1] },
+      { text: "둘째 문단", commentIds: [0, 2, 3] },
+    ],
+    comments: [
+      { text: "X 첫 메모", author: "가", date: "2026-03-03T09:00:00Z" },
+      { text: "Y 첫 메모", author: "나", date: "2026-03-01T09:00:00Z" },
+      { text: "X 답글 늦음", author: "나", date: "2026-03-03T11:00:00Z", replyTo: 0 },
+      { text: "X 답글 이름", author: "다", date: "2026-03-03T10:00:00Z", replyTo: 0 },
+    ],
+  };
+  const at = (thread: number, index: number, part: "head" | "text") => ({
+    thread,
+    index,
+    part,
+  });
+
+  it("appends threads by first-comment time, replies by time, each comment as a head and a text block", async () => {
+    const doc = await parse(spec);
+    expect(doc.text).toBe(
+      "본문 첫 문단\n둘째 문단\n\n" +
+        "나 2026-03-01T09:00:00Z\nY 첫 메모\n" +
+        "가 2026-03-03T09:00:00Z\nX 첫 메모\n" +
+        "다 2026-03-03T10:00:00Z\nX 답글 이름\n" +
+        "나 2026-03-03T11:00:00Z\nX 답글 늦음",
+    );
+    expect(doc.blocks.slice(2).map((b) => b.locator)).toEqual([
+      { format: "docx", paragraph: 0, comment: at(0, 0, "head") },
+      { format: "docx", paragraph: 0, comment: at(0, 0, "text") },
+      { format: "docx", paragraph: 1, comment: at(1, 0, "head") },
+      { format: "docx", paragraph: 1, comment: at(1, 0, "text") },
+      { format: "docx", paragraph: 1, comment: at(1, 1, "head") },
+      { format: "docx", paragraph: 1, comment: at(1, 1, "text") },
+      { format: "docx", paragraph: 1, comment: at(1, 2, "head") },
+      { format: "docx", paragraph: 1, comment: at(1, 2, "text") },
+    ]);
+    expect(slices(doc).slice(2, 4)).toEqual(["나 2026-03-01T09:00:00Z", "Y 첫 메모"]);
+    expect(doc.metadata.participants).toEqual(["나", "가", "다"]);
+    expect(doc.limitations).toEqual([]);
+  });
+
+  it("participants stay inside what the host protocol accepts: a very long author is cut, so the file still imports", async () => {
+    const doc = await parse({
+      body: [{ text: "본문", commentIds: [0] }],
+      comments: [{ text: "메모", author: "가".repeat(3_000), date: "2026-03-01T09:00:00Z" }],
+    });
+    expect(doc.metadata.participants?.[0]?.length).toBeLessThanOrEqual(1_024);
+    const result = { ok: true, document: { format: "docx", ...doc } };
+    expect(parseNormalizeResult(result, resultCaps(resolveLimits()))).toEqual(result);
+  });
+
+  it("cutting a long author never leaves half of a surrogate pair", async () => {
+    const doc = await parse({
+      body: [{ text: "본문", commentIds: [0] }],
+      comments: [{ text: "메모", author: `${"a".repeat(1_023)}😀` }],
+    });
+    expect(doc.metadata.participants).toEqual(["a".repeat(1_023)]);
+  });
+
+  it("a document without comments has no comment section and no participants", async () => {
+    const doc = await parse({ body: [{ text: "본문" }] });
     expect(doc.text).toBe("본문");
+    expect(doc.metadata.participants).toBeUndefined();
   });
 });
 

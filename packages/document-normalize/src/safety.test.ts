@@ -10,6 +10,7 @@ import tls from "node:tls";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { codePointSlice, LIMITATION_CODES, normalizeDocument } from "./index.ts";
 import type { NormalizedDocument, NormalizeResult } from "./index.ts";
+import type { Block } from "./types.ts";
 import {
   generateFixtures,
   HTML_SCRIPT_MARKER,
@@ -224,7 +225,14 @@ describe("block invariants on every successful result (C1, R9)", () => {
         // Between blocks (and before the first / after the last) only separators.
         expect(codePointSlice(doc.text, previousEnd, b.start), where).toMatch(/^[\t\n]*$/);
         if (i > 0 && gaps[doc.format] !== undefined) {
-          expect(codePointSlice(doc.text, previousEnd, b.start), where).toBe(gaps[doc.format]);
+          // the comments of a DOCX follow its body after a blank line (I02B-R30)
+          const isComment = (x: Block | undefined) =>
+            x?.locator.format === "docx" && x.locator.comment !== undefined;
+          const gap =
+            doc.format === "docx" && isComment(b) && !isComment(doc.blocks[i - 1])
+              ? "\n\n"
+              : gaps[doc.format];
+          expect(codePointSlice(doc.text, previousEnd, b.start), where).toBe(gap);
         }
         expect(b.locator.format, where).toBe(doc.format);
         previousEnd = b.end;

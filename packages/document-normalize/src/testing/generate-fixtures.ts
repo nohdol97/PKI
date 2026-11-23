@@ -159,9 +159,23 @@ export function generateFixtures(): Map<string, Uint8Array> {
         headers: ["머리글 글"],
         footers: ["바닥글 글"],
         footnotes: ["각주 글"],
-        comments: ["메모 글"],
         images: 1,
         externalImage: "https://example.invalid/pic.png",
+      }),
+    ],
+    [
+      "normal-docx-comments.docx",
+      buildDocx({
+        body: [
+          { text: "본문 첫 문단", commentIds: [1] },
+          { text: "둘째 문단", commentIds: [0, 2, 3] },
+        ],
+        comments: [
+          { text: "X 첫 메모", author: "가", date: "2026-03-03T09:00:00Z" },
+          { text: "Y 첫 메모", author: "나", date: "2026-03-01T09:00:00Z" },
+          { text: "X 답글 늦음", author: "나", date: "2026-03-03T11:00:00Z", replyTo: 0 },
+          { text: "X 답글 이름", author: "다", date: "2026-03-03T10:00:00Z", replyTo: 0 },
+        ],
       }),
     ],
     ["corrupt-docx-not-zip.docx", enc("not a zip archive\n")],
@@ -187,6 +201,12 @@ export function generateFixtures(): Map<string, Uint8Array> {
           created: "2026-03-01T09:00:00Z",
           modified: "2026-03-02T09:00:00Z",
         },
+      }),
+    ],
+    [
+      "limit-xlsx-comments.xlsx",
+      buildXlsx({
+        sheets: [{ name: "메모", rows: [["값"]], comments: [{ ref: "A1", text: "셀 메모 글" }] }],
       }),
     ],
     [

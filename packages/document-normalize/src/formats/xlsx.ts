@@ -41,6 +41,16 @@ function hasHiddenSheet(workbook: string): boolean {
   return found;
 }
 
+/** A part with a note (`comment`) or a threaded comment (`threadedComment`). */
+function hasComment(xml: string): boolean {
+  let found = false;
+  scanXml(
+    xml,
+    (t) => (found = t.kind === "open" && (t.name === "comment" || t.name === "threadedComment")),
+  );
+  return found;
+}
+
 function limitations(pkg: OoxmlPackage): Limitation[] {
   let formula = false;
   let merged = false;
@@ -60,6 +70,13 @@ function limitations(pkg: OoxmlPackage): Limitation[] {
   if (formula) found.push({ code: "xlsx.formula-cached-value" });
   if (merged) found.push({ code: "xlsx.merged-cells" });
   if (hasHiddenSheet(entryText(pkg, "xl/workbook.xml"))) found.push({ code: "xlsx.hidden-sheet" });
+  // legacy notes and threaded comments: the cells' text is read, the comments are not restored (I02B-R30)
+  const commentParts = [...pkg.entries.keys()].filter((n) =>
+    /^xl\/(?:comments[^/]*|threadedComments\/[^/]+)\.xml$/.test(n),
+  );
+  if (commentParts.some((n) => hasComment(entryText(pkg, n)))) {
+    found.push({ code: "xlsx.comments-omitted" });
+  }
   return found;
 }
 

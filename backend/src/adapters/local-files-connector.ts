@@ -682,6 +682,9 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
         ...(document.blocks.length > 0 ? { blocks: document.blocks } : {}),
         sourceType: "file",
         ...(document.metadata.author ? { author: document.metadata.author } : {}),
+        ...(document.metadata.participants?.length
+          ? { participants: document.metadata.participants }
+          : {}),
         ...(created && ISO_WITH_OFFSET.test(created) ? { createdAt: created } : {}),
         updatedAt: iso(msOf(e.mtimeNs)),
         metadata: {
