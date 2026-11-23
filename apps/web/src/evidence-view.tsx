@@ -3,16 +3,19 @@
 // an evidence row points to with its span marked. Imported text is untrusted data:
 // it reaches the page only as React text nodes, never as markup, and inside <bdi>
 // so its direction marks cannot reorder the product's own labels around it.
-import type {
-  EvidenceSource,
-  EvidenceSummary,
-  InsightSummary as InsightRow,
-  LocalSourceInfo,
+import {
+  insightType,
+  type EvidenceSource,
+  type EvidenceSummary,
+  type InsightSummary as InsightRow,
+  type InsightTypeListResponse,
+  type LocalSourceInfo,
 } from "@pki/contracts";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import { InsightFeedback, RecentFeedback } from "./feedback.tsx";
 import {
+  AUTO_NOTIFY_EXCLUDED,
   evidenceVersionText,
   INSIGHT_EPISTEMIC,
   INSIGHT_GONE,
@@ -20,10 +23,13 @@ import {
   LOCAL_NOT_FOUND_TEXT,
   LOCAL_PAUSED_TEXT,
   locatorText,
+  rankingText,
+  REASONING_BY,
   REVEAL_FAILED_TEXT,
   SOURCE_GONE,
   SPAN_UNAVAILABLE,
   splitAtCodePoints,
+  typeStatusText,
   UNTRUSTED_BADGE,
 } from "./evidence-text.ts";
 
@@ -32,10 +38,27 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 export function InsightSummary({ insight }: { insight: InsightRow }) {
   return (
     <>
+      <p>{insightType(insight.type)?.label ?? insight.type}</p>
       <p>
         <strong>{INSIGHT_EPISTEMIC[insight.epistemic]}</strong> <bdi>{insight.summary}</bdi>
       </p>
       <p>{INSIGHT_NOT_CONFIRMED}</p>
+      {insight.factLines.length > 0 && (
+        <ul aria-label="사실 줄">
+          {insight.factLines.map((line, i) => (
+            <li key={i}>
+              <bdi>{line}</bdi>
+            </li>
+          ))}
+        </ul>
+      )}
+      {insight.reasoningSummary !== null && insight.reasoningBy !== null && (
+        <p>
+          {REASONING_BY[insight.reasoningBy]}: <bdi>{insight.reasoningSummary}</bdi>
+        </p>
+      )}
+      <p>{rankingText(insight.ranking)}</p>
+      {insight.autoNotifyExcluded && <p>{AUTO_NOTIFY_EXCLUDED}</p>}
     </>
   );
 }
@@ -200,6 +223,7 @@ export function Insights({
   bridge?: RevealBridge | undefined;
 }) {
   const [loadError, setLoadError] = useState<string>();
+  const [types, setTypes] = useState<InsightTypeListResponse["types"]>();
   const [local, setLocal] = useState<LocalSourceInfo>();
   const [revealFailed, setRevealFailed] = useState(false);
   const [state, dispatch] = useReducer(evidenceReducer, { opens: 0 });
@@ -215,6 +239,13 @@ export function Insights({
       (e: unknown) => setLoadError(message(e)),
     );
   }, [api, feedbackVersion]);
+  // a failed read only leaves the type list out: the Insight list does not depend on it
+  useEffect(() => {
+    api("insightTypes").then(
+      (r) => setTypes(r.types),
+      () => undefined,
+    );
+  }, [api]);
 
   const openInsight = (insightId: number) =>
     api("insightEvidence", { insightId }).then(
@@ -255,6 +286,18 @@ export function Insights({
         </ul>
       )}
       <RecentFeedback api={api} version={feedbackVersion} onChange={feedbackChanged} />
+      {types && (
+        <details>
+          <summary>Insight 유형 지원 상태</summary>
+          <ul aria-label="Insight 유형">
+            {types.map((t) => (
+              <li key={t.type}>
+                {t.label} — {typeStatusText(t)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {notice && <p role="alert">{notice}</p>}
       {opened && (
         <section aria-labelledby="evidence-heading">

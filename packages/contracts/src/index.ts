@@ -663,6 +663,8 @@ export const InsightTypeListResponseSchema = z.object({
   ),
 });
 
+export type InsightTypeListResponse = z.infer<typeof InsightTypeListResponseSchema>;
+
 export const InsightEvidenceRequestSchema = z.strictObject({ insightId: z.int().positive() });
 
 /**
