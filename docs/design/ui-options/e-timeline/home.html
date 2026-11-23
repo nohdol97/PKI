@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>PKI · 홈</title><link rel="stylesheet" href="style.css"></head>
+<body><div class="app">
+<aside class="side">
+<div class="logo"><span class="logo-mark"><i></i></span><span class="logo-name">PKI</span></div>
+<div class="nav-label">탐색 메뉴</div>
+<ul class="nav">
+<li class="on"><a href="#" aria-current="page"><span class="ico">⌂</span>홈</a></li>
+<li><a href="#"><span class="ico">▤</span>원본</a></li>
+<li><a href="#"><span class="ico">◔</span>알림<span class="badge">3</span></a></li>
+<li><a href="#"><span class="ico">≡</span>위키</a></li>
+<li><a href="#"><span class="ico">✓</span>점검</a></li>
+<li><a href="#"><span class="ico">?</span>질문</a></li>
+<li><a href="#"><span class="ico">◎</span>탐색</a></li>
+<li><a href="#"><span class="ico">✦</span>지식 검토</a></li>
+<li><a href="#"><span class="ico">∿</span>활동</a></li>
+<li><a href="#"><span class="ico">⚙</span>설정</a></li>
+</ul>
+<div class="status"><div><span class="dot-ok"></span>로컬 전용 · 외부 전송 꺼짐</div><div>마지막 수집 5분 전</div></div>
+</aside>
+<main class="main">
+<section class="tl-col">
+<div class="col-head"><h1>Insight 타임라인</h1><span class="sub">5건 · 최근 5일</span></div>
+<div class="filters"><span class="f on">전체 5</span><span class="f">일정 위험</span><span class="f">충돌</span><span class="f">변경 감지</span><span class="f">기타</span></div>
+<div class="tl-scroll"><div class="tl">
+<div class="now"><span>지금 09:41</span></div>
+<div class="day"><b>오늘</b>· <span class="d">11월 24일</span></div>
+<a class="ev hi sel" href="#"><span class="t">09:12</span><h3>“결제 모듈 이관” 마감이 선행 작업보다 앞섭니다</h3><p><span class="k hi">일정 위험 · 높음</span>근거 3건 · 추론</p></a>
+<div class="day"><b>어제</b>· <span class="d">11월 23일</span></div>
+<a class="ev md" href="#"><span class="t">18:40</span><h3>배포 일자가 두 문서에서 다릅니다</h3><p><span class="k md">충돌 · 중간</span>근거 2건 · 명시 사실</p></a>
+<a class="ev md" href="#"><span class="t">14:05</span><h3>“정산 배치” 담당자가 박도윤에서 이하준으로 바뀌었습니다</h3><p><span class="k md">변경 감지 · 중간</span>근거 2건 · 명시 사실</p></a>
+<div class="day"><b>11월 21일</b></div>
+<a class="ev lo" href="#"><span class="t">10:30</span><h3>QA 일정에 회귀 시험 기간이 없습니다</h3><p><span class="k lo">누락 · 낮음</span>근거 1건 · 가설</p></a>
+<div class="day"><b>11월 20일</b></div>
+<a class="ev lo" href="#"><span class="t">16:22</span><h3>같은 질문이 세 번 나왔습니다: “스테이징 DB 접근 권한”</h3><p><span class="k lo">반복 · 낮음</span>근거 3건 · 명시 사실</p></a>
+<div class="tl-end">더 이전 기록 없음</div>
+</div></div>
+<div class="tl-legend"><span class="hi"><i></i>높음</span><span class="md"><i></i>중간</span><span class="lo"><i></i>낮음</span><span class="now-k"><i></i>현재 시각</span></div>
+</section>
+<section class="dt-col">
+<div class="col-head"><h1>Insight 상세</h1><span class="sub">#1 · 2026-11-24 09:12</span></div>
+<div class="dt-scroll">
+<div class="eyebrow">일정 위험 <span class="mono">· 높음</span></div>
+<h2 class="dt-title">“결제 모듈 이관” 마감이 선행 작업보다 앞섭니다</h2>
+<div class="chips"><span class="chip hi">높음</span><span class="chip">유형 · 추론</span><span class="chip amb">상태 · 검토 전(candidate)</span><span class="chip blue">근거 3건</span></div>
+<p class="sum">“결제 모듈 이관”의 마감(12월 5일)이 선행 작업 “인증 서버 교체”의 완료 예정일(12월 9일)보다 4일 빠릅니다. 선행 작업이 끝나기 전에는 이관 검증을 시작할 수 없습니다.</p>
+<p class="why">판단 근거: 날짜 비교는 규칙으로 계산했고, 두 작업의 의존 관계는 메신저 대화에서 추론했습니다.</p>
+<div class="sec-label">관계도 <span class="mono">12/1 – 12/12</span></div>
+<div class="diagram"><svg viewBox="0 0 660 236" role="img" aria-label="결제 모듈 이관과 인증 서버 교체의 선행 관계와 4일 일정 충돌">
+<defs></defs>
+<rect class="dg-gap" x="251" y="150" width="211" height="50"/>
+<text class="dg-gap-lbl" x="356" y="180">4일 충돌</text>
+<line class="dg-drop" x1="251" y1="110" x2="251" y2="200"/>
+<line class="dg-drop-b" x1="462" y1="110" x2="462" y2="200"/>
+<rect class="dg-box" x="40" y="70" width="211" height="40" rx="6"/>
+<text class="dg-txt" x="52" y="94">결제 모듈 이관 (마감 12/5)</text>
+<rect class="dg-box-b" x="400" y="70" width="220" height="40" rx="6"/>
+<text class="dg-txt" x="412" y="94">인증 서버 교체 (완료 예정 12/9)</text>
+<line class="dg-arrow" x1="400" y1="90" x2="259" y2="90"/>
+<path class="dg-arrow-head" d="M252 90 L261 85 L261 95 Z"/>
+<text class="dg-rel" x="330" y="82">선행 조건</text>
+<rect class="dg-ev" x="90" y="8" width="110" height="24" rx="12"/>
+<text class="dg-ev-txt" x="145" y="24">메일 · 11/18</text>
+<rect class="dg-ev" x="455" y="8" width="110" height="24" rx="12"/>
+<text class="dg-ev-txt" x="510" y="24">메신저 · 11/20</text>
+<rect class="dg-ev" x="275" y="8" width="110" height="24" rx="12"/>
+<text class="dg-ev-txt" x="330" y="24">Wiki · 11/19</text>
+<path class="dg-link" d="M145 32 L145 70"/><path class="dg-link" d="M510 32 L510 70"/><path class="dg-link" d="M330 32 L330 70"/>
+<circle class="dg-dot" cx="145" cy="70" r="3"/><circle class="dg-dot" cx="510" cy="70" r="3"/><circle class="dg-dot" cx="330" cy="72" r="3"/>
+<line class="dg-axis" x1="40" y1="200" x2="620" y2="200"/>
+<line class="dg-tick" x1="40.0" y1="200" x2="40.0" y2="206"/><text class="dg-tick-lbl" x="40.0" y="224">12/1</text>
+<line class="dg-tick" x1="92.7" y1="200" x2="92.7" y2="206"/><text class="dg-tick-lbl" x="92.7" y="224">12/2</text>
+<line class="dg-tick" x1="145.5" y1="200" x2="145.5" y2="206"/><text class="dg-tick-lbl" x="145.5" y="224">12/3</text>
+<line class="dg-tick" x1="198.2" y1="200" x2="198.2" y2="206"/><text class="dg-tick-lbl" x="198.2" y="224">12/4</text>
+<line class="dg-tick" x1="250.9" y1="200" x2="250.9" y2="208"/><text class="dg-tick-key" x="250.9" y="224">12/5</text>
+<line class="dg-tick" x1="303.6" y1="200" x2="303.6" y2="206"/><text class="dg-tick-lbl" x="303.6" y="224">12/6</text>
+<line class="dg-tick" x1="356.4" y1="200" x2="356.4" y2="206"/><text class="dg-tick-lbl" x="356.4" y="224">12/7</text>
+<line class="dg-tick" x1="409.1" y1="200" x2="409.1" y2="206"/><text class="dg-tick-lbl" x="409.1" y="224">12/8</text>
+<line class="dg-tick" x1="461.8" y1="200" x2="461.8" y2="208"/><text class="dg-tick-key" x="461.8" y="224">12/9</text>
+<line class="dg-tick" x1="514.5" y1="200" x2="514.5" y2="206"/><text class="dg-tick-lbl" x="514.5" y="224">12/10</text>
+<line class="dg-tick" x1="567.3" y1="200" x2="567.3" y2="206"/><text class="dg-tick-lbl" x="567.3" y="224">12/11</text>
+<line class="dg-tick" x1="620.0" y1="200" x2="620.0" y2="206"/><text class="dg-tick-lbl" x="620.0" y="224">12/12</text>
+<text class="dg-note" x="40" y="148">점선 연결 = 근거가 뒷받침하는 사실</text></svg></div>
+<div class="sec-label">근거 3건</div>
+<div class="ev-list">
+<div class="evi"><div class="src">메일<span>11/18</span></div><div><div class="meta"><b>[결제] 이관 일정 확정</b> · 김서연</div><q>결제 모듈 이관은 <mark>12월 5일까지 완료</mark>하는 것으로 확정합니다.</q></div></div>
+<div class="evi"><div class="src">메신저<span>11/20</span></div><div><div class="meta"><b>#infra-migration</b> · 이하준</div><q>인증 서버 교체는 <mark>12월 9일쯤 끝날 것</mark> 같습니다. 그 전에는 결제 쪽 검증 환경을 못 띄워요.</q></div></div>
+<div class="evi"><div class="src">WIKI<span>11/19</span></div><div><div class="meta"><b>결제 모듈 이관 계획 v7</b> · 박도윤</div><q>선행 조건: <mark>인증 서버 교체 완료</mark></q></div></div>
+</div>
+</div>
+<div class="dt-foot">
+<div class="actions"><button class="btn ok">유용함</button><button class="btn">관련 없음</button><button class="btn">잘못된 정보</button><button class="btn">이미 알고 있음</button><button class="btn">다시 알리지 않기</button></div>
+<div class="links"><a href="#">탐색에서 보기</a><a href="#">원본 보기</a></div>
+</div>
+</section>
+</main></div></body></html>

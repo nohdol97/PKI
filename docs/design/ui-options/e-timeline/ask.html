@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>PKI · 질문</title><link rel="stylesheet" href="style.css"></head>
+<body><div class="app">
+<aside class="side">
+<div class="logo"><span class="logo-mark"><i></i></span><span class="logo-name">PKI</span></div>
+<div class="nav-label">탐색 메뉴</div>
+<ul class="nav">
+<li><a href="#"><span class="ico">⌂</span>홈</a></li>
+<li><a href="#"><span class="ico">▤</span>원본</a></li>
+<li><a href="#"><span class="ico">◔</span>알림<span class="badge">3</span></a></li>
+<li><a href="#"><span class="ico">≡</span>위키</a></li>
+<li><a href="#"><span class="ico">✓</span>점검</a></li>
+<li class="on"><a href="#" aria-current="page"><span class="ico">?</span>질문</a></li>
+<li><a href="#"><span class="ico">◎</span>탐색</a></li>
+<li><a href="#"><span class="ico">✦</span>지식 검토</a></li>
+<li><a href="#"><span class="ico">∿</span>활동</a></li>
+<li><a href="#"><span class="ico">⚙</span>설정</a></li>
+</ul>
+<div class="status"><div><span class="dot-ok"></span>로컬 전용 · 외부 전송 꺼짐</div><div>마지막 수집 5분 전</div></div>
+</aside>
+<main class="main">
+<section class="tl-col tl-q">
+<div class="col-head"><h1>질문 기록</h1><span class="sub">5건 · 최근 5일</span></div>
+<div class="tl-scroll"><div class="tl">
+<div class="now"><span>지금 09:52</span></div>
+<div class="day"><b>오늘</b>· <span class="d">11월 24일</span></div>
+<a class="ev hi sel" href="#"><span class="t">09:48</span><h3>결제 모듈 이관 일정이 왜 위험해?</h3><p><span class="k lo">근거 3건 · 4.2초</span></p></a>
+<div class="day"><b>어제</b>· <span class="d">11월 23일</span></div>
+<a class="ev lo" href="#"><span class="t">17:20</span><h3>정산 배치 담당자가 바뀐 이유는?</h3><p><span class="k lo">근거 2건</span></p></a>
+<a class="ev lo" href="#"><span class="t">11:05</span><h3>배포 일자는 어느 쪽이 맞아?</h3><p><span class="k lo">근거 2건</span></p></a>
+<div class="day"><b>11월 21일</b></div>
+<a class="ev lo" href="#"><span class="t">15:12</span><h3>QA 일정에 빠진 것이 뭐야?</h3><p><span class="k lo">근거 1건</span></p></a>
+<div class="day"><b>11월 20일</b></div>
+<a class="ev lo" href="#"><span class="t">10:44</span><h3>스테이징 DB 접근은 누구에게 요청해?</h3><p><span class="k lo">근거 3건</span></p></a>
+<div class="tl-end">더 이전 기록 없음</div>
+</div></div>
+<div class="tl-legend"><span class="now-k"><i></i>현재 시각</span><span class="lo"><i></i>이전 질문</span></div>
+</section>
+<section class="dt-col">
+<div class="col-head"><h1>질문</h1><span class="sub">로컬 모델 · 2026-11-24 09:48</span></div>
+<div class="dt-scroll">
+<div class="eyebrow">질문</div>
+<h2 class="q-title">결제 모듈 이관 일정이 왜 위험해?</h2>
+<div class="stepper"><div class="step"><span class="node">✓</span><span class="lbl">질문 해석<small>0.3초</small></span></div><div class="step"><span class="node">✓</span><span class="lbl">검색(키워드·그래프)<small>1.1초</small></span></div><div class="step"><span class="node">✓</span><span class="lbl">근거 확인<small>1.6초</small></span></div><div class="step"><span class="node">✓</span><span class="lbl">답 작성<small>1.2초</small></span></div></div>
+<div class="sec-label">답</div>
+<p class="answer">결제 모듈 이관의 마감은 12월 5일인데<span class="cite">1</span>, 그 선행 작업인 인증 서버 교체가 12월 9일에야 끝날 예정이기 때문입니다<span class="cite">2</span>. 이관 계획 문서도 인증 서버 교체 완료를 선행 조건으로 적고 있어<span class="cite">3</span>, 지금 일정대로면 검증 환경 없이 마감을 맞아야 합니다.</p>
+<div class="note"><i></i>근거로 확인된 문장만 답에 썼습니다 · 로컬 모델 사용 · 4.2초</div>
+<div class="sec-label">인용한 원본 3건 <span class="mono">시간순</span></div>
+<div class="trail">
+<div class="tr"><span class="d">11/18</span><div class="hd"><span class="cite">1</span><b>메일 · [결제] 이관 일정 확정</b> · 김서연</div><q>결제 모듈 이관은 <mark>12월 5일까지 완료</mark>하는 것으로 확정합니다.</q></div>
+<div class="tr"><span class="d">11/19</span><div class="hd"><span class="cite">3</span><b>Wiki · 결제 모듈 이관 계획 v7</b> · 박도윤</div><q>선행 조건: <mark>인증 서버 교체 완료</mark></q></div>
+<div class="tr open"><span class="d">11/20</span><div class="hd"><span class="cite">2</span><b>메신저 · #infra-migration</b> · 이하준</div><q>인증 서버 교체는 <mark>12월 9일쯤 끝날 것</mark> 같습니다. 그 전에는 결제 쪽 검증 환경을 못 띄워요.</q><div class="ctx"><p><span class="who">11/20 16:02 박도윤</span>스테이징 검증 일정은 인증 쪽 상황 보고 잡을게요.</p><p class="hit"><span class="who">11/20 16:05 이하준</span>인증 서버 교체는 12월 9일쯤 끝날 것 같습니다. 그 전에는 결제 쪽 검증 환경을 못 띄워요.</p><p><span class="who">11/20 16:06 김서연</span>알겠습니다. 마감과 겹치는지 따로 확인해 볼게요.</p></div></div>
+</div>
+</div>
+<div class="dt-foot">
+<div class="follow"><span class="fchip">인증 서버 교체가 늦어진 이유는?</span><span class="fchip">마감을 옮기면 영향받는 작업은?</span><span class="fchip">이 일정을 누가 정했어?</span></div>
+<div class="ask-box"><span class="ph">다음 질문을 입력하세요</span><button class="btn">취소</button><button class="btn go">보내기</button></div>
+</div>
+</section>
+</main></div></body></html>
