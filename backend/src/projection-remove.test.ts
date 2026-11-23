@@ -39,6 +39,7 @@ import {
 import {
   derivativeKindContract,
   MemoryKnowledgeEngine,
+  activateEmpty,
   MemoryVectorIndex,
   send,
   type DerivativeContractSubject,
@@ -87,7 +88,7 @@ beforeEach(async () => {
   registerConnectorInstance(db, "c", "test-fixtures");
   engine = new MemoryKnowledgeEngine();
   vector = new MemoryVectorIndex();
-  await vector.reset(SPACE);
+  await activateEmpty(vector, SPACE);
 });
 afterEach(() => {
   db.close();
@@ -195,7 +196,7 @@ describe("derivatives.contract: the projection kinds, on the product's wiring", 
         registerConnectorInstance(db, "c", "test-fixtures");
         engine = new MemoryKnowledgeEngine();
         vector = new MemoryVectorIndex();
-        await vector.reset(SPACE);
+        await activateEmpty(vector, SPACE);
         current = wiring();
         const a = await ingest("a", "alpha qzcanary");
         const b = await ingest("b", "bravo");

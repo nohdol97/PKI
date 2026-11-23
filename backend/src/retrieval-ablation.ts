@@ -429,7 +429,7 @@ async function prepareVector(
     return `embedding model: ${typeof status === "string" ? status : status.unavailable}`;
   }
   const { modelId, revision, dimension } = vector.embedding.describe();
-  await vector.index.reset({ modelId, revision, dimension });
+  const build = await vector.index.beginRebuild({ modelId, revision, dimension });
   const versions = db
     .all("SELECT source_id AS s, version AS n, title, body FROM source_versions ORDER BY id")
     .filter((v) => (v.body as string) !== "");
@@ -441,8 +441,12 @@ async function prepareVector(
     refs.map((r) => r.text),
     "document",
   );
-  await vector.index.upsert(
+  await build.upsert(
     refs.map((r, i) => ({ ref: r.ref, vector: vectors[i] as Float32Array })),
+    1,
+  );
+  await build.activate(
+    refs.map((r) => r.ref),
     1,
   );
   return vector;
