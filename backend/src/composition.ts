@@ -112,6 +112,7 @@ import {
   type ConnectorManager,
   type SyncOptions,
 } from "./connectors.ts";
+import { withAskQuestions } from "./ask-questions.ts";
 import type { Clock } from "./clock.ts";
 import {
   CONNECTOR_SYNC_KIND,
@@ -400,7 +401,7 @@ export function productCalls(
     db,
     provider: () => selectProvider(providers, readDefaultProvider(db)),
     userActions: ledger.redeemer,
-    candidates: knowledgeCandidates(db, options.registry ?? derivativeRegistry),
+    candidates: withAskQuestions(knowledgeCandidates(db, options.registry ?? derivativeRegistry)),
     egress,
     execution,
     recorder: createCallRecorder(db),

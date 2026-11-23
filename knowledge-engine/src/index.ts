@@ -170,3 +170,4 @@ export {
   type LintOp,
   type ReportOutcome,
 } from "./lint-decide.ts";
+export * from "./retrieval/index.ts";

@@ -17,6 +17,8 @@
 - `s02-expected.json`: 위 두 원본의 기대 결과(`plain`, `malicious`). 식별자(값, 꼬리표), 관계, 진술, 유형 제안과 각 근거(코드 포인트 `[시작, 끝)`, 인용문). 인용문은 자기 원본에 정확히 한 번 나오고, 식별자 값과 진술은 자기 인용문 안에 있다.
 - `s03-analytical.jsonl`: S03(분석용 의미)의 추출 원본([S03 spec](../docs/specs/2026-11-22-S03-analytical-semantic.md) R7·R9). 한 줄이 원본 version 하나이고 모양은 `v02-*.jsonl`과 같다. 기준 문서 한 쪽(`wiki-s03-0001`: Metric "월간 매출"의 계산 기준·단위 `원`·통화 `KRW`·기간 `month`·판 `v1`, `MEASURED_ON` Dataset "월별 매출표")과 충돌 fixture 넷, 곧 한 줄짜리 문서 넷(`wiki-s03-0002`~`0005`: 단위 `천원`, 통화 `USD`, 기간 `quarter`, 판 `v2`)이다. 표 원본(CSV)은 두지 않는다: 시험이 메모리에서 만든다.
 - `s03-expected.json`: 위 원본의 기대 결과(`base`, `unit`, `currency`, `period`, `version`). 사실(값, 근거)과 관계와 각 근거(코드 포인트 `[시작, 끝)`, 인용문). 인용문은 자기 원본에 정확히 한 번 나오고, 단위·판의 값과 계산 기준의 열 이름은 자기 인용문 안에 있다.
+- `x01-ask.jsonl`: X01(질문별 검색)의 가져오기 원본([X01 spec](../docs/specs/2026-11-23-X01-retrieval-qa.md) C1a). 한 줄이 원본 version 하나이고 모양은 `v02-*.jsonl`과 같다. 개요·코드명 메모·운영 노트·배포일 안내(같은 `external_id`의 version 1·2)·점검 공지·코드명 대장 일곱 줄이다. 코드명 메모(`wiki-x01-0002`)는 두 항목의 한글 이름을 한 번도 쓰지 않고 관계의 근거가 된다.
+- `x01-expected.json`: 위 원본에 심는 지식(항목, 관계, 사실, 사실 사이 `SUPERSEDES`·`CONTRADICTS` 연결과 각 근거의 인용문)과 질문 표본. 인용문은 자기 원본에 정확히 한 번 나온다. 시험이 라벨에서 심는다(추출 없음).
 
 여기의 자료를 고치거나 더하면 `pnpm --filter @pki/providers build:synthetic-manifest`로 합성 목록을 다시 만들어 함께 커밋한다. 목록이 자료와 어긋나면 `pnpm test`가 실패한다.
 

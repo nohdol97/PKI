@@ -104,6 +104,7 @@ import {
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { ASK_PATH, createAskRoute, type AskDeps } from "./ask-route.ts";
 import type { ConnectorManager, ConnectorRebuild } from "./connectors.ts";
 import { releaseHeldOnEvent, type HeldEvent } from "./held-release.ts";
 import type { InstanceImporter } from "./imports.ts";
@@ -213,6 +214,8 @@ export interface ServerOptions {
   decisions?: UserDecisions;
   /** Milliseconds now, for the Provider check's reuse window (tests); default Date.now. */
   now?: () => number;
+  /** X01-R5: the strategies the Ask route runs besides the always-on ones; default the code's list. A test passes another. */
+  askStrategies?: AskDeps["enabled"];
 }
 
 export interface RunningServer {
@@ -1286,6 +1289,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // K01-R5: queued without a wake: a write's own route wakes the runner when it should (the import waits for the
   // engine's delivery, review F6), and a wake here would claim the import's extraction before the proposal exists
   const afterWrite = () => void requestWikiBuild(options.db);
+  // X01-R10: the one route that answers a stream, served outside the route table (ask-route.ts)
+  const asking = createAskRoute({
+    db: options.db,
+    registry: options.registry ?? defaultReadRegistry,
+    broker: options.calls?.broker,
+    issuer: options.calls?.issuer,
+    vector: options.embedder
+      ? { embedding: options.embedder, index: options.vectorIndex }
+      : undefined,
+    enabled: options.askStrategies,
+  });
   let selfHost = "";
 
   const server = createServer((req, res) => {
@@ -1304,6 +1318,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     }
     if (!tokenMatches(req.headers.authorization, token)) return reject(res, 401, "unauthorized");
 
+    if (new URL(`http://_${req.url}`).pathname === ASK_PATH) {
+      return void asking(req, res).catch(() => res.destroy());
+    }
     const match = matchRoute(routes, req.method, new URL(`http://_${req.url}`).pathname);
     if (typeof match !== "string") {
       return reject(res, match.error === "not-found" ? 404 : 405, match.error);

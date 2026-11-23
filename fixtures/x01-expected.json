@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "PR": { "type": "Project", "name": "물결 프로젝트" },
+    "SY": { "type": "System", "name": "별빛 시스템" }
+  },
+  "relations": [
+    {
+      "subject": "PR",
+      "type": "DEPENDS_ON",
+      "object": "SY",
+      "evidence": { "record_id": "wiki-x01-0002", "quote": "MG-7은 BB-2 위에서 동작한다" }
+    }
+  ],
+  "facts": {
+    "release-old": {
+      "entity": "PR",
+      "attribute": "release_date",
+      "value": "2026-12-10",
+      "valid_at": "2026-12-10",
+      "evidence": { "record_id": "mail-x01-0004", "quote": "배포일은 12월 10일이다" }
+    },
+    "release-new": {
+      "entity": "PR",
+      "attribute": "release_date",
+      "value": "2026-12-17",
+      "valid_at": "2026-12-17",
+      "evidence": { "record_id": "mail-x01-0004-v2", "quote": "배포일은 12월 17일로 바뀌었다" }
+    },
+    "check-tue": {
+      "entity": "SY",
+      "attribute": "check_day",
+      "value": "화요일",
+      "evidence": { "record_id": "wiki-x01-0003", "quote": "매주 화요일에 점검한다" }
+    },
+    "check-thu": {
+      "entity": "SY",
+      "attribute": "check_day",
+      "value": "목요일",
+      "evidence": { "record_id": "messenger-x01-0006", "quote": "점검은 목요일로 공지됐다" }
+    },
+    "alias-sy": {
+      "entity": "SY",
+      "attribute": "alias.abbreviation",
+      "value": "SY-ONE",
+      "evidence": { "record_id": "wiki-x01-0007", "quote": "SY-ONE은 별빛 시스템의 내부 호칭이다" }
+    }
+  },
+  "links": [
+    { "type": "SUPERSEDES", "from": "release-new", "to": "release-old" },
+    { "type": "CONTRADICTS", "from": "check-tue", "to": "check-thu" }
+  ],
+  "questions": {
+    "plain": { "text": "연말 배포 목표", "used": ["keyword"], "hits": ["wiki-x01-0001"] },
+    "dependency": {
+      "text": "물결 프로젝트와 별빛 시스템의 의존 관계",
+      "used": ["keyword", "graph"],
+      "onlyByGraph": "wiki-x01-0002"
+    },
+    "alias": { "text": "SY-ONE", "onlyByConcept": "wiki-x01-0003" },
+    "checkDay": {
+      "text": "별빛 시스템 점검",
+      "conflict": ["wiki-x01-0003", "messenger-x01-0006"]
+    },
+    "releaseDate": { "text": "배포일", "stale": ["mail-x01-0004"] }
+  }
+}

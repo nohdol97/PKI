@@ -225,6 +225,11 @@
     "source": "fixtures/s03-analytical.jsonl"
   },
   {
+    "hash": "419730cc062bd621fc1e46185be83e8c91962b1c5de9d17d8806f843b5b6e9ba",
+    "malicious": false,
+    "source": "fixtures/x01-ask.jsonl"
+  },
+  {
     "hash": "4321ae8ed18affec68afa0848ce3e7869668adc2dbf3299293e049dc9b741742",
     "malicious": false,
     "source": "eval/golden/sources/mail.jsonl"
@@ -375,9 +380,24 @@
     "source": "eval/golden/sources/wiki.jsonl"
   },
   {
+    "hash": "694e66bbea81be72d2d0165478bbd1d650034ed0e8c76f11a363720fd9bb1e30",
+    "malicious": false,
+    "source": "fixtures/x01-ask.jsonl"
+  },
+  {
+    "hash": "69a150d34d73bfc68da8234f6be7b5ae251929b3c32e6ee16f9b7c1d252fd963",
+    "malicious": false,
+    "source": "fixtures/x01-ask.jsonl"
+  },
+  {
     "hash": "6c2dbfe15a8bd22b1016d6e128d8b95ec092f158434a9b467a75fc1d51df4029",
     "malicious": false,
     "source": "fixtures/v02-wiki.jsonl"
+  },
+  {
+    "hash": "6d1f89f7e1495e2b9aee99ba0571164ae2e82b163b1973adbf72328697e144e3",
+    "malicious": false,
+    "source": "fixtures/x01-ask.jsonl"
   },
   {
     "hash": "6fcec8f014fb6bdde86e970ca16fcd3c125712563ce3fe9530ab92671b7dac7c",
@@ -513,6 +533,11 @@
     "hash": "9a602587512755eef1b8b1bc9473a146786173e489a5c1b785279c3f87b91df1",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "9b3f673b57a81dac126f33b056fe3d589ad3d4289494ed61517b553ba4fc0289",
+    "malicious": false,
+    "source": "fixtures/x01-ask.jsonl"
   },
   {
     "hash": "9c4450b49273dcb41551f2b24c7c29b1eedce2b7ff2c04910944ea9290bf6a40",
@@ -675,6 +700,11 @@
     "source": "eval/golden/sources/wiki.jsonl"
   },
   {
+    "hash": "c5bc4a6f242ed08a384cd4c4d4e82ecdc03437169739185f3b861594635dca52",
+    "malicious": false,
+    "source": "fixtures/x01-ask.jsonl"
+  },
+  {
     "hash": "c7ed82117351f9593ab346e043b8e30fc088769728ba5355db04bccc591ccd0a",
     "malicious": false,
     "source": "eval/golden/sources/wiki.jsonl"
@@ -708,6 +738,11 @@
     "hash": "d50908a34939394817a2391fd8cdd3b60fa85e6d0c9ac1f5da269ad9527f53b6",
     "malicious": false,
     "source": "eval/golden/sources/messenger.jsonl"
+  },
+  {
+    "hash": "d50c284fed2647ee4d58347af662cabdceab88d4038613b80f2ac457d4f5594b",
+    "malicious": false,
+    "source": "fixtures/x01-ask.jsonl"
   },
   {
     "hash": "d5ab24f64a0b6e6f4b96687d8b8ee6376e96d197e4bcdbd5a90824f204c8be53",
