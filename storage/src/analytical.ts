@@ -2,7 +2,7 @@
 // the `dataset-profile` job is registered, and the rows of `dataset_tables`. A Dataset is a registry item and
 // its columns are facts (the registry's tables hold them); this file holds only what ties an item to a stored
 // table. No cell of a table is read or kept here.
-import { DATASET_PROFILE_KIND } from "./job-kinds.ts";
+import { ANALYTICAL_CHECK_JOB_KIND, DATASET_PROFILE_KIND } from "./job-kinds.ts";
 import { registerJob } from "./jobs.ts";
 import { readSetting, writeSetting } from "./settings.ts";
 import type { SqlDriver } from "./sql-driver.ts";
@@ -51,6 +51,8 @@ export function registerDatasetProfileJob(
   version: { sourceId: number; version: number; at: Date },
 ): boolean {
   if (!readAnalyticalProfile(db) || !isTabularVersion(db, version.sourceId, version.version)) {
+    // no profile for this version: a table the source already holds still needs its checks again
+    registerAnalyticalCheckJob(db, version.sourceId, version.at);
     return false;
   }
   return registerJob(db, {
@@ -58,6 +60,52 @@ export function registerDatasetProfileJob(
     sourceId: version.sourceId,
     fenceVersion: version.version,
     at: version.at,
+  }).registered;
+}
+
+const OPEN_BEFORE_RUN = "('queued', 'retry', 'held')";
+
+/**
+ * Queues the check job of one table source (S03-R12), fenced to the source's current version. None when the
+ * source has no version, its current version is covered by a tombstone, or no `dataset_tables` row is bound
+ * to it. A job of the same source and version that has not started yet is reused (it reads the state when it
+ * runs); a running one is not, because it may have read the old state. A job the unique key refuses a second
+ * time (kind, target, source, fence) is told apart by `target`: `run:<n>`, the next number. True when a job
+ * was made. The caller's transaction holds it.
+ */
+export function registerAnalyticalCheckJob(db: SqlDriver, sourceId: number, at?: Date): boolean {
+  const latest = db.all(`SELECT max(version) AS version FROM source_versions WHERE source_id = ?`, [
+    sourceId,
+  ])[0]?.version as number | null | undefined;
+  if (latest === null || latest === undefined) return false;
+  const covered = db.all("SELECT 1 FROM tombstones WHERE source_id = ? AND covers_version >= ?", [
+    sourceId,
+    latest,
+  ]);
+  if (covered.length > 0) return false;
+  if (db.all("SELECT 1 FROM dataset_tables WHERE source_id = ? LIMIT 1", [sourceId]).length === 0) {
+    return false;
+  }
+  const same = `kind = ? AND source_id = ? AND fence_version = ?`;
+  const params = [ANALYTICAL_CHECK_JOB_KIND, sourceId, latest];
+  if (
+    db.all(`SELECT 1 FROM jobs WHERE ${same} AND status IN ${OPEN_BEFORE_RUN} LIMIT 1`, params)
+      .length > 0
+  ) {
+    return false;
+  }
+  const next =
+    (db.all(
+      `SELECT max(CAST(substr(target, 5) AS INTEGER)) AS n FROM jobs WHERE ${same} AND target LIKE 'run:%'`,
+      params,
+    )[0]?.n as number | null) ?? 0;
+  return registerJob(db, {
+    kind: ANALYTICAL_CHECK_JOB_KIND,
+    target: `run:${next + 1}`,
+    sourceId,
+    fenceVersion: latest,
+    priority: "scheduled",
+    ...(at ? { at } : {}),
   }).registered;
 }
 

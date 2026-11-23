@@ -17,6 +17,7 @@ import { DELETIONS_MAY_BE_MISSED, SYNC_STOP_TEXT } from "./connector-text.ts";
 const KIND: Readonly<Record<string, string>> = {
   extract: "추출",
   "dataset-profile": "표 읽기",
+  "analytical-check": "데이터 검사",
   "connector-sync": "동기화",
   maintenance: "정리",
   "projection-remove": "투영 제거",

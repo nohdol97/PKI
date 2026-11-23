@@ -135,7 +135,10 @@ const TABLES: Record<string, string> = {
 const exists = (ref: DerivedRef) =>
   ref.kind === "entity-merge" || ref.kind === "merge-candidate"
     ? pairRowExists(ref)
-    : db.all(`SELECT 1 FROM ${TABLES[ref.kind]} WHERE id = ?`, [Number(ref.id)]).length === 1;
+    : ref.kind === "analytical-check"
+      ? db.all("SELECT 1 FROM dataset_tables WHERE id = ?", [Number(ref.id.replace("table:", ""))])
+          .length === 1
+      : db.all(`SELECT 1 FROM ${TABLES[ref.kind]} WHERE id = ?`, [Number(ref.id)]).length === 1;
 
 /** The ids of the two entity-resolution kinds: `merge:<id>`, `candidate:<a>:<b>` (canonical-kinds.ts). */
 function pairRowExists(ref: DerivedRef): boolean {
@@ -272,7 +275,7 @@ function world() {
     insight: { onlyA: iA, shared: iS, withoutLineage: iN },
     "scope-drop": { onlyA: dropA, shared: null, withoutLineage: null },
     ontology: { onlyA: ontoA, shared: ontoS, withoutLineage: added },
-    "analytical-check": { onlyA: tableA, shared: null, withoutLineage: null },
+    "analytical-check": { onlyA: `table:${tableA}`, shared: null, withoutLineage: null },
   };
   const built = new Map<string, readonly SourceVersionRef[]>();
   for (const [kind, r] of Object.entries(rows)) {

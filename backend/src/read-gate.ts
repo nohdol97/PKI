@@ -15,6 +15,8 @@ import {
   listInsightUserInputs,
   listSemanticFacts,
   listSemanticItems,
+  listSemanticMembers,
+  mergedIntoOf,
   listSemanticRelations,
   listSources,
   readEvidenceSource,
@@ -193,12 +195,33 @@ export function createReadGate(
     },
     semantic() {
       // one more than the limit tells whether the list was cut
+      const rowsOf = <T extends { id: number }>(item: T) => ({
+        ...item,
+        facts: only(listSemanticFacts(db, item.id), "fact", (f) => f.id, "display"),
+        relations: only(listSemanticRelations(db, item.id), "relation", (r) => r.id, "display"),
+      });
+      // `mergedInto` is the nearest item along the chain the caller may see: a hidden item is named nowhere,
+      // and a member with none visible is left out
+      const nearestShown = <T extends { mergedInto: number }>(members: T[]): T[] =>
+        members.flatMap((m) => {
+          for (
+            let at: number | undefined = m.mergedInto, n = 0;
+            at !== undefined && n < 1000;
+            n++
+          ) {
+            if (isShown("item", at)) return [{ ...m, mergedInto: at }];
+            at = mergedIntoOf(db, at);
+          }
+          return [];
+        });
+      // a member is listed under its representative, not as an entry of its own (S02-R13)
       const items = filled((n) => listSemanticItems(db, n), "item", "display", semanticLimit + 1);
       return {
         items: items.slice(0, semanticLimit).map((item) => ({
-          ...item,
-          facts: only(listSemanticFacts(db, item.id), "fact", (f) => f.id, "display"),
-          relations: only(listSemanticRelations(db, item.id), "relation", (r) => r.id, "display"),
+          ...rowsOf(item),
+          members: nearestShown(
+            only(listSemanticMembers(db, item.id), "item", (m) => m.id, "display"),
+          ).map(rowsOf),
         })),
         truncated: items.length > semanticLimit,
       };

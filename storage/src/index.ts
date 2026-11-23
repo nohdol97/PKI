@@ -148,6 +148,7 @@ export {
   type ProjectionActivity,
 } from "./job-activity.ts";
 export {
+  ANALYTICAL_CHECK_JOB_KIND,
   DATASET_PROFILE_KIND,
   EXTRACT_JOB_KIND,
   PROJECTION_REBUILD_KIND,
@@ -235,13 +236,16 @@ export { rowLineage, unionOfVersions } from "./row-lineage.ts";
 export {
   listSemanticFacts,
   listSemanticItems,
+  listSemanticMembers,
   listSemanticRelations,
+  mergedIntoOf,
   itemsOfEntry,
   readSemanticHistory,
   readSemanticState,
   type SemanticFactView,
   type SemanticHistoryLine,
   type SemanticItemView,
+  type SemanticMemberView,
   type SemanticRelationView,
   type SemanticRowView,
 } from "./semantic-view.ts";
@@ -254,10 +258,12 @@ export {
   readMergeLine,
   rejudgeGroups,
   rootOf,
+  withGroups,
   type EntityGroups,
   type ItemId,
   type MembershipChange,
   type MembershipListener,
+  type MembershipScope,
   type MergeLine,
   type MovedRow,
 } from "./entity-groups.ts";
@@ -296,11 +302,31 @@ export {
   isTabularVersion,
   readAnalyticalMaxCells,
   readAnalyticalProfile,
+  registerAnalyticalCheckJob,
   registerDatasetProfileJob,
   saveDatasetTable,
   setAnalyticalProfile,
   type DatasetTableRow,
 } from "./analytical.ts";
+export {
+  PATH_TYPES,
+  analyticalRowChanged,
+  checkLinesReading,
+  claimCandidates,
+  eraseChecksReading,
+  listCheckLines,
+  onMembershipChanged,
+  queueChecksAround,
+  saveCheckLine,
+  splitMovedClaims,
+  tableSourcesOf,
+  waitingRelations,
+  type AnalyticalRowRef,
+  type CheckName,
+  type Following,
+  type NewCheckLine,
+  type StoredCheckLine,
+} from "./analytical-check-lines.ts";
 export {
   ANALYTICAL_SEED,
   ANALYTICAL_VALUE_TYPES,
@@ -344,7 +370,7 @@ export {
   type ValueType,
 } from "./ontology.ts";
 export {
-  findRelation,
+  listRelationsBetween,
   listEvidenceVersions,
   listFactsOfKind,
   listInsightKeys,

@@ -898,12 +898,23 @@ export const SemanticRelationSchema = SemanticRowSchema.extend({
   objectId: z.int().positive(),
   evidenceCount: z.int().nonnegative(),
 });
-export const SemanticItemSchema = SemanticRowSchema.extend({
+const SemanticItemBaseSchema = SemanticRowSchema.extend({
   type: z.string(),
   name: z.string(),
   facts: z.array(SemanticFactSchema),
   /** The relations whose subject is this item. */
   relations: z.array(SemanticRelationSchema),
+});
+/** An item merged into another's group (S02-R13): listed under the representative, with the line that makes it one. */
+export const SemanticMemberSchema = SemanticItemBaseSchema.extend({
+  /** The merge line that makes it a member: what an unmerge takes. */
+  mergeId: z.int().positive(),
+  /** The item that line points at: the representative, or the next item of a chain. */
+  mergedInto: z.int().positive(),
+});
+export const SemanticItemSchema = SemanticItemBaseSchema.extend({
+  /** The active members of the item's group, ascending by id; empty for an item that leads none. */
+  members: z.array(SemanticMemberSchema),
 });
 export const SemanticListResponseSchema = z.object({
   items: z.array(SemanticItemSchema),

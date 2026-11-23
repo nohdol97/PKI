@@ -44,10 +44,12 @@ import {
 } from "@pki/providers/adapters";
 import {
   createCanonicalEntries,
+  createAnalyticalCheckHandler,
   createDatasetProfileHandler,
   createExtractHandler,
   createProductRegistry,
   createProjections,
+  dependencyDelayReceiver,
   derivativeRegistry,
   ENGINE_KIND,
   knowledgeCandidates,
@@ -60,10 +62,12 @@ import { createVisibleEngine, NullKnowledgeEngine } from "@pki/knowledge-engine/
 import {
   createCommitScope,
   createUserDecisions,
+  ANALYTICAL_CHECK_JOB_KIND,
   DATASET_PROFILE_KIND,
   dataDirectory,
   defaultScopePolicy,
   ensureDataDirectory,
+  onMembershipChanged,
   prepareCanonicalDb,
   type DerivativeRegistry,
   type MembershipListener,
@@ -140,10 +144,13 @@ export function productEngine(): KnowledgeEngine {
  * unmerge, a group resting or waking and a split announce to in their own transaction. Both users of the
  * list, the user's entry and the derivative kind `entity-merge`, are built from this one constant. A receiver
  * deletes or recomputes what rests on an item and never throws in a deletion's propagation (a throw rolls
- * that propagation back); S02-T05 (the rule's Insight), S02-T06 (candidates), S02-T08 (conflicts) and S03
- * (the check lines) add theirs here, at review. Empty until a receiver exists.
+ * that propagation back). The rule's receiver (the Insight, S02-T05) is first, then S03's (erases check lines
+ * and queues the check job, S03-T05); S02-T06 (candidates) and S02-T08 (conflicts) add theirs here, at review.
  */
-export const MEMBERSHIP_LISTENERS: readonly MembershipListener[] = Object.freeze([]);
+export const MEMBERSHIP_LISTENERS: readonly MembershipListener[] = Object.freeze([
+  dependencyDelayReceiver,
+  onMembershipChanged,
+]);
 
 /**
  * The derivative registry of the product (I04-R1): the ten canonical kinds and the two projections, the
@@ -450,6 +457,11 @@ export function productRunner(
     handlers: {
       [EXTRACT_JOB_KIND]: handler,
       // S03-R6: no Provider is called; the version is the job's fence
+      // S03-R12: re-checks the facts that rest on one table source; no Provider is called
+      [ANALYTICAL_CHECK_JOB_KIND]: createAnalyticalCheckHandler({
+        db,
+        ...(clock ? { now: () => new Date(clock.now()) } : {}),
+      }),
       [DATASET_PROFILE_KIND]: createDatasetProfileHandler({
         db,
         ...(clock ? { now: () => new Date(clock.now()) } : {}),
