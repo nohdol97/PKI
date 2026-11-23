@@ -13,6 +13,7 @@ const SPEC_FUNCTIONS = [
   "hasSecret",
   "openExternal",
   "pickLocation",
+  "revealSource",
   "setSecret",
 ];
 

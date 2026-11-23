@@ -157,6 +157,8 @@ async function run() {
       return picked.canceled ? undefined : picked.filePaths[0];
     },
     registerLocationTicket: (input) => supervisor.registerLocationTicket(input),
+    revealPath: (sourceVersionId) => supervisor.revealPath(sourceVersionId),
+    showInFolder: (path) => shell.showItemInFolder(path),
   });
   for (const name of Object.keys(BRIDGE) as BridgeFunction[]) {
     ipcMain.handle(BRIDGE[name], (event, ...args: unknown[]) =>

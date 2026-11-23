@@ -126,7 +126,7 @@ test("local-files.e2e: approve a folder → sources → Insight evidence with a 
     await page.getByRole("button", { name: "폴더 추가" }).click();
     const table = page.getByRole("table", { name: "로컬 자료 위치" });
     await expect(table).toContainText(docs);
-    await expect(table).toContainText("실시간 감시 없음");
+    await expect(table).toContainText("실시간 감시 중");
   });
 
   await test.step("the files are sources and the Provider double's Insight has Markdown evidence", async () => {
@@ -196,4 +196,63 @@ test("local-files.e2e: approve a folder → sources → Insight evidence with a 
       expect(check.status).toBe(0);
     });
   }
+});
+
+test("local-files.e2e: pause → resume → revoke through the confirm dialog, the files stay on disk (I02B-T04 C13, C28)", async ({
+  target,
+  playwright,
+}) => {
+  test.skip(
+    target !== "browser",
+    "one browser flow; the Electron shell adds nothing to the lifecycle",
+  );
+  const docs = join(dir, "docs");
+  mkdirSync(docs);
+  for (const [name, record] of FILES) {
+    const file = join(docs, name);
+    writeFileSync(file, content(record));
+    const old = new Date(Date.now() - 3_600_000);
+    utimesSync(file, old, old);
+  }
+  const page = await startStack(target, docs, playwright.chromium);
+  const table = page.getByRole("table", { name: "로컬 자료 위치" });
+
+  await test.step("approve, then read the files into sources", async () => {
+    await go(page, "설정");
+    await page.getByLabel("폴더 경로(개발용)").fill(docs);
+    await page.getByRole("button", { name: "폴더 추가" }).click();
+    await expect(table).toContainText(docs);
+    await page.waitForTimeout(2_500);
+    await go(page, "원본");
+    await page.getByRole("button", { name: "local-files 동기화" }).click();
+    await expect(async () => {
+      await go(page, "설정");
+      await go(page, "원본");
+      await expect(page.getByRole("table").last().getByRole("row")).toHaveCount(3, {
+        timeout: 1_000,
+      });
+    }).toPass({ timeout: 30_000 });
+    await go(page, "설정");
+  });
+
+  await test.step("pause and resume from the row's buttons", async () => {
+    await page.getByRole("button", { name: "일시 중지" }).click();
+    await expect(table).toContainText("일시 중지");
+    await page.getByRole("button", { name: "다시 켜기" }).click();
+    await expect(table).toContainText("읽는 중");
+  });
+
+  await test.step("revoke: the dialog shows the count and the sentence; confirming removes the location", async () => {
+    await page.getByRole("button", { name: "승인 철회" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("지워질 원본 3개");
+    await expect(dialog).toContainText("이 폴더의 파일은 디스크에 그대로 남습니다");
+    await dialog.getByRole("button", { name: "철회", exact: true }).click();
+    await expect(page.getByText("추가한 폴더가 없습니다.")).toBeVisible();
+    for (const [name] of FILES)
+      expect(readFileSync(join(docs, name), "utf8").length).toBeGreaterThan(0);
+    await go(page, "원본");
+    // with no source left the screen draws no table but this sentence (the last table is another one)
+    await expect(page.getByText("저장된 원본이 없습니다.")).toBeVisible();
+  });
 });

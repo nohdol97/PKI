@@ -54,6 +54,21 @@
 - **Embedding 모델 준비**: 설정 값이 아니라 홈의 "Embedding 모델 준비"에서 보내는 준비 요청이다(`POST /api/embedding/prepare`. 로컬 팩 폴더의 절대 경로, 또는 확인 창에서 승인한 내려받기). 무엇을 준비했는지는 저장하지 않으므로 앱을 다시 켜면 "모델 없음"이고, 같은 요청이 설치된 파일을 네트워크 없이 해시 확인만으로 다시 올린다. 자동으로 내려받지 않는다(S09).
 - **자동 업데이트 주소**: 아직 없다. 업데이트는 H02(#33)가 정하며 그때 이 표에 키를 더한다(S12).
 
+#### 로컬 자료 한도(`localFiles.*`)
+
+로컬 파일 수집기의 한도다. 설정 API(`GET`·`POST /api/settings/local-files`)로 읽고 쓰며 값은 정본 DB의 `settings` 표에 `localFiles.<이름>`으로 남는다. 모두 양의 정수이고(비율 `deletionBrake.ratio`만 양의 소수) 0 이하나 잘못된 값은 거부된다. 위 「실행 중 설정」 표와 달리 키 대조 시험(`providers/src/site-setup-keys.test.ts`)이 읽는 표가 아니라서 따로 적었다.
+
+| 설정 | 뜻 | 공용 기본값 |
+|---|---|---|
+| `localFiles.maxFileBytes` | 읽을 파일의 최대 크기(바이트) | 52428800 |
+| `localFiles.settleMs` | 파일이 이 시간(밀리초) 이상 같은 모습이어야 읽는다 | 2000 |
+| `localFiles.pageBudgetMs` | 한 페이지를 만드는 데 쓸 수 있는 시간 | 20000 |
+| `localFiles.walk.maxFilesPerLocation` · `walk.maxDepth` · `walk.maxRelativePathChars` | 위치마다 훑을 파일 수, 폴더 깊이, 상대 경로 길이의 상한 | 50000 · 32 · 1024 |
+| `localFiles.normalize.timeoutMs` · `normalize.maxHeapMb` · `normalize.maxExternalMemoryBytes` | 문서 읽기 프로그램의 시간, 힙, 외부 메모리 상한 | 60000 · 1536 · 1610612736 |
+| `localFiles.deletionBrake.ratio` · `deletionBrake.minFiles` | 대량 삭제 보류: 읽던 파일 가운데 이 비율 이상이 사라지고 사라진 수가 `minFiles` 이상이면 삭제를 알리지 않고 사용자 확인을 기다린다(`ratio`가 1보다 크면 끔) | 0.5 · 20 |
+| `localFiles.revoke.maxPerTransaction` · `revoke.lockWaitMs` | 승인 철회가 한 트랜잭션에서 지우는 원본 수, 동기화가 끝나길 기다리는 시간 | 100 · 5000 |
+| `localFiles.watch.quietMs` · `watch.maxWaitMs` | 감시 신호가 이 시간 조용하면 동기화 하나를 등록하고, 신호가 계속 와도 이 시간마다 한 번은 등록한다 | 2000 · 30000 |
+
 ## 배포처 설정 체크리스트
 
 항목마다 무엇을 하는지, 어떤 종류의 값이 필요한지, 끝났다는 것을 무엇으로 확인하는지 적었다. 번호(`S01` 등)는 구현 spec의 비목표 항목과 일대일로 대응한다([V01](specs/2026-11-21-V01-vertical-skeleton.md) S01~S13, [V02](specs/2026-11-21-V02-vertical-slice.md) S14~S15, [I02-A](specs/2026-11-21-I02-document-normalization.md) S16~S17, [I01](specs/2026-11-21-I01-connector-sdk.md) S18, [I03](specs/2026-11-21-I03-persistent-queue.md) S19~S20, [I04](specs/2026-11-21-I04-invalidation.md) S21~S22, [I05](specs/2026-11-22-I05-site-connector-registration.md) S26~S27, [I06](specs/2026-11-22-I06-connector-credentials.md) S28~S29, [I07](specs/2026-11-22-I07-installed-scopes-file.md) S30~S31). 이어서 [S01](specs/2026-11-22-S01-semantic-registry.md) S32. 이어서 [S02](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) S33. 이어서 [S03](specs/2026-11-22-S03-analytical-semantic.md) S34. 이어서 [K01](specs/2026-11-23-K01-wiki-projection.md) S35.

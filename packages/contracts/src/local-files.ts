@@ -128,6 +128,8 @@ export interface LocalLocationView {
   rootDev: string;
   rootIno: string;
   state: "active" | "paused" | "unavailable" | "needs-confirmation" | "revoking";
+  /** Why the state is what it is (`root-missing`, `root-changed`, ...), null for none. */
+  stateReason: string | null;
 }
 
 /** The part of the isolated normalizer's result the connector reads. */
@@ -170,6 +172,12 @@ export interface LocalFilesLimits {
   pageBudgetMs: number;
   walk: { maxFilesPerLocation: number; maxDepth: number; maxRelativePathChars: number };
   normalize: { maxHeapMb: number; maxExternalMemoryBytes: number };
+  /** A walk that finds at least `minFiles` files gone, and at least `ratio` of the tracked ones, holds them (I02B-R8). */
+  deletionBrake: { ratio: number; minFiles: number };
+  /** A revocation deletes `maxPerTransaction` sources per transaction and waits `lockWaitMs` for a running sync (I02B-R49). */
+  revoke: { maxPerTransaction: number; lockWaitMs: number };
+  /** A watch signal registers a sync once it has been quiet `quietMs`, and at the latest `maxWaitMs` after the first (I02B-R20). */
+  watch: { quietMs: number; maxWaitMs: number };
 }
 
 /** What one pass learned about a location, for the location list (I02B-R36, R38). */
@@ -184,6 +192,11 @@ export interface LocalLocationReport {
   limitExceeded: boolean;
   /** The root was missing or was not the folder approved: nothing was read or deleted (I02B-R7). */
   rootUnavailable: boolean;
+  /**
+   * Paths of files the user deleted from the product that are still in the location (I02B-R33). Only
+   * the walk knows them (the index keeps a keyed hash), so the skipped list reads them from here.
+   */
+  forgottenPaths: string[];
 }
 
 export interface LocalPassReport {
@@ -231,12 +244,112 @@ export const LocalApprovalRequestSchema = z
   });
 export type LocalApprovalRequest = z.infer<typeof LocalApprovalRequestSchema>;
 
+/**
+ * A relink (I02B-R9): which location, and the folder it is now, as a typed path (development, test) or
+ * the one-time ticket of the shell's picker (I02B-R37, the same rule as an approval).
+ */
+export const LocalRelinkRequestSchema = z
+  .strictObject({
+    locationId: z.string().min(1).max(64),
+    path: z.string().min(1).max(4096).optional(),
+    ticket: z.string().min(16).max(256).optional(),
+  })
+  .refine((r) => (r.path === undefined) !== (r.ticket === undefined), {
+    message: "exactly one of path and ticket",
+  });
+export type LocalRelinkRequest = z.infer<typeof LocalRelinkRequestSchema>;
+
+/** A request about one location: pause, resume, rescan. */
+export const LocalLocationIdRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+});
+export type LocalLocationIdRequest = z.infer<typeof LocalLocationIdRequestSchema>;
+
+/** The held deletions are confirmed by the count the user saw (I02B-R8): another count is refused. */
+export const LocalConfirmDeletionsRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+  count: z.int().nonnegative(),
+});
+export type LocalConfirmDeletionsRequest = z.infer<typeof LocalConfirmDeletionsRequestSchema>;
+
+/** A revocation (I02B-R10): the location and the number of sources the user was shown (I02B-R49); the same call with the remaining count continues one. */
+export const LocalRevokeRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+  count: z.int().nonnegative(),
+});
+export type LocalRevokeRequest = z.infer<typeof LocalRevokeRequestSchema>;
+
+/**
+ * Done in one transaction (`revoked`, with how many sources went), or begun (`revoking`, with how many
+ * are still to go: the location lists as `revoking`). One object, not a union: the route table's
+ * response schemas convert to a JSON Schema object (a test).
+ */
+export const LocalRevokeResponseSchema = z.strictObject({
+  state: z.enum(["revoked", "revoking"]),
+  revoked: z.int().nonnegative().optional(),
+  remaining: z.int().positive().optional(),
+});
+export type LocalRevokeResponse = z.infer<typeof LocalRevokeResponseSchema>;
+
+/** One page of the skipped list of a location (I02B-R36). */
+export const LocalSkippedRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+  offset: z.int().nonnegative().default(0),
+  limit: z.int().min(1).max(500).default(100),
+});
+export type LocalSkippedRequest = z.input<typeof LocalSkippedRequestSchema>;
+
+/** A skip reason, or `user-deleted` for a file the user removed from the product. */
+export const LocalSkippedReasonSchema = z.enum([...LOCAL_SKIP_REASON_CODES, "user-deleted"]);
+export const LocalSkippedResponseSchema = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      relativePath: z.string(),
+      reason: LocalSkippedReasonSchema,
+      /** ISO time the file was first skipped for this reason; null for a user deletion (not stored). */
+      since: z.string().nullable(),
+    }),
+  ),
+  total: z.int().nonnegative(),
+});
+export type LocalSkippedResponse = z.infer<typeof LocalSkippedResponseSchema>;
+
+/** A skipped file read again: the location and the path the list showed (I02B-R33). */
+export const LocalReimportRequestSchema = z.strictObject({
+  locationId: z.string().min(1).max(64),
+  relativePath: z.string().min(1).max(4096),
+});
+export type LocalReimportRequest = z.infer<typeof LocalReimportRequestSchema>;
+export const LocalReimportResponseSchema = z.strictObject({ outcome: z.literal("queued") });
+
+/** "지금 위치" of a source version the screen holds (I02B-R39): keyed by the version id, a POST like the other routes with an input. */
+export const LocalSourceInfoRequestSchema = z.strictObject({
+  sourceVersionId: z.int().positive(),
+});
+export type LocalSourceInfoRequest = z.infer<typeof LocalSourceInfoRequestSchema>;
+
+/**
+ * Where a local source is now. The relative path only: no answer carries an absolute path (I02B-R36, R39).
+ * `notFound` is derived from the index, never from the disk: the location is `unavailable`, or the file's
+ * deletion is held or confirmed.
+ */
+export const LocalSourceInfoResponseSchema = z.strictObject({
+  local: z.boolean(),
+  relativePath: z.string().nullable(),
+  state: z.enum(["active", "paused", "unavailable", "needs-confirmation", "revoking"]).nullable(),
+  notFound: z.boolean(),
+});
+export type LocalSourceInfo = z.infer<typeof LocalSourceInfoResponseSchema>;
+
 const PositiveInt = z.int().positive();
 const walkShape = {
   maxFilesPerLocation: PositiveInt,
   maxDepth: PositiveInt,
   maxRelativePathChars: PositiveInt,
 };
+const watchShape = { quietMs: z.int().positive(), maxWaitMs: z.int().positive() };
+const revokeShape = { maxPerTransaction: z.int().positive(), lockWaitMs: z.int().positive() };
+const brakeShape = { ratio: z.number().positive(), minFiles: PositiveInt };
 const normalizeShape = {
   timeoutMs: PositiveInt,
   maxHeapMb: PositiveInt,
@@ -250,6 +363,9 @@ export const LocalFilesSettingsSchema = z.strictObject({
   pageBudgetMs: PositiveInt,
   walk: z.strictObject(walkShape),
   normalize: z.strictObject(normalizeShape),
+  deletionBrake: z.strictObject(brakeShape),
+  revoke: z.strictObject(revokeShape),
+  watch: z.strictObject(watchShape),
 });
 export type LocalFilesSettings = z.infer<typeof LocalFilesSettingsSchema>;
 
@@ -260,6 +376,9 @@ export const LocalFilesSettingsPatchSchema = z.strictObject({
   pageBudgetMs: PositiveInt.optional(),
   walk: z.strictObject(walkShape).partial().optional(),
   normalize: z.strictObject(normalizeShape).partial().optional(),
+  deletionBrake: z.strictObject(brakeShape).partial().optional(),
+  revoke: z.strictObject(revokeShape).partial().optional(),
+  watch: z.strictObject(watchShape).partial().optional(),
 });
 export type LocalFilesSettingsPatch = z.infer<typeof LocalFilesSettingsPatchSchema>;
 
@@ -275,6 +394,8 @@ export const LocalLocationSchema = z.object({
     skipped: z.int().nonnegative(),
     ignored: z.int().nonnegative(),
     pendingDeletes: z.int().nonnegative(),
+    /** Sources of the location that are still whole: what a revocation deletes, and what is left while it runs (I02B-R36). */
+    sources: z.int().nonnegative(),
   }),
   limitExceeded: z.boolean(),
   /** ISO time of the last finished pass, null before the first. */

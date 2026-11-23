@@ -85,19 +85,22 @@ export function listLocations(db: SqlDriver): LocalLocation[] {
   return db.all("SELECT * FROM local_locations ORDER BY created_at, id").map(locationOf);
 }
 
-/** Moves a location to a state; false when there is no such location. */
+/**
+ * Moves a location to a state; false when there is no such location, or, given `expected`, when it is no
+ * longer in that state (a pass writes only from the state it decided from, so a user's change is kept).
+ */
 export function setLocationState(
   db: SqlDriver,
   id: string,
   state: LocationState,
   reason: string | null,
+  expected?: LocationState,
 ): boolean {
   return (
-    db.run("UPDATE local_locations SET state = ?, state_reason = ? WHERE id = ?", [
-      state,
-      reason,
-      id,
-    ]).changes === 1
+    db.run(
+      `UPDATE local_locations SET state = ?, state_reason = ? WHERE id = ?${expected ? " AND state = ?" : ""}`,
+      expected ? [state, reason, id, expected] : [state, reason, id],
+    ).changes === 1
   );
 }
 
@@ -206,16 +209,18 @@ const plaintext = (next: EntryFields) =>
         fileNo: next.fileNo,
       };
 
+/** The next number from the counter: the one place a sequence number is made. */
+export function takeLocalSeq(db: SqlDriver): number {
+  db.run("UPDATE local_index_seq SET value = value + 1 WHERE id = 1");
+  return db.all("SELECT value FROM local_index_seq WHERE id = 1")[0]?.value as number;
+}
+
 export function createLocalFileIndex(db: SqlDriver): LocalFileIndex {
   const pathHash = (locationId: string, path: string) =>
     keyedTextHash(db, "local-path", `${locationId}\n${path}`);
   const contentHashOf = (locationId: string, content: string) =>
     keyedTextHash(db, "local-content", `${locationId}\n${content}`);
-  /** The next number from the counter: the one place a sequence number is made. */
-  const takeSeq = (): number => {
-    db.run("UPDATE local_index_seq SET value = value + 1 WHERE id = 1");
-    return db.all("SELECT value FROM local_index_seq WHERE id = 1")[0]?.value as number;
-  };
+  const takeSeq = (): number => takeLocalSeq(db);
   const locationIsRead = (locationId: string): boolean => {
     const state = db.all("SELECT state FROM local_locations WHERE id = ?", [locationId])[0]
       ?.state as LocationState | undefined;

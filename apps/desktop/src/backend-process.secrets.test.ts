@@ -79,6 +79,33 @@ describe("the shell's folder for the backend", () => {
   });
 });
 
+describe("the shell's reveal request to the backend (I02B-R39, P6)", () => {
+  it("asks by version id and gets the path back by request id; null, a timeout and an exit all give undefined", async () => {
+    const child = fakeChild();
+    const backend = await start(child);
+    const asked = backend.revealPath(7);
+    const request = child.posted.find(
+      (m) => (m as { type?: string }).type === "reveal-request",
+    ) as {
+      id: number;
+      sourceVersionId: number;
+    };
+    expect(request).toMatchObject({ type: "reveal-request", sourceVersionId: 7 });
+    child.send({ type: "reveal-path", id: request.id + 1, path: "/wrong" });
+    child.send({ type: "reveal-path", id: request.id, path: "/docs/a.md" });
+    expect(await asked).toBe("/docs/a.md");
+
+    const none = backend.revealPath(8);
+    const second = child.posted.filter(
+      (m) => (m as { type?: string }).type === "reveal-request",
+    )[1] as {
+      id: number;
+    };
+    child.send({ type: "reveal-path", id: second.id, path: null });
+    expect(await none).toBeUndefined();
+  });
+});
+
 describe("backend secret requests", () => {
   it("answers a read with the stored value, matched by ID", async () => {
     const child = fakeChild();

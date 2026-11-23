@@ -1,5 +1,5 @@
 // Words and span cutting for the evidence screens (V02-R14, R15; spec "T10이 넘기는 것" 3, 4).
-import type { InsightSummary } from "@pki/contracts";
+import type { InsightSummary, NativeLocator } from "@pki/contracts";
 
 /** The label of each epistemic type an Insight can have: only an inference (V02-R9). */
 export const INSIGHT_EPISTEMIC: Record<InsightSummary["epistemic"], string> = { inferred: "추론" };
@@ -42,3 +42,40 @@ export function splitAtCodePoints(
     after: points.slice(end).join(""),
   };
 }
+
+/**
+ * The position table's shapes as words (I02B-R39). Blocks are counted from 0 in the contract; the reader counts
+ * from 1, so a docx paragraph and a table's row and cell show one more. The memo shape does not exist in the
+ * contract yet (a DOCX comment is a limitation code), so none is worded.
+ */
+export function locatorText(locator: NativeLocator): string {
+  switch (locator.format) {
+    case "pdf":
+      return `${locator.page}쪽`;
+    case "docx": {
+      const { table } = locator;
+      return table
+        ? `표 ${table.index + 1}의 ${table.row + 1}행 ${table.cell + 1}열`
+        : `문단 ${locator.paragraph + 1}`;
+    }
+    case "xlsx": {
+      const sheet = `시트 '${locator.sheet}'`;
+      if (locator.cell !== undefined) return `${sheet} ${locator.cell} 칸`;
+      if (locator.row !== undefined) return `${sheet} ${locator.row}행`;
+      if (locator.column !== undefined) return `${sheet} ${locator.column}열`;
+      return sheet;
+    }
+    case "csv":
+      return `레코드 ${locator.record} · ${locator.line}번째 줄 · 필드 ${locator.field}`;
+    case "html":
+      return `${locator.line}번째 줄 (${locator.path})`;
+    case "markdown":
+    case "txt":
+    case "json":
+      return `${locator.line}번째 줄`;
+  }
+}
+
+export const LOCAL_NOT_FOUND_TEXT = "원본 파일을 찾을 수 없음";
+export const LOCAL_PAUSED_TEXT = "이 위치는 일시 중지되어 파일을 다시 읽지 않습니다.";
+export const REVEAL_FAILED_TEXT = "폴더를 열지 못했습니다. 파일이 옮겨졌거나 지워졌을 수 있습니다.";

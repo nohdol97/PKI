@@ -116,7 +116,7 @@ export interface ConnectorManager {
 
   sync(
     id: string,
-    options?: Pick<SyncOptions, "signal">,
+    options?: Pick<SyncOptions, "signal" | "rescan">,
   ): Promise<
     SyncResponse | { error: Extract<ErrorResponse["error"], "not-found" | "connector-unavailable"> }
   >;

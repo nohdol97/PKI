@@ -61,6 +61,7 @@ export {
   type UpdateResult,
   type WriteRefusal,
 } from "./local-files.ts";
+export * from "./local-lifecycle.ts";
 export { databaseEncryption } from "./database-encryption.ts";
 export {
   dataDirectory,

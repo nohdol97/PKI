@@ -60,6 +60,13 @@ describe("the shell's location tickets", () => {
       const typed = await approve({ type: "folder", path: join(dir, "elsewhere") });
       expect(typed.body).toEqual({ error: "approval-rejected", code: "ticket-required" });
 
+      // the shell asks where a source is; an unknown version answers null, over the channel only
+      const answer = new Promise<unknown>((resolve) =>
+        proc.on("message", (m) => (m as { type: string }).type === "reveal-path" && resolve(m)),
+      );
+      proc.send({ type: "reveal-request", id: 5, sourceVersionId: 999 });
+      expect(await answer).toEqual({ type: "reveal-path", id: 5, path: null });
+
       const listed = await send(port, routes.localLocations.path, h);
       expect((listed.body as { locations: unknown[] }).locations).toHaveLength(1);
     } finally {

@@ -249,3 +249,56 @@ describe("evidenceReducer", () => {
     ).toEqual({ insights: [insight(1)], opens: 0 });
   });
 });
+
+// I02B-R39, C28 (evidence half): a local source shows its place in the folder; when the file is gone the
+// screen says so and still shows the stored quote; the reveal button only where the shell offers it.
+describe("SourceView of a local file", () => {
+  const source = {
+    evidenceId: 1,
+    quote: "등대",
+    start: 3,
+    end: 5,
+    locator: { format: "pdf", page: 3 } as const,
+    sourceVersion: { id: 9, version: 1, latestVersion: 1, title: "제목", body: "합성 등대 문장" },
+  };
+  const here = (over: object) => ({
+    local: true,
+    relativePath: "docs/a.md",
+    state: "active" as const,
+    notFound: false,
+    ...over,
+  });
+
+  it("shows the locator words, the current place and the reveal button", () => {
+    const html = renderToStaticMarkup(
+      <SourceView source={source} local={here({})} onReveal={() => undefined} />,
+    );
+    expect(html).toContain("3쪽");
+    expect(html).toContain("docs/a.md");
+    expect(html).toContain(">폴더에서 보기</button>");
+    expect(html).not.toContain("원본 파일을 찾을 수 없음");
+  });
+
+  it("an unavailable location shows 'not found' and the stored quote, and no reveal button", () => {
+    const html = renderToStaticMarkup(
+      <SourceView
+        source={source}
+        local={here({ state: "unavailable", notFound: true })}
+        onReveal={() => undefined}
+      />,
+    );
+    expect(html).toContain("원본 파일을 찾을 수 없음");
+    expect(html).toContain("<mark>등대</mark>");
+    expect(html).not.toContain("폴더에서 보기");
+  });
+
+  it("a source that is not a local file shows no place", () => {
+    const html = renderToStaticMarkup(
+      <SourceView
+        source={source}
+        local={{ local: false, relativePath: null, state: null, notFound: false }}
+      />,
+    );
+    expect(html).not.toContain("지금 위치");
+  });
+});

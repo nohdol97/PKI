@@ -18,10 +18,21 @@ import { REJECT_CODES } from "./connector.ts";
 import { DATA_CHECK_NAMES, FACT_VALUE_TYPES, KNOWLEDGE_PLACES } from "./knowledge-schema.ts";
 import {
   LocalApprovalRequestSchema,
+  LocalConfirmDeletionsRequestSchema,
   LocalFilesSettingsPatchSchema,
   LocalFilesSettingsSchema,
+  LocalLocationIdRequestSchema,
   LocalLocationListSchema,
   LocalLocationSchema,
+  LocalReimportRequestSchema,
+  LocalReimportResponseSchema,
+  LocalRelinkRequestSchema,
+  LocalRevokeRequestSchema,
+  LocalRevokeResponseSchema,
+  LocalSkippedRequestSchema,
+  LocalSkippedResponseSchema,
+  LocalSourceInfoRequestSchema,
+  LocalSourceInfoResponseSchema,
 } from "./local-files.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
@@ -110,6 +121,9 @@ export const ErrorResponseSchema = z.object({
     "instance-busy",
     "storage-failed",
     "ledger-unwritable",
+    "ledger-degraded",
+    "count-mismatch",
+    "not-lifted",
     "approval-rejected",
     "limit-would-delete",
     "payload-too-large",
@@ -1709,6 +1723,60 @@ export const routes = {
     path: "/api/local-locations",
     request: LocalApprovalRequestSchema,
     response: LocalLocationSchema,
+  },
+  relinkLocalLocation: {
+    method: "POST",
+    path: "/api/local-locations/relink",
+    request: LocalRelinkRequestSchema,
+    response: LocalLocationSchema,
+  },
+  pauseLocalLocation: {
+    method: "POST",
+    path: "/api/local-locations/pause",
+    request: LocalLocationIdRequestSchema,
+    response: LocalLocationSchema,
+  },
+  resumeLocalLocation: {
+    method: "POST",
+    path: "/api/local-locations/resume",
+    request: LocalLocationIdRequestSchema,
+    response: LocalLocationSchema,
+  },
+  rescanLocalLocation: {
+    method: "POST",
+    path: "/api/local-locations/rescan",
+    request: LocalLocationIdRequestSchema,
+    response: LocalReimportResponseSchema,
+  },
+  confirmLocalDeletions: {
+    method: "POST",
+    path: "/api/local-locations/confirm-deletions",
+    request: LocalConfirmDeletionsRequestSchema,
+    response: LocalLocationSchema,
+  },
+  localSkipped: {
+    method: "POST",
+    path: "/api/local-locations/skipped",
+    request: LocalSkippedRequestSchema,
+    response: LocalSkippedResponseSchema,
+  },
+  reimportLocalFile: {
+    method: "POST",
+    path: "/api/local-locations/reimport",
+    request: LocalReimportRequestSchema,
+    response: LocalReimportResponseSchema,
+  },
+  localSourceInfo: {
+    method: "POST",
+    path: "/api/local-locations/source",
+    request: LocalSourceInfoRequestSchema,
+    response: LocalSourceInfoResponseSchema,
+  },
+  revokeLocalLocation: {
+    method: "POST",
+    path: "/api/local-locations/revoke",
+    request: LocalRevokeRequestSchema,
+    response: LocalRevokeResponseSchema,
   },
   localFilesSettings: {
     method: "GET",

@@ -430,7 +430,7 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     expect(collector).not.toMatch(/realpath|symlink|lstat/i);
   });
 
-  it("the screens draw no locator (chapter 11)", () => {
+  it("only the evidence screen draws a locator (chapter 11, I02B-R39)", () => {
     const hits: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(resolve(repoRoot, dir), { withFileTypes: true })) {
@@ -442,7 +442,7 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
       }
     };
     walk("apps/web/src");
-    expect(hits).toEqual([]);
+    expect(hits.sort()).toEqual(["apps/web/src/evidence-text.ts", "apps/web/src/evidence-view.tsx"]);
   });
 });
 

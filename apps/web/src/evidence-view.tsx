@@ -3,7 +3,12 @@
 // an evidence row points to with its span marked. Imported text is untrusted data:
 // it reaches the page only as React text nodes, never as markup, and inside <bdi>
 // so its direction marks cannot reorder the product's own labels around it.
-import type { EvidenceSource, EvidenceSummary, InsightSummary as InsightRow } from "@pki/contracts";
+import type {
+  EvidenceSource,
+  EvidenceSummary,
+  InsightSummary as InsightRow,
+  LocalSourceInfo,
+} from "@pki/contracts";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import {
@@ -11,6 +16,10 @@ import {
   INSIGHT_EPISTEMIC,
   INSIGHT_GONE,
   INSIGHT_NOT_CONFIRMED,
+  LOCAL_NOT_FOUND_TEXT,
+  LOCAL_PAUSED_TEXT,
+  locatorText,
+  REVEAL_FAILED_TEXT,
   SOURCE_GONE,
   SPAN_UNAVAILABLE,
   splitAtCodePoints,
@@ -30,7 +39,24 @@ export function InsightSummary({ insight }: { insight: InsightRow }) {
   );
 }
 
-export function SourceView({ source }: { source: EvidenceSource }) {
+/** The part of the Electron preload's `window.pki` this view uses; absent in the browser (the path is only text there). */
+export interface RevealBridge {
+  revealSource?(sourceVersionId: number): Promise<{ revealed: boolean }>;
+}
+
+export function SourceView({
+  source,
+  local,
+  onReveal,
+  revealFailed,
+}: {
+  source: EvidenceSource;
+  /** Where a local file is now (I02B-R39); undefined while unknown or for another kind of source. */
+  local?: LocalSourceInfo | undefined;
+  /** Given only where the shell can show a folder; the button is not drawn without it. */
+  onReveal?: (() => void) | undefined;
+  revealFailed?: boolean | undefined;
+}) {
   const { sourceVersion: v } = source;
   const parts = splitAtCodePoints(v.body, source.start, source.end);
   return (
@@ -42,6 +68,22 @@ export function SourceView({ source }: { source: EvidenceSource }) {
         <bdi>{v.title}</bdi>
       </h4>
       <p>{evidenceVersionText(v)}</p>
+      {source.locator && <p>위치: {locatorText(source.locator)}</p>}
+      {local?.local && (
+        <>
+          <p>
+            지금 위치: <bdi>{local.relativePath}</bdi>
+          </p>
+          {local.notFound && <p role="alert">{LOCAL_NOT_FOUND_TEXT}</p>}
+          {local.state === "paused" && <p>{LOCAL_PAUSED_TEXT}</p>}
+          {!local.notFound && onReveal && (
+            <button type="button" onClick={onReveal}>
+              폴더에서 보기
+            </button>
+          )}
+          {revealFailed && <p role="alert">{REVEAL_FAILED_TEXT}</p>}
+        </>
+      )}
       {parts === undefined && <p role="alert">{SPAN_UNAVAILABLE}</p>}
       <pre className="source-text">
         {parts === undefined ? (
@@ -149,8 +191,16 @@ export function useFocusOn(opens: number, shown: boolean) {
   return ref;
 }
 
-export function Insights({ api }: { api: ApiClient }) {
+export function Insights({
+  api,
+  bridge = (globalThis as { pki?: RevealBridge }).pki,
+}: {
+  api: ApiClient;
+  bridge?: RevealBridge | undefined;
+}) {
   const [loadError, setLoadError] = useState<string>();
+  const [local, setLocal] = useState<LocalSourceInfo>();
+  const [revealFailed, setRevealFailed] = useState(false);
   const [state, dispatch] = useReducer(evidenceReducer, { opens: 0 });
   const { insights, opened, source, notice } = state;
   const evidenceHeading = useFocusOn(state.opens, opened !== undefined && source === undefined);
@@ -170,7 +220,16 @@ export function Insights({ api }: { api: ApiClient }) {
     );
   const openSource = (evidenceId: number) =>
     api("evidenceSource", { evidenceId }).then(
-      (s) => dispatch({ type: "source-opened", source: s }),
+      (s) => {
+        setLocal(undefined);
+        setRevealFailed(false);
+        dispatch({ type: "source-opened", source: s });
+        // where the file is now: a failure only leaves this line out, the stored text is shown anyway
+        api("localSourceInfo", { sourceVersionId: s.sourceVersion.id }).then(
+          setLocal,
+          () => undefined,
+        );
+      },
       (error: unknown) => dispatch({ type: "failed", what: "source", id: evidenceId, error }),
     );
 
@@ -212,7 +271,20 @@ export function Insights({ api }: { api: ApiClient }) {
           <h3 id="source-heading" tabIndex={-1} ref={sourceHeading}>
             원본 보기
           </h3>
-          <SourceView source={source} />
+          <SourceView
+            source={source}
+            local={local}
+            revealFailed={revealFailed}
+            onReveal={
+              bridge?.revealSource
+                ? () =>
+                    void bridge.revealSource?.(source.sourceVersion.id).then(
+                      (r) => setRevealFailed(!r.revealed),
+                      () => setRevealFailed(true),
+                    )
+                : undefined
+            }
+          />
         </section>
       )}
     </section>

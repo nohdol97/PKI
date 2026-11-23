@@ -95,7 +95,7 @@ async function boot(registry?: DerivativeRegistry) {
   const insightId = db.all("SELECT id FROM insights")[0]?.id as number;
   const call = (name: keyof typeof routes, body?: unknown) =>
     send(server.port, routes[name].path, headers, routes[name].method, body);
-  return { call, insightId, evidenceId };
+  return { call, insightId, evidenceId, versionId };
 }
 
 describe("the registry boot builds reaches the read paths", () => {
@@ -108,6 +108,24 @@ describe("the registry boot builds reaches the read paths", () => {
     expect((await call("insights")).body).toMatchObject({ insights: [{ summary: "요약" }] });
     expect((await call("insightEvidence", { insightId })).status).toBe(200);
     expect((await call("evidenceSource", { evidenceId })).status).toBe(200);
+  });
+
+  it("the 'where is it now' answer of a source version (I02B-R39, P7)", async () => {
+    const control = await boot();
+    const shown = await control.call("localSourceInfo", { sourceVersionId: control.versionId });
+    expect(shown.status).toBe(200);
+    await booted?.server.close();
+    booted?.db.close();
+    booted = undefined;
+    rmSync(dir, { recursive: true, force: true });
+    dir = mkdtempSync(join(tmpdir(), "pki-boot-read-gate-"));
+
+    const { asked, registry } = hiding();
+    const { call, versionId } = await boot(registry);
+    const res = await call("localSourceInfo", { sourceVersionId: versionId });
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "not-found" });
+    expect(asked).toContain("source");
   });
 
   it("the Sources list", async () => {

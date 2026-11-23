@@ -56,6 +56,16 @@ export interface LocalFilesPorts {
   limits: () => LocalFilesLimits;
   /** Milliseconds, the wall clock. */
   now: () => number;
+  /**
+   * Moves a location to a state the pass found it in (I02B-R7); `active` is a reopening. Only from `expected`,
+   * the state the pass decided from: false when the user changed it meanwhile (a pause is not overwritten).
+   */
+  setLocationState: (
+    id: string,
+    state: "active" | "paused" | "unavailable" | "needs-confirmation" | "revoking",
+    reason: string | null,
+    expected: "active" | "paused" | "unavailable" | "needs-confirmation" | "revoking",
+  ) => boolean;
   /** Told what a finished sync learned, for the location list. */
   report?: (report: LocalPassReport) => void;
   fs?: BoundaryFs;
@@ -120,6 +130,8 @@ const idOfFileNo = (fileNo: string): { dev: string; ino: string } => {
   const [dev = "", ino = ""] = fileNo.split(":");
   return { dev, ino };
 };
+
+type RootProblem = "root-missing" | "root-not-readable" | "root-changed";
 
 interface WalkedFile {
   path: string;
@@ -227,18 +239,25 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     return now - before.at >= settleMs && now - msOf(f.mtimeNs) > settleMs;
   }
 
-  /** The location is still the folder that was approved (I02B-R7); otherwise nothing is read or deleted. */
-  async function rootIntact(fs: BoundaryFs, location: LocalLocationView): Promise<boolean> {
+  /**
+   * Why the location is not the folder that was approved, or null when it is (I02B-R7): it cannot be
+   * opened, or its real path or identity (`dev`, `ino`) differs. Nothing is read or deleted otherwise.
+   */
+  async function rootProblem(
+    fs: BoundaryFs,
+    location: LocalLocationView,
+  ): Promise<RootProblem | null> {
     try {
-      if ((await fs.realpath(location.realPath)) !== location.realPath) return false;
+      if ((await fs.realpath(location.realPath)) !== location.realPath) return "root-changed";
       const stat = await fs.stat(location.realPath);
-      return (
-        stat.isDirectory() &&
+      return stat.isDirectory() &&
         String(stat.dev) === location.rootDev &&
         String(stat.ino) === location.rootIno
-      );
-    } catch {
-      return false;
+        ? null
+        : "root-changed";
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      return code === "EACCES" || code === "EPERM" ? "root-not-readable" : "root-missing";
     }
   }
 
@@ -261,11 +280,25 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       pending: 0,
       limitExceeded: false,
       rootUnavailable: false,
+      forgottenPaths: [],
     };
     pass.reports.set(location.id, report);
-    if (!(await rootIntact(fs, location))) {
+    const problem = await rootProblem(fs, location);
+    if (problem !== null) {
       report.rootUnavailable = true;
+      if (location.state !== "unavailable" || location.stateReason !== problem) {
+        p.setLocationState(location.id, "unavailable", problem, location.state);
+      }
       return;
+    }
+    // a root that was away and fits again is read again; one whose identity changed waits for the
+    // user's relink (I02B-R7, R9)
+    // the state the pass decides from from here on: a return makes it `active`, so held deletions put the
+    // location back to `needs-confirmation` in this pass (I02B-R7); a user's change since the snapshot ends the pass
+    let state = location.state;
+    if (state === "unavailable") {
+      if (!p.setLocationState(location.id, "active", null, "unavailable")) return;
+      state = "active";
     }
 
     // walk; a thrown traversal rejects the sync and nothing is written as deleted (D7)
@@ -322,14 +355,28 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       ...files.filter((f) => hashed.get(f.path) === hash).map((f) => f.path),
     ];
 
+    // a held or confirmed deletion whose file is back lets go of the mark (I02B-R8)
+    for (const f of files) {
+      const held = byPath.get(f.path);
+      if (held && held.pendingDelete !== 0) {
+        const cleared = p.index.updateEntry(held.externalId, held.seq, {
+          ...fieldsOf(held),
+          pendingDelete: 0,
+        });
+        if (cleared.applied) byPath.set(f.path, { ...held, pendingDelete: 0, seq: cleared.seq });
+      }
+    }
+
     // files that have an entry
     const fresh: WalkedFile[] = [];
     for (const f of files) {
       const e = byPath.get(f.path);
       if (!e) {
         const forgotten = p.index.findByPath(location.id, f.path);
-        if (forgotten?.state === "forgotten") report.skipped += 1;
-        else fresh.push(f);
+        if (forgotten?.state === "forgotten") {
+          report.skipped += 1;
+          report.forgottenPaths.push(f.path);
+        } else fresh.push(f);
         continue;
       }
       if (e.contentHash !== null) hashed.set(f.path, e.contentHash);
@@ -469,7 +516,7 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
 
     // a deletion is told only when the whole location was walked (I02B-R19)
     if (complete) {
-      for (const m of missing) {
+      const gone = (m: LocalIndexEntry) =>
         p.index.updateEntry(m.externalId, m.seq, {
           ...fieldsOf(m),
           size: null,
@@ -482,7 +529,32 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
           skippedAt: null,
           skipLimits: null,
         });
+      // too many at once is held for the user (I02B-R8): the denominator is the tracked files not yet
+      // confirmed, the numerator what vanished of them, a held one included; a skipped file is no
+      // knowledge to lose and goes at once
+      const tracked = entries.filter((e) => e.state === "present" && e.pendingDelete !== 2).length;
+      const vanished = missing.filter((m) => m.state === "present" && m.pendingDelete !== 2);
+      const { ratio, minFiles } = limits.deletionBrake;
+      const brake = vanished.length >= minFiles && vanished.length / tracked >= ratio;
+      for (const m of missing) {
+        if (m.state === "present" && m.pendingDelete !== 2 && brake) {
+          if (m.pendingDelete === 0) {
+            p.index.updateEntry(m.externalId, m.seq, { ...fieldsOf(m), pendingDelete: 1 });
+          }
+        } else gone(m);
       }
+      if (brake && state === "active") {
+        if (p.setLocationState(location.id, "needs-confirmation", null, "active")) {
+          state = "needs-confirmation";
+        }
+      }
+    }
+    // a location waiting for a confirmation that nothing is held for any more is active again
+    if (
+      state === "needs-confirmation" &&
+      !p.index.entriesOfLocation(location.id).some((e) => e.pendingDelete === 1)
+    ) {
+      p.setLocationState(location.id, "active", null, "needs-confirmation");
     }
 
     for (const { f, hash, reason } of inserts) {
@@ -506,7 +578,10 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
         },
         hash === null ? [] : sameContentPaths(hash),
       );
-      if (!result.applied && result.reason === "forgotten") report.skipped += 1;
+      if (!result.applied && result.reason === "forgotten") {
+        report.skipped += 1;
+        report.forgottenPaths.push(f.path);
+      }
     }
     for (const [path, reason] of skips) {
       const kept = byPath.get(path);
@@ -550,7 +625,8 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     }
     for (const location of p.locations()) {
       if (location.type !== "folder") continue;
-      if (location.state !== "active" && location.state !== "needs-confirmation") continue;
+      if (location.state === "unavailable" && location.stateReason === "root-changed") continue;
+      if (!isRead(location) && location.state !== "unavailable") continue;
       signal.throwIfAborted();
       await scanLocation(p, pass, location, full, signal);
     }
@@ -620,6 +696,9 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     };
   }
 
+  const isRead = (location: LocalLocationView) =>
+    location.state === "active" || location.state === "needs-confirmation";
+
   const locationOf = (p: LocalFilesPorts, e: LocalIndexEntry) =>
     p.locations().find((l) => l.id === e.locationId && l.type === "folder");
 
@@ -630,6 +709,10 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     e: LocalIndexEntry,
     signal: AbortSignal,
   ): Promise<{ change?: Change; halt?: true }> {
+    // a location that is not read announces nothing, deletions included (I02B-R7, R10); what it was
+    // not read for is given a new sequence number when it is read again (storage `reopenLocation`)
+    const location = locationOf(p, e);
+    if (!location || !isRead(location)) return {};
     if (e.state === "deleted") {
       return {
         change: {
@@ -642,9 +725,8 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       };
     }
     if (e.state !== "present" || e.mtimeNs === null || silent.has(e.seq)) return {};
-    const location = locationOf(p, e);
-    if (!location || (location.state !== "active" && location.state !== "needs-confirmation"))
-      return {};
+    // a held or confirmed deletion changes nothing the product knows: the pass decides it (I02B-R8)
+    if (e.pendingDelete !== 0) return {};
     const built = await buildRecord(p, pass, e, location, signal);
     if (built.kind === "stale") {
       // back to "to look at": the next pass reads the file again and announces it with a larger revision
@@ -734,6 +816,8 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       if (!pass || pass.id !== passId || cursor === null) {
         pass = await runPass(p, cursor === null, signal);
         open = pass;
+        // a rescan reads every entry: none stays hidden because this pass noted its size or time silently (#179 FU6)
+        if (cursor === null) silent.clear();
       }
       const changes: Change[] = [];
       const started = p.now();
@@ -770,7 +854,7 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       const e = p.index.entryOf(externalId);
       if (!e || e.locationId !== namespace || e.state !== "present") return null;
       const location = locationOf(p, e);
-      if (!location) return null;
+      if (!location || !isRead(location)) return null;
       const built = await buildRecord(p, undefined, e, location, new AbortController().signal);
       return built.kind === "record" ? built.record : null;
     },

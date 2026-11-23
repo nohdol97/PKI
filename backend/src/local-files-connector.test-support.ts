@@ -16,6 +16,8 @@ import {
   recordTombstone,
   registerConnectorInstance,
   saveSourceRecord,
+  closeLocation,
+  reopenLocation,
   type LocalFileIndex,
   type SqlDriver,
 } from "@pki/storage";
@@ -43,6 +45,9 @@ export const DEFAULT_LIMITS: LocalFilesLimits = {
   pageBudgetMs: 60_000,
   walk: { maxFilesPerLocation: 1_000, maxDepth: 8, maxRelativePathChars: 256 },
   normalize: { maxHeapMb: 256, maxExternalMemoryBytes: 512 * 1024 ** 2 },
+  deletionBrake: { ratio: 0.5, minFiles: 20 },
+  revoke: { maxPerTransaction: 100, lockWaitMs: 5_000 },
+  watch: { quietMs: 2_000, maxWaitMs: 30_000 },
 };
 
 /** What a test hooks into the file system calls (lstat, open) of the path boundary. */
@@ -101,6 +106,10 @@ export interface World {
   sync(opts?: { limit?: number; cursor?: string | null }): Promise<Change[]>;
   /** Two syncs: a new or changed file passes the settle condition (I02B-R15). */
   settle(): Promise<Change[]>;
+  /** The location leaves the readable states, as the user's pause does (I02B-R10). */
+  pause(): void;
+  /** The location is read again. */
+  resume(): void;
   close(): void;
 }
 
@@ -143,6 +152,9 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
     ...DEFAULT_LIMITS,
     walk: { ...DEFAULT_LIMITS.walk },
     normalize: { ...DEFAULT_LIMITS.normalize },
+    deletionBrake: { ...DEFAULT_LIMITS.deletionBrake },
+    revoke: { ...DEFAULT_LIMITS.revoke },
+    watch: { ...DEFAULT_LIMITS.watch },
     ...options.limits,
   };
   const nth = new Map<string, number>();
@@ -190,6 +202,10 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
     excluded: () => [dataDir],
     limits: () => w.limits,
     now: () => clock.t,
+    setLocationState: (id, state, reason, expected) =>
+      state === "active"
+        ? reopenLocation(db, id, reason, expected)
+        : closeLocation(db, id, state, reason, expected),
     report: (r) => reports.push(r),
     fs: hookedFs(hooks),
   };
@@ -224,6 +240,12 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
     await w.sync();
     return w.sync();
   };
+  w.pause = () => {
+    closeLocation(db, locationId, "paused", null);
+  };
+  w.resume = () => {
+    reopenLocation(db, locationId);
+  };
   w.close = () => {
     db.close();
     rmSync(base, { recursive: true, force: true });
@@ -234,6 +256,19 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
 export const upserts = (changes: readonly Change[]): SourceRecord[] =>
   changes.flatMap((c) => (c.kind === "upsert" ? [SourceRecordSchema.parse(c.record)] : []));
 export const deletes = (changes: readonly Change[]) => changes.filter((c) => c.kind === "delete");
+
+/** What the sync job does with an announced upsert: the source row, with the record's revision. */
+export function storeUpserts(w: World, changes: readonly Change[]): void {
+  for (const r of upserts(changes)) {
+    saveSourceRecord(w.db, "local-files", {
+      namespace: r.namespace,
+      externalId: r.externalId,
+      title: r.title,
+      body: r.body,
+      revision: r.revision,
+    });
+  }
+}
 
 /** The source row a sync would store for the entry, then the user's deletion of it (the tombstone trigger scrubs). */
 export function userDeletes(w: World, externalId: string): void {
