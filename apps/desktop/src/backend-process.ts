@@ -12,6 +12,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { NormalizerHostBroker } from "./normalizer-host.ts";
+import { NotifyMessageSchema, type NotifyMessage, type NotifyResult } from "./notifier.ts";
 import type { SecretStore } from "./secret-store.ts";
 
 /** The surface shared by Electron's utilityProcess.fork and Node's fork (tests). */
@@ -103,6 +104,8 @@ const FromBackend = z.discriminatedUnion("type", [
     id: z.int().positive(),
     path: z.string().min(1).max(4096).nullable(),
   }),
+  // the backend's count-only message for an OS toast (P02-R9): its five keys exactly, checked again by the notifier
+  NotifyMessageSchema,
   z.strictObject({
     type: z.literal("secret-request"),
     id: z.int().positive(),
@@ -180,6 +183,11 @@ export interface BackendOptions {
   normalizerHost?: ((backend: BackendChild) => NormalizerHostBroker) | undefined;
   /** How long a reveal request waits for the backend's answer (default 5 s). */
   revealTimeoutMs?: number | undefined;
+  /**
+   * Shows the OS toast of a `notify` message (P02-R9, notifier.ts) and answers what the platform did, which goes
+   * back to the backend as `notify-ack`; undefined answers nothing. Without it the answer is `unavailable`.
+   */
+  notify?: ((message: NotifyMessage) => Promise<NotifyResult | undefined>) | undefined;
 }
 
 export interface Backend {
@@ -259,6 +267,16 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
           // the backend may have exited meanwhile; nothing to answer then
           if (!ended) child.postMessage({ type: "secret", id, ...answer });
         });
+        return;
+      }
+      if (message.data.type === "notify") {
+        const { id } = message.data;
+        const answer = (result: NotifyResult | undefined) => {
+          // the backend may have exited meanwhile; nothing to answer then
+          if (result !== undefined && !ended) child.postMessage({ type: "notify-ack", id, result });
+        };
+        const shown = options.notify?.(message.data) ?? Promise.resolve("unavailable" as const);
+        void shown.then(answer, () => answer("failed"));
         return;
       }
       if (message.data.type === "reveal-path") {

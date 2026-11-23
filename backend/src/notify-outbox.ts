@@ -120,11 +120,12 @@ export function createNotifyOutbox(deps: NotifyOutboxDeps): NotifyOutbox {
     return db.transaction(() => {
       const waiting: StoredNotification[] = [];
       for (const line of queuedNotifications(db)) {
+        // a line the user read or closed, whatever its kind, needs no message
+        if (line.status !== "sent" || line.readAt !== null) {
+          setOsState(db, [line.id], "queued", "cancelled");
+          continue;
+        }
         if (line.kind === "insight") {
-          if (line.status !== "sent" || line.readAt !== null) {
-            setOsState(db, [line.id], "queued", "cancelled");
-            continue;
-          }
           const verdict = deliveryVerdict(db, registry, {
             insightId: line.insightId as number,
             insightChangedAt: line.insightChangedAt,

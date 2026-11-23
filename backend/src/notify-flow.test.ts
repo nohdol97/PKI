@@ -195,26 +195,22 @@ describe("notify.flow: the digest's and the report's content, computed when read
     expect(daily).toBeDefined();
     expect(weekly).toBeDefined();
 
-    const day = (await call("notificationDigest", { id: daily?.id as number })).body;
-    expect(day.status).toBe("ok");
-    if (day.status !== "ok") return;
-    expect(day.lines.map((l) => [l.insight.summary, l.reason]).sort()).toEqual([
+    const day = (await call("notificationDigest", { id: daily?.id as number })).body.digest;
+    expect(day).not.toBeNull();
+    expect(day?.lines.map((l) => [l.insight.summary, l.reason]).sort()).toEqual([
       ["낮음 요약", "low-confidence"],
       ["중요 요약", null],
     ]);
-    expect(day.lint).toBeNull();
+    expect(day?.lint).toBeNull();
 
-    const week = (await call("notificationDigest", { id: weekly?.id as number })).body;
-    if (week.status !== "ok") throw new Error("weekly digest");
-    expect(week.lint?.counts.map((c) => c.rule)).toEqual([
+    const week = (await call("notificationDigest", { id: weekly?.id as number })).body.digest;
+    expect(week?.lint?.counts.map((c) => c.rule)).toEqual([
       "synonym",
       "stale",
       "overdue-work",
       "missing-link",
     ]);
-    expect((await call("notificationDigest", { id: 999_999 })).body).toEqual({
-      status: "not-found",
-    });
+    expect((await call("notificationDigest", { id: 999_999 })).body).toEqual({ digest: null });
   });
 
   it("leaves a digest row out while its window holds only lines the user hid (reviewer FU4)", async () => {
@@ -233,6 +229,25 @@ describe("notify.flow: the digest's and the report's content, computed when read
     }
 
     expect((await call("notifications")).body).toMatchObject({ lines: [], digests: [], unread: 0 });
+  });
+});
+
+describe("notify.flow: a line is shown only for the content it was made for (P02-R7)", () => {
+  it("hides a line whose Insight changed since, and shows the new line the next scan writes", async () => {
+    const { call } = await backend();
+    const { insightId } = seedInsight(db, { name: "바뀜" });
+    notifyNow(db, "scan");
+    expect((await call("notifications")).body.lines).toHaveLength(1);
+
+    db.run("UPDATE insights SET changed_at = ? WHERE id = ?", [
+      "2026-11-24T09:00:00.000Z",
+      insightId,
+    ]);
+    expect((await call("notifications")).body).toMatchObject({ lines: [], unread: 0 });
+
+    notifyNow(db, "scan", "2026-11-24T09:05:00.000Z");
+    const lines = (await call("notifications")).body.lines;
+    expect(lines.map((l) => l.createdAt)).toEqual(["2026-11-24T09:05:00.000Z"]);
   });
 });
 

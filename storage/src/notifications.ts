@@ -171,13 +171,17 @@ export function dueDeferredNotifications(db: SqlDriver, now: string): StoredNoti
     .map(fromRow);
 }
 
-/** A line goes back to the feed and takes the OS channel once more (P02-R4). */
-export function returnNotification(db: SqlDriver, id: number): boolean {
+/**
+ * A line goes back to the feed (P02-R4). Its time having come, it takes the OS channel once more; the user's own
+ * "take it back" (`queueOs` false) leaves the channel as it is, since the user is looking at the feed.
+ */
+export function returnNotification(db: SqlDriver, id: number, queueOs = true): boolean {
   const done =
     db.run(
-      `UPDATE notifications SET status = 'sent', not_before = NULL, os_state = 'queued', read_at = NULL
+      `UPDATE notifications SET status = 'sent', not_before = NULL, read_at = NULL,
+         os_state = CASE WHEN ? THEN 'queued' ELSE os_state END
         WHERE id = ? AND status = 'deferred'`,
-      [id],
+      [queueOs ? 1 : 0, id],
     ).changes === 1;
   if (done) touch(db);
   return done;
@@ -217,6 +221,33 @@ export function deferNotification(db: SqlDriver, id: number, notBefore: string):
          os_state = CASE WHEN os_state = 'queued' THEN 'cancelled' ELSE os_state END
         WHERE id = ? AND status = 'sent' AND kind = 'insight'`,
       [notBefore, id],
+    ).changes === 1;
+  if (done) touch(db);
+  return done;
+}
+
+/**
+ * The user read a line of the feed or of a digest (P02-R11). Its waiting OS message is cancelled by the outbox's
+ * next settle, whatever the line's kind.
+ */
+export function markNotificationRead(db: SqlDriver, id: number, at: string): boolean {
+  const done =
+    db.run(
+      `UPDATE notifications SET read_at = ?
+        WHERE id = ? AND status IN ('sent', 'digest') AND read_at IS NULL`,
+      [at, id],
+    ).changes === 1;
+  if (done) touch(db);
+  return done;
+}
+
+/** The user closed a line (P02-R11): it leaves the feed and stays in the timeline; a waiting OS message is cancelled at the next settle. */
+export function dismissNotification(db: SqlDriver, id: number, at: string): boolean {
+  const done =
+    db.run(
+      `UPDATE notifications SET status = 'dismissed', not_before = NULL, read_at = coalesce(read_at, ?)
+        WHERE id = ? AND status IN ('sent', 'digest', 'deferred')`,
+      [at, id],
     ).changes === 1;
   if (done) touch(db);
   return done;
