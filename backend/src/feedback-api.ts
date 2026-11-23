@@ -100,7 +100,7 @@ export function createFeedbackApi(
           return {
             status: "refused",
             reason: done.reason as RouteResponse<"feedbackRecord">["reason"],
-            ...(done.unmet ? { unmet: [...done.unmet] } : {}),
+            ...(done.unmet ? { unmet: [...gate.dataUnmetShown(request.target.id)] } : {}),
           };
         }
         if (done.touched) afterCorrection(done.touched, at);
