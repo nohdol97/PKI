@@ -81,6 +81,20 @@ describe("otherValidValues (S02-R20)", () => {
     expect(otherValidValues(db, 9999, "item")).toEqual([]);
   });
 
+  it("a mutual pair with both facts valid counts only the later link (S02F-R1)", () => {
+    const x = item();
+    const a = fact(x, "2026-12-01");
+    const b = fact(x, "2026-12-02");
+    const first = link("SUPERSEDES", b, a);
+    const later = link("SUPERSEDES", a, b);
+    expect(supersededAmong(db, [a, b])).toEqual([{ factId: b, linkId: later }]);
+    // with `a` no longer valid only the link whose superseder (`b`) is valid counts
+    expect(
+      automatedLifecycle.supersede(db, { kind: "fact", id: a }, { sourceId: 1, version: 1 }),
+    ).toMatchObject({ status: "applied" });
+    expect(supersededAmong(db, [a, b])).toEqual([{ factId: a, linkId: first }]);
+  });
+
   it("leaves out a superseded value and the value that supersedes the asked fact; a 'many' kind answers nothing", () => {
     const a = item();
     const early = fact(a, "2026-12-01");
@@ -122,6 +136,31 @@ describe("conflict.supersede-links: the user's value fix (S02-R19)", () => {
       }),
     ]);
     expect(userDecisions.undo(db, fix.added, AT)).toMatchObject({ status: "removed" });
+    expect(listAssertionLinks(db)).toEqual([]);
+  });
+});
+
+describe("undoing a value fix (S02F-R5-4)", () => {
+  it("removes the user's link explicitly while the new row, which gained evidence, stays", () => {
+    const old = fact(item(), "2026-12-01");
+    const fix = userDecisions.replaceValue(db, { kind: "fact", id: old }, "2026-12-09", AT);
+    if (fix.status !== "applied") throw new Error(fix.status);
+    saveSourceRecord(db, "c1", {
+      externalId: "s-fix",
+      title: "t",
+      body: "body text",
+      accessScope: null,
+    });
+    const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    addEvidence(db, {
+      target: { factId: fix.added.id },
+      sourceVersionId: versionId,
+      start: 0,
+      end: 4,
+      quote: "body",
+    });
+    expect(userDecisions.undo(db, fix.added, AT)).toMatchObject({ status: "applied" });
+    expect(db.all("SELECT id FROM facts WHERE id = ?", [fix.added.id])).toHaveLength(1);
     expect(listAssertionLinks(db)).toEqual([]);
   });
 });

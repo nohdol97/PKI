@@ -105,13 +105,23 @@ export function linksOfFacts(db: SqlDriver, factIds: readonly number[]): StoredA
  */
 export function supersedingStands(
   db: SqlDriver,
-  link: Pick<StoredAssertionLink, "type" | "fromFactId">,
+  link: Pick<StoredAssertionLink, "id" | "type" | "fromFactId" | "toFactId">,
 ): boolean {
   if (link.type !== "SUPERSEDES") return false;
-  const status = db.all("SELECT status FROM facts WHERE id = ?", [link.fromFactId])[0]?.status;
+  if (!factIsValid(db, link.fromFactId)) return false;
+  // a mutual pair with both facts valid: only the later link counts (S02F-R1); the earlier one stays stored
+  const reverse = db.all(
+    `SELECT 1 FROM assertion_links
+     WHERE type = 'SUPERSEDES' AND from_fact_id = ? AND to_fact_id = ? AND id > ? LIMIT 1`,
+    [link.toFactId, link.fromFactId, link.id],
+  );
+  return reverse.length === 0 || !factIsValid(db, link.toFactId);
+}
+
+function factIsValid(db: SqlDriver, factId: number): boolean {
+  const status = db.all("SELECT status FROM facts WHERE id = ?", [factId])[0]?.status;
   return (
-    status !== undefined &&
-    isValidRow(db, { kind: "fact", id: link.fromFactId }, status as KnowledgeStatus)
+    status !== undefined && isValidRow(db, { kind: "fact", id: factId }, status as KnowledgeStatus)
   );
 }
 
