@@ -106,10 +106,12 @@ export {
   INSIGHT_INTERPRET_MAX_STATEMENT,
   INSIGHT_INTERPRET_MAX_SUMMARY,
   INSIGHT_INTERPRET_SCHEMA_VERSION,
+  REFLECTION_REFINE_SCHEMA_VERSION,
   TASKS,
   WIKI_SUMMARY_SCHEMA_VERSION,
   type ExtractionOutput,
   type InsightInterpretOutput,
+  type ReflectionRefineOutput,
   type TaskDefinition,
   type WikiSummaryOutput,
 } from "./tasks.ts";

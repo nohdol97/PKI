@@ -190,6 +190,17 @@ export {
   type StoredFinding,
 } from "./reflection.ts";
 export {
+  lineageHash,
+  readReflectionRefine,
+  REFLECTION_REFINE_BATCH,
+  REFLECTION_REFINE_KIND,
+  REFLECTION_REFINE_MAX_VERSIONS,
+  REFLECTION_REFINE_SETTING,
+  requestReflectionRefinements,
+  setReflectionRefine,
+  writeFindingOpinion,
+} from "./reflection-refine.ts";
+export {
   addWikiNote,
   advanceWikiState,
   isWikiBuildDead,

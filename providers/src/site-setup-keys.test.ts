@@ -50,6 +50,11 @@ const OTHER_PACKAGE_KEYS = [
     file: "../../storage/src/insight-interpretation.ts",
     holds: 'INSIGHT_INTERPRET_SETTING = "insight.interpret"',
   },
+  {
+    key: "reflection.refine",
+    file: "../../storage/src/reflection-refine.ts",
+    holds: 'REFLECTION_REFINE_SETTING = "reflection.refine"',
+  },
 ] as const;
 
 const implemented = Object.entries(entry)

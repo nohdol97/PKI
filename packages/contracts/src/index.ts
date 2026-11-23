@@ -1569,6 +1569,8 @@ export const LintFindingSchema = z.object({
     z.object({ kind: LintTargetKindSchema, id: z.int().positive(), label: z.string() }),
   ),
   evidence: z.array(z.int().positive()),
+  /** The LLM's verdict on a `synonym` or `missing-link` pair, when the optional refinement gave one (K02-R17). */
+  opinion: z.enum(["same", "related", "unrelated"]).optional(),
 });
 export const LintResponseSchema = z.object({
   findings: z.array(LintFindingSchema),

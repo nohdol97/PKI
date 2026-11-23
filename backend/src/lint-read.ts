@@ -126,6 +126,11 @@ export function createLintReads(
       .filter((id) => ok.has(String(id)))
       .slice(0, EVIDENCE_PER_FINDING);
   };
+  /** The verdict of the stored LLM opinion (K02-R17); its position in the source is not sent. */
+  const opinionOf = (f: StoredFinding): Finding["opinion"] =>
+    f.opinion === null
+      ? undefined
+      : (JSON.parse(f.opinion) as { verdict: Finding["opinion"] }).verdict;
   const view = (f: StoredFinding): Finding => ({
     id: f.id,
     rule: f.rule,
@@ -134,6 +139,7 @@ export function createLintReads(
     flips: f.flips,
     targets: rowsOf(f.target).map((r) => ({ ...r, label: label(r) })),
     evidence: evidenceOf(f),
+    ...(opinionOf(f) === undefined ? {} : { opinion: opinionOf(f) }),
   });
 
   return {
