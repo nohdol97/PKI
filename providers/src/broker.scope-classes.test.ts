@@ -9,7 +9,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./scope-grading.ts", async (importOriginal) => ({
@@ -18,6 +18,8 @@ vi.mock("./scope-grading.ts", async (importOriginal) => ({
 }));
 
 import type { CandidateItem } from "./broker.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const { createBroker } = await import("./broker.ts");
 const { createUserActionLedger } = await import("./user-actions.ts");
@@ -28,8 +30,7 @@ let answerOf: (classes: readonly string[]) => string;
 let graded: Record<string, string>;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   provider = new FakeProvider({
     answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
   });

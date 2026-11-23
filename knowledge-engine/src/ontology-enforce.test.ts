@@ -41,11 +41,18 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider, setOntologyStatusForTest, type FakeStep } from "@pki/testkit";
+import {
+  FakeProvider,
+  setOntologyStatusForTest,
+  type FakeStep,
+  memoryDbTemplate,
+} from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CANONICAL_KINDS, propagateCanonical } from "./canonical-kinds.ts";
 import { createExtractHandler } from "./extraction.ts";
 import { knowledgeCandidates } from "./linking.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const T0 = new Date("2026-11-21T00:00:00.000Z");
 let db: SqlDriver;
@@ -76,8 +83,7 @@ function setUp(script: FakeStep[] = []) {
   handler = createExtractHandler({ db, now: () => T0 });
 }
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "fixtures", "test-fixtures");
   setUp();
 });

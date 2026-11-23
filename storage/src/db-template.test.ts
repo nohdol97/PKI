@@ -26,7 +26,10 @@ describe("memoryDbTemplate", () => {
     expect(tables(a).length).toBeGreaterThan(5);
     a.exec("insert into template_marker values ('only in a')");
     expect(b.all("select count(*) as n from template_marker")).toEqual([{ n: 0 }]);
+    const c = freshDb();
+    expect(c.all("select count(*) as n from template_marker")).toEqual([{ n: 0 }]);
     a.close();
     b.close();
+    c.close();
   });
 });

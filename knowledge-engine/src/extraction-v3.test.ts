@@ -30,6 +30,7 @@ import {
   fixtureExtraction,
   setOntologyStatusForTest,
   type FakeStep,
+  memoryDbTemplate,
 } from "@pki/testkit";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -38,6 +39,8 @@ import { createExtractHandler } from "./extraction.ts";
 import { knowledgeCandidates } from "./linking.ts";
 import { propagateNewVersion } from "./propagation.ts";
 import { purgeSource } from "./purge.test-support.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const T0 = new Date("2026-11-23T00:00:00.000Z");
 let db: SqlDriver;
@@ -76,8 +79,7 @@ function setUp(
   handler = createExtractHandler({ db, now: () => T0 });
 }
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "imported", "jsonl-import");
 });
 afterEach(() => db.close());

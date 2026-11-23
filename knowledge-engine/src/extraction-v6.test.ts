@@ -16,10 +16,12 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider, type FakeStep } from "@pki/testkit";
+import { FakeProvider, type FakeStep, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createExtractHandler } from "./extraction.ts";
 import { knowledgeCandidates } from "./linking.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const T0 = new Date("2026-11-23T00:00:00.000Z");
 let db: SqlDriver;
@@ -54,8 +56,7 @@ function setUp(script: FakeStep[]) {
 }
 beforeEach(() => {
   tick = 0;
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "imported", "jsonl-import");
 });
 afterEach(() => db.close());

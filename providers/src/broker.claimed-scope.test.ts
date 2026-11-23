@@ -17,12 +17,14 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createBroker, type CandidateItem, type ScopeGrading } from "./broker.ts";
 import { createUserActionLedger } from "./user-actions.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 /** Labels: public < open < team < secret in strictness; "open-*" labels are unordered among themselves. */
 const RANK: Record<string, number> = { public: 0, open: 1, team: 2, secret: 3 };
@@ -97,8 +99,7 @@ function makeBroker(withScope = true) {
 let broker: ReturnType<typeof createBroker>;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   provider = new FakeProvider({
     answer: () => ({ items: [], facts: [], relations: [], terms: [], definitions: [] }),
   });

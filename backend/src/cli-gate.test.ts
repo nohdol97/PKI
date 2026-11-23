@@ -13,7 +13,7 @@ import {
   writeSetting,
   type SqlDriver,
 } from "@pki/storage";
-import { FakeProvider, send } from "@pki/testkit";
+import { FakeProvider, send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -21,6 +21,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openCanonicalDb, productAdapters, productCalls, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const TOKEN = "g".repeat(43);
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
@@ -54,6 +56,7 @@ let server: RunningServer | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-cli-gate-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
 });
 afterEach(async () => {

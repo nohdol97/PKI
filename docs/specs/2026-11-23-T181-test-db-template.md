@@ -60,7 +60,8 @@
 
 ## 미루는 항목
 
-- 다른 세션이 고치는 중인 시험 파일 33개(`it(` 507개): 그 브랜치가 머지된 뒤 같은 방식으로 전환한다. 목록은 설계 보고서에 있다.
+- 다른 세션이 고치는 중이거나 그 주제와 겹칠 시험 파일(insight·wiki·lint·reflection·analytical·local 계열, `api.contract`, `connector-sync-job`, `derivative-coverage` 등): 그 브랜치가 머지된 뒤 같은 방식으로 전환한다. #240 첫 묶음에서 이전에 미뤘던 파일 중 `dependency-delay`, `extraction-v3/v4/v6`, `ontology-enforce`, `broker.claimed-scope/inputs/scope-classes`, `storage/ontology`, `cli-gate`, `knowledge-schema.api`, `ontology-api`를 전환했다.
+- 파일 DB 쪽(`openCanonicalDb`)에서 준비 코드가 `beforeEach` 밖(`beforeAll`, 시험 본문, 헬퍼)에 있거나 `openCanonicalDb`를 두 번 이상 부르는 시험은 R4 범위 밖이라 전환하지 않는다.
 - `openCanonicalDb`를 여러 번 부르는 backend 시험 14개(boot, composition, ledger 계열): 열기 자체가 시험 대상인 자리가 섞여 있어 파일마다 판단이 필요하다.
 - 실행 전체에서 템플릿 하나 공유: 전환 뒤에도 파일당 한 번(약 0.2 s × 140여 파일)이 남는다.
 - 마이그레이션 v26 단계의 비용 점검.
@@ -70,3 +71,4 @@
 | 날짜 | 변경 내용 | 사유 |
 |---|---|---|
 | 2026-11-23 | 초안 작성 | #181 |
+| 2026-11-23 | #240 첫 묶음 반영: 남은 대상 12개 파일 전환, 미루는 항목 갱신 | #240 |
