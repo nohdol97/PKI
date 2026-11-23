@@ -264,9 +264,9 @@ describe("the P01 columns (P01-R2, R3, R5)", () => {
       urgencyDate: "2026-12-05",
       changedAt: rich.changedAt,
     });
-    const { changedAt: _omit, ...withoutChange } = rich;
+    const { changedAt, ...withoutChange } = rich;
     saveInsight(db, key, { ...withoutChange, evidenceIds: evidence, confidence: 30 });
-    expect(readInsight(db, key)).toMatchObject({ confidence: 30, changedAt: rich.changedAt });
+    expect(readInsight(db, key)).toMatchObject({ confidence: 30, changedAt });
   });
 
   it("empties all five on resolve: the text columns hold source-derived values", () => {

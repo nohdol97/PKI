@@ -321,7 +321,11 @@ describe("scope.policy and scope.changed through the product's runner", () => {
       db.all("SELECT status FROM jobs WHERE kind <> 'wiki-build' ORDER BY id").map((j) => j.status),
     ).toEqual(["succeeded"]);
     expect(count("relations")).toBe(1);
-    expect(count("insights")).toBe(1);
+    // the dependency Insight, and a `conflict` one: 알파 now holds two target dates (P01)
+    expect(db.all("SELECT rule FROM insights ORDER BY id")).toEqual([
+      { rule: "dependency_delay" },
+      { rule: "conflict" },
+    ]);
     expect(count("scope_policy_drops")).toBe(0);
     expect((await status()).scopePolicyDrops).toBe(0);
   });
@@ -335,7 +339,7 @@ describe("scope.policy and scope.changed through the product's runner", () => {
     registerJob(db, { kind: "extract", sourceId: b, fenceVersion: 1 });
     await kit.runner.wake();
     expect(count("relations")).toBe(1);
-    expect(count("insights")).toBe(1);
+    expect(count("insights")).toBe(2); // the dependency Insight and the `conflict` on 알파's two target dates (P01)
     expect(count("scope_policy_drops")).toBe(0);
   });
 });

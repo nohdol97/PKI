@@ -574,7 +574,9 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
 
     const { propagation } = db.transaction(() => propagateCanonical(db, scopeChange(b.sourceId)));
 
-    expect(counts()).toEqual(before);
+    // nothing is deleted or changed; the one new row is the `conflict` Insight (P01) the judged-again items now
+    // get for the CONTRADICTS link the world holds, the last count (insights)
+    expect(counts()).toEqual([...before.slice(0, -1), (before.at(-1) as number) + 1]);
     expect(
       db.all("SELECT id, status FROM facts UNION ALL SELECT id, status FROM relations"),
     ).toEqual(statuses);
@@ -601,7 +603,8 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
     const id = rows.insight?.shared as number;
     // the rule resolves the stored row on its items (no completion date on YS)
     const { propagation } = db.transaction(() => propagateCanonical(db, scopeChange(b.sourceId)));
-    expect(propagation.recomputedByKind.insight).toBe(1);
+    // two rows: the dependency row resolved, and the `conflict` row the link of the world makes (P01)
+    expect(propagation.recomputedByKind.insight).toBe(2);
     expect(db.all("SELECT id, state, summary FROM insights WHERE id = ?", [id])).toEqual([
       { id, state: "resolved", summary: null },
     ]);
@@ -779,7 +782,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           "entity-merge": 0,
           "merge-candidate": 0,
           item: 0,
-          insight: 1,
+          insight: 2, // iS judged again, and the `conflict` Insight the link of the world makes (P01)
           "analytical-check": 0,
           "wiki-page": 0,
           engine: 0,

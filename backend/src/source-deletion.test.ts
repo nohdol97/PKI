@@ -263,7 +263,9 @@ describe("delete.purge", () => {
         { value: "2026-12-10", status: "superseded" },
         { value: "2026-12-12", status: "candidate" },
       ]);
-      expect(db.all("SELECT state, summary FROM insights")).toEqual([
+      // the dependency Insight, and the `important_change` one for the completion date the new version replaced (P01)
+      expect(db.all("SELECT state, summary FROM insights ORDER BY id")).toEqual([
+        { state: "active", summary: expect.stringContaining(Y_NAME) },
         { state: "active", summary: expect.stringContaining(Y_NAME) },
       ]);
 

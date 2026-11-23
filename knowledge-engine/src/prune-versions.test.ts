@@ -164,7 +164,10 @@ describe("versions.prune", () => {
     ).toEqual([CANARY.shared]);
     // the item that only the deleted fact held goes too, and its Insight with it
     expect(ids("items")).not.toContain(x);
-    expect(db.all("SELECT count(*) AS n FROM insights")[0]?.n).toBe(0);
+    // (the two completion dates left on y are a `conflict` Insight of their own, P01)
+    expect(db.all("SELECT count(*) AS n FROM insights WHERE rule = 'dependency_delay'")[0]?.n).toBe(
+      0,
+    );
   });
 
   it("records one invalidation of kind old-versions-pruned with its counts and no tombstone", () => {
