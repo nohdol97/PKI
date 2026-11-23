@@ -150,4 +150,20 @@ describe("gate.lost", () => {
       basis_version: w.table.version,
     });
   });
+
+  it("G-C4: a stray candidate MEASURED_ON to an unbound Dataset beside a bound one does not make a verified calculation lose its table at a judgement point", () => {
+    const w = world();
+    expect(userDecisions.decide(db, { kind: "fact", id: w.calc }, "approve").status).toBe(
+      "applied",
+    );
+    const stray = item(db, "Dataset", "stray"); // no table bound
+    relation(db, w.metric, "MEASURED_ON", stray);
+    // the judgement point: a user cut of another path relation whose object has a table (the basis)
+    const second = dataset(db, "second", storeVersion(db, "t2").sourceId);
+    const extra = relation(db, w.metric, "MEASURED_ON", second);
+    expect(userDecisions.decide(db, { kind: "relation", id: extra }, "reject").status).toBe(
+      "applied",
+    );
+    expect(readFact(db, w.calc)?.status).toBe("verified");
+  });
 });

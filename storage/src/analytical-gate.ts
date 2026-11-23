@@ -57,16 +57,12 @@ const objectsOf = (tx: SqlDriver, itemId: number, type: string): number[] =>
  * The Datasets a fact's checks read, by the item's type as the check job reads it: a Dataset is its own,
  * a Join has its left and right objects (both sides are required), any other item its `MEASURED_ON` objects.
  */
-function targetsOf(tx: SqlDriver, itemId: number): { targets: number[]; complete: boolean } {
+function targetsOf(tx: SqlDriver, itemId: number): number[] {
   const type = tx.all("SELECT type FROM items WHERE id = ?", [itemId])[0]?.type;
-  if (type === "Dataset") return { targets: [itemId], complete: true };
-  if (type === "Join") {
-    const left = objectsOf(tx, itemId, "JOIN_LEFT");
-    const right = objectsOf(tx, itemId, "JOIN_RIGHT");
-    return { targets: [...left, ...right], complete: left.length > 0 && right.length > 0 };
-  }
-  const on = objectsOf(tx, itemId, "MEASURED_ON");
-  return { targets: on, complete: on.length > 0 };
+  if (type === "Dataset") return [itemId];
+  if (type === "Join")
+    return [...objectsOf(tx, itemId, "JOIN_LEFT"), ...objectsOf(tx, itemId, "JOIN_RIGHT")];
+  return objectsOf(tx, itemId, "MEASURED_ON");
 }
 
 /** A Dataset bound to a table of a source that still has a version no tombstone covers. */
@@ -79,9 +75,16 @@ const bound = (tx: SqlDriver, datasetId: number): boolean =>
     [datasetId],
   ).length > 0;
 
+/** No table: a required side has no live target bound to a table (an extra unbound target is a conflict, not a loss). */
 function noDataset(tx: SqlDriver, itemId: number): boolean {
-  const { targets, complete } = targetsOf(tx, itemId);
-  return !complete || targets.some((t) => !bound(tx, t));
+  const type = tx.all("SELECT type FROM items WHERE id = ?", [itemId])[0]?.type;
+  const sides =
+    type === "Dataset"
+      ? [[itemId]]
+      : type === "Join"
+        ? [objectsOf(tx, itemId, "JOIN_LEFT"), objectsOf(tx, itemId, "JOIN_RIGHT")]
+        : [objectsOf(tx, itemId, "MEASURED_ON")];
+  return sides.some((side) => !side.some((t) => bound(tx, t)));
 }
 
 /** The relation types that name a table of this item: two live objects on one of them leave no table to choose. */
@@ -104,7 +107,7 @@ function specConflict(tx: SqlDriver, factId: number, itemId: number, checks: rea
   if (rivalled(tx, itemId, factId) || ambiguousPath(tx, itemId)) return true;
   if (!checks.includes("aggregation")) return false;
   // the Grain facts of each target Dataset (S03-R14 (c)): two valid grains leave the aggregation no row key
-  return targetsOf(tx, itemId).targets.some((dataset) =>
+  return targetsOf(tx, itemId).some((dataset) =>
     rivalled(tx, dataset, undefined, (kind) => requiredChecks(tx, kind).includes("grain")),
   );
 }
