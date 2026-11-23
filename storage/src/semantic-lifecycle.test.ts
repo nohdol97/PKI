@@ -210,6 +210,15 @@ describe("lifecycle.transitions", () => {
       ]);
     });
 
+    it("a policy dispute writes the reason code it was given", () => {
+      const fact = row("fact", "verified");
+      const plain = row("fact", "verified");
+      automatedLifecycle.raiseDispute(db, fact, BASIS, undefined, "contradiction");
+      automatedLifecycle.raiseDispute(db, plain, BASIS);
+      expect(lines(fact)).toMatchObject([{ actor: "policy", reason: "contradiction" }]);
+      expect(lines(plain)).toMatchObject([{ reason: null }]);
+    });
+
     it("is refused on any other status", () => {
       const fact = row("fact", "candidate");
       expect(automatedLifecycle.raiseDispute(db, fact, BASIS)).toEqual({
