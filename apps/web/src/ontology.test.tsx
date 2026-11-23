@@ -160,7 +160,7 @@ describe("유형 정의 screen: add and change", () => {
 describe("유형 정의 screen: editing a stored rule", () => {
   it("opens the form with the stored rule and sends it back as a change-rule request with the same dataChecks", () => {
     const stored = {
-      ...elements[1]!,
+      ...(elements[1] as (typeof elements)[number]),
       rule: {
         elementKind: "fact-kind" as const,
         itemTypes: ["Project"],
