@@ -1,6 +1,8 @@
 // I02B-T04 T0 (F1, FU7): what a location that is not read owes the connector when it is read again.
 // One representative case per clause; the connector runs over the canonical index on an in-memory database.
-import { unlinkSync } from "node:fs";
+import { listLocations, relinkLocation } from "@pki/storage";
+import { mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   deletes,
@@ -82,5 +84,50 @@ describe("F1: a location read again announces what it was not read for", () => {
     expect(await ask()).not.toBeNull();
     w.pause();
     expect(await ask()).toBeNull();
+  });
+});
+
+describe("C11: the root of a location", () => {
+  const stateOf = (w: World) => {
+    const l = listLocations(w.db).find((x) => x.id === w.locationId)!;
+    return [l.state, l.stateReason];
+  };
+  const present = (w: World) =>
+    w.index.entriesOfLocation(w.locationId).filter((e) => e.state === "present");
+
+  it("a folder renamed away makes the location unavailable with no deletion, and renamed back it is active again", async () => {
+    const w = make();
+    w.write("a.md", "# a\n\nbody of a\n");
+    w.write("b.md", "# b\n\nbody of b\n");
+    storeUpserts(w, await w.settle());
+    renameSync(w.root, `${w.root}-away`);
+    expect(deletes(await w.sync())).toHaveLength(0);
+    expect(stateOf(w)).toEqual(["unavailable", "root-missing"]);
+    renameSync(`${w.root}-away`, w.root);
+    expect(deletes(await w.sync())).toHaveLength(0);
+    expect(stateOf(w)).toEqual(["active", null]);
+    expect(present(w)).toHaveLength(2);
+  });
+
+  it("another folder at the same path is root-changed, stays so, and a relink to it keeps the internal ids", async () => {
+    const w = make();
+    w.write("a.md", "# a\n\nbody of a\n");
+    storeUpserts(w, await w.settle());
+    const idsBefore = present(w).map((e) => e.externalId);
+    renameSync(w.root, `${w.root}-old`);
+    mkdirSync(join(w.root, "pki-data"), { recursive: true });
+    w.write("a.md", "# a\n\nbody of a\n");
+    expect(deletes([...(await w.sync()), ...(await w.sync())])).toHaveLength(0);
+    expect(stateOf(w)).toEqual(["unavailable", "root-changed"]);
+    const stat = statSync(w.root, { bigint: true });
+    relinkLocation(w.db, w.locationId, {
+      displayPath: w.root,
+      realPath: w.root,
+      rootDev: stat.dev.toString(),
+      rootIno: stat.ino.toString(),
+    });
+    expect(deletes([...(await w.sync()), ...(await w.sync())])).toHaveLength(0);
+    expect(stateOf(w)).toEqual(["active", null]);
+    expect(present(w).map((e) => e.externalId)).toEqual(idsBefore);
   });
 });

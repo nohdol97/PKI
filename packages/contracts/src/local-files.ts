@@ -231,6 +231,21 @@ export const LocalApprovalRequestSchema = z
   });
 export type LocalApprovalRequest = z.infer<typeof LocalApprovalRequestSchema>;
 
+/**
+ * A relink (I02B-R9): which location, and the folder it is now, as a typed path (development, test) or
+ * the one-time ticket of the shell's picker (I02B-R37, the same rule as an approval).
+ */
+export const LocalRelinkRequestSchema = z
+  .strictObject({
+    locationId: z.string().min(1).max(64),
+    path: z.string().min(1).max(4096).optional(),
+    ticket: z.string().min(16).max(256).optional(),
+  })
+  .refine((r) => (r.path === undefined) !== (r.ticket === undefined), {
+    message: "exactly one of path and ticket",
+  });
+export type LocalRelinkRequest = z.infer<typeof LocalRelinkRequestSchema>;
+
 const PositiveInt = z.int().positive();
 const walkShape = {
   maxFilesPerLocation: PositiveInt,
