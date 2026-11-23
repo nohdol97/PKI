@@ -51,7 +51,7 @@ import {
   AUTO_VERIFY_SETTING,
   defaultEntries,
   readAutoVerify,
-  recomputeDependencyDelay,
+  recomputeInsights,
   readAutoDispute,
   refreshCandidates,
   refreshConflicts,
@@ -579,7 +579,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     if (requestWikiBuild(options.db).status === "registered") options.onRunConditionsChanged?.();
   };
   /**
-   * The rule "의존 업무 지연" judged again over the items a user action bore on, in the action's own
+   * The Insight rules (P01) judged again over the items a user action bore on, in the action's own
    * transaction (S01-R15): an approval, a rejection, a fix or an undo changes what the rule reads, and
    * the Insight follows at once instead of at the next source change. The policy judges the sources the
    * Insight rests on, a user input's included, as it does when extraction runs the rule.
@@ -601,7 +601,10 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       },
       at,
     );
-    recomputeDependencyDelay(options.db, [...new Set(items)], scope);
+    recomputeInsights(options.db, [...new Set(items)], {
+      scope,
+      ...(at === undefined ? {} : { at }),
+    });
     // S02-R10: what supported or opposed a candidate may have changed with the user's action
     refreshCandidates(options.db, [...new Set(items)], scope);
   };

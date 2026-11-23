@@ -11,7 +11,7 @@
 // extraction is registered.
 import type { DerivativeRegistry, InsightKey, SqlDriver } from "@pki/storage";
 import { derivativeRegistry, propagateCanonical } from "./canonical-kinds.ts";
-import type { RuleOutcome } from "./dependency-delay.ts";
+import type { RuleOutcome } from "./insight-rules.ts";
 
 export interface Propagation {
   /** Facts and relations superseded, ascending. */

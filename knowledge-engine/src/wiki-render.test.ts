@@ -127,4 +127,17 @@ describe("wiki.render: a page per target, by the kind its type maps to", () => {
       { ref: { kind: "fact", id: next }, validAt: "2031-01-01" },
     ]);
   });
+
+  it("renders a single-item Insight (X = Y) with one end and one link, and no page once it is resolved (P01)", () => {
+    const a = addSource(db, "a", "합성 본문 가");
+    const item = addItem(db, "Project", "미리내");
+    cite(db, { factId: addFact(db, item, "memo", "값") }, a.id);
+    const key = { rule: "schedule-conflict", xItemId: item, yItemId: item };
+    const id = saveInsight(db, key, { state: "active", summary: "단일 항목", evidenceIds: [] });
+    const page = renderWikiPages(db).find((p) => p.key === `syntheses/${id}`);
+    expect(page?.links).toEqual([{ toKey: `projects/${item}`, basisKind: "insight", basisId: id }]);
+    expect(page?.document.insight?.ends).toEqual([`projects/${item}`]);
+    saveInsight(db, key, { state: "resolved" });
+    expect(renderWikiPages(db).some((p) => p.key === `syntheses/${id}`)).toBe(false);
+  });
 });

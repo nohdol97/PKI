@@ -63,6 +63,11 @@ describe("saveInsight", () => {
       evidenceIds: evidence,
       userInputs: [],
       linkIds: [],
+      factLines: [],
+      reasoningSummary: null,
+      confidence: null,
+      urgencyDate: null,
+      changedAt: null,
     });
   });
 
@@ -125,6 +130,11 @@ describe("saveInsight", () => {
       evidenceIds: [],
       userInputs: [],
       linkIds: [],
+      factLines: [],
+      reasoningSummary: null,
+      confidence: null,
+      urgencyDate: null,
+      changedAt: null,
     });
     expect(saveInsight(db, key, { state: "active", summary: "s", evidenceIds: evidence })).toBe(id);
     expect(db.all("SELECT count(*) AS n FROM insights")).toEqual([{ n: 1 }]);
@@ -230,5 +240,54 @@ describe("rule reads (V02-R8: depth-1 queries)", () => {
     expect(listInsightKeys(db, key.rule, [key.yItemId])).toEqual([key]);
     expect(listInsightKeys(db, "other", [key.yItemId])).toEqual([]);
     expect(listInsightKeys(db, key.rule, [])).toEqual([]);
+  });
+});
+
+describe("the P01 columns (P01-R2, R3, R5)", () => {
+  const rich = {
+    state: "active" as const,
+    summary: "s",
+    evidenceIds: [] as number[],
+    factLines: ["목표일 2026-12-05", "완료일 2026-12-10"],
+    reasoningSummary: "두 날짜를 코드가 비교했습니다.",
+    confidence: 80,
+    urgencyDate: "2026-12-05",
+    changedAt: "2026-11-23T00:00:00.000Z",
+  };
+
+  it("round-trips the five fields and keeps changed_at when an update omits it", () => {
+    saveInsight(db, key, { ...rich, evidenceIds: evidence });
+    expect(readInsight(db, key)).toMatchObject({
+      factLines: rich.factLines,
+      reasoningSummary: rich.reasoningSummary,
+      confidence: 80,
+      urgencyDate: "2026-12-05",
+      changedAt: rich.changedAt,
+    });
+    const { changedAt, ...withoutChange } = rich;
+    saveInsight(db, key, { ...withoutChange, evidenceIds: evidence, confidence: 30 });
+    expect(readInsight(db, key)).toMatchObject({ confidence: 30, changedAt });
+  });
+
+  it("empties all five on resolve: the text columns hold source-derived values", () => {
+    saveInsight(db, key, { ...rich, evidenceIds: evidence });
+    saveInsight(db, key, { state: "resolved" });
+    expect(readInsight(db, key)).toMatchObject({
+      state: "resolved",
+      summary: null,
+      factLines: [],
+      reasoningSummary: null,
+      confidence: null,
+      urgencyDate: null,
+      changedAt: null,
+    });
+  });
+
+  it("refuses a reasoning summary of more than 500 characters", () => {
+    expect(() =>
+      saveInsight(db, key, { ...rich, evidenceIds: evidence, reasoningSummary: "가".repeat(501) }),
+    ).toThrow();
+    saveInsight(db, key, { ...rich, evidenceIds: evidence, reasoningSummary: "가".repeat(500) });
+    expect(readInsight(db, key)?.reasoningSummary).toHaveLength(500);
   });
 });

@@ -194,7 +194,8 @@ describe("correction.effective: an action on a registry row recomputes the rule 
       ).body,
     );
     if (earlier.status !== "applied" || !earlier.entry) throw new Error("fix again");
-    expect(await insights()).toEqual([]);
+    // the dependency Insight is resolved; the replaced value is an `important_change` Insight now (P01)
+    expect((await insights()).filter((i) => i.summary.includes("의존 업무의 지연"))).toEqual([]);
     expect((await call("insightEvidence", { insightId: made?.id })).status).toBe(404);
 
     // the undo of the second fix gives the 12-20 row back, and the same Insight with it

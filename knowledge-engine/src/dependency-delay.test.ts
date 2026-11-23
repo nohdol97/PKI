@@ -400,6 +400,11 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
       evidenceIds: [],
       userInputs: [],
       linkIds: [],
+      factLines: [],
+      reasoningSummary: null,
+      confidence: null,
+      urgencyDate: null,
+      changedAt: null,
     });
     expect(db.all("SELECT count(*) AS n FROM insight_evidence")).toEqual([{ n: 0 }]);
   });

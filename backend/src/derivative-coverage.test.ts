@@ -7,7 +7,7 @@ import {
   candidatesReceiver,
   conflictsReceiver,
   createProductRegistry,
-  dependencyDelayReceiver,
+  insightsReceiver,
 } from "@pki/knowledge-engine";
 import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
@@ -68,7 +68,7 @@ describe("resolution.group-reads: the membership receivers (S02-R13)", () => {
     expect(Object.isFrozen(MEMBERSHIP_LISTENERS)).toBe(true);
     expect(MEMBERSHIP_LISTENERS).toEqual([
       conflictsReceiver,
-      dependencyDelayReceiver,
+      insightsReceiver,
       onMembershipChanged,
       candidatesReceiver,
     ]);

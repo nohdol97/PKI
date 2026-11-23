@@ -62,7 +62,7 @@ import {
   createProductRegistry,
   createProjections,
   createWikiBuildHandler,
-  dependencyDelayReceiver,
+  insightsReceiver,
   derivativeRegistry,
   ENGINE_KIND,
   knowledgeCandidates,
@@ -180,7 +180,7 @@ export function productEngine(): KnowledgeEngine {
  */
 export const MEMBERSHIP_LISTENERS: readonly MembershipListener[] = Object.freeze([
   conflictsReceiver,
-  dependencyDelayReceiver,
+  insightsReceiver,
   onMembershipChanged,
   candidatesReceiver,
 ]);

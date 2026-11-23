@@ -1606,6 +1606,21 @@ const v27: Migration = (db) => {
   `);
 };
 
+// Schema v28 (P01-T01, P01-R2): additive only. The five fields an Insight carries besides its summary; all
+// NULL-able, no stored row is rewritten (an old row is filled by its next judgement). The number is the next
+// one free on main when this merges (after K01 v27): it is renumbered on a rebase over another v28.
+const v28: Migration = (db) => {
+  db.exec(`
+    ALTER TABLE insights ADD COLUMN fact_lines TEXT CHECK (fact_lines IS NULL OR json_valid(fact_lines));
+    ALTER TABLE insights ADD COLUMN reasoning_summary TEXT
+      CHECK (reasoning_summary IS NULL OR length(reasoning_summary) <= 500);
+    ALTER TABLE insights ADD COLUMN confidence INTEGER
+      CHECK (confidence IS NULL OR (confidence BETWEEN 0 AND 100));
+    ALTER TABLE insights ADD COLUMN urgency_date TEXT;
+    ALTER TABLE insights ADD COLUMN changed_at TEXT;
+  `);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1635,6 +1650,7 @@ export const migrations: readonly Migration[] = [
   v25,
   v26,
   v27,
+  v28,
 ];
 
 export function schemaVersion(db: SqlDriver): number {
