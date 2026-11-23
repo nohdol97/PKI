@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { insertItem, saveFact } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
+import { userDecisions } from "./semantic-user.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import {
   addWikiNote,
@@ -166,5 +167,36 @@ describe("wiki.incarnation: an Insight that goes with its item (#220, K01-D20)",
     expect(listWikiLog(db, { pageKey: key, limit: 10 })).toHaveLength(0);
     expect(listWikiNotes(db, key)).toHaveLength(0);
     expect(listWikiNotes(db, `${key}#gone`).map((n) => n.text)).toEqual(["내 메모"]);
+  });
+});
+
+describe("wiki.undo: the pages of an item the user took back go with it (#235, K01-R19)", () => {
+  it("leaves no page row and no lineage row for the item or for the Insight that went with it", () => {
+    const added = userDecisions.add(db, { kind: "item", type: "Project", name: "옛 이름" });
+    if (added.status !== "applied" || added.ref.kind !== "item") throw new Error(added.status);
+    const id = added.ref.id;
+    const y = insertItem(db, { type: "Project", name: "나", ...attrs });
+    const insight = db.run(
+      `INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary)
+       VALUES ('r', ?, ?, 'explicit', 'resolved', NULL)`,
+      [id, y],
+    ).lastInsertRowid;
+    const lineage = [{ sourceId: 1, version: 1 }];
+    writeWikiPage(
+      db,
+      { ...page(`projects/${id}`), target: String(id), title: "옛 이름", lineage },
+      AT,
+    );
+    writeWikiPage(
+      db,
+      { ...page(`syntheses/${insight}`), kind: "syntheses", target: String(insight), lineage },
+      AT,
+    );
+    expect(db.all("SELECT key FROM wiki_pages")).toHaveLength(2);
+
+    expect(db.transaction(() => userDecisions.undo(db, added.ref))).toEqual({ status: "removed" });
+
+    expect(db.all("SELECT key FROM wiki_pages")).toEqual([]);
+    expect(db.all("SELECT page_key FROM wiki_page_lineage")).toEqual([]);
   });
 });
