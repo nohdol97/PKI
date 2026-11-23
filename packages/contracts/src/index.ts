@@ -111,12 +111,15 @@ export type CredentialReason = (typeof CREDENTIAL_REASONS)[number];
 
 // "not-implemented" is a site Connector placeholder (V01-R18); "unavailable" failed to
 // initialize, or, with reason "unsupported-sdk-version", was never initialized because
-// it implements another Connector SDK version (I01-R1).
+// it implements another Connector SDK version (I01-R1). "instance-kind-mismatch": the stored data
+// binds the instance id to another kind, so no object is made (I05F-R1).
 export const ConnectorSummarySchema = z.object({
   id: z.string(),
   kind: z.string(),
   state: z.enum(["ready", "not-implemented", "unavailable"]),
-  reason: z.enum(["unsupported-sdk-version", ...CREDENTIAL_REASONS]).optional(),
+  reason: z
+    .enum(["unsupported-sdk-version", "instance-kind-mismatch", ...CREDENTIAL_REASONS])
+    .optional(),
   // a Connector that declared slots (I06-R13): the stored name and the last presence check of each, never a value
   credentials: z
     .array(

@@ -143,6 +143,17 @@ describe("contract schemas", () => {
   });
 });
 
+describe("connector summary reason (I05F-R2, C6 ②)", () => {
+  const parse = (reason: string) =>
+    ConnectorListResponseSchema.safeParse({
+      connectors: [{ id: "a", kind: "k", state: "unavailable", reason }],
+    }).success;
+  it("accepts the kind mismatch reason and still rejects any other text", () => {
+    expect(parse("instance-kind-mismatch")).toBe(true);
+    expect(parse("anything else")).toBe(false);
+  });
+});
+
 describe("sync v2 contract (I01-R19, R21, T03)", () => {
   const result = {
     connectorId: "c",

@@ -66,9 +66,14 @@ export const CREDENTIAL_SLOT_STATE_TEXT: Readonly<
 export const NO_CREDENTIAL_STORE_TEXT =
   "이 실행에는 저장소가 없습니다. 자격 증명은 설치된 앱에서만 입력할 수 있습니다.";
 
-/** The row's reason in words, for the credential reasons; nothing for the others. */
+/** The stored data binds this id to another kind; the stored kind is never shown (I05F-R7, D7). */
+export const KIND_MISMATCH_TEXT =
+  "같은 ID가 다른 종류의 자료에 이미 쓰이고 있어 수집기를 쓸 수 없습니다. 등록의 ID나 종류를 고쳐 다시 시작하세요.";
+
+/** The row's reason in words, for the credential reasons and the kind mismatch; nothing for the others. */
 export function connectorReasonText(connector: ConnectorSummary): string | undefined {
   const { reason } = connector;
+  if (reason === "instance-kind-mismatch") return KIND_MISMATCH_TEXT;
   return reason !== undefined && (CREDENTIAL_REASONS as readonly string[]).includes(reason)
     ? CREDENTIAL_REASON_TEXT[reason as CredentialReason]
     : undefined;

@@ -39,6 +39,7 @@ import {
 import { log } from "@pki/providers";
 import {
   beginRescan,
+  readConnectorKind,
   readCursor,
   readRescanState,
   registerConnectorInstance,
@@ -281,7 +282,10 @@ export const markReplacedStop = (answer: object): void => void replacedStops.add
 /** What initializing one Connector came to, as the Connector list shows it. */
 export type InitializeOutcome =
   | { state: "ready" }
-  | { state: "unavailable"; reason: "unsupported-sdk-version" | CredentialReason }
+  | {
+      state: "unavailable";
+      reason: "unsupported-sdk-version" | "instance-kind-mismatch" | CredentialReason;
+    }
   | { state: "not-implemented" | "unavailable"; error: unknown };
 
 /**
@@ -449,7 +453,11 @@ export async function createConnectorManager(
       const declared = declareCredentials(kind, id, credentials);
       const slots = declared === "invalid" ? undefined : declared;
       const access = createCredentialAccess(slots ?? [], secrets);
-      const entry = (outcome: InitializeOutcome, connector?: Connector): Entry => {
+      const entry = (
+        outcome: InitializeOutcome,
+        connector?: Connector,
+        mismatched = false,
+      ): Entry => {
         const ready = outcome.state === "ready" && connector !== undefined;
         if (!ready) access.revoke(); // an object given up reads nothing more (I06-R7)
         return {
@@ -458,7 +466,7 @@ export async function createConnectorManager(
           connector,
           access: ready ? access : undefined,
           factory,
-          slots,
+          slots: mismatched ? undefined : slots,
           states: access.states(),
           lateRechecks: 0,
           abandonedLogged: false,
@@ -471,6 +479,13 @@ export async function createConnectorManager(
       if (!factory) {
         log("connector-kind-unknown", { id });
         return entry(unavailable);
+      }
+      // the stored data binds the id to another kind: no object, no store question, and no slots to
+      // list or to rebuild from (I05F-R1, R5); only the next start judges it again
+      const bound = readConnectorKind(db, id);
+      if (bound !== undefined && bound !== kind) {
+        log("connector-kind-mismatch", { id });
+        return entry({ state: "unavailable", reason: "instance-kind-mismatch" }, undefined, true);
       }
       if (!slots) {
         log("connector-credentials-invalid", { id });

@@ -63,6 +63,8 @@ const REASON: Readonly<Record<string, string>> = {
   // held because the Connector instance cannot run (I03-T09)
   "unsupported-sdk-version": "수집기가 다른 SDK 버전용이라 실행할 수 없음",
   "connector-unavailable": "수집기를 초기화하지 못해 실행할 수 없음",
+  "instance-kind-mismatch":
+    "같은 ID가 다른 종류의 자료에 이미 쓰여 수집기를 실행할 수 없음(등록의 ID나 종류를 고쳐 다시 시작)",
   "not-implemented": "배포처 수집기가 아직 구현되지 않음",
   "credential-store-unavailable": "수집기의 자격 증명 저장소를 쓸 수 없어 실행할 수 없음",
   "credential-missing": "수집기의 자격 증명 값이 없어 실행할 수 없음",

@@ -268,6 +268,8 @@ export class ConnectorError extends Error {
 
 자격 증명 때문에 `unavailable`인 인스턴스(사유 `credential-store-unavailable`, `credential-missing`, `credential-unreadable`, `credential-rejected`)의 수집 작업은 `connector-unavailable`이 아니라 그 인스턴스의 사유로 보류되고, 그 인스턴스가 `ready`가 되면 풀린다. 네 사유와 풀리는 길은 8장에 있다.
 
+등록의 인스턴스 ID가 정본에 다른 종류로 묶여 있으면 그 인스턴스는 `unavailable`(사유 `instance-kind-mismatch`)이고, 제품은 그 수집기를 만들지도 초기화하지도 않는다. 그 수집 작업은 그 사유로 보류되며, 등록의 ID나 종류를 고쳐 다시 시작해 어긋남이 없어지면 풀린다.
+
 수집기를 만드는 사람이 이 표에서 챙길 것은 셋이다.
 
 1. 포기(`dead_letter`)가 되는 `connector-failed`·`invalid-page`·`no-progress`·`cursor-expired`는 **자동으로 다시 시도되지 않는다.** 일시 장애를 `ConnectorError`로 감싸지 않으면 영구 실패로 처리된다.

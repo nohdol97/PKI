@@ -1,8 +1,14 @@
 // I05-T02 on the real bootBackend: a start with a Connector that never initializes ends at the
 // time limit (I05-C8), and what the stored data says about instances the present set does not
-// match (I05-R12, C10 ① ②: `boot.stored-mismatch`, held by tests, not changed by I05).
+// match (I05-R12, C10 ① ②: `boot.stored-mismatch`, held by tests; I05F-C2 changes ② to the 409 answer).
 import { routes, type Connector } from "@pki/contracts";
-import { readJob, registerConnectorInstance, registerJob, saveSourceRecord } from "@pki/storage";
+import {
+  readConnectorKind,
+  readJob,
+  registerConnectorInstance,
+  registerJob,
+  saveSourceRecord,
+} from "@pki/storage";
 import { send } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -161,8 +167,14 @@ describe("boot.stored-mismatch (I05-R12, C10 ① ②)", () => {
       kinds: { fine: () => connector(ok) },
     });
     const first = await api().sync("bound");
-    // the kind binding of the stored data refuses the sync: the existing answer is the API's internal error
-    expect([first.status, first.body]).toEqual([500, { error: "internal-error" }]);
+    // the start sees the binding (I05F-R1): the instance is unavailable, so the answer is the usual 409
+    expect([first.status, first.body]).toEqual([409, { error: "connector-unavailable" }]);
+    expect((await api().get(routes.connectors.path)).body).toMatchObject({
+      connectors: expect.arrayContaining([
+        { id: "bound", kind: "fine", state: "unavailable", reason: "instance-kind-mismatch" },
+      ]),
+    });
+    expect(readConnectorKind(booted.db, "bound")).toBe("jsonl-import");
     expect((await api().sync("other")).body).toMatchObject({ connectorId: "other", created: 1 });
     const sources = (await api().get("/api/sources")).body as {
       sources: Array<{ externalId: string; title: string }>;
@@ -171,5 +183,61 @@ describe("boot.stored-mismatch (I05-R12, C10 ① ②)", () => {
       { title: "kept" },
     ]);
     expect(sources.sources.filter((s) => s.externalId === "r0")).toHaveLength(1); // only other's
+  });
+
+  it("③ a queued sync job of the mismatched instance is held with its reason, attempt unspent, and another instance still syncs", async () => {
+    const db = openCanonicalDb(dir);
+    registerConnectorInstance(db, "bound", "jsonl-import");
+    const queued = registerJob(db, { kind: "connector-sync", target: "bound" });
+    if (!queued.registered) throw new Error("expected a new job");
+    db.close();
+    booted = await boot({
+      instances: [
+        { id: "bound", kind: "fine", config: {} },
+        { id: "other", kind: "fine", config: {} },
+      ],
+      kinds: { fine: () => connector(ok) },
+    });
+    const { db: stored } = booted;
+    await vi.waitFor(() =>
+      expect(readJob(stored, queued.job.id)).toMatchObject({
+        status: "held",
+        reason: "instance-kind-mismatch",
+        attempts: 0,
+      }),
+    );
+    expect((await api().sync("other")).body).toMatchObject({ connectorId: "other", created: 1 });
+  });
+
+  it("④ after the registration is corrected and the data folder started again, the held job is released and completes", async () => {
+    const db = openCanonicalDb(dir);
+    registerConnectorInstance(db, "bound", "jsonl-import");
+    const queued = registerJob(db, { kind: "connector-sync", target: "bound" });
+    if (!queued.registered) throw new Error("expected a new job");
+    db.close();
+    booted = await boot({
+      instances: [{ id: "bound", kind: "fine", config: {} }],
+      kinds: { fine: () => connector(ok) },
+    });
+    const first = booted.db;
+    await vi.waitFor(() =>
+      expect(readJob(first, queued.job.id)).toMatchObject({
+        status: "held",
+        reason: "instance-kind-mismatch",
+      }),
+    );
+    await booted.server.close();
+    booted.db.close();
+    booted = await boot({
+      instances: [{ id: "bound", kind: "jsonl-import", config: {} }],
+      kinds: { "jsonl-import": () => connector(ok) },
+    });
+    expect((await api().get(routes.connectors.path)).body).toMatchObject({
+      connectors: [{ id: "bound", kind: "jsonl-import", state: "ready" }],
+    });
+    const second = booted.db;
+    await vi.waitFor(() =>
+      expect(readJob(second, queued.job.id)).toMatchObject({ status: "succeeded" }),
+    );
   });
 });

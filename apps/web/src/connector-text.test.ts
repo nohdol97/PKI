@@ -68,4 +68,16 @@ describe("credential wording (I06-R14, I06-C11 ⑤)", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("words the kind mismatch with its cause and the way out, apart from the credential reasons (I05F-R7 ①)", () => {
+    const text = connectorReasonText({
+      id: "c",
+      kind: "k",
+      state: "unavailable",
+      reason: "instance-kind-mismatch",
+    });
+    expect(text).toContain("다시 시작");
+    expect(text).toContain("다른 종류");
+    expect(Object.values(CREDENTIAL_REASON_TEXT)).not.toContain(text);
+  });
 });

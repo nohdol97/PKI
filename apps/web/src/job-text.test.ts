@@ -56,6 +56,11 @@ describe("reasonText", () => {
     expect(reasonText("manager-not-ready")).toContain("준비");
   });
 
+  it("words the kind mismatch hold apart from the plain one (I05F-R7)", () => {
+    expect(reasonText("instance-kind-mismatch")).not.toBe("instance-kind-mismatch");
+    expect(reasonText("instance-kind-mismatch")).not.toBe(reasonText("connector-unavailable"));
+  });
+
   it("words the four credential holds apart from each other and from the plain one (I06-R10)", () => {
     const codes = [
       "credential-store-unavailable",
