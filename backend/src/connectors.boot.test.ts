@@ -3,7 +3,13 @@
 // a Connector here is a small double whose `initialize` and `healthCheck` the test holds.
 import type { Connector } from "@pki/contracts";
 import { ConnectorNotImplementedError } from "@pki/contracts";
-import { migrate, type SqlDriver } from "@pki/storage";
+import {
+  migrate,
+  readConnectorKind,
+  registerConnectorInstance,
+  registerJob,
+  type SqlDriver,
+} from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createConnectorSyncHandler, recheckInstances } from "./connector-sync-job.ts";
@@ -366,6 +372,94 @@ describe("connectors.recheck-fresh (I05-C11)", () => {
     lines.length = 0;
     await lateTurn();
     expect(objects).toHaveLength(7);
+    expect(events()).toEqual([]);
+  });
+});
+
+describe("connectors.boot-kind-mismatch (I05F-C1, C4)", () => {
+  /** A store double that records every question: a mismatched instance must ask none. */
+  const askedStore = () => {
+    const asked: string[] = [];
+    return {
+      asked,
+      store: {
+        read: async (name: string) => (asked.push(name), { state: "missing" as const }),
+        has: async (name: string) => (asked.push(name), "missing" as const),
+        deleteOthers: async () => "done" as const,
+      },
+    };
+  };
+  const BOUND = "stored-kind-canary";
+
+  function setup(extra: Record<string, ConnectorFactory> = {}) {
+    registerConnectorInstance(db, "bound", BOUND);
+    registerConnectorInstance(db, "same", "k");
+    const bad = made();
+    const fine = made();
+    const ok = made();
+    const objects = { bad, fine, ok };
+    const calls = { bad: 0, fine: 0, ok: 0 };
+    const kinds: Record<string, ConnectorFactory> = {
+      k: () => (calls.fine++, asConnector(fine)),
+      other: () => (calls.bad++, asConnector(bad)),
+      okk: () => (calls.ok++, asConnector(ok)),
+      ...extra,
+    };
+    return { objects, calls, kinds };
+  }
+  const instances = [
+    { id: "bound", kind: "other", config: {}, credentials: ["token"] },
+    { id: "same", kind: "k", config: {} },
+    { id: "fresh", kind: "okk", config: {} },
+  ];
+
+  it("① ② ③ ④ ⑥ the mismatched instance is unavailable with its reason, nothing is made, asked or initialized, the log names only the id", async () => {
+    const { calls, objects, kinds } = setup();
+    const { asked, store } = askedStore();
+    const manager = await createConnectorManager(db, instances, kinds, { secrets: store });
+    expect(manager.list()).toEqual([
+      { id: "bound", kind: "other", state: "unavailable", reason: "instance-kind-mismatch" },
+      { id: "same", kind: "k", state: "ready" },
+      { id: "fresh", kind: "okk", state: "ready" },
+    ]);
+    expect(calls.bad).toBe(0);
+    expect(objects.bad.initializeCalls).toBe(0);
+    expect(asked).toEqual([]);
+    expect(events()).toEqual([{ event: "connector-kind-mismatch", id: "bound" }]);
+    expect(lines.join("\n")).not.toContain(BOUND);
+    expect(JSON.stringify(manager.list())).not.toContain(BOUND);
+    expect(readConnectorKind(db, "bound")).toBe(BOUND);
+    expect(await manager.sync("bound")).toEqual({ error: "connector-unavailable" });
+  });
+
+  it("⑤ an unknown kind that is also bound elsewhere is unavailable without a reason and logs only connector-kind-unknown", async () => {
+    registerConnectorInstance(db, "bound", BOUND);
+    const manager = await createConnectorManager(db, [instance("bound", "nowhere")], {});
+    expect(manager.list()).toEqual([{ id: "bound", kind: "nowhere", state: "unavailable" }]);
+    expect(events()).toEqual([{ event: "connector-kind-unknown", id: "bound" }]);
+  });
+
+  it("C4 ① ② ③ a recheck, a rebuild and a recheck pass bring nothing back: no object, no store question, state and held job kept", async () => {
+    const { calls, kinds } = setup();
+    const { asked, store } = askedStore();
+    const manager = await createConnectorManager(db, instances, kinds, { secrets: store });
+    lines.length = 0;
+    const before = manager.list();
+    const queued = registerJob(db, { kind: "connector-sync", target: "bound" });
+    if (!queued.registered) throw new Error("expected a new job");
+    const handler = createConnectorSyncHandler({ db, manager: () => manager });
+    expect(
+      await handler(
+        { target: "bound", id: 1 } as never,
+        { signal: new AbortController().signal } as never,
+      ),
+    ).toEqual({ status: "held", reason: "instance-kind-mismatch" });
+    expect(await manager.recheck("bound")).toBe("unavailable");
+    expect((await manager.rebuild("bound"))?.rebuild).toBe("skipped");
+    await recheckInstances({ db, manager, runner: { wake: async () => {} } });
+    expect(calls.bad).toBe(0);
+    expect(asked).toEqual([]);
+    expect(manager.list()).toEqual(before);
     expect(events()).toEqual([]);
   });
 });

@@ -57,6 +57,8 @@ export const HELD_REASONS: Readonly<Record<string, HeldReason>> = {
   "unsupported-sdk-version": { events: [], collector: true },
   "connector-unavailable": { events: [], collector: true },
   "not-implemented": { events: [], collector: true },
+  // The stored data binds the instance id to another kind (I05F-R4): a start that finds it ready lifts it.
+  "instance-kind-mismatch": { events: [], collector: true },
   // The instance's credentials cannot be used (I06-R9): lifted per instance when it is ready again.
   "credential-store-unavailable": { events: [], collector: true },
   "credential-missing": { events: [], collector: true },

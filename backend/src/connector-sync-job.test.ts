@@ -304,6 +304,7 @@ describe("connector-sync.stop-codes (I03-R19, I01-R20): each end of a sync, by I
   it("names the held reason by the instance's own state, never by text", async () => {
     const reasons: [Partial<ConnectorSummary>, string][] = [
       [{ state: "unavailable", reason: "unsupported-sdk-version" }, "unsupported-sdk-version"],
+      [{ state: "unavailable", reason: "instance-kind-mismatch" }, "instance-kind-mismatch"],
       [{ state: "unavailable" }, "connector-unavailable"],
       [{ state: "not-implemented" }, "not-implemented"],
     ];
