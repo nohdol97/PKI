@@ -7,6 +7,7 @@ import {
   migrate,
   registerConnectorInstance,
   saveInsight,
+  userDecisions,
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
@@ -103,5 +104,25 @@ describe("wiki.render: a page per target, by the kind its type maps to", () => {
     expect(listWikiLog(db, { limit: 10 }).map((l) => [l.pageKey, l.action, l.added])).toEqual([
       [`projects/${item}`, "created", 1],
     ]);
+  });
+
+  it("takes the page's lineage from the facts it carries, and keeps a fact's own end apart from its superseders", () => {
+    const a = addSource(db, "a", "가 본문");
+    const authored = userDecisions.add(db, { kind: "item", type: "Project", name: "직접 쓴 항목" });
+    if (authored.status !== "applied") throw new Error("the user's item");
+    const old = addFact(db, authored.ref.id, "memo", "옛 값");
+    const next = addFact(db, authored.ref.id, "memo", "새 값");
+    cite(db, { factId: old }, a.id);
+    cite(db, { factId: next }, a.id);
+    db.run("UPDATE facts SET valid_at = '2031-01-01' WHERE id = ?", [next]);
+    db.run(
+      "INSERT INTO assertion_links (type, from_fact_id, to_fact_id, created_by, at) VALUES ('SUPERSEDES', ?, ?, 'rule', 'x')",
+      [next, old],
+    );
+    const page = renderWikiPages(db).find((p) => p.key === `projects/${authored.ref.id}`);
+    expect(page?.lineage).toEqual([{ sourceId: a.sourceId, version: a.version }]);
+    const claim = page?.document.claims.find((c) => c.ref.id === old);
+    expect(claim?.validUntil).toBeNull();
+    expect(claim?.supersededBy).toEqual([{ ref: { kind: "fact", id: next }, validAt: "2031-01-01" }]);
   });
 });

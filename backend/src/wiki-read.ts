@@ -9,6 +9,7 @@ import type { RouteRequest, RouteResponse } from "@pki/contracts";
 import type { WikiPageBody } from "@pki/knowledge-engine";
 import {
   addWikiNote,
+  effectiveUntil,
   isWikiStale,
   listStoredWikiPages,
   listWikiBacklinks,
@@ -18,6 +19,7 @@ import {
   readStoredWikiPage,
   removeWikiNote,
   setWikiHide,
+  unionOfVersions,
   type DerivativeRegistry,
   type SqlDriver,
   type StoredWikiPage,
@@ -135,14 +137,38 @@ export function createWikiReads(
       }
       const evidenceOk = shownEvidence(claims.flatMap((c) => c.evidence));
       const keptRef = (r: { kind: "fact" | "relation"; id: number }) => shownRows[r.kind].has(r.id);
+      // a link between two facts is shown only when the policy lets the two be put together (S02-R24)
+      const together = new Map<string, boolean>();
+      const combinable = (a: number, b: number): boolean => {
+        const k = `${Math.min(a, b)}:${Math.max(a, b)}`;
+        let ok = together.get(k);
+        if (ok === undefined) {
+          ok = registry.combinable(
+            db,
+            unionOfVersions(
+              registry.lineage(db, { kind: "fact", id: String(a) }),
+              registry.lineage(db, { kind: "fact", id: String(b) }),
+            ),
+          );
+          together.set(k, ok);
+        }
+        return ok;
+      };
       const kept = claims
         .filter((c) => keptRef(c.ref))
         .filter((c) => c.to === undefined || shownPage(c.to) !== undefined)
-        .map((c) => ({
+        .map(({ supersededBy, ...c }) => ({
           ...c,
+          // the end counts the superseders the caller may see, together with this fact, and no others
+          validUntil: effectiveUntil(
+            c.validUntil,
+            supersededBy
+              .filter((s) => gate.semanticShown("fact", s.ref.id) && combinable(c.ref.id, s.ref.id))
+              .map((s) => s.validAt),
+          ),
           evidence: c.evidence.filter((id) => evidenceOk.has(id)),
-          contradicts: c.contradicts.filter(keptRef),
-          supersedes: c.supersedes.filter(keptRef),
+          contradicts: c.contradicts.filter((r) => keptRef(r) && combinable(c.ref.id, r.id)),
+          supersedes: c.supersedes.filter((r) => keptRef(r) && combinable(c.ref.id, r.id)),
         }));
       const toTitle = (toKey: string) => shownPage(toKey)?.title;
       const linkKeys = [

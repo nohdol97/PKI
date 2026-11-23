@@ -6,12 +6,13 @@
 // like any item: its status only, no check result (S03-R19).
 import { createHash } from "node:crypto";
 import {
-  effectiveUntil,
   entityGroups,
   lineageOfItems,
   linksOfFacts,
   listEvidence,
+  rowLineage,
   supersedingStands,
+  unionOfVersions,
   type SourceVersionRef,
   type SqlDriver,
   type WikiLinkInput,
@@ -72,7 +73,10 @@ export interface WikiClaim {
   status: string;
   epistemic: string;
   validAt: string | null;
+  /** The row's own end; the effective end is worked out at read from the superseders the caller sees (S02-R24 1). */
   validUntil: string | null;
+  /** The facts that stand as superseding this one, with the start of each: the read keeps those it may show. */
+  supersededBy: { ref: ClaimRef; validAt: string | null }[];
   evidence: number[];
   contradicts: ClaimRef[];
   supersedes: ClaimRef[];
@@ -161,11 +165,6 @@ export function renderWikiPages(db: SqlDriver, only?: ReadonlySet<string>): Rend
       ...facts.map((f): WikiClaim => {
         const id = f.id as number;
         const superseders = links.filter((l) => l.toFactId === id && supersedingStands(db, l));
-        const starts = superseders.map(
-          (l) =>
-            (db.all("SELECT valid_at FROM facts WHERE id = ?", [l.fromFactId])[0]?.valid_at ??
-              null) as string | null,
-        );
         return {
           ref: refOf(id),
           kind: f.kind as string,
@@ -174,7 +173,12 @@ export function renderWikiPages(db: SqlDriver, only?: ReadonlySet<string>): Rend
           status: f.status as string,
           epistemic: f.epistemic as string,
           validAt: f.valid_at as string | null,
-          validUntil: effectiveUntil(f.valid_until as string | null, starts),
+          validUntil: f.valid_until as string | null,
+          supersededBy: superseders.map((l) => ({
+            ref: refOf(l.fromFactId),
+            validAt: (db.all("SELECT valid_at FROM facts WHERE id = ?", [l.fromFactId])[0]
+              ?.valid_at ?? null) as string | null,
+          })),
           evidence: listEvidence(db, { factId: id })
             .filter((e) => e.current)
             .map((e) => e.id),
@@ -198,6 +202,7 @@ export function renderWikiPages(db: SqlDriver, only?: ReadonlySet<string>): Rend
           epistemic: r.epistemic as string,
           validAt: r.valid_at as string | null,
           validUntil: r.valid_until as string | null,
+          supersededBy: [],
           evidence: listEvidence(db, { relationId: id })
             .filter((e) => e.current)
             .map((e) => e.id),
@@ -217,7 +222,13 @@ export function renderWikiPages(db: SqlDriver, only?: ReadonlySet<string>): Rend
         kind: pageKindOfType(root.type as string),
         target: String(rootId),
         title: root.name as string,
-        lineage: lineageOfItems(db, memberIds),
+        // the sources of every row the body carries: an item the user wrote has none of its own, but the
+        // facts and relations extraction attached to it do (a deletion must reach the page)
+        lineage: unionOfVersions(
+          lineageOfItems(db, memberIds),
+          ...facts.map((f) => rowLineage(db, { kind: "fact", id: f.id as number })),
+          ...relations.map((r) => rowLineage(db, { kind: "relation", id: r.id as number })),
+        ),
         links: pageLinks,
       },
       { members, claims },
