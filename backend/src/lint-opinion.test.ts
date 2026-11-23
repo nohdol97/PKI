@@ -6,6 +6,8 @@ import {
   commitDerived,
   defaultScopePolicy,
   insertItem,
+  lineageHash,
+  lineageOfFinding,
   migrate,
   registerConnectorInstance,
   saveFact,
@@ -67,11 +69,19 @@ describe("lint.opinion: the list shows the LLM verdict (K02-R17)", () => {
     );
     expect(lint.list().findings[0]).not.toHaveProperty("opinion");
 
-    db.run("UPDATE lint_findings SET opinion = ?", [
+    const hash = lineageHash(
+      lineageOfFinding(db, db.all("SELECT id FROM lint_findings")[0]?.id as number),
+    );
+    db.run("UPDATE lint_findings SET opinion = ?, opinion_lineage_hash = ?", [
       JSON.stringify({ verdict: "related", sourceId: 1, version: 1, start: 0, end: 2 }),
+      hash,
     ]);
     const shown = lint.list().findings[0];
     expect(shown?.opinion).toBe("related");
     expect(JSON.stringify(shown)).not.toContain("start");
+
+    // an opinion asked at another lineage than the finding has now is not shown (K02-D19)
+    db.run("UPDATE lint_findings SET opinion_lineage_hash = 'other'");
+    expect(lint.list().findings[0]).not.toHaveProperty("opinion");
   });
 });
