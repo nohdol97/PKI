@@ -83,6 +83,7 @@ test("wiki.e2e: open a page, its claim and evidence, follow a link to the backli
   await expect(
     page.getByRole("list", { name: "이 페이지를 가리키는 페이지" }).getByRole("button", {
       name: PROJECT,
+      exact: true, // the Insight page that names both ends is a backlink too
     }),
   ).toBeVisible();
 

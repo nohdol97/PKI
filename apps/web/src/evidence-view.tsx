@@ -141,7 +141,7 @@ export function evidenceReducer(state: EvidenceState, action: EvidenceAction): E
 }
 
 /** Moves keyboard focus to the heading of the section the latest open showed. */
-function useFocusOn(opens: number, shown: boolean) {
+export function useFocusOn(opens: number, shown: boolean) {
   const ref = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (opens > 0 && shown) ref.current?.focus();

@@ -82,6 +82,7 @@ describe("words for kinds, statuses, periods", () => {
   it("words the kinds and statuses, and an unknown kind as its code", () => {
     expect(kindText("connector-sync")).toBe("동기화");
     expect(kindText("projection-rebuild")).toBe("투영 재구축");
+    expect(kindText("wiki-build")).toBe("위키 만들기");
     expect(kindText("future-kind")).toBe("future-kind");
     expect(statusText("dead_letter")).toBe("포기");
     expect(statusText("held")).toBe("보류");
