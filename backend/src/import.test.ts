@@ -32,8 +32,10 @@ const GOLDEN_DIR = resolve(import.meta.dirname, "../../eval/golden/sources");
 const CANARY = "CANARY-import-text-5530";
 
 // The ordering cases open hundreds of throwaway DBs. Migrating a fresh file DB costs ~200 ms
-// (fsync-bound); a copy of one already-migrated directory costs ~20 ms. Every case still opens
-// through the product's `openCanonicalDb`, so nothing but the migration time is shared.
+// (fsync-bound); a copy of one already-migrated directory costs ~20 ms. Every copied case (`caseDb`)
+// still opens through the product's `openCanonicalDb`. Besides the migration, the copied cases share
+// the template's random identity key and the deletion ledger beside it (which records that key),
+// so the same identity hashes to the same value in each of them. The `beforeEach` DB is fresh.
 let templateRoot: string;
 let templateDir: string;
 beforeAll(() => {
