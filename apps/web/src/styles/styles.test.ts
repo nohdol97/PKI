@@ -69,7 +69,9 @@ describe("UI01-C1 styles are files, tokens are in one file", () => {
   it("defines every token name, and every var(--x) a stylesheet uses", () => {
     expect(TOKEN_NAMES.filter((n) => !defined(n))).toEqual([]);
     const used = new Set(
-      stylesheets.flatMap(({ css }) => [...css.matchAll(/var\(\s*--([\w-]+)/g)].map((m) => m[1]!)),
+      stylesheets.flatMap(({ css }) =>
+        [...css.matchAll(/var\(\s*--([\w-]+)/g)].map((m) => m[1] ?? ""),
+      ),
     );
     expect([...used].filter((n) => !defined(n))).toEqual([]);
   });
@@ -111,24 +113,26 @@ describe("UI01-C1 styles are files, tokens are in one file", () => {
     );
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(main.indexOf("./screens.css")).toBeGreaterThan(order[3]!);
+    expect(main.indexOf("./screens.css")).toBeGreaterThan(order[3] ?? Infinity);
   });
 });
 
 const channel = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 const luminance = (hex: string) => {
   const n = Number.parseInt(hex.slice(1), 16);
-  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => channel(v / 255));
-  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  const [r = 0, g = 0, b = 0] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) =>
+    channel(v / 255),
+  );
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 };
 const contrast = (a: string, b: string) => {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi! + 0.05) / (lo! + 0.05);
+  const [hi = 0, lo = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
 };
 const colour = (name: string) => {
   const v = value(name);
   expect(v, `--${name}`).toMatch(/^#[0-9a-fA-F]{6}$/);
-  return v!;
+  return v ?? "";
 };
 
 describe("UI01-C2 contrast of the token values", () => {
