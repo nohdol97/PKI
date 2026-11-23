@@ -15,6 +15,7 @@ import {
   listInsightUserInputs,
   listSemanticFacts,
   listSemanticItems,
+  listSemanticMembers,
   listSemanticRelations,
   listSources,
   readEvidenceSource,
@@ -193,12 +194,19 @@ export function createReadGate(
     },
     semantic() {
       // one more than the limit tells whether the list was cut
+      const rowsOf = <T extends { id: number }>(item: T) => ({
+        ...item,
+        facts: only(listSemanticFacts(db, item.id), "fact", (f) => f.id, "display"),
+        relations: only(listSemanticRelations(db, item.id), "relation", (r) => r.id, "display"),
+      });
+      // a member is listed under its representative, not as an entry of its own (S02-R13)
       const items = filled((n) => listSemanticItems(db, n), "item", "display", semanticLimit + 1);
       return {
         items: items.slice(0, semanticLimit).map((item) => ({
-          ...item,
-          facts: only(listSemanticFacts(db, item.id), "fact", (f) => f.id, "display"),
-          relations: only(listSemanticRelations(db, item.id), "relation", (r) => r.id, "display"),
+          ...rowsOf(item),
+          members: only(listSemanticMembers(db, item.id), "item", (m) => m.id, "display").map(
+            rowsOf,
+          ),
         })),
         truncated: items.length > semanticLimit,
       };

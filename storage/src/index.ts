@@ -235,6 +235,7 @@ export { rowLineage, unionOfVersions } from "./row-lineage.ts";
 export {
   listSemanticFacts,
   listSemanticItems,
+  listSemanticMembers,
   listSemanticRelations,
   itemsOfEntry,
   readSemanticHistory,
@@ -242,6 +243,7 @@ export {
   type SemanticFactView,
   type SemanticHistoryLine,
   type SemanticItemView,
+  type SemanticMemberView,
   type SemanticRelationView,
   type SemanticRowView,
 } from "./semantic-view.ts";
