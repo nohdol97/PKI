@@ -8,6 +8,8 @@ import {
   entityGroups,
   INVALID,
   linksOfFacts,
+  OPPORTUNITY_RULE,
+  readInsight,
   readItem,
   supersedingStands,
   validRow,
@@ -221,11 +223,63 @@ export const importantChangeRule: InsightRule = {
   },
 };
 
+/** An `opportunity` is at most this confident (P01-D18), so it is always kept out of automatic notification. */
+export const OPPORTUNITY_CONFIDENCE_CAP = 40;
+
+/**
+ * 기회 (P01-D18): the interpretation job proposes it and writes it with the parent's evidence and fact lines; this
+ * rule only keeps it. It stands while an active Insight a rule judged on the same key still has the fact lines and
+ * input ids the opportunity copied; otherwise it is resolved, and a resolved row stays so (its text is gone).
+ * Last in the list: it reads the rows the other rules wrote in the same run.
+ */
+export const opportunityRule: InsightRule = {
+  type: OPPORTUNITY_RULE,
+  candidates: () => [],
+  evaluate(db, key): Desired {
+    const stored = readInsight(db, key);
+    if (stored?.state !== "active" || stored.summary === null) return { state: "resolved" };
+    const parent = db
+      .all(
+        `SELECT rule FROM insights WHERE x_item_id = ? AND y_item_id = ? AND state = 'active' AND rule <> ? ORDER BY id`,
+        [key.xItemId, key.yItemId, OPPORTUNITY_RULE],
+      )
+      .map((r) => readInsight(db, { ...key, rule: r.rule as string }))
+      .find(
+        (p) =>
+          p !== undefined &&
+          sameValues(p.factLines, stored.factLines) &&
+          sameValues(p.evidenceIds, stored.evidenceIds) &&
+          sameValues(p.linkIds, stored.linkIds) &&
+          sameValues(
+            p.userInputs.map((u) => `${u.kind}:${u.id}`),
+            stored.userInputs.map((u) => `${u.kind}:${u.id}`),
+          ),
+      );
+    if (!parent) return { state: "resolved" };
+    return {
+      state: "active",
+      summary: stored.summary,
+      factLines: stored.factLines,
+      reasoningSummary: stored.reasoningSummary ?? "",
+      evidenceIds: stored.evidenceIds,
+      userInputs: stored.userInputs,
+      linkIds: stored.linkIds,
+      usedRows: [],
+      urgencyDate: stored.urgencyDate,
+      confidenceCap: Math.min(OPPORTUNITY_CONFIDENCE_CAP, parent.confidence ?? 100),
+    };
+  },
+};
+
+const sameValues = (a: readonly (string | number)[], b: readonly (string | number)[]) =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
+
 export const INSIGHT_RULES: readonly InsightRule[] = [
   dependencyDelayRule,
   scheduleConflictRule,
   conflictRule,
   importantChangeRule,
+  opportunityRule,
 ];
 
 /** Judges every registered rule again over the items and their merge groups (see `runInsightRules`). */

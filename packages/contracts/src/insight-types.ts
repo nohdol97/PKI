@@ -76,7 +76,8 @@ export const INSIGHT_TYPES: readonly InsightTypeInfo[] = [
   unsupported("open_issue", "미해결 이슈", "code", "이슈의 상태 종류가 없다"),
   unsupported("similar_resolution", "유사 해결", "code", "유사도 검색이 없다"),
   unsupported("related_document", "관련 문서", "code", "검색이 없다"),
-  unsupported("opportunity", "기회", "llm", "LLM 해석 작업이 없다"),
+  // judged by the interpretation job (P01-T04, D19): supported although it appears only while `insight.interpret` is on
+  { ...supported("opportunity", "기회", 50, 50), judgedBy: "llm" },
   unsupported(
     "policy_change",
     "정책 변화",

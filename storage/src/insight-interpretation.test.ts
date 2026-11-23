@@ -11,7 +11,7 @@ import {
   writeInsightInterpretation,
 } from "./insight-interpretation.ts";
 import { INSIGHT_INTERPRET_KIND } from "./job-kinds.ts";
-import { saveInsight, type InsightKey } from "./insights.ts";
+import { saveInsight, type InsightKey, type StoredInsight } from "./insights.ts";
 import { addEvidence, insertItem, saveFact, type KnowledgeAttributes } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
@@ -50,11 +50,12 @@ afterEach(() => {
 });
 
 const stored = (id: number) => readInsightById(db, id);
+const basisOf = (id: number) => insightBasis(stored(id) as StoredInsight);
 
 describe("writeInsightInterpretation (the guard)", () => {
   it("writes only while the Insight is active and still has the basis the job was asked at", () => {
     const id = saveInsight(db, key, active("A 위험"));
-    const basis = insightBasis(stored(id)!);
+    const basis = basisOf(id);
     expect(writeInsightInterpretation(db, id, basis, interpretation)).toBe(true);
     expect(stored(id)?.interpretation).toEqual(interpretation);
 
@@ -66,7 +67,7 @@ describe("writeInsightInterpretation (the guard)", () => {
 
   it("refuses a resolved Insight", () => {
     const id = saveInsight(db, key, active("A 위험"));
-    const basis = insightBasis(stored(id)!);
+    const basis = basisOf(id);
     saveInsight(db, key, { state: "resolved" });
     expect(writeInsightInterpretation(db, id, basis, interpretation)).toBe(false);
     expect(stored(id)?.interpretation).toBeNull();
@@ -76,11 +77,11 @@ describe("writeInsightInterpretation (the guard)", () => {
 describe("saveInsight clears the interpretation (D13)", () => {
   it("empties the three columns on an update and on resolving", () => {
     const id = saveInsight(db, key, active("A 위험"));
-    writeInsightInterpretation(db, id, insightBasis(stored(id)!), interpretation);
+    writeInsightInterpretation(db, id, basisOf(id), interpretation);
     saveInsight(db, key, active("A 위험 변경"));
     expect(stored(id)?.interpretation).toBeNull();
 
-    writeInsightInterpretation(db, id, insightBasis(stored(id)!), interpretation);
+    writeInsightInterpretation(db, id, basisOf(id), interpretation);
     saveInsight(db, key, { state: "resolved" });
     expect(
       db.all("SELECT llm_reasoning_summary, llm_impact, llm_actionability FROM insights"),
@@ -101,7 +102,7 @@ describe("requestInsightInterpretations (D14, D15)", () => {
     const id = saveInsight(db, key, active("A 위험"));
     saveInsight(db, { ...key, rule: "opportunity" }, active("기회"));
     expect(setInsightInterpret(db, true, new Date())).toBe(1);
-    expect(jobs()).toEqual([{ target: `${id}#${insightBasis(stored(id)!)}` }]);
+    expect(jobs()).toEqual([{ target: `${id}#${basisOf(id)}` }]);
     expect(requestInsightInterpretations(db)).toBe(0);
   });
 });

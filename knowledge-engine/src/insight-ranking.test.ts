@@ -39,4 +39,12 @@ describe("rankInsight", () => {
       rankInsight({ ...base, confidence: 90 }, NOW).score,
     );
   });
+
+  it("takes an interpretation's impact and actionability over the type's defaults (P01-R4, D12)", () => {
+    const plain = rankInsight(base, NOW);
+    const read = rankInsight({ ...base, impact: 10, actionability: 90 }, NOW);
+    expect([read.impact, read.actionability]).toEqual([10, 90]);
+    expect(read.score).not.toBe(plain.score);
+    expect(rankInsight({ ...base, impact: null, actionability: null }, NOW)).toEqual(plain);
+  });
 });

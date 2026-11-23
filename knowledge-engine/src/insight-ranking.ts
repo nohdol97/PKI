@@ -13,6 +13,9 @@ export interface RankingSignals {
   changedAt: string | null;
   /** how many user-input rows the Insight used */
   userInputCount: number;
+  /** An interpretation's 0..100 numbers (P01-R4, D12): when present they replace the type's defaults. */
+  impact?: number | null;
+  actionability?: number | null;
 }
 
 export interface InsightRanking {
@@ -46,7 +49,7 @@ export function rankInsight(signals: RankingSignals, now: Date): InsightRanking 
   const since = signals.changedAt === null ? NaN : Date.parse(signals.changedAt);
   const axes = {
     relevance: signals.userInputCount > 0 ? 100 : 50,
-    impact: info?.impact ?? 50,
+    impact: signals.impact ?? info?.impact ?? 50,
     urgency: Number.isNaN(until)
       ? 30
       : bucket(
@@ -70,7 +73,7 @@ export function rankInsight(signals: RankingSignals, now: Date): InsightRanking 
           10,
         ),
     confidence: signals.confidence ?? 50,
-    actionability: info?.actionability ?? 50,
+    actionability: signals.actionability ?? info?.actionability ?? 50,
   };
   const score = Math.round(
     (Object.keys(RANK_WEIGHTS) as (keyof typeof RANK_WEIGHTS)[]).reduce(

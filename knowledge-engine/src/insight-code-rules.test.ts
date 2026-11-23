@@ -125,7 +125,13 @@ const quotesOf = (evidenceIds: number[]) =>
     .map((id) => db.all("SELECT quote FROM evidence WHERE id = ?", [id])[0]?.quote as string)
     .sort();
 
-const supported = Object.entries(fixture.types).filter(([, e]) => e.support === "supported");
+// an llm-judged type has no code scenario: knowledge-engine/src/insight-interpret.test.ts proves it
+const supported = Object.entries(fixture.types).filter(
+  ([, e]) => e.support === "supported" && e.scenario,
+);
+const supportedNames = Object.entries(fixture.types)
+  .filter(([, e]) => e.support === "supported")
+  .map(([type]) => type);
 
 describe("the code rules over the fixture scenarios (P01-C1a, C3a)", () => {
   it.each(supported)(
@@ -160,6 +166,11 @@ describe("the type table and the fixture agree (P01-C1b)", () => {
     expect(Object.keys(fixture.types)).toEqual([...INSIGHT_TYPE_NAMES]);
     for (const t of INSIGHT_TYPES) expect(fixture.types[t.type]?.support).toBe(t.status);
     expect(INSIGHT_RULES.map((r) => r.type).sort()).toEqual(
+      INSIGHT_TYPES.filter((t) => t.status === "supported")
+        .map((t) => t.type)
+        .sort(),
+    );
+    expect(supportedNames.sort()).toEqual(
       INSIGHT_TYPES.filter((t) => t.status === "supported")
         .map((t) => t.type)
         .sort(),
