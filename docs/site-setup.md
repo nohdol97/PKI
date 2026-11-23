@@ -53,7 +53,7 @@
 설정이 아닌 것:
 
 - **Embedding 모델 준비**: 설정 값이 아니라 홈의 "Embedding 모델 준비"에서 보내는 준비 요청이다(`POST /api/embedding/prepare`. 로컬 팩 폴더의 절대 경로, 또는 확인 창에서 승인한 내려받기). 무엇을 준비했는지는 저장하지 않으므로 앱을 다시 켜면 "모델 없음"이고, 같은 요청이 설치된 파일을 네트워크 없이 해시 확인만으로 다시 올린다. 자동으로 내려받지 않는다(S09).
-- **자동 업데이트 주소**: 아직 없다. 업데이트는 H02(#33)가 정하며 그때 이 표에 키를 더한다(S12).
+- **자동 업데이트**: 검증 코드(`apps/desktop/src/update.ts`: 서명·버전·해시)는 있고, 채널(받아 오기·설치)과 서명 공개 키는 배포처가 넣는다. 공용 채널은 `미구현, 배포처 후속`으로 실패하며 셸은 업데이트를 부르지 않는다. 이 표에 더할 키는 없다(S12, S47).
 
 #### 로컬 자료 한도(`localFiles.*`)
 
@@ -72,7 +72,7 @@
 
 ## 배포처 설정 체크리스트
 
-항목마다 무엇을 하는지, 어떤 종류의 값이 필요한지, 끝났다는 것을 무엇으로 확인하는지 적었다. 번호(`S01` 등)는 구현 spec의 비목표 항목과 일대일로 대응한다([V01](specs/2026-11-21-V01-vertical-skeleton.md) S01~S13, [V02](specs/2026-11-21-V02-vertical-slice.md) S14~S15, [I02-A](specs/2026-11-21-I02-document-normalization.md) S16~S17, [I01](specs/2026-11-21-I01-connector-sdk.md) S18, [I03](specs/2026-11-21-I03-persistent-queue.md) S19~S20, [I04](specs/2026-11-21-I04-invalidation.md) S21~S22, [I05](specs/2026-11-22-I05-site-connector-registration.md) S26~S27, [I06](specs/2026-11-22-I06-connector-credentials.md) S28~S29, [I07](specs/2026-11-22-I07-installed-scopes-file.md) S30~S31). 이어서 [S01](specs/2026-11-22-S01-semantic-registry.md) S32. 이어서 [S02](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) S33. 이어서 [S03](specs/2026-11-22-S03-analytical-semantic.md) S34. 이어서 [K01](specs/2026-11-23-K01-wiki-projection.md) S35. 이어서 [X01](specs/2026-11-23-X01-retrieval-qa.md) S37~S41(S36은 P03). 이어서 [I02-B](specs/2026-11-22-I02-local-file-import.md) S23~S25. 이어서 [X02](specs/2026-11-23-X02-explore-ux.md) S42. 이어서 [P02](specs/2026-11-23-P02-notifications-digest-timeline.md) S44. 이어서 [X02B](specs/2026-11-24-X02B-explore-curation.md) S45.
+항목마다 무엇을 하는지, 어떤 종류의 값이 필요한지, 끝났다는 것을 무엇으로 확인하는지 적었다. 번호(`S01` 등)는 구현 spec의 비목표 항목과 일대일로 대응한다([V01](specs/2026-11-21-V01-vertical-skeleton.md) S01~S13, [V02](specs/2026-11-21-V02-vertical-slice.md) S14~S15, [I02-A](specs/2026-11-21-I02-document-normalization.md) S16~S17, [I01](specs/2026-11-21-I01-connector-sdk.md) S18, [I03](specs/2026-11-21-I03-persistent-queue.md) S19~S20, [I04](specs/2026-11-21-I04-invalidation.md) S21~S22, [I05](specs/2026-11-22-I05-site-connector-registration.md) S26~S27, [I06](specs/2026-11-22-I06-connector-credentials.md) S28~S29, [I07](specs/2026-11-22-I07-installed-scopes-file.md) S30~S31). 이어서 [S01](specs/2026-11-22-S01-semantic-registry.md) S32. 이어서 [S02](specs/2026-11-22-S02-entity-resolution-temporal-graph.md) S33. 이어서 [S03](specs/2026-11-22-S03-analytical-semantic.md) S34. 이어서 [K01](specs/2026-11-23-K01-wiki-projection.md) S35. 이어서 [X01](specs/2026-11-23-X01-retrieval-qa.md) S37~S41(S36은 P03). 이어서 [I02-B](specs/2026-11-22-I02-local-file-import.md) S23~S25. 이어서 [X02](specs/2026-11-23-X02-explore-ux.md) S42. 이어서 [P02](specs/2026-11-23-P02-notifications-digest-timeline.md) S44. 이어서 [X02B](specs/2026-11-24-X02B-explore-curation.md) S45. 이어서 [H02 공용 범위](specs/2026-11-24-H02-common.md) S46~S48.
 
 ### 수집
 
@@ -103,6 +103,10 @@
 - [ ] **S11 저장 데이터 보호 확인.** 제품을 쓸 PC에 OS 디스크 암호화가 적용되는지, 앱이 OS 자격 증명 저장소를 쓸 수 있는지, 앱의 데이터 디렉터리가 다른 PC로 따라다니지 않는 위치인지 확인한다. 필요한 것: PC 보안 정책의 해당 항목. 확인: 앱에 API 키를 저장했다가 재시작 뒤 다시 쓸 수 있고(로밍 프로필 동기화 뒤에도. ADR 0010 "지켜볼 것"), 그 키의 평문이 앱의 어떤 파일에도 남아 있지 않다(`secrets.json`에는 암호문만). **디스크 암호화가 확인되지 않은 PC에는 실제 업무 데이터를 넣지 않는다**([ADR 0010](adr/0010-encryption-at-rest.md), A16, A19).
 - [ ] **S12 서명, 배포 채널, 업데이트.** 설치 파일과 그 안의 네이티브 모듈을 무엇으로 서명할지, 사용자에게 어떻게 배포할지, 업데이트를 어디서 받게 할지 정한다. 필요한 것: 서명 주체, 내부 배포 방법, 업데이트를 둘 주소(없으면 자동 업데이트를 끈다). 확인: R04-C3의 기록. 설치와 실행에서 Windows의 차단 동작을 관찰해 적는다. 자동 업데이트를 실제로 돌려 보는 확인은 R04의 기준에 없으며 H02(#33)에서 한다(A14, A15).
 - [ ] **S13 엔진과 저장소의 실행 비교.** R03의 절차대로 엔진 후보와 저장소를 합성 입력으로 실행해 비교한다. 벡터 색인의 실제 구현 후보(sqlite-vec)가 Windows에서 로드되는지, 정본 SQLite가 갑작스러운 종료를 견디는지도 여기서 확인한다. Phase 1의 제품에는 벡터 색인 구현이 들어 있지 않다. 필요한 것: 실행 환경과 R05가 고정한 측정 기준. 확인: R03-C1~C4의 실행 기록. 결과로 [ADR 0002](adr/0002-authority-in-product-records.md), [0003](adr/0003-phase1-without-engine.md), [0004](adr/0004-embedded-storage.md), [0011](adr/0011-sidecar-language.md), [0013](adr/0013-failure-recovery.md)을 R07에서 확정하거나 고친다(A08, A09, A10, A20).
+
+- [ ] **S46 Windows 11 설치본의 수명주기를 표준 사용자로 실행해 기록.** 설치·업데이트·제거, 트레이와 알림(AppUserModelID 포함), 단일 실행, 정상 종료, 충돌 뒤 재시작, 데이터 잠금의 Windows 동작, **트레이의 자동 시작 항목이 로그인 뒤 실제로 PKI를 띄우는지**, **절전·최대 절전에서 깨어날 때 `resume`이 와서 백엔드가 점검을 앞당기는지**(S19와 함께)를 확인한다. 공용 저장소는 가짜 Electron 객체와 macOS 개발 PC에서만 시험했고 `app.setLoginItemSettings`가 이 Electron 버전의 Windows에서 표준 사용자 권한으로 되는지도 확인하지 못했다. 필요한 것: S10의 설치 파일과 깨끗한 Windows 11, 표준 사용자 계정. 확인: 이슈 H02-C1의 실행 기록([H02 spec](specs/2026-11-24-H02-common.md)).
+- [ ] **S47 업데이트 채널과 서명.** 채널 어댑터(`UpdateChannel`: manifest·서명 받아 오기, 파일 받기, 설치 시작)를 구현하고 `run()`에서 `runUpdate`를 부른다. 필요한 것: 업데이트를 둘 주소, 서명 키 보관(공개 키를 빌드에 넣는 자리), 릴리스 버전을 매기는 절차(지금 앱 폴더의 `package.json`에는 버전이 없다), 설치 실패 때의 되돌림, electron-updater를 쓸지 여부(쓰면 게시자 이름 검사와 manifest 서명이 겹치는 두 층이 된다). 공용 채널은 `미구현, 배포처 후속`으로 실패한다. 확인: 서명이 틀리거나 낮은 버전이거나 해시가 다른 업데이트가 설치 단계에 닿지 않고, 정상 업데이트가 표준 사용자로 설치되는 실행 기록(S12, 이슈 H02-C2).
+- [ ] **S48 설치 프로그램 연결과 SBOM 게시.** 제거 프로그램이 데이터 보존·삭제를 물어 그 답으로 셸을 `--pki-uninstall-data=keep|delete`로 부르게 하고(종료 코드 1이면 지워지지 않은 것이므로 사용자에게 알리고, 기본은 보존), userData와 레지스트리 Run 키의 잔여를 확인한다(R04의 `06` 스크립트). SBOM(`sbom.cdx.json`)은 **Windows에서 빌드한 것**을 게시한다(네이티브 패키지는 빌드한 OS의 것만 들어간다). 번들한 `.dll`·`.node`의 서명도 확인한다. 필요한 것: S10·S12의 패키저 설정, SBOM을 둘 위치. 확인: 설치 파일로 제거할 때 선택대로 데이터 폴더가 남거나 없어지는 기록, 게시한 SBOM이 설치본의 외부 소프트웨어를 모두 담는다는 대조(이슈 H02-C2, C3).
 
 ### 수직 흐름
 

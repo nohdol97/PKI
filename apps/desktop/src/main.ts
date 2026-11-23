@@ -31,7 +31,7 @@ import {
 import { dataDirectory } from "@pki/storage";
 import { autostartMenuItem } from "./autostart.ts";
 import { DATA_IN_USE, lockDataDirectory, type DataLock } from "./data-lock.ts";
-import { removeUserData } from "./data-removal.ts";
+import { removeUserData, UNINSTALL_SWITCH } from "./data-removal.ts";
 import { url as inspectorUrl } from "node:inspector";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -262,8 +262,6 @@ function takeDataLock(): boolean {
   if (dataLock === undefined) console.error(DATA_IN_USE);
   return dataLock !== undefined;
 }
-
-const UNINSTALL_SWITCH = "pki-uninstall-data";
 
 /** The installer's call (H02A-R6): decide about the data folder, print, exit. No window, no backend. */
 function uninstallData(): void {

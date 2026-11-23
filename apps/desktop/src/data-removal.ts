@@ -7,6 +7,9 @@ import { lstatSync, readdirSync, rmdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_IN_USE, DATA_LOCK_FILE, type DataLock } from "./data-lock.ts";
 
+/** The shell switch the installer passes (without the leading dashes). */
+export const UNINSTALL_SWITCH = "pki-uninstall-data";
+
 /** Files whose presence says this folder is a PKI data folder. */
 const MARKERS = ["pki.sqlite", DATA_LOCK_FILE];
 
