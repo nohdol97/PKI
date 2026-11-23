@@ -12,6 +12,7 @@
 // Nothing here writes to the store; the log names a count and a state, never text or an id (R15).
 import type { AskEvent, AskRequest } from "@pki/contracts";
 import {
+  feedbackPreference,
   locateQuote,
   MAX_EXTRACT_CODE_POINTS,
   retrieve,
@@ -62,7 +63,12 @@ export async function* ask(
     registry,
     request.question,
     { connectorIds: request.connectorIds, from: request.from, to: request.to },
-    { enabled: deps.enabled, vector: deps.vector, signal },
+    {
+      enabled: deps.enabled,
+      vector: deps.vector,
+      signal,
+      preference: feedbackPreference(db, registry),
+    },
   );
   if (signal?.aborted) return;
 

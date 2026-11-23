@@ -96,18 +96,41 @@ export async function retrieve(
   const items = itemBased ? matchItems(reading) : [];
   const wants = routeQuestion(question, items.length);
 
+  // X01-R20, R12: one request-scoped check for every list. A version is judged once; the policy comes first, then
+  // the conditions, and only what passes both may take a slot of a list. `filteredOut` holds the visible versions
+  // the conditions removed (R23).
+  const heads = new Map<number, VersionHead>();
+  const admitted = new Map<number, boolean>();
+  const filteredOut = new Set<number>();
+  const admit = (ids: readonly number[]): number[] => {
+    const fresh = [...new Set(ids)].filter((id) => !admitted.has(id));
+    if (fresh.length > 0) {
+      for (const h of readVersionHeads(db, fresh)) heads.set(h.id, h);
+      const known = fresh.filter((id) => heads.has(id));
+      const searchable = shownVersions(db, registry, known);
+      const visible = known.filter((id) => searchable.has(id));
+      const passing = new Set(
+        hasConditions(conditions) ? filterByConditions(db, visible, conditions) : visible,
+      );
+      for (const id of fresh) admitted.set(id, passing.has(id));
+      for (const id of visible) if (!passing.has(id)) filteredOut.add(id);
+    }
+    return ids.filter((id) => admitted.get(id) === true);
+  };
+
   const route = Object.fromEntries(STRATEGIES.map((s) => [s, { status: "off" }])) as Route;
   const lists: { strategy: StrategyName; ids: number[] }[] = [];
   const ran = (strategy: StrategyName, ids: number[]) => {
-    lists.push({ strategy, ids });
-    route[strategy] = { status: "used", count: ids.length };
+    const kept = admit(ids).slice(0, STRATEGY_LIST_LIMIT);
+    lists.push({ strategy, ids: kept });
+    route[strategy] = { status: "used", count: kept.length };
   };
   const skipped = (strategy: StrategyName) => {
     route[strategy] = { status: "skipped" };
   };
 
   const useConcept = enabled.has("concept") && wants.concept;
-  ran("keyword", keywordIds(reading, useConcept ? conceptQueries(reading, items) : []));
+  ran("keyword", keywordIds(reading, useConcept ? conceptQueries(reading, items) : [], admit));
   if (enabled.has("concept")) {
     if (useConcept) ran("concept", conceptIds(reading, items));
     else skipped("concept");
@@ -130,32 +153,9 @@ export async function retrieve(
     else route.vector = outcome;
   }
 
-  if (hasConditions(conditions)) {
-    let removed = 0;
-    for (const list of lists) {
-      const kept = filterByConditions(db, list.ids, conditions);
-      removed += list.ids.length - kept.length;
-      list.ids = kept;
-      route[list.strategy] = { status: "used", count: kept.length };
-    }
-    route.metadata = { status: "used", count: removed };
-  } else {
-    skipped("metadata");
-  }
+  if (hasConditions(conditions)) route.metadata = { status: "used", count: filteredOut.size };
+  else skipped("metadata");
 
-  const heads = new Map(
-    readVersionHeads(db, [...new Set(lists.flatMap((l) => l.ids))]).map((h) => [h.id, h]),
-  );
-  // R12: what the policy hides for a search leaves each list before the lists are fused and cut, so a hidden
-  // version takes no rank and no hit slot
-  const searchable = shownVersions(db, registry, [...heads.keys()]);
-  for (const list of lists) {
-    // the cut of each strategy's list (R3) comes after the check, so a hidden version takes none of its slots
-    list.ids = list.ids
-      .filter((id) => heads.has(id) && searchable.has(id))
-      .slice(0, STRATEGY_LIST_LIMIT);
-    route[list.strategy] = { status: "used", count: list.ids.length };
-  }
   route.rerank = { status: "used", count: new Set(lists.flatMap((l) => l.ids)).size };
   const merged = merge(
     lists,

@@ -1,4 +1,5 @@
 export { retrieve } from "./retrieve.ts";
+export { feedbackPreference, PREFERENCE_SPAN } from "./preference.ts";
 export {
   ALWAYS_ON,
   DEFAULT_ENABLED_STRATEGIES,
