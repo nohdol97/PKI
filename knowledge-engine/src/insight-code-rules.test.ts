@@ -189,6 +189,13 @@ describe("the type table and the fixture agree (P01-C1b)", () => {
         .map((t) => t.type)
         .sort(),
     );
+    // every supported code-judged type keeps a scenario: the filter above must not drop one silently
+    const withScenario = supported.map(([type]) => type);
+    for (const t of INSIGHT_TYPES.filter(
+      (x) => x.status === "supported" && x.judgedBy === "code",
+    )) {
+      expect(withScenario).toContain(t.type);
+    }
     for (const [, entry] of supported) {
       judge(seed((entry as Required<TypeEntry>).scenario));
       db.close();
