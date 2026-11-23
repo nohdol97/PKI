@@ -266,6 +266,15 @@ describe("resolution.signals (S02-R9)", () => {
     expect(signalsBetween(db, p, r)).toContain("organization-match");
   });
 
+  it("a BELONGS_TO that ends at a Project gives no organization signal (S02F-R2)", () => {
+    const w = world();
+    const [projA, projB] = [w.item("Project", "Apollo"), w.item("Project", "Borealis")];
+    const [p, q] = [w.person("Kim"), w.person("Kim")];
+    w.relation(p, "BELONGS_TO", projA, { from: "2026-01-01", until: "2026-12-31" });
+    w.relation(q, "BELONGS_TO", projB, { from: "2026-06-01", until: null });
+    expect(signalsBetween(db, p, q)).not.toContain("organization-mismatch");
+  });
+
   it("an interval overlaps another only when both are known and share a day (the stored-row cases are S02-T08's)", () => {
     const span = (from: string | null, to: string | null) => ({ from, to });
     expect(intervalsOverlap(span("2026-01-01", "2026-06-30"), span("2026-06-01", null))).toBe(true);
