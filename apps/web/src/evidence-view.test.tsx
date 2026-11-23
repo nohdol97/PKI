@@ -294,7 +294,10 @@ describe("SourceView of a local file", () => {
 
   it("a source that is not a local file shows no place", () => {
     const html = renderToStaticMarkup(
-      <SourceView source={source} local={{ local: false, relativePath: null, state: null, notFound: false }} />,
+      <SourceView
+        source={source}
+        local={{ local: false, relativePath: null, state: null, notFound: false }}
+      />,
     );
     expect(html).not.toContain("지금 위치");
   });

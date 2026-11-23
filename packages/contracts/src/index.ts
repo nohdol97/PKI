@@ -31,6 +31,8 @@ import {
   LocalRevokeResponseSchema,
   LocalSkippedRequestSchema,
   LocalSkippedResponseSchema,
+  LocalSourceInfoRequestSchema,
+  LocalSourceInfoResponseSchema,
 } from "./local-files.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
@@ -1763,6 +1765,12 @@ export const routes = {
     path: "/api/local-locations/reimport",
     request: LocalReimportRequestSchema,
     response: LocalReimportResponseSchema,
+  },
+  localSourceInfo: {
+    method: "POST",
+    path: "/api/local-locations/source",
+    request: LocalSourceInfoRequestSchema,
+    response: LocalSourceInfoResponseSchema,
   },
   revokeLocalLocation: {
     method: "POST",

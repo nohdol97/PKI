@@ -12,6 +12,8 @@ import type {
   LocalRevokeRequest,
   LocalSkippedRequest,
   LocalSkippedResponse,
+  LocalSourceInfo,
+  LocalSourceInfoRequest,
   LocalRelinkRequest,
   LocalFilesSettings,
   LocalFilesSettingsPatch,
@@ -20,6 +22,7 @@ import type {
   LocalPassReport,
 } from "@pki/contracts";
 import { errorClass, log, type BuildKind } from "@pki/providers";
+import { sourceInfoOf } from "./local-reveal.ts";
 import type { LocalRevoke, RevokeAnswer } from "./local-revoke.ts";
 import {
   closeLocation,
@@ -210,6 +213,8 @@ export interface LocalLocations {
   revoke(request: LocalRevokeRequest): Promise<RevokeAnswer | { error: "connector-unavailable" }>;
   /** The held deletions are confirmed by the count the user saw (I02B-R8). */
   confirmDeletions(request: LocalConfirmDeletionsRequest): ActionAnswer;
+  /** Where a source version is now, for the evidence screen; answered after the read gate (I02B-R39). */
+  sourceInfo(request: LocalSourceInfoRequest): LocalSourceInfo;
   list(): LocalLocationList;
   settings(): LocalFilesSettings;
   writeSettings(
@@ -380,6 +385,7 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     );
 
   return {
+    sourceInfo: ({ sourceVersionId }) => sourceInfoOf(db, sourceVersionId),
     approve(request) {
       // one approval at a time: two requests for the same place cannot both pass the overlap check
       const run = queue.then(() => approveOne(request));

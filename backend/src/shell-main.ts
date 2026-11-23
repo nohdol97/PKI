@@ -14,6 +14,7 @@ import { bootBackend, closeProviders } from "./boot.ts";
 import { electronHostChannel } from "./normalizer-host-electron.ts";
 import { channelSecrets } from "./secret-sources.ts";
 import { locationTicket, type ApprovalTickets } from "./local-locations.ts";
+import { revealPathOf, revealRequest } from "./local-reveal.ts";
 import { shellOptions } from "./shell-options.ts";
 import type { RunningServer } from "./server.ts";
 import type { SiteRegistration } from "./site-registration.ts";
@@ -74,6 +75,8 @@ export async function runShell(site: SiteRegistration): Promise<void> {
         server: RunningServer;
         providers: readonly LLMProvider[];
         tickets: ApprovalTickets;
+        /** The absolute path of a local source's file, for the shell only (P6). */
+        revealPath(sourceVersionId: number): string | undefined;
         close(): void;
       }
     | undefined;
@@ -95,7 +98,13 @@ export async function runShell(site: SiteRegistration): Promise<void> {
       // and the shell's user-data folder is no place for a location (I02B-R48)
       localFiles,
     });
-    running = { server, providers, tickets, close: () => db.close() };
+    running = {
+      server,
+      providers,
+      tickets,
+      revealPath: (sourceVersionId) => revealPathOf(db, sourceVersionId),
+      close: () => db.close(),
+    };
     return server.port;
   }
 
@@ -137,6 +146,12 @@ export async function runShell(site: SiteRegistration): Promise<void> {
     // a path the user picked, under a ticket the shell made; dropped while no backend runs (I02B-R37)
     const picked = locationTicket(data);
     if (picked) return void running?.tickets.register(picked);
+    // where a source's file is, answered to the shell only; never over HTTP (I02B-R39)
+    const reveal = revealRequest(data);
+    if (reveal) {
+      const path = running?.revealPath(reveal.sourceVersionId) ?? null;
+      return void channel.post({ type: "reveal-path", id: reveal.id, path });
+    }
     const message = parse(data);
     if (message?.type === "stop") return void stop();
     if (starting) return; // one start per process; later messages are ignored

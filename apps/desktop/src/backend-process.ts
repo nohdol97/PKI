@@ -97,6 +97,12 @@ const FromBackend = z.discriminatedUnion("type", [
   // the backend's requests for its normalizer host (I02B-R22): a number each, nothing else
   z.strictObject({ type: z.literal("normalizer-host-start"), id: z.int().positive() }),
   z.strictObject({ type: z.literal("normalizer-host-end"), id: z.int().positive() }),
+  // the answer to a reveal request: the file's path, or null when there is none to show (I02B-R39)
+  z.strictObject({
+    type: z.literal("reveal-path"),
+    id: z.int().positive(),
+    path: z.string().min(1).max(4096).nullable(),
+  }),
   z.strictObject({
     type: z.literal("secret-request"),
     id: z.int().positive(),
@@ -172,6 +178,8 @@ export interface BackendOptions {
    * are ignored.
    */
   normalizerHost?: ((backend: BackendChild) => NormalizerHostBroker) | undefined;
+  /** How long a reveal request waits for the backend's answer (default 5 s). */
+  revealTimeoutMs?: number | undefined;
 }
 
 export interface Backend {
@@ -185,6 +193,11 @@ export interface Backend {
    * answer. False when the process has ended.
    */
   registerLocationTicket(input: { ticket: string; kind: "folder"; path: string }): boolean;
+  /**
+   * Asks the backend where a local source's file is (I02B-R39, over this channel, never HTTP). Resolves
+   * undefined when the backend has no path to show, ends, or does not answer in time.
+   */
+  revealPath(sourceVersionId: number): Promise<string | undefined>;
   /**
    * Asks the backend to close, kills it if it has not ended in time, force-kills it
    * if that is ignored too, and returns within stopTimeoutMs + 2 × killTimeoutMs
@@ -216,6 +229,10 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
     }),
   );
 
+  const reveals = new Map<number, (path: string | undefined) => void>();
+  let revealIds = 0;
+  void exited.then(() => reveals.forEach((answer) => answer(undefined)));
+
   const port = await new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => {
       child.kill();
@@ -239,6 +256,9 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
           if (!ended) child.postMessage({ type: "secret", id, ...answer });
         });
         return;
+      }
+      if (message.data.type === "reveal-path") {
+        return reveals.get(message.data.id)?.(message.data.path ?? undefined);
       }
       if (message.data.type === "normalizer-host-start") {
         return normalizerHost?.start(message.data.id);
@@ -266,6 +286,20 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
       if (ended) return false;
       child.postMessage({ type: "location-ticket", ...input });
       return true;
+    },
+    revealPath(sourceVersionId) {
+      if (ended) return Promise.resolve(undefined);
+      const id = (revealIds += 1);
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => answer(undefined), options.revealTimeoutMs ?? 5_000);
+        const answer = (path: string | undefined) => {
+          clearTimeout(timer);
+          reveals.delete(id);
+          resolve(path);
+        };
+        reveals.set(id, answer);
+        child.postMessage({ type: "reveal-request", id, sourceVersionId });
+      });
     },
     async stop() {
       if (ended) return;

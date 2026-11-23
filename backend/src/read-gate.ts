@@ -88,6 +88,8 @@ export interface ReadGate {
     | undefined;
   /** undefined when the evidence row is absent or not shown. */
   evidenceSource(evidenceId: number): EvidenceSourceView | undefined;
+  /** Whether the source version is stored and shown: the one answer for a version that is absent, deleted or hidden. */
+  sourceShown(versionId: number): boolean;
   /** The Semantic registry's items with the facts and relations shown (S01-R23): a hidden row is left out whole. */
   semantic(): SemanticList;
   /**
@@ -226,6 +228,7 @@ export function createReadGate(
     evidenceSource(evidenceId) {
       return isShown("evidence", evidenceId) ? readEvidenceSource(db, evidenceId) : undefined;
     },
+    sourceShown: (versionId) => isShown("source", versionId),
     semantic() {
       // one more than the limit tells whether the list was cut
       const rowsOf = <T extends { id: number }>(item: T) => ({

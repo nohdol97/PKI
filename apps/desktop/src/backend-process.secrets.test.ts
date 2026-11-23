@@ -84,7 +84,9 @@ describe("the shell's reveal request to the backend (I02B-R39, P6)", () => {
     const child = fakeChild();
     const backend = await start(child);
     const asked = backend.revealPath(7);
-    const request = child.posted.find((m) => (m as { type?: string }).type === "reveal-request") as {
+    const request = child.posted.find(
+      (m) => (m as { type?: string }).type === "reveal-request",
+    ) as {
       id: number;
       sourceVersionId: number;
     };
@@ -94,7 +96,9 @@ describe("the shell's reveal request to the backend (I02B-R39, P6)", () => {
     expect(await asked).toBe("/docs/a.md");
 
     const none = backend.revealPath(8);
-    const second = child.posted.filter((m) => (m as { type?: string }).type === "reveal-request")[1] as {
+    const second = child.posted.filter(
+      (m) => (m as { type?: string }).type === "reveal-request",
+    )[1] as {
       id: number;
     };
     child.send({ type: "reveal-path", id: second.id, path: null });

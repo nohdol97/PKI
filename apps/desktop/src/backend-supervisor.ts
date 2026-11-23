@@ -23,6 +23,8 @@ export interface Supervisor {
   url(): string | undefined;
   /** Forwards a picked path and its ticket to the running backend; false when none is running. */
   registerLocationTicket(input: Parameters<Backend["registerLocationTicket"]>[0]): boolean;
+  /** Asks the running backend where a local source's file is; undefined when none is running or none to show. */
+  revealPath(sourceVersionId: number): Promise<string | undefined>;
   /** Stops the backend (or the one starting) and restarts nothing after it. */
   stop(): Promise<void>;
 }
@@ -64,6 +66,7 @@ export async function superviseBackend(options: SupervisorOptions): Promise<Supe
     token,
     url: () => running?.url,
     registerLocationTicket: (input) => running?.registerLocationTicket(input) ?? false,
+    revealPath: async (sourceVersionId) => running?.revealPath(sourceVersionId),
     async stop() {
       stopping = true;
       await starting;

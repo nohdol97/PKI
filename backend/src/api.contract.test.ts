@@ -146,6 +146,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     confirmLocalDeletions: { locationId: "", count: 0 },
     localSkipped: { locationId: "" },
     reimportLocalFile: { locationId: "", relativePath: "held.pdf" },
+    localSourceInfo: { sourceVersionId: 1 },
     revokeLocalLocation: { locationId: "", count: 0 },
     setDefaultProvider: { providerId: "claude-code" },
     // The pack does not exist: the preparation starts, then fails without touching disk.

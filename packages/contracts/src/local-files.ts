@@ -322,6 +322,25 @@ export const LocalReimportRequestSchema = z.strictObject({
 export type LocalReimportRequest = z.infer<typeof LocalReimportRequestSchema>;
 export const LocalReimportResponseSchema = z.strictObject({ outcome: z.literal("queued") });
 
+/** "지금 위치" of a source version the screen holds (I02B-R39): keyed by the version id, a POST like the other routes with an input. */
+export const LocalSourceInfoRequestSchema = z.strictObject({
+  sourceVersionId: z.int().positive(),
+});
+export type LocalSourceInfoRequest = z.infer<typeof LocalSourceInfoRequestSchema>;
+
+/**
+ * Where a local source is now. The relative path only: no answer carries an absolute path (I02B-R36, R39).
+ * `notFound` is derived from the index, never from the disk: the location is `unavailable`, or the file's
+ * deletion is held or confirmed.
+ */
+export const LocalSourceInfoResponseSchema = z.strictObject({
+  local: z.boolean(),
+  relativePath: z.string().nullable(),
+  state: z.enum(["active", "paused", "unavailable", "needs-confirmation", "revoking"]).nullable(),
+  notFound: z.boolean(),
+});
+export type LocalSourceInfo = z.infer<typeof LocalSourceInfoResponseSchema>;
+
 const PositiveInt = z.int().positive();
 const walkShape = {
   maxFilesPerLocation: PositiveInt,

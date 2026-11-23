@@ -38,6 +38,12 @@ describe("a local source's present location", () => {
     expect(sourceInfoOf(w.db, versionId)).toMatchObject({ state: "unavailable", notFound: true });
   });
 
+  it("an index path that leaves the folder is never revealed", async () => {
+    const { w, versionId } = await seeded();
+    w.db.run("UPDATE local_file_entries SET relative_path = '../outside.md', path_hash = 'x'");
+    expect(revealPathOf(w.db, versionId)).toBeUndefined();
+  });
+
   it("a source of another connector, or an unknown version, is not local and has nothing to reveal", async () => {
     const { w } = await seeded();
     registerConnectorInstance(w.db, "c", "test-fixtures");

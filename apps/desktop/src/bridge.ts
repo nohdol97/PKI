@@ -16,6 +16,7 @@ export const BRIDGE = {
   deleteSecret: "pki:delete-secret",
   openExternal: "pki:open-external",
   pickLocation: "pki:pick-location",
+  revealSource: "pki:reveal-source",
 } as const;
 export type BridgeFunction = keyof typeof BRIDGE;
 
@@ -33,6 +34,8 @@ const INPUTS = {
   deleteSecret: z.tuple([SecretNameSchema]),
   openExternal: z.tuple([ExternalUrl]),
   pickLocation: z.tuple([z.literal("folder")]),
+  // a source version id, never a path: the main process asks the backend where the file is (I02B-R39)
+  revealSource: z.tuple([z.int().positive()]),
 } satisfies Record<BridgeFunction, z.ZodType>;
 
 export interface ExternalTarget {
@@ -55,6 +58,10 @@ export interface BridgeDeps {
   pickLocation(type: "folder"): Promise<string | undefined>;
   /** Gives the backend the picked path under a ticket; false when no backend is running. */
   registerLocationTicket(input: { ticket: string; kind: "folder"; path: string }): boolean;
+  /** Asks the backend for the absolute path of a local source's file; undefined when there is none to show. */
+  revealPath(sourceVersionId: number): Promise<string | undefined>;
+  /** Shows the file in the OS file manager (`shell.showItemInFolder`); never opens it. */
+  showInFolder(path: string): void;
 }
 
 /** Each takes the sender frame's URL and the page's arguments as received. */
@@ -95,6 +102,13 @@ export function createBridgeHandlers(deps: BridgeDeps): BridgeHandlers {
       if (path === undefined) return { ticket: null };
       const ticket = randomBytes(32).toString("base64url");
       return { ticket: deps.registerLocationTicket({ ticket, kind: type, path }) ? ticket : null };
+    }),
+    // the page names a version; the path comes from the backend and goes only to the file manager
+    revealSource: checked("revealSource", async ([sourceVersionId]) => {
+      const path = await deps.revealPath(sourceVersionId);
+      if (path === undefined) return { revealed: false };
+      deps.showInFolder(path);
+      return { revealed: true };
     }),
   };
 }

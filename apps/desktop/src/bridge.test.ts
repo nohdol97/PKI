@@ -12,7 +12,7 @@ const PAGE = `${APP_ORIGIN}/`;
 function handlers(
   confirm = true,
   picked: string | null = "/picked/folder",
-  revealed: string | undefined = "/docs/a.md",
+  revealed: string | null = "/docs/a.md",
 ) {
   const opened: string[] = [];
   const confirmExternal = vi.fn<(target: ExternalTarget) => Promise<boolean>>(async () => confirm);
@@ -34,7 +34,7 @@ function handlers(
     openExternal: async (url) => void opened.push(url),
     pickLocation: async () => picked ?? undefined,
     registerLocationTicket: (input) => (registered.push(input), true),
-    revealPath: async (id) => (asked.push(id), revealed),
+    revealPath: async (id) => (asked.push(id), revealed ?? undefined),
     showInFolder: (path) => void shown.push(path),
   });
   return { bridge, opened, confirmExternal, secrets, stored, registered, asked, shown };
@@ -84,12 +84,14 @@ describe("bridge handlers", () => {
     expect(asked).toEqual([7]);
     expect(shown).toEqual(["/docs/a.md"]);
 
-    const gone = handlers(true, "/p", undefined);
+    const gone = handlers(true, "/p", null);
     expect(await gone.bridge.revealSource(PAGE, [7])).toEqual({ revealed: false });
     expect(gone.shown).toEqual([]);
 
     const refused = handlers();
-    await expect(refused.bridge.revealSource(PAGE, ["/etc/passwd"])).rejects.toThrow("invalid-input");
+    await expect(refused.bridge.revealSource(PAGE, ["/etc/passwd"])).rejects.toThrow(
+      "invalid-input",
+    );
     await expect(refused.bridge.revealSource(PAGE, [7, "/x"])).rejects.toThrow("invalid-input");
     await expect(refused.bridge.revealSource("https://evil.example/", [7])).rejects.toThrow(
       "forbidden-sender",
@@ -99,7 +101,9 @@ describe("bridge handlers", () => {
 
     // no call that would open a file with its associated program (I02-C3)
     const dir = new URL(".", import.meta.url);
-    for (const name of readdirSync(dir).filter((f) => /\.(ts|cjs)$/.test(f) && !f.includes(".test."))) {
+    for (const name of readdirSync(dir).filter(
+      (f) => /\.(ts|cjs)$/.test(f) && !f.includes(".test."),
+    )) {
       expect(readFileSync(new URL(name, dir), "utf8"), name).not.toContain("openPath");
     }
   });

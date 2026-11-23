@@ -974,6 +974,10 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       options.localLocations?.revoke(input) ?? { error: "connector-unavailable" },
     localSkipped: async (input) =>
       options.localLocations?.skipped(input) ?? { error: "connector-unavailable" },
+    localSourceInfo: async (input) =>
+      (gate.sourceShown(input.sourceVersionId)
+        ? options.localLocations?.sourceInfo(input)
+        : undefined) ?? { error: "not-found" },
     reimportLocalFile: async (input) =>
       options.localLocations?.reimport(input) ?? { error: "connector-unavailable" },
     localFilesSettings: async () =>
