@@ -39,6 +39,7 @@ import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { LocalLocations } from "./local-locations.tsx";
 import { invalidationText } from "./job-text.ts";
+import { writeInsightInterpret } from "./insight-settings.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
 import {
   componentText,
@@ -681,7 +682,7 @@ export function InsightInterpretSetting({ api }: { api: ApiClient }) {
   const { data, error, reload } = useRoute(api, "semanticSettings");
   const [failure, setFailure] = useState<string>();
   const set = (insightInterpret: boolean) =>
-    api("setSemanticSettings", { autoVerify: data?.autoVerify ?? false, insightInterpret }).then(
+    writeInsightInterpret(api, insightInterpret).then(
       () => {
         setFailure(undefined);
         reload();

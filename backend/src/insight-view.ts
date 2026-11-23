@@ -2,6 +2,7 @@
 // request's time, the reason text is the interpretation's when there is one (D12), and the list is ordered
 // by score. The gate has already judged what may be shown; nothing here reads the store.
 import {
+  INSIGHT_TYPE_NAMES,
   INSIGHT_TYPES,
   type InsightSummary,
   type InsightTypeName,
@@ -40,11 +41,16 @@ export function insightView(row: ActiveInsight, now: Date): InsightSummary {
   };
 }
 
+/** Whether the stored rule is one of the 13 types; a row with any other value is not shown (it would fail the response). */
+export const knownInsightType = (row: Pick<ActiveInsight, "type">): boolean =>
+  (INSIGHT_TYPE_NAMES as readonly string[]).includes(row.type);
+
 /** Views by score, then the later change first (none last), then the lower id (P01-D28). */
 export function rankedInsightViews(rows: readonly ActiveInsight[], now: Date): InsightSummary[] {
   const changed = (row: ActiveInsight) =>
     row.changedAt === null ? -Infinity : Date.parse(row.changedAt);
   return rows
+    .filter(knownInsightType)
     .map((row) => ({ row, view: insightView(row, now) }))
     .sort(
       (a, b) =>

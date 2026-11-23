@@ -88,6 +88,8 @@ export interface ReadGate {
     | undefined;
   /** undefined when the evidence row is absent or not shown. */
   evidenceSource(evidenceId: number): EvidenceSourceView | undefined;
+  /** Whether both end items of the stored Insight are shown (P01-R15, D30); false when no row is stored. */
+  insightEndsShown(insightId: number): boolean;
   /** Whether the source version is stored and shown: the one answer for a version that is absent, deleted or hidden. */
   sourceShown(versionId: number): boolean;
   /** The Semantic registry's items with the facts and relations shown (S01-R23): a hidden row is left out whole. */
@@ -204,6 +206,7 @@ export function createReadGate(
   const semanticLimit = options.semanticLimit ?? SEMANTIC_LIMIT;
   const isShown = (kind: string, id: number) =>
     shown([{ kind, id: String(id) }], "display").has(String(id));
+  const endsShown = (x: number, y: number) => isShown("item", x) && isShown("item", y);
   return {
     sources: () => filled((n) => listSources(db, n), "source", "display", sourcesLimit),
     searchSources: (query) =>
@@ -229,9 +232,7 @@ export function createReadGate(
       if (!isShown("insight", insightId)) return undefined;
       const read = readInsightEvidence(db, insightId);
       if (!read) return undefined;
-      if (!isShown("item", read.insight.xItemId) || !isShown("item", read.insight.yItemId)) {
-        return undefined;
-      }
+      if (!endsShown(read.insight.xItemId, read.insight.yItemId)) return undefined;
       const evidence = only(read.evidence, "evidence", (e) => e.id, "display");
       const userInputs = shownUserInputs(insightId);
       return {
@@ -239,6 +240,12 @@ export function createReadGate(
         evidence,
         userInputs,
       };
+    },
+    insightEndsShown(insightId) {
+      const ends = db.all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [
+        insightId,
+      ])[0];
+      return ends !== undefined && endsShown(ends.x as number, ends.y as number);
     },
     evidenceSource(evidenceId) {
       return isShown("evidence", evidenceId) ? readEvidenceSource(db, evidenceId) : undefined;

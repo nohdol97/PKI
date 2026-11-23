@@ -69,7 +69,7 @@ V02가 규칙 하나("의존 업무 지연")와 Insight 행(`insights`, 키 `(ru
 | 신뢰 | 저장된 `confidence`(없으면 50) | 0.15 |
 | 행동성 | 유형 표의 기본값 | 0.10 |
 
-- **P01-R5 사고 과정을 저장하지 않는다.** Insight에 저장되는 글은 `summary`·`fact_lines`·`reasoning_summary` 셋뿐이다. LLM 해석의 출력 스키마(T04)는 네 키(`reasoningSummary`·`impact`·`actionability`·`opportunity`)만 받고 모든 단계에서 엄격하다: 그 밖의 키가 있거나 이유 요약이 500자를 넘으면 Broker가 응답 전체를 거부한다(`invalid-output`). `reasoning_summary`는 500자를 넘으면 저장하지 않는다. Provider 호출 이력은 지금처럼 본문을 갖지 않는다.
+- **P01-R5 사고 과정을 저장하지 않는다.** Insight에 저장되는 글은 코드가 쓰는 `summary`·`fact_lines`·`reasoning_summary`, 해석이 채우는 `llm_*` 열(`llm_reasoning_summary`와 두 점수), `opportunity` 행의 `summary`(모델이 제안한 문장)뿐이다. LLM 해석의 출력 스키마(T04)는 네 키(`reasoningSummary`·`impact`·`actionability`·`opportunity`)만 받고 모든 단계에서 엄격하다: 그 밖의 키가 있거나 이유 요약이 500자를 넘으면 Broker가 응답 전체를 거부한다(`invalid-output`). `reasoning_summary`는 500자를 넘으면 저장하지 않는다. Provider 호출 이력은 지금처럼 본문을 갖지 않는다.
 
 ### 판정과 수명
 
@@ -129,7 +129,7 @@ stateDiagram-v2
   - **C1a** (R1, R6): 지원 유형의 fixture를 넣고 판정하면 기대한 Insight 한 건(유형, 사실 줄, 근거 인용문)이 생기고, 조건을 깨는 변형에서는 생기지 않는다.
   - **C1b** (R1): fixture와 유형 표가 같은 13개 유형을 갖고, 미지원 유형은 사유가 있으며 그 유형의 Insight가 만들어지지 않는다.
   - **C1a 추가** (T05, R11, R12): 새 지원 유형 다섯의 fixture를 넣고 판정하면 기대한 Insight 한 건이 생기고 조건을 깨는 변형에서는 생기지 않으며, `fixtures/p01-status.jsonl`을 가져오기(추출 double v6)로 넣으면 `pending_request`·`open_issue`가 한 건씩 생긴다.
-  - **C1a 추가** (T04, R1): `opportunity`는 해석 응답이 후보를 내면 부모 Insight의 근거를 그대로 가진 한 건이 생기고, 부모 내용이 바뀌면 철회된다.
+  - **C1a 추가** (T04, R1): `opportunity`는 해석 응답이 후보를 내면 부모 Insight의 근거를 그대로 가진 한 건이 생기고, 부모의 사실 줄·근거·사용자 입력·연결이 바뀌면 철회된다(요약·시급 날짜만 바뀌면 유지, D18).
 - [ ] **P01-C2** — Insight schema·evidence·reasoning_summary·사실/추론 구분·관련성/영향/시급/신규/신뢰/행동성 ranking을 검증한다. 모델 내부 사고과정을 저장하지 않는다.
   - **C2a** (R2, R3): 규칙이 만든 활성 Insight는 사실 줄·추론 문장·이유 요약·신뢰도와 근거(또는 사용자 입력) 하나 이상을 갖고, 철회하면 글·신뢰도·날짜·근거 연결이 모두 비워진다.
   - **C2b** (R4): `rankInsight`는 여섯 축과 점수를 돌려주고, 같은 입력과 시각에서 같은 값이며, 기준 날짜가 가까운 쪽이 시급이 높고 신뢰도가 낮은 쪽이 점수가 낮다.
@@ -158,7 +158,7 @@ stateDiagram-v2
 | C3a | C1a의 테스트가 Provider 없이 돈다 / (T04) `knowledge-engine/src/insight-interpret.test.ts`(해석 열 셋만 바뀜·`unchanged`·`opportunity`)와 `backend/src/insight-interpret-flow.test.ts`(동의 없으면 `held`) | T02·T04 |
 | C1a(T05) | `knowledge-engine/src/insight-code-rules.test.ts`: 다섯 유형의 시나리오와 변형 / `knowledge-engine/src/insight-import.test.ts`: `fixtures/p01-status.jsonl`에서 한 건씩 / `knowledge-engine/src/extraction-v6.test.ts`: `status` 소문자, `conclusion` 인용문·500자 검사, 한 번의 추출은 한 `observed_at` | T05 |
 | C1b(T05) | `storage/src/knowledge-schema.migration.test.ts`: 3판 seed가 유형 목록과 같고 사용자가 바꾼 규칙은 그대로 / `packages/contracts/src/insight-types.test.ts`: 지원 유형 목록 | T05 |
-| C1a(`opportunity`) | (T04) `knowledge-engine/src/insight-interpret.test.ts`: 부모 근거를 가진 한 건, 부모가 바뀌면 철회 | T04 |
+| C1a(`opportunity`) | (T04) `knowledge-engine/src/insight-interpret.test.ts`: 부모 근거를 가진 한 건, 부모의 사실 줄이 바뀌면 철회 | T04 |
 | C3b | `knowledge-engine/src/insight-code-rules.test.ts`: 어긋남 두 쌍 → 한 건, 재판정 `unchanged` | T02 |
 | C3c | `knowledge-engine/src/insight-rules.test.ts`: `updated`·`resolved`·`revived`와 같은 id | T01 |
 | C3d | `knowledge-engine/src/insight-rules.test.ts`: 신뢰도 30과 제외 표시, 승인 뒤 해제 | T01 |
@@ -203,7 +203,7 @@ stateDiagram-v2
 - **P01-D15 설정 `insight.interpret`은 기본 끔이고 정확히 `on`일 때만 켠다**(루트 13-5 dark launch, `wiki.summary`와 같은 방식). 시작 때, 작업이 닫힐 때, 켜질 때 큐에 넣고 한 번에 50건까지다. **저장소 스위치(`setInsightInterpret`)만 들어가고 API·화면은 없다**: 설정 경로(`backend/src/server.ts`·`packages/contracts/src/index.ts`)는 다른 세션이 쥐고 있다. 후속(이슈 또는 T03)에서 그 경로에 `insightInterpret` 필드를 더한다. → T03이 더했다(R17, D33).
 - **P01-D16 Provider로 나가는 것.** `sourceVersionIds`는 Insight 계보의 version 행(8개 이하, 합계 `MAX_EXTRACT_CODE_POINTS` 이하), `candidateItemIds`는 X·Y와 `insight:<id>`다. `knowledgeCandidates`가 `insight:<id>`에 이름(`[유형] 추론 | 사실 줄`)과 등록부의 `insight` 계보를 답하고, 사용자 입력 행을 쓴 Insight는 출처 없는 이름으로 가장 엄격한 등급을 받는다(닫힌 쪽으로 실패). 계보가 없거나 한도를 넘거나 정책이 묶음을 거부하면 호출 없이 끝난다. Broker는 그대로이고 읽기·등급은 Broker만 한다. Insight 글을 보내지 않으려면 세 번째 후보를 빼야 하고 그 대신 모델이 유형을 모른다.
 - **P01-D17 응답 스키마 v1은 모든 단계에서 엄격하다.** `{ reasoningSummary: 1~500자, impact: 0~100 정수, actionability: 0~100 정수, opportunity: { statement: 1~200자 } | null }`. 다른 키나 긴 글은 Broker의 `invalid-output`이고 처리기는 다시 묻지 않는다(`retryable: false`). 부분 수용을 하려면 길이 검사를 처리기로 옮겨야 한다.
-- **P01-D18 `opportunity`는 해석 응답이 제안하고 나머지는 코드가 정한다.** 키는 부모의 `(opportunity, X, Y)`다. 처리기가 문장을 `summary`로(추론), 부모의 사실 줄·근거·사용자 입력·연결·시급 날짜를 그대로 복사해 쓰고, 신뢰도는 `min(부모, 40)`이라 늘 자동 알림 제외다. 활성 행이 이미 있으면 제안은 버린다. 규칙(`opportunityRule`)은 같은 키에 사실 줄·입력이 같은 활성 Insight가 있는 동안만 유지하고 아니면 철회하며, 철회된 행은 규칙이 되살리지 않는다(글이 없다). 모델의 인용문과 새 근거 행은 만들지 않는다(근거는 사실·관계에 매인다). `opportunity` 행은 다시 해석하지 않는다. 상한은 상수 하나다.
+- **P01-D18 `opportunity`는 해석 응답이 제안하고 나머지는 코드가 정한다.** 키는 부모의 `(opportunity, X, Y)`다. 처리기가 문장을 `summary`로(추론), 부모의 사실 줄·근거·사용자 입력·연결·시급 날짜를 그대로 복사해 쓰고, 신뢰도는 `min(부모, 40)`이라 늘 자동 알림 제외다. 활성 행이 이미 있으면 제안은 버린다. 규칙(`opportunityRule`)은 같은 키에 사실 줄·근거·입력·연결이 같은 활성 Insight가 있는 동안만 유지하고(부모의 요약·시급 날짜만 바뀐 경우는 같은 것으로 보고 유지한다) 아니면 철회하며, 철회된 행은 규칙이 되살리지 않는다(글이 없다). 모델의 인용문과 새 근거 행은 만들지 않는다(근거는 사실·관계에 매인다). `opportunity` 행은 다시 해석하지 않는다. 상한은 상수 하나다.
 - **P01-D19 유형 표는 `opportunity`를 지원으로 올린다.** 설정이 켜져야만 생기지만 R1이 "구현된 만큼"을 지원으로 정하기 때문이다. 보고서에 "지원(꺼짐)"이 필요하면 세 번째 상태를 더한다.
 - **P01-D20 요청은 새 항목 유형 `Request`다.** 약속(Commitment)·할 일(Task)과 뜻이 달라 섞지 않는다. Commitment로 판정하려면 `pending_request` 규칙의 항목 유형 상수 하나를 바꾼다.
 - **P01-D21 상태 값은 닫힌 네 개이고 열린 값은 `open`·`in_progress`다.** 값 유형의 값 목록(`WORK_STATUSES`)과 규칙 파일의 `OPEN_STATUSES`다. 값을 더하려면 두 상수를 고친다.
@@ -215,13 +215,14 @@ stateDiagram-v2
 - **P01-D27 (T03) 새 경로를 만들지 않고 기존 Insight 응답에 필드를 더한다.** 목록과 근거 조회가 같은 모양을 쓴다. 한글 유형 이름은 응답에 싣지 않고 화면이 `INSIGHT_TYPES`에서 찾는다. 아직 다시 판정되지 않은 옛 행(D9)은 `factLines`가 빈 배열이고 이유 요약·신뢰도가 `null`이다.
 - **P01-D28 순서는 점수 내림차순, 같으면 `changed_at`이 늦은 것(없으면 뒤), 그래도 같으면 id 오름차순이다.** 목록에 상한은 두지 않는다(지금도 없다). 순서와 순위 계산은 `backend/src/insight-view.ts` 한 곳에 있고 시각은 서버 시계다.
 - **P01-D29 철회된 Insight는 어떤 응답에도 없다**(V02-R14 그대로). 철회 이력을 보이려면 상태 필드와 별도 목록이 필요하다(P02·P03에서 필요해지면).
-- **P01-D30 읽기 문에 끝 항목 검사를 더한다.** 지금까지는 Insight 계보만 봤는데, 추론 문장과 사실 줄의 항목 이름은 다른 원본에서 왔을 수 있다. 검사는 대표 항목 자신의 `item` 계보다(Semantic 목록이 그 이름을 보일 때와 같은 판정). 효과: 끝 항목에 숨은 원본에서 온 사실이 하나라도 있으면 그 항목의 Insight도 숨는다(닫힌 쪽으로 실패). 빼려면 `read-gate.ts`의 검사 한 줄을 지운다. Wiki의 Insight 페이지(`wiki-read.ts`)는 이 검사를 하지 않는다(범위 밖, 후속 이슈로 넘긴다).
+- **P01-D30 읽기 문에 끝 항목 검사를 더한다.** 지금까지는 Insight 계보만 봤는데, 추론 문장과 사실 줄의 항목 이름은 다른 원본에서 왔을 수 있다. 검사는 대표 항목 자신의 `item` 계보다(Semantic 목록이 그 이름을 보일 때와 같은 판정). 효과: 끝 항목에 숨은 원본에서 온 사실이 하나라도 있으면 그 항목의 Insight도 숨는다(닫힌 쪽으로 실패). 빼려면 `read-gate.ts`의 검사 한 줄을 지운다. Wiki의 Insight 페이지(`wiki-read.ts`)도 같은 검사(`ReadGate.insightEndsShown`)를 거쳐, 끝 항목이 숨은 Insight는 페이지·색인·역링크에서 없는 페이지와 같은 답이다(이슈 #257 F4).
 - **P01-D31 이유 요약은 하나만 주고 누가 썼는지 표시한다.** 해석이 있으면 해석의 글과 `reasoningBy: llm`이고 화면은 "해석(LLM)"이라고 붙인다. 코드의 글도 함께 보이려면 필드를 하나 더한다.
 - **P01-D32 알림 제외는 불리언 하나로 주고 화면은 "자동 알림 제외(신뢰도 낮음)" 글자로 보인다.** 값은 기존 함수 `isAutoNotifyExcluded`가 정한다(D5). 신뢰도가 없는 옛 행은 거짓이다.
 - **P01-D33 설정 필드는 `insightInterpret`이고 `wiki.summary`와 같은 경로(`/api/settings/semantic`)에 둔다.** `wiki.summary`는 API에만 있고 화면이 없다. T03은 Insight 해석의 체크박스만 더하고 위키 요약의 화면은 건드리지 않는다. 스위치를 두는 것은 켜는 것이 아니다: 기본은 꺼짐이고 켜는 것은 사용자의 조작이다(D15).
 - **P01-D34 유형 경로는 13개 전부를 주고 순위 기본값(영향·행동성)은 싣지 않는다.** 원본 자료가 아닌 코드 상수라 읽기 문을 지나지 않는다(토큰 검사는 다른 경로와 같다). `opportunity`는 설정이 꺼져 있어도 "지원"이다(D19).
 - **P01-D35 T03은 마이그레이션을 쓰지 않는다.** 모든 값이 이미 있는 열(v28·v29)과 읽을 때의 계산에서 나온다. `backend/src/server.ts`와 `packages/contracts/src/index.ts`의 변경은 줄·필드를 더하는 것뿐이다(다른 세션 `feat/k02-reflection`과 겹치는 파일).
 - **P01-D36 E2E는 새 파일을 만들지 않고 `evidence.e2e.ts`에 시험 하나를 더한다.** 그 파일의 `startStack`과 seed `plain`을 그대로 쓰기 위해서다. Electron에서는 건너뛴다.
+- **P01-D37 `new_relation`은 양 끝 항목 행 자신의 `observed_at`과 비교한다(잠정, #238 F4).** 병합 묶음의 `observed_at`은 보지 않는다. R12의 문구가 "양 끝 항목 행"이고 한 번의 추출이 같은 `observed_at`을 쓰는 것(D24)이 이 비교를 전제로 하며, 기존 fixture·시험에서 틀린 결과를 내는 경우를 찾지 못해 유지한다. 바꾸려면 `newRelationRule`의 비교 대상(`from`·`to`)을 묶음 대표의 값으로 바꾸고 시험 기대값을 다시 정한다.
 
 ## 미해결 질문 / 검증하지 않은 범위
 
@@ -246,3 +247,4 @@ stateDiagram-v2
 | 2026-11-23 | T05 설계 추가: R11·R12(새 종류와 남은 코드 유형 다섯), 유형 표의 다섯 유형을 지원으로, C1a·C1b 추가 행, D20~D25, D16 보정(D26: Insight 후보를 항목 계보까지 합쳐 등급) | 요구사항·완료 기준·잠정 결정 | P01-T05 구현과 독립 리뷰 M1 반영 |
 | 2026-11-23 | D26 보강: 커밋 때 범위 정책 재확인도 호출 전과 같은 합집합(Insight 계보 + X·Y 묶음 계보)에 묻는다. X≠Y 시험 추가 | D26 | 이슈 #238 F1·F2 |
 | 2026-11-23 | T03 설계 추가: R13~R17(Insight 응답·순서·읽기 문·유형 보고·해석 스위치), 기준 C1c·C2d·e·f·C3e와 증명 시험, D27~D36, 작업 표의 T03 줄 | 요구사항·완료 기준·작업 분해·잠정 결정 | P01-T03 구현 착수, 이슈 #232 첫 항목 |
+| 2026-11-23 | R5 문구에 `llm_*` 열·opportunity 요약 반영, C1a·D18의 opportunity 철회 조건을 코드와 같게(사실 줄·근거·입력·연결), D30의 Wiki Insight 페이지 검사 반영, D37 추가 | R5·C1a·D18·D30·D37 | 이슈 #232 U2·S2, #257 F4, #238 F4 |

@@ -93,7 +93,8 @@ export function createWikiReads(
   };
   const insightShown = (id: number): boolean =>
     db.all("SELECT 1 FROM insights WHERE id = ? AND state = 'active'", [id]).length === 1 &&
-    visibleIds("insight", [id]).has(id);
+    visibleIds("insight", [id]).has(id) &&
+    gate.insightEndsShown(id);
   const targetShown = (page: Pick<StoredWikiPage, "kind" | "target">): boolean =>
     page.kind === "syntheses"
       ? insightShown(Number(page.target))

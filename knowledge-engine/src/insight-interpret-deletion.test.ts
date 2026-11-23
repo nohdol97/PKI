@@ -19,6 +19,7 @@ import {
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { propagateCanonical } from "./canonical-kinds.ts";
 import { recomputeInsights } from "./insight-code-rules.ts";
 import { propagateNewVersion } from "./propagation.ts";
 import { purgeSource } from "./purge.test-support.ts";
@@ -100,6 +101,15 @@ describe("a source the interpretation read changes (P01-R3, D13)", () => {
     purgeSource(db, other, { reason: "source-deleted", at: "2026-11-23T01:00:00.000Z" });
     expect(readInsightById(db, parent.id)).toMatchObject({ state: "active", interpretation: null });
     expect(readInsight(db, oppKey)).toMatchObject({ state: "resolved", summary: null });
+  });
+
+  it("counts the opportunity it resolved in the recomputed Insights, though the parent itself is unchanged (D1-U6)", () => {
+    const { other, oppKey } = seed();
+    const { propagation } = db.transaction(() =>
+      propagateCanonical(db, { kind: "scope-changed", sourceId: other, from: null, to: ["team"] }),
+    );
+    expect(readInsight(db, oppKey)).toMatchObject({ state: "resolved" });
+    expect(propagation.recomputedByKind.insight).toBe(1);
   });
 
   it("a new version of it leaves the interpretation and the active opportunity in place", () => {

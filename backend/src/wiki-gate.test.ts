@@ -334,8 +334,8 @@ describe("wiki.gate: the object side of a relation and an Insight's ends read th
     expect(xPage?.claims.filter((c) => c.ref.kind === "relation")).toEqual([]);
     expect(xPage?.links.map((l) => l.key)).not.toContain(`projects/${rep}`);
     expect(reads.page(`projects/${rep}`)?.backlinks).toEqual([]);
-    const insightPage = reads.page("syntheses/1");
-    expect(insightPage?.links.map((l) => l.key)).toEqual([`projects/${x}`]);
+    // the member end is not shown to this reader, so the Insight page is none (P01-R15, D30)
+    expect(reads.page("syntheses/1")).toBeUndefined();
 
     // read by one who may put the two together, the same rows show
     const open = createProductRegistry({ policy });
@@ -347,6 +347,29 @@ describe("wiki.gate: the object side of a relation and an Insight's ends read th
         .sort(),
     ).toEqual(["insight", "relation"]);
     expect(together.page("syntheses/1")?.links.map((l) => l.key)).toContain(`projects/${rep}`);
+  });
+});
+
+describe("wiki.gate: an Insight page follows the end-item rule (P01-R15, D30)", () => {
+  it("is no page, no index entry and no backlink while an end item is not shown", () => {
+    const open = source("open", "공개 본문", ["open"]);
+    const secret = source("secret", `${SECRET} 본문`, ["secret"]);
+    const x = insertItem(db, { type: "Project", name: "공개 항목", ...attrs });
+    const y = insertItem(db, { type: "Project", name: `${SECRET} 항목`, ...attrs });
+    citedFact(x, "공개 값", open);
+    citedFact(y, `${SECRET} 값`, secret);
+    db.run(
+      "INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary) VALUES ('r', ?, ?, 'explicit', 'active', '요약')",
+      [x, y],
+    );
+    const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+
+    const registry = createProductRegistry({ policy });
+    const reads = createWikiReads(db, registry, createReadGate(db, registry));
+    expect(reads.page("syntheses/1")).toBeUndefined();
+    expect(reads.index().kinds.map((k) => k.kind)).not.toContain("syntheses");
+    expect(reads.page(`projects/${x}`)?.backlinks).toEqual([]);
   });
 });
 

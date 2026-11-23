@@ -539,6 +539,7 @@ const INSIGHT: DerivativeKind = {
     const { tx } = ctx;
     // P01-D13: an LLM reading was made from the lineage as it was, and an unchanged Insight is not rewritten, so
     // a deletion, prune or scope change (not a new version: a changed Insight is rewritten, which empties it) empties the reading of every collected Insight and resolves its opportunity
+    const withdrawn: { key: InsightKey; outcome: "resolved" }[] = [];
     for (const { ref } of supported(change) === "new-version" ? [] : snapshot) {
       tx.run(
         "UPDATE insights SET llm_reasoning_summary = NULL, llm_impact = NULL, llm_actionability = NULL WHERE id = ?",
@@ -549,15 +550,13 @@ const INSIGHT: DerivativeKind = {
         [Number(ref.id)],
       )[0];
       if (row?.rule === OPPORTUNITY_RULE) {
-        saveInsight(
-          tx,
-          {
-            rule: OPPORTUNITY_RULE,
-            xItemId: row.x_item_id as number,
-            yItemId: row.y_item_id as number,
-          },
-          { state: "resolved" },
-        );
+        const key = {
+          rule: OPPORTUNITY_RULE,
+          xItemId: row.x_item_id as number,
+          yItemId: row.y_item_id as number,
+        };
+        saveInsight(tx, key, { state: "resolved" });
+        withdrawn.push({ key, outcome: "resolved" });
       }
     }
     const items =
@@ -590,11 +589,12 @@ const INSIGHT: DerivativeKind = {
     const report = noting(ctx);
     if (report) {
       report.remainingItemIds = remaining;
-      report.insights = outcomes;
+      report.insights = [...withdrawn, ...outcomes];
     }
     return {
       removed: gone(tx, "insights", snapshot).length,
       recomputed:
+        withdrawn.length +
         outcomes.filter((o) => o.outcome !== "unchanged").length +
         (running?.byReceivers.get("insight") ?? 0),
     };

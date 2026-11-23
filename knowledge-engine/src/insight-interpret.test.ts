@@ -161,6 +161,14 @@ describe("the interpretation job (P01-C3a, D12-D18)", () => {
     expect(readInsightById(db, parent.id)?.interpretation).not.toBeNull();
   });
 
+  it("stores nothing when the Broker refuses the response as invalid-output (C2c)", async () => {
+    const { parent, job } = setUp();
+    const invalid = { status: "invalid-output" } as unknown as BrokerResult;
+    expect(await run(job, broker(invalid))).toEqual(invalid);
+    expect(readInsightById(db, parent.id)).toEqual(parent);
+    expect(readInsight(db, oppKey())).toBeUndefined();
+  });
+
   it("hands a blocked Broker result back and leaves the row as it was; nothing is sent while the setting is off", async () => {
     const { parent, job } = setUp();
     const blocked = { status: "blocked", reason: "consent-missing" } as unknown as BrokerResult;
