@@ -38,6 +38,7 @@ import { Lint } from "./lint.tsx";
 import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { LocalLocations } from "./local-locations.tsx";
+import { SemanticReview } from "./semantic-review.tsx";
 import { invalidationText } from "./job-text.ts";
 import { writeInsightInterpret } from "./insight-settings.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
@@ -57,6 +58,7 @@ const SCREENS = {
   wiki: "위키",
   lint: "점검",
   ask: "질문",
+  semantic: "지식 검토",
   activity: "활동",
   settings: "설정",
 } as const;
@@ -70,6 +72,7 @@ export function App({ api }: { api: ApiClient }) {
     wiki: Wiki,
     lint: Lint,
     ask: Ask,
+    semantic: SemanticReview,
     activity: Activity,
     settings: Settings,
   }[screen];

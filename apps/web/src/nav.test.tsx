@@ -3,6 +3,8 @@
 // plain. The Ask screen's related-knowledge links call `go` with the item and the page key.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { App } from "./App.tsx";
+import type { ApiClient } from "./api.ts";
 import { relatedActions } from "./ask.tsx";
 import { NavProvider, pendingFor, useNav, type NavState } from "./nav.tsx";
 
@@ -47,5 +49,15 @@ describe("related knowledge links of the Ask screen", () => {
     expect(
       relatedActions(go, { ...related, wikiKey: null, wikiTitle: null }).openWiki,
     ).toBeUndefined();
+  });
+});
+
+describe("the navigation", () => {
+  it("lists 지식 검토 next to the existing screens", () => {
+    const out = renderToStaticMarkup(
+      <App api={(() => new Promise(() => undefined)) as unknown as ApiClient} />,
+    );
+    expect(out).toMatch(/<button[^>]*>지식 검토<\/button>/);
+    expect(out).toMatch(/<button[^>]*>질문<\/button>/);
   });
 });
