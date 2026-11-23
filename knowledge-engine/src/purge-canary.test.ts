@@ -449,6 +449,50 @@ describe("purge.canary-files: a table source's profile (S03-R17)", () => {
     },
   );
 
+  it("with a document's MEASURED_ON holding the Dataset: no column name and no table row are left, the item's name is; deleting the document too leaves none", async () => {
+    await seedTable();
+    const doc = saveSourceRecord(db, "c1", {
+      namespace: "",
+      externalId: "holder-doc",
+      title: "holder",
+      body: "plain body",
+    });
+    if (doc.status !== "created") throw new Error("seed");
+    const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    const dataset = db.all("SELECT id FROM items WHERE type = 'Dataset'")[0]?.id as number;
+    const metric = insertItem(db, { type: "Metric", name: "m", ...attrs });
+    const measured = saveRelation(db, {
+      subjectId: metric,
+      type: "MEASURED_ON",
+      objectId: dataset,
+      ...attrs,
+    }).id;
+    addEvidence(db, {
+      target: { relationId: measured },
+      sourceVersionId: versionId,
+      start: 0,
+      end: 5,
+      quote: "plain",
+    });
+    tableEntry("source-deleted");
+    expect(db.all("SELECT 1 FROM dataset_tables")).toEqual([]);
+    expect(db.all("SELECT 1 FROM facts WHERE kind = 'dataset.column'")).toEqual([]);
+    expect(db.all("SELECT name FROM items WHERE type = 'Dataset'")).toEqual([
+      { name: `${TABLE.title}:${TABLE.sheet}` },
+    ]);
+    expect(left().sort()).toEqual([TABLE.sheet, TABLE.title].sort());
+    canonicalTransaction(db, (tx) =>
+      applyTombstone(tx, {
+        identity: { connectorInstanceId: "c1", namespace: "", externalId: "holder-doc" },
+        reason: "source-deleted",
+        lastRevision: null,
+        at: AT,
+      }),
+    );
+    expect(left()).toEqual([]);
+    expect(db.all("SELECT 1 FROM items WHERE type = 'Dataset'")).toEqual([]);
+  });
+
   it("a prose source's deletion leaves a table's names alone", async () => {
     await seedTable();
     seed();

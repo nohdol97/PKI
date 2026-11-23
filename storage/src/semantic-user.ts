@@ -13,6 +13,7 @@
 // The type definitions' user operations (ontology.ts, S01-T07) and entity resolution's (entity-decisions.ts,
 // S02-T04: merge, unmerge, the distinct mark) travel in the same object, so the one lint-guarded name
 // `userDecisions` (and its constructor `createUserDecisions`, which the composition root calls) is the only way to them.
+import { eraseChecksReading, queueChecksAround } from "./analytical-check-lines.ts";
 import { listEvidence } from "./knowledge.ts";
 import { findSameForm, isSurfaceFormKind } from "./surface-form.ts";
 import {
@@ -236,7 +237,10 @@ function undoCreated(
   const held =
     listEvidence(tx, ref.kind === "fact" ? { factId: ref.id } : { relationId: ref.id }).length > 0;
   if (!held) {
+    // the lines that read the row go with it, and the sources it reached are checked again (S03-R11)
+    const around = eraseChecksReading(tx, ref);
     tx.run(`DELETE FROM ${TABLE[ref.kind]} WHERE id = ?`, [ref.id]);
+    queueChecksAround(tx, around);
     return { status: "removed" };
   }
   const seq = writeLine(tx, ref, {
