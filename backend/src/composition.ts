@@ -811,7 +811,7 @@ export function productLocalFiles(
     /** The running instances of JSONL file locations (I02B-R41); the composition's start binds them. */
     jsonlFile?: JsonlFileHooks;
     /** A full sync of the `local-files` instance (I02B-R13). */
-    rescan: () => void;
+    rescan: () => boolean;
     /** The driver's watch answer and its refresh after a change (I02B-R20, R38). */
     watching?: (locationId: string) => boolean;
     changed?: () => void;

@@ -1,6 +1,7 @@
 // Where a local source is now (I02B-R39): the relative path and whether the file can be found, for the
 // evidence screen; and the absolute path of its folder entry, for the shell only. The screen holds a source
-// version id, so both are keyed by it. The absolute path is returned by `revealPathOf` and travels only on the
+// version id, so both are keyed by it. The absolute path is returned by `revealPathOf`, only for a version the
+// read gate shows, and travels only on the
 // parent-child channel to the shell's main process (`shell-main.ts`), never in an HTTP answer (P6, I02B-R36).
 // The answers come from the index, not from the disk: a stat here would make a screen read a file system.
 import type { LocalSourceInfo } from "@pki/contracts";
@@ -48,8 +49,16 @@ export function sourceInfoOf(db: SqlDriver, sourceVersionId: number): LocalSourc
   };
 }
 
-/** The file's absolute path for the shell to show in its folder; undefined when the source is not a local file's or not findable. */
-export function revealPathOf(db: SqlDriver, sourceVersionId: number): string | undefined {
+/**
+ * The file's absolute path for the shell to show in its folder; undefined when the source is not a local file's,
+ * not findable, or not shown by the read gate (`shown`, required: I02F-R2).
+ */
+export function revealPathOf(
+  db: SqlDriver,
+  sourceVersionId: number,
+  shown: (versionId: number) => boolean,
+): string | undefined {
+  if (!shown(sourceVersionId)) return undefined;
   const at = locate(db, sourceVersionId);
   if (!at || at.location.state === "unavailable" || at.pendingDelete !== 0) return undefined;
   const path = join(at.location.realPath, at.relativePath);

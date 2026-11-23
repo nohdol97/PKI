@@ -62,6 +62,18 @@ describe("pause and resume", () => {
     });
   });
 
+  it("I02F-C3: a paused location refuses the deletion confirmation and keeps its held mark", async () => {
+    const { w, locations } = make();
+    w.write("a.md", "# a\n\nbody of a\n");
+    storeUpserts(w, await w.settle());
+    w.db.run("UPDATE local_file_entries SET pending_delete = 1");
+    locations.pause({ locationId: w.locationId });
+    expect(locations.confirmDeletions({ locationId: w.locationId, count: 1 })).toEqual({
+      error: "bad-request",
+    });
+    expect(w.index.entriesOfLocation(w.locationId).map((e) => e.pendingDelete)).toEqual([1]);
+  });
+
   it("an unavailable location can be paused too (I02B-R7)", () => {
     const { w, locations } = make();
     closeLocation(w.db, w.locationId, "unavailable", "root-missing");

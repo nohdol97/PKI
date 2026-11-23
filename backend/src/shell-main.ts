@@ -14,7 +14,7 @@ import { bootBackend, closeProviders } from "./boot.ts";
 import { electronHostChannel } from "./normalizer-host-electron.ts";
 import { channelSecrets } from "./secret-sources.ts";
 import { locationTicket, type ApprovalTickets } from "./local-locations.ts";
-import { revealPathOf, revealRequest } from "./local-reveal.ts";
+import { revealRequest } from "./local-reveal.ts";
 import { shellOptions } from "./shell-options.ts";
 import type { RunningServer } from "./server.ts";
 import type { SiteRegistration } from "./site-registration.ts";
@@ -88,7 +88,7 @@ export async function runShell(site: SiteRegistration): Promise<void> {
     // built apart so the boot call stays a literal with no spread (entries.swap.test.ts, V01-R17)
     const excluded = options.userData ? [options.userData] : [];
     const localFiles = { shellHost: normalizerHosts.spawner, excluded };
-    const { server, db, providers, tickets, notifyOutbox } = await bootBackend({
+    const { server, providers, tickets, notifyOutbox, revealPath, db } = await bootBackend({
       dataDir,
       connectors: options.connectors,
       site,
@@ -106,7 +106,7 @@ export async function runShell(site: SiteRegistration): Promise<void> {
       server,
       providers,
       tickets,
-      revealPath: (sourceVersionId) => revealPathOf(db, sourceVersionId),
+      revealPath,
       notifyAck: (data) => notifyOutbox.acknowledge(data),
       close: () => db.close(),
     };
