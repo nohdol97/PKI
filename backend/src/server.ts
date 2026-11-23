@@ -125,6 +125,7 @@ import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { createFeedbackApi } from "./feedback-api.ts";
 import { createLintReads } from "./lint-read.ts";
 import { createExploreReads } from "./explore-read.ts";
+import { readSourceThread } from "./thread-read.ts";
 import { createWikiReads } from "./wiki-read.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -1205,6 +1206,8 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     exploreItems: async (request) => explore.items(request),
     exploreItem: async (request) => explore.item(request) ?? { error: "not-found" as const },
     exploreSource: async (request) => explore.source(request) ?? { error: "not-found" as const },
+    sourceThread: async ({ versionId }) =>
+      readSourceThread(options.db, gate, versionId) ?? { error: "not-found" as const },
     // K02-R15: the lint. A decision runs in the transaction of the entry it calls
     lint: async () => lint.list(),
     lintDecide: async (request) => lint.decide(request, serverTime()),

@@ -51,11 +51,13 @@ import {
   ExploreSourceResponseSchema,
 } from "./explore.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
+import { SourceThreadRequestSchema, SourceThreadResponseSchema } from "./thread.ts";
 
 export * from "./adapter-errors.ts";
 export * from "./analytical-types.ts";
 export * from "./ask.ts";
 export * from "./explore.ts";
+export * from "./thread.ts";
 export type * from "./embedding.ts";
 export type * from "./knowledge-engine.ts";
 export type * from "./vector-index.ts";
@@ -2096,6 +2098,13 @@ export const routes = {
     path: "/api/explore/source",
     request: ExploreSourceRequestSchema,
     response: ExploreSourceResponseSchema,
+  },
+  // I02-B (R55): the thread a source version belongs to. A POST with the version number in the body, as the other by-number reads are.
+  sourceThread: {
+    method: "POST",
+    path: "/api/sources/thread",
+    request: SourceThreadRequestSchema,
+    response: SourceThreadResponseSchema,
   },
   wikiEdit: {
     method: "POST",

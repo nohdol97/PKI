@@ -192,6 +192,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     exploreItems: {},
     exploreItem: { itemId: 1, depth: 2 },
     exploreSource: { versionId: 1 },
+    sourceThread: { versionId: 1 },
     // the Wiki (K01-T1): the page and the note's key are set in beforeAll, once the seed's pages are built
     wikiPage: { key: "" },
     wikiEdit: { op: "note-add", key: "", text: "합성 메모" },
