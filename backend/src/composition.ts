@@ -62,6 +62,7 @@ import {
   createProductRegistry,
   createProjections,
   createWikiBuildHandler,
+  createInsightInterpretHandler,
   createWikiSummaryHandler,
   insightsReceiver,
   derivativeRegistry,
@@ -86,6 +87,8 @@ import {
   onMembershipChanged,
   listLocations,
   prepareCanonicalDb,
+  INSIGHT_INTERPRET_KIND,
+  requestInsightInterpretations,
   requestWikiBuild,
   requestWikiSummaries,
   WIKI_BUILD_KIND,
@@ -481,7 +484,10 @@ export function productRunner(
       // K01-R5: a job that closed may have left the Wiki's pages behind: queue the one build; the drain claims it
       const built = requestWikiBuild(db).status === "registered";
       // K01-R12: pages whose summary is not of their content get a job; the one that closed may have left some
-      if (requestWikiSummaries(db) > 0 || built) void runner.wake();
+      const summaries = requestWikiSummaries(db) > 0;
+      // P01-R7: Insights whose content changed (or that were never read) get an interpretation job, setting on only
+      const interpretations = requestInsightInterpretations(db) > 0;
+      if (summaries || interpretations || built) void runner.wake();
       const manager = options.connectors?.();
       const stoppedOnReplaced = replaced.delete(replacedKey(job));
       if (
@@ -516,6 +522,12 @@ export function productRunner(
       [WIKI_SUMMARY_KIND]: createWikiSummaryHandler({
         db,
         ...(options.registry ? { registry: options.registry } : {}),
+      }),
+      // P01-R7: one Broker call per Insight, IDs only; the Broker asks consent and egress, the row keeps its code content
+      [INSIGHT_INTERPRET_KIND]: createInsightInterpretHandler({
+        db,
+        ...(options.registry ? { registry: options.registry } : {}),
+        ...(clock ? { now: () => new Date(clock.now()) } : {}),
       }),
       ...(options.connectors
         ? {

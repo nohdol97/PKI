@@ -193,7 +193,7 @@ flowchart TB
 | 분석 의미의 표 행(`dataset_tables`: Dataset 항목, 표 원본, 표 키, 행 수)과 검사 줄(`analytical_checks`: 사실, 검사 이름, 통과 여부, 센 수. S03). 사실의 값과 원문 글은 없지만, 표 키는 XLSX 시트 이름이라 사용자의 글이다 | 정본 SQLite | **정본**(표 행은 표 원본에서, 검사 줄은 표와 사실에서 다시 만들 수 있다) | 표 원본을 다시 프로파일하고 검사를 다시 돌린다. 사용자의 승인은 행에 남아 있다 |
 | 사용자의 교정·승인·기각·직접 추가: 따로 테이블을 두지 않고 대상 행(`user_authored`, 인식 유형 `user-approved`)과 위 이력 행의 줄이며, Insight가 입력으로 쓴 사용자 행은 `insight_user_inputs`로 그 Insight와 잇는다(S01-T02·T03·T04). 입력 화면은 아직 없고 API로만 한다 | 정본 SQLite | **정본** | 복구 불가 |
 | 피드백·선호 | 아직 없다(Phase 5 P03에서 정한다) | — | — |
-| Insight(P01: 유형 이름 `rule`, 사실 줄 `fact_lines`, 이유 요약 `reasoning_summary`, 신뢰도 `confidence`, 시급 기준 날짜 `urgency_date`, 내용이 바뀐 시각 `changed_at`. 순위는 저장하지 않고 읽을 때 계산) | 정본 SQLite | **정본**. 내용은 규칙으로 다시 계산할 수 있다 | 재계산 |
+| Insight(P01: 유형 이름 `rule`, 사실 줄 `fact_lines`, 이유 요약 `reasoning_summary`, 신뢰도 `confidence`, 시급 기준 날짜 `urgency_date`, 내용이 바뀐 시각 `changed_at`, 설정을 켰을 때만 채워지는 LLM 해석 열 셋 `llm_reasoning_summary`·`llm_impact`·`llm_actionability`(P01-T04). 순위는 저장하지 않고 읽을 때 계산) | 정본 SQLite | **정본**. 내용은 규칙으로 다시 계산할 수 있다 | 재계산 |
 | 작업(job)과 스케줄 상태 | 정본 SQLite | **정본**(운영 상태) | 미완료 작업을 원본에서 다시 등록 |
 | 설정, 동의 기록, 전송 정책 | 정본 SQLite | **정본** | 사용자가 다시 설정 |
 | Provider 호출 이력(본문 없음) | 정본 SQLite | **정본**(감사용) | 복구 불가 |
