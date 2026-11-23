@@ -1,8 +1,11 @@
 // S03-T05 `check.job` (S03-R12, R11, C2): the `analytical-check` handler on a real SQLite database. A table
 // source's Datasets and the Metrics and Joins that reach them get one line per (fact, check), written through
 // `commitDerived` behind the version fence; no Provider is called; a check whose input conflicts writes no line.
-// The judgement of the lines is S03-T06's: the handler only hands the results over. All data is synthetic.
+// The judgement of the lines (S03-R15, R16, T06) is the job's own last item: it reads stored lines and row
+// states only. All data is synthetic.
 import {
+  addEvidence,
+  automatedLifecycle,
   closeJob,
   createCommitScope,
   findSourceVersionId,
@@ -18,6 +21,7 @@ import {
   saveFact,
   saveRelation,
   saveSourceRecord,
+  userDecisions,
   writeSetting,
   type KnowledgeStatus,
   type SqlDriver,
@@ -26,11 +30,8 @@ import {
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { csvVersion } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  createAnalyticalCheckHandler,
-  type CheckJobHandOver,
-  type CheckLineOutcome,
-} from "./analytical-check-job.ts";
+import { createAnalyticalCheckHandler } from "./analytical-check-job.ts";
+import { AUTO_VERIFY_SETTING } from "./auto-verify.ts";
 
 const T0 = new Date("2026-11-23T00:00:00.000Z");
 let db: SqlDriver;
@@ -144,7 +145,6 @@ function world(
 function run(
   sourceId: number,
   options: {
-    judge?: (tx: SqlDriver, handOver: CheckJobHandOver) => void;
     scope?: ReturnType<typeof createCommitScope>;
     between?: () => void;
   } = {},
@@ -152,11 +152,7 @@ function run(
   registerAnalyticalCheckJob(db, sourceId, T0);
   const job = leaseNextJob(db, { kinds: [ANALYTICAL_CHECK_JOB_KIND], now: T0, leaseMs: 60_000 });
   if (!job) throw new Error("no job queued");
-  const handler = createAnalyticalCheckHandler({
-    db,
-    now: () => T0,
-    ...(options.judge ? { judge: options.judge } : {}),
-  });
+  const handler = createAnalyticalCheckHandler({ db, now: () => T0 });
   return handler(job).then((result) => {
     options.between?.();
     if (result.status !== "succeeded") return { job, status: result.status };
@@ -405,35 +401,11 @@ describe("check.job: the run's end", () => {
     expect(readKnowledgeRevision(db)).toBeGreaterThan(0);
   });
 
-  it("hands the written results and the split record's rows to judge in the closing transaction, and item_split_moves is unchanged", async () => {
+  it("the closing judgement runs after the lines are written and leaves the split record as it was", async () => {
     const w = world();
     const moves = db.all("SELECT * FROM item_split_moves");
-    const seen: CheckJobHandOver[] = [];
-    let readInside = 0;
-    await run(w.a.sourceId, {
-      judge: (tx, handOver) => {
-        seen.push(handOver);
-        readInside = tx.all("SELECT 1 FROM analytical_checks").length; // the lines are written already
-      },
-    });
-    expect(seen).toHaveLength(1);
-    expect(seen[0]?.source).toEqual({ sourceId: w.a.sourceId, version: w.a.version });
-    expect(seen[0]?.splitMoved).toEqual([]);
-    const written = (seen[0]?.results ?? [])
-      .map((r: CheckLineOutcome) => `${r.factId}:${r.check}`)
-      .sort();
-    expect(written).toEqual(
-      [
-        `${w.grain}:grain`,
-        `${w.grain}:schema`,
-        `${w.measure}:schema`,
-        `${w.calc}:schema`,
-        `${w.calc}:aggregation`,
-        `${w.keys}:schema`,
-        `${w.cardinality}:join-cardinality`,
-      ].sort(),
-    );
-    expect(readInside).toBe(7);
+    await run(w.a.sourceId);
+    expect(db.all("SELECT 1 FROM analytical_checks")).toHaveLength(7);
     expect(db.all("SELECT * FROM item_split_moves")).toEqual(moves);
   });
 
@@ -512,5 +484,102 @@ describe("check.job: the run's end", () => {
     expect(lines(w.grain).grain?.current).toBe(false);
     await run(w.a.sourceId);
     expect(lines(w.grain).grain).toMatchObject({ current: true, examined: 3 });
+  });
+});
+
+describe("gate.lost / gate.auto-verify (S03-R15, R16, G-C3, G-C4, G-C5): the job's judgement", () => {
+  const FEWER = [
+    ["k", "other"],
+    ["1", "2"],
+  ] as const;
+  const last = (factId: number) =>
+    db.all(
+      "SELECT actor, action, reason, basis_source_id, basis_version FROM fact_history WHERE fact_id = ? ORDER BY seq DESC LIMIT 1",
+      [factId],
+    )[0];
+  const status = (factId: number) =>
+    db.all("SELECT status FROM facts WHERE id = ?", [factId])[0]?.status;
+
+  it("G-C4: a user-approved calculation whose column a new table version lost is disputed by the policy with data-check-failed, value unchanged and the new version as the basis", async () => {
+    const w = world();
+    await run(w.a.sourceId);
+    expect(userDecisions.decide(db, { kind: "fact", id: w.calc }, "approve").status).toBe(
+      "applied",
+    );
+    const next = arrive(w.salesId, FEWER);
+    await run(w.a.sourceId);
+    expect(status(w.calc)).toBe("disputed");
+    expect(db.all("SELECT value FROM facts WHERE id = ?", [w.calc])).toEqual([
+      { value: '{"aggregation":"sum","column":"amount"}' },
+    ]);
+    expect(last(w.calc)).toEqual({
+      actor: "policy",
+      action: "dispute",
+      reason: "data-check-failed",
+      basis_source_id: w.a.sourceId,
+      basis_version: next.version,
+    });
+  });
+
+  it("G-C4: a calculation the policy promoted goes back to candidate with data-check-failed when its check fails", async () => {
+    const w = world();
+    await run(w.a.sourceId);
+    expect(
+      automatedLifecycle.autoVerify(db, { kind: "fact", id: w.calc }, T0.toISOString()).status,
+    ).toBe("applied");
+    const next = arrive(w.salesId, FEWER);
+    await run(w.a.sourceId);
+    expect(status(w.calc)).toBe("candidate");
+    expect(last(w.calc)).toEqual({
+      actor: "policy",
+      action: "auto-verify-reverted",
+      reason: "data-check-failed",
+      basis_source_id: w.a.sourceId,
+      basis_version: next.version,
+    });
+  });
+
+  it("G-C3: a candidate meeting the five conditions is promoted in the job's transaction once its lines pass", async () => {
+    const w = world();
+    writeSetting(db, AUTO_VERIFY_SETTING, "on");
+    for (const [id, body] of [
+      ["d1", "sum is stated here"],
+      ["d2", "total is stated here"],
+    ] as const) {
+      const saved = saveSourceRecord(db, "c1", { namespace: "", externalId: id, title: id, body });
+      if (saved.status !== "created") throw new Error(saved.status);
+      addEvidence(db, {
+        target: { factId: w.calc },
+        sourceVersionId: findSourceVersionId(db, saved.sourceId, saved.version) as number,
+        start: body.indexOf("is stated"),
+        end: body.length,
+        quote: "is stated here",
+      });
+    }
+    expect(status(w.calc)).toBe("candidate");
+    // the evidence queued a job at the wall clock; `run` queues and leases its own at T0
+    db.run("DELETE FROM jobs WHERE kind = ?", [ANALYTICAL_CHECK_JOB_KIND]);
+    await run(w.a.sourceId);
+    expect(status(w.calc)).toBe("verified");
+    expect(last(w.calc)).toMatchObject({ actor: "policy", action: "auto-verify" });
+  });
+
+  it("G-C5: a policy that refuses the job's own lineage still lets the job judge: a stored failing line disputes the verified row", async () => {
+    const a = arrive("sales", SALES, ["x"]);
+    const b = arrive("customers", CUSTOMERS, ["y"]);
+    const d = bind("sales", a.sourceId);
+    const d2 = bind("customers", b.sourceId);
+    const join = item("Join", "j");
+    const keys = fact(join, "join.keys", '[["k","nothere"]]', "verified");
+    rel(join, "JOIN_LEFT", d);
+    rel(join, "JOIN_RIGHT", d2);
+    const scope = createCommitScope({
+      policy: { combinable: (scopes: readonly unknown[]) => scopes.length !== 1 } as never,
+      now: () => T0.toISOString(),
+    });
+    await run(a.sourceId, { scope });
+    expect(lines(keys).schema).toMatchObject({ passed: false, failure: "column-missing" }); // the two-scope line passes the policy
+    expect(status(keys)).toBe("disputed");
+    expect(last(keys)).toMatchObject({ reason: "data-check-failed", basis_source_id: a.sourceId });
   });
 });

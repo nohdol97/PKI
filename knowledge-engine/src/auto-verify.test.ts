@@ -15,6 +15,8 @@ import {
   readFact,
   readRelation,
   registerConnectorInstance,
+  saveCheckLine,
+  saveDatasetTable,
   saveFact,
   saveRelation,
   saveSourceRecord,
@@ -935,5 +937,62 @@ describe("user actions with the setting off after on (review D1-S1)", () => {
     assessAfterUserAction(db, { itemIds: [item], relationIds: [] }, T);
     expect(state(ref).status).toBe("candidate");
     expect(lines(ref).at(-1)).toMatchObject({ action: "auto-verify-reverted" });
+  });
+});
+
+describe("autoverify.conditions: the sixth condition (S03-R15, G-C3)", () => {
+  /** A calculation fact meeting the five S01 conditions, on a Metric measured on a Dataset bound to a table. */
+  function calculation() {
+    const table = version("tbl", "a,b");
+    const dataset = insertItem(db, { type: "Dataset", name: "sales", ...attrs() });
+    saveDatasetTable(db, { itemId: dataset, sourceId: table.sourceId, key: "", rowCount: 1 });
+    const metric = insertItem(db, { type: "Metric", name: "total", ...attrs() });
+    saveRelation(db, { subjectId: metric, type: "MEASURED_ON", objectId: dataset, ...attrs() });
+    const ref = fact(metric, { kind: "metric.calculation", value: '{"aggregation":"count"}' });
+    for (const s of [version("x", "sum is stated here"), version("y", "total is stated here")]) {
+      cite({ factId: ref.id }, s, "is stated here");
+    }
+    const lines = (versionId: number) =>
+      (["schema", "aggregation"] as const).forEach((check) =>
+        saveCheckLine(db, {
+          factId: ref.id,
+          check,
+          passed: true,
+          failure: null,
+          examined: 1,
+          violations: 0,
+          skipped: 0,
+          versionId,
+          otherVersionId: null,
+          at: T,
+        }),
+      );
+    return { ref, metric, table, lines };
+  }
+
+  it("G-C3: a candidate meeting the five conditions is not promoted while a data condition is unmet and names `data-checks`; once the lines pass it is", () => {
+    enable();
+    const w = calculation();
+    expect(assessAutoVerify(db, w.ref, T)).toEqual({
+      status: "refused",
+      reason: "auto-verify-unmet",
+      unmet: ["data-checks"],
+    });
+    w.lines(w.table.versionId);
+    expect(assessAutoVerify(db, w.ref, T).status).toBe("applied");
+    expect(readFact(db, w.ref.id)?.status).toBe("verified");
+  });
+
+  it("G-C3: a row the policy promoted stays verified when its line goes stale and a rival unit arrives", () => {
+    enable();
+    const w = calculation();
+    w.lines(w.table.versionId);
+    expect(assessAutoVerify(db, w.ref, T).status).toBe("applied");
+    version("tbl", "a,b,c"); // a new table version the lines did not read
+    for (const value of ["KRW", "USD"]) {
+      userDecisions.add(db, { kind: "fact", itemId: w.metric, factKind: "metric.unit", value });
+    }
+    expect(assessAutoVerify(db, w.ref, T)).toEqual({ status: "unchanged" });
+    expect(readFact(db, w.ref.id)?.status).toBe("verified");
   });
 });
