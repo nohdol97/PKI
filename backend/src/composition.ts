@@ -27,6 +27,7 @@ import {
   BUILD_KIND,
   createBroker,
   createCallRecorder,
+  readCallBudget,
   createEgressPolicy,
   createExecutionGate,
   createUserActionLedger,
@@ -463,6 +464,7 @@ export function productCalls(
     egress,
     execution,
     recorder: createCallRecorder(db),
+    limits: { callBudget: readCallBudget(db) }, // P7F-R3: read once, at start
     // a claimed scope is compared by the registry's policy, the one every other scope judgment
     // uses; the mapping scope -> class is the registration's, else a test build's own, else the public
     // repository's (I05-R14, S08)

@@ -44,6 +44,7 @@ export {
   type UserActionRedeemer,
 } from "./user-actions.ts";
 export { BUILD_KIND, loopbackHttpAllowed, type BuildKind } from "./build-kind.ts";
+export { CALL_BUDGET_MAX_CALLS_SETTING, readCallBudget } from "./call-budget.ts";
 export {
   CLI_ARGUMENTS,
   CLI_PROFILES,
