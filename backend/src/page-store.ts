@@ -245,7 +245,14 @@ export function storePage(
     if (!parsed.success) return refuse("schema");
     const change = parsed.data;
     if (violatesCapabilities(change, capabilities)) return refuse("capability-violation");
-    if (change.kind === "upsert" && !blocksValid(change.record.body, change.record.blocks ?? [])) {
+    if (
+      change.kind === "upsert" &&
+      !blocksValid(
+        change.record.body,
+        change.record.blocks ?? [],
+        change.record.attachments?.length,
+      )
+    ) {
       return refuse("invalid-blocks");
     }
     judged.push({ i, change, seen: expectedContent(raw as object) });

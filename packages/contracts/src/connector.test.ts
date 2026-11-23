@@ -183,6 +183,43 @@ describe("blocks and locators (I01-R7)", () => {
   });
 });
 
+describe("attachments (I02C-C1)", () => {
+  const two = [
+    { name: "plan.pdf", mediaType: "application/pdf", size: 1024 },
+    { name: "table.xlsx", mediaType: "application/vnd.ms-excel", size: 0 },
+  ];
+
+  it("accepts a mail record with two attachments and one without", () => {
+    expect(SourceRecordSchema.parse({ ...record, attachments: two }).attachments).toEqual(two);
+    expect(SourceRecordSchema.safeParse(record).success).toBe(true);
+  });
+
+  it.each([
+    ["a name with a slash", [{ ...two[0], name: "a/b.pdf" }]],
+    ["a mediaType that is not type/subtype", [{ ...two[0], mediaType: "pdf" }]],
+    ["101 attachments", Array.from({ length: 101 }, () => two[0])],
+  ])("refuses %s", (_, attachments) => {
+    expect(SourceRecordSchema.safeParse({ ...record, attachments }).success).toBe(false);
+  });
+
+  it("refuses a backslash or control character in a name", () => {
+    for (const name of ["a\\b.pdf", "a\u0007.pdf"]) {
+      const attachments = [{ ...two[0], name }];
+      expect(SourceRecordSchema.safeParse({ ...record, attachments }).success, name).toBe(false);
+    }
+  });
+
+  it("blocksValid refuses an attachment index at or past the list length (I02C-C2)", () => {
+    const b = (attachment?: number) => [
+      { start: 0, end: 1, ...(attachment === undefined ? {} : { attachment }) },
+    ];
+    expect(blocksValid("ab", b(1), 2)).toBe(true);
+    expect(blocksValid("ab", b(2), 2)).toBe(false);
+    expect(blocksValid("ab", b(0))).toBe(false);
+    expect(blocksValid("ab", b())).toBe(true);
+  });
+});
+
 describe("ChangeSchema (I01-R6)", () => {
   const ref = { namespace: "n", externalId: "e", revision: 2, at: AT };
 

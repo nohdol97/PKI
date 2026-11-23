@@ -140,27 +140,62 @@ export const NativeLocatorSchema = z.discriminatedUnion("format", [
 ]);
 export type NativeLocator = z.infer<typeof NativeLocatorSchema>;
 
-/** Code points `[start, end)` of the record's body and where they came from. */
+/** The limits of a mail attachment's metadata (I02C-R1, R2): over them the record is refused, not cut. */
+export const MAX_ATTACHMENTS = 100;
+export const MAX_ATTACHMENT_NAME_LENGTH = 255;
+export const MAX_ATTACHMENT_MEDIA_TYPE_LENGTH = 127;
+
+/** The name of an attachment: no control character and no path separator (I02C-R2, D4). */
+const attachmentName = z
+  .string()
+  .min(1)
+  .max(MAX_ATTACHMENT_NAME_LENGTH)
+  // eslint-disable-next-line no-control-regex -- the rule is about control characters
+  .regex(/^[^\u0000-\u001F\u007F-\u009F/\\]+$/);
+
+/** A lowercase `type/subtype` without parameters (I02C-R2). */
+const attachmentMediaType = z
+  .string()
+  .max(MAX_ATTACHMENT_MEDIA_TYPE_LENGTH)
+  .regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/);
+
+/** One attachment as the origin system said it (I02C-R1): never checked by the product. */
+export const AttachmentSchema = z.strictObject({
+  name: attachmentName,
+  mediaType: attachmentMediaType,
+  size: z.int().min(0).max(Number.MAX_SAFE_INTEGER),
+});
+export type Attachment = z.infer<typeof AttachmentSchema>;
+
+/**
+ * Code points `[start, end)` of the record's body and where they came from. `attachment` is the
+ * index into the record's `attachments` of the attachment this text came from; the locator then
+ * places it inside that attachment (I02C-R3).
+ */
 export const BlockSchema = z.strictObject({
   start: z.int(),
   end: z.int(),
   locator: NativeLocatorSchema,
+  attachment: z.int().min(0).optional(),
 });
 export type Block = z.infer<typeof BlockSchema>;
 
 /**
  * The range rules of I01-R7, which need the body: `0 ≤ start < end ≤` its code
  * point count, sorted by start, no overlap, gaps allowed. A record failing them
- * is refused as `invalid-blocks`, apart from schema failures.
+ * is refused as `invalid-blocks`, apart from schema failures. A block's `attachment` must index
+ * the record's attachment list (I02C-R3).
  */
 export function blocksValid(
   body: string,
-  blocks: readonly Pick<Block, "start" | "end">[],
+  blocks: readonly Pick<Block, "start" | "end" | "attachment">[],
+  attachmentCount = 0,
 ): boolean {
   const length = Array.from(body).length;
   let previousEnd = 0;
-  for (const { start, end } of blocks) {
+  for (const { start, end, attachment } of blocks) {
     if (start < previousEnd || start >= end || end > length) return false;
+    if (attachment !== undefined && attachment >= attachmentCount) return false;
     previousEnd = end;
   }
   return true;
@@ -184,6 +219,8 @@ export const SourceRecordSchema = z.strictObject({
   /** The normalized body; block ranges count its code points. */
   body: z.string(),
   blocks: z.array(BlockSchema).optional(),
+  /** The mail's attachments' metadata, not their content (I02C-R1). */
+  attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional(),
   /** Who may see it, as the origin system names them; absent means unknown (strictest). */
   accessScope: accessScope.optional(),
   sourceType: z.string().optional(),

@@ -71,6 +71,7 @@ describe("SourceView", () => {
             start,
             end,
             locator: null,
+            attachment: null,
             sourceVersion: {
               id: 1,
               version: 1,
@@ -102,6 +103,7 @@ describe("SourceView", () => {
           start,
           end: start + Array.from(quote).length,
           locator: null,
+          attachment: null,
           sourceVersion: { id: 3, version: 2, latestVersion: 2, title: "제목", body },
         }}
       />,
@@ -120,6 +122,7 @@ describe("SourceView", () => {
           start: 5,
           end: 99,
           locator: null,
+          attachment: null,
           sourceVersion: { id: 3, version: 1, latestVersion: 1, title: "제목", body: "짧은 본문" },
         }}
       />,
@@ -167,7 +170,43 @@ const source = (version: number, latestVersion: number) => ({
   start: 0,
   end: 1,
   locator: null,
+  attachment: null,
   sourceVersion: { id: 3, version, latestVersion, title: "\u202e제목", body: "가나" },
+});
+
+// I02C-C5: the attachment of the evidence's block is drawn as text before the locator line, and not at all for null
+describe("SourceView attachment line", () => {
+  const withAttachment = (
+    attachment: { name: string; mediaType: string; size: number } | null,
+  ) => ({
+    ...source(1, 1),
+    locator: { format: "pdf", page: 3 } as const,
+    attachment,
+  });
+
+  it("shows the attachment's name, type and size before the locator, escaped as text", () => {
+    const html = renderToStaticMarkup(
+      <SourceView
+        source={withAttachment({
+          name: "<b>plan</b>.pdf",
+          mediaType: "application/pdf",
+          size: 1024,
+        })}
+      />,
+    );
+    expect(html).toContain("첨부:");
+    expect(html).toContain("&lt;b&gt;plan&lt;/b&gt;.pdf");
+    expect(html).toContain("application/pdf");
+    expect(html).toContain("1024바이트");
+    expect(html).not.toContain("<b>plan");
+    expect(html.indexOf("첨부:")).toBeLessThan(html.indexOf("위치:"));
+  });
+
+  it("draws no attachment line for null", () => {
+    expect(renderToStaticMarkup(<SourceView source={withAttachment(null)} />)).not.toContain(
+      "첨부:",
+    );
+  });
 });
 
 describe("SourceView labels", () => {
@@ -296,6 +335,7 @@ describe("SourceView of a local file", () => {
     start: 3,
     end: 5,
     locator: { format: "pdf", page: 3 } as const,
+    attachment: null,
     sourceVersion: { id: 9, version: 1, latestVersion: 1, title: "제목", body: "합성 등대 문장" },
   };
   const here = (over: object) => ({

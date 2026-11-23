@@ -264,6 +264,16 @@ describe("importJsonl", () => {
     );
   });
 
+  it("a revoke line of a source stored with attachments still matches its content (I02C D2)", async () => {
+    const attachments = [{ name: "plan.pdf", media_type: "application/pdf", size: 10 }];
+    await importJsonl(db, line({ external_id: "m", attachments }));
+    const result = await importJsonl(
+      db,
+      line({ external_id: "m", operation: "revoke", version: 2, access_scope: ["user:a"] }),
+    );
+    expect(result.errors).toEqual([]);
+  });
+
   it("keeps per-source line order across a delete between two upserts in one file", async () => {
     // rounds: v1 is stored, the delete (revision 2) purges it, revision 3 is a new version past the cover
     const result = await importJsonl(

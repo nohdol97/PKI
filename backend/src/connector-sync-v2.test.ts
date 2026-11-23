@@ -319,6 +319,27 @@ describe("sync.capability-violation", () => {
     expect(counts()).toEqual([2, 2]);
   });
 
+  it("a block naming an attachment past the list is invalid-blocks and the rest is stored (I02C-C2)", async () => {
+    const attachments = [
+      { name: "a.pdf", mediaType: "application/pdf", size: 1 },
+      { name: "b.pdf", mediaType: "application/pdf", size: 2 },
+    ];
+    const m = await manager(new ScriptedConnector(), {
+      entries: [
+        up("a"),
+        up("b", 1, {
+          attachments,
+          blocks: [{ start: 0, end: 4, attachment: 2, locator: { format: "pdf", page: 1 } }],
+        }),
+      ],
+      pageSize: 10,
+    });
+    expect(await m.sync("s")).toMatchObject({
+      created: 1,
+      rejected: [{ at: "change:1", code: "invalid-blocks" }],
+    });
+  });
+
   it("the same revision with other content is refused as revision-conflict, and stores nothing of it", async () => {
     const m = await manager(new ScriptedConnector(), {
       entries: [up("a", 2), up("a", 2, {}, "other body"), up("b")],

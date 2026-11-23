@@ -6,7 +6,11 @@
 // `malicious: true` marks a synthetic malicious variant for the synthetic
 // manifest only; a Connector drops it, since SourceRecordSchema rejects it.
 import { z } from "zod";
-import { ISO_WITH_OFFSET as isoWithOffset } from "./connector.ts";
+import {
+  AttachmentSchema,
+  ISO_WITH_OFFSET as isoWithOffset,
+  MAX_ATTACHMENTS,
+} from "./connector.ts";
 
 /**
  * The longest connector instance id anywhere (I04-R17): the import line's `connector_instance_id`, the
@@ -33,6 +37,15 @@ export const ImportRecordSchema = z
     version: z.int().min(1),
     access_scope: z.array(z.string()),
     metadata: z.record(z.string(), z.unknown()),
+    /** A mail's attachments (I02C-R4): the record's `attachments` with `media_type`. */
+    attachments: z
+      .array(
+        AttachmentSchema.omit({ mediaType: true }).extend({
+          media_type: AttachmentSchema.shape.mediaType,
+        }),
+      )
+      .max(MAX_ATTACHMENTS)
+      .optional(),
     connector_instance_id: z.string().min(1).max(MAX_INSTANCE_ID_LENGTH),
     operation: z.enum(["upsert", "delete", "revoke", "access-revoked"]),
     schema_version: z.literal("1"),
