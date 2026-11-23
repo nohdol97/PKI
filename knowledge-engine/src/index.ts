@@ -4,11 +4,16 @@ export {
   DEPENDS_ON,
   isDate,
   TARGET_DATE,
-  dependencyDelayReceiver,
   recomputeDependencyDelay,
+} from "./dependency-delay.ts";
+export {
+  isAutoNotifyExcluded,
+  LOW_CONFIDENCE_BELOW,
   type RuleOutcome,
   type RuleScope,
-} from "./dependency-delay.ts";
+} from "./insight-rules.ts";
+export { INSIGHT_RULES, insightsReceiver, recomputeInsights } from "./insight-code-rules.ts";
+export { rankInsight, type InsightRanking, type RankingSignals } from "./insight-ranking.ts";
 export {
   candidatesReceiver,
   countLinksRefused,
