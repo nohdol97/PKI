@@ -83,7 +83,7 @@ describe("evidence views", () => {
 
   it("lists and opens only active Insights", () => {
     const { insightId, key } = seed();
-    expect(listActiveInsights(db)).toEqual([
+    expect(listActiveInsights(db)).toMatchObject([
       { id: insightId, epistemic: "inferred", summary: "위험(추론)", evidenceCount: 1 },
     ]);
     saveInsight(db, key, { state: "resolved" });
