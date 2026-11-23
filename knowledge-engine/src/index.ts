@@ -4,6 +4,7 @@ export {
   DEPENDS_ON,
   isDate,
   TARGET_DATE,
+  dependencyDelayReceiver,
   recomputeDependencyDelay,
   type RuleOutcome,
   type RuleScope,
@@ -43,6 +44,13 @@ export {
   type DatasetProfileOptions,
   type DatasetProfileResult,
 } from "./dataset-profile.ts";
+export {
+  createAnalyticalCheckHandler,
+  type AnalyticalCheckOptions,
+  type AnalyticalCheckResult,
+  type CheckJobHandOver,
+  type CheckLineOutcome,
+} from "./analytical-check-job.ts";
 export { sqlTabularSource, type TabularSource } from "./tabular-source.ts";
 export {
   createExtractHandler,

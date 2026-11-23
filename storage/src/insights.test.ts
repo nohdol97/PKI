@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
-  findRelation,
+  listRelationsBetween,
   listFactsOfKind,
   listInsightKeys,
   listRelationPairs,
@@ -184,27 +184,35 @@ describe("rule reads (V02-R8: depth-1 queries)", () => {
     expect(listFactsOfKind(db, key.yItemId, "k")).toEqual([]);
   });
 
-  it("finds a relation by subject, type and object", () => {
-    const id = saveRelation(db, {
+  it("lists the relations of one type from any of the subjects to any of the objects, by id", () => {
+    const z = insertItem(db, { type: "system", name: "C", ...attrs });
+    const first = saveRelation(db, {
       subjectId: key.xItemId,
       type: "DEPENDS_ON",
       objectId: key.yItemId,
       ...attrs,
     }).id;
-    expect(findRelation(db, key.xItemId, "DEPENDS_ON", key.yItemId)).toEqual({
-      id,
-      status: "candidate",
-    });
-    expect(findRelation(db, key.yItemId, "DEPENDS_ON", key.xItemId)).toBeUndefined();
-    const related = saveRelation(db, {
+    const second = saveRelation(db, {
+      subjectId: z,
+      type: "DEPENDS_ON",
+      objectId: key.yItemId,
+      ...attrs,
+    }).id;
+    saveRelation(db, {
       subjectId: key.xItemId,
       type: "RELATED_TO",
       objectId: key.yItemId,
       ...attrs,
-    }).id;
-    expect(findRelation(db, key.xItemId, "RELATED_TO", key.yItemId)?.id).toBe(related);
-    expect(findRelation(db, key.xItemId, "DEPENDS_ON", key.yItemId)?.id).toBe(id);
-    expect(findRelation(db, key.xItemId, "OWNS", key.yItemId)).toBeUndefined();
+    });
+    expect(listRelationsBetween(db, "DEPENDS_ON", [key.xItemId], [key.yItemId])).toEqual([
+      { id: first, status: "candidate" },
+    ]);
+    expect(
+      listRelationsBetween(db, "DEPENDS_ON", [z, key.xItemId], [key.yItemId]).map((r) => r.id),
+    ).toEqual([first, second]);
+    expect(listRelationsBetween(db, "DEPENDS_ON", [key.yItemId], [key.xItemId])).toEqual([]);
+    expect(listRelationsBetween(db, "OWNS", [key.xItemId], [key.yItemId])).toEqual([]);
+    expect(listRelationsBetween(db, "DEPENDS_ON", [], [key.yItemId])).toEqual([]);
   });
 
   it("lists the pairs an item takes part in, through relations or Insight rows", () => {

@@ -1,8 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
 // `*.e2e.{ts,tsx}` files. The browser project runs them all except the shell's own;
-// the electron project (V01-T06) runs the same screens file inside the shell plus the
-// shell's tests, after building the screens the shell serves. The artifact project
+// the electron project (V01-T06) runs the main flows and the shell's tests inside the shell,
+// after building the screens the shell serves. Files that only check one screen against backend
+// state (degraded, activity) run in the browser only: the shell adds no assertion of its own there. The artifact project
 // checks and launches the production build (V01-T15).
 export default defineConfig<{ target: "browser" | "electron" }>({
   projects: [
@@ -28,9 +29,7 @@ export default defineConfig<{ target: "browser" | "electron" }>({
         "apps/web/e2e/screens.e2e.ts",
         "apps/web/e2e/provider-settings.e2e.ts",
         "apps/web/e2e/evidence.e2e.ts",
-        "apps/web/e2e/degraded.e2e.ts",
         "apps/web/e2e/v02-flow.e2e.ts",
-        "apps/web/e2e/activity.e2e.ts",
         "apps/desktop/e2e/**/*.e2e.{ts,tsx}",
       ],
       dependencies: ["build-web"],

@@ -1,6 +1,7 @@
 // I02B-T02b review round 1 (path half): the exclusion is required and also guards reads; the walk
 // re-checks a folder after listing it; a read may be pinned to the walk's identity.
 import {
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -22,6 +23,11 @@ import {
   type WalkEvent,
 } from "./local-path.ts";
 
+/** The identity the walk would have seen: the file's own, measured on the real disk. */
+const seenId = (path: string): { dev: string; ino: string } => {
+  const s = lstatSync(path, { bigint: true });
+  return { dev: s.dev.toString(), ino: s.ino.toString() };
+};
 let base: string;
 let loc: string;
 let out: string;
@@ -82,6 +88,7 @@ describe("the exclusion is required (P-F1)", () => {
         relativePath: "a.txt",
         kind: "folder",
         maxFileBytes: 100,
+        expectedId: seenId(join(loc, "a.txt")),
       }),
     ).rejects.toThrow(TypeError);
   });
@@ -101,6 +108,7 @@ describe("the exclusion is required (P-F1)", () => {
         kind: "folder",
         maxFileBytes: 100,
         excluded: excl,
+        expectedId: seenId(join(data, "secrets.json")),
       });
     expect(await attempt(excluded)).toEqual({ ok: false, reason: "excluded" });
     // by identity alone (the path list is empty)
@@ -123,6 +131,7 @@ describe("the exclusion is required (P-F1)", () => {
         kind: "folder",
         maxFileBytes: 100,
         excluded,
+        expectedId: seenId(join(data, "deep", "x.json")),
       }),
     ).toEqual({ ok: false, reason: "excluded" });
     const ok = await readLocationFile({
@@ -131,6 +140,7 @@ describe("the exclusion is required (P-F1)", () => {
       kind: "folder",
       maxFileBytes: 100,
       excluded,
+      expectedId: seenId(join(loc, "a.txt")),
     });
     expect(ok.ok).toBe(true);
   });
@@ -151,6 +161,7 @@ describe("the exclusion is required (P-F1)", () => {
       kind: "folder",
       maxFileBytes: 100,
       excluded: [{ paths: [], id: excluded[0]?.id }],
+      expectedId: seenId(join(loc, "a.txt")),
     });
     expect(r).toEqual({ ok: false, reason: "excluded" });
   });
@@ -314,6 +325,7 @@ describe("dev 0 in the walk and the read (P-F4)", () => {
         kind: "folder",
         maxFileBytes: 100,
         excluded: [],
+        expectedId: { dev: "0", ino: "0" },
       }),
     ).toEqual({ ok: false, reason: "identity-unavailable" });
   });

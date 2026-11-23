@@ -19,7 +19,7 @@ Phase 1의 골격(V01: 화면, 로컬 API, Electron 쉘, 정본 저장, Provider
 - `pnpm lint` — ESLint(모듈 경계 규칙 포함)와 Prettier 검사
 - `pnpm typecheck` — TypeScript strict 타입 검사
 - `pnpm test` — Vitest 단위·계약 테스트
-- `pnpm e2e` — Playwright E2E. 같은 화면 테스트를 브라우저와 Electron 쉘에서 돌린다(쉘 쪽은 화면을 먼저 빌드한다). 프로덕션 산출물도 먼저 빌드해 검사하고 Electron으로 띄워 본다(`--project=artifact`만 돌릴 수 있다). 처음 한 번 `pnpm exec playwright install --only-shell chromium`으로 브라우저를 받고, Electron 바이너리는 처음 실행할 때 내려받는다
+- `pnpm e2e` — Playwright E2E. 화면 테스트는 브라우저에서 돌리고, 주요 흐름(화면 seed 0, 가져오기→근거 열기 흐름, 신뢰할 수 없는 내용, 설정 저장, 쉘 보안·수명 주기)만 Electron 쉘에서도 돌린다(쉘 쪽은 화면을 먼저 빌드한다). 프로덕션 산출물도 먼저 빌드해 검사하고 Electron으로 띄워 본다(`--project=artifact`만 돌릴 수 있다). 처음 한 번 `pnpm exec playwright install --only-shell chromium`으로 브라우저를 받고, Electron 바이너리는 처음 실행할 때 내려받는다
 - `pnpm --filter @pki/web dev` — 개발 백엔드(합성 자료)와 화면을 함께 띄운다. 브라우저에서 http://127.0.0.1:5173 을 연다
 - `pnpm --filter @pki/backend dev` — 개발 백엔드만 띄운다(합성 자료, 데이터 폴더 `PKI-dev`). 주소와 세션 토큰을 표준 출력에 한 줄로 쓴다
 - `pnpm --filter @pki/web build && pnpm --filter @pki/desktop start` — Electron 쉘로 빌드한 화면과 백엔드를 띄운다(정본 DB는 사용자 데이터 폴더)
@@ -31,6 +31,7 @@ Phase 1의 골격(V01: 화면, 로컬 API, Electron 쉘, 정본 저장, Provider
 - `pnpm --filter @pki/providers build:synthetic-manifest` — `fixtures/`·`eval/golden/sources/`·연결 시험 자료가 바뀐 뒤 합성 목록을 다시 만든다(어긋나면 `pnpm test`와 프로덕션 빌드가 실패한다)
 - `pnpm --filter @pki/providers check:synthetic-manifest` — 합성 목록이 최신인지 확인만 한다
 - `pnpm --filter @pki/document-normalize build:fixtures` — 문서 정규화의 합성 시험 문서(`fixtures/documents/`)를 다시 만든다(같은 코드면 같은 바이트)
+- `PKI_SLOW_E2E=1 pnpm exec playwright test apps/desktop/artifact/artifact.normalizer.e2e.ts --project=artifact` — 격리 정규화의 G23 측정(유발 XLSX가 Electron V8에서 쓰는 힙을 기록, 약 2.5분). 단언이 "두 행"과 종료 상태 형식뿐인 측정이라 기본 `pnpm e2e`에서는 건너뛴다
 - `pnpm exec vitest run --config vitest.normalizer-slow.config.ts` — 격리 정규화의 느린 시험(재현 입력 둘의 상한 시험과, 유발 입력을 30번 되풀이하는 시험. 한 번에 몇 분이 걸리고 메모리를 1 GB 넘게 쓰므로 `pnpm test`는 돌리지 않는다). 정규화는 백엔드와 다른 호스트 프로세스에서 돌고, 묶인 앱에서는 주 프로세스가 그 호스트를 띄운다
 
 배포처 설정: [docs/site-setup.md](docs/site-setup.md) · 저장소 배치: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

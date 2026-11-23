@@ -226,6 +226,155 @@ describe("GET /api/semantic: the registry's rows", () => {
   });
 });
 
+describe("GET /api/semantic: members under their representative (S02-R13)", () => {
+  const AT = "2026-11-23T00:00:00.000Z";
+  /** The user's merge through the entry (the line is the user's, its number is the answer): the member is the representative's. */
+  const mergeInto = (member: number, representative: number) => {
+    const done = userDecisions.entities.merge(db, member, representative, AT);
+    if (done.status !== "applied") throw new Error(done.reason);
+    return done.mergeId;
+  };
+  const list = async () => routes.semantic.response.parse((await call("semantic")).body);
+
+  it("lists a member under its representative with its own facts and relations and the number of its merge line; the member is no top-level entry", async () => {
+    const [a, b] = [world("a"), world("b")] as const;
+    const mergeId = mergeInto(a.item, b.item);
+    await start();
+    const body = await list();
+    expect(body.items.map((i) => i.id)).toEqual([a.other, b.item, b.other].sort((x, y) => x - y));
+    const rep = body.items.find((i) => i.id === b.item);
+    expect(rep?.members).toEqual([
+      expect.objectContaining({
+        id: a.item,
+        mergeId,
+        mergedInto: b.item,
+        facts: [expect.objectContaining({ id: a.fact, value: VALUE })],
+        relations: [expect.objectContaining({ id: a.relation, objectId: a.other })],
+      }),
+    ]);
+    // a lone item has no members, and the representative keeps only its own rows
+    expect(body.items.find((i) => i.id === b.other)?.members).toEqual([]);
+    expect(rep?.facts.map((f) => f.id)).toEqual([b.fact]);
+  });
+
+  it("an unmerge by the listed number puts the member back at the top level", async () => {
+    const [a, b] = [world("a"), world("b")] as const;
+    mergeInto(a.item, b.item);
+    await start();
+    const before = await list();
+    const mergeId = before.items.find((i) => i.id === b.item)?.members[0]?.mergeId as number;
+    expect(
+      routes.entityUnmerge.response.parse((await call("entityUnmerge", { mergeId })).body),
+    ).toEqual({
+      status: "applied",
+    });
+    const after = await list();
+    expect(after.items.map((i) => i.id)).toContain(a.item);
+    expect(after.items.find((i) => i.id === b.item)?.members).toEqual([]);
+  });
+
+  it("lists both items at the top level while their group rests", async () => {
+    const [a, b] = [world("a"), world("b")] as const;
+    mergeInto(a.item, b.item);
+    db.run("UPDATE item_merges SET active = 0");
+    await start();
+    const body = await list();
+    expect(body.items.map((i) => i.id)).toEqual(expect.arrayContaining([a.item, b.item]));
+    expect(body.items.every((i) => i.members.length === 0)).toBe(true);
+  });
+
+  it("a chain A->B->C lists A and B under C, each with its own line's number and the item it points at", async () => {
+    const [a, b, c] = [world("a"), world("b"), world("c")] as const;
+    const first = mergeInto(a.item, b.item);
+    const second = mergeInto(b.item, c.item);
+    await start();
+    const members = (await list()).items.find((i) => i.id === c.item)?.members;
+    expect(members?.map((m) => [m.id, m.mergeId, m.mergedInto])).toEqual([
+      [a.item, first, b.item],
+      [b.item, second, c.item],
+    ]);
+  });
+
+  it("leaves a member the policy hides out of its representative's members, and a hidden row of a member out of the member", async () => {
+    // hides a source set of exactly the secret source: an item over two sources is shown, a row from it alone is not
+    const alone: ScopePolicy = {
+      ...defaultScopePolicy,
+      allows: (scopes) => !(scopes.length === 1 && scopes[0]?.includes("secret")),
+    };
+    const hiding = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: alone,
+    });
+    const [rep, shown, hidden] = [world("rep"), world("shown"), world("hidden", SECRET)] as const;
+    const secret = source("secret", SECRET);
+    const hiddenRow = saveFact(db, {
+      itemId: shown.item,
+      kind: "completion_date",
+      value: "2027-01-01",
+      ...attrs,
+    }).id;
+    addEvidence(db, {
+      target: { factId: hiddenRow },
+      sourceVersionId: secret.versionId,
+      start: 0,
+      end: 1,
+      quote: [...`${NAME}의 목표일은 ${VALUE}`][0] as string,
+    });
+    mergeInto(shown.item, rep.item);
+    mergeInto(hidden.item, rep.item);
+    await start({ registry: hiding });
+    const members = (await list()).items.find((i) => i.id === rep.item)?.members;
+    expect(members?.map((m) => m.id)).toEqual([shown.item]);
+    expect(members?.[0]?.facts.map((f) => f.id)).toEqual([shown.fact]);
+  });
+
+  it("a chain with a hidden middle lists the visible end under the representative and names no hidden item: mergedInto is the nearest visible item", async () => {
+    const policy: ScopePolicy = {
+      ...defaultScopePolicy,
+      allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+    };
+    const hiding = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy,
+    });
+    const [a, b, c] = [world("a"), world("b", SECRET), world("c")] as const;
+    const first = mergeInto(a.item, b.item);
+    mergeInto(b.item, c.item);
+    await start({ registry: hiding });
+    const members = (await list()).items.find((i) => i.id === c.item)?.members;
+    expect(members?.map((m) => [m.id, m.mergeId, m.mergedInto])).toEqual([[a.item, first, c.item]]);
+  });
+
+  it("counts representatives against the limit: members do not make the list truncated", async () => {
+    const [a, b] = [world("a"), world("b")] as const;
+    mergeInto(a.item, b.item);
+    // 100 further lone items bring the top level to exactly the limit with the representative, members aside
+    for (let i = 0; i < 97; i++) insertItem(db, { type: "Project", name: `P${i}`, ...attrs });
+    await start();
+    const body = await list();
+    // a.other, b.item, b.other and 97 lone items = 100 top-level entries; a.item is a member
+    expect(body.items).toHaveLength(100);
+    expect(body.truncated).toBe(false);
+  });
+
+  it("pins the limit: a member whose representative the policy hides is not listed anywhere", async () => {
+    const policy: ScopePolicy = {
+      ...defaultScopePolicy,
+      allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+    };
+    const hiding = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy,
+    });
+    const [member, hiddenRep] = [world("member"), world("hidden-rep", SECRET)] as const;
+    mergeInto(member.item, hiddenRep.item);
+    await start({ registry: hiding });
+    const ids = (await list()).items.flatMap((i) => [i.id, ...i.members.map((m) => m.id)]);
+    expect(ids).not.toContain(member.item);
+    expect(ids).not.toContain(hiddenRep.item);
+  });
+});
+
 describe("POST /api/semantic/decide and /undo", () => {
   it.each(["item", "fact", "relation"] as const)(
     "approves a %s, writes its history line and answers the row as it is",

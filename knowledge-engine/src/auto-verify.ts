@@ -189,8 +189,8 @@ export function assessAfterPropagation(tx: SqlDriver, reached: Reached, at?: str
  * After a user action (decide, undo, add, replace): the items and relations the action bore on are
  * judged. A value the user wrote or approved is a valid row (R15), so it can end a promoted sibling's
  * condition 5; an undo can give a row back to the policy while its grounds are gone. The caller is the
- * API layer, after a successful action (backend `judgeAgain`), in the action's transaction. Does
- * nothing while the key was never written.
+ * API layer, after a successful action (backend `judgeAgain`, and the split route), in the action's
+ * transaction. Does nothing while the key was never written.
  */
 export function assessAfterUserAction(tx: SqlDriver, reached: Reached, at?: string): void {
   if (!everEnabled(tx)) return;

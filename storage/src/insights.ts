@@ -130,18 +130,21 @@ export function listFactsOfKind(
     }));
 }
 
-/** The relation (subject, type, object), if stored. */
-export function findRelation(
+/** The relations of `type` from one of `subjectIds` to one of `objectIds`, by id. */
+export function listRelationsBetween(
   db: SqlDriver,
-  subjectId: number,
   type: string,
-  objectId: number,
-): { id: number; status: KnowledgeStatus } | undefined {
-  const row = db.all(
-    "SELECT id, status FROM relations WHERE subject_id = ? AND type = ? AND object_id = ?",
-    [subjectId, type, objectId],
-  )[0];
-  return row && { id: row.id as number, status: row.status as KnowledgeStatus };
+  subjectIds: readonly number[],
+  objectIds: readonly number[],
+): { id: number; status: KnowledgeStatus }[] {
+  if (subjectIds.length === 0 || objectIds.length === 0) return [];
+  return db
+    .all(
+      `SELECT id, status FROM relations
+       WHERE type = ? AND subject_id IN ${IDS} AND object_id IN ${IDS} ORDER BY id`,
+      [type, JSON.stringify(subjectIds), JSON.stringify(objectIds)],
+    )
+    .map((row) => ({ id: row.id as number, status: row.status as KnowledgeStatus }));
 }
 
 /** (subject, object) of each relation of `type` that has one of `itemIds` at either end. */

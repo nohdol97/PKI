@@ -10,7 +10,15 @@ import {
 } from "@pki/providers";
 import {
   IdentityKeyMissingError,
+  insertItem,
+  listCheckLines,
   migrations,
+  onMembershipChanged,
+  registerConnectorInstance,
+  saveCheckLine,
+  saveDatasetTable,
+  saveFact,
+  saveSourceRecord,
   readSetting,
   schemaVersion,
   writeSetting,
@@ -23,6 +31,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CANONICAL_DB_FILE,
+  MEMBERSHIP_LISTENERS,
   connectorKinds,
   fixtureConnectors,
   openCanonicalDb,
@@ -30,6 +39,7 @@ import {
   productCalls,
   productEgress,
   productProviders,
+  productUserDecisions,
 } from "./composition.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
@@ -265,6 +275,56 @@ describe("productCalls", () => {
       expect([...a.requests, ...b.requests]).toEqual([]);
     } finally {
       db.close();
+    }
+  });
+});
+
+describe("check.staleness: the membership receivers' fixed list (S02-R13, S03-R11)", () => {
+  it("holds S03's receiver, and a merge through productUserDecisions erases a seeded line", () => {
+    expect(MEMBERSHIP_LISTENERS).toContain(onMembershipChanged);
+    const dbFile = openCanonicalDb(root);
+    try {
+      registerConnectorInstance(dbFile, "c1", "test-fixtures");
+      const attrs = {
+        epistemic: "explicit",
+        status: "candidate",
+        validAt: null,
+        observedAt: "t",
+      } as const;
+      const saved = saveSourceRecord(dbFile, "c1", { externalId: "t", title: "t", body: "a\tb" });
+      if (saved.status !== "created") throw new Error(saved.status);
+      const versionId = dbFile.all("SELECT id FROM source_versions")[0]?.id as number;
+      const [x, y] = [
+        insertItem(dbFile, { type: "Dataset", name: "x", ...attrs }),
+        insertItem(dbFile, { type: "Dataset", name: "y", ...attrs }),
+      ] as const;
+      saveDatasetTable(dbFile, { itemId: x, sourceId: saved.sourceId, key: "", rowCount: 1 });
+      const fact = saveFact(dbFile, {
+        itemId: x,
+        kind: "dataset.grain",
+        value: '["a"]',
+        ...attrs,
+      }).id;
+      saveCheckLine(dbFile, {
+        factId: fact,
+        check: "grain",
+        passed: true,
+        failure: null,
+        examined: 1,
+        violations: 0,
+        skipped: 0,
+        versionId,
+        otherVersionId: null,
+        at: "t",
+      });
+      expect(listCheckLines(dbFile, fact)).toHaveLength(1);
+      const merged = dbFile.transaction(() =>
+        productUserDecisions({ combinable: () => true }).entities.merge(dbFile, y, x),
+      );
+      expect(merged.status).toBe("applied");
+      expect(listCheckLines(dbFile, fact)).toEqual([]);
+    } finally {
+      dbFile.close();
     }
   });
 });

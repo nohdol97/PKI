@@ -1,4 +1,5 @@
-// V02-C2 in the browser and in the Electron shell (same file, `target`):
+// V02-C2 (same file, `target`): untrusted.e2e runs in the browser and in the Electron shell,
+// evidence.e2e in the browser only (in the shell v02-flow.e2e opens the same evidence):
 // evidence.e2e — Home's Insight is labelled an inference, its three evidence each
 // open their source version with the quote marked, matching fixtures/v02-expected.json.
 // untrusted.e2e — on the malicious variant the imported <script> never runs (no
@@ -73,6 +74,10 @@ test("evidence.e2e: the Insight's three evidence open their source version and s
   target,
   playwright,
 }) => {
+  test.skip(
+    target !== "browser",
+    "in the shell, v02-flow.e2e opens the same evidence (openEvidence, plain) twice",
+  );
   const stack = await startStack("plain", target, playwright.chromium);
   try {
     await openEvidence(stack.page, "plain");

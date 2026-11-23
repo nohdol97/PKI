@@ -1,6 +1,7 @@
 // S01-T05 rework (review M2): the judgement runs after the user's actions over HTTP, in the action's own
-// transaction (`judgeAgain` in server.ts). A value the user writes or approves is valid under R15, so a
-// promoted sibling goes back; an undo can give a row back to the policy while its grounds are gone.
+// transaction (`judgeAgain` in server.ts; the split route calls the judgement alone, its rule half being
+// the receiver's). A value the user writes or approves is valid under R15, so a promoted sibling goes
+// back; an undo can give a row back to the policy while its grounds are gone.
 // With the setting key never written the action leaves the registry as before. All data is synthetic.
 import { routes } from "@pki/contracts";
 import { assessAutoVerify, AUTO_VERIFY_SETTING } from "@pki/knowledge-engine";
@@ -57,8 +58,10 @@ afterEach(async () => {
 
 const T = "2026-11-23T00:00:00.000Z";
 const attrs = { epistemic: "explicit", status: "candidate", validAt: null, observedAt: T } as const;
-const post = (name: "semanticDecide" | "semanticUndo" | "semanticCorrect", body: unknown) =>
-  send(server.port, routes[name].path, headers, "POST", body);
+const post = (
+  name: "semanticDecide" | "semanticUndo" | "semanticCorrect" | "entitySplit",
+  body: unknown,
+) => send(server.port, routes[name].path, headers, "POST", body);
 
 /** A fact with current evidence from two sources, promoted by the policy while the setting is on. */
 function promoted() {
@@ -156,5 +159,38 @@ describe("the judgement after a user action (review M2)", () => {
       },
     });
     expect(db.all("SELECT 1 FROM fact_history WHERE actor = 'policy'")).toEqual([]);
+  });
+});
+
+describe("the judgement after a split (S02-T05, S01-R9 condition 5)", () => {
+  it("a split that moves the rival value away lets the policy judge the item's remaining value again, in the split's own request", async () => {
+    const { item, id } = promoted();
+    // a rival value on the same item, with current evidence: condition 5 no longer holds, the policy takes `id` back
+    const rival = saveFact(db, { itemId: item, kind: "target_date", value: RIVAL, ...attrs }).id;
+    automatedLifecycle.created(db, { kind: "fact", id: rival }, "extraction", null, T);
+    const saved = saveSourceRecord(db, "c", {
+      externalId: "rival",
+      title: "rival",
+      body: `rival says ${RIVAL}`,
+    });
+    if (saved.status !== "created") throw new Error("expected a new version");
+    addEvidence(db, {
+      target: { factId: rival },
+      sourceVersionId: db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number,
+      start: "rival says ".length,
+      end: "rival says ".length + RIVAL.length,
+      quote: RIVAL,
+    });
+    expect(assessAutoVerify(db, { kind: "fact", id }, T).status).toBe("applied"); // reverted
+    expect(status(id)).toBe("candidate");
+    // the split moves the rival away: the same request promotes `id` again
+    const res = await post("entitySplit", {
+      itemId: item,
+      rows: [{ kind: "fact", id: rival }],
+      name: "rival item",
+    });
+    expect(res.body).toMatchObject({ status: "applied" });
+    expect(status(id)).toBe("verified");
+    expect(actions(id).at(-1)).toBe("policy:auto-verify");
   });
 });

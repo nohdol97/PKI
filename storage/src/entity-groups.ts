@@ -32,25 +32,41 @@ export interface MembershipChange {
   movedRows: readonly MovedRow[];
 }
 
+/** What a receiver may ask of the scope policy: the acting side's own, the user's entry's or the propagation's (I04-R14). */
+export interface MembershipScope {
+  combinable(lineage: readonly SourceVersionRef[]): boolean;
+  /**
+   * A receiver says how many rows of a derivative kind it changed, when the acting side keeps a tally: a
+   * propagation counts them in its record, so the record's count of a kind includes what a receiver changed.
+   */
+  recomputed?(kind: string, count: number): void;
+}
+
 /**
  * A receiver of the notification. It deletes or recomputes what rests on an item (a rule's Insight, a
  * check line) and nothing else; it is reviewed when it is registered, as a derivative kind is, because
- * a throw inside a deletion's propagation rolls that propagation back.
+ * a throw inside a deletion's propagation rolls that propagation back. `scope` is the acting side's
+ * policy, for a receiver that recomputes something the policy may refuse.
  */
-export type MembershipListener = (tx: SqlDriver, change: MembershipChange) => void;
+export type MembershipListener = (
+  tx: SqlDriver,
+  change: MembershipChange,
+  scope: MembershipScope,
+) => void;
 
-/** Calls every listener in the list's order; an empty change is not announced. */
+/** Calls every listener in the list's order, handing each the action's scope; an empty change is not announced. */
 export function notifyMembership(
   tx: SqlDriver,
   listeners: readonly MembershipListener[],
   change: MembershipChange,
+  scope: MembershipScope,
 ): void {
   if (change.items.length === 0 && change.movedRows.length === 0) return;
   const sorted = {
     items: [...new Set(change.items)].sort((a, b) => a - b),
     movedRows: change.movedRows,
   };
-  for (const listener of listeners) listener(tx, sorted);
+  for (const listener of listeners) listener(tx, sorted, scope);
 }
 
 /** The group as readers see it (only active lines count). */
@@ -177,6 +193,29 @@ export const entityGroups: EntityGroups = {
     return lineageOfItems(db, entityGroups.membersOf(db, item));
   },
 };
+
+/**
+ * The items and every member of their groups, ascending, each once (active lines only, as `membersOf`).
+ * One read finds which of the items are on a line at all, so a long list of lone items costs one query.
+ */
+export function withGroups(db: SqlDriver, items: readonly ItemId[]): ItemId[] {
+  const all = new Set<ItemId>(items);
+  if (items.length === 0) return [];
+  const ids = JSON.stringify([...all]);
+  const onLine = new Set<ItemId>();
+  for (const r of db.all(
+    `SELECT member_id, representative_id FROM item_merges
+     WHERE active = 1 AND (member_id IN (SELECT value FROM json_each(?))
+       OR representative_id IN (SELECT value FROM json_each(?)))`,
+    [ids, ids],
+  )) {
+    for (const id of [r.member_id as ItemId, r.representative_id as ItemId]) {
+      if (all.has(id)) onLine.add(id);
+    }
+  }
+  for (const id of onLine) for (const m of entityGroups.membersOf(db, id)) all.add(m);
+  return [...all].sort((a, b) => a - b);
+}
 
 /**
  * Judges the groups the items belong to again (R13): the lineage of a whole group, resting lines

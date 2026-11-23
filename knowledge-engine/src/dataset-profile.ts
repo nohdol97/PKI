@@ -18,6 +18,7 @@ import {
   readAnalyticalMaxCells,
   readAnalyticalProfile,
   readSourceVersion,
+  registerAnalyticalCheckJob,
   saveDatasetTable,
   saveFact,
   valueFits,
@@ -167,6 +168,14 @@ export function createDatasetProfileHandler(options: DatasetProfileOptions) {
       if (!("table" in entry)) continue; // no-header, no-rows, too-large: not a table (S03-R5)
       written.push(...tableItems(entry.table));
     }
+    // the table rows and the facts are written above, so the check job finds them: it is queued in the
+    // profile's closing transaction (S03-R6 last line)
+    written.push({
+      kind: DATASET_TABLE_ITEM_KIND,
+      itemKey: JSON.stringify(["check-job", own.sourceId]),
+      lineage: [own],
+      write: (tx) => void registerAnalyticalCheckJob(tx, own.sourceId, now()),
+    });
     return { status: "succeeded", items: written };
   };
 }
