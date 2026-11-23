@@ -62,7 +62,7 @@ describe("site-check in a tree with no composition package (V01-H2, I05-C20 ①)
   it("rejects an unknown kind with usage and a distinct exit code", async () => {
     const { io, seen } = capture();
     await publicSiteCheck(root, ["site-nope"], io);
-    expect(seen.stderr[0]).toMatch(/^usage: site-check <site-mail\|site-messenger\|site-wiki>/);
+    expect(seen.stderr[0]).toMatch(/^usage: site-check <site-mail\|site-messenger\|site-wiki\|local-files>/);
     expect(seen.code).toBe(2);
   });
 
@@ -153,7 +153,7 @@ describe("runSiteCheck (I05-R1): the fork's own entry checks the registration's 
   it("the usage lists the registered kinds next to the product's", async () => {
     const { io, seen } = capture();
     await runSiteCheck({ connectorKinds: { fork: () => connector } }, ["nope"], io);
-    expect(seen.stderr[0]).toBe("usage: site-check <site-mail|site-messenger|site-wiki|fork>");
+    expect(seen.stderr[0]).toBe("usage: site-check <site-mail|site-messenger|site-wiki|local-files|fork>");
     expect(seen.code).toBe(2);
   });
 

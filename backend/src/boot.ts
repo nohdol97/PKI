@@ -10,9 +10,11 @@ import type {
   EmbeddingProvider,
   KnowledgeEngine,
   LLMProvider,
+  LocalNormalizerPort,
   SecretSource,
   VectorIndex,
 } from "@pki/contracts";
+import type { HostSpawner } from "@pki/document-normalize";
 import type { Projections } from "@pki/knowledge-engine";
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { BUILD_KIND, errorClass, log, type ScopeGrading } from "@pki/providers";
@@ -35,11 +37,14 @@ import {
   productProviders,
   productRegistry,
   productRunner,
+  productLocalFiles,
   productVisibleEngine,
   sweepCliRuns,
   cliRunsRoot,
+  withLocalFilesPorts,
   type ConnectorSet,
 } from "./composition.ts";
+import type { ApprovalTickets } from "./local-locations.ts";
 import { systemClock } from "./clock.ts";
 import { applyConfiguredScopes, bindConnectorScopes } from "./connector-scopes.ts";
 import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
@@ -49,8 +54,14 @@ import {
   type ConnectorRebuild,
   type ConnectorRecheck,
 } from "./connectors.ts";
-import { releaseOnReady, startCollectorUpkeep } from "./connector-sync-job.ts";
+import {
+  CONNECTOR_SYNC_KIND,
+  releaseOnReady,
+  startCollectorUpkeep,
+  SYNC_PERIOD,
+} from "./connector-sync-job.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
+import { LOCAL_FILES_INSTANCE_ID } from "@pki/storage";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
 import { reapplyAtStart } from "./ledger-boot.ts";
@@ -112,6 +123,18 @@ export interface BootOptions {
    * its own `PKI_SCOPE_POLICY`), the development entry reads `PKI_SCOPE_POLICY` (scope-policy.ts scopePolicyFromEnv).
    */
   scopePolicy?: string | undefined;
+  /**
+   * The `local-files` connector's outside (I02B-R4, R22, R37). `shellHost` is the spawner the Electron
+   * shell's channel gives the normalizer host (shell-main.ts); `underElectron` overrides the process's own
+   * answer (tests); `excluded` are more folders no location may be or lie in (the shell's user-data folder);
+   * `normalizer` replaces the isolated normalizer, in a test build only.
+   */
+  localFiles?: {
+    shellHost?: HostSpawner;
+    underElectron?: boolean;
+    excluded?: readonly string[];
+    normalizer?: LocalNormalizerPort;
+  };
 }
 
 export interface BootedBackend {
@@ -128,6 +151,8 @@ export interface BootedBackend {
   connectors: ConnectorManager & ConnectorRebuild & ConnectorRecheck;
   /** The periods' check, started at boot (I03-R22); I03-T09 adds the default periods through it. */
   scheduler: Scheduler;
+  /** The one-time tickets the shell registers a picked path under (I02B-R37). */
+  tickets: ApprovalTickets;
 }
 
 export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
@@ -201,7 +226,24 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // the manager wakes the runner and the runner's `connector-sync` handler calls the manager:
   // the handler reads it at each run; a run claimed before it is set (a wake can claim before
   // runner.start) is deferred by the handler, its attempt unspent
-  const late: { manager?: ConnectorManager } = {};
+  const late: { manager?: ConnectorManager; scheduler?: Scheduler } = {};
+  // the location API and the `local-files` ports (I02B-R4): an approval registers one sync now
+  const localFiles = productLocalFiles(db, {
+    dataDir: options.dataDir,
+    clock,
+    ...options.localFiles,
+    onApproved: () => {
+      const scheduler = late.scheduler;
+      if (!scheduler) return;
+      const { schedule } = scheduler.ensureSchedule({
+        kind: CONNECTOR_SYNC_KIND,
+        target: LOCAL_FILES_INSTANCE_ID,
+        period: SYNC_PERIOD,
+      });
+      scheduler.runNow(schedule.id);
+      void runner.wake();
+    },
+  });
   const runner = productRunner(db, calls.broker, {
     clock,
     connectors: () => late.manager,
@@ -215,15 +257,20 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       ? { testBuild: options.testBuild.jobs }
       : {}),
   });
-  const connectors = await createConnectorManager(db, instances, kinds, {
-    runner,
-    projections,
-    clock,
-    entries,
-    scopes,
-    secrets: options.secrets,
-    onReady: releaseOnReady(db, runner),
-  });
+  const connectors = await createConnectorManager(
+    db,
+    instances,
+    withLocalFilesPorts(kinds, () => localFiles.ports),
+    {
+      runner,
+      projections,
+      clock,
+      entries,
+      scopes,
+      secrets: options.secrets,
+      onReady: releaseOnReady(db, runner),
+    },
+  );
   late.manager = connectors;
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
   // whatever the applied change sequence says (I03-R7); registered before the server serves a deletion or the runner starts
@@ -237,6 +284,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     onRegistered: () => void runner.wake(),
     onError: (error) => log("scheduler-error", { error: errorClass(error) }),
   });
+  late.scheduler = scheduler;
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,
@@ -260,6 +308,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     }),
     entries,
     registry,
+    localLocations: localFiles.locations,
     decisions: productUserDecisions(registry),
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),
@@ -292,6 +341,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
         await server.close();
         await runner.stop();
         await projections.drain();
+        await localFiles.close();
       },
     },
     db,
@@ -301,6 +351,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     runner,
     connectors,
     scheduler,
+    tickets: localFiles.tickets,
   };
 }
 

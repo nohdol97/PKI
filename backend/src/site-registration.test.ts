@@ -312,6 +312,7 @@ describe("site.registration: merging onto the base set", () => {
     expect(connectors.kinds["site-mail"]).toBe(forkMail);
     expect(connectors.kinds["site-wiki"]).toBe(product.kinds["site-wiki"]);
     expect(connectors.instances.map((i) => i.id).sort()).toEqual([
+      "local-files",
       "mail-1",
       "site-messenger",
       "site-wiki",
@@ -345,6 +346,7 @@ describe("site.registration: merging onto the base set", () => {
     );
     expect(Object.keys(connectors.kinds).sort()).toEqual([
       "fork",
+      "local-files",
       "site-mail",
       "site-messenger",
       "site-wiki",

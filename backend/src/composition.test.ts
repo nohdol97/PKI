@@ -32,8 +32,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CANONICAL_DB_FILE,
   MEMBERSHIP_LISTENERS,
+  chooseNormalizerSpawner,
   connectorKinds,
   fixtureConnectors,
+  isolatedNormalizerPort,
   openCanonicalDb,
   productConnectors,
   productCalls,
@@ -42,6 +44,7 @@ import {
   productUserDecisions,
 } from "./composition.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
+import type { HostSpawner } from "@pki/document-normalize";
 
 let root: string;
 
@@ -116,6 +119,7 @@ describe("site Connector kinds", () => {
 describe("Connectors of the product and of source runs (V01-T15)", () => {
   it("the product registers the site kinds only: no test Connector (T04 ③)", () => {
     expect(Object.keys(connectorKinds).sort()).toEqual([
+      "local-files",
       "site-mail",
       "site-messenger",
       "site-wiki",
@@ -126,12 +130,14 @@ describe("Connectors of the product and of source runs (V01-T15)", () => {
       "site-mail",
       "site-messenger",
       "site-wiki",
+      "local-files",
     ]);
   });
 
   it("a source run adds the test Connector replaying the given file", () => {
     const set = fixtureConnectors("/synthetic/fixtures.jsonl");
     expect(Object.keys(set.kinds).sort()).toEqual([
+      "local-files",
       "site-mail",
       "site-messenger",
       "site-wiki",
@@ -326,5 +332,33 @@ describe("check.staleness: the membership receivers' fixed list (S02-R13, S03-R1
     } finally {
       dbFile.close();
     }
+  });
+});
+
+describe("the normalizer host's spawner (I02B-R22, D9)", () => {
+  const shell: HostSpawner = { spawn: () => Promise.reject(new Error("not used")) };
+
+  it("plain Node forks the host; Electron uses the shell's channel; Electron without one has none, never the fork", () => {
+    const forked = chooseNormalizerSpawner({ underElectron: false, shell });
+    expect(forked).toBeDefined();
+    expect(forked).not.toBe(shell);
+    expect(chooseNormalizerSpawner({ underElectron: true, shell })).toBe(shell);
+    expect(chooseNormalizerSpawner({ underElectron: true })).toBeUndefined();
+  });
+
+  it("no spawner gives a normalizer that is unavailable, visibly, and never throws", async () => {
+    const port = isolatedNormalizerPort(undefined, {
+      timeoutMs: 1_000,
+      maxHeapMb: 256,
+      maxExternalMemoryBytes: 1 << 28,
+    });
+    expect(port.unavailable()).toBe(true);
+    expect(await port.recheck()).toBe(false);
+    const result = await port.normalize({ bytes: new Uint8Array(), name: "a.md" }, {});
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "worker-failed" },
+      unavailable: true,
+    });
   });
 });

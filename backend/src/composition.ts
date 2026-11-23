@@ -9,9 +9,19 @@ import type {
   EmbeddingProvider,
   KnowledgeEngine,
   LLMProvider,
+  LocalNormalizerPort,
+  LocalPassReport,
+  LocalSkipReason,
   SecretSource,
   VectorIndex,
 } from "@pki/contracts";
+import {
+  createForkSpawner,
+  createIsolatedNormalizer,
+  NORMALIZER_VERSION,
+  type HostSpawner,
+  type IsolatedErrorCode,
+} from "@pki/document-normalize";
 import {
   BUILD_KIND,
   createBroker,
@@ -62,13 +72,16 @@ import {
 import { createVisibleEngine, NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   createCommitScope,
+  createLocalFileIndex,
   createUserDecisions,
   ANALYTICAL_CHECK_JOB_KIND,
   DATASET_PROFILE_KIND,
   dataDirectory,
   defaultScopePolicy,
+  LOCAL_FILES_INSTANCE_ID,
   ensureDataDirectory,
   onMembershipChanged,
+  listLocations,
   prepareCanonicalDb,
   type DerivativeRegistry,
   type MembershipListener,
@@ -108,6 +121,17 @@ import {
 } from "./projection-jobs.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
+import {
+  createLocalFilesConnector,
+  type LocalFilesPorts,
+} from "./adapters/local-files-connector.ts";
+import {
+  createApprovalTickets,
+  createLocalLocations,
+  readLocalFilesSettings,
+  type ApprovalTickets,
+  type LocalLocations,
+} from "./local-locations.ts";
 import { createSiteConnector } from "./adapters/site-connectors.ts";
 import { SITE_CONNECTOR_KINDS } from "./public-kinds.ts";
 import type { ServerOptions } from "./server.ts";
@@ -502,11 +526,16 @@ export function productRunner(
 
 export const CANONICAL_DB_FILE = "pki.sqlite";
 
-/** The product's Connector kinds: the site kinds, listed as not implemented (V01-R18). */
+/**
+ * The product's Connector kinds: the site kinds, listed as not implemented (V01-R18), and `local-files`
+ * (I02B-R2). The `local-files` function takes no argument and reads ports no one has bound here, so an
+ * instance made from this list alone is unavailable; `boot.ts` binds its own (`withLocalFilesPorts`).
+ */
 export const connectorKinds = {
   "site-mail": () => createSiteConnector("site-mail"),
   "site-messenger": () => createSiteConnector("site-messenger"),
   "site-wiki": () => createSiteConnector("site-wiki"),
+  "local-files": () => createLocalFilesConnector(() => undefined),
 } satisfies Record<string, ConnectorFactory>;
 
 /**
@@ -606,7 +635,137 @@ export function openCanonicalDb(dir: string = dataDirectory()): SqlDriver {
   return db;
 }
 
-/** One instance per site kind, listed as not implemented. */
+/** One instance per site kind, listed as not implemented, and the one `local-files` instance (I02B-R2). */
 export function connectorInstances(): ConnectorInstanceConfig[] {
-  return SITE_CONNECTOR_KINDS.map((kind) => ({ id: kind, kind, config: {} }));
+  return [
+    ...SITE_CONNECTOR_KINDS.map((kind) => ({ id: kind, kind, config: {} })),
+    { id: LOCAL_FILES_INSTANCE_ID, kind: "local-files", config: {} },
+  ];
+}
+
+// --- local files (I02B-R4, R22, R37) ----------------------------------------------------------------
+
+/**
+ * Which host spawner runs the normalizer (I02B-R22, D9): a plain Node process forks the host (ⓐ), an
+ * Electron utility process asks the shell through its channel (ⓑ). Under Electron without a channel there
+ * is none: the normalizer is then unavailable, visibly, and never falls back to forking.
+ */
+export function chooseNormalizerSpawner(options: {
+  underElectron: boolean;
+  shell?: HostSpawner;
+}): HostSpawner | undefined {
+  return options.underElectron ? options.shell : createForkSpawner();
+}
+
+/** Whether this process is Electron's utility process: `parentPort` exists there and in no other process. */
+export const runsUnderElectron = (): boolean =>
+  (process as { parentPort?: unknown }).parentPort !== undefined;
+
+/**
+ * Every code the isolated normalizer can fail with is a skip reason: a code added to it without a place in
+ * `LOCAL_SKIP_REASONS` stops compiling here, instead of being read as `corrupt` by the connector.
+ */
+export type IsolatedCodesAreSkipReasons =
+  Exclude<IsolatedErrorCode, LocalSkipReason> extends never ? true : never;
+const isolatedCodesAreSkipReasons: IsolatedCodesAreSkipReasons = true;
+void isolatedCodesAreSkipReasons;
+
+/**
+ * The isolated normalizer as the connector's port, assigned without a cast: the real object satisfies
+ * the port's shape. Without a spawner it is a port that is unavailable.
+ */
+export function isolatedNormalizerPort(
+  spawner: HostSpawner | undefined,
+  limits: { timeoutMs: number; maxHeapMb: number; maxExternalMemoryBytes: number },
+): LocalNormalizerPort & { close(): Promise<void> } {
+  if (spawner === undefined) {
+    return {
+      normalize: async () => ({
+        ok: false,
+        error: { code: "worker-failed" },
+        unavailable: true,
+      }),
+      unavailable: () => true,
+      recheck: async () => false,
+      close: async () => undefined,
+    };
+  }
+  return createIsolatedNormalizer({ spawner, ...limits });
+}
+
+export interface LocalFilesWiring {
+  ports: LocalFilesPorts;
+  locations: LocalLocations;
+  tickets: ApprovalTickets;
+  /** Ends the normalizer host. */
+  close(): Promise<void>;
+}
+
+/**
+ * The `local-files` ports, the location API and the ticket table over `db`. `shellHost` is the spawner
+ * the Electron shell's channel gives (shell-main.ts); `normalizer` replaces the isolated one in a test
+ * build only.
+ */
+export function productLocalFiles(
+  db: SqlDriver,
+  options: {
+    dataDir: string;
+    /** More folders no location may be or lie in (the shell's user-data folder). */
+    excluded?: readonly string[];
+    clock: Clock;
+    onApproved: () => void;
+    shellHost?: HostSpawner;
+    underElectron?: boolean;
+    normalizer?: LocalNormalizerPort;
+  },
+): LocalFilesWiring {
+  const index = createLocalFileIndex(db);
+  const forbidden = [options.dataDir, ...(options.excluded ?? [])];
+  const settings = readLocalFilesSettings(db);
+  const isolated = isolatedNormalizerPort(
+    chooseNormalizerSpawner({
+      underElectron: options.underElectron ?? runsUnderElectron(),
+      ...(options.shellHost ? { shell: options.shellHost } : {}),
+    }),
+    settings.normalize,
+  );
+  const normalizer: LocalNormalizerPort =
+    BUILD_KIND === "test" && options.normalizer ? options.normalizer : isolated;
+  let last: LocalPassReport | undefined;
+  const tickets = createApprovalTickets();
+  return {
+    ports: {
+      index,
+      locations: () => listLocations(db),
+      normalizer,
+      normalizerVersion: NORMALIZER_VERSION,
+      excluded: () => forbidden,
+      limits: () => readLocalFilesSettings(db),
+      now: () => options.clock.now(),
+      report: (report) => void (last = report),
+    },
+    locations: createLocalLocations({
+      db,
+      index,
+      forbidden,
+      buildKind: BUILD_KIND,
+      tickets,
+      onApproved: options.onApproved,
+      normalizerUnavailable: () => normalizer.unavailable(),
+      lastReport: () => last,
+      now: () => options.clock.now(),
+    }),
+    tickets,
+    close: () => isolated.close(),
+  };
+}
+
+/** `kinds` with the `local-files` function reading `ports`: one backend's own binding, so two backends in one process never share it. */
+export function withLocalFilesPorts<K extends Record<string, ConnectorFactory>>(
+  kinds: K,
+  ports: () => LocalFilesPorts | undefined,
+): K {
+  return "local-files" in kinds
+    ? { ...kinds, "local-files": () => createLocalFilesConnector(ports) }
+    : kinds;
 }

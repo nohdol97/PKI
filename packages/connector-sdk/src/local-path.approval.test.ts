@@ -142,6 +142,16 @@ describe("one case per rejection code (I02B-C3)", () => {
     "unsupported-path-form": async () =>
       (await reject("folder", "C:foo", ctx({ rules: "win32" }))).code,
     "not-found": async () => (await reject("folder", join(root, "missing"))).code,
+    "location-unreachable": async () => {
+      const fs = stubFs({
+        "/": { id: [1n, 2n] },
+        "/vol": { id: [1n, 3n] },
+        "/vol/Other": { id: [1n, 77n] },
+      });
+      const gone = { id: "L".repeat(22), realPath: "/vol/Gone", rootDev: "1", rootIno: "9" };
+      return (await reject("folder", "/vol/Other", ctx({ fs, rules: "posix", locations: [gone] })))
+        .code;
+    },
     "not-readable": async () => {
       mkdirSync(join(root, "locked"));
       const fs = stubFs({ [join(root, "locked")]: { unreadable: true } });
@@ -398,12 +408,14 @@ describe("path and identity are two routes; either one saying 'inside' is enough
     expect((await reject("folder", "/vol/Other", c)).code).toBe("inside-data-directory");
   });
 
-  it("a location whose root cannot be read (an unplugged disk) blocks a new approval as overlapping: its chain is unknown, so fail closed", async () => {
+  it("a location whose root cannot be read (an unplugged disk) is compared by its nearest readable ancestor: elsewhere is location-unreachable, never approved; above it is still an overlap", async () => {
     // the stored location's folder (DOCS) is gone
     const nodes = Object.fromEntries(Object.entries(base()).filter(([path]) => path !== DOCS));
     nodes["/vol/Other"] = { id: [1n, 77n] };
+    nodes["/vol/VOL~1"] = { id: [1n, 3n] }; // /vol itself, spelled so that no text matches
     const c = ctx({ fs: stubFs(nodes), rules: "posix", locations: [location] });
-    expect((await reject("folder", "/vol/Other", c)).code).toBe("overlaps-location");
+    expect((await reject("folder", "/vol/Other", c)).code).toBe("location-unreachable");
+    expect((await reject("folder", "/vol/VOL~1", c)).code).toBe("overlaps-location");
   });
 
   it("an identity with dev 0 and a non-zero ino is unavailable as well", async () => {

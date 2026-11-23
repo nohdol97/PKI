@@ -10,6 +10,13 @@ import {
 } from "./import-record.ts";
 import { REJECT_CODES } from "./connector.ts";
 import { DATA_CHECK_NAMES, FACT_VALUE_TYPES, KNOWLEDGE_PLACES } from "./knowledge-schema.ts";
+import {
+  LocalApprovalRequestSchema,
+  LocalFilesSettingsPatchSchema,
+  LocalFilesSettingsSchema,
+  LocalLocationListSchema,
+  LocalLocationSchema,
+} from "./local-files.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
@@ -95,6 +102,8 @@ export const ErrorResponseSchema = z.object({
     "instance-busy",
     "storage-failed",
     "ledger-unwritable",
+    "approval-rejected",
+    "limit-would-delete",
     "payload-too-large",
     "internal-error",
   ]),
@@ -1415,6 +1424,28 @@ export const routes = {
     path: "/api/settings/analytical",
     request: AnalyticalSettingsSchema,
     response: AnalyticalSettingsSchema,
+  },
+  localLocations: {
+    method: "GET",
+    path: "/api/local-locations",
+    response: LocalLocationListSchema,
+  },
+  approveLocalLocation: {
+    method: "POST",
+    path: "/api/local-locations",
+    request: LocalApprovalRequestSchema,
+    response: LocalLocationSchema,
+  },
+  localFilesSettings: {
+    method: "GET",
+    path: "/api/settings/local-files",
+    response: LocalFilesSettingsSchema,
+  },
+  setLocalFilesSettings: {
+    method: "POST",
+    path: "/api/settings/local-files",
+    request: LocalFilesSettingsPatchSchema,
+    response: LocalFilesSettingsSchema,
   },
   semanticSettings: {
     method: "GET",
