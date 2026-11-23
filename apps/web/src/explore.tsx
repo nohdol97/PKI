@@ -8,6 +8,7 @@ import { ApiError, type ApiClient } from "./api.ts";
 import { EntityCuration } from "./entity-curation.tsx";
 import { SOURCE_GONE } from "./evidence-text.ts";
 import { SourceView, useFocusOn } from "./evidence-view.tsx";
+import { DETAIL_HINT, DetailPane, PaneHead, Props, Row as PaneRow } from "./panes.tsx";
 import {
   directionText,
   EXPLORE_EMPTY,
@@ -155,10 +156,13 @@ export async function traceEvidence(
 
 export function ItemList({
   state,
+  selected,
   onOpen,
   onMore,
 }: {
   state: ListState;
+  /** The open item, whose row is marked. */
+  selected?: number | undefined;
   onOpen: (itemId: number) => void;
   onMore: () => void;
 }) {
@@ -167,19 +171,25 @@ export function ItemList({
   return (
     <>
       {state.items.length === 0 && <p>{EXPLORE_EMPTY}</p>}
-      <ul aria-label="항목 목록">
+      <ul className="rows" aria-label="항목 목록">
         {state.items.map((i) => (
           <li key={i.id}>
-            <button type="button" onClick={() => onOpen(i.id)}>
-              <bdi>{i.name}</bdi>
-            </button>{" "}
-            ({i.type})
-            {i.alias !== null && (
-              <>
-                {" "}
-                · <bdi>{i.alias}</bdi>
-              </>
-            )}
+            <PaneRow
+              title={<bdi>{i.name}</bdi>}
+              meta={
+                <>
+                  {i.type}
+                  {i.alias !== null && (
+                    <>
+                      {" · "}
+                      <bdi>{i.alias}</bdi>
+                    </>
+                  )}
+                </>
+              }
+              selected={i.id === selected}
+              onClick={() => onOpen(i.id)}
+            />
           </li>
         ))}
       </ul>
@@ -284,18 +294,21 @@ export function Neighbourhood({
   const dated = timeline.filter((e) => e.validAt !== null || e.validUntil !== null);
   const undated = timeline.filter((e) => e.validAt === null && e.validUntil === null);
   return (
-    <section aria-label="선택한 항목">
-      <h2 tabIndex={-1} ref={headingRef}>
-        <bdi>{center.name}</bdi>
-      </h2>
-      <p>
-        {center.type}{" "}
-        {center.wikiKey !== null && (
+    <DetailPane
+      label="항목 상세"
+      head={{
+        title: "항목",
+        right: center.wikiKey !== null && (
           <button type="button" onClick={() => onWiki(center.wikiKey as string)}>
             {OPEN_WIKI}
           </button>
-        )}
-      </p>
+        ),
+      }}
+    >
+      <h2 className="detail-title" tabIndex={-1} ref={headingRef}>
+        <bdi>{center.name}</bdi>
+      </h2>
+      <Props items={[["유형", center.type]]} />
       <RowDetail
         key={center.id}
         api={api}
@@ -304,87 +317,91 @@ export function Neighbourhood({
         name={`항목 ${center.name}`}
         onChanged={onChanged}
       />
-      <h3>이웃</h3>
-      <p>
-        <label>
-          깊이{" "}
-          <select value={depth} onChange={(e) => onDepth(Number(e.target.value))}>
-            {[1, 2, 3].map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
+      <div className="sec">
+        <h3>이웃</h3>
+        <p>
+          <label>
+            깊이{" "}
+            <select value={depth} onChange={(e) => onDepth(Number(e.target.value))}>
+              {[1, 2, 3].map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </label>
+        </p>
+        {types.length > 0 && (
+          <fieldset>
+            <legend>관계 종류</legend>
+            {types.map((t) => (
+              <label key={t}>
+                <input type="checkbox" checked={!off.has(t)} onChange={() => onToggleType(t)} />{" "}
+                {t}{" "}
+              </label>
             ))}
-          </select>
-        </label>
-      </p>
-      {types.length > 0 && (
-        <fieldset>
-          <legend>관계 종류</legend>
-          {types.map((t) => (
-            <label key={t}>
-              <input type="checkbox" checked={!off.has(t)} onChange={() => onToggleType(t)} />{" "}
-              {t}{" "}
-            </label>
-          ))}
-        </fieldset>
-      )}
-      {read.truncated && <p role="status">{EXPLORE_TRUNCATED}</p>}
-      {edges.length > 0 && (
-        <NeighbourGraph
-          center={center}
-          items={read.items}
-          edges={read.edges}
-          off={off}
-          onOpen={onOpen}
-        />
-      )}
-      {edges.length === 0 ? (
-        <p>{EXPLORE_NO_NEIGHBOURS}</p>
-      ) : (
-        <table aria-label="이웃 표">
-          <thead>
-            <tr>
-              <th scope="col">상대 항목</th>
-              <th scope="col">관계 종류</th>
-              <th scope="col">방향</th>
-              <th scope="col">걸음 수</th>
-              <th scope="col">이어진 곳</th>
-            </tr>
-          </thead>
-          <tbody>
-            {edges.map((e) => (
-              <tr key={e.relationId}>
-                <td>
-                  <button type="button" onClick={() => onOpen(e.to)}>
-                    <bdi>{nameOf(e.to)}</bdi>
-                  </button>
-                </td>
-                <td>{e.type}</td>
-                <td>{directionText(e.direction)}</td>
-                <td>{e.step}</td>
-                <td>
-                  <bdi>{nameOf(e.from)}</bdi>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <h3>타임라인</h3>
-      <ol aria-label="시작 날짜순">
-        {dated.map((e) => (
-          <li key={`${e.kind}${e.id}`}>
-            <time>{intervalText(e.validAt, e.validUntil)}</time>
-            <ul>{line(e)}</ul>
-          </li>
-        ))}
-        {undated.length > 0 && (
-          <li>
-            {TIMELINE_NONE}
-            <ul>{undated.map(line)}</ul>
-          </li>
+          </fieldset>
         )}
-      </ol>
+        {read.truncated && <p role="status">{EXPLORE_TRUNCATED}</p>}
+        {edges.length > 0 && (
+          <NeighbourGraph
+            center={center}
+            items={read.items}
+            edges={read.edges}
+            off={off}
+            onOpen={onOpen}
+          />
+        )}
+        {edges.length === 0 ? (
+          <p>{EXPLORE_NO_NEIGHBOURS}</p>
+        ) : (
+          <table aria-label="이웃 표">
+            <thead>
+              <tr>
+                <th scope="col">상대 항목</th>
+                <th scope="col">관계 종류</th>
+                <th scope="col">방향</th>
+                <th scope="col">걸음 수</th>
+                <th scope="col">이어진 곳</th>
+              </tr>
+            </thead>
+            <tbody>
+              {edges.map((e) => (
+                <tr key={e.relationId}>
+                  <td>
+                    <button type="button" onClick={() => onOpen(e.to)}>
+                      <bdi>{nameOf(e.to)}</bdi>
+                    </button>
+                  </td>
+                  <td>{e.type}</td>
+                  <td>{directionText(e.direction)}</td>
+                  <td>{e.step}</td>
+                  <td>
+                    <bdi>{nameOf(e.from)}</bdi>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      <div className="sec">
+        <h3>타임라인</h3>
+        <ol aria-label="시작 날짜순">
+          {dated.map((e) => (
+            <li key={`${e.kind}${e.id}`}>
+              <time>{intervalText(e.validAt, e.validUntil)}</time>
+              <ul>{line(e)}</ul>
+            </li>
+          ))}
+          {undated.length > 0 && (
+            <li>
+              {TIMELINE_NONE}
+              <ul>{undated.map(line)}</ul>
+            </li>
+          )}
+        </ol>
+      </div>
       <EntityCuration
         key={center.id}
         api={api}
@@ -393,7 +410,7 @@ export function Neighbourhood({
         onOpen={onOpen}
       />
       {evidence && (
-        <section aria-label="근거 원본">
+        <section className="sec" aria-label="근거 원본">
           <h3 tabIndex={-1} ref={sourceHeadingRef}>
             근거: <bdi>{evidence.label}</bdi>
           </h3>
@@ -403,7 +420,7 @@ export function Neighbourhood({
           ))}
         </section>
       )}
-    </section>
+    </DetailPane>
   );
 }
 
@@ -545,16 +562,30 @@ export function Explore({ api }: { api: ApiClient }) {
   };
   return (
     <>
-      <p>{EXPLORE_INTRO}</p>
-      <form onSubmit={submit}>
-        <label>
-          {EXPLORE_SEARCH} <input value={query} onChange={(e) => setQuery(e.target.value)} />
-        </label>{" "}
-        <button type="submit">{EXPLORE_SEARCH_SUBMIT}</button>
-      </form>
-      <ItemList state={list} onOpen={open} onMore={() => session.more(list)} />
-      {notice && <p role="alert">{notice}</p>}
-      {read && (
+      <div className="pane-list">
+        <PaneHead
+          title="탐색"
+          as="h1"
+          count={list.status === "ready" ? list.items.length : undefined}
+        />
+        <div className="pane-body">
+          <p>{EXPLORE_INTRO}</p>
+          <form onSubmit={submit}>
+            <label>
+              {EXPLORE_SEARCH} <input value={query} onChange={(e) => setQuery(e.target.value)} />
+            </label>{" "}
+            <button type="submit">{EXPLORE_SEARCH_SUBMIT}</button>
+          </form>
+          <ItemList
+            state={list}
+            selected={read?.center.id}
+            onOpen={open}
+            onMore={() => session.more(list)}
+          />
+          {notice && <p role="alert">{notice}</p>}
+        </div>
+      </div>
+      {read ? (
         <Neighbourhood
           api={api}
           read={read}
@@ -580,6 +611,10 @@ export function Explore({ api }: { api: ApiClient }) {
           onChanged={() => session.changed(read.center.id)}
           onWiki={(key) => nav.go("wiki", { wikiKey: key })}
         />
+      ) : (
+        <DetailPane label="항목 상세" head={{ title: "항목" }}>
+          <p className="hint">{DETAIL_HINT}</p>
+        </DetailPane>
       )}
     </>
   );

@@ -80,6 +80,13 @@ test("explore.e2e: approve a candidate, find an item by name, its neighbour, the
   await found.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: PROJECT, level: 2 })).toBeFocused();
+  // UI01-C8: the chosen row is marked, and the item is the detail pane to the right of the list
+  await expect(found).toHaveAttribute("aria-current", "true");
+  const [listBox, detailBox] = [
+    await page.getByRole("list", { name: "항목 목록" }).boundingBox(),
+    await page.getByRole("region", { name: "항목 상세" }).boundingBox(),
+  ];
+  expect(detailBox?.x).toBeGreaterThanOrEqual((listBox?.x ?? 0) + (listBox?.width ?? 0));
 
   // the neighbour and the relation to it
   const row = page

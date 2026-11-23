@@ -71,7 +71,7 @@ export function NeighbourGraph({
     id === center.id ? center.name : (items.find((i) => i.id === id)?.name ?? `항목 ${id}`);
   const half = RING * maxStep + 80;
   return (
-    <div>
+    <div className="graph">
       <svg
         role="img"
         aria-label={graphSummary(points.size, drawn.length)}
@@ -84,8 +84,13 @@ export function NeighbourGraph({
           const b = points.get(e.to) as { x: number; y: number };
           return (
             <g key={e.relationId}>
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="currentColor" strokeWidth={1} />
-              <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} fontSize={10} textAnchor="middle">
+              <line className="graph-edge" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+              <text
+                className="graph-edge-label"
+                x={(a.x + b.x) / 2}
+                y={(a.y + b.y) / 2}
+                textAnchor="middle"
+              >
                 {e.type}
               </text>
             </g>
@@ -93,8 +98,13 @@ export function NeighbourGraph({
         })}
         {[...points].map(([id, p]) => (
           <g key={id} className="graph-node" onClick={() => onOpen(id)}>
-            <circle cx={p.x} cy={p.y} r={id === center.id ? 10 : 6} fill="currentColor" />
-            <text x={p.x} y={p.y + 20} fontSize={11} textAnchor="middle">
+            <circle
+              className={id === center.id ? "graph-dot graph-dot-center" : "graph-dot"}
+              cx={p.x}
+              cy={p.y}
+              r={id === center.id ? 10 : 6}
+            />
+            <text className="graph-name" x={p.x} y={p.y + 20} textAnchor="middle">
               {nameOf(id)}
             </text>
           </g>

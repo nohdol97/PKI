@@ -85,13 +85,16 @@ export function DetailPane({
   children,
 }: {
   label: string;
-  head: { title: string; count?: string | undefined };
+  /** `right` is what the head bar holds at its right (an action that belongs to the whole pane). */
+  head: { title: string; count?: string | undefined; right?: ReactNode };
   actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="pane-detail" aria-label={label}>
-      <PaneHead title={head.title} count={head.count} as="p" />
+      <PaneHead title={head.title} count={head.count} as="p">
+        {head.right}
+      </PaneHead>
       <div className="pane-body">{children}</div>
       {actions}
     </section>

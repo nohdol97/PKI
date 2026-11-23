@@ -97,7 +97,11 @@ export function App({ api }: { api: ApiClient }) {
   // the screens with a list and a detail draw their own panes, 질문 draws its own pane (the input bar is pinned in
   // it); the others are one pane under a head bar
   const split =
-    screen === "home" || screen === "notifications" || screen === "wiki" || screen === "lint";
+    screen === "home" ||
+    screen === "notifications" ||
+    screen === "wiki" ||
+    screen === "lint" ||
+    screen === "explore";
   const own = screen === "ask";
   return (
     <NavProvider screen={screen} onScreen={setScreen}>

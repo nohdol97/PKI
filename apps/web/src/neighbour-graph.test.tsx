@@ -64,3 +64,14 @@ describe("이웃 그림 (X02B-C4 ③)", () => {
     expect(cut).not.toContain("이웃60");
   });
 });
+
+// UI01-D19, C1: the picture takes its colours and text size from the stylesheet, not from attributes.
+describe("이웃 그림의 스타일 (UI01-D19)", () => {
+  it("has no stroke, fill or font-size attribute: colours and sizes come from classes", () => {
+    const out = draw();
+    expect(out).not.toMatch(/\s(?:stroke|fill|fontSize|font-size|stroke-width|strokeWidth)=/);
+    expect(out).toContain('class="graph-node"');
+    expect(out).toMatch(/<line[^>]*class="graph-edge"/);
+    expect(out).toMatch(/<circle[^>]*class="graph-dot graph-dot-center"/);
+  });
+});

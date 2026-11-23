@@ -1,1 +1,35 @@
-/* 탐색 (UI01-D18, D19): the open item's sections and the neighbour picture. */
+/* 탐색 (UI01-D18, D19): the neighbour picture takes its colours and text size from here (the tokens), not from
+   attributes in the markup. */
+
+.graph {
+  margin: var(--sp-2) 0 var(--sp-3);
+  padding: var(--sp-2);
+  border: var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-quiet);
+  color: var(--ink-2);
+}
+.graph svg {
+  display: block;
+  margin: 0 auto;
+}
+.graph-edge {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.graph-dot {
+  fill: var(--ink-2);
+}
+.graph-dot-center {
+  fill: var(--accent);
+}
+.graph text {
+  fill: var(--ink-2);
+  font-size: var(--fs-meta);
+}
+.graph .graph-edge-label {
+  fill: var(--ink-meta);
+}
+.graph-node {
+  cursor: pointer;
+}
