@@ -15,6 +15,8 @@ export { INSIGHT_INTERPRET_KIND } from "./job-kinds.ts";
 export const INSIGHT_INTERPRET_SETTING = "insight.interpret";
 /** Provisional (D15): interpretation jobs one request queues. */
 export const INSIGHT_INTERPRET_BATCH = 50;
+/** Provisional (D16): the source versions of an Insight's lineage one interpretation call takes. */
+export const INSIGHT_INTERPRET_MAX_VERSIONS = 8;
 /** The rule of the Insight the interpretation itself proposes (D18): such a row is never interpreted. */
 export const OPPORTUNITY_RULE = "opportunity";
 

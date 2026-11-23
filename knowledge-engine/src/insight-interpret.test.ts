@@ -3,7 +3,13 @@
 import {
   addEvidence,
   insertItem,
+  insightBasis,
+  INSIGHT_INTERPRET_KIND,
   migrate,
+  readInsightById,
+  setInsightInterpret,
+  type DerivedItem,
+  type StoredJob,
   readInsight,
   registerConnectorInstance,
   saveFact,
@@ -15,8 +21,11 @@ import {
   type StoredInsight,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { BrokerResult } from "@pki/providers";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recomputeInsights } from "./insight-code-rules.ts";
+import { createInsightInterpretHandler } from "./insight-interpret.ts";
+import { knowledgeCandidates } from "./linking.ts";
 
 const allow = { combinable: () => true };
 const at = "2026-11-23T00:00:00.000Z";
@@ -97,5 +106,114 @@ describe("the opportunity rule (P01-C1a, D18)", () => {
     expect(judge().filter((o) => o.key.rule === "opportunity")).toEqual([
       { key: oppKey(), outcome: "unchanged" },
     ]);
+  });
+});
+
+describe("the interpretation job (P01-C3a, D12-D18)", () => {
+  const answer = (opportunity: { statement: string } | null = null) => ({
+    reasoningSummary: "합성 해석",
+    impact: 80,
+    actionability: 20,
+    opportunity,
+  });
+  const broker = (result: BrokerResult) => ({ call: vi.fn(async (_raw: unknown) => result) });
+  const ok = (output: unknown): BrokerResult => ({ status: "ok", output }) as BrokerResult;
+
+  /** The schedule_conflict Insight, the setting on, and the job the queue made for it. */
+  function setUp(): { parent: StoredInsight; job: StoredJob } {
+    fact("target_date", "2026-12-01");
+    fact("completion_date", "2026-12-10");
+    judge();
+    expect(setInsightInterpret(db, true, new Date())).toBe(1);
+    const parent = readInsight(db, parentKey()) as StoredInsight;
+    const job = {
+      id: 1,
+      leaseToken: 1,
+      kind: INSIGHT_INTERPRET_KIND,
+      target: `${parent.id}#${insightBasis(parent)}`,
+    } as unknown as StoredJob;
+    return { parent, job };
+  }
+  const run = async (job: StoredJob, b: { call: (raw: unknown) => Promise<BrokerResult> }) => {
+    const result = await createInsightInterpretHandler({ db })(job, { broker: b });
+    if (result.status === "succeeded")
+      db.transaction(() => result.items.forEach((i: DerivedItem) => i.write(db)));
+    return result;
+  };
+
+  it("stores only the three interpretation columns; judging again is unchanged and keeps them", async () => {
+    const { parent, job } = setUp();
+    const b = broker(ok(answer()));
+    await run(job, b);
+    expect(b.call.mock.calls[0]?.[0]).toMatchObject({
+      taskKind: "insight-interpret",
+      candidateItemIds: [String(item), `insight:${parent.id}`],
+      sourceVersionIds: expect.any(Array) as string[],
+    });
+    const after = readInsightById(db, parent.id) as StoredInsight;
+    expect(after).toEqual({
+      ...parent,
+      interpretation: { reasoningSummary: "합성 해석", impact: 80, actionability: 20 },
+    });
+    expect(judge().filter((o) => o.outcome !== "unchanged")).toEqual([]);
+    expect(readInsightById(db, parent.id)?.interpretation).not.toBeNull();
+  });
+
+  it("hands a blocked Broker result back and leaves the row as it was; nothing is sent while the setting is off", async () => {
+    const { parent, job } = setUp();
+    const blocked = { status: "blocked", reason: "consent-missing" } as unknown as BrokerResult;
+    expect(await run(job, broker(blocked))).toEqual(blocked);
+    expect(readInsightById(db, parent.id)).toEqual(parent);
+
+    setInsightInterpret(db, false, new Date());
+    const silent = broker(ok(answer()));
+    await run(job, silent);
+    expect(silent.call).not.toHaveBeenCalled();
+  });
+
+  it("writes one opportunity with the parent's evidence and drops a second proposal while it is active", async () => {
+    const { parent, job } = setUp();
+    await run(job, broker(ok(answer({ statement: "합성 기회 A" }))));
+    const opp = readInsight(db, oppKey());
+    expect(opp).toMatchObject({ state: "active", summary: "합성 기회 A", epistemic: "inferred" });
+    expect(opp?.evidenceIds).toEqual(parent.evidenceIds);
+    expect(opp?.factLines).toEqual(parent.factLines);
+    expect(opp?.confidence).toBeLessThanOrEqual(40);
+
+    // the parent is interpreted again and proposes another: dropped, the first stays
+    const again = readInsightById(db, parent.id) as StoredInsight;
+    saveInsight(db, parentKey(), {
+      state: "active",
+      summary: again.summary as string,
+      factLines: again.factLines,
+      reasoningSummary: again.reasoningSummary,
+      confidence: again.confidence,
+      urgencyDate: again.urgencyDate,
+      evidenceIds: again.evidenceIds,
+      changedAt: at,
+    });
+    const next = {
+      ...job,
+      target: `${parent.id}#${insightBasis(readInsightById(db, parent.id) as StoredInsight)}`,
+    };
+    await run(next as StoredJob, broker(ok(answer({ statement: "합성 기회 B" }))));
+    expect(readInsight(db, oppKey())?.summary).toBe("합성 기회 A");
+  });
+
+  it("offers the Insight as a graded candidate: its lineage, and the strictest class when it used a user input", () => {
+    const { parent } = setUp();
+    const lookup = knowledgeCandidates(db).lookup(`insight:${parent.id}`);
+    expect(lookup?.name).toContain(parent.factLines[0] as string);
+    expect(lookup?.evidenceSourceVersionIds).toHaveLength(2);
+    expect(lookup?.nameUnsourced).toBe(false);
+
+    const factId = db.all("SELECT id FROM facts ORDER BY id")[0]?.id as number;
+    saveInsight(db, parentKey(), {
+      state: "active",
+      summary: "합성",
+      evidenceIds: parent.evidenceIds,
+      userInputs: [{ kind: "fact", id: factId }],
+    });
+    expect(knowledgeCandidates(db).lookup(`insight:${parent.id}`)?.nameUnsourced).toBe(true);
   });
 });

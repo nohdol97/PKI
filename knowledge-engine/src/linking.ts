@@ -14,6 +14,7 @@ import {
   listItemNames,
   listVerifiedForms,
   normalizeForLinking,
+  readInsightById,
   readItem,
   unionOfVersions,
   type DerivativeRegistry,
@@ -88,6 +89,8 @@ export function groupLineage(
 }
 
 const ROW_ID = /^[1-9][0-9]*$/;
+/** An Insight offered as a candidate to its own interpretation (P01-D16). */
+const INSIGHT_CANDIDATE = /^insight:([1-9][0-9]*)$/;
 
 /**
  * The Broker's candidate lookup on the knowledge store: an item's name and the
@@ -103,6 +106,8 @@ export function knowledgeCandidates(
 ): CandidateItems {
   return {
     lookup(id) {
+      const insightId = INSIGHT_CANDIDATE.exec(id)?.[1];
+      if (insightId !== undefined) return insightCandidate(db, registry, id, Number(insightId));
       if (!ROW_ID.test(id)) return undefined;
       const item = readItem(db, Number(id));
       if (!item) return undefined;
@@ -115,5 +120,27 @@ export function knowledgeCandidates(
           .map((v) => String(findSourceVersionId(db, v.sourceId, v.version) ?? 0)),
       };
     },
+  };
+}
+
+/**
+ * An active Insight as a candidate (P01-D16): its name is the type, the summary and the fact lines, text the
+ * code wrote from source values, so it is graded by the registry's lineage of the Insight; one that used a
+ * row of the user's own has a part with no source, which makes it the strictest class (fail closed).
+ */
+function insightCandidate(
+  db: SqlDriver,
+  registry: Pick<DerivativeRegistry, "lineage">,
+  id: string,
+  insightId: number,
+) {
+  const insight = readInsightById(db, insightId);
+  if (insight?.state !== "active") return undefined;
+  return {
+    name: `[${insight.rule}] ${insight.summary ?? ""} | ${insight.factLines.join(" | ")}`,
+    nameUnsourced: insight.userInputs.length > 0,
+    evidenceSourceVersionIds: registry
+      .lineage(db, { kind: "insight", id: id.slice("insight:".length) })
+      .map((v) => String(findSourceVersionId(db, v.sourceId, v.version) ?? 0)),
   };
 }
