@@ -53,11 +53,12 @@ describe("related knowledge links of the Ask screen", () => {
 });
 
 describe("the navigation", () => {
-  it("lists 지식 검토 next to the existing screens", () => {
+  it("lists 탐색 and 지식 검토 next to the existing screens", () => {
     const out = renderToStaticMarkup(
       <App api={(() => new Promise(() => undefined)) as unknown as ApiClient} />,
     );
     expect(out).toMatch(/<button[^>]*>지식 검토<\/button>/);
+    expect(out).toMatch(/<button[^>]*>탐색<\/button>/);
     expect(out).toMatch(/<button[^>]*>질문<\/button>/);
   });
 });

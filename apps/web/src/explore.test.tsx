@@ -2,7 +2,7 @@
 // the next page with `after` and appends it; turning a relation type off takes its lines out of the table; the
 // timeline runs by start date with the undated last; choosing an item puts a focusable heading on the page.
 // Imported names and values only reach the page as text inside <bdi>. (Real keyboard focus is the e2e's.)
-import type { RouteName, RouteResponse } from "@pki/contracts";
+import type { RouteName } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
@@ -14,9 +14,9 @@ import {
   timelineOf,
   traceEvidence,
   type Center,
+  type Read,
 } from "./explore.tsx";
 
-type Read = Extract<RouteResponse<"exploreItem">, { status: "ok" }>;
 function fake(handlers: Partial<Record<RouteName, (request: unknown) => unknown>>) {
   const calls: [string, unknown][] = [];
   const api = vi.fn(async (name: string, request?: unknown) => {
