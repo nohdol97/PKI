@@ -79,7 +79,11 @@ import {
   type PermanentlyAbsent,
   type Projections,
 } from "@pki/knowledge-engine";
-import { createVisibleEngine, NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
+import {
+  createVisibleEngine,
+  NullKnowledgeEngine,
+  servedVectorIndex,
+} from "@pki/knowledge-engine/adapters";
 import {
   createCommitScope,
   closeLocation,
@@ -139,7 +143,6 @@ import { createJobRunner, type JobRunner, type RunnerTestBuild } from "./job-run
 import { createMaintenanceHandler } from "./maintenance.ts";
 import { MAINTENANCE_KIND } from "./scheduler.ts";
 import { projectionPorts } from "./projection-ports.ts";
-import { servedVectorIndex } from "./vector-serving.ts";
 import { importContent, type InstanceImporter } from "./imports.ts";
 import { importJsonl, type JsonlImporter } from "./jsonl-import.ts";
 import {

@@ -1,6 +1,6 @@
 # 스펙: H01-C3 — 실제 벡터 색인, 문서 embedding 쓰기 경로, embedding 교체
 
-- 날짜: 2026-11-24 / 상태: 초안(잠정 결정 D1~D12 포함)
+- 날짜: 2026-11-24 / 상태: 확정(잠정 결정 D1~D12 포함)
 - 관련: 이슈 #32(H01, 기준 `H01-C3`), 총괄 #1, #30(X01), #37(R07). [H01 백업·복원 spec](2026-11-23-H01-backup-restore.md)(D1 "C3은 뒤 단위", R2 "투영은 백업에서 뺀다"), [X01 spec](2026-11-23-X01-retrieval-qa.md), [ADR 0004](../adr/0004-embedded-storage.md), [ADR 0006](../adr/0006-embedding.md), [ADR 0025](../adr/0025-retrieval-strategies.md), ARCHITECTURE 3.2·4·5.4절
 - 번호: 요구사항 `H01C3-R<n>`, 완료 기준 `H01C3-C<n>`, 결정 `H01C3-D<n>`, 작업 `H01C3-T<n>`. 정본 마이그레이션은 더하지 않는다(가장 높은 번호는 v33 그대로, `storage/src/migrations.ts:1953`).
 
@@ -59,9 +59,9 @@
 
 ### 읽기와 교체
 
-- **H01C3-R8 읽는 쪽의 상태.** 서버가 받는 색인은 `status`만 덧씌운 것이다. 색인이 낡음으로 표시돼 있으면 `rebuilding`, 활성 세대의 공간이 묶인 embedder와 다르면 `unavailable`(이유: 공간 다름)이다. `vector` 전략은 `ready`가 아니면 지금처럼 이유를 달아 `unavailable`로 답하고 다른 전략의 결과는 바뀌지 않는다.
+- **H01C3-R8 읽는 쪽의 상태.** 서버가 받는 색인은 `status`만 덧씌운 것이다. 묶인 색인의 상태가 `ready`가 아니면 그대로 두고(빈 색인은 낡음 표시가 있어도 `unavailable`이다), `ready`일 때 색인이 낡음으로 표시돼 있으면 `rebuilding`, 활성 세대의 공간이 묶인 embedder와 다르면 `unavailable`(이유: 공간 다름)이다. `vector` 전략은 `ready`가 아니면 지금처럼 이유를 달아 `unavailable`로 답하고 다른 전략의 결과는 바뀌지 않는다.
 - **H01C3-R9 embedding 교체(`H01-C3`).** 교체는 따로 만든 길이 아니라 R4의 재구축이다. 활성 세대는 `activate`가 성공하는 순간까지 행 하나 바뀌지 않는다(지운 원본의 `remove`만 예외). 실패·중단·꺼짐 뒤에는 이전 세대만 남고(R3), 작업은 기존 재시도·lease 회수로 처음부터 다시 돈다.
-- **H01C3-R10 언제 다시 만드는가.** 시작할 때의 비교(`projections.ts:242`)는 벡터 색인이 ① 반영 순번이 정본과 다르거나 ② 낡음 표시가 있거나 ③ 활성 세대가 없거나 ④ 활성 세대의 공간이 embedder와 다르면 낡음으로 표시하고 `projection-rebuild` 작업을 요청한다. **시작하는 자리에서 embedding하지 않는다.** 복원 마무리는 재구축 요청과 같은 트랜잭션에서 벡터 색인의 낡음 표시를 쓴다(복원은 번호 발급까지 되돌리므로 복원 전의 ref가 다른 원본을 가리킬 수 있다).
+- **H01C3-R10 언제 다시 만드는가.** 시작할 때의 비교(`projections.ts:242`)는 벡터 색인이 ① 반영 순번이 정본과 다르거나 ② 낡음 표시가 있거나 ③ 활성 세대가 없거나 ④ 활성 세대의 공간이 embedder와 다르면 낡음으로 표시하고 `projection-rebuild` 작업을 요청한다(`reconcile`의 결과는 `requested`). **시작하는 자리에서 embedding하지 않는다.** 복원 마무리는 재구축 요청과 같은 트랜잭션에서 벡터 색인의 낡음 표시를 쓴다(복원은 번호 발급까지 되돌리므로 복원 전의 ref가 다른 원본을 가리킬 수 있다).
 
 ### 묶기
 
@@ -105,7 +105,7 @@ flowchart TD
 | H01C3-C2 | 원본 둘을 넣고 재구축하면 ref가 최신 version마다 하나이고, 한 원본의 글과 같은 질의 벡터로 찾으면 그 ref가 첫째다. 새 version을 통지하면 새 version의 ref만 남는다. `egress`가 `external`인 embedder로는 `embed`가 한 번도 불리지 않고 색인에 벡터가 없다(R4~R6) | `knowledge-engine/src/vector-build.test.ts` |
 | H01C3-C3 | 재구축이 첫 묶음을 넣은 뒤에 원본 하나를 삭제 경로로 지우면, 재구축이 성공으로 끝나고 그 원본의 ref가 활성 세대에 없다. 만드는 세대에 든 ref에 `remove`를 부르면 그 세대의 `refs()`에 없다(R7) | `knowledge-engine/src/vector-build.test.ts`, `packages/testkit/src/vector-index.contract.ts` |
 | H01C3-C4 | 모델 A로 만든 활성 세대가 있을 때 모델 B로 재구축한다. 둘째 묶음에서 `embed`가 실패하거나 중단 신호가 오면 재구축은 실패로 끝나고 `search` 결과와 `embeddingSpace`(A)가 전과 같으며 만드는 세대가 없다. 성공하면 공간이 B이고 반영 순번이 읽은 순번이다. B가 묶였는데 활성이 A인 동안, 그리고 낡음 표시가 있는 동안 덧씌운 `status`는 `ready`가 아니고 `vector` 전략은 `unavailable`이다(R8·R9) | `knowledge-engine/src/vector-build.test.ts`, `backend/src/vector-serving.test.ts` |
-| H01C3-C5 | 실제 `bootBackend`로: `vectorIndexing`을 켜고 원본을 넣은 뒤 다시 시작하면 시작 중 `embed` 호출이 0이고 `projection-rebuild` 작업이 돈 뒤 상태 API의 벡터 색인이 `ready`다. 원본을 `/api/sources/delete`로 지우면 그 ref가 색인 파일에 없다. 옵션 없이 시작하면 묶인 색인이 `EmptyVectorIndex`이고 `vectors/`가 지워져 있으며 재구축 작업이 새로 등록되지 않는다. 복원 마무리 뒤에는 벡터 색인의 낡음 표시가 `1`이다(R10·R11) | `backend/src/vector-index.boot.test.ts`, `backend/src/restore-ledger.test.ts`(단언 하나), `backend/src/derivative-coverage.test.ts`(기존) |
+| H01C3-C5 | 실제 `bootBackend`로: `vectorIndexing`을 켜고 원본을 넣은 뒤 다시 시작하면 시작 중 `embed` 호출이 0이고 `projection-rebuild` 작업이 돈 뒤 상태 API의 벡터 색인이 `ready`다. 원본을 `/api/sources/delete`로 지우면 그 ref가 색인 파일에 없다. 옵션 없이 시작하면 묶인 색인이 `EmptyVectorIndex`이고 `vectors/`가 지워져 있으며 재구축 작업이 새로 등록되지 않는다. 복원 마무리 뒤에는 벡터 색인의 낡음 표시가 `1`이다(R10·R11) | `backend/src/vector-index.boot.test.ts`, `backend/src/restore-boot.test.ts`(단언 하나. 부팅 수준의 `restore-ledger.test.ts`는 빈 색인이 스스로 낡음 표시를 써서 이 단언을 가르지 못한다), `backend/src/derivative-coverage.test.ts`(기존) |
 
 **변이 확인**(테스트 간략화 규칙 5, 데이터 보호의 허용·차단): ① `remove`가 활성 세대만 지우게 하면 C3의 계약 사례가 빨개진다 ② R4 ③의 "정본에 없는 ref 지우기"를 빼면 C3의 재구축 사례가 빨개진다 ③ `activate`의 집합 대조를 빼면 C1의 거절 사례가 빨개진다. 변이가 맞힌 줄을 PR에 적는다. 경계값·조합은 더 늘리지 않는다.
 
@@ -141,7 +141,7 @@ PR 하나, 한 구현자가 차례로 한다. T4는 T2·T3과 파일이 겹치�
 |---|---|---|---|---|---|
 | H01C3-T1 | 규격의 세대 모양과 두 구현 | C1, C3(계약 사례) | 없음 | `packages/contracts/src/vector-index.ts`, `packages/testkit/src/memory-vector-index.ts`·`vector-index.contract.ts`, 새 `storage/src/adapters/sqlite-vector-index.ts`와 계약 시험, `storage/src/adapters/index.ts`·`empty-vector-index.ts`, `reset`을 부르던 곳의 옮김 | 두 계약 시험 통과 출력, 변이 ①·③의 빨간 출력 |
 | H01C3-T2 | 재구축·통지·시작 비교의 쓰기 경로 | C2, C3(재구축 사례), C4(앞 두 문장) | T1 | 새 `knowledge-engine/src/vector-build.ts`와 시험, `knowledge-engine/src/projections.ts`·`projection-kinds.ts`, `backend/src/retrieval-ablation.ts` | `vector-build.test.ts`·`projections.test.ts` 통과 출력, 변이 ②의 빨간 출력 |
-| H01C3-T3 | 제품 묶기: 옵션, 정책을 지나는 embedding, 덧씌운 상태, 복원의 낡음 표시 | C4(끝 문장), C5 | T2 | `backend/src/composition.ts`·`boot.ts`·`projection-ports.ts`·`restore-boot.ts`, 새 `backend/src/vector-serving.test.ts`·`vector-index.boot.test.ts`, `backend/src/restore-ledger.test.ts` | 세 시험과 `derivative-coverage.test.ts`·`projection-remove.test.ts` 통과 출력 |
+| H01C3-T3 | 제품 묶기: 옵션, 정책을 지나는 embedding, 덧씌운 상태, 복원의 낡음 표시 | C4(끝 문장), C5 | T2 | `backend/src/composition.ts`·`boot.ts`·`projection-ports.ts`·`restore-boot.ts`, 새 `knowledge-engine/src/adapters/served-vector-index.ts`·`backend/src/vector-serving.test.ts`·`vector-index.boot.test.ts`, `backend/src/restore-boot.test.ts` | 세 시험과 `derivative-coverage.test.ts`·`projection-remove.test.ts` 통과 출력 |
 | H01C3-T4 | 문서: 새 ADR(잠정 구현과 세대 전환), ADR 0004에 가리키는 줄, ADR 0025의 "색인 없음" 문장, ARCHITECTURE 3.2·4·5.4절과 A08, site-setup S39, `docs/README.md`·`docs/adr/README.md` | (문서) | T1 | 왼쪽 문서들 | `pnpm lint` 통과, 문서의 파일 이름·옵션 이름이 코드와 같음 |
 
 `backend/src/composition.ts`·`boot.ts`·`restore-boot.ts`·`docs/site-setup.md`·`docs/ARCHITECTURE.md`·`docs/README.md`는 여러 세션이 자주 고치는 파일이다. 줄을 덧붙이는 쪽으로 쓴다. `backend/src/server.ts`, `packages/contracts/src/index.ts`, `storage/src/index.ts`, `storage/src/migrations.ts`는 건드리지 않는다.
@@ -158,3 +158,4 @@ PR 하나, 한 구현자가 차례로 한다. T4는 T2·T3과 파일이 겹치�
 | 날짜 | 변경 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-24 | 처음 씀(초안) | 전체 | H01 백업·복원(#271)이 합쳐지고 X01이 찾는 쪽을 만든 뒤, 미뤄 둔 `H01-C3`과 그 전제(실제 색인·쓰기 경로)를 한 단위로 묶음 |
+| 2026-11-24 | 확정으로 올림. R8: 묶인 색인이 `ready`가 아니면 그 상태를 그대로 둠(빈 색인이 낡음 표시로 `rebuilding`이 되면 기본 설치의 상태가 바뀜). R10: 결과 `requested`. C5·T3: 복원의 낡음 표시 단언을 `restore-boot.test.ts`로(`restore-ledger.test.ts`의 부팅은 빈 색인이 스스로 표시를 써서 가르지 못함), 새 파일 `knowledge-engine/src/adapters/served-vector-index.ts`(모듈 경계 lint가 색인 구현을 `adapters/` 밖에 두지 못하게 하고, `backend/src/adapters`는 수집기 경로 검사의 대상이라 감싼 엔진 `createVisibleEngine`처럼 knowledge-engine의 어댑터에 둠) | R8, R10, C5, T3 | 구현 중 발견(H01C3-T3) |

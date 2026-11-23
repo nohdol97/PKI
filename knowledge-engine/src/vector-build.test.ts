@@ -20,7 +20,7 @@ import {
   MemoryVectorIndex,
   memoryDbTemplate,
 } from "@pki/testkit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createProjections,
   PROJECTION_STALE_SETTINGS,

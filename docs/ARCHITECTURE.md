@@ -173,7 +173,7 @@ flowchart TB
 | **삭제 전파**: 원본이 지워지면 그 원본의 모든 version을 가리키는 근거(지난 근거 포함)를 지우고, 근거가 하나도 남지 않은 행을 지운다. 근거 개수를 세는 일이다 | — |
 | 날짜 비교, 상태 변경, 의존 관계 충돌, 중복 검사 같은 **결정론 규칙**(원 설계 10절) | 일반 그래프 탐색, 그래프 순위·군집 알고리즘 |
 | **정해진 횟수(3까지)의 깊이 1 질의**(예: "A가 의존하는 B", 그 B가 의존하는 C). 한 번에 한 층씩 읽고, 펼치는 항목은 200개까지이며, 재귀 질의·순위·최단 경로 계산을 쓰지 않는다. 결과는 모두 접근 범위 검사를 지난다([ADR 0022](adr/0022-entity-resolution-and-conflicts.md) 결정 4) | 깊이가 정해지지 않은 관계 탐색 |
-| 근거·시간·상태·교정 이력 관리. 항목·사실·관계의 상태와 인식 유형은 입구 하나가 바꾸고, 바꿀 때마다 이력 한 줄(누가·언제·무엇을 근거로, 글 없음)을 남긴다(S01-T01). 사용자의 승인·기각·직접 추가·값 고치기는 S01-T02·T03, 자동 승격은 S01-T05이고, 입구 하나를 두고 새 테이블을 만들지 않은 이유는 [ADR 0021](adr/0021-semantic-registry-on-existing-rows.md)에 있다 | 근사 최근접 색인, 벡터 점수 계산, Wiki 페이지 합성·병합, 기억 통합(consolidation) 파이프라인 |
+| 근거·시간·상태·교정 이력 관리. 항목·사실·관계의 상태와 인식 유형은 입구 하나가 바꾸고, 바꿀 때마다 이력 한 줄(누가·언제·무엇을 근거로, 글 없음)을 남긴다(S01-T01). 사용자의 승인·기각·직접 추가·값 고치기는 S01-T02·T03, 자동 승격은 S01-T05이고, 입구 하나를 두고 새 테이블을 만들지 않은 이유는 [ADR 0021](adr/0021-semantic-registry-on-existing-rows.md)에 있다 | 근사 최근접 색인, 벡터 점수 계산(다만 H01-C3의 `SqliteVectorIndex`는 R07 전의 잠정 구현으로 전수 코사인 비교를 한다. [ADR 0026](adr/0026-vector-index-generations.md)), Wiki 페이지 합성·병합, 기억 통합(consolidation) 파이프라인 |
 | **분석 의미와 데이터 검사**: Dataset·Metric·Join을 항목·사실·관계 행으로 적고, 표 원본(CSV·XLSX)의 머리 행·열 이름·행 수를 읽어 Dataset의 표 행을 만들며, 네 가지 세는 검사(스키마·Grain·Join cardinality·집계)를 값 하나 계산하지 않고 센 결과로 쓴다([ADR 0023](adr/0023-analytical-semantic-rows-and-data-checks.md)) | 질의 엔진, 지표 값 계산, 임의 식·SQL을 받는 질의 |
 
 오른쪽 칸의 기능이 필요해지면 직접 만들지 않고 KnowledgeEngine 어댑터 뒤에 엔진을 꽂는다. **위험을 숨기지 않는다**: 왼쪽 칸도 얇은 추출 파이프라인이고, "대체"와 "삭제 전파"는 조사에서 엔진을 평가한 바로 그 기능(OSS_EVALUATION 1절 탈락 조건 ③)이다. Phase 3(개체 해소, 시간 그래프, 충돌 처리)에서 오른쪽으로 번지려는 압력이 가장 크고, 그 선을 어디까지 넘었는지는 [ADR 0022](adr/0022-entity-resolution-and-conflicts.md)가 적는다.
@@ -205,7 +205,7 @@ flowchart TB
 | 데이터 디렉터리 밖의 사본(백업, 내보내기) | 사용자가 정한 위치 | 제품의 소거 대상이 아님. 백업은 암호구로 암호화한 `.pkibak` 파일이고 복원은 다음 시작에 적용된다(H01 #32, [spec](specs/2026-11-23-H01-backup-restore.md)). 복원 뒤 삭제는 장부로 재적용(I04-T10) | 복원본이 지운 데이터를 담고 있을 수 있음. 장부가 그 삭제를 다시 적용한다 |
 | 사용자 동작 기록 | 백엔드 메모리. 저장하지 않는다 | 정본 아님. 요청 하나가 처리되는 동안만 있다 | 영향 없음 |
 | 키워드 검색 색인 | 정본 SQLite 파일 안 | 투영. 정본과 같은 트랜잭션으로 갱신 | 정본에서 재구축 |
-| 벡터 색인 | 별도 파일. **Phase 1에는 실제 구현이 없다** | 투영 | 지우고 정본 + embedding으로 재구축 |
+| 벡터 색인 | 별도 파일 `vectors/index.sqlite`(옵션 `vectorIndexing`을 켠 설치만, 백업에서 뺌). 켜지 않으면 실제 구현이 묶이지 않는다 | 투영 | 지우고 정본 + embedding으로 재구축 |
 | 지식 엔진 내부 저장소 | 엔진이 쓰는 디렉터리 | 투영. Phase 1에는 없음 | 정본에서 재구축 |
 | 그래프 저장소 | — | 도입하면 **투영**이다. Phase 1에는 없고 관계는 정본의 행이다. 관계 경로와 근거 사슬은 읽을 때 계산하고 저장하지 않는다(S02-R22) | 정본에서 재구축 |
 | Wiki 페이지(본문·계보·링크·변경 기록·"만든 순번" 상태, K01) | 정본 SQLite의 `wiki_pages`·`wiki_page_lineage`·`wiki_links`·`wiki_log`·`wiki_state`(스키마 v27). 파생물 종류 `wiki-page`는 실행 위치가 `canonical`이라 원본 삭제 때 같은 트랜잭션에서 지우거나 다시 쓴다 | 투영 | 정본에서 재생성("다시 만들기") |
@@ -345,25 +345,32 @@ interface VectorIndex {
   status(): Promise<'ready' | 'rebuilding' | { unavailable: string }>
   embeddingSpace(): Promise<{ modelId: string; revision: string; dimension: number } | null>
   appliedChangeSeq(): Promise<number | null>
-  reset(space: { modelId: string; revision: string; dimension: number }): Promise<void>   // 재구축의 시작점
+  beginRebuild(space: { modelId: string; revision: string; dimension: number }): Promise<VectorRebuild>   // 옆에 세대를 만든다
   upsert(items: { ref: IndexedRef; vector: Float32Array }[], changeSeq: number): Promise<void>
   remove(refs: IndexedRef[], changeSeq: number): Promise<void>
   search(query: Float32Array, k: number): Promise<{ ref: IndexedRef; score: number }[]>
 }
+interface VectorRebuild {   // 만드는 세대의 손잡이
+  refs(): Promise<IndexedRef[]>
+  upsert(items: { ref: IndexedRef; vector: Float32Array }[], changeSeq: number): Promise<void>
+  activate(expectedRefs: IndexedRef[], appliedChangeSeq: number | null): Promise<void>   // 한 트랜잭션: 집합 대조, 전환, 이전 세대 삭제
+  discard(): Promise<void>
+}
 // IndexedRef는 언제나 정본의 ID다. 색인은 본문을 갖지 않는다.
 ```
 
-**Phase 1에는 규격, 계약 테스트, 테스트용 메모리 구현(fake)만 있다.** 제품의 기본 구성은 `unavailable`을 돌려주는 빈 구현에 묶이고, 키워드 검색으로 동작한다. 네이티브 벡터 모듈은 V01에 넣지 않는다. sqlite-vec는 배포처에서 확인할 잠정 후보다([ADR 0004](adr/0004-embedded-storage.md), 가정 A08).
+**제품의 기본 구성은 `unavailable`을 돌려주는 빈 구현에 묶이고, 키워드 검색으로 동작한다.** 네이티브 벡터 모듈은 넣지 않는다. 실제 구현은 H01-C3(#32)의 `SqliteVectorIndex`(앱 코드의 전수 코사인 비교, 잠정, [ADR 0026](adr/0026-vector-index-generations.md))이고 `bootBackend`의 옵션 `vectorIndexing`을 켠 설치에만 묶인다(기본 꺼짐). sqlite-vec는 R07이 정할 후보로 남는다([ADR 0004](adr/0004-embedded-storage.md), 가정 A08).
 
-Phase 1에서 제품 코드가 이 규격을 부르는 자리는 둘뿐이다: 상태 API가 읽는 `status()`, 그리고 삭제 때의 `remove()`(5.3절 표). **`upsert`와 `search`를 부르는 제품 코드는 Phase 1에 없다.** 따라서 벡터를 쓰고 찾는 경로는 구현을 바꿔도 된다는 것이 Phase 1에서 증명되지 않았다. X01(#30)은 이 중 `search`를 부르는 자리를 하나 만들었고(아래), `upsert`를 부르는 기능은 R07 뒤의 벡터 구현 작업이 만들므로 쓰기 경로는 그때까지 미증명이다.
+제품 코드가 이 규격을 부르는 자리: 상태 API가 읽는 `status()`, 삭제 때의 `remove()`(5.3절 표), X01의 `search`(아래), 그리고 옵션을 켠 설치에서 `projection-rebuild` 작업의 `beginRebuild`·`upsert`·`activate`와 새 version 통지의 `upsert`(문서 embedding은 전송 정책 `embedWithinPolicy`를 지난다). 켜지 않은 기본 설치에서는 앞의 셋뿐이다.
 
 **V01-T12에서 확정한 규격**(정확한 타입은 [`packages/contracts/src/vector-index.ts`](../packages/contracts/src/vector-index.ts)):
 
 - **빈 구현.** 제품 기본인 `EmptyVectorIndex`는 `status()`가 `{ unavailable: 이유 }`를 돌려주고, 나머지 메서드(`remove()`, `appliedChangeSeq()` 포함)는 같은 이유를 단 `AdapterUnavailableError`로 거부한다. V02의 삭제 경로와 시작 비교는 이 오류를 실패가 아니라 "건너뜀"으로 다룬다.
-- **순서 규칙.** 색인은 ref마다 마지막 `upsert`·`remove`의 변경 순번을 기억한다. 어느 ref라도 그보다 오래된 순번을 실은 호출은 **묶음 전체가** `StaleFenceError`로 거부되고 아무것도 바뀌지 않는다. 같은 순번은 재전달로 보고 받아들인다. `reset`은 벡터와 이 기억을 모두 비운다.
+- **순서 규칙.** 색인은 ref마다 마지막 `upsert`·`remove`의 변경 순번을 기억한다. 어느 ref라도 그보다 오래된 순번을 실은 호출은 **묶음 전체가** `StaleFenceError`로 거부되고 아무것도 바뀌지 않는다. 같은 순번은 재전달로 보고 받아들인다. 기억은 세대마다 따로 있다(새 세대는 비어서 시작한다).
+- **세대(H01-C3, [ADR 0026](adr/0026-vector-index-generations.md)).** 활성 세대는 많아야 하나이고 `status`·`embeddingSpace`·`appliedChangeSeq`·`search`·색인의 `upsert`는 활성 세대만 본다. 만드는 세대(많아야 하나)는 `beginRebuild`의 손잡이로만 쓰고, `activate`는 ref 집합이 기대한 집합과 같을 때만 한 트랜잭션으로 바꾼다. `remove`는 모든 세대에서 지운다. 열 때 만들던 세대는 버린다. 읽는 쪽이 보는 색인은 `status`만 덧씌운 것이다(낡음 표시면 `rebuilding`, 활성 세대의 공간이 묶인 embedder와 다르면 `unavailable`).
 - **묶음 거부의 처리.** 묶음 전체가 거부되므로 부르는 쪽(X01)은 낡은 ref를 빼고 다시 보내거나 재구축에 맡긴다.
 - 상태 API는 색인의 상태가 규격에 맞지 않거나 읽을 수 없으면 그 항목만 `unavailable`("status check failed")로 보이고 다른 항목은 그대로 보인다.
-- **X01(#30)이 `search`를 부르는 자리(잠정).** 제품 코드에서 `search`를 부르는 곳은 `knowledge-engine/src/retrieval/`의 `vector` 전략 하나다. 질의를 `EmbeddingProvider.embed`로 벡터로 바꾸고 `VectorIndex.search`를 부르며, 기본 켬 목록에는 들지 않고([ADR 0025](adr/0025-retrieval-strategies.md)) 서버 옵션 `askStrategies`로만 켠다. 모델이 없거나 색인이 `unavailable`·`rebuilding`이면 그 이유를 `route` 사건에 `unavailable`로 알리고, 다른 전략이나 가짜 결과로 바꿔 쓰지 않는다(X01-R2, D4). 문서 임베딩과 `upsert`는 하지 않는다(X01-D6). 이 호출이 확인된 것은 메모리 구현뿐이며 실제 벡터 구현에서의 동작은 배포처 후속이다.
+- **X01(#30)이 `search`를 부르는 자리(잠정).** 제품 코드에서 `search`를 부르는 곳은 `knowledge-engine/src/retrieval/`의 `vector` 전략 하나다. 질의를 `EmbeddingProvider.embed`로 벡터로 바꾸고 `VectorIndex.search`를 부르며, 기본 켬 목록에는 들지 않고([ADR 0025](adr/0025-retrieval-strategies.md)) 서버 옵션 `askStrategies`로만 켠다. 모델이 없거나 색인이 `unavailable`·`rebuilding`이면 그 이유를 `route` 사건에 `unavailable`로 알리고, 다른 전략이나 가짜 결과로 바꿔 쓰지 않는다(X01-R2, D4). 문서 임베딩과 `upsert`는 하지 않는다(X01-D6, 쓰기는 H01-C3). 이 호출이 확인된 것은 메모리 구현과 `SqliteVectorIndex`의 합성 시험이며 실제 모델에서의 동작은 배포처 후속이다(S39).
 
 정본 SQLite 쪽에는 드라이버를 바꿀 수 있도록 좁은 **SQL 드라이버 포트**(열기, 실행, 트랜잭션)를 둔다.
 
@@ -528,7 +535,7 @@ sequenceDiagram
 |---|---|---|
 | 가져오기 도중 꺼짐 | 저장된 원본까지만 남고 cursor는 그 뒤에 확정되므로 앞서지 않는다 | 다시 실행하면 같은 원본은 hash로 걸러진다 |
 | 추출 도중 꺼짐 | 작업이 임대된 채 남는다 | 재시작 때 임대가 만료된 작업을 다시 집는다. 결과는 fence로 다시 검사 |
-| 정본 기록 뒤, 엔진·벡터 규격 통지 전 꺼짐 | 투영이 반영한 변경 순번이 정본보다 뒤처진다 | 재시작 때 두 번호를 비교해 다르면 `rebuild`. 같으면 아무것도 하지 않는다 |
+| 정본 기록 뒤, 엔진·벡터 규격 통지 전 꺼짐 | 투영이 반영한 변경 순번이 정본보다 뒤처진다 | 재시작 때 두 번호를 비교해 다르면 `rebuild`(벡터 색인은 embedding하지 않고 재구축 작업을 요청한다). 같으면 아무것도 하지 않는다 |
 | 투영 파일 손상 | 색인을 못 쓴다 | 투영을 비우고 정본에서 재구축. 그동안 `rebuilding` 상태를 알리고 키워드 검색은 유지 |
 | 추출 중 원본이 수정·삭제됨 | 낡은 결과가 도착한다 | fence와 tombstone이 쓰기를 거부 |
 | Provider 시간 초과·오류 | 호출 실패 | Broker가 재시도 가능 여부에 따라 간격을 늘려 재시도하고, 한도를 넘으면 작업을 실패로 남겨 화면에 보인다. CLI는 프로세스 트리까지 종료(가정 A04) |
@@ -573,7 +580,7 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | A05 | CLI의 구조화 출력 옵션이 도구를 뺀 상태에서도 동작한다 | 5.1절 `generateStructured` | R02-C1 | 그 Provider는 일반 응답을 받아 제품이 JSON을 꺼내 스키마로 검증한다(검증은 어느 경우든 제품이 한다) |
 | A06 | 배포처에 쓸 수 있는 OpenAI 호환 엔드포인트와 키가 있고 구조화 출력을 지원한다 | ADR 0005 | 배포처 설정 S05, R02 기록 | 스키마를 지시문으로 요구하고 검증으로 걸러 낸다. 엔드포인트가 아예 없으면 LLM 기능 없이 탐색만 동작 |
 | A07 | better-sqlite3의 미리 빌드된 바이너리가 Electron 설치본 안에서 재빌드 없이 로드된다 | ADR 0004 | R04-C1, R03-C4 | 패키징에 재빌드 단계를 넣거나 SQL 드라이버 포트 뒤의 드라이버를 바꾼다 |
-| A08 | sqlite-vec 확장(`vec0.dll`)이 Windows에서 서명·차단 문제 없이 로드된다 | ADR 0004(벡터 구현 후보) | R03-C4, R04-C2 | VectorIndex의 구현으로 앱 수준 전수 비교나 LanceDB를 고른다(OSS_EVALUATION 4.8절 차선). Phase 1에는 실제 구현이 없으므로 Phase 1 코드는 바뀌지 않는다 |
+| A08 | sqlite-vec 확장(`vec0.dll`)이 Windows에서 서명·차단 문제 없이 로드된다 | ADR 0004(벡터 구현 후보) | R03-C4, R04-C2 | VectorIndex의 구현으로 앱 수준 전수 비교나 LanceDB를 고른다(OSS_EVALUATION 4.8절 차선). H01-C3이 이미 앱 수준 전수 비교(`SqliteVectorIndex`, ADR 0026)를 잠정으로 묶었으므로 그 경우 코드는 바뀌지 않고, sqlite-vec를 고르면 어댑터 파일 하나를 바꾼다 |
 | A09 | "제품 기록이 정본, 엔진은 투영" 구조가 "엔진이 정본"보다 근거·시간·삭제·교정 요구를 잘 충족한다 | ADR 0002 | R03-C1, R03-C4. 그리고 사용자 판단 | 지식 항목·사실·관계의 정본을 엔진으로 넘기고 중복 테이블을 없앤다 |
 | A10 | 원본당 구조화 호출 1회의 추출로 Phase 1 흐름이 성립하고, 이 방식이 엔진 재구현으로 번지지 않는다 | ADR 0003 | R03-C1, R03-C2 | KnowledgeEngine 어댑터에 보류 후보(LightRAG, cognee, sage-wiki) 중 실행을 통과한 것을 꽂는다 |
 | A11 | bge-m3(int8 ONNX)가 Transformers.js로 Electron 설치본 안에서 CPU로 돌고 속도·메모리가 받아들일 만하다 | ADR 0006 | R03-C3, R04-C2 | 차선 모델(multilingual-e5-base)이나 차선 런타임으로 바꾼다(OSS_EVALUATION 4.8절) |
@@ -657,3 +664,4 @@ Phase 1의 투영 동기화는 "정본을 쓴 뒤 통지하고, 놓친 것은 �
 | 2026-11-24 | 4절 저장 표의 "원본 파일과 첨부" 행을 "사본을 두지 않는다"와 ADR 0017 링크로 고치고, 9절 가정 표에 로컬 파일의 Windows 가정(I02B-G6·G9·G14·G15·G18·G22)을 더함 | 4절, 9절 | I02B-T06, I02B-R43 |
 | 2026-11-23 | 4절 저장 표에 점검 발견·재검토 진행 표시 줄을 더함(스키마 v31, 종류 `lint-finding`은 실행 위치 `canonical`, 사용자가 말한 발견은 대상이 남는 동안 지우지 않음). 선택적 LLM 의견(설정 `reflection.refine`, 기본 끔)은 발견 행의 열 둘에 둠 | 4절 | K02-T3 문서(K02-R13·R16·R17) |
 | 2026-11-23 | 4절 저장 표에 알림 줄·알림 변경 순번 줄을 더함(테이블 `notifications`·`notify_state`, 스키마 v33, 파생물 종류 `notification`·층 `delivery`, 쉘로 가는 건수만 든 메시지와 5초 순번 읽기) | 4절 | P02-T1·T2·T3 구현. 새 엔진·전송 통로가 없어 ADR은 쓰지 않음(P02-D14) |
+| 2026-11-24 | 3.2절 벡터 점수 계산에 잠정 예외, 4절 벡터 색인 줄, 5.4절 규격을 `reset`에서 `beginRebuild`·`VectorRebuild`(세대)로 바꾸고 제품 코드의 호출 자리·옵션 `vectorIndexing`·세대 규칙·덧씌운 상태를 적음, 5.4절 재시작 비교의 벡터 줄 | 3.2·4·5.4·7절 | H01-C3(#32), ADR 0026 |

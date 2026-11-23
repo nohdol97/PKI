@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { routes, type EmbeddingKind } from "@pki/contracts";
+import { routes, type EmbeddingKind, type VectorIndex } from "@pki/contracts";
 import { vectorRefOf } from "@pki/knowledge-engine";
 import {
   findSourceId,
@@ -13,11 +13,12 @@ import {
   saveSourceRecord,
   type SqlDriver,
 } from "@pki/storage";
-import { openBetterSqlite3 } from "@pki/storage/adapters";
+import { EmptyVectorIndex, openBetterSqlite3, SqliteVectorIndex } from "@pki/storage/adapters";
 import { FakeEmbedder, send } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bootBackend } from "./boot.ts";
-import { CANONICAL_DB_FILE } from "./composition.ts";
+import { CANONICAL_DB_FILE, productEngine, productRegistry } from "./composition.ts";
+import { checkDataDirectory } from "./derivative-coverage.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "v".repeat(43);
@@ -148,6 +149,22 @@ describe("vectorIndexing on", () => {
     expect(embedder.calls.embed).toEqual([]);
     expect(indexRefs()).toEqual([]);
     expect((await second.status()).vectorIndex.state).not.toBe("ready");
+  });
+});
+
+describe("the data directory check", () => {
+  it("knows the vectors folder as the vector index's path only when the real index is bound", async () => {
+    const embedder = await ready();
+    await boot({ vectorIndexing: true, embedder });
+    await stop();
+    const index = new SqliteVectorIndex(join(dir, "vectors", "index.sqlite"), openBetterSqlite3);
+    const unclaimed = (vectorIndex: VectorIndex) =>
+      checkDataDirectory(dir, productRegistry({ engine: productEngine(), vectorIndex })).filter(
+        (problem) => problem.includes('"vectors'),
+      );
+    expect(unclaimed(index)).toEqual([]);
+    expect(unclaimed(new EmptyVectorIndex())).toHaveLength(1);
+    index.close();
   });
 });
 

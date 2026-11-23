@@ -3,7 +3,7 @@
 // answer until a rebuild (a status that is not `ready` is passed on as it is); one whose active generation is in another embedding space than the bound
 // embedder's cannot be compared with its queries. Every other call is the bound index's own.
 import type { EmbeddingSpace, VectorIndex } from "@pki/contracts";
-import { sameSpace } from "@pki/knowledge-engine";
+import { sameSpace } from "../vector-build.ts";
 
 export function servedVectorIndex(
   index: VectorIndex,

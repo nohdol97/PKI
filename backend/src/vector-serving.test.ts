@@ -8,8 +8,7 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { FakeEmbedder, MemoryVectorIndex, activateEmpty, memoryDbTemplate } from "@pki/testkit";
 import { describe, expect, it } from "vitest";
 import { productRegistry } from "./composition.ts";
-import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
-import { servedVectorIndex } from "./vector-serving.ts";
+import { NullKnowledgeEngine, servedVectorIndex } from "@pki/knowledge-engine/adapters";
 
 const db = memoryDbTemplate(openBetterSqlite3, migrate)();
 registerConnectorInstance(db, "c", "test-fixtures");
