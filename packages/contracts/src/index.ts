@@ -501,6 +501,10 @@ export type ConnectionTestResult = z.infer<typeof ConnectionTestResponseSchema>;
 export const ExecutionSettingsSchema = z.strictObject({ cliBackground: z.boolean() });
 export type ExecutionSettings = z.infer<typeof ExecutionSettingsSchema>;
 
+/** The Semantic setting (site-setup.md `semantic.autoVerify`, S01-R9): automatic promotion, default off. */
+export const SemanticSettingsSchema = z.strictObject({ autoVerify: z.boolean() });
+export type SemanticSettings = z.infer<typeof SemanticSettingsSchema>;
+
 /**
  * The analytical semantic's runtime settings (S03-R5, R6, site-setup.md): `profile` is the switch of the
  * Dataset profile (default off: dark launch); `maxCells` bounds the size of a table the profile and the
@@ -1371,6 +1375,17 @@ export const routes = {
     path: "/api/settings/analytical",
     request: AnalyticalSettingsSchema,
     response: AnalyticalSettingsSchema,
+  },
+  semanticSettings: {
+    method: "GET",
+    path: "/api/settings/semantic",
+    response: SemanticSettingsSchema,
+  },
+  setSemanticSettings: {
+    method: "POST",
+    path: "/api/settings/semantic",
+    request: SemanticSettingsSchema,
+    response: SemanticSettingsSchema,
   },
   providers: { method: "GET", path: "/api/providers", response: ProviderListResponseSchema },
   setDefaultProvider: {

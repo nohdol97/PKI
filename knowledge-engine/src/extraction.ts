@@ -13,7 +13,8 @@
 // the same row by the tables' keys (V02-R8); a same row gets evidence only, a row
 // propagation superseded is restored by it, and an explicit statement lifts a
 // hypothesis row (V02-R11, S01-R5, R11): each through the lifecycle gate, which
-// writes the history line, as does each row it creates. The result is handed over as
+// writes the history line, as does each row it creates. Last, the automatic promotion is judged once on the rows of the answer
+// and their siblings (S01-R9, auto-verify.ts; the setting is off by default and then nothing is written). The result is handed over as
 // items (I04-R11): the job's bookkeeping (drop counts, records of earlier refusals), one
 // per kept fact or relation, then the rule "의존 업무 지연". The runner writes them through commitDerived, inside the
 // fence transaction, and only when the source version and every source a kept
@@ -78,6 +79,7 @@ import {
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
+import { assessAfterExtraction } from "./auto-verify.ts";
 import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
 import { recomputeDependencyDelay } from "./dependency-delay.ts";
 import { findCandidates } from "./linking.ts";
@@ -643,6 +645,8 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // runs the handler again for a fresh closure, a throwing write closes the job).
     const ids = new Map<string, number>();
     const touched = new Set<number>();
+    const judgedFacts = new Set<number>();
+    const judgedRelations = new Set<number>();
     const lineageOf = (extra: LineageRef[]) => [own, ...extra];
     for (const [ref, item] of items) {
       if (item.existingItemId !== null) ids.set(ref, Number(item.existingItemId));
@@ -693,6 +697,8 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
           // restored (V02-R11, S01-R5), and a hypothesis row the answer states as explicit rises (R11)
           automatedLifecycle.evidenceReturned(tx, row, own, at);
           if (entry.explicit) automatedLifecycle.explicitEvidence(tx, row, own, at);
+          // judged once, after every row of the answer is written (the rule item below)
+          (row.kind === "fact" ? judgedFacts : judgedRelations).add(row.id);
         },
       };
     });
@@ -730,6 +736,25 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         });
       },
     };
-    return { status: "succeeded", items: [bookkeeping, ...written, rule, ...proposalItems] };
+    // S01-R9: the automatic promotion, judged once on the final state of this answer's rows. Its own
+    // content-free item (status lines only, like the bookkeeping): a scope policy that refuses the
+    // Insight rule's combined lineage must not skip it, or a rival written in this run would leave a
+    // promoted sibling verified.
+    const judgement: DerivedItem = {
+      kind: BOOKKEEPING_KIND,
+      itemKey: "auto-verify",
+      lineage: [own],
+      unjudged: true as const,
+      write: (tx) =>
+        assessAfterExtraction(
+          tx,
+          { factIds: [...judgedFacts], relationIds: [...judgedRelations] },
+          now().toISOString(),
+        ),
+    };
+    return {
+      status: "succeeded",
+      items: [bookkeeping, ...written, judgement, rule, ...proposalItems],
+    };
   };
 }

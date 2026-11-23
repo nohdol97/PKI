@@ -120,6 +120,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     connectionTest: { acknowledgeUnverified: false },
     setExecutionSettings: { cliBackground: false },
     setAnalyticalSettings: { profile: false, maxCells: 200_000 },
+    setSemanticSettings: { autoVerify: false },
     setDefaultProvider: { providerId: "claude-code" },
     // The pack does not exist: the preparation starts, then fails without touching disk.
     prepareEmbedding: { source: { kind: "local-pack", path: "/synthetic/missing-pack" } },

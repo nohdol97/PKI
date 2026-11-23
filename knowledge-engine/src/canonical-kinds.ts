@@ -45,6 +45,7 @@ import {
   type SqlDriver,
   type SqlValue,
 } from "@pki/storage";
+import { assessAfterPropagation } from "./auto-verify.ts";
 import { recomputeDependencyDelay, type RuleOutcome } from "./dependency-delay.ts";
 import { projectionKinds, type PermanentlyAbsent } from "./projection-kinds.ts";
 
@@ -334,10 +335,16 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
       const { tx } = ctx;
       const deleted: number[] = [];
       const superseded: number[] = [];
+      // the items the rows reach, named before any row goes: the automatic promotion judges their facts after
+      const reachedItems: number[] = [];
       for (const { ref } of snapshot) {
         const id = Number(ref.id);
-        const row = tx.all(`SELECT status, user_authored FROM ${table} WHERE id = ?`, [id])[0];
+        const row = tx.all(
+          `SELECT status, user_authored${kind === "fact" ? ", item_id" : ""} FROM ${table} WHERE id = ?`,
+          [id],
+        )[0];
         if (row === undefined) continue;
+        if (kind === "fact") reachedItems.push(row.item_id as number);
         const status = row.status;
         const evidence = listEvidence(tx, target(id));
         if (evidence.length === 0) {
@@ -376,6 +383,15 @@ function knowledgeKind(kind: "fact" | "relation"): DerivativeKind {
         for (const id of written) tx.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
         deleted.push(...written);
       }
+      // S01-R9: after the evidence was taken away and the rows judged again, the promotion is judged (off by default)
+      assessAfterPropagation(
+        tx,
+        {
+          itemIds: reachedItems,
+          relationIds: kind === "relation" ? snapshot.map(({ ref }) => Number(ref.id)) : [],
+        },
+        running?.at,
+      );
       const report = noting(ctx);
       if (report) {
         report[kind === "fact" ? "facts" : "relations"].push(...deleted);

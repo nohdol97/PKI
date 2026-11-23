@@ -47,7 +47,10 @@ import {
   type UserActionIssuer,
 } from "@pki/providers";
 import {
+  assessAfterUserAction,
+  AUTO_VERIFY_SETTING,
   defaultEntries,
+  readAutoVerify,
   recomputeDependencyDelay,
   type CanonicalEntries,
 } from "@pki/knowledge-engine";
@@ -83,6 +86,7 @@ import {
   type UserChangeOutcome,
   type SqlDriver,
   type UndoResult,
+  type EntryRef,
   type UserDecisions,
 } from "@pki/storage";
 import { timingSafeEqual } from "node:crypto";
@@ -560,7 +564,17 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
    * the Insight follows at once instead of at the next source change. The policy judges the sources the
    * Insight rests on, a user input's included, as it does when extraction runs the rule.
    */
-  const judgeAgain = (items: readonly number[]) => {
+  const judgeAgain = (items: readonly number[], rows: readonly EntryRef[] = [], at?: string) => {
+    // S01-R9: a value the user wrote or approved is valid (R15), so it can end a promoted sibling's single value;
+    // an undo can give a row back to the policy. Nothing happens while the setting was never written.
+    assessAfterUserAction(
+      options.db,
+      {
+        itemIds: items,
+        relationIds: rows.filter((r) => r.kind === "relation").map((r) => r.id),
+      },
+      at,
+    );
     recomputeDependencyDelay(options.db, [...new Set(items)], {
       combinable: (lineage) => registry.combinable(options.db, lineage),
     });
@@ -599,9 +613,10 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     return options.db.transaction(() => {
       if (!gate.semanticShown(ref.kind, ref.id)) return { error: "not-found" as const };
       const before = itemsOfEntry(options.db, ref);
-      const outcome = act(decisions, new Date(options.now?.() ?? Date.now()).toISOString());
+      const at = new Date(options.now?.() ?? Date.now()).toISOString();
+      const outcome = act(decisions, at);
       if (outcome.status === "applied" || outcome.status === "removed") {
-        judgeAgain([...before, ...itemsOfEntry(options.db, ref)]);
+        judgeAgain([...before, ...itemsOfEntry(options.db, ref)], [ref], at);
       }
       if (outcome.status === "removed") return { status: "removed" as const };
       if (outcome.status === "refused") {
@@ -670,7 +685,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         const added = decisions.add(options.db, entry, at);
         if (added.status === "refused")
           return refused(added.reason, "existing" in added ? added.existing : undefined);
-        judgeAgain(itemsOfEntry(options.db, added.ref));
+        judgeAgain(itemsOfEntry(options.db, added.ref), [added.ref], at);
         const row = state(added.ref);
         return row ? { status: "applied", seq: added.seq, entry: row } : { error: "not-found" };
       }
@@ -681,7 +696,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       if (kind !== undefined && badValue(kind, value)) return { error: "bad-request" };
       const fixed = decisions.replaceValue(options.db, fact, value, at);
       if (fixed.status === "refused") return refused(fixed.reason, fixed.existing);
-      judgeAgain(itemsOfEntry(options.db, fixed.added));
+      judgeAgain(itemsOfEntry(options.db, fixed.added), [fixed.added, fixed.replaced], at);
       const added = state(fixed.added);
       const replaced = state(fixed.replaced);
       return added && replaced
@@ -881,6 +896,12 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       });
       options.onRunConditionsChanged?.(); // wakes the runner for the profile jobs the switch queued
       return analyticalSettings(options.db);
+    },
+    semanticSettings: async () => ({ autoVerify: readAutoVerify(options.db) }),
+    setSemanticSettings: async ({ autoVerify }) => {
+      // no held job waits on this setting, so nothing is released with it (cf. `releasing`)
+      writeSetting(options.db, AUTO_VERIFY_SETTING, autoVerify ? "on" : "off");
+      return { autoVerify: readAutoVerify(options.db) };
     },
     providers: async () => providerList(options),
     setDefaultProvider: async ({ providerId }) => {

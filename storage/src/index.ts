@@ -221,8 +221,10 @@ export {
 } from "./knowledge.ts";
 export {
   automatedLifecycle,
+  isUserDecided,
   userInputKind,
   type Actor,
+  type AutoVerifyLoss,
   type AutomatedLifecycle,
   type Basis,
   type EntryRef,

@@ -56,7 +56,21 @@ export interface AutomatedLifecycle {
   explicitEvidence(tx: SqlDriver, ref: EntryRef, basis: Basis, at?: string): Outcome;
   /** Policy: verified becomes disputed; needs the source version it rests on. */
   raiseDispute(tx: SqlDriver, ref: EntryRef, basis: Basis | null, at?: string): Outcome;
+  /**
+   * Policy (S01-R9): a candidate fact or relation becomes verified. The conditions are the caller's
+   * (knowledge-engine/auto-verify.ts); the gate refuses an item, a row that is not a candidate, and a
+   * row the user decided or wrote (`user-override`, ahead of every other answer).
+   */
+  autoVerify(tx: SqlDriver, ref: EntryRef, at?: string): Outcome;
+  /**
+   * Policy (S01-R9, R5 restore): a row the policy verified goes back to the state and epistemic type it
+   * had before, because `lost` no longer holds. A row the policy did not verify is `unchanged`.
+   */
+  autoVerifyLost(tx: SqlDriver, ref: EntryRef, lost: AutoVerifyLoss, at?: string): Outcome;
 }
+
+/** The conditions of S01-R9 a promoted row can lose, as the reason code of the restore line. */
+export type AutoVerifyLoss = "independent-sources" | "conflicting-value";
 
 const TABLES = {
   item: { table: "items", history: "item_history", fk: "item_id" },
@@ -270,6 +284,28 @@ export function userInputKind(tx: SqlDriver, ref: EntryRef): "authored" | "appro
 }
 
 /**
+ * The line that made a verified row verified when the policy did (S01-R9): the newest line that
+ * explains the status, read through cancellations (an undo names the line it reverted) and through
+ * evidence returning (a restore names the supersede it reverted, so the status is the one before that
+ * supersede). Undefined when the status has another origin or no line explains it.
+ */
+function policyVerifiedLine(lines: readonly StoredLine[]): StoredLine | undefined {
+  let upto = lines;
+  for (;;) {
+    const line = upto[upto.length - 1];
+    if (!line) return undefined;
+    if (line.action === "undo" || line.action === "evidence-returned") {
+      if (line.revertsSeq === null) return undefined;
+      const before: number = line.revertsSeq;
+      upto = upto.filter((l) => l.seq < before);
+      continue;
+    }
+    // only the policy writes this action, and only into verified (the table has no other row for it)
+    return line.action === "auto-verify" ? line : undefined;
+  }
+}
+
+/**
  * Moves a row to status `to` by the transition table for `actor`. An automated actor on a row the
  * user decided is refused first (R12: `user-override`, before the same-state shortcut), then
  * `unchanged` when the row already has that status, `invalid-transition` when the table has no such
@@ -295,15 +331,25 @@ export function applyTransition(
     const refusal = automatedRefusal(tx, ref, actor, to);
     if (refusal) return refusal;
   }
-  if (row.status === to) return { status: "unchanged" };
-  const found = TRANSITIONS.find(
-    (t) =>
-      t.from === row.status &&
-      t.to === to &&
-      t.actor === actor &&
-      t.kinds.includes(ref.kind) &&
-      (wanted === undefined || t.action === wanted),
-  );
+  // The user approving a row the policy verified is the one same-state request that is an action: it
+  // makes the row the user's (user-approved, a standing user action), so a later loss of the policy's
+  // conditions cannot take back what the user approved (S01-T05 decision 5).
+  const approvesPolicyRow =
+    actor === "user" &&
+    to === "verified" &&
+    row.status === "verified" &&
+    policyVerifiedLine(stateLinesOf(tx, ref)) !== undefined;
+  if (row.status === to && !approvesPolicyRow) return { status: "unchanged" };
+  const found = approvesPolicyRow
+    ? { action: "approve" }
+    : TRANSITIONS.find(
+        (t) =>
+          t.from === row.status &&
+          t.to === to &&
+          t.actor === actor &&
+          t.kinds.includes(ref.kind) &&
+          (wanted === undefined || t.action === wanted),
+      );
   if (!found) return { status: "refused", reason: "invalid-transition" };
   const approving = actor === "user" && to === "verified";
   const noCurrentEvidence =
@@ -459,4 +505,30 @@ export const automatedLifecycle: AutomatedLifecycle = {
 
   raiseDispute: (tx, ref, basis, at) =>
     applyTransition(tx, ref, "policy", "disputed", { basis, at }),
+
+  autoVerify: (tx, ref, at) => applyTransition(tx, ref, "policy", "verified", { at }),
+
+  autoVerifyLost(tx, ref, lost, at) {
+    if (!holdsEvidence(ref)) return { status: "refused", reason: "invalid-transition" };
+    const row = readRow(tx, ref);
+    if (!row) return { status: "refused", reason: "not-found" };
+    // R12: a row the user decided or wrote (its creation line is a user action) is never taken back
+    if (isUserDecided(tx, ref)) {
+      return { status: "refused", reason: "user-override" };
+    }
+    const promoted = policyVerifiedLine(stateLinesOf(tx, ref));
+    if (row.status !== "verified" || !promoted || !promoted.fromStatus) {
+      return { status: "unchanged" };
+    }
+    const seq = writeLine(tx, ref, {
+      from: row,
+      to: { status: promoted.fromStatus, epistemic: promoted.fromEpistemic as EpistemicType },
+      actor: "policy",
+      action: "auto-verify-reverted",
+      reason: lost,
+      revertsSeq: promoted.seq, // the line that verified it (R6: a restore names what it reverts)
+      at,
+    });
+    return { status: "applied", seq };
+  },
 };

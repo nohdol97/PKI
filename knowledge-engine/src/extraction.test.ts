@@ -195,13 +195,25 @@ describe("extraction.calls", () => {
     expect(facts()).toHaveLength(1);
   });
 
-  it("hands over the job's bookkeeping, one item per kept fact, then the rule, each with this version as lineage (I04-R11)", async () => {
+  it("hands over the job's bookkeeping, one item per kept fact, the automatic promotion's judgement, then the rule, each with this version as lineage (I04-R11)", async () => {
     imported(mail);
     const { job, result } = await runNext();
     if (result.status !== "succeeded") throw new Error("expected a result");
     const own = { sourceId: job.sourceId, version: job.fenceVersion };
-    expect(result.items.map((i) => i.kind)).toEqual(["extraction", "fact", "insight"]);
-    expect(result.items.map((i) => i.lineage)).toEqual([[own], [own], [own]]);
+    // S01-T05: the judgement is its own content-free item (kind of the bookkeeping, itemKey auto-verify)
+    expect(result.items.map((i) => i.kind)).toEqual([
+      "extraction",
+      "fact",
+      "extraction",
+      "insight",
+    ]);
+    expect(result.items.map((i) => i.itemKey)).toEqual([
+      "bookkeeping",
+      expect.any(String),
+      "auto-verify",
+      "dependency-delay",
+    ]);
+    expect(result.items.map((i) => i.lineage)).toEqual([[own], [own], [own], [own]]);
     expect(facts()).toHaveLength(1);
   });
 
