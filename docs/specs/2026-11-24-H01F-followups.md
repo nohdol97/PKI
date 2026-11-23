@@ -1,6 +1,6 @@
 # 스펙: H01 후속 묶음 — 백업·복원에 남은 정확성·보안·데이터 손실 결함
 
-- 날짜: 2026-11-24 / 상태: 초안(잠정 결정 D1~D9 포함)
+- 날짜: 2026-11-24 / 상태: 확정(잠정 결정 D1~D9 포함)
 - 관련: 이슈 #270(H01 후속), #32(H01). [H01 spec](2026-11-23-H01-backup-restore.md), [H01-C3 spec](2026-11-24-H01-C3-vector-index.md)
 - 번호: 요구사항 `H01F-R<n>`, 완료 기준 `H01F-C<n>`, 결정 `H01F-D<n>`, 작업 `H01F-T<n>`
 
@@ -111,7 +111,7 @@ H01의 독립 검토 두 건이 "재작업 아님"으로 넘긴 지적과 뒤로
 
 바꾸려면 적힌 자리 하나를 고치면 된다.
 
-- **H01F-D1 4번 항목은 이 묶음에서 고친다.** 읽어 보니 `boot.ts`가 아니라 `applyPendingRestore`에서 닫힌다. `restore-boot.ts`는 다른 세션(4f)도 고치지만 그쪽은 `finishRestore` 둘레이고 이쪽은 한 갈래 몇 줄이다. 시험은 새 파일에 둔다. 합칠 때 겹치면 T4만 빼고 이슈에 남긴다(다른 작업이 기대지 않는다).
+- **H01F-D1 4번 항목은 이 묶음에서 고친다.** 읽어 보니 `boot.ts`가 아니라 `applyPendingRestore`에서 닫힌다. `restore-boot.ts`의 `finishRestore` 둘레를 고친 다른 묶음(#292)은 이미 합쳐졌고, 이쪽은 그 위에서 한 갈래 몇 줄만 고친다. 시험은 새 파일에 둔다. 합칠 때 겹치면 T4만 빼고 이슈에 남긴다(다른 작업이 기대지 않는다).
 - **H01F-D2 사본이 있을 때의 취소는 거절만 한다.** 앱이 사본을 지우거나 되돌리면 어느 쪽이 사용자의 데이터인지 모르는 채로 한 파일을 없앤다. 단추로 풀려면 표식 `rolling-back`을 쓰는 경로를 더하고 그 확인 문구를 정한다.
 - **H01F-D3 시작 실패 이유는 코드마다 하나(다섯)다.** 할 일이 코드마다 달라 하나로 묶지 않았다. 묶으려면 `classify`의 대응 표를 고친다.
 - **H01F-D4 scrypt 상한은 메모리 256MiB, `N·r·p` 2^22다.** 제품 값(128MiB, 2^20)의 2배·4배라 앞으로 값을 한 단계 올린 파일까지 읽힌다. 넘는 파일의 답은 기존 코드 `damaged`다(새 코드를 만들지 않았다). 값은 `backup-file.ts`의 상수다.
@@ -141,10 +141,11 @@ PR 하나, 한 worktree에서 차례로 한다. 자세한 설명은 작업 폴�
 | H01F-T3 | 셸과 화면의 문구: 이유 다섯의 수용과 문구, 사본 경고와 실패 문구 | C1(셸), C2(화면 문구) | T2 | `apps/desktop/src/backend-process.ts`(목록 두 곳에 줄 더하기), `apps/desktop/src/start-failure-text.ts`, `apps/desktop/src/start-failure.test.ts`, `apps/web/src/backup.tsx`, `apps/web/src/backup-text.ts`·`backup-text.test.ts` | 두 시험의 통과 출력, PR 직전 `pnpm e2e`의 기존 `backup.e2e.ts` 통과 |
 | H01F-T4 | 커밋된 복원을 되돌리지 않기, H01 spec의 가리키는 줄과 이력 | C7 | T1 | `backend/src/restore-boot.ts`(`applyPendingRestore`의 `swapped` 갈래만), 새 파일 `backend/src/restore-boot.committed.test.ts`, `docs/specs/2026-11-23-H01-backup-restore.md`(R10·R11·D7에 이 spec을 가리키는 줄, 이력) | 새 시험과 기존 `restore-boot.test.ts`의 통과 출력, 변이 하나(C7)의 빨간 출력 |
 
-`backend-process.ts`는 세션 53이, `restore-boot.ts`는 세션 4f가 다른 자리를 고치고 있다. 이 묶음은 적힌 자리만 고치고, 나중에 합치는 쪽이 rebase한다. `docs/README.md`에는 색인 한 줄만 더한다.
+`backend-process.ts`는 세션 53이 다른 자리를 고치고 있다(`restore-boot.ts`를 고친 #292는 이미 합쳐졌다). 이 묶음은 적힌 자리만 고치고, 나중에 합치는 쪽이 rebase한다. `docs/README.md`에는 색인 한 줄만 더한다.
 
 ## 변경 이력
 
 | 날짜 | 변경 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-24 | 처음 씀(초안) | 전체 | 이슈 #270의 열세 항목을 코드와 대조해 결함 일곱 요구사항을 한 묶음으로 정함 |
+| 2026-11-24 | 확정 | 상태, D1, 작업 분해 | #292가 합쳐진 main 위로 옮김. 인용한 줄 번호는 `0b498f93` 기준이라 `restore-boot.ts`는 열몇 줄 밀려 있음 |
