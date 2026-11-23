@@ -8,6 +8,7 @@ import { NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   createDerivativeRegistry,
   migrate,
+  onMembershipChanged,
   saveConsent,
   writeSetting,
   type DerivativeKind,
@@ -60,7 +61,7 @@ function freshDb() {
 describe("resolution.group-reads: the membership receivers (S02-R13)", () => {
   it("are one fixed list with the rule's receiver first, and both the registry and the user's entry are built from it", () => {
     expect(Object.isFrozen(MEMBERSHIP_LISTENERS)).toBe(true);
-    expect(MEMBERSHIP_LISTENERS).toEqual([dependencyDelayReceiver]);
+    expect(MEMBERSHIP_LISTENERS).toEqual([dependencyDelayReceiver, onMembershipChanged]);
   });
 });
 
