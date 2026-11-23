@@ -20,12 +20,15 @@
 // that runs the registry, by its transaction, beside the counts the record keeps.
 import {
   automatedLifecycle,
+  checkLinesReading,
+  claimCandidates,
   createDerivativeRegistry,
   defaultScopePolicy,
   EXTRACT_JOB_KIND,
   lineageOfItems,
   listEvidence,
   notifyMembership,
+  queueChecksAround,
   registerJob,
   rejudgeGroups,
   rowLineage,
@@ -170,11 +173,6 @@ const lineageOf: Record<string, (db: SqlDriver, id: number) => SourceVersionRef[
       ),
       ...userInputsOf(db, id).map((input) => rowLineage(db, input)),
     ),
-  // a dataset table follows its source: the source's versions are its lineage (S03-R17)
-  "analytical-check": (db, id) =>
-    versionsOf(db, VERSIONS("v.source_id = (SELECT source_id FROM dataset_tables WHERE id = ?)"), [
-      id,
-    ]),
   // only a candidate or a rejected type definition follows its source; a verified one (and a retired
   // one, which was verified) is a rule the user accepted and holds no lineage (S01-R20, R22)
   ontology: (db, id) =>
@@ -843,31 +841,167 @@ const ONTOLOGY: DerivativeKind = {
 };
 
 /**
- * The analytical semantic's rows that are not registry rows (`dataset_tables` and `analytical_checks`, schema
- * v24, S03-R17). Layer `insight`: it runs after the fact, relation and item kinds, so a later judgement sees
- * the rows they left. S03-T04 registers the kind with what its table needs: a deleted source's
- * `dataset_tables` rows go in the deletion's transaction (the source row stays, so nothing cascades). A new
- * version, a scope change and a prune keep every row: the Dataset of the next version is the same item
- * (S03-R6). The check rows and the judgement of the claims that rest on a table are S03-T05's; a check row
- * goes with its fact or its version by cascade until then.
+ * The analytical semantic's rows that are not registry rows (`dataset_tables` and `analytical_checks`, S03-R17).
+ * Layer `insight`: it runs after the fact, relation and item kinds, so a judgement sees the rows they left; it
+ * points at no kind of its own layer (`references` stays empty, a reference across layers throws).
+ *
+ * Three kinds of ref, one prefix each: `table:<dataset_tables.id>` (follows its source's versions),
+ * `check:<analytical_checks.id>` (the versions it read and its fact's lineage) and `claim:<fact id>`, a fact
+ * whose table support the change touches: not a stored row, so it is counted nowhere and its snapshot lineage is
+ * its basis, the table sources and versions the fact's item reached (S03-R17). Phase 2 is the judgement's seat
+ * (S03-T06); S03-T05 collects the claims and deletes what is deleted.
+ *
+ * A deletion takes the source's table rows and the lines that read its versions, a prune the lines that read
+ * the pruned versions only (the table rows stay). Both also take the lines that read a row the change removes
+ * from under a check: a propagation deletes a row with no history line, so S03-R11's erase on a state change
+ * cannot see it. A new version and a deletion take the `aggregation` lines of the Metrics that use a Join on a
+ * table of the source (decision D7: a line holds two version columns, a Metric may read more tables). The
+ * counts are the phase-1 refs no longer stored, because the version delete cascades some before this kind
+ * runs. A scope change keeps every row.
  */
+const analyticalRefs = (
+  rows: readonly { id: unknown }[],
+  prefix: string,
+  lineageOfRow: (id: number) => SourceVersionRef[],
+) =>
+  rows.map((r) => ({
+    ref: { kind: "analytical-check", id: `${prefix}:${r.id}` },
+    lineage: lineageOfRow(Number(r.id)),
+  }));
+
+/** The ids of the lines of the Metrics that use a Join on a Dataset bound to the source (decision D7). */
+const JOIN_USERS_LINES = `
+  SELECT c.id FROM analytical_checks c JOIN facts f ON f.id = c.fact_id
+   WHERE c.check_name = 'aggregation' AND f.item_id IN (
+     SELECT u.subject_id FROM relations u
+      WHERE u.type = 'USES_JOIN' AND u.object_id IN (
+        SELECT j.subject_id FROM relations j
+         WHERE j.type IN ('JOIN_LEFT', 'JOIN_RIGHT')
+           AND j.object_id IN (SELECT item_id FROM dataset_tables WHERE source_id = ?)))`;
+
+const analyticalLineage = (db: SqlDriver, ref: DerivedRef): SourceVersionRef[] => {
+  const [prefix, rest] = ref.id.split(":");
+  const id = Number(rest);
+  if (prefix === "table") {
+    return versionsOf(
+      db,
+      VERSIONS("v.source_id = (SELECT source_id FROM dataset_tables WHERE id = ?)"),
+      [id],
+    );
+  }
+  if (prefix !== "check") return []; // a claim is no stored row: its basis rides on the snapshot
+  const line = db.all(
+    "SELECT fact_id, version_id, other_version_id FROM analytical_checks WHERE id = ?",
+    [id],
+  )[0];
+  if (!line) return [];
+  const read = versionsOf(db, VERSIONS("v.id IN (?, coalesce(?, ?))"), [
+    line.version_id as number,
+    line.other_version_id as number | null,
+    line.version_id as number,
+  ]);
+  return unionOfVersions(read, rowLineage(db, { kind: "fact", id: line.fact_id as number }));
+};
+
 const ANALYTICAL_CHECK: DerivativeKind = {
   ...base("analytical-check", "insight"),
+  lineage: analyticalLineage,
   affected: (tx, change) => {
-    if (supported(change) !== "deletion") return [];
-    return collect(
-      tx,
-      "analytical-check",
-      "SELECT id FROM dataset_tables WHERE source_id = ? ORDER BY id",
-      [change.sourceId],
-    );
+    const mode = supported(change);
+    if (mode === "scope-changed") return [];
+    const id = change.sourceId;
+    const lines = new Set<number>();
+    const read = (sql: string, params: SqlValue[]) =>
+      tx.all(sql, params).forEach((r) => lines.add(r.id as number));
+    // lines that read a version this change takes (all of them for a deletion, those below the kept one for a prune)
+    if (mode !== "new-version") {
+      const taken = `SELECT v.id FROM source_versions v WHERE v.source_id = ? ${below(change, "v.")}`;
+      read(
+        `SELECT c.id FROM analytical_checks c WHERE c.version_id IN (${taken})
+            OR c.other_version_id IN (${taken})`,
+        [id, ...belowParams(change), id, ...belowParams(change)],
+      );
+      // rows the evidence of this source cites go with their evidence without a history line, and the user's
+      // rows on or touching the cited items go with their items: the lines that read them are stale
+      const cited = [
+        ...tx
+          .all(`SELECT id FROM facts WHERE id IN (${CITED("fact_id")})`, [id])
+          .map((r) => ({ kind: "fact" as const, id: r.id as number })),
+        ...tx
+          .all(`SELECT id FROM relations WHERE id IN (${CITED("relation_id")})`, [id])
+          .map((r) => ({ kind: "relation" as const, id: r.id as number })),
+        ...tx
+          .all(
+            `SELECT id FROM facts WHERE user_authored = 1 AND item_id IN (SELECT id FROM (${CITED_ITEMS}))`,
+            [id, id, id],
+          )
+          .map((r) => ({ kind: "fact" as const, id: r.id as number })),
+        ...tx
+          .all(
+            `SELECT id FROM relations WHERE user_authored = 1
+               AND (subject_id IN (SELECT id FROM (${CITED_ITEMS})) OR object_id IN (SELECT id FROM (${CITED_ITEMS})))`,
+            [id, id, id, id, id, id],
+          )
+          .map((r) => ({ kind: "relation" as const, id: r.id as number })),
+      ];
+      for (const row of cited) for (const line of checkLinesReading(tx, row)) lines.add(line);
+    }
+    if (mode !== "pruned") read(JOIN_USERS_LINES, [id]);
+    const sorted = [...lines].sort((a, b) => a - b);
+    const tables =
+      mode === "deletion"
+        ? tx
+            .all("SELECT id FROM dataset_tables WHERE source_id = ? ORDER BY id", [id])
+            .map((r) => ({ id: r.id as number }))
+        : [];
+    const claims =
+      mode === "new-version"
+        ? []
+        : claimCandidates(tx, {
+            sourceId: id,
+            mode: mode === "deletion" ? "deletion" : "pruned",
+            ...(change.kind === "old-versions-pruned" ? { keptVersion: change.version } : {}),
+          });
+    return [
+      ...analyticalRefs(tables, "table", (n) =>
+        analyticalLineage(tx, { kind: "analytical-check", id: `table:${n}` }),
+      ),
+      ...analyticalRefs(
+        sorted.map((n) => ({ id: n })),
+        "check",
+        (n) => analyticalLineage(tx, { kind: "analytical-check", id: `check:${n}` }),
+      ),
+      ...claims.map((c) => ({
+        ref: { kind: "analytical-check", id: `claim:${c.factId}` },
+        lineage: c.basis,
+      })),
+    ];
   },
   invalidate: (ctx, snapshot) => {
+    const { tx } = ctx;
     noting(ctx);
+    const table = { table: "dataset_tables", check: "analytical_checks" } as const;
     let removed = 0;
+    const claims: number[] = [];
     for (const { ref } of snapshot) {
-      removed += ctx.tx.run("DELETE FROM dataset_tables WHERE id = ?", [Number(ref.id)]).changes;
+      const [prefix, rest] = ref.id.split(":");
+      const id = Number(rest);
+      if (prefix === "claim") {
+        claims.push(id);
+        continue;
+      }
+      const name = table[prefix as keyof typeof table];
+      tx.run(`DELETE FROM ${name} WHERE id = ?`, [id]);
+      if (!stored(tx, name, id)) removed++;
     }
+    // S03-T06 judges the claims here (S03-R16): a `verified` row the change took its table from. Until then the
+    // sources the claims still reach are checked again.
+    const items = tx
+      .all("SELECT DISTINCT item_id FROM facts WHERE id IN (SELECT value FROM json_each(?))", [
+        JSON.stringify(claims),
+      ])
+      .map((r) => r.item_id as number);
+    queueChecksAround(tx, items);
     return { removed, recomputed: 0 };
   },
 };
