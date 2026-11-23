@@ -73,6 +73,10 @@ test("evidence.e2e: the Insight's three evidence open their source version and s
   target,
   playwright,
 }) => {
+  test.skip(
+    target !== "browser",
+    "in the shell, v02-flow.e2e opens the same evidence (openEvidence, plain) twice",
+  );
   const stack = await startStack("plain", target, playwright.chromium);
   try {
     await openEvidence(stack.page, "plain");

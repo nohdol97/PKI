@@ -211,6 +211,10 @@ test("a heap-filling worker at a small heap limit ends as resource-exceeded and 
 });
 
 test("G23: the trigger XLSX's heap use inside Electron's V8 is recorded", async () => {
+  test.skip(
+    process.env.PKI_SLOW_E2E === undefined,
+    "measurement (I02 G23, 156 s): run with PKI_SLOW_E2E=1",
+  );
   test.setTimeout(300_000);
   const r = await run("g23", 280_000);
   const rows = all(r, "g23");
