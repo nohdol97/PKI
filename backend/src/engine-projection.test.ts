@@ -293,10 +293,10 @@ describe("engine.restart", () => {
       });
       await post(routes.importJsonl.path, { text: read("v02-mail.jsonl") });
       await booted.runner.wake(); // no drain: the close below delivers what is queued
-      // K01: the Wiki's own `wiki-build` jobs are not the extraction jobs counted here
-      expect(booted.db.all("SELECT status FROM jobs WHERE kind <> 'wiki-build'")).toEqual([
-        { status: "succeeded" },
-      ]);
+      // K01, P02: the Wiki's own `wiki-build` jobs and the notification scan are not the extraction jobs counted here
+      expect(
+        booted.db.all("SELECT status FROM jobs WHERE kind NOT IN ('wiki-build', 'notify')"),
+      ).toEqual([{ status: "succeeded" }]);
       expect(booted.db.all("SELECT value FROM facts")).toEqual([{ value: "2026-12-05" }]);
       await booted.server.close();
       booted.db.close();
@@ -697,8 +697,8 @@ describe("a stale engine through the product's wiring (review R2-1)", () => {
       await post(routes.importJsonl.path, { text: read("v02-mail.jsonl") });
       await booted.projections.drain(); // the upsert failed: the engine is stale now
       await booted.runner.wake();
-      // K01: the Wiki's own `wiki-build` jobs are not the extraction jobs counted here
-      expect(db.all("SELECT status FROM jobs WHERE kind <> 'wiki-build'")).toEqual([
+      // K01, P02: the Wiki's own `wiki-build` jobs and the notification scan are not the extraction jobs counted here
+      expect(db.all("SELECT status FROM jobs WHERE kind NOT IN ('wiki-build', 'notify')")).toEqual([
         { status: "succeeded" },
       ]);
       expect(endpoint.completions()).toBe(1); // extraction ran

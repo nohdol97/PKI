@@ -327,6 +327,25 @@ describe("evidenceReducer", () => {
       evidenceReducer({ opens: 0 }, { type: "insights-loaded", insights: [insight(1)] }),
     ).toEqual({ insights: [insight(1)], opens: 0 });
   });
+
+  // P02-R16: a change reads the open evidence again; the focus is not moved, and a source whose evidence left the list goes
+  it("replaces the evidence list without counting an open, and drops an open source whose evidence is gone", () => {
+    const shown: EvidenceState = { ...open, source: { ...source(1, 1), evidenceId: 7 } };
+    const kept = evidenceReducer(shown, {
+      type: "evidence-refreshed",
+      insightId: 1,
+      evidence: [entry(7)],
+    });
+    expect(kept).toEqual({ ...shown, opened: { insightId: 1, evidence: [entry(7)] } });
+    const gone = evidenceReducer(shown, {
+      type: "evidence-refreshed",
+      insightId: 1,
+      evidence: [entry(8)],
+    });
+    expect(gone.source).toBeUndefined();
+    expect(gone.opens).toBe(shown.opens);
+    expect(gone.notice).toBe(SOURCE_GONE);
+  });
 });
 
 // I02B-R39, C28 (evidence half): a local source shows its place in the folder; when the file is gone the

@@ -61,6 +61,7 @@ import { refreshCandidates } from "./entity-resolution.ts";
 import { projectionKinds, type PermanentlyAbsent } from "./projection-kinds.ts";
 import { LINT_FINDING_KIND } from "./lint-kind.ts";
 import { WIKI_PAGE_KIND } from "./wiki-kind.ts";
+import { createNotificationKind } from "./notify-kind.ts";
 
 /** What one propagation did, by id, for V02's entries (ascending ids). */
 export interface CanonicalReport {
@@ -1192,6 +1193,9 @@ export function createProductRegistry(options: {
   return createDerivativeRegistry({
     kinds: [
       ...canonicalKinds(options.membershipListeners),
+      createNotificationKind((db, id) =>
+        lineage("insight")(db, { kind: "insight", id: String(id) }),
+      ),
       WIKI_PAGE_KIND,
       LINT_FINDING_KIND,
       ...projectionKinds({

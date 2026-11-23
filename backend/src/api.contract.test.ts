@@ -203,6 +203,10 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     // feedback (P03-T3): a preference on the seed's Insight 1 and, routes running in contract order, the undo of that line
     feedbackRecord: { target: { kind: "insight", id: 1 }, kind: "useful" },
     feedbackUndo: { id: 1 },
+    // notifications (P02-T2): a line that need not exist (an answer of 200 with `not-found`), and a settings write of nothing
+    notificationDigest: { id: 999_999 },
+    notificationAct: { id: 999_999, op: "read" },
+    setNotificationSettings: {},
   };
 
   beforeAll(async () => {

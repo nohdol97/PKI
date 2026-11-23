@@ -34,7 +34,10 @@ import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts
 import { INSIGHT_INTERPRET_TEXT } from "./evidence-text.ts";
 import { Insights } from "./evidence-view.tsx";
 import { Ask } from "./ask.tsx";
+import { useChanges } from "./changes.ts";
 import { Lint } from "./lint.tsx";
+import { Notifications } from "./notifications.tsx";
+import { unreadBadge } from "./notifications-text.ts";
 import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { Explore } from "./explore.tsx";
@@ -57,6 +60,7 @@ import {
 const SCREENS = {
   home: "홈",
   sources: "원본",
+  notifications: "알림",
   wiki: "위키",
   lint: "점검",
   ask: "질문",
@@ -69,16 +73,19 @@ type Screen = keyof typeof SCREENS;
 
 export function App({ api }: { api: ApiClient }) {
   const [screen, setScreen] = useState<Screen>("home");
-  const Current = {
-    home: Home,
-    sources: Sources,
-    wiki: Wiki,
-    lint: Lint,
-    ask: Ask,
-    explore: Explore,
-    semantic: SemanticReview,
-    activity: Activity,
-    settings: Settings,
+  // P02-R16: one poll of the change numbers; a screen that gets `key` reads its data again when it changes
+  const changes = useChanges(api);
+  const shown = {
+    home: () => <Home api={api} refresh={changes.key} />,
+    sources: () => <Sources api={api} />,
+    notifications: () => <Notifications api={api} refresh={changes.key} />,
+    wiki: () => <Wiki api={api} />,
+    lint: () => <Lint api={api} />,
+    ask: () => <Ask api={api} />,
+    explore: () => <Explore api={api} />,
+    semantic: () => <SemanticReview api={api} />,
+    activity: () => <Activity api={api} />,
+    settings: () => <Settings api={api} />,
   }[screen];
   return (
     <NavProvider screen={screen} onScreen={setScreen}>
@@ -91,12 +98,13 @@ export function App({ api }: { api: ApiClient }) {
             onClick={() => setScreen(id)}
           >
             {SCREENS[id]}
+            {id === "notifications" && unreadBadge(changes.unread)}
           </button>
         ))}
       </nav>
       <main>
         <h1>{SCREENS[screen]}</h1>
-        <Current api={api} />
+        {shown()}
       </main>
     </NavProvider>
   );
@@ -142,7 +150,7 @@ function statusRows(status: RouteResponse<"status">) {
   ] as const;
 }
 
-function Home({ api }: { api: ApiClient }) {
+function Home({ api, refresh }: { api: ApiClient; refresh: string }) {
   const { data, error, reload } = useRoute(api, "status");
   const preparing = data?.embedding.state === "preparing";
   // a preparation runs in the backend; Home reads the state again until it ends
@@ -154,7 +162,7 @@ function Home({ api }: { api: ApiClient }) {
   const guidance = data && providerStatusText(data.provider).guidance;
   return (
     <>
-      <Insights api={api} />
+      <Insights api={api} refresh={refresh} />
       <h2>상태</h2>
       <Failure error={error} />
       {data && (

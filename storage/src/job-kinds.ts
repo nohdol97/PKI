@@ -18,6 +18,8 @@ export const INSIGHT_INTERPRET_KIND = "insight-interpret";
 export const REFLECT_JOB_KIND = "reflect";
 /** The job that asks a Provider for the opinion of one open `synonym` or `missing-link` finding (K02-R16): sourceless, no version fence. */
 export const REFLECTION_REFINE_KIND = "reflection-refine";
+/** The notification job (P02-R3): target `scan`, `daily` or `weekly`; reads the DB only, no Provider call, no source. */
+export const NOTIFY_JOB_KIND = "notify";
 export const PROJECTION_REMOVE_KIND = "projection-remove";
 export const PROJECTION_REBUILD_KIND = "projection-rebuild";
 
@@ -34,6 +36,7 @@ export const FENCE_FREE_KINDS: readonly string[] = [
   INSIGHT_INTERPRET_KIND,
   REFLECT_JOB_KIND,
   REFLECTION_REFINE_KIND,
+  NOTIFY_JOB_KIND,
 ];
 
 /** False for the projection kinds: their source and version are a name and a cover, not a fence. */

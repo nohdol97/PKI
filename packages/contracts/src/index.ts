@@ -642,7 +642,7 @@ const InsightRankingSchema = z.object({
   actionability: RankAxisSchema,
   score: RankAxisSchema,
 });
-const InsightSummarySchema = z.object({
+export const InsightSummarySchema = z.object({
   id: z.int().positive(),
   epistemic: z.literal("inferred"),
   summary: z.string(),
@@ -1680,6 +1680,127 @@ export const LintReportResponseSchema = z.object({
   finding: LintFindingSchema.optional(),
 });
 
+// P02 (R14, R16): notifications. A line is ids, codes and times; the words are the Insight's, read through the read
+// gate when shown, in the Insight response's own shape. Nothing of an OS toast's text is here: the shell owns it.
+/** The three "remind me later" times, in minutes (P02-D16); the request schema below lists the same three. */
+export const NOTIFICATION_SNOOZE_MINUTES = [60, 240, 1440] as const;
+export const NOTIFICATION_ACTIONS = ["evidence", "read", "snooze", "unsnooze", "dismiss"] as const;
+export type NotificationAction = (typeof NOTIFICATION_ACTIONS)[number];
+/** Why a line went to the digest only (P02-R2). */
+export const NOTIFICATION_REASONS = [
+  "low-confidence",
+  "below-threshold",
+  "repeat",
+  "muted",
+] as const;
+export type NotificationReason = (typeof NOTIFICATION_REASONS)[number];
+
+export const NotificationLineSchema = z.object({
+  id: z.int().positive(),
+  status: z.enum(["sent", "digest", "deferred", "dismissed"]),
+  reason: z.enum(NOTIFICATION_REASONS).nullable(),
+  /** `deferred` only: when the line comes back. */
+  notBefore: z.string().nullable(),
+  createdAt: z.string(),
+  readAt: z.string().nullable(),
+  /** What the user can do with the line now. */
+  actions: z.array(z.enum(NOTIFICATION_ACTIONS)),
+  insight: InsightSummarySchema,
+});
+export type NotificationLine = z.infer<typeof NotificationLineSchema>;
+const NotificationDigestRowSchema = z.object({
+  id: z.int().positive(),
+  kind: z.enum(["daily", "weekly"]),
+  windowStart: z.string(),
+  windowEnd: z.string(),
+  createdAt: z.string(),
+  readAt: z.string().nullable(),
+  /** How many lines of the window are shown now. */
+  count: z.int().nonnegative(),
+});
+export type NotificationDigestRow = z.infer<typeof NotificationDigestRowSchema>;
+/** The feed, the digest rows and the timeline are one answer: the screen shows it three ways. */
+export const NotificationListResponseSchema = z.object({
+  lines: z.array(NotificationLineSchema),
+  digests: z.array(NotificationDigestRowSchema),
+  unread: z.int().nonnegative(),
+});
+export const NotificationDigestRequestSchema = z.strictObject({ id: z.int().positive() });
+/**
+ * The digest's or the report's content, computed when asked; the report adds the lint's counts by rule (K02).
+ * `digest` is null for a row that is absent or not shown (the one answer for both).
+ */
+export const NotificationDigestResponseSchema = z.object({
+  digest: z
+    .object({
+      kind: z.enum(["daily", "weekly"]),
+      windowStart: z.string(),
+      windowEnd: z.string(),
+      lines: z.array(NotificationLineSchema),
+      lint: z
+        .object({
+          counts: z.array(
+            z.object({
+              rule: LintRuleSchema,
+              open: z.int().nonnegative(),
+              accepted: z.int().nonnegative(),
+              falsePositive: z.int().nonnegative(),
+              missed: z.int().nonnegative(),
+              oscillating: z.int().nonnegative(),
+            }),
+          ),
+          /** Shown findings first seen inside the window. */
+          opened: z.int().nonnegative(),
+        })
+        .nullable(),
+    })
+    .nullable(),
+});
+/** The four actions (P02-R11); a value outside them, or a snooze time outside the three, is a 400. */
+export const NotificationActRequestSchema = z
+  .strictObject({
+    id: z.int().positive(),
+    op: z.enum(["read", "dismiss", "snooze", "unsnooze"]),
+    /** With `snooze` and only then. */
+    minutes: z.union([z.literal(60), z.literal(240), z.literal(1440)]).optional(),
+  })
+  .refine((r) => (r.op === "snooze") === (r.minutes !== undefined));
+/** `refused`: the line is there but not in a state the action applies to; `not-found`: absent or not shown (the one answer). */
+export const NotificationActResponseSchema = z.object({
+  status: z.enum(["applied", "refused", "not-found"]),
+  unread: z.int().nonnegative(),
+});
+const ClockTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+const QuietHoursSchema = z.strictObject({
+  enabled: z.boolean(),
+  start: ClockTimeSchema,
+  end: ClockTimeSchema,
+});
+/** `notifications.os`, `.quietHours` and `.snoozeUntil` (P02-R6, R10, D10). */
+export const NotificationSettingsSchema = z.strictObject({
+  os: z.boolean(),
+  quietHours: QuietHoursSchema,
+  snoozeUntil: z.string().nullable(),
+});
+/** The write: a key left out stays as it is; `snoozeUntil` null ends a pause. */
+export const NotificationSettingsRequestSchema = z.strictObject({
+  os: z.boolean().optional(),
+  quietHours: QuietHoursSchema.optional(),
+  snoozeUntil: z
+    .string()
+    .max(40)
+    .refine((value) => !Number.isNaN(Date.parse(value)))
+    .nullable()
+    .optional(),
+});
+/** The cheap read the open screens poll (P02-R16, D14): three sequence numbers and the unread count, no text. */
+export const ChangesResponseSchema = z.object({
+  sources: z.int().nonnegative(),
+  knowledge: z.int().nonnegative(),
+  notifications: z.int().nonnegative(),
+  unread: z.int().nonnegative(),
+});
+
 export const routes = {
   status: { method: "GET", path: "/api/status", response: StatusResponseSchema },
   connectors: { method: "GET", path: "/api/connectors", response: ConnectorListResponseSchema },
@@ -2146,6 +2267,36 @@ export const routes = {
     request: FeedbackUndoRequestSchema,
     response: FeedbackUndoResponseSchema,
   },
+  // P02 (R14, R16): notifications, their settings and the poll of change numbers
+  notifications: {
+    method: "GET",
+    path: "/api/notifications",
+    response: NotificationListResponseSchema,
+  },
+  notificationDigest: {
+    method: "POST",
+    path: "/api/notifications/digest",
+    request: NotificationDigestRequestSchema,
+    response: NotificationDigestResponseSchema,
+  },
+  notificationAct: {
+    method: "POST",
+    path: "/api/notifications/act",
+    request: NotificationActRequestSchema,
+    response: NotificationActResponseSchema,
+  },
+  notificationSettings: {
+    method: "GET",
+    path: "/api/settings/notifications",
+    response: NotificationSettingsSchema,
+  },
+  setNotificationSettings: {
+    method: "POST",
+    path: "/api/settings/notifications",
+    request: NotificationSettingsRequestSchema,
+    response: NotificationSettingsSchema,
+  },
+  changes: { method: "GET", path: "/api/changes", response: ChangesResponseSchema },
 } as const;
 export type RouteName = keyof typeof routes;
 export type RouteResponse<Name extends RouteName> = z.infer<(typeof routes)[Name]["response"]>;
