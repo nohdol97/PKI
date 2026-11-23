@@ -40,6 +40,7 @@
 | [specs/2026-11-23-S02F-followups.md](specs/2026-11-23-S02F-followups.md) | S02 후속(#183·#193·#199·#210): 맞대신 쌍은 나중 줄만 세기, 조직 신호는 끝이 조직일 때만, 구분 표시를 끄면 후보 다시 계산, 항목 시작 사슬의 `HAS` 행 보임 검사, 범위를 지키는 가드 시험 여섯 | 확정(잠정 결정 포함) |
 | [specs/2026-11-22-S03-analytical-semantic.md](specs/2026-11-22-S03-analytical-semantic.md) | 분석 의미(S03, #24): Dataset·Metric·Join을 등록 행으로 적기, 표 원본에서 실제 스키마 읽기(Dataset 프로파일), 데이터 검사 넷(스키마·Grain·Join cardinality·집계)과 그것을 지나야 하는 승격, 단위·통화·기간·version 충돌, 값을 계산하지 않음, 검토 API 계약, 작업 분해. S02 spec(개체 해소·시간 그래프·충돌) 위에 쓴다 | 확정(잠정 결정 포함). 구현은 T01~T10이 끝났고 프로파일을 켤지는 배포처 S34가 정한다 |
 | [specs/2026-11-23-K01-wiki-projection.md](specs/2026-11-23-K01-wiki-projection.md) | 근거 기반 Wiki 투영(K01, #25): 종류별 페이지·index·log를 정본 SQLite의 투영으로 만들기, backlink, 원본 삭제·범위 승계, 다시 만들기, 메모·숨김 편집 레이어, 선택 LLM 요약, API와 "위키" 화면. Wiki OSS는 들이지 않는다 | 확정(잠정 결정 포함) |
+| [specs/2026-11-23-K02-reflection-consolidation.md](specs/2026-11-23-K02-reflection-consolidation.md) | Reflection·Consolidation·Knowledge Lint(K02, #26): dirty 표시와 주기 재검토(`reflect`), 점검 규칙 넷과 발견의 상태·왔다 갔다 막기, 결정은 기존 입구로, 오탐·미탐 수, 읽기 문, "점검" 화면, 선택적 LLM 의견(`reflection.refine`) | 확정 |
 | [specs/2026-11-23-P01-insight-discovery.md](specs/2026-11-23-P01-insight-discovery.md) | Insight 발견·변경 감지·설명 가능한 순위(P01, #27): 13개 유형 표와 지원 상태, Insight의 사실 줄·이유 요약·신뢰도, 규칙 틀 `recomputeInsights`, 여섯 축 순위(읽을 때 계산), 알림 제외 표시, 작업 분해(첫 묶음 T01+T02) | 확정(잠정 결정 포함) |
 | [specs/2026-11-23-analytical-read-performance.md](specs/2026-11-23-analytical-read-performance.md) | 분석 읽기 속도(#233, #227 R1): 드라이버가 준비한 문장을 다시 쓰고, 한 읽기 안에서 보임 판정과 사실 행을 기억함. 질의 수로 검증, 200개×3목록 중앙값 3분의 1 이하 목표. 묶음의 구성원은 대표 아래에만 | 확정 |
 
@@ -56,7 +57,7 @@
 
 ## 앞으로 쓸 spec
 
-구현 spec은 그 작업을 시작할 때 쓴다(이슈 #15 R06-C1). 지금은 Phase 1의 둘(V01, V02)과 Phase 2의 I01, I03, I04, I05, I06, 그리고 I02의 두 조각(I02-A, I02-B), Phase 4의 K01이 있다.
+구현 spec은 그 작업을 시작할 때 쓴다(이슈 #15 R06-C1). 지금은 Phase 1의 둘(V01, V02)과 Phase 2의 I01, I03, I04, I05, I06, 그리고 I02의 두 조각(I02-A, I02-B), Phase 4의 K01, K02가 있다.
 
 | 작업 | 이슈 | spec을 쓰는 때 |
 |---|---|---|
@@ -65,7 +66,8 @@
 | I01~I04(Phase 2 수집) | #18~#21 | I01, I03, I04와 I02-A, I02-B는 spec이 있다 |
 | S01~S03(Phase 3 Semantic) | #22~#24 | S01은 구현이 끝났다(T01~T10. spec은 R07의 엔진 결정 전에 썼고, 그 결정에 걸리는 부분은 spec의 배경에 적었다). 자동 승격을 켤지는 배포처 S32를 기다린다. S02는 구현이 끝났다(T01~T10. 자동 이의를 켤지는 배포처 S33을 기다린다). S03은 구현이 끝났다(T01~T10. 프로파일을 켤지는 배포처 S34를 기다린다) |
 | K01(Phase 4 Wiki) | #25 | spec이 확정됐다(S02·S03 위에 썼고, Wiki OSS를 들이지 않는 결정과 LLM 요약을 뒤 작업 K01-T2로 미루는 것을 spec에 적었다) |
-| K02(Phase 4), P01~P03(Phase 5), X01~X02(Phase 6), H01~H03(Phase 7) | #26~#34 | 각 작업 착수 시 |
+| K02(Phase 4 Reflection·Lint) | #26 | 구현이 끝났다(T1~T3. LLM 의견은 기본 끔이고, 켤지는 배포처 S36을 기다린다) |
+| P01~P03(Phase 5), X01~X02(Phase 6), H01~H03(Phase 7) | #27~#34 | 각 작업 착수 시 |
 
 ## 참고
 
