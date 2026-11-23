@@ -18,11 +18,12 @@ import type { HostSpawner } from "@pki/document-normalize";
 import type { Projections } from "@pki/knowledge-engine";
 import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { BUILD_KIND, errorClass, log, type ScopeGrading } from "@pki/providers";
-import type { DerivativeRegistry, SqlDriver } from "@pki/storage";
+import type { DerivativeRegistry, ScryptCost, SqlDriver } from "@pki/storage";
 import { join } from "node:path";
 import {
   CANONICAL_DB_FILE,
   openCanonicalDb,
+  openSqlFile,
   productAdapters,
   productCalls,
   productConnectors,
@@ -46,6 +47,7 @@ import {
   type ConnectorSet,
 } from "./composition.ts";
 import { readLocalFilesSettings, type ApprovalTickets } from "./local-locations.ts";
+import { createBackupApi } from "./backup-api.ts";
 import { systemClock } from "./clock.ts";
 import { applyConfiguredScopes, bindConnectorScopes } from "./connector-scopes.ts";
 import { assertBoundAdaptersRegistered } from "./derivative-coverage.ts";
@@ -90,6 +92,13 @@ import { ensureReflectionSchedules } from "./reflection-schedules.ts";
 import { createNotifyOutbox, type NotifyChannel, type NotifyOutbox } from "./notify-outbox.ts";
 import { ensureNotifySchedules, wakeNotifyScan } from "./notify-schedules.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
+import {
+  applyPendingRestore,
+  finishRestore,
+  readIndexFacts,
+  rollbackRestore,
+  type RestoreRun,
+} from "./restore-boot.ts";
 import { productScopePolicy } from "./scope-policy.ts";
 import { startServer, type RunningServer } from "./server.ts";
 import { publicSite, resolveSiteRegistration, type SiteRegistration } from "./site-registration.ts";
@@ -138,6 +147,8 @@ export interface BootOptions {
   registry?: DerivativeRegistry;
   /** The mapping scope -> class for the Broker (I01-R15); honoured in a test build only, like `registry`. */
   scopeGrading?: ScopeGrading;
+  /** A lower scrypt cost for the backup files the API makes (H01-D5); honoured in a test build only. */
+  backupScrypt?: ScryptCost;
   /**
    * The scope policy by name (I04-R14, I05-R15, S21), for a source run: none gives the registration's
    * policy (else the public default), `default` the public default, `site` the registration's policy, which
@@ -187,7 +198,27 @@ export interface BootedBackend {
   notifyOutbox: NotifyOutbox;
 }
 
-export async function bootBackend(options: BootOptions): Promise<BootedBackend> {
+export function bootBackend(options: BootOptions): Promise<BootedBackend> {
+  const holder: { restore?: RestoreRun } = {};
+  const started = startBackend(options, holder);
+  // H01-R13: a start that fails between the swap and the finish commit puts the previous database back. A side
+  // reaction of the same promise, not a wrapper around it: the caller sees the start's own timing and error
+  started.catch(() => {
+    const { restore } = holder;
+    if (!restore?.applied || restore.finished) return;
+    try {
+      rollbackRestore(restore);
+    } catch (error) {
+      log("restore-rollback-failed", { error: errorClass(error) });
+    }
+  });
+  return started;
+}
+
+async function startBackend(
+  options: BootOptions,
+  holder: { restore?: RestoreRun },
+): Promise<BootedBackend> {
   const site = options.site ?? publicSite;
   // the policy before any file is opened: a name that is not implemented stops the start (I04-H2 ①)
   const policy = productScopePolicy(options.scopePolicy, site.scopePolicy);
@@ -197,7 +228,10 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     site,
     options.connectors ?? productConnectors(),
   );
+  // H01-R11: a staged restore is swapped in before the database is opened
+  const restore = (holder.restore = applyPendingRestore(options.dataDir, openSqlFile));
   const db = openCanonicalDb(options.dataDir);
+  restore.db = db;
   // the instances' configured scopes follow the registration's value before anything is graded (I01-R15);
   // one table, handed to every place that copies it (I07-R2). It never stops the start: what is bad is unknown
   const { scopes, state, configured, rejected } = bindConnectorScopes(site.connectorScopes);
@@ -257,6 +291,14 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     (kind) => knownKinds.has(kind),
     scopes,
   );
+  // H01-R12: the restore's finish, in one transaction, before the server or the runner exist
+  if (restore.applied) {
+    finishRestore(db, restore, {
+      reapplied: reapplied.applied,
+      embeddingSpace: (await readIndexFacts(adapters.vectorIndex)).embeddingSpace,
+      now: new Date(systemClock.now()),
+    });
+  }
   // before anything changes the store: a notice missed by the last run is found here
   await projections.reconcile();
   // one clock for the runner and for the jobs imports and syncs register (I03 "시계")
@@ -414,6 +456,15 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     entries,
     registry,
     localLocations: localFiles.locations,
+    backup: createBackupApi({
+      db,
+      dataDir: options.dataDir,
+      open: openSqlFile,
+      vectorIndex: adapters.vectorIndex,
+      tickets: localFiles.tickets,
+      buildKind: options.localFiles?.typedPaths ? "development" : BUILD_KIND,
+      ...(BUILD_KIND === "test" && options.backupScrypt ? { scrypt: options.backupScrypt } : {}),
+    }),
     decisions: productUserDecisions(registry),
     // the held jobs were put back in the transaction that changed the condition (R16 ①)
     onRunConditionsChanged: () => void runner.wake(),

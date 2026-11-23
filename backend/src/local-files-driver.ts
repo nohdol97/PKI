@@ -54,7 +54,7 @@ export interface LocalFilesDriver {
 }
 
 /** A location that is read, or that returns to being read by itself at the next pass. */
-const isReadable = (l: LocalLocation) =>
+export const isReadable = (l: LocalLocation) =>
   l.type === "folder" &&
   (l.state === "active" || l.state === "needs-confirmation" || l.state === "unavailable");
 

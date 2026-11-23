@@ -52,6 +52,18 @@ import {
   ExploreSourceRequestSchema,
   ExploreSourceResponseSchema,
 } from "./explore.ts";
+import {
+  BackupFolderRequestSchema,
+  BackupFolderResponseSchema,
+  BackupStatusSchema,
+  CancelRestoreResponseSchema,
+  CreateBackupRequestSchema,
+  CreateBackupResponseSchema,
+  InspectRestoreRequestSchema,
+  InspectRestoreResponseSchema,
+  RestoreRequestSchema,
+  RestoreResponseSchema,
+} from "./backup-types.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 import { SourceThreadRequestSchema, SourceThreadResponseSchema } from "./thread.ts";
 
@@ -59,6 +71,7 @@ export * from "./adapter-errors.ts";
 export * from "./analytical-types.ts";
 export * from "./ask.ts";
 export * from "./explore.ts";
+export * from "./backup-types.ts";
 export * from "./thread.ts";
 export type * from "./embedding.ts";
 export type * from "./knowledge-engine.ts";
@@ -2317,6 +2330,33 @@ export const routes = {
     request: FeedbackUndoRequestSchema,
     response: FeedbackUndoResponseSchema,
   },
+  // H01 (R15): backup files and the restore that the next start applies
+  backupStatus: { method: "GET", path: "/api/backup", response: BackupStatusSchema },
+  setBackupFolder: {
+    method: "PUT",
+    path: "/api/backup/folder",
+    request: BackupFolderRequestSchema,
+    response: BackupFolderResponseSchema,
+  },
+  createBackup: {
+    method: "POST",
+    path: "/api/backup",
+    request: CreateBackupRequestSchema,
+    response: CreateBackupResponseSchema,
+  },
+  inspectRestore: {
+    method: "POST",
+    path: "/api/restore/inspect",
+    request: InspectRestoreRequestSchema,
+    response: InspectRestoreResponseSchema,
+  },
+  restoreBackup: {
+    method: "POST",
+    path: "/api/restore",
+    request: RestoreRequestSchema,
+    response: RestoreResponseSchema,
+  },
+  cancelRestore: { method: "DELETE", path: "/api/restore", response: CancelRestoreResponseSchema },
   // P02 (R14, R16): notifications, their settings and the poll of change numbers
   notifications: {
     method: "GET",
