@@ -41,6 +41,7 @@ import {
   FeedbackUndoRequestSchema,
   FeedbackUndoResponseSchema,
 } from "./feedback-types.ts";
+import { INSIGHT_TYPE_NAMES } from "./insight-types.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
@@ -620,14 +621,47 @@ export const EmbeddingPrepareResponseSchema = z.object({ embedding: EmbeddingSta
  * (V02-R9); "inferred" is the only epistemic type the schema lets through, so a
  * row of any other type fails the response check instead of reaching the screen.
  */
+const RankAxisSchema = z.int().min(0).max(100);
+const InsightRankingSchema = z.object({
+  relevance: RankAxisSchema,
+  impact: RankAxisSchema,
+  urgency: RankAxisSchema,
+  novelty: RankAxisSchema,
+  confidence: RankAxisSchema,
+  actionability: RankAxisSchema,
+  score: RankAxisSchema,
+});
 const InsightSummarySchema = z.object({
   id: z.int().positive(),
   epistemic: z.literal("inferred"),
   summary: z.string(),
   evidenceCount: z.int().nonnegative(),
+  /** P01-R13: the type, the rule's fact lines ([] on a legacy row), and who wrote the reason text. */
+  type: z.enum(INSIGHT_TYPE_NAMES),
+  factLines: z.array(z.string()),
+  /** The interpretation's text when there is one, else the code's (P01-D12); no `.max`: the DB counts characters. */
+  reasoningSummary: z.string().nullable(),
+  /** Null exactly when `reasoningSummary` is. */
+  reasoningBy: z.enum(["code", "llm"]).nullable(),
+  confidence: z.int().min(0).max(100).nullable(),
+  ranking: InsightRankingSchema,
+  autoNotifyExcluded: z.boolean(),
 });
 export const InsightListResponseSchema = z.object({ insights: z.array(InsightSummarySchema) });
 export type InsightSummary = z.infer<typeof InsightSummarySchema>;
+
+/** P01-R16: the 13 types and whether each is supported, as the type table says. */
+export const InsightTypeListResponseSchema = z.object({
+  types: z.array(
+    z.object({
+      type: z.enum(INSIGHT_TYPE_NAMES),
+      label: z.string(),
+      judgedBy: z.enum(["code", "llm"]),
+      status: z.enum(["supported", "unsupported"]),
+      reason: z.string().nullable(),
+    }),
+  ),
+});
 
 export const InsightEvidenceRequestSchema = z.strictObject({ insightId: z.int().positive() });
 
@@ -1895,6 +1929,11 @@ export const routes = {
     response: EmbeddingPrepareResponseSchema,
   },
   insights: { method: "GET", path: "/api/insights", response: InsightListResponseSchema },
+  insightTypes: {
+    method: "GET",
+    path: "/api/insights/types",
+    response: InsightTypeListResponseSchema,
+  },
   insightEvidence: {
     method: "POST",
     path: "/api/insights/evidence",
