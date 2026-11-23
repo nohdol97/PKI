@@ -43,13 +43,14 @@ export interface Interval {
 
 /**
  * Whether two known intervals overlap (S02-R9, the time that decides `organization-mismatch`). An interval
- * with neither end is not known and overlaps nothing. S02-T08 feeds it the stored `valid_until`.
+ * with neither end is not known and overlaps nothing. The interval is half-open, `[from, to)`: one that ends the
+ * day the other starts shares no day with it (S02-R17).
  */
 export function intervalsOverlap(a: Interval, b: Interval): boolean {
   const known = (i: Interval) => i.from !== null || i.to !== null;
   if (!known(a) || !known(b)) return false;
   const before = (end: string | null, start: string | null) =>
-    end !== null && start !== null && end < start;
+    end !== null && start !== null && end <= start;
   return !before(a.to, b.from) && !before(b.to, a.from);
 }
 
@@ -66,6 +67,8 @@ interface Profile {
   identifiers: Map<string, Set<string>>;
   /** The other end (a representative) of each valid relation, whether one of them is `BELONGS_TO` from here. */
   links: Map<number, { belongs: boolean }>;
+  /** The valid interval of each `BELONGS_TO` from the group, per organization (S02-R9, R17). */
+  belongings: Map<number, Interval[]>;
 }
 
 const typeOf = (db: SqlDriver, item: number): string =>
@@ -84,6 +87,7 @@ function profileOf(db: SqlDriver, item: number): Profile {
     forms: new Set(),
     identifiers: new Map(),
     links: new Map(),
+    belongings: new Map(),
   };
   for (const r of db.all(`SELECT name FROM items WHERE id ${IN}`, [list])) {
     profile.names.add(normalizeForLinking(r.name as string));
@@ -106,7 +110,7 @@ function profileOf(db: SqlDriver, item: number): Profile {
     }
   }
   for (const r of db.all(
-    `SELECT id, subject_id, type, object_id, status FROM relations
+    `SELECT id, subject_id, type, object_id, status, valid_at, valid_until FROM relations
      WHERE subject_id ${IN} OR object_id ${IN}`,
     [list, list],
   )) {
@@ -116,7 +120,13 @@ function profileOf(db: SqlDriver, item: number): Profile {
     const mine = members.includes(r.subject_id as number);
     const other = entityGroups.representativeOf(db, (mine ? r.object_id : r.subject_id) as number);
     const seen = profile.links.get(other) ?? { belongs: false };
-    if (mine && r.type === BELONGS_TO) seen.belongs = true;
+    if (mine && r.type === BELONGS_TO) {
+      seen.belongs = true;
+      profile.belongings.set(other, [
+        ...(profile.belongings.get(other) ?? []),
+        { from: r.valid_at as string | null, to: r.valid_until as string | null },
+      ]);
+    }
     profile.links.set(other, seen);
   }
   return profile;
@@ -136,8 +146,9 @@ const overlap = <T>(a: ReadonlySet<T>, b: ReadonlySet<T>) => [...a].some((x) => 
 
 /**
  * The signals between two items, read over their groups (R13), sorted. Different types are not compared:
- * the list is empty. `organization-mismatch` is never set from stored rows until a row's interval end
- * exists (S02-T08).
+ * the list is empty. The organization signals read each `BELONGS_TO`'s valid interval (S02-R9): the same
+ * organization matches when the intervals overlap or either is unknown; different organizations mismatch only
+ * when two known intervals overlap.
  */
 export function signalsBetween(db: SqlDriver, a: number, b: number): Signal[] {
   const pa = profileOf(db, a);
@@ -158,11 +169,29 @@ export function signalsBetween(db: SqlDriver, a: number, b: number): Signal[] {
     const theirs = pb.links.get(other);
     if (!theirs || reps.has(other)) continue;
     if (typeOf(db, other) === "Project") found.add("project-match");
-    else if (mine.belongs && theirs.belongs) found.add("organization-match");
-    else found.add("shared-neighbor");
+    else if (mine.belongs && theirs.belongs && belongedTogether(pa, pb, other)) {
+      found.add("organization-match");
+    } else found.add("shared-neighbor");
   }
+  if (mismatchedOrganizations(pa, pb)) found.add("organization-mismatch");
   return SIGNALS.filter((s) => found.has(s));
 }
+
+const known = (i: Interval) => i.from !== null || i.to !== null;
+
+/** Both groups belong to the organization at overlapping times, or at least one of the two intervals is unknown. */
+const belongedTogether = (a: Profile, b: Profile, org: number): boolean =>
+  (a.belongings.get(org) ?? []).some((x) =>
+    (b.belongings.get(org) ?? []).some((y) => !known(x) || !known(y) || intervalsOverlap(x, y)),
+  );
+
+/** The two groups belong to different organizations at the same time (both intervals known). */
+const mismatchedOrganizations = (a: Profile, b: Profile): boolean =>
+  [...a.belongings].some(([orgA, xs]) =>
+    [...b.belongings].some(
+      ([orgB, ys]) => orgA !== orgB && xs.some((x) => ys.some((y) => intervalsOverlap(x, y))),
+    ),
+  );
 
 /** R10 conditions 1–3: same type, no negative signal, and an identifier or a name with support. */
 function qualifies(signals: readonly Signal[]): boolean {
