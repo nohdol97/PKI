@@ -333,18 +333,31 @@ export const CLOCK_REGRESSION_LEASES = 2;
  * row with no lease end is reclaimed too, along the same three branches (no one
  * would claim it again otherwise). Returns how many were reclaimed.
  */
-export function reclaimLeases(db: SqlDriver, request: Omit<LeaseRequest, "owner">): number {
+export function reclaimLeases(
+  db: SqlDriver,
+  request: Omit<LeaseRequest, "owner"> & {
+    /** Reclaim every running job of `kinds` whatever its lease end says (a restored database, H01-R12). */
+    ignoreExpiry?: boolean;
+  },
+): number {
   if (request.kinds.length === 0) return 0;
   const holding = request.holding ?? [];
   const limit = attemptLimit(request.maxAttempts);
+  const expiry = request.ignoreExpiry
+    ? "1"
+    : "(lease_until IS NULL OR lease_until <= ? OR lease_until > ?)";
   const where = `kind IN (${placeholders(request.kinds)}) AND status = 'running'
-      AND (lease_until IS NULL OR lease_until <= ? OR lease_until > ?)
+      AND ${expiry}
       AND id NOT IN (${placeholders(holding)})`;
   return db.transaction(
     () => {
       const now = readNow(request.now).getTime(); // under the write lock
       const ahead = now + CLOCK_REGRESSION_LEASES * request.leaseMs;
-      const params: SqlValue[] = [...request.kinds, now, ahead, ...holding];
+      const params: SqlValue[] = [
+        ...request.kinds,
+        ...(request.ignoreExpiry ? [] : [now, ahead]),
+        ...holding,
+      ];
       let reclaimed = 0;
       // in this order: a cancel request first, then the attempts left
       const branches: [JobStatus, string, string][] = [

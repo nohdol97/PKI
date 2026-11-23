@@ -41,6 +41,7 @@ import { unreadBadge } from "./notifications-text.ts";
 import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { Explore } from "./explore.tsx";
+import { BackupRestore } from "./backup.tsx";
 import { LocalLocations } from "./local-locations.tsx";
 import { NavProvider } from "./nav.tsx";
 import { SemanticReview } from "./semantic-review.tsx";
@@ -513,6 +514,7 @@ function Settings({ api }: { api: ApiClient }) {
       <BackgroundExecution api={api} />
       <InsightInterpretSetting api={api} />
       <LocalLocations api={api} />
+      <BackupRestore api={api} />
     </>
   );
 }

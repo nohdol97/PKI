@@ -765,6 +765,21 @@ describe("lease.reclaim (I03-R5)", () => {
     });
   });
 
+  it("H01-R12: with ignoreExpiry a lease that is still alive is reclaimed too, the token raised", () => {
+    const job = registered();
+    const held1 = claimed();
+    expect(reclaim(at(LEASE - 1))).toBe(0);
+    expect(
+      reclaimLeases(db, { kinds: ["extract"], now: at(1), leaseMs: LEASE, ignoreExpiry: true }),
+    ).toBe(1);
+    expect(readJob(db, job.id)).toMatchObject({
+      status: "queued",
+      leaseToken: held1.leaseToken + 1,
+      attempts: 1,
+      leaseUntil: null,
+    });
+  });
+
   it("reclaims a lease further ahead than two lease lengths (the wall clock went back)", () => {
     expect(CLOCK_REGRESSION_LEASES).toBe(2);
     const job = registered();

@@ -42,6 +42,7 @@ import {
   productProjections,
   productRunner,
 } from "./composition.ts";
+import { createBackupApi } from "./backup-api.ts";
 import { systemClock } from "./clock.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { createJobActions } from "./job-actions.ts";
@@ -203,6 +204,11 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     // feedback (P03-T3): a preference on the seed's Insight 1 and, routes running in contract order, the undo of that line
     feedbackRecord: { target: { kind: "insight", id: 1 }, kind: "useful" },
     feedbackUndo: { id: 1 },
+    // backup and restore (H01-T3): requests that end in a refusal code, none of which touches the disk
+    setBackupFolder: { path: "/synthetic/not-a-folder" },
+    createBackup: { passphrase: "short" },
+    inspectRestore: { fileName: "pki-backup-x.pkibak", passphrase: "short" },
+    restoreBackup: { fileName: "pki-backup-x.pkibak", passphrase: "short", confirmBackupId: "x" },
     // notifications (P02-T2): a line that need not exist (an answer of 200 with `not-found`), and a settings write of nothing
     notificationDigest: { id: 999_999 },
     notificationAct: { id: 999_999, op: "read" },
@@ -336,6 +342,14 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
       }),
       ...adapters,
       localLocations: localFiles.locations,
+      backup: createBackupApi({
+        db,
+        dataDir: "/synthetic/data",
+        open: openBetterSqlite3,
+        vectorIndex: adapters.vectorIndex,
+        tickets: localFiles.tickets,
+        buildKind: "test",
+      }),
       decisions: userDecisions,
       importer: productImporter(db, { runner, projections }),
       instanceImporter: productInstanceImporter(db, { runner, projections }),
