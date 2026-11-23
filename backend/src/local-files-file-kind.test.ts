@@ -111,7 +111,11 @@ describe("C34 the file kind", () => {
         },
       };
       expect(deletes(await w.sync()), `present ${present}`).toEqual([]);
-      expect(listLocations(w.db).find((l) => l.id === w.locationId)?.state).toBe("unavailable");
+      const after = listLocations(w.db).find((l) => l.id === w.locationId);
+      expect([after?.state, after?.stateReason]).toEqual([
+        "unavailable",
+        present ? "root-changed" : "root-missing",
+      ]);
     }
   });
 

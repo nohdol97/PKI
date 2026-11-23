@@ -268,9 +268,11 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
   /**
    * The `file` kind's root (I02B-R3): the file itself. Its real path is the approved one and it is a regular
    * file; its identity is not compared, because an editor that saves by writing a new file and renaming it
-   * gives the same path another number (a change of content, not of place). A name that is gone while the
-   * folder that held it still reads is a deleted file (`file-gone`, announced as a deletion); a folder that
-   * is gone too is the disk's absence (`root-missing`).
+   * gives the same path another number (a change of content, not of place). The volume (`dev`) recorded at
+   * approval is compared: another volume at the same place is `root-changed` (file present) or `root-missing`
+   * (name gone), never a deletion (I02B-R7). A name that is gone while the folder that held it still reads, on
+   * the same volume, is a deleted file (`file-gone`, announced as a deletion); a folder that is gone too is the
+   * disk's absence (`root-missing`).
    */
   async function fileRootProblem(
     fs: BoundaryFs,
@@ -278,13 +280,14 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
   ): Promise<RootProblem | "file-gone" | null> {
     try {
       if ((await fs.realpath(location.realPath)) !== location.realPath) return "root-changed";
-      return (await fs.stat(location.realPath)).isFile() ? null : "root-changed";
+      const stat = await fs.stat(location.realPath);
+      return stat.isFile() && String(stat.dev) === location.rootDev ? null : "root-changed";
     } catch (error) {
       const code = (error as { code?: unknown }).code;
       if (code === "EACCES" || code === "EPERM") return "root-not-readable";
       try {
-        await fs.stat(dirname(location.realPath));
-        return "file-gone";
+        const parent = await fs.stat(dirname(location.realPath));
+        return String(parent.dev) === location.rootDev ? "file-gone" : "root-missing";
       } catch {
         return "root-missing";
       }
