@@ -1,7 +1,7 @@
 // I02B-T04 T0 (F1, FU7): what a location that is not read owes the connector when it is read again.
 // One representative case per clause; the connector runs over the canonical index on an in-memory database.
 import { confirmDeletions, listLocations, relinkLocation } from "@pki/storage";
-import { chmodSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { chmodSync, utimesSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -193,5 +193,18 @@ describe("C12: the deletion brake", () => {
     expect(
       w.index.entriesOfLocation(w.locationId).filter((e) => e.state === "present"),
     ).toHaveLength(1);
+  });
+});
+
+describe("FU6 (#179): a rescan from a null cursor", () => {
+  it("announces an entry whose size and time were just noted silently, as every rescan announces all", async () => {
+    const w = make();
+    w.write("a.md", "# a\n\nbody of a\n");
+    const [first] = upserts(await w.settle());
+    const later = new Date(Date.now() - 1_800_000);
+    utimesSync(`${w.root}/a.md`, later, later); // the time alone changed: a silent write in the pass
+    await w.sync({ cursor: null }); // the new time is seen, not yet settled
+    const rescan = await w.sync({ cursor: null }); // settled: the entry is rewritten silently in this pass
+    expect(upserts(rescan).map((r) => r.externalId)).toEqual([first?.externalId]);
   });
 });
