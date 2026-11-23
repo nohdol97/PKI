@@ -13,6 +13,7 @@ import {
 } from "@pki/knowledge-engine";
 import {
   countDirty,
+  lineageHash,
   lineageOfFinding,
   listFindings,
   LINT_RULES,
@@ -128,7 +129,7 @@ export function createLintReads(
   };
   /** The verdict of the stored LLM opinion (K02-R17); its position in the source is not sent. */
   const opinionOf = (f: StoredFinding): Finding["opinion"] =>
-    f.opinion === null
+    f.opinion === null || f.opinionLineageHash !== lineageHash(lineageOfFinding(db, f.id))
       ? undefined
       : (JSON.parse(f.opinion) as { verdict: Finding["opinion"] }).verdict;
   const view = (f: StoredFinding): Finding => ({
