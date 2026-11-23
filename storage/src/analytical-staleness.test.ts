@@ -129,6 +129,8 @@ const checkJobs = () =>
     ])
     .map((r) => r.source_id as number);
 
+const ANY_SCOPE = { combinable: () => true };
+
 describe("check.staleness: another row a check reads changes", () => {
   it("check.staleness: changing the Grain fact's status deletes the calculation's aggregation line in the same transaction and keeps its schema line and the Grain fact's own lines", () => {
     expect(() =>
@@ -345,13 +347,19 @@ describe("check.staleness: the receiver of a changed membership", () => {
   it("check.staleness: the receiver does not throw when a moved row is gone, an item is gone, or nothing reaches a table", () => {
     expect(() =>
       db.transaction(() =>
-        onMembershipChanged(db, { items: [99999], movedRows: [{ kind: "fact", id: 99999 }] }),
+        onMembershipChanged(
+          db,
+          { items: [99999], movedRows: [{ kind: "fact", id: 99999 }] },
+          ANY_SCOPE,
+        ),
       ),
     ).not.toThrow();
     const bare = item(db, "Concept", "bare");
-    expect(() => onMembershipChanged(db, { items: [bare], movedRows: [] })).not.toThrow();
+    expect(() =>
+      onMembershipChanged(db, { items: [bare], movedRows: [] }, ANY_SCOPE),
+    ).not.toThrow();
     expect(lines()).toEqual(ALL(s));
     db.run("DELETE FROM dataset_tables");
-    expect(() => onMembershipChanged(db, { items: [s.d], movedRows: [] })).not.toThrow();
+    expect(() => onMembershipChanged(db, { items: [s.d], movedRows: [] }, ANY_SCOPE)).not.toThrow();
   });
 });
