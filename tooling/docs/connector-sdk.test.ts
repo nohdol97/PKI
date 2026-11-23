@@ -1126,7 +1126,7 @@ describe("docs.connector-sdk (I07): the ADR and its index (I07-R15)", () => {
     expect(docsIndex).toContain("결정 기록 19건(잠정 14, 확정 4, 미결 1.");
   });
 
-  it("the ADR index links only files that exist (0017 stays reserved for I02-B: no link to a file not written yet; 0019 is written by I06)", () => {
+  it("the ADR index links only files that exist (0017 is written by I02-B, 0019 by I06)", () => {
     const index = read("docs/adr/README.md");
     const links = [...index.matchAll(/\]\((\d{4}-[a-z0-9-]+\.md)\)/g)].map((m) => m[1] as string);
     expect(links.length).toBeGreaterThanOrEqual(18);
@@ -1134,11 +1134,11 @@ describe("docs.connector-sdk (I07): the ADR and its index (I07-R15)", () => {
     const numbers = readdirSync(resolve(docsDir, "adr")).flatMap((f) => /^(\d{4})-/.exec(f)?.[1] ?? []);
     expect(numbers).toContain("0020");
     expect(numbers).toContain("0019");
-    // 0017 is not written: neither a file nor a row of the index may imply it exists
-    expect(numbers).not.toContain("0017");
-    expect(links.filter((l) => l.startsWith("0017-"))).toEqual([]);
-    expect(index).not.toContain("| [0017]");
-    expect(index).toContain("0017은 I02-B spec이 정해 둔 번호이고 아직 쓰이지 않았다.");
+    // 0017 is written (I02B-T06): the file, its row of the index, and no "reserved" sentence left behind
+    expect(numbers).toContain("0017");
+    expect(links.filter((l) => l.startsWith("0017-"))).toEqual(["0017-local-files-in-place.md"]);
+    expect(index).toContain("| [0017](0017-local-files-in-place.md) |");
+    expect(index).not.toContain("0017은 I02-B spec이 정해 둔 번호이고 아직 쓰이지 않았다.");
     expect(index).not.toContain("0019는 I06 spec이 정해 둔 번호");
   });
 

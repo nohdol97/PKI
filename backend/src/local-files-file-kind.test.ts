@@ -1,7 +1,7 @@
 // I02B-T06 (I02B-R3, R42, C34): a `file` location is one document file approved by itself; it follows the
 // file as a folder's files are followed, and its deletion is a tombstone. A `.jsonl` file inside a folder is
 // not a document: it is skipped as `unsupported-format` (the text of that reason points to "JSONL 파일 추가").
-import { statSync, unlinkSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { insertLocation, newLocalId } from "@pki/storage";
 import { afterEach, describe, expect, it } from "vitest";
@@ -79,5 +79,25 @@ describe("C34 .jsonl inside a folder (I02B-R42)", () => {
       .filter((e) => e.state === "skipped")
       .map((e) => [e.relativePath, e.skipReason]);
     expect(skipped).toEqual([["lines.jsonl", "unsupported-format"]]);
+  });
+});
+
+describe("C34 one reader of a JSONL file's path", () => {
+  it("of the product code that parses JSONL, only the file collector also reads a file", () => {
+    const here = new URL(".", import.meta.url).pathname;
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory()
+          ? walk(join(dir, e.name))
+          : /\.ts$/.test(e.name) && !/\.test(-support)?\.ts$/.test(e.name)
+            ? [join(dir, e.name)]
+            : [],
+      );
+    const parsers = walk(here).filter((f) => readFileSync(f, "utf8").includes("parseJsonl("));
+    expect(parsers.length).toBeGreaterThan(1); // the import's text path parses too, and is not a reader of paths
+    const readers = parsers.filter((f) =>
+      /readFileSync\(|readLocationFile\(|createReadStream\(/.test(readFileSync(f, "utf8")),
+    );
+    expect(readers.map((f) => f.slice(here.length))).toEqual(["adapters/jsonl-connector.ts"]);
   });
 });
