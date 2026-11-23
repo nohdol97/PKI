@@ -16,8 +16,10 @@ import {
   readTombstoneState,
   registerConnectorInstance,
   registerJob,
+  readInsight,
   saveFact,
   saveInsight,
+  saveRelation,
   saveSourceRecord,
   searchKeyword,
   type KnowledgeAttributes,
@@ -32,7 +34,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatasetProfileHandler } from "./dataset-profile.ts";
-import { COMPLETION_DATE, DEPENDENCY_DELAY } from "./dependency-delay.ts";
+import {
+  COMPLETION_DATE,
+  DEPENDENCY_DELAY,
+  DEPENDS_ON,
+  TARGET_DATE,
+  recomputeDependencyDelay,
+} from "./dependency-delay.ts";
 import { applyTombstone } from "./tombstone-entry.ts";
 
 const CANARY = {
@@ -265,6 +273,87 @@ describe("purge.canary-files", () => {
 // S03-R17: the names a table's profile writes (a column name, the sheet's name) are gone with the table's source.
 // The Dataset item is named `title:sheet`, so its name goes with its item, which no other source holds here
 // (the case that another source's row holds it is S03-T05's).
+// S02-R13: the member's completion date is in the Insight of the representative's key; deleting the source
+// that holds it takes it from the Insight's explanation too, which the collection must find through the group.
+describe("purge.canary-files: a merged member's date in the representative's Insight (S02-R13)", () => {
+  const DATE = "2031-07-19"; // shares no digits-and-dashes run with any other stored value
+  const DATE_ID = { connectorInstanceId: "c1", namespace: "ns", externalId: "dateid" };
+
+  /** Whether the date is in any file once every connection is closed. */
+  const dateLeft = () => {
+    db.close();
+    const left = canariesLeft(dir, [DATE]);
+    db = open();
+    return left;
+  };
+
+  function seedGroup() {
+    const stored = (externalId: string, body: string) => {
+      const saved = saveSourceRecord(db, "c1", { namespace: "ns", externalId, title: "t", body });
+      if (saved.status !== "created") throw new Error(saved.status);
+      return db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    };
+    const quoted = (
+      target: { factId: number } | { relationId: number },
+      id: number,
+      body: string,
+    ) => addEvidence(db, { target, sourceVersionId: id, start: 0, end: body.length, quote: body });
+    const [x, y, member] = [
+      insertItem(db, { type: "Project", name: "X 항목", ...attrs }),
+      insertItem(db, { type: "System", name: "Y 항목", ...attrs }),
+      insertItem(db, { type: "System", name: "Y′ 항목", ...attrs }),
+    ] as const;
+    const plan = "plan 2026-12-05";
+    quoted(
+      { factId: saveFact(db, { itemId: x, kind: TARGET_DATE, value: "2026-12-05", ...attrs }).id },
+      stored("plan", plan),
+      plan,
+    );
+    const dep = saveRelation(db, { subjectId: x, type: DEPENDS_ON, objectId: y, ...attrs }).id;
+    quoted({ relationId: dep }, stored("dep", "x depends on y"), "x depends on y");
+    const own = saveFact(db, { itemId: y, kind: "note", value: "own", ...attrs }).id;
+    quoted({ factId: own }, stored("own", "own note"), "own note");
+    const done = `done ${DATE}`;
+    const completion = saveFact(db, {
+      itemId: member,
+      kind: COMPLETION_DATE,
+      value: DATE,
+      ...attrs,
+    }).id;
+    quoted({ factId: completion }, stored("dateid", done), done);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+      [member, y, AT],
+    );
+    recomputeDependencyDelay(db, [member]);
+    return { x, y };
+  }
+
+  it("the canary date is in the file and in the representative's Insight before the deletion", () => {
+    const { x, y } = seedGroup();
+    expect(readInsight(db, { rule: DEPENDENCY_DELAY, xItemId: x, yItemId: y })?.summary).toContain(
+      DATE,
+    );
+    expect(dateLeft()).toContain(DATE);
+  });
+
+  it("leaves the member's completion date in no file after its source's deletion", () => {
+    const { x, y } = seedGroup();
+    canonicalTransaction(db, (tx) =>
+      applyTombstone(tx, {
+        identity: DATE_ID,
+        reason: "source-deleted",
+        lastRevision: null,
+        at: AT,
+      }),
+    );
+    expect(
+      db.all("SELECT state FROM insights WHERE x_item_id = ? AND y_item_id = ?", [x, y]),
+    ).toEqual([{ state: "resolved" }]);
+    expect(dateLeft()).not.toContain(DATE);
+  });
+});
+
 describe("purge.canary-files: a table source's profile (S03-R17)", () => {
   const TABLE = {
     column: "zqkcolumn", // a header cell: a `dataset.column` fact's value and its evidence's quote

@@ -233,5 +233,6 @@ export function recomputeDependencyDelay(
  * the original or the new item as one end, and both are in `change.items`. It only recomputes.
  */
 export const dependencyDelayReceiver: MembershipListener = (tx, change, scope) => {
-  recomputeDependencyDelay(tx, change.items, scope);
+  const outcomes = recomputeDependencyDelay(tx, change.items, scope);
+  scope.recomputed?.("insight", outcomes.filter((o) => o.outcome !== "unchanged").length);
 };

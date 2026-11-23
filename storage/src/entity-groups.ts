@@ -35,6 +35,11 @@ export interface MembershipChange {
 /** What a receiver may ask of the scope policy: the acting side's own, the user's entry's or the propagation's (I04-R14). */
 export interface MembershipScope {
   combinable(lineage: readonly SourceVersionRef[]): boolean;
+  /**
+   * A receiver says how many rows of a derivative kind it changed, when the acting side keeps a tally: a
+   * propagation counts them in its record, so the record's count of a kind includes what a receiver changed.
+   */
+  recomputed?(kind: string, count: number): void;
 }
 
 /**

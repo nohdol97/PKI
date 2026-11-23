@@ -44,6 +44,7 @@ import {
   type SourceVersionRef,
   type SqlDriver,
   type SqlValue,
+  withGroups,
 } from "@pki/storage";
 import { assessAfterPropagation } from "./auto-verify.ts";
 import { recomputeDependencyDelay, type RuleOutcome } from "./dependency-delay.ts";
@@ -73,6 +74,8 @@ interface Run {
   report: CanonicalReport;
   at: string;
   invalidationIds: Set<number>;
+  /** Rows of a kind that a membership receiver changed inside this propagation (the kind's own count adds them). */
+  byReceivers: Map<string, number>;
 }
 let running: Run | undefined;
 
@@ -438,14 +441,16 @@ const INSIGHT: DerivativeKind = {
   affected: (tx, change) => {
     const id = change.sourceId;
     supported(change);
-    // the Insights on the items the source's evidence reaches, a resolved row included: a scope
-    // change may revive it, and a resolved row has no evidence link of its own to find it by
+    // the Insights on the items the source's evidence reaches and on every member of their groups, as
+    // the groups are before anything changes (S02-R13), a resolved row included: a scope change may
+    // revive it, and a resolved row has no evidence link of its own to find it by
+    const group = JSON.stringify(withGroups(tx, reachedItems(tx, id)));
     return collect(
       tx,
       "insight",
-      `SELECT id FROM insights WHERE x_item_id IN (${CITED_ITEMS})
-         OR y_item_id IN (${CITED_ITEMS}) ORDER BY id`,
-      [id, id, id, id, id, id],
+      `SELECT id FROM insights WHERE x_item_id IN (SELECT value FROM json_each(?))
+         OR y_item_id IN (SELECT value FROM json_each(?)) ORDER BY id`,
+      [group, group],
     );
   },
   invalidate: (ctx, snapshot, change) => {
@@ -459,7 +464,21 @@ const INSIGHT: DerivativeKind = {
           )
         : (ctx.collected.get("item") ?? []).map((a) => Number(a.ref.id));
     const remaining = ascending(items.filter((id) => stored(tx, "items", id)));
-    const outcomes = recomputeDependencyDelay(tx, remaining, ctx);
+    // an Insight collected only through a group names no reached item (the reached member may be gone):
+    // its ends are judged again too, over their groups as they are now
+    const reached = new Set(items);
+    const viaGroup = snapshot.flatMap(({ ref }) =>
+      tx
+        .all("SELECT x_item_id, y_item_id FROM insights WHERE id = ?", [Number(ref.id)])
+        .map((r) => [r.x_item_id as number, r.y_item_id as number])
+        .filter((ends) => !ends.some((end) => reached.has(end)))
+        .flat(),
+    );
+    const outcomes = recomputeDependencyDelay(
+      tx,
+      ascending([...remaining, ...viaGroup.filter((id) => stored(tx, "items", id))]),
+      ctx,
+    );
     const report = noting(ctx);
     if (report) {
       report.remainingItemIds = remaining;
@@ -467,7 +486,9 @@ const INSIGHT: DerivativeKind = {
     }
     return {
       removed: gone(tx, "insights", snapshot).length,
-      recomputed: outcomes.filter((o) => o.outcome !== "unchanged").length,
+      recomputed:
+        outcomes.filter((o) => o.outcome !== "unchanged").length +
+        (running?.byReceivers.get("insight") ?? 0),
     };
   },
 };
@@ -605,7 +626,18 @@ function entityMergeKind(listeners: readonly MembershipListener[]): DerivativeKi
       const judged = rejudgeGroups(tx, survivors, (lineage) => ctx.combinable(lineage));
       recomputed += judged.changedLines;
       // a group that rested or woke is a membership change; a relink alone moves no row's item
-      notifyMembership(tx, listeners, { items: judged.items, movedRows: [] }, ctx);
+      notifyMembership(
+        tx,
+        listeners,
+        { items: judged.items, movedRows: [] },
+        {
+          combinable: (lineage) => ctx.combinable(lineage),
+          recomputed: (kind, count) => {
+            if (running)
+              running.byReceivers.set(kind, (running.byReceivers.get(kind) ?? 0) + count);
+          },
+        },
+      );
       return {
         removed: snapshot.filter(({ ref }) => !refExists(tx, ref.id)).length,
         recomputed,
@@ -914,7 +946,7 @@ export function propagateCanonical(
     insights: [],
   };
   const outer = running;
-  const run: Run = { report, at, invalidationIds: new Set() };
+  const run: Run = { report, at, invalidationIds: new Set(), byReceivers: new Map() };
   running = run;
   try {
     const propagation = registry.propagate(db, change);
