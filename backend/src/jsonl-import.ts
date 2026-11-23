@@ -22,6 +22,7 @@ import {
   type SyncOptions,
 } from "./connectors.ts";
 import { parseJsonl, splitRounds, type JsonlLine } from "./jsonl-lines.ts";
+import { PUBLIC_INSTANCE_ID_PREFIXES } from "./public-kinds.ts";
 
 /** Provisional: distinct instances one file may name; each leaves a permanent row. */
 export const MAX_IMPORT_INSTANCES = 32;
@@ -142,6 +143,8 @@ export async function importJsonl(
     },
   };
   const boundElsewhere = (id: string) => {
+    // an id the public code makes while running (an approved JSONL file location's instance) is never the caller's to name (I02B-R52)
+    if (PUBLIC_INSTANCE_ID_PREFIXES.some((prefix) => id.startsWith(prefix))) return true;
     const kind = readConnectorKind(db, id);
     if (kind !== undefined && kind !== JSONL_IMPORT_KIND) return true;
     // a configured Connector of another kind that never synced is not bound yet: its id is its own

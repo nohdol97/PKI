@@ -37,6 +37,27 @@ export function jsonlFileInstances(db: SqlDriver): ConnectorInstanceConfig[] {
     .map(jsonlFileInstance);
 }
 
+/**
+ * The start's sweep (I02B-R53): the period of a `jsonl-file:` instance whose location row is gone (the process died
+ * between the revocation's last transaction and `revoked()`) or is `revoking` (it has no instance, see above) is
+ * turned off, as `revoked()` does; it would only pile up `instance-not-found` dead letters.
+ */
+export function disableOrphanJsonlFileSchedules(
+  db: SqlDriver,
+  scheduler: Pick<Scheduler, "list" | "disable">,
+): void {
+  const live = new Set(jsonlFileInstances(db).map((instance) => instance.id));
+  for (const period of scheduler.list()) {
+    if (
+      period.enabled &&
+      period.kind === CONNECTOR_SYNC_KIND &&
+      period.target.startsWith(JSONL_FILE_INSTANCE_PREFIX) &&
+      !live.has(period.target)
+    )
+      scheduler.disable(period.id);
+  }
+}
+
 /** What the location API and the revocation ask of the running instances (the composition point binds them). */
 export interface JsonlFileHooks {
   /** A JSONL file location was approved: its instance runs now, with its default period. */

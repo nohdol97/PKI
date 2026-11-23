@@ -335,9 +335,7 @@ describe("importJsonl", () => {
     expect(result).toEqual(
       reply({ received: 1, created: 1, errors: [{ line: 1, reason: "instance-conflict" }] }),
     );
-    expect(
-      db.all("SELECT id FROM connector_instances WHERE id LIKE 'jsonl-file:%'"),
-    ).toEqual([]);
+    expect(db.all("SELECT id FROM connector_instances WHERE id LIKE 'jsonl-file:%'")).toEqual([]);
   });
 
   it("stores v1 and v2 of one source in one file as two versions with two jobs (R2, review A-M1)", async () => {

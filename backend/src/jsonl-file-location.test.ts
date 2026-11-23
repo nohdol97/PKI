@@ -175,7 +175,9 @@ describe("jsonl-file location (I02B-C33): the life of the instance", () => {
   it("a restart turns off the period of a jsonl-file instance whose location row is gone, and keeps the live one's (I02B-R53, #258 F2)", async () => {
     const t = await start();
     const goneId = await t.approve(file("gone.jsonl", lines(line({ external_id: "g1" }))));
-    const liveId = await t.approve(file("live.jsonl", lines(line({ external_id: "l1", id: "r2" }))));
+    const liveId = await t.approve(
+      file("live.jsonl", lines(line({ external_id: "l1", id: "r2" }))),
+    );
     const period = (running: NonNullable<typeof booted>, id: string) =>
       running.scheduler
         .list()
