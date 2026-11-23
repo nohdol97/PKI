@@ -133,5 +133,20 @@ class AnalyticalCounts(unittest.TestCase):
         self.assertFalse(os.path.exists(missing))
 
 
+class AnalyticalRunbook(unittest.TestCase):
+    def test_the_runbook_section_names_the_subcommand_and_every_counted_name(self):
+        with open(os.path.join(_paths.VERIF_DIR, KIT, "RUNBOOK.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        section = text[text.index("## 12. 분석 의미 실측 (S34"):]
+        self.assertIn("analytical-scenario preflight", section)
+        self.assertIn("analytical-scenario record", section)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pki.sqlite")
+            make_db(path)
+            counts = az.read_counts(path)
+        for name in counts:
+            self.assertIn("`{}`".format(name), section, name)
+
+
 if __name__ == "__main__":
     unittest.main()
