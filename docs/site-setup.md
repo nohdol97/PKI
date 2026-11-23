@@ -222,7 +222,7 @@
 
 | 키 | 뜻 | 기본값 |
 |---|---|---|
-| `notifications.os` | `on` 또는 `off`(정확히 `off`일 때만 끔). 끄면 OS 통로만 `unavailable`로 끝나고 피드는 그대로 쌓인다. 설정 화면의 "알림 설정"과 `POST /api/settings/notifications`로 바꾼다 | 켬 |
+| `notifications.os` | `on` 또는 `off`(정확히 `off`일 때만 끔). 끄면 OS 통로만 `unavailable`로 끝나고 피드는 그대로 쌓인다. 알림 화면의 "알림 설정"과 `POST /api/settings/notifications`로 바꾼다 | 켬 |
 | `notifications.quietHours` | `{"enabled":true,"start":"22:00","end":"08:00"}` 꼴의 JSON. 이 시간대에는 OS 알림을 띄우지 않고 쌓아 두었다가 끝나면 건수 하나로 보낸다. 시각은 실행하는 PC의 시간대다. 값이 틀리면 기본값으로 읽는다 | 22:00~08:00, 켬 |
 | `notifications.snoozeUntil` | 이 시각(ISO)까지 모든 OS 알림을 보류한다. 비어 있거나 틀리면 일시 중지가 없다 | 없음 |
 
