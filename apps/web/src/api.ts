@@ -33,8 +33,17 @@ export type ApiClient = <Name extends RouteName>(
   ...input: RouteRequest<Name> extends undefined ? [] : [RouteRequest<Name>]
 ) => Promise<RouteResponse<Name>>;
 
+/** What a stream reader needs of a client made by `createApiClient`: the routes table answers JSON only (X01-R10). */
+export interface ApiConnection {
+  baseUrl: string;
+  token: string;
+  fetchImpl: typeof fetch;
+}
+const connections = new WeakMap<ApiClient, ApiConnection>();
+export const connectionOf = (api: ApiClient): ApiConnection | undefined => connections.get(api);
+
 export function createApiClient(session: Session, fetchImpl: typeof fetch = fetch): ApiClient {
-  return async (name, ...[input]) => {
+  const client: ApiClient = async (name, ...[input]) => {
     const route = routes[name];
     const authorization = `Bearer ${session.token}`;
     const res = await fetchImpl(
@@ -61,6 +70,8 @@ export function createApiClient(session: Session, fetchImpl: typeof fetch = fetc
     }
     return route.response.parse(body) as RouteResponse<typeof name>;
   };
+  connections.set(client, { baseUrl: session.baseUrl, token: session.token, fetchImpl });
+  return client;
 }
 
 export async function fetchDevSession(fetchImpl: typeof fetch = fetch): Promise<Session> {

@@ -63,7 +63,7 @@ V02가 I04로 넘긴 것: tombstone 보존 기간, 삭제한 원본의 복원, �
 - 그래프 경로·여러 단계 근거의 무효화와 권한 교차 경로의 유출 방지 실행 검증: S02(#23) S02-C3. 범위가 좁아진 뒤 이미 합쳐진 항목을 다시 나누는 일도 S02의 병합 되돌리기·분리다. 경로와 사슬은 읽을 때 계산하고 저장하지 않으므로 등록할 종류가 없다(S02-R22). 새로 저장하는 것은 `entity-merge`·`merge-candidate`·`assertion-link` 종류다. 합쳐진 항목은 쉬는 줄로 묶음이 풀린 것처럼 읽는다(S02-R13).
 - Wiki 페이지의 삭제·access_scope 승계·같은 knowledge revision 재생성: K01(#25) K01-C3.
 - 알림·digest의 발송 직전 재검사와 중복 발송 방지: P02(#28) P02-C3.
-- 검색 결과·답변 생성 직전의 재검사, Provider 문맥 최소화, 답변·인용·로그의 부정 테스트, 벡터 색인의 실제 쓰기·찾기 경로: X01(#30) X01-C4.
+- 검색 결과·답변 생성 직전의 재검사, Provider 문맥 최소화, 답변·인용·로그의 부정 테스트: X01(#30) X01-C4. 벡터 색인의 실제 쓰기·찾기 경로: R07 뒤의 벡터 구현 작업(X01은 찾는 쪽만 부른다).
 - 사용자 교정·승인 기록의 등록: S01(#22). S01이 교정 테이블을 만들 때 이 계약에 등록한다(등록표의 S01 행).
 - 백업 파일의 생성과 실제 복원 실행: H01(#32) H01-C2. I04는 복원 뒤 재적용 **정책**과 그 정책을 실행하는 함수만 만든다.
 - 정본 SQLite의 파일 단위 암호화: H01([ADR 0010](../adr/0010-encryption-at-rest.md)).
@@ -402,11 +402,11 @@ function atLeastAsStrict(policy: ScopePolicy, a: AccessScope, b: AccessScope): b
 | 항목 | item | canonical | V02 | I04-C1 |
 | Insight | insight | canonical | V02 | I04-C1 |
 | 엔진 투영 | projection | projection | V02-T09 | I04-C1(메모리 구현). 실제 엔진은 R07 |
-| 벡터 투영 | projection | projection | V01(빈 구현) | I04-C1(fake). 실제 쓰기는 X01-C4 |
+| 벡터 투영 | projection | projection | V01(빈 구현) | I04-C1(fake). 실제 쓰기는 R07 뒤의 벡터 구현 작업(X01은 찾는 쪽만 부르고 쓰지 않는다, X01-D6) |
 | 그래프 경로·여러 단계 근거 | 없음(읽을 때 계산, 등록하지 않음) | 없음 | S02 | S02-C3 |
 | Wiki 페이지 | projection | canonical | K01 | K01-C3 |
 | 알림, digest | delivery | P02가 정함 | P02 | P02-C3 |
-| 답변 문맥, 인용, 답변 캐시 | delivery | X01이 정함 | X01 | X01-C4 |
+| 답변 문맥, 인용, 답변 캐시 | 없음(읽을 때 계산, 저장하지 않음. 등록할 행 없음). 범위는 X01 R12~R14의 `visible`·`combinable`로, 전송 등급은 Broker가 문맥 version들의 계보로 승계. 답변 캐시는 만들지 않는다 | 없음 | X01 | X01-C4 |
 | 사용자 교정·승인 기록 | knowledge | canonical | S01 | S01 spec에서 정함(이슈 #21에 C번호 없음). 이력은 대상 행의 종류에, 사용자가 쓴 행의 계보는 S01 R22(S01-T04 구현) |
 
 ### 장부 줄 하나가 거치는 상태 (I04-R20)
@@ -501,7 +501,7 @@ C1~C3은 이슈 #21의 문장 그대로다. H1·H2는 이 프로젝트가 배포
 
 | 기준 | 사외 | 남는 것 |
 |---|---|---|
-| C1 | **부분.** 지금 있는 파생물로 충족 가능 | 뒤 층의 실행 검증(S02-C3, K01-C3, P02-C3, X01-C4). 실제 엔진·벡터 구현의 제거(R07, X01). 배포처 범위 정책의 값(S21) |
+| C1 | **부분.** 지금 있는 파생물로 충족 가능 | 뒤 층의 실행 검증(S02-C3, K01-C3, P02-C3, X01-C4). 실제 엔진·벡터 구현의 제거(R07 뒤의 구현 작업). 배포처 범위 정책의 값(S21) |
 | C2 | **충족 가능**(개발 OS). 수동 재시도 경우는 I03 뒤 | 실제 수집기의 사건 순서(S22) |
 | C3 | **부분.** 재평가, 소거, 보존, 재적용 함수 | 실제 백업 파일의 복원(H01-C2). Windows 설치본의 데이터 디렉터리에서의 파일 카나리(S22). 데이터 디렉터리 밖의 사본("남는 위험" 표의 담당) |
 | C4~C12 | **충족 가능**(개발 OS) | 실제 백업 파일의 복원으로 하는 같은 순서(H01-C2). 실제 포크 빌드에서 종류를 넣고 빼는 실행(S26·S27) |
@@ -661,7 +661,7 @@ flowchart LR
 4. **감싼 엔진(R13).** `relatedContext`의 결과 각 hit를 `{ kind: "engine", id: "<sourceId>:<version>" }`로 바꿔 `registry.visible(…, "search")`에 넘기고 살아남은 것만 엔진의 순서·점수 그대로 돌려준다. 정수가 아닌 `sourceId`의 hit는 우리 행이 아니므로 버린다. 다른 멤버는 엔진의 것 그대로다. **정책이 판정하지 못해 던지면 호출이 거부된다**(열림 대신 닫힘). (T04 시점에는 `NO_POLICY_YET`의 `allows`가 던져 제품에서 `relatedContext`를 부르면 거부됐다. I04-T08이 제품 등록부를 `allows`가 참인 임시 정책으로 바꿔 열었고, T09의 기본 정책이 그것을 이었다. "T08이 넘기는 것" 1.) 제품 코드는 아직 부르지 않는다(V02-C5). 엔진은 `productVisibleEngine`을 거친 것만 백엔드에 묶인다(`boot.ts`가 투영·실행기·포트에 감싼 것만 넘긴다). `permanentlyAbsent` 판정은 감싸기 **전**의 구현으로 한다.
 5. **`permanentlyAbsent`는 묶인 구현의 정적 사실이다**(잠정). 종류의 모양이 아니라 구성 지점이 `createProductRegistry({ permanentlyAbsent })`로 준다: `productRegistry`가 `NullKnowledgeEngine`·`EmptyVectorIndex`의 인스턴스일 때만 켠다. 다른 구현(시험 대역, 멈출 수 있는 사이드카)은 켜지 않는다. 이 표시가 있는 투영의 `AdapterUnavailableError`만 건너뜀이고, null 엔진의 `removeSource`는 오류 없이 끝나므로 엔진은 건너뜀이 아니라 **성공**으로 닫힌다(빈 벡터 색인만 `adapter-unavailable`로 건너뜀). I04-T02의 "묶인 어댑터는 등록된 종류여야 한다" 검사는 `productRegistry`가 한 곳이므로 그 함수의 입력과 등록부의 투영 종류 이름을 대조하면 된다.
 6. **통지에서 삭제가 빠졌다(V02-T09의 직접 호출 → 작업).** `ProjectionNotice`는 version 통지 하나다(`removed` 종류와 `versionIds`·`replacedVersionIds`가 없어졌다). 삭제·권한 철회의 소거 트랜잭션이 등록한 제거 작업을 실행기가 돌린다. 그래서 `userDeleteWithNotice`는 `userDelete`가 되어 `{ outcome, sourceId, coversVersion }`만 돌려주고, `acceptChange`의 `tombstoned`에는 `notice`가 없다. 제거 작업이 등록된 뒤 실행기를 깨우는 자리: Connector 동기화가 한 쪽에 삭제가 있으면(`storeChange`가 `deleted`) `runner.wake()`, 화면 삭제는 `onRunConditionsChanged`다(둘 다 기존 입구를 다시 썼다). **동작이 달라지는 곳**: 삭제가 엔진·벡터 색인에 닿는 때가 커밋 직후 한 번에서 실행기의 다음 차례로 바뀌었고, 실패하면 이제 재시도되며 포기하면 재구축 표식이다(I03-T10). 투영이 stale로 표시된 동안에도 제거는 시도된다(통지는 건너뛴다).
-7. **벡터 ref가 원본 version 이름이 되었다**(잠정, X01이 벡터를 쓰기 시작할 때 다시 정한다). `vectorRefOf(sourceId, version)` = `source-version:<원본>:<version>`. 이전 `vectorRefOf(versionId)`(version 행 번호)는 소거가 그 행을 가져가므로 제거 작업이 지울 ref를 대지 못했다. 원본 번호와 version 번호는 다시 쓰이지 않으므로(version은 덮개 뒤에도 이어서 센다) 안전하다. `ProjectionNotice`의 `replacedVersionIds`는 `replacedVersions`(version 번호)가 되었다. 제품에는 벡터를 쓰는 곳이 아직 없다.
+7. **벡터 ref가 원본 version 이름이 되었다**(잠정, R07 뒤의 벡터 구현 작업이 벡터를 쓰기 시작할 때 다시 정한다). `vectorRefOf(sourceId, version)` = `source-version:<원본>:<version>`. 이전 `vectorRefOf(versionId)`(version 행 번호)는 소거가 그 행을 가져가므로 제거 작업이 지울 ref를 대지 못했다. 원본 번호와 version 번호는 다시 쓰이지 않으므로(version은 덮개 뒤에도 이어서 센다) 안전하다. `ProjectionNotice`의 `replacedVersionIds`는 `replacedVersions`(version 번호)가 되었다. 제품에는 벡터를 쓰는 곳이 아직 없다.
 8. **벡터 포트의 낡은 순번.** 제거 호출은 1부터 덮는 version까지의 ref를 한 번에 보낸다. 색인이 어떤 ref가 더 새 순번을 가졌다며 `StaleFenceError`로 통째 거부하면 ref마다 따로 불러 거부된 ref만 놓는다(덮는 version 이하는 다시 쓰이지 않으므로 더 새 호출은 제거뿐이다). 그 밖의 오류는 그대로 올라가 I03의 재시도를 따른다. 원본 version fence는 벡터에 뜻이 없어 쓰지 않는다. 엔진 포트는 `removeSource({sourceId, version: 덮는 version}, {version: fence}, 변경 순번)`이고 낡은 fence의 다시 보내기는 I03-T10의 처리기가 한다.
 9. **재구축은 통지와 같은 줄에 선다.** `Projections.rebuild(name, seq)`가 추가되어(`reconcile`이 쓰던 재구축과 같은 함수) 통지와 겹치지 않고, 성공하면 stale 표시(프로세스와 설정)를 지운다. 포트의 `rebuild`가 이것을 부르므로 재구축 작업이 끝나면 그 투영이 다시 통지를 받는다. 이전에는 시작 비교만 표시를 지웠다. 실패는 던져서 처리기의 분류(`permanentlyAbsent`만 건너뜀)를 따른다.
 10. **`projectionPorts` 부팅 옵션은 남겼다**(시험이 투영 대역으로 바꾼다). 기본은 제품의 포트다(`productProjectionPorts`). I03-T10의 시험(`backend/src/projection-jobs.test.ts`)의 `deleted()` 도우미는 이제 삭제가 등록하는 두 작업 가운데 시험하는 투영의 것만 남기고, 등록부에 종류가 없는 대상(`graph`, `vector`)이면 손으로 등록한다. 그 시험의 의미는 바뀌지 않았다.
@@ -671,7 +671,7 @@ flowchart LR
 14. **하나의 인스턴스 ID 한도와 지울 수 없는 원본(재검토 5).** 인스턴스 ID의 한도는 상수 하나 `MAX_INSTANCE_ID_LENGTH = 128`(`packages/contracts/src/import-record.ts`)이다: 가져오기 줄의 `connector_instance_id`, 가져오기 API의 `instanceId`(이미 128), 그리고 장부 읽기 쪽 검증이 같은 값을 쓰고, 골든 검사기(`eval/scorer/validate.py`)도 같은 값을 지킨다(`providers/src/import-record.test.ts`가 일치를 본다). 골든·픽스처의 가장 긴 ID는 13자라 지금 받던 것이 거절되지 않는다. 한도를 넘는 줄은 줄마다 `invalid-record`로 거절된다. 등록된 모든 연결 종류가 장부의 종류 규칙을 만족하는지는 시험(`ledger.id-limit.test.ts`: `site-*`, `jsonl-import`, `test-fixtures` 포함)이 본다. **이미 있는 원본**의 ID·종류를 장부가 적지 못하면(출시 전 개발 데이터, 포크의 나쁜 종류) 삭제는 **거부**되고(읽을 수 있는 줄 없는 tombstone 없음, 쓰는 쪽 검사는 그대로) `POST /api/sources/delete`는 409 `ledger-unwritable`, 가져오기의 `delete`·`access-revoked` 줄은 줄별 사유 `ledger-unwritable`로 답한다(화면에 고정 한국어 문장, ID 없음). 한도를 넘는 옛 ID의 원본은 사용자가 유효한 ID로 다시 가져오기 전에는 지울 수 없다(출시 전 한도). 안전한 대안(예: 그 인스턴스 ID를 장부에 줄여 적기)은 후속으로만 적고 만들지 않았다.
 15. **지켜볼 것(재검토 6).** 읽는 쪽의 ID 한도를 256에서 128로 낮췄으므로, 이전에 쓰인 129~256자 ID의 장부 줄은 읽을 수 없는 줄로 센다(출시 전 한계). 화면의 삭제가 `ledger-unwritable`(409)일 때의 `App.tsx` 처리는 UI 시험이 없다(문장 함수와 API 클라이언트의 오류 매핑만 시험한다). `docs/connector-sdk.md`는 ID 한도(128)와 장부 거부(`ledger-unwritable`)를 적고 `backend/src/connector-sdk.docs.test.ts`가 그 값을 고정한다.
 16. **검증하지 않은 것.** 실제 엔진·벡터 구현(제품에 없다), Windows, 제품 설정으로 고른 정책, 실행기가 돌 때까지 삭제가 투영에서 보이는 구간의 사용자 화면(검색은 키워드 색인이 정본이라 같은 트랜잭션에서 지워지고, 엔진 결과는 감싼 엔진이 거른다. 화면 E2E는 T08).
-14. **뒤 작업에 남기는 주의**(독립 검토 W1~W3). ① `permanentlyAbsent`는 `instanceof`(5항)이므로 **실제 어댑터는 `NullKnowledgeEngine`·`EmptyVectorIndex`를 상속하면 안 된다**(상속하면 사이드카가 멈춰도 제거가 건너뜀으로 닫힌다). 실제 엔진·벡터 어댑터가 처음 들어오는 작업(엔진 후보 평가 R07 이후의 어댑터 작업, 벡터는 X01)이 이 규칙을 지키고 T02의 어댑터 검사가 구현이 이 두 클래스의 하위 클래스가 아닌지 확인한다. ② 제거 작업은 통지의 대기열 밖에서 `removeSource`를 부르므로, 통지의 upsert와 겹쳐도 되살아나지 않는 것은 엔진의 계약(덮는 version 이하의 upsert는 `StaleFenceError`)에 기댄다. `engine.contract`의 낡은 fence·제거 뒤 upsert 경우가 이미 이것을 시험하므로(`packages/testkit/src/engine.contract.ts`) 실제 엔진은 그 묶음을 통과해야 한다. 별도 묶음은 더하지 않았다. ③ 이전 version 정리(I04-T12, `old-versions-pruned`)의 엔진·벡터 제거는 T12가 했다(투영 종류가 정리된 version 1..남기는 것-1의 `projection-remove`를 등록한다).
+14. **뒤 작업에 남기는 주의**(독립 검토 W1~W3). ① `permanentlyAbsent`는 `instanceof`(5항)이므로 **실제 어댑터는 `NullKnowledgeEngine`·`EmptyVectorIndex`를 상속하면 안 된다**(상속하면 사이드카가 멈춰도 제거가 건너뜀으로 닫힌다). 실제 엔진·벡터 어댑터가 처음 들어오는 작업(엔진 후보 평가 R07 이후의 어댑터 작업, 벡터는 R07 뒤의 벡터 구현 작업)이 이 규칙을 지키고 T02의 어댑터 검사가 구현이 이 두 클래스의 하위 클래스가 아닌지 확인한다. ② 제거 작업은 통지의 대기열 밖에서 `removeSource`를 부르므로, 통지의 upsert와 겹쳐도 되살아나지 않는 것은 엔진의 계약(덮는 version 이하의 upsert는 `StaleFenceError`)에 기댄다. `engine.contract`의 낡은 fence·제거 뒤 upsert 경우가 이미 이것을 시험하므로(`packages/testkit/src/engine.contract.ts`) 실제 엔진은 그 묶음을 통과해야 한다. 별도 묶음은 더하지 않았다. ③ 이전 version 정리(I04-T12, `old-versions-pruned`)의 엔진·벡터 제거는 T12가 했다(투영 종류가 정리된 version 1..남기는 것-1의 `projection-remove`를 등록한다).
 
 **T08이 넘기는 것 / 잠정 결정**(잠정). T08이 정한 것과 I04-T09, V02의 화면 작업, 뒤의 읽기 경로(P02·X01)가 이어받는 결합 지점이다. 바꿀 때는 이 절과 `backend/src/read-gate.ts`, `read-gate.test.ts`(경우별 시험), `boot.read-gate.test.ts`(구성 지점 연결), `apps/web/e2e/v02-flow.e2e.ts`의 `read-gate.e2e`를 함께 고친다. **스키마는 바꾸지 않았다**(마이그레이션 없음).
 
@@ -893,3 +893,4 @@ flowchart LR
 | 2026-11-23 | 독립 검토 반영: I04-R20 ⑥의 근거를 좁힘(고치기 전 빌드가 건너뛴 줄은 그 뒤 인스턴스가 등록되지 않았을 때만 되찾음), "I04-T14의 결정" 한계 ⑥~⑧(등록된 인스턴스의 옛 줄은 잃음, 던진 시작의 이력 누락, 종류 없는 v1 줄은 등록 뒤 다시 시작해야 적용) 추가, 검토 통과 표시 | I04-R20 ⑥, "I04-T14의 결정" | 이슈 #121 독립 검토 F1~F5. 동작은 바꾸지 않았다 |
 | 2026-11-23 | 그래프 경로·여러 단계 근거 줄을 S02-T09가 정한 답(저장하지 않아 등록할 종류가 없음)으로 정리 | 비목표 줄, 파생물 표의 그래프 경로 줄 | S02-T09(#23) 구현이 후속 표의 "I04 spec" 항목을 닫음 |
 | 2026-11-23 | 등록표의 Wiki 페이지 줄의 실행 위치를 `projection`에서 `canonical`로 고침 | 등록표 | K01(#25) 잠정 결정 K01-D3: 페이지가 정본과 같은 SQLite 파일에 있어 tombstone 트랜잭션 안에서 지우거나 다시 쓸 수 있고, 커밋 뒤 작업으로 두면 지운 내용이 남는 구간이 생긴다. 층은 `projection` 그대로 |
+| 2026-11-23 | 등록표의 "답변 문맥, 인용, 답변 캐시" 줄을 "읽을 때 계산, 저장하지 않음(등록할 행 없음)"으로 채우고, "벡터 투영"의 실제 쓰기 담당을 X01에서 R07 뒤의 벡터 구현 작업으로 옮김(비목표 줄, C1 부분 줄, 잠정 결정 7·14 문구 포함) | 등록표, 비목표 줄, 잠정 결정 | X01(#30) R16·D3·D6: 질문과 답을 저장하지 않으므로 등록할 파생물이 없고, X01은 벡터를 찾는 쪽만 부른다(ADR 0004) |

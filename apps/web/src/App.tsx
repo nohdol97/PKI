@@ -33,6 +33,7 @@ import { nextSyncStops } from "./connector-text.ts";
 import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts";
 import { INSIGHT_INTERPRET_TEXT } from "./evidence-text.ts";
 import { Insights } from "./evidence-view.tsx";
+import { Ask } from "./ask.tsx";
 import { Lint } from "./lint.tsx";
 import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
@@ -54,6 +55,7 @@ const SCREENS = {
   sources: "원본",
   wiki: "위키",
   lint: "점검",
+  ask: "질문",
   activity: "활동",
   settings: "설정",
 } as const;
@@ -66,6 +68,7 @@ export function App({ api }: { api: ApiClient }) {
     sources: Sources,
     wiki: Wiki,
     lint: Lint,
+    ask: Ask,
     activity: Activity,
     settings: Settings,
   }[screen];
