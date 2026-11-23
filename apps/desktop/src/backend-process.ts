@@ -11,12 +11,14 @@ import {
 } from "@pki/contracts";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import type { NormalizerHostBroker } from "./normalizer-host.ts";
 import type { SecretStore } from "./secret-store.ts";
 
 /** The surface shared by Electron's utilityProcess.fork and Node's fork (tests). */
 export interface BackendChild {
   readonly pid: number | undefined;
-  postMessage(message: unknown): void;
+  /** `transfer`: message ports that go with the message (the normalizer host's, I02B-R22). */
+  postMessage(message: unknown, transfer?: readonly unknown[]): void;
   on(event: "message", listener: (message: unknown) => void): void;
   once(event: "exit", listener: (code: number) => void): void;
   kill(): boolean;
@@ -92,6 +94,9 @@ const FromBackend = z.discriminatedUnion("type", [
       .optional(),
     line: z.int().positive().optional(),
   }),
+  // the backend's requests for its normalizer host (I02B-R22): a number each, nothing else
+  z.strictObject({ type: z.literal("normalizer-host-start"), id: z.int().positive() }),
+  z.strictObject({ type: z.literal("normalizer-host-end"), id: z.int().positive() }),
   z.strictObject({
     type: z.literal("secret-request"),
     id: z.int().positive(),
@@ -156,6 +161,12 @@ export interface BackendOptions {
    * request gets the state alone, never the value.
    */
   secrets?: Pick<SecretStore, "read" | "has" | "deleteOthers" | "available"> | undefined;
+  /**
+   * Answers the backend's requests to start and end its normalizer host (I02B-R22, adapter ⓑ). Given
+   * the backend's channel when it is forked; stopped when the backend exits. Without it the requests
+   * are ignored.
+   */
+  normalizerHost?: ((backend: BackendChild) => NormalizerHostBroker) | undefined;
 }
 
 export interface Backend {
@@ -182,10 +193,13 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
     ...(options.scopePolicy !== undefined ? ["--scope-policy", options.scopePolicy] : []),
   ];
   const child = options.fork(options.entry, args, backendEnv(options.env ?? process.env));
+  const normalizerHost = options.normalizerHost?.(child);
   let ended = false;
   const exited = new Promise<number>((resolve) =>
     child.once("exit", (code) => {
       ended = true;
+      // the backend's host does not outlive it
+      normalizerHost?.stop();
       resolve(code);
     }),
   );
@@ -213,6 +227,12 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
           if (!ended) child.postMessage({ type: "secret", id, ...answer });
         });
         return;
+      }
+      if (message.data.type === "normalizer-host-start") {
+        return normalizerHost?.start(message.data.id);
+      }
+      if (message.data.type === "normalizer-host-end") {
+        return normalizerHost?.end(message.data.id);
       }
       if (message.data.type === "failed")
         return fail(new BackendStartError(message.data.reason, message.data.line));

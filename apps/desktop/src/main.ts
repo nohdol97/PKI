@@ -14,6 +14,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  MessageChannelMain,
   protocol,
   safeStorage,
   session,
@@ -31,7 +32,15 @@ import { superviseBackend, type Supervisor } from "./backend-supervisor.ts";
 import { BRIDGE, createBridgeHandlers, type BridgeFunction } from "./bridge.ts";
 import { createSecretStore, electronCipher } from "./secret-store.ts";
 import { debuggingRequested } from "./debugging.ts";
-import { BACKEND_ENTRY, REFUSE_DEBUGGING, scopePolicyName, switches, WEB_ROOT } from "./layout.ts";
+import {
+  BACKEND_ENTRY,
+  NORMALIZER_HOST_ENTRY,
+  REFUSE_DEBUGGING,
+  scopePolicyName,
+  switches,
+  WEB_ROOT,
+} from "./layout.ts";
+import { createProductNormalizerHostBroker } from "./normalizer-host.ts";
 import { loadScreens, lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
@@ -48,7 +57,8 @@ const forkUtility: ForkBackend = (entry, args, env) => {
     get pid() {
       return child.pid;
     },
-    postMessage: (message) => child.postMessage(message),
+    postMessage: (message, transfer) =>
+      child.postMessage(message, transfer as Electron.MessagePortMain[] | undefined),
     on: (_event, listener) => void child.on("message", listener),
     once: (_event, listener) => void child.once("exit", listener),
     kill: () => child.kill(),
@@ -93,6 +103,14 @@ async function run() {
         scopePolicy: scopePolicyName(process.env),
         secrets,
         token,
+        normalizerHost: (backendChild) =>
+          // the bundled host entry, no arguments, no environment (I02B-R22, I02B-C50)
+          createProductNormalizerHostBroker({
+            fork: (entry, args, options) => utilityProcess.fork(entry, args, options),
+            entry: NORMALIZER_HOST_ENTRY,
+            newChannel: () => new MessageChannelMain(),
+            backend: backendChild,
+          }),
       }),
     maxRestarts: MAX_RESTARTS,
     // after the last restart /api/ answers 502 until the app is started again

@@ -106,6 +106,9 @@ importers:
       '@pki/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
+      '@pki/document-normalize':
+        specifier: workspace:*
+        version: link:../packages/document-normalize
       '@pki/knowledge-engine':
         specifier: workspace:*
         version: link:../knowledge-engine

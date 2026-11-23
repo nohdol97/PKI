@@ -9,6 +9,7 @@
   "dependencies": {
     "@pki/connector-sdk": "workspace:*",
     "@pki/contracts": "workspace:*",
+    "@pki/document-normalize": "workspace:*",
     "@pki/knowledge-engine": "workspace:*",
     "@pki/providers": "workspace:*",
     "@pki/storage": "workspace:*"

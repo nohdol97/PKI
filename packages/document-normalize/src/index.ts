@@ -24,3 +24,15 @@ export type {
   ParsedDocument,
   TextFormatModule,
 } from "./types.ts";
+export { NORMALIZER_VERSION } from "./version.ts";
+export { createIsolatedNormalizer } from "./isolated.ts";
+export type {
+  HostHandle,
+  HostSpawner,
+  IsolatedError,
+  IsolatedErrorCode,
+  IsolatedNormalizer,
+  IsolatedNormalizerOptions,
+  IsolatedResult,
+} from "./isolated.ts";
+export { createForkSpawner } from "./spawn-node.ts";

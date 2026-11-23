@@ -27,7 +27,13 @@ export const REPLACEMENTS: Readonly<Record<string, string>> = {
 };
 
 /** Test-only or development-only code, refused by path (V02 spec "T10이 넘기는 것" 5). */
-const FORBIDDEN_PREFIXES = ["packages/testkit/", "apps/desktop/e2e/", "apps/desktop/artifact/"];
+const FORBIDDEN_PREFIXES = [
+  "packages/testkit/",
+  "apps/desktop/e2e/",
+  "apps/desktop/artifact/",
+  // the normalizer's test workers, test host and time-bomb inputs (I02B-R25)
+  "packages/document-normalize/src/testing/",
+];
 // named as well as caught by the patterns below (V02 spec "T10이 넘기는 것" 5, T11 7):
 // the seed and the test-build doubles and shell entry, the swapped configuration's
 // doubles and preload (V01 spec "T17이 넘기는 것" 3), and the development entry
@@ -46,7 +52,7 @@ const FORBIDDEN_FILES = [
   // the ledger crash test's child, killed after it wrote a ledger line and before COMMIT (I04-R17)
   "backend/src/ledger-kill.child.ts",
 ];
-const TEST_FILE = /\.(test|e2e|setup|test-support)\.[cm]?[jt]sx?$/;
+const TEST_FILE = /\.(test|e2e|setup|test-support|slow)\.[cm]?[jt]sx?$/;
 /** Any `e2e/` folder: E2E code and its helpers, whatever their file names. */
 const E2E_FOLDER = /(^|\/)e2e\//;
 /** Reached through the composition root's static import; must not survive tree-shaking. */
@@ -118,7 +124,7 @@ export function nativeReason(id: string): string | undefined {
     : undefined;
 }
 
-function productionModules(): Plugin {
+function productionModules(allowTestOnly: readonly string[]): Plugin {
   return {
     name: "pki-production-modules",
     async resolveId(source, importer, options) {
@@ -126,7 +132,10 @@ function productionModules(): Plugin {
       if (!resolved || resolved.external) return resolved;
       const pair = REPLACEMENTS[repoPath(resolved.id)];
       if (pair !== undefined) return resolve(REPO_ROOT, pair);
-      const why = forbiddenReason(resolved.id) ?? nativeReason(resolved.id);
+      const why =
+        (allowTestOnly.includes(repoPath(resolved.id))
+          ? undefined
+          : forbiddenReason(resolved.id)) ?? nativeReason(resolved.id);
       if (why !== undefined) this.error(why);
       return resolved;
     },
@@ -139,6 +148,12 @@ export interface BundleOptions {
   outFile: string;
   /** Written as `import.meta.PKI_BUILD_KIND`; undefined writes nothing (as without a bundler). */
   buildKind: string | undefined;
+  /**
+   * Repository paths of test-only modules this one bundle may reach (the test app of an artifact test,
+   * e.g. a stand-in backend entry); the production build passes none. Only these exact paths are
+   * exempt: the rest of the refusals stand.
+   */
+  allowTestOnly?: readonly string[];
 }
 
 /** Bundles `input` into `outFile`; returns the repository modules the bundle kept. */
@@ -159,7 +174,7 @@ export async function bundle(options: BundleOptions): Promise<{ modules: string[
       options.buildKind === undefined
         ? {}
         : { define: { "import.meta.PKI_BUILD_KIND": JSON.stringify(options.buildKind) } },
-    plugins: [productionModules()],
+    plugins: [productionModules(options.allowTestOnly ?? [])],
     onLog(level, log, handler) {
       // a warning is a build failure: an unresolved import or an eval must not ship quietly
       if (level === "warn") throw new Error(`bundle ${options.input}: ${log.message}`);

@@ -5,8 +5,9 @@
 // 1. the synthetic manifest must equal a fresh build from the repository (it is
 //    checked, never rewritten: "T04가 넘기는 것" 1)
 // 2. the screens (Vite) into app/web
-// 3. the shell's main and the backend's shell entry, bundled (bundle.ts); the entry is the public
-//    backend/src/shell.ts, or the fork's own when site/composition exists (backend-entry.ts, I05-R2)
+// 3. the shell's main, the backend's shell entry and the normalizer host with its worker, bundled
+//    (bundle.ts); the entry is the public backend/src/shell.ts, or the fork's own when
+//    site/composition exists (backend-entry.ts, I05-R2)
 // 4. the judgment of the instance scopes file against the backend bundle's modules (scopes-check.ts, I07-R7)
 // 5. the runtime packages the bundles leave external (runtime-packages.ts)
 // 6. the report: the modules each bundle kept, the scopes file's state and the packages copied
@@ -51,6 +52,9 @@ const BACKEND_ENTRY = backendEntry(REPO_ROOT);
 for (const [input, output] of [
   ["apps/desktop/src/main.ts", "main.js"],
   [BACKEND_ENTRY, "backend/shell.js"],
+  // the normalizer host the shell starts for the backend, and its worker (I02B-R22)
+  ["packages/document-normalize/src/host.ts", "backend/host.js"],
+  ["packages/document-normalize/src/isolated-worker.ts", "backend/isolated-worker.js"],
 ] as const) {
   bundles[output] = (
     await bundle({ input, outFile: join(APP_DIR, output), buildKind: "production" })

@@ -172,6 +172,31 @@ describe("build check", () => {
     );
   });
 
+  it("refuses the normalizer's testing folder by path and its `.slow.ts` files by name (I02B-R25)", () => {
+    for (const path of [
+      "packages/document-normalize/src/testing/bomb-worker.ts",
+      "packages/document-normalize/src/testing/test-host.ts",
+      "packages/document-normalize/src/testing/time-bombs.ts",
+      "packages/document-normalize/src/trigger-repeat.slow.ts",
+    ]) {
+      expect(forbiddenReason(join(REPO_ROOT, path)), path).toMatch(/is a test-only module/);
+    }
+    // the product's own files are not
+    expect(
+      forbiddenReason(join(REPO_ROOT, "packages/document-normalize/src/host.ts")),
+    ).toBeUndefined();
+  });
+
+  it("fails a bundle that reaches the normalizer's time-bomb inputs", async () => {
+    await expect(
+      bundle({
+        input: "packages/document-normalize/src/testing/time-bombs.ts",
+        outFile: join(out, "bombs.mjs"),
+        buildKind: "production",
+      }),
+    ).rejects.toThrow(/test-only module/);
+  });
+
   it("fails a bundle that reaches a test-only module, by path rather than by name", async () => {
     const dir = join(REPO_ROOT, "apps/desktop/build/.bundle-test-input");
     mkdirSync(dir, { recursive: true });
@@ -184,6 +209,34 @@ describe("build check", () => {
       await expect(
         bundle({ input: entry, outFile: join(out, "refused.mjs"), buildKind: "production" }),
       ).rejects.toThrow(/test-only module/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("lets one bundle reach the test-only modules it names by path, and no others (the test app of an artifact test)", async () => {
+    const dir = join(REPO_ROOT, "apps/desktop/build/.bundle-test-input");
+    mkdirSync(dir, { recursive: true });
+    try {
+      const helper = "apps/desktop/build/.bundle-test-input/helper.test-support.ts";
+      writeFileSync(join(dir, "helper.test-support.ts"), "export const helper = 1;\n");
+      const entry = join(dir, "entry.ts");
+      writeFileSync(
+        entry,
+        'import { helper } from "./helper.test-support.ts";\nconsole.log(helper);\n',
+      );
+      const build = (allowTestOnly?: string[]) =>
+        bundle({
+          input: entry,
+          outFile: join(out, "allow.mjs"),
+          buildKind: "test",
+          ...(allowTestOnly === undefined ? {} : { allowTestOnly }),
+        });
+      await expect(build()).rejects.toThrow(/test-only module/);
+      await expect(
+        build(["apps/desktop/build/.bundle-test-input/other.test-support.ts"]),
+      ).rejects.toThrow(/test-only module/);
+      await expect(build([helper])).resolves.toMatchObject({ modules: expect.any(Array) });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

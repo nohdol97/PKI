@@ -11,6 +11,7 @@ import { startFailureLine, startFailureReport } from "./start-failure.ts";
 import { dataDirectory } from "@pki/storage";
 import type { LLMProvider } from "@pki/contracts";
 import { bootBackend, closeProviders } from "./boot.ts";
+import { electronHostChannel } from "./normalizer-host-electron.ts";
 import { channelSecrets } from "./secret-sources.ts";
 import { shellOptions } from "./shell-options.ts";
 import type { RunningServer } from "./server.ts";
@@ -30,12 +31,13 @@ function parse(data: unknown): ToBackend | undefined {
 }
 
 interface Channel {
-  onMessage(listener: (data: unknown) => void): void;
+  /** `ports`: message ports that came with the message (the shell hands the normalizer host's over). */
+  onMessage(listener: (data: unknown, ports: readonly unknown[]) => void): void;
   post(message: unknown): void;
 }
 
 interface ParentPort {
-  on(event: "message", listener: (event: { data: unknown }) => void): void;
+  on(event: "message", listener: (event: { data: unknown; ports?: unknown[] }) => void): void;
   postMessage(message: unknown): void;
 }
 
@@ -43,14 +45,17 @@ function parentChannel(onDisconnect: () => void): Channel {
   const port = (process as { parentPort?: ParentPort }).parentPort;
   if (port) {
     return {
-      onMessage: (l) => port.on("message", (e) => l(e.data)),
+      onMessage: (l) => port.on("message", (e) => l(e.data, e.ports ?? [])),
       post: (m) => port.postMessage(m),
     };
   }
   if (process.send) {
     // Node fork: end with the parent, ending running CLI trees first (stop, V01-T10).
     process.once("disconnect", onDisconnect);
-    return { onMessage: (l) => process.on("message", l), post: (m) => process.send?.(m) };
+    return {
+      onMessage: (l) => process.on("message", (m) => l(m, [])),
+      post: (m) => process.send?.(m),
+    };
   }
   throw new Error("the shell entry needs a parent channel");
 }
@@ -61,6 +66,8 @@ export async function runShell(site: SiteRegistration): Promise<void> {
 
   const channel = parentChannel(() => void stop());
   const secrets = channelSecrets((message) => channel.post(message));
+  // the shell starts the normalizer host for this backend when asked (I02B-R22, adapter ⓑ)
+  const normalizerHosts = electronHostChannel((message) => channel.post(message));
   let running:
     { server: RunningServer; providers: readonly LLMProvider[]; close(): void } | undefined;
 
@@ -97,6 +104,7 @@ export async function runShell(site: SiteRegistration): Promise<void> {
       closeProviders(running?.providers ?? [], 3_000),
       Promise.race([closed, new Promise((r) => setTimeout(r, 2_000))]),
     ]);
+    normalizerHosts.close();
     running?.close();
     process.exit(0);
   }
@@ -110,8 +118,9 @@ export async function runShell(site: SiteRegistration): Promise<void> {
     process.exit(1);
   };
 
-  channel.onMessage((data) => {
+  channel.onMessage((data, ports) => {
     if (secrets.deliver(data)) return;
+    if (normalizerHosts.deliver(data, ports)) return;
     const message = parse(data);
     if (message?.type === "stop") return void stop();
     if (starting) return; // one start per process; later messages are ignored
