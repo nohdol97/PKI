@@ -396,7 +396,29 @@
   gap: var(--sp-1) var(--sp-3);
 }
 .line-list.spread > li > span:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  max-width: 60%;
   margin-left: auto;
+}
+.line-list.spread > li > span:last-child button + button {
+  margin-left: 0;
+}
+.line-list.spread form {
+  flex-basis: 100%;
+  justify-content: flex-end;
+  align-items: flex-end;
+  margin: 0;
+}
+.line-list.spread label {
+  margin: 0;
+}
+.line-list button,
+.knowledge-list button {
+  min-height: calc(var(--control-h) - var(--sp-2));
+  font-size: var(--fs-meta);
 }
 
 /* a medium window (the shell's 1100px default): tighter bar so the main actions of a detail stay on one row */

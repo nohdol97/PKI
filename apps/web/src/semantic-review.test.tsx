@@ -336,6 +336,13 @@ describe("지식 검토 화면 구성 (UI01)", () => {
     expect(out.match(/<select/g)).toHaveLength(1);
   });
 
+  it("sets each line's words apart from its action buttons, which come after them", () => {
+    const line = /<li><span class="line-text">([\s\S]*?)<\/span><span>/.exec(out)?.[1] ?? "";
+    expect(line).toContain("항목");
+    expect(line).not.toContain("<button");
+    expect(out).toMatch(/<\/span><span><button[^>]*aria-label="승인: /);
+  });
+
   it("puts the lists in three group boxes and shows a row's status as a dot with its word", () => {
     expect(out.match(/class="group"/g)).toHaveLength(3);
     expect(out).toContain('aria-label="지식 목록"');

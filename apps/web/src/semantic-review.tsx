@@ -332,7 +332,9 @@ export function ReviewView({
                 <ul className="line-list spread">
                   {entries.item && (
                     <li>
-                      항목 · {state(item.status)} · {EPISTEMIC_TEXT[item.epistemic]}{" "}
+                      <span className="line-text">
+                        항목 · {state(item.status)} · {EPISTEMIC_TEXT[item.epistemic]}{" "}
+                      </span>
                       <SemanticRowActions
                         kind="item"
                         id={item.id}
@@ -343,8 +345,10 @@ export function ReviewView({
                   )}
                   {entries.facts.map((f) => (
                     <li key={`f${f.id}`}>
-                      사실 · {f.kind}: <bdi>{f.value}</bdi> · {state(f.status)} ·{" "}
-                      {EPISTEMIC_TEXT[f.epistemic]} · 근거 {f.evidenceCount}{" "}
+                      <span className="line-text">
+                        사실 · {f.kind}: <bdi>{f.value}</bdi> · {state(f.status)} ·{" "}
+                        {EPISTEMIC_TEXT[f.epistemic]} · 근거 {f.evidenceCount}{" "}
+                      </span>
                       <SemanticRowActions
                         kind="fact"
                         id={f.id}
@@ -355,8 +359,11 @@ export function ReviewView({
                   ))}
                   {entries.relations.map((r) => (
                     <li key={`r${r.id}`}>
-                      관계 · {r.type} → <bdi>{nameOf(r.objectId) ?? `항목 ${r.objectId}`}</bdi> ·{" "}
-                      {state(r.status)} · {EPISTEMIC_TEXT[r.epistemic]} · 근거 {r.evidenceCount}{" "}
+                      <span className="line-text">
+                        관계 · {r.type} → <bdi>{nameOf(r.objectId) ?? `항목 ${r.objectId}`}</bdi> ·{" "}
+                        {state(r.status)} · {EPISTEMIC_TEXT[r.epistemic]} · 근거{" "}
+                        {r.evidenceCount}{" "}
+                      </span>
                       <SemanticRowActions
                         kind="relation"
                         id={r.id}

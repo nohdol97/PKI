@@ -13,7 +13,11 @@
   margin-right: auto;
   margin-left: auto;
 }
+.pane-read .pane-head {
+  background: var(--surface);
+}
 .pane-read .pane-body > .detail-title {
+  margin-top: 0;
   margin-bottom: var(--sp-3);
   font-size: var(--fs-h1);
 }
