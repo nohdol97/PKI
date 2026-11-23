@@ -21,6 +21,7 @@ site = _paths.load_kit_module(KIT, "run.py", "s03_site_run")
 az = site.analytical_scenario  # the module run.py imported: one set of exception classes
 
 NOTICE = "배포처 후속"
+SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "s03_runner_schema.sql")
 
 
 def run_cli(*args):
@@ -46,20 +47,22 @@ class AnalyticalScenarioRefuse(unittest.TestCase):
             self.assertEqual(os.listdir(out), [])
 
 
+class AnalyticalGateDouble(unittest.TestCase):
+    def test_on_windows_a_test_double_provider_is_refused_with_the_s34_notice_and_reason_test_double(self):
+        cfg = {"productName": "PKI", "installedExe": "C:\\Users\\u\\AppData\\Local\\Programs\\PKI\\PKI.exe",
+               "provider": {"kind": "test-double", "id": "openai-compatible", "name": "openai-compatible", "version": "x"}}
+        with self.assertRaises(site.Refusal) as ctx:
+            site.analytical_gate(cfg, platform="win32", read_uninstall=lambda: [], is_file=lambda _p: True, in_git_tree=lambda _p: False)
+        self.assertEqual(ctx.exception.notice, site.NOTICE_ANALYTICAL_DOUBLE)
+        self.assertIn("S34", ctx.exception.notice)
+        self.assertEqual(ctx.exception.code, "test-double")
+
+
 def make_db(path):
-    """The columns read_counts reads (storage/src/migrations.ts): sources, versions, tombstones, tables, items, facts, checks, jobs."""
+    """The columns read_counts reads: s03_runner_schema.sql, which storage/src/analytical-runner-schema.test.ts ties to the real migration."""
     db = sqlite3.connect(path)
-    db.executescript("""
-        CREATE TABLE source_versions (id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL, version INTEGER NOT NULL, blocks TEXT);
-        CREATE TABLE tombstones (source_id INTEGER PRIMARY KEY, covers_version INTEGER NOT NULL);
-        CREATE TABLE dataset_tables (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, source_id INTEGER NOT NULL, row_count INTEGER NOT NULL);
-        CREATE TABLE items (id INTEGER PRIMARY KEY, type TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL);
-        CREATE TABLE facts (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL, status TEXT NOT NULL);
-        CREATE TABLE analytical_checks (id INTEGER PRIMARY KEY, fact_id INTEGER NOT NULL, check_name TEXT NOT NULL, passed INTEGER NOT NULL);
-        CREATE TABLE jobs (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, source_id INTEGER, status TEXT NOT NULL,
-                           created_at INTEGER NOT NULL, finished_at INTEGER);
-        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-    """)
+    with open(SCHEMA, encoding="utf-8") as fh:
+        db.executescript(fh.read())
     db.commit()
     db.close()
 
@@ -95,6 +98,8 @@ class AnalyticalCounts(unittest.TestCase):
         self.sql("INSERT INTO facts VALUES (1, 1, 'dataset.grain', 'secret grain', 'candidate')")
         self.sql("INSERT INTO facts VALUES (2, 3, 'metric.calculation', 'secret calc', 'verified')")
         self.sql("INSERT INTO facts VALUES (3, 3, 'user.made.kind', 'x', 'candidate')")
+        self.sql("INSERT INTO items VALUES (4, 'Person', 'Orlund', 'candidate')")  # an item of another type: its facts are not analytical
+        self.sql("INSERT INTO facts VALUES (4, 4, 'definition', 'y', 'candidate')")
         self.sql("INSERT INTO analytical_checks (fact_id, check_name, passed) VALUES (1, 'grain', 1)")
         self.sql("INSERT INTO analytical_checks (fact_id, check_name, passed) VALUES (2, 'aggregation', 0)")
         self.sql("INSERT INTO jobs (kind, source_id, status, created_at, finished_at) VALUES ('dataset-profile', 1, 'succeeded', 1000, 1900)")
