@@ -8,8 +8,10 @@
 // over) and the versions it replaced are removed from both. A deletion is no
 // notice: the tombstone's transaction registers a `projection-remove` job per
 // projection (projection-kinds.ts, I04-R12), which the job runner executes.
-// The vector index holds no vectors in Phase 1 (nothing upserts), so its
-// removals keep its applied change sequence in step with the store.
+// With the vector write path bound (`vectors`, vector-build.ts) a new version is
+// embedded into the active generation and a rebuild fills a generation beside it;
+// without it the index holds no vectors and its removals keep its applied change
+// sequence in step with the store.
 // Missed notices are found at start (reconcile): a projection whose applied
 // sequence differs from the store's, null included, is rebuilt, whatever its
 // kind; an equal one is left alone. A delivery that fails marks the projection
@@ -22,7 +24,6 @@ import {
   AdapterUnavailableError,
   type EmbeddingSpace,
   type EngineSourceInput,
-  type IndexedRef,
   type KnowledgeEngine,
   type VectorIndex,
 } from "@pki/contracts";
@@ -37,6 +38,17 @@ import {
 } from "@pki/storage";
 import { derivativeRegistry } from "./canonical-kinds.ts";
 import { tombstoneEntries } from "./tombstone-entry.ts";
+import {
+  embedVersion,
+  latestVersionRows,
+  rebuildVectors,
+  sameSpace,
+  vectorRefOf,
+  vectorTextOf,
+  type VectorWrites,
+} from "./vector-build.ts";
+
+export { vectorRefOf };
 
 /** What one committed version tells the projections. */
 export interface ProjectionNotice {
@@ -58,15 +70,6 @@ export const PROJECTION_STALE_SETTINGS: Readonly<Record<ProjectionName, string>>
   engine: "projections.engine-stale",
   vectorIndex: "projections.vector-index-stale",
 });
-
-/**
- * Provisional (X01 decides when vectors are written): a vector's canonical ID names its source version,
- * `source-version:<sourceId>:<version>`. Neither number is ever reused (versions only count up, past a
- * tombstone's cover), and a removal after a deletion can name the versions up to the cover without the
- * version rows, which the purge took.
- */
-export const vectorRefOf = (sourceId: number, version: number): IndexedRef =>
-  `source-version:${sourceId}:${version}`;
 
 /** Call inside the transaction that stored `version` of the source, right after storing it. */
 export function versionNotice(db: SqlDriver, sourceId: number, version: number): ProjectionNotice {
@@ -122,14 +125,17 @@ export function createUserDelete(registry: DerivativeRegistry): UserDelete {
 
 export const userDelete: UserDelete = createUserDelete(derivativeRegistry);
 
-export type ReconcileOutcome = "current" | "rebuilt" | "skipped" | "failed";
+/** `requested`: behind, and a rebuild job was asked for instead of rebuilding in place (H01C3-R10). */
+export type ReconcileOutcome = "current" | "rebuilt" | "requested" | "skipped" | "failed";
 
 export interface ProjectionsOptions {
   db: SqlDriver;
   engine: KnowledgeEngine;
   vectorIndex: VectorIndex;
-  /** The space a vector index rebuild resets to (the embedder's model); null skips it. */
+  /** The space a vector index rebuild builds in (the embedder's model); null skips it. */
   embeddingSpace: () => EmbeddingSpace | null;
+  /** The vector write path (H01C3): embedding, and the rebuild job the start asks for. Absent: no vectors are written. */
+  vectors?: VectorWrites;
   /** A failed delivery or rebuild; the error may carry engine text, so log its class only. */
   onError?: (projection: ProjectionName, error: unknown) => void;
 }
@@ -144,7 +150,7 @@ export interface Projections {
    * job: the sequence it read before reading the store). Queued like a notice, so it never overlaps a
    * delivery; clears the projection's stale mark. A failure is thrown for the job to classify, never marked.
    */
-  rebuild(name: ProjectionName, seq: number): Promise<void>;
+  rebuild(name: ProjectionName, seq: number, signal?: AbortSignal): Promise<void>;
   /** Resolves once everything queued so far is delivered. */
   drain(): Promise<void>;
   /** True from a missed notice (failed or unavailable) until a rebuild: it may hold purged content. */
@@ -153,16 +159,11 @@ export interface Projections {
 
 /** The latest version of every source with one (a purged source has none). */
 async function* latestSources(db: SqlDriver): AsyncGenerator<EngineSourceInput> {
-  const rows = db.all(
-    `SELECT v.id, v.source_id, v.version FROM source_versions v
-      WHERE v.version = (SELECT max(version) FROM source_versions WHERE source_id = v.source_id)
-      ORDER BY v.source_id`,
-  );
-  for (const row of rows) {
-    const stored = readSourceVersion(db, row.id as number);
+  for (const row of latestVersionRows(db)) {
+    const stored = readSourceVersion(db, row.id);
     if (!stored) continue; // purged since the list was read
     yield {
-      ref: { sourceId: String(row.source_id), version: row.version as number },
+      ref: { sourceId: String(row.sourceId), version: row.version },
       title: stored.title,
       body: stored.body,
     };
@@ -219,35 +220,64 @@ export function createProjections(options: ProjectionsOptions): Projections {
         await engine.removeSource({ sourceId, version: notice.version - 1 }, fence, seq);
       }
     });
-    await deliver("vectorIndex", () =>
-      vectorIndex.remove(
+    await deliver("vectorIndex", async () => {
+      if (options.vectors) {
+        const space = options.embeddingSpace();
+        if (!space) throw new AdapterUnavailableError("no embedding space bound");
+        const stored = readSourceVersion(db, notice.versionId);
+        // purged after the commit: its removal job follows, nothing to embed
+        if (stored) {
+          const ref = vectorRefOf(notice.sourceId, notice.version);
+          await embedVersion(
+            { vectorIndex, writes: options.vectors, space },
+            { ref, text: vectorTextOf(stored) },
+            seq,
+          );
+        }
+      }
+      await vectorIndex.remove(
         notice.replacedVersions.map((version) => vectorRefOf(notice.sourceId, version)),
         seq,
-      ),
-    );
+      );
+    });
   }
 
-  const rebuilders: Record<ProjectionName, (seq: number) => Promise<void>> = {
+  const rebuilders: Record<ProjectionName, (seq: number, signal?: AbortSignal) => Promise<void>> = {
     engine: (seq) => engine.rebuild(latestSources(db), seq),
-    vectorIndex: async (seq) => {
+    vectorIndex: async (seq, signal) => {
       const space = options.embeddingSpace();
       if (!space) throw new AdapterUnavailableError("no embedding space bound");
-      // Phase 1 writes no vectors (X01), so the rebuilt index is empty; an
-      // empty removal records the sequence it was rebuilt at.
-      await vectorIndex.reset(space);
-      await vectorIndex.remove([], seq);
+      if (options.vectors) {
+        return rebuildVectors({ db, vectorIndex, space, writes: options.vectors }, seq, signal);
+      }
+      // no write path bound: the rebuilt index is an empty generation at the sequence it was rebuilt at
+      await (await vectorIndex.beginRebuild(space)).activate([], seq);
     },
   };
 
+  /** H01C3-R10 ②–④ besides the sequence: another embedding space than the bound embedder's. */
+  async function vectorSpaceDiffers() {
+    const space = options.embeddingSpace();
+    const active = await vectorIndex.embeddingSpace();
+    return options.vectors !== undefined && space !== null && !(active && sameSpace(active, space));
+  }
+
   async function reconcileOne(
     name: ProjectionName,
-    applied: () => Promise<number | null>,
+    behind: (seq: number) => Promise<boolean>,
     rebuild: (seq: number) => Promise<void>,
   ): Promise<ReconcileOutcome> {
     try {
       const seq = readChangeSeq(db);
       const marked = stale[name] || readSetting(db, PROJECTION_STALE_SETTINGS[name]) === "1";
-      if (!marked && (await applied()) === seq) return "current";
+      if (!marked && !(await behind(seq))) return "current";
+      if (name === "vectorIndex" && options.vectors) {
+        // embedding a corpus is a job's work, not the start's: mark it behind and ask for the job
+        stale[name] = true;
+        writeSetting(db, PROJECTION_STALE_SETTINGS[name], "1");
+        options.vectors.requestRebuild(name);
+        return "requested";
+      }
       await rebuild(seq);
       stale[name] = false;
       if (marked) writeSetting(db, PROJECTION_STALE_SETTINGS[name], "0");
@@ -265,16 +295,21 @@ export function createProjections(options: ProjectionsOptions): Projections {
       }),
     reconcile: () =>
       enqueue(async () => ({
-        engine: await reconcileOne("engine", () => engine.appliedChangeSeq(), rebuilders.engine),
+        engine: await reconcileOne(
+          "engine",
+          async (seq) => (await engine.appliedChangeSeq()) !== seq,
+          rebuilders.engine,
+        ),
         vectorIndex: await reconcileOne(
           "vectorIndex",
-          () => vectorIndex.appliedChangeSeq(),
+          async (seq) =>
+            (await vectorIndex.appliedChangeSeq()) !== seq || (await vectorSpaceDiffers()),
           rebuilders.vectorIndex,
         ),
       })),
-    rebuild: (name, seq) =>
+    rebuild: (name, seq, signal) =>
       enqueue(async () => {
-        await rebuilders[name](seq);
+        await rebuilders[name](seq, signal);
         stale[name] = false;
         if (readSetting(db, PROJECTION_STALE_SETTINGS[name]) === "1") {
           writeSetting(db, PROJECTION_STALE_SETTINGS[name], "0");

@@ -44,13 +44,18 @@ const coversVersion = (change: SourceChange): number | undefined =>
       ? change.coversVersion
       : undefined;
 
-function projectionKind(kind: string, absent: boolean, at: () => string): DerivativeKind {
+function projectionKind(
+  kind: string,
+  absent: boolean,
+  at: () => string,
+  dataPaths: readonly string[],
+): DerivativeKind {
   return {
     kind,
     layer: "projection",
     references: [],
     storage: "projection",
-    dataPaths: [],
+    dataPaths,
     ...(absent ? { permanentlyAbsent: true as const } : {}),
     // every stored version of the source the change takes, before it: what the projection may still hold
     affected: (tx: SqlDriver, change): Affected =>
@@ -95,9 +100,16 @@ function projectionKind(kind: string, absent: boolean, at: () => string): Deriva
 export function projectionKinds(options: {
   at: () => string;
   permanentlyAbsent?: PermanentlyAbsent;
+  /** The data directory entries a projection's implementation writes (the real vector index: `vectors`). */
+  dataPaths?: Partial<Record<typeof ENGINE_KIND | typeof VECTOR_KIND, readonly string[]>>;
 }): readonly DerivativeKind[] {
   const absent = options.permanentlyAbsent ?? {};
   return [ENGINE_KIND, VECTOR_KIND].map((kind) =>
-    projectionKind(kind, absent[kind as keyof PermanentlyAbsent] === true, options.at),
+    projectionKind(
+      kind,
+      absent[kind as keyof PermanentlyAbsent] === true,
+      options.at,
+      options.dataPaths?.[kind as keyof PermanentlyAbsent] ?? [],
+    ),
   );
 }

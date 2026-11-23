@@ -14,7 +14,7 @@ export class EmptyVectorIndex implements VectorIndex {
   }
   embeddingSpace = unavailable;
   appliedChangeSeq = unavailable;
-  reset = unavailable;
+  beginRebuild = unavailable;
   upsert = unavailable;
   remove = unavailable;
   search = unavailable;

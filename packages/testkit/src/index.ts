@@ -10,7 +10,7 @@ export { sqlDriverContract, type ContractSqlDriver } from "./sql-driver.contract
 export { knowledgeEngineContract } from "./engine.contract.ts";
 export { MemoryKnowledgeEngine } from "./memory-knowledge-engine.ts";
 export { ProposingKnowledgeEngine, type Proposer } from "./proposing-knowledge-engine.ts";
-export { MemoryVectorIndex } from "./memory-vector-index.ts";
+export { activateEmpty, MemoryVectorIndex } from "./memory-vector-index.ts";
 export { vectorIndexContract } from "./vector-index.contract.ts";
 export {
   CONNECTOR_VIOLATION_CODES,

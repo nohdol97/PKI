@@ -21,6 +21,7 @@ import {
   FakeProvider,
   fixtureExtraction,
   MemoryKnowledgeEngine,
+  activateEmpty,
   MemoryVectorIndex,
   ProposingKnowledgeEngine,
   send,
@@ -102,6 +103,7 @@ async function pipeline(engine: KnowledgeEngine, vectorIndex = new MemoryVectorI
   writeDefaultProvider(db, provider.id); // the user's default (V01-T10)
   const { broker } = productCalls(db, egress, { providers: [provider] });
   consent(egress);
+  await activateEmpty(vectorIndex, { modelId: "m", revision: "r", dimension: 3 });
   const adapters = { ...productAdapters(dir), vectorIndex };
   const projections = productProjections(db, { engine, ...adapters });
   // the registry and the ports as boot.ts builds them: a deletion's removals are jobs the runner executes (I04-T04)

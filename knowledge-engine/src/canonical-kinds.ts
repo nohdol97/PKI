@@ -1186,6 +1186,8 @@ export const CANONICAL_KINDS: readonly DerivativeKind[] = canonicalKinds();
 export function createProductRegistry(options: {
   policy: ScopePolicy;
   permanentlyAbsent?: PermanentlyAbsent;
+  /** The data directory entries of the projections' implementations (projection-kinds.ts). */
+  projectionDataPaths?: Parameters<typeof projectionKinds>[0]["dataPaths"];
   /** The fixed list of receivers of a changed membership (S02-R13); none by default. */
   membershipListeners?: readonly MembershipListener[];
 }): DerivativeRegistry {
@@ -1201,6 +1203,7 @@ export function createProductRegistry(options: {
       ...projectionKinds({
         at: now,
         ...(options.permanentlyAbsent ? { permanentlyAbsent: options.permanentlyAbsent } : {}),
+        ...(options.projectionDataPaths ? { dataPaths: options.projectionDataPaths } : {}),
       }),
     ],
     policy: options.policy,
