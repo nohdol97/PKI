@@ -547,6 +547,15 @@ describe("source.provenance", () => {
     ]);
   });
 
+  it("keeps a record's attachments in the version's meta, and leaves the key out when there are none (I02C-R5)", () => {
+    const attachments = [{ name: "plan.pdf", mediaType: "application/pdf", size: 10 }];
+    upsert(1, { author: "A", attachments });
+    upsert(2, { body: "second", author: "B" });
+    const rows = db.all("SELECT meta FROM source_versions ORDER BY version");
+    expect(JSON.parse(rows[0]?.meta as string)).toEqual({ author: "A", attachments });
+    expect(rows[1]?.meta).toBe('{"author":"B"}');
+  });
+
   it("stores no provenance and no blocks for a record that has none", () => {
     upsert(1);
     expect(db.all("SELECT meta, blocks, record_schema_version FROM source_versions")).toEqual([

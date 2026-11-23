@@ -331,8 +331,8 @@ class Check {
       });
       if (!parsed.success) this.add("record-schema");
       else if (parsed.data.kind === "upsert") {
-        const { body, blocks, accessScope } = parsed.data.record;
-        if (blocks && !blocksValid(body, blocks)) this.add("invalid-blocks");
+        const { body, blocks, accessScope, attachments } = parsed.data.record;
+        if (blocks && !blocksValid(body, blocks, attachments?.length)) this.add("invalid-blocks");
         if (this.caps.accessScope !== (accessScope !== undefined))
           this.add("capability-access-scope");
       }

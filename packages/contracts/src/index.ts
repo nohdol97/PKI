@@ -8,7 +8,7 @@ import {
   AnalyticalListSchema,
   SemanticPiecesSchema,
 } from "./analytical-types.ts";
-import { NativeLocatorSchema } from "./connector.ts";
+import { AttachmentSchema, NativeLocatorSchema } from "./connector.ts";
 import {
   ImportJsonlRequestSchema,
   ImportJsonlResponseSchema,
@@ -714,6 +714,8 @@ export const EvidenceSourceResponseSchema = z.object({
   end: z.int().nonnegative(),
   /** I01-R29: computed on read from the version's blocks; null without blocks or in a gap. */
   locator: NativeLocatorSchema.nullable(),
+  /** I02C-R6: the attachment of the block holding the span's start, read from the version's meta; else null. */
+  attachment: AttachmentSchema.nullable(),
   sourceVersion: z.object({
     id: z.int().positive(),
     version: z.int().positive(),

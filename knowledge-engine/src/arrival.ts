@@ -87,6 +87,7 @@ function accept(
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
           metadata: record.metadata,
+          attachments: record.attachments,
         },
         accessScope: record.accessScope ?? null,
       },

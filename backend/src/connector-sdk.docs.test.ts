@@ -612,3 +612,24 @@ describe("docs.connector-sdk (I06): chapter 8 and chapter 6 equal the code", () 
     for (const code of named) expect([...CONNECTOR_VIOLATION_CODES], code).toContain(code);
   });
 });
+
+// I02C-C7: chapter 3's field table and chapter 9's mapping table carry the attachment fields, and the
+// site-setup S01 item points to the tracking issue.
+describe("docs.connector-sdk: the attachment fields (I02C-R8)", () => {
+  const rowOf = (chapter: string, cell: string) =>
+    chapter.split("\n").find((l) => l.startsWith(`| \`${cell}\``));
+  const three = DOC.slice(DOC.indexOf("## 3. "), DOC.indexOf("## 4. "));
+  const nine = DOC.slice(DOC.indexOf("## 9. "), DOC.indexOf("## 10. "));
+
+  it("chapter 3's field table has attachments, and the block text names the attachment index", () => {
+    expect(rowOf(three, "attachments")).toBeDefined();
+    expect(three).toContain("`attachment`");
+  });
+
+  it("chapter 9's mapping table has attachments, and site-setup S01 names issue #122", () => {
+    expect(rowOf(nine, "attachments")).toBeDefined();
+    const site = readFileSync(resolve(repo, "docs/site-setup.md"), "utf8");
+    const s01 = site.split("\n").find((l) => l.startsWith("- [ ] **S01 "));
+    expect(s01).toContain("#122");
+  });
+});

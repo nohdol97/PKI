@@ -32,6 +32,11 @@ export function typeStatusText(t: {
   return t.status === "supported" ? "지원" : `미지원: ${t.reason ?? ""}`;
 }
 
+/** "application/pdf, 1024바이트": what the origin system said of an attachment (I02C-R6), shown as it came. */
+export function attachmentDetailText(a: { mediaType: string; size: number }): string {
+  return `${a.mediaType}, ${a.size}바이트`;
+}
+
 export const UNTRUSTED_BADGE = "가져온 자료(신뢰하지 않음)";
 
 /** Provisional wording (spec "T10이 넘기는 것" 7): shown instead of the API's 404 code. */
