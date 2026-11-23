@@ -2,6 +2,7 @@
 // unauthorized request kind and is unreachable from non-loopback addresses.
 import { migrate, readJob, registerJob } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
+import { request } from "node:http";
 import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -274,5 +275,50 @@ describe("local API security", () => {
         ...productAdapters(stores.dataDirectory),
       }),
     ).rejects.toThrow(/token/);
+  });
+});
+
+/** Status and headers of one request; `send` in testkit returns only status and body. */
+function head(method: string, path: string, headers: Record<string, string>) {
+  return new Promise<{ status: number; headers: Record<string, unknown> }>((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port: server.port, path, method, headers }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+describe("local API security: the ask stream route and CORS (H03-C1)", () => {
+  const ask = (headers: Record<string, string>) =>
+    send(server.port, "/api/ask", headers, "POST", { question: "q", answer: false });
+
+  it("refuses /api/ask without a token, from a foreign Origin and for a foreign Host", async () => {
+    expect(await ask(without("authorization"))).toEqual({
+      status: 401,
+      body: { error: "unauthorized" },
+    });
+    expect(await ask({ ...valid, origin: "https://evil.example" })).toEqual({
+      status: 403,
+      body: { error: "forbidden-origin" },
+    });
+    expect(await ask({ ...valid, host: "evil.example" })).toEqual({
+      status: 403,
+      body: { error: "forbidden-host" },
+    });
+  });
+
+  it("refuses a preflight from a foreign Origin and never sends access-control-allow-origin", async () => {
+    const preflight = await head("OPTIONS", "/api/status", {
+      ...valid,
+      origin: "https://evil.example",
+    });
+    expect(preflight.status).toBe(403);
+    expect(preflight.headers["access-control-allow-origin"]).toBeUndefined();
+
+    const ok = await head("GET", "/api/status", valid);
+    expect(ok.status).toBe(200);
+    expect(ok.headers["access-control-allow-origin"]).toBeUndefined();
   });
 });
