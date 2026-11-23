@@ -51,6 +51,7 @@ import {
 } from "@pki/storage";
 import { assessAfterPropagation } from "./auto-verify.ts";
 import { recomputeDependencyDelay, type RuleOutcome } from "./dependency-delay.ts";
+import { refreshCandidates } from "./entity-resolution.ts";
 import { projectionKinds, type PermanentlyAbsent } from "./projection-kinds.ts";
 
 /** What one propagation did, by id, for V02's entries (ascending ids). */
@@ -695,18 +696,19 @@ function joinAround(tx: SqlDriver, item: number): number {
 
 /**
  * The merge candidates (S02-R10; `merge_candidates`, schema v24): a pair the product suggests, its lineage
- * the two items'. S02-T06 computes and recomputes them; this kind removes what an item's deletion takes (a
- * deleted source's items are deleted before it counts, so a candidate of two items deleted with the source
- * is gone). Nothing is recomputed here.
+ * the two items'. A deleted source's items are deleted before it counts, so a candidate of two items deleted
+ * with the source is gone; the candidates of the groups the change reached are judged again over the state
+ * the lower layers left (S02-T06): one that lost its support or gained a negative signal is removed, one a
+ * change makes possible is created, one the policy will not allow is absent. Counted as removed: the
+ * collected rows no longer stored; as recomputed: the rows created or changed.
  */
 const MERGE_CANDIDATE: DerivativeKind = {
   ...base("merge-candidate", "item"),
   references: ["item"],
   lineage: pairLineage,
   affected: (tx, change) => {
-    const mode = supported(change);
-    if (mode === "new-version" || mode === "scope-changed") return [];
-    const list = idList(reachedItems(tx, change.sourceId));
+    supported(change);
+    const list = idList(withGroups(tx, reachedItems(tx, change.sourceId)));
     return tx
       .all(
         `SELECT item_a, item_b FROM merge_candidates
@@ -734,7 +736,24 @@ const MERGE_CANDIDATE: DerivativeKind = {
         [list, list],
       );
     }
-    return { removed: snapshot.filter(({ ref }) => !refExists(tx, ref.id)).length, recomputed: 0 };
+    // the items to judge: the ones the source's evidence reached (collected before anything changed) and
+    // the ends of the collected candidates, whatever of them is left
+    const reached = new Set<number>((ctx.collected.get("item") ?? []).map((a) => Number(a.ref.id)));
+    for (const { ref } of snapshot) for (const id of itemsOfRef(tx, ref.id)) reached.add(id);
+    for (const id of change.kind === "scope-changed" ? reachedItems(tx, change.sourceId) : []) {
+      reached.add(id);
+    }
+    const refreshed = refreshCandidates(
+      tx,
+      [...reached].sort((a, b) => a - b),
+      { combinable: (lineage) => ctx.combinable(lineage) },
+      { exclude: new Set(doomed) },
+    );
+    return {
+      removed: snapshot.filter(({ ref }) => !refExists(tx, ref.id)).length,
+      recomputed:
+        refreshed.created + refreshed.updated + (running?.byReceivers.get("merge-candidate") ?? 0),
+    };
   },
 };
 

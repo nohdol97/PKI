@@ -3,7 +3,11 @@
 // hangs on the item. A refusal is a code in a 200 body; an item that is absent, deleted or hidden (or whose group's top
 // is) answers the one 404 `not-found`; no name, value or quote is in any answer. All data is synthetic.
 import { routes, type RouteName } from "@pki/contracts";
-import { createProductRegistry, recomputeDependencyDelay } from "@pki/knowledge-engine";
+import {
+  createProductRegistry,
+  recomputeDependencyDelay,
+  refreshCandidates,
+} from "@pki/knowledge-engine";
 import {
   addEvidence,
   automatedLifecycle,
@@ -564,5 +568,102 @@ describe("POST /api/entities/split (S02-R25, R15)", () => {
     });
     expect(routes.entitySplit.response.parse(res.body)).toMatchObject({ status: "applied" });
     expect(db.all("SELECT state FROM insights")).toEqual([{ state: "active" }]);
+  });
+});
+
+describe("GET /api/entities/candidates (S02-R25) and the candidates' upkeep (S02-R10)", () => {
+  /** Two items that share one email address (an identifier match), and the candidate row the extraction would leave. */
+  function pair(
+    externalIds: [string, string],
+    accessScopes: [string[] | null, string[] | null] = [null, null],
+    email = "shared@example.test",
+  ) {
+    const [a, b] = [
+      itemFrom(externalIds[0], accessScopes[0]),
+      itemFrom(externalIds[1], accessScopes[1]),
+    ] as const;
+    const emails = [a, b].map((item) => {
+      const fact = saveFact(db, {
+        itemId: item,
+        kind: "identifier.email",
+        value: email,
+        ...attrs,
+      }).id;
+      const version = db.all(
+        "SELECT e.source_version_id AS v FROM evidence e JOIN facts f ON f.id = e.fact_id WHERE f.item_id = ? LIMIT 1",
+        [item],
+      )[0]?.v as number;
+      addEvidence(db, {
+        target: { factId: fact },
+        sourceVersionId: version,
+        start: 0,
+        end: 3,
+        quote: NAME.slice(0, 3),
+      });
+      return fact;
+    });
+    db.transaction(() => refreshCandidates(db, [a, b], { combinable: () => true }));
+    return { a, b, emails: emails as [number, number] };
+  }
+  const stored = () =>
+    db.all("SELECT item_a, item_b FROM merge_candidates ORDER BY item_a, item_b");
+
+  it("lists a row as two ids and signal codes; the answer matches the contract and holds no text", async () => {
+    const { a, b } = pair(["a", "b"]);
+    await start();
+    const res = await call("entityCandidates");
+    expect(res.status).toBe(200);
+    expect(routes.entityCandidates.response.parse(res.body)).toEqual({
+      candidates: [{ a, b, signals: ["same-type", "identifier-match"] }],
+      truncated: false,
+    });
+    expect(JSON.stringify(res.body)).not.toContain(NAME);
+  });
+
+  it("leaves out a row with a hidden item and differs in nothing else", async () => {
+    const open = pair(["a", "b"]);
+    pair(["c", "secret"], [null, ["secret"]], "other@example.test");
+    const registry = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+      },
+    });
+    expect(stored()).toHaveLength(2);
+    await start({ registry });
+    expect((await call("entityCandidates")).body).toEqual({
+      candidates: [{ a: open.a, b: open.b, signals: ["same-type", "identifier-match"] }],
+      truncated: false,
+    });
+  });
+
+  it("accepting merges and clears the row; an unmerge without a mark brings it back; dismissing clears it and it does not come back", async () => {
+    const { a, b } = pair(["a", "b"]);
+    const registry = createProductRegistry({ policy: defaultScopePolicy });
+    const derived = createDerivativeRegistry({ kinds: registry.kinds, policy: defaultScopePolicy });
+    await start({ registry: derived, decisions: productUserDecisions(derived) });
+    const merged = routes.entityMerge.response.parse(
+      (await call("entityMerge", { member: a, into: b })).body,
+    );
+    expect(stored()).toEqual([]);
+    await call("entityUnmerge", {
+      mergeId: (merged as { mergeId: number }).mergeId,
+      keepDistinct: false,
+    });
+    expect(stored()).toEqual([{ item_a: a, item_b: b }]);
+    await call("entityDistinct", { a, b, on: true });
+    expect(stored()).toEqual([]);
+    db.transaction(() => refreshCandidates(db, [a, b], { combinable: () => true }));
+    expect(stored()).toEqual([]);
+  });
+
+  it("rejecting the supporting fact removes the candidate in that request", async () => {
+    const { emails } = pair(["a", "b"]);
+    await start();
+    expect(stored()).toHaveLength(1);
+    const res = await call("semanticDecide", { kind: "fact", id: emails[0], action: "reject" });
+    expect(res.status).toBe(200);
+    expect(stored()).toEqual([]);
   });
 });

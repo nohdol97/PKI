@@ -180,6 +180,32 @@ function world() {
   const fNa = fact(xN, TARGET_DATE, "2026-12-08");
   cite({ factId: fNa }, a.id);
   const rN = relation(xN, yN as number);
+  // the support of the three candidates below (S02-R10): one email on both items of the pair, on items of
+  // their own because a candidate is never between two items of one group. The extraction's rows cite the
+  // source versions the pair is built from; the user's pair has none.
+  const email = (itemId: number, value: string, ...from: { id: number }[]) => {
+    const id = fact(itemId, "identifier.email", value);
+    for (const v of from) cite({ factId: id }, v.id);
+    return id;
+  };
+  const [pA1, pA2, pS1, pS2] = ["PA1", "PA2", "PS1", "PS2"].map(item) as number[];
+  const emailsA = [
+    email(pA1 as number, "pair-a@example.test", a),
+    email(pA2 as number, "pair-a@example.test", a),
+  ];
+  email(pS1 as number, "pair-s@example.test", a, b);
+  email(pS2 as number, "pair-s@example.test", a, b);
+  const pairN = ["PN1", "PN2"].map((name) => {
+    const made = userDecisions.add(db, { kind: "item", type: "Project", name });
+    if (made.status !== "applied") throw new Error("the user's item");
+    userDecisions.add(db, {
+      kind: "fact",
+      itemId: made.ref.id,
+      factKind: "identifier.email",
+      value: "user@example.test",
+    });
+    return made.ref.id;
+  }) as [number, number];
   const key = (x: number, y: number) => ({ rule: DEPENDENCY_DELAY, xItemId: x, yItemId: y });
   const iA = saveInsight(db, key(xA as number, yA as number), {
     state: "active",
@@ -242,11 +268,11 @@ function world() {
       ).lastInsertRowid
     }`;
   const candidateOf = (a: number, b: number) => {
-    db.run("INSERT INTO merge_candidates (item_a, item_b, signals, at) VALUES (?, ?, '[]', ?)", [
-      Math.min(a, b),
-      Math.max(a, b),
-      AT,
-    ]);
+    db.run(
+      `INSERT INTO merge_candidates (item_a, item_b, signals, at)
+       VALUES (?, ?, '["same-type","identifier-match"]', ?)`,
+      [Math.min(a, b), Math.max(a, b), AT],
+    );
     return `candidate:${Math.min(a, b)}:${Math.max(a, b)}`;
   };
   const rows: Record<
@@ -263,9 +289,9 @@ function world() {
       withoutLineage: mergeOf(xN, yN as number),
     },
     "merge-candidate": {
-      onlyA: candidateOf(xA as number, yA as number),
-      shared: candidateOf(xS as number, yS as number),
-      withoutLineage: candidateOf(xN, yN as number),
+      onlyA: candidateOf(pA1 as number, pA2 as number),
+      shared: candidateOf(pS1 as number, pS2 as number),
+      withoutLineage: candidateOf(pairN[0], pairN[1]),
     },
     source: { onlyA: a.id, shared: null, withoutLineage: null },
     evidence: { onlyA: eA, shared: null, withoutLineage: null },
@@ -283,7 +309,7 @@ function world() {
     if (r.shared !== null) built.set(`${kind}:${r.shared}`, lineAB);
     if (r.withoutLineage !== null) built.set(`${kind}:${r.withoutLineage}`, []);
   }
-  return { a, b, rows, built, fNa };
+  return { a, b, rows, built, fNa, emailsA };
 }
 
 /**
@@ -512,7 +538,7 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
       ontology: [], // a scope change keeps every lineage row (S01-R22)
       // the merge lines of the items the source reaches are judged again (S02-R13); a candidate is T06's
       "entity-merge": [String(rows["entity-merge"]?.shared)],
-      "merge-candidate": [],
+      "merge-candidate": ["candidate:9:10"], // the pair both `a` and `b` built: judged again whatever the change
       insight: [String(rows.insight?.shared)],
       "analytical-check": [], // a table's row follows its source's deletion only (S03-T04)
     });
@@ -558,14 +584,15 @@ describe("scope-changed (I04-R15): nothing is deleted, the source's Insights are
 
 describe("propagateCanonical's report (I04-T03)", () => {
   it("notes the ids whatever driver object the kinds are handed", () => {
-    const { a, rows, fNa } = world();
+    const { a, rows, fNa, emailsA } = world();
     const wrapped: SqlDriver = { ...db };
     const { report } = db.transaction(() =>
       propagateCanonical(wrapped, deletionOf(a.sourceId), AT),
     );
     expect(report).toMatchObject({
       versions: 1,
-      facts: [rows.fact?.onlyA, fNa], // fNa: an extraction's fact on the item the user created
+      // fNa: an extraction's fact on the item the user created; emailsA: the support of a's candidate
+      facts: [rows.fact?.onlyA, fNa, ...emailsA],
       relations: [rows.relation?.onlyA],
     });
     expect(listInvalidations(db)[0]?.at).toBe(AT);
@@ -661,15 +688,15 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
     // the projections' counts are the removal jobs registered (I04-T04)
     expect(result).toEqual({
       source: 1,
-      evidence: 5, // fNa's too
-      fact: 2,
+      evidence: 9, // fNa's too, and the four of the candidates' emails that cite `a`
+      fact: 4, // fA, fNa and the two emails of a's candidate
       relation: 1,
       "scope-drop": 1,
       ontology: 1,
       // the line and the candidate of the two items only `a` built: gone with them (the chain was mended first)
       "entity-merge": 1,
       "merge-candidate": 1,
-      item: 2,
+      item: 4, // the two items of a's own pair and the two of its candidate
       insight: 1,
       "analytical-check": 1,
       engine: 1,
@@ -692,14 +719,14 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         changeKind: "access-revoked",
         removedByKind: {
           source: 1,
-          evidence: 5,
-          fact: 2,
+          evidence: 9,
+          fact: 4,
           relation: 1,
           "scope-drop": 1,
           ontology: 1,
           "entity-merge": 1,
           "merge-candidate": 1,
-          item: 2,
+          item: 4,
           insight: 1,
           "analytical-check": 1,
           engine: 1,

@@ -10,6 +10,20 @@ export {
   type RuleScope,
 } from "./dependency-delay.ts";
 export {
+  candidatesReceiver,
+  countLinksRefused,
+  intervalsOverlap,
+  linkRefused,
+  listMergeCandidates,
+  markLinkRefused,
+  recordRefusedCandidate,
+  refreshCandidates,
+  SIGNALS,
+  signalsBetween,
+  type Interval,
+  type Signal,
+} from "./entity-resolution.ts";
+export {
   assessAfterUserAction,
   assessAutoVerify,
   AUTO_VERIFY_SETTING,

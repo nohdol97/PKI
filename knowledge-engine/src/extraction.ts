@@ -82,6 +82,12 @@ import {
 import { assessAfterExtraction } from "./auto-verify.ts";
 import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
 import { recomputeDependencyDelay } from "./dependency-delay.ts";
+import {
+  linkRefused,
+  markLinkRefused,
+  recordRefusedCandidate,
+  refreshCandidates,
+} from "./entity-resolution.ts";
 import { findCandidates, groupLineage } from "./linking.ts";
 import { locateQuote, type QuoteSpan } from "./quote.ts";
 
@@ -385,6 +391,34 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         continue;
       }
       items.set(item.ref, item);
+    }
+
+    // S02-R8 2: a link to an existing item X is checked before anything is written. When the key the answer
+    // gives it under a tag is none of the keys X's group holds under that tag, the link is refused: the item is
+    // made new (the answer's type and name), and a mark between it and X is written below. The type half of R8
+    // is not checked (spec decision 29). Only keys the write path below keeps count: quote located, confidence in range.
+    const refused: { ref: string; existing: number }[] = [];
+    for (const [ref, item] of items) {
+      if (item.existingItemId === null) continue;
+      const keys = answer.facts
+        .filter(
+          (f) =>
+            f.item === ref &&
+            f.kind === "identifier.key" &&
+            f.quote.includes(f.value.trim()) &&
+            confidenceInRange(f.confidence) &&
+            !("dropped" in locateQuote(body, f.quote)), // only a key the write path will keep
+        )
+        .map((f) => {
+          const tag = tagOf(f.context);
+          return {
+            tag: tag !== null && [...tag].length > MAX_CONTEXT_CODE_POINTS ? null : tag,
+            value: f.value.trim(),
+          };
+        });
+      if (!linkRefused(db, Number(item.existingItemId), keys)) continue;
+      refused.push({ ref, existing: Number(item.existingItemId) });
+      items.set(ref, { ...item, existingItemId: null });
     }
 
     // S01-R21: what does not fit the verified type definitions is dropped. An existing item has the type
@@ -736,6 +770,39 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         });
       },
     };
+    // S02-R16: the mark of each refused link, between X and the item made instead, content-free like the
+    // judgement below (the policy cannot skip it); an item no entry kept has nothing to mark.
+    const linkMarks: DerivedItem = {
+      kind: BOOKKEEPING_KIND,
+      itemKey: "link-check",
+      lineage: [own],
+      unjudged: true as const,
+      write: (tx) => {
+        for (const { ref, existing } of refused) {
+          const made = ids.get(ref);
+          if (made !== undefined) markLinkRefused(tx, existing, made);
+        }
+      },
+    };
+    // S02-R10: the candidates of the groups this answer touched, judged over the final state; a pair the policy
+    // will not put together leaves a content-free record bound to this version (a widening extracts it again).
+    const candidatesItem: DerivedItem = {
+      kind: BOOKKEEPING_KIND,
+      itemKey: "merge-candidates",
+      lineage: [own],
+      unjudged: true as const,
+      write: (tx) => {
+        if (touched.size === 0) return;
+        refreshCandidates(
+          tx,
+          [...touched],
+          { combinable: (lineage) => registry.combinable(tx, lineage) },
+          {
+            onRefused: (a, b) => recordRefusedCandidate(tx, own, a, b, now().toISOString()),
+          },
+        );
+      },
+    };
     // S01-R9: the automatic promotion, judged once on the final state of this answer's rows. Its own
     // content-free item (status lines only, like the bookkeeping): a scope policy that refuses the
     // Insight rule's combined lineage must not skip it, or a rival written in this run would leave a
@@ -754,7 +821,15 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     };
     return {
       status: "succeeded",
-      items: [bookkeeping, ...written, judgement, rule, ...proposalItems],
+      items: [
+        bookkeeping,
+        ...written,
+        judgement,
+        rule,
+        linkMarks,
+        candidatesItem,
+        ...proposalItems,
+      ],
     };
   };
 }
