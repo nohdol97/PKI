@@ -54,7 +54,7 @@ describe("import.attachments: the optional attachments field (I02C-C3)", () => {
     expect(first?.kind === "upsert" && first.record.attachments).toEqual([
       { name: "plan.pdf", mediaType: "application/pdf", size: 10 },
     ]);
-    expect(second?.kind === "upsert" && second.record.attachments).toBeUndefined();
+    expect(second?.kind === "upsert" && Object.hasOwn(second.record, "attachments")).toBe(false);
   });
 
   it("refuses a name with a backslash on that line only, naming the field", () => {

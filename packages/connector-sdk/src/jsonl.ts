@@ -121,11 +121,13 @@ export function recordToChange(
           createdAt: record.created_at,
           updatedAt: record.updated_at,
           metadata: record.metadata,
-          attachments: record.attachments?.map((a) => ({
-            name: a.name,
-            mediaType: a.media_type,
-            size: a.size,
-          })),
+          ...(record.attachments && {
+            attachments: record.attachments.map((a) => ({
+              name: a.name,
+              mediaType: a.media_type,
+              size: a.size,
+            })),
+          }),
         },
       };
     case "scope-change": {
