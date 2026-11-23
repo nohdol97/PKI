@@ -323,6 +323,7 @@ describe("derivatives.schema-coverage", () => {
       "fact",
       "insight",
       "item",
+      "lint-finding",
       "merge-candidate",
       "ontology",
       "relation",

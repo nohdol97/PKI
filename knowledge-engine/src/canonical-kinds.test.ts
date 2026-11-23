@@ -511,6 +511,8 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
       ["analytical-check", "insight", "canonical"],
       // the Wiki's pages rest on every knowledge layer: after all of them, still in the canonical transaction (K01-D3)
       ["wiki-page", "projection", "canonical"],
+      // the lint findings rest on the same layers and are judged again from what they left (K02-R13)
+      ["lint-finding", "projection", "canonical"],
       ["engine", "projection", "projection"],
       ["vectorIndex", "projection", "projection"],
     ]);
@@ -518,9 +520,9 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
   });
 
   it("declares not applicable only what the closed list allows, for every registered kind", () => {
-    // the wiki-page kind has its own contract run (wiki-kind.test.ts)
+    // the wiki-page and lint-finding kinds have their own contract runs (wiki-kind.test.ts, lint-kind.test.ts)
     const canonical = derivativeRegistry.kinds.filter(
-      (k) => k.storage === "canonical" && k.kind !== "wiki-page",
+      (k) => k.storage === "canonical" && k.kind !== "wiki-page" && k.kind !== "lint-finding",
     );
     expect(Object.keys(SUBJECTS).sort()).toEqual(canonical.map((k) => k.kind).sort());
     for (const k of canonical) {
@@ -696,7 +698,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
-    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(15);
+    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(16);
     expect(log.findLastIndex((e) => e.startsWith("affected:"))).toBeLessThan(firstDelete);
     expect(log.filter((e) => e.startsWith("invalidate:"))).toEqual(
       [
@@ -713,6 +715,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         "insight",
         "analytical-check",
         "wiki-page",
+        "lint-finding",
         "engine",
         "vectorIndex",
       ].map((k) => `invalidate:${k}`),
@@ -735,6 +738,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       insight: 1,
       "analytical-check": 1,
       "wiki-page": 0, // no page was built in this state
+      "lint-finding": 0,
       engine: 1,
       vectorIndex: 1,
     });
@@ -767,6 +771,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           insight: 1,
           "analytical-check": 1,
           "wiki-page": 0,
+          "lint-finding": 0,
           engine: 1,
           vectorIndex: 1,
         },
@@ -785,6 +790,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           insight: 2, // iS judged again, and the `conflict` Insight the link of the world makes (P01)
           "analytical-check": 0,
           "wiki-page": 0,
+          "lint-finding": 0,
           engine: 0,
           vectorIndex: 0,
         },

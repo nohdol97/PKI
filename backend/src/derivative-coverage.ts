@@ -85,6 +85,15 @@ export const TABLE_CLASSIFICATION: Readonly<Record<string, TableClass>> = {
   wiki_edits: kind("wiki-page"),
   wiki_log: operational("page keys, counts and times of the Wiki's changes, no content (K01-R6)"),
   wiki_state: operational("one row: the Wiki's input and built sequence numbers (K01-R5)"),
+  // reflection and knowledge lint (K02-T1): findings name rows by id and rule only, and their lineage is the
+  // registered kind `lint-finding`'s (a deletion judges them again in its own transaction, K02-R13)
+  lint_findings: kind("lint-finding"),
+  lint_finding_lineage: kind("lint-finding"),
+  // item ids and the sequence of their last change; a mark of an item a deletion took goes in the same transaction
+  reflection_dirty: kind("lint-finding"),
+  reflection_state: operational(
+    "one row: the dirty sequence, the last run times, the weekly cursor (K02-R4)",
+  ),
   jobs: operational("work queue: a row names a source by id and holds no content"),
   schedules: operational("periods of the schedule (I03)"),
   consents: operational("the user's consent per Provider"),

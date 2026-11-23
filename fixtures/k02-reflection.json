@@ -1,0 +1,70 @@
+{
+  "now": "2026-11-23T00:00:00.000Z",
+  "note": "Synthetic. Five situations the lint rules look for; each item is cited by sources of its own so the situations do not overlap.",
+  "sources": [
+    { "key": "s1", "bodies": ["합성 자료 1. 물결 시스템과 새 물결 시스템 문서."] },
+    { "key": "s2", "bodies": ["합성 자료 2. 새 물결 시스템의 별칭 문서."] },
+    {
+      "key": "s3",
+      "bodies": [
+        "합성 자료 3, 첫 version. 가온 서비스는 나루 서비스에 의존한다.",
+        "합성 자료 3, 둘째 version. 의존 문장이 사라졌다."
+      ]
+    },
+    { "key": "s4", "bodies": ["합성 자료 4. 가온 서비스 소개."] },
+    { "key": "s5", "bodies": ["합성 자료 5. 나루 서비스 소개."] },
+    { "key": "s6", "bodies": ["합성 자료 6. 점검 업무의 목표일은 2026-01-15이다."] },
+    { "key": "s7", "bodies": ["합성 자료 7. 하늘 프로젝트와 바람 시스템 회의록."] },
+    { "key": "s8", "bodies": ["합성 자료 8. 하늘 프로젝트와 바람 시스템 점검표."] },
+    { "key": "s9", "bodies": ["합성 자료 9. 구름 프로젝트와 노을 프로젝트 목록."] }
+  ],
+  "items": [
+    { "key": "sys1", "type": "System", "name": "물결 시스템" },
+    { "key": "sys2", "type": "System", "name": "새 물결 시스템" },
+    { "key": "rp", "type": "System", "name": "가온 서비스" },
+    { "key": "rq", "type": "System", "name": "나루 서비스" },
+    { "key": "task", "type": "Task", "name": "점검 업무" },
+    { "key": "m1", "type": "Project", "name": "하늘 프로젝트" },
+    { "key": "m2", "type": "System", "name": "바람 시스템" },
+    { "key": "z1", "type": "Project", "name": "구름 프로젝트" },
+    { "key": "z2", "type": "Project", "name": "노을 프로젝트" }
+  ],
+  "facts": [
+    { "item": "sys1", "kind": "memo", "value": "메모 가", "cite": [["s1", 1]] },
+    { "item": "sys2", "kind": "memo", "value": "메모 나", "cite": [["s2", 1]] },
+    { "item": "sys2", "kind": "alias.name", "value": "물결 시스템", "cite": [["s2", 1]] },
+    { "item": "rp", "kind": "memo", "value": "메모 다", "cite": [["s4", 1]] },
+    { "item": "rq", "kind": "memo", "value": "메모 라", "cite": [["s5", 1]] },
+    { "item": "task", "kind": "target_date", "value": "2026-01-15", "cite": [["s6", 1]] },
+    {
+      "item": "m1",
+      "kind": "memo",
+      "value": "메모 마",
+      "cite": [
+        ["s7", 1],
+        ["s8", 1]
+      ]
+    },
+    {
+      "item": "m2",
+      "kind": "memo",
+      "value": "메모 바",
+      "cite": [
+        ["s7", 1],
+        ["s8", 1]
+      ]
+    },
+    { "item": "z1", "kind": "memo", "value": "메모 사", "cite": [["s9", 1]] },
+    { "item": "z2", "kind": "memo", "value": "메모 아", "cite": [["s9", 1]] }
+  ],
+  "relations": [
+    { "key": "r1", "subject": "rp", "type": "DEPENDS_ON", "object": "rq", "cite": [["s3", 1]] }
+  ],
+  "staleCandidates": [["z1", "z2"]],
+  "expect": {
+    "synonym": [["sys1", "sys2"]],
+    "stale": [["relation", "r1"]],
+    "overdue-work": [["task"]],
+    "missing-link": [["m1", "m2"]]
+  }
+}
