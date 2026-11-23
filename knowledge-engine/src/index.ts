@@ -8,6 +8,14 @@ export {
   type RuleOutcome,
   type RuleScope,
 } from "./dependency-delay.ts";
+export {
+  assessAfterUserAction,
+  assessAutoVerify,
+  AUTO_VERIFY_SETTING,
+  readAutoVerify,
+  type AutoVerifyCondition,
+  type AutoVerifyOutcome,
+} from "./auto-verify.ts";
 export { acceptChange, type Accepted, type AcceptOptions } from "./arrival.ts";
 export { applyTombstone, liftTombstone } from "./tombstone-entry.ts";
 export {

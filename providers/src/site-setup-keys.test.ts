@@ -30,6 +30,11 @@ const OTHER_PACKAGE_KEYS = [
     file: "../../backend/src/job-runner.ts",
     holds: 'JOBS_MAX_CONCURRENT_SETTING = "jobs.maxConcurrent"',
   },
+  {
+    key: "semantic.autoVerify",
+    file: "../../knowledge-engine/src/auto-verify.ts",
+    holds: 'AUTO_VERIFY_SETTING = "semantic.autoVerify"',
+  },
 ] as const;
 
 const implemented = Object.entries(entry)

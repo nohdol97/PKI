@@ -71,6 +71,14 @@ function validRow(db: SqlDriver, ref: UserInputRef): ValidRow | undefined {
   return evidenceIds.length > 0 ? { evidenceIds, input: null } : undefined;
 }
 
+/**
+ * Whether a fact or relation of this status is "valid" (S01-R15) — the predicate the rule reads, which
+ * the automatic promotion's condition 5 asks too (S01-T04 hand-off 10): not superseded or rejected,
+ * and current evidence or a user input.
+ */
+export const isValidRow = (db: SqlDriver, ref: UserInputRef, status: KnowledgeStatus): boolean =>
+  !INVALID.has(status) && validRow(db, ref) !== undefined;
+
 interface DatedRow extends ValidRow {
   value: string;
 }

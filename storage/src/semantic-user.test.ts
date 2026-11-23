@@ -484,7 +484,15 @@ describe("user-override.guard (S01-R12)", () => {
 
   it("the automated entry has no approve, reject or user action to call (type and keys)", () => {
     expect(Object.keys(automatedLifecycle).sort()).toEqual(
-      ["created", "evidenceReturned", "explicitEvidence", "raiseDispute", "supersede"].sort(),
+      [
+        "autoVerify", // S01-T05: the policy's promotion and its restore, neither a user action
+        "autoVerifyLost",
+        "created",
+        "evidenceReturned",
+        "explicitEvidence",
+        "raiseDispute",
+        "supersede",
+      ].sort(),
     );
     // @ts-expect-error the automated entry has no approve
     expect(automatedLifecycle.approve).toBeUndefined();
