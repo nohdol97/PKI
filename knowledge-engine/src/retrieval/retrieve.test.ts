@@ -465,3 +465,32 @@ describe("X01-C6a X01-C6b ③ keyword reads in pages, metadata counts after the 
     db.close();
   });
 });
+
+describe("X01-R7 RVF-R2 a related link follows only a merge line the search shows", () => {
+  it("links the hit to the merged item A when the registry hides the merge line, and to B when it is shown", async () => {
+    const w = world();
+    const a = w.db.all("SELECT id FROM items WHERE name = ?", ["별빛 시스템"])[0]?.id as number;
+    const b = insertItem(w.db, { type: "System", name: "별빛 통합", ...attrs });
+    w.db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+      [a, b, "2026-11-24T00:00:00.000Z"],
+    );
+    const line = String(w.db.all("SELECT id FROM item_merges WHERE member_id = ?", [a])[0]?.id);
+    const tue = w.version.get("wiki-x01-0003");
+    const linkOf = async (reg: typeof registry) => {
+      const found = await retrieve(w.db, reg, expected.questions.checkDay?.text as string, {});
+      return found.hits.find((h) => h.versionId === tue)?.related.map((l) => l.itemId);
+    };
+    const hiding: typeof registry = {
+      ...registry,
+      visible: (db, refs, purpose) =>
+        registry
+          .visible(db, refs, purpose)
+          .filter(
+            (r) => !(purpose === "search" && r.kind === "entity-merge" && r.id === `merge:${line}`),
+          ),
+    };
+    expect(await linkOf(hiding)).toEqual([a]);
+    expect(await linkOf(registry)).toEqual([b]);
+  });
+});

@@ -19,6 +19,7 @@ import { EmptyVectorIndex, openBetterSqlite3, SqliteVectorIndex } from "@pki/sto
 import { FakeEmbedder, send } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bootBackend } from "./boot.ts";
+import { readRestoreLast } from "./restore-boot.ts";
 import { CANONICAL_DB_FILE, productEngine, productRegistry } from "./composition.ts";
 import { checkDataDirectory } from "./derivative-coverage.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -172,7 +173,9 @@ describe("an applied restore (H01C3-R10)", () => {
       folder,
       passphrase: "correct horse battery staple",
       now: new Date(),
-      embeddingSpace: null,
+      embeddingSpace: (({ modelId, revision, dimension }) => ({ modelId, revision, dimension }))(
+        embedder.describe(),
+      ),
       vectorIndexSeq: null,
       scrypt: { N: 1024, r: 8, p: 1 },
     });
@@ -192,7 +195,9 @@ describe("an applied restore (H01C3-R10)", () => {
     // the restoring start cannot embed (not local), so nothing can have been written again: what is left is of before
     const external = new FakeEmbedder({ egress: "external" });
     await external.prepare({ kind: "download" }, new AbortController().signal);
-    await boot({ vectorIndexing: true, embedder: external });
+    const restored = await boot({ vectorIndexing: true, embedder: external });
+    // RVF-R3: the backup was made under this embedder's space, so the record does not say it differs
+    expect(readRestoreLast(restored.db)).toMatchObject({ embeddingSpaceDiffers: false });
     const index = openBetterSqlite3(join(dir, "vectors", "index.sqlite"));
     try {
       expect(index.all("SELECT ref FROM vectors")).toEqual([]);

@@ -74,6 +74,22 @@ describe("SqliteVectorIndex file", () => {
     await build.activate(["a"], 1);
     rebuilt.close();
 
+    // RVF-R4: the same `user_version` as this build's over tables that are not the ones it reads
+    const sameVersion = freshPath();
+    open(sameVersion).close();
+    const odd = openBetterSqlite3(sameVersion);
+    odd.exec(
+      "DROP TABLE vectors; DROP TABLE marks; DROP TABLE generations; CREATE TABLE generations (unexpected TEXT);",
+    );
+    odd.close();
+    const mended = open(sameVersion);
+    expect(await mended.status()).toEqual({ unavailable: expect.any(String) });
+    const second = await mended.beginRebuild(SPACE);
+    await second.upsert([{ ref: "b", vector: v(1, 0) }], 1);
+    await second.activate(["b"], 1);
+    expect(await mended.status()).toBe("ready");
+    mended.close();
+
     const garbage = freshPath();
     mkdirSync(join(garbage, ".."), { recursive: true });
     writeFileSync(garbage, "not a database");

@@ -1,7 +1,6 @@
 // X01-R6 and R7: the marks and the related-knowledge links of the hits, computed by code from the stored rows.
 // Both read only what the registry shows for a search: a hit the policy hides takes part in no mark and no link.
 import {
-  entityGroups,
   factsEvidencedBy,
   isValidRow,
   itemsEvidencedBy,
@@ -14,7 +13,7 @@ import {
   type DerivedRef,
   type SqlDriver,
 } from "@pki/storage";
-import { visibleLinks, type GraphJudge } from "../graph-read.ts";
+import { groupView, visibleLinks, type GraphJudge } from "../graph-read.ts";
 import { WIKI_PAGE_KIND_NAME } from "../wiki-kind.ts";
 import { pageKindOfType } from "../wiki-render.ts";
 import { RELATED_LIMIT, type GapNote, type RelatedLink } from "./types.ts";
@@ -87,7 +86,7 @@ export function gapNotes(
 }
 
 /**
- * R7: per hit, the items its source supports (group representatives the policy shows, lowest id first, at most
+ * R7: per hit, the items its source supports (group tops over the merge lines the policy shows, lowest id first, at most
  * RELATED_LIMIT) with each item's Wiki page when one is stored and shown.
  */
 export function relatedLinks(
@@ -95,9 +94,10 @@ export function relatedLinks(
   judge: GraphJudge,
   shown: readonly number[],
 ): Map<number, RelatedLink[]> {
+  const groups = groupView(db, judge);
   const representatives = new Map<number, number>();
   const rows = itemsEvidencedBy(db, shown).map(({ versionId, itemId }) => {
-    const rep = representatives.get(itemId) ?? entityGroups.representativeOf(db, itemId);
+    const rep = representatives.get(itemId) ?? groups.topOf(itemId);
     representatives.set(itemId, rep);
     return { versionId, itemId: rep };
   });
