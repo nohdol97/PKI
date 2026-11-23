@@ -94,7 +94,7 @@ describe("sources.thread (I02B-C56, C57)", () => {
 
   it("leaves a hidden message out of the list and the participants, and answers a hidden or thread-less request as a missing number", async () => {
     const open = message("m1", "공개인", "2026-11-10T01:00:00Z", "th");
-    message("m2", "비밀인", "2026-11-10T02:00:00Z", "th", ["secret"]);
+    const hiddenInOpen = message("m2", "비밀인", "2026-11-10T02:00:00Z", "th", ["secret"]);
     const hiddenOnly = message("h1", "비밀둘", "2026-11-10T01:00:00Z", "th-hidden", ["secret"]);
     const noThread = saveSourceRecord(db, "c", { externalId: "plain", title: "t", body: "b" });
     expect(noThread.status).toBe("created");
@@ -105,7 +105,8 @@ describe("sources.thread (I02B-C56, C57)", () => {
     expect(routes.sourceThread.response.parse(shown.body).messages).toHaveLength(1);
     expect(text).not.toContain("비밀인");
     expect(text).not.toContain("제목 m2");
-    for (const versionId of [hiddenOnly, plain, 99_999]) {
+    // hiddenInOpen sits in a thread with a shown message: only the requested-version check refuses it.
+    for (const versionId of [hiddenInOpen, hiddenOnly, plain, 99_999]) {
       expect(await call("sourceThread", { versionId })).toEqual(NOT_FOUND);
     }
   });
