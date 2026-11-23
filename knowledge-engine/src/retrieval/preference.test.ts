@@ -1,6 +1,6 @@
 // X01-C5a (R19) the item preference lifts a source's rank when `feedback.learned` is on and nothing else changes;
 // X01-C5b (R19, R12, negative test, mutation target) an item the read gate hides for a search moves no hit.
-// The data is synthetic; the ranks are read from a base run, never assumed.
+// The second C5b case puts the preference on a group mate, the line only `usable` guards. The data is synthetic; the ranks are read from a base run, never assumed.
 import {
   addEvidence,
   defaultScopePolicy,

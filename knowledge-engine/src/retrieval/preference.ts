@@ -1,6 +1,7 @@
 // X01-R19: the preference signal of R4 made from the user's item preferences (P03), read-only. A source version's
 // weight comes from the items its evidence rests on (and their merge groups), and only from items and lines the
 // read gate shows for a search (R12): a hidden item moves no hit.
+import type { FeedbackTarget } from "@pki/contracts";
 import {
   feedbackLearned,
   itemsEvidencedBy,
@@ -8,7 +9,6 @@ import {
   withGroups,
   type DerivativeRegistry,
   type DerivedRef,
-  type FeedbackTarget,
   type SqlDriver,
 } from "@pki/storage";
 import { createJudge } from "../graph-read.ts";
