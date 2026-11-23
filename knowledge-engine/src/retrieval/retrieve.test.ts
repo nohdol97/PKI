@@ -364,6 +364,17 @@ describe("X01-R6 R12 a hidden newer version leaves no trace in the marks", () =>
     expect(found.hits.map((h) => h.versionId)).toContain(w.version.get("mail-x01-0004"));
     expect(found.hits.map((h) => h.versionId)).not.toContain(Number(newer));
     expect(found.notes.filter((n) => n.kind === "stale")).toEqual([]);
+    // the control: with the newer version shown, the same past version is stale
+    const shown = await retrieve(
+      w.db,
+      registry,
+      expected.questions.releaseDate?.text as string,
+      {},
+    );
+    expect(shown.notes).toContainEqual({
+      kind: "stale",
+      versionId: w.version.get("mail-x01-0004"),
+    });
   });
 });
 
@@ -384,6 +395,7 @@ describe("X01-R12 the visibility check comes before the strategy cut", () => {
     for (let i = 0; i < 5; i++) add(`open-${i}`, ["open"], "프로브낱말");
     const found = await retrieve(db, denying, "프로브낱말");
     expect(found.hits).toHaveLength(5);
+    expect(found.route.keyword).toEqual({ status: "used", count: 5 });
     db.close();
   });
 });

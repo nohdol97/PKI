@@ -34,7 +34,7 @@ export function shownVersions(
 }
 
 /**
- * `stale`: the hit is not its source's latest version, or a fact resting on it was replaced by another fact
+ * `stale`: a newer version of its source is shown for a search, or a fact resting on it was replaced by another fact
  * (a standing SUPERSEDES link). `conflict`: two facts resting on shown hits are tied by a CONTRADICTS link that
  * is still open, both facts valid and neither replaced. Only shown hits and shown links count.
  */
@@ -46,10 +46,15 @@ export function gapNotes(
 ): GapNote[] {
   if (shown.length === 0) return [{ kind: "insufficient" }];
   const notes: GapNote[] = [];
+  // a newer version the policy hides is no newer version for the caller (R12), so it makes nothing stale
+  const heads = readVersionHeads(db, shown);
+  const searchable = shownVersions(
+    db,
+    registry,
+    heads.flatMap((h) => h.newerIds),
+  );
   const stale = new Set(
-    readVersionHeads(db, shown)
-      .filter((h) => !h.latest)
-      .map((h) => h.id),
+    heads.filter((h) => h.newerIds.some((id) => searchable.has(id))).map((h) => h.id),
   );
   const resting = factsEvidencedBy(db, shown).filter((f) =>
     isValidRow(db, { kind: "fact", id: f.factId }, f.status),

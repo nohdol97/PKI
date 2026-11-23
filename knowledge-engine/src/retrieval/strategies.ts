@@ -58,8 +58,7 @@ export function conceptIds(reading: Reading, items: readonly number[]): number[]
   const { db, registry } = reading;
   return items
     .flatMap((item) => versionIds(db, groupLineage(db, registry, item)).sort((a, b) => b - a))
-    .filter((id, i, all) => all.indexOf(id) === i)
-    .slice(0, STRATEGY_LIST_LIMIT);
+    .filter((id, i, all) => all.indexOf(id) === i);
 }
 
 /** `concept` also adds the matched items' names and `verified` forms (shown ones) as queries to the keyword strategy. */
@@ -79,8 +78,8 @@ export function conceptQueries({ db, judge }: Reading, items: readonly number[])
 export function keywordIds({ db, question }: Reading, extraQueries: readonly string[]): number[] {
   const tokens = keywordTokens(question);
   const queries = [...tokens, ...(tokens.length > 1 ? [tokens.join(" ")] : []), ...extraQueries];
-  const lists = queries.map((q) => searchKeyword(db, q, STRATEGY_LIST_LIMIT));
-  return bestFirst(reciprocalSum(lists)).slice(0, STRATEGY_LIST_LIMIT);
+  const lists = queries.map((q) => searchKeyword(db, q, -1));
+  return bestFirst(reciprocalSum(lists));
 }
 
 /** Pairs asked at most, and paths read from one item, so a question naming many items stays cheap. */
@@ -114,7 +113,7 @@ export function graphIds(reading: Reading, items: readonly number[]): number[] {
     [...new Set(relationIds)].flatMap((id) =>
       registry.lineage(db, { kind: "relation", id: String(id) }),
     ),
-  ).slice(0, STRATEGY_LIST_LIMIT);
+  );
 }
 
 const FACT_WINDOW = 200;
@@ -161,7 +160,7 @@ export function temporalIds(reading: Reading, items: readonly number[]): number[
       .sort((a, b) => Number(b.current) - Number(a.current) || b.id - a.id)
       .map((e) => e.sourceVersionId),
   );
-  return [...new Set(refs)].slice(0, STRATEGY_LIST_LIMIT);
+  return [...new Set(refs)];
 }
 
 /** `wiki`: the sources the matched items' Wiki pages rest on (a page that is absent or not shown gives none; D11: the page text is a clue, never evidence). */
@@ -177,7 +176,7 @@ export function wikiIds(reading: Reading, items: readonly number[]): number[] {
   return versionIds(
     db,
     refs.filter((r) => shown.has(refKey(r))).flatMap((r) => registry.lineage(db, r)),
-  ).slice(0, STRATEGY_LIST_LIMIT);
+  );
 }
 
 const VECTOR_REF = /^source-version:(\d+):(\d+)$/;

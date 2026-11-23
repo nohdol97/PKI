@@ -29,6 +29,7 @@ import {
   ALWAYS_ON,
   DEFAULT_ENABLED_STRATEGIES,
   STRATEGIES,
+  STRATEGY_LIST_LIMIT,
   type Hit,
   type RetrievalConditions,
   type RetrievalResult,
@@ -141,7 +142,6 @@ export async function retrieve(
   } else {
     skipped("metadata");
   }
-  route.rerank = { status: "used", count: new Set(lists.flatMap((l) => l.ids)).size };
 
   const heads = new Map(
     readVersionHeads(db, [...new Set(lists.flatMap((l) => l.ids))]).map((h) => [h.id, h]),
@@ -149,7 +149,14 @@ export async function retrieve(
   // R12: what the policy hides for a search leaves each list before the lists are fused and cut, so a hidden
   // version takes no rank and no hit slot
   const searchable = shownVersions(db, registry, [...heads.keys()]);
-  for (const list of lists) list.ids = list.ids.filter((id) => heads.has(id) && searchable.has(id));
+  for (const list of lists) {
+    // the cut of each strategy's list (R3) comes after the check, so a hidden version takes none of its slots
+    list.ids = list.ids
+      .filter((id) => heads.has(id) && searchable.has(id))
+      .slice(0, STRATEGY_LIST_LIMIT);
+    route[list.strategy] = { status: "used", count: list.ids.length };
+  }
+  route.rerank = { status: "used", count: new Set(lists.flatMap((l) => l.ids)).size };
   const merged = merge(
     lists,
     (id) => {
