@@ -21,6 +21,7 @@ import {
   createBackup,
   insertLocation,
   leaseNextJob,
+  listLocations,
   newLocalId,
   openManifest,
   readPending,
@@ -76,11 +77,22 @@ function healthy(path: string): boolean {
  * A data folder whose backup holds two sources, the live database a third one that came after, and a restore
  * staged from that backup: the state a user is in when they quit the app after asking for the restore.
  */
-function stagedFolder(): void {
+function stagedFolder(withFolder = false): void {
   const db = openCanonicalDb(data);
   registerConnectorInstance(db, "c1", "jsonl-import");
   for (const externalId of ["a", "b"]) {
     saveSourceRecord(db, "c1", { namespace: "n", externalId, title: externalId, body: "본문" });
+  }
+  if (withFolder) {
+    insertLocation(db, {
+      id: newLocalId(),
+      type: "folder",
+      displayPath: root,
+      realPath: root,
+      rootDev: "1",
+      rootIno: "2",
+      createdAt: NOW.toISOString(),
+    });
   }
   const { fileName } = createBackup({
     db,
@@ -268,6 +280,32 @@ describe("restore.finish (H01-R12)", () => {
     expect(last).toMatchObject({ reapplied: 4, clearedConsents: 1, pausedLocations: 1 });
     expect(JSON.parse(readSetting(db, RESTORE_LAST_SETTING) as string)).toEqual(last);
     db.close();
+  });
+});
+
+describe("restore.pause (H01-R12, M1)", () => {
+  it("a restart after a process that was gone right after the finish returned still finds the restored folders paused", async () => {
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root, { recursive: true });
+    mkdirSync(folder);
+    stagedFolder(true);
+    const run = applyPendingRestore(data, openBetterSqlite3);
+    const db = openCanonicalDb(data);
+    run.db = db;
+    // the start is gone right after the finish returned: marker and previous file removed, no driver started yet
+    finishRestore(db, run, REPORT);
+    db.close();
+    expect(existsSync(join(data, RESTORE_DIR))).toBe(false);
+    const booted = await bootBackend({
+      dataDir: data,
+      token: "t".repeat(43),
+      allowedOrigins: [],
+      secrets: NO_SECRET_STORE,
+    });
+    const states = listLocations(booted.db).map((l) => [l.state, l.stateReason]);
+    await booted.server.close();
+    booted.db.close();
+    expect(states).toEqual([["paused", "restored"]]);
   });
 });
 

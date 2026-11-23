@@ -10,6 +10,7 @@ import {
   RESTORE_DIR,
   RESTORE_LAST_SETTING,
   STAGED_FILE,
+  closeLocation,
   listLocations,
   readPending,
   readSetting,
@@ -256,6 +257,11 @@ export function finishRestore(
           leaseMs: 60_000, // unused with ignoreExpiry; a real lease length keeps the clock-regression branch out of it
           ignoreExpiry: true,
         });
+        // the restored rows say `active` for folders that may since be revoked ones (I02B-R34): paused here, in the
+        // same commit as the record, so no start that is cut off afterwards leaves them read
+        const readable = listLocations(db).filter(isReadable);
+        for (const location of readable) closeLocation(db, location.id, "paused", "restored");
+        const paused = readable.length;
         const clearedConsents = Number(db.all("SELECT count(*) AS n FROM consents")[0]?.n);
         db.run("DELETE FROM consents");
         for (const target of [ENGINE_KIND, VECTOR_KIND]) {
@@ -267,7 +273,7 @@ export function finishRestore(
           appliedAt: report.now.toISOString(),
           backupCreatedAt: summary.backupCreatedAt,
           reapplied: report.reapplied,
-          pausedLocations: listLocations(db).filter(isReadable).length,
+          pausedLocations: paused,
           clearedConsents,
           embeddingSpaceDiffers:
             JSON.stringify(summary.embeddingSpace) !== JSON.stringify(report.embeddingSpace),

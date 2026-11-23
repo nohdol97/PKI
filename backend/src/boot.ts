@@ -405,7 +405,7 @@ async function startBackend(
     limits: () => readLocalFilesSettings(db).watch,
   });
   late.driver = driver;
-  driver.start(needsRebuild(reapplied) || restore.applied);
+  driver.start(needsRebuild(reapplied));
   const server = await startServer({
     token: options.token,
     allowedOrigins: options.allowedOrigins,
