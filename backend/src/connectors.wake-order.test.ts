@@ -6,11 +6,13 @@ import { migrate, registerConnectorInstance, saveSourceRecord, type SqlDriver } 
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { syncConnector } from "./connectors.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c", "k");
   saveSourceRecord(db, "c", { externalId: "x", title: "x", body: "본문" });
 });

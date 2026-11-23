@@ -3,16 +3,17 @@
 import { ErrorResponseSchema, routes, type VectorIndex } from "@pki/contracts";
 import { migrate, writeSetting } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { MemoryVectorIndex, send } from "@pki/testkit";
+import { MemoryVectorIndex, send, memoryDbTemplate } from "@pki/testkit";
 import { describe, expect, it, vi } from "vitest";
 import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer } from "./server.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const TOKEN = "s".repeat(43);
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
-const db = openBetterSqlite3(":memory:");
-migrate(db);
+const db = freshDb();
 const stores = { db, dataDirectory: "/synthetic/data", egress: productEgress(db) };
 
 async function getStatus(vectorIndex: VectorIndex) {

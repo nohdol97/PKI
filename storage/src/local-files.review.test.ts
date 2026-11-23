@@ -16,14 +16,16 @@ import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 import { recordTombstone } from "./tombstones.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const AT = "2026-11-22T00:00:00.000Z";
 let db: SqlDriver;
 let loc: string;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "local-files", "local-files");
   registerConnectorInstance(db, "mail-1", "mail");
   loc = newLocation();

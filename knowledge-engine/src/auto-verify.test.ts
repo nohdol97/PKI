@@ -28,7 +28,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { setOntologyStatusForTest, setStatusForTest } from "@pki/testkit";
+import { setOntologyStatusForTest, setStatusForTest, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AUTO_VERIFY_SETTING,
@@ -40,14 +40,15 @@ import {
 } from "./auto-verify.ts";
 import { DEPENDENCY_DELAY, DEPENDS_ON, recomputeDependencyDelay } from "./dependency-delay.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const T = "2026-11-23T00:00:00.000Z";
 const DATE = "2026-12-01";
 const OTHER_DATE = "2026-12-09";
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "imported", "jsonl-import");
 });
 afterEach(() => db.close());

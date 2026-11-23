@@ -10,11 +10,13 @@ import { automatedLifecycle } from "./semantic-lifecycle.ts";
 import { userDecisions } from "./semantic-user.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 import { fillValidity, validitySetByUser } from "./valid-time.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
 });
 afterEach(() => db.close());
 

@@ -2,7 +2,7 @@
 // are knowledge-engine's (`auto-verify.test.ts`); what is held here is what the gate refuses whoever
 // calls it: an item, a row that is not a candidate, the user's rows (ahead of the same-state shortcut)
 // and, for the restore, a row the policy did not verify.
-import { setStatusForTest } from "@pki/testkit";
+import { setStatusForTest, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { insertItem, saveFact, type KnowledgeStatus } from "./knowledge.ts";
@@ -11,10 +11,11 @@ import { automatedLifecycle, type EntryRef } from "./semantic-lifecycle.ts";
 import { userDecisions } from "./semantic-user.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
 });
 afterEach(() => db.close());
 

@@ -17,12 +17,14 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createProductRegistry } from "./canonical-kinds.ts";
 import { knowledgeCandidates } from "./linking.ts";
 import { createWikiSummaryHandler } from "./wiki-summary-job.ts";
 import { addFact, addItem, addSource, AT, buildWiki, cite } from "./wiki.test-support.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const KEPT = "마감은 12월 5일이다.";
 const INVENTED = "예산은 두 배로 늘었다.";
@@ -69,8 +71,7 @@ function setUp(registry?: ReturnType<typeof createProductRegistry>) {
 }
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());
@@ -151,8 +152,7 @@ describe("wiki.summary-job: only located sentences are kept (K01-C4 ①)", () =>
     expect(provider.requests).toEqual([]);
 
     db.close();
-    db = openBetterSqlite3(":memory:");
-    migrate(db);
+    db = freshDb();
     registerConnectorInstance(db, "c1", "test-fixtures");
     page(Array.from({ length: 9 }, (_, i) => ({ body: `문서 ${i}` })));
     setWikiSummary(db, true, new Date(AT));

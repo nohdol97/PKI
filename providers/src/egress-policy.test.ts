@@ -15,11 +15,13 @@ import {
   parseEndpoint,
   type EgressRule,
 } from "./egress-policy.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
 });
 afterEach(() => db.close());
 

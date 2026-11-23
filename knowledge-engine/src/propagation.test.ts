@@ -25,6 +25,9 @@ import {
   recomputeDependencyDelay,
 } from "./dependency-delay.ts";
 import { propagateNewVersion } from "./propagation.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const attrs: KnowledgeAttributes = {
   epistemic: "explicit",
@@ -38,8 +41,7 @@ let x: number;
 let y: number;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   x = insertItem(db, { type: "Project", name: "미리내 프로젝트", ...attrs });
   y = insertItem(db, { type: "System", name: "물결 API", ...attrs });

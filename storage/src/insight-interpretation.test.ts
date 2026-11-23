@@ -16,6 +16,9 @@ import { addEvidence, insertItem, saveFact, type KnowledgeAttributes } from "./k
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 let key: InsightKey;
@@ -32,8 +35,7 @@ const active = (summary: string) =>
   ({ state: "active", summary, evidenceIds: evidence, factLines: ["줄"] }) as const;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   saveSourceRecord(db, "c1", { externalId: "e1", title: "t", body: "abc" });
   const x = insertItem(db, { type: "project", name: "A", ...attrs });

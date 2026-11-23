@@ -15,12 +15,14 @@ import {
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   saveSourceRecord(db, "c1", { externalId: "a", title: "등대 점검 초안", body: "합성 자료" });
   saveSourceRecord(db, "c1", { externalId: "b", title: "Harbor budget", body: "synthetic pier" });

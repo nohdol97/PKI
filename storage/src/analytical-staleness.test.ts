@@ -22,6 +22,9 @@ import { applyTransition, automatedLifecycle } from "./semantic-lifecycle.ts";
 import { createUserDecisions, userDecisions } from "./semantic-user.ts";
 import { registerConnectorInstance } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const AT = "2026-11-23T01:02:03.000Z";
 
@@ -99,8 +102,7 @@ function scene(db: SqlDriver): Scene {
 let db: SqlDriver;
 let s: Scene;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   s = scene(db);
 });

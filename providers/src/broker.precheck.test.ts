@@ -5,7 +5,7 @@
 // the CLI's version query is remembered for an hour per Provider.
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { describe, expect, it } from "vitest";
 import {
   createBroker,
@@ -17,6 +17,8 @@ import {
 } from "./broker.ts";
 import { createUserActionLedger } from "./user-actions.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 function setup(
   options: {
     provider?: FakeProvider | undefined;
@@ -24,8 +26,7 @@ function setup(
     run?: (input: ExecutionInput) => { run: true } | { run: false; reason: string };
   } = {},
 ) {
-  const db = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db = freshDb();
   const records: CallRecord[] = [];
   const egressInputs: EgressInput[] = [];
   const executionInputs: ExecutionInput[] = [];

@@ -1,7 +1,7 @@
 // The default Provider (V01-R9, V01-C4 "두 CLI가 모두 있으면 사용자가 기본 Provider를
 // 고른다"; T10 handoff 8): the Broker calls the Provider the user chose, and none
 // when nothing or an unbound name is chosen — never one picked on the user's behalf.
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { migrate, writeSetting } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { describe, expect, it } from "vitest";
@@ -12,12 +12,13 @@ import {
   writeDefaultProvider,
 } from "./provider-selection.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const claude = new FakeProvider({ id: "claude-code", transport: "cli" });
 const codex = new FakeProvider({ id: "codex", transport: "cli" });
 
 function db() {
-  const d = openBetterSqlite3(":memory:");
-  migrate(d);
+  const d = freshDb();
   return d;
 }
 

@@ -15,12 +15,14 @@ import {
 } from "@pki/contracts";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { send } from "@pki/testkit";
+import { send, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { productAdapters, productEgress } from "./composition.ts";
 import { connectorCredentialName } from "./connector-credentials.ts";
 import { createConnectorManager, type ConnectorFactory } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const TOKEN = "k".repeat(43);
 const KIND = "fork";
@@ -65,8 +67,7 @@ let headers: Record<string, string>;
 let close: () => void;
 beforeEach(async () => {
   values.clear();
-  const db = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db = freshDb();
   const connectors = await createConnectorManager(
     db,
     [
@@ -211,8 +212,7 @@ describe("the route passes the manager's answer through", () => {
   it.each(["done", "queued", "skipped"] as const)(
     "answers %s as the manager said it",
     async (rebuild) => {
-      const db = openBetterSqlite3(":memory:");
-      migrate(db);
+      const db = freshDb();
       const stores = { db, dataDirectory: "/synthetic/data", egress: productEgress(db) };
       const stub = await startServer({
         token: TOKEN,
@@ -245,8 +245,7 @@ describe("the route passes the manager's answer through", () => {
 
 describe("the route without a manager that can rebuild", () => {
   it("answers connector-unavailable (only a test double lacks it: the product's manager is built before the server starts)", async () => {
-    const db = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db = freshDb();
     const stores = { db, dataDirectory: "/synthetic/data", egress: productEgress(db) };
     const bare = await startServer({
       token: TOKEN,

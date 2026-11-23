@@ -26,13 +26,15 @@ import {
   RECHECK_LATE_LIMIT,
   type ConnectorFactory,
 } from "./connectors.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 let lines: string[];
 beforeEach(() => {
   vi.useFakeTimers();
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   lines = [];
   vi.spyOn(console, "error").mockImplementation((line: unknown) => void lines.push(String(line)));
 });

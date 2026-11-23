@@ -26,18 +26,24 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { csvVersion, setOntologyStatusForTest, type StoredTableVersion } from "@pki/testkit";
+import {
+  csvVersion,
+  setOntologyStatusForTest,
+  type StoredTableVersion,
+  memoryDbTemplate,
+} from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatasetProfileHandler } from "./dataset-profile.ts";
 import { propagateNewVersion } from "./propagation.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const FIXTURES = fileURLToPath(new URL("../../fixtures/documents/", import.meta.url));
 const T0 = new Date("2026-11-23T00:00:00.000Z");
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   setAnalyticalProfile(db, true, T0);
 });

@@ -5,7 +5,7 @@
 import { ProviderError, type StructuredRequest } from "@pki/contracts";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { installFakeCli, structuredRequest, type FakeCli } from "@pki/testkit";
+import { installFakeCli, structuredRequest, type FakeCli, memoryDbTemplate } from "@pki/testkit";
 import { mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,8 @@ import { CLI_PROFILES } from "../cli-profiles.ts";
 import { createUserActionLedger } from "../user-actions.ts";
 import { createClaudeCodeProvider } from "./cli-provider.ts";
 import type { CliProviderOptions } from "./cli-provider.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 /** This file's run root: every run's folder is made here and must be gone after it. */
 const runs = mkdtempSync(join(tmpdir(), "pki-cli-runs-test-"));
@@ -100,8 +102,7 @@ describe("cli path: the Provider", () => {
 
 describe("cli path: through the Broker", () => {
   function broker(provider: ReturnType<typeof claudeProvider>) {
-    const db = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db = freshDb();
     const ledger = createUserActionLedger();
     const judged: ExecutionInput[] = [];
     const instance = createBroker({

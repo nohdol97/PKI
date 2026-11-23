@@ -24,6 +24,9 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { COMPLETION_DATE, TARGET_DATE } from "./dependency-delay.ts";
 import { applyTombstone, liftTombstone } from "./tombstone-entry.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const attrs: KnowledgeAttributes = {
   epistemic: "explicit",
@@ -60,8 +63,7 @@ function fact(kind: string, value: string, sourceVersionId: number, body: string
 }
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   item = insertItem(db, { type: "Project", name: "미리내 프로젝트", ...attrs });
   const kept = version("mail", "목표 12-05");

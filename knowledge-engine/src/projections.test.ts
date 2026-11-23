@@ -17,7 +17,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
-import { MemoryKnowledgeEngine, MemoryVectorIndex } from "@pki/testkit";
+import { MemoryKnowledgeEngine, MemoryVectorIndex, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NullKnowledgeEngine } from "./adapters/null-knowledge-engine.ts";
 import {
@@ -29,13 +29,14 @@ import {
 } from "./projections.ts";
 import { purgeSource } from "./purge.test-support.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const SPACE = { modelId: "fake", revision: "r1", dimension: 3 };
 const AT = "2026-11-22T00:00:00.000Z";
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

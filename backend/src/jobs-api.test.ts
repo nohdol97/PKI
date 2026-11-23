@@ -14,7 +14,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { send } from "@pki/testkit";
+import { send, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { productAdapters, productEgress } from "./composition.ts";
 import type { Clock } from "./clock.ts";
@@ -22,6 +22,8 @@ import { createJobActions } from "./job-actions.ts";
 import { JOBS_LISTED, type JobsPort } from "./jobs-view.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const TOKEN = "j".repeat(43);
 const ORIGIN = "http://localhost:5173";
@@ -87,8 +89,7 @@ const call = (name: RouteName, body?: unknown, headers = valid) =>
   send(server.port, routes[name].path, headers, routes[name].method, body);
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   wake.mockClear();
   cancelRunning.mockClear();
   scheduler = createScheduler({ db, clock, timeZone: () => "UTC", openJobCap: 4 });

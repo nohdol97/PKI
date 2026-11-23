@@ -4,7 +4,7 @@
 // at another of its layer first), inside the caller's transaction. Also the
 // registry's checks, its invalidation record, `visible` and `scopesOf`, and a SQL
 // double run through the testkit contract suite.
-import { derivativeKindContract, seedLegacyTombstone } from "@pki/testkit";
+import { derivativeKindContract, seedLegacyTombstone, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
@@ -26,6 +26,8 @@ import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 import { recordTombstoneLift } from "./tombstones.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const AT = "2026-11-22T00:00:00.000Z";
 const permissive: ScopePolicy = {
   compare: () => "equal",
@@ -36,8 +38,7 @@ const permissive: ScopePolicy = {
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   db.exec(`
     CREATE TABLE double_rows (kind TEXT NOT NULL, id TEXT NOT NULL, text TEXT NOT NULL,

@@ -34,6 +34,9 @@ import {
   TARGET_DATE,
   recomputeDependencyDelay,
 } from "./dependency-delay.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const AT = "2026-11-22T00:00:00.000Z";
 const attrs: KnowledgeAttributes = {
@@ -51,8 +54,7 @@ const sameScopeOnly: ScopePolicy = {
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

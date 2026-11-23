@@ -16,6 +16,9 @@ import {
   applyConfiguredScopes,
   bindConnectorScopes,
 } from "./connector-scopes.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 describe("what a registration's value binds (C3)", () => {
   it("maps an instance id to a normalized scope, or to null", () => {
@@ -156,8 +159,7 @@ describe("copying into the instance rows", () => {
   const configured = () =>
     db.all("SELECT id, configured_scope FROM connector_instances ORDER BY id");
   beforeEach(() => {
-    db = openBetterSqlite3(":memory:");
-    migrate(db);
+    db = freshDb();
     for (const id of ["a", "b", "c"]) registerConnectorInstance(db, id, "k");
   });
 

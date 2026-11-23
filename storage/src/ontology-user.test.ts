@@ -6,7 +6,7 @@
 // approval with no lineage row left removes the element; an undo of an approval or an add of an
 // element that is in use is refused with counts only; a retirement is undone with the edition going
 // up, never down; a rule change is not undone. All data is synthetic.
-import { setOntologyStatusForTest, setStatusForTest } from "@pki/testkit";
+import { setOntologyStatusForTest, setStatusForTest, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { insertItem, saveFact, saveRelation, type KnowledgeAttributes } from "./knowledge.ts";
@@ -24,10 +24,11 @@ import { readKnowledgeRevision } from "./revisions.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

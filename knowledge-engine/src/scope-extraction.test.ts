@@ -27,12 +27,14 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createProductRegistry, propagateCanonical } from "./canonical-kinds.ts";
 import { COMPLETION_DATE, DEPENDS_ON, TARGET_DATE } from "./dependency-delay.ts";
 import { createExtractHandler } from "./extraction.ts";
 import { knowledgeCandidates } from "./linking.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const T0 = new Date("2026-11-21T00:00:00.000Z");
 const attrs: KnowledgeAttributes = {
@@ -52,8 +54,7 @@ let db: SqlDriver;
 let requests: BrokerRequest[];
 let duringCall: (() => void) | undefined;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "imported", "jsonl-import");
   requests = [];
   duringCall = undefined;

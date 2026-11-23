@@ -3,7 +3,7 @@
 // the change sequence it read, the latest canonical version a stale removal is re-sent
 // with, and the kinds that carry no version fence. The handlers are backend's
 // (projection-jobs.test.ts: `projection.*`).
-import { seedLegacyTombstone } from "@pki/testkit";
+import { seedLegacyTombstone, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { closeJob, leaseNextJob, readJob, registerJob, type StoredJob } from "./jobs.ts";
@@ -19,10 +19,11 @@ import {
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());
