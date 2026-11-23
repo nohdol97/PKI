@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>PKI 홈 · H1 그림 한 장</title>
+<link rel="stylesheet" href="../g-evidence-briefing/base.css">
+<link rel="stylesheet" href="h1-diagram.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">PKI</div>
+    <nav class="nav" aria-label="주 메뉴">
+      <a href="#" aria-current="page">홈</a>
+      <a href="#">질문</a>
+      <a href="#">알림 <span class="count">3</span></a>
+      <a href="#">위키</a>
+      <a href="#">더 보기 ▾</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="checked"><span class="dot"></span><span><strong>08:30 기준</strong> · 메일·메신저·Wiki 확인함</span></div>
+    <button class="textsize" type="button">글자 크기 가 ▾</button>
+  </header>
+  <main class="page">
+    <div class="wrap">
+      <div class="head">
+        <h1>11월 24일 화요일</h1>
+        <p class="count-line">확인할 것 5건 · 높음 1</p>
+      </div>
+
+      <section class="card hero" aria-labelledby="i1">
+        <div class="toprow">
+          <span class="tag attn">높음</span>
+          <span class="label">일정 위험</span>
+          <span class="when">오늘 09:12</span>
+        </div>
+        <h2 id="i1">결제 모듈 이관 마감이 선행 작업보다 4일 빠릅니다</h2>
+
+        <div class="diagram">
+          <svg viewBox="0 0 1100 250" role="img" aria-label="12월 5일 마감과 12월 9일 완료 예정 사이 4일 차이">
+            <rect class="gap" x="411" y="20" width="371" height="64" rx="6"/>
+            <rect class="bar a" x="40" y="20" width="371" height="64" rx="6"/>
+            <rect class="bar b" x="40" y="100" width="742" height="64" rx="6"/>
+            <text class="bt" x="58" y="60">결제 모듈 이관 마감</text>
+            <text class="bt" x="58" y="140">인증 서버 교체 완료 예정</text>
+            <text class="gt" x="596" y="65" text-anchor="middle">4일</text>
+            <line class="mk" x1="411" y1="20" x2="411" y2="190"/>
+            <line class="mk" x1="782" y1="100" x2="782" y2="190"/>
+            <line class="axis" x1="40" y1="190" x2="1060" y2="190"/>
+            <path class="tick" d="M40 190v9M132.7 190v9M225.5 190v9M318.2 190v9M411 190v9M503.6 190v9M596.4 190v9M689.1 190v9M781.8 190v9M874.5 190v9M967.3 190v9M1060 190v9"/>
+            <text class="dl" x="40" y="232" text-anchor="start">12월 1일</text>
+            <text class="dl strong" x="411" y="232" text-anchor="middle">12월 5일</text>
+            <text class="dl strong" x="782" y="232" text-anchor="middle">12월 9일</text>
+            <text class="dl" x="1060" y="232" text-anchor="end">12월 12일</text>
+          </svg>
+          <span class="chip c1">김서연 · 메일 · 11월 18일</span>
+          <span class="chip c2">이하준 · 메신저 · 11월 20일</span>
+        </div>
+
+        <div class="actions">
+          <button class="btn primary" type="button">근거 3건 보기 ▸</button>
+          <span class="how">추론</span>
+          <div class="spacer"></div>
+          <button class="btn" type="button">유용함</button>
+          <button class="btn" type="button">잘못된 정보</button>
+          <button class="btn" type="button">더 보기 ▾</button>
+          <button class="btn quiet" type="button">원본 보기</button>
+        </div>
+      </section>
+
+      <div class="tiles">
+        <article class="card tile">
+          <div class="trow"><span class="tag warn">중간</span><span class="label">충돌</span></div>
+          <h3>배포 일자 불일치</h3>
+          <p class="fact">12일 ↔ 15일</p>
+          <p class="meta">어제</p>
+        </article>
+        <article class="card tile">
+          <div class="trow"><span class="tag warn">중간</span><span class="label">변경 감지</span></div>
+          <h3>정산 배치 담당자</h3>
+          <p class="fact">박도윤 → 이하준</p>
+          <p class="meta">어제</p>
+        </article>
+        <article class="card tile">
+          <div class="trow"><span class="tag none">낮음</span><span class="label">누락</span></div>
+          <h3>QA 일정</h3>
+          <p class="fact">회귀 시험 기간 없음</p>
+          <p class="meta">11월 21일</p>
+        </article>
+        <article class="card tile">
+          <div class="trow"><span class="tag none">낮음</span><span class="label">반복</span></div>
+          <h3>스테이징 DB 접근 권한</h3>
+          <p class="fact">3회 반복</p>
+          <p class="meta">11월 20일</p>
+        </article>
+      </div>
+
+      <form class="ask">
+        <input type="text" placeholder="물어보기…" aria-label="질문">
+        <button class="btn primary" type="button">묻기</button>
+      </form>
+    </div>
+  </main>
+</div>
+</body>
+</html>

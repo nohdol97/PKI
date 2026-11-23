@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>PKI · 홈 (한 번에 한 건)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../g-evidence-briefing/base.css">
+<link rel="stylesheet" href="h4-one-at-a-time.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">PKI</div>
+    <nav class="nav" aria-label="주 메뉴">
+      <a href="#" aria-current="page">홈</a>
+      <a href="#">질문</a>
+      <a href="#">알림 <span class="count">3</span></a>
+      <a href="#">위키</a>
+      <a href="#">더 보기 ▾</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="checked"><span class="dot"></span><span><strong>08:30 기준</strong> · 메일·메신저·Wiki 확인함</span></div>
+    <button class="textsize" type="button">글자 크기 가 ▾</button>
+  </header>
+  <main class="page">
+    <div class="deck">
+      <div class="progress">
+        <ol class="steps" aria-label="진행 단계">
+          <li class="active" aria-current="step"><span class="bar"></span><span class="lab">1 일정 위험</span></li>
+          <li><span class="bar"></span><span class="lab">2 충돌</span></li>
+          <li><span class="bar"></span><span class="lab">3 변경 감지</span></li>
+          <li><span class="bar"></span><span class="lab">4 누락</span></li>
+          <li><span class="bar"></span><span class="lab">5 반복</span></li>
+        </ol>
+        <div class="pos">1 / 5</div>
+      </div>
+
+      <div class="stage">
+        <button class="btn nav-btn" type="button" disabled>← 이전</button>
+
+        <article class="card insight">
+          <div class="top">
+            <span class="tag attn">높음</span>
+            <span class="kind">일정 위험</span>
+            <span class="when">오늘 09:12</span>
+          </div>
+          <h1>결제 모듈 이관 마감이 선행 작업보다 4일 빠릅니다</h1>
+          <div class="compare">
+            <div class="side">
+              <div class="what">마감</div>
+              <div class="big">12월 5일</div>
+              <div class="from">김서연 · 메일 · 11월 18일</div>
+            </div>
+            <div class="gap"><span class="num">4일</span></div>
+            <div class="side">
+              <div class="what">선행 작업 완료 예정</div>
+              <div class="big">12월 9일</div>
+              <div class="from">이하준 · 메신저 · 11월 20일</div>
+            </div>
+          </div>
+          <div class="bottom">
+            <button class="btn open" type="button">근거 3건 보기 ▸</button>
+            <span class="how">추론</span>
+            <div class="spacer"></div>
+            <button class="btn" type="button">유용함</button>
+            <button class="btn" type="button">잘못된 정보</button>
+            <button class="btn" type="button">더 보기 ▾</button>
+          </div>
+        </article>
+
+        <button class="btn primary nav-btn" type="button">다음 →</button>
+      </div>
+
+      <div class="below">
+        <p class="next">다음: 충돌 · 배포 일자 12일 ↔ 15일</p>
+        <a href="#">5건 한꺼번에 보기</a>
+      </div>
+
+      <form class="ask">
+        <input type="text" placeholder="이 건에 대해 물어보기…" aria-label="이 건에 대해 물어보기">
+        <button class="btn primary" type="button">묻기</button>
+      </form>
+    </div>
+  </main>
+</div>
+</body>
+</html>

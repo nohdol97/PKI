@@ -1,0 +1,22 @@
+/* H3: five headlines only. Page stylesheet; base.css is linked first. */
+.col { max-width: 1040px; margin: 0 auto; }
+.head { margin-top: 12px; display: flex; align-items: baseline; gap: 20px; padding-bottom: 14px; }
+.head h1 { font-size: var(--fs-h1); font-weight: 700; }
+.count-line { font-size: var(--fs-lead); font-weight: 600; color: var(--ink-2); }
+.rows { border-top: 1px solid var(--line-strong); }
+.row {
+  position: relative; display: grid; grid-template-columns: 110px 1fr 92px 112px; align-items: center; gap: 0 20px;
+  height: 114px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line);
+}
+.row.first { background: var(--attn-bg); border-left: 4px solid var(--attn); padding-left: 16px; }
+.status { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.kind { font-size: var(--fs-sub); color: var(--ink-2); }
+.body h2 { font-size: 23px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.body h2 b { font-size: 26px; font-weight: 700; }
+.meta-line { font-size: var(--fs-sub); color: var(--ink-2); margin-top: 4px; }
+.gap { font-size: var(--fs-sub); font-weight: 700; color: var(--attn); background: var(--surface); border: 1px solid #E9C4BB; border-radius: 6px; padding: 4px 12px; white-space: nowrap; }
+.go { text-decoration: none; color: var(--accent); white-space: nowrap; }
+.ask { display: flex; gap: 12px; margin-top: 32px; }
+.field { flex: 1; height: 52px; padding: 0 18px; font: inherit; font-size: var(--fs-body); border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); }
+.ask .btn { height: 52px; }
+.row > .go { grid-column: 4; }

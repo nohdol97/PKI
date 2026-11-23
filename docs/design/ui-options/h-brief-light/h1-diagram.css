@@ -1,0 +1,38 @@
+.wrap { max-width: 1280px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; gap: 14px; }
+.head { display: flex; align-items: baseline; gap: 20px; }
+.head h1 { font-size: var(--fs-h1); font-weight: 700; line-height: 1.3; }
+.count-line { font-size: var(--fs-lead); color: var(--ink-2); font-weight: 600; }
+
+.hero { padding: 18px 28px 20px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; border-left: 6px solid var(--attn); }
+.toprow { display: flex; align-items: center; gap: 12px; }
+.toprow .when { margin-left: auto; font-size: var(--fs-sub); color: var(--ink-2); }
+.hero h2 { font-size: 28px; font-weight: 700; line-height: 1.35; }
+
+.diagram { position: relative; padding-bottom: 40px; margin-top: 4px; margin-bottom: 10px; }
+.diagram svg { display: block; width: 100%; height: auto; }
+.gap { fill: var(--attn-bg); stroke: var(--attn); stroke-width: 2; stroke-dasharray: 6 5; }
+.bar.a { fill: var(--accent); }
+.bar.b { fill: #4A5F7C; }
+.bt { font-size: 19px; font-weight: 600; fill: #fff; }
+.gt { font-size: 44px; font-weight: 700; fill: var(--attn); }
+.mk { stroke: var(--ink); stroke-width: 2; }
+.axis { stroke: var(--line-strong); stroke-width: 2; }
+.tick { stroke: var(--line-strong); stroke-width: 2; fill: none; }
+.dl { font-size: 17px; font-weight: 400; fill: var(--ink-2); }
+.dl.strong { font-size: 22px; font-weight: 700; fill: var(--ink); }
+
+.chip { position: absolute; bottom: 0; font-size: var(--fs-sub); color: var(--ink-2); background: var(--surface-quiet); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; white-space: nowrap; line-height: 1.5; }
+.chip.c1 { right: calc(100% - 37.4%); }
+.chip.c2 { right: calc(100% - 71.1% - 40px); }
+
+.actions { display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); margin-top: auto; }
+.actions .spacer { flex: 1; }
+
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.tile { padding: 14px 20px 14px; display: flex; flex-direction: column; gap: 2px; }
+.trow { display: flex; align-items: center; gap: 10px; }
+.tile h3 { font-size: var(--fs-body); font-weight: 600; color: var(--ink-2); margin-top: 4px; }
+.fact { font-size: 24px; font-weight: 700; line-height: 1.3; color: var(--ink); }
+
+.ask { display: flex; gap: 12px; }
+.ask input { flex: 1; height: var(--target); padding: 0 16px; font: inherit; font-size: var(--fs-body); border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); }
