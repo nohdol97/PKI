@@ -17,6 +17,8 @@ vi.mock("./scope-grading.ts", async (importOriginal) => ({
   SCOPE_CLASSES: ["general", "restricted"],
 }));
 
+import type { CandidateItem } from "./broker.ts";
+
 const { createBroker } = await import("./broker.ts");
 const { createUserActionLedger } = await import("./user-actions.ts");
 
@@ -43,13 +45,17 @@ function sourceId(): string {
   return String(db.all("SELECT max(id) AS id FROM source_versions")[0]?.id);
 }
 
-async function call(ids: string[], inputs: string[][] = []) {
+async function call(
+  ids: string[],
+  inputs: string[][] = [],
+  candidates: Record<string, CandidateItem> = {},
+) {
   const ledger = createUserActionLedger();
   const broker = createBroker({
     db,
     provider: () => provider,
     userActions: ledger.redeemer,
-    candidates: { lookup: () => undefined },
+    candidates: { lookup: (id) => candidates[id] },
     egress: { decide: () => ({ allowed: true, destination: "fake", policyVersion: "pv" }) },
     execution: { decide: () => ({ run: true }) },
     recorder: {
@@ -80,7 +86,7 @@ async function call(ids: string[], inputs: string[][] = []) {
       origin: { userActionId },
       taskKind: "extract",
       sourceVersionIds: ids,
-      candidateItemIds: [],
+      candidateItemIds: Object.keys(candidates),
       schemaVersion: 4,
       budget: { timeoutMs: 1000 },
       retryable: false,
@@ -113,5 +119,22 @@ describe("scope.claimed-grade: the combined class is one of the two classes aske
     answerOf = () => "restricted";
     const id = String(db.all("SELECT max(id) AS id FROM source_versions")[0]?.id);
     expect((await call([id])).status).toBe("ok"); // imp2 has no configured scope: strictest([])
+  });
+});
+
+describe("egress.type-names: a name with no source is graded by the mapping's strictest class (S02-R6)", () => {
+  const unsourced = { c1: { name: "민수", evidenceSourceVersionIds: [] } };
+
+  it("asks grading.strictest([]) for a candidate whose lineage is empty", async () => {
+    answerOf = (classes) => classes[0] ?? "restricted";
+    const inputs: string[][] = [];
+    expect((await call([sourceId()], inputs, unsourced)).status).toBe("ok");
+    expect(inputs.filter((c) => c.length === 0)).toHaveLength(1);
+  });
+
+  it("refuses the call when the mapping's strictest([]) is no class of the set; the Provider receives nothing", async () => {
+    answerOf = (classes) => classes[0] ?? "nope";
+    expect(await call([sourceId()], [], unsourced)).toEqual({ status: "rejected", reason: "scope-unjudged" });
+    expect(provider.requests).toEqual([]);
   });
 });

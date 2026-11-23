@@ -599,6 +599,18 @@ describe("linking.verified-forms: through the extract handler and the Broker", (
     expect(egressAsked.at(-1)?.classification).toBe("synthetic");
   });
 
+  it("egress.type-names: a user-made representative's name is never graded by its members' sources alone", async () => {
+    const { rep } = group(
+      stored(fixture("v02-mail.jsonl")),
+      stored(fixture("v02-messenger.jsonl")),
+    );
+    db.run("UPDATE items SET user_authored = 1 WHERE id = ?", [rep]); // the name is the user's own text
+    const run = kit();
+    await run(stored(fixture("v02-wiki.jsonl")));
+    expect(requests.map((r) => r.candidateItemIds)).toEqual([[String(rep)]]);
+    expect(egressAsked.at(-1)?.classification).toBe("general");
+  });
+
   it("resolution.group-reads: offers no representative when a member's source cannot be put together with this document", async () => {
     const rep = item("멀티테넌시");
     quoted(
