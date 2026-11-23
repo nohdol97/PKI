@@ -299,7 +299,11 @@ export function Neighbourhood({
       head={{
         title: "항목",
         right: center.wikiKey !== null && (
-          <button type="button" onClick={() => onWiki(center.wikiKey as string)}>
+          <button
+            type="button"
+            className="btn-text"
+            onClick={() => onWiki(center.wikiKey as string)}
+          >
             {OPEN_WIKI}
           </button>
         ),

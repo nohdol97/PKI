@@ -432,3 +432,32 @@
     font-size: var(--fs-meta);
   }
 }
+
+/* review fixes: focus ring inside the row, quieter list-pane section labels, basis text, small source buttons */
+.rows .row:focus-visible {
+  outline-offset: -2px;
+}
+.pane-list .pane-body > h2,
+.pane-list #feedback-heading {
+  margin: var(--sp-4) 0 var(--sp-1);
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+.sec > p.basis {
+  color: var(--ink-2);
+  font-size: var(--fs-body);
+}
+.quotes li > button {
+  min-height: calc(var(--control-h) - var(--sp-2));
+  font-size: var(--fs-meta);
+}
+pre.source-text {
+  font: inherit;
+}
+.line-list.spread > li {
+  align-items: flex-start;
+}
+.line-text {
+  line-height: calc(var(--control-h) - var(--sp-2));
+}

@@ -40,6 +40,9 @@ const STATE_CLASS: Readonly<Record<string, string>> = {
   resolved: "state-ok",
   dismissed: "state-none",
 };
+/** The findings in the order the rows are drawn: grouped by rule, the API's order inside a rule. */
+export const drawnOrder = <T extends { rule: string }>(findings: readonly T[]): T[] =>
+  RULE_ORDER.flatMap((rule) => findings.filter((f) => f.rule === rule));
 const heading = (f: Finding) => f.targets.map((t) => t.label).join(" ↔ ");
 
 export function Lint({ api }: { api: ApiClient }) {
@@ -88,7 +91,7 @@ export function Lint({ api }: { api: ApiClient }) {
       (e: unknown) => (gone(e) ? setNotice(SOURCE_GONE) : fail(e)),
     );
 
-  const findings = lint?.findings ?? [];
+  const findings = drawnOrder(lint?.findings ?? []);
   const current = findings.find((f) => f.id === chosen);
   const at = current ? findings.indexOf(current) : -1;
   const stateOf = (f: Finding) => (

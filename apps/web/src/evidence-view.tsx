@@ -113,7 +113,7 @@ export function InsightBody({ insight, lead }: { insight: InsightData; lead?: Re
       {insight.reasoningSummary !== null && insight.reasoningBy !== null && (
         <div className="sec">
           <h4>판단 근거</h4>
-          <p>
+          <p className="basis">
             {REASONING_BY[insight.reasoningBy]}: <bdi>{insight.reasoningSummary}</bdi>
           </p>
         </div>

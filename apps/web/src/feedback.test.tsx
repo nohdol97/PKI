@@ -3,7 +3,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ApiClient } from "./api.ts";
-import { InsightFeedback, RowFeedback } from "./feedback.tsx";
+import { InsightFeedback, RowFeedback, scopedNotice } from "./feedback.tsx";
 
 const api = (() => Promise.reject(new Error("not called"))) as unknown as ApiClient;
 const names = (html: string) =>
@@ -56,5 +56,15 @@ describe("InsightFeedback", () => {
     expect(bar).toMatch(
       /class="btn-primary"[^>]*aria-label="유용함: 요약"|aria-label="유용함: 요약"[^>]*class="btn-primary"/,
     );
+  });
+});
+
+// UI01 review A1: a refusal or failure belongs to the Insight it was made for; it never shows under another one.
+describe("scopedNotice", () => {
+  it("shows a held notice only for its own Insight", () => {
+    const held = { id: 1, text: "거절" };
+    expect(scopedNotice(held, 1)).toBe("거절");
+    expect(scopedNotice(held, 2)).toBeUndefined();
+    expect(scopedNotice(undefined, 1)).toBeUndefined();
   });
 });

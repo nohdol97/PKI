@@ -26,21 +26,32 @@ import {
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const gone = (error: unknown) => error instanceof ApiError && error.status === 404;
 
+/** A notice held with the target it was made for; it is shown only while that target is the one on screen. */
+export const scopedNotice = (
+  held: { id: number; text: string | undefined } | undefined,
+  id: number,
+): string | undefined => (held?.id === id ? held.text : undefined);
+
 /** The record call every button makes: the refusal or failure text it leaves, and the press itself. */
 function useRecord(api: ApiClient, target: FeedbackTarget, onChange: () => void) {
-  const [notice, setNotice] = useState<string>();
-  const press = (kind: FeedbackKind) =>
-    api("feedbackRecord", { target, kind }).then(
+  const [held, setHeld] = useState<{ id: number; text: string | undefined }>();
+  const press = (kind: FeedbackKind) => {
+    const id = target.id;
+    return api("feedbackRecord", { target, kind }).then(
       (r) => {
-        setNotice(r.status === "refused" ? feedbackRefusalText(r.reason) : undefined);
+        setHeld({ id, text: r.status === "refused" ? feedbackRefusalText(r.reason) : undefined });
         onChange();
       },
       (error: unknown) => {
-        setNotice(gone(error) ? FEEDBACK_GONE : `보내지 못했습니다: ${message(error)}`);
+        setHeld({
+          id,
+          text: gone(error) ? FEEDBACK_GONE : `보내지 못했습니다: ${message(error)}`,
+        });
         if (gone(error)) onChange();
       },
     );
-  return { notice, press };
+  };
+  return { notice: scopedNotice(held, target.id), press };
 }
 
 /** The record call of one Insight, shared by the head bar's and the action bar's buttons of its detail pane. */

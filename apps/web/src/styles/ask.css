@@ -172,3 +172,8 @@
 .ask-buttons button + button {
   margin-left: 0;
 }
+
+/* the head title starts on the same left line as the centred body column */
+.pane-read .pane-head {
+  padding-left: max(var(--sp-6), calc((100% - 700px) / 2));
+}

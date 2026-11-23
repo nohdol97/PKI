@@ -413,6 +413,7 @@ export function Ask({ api }: { api: ApiClient }) {
             <span className="sr-only">{ASK_QUESTION}</span>
             <textarea
               rows={2}
+              placeholder="다음 질문을 입력하세요"
               value={form.question}
               onChange={(e) => setForm({ ...form, question: e.target.value })}
             />

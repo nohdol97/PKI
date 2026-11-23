@@ -274,3 +274,8 @@ th button {
 [role="alertdialog"] > :last-child {
   margin-bottom: 0;
 }
+
+input + button,
+select + button {
+  margin-left: var(--sp-2);
+}

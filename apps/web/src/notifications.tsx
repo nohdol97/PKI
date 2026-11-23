@@ -139,8 +139,8 @@ export function Notifications({ api, refresh }: { api: ApiClient; refresh: strin
               onAct={act}
             />
           )}
-          {tab === "timeline" && (
-            <Timeline lines={list?.lines ?? []} openedId={openedId} onOpenEvidence={openEvidence} />
+          {tab === "timeline" && list && (
+            <Timeline lines={list.lines} openedId={openedId} onOpenEvidence={openEvidence} />
           )}
           {evidence.notice && <p role="alert">{evidence.notice}</p>}
           <Settings api={api} />
