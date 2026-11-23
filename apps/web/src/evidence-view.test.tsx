@@ -170,6 +170,41 @@ const source = (version: number, latestVersion: number) => ({
   sourceVersion: { id: 3, version, latestVersion, title: "\u202e제목", body: "가나" },
 });
 
+// I02C-C5: the attachment of the evidence's block is drawn as text before the locator line, and not at all for null
+describe("SourceView attachment line", () => {
+  const withAttachment = (
+    attachment: { name: string; mediaType: string; size: number } | null,
+  ) => ({
+    ...source(1, 1),
+    locator: { format: "pdf", page: 3 } as const,
+    attachment,
+  });
+
+  it("shows the attachment's name, type and size before the locator, escaped as text", () => {
+    const html = renderToStaticMarkup(
+      <SourceView
+        source={withAttachment({
+          name: "<b>plan</b>.pdf",
+          mediaType: "application/pdf",
+          size: 1024,
+        })}
+      />,
+    );
+    expect(html).toContain("첨부:");
+    expect(html).toContain("&lt;b&gt;plan&lt;/b&gt;.pdf");
+    expect(html).toContain("application/pdf");
+    expect(html).toContain("1024바이트");
+    expect(html).not.toContain("<b>plan");
+    expect(html.indexOf("첨부:")).toBeLessThan(html.indexOf("위치:"));
+  });
+
+  it("draws no attachment line for null", () => {
+    expect(renderToStaticMarkup(<SourceView source={withAttachment(null)} />)).not.toContain(
+      "첨부:",
+    );
+  });
+});
+
 describe("SourceView labels", () => {
   it("says when the evidence points to a past version, naming the latest", () => {
     expect(renderToStaticMarkup(<SourceView source={source(1, 3)} />)).toContain(
