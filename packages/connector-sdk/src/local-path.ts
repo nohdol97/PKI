@@ -546,8 +546,8 @@ export interface ReadOptions {
   maxFileBytes: number;
   /** Required, as for the walk: a read under an excluded folder is refused (by path and by identity). */
   excluded: readonly ExcludedFolder[];
-  /** The identity the walk saw for this file: when given, the opened file must be that one. */
-  expectedId?: { dev: string; ino: string };
+  /** The identity the walk saw for this file: the opened file must be that one (required: a re-measured one proves nothing). */
+  expectedId: { dev: string; ino: string };
 }
 
 /**
@@ -635,9 +635,8 @@ export async function readLocationFile(options: ReadOptions): Promise<ReadResult
     if (!openedId) return fail("identity-unavailable");
     if (!sameId(openedId, named)) return fail("redirected");
     if (
-      options.expectedId &&
-      (openedId.dev.toString() !== options.expectedId.dev ||
-        openedId.ino.toString() !== options.expectedId.ino)
+      openedId.dev.toString() !== options.expectedId.dev ||
+      openedId.ino.toString() !== options.expectedId.ino
     ) {
       return fail("redirected");
     }
