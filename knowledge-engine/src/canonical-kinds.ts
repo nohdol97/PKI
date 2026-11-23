@@ -178,6 +178,10 @@ const lineageOf: Record<string, (db: SqlDriver, id: number) => SourceVersionRef[
         [id],
       ),
       ...userInputsOf(db, id).map((input) => rowLineage(db, input)),
+      // the links that took a value out of the rule's reading (S02-R19)
+      ...db
+        .all("SELECT link_id FROM insight_link_inputs WHERE insight_id = ?", [id])
+        .map((r) => linkLineage(db, r.link_id as number)),
     ),
   // only a candidate or a rejected type definition follows its source; a verified one (and a retired
   // one, which was verified) is a rule the user accepted and holds no lineage (S01-R20, R22)
