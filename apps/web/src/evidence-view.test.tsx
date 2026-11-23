@@ -4,13 +4,15 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import { ApiError } from "./api.ts";
+import { describe, expect, it, vi } from "vitest";
+import { ApiError, type ApiClient } from "./api.ts";
 import {
   citationSource,
   EvidenceEntry,
   evidenceReducer,
   InsightSummary,
+  openThreadMessage,
+  SameThread,
   SourceView,
   type EvidenceState,
 } from "./evidence-view.tsx";
@@ -403,5 +405,34 @@ describe("citationSource (X02-R5)", () => {
     );
     expect(source.locator).toBeNull();
     expect(source.attachment).toBeNull();
+  });
+});
+
+describe("same-thread list (I02B-C56)", () => {
+  const thread = {
+    messages: [
+      { versionId: 4, title: "<script>alert(1)</script>", author: "김" },
+      { versionId: 5, title: "답장", createdAt: "2026-11-10T09:00:00+09:00" },
+    ],
+    participants: ["김"],
+  };
+
+  it("draws each message as bdi text, never as elements, and marks the open one", () => {
+    const html = renderToStaticMarkup(
+      <SameThread thread={thread} currentVersionId={4} onOpen={() => undefined} />,
+    );
+    expect(html).not.toMatch(/<script/i);
+    expect(html).toContain("<bdi>&lt;script&gt;alert(1)&lt;/script&gt;</bdi>");
+    expect(html).toContain("<bdi>답장</bdi>");
+    expect(html.match(/<button/g)).toHaveLength(1);
+  });
+
+  it("opens another message by its version number", async () => {
+    const api = vi.fn(async () => ({
+      sourceVersion: { id: 5, version: 1, latestVersion: 1, title: "답장", body: "본문" },
+    }));
+    const opened = await openThreadMessage(api as unknown as ApiClient, 5);
+    expect(api).toHaveBeenCalledWith("exploreSource", { versionId: 5 });
+    expect(opened.sourceVersion.id).toBe(5);
   });
 });

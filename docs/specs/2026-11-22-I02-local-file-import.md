@@ -320,7 +320,7 @@ I02-A는 파일 하나를 글과 위치표로 바꾸는 순수 모듈(`@pki/docu
   | `POST /api/local-locations/revoke` | 승인 철회(I02B-R10, R49). 요청에 지울 원본 수를 함께 보내야 한다(화면이 확인 창에 보인 수). 거부는 모두 409이고 아무것도 지워지지 않는다: 수가 다르면 `count-mismatch`, 장부가 거부하면 `ledger-unwritable` 또는 `ledger-degraded`, 인스턴스 잠금을 못 얻으면 `instance-busy`. 성공은 `revoked`(다 지움) 또는 `revoking`(남은 수와 함께) |
   | `GET /api/local-locations/skipped` | 건너뛴 파일 목록(위치 ID, 쪽 매김): 상대 경로, 사유, 처음 건너뛴 시각 |
   | `POST /api/local-locations/reimport` | 건너뛴 파일 하나를 다시 가져오게 한다(revision을 올린다). `user-deleted`인 항목은 tombstone이 해제되어 있지 않으면 409 `not-lifted` |
-  | `GET /api/sources/thread` | I02B-R29 |
+  | `POST /api/sources/thread` | I02B-R55(I02B-R29의 읽기 경로. 이 저장소의 원본 하나를 번호로 읽는 길은 모두 POST라 그 규약을 따른다) |
 
   응답과 로그에 파일의 글은 싣지 않는다. 절대 경로는 위치 목록의 "보이는 경로"에만 있다.
   - **`ledger-degraded`의 답.** 지금 API의 공통 처리기는 `LedgerLineUnwritableError`만 409로 옮기고 `LedgerDegradedError`는 옮기지 않는다. 공통 처리기에 한 줄을 더해, **그 오류가 공통 처리기까지 올라오는 경로**가 장부 잠금 상태에서 409 `ledger-degraded`를 돌려주게 한다(I04-R17이 이미 이름 붙인 오류다). 위치 API만 따로 잡지 않는다. 올라오는 경로는 화면의 사용자 삭제(`POST /api/sources/delete`), tombstone 해제, 이 spec의 위치 API(철회, 삭제 반영, 다시 가져오기 등 `canonicalTransaction`을 여는 것)다. **가져오기(`/api/import/jsonl`, `/api/imports`)와 동기화는 바뀌지 않는다**: 페이지 저장이 트랜잭션의 오류를 모두 잡아 멈춤 코드 `storage-failed`로 돌려주므로(`backend/src/page-store.ts`) 그 경로는 지금처럼 `storage-failed`로 보인다. `@pki/contracts`의 오류 코드 목록(`packages/contracts/src/index.ts`. 지금 `ledger-unwritable`은 있고 `ledger-degraded`는 없다)에 `ledger-degraded`를 더한다.
@@ -352,6 +352,7 @@ I02-A는 파일 하나를 글과 위치표로 바꾸는 순수 모듈(`@pki/docu
 - **I02B-R51 `jsonl-file:` 접두사는 공용의 것이다.** I05 spec은 포크의 등록이 공용 인스턴스의 ID를 쓰지 못하게 하고(`instance-id-reserved`), 무엇이 공용 ID인지는 판정 함수 하나(`isPublicInstanceId`, 잠정 이름. I05-T03이 만든다)가 답한다. `jsonl-file:`로 시작하는 ID는 그 판정에서 공용이어야 한다. 포크가 `jsonl-file:<무엇>`을 자기 인스턴스의 ID로 등록하면, 사용자의 승인 없이 그 이름의 원본을 만들거나 뒤에 승인되는 위치의 인스턴스와 겹칠 수 있기 때문이다. 접두사를 그 판정에 더하는 일은 I02B-T06이 한다(그래서 T06은 I05-T03이 들어온 뒤에 한다). I05의 자체 검사(I05-C14)는 시작할 때 만들어지는 ID만 보므로 실행 중에 생기는 이 ID를 잡지 못한다. 그래서 이 spec이 기준을 둔다(I02B-C48).
 - **I02B-R52 붙여넣기·API 가져오기(`importJsonl`과 `POST /api/imports`의 `importContent`)는 `jsonl-file:` ID를 쓰지 못한다.** 호출자가 적은 `connector_instance_id`가 공용 접두사(`PUBLIC_INSTANCE_ID_PREFIXES`, R51)로 시작하면 그 줄은 쓰지 않고 `instance-conflict`로 돌려준다(`importContent`는 `bad-request`로 거부하고 잠금도 잡지 않는다). 승인 위치의 인스턴스에 쓰고 cursor를 덮는 길을 닫는다(#258 F3). 위치 승인이 안에서 만드는 `jsonl-file:<id>` 인스턴스는 그대로 동작한다. 폴더·파일 위치는 위치마다 인스턴스를 만들지 않으므로(`local-files` 하나) 예약할 접두사가 더 없다.
 - **I02B-R53 시작할 때 사라진 `jsonl-file` 인스턴스의 주기를 끈다.** 철회의 마지막 트랜잭션 뒤 `revoked()` 전에 프로세스가 죽으면 위치 행은 없는데 `jsonl-file:<id>` 동기화 주기가 켜진 채 남아 `instance-not-found` 실패가 쌓인다. 시작할 때, 대응하는 `jsonl-file` 위치 행이 없거나 `revoking`인 `jsonl-file:` 대상의 동기화 주기를 끈다(`revoked()`와 같은 방식. 지우지 않는다). `revoking`이 이어지면 철회 끝에서 `revoked()`가 한 번 더 끈다(#258 F2).
+- **I02B-R55 스레드 읽기 API와 "같은 스레드" 목록.** `POST /api/sources/thread`는 `{ versionId }`(원본 version 하나의 번호)를 받아 그 원본이 속한 스레드를 I02B-R29의 순서로 `{ messages: [{ versionId, title, author?, createdAt? }], participants }`로 돌려준다(글은 싣지 않는다). 메시지마다 읽기 검사(`display`)를 **순서·참여자·개수를 만들기 전에** 건다. 가려진(범위 거부·tombstone) 메시지는 `messages`·`participants`·순서·오류 모양 어디에도 흔적이 없고, 요청한 version이 가려졌거나 스레드가 없거나 스레드의 모든 메시지가 가려졌으면 없는 번호와 같은 404 `not-found`다. 원본 화면은 이것으로 "같은 스레드" 목록을 보이고, 항목을 누르면 그 메시지를 연다. 가져온 글은 믿지 않는 자료이므로 목록은 React 글 노드와 `<bdi>`로만 그린다. (#249)
 - **I02B-R54 검증 실행기의 `record`는 경로를 퍼센트 인코딩해 sqlite URI를 만든다.** 경로에 `?`, `#`, `%`가 있어도 열린다(#258 F6).
 - **I02B-R42 폴더 안의 `.jsonl`.** `folder` 위치 안에서 만난 `.jsonl` 파일은 문서로 읽지 않는다. `unsupported-format`으로 건너뛰고 사유 문구가 "JSONL 파일 추가"를 안내한다. 형식 전환 스위치는 두지 않는다. 한 파일을 읽는 길은 종류마다 하나다.
 
@@ -870,6 +871,7 @@ flowchart LR
 | T03 | C1, C2, C3, C4, C5, C6, C7, C9, C10, C14, C20, C21, C24, C25, C27, C30, C42, C43, C44, C47, C52 |
 | T04 | C8, C11, C12, C13, C15, C22, C26, C28, C29, C39, C40, C41 |
 | T05 | C31, C32 |
+| #249 후속 | C56, C57, C58 |
 | T06 | C33, C34, C35, C36, C48, H1, H2 |
 
 ## 완료 기준 (테스트 가능한 형태)
@@ -971,6 +973,10 @@ I02B-C1~C55는 이 조각의 기준이고, H1·H2는 배포처로 넘어가는 �
 - [x] **I02B-C53** (R52): 가져오기 본문의 한 줄이 `jsonl-file:loc-1`을 인스턴스 ID로 적으면 그 줄만 `instance-conflict`이고 `connector_instances`에 그 ID가 생기지 않으며, 다른 줄은 저장된다(`backend/src/jsonl-import.test.ts`). 접두사 검사 줄을 빼면 이 시험이 실패한다(변이 확인).
 - [x] **I02B-C54** (R53): 부팅한 백엔드에서 승인한 두 `jsonl-file` 위치 가운데 한 행을 지우고 다시 시작하면 지운 쪽의 동기화 주기만 `enabled=false`이고 남은 위치의 것은 켜져 있다(`backend/src/jsonl-file-location.test.ts`).
 - [x] **I02B-C55** (R54): `?`, `#`, `%`가 든 폴더의 데이터베이스를 `run.record`가 연다(`verification/tests/test_i02b_local_files.py`).
+
+- [ ] **I02B-C56** (R55): 스레드 메시지 셋이 든 인스턴스에서 `POST /api/sources/thread`가 그 중 하나의 번호로 R29의 순서의 메시지 셋과 `participants`를 돌려주고 응답이 계약 스키마를 지난다. 원본 화면의 "같은 스레드" 목록이 항목을 `<bdi>` 글 노드로 그리고 누르면 그 version을 연다(`backend/src/api.contract.test.ts`, `apps/web/src/evidence-view.test.tsx`).
+- [ ] **I02B-C57** (R55, 음성): 한 메시지의 범위를 거부하는 정책에서 그 메시지의 작성자 이름이 `messages`와 `participants` 어디에도 없고, 가려진 메시지의 번호로 묻거나 모든 메시지가 가려진 스레드를 물으면 없는 번호와 같은 404다. 가시성 검사를 지우면 실패한다(`backend/src/thread-gate.test.ts`).
+- [ ] **I02B-C58** (R30): 첫 메모에 작성자도 시각도 없으면 본문과 메모 글 사이가 `\n\n`이다(`docx.test.ts`, #249 F3).
 
 ### 이슈 기준과의 관계
 
@@ -1075,3 +1081,4 @@ C1~C55와 H1, H2는 모두 개발 OS(macOS, Linux)와 저장소가 고정한 Nod
 | 2026-11-24 | I02B-T06 구현. 잠정 결정 D31~D36(양보 80%와 `yielded`·checkpoint, `file` 위치의 정체 비교 없음과 파일 삭제, `jsonl-file` 인스턴스의 생애, `jsonl-import` 종류는 시작할 때 더함, 선택 창의 세 종류, 검증 실행기의 판정) 추가. C33·C34·C35·C36·C48·H1·H2 체크. I01 spec의 I01-R20 표에 양보 행과 "다섯 가운데 하나", I04-R3 운영 목록에 `local_locations`·`local_index_seq`. 폴더 안 `.jsonl`의 건너뜀 문구가 "JSONL 파일 추가"를 안내 | 잠정 결정, 완료 기준, 작업 분해(T06) | I02B-T06 구현(#19, #116, #114) |
 | 2026-11-24 | I02B-T06 검토 F1: `file` 위치의 `fileRootProblem`이 승인 때의 `dev`를 비교한다(다른 볼륨은 `root-changed`·`root-missing`, 삭제 아님). D32 갱신 | D32, R7 | 독립 검토 F1(자료 손실): 같은 자리에 다른 디스크가 꽂히면 삭제로 읽힘 |
 | 2026-11-24 | #258 후속 F3·F2·F6. R52~R54, C53~C55, D37·D38 추가(번호 재배치 없음) | R52, R53, R54, C53, C54, C55, D37, D38 | I02B-T06 독립 검토 후속(#258) |
+| 2026-11-24 | #249 R29 나머지·F2·F3. R55, C56~C58 추가(번호 재배치 없음). 잠정 결정: 경로는 이 저장소의 번호 읽기 규약대로 `POST /api/sources/thread`(`GET`이 아님), 요청은 version 번호 하나, 응답은 글 없는 메시지 목록과 참여자 | R29, R55, C56, C57, C58 | 계약의 `routes`가 매개변수 있는 GET을 표현하지 못하고 번호 읽기가 모두 POST. 바꾸려면 R55와 계약 경로 표를 고침 |
