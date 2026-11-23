@@ -148,3 +148,37 @@ C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요
 **붙이는 것.** `v02-result\result.md`만. 허용 목록의 값은 다음 아홉 가지입니다: `scenario`, `app_version`, `effect_rows`(성공한 추출 작업 수), `merged_slots`(합쳐진 slot 수), `retried_jobs`(시도 2 이상으로 끝난 작업 수), `jobs_open`(끝나지 않은 작업 수), `jobs_dead_letter`(포기한 작업 수), `observed`(관찰 단어), `kit_commit`. `raw\`, `config`, 상태 파일, 수동 확인 기록은 붙이지 않습니다. 결과는 이슈 #20(I03)에 남깁니다. 여섯 시나리오를 모두 실행하기 전에는 S19를 끝났다고 적지 않습니다.
 
 **이 절차가 확인하지 못하는 것(미검증으로 둡니다).** 전원 차단(플러그를 뽑는 것)은 하지 않습니다. 정본 SQLite의 갑작스러운 종료 내성은 A20(S13)의 몫입니다. 화면, 강제 종료, 절전, 시계·시간대 변경은 모두 사람의 관찰이며 실행기는 그 사건을 보지 못합니다. 효과 행은 성공한 추출 작업의 수이고 파생 지식의 행 수가 아닙니다. 합쳐진 slot은 slot 간격에서 다시 계산한 값이며 일·주 주기는 어림입니다. Provider 호출이 두 번 일어났는지는 이 절차가 보지 않습니다(두 번 호출은 막지 못하며 예산으로 셉니다. I03 spec C1). 절전 중 Broker 시간 제한과 CLI 프로세스 트리 종료(I03-A2)는 `woke-app-running`과 작업이 끝났다는 사실로만 간접히 보입니다. 바꾼 시간대를 프로세스가 바로 따르는지(I03-A5)는 `timezone`의 사람 관찰입니다. 어느 실행 파일이 DB를 썼는지는 7절과 같이 확인하지 못합니다.
+
+## 10. Semantic 실측 (S32, S01-R25)
+
+> **상태: 작성만 됨 — 실행된 적 없음.** Windows에서 돌려 본 적이 없습니다. 사외에서는 거부 경로와 숫자를 세는 부분만 합성 SQLite로 단위 시험했습니다. 그 통과는 배포처 결과가 아닙니다. 스펙: [S01 spec](../../docs/specs/2026-11-22-S01-semantic-registry.md) S01-R24·R25, 배포처 항목: [site-setup.md S32](../../docs/site-setup.md).
+
+**무엇을 하나.** 실제 Provider로 실제 자료에서 표기(`alias.*` 사실)와 정의를 추출하고, 자동 승격(`semantic.autoVerify`)을 켜기 전과 켠 뒤에 정본의 숫자를 읽기 전용으로 셉니다. **통과·실패를 판정하지 않습니다.** 숫자를 보고 켤지 정하는 것은 사람입니다. 결과 파일은 숫자와 코드 이름(상태, 종류 이름 `alias.synonym` 등, `on`·`off`·`unset`)만 담고 글, 값, 항목 이름은 담지 않습니다.
+
+**준비.** 3절의 준비와 같되(설정은 `config.example.json`을 그대로 씁니다) 합성 자료가 아니라 **실제 자료**를 추출합니다. 그래서 결과 폴더의 파일을 공용 이슈에 올릴 때는 아래 "붙이기"의 숫자만 옮깁니다.
+
+| 순서 | 할 일 | 확인 |
+|---|---|---|
+| 1 | `python verification\v02-site-flow\run.py semantic-scenario preflight --config v02-result\config.json` | `preflight ok`. 설치본이 아니거나 Windows가 아니거나 test double Provider이면 `배포처 후속`으로 시작하는 알림과 종료 값 3 |
+| 2 | 설정 `semantic.autoVerify`를 **한 번도 쓰지 않은 채로** 설치된 exe로 켜서 실제 자료를 추출하고 앱을 완전히 닫습니다(알림 영역 포함) | 활동 화면에서 추출이 끝남 |
+| 3 | `... semantic-scenario record --config v02-result\config.json --out v02-result --phase off` | `semantic-counts.off.json`이 생김, 종료 값 0 |
+| 4 | 앱을 켜 `POST /api/settings/semantic`으로 `{ "autoVerify": true }`를 보냅니다. 켜도 이미 있는 행을 훑지 않으므로, 다음 추출이나 원본의 변경(새 version, 삭제, 정리)이 닿는 행부터 판정됩니다. 추출을 한 번 더 돌리거나 원본을 바꿉니다 | 설정 API가 `autoVerify: true`를 돌려줌 |
+| 5 | 정책이 올린 행을 API(`GET /api/semantic`)로 훑어 **틀린 것에 이의나 기각**을 냅니다(`POST /api/semantic/decide`). 틀린 승격이 없으면 그 사실을 적습니다. 앱을 완전히 닫습니다 | |
+| 6 | `... record ... --phase on` | `semantic-counts.on.json`이 생김, 종료 값 0 |
+
+**숫자의 뜻.** 모두 **지금 상태의 행**을 센 것이고 변경 이력의 줄 수가 아닙니다. 올렸다가 되돌리고 다시 올린 행은 한 번입니다.
+
+| 이름 | 뜻 |
+|---|---|
+| `setting` | 저장된 설정. `on`, `off`, `unset`(한 번도 쓰지 않음), `other` |
+| `forms` | 종류(`alias.synonym` 등)별로 표기 사실의 상태별 수 |
+| `definitions` | 정의 사실의 상태별 수 |
+| `promoted` | 정책이 `auto-verify`로 올린 적이 있는 사실·관계의 수 |
+| `promotedStanding` | 그 가운데 지금 `verified`인 수 |
+| `promotedJudgedWrong` | 그 가운데 사용자가 틀렸다고 본 수: 지금 `disputed`·`rejected`이거나, 사용자의 값 고치기로 `superseded`가 된 것. 이의를 낸 뒤 취소해 `verified`로 돌아온 행은 세지 않습니다 |
+
+`--phase`는 파일 이름과 `phase` 칸만 정합니다. 저장된 설정과 어긋나면(`off`인데 설정이 `on`, `on`인데 `on`이 아님) 표준 오류에 `warning:` 한 줄을 내지만 막지 않습니다.
+
+**붙이기.** 두 파일의 숫자와, 켤지 정한 결과(켠다·끈 채로 둔다·더 잰다)를 이슈 #22(S01)에 남깁니다. 글, 값, 항목 이름, 설정 파일은 붙이지 않습니다.
+
+**이 절차가 확인하지 못하는 것(미검증으로 둡니다).** 이 실행기는 Windows에서 돌려 본 적이 없습니다. 설치본의 정본 경로가 `%LOCALAPPDATA%\PKI\pki.sqlite`와 같은지(포크의 빌드에서)와 실제 Provider가 표기를 인용문 그대로 돌려주는지는 확인하지 못했습니다. "틀렸다"는 판단은 사용자가 API로 낸 이의·기각·값 고치기에서만 오므로, 사용자가 훑지 않은 승격은 틀리지 않은 것으로 셉니다. 내용 해시가 다른 거의 같은 글 두 원본은 두 원본으로 세는 것이 조건 자체이고, 그 승격이 틀렸는지가 이 숫자가 보려는 것입니다. 숫자가 작으면(수십 건 미만) 정밀도로 읽을 수 없습니다.
