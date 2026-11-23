@@ -1,13 +1,14 @@
 // linking.verified-forms (S01-R16, S01-C3, S01-T09): before extraction, the candidate search also reads an
 // item's `verified` surface forms (`alias.*` facts) and only those. The user's rows are made by the real
-// user entry (add, approve, reject, dispute, value fix, undo); only the policy-verified status is forged
-// (the testkit seed), because the auto-verify that writes it is S01-T05's. The egress half runs the real
+// user entry (add, approve, reject, dispute, value fix, undo); the policy-verified row is raised by the
+// real auto-verify gate (`assessAutoVerify`, S01-T05, #173). The egress half runs the real
 // extract handler and Broker: what the Provider is offered is the item's name, graded by the item's lineage.
 // All data is synthetic.
 import type { BrokerRequest } from "@pki/contracts";
 import { createBroker, createUserActionLedger, type EgressInput } from "@pki/providers";
 import {
   addEvidence,
+  automatedLifecycle,
   closeJob,
   createCommitScope,
   defaultScopePolicy,
@@ -19,6 +20,7 @@ import {
   saveFact,
   saveSourceRecord,
   userDecisions,
+  writeSetting,
   type KnowledgeAttributes,
   type ScopePolicy,
   type ScopePurpose,
@@ -30,6 +32,7 @@ import { FakeProvider, setStatusForTest } from "@pki/testkit";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { assessAutoVerify, AUTO_VERIFY_SETTING } from "./auto-verify.ts";
 import { createProductRegistry } from "./canonical-kinds.ts";
 import { createExtractHandler } from "./extraction.ts";
 import { findCandidates, knowledgeCandidates } from "./linking.ts";
@@ -73,8 +76,27 @@ describe("linking.verified-forms: which forms the search reads", () => {
       value: "lazy eval",
     });
     expect(added.status).toBe("applied");
-    // the auto-verify that writes this status is S01-T05's: the status alone is forged
-    setStatusForTest(db, "fact", alias(c, "BC"), "verified", "policy");
+    // the policy's row: a candidate form with current evidence in two sources of different content
+    const f = alias(c, "BC");
+    automatedLifecycle.created(db, ref(f), "extraction", null);
+    for (const [externalId, body] of [
+      ["p", "BC 는 빌드 캐시의 약어, 첫 번째 글"],
+      ["q", "BC 라고 줄여 부른다, 두 번째 글"],
+    ] as const) {
+      const saved = saveSourceRecord(db, "imported", { externalId, title: "용어", body });
+      if (saved.status !== "created") throw new Error(saved.status);
+      const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+      addEvidence(db, {
+        target: { factId: f },
+        sourceVersionId: versionId,
+        start: body.indexOf("BC"),
+        end: body.indexOf("BC") + 2,
+        quote: "BC",
+      });
+    }
+    expect(find("BC")).toEqual([]); // before the gate runs
+    writeSetting(db, AUTO_VERIFY_SETTING, "on");
+    expect(assessAutoVerify(db, ref(f)).status).toBe("applied");
     expect(find("mt 와 lazy eval 과 BC")).toEqual([a, b, c]);
   });
 
