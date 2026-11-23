@@ -1,6 +1,6 @@
 # 스펙: X01 — 질문별 Hybrid Retrieval·근거 Q&A
 
-- 날짜: 2026-11-23 / 상태: 확정(잠정 결정 포함). 구현은 T1~T6이 끝났고 배포처 확인은 `site-setup.md`의 S37~S41. 선호 연결과 검색 후속(R19~R23)은 T7~T9
+- 날짜: 2026-11-23 / 상태: 확정(잠정 결정 포함). 구현은 T1~T9가 끝났고(선호 연결과 검색 후속 R19~R23은 T7~T9, 기준 C5a~C6b 통과) 배포처 확인은 `site-setup.md`의 S37~S41
 - 관련: 이슈 #30(X01), 후속 #252·#254, 총괄 #1(원 설계 13절·14절 Ask·18절), Phase 6 #8, 선행 #23(S02)·#25(K01)·#29(P03, 머지됨), 후속 #31(X02). [I04 spec](2026-11-21-I04-invalidation.md)(R13 읽기 검사, R14 범위 승계, R16 전송 등급, 등록표), [S02 spec](2026-11-22-S02-entity-resolution-temporal-graph.md)(R23·R24 경로 검사), [K01 spec](2026-11-23-K01-wiki-projection.md), [R05 spec](2026-11-21-R05-golden-dataset.md)·[EVALUATION.md](../EVALUATION.md)(지표, ablation 5개), [ADR 0004](../adr/0004-embedded-storage.md)(벡터는 어댑터 뒤)·[0006](../adr/0006-embedding.md)·[0014](../adr/0014-egress-policy-and-consent.md)
 - 번호: 요구사항 `X01-R<n>`, 결정 `X01-D<n>`, 작업 `X01-T<n>`. 완료 기준 `X01-C1`~`C4`는 이슈 #30의 번호 그대로이고 그 아래를 `a`·`b`·`c`로 나눈다. `C5`·`C6`은 후속(#252·#254)의 기준이다. **마이그레이션은 없다**(X01-D3). 구현 중 필요해지면 합쳐지는 때 main의 다음 번호를 쓰고, 나중에 합치는 쪽이 번호를 옮긴다. 새 ADR 번호와 `site-setup.md` 항목 번호도 같은 규칙이다.
 
@@ -226,9 +226,9 @@ PR은 둘이다. **PR 1 = T1~T4**(백엔드와 평가. T4는 T1 뒤 T2·T3과 �
 | X01-T4 | 평가 실행기, dev·T0 결과, ADR | C3 | T1 | `backend/src/retrieval-ablation.ts`·`.test.ts`, `eval/results/x01-dev-t0.json`, `docs/adr/00NN-retrieval-strategies.md` | `docs/adr/README.md`(한 줄), `docs/EVALUATION.md`(결과를 가리키는 한 줄), `knowledge-engine/src/retrieval/`의 기본 목록 상수(T1의 파일) | 실행 명령과 `score.py` 출력, 대조 시험 통과 |
 | X01-T5 (완료) | "질문" 화면과 브라우저 E2E | C2c | T3, `feat/p01-t03-insight-api-ui` 머지 | `apps/web/src/ask.tsx`, `ask-text.ts`, `ask-stream.ts`, 그 시험, `apps/web/e2e/ask.e2e.ts` | `apps/web/src/App.tsx`(import, 이름, 화면 세 줄) | `pnpm e2e` 가운데 `ask.e2e.ts` 통과 출력 |
 | X01-T6 (완료) | 문서: I04 등록표 두 줄, ARCHITECTURE(5.4절 벡터 호출 자리, 읽기 경로), 문서 색인, README, `site-setup.md` 항목 | R16 | T3·T4, `feat/k02-t3-refine` 머지 | — | `docs/specs/2026-11-21-I04-invalidation.md`, `docs/ARCHITECTURE.md`, `docs/README.md`, `README.md`, `docs/site-setup.md` | 문서 대조 시험(`tooling/docs`) 통과 |
-| X01-T7 | 선호 신호 구현 `feedbackPreference`와 `ask` 연결 | C5a, C5b, C5c | P03 머지(#29) | `knowledge-engine/src/retrieval/preference.ts`·`preference.test.ts` | `knowledge-engine/src/retrieval/index.ts`(export 한 줄), `backend/src/ask.ts`(import와 `preference` 한 줄), `docs/site-setup.md`(`feedback.learned` 줄에 검색 반영 한 문장) | `preference.test.ts`·`ask-gate.test.ts` 통과 출력, C5b 변이가 빨개진 출력 |
-| X01-T8 | 키워드 쪽 단위 조회와 검사 뒤 `metadata` 건수 | C6a, C6b ③ | 없음 | `knowledge-engine/src/retrieval/strategies.test.ts` | `storage/src/keyword-search.ts`(`offset` 인자), `retrieval/strategies.ts`·`retrieve.ts` | `retrieve.test.ts`·`strategies.test.ts` 통과 출력 |
-| X01-T9 | 잡음 낱말 완전 일치, 벡터 `status()` 예외 처리 | C6b ①② | T8(같은 파일) | `knowledge-engine/src/retrieval/routing.test.ts` | `retrieval/routing.ts`, `retrieval/strategies.ts`(`vectorIds`) | `routing.test.ts`·`retrieve.test.ts` 통과 출력 |
+| X01-T7 (완료) | 선호 신호 구현 `feedbackPreference`와 `ask` 연결 | C5a, C5b, C5c | P03 머지(#29) | `knowledge-engine/src/retrieval/preference.ts`·`preference.test.ts` | `knowledge-engine/src/retrieval/index.ts`(export 한 줄), `backend/src/ask.ts`(import와 `preference` 한 줄), `docs/site-setup.md`(`feedback.learned` 줄에 검색 반영 한 문장) | `preference.test.ts`·`ask-gate.test.ts` 통과 출력, C5b 변이가 빨개진 출력 |
+| X01-T8 (완료) | 키워드 쪽 단위 조회와 검사 뒤 `metadata` 건수 | C6a, C6b ③ | 없음 | `knowledge-engine/src/retrieval/strategies.test.ts` | `storage/src/keyword-search.ts`(`offset` 인자), `retrieval/strategies.ts`·`retrieve.ts` | `retrieve.test.ts`·`strategies.test.ts` 통과 출력 |
+| X01-T9 (완료) | 잡음 낱말 완전 일치, 벡터 `status()` 예외 처리 | C6b ①② | T8(같은 파일) | `knowledge-engine/src/retrieval/routing.test.ts` | `retrieval/routing.ts`, `retrieval/strategies.ts`(`vectorIds`) | `routing.test.ts`·`retrieve.test.ts` 통과 출력 |
 
 T7~T9는 후속 PR 하나다(#252·#254). 다른 세션이 쥔 `composition.ts`·`server.ts`·`storage/src/index.ts`·`knowledge-engine/src/index.ts`·계약 색인·화면은 건드리지 않는다.
 
