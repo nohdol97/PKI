@@ -159,6 +159,11 @@ export {
   type ReflectTarget,
 } from "./reflect-job.ts";
 export {
+  createReflectionRefineHandler,
+  type ReflectionRefineHandlerOptions,
+  type ReflectionRefineResult,
+} from "./reflection-refine-job.ts";
+export {
   decideFinding,
   hasRuleShape,
   NO_ENTRY,

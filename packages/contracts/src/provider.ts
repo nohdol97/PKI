@@ -29,6 +29,7 @@ export const TASK_KINDS = [
   "wiki-summary",
   "insight-interpret",
   "answer",
+  "reflection-refine",
 ] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 

@@ -19,6 +19,7 @@ let db: SqlDriver;
 let provider: FakeProvider;
 let consent = true;
 const candidates = new Map<string, CandidateItem>();
+let seq = 0;
 
 const broker = () =>
   createBroker({
@@ -52,14 +53,14 @@ beforeEach(() => {
 
 /** One stored document, two candidate items resting on it, and a running sourceless job of the kind. */
 function ask(answer: unknown) {
-  saveSourceRecord(db, "c1", { externalId: "ext-1", title: "제목", body: "합성 본문" });
+  saveSourceRecord(db, "c1", { externalId: `ext-${++seq}`, title: "제목", body: "합성 본문" });
   const id = String(db.all("SELECT max(id) AS id FROM source_versions")[0]?.id);
   candidates.set("1", { name: "항목 가", evidenceSourceVersionIds: [id] });
   candidates.set("2", { name: "항목 나", evidenceSourceVersionIds: [id] });
   provider = new FakeProvider({ answer: () => answer });
   const queued = registerJob(db, {
     kind: "reflection-refine",
-    target: "1#hash",
+    target: `1#${seq}`,
     priority: "maintenance",
   });
   if (!queued.registered) throw new Error("expected a new job");
@@ -87,11 +88,14 @@ describe("broker.reflection-refine: strict answer and consent (K02-C4)", () => {
     expect((await ask(valid)).status).toBe("ok");
   });
 
-  it("rejects a verdict outside the three, and an extra key", async () => {
+  it("rejects a verdict outside the three", async () => {
     expect(await ask({ ...valid, verdict: "maybe" })).toMatchObject({
       status: "failed",
       error: "invalid-output",
     });
+  });
+
+  it("rejects an extra key", async () => {
     expect(await ask({ ...valid, thinking: "x" })).toMatchObject({
       status: "failed",
       error: "invalid-output",
