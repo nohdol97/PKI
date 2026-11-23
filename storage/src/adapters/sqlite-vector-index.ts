@@ -68,6 +68,16 @@ function fromBlob(blob: unknown): Float32Array {
   );
 }
 
+/** Whether an error from opening or probing the file says the file is not an index of this schema. */
+function isOtherFile(error: unknown): boolean {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  return (
+    code === "SQLITE_NOTADB" ||
+    code === "SQLITE_CORRUPT" ||
+    (code === "SQLITE_ERROR" && /no such (table|column)/.test(String(message)))
+  );
+}
+
 interface Generation {
   id: number;
   space: EmbeddingSpace;
@@ -103,8 +113,13 @@ export class SqliteVectorIndex implements VectorIndex {
           db.exec(SCHEMA);
           return db;
         }
-      } catch {
-        // no database at all: treated like another schema
+      } catch (e) {
+        // RSP-R6: only a file that is no database, a corrupt one or one without the expected tables or columns is
+        // another schema; a lock or any other failure leaves the file alone
+        if (!isOtherFile(e)) {
+          db?.close();
+          throw e;
+        }
       }
       db?.close();
       return null;
