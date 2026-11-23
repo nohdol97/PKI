@@ -513,7 +513,7 @@ sequenceDiagram
 질문은 저장하지 않는 읽기 경로다. `POST /api/ask`는 한 줄에 사건 하나인 JSON 줄(NDJSON)로 답하고 `route` → `hits` → `answer` → `sentence`(0개 이상) → `done` 순서를 지킨다. 이 경로는 `routes` 표의 행이 아니라 `packages/contracts/src/ask.ts`의 `askRoute`이고, `server.ts`의 갈래 하나가 Host·Origin·토큰 검사 뒤에 `backend/src/ask-route.ts`로 잇는다. 요구사항과 그림은 [X01 spec](specs/2026-11-23-X01-retrieval-qa.md)에 있다.
 
 - **찾기.** `retrieve`가 질문의 글로 전략(`keyword`, `metadata`, `concept`, `graph`, `temporal`, `wiki`, `vector`)을 고르고 순위 역수 합으로 하나의 순위를 만든다. 켜 둔 기본 목록은 키워드·메타데이터·합치기이고 나머지는 측정이 이득을 보일 때까지 끈다([ADR 0025](adr/0025-retrieval-strategies.md)). 순위의 단위는 원본 version이다.
-- **읽기 검사는 세 번.** ① 목록들을 합치기 전과 응답에 싣기 직전에 `visible(…, 'search')`로 보이지 않는 원본을 뺀다. 빠진 것은 수·순서·제목에 흔적을 남기지 않는다. ② Broker를 부르기 직전에 `visible(…, 'answer')`와 `combinable`로 답변 문맥을 5건 이하·호출 한계 이내로 다시 고른다. ③ Provider가 답한 뒤 인용된 원본을 `visible(…, 'answer')`로 한 번 더 묻는다.
+- **읽기 검사는 세 번.** ① 목록들을 합치기 전과 응답에 싣기 직전에 `visible(…, 'search')`로 보이지 않는 원본을 뺀다. 검사를 지난 뒤의 수·순서·제목에는 빠진 것의 흔적이 없다. 다만 전략마다 목록을 자르는 한계(50건, `temporal`은 사실 200건의 창)가 이 검사보다 앞에 있어 가려진 원본이 그 자리를 차지하면 보이는 원본이 밀릴 수 있다(잔여 한계, #254). ② Broker를 부르기 직전에 `visible(…, 'answer')`와 `combinable`로 답변 문맥을 5건 이하·호출 한계 이내로 다시 고른다. ③ Provider가 답한 뒤 인용된 원본을 `visible(…, 'answer')`로 한 번 더 묻는다.
 - **Provider는 Broker로, ID만.** 답은 작업 종류 `answer`를 사용자 동작으로 한 번 부른다. 넘기는 것은 원본 version ID들과 일회용 `question:<표>` 후보 하나뿐이고, 질문의 글은 요청이 사는 동안 메모리에만 있다. 인용문을 원본에서 정확히 한 번 찾지 못한 문장은 버리고 버린 수를 `done`에 싣는다. `hits`는 Provider를 부르기 전에 나가고, 화면이 연결을 끊으면 그것이 취소다(Broker 호출에 중단 신호를 낸다).
 - **저장하지 않는다.** 질문·적중·답·인용은 DB에 쓰지 않아 I04 등록부에 등록할 행이 없다([I04 spec](specs/2026-11-21-I04-invalidation.md) 등록표). 로그에는 경로 이름, 전략별 건수, 결과 상태만 남는다.
 
