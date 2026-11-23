@@ -726,16 +726,43 @@ flowchart LR
 10. **시험.** `knowledge-engine/src/linking-forms.test.ts`(`linking.verified-forms`): 표기를 거치는 후보(승인·직접 추가·정책 상태, 세 종류), `candidate`·`disputed`·`rejected`·`superseded`는 안 됨, 사용자의 조치가 바로 반영됨(취소·이의·기각·재승인·값 고치기), 가공(대소문자·전각·공백)과 저장 값이 그대로임, 다른 사실 종류와 빈 표기는 표기가 아님, 이름과 표기가 함께 맞아도 한 번이고 id 순서, 같은 표기의 두 항목이 둘 다 나오고 합쳐지지 않음, 삭제된 원본의 표기, 정책이 표기 행·항목을 가림(합집합만 허용하는 정책 포함), 추출이 자기 registry를 넘김, Provider에 가는 것이 ID와 이름뿐임과 호출의 등급(일반 원본이 표기의 근거면 합성 문서의 호출도 일반), 묶을 수 없는 범위의 항목이 빠짐, 승인 뒤 다음 추출부터 후보가 됨. V02의 `linking`과 I04의 `egress.derived-grade`는 고치지 않았다.
 11. **하지 않은 것.** 합치기·개체 해소(S02), 화면(X02), 실제 Provider 호출(S32), 자동 승격(T05), 단어 경계·최소 길이, 표기 색인. 한 호출마다 `verified` 표기를 전부 읽고 글에 든 것만 `visible`을 부르므로 표기가 아주 많은 저장소의 성능은 재 보지 않았다(색인을 만들지 않는다는 ADR 0003의 선 안에서 한 번의 `SELECT`).
 
-12. **알려진 한계와 이어받는 것(검토 W2·W6·W7).** ① `rejected`인 항목에 붙은 `verified` 표기도 그 항목을 후보로 낸다. 이름으로 찾는 길이 항목의 상태를 보지 않는 것(V02 때부터)과 같고 T09 밖이다. ② **(S01-T10이 고쳤다: 3.2절 연결 줄이 `verified` 표기를 적는다.)** `docs/ARCHITECTURE.md` 170행 부근(3.2절 표의 연결 줄)은 아직 "별칭은 그 항목에 이미 기록된 이름과 사용자 교정에서만 온다"는 옛 규칙을 적고 있다. 새 규칙은 위 2·4다. ③ **S01-T05와 합칠 때:** 이 spec은 두 작업의 "넘기는 것" 절과 변경 이력 줄이 같은 자리에서 부딪친다(둘 다 남긴다). 나중에 합치는 쪽이 T05의 실제 자동 승격 경로로 `linking-forms.test.ts`를 다시 돌린다(지금 시험은 정책이 올린 상태를 testkit으로 만든다).
+12. **알려진 한계와 이어받는 것(검토 W2·W6·W7).** ① `rejected`인 항목에 붙은 `verified` 표기도 그 항목을 후보로 낸다. 이름으로 찾는 길이 항목의 상태를 보지 않는 것(V02 때부터)과 같고 T09 밖이다. ② **(S01-T10이 고쳤다: 3.2절 연결 줄이 `verified` 표기를 적는다.)** `docs/ARCHITECTURE.md` 3.2절 표의 연결 줄은 T09 때 "별칭은 그 항목에 이미 기록된 이름과 사용자 교정에서만 온다"는 옛 규칙을 적고 있었다. 새 규칙은 위 2·4다. ③ **(S01 후속 #173이 했다: `linking-forms.test.ts`의 정책 승격 행은 `assessAutoVerify`가 올린다.)** S01-T05와 합칠 때: 이 spec은 두 작업의 "넘기는 것" 절과 변경 이력 줄이 같은 자리에서 부딪친다(둘 다 남긴다). 나중에 합치는 쪽이 T05의 실제 자동 승격 경로로 `linking-forms.test.ts`를 다시 돌린다.
 
 **S01-T10이 넘기는 것 / 잠정 결정**(잠정). T10이 정한 것과 S32(배포처 측정)·S02-T10·S03-T10(같은 시험 번호를 잡은 작업)이 이어받는 결합 지점이다. 바꿀 때는 이 절과 `tooling/docs/site-setup-s01.test.ts`, `verification/tests/test_s01_semantic_scenario.py`, `docs/site-setup.md`의 S32, `verification/v02-site-flow/RUNBOOK.md` 10절을 함께 고친다. 코드(제품)는 바꾸지 않았고 스키마도 그대로다.
 
 1. **S 번호는 S32 그대로다.** S23~S25(I02-B의 예약)와 S26~S31(I05~I07)이 이미 있고 S33·S34는 S02·S03이 잡아 두었다. 바꾸려면 spec, site-setup, 시험, 실행기의 알림 두 문장, ADR 0021, ADR 색인 줄을 함께 고친다.
 2. **Semantic 시나리오는 `preflight`와 숫자를 세는 `record`뿐이다(R25).** `prepare`가 없는 까닭은 S32가 배포처의 실제 자료를 재는 것이지 합성 입력을 심는 것이 아니기 때문이고, 통과·실패 판정이 없는 까닭은 결과가 사람이 켤지 정하는 근거이기 때문이다. 알림은 둘이고 모두 `배포처 후속: S32`로 시작한다(실제 Provider가 아님: 이유 `test-double`, Windows 설치본이 아님: `not-windows` 등 V02의 이유 코드). Windows가 아니면 설정을 읽기 전에 거부하고(삭제·큐 시나리오와 같다), Windows에서는 Provider를 먼저 본다. 바꾸려면 `run.py`의 `run_semantic_scenario`와 `semantic_gate`.
-3. **`record`의 숫자(결정 3의 W1·W4·W5가 요구한 것).** 이력 줄이 아니라 지금 상태의 행을 센다: `forms`(`alias.*` 종류별·상태별), `definitions`(상태별), `promoted`(정책 주체의 `auto-verify` 줄이 있는 사실·관계, 행마다 한 번), `promotedStanding`(그 가운데 지금 `verified`), `promotedJudgedWrong`(그 가운데 지금 `disputed`·`rejected`이거나, 가장 새 상태 줄의 주체가 사용자인 `superseded`. 이의를 내고 취소해 `verified`로 돌아온 행은 세지 않는다). 파일에는 숫자와 코드 이름만 있다(이상한 종류 이름은 `other`로 센다). 결과 파일은 `common/results`의 `result.json`이 아니다(그 등록부는 기준 번호가 붙은 통과·실패 판정을 다루고 판정 없는 측정을 위한 칸이 없다). 바꾸려면 `semantic_scenario.py`의 `_promoted`.
+3. **`record`의 숫자(결정 3의 W1·W4·W5가 요구한 것).** 이력 줄이 아니라 지금 상태의 행을 센다: `forms`(seed 표기 종류 셋별·상태별. 그 밖의 `alias.*` 종류는 사용자가 만든 것까지 `other`), `definitions`(상태별), `promoted`(정책 주체의 `auto-verify` 줄이 있는 사실·관계, 행마다 한 번), `promotedStanding`(그 가운데 지금 `verified`), `promotedJudgedWrong`(그 가운데 지금 `disputed`·`rejected`·`superseded`이고 가장 새 상태 줄의 주체가 사용자인 것. 정책이 낸 이의와, 이의를 내고 취소해 `verified`로 돌아온 행은 세지 않는다). 파일에는 숫자와 코드 이름만 있다(seed가 아닌 종류 이름은 `other`로 센다. "S01 후속(#173)이 넘기는 것" 참조). 결과 파일은 `common/results`의 `result.json`이 아니다(그 등록부는 기준 번호가 붙은 통과·실패 판정을 다루고 판정 없는 측정을 위한 칸이 없다). 바꾸려면 `semantic_scenario.py`의 `_promoted`.
 4. **`--phase off|on`은 파일 이름과 `phase` 칸을 정할 뿐이다.** 저장된 설정과 어긋나면 표준 오류에 한 줄을 내고 막지 않는다. 바꾸려면 `phase_warning`의 결과를 설정 오류로 돌린다.
 5. **이 spec의 상태 칸은 "확정(잠정 결정 포함)"으로 둔다**(R24). 잠정 결정이 S32 전까지 서 있기 때문이다. 바뀐 것은 `docs/README.md`의 로드맵 줄(구현이 끝났다, S32를 기다린다)이다.
 6. **알려진 것.** ARCHITECTURE 5.6절의 종류 수("여덟", "일곱 번째·여덟 번째")는 S02가 `entity-merge`·`merge-candidate`를 등록한 뒤로 낡았다. T10은 새 문장에 총수를 적지 않았고 그 줄은 S02-T10이 고친다. 시험은 합성 SQLite로 숫자의 정의를 확인했고 제품이 쓴 DB로는 돌리지 않았다. Windows의 분기와 `record`는 실행된 적이 없다.
+
+**S01 후속(#173)이 넘기는 것 / 잠정 결정**(잠정). S01-T10 검토의 후속 P1·P2·P3·P4·P6과 "S01-T09이 넘기는 것" 12③이다. P5(ARCHITECTURE 5.6절의 종류 수)는 S02-T10 몫이다. 제품 코드와 스키마는 바꾸지 않았다. 바꿀 때는 이 절과 "S01-T10이 넘기는 것" 3, RUNBOOK 10절, `verification/tests/test_s01_semantic_scenario.py`를 함께 고친다.
+
+요구사항
+
+- **F173-R1** `promotedJudgedWrong`은 정책이 올린 행 가운데 지금 `disputed`·`rejected`·`superseded`이고 **가장 새 상태 줄의 주체가 사용자**인 행만 센다. 정책이 낸 이의(주체 `policy`)는 사용자의 판단이 아니므로 세지 않는다.
+- **F173-R2** 집계 파일의 `forms`에 이름이 나가는 종류는 seed 표기 종류 셋(`alias.synonym`·`alias.abbreviation`·`alias.translation`)뿐이다. 그 밖의 `alias.*` 종류는 사용자가 지은 이름일 수 있으므로 `other`로만 센다.
+- **F173-R3** 집계가 여는 연결은 쓰기를 거부한다.
+- **F173-R4** `linking.verified-forms`의 "정책이 올린 표기" 사례는 testkit이 만든 상태가 아니라 설정을 켠 뒤 `assessAutoVerify`가 올린 행으로 확인한다.
+- **F173-R5** "S01-T09이 넘기는 것" 12②의 낡은 현재형 문장을 고친다.
+- **F173-R6** ADR 0021 결정 3의 "사용자 조치 뒤" 판정 자리에 나누기 경로(`entitySplit`이 `assessAfterUserAction`을 직접 부름)를 더한다.
+
+완료 기준
+
+| 기준 | 요구사항 | 문장 | 시험 |
+|---|---|---|---|
+| F173-C1 | R1 | 정책이 올린 행이 정책의 이의로 `disputed`이면 `promotedJudgedWrong`에 들지 않고, 사용자의 이의면 든다 | `test_s01_semantic_scenario.py` |
+| F173-C2 | R2 | 종류가 `alias.codename`인 사실이 있으면 `other`로 세고 그 이름은 집계 파일 어디에도 없다 | 같은 파일 |
+| F173-C3 | R3 | `open_ro`가 돌려준 연결에 쓰기를 시도하면 SQLite가 거부한다 | 같은 파일 |
+| F173-C4 | R4 | 설정이 `on`이고 후보 표기가 내용이 다른 두 원본의 현재 근거를 가지면 `assessAutoVerify`가 올리고 `findCandidates`가 그 항목을 낸다. 올리기 전에는 내지 않는다 | `knowledge-engine/src/linking-forms.test.ts` |
+
+잠정 결정
+
+1. **F173-R1은 세 상태에 같은 규칙 하나를 쓴다**(가장 새 상태 줄의 주체). 그래서 정책이 이의를 낸 뒤 사용자가 기각한 행은 세고, 사용자가 이의를 낸 뒤 전파가 `superseded`로 만든 행은 세지 않는다(T10 때와 같다). 바꾸려면 `semantic_scenario.py`의 `_promoted`.
+2. **seed 종류 셋은 실행기에 상수로 적었다**(`SEED_FORM_KINDS`). 실행기는 제품 코드를 읽지 않는다. seed에 표기 종류가 더해지면 `other`로 세어질 뿐 이름이 새지 않으며(안전한 쪽으로 낡는다), 그때 상수와 RUNBOOK 10절을 함께 고친다.
+3. **F173-C4는 추출 핸들러가 아니라 게이트 `assessAutoVerify`를 직접 부른다.** 추출 뒤 판정(`assessAfterExtraction`)이 게이트를 부르는 것은 `auto-verify-flow.test.ts`가 이미 시험한다.
+4. **R5·R6은 문장만 고치므로 기준이 없다.**
 
 ## 잠정 결정
 
@@ -849,3 +876,4 @@ flowchart LR
 | 2026-11-23 | S01-T09 구현: 연결 후보가 `verified`인 표기를 봄(`listVerifiedForms`, `findCandidates`, 추출이 registry를 넘김), 새 ADR 0021과 ADR 0003 맨 위의 대체 안내 한 줄(본문은 그대로), ADR 색인 줄, "S01-T09이 넘기는 것" 절, T07·T08의 "T09" 항목에 했음을 표시 | R16, R24(ADR), 작업 분해 뒤 "S01-T09이 넘기는 것 / 잠정 결정", "S01-T07이 넘기는 것" 12, "S01-T08이 넘기는 것" 9 | S01-T09(이슈 #22) 구현. ADR 번호는 base와 다른 spec의 예약을 모두 피하는 가장 낮은 번호인 0021을 그대로 썼다 |
 | 2026-11-23 | S01-T09 검토 반영: ① 표기를 쓰는 조건에 "표기 사실의 계보가 그 항목의 계보 안에 든다"를 더함(사용자가 만든 항목에 추출이 붙인 표기가 묶기 판정과 등급을 비껴가던 길을 닫음) ② 표기 종류 판정을 대소문자 구분으로(`substr`) ③ 짧은 표기의 규칙을 시험으로 고정 ④ 레지스트리 없이 부르면 이름만 봄 ⑤ 알려진 한계(`rejected` 항목, ARCHITECTURE 170행, T05와 합침)를 "넘기는 것" 12에 적음 | "S01-T09이 넘기는 것" 4·4-1~4-3·12 | S01-T09 독립 검토(F1 must-fix, F2·W1·W3) |
 | 2026-11-23 | S01-T10 구현: ARCHITECTURE 3.2·4·5.6절(표기 출처, 4절 행, T08·T09 문단), site-setup S32와 결과 위치, ADR 0021의 구현과 어긋난 곳 고침, `semantic-scenario`(검증 실행기)와 RUNBOOK 10절, 문서 시험 `site-setup-s01.test.ts`와 거부·숫자 시험, docs/README의 로드맵 줄, "S01-T10이 넘기는 것" 절, T09 넘김 12②를 해결로 표시 | 문서, 검증 실행기 | S01-T10 |
+| 2026-11-23 | S01 후속(#173): `promotedJudgedWrong`을 사용자가 바꾼 행으로 좁힘(정책 이의 제외), 집계의 표기 종류 이름을 seed 셋으로 한정(그 밖은 `other`), 읽기 전용 연결의 쓰기 거부 시험, `linking-forms.test.ts`의 정책 승격 사례를 실제 게이트로, T09 넘김 12②의 문장과 12③ 표시, ADR 0021 결정 3에 나누기 경로, RUNBOOK 10절 두 줄, "S01 후속(#173)이 넘기는 것" 절 | 검증 실행기, 시험, 문서 | #173, S01-T09 넘김 12③ |
