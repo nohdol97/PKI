@@ -77,6 +77,7 @@ import {
   type LocalFilesDriver,
 } from "./local-files-driver.ts";
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
+import { ensureReflectionSchedules } from "./reflection-schedules.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
 import { productScopePolicy } from "./scope-policy.ts";
 import { startServer, type RunningServer } from "./server.ts";
@@ -388,6 +389,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     onError: (error) => log("held-reevaluation-error", { error: errorClass(error) }),
   });
   // the default periods, the held collectors that are ready now, and the hourly recheck (I03-T09)
+  ensureReflectionSchedules(scheduler); // K02-R2: the re-review's two periods
   const collectors = startCollectorUpkeep({ db, manager: connectors, scheduler, runner });
   scheduler.start();
   return {

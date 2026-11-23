@@ -192,6 +192,9 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     wikiPage: { key: "" },
     wikiEdit: { op: "note-add", key: "", text: "합성 메모" },
     wikiRebuild: {},
+    // reflection and knowledge lint (K02-T2): rows that need not exist (an answer of 200 with `not-found`)
+    lintDecide: { id: 999_999, op: "dismiss" },
+    lintReport: { rule: "stale", kind: "fact", a: 999_999 },
   };
 
   beforeAll(async () => {

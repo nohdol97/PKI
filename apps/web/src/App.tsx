@@ -32,6 +32,7 @@ import { SecretField } from "./secret-field.tsx";
 import { nextSyncStops } from "./connector-text.ts";
 import { deleteConfirmText, deletedText, notDeletedText } from "./delete-text.ts";
 import { Insights } from "./evidence-view.tsx";
+import { Lint } from "./lint.tsx";
 import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { LocalLocations } from "./local-locations.tsx";
@@ -51,6 +52,7 @@ const SCREENS = {
   home: "홈",
   sources: "원본",
   wiki: "위키",
+  lint: "점검",
   activity: "활동",
   settings: "설정",
 } as const;
@@ -62,6 +64,7 @@ export function App({ api }: { api: ApiClient }) {
     home: Home,
     sources: Sources,
     wiki: Wiki,
+    lint: Lint,
     activity: Activity,
     settings: Settings,
   }[screen];
