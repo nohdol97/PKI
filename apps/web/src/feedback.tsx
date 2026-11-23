@@ -43,32 +43,45 @@ function useRecord(api: ApiClient, target: FeedbackTarget, onChange: () => void)
   return { notice, press };
 }
 
+/** The record call of one Insight, shared by the head bar's and the action bar's buttons of its detail pane. */
+export const useInsightRecord = (api: ApiClient, insightId: number, onChange: () => void) =>
+  useRecord(api, { kind: "insight", id: insightId }, onChange);
+
+/**
+ * The Insight's feedback in its detail pane: "확인 완료" in the head bar (part "head"), the other kinds in the action
+ * bar (part "bar"), where the first of them (유용함) is the main action and a refusal or failure is told.
+ */
 export function InsightFeedback({
-  api,
   insight,
-  onChange,
+  record,
+  part,
 }: {
-  api: ApiClient;
   insight: { id: number; summary: string };
-  onChange: () => void;
+  record: ReturnType<typeof useInsightRecord>;
+  part: "head" | "bar";
 }) {
-  const { notice, press } = useRecord(api, { kind: "insight", id: insight.id }, onChange);
+  const { notice, press } = record;
+  const kinds = INSIGHT_FEEDBACK_KINDS.filter(
+    (kind) => (kind === "confirmed") === (part === "head"),
+  );
+  const buttons = kinds.map((kind) => (
+    <button
+      key={kind}
+      type="button"
+      className={part === "head" ? "btn-text" : kind === "useful" ? "btn-primary" : undefined}
+      title={insightHint(kind)}
+      aria-label={feedbackButtonName(kind, insight.summary)}
+      onClick={() => void press(kind)}
+    >
+      {feedbackLabel(kind)}
+    </button>
+  ));
+  if (part === "head") return <>{buttons}</>;
   return (
     <>
       {notice && <p role="alert">{notice}</p>}
       <div className="actions" role="group" aria-label={`피드백: ${insight.summary}`}>
-        {INSIGHT_FEEDBACK_KINDS.map((kind) => (
-          <button
-            key={kind}
-            type="button"
-            className={kind === "useful" ? "btn-primary" : undefined}
-            title={insightHint(kind)}
-            aria-label={feedbackButtonName(kind, insight.summary)}
-            onClick={() => void press(kind)}
-          >
-            {feedbackLabel(kind)}
-          </button>
-        ))}
+        {buttons}
       </div>
     </>
   );

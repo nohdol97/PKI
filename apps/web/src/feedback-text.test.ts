@@ -17,13 +17,14 @@ describe("feedback text", () => {
       "다시 알리지 않기",
       "확인 완료",
     ]);
-    const html = renderToStaticMarkup(
-      createElement(InsightFeedback, {
-        api: (() => Promise.reject(new Error("unused"))) as never,
-        insight: { id: 1, summary: '<img src="https://tracker.example.test/x">' },
-        onChange: () => undefined,
-      }),
-    );
+    const record = { notice: undefined, press: () => Promise.resolve() };
+    const insight = { id: 1, summary: '<img src="https://tracker.example.test/x">' };
+    // the six kinds are split over the detail pane: 확인 완료 in the head bar, the other five in the action bar
+    const html = (["head", "bar"] as const)
+      .map((part) =>
+        renderToStaticMarkup(createElement(InsightFeedback, { insight, record, part })),
+      )
+      .join("");
     expect(html).not.toContain("<img");
     expect((html.match(/<button/g) ?? []).length).toBe(6);
   });

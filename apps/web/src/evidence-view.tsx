@@ -14,7 +14,7 @@ import {
 } from "@pki/contracts";
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
-import { InsightFeedback, RecentFeedback, RowFeedback } from "./feedback.tsx";
+import { InsightFeedback, RecentFeedback, RowFeedback, useInsightRecord } from "./feedback.tsx";
 import { DETAIL_HINT, DetailPane, PaneHead, Props, Row } from "./panes.tsx";
 import {
   AUTO_NOTIFY_EXCLUDED,
@@ -446,12 +446,15 @@ export function InsightDetail({
   insight,
   position,
   lead,
+  headAction,
   actions,
   evidence,
 }: {
   insight: InsightData | undefined;
   position?: string | undefined;
   lead?: ReactNode;
+  /** What the head bar holds at its right (Home: "확인 완료"). */
+  headAction?: ReactNode;
   actions?: ReactNode;
   evidence: EvidenceViewProps;
 }) {
@@ -463,7 +466,11 @@ export function InsightDetail({
     );
   }
   return (
-    <DetailPane label="Insight 상세" head={{ title: "Insight", count: position }} actions={actions}>
+    <DetailPane
+      label="Insight 상세"
+      head={{ title: "Insight", count: position, right: headAction }}
+      actions={actions}
+    >
       <InsightBody insight={insight} lead={lead} />
       <EvidenceSections {...evidence} />
     </DetailPane>
@@ -496,6 +503,7 @@ export function Insights({
   const index = insights?.findIndex((i) => i.id === openedId) ?? -1;
   const current = insights?.[index];
   const firstShown = useRef(false);
+  const record = useInsightRecord(api, openedId ?? 0, feedbackChanged);
 
   useEffect(() => {
     api("insights").then(
@@ -607,9 +615,8 @@ export function Insights({
       <InsightDetail
         insight={current}
         position={current && insights ? `${index + 1} / ${insights.length}` : undefined}
-        actions={
-          current && <InsightFeedback api={api} insight={current} onChange={feedbackChanged} />
-        }
+        headAction={current && <InsightFeedback insight={current} record={record} part="head" />}
+        actions={current && <InsightFeedback insight={current} record={record} part="bar" />}
         evidence={{
           state,
           onOpenSource: openSource,

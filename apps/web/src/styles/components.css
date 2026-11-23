@@ -273,6 +273,13 @@
   height: var(--control-h);
   resize: vertical;
 }
+.btn-text {
+  min-height: 0;
+  padding: var(--sp-1) var(--sp-2);
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+}
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -390,4 +397,16 @@
 }
 .line-list.spread > li > span:last-child {
   margin-left: auto;
+}
+
+/* a medium window (the shell's 1100px default): tighter bar so the main actions of a detail stay on one row */
+@media (max-width: 1280px) {
+  .actions {
+    gap: var(--sp-1);
+    padding: 12px var(--sp-4);
+  }
+  .actions button {
+    padding: var(--sp-1) 10px;
+    font-size: var(--fs-meta);
+  }
 }
