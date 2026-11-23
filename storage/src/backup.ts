@@ -10,6 +10,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -22,6 +23,7 @@ import {
   BACKUP_EXTENSION,
   BACKUP_FORMAT,
   BackupFileError,
+  CHUNK_BYTES,
   MIN_PASSPHRASE_LENGTH,
   openBackup,
   type OpenedBackup,
@@ -155,6 +157,41 @@ export function syncPath(path: string): void {
   }
 }
 
+/** The byte count and SHA-256 of a file, read a piece at a time (H01F-R4). */
+function hashFile(path: string, pieceBytes: number): { bytes: number; sha256: string } {
+  const hash = createHash("sha256");
+  const piece = Buffer.alloc(pieceBytes);
+  const fd = openSync(path, "r");
+  let bytes = 0;
+  try {
+    for (;;) {
+      const n = readSync(fd, piece, 0, pieceBytes, bytes);
+      if (n === 0) break;
+      hash.update(piece.subarray(0, n));
+      bytes += n;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return { bytes, sha256: hash.digest("hex") };
+}
+
+const STALE_PARTIAL_MS = 60 * 60 * 1000;
+const PARTIAL_NAME = /^pki-backup-.*\.pkibak\.partial$/;
+
+/** A backup folder's `.partial` files of this product's name that a crash left more than an hour ago (H01F-R4, D5). */
+function removeStalePartials(folder: string): void {
+  for (const name of readdirSync(folder)) {
+    if (!PARTIAL_NAME.test(name)) continue;
+    try {
+      const path = join(folder, name);
+      if (Date.now() - statSync(path).mtimeMs > STALE_PARTIAL_MS) rmSync(path, { force: true });
+    } catch {
+      // gone or not ours to remove: the backup does not depend on it
+    }
+  }
+}
+
 export interface CreateBackupInput {
   db: SqlDriver;
   open: OpenSqlDriver;
@@ -189,14 +226,14 @@ export function createBackup(input: CreateBackupInput): {
     } finally {
       copy.close();
     }
-    const bytes = readFileSync(snapshot);
+    const { bytes, sha256 } = hashFile(snapshot, input.chunkBytes ?? CHUNK_BYTES);
     const manifest: BackupManifest = {
       backupId: randomUUID(),
       createdAt: input.now.toISOString(),
       formatVersion: BACKUP_FORMAT,
       ...facts,
-      snapshotBytes: bytes.length,
-      snapshotSha256: createHash("sha256").update(bytes).digest("hex"),
+      snapshotBytes: bytes,
+      snapshotSha256: sha256,
       embeddingSpace: input.embeddingSpace,
       vectorIndexSeq: input.vectorIndexSeq,
       installation,
@@ -206,6 +243,7 @@ export function createBackup(input: CreateBackupInput): {
     if (existsSync(target)) throw new BackupExistsError();
     const partial = `${target}.partial`;
     rmSync(partial, { force: true });
+    removeStalePartials(input.folder);
     try {
       writeBackupFile(partial, {
         passphrase: input.passphrase,
@@ -473,6 +511,19 @@ export function stageRestore(input: StageInput): StageResult {
   }
 }
 
+/** Settings that say where this PC writes and sends: the copy's values are not applied (H01F-R6, D6). */
+const keptSetting = "key = 'backup.folder' OR substr(key, 1, 10) = 'providers.'";
+
+function keepLocalSettings(live: SqlDriver, staged: SqlDriver): void {
+  const mine = live.all(`SELECT key, value FROM settings WHERE ${keptSetting}`);
+  staged.transaction(() => {
+    staged.run(`DELETE FROM settings WHERE ${keptSetting} OR key = ?`, [RESTORE_LAST_SETTING]);
+    for (const row of mine) {
+      staged.run("INSERT INTO settings (key, value) VALUES (?, ?)", [row.key, row.value]);
+    }
+  });
+}
+
 /** The checks of R9 in order on the unpacked file; the code of the first that fails, or undefined. */
 function checkAndLift(
   input: StageInput,
@@ -501,8 +552,9 @@ function checkAndLift(
     // ④ another installation's data over one that holds sources or deletions (H01-D8)
     const theirs = keyOf(staged);
     const mine = keyOf(input.db);
+    // a copy with no key takes a new one at start, so it is a stranger to this installation's deletions (H01F-R5)
     const differs =
-      theirs !== undefined && (mine === undefined || Buffer.compare(theirs, mine) !== 0);
+      theirs === undefined || mine === undefined || Buffer.compare(theirs, mine) !== 0;
     if (differs) {
       const held = readSnapshotFacts(input.db).counts;
       if (held.sources > 0 || held.tombstones > 0) return "other-installation";
@@ -522,6 +574,7 @@ function checkAndLift(
     if (found.length !== expected.length || found.some((line, i) => line !== expected[i])) {
       return "foreign-schema";
     }
+    keepLocalSettings(input.db, staged);
     return undefined;
   } finally {
     staged.close();
