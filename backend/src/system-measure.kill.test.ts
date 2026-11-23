@@ -20,6 +20,7 @@ describe.skipIf(process.platform === "win32")("system-measure kill (H03-C2, C3)"
     const trace: { pids: number[]; workDir?: string } = { pids: [] };
     const value = await runKillPhase({ mode: "test-build", leaseMs: 1000, docs: 3, trace });
     expect(value.runningAtKill).toBeGreaterThan(0);
+    expect(value.failedJobs).toEqual({});
     expect(value.lostDocs).toBe(0);
     expect(value.duplicateItems).toBe(0);
     expect(value.firstJobAfterRestartMs).toBeGreaterThan(0);

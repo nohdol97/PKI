@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
 import {
+  failedJobCounts,
   runMeasurement,
   SYSTEM_THRESHOLDS,
   validateResult,
@@ -95,5 +96,11 @@ describe("system-measure (H03-C2)", () => {
     expect(committed.mode).toBe("source-run");
     expect(committed.metrics.killRecover.status).toBe("measured");
     expect(committed.args).toMatchObject({ sources: 200, queries: 220, idleSeconds: 30 });
+  });
+
+  it("F1: counts jobs that ended in a terminal status other than succeeded", () => {
+    const counts = { succeeded: 9, dead_letter: 1, cancelled: 0, superseded: 2 };
+    expect(failedJobCounts({ counts } as never)).toEqual({ dead_letter: 1, superseded: 2 });
+    expect(failedJobCounts({ counts: { succeeded: 3 } } as never)).toEqual({});
   });
 });

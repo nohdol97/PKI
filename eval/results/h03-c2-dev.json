@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "ranAt": "2026-11-23T21:56:53.935Z",
-  "productCommit": "a05ffc7b624424d3c3128a97dde482483b048380",
+  "ranAt": "2026-11-23T22:13:55.131Z",
+  "productCommit": "720e0c6035b2e50337ad44a9af45bec5786eaf1e",
   "workingTreeClean": true,
   "mode": "source-run",
   "environment": {
@@ -46,8 +46,8 @@
     },
     "idleCpu": {
       "status": "measured",
-      "percentOfAllCores": 0.00829348000595967,
-      "observedSeconds": 30.144161415999996,
+      "percentOfAllCores": 0,
+      "observedSeconds": 30.091666874999998,
       "note": "observed 30 s; EVALUATION asks for a 10-minute idle, so this is shorter than the reference; the sample is CPU time over wall time across all logical cores",
       "threshold": {
         "label": "유휴 CPU",
@@ -56,10 +56,10 @@
     },
     "idleRss": {
       "status": "measured",
-      "minMiB": 21.21875,
-      "medianMiB": 21.90625,
-      "maxMiB": 78.078125,
-      "observedSeconds": 30.144161415999996,
+      "minMiB": 57.671875,
+      "medianMiB": 179.515625,
+      "maxMiB": 180.21875,
+      "observedSeconds": 30.091666874999998,
       "note": "observed 30 s; EVALUATION asks for a 10-minute idle, so this is shorter than the reference; the embedding model is not loaded in this run",
       "threshold": {
         "label": "유휴 메모리",
@@ -69,8 +69,8 @@
     "processingSearchable": {
       "status": "measured",
       "samples": 200,
-      "p50Ms": 73.49254099999962,
-      "p95Ms": 216.5532920000005,
+      "p50Ms": 23.269874999999956,
+      "p95Ms": 51.84045900000092,
       "definition": "from sending the document to the import API until a keyword search returns it",
       "threshold": {
         "label": "신규 문서 처리(검색 가능까지, LLM 제외)",
@@ -80,8 +80,8 @@
     "processingExtracted": {
       "status": "measured",
       "samples": 60,
-      "p50Ms": 166.09929099999954,
-      "p95Ms": 581.4147499999999,
+      "p50Ms": 85.72062499999993,
+      "p95Ms": 93.65666599999986,
       "definition": "from sending the document until every job is done (the stub answers after the stated delay); documents are sent one at a time, so no queue wait is in it",
       "threshold": {
         "label": "신규 문서 처리(지식 추출까지, LLM 포함)",
@@ -91,8 +91,8 @@
     "search": {
       "status": "measured",
       "samples": 200,
-      "p50Ms": 3.0958749999990687,
-      "p95Ms": 29.090458000006038,
+      "p50Ms": 1.225958000000901,
+      "p95Ms": 2.3789170000000013,
       "warmupDiscarded": 20,
       "definition": "one keyword-search request over HTTP, timed only when the query's own document is in the results",
       "threshold": {
@@ -197,9 +197,10 @@
       "leaseSource": "product default",
       "docs": 10,
       "runningAtKill": 1,
-      "firstJobAfterRestartMs": 120034.56612499998,
-      "allJobsDoneMs": 130220.858667,
+      "firstJobAfterRestartMs": 119923.28375,
+      "allJobsDoneMs": 130256.48329100001,
       "lostDocs": 0,
+      "failedJobs": {},
       "duplicateItems": 0,
       "note": "firstJobAfterRestartMs is the time from the restart to the first job to run (any job); allJobsDoneMs to every job finished, the interrupted job included, which waits for its lease to run out",
       "threshold": {

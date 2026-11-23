@@ -88,7 +88,10 @@ export interface KillRecoverValue {
   /** Restart to the first job to run (D5), restart to every job finished. */
   firstJobAfterRestartMs: number;
   allJobsDoneMs: number;
+  /** Documents not found by search plus jobs that ended dead_letter, cancelled or superseded (no knowledge produced). */
   lostDocs: number;
+  /** The terminal non-succeeded jobs by status, already part of `lostDocs`. */
+  failedJobs: Record<string, number>;
   duplicateItems: number;
   note: string;
 }
@@ -272,6 +275,11 @@ export function validateResult(value: unknown): string[] {
     positive("metrics.killRecover.allJobsDoneMs");
     nonNegative("metrics.killRecover.lostDocs");
     nonNegative("metrics.killRecover.duplicateItems");
+    at(
+      "metrics.killRecover.failedJobs",
+      typeof get(value, "metrics.killRecover.failedJobs") === "object",
+      "missing",
+    );
   }
   const unverified = get(value, "unverified");
   const items = Array.isArray(unverified)
@@ -549,6 +557,16 @@ async function bindStub(backend: Backend): Promise<void> {
 const OPEN = ["queued", "running", "retry", "held"] as const;
 const openJobs = (jobs: JobsResponse) => OPEN.reduce((n, s) => n + (jobs.counts[s] ?? 0), 0);
 
+/** Jobs that ended without producing their result, by status: a document whose extraction failed is lost knowledge. */
+export function failedJobCounts(jobs: JobsResponse): Record<string, number> {
+  const failed: Record<string, number> = {};
+  for (const status of ["dead_letter", "cancelled", "superseded"] as const) {
+    const n = jobs.counts[status] ?? 0;
+    if (n > 0) failed[status] = n;
+  }
+  return failed;
+}
+
 async function importDoc(backend: Backend, doc: SyntheticDoc): Promise<void> {
   const res = await backend.call(routes.importJsonl, { text: doc.line });
   if (res.errorCount > 0) {
@@ -786,6 +804,8 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       const found = await backend.call(routes.searchSources, { query: doc.token });
       if (!found.sources.some((s) => s.externalId === doc.externalId)) lostDocs++;
     }
+    const failedJobs = failedJobCounts(await backend.call(routes.jobs));
+    lostDocs += Object.values(failedJobs).reduce((a, b) => a + b, 0);
     const names = await itemsNamed(backend, STUB_ITEM_NAME);
     const leaseMs = options.mode === "test-build" ? (options.leaseMs ?? 0) : 120_000;
     return {
@@ -796,6 +816,7 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       firstJobAfterRestartMs: firstJobAfterRestartMs ?? allJobsDoneMs,
       allJobsDoneMs,
       lostDocs,
+      failedJobs,
       duplicateItems: Math.max(0, names - 1),
       note: "firstJobAfterRestartMs is the time from the restart to the first job to run (any job); allJobsDoneMs to every job finished, the interrupted job included, which waits for its lease to run out",
     };
