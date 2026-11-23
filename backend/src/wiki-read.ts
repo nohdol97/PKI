@@ -17,13 +17,16 @@ import {
   listWikiHidden,
   listWikiLog,
   listWikiNotes,
+  lineageOfWikiPage,
   readStoredWikiPage,
+  readWikiSummary,
   removeWikiNote,
   setWikiHide,
   unionOfVersions,
   type DerivativeRegistry,
   type SqlDriver,
   type StoredWikiPage,
+  wikiSummaryHeld,
   type WikiLogLine,
 } from "@pki/storage";
 import type { ReadGate } from "./read-gate.ts";
@@ -115,6 +118,34 @@ export function createWikiReads(
   const shownPage = (key: string): StoredWikiPage | undefined => {
     const stored = readStoredWikiPage(db, key);
     return stored && targetShown(stored) ? stored : undefined;
+  };
+
+  /**
+   * The summary's state (K01-R14). Sentences go out only while the whole lineage is shown and the policy lets
+   * it be put together (R9): a page's stored summary was made from all of its sources, so one source the caller
+   * may not see makes the whole summary not theirs.
+   */
+  const summaryOf = (stored: StoredWikiPage): Page["summary"] => {
+    if (!readWikiSummary(db)) return { state: "off" };
+    if (stored.summaryHash === stored.contentHash && stored.summary !== null) {
+      const sentences = (
+        JSON.parse(stored.summary) as {
+          sentence: string;
+          sourceId: number;
+          version: number;
+          start: number;
+          end: number;
+        }[]
+      ).map(({ sentence, ...span }) => ({ text: sentence, ...span }));
+      if (
+        sentences.length > 0 &&
+        registry.visible(db, [{ kind: "wiki-page", id: stored.key }], "display").length === 1 &&
+        registry.combinable(db, lineageOfWikiPage(db, stored.key))
+      ) {
+        return { state: "ready", sentences };
+      }
+    }
+    return wikiSummaryHeld(db, stored.key) ? { state: "held" } : { state: "none" };
   };
 
   return {
@@ -263,7 +294,7 @@ export function createWikiReads(
         history: listWikiLog(db, { pageKey: key, limit: PAGE_HISTORY_LINES })
           .reverse()
           .map(logLine),
-        summary: { state: "off" },
+        summary: summaryOf(stored),
       };
     },
 

@@ -520,12 +520,15 @@ export const SemanticSettingsSchema = z.strictObject({
   autoVerify: z.boolean(),
   /** `semantic.autoDispute` (S02-R20): the policy disputes a verified fact on a new contradiction, default off. */
   autoDispute: z.boolean(),
+  /** `wiki.summary` (K01-R12, R15): the Wiki's LLM summary, default off. */
+  wikiSummary: z.boolean(),
 });
 export type SemanticSettings = z.infer<typeof SemanticSettingsSchema>;
 /** The write: `autoDispute` left out means unchanged. */
 export const SemanticSettingsRequestSchema = z.strictObject({
   autoVerify: z.boolean(),
   autoDispute: z.boolean().optional(),
+  wikiSummary: z.boolean().optional(),
 });
 
 /**
@@ -1481,8 +1484,21 @@ export const WikiPageResponseSchema = z.object({
   notes: z.array(WikiNoteSchema),
   /** Oldest first. */
   history: z.array(WikiLogLineSchema),
-  /** The LLM summary's state (K01-R14); `off` until the summary feature (K01-T2) is on. */
-  summary: z.object({ state: z.enum(["off", "none", "held", "ready"]) }),
+  /** The LLM summary's state (K01-R14); `sentences` only with `ready`. */
+  summary: z.object({
+    state: z.enum(["off", "none", "held", "ready"]),
+    sentences: z
+      .array(
+        z.object({
+          text: z.string(),
+          sourceId: z.int().positive(),
+          version: z.int().positive(),
+          start: z.int().nonnegative(),
+          end: z.int().nonnegative(),
+        }),
+      )
+      .optional(),
+  }),
 });
 /**
  * One object (a contract schema converts to a JSON Schema object), the shape of each `op` checked by a

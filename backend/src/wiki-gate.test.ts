@@ -11,6 +11,7 @@ import {
   saveFact,
   saveRelation,
   saveSourceRecord,
+  setWikiSummary,
   type KnowledgeAttributes,
   type ScopePolicy,
   type SqlDriver,
@@ -107,6 +108,54 @@ describe("wiki.gate: what the policy refuses is not in the Wiki's answer", () =>
     const index = reads.index();
     expect(index.kinds.flatMap((k) => k.pages.map((p) => p.key))).toEqual([`projects/${shown}`]);
     expect(JSON.stringify(index)).not.toContain(SECRET);
+  });
+});
+
+describe("wiki.gate: a stored summary is shown only when the whole lineage is (K01-R9, C4)", () => {
+  it("answers `ready` with the sentences under a policy that allows every scope, and `none` without them when one scope is refused", () => {
+    const open = source("open", "공개 본문", ["open"]);
+    const secret = source("secret", `${SECRET} 본문`, ["secret"]);
+    const shown = insertItem(db, { type: "Project", name: "공개 항목", ...attrs });
+    const alias = insertItem(db, { type: "Project", name: `${SECRET} 별칭`, ...attrs });
+    citedFact(shown, "공개 값", open);
+    citedFact(alias, `${SECRET} 값`, secret);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [alias, shown],
+    );
+    const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+    const key = `projects/${shown}`;
+    const sentence = { sentence: `${SECRET} 요약`, sourceId: 1, version: 1, start: 0, end: 2 };
+    setWikiSummary(db, true, new Date());
+    db.run("UPDATE wiki_pages SET summary = ?, summary_hash = content_hash WHERE key = ?", [
+      JSON.stringify([sentence]),
+      key,
+    ]);
+
+    const allowAll = createProductRegistry({
+      policy: { ...policy, allows: () => true },
+    });
+    const everything = createWikiReads(db, allowAll, createReadGate(db, allowAll));
+    expect(everything.page(key)?.summary.state).toBe("ready");
+
+    // every scope allowed but the two not to be put together: the summary mixes them, so it is not shown
+    const apart = createProductRegistry({
+      policy: {
+        ...policy,
+        allows: () => true,
+        combinable: (scopes) => new Set(scopes.map((s) => JSON.stringify(s))).size <= 1,
+      },
+    });
+    expect(createWikiReads(db, apart, createReadGate(db, apart)).page(key)?.summary).toEqual({
+      state: "none",
+    });
+
+    const registry = createProductRegistry({ policy });
+    const reads = createWikiReads(db, registry, createReadGate(db, registry));
+    const page = reads.page(key);
+    expect(page?.summary).toEqual({ state: "none" });
+    expect(JSON.stringify(page)).not.toContain(`${SECRET} 요약`);
   });
 });
 

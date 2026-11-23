@@ -72,3 +72,7 @@ export const rebuildText = (status: "queued" | "open"): string =>
   status === "queued"
     ? "다시 만들기를 요청했습니다."
     : "이미 만드는 작업이 있어 그 작업이 처리합니다.";
+
+/** The LLM summary's label and its held state (K01-R13, R14): the sentences come from a model, not from a row. */
+export const WIKI_SUMMARY_LABEL = "LLM 요약";
+export const WIKI_SUMMARY_HELD = "LLM 요약은 동의나 전송 조건을 기다리는 중입니다.";

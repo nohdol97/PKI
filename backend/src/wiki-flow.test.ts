@@ -20,6 +20,7 @@ import {
   productRunner,
 } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
+import { releaseHeldOnEvent } from "./held-release.ts";
 import type { JobRunner } from "./job-runner.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
@@ -57,11 +58,21 @@ function consent(egress: EgressControls) {
 
 /** The product's runner (it queues `wiki-build` itself), the import and the API over one database. */
 async function backend() {
+  const extraction = fixtureExtraction();
   const egress = productEgress(db);
   const provider = new FakeProvider({
     id: "local-model",
     transport: "http",
-    answer: fixtureExtraction(),
+    answer: (request) =>
+      request.taskKind === "wiki-summary"
+        ? {
+            sentences: request.input.untrustedDocuments.slice(0, 1).map((d) => ({
+              text: "요약 문장",
+              documentId: d.id,
+              quote: d.body,
+            })),
+          }
+        : extraction(request),
   });
   writeSetting(db, DEFAULT_PROVIDER_SETTING, provider.id);
   const calls = productCalls(db, egress, { providers: [provider] });
@@ -86,7 +97,13 @@ async function backend() {
     return { status: res.status, body: res.body as RouteResponse<Name> };
   };
   const importer = productImporter(db, { runner: run });
-  return { call, run, importIn: async (text: string) => (await importer(text), await run.wake()) };
+  return {
+    call,
+    run,
+    egress,
+    provider,
+    importIn: async (text: string) => (await importer(text), await run.wake()),
+  };
 }
 
 const pages = () =>
@@ -178,5 +195,43 @@ describe("wiki.flow: rebuild and the user's edits (K01-C3c)", () => {
     expect(page.notes.map((n) => n.text)).toEqual(["내 메모"]);
     expect(page.claims.map((c) => c.ref)).not.toContainEqual(claim?.ref);
     expect(page.stale).toBe(false);
+  });
+});
+
+const summaryJobs = () =>
+  db.all("SELECT status, reason FROM jobs WHERE kind = 'wiki-summary' ORDER BY id");
+const IMPORT = ["v02-mail", "v02-wiki", "v02-messenger"].map((n) => read(`${n}.jsonl`)).join("\n");
+
+describe("wiki.summary-flow: the setting, consent and the state a page shows (K01-C4 ②③)", () => {
+  it("③ with the setting off (the default) queues no summary job and the page says `off`", async () => {
+    const { call, importIn } = await backend();
+    await importIn(IMPORT);
+    expect(summaryJobs()).toEqual([]);
+    expect((await call("wikiPage", { key: keyOf("물결 API") })).body.summary).toEqual({
+      state: "off",
+    });
+  });
+
+  it("② without consent the job is held, no Provider is asked, the page says `held`; with consent it becomes `ready`", async () => {
+    const { call, run, egress, provider, importIn } = await backend();
+    await importIn(IMPORT);
+    egress.revoke("local-model");
+    const asked = provider.requests.length;
+
+    await call("setSemanticSettings", { autoVerify: false, wikiSummary: true });
+    await run.wake();
+
+    expect(summaryJobs().length).toBeGreaterThan(0);
+    expect(summaryJobs().every((j) => j.status === "held" && j.reason === "no-consent")).toBe(true);
+    expect(provider.requests.length).toBe(asked);
+    const key = keyOf("물결 API");
+    expect((await call("wikiPage", { key })).body.summary).toEqual({ state: "held" });
+
+    consent(egress);
+    releaseHeldOnEvent(db, "consent");
+    await run.wake();
+    const { summary } = (await call("wikiPage", { key })).body;
+    expect(summary.state).toBe("ready");
+    expect(summary.sentences?.[0]?.text).toBe("요약 문장");
   });
 });

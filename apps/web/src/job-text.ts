@@ -23,6 +23,7 @@ const KIND: Readonly<Record<string, string>> = {
   "projection-remove": "투영 제거",
   "projection-rebuild": "투영 재구축",
   "wiki-build": "위키 만들기",
+  "wiki-summary": "위키 요약",
 };
 export const kindText = (kind: string): string => KIND[kind] ?? kind;
 
