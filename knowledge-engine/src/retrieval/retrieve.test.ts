@@ -399,3 +399,44 @@ describe("X01-R12 the visibility check comes before the strategy cut", () => {
     db.close();
   });
 });
+
+describe("X01-C6a X01-C6b ③ keyword reads in pages, metadata counts after the check", () => {
+  const denying = createProductRegistry({
+    policy: {
+      ...defaultScopePolicy,
+      allows: (scopes) => !scopes.some((s) => s?.includes("denied")),
+    },
+  });
+  const plant = (denied: number, open: number, deniedConnector = "c1") => {
+    const db: SqlDriver = openBetterSqlite3(":memory:");
+    migrate(db);
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    registerConnectorInstance(db, "c2", "test-fixtures");
+    const add = (connector: string, mark: string, scope: string[], body: string) =>
+      saveSourceRecord(db, connector, {
+        externalId: mark,
+        title: mark,
+        body,
+        accessScope: scope,
+      });
+    for (let i = 0; i < denied; i++)
+      add(deniedConnector, `denied-${i}`, ["denied"], "프로브낱말 프로브낱말 프로브낱말");
+    for (let i = 0; i < open; i++) add("c1", `open-${i}`, ["open"], "프로브낱말");
+    return db;
+  };
+
+  it("C6a ① finds the visible sources behind 110 hidden ones that rank above them", async () => {
+    const db = plant(110, 3);
+    const found = await retrieve(db, denying, "프로브낱말");
+    expect(found.hits).toHaveLength(3);
+    expect(found.route.keyword).toEqual({ status: "used", count: 3 });
+    db.close();
+  });
+
+  it("C6b ③ does not count a hidden source the collector condition would have removed", async () => {
+    const db = plant(1, 3, "c2");
+    const found = await retrieve(db, denying, "프로브낱말", { connectorIds: ["c1"] });
+    expect(found.route.metadata).toEqual({ status: "used", count: 0 });
+    db.close();
+  });
+});
