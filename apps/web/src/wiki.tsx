@@ -37,8 +37,6 @@ function claimTitle(claim: WikiClaim, titleOf: (key: string) => string): string 
 
 export interface PageViewProps {
   page: Page;
-  /** Claims hidden since this page was opened: the page no longer lists them, so the way back is here. */
-  hidden: WikiClaim[];
   source: EvidenceSource | undefined;
   headingRef: Ref<HTMLHeadingElement>;
   sourceHeadingRef: Ref<HTMLHeadingElement>;
@@ -51,7 +49,8 @@ export interface PageViewProps {
 }
 
 export function PageView(props: PageViewProps) {
-  const { page, hidden, source, onOpenPage, onOpenEvidence } = props;
+  const { page, source, onOpenPage, onOpenEvidence } = props;
+  const { hidden } = page;
   const [note, setNote] = useState("");
   const titleOf = (key: string) => page.links.find((l) => l.key === key)?.title ?? key;
   const addNote = (event: FormEvent) => {
@@ -130,8 +129,8 @@ export function PageView(props: PageViewProps) {
       )}
       {hidden.length > 0 && (
         <>
-          <h3>방금 숨긴 주장</h3>
-          <ul aria-label="방금 숨긴 주장">
+          <h3>숨긴 주장</h3>
+          <ul aria-label="숨긴 주장">
             {hidden.map((c) => {
               const title = claimTitle(c, titleOf);
               return (
@@ -232,7 +231,6 @@ export function PageView(props: PageViewProps) {
 export function Wiki({ api }: { api: ApiClient }) {
   const [index, setIndex] = useState<Index>();
   const [page, setPage] = useState<Page>();
-  const [hidden, setHidden] = useState<WikiClaim[]>([]);
   const [source, setSource] = useState<EvidenceSource>();
   const [notice, setNotice] = useState<string>();
   const [rebuilding, setRebuilding] = useState<string>();
@@ -254,7 +252,6 @@ export function Wiki({ api }: { api: ApiClient }) {
         (p) => {
           setPage(p);
           if (fresh) {
-            setHidden([]);
             setSource(undefined);
             setNotice(undefined);
             setOpens((n) => n + 1);
@@ -358,27 +355,16 @@ export function Wiki({ api }: { api: ApiClient }) {
       {page && (
         <PageView
           page={page}
-          hidden={hidden}
           source={source}
           headingRef={headingRef}
           sourceHeadingRef={sourceHeadingRef}
           onOpenPage={(key) => void readPage(key, true)}
           onOpenEvidence={(id) => void openEvidence(id)}
           onHide={(claim) =>
-            void edit({ op: "hide", claim: claim.ref }).then((ok) => {
-              if (!ok) return;
-              setHidden((h) => [...h, claim]);
-              after();
-            })
+            void edit({ op: "hide", claim: claim.ref }).then((ok) => ok && after())
           }
           onUnhide={(claim) =>
-            void edit({ op: "unhide", claim: claim.ref }).then((ok) => {
-              if (!ok) return;
-              setHidden((h) =>
-                h.filter((x) => x.ref.id !== claim.ref.id || x.ref.kind !== claim.ref.kind),
-              );
-              after();
-            })
+            void edit({ op: "unhide", claim: claim.ref }).then((ok) => ok && after())
           }
           onAddNote={(text) =>
             edit({ op: "note-add", key: page.key, text }).then((ok) => (ok && after(), ok))

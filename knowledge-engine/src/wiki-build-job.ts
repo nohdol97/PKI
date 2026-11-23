@@ -2,8 +2,8 @@
 // page's hash with the stored one and hands back only the pages that changed and the pages of targets that
 // are gone, plus the state advance as the last item. The runner writes the result through commitDerived in
 // one transaction, so a write that throws leaves no half-written Wiki and no advance (the Wiki stays stale).
-// No Provider is called. A forced rebuild skips the comparison and writes every page; a page whose hash is
-// unchanged writes nothing, so its hash, its time and the log stay (writeWikiPage).
+// No Provider is called. A forced rebuild skips the comparison and the page cap and hands back every page; a page whose hash
+// is unchanged writes nothing, so its hash, its time and the log stay (writeWikiPage).
 import {
   advanceWikiState,
   listStoredWikiPages,
@@ -55,8 +55,9 @@ export function planWikiBuild(
       write: (tx: SqlDriver) => void writeWikiPage(tx, page, at),
     })),
   ];
-  const complete = work.length <= cap;
-  const items = work.slice(0, cap);
+  // a forced rebuild is not cut: the same first pages would come round every run and the state never advance
+  const complete = force || work.length <= cap;
+  const items = complete ? work : work.slice(0, cap);
   if (complete) {
     items.push({
       kind: WIKI_PAGE_KIND_NAME,

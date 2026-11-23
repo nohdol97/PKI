@@ -1461,6 +1461,8 @@ export const WikiPageResponseSchema = z.object({
   stale: z.boolean(),
   members: z.array(z.object({ id: z.int().positive(), name: z.string() })),
   claims: z.array(WikiClaimSchema),
+  /** The claims the user hid on this page, judged by the same read rules as `claims`: the way back (K01-R11). */
+  hidden: z.array(WikiClaimSchema),
   /** The pages this one points at (a relation claim's end, an Insight's two ends). */
   links: z.array(z.object({ key: z.string(), title: z.string() })),
   backlinks: z.array(

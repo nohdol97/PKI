@@ -123,6 +123,8 @@ describe("wiki.render: a page per target, by the kind its type maps to", () => {
     expect(page?.lineage).toEqual([{ sourceId: a.sourceId, version: a.version }]);
     const claim = page?.document.claims.find((c) => c.ref.id === old);
     expect(claim?.validUntil).toBeNull();
-    expect(claim?.supersededBy).toEqual([{ ref: { kind: "fact", id: next }, validAt: "2031-01-01" }]);
+    expect(claim?.supersededBy).toEqual([
+      { ref: { kind: "fact", id: next }, validAt: "2031-01-01" },
+    ]);
   });
 });

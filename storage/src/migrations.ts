@@ -1524,6 +1524,7 @@ const WIKI_INPUT_TABLES = [
   "item_merges",
   "insights",
   "insight_evidence",
+  "source_versions",
 ];
 const v27: Migration = (db) => {
   db.exec(`

@@ -4,9 +4,9 @@
 // shown; otherwise it is the same answer as a key nothing is stored under. Inside a shown page a claim is shown
 // only while its row is stored and shown (and its other end's page is), an evidence id likewise, a member's
 // name likewise, a backlink only when the page it comes from and the row it rests on are. The user's edits are
-// laid over at this read: a hidden claim is left out, the notes are attached (K01-R11).
+// laid over at this read: a hidden claim is left out of `claims` and listed in `hidden` (judged by the same rules), the notes are attached (K01-R11).
 import type { RouteRequest, RouteResponse } from "@pki/contracts";
-import type { WikiPageBody } from "@pki/knowledge-engine";
+import type { ClaimRef, WikiPageBody } from "@pki/knowledge-engine";
 import {
   addWikiNote,
   effectiveUntil,
@@ -123,8 +123,10 @@ export function createWikiReads(
       const stored = shownPage(key);
       if (!stored) return undefined;
       const document = JSON.parse(stored.body) as WikiPageBody;
-      const hidden = new Set(listWikiHidden(db).map((h) => `${h.kind}:${h.id}`));
-      const claims = document.claims.filter((c) => !hidden.has(`${c.ref.kind}:${c.ref.id}`));
+      const hiddenKeys = new Set(listWikiHidden(db).map((h) => `${h.kind}:${h.id}`));
+      const isHidden = (c: { ref: { kind: string; id: number } }) =>
+        hiddenKeys.has(`${c.ref.kind}:${c.ref.id}`);
+      const claims = document.claims.filter((c) => !isHidden(c));
       // each row is stored and shown; a relation also needs the page at its other end to be shown
       const shownRows = {
         fact: new Set(claims.filter((c) => c.ref.kind === "fact").map((c) => c.ref.id)),
@@ -135,7 +137,7 @@ export function createWikiReads(
           if (!gate.semanticShown(kind, id)) shownRows[kind].delete(id);
         }
       }
-      const evidenceOk = shownEvidence(claims.flatMap((c) => c.evidence));
+      const evidenceOk = shownEvidence(document.claims.flatMap((c) => c.evidence));
       const keptRef = (r: { kind: "fact" | "relation"; id: number }) => shownRows[r.kind].has(r.id);
       // a link between two facts is shown only when the policy lets the two be put together (S02-R24)
       const together = new Map<string, boolean>();
@@ -154,22 +156,30 @@ export function createWikiReads(
         }
         return ok;
       };
-      const kept = claims
-        .filter((c) => keptRef(c.ref))
-        .filter((c) => c.to === undefined || shownPage(c.to) !== undefined)
-        .map(({ supersededBy, ...c }) => ({
-          ...c,
-          // the end counts the superseders the caller may see, together with this fact, and no others
-          validUntil: effectiveUntil(
-            c.validUntil,
-            supersededBy
-              .filter((s) => gate.semanticShown("fact", s.ref.id) && combinable(c.ref.id, s.ref.id))
-              .map((s) => s.validAt),
-          ),
-          evidence: c.evidence.filter((id) => evidenceOk.has(id)),
-          contradicts: c.contradicts.filter((r) => keptRef(r) && combinable(c.ref.id, r.id)),
-          supersedes: c.supersedes.filter((r) => keptRef(r) && combinable(c.ref.id, r.id)),
-        }));
+      /** The claims of `list` whose row `own` lets through, each cut to what the caller may see. */
+      const shape = (list: WikiPageBody["claims"], own: (r: ClaimRef) => boolean) =>
+        list
+          .filter((c) => own(c.ref))
+          .filter((c) => c.to === undefined || shownPage(c.to) !== undefined)
+          .map(({ supersededBy, ...c }) => ({
+            ...c,
+            // the end counts the superseders the caller may see, together with this fact, and no others
+            validUntil: effectiveUntil(
+              c.validUntil,
+              supersededBy
+                .filter(
+                  (s) => gate.semanticShown("fact", s.ref.id) && combinable(c.ref.id, s.ref.id),
+                )
+                .map((s) => s.validAt),
+            ),
+            evidence: c.evidence.filter((id) => evidenceOk.has(id)),
+            contradicts: c.contradicts.filter((r) => keptRef(r) && combinable(c.ref.id, r.id)),
+            supersedes: c.supersedes.filter((r) => keptRef(r) && combinable(c.ref.id, r.id)),
+          }));
+      const kept = shape(claims, keptRef);
+      const hidden = shape(document.claims.filter(isHidden), (r) =>
+        gate.semanticShown(r.kind, r.id),
+      );
       const toTitle = (toKey: string) => shownPage(toKey)?.title;
       const linkKeys = [
         ...new Set([
@@ -186,7 +196,7 @@ export function createWikiReads(
         const from = shownPage(l.fromKey);
         const rowShown =
           l.basisKind === "relation"
-            ? gate.semanticShown("relation", l.basisId) && !hidden.has(`relation:${l.basisId}`)
+            ? gate.semanticShown("relation", l.basisId) && !hiddenKeys.has(`relation:${l.basisId}`)
             : true; // the Insight page that carries it was judged as `from`
         return from && rowShown
           ? [{ fromKey: l.fromKey, title: from.title, basisKind: l.basisKind, basisId: l.basisId }]
@@ -199,6 +209,7 @@ export function createWikiReads(
         stale: isWikiStale(db),
         members: document.members.filter((m) => gate.semanticShown("item", m.id)),
         claims: kept,
+        hidden,
         links: linkedPages,
         backlinks,
         ...(document.insight
