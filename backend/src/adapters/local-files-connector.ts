@@ -42,7 +42,7 @@ import {
   type WalkSkipReason,
 } from "@pki/connector-sdk";
 import { createHash, randomBytes } from "node:crypto";
-import { basename, extname } from "node:path";
+import { basename, dirname, extname } from "node:path";
 
 /** What the composition point hands the connector (I02B-R4). */
 export interface LocalFilesPorts {
@@ -98,6 +98,9 @@ const FORMAT_OF_EXTENSION: Readonly<Record<string, string>> = {
 };
 const formatOf = (path: string): string | undefined =>
   FORMAT_OF_EXTENSION[extname(path).toLowerCase()];
+
+/** Whether a file name is one of the document formats: what a `file` location may be approved for (I02B-R5). */
+export const isDocumentFileName = (name: string): boolean => formatOf(name) !== undefined;
 
 /**
  * Every code a walk, a read or the normalizer can fail with is a skip reason (I02B-R16): a code added
@@ -184,11 +187,12 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     seen: { dev: string; ino: string },
   ) {
     const fs = p.fs ?? nodeBoundaryFs;
+    const single = location.type === "file";
     return readLocationFile({
       fs,
       rootRealPath: location.realPath,
-      relativePath: path,
-      kind: "folder",
+      relativePath: single ? "" : path,
+      kind: single ? "file" : "folder",
       maxFileBytes: p.limits().maxFileBytes,
       excluded: pass?.excluded ?? (await resolveExcluded(fs, p.excluded())),
       expectedId: seen,
@@ -261,6 +265,69 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     }
   }
 
+  /**
+   * The `file` kind's root (I02B-R3): the file itself. Its real path is the approved one and it is a regular
+   * file; its identity is not compared, because an editor that saves by writing a new file and renaming it
+   * gives the same path another number (a change of content, not of place). A name that is gone while the
+   * folder that held it still reads is a deleted file (`file-gone`, announced as a deletion); a folder that
+   * is gone too is the disk's absence (`root-missing`).
+   */
+  async function fileRootProblem(
+    fs: BoundaryFs,
+    location: LocalLocationView,
+  ): Promise<RootProblem | "file-gone" | null> {
+    try {
+      if ((await fs.realpath(location.realPath)) !== location.realPath) return "root-changed";
+      return (await fs.stat(location.realPath)).isFile() ? null : "root-changed";
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      if (code === "EACCES" || code === "EPERM") return "root-not-readable";
+      try {
+        await fs.stat(dirname(location.realPath));
+        return "file-gone";
+      } catch {
+        return "root-missing";
+      }
+    }
+  }
+
+  /** The one file of a `file` location, as the walk of a folder would give it. */
+  async function* singleFile(
+    fs: BoundaryFs,
+    location: LocalLocationView,
+  ): AsyncGenerator<
+    | {
+        kind: "file";
+        relativePath: string;
+        size: number;
+        mtimeNs: string;
+        dev: string;
+        ino: string;
+      }
+    | { kind: "skip"; relativePath: string; reason: WalkSkipReason }
+  > {
+    const relativePath = basename(location.realPath);
+    try {
+      const stat = await fs.lstat(location.realPath);
+      if (stat.isSymbolicLink()) yield { kind: "skip", relativePath, reason: "symlink" };
+      else if (!stat.isFile()) yield { kind: "skip", relativePath, reason: "not-regular-file" };
+      else if (stat.dev === 0n && stat.ino === 0n) {
+        yield { kind: "skip", relativePath, reason: "identity-unavailable" };
+      } else {
+        yield {
+          kind: "file",
+          relativePath,
+          size: Number(stat.size),
+          mtimeNs: stat.mtimeNs.toString(),
+          dev: stat.dev.toString(),
+          ino: stat.ino.toString(),
+        };
+      }
+    } catch {
+      yield { kind: "skip", relativePath, reason: "not-readable" };
+    }
+  }
+
   async function scanLocation(
     p: LocalFilesPorts,
     pass: Pass,
@@ -283,7 +350,10 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       forgottenPaths: [],
     };
     pass.reports.set(location.id, report);
-    const problem = await rootProblem(fs, location);
+    const single = location.type === "file";
+    const checked = single ? await fileRootProblem(fs, location) : await rootProblem(fs, location);
+    const gone = checked === "file-gone";
+    const problem = gone ? null : checked;
     if (problem !== null) {
       report.rootUnavailable = true;
       if (location.state !== "unavailable" || location.stateReason !== problem) {
@@ -306,16 +376,21 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     const skips = new Map<string, string>();
     const shielded: string[] = [];
     let complete = true;
-    for await (const event of walkLocation({
-      fs,
-      rootRealPath: location.realPath,
-      limits: {
-        maxDepth: limits.walk.maxDepth,
-        maxRelativePathChars: limits.walk.maxRelativePathChars,
-      },
-      ignore: isIgnored,
-      excluded: pass.excluded,
-    })) {
+    const walk = gone
+      ? []
+      : single
+        ? singleFile(fs, location)
+        : walkLocation({
+            fs,
+            rootRealPath: location.realPath,
+            limits: {
+              maxDepth: limits.walk.maxDepth,
+              maxRelativePathChars: limits.walk.maxRelativePathChars,
+            },
+            ignore: isIgnored,
+            excluded: pass.excluded,
+          });
+    for await (const event of walk) {
       signal.throwIfAborted();
       if (event.kind === "file") {
         if (files.length >= limits.walk.maxFilesPerLocation) {
@@ -624,7 +699,7 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       return pass;
     }
     for (const location of p.locations()) {
-      if (location.type !== "folder") continue;
+      if (location.type === "jsonl-file") continue; // its own instance reads it (I02B-R41)
       if (location.state === "unavailable" && location.stateReason === "root-changed") continue;
       if (!isRead(location) && location.state !== "unavailable") continue;
       signal.throwIfAborted();
@@ -703,7 +778,7 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     location.state === "active" || location.state === "needs-confirmation";
 
   const locationOf = (p: LocalFilesPorts, e: LocalIndexEntry) =>
-    p.locations().find((l) => l.id === e.locationId && l.type === "folder");
+    p.locations().find((l) => l.id === e.locationId && l.type !== "jsonl-file");
 
   /** One entry of the index as a change, or nothing; `halt` stops the read with the entry consumed. */
   async function emit(

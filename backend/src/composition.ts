@@ -89,6 +89,7 @@ import {
   ensureDataDirectory,
   onMembershipChanged,
   listLocations,
+  readLocation,
   prepareCanonicalDb,
   INSIGHT_INTERPRET_KIND,
   requestInsightInterpretations,
@@ -104,6 +105,7 @@ import {
   type UserDecisions,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
+import { JSONL_IMPORT_KIND } from "@pki/connector-sdk";
 import { join } from "node:path";
 import {
   EXTRACT_JOB_KIND,
@@ -136,7 +138,8 @@ import {
   type ProjectionPorts,
 } from "./projection-jobs.ts";
 import { createFixtureConnector } from "./adapters/fixture-connector.ts";
-import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
+import { createJsonlConnector, type JsonlFilePorts } from "./adapters/jsonl-connector.ts";
+import type { JsonlFileHooks } from "./jsonl-file-instances.ts";
 import {
   createLocalFilesConnector,
   type LocalFilesPorts,
@@ -743,6 +746,8 @@ export function isolatedNormalizerPort(
 
 export interface LocalFilesWiring {
   ports: LocalFilesPorts;
+  /** What the instances of approved JSONL file locations read through (I02B-R4, R41). */
+  jsonlPorts: JsonlFilePorts;
   locations: LocalLocations;
   tickets: ApprovalTickets;
   /** The revocation; the start continues a `revoking` location through it (I02B-R49). */
@@ -771,8 +776,10 @@ export function productLocalFiles(
     typedPaths?: boolean;
     /** The tombstone entry a revocation deletes sources through (I02B-R10): the product registry's. */
     entries: Pick<CanonicalEntries, "applyTombstone">;
-    /** Asks the running `local-files` sync to stop, so a revocation gets the instance lock (I02B-R49). */
-    cancelSync: () => void;
+    /** Asks the running sync of an instance to stop, so a revocation gets its lock (I02B-R49). */
+    cancelSync: (instanceId: string) => void;
+    /** The running instances of JSONL file locations (I02B-R41); the composition's start binds them. */
+    jsonlFile?: JsonlFileHooks;
     /** A full sync of the `local-files` instance (I02B-R13). */
     rescan: () => void;
     /** The driver's watch answer and its refresh after a change (I02B-R20, R38). */
@@ -799,8 +806,23 @@ export function productLocalFiles(
     entries: options.entries,
     limits: () => readLocalFilesSettings(db).revoke,
     cancelSync: options.cancelSync,
+    ...(options.jsonlFile ? { onRevoked: options.jsonlFile.revoked } : {}),
   });
   return {
+    jsonlPorts: {
+      location: (id) => {
+        const found = readLocation(db, id);
+        return found?.type === "jsonl-file"
+          ? {
+              realPath: found.realPath,
+              rootDev: found.rootDev,
+              rootIno: found.rootIno,
+              active: found.state === "active",
+            }
+          : undefined;
+      },
+      excluded: () => forbidden,
+    },
     ports: {
       index,
       locations: () => listLocations(db),
@@ -826,6 +848,7 @@ export function productLocalFiles(
       lastReport: () => last,
       revoker,
       rescan: options.rescan,
+      ...(options.jsonlFile ? { jsonlFile: options.jsonlFile } : {}),
       ...(options.watching ? { watching: options.watching } : {}),
       ...(options.changed ? { changed: options.changed } : {}),
       now: () => options.clock.now(),
@@ -834,6 +857,21 @@ export function productLocalFiles(
     revoker,
     close: () => isolated.close(),
   };
+}
+
+/**
+ * `kinds` with the import's kind (`jsonl-import`) made over `ports`: the instances of approved JSONL file
+ * locations open their file through them (I02B-R41). The import's kind is not in the product's list of kinds
+ * (it is the import's own), so it is added here, in the one backend that has the ports; a set that already has
+ * one (a test's own) is left as it is.
+ */
+export function withJsonlFilePorts<K extends Record<string, ConnectorFactory>>(
+  kinds: K,
+  ports: () => JsonlFilePorts | undefined,
+): K & Record<string, ConnectorFactory> {
+  return JSONL_IMPORT_KIND in kinds
+    ? kinds
+    : { ...kinds, [JSONL_IMPORT_KIND]: () => createJsonlConnector(ports) };
 }
 
 /** `kinds` with the `local-files` function reading `ports`: one backend's own binding, so two backends in one process never share it. */

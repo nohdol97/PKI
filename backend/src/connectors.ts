@@ -147,6 +147,17 @@ export interface RecheckTurn {
   open: boolean;
 }
 
+/**
+ * The instances that come and go while the backend runs (I02B-R41): an approved JSONL file location makes one,
+ * its revocation drops it. Both go through the manager's one way to open a Connector.
+ */
+export interface ConnectorInstances {
+  /** Makes and initializes the instance as the start does (`openConnector`) and lists it; one that is there already is left as it is. */
+  addInstance(config: ConnectorInstanceConfig): Promise<ConnectorSummary>;
+  /** Drops the instance from the list; its stored sources are not touched. False for an id that is not there. */
+  removeInstance(id: string): boolean;
+}
+
 /** The configuration an instance was made with (shown by no API); the default schedules read it. */
 export interface ConnectorConfigs {
   configOf(id: string): unknown;
@@ -456,7 +467,9 @@ export async function createConnectorManager(
      */
     onReady?: (id: string) => void;
   } = {},
-): Promise<ConnectorManager & ConnectorRecheck & ConnectorConfigs & ConnectorRebuild> {
+): Promise<
+  ConnectorManager & ConnectorRecheck & ConnectorConfigs & ConnectorRebuild & ConnectorInstances
+> {
   const { secrets } = options;
   const clock = options.clock ?? systemClock;
   const summaryOf = (id: string, kind: string, outcome: InitializeOutcome): ConnectorSummary =>
@@ -464,68 +477,78 @@ export async function createConnectorManager(
       ? { id, kind, state: outcome.state, reason: outcome.reason }
       : { id, kind, state: outcome.state };
   const unavailable: InitializeOutcome = { state: "unavailable", error: undefined };
-  // each instance alone: a late result of one that passed its limit is never read (I05-R10, R11)
-  const entries: Entry[] = await Promise.all(
-    instances.map(async ({ id, kind, config, credentials }): Promise<Entry> => {
-      const factory = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
-      const declared = declareCredentials(kind, id, credentials);
-      const slots = declared === "invalid" ? undefined : declared;
-      const access = createCredentialAccess(slots ?? [], secrets);
-      const entry = (
-        outcome: InitializeOutcome,
-        connector?: Connector,
-        mismatched = false,
-      ): Entry => {
-        const ready = outcome.state === "ready" && connector !== undefined;
-        if (!ready) access.revoke(); // an object given up reads nothing more (I06-R7)
-        return {
-          summary: summaryOf(id, kind, outcome),
-          config,
-          connector,
-          access: ready ? access : undefined,
-          factory,
-          slots: mismatched ? undefined : slots,
-          states: access.states(),
-          lateRechecks: 0,
-          abandonedLogged: false,
-          slot: undefined,
-          pending: false,
-          rejectedRebuildAt: undefined,
-          gapTimer: undefined,
-        };
+  /**
+   * One instance made: the declared slots, the stored kind binding and `openConnector` decide its state (I05-R10, R11,
+   * I06-R6). The start makes every configured instance here and `addInstance` makes one more while the backend runs, so
+   * there is one way to open a Connector.
+   */
+  async function makeEntry({
+    id,
+    kind,
+    config,
+    credentials,
+  }: ConnectorInstanceConfig): Promise<Entry> {
+    const factory = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
+    const declared = declareCredentials(kind, id, credentials);
+    const slots = declared === "invalid" ? undefined : declared;
+    const access = createCredentialAccess(slots ?? [], secrets);
+    const entry = (
+      outcome: InitializeOutcome,
+      connector?: Connector,
+      mismatched = false,
+    ): Entry => {
+      const ready = outcome.state === "ready" && connector !== undefined;
+      if (!ready) access.revoke(); // an object given up reads nothing more (I06-R7)
+      return {
+        summary: summaryOf(id, kind, outcome),
+        config,
+        connector,
+        access: ready ? access : undefined,
+        factory,
+        slots: mismatched ? undefined : slots,
+        states: access.states(),
+        lateRechecks: 0,
+        abandonedLogged: false,
+        slot: undefined,
+        pending: false,
+        rejectedRebuildAt: undefined,
+        gapTimer: undefined,
       };
-      if (!factory) {
-        log("connector-kind-unknown", { id });
-        return entry(unavailable);
-      }
-      // the stored data binds the id to another kind: no object, no store question, and no slots to
-      // list or to rebuild from (I05F-R1, R5); only the next start judges it again
-      const bound = readConnectorKind(db, id);
-      if (bound !== undefined && bound !== kind) {
-        log("connector-kind-mismatch", { id });
-        return entry({ state: "unavailable", reason: "instance-kind-mismatch" }, undefined, true);
-      }
-      if (!slots) {
-        log("connector-credentials-invalid", { id });
-        return entry(unavailable);
-      }
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const limit = new Promise<"timeout">((resolve) => {
-        timer = setTimeout(() => resolve("timeout"), INITIALIZE_TIMEOUT_MS);
-      });
-      const opened = await Promise.race([openConnector(id, factory, config, access), limit]);
-      clearTimeout(timer);
-      if (opened === "timeout") {
-        log("connector-initialize-timeout", { id });
-        return entry(unavailable);
-      }
-      // the start only: a recheck runs every hour and would repeat it
-      if (opened.connector && opened.outcome.state === "unavailable" && "error" in opened.outcome) {
-        log("connector-initialize-failed", { id });
-      }
-      return entry(opened.outcome, opened.connector);
-    }),
-  );
+    };
+    if (!factory) {
+      log("connector-kind-unknown", { id });
+      return entry(unavailable);
+    }
+    // the stored data binds the id to another kind: no object, no store question, and no slots to
+    // list or to rebuild from (I05F-R1, R5); only the next start judges it again
+    const bound = readConnectorKind(db, id);
+    if (bound !== undefined && bound !== kind) {
+      log("connector-kind-mismatch", { id });
+      return entry({ state: "unavailable", reason: "instance-kind-mismatch" }, undefined, true);
+    }
+    if (!slots) {
+      log("connector-credentials-invalid", { id });
+      return entry(unavailable);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const limit = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), INITIALIZE_TIMEOUT_MS);
+    });
+    const opened = await Promise.race([openConnector(id, factory, config, access), limit]);
+    clearTimeout(timer);
+    if (opened === "timeout") {
+      log("connector-initialize-timeout", { id });
+      return entry(unavailable);
+    }
+    // the start only: a recheck runs every hour and would repeat it
+    if (opened.connector && opened.outcome.state === "unavailable" && "error" in opened.outcome) {
+      log("connector-initialize-failed", { id });
+    }
+    return entry(opened.outcome, opened.connector);
+  }
+
+  // each instance alone: a late result of one that passed its limit is never read (I05-R10, R11)
+  const entries: Entry[] = await Promise.all(instances.map(makeEntry));
 
   const find = (id: string): Entry | undefined => entries.find((e) => e.summary.id === id);
 
@@ -721,6 +744,26 @@ export async function createConnectorManager(
     // the mark lives in the file, so a restart keeps it (I01-R17)
     list: () => entries.map(listed),
     configOf: (id) => find(id)?.config,
+    async addInstance(config) {
+      const there = find(config.id);
+      if (there) return listed(there);
+      const entry = await makeEntry(config);
+      // two adds of one id that waited on each other: the first one in stays
+      const raced = find(config.id);
+      if (raced) return listed(raced);
+      entries.push(entry);
+      return listed(entry);
+    },
+    removeInstance(id) {
+      const at = entries.findIndex((e) => e.summary.id === id);
+      const entry = entries[at];
+      if (!entry) return false;
+      entries.splice(at, 1);
+      // the object is given up: it reads nothing more and no timer of the instance is left (I06-R7)
+      entry.access?.revoke();
+      if (entry.gapTimer !== undefined) clearTimeout(entry.gapTimer);
+      return true;
+    },
     async recheck(id, turn) {
       const entry = find(id);
       if (!entry) return undefined;

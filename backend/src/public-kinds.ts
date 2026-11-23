@@ -17,8 +17,19 @@ export const PUBLIC_CONNECTOR_KINDS: readonly string[] = [
 /** The ids of the instances a public composition point makes at the start (a source run's `fixtures`, the one `local-files`). */
 export const PUBLIC_INSTANCE_IDS: readonly string[] = ["fixtures", "local-files"];
 
-/** The prefixes the public code gives the ids of instances it makes while running (none yet). */
-export const PUBLIC_INSTANCE_ID_PREFIXES: readonly string[] = [];
+/**
+ * The prefix of the id of the instance an approved JSONL file location makes while the backend runs (I02B-R41,
+ * R51): the prefix, then the location's id. The one place the text is written; the code that makes the id and
+ * the predicate below both read it, so a fork cannot register an id that a later approval would collide with.
+ */
+export const JSONL_FILE_INSTANCE_PREFIX = "jsonl-file:";
+
+/** Whether `id` is an instance of an approved JSONL file location (I02B-R41). */
+export const isJsonlFileInstanceId = (id: string): boolean =>
+  id.startsWith(JSONL_FILE_INSTANCE_PREFIX);
+
+/** The prefixes the public code gives the ids of instances it makes while running. */
+export const PUBLIC_INSTANCE_ID_PREFIXES: readonly string[] = [JSONL_FILE_INSTANCE_PREFIX];
 
 /**
  * Whether `id` is a public instance's: a public composition point's, one with a reserved prefix, or a

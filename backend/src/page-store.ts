@@ -41,6 +41,7 @@ import {
 } from "@pki/storage";
 import { systemClock, type Clock } from "./clock.ts";
 import { tryLockInstance } from "./instance-lock.ts";
+import { isJsonlFileInstanceId } from "./public-kinds.ts";
 import type { JobRunner } from "./job-runner.ts";
 
 /** Provisional: refused records listed in a result; `rejectedCount` counts them all. */
@@ -271,9 +272,12 @@ export function storePage(
           rejected.push({ at: place(i), code: "schema" });
           continue;
         }
-        const at = scopeClaimed
-          ? resolveImported(tx, instanceId, change, lockLegacy)
-          : { instanceId, change };
+        // an approved JSONL file's lines stay in its own instance: the route that moves a line to the older
+        // instance named in its `connector_instance_id` is not taken (I02B-R41; paste and API imports keep it)
+        const at =
+          scopeClaimed && !isJsonlFileInstanceId(instanceId)
+            ? resolveImported(tx, instanceId, change, lockLegacy)
+            : { instanceId, change };
         const outcome =
           seen &&
           at.change.kind === "scope-change" &&

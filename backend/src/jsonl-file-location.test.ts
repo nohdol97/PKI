@@ -22,7 +22,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import { CONNECTOR_SYNC_KIND } from "./connector-sync-job.ts";
 import { inProcessNormalizer } from "./local-normalizer.test-support.ts";
@@ -80,10 +80,20 @@ async function start() {
   return {
     db: running.db,
     call,
+    // the approval registers a first sync of the new instance: wait until that job is over, so no test races it
     approve: async (path: string) => {
       const r = await call(routes.approveLocalLocation.path, "POST", { type: "jsonl-file", path });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
-      return (r.body as { id: string }).id;
+      const id = (r.body as { id: string }).id;
+      await vi.waitFor(() =>
+        expect(
+          running.db.all(
+            "SELECT count(*) AS n FROM jobs WHERE kind = ? AND target = ? AND status IN ('queued', 'running', 'retry')",
+            [CONNECTOR_SYNC_KIND, `jsonl-file:${id}`],
+          )[0]?.n,
+        ).toBe(0),
+      );
+      return id;
     },
     sync: (id: string) =>
       call(routes.syncConnector.path, "POST", { connectorId: `jsonl-file:${id}` }),
@@ -133,8 +143,9 @@ describe("jsonl-file location (I02B-C33): the life of the instance", () => {
       .filter((s) => s.kind === CONNECTOR_SYNC_KIND && s.target === instance);
     expect(periods).toHaveLength(1);
 
-    const synced = await t.sync(id);
-    expect(synced.body).toMatchObject({ connectorId: instance, created: 2 });
+    // the first sync, which the approval itself registered, stored both lines; a sync again changes nothing
+    expect(snapshot(t.db, instance).sources).toBe(2);
+    expect((await t.sync(id)).body).toMatchObject({ connectorId: instance, created: 0 });
     expect(
       t.db.all("SELECT scope_claimed FROM sources WHERE connector_instance_id = ?", [instance]),
     ).toEqual([{ scope_claimed: 1 }, { scope_claimed: 1 }]);
@@ -166,6 +177,7 @@ describe("jsonl-file location (I02B-C33): the life of the instance", () => {
     const path = file("a.jsonl", lines(line({ external_id: "e1" })));
     const decoy = file("decoy.jsonl", lines(line({ external_id: "decoy" })));
     const id = await t.approve(path);
+    const before = snapshot(t.db, `jsonl-file:${id}`); // what the approval's own sync stored
 
     // another file in the same place (another identity)
     const other = file("other.jsonl", lines(line({ external_id: "swapped" })));
@@ -178,7 +190,7 @@ describe("jsonl-file location (I02B-C33): the life of the instance", () => {
     symlinkSync(decoy, path);
     const linked = await t.sync(id);
     expect(linked.body).toMatchObject({ stopped: "connector-failed", created: 0 });
-    expect(snapshot(t.db, `jsonl-file:${id}`).sources).toBe(0);
+    expect(snapshot(t.db, `jsonl-file:${id}`)).toEqual(before);
   });
 
   it("a line cannot reach the sources of another jsonl-file location, nor of an older jsonl-import instance, while the paste import still does", async () => {

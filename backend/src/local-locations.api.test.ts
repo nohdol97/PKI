@@ -173,12 +173,7 @@ describe("the file kinds and the network location (I02B-R3, R5; I02B-C34, H2 ②
       writeFileSync(join(docs, "a.md"), "# a\n");
       writeFileSync(join(docs, "b.hwp"), "x");
       writeFileSync(join(docs, "c.jsonl"), "{}\n");
-      const doc = await locations.approve({ type: "file", path: join(docs, "a.md") });
-      expect(doc).toMatchObject({ type: "file", displayPath: join(docs, "a.md"), state: "active" });
-      const jsonl = await locations.approve({ type: "jsonl-file", path: join(docs, "c.jsonl") });
-      expect(jsonl).toMatchObject({ type: "jsonl-file", state: "active" });
-      expect(rowCount(db)).toBe(2);
-
+      // a file of the wrong format for its kind: no row, whatever else is approved
       expect(await locations.approve({ type: "file", path: join(docs, "b.hwp") })).toEqual({
         error: "approval-rejected",
         code: "unsupported-format",
@@ -187,6 +182,12 @@ describe("the file kinds and the network location (I02B-R3, R5; I02B-C34, H2 ②
         error: "approval-rejected",
         code: "unsupported-format",
       });
+      expect(rowCount(db)).toBe(0);
+
+      const doc = await locations.approve({ type: "file", path: join(docs, "a.md") });
+      expect(doc).toMatchObject({ type: "file", displayPath: join(docs, "a.md"), state: "active" });
+      const jsonl = await locations.approve({ type: "jsonl-file", path: join(docs, "c.jsonl") });
+      expect(jsonl).toMatchObject({ type: "jsonl-file", state: "active" });
       expect(rowCount(db)).toBe(2);
     } finally {
       db.close();

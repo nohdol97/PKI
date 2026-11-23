@@ -54,7 +54,7 @@ describe("C34 the file kind", () => {
 
     // the file is gone while the folder that held it reads: the file was deleted, not the disk
     unlinkSync(join(w.root, "note.md"));
-    const gone = deletes(await w.settle());
+    const gone = deletes(await w.sync());
     expect(gone).toHaveLength(1);
     expect(gone[0]).toMatchObject({ namespace: w.locationId, externalId: first[0]?.externalId });
   });
