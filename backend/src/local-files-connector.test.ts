@@ -82,6 +82,24 @@ describe("C2 records", () => {
   });
 });
 
+describe("C32 DOCX comments", () => {
+  it("the comment authors become the record's participants and the comment locators pass the schema", async () => {
+    const w = make();
+    w.write(
+      "review.docx",
+      readFileSync(
+        resolve(import.meta.dirname, "../../fixtures/documents/normal-docx-comments.docx"),
+      ),
+    );
+    const [record] = upserts(await w.settle());
+    expect(SourceRecordSchema.safeParse(record).success).toBe(true);
+    expect(record?.participants).toEqual(["나", "가", "다"]);
+    expect(record?.blocks?.some((b) => b.locator.format === "docx" && b.locator.comment)).toBe(
+      true,
+    );
+  });
+});
+
 describe("C4 the outside never enters", () => {
   it("a symlink and the data directory add no record and no index row", async () => {
     const w = make();

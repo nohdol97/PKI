@@ -182,6 +182,15 @@ export interface DocxParagraph {
   style?: DocxStyle;
   /** Paragraph texts of a text box anchored in this paragraph. */
   textbox?: string[];
+  /** Indexes into `DocxSpec.comments` whose comment is attached to this paragraph (a reference run). */
+  commentIds?: number[];
+}
+/** A comment with the fields Word writes; `replyTo` is the index of the comment it answers. */
+export interface DocxComment {
+  text: string;
+  author?: string;
+  date?: string;
+  replyTo?: number;
 }
 /** A table: rows of cells; a cell is one paragraph text or a list of paragraph texts. */
 export interface DocxTable {
@@ -200,7 +209,7 @@ export interface DocxSpec {
   endnotes?: string[];
   /** Write notes parts that hold only Word's separator notes (no real note). */
   separatorNotes?: boolean;
-  comments?: string[];
+  comments?: (string | DocxComment)[];
   /** Number of embedded pictures; they are added in a paragraph appended after `body`. */
   images?: number;
   /** An external picture link (TargetMode="External") with this target. */
@@ -216,6 +225,8 @@ export const heading = (level: number, text: string): DocxParagraph => ({
 
 const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
 const R_NS = `xmlns:r="${OFFICE_REL}"`;
+const W14_NS = 'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"';
+const W15_NS = 'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"';
 const WORD_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml";
 
 /** Runs for a text: `\t` becomes a tab and `\n` a line break. */
@@ -230,7 +241,13 @@ function runsXml(text: string): string {
     .join("");
 }
 
-function paragraphXml(text: string, style?: DocxStyle, textbox: string[] = []): string {
+function paragraphXml(
+  text: string,
+  style?: DocxStyle,
+  textbox: string[] = [],
+  commentIds: number[] = [],
+  paraId?: string,
+): string {
   const props = style ? `<w:pPr><w:pStyle w:val="${escapeXml(style.id)}"/></w:pPr>` : "";
   const box =
     textbox.length > 0
@@ -238,7 +255,9 @@ function paragraphXml(text: string, style?: DocxStyle, textbox: string[] = []): 
           .map((t) => paragraphXml(t))
           .join("")}</w:txbxContent></v:textbox></v:shape></w:pict></w:r>`
       : "";
-  return `<w:p>${props}${runsXml(text)}${box}</w:p>`;
+  const refs = commentIds.map((id) => `<w:r><w:commentReference w:id="${id}"/></w:r>`).join("");
+  const attrs = paraId === undefined ? "" : ` w14:paraId="${paraId}"`;
+  return `<w:p${attrs}>${props}${runsXml(text)}${box}${refs}</w:p>`;
 }
 
 function stylesXml(used: DocxStyle[]): string {
@@ -305,7 +324,7 @@ export function buildDocx(spec: DocxSpec): Uint8Array {
       return `<w:tbl>${rows}</w:tbl>`;
     }
     useStyle(block.style);
-    return paragraphXml(block.text, block.style, block.textbox);
+    return paragraphXml(block.text, block.style, block.textbox, block.commentIds);
   });
 
   const rels: { id: string; type: string; target: string; external?: boolean }[] = [
@@ -351,15 +370,45 @@ export function buildDocx(spec: DocxSpec): Uint8Array {
   }
 
   if (spec.comments && spec.comments.length > 0) {
-    const items = spec.comments
-      .map((t, i) => `<w:comment w:id="${i}" w:author="작성자">${paragraphXml(t)}</w:comment>`)
+    const all = spec.comments.map((c): DocxComment => (typeof c === "string" ? { text: c } : c));
+    const paraIdOf = (i: number) => `0000${(i + 1).toString(16).padStart(4, "0").toUpperCase()}`;
+    const items = all
+      .map((c, i) => {
+        const date = c.date === undefined ? "" : ` w:date="${escapeXml(c.date)}"`;
+        const author = escapeXml(c.author ?? "작성자");
+        const inner = c.text
+          .split("\n\n")
+          .map((t, k, list) =>
+            paragraphXml(t, undefined, [], [], k === list.length - 1 ? paraIdOf(i) : undefined),
+          )
+          .join("");
+        return `<w:comment w:id="${i}" w:author="${author}"${date}>${inner}</w:comment>`;
+      })
       .join("");
     parts.push({
       name: "word/comments.xml",
-      data: XML_HEAD + `<w:comments ${W_NS}>${items}</w:comments>`,
+      data: XML_HEAD + `<w:comments ${W_NS} ${W14_NS}>${items}</w:comments>`,
     });
     rels.push({ id: "rIdComments", type: `${OFFICE_REL}/comments`, target: "comments.xml" });
     overrides.push({ part: "word/comments.xml", type: `${WORD_TYPE}.comments+xml` });
+    if (all.some((c) => c.replyTo !== undefined)) {
+      const extended = all
+        .map((c, i) => {
+          const parent =
+            c.replyTo === undefined ? "" : ` w15:paraIdParent="${paraIdOf(c.replyTo)}"`;
+          return `<w15:commentEx w15:paraId="${paraIdOf(i)}"${parent} w15:done="0"/>`;
+        })
+        .join("");
+      parts.push({
+        name: "word/commentsExtended.xml",
+        data: XML_HEAD + `<w15:commentsEx ${W15_NS}>${extended}</w15:commentsEx>`,
+      });
+      rels.push({
+        id: "rIdCommentsEx",
+        type: "http://schemas.microsoft.com/office/2011/relationships/commentsExtended",
+        target: "commentsExtended.xml",
+      });
+    }
   }
 
   let pictures = "";
@@ -417,6 +466,8 @@ export interface XlsxSheetSpec {
   /** Merged ranges such as `A1:B1`. */
   merges?: string[];
   hidden?: boolean | "veryHidden";
+  /** Cell comments (legacy notes): written as `xl/comments<N>.xml` and related from the sheet. */
+  comments?: { ref: string; text: string }[];
 }
 export interface XlsxSpec {
   sheets: XlsxSheetSpec[];
@@ -488,6 +539,38 @@ export function buildXlsx(spec: XlsxSpec): Uint8Array {
     data: sheetXml(sheet),
   }));
 
+  const commentFiles = spec.sheets.flatMap((sheet, i) =>
+    sheet.comments && sheet.comments.length > 0
+      ? [
+          {
+            part: {
+              name: `xl/comments${i + 1}.xml`,
+              data:
+                XML_HEAD +
+                `<comments ${SHEET_NS}><authors><author>작성자</author></authors><commentList>` +
+                sheet.comments
+                  .map(
+                    (c) =>
+                      `<comment ref="${c.ref}" authorId="0"><text><r><t>${escapeXml(c.text)}</t></r></text></comment>`,
+                  )
+                  .join("") +
+                "</commentList></comments>",
+            },
+            rels: {
+              name: `xl/worksheets/_rels/sheet${i + 1}.xml.rels`,
+              data: relsXml([
+                {
+                  id: "rIdComments",
+                  type: `${OFFICE_REL}/comments`,
+                  target: `../comments${i + 1}.xml`,
+                },
+              ]),
+            },
+          },
+        ]
+      : [],
+  );
+
   const sheetsXml = spec.sheets
     .map((sheet, i) => {
       const state = sheet.hidden
@@ -523,6 +606,7 @@ export function buildXlsx(spec: XlsxSpec): Uint8Array {
   const overrides = [
     { part: "xl/workbook.xml", type: `${SHEET_TYPE}.sheet.main+xml` },
     ...sheetFiles.map((f) => ({ part: f.name, type: `${SHEET_TYPE}.worksheet+xml` })),
+    ...commentFiles.map((c) => ({ part: c.part.name, type: `${SHEET_TYPE}.comments+xml` })),
     { part: "xl/styles.xml", type: `${SHEET_TYPE}.styles+xml` },
     { part: "xl/sharedStrings.xml", type: `${SHEET_TYPE}.sharedStrings+xml` },
     {
@@ -547,6 +631,7 @@ export function buildXlsx(spec: XlsxSpec): Uint8Array {
     { name: "xl/workbook.xml", data: workbook },
     { name: "xl/_rels/workbook.xml.rels", data: relsXml(wbRels) },
     ...sheetFiles,
+    ...commentFiles.flatMap((c) => [c.part, c.rels]),
     { name: "xl/styles.xml", data: styles },
     { name: "xl/sharedStrings.xml", data: shared },
     { name: "docProps/core.xml", data: coreXml(spec.core ?? {}) },

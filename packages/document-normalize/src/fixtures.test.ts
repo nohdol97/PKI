@@ -117,6 +117,12 @@ const EXPECTED: Record<string, Outcome> = {
       modified: "2026-03-02T09:00:00.000Z",
     },
   },
+  "normal-docx-comments.docx": {
+    ok: true,
+    blocks: 10,
+    limitations: [],
+    metadata: { participants: ["나", "가", "다"] },
+  },
   "limit-docx-omitted-parts.docx": {
     ok: true,
     blocks: 1,
@@ -124,7 +130,6 @@ const EXPECTED: Record<string, Outcome> = {
       { code: "docx.images-omitted" },
       { code: "docx.headers-footers-omitted" },
       { code: "docx.notes-omitted" },
-      { code: "docx.comments-omitted" },
     ],
     metadata: {},
   },
@@ -151,6 +156,12 @@ const EXPECTED: Record<string, Outcome> = {
       { code: "xlsx.hidden-sheet" },
     ],
     metadata: { sheetNames: ["계산", "숨김"] },
+  },
+  "limit-xlsx-comments.xlsx": {
+    ok: true,
+    blocks: 2,
+    limitations: [{ code: "xlsx.comments-omitted" }],
+    metadata: { sheetNames: ["메모"] },
   },
   "corrupt-xlsx-broken-workbook.xlsx": { ok: false, code: "corrupt" },
   "table-csv-blank-cells.csv": {
