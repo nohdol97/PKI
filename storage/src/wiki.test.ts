@@ -6,7 +6,10 @@ import { insertItem, saveFact } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import {
+  addWikiNote,
+  endWikiItemIncarnation,
   isWikiBuildDead,
+  listWikiNotes,
   isWikiStale,
   listWikiLog,
   readWikiState,
@@ -137,5 +140,31 @@ describe("wiki.edits: a hide goes with the fact it hid (K01-R11)", () => {
     expect(listWikiHidden(db)).toEqual([{ kind: "fact", id: fact }]);
     db.run("DELETE FROM facts WHERE id = ?", [fact]);
     expect(listWikiHidden(db)).toEqual([]);
+  });
+});
+
+describe("wiki.incarnation: an Insight that goes with its item (#220, K01-D20)", () => {
+  it("ends the key of an Insight page removed earlier while its row stood, so a reused id inherits no note or history", () => {
+    const x = insertItem(db, { type: "Project", name: "가", ...attrs });
+    const y = insertItem(db, { type: "Project", name: "나", ...attrs });
+    const insight = db.run(
+      `INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary)
+       VALUES ('r', ?, ?, 'explicit', 'resolved', NULL)`,
+      [x, y],
+    ).lastInsertRowid;
+    const key = `syntheses/${insight}`;
+    writeWikiPage(db, { ...page(key), kind: "syntheses", target: String(insight) }, AT);
+    addWikiNote(db, key, "내 메모", AT);
+    removeWikiPage(db, key, AT); // the page goes while the Insight row still stands: the note is orphaned
+    expect(listWikiLog(db, { pageKey: key, limit: 10 }).length).toBeGreaterThan(0);
+
+    db.transaction(() => {
+      db.run("DELETE FROM items WHERE id = ?", [x]); // the Insight goes with it (cascade)
+      endWikiItemIncarnation(db, x);
+    });
+
+    expect(listWikiLog(db, { pageKey: key, limit: 10 })).toHaveLength(0);
+    expect(listWikiNotes(db, key)).toHaveLength(0);
+    expect(listWikiNotes(db, `${key}#gone`).map((n) => n.text)).toEqual(["내 메모"]);
   });
 });

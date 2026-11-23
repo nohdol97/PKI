@@ -231,7 +231,10 @@ export function endWikiIncarnation(tx: SqlDriver, key: string): void {
   );
 }
 
-/** An item row was deleted: ends the incarnation of every non-Insight page key naming it, stored or not. */
+/**
+ * An item row was deleted: ends the incarnation of every item page key naming it, stored or not, and of every
+ * `syntheses/<id>` key whose Insight went with the item (cascade), whether or not its page was still stored.
+ */
 export function endWikiItemIncarnation(tx: SqlDriver, itemId: number): void {
   const keys = new Set<string>();
   for (const sql of [
@@ -246,6 +249,21 @@ export function endWikiItemIncarnation(tx: SqlDriver, itemId: number): void {
     keys.add(r.key as string);
   }
   for (const key of keys) if (!key.startsWith("syntheses/")) endWikiIncarnation(tx, key);
+  for (const sql of [
+    "SELECT page_key AS k FROM wiki_log WHERE page_key LIKE 'syntheses/%'",
+    "SELECT page_key AS k FROM wiki_edits WHERE op = 'note' AND page_key LIKE 'syntheses/%'",
+  ]) {
+    for (const r of tx.all(sql)) {
+      const key = r.k as string;
+      if (
+        /^syntheses\/\d+$/.test(key) &&
+        tx.all("SELECT 1 FROM insights WHERE id = ?", [Number(key.slice("syntheses/".length))])
+          .length === 0
+      ) {
+        endWikiIncarnation(tx, key);
+      }
+    }
+  }
 }
 
 export interface WikiLogLine {
