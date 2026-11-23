@@ -32,9 +32,9 @@ import {
   DEPENDENCY_DELAY,
   DEPENDS_ON,
   TARGET_DATE,
-  dependencyDelayReceiver,
   recomputeDependencyDelay,
 } from "./dependency-delay.ts";
+import { insightsReceiver } from "./insight-code-rules.ts";
 
 const attrs: KnowledgeAttributes = {
   epistemic: "explicit",
@@ -211,7 +211,7 @@ const AT = "2026-11-23T00:00:00.000Z";
 const entryWith = (combinable: (lineageSize: number) => boolean = () => true): UserDecisions =>
   createUserDecisions({
     combinable: (_tx, lineage) => combinable(lineage.length),
-    listeners: [dependencyDelayReceiver],
+    listeners: [insightsReceiver],
   });
 const mergeThrough = (entry: UserDecisions, member: number, into: number) => {
   const done = db.transaction(() => entry.entities.merge(db, member, into, AT));
@@ -284,11 +284,11 @@ const apart: ScopePolicy = {
   combinable: (scopes) => !(scopes.length > 1 && scopes.some((s) => s?.includes("secret"))),
 };
 const registryOf = (policy: ScopePolicy = defaultScopePolicy) =>
-  createProductRegistry({ policy, membershipListeners: [dependencyDelayReceiver] });
+  createProductRegistry({ policy, membershipListeners: [insightsReceiver] });
 const entryUnder = (policy: ScopePolicy) =>
   createUserDecisions({
     combinable: (tx, lineage) => mayCombine(policy, scopesOfVersions(tx, lineage)),
-    listeners: [dependencyDelayReceiver],
+    listeners: [insightsReceiver],
   });
 const sourceId = (externalId: string) =>
   db.all("SELECT id FROM sources WHERE external_id = ?", [externalId])[0]?.id as number;
