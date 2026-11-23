@@ -3,6 +3,7 @@
 // not a document: it is skipped as `unsupported-format` (the text of that reason points to "JSONL 파일 추가").
 import { readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { nodeBoundaryFs } from "@pki/connector-sdk";
 import { insertLocation, newLocalId } from "@pki/storage";
 import { afterEach, describe, expect, it } from "vitest";
 import { deletes, upserts, world, type World } from "./local-files-connector.test-support.ts";
@@ -57,6 +58,32 @@ describe("C34 the file kind", () => {
     const gone = deletes(await w.sync());
     expect(gone).toHaveLength(1);
     expect(gone[0]).toMatchObject({ namespace: w.locationId, externalId: first[0]?.externalId });
+  });
+
+  it("a file whose system gives it no identity (a 0 number) is skipped as identity-unavailable, never read", async () => {
+    const w = fileWorld("note.md");
+    const real = w.ports.fs ?? nodeBoundaryFs;
+    w.ports.fs = {
+      ...real,
+      lstat: async (path) => {
+        const stat = await real.lstat(path);
+        return path.endsWith("note.md")
+          ? {
+              dev: stat.dev,
+              ino: 0n,
+              size: stat.size,
+              mtimeNs: stat.mtimeNs,
+              isFile: () => stat.isFile(),
+              isDirectory: () => stat.isDirectory(),
+              isSymbolicLink: () => stat.isSymbolicLink(),
+            }
+          : stat;
+      },
+    };
+    expect(upserts(await w.settle())).toEqual([]);
+    expect(
+      w.index.entriesOfLocation(w.locationId).map((e) => [e.relativePath, e.state, e.skipReason]),
+    ).toEqual([["note.md", "skipped", "identity-unavailable"]]);
   });
 
   it("knows a document file by its extension (the eight formats), and a .jsonl file is none", () => {

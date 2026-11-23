@@ -311,7 +311,7 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       const stat = await fs.lstat(location.realPath);
       if (stat.isSymbolicLink()) yield { kind: "skip", relativePath, reason: "symlink" };
       else if (!stat.isFile()) yield { kind: "skip", relativePath, reason: "not-regular-file" };
-      else if (stat.dev === 0n && stat.ino === 0n) {
+      else if (stat.dev === 0n || stat.ino === 0n) {
         yield { kind: "skip", relativePath, reason: "identity-unavailable" };
       } else {
         yield {
