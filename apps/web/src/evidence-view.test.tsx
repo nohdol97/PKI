@@ -395,4 +395,13 @@ describe("citationSource (X02-R5)", () => {
     expect(out).toContain("&lt;b&gt;제목");
     expect(out).not.toContain("<b>");
   });
+
+  it("carries no locator and no attachment, since a citation has no evidence row", () => {
+    const source = citationSource(
+      { id: 4, version: 1, latestVersion: 1, title: "제목", body: "가나다라" },
+      { quote: "나다", start: 1, end: 3 },
+    );
+    expect(source.locator).toBeNull();
+    expect(source.attachment).toBeNull();
+  });
 });
