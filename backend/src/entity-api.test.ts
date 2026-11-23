@@ -21,12 +21,20 @@ import {
   type SqlDriver,
   type UserDecisions,
 } from "@pki/storage";
+import { EmptyVectorIndex } from "@pki/storage/adapters";
 import { send } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openCanonicalDb, productAdapters, productEgress } from "./composition.ts";
+import {
+  openCanonicalDb,
+  productAdapters,
+  productEgress,
+  productEngine,
+  productRegistry,
+  productUserDecisions,
+} from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
@@ -280,6 +288,42 @@ describe("POST /api/entities/merge, /unmerge, /distinct (S02-R25)", () => {
   });
 });
 
+describe("resolution.group-reads: the merge route recomputes the rule (S02-R13)", () => {
+  it("a merge through the route makes the representative's Insight and the unmerge resolves it, in their own requests", async () => {
+    const x = itemFrom("x"); // target date 2026-12-05
+    const y = itemFrom("y");
+    const member = itemFrom("m");
+    db.run("UPDATE facts SET kind = 'completion_date', value = '2026-12-20' WHERE item_id = ?", [
+      member,
+    ]);
+    const rel = saveRelation(db, { subjectId: x, type: "DEPENDS_ON", objectId: y, ...attrs }).id;
+    addEvidence(db, {
+      target: { relationId: rel },
+      sourceVersionId: db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number,
+      start: 0,
+      end: [...NAME].length,
+      quote: NAME,
+    });
+    const registry = productRegistry({
+      engine: productEngine(),
+      vectorIndex: new EmptyVectorIndex(),
+    });
+    await start({ registry, decisions: productUserDecisions(registry) });
+    expect(db.all("SELECT 1 FROM insights")).toEqual([]);
+    const merged = routes.entityMerge.response.parse(
+      (await call("entityMerge", { member, into: y })).body,
+    );
+    if (merged.status !== "applied") throw new Error(merged.reason);
+    expect(db.all("SELECT x_item_id, y_item_id, state FROM insights")).toEqual([
+      { x_item_id: x, y_item_id: y, state: "active" },
+    ]);
+    await call("entityUnmerge", { mergeId: merged.mergeId });
+    expect(db.all("SELECT x_item_id, y_item_id, state FROM insights")).toEqual([
+      { x_item_id: x, y_item_id: y, state: "resolved" },
+    ]);
+  });
+});
+
 describe("the undo of a user-made item inside a merge chain (S02-R11, the review's watch item)", () => {
   it("refuses with existing-data-violation and the counts, changes nothing; after the unmerge and the mark's clearing the undo removes the item", async () => {
     const mine = userItem("내가 만든 항목");
@@ -475,7 +519,8 @@ describe("POST /api/entities/split (S02-R25, R15)", () => {
     expect(db.all("SELECT 1 FROM item_split_moves")).toEqual([]);
   });
 
-  it("resolves a dependency-delay Insight that relied on a moved row, in the split's own request", async () => {
+  /** x (target 2026-12-05) depends on y, whose completion date is later: the Insight is active. Returns the relation. */
+  function lateDependency() {
     const x = itemFrom("x"); // target date 2026-12-05
     const y = itemFrom("y");
     db.run("UPDATE facts SET kind = 'completion_date', value = '2026-12-20' WHERE item_id = ?", [
@@ -485,7 +530,20 @@ describe("POST /api/entities/split (S02-R25, R15)", () => {
     cite({ relationId: rel }, versionOf("x"));
     recomputeDependencyDelay(db, [x, y], { combinable: () => true });
     expect(db.all("SELECT state FROM insights")).toEqual([{ state: "active" }]);
-    await start();
+    return { x, y, rel };
+  }
+  /** The composition's own pair: the registry and the user's entry built from the one receiver list. */
+  const composed = () => {
+    const registry = productRegistry({
+      engine: productEngine(),
+      vectorIndex: new EmptyVectorIndex(),
+    });
+    return { registry, decisions: productUserDecisions(registry) };
+  };
+
+  it("resolves a dependency-delay Insight that relied on a moved row, in the split's own request, through the membership receiver", async () => {
+    const { x, rel } = lateDependency();
+    await start(composed());
     // x keeps its target date; the relation goes to a new item, so x no longer depends on y
     const res = await call("entitySplit", {
       itemId: x,
@@ -494,5 +552,17 @@ describe("POST /api/entities/split (S02-R25, R15)", () => {
     });
     expect(routes.entitySplit.response.parse(res.body)).toMatchObject({ status: "applied" });
     expect(db.all("SELECT state FROM insights")).toEqual([{ state: "resolved" }]);
+  });
+
+  it("recomputes the rule once, through the receiver alone: an entry with no receiver leaves the Insight as it was (the route holds no call of its own)", async () => {
+    const { x, rel } = lateDependency();
+    await start(); // storage's listener-less entry
+    const res = await call("entitySplit", {
+      itemId: x,
+      rows: [{ kind: "relation", id: rel }],
+      name: "다른 것",
+    });
+    expect(routes.entitySplit.response.parse(res.body)).toMatchObject({ status: "applied" });
+    expect(db.all("SELECT state FROM insights")).toEqual([{ state: "active" }]);
   });
 });

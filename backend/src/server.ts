@@ -974,8 +974,12 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
             ? { error: "not-found" as const }
             : { status: "refused" as const, reason: done.reason };
         }
-        // the rule over what the moved rows left and reached (T05 moves this to the membership receivers)
-        judgeAgain([itemId, done.created, ...ends]);
+        // S01-R9: the rows left on the item and the rows that moved are judged again; the rule's Insight is the
+        // membership receiver's (S02-R13), already run in the split's own transaction
+        assessAfterUserAction(options.db, {
+          itemIds: [itemId, done.created, ...ends],
+          relationIds: [],
+        });
         return { status: "applied" as const, created: done.created };
       }),
     entityDistinct: async ({ a, b, on }) =>
