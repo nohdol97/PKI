@@ -1190,9 +1190,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // Preparations still running when the server closes are aborted; an aborted one leaves no model.
   const preparations = new Set<AbortController>();
   const handlers = createHandlers(options, preparations);
-  const afterWrite = () => {
-    if (requestWikiBuild(options.db).status === "registered") options.onRunConditionsChanged?.();
-  };
+  // K01-R5: queued without a wake: a write's own route wakes the runner when it should (the import waits for the
+  // engine's delivery, review F6), and a wake here would claim the import's extraction before the proposal exists
+  const afterWrite = () => void requestWikiBuild(options.db);
   let selfHost = "";
 
   const server = createServer((req, res) => {

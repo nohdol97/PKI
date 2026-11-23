@@ -162,7 +162,9 @@ describe("bootBackend", () => {
         .map((f) => readFileSync(join(fixtures, f), "utf8"))
         .join("\n");
       expect((await post(routes.importJsonl.path, { text })).body).toMatchObject({ created: 3 });
-      const jobs = () => db.all("SELECT status, reason FROM jobs ORDER BY id");
+      // K01: the Wiki's own `wiki-build` jobs are not what this test's jobs are about
+      const jobs = () =>
+        db.all("SELECT status, reason FROM jobs WHERE kind <> 'wiki-build' ORDER BY id");
       // no default Provider chosen yet (V01-T10): nothing is called
       await vi.waitFor(() =>
         expect(jobs()).toEqual(Array(3).fill({ status: "held", reason: "no-provider" })),
@@ -229,7 +231,9 @@ describe("bootBackend", () => {
         db.close();
       }
     }
-    const jobsOf = (db: SqlDriver) => db.all("SELECT status, reason FROM jobs ORDER BY id");
+    // K01: the Wiki's own `wiki-build` jobs are not the runner jobs these tests are about
+    const jobsOf = (db: SqlDriver) =>
+      db.all("SELECT status, reason FROM jobs WHERE kind <> 'wiki-build' ORDER BY id");
 
     it("starts the runner: a job left queued before the start runs with no other trigger", async () => {
       seed([{ status: "queued" }]);

@@ -286,7 +286,8 @@ describe("scope.policy and scope.changed through the product's runner", () => {
     registerJob(db, { kind: "extract", sourceId: b, fenceVersion: 1 });
     await kit.runner.wake();
 
-    expect(db.all("SELECT status, reason FROM jobs")).toEqual([
+    // K01: the Wiki's own `wiki-build` jobs are not the runner's job under test
+    expect(db.all("SELECT status, reason FROM jobs WHERE kind <> 'wiki-build'")).toEqual([
       { status: "succeeded", reason: null },
     ]);
     // 새것 and its completion date are written; the date on 알파 and the relation from it are not
@@ -316,9 +317,9 @@ describe("scope.policy and scope.changed through the product's runner", () => {
     // the records stay until the re-extraction has run
     expect(count("scope_policy_drops")).toBe(3);
     await kit.runner.wake();
-    expect(db.all("SELECT status FROM jobs ORDER BY id").map((j) => j.status)).toEqual([
-      "succeeded",
-    ]);
+    expect(
+      db.all("SELECT status FROM jobs WHERE kind <> 'wiki-build' ORDER BY id").map((j) => j.status),
+    ).toEqual(["succeeded"]);
     expect(count("relations")).toBe(1);
     expect(count("insights")).toBe(1);
     expect(count("scope_policy_drops")).toBe(0);
