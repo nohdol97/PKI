@@ -63,13 +63,13 @@ EvidenceSourceResponseSchema.attachment: Attachment | null
 
 합성 자료만 쓴다. 기준마다 대표 사례 하나둘이다.
 
-- [ ] **I02C-C1** (R1, R2): 첨부 둘을 가진 합성 메일 레코드가 `SourceRecordSchema`를 통과하고, `attachments`가 없는 레코드도 통과한다. 이름에 `/`가 있는 것, `mediaType`이 `type/subtype`이 아닌 것, 첨부 101개인 것은 각각 통과하지 못한다.
-- [ ] **I02C-C2** (R3): `attachment: 2`인 block을 가진 첨부 둘짜리 레코드를 받으면 `page-store`가 `invalid-blocks`로 거부하고 다른 변경은 저장된다. 계약 테스트 묶음이 같은 레코드를 내는 수집기에 `invalid-blocks`를 보고한다.
-- [ ] **I02C-C3** (R4): `attachments`가 있는 JSONL 줄을 `parseJsonl`에 넣으면 변경의 `record.attachments`가 `mediaType`으로 옮겨져 있고, 이름에 `\`가 있는 줄은 `schema`(필드 `attachments`)로 그 줄만 거부된다. 필드가 없는 줄의 변경은 `record.attachments`가 `undefined`이고 지금의 JSONL 시험이 그대로 통과한다.
-- [ ] **I02C-C4** (R5, R6): 첨부 둘과, 본문 block 하나·`attachment: 1`인 PDF block 하나를 가진 레코드를 받아들인 뒤, 첨부 block 안에서 시작하는 근거의 `evidenceSource` 응답이 둘째 첨부의 `{ name, mediaType, size }`와 그 block의 locator를 갖는다. 본문 block에서 시작하는 근거와 첨부가 없는 원본의 근거는 `attachment: null`이다.
-- [ ] **I02C-C5** (R6): 근거 화면 컴포넌트가 `attachment`가 있는 응답에서 첨부 이름·형식·크기를 글자로 그리고, `null`이면 그 줄이 없다.
-- [ ] **I02C-C6** (R7): 읽기 검사가 가리는 근거의 `evidenceSource`는 전과 같이 `not-found`이고 응답에 첨부 이름이 없다. 첨부 이름을 표식으로 가진 원본을 삭제하고 지운 뒤 DB 파일에 그 표식이 없다(`purge-canary` 시험에 표식 하나를 더한다).
-- [ ] **I02C-C7** (R8): 문서 시험(`connector-sdk.docs`)이 3장 필드 표에 `attachments`가, 9장 대응 표에 `attachments`가 있음을 보고, site-setup S01에 `#122`가 있다.
+- [x] **I02C-C1** (R1, R2): 첨부 둘을 가진 합성 메일 레코드가 `SourceRecordSchema`를 통과하고, `attachments`가 없는 레코드도 통과한다. 이름에 `/`가 있는 것, `mediaType`이 `type/subtype`이 아닌 것, 첨부 101개인 것은 각각 통과하지 못한다.
+- [x] **I02C-C2** (R3): `attachment: 2`인 block을 가진 첨부 둘짜리 레코드를 받으면 `page-store`가 `invalid-blocks`로 거부하고 다른 변경은 저장된다. 계약 테스트 묶음이 같은 레코드를 내는 수집기에 `invalid-blocks`를 보고한다.
+- [x] **I02C-C3** (R4): `attachments`가 있는 JSONL 줄을 `parseJsonl`에 넣으면 변경의 `record.attachments`가 `mediaType`으로 옮겨져 있고, 이름에 `\`가 있는 줄은 `schema`(필드 `attachments`)로 그 줄만 거부된다. 필드가 없는 줄의 변경은 `record.attachments`가 `undefined`이고 지금의 JSONL 시험이 그대로 통과한다.
+- [x] **I02C-C4** (R5, R6): 첨부 둘과, 본문 block 하나·`attachment: 1`인 PDF block 하나를 가진 레코드를 받아들인 뒤, 첨부 block 안에서 시작하는 근거의 `evidenceSource` 응답이 둘째 첨부의 `{ name, mediaType, size }`와 그 block의 locator를 갖는다. 본문 block에서 시작하는 근거와 첨부가 없는 원본의 근거는 `attachment: null`이다.
+- [x] **I02C-C5** (R6): 근거 화면 컴포넌트가 `attachment`가 있는 응답에서 첨부 이름·형식·크기를 글자로 그리고, `null`이면 그 줄이 없다.
+- [x] **I02C-C6** (R7): 읽기 검사가 가리는 근거의 `evidenceSource`는 전과 같이 `not-found`이고 응답에 첨부 이름이 없다. 첨부 이름을 표식으로 가진 원본을 삭제하고 지운 뒤 DB 파일에 그 표식이 없다(`purge-canary` 시험에 표식 하나를 더한다).
+- [x] **I02C-C7** (R8): 문서 시험(`connector-sdk.docs`)이 3장 필드 표에 `attachments`가, 9장 대응 표에 `attachments`가 있음을 보고, site-setup S01에 `#122`가 있다.
 
 ## 미해결 질문 / 검증하지 않은 범위
 
@@ -86,6 +86,10 @@ EvidenceSourceResponseSchema.attachment: Attachment | null
 | D4 | 이름에 `/`, `\`, 제어 문자를 허용하지 않는다 | 이름이 경로로 읽힐 여지를 스키마에서 없앤다. 수집기는 마지막 경로 조각만 싣는다 | `AttachmentSchema`의 `name` 검사를 푼다(제품은 어차피 경로로 쓰지 않는다) |
 | D5 | 순번 참조(`attachment: n`)를 쓴다 | 이름은 한 메일 안에서 겹칠 수 있다. block마다 이름을 되풀이하지 않는다 | block에 첨부 ID 문자열을 두고 첨부에 `id`를 더한다 |
 | D6 | 읽는 곳은 `evidenceSource` 하나, 화면은 근거 화면의 한 줄 | I02-C1이 요구하는 것은 보존과 근거 위치다. 목록 화면은 요구가 생기면 만든다 | `EvidenceSummarySchema`나 원본 보기 응답에 같은 필드를 더한다 |
+
+| D7 | `blocksValid`의 `attachmentCount`가 없으면 0이다. 첨부 block이 있는 레코드에 `attachments`가 없으면 `invalid-blocks`다 | R3의 "목록이 없으면 거부"를 한 곳에서 판정 | 기본값을 바꾼다 |
+| D8 | 근거 읽기에서 `meta`가 없거나 block이 가리키는 순번에 첨부가 없으면 던지지 않고 `attachment: null`이다 | 직접 넣은 행·복원 경로에서 읽기 전체가 죽지 않게 | `attachmentAt`을 바꾼다 |
+| D9 | 근거 화면의 줄은 `첨부: 이름 (형식, N바이트)` 모양이다 | 이름은 신뢰하지 않는 글자라 `<bdi>`로 감싼다 | `attachmentDetailText`와 화면 한 줄 |
 
 가정: 한 레코드의 첨부 순서는 수집기가 정하고 같은 revision 안에서 바뀌지 않는다.
 
@@ -105,3 +109,4 @@ EvidenceSourceResponseSchema.attachment: Attachment | null
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-23 | 작성, 확정 | 이 문서 | 이슈 #122(I02-B 후속 표 F1) |
+| 2026-11-23 | 구현 완료, C1~C7 체크, 잠정 결정 D7~D9 추가 | 이 문서 | 구현자 보고 |
