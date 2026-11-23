@@ -130,6 +130,12 @@ export function SourceView({
   );
 }
 
+/** A source version read by its number, with the span an Ask citation marks in it (X02-R5): no evidence row, no locator. */
+export const citationSource = (
+  sourceVersion: EvidenceSource["sourceVersion"],
+  span: { quote: string; start: number; end: number },
+): EvidenceSource => ({ evidenceId: 0, ...span, locator: null, sourceVersion });
+
 /** One entry of an Insight's evidence list. */
 export function EvidenceEntry({
   evidence: e,

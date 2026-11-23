@@ -7,7 +7,7 @@ import type { AskEvent, AskRequest, EvidenceSource, RouteResponse } from "@pki/c
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { connectionOf, type ApiClient } from "./api.ts";
 import { readAskEvents } from "./ask-stream.ts";
-import { SourceView } from "./evidence-view.tsx";
+import { citationSource, SourceView } from "./evidence-view.tsx";
 import { useNav, type Nav } from "./nav.tsx";
 import {
   answerText,
@@ -46,14 +46,7 @@ export const relatedActions = (go: Nav["go"], related: Related) => ({
 /** The version a citation points to, as the source view takes it: read by its version number, the span marked. */
 export async function openCitation(api: ApiClient, c: Citation): Promise<EvidenceSource> {
   const { sourceVersion } = await api("exploreSource", { versionId: c.versionId });
-  return {
-    evidenceId: 0,
-    quote: c.quote,
-    start: c.start,
-    end: c.end,
-    locator: null,
-    sourceVersion,
-  };
+  return citationSource(sourceVersion, c);
 }
 
 export interface AskState {
