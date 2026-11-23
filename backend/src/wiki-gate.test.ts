@@ -292,6 +292,64 @@ describe("wiki.gate: a merge line the caller cannot see is not a group (S02-R24 
   });
 });
 
+describe("wiki.gate: the object side of a relation and an Insight's ends read the same group view (S02-R24 4, K01-R9)", () => {
+  const crossing: ScopePolicy = {
+    ...policy,
+    allows: (scopes) =>
+      !(scopes.some((s) => s?.includes("A")) && scopes.some((s) => s?.includes("B"))),
+  };
+
+  it("names no page and no backlink that would show a hidden merge member's page is the representative's", () => {
+    const a = source("a", "가 본문", ["A"]);
+    const b = source("b", "나 본문", ["B"]);
+    const rep = insertItem(db, { type: "Project", name: "대표 항목", ...attrs });
+    const member = insertItem(db, { type: "Project", name: "숨은별칭", ...attrs });
+    const x = insertItem(db, { type: "Project", name: "다른 항목", ...attrs });
+    citedFact(rep, "가 값", a);
+    citedFact(member, "나 값", b);
+    citedFact(x, "엑스 값", a);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [member, rep],
+    );
+    // X's relation ends at the hidden member; an Insight joins X and the same member
+    const rel = saveRelation(db, { subjectId: x, type: "USES", objectId: member, ...attrs }).id;
+    addEvidence(db, {
+      target: { relationId: rel },
+      sourceVersionId: a,
+      start: 0,
+      end: 1,
+      quote: "가",
+    });
+    db.run(
+      "INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary) VALUES ('r', ?, ?, 'explicit', 'active', '요약')",
+      [x, member],
+    );
+    const plan = planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" });
+    db.transaction(() => commitDerived(db, { source: null, items: plan.items }));
+
+    const registry = createProductRegistry({ policy: crossing });
+    const reads = createWikiReads(db, registry, createReadGate(db, registry));
+    const xPage = reads.page(`projects/${x}`);
+    expect(xPage?.claims.filter((c) => c.ref.kind === "relation")).toEqual([]);
+    expect(xPage?.links.map((l) => l.key)).not.toContain(`projects/${rep}`);
+    expect(reads.page(`projects/${rep}`)?.backlinks).toEqual([]);
+    const insightPage = reads.page("syntheses/1");
+    expect(insightPage?.links.map((l) => l.key)).toEqual([`projects/${x}`]);
+
+    // read by one who may put the two together, the same rows show
+    const open = createProductRegistry({ policy });
+    const together = createWikiReads(db, open, createReadGate(db, open));
+    expect(
+      together
+        .page(`projects/${rep}`)
+        ?.backlinks.map((l) => l.basisKind)
+        .sort(),
+    ).toEqual(["insight", "relation"]);
+    expect(together.page("syntheses/1")?.links.map((l) => l.key)).toContain(`projects/${rep}`);
+  });
+});
+
 describe("wiki.hidden: a hidden claim stays reachable for the way back (K01-R11, R15)", () => {
   it("is listed in `hidden` and not in `claims` on a later read, back in `claims` after unhide, and judged by the same gate", () => {
     const open = source("open", "공개 본문", ["open"]);
