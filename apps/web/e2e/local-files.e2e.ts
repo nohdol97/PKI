@@ -137,7 +137,7 @@ test("local-files.e2e: approve a folder → sources → Insight evidence with a 
     await go(page, "원본");
     await page.getByRole("button", { name: "local-files 동기화" }).click();
     // Home rereads when entered: enter it until the sync and the extraction have ended
-    const insight = page.getByRole("list", { name: "Insight 목록" }).getByRole("listitem");
+    const insight = page.getByRole("list", { name: "Insight 목록" }).locator(":scope > li");
     await expect(async () => {
       await go(page, "원본");
       await go(page, "홈");

@@ -55,8 +55,9 @@ export const remote = (url: string) => {
   return (protocol === "http:" || protocol === "https:") && hostname !== "127.0.0.1";
 };
 
+/** The list's own rows: an Insight's fact-line list nests inside its row (P01-R13), so no deeper item counts. */
 export const insightItems = (page: Page) =>
-  page.getByRole("list", { name: "Insight 목록" }).getByRole("listitem");
+  page.getByRole("list", { name: "Insight 목록" }).locator(":scope > li");
 
 /** Opens the one Insight's evidence by keyboard, checks each source span, returns the source view. */
 export async function openEvidence(page: Page, set: string) {
