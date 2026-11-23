@@ -46,6 +46,15 @@ describe("notify.rules: decideNotification (P02-C2a)", () => {
     ).toEqual({ status: "sent" });
   });
 
+  it("a hidden Insight is withdrawn and a muted one goes to the digest, before every other row (P03 hand-over)", () => {
+    expect(
+      decideNotification({ ...urgent, preference: { hidden: true, muted: true } }, [], NOW),
+    ).toEqual({ status: "withdrawn" });
+    expect(
+      decideNotification({ ...urgent, preference: { hidden: false, muted: true } }, [], NOW),
+    ).toEqual({ status: "digest", reason: "muted" });
+  });
+
   it("④ anything else is sent", () => {
     expect(decideNotification(urgent, [], NOW)).toEqual({ status: "sent" });
   });
