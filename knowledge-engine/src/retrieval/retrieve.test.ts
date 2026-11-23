@@ -348,3 +348,54 @@ describe("X01-R12 what a search hides takes no hit slot", () => {
     expect(await hitsWith(10)).toEqual(without);
   });
 });
+
+describe("X01-R6 R12 a hidden newer version leaves no trace in the marks", () => {
+  it("does not mark a visible past version stale because a newer version the registry hides exists", async () => {
+    const w = world();
+    const newer = String(w.version.get("mail-x01-0004-v2"));
+    const hiding: typeof registry = {
+      ...registry,
+      visible: (db, refs, purpose) =>
+        registry
+          .visible(db, refs, purpose)
+          .filter((r) => !(purpose === "search" && r.kind === "source" && r.id === newer)),
+    };
+    const found = await retrieve(w.db, hiding, expected.questions.releaseDate?.text as string, {});
+    expect(found.hits.map((h) => h.versionId)).toContain(w.version.get("mail-x01-0004"));
+    expect(found.hits.map((h) => h.versionId)).not.toContain(Number(newer));
+    expect(found.notes.filter((n) => n.kind === "stale")).toEqual([]);
+    // the control: with the newer version shown, the same past version is stale
+    const shown = await retrieve(
+      w.db,
+      registry,
+      expected.questions.releaseDate?.text as string,
+      {},
+    );
+    expect(shown.notes).toContainEqual({
+      kind: "stale",
+      versionId: w.version.get("mail-x01-0004"),
+    });
+  });
+});
+
+describe("X01-R12 the visibility check comes before the strategy cut", () => {
+  it("keeps the visible hits a strategy would cut off behind the hidden ones", async () => {
+    const denying = createProductRegistry({
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) => !scopes.some((s) => s?.includes("denied")),
+      },
+    });
+    const db: SqlDriver = openBetterSqlite3(":memory:");
+    migrate(db);
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    const add = (mark: string, scope: string[], body: string) =>
+      saveSourceRecord(db, "c1", { externalId: mark, title: mark, body, accessScope: scope });
+    for (let i = 0; i < 60; i++) add(`denied-${i}`, ["denied"], "프로브낱말 프로브낱말 프로브낱말");
+    for (let i = 0; i < 5; i++) add(`open-${i}`, ["open"], "프로브낱말");
+    const found = await retrieve(db, denying, "프로브낱말");
+    expect(found.hits).toHaveLength(5);
+    expect(found.route.keyword).toEqual({ status: "used", count: 5 });
+    db.close();
+  });
+});

@@ -12,8 +12,8 @@ export interface VersionHead {
   sourceId: number;
   version: number;
   connectorId: string;
-  /** The version is its source's latest. */
-  latest: boolean;
+  /** The row ids of the later versions of the same source (empty when this is its latest). */
+  newerIds: number[];
   /** The origin system's update time, else its creation time, as the record gave it; null when the version carries none. */
   originAt: string | null;
 }
@@ -23,7 +23,7 @@ export function readVersionHeads(db: SqlDriver, ids: readonly number[]): Version
   if (ids.length === 0) return [];
   const rows = db.all(
     `SELECT v.id, v.source_id, v.version, s.connector_instance_id AS connector,
-            v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id) AS latest,
+            (SELECT json_group_array(id) FROM source_versions WHERE source_id = v.source_id AND id > v.id) AS newer,
             coalesce(json_extract(v.meta, '$.updatedAt'), json_extract(v.meta, '$.createdAt')) AS origin_at
        FROM source_versions v JOIN sources s ON s.id = v.source_id
       WHERE v.id IN ${IDS}`,
@@ -37,7 +37,7 @@ export function readVersionHeads(db: SqlDriver, ids: readonly number[]): Version
         sourceId: r.source_id as number,
         version: r.version as number,
         connectorId: r.connector as string,
-        latest: r.latest === 1,
+        newerIds: JSON.parse(r.newer as string) as number[],
         originAt: typeof r.origin_at === "string" ? r.origin_at : null,
       },
     ]),
