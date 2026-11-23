@@ -183,11 +183,13 @@ describe("blocks and arrays are checked for sense (I02B-R23)", () => {
   });
 
   it("a sparse array is refused: holes in sheetNames and in the pages of a limitation", () => {
-    // eslint-disable-next-line no-sparse-arrays
-    const holes = ["a", , "c"];
+    const holes = ["a", "b", "c"];
+    delete holes[1];
+    const pages = [1, 2, 3];
+    delete pages[1];
     expect(parse(ok(doc({ metadata: { sheetNames: holes } })))).toBeUndefined();
     expect(
-      parse(ok(doc({ limitations: [{ code: "pdf.page-without-text", pages: [1, , 3] }] }))),
+      parse(ok(doc({ limitations: [{ code: "pdf.page-without-text", pages }] }))),
     ).toBeUndefined();
     expect(parse(ok(doc({ metadata: { sheetNames: ["a", "b"] } })))).toBeDefined();
   });
