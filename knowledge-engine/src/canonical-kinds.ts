@@ -52,7 +52,8 @@ import {
 } from "@pki/storage";
 import { assessAfterPropagation } from "./auto-verify.ts";
 import { refreshConflicts } from "./conflicts.ts";
-import { recomputeDependencyDelay, type RuleOutcome } from "./dependency-delay.ts";
+import { recomputeInsights } from "./insight-code-rules.ts";
+import type { RuleOutcome } from "./insight-rules.ts";
 import { refreshCandidates } from "./entity-resolution.ts";
 import { projectionKinds, type PermanentlyAbsent } from "./projection-kinds.ts";
 import { WIKI_PAGE_KIND } from "./wiki-kind.ts";
@@ -551,10 +552,10 @@ const INSIGHT: DerivativeKind = {
     // the members that survive of the groups as they were before the change: a deleted representative
     // took its Insight with it (cascade), and the survivors' own Insight is keyed by the new top (R13)
     const survivors = (running?.groupBefore ?? []).filter((id) => stored(tx, "items", id));
-    const outcomes = recomputeDependencyDelay(
+    const outcomes = recomputeInsights(
       tx,
       ascending([...remaining, ...survivors, ...viaGroup.filter((id) => stored(tx, "items", id))]),
-      ctx,
+      { scope: ctx, ...(running ? { at: running.at } : {}) },
     );
     const report = noting(ctx);
     if (report) {

@@ -566,6 +566,11 @@ describe("schema v5 (V02-T02, the V02 spec's knowledge schema)", () => {
       "epistemic",
       "state",
       "summary",
+      "fact_lines",
+      "reasoning_summary",
+      "confidence",
+      "urgency_date",
+      "changed_at",
     ]);
   });
 

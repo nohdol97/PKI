@@ -27,6 +27,16 @@ export type InsightContent =
       userInputs?: readonly UserInputRef[];
       /** The SUPERSEDES links that took a value out of the rule's reading (S02-R19). */
       linkIds?: readonly number[];
+      /** What the rule read, one line per row, written by code from the rows' values (P01-R2); omitted is NULL. */
+      factLines?: readonly string[];
+      /** How the conclusion was reached, 500 characters at most; never a model's reasoning (P01-R5). */
+      reasoningSummary?: string | null;
+      /** 0..100, the lowest of the rows used (P01-R10). */
+      confidence?: number | null;
+      /** The date the ranking's urgency reads (YYYY-MM-DD), if any. */
+      urgencyDate?: string | null;
+      /** When the content last changed; omitted keeps the stored value (P01-R9). */
+      changedAt?: string;
     }
   | { state: "resolved" };
 
@@ -38,6 +48,11 @@ export interface StoredInsight extends InsightKey {
   evidenceIds: number[];
   userInputs: UserInputRef[];
   linkIds: number[];
+  factLines: string[];
+  reasoningSummary: string | null;
+  confidence: number | null;
+  urgencyDate: string | null;
+  changedAt: string | null;
 }
 
 const KEY = "rule = ? AND x_item_id = ? AND y_item_id = ?";
@@ -45,12 +60,29 @@ const keyValues = (k: InsightKey) => [k.rule, k.xItemId, k.yItemId];
 
 /** Creates or updates the key's row and replaces its evidence and user-input links; returns its id. */
 export function saveInsight(db: SqlDriver, key: InsightKey, content: InsightContent): number {
-  const summary = content.state === "resolved" ? null : content.summary;
+  const live = content.state === "resolved" ? undefined : content;
+  // Resolving empties every text and number column: they hold values taken from sources (P01-R3).
+  const factLines = live?.factLines === undefined ? null : JSON.stringify(live.factLines);
   db.run(
-    `INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary)
-     VALUES (?, ?, ?, 'inferred', ?, ?)
-     ON CONFLICT (rule, x_item_id, y_item_id) DO UPDATE SET state = excluded.state, summary = excluded.summary`,
-    [...keyValues(key), content.state, summary],
+    `INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary,
+       fact_lines, reasoning_summary, confidence, urgency_date, changed_at)
+     VALUES (?, ?, ?, 'inferred', ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (rule, x_item_id, y_item_id) DO UPDATE SET state = excluded.state,
+       summary = excluded.summary, fact_lines = excluded.fact_lines,
+       reasoning_summary = excluded.reasoning_summary, confidence = excluded.confidence,
+       urgency_date = excluded.urgency_date,
+       changed_at = CASE WHEN excluded.state = 'resolved' THEN NULL
+         ELSE coalesce(excluded.changed_at, insights.changed_at) END`,
+    [
+      ...keyValues(key),
+      content.state,
+      live?.summary ?? null,
+      factLines,
+      live?.reasoningSummary ?? null,
+      live?.confidence ?? null,
+      live?.urgencyDate ?? null,
+      live?.changedAt ?? null,
+    ],
   );
   const id = db.all(`SELECT id FROM insights WHERE ${KEY}`, keyValues(key))[0]?.id as number;
   db.run("DELETE FROM insight_evidence WHERE insight_id = ?", [id]);
@@ -77,7 +109,8 @@ export function saveInsight(db: SqlDriver, key: InsightKey, content: InsightCont
 
 export function readInsight(db: SqlDriver, key: InsightKey): StoredInsight | undefined {
   const row = db.all(
-    `SELECT id, epistemic, state, summary FROM insights WHERE ${KEY}`,
+    `SELECT id, epistemic, state, summary, fact_lines, reasoning_summary, confidence, urgency_date, changed_at
+     FROM insights WHERE ${KEY}`,
     keyValues(key),
   )[0];
   if (!row) return undefined;
@@ -88,6 +121,11 @@ export function readInsight(db: SqlDriver, key: InsightKey): StoredInsight | und
     epistemic: row.epistemic as "inferred",
     state: row.state as StoredInsight["state"],
     summary: row.summary as string | null,
+    factLines: row.fact_lines === null ? [] : (JSON.parse(row.fact_lines as string) as string[]),
+    reasoningSummary: row.reasoning_summary as string | null,
+    confidence: row.confidence as number | null,
+    urgencyDate: row.urgency_date as string | null,
+    changedAt: row.changed_at as string | null,
     evidenceIds: db
       .all("SELECT evidence_id FROM insight_evidence WHERE insight_id = ? ORDER BY evidence_id", [
         id,
