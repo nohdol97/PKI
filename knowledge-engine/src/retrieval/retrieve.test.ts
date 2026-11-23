@@ -314,3 +314,37 @@ describe("X01-R1 R2 R5 the other strategies", () => {
     expect(recent.route.metadata.status).toBe("used");
   });
 });
+
+describe("X01-R12 what a search hides takes no hit slot", () => {
+  it("returns the hits of the visible sources only, as many and in the order as without the hidden ones", async () => {
+    const denying = createProductRegistry({
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) => !scopes.some((s) => s?.includes("denied")),
+      },
+    });
+    const hitsWith = async (hidden: number) => {
+      const db: SqlDriver = openBetterSqlite3(":memory:");
+      migrate(db);
+      registerConnectorInstance(db, "c1", "test-fixtures");
+      const add = (mark: string, scope: string[], extra: string) =>
+        saveSourceRecord(db, "c1", {
+          externalId: mark,
+          title: mark,
+          body: `프로브낱말 ${mark} ${extra}`,
+          accessScope: scope,
+        });
+      for (let i = 0; i < 25; i++) add(`open-${i}`, ["open"], "");
+      for (let i = 0; i < hidden; i++) add(`denied-${i}`, ["denied"], "프로브낱말 프로브낱말");
+      const found = await retrieve(db, denying, "프로브낱말");
+      const titles = found.hits.map(
+        (h) => db.all("SELECT title FROM source_versions WHERE id = ?", [h.versionId])[0]?.title,
+      );
+      db.close();
+      return titles;
+    };
+    const without = await hitsWith(0);
+    expect(without).toHaveLength(20);
+    expect(await hitsWith(10)).toEqual(without);
+  });
+});

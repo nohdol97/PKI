@@ -1,8 +1,9 @@
 // X01-R1~R7: one question in, `{ route, hits, notes }` out. The route is chosen by code from the question's words
 // (R2), the strategies that run each give a ranked list of source versions, the lists are merged by the
 // rank-reciprocal sum with the preference weight (R3, R4), and the marks and links are computed for what is left.
-// Nothing here writes to the store, and the hits are not yet gated for the caller's boundary (R12): the caller
-// judges them with `visible` before it lets one out, and drops the notes of a hit it drops.
+// Nothing here writes to the store. What the policy hides for a search is dropped from every list before the
+// lists are fused (R12); the caller still judges the hits with `visible` at its boundary and drops the notes of a
+// hit it drops.
 import {
   readVersionHeads,
   type DerivativeRegistry,
@@ -145,7 +146,10 @@ export async function retrieve(
   const heads = new Map(
     readVersionHeads(db, [...new Set(lists.flatMap((l) => l.ids))]).map((h) => [h.id, h]),
   );
-  for (const list of lists) list.ids = list.ids.filter((id) => heads.has(id));
+  // R12: what the policy hides for a search leaves each list before the lists are fused and cut, so a hidden
+  // version takes no rank and no hit slot
+  const searchable = shownVersions(db, registry, [...heads.keys()]);
+  for (const list of lists) list.ids = list.ids.filter((id) => heads.has(id) && searchable.has(id));
   const merged = merge(
     lists,
     (id) => {
