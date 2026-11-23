@@ -56,6 +56,12 @@ export interface LocalFilesPorts {
   limits: () => LocalFilesLimits;
   /** Milliseconds, the wall clock. */
   now: () => number;
+  /** Moves a location to a state the pass found it in (I02B-R7); `active` is a reopening. */
+  setLocationState: (
+    id: string,
+    state: "active" | "paused" | "unavailable" | "needs-confirmation" | "revoking",
+    reason: string | null,
+  ) => void;
   /** Told what a finished sync learned, for the location list. */
   report?: (report: LocalPassReport) => void;
   fs?: BoundaryFs;
@@ -550,7 +556,7 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     }
     for (const location of p.locations()) {
       if (location.type !== "folder") continue;
-      if (location.state !== "active" && location.state !== "needs-confirmation") continue;
+      if (!isRead(location)) continue;
       signal.throwIfAborted();
       await scanLocation(p, pass, location, full, signal);
     }
@@ -620,6 +626,9 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     };
   }
 
+  const isRead = (location: LocalLocationView) =>
+    location.state === "active" || location.state === "needs-confirmation";
+
   const locationOf = (p: LocalFilesPorts, e: LocalIndexEntry) =>
     p.locations().find((l) => l.id === e.locationId && l.type === "folder");
 
@@ -630,6 +639,10 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
     e: LocalIndexEntry,
     signal: AbortSignal,
   ): Promise<{ change?: Change; halt?: true }> {
+    // a location that is not read announces nothing, deletions included (I02B-R7, R10); what it was
+    // not read for is given a new sequence number when it is read again (storage `reopenLocation`)
+    const location = locationOf(p, e);
+    if (!location || !isRead(location)) return {};
     if (e.state === "deleted") {
       return {
         change: {
@@ -642,9 +655,6 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       };
     }
     if (e.state !== "present" || e.mtimeNs === null || silent.has(e.seq)) return {};
-    const location = locationOf(p, e);
-    if (!location || (location.state !== "active" && location.state !== "needs-confirmation"))
-      return {};
     const built = await buildRecord(p, pass, e, location, signal);
     if (built.kind === "stale") {
       // back to "to look at": the next pass reads the file again and announces it with a larger revision
@@ -770,7 +780,7 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       const e = p.index.entryOf(externalId);
       if (!e || e.locationId !== namespace || e.state !== "present") return null;
       const location = locationOf(p, e);
-      if (!location) return null;
+      if (!location || !isRead(location)) return null;
       const built = await buildRecord(p, undefined, e, location, new AbortController().signal);
       return built.kind === "record" ? built.record : null;
     },

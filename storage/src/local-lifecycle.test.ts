@@ -91,7 +91,9 @@ describe("reopenLocation", () => {
     reopenLocation(db, loc);
 
     expect(readLocation(db, loc)).toMatchObject({ state: "active", stateReason: null });
-    const after = Object.fromEntries(index.entriesOfLocation(loc).map((e) => [e.externalId, e.seq]));
+    const after = Object.fromEntries(
+      index.entriesOfLocation(loc).map((e) => [e.externalId, e.seq]),
+    );
     expect(after[announced.externalId]).toBe(before[announced.externalId]);
     for (const e of [behind, never, gone]) expect(after[e.externalId]).toBeGreaterThan(mark);
     expect(index.lastSeq()).toBe(mark + 3);

@@ -72,4 +72,15 @@ describe("F1: a location read again announces what it was not read for", () => {
     const after = [...(await w.sync()), ...(await w.sync())];
     expect(deletes(after)).toHaveLength(1);
   });
+
+  it("FU7: a document of a paused location is not read", async () => {
+    const w = make();
+    w.write("a.md", "# a\n\nbody of a\n");
+    const [record] = upserts(await w.settle());
+    const ask = () =>
+      w.connector.getDocument?.({ namespace: w.locationId, externalId: record!.externalId });
+    expect(await ask()).not.toBeNull();
+    w.pause();
+    expect(await ask()).toBeNull();
+  });
 });

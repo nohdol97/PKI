@@ -206,16 +206,18 @@ const plaintext = (next: EntryFields) =>
         fileNo: next.fileNo,
       };
 
+/** The next number from the counter: the one place a sequence number is made. */
+export function takeLocalSeq(db: SqlDriver): number {
+  db.run("UPDATE local_index_seq SET value = value + 1 WHERE id = 1");
+  return db.all("SELECT value FROM local_index_seq WHERE id = 1")[0]?.value as number;
+}
+
 export function createLocalFileIndex(db: SqlDriver): LocalFileIndex {
   const pathHash = (locationId: string, path: string) =>
     keyedTextHash(db, "local-path", `${locationId}\n${path}`);
   const contentHashOf = (locationId: string, content: string) =>
     keyedTextHash(db, "local-content", `${locationId}\n${content}`);
-  /** The next number from the counter: the one place a sequence number is made. */
-  const takeSeq = (): number => {
-    db.run("UPDATE local_index_seq SET value = value + 1 WHERE id = 1");
-    return db.all("SELECT value FROM local_index_seq WHERE id = 1")[0]?.value as number;
-  };
+  const takeSeq = (): number => takeLocalSeq(db);
   const locationIsRead = (locationId: string): boolean => {
     const state = db.all("SELECT state FROM local_locations WHERE id = ?", [locationId])[0]
       ?.state as LocationState | undefined;

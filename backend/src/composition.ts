@@ -76,7 +76,9 @@ import {
 import { createVisibleEngine, NullKnowledgeEngine } from "@pki/knowledge-engine/adapters";
 import {
   createCommitScope,
+  closeLocation,
   createLocalFileIndex,
+  reopenLocation,
   createUserDecisions,
   ANALYTICAL_CHECK_JOB_KIND,
   DATASET_PROFILE_KIND,
@@ -779,6 +781,10 @@ export function productLocalFiles(
       excluded: () => forbidden,
       limits: () => readLocalFilesSettings(db),
       now: () => options.clock.now(),
+      setLocationState: (id, state, reason) =>
+        void (state === "active"
+          ? reopenLocation(db, id, reason)
+          : closeLocation(db, id, state, reason)),
       report: (report) => void (last = report),
     },
     locations: createLocalLocations({

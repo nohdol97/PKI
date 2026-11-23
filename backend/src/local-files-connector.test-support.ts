@@ -16,7 +16,8 @@ import {
   recordTombstone,
   registerConnectorInstance,
   saveSourceRecord,
-  setLocationState,
+  closeLocation,
+  reopenLocation,
   type LocalFileIndex,
   type SqlDriver,
 } from "@pki/storage";
@@ -195,6 +196,10 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
     excluded: () => [dataDir],
     limits: () => w.limits,
     now: () => clock.t,
+    setLocationState: (id, state, reason) =>
+      void (state === "active"
+        ? reopenLocation(db, id, reason)
+        : closeLocation(db, id, state, reason)),
     report: (r) => reports.push(r),
     fs: hookedFs(hooks),
   };
@@ -230,10 +235,10 @@ export function world(options: { limits?: Partial<LocalFilesLimits> } = {}): Wor
     return w.sync();
   };
   w.pause = () => {
-    setLocationState(db, locationId, "paused", null);
+    closeLocation(db, locationId, "paused", null);
   };
   w.resume = () => {
-    setLocationState(db, locationId, "active", null);
+    reopenLocation(db, locationId);
   };
   w.close = () => {
     db.close();
