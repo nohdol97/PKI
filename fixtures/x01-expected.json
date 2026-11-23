@@ -56,7 +56,7 @@
       "used": ["keyword", "graph"],
       "onlyByGraph": "wiki-x01-0002"
     },
-    "alias": { "text": "SY-ONE 점검 알려줘", "onlyByConcept": "wiki-x01-0003" },
+    "alias": { "text": "SY-ONE", "onlyByConcept": "wiki-x01-0003" },
     "checkDay": {
       "text": "별빛 시스템 점검",
       "conflict": ["wiki-x01-0003", "messenger-x01-0006"]

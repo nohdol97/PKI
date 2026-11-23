@@ -13,13 +13,20 @@ import {
   saveFact,
   saveRelation,
   saveSourceRecord,
+  writeWikiPage,
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { describe, expect, it } from "vitest";
 import { createProductRegistry } from "../canonical-kinds.ts";
 import { locateQuote } from "../quote.ts";
-import { retrieve, type PreferenceSignal, type StrategyName } from "./index.ts";
+import { renderWikiPages } from "../wiki-render.ts";
+import {
+  DEFAULT_ENABLED_STRATEGIES,
+  retrieve,
+  type PreferenceSignal,
+  type StrategyName,
+} from "./index.ts";
 
 const FIXTURES = resolve(import.meta.dirname, "../../../fixtures");
 const lines = readFileSync(resolve(FIXTURES, "x01-ask.jsonl"), "utf8")
@@ -176,5 +183,134 @@ describe("X01-C1a retrieve", () => {
       new Set(base.hits.map((h) => h.versionId)),
     );
     expect(w.counts()).toEqual(before);
+  });
+});
+
+describe("X01-R6 R7 notes and links", () => {
+  it("marks a conflict between shown hits, a past version as stale, and links a hit to the items it supports", async () => {
+    const w = world();
+    const conflict = await ask(w, "checkDay");
+    const tue = w.version.get("wiki-x01-0003");
+    const thu = w.version.get("messenger-x01-0006");
+    expect(conflict.notes).toEqual(
+      expect.arrayContaining([
+        { kind: "conflict", versionId: tue },
+        { kind: "conflict", versionId: thu },
+      ]),
+    );
+    expect(conflict.hits.find((h) => h.versionId === tue)?.related.map((l) => l.name)).toEqual([
+      "별빛 시스템",
+    ]);
+
+    const release = await ask(w, "releaseDate");
+    const stale = release.notes.filter((n) => n.kind === "stale");
+    expect(stale).toEqual([{ kind: "stale", versionId: w.version.get("mail-x01-0004") }]);
+  });
+
+  it("says insufficient when nothing is found", async () => {
+    const w = world();
+    const none = await retrieve(w.db, registry, "존재하지않는낱말", {});
+    expect(none.hits).toEqual([]);
+    expect(none.notes).toEqual([{ kind: "insufficient" }]);
+  });
+});
+
+describe("X01-R1 R2 R5 the other strategies", () => {
+  it("concept finds a source through an alias; the default list leaves it off", async () => {
+    const w = world();
+    const ops = w.version.get("wiki-x01-0003");
+    expect((await ask(w, "alias")).hits.map((h) => h.versionId)).not.toContain(ops);
+    const withConcept = await ask(w, "alias", ["keyword", "metadata", "concept", "rerank"]);
+    expect(withConcept.route.concept.status).toBe("used");
+    expect(withConcept.hits.find((h) => h.versionId === ops)?.strategies).toContain("concept");
+    expect(DEFAULT_ENABLED_STRATEGIES).toEqual(["keyword", "metadata", "rerank"]);
+  });
+
+  it("temporal puts the replacing fact's source first for a question about a change; wiki follows the item's page", async () => {
+    const w = world();
+    const changed = await retrieve(
+      w.db,
+      registry,
+      "물결 프로젝트 배포일이 바뀐 건",
+      {},
+      { enabled: ["temporal"] },
+    );
+    expect(changed.route.temporal.status).toBe("used");
+    const newest = w.version.get("mail-x01-0004-v2");
+    expect(changed.hits.find((h) => h.versionId === newest)?.strategies).toContain("temporal");
+
+    for (const page of renderWikiPages(w.db)) writeWikiPage(w.db, page, "2026-11-23T00:00:00.000Z");
+    const wiki = await retrieve(
+      w.db,
+      registry,
+      "물결 프로젝트 전체 정리",
+      {},
+      { enabled: ["wiki"] },
+    );
+    const codename = w.version.get("wiki-x01-0002");
+    expect(wiki.hits.find((h) => h.versionId === codename)?.strategies).toContain("wiki");
+    expect(wiki.hits.find((h) => h.versionId === codename)?.related[0]?.wikiKey).toMatch(
+      /^projects\//,
+    );
+  });
+
+  it("vector reports unavailable with its reason, runs through the adapters when ready, and never fakes", async () => {
+    const w = world();
+    const none = await retrieve(w.db, registry, "별빛 시스템", {}, { enabled: ["vector"] });
+    expect(none.route.vector).toEqual({
+      status: "unavailable",
+      reason: "no embedding provider or vector index is configured",
+    });
+    const sourceId = w.db.all("SELECT source_id AS s FROM source_versions WHERE id = ?", [
+      w.version.get("wiki-x01-0007") as number,
+    ])[0]?.s;
+    const ready = {
+      embedding: {
+        status: async () => "ready" as const,
+        embed: async () => [new Float32Array([1])],
+      },
+      index: {
+        status: async () => "ready" as const,
+        search: async () => [{ ref: `source-version:${String(sourceId)}:1`, score: 1 }],
+      },
+    };
+    const hit = await retrieve(
+      w.db,
+      registry,
+      "무관한 문장",
+      {},
+      { enabled: ["vector"], vector: ready },
+    );
+    expect(hit.route.vector.status).toBe("used");
+    expect(hit.hits.map((h) => h.versionId)).toEqual([w.version.get("wiki-x01-0007")]);
+    const rebuilding = await retrieve(
+      w.db,
+      registry,
+      "x",
+      {},
+      {
+        enabled: ["vector"],
+        vector: { ...ready, index: { ...ready.index, status: async () => "rebuilding" as const } },
+      },
+    );
+    expect(rebuilding.route.vector).toEqual({
+      status: "unavailable",
+      reason: "vector index: rebuilding",
+    });
+  });
+
+  it("metadata filters every list by collector and by the origin system's time", async () => {
+    const w = world();
+    const mail = await retrieve(w.db, registry, "물결 프로젝트", {
+      connectorIds: ["conn-x01-mail"],
+    });
+    expect(mail.hits.map((h) => h.versionId).sort()).toEqual(
+      [w.version.get("mail-x01-0004"), w.version.get("mail-x01-0004-v2")].sort(),
+    );
+    const recent = await retrieve(w.db, registry, "물결 프로젝트", {
+      from: "2026-11-10T00:00:00+09:00",
+    });
+    expect(recent.hits.map((h) => h.versionId)).toEqual([w.version.get("mail-x01-0004-v2")]);
+    expect(recent.route.metadata.status).toBe("used");
   });
 });

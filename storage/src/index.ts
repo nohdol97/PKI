@@ -630,3 +630,10 @@ export {
   type StoredAssertionLink,
 } from "./assertion-links.ts";
 export { fillValidity, validitySetByUser } from "./valid-time.ts";
+export {
+  factsEvidencedBy,
+  itemsEvidencedBy,
+  listDatedFacts,
+  readVersionHeads,
+  type VersionHead,
+} from "./retrieval-reads.ts";
