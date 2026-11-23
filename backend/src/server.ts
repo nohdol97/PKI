@@ -124,6 +124,7 @@ import {
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { createFeedbackApi } from "./feedback-api.ts";
 import { createLintReads } from "./lint-read.ts";
+import { createExploreReads } from "./explore-read.ts";
 import { createWikiReads } from "./wiki-read.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -603,6 +604,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     now: () => new Date(options.now?.() ?? Date.now()),
   });
   const wiki = createWikiReads(options.db, registry, gate);
+  const explore = createExploreReads(options.db, registry, gate);
   /** K01-R5: a Wiki read finds the pages behind and queues the one build; the runner is woken for it. */
   const queueWikiBuild = () => {
     if (requestWikiBuild(options.db).status === "registered") options.onRunConditionsChanged?.();
@@ -1199,6 +1201,10 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       return wiki.page(key) ?? { error: "not-found" as const };
     },
     wikiEdit: async (edit) => wiki.edit(edit, serverTime()),
+    // X02-R1..R3: the Explore reads, each through the read gate
+    exploreItems: async (request) => explore.items(request),
+    exploreItem: async (request) => explore.item(request) ?? { error: "not-found" as const },
+    exploreSource: async (request) => explore.source(request) ?? { error: "not-found" as const },
     // K02-R15: the lint. A decision runs in the transaction of the entry it calls
     lint: async () => lint.list(),
     lintDecide: async (request) => lint.decide(request, serverTime()),

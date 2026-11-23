@@ -37,7 +37,10 @@ import { Ask } from "./ask.tsx";
 import { Lint } from "./lint.tsx";
 import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
+import { Explore } from "./explore.tsx";
 import { LocalLocations } from "./local-locations.tsx";
+import { NavProvider } from "./nav.tsx";
+import { SemanticReview } from "./semantic-review.tsx";
 import { invalidationText } from "./job-text.ts";
 import { writeInsightInterpret } from "./insight-settings.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
@@ -57,6 +60,8 @@ const SCREENS = {
   wiki: "위키",
   lint: "점검",
   ask: "질문",
+  explore: "탐색",
+  semantic: "지식 검토",
   activity: "활동",
   settings: "설정",
 } as const;
@@ -70,11 +75,13 @@ export function App({ api }: { api: ApiClient }) {
     wiki: Wiki,
     lint: Lint,
     ask: Ask,
+    explore: Explore,
+    semantic: SemanticReview,
     activity: Activity,
     settings: Settings,
   }[screen];
   return (
-    <>
+    <NavProvider screen={screen} onScreen={setScreen}>
       <nav>
         {(Object.keys(SCREENS) as Screen[]).map((id) => (
           <button
@@ -91,7 +98,7 @@ export function App({ api }: { api: ApiClient }) {
         <h1>{SCREENS[screen]}</h1>
         <Current api={api} />
       </main>
-    </>
+    </NavProvider>
   );
 }
 

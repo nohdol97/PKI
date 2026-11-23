@@ -7,14 +7,14 @@ import type { SqlDriver } from "./sql-driver.ts";
  * so FTS5 query syntax in user input stays plain text, and matched as a prefix
  * so a Korean word followed by a particle ("예산을") is found by "예산".
  */
-export function searchKeyword(db: SqlDriver, query: string, limit = 50): number[] {
+export function searchKeyword(db: SqlDriver, query: string, limit = 50, offset = 0): number[] {
   const match = matchExpression(query);
   if (match === undefined) return [];
   return db
-    .all("SELECT rowid FROM keyword_index WHERE keyword_index MATCH ? ORDER BY rank LIMIT ?", [
-      match,
-      limit,
-    ])
+    .all(
+      "SELECT rowid FROM keyword_index WHERE keyword_index MATCH ? ORDER BY rank LIMIT ? OFFSET ?",
+      [match, limit, offset],
+    )
     .map((r) => r.rowid as number);
 }
 

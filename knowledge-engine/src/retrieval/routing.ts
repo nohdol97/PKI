@@ -140,10 +140,12 @@ export const explicitDates = (question: string): string[] => question.match(ISO_
 export function keywordTokens(question: string): string[] {
   const words = normalizeForLinking(question)
     .split(/[^\p{L}\p{N}-]+/u)
-    .filter((w) => w.length >= 2 && ![...NOISE].some((n) => w.startsWith(n)));
-  const stripped = words.map((w) => {
+    .filter((w) => w.length >= 2);
+  const stripped = words.flatMap((w) => {
     const ending = PARTICLES.find((p) => w.endsWith(p) && w.length - p.length >= 2);
-    return ending ? w.slice(0, -ending.length) : w;
+    const base = ending ? w.slice(0, -ending.length) : w;
+    // X01-R21: a noise word is dropped only when the whole word (with or without one particle) is that word
+    return NOISE.has(w) || NOISE.has(base) ? [] : [base];
   });
   return [...new Set(stripped)].slice(0, MAX_TOKENS);
 }

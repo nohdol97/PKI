@@ -71,14 +71,33 @@ export function conceptQueries({ db, judge }: Reading, items: readonly number[])
   return [...names, ...forms.filter((f) => shown.has(refKey(ref(f)))).map((f) => f.form)];
 }
 
+/** X01-D19: a query is read in pages of `size` matches, at most `pages` pages. */
+export const KEYWORD_PAGING = { size: 100, pages: 5 } as const;
+
 /**
  * `keyword`: one FTS5 query per content word, one for all of them together, and one per extra query; the lists are
  * merged by the rank-reciprocal sum so a source holding more of the words rises and no word has to be in every source.
+ * Each query is read page by page in FTS order and every page goes through `admit` (R12 visibility, then the
+ * conditions) before the cut, so a hidden source takes no slot; the read stops at the list limit, at the last page
+ * or at the page limit (X01-R20).
  */
-export function keywordIds({ db, question }: Reading, extraQueries: readonly string[]): number[] {
+export function keywordIds(
+  { db, question }: Reading,
+  extraQueries: readonly string[],
+  admit: (ids: readonly number[]) => number[],
+  paging: { size: number; pages: number } = KEYWORD_PAGING,
+): number[] {
   const tokens = keywordTokens(question);
   const queries = [...tokens, ...(tokens.length > 1 ? [tokens.join(" ")] : []), ...extraQueries];
-  const lists = queries.map((q) => searchKeyword(db, q, -1));
+  const lists = queries.map((q) => {
+    const kept: number[] = [];
+    for (let page = 0; page < paging.pages; page++) {
+      const rows = searchKeyword(db, q, paging.size, page * paging.size);
+      kept.push(...admit(rows));
+      if (kept.length >= STRATEGY_LIST_LIMIT || rows.length < paging.size) break;
+    }
+    return kept.slice(0, STRATEGY_LIST_LIMIT);
+  });
   return bestFirst(reciprocalSum(lists));
 }
 
@@ -184,6 +203,18 @@ const VECTOR_REF = /^source-version:(\d+):(\d+)$/;
 export type VectorOutcome =
   { status: "ok"; ids: number[] } | { status: "unavailable"; reason: string };
 
+/** X01-R22: a status check that throws is `unavailable` with a fixed reason; the error's own text is never carried. */
+async function statusOf<T>(
+  status: () => Promise<T>,
+  what: string,
+): Promise<T | { unavailable: string }> {
+  try {
+    return await status();
+  } catch {
+    return { unavailable: `${what}: status check failed` };
+  }
+}
+
 /**
  * `vector`: the query embedded and searched through the adapters as they are. Not ready, missing or rebuilding is
  * `unavailable` with the adapter's own reason; nothing is faked and nothing falls back to another strategy (D4, D6).
@@ -195,7 +226,7 @@ export async function vectorIds(
 ): Promise<VectorOutcome> {
   if (!deps)
     return { status: "unavailable", reason: "no embedding provider or vector index is configured" };
-  const embedding = await deps.embedding.status();
+  const embedding = await statusOf(() => deps.embedding.status(), "embedding model");
   if (embedding !== "ready") {
     return {
       status: "unavailable",
@@ -203,7 +234,7 @@ export async function vectorIds(
         typeof embedding === "string" ? `embedding model: ${embedding}` : embedding.unavailable,
     };
   }
-  const index = await deps.index.status();
+  const index = await statusOf(() => deps.index.status(), "vector index");
   if (index !== "ready") {
     return {
       status: "unavailable",
