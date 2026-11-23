@@ -705,7 +705,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
-    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(16);
+    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(17);
     expect(log.findLastIndex((e) => e.startsWith("affected:"))).toBeLessThan(firstDelete);
     expect(log.filter((e) => e.startsWith("invalidate:"))).toEqual(
       [
@@ -721,6 +721,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         "item",
         "insight",
         "analytical-check",
+        "notification",
         "wiki-page",
         "lint-finding",
         "engine",
@@ -744,6 +745,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       item: 4, // the two items of a's own pair and the two of its candidate
       insight: 1,
       "analytical-check": 1,
+      notification: 0,
       "wiki-page": 0, // no page was built in this state
       "lint-finding": 0,
       engine: 1,
@@ -777,6 +779,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           item: 4,
           insight: 1,
           "analytical-check": 1,
+          notification: 0,
           "wiki-page": 0,
           "lint-finding": 0,
           engine: 1,
@@ -796,6 +799,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           item: 0,
           insight: 2, // iS judged again, and the `conflict` Insight the link of the world makes (P01)
           "analytical-check": 0,
+          notification: 0,
           "wiki-page": 0,
           "lint-finding": 0,
           engine: 0,

@@ -819,6 +819,9 @@ describe("the product's composition (bootBackend)", () => {
     expect(schedules.map((s) => `${s.kind}:${s.target}`).sort()).toEqual([
       `${CONNECTOR_SYNC_KIND}:pull`,
       `${MAINTENANCE_KIND}:`,
+      "notify:daily", // P02-R3: the notification job's three periods
+      "notify:scan",
+      "notify:weekly",
       "reflect:daily", // K02-R2: the re-review's two periods
       "reflect:weekly",
     ]);

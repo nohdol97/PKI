@@ -71,6 +71,7 @@ import {
   ENGINE_KIND,
   knowledgeCandidates,
   VECTOR_KIND,
+  createNotifyHandler,
   type CanonicalEntries,
   type PermanentlyAbsent,
   type Projections,
@@ -101,6 +102,7 @@ import {
   requestReflectionRefinements,
   WIKI_BUILD_KIND,
   WIKI_SUMMARY_KIND,
+  NOTIFY_JOB_KIND,
   type DerivativeRegistry,
   type MembershipListener,
   type ScopePolicy,
@@ -469,6 +471,8 @@ export function productRunner(
     connectors?: () => SyncManager | undefined;
     /** The registry that names a candidate item's lineage (productRegistry); default `derivativeRegistry` (knowledge-engine canonical-kinds.ts). */
     registry?: DerivativeRegistry;
+    /** Called after a job closed, with its kind and what the close answered (P02: wakes the notification scan, flushes the OS channel). */
+    onJobClosed?: (job: { kind: string }, status: string) => void;
   } = {},
 ): JobRunner {
   const { clock, engine, projections } = options;
@@ -508,6 +512,7 @@ export function productRunner(
         status === "succeeded" &&
         requestReflectionRefinements(db) > 0;
       if (summaries || interpretations || refinements || built) void runner.wake();
+      options.onJobClosed?.(job, status);
       const manager = options.connectors?.();
       const stoppedOnReplaced = replaced.delete(replacedKey(job));
       if (
@@ -556,6 +561,12 @@ export function productRunner(
       }),
       // P01-R7: one Broker call per Insight, IDs only; the Broker asks consent and egress, the row keeps its code content
       [INSIGHT_INTERPRET_KIND]: createInsightInterpretHandler({
+        db,
+        ...(options.registry ? { registry: options.registry } : {}),
+        ...(clock ? { now: () => new Date(clock.now()) } : {}),
+      }),
+      // P02-R3: reads the DB only, no Provider is called; no source, so no fence
+      [NOTIFY_JOB_KIND]: createNotifyHandler({
         db,
         ...(options.registry ? { registry: options.registry } : {}),
         ...(clock ? { now: () => new Date(clock.now()) } : {}),

@@ -126,21 +126,22 @@ sequenceDiagram
 모든 시험은 합성 fixture만 쓰고, 기준마다 대표 사례 1~2개다.
 
 - **P02-C1a** (R1~R4·R14, 실제 입력) 띄운 백엔드에 합성 JSONL을 가져오기 API로 넣고 fixture 추출을 돌린 뒤 `scan`을 "지금 실행"하면, `GET /api/notifications`에 점수가 문턱 이상인 Insight가 `sent`로 사실 줄·이유 요약·근거 수·`inferred`·조치 목록과 함께 나오고, 신뢰도 30인 Insight는 `digest`·`low-confidence`이며 쉘로 간 메시지의 건수에 들지 않는다. → `backend/src/notify-flow.test.ts`
-- **P02-C1b** (R5) `daily`를 돌리면 구간을 가진 요약 줄 하나가 생기고 그 내용에 즉시 알린 줄과 요약으로만 온 줄이 사유와 함께 있다. `weekly`의 내용에는 K02 fixture의 규칙별 수가 있다. 구간에 아무것도 없으면 줄이 생기지 않는다. → `knowledge-engine/src/notify-job.test.ts`, `backend/src/notify-flow.test.ts`
+- **P02-C1b** (R5) `daily`를 돌리면 구간을 가진 요약 줄 하나가 생기고 그 내용에 즉시 알린 줄과 요약으로만 온 줄이 사유와 함께 있다. `weekly`의 내용에는 K02 fixture의 규칙별 수가 있다. 구간에 아무것도 없으면 줄이 생기지 않는다. → `knowledge-engine/src/notify-job.test.ts`, `backend/src/notify-flow.test.ts` **[T1 충족: 작업 부분(`notify-job.test.ts`). 읽기 부분은 T2]**
 - **P02-C1c** (R15·R16) 사용자가 "알림"에서 카드의 "추론" 표지·이유·사실 줄을 보고, 근거를 열고, 다시 알림을 누르면 피드에서 사라지고 타임라인에 "다시 알림 예정"으로 남는다. 요약에서 신뢰도 낮은 줄의 사유를 본다. 다른 탭에서 원본을 지우면 열려 있던 화면이 다시 누르지 않아도 바뀐다. → `apps/web/e2e/notifications.e2e.ts`(브라우저 하나)
-- **P02-C2a** (R2) `decideNotification`이 표의 네 줄을 각각 한 사례로 돌려준다: 제외 표시, 문턱 미만, 24시간 안의 반복, 그 밖. → `knowledge-engine/src/notify-rules.test.ts`
+- **P02-C2a** (R2) `decideNotification`이 표의 네 줄을 각각 한 사례로 돌려준다: 제외 표시, 문턱 미만, 24시간 안의 반복, 그 밖. → `knowledge-engine/src/notify-rules.test.ts` **[T1 충족]**
 - **P02-C2b** (R9·R12) 쉘의 알림 모듈에 가짜 Electron 객체를 주면 ① 올바른 메시지에 토스트 한 번이 고정 문구와 수로 뜨고 트레이 툴팁이 읽지 않은 수다. ② 키가 하나 더 있는 메시지(예: `summary`)는 토스트 없이 버려진다. ③ 알림 미지원이면 `unavailable`을 답하고 던지지 않는다. → `apps/desktop/src/notifier.test.ts`
-- **P02-C2c** (R6·R10·R11) ① 조용한 시간 안에서는 `sent` 줄 둘이 피드에 있고 쉘로 간 메시지가 0건이며, 시각을 조용한 시간 뒤로 옮기면 건수 2인 메시지 하나가 간다. ② 쉘이 `unavailable`을 답하거나 쉘이 없어도 피드의 줄은 그대로다. ③ 다시 알림한 줄은 시각 전에는 피드에 없고 지나면 돌아온다. → `backend/src/notify-outbox.test.ts`
-- **P02-C3a** (R1·R8) ① `scan`을 두 번 돌리거나 실패 뒤 다시 돌려도 Insight 하나에 알림 줄이 하나다. ② `handed`를 적은 뒤 메시지를 보내기 전에 끊고 새 프로세스로 내보내기를 돌리면 메시지가 0건이다. `queued`인 채로 끊겼으면 한 번 간다. → `knowledge-engine/src/notify-job.test.ts`, `backend/src/notify-outbox.test.ts`
-- **P02-C3b** (R7·R13) ① 판정 뒤, 내보내기 전에 받치던 원본을 지우면 메시지가 가지 않고 줄이 피드·요약·타임라인에 없으며, 공통 계약(`derivativeKindContract`)이 `notification`에 대해 통과한다. ② 용도 `notify`를 거부하는 범위 정책에서는 줄이 `withdrawn`이고 메시지가 0건이다. **변이**: `mayDeliver`의 범위 확인을 빼면 ②가, 활성 확인을 빼면 ①이 빨개진다. → `backend/src/notify-gate.test.ts`, `knowledge-engine/src/notify-kind.test.ts`
-- **P02-C3c** (비목표 "앱 밖", R3·R11) ① 호출되면 던지는 Broker를 준 채로 `notify` 작업 셋이 성공한다(Provider 호출 0건). ② `act`의 `op`는 넷뿐이고 그 밖의 값은 400이다. ③ 알림 모듈들(`notify-*.ts`, `notifier.ts`)은 네트워크·Connector·Broker 모듈을 들여오지 않는다(들여오기 대조 시험). → `backend/src/notify-no-egress.test.ts`
+- **P02-C2c** (R6·R10·R11) ① 조용한 시간 안에서는 `sent` 줄 둘이 피드에 있고 쉘로 간 메시지가 0건이며, 시각을 조용한 시간 뒤로 옮기면 건수 2인 메시지 하나가 간다. ② 쉘이 `unavailable`을 답하거나 쉘이 없어도 피드의 줄은 그대로다. ③ 다시 알림한 줄은 시각 전에는 피드에 없고 지나면 돌아온다. → `backend/src/notify-outbox.test.ts` **[T1 충족]**
+- **P02-C3a** (R1·R8) ① `scan`을 두 번 돌리거나 실패 뒤 다시 돌려도 Insight 하나에 알림 줄이 하나다. ② `handed`를 적은 뒤 메시지를 보내기 전에 끊고 새 프로세스로 내보내기를 돌리면 메시지가 0건이다. `queued`인 채로 끊겼으면 한 번 간다. → `knowledge-engine/src/notify-job.test.ts`, `backend/src/notify-outbox.test.ts` **[T1 충족]**
+- **P02-C3b** (R7·R13) ① 판정 뒤, 내보내기 전에 받치던 원본을 지우면 메시지가 가지 않고 줄이 피드·요약·타임라인에 없으며, 공통 계약(`derivativeKindContract`)이 `notification`에 대해 통과한다. ② 용도 `notify`를 거부하는 범위 정책에서는 줄이 `withdrawn`이고 메시지가 0건이다. **변이**: `mayDeliver`의 범위 확인을 빼면 ②가, 활성 확인을 빼면 ①이 빨개진다. → `backend/src/notify-gate.test.ts`, `knowledge-engine/src/notify-kind.test.ts` **[T1 충족: 변이 둘이 각각 `notify-gate.test.ts`를 빨갛게 함을 확인]**
+- **P02-C3c** (비목표 "앱 밖", R3·R11) ① 호출되면 던지는 Broker를 준 채로 `notify` 작업 셋이 성공한다(Provider 호출 0건). ② `act`의 `op`는 넷뿐이고 그 밖의 값은 400이다. ③ 알림 모듈들(`notify-*.ts`, `notifier.ts`)은 네트워크·Connector·Broker 모듈을 들여오지 않는다(들여오기 대조 시험). → `backend/src/notify-no-egress.test.ts` **[T1 충족: ①·③. ②는 T2]**
 
 ## 미해결 질문 / 검증하지 않은 범위
 
 - **Windows 설치본의 실제 토스트·트레이.** 알림 센터 표시, 집중 지원(방해 금지)과의 겹침, 앱 ID(AppUserModelID)가 없을 때의 동작, 트레이 아이콘 모양은 확인하지 않는다. macOS에서 OS 권한이 거부됐을 때 Electron이 `show`를 알리는지도 확인하지 않았다(알리지 않으면 `handed`로 남고 피드는 그대로다).
 - **문턱 70과 24시간.** 실제 자료에서 즉시 알림이 하루 몇 건 나오는지 재지 않았다. P01의 순위 값 자체가 실측 전이다(P01-D6).
 - **10분 주기와 5초 읽기의 비용.** Insight가 수천 건일 때 `scan`의 시간, 창을 오래 열어 둘 때의 읽기 부하는 재지 않았다.
-- **요약 줄처럼 계보가 없는 행을 가진 종류가 공통 계약과 테이블 대조 시험을 그대로 통과하는지**는 구현에서 확인한다(안 되면 D6의 대안).
+- ~~요약 줄처럼 계보가 없는 행을 가진 종류가 공통 계약과 테이블 대조 시험을 그대로 통과하는지~~ T1에서 확인: 공통 계약은 계보 없는 행(`withoutLineage`)을 받고 대조 시험은 `notifications`를 종류 `notification`의 표로 받는다. D6의 대안은 쓰지 않는다.
+- **문턱 70이 닿는 범위(T1 측정).** 합성 신호로 `rankInsight`를 재면 긴급 날짜(7일 안)가 없고 사용자 입력을 쓰지 않은 Insight는 어떤 유형도 최대 67점(`dependency_delay`, 신뢰도 100)이고, 날짜가 7일 안이면 신뢰도 50에서 7개 유형이 71~77점, `important_change`·`opportunity`·`new_relation`이 64~69점이다. 즉 70은 "기한이 임박한 Insight"만 즉시 알리는 값이라 도달 불가는 아니어서 그대로 둔다(D2). 실제 분포는 여전히 재지 않았다.
 - **P01-T03이 합쳐진 뒤의 Insight 응답 모양**(아래 "가정")과, 배포처 범위 정책이 용도 `notify`에 실제로 무엇을 답하는지.
 
 ## 잠정 결정과 가정
@@ -190,3 +191,4 @@ sequenceDiagram
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-23 | 초안 작성 | 이 문서 | 이슈 #28 착수(P01-T03·K02-T3 머지 전이라 문서만) |
+| 2026-11-23 | T1 구현 반영: 완료 기준 상태 표시, 계보 없는 행의 공통 계약 통과 확인(D6 대안 불필요), 문턱 70의 도달 범위 측정 기록, 마이그레이션 v33(P03이 v32를 먼저 씀) | 이 문서 | P02-T1(백엔드) 구현. 문턱 값은 도달 가능하여 바꾸지 않음 |

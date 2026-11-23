@@ -160,6 +160,7 @@ export {
   usesVersionFence,
   WIKI_BUILD_KIND,
   WIKI_SUMMARY_KIND,
+  NOTIFY_JOB_KIND,
 } from "./job-kinds.ts";
 export {
   clearDirty,
@@ -656,3 +657,30 @@ export {
   readVersionHeads,
   type VersionHead,
 } from "./retrieval-reads.ts";
+export {
+  countInsightLinesIn,
+  DEFAULT_QUIET_HOURS,
+  deferNotification,
+  dueDeferredNotifications,
+  firstInsightLineAt,
+  immediateLinesSince,
+  insertDigestNotification,
+  insertInsightNotification,
+  lastDigestEnd,
+  listNotifications,
+  NOTIFY_SETTING_KEYS,
+  queuedNotifications,
+  readNotifySeq,
+  readNotifySettings,
+  readNotification,
+  returnNotification,
+  setOsState,
+  unnotifiedActiveInsightIds,
+  withdrawNotification,
+  type NotificationKind,
+  type NotificationReason,
+  type NotificationStatus,
+  type NotifySettings,
+  type OsState,
+  type StoredNotification,
+} from "./notifications.ts";

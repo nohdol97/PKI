@@ -8,6 +8,7 @@ import {
   listInvalidations,
   migrate,
   readNotification,
+  readTombstoneState,
   registerConnectorInstance,
   saveInsight,
   type DerivedRef,
@@ -32,16 +33,19 @@ beforeEach(() => {
 });
 afterEach(() => db.close());
 
+/** A source's deletion as the entry does it; a second call propagates again over the cover the first left. */
 function deleteSource(sourceId: number) {
   return db.transaction(() => {
     const latest = db.all("SELECT max(version) AS v FROM source_versions WHERE source_id = ?", [
       sourceId,
-    ])[0]?.v as number;
-    seedLegacyTombstone(db, { sourceId, version: latest, at: NOW, reason: "source-deleted" });
+    ])[0]?.v as number | null;
+    if (latest !== null) {
+      seedLegacyTombstone(db, { sourceId, version: latest, at: NOW, reason: "source-deleted" });
+    }
     return derivativeRegistry.propagate(db, {
       kind: "source-deleted",
       sourceId,
-      coversVersion: latest,
+      coversVersion: latest ?? (readTombstoneState(db, sourceId)?.coversVersion as number),
       lastRevision: null,
     });
   });

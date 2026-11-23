@@ -113,10 +113,10 @@ describe("notify.outbox: a deferred line comes back after its time and takes the
     notifyNow(db, "scan", "2026-11-23T12:00:00.000Z");
     const [line] = listNotifications(db);
     deferNotification(db, line?.id as number, "2026-11-23T16:00:00.000Z");
-    expect(states()).toEqual(["deferred/none"]);
+    expect(states()).toEqual(["deferred/cancelled"]);
 
     notifyNow(db, "scan", "2026-11-23T15:00:00.000Z");
-    expect(states()).toEqual(["deferred/none"]);
+    expect(states()).toEqual(["deferred/cancelled"]);
 
     notifyNow(db, "scan", "2026-11-23T16:30:00.000Z");
     expect(states()).toEqual(["sent/queued"]);
@@ -131,11 +131,13 @@ describe("notify.outbox: at most once (P02-C3a ②)", () => {
     seedInsight(db, { name: "하나" });
     notifyNow(db, "scan", "2026-11-23T12:00:00.000Z");
     const at = () => "2026-11-23T12:30:00.000Z";
+    let seen: string[] = [];
     const cut = fakeChannel(() => {
-      expect(states()).toEqual(["sent/handed"]);
+      seen = states();
       throw new Error("the process died before the message went");
     });
     outboxAt(cut.channel, at).flush();
+    expect(seen).toEqual(["sent/handed"]);
 
     const fresh = fakeChannel();
     outboxAt(fresh.channel, at).flush();

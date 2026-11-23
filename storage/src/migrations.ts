@@ -1882,6 +1882,40 @@ const v32: Migration = (db) => {
   `);
 };
 
+// P02-R1, R5, R8: a line per (Insight, changed_at) saying how it was told, and one per digest window. Ids,
+// codes and times only: no name, sentence or quote. A line goes with its Insight (foreign key).
+const v33: Migration = (db) => {
+  db.exec(`
+    CREATE TABLE notifications (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('insight', 'daily', 'weekly')),
+      dedupe_key TEXT NOT NULL UNIQUE,
+      insight_id INTEGER REFERENCES insights (id) ON DELETE CASCADE,
+      insight_changed_at TEXT,
+      status TEXT NOT NULL
+        CHECK (status IN ('sent', 'digest', 'deferred', 'dismissed', 'withdrawn')),
+      reason TEXT CHECK (reason IN ('low-confidence', 'below-threshold', 'repeat')),
+      not_before TEXT,
+      window_start TEXT,
+      window_end TEXT,
+      os_state TEXT NOT NULL DEFAULT 'none'
+        CHECK (os_state IN ('none', 'queued', 'handed', 'shown', 'unavailable', 'failed', 'cancelled')),
+      created_at TEXT NOT NULL,
+      read_at TEXT,
+      CHECK ((kind = 'insight') = (insight_id IS NOT NULL)),
+      CHECK ((kind = 'insight') = (insight_changed_at IS NOT NULL)),
+      CHECK ((kind <> 'insight') = (window_end IS NOT NULL))
+    );
+    CREATE INDEX notifications_insight ON notifications (insight_id, created_at);
+    CREATE INDEX notifications_os ON notifications (os_state);
+    CREATE TABLE notify_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      seq INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO notify_state (id, seq) VALUES (1, 0);
+  `);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1916,6 +1950,7 @@ export const migrations: readonly Migration[] = [
   v30,
   v31,
   v32,
+  v33,
 ];
 
 export function schemaVersion(db: SqlDriver): number {
