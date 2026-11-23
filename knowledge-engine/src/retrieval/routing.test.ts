@@ -1,4 +1,4 @@
-// X01-C6b ① the keyword query drops a noise word only when the whole word matches (X01-R21).
+// X01-C6b ① the keyword query drops a noise word only when the whole word matches (X01-R21); the route cue words stay substring matches.
 import { describe, expect, it } from "vitest";
 import { keywordTokens } from "./routing.ts";
 

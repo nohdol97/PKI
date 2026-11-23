@@ -203,6 +203,18 @@ const VECTOR_REF = /^source-version:(\d+):(\d+)$/;
 export type VectorOutcome =
   { status: "ok"; ids: number[] } | { status: "unavailable"; reason: string };
 
+/** X01-R22: a status check that throws is `unavailable` with a fixed reason; the error's own text is never carried. */
+async function statusOf<T>(
+  status: () => Promise<T>,
+  what: string,
+): Promise<T | { unavailable: string }> {
+  try {
+    return await status();
+  } catch {
+    return { unavailable: `${what}: status check failed` };
+  }
+}
+
 /**
  * `vector`: the query embedded and searched through the adapters as they are. Not ready, missing or rebuilding is
  * `unavailable` with the adapter's own reason; nothing is faked and nothing falls back to another strategy (D4, D6).
@@ -214,7 +226,7 @@ export async function vectorIds(
 ): Promise<VectorOutcome> {
   if (!deps)
     return { status: "unavailable", reason: "no embedding provider or vector index is configured" };
-  const embedding = await deps.embedding.status();
+  const embedding = await statusOf(() => deps.embedding.status(), "embedding model");
   if (embedding !== "ready") {
     return {
       status: "unavailable",
@@ -222,7 +234,7 @@ export async function vectorIds(
         typeof embedding === "string" ? `embedding model: ${embedding}` : embedding.unavailable,
     };
   }
-  const index = await deps.index.status();
+  const index = await statusOf(() => deps.index.status(), "vector index");
   if (index !== "ready") {
     return {
       status: "unavailable",
