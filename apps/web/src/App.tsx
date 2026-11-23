@@ -44,6 +44,8 @@ import { Explore } from "./explore.tsx";
 import { LocalLocations } from "./local-locations.tsx";
 import { NavProvider } from "./nav.tsx";
 import { SemanticReview } from "./semantic-review.tsx";
+import { Ontology } from "./ontology.tsx";
+import { MoreButton, usePaged } from "./paged-list.tsx";
 import { invalidationText } from "./job-text.ts";
 import { writeInsightInterpret } from "./insight-settings.ts";
 import { connectionTestGuidance, providerCheckText, providerName } from "./provider-text.ts";
@@ -66,6 +68,7 @@ const SCREENS = {
   ask: "질문",
   explore: "탐색",
   semantic: "지식 검토",
+  ontology: "유형 정의",
   activity: "활동",
   settings: "설정",
 } as const;
@@ -84,6 +87,7 @@ export function App({ api }: { api: ApiClient }) {
     ask: () => <Ask api={api} />,
     explore: () => <Explore api={api} />,
     semantic: () => <SemanticReview api={api} />,
+    ontology: () => <Ontology api={api} />,
     activity: () => <Activity api={api} />,
     settings: () => <Settings api={api} />,
   }[screen];
@@ -113,8 +117,6 @@ export function App({ api }: { api: ApiClient }) {
 type ReadRoute =
   | "status"
   | "connectors"
-  | "sources"
-  | "activity"
   | "settings"
   | "consents"
   | "executionSettings"
@@ -249,7 +251,14 @@ function PrepareModel({ api, onStarted }: { api: ApiClient; onStarted: () => voi
 
 function Sources({ api }: { api: ApiClient }) {
   const connectors = useRoute(api, "connectors");
-  const stored = useRoute(api, "sources");
+  const readStored = useCallback(
+    async (before?: number) => {
+      const page = await api("sourcesPage", before === undefined ? {} : { before });
+      return { rows: page.sources, next: page.next };
+    },
+    [api],
+  );
+  const stored = usePaged(readStored);
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<SourceSummary[]>();
   const [imported, setImported] = useState<ImportJsonlResponse>();
@@ -333,7 +342,7 @@ function Sources({ api }: { api: ApiClient }) {
           : fail(e),
     );
   };
-  const shown = found ?? stored.data?.sources;
+  const shown = found ?? stored.shown?.rows;
 
   return (
     <>
@@ -389,6 +398,9 @@ function Sources({ api }: { api: ApiClient }) {
           </button>
         </div>
       )}
+      {stored.loading && !stored.shown && !found && (
+        <p role="status">저장된 원본을 불러오는 중입니다.</p>
+      )}
       {shown?.length === 0 && <p>{found ? "찾은 원본이 없습니다." : "저장된 원본이 없습니다."}</p>}
       {shown && shown.length > 0 && (
         <table>
@@ -417,6 +429,14 @@ function Sources({ api }: { api: ApiClient }) {
           </tbody>
         </table>
       )}
+      {!found && (
+        <MoreButton
+          next={stored.shown?.next ?? null}
+          loading={stored.loading}
+          onMore={stored.more}
+          label="원본"
+        />
+      )}
     </>
   );
 }
@@ -432,7 +452,16 @@ const CLASS_LABEL: Record<DataClassification, string> = { synthetic: "합성", g
 const NONE = "—";
 
 function Activity({ api }: { api: ApiClient }) {
-  const { data, error } = useRoute(api, "activity");
+  const readCalls = useCallback(
+    async (before?: number) => {
+      const page = await api("activityPage", before === undefined ? {} : { before });
+      return { rows: page.calls, next: page.next };
+    },
+    [api],
+  );
+  const calls = usePaged(readCalls);
+  const { error } = calls;
+  const data = calls.shown && { calls: calls.shown.rows };
   const status = useRoute(api, "status");
   return (
     <>
@@ -477,6 +506,12 @@ function Activity({ api }: { api: ApiClient }) {
           </tbody>
         </table>
       )}
+      <MoreButton
+        next={calls.shown?.next ?? null}
+        loading={calls.loading}
+        onMore={calls.more}
+        label="Provider 호출 기록"
+      />
     </>
   );
 }

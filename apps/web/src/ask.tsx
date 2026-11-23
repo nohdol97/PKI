@@ -43,10 +43,13 @@ export const relatedActions = (go: Nav["go"], related: Related) => ({
     related.wikiKey === null ? undefined : () => go("wiki", { wikiKey: related.wikiKey as string }),
 });
 
-/** The version a citation points to, as the source view takes it: read by its version number, the span marked. */
+/** The version a citation points to, as the source view takes it: read by its version number and the citation's start, the span marked, the attachment and position shown (X02B-R12). */
 export async function openCitation(api: ApiClient, c: Citation): Promise<EvidenceSource> {
-  const { sourceVersion } = await api("exploreSource", { versionId: c.versionId });
-  return citationSource(sourceVersion, c);
+  const { sourceVersion, locator, attachment } = await api("exploreSource", {
+    versionId: c.versionId,
+    start: c.start,
+  });
+  return citationSource(sourceVersion, c, { locator, attachment });
 }
 
 export interface AskState {

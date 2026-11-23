@@ -5,7 +5,7 @@ import type { RouteName, RouteResponse } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
-import { EMPTY_DRAFT, changeOf, checkText } from "./ontology-text.ts";
+import { EMPTY_DRAFT, changeOf, checkText, draftOf } from "./ontology-text.ts";
 import { OntologyView, perform, preview } from "./ontology.tsx";
 
 const elements: RouteResponse<"ontology">["elements"] = [
@@ -154,5 +154,26 @@ describe("유형 정의 screen: add and change", () => {
     const kept = changeOf({ ...draft, mode: "change-rule", dataChecks: ["grain"] });
     expect(kept).toMatchObject({ op: "change-rule", elementKind: "fact-kind" });
     expect(kept.rule).toMatchObject({ dataChecks: ["grain"] });
+  });
+});
+
+describe("유형 정의 screen: editing a stored rule", () => {
+  it("opens the form with the stored rule and sends it back as a change-rule request with the same dataChecks", () => {
+    const stored = {
+      ...elements[1]!,
+      rule: {
+        elementKind: "fact-kind" as const,
+        itemTypes: ["Project"],
+        valueType: "date" as const,
+        cardinality: "many" as const,
+        dataChecks: ["schema" as const],
+      },
+    };
+    expect(changeOf(draftOf(stored))).toEqual({
+      op: "change-rule",
+      name: stored.name,
+      elementKind: "fact-kind",
+      rule: stored.rule,
+    });
   });
 });
