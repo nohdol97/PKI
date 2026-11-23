@@ -81,6 +81,8 @@ export async function runShell(site: SiteRegistration): Promise<void> {
       allowedOrigins: options.origins,
       secrets: secrets.source,
       scopePolicy: options.scopePolicy,
+      // the normalizer host is started by the shell for a utility process (I02B-R22, adapter ⓑ)
+      localFiles: { shellHost: normalizerHosts.spawner },
     });
     running = { server, providers, close: () => db.close() };
     return server.port;

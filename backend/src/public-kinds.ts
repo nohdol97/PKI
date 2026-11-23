@@ -8,10 +8,14 @@
 export const SITE_CONNECTOR_KINDS = ["site-mail", "site-messenger", "site-wiki"] as const;
 
 /** Every kind name the public code uses that is not a placeholder: the composition points', the import's, the test kind. */
-export const PUBLIC_CONNECTOR_KINDS: readonly string[] = ["jsonl-import", "test-fixtures"];
+export const PUBLIC_CONNECTOR_KINDS: readonly string[] = [
+  "jsonl-import",
+  "local-files",
+  "test-fixtures",
+];
 
-/** The ids of the instances a public composition point makes at the start (a source run's `fixtures`). */
-export const PUBLIC_INSTANCE_IDS: readonly string[] = ["fixtures"];
+/** The ids of the instances a public composition point makes at the start (a source run's `fixtures`, the one `local-files`). */
+export const PUBLIC_INSTANCE_IDS: readonly string[] = ["fixtures", "local-files"];
 
 /** The prefixes the public code gives the ids of instances it makes while running (none yet). */
 export const PUBLIC_INSTANCE_ID_PREFIXES: readonly string[] = [];

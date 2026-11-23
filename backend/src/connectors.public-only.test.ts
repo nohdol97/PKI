@@ -20,16 +20,17 @@ const SYNTHETIC_LINE = readFileSync(
   "utf8",
 );
 const SITE_KINDS = ["site-mail", "site-messenger", "site-wiki"];
+const PRODUCT_KINDS = ["local-files", ...SITE_KINDS];
 
-it("the product's Connector kinds are exactly jsonl-import and the three site kinds", async () => {
+it("the product's Connector kinds are exactly local-files and the three site kinds (jsonl-import is the import's)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pki-public-only-"));
   const db = openCanonicalDb(join(dir, "data"));
   try {
     const product = productConnectors();
     const registered = Object.keys(product.kinds);
-    expect([...registered].sort()).toEqual(SITE_KINDS);
+    expect([...registered].sort()).toEqual(PRODUCT_KINDS);
     // every instance the product starts with is of a registered site kind
-    expect(product.instances.map((i) => i.kind).sort()).toEqual(SITE_KINDS);
+    expect(product.instances.map((i) => i.kind).sort()).toEqual(PRODUCT_KINDS);
 
     expect(await productImporter(db)(SYNTHETIC_LINE)).toMatchObject({ created: 1, errors: [] });
     const imported = db
@@ -39,6 +40,7 @@ it("the product's Connector kinds are exactly jsonl-import and the three site ki
 
     expect([...new Set([...registered, ...imported])].sort()).toEqual([
       "jsonl-import",
+      "local-files",
       "site-mail",
       "site-messenger",
       "site-wiki",

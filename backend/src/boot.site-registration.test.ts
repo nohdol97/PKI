@@ -22,7 +22,12 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SITE_CONNECTOR_KINDS } from "./public-kinds.ts";
 import { bootBackend } from "./boot.ts";
-import { CANONICAL_DB_FILE, fixtureConnectors, openCanonicalDb } from "./composition.ts";
+import {
+  CANONICAL_DB_FILE,
+  fixtureConnectors,
+  openCanonicalDb,
+  productConnectors,
+} from "./composition.ts";
 import type { ConnectorFactory } from "./connectors.ts";
 import { readLedgerHistory } from "./ledger-history.ts";
 import { PUBLIC_CONNECTOR_KINDS } from "./public-kinds.ts";
@@ -143,7 +148,7 @@ describe("boot.site-registration: the registration is merged onto the base set (
   it("without a registration the list is the product's, as before", async () => {
     await boot();
     expect((await api().list()).map((c) => c.id).sort()).toEqual(
-      SITE_CONNECTOR_KINDS.slice().sort(),
+      [...SITE_CONNECTOR_KINDS, "local-files"].sort(),
     );
   });
 
@@ -214,7 +219,9 @@ describe("boot.registration-rejected: four violations leave their item out and a
       expect(events("site-registration-invalid")).toEqual([]);
       const listed = await api().list();
       if (what === "kinds") {
-        expect(listed.map((c) => c.kind).sort()).toEqual(SITE_CONNECTOR_KINDS.slice().sort());
+        expect(listed.map((c) => c.kind).sort()).toEqual(
+          [...SITE_CONNECTOR_KINDS, "local-files"].sort(),
+        );
       } else {
         expect(listed.filter((c) => c.kind === "fork").length).toBe(
           code === "instance-id-duplicate" ? 1 : 0,
@@ -524,7 +531,9 @@ describe("boot.site-registration-ledger: the ledger's re-apply knows the merged 
   });
 
   it("a public kind the registration tried to register is not known either: a refused name does not bind an instance", async () => {
-    const name = PUBLIC_CONNECTOR_KINDS.find((k) => k !== JSONL_IMPORT_KIND) as string;
+    // a public kind this boot does not know: the import's and the product's own (`local-files`) are known
+    const known = [JSONL_IMPORT_KIND, ...Object.keys(productConnectors().kinds)];
+    const name = PUBLIC_CONNECTOR_KINDS.find((k) => !known.includes(k)) as string;
     const db = openCanonicalDb(dir);
     db.exec(`VACUUM INTO '${join(dir, "backup.sqlite")}'`);
     registerConnectorInstance(db, "fork-1", name);

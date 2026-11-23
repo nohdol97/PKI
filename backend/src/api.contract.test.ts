@@ -15,8 +15,9 @@ import { OPENAI_BASE_URL_SETTING, writeDefaultProvider } from "@pki/providers";
 import { migrate, userDecisions } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FakeProvider, ProposingKnowledgeEngine, send } from "@pki/testkit";
 import {
@@ -28,9 +29,11 @@ import {
   productEngine,
   productImporter,
   productInstanceImporter,
+  productLocalFiles,
   productProjections,
   productRunner,
 } from "./composition.ts";
+import { systemClock } from "./clock.ts";
 import { createConnectorManager } from "./connectors.ts";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner } from "./job-runner.ts";
@@ -88,6 +91,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
   let valid: Record<string, string>;
   let projections: ReturnType<typeof productProjections>;
   let runner: JobRunner;
+  let localRoot: string;
 
   // A body for every route that takes one; the schema test below fails for a route missing here.
   const requests: Partial<Record<RouteName, unknown>> = {
@@ -121,6 +125,9 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     setExecutionSettings: { cliBackground: false },
     setAnalyticalSettings: { profile: false, maxCells: 200_000 },
     setSemanticSettings: { autoVerify: false },
+    // the folder is made in beforeAll
+    approveLocalLocation: { type: "folder", path: "" },
+    setLocalFilesSettings: { settleMs: 3_000 },
     setDefaultProvider: { providerId: "claude-code" },
     // The pack does not exist: the preparation starts, then fails without touching disk.
     prepareEmbedding: { source: { kind: "local-pack", path: "/synthetic/missing-pack" } },
@@ -187,6 +194,13 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
       name: "나눈 항목",
     };
     const adapters = productAdapters("/synthetic/data");
+    localRoot = realpathSync(mkdtempSync(join(tmpdir(), "pki-api-contract-")));
+    requests.approveLocalLocation = { type: "folder", path: localRoot };
+    const localFiles = productLocalFiles(db, {
+      dataDir: "/synthetic/data",
+      clock: systemClock,
+      onApproved: () => undefined,
+    });
     const bound = engine();
     projections = productProjections(db, { engine: bound, ...adapters });
     // extraction of what importJsonl stores: a local double answering nothing, so a
@@ -228,6 +242,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
         providers: [new FakeProvider({ id: "claude-code", transport: "cli" })],
       }),
       ...adapters,
+      localLocations: localFiles.locations,
       decisions: userDecisions,
       importer: productImporter(db, { runner, projections }),
       instanceImporter: productInstanceImporter(db, { runner, projections }),
@@ -246,6 +261,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     await runner.stop();
     await projections.drain();
     db.close();
+    rmSync(localRoot, { recursive: true, force: true });
   });
 
   describe("API responses match @pki/contracts", () => {

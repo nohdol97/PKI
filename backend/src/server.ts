@@ -99,6 +99,7 @@ import type { InstanceImporter } from "./imports.ts";
 import { InstanceBusyError, type JsonlImporter } from "./jsonl-import.ts";
 import { ledgerStatus } from "./ledger-status.ts";
 import { jobsApi, type JobsPort } from "./jobs-view.ts";
+import type { LocalLocations } from "./local-locations.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
 import { matchRoute } from "./routing.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -161,6 +162,8 @@ export interface ServerOptions {
   };
   /** The JSONL import (composition.ts productImporter); without it the route answers connector-unavailable. */
   importer?: JsonlImporter;
+  /** The location API (composition.ts `productLocalFiles`); without it its routes answer connector-unavailable. */
+  localLocations?: LocalLocations;
   /** The local import API's importer (composition.ts productInstanceImporter); without it the route answers connector-unavailable. */
   instanceImporter?: InstanceImporter;
   /**
@@ -224,6 +227,9 @@ export const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   // I01-R21, R24: the import API's own answers; an oversize body answers 413 where it is read
   "instance-busy": 409,
   "storage-failed": 500,
+  // I02B-R5, R40: a refused approval names its code in the body; a limit that would turn entries into deletes
+  "approval-rejected": 422,
+  "limit-would-delete": 409,
 };
 
 /** Provisional: below the Broker's 120 s ceiling, long enough for a CLI to start. */
@@ -902,6 +908,14 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       options.onRunConditionsChanged?.(); // wakes the runner for the profile jobs the switch queued
       return analyticalSettings(options.db);
     },
+    localLocations: async () =>
+      options.localLocations?.list() ?? { error: "connector-unavailable" },
+    approveLocalLocation: async (input) =>
+      options.localLocations?.approve(input) ?? { error: "connector-unavailable" },
+    localFilesSettings: async () =>
+      options.localLocations?.settings() ?? { error: "connector-unavailable" },
+    setLocalFilesSettings: async (patch) =>
+      options.localLocations?.writeSettings(patch) ?? { error: "connector-unavailable" },
     semanticSettings: async () => ({ autoVerify: readAutoVerify(options.db) }),
     setSemanticSettings: async ({ autoVerify }) => {
       // no held job waits on this setting, so nothing is released with it (cf. `releasing`)
@@ -1072,7 +1086,12 @@ async function handle(
   }
   if (typeof result === "object" && result !== null && "error" in result) {
     const { error } = result as ErrorResponse;
-    return reject(res, errorStatus[error] ?? 500, error);
+    // a refused approval also names its closed code (I02B-R5)
+    const { code } = result as { code?: unknown };
+    return reply(res, errorStatus[error] ?? 500, {
+      error,
+      ...(error === "approval-rejected" && typeof code === "string" ? { code } : {}),
+    });
   }
   // Responses are checked against the shared schema before they leave.
   reply(res, 200, routes[name].response.parse(result));
