@@ -98,6 +98,8 @@ export function replaceFindingLineage(
   const after = new Set(lineage.map(key));
   if (before.size === after.size && [...before].every((k) => after.has(k))) return false;
   tx.run("DELETE FROM lint_finding_lineage WHERE finding_id = ?", [id]);
+  // an LLM opinion was asked at the lineage that is gone (K02-D19)
+  tx.run("UPDATE lint_findings SET opinion = NULL, opinion_lineage_hash = NULL WHERE id = ?", [id]);
   for (const v of lineage) {
     tx.run(
       "INSERT OR IGNORE INTO lint_finding_lineage (finding_id, source_id, version) VALUES (?, ?, ?)",

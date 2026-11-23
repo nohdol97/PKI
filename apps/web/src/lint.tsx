@@ -16,6 +16,7 @@ import {
   LINT_NO_TYPES,
   LINT_NOT_FACT,
   LINT_OSCILLATING,
+  opinionText,
   LINT_PICK_TYPE,
   LINT_RELATION_TYPE,
   refusalText,
@@ -98,6 +99,7 @@ export function Lint({ api }: { api: ApiClient }) {
                     <li key={f.id}>
                       <bdi>{heading(f)}</bdi> <strong>{statusText(f.status)}</strong>
                       {f.status === "oscillating" && <> {LINT_OSCILLATING}</>}{" "}
+                      {f.opinion && <span>{opinionText(f.opinion)} </span>}
                       {f.evidence.length === 0 ? (
                         <span>{LINT_NO_EVIDENCE}</span>
                       ) : (
