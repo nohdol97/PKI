@@ -5,11 +5,12 @@ import type { LocalLocationList } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient } from "./api.ts";
-import { LocationList, pickAndAdd } from "./local-locations.tsx";
+import { ConfirmDialog, LocationList, pickAndAdd } from "./local-locations.tsx";
 import {
   APPROVAL_REJECTION_TEXT,
   NORMALIZER_UNAVAILABLE_TEXT,
   NOT_WATCHING_TEXT,
+  REVOKE_WARNING_TEXT,
 } from "./local-locations-text.ts";
 
 const list = (over: Partial<LocalLocationList> = {}): LocalLocationList => ({
@@ -20,7 +21,7 @@ const list = (over: Partial<LocalLocationList> = {}): LocalLocationList => ({
       displayPath: "/docs",
       state: "active",
       stateReason: null,
-      counts: { tracked: 3, skipped: 1, ignored: 2, pendingDeletes: 0 },
+      counts: { tracked: 3, skipped: 1, ignored: 2, pendingDeletes: 0, sources: 3 },
       limitExceeded: false,
       lastPassAt: null,
       watching: false,
@@ -68,5 +69,62 @@ describe("the shell's folder picker", () => {
       await pickAndAdd(untouched as unknown as ApiClient, async () => ({ ticket: null })),
     ).toBeUndefined();
     expect(untouched).not.toHaveBeenCalled();
+  });
+});
+
+const withState = (state: LocalLocationList["locations"][number]["state"], pending = 0) =>
+  list({
+    locations: [
+      {
+        ...list().locations[0]!,
+        state,
+        counts: { tracked: 3, skipped: 1, ignored: 2, pendingDeletes: pending, sources: 7 },
+      },
+    ],
+  });
+
+describe("location actions (C28)", () => {
+  it("every action is a named button, so the keyboard reaches revocation from the list", () => {
+    for (const state of ["active", "paused", "unavailable", "needs-confirmation"] as const) {
+      const html = renderToStaticMarkup(<LocationList list={withState(state, 2)} />);
+      expect(html).toContain("승인 철회");
+      for (const tag of html.match(/<button[^>]*>[^<]*<\/button>/g) ?? []) {
+        expect(tag).toContain('type="button"');
+        expect(tag).not.toContain("tabindex");
+        expect(tag.replace(/<[^>]*>/g, "").length).toBeGreaterThan(0);
+      }
+    }
+    expect(renderToStaticMarkup(<LocationList list={withState("paused")} />)).toContain("다시 켜기");
+    expect(renderToStaticMarkup(<LocationList list={withState("needs-confirmation", 2)} />)).toContain(
+      "삭제 반영",
+    );
+  });
+
+  it("a revoking row shows the state, the remaining count and a continue button", () => {
+    const html = renderToStaticMarkup(<LocationList list={withState("revoking")} />);
+    expect(html).toContain("철회하는 중");
+    expect(html).toContain("남은 원본 7개");
+    expect(html).toContain("철회 계속");
+  });
+
+  it("the revoke dialog shows the source count and the fixed sentence", () => {
+    const html = renderToStaticMarkup(
+      <ConfirmDialog
+        title="승인 철회"
+        count={7}
+        countLabel="지워질 원본"
+        warning={REVOKE_WARNING_TEXT}
+        confirmLabel="철회"
+        onConfirm={() => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain("지워질 원본 7개");
+    expect(html).toContain(
+      "이 폴더의 파일은 디스크에 그대로 남습니다. 제품이 가져온 내용과 거기서 나온 지식은 지워지며 되돌릴 수 없습니다",
+    );
+    expect(html).toContain(">철회</button>");
+    expect(html).toContain(">취소</button>");
   });
 });
