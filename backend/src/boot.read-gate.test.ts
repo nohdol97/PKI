@@ -119,6 +119,13 @@ describe("the registry boot builds reaches the read paths", () => {
     expect(shown.body).toMatchObject({ attachment: { name: ATTACHMENT_NAME } });
   });
 
+  it("I02F-C2: the path to reveal in the folder goes through the read gate", async () => {
+    const { asked, registry } = hiding();
+    const { versionId } = await boot(registry);
+    expect(booted?.revealPath(versionId)).toBeUndefined();
+    expect(asked).toContain("source");
+  });
+
   it("the 'where is it now' answer of a source version (I02B-R39, P7)", async () => {
     const control = await boot();
     const shown = await control.call("localSourceInfo", { sourceVersionId: control.versionId });

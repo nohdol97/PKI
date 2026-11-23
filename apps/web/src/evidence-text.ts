@@ -75,17 +75,18 @@ export function splitAtCodePoints(
 
 /**
  * The position table's shapes as words (I02B-R39). Blocks are counted from 0 in the contract; the reader counts
- * from 1, so a docx paragraph and a table's row and cell show one more. The memo shape does not exist in the
- * contract yet (a DOCX comment is a limitation code), so none is worded.
+ * from 1, so a docx paragraph and a table's row and cell show one more. A docx memo (`comment`) names its
+ * paragraph, then its thread and the entry in it (I02F-R6).
  */
 export function locatorText(locator: NativeLocator): string {
   switch (locator.format) {
     case "pdf":
       return `${locator.page}쪽`;
     case "docx": {
-      const { table } = locator;
-      return table
-        ? `표 ${table.index + 1}의 ${table.row + 1}행 ${table.cell + 1}열`
+      const { table, comment } = locator;
+      if (table) return `표 ${table.index + 1}의 ${table.row + 1}행 ${table.cell + 1}열`;
+      return comment
+        ? `문단 ${locator.paragraph + 1} · 메모 ${comment.thread + 1}의 ${comment.index + 1}번째 글(${comment.part === "head" ? "머리" : "본문"})`
         : `문단 ${locator.paragraph + 1}`;
     }
     case "xlsx": {

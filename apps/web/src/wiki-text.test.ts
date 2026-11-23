@@ -2,7 +2,7 @@
 // marker when it has one; a code the file does not know is shown as itself.
 import type { WikiClaim } from "@pki/contracts";
 import { describe, expect, it } from "vitest";
-import { claimMarks, pageKindText, validityText } from "./wiki-text.ts";
+import { claimMarks, historyText, pageKindText, validityText } from "./wiki-text.ts";
 
 const claim: WikiClaim = {
   ref: { kind: "fact", id: 1 },
@@ -27,5 +27,13 @@ describe("claim words", () => {
   it("shows a kind it does not know as its code", () => {
     expect(pageKindText("projects")).toBe("프로젝트");
     expect(pageKindText("future-kind")).toBe("future-kind");
+  });
+});
+
+describe("history line", () => {
+  it("shows the added claims only, never a removed count (KF-C4)", () => {
+    const text = historyText({ action: "changed", added: 2, at: "2026-11-24" });
+    expect(text).toContain("+2");
+    expect(text).not.toContain("−");
   });
 });

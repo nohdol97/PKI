@@ -102,7 +102,7 @@ const sameScope = (a: AccessScope, b: AccessScope) =>
 
 /** The source's latest version: the (source_id, version) index, no sort. */
 export const LATEST_VERSION_SQL =
-  "SELECT content_hash, version, revision FROM source_versions WHERE source_id = ? ORDER BY version DESC LIMIT 1";
+  "SELECT content_hash, version, revision, meta FROM source_versions WHERE source_id = ? ORDER BY version DESC LIMIT 1";
 
 /**
  * The content hash of the source's latest version, or undefined when it has none (a
@@ -116,7 +116,7 @@ interface Standing {
   last: number | null;
   scope: AccessScope;
   tombstone: TombstoneState | undefined;
-  latest: { hash: string; version: number } | undefined;
+  latest: { hash: string; version: number; attachments: string } | undefined;
 }
 
 function readStanding(db: SqlDriver, sourceId: number): Standing {
@@ -126,8 +126,26 @@ function readStanding(db: SqlDriver, sourceId: number): Standing {
     last: (row?.last_revision ?? null) as number | null,
     scope: parseScope((row?.access_scope ?? null) as string | null),
     tombstone: readTombstoneState(db, sourceId),
-    latest: latest && { hash: latest.content_hash as string, version: latest.version as number },
+    latest: latest && {
+      hash: latest.content_hash as string,
+      version: latest.version as number,
+      attachments: attachmentsKey(parseMeta(latest.meta)),
+    },
   };
+}
+
+function parseMeta(meta: unknown): unknown {
+  try {
+    return JSON.parse(String(meta ?? "{}"));
+  } catch {
+    return {};
+  }
+}
+
+/** The attachment list as compared: order kept, an absent list and an empty one the same (I02F-R5). */
+function attachmentsKey(provenance: unknown): string {
+  const list = (provenance as { attachments?: unknown } | null | undefined)?.attachments;
+  return stableJson(Array.isArray(list) ? list : []);
 }
 
 /**
@@ -190,16 +208,20 @@ export function saveSourceRecord(
   const revision = record.revision;
   if (blockedByTombstone(standing?.tombstone, revision)) return { status: "blocked" };
   const hash = contentHash(record.title, record.body, record.blocks);
+  // "the same content": the same hash and the same attachment list (I02F-R5)
+  const sameContent =
+    standing?.latest?.hash === hash &&
+    standing.latest.attachments === attachmentsKey(record.provenance);
   const last = standing?.last ?? null;
   if (revision !== undefined && last !== null) {
     if (revision < last) return { status: "stale" };
     if (revision === last) {
       if (!standing?.latest) return { status: "stale" };
-      if (standing.latest.hash !== hash) return { status: "rejected", code: "revision-conflict" };
+      if (!sameContent) return { status: "rejected", code: "revision-conflict" };
     }
   }
   const claimed = options.scopeClaimed ?? false;
-  if (found !== undefined && standing?.latest?.hash === hash) {
+  if (found !== undefined && sameContent) {
     if (revision !== undefined) raiseLastRevision(db, found, revision);
     if (record.accessScope === undefined) return { status: "unchanged", sourceId: found };
     const to = record.accessScope === null ? null : normalizeScope(record.accessScope);

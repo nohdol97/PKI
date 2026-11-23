@@ -298,7 +298,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
       onApproved: () => undefined,
       entries: defaultEntries,
       cancelSync: () => undefined,
-      rescan: () => undefined,
+      rescan: () => true,
     });
     const bound = engine();
     projections = productProjections(db, { engine: bound, ...adapters });

@@ -208,6 +208,31 @@ describe("saveSourceRecord with the Connector's revision (V02-R2, cross-spec D1)
     ]);
   });
 
+  it("I02F-C5: a revision that differs only in its attachment list is a new version, the same list again is unchanged", () => {
+    const A = { name: "a.pdf", mediaType: "application/pdf", size: 1 };
+    const B = { name: "b.pdf", mediaType: "application/pdf", size: 2 };
+    const base = {
+      externalId: "m",
+      title: "t",
+      body: "body",
+      blocks: [{ start: 0, end: 4, attachment: 0 }],
+    };
+    const at = (revision: number, attachments: (typeof A)[]) => ({
+      ...base,
+      revision,
+      provenance: { attachments },
+    });
+    expect(saveSourceRecord(db, "c1", at(1, [A, B])).status).toBe("created");
+    expect(saveSourceRecord(db, "c1", at(2, [B, A])).status).toBe("created");
+    const latest = db.all(LATEST_VERSION_SQL, [1])[0];
+    expect(JSON.parse(String(latest?.meta))).toEqual({ attachments: [B, A] });
+    expect(saveSourceRecord(db, "c1", at(3, [B, A])).status).toBe("unchanged");
+    expect(saveSourceRecord(db, "c1", at(3, [A, B]))).toEqual({
+      status: "rejected",
+      code: "revision-conflict",
+    });
+  });
+
   it("finds the latest version through the (source, version) index, not a sort (B-R2-S3)", () => {
     saveSourceRecord(db, "c1", rev(1, "v1"));
     saveSourceRecord(db, "c1", rev(2, "v2"));

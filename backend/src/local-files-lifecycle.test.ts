@@ -199,6 +199,22 @@ describe("C12: the deletion brake", () => {
     expect(stateOf(w)).toBe("active");
   }, 30_000);
 
+  it("I02F-C1: a held deletion stays held when new files push the ratio under the brake, until confirmed", async () => {
+    const w = make();
+    await seed(w, 40);
+    remove(w, 0, 25);
+    await w.sync();
+    await w.sync();
+    expect(held(w)).toBe(25);
+    for (let i = 0; i < 20; i++) w.write(`n${i}.md`, `# n${i}\n\nbody of n${i}\n`);
+    const during = [...(await w.settle()), ...(await w.sync())];
+    expect(deletes(during)).toHaveLength(0);
+    expect(held(w)).toBe(25);
+    expect(stateOf(w)).toBe("needs-confirmation");
+    expect(confirmDeletions(w.db, w.locationId, 25)).toMatchObject({ ok: true });
+    expect(deletes(await w.sync())).toHaveLength(25);
+  }, 30_000);
+
   it("held deletions survive a folder that went away and came back: the location returns as needs-confirmation with the same count (C11)", async () => {
     const w = make();
     await seed(w, 40);

@@ -7,7 +7,7 @@ import { send } from "@pki/testkit";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootBackend } from "./boot.ts";
 import { inProcessNormalizer } from "./local-normalizer.test-support.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
@@ -47,10 +47,19 @@ async function start() {
   await call(routes.setLocalFilesSettings.path, { settleMs: 1 });
   const approved = (await call(routes.approveLocalLocation.path, { type: "folder", path: docs }))
     .body as LocalLocationInfo;
-  for (let i = 0; i < 2; i++) {
-    await new Promise((r) => setTimeout(r, 10));
-    await call(routes.syncConnector.path, { connectorId: "local-files" });
-  }
+  // a sync answers `instance-busy` while the job the approval or the watcher registered holds the lock (by design), so sync
+  // until one runs, then wait for the import to be committed: the source is the observable condition
+  await vi.waitFor(
+    async () => {
+      const synced = await call(routes.syncConnector.path, { connectorId: "local-files" });
+      expect((synced.body as { stopped?: string }).stopped).not.toBe("instance-busy");
+      const listed = (await get(routes.sources.path)).body as {
+        sources: { connectorId: string }[];
+      };
+      expect(listed.sources.some((s) => s.connectorId === "local-files")).toBe(true);
+    },
+    { timeout: 30_000, interval: 50 },
+  );
   return { call, get, id: approved.id, db: running.db };
 }
 
