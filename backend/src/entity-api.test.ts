@@ -318,12 +318,16 @@ describe("resolution.group-reads: the merge route recomputes the rule (S02-R13)"
       (await call("entityMerge", { member, into: y })).body,
     );
     if (merged.status !== "applied") throw new Error(merged.reason);
-    expect(db.all("SELECT x_item_id, y_item_id, state FROM insights")).toEqual([
-      { x_item_id: x, y_item_id: y, state: "active" },
+    // the representative's dependency Insight, and its own `schedule_conflict`: the member's completion date
+    // (12-20) is later than the representative's target date once they are one group (P01)
+    expect(db.all("SELECT rule, x_item_id, y_item_id, state FROM insights ORDER BY id")).toEqual([
+      { rule: "dependency_delay", x_item_id: x, y_item_id: y, state: "active" },
+      { rule: "schedule_conflict", x_item_id: y, y_item_id: y, state: "active" },
     ]);
     await call("entityUnmerge", { mergeId: merged.mergeId });
-    expect(db.all("SELECT x_item_id, y_item_id, state FROM insights")).toEqual([
-      { x_item_id: x, y_item_id: y, state: "resolved" },
+    expect(db.all("SELECT rule, x_item_id, y_item_id, state FROM insights ORDER BY id")).toEqual([
+      { rule: "dependency_delay", x_item_id: x, y_item_id: y, state: "resolved" },
+      { rule: "schedule_conflict", x_item_id: y, y_item_id: y, state: "resolved" },
     ]);
   });
 });
