@@ -97,7 +97,7 @@ function seed(scenario: Scenario, facts: FactSpec[] = scenario.facts): Map<strin
     });
     cite({ factId: id }, f.source, f.quote);
   }
-  for (const r of facts === scenario.facts ? scenario.relations : scenario.relations) {
+  for (const r of scenario.relations) {
     const { id } = saveRelation(db, {
       subjectId: items.get(r.subject) as number,
       type: r.type,
