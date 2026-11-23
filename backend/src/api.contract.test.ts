@@ -147,6 +147,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     semanticHistory: { kind: "fact", id: 1 },
     semanticDecide: { kind: "fact", id: 1, action: "dispute" },
     semanticUndo: { kind: "fact", id: 1 },
+    semanticValidity: { kind: "fact", id: 1, from: null, until: null },
     // a direct add of an item no seed has: it applies (the refusals and not-found of the route are in semantic-api.test.ts)
     semanticCorrect: {
       correction: { action: "add", entry: { kind: "item", type: "Concept", name: "합성 개념" } },
