@@ -141,6 +141,97 @@ describe("the insight candidate is graded by the items' lineage too (P01-D26)", 
   });
 });
 
+describe("X and Y each count in the grading union (P01-D26, #238 F2)", () => {
+  const apart: ScopePolicy = {
+    compare: () => "equal",
+    strictest: (scopes) => scopes[0] ?? null,
+    combinable: (scopes) => new Set(scopes.map((s) => JSON.stringify(s))).size <= 1,
+    allows: () => true,
+  };
+
+  /** An Insight on two different items; its own evidence is an unscoped source, each item is named by one source. */
+  function pair(xScope?: string[], yScope?: string[]) {
+    const other = insertItem(db, { type: "Project", name: "별빛 프로젝트", ...attrs });
+    const own = source("own", "근거 문장 하나");
+    const evidenceId = addEvidence(db, {
+      target: { factId: fact("note", "n") },
+      sourceVersionId: own,
+      start: 0,
+      end: 2,
+      quote: "근거",
+    });
+    const nameX = source("nameX", "미리내 프로젝트 코드 KX-1", xScope);
+    saveFact(db, { itemId: item, kind: "identifier.key", value: "KX-1", ...attrs });
+    const xFact = db.all("SELECT max(id) AS id FROM facts")[0]?.id as number;
+    cite(xFact, nameX, "KX-1");
+    const nameY = source("nameY", "별빛 프로젝트 코드 KY-1", yScope);
+    const yFact = saveFact(db, {
+      itemId: other,
+      kind: "identifier.key",
+      value: "KY-1",
+      ...attrs,
+    }).id;
+    cite(yFact, nameY, "KY-1");
+    const key = { rule: "schedule_conflict", xItemId: item, yItemId: other };
+    saveInsight(db, key, {
+      state: "active",
+      summary: "합성 요약",
+      factLines: [],
+      reasoningSummary: "합성",
+      confidence: 40,
+      urgencyDate: null,
+      evidenceIds: [evidenceId],
+      userInputs: [],
+      linkIds: [],
+      changedAt: at,
+    });
+    return readInsight(db, key) as StoredInsight;
+  }
+
+  async function run(parent: StoredInsight, policy: ScopePolicy) {
+    setInsightInterpret(db, true, new Date());
+    const job = {
+      id: 1,
+      leaseToken: 1,
+      kind: INSIGHT_INTERPRET_KIND,
+      target: `${parent.id}#${insightBasis(parent)}`,
+    } as unknown as StoredJob;
+    const call = vi.fn<(raw: unknown) => Promise<BrokerResult>>(
+      async () =>
+        ({
+          status: "ok",
+          output: { reasoningSummary: "합성", impact: 1, actionability: 1, opportunity: null },
+        }) as BrokerResult,
+    );
+    const handler = createInsightInterpretHandler({
+      db,
+      registry: createProductRegistry({ policy }),
+    });
+    const result = await handler(job, { broker: { call } });
+    return { call, result };
+  }
+
+  it("a source that only names X ends the job without a call", async () => {
+    const { call } = await run(pair(["z"]), apart);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("a source that only names Y ends the job without a call", async () => {
+    const { call } = await run(pair(undefined, ["z"]), apart);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("the item handed to the commit carries the grading union, so the commit re-checks the same sources (#238 F1)", async () => {
+    const parent = pair();
+    const { call, result } = await run(parent, { ...apart, combinable: () => true });
+    expect(call).toHaveBeenCalledTimes(1);
+    const lineage = (result as { items: readonly { lineage: readonly { sourceId: number }[] }[] })
+      .items[0]?.lineage;
+    const ids = lineage?.map((ref) => ref.sourceId) ?? [];
+    expect(new Set(ids).size).toBe(3);
+  });
+});
+
 describe("evidence that goes while the text stays (rework M2 check against #231, P01-R3)", () => {
   it("clears the reading and resolves the opportunity; an opportunity on an empty evidence set is not kept", () => {
     const { key, parent, v1, v3 } = scenario();

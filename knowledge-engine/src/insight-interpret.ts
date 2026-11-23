@@ -70,7 +70,9 @@ export function createInsightInterpretHandler(options: InsightInterpretHandlerOp
     if (lineage.length === 0 || lineage.length > INSIGHT_INTERPRET_MAX_VERSIONS) return nothing;
     // the call also carries the two items' names (candidates) and the text built from them: the policy is asked
     // over the Insight's lineage and the items' group lineage together, as the candidate lookup grades it (D26)
-    if (!registry.combinable(db, insightGradingLineage(db, registry, insight))) return nothing;
+    // the same union is what the commit asks the policy again over (#238 F1)
+    const grading = insightGradingLineage(db, registry, insight);
+    if (!registry.combinable(db, grading)) return nothing;
 
     const versionIds: string[] = [];
     let size = 0;
@@ -107,7 +109,7 @@ export function createInsightInterpretHandler(options: InsightInterpretHandlerOp
         {
           kind: "insight",
           itemKey: `interpret:${id}`,
-          lineage,
+          lineage: grading,
           write: (tx: SqlDriver) => {
             // refused when the Insight changed or resolved meanwhile: then nothing of the answer is kept
             if (
