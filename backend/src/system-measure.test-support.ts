@@ -121,6 +121,13 @@ export interface MeasurementResult {
   };
   provider: { kind: "stub"; meaning: string };
   judgement: string;
+  /** The Broker's own call budget caps how many documents' extraction a run can finish (a product limit, no setting). */
+  brokerBudget: {
+    maxCalls: number | null;
+    windowMs: number | null;
+    extractionTimedForDocs: number;
+    extractionWaitingForBudget: number;
+  };
   metrics: {
     installerSize: NotMeasured & WithThreshold;
     idleCpu: Metric<{ percentOfAllCores: number; observedSeconds: number; note: string }>;
@@ -137,6 +144,9 @@ export interface MeasurementResult {
     llmCalls: Metric<{
       total: number;
       byTaskKind: Record<string, number>;
+      /** Attempts by their recorded outcome; "budget-exhausted" ones never reached the Provider. */
+      byOutcome: Record<string, number>;
+      /** Attempts that reached the Provider, over the documents whose extraction was waited for. */
       perDocAvg: number;
       answeredBy: "stub";
       maxPerDoc: NotMeasured;
@@ -557,7 +567,12 @@ async function waitDrained(backend: Backend, timeoutMs: number, what: string): P
       throw new Error(
         `a job is held (${held.kind}: ${held.reason ?? "no reason"}) waiting for ${what}`,
       );
-    if (ms() > deadline) throw new Error(`timed out waiting for ${what}`);
+    if (ms() > deadline) {
+      const open = jobs.jobs.filter((j) => OPEN.includes(j.status as (typeof OPEN)[number]));
+      throw new Error(
+        `timed out waiting for ${what}: ${JSON.stringify(open.slice(0, 3))} budget ${JSON.stringify(jobs.budget)}`,
+      );
+    }
     await sleep(20);
   }
 }
@@ -668,19 +683,27 @@ async function itemsNamed(backend: Backend, name: string): Promise<number> {
   }
 }
 
-async function countCalls(
-  backend: Backend,
-): Promise<{ total: number; byTaskKind: Record<string, number> }> {
+async function countCalls(backend: Backend): Promise<{
+  total: number;
+  ran: number;
+  byTaskKind: Record<string, number>;
+  byOutcome: Record<string, number>;
+}> {
   const byTaskKind: Record<string, number> = {};
+  const byOutcome: Record<string, number> = {};
   let total = 0;
+  let ran = 0;
   let before: number | undefined;
   for (;;) {
     const page = await backend.call(routes.activityPage, before === undefined ? {} : { before });
     for (const call of page.calls) {
       total++;
       byTaskKind[call.taskKind] = (byTaskKind[call.taskKind] ?? 0) + 1;
+      byOutcome[call.outcome] = (byOutcome[call.outcome] ?? 0) + 1;
+      // an attempt the budget or a decision stopped never reached the Provider
+      if (call.outcome !== "budget-exhausted" && call.outcome !== "blocked") ran++;
     }
-    if (page.next === null) return { total, byTaskKind };
+    if (page.next === null) return { total, ran, byTaskKind, byOutcome };
     before = page.next;
   }
 }
@@ -839,13 +862,19 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
     const points: { sources: number; dataDirBytes: number; rawBytes: number }[] = [];
     const every = Math.max(1, Math.ceil(docs.length / 10));
     let rawBytes = 0;
+    // The Broker allows `maxCalls` Provider attempts an hour (a product limit, no setting reaches it): the documents
+    // past it are imported and searched but their extraction waits for the window, so only the first ones are timed.
+    const budget = (await backend.call(routes.jobs)).budget;
+    const extractedDocs = Math.min(docs.length, budget?.maxCalls ?? docs.length);
     for (const doc of docs) {
       const started = ms();
       await importDoc(backend, doc);
       await searchFor(backend, doc, doc.token, 10_000);
       searchable.push(ms() - started);
-      await waitDrained(backend, SOURCE_TIMEOUT_MS, `extraction of ${doc.externalId}`);
-      extracted.push(ms() - started);
+      if (doc.index < extractedDocs) {
+        await waitDrained(backend, SOURCE_TIMEOUT_MS, `extraction of ${doc.externalId}`);
+        extracted.push(ms() - started);
+      }
       rawBytes += doc.bytes;
       if ((doc.index + 1) % every === 0 || doc.index === docs.length - 1) {
         points.push({ sources: doc.index + 1, dataDirBytes: dirBytes(dataDir), rawBytes });
@@ -891,7 +920,6 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
         await searchFor(backend, doc, doc.token, 10_000);
         searches++;
         documentsAdded++;
-        await waitDrained(backend, SOURCE_TIMEOUT_MS, "the soak's extraction");
       }
       soak = {
         status: "measured",
@@ -964,7 +992,8 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
         status: "measured",
         total: calls.total,
         byTaskKind: calls.byTaskKind,
-        perDocAvg: calls.total / docs.length,
+        byOutcome: calls.byOutcome,
+        perDocAvg: calls.ran / extractedDocs,
         answeredBy: "stub",
         maxPerDoc: {
           status: "not-measured",
@@ -991,6 +1020,12 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
     };
 
     const unverified = [...FIXED_UNVERIFIED].map((u) => ({ ...u }));
+    if (extractedDocs < docs.length) {
+      unverified.push({
+        item: "extraction past the Broker's call budget",
+        reason: `the Broker allows ${budget?.maxCalls ?? "?"} Provider attempts per ${(budget?.windowMs ?? 0) / 60_000} minutes, so only the first ${extractedDocs} of ${docs.length} documents were extracted and timed; the others wait for the window (storage growth and call counts are of those ${extractedDocs}'s knowledge only)`,
+      });
+    }
     for (const [item, metric] of [
       ["forced kill and recovery", metrics.killRecover],
       ["soak run", metrics.soak],
@@ -1033,6 +1068,12 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
       },
       judgement:
         "none: thresholds are EVALUATION 4.4's, copied beside each value; they are judged only on grade A hardware with corpus T2 and a real Provider (D2)",
+      brokerBudget: {
+        maxCalls: budget?.maxCalls ?? null,
+        windowMs: budget?.windowMs ?? null,
+        extractionTimedForDocs: extractedDocs,
+        extractionWaitingForBudget: docs.length - extractedDocs,
+      },
       metrics,
       unverified,
     };

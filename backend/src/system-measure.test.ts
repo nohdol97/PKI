@@ -9,6 +9,7 @@ import {
   runMeasurement,
   SYSTEM_THRESHOLDS,
   validateResult,
+  type MeasurementResult,
   type MeasurementRun,
 } from "./system-measure.test-support.ts";
 
@@ -85,4 +86,14 @@ describe("system-measure (H03-C2)", () => {
       runMeasurement({ ...SMALL, sources: 2, queries: 2, warmup: 0, queryFor: () => "zzabsentzz" }),
     ).rejects.toThrow(/not in the results/);
   }, 120_000);
+
+  it("C4: the committed default-size run passes the same validator and measured the forced kill", () => {
+    const committed = JSON.parse(
+      readFileSync(join(ROOT, "eval/results/h03-c2-dev.json"), "utf8"),
+    ) as MeasurementResult;
+    expect(validateResult(committed)).toEqual([]);
+    expect(committed.mode).toBe("source-run");
+    expect(committed.metrics.killRecover.status).toBe("measured");
+    expect(committed.args).toMatchObject({ sources: 200, queries: 220, idleSeconds: 30 });
+  });
 });
