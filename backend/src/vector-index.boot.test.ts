@@ -8,9 +8,11 @@ import { join } from "node:path";
 import { routes, type EmbeddingKind, type VectorIndex } from "@pki/contracts";
 import { vectorRefOf } from "@pki/knowledge-engine";
 import {
+  createBackup,
   findSourceId,
   registerConnectorInstance,
   saveSourceRecord,
+  stageRestore,
   type SqlDriver,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3, SqliteVectorIndex } from "@pki/storage/adapters";
@@ -149,6 +151,55 @@ describe("vectorIndexing on", () => {
     expect(embedder.calls.embed).toEqual([]);
     expect(indexRefs()).toEqual([]);
     expect((await second.status()).vectorIndex.state).not.toBe("ready");
+  });
+});
+
+describe("an applied restore (H01C3-R10)", () => {
+  it("deletes the vector file of before: a pre-restore vector would outlive a deletion made after the restore", async () => {
+    const embedder = await ready();
+    const first = await boot({ vectorIndexing: true, embedder });
+    registerConnectorInstance(first.db, "c1", "test-fixtures");
+    saveSourceRecord(first.db, "c1", { externalId: "x1", title: "첫째", body: "alpha" });
+    await stop();
+    const second = await boot({ vectorIndexing: true, embedder });
+    await expect.poll(() => indexRefs().length, { timeout: 10_000 }).toBe(1);
+    const folder = join(dir, "backups");
+    mkdirSync(folder);
+    const { fileName, manifest } = createBackup({
+      db: second.db,
+      open: openBetterSqlite3,
+      dataDir: dir,
+      folder,
+      passphrase: "correct horse battery staple",
+      now: new Date(),
+      embeddingSpace: null,
+      vectorIndexSeq: null,
+      scrypt: { N: 1024, r: 8, p: 1 },
+    });
+    expect(
+      stageRestore({
+        db: second.db,
+        open: openBetterSqlite3,
+        dataDir: dir,
+        file: join(folder, fileName),
+        passphrase: "correct horse battery staple",
+        confirmBackupId: manifest.backupId,
+        now: new Date(),
+      }).status,
+    ).toBe("staged");
+    await stop();
+
+    // the restoring start cannot embed (not local), so nothing can have been written again: what is left is of before
+    const external = new FakeEmbedder({ egress: "external" });
+    await external.prepare({ kind: "download" }, new AbortController().signal);
+    await boot({ vectorIndexing: true, embedder: external });
+    const index = openBetterSqlite3(join(dir, "vectors", "index.sqlite"));
+    try {
+      expect(index.all("SELECT ref FROM vectors")).toEqual([]);
+      expect(index.all("SELECT id FROM generations WHERE state = 'active'")).toEqual([]);
+    } finally {
+      index.close();
+    }
   });
 });
 

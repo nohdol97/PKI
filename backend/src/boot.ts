@@ -255,8 +255,9 @@ async function startBackend(
     options.providers ??
     productProviders(db, options.secrets, egress, cliRunsRoot(options.dataDir));
   const bound = options.engine ?? productEngine();
-  // derived data a deletion notice would not reach is not kept while the index is not bound (H01C3-R11)
-  if (!options.vectorIndexing)
+  // derived data a deletion notice would not reach is not kept while the index is not bound (H01C3-R11), nor across an
+  // applied restore: it swaps only the database, so the file's vectors and sequence marks are of the timeline before it
+  if (!options.vectorIndexing || restore.applied)
     rmSync(join(options.dataDir, VECTORS_DIR), { recursive: true, force: true });
   const adapters = productAdapters(options.dataDir, {
     ...(options.vectorIndexing ? { vectorIndexing: true } : {}),
