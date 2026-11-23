@@ -1,6 +1,6 @@
 # 스펙: 검색 전략을 켜기 전의 선행 조건 묶음 — 거른 뒤 자르기, 보이는 병합 줄·근거만 따라가기, 색인 파일을 지우는 조건
 
-- 날짜: 2026-11-24 / 상태: 초안(잠정 결정 D1~D7 포함)
+- 날짜: 2026-11-24 / 상태: 확정(잠정 결정 D1~D7 포함)
 - 관련: 이슈 #291. [RVF spec](2026-11-24-RVF-retrieval-vector-followups.md)(이 항목들을 넘긴 묶음, RVF-D2·D5), [X01 spec](2026-11-23-X01-retrieval-qa.md), [H01-C3 spec](2026-11-24-H01-C3-vector-index.md), [ADR 0025](../adr/0025-retrieval-strategies.md), [ADR 0026](../adr/0026-vector-index-generations.md)
 - 번호: 요구사항 `RSP-R<n>`, 완료 기준 `RSP-C<n>`, 결정 `RSP-D<n>`, 작업 `RSP-T<n>`. 마이그레이션은 없다.
 
