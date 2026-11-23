@@ -1,8 +1,9 @@
-// Per-fixture extraction double (V02-R17, V02-T05, S01-T08, S02-T02): what a Provider of kind
-// `test-double` answers to an extraction request for a V02, S01 or S02 fixture. The answer
+// Per-fixture extraction double (V02-R17, V02-T05, S01-T08, S02-T02, S03-T07): what a Provider of kind
+// `test-double` answers to an extraction request for a V02, S01, S02 or S03 fixture. The answer
 // is fixed in fixtures/v02-expected.json (the facts and relations), fixtures/s01-expected.json
 // (the surface forms and definitions of the glossary) and fixtures/s02-expected.json (identifiers,
-// the six relations, a statement and a type proposal) whose evidence is the requested
+// the six relations, a statement and a type proposal) and fixtures/s03-expected.json (the analytical facts
+// and relation of a Metric page, in the shape of v02-expected.json) whose evidence is the requested
 // document's record, with their quotes. It names an existing item only by picking it
 // from the candidates the request carried (same name); otherwise the item is new. A
 // document that is no fixture gets an empty answer. It always quotes exactly and gives
@@ -63,7 +64,7 @@ interface ExpectedEntities {
   >;
 }
 
-/** The extraction output (schema version 4, providers/src/tasks.ts). */
+/** The extraction output (schema version 5, providers/src/tasks.ts). */
 export interface FixtureExtraction {
   items: { ref: string; type: string; name: string; existingItemId: string | null }[];
   facts: {
@@ -87,12 +88,13 @@ export interface FixtureExtraction {
 }
 
 function load() {
-  const expected = JSON.parse(
-    readFileSync(resolve(FIXTURES, "v02-expected.json"), "utf8"),
-  ) as Expected;
+  // v02 and s03 share one shape: entities, and sets of facts and relations with their evidence
+  const [expected, analytical] = ["v02-expected.json", "s03-expected.json"].map(
+    (name) => JSON.parse(readFileSync(resolve(FIXTURES, name), "utf8")) as Expected,
+  ) as [Expected, Expected];
   /** Fixture content -> record id. */
   const records = new Map<string, string>();
-  for (const file of readdirSync(FIXTURES).filter((f) => /^(v02|s01|s02)-.*\.jsonl$/.test(f))) {
+  for (const file of readdirSync(FIXTURES).filter((f) => /^(v02|s01|s02|s03)-.*\.jsonl$/.test(f))) {
     for (const line of readFileSync(resolve(FIXTURES, file), "utf8").split("\n")) {
       if (line.trim() === "") continue;
       const record = JSON.parse(line) as { id: string; content: string };
@@ -101,7 +103,7 @@ function load() {
   }
   const facts = new Map<string, Expected["sets"][string]["facts"][number]>();
   const relations = new Map<string, Expected["sets"][string]["relations"][number]>();
-  for (const set of Object.values(expected.sets)) {
+  for (const set of [...Object.values(expected.sets), ...Object.values(analytical.sets)]) {
     for (const f of set.facts) facts.set(`${f.evidence.record_id}|${f.entity}|${f.attribute}`, f);
     for (const r of set.relations) {
       relations.set(`${r.evidence.record_id}|${r.subject}|${r.type}|${r.object}`, r);
@@ -133,7 +135,12 @@ function load() {
     for (const p of set.proposedTypes) proposed.set(`${p.evidence.record_id}|${p.name}`, p);
   }
   return {
-    entities: { ...expected.entities, ...glossary.entities, ...organisation.entities },
+    entities: {
+      ...expected.entities,
+      ...analytical.entities,
+      ...glossary.entities,
+      ...organisation.entities,
+    },
     records,
     facts: [...facts.values()],
     relations: [...relations.values()],

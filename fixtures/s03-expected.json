@@ -1,0 +1,155 @@
+{
+  "entities": {
+    "S03M": {
+      "type": "Metric",
+      "name": "월간 매출"
+    },
+    "S03D": {
+      "type": "Dataset",
+      "name": "월별 매출표"
+    }
+  },
+  "sets": {
+    "base": {
+      "files": ["s03-analytical.jsonl"],
+      "facts": [
+        {
+          "entity": "S03M",
+          "attribute": "metric.calculation",
+          "value": "{\"aggregation\":\"sum\",\"column\":\"매출액\"}",
+          "evidence": {
+            "record_id": "wiki-s03-0001",
+            "version": 1,
+            "span": [23, 48],
+            "quote": "월간 매출은 월별 매출표의 매출액 합계로 센다"
+          }
+        },
+        {
+          "entity": "S03M",
+          "attribute": "metric.unit",
+          "value": "원",
+          "evidence": {
+            "record_id": "wiki-s03-0001",
+            "version": 1,
+            "span": [50, 64],
+            "quote": "월간 매출의 단위는 원이다"
+          }
+        },
+        {
+          "entity": "S03M",
+          "attribute": "metric.currency",
+          "value": "KRW",
+          "evidence": {
+            "record_id": "wiki-s03-0001",
+            "version": 1,
+            "span": [66, 82],
+            "quote": "월간 매출의 통화는 KRW이다"
+          }
+        },
+        {
+          "entity": "S03M",
+          "attribute": "metric.period",
+          "value": "month",
+          "evidence": {
+            "record_id": "wiki-s03-0001",
+            "version": 1,
+            "span": [84, 102],
+            "quote": "월간 매출의 기간은 month이다"
+          }
+        },
+        {
+          "entity": "S03M",
+          "attribute": "metric.version",
+          "value": "v1",
+          "evidence": {
+            "record_id": "wiki-s03-0001",
+            "version": 1,
+            "span": [104, 118],
+            "quote": "월간 매출의 판은 v1이다"
+          }
+        }
+      ],
+      "relations": [
+        {
+          "subject": "S03M",
+          "type": "MEASURED_ON",
+          "object": "S03D",
+          "evidence": {
+            "record_id": "wiki-s03-0001",
+            "version": 1,
+            "span": [120, 138],
+            "quote": "월간 매출은 월별 매출표에서 잰다"
+          }
+        }
+      ]
+    },
+    "unit": {
+      "files": ["s03-analytical.jsonl"],
+      "facts": [
+        {
+          "entity": "S03M",
+          "attribute": "metric.unit",
+          "value": "천원",
+          "evidence": {
+            "record_id": "wiki-s03-0002",
+            "version": 1,
+            "span": [26, 41],
+            "quote": "월간 매출의 단위는 천원이다"
+          }
+        }
+      ],
+      "relations": []
+    },
+    "currency": {
+      "files": ["s03-analytical.jsonl"],
+      "facts": [
+        {
+          "entity": "S03M",
+          "attribute": "metric.currency",
+          "value": "USD",
+          "evidence": {
+            "record_id": "wiki-s03-0003",
+            "version": 1,
+            "span": [26, 42],
+            "quote": "월간 매출의 통화는 USD이다"
+          }
+        }
+      ],
+      "relations": []
+    },
+    "period": {
+      "files": ["s03-analytical.jsonl"],
+      "facts": [
+        {
+          "entity": "S03M",
+          "attribute": "metric.period",
+          "value": "quarter",
+          "evidence": {
+            "record_id": "wiki-s03-0004",
+            "version": 1,
+            "span": [26, 46],
+            "quote": "월간 매출의 기간은 quarter이다"
+          }
+        }
+      ],
+      "relations": []
+    },
+    "version": {
+      "files": ["s03-analytical.jsonl"],
+      "facts": [
+        {
+          "entity": "S03M",
+          "attribute": "metric.version",
+          "value": "v2",
+          "evidence": {
+            "record_id": "wiki-s03-0005",
+            "version": 1,
+            "span": [25, 39],
+            "quote": "월간 매출의 판은 v2이다"
+          }
+        }
+      ],
+      "relations": []
+    }
+  }
+}

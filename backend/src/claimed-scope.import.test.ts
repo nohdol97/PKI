@@ -155,7 +155,7 @@ function broker(db: SqlDriver, injected: boolean) {
           taskKind: "extract",
           sourceVersionIds: ids,
           candidateItemIds: candidates,
-          schemaVersion: 4,
+          schemaVersion: 5,
           budget: { timeoutMs: 1000 },
           retryable: false,
         }),
