@@ -23,6 +23,7 @@ Phase 1의 골격(V01: 화면, 로컬 API, Electron 쉘, 정본 저장, Provider
 - `pnpm typecheck` — TypeScript strict 타입 검사
 - `pnpm test` — Vitest 단위·계약 테스트
 - `pnpm e2e` — Playwright E2E. 화면 테스트는 브라우저에서 돌리고, 주요 흐름(화면 seed 0, 가져오기→근거 열기 흐름, 신뢰할 수 없는 내용, 설정 저장, 쉘 보안·수명 주기)만 Electron 쉘에서도 돌린다(쉘 쪽은 화면을 먼저 빌드한다). 프로덕션 산출물도 먼저 빌드해 검사하고 Electron으로 띄워 본다(`--project=artifact`만 돌릴 수 있다). 처음 한 번 `pnpm exec playwright install --only-shell chromium`으로 브라우저를 받고, Electron 바이너리는 처음 실행할 때 내려받는다
+- `pnpm exec playwright test apps/web/e2e/notifications.e2e.ts --project=browser` — 알림 화면(피드·요약·타임라인, 다른 탭에서 원본을 지우면 열린 화면이 스스로 바뀜)의 브라우저 E2E 하나. 쉘의 OS 알림과 트레이는 단위 시험(`apps/desktop/src/notifier.test.ts`, 가짜 Electron 객체)으로만 확인하며 실제 토스트를 띄우지 않는다. Windows 설치본의 토스트는 확인하지 않았다([site-setup S37](docs/site-setup.md))
 - `pnpm --filter @pki/web dev` — 개발 백엔드(합성 자료)와 화면을 함께 띄운다. 브라우저에서 http://127.0.0.1:5173 을 연다
 - `pnpm --filter @pki/backend dev` — 개발 백엔드만 띄운다(합성 자료, 데이터 폴더 `PKI-dev`). 주소와 세션 토큰을 표준 출력에 한 줄로 쓴다
 - `pnpm --filter @pki/web build && pnpm --filter @pki/desktop start` — Electron 쉘로 빌드한 화면과 백엔드를 띄운다(정본 DB는 사용자 데이터 폴더)

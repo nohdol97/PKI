@@ -83,6 +83,7 @@ describe("the registered projection kinds (I04-R1)", () => {
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
       ["analytical-check", "insight", "canonical"],
+      ["notification", "delivery", "canonical"],
       ["wiki-page", "projection", "canonical"],
       ["lint-finding", "projection", "canonical"],
       [ENGINE_KIND, "projection", "projection"],

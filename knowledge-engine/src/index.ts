@@ -176,3 +176,29 @@ export {
   type ReportOutcome,
 } from "./lint-decide.ts";
 export * from "./retrieval/index.ts";
+export {
+  decideNotification,
+  NOTIFY_REPEAT_WINDOW_MS,
+  NOTIFY_SCAN_LIMIT,
+  NOTIFY_THRESHOLD,
+  type NotifyDecision,
+  type NotifySignal,
+  type PastLine,
+} from "./notify-rules.ts";
+export {
+  deliveryVerdict,
+  insightHolds,
+  insightPreference,
+  lineShown,
+  mayDeliver,
+  type DeliveryLine,
+  type DeliveryVerdict,
+} from "./notify-gate.ts";
+export {
+  createNotifyHandler,
+  planNotify,
+  type NotifyOptions,
+  type NotifyPlan,
+  type NotifyTarget,
+} from "./notify-job.ts";
+export { createNotificationKind, NOTIFICATION_KIND_NAME } from "./notify-kind.ts";
