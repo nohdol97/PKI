@@ -51,7 +51,7 @@
 
 | 전략 | 찾는 곳 | 고르는 때(질문의 글) | 쓸 수 없는 때 |
 |---|---|---|---|
-| `keyword` | FTS5 색인(`searchKeyword`) | 항상 | — |
+| `keyword` | FTS5 색인(`searchKeyword`). 내용 낱말마다 질의 하나, 낱말 전부를 묶은 질의 하나, `concept`가 낸 별칭 질의들을 돌려 순위 역수 합으로 하나의 목록으로 합친다. 질문·단서 낱말(어떻게·의존 등)은 버리고 끝의 한국어 조사 하나는 뗀다(`searchKeyword`가 낱말을 모두 포함하는 글만 찾기 때문) | 항상 | — |
 | `metadata` | 요청의 걸러 내기 칸(수집기, 기간) | 칸이 있으면. 순위를 내지 않고 다른 전략의 결과를 거른다 | — |
 | `concept` | 항목 이름·별칭(`alias.*`) | 질문에 등록된 이름·별칭이 정규화해서 들어 있을 때. 그 항목의 근거 원본을 내고, 별칭을 키워드 질의에 더한다 | — |
 | `graph` | 관계(`relationPaths` 등, 깊이 2까지) | 항목이 둘 이상 잡히거나, 하나 잡히고 관계를 묻는 말(의존·영향·담당·원인 등)이 있을 때 | — |
@@ -60,8 +60,8 @@
 | `vector` | `EmbeddingProvider.embed`(질의) → `VectorIndex.search` | 켜져 있고 둘 다 `ready`일 때 | 모델 없음, 색인 `unavailable`·`rebuilding`(이유를 그대로 알림) |
 | `rerank` | 위 목록들 | 항상(R3) | — |
 
-- **X01-R2 길 고르기는 코드 규칙이고 결과를 알린다.** 위 표의 조건은 말 목록 상수와 순수 함수다. 응답은 전략마다 `used`(돌림)·`skipped`(질문이 부르지 않음)·`off`(꺼 둠)·`unavailable`(쓸 수 없음, 이유) 가운데 하나를 알린다. 어떤 전략이 꺼져 있거나 쓸 수 없어도 나머지로 답한다. 다른 전략이나 외부 Provider로 **몰래 바꿔 쓰지 않는다.**
-- **X01-R3 합치기.** 목록들을 순위 역수 합(Reciprocal Rank Fusion, 각 목록에서의 등수만 쓰는 계산)으로 하나로 만든다. 그 뒤 선호 신호의 가중을 곱하고(R4) 위에서 잠정 20건을 남긴다.
+- **X01-R2 길 고르기는 코드 규칙이고 결과를 알린다.** 위 표의 조건은 말 목록 상수와 순수 함수다. 응답은 전략마다 `used`(돌림)·`skipped`(질문이 부르지 않음)·`off`(꺼 둠)·`unavailable`(쓸 수 없음, 이유) 가운데 하나를 알린다. `route` 사건은 상태와 이유만 싣고 건수는 싣지 않는다. 어떤 전략이 꺼져 있거나 쓸 수 없어도 나머지로 답한다. 다른 전략이나 외부 Provider로 **몰래 바꿔 쓰지 않는다.**
+- **X01-R3 합치기.** 목록들을 순위 역수 합(Reciprocal Rank Fusion, 각 목록에서의 등수만 쓰는 계산)으로 하나로 만든다. 순서는 검사(R12, 목록마다 보이지 않는 원본을 뺌) → 합치기 → 선호 신호의 가중 곱하기(R4) → 위에서 잠정 20건 자르기다. 보이지 않는 원본이 자리나 등수를 차지하지 않게 하려는 순서다.
 - **X01-R4 선호 신호는 순서만 바꾼다.** 신호는 `(원본 version) → 가중(양수)`인 읽기 전용 인터페이스이고 기본 구현은 언제나 1("신호 없음")이다. 가중은 자르기 전에 곱하며, 후보를 빼거나 더하지 않고, 신호를 주는 쪽은 DB에 쓸 손잡이를 받지 않는다. 실제 신호와 그 효과의 확인은 P03이다.
 - **X01-R5 켜고 끄기.** 켜 둔 전략 목록은 코드 상수 하나다. `keyword`·`metadata`·`rerank`는 항상 켜 있다. 나머지의 기본값은 X01-T4의 측정이 EVALUATION 3절의 유지 조건을 채운 것만 켠다(측정 전 초기값은 끔). 요청으로는 바꿀 수 없고, 평가 실행기만 함수 인자로 다른 목록을 준다.
 
@@ -71,12 +71,12 @@
 - **X01-R7 관련 지식 링크.** 적중마다 그 원본에 근거를 둔 항목(대표 항목)과 그 항목의 Wiki 페이지를 ID와 이름으로 붙인다(적중당 잠정 5개). 링크의 대상도 읽기 문을 지난 것만 싣는다.
 - **X01-R8 답은 Broker로, ID만.** 요청이 답을 원하고 적중이 있으면 작업 종류 `answer`를 Broker에 **사용자 동작**으로 한 번 부른다(연결 시험과 같은 사용자 동작 기록, 같은 "격리 미검증 확인" 칸). 넘기는 것은 답변 문맥의 원본 version ID들과 후보 `question:<일회용 표>` 하나뿐이다. 질문 글은 요청이 사는 동안만 메모리에 있고, Broker의 후보 조회가 그 표로 읽는다. 질문은 출처 없는 글이므로 Broker가 가장 엄격한 등급으로 매긴다(지금 동작 그대로). 동의·전송 정책·실행 조건·호출 예산은 Broker가 판정한다.
 - **X01-R9 문장은 확인된 것만 나간다.** 응답 스키마는 문장 목록(글, 기댄 문서 ID, 그 문서에서 그대로 베낀 인용문)과 "근거 부족" 여부다. 인용문을 그 문서 본문에서 정확히 한 번 찾지 못한 문장은 버리고 버린 수를 알린다(Wiki 요약·추출과 같은 규칙, `quote.ts`). 남은 문장의 인용은 원본 version ID와 글자 위치다. 답은 `evidence`·`facts`·`relations`·`items` 어디에도 쓰지 않는다.
-- **X01-R10 흘려보내기와 취소.** `POST /api/ask`는 한 줄에 사건 하나인 JSON 줄(NDJSON)로 답한다. 순서는 `route`(R2) → `hits`(적중, 표시, 링크) → `answer`(상태: 시작·없음·막힘·실패·취소와 이유) → `sentence`(0개 이상) → `done`. `hits`는 Provider를 부르기 **전에** 나간다. 화면이 연결을 끊으면 그것이 취소다: 서버는 Broker 호출의 중단 신호를 내고 그 뒤로 아무 사건도 쓰지 않는다. 답을 원하지 않는 요청, Provider가 없거나 막힌 경우는 `answer`가 그 상태를 알리고 `done`으로 끝난다(오류가 아니다).
+- **X01-R10 흘려보내기와 취소.** `POST /api/ask`는 한 줄에 사건 하나인 JSON 줄(NDJSON)로 답한다. 이 경로는 계약의 경로 표(`routes`, JSON 응답만 담는 표)의 행이 아니다. `askRoute`를 `packages/contracts/src/ask.ts`에서 내보내고, `server.ts`의 갈래 하나가 Host·Origin·토큰 검사를 지난 뒤에 이 경로를 잇는다. 순서는 `route`(R2) → `hits`(적중, 표시, 링크) → `answer`(상태: 시작·없음·막힘·실패·취소와 이유) → `sentence`(0개 이상) → `done`. `hits`의 등수는 보이는 적중만으로 다시 매기고, `done`의 버린 수는 인용 확인에서 버린 문장만 센다(R14로 문서에서 뺀 것은 세지 않는다). `hits`는 Provider를 부르기 **전에** 나간다. 화면이 연결을 끊으면 그것이 취소다: 서버는 Broker 호출의 중단 신호를 내고 그 뒤로 아무 사건도 쓰지 않는다. 답을 원하지 않는 요청, Provider가 없거나 막힌 경우는 `answer`가 그 상태를 알리고 `done`으로 끝난다(오류가 아니다).
 - **X01-R11 화면.** 내비게이션에 "질문"을 더한다. 질문 칸, 걸러 내기, "답 받기" 켬/끔, 고른 길과 쓸 수 없는 전략의 이유, 적중 목록(제목, 찾은 전략, 낡음 표시, 관련 지식 링크), 문장과 인용문, 부족·충돌 알림, 취소 단추. 문구는 한국어 문구 모듈에 둔다.
 
 ### 보호
 
-- **X01-R12 내보내기 직전의 검사(검색).** 합친 순위는 응답에 싣기 직전에 `visible(…, "search")`를 한 번에 지난다. 빠진 것은 수·제목·순서·오류 어디에도 흔적을 남기지 않는다. 등록부가 판정하지 못하면 요청이 실패한다(닫힘). 전략 안에서 그래프·항목·Wiki를 읽을 때도 기존 읽기 문 도우미를 쓴다.
+- **X01-R12 검색 검사.** `visible(…, "search")`는 두 번 지난다. 먼저 전략마다의 목록이 합쳐지기 **전에**(R3) 보이지 않는 원본을 뺀다. 그래야 가려진 원본이 적중 자리와 등수를 차지해 보이는 적중의 수·순서가 바뀌는 일이 없다. 다음으로 응답에 싣기 직전에 합친 순위를 한 번 더 지난다(이중 방어). 빠진 것은 수·제목·순서·오류 어디에도 흔적을 남기지 않는다. 등록부가 판정하지 못하면 요청이 실패한다(닫힘). 전략 안에서 그래프·항목·Wiki를 읽을 때도 기존 읽기 문 도우미를 쓴다.
 - **X01-R13 답 만들기 직전의 검사와 최소 문맥.** 답변 문맥은 Broker를 부르기 직전에 다시 고른다: ① 적중을 `visible(…, "answer")`로 다시 거른다. ② 순위대로 잠정 5건까지, 합친 글자 수가 한 번의 호출 한계(`MAX_EXTRACT_CODE_POINTS`)를 넘지 않는 만큼만 담는다. ③ 담을 때마다 지금까지 담은 것과 **한데 묶어도 되는지**(`combinable`) 묻고, 안 되면 그 건을 건너뛴다. 항목 이름·Wiki 글·Insight 글·다른 적중의 제목은 보내지 않는다. 남는 문맥이 없으면 Provider를 부르지 않고 `answer`가 `insufficient`를 알린다.
 - **X01-R14 돌아온 뒤 한 번 더.** Provider가 답한 뒤 문장을 내보내기 직전에, 인용된 원본을 `visible(…, "answer")`로 한 번 더 묻는다. 호출 도중 지워진 원본에 기댄 문장은 버린다.
 - **X01-R15 남기지 않는다.** 질문·적중·답·인용을 DB에 저장하지 않는다. 로그에는 경로 이름, 전략별 건수, 결과 상태만 적는다(질문 글, 제목, 인용문, 원본 ID는 적지 않는다). Provider 호출 기록은 기존 칸(종류·등급·결과)만 쓴다.
@@ -142,17 +142,18 @@ sequenceDiagram
 모든 시험은 합성 fixture만 쓴다. 각 기준은 대표 사례 1~2개다. 고정 fixture는 `fixtures/x01-ask.jsonl`(원본)과 `fixtures/x01-expected.json`이다.
 
 - **X01-C1a** (R1~R5) ① 낱말만 있는 질문은 `keyword`만 `used`이고, 두 항목의 의존을 묻는 질문은 `graph`가 `used`이며 키워드만으로는 안 나오는 원본(질문의 낱말이 없고 관계의 근거인 문서)이 적중에 든다. ② 한 원본에 가중 2를 주는 가짜 선호 신호를 넣으면 그 원본의 등수가 오르고, 적중의 집합과 `items`·`facts`·`relations`·`evidence`의 행 수는 신호가 없을 때와 같다. → `knowledge-engine/src/retrieval/retrieve.test.ts`
-- **X01-C1b** (R2·R10, 오프라인) Provider를 고르지 않고 임베딩 모델이 없는 기본 구성으로 띄운 백엔드에 `POST /api/ask`를 보내면 `hits`에 키워드 적중이 있고, `route`가 `vector`를 `unavailable`(이유 포함)로 알리며, `answer`가 "Provider 없음"이고, Provider 호출 기록에 시도가 없다. → `backend/src/ask-flow.test.ts`
-- **X01-C2a** (R6~R10, 실제 API) 띄운 백엔드에 합성 JSONL을 가져오기 API로 넣고 fixture 추출을 돌린 뒤 fake Provider로 질문하면 ① 사건이 `route`→`hits`→`answer`→`sentence`→`done` 순서로 오고 `hits`가 Provider 호출보다 먼저 쓰인다. ② `sentence`의 인용문이 그 원본 version의 저장된 본문에서 인용 위치 그대로 나온다. 원문에 없는 인용문을 단 문장은 오지 않고 `done`의 버린 수가 1이다. ③ 적중에 관련 항목 링크가 있다. ④ 서로 어긋나는 두 사실의 원본이 함께 적중이면 `conflict`, 새 version이 있는 원본의 옛 version이 적중이면 `stale`, 아무것도 못 찾는 질문이면 `insufficient`이고 Provider 호출이 없다. → `backend/src/ask-flow.test.ts`
+- **X01-C1b** (R2·R10, 오프라인) Provider를 고르지 않고 임베딩 모델이 없는 기본 구성으로 띄운 백엔드에 `POST /api/ask`를 보내면 `hits`에 키워드 적중이 있고, `route`가 `vector`를 `off`로 알리고(기본 목록은 벡터를 끈다. 서버 옵션 `askStrategies`로 벡터를 켠 채 모델이 없으면 `unavailable`과 이유를 알린다. 두 경우를 모두 시험한다), `answer`가 "Provider 없음"이고, Provider 호출 기록에 시도가 없다. → `backend/src/ask-flow.test.ts`
+- **X01-C2a** (R6~R10, 실제 API) 띄운 백엔드에 합성 JSONL을 가져오기 API로 넣고(가져오기는 실제 API를 지난다. 지식은 fixture 추출이 이 사실 종류를 만들 수 없어 라벨에서 심는다) fake Provider로 질문하면 ① 사건이 `route`→`hits`→`answer`→`sentence`→`done` 순서로 오고 `hits`가 Provider 호출보다 먼저 쓰인다. ② `sentence`의 인용문이 그 원본 version의 저장된 본문에서 인용 위치 그대로 나온다. 원문에 없는 인용문을 단 문장은 오지 않고 `done`의 버린 수가 1이다. ③ 적중에 관련 항목 링크가 있다. ④ 서로 어긋나는 두 사실의 원본이 함께 적중이면 `conflict`, 새 version이 있는 원본의 옛 version이 적중이면 `stale`, 아무것도 못 찾는 질문이면 `insufficient`이고 Provider 호출이 없다. → `backend/src/ask-flow.test.ts`
 - **X01-C2b** (R10, 취소) fake Provider가 답을 붙들고 있는 동안 요청을 끊으면 Provider가 중단 신호를 받고, 호출 기록의 결과가 취소이며, 끊은 뒤 `sentence`가 쓰이지 않는다. → `backend/src/ask-flow.test.ts`
 - **X01-C2c** (R11) 사용자가 "질문"에서 묻고, 적중과 문장·인용문을 보고, 관련 지식 링크가 있음을 본다. Provider가 없는 구성에서는 적중과 "답을 만들 수 없음" 안내를 본다. → `apps/web/e2e/ask.e2e.ts`(브라우저 하나)
 - **X01-C3** (R17·R18) ① 실행기를 dev 질문 2개짜리 표본에 돌리면 다섯 구성의 predictions 줄이 나오고 `eval/scorer/score.py`가 오류 없이 채점한다. → `backend/src/retrieval-ablation.test.ts` ② dev·T0 전체를 돌린 결과 파일이 `eval/results/`에 있고, ADR이 구성별 Recall@5·Precision@5·MRR, 재지 못한 구성과 이유, 유지 조건 판정, 기본 전략 목록을 적으며, 코드의 기본 목록 상수가 ADR과 같다(대조 시험).
-- **X01-C4a** (R12·R14·R15, 부정 시험) 카나리 낱말을 가진 원본 둘(하나는 정책이 `search`·`answer`를 거부하는 범위, 하나는 가져온 뒤 삭제해 tombstone)과 보이는 원본 하나를 두고 카나리로 질문하면, 응답의 모든 사건·fake Provider가 받은 요청·Provider 호출 기록·잡아 둔 로그 줄에 두 원본의 카나리·제목·ID가 없고 보이는 원본은 있다. 정책이 `search`는 허용하고 `answer`만 거부하면 적중에는 있고 Provider 요청에는 없다. **변이**: R12의 검사를 빼면, 그리고 R13 ①을 빼면 각각 빨개진다. → `backend/src/ask-gate.test.ts`
+- **X01-C4a** (R12·R14·R15, 부정 시험) 카나리 낱말을 가진 원본 둘(하나는 정책이 `search`·`answer`를 거부하는 범위, 하나는 가져온 뒤 삭제해 tombstone)과 보이는 원본 하나를 두고 카나리로 질문하면, 응답의 모든 사건·fake Provider가 받은 요청·Provider 호출 기록·잡아 둔 로그 줄에 두 원본의 카나리·제목·ID가 없고 보이는 원본은 있다. 정책이 `search`는 허용하고 `answer`만 거부하면 적중에는 있고 Provider 요청에는 없다. 또한 보이는 원본 25건에 정책이 거부하는 원본 10건이 위 등수로 섞여 있어도 적중 수는 20건이고 보이는 적중의 순서는 거부된 원본이 없을 때와 같다. **변이**: 목록을 합치기 전의 검사(R12)를 빼면, 그리고 R13 ①을 빼면 각각 빨개진다. 응답 경계의 검사만 빼면 이제 어느 시험도 빨개지지 않는다(앞의 검사가 먼저 걸러 이중 방어가 됐다). → `backend/src/ask-gate.test.ts`, `knowledge-engine/src/retrieval/retrieve.test.ts`
 - **X01-C4b** (R8·R13·R15·R16, 최소 문맥) ① 적중이 8건이면 fake Provider가 받은 문서는 5건 이하이고 후보는 `question:` 하나뿐이며 항목 이름이 없다. ② 한데 묶을 수 없는 범위의 적중은 문서에서 빠진다. ③ 질문 전후로 `provider_calls`를 뺀 모든 테이블의 행 수가 같다. → `backend/src/ask-gate.test.ts`
 
 ## 미해결 질문 / 검증하지 않은 범위
 
-- **확인하지 못한 사실(추측하지 않음).** ① 원본 version에 원 시스템의 작성·수정 시각 칸이 있어 `metadata`의 기간 걸러 내기에 쓸 수 있는지. 없으면 `metadata`는 수집기 걸러 내기만 한다. ② 서버의 경로 표(`routes`)가 JSON이 아닌 응답 경로를 그대로 받을 수 있는지. 안 되면 `server.ts`에 갈래 한 줄이 더 든다. ③ 화면의 API 클라이언트가 응답을 줄 단위로 읽게 열려 있는지. ④ `concept`가 질문에서 이름을 찾을 때의 비용(항목이 많을 때).
+- **확인하지 못한 사실(추측하지 않음).** ① 원본 version에 원 시스템의 작성·수정 시각 칸이 있어 `metadata`의 기간 걸러 내기에 쓸 수 있는지. 없으면 `metadata`는 수집기 걸러 내기만 한다. ② (확인함) 서버의 경로 표(`routes`)는 JSON만 담아 NDJSON 경로를 받지 못한다. 그래서 `server.ts`에 갈래 하나를 더했다(R10). ③ 화면의 API 클라이언트가 응답을 줄 단위로 읽게 열려 있는지. ④ `concept`가 질문에서 이름을 찾을 때의 비용(항목이 많을 때).
+- **R6과 R12의 충돌(후속 이슈에서 정한다).** `stale`은 같은 원본에 더 새 version이 있으면 달리는데, 그 새 version이 가려졌거나 삭제됐어도 달린다. 보이는 옛 version에 `stale`이 붙어 보이지 않는 새 version이 있다는 사실이 드러난다. R12("흔적을 남기지 않는다")와 맞지 않으므로 `stale`의 기준을 "검색에 보이는 version 가운데 최신"으로 좁힐지 정해야 한다. version마다 범위가 다를 수 있는지는 확인하지 못했다.
 - **품질.** 길 고르기 말 목록, 합치기 상수, 문맥 5건이 실제 질문에서 맞는지 재지 않았다. X01-C3의 수치는 T0(방해 문서 없음)·라벨에서 심은 지식 기준이라 **잠정**이다. 단계 선택의 정식 판정(T1, 실제 추출)과 봉인 eval 한 번은 배포처 몫이다.
 - **Answer Groundedness, Citation Accuracy.** 앞의 것은 채점표가 없어 EVALUATION에서 "판정 보류"이고, 뒤의 것은 실제 Provider의 답이 있어야 한다. 실행기는 Provider가 설정된 환경에서 `citation` 줄을 내도록 만들되 사외에서는 수치를 보고하지 않는다(fake Provider의 답은 측정이 아니다).
 - **벡터.** 제품에서 `search`를 부르는 길은 메모리 구현으로만 확인된다. 실제 벡터 구현, 문서 임베딩, 삭제 뒤 벡터 제거의 실제 동작은 미검증으로 남는다(R07 뒤).
@@ -187,7 +188,7 @@ PR은 둘이다. **PR 1 = T1~T4**(백엔드와 평가. T4는 T1 뒤 T2·T3과 �
 |---|---|---|---|---|---|---|
 | X01-T1 | 찾기 모듈 `retrieve`(전략 여덟, 길 고르기, 합치기, 선호 인터페이스, 표시·링크)와 fixture | C1a | 없음 | `knowledge-engine/src/retrieval/*`, `fixtures/x01-ask.jsonl`, `fixtures/x01-expected.json` | `knowledge-engine/src/index.ts`(export). 새 저장 읽기가 꼭 필요하면 `storage/src/retrieval-reads.ts` + `storage/src/index.ts`(export 한 줄) | `retrieve.test.ts` 통과 출력 |
 | X01-T2 | 요청 진행 `ask`(검사 세 번, 최소 문맥, `answer` 작업 정의, 질문 표, 문장 확인) | C4a, C4b | T1 | `backend/src/ask.ts`, `ask-read.ts`, `ask-questions.ts`, `ask-gate.test.ts`, `providers/src/broker.answer.test.ts` | `providers/src/tasks.ts`(작업 정의 한 줄과 스키마), `packages/contracts/src/provider.ts`(`TASK_KINDS`에 `answer`), `backend/src/composition.ts`(후보 조회를 질문 표로 감싸는 한 줄) | `ask-gate.test.ts` 통과 출력, 변이 둘이 빨개진 출력 |
-| X01-T3 | NDJSON 경로 `POST /api/ask`와 스키마, 취소 | C1b, C2a, C2b | T2 | `packages/contracts/src/ask.ts`, `backend/src/ask-route.ts`, `ask-flow.test.ts` | `packages/contracts/src/index.ts`(export, 경로 한 줄), `backend/src/server.ts`(연결 한두 줄) | `ask-flow.test.ts` 통과 출력 |
+| X01-T3 | NDJSON 경로 `POST /api/ask`와 스키마, 취소 | C1b, C2a, C2b | T2 | `packages/contracts/src/ask.ts`, `backend/src/ask-route.ts`, `ask-flow.test.ts` | `packages/contracts/src/index.ts`(export 한 줄. 경로는 `routes` 표의 행이 아니라 `ask.ts`의 `askRoute`), `backend/src/server.ts`(Host·Origin·토큰 검사 뒤의 갈래 하나) | `ask-flow.test.ts` 통과 출력 |
 | X01-T4 | 평가 실행기, dev·T0 결과, ADR | C3 | T1 | `backend/src/retrieval-ablation.ts`·`.test.ts`, `eval/results/x01-dev-t0.json`, `docs/adr/00NN-retrieval-strategies.md` | `docs/adr/README.md`(한 줄), `docs/EVALUATION.md`(결과를 가리키는 한 줄), `knowledge-engine/src/retrieval/`의 기본 목록 상수(T1의 파일) | 실행 명령과 `score.py` 출력, 대조 시험 통과 |
 | X01-T5 | "질문" 화면과 브라우저 E2E | C2c | T3, `feat/p01-t03-insight-api-ui` 머지 | `apps/web/src/ask.tsx`, `ask-text.ts`, `ask-stream.ts`, 그 시험, `apps/web/e2e/ask.e2e.ts` | `apps/web/src/App.tsx`(import, 이름, 화면 세 줄) | `pnpm e2e` 가운데 `ask.e2e.ts` 통과 출력 |
 | X01-T6 | 문서: I04 등록표 두 줄, ARCHITECTURE(5.4절 벡터 호출 자리, 읽기 경로), 문서 색인, README, `site-setup.md` 항목 | R16 | T3·T4, `feat/k02-t3-refine` 머지 | — | `docs/specs/2026-11-21-I04-invalidation.md`, `docs/ARCHITECTURE.md`, `docs/README.md`, `README.md`, `docs/site-setup.md` | 문서 대조 시험(`tooling/docs`) 통과 |
@@ -216,3 +217,4 @@ PR은 둘이다. **PR 1 = T1~T4**(백엔드와 평가. T4는 T1 뒤 T2·T3과 �
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-23 | 초안 작성 | 이 문서 | 이슈 #30 착수. 조율 세션의 잠정 결정 다섯(D1~D4, D14)을 기록하고 D5~D13을 더함 |
+| 2026-11-23 | 구현과 맞춤: 키워드 전략의 질의 구성(R1·R3), 검색 검사를 합치기 전에도 적용(R12, 검토 F1), `/api/ask`는 `routes` 밖(R10·T3), C1b·C2a·C4a 문구, `route`·`hits`·`done` 세부(R2·R10), R6과 R12의 충돌을 미해결로 올림 | R1·R2·R3·R10·R12, T3, C1b·C2a·C4a, 미해결 질문 | 구현 중 받아들인 편차와 검토 지적 F1을 스펙에 반영 |
