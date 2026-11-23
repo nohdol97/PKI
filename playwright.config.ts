@@ -16,6 +16,7 @@ export default defineConfig<{ target: "browser" | "electron" }>({
         "apps/desktop/**",
         "backend/src/v02-seed.e2e.ts",
         "backend/src/k02-seed.e2e.ts",
+        "backend/src/p02-seed.e2e.ts",
         "backend/src/data-dir-check.e2e.ts",
         "backend/src/v02-double.e2e.ts",
         "backend/src/v02-double.hook.e2e.ts",

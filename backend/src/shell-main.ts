@@ -77,6 +77,8 @@ export async function runShell(site: SiteRegistration): Promise<void> {
         tickets: ApprovalTickets;
         /** The absolute path of a local source's file, for the shell only (P6). */
         revealPath(sourceVersionId: number): string | undefined;
+        /** The shell's answer to a notify message (P02-R8). */
+        notifyAck(data: unknown): boolean;
         close(): void;
       }
     | undefined;
@@ -86,7 +88,7 @@ export async function runShell(site: SiteRegistration): Promise<void> {
     // built apart so the boot call stays a literal with no spread (entries.swap.test.ts, V01-R17)
     const excluded = options.userData ? [options.userData] : [];
     const localFiles = { shellHost: normalizerHosts.spawner, excluded };
-    const { server, db, providers, tickets } = await bootBackend({
+    const { server, db, providers, tickets, notifyOutbox } = await bootBackend({
       dataDir,
       connectors: options.connectors,
       site,
@@ -97,12 +99,15 @@ export async function runShell(site: SiteRegistration): Promise<void> {
       // the normalizer host is started by the shell for a utility process (I02B-R22, adapter ⓑ)
       // and the shell's user-data folder is no place for a location (I02B-R48)
       localFiles,
+      // the count-only message of an OS toast goes to the shell over this channel; its answer comes back below (P02-R8, R9)
+      notifyChannel: { send: (message) => channel.post(message) },
     });
     running = {
       server,
       providers,
       tickets,
       revealPath: (sourceVersionId) => revealPathOf(db, sourceVersionId),
+      notifyAck: (data) => notifyOutbox.acknowledge(data),
       close: () => db.close(),
     };
     return server.port;
@@ -146,6 +151,8 @@ export async function runShell(site: SiteRegistration): Promise<void> {
     // a path the user picked, under a ticket the shell made; dropped while no backend runs (I02B-R37)
     const picked = locationTicket(data);
     if (picked) return void running?.tickets.register(picked);
+    // what the shell did with a toast: recorded on the lines it carried; dropped while no backend runs (P02-R8)
+    if (running?.notifyAck(data)) return;
     // where a source's file is, answered to the shell only; never over HTTP (I02B-R39)
     const reveal = revealRequest(data);
     if (reveal) {
