@@ -61,6 +61,11 @@ function fake(handlers: Partial<Record<RouteName, (request: unknown) => unknown>
   });
   return { api: api as unknown as ApiClient, calls };
 }
+/** The review a performed action handed back; its absence is a test failure. */
+function held(done: { review: Review | undefined }): Review {
+  if (!done.review) throw new Error("the list was not read again");
+  return done.review;
+}
 const view = (review: Review, filter: "candidate" | "all" = "candidate", notice?: string) =>
   renderToStaticMarkup(
     <ReviewView
@@ -103,7 +108,7 @@ describe("지식 검토 (X02-C2c)", () => {
         .sort(),
     ).toEqual(["conflicts", "entityCandidates", "semanticPage"]);
     expect(done.refusal).toBeUndefined();
-    const out = view(done.review, "all");
+    const out = view(held(done), "all");
     expect(out).toContain("확정");
     expect(out).toContain("&lt;img"); // the name, as text
     expect(out).not.toContain("<img");
@@ -163,7 +168,7 @@ describe("지식 검토 (X02-C2c)", () => {
       { type: "decide", kind: "fact", id: 8, action: "reject" },
       "all",
     );
-    expect(view(after.review)).not.toContain("어긋남");
+    expect(view(held(after))).not.toContain("어긋남");
   });
 
   it("reads the chosen status from the server and appends the next page after `after` (X02B-C5 ①)", async () => {
@@ -187,20 +192,25 @@ describe("지식 검토 (X02-C2c)", () => {
     });
     expect(more.list.items.map((i) => i.id)).toEqual([1, 2]);
     expect(view(more, "all")).not.toContain("더 보기");
-    expect(view({ list: { items: [], next: null }, conflicts: noConflicts, pairs: [] })).toContain(
-      "보여 줄 지식이 없습니다",
-    );
+    expect(
+      view({ list: { items: [], next: null }, conflicts: noConflicts, pairs: [], pages: 1 }),
+    ).toContain("보여 줄 지식이 없습니다");
   });
 
   it("disables 더 보기 while a page is being read, and keeps it when a page is short or empty but `next` is set (X02B-R3)", () => {
-    const held: Review = { list: { items: [], next: 7 }, conflicts: noConflicts, pairs: [] };
-    const idle = view(held, "candidate");
+    const stuck: Review = {
+      list: { items: [], next: 7 },
+      conflicts: noConflicts,
+      pairs: [],
+      pages: 1,
+    };
+    const idle = view(stuck, "candidate");
     expect(idle).toContain("더 보기");
     expect(idle).not.toContain("보여 줄 지식이 없습니다");
     expect(idle).not.toMatch(/<button[^>]*disabled[^>]*>더 보기/);
     const busy = renderToStaticMarkup(
       <ReviewView
-        review={held}
+        review={stuck}
         filter="candidate"
         loading
         onAct={() => undefined}
@@ -244,6 +254,50 @@ describe("지식 검토 (X02-C2c)", () => {
       b: 2,
       on: true,
     });
-    expect(view(after.review)).not.toContain("에 합치기");
+    expect(view(held(after))).not.toContain("에 합치기");
+  });
+
+  it("reads as many pages again as were held, and keeps the held list when the action took but the re-read failed (X02F-C5)", async () => {
+    const page = (id: number, next: number | null) => ({
+      items: list("verified").items.map((i) => ({ ...i, id, name: `항목${id}` })),
+      next,
+    });
+    let failing = false;
+    const { api, calls } = fake({
+      semanticPage: (request) => {
+        if (failing) throw new Error("연결 끊김");
+        return (request as { after?: number }).after === undefined ? page(1, 1) : page(2, null);
+      },
+      conflicts: () => noConflicts,
+      entityCandidates: () => ({ candidates: [], truncated: false }),
+      semanticDecide: () => ({
+        status: "applied",
+        seq: 1,
+        entry: { kind: "fact", id: 7, status: "verified", epistemic: "user-approved" },
+      }),
+    });
+    const first = await loadReview(api, "verified");
+    const two = await loadMore(api, first, "verified");
+    expect(two.pages).toBe(2);
+    const done = await perform(
+      api,
+      { type: "decide", kind: "fact", id: 7, action: "approve" },
+      "verified",
+      two.pages,
+    );
+    expect(held(done).list.items.map((i) => i.id)).toEqual([1, 2]);
+    expect(done.rereadFailed).toBeUndefined();
+    expect(calls.filter(([name]) => name === "semanticPage")).toHaveLength(4);
+
+    failing = true;
+    const lost = await perform(
+      api,
+      { type: "decide", kind: "fact", id: 7, action: "approve" },
+      "verified",
+      two.pages,
+    );
+    expect(lost.review).toBeUndefined();
+    expect(lost.rereadFailed).toContain("연결 끊김");
+    expect(lost.refusal).toBeUndefined();
   });
 });
