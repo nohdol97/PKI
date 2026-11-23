@@ -1,3 +1,4 @@
+> **범위 제한 3·4·5·6번의 일부 문장은 [ADR 0022](0022-entity-resolution-and-conflicts.md)가 대체했다**(식별자·조직·시간 신호의 후보, 유효 구간의 순서로 대신함을 표시, 관계 탐색 깊이 3). 나머지는 그대로다.
 > **범위 제한 3번 문장은 [ADR 0021](0021-semantic-registry-on-existing-rows.md)이 대체했다**(연결 후보는 이름에 더해 `verified`인 표기도 본다). 나머지는 그대로다.
 
 # ADR 0003: Phase 1은 제3자 지식 엔진 없이, 어댑터와 null 구현으로
