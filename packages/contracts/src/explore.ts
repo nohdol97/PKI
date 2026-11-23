@@ -47,6 +47,8 @@ const Row = {
 };
 export const ExploreFactSchema = z.object({
   ...Row,
+  /** The item that holds the fact: the centre or one of its members (X02F-R2). */
+  itemId: z.int().positive(),
   kind: z.string(),
   value: z.string(),
   context: z.string().nullable(),
@@ -74,8 +76,8 @@ export const ExploreItemResponseSchema = z
     center: ExploreItemRefSchema.extend({
       /** The Wiki page of the item, when one is stored and shown. */
       wikiKey: z.string().nullable(),
-      /** The shown active members of the item's group, ascending by id (X02B-R2); `mergeId` is what an unmerge takes. */
-      members: z.array(ExploreItemRefSchema.extend({ mergeId: z.int().positive() })),
+      /** The shown active members of the item's group, ascending by id (X02B-R2); `mergeId` is what an unmerge takes, null when its line points at an item not shown. */
+      members: z.array(ExploreItemRefSchema.extend({ mergeId: z.int().positive().nullable() })),
       facts: z.array(ExploreFactSchema),
       relations: z.array(ExploreRelationSchema),
     }).optional(),
