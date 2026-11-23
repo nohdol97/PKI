@@ -308,31 +308,28 @@ describe("correction.effective: the lineage of the user's row decides what may b
 });
 
 describe("correction.effective: the evidence API leaves out a user input the policy hides", () => {
-  /** Denies exactly a pair of scopes one of which is the secret one: the user's row's, not the Insight's. */
-  const secretPair: ScopePolicy = {
+  /** Denies what rests on the secret source alone: the approved row's own lineage, not the end items' or the Insight's. */
+  const secretSingle: ScopePolicy = {
     ...defaultScopePolicy,
-    allows: (scopes) => !(scopes.length === 2 && scopes.some((s) => s?.includes("secret"))),
+    allows: (scopes) => !(scopes.length === 1 && scopes[0]?.includes("secret")),
   };
 
-  it("lists the Insight and what it shows, not a user's row whose own lineage the policy denies", async () => {
+  // P01-R15: a row the user wrote on an end item has that item's lineage, so a denied one hides the Insight with it;
+  // an approved row with only past evidence has a lineage of its own, and the Insight is shown without it (S01-R15)
+  it("lists the Insight and what it shows, not an approved row whose own lineage the policy denies", async () => {
     const a = source("a");
     const team = source("d", ["team"]);
-    const secret = source("secret-doc", SECRET);
+    const secret = source("secret-doc", SECRET, true); // its evidence is past: approving needs no current evidence
     const x = item("X");
     const y = item("Y");
     fact(x, "target_date", TARGET, team);
     dependsOn(x, y, a);
-    fact(y, "memo", "메모", secret);
-    const written = userDecisions.add(db, {
-      kind: "fact",
-      itemId: y,
-      factKind: "completion_date",
-      value: LATE,
-    });
-    if (written.status !== "applied") throw new Error("add");
+    const approved = fact(y, "completion_date", LATE, secret);
+    userDecisions.decide(db, { kind: "fact", id: approved }, "approve");
     recomputeDependencyDelay(db, [x, y]);
-    // the Insight rests on three scopes (team, open, secret): shown; the user's row on Y's two (open, secret): not
-    await start(registryWith(secretPair));
+    expect(db.all("SELECT fact_id FROM insight_user_inputs")).toEqual([{ fact_id: approved }]);
+    // Y rests on two scopes (open, secret): shown; the Insight on three: shown; the approved fact on the secret one alone: not
+    await start(registryWith(secretSingle));
     const [made] = await insights();
     expect(made).toBeDefined();
     const shown = await evidenceOf(made?.id as number);
@@ -387,7 +384,7 @@ describe("correction.effective: the evidence API's user inputs, relation side an
     expect(made?.evidenceCount).toBe(3);
   });
 
-  it("hides only the relation the user wrote when one end is an item the user created", async () => {
+  it("hides the Insight when the end item the user did not create rests on the secret source alone (P01-R15)", async () => {
     const a = source("a");
     const secret = source("secret-doc", SECRET);
     const created = userDecisions.add(db, { kind: "item", type: "Project", name: "내 항목" });
@@ -405,12 +402,10 @@ describe("correction.effective: the evidence API's user inputs, relation side an
     if (written.status !== "applied") throw new Error("add");
     recomputeDependencyDelay(db, [x, y]);
     await start(registryWith(secretSingle));
-    const [made] = await insights(); // rests on `a` and the secret source together: shown
-    expect(made).toBeDefined();
-    const shown = await evidenceOf(made?.id as number);
-    expect(shown.userInputs).toEqual([]); // the relation's own lineage is the secret source alone
-    expect(shown.evidence).toHaveLength(1); // the completion date's evidence rests on the secret source alone too
-    expect(shown.insight.evidenceCount).toBe(1);
+    // the user's relation has Y's lineage, so Y and the relation are denied together and the Insight goes with its end item
+    expect(await insights()).toEqual([]);
+    const id = db.all("SELECT id FROM insights")[0]?.id as number;
+    expect((await call("insightEvidence", { insightId: id })).status).toBe(404);
   });
 
   it("reports the status of a user input that is not verified (a disputed row the user wrote still counts)", async () => {
