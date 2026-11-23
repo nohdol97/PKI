@@ -71,7 +71,7 @@ describe("wiki.render: a page per target, by the kind its type maps to", () => {
     // Event lands in topics; a relation claim names the other page by key
     expect(pages.find((p) => p.title === "Event 항목")?.kind).toBe("topics");
     const projectPage = pages.find((p) => p.key === `projects/${project}`);
-    const claims = (projectPage?.body.claims ?? []) as {
+    const claims = (projectPage?.document.claims ?? []) as {
       ref: { kind: string; id: number };
       status: string;
       evidence: number[];
@@ -82,11 +82,11 @@ describe("wiki.render: a page per target, by the kind its type maps to", () => {
     expect(claims[1]?.to).toBe(`systems/${system}`);
     // a Metric page states status only: the same claim shape as any other, no check field
     const metric = pages.find((p) => p.kind === "metrics");
-    const metricClaim = (metric?.body.claims[0] ?? {}) as Record<string, unknown>;
+    const metricClaim = (metric?.document.claims[0] ?? {}) as Record<string, unknown>;
     expect(Object.keys(metricClaim).sort()).toEqual(
       Object.keys((claims[0] ?? {}) as Record<string, unknown>).sort(),
     );
-    expect(JSON.stringify(metric?.body)).not.toMatch(/check/i);
+    expect(JSON.stringify(metric?.document)).not.toMatch(/check/i);
   });
 
   it("is the same bytes from the same state, and the index and the log read what was stored", () => {

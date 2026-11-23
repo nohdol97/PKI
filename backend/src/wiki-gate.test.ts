@@ -44,7 +44,12 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 function source(externalId: string, body: string, accessScope: string[]) {
-  const saved = saveSourceRecord(db, "c1", { externalId, title: `제목 ${externalId}`, body, accessScope });
+  const saved = saveSourceRecord(db, "c1", {
+    externalId,
+    title: `제목 ${externalId}`,
+    body,
+    accessScope,
+  });
   if (saved.status !== "created") throw new Error(saved.status);
   return db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
 }

@@ -1402,6 +1402,112 @@ export const KnowledgeSchemaResponseSchema = z.object({
 export const SessionSchema = z.object({ baseUrl: z.string(), token: z.string().min(32) });
 export type Session = z.infer<typeof SessionSchema>;
 
+// K01 (R15): the Wiki. Pages are a projection of the knowledge tables: a claim is one fact or relation
+// with its evidence ids, and the words a page reads in are the screen's. Ids, codes, dates and the
+// user's own notes; the page's text is what the knowledge rows hold (the same text the Semantic list shows).
+const WikiClaimRefSchema = z.object({
+  kind: z.enum(["fact", "relation"]),
+  id: z.int().positive(),
+});
+export const WikiClaimSchema = z.object({
+  ref: WikiClaimRefSchema,
+  /** The fact kind, or the relation type. */
+  kind: z.string(),
+  value: z.string().optional(),
+  context: z.string().nullable().optional(),
+  /** A relation's other end: the page key. */
+  to: z.string().optional(),
+  status: z.string(),
+  epistemic: z.string(),
+  validAt: z.string().nullable(),
+  validUntil: z.string().nullable(),
+  evidence: z.array(z.int().positive()),
+  contradicts: z.array(WikiClaimRefSchema),
+  supersedes: z.array(WikiClaimRefSchema),
+});
+export type WikiClaim = z.infer<typeof WikiClaimSchema>;
+const WikiLogLineSchema = z.object({
+  pageKey: z.string(),
+  action: z.enum(["created", "changed", "removed"]),
+  knowledgeRevision: z.int().nonnegative(),
+  changeSeq: z.int().nonnegative(),
+  added: z.int().nonnegative(),
+  removed: z.int().nonnegative(),
+  at: z.string(),
+});
+const WikiNoteSchema = z.object({
+  id: z.int().positive(),
+  text: z.string(),
+  at: z.string(),
+});
+/** `stale`: a table the pages read changed since the last build caught up (K01-R7). */
+export const WikiIndexResponseSchema = z.object({
+  stale: z.boolean(),
+  kinds: z.array(
+    z.object({
+      kind: z.string(),
+      pages: z.array(z.object({ key: z.string(), title: z.string() })),
+    }),
+  ),
+  log: z.array(WikiLogLineSchema),
+  /** Notes whose page is gone (K01-D7): shown so the user can delete them. */
+  orphanNotes: z.array(WikiNoteSchema.extend({ pageKey: z.string() })),
+});
+export const WikiPageRequestSchema = z.strictObject({ key: z.string().min(1).max(200) });
+export const WikiPageResponseSchema = z.object({
+  key: z.string(),
+  kind: z.string(),
+  title: z.string(),
+  stale: z.boolean(),
+  members: z.array(z.object({ id: z.int().positive(), name: z.string() })),
+  claims: z.array(WikiClaimSchema),
+  /** The pages this one points at (a relation claim's end, an Insight's two ends). */
+  links: z.array(z.object({ key: z.string(), title: z.string() })),
+  backlinks: z.array(
+    z.object({
+      fromKey: z.string(),
+      title: z.string(),
+      basisKind: z.enum(["relation", "insight"]),
+      basisId: z.int().positive(),
+    }),
+  ),
+  /** `syntheses` pages: the Insight the page is. */
+  insight: z
+    .object({ summary: z.string(), epistemic: z.string(), evidence: z.array(z.int().positive()) })
+    .optional(),
+  notes: z.array(WikiNoteSchema),
+  /** Oldest first. */
+  history: z.array(WikiLogLineSchema),
+  /** The LLM summary's state (K01-R14); `off` until the summary feature (K01-T2) is on. */
+  summary: z.object({ state: z.enum(["off", "none", "held", "ready"]) }),
+});
+/**
+ * One object (a contract schema converts to a JSON Schema object), the shape of each `op` checked by a
+ * refinement: `note-add` names a page key and the text, `note-remove` a note id, `hide` and `unhide` a claim.
+ */
+export const WikiEditRequestSchema = z
+  .strictObject({
+    op: z.enum(["note-add", "note-remove", "hide", "unhide"]),
+    key: z.string().min(1).max(200).optional(),
+    text: z.string().trim().min(1).max(2000).optional(),
+    id: z.int().positive().optional(),
+    claim: WikiClaimRefSchema.optional(),
+  })
+  .refine((r) =>
+    r.op === "note-add"
+      ? r.key !== undefined && r.text !== undefined && r.id === undefined && r.claim === undefined
+      : r.op === "note-remove"
+        ? r.id !== undefined && r.key === undefined && r.text === undefined && r.claim === undefined
+        : r.claim !== undefined &&
+          r.key === undefined &&
+          r.text === undefined &&
+          r.id === undefined,
+  );
+export const WikiEditResponseSchema = z.object({ status: z.literal("applied") });
+export const WikiRebuildRequestSchema = z.strictObject({});
+/** `queued`: a build was queued; `open`: one was open already and will do it. */
+export const WikiRebuildResponseSchema = z.object({ status: z.enum(["queued", "open"]) });
+
 export const routes = {
   status: { method: "GET", path: "/api/status", response: StatusResponseSchema },
   connectors: { method: "GET", path: "/api/connectors", response: ConnectorListResponseSchema },
@@ -1727,6 +1833,26 @@ export const routes = {
     path: "/api/ontology/history",
     request: OntologyRefRequestSchema,
     response: OntologyHistoryResponseSchema,
+  },
+  // K01 (R15): the Wiki. The page read is a POST with its key in the body, as the other by-id reads are.
+  wiki: { method: "GET", path: "/api/wiki", response: WikiIndexResponseSchema },
+  wikiPage: {
+    method: "POST",
+    path: "/api/wiki/page",
+    request: WikiPageRequestSchema,
+    response: WikiPageResponseSchema,
+  },
+  wikiEdit: {
+    method: "POST",
+    path: "/api/wiki/edit",
+    request: WikiEditRequestSchema,
+    response: WikiEditResponseSchema,
+  },
+  wikiRebuild: {
+    method: "POST",
+    path: "/api/wiki/rebuild",
+    request: WikiRebuildRequestSchema,
+    response: WikiRebuildResponseSchema,
   },
 } as const;
 export type RouteName = keyof typeof routes;

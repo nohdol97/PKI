@@ -509,6 +509,8 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
       ["item", "item", "canonical"],
       ["insight", "insight", "canonical"],
       ["analytical-check", "insight", "canonical"],
+      // the Wiki's pages rest on every knowledge layer: after all of them, still in the canonical transaction (K01-D3)
+      ["wiki-page", "projection", "canonical"],
       ["engine", "projection", "projection"],
       ["vectorIndex", "projection", "projection"],
     ]);
@@ -516,7 +518,10 @@ describe("the product registry's canonical kinds (I04-R1)", () => {
   });
 
   it("declares not applicable only what the closed list allows, for every registered kind", () => {
-    const canonical = derivativeRegistry.kinds.filter((k) => k.storage === "canonical");
+    // the wiki-page kind has its own contract run (wiki-kind.test.ts)
+    const canonical = derivativeRegistry.kinds.filter(
+      (k) => k.storage === "canonical" && k.kind !== "wiki-page",
+    );
     expect(Object.keys(SUBJECTS).sort()).toEqual(canonical.map((k) => k.kind).sort());
     for (const k of canonical) {
       expect(SUBJECTS[k.kind], k.kind).toEqual(NOT_APPLICABLE[k.kind] ?? BOTH);
@@ -688,7 +693,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       return registry.propagate(tx, deletionOf(a.sourceId)).removedByKind;
     });
     const firstDelete = log.indexOf("sql:DELETE");
-    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(14);
+    expect(log.filter((e) => e.startsWith("affected:"))).toHaveLength(15);
     expect(log.findLastIndex((e) => e.startsWith("affected:"))).toBeLessThan(firstDelete);
     expect(log.filter((e) => e.startsWith("invalidate:"))).toEqual(
       [
@@ -704,6 +709,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
         "item",
         "insight",
         "analytical-check",
+        "wiki-page",
         "engine",
         "vectorIndex",
       ].map((k) => `invalidate:${k}`),
@@ -725,6 +731,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
       item: 4, // the two items of a's own pair and the two of its candidate
       insight: 1,
       "analytical-check": 1,
+      "wiki-page": 0, // no page was built in this state
       engine: 1,
       vectorIndex: 1,
     });
@@ -756,6 +763,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           item: 4,
           insight: 1,
           "analytical-check": 1,
+          "wiki-page": 0,
           engine: 1,
           vectorIndex: 1,
         },
@@ -773,6 +781,7 @@ describe("propagate.two-phase over the real schema's cascades (I04-R2)", () => {
           item: 0,
           insight: 1,
           "analytical-check": 0,
+          "wiki-page": 0,
           engine: 0,
           vectorIndex: 0,
         },

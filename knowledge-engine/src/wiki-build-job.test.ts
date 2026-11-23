@@ -27,10 +27,7 @@ beforeEach(() => {
 });
 afterEach(() => db.close());
 
-const hashes = () =>
-  Object.fromEntries(listStoredWikiPages(db).map((p) => [p.key, p.contentHash]));
-const handler = createWikiBuildHandler({ db, now: () => new Date("2026-11-23T00:00:00Z") });
-
+const hashes = () => Object.fromEntries(listStoredWikiPages(db).map((p) => [p.key, p.contentHash]));
 /** Requests, claims and runs one `wiki-build` job the way the runner does: handler, then closeJob. */
 async function run(): Promise<string> {
   const requested = requestWikiBuild(db);
@@ -40,7 +37,10 @@ async function run(): Promise<string> {
     now: new Date(),
     leaseMs: 60_000,
   }) as StoredJob;
-  const result = await handler(job);
+  const result = await createWikiBuildHandler({
+    db,
+    now: () => new Date("2026-11-23T00:00:00Z"),
+  })();
   if (result.status !== "succeeded") throw new Error(result.status);
   return closeJob(db, job, { status: "succeeded", items: result.items });
 }

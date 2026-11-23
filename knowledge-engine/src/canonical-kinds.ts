@@ -55,6 +55,7 @@ import { refreshConflicts } from "./conflicts.ts";
 import { recomputeDependencyDelay, type RuleOutcome } from "./dependency-delay.ts";
 import { refreshCandidates } from "./entity-resolution.ts";
 import { projectionKinds, type PermanentlyAbsent } from "./projection-kinds.ts";
+import { WIKI_PAGE_KIND } from "./wiki-kind.ts";
 
 /** What one propagation did, by id, for V02's entries (ascending ids). */
 export interface CanonicalReport {
@@ -1160,6 +1161,7 @@ export function createProductRegistry(options: {
   return createDerivativeRegistry({
     kinds: [
       ...canonicalKinds(options.membershipListeners),
+      WIKI_PAGE_KIND,
       ...projectionKinds({
         at: now,
         ...(options.permanentlyAbsent ? { permanentlyAbsent: options.permanentlyAbsent } : {}),

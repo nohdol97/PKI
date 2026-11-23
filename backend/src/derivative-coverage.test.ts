@@ -329,6 +329,7 @@ describe("derivatives.schema-coverage", () => {
       "scope-drop",
       "source",
       "vectorIndex",
+      "wiki-page",
     ]);
     // each of the three stands or falls with its entry
     for (const table of ["local_locations", "local_index_seq", "local_file_entries"]) {

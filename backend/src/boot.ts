@@ -61,7 +61,7 @@ import {
   SYNC_PERIOD,
 } from "./connector-sync-job.ts";
 import { releaseOnPolicyChange, startHeldReevaluation } from "./held-release.ts";
-import { LOCAL_FILES_INSTANCE_ID } from "@pki/storage";
+import { LOCAL_FILES_INSTANCE_ID, requestWikiBuild } from "@pki/storage";
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner, RunnerTestBuild } from "./job-runner.ts";
 import { reapplyAtStart } from "./ledger-boot.ts";
@@ -275,6 +275,8 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   // a removal the last run left unfinished or gave up on marks its projection: rebuilt now,
   // whatever the applied change sequence says (I03-R7); registered before the server serves a deletion or the runner starts
   checkProjectionMarkers(db, { phase: "start", now: clock.now() });
+  // K01-R5: pages left behind by a stop (or by a version that had no Wiki) are built from the start
+  requestWikiBuild(db);
   // the check at start and every 30 s (started below): due periods, and the run times a clock that
   // went back left in the future (I03-R22), with or without any period stored. Made before the
   // server, whose Activity API changes periods through it (I03-R23).

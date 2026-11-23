@@ -93,7 +93,10 @@ const pages = () =>
   Object.fromEntries(
     db
       .all("SELECT key, content_hash, updated_at FROM wiki_pages ORDER BY key")
-      .map((r) => [r.key as string, { hash: r.content_hash as string, at: r.updated_at as string }]),
+      .map((r) => [
+        r.key as string,
+        { hash: r.content_hash as string, at: r.updated_at as string },
+      ]),
   );
 const keyOf = (name: string) =>
   db.all("SELECT key FROM wiki_pages WHERE title = ?", [name])[0]?.key as string;
@@ -101,7 +104,9 @@ const keyOf = (name: string) =>
 describe("wiki.flow: from an import to a page the API reads (K01-C2a)", () => {
   it("builds pages with openable evidence and a backlink; a disagreeing second document changes the same page only", async () => {
     const { call, importIn } = await backend();
-    await importIn(["v02-mail", "v02-wiki", "v02-messenger"].map((n) => read(`${n}.jsonl`)).join("\n"));
+    await importIn(
+      ["v02-mail", "v02-wiki", "v02-messenger"].map((n) => read(`${n}.jsonl`)).join("\n"),
+    );
 
     // ① a page with claims whose evidence ids open to the span in the source
     const project = keyOf("미리내 프로젝트");
@@ -110,7 +115,11 @@ describe("wiki.flow: from an import to a page the API reads (K01-C2a)", () => {
     expect(system).toMatch(/^systems\//);
     const index = await call("wiki");
     expect(index.body.stale).toBe(false);
-    expect(index.body.kinds.map((k) => k.kind).sort()).toEqual(["projects", "syntheses", "systems"]);
+    expect(index.body.kinds.map((k) => k.kind).sort()).toEqual([
+      "projects",
+      "syntheses",
+      "systems",
+    ]);
     const page = (await call("wikiPage", { key: project })).body;
     const claim = page.claims.find((c) => c.ref.kind === "fact");
     expect(claim?.evidence.length).toBeGreaterThan(0);
@@ -144,7 +153,9 @@ describe("wiki.flow: from an import to a page the API reads (K01-C2a)", () => {
 describe("wiki.flow: rebuild and the user's edits (K01-C3c)", () => {
   it("keeps every page's hash, the note and the hidden claim through a rebuild", async () => {
     const { call, run, importIn } = await backend();
-    await importIn(["v02-mail", "v02-wiki", "v02-messenger"].map((n) => read(`${n}.jsonl`)).join("\n"));
+    await importIn(
+      ["v02-mail", "v02-wiki", "v02-messenger"].map((n) => read(`${n}.jsonl`)).join("\n"),
+    );
     const key = keyOf("물결 API");
     const claim = (await call("wikiPage", { key })).body.claims[0];
     expect(claim).toBeDefined();

@@ -59,10 +59,10 @@ describe("wiki.state: stale is the input sequence ahead of the built one (K01-R5
       "UPDATE wiki_state SET built_seq = input_seq, built_knowledge_revision = 0, built_change_seq = 0",
     );
     expect(isWikiStale(db)).toBe(false);
-    db.run("INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')", [
-      insertItem(db, { type: "Project", name: "나", ...attrs }),
-      item,
-    ]);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, 'x')",
+      [insertItem(db, { type: "Project", name: "나", ...attrs }), item],
+    );
     expect(isWikiStale(db)).toBe(true);
   });
 });
@@ -76,7 +76,9 @@ describe("wiki.request: one open build, and a dead one is not asked again for th
     insertItem(db, { type: "Project", name: "가", ...attrs });
     expect(requestWikiBuild(db).status).toBe("registered");
     expect(requestWikiBuild(db).status).toBe("open");
-    expect(db.all("SELECT count(*) AS n FROM jobs WHERE kind = ?", [WIKI_BUILD_KIND])[0]?.n).toBe(1);
+    expect(db.all("SELECT count(*) AS n FROM jobs WHERE kind = ?", [WIKI_BUILD_KIND])[0]?.n).toBe(
+      1,
+    );
   });
 
   it("does not register again after a dead letter until the input changes or the user rebuilds", () => {

@@ -1511,6 +1511,100 @@ const v26: Migration = (db) => {
   `);
 };
 
+// Schema v27 (K01-T1, K01-R3..R6, R11): the Wiki projection. Additive only. Pages, their lineage and links,
+// the content-free change log, the user's edits and the one-row state (the input sequence the triggers raise
+// and the one the last build caught up to). A new migration that merges first renumbers this one (`v27` and
+// its line in `migrations`). The tables the pages read are the ones that carry a trigger below.
+const WIKI_INPUT_TABLES = [
+  "items",
+  "facts",
+  "relations",
+  "evidence",
+  "assertion_links",
+  "item_merges",
+  "insights",
+  "insight_evidence",
+];
+const v27: Migration = (db) => {
+  db.exec(`
+    CREATE TABLE wiki_pages (
+      key TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      target TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      summary TEXT,
+      summary_hash TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE wiki_page_lineage (
+      page_key TEXT NOT NULL REFERENCES wiki_pages (key) ON DELETE CASCADE,
+      source_id INTEGER NOT NULL,
+      version INTEGER NOT NULL,
+      PRIMARY KEY (page_key, source_id, version)
+    ) WITHOUT ROWID;
+    CREATE INDEX wiki_page_lineage_source ON wiki_page_lineage (source_id, version);
+    CREATE TABLE wiki_links (
+      from_key TEXT NOT NULL REFERENCES wiki_pages (key) ON DELETE CASCADE,
+      to_key TEXT NOT NULL,
+      basis_kind TEXT NOT NULL CHECK (basis_kind IN ('relation', 'insight')),
+      basis_id INTEGER NOT NULL,
+      PRIMARY KEY (from_key, to_key, basis_kind, basis_id)
+    ) WITHOUT ROWID;
+    CREATE INDEX wiki_links_to ON wiki_links (to_key);
+    CREATE TABLE wiki_log (
+      id INTEGER PRIMARY KEY,
+      page_key TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('created', 'changed', 'removed')),
+      knowledge_revision INTEGER NOT NULL,
+      change_seq INTEGER NOT NULL,
+      added INTEGER NOT NULL CHECK (added >= 0),
+      removed INTEGER NOT NULL CHECK (removed >= 0),
+      at TEXT NOT NULL
+    );
+    CREATE TABLE wiki_edits (
+      id INTEGER PRIMARY KEY,
+      op TEXT NOT NULL CHECK (op IN ('note', 'hide')),
+      page_key TEXT,
+      note TEXT,
+      fact_id INTEGER REFERENCES facts (id) ON DELETE CASCADE,
+      relation_id INTEGER REFERENCES relations (id) ON DELETE CASCADE,
+      at TEXT NOT NULL,
+      CHECK (
+        (op = 'note' AND page_key IS NOT NULL AND note IS NOT NULL
+          AND fact_id IS NULL AND relation_id IS NULL)
+        OR (op = 'hide' AND page_key IS NULL AND note IS NULL
+          AND (fact_id IS NULL) <> (relation_id IS NULL))
+      )
+    );
+    CREATE UNIQUE INDEX wiki_edits_hide_fact ON wiki_edits (fact_id) WHERE fact_id IS NOT NULL;
+    CREATE UNIQUE INDEX wiki_edits_hide_relation ON wiki_edits (relation_id)
+      WHERE relation_id IS NOT NULL;
+    CREATE TABLE wiki_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      input_seq INTEGER NOT NULL DEFAULT 0,
+      built_seq INTEGER NOT NULL DEFAULT 0,
+      built_knowledge_revision INTEGER NOT NULL DEFAULT 0,
+      built_change_seq INTEGER NOT NULL DEFAULT 0,
+      force_seq INTEGER NOT NULL DEFAULT 0,
+      forced_seq INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO wiki_state (id, input_seq)
+      VALUES (1, CASE WHEN EXISTS (SELECT 1 FROM items) OR EXISTS (SELECT 1 FROM insights)
+                      THEN 1 ELSE 0 END);
+    ${WIKI_INPUT_TABLES.flatMap((table) =>
+      ["INSERT", "UPDATE", "DELETE"].map(
+        (event) => `
+    CREATE TRIGGER wiki_input_${table}_${event.toLowerCase()} AFTER ${event} ON ${table} BEGIN
+      UPDATE wiki_state SET input_seq = input_seq + 1;
+    END;`,
+      ),
+    ).join("")}
+  `);
+};
+
 /** Index i holds the migration that brings the schema to version i + 1. */
 export const migrations: readonly Migration[] = [
   v1,
@@ -1539,6 +1633,7 @@ export const migrations: readonly Migration[] = [
   v24,
   v25,
   v26,
+  v27,
 ];
 
 export function schemaVersion(db: SqlDriver): number {
