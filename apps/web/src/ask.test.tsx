@@ -170,6 +170,8 @@ describe("ask view: a sentence's source (X02-C1a ②)", () => {
         title: "배포 안내",
         body: "가나 배포일은 12월 10일이다 다라",
       },
+      locator: null,
+      attachment: null,
     }));
     const citation = {
       versionId: 4,
@@ -180,9 +182,30 @@ describe("ask view: a sentence's source (X02-C1a ②)", () => {
       quote: "배포일은 12월 10일이다",
     };
     const source = await openCitation(api as unknown as ApiClient, citation);
-    expect(api).toHaveBeenCalledWith("exploreSource", { versionId: 4 });
+    expect(api).toHaveBeenCalledWith("exploreSource", { versionId: 4, start: 3 });
     const out = renderToStaticMarkup(<SourceView source={source} />);
     expect(out).toContain("<mark>배포일은 12월 10일이다</mark>");
+  });
+
+  it("shows the attachment name and the position the read answered for the cited start (X02B-C7 ②)", async () => {
+    const api = vi.fn(async () => ({
+      sourceVersion: { id: 4, version: 1, latestVersion: 1, title: "표", body: "가나다라" },
+      locator: { format: "pdf", page: 3 },
+      attachment: { name: "<b>계약서</b>.pdf", mediaType: "application/pdf", size: 2048 },
+    }));
+    const source = await openCitation(api as unknown as ApiClient, {
+      versionId: 4,
+      sourceId: 2,
+      version: 1,
+      start: 1,
+      end: 3,
+      quote: "나다",
+    });
+    const out = renderToStaticMarkup(<SourceView source={source} />);
+    expect(out).toContain("3쪽");
+    expect(out).toContain("&lt;b&gt;계약서");
+    expect(out).toContain("application/pdf");
+    expect(out).toContain("<mark>나다</mark>");
   });
 
   it("passes a refusal of the read on, so a hidden or deleted version shows as a failure and no source", async () => {

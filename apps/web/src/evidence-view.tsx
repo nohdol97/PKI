@@ -131,11 +131,15 @@ export function SourceView({
   );
 }
 
-/** A source version read by its number, with the span an Ask citation marks in it (X02-R5): no evidence row, no locator, no attachment. */
+/**
+ * A source version read by its number, with the span an Ask citation marks in it (X02-R5). There is no evidence
+ * row, so the locator and the attachment are the ones the read answered for the citation's start (X02B-R5), if any.
+ */
 export const citationSource = (
   sourceVersion: EvidenceSource["sourceVersion"],
   span: { quote: string; start: number; end: number },
-): EvidenceSource => ({ evidenceId: 0, ...span, locator: null, attachment: null, sourceVersion });
+  found: Pick<EvidenceSource, "locator" | "attachment"> = { locator: null, attachment: null },
+): EvidenceSource => ({ evidenceId: 0, ...span, ...found, sourceVersion });
 
 /** Another message of the source's thread, read by its version number like an Ask citation's source. */
 export async function openThreadMessage(
