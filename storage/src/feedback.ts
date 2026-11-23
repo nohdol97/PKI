@@ -196,11 +196,13 @@ export function listFeedback(
   limit: number,
   usable: (target: FeedbackTarget) => boolean = () => true,
 ): StoredFeedback[] {
-  return db
-    .all("SELECT * FROM feedback WHERE undone_at IS NULL ORDER BY id DESC")
-    .map(rowOf)
-    .filter((f) => usable(f.target))
-    .slice(0, limit);
+  const listed: StoredFeedback[] = [];
+  for (const row of db.all("SELECT * FROM feedback WHERE undone_at IS NULL ORDER BY id DESC")) {
+    const f = rowOf(row);
+    if (listed.length >= limit) break;
+    if (usable(f.target)) listed.push(f);
+  }
+  return listed;
 }
 
 export const feedbackLearned = (db: SqlDriver): boolean =>

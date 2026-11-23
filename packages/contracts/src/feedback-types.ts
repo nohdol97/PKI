@@ -1,7 +1,10 @@
 // The eight kinds of feedback (P03-R1): one table says each kind's screen name, class, the targets it
 // may be given to and its effect. Storage, the API and the screen read this table and nothing else, so a
 // combination that is not in it (a relation marked "useful") is refused everywhere alike. The weights are
-// provisional constants, not measured on use (P03-D6).
+// provisional constants, not measured on use (P03-D6). The request and response schemas of the three
+// feedback routes are here too (P03-R14) and the contract's route table names them.
+import { z } from "zod";
+
 export const FEEDBACK_KINDS = [
   "useful",
   "important",
@@ -117,3 +120,63 @@ export function feedbackClass(
 export const INSIGHT_FEEDBACK_KINDS: readonly FeedbackKind[] = FEEDBACK_KINDS.filter(
   (kind) => feedbackClass(kind, "insight") !== undefined,
 );
+
+const FeedbackKindSchema = z.enum(FEEDBACK_KINDS);
+const FeedbackTargetSchema = z.strictObject({
+  kind: z.enum(["insight", "item", "fact", "relation"]),
+  id: z.int().positive(),
+});
+
+/** One feedback to record: what it is about and which of the eight kinds (P03-R14). */
+export const FeedbackRecordRequestSchema = z.strictObject({
+  target: FeedbackTargetSchema,
+  kind: FeedbackKindSchema,
+});
+export const FeedbackUndoRequestSchema = z.strictObject({ id: z.int().positive() });
+
+const FeedbackLineSchema = z.object({
+  id: z.int().positive(),
+  kind: FeedbackKindSchema,
+  class: z.enum(["preference", "correction"]),
+  target: FeedbackTargetSchema,
+  /** The target's display name; only a target the caller may see is listed. */
+  label: z.string(),
+  at: z.string(),
+});
+export type FeedbackLine = z.infer<typeof FeedbackLineSchema>;
+
+/** What the user's entry refuses a feedback or its undo with (a code, never a text). */
+export const FEEDBACK_REFUSALS = [
+  "data-check-unmet",
+  "invalid-transition",
+  "user-override",
+  "basis-required",
+  "not-latest",
+  "nothing-to-undo",
+  "value-exists",
+  "existing-data-violation",
+] as const;
+
+/** One object (a contract schema must convert to a JSON Schema object): `applied` carries the line, `refused` a reason. */
+const FeedbackOutcomeSchema = z.object({
+  status: z.enum(["applied", "refused"]),
+  /** The line written, or the live one that was already there (`applied`, record only). */
+  feedback: FeedbackLineSchema.optional(),
+  /** The knowledge row a correction (or its undo) changed, as it is now. */
+  entry: z
+    .object({
+      kind: z.enum(["item", "fact", "relation"]),
+      id: z.int().positive(),
+      status: z.enum(["candidate", "verified", "disputed", "superseded", "rejected"]),
+      epistemic: z.enum(["explicit", "user-approved", "inferred", "hypothesis"]),
+    })
+    .optional(),
+  reason: z.enum(FEEDBACK_REFUSALS).optional(),
+  /** The data conditions an approval left unmet, with the refusal `data-check-unmet` only. */
+  unmet: z.array(z.string()).min(1).optional(),
+});
+export const FeedbackRecordResponseSchema = FeedbackOutcomeSchema;
+export const FeedbackUndoResponseSchema = FeedbackOutcomeSchema;
+
+/** The live lines, newest first, 100 at most. */
+export const FeedbackListResponseSchema = z.object({ feedback: z.array(FeedbackLineSchema) });

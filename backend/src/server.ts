@@ -113,6 +113,7 @@ import { jobsApi, type JobsPort } from "./jobs-view.ts";
 import type { LocalLocations } from "./local-locations.ts";
 import { createAnalyticalApi } from "./analytical-api.ts";
 import { createReadGate, defaultReadRegistry } from "./read-gate.ts";
+import { createFeedbackApi } from "./feedback-api.ts";
 import { createLintReads } from "./lint-read.ts";
 import { createWikiReads } from "./wiki-read.ts";
 import { matchRoute } from "./routing.ts";
@@ -637,6 +638,13 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         at,
       ),
   );
+  /** P03: feedback on an Insight or a knowledge row; a correction is followed by the same re-judging as any user action. */
+  const feedback = createFeedbackApi(
+    options.db,
+    gate,
+    () => options.decisions,
+    (ref, at) => judgeAgain(itemsOfEntry(options.db, ref), [ref], at),
+  );
   const secrets = options.secrets ?? NO_SECRET_STORE;
   const settings = async () => {
     const baseUrl = readSetting(options.db, OPENAI_BASE_URL_SETTING) ?? null;
@@ -1037,7 +1045,7 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     prepareEmbedding: (input) => prepareEmbedding(options.embedder, input.source, preparations),
     // V02-R14: only active Insights, and a hidden one's evidence list is not-found. A source
     // opens by evidence id while its rows exist (until T08's purge deletes them).
-    insights: async () => ({ insights: gate.insights() }),
+    insights: async () => ({ insights: feedback.visibleInsights(gate.insights()) }),
     insightEvidence: async ({ insightId }) =>
       gate.insightEvidence(insightId) ?? { error: "not-found" },
     evidenceSource: async ({ evidenceId }) =>
@@ -1170,6 +1178,10 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     lint: async () => lint.list(),
     lintDecide: async (request) => lint.decide(request, serverTime()),
     lintReport: async (request) => lint.report(request, serverTime()),
+    // P03-R14: feedback; a hidden or absent target answers `not-found`
+    feedbackList: async () => feedback.list(),
+    feedbackRecord: async (request) => feedback.record(request, serverTime()),
+    feedbackUndo: async (request) => feedback.undo(request, serverTime()),
     wikiRebuild: async () => {
       const requested = requestWikiRebuild(options.db);
       if (requested.status === "registered") options.onRunConditionsChanged?.();
