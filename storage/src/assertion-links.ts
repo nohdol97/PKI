@@ -126,7 +126,7 @@ export function effectiveUntil(
  * a kind with no `verified` fact-kind definition of cardinality `one`. The conflict rule's own input.
  */
 export function slotRivals(db: SqlDriver, fact: number, within: ConflictReach): number[] {
-  const own = db.all("SELECT item_id, kind, context FROM facts WHERE id = ?", [fact])[0];
+  const own = db.all("SELECT item_id, kind, value, context FROM facts WHERE id = ?", [fact])[0];
   if (!own) return [];
   const kind = own.kind as string;
   const definition = listOntologyElements(db).find(
@@ -140,8 +140,8 @@ export function slotRivals(db: SqlDriver, fact: number, within: ConflictReach): 
   return db
     .all(
       `SELECT id, status FROM facts
-       WHERE item_id IN ${IDS} AND kind = ? AND context IS ? AND id <> ? ORDER BY id`,
-      [JSON.stringify(items), kind, own.context as string | null, fact],
+       WHERE item_id IN ${IDS} AND kind = ? AND context IS ? AND value <> ? ORDER BY id`,
+      [JSON.stringify(items), kind, own.context as string | null, own.value as string],
     )
     .filter((r) =>
       isValidRow(db, { kind: "fact", id: r.id as number }, r.status as KnowledgeStatus),
