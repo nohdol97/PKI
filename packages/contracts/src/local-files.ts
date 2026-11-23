@@ -277,11 +277,16 @@ export const LocalRevokeRequestSchema = z.strictObject({
 });
 export type LocalRevokeRequest = z.infer<typeof LocalRevokeRequestSchema>;
 
-/** Done in one transaction, or begun: `remaining` sources are still to go (the location lists as `revoking`). */
-export const LocalRevokeResponseSchema = z.union([
-  z.strictObject({ state: z.literal("revoked"), revoked: z.int().nonnegative() }),
-  z.strictObject({ state: z.literal("revoking"), remaining: z.int().positive() }),
-]);
+/**
+ * Done in one transaction (`revoked`, with how many sources went), or begun (`revoking`, with how many
+ * are still to go: the location lists as `revoking`). One object, not a union: the route table's
+ * response schemas convert to a JSON Schema object (a test).
+ */
+export const LocalRevokeResponseSchema = z.strictObject({
+  state: z.enum(["revoked", "revoking"]),
+  revoked: z.int().nonnegative().optional(),
+  remaining: z.int().positive().optional(),
+});
 export type LocalRevokeResponse = z.infer<typeof LocalRevokeResponseSchema>;
 
 /** One page of the skipped list of a location (I02B-R36). */

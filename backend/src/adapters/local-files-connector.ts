@@ -804,6 +804,8 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       if (!pass || pass.id !== passId || cursor === null) {
         pass = await runPass(p, cursor === null, signal);
         open = pass;
+        // a rescan reads every entry: none stays hidden because this pass noted its size or time silently (#179 FU6)
+        if (cursor === null) silent.clear();
       }
       const changes: Change[] = [];
       const started = p.now();

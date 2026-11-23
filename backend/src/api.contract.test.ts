@@ -12,11 +12,19 @@ import {
   type RouteName,
 } from "@pki/contracts";
 import { OPENAI_BASE_URL_SETTING, writeDefaultProvider } from "@pki/providers";
-import { planWikiBuild } from "@pki/knowledge-engine";
-import { commitDerived, migrate, userDecisions } from "@pki/storage";
+import { defaultEntries, planWikiBuild } from "@pki/knowledge-engine";
+import {
+  closeLocation,
+  commitDerived,
+  insertLocation,
+  migrate,
+  newLocalId,
+  userDecisions,
+} from "@pki/storage";
+import { statSync } from "node:fs";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -93,6 +101,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
   let projections: ReturnType<typeof productProjections>;
   let runner: JobRunner;
   let localRoot: string;
+  let movedRoot: string;
 
   // A body for every route that takes one; the schema test below fails for a route missing here.
   const requests: Partial<Record<RouteName, unknown>> = {
@@ -129,6 +138,15 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     // the folder is made in beforeAll
     approveLocalLocation: { type: "folder", path: "" },
     setLocalFilesSettings: { settleMs: 3_000 },
+    // the location made in beforeAll: unavailable, so the relink runs first; the revoke runs last
+    relinkLocalLocation: { locationId: "", path: "" },
+    pauseLocalLocation: { locationId: "" },
+    resumeLocalLocation: { locationId: "" },
+    rescanLocalLocation: { locationId: "" },
+    confirmLocalDeletions: { locationId: "", count: 0 },
+    localSkipped: { locationId: "" },
+    reimportLocalFile: { locationId: "", relativePath: "held.pdf" },
+    revokeLocalLocation: { locationId: "", count: 0 },
     setDefaultProvider: { providerId: "claude-code" },
     // The pack does not exist: the preparation starts, then fails without touching disk.
     prepareEmbedding: { source: { kind: "local-pack", path: "/synthetic/missing-pack" } },
@@ -215,10 +233,49 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     const adapters = productAdapters("/synthetic/data");
     localRoot = realpathSync(mkdtempSync(join(tmpdir(), "pki-api-contract-")));
     requests.approveLocalLocation = { type: "folder", path: localRoot };
+    // a location whose folder moved: the lifecycle routes run on it, from its relink to its revoke
+    const relinkRoot = join(localRoot, "..", `${localRoot.split("/").at(-1)}-moved`);
+    mkdirSync(relinkRoot);
+    movedRoot = relinkRoot;
+    const lifecycle = newLocalId();
+    const moved = statSync(relinkRoot);
+    insertLocation(db, {
+      id: lifecycle,
+      type: "folder",
+      displayPath: relinkRoot,
+      realPath: relinkRoot,
+      rootDev: String(moved.dev),
+      rootIno: String(moved.ino),
+      createdAt: "2026-11-23T00:00:00.000Z",
+    });
+    db.run(
+      `INSERT INTO local_file_entries (external_id, location_id, identity_hash, relative_path, path_hash,
+         revision, seq, state, skip_reason, skipped_at)
+       VALUES (?, ?, ?, 'held.pdf', 'h', 1, 1, 'skipped', 'corrupt', '2026-11-23T00:00:00.000Z')`,
+      [newLocalId(), lifecycle, "i".repeat(64)],
+    );
+    db.run("UPDATE local_index_seq SET value = 1");
+    closeLocation(db, lifecycle, "unavailable", "root-missing");
+    for (const name of [
+      "relinkLocalLocation",
+      "pauseLocalLocation",
+      "resumeLocalLocation",
+      "rescanLocalLocation",
+      "confirmLocalDeletions",
+      "localSkipped",
+      "reimportLocalFile",
+      "revokeLocalLocation",
+    ] as const) {
+      (requests[name] as { locationId: string }).locationId = lifecycle;
+    }
+    (requests.relinkLocalLocation as { path: string }).path = relinkRoot;
     const localFiles = productLocalFiles(db, {
       dataDir: "/synthetic/data",
       clock: systemClock,
       onApproved: () => undefined,
+      entries: defaultEntries,
+      cancelSync: () => undefined,
+      rescan: () => undefined,
     });
     const bound = engine();
     projections = productProjections(db, { engine: bound, ...adapters });
@@ -281,6 +338,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     await projections.drain();
     db.close();
     rmSync(localRoot, { recursive: true, force: true });
+    rmSync(movedRoot, { recursive: true, force: true });
   });
 
   describe("API responses match @pki/contracts", () => {

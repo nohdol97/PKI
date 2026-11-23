@@ -9,6 +9,7 @@ import type {
   LocalConfirmDeletionsRequest,
   LocalLocationIdRequest,
   LocalReimportRequest,
+  LocalRevokeRequest,
   LocalSkippedRequest,
   LocalSkippedResponse,
   LocalRelinkRequest,
@@ -19,6 +20,7 @@ import type {
   LocalPassReport,
 } from "@pki/contracts";
 import { errorClass, log, type BuildKind } from "@pki/providers";
+import type { LocalRevoke, RevokeAnswer } from "./local-revoke.ts";
 import {
   closeLocation,
   confirmDeletions,
@@ -196,6 +198,10 @@ export interface LocalLocations {
   skipped(request: LocalSkippedRequest): LocalSkippedResponse | { error: "not-found" };
   /** A skipped or user-deleted file is read again; a user deletion needs its tombstone lifted (I02B-R33). */
   reimport(request: LocalReimportRequest): ReimportAnswer;
+  /** Every location is walked from the start at the next sync (I02B-R13); instance-wide, whichever location is named. */
+  rescan(request: LocalLocationIdRequest): { outcome: "queued" } | { error: "not-found" };
+  /** The approval is withdrawn: every source of the location is deleted as the user's deletion (I02B-R10, R49). */
+  revoke(request: LocalRevokeRequest): Promise<RevokeAnswer | { error: "connector-unavailable" }>;
   /** The held deletions are confirmed by the count the user saw (I02B-R8). */
   confirmDeletions(request: LocalConfirmDeletionsRequest): ActionAnswer;
   list(): LocalLocationList;
@@ -218,6 +224,10 @@ export interface LocalLocationsOptions {
   normalizerUnavailable: () => boolean;
   /** What the last finished pass learned (the counts the list shows that the index does not hold). */
   lastReport?: () => LocalPassReport | undefined;
+  /** The revocation (local-revoke.ts); without it a revoke answers connector-unavailable. */
+  revoker?: LocalRevoke;
+  /** Starts a full sync of the `local-files` instance; the composition point binds the manager. */
+  rescan?: () => void;
   now?: () => number;
   fs?: BoundaryFs;
 }
@@ -370,6 +380,14 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
         undefined,
         () => confirmDeletions(db, locationId, count).ok || "count-mismatch",
       ),
+    rescan({ locationId }) {
+      if (!listLocations(db).some((l) => l.id === locationId)) return { error: "not-found" };
+      options.rescan?.();
+      return { outcome: "queued" };
+    },
+    async revoke(request) {
+      return options.revoker ? options.revoker.revoke(request) : { error: "connector-unavailable" };
+    },
     skipped({ locationId, offset = 0, limit = 100 }) {
       if (!listLocations(db).some((l) => l.id === locationId)) return { error: "not-found" };
       // a user deletion keeps no path in the index (R33): the last pass's report is where it is named

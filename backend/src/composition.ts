@@ -144,6 +144,7 @@ import {
   type ApprovalTickets,
   type LocalLocations,
 } from "./local-locations.ts";
+import { createLocalRevoke, type LocalRevoke } from "./local-revoke.ts";
 import { createSiteConnector } from "./adapters/site-connectors.ts";
 import { SITE_CONNECTOR_KINDS } from "./public-kinds.ts";
 import type { ServerOptions } from "./server.ts";
@@ -734,6 +735,8 @@ export interface LocalFilesWiring {
   ports: LocalFilesPorts;
   locations: LocalLocations;
   tickets: ApprovalTickets;
+  /** The revocation; the start continues a `revoking` location through it (I02B-R49). */
+  revoker: LocalRevoke;
   /** Ends the normalizer host. */
   close(): Promise<void>;
 }
@@ -756,6 +759,12 @@ export function productLocalFiles(
     normalizer?: LocalNormalizerPort;
     /** Browser development only (dev.ts): approve a typed path as a test build does (I02B-R37). */
     typedPaths?: boolean;
+    /** The tombstone entry a revocation deletes sources through (I02B-R10): the product registry's. */
+    entries: Pick<CanonicalEntries, "applyTombstone">;
+    /** Asks the running `local-files` sync to stop, so a revocation gets the instance lock (I02B-R49). */
+    cancelSync: () => void;
+    /** A full sync of the `local-files` instance (I02B-R13). */
+    rescan: () => void;
   },
 ): LocalFilesWiring {
   const index = createLocalFileIndex(db);
@@ -772,6 +781,12 @@ export function productLocalFiles(
     BUILD_KIND === "test" && options.normalizer ? options.normalizer : isolated;
   let last: LocalPassReport | undefined;
   const tickets = createApprovalTickets();
+  const revoker = createLocalRevoke({
+    db,
+    entries: options.entries,
+    limits: () => readLocalFilesSettings(db).revoke,
+    cancelSync: options.cancelSync,
+  });
   return {
     ports: {
       index,
@@ -796,9 +811,12 @@ export function productLocalFiles(
       onApproved: options.onApproved,
       normalizerUnavailable: () => normalizer.unavailable(),
       lastReport: () => last,
+      revoker,
+      rescan: options.rescan,
       now: () => options.clock.now(),
     }),
     tickets,
+    revoker,
     close: () => isolated.close(),
   };
 }

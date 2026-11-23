@@ -62,6 +62,7 @@ import {
   ANALYTICAL_MAX_CELLS_SETTING,
   databaseEncryption,
   canonicalTransaction,
+  LedgerDegradedError,
   LedgerLineUnwritableError,
   findSourceId,
   isDate,
@@ -242,6 +243,10 @@ export const errorStatus: Partial<Record<ErrorResponse["error"], number>> = {
   // I02B-R5, R40: a refused approval names its code in the body; a limit that would turn entries into deletes
   "approval-rejected": 422,
   "limit-would-delete": 409,
+  // I02B-R36, R49: a refusal that changes nothing
+  "count-mismatch": 409,
+  "not-lifted": 409,
+  "ledger-degraded": 409,
 };
 
 /** Provisional: below the Broker's 120 s ceiling, long enough for a CLI to start. */
@@ -955,6 +960,22 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
       options.localLocations?.list() ?? { error: "connector-unavailable" },
     approveLocalLocation: async (input) =>
       options.localLocations?.approve(input) ?? { error: "connector-unavailable" },
+    pauseLocalLocation: async (input) =>
+      options.localLocations?.pause(input) ?? { error: "connector-unavailable" },
+    resumeLocalLocation: async (input) =>
+      options.localLocations?.resume(input) ?? { error: "connector-unavailable" },
+    relinkLocalLocation: async (input) =>
+      options.localLocations?.relink(input) ?? { error: "connector-unavailable" },
+    rescanLocalLocation: async (input) =>
+      options.localLocations?.rescan(input) ?? { error: "connector-unavailable" },
+    confirmLocalDeletions: async (input) =>
+      options.localLocations?.confirmDeletions(input) ?? { error: "connector-unavailable" },
+    revokeLocalLocation: async (input) =>
+      options.localLocations?.revoke(input) ?? { error: "connector-unavailable" },
+    localSkipped: async (input) =>
+      options.localLocations?.skipped(input) ?? { error: "connector-unavailable" },
+    reimportLocalFile: async (input) =>
+      options.localLocations?.reimport(input) ?? { error: "connector-unavailable" },
     localFilesSettings: async () =>
       options.localLocations?.settings() ?? { error: "connector-unavailable" },
     setLocalFilesSettings: async (patch) =>
@@ -1181,6 +1202,7 @@ async function handle(
   } catch (error) {
     // fail closed, with its own answer: no tombstone without a readable ledger line
     if (error instanceof LedgerLineUnwritableError) return reject(res, 409, "ledger-unwritable");
+    if (error instanceof LedgerDegradedError) return reject(res, 409, "ledger-degraded");
     throw error;
   }
   if (typeof result === "object" && result !== null && "error" in result) {

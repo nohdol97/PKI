@@ -239,6 +239,21 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     dataDir: options.dataDir,
     clock,
     ...options.localFiles,
+    entries,
+    // a revocation needs the instance lock: the running sync is asked to stop (it continues from its cursor)
+    cancelSync: () => {
+      for (const row of db.all(
+        "SELECT id FROM jobs WHERE kind = ? AND target = ? AND status = 'running'",
+        [CONNECTOR_SYNC_KIND, LOCAL_FILES_INSTANCE_ID],
+      )) {
+        actions.cancel(row.id as number);
+      }
+    },
+    // every location is walked from the start by the next sync (I02B-R13)
+    rescan: () =>
+      void late.manager
+        ?.sync(LOCAL_FILES_INSTANCE_ID, { rescan: true })
+        .catch((error) => log("local-rescan-failed", { error: errorClass(error) })),
     onApproved: () => {
       const scheduler = late.scheduler;
       if (!scheduler) return;
@@ -264,6 +279,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
       ? { testBuild: options.testBuild.jobs }
       : {}),
   });
+  const actions = createJobActions({ db, runner, clock });
   const connectors = await createConnectorManager(
     db,
     instances,
@@ -325,7 +341,7 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     onRunConditionsChanged: () => void runner.wake(),
     jobs: {
       scheduler,
-      actions: createJobActions({ db, runner, clock }),
+      actions,
       budgetUsage: calls.broker.budgetUsage,
       projectionNames: Object.keys(projectionPorts),
       wake: () => void runner.wake(),
