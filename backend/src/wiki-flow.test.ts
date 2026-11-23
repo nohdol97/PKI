@@ -102,7 +102,7 @@ const keyOf = (name: string) =>
   db.all("SELECT key FROM wiki_pages WHERE title = ?", [name])[0]?.key as string;
 
 describe("wiki.flow: from an import to a page the API reads (K01-C2a)", () => {
-  it("builds pages with openable evidence and a backlink; a disagreeing second document changes the same page only", async () => {
+  it("builds pages with openable evidence and a backlink; a disagreeing second document changes the same page and adds only its Insight page", async () => {
     const { call, importIn } = await backend();
     await importIn(
       ["v02-mail", "v02-wiki", "v02-messenger"].map((n) => read(`${n}.jsonl`)).join("\n"),
@@ -136,7 +136,9 @@ describe("wiki.flow: from an import to a page the API reads (K01-C2a)", () => {
     const before = pages();
     await importIn(read("v02-date-variant.jsonl"));
     const after = pages();
-    expect(Object.keys(after)).toEqual(Object.keys(before));
+    // P01: the changed completion date also makes an important-change Insight, a new `syntheses/` page
+    expect(Object.keys(after).filter((k) => !(k in before))).toEqual(["syntheses/2"]);
+    expect(Object.keys(before).every((k) => k in after)).toBe(true);
     expect(after[system]?.hash).not.toBe(before[system]?.hash);
     expect(after[project]).toEqual(before[project]);
     const changed = (await call("wikiPage", { key: system })).body;

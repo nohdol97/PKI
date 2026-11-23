@@ -1650,6 +1650,7 @@ export const migrations: readonly Migration[] = [
   v25,
   v26,
   v27,
+  v28,
 ];
 
 export function schemaVersion(db: SqlDriver): number {

@@ -62,7 +62,6 @@ import {
   createProductRegistry,
   createProjections,
   createWikiBuildHandler,
-  dependencyDelayReceiver,
   insightsReceiver,
   derivativeRegistry,
   ENGINE_KIND,
