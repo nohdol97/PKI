@@ -70,3 +70,13 @@ describe("buildState (#220)", () => {
     expect(buildState({ stale: false, buildDead: false }, { stale: false })).toBe("idle");
   });
 });
+
+// UI01-C5 (R5, R6): an opened page is one role-less div.pane-detail around the page's section.
+describe("PageView's detail column", () => {
+  it("sits in one div.pane-detail that has no role or name", () => {
+    const html = renderToStaticMarkup(<PageView {...props} />);
+    expect(html.match(/pane-detail/g)).toHaveLength(1);
+    expect(html).toMatch(/^<div class="pane-detail"><section aria-labelledby="wiki-page-heading">/);
+    expect(html).toMatch(/<\/section><\/div>$/);
+  });
+});

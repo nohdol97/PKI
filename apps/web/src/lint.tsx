@@ -31,6 +31,14 @@ type Finding = Lint["findings"][number];
 const RULE_ORDER = ["synonym", "stale", "overdue-work", "missing-link"] as const;
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const gone = (error: unknown) => error instanceof ApiError && error.status === 404;
+/** The dot colour of a finding's status; the word beside it says the same (UI01-R7). */
+const STATE_CLASS: Readonly<Record<string, string>> = {
+  open: "state-attn",
+  oscillating: "state-attn",
+  accepted: "state-ok",
+  resolved: "state-ok",
+  dismissed: "state-none",
+};
 const heading = (f: Finding) => f.targets.map((t) => t.label).join(" ↔ ");
 
 export function Lint({ api }: { api: ApiClient }) {
@@ -94,10 +102,13 @@ export function Lint({ api }: { api: ApiClient }) {
               {counts && <p>{countsText(counts)}</p>}
               <p>{ruleHint(rule)}</p>
               {mine.length > 0 && (
-                <ul aria-label={ruleText(rule)}>
+                <ul className="cards" aria-label={ruleText(rule)}>
                   {mine.map((f) => (
                     <li key={f.id}>
-                      <bdi>{heading(f)}</bdi> <strong>{statusText(f.status)}</strong>
+                      <bdi>{heading(f)}</bdi>{" "}
+                      <strong className={`state ${STATE_CLASS[f.status] ?? "state-none"}`}>
+                        {statusText(f.status)}
+                      </strong>
                       {f.status === "oscillating" && <> {LINT_OSCILLATING}</>}{" "}
                       {f.opinion && <span>{opinionText(f.opinion)} </span>}
                       {f.evidence.length === 0 ? (
@@ -171,12 +182,14 @@ export function Lint({ api }: { api: ApiClient }) {
           );
         })}
       {source && (
-        <section aria-labelledby="lint-source-heading">
-          <h3 id="lint-source-heading" tabIndex={-1} ref={sourceHeadingRef}>
-            원본 보기
-          </h3>
-          <SourceView source={source} />
-        </section>
+        <div className="pane-detail">
+          <section aria-labelledby="lint-source-heading">
+            <h3 id="lint-source-heading" tabIndex={-1} ref={sourceHeadingRef}>
+              원본 보기
+            </h3>
+            <SourceView source={source} />
+          </section>
+        </div>
       )}
     </>
   );

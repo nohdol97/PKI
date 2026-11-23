@@ -9,6 +9,7 @@ import { ApiError, type ApiClient } from "./api.ts";
 import {
   citationSource,
   EvidenceEntry,
+  EvidencePanel,
   evidenceReducer,
   InsightSummary,
   openThreadMessage,
@@ -465,5 +466,35 @@ describe("same-thread list (I02B-C56)", () => {
     const opened = await openThreadMessage(api as unknown as ApiClient, 5);
     expect(api).toHaveBeenCalledWith("exploreSource", { versionId: 5 });
     expect(opened.sourceVersion.id).toBe(5);
+  });
+});
+
+// UI01-C5 (R5, R6): what a screen opens (the evidence, the source view) sits in one role-less
+// div.pane-detail, which the stylesheet places in the right-hand column; nothing open, no wrapper.
+describe("EvidencePanel's detail column", () => {
+  const evidence = {
+    id: 7,
+    target: "fact" as const,
+    targetId: 7,
+    status: "candidate" as const,
+    quote: "인용 7",
+    sourceTitle: "제목 7",
+    sourceVersionId: 3,
+    version: 1,
+    current: true,
+    locator: null,
+  };
+  const render = (state: EvidenceState) =>
+    renderToStaticMarkup(<EvidencePanel state={state} onOpenSource={() => undefined} />);
+
+  it("wraps what is open in one div.pane-detail with no role or name", () => {
+    const html = render({ opened: { insightId: 1, evidence: [evidence] }, opens: 1 });
+    expect(html.match(/pane-detail/g)).toHaveLength(1);
+    expect(html).toMatch(/^<div class="pane-detail"><section aria-labelledby="evidence-heading">/);
+    expect(html).toMatch(/<\/section><\/div>$/);
+  });
+
+  it("draws no pane-detail when nothing is open", () => {
+    expect(render({ opens: 0 })).not.toContain("pane-detail");
   });
 });

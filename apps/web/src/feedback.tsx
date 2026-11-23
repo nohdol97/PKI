@@ -55,7 +55,7 @@ export function InsightFeedback({
   const { notice, press } = useRecord(api, { kind: "insight", id: insight.id }, onChange);
   return (
     <>
-      <div role="group" aria-label={`피드백: ${insight.summary}`}>
+      <div className="actions" role="group" aria-label={`피드백: ${insight.summary}`}>
         {INSIGHT_FEEDBACK_KINDS.map((kind) => (
           <button
             key={kind}
@@ -88,7 +88,7 @@ export function RowFeedback({
   const { notice, press } = useRecord(api, target, onChange);
   return (
     <>
-      <div role="group" aria-label={`교정: ${label}`}>
+      <div className="actions" role="group" aria-label={`교정: ${label}`}>
         {rowFeedbackKinds(target.kind).map((kind) => (
           <button
             key={kind}
@@ -140,7 +140,7 @@ export function RecentFeedback({
       {notice && <p role="alert">{notice}</p>}
       {lines?.length === 0 && <p>{FEEDBACK_EMPTY}</p>}
       {lines && lines.length > 0 && (
-        <ul aria-label="최근 피드백 목록">
+        <ul className="cards" aria-label="최근 피드백 목록">
           {lines.map((line) => (
             <li key={line.id}>
               <strong>{feedbackLabel(line.kind)}</strong> <bdi>{line.label}</bdi>{" "}

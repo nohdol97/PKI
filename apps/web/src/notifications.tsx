@@ -88,7 +88,7 @@ export function Notifications({ api, refresh }: { api: ApiClient; refresh: strin
     <>
       <p>{NOTIFICATIONS_NOT_FACT}</p>
       {failure && <p role="alert">불러오지 못했습니다: {failure}</p>}
-      <div role="group" aria-label="알림 보기">
+      <div className="tabs" role="group" aria-label="알림 보기">
         {(Object.keys(TABS) as Tab[]).map((id) => (
           <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>
             {TABS[id]}
@@ -99,7 +99,7 @@ export function Notifications({ api, refresh }: { api: ApiClient; refresh: strin
         <>
           {feed.length === 0 && <p>{FEED_EMPTY}</p>}
           {feed.length > 0 && (
-            <ul aria-label="알림 피드">
+            <ul className="cards" aria-label="알림 피드">
               {feed.map((line) => (
                 <li key={line.id}>
                   <Card line={line} onAct={act} onOpenEvidence={openEvidence} />
@@ -204,7 +204,7 @@ function Digests({
   if (rows.length === 0) return <p>{DIGEST_EMPTY}</p>;
   return (
     <>
-      <ul aria-label="요약 목록">
+      <ul className="cards" aria-label="요약 목록">
         {rows.map((row) => (
           <li key={row.id}>
             <strong>{DIGEST_KIND[row.kind]}</strong> {dateText(row.windowStart)} ~{" "}
@@ -288,7 +288,7 @@ function Timeline({
       {[...days].map(([day, dayLines]) => (
         <section key={day}>
           <h3>{day}</h3>
-          <ul aria-label={`알림 타임라인 ${day}`}>
+          <ul className="cards" aria-label={`알림 타임라인 ${day}`}>
             {dayLines.map((line) => (
               <li key={line.id}>
                 <p>

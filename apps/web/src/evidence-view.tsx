@@ -329,7 +329,7 @@ export function EvidencePanel({
   const { opened, source } = state;
   const evidenceHeading = useFocusOn(state.opens, opened !== undefined && source === undefined);
   const sourceHeading = useFocusOn(state.opens, source !== undefined);
-  return (
+  const panel = (
     <>
       {opened && (
         <section aria-labelledby="evidence-heading">
@@ -369,6 +369,8 @@ export function EvidencePanel({
       )}
     </>
   );
+  // what is open takes the detail column (UI01-R5); nothing open draws no wrapper
+  return opened || source ? <div className="pane-detail">{panel}</div> : null;
 }
 
 export function Insights({
@@ -458,7 +460,7 @@ export function Insights({
       {loadError && <p role="alert">불러오지 못했습니다: {loadError}</p>}
       {insights?.length === 0 && <p>보여 줄 Insight가 없습니다.</p>}
       {insights && insights.length > 0 && (
-        <ul aria-label="Insight 목록">
+        <ul className="cards" aria-label="Insight 목록">
           {insights.map((insight) => (
             <li key={insight.id}>
               <InsightSummary insight={insight} />
