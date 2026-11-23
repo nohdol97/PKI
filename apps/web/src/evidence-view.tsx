@@ -22,6 +22,7 @@ import {
   INSIGHT_NOT_CONFIRMED,
   LOCAL_NOT_FOUND_TEXT,
   LOCAL_PAUSED_TEXT,
+  attachmentDetailText,
   locatorText,
   rankingText,
   REASONING_BY,
@@ -92,6 +93,11 @@ export function SourceView({
         <bdi>{v.title}</bdi>
       </h4>
       <p>{evidenceVersionText(v)}</p>
+      {source.attachment && (
+        <p>
+          첨부: <bdi>{source.attachment.name}</bdi> ({attachmentDetailText(source.attachment)})
+        </p>
+      )}
       {source.locator && <p>위치: {locatorText(source.locator)}</p>}
       {local?.local && (
         <>

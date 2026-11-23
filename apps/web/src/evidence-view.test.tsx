@@ -71,6 +71,7 @@ describe("SourceView", () => {
             start,
             end,
             locator: null,
+            attachment: null,
             sourceVersion: {
               id: 1,
               version: 1,
@@ -102,6 +103,7 @@ describe("SourceView", () => {
           start,
           end: start + Array.from(quote).length,
           locator: null,
+          attachment: null,
           sourceVersion: { id: 3, version: 2, latestVersion: 2, title: "제목", body },
         }}
       />,
@@ -120,6 +122,7 @@ describe("SourceView", () => {
           start: 5,
           end: 99,
           locator: null,
+          attachment: null,
           sourceVersion: { id: 3, version: 1, latestVersion: 1, title: "제목", body: "짧은 본문" },
         }}
       />,
@@ -167,6 +170,7 @@ const source = (version: number, latestVersion: number) => ({
   start: 0,
   end: 1,
   locator: null,
+  attachment: null,
   sourceVersion: { id: 3, version, latestVersion, title: "\u202e제목", body: "가나" },
 });
 
@@ -331,6 +335,7 @@ describe("SourceView of a local file", () => {
     start: 3,
     end: 5,
     locator: { format: "pdf", page: 3 } as const,
+    attachment: null,
     sourceVersion: { id: 9, version: 1, latestVersion: 1, title: "제목", body: "합성 등대 문장" },
   };
   const here = (over: object) => ({
