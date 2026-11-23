@@ -10,6 +10,7 @@ import { dataChecksUnmet, needsDataChecks, type DataCheckUnmet } from "./analyti
 import { listCheckLines, waitingRelations, type CheckName } from "./analytical-check-lines.ts";
 import { entityGroups } from "./entity-groups.ts";
 import { listEvidence, type EpistemicType, type KnowledgeStatus } from "./knowledge.ts";
+import { memoReads } from "./read-memo.ts";
 import { isUserDecided } from "./semantic-lifecycle.ts";
 import {
   listSemanticFacts,
@@ -158,7 +159,7 @@ class Reader {
   readonly db: SqlDriver;
   readonly vis: Visibility;
   constructor(db: SqlDriver, vis: Visibility) {
-    this.db = db;
+    this.db = memoReads(db);
     this.vis = vis;
   }
 
