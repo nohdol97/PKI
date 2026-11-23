@@ -73,11 +73,18 @@ export interface AutomatedLifecycle {
    * Policy (S01-R9, R5 restore): a row the policy verified goes back to the state and epistemic type it
    * had before, because `lost` no longer holds. A row the policy did not verify is `unchanged`.
    */
-  autoVerifyLost(tx: SqlDriver, ref: EntryRef, lost: AutoVerifyLoss, at?: string): Outcome;
+  autoVerifyLost(
+    tx: SqlDriver,
+    ref: EntryRef,
+    lost: AutoVerifyLoss,
+    at?: string,
+    basis?: Basis,
+  ): Outcome;
 }
 
 /** The conditions of S01-R9 a promoted row can lose, as the reason code of the restore line. */
-export type AutoVerifyLoss = "independent-sources" | "conflicting-value";
+export type AutoVerifyLoss =
+  "independent-sources" | "conflicting-value" | "data-check-failed" | "data-basis-lost";
 
 const TABLES = {
   item: { table: "items", history: "item_history", fk: "item_id" },
@@ -519,7 +526,7 @@ export const automatedLifecycle: AutomatedLifecycle = {
 
   autoVerify: (tx, ref, at) => applyTransition(tx, ref, "policy", "verified", { at }),
 
-  autoVerifyLost(tx, ref, lost, at) {
+  autoVerifyLost(tx, ref, lost, at, basis) {
     if (!holdsEvidence(ref)) return { status: "refused", reason: "invalid-transition" };
     const row = readRow(tx, ref);
     if (!row) return { status: "refused", reason: "not-found" };
@@ -537,6 +544,7 @@ export const automatedLifecycle: AutomatedLifecycle = {
       actor: "policy",
       action: "auto-verify-reverted",
       reason: lost,
+      basis: basis ?? null,
       revertsSeq: promoted.seq, // the line that verified it (R6: a restore names what it reverts)
       at,
     });

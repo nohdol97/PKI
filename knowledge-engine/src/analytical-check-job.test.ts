@@ -524,10 +524,11 @@ describe("gate.lost / gate.auto-verify (S03-R15, R16, G-C3, G-C4, G-C5): the job
   it("G-C4: a calculation the policy promoted goes back to candidate with data-check-failed when its check fails", async () => {
     const w = world();
     await run(w.a.sourceId);
+    const next = arrive(w.salesId, FEWER);
+    // promoted after the new version arrived: the job this queues is fenced to that version
     expect(
       automatedLifecycle.autoVerify(db, { kind: "fact", id: w.calc }, T0.toISOString()).status,
     ).toBe("applied");
-    const next = arrive(w.salesId, FEWER);
     await run(w.a.sourceId);
     expect(status(w.calc)).toBe("candidate");
     expect(last(w.calc)).toEqual({

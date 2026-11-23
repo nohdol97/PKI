@@ -69,6 +69,7 @@ import {
   fillValidity,
   followMovedRow,
   isDate,
+  judgeWaitingOn,
   saveFact,
   saveRelation,
   valueFits,
@@ -858,12 +859,16 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       itemKey: "auto-verify",
       lineage: [own],
       unjudged: true as const,
-      write: (tx) =>
+      write: (tx) => {
+        const at = now().toISOString();
+        // S03-R16 ③: what still waits on this source after its extraction is not stated again
+        judgeWaitingOn(tx, own.sourceId, at);
         assessAfterExtraction(
           tx,
           { factIds: [...judgedFacts], relationIds: [...judgedRelations] },
-          now().toISOString(),
-        ),
+          at,
+        );
+      },
     };
     return {
       status: "succeeded",
