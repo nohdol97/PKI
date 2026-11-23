@@ -2283,3 +2283,41 @@ describe("schema v26 (S02-T08, S02-R17, R18)", () => {
     expect(db.all("SELECT count(*) AS n FROM insight_link_inputs")).toEqual([{ n: 0 }]);
   });
 });
+
+describe("schema v27 (P01-T01, P01-R2)", () => {
+  it("adds the five Insight columns, NULL for every row so far, and rewrites no stored row", () => {
+    migrate(db, migrations.slice(0, 26));
+    db.run(
+      `INSERT INTO items (type, name, epistemic, status, observed_at)
+       VALUES ('Project', 'a', 'explicit', 'candidate', '2026-11-21T00:00:00Z'),
+              ('System', 'b', 'explicit', 'candidate', '2026-11-21T00:00:00Z')`,
+    );
+    db.run(
+      "INSERT INTO insights (rule, x_item_id, y_item_id, epistemic, state, summary) VALUES ('dependency_delay', 1, 2, 'inferred', 'active', 's')",
+    );
+    const before = db.all("SELECT * FROM insights");
+    migrate(db);
+    expect(schemaVersion(db)).toBe(27);
+    const newColumns = [
+      "fact_lines",
+      "reasoning_summary",
+      "confidence",
+      "urgency_date",
+      "changed_at",
+    ];
+    expect(db.all(`SELECT ${newColumns.join(", ")} FROM insights`)).toEqual([
+      {
+        fact_lines: null,
+        reasoning_summary: null,
+        confidence: null,
+        urgency_date: null,
+        changed_at: null,
+      },
+    ]);
+    const strip = (rows: Record<string, unknown>[]) =>
+      rows.map((row) =>
+        Object.fromEntries(Object.entries(row).filter(([k]) => !newColumns.includes(k))),
+      );
+    expect(strip(db.all("SELECT * FROM insights"))).toEqual(strip(before));
+  });
+});
