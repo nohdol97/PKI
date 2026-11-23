@@ -101,9 +101,13 @@ export {
   EXTRACT_SCHEMA_VERSION,
   EXTRACT_STATEMENT_FACT_KIND,
   EXTRACT_TERM_KINDS,
+  INSIGHT_INTERPRET_MAX_STATEMENT,
+  INSIGHT_INTERPRET_MAX_SUMMARY,
+  INSIGHT_INTERPRET_SCHEMA_VERSION,
   TASKS,
   WIKI_SUMMARY_SCHEMA_VERSION,
   type ExtractionOutput,
+  type InsightInterpretOutput,
   type TaskDefinition,
   type WikiSummaryOutput,
 } from "./tasks.ts";
