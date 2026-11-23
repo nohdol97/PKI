@@ -230,7 +230,7 @@ C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요
 | 순서 | 할 일 | 확인 |
 |---|---|---|
 | 1 | `python verification\v02-site-flow\run.py analytical-scenario preflight --config v02-result\config.json` | `preflight ok`. 설치본이 아니거나 Windows가 아니거나 test double Provider이면 `배포처 후속`으로 시작하는 알림과 종료 값 3 |
-| 2 | 설치된 exe로 설정 `analytical.profile`을 켭니다(쓰는 길은 `POST /api/settings/analytical`이고 화면에는 없습니다). 켜면 이미 있는 표 자료의 프로파일 작업이 쌓입니다. 필요하면 `analytical.maxCells`도 정합니다 | 활동 화면에서 작업이 끝남 |
+| 2 | 설치된 exe로 설정 `analytical.profile`을 켭니다(쓰는 길은 `POST /api/settings/analytical`이고 화면에는 없습니다. 본문은 `{ "profile": true, "maxCells": 200000 }`처럼 두 키가 모두 있어야 하며, 한도를 따로 정하지 않았으면 기본값 200000을 보냅니다). 켜면 이미 있는 표 자료의 프로파일 작업이 쌓입니다 | 활동 화면에서 작업이 끝남 |
 | 3 | 실제 Provider로 표를 설명하는 문서를 추출하고, `GET /api/analytical`로 목록을 봅니다. 맞지 않는 표나 행은 되돌립니다. 앱을 완전히 닫습니다(알림 영역 포함) | |
 | 4 | `... analytical-scenario record --config v02-result\config.json --out v02-result` | `analytical-counts.json`이 생김, 종료 값 0. 저장된 `analytical.profile`이 `on`이 아니면 표준 오류에 `warning:` 한 줄(막지는 않음) |
 

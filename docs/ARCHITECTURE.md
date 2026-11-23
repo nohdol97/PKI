@@ -190,7 +190,7 @@ flowchart TB
 | 상태·인식 유형의 변경 이력(`item_history`·`fact_history`·`relation_history`, S01-T01). 번호와 코드만 있고 글이 없다 | 정본 SQLite | **정본** | 복구 불가(추출을 다시 돌려도 지나간 변경은 되살아나지 않는다). 대상 행이 지워지면 함께 지워진다 |
 | 유형 정의(`ontology_elements`·`ontology_basis`·`ontology_history`, S01-T06): 항목 유형·사실 종류·관계 유형과 그 규칙, 제안한 원본의 계보, 변경 이력(번호와 코드만) | 정본 SQLite | **정본**(seed 열 개가 처음 값) | 사용자가 더하거나 승인한 것은 복구 불가. 원본에서 제안된 후보는 그 원본이 지워지면 함께 지워진다 |
 | 합치기 줄(`item_merges`)·구분 표시(`item_distinct`)·나누기 기록(`item_split_moves`), 합치기 후보(`merge_candidates`), 주장 연결(`assertion_links`, Insight가 입력으로 쓴 줄은 `insight_link_inputs`)(S02). 번호와 코드만 있고 글이 없다 | 정본 SQLite | **정본** | 사용자의 합치기·구분 표시·나누기는 복구 불가. 후보와 규칙이 만든 주장 연결은 다시 계산 |
-| 분석 의미의 표 행(`dataset_tables`: Dataset 항목, 표 원본, 표 키, 행 수)과 검사 줄(`analytical_checks`: 사실, 검사 이름, 통과 여부, 센 수. S03). 값과 글이 없다 | 정본 SQLite | **정본**(표 행은 표 원본에서, 검사 줄은 표와 사실에서 다시 만들 수 있다) | 표 원본을 다시 프로파일하고 검사를 다시 돌린다. 사용자의 승인은 행에 남아 있다 |
+| 분석 의미의 표 행(`dataset_tables`: Dataset 항목, 표 원본, 표 키, 행 수)과 검사 줄(`analytical_checks`: 사실, 검사 이름, 통과 여부, 센 수. S03). 사실의 값과 원문 글은 없지만, 표 키는 XLSX 시트 이름이라 사용자의 글이다 | 정본 SQLite | **정본**(표 행은 표 원본에서, 검사 줄은 표와 사실에서 다시 만들 수 있다) | 표 원본을 다시 프로파일하고 검사를 다시 돌린다. 사용자의 승인은 행에 남아 있다 |
 | 사용자의 교정·승인·기각·직접 추가: 따로 테이블을 두지 않고 대상 행(`user_authored`, 인식 유형 `user-approved`)과 위 이력 행의 줄이며, Insight가 입력으로 쓴 사용자 행은 `insight_user_inputs`로 그 Insight와 잇는다(S01-T02·T03·T04). 입력 화면은 아직 없고 API로만 한다 | 정본 SQLite | **정본** | 복구 불가 |
 | 피드백·선호 | 아직 없다(Phase 5 P03에서 정한다) | — | — |
 | Insight(P01: 유형 이름 `rule`, 사실 줄 `fact_lines`, 이유 요약 `reasoning_summary`, 신뢰도 `confidence`, 시급 기준 날짜 `urgency_date`, 내용이 바뀐 시각 `changed_at`. 순위는 저장하지 않고 읽을 때 계산) | 정본 SQLite | **정본**. 내용은 규칙으로 다시 계산할 수 있다 | 재계산 |
