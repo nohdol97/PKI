@@ -7,7 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { launchShell } from "./launch.ts";
 
-const SPEC_FUNCTIONS = ["deleteSecret", "getSession", "hasSecret", "openExternal", "setSecret"];
+const SPEC_FUNCTIONS = [
+  "deleteSecret",
+  "getSession",
+  "hasSecret",
+  "openExternal",
+  "pickLocation",
+  "setSecret",
+];
 
 test("the page sees only the spec's preload functions", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pki-surface-"));

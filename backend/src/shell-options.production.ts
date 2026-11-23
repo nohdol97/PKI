@@ -12,7 +12,12 @@ export function shellOptions(args?: string[]): ShellOptions {
     args,
     options: {
       origin: { type: "string", multiple: true, default: [] },
+      // the shell passes its user-data folder, which no location may be or lie in (I02B-R48)
+      "user-data": { type: "string" },
     },
   });
-  return { origins: values.origin };
+  return {
+    origins: values.origin,
+    ...(values["user-data"] === undefined ? {} : { userData: values["user-data"] }),
+  };
 }

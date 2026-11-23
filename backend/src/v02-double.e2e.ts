@@ -15,7 +15,9 @@
 import type { LLMProvider } from "@pki/contracts";
 import { DEFAULT_PROVIDER_SETTING, readDefaultProvider, type EgressControls } from "@pki/providers";
 import { writeSetting, type SqlDriver } from "@pki/storage";
+import { normalizeDocument, type NormalizeResult } from "@pki/document-normalize";
 import { FakeProvider, fixtureExtraction } from "@pki/testkit";
+import { readFileSync } from "node:fs";
 
 /** The Provider id the double answers under (the run record names it: v02-flow.e2e.ts). */
 const DOUBLE_ID = "local-model";
@@ -30,12 +32,45 @@ export function consentLocalModel(egress: EgressControls): void {
   if ("error" in granted) throw new Error(granted.error);
 }
 
+/**
+ * The text each fixture record's content has once it is a Markdown file that the product's parser read
+ * (I02B-C25: the local-files flow writes the records as .md files). The fixture double answers only for a
+ * record's exact content, and the parser drops blank lines and heading marks, so the parsed text maps back.
+ */
+const PARSED_CONTENT = new Map<string, string>();
+for (const file of ["v02-mail.jsonl", "v02-wiki.jsonl", "v02-messenger.jsonl"]) {
+  const lines = readFileSync(new URL(`../../fixtures/${file}`, import.meta.url), "utf8").trim();
+  for (const line of lines.split("\n")) {
+    const { content } = JSON.parse(line) as { content: string };
+    const parsed = (await normalizeDocument(
+      { kind: "bytes", bytes: new TextEncoder().encode(content), name: "record.md" },
+      {},
+    )) as NormalizeResult;
+    if (parsed.ok) PARSED_CONTENT.set(parsed.document.text, content);
+  }
+}
+
 /** The per-fixture double, under the id the user's consent and default name. */
 export function providerDouble(): FakeProvider {
+  const answer = fixtureExtraction();
   return new FakeProvider({
     id: DOUBLE_ID,
     transport: "http",
-    answer: fixtureExtraction(),
+    answer: (request) => {
+      const [document] = request.input.untrustedDocuments;
+      const content = document && PARSED_CONTENT.get(document.body);
+      if (content === undefined || !document) return answer(request);
+      return answer({
+        ...request,
+        input: {
+          ...request.input,
+          untrustedDocuments: [
+            { ...document, body: content },
+            ...request.input.untrustedDocuments.slice(1),
+          ],
+        },
+      });
+    },
   });
 }
 

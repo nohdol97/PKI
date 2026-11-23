@@ -12,6 +12,8 @@ export interface ShellOptions {
   /** The scope policy by name (I04-R14); the desktop shell passes it, none: the default. */
   scopePolicy?: string;
   connectors?: ConnectorSet;
+  /** The Electron shell's user-data folder: no location may be or lie in it (I02B-R48). */
+  userData?: string;
 }
 
 /** `args` default: the process arguments, as parseArgs reads them. */
@@ -23,12 +25,14 @@ export function shellOptions(args?: string[]): ShellOptions {
       "data-dir": { type: "string" },
       fixtures: { type: "string" },
       "scope-policy": { type: "string" },
+      "user-data": { type: "string" },
     },
   });
   return {
     origins: values.origin,
     ...(values["data-dir"] === undefined ? {} : { dataDir: values["data-dir"] }),
     ...(values["scope-policy"] === undefined ? {} : { scopePolicy: values["scope-policy"] }),
+    ...(values["user-data"] === undefined ? {} : { userData: values["user-data"] }),
     ...(values.fixtures === undefined ? {} : { connectors: fixtureConnectors(values.fixtures) }),
   };
 }

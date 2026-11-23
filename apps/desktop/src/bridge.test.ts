@@ -8,7 +8,7 @@ import { BRIDGE, createBridgeHandlers, type ExternalTarget } from "./bridge.ts";
 const SESSION = { baseUrl: "", token: "t".repeat(43) };
 const PAGE = `${APP_ORIGIN}/`;
 
-function handlers(confirm = true) {
+function handlers(confirm = true, picked: string | null = "/picked/folder") {
   const opened: string[] = [];
   const confirmExternal = vi.fn<(target: ExternalTarget) => Promise<boolean>>(async () => confirm);
   const stored = new Map<string, string>();
@@ -19,21 +19,53 @@ function handlers(confirm = true) {
     has: vi.fn(async (name: string) => ({ ok: true as const, present: stored.has(name) })),
     delete: vi.fn(async (name: string) => (stored.delete(name), { ok: true as const })),
   };
+  const registered: { ticket: string; kind: "folder"; path: string }[] = [];
   const bridge = createBridgeHandlers({
     session: SESSION,
     secrets,
     confirmExternal,
     openExternal: async (url) => void opened.push(url),
+    pickLocation: async () => picked ?? undefined,
+    registerLocationTicket: (input) => (registered.push(input), true),
   });
-  return { bridge, opened, confirmExternal, secrets, stored };
+  return { bridge, opened, confirmExternal, secrets, stored, registered };
 }
 
 describe("bridge handlers", () => {
   it("names exactly the spec's preload functions", () => {
     expect(Object.keys(BRIDGE).sort()).toEqual(
-      ["deleteSecret", "getSession", "hasSecret", "openExternal", "setSecret"].sort(),
+      [
+        "deleteSecret",
+        "getSession",
+        "hasSecret",
+        "openExternal",
+        "pickLocation",
+        "setSecret",
+      ].sort(),
     );
     expect(Object.keys(handlers().bridge).sort()).toEqual(Object.keys(BRIDGE).sort());
+  });
+
+  it("pickLocation registers the picked path under a fresh ticket and returns only the ticket; a cancel registers nothing; a foreign sender is refused (S3)", async () => {
+    const { bridge, registered } = handlers();
+    const answer = (await bridge.pickLocation(PAGE, ["folder"])) as { ticket: string };
+    expect(registered).toEqual([{ ticket: answer.ticket, kind: "folder", path: "/picked/folder" }]);
+    expect(answer.ticket.length).toBeGreaterThanOrEqual(32);
+    expect(JSON.stringify(answer)).not.toContain("/picked/folder");
+
+    const second = (await bridge.pickLocation(PAGE, ["folder"])) as { ticket: string };
+    expect(second.ticket).not.toBe(answer.ticket);
+
+    const cancelled = handlers(true, null);
+    expect(await cancelled.bridge.pickLocation(PAGE, ["folder"])).toEqual({ ticket: null });
+    expect(cancelled.registered).toEqual([]);
+
+    const foreign = handlers();
+    await expect(foreign.bridge.pickLocation("https://evil.example/", ["folder"])).rejects.toThrow(
+      "forbidden-sender",
+    );
+    await expect(foreign.bridge.pickLocation(PAGE, ["/etc"])).rejects.toThrow("invalid-input");
+    expect(foreign.registered).toEqual([]);
   });
 
   it("gives the app page its session", async () => {

@@ -121,6 +121,20 @@ export function createApprovalTickets(
   };
 }
 
+/** The shell's `location-ticket` message on the parent channel (exactly that shape), or undefined. */
+export function locationTicket(
+  data: unknown,
+): { ticket: string; type: "folder"; path: string } | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  if (Object.keys(data).sort().join(",") !== "kind,path,ticket,type") return undefined;
+  const { type, ticket, kind, path } = data as Record<string, unknown>;
+  const sized = (v: unknown, min: number, max: number): v is string =>
+    typeof v === "string" && v.length >= min && v.length <= max;
+  if (type !== "location-ticket" || kind !== "folder") return undefined;
+  if (!sized(ticket, 16, 256) || !sized(path, 1, 4096)) return undefined;
+  return { ticket, type: "folder", path };
+}
+
 // --- the handler ---------------------------------------------------------------------------------------
 
 export type ApprovalAnswer =

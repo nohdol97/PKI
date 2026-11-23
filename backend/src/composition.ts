@@ -730,6 +730,8 @@ export function productLocalFiles(
     shellHost?: HostSpawner;
     underElectron?: boolean;
     normalizer?: LocalNormalizerPort;
+    /** Browser development only (dev.ts): approve a typed path as a test build does (I02B-R37). */
+    typedPaths?: boolean;
   },
 ): LocalFilesWiring {
   const index = createLocalFileIndex(db);
@@ -761,7 +763,7 @@ export function productLocalFiles(
       db,
       index,
       forbidden,
-      buildKind: BUILD_KIND,
+      buildKind: options.typedPaths ? "development" : BUILD_KIND,
       tickets,
       onApproved: options.onApproved,
       normalizerUnavailable: () => normalizer.unavailable(),

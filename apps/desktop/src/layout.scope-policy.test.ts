@@ -27,7 +27,13 @@ async function argsFor(name: string | undefined) {
     seen.push(args);
     return child();
   };
-  await startBackendProcess({ fork, entry: "x", origin: "app://pki", scopePolicy: name });
+  await startBackendProcess({
+    fork,
+    entry: "x",
+    origin: "app://pki",
+    userData: "/u",
+    scopePolicy: name,
+  });
   return seen[0];
 }
 
@@ -48,6 +54,8 @@ describe("the production build gives the backend no policy name (I05-R15, I05-C1
     expect(await argsFor(production({ PKI_SCOPE_POLICY: "site" }))).toEqual([
       "--origin",
       "app://pki",
+      "--user-data",
+      "/u",
     ]);
   });
 });
@@ -59,6 +67,8 @@ describe("a source run reads the environment", () => {
     expect(await argsFor(sourceRun({ PKI_SCOPE_POLICY: "site" }))).toEqual([
       "--origin",
       "app://pki",
+      "--user-data",
+      "/u",
       "--scope-policy",
       "site",
     ]);

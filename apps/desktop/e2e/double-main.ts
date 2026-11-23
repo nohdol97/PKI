@@ -11,6 +11,7 @@ import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { backendEntry } from "../src/backend-entry.ts";
+import { NORMALIZER_HOST_ENTRY } from "../src/layout.ts";
 
 // The entry the shell forks from source is the build's choice (I05-R2): the public one, or a fork's own when
 // the tree has a composition package. The double still forks the public double entry below, so v02-flow
@@ -30,7 +31,9 @@ const DOUBLE_ENTRY = fileURLToPath(
 
 const fork = utilityProcess.fork;
 utilityProcess.fork = (modulePath, args, options) => {
-  // a shell that forks anything else has changed: fail loudly, never run unbound. The
+  // the normalizer host the shell starts for the backend (I02B-R22, adapter ⓑ) is the product's own entry
+  if (modulePath === NORMALIZER_HOST_ENTRY) return fork(modulePath, args, options);
+  // a shell that forks anything else (the normalizer host aside) has changed: fail loudly, never run unbound. The
   // reason also goes to the file the E2E names (PKI_E2E_GUARD_FILE), which it reads
   // when the shell does not start (this may run before the E2E can read stderr). Then
   // the process ends at once: a throw reaches the shell's start-failure dialog, which

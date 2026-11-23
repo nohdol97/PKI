@@ -24,6 +24,7 @@ const start = (report: unknown) =>
     fork: () => childReporting(report),
     entry: "unused",
     origin: "app://pki",
+    userData: "/u",
     scopePolicy: undefined,
   });
 
@@ -82,6 +83,7 @@ describe("the policy name crosses the process boundary as a switch, not as envir
       fork,
       entry: "unused",
       origin: "app://pki",
+      userData: "/u",
       scopePolicy,
       env: { PATH: "/bin", PKI_SCOPE_POLICY: "site" },
     }).then(() => seen[0] as { args: string[]; env: Record<string, string> });
@@ -91,11 +93,20 @@ describe("the policy name crosses the process boundary as a switch, not as envir
     expect((await spawned("site")).args).toEqual([
       "--origin",
       "app://pki",
+      "--user-data",
+      "/u",
       "--scope-policy",
       "site",
     ]);
-    expect((await spawned("")).args).toEqual(["--origin", "app://pki", "--scope-policy", ""]);
-    expect((await spawned(undefined)).args).toEqual(["--origin", "app://pki"]);
+    expect((await spawned("")).args).toEqual([
+      "--origin",
+      "app://pki",
+      "--user-data",
+      "/u",
+      "--scope-policy",
+      "",
+    ]);
+    expect((await spawned(undefined)).args).toEqual(["--origin", "app://pki", "--user-data", "/u"]);
   });
 
   it("does not widen the environment passthrough", async () => {

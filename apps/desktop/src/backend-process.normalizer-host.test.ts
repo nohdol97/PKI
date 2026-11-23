@@ -32,6 +32,7 @@ function setup() {
     fork: () => child,
     entry: "backend/shell.js",
     origin: "app://pki",
+    userData: "/u",
     scopePolicy: undefined,
     normalizerHost: (backend) => (given.push(backend), broker),
   });
@@ -103,6 +104,7 @@ describe("the normalizer host requests on the backend channel", () => {
       fork: () => child,
       entry: "e",
       origin: "app://pki",
+      userData: "/u",
       scopePolicy: undefined,
     });
     expect(() => send({ type: "normalizer-host-start", id: 1 })).not.toThrow();
