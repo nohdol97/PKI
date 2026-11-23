@@ -72,6 +72,8 @@ export const REVIEW_INTRO =
 export const REVIEW_LOADING = "지식 목록을 불러오는 중입니다.";
 export const REVIEW_EMPTY = "이 상태로 보여 줄 지식이 없습니다.";
 export const REVIEW_MORE = "더 보기";
+export const REVIEW_REREAD_FAILED =
+  "조치는 반영됐지만 목록을 다시 읽지 못했습니다. 보이는 목록은 조치 전의 것입니다.";
 export const PAIRS_HEADING = "합치기 후보";
 export const PAIRS_EMPTY = "합치기 후보가 없습니다.";
 export const CONFLICTS_EMPTY = "검토할 충돌이 없습니다.";

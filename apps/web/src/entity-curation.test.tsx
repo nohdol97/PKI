@@ -10,9 +10,11 @@ import {
   markDistinct,
   mergeInto,
   SplitResult,
+  splitRowsOf,
   splitOff,
   unmerge,
 } from "./entity-curation.tsx";
+import { actionText } from "./entity-text.ts";
 import type { Center } from "./explore.tsx";
 
 function fake(handlers: Partial<Record<RouteName, (request: unknown) => unknown>>) {
@@ -41,9 +43,18 @@ const center: Center = {
   type: "Project",
   name: "미리내",
   wikiKey: null,
-  members: [{ id: 9, type: "Project", name: "미리내 별칭 <b>", mergeId: 4 }],
-  facts: [{ id: 5, kind: "memo", value: "메모", context: null, ...row }],
-  relations: [{ id: 8, type: "OWNS", subjectId: 1, objectId: 2, ...row }],
+  members: [
+    { id: 9, type: "Project", name: "미리내 별칭 <b>", mergeId: 4 },
+    { id: 10, type: "Project", name: "가려진 줄 구성원", mergeId: null },
+  ],
+  facts: [
+    { id: 5, itemId: 1, kind: "memo", value: "메모", context: null, ...row },
+    { id: 6, itemId: 9, kind: "memo", value: "구성원의 메모", context: null, ...row },
+  ],
+  relations: [
+    { id: 8, type: "OWNS", subjectId: 1, objectId: 2, ...row },
+    { id: 11, type: "OWNS", subjectId: 9, objectId: 2, ...row },
+  ],
 };
 
 describe("항목 정리 (X02B-C3)", () => {
@@ -73,6 +84,32 @@ describe("항목 정리 (X02B-C3)", () => {
     expect(out).not.toContain("<b>");
     expect(out).toContain("사실 memo 메모");
     expect(out).toContain("관계 OWNS 8");
+  });
+
+  it("lists only the centre's own rows for splitting, and no undo button for a member with no merge line (X02F-C3)", () => {
+    const out = renderToStaticMarkup(
+      <EntityCuration
+        api={fake({}).api}
+        center={center}
+        onChanged={() => undefined}
+        onOpen={() => undefined}
+      />,
+    );
+    expect(out).not.toContain("구성원의 메모");
+    expect(out).not.toContain("관계 OWNS 11");
+    expect(out).toContain("관계 OWNS 8");
+    expect(out).toContain("가려진 줄 구성원");
+    expect(out).not.toContain("합치기 되돌리기: 가려진 줄 구성원");
+    expect(splitRowsOf(center)).toEqual([
+      { kind: "fact", id: 5, label: "사실 memo 메모" },
+      { kind: "relation", id: 8, label: "관계 OWNS 8" },
+    ]);
+  });
+
+  it("shows an action code the table does not hold as the code itself, even a name on the object prototype (X02F-C3)", () => {
+    expect(actionText("approve")).toBe("승인");
+    expect(actionText("__proto__")).toBe("__proto__");
+    expect(actionText("toString")).toBe("toString");
   });
 
   it("splits the chosen rows under the new name and offers the created item", async () => {

@@ -5,6 +5,7 @@
 import type { OntologyChangeRequest, RouteResponse } from "@pki/contracts";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { ApiClient } from "./api.ts";
+import { createBusy } from "./latest.ts";
 import {
   ACTOR_TEXT,
   CARDINALITY_TEXT,
@@ -303,10 +304,14 @@ export function Ontology({ api }: { api: ApiClient }) {
     setChecked(undefined);
     setDraft(next);
   };
+  // one action out at a time: a second press before the answer is not sent (X02F-R6)
+  const [busy] = useState(createBusy);
   const act = (action: OntologyAction) => {
+    const work = busy(() => perform(api, action));
+    if (!work) return;
     const mine = ++listSeq.current;
     setNotice(undefined);
-    perform(api, action).then(
+    work.then(
       ({ elements: list, refusal }) => {
         if (mine !== listSeq.current) return;
         setElements(list);

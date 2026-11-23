@@ -12,6 +12,7 @@ import {
   buildRequest,
   INITIAL_ASK,
   openCitation,
+  sourceOpener,
   type AskState,
 } from "./ask.tsx";
 import { SourceView } from "./evidence-view.tsx";
@@ -236,5 +237,47 @@ describe("ask view: a sentence's source (X02-C1a ②)", () => {
     expect(out).toContain("원본 보기");
     expect(out).not.toContain("다음 단계(X02)");
     expect(out).toMatch(/<button[^>]*>(<bdi>)?물결 프로젝트/);
+  });
+
+  it("drops a source read that ends after a new question reset the opener, and shows one that did not (X02F-C7)", async () => {
+    const answer = {
+      sourceVersion: { id: 4, version: 1, latestVersion: 1, title: "t", body: "나다" },
+      locator: null,
+      attachment: null,
+    };
+    let finish: (value: unknown) => void = () => undefined;
+    const api = vi.fn(() => new Promise((resolve) => (finish = resolve)));
+    const shown: number[] = [];
+    const failed: string[] = [];
+    const opener = sourceOpener(
+      api as unknown as ApiClient,
+      (index) => shown.push(index),
+      (text) => failed.push(text),
+    );
+    const citation = { versionId: 4, sourceId: 2, version: 1, start: 0, end: 1, quote: "나" };
+    opener.open(citation, 0);
+    opener.reset();
+    finish(answer);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(shown).toEqual([]);
+    opener.open(citation, 1);
+    finish(answer);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(shown).toEqual([1]);
+    // a failed read says the source could not be loaded, not that the question failed
+    const broken = vi.fn(async () => {
+      throw new Error("API 404");
+    });
+    const second = sourceOpener(
+      broken as unknown as ApiClient,
+      (index) => shown.push(index),
+      (text) => failed.push(text),
+    );
+    second.open(citation, 2);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(shown).toEqual([1]);
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toContain("원본");
+    expect(failed[0]).toContain("API 404");
   });
 });

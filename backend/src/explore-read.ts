@@ -1,7 +1,7 @@
 // The Explore screen's reads (X02-R1..R4). Each is answered from rows the read gate shows (I04-R13, purpose
 // `display`): a hidden item, fact, relation or source version is left out whole, and a number asked for that is
 // hidden is the same `undefined` (the server's `not-found`) as one nothing is stored under. Visibility is applied
-// before paging, so a hidden item neither shortens a page nor moves `next`. Nothing is stored here (X02-D2).
+// before paging, so a hidden item neither shortens a page nor moves `next`; at the scan cap `next` is the last item the page could hold. Nothing is stored here (X02-D2).
 import { EXPLORE_PAGE_SIZE, type RouteRequest, type RouteResponse } from "@pki/contracts";
 import { pageKindOfType, WIKI_PAGE_KIND_NAME } from "@pki/knowledge-engine";
 import {
@@ -26,6 +26,11 @@ type Hop = NonNullable<RouteResponse<"graphPaths">["paths"]>[number][number];
 const BATCH = 100;
 const MAX_SCAN = 10_000;
 
+export interface ExploreReadOptions {
+  /** The most items read for one page; the tests lower it (X02F-D2). */
+  maxScan?: number;
+}
+
 export interface ExploreReads {
   items(request: RouteRequest<"exploreItems">): Items;
   /** undefined when the item is absent or not shown: the one answer for each. */
@@ -40,7 +45,9 @@ export function createExploreReads(
   db: SqlDriver,
   registry: DerivativeRegistry,
   gate: ReadGate,
+  options: ExploreReadOptions = {},
 ): ExploreReads {
+  const maxScan = options.maxScan ?? MAX_SCAN;
   const refOf = (id: number) => {
     const stored = readItem(db, id);
     return stored ? { id, type: stored.type, name: stored.name } : undefined;
@@ -57,8 +64,11 @@ export function createExploreReads(
       const kept: Items["items"] = [];
       let cursor = after ?? 0;
       let scanned = 0;
+      let reachedEnd = false;
+      // the last number that went into the answer: a hidden row's, or a shown item's that only a hidden alias matched, is never answered (X02F-R1)
+      let lastShown: number | null = null;
       // read on until a page and one more are shown (or the store ends): the one more says `next` exists
-      while (kept.length <= EXPLORE_PAGE_SIZE && scanned < MAX_SCAN) {
+      while (kept.length <= EXPLORE_PAGE_SIZE && scanned < maxScan) {
         const rows = listExploreItems(db, { after: cursor, query, limit: BATCH });
         for (const row of rows) {
           cursor = row.id;
@@ -67,16 +77,28 @@ export function createExploreReads(
           const alias = row.nameMatch
             ? null
             : (row.aliases.find((a) => gate.semanticShown("fact", a.id))?.value ?? undefined);
-          if (alias !== undefined) kept.push({ id: row.id, type: row.type, name: row.name, alias });
+          if (alias !== undefined) {
+            kept.push({ id: row.id, type: row.type, name: row.name, alias });
+            lastShown = row.id;
+          }
           if (kept.length > EXPLORE_PAGE_SIZE) break;
         }
         scanned += rows.length;
-        if (rows.length < BATCH) break;
+        if (rows.length < BATCH) {
+          reachedEnd = true;
+          break;
+        }
       }
       const page = kept.slice(0, EXPLORE_PAGE_SIZE);
       return {
         items: page,
-        next: kept.length > EXPLORE_PAGE_SIZE ? (page.at(-1)?.id ?? null) : null,
+        // stopped at the cap with rows left: the page may be short or empty, and `next` is the last shown number read
+        next:
+          kept.length > EXPLORE_PAGE_SIZE
+            ? (page.at(-1)?.id ?? null)
+            : reachedEnd
+              ? null
+              : lastShown,
       };
     },
     item({ itemId, depth }) {
@@ -97,7 +119,7 @@ export function createExploreReads(
       );
       const owners = [itemId, ...members.map((m) => m.id)];
       const facts = owners
-        .flatMap((id) => listSemanticFacts(db, id))
+        .flatMap((id) => listSemanticFacts(db, id).map((f) => ({ ...f, itemId: id })))
         .filter((f) => gate.semanticShown("fact", f.id));
       const relations = owners
         .flatMap((id) => listSemanticRelations(db, id))
@@ -141,12 +163,17 @@ export function createExploreReads(
             id: m.id,
             type: m.type,
             name: m.name,
-            mergeId: m.mergeId,
+            // a line that points at a hidden item is not undoable from here: its number would name nothing shown
+            mergeId: gate.semanticShown("item", m.mergedInto) ? m.mergeId : null,
           })),
           facts: facts.map((f) => ({ ...f, ...(factTimes.get(f.id) ?? empty) })),
           relations: relations.map((r) => ({ ...r, ...(relationTimes.get(r.id) ?? empty) })),
         },
-        items: neighbours.flatMap((id) => refOf(id) ?? []),
+        // the representative of a member centre is a name too, when the walk climbed to it (X02F-R2 3)
+        items: [
+          ...(root !== itemId && gate.semanticShown("item", root) ? [root] : []),
+          ...neighbours,
+        ].flatMap((id) => refOf(id) ?? []),
         edges: [...steps.values()]
           .filter(({ hop }) => open.has(hop.from) && open.has(hop.to))
           .sort((a, b) => a.step - b.step || a.hop.relationId - b.hop.relationId)

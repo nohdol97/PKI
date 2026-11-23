@@ -4,9 +4,10 @@
 // only (V02-R15). Nothing is stored here: the question and the answer live in this component until the user
 // leaves the screen (X01-R15). Cancel closes the connection; what already arrived stays on screen.
 import type { AskEvent, AskRequest, EvidenceSource, RouteResponse } from "@pki/contracts";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { connectionOf, type ApiClient } from "./api.ts";
 import { readAskEvents } from "./ask-stream.ts";
+import { createLatest } from "./latest.ts";
 import { citationSource, SourceView } from "./evidence-view.tsx";
 import { useNav, type Nav } from "./nav.tsx";
 import {
@@ -28,6 +29,7 @@ import {
   ASK_WANT_ANSWER,
   droppedText,
   failureText,
+  sourceFailureText,
   routeStatusText,
   strategyText,
 } from "./ask-text.ts";
@@ -50,6 +52,32 @@ export async function openCitation(api: ApiClient, c: Citation): Promise<Evidenc
     start: c.start,
   });
   return citationSource(sourceVersion, c, { locator, attachment });
+}
+
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/**
+ * Opens the source a citation points to. `reset()` (a new question) drops a read still out, so an old source never
+ * shows under a new answer (X02F-R7); a failed read is told as a source that could not be loaded.
+ */
+export function sourceOpener(
+  api: ApiClient,
+  show: (index: number, source: EvidenceSource) => void,
+  fail: (text: string) => void,
+) {
+  const reads = createLatest();
+  return {
+    open(citation: Citation, index: number) {
+      const current = reads.begin();
+      openCitation(api, citation).then(
+        (source) => current() && show(index, source),
+        (error: unknown) => current() && fail(sourceFailureText(message(error))),
+      );
+    },
+    reset() {
+      reads.begin();
+    },
+  };
 }
 
 export interface AskState {
@@ -218,8 +246,6 @@ export function AskResults({
   );
 }
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
-
 export function Ask({ api }: { api: ApiClient }) {
   const [form, setForm] = useState<AskForm>({
     question: "",
@@ -249,6 +275,15 @@ export function Ask({ api }: { api: ApiClient }) {
   const needsAck =
     state.answer?.status === "blocked" && state.answer.reason === "unverified-ack-required";
 
+  const opener = useMemo(
+    () =>
+      sourceOpener(
+        api,
+        (index, source) => setOpened({ index, source }),
+        (text) => setFailure(text),
+      ),
+    [api],
+  );
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!connection || running || form.question.trim() === "") return;
@@ -258,6 +293,7 @@ export function Ask({ api }: { api: ApiClient }) {
     setCancelled(false);
     setFailure(undefined);
     setOpened(undefined);
+    opener.reset();
     setRunning(true);
     const request = buildRequest(form);
     setForm((f) => ({ ...f, acknowledgeUnverified: false })); // consent covers this one call only
@@ -280,11 +316,7 @@ export function Ask({ api }: { api: ApiClient }) {
 
   const openSource = (index: number) => {
     const citation = state.sentences[index]?.citation;
-    if (!citation) return;
-    openCitation(api, citation).then(
-      (source) => setOpened({ index, source }),
-      (error: unknown) => setFailure(failureText(message(error))),
-    );
+    if (citation) opener.open(citation, index);
   };
 
   return (

@@ -6,6 +6,7 @@ import type { RouteResponse } from "@pki/contracts";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { ApiClient } from "./api.ts";
 import { markDistinct, mergeInto } from "./entity-curation.tsx";
+import { createBusy } from "./latest.ts";
 import { useNav } from "./nav.tsx";
 import {
   CONFLICT_TYPE_TEXT,
@@ -21,6 +22,7 @@ import {
   REVIEW_INTRO,
   REVIEW_LOADING,
   REVIEW_MORE,
+  REVIEW_REREAD_FAILED,
   STATUS_ORDER,
   STATUS_TEXT,
 } from "./semantic-text.ts";
@@ -39,6 +41,15 @@ export interface Review {
   list: List;
   conflicts: RouteResponse<"conflicts">;
   pairs: Pair[];
+  /** How many pages of the list were read: an action reads that many again (X02F-R5). */
+  pages: number;
+}
+/** What an action answers: the refusal in words, and the review read again, or why it could not be. */
+export interface Performed {
+  review: Review | undefined;
+  refusal: string | undefined;
+  /** Set when the action went through but the list could not be read again. */
+  rereadFailed?: string;
 }
 export type PairAction =
   { type: "merge"; member: number; into: number } | { type: "distinct"; a: number; b: number };
@@ -72,14 +83,25 @@ async function loadPairs(api: ApiClient): Promise<Pair[]> {
   });
 }
 
-/** The first page of `filter`'s items (the server filters), the conflicts and the merge candidates. */
-export async function loadReview(api: ApiClient, filter: Status | "all"): Promise<Review> {
-  const [list, conflicts, pairs] = await Promise.all([
+/** The first `pages` pages of `filter`'s items (the server filters), the conflicts and the merge candidates. */
+export async function loadReview(
+  api: ApiClient,
+  filter: Status | "all",
+  pages = 1,
+): Promise<Review> {
+  const [first, conflicts, candidates] = await Promise.all([
     api("semanticPage", statusRequest(filter)),
     api("conflicts"),
     loadPairs(api),
   ]);
-  return { list, conflicts, pairs };
+  let list = first;
+  let read = 1;
+  while (read < pages && list.next !== null) {
+    const page = await api("semanticPage", { ...statusRequest(filter), after: list.next });
+    list = { items: [...list.items, ...page.items], next: page.next };
+    read += 1;
+  }
+  return { list, conflicts, pairs: candidates, pages: read };
 }
 
 /** The page after the one `review` holds, appended; the rest of the review stays as it was. */
@@ -90,7 +112,11 @@ export async function loadMore(
 ): Promise<Review> {
   if (review.list.next === null) return review;
   const page = await api("semanticPage", { ...statusRequest(filter), after: review.list.next });
-  return { ...review, list: { items: [...review.list.items, ...page.items], next: page.next } };
+  return {
+    ...review,
+    list: { items: [...review.list.items, ...page.items], next: page.next },
+    pages: review.pages + 1,
+  };
 }
 
 /** Runs one action; a refusal comes back as words, an error is thrown. */
@@ -108,14 +134,28 @@ export async function act(api: ApiClient, action: ReviewAction): Promise<string 
     : undefined;
 }
 
-/** An action and then the list read again: the review as stored now, with the refusal's words if there was one. */
+/** The list read again after an action: the review, or the reason it could not be read (the action stands). */
+async function reread(
+  api: ApiClient,
+  filter: Status | "all",
+  pages: number,
+  refusal: string | undefined,
+): Promise<Performed> {
+  try {
+    return { review: await loadReview(api, filter, pages), refusal };
+  } catch (error) {
+    return { review: undefined, refusal, rereadFailed: message(error) };
+  }
+}
+
+/** An action and then the list read again, as many pages as were held: the refusal's words if there was one. */
 export async function perform(
   api: ApiClient,
   action: ReviewAction,
   filter: Status | "all",
-): Promise<{ review: Review; refusal: string | undefined }> {
-  const refusal = await act(api, action);
-  return { review: await loadReview(api, filter), refusal };
+  pages = 1,
+): Promise<Performed> {
+  return reread(api, filter, pages, await act(api, action));
 }
 
 /** A merge or "다른 것" mark of a candidate pair and then the review read again, without the pair if it is settled. */
@@ -123,11 +163,18 @@ export async function performPair(
   api: ApiClient,
   action: PairAction,
   filter: Status | "all",
-): Promise<{ review: Review; refusal: string | undefined }> {
+  pages = 1,
+): Promise<Performed> {
   let refusal: string | undefined;
   if (action.type === "merge") refusal = await mergeInto(api, action.member, action.into);
   else await markDistinct(api, action.a, action.b, true);
-  return { review: await loadReview(api, filter), refusal };
+  return reread(api, filter, pages, refusal);
+}
+
+/** Starts `start` unless another is out; `accepted` tells whether it was taken or dropped (X02F-R6). */
+export function admit<T>(busy: ReturnType<typeof createBusy>, start: () => Promise<T>) {
+  const work = busy(start);
+  return { accepted: work !== undefined, work };
 }
 
 /** The actions of one registry row. A fact's value can be fixed here too. */
@@ -141,14 +188,14 @@ export function SemanticRowActions({
   id: number;
   /** What the row is called to a screen reader: the buttons are named by it. */
   name: string;
-  onAct: (action: ReviewAction) => void;
+  /** false when the action was dropped: the typed value then stays. */
+  onAct: (action: ReviewAction) => boolean | undefined;
 }) {
   const [value, setValue] = useState("");
   const fix = (event: FormEvent) => {
     event.preventDefault();
     if (value.trim() === "") return;
-    onAct({ type: "replace", id, value });
-    setValue("");
+    if (onAct({ type: "replace", id, value }) !== false) setValue("");
   };
   const decide = (action: "approve" | "reject" | "dispute", label: string) => (
     <button
@@ -215,7 +262,7 @@ export function ReviewView({
   notice?: string | undefined;
   /** A page is being read: the list below is the previous one. */
   loading?: boolean | undefined;
-  onAct: (action: ReviewAction) => void;
+  onAct: (action: ReviewAction) => boolean | undefined;
   onPair: (action: PairAction) => void;
   onFilter: (filter: Status | "all") => void;
   onMore: () => void;
@@ -425,15 +472,21 @@ export function SemanticReview({ api }: { api: ApiClient }) {
     [api, read],
   );
   useEffect(() => load("candidate"), [load]);
-  const afterAction = (work: Promise<{ review: Review; refusal: string | undefined }>) =>
-    read(
-      work,
-      ({ review: next, refusal }) => {
-        setReview(next);
-        setNotice(refusal);
-      },
-      (text) => setNotice(`조치하지 못했습니다: ${text}`),
-    );
+  // one action out at a time: a second press before the answer is not sent (X02F-R6)
+  const [busy] = useState(createBusy);
+  const afterAction = (start: () => Promise<Performed>): boolean => {
+    const { accepted, work } = admit(busy, start);
+    if (work)
+      read(
+        work,
+        ({ review: next, refusal, rereadFailed }) => {
+          if (next) setReview(next);
+          setNotice(rereadFailed === undefined ? refusal : (refusal ?? REVIEW_REREAD_FAILED));
+        },
+        (text) => setNotice(`조치하지 못했습니다: ${text}`),
+      );
+    return accepted;
+  };
   if (failure) return <p role="alert">{failure}</p>;
   if (!review) return <p role="status">{REVIEW_LOADING}</p>;
   return (
@@ -442,8 +495,8 @@ export function SemanticReview({ api }: { api: ApiClient }) {
       filter={filter}
       notice={notice}
       loading={loading}
-      onAct={(a) => afterAction(perform(api, a, filter))}
-      onPair={(a) => afterAction(performPair(api, a, filter))}
+      onAct={(a) => afterAction(() => perform(api, a, filter, review.pages))}
+      onPair={(a) => afterAction(() => performPair(api, a, filter, review.pages))}
       onFilter={(next) => {
         setFilter(next);
         setNotice(undefined);
