@@ -116,7 +116,9 @@ describe("the interpretation job (P01-C3a, D12-D18)", () => {
     actionability: 20,
     opportunity,
   });
-  const broker = (result: BrokerResult) => ({ call: vi.fn(async (_raw: unknown) => result) });
+  const broker = (result: BrokerResult) => ({
+    call: vi.fn<(raw: unknown) => Promise<BrokerResult>>(async () => result),
+  });
   const ok = (output: unknown): BrokerResult => ({ status: "ok", output }) as BrokerResult;
 
   /** The schedule_conflict Insight, the setting on, and the job the queue made for it. */
