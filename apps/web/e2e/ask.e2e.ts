@@ -90,3 +90,37 @@ test("ask.e2e: with no Provider chosen the hits show and the answer cannot be ma
   await expect(page.getByText(/답을 만들 수 없음/)).toBeVisible();
   await expect(page.getByRole("list", { name: "답 문장" })).toHaveCount(0);
 });
+
+// The acknowledgement is consent for one call: ticked once, the next question carries none (X01 contract).
+test("ask.e2e: the unverified-isolation acknowledgement applies to one question only", async ({
+  page,
+}) => {
+  const bodies: Record<string, unknown>[] = [];
+  const blocked = [
+    { type: "route", route: { keyword: { status: "used" } } },
+    { type: "hits", hits: [], notes: [] },
+    { type: "answer", status: "blocked", reason: "unverified-ack-required" },
+    { type: "done", sentences: 0, dropped: 0, insufficient: false },
+  ];
+  await page.route("**/api/ask", async (route) => {
+    bodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/x-ndjson",
+      body: blocked.map((e) => JSON.stringify(e)).join("\n") + "\n",
+    });
+  });
+  await ask(page, await start());
+
+  const ack = page.getByLabel(/격리 미검증 경고를 확인했습니다/);
+  await ack.check(); // shown because the first answer was blocked
+  await page.getByRole("button", { name: "질문하기" }).click();
+  await expect.poll(() => bodies.length).toBe(2);
+  await expect(ack).toBeVisible(); // blocked again; not ticked for this one
+  await page.getByRole("button", { name: "질문하기" }).click();
+  await expect.poll(() => bodies.length).toBe(3);
+
+  expect(bodies[0]).not.toHaveProperty("acknowledgeUnverified");
+  expect(bodies[1]).toHaveProperty("acknowledgeUnverified", true);
+  expect(bodies[2]).not.toHaveProperty("acknowledgeUnverified");
+});

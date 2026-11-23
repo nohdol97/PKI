@@ -207,8 +207,10 @@ export function Ask({ api }: { api: ApiClient }) {
     setCancelled(false);
     setFailure(undefined);
     setRunning(true);
+    const request = buildRequest(form);
+    setForm((f) => ({ ...f, acknowledgeUnverified: false })); // consent covers this one call only
     try {
-      for await (const e of readAskEvents(connection, buildRequest(form), mine.signal)) {
+      for await (const e of readAskEvents(connection, request, mine.signal)) {
         setState((s) => applyEvent(s, e));
       }
     } catch (error) {
