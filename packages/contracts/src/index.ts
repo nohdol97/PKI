@@ -20,6 +20,7 @@ export * from "./cell-grammar.ts";
 export * from "./connector.ts";
 export * from "./import-record.ts";
 export * from "./knowledge-schema.ts";
+export * from "./local-files.ts";
 export * from "./provider.ts";
 export * from "./secrets.ts";
 export * from "./site-scopes.ts";

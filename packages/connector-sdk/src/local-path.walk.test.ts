@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   openSync,
   closeSync,
+  lstatSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -131,6 +132,15 @@ const outsideTouched = (calls: { method: string; args: unknown[] }[]) =>
     .filter((c) => c.method === "open" || c.method === "read")
     .filter((c) => String(c.args[0]).startsWith(out));
 
+/** The identity the walk would have seen: the file's own, measured on the real disk (0 when it is not there). */
+const seenId = (path: string): { dev: string; ino: string } => {
+  try {
+    const s = lstatSync(path, { bigint: true });
+    return { dev: s.dev.toString(), ino: s.ino.toString() };
+  } catch {
+    return { dev: "0", ino: "0" };
+  }
+};
 const read = (
   relativePath: string,
   fs?: BoundaryFs,
@@ -142,6 +152,7 @@ const read = (
     kind: "folder",
     maxFileBytes: 1_000_000,
     excluded: [],
+    expectedId: seenId(join(loc, relativePath)),
     ...(fs ? { fs } : {}),
     ...over,
   });
@@ -363,6 +374,7 @@ describe("reading one file in the order of I02B-R47", () => {
     writeFileSync(join(loc, "one.md"), INSIDE);
     const r = await readLocationFile({
       excluded: [],
+      expectedId: seenId(join(loc, "one.md")),
       rootRealPath: join(loc, "one.md"),
       relativePath: "",
       kind: "file",
