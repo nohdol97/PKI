@@ -124,9 +124,26 @@ export function knowledgeCandidates(
 }
 
 /**
- * An active Insight as a candidate (P01-D16): its name is the type, the summary and the fact lines, text the
- * code wrote from source values, so it is graded by the registry's lineage of the Insight; one that used a
- * row of the user's own has a part with no source, which makes it the strictest class (fail closed).
+ * The source versions the text of an Insight candidate is graded by (P01-D16, D26): the Insight's own lineage and
+ * the group lineage of its two items, because the text carries both items' names, as an item candidate is graded.
+ */
+export function insightGradingLineage(
+  db: SqlDriver,
+  registry: Pick<DerivativeRegistry, "lineage">,
+  insight: { id: number; xItemId: number; yItemId: number },
+): SourceVersionRef[] {
+  return unionOfVersions(
+    registry.lineage(db, { kind: "insight", id: String(insight.id) }),
+    groupLineage(db, registry, insight.xItemId),
+    groupLineage(db, registry, insight.yItemId),
+  );
+}
+
+/**
+ * An active Insight as a candidate (P01-D16, D26): its name is the type, the summary and the fact lines, text the
+ * code wrote from source values and item names, so it is graded by `insightGradingLineage`; one that used a row
+ * of the user's own, or whose item has no lineage of its own (a user-made item), has a part with no source, which
+ * makes it the strictest class (fail closed).
  */
 function insightCandidate(
   db: SqlDriver,
@@ -136,11 +153,14 @@ function insightCandidate(
 ) {
   const insight = readInsightById(db, insightId);
   if (insight?.state !== "active") return undefined;
+  const itemUnsourced = [insight.xItemId, insight.yItemId].some(
+    (item) => registry.lineage(db, { kind: "item", id: String(item) }).length === 0,
+  );
   return {
     name: `[${insight.rule}] ${insight.summary ?? ""} | ${insight.factLines.join(" | ")}`,
-    nameUnsourced: insight.userInputs.length > 0,
-    evidenceSourceVersionIds: registry
-      .lineage(db, { kind: "insight", id: id.slice("insight:".length) })
-      .map((v) => String(findSourceVersionId(db, v.sourceId, v.version) ?? 0)),
+    nameUnsourced: insight.userInputs.length > 0 || itemUnsourced,
+    evidenceSourceVersionIds: insightGradingLineage(db, registry, insight).map((v) =>
+      String(findSourceVersionId(db, v.sourceId, v.version) ?? 0),
+    ),
   };
 }

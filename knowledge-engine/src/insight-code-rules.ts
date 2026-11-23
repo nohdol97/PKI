@@ -43,12 +43,12 @@ import {
 
 /** The fact kinds whose replacement is an "important change" (P01-D4); a rule-file constant. */
 export const CHANGE_KINDS: readonly string[] = [TARGET_DATE, COMPLETION_DATE];
-/** The fact kind of a decision's or rule's current content, the kind of a work item's status (P01-D13, D14). */
+/** The fact kind of a decision's or rule's current content, the kind of a work item's status (P01-D21, D22). */
 export const CONCLUSION_KIND = "conclusion";
 export const STATUS_KIND = "status";
-/** The `status` values that mean the work is not done (P01-D13); a rule-file constant next to the value type's list. */
+/** The `status` values that mean the work is not done (P01-D21); a rule-file constant next to the value type's list. */
 export const OPEN_STATUSES: readonly string[] = ["open", "in_progress"];
-/** The relation types a "new relation" is looked for among (P01-D16); a rule-file constant. */
+/** The relation types a "new relation" is looked for among (P01-D24); a rule-file constant. */
 export const NEW_RELATION_TYPES: readonly string[] = [
   "DEPENDS_ON",
   "RESPONSIBLE_FOR",
@@ -288,7 +288,7 @@ const startOfNewest = (newer: readonly Fact[]): string | null =>
     .sort()
     .at(-1) ?? null;
 
-/** 의사결정 변경 (P01-D14): a Decision's `conclusion` replaced through a SUPERSEDES link whose newer side stands. */
+/** 의사결정 변경 (P01-D22): a Decision's `conclusion` replaced through a SUPERSEDES link whose newer side stands. */
 export const decisionChangeRule = changeRule({
   type: "decision_change",
   kinds: [CONCLUSION_KIND],
@@ -299,7 +299,7 @@ export const decisionChangeRule = changeRule({
   urgency: startOfNewest,
 });
 
-/** 정책 변화 (P01-D14): a BusinessRule's `conclusion` replaced through a SUPERSEDES link whose newer side stands. */
+/** 정책 변화 (P01-D22): a BusinessRule's `conclusion` replaced through a SUPERSEDES link whose newer side stands. */
 export const policyChangeRule = changeRule({
   type: "policy_change",
   kinds: [CONCLUSION_KIND],
@@ -339,7 +339,7 @@ function validStatuses(db: SqlDriver, members: readonly number[]) {
 }
 
 /**
- * 미처리 요청·미해결 이슈 (P01-D13): a group of `itemType` with at least one valid `status` and every one an
+ * 미처리 요청·미해결 이슈 (P01-D21): a group of `itemType` with at least one valid `status` and every one an
  * open value (`OPEN_STATUSES`). A closed value, or a closed and an open one at once, makes it stand down (the
  * latter is the conflict type's). A request's earliest valid target date is the urgency; it is cited as a row.
  */
@@ -429,7 +429,7 @@ function newRelationCandidates(db: SqlDriver, items: readonly number[]) {
 const instant = (value: string) => Date.parse(value);
 
 /**
- * 새 관계 (P01-D16): a still-`candidate`, valid relation of a new-relation type between two groups whose
+ * 새 관계 (P01-D24): a still-`candidate`, valid relation of a new-relation type between two groups whose
  * `observed_at` is later than that of both end items: the items were known before the relation was seen. The
  * rule never reads the clock; the ranking's novelty axis lowers an old one.
  */

@@ -1635,7 +1635,7 @@ const v29: Migration = (db) => {
   `);
 };
 
-// Schema v30 (P01-T05, P01-R11, D23): catalogue edition 3. The item
+// Schema v30 (P01-T05, P01-R11, D20, D25): catalogue edition 3. The item
 // type `Request`, the fact kinds `status` and `conclusion` are seeded `verified`, edition 1, `origin = seed`
 // (a name that exists, by R19's comparison, is left alone); `target_date`, `statement`, `identifier.key` and
 // `RELATED_TO` are widened to `Request` only while the stored rule is the one v23 left, `verified`, edition

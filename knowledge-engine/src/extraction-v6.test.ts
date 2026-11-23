@@ -173,7 +173,7 @@ describe("extract.v6: a request's status and a decision's conclusion (P01-R11)",
   });
 });
 
-describe("extract.v6: a new relation is one seen after its items (P01-D16)", () => {
+describe("extract.v6: a new relation is one seen after its items (P01-D24)", () => {
   const newRelations = () =>
     db.all(
       "SELECT x_item_id, y_item_id FROM insights WHERE rule = 'new_relation' AND state = 'active'",

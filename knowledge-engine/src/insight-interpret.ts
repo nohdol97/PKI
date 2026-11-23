@@ -32,6 +32,7 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { derivativeRegistry } from "./canonical-kinds.ts";
+import { insightGradingLineage } from "./linking.ts";
 import { EXTRACT_TIMEOUT_MS, MAX_EXTRACT_CODE_POINTS, type RunBroker } from "./extraction.ts";
 import { OPPORTUNITY_CONFIDENCE_CAP } from "./insight-code-rules.ts";
 
@@ -67,7 +68,9 @@ export function createInsightInterpretHandler(options: InsightInterpretHandlerOp
     // R9: a combination the policy refuses is not put in one call, and so not in one reading
     const lineage = registry.lineage(db, { kind: "insight", id: String(id) });
     if (lineage.length === 0 || lineage.length > INSIGHT_INTERPRET_MAX_VERSIONS) return nothing;
-    if (!registry.combinable(db, lineage)) return nothing;
+    // the call also carries the two items' names (candidates) and the text built from them: the policy is asked
+    // over the Insight's lineage and the items' group lineage together, as the candidate lookup grades it (D26)
+    if (!registry.combinable(db, insightGradingLineage(db, registry, insight))) return nothing;
 
     const versionIds: string[] = [];
     let size = 0;
