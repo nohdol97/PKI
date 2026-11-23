@@ -140,6 +140,19 @@ describe("approval (I02B-R5, R37; I02B-C3 at the API, C43)", () => {
 });
 
 describe("limits settings (I02B-R40, I02B-C14 setting half)", () => {
+  it("the deletion brake defaults to 0.5 and 20, and takes a decimal ratio (I02B-R8)", () => {
+    const { db, locations } = handler();
+    try {
+      expect(locations.settings().deletionBrake).toEqual({ ratio: 0.5, minFiles: 20 });
+      expect(locations.writeSettings({ deletionBrake: { ratio: 0.25 } })).toMatchObject({
+        deletionBrake: { ratio: 0.25, minFiles: 20 },
+      });
+      expect(locations.settings().deletionBrake.ratio).toBe(0.25);
+    } finally {
+      db.close();
+    }
+  });
+
   it("lowering a walk limit below its value while the location holds entries is refused and nothing changes; raising is allowed (FU8)", async () => {
     const { db, locations } = handler();
     try {

@@ -172,6 +172,8 @@ export interface LocalFilesLimits {
   pageBudgetMs: number;
   walk: { maxFilesPerLocation: number; maxDepth: number; maxRelativePathChars: number };
   normalize: { maxHeapMb: number; maxExternalMemoryBytes: number };
+  /** A walk that finds at least `minFiles` files gone, and at least `ratio` of the tracked ones, holds them (I02B-R8). */
+  deletionBrake: { ratio: number; minFiles: number };
 }
 
 /** What one pass learned about a location, for the location list (I02B-R36, R38). */
@@ -254,6 +256,7 @@ const walkShape = {
   maxDepth: PositiveInt,
   maxRelativePathChars: PositiveInt,
 };
+const brakeShape = { ratio: z.number().positive(), minFiles: PositiveInt };
 const normalizeShape = {
   timeoutMs: PositiveInt,
   maxHeapMb: PositiveInt,
@@ -267,6 +270,7 @@ export const LocalFilesSettingsSchema = z.strictObject({
   pageBudgetMs: PositiveInt,
   walk: z.strictObject(walkShape),
   normalize: z.strictObject(normalizeShape),
+  deletionBrake: z.strictObject(brakeShape),
 });
 export type LocalFilesSettings = z.infer<typeof LocalFilesSettingsSchema>;
 
@@ -277,6 +281,7 @@ export const LocalFilesSettingsPatchSchema = z.strictObject({
   pageBudgetMs: PositiveInt.optional(),
   walk: z.strictObject(walkShape).partial().optional(),
   normalize: z.strictObject(normalizeShape).partial().optional(),
+  deletionBrake: z.strictObject(brakeShape).partial().optional(),
 });
 export type LocalFilesSettingsPatch = z.infer<typeof LocalFilesSettingsPatchSchema>;
 

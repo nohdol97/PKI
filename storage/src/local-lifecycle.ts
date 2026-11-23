@@ -4,6 +4,7 @@
 // over while the location was closed is given a new sequence number and is announced by the ordinary read.
 import {
   LOCAL_FILES_INSTANCE_ID,
+  readLocation,
   setLocationState,
   takeLocalSeq,
   type LocationState,
@@ -92,6 +93,37 @@ export function relinkLocation(db: SqlDriver, id: string, target: RelinkTarget):
         [id],
       );
       return reopenLocation(db, id);
+    },
+    { immediate: true },
+  );
+}
+
+export type ConfirmResult =
+  { ok: true; confirmed: number } | { ok: false; reason: "count-mismatch" };
+
+/**
+ * The user confirms the held deletions (I02B-R8) having seen `expectedCount` of them: the held entries
+ * are marked confirmed, each with a new sequence number so a pass running now loses its fence on them,
+ * and a location waiting for the confirmation is `active` again. A different count changes nothing.
+ */
+export function confirmDeletions(db: SqlDriver, id: string, expectedCount: number): ConfirmResult {
+  return db.transaction(
+    () => {
+      const rows = db.all(
+        "SELECT external_id FROM local_file_entries WHERE location_id = ? AND pending_delete = 1 ORDER BY seq",
+        [id],
+      );
+      if (rows.length !== expectedCount) return { ok: false, reason: "count-mismatch" };
+      for (const row of rows) {
+        db.run("UPDATE local_file_entries SET pending_delete = 2, seq = ? WHERE external_id = ?", [
+          takeLocalSeq(db),
+          row.external_id as string,
+        ]);
+      }
+      if (readLocation(db, id)?.state === "needs-confirmation") {
+        setLocationState(db, id, "active", null);
+      }
+      return { ok: true, confirmed: rows.length };
     },
     { immediate: true },
   );

@@ -344,6 +344,18 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       ...files.filter((f) => hashed.get(f.path) === hash).map((f) => f.path),
     ];
 
+    // a held or confirmed deletion whose file is back lets go of the mark (I02B-R8)
+    for (const f of files) {
+      const held = byPath.get(f.path);
+      if (held && held.pendingDelete !== 0) {
+        const cleared = p.index.updateEntry(held.externalId, held.seq, {
+          ...fieldsOf(held),
+          pendingDelete: 0,
+        });
+        if (cleared.applied) byPath.set(f.path, { ...held, pendingDelete: 0, seq: cleared.seq });
+      }
+    }
+
     // files that have an entry
     const fresh: WalkedFile[] = [];
     for (const f of files) {
@@ -491,7 +503,7 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
 
     // a deletion is told only when the whole location was walked (I02B-R19)
     if (complete) {
-      for (const m of missing) {
+      const gone = (m: LocalIndexEntry) =>
         p.index.updateEntry(m.externalId, m.seq, {
           ...fieldsOf(m),
           size: null,
@@ -504,7 +516,30 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
           skippedAt: null,
           skipLimits: null,
         });
+      // too many at once is held for the user (I02B-R8): the denominator is the tracked files not yet
+      // confirmed, the numerator what vanished of them, a held one included; a skipped file is no
+      // knowledge to lose and goes at once
+      const tracked = entries.filter((e) => e.state === "present" && e.pendingDelete !== 2).length;
+      const vanished = missing.filter((m) => m.state === "present" && m.pendingDelete !== 2);
+      const { ratio, minFiles } = limits.deletionBrake;
+      const brake = vanished.length >= minFiles && vanished.length / tracked >= ratio;
+      for (const m of missing) {
+        if (m.state === "present" && m.pendingDelete !== 2 && brake) {
+          if (m.pendingDelete === 0) {
+            p.index.updateEntry(m.externalId, m.seq, { ...fieldsOf(m), pendingDelete: 1 });
+          }
+        } else gone(m);
       }
+      if (brake && location.state === "active") {
+        p.setLocationState(location.id, "needs-confirmation", null);
+      }
+    }
+    // a location waiting for a confirmation that nothing is held for any more is active again
+    if (
+      location.state === "needs-confirmation" &&
+      !p.index.entriesOfLocation(location.id).some((e) => e.pendingDelete === 1)
+    ) {
+      p.setLocationState(location.id, "active", null);
     }
 
     for (const { f, hash, reason } of inserts) {
@@ -672,6 +707,8 @@ export function createLocalFilesConnector(bound: () => LocalFilesPorts | undefin
       };
     }
     if (e.state !== "present" || e.mtimeNs === null || silent.has(e.seq)) return {};
+    // a held or confirmed deletion changes nothing the product knows: the pass decides it (I02B-R8)
+    if (e.pendingDelete !== 0) return {};
     const built = await buildRecord(p, pass, e, location, signal);
     if (built.kind === "stale") {
       // back to "to look at": the next pass reads the file again and announces it with a larger revision

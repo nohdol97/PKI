@@ -36,6 +36,7 @@ export const LOCAL_FILES_DEFAULTS: LocalFilesSettings = {
   pageBudgetMs: 20_000,
   walk: { maxFilesPerLocation: 50_000, maxDepth: 32, maxRelativePathChars: 1_024 },
   normalize: { timeoutMs: 60_000, maxHeapMb: 1_536, maxExternalMemoryBytes: 1_610_612_736 },
+  deletionBrake: { ratio: 0.5, minFiles: 20 },
 };
 
 const KEY = "localFiles.";
@@ -43,6 +44,13 @@ const positive = (text: string | undefined): number | undefined => {
   if (text === undefined || !/^[1-9][0-9]*$/.test(text)) return undefined;
   const n = Number(text);
   return Number.isSafeInteger(n) ? n : undefined;
+};
+
+/** A positive decimal such as `0.5` or `3`; anything else is undefined. */
+const positiveDecimal = (text: string | undefined): number | undefined => {
+  if (text === undefined || !/^(?:[0-9]+\.?[0-9]*|\.[0-9]+)$/.test(text)) return undefined;
+  const n = Number(text);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 };
 
 /** The limits as stored; a missing or damaged value is the default, never a guess. */
@@ -67,6 +75,10 @@ export function readLocalFilesSettings(db: SqlDriver): LocalFilesSettings {
         d.normalize.maxExternalMemoryBytes,
       ),
     },
+    deletionBrake: {
+      ratio: positiveDecimal(readSetting(db, `${KEY}deletionBrake.ratio`)) ?? d.deletionBrake.ratio,
+      minFiles: read("deletionBrake.minFiles", d.deletionBrake.minFiles),
+    },
   };
 }
 
@@ -77,7 +89,7 @@ function changes(patch: LocalFilesSettingsPatch): [string, number][] {
     const value = patch[name];
     if (value !== undefined) out.push([name, value]);
   }
-  for (const group of ["walk", "normalize"] as const) {
+  for (const group of ["walk", "normalize", "deletionBrake"] as const) {
     for (const [name, value] of Object.entries(patch[group] ?? {})) {
       if (value !== undefined) out.push([`${group}.${name}`, value]);
     }
