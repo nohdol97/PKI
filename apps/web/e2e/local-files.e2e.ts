@@ -126,7 +126,7 @@ test("local-files.e2e: approve a folder → sources → Insight evidence with a 
     await page.getByRole("button", { name: "폴더 추가" }).click();
     const table = page.getByRole("table", { name: "로컬 자료 위치" });
     await expect(table).toContainText(docs);
-    await expect(table).toContainText("실시간 감시 없음");
+    await expect(table).toContainText("실시간 감시 중");
   });
 
   await test.step("the files are sources and the Provider double's Insight has Markdown evidence", async () => {
@@ -252,6 +252,7 @@ test("local-files.e2e: pause → resume → revoke through the confirm dialog, t
     for (const [name] of FILES)
       expect(readFileSync(join(docs, name), "utf8").length).toBeGreaterThan(0);
     await go(page, "원본");
-    await expect(page.getByRole("table").last().getByRole("row")).toHaveCount(0);
+    // with no source left the screen draws no table but this sentence (the last table is another one)
+    await expect(page.getByText("저장된 원본이 없습니다.")).toBeVisible();
   });
 });
