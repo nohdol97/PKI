@@ -533,8 +533,8 @@ const INSIGHT: DerivativeKind = {
   invalidate: (ctx, snapshot, change) => {
     const { tx } = ctx;
     // P01-D13: an LLM reading was made from the lineage as it was, and an unchanged Insight is not rewritten, so
-    // a deletion, prune or scope change empties the reading of every collected Insight and resolves its opportunity
-    for (const { ref } of snapshot) {
+    // a deletion, prune or scope change (not a new version: a changed Insight is rewritten, which empties it) empties the reading of every collected Insight and resolves its opportunity
+    for (const { ref } of supported(change) === "new-version" ? [] : snapshot) {
       tx.run(
         "UPDATE insights SET llm_reasoning_summary = NULL, llm_impact = NULL, llm_actionability = NULL WHERE id = ?",
         [Number(ref.id)],
