@@ -71,6 +71,7 @@ describe("evidence views", () => {
       start: 6,
       end: 9,
       locator: null,
+      attachment: null,
       sourceVersion: {
         id: v1,
         version: 1,
@@ -79,6 +80,27 @@ describe("evidence views", () => {
         body: "🙂 기한은 12월",
       },
     });
+  });
+
+  it("reads no attachment, and does not throw, for a block naming one that the meta lacks (I02C-R6)", () => {
+    const x = insertItem(db, { ...attrs, type: "Project", name: "X" });
+    const fact = saveFact(db, { ...attrs, itemId: x, kind: "target_date", value: "2026-12-05" });
+    const blocks = [{ start: 0, end: 4, attachment: 1, locator: { format: "pdf", page: 1 } }];
+    const read = (externalId: string, provenance?: Record<string, unknown>) => {
+      saveSourceRecord(db, "c1", { externalId, title: "t", body: "합성 본문", blocks, provenance });
+      const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+      const id = addEvidence(db, {
+        target: { factId: fact.id },
+        sourceVersionId: versionId,
+        start: 0,
+        end: 2,
+        quote: "합성",
+      });
+      return readEvidenceSource(db, id)?.attachment;
+    };
+    const one = [{ name: "a.pdf", mediaType: "application/pdf", size: 1 }];
+    expect(read("no-meta")).toBeNull();
+    expect(read("short-list", { attachments: one })).toBeNull();
   });
 
   it("lists and opens only active Insights", () => {

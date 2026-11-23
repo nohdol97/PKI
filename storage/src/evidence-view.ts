@@ -3,7 +3,7 @@
 // evidence row points to. Nothing here writes. Resolved (and dirty) Insights are
 // hidden: not listed, and their evidence list is not read. A source is read by
 // evidence id whatever its Insight's state, while the evidence row exists.
-import type { Block, NativeLocator } from "@pki/contracts";
+import type { Attachment, Block, NativeLocator } from "@pki/contracts";
 import type { KnowledgeStatus } from "./knowledge.ts";
 import type { SqlDriver, SqlRow } from "./sql-driver.ts";
 
@@ -61,6 +61,8 @@ export interface EvidenceSourceView {
   end: number;
   /** I01-R29: computed on read from the blocks of `sourceVersion`, never stored on the evidence. */
   locator: NativeLocator | null;
+  /** I02C-R6: the attachment of that block, read from the version's `meta`; null when there is none. */
+  attachment: Attachment | null;
   sourceVersion: {
     id: number;
     version: number;
@@ -70,11 +72,23 @@ export interface EvidenceSourceView {
   };
 }
 
-/** The locator of the block holding code point `start`; null for no blocks or a gap (I01-R29). */
-function locatorAt(blocksJson: unknown, start: number): NativeLocator | null {
-  if (typeof blocksJson !== "string") return null;
+/** The block holding code point `start`; undefined for no blocks or a gap (I01-R29). */
+function blockAt(blocksJson: unknown, start: number): Block | undefined {
+  if (typeof blocksJson !== "string") return undefined;
   const blocks = JSON.parse(blocksJson) as Block[];
-  return blocks.find((b) => b.start <= start && start < b.end)?.locator ?? null;
+  return blocks.find((b) => b.start <= start && start < b.end);
+}
+
+/** The locator of the block holding code point `start`; null for no blocks or a gap (I01-R29). */
+const locatorAt = (blocksJson: unknown, start: number): NativeLocator | null =>
+  blockAt(blocksJson, start)?.locator ?? null;
+
+/** The attachment that block names in the version's `meta`; null for no meta, no entry or no attachment (I02C-R6). */
+function attachmentAt(blocksJson: unknown, metaJson: unknown, start: number): Attachment | null {
+  const index = blockAt(blocksJson, start)?.attachment;
+  if (index === undefined || typeof metaJson !== "string") return null;
+  const list = (JSON.parse(metaJson) as { attachments?: Attachment[] }).attachments;
+  return list?.[index] ?? null;
 }
 
 const ACTIVE_INSIGHT = `SELECT i.id, i.epistemic, i.summary, i.rule, i.x_item_id, i.y_item_id, i.fact_lines,
@@ -177,7 +191,7 @@ export function readEvidenceSource(
 ): EvidenceSourceView | undefined {
   const row = db.all(
     `SELECT e.id, e.quote, e.start_offset, e.end_offset, v.id AS version_id, v.version,
-       v.title, v.body, v.blocks,
+       v.title, v.body, v.blocks, v.meta,
        (SELECT max(version) FROM source_versions WHERE source_id = v.source_id) AS latest
      FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
      WHERE e.id = ?`,
@@ -190,6 +204,7 @@ export function readEvidenceSource(
     start: row.start_offset as number,
     end: row.end_offset as number,
     locator: locatorAt(row.blocks, row.start_offset as number),
+    attachment: attachmentAt(row.blocks, row.meta, row.start_offset as number),
     sourceVersion: {
       id: row.version_id as number,
       version: row.version as number,
