@@ -171,6 +171,12 @@ export async function performPair(
   return reread(api, filter, pages, refusal);
 }
 
+/** Starts `start` unless another is out; `accepted` tells whether it was taken or dropped (X02F-R6). */
+export function admit<T>(busy: ReturnType<typeof createBusy>, start: () => Promise<T>) {
+  const work = busy(start);
+  return { accepted: work !== undefined, work };
+}
+
 /** The actions of one registry row. A fact's value can be fixed here too. */
 export function SemanticRowActions({
   kind,
@@ -182,14 +188,14 @@ export function SemanticRowActions({
   id: number;
   /** What the row is called to a screen reader: the buttons are named by it. */
   name: string;
-  onAct: (action: ReviewAction) => void;
+  /** false when the action was dropped: the typed value then stays. */
+  onAct: (action: ReviewAction) => boolean | undefined;
 }) {
   const [value, setValue] = useState("");
   const fix = (event: FormEvent) => {
     event.preventDefault();
     if (value.trim() === "") return;
-    onAct({ type: "replace", id, value });
-    setValue("");
+    if (onAct({ type: "replace", id, value }) !== false) setValue("");
   };
   const decide = (action: "approve" | "reject" | "dispute", label: string) => (
     <button
@@ -256,7 +262,7 @@ export function ReviewView({
   notice?: string | undefined;
   /** A page is being read: the list below is the previous one. */
   loading?: boolean | undefined;
-  onAct: (action: ReviewAction) => void;
+  onAct: (action: ReviewAction) => boolean | undefined;
   onPair: (action: PairAction) => void;
   onFilter: (filter: Status | "all") => void;
   onMore: () => void;
@@ -468,8 +474,8 @@ export function SemanticReview({ api }: { api: ApiClient }) {
   useEffect(() => load("candidate"), [load]);
   // one action out at a time: a second press before the answer is not sent (X02F-R6)
   const [busy] = useState(createBusy);
-  const afterAction = (start: () => Promise<Performed>) => {
-    const work = busy(start);
+  const afterAction = (start: () => Promise<Performed>): boolean => {
+    const { accepted, work } = admit(busy, start);
     if (work)
       read(
         work,
@@ -479,6 +485,7 @@ export function SemanticReview({ api }: { api: ApiClient }) {
         },
         (text) => setNotice(`조치하지 못했습니다: ${text}`),
       );
+    return accepted;
   };
   if (failure) return <p role="alert">{failure}</p>;
   if (!review) return <p role="status">{REVIEW_LOADING}</p>;

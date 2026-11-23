@@ -219,7 +219,7 @@ export function Neighbourhood({
   onToggleType: (type: string) => void;
   onOpen: (itemId: number) => void;
   onEvidence: (row: Row, label: string) => void;
-  onAct: (action: ReviewAction) => void;
+  onAct: (action: ReviewAction) => boolean | undefined;
   /** Read the centre item again after a curation action. */
   onChanged: () => void;
   onWiki: (key: string) => void;

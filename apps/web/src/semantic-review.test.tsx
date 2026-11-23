@@ -5,7 +5,9 @@ import type { RouteName, RouteResponse } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
+import { createBusy } from "./latest.ts";
 import {
+  admit,
   loadMore,
   loadReview,
   perform,
@@ -299,5 +301,17 @@ describe("지식 검토 (X02-C2c)", () => {
     expect(lost.review).toBeUndefined();
     expect(lost.rereadFailed).toContain("연결 끊김");
     expect(lost.refusal).toBeUndefined();
+  });
+
+  it("says whether an action was taken: false while another is out, so the typed value is kept (X02F-C6)", async () => {
+    const busy = createBusy();
+    let release: () => void = () => undefined;
+    const slow = () => new Promise<string>((resolve) => (release = () => resolve("done")));
+    const first = admit(busy, slow);
+    expect(first.accepted).toBe(true);
+    expect(admit(busy, slow).accepted).toBe(false);
+    release();
+    await first.work;
+    expect(admit(busy, async () => "again").accepted).toBe(true);
   });
 });
