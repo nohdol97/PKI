@@ -56,14 +56,14 @@ const itemOf = (db: SqlDriver, r: SqlRow): SemanticItemView => ({
   name: r.name as string,
 });
 
-/** The first `limit` items that are no active member of a group (S02-R13), by id. */
-export function listSemanticItems(db: SqlDriver, limit: number): SemanticItemView[] {
+/** The first `limit` items after id `after` that are no active member of a group (S02-R13), by id. */
+export function listSemanticItems(db: SqlDriver, limit: number, after = 0): SemanticItemView[] {
   return db
     .all(
       `SELECT ${COLUMNS}, type, name FROM items
-       WHERE NOT EXISTS (SELECT 1 FROM item_merges m WHERE m.member_id = items.id AND m.active = 1)
+       WHERE id > ? AND NOT EXISTS (SELECT 1 FROM item_merges m WHERE m.member_id = items.id AND m.active = 1)
        ORDER BY id LIMIT ?`,
-      [limit],
+      [after, limit],
     )
     .map((r) => itemOf(db, r));
 }

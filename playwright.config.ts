@@ -24,6 +24,7 @@ export default defineConfig<{ target: "browser" | "electron" }>({
         "backend/src/swap-double.e2e.ts",
         "backend/src/swap-double.hook.e2e.ts",
         "backend/src/x01-ask-seed.e2e.ts",
+        "backend/src/x02b-curation-seed.e2e.ts",
         "backend/src/x01-ask-double.e2e.ts",
         "backend/src/x01-ask.hook.e2e.ts",
       ],

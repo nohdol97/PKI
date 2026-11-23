@@ -26,3 +26,8 @@ export function intervalText(validAt: string | null, validUntil: string | null):
   if (validUntil) return `${validUntil}까지`;
   return "";
 }
+
+export const GRAPH_NOTE_CUT =
+  "이웃이 많아 그림에는 60개까지만 그렸습니다. 표에서 전부 볼 수 있습니다.";
+export const graphSummary = (items: number, relations: number): string =>
+  `이웃 그림: 항목 ${items}개, 관계 ${relations}개`;

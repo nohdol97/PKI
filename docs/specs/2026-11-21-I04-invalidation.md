@@ -409,6 +409,7 @@ function atLeastAsStrict(policy: ScopePolicy, a: AccessScope, b: AccessScope): b
 | 알림 줄, digest 줄(`notification`) | delivery | canonical | P02 | P02-C3b |
 | 답변 문맥, 인용, 답변 캐시 | 없음(읽을 때 계산, 저장하지 않음. 등록할 행 없음). 범위는 X01 R12~R14의 `visible`·`combinable`로, 전송 등급은 Broker가 문맥 version들의 계보로 승계. 답변 캐시는 만들지 않는다 | 없음 | X01 | X01-C4 |
 | 탐색 읽기 | 없음(항목 목록, 이웃, 원본 version을 읽을 때 계산, 저장하지 않음. 등록할 행 없음). 세 경로는 `display` 용도의 `semanticShown`·`sourceShown`·`graphPaths`를 지나고, 가려진 것은 쪽 나눔 전에 걸러 쪽 크기·순서·`next`에 흔적이 없다 | 없음 | X02 | X02-C2b |
+| 탐색·지식 검토의 넘긴 읽기 | 없음(별칭 찾기, 구성원·이름, 상태로 거른 지식 목록, 원본·활동 이어 읽기, 인용 원본의 첨부·위치를 읽을 때 계산, 저장하지 않음. 등록할 행 없음). `display` 용도의 `semanticShown`·`sourceShown`·`filled`를 지나고, 가려진 것은 쪽 나눔 전에 걸러 쪽 크기·순서·`next`에 흔적이 없다 | 없음 | X02B | X02B-C2 |
 | 사용자 교정·승인 기록 | knowledge | canonical | S01 | S01 spec에서 정함(이슈 #21에 C번호 없음). 이력은 대상 행의 종류에, 사용자가 쓴 행의 계보는 S01 R22(S01-T04 구현) |
 
 ### 장부 줄 하나가 거치는 상태 (I04-R20)
@@ -899,3 +900,4 @@ flowchart LR
 | 2026-11-23 | 등록표에 "탐색 읽기" 줄을 더함(읽을 때 계산, 저장하지 않음, 등록할 행 없음) | 등록표 | X02(#31) R4·D2: 탐색 화면의 새 읽기 세 경로는 저장하는 것이 없고 읽기 문으로 거른다 |
 | 2026-11-23 | 등록표에 점검 발견 줄(`lint-finding`, 층 `projection`, 실행 위치 `canonical`)을 더함 | 등록표 | K02(#26) K02-R13: 발견이 정본과 같은 SQLite 파일에 있어 삭제 트랜잭션 안에서 다시 판정해 지울 수 있고, 사용자가 말한 발견은 대상이 남는 동안 지우지 않는다 |
 | 2026-11-23 | 등록표의 알림·digest 줄을 확정: 종류 `notification`, 층 `delivery`, 실행 위치 `canonical`, 실행 검증 P02-C3b | 등록표 | P02(#28) 구현. 줄이 정본 SQLite의 `notifications`에 있어 삭제 트랜잭션 안에서 지우거나 `withdrawn`으로 바꾼다. 요약 줄은 계보가 없어 공통 계약의 계보 없는 행 칸으로 통과한다 |
+| 2026-11-24 | 등록표에 "탐색·지식 검토의 넘긴 읽기" 줄을 더함(읽을 때 계산, 저장하지 않음, 등록할 행 없음) | 등록표 | X02B(#268) R6·D1: 새 읽기 다섯 곳은 저장하는 것이 없고 읽기 문으로 거른다 |

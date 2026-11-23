@@ -42,6 +42,7 @@ const center: Center = {
   type: "Project",
   name: '<img src="https://tracker.example.test/x"> 미리내',
   wikiKey: "projects/1",
+  members: [],
   facts: [
     {
       id: 5,
@@ -100,6 +101,7 @@ const noop = () => undefined;
 const neighbourhood = (over: Partial<Parameters<typeof Neighbourhood>[0]> = {}) =>
   renderToStaticMarkup(
     <Neighbourhood
+      api={fake({}).api}
       read={read}
       depth={1}
       off={new Set()}
@@ -111,6 +113,7 @@ const neighbourhood = (over: Partial<Parameters<typeof Neighbourhood>[0]> = {}) 
       onOpen={noop}
       onEvidence={noop}
       onAct={noop}
+      onChanged={noop}
       onWiki={noop}
       {...over}
     />,
@@ -179,6 +182,13 @@ describe("이웃과 타임라인 (X02-C3a ③~⑤)", () => {
     expect(off).toContain("물결 API");
     expect(off).not.toContain("바다 API");
     expect(shownEdges(read.edges, new Set(["DEPENDS_ON", "OWNS"]))).toEqual([]);
+  });
+
+  it("draws the neighbours as a picture above the table and gives each line its own detail controls", () => {
+    const out = neighbourhood();
+    expect(out.indexOf('role="img"')).toBeLessThan(out.indexOf('aria-label="이웃 표"'));
+    expect(out).toContain('aria-label="이력 보기: 사실 memo: 처음"');
+    expect(out).toContain('aria-label="이력 보기: 항목 ');
   });
 
   it("orders the timeline by start date and puts what has no start last under 시점 없음", () => {

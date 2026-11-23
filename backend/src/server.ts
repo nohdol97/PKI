@@ -17,6 +17,7 @@ import {
   type ProviderId,
   type ProviderInfo,
   type ProviderList,
+  LIST_PAGE_SIZE,
   type ProviderStatus,
   type PrepareSource,
   type RouteName,
@@ -70,6 +71,7 @@ import {
   listLiftableTombstones,
   countScopePolicyDrops,
   listInvalidations,
+  listProviderCallPage,
   listProviderCalls,
   LEGACY_CLEANUP_SETTING,
   readAnalyticalMaxCells,
@@ -1212,6 +1214,11 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
     exploreItems: async (request) => explore.items(request),
     exploreItem: async (request) => explore.item(request) ?? { error: "not-found" as const },
     exploreSource: async (request) => explore.source(request) ?? { error: "not-found" as const },
+    exploreNames: async (request) => explore.names(request),
+    semanticPage: async (request) => gate.semanticPage(request),
+    sourcesPage: async (request) => gate.sourcesPage(request),
+    activityPage: async ({ before }) =>
+      listProviderCallPage(options.db, { before, limit: LIST_PAGE_SIZE }),
     sourceThread: async ({ versionId }) =>
       readSourceThread(options.db, gate, versionId) ?? { error: "not-found" as const },
     // K02-R15: the lint. A decision runs in the transaction of the entry it calls

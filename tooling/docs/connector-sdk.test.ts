@@ -432,7 +432,7 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     expect(docText).toContain("### 승인한 JSONL 파일 위치(공용 저장소 #116)");
   });
 
-  it("only the evidence screen draws a locator (chapter 11, I02B-R39)", () => {
+  it("only the evidence screen and the question screen's cited-source view handle a locator (chapter 11, I02B-R39, X02B-R12)", () => {
     const hits: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(resolve(repoRoot, dir), { withFileTypes: true })) {
@@ -444,7 +444,11 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
       }
     };
     walk("apps/web/src");
-    expect(hits.sort()).toEqual(["apps/web/src/evidence-text.ts", "apps/web/src/evidence-view.tsx"]);
+    expect(hits.sort()).toEqual([
+      "apps/web/src/ask.tsx",
+      "apps/web/src/evidence-text.ts",
+      "apps/web/src/evidence-view.tsx",
+    ]);
   });
 });
 

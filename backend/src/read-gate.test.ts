@@ -194,6 +194,49 @@ describe("read-gate: the window that fills a limit", () => {
   });
 });
 
+describe("read-gate: the status-filtered knowledge page at the scan cap (X02B-R3)", () => {
+  it("answers a short page whose `next` is where the scan stopped, so a match beyond the cap is reached by following it", () => {
+    for (let i = 0; i < 120; i++)
+      insertItem(db, { ...attrs, status: "verified", type: "Project", name: `검증 ${i}` });
+    const wanted = insertItem(db, { ...attrs, type: "Project", name: "뒤의 후보" });
+    const gate = createReadGate(db, registryOf(policy()), { maxScan: 100 });
+    const first = gate.semanticPage({ status: "candidate" });
+    expect(first.items).toEqual([]);
+    expect(first.next).not.toBeNull();
+    const second = gate.semanticPage({ status: "candidate", after: first.next as number });
+    expect(second.items.map((i) => i.id)).toEqual([wanted]);
+    expect(second.next).toBeNull();
+  });
+
+  it("never answers a hidden item's number as `next`: it is the last shown number the scan read, whatever its status", () => {
+    const secret = source("s", SECRET);
+    for (let i = 0; i < 99; i++)
+      insertItem(db, { ...attrs, status: "verified", type: "Project", name: `검증 ${i}` });
+    const hidden = insertItem(db, { ...attrs, type: "Project", name: "가려진 항목" });
+    const fact = saveFact(db, { ...attrs, itemId: hidden, kind: "memo", value: "값" });
+    addEvidence(db, {
+      target: { factId: fact.id },
+      sourceVersionId: secret.versionId,
+      start: 0,
+      end: 2,
+      quote: "합성",
+    });
+    const wanted = Array.from({ length: 5 }, (_, i) =>
+      insertItem(db, { ...attrs, type: "Project", name: `뒤의 후보 ${i}` }),
+    );
+    const gate = createReadGate(db, registryOf(policy()), { maxScan: 100 });
+    expect(hidden).toBe(100);
+    const first = gate.semanticPage({ status: "candidate" });
+    expect(first.items).toEqual([]);
+    expect(first.next).toBe(99);
+    // a status nothing has gives the same answer, so sweeping it finds no number a shown row lacks
+    expect(gate.semanticPage({ status: "rejected" })).toEqual({ items: [], next: 99 });
+    const second = gate.semanticPage({ status: "candidate", after: first.next as number });
+    expect(second.items.map((i) => i.id)).toEqual(wanted);
+    expect(second.next).toBeNull();
+  });
+});
+
 describe("read-gate: Home's Insights, their evidence and an evidence row's source", () => {
   it("lists only the Insights whose whole lineage is shown, wherever they stand", () => {
     const a = source("a");

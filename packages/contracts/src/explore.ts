@@ -4,6 +4,7 @@
 // The row shapes mirror the Semantic list's (`SemanticFactSchema`, `SemanticRelationSchema` in index.ts) with the
 // valid interval added; this file cannot import them (index.ts re-exports this file), so the enums are spelled here.
 import { z } from "zod";
+import { AttachmentSchema, NativeLocatorSchema } from "./connector.ts";
 
 /** X02-D5: items per page. No total is ever answered: a count would include what the gate hides. */
 export const EXPLORE_PAGE_SIZE = 50;
@@ -21,7 +22,8 @@ const ExploreItemRefSchema = z.object({
   name: z.string(),
 });
 export const ExploreItemsResponseSchema = z.object({
-  items: z.array(ExploreItemRefSchema),
+  /** `alias` (X02B-R1): the first shown alias that matched when the name did not; null for a name match. */
+  items: z.array(ExploreItemRefSchema.extend({ alias: z.string().nullable() })),
   next: z.int().positive().nullable(),
 });
 
@@ -72,6 +74,8 @@ export const ExploreItemResponseSchema = z
     center: ExploreItemRefSchema.extend({
       /** The Wiki page of the item, when one is stored and shown. */
       wikiKey: z.string().nullable(),
+      /** The shown active members of the item's group, ascending by id (X02B-R2); `mergeId` is what an unmerge takes. */
+      members: z.array(ExploreItemRefSchema.extend({ mergeId: z.int().positive() })),
       facts: z.array(ExploreFactSchema),
       relations: z.array(ExploreRelationSchema),
     }).optional(),
@@ -93,7 +97,18 @@ export const ExploreItemResponseSchema = z
         o.truncated === undefined,
   );
 
-export const ExploreSourceRequestSchema = z.strictObject({ versionId: z.int().positive() });
+/** X02B-R2: item names by number; a missing or hidden number is left out, not refused. */
+export const EXPLORE_NAMES_MAX = 200;
+export const ExploreNamesRequestSchema = z.strictObject({
+  ids: z.array(z.int().positive()).min(1).max(EXPLORE_NAMES_MAX),
+});
+export const ExploreNamesResponseSchema = z.object({ items: z.array(ExploreItemRefSchema) });
+
+export const ExploreSourceRequestSchema = z.strictObject({
+  versionId: z.int().positive(),
+  /** X02B-R5: a code point of `body`; with it the answer carries the locator and attachment of the block holding it. */
+  start: z.int().nonnegative().optional(),
+});
 /** The same fields as `EvidenceSourceResponseSchema.sourceVersion`. The body is imported, untrusted text. */
 export const ExploreSourceResponseSchema = z.object({
   sourceVersion: z.object({
@@ -103,4 +118,7 @@ export const ExploreSourceResponseSchema = z.object({
     title: z.string(),
     body: z.string(),
   }),
+  /** Both null without `start` (or for a gap), as in `EvidenceSourceResponseSchema`. */
+  locator: NativeLocatorSchema.nullable(),
+  attachment: AttachmentSchema.nullable(),
 });

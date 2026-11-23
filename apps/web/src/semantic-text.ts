@@ -71,8 +71,9 @@ export const REVIEW_INTRO =
   "추출된 지식을 확인합니다. 승인·기각·이의·되돌리기와 값 고치기는 바로 저장되고, 목록은 다시 읽어 보여 줍니다.";
 export const REVIEW_LOADING = "지식 목록을 불러오는 중입니다.";
 export const REVIEW_EMPTY = "이 상태로 보여 줄 지식이 없습니다.";
-export const REVIEW_TRUNCATED =
-  "목록이 잘렸습니다(처음 100개 항목). 나머지는 탐색에서 항목을 찾아 같은 조치를 하세요.";
+export const REVIEW_MORE = "더 보기";
+export const PAIRS_HEADING = "합치기 후보";
+export const PAIRS_EMPTY = "합치기 후보가 없습니다.";
 export const CONFLICTS_EMPTY = "검토할 충돌이 없습니다.";
 export const CONFLICTS_TRUNCATED = "충돌 목록이 잘렸습니다.";
 export const FILTER_ALL = "전체";

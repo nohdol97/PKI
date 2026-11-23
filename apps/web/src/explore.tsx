@@ -3,8 +3,9 @@
 // imported text: React text nodes inside <bdi> only (V02-R15). Nothing is stored: the search, the chosen item and
 // the filters live in this component until the user leaves the screen (X02-D2).
 import type { EvidenceSource, RouteResponse } from "@pki/contracts";
-import { useCallback, useEffect, useState, type FormEvent, type Ref } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type Ref } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
+import { EntityCuration } from "./entity-curation.tsx";
 import { SOURCE_GONE } from "./evidence-text.ts";
 import { SourceView, useFocusOn } from "./evidence-view.tsx";
 import {
@@ -23,7 +24,9 @@ import {
   OPEN_WIKI,
   TIMELINE_NONE,
 } from "./explore-text.ts";
+import { NeighbourGraph } from "./neighbour-graph.tsx";
 import { useNav } from "./nav.tsx";
+import { previousKey, rememberPrevious, RowDetail, type Previous } from "./row-detail.tsx";
 import { SemanticRowActions, act, type ReviewAction } from "./semantic-review.tsx";
 import { EPISTEMIC_TEXT, STATUS_TEXT } from "./semantic-text.ts";
 
@@ -178,6 +181,7 @@ export function ItemList({
 }
 
 export function Neighbourhood({
+  api,
   read,
   depth,
   off,
@@ -189,8 +193,10 @@ export function Neighbourhood({
   onOpen,
   onEvidence,
   onAct,
+  onChanged,
   onWiki,
 }: {
+  api: ApiClient;
   read: Read;
   depth: number;
   off: ReadonlySet<string>;
@@ -202,9 +208,13 @@ export function Neighbourhood({
   onOpen: (itemId: number) => void;
   onEvidence: (row: Row, label: string) => void;
   onAct: (action: ReviewAction) => void;
+  /** Read the centre item again after a curation action. */
+  onChanged: () => void;
   onWiki: (key: string) => void;
 }) {
   const { center } = read;
+  /** Each row's replaced interval lives here, not in its line: a re-read can move the line between timeline groups and mount it anew. */
+  const [previous, setPrevious] = useState<ReadonlyMap<string, Previous>>(new Map());
   const nameOf = (id: number) =>
     id === center.id ? center.name : (read.items.find((i) => i.id === id)?.name ?? `항목 ${id}`);
   const types = [...new Set(read.edges.map((e) => e.type))].sort();
@@ -242,6 +252,20 @@ export function Neighbourhood({
           근거 보기
         </button>{" "}
         <SemanticRowActions kind={e.kind} id={e.id} name={label} onAct={onAct} />
+        {row && (
+          <RowDetail
+            api={api}
+            kind={e.kind}
+            id={e.id}
+            name={`${e.kind === "fact" ? "사실" : "관계"} ${label}`}
+            validity={{ from: row.validAt, until: row.validUntil }}
+            previous={previous.get(previousKey(e.kind, e.id))}
+            onPrevious={(p) =>
+              setPrevious((held) => rememberPrevious(held, previousKey(e.kind, e.id), p))
+            }
+            onChanged={onChanged}
+          />
+        )}
       </li>
     );
   };
@@ -260,6 +284,14 @@ export function Neighbourhood({
           </button>
         )}
       </p>
+      <RowDetail
+        key={center.id}
+        api={api}
+        kind="item"
+        id={center.id}
+        name={`항목 ${center.name}`}
+        onChanged={onChanged}
+      />
       <h3>이웃</h3>
       <p>
         <label>
@@ -285,6 +317,15 @@ export function Neighbourhood({
         </fieldset>
       )}
       {read.truncated && <p role="status">{EXPLORE_TRUNCATED}</p>}
+      {edges.length > 0 && (
+        <NeighbourGraph
+          center={center}
+          items={read.items}
+          edges={read.edges}
+          off={off}
+          onOpen={onOpen}
+        />
+      )}
       {edges.length === 0 ? (
         <p>{EXPLORE_NO_NEIGHBOURS}</p>
       ) : (
@@ -332,6 +373,13 @@ export function Neighbourhood({
           </li>
         )}
       </ol>
+      <EntityCuration
+        key={center.id}
+        api={api}
+        center={center}
+        onChanged={onChanged}
+        onOpen={onOpen}
+      />
       {evidence && (
         <section aria-label="근거 원본">
           <h3 tabIndex={-1} ref={sourceHeadingRef}>
@@ -360,6 +408,8 @@ export function Explore({ api }: { api: ApiClient }) {
   const [notice, setNotice] = useState<string>();
   const [opens, setOpens] = useState(0);
   const [sourceOpens, setSourceOpens] = useState(0);
+  /** The newest neighbourhood read: an older answer arriving later is dropped (last request wins). */
+  const newest = useRef(0);
   const headingRef = useFocusOn(opens, read !== undefined);
   const sourceHeadingRef = useFocusOn(sourceOpens, evidence !== undefined);
 
@@ -377,10 +427,11 @@ export function Explore({ api }: { api: ApiClient }) {
 
   /** Reads the neighbourhood of `id`; `fresh` is an item the user just chose (focus, and nothing carried over). */
   const load = useCallback(
-    (id: number, at: number, fresh: boolean) =>
-      api("exploreItem", { itemId: id, depth: at }).then(
+    (id: number, at: number, fresh: boolean) => {
+      const turn = ++newest.current;
+      return api("exploreItem", { itemId: id, depth: at }).then(
         (r) => {
-          if (r.status !== "ok") return;
+          if (turn !== newest.current || r.status !== "ok") return;
           setRead(r as Read);
           if (fresh) {
             setEvidence(undefined);
@@ -390,10 +441,12 @@ export function Explore({ api }: { api: ApiClient }) {
           }
         },
         (error: unknown) => {
+          if (turn !== newest.current) return;
           setRead(undefined);
           setNotice(gone(error) ? EXPLORE_GONE : `불러오지 못했습니다: ${message(error)}`);
         },
-      ),
+      );
+    },
     [api],
   );
   const open = (id: number) => {
@@ -456,6 +509,7 @@ export function Explore({ api }: { api: ApiClient }) {
       {notice && <p role="alert">{notice}</p>}
       {read && (
         <Neighbourhood
+          api={api}
           read={read}
           depth={depth}
           off={off}
@@ -473,6 +527,7 @@ export function Explore({ api }: { api: ApiClient }) {
           onOpen={open}
           onEvidence={showEvidence}
           onAct={(a) => void run(a)}
+          onChanged={() => itemId !== undefined && void load(itemId, depth, false)}
           onWiki={(key) => nav.go("wiki", { wikiKey: key })}
         />
       )}

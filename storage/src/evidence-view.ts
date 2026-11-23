@@ -80,11 +80,15 @@ function blockAt(blocksJson: unknown, start: number): Block | undefined {
 }
 
 /** The locator of the block holding code point `start`; null for no blocks or a gap (I01-R29). */
-const locatorAt = (blocksJson: unknown, start: number): NativeLocator | null =>
+export const locatorAt = (blocksJson: unknown, start: number): NativeLocator | null =>
   blockAt(blocksJson, start)?.locator ?? null;
 
 /** The attachment that block names in the version's `meta`; null for no meta, no entry or no attachment (I02C-R6). */
-function attachmentAt(blocksJson: unknown, metaJson: unknown, start: number): Attachment | null {
+export function attachmentAt(
+  blocksJson: unknown,
+  metaJson: unknown,
+  start: number,
+): Attachment | null {
   const index = blockAt(blocksJson, start)?.attachment;
   if (index === undefined || typeof metaJson !== "string") return null;
   const list = (JSON.parse(metaJson) as { attachments?: Attachment[] }).attachments;

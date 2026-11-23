@@ -5,7 +5,14 @@ import type { RouteName, RouteResponse } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
-import { loadReview, perform, ReviewView, type Review } from "./semantic-review.tsx";
+import {
+  loadMore,
+  loadReview,
+  perform,
+  performPair,
+  ReviewView,
+  type Review,
+} from "./semantic-review.tsx";
 
 const row = {
   confidence: null,
@@ -14,8 +21,8 @@ const row = {
   evidenceCount: 1,
   epistemic: "explicit",
 } as const;
-const list = (status: "candidate" | "verified"): RouteResponse<"semantic"> => ({
-  truncated: false,
+const list = (status: "candidate" | "verified"): RouteResponse<"semanticPage"> => ({
+  next: null,
   items: [
     {
       id: 1,
@@ -61,7 +68,9 @@ const view = (review: Review, filter: "candidate" | "all" = "candidate", notice?
       filter={filter}
       notice={notice}
       onAct={() => undefined}
+      onPair={() => undefined}
       onFilter={() => undefined}
+      onMore={() => undefined}
     />,
   );
 
@@ -69,8 +78,9 @@ describe("지식 검토 (X02-C2c)", () => {
   it("approves a candidate fact through semanticDecide, reads the list again and shows it as 확정; a refusal is shown in words", async () => {
     let status: "candidate" | "verified" = "candidate";
     const { api, calls } = fake({
-      semantic: () => list(status),
+      semanticPage: () => list(status),
       conflicts: () => noConflicts,
+      entityCandidates: () => ({ candidates: [], truncated: false }),
       semanticDecide: () => {
         status = "verified";
         return {
@@ -80,14 +90,18 @@ describe("지식 검토 (X02-C2c)", () => {
         };
       },
     });
-    const done = await perform(api, { type: "decide", kind: "fact", id: 7, action: "approve" });
+    const done = await perform(
+      api,
+      { type: "decide", kind: "fact", id: 7, action: "approve" },
+      "all",
+    );
     expect(calls[0]).toEqual(["semanticDecide", { kind: "fact", id: 7, action: "approve" }]);
     expect(
       calls
         .slice(1)
         .map(([name]) => name)
         .sort(),
-    ).toEqual(["conflicts", "semantic"]);
+    ).toEqual(["conflicts", "entityCandidates", "semanticPage"]);
     expect(done.refusal).toBeUndefined();
     const out = view(done.review, "all");
     expect(out).toContain("확정");
@@ -95,31 +109,32 @@ describe("지식 검토 (X02-C2c)", () => {
     expect(out).not.toContain("<img");
 
     const refused = fake({
-      semantic: () => list("candidate"),
+      semanticPage: () => list("candidate"),
       conflicts: () => noConflicts,
+      entityCandidates: () => ({ candidates: [], truncated: false }),
       semanticDecide: () => ({ status: "refused", reason: "basis-required" }),
     });
-    const again = await perform(refused.api, {
-      type: "decide",
-      kind: "fact",
-      id: 7,
-      action: "approve",
-    });
+    const again = await perform(
+      refused.api,
+      { type: "decide", kind: "fact", id: 7, action: "approve" },
+      "all",
+    );
     expect(again.refusal).toContain("근거");
     expect(again.refusal).not.toContain("basis-required");
   });
 
   it("fixes a fact's value through semanticCorrect with `replace`", async () => {
     const { api, calls } = fake({
-      semantic: () => list("candidate"),
+      semanticPage: () => list("candidate"),
       conflicts: () => noConflicts,
+      entityCandidates: () => ({ candidates: [], truncated: false }),
       semanticCorrect: () => ({
         status: "applied",
         seq: 2,
         entry: { kind: "fact", id: 9, status: "verified", epistemic: "user-approved" },
       }),
     });
-    await perform(api, { type: "replace", id: 7, value: "2026-12-11" });
+    await perform(api, { type: "replace", id: 7, value: "2026-12-11" }, "all");
     expect(calls[0]).toEqual([
       "semanticCorrect",
       { correction: { action: "replace", id: 7, value: "2026-12-11" } },
@@ -129,8 +144,9 @@ describe("지식 검토 (X02-C2c)", () => {
   it("drops a conflict pair from the list once one side is rejected and the list is read again", async () => {
     let rejected = false;
     const { api } = fake({
-      semantic: () => list("candidate"),
+      semanticPage: () => list("candidate"),
       conflicts: () => (rejected ? noConflicts : conflictPair),
+      entityCandidates: () => ({ candidates: [], truncated: false }),
       semanticDecide: () => {
         rejected = true;
         return {
@@ -140,16 +156,94 @@ describe("지식 검토 (X02-C2c)", () => {
         };
       },
     });
-    const before = await loadReview(api);
+    const before = await loadReview(api, "all");
     expect(view(before)).toContain("어긋남");
-    const after = await perform(api, { type: "decide", kind: "fact", id: 8, action: "reject" });
+    const after = await perform(
+      api,
+      { type: "decide", kind: "fact", id: 8, action: "reject" },
+      "all",
+    );
     expect(view(after.review)).not.toContain("어긋남");
   });
 
-  it("says when the list was cut and where to find the rest, and when nothing matches", () => {
-    const cut: Review = { list: { ...list("candidate"), truncated: true }, conflicts: noConflicts };
-    expect(view(cut)).toContain("탐색");
-    const empty: Review = { list: { items: [], truncated: false }, conflicts: noConflicts };
-    expect(view(empty)).toContain("보여 줄 지식이 없습니다");
+  it("reads the chosen status from the server and appends the next page after `after` (X02B-C5 ①)", async () => {
+    const item = (id: number) =>
+      list("verified").items.map((i) => ({ ...i, id, name: `항목${id}` }));
+    const { api, calls } = fake({
+      semanticPage: (request) =>
+        (request as { after?: number }).after === undefined
+          ? { items: item(1), next: 1 }
+          : { items: item(2), next: null },
+      conflicts: () => noConflicts,
+      entityCandidates: () => ({ candidates: [], truncated: false }),
+    });
+    const first = await loadReview(api, "verified");
+    expect(calls.find(([name]) => name === "semanticPage")?.[1]).toEqual({ status: "verified" });
+    expect(view(first, "all")).toContain("더 보기");
+    const more = await loadMore(api, first, "verified");
+    expect(calls.filter(([name]) => name === "semanticPage")[1]?.[1]).toEqual({
+      status: "verified",
+      after: 1,
+    });
+    expect(more.list.items.map((i) => i.id)).toEqual([1, 2]);
+    expect(view(more, "all")).not.toContain("더 보기");
+    expect(view({ list: { items: [], next: null }, conflicts: noConflicts, pairs: [] })).toContain(
+      "보여 줄 지식이 없습니다",
+    );
+  });
+
+  it("disables 더 보기 while a page is being read, and keeps it when a page is short or empty but `next` is set (X02B-R3)", () => {
+    const held: Review = { list: { items: [], next: 7 }, conflicts: noConflicts, pairs: [] };
+    const idle = view(held, "candidate");
+    expect(idle).toContain("더 보기");
+    expect(idle).not.toContain("보여 줄 지식이 없습니다");
+    expect(idle).not.toMatch(/<button[^>]*disabled[^>]*>더 보기/);
+    const busy = renderToStaticMarkup(
+      <ReviewView
+        review={held}
+        filter="candidate"
+        loading
+        onAct={() => undefined}
+        onPair={() => undefined}
+        onFilter={() => undefined}
+        onMore={() => undefined}
+      />,
+    );
+    expect(busy).toMatch(/<button[^>]*disabled[^>]*>더 보기/);
+  });
+
+  it("shows a merge-candidate pair by two names, marks it 다른 것 and reads again without it (X02B-C5 ②)", async () => {
+    let marked = false;
+    const { api, calls } = fake({
+      semanticPage: () => list("candidate"),
+      conflicts: () => noConflicts,
+      entityCandidates: () => ({
+        candidates: marked ? [] : [{ a: 1, b: 2, signals: ["name-match"] }],
+        truncated: false,
+      }),
+      exploreNames: () => ({
+        items: [
+          { id: 1, type: "Project", name: "미리내" },
+          { id: 2, type: "Project", name: "<b>미리네</b>" },
+        ],
+      }),
+      entityDistinct: () => {
+        marked = true;
+        return { status: "applied" };
+      },
+    });
+    const before = await loadReview(api, "candidate");
+    expect(calls.find(([name]) => name === "exploreNames")?.[1]).toEqual({ ids: [1, 2] });
+    const out = view(before);
+    expect(out).toContain("미리내에 합치기");
+    expect(out).toContain("&lt;b&gt;미리네&lt;/b&gt;에 합치기");
+    expect(out).not.toContain("<b>");
+    const after = await performPair(api, { type: "distinct", a: 1, b: 2 }, "candidate");
+    expect(calls.find(([name]) => name === "entityDistinct")?.[1]).toEqual({
+      a: 1,
+      b: 2,
+      on: true,
+    });
+    expect(view(after.review)).not.toContain("에 합치기");
   });
 });

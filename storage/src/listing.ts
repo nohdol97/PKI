@@ -9,11 +9,12 @@ const COLUMNS =
   "v.id, s.connector_instance_id AS connectorId, s.namespace, s.external_id AS externalId, v.title";
 const IS_LATEST = "v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id)";
 
-export function listSources(db: SqlDriver, limit = 100): SourceSummary[] {
+/** The newest `limit` sources; with `before`, only those whose latest version id is below it (X02B-R4). */
+export function listSources(db: SqlDriver, limit = 100, before?: number): SourceSummary[] {
   return db.all(
     `SELECT ${COLUMNS} FROM source_versions v JOIN sources s ON s.id = v.source_id
-     WHERE ${IS_LATEST} ORDER BY v.id DESC LIMIT ?`,
-    [limit],
+     WHERE ${IS_LATEST} ${before === undefined ? "" : "AND v.id < ?"} ORDER BY v.id DESC LIMIT ?`,
+    [...(before === undefined ? [] : [before]), limit],
   ) as unknown as SourceSummary[];
 }
 
@@ -32,22 +33,47 @@ export function findSources(db: SqlDriver, query: string, limit = 50): SourceSum
   ) as unknown as SourceSummary[];
 }
 
+const CALL_COLUMNS = `id, request_id AS requestId, attempt, provider, destination, task_kind AS taskKind,
+       classification, policy_version AS policyVersion, outcome, reason,
+       duration_ms AS durationMs, created_at AS createdAt`;
+
+const callOf = (r: Record<string, unknown>): ProviderCall => ({
+  requestId: r.requestId as string,
+  attempt: r.attempt as number,
+  provider: r.provider as string,
+  egress: providerEgress(r.provider as string),
+  destination: r.destination as string | null,
+  taskKind: r.taskKind as string,
+  classification: r.classification as string,
+  policyVersion: r.policyVersion as string | null,
+  outcome: r.outcome as string,
+  reason: r.reason as string | null,
+  durationMs: r.durationMs as number | null,
+  createdAt: r.createdAt as string,
+});
+
 /** Provider call attempts, newest first, each labelled external or local (ADR 0014). */
 export function listProviderCalls(db: SqlDriver, limit = 100): ProviderCall[] {
+  return db
+    .all(`SELECT ${CALL_COLUMNS} FROM provider_calls ORDER BY id DESC LIMIT ?`, [limit])
+    .map(callOf);
+}
+
+/** One page of the attempts, newest first; `next` is the row number to pass as `before`, null at the end (X02B-R4). */
+export function listProviderCallPage(
+  db: SqlDriver,
+  options: { before?: number | undefined; limit: number },
+): { calls: ProviderCall[]; next: number | null } {
   const rows = db.all(
-    `SELECT request_id AS requestId, attempt, provider, destination, task_kind AS taskKind,
-       classification, policy_version AS policyVersion, outcome, reason,
-       duration_ms AS durationMs, created_at AS createdAt
-     FROM provider_calls ORDER BY id DESC LIMIT ?`,
-    [limit],
-  ) as unknown as Omit<ProviderCall, "egress">[];
-  return rows.map(({ requestId, attempt, provider, ...rest }) => ({
-    requestId,
-    attempt,
-    provider,
-    egress: providerEgress(provider),
-    ...rest,
-  }));
+    `SELECT ${CALL_COLUMNS} FROM provider_calls ${options.before === undefined ? "" : "WHERE id < ?"}
+     ORDER BY id DESC LIMIT ?`,
+    [...(options.before === undefined ? [] : [options.before]), options.limit + 1],
+  );
+  const page = rows.slice(0, options.limit);
+  return {
+    calls: page.map(callOf),
+    next: rows.length > options.limit ? ((page.at(-1)?.id as number | undefined) ?? null) : null,
+  };
 }
 
 export interface ProviderCallRow {
