@@ -482,6 +482,12 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
           };
         });
       if (!linkRefused(db, Number(item.existingItemId), keys)) continue;
+      // a refused link makes the item new with the answer's own type: a table source writes no analytical one
+      if (tabular && (EXTRACT_ANALYTICAL_ITEM_TYPES as readonly string[]).includes(item.type)) {
+        items.delete(ref);
+        drops.other++;
+        continue;
+      }
       refused.push({ ref, existing: Number(item.existingItemId) });
       items.set(ref, { ...item, existingItemId: null });
     }

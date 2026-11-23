@@ -234,6 +234,36 @@ describe("extract.analytical: a table source's own extraction (X-C3)", () => {
   });
 });
 
+describe("extract.analytical: a refused link on a table source (X-C3)", () => {
+  it("writes no Metric when the answer links a Metric to a candidate whose key the link check refuses", async () => {
+    await extract(
+      answer({
+        items: [item("p", "Project", "물결")],
+        facts: [{ ...fact("p", "identifier.key", "K-1", "물결 K-1"), context: "sys" }],
+      }),
+      { body: "물결 K-1 이다." },
+    );
+    const project = db.all("SELECT id FROM items")[0]?.id as number;
+    const job = await extract(
+      answer({
+        items: [item("x", "Metric", "물결", String(project))],
+        facts: [
+          { ...fact("x", "identifier.key", "K-2", "물결 K-2"), context: "sys" },
+          fact("x", "metric.unit", "원", "물결 K-2 단위 원"),
+        ],
+      }),
+      {
+        title: "물결",
+        body: "물결\t원\n물결 K-2 단위 원\n",
+        blocks: [{ start: 0, end: 2, locator: { format: "csv", record: 1, line: 1, field: 1 } }],
+      },
+    );
+    expect(items()).toEqual([{ type: "Project", name: "물결" }]);
+    expect(facts().map((f) => f.kind)).toEqual(["identifier.key"]);
+    expect(drops(job)).toEqual({ quotes: 0, other: 3 }); // the Metric, its key and its unit
+  });
+});
+
 describe("extract.analytical: the egress of a table's columns (X-C4)", () => {
   it("sends the Dataset's name and no column name of the table in the request of another source", async () => {
     const CANARY = "canary_col_qx7";
