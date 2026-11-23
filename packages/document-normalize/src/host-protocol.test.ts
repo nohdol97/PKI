@@ -57,6 +57,20 @@ describe("parseNormalizeResult", () => {
     ).toBeUndefined();
   });
 
+  it("a DOCX comment locator passes whole; a comment part outside head and text is a misfit (I02B-R30)", () => {
+    const at = (comment: unknown) =>
+      ok(
+        doc({
+          format: "docx",
+          blocks: [{ start: 0, end: 1, locator: { format: "docx", paragraph: 0, comment } }],
+        }),
+      );
+    const good = { thread: 0, index: 1, part: "text" };
+    expect(parse(at(good))).toEqual(at(good));
+    expect(parse(at({ ...good, part: "tail" }))).toBeUndefined();
+    expect(parse(at({ ...good, extra: 1 }))).toBeUndefined();
+  });
+
   it("rebuilds the result: what comes back is a new object", () => {
     const raw = ok(doc());
     const parsed = parse(raw);

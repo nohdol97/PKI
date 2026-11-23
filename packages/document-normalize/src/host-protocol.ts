@@ -179,12 +179,13 @@ function copyOf(raw: Record<string, unknown>, names: readonly string[]): Record<
 }
 
 const PDF = ["format", "page"] as const;
-const DOCX = ["format", "paragraph", "style", "headingLevel", "table"] as const;
+const DOCX = ["format", "paragraph", "style", "headingLevel", "table", "comment"] as const;
 const XLSX = ["format", "sheet", "cell", "row", "column"] as const;
 const CSV = ["format", "record", "line", "field"] as const;
 const HTML = ["format", "path", "line"] as const;
 const MARKDOWN = ["format", "line", "node", "depth"] as const;
 const LINE = ["format", "line"] as const;
+const COMMENT = ["thread", "index", "part"] as const;
 const TABLE = ["index", "row", "cell"] as const;
 
 function parseLocator(raw: unknown): Locator | undefined {
@@ -202,11 +203,28 @@ function parseLocator(raw: unknown): Locator | undefined {
       ) {
         return undefined;
       }
-      if (t === undefined) return copyOf(raw, DOCX) as Locator;
-      if (!isRecord(t) || !shaped(t, TABLE, 3) || !int(t.index) || !int(t.row) || !int(t.cell)) {
+      const c = raw.comment;
+      if (
+        c !== undefined &&
+        (!isRecord(c) ||
+          !shaped(c, COMMENT, 3) ||
+          !int(c.thread) ||
+          !int(c.index) ||
+          (c.part !== "head" && c.part !== "text"))
+      ) {
         return undefined;
       }
-      return { ...copyOf(raw, DOCX), table: copyOf(t, TABLE) } as Locator;
+      if (
+        t !== undefined &&
+        (!isRecord(t) || !shaped(t, TABLE, 3) || !int(t.index) || !int(t.row) || !int(t.cell))
+      ) {
+        return undefined;
+      }
+      return {
+        ...copyOf(raw, DOCX),
+        ...(t === undefined ? {} : { table: copyOf(t as Record<string, unknown>, TABLE) }),
+        ...(c === undefined ? {} : { comment: copyOf(c as Record<string, unknown>, COMMENT) }),
+      } as Locator;
     }
     case "xlsx":
       return shaped(raw, XLSX, 2) &&
@@ -248,7 +266,15 @@ function everyElement(list: unknown, max: number, ok: (v: unknown) => boolean): 
 
 const DOCUMENT = ["format", "text", "blocks", "metadata", "limitations", "encoding"] as const;
 const BLOCK = ["start", "end", "locator"] as const;
-const META = ["title", "author", "created", "modified", "pageCount", "sheetNames"] as const;
+const META = [
+  "title",
+  "author",
+  "created",
+  "modified",
+  "pageCount",
+  "sheetNames",
+  "participants",
+] as const;
 const LIMITATION = ["code", "count", "pages"] as const;
 const ENCODING_NAMES: readonly unknown[] = ["utf-8", "utf-16le", "utf-16be", "euc-kr"];
 const ENCODING_METHODS: readonly unknown[] = ["bom", "strict", "fallback"];
@@ -286,6 +312,10 @@ function parseDocument(raw: Record<string, unknown>, caps: ResultCaps) {
   if (meta.sheetNames !== undefined) {
     if (!everyElement(meta.sheetNames, CAP.list, (n) => str(n, CAP.short))) return undefined;
     metadata.sheetNames = [...meta.sheetNames];
+  }
+  if (meta.participants !== undefined) {
+    if (!everyElement(meta.participants, CAP.list, (n) => str(n, CAP.short))) return undefined;
+    metadata.participants = [...meta.participants];
   }
   let encoding;
   if (raw.encoding !== undefined) {

@@ -127,7 +127,7 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
   | `format` | 필드 | 번호의 기준 |
   |---|---|---|
   | `pdf` | `page` | 쪽 1부터 |
-  | `docx` | `paragraph`, 선택 `style`, 선택 `headingLevel`, 선택 `table: { index, row, cell }` | 문단(빈 문단 포함)·표·행·칸 0부터 |
+  | `docx` | `paragraph`, 선택 `style`, 선택 `headingLevel`, 선택 `table: { index, row, cell }`, 선택 `comment: { thread, index, part }`(복원한 메모. `part`는 `head` 또는 `text`) | 문단(빈 문단 포함)·표·행·칸·메모 스레드·스레드 안 번호 0부터 |
   | `xlsx` | `sheet`, 선택 `cell`(A1 형식), 선택 `row`, 선택 `column` | 행·열 1부터. 시트 이름 블록은 `cell`이 없다 |
   | `csv` | `record`, `line`(레코드가 시작하는 원문의 줄), `field` | 모두 1부터 |
   | `html` | `path`(요소 경로, 예: `body>div[1]>p[2]`), `line` | 형제 번호와 줄 1부터 |
@@ -397,7 +397,8 @@ export const CONNECTOR_SDK_VERSION = 2;
 type NativeLocator =                    // I02 spec "위치표의 모양"과 같다
   | { format: "pdf"; page: number }
   | { format: "docx"; paragraph: number; style?: string; headingLevel?: number;
-      table?: { index: number; row: number; cell: number } }
+      table?: { index: number; row: number; cell: number };
+      comment?: { thread: number; index: number; part: "head" | "text" } }
   | { format: "xlsx"; sheet: string; cell?: string; row?: number; column?: number }
   | { format: "csv"; record: number; line: number; field: number }
   | { format: "html"; path: string; line: number }
@@ -928,3 +929,4 @@ C1~C4는 이슈 #18의 문장 그대로다. H1·H2는 배포처로 넘어가는 
 | 2026-11-23 | R19 멈춤 목록과 R20 표에 `credential-unusable`(held, 시도 쓰지 않음, 인스턴스가 `ready`가 될 때) 추가 | I01-R19, I01-R20 | I06-T03(#114)이 `SYNC_OUTCOMES`와 함께 고침. [I06 spec](2026-11-22-I06-connector-credentials.md) I06-R10 |
 | 2026-11-23 | "T06이 넘기는 것" 3·10②에 처리 표시: 인스턴스 범위 파일을 설치본이 얻는 길은 I07 spec이 닫았다(등록이 빌드할 때 묶음, 실행본은 파일을 읽지 않음, 로그 코드 넷과 `rejected`, 확인은 S31) | "T06이 넘기는 것" 3·10② | I07-T04(#115). 요구사항의 뜻은 바꾸지 않았고 옛 문장은 처리 표시와 함께 남긴다 |
 | 2026-11-23 | "T10이 넘기는 것" 4에 처리 표시: 수집기에 비밀 값을 건네는 통로는 I06이 닫았다(칸의 선언, `initialize`의 접근자, 화면에서 값을 넣는 길, 문서는 8장) | "T10이 넘기는 것" 4 | I06-T05(#114). 요구사항의 뜻은 바꾸지 않았고 옛 문장은 처리 표시와 함께 남긴다 |
+| 2026-11-24 | 위치표(`NativeLocator`)의 `docx`에 선택 필드 `comment`를 더한다(규격 버전은 그대로 2) | I01-R7의 위치표, 아래 `NativeLocator` 모양 | I02B-T05(#19)의 DOCX 메모 복원. I01-R7의 "I02 위치표를 따른다" 약속 |
