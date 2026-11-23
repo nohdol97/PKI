@@ -3,7 +3,7 @@
 // hangs on the item. A refusal is a code in a 200 body; an item that is absent, deleted or hidden (or whose group's top
 // is) answers the one 404 `not-found`; no name, value or quote is in any answer. All data is synthetic.
 import { routes, type RouteName } from "@pki/contracts";
-import { createProductRegistry } from "@pki/knowledge-engine";
+import { createProductRegistry, recomputeDependencyDelay } from "@pki/knowledge-engine";
 import {
   addEvidence,
   automatedLifecycle,
@@ -13,6 +13,7 @@ import {
   insertItem,
   registerConnectorInstance,
   saveFact,
+  saveRelation,
   saveSourceRecord,
   userDecisions,
   type DerivativeRegistry,
@@ -423,5 +424,75 @@ describe("POST /api/entities/split (S02-R25, R15)", () => {
     ]) {
       expect((await call("entitySplit", body)).status).toBe(400);
     }
+  });
+
+  /** Evidence for `target` quoting the NAME of a version row. */
+  const cite = (target: { factId: number } | { relationId: number }, versionId: number) =>
+    addEvidence(db, {
+      target,
+      sourceVersionId: versionId,
+      start: 0,
+      end: [...NAME].length,
+      quote: NAME,
+    });
+  const versionOf = (externalId: string) =>
+    db.all(
+      `SELECT v.id FROM source_versions v JOIN sources s ON s.id = v.source_id
+       WHERE s.external_id = ? ORDER BY v.id DESC`,
+      [externalId],
+    )[0]?.id as number;
+
+  it("answers row-not-on-item and changes nothing for a fact of a hidden source on a visible item", async () => {
+    const open = itemFrom("open");
+    const secretFact = factOf(open, "2026-12-09");
+    itemFrom("secret", ["secret"]);
+    cite({ factId: secretFact }, versionOf("secret"));
+    const alone: ScopePolicy = {
+      ...defaultScopePolicy,
+      allows: (scopes) => !(scopes.length === 1 && scopes[0]?.includes("secret")),
+    };
+    await start({
+      registry: createDerivativeRegistry({
+        kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+        policy: alone,
+      }),
+    });
+    // the item is shown (its lineage has two scopes) while the fact rests on the secret source alone
+    expect((await call("semanticHistory", { kind: "item", id: open })).status).toBe(200);
+    expect(await call("semanticHistory", { kind: "fact", id: secretFact })).toEqual(NOT_FOUND);
+    const before = {
+      facts: db.all("SELECT * FROM facts ORDER BY id"),
+      items: db.all("SELECT id FROM items"),
+    };
+    const res = await call("entitySplit", {
+      itemId: open,
+      rows: [{ kind: "fact", id: secretFact }],
+      name: "n",
+    });
+    expect(res).toEqual({ status: 200, body: { status: "refused", reason: "row-not-on-item" } });
+    expect(db.all("SELECT * FROM facts ORDER BY id")).toEqual(before.facts);
+    expect(db.all("SELECT id FROM items")).toEqual(before.items);
+    expect(db.all("SELECT 1 FROM item_split_moves")).toEqual([]);
+  });
+
+  it("resolves a dependency-delay Insight that relied on a moved row, in the split's own request", async () => {
+    const x = itemFrom("x"); // target date 2026-12-05
+    const y = itemFrom("y");
+    db.run("UPDATE facts SET kind = 'completion_date', value = '2026-12-20' WHERE item_id = ?", [
+      y,
+    ]);
+    const rel = saveRelation(db, { subjectId: x, type: "DEPENDS_ON", objectId: y, ...attrs }).id;
+    cite({ relationId: rel }, versionOf("x"));
+    recomputeDependencyDelay(db, [x, y], { combinable: () => true });
+    expect(db.all("SELECT state FROM insights")).toEqual([{ state: "active" }]);
+    await start();
+    // x keeps its target date; the relation goes to a new item, so x no longer depends on y
+    const res = await call("entitySplit", {
+      itemId: x,
+      rows: [{ kind: "relation", id: rel }],
+      name: "다른 것",
+    });
+    expect(routes.entitySplit.response.parse(res.body)).toMatchObject({ status: "applied" });
+    expect(db.all("SELECT state FROM insights")).toEqual([{ state: "resolved" }]);
   });
 });

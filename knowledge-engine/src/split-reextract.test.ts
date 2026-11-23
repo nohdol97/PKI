@@ -6,6 +6,7 @@
 import { createBroker, createUserActionLedger, type Broker } from "@pki/providers";
 import {
   closeJob,
+  entityGroups,
   isFenceCurrent,
   leaseNextJob,
   listEvidence,
@@ -19,8 +20,9 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider, fixtureExtraction, type FakeStep } from "@pki/testkit";
+import { FakeProvider, fixtureExtraction, seedLegacyTombstone, type FakeStep } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { propagateCanonical } from "./canonical-kinds.ts";
 import { createExtractHandler } from "./extraction.ts";
 import { knowledgeCandidates } from "./linking.ts";
 import { propagateNewVersion } from "./propagation.ts";
@@ -203,5 +205,42 @@ describe("resolution.split: re-extraction of the same source (S02-R15)", () => {
     expect(await runNext()).toBe("succeeded");
     expect(factsOf(original)).toEqual([D1, D2]);
     expect(evidenceOf(moved)).toBe(1);
+  });
+});
+
+describe("resolution.split: what comes after a split (S02-R15)", () => {
+  it("deletes the moved row with its source and keeps the new item the user made", async () => {
+    setUp([answer([D1, D2])]);
+    const { created, moved } = await splitAfterV1();
+    const sourceId = db.all("SELECT id FROM sources")[0]?.id as number;
+    db.transaction(() => {
+      seedLegacyTombstone(db, {
+        sourceId,
+        version: 1,
+        at: T0.toISOString(),
+        reason: "source-deleted",
+      });
+      propagateCanonical(
+        db,
+        { kind: "source-deleted", sourceId, coversVersion: 1, lastRevision: null },
+        T0.toISOString(),
+      );
+    });
+    expect(db.all("SELECT 1 FROM facts WHERE id = ?", [moved])).toEqual([]); // the row is the source's
+    expect(db.all("SELECT 1 FROM item_split_moves")).toEqual([]);
+    expect(db.all("SELECT user_authored FROM items WHERE id = ?", [created])).toEqual([
+      { user_authored: 1 },
+    ]); // the item is the user's
+  });
+
+  it("reads the original and the new item as one group when the user merges them again", async () => {
+    setUp([answer([D1, D2])]);
+    const { original, created } = await splitAfterV1();
+    const merged = db.transaction(() => userDecisions.entities.merge(db, created, original));
+    expect(merged.status).toBe("applied");
+    expect(entityGroups.membersOf(db, original)).toEqual([original, created].sort((a, b) => a - b));
+    expect(entityGroups.representativeOf(db, created)).toBe(original);
+    // the merge cleared the split's distinct mark
+    expect(db.all("SELECT 1 FROM item_distinct")).toEqual([]);
   });
 });

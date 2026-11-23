@@ -349,3 +349,52 @@ describe("resolution.split: the hook covers every fact kind, identifiers and sta
     });
   });
 });
+
+describe("resolution.split: the moved relation row and the hook's reach (S02-R15)", () => {
+  it("changes only the end of a moved relation: every other column, valid_at included, is as it was", () => {
+    const [a, x] = [item(), item()] as [number, number];
+    fact(a, "2026-12-05");
+    const rel = saveRelation(db, {
+      subjectId: a,
+      type: "DEPENDS_ON",
+      objectId: x,
+      ...attrs,
+      validAt: "2026-03-01",
+      confidence: 0.7,
+    }).id;
+    const before = db.all("SELECT * FROM relations WHERE id = ?", [rel])[0];
+    const done = split(a, [{ kind: "relation", id: rel }]);
+    if (done.status !== "applied") throw new Error("split");
+    expect(db.all("SELECT * FROM relations WHERE id = ?", [rel])[0]).toEqual({
+      ...before,
+      subject_id: done.created,
+    });
+  });
+
+  it("does not take a fresh relation of an item outside the group for the moved one", () => {
+    const [a, x, z] = [item(), item(), item()] as [number, number, number];
+    fact(a, "2026-12-05");
+    const rel = relation(a, x);
+    const versionId = saveV("s1");
+    const sourceId = db.all("SELECT source_id FROM source_versions WHERE id = ?", [versionId])[0]
+      ?.source_id as number;
+    addEvidence(db, {
+      target: { relationId: rel },
+      sourceVersionId: versionId,
+      start: 0,
+      end: 4,
+      quote: "body",
+    });
+    split(a, [{ kind: "relation", id: rel }]);
+    // the same type and object, but the subject is an item that was never in the original's group
+    const outside = saveRelation(db, { subjectId: z, type: "DEPENDS_ON", objectId: x, ...attrs });
+    expect(outside.created).toBe(true);
+    expect(
+      followMovedRow(db, { target: { relationId: outside.id }, created: true }, sourceId),
+    ).toEqual({
+      target: { relationId: outside.id },
+      created: true,
+    });
+    expect(db.all("SELECT 1 FROM relations WHERE id = ?", [outside.id])).toHaveLength(1);
+  });
+});
