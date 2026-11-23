@@ -1126,3 +1126,39 @@ describe("reevaluate (I04-R8, C3)", () => {
     expect(after?.summary).not.toContain("2026-12-12");
   });
 });
+
+describe("an assertion link under a deletion (S02-R19, C3)", () => {
+  it("deleting the superseding fact's source recomputes the Insight with the date that had been superseded", () => {
+    const [x, y] = [item("X"), item("Y")] as [number, number];
+    const oldSource = version("old", "old 목표일");
+    const newSource = version("new", "new 목표일");
+    const dep = version("dep", "x가 y에 기댄다");
+    const done = version("done", "y 완료일");
+    const old = fact(x, TARGET_DATE, "2026-12-01");
+    cite({ factId: old }, oldSource.id);
+    const next = fact(x, TARGET_DATE, "2026-12-05");
+    cite({ factId: next }, newSource.id);
+    cite({ relationId: relation(x, y) }, dep.id);
+    const completion = fact(y, COMPLETION_DATE, "2026-12-10");
+    cite({ factId: completion }, done.id);
+    const link = insertAssertionLink(db, {
+      type: "SUPERSEDES",
+      fromFactId: next,
+      toFactId: old,
+      createdBy: "rule",
+      at: AT,
+    }).id;
+    recomputeDependencyDelay(db, [x, y]);
+    const key = { rule: DEPENDENCY_DELAY, xItemId: x, yItemId: y };
+    expect(readInsight(db, key)).toMatchObject({ linkIds: [link] });
+    expect(readInsight(db, key)?.summary).toContain("2026-12-05");
+
+    deleteSource(db, newSource.sourceId, { reason: "user-deleted", at: AT });
+
+    // the link went with its fact; the old date is valid again and the Insight is read from it
+    expect(db.all("SELECT count(*) AS n FROM assertion_links")).toEqual([{ n: 0 }]);
+    const after = readInsight(db, key);
+    expect(after).toMatchObject({ state: "active", linkIds: [] });
+    expect(after?.summary).toContain("2026-12-01");
+  });
+});

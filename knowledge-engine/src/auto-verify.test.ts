@@ -8,6 +8,7 @@ import {
   addEvidence,
   automatedLifecycle,
   findSourceVersionId,
+  insertAssertionLink,
   insertItem,
   listOntologyElements,
   migrate,
@@ -430,6 +431,30 @@ describe("each condition alone fails with its own name (C1)", () => {
       const bare = fact(item, { value: "2026-12-11" }); // candidate, no evidence: not valid
       expect(state(bare).status).toBe("candidate");
       expect(assessAutoVerify(db, ref, T)).toMatchObject({ status: "applied" });
+    });
+
+    it("condition 5 asks otherValidValues on the item: a rival that is superseded, or one that lives only on another member of the group, does not stop the promotion", () => {
+      enable();
+      const { item, ref } = qualifying();
+      const old = rival(item, "candidate");
+      expect(assessAutoVerify(db, ref, T)).toEqual(unmet("conflicting-value"));
+      // the asked fact supersedes the rival (non-overlapping intervals): the pair stops counting
+      insertAssertionLink(db, {
+        type: "SUPERSEDES",
+        fromFactId: ref.id,
+        toFactId: old.id,
+        createdBy: "rule",
+        at: T,
+      });
+      expect(assessAutoVerify(db, ref, T)).toMatchObject({ status: "applied" });
+      // a value that lives only on another member of the merge group is not read on the item
+      const other = project("Beta");
+      rival(other, "candidate", true, "2026-12-20");
+      db.run(
+        "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+        [other, item, T],
+      );
+      expect(assessAutoVerify(db, ref, T)).toEqual({ status: "unchanged" });
     });
 
     it("a row the user wrote blocks even with no evidence (T04 hand-off 10), but not once it is retired", () => {
@@ -869,6 +894,18 @@ describe("the revert reason names the first lost condition", () => {
 });
 
 describe("state-neutral lines between the promotion and the loss (review D1-S2)", () => {
+  it("a candidate whose interval the user fixed is user-override for the promotion (S02-R17)", () => {
+    enable();
+    const { ref } = qualifying();
+    db.run(
+      `INSERT INTO fact_history (fact_id, seq, at, actor, action, from_status, to_status, from_epistemic, to_epistemic)
+       VALUES (?, 2, ?, 'user', 'set-validity', 'candidate', 'candidate', 'explicit', 'explicit')`,
+      [ref.id, T],
+    );
+    expect(assessAutoVerify(db, ref, T)).toEqual({ status: "refused", reason: "user-override" });
+    expect(state(ref).status).toBe("candidate");
+  });
+
   it("a merge-like line the history carries does not hide the policy's promotion: the row is still reverted", () => {
     enable();
     const { ref } = qualifying();

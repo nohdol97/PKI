@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import {
   addEvidence,
+  insertAssertionLink,
   insertItem,
   listEvidence,
   migrate,
@@ -264,6 +265,49 @@ describe("rule.dependency-delay — validity (V02-R9)", () => {
   });
 });
 
+describe("conflict.rule ⑨: the rule reads supersession (S02-R19)", () => {
+  /** x has two targets, the later-starting 12-05 superseding 12-01; y completes 12-10. */
+  function superseded() {
+    const old = fact(x, TARGET_DATE, "2026-12-01", "old-source");
+    const next = fact(x, TARGET_DATE, "2026-12-05", "new-source");
+    dependsOn(x, y);
+    fact(y, COMPLETION_DATE, "2026-12-10");
+    const link = insertAssertionLink(db, {
+      type: "SUPERSEDES",
+      fromFactId: next,
+      toFactId: old,
+      createdBy: "rule",
+      at: "2026-11-23T00:00:00.000Z",
+    }).id;
+    return { old, next, link };
+  }
+
+  it("leaves a superseded target date out, and the Insight names the link in insight_link_inputs", () => {
+    const { old, link } = superseded();
+    recomputeDependencyDelay(db, [x]);
+    const insight = readInsight(db, key());
+    expect(insight).toMatchObject({ state: "active", linkIds: [link] });
+    expect(insight?.summary).toContain("2026-12-05");
+    expect(insight?.summary).not.toContain("2026-12-01");
+    expect(insight?.evidenceIds).not.toContain(currentEvidence({ factId: old })[0]);
+  });
+
+  it("makes no Insight when the superseding fact's source cannot be put with the others (the link's lineage joins the judgement)", () => {
+    const { old } = superseded();
+    const oldSource = db.all(
+      "SELECT source_id FROM source_versions WHERE id = (SELECT source_version_id FROM evidence WHERE fact_id = ?)",
+      [old],
+    )[0]?.source_id as number;
+    // the policy refuses any set that holds the superseded fact's source: only the link carries it
+    const scope = {
+      combinable: (lineage: readonly { sourceId: number }[]) =>
+        !lineage.some((v) => v.sourceId === oldSource),
+    };
+    expect(recomputeDependencyDelay(db, [x], scope)).toEqual([]);
+    expect(insightCount()).toBe(0);
+  });
+});
+
 describe("rule.dependency-delay — upkeep (V02-R10)", () => {
   let t: number;
   let r: number;
@@ -355,6 +399,7 @@ describe("rule.dependency-delay — upkeep (V02-R10)", () => {
       summary: null,
       evidenceIds: [],
       userInputs: [],
+      linkIds: [],
     });
     expect(db.all("SELECT count(*) AS n FROM insight_evidence")).toEqual([{ n: 0 }]);
   });

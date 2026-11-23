@@ -23,17 +23,17 @@
 import {
   automatedLifecycle,
   isUserDecided,
-  listFactsOfKind,
+  otherValidValues,
   listOntologyElements,
   readFact,
   readRelation,
   readSetting,
+  validitySetByUser,
   type AutoVerifyLoss,
   type EntryRef,
   type Outcome,
   type SqlDriver,
 } from "@pki/storage";
-import { isValidRow } from "./dependency-delay.ts";
 
 export const AUTO_VERIFY_SETTING = "semantic.autoVerify";
 
@@ -79,17 +79,13 @@ function definitionOf(tx: SqlDriver, ref: EntryRef, name: string) {
   );
 }
 
-/** Condition 5 holds when this returns true: another value in a valid row of a `one` kind. */
-function conflictingValue(
-  tx: SqlDriver,
-  fact: { id: number; itemId: number; kind: string },
-  rule: ReturnType<typeof definitionOf>,
-): boolean {
-  if (rule?.rule.elementKind !== "fact-kind" || rule.rule.cardinality !== "one") return false;
-  return listFactsOfKind(tx, fact.itemId, fact.kind).some(
-    (other) => other.id !== fact.id && isValidRow(tx, { kind: "fact", id: other.id }, other.status),
-  );
-}
+/**
+ * Condition 5 holds when this returns true: another valid value in the same slot of the item (the one
+ * shared judgement `otherValidValues`, S02-R20; it answers nothing for a kind that is not a `one` kind, and
+ * leaves out a value a SUPERSEDES link replaced). Same item only: the merge group is the conflict list's.
+ */
+const conflictingValue = (tx: SqlDriver, fact: { id: number }): boolean =>
+  otherValidValues(tx, fact.id, "item").length > 0;
 
 /**
  * Judges one fact or relation. A candidate is promoted when every condition holds, else the answer
@@ -114,6 +110,11 @@ export function assessAutoVerify(tx: SqlDriver, ref: EntryRef, at?: string): Aut
   if (isUserDecided(tx, ref)) {
     return { status: "refused", reason: "user-override" };
   }
+  // a candidate whose interval the user fixed is not a target of the promotion (S02-R17); the gate's own
+  // test ignores that line, and a promotion the policy already made is still taken back as before
+  if (row.status === "candidate" && validitySetByUser(tx, ref)) {
+    return { status: "refused", reason: "user-override" };
+  }
   // Off (or never written): a candidate is not promoted, but a row the policy once promoted is still
   // taken back when it loses condition 3 or 5 (R9). The hooks never call this while the key was never written.
   const enabled = readAutoVerify(tx);
@@ -122,7 +123,7 @@ export function assessAutoVerify(tx: SqlDriver, ref: EntryRef, at?: string): Aut
 
   const name = "type" in row ? row.type : row.kind;
   const definition = definitionOf(tx, ref, name);
-  const conflict = "value" in row && conflictingValue(tx, row, definition);
+  const conflict = "value" in row && conflictingValue(tx, row);
   const sources = independentSources(tx, ref);
 
   if (row.status === "verified") {
