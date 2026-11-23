@@ -1,0 +1,524 @@
+// The analytical reads (S03-R8, R9, R19): `listMetricViews` (the one function behind the API's Metric list and
+// K01's `metrics` page) and `listAnalytical` (Datasets, Metrics and Joins for `GET /api/analytical`). Reads only,
+// and no value is computed: a column name or a calculation as the row states it, the codes and counts of a check
+// line, ids (S03-R18). What the caller may not see is judged by `Visibility`, the read gate's `visible` as a
+// predicate, so a row it hides, a check line it hides and a table it hides are absent whole, as is anything that
+// would name them (a count, an id in a conflict list). Storage never imports the registry.
+import { otherValidValues } from "./assertion-links.ts";
+import { dataChecksUnmet, needsDataChecks, type DataCheckUnmet } from "./analytical-gate.ts";
+import { listCheckLines, waitingRelations, type CheckName } from "./analytical-check-lines.ts";
+import { entityGroups } from "./entity-groups.ts";
+import { listEvidence } from "./knowledge.ts";
+import { isUserDecided } from "./semantic-lifecycle.ts";
+import {
+  listSemanticFacts,
+  listSemanticRelations,
+  type SemanticFactView,
+  type SemanticRelationView,
+} from "./semantic-view.ts";
+import type { SqlDriver } from "./sql-driver.ts";
+import { isValidRow } from "./valid-row.ts";
+
+/** Whether a derived row is shown: `kind` is the registry's (`item`, `fact`, `relation`, `evidence`, `source`, `analytical-check`). */
+export interface Visibility {
+  shown(kind: string, id: string): boolean;
+}
+export const SHOW_ALL: Visibility = { shown: () => true };
+
+export interface CheckResultView {
+  check: CheckName;
+  passed: boolean;
+  failure: string | null;
+  examined: number;
+  violations: number;
+  skipped: number;
+}
+export interface FactRowView extends Omit<SemanticFactView, "evidenceCount"> {
+  /** The current evidence the caller may see (ids; the count is its length). */
+  evidenceIds: number[];
+  evidenceCount: number;
+  /** Whether the kind's rule names `dataChecks`; `checks` and `unmet` are empty for a kind that does not. */
+  checkNeeded: boolean;
+  /** The current lines only: a line that is not current is as good as absent (S03-R11). */
+  checks: CheckResultView[];
+  unmet: DataCheckUnmet[];
+  /** The sources whose extraction this row waits on (S03-R16); empty when it does not wait. */
+  awaitingSourceIds: number[];
+}
+export interface RelationRowView extends Omit<SemanticRelationView, "evidenceCount"> {
+  evidenceIds: number[];
+  evidenceCount: number;
+}
+export interface ConflictView {
+  /** The fact kind, the relation type, or `multiple-tables` (a group with real tables on several members). */
+  kind: string;
+  rowKind: "fact" | "relation" | "item";
+  ids: number[];
+}
+export interface TableView {
+  tableId: number;
+  sourceId: number;
+  rowCount: number;
+  /** The limitation codes of the table version's source, per workbook (S03-R4). */
+  limitations: string[];
+}
+export interface DatasetRefView {
+  itemId: number;
+  name: string;
+  tables: TableView[];
+  /** Another member of the same group has a real table and this item has none (not counted for the gate, R8). */
+  groupTableItemIds: number[];
+  /** This item is the representative of a group and has no real table while a member has one (S03-R8). */
+  representativeLacksTable: boolean;
+}
+export interface ColumnMatchView {
+  column: string | null;
+  /** The `dataset.column` fact of the current table, or null with a code in `missing`. */
+  factId: number | null;
+  missing: "column-missing" | "no-table" | null;
+}
+interface ItemBase {
+  itemId: number;
+  name: string;
+  status: string;
+  epistemic: string;
+  userDecided: boolean;
+  userAuthored: boolean;
+  conflicts: ConflictView[];
+}
+export interface MetricView extends ItemBase {
+  terms: FactRowView[];
+  definitions: FactRowView[];
+  calculations: FactRowView[];
+  /** True only when a calculation row is `verified` (S03-R19). */
+  calculationConfirmed: boolean;
+  /** The `MEASURED_ON` Datasets, live; more than one is a conflict (also listed in `conflicts`). */
+  datasets: DatasetRefView[];
+  columns: ColumnMatchView[];
+  grain: FactRowView[];
+  joins: { itemId: number; name: string }[];
+  units: FactRowView[];
+  currencies: FactRowView[];
+  periods: FactRowView[];
+  versions: FactRowView[];
+  relations: RelationRowView[];
+}
+export interface DatasetView extends ItemBase {
+  tables: TableView[];
+  columns: FactRowView[];
+  roles: FactRowView[];
+  grain: FactRowView[];
+  measures: FactRowView[];
+  dimensions: FactRowView[];
+  timeDimensions: FactRowView[];
+  groupTableItemIds: number[];
+  representativeLacksTable: boolean;
+  members: DatasetView[];
+}
+export interface JoinView extends ItemBase {
+  left: { itemId: number; name: string }[];
+  right: { itemId: number; name: string }[];
+  keys: FactRowView[];
+  cardinality: FactRowView[];
+  relations: RelationRowView[];
+}
+export interface AnalyticalList {
+  datasets: DatasetView[];
+  metrics: MetricView[];
+  joins: JoinView[];
+  /** A list was cut at `limit` items. */
+  truncated: boolean;
+}
+
+const LIVE = "status NOT IN ('superseded', 'rejected')";
+const DEFAULT_LIMIT = 200;
+const ascending = (ids: Iterable<number>): number[] => [...new Set(ids)].sort((a, b) => a - b);
+
+class Reader {
+  readonly db: SqlDriver;
+  readonly vis: Visibility;
+  constructor(db: SqlDriver, vis: Visibility) {
+    this.db = db;
+    this.vis = vis;
+  }
+
+  shown = (kind: string, id: number | string) => this.vis.shown(kind, String(id));
+
+  private awaiting?: Map<number, number[]>;
+  /** The sources a relation's subject waits on, by item (read once per call). */
+  waitingSources(itemId: number): number[] {
+    if (!this.awaiting) {
+      this.awaiting = new Map();
+      const waits = waitingRelations(this.db);
+      if (waits.length > 0) {
+        const bySource = new Map(waits.map((w) => [w.relationId, w.sourceId]));
+        const rows = this.db.all(
+          `SELECT id, subject_id FROM relations WHERE id IN (SELECT value FROM json_each(?))
+             AND type IN ('MEASURED_ON', 'JOIN_LEFT', 'JOIN_RIGHT')`,
+          [JSON.stringify(waits.map((w) => w.relationId))],
+        );
+        for (const r of rows) {
+          const subject = r.subject_id as number;
+          const source = bySource.get(r.id as number) as number;
+          this.awaiting.set(subject, [...(this.awaiting.get(subject) ?? []), source]);
+        }
+      }
+    }
+    return ascending(this.awaiting.get(itemId) ?? []).filter((s) => this.shown("source", s));
+  }
+
+  evidenceIds(target: { factId: number } | { relationId: number }): number[] {
+    return listEvidence(this.db, target)
+      .filter((e) => e.current && this.shown("evidence", e.id))
+      .map((e) => e.id);
+  }
+
+  factRow(f: SemanticFactView): FactRowView {
+    const needed = needsDataChecks(this.db, f.kind);
+    const ids = this.evidenceIds({ factId: f.id });
+    const lineIds = new Map(
+      this.db
+        .all("SELECT id, check_name FROM analytical_checks WHERE fact_id = ?", [f.id])
+        .map((r) => [r.check_name as string, r.id as number] as const),
+    );
+    const checks = needed
+      ? listCheckLines(this.db, f.id)
+          .filter(
+            (l) => l.current && this.shown("analytical-check", `check:${lineIds.get(l.check)}`),
+          )
+          .map(({ check, passed, failure, examined, violations, skipped }) => ({
+            check,
+            passed,
+            failure,
+            examined,
+            violations,
+            skipped,
+          }))
+      : [];
+    const itemId = this.db.all("SELECT item_id FROM facts WHERE id = ?", [f.id])[0]
+      ?.item_id as number;
+    return {
+      ...f,
+      evidenceIds: ids,
+      evidenceCount: ids.length,
+      checkNeeded: needed,
+      checks,
+      unmet: needed ? [...dataChecksUnmet(this.db, { kind: "fact", id: f.id })] : [],
+      awaitingSourceIds: needed ? this.waitingSources(itemId) : [],
+    };
+  }
+
+  facts(itemId: number): FactRowView[] {
+    return listSemanticFacts(this.db, itemId)
+      .filter((f) => this.shown("fact", f.id))
+      .map((f) => this.factRow(f));
+  }
+
+  relations(itemId: number): RelationRowView[] {
+    return listSemanticRelations(this.db, itemId)
+      .filter((r) => this.shown("relation", r.id))
+      .map((r) => {
+        const ids = this.evidenceIds({ relationId: r.id });
+        return { ...r, evidenceIds: ids, evidenceCount: ids.length };
+      });
+  }
+
+  name(itemId: number): string | undefined {
+    return this.shown("item", itemId)
+      ? (this.db.all("SELECT name FROM items WHERE id = ?", [itemId])[0]?.name as
+          string | undefined)
+      : undefined;
+  }
+
+  /** The Dataset's real tables: a table row whose source has a version no tombstone covers and the caller may see. */
+  tables(datasetId: number): TableView[] {
+    return this.db
+      .all(
+        `SELECT t.id, t.source_id, t.row_count,
+                (SELECT v.meta FROM source_versions v WHERE v.source_id = t.source_id
+                  ORDER BY v.version DESC LIMIT 1) AS meta
+           FROM dataset_tables t WHERE t.item_id = ? AND EXISTS (
+             SELECT 1 FROM source_versions v WHERE v.source_id = t.source_id
+                AND NOT EXISTS (SELECT 1 FROM tombstones x
+                                 WHERE x.source_id = v.source_id AND x.covers_version >= v.version))
+          ORDER BY t.id`,
+        [datasetId],
+      )
+      .filter((r) => this.shown("analytical-check", `table:${r.id}`))
+      .map((r) => ({
+        tableId: r.id as number,
+        sourceId: r.source_id as number,
+        rowCount: r.row_count as number,
+        limitations: limitations(r.meta),
+      }));
+  }
+
+  /** The group's other members that have a real table (ascending), the caller seeing both. */
+  groupTables(itemId: number): number[] {
+    return entityGroups
+      .membersOf(this.db, itemId)
+      .filter((m) => m !== itemId && this.shown("item", m) && this.tables(m).length > 0);
+  }
+
+  datasetRef(itemId: number): DatasetRefView | undefined {
+    const name = this.name(itemId);
+    if (name === undefined) return undefined;
+    const tables = this.tables(itemId);
+    const others = tables.length === 0 ? this.groupTables(itemId) : [];
+    const representative = entityGroups.representativeOf(this.db, itemId) === itemId;
+    return {
+      itemId,
+      name,
+      tables,
+      groupTableItemIds: others,
+      representativeLacksTable: tables.length === 0 && representative && others.length > 0,
+    };
+  }
+
+  /** The live objects of a relation type from an item (R10's two written paths read these). */
+  objects(itemId: number, type: string): number[] {
+    return this.db
+      .all(
+        `SELECT DISTINCT object_id FROM relations WHERE subject_id = ? AND type = ? AND ${LIVE} ORDER BY object_id`,
+        [itemId, type],
+      )
+      .map((r) => r.object_id as number)
+      .filter((id) => this.shown("item", id));
+  }
+
+  /** S03-R9: the group-wide conflicts of an item, with the rows the caller may see; fewer than two is none. */
+  conflicts(itemId: number, type: string): ConflictView[] {
+    const out = new Map<string, ConflictView>();
+    const add = (c: ConflictView) => {
+      const ids = ascending(c.ids);
+      if (ids.length >= 2) out.set(`${c.rowKind}:${c.kind}:${ids.join(",")}`, { ...c, ids });
+    };
+    for (const f of this.db.all(
+      "SELECT id, kind, status FROM facts WHERE item_id = ? ORDER BY id",
+      [itemId],
+    )) {
+      const id = f.id as number;
+      if (!isValidRow(this.db, { kind: "fact", id }, f.status as never)) continue;
+      const rivals = otherValidValues(this.db, id, "group");
+      add({
+        kind: f.kind as string,
+        rowKind: "fact",
+        ids: [id, ...rivals].filter((x) => this.shown("fact", x)),
+      });
+    }
+    const members = entityGroups.membersOf(this.db, itemId);
+    for (const relType of ["MEASURED_ON", "JOIN_LEFT", "JOIN_RIGHT"]) {
+      const rows = this.db
+        .all(
+          `SELECT id, object_id FROM relations WHERE subject_id IN (SELECT value FROM json_each(?))
+              AND type = ? AND ${LIVE} ORDER BY id`,
+          [JSON.stringify(members), relType],
+        )
+        .filter((r) => this.shown("relation", r.id as number));
+      if (new Set(rows.map((r) => r.object_id)).size > 1) {
+        add({ kind: relType, rowKind: "relation", ids: rows.map((r) => r.id as number) });
+      }
+    }
+    if (type === "Dataset") {
+      add({
+        kind: "multiple-tables",
+        rowKind: "item",
+        ids: members.filter((m) => this.shown("item", m) && this.tables(m).length > 0),
+      });
+    }
+    return [...out.values()];
+  }
+}
+
+const limitations = (meta: unknown): string[] => {
+  if (typeof meta !== "string") return [];
+  const found = (JSON.parse(meta) as { metadata?: { limitations?: unknown } } | null)?.metadata
+    ?.limitations;
+  return Array.isArray(found)
+    ? [...new Set(found.filter((c): c is string => typeof c === "string"))].sort()
+    : [];
+};
+
+const ofKind = (rows: readonly FactRowView[], ...kinds: string[]) =>
+  rows.filter((r) => kinds.includes(r.kind));
+
+function base(r: Reader, id: number, name: string, type: string): ItemBase | undefined {
+  const row = r.db.all("SELECT status, epistemic, user_authored FROM items WHERE id = ?", [id])[0];
+  if (!row) return undefined;
+  return {
+    itemId: id,
+    name,
+    status: row.status as string,
+    epistemic: row.epistemic as string,
+    userDecided: isUserDecided(r.db, { kind: "item", id }),
+    userAuthored: row.user_authored === 1,
+    conflicts: r.conflicts(id, type),
+  };
+}
+
+/** The column a calculation fact names, as stored (`{"aggregation":…,"column":…}`); null for a row of no column. */
+function calculationColumn(value: string): string | null {
+  try {
+    const parsed = JSON.parse(value) as { column?: unknown };
+    return typeof parsed.column === "string" ? parsed.column : null;
+  } catch {
+    return null;
+  }
+}
+
+/** S03-R8 (4): the `dataset.column` fact of the Dataset's current table whose current evidence sits in it. */
+function matchColumn(
+  r: Reader,
+  dataset: DatasetRefView | undefined,
+  column: string,
+): ColumnMatchView {
+  if (!dataset || dataset.tables.length === 0) {
+    return { column, factId: null, missing: "no-table" };
+  }
+  const found = r.db.all(
+    `SELECT f.id FROM facts f WHERE f.item_id = ? AND f.kind = 'dataset.column' AND f.value = ?
+        AND f.${LIVE} AND EXISTS (
+          SELECT 1 FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
+           WHERE e.fact_id = f.id AND v.source_id IN (SELECT value FROM json_each(?))
+             AND v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id))
+      ORDER BY f.id`,
+    [dataset.itemId, column, JSON.stringify(dataset.tables.map((t) => t.sourceId))],
+  );
+  const id = found.map((x) => x.id as number).find((x) => r.shown("fact", x));
+  return id === undefined
+    ? { column, factId: null, missing: "column-missing" }
+    : { column, factId: id, missing: null };
+}
+
+function metricView(r: Reader, id: number): MetricView | undefined {
+  const name = r.name(id);
+  if (name === undefined) return undefined;
+  const head = base(r, id, name, "Metric");
+  if (!head) return undefined;
+  const facts = r.facts(id);
+  const datasets = r.objects(id, "MEASURED_ON").flatMap((d) => r.datasetRef(d) ?? []);
+  const calculations = ofKind(facts, "metric.calculation");
+  const real = datasets.find((d) => d.tables.length > 0) ?? datasets[0];
+  const named = new Set(
+    calculations.flatMap((c) => {
+      const column = calculationColumn(c.value);
+      return column === null ? [] : [column];
+    }),
+  );
+  const columns = [...named].map((column) => matchColumn(r, real, column));
+  const grain = datasets.flatMap((d) => ofKind(r.facts(d.itemId), "dataset.grain"));
+  const joins = r.objects(id, "USES_JOIN").flatMap((j) => {
+    const joinName = r.name(j);
+    return joinName === undefined ? [] : [{ itemId: j, name: joinName }];
+  });
+  return {
+    ...head,
+    terms: facts.filter((f) => f.kind.startsWith("alias.")),
+    definitions: ofKind(facts, "definition"),
+    calculations,
+    calculationConfirmed: calculations.some((c) => c.status === "verified"),
+    datasets,
+    columns,
+    grain,
+    joins,
+    units: ofKind(facts, "metric.unit"),
+    currencies: ofKind(facts, "metric.currency"),
+    periods: ofKind(facts, "metric.period"),
+    versions: ofKind(facts, "metric.version"),
+    relations: r.relations(id),
+  };
+}
+
+const notMember =
+  "NOT EXISTS (SELECT 1 FROM item_merges m WHERE m.member_id = items.id AND m.active = 1)";
+
+function itemIds(db: SqlDriver, type: string, limit: number, grouped: boolean): number[] {
+  return db
+    .all(`SELECT id FROM items WHERE type = ? ${grouped ? `AND ${notMember}` : ""} ORDER BY id`, [
+      type,
+    ])
+    .map((r) => r.id as number)
+    .slice(0, limit + 1);
+}
+
+/**
+ * The Metrics, each answering exactly the fields of S03-R19 and nothing else. The API's Metric list is this
+ * result as it is, and K01's `metrics` page calls it too. A Metric the caller may not see is absent, as is every
+ * check result it hides. Returns at most `limit` Metrics, in id order; `truncated` is in `listAnalytical`.
+ */
+export function listMetricViews(
+  db: SqlDriver,
+  vis: Visibility = SHOW_ALL,
+  limit = DEFAULT_LIMIT,
+): MetricView[] {
+  const r = new Reader(db, vis);
+  return itemIds(db, "Metric", limit, true)
+    .slice(0, limit)
+    .flatMap((id) => metricView(r, id) ?? []);
+}
+
+function datasetView(r: Reader, id: number, withMembers: boolean): DatasetView | undefined {
+  const name = r.name(id);
+  if (name === undefined) return undefined;
+  const head = base(r, id, name, "Dataset");
+  if (!head) return undefined;
+  const facts = r.facts(id);
+  const ref = r.datasetRef(id) as DatasetRefView;
+  return {
+    ...head,
+    tables: ref.tables,
+    columns: ofKind(facts, "dataset.column"),
+    roles: ofKind(facts, "dataset.role"),
+    grain: ofKind(facts, "dataset.grain"),
+    measures: ofKind(facts, "dataset.measure"),
+    dimensions: ofKind(facts, "dataset.dimension"),
+    timeDimensions: ofKind(facts, "dataset.time_dimension"),
+    groupTableItemIds: ref.groupTableItemIds,
+    representativeLacksTable: ref.representativeLacksTable,
+    members: withMembers
+      ? entityGroups
+          .membersOf(r.db, id)
+          .filter((m) => m !== id)
+          .flatMap((m) => datasetView(r, m, false) ?? [])
+      : [],
+  };
+}
+
+function joinView(r: Reader, id: number): JoinView | undefined {
+  const name = r.name(id);
+  if (name === undefined) return undefined;
+  const head = base(r, id, name, "Join");
+  if (!head) return undefined;
+  const facts = r.facts(id);
+  const side = (type: string) =>
+    r.objects(id, type).flatMap((d) => {
+      const n = r.name(d);
+      return n === undefined ? [] : [{ itemId: d, name: n }];
+    });
+  return {
+    ...head,
+    left: side("JOIN_LEFT"),
+    right: side("JOIN_RIGHT"),
+    keys: ofKind(facts, "join.keys"),
+    cardinality: ofKind(facts, "join.cardinality"),
+    relations: r.relations(id),
+  };
+}
+
+/** The body of `GET /api/analytical` (S03-R19): Datasets (a group under its representative), Metrics, Joins. */
+export function listAnalytical(
+  db: SqlDriver,
+  vis: Visibility = SHOW_ALL,
+  limit = DEFAULT_LIMIT,
+): AnalyticalList {
+  const r = new Reader(db, vis);
+  const datasetIds = itemIds(db, "Dataset", limit, true);
+  const metricIds = itemIds(db, "Metric", limit, true);
+  const joinIds = itemIds(db, "Join", limit, true);
+  return {
+    datasets: datasetIds.slice(0, limit).flatMap((id) => datasetView(r, id, true) ?? []),
+    metrics: metricIds.slice(0, limit).flatMap((id) => metricView(r, id) ?? []),
+    joins: joinIds.slice(0, limit).flatMap((id) => joinView(r, id) ?? []),
+    truncated: [datasetIds, metricIds, joinIds].some((ids) => ids.length > limit),
+  };
+}
