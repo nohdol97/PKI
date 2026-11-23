@@ -105,4 +105,12 @@ describe("requestInsightInterpretations (D14, D15)", () => {
     expect(jobs()).toEqual([{ target: `${id}#${basisOf(id)}` }]);
     expect(requestInsightInterpretations(db)).toBe(0);
   });
+
+  it("does not queue a basis again once a job for it has closed without an interpretation (D14)", () => {
+    saveInsight(db, key, active("A 위험"));
+    expect(setInsightInterpret(db, true, new Date())).toBe(1);
+    db.run("UPDATE jobs SET status = 'succeeded' WHERE kind = ?", [INSIGHT_INTERPRET_KIND]);
+    expect(requestInsightInterpretations(db)).toBe(0);
+    expect(jobs()).toHaveLength(1);
+  });
 });

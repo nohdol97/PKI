@@ -102,9 +102,16 @@ export function requestInsightInterpretations(db: SqlDriver, at: Date = new Date
       if (queued >= INSIGHT_INTERPRET_BATCH) break;
       const insight = readInsightById(db, row.id as number);
       if (!insight) continue;
+      const target = `${insight.id}#${insightBasis(insight)}`;
+      // a basis already tried, whatever became of it, is not asked again (D14)
+      if (
+        db.all("SELECT 1 FROM jobs WHERE kind = ? AND target = ?", [INSIGHT_INTERPRET_KIND, target])
+          .length > 0
+      )
+        continue;
       const registered = registerJob(db, {
         kind: INSIGHT_INTERPRET_KIND,
-        target: `${insight.id}#${insightBasis(insight)}`,
+        target,
         priority: "maintenance",
         at,
       });
