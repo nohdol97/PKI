@@ -11,7 +11,7 @@ import {
   type TestBuildExecution,
 } from "@pki/providers";
 import { readConsent, readJob, registerJob, writeSetting, type SqlDriver } from "@pki/storage";
-import { FakeProvider, fixtureExtraction, send } from "@pki/testkit";
+import { FakeProvider, fixtureExtraction, send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -37,6 +37,8 @@ import {
 import { createJobActions } from "./job-actions.ts";
 import type { JobRunner } from "./job-runner.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const read = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8");
@@ -65,6 +67,7 @@ let runner: JobRunner | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-held-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
 });
 afterEach(async () => {

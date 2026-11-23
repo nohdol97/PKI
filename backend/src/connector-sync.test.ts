@@ -14,6 +14,9 @@ import {
   openCanonicalDb,
 } from "./composition.ts";
 import { createConnectorManager, EXTRACT_JOB_KIND, syncConnector } from "./connectors.ts";
+import { dirTemplate } from "@pki/testkit";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures/test-connector.jsonl");
 
@@ -22,6 +25,7 @@ let db: SqlDriver;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-sync-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
 });
 

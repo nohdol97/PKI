@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { seedLegacyTombstone } from "@pki/testkit";
+import { seedLegacyTombstone, memoryDbTemplate } from "@pki/testkit";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { commitDerived } from "./commit-derived.ts";
 import {
@@ -42,11 +42,12 @@ import { readChangeSeq } from "./revisions.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 let db: SqlDriver;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   saveSourceRecord(db, "c1", { externalId: "e1", title: "t", body: "b" });
 });

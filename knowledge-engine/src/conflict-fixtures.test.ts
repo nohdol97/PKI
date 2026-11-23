@@ -24,18 +24,19 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { csvVersion, FakeProvider, fixtureExtraction } from "@pki/testkit";
+import { csvVersion, FakeProvider, fixtureExtraction, memoryDbTemplate } from "@pki/testkit";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createExtractHandler } from "./extraction.ts";
 import { knowledgeCandidates } from "./linking.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const T0 = new Date("2026-11-23T00:00:00.000Z");
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "imported", "jsonl-import");
   registerConnectorInstance(db, "c1", "test-fixtures");
 });

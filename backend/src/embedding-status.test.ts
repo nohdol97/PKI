@@ -4,7 +4,7 @@
 import { routes, type EmbeddingProvider } from "@pki/contracts";
 import { migrate, registerConnectorInstance, saveSourceRecord } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeEmbedder, send } from "@pki/testkit";
+import { FakeEmbedder, send, memoryDbTemplate } from "@pki/testkit";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,10 +13,11 @@ import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer } from "./server.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const TOKEN = "e".repeat(43);
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
-const db = openBetterSqlite3(":memory:");
-migrate(db);
+const db = freshDb();
 registerConnectorInstance(db, "fixtures", "test-fixtures");
 saveSourceRecord(db, "fixtures", { externalId: "m1", title: "합성 등대 점검", body: "합성 자료" });
 

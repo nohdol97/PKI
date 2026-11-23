@@ -14,16 +14,17 @@ import {
   StaleDerivativeError,
 } from "./commit-derived.ts";
 import type { DerivedItem, ScopePolicyDrop, SourceVersionRef } from "./derivatives.ts";
-import { seedLegacyTombstone } from "@pki/testkit";
+import { seedLegacyTombstone, memoryDbTemplate } from "@pki/testkit";
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 import { recordTombstoneLift } from "./tombstones.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

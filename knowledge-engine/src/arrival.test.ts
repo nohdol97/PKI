@@ -17,7 +17,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { canariesLeft, seedLegacyTombstone } from "@pki/testkit";
+import { canariesLeft, seedLegacyTombstone, memoryDbTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,13 +25,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { acceptChange } from "./arrival.ts";
 import { applyTombstone, liftTombstone } from "./tombstone-entry.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const AT = "2026-11-22T00:00:00.000Z";
 const EVENT_AT = "2026-11-21T00:00:00Z";
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   registerConnectorInstance(db, "c2", "test-fixtures");
 });

@@ -10,16 +10,17 @@ import {
 } from "@pki/contracts";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeEmbedder, send } from "@pki/testkit";
+import { FakeEmbedder, send, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const TOKEN = "p".repeat(43);
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
-const db = openBetterSqlite3(":memory:");
-migrate(db);
+const db = freshDb();
 const pack: PrepareSource = { kind: "local-pack", path: "/synthetic/pack" };
 
 let server: RunningServer | undefined;

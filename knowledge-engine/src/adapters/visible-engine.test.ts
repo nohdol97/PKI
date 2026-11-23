@@ -11,10 +11,12 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { MemoryKnowledgeEngine, seedLegacyTombstone } from "@pki/testkit";
+import { MemoryKnowledgeEngine, seedLegacyTombstone, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createProductRegistry } from "../canonical-kinds.ts";
 import { createVisibleEngine } from "./visible-engine.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const permissive: ScopePolicy = {
   compare: () => "equal",
@@ -26,8 +28,7 @@ const permissive: ScopePolicy = {
 let db: SqlDriver;
 let inner: MemoryKnowledgeEngine;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   inner = new MemoryKnowledgeEngine();
 });

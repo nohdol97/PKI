@@ -20,6 +20,9 @@ import {
   type LedgerFs,
   type LedgerIo,
 } from "./tombstone-ledger.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const hh = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -209,8 +212,7 @@ describe("through a canonical transaction", () => {
   });
 
   it("a write that fails part-way: the transaction is undone, the fragment is one damaged line, and the next line is readable", () => {
-    const db = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db = freshDb();
     let text = "";
     let failNext = true;
     const io: LedgerIo = {
@@ -284,8 +286,7 @@ describe("through a canonical transaction", () => {
   });
 
   it("a savepoint opened through the tx that rolls back takes the lines queued inside it", () => {
-    const db = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db = freshDb();
     let text = "";
     const io: LedgerIo = {
       read: () => text,

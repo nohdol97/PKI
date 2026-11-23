@@ -15,16 +15,17 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
 import { openCanonicalDb, productImporter } from "./composition.ts";
 import { createConnectorManager, tryLockInstance, type ConnectorManager } from "./connectors.ts";
 import { importContent, type ImportOutcome } from "./imports.ts";
 import { storePage } from "./page-store.ts";
 import { applyTombstone } from "@pki/knowledge-engine";
+import { dirTemplate } from "@pki/testkit";
 import { JSONL_CAPABILITIES, parseJsonl } from "@pki/connector-sdk";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
@@ -36,18 +37,9 @@ const CANARY = "CANARY-import-text-5530";
 // still opens through the product's `openCanonicalDb`. Besides the migration, the copied cases share
 // the template's random identity key and the deletion ledger beside it (which records that key),
 // so the same identity hashes to the same value in each of them. The `beforeEach` DB is fresh.
-let templateRoot: string;
-let templateDir: string;
-beforeAll(() => {
-  templateRoot = mkdtempSync(join(tmpdir(), "pki-import-template-"));
-  templateDir = join(templateRoot, "data");
-  openCanonicalDb(templateDir).close();
-});
-afterAll(() => {
-  rmSync(templateRoot, { recursive: true, force: true });
-});
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 const caseDb = (path: string): SqlDriver => {
-  cpSync(templateDir, path, { recursive: true });
+  seedDataDir(path);
   return openCanonicalDb(path);
 };
 

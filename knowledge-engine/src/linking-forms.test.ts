@@ -28,7 +28,7 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider, setStatusForTest } from "@pki/testkit";
+import { FakeProvider, setStatusForTest, memoryDbTemplate } from "@pki/testkit";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -37,6 +37,8 @@ import { createProductRegistry } from "./canonical-kinds.ts";
 import { createExtractHandler } from "./extraction.ts";
 import { findCandidates, knowledgeCandidates } from "./linking.ts";
 import { purgeSource } from "./purge.test-support.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const T0 = new Date("2026-11-23T00:00:00.000Z");
 const attrs: KnowledgeAttributes = {
@@ -48,8 +50,7 @@ const attrs: KnowledgeAttributes = {
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "imported", "jsonl-import");
   registerConnectorInstance(db, "fixtures", "test-fixtures");
 });

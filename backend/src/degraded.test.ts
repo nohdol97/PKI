@@ -32,7 +32,14 @@ import {
 import { registerConnectorInstance, saveSourceRecord, writeSetting } from "@pki/storage";
 import type { SqlDriver } from "@pki/storage";
 import { EmptyVectorIndex } from "@pki/storage/adapters";
-import { FakeEmbedder, installFakeCli, MemoryVectorIndex, send, type FakeCli } from "@pki/testkit";
+import {
+  FakeEmbedder,
+  installFakeCli,
+  MemoryVectorIndex,
+  send,
+  type FakeCli,
+  dirTemplate,
+} from "@pki/testkit";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,6 +55,8 @@ import {
 import type { ConnectorManager } from "./connectors.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 // fake CLI runs are Node starts: slow when the whole suite runs in parallel
 vi.setConfig({ testTimeout: 30_000 });
@@ -156,6 +165,7 @@ async function explorationWorks() {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-degraded-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
   registerConnectorInstance(db, "fixtures", "test-fixtures");
   saveSourceRecord(db, "fixtures", {

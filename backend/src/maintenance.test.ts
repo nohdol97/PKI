@@ -11,7 +11,7 @@ import {
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
-import { seedLegacyTombstone } from "@pki/testkit";
+import { seedLegacyTombstone, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +22,8 @@ import { createMaintenanceHandler, RETENTION_MS } from "./maintenance.ts";
 import { createJobRunner } from "./job-runner.ts";
 import { createScheduler } from "./scheduler.ts";
 import { MAINTENANCE_KIND } from "./scheduler.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const DAY = 24 * 60 * 60_000;
 const T0 = Date.parse("2026-11-22T03:00:00.000Z");
@@ -37,6 +39,7 @@ const clock: Clock = {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-maintenance-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
   wall = T0;
 });

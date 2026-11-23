@@ -11,6 +11,9 @@ import { expect, it, vi } from "vitest";
 import { createJsonlConnector } from "./adapters/jsonl-connector.ts";
 import { importJsonl } from "./jsonl-import.ts";
 import * as lines from "./jsonl-lines.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 vi.mock("./jsonl-lines.ts", async (actual) => {
   const real = await actual<typeof import("./jsonl-lines.ts")>();
@@ -32,8 +35,7 @@ const line = (i: number) => {
 };
 
 it("parses the text once for eight instances, and hands each Connector its own lines", async () => {
-  const db = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db = freshDb();
   const configs: unknown[] = [];
   const createConnector = () => {
     const connector = createJsonlConnector();

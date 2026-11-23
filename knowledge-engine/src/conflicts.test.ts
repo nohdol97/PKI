@@ -21,12 +21,14 @@ import {
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AUTO_DISPUTE_SETTING, linkPropagationSupersedes, refreshConflicts } from "./conflicts.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const T = "2026-11-23T00:00:00.000Z";
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

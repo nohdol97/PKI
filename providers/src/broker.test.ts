@@ -11,7 +11,7 @@ import {
 } from "@pki/contracts";
 import { migrate } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { describe, expect, it } from "vitest";
 import {
   createBroker,
@@ -24,11 +24,12 @@ import {
 import { TASKS } from "./tasks.ts";
 import { createUserActionLedger } from "./user-actions.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const ALLOW = { allowed: true, destination: "fake.example", policyVersion: "pv-test" } as const;
 
 function setup(options: { provider?: FakeProvider; deps?: Partial<BrokerDeps> } = {}) {
-  const db = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db = freshDb();
   const ledger = createUserActionLedger();
   const provider = options.provider ?? new FakeProvider();
   const records: CallRecord[] = [];

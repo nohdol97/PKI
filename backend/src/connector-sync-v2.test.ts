@@ -13,7 +13,7 @@ import {
   type ConnectorCapabilities,
 } from "@pki/contracts";
 import { readCursor, type SqlDriver } from "@pki/storage";
-import { ScriptedConnector } from "@pki/testkit";
+import { ScriptedConnector, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
 import { createConnectorManager, tryLockInstance, type ConnectorManager } from "./connectors.ts";
 import type { Clock } from "./clock.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const AT = "2026-11-22T00:00:00Z";
 const CANARY = "CANARY-origin-text-7731";
@@ -30,6 +32,7 @@ let db: SqlDriver;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-sync2-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
 });
 afterEach(() => {

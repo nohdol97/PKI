@@ -26,11 +26,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
 import { createReadGate } from "./read-gate.ts";
+import { dirTemplate } from "@pki/testkit";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 let dir: string;
 let db: SqlDriver;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-read-gate-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
   registerConnectorInstance(db, "c", "test-fixtures");
 });

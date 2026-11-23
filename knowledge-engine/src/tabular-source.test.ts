@@ -15,9 +15,12 @@ import {
   type StoredTableVersion,
   type TabularContractFixture,
   type TabularContractHarness,
+  memoryDbTemplate,
 } from "@pki/testkit";
 import { describe, expect, it } from "vitest";
 import { sqlTabularSource } from "./tabular-source.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const FIXTURES = fileURLToPath(new URL("../../fixtures/documents/", import.meta.url));
 
@@ -39,8 +42,7 @@ const fixtures = Object.fromEntries(
 ) as Record<TabularContractFixture, StoredTableVersion>;
 
 function openSql(): TabularContractHarness<SqlDriver> {
-  const db = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db = freshDb();
   registerConnectorInstance(db, "imported", "jsonl-import");
   let n = 0;
   return {

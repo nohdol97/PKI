@@ -6,10 +6,12 @@ import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { routes, type RouteName } from "@pki/contracts";
-import { send, sendRaw } from "@pki/testkit";
+import { send, sendRaw, memoryDbTemplate } from "@pki/testkit";
 import { productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager, ConnectorRebuild } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const TOKEN = "t".repeat(43);
 const ALLOWED_ORIGIN = "http://localhost:5173";
@@ -19,8 +21,7 @@ let valid: Record<string, string>;
 const synced: string[] = [];
 const imported: string[] = [];
 const rebuilt: string[] = [];
-const db = openBetterSqlite3(":memory:");
-migrate(db);
+const db = freshDb();
 const stores = { db, dataDirectory: "/synthetic/data", egress: productEgress(db) };
 const connectors: ConnectorManager & ConnectorRebuild = {
   list: () => [],

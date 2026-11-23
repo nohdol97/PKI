@@ -6,11 +6,13 @@
 import { ProviderError, type BrokerRequest } from "@pki/contracts";
 import { listProviderCalls, migrate, type SqlDriver } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBroker, DEFAULT_LIMITS } from "./broker.ts";
 import { createCallRecorder } from "./call-recorder.ts";
 import { createUserActionLedger } from "./user-actions.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const T0 = Date.parse("2026-11-21T00:00:00.000Z");
 const HOUR = DEFAULT_LIMITS.callBudget.windowMs;
@@ -22,8 +24,7 @@ afterEach(() => {
 });
 
 function newDb(): SqlDriver {
-  const db = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db = freshDb();
   open.push(db);
   return db;
 }

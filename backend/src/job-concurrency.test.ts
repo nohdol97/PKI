@@ -29,6 +29,9 @@ import {
   type JobResult,
   type JobRunner,
 } from "./job-runner.ts";
+import { dirTemplate } from "@pki/testkit";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 let dir: string;
 let db: SqlDriver;
@@ -47,6 +50,7 @@ const testClock: Clock = {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-jobs-concurrency-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
   clock = T0;
   mono = 0;

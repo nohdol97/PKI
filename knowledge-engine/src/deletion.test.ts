@@ -21,7 +21,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { setStatusForTest } from "@pki/testkit";
+import { setStatusForTest, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { propagateNewVersion } from "./propagation.ts";
 import { purgeSource as deleteSource } from "./purge.test-support.ts";
@@ -32,6 +32,8 @@ import {
   TARGET_DATE,
   recomputeDependencyDelay,
 } from "./dependency-delay.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const attrs: KnowledgeAttributes = {
   epistemic: "explicit",
@@ -46,8 +48,7 @@ let x: number;
 let y: number;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   x = insertItem(db, { type: "Project", name: "미리내 프로젝트", ...attrs });
   y = insertItem(db, { type: "System", name: "물결 API", ...attrs });

@@ -13,12 +13,14 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { MemoryVectorIndex, send } from "@pki/testkit";
+import { MemoryVectorIndex, send, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { seedLegacyTombstone } from "@pki/testkit";
 import { productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer } from "./server.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const TOKEN = "i".repeat(43);
 const AT = "2026-11-22T00:00:00.000Z";
@@ -33,8 +35,7 @@ const connectors: ConnectorManager = { list: () => [], sync: async () => ({ erro
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   db.exec("CREATE TABLE quotes (id INTEGER PRIMARY KEY, source_id INTEGER, quote TEXT)");
 });
 afterEach(() => db.close());

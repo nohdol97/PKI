@@ -12,7 +12,7 @@ import {
 } from "@pki/contracts";
 import { migrate, registerJob } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { send } from "@pki/testkit";
+import { send, memoryDbTemplate } from "@pki/testkit";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +23,8 @@ import { CONNECTOR_SYNC_KIND } from "./connector-sync-job.ts";
 import { createConnectorManager, type ConnectorFactory } from "./connectors.ts";
 import { runSiteCheck, type SiteCheckIo } from "./site-check-main.ts";
 import type { SiteRegistration } from "./site-registration.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const TOKEN = "u".repeat(43);
 /** The value the store holds; the code-shaped one passes the product log's field filter, so a leak into a field shows (B3). */
@@ -282,8 +284,7 @@ describe("connectors.credentials-canary (I06-C14)", () => {
 
   it("a change notice's rebuild and a recheck leave the value out of the summaries and the log, however the Connector leaks it", async () => {
     const store1 = secrets();
-    const db = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db = freshDb();
     const manager = await createConnectorManager(
       db,
       instances.filter((i) => i.id !== "missing"),

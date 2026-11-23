@@ -24,7 +24,7 @@ import {
   type UserDecisions,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { seedLegacyTombstone } from "@pki/testkit";
+import { seedLegacyTombstone, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createProductRegistry, propagateCanonical } from "./canonical-kinds.ts";
 import {
@@ -36,6 +36,8 @@ import {
 } from "./dependency-delay.ts";
 import { insightsReceiver } from "./insight-code-rules.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const attrs: KnowledgeAttributes = {
   epistemic: "explicit",
   status: "candidate",
@@ -45,8 +47,7 @@ const attrs: KnowledgeAttributes = {
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

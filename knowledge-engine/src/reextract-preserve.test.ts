@@ -19,11 +19,13 @@ import {
   type UserEntry,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider, fixtureExtraction, type FakeStep } from "@pki/testkit";
+import { FakeProvider, fixtureExtraction, type FakeStep, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createExtractHandler } from "./extraction.ts";
 import { knowledgeCandidates } from "./linking.ts";
 import { propagateNewVersion } from "./propagation.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const T0 = new Date("2026-11-23T00:00:00.000Z");
 const NAME = "미리내 프로젝트";
@@ -82,8 +84,7 @@ const answer = (dates: string[], existing: string | null = null): FakeStep => ({
 });
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "imported", "jsonl-import");
 });
 afterEach(() => db.close());

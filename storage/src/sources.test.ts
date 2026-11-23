@@ -2,7 +2,7 @@
 // (I01-R8), the same content makes no new version, and each instance keeps its
 // kind and cursor.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { seedLegacyTombstone } from "@pki/testkit";
+import { seedLegacyTombstone, memoryDbTemplate } from "@pki/testkit";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import { migrate } from "./migrations.ts";
 import { readChangeSeq } from "./revisions.ts";
@@ -23,11 +23,12 @@ import {
 } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 let db: SqlDriver;
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   for (const id of ["c1", "c2"]) registerConnectorInstance(db, id, "test-fixtures");
 });
 

@@ -10,6 +10,9 @@ import { addEvidence, insertItem, saveFact, type KnowledgeAttributes } from "./k
 import { migrate } from "./migrations.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 const attrs: KnowledgeAttributes = {
@@ -20,8 +23,7 @@ const attrs: KnowledgeAttributes = {
 };
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

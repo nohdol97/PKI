@@ -14,6 +14,9 @@ import {
   readCliBackground,
 } from "./execution-gate.ts";
 import { VERIFIED_CLI_COMBINATIONS } from "./verified-cli.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const OS = platform();
 const VERSION = "2.1.3";
@@ -40,8 +43,7 @@ const user: ExecutionInput = {
 };
 
 function db() {
-  const d = openBetterSqlite3(":memory:");
-  migrate(d);
+  const d = freshDb();
   return d;
 }
 

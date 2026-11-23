@@ -15,7 +15,7 @@ import {
   type SqlDriver,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { seedLegacyTombstone, setStatusForTest } from "@pki/testkit";
+import { seedLegacyTombstone, setStatusForTest, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { propagateCanonical } from "./canonical-kinds.ts";
 import {
@@ -24,6 +24,8 @@ import {
   signalsBetween,
   type Signal,
 } from "./entity-resolution.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const AT = "2026-11-23T00:00:00.000Z";
 const attrs: KnowledgeAttributes = {
@@ -37,8 +39,7 @@ const permissive = { combinable: () => true };
 let db: SqlDriver;
 let versions = 0;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   versions = 0;
 });

@@ -20,11 +20,13 @@ import { applyTransition, automatedLifecycle } from "./semantic-lifecycle.ts";
 import { userDecisions } from "./semantic-user.ts";
 import { registerConnectorInstance } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

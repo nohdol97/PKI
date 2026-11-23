@@ -22,6 +22,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { recomputeInsights } from "./insight-code-rules.ts";
 import { propagateNewVersion } from "./propagation.ts";
 import { purgeSource } from "./purge.test-support.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const attrs: KnowledgeAttributes = {
   epistemic: "explicit",
@@ -32,8 +35,7 @@ const attrs: KnowledgeAttributes = {
 const at = "2026-11-23T00:00:00.000Z";
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

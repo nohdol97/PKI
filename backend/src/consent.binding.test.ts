@@ -13,7 +13,7 @@ import {
   type EgressRule,
 } from "@pki/providers";
 import { listProviderCalls, writeSetting, type SqlDriver } from "@pki/storage";
-import { FakeProvider, send } from "@pki/testkit";
+import { FakeProvider, send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openCanonicalDb, productAdapters } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const TOKEN = "b".repeat(43);
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
@@ -31,6 +33,7 @@ let server: RunningServer | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-consent-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
 });
 afterEach(async () => {

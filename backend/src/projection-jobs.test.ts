@@ -41,6 +41,9 @@ import {
 } from "./projection-jobs.ts";
 import { createScheduler } from "./scheduler.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
+import { dirTemplate } from "@pki/testkit";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -61,6 +64,7 @@ const reopen = (): SqlDriver => {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-projection-jobs-"));
+  seedDataDir(dir);
   db = reopen();
   wall = T0;
   registerConnectorInstance(db, "c", "test-fixtures");

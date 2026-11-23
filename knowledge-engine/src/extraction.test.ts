@@ -43,6 +43,7 @@ import {
   ProposingKnowledgeEngine,
   setStatusForTest,
   type FakeStep,
+  memoryDbTemplate,
 } from "@pki/testkit";
 import type { KnowledgeCandidate } from "@pki/contracts";
 import { readFileSync } from "node:fs";
@@ -58,6 +59,8 @@ import {
 import { findCandidates, knowledgeCandidates } from "./linking.ts";
 import { propagateNewVersion } from "./propagation.ts";
 import { purgeSource } from "./purge.test-support.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const fixtures = resolve(import.meta.dirname, "../../fixtures");
 type Line = { id: string; title: string; content: string };
@@ -123,8 +126,7 @@ function setUp(
 let engineErrors: unknown[] = [];
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "imported", "jsonl-import");
   registerConnectorInstance(db, "fixtures", "test-fixtures");
   egressAsked = [];

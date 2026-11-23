@@ -5,7 +5,7 @@
 import { ErrorResponseSchema, routes } from "@pki/contracts";
 import { AUTO_VERIFY_SETTING } from "@pki/knowledge-engine";
 import { readSetting, type SqlDriver } from "@pki/storage";
-import { send } from "@pki/testkit";
+import { send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openCanonicalDb, productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const TOKEN = "a".repeat(43);
 const ORIGIN = "http://localhost:5173";
@@ -35,6 +37,7 @@ async function boot() {
 }
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "pki-semantic-settings-"));
+  seedDataDir(dir);
   await boot();
 });
 afterEach(async () => {

@@ -3,7 +3,7 @@
 // one automatic epistemic change. The oracle below is written out from the spec's tables, not
 // read from the implementation's `TRANSITIONS`.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { setStatusForTest } from "@pki/testkit";
+import { setStatusForTest, memoryDbTemplate } from "@pki/testkit";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import {
   addEvidence,
@@ -28,10 +28,11 @@ import {
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

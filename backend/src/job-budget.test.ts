@@ -19,7 +19,7 @@ import {
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +30,8 @@ import { BACKOFF_MAX_MS } from "./schedule.ts";
 import { classifyResult, DEFAULT_RUN_TIMEOUT_MS } from "./job-outcomes.ts";
 import { jobBroker } from "./job-broker.ts";
 import { createJobRunner, DEFAULT_HEARTBEAT_MS, type JobHandler } from "./job-runner.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const T0 = Date.parse("2026-11-21T00:00:00.000Z");
 const HOUR = DEFAULT_LIMITS.callBudget.windowMs;
@@ -42,6 +44,7 @@ const testClock: Clock = { now: () => wall, sleep: async () => {}, monotonic: ()
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-job-budget-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
   wall = T0;
   mono = 0;

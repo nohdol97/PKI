@@ -78,3 +78,4 @@ export {
   type TabularContractHarness,
 } from "./tabular.contract.ts";
 export { MemoryTabularSource } from "./memory-tabular-source.ts";
+export { dirTemplate, memoryDbTemplate } from "./db-template.ts";

@@ -16,7 +16,7 @@ import {
   writeSetting,
   type SqlDriver,
 } from "@pki/storage";
-import { send } from "@pki/testkit";
+import { send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +24,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openCanonicalDb, productAdapters, productEgress } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const TOKEN = "u".repeat(43);
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
@@ -36,6 +38,7 @@ let headers: Record<string, string>;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "pki-auto-verify-api-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
   registerConnectorInstance(db, "c", "test-fixtures");
   server = await startServer({

@@ -6,7 +6,7 @@
 import { routes, type ConnectionTestResult } from "@pki/contracts";
 import { CLI_PROFILES, DEFAULT_PROVIDER_SETTING } from "@pki/providers";
 import { writeSetting, type SqlDriver } from "@pki/storage";
-import { FakeProvider, send } from "@pki/testkit";
+import { FakeProvider, send, dirTemplate } from "@pki/testkit";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
 import type { ConnectorManager } from "./connectors.ts";
 import type { RunningServer } from "./server.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const TOKEN = "r".repeat(43);
 const connectors: ConnectorManager = { list: () => [], sync: async () => ({ error: "not-found" }) };
@@ -43,6 +45,7 @@ const savedEnv = new Map<string, string | undefined>();
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-cli-list-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
   for (const key of ENV_KEYS) savedEnv.set(key, process.env[key]);
 });

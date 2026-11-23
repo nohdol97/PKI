@@ -21,11 +21,13 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider, type FakeStep } from "@pki/testkit";
+import { FakeProvider, type FakeStep, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { countLinksRefused } from "./entity-resolution.ts";
 import { createExtractHandler } from "./extraction.ts";
 import { knowledgeCandidates } from "./linking.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const T0 = new Date("2026-11-23T00:00:00.000Z");
 const attrs: KnowledgeAttributes = {
@@ -62,8 +64,7 @@ function setUp(script: FakeStep[] = []) {
   handler = createExtractHandler({ db, now: () => T0 });
 }
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "fixtures", "test-fixtures");
   setUp();
   documents = 0;

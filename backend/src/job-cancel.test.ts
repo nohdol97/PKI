@@ -19,11 +19,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
 import { createJobActions } from "./job-actions.ts";
 import { createJobRunner, type JobHandler, type JobResult } from "./job-runner.ts";
+import { dirTemplate } from "@pki/testkit";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 let dir: string;
 let db: SqlDriver;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-cancel-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
   registerConnectorInstance(db, "c", "test-fixtures");
 });

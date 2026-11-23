@@ -21,11 +21,14 @@ import {
   structuredRequest,
   type FakeHttpReply,
   type FakeOpenAIServer,
+  memoryDbTemplate,
 } from "@pki/testkit";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { OPENAI_BASE_URL_SETTING, OPENAI_MODEL_SETTING } from "../egress-policy.ts";
 import { openaiKeySecretName } from "../secret-names.ts";
 import { OpenAICompatibleProvider } from "./openai-compatible.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const KEY = "sk-synthetic-test-key";
 const MODEL = "synthetic-model";
@@ -59,8 +62,7 @@ function secretsOf(read: SecretRead = { state: "present", value: KEY }, forHost?
 }
 
 function dbWith(baseUrl: string | undefined, model: string | undefined): SqlDriver {
-  const db = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db = freshDb();
   if (baseUrl !== undefined) writeSetting(db, OPENAI_BASE_URL_SETTING, baseUrl);
   if (model !== undefined) writeSetting(db, OPENAI_MODEL_SETTING, model);
   return db;
