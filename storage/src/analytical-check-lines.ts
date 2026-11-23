@@ -4,7 +4,9 @@
 // reads that collect the rows a table source's loss or change touches for the judgement (S03-T06). A line
 // holds no text: no column name, no cell, no key. The checks themselves are computed in knowledge-engine.
 import { registerAnalyticalCheckJob } from "./analytical.ts";
+import type { SourceVersionRef } from "./derivatives.ts";
 import type { MembershipListener } from "./entity-groups.ts";
+import { listSplitMoves } from "./split-moves.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
 export type CheckName = "schema" | "grain" | "join-cardinality" | "aggregation";
@@ -326,3 +328,172 @@ export const onMembershipChanged: MembershipListener = (tx, change) => {
   );
   queueChecksAround(tx, closure);
 };
+
+// ---- collection for the judgement (S03-R12, R16, R17): reads only -----------------------------------------
+
+/**
+ * The relations waiting on a new version's extraction (S03-R16 "기다리는 행"), each with the source it waits
+ * on (the basis source of the supersede line). Ascending by relation. Read from S01's history.
+ */
+export function waitingRelations(tx: SqlDriver): { relationId: number; sourceId: number }[] {
+  return tx
+    .all(
+      `SELECT r.id, h.basis_source_id AS source_id FROM relations r
+         JOIN relation_history h ON h.relation_id = r.id
+          AND h.seq = (SELECT max(seq) FROM relation_history WHERE relation_id = r.id)
+        WHERE ${WAITING("r")} AND h.basis_source_id IS NOT NULL ORDER BY r.id`,
+    )
+    .map((r) => ({ relationId: r.id as number, sourceId: r.source_id as number }));
+}
+
+/** Facts whose kind's verified rule demands checks (any status; the judgement filters by state). */
+const CHECK_NEEDING = `f.kind IN (SELECT name FROM ontology_elements
+  WHERE element_kind = 'fact-kind' AND status = 'verified'
+    AND coalesce(json_array_length(json_extract(rule, '$.dataChecks')), 0) > 0)`;
+
+/** Items that stand above a set of items: subjects of path relations to them (live or waiting). */
+function reaching(tx: SqlDriver, items: readonly number[], types: readonly string[]): number[] {
+  return tx
+    .all(
+      `SELECT DISTINCT r.subject_id FROM relations r
+        WHERE r.type IN (${quoted(types)}) AND ${usable("r", "live-or-waiting")}
+          AND r.object_id IN (SELECT value FROM json_each(?))`,
+      [JSON.stringify(items)],
+    )
+    .map((r) => r.subject_id as number);
+}
+
+const currentVersion = (tx: SqlDriver, sourceId: number): SourceVersionRef | undefined => {
+  const version = tx.all(
+    "SELECT max(version) AS version FROM source_versions WHERE source_id = ?",
+    [sourceId],
+  )[0]?.version;
+  return typeof version === "number" ? { sourceId, version } : undefined;
+};
+
+/**
+ * The check-needing facts a change to a source touches, found by relations and never by check lines (S03-R17),
+ * each with its basis: the table sources its item reached (live or waiting relations) and their current
+ * versions, ascending by source. A deletion also collects what rests on the source's tables (its Datasets, the
+ * Metrics and Joins on them, the Metrics using those Joins) and the rows a split took off them; both
+ * a deletion and a prune collect the facts of items whose path relation (live or superseded) has evidence on the
+ * source (below the kept version for a prune) and of items whose path relation waits on it. Facts of any status:
+ * the judgement (S03-T06) keeps the `verified` ones. Distinct, ascending.
+ */
+export function claimCandidates(
+  tx: SqlDriver,
+  change: { sourceId: number; mode: "deletion" | "pruned"; keptVersion?: number },
+): { factId: number; basis: SourceVersionRef[] }[] {
+  const items = new Set<number>();
+  const facts = new Set<number>();
+  if (change.mode === "deletion") {
+    const datasets = tx
+      .all("SELECT item_id FROM dataset_tables WHERE source_id = ?", [change.sourceId])
+      .map((r) => r.item_id as number);
+    if (datasets.length > 0) {
+      const onDatasets = reaching(tx, datasets, ON_DATASET);
+      const joins = tx
+        .all(
+          `SELECT DISTINCT r.subject_id FROM relations r
+            WHERE r.type IN ('JOIN_LEFT', 'JOIN_RIGHT') AND ${usable("r", "live-or-waiting")}
+              AND r.object_id IN (SELECT value FROM json_each(?))`,
+          [JSON.stringify(datasets)],
+        )
+        .map((r) => r.subject_id as number);
+      for (const id of [...datasets, ...onDatasets, ...reaching(tx, joins, ["USES_JOIN"])]) {
+        items.add(id);
+      }
+      for (const id of splitMovedClaims(tx, change.sourceId)) facts.add(id);
+    }
+  }
+  const below = change.mode === "pruned" ? " AND v.version < ?" : "";
+  const cited = tx.all(
+    `SELECT DISTINCT r.subject_id FROM relations r
+      WHERE r.type IN (${quoted([...ON_DATASET, "USES_JOIN"])})
+        AND r.status <> 'rejected'
+        AND EXISTS (SELECT 1 FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
+                     WHERE e.relation_id = r.id AND v.source_id = ?${below})`,
+    change.mode === "pruned" ? [change.sourceId, change.keptVersion ?? 0] : [change.sourceId],
+  );
+  for (const row of cited) items.add(row.subject_id as number);
+  const waiting = new Set(
+    waitingRelations(tx)
+      .filter((w) => w.sourceId === change.sourceId)
+      .map((w) => w.relationId),
+  );
+  if (waiting.size > 0) {
+    const rows = tx.all(
+      `SELECT subject_id FROM relations
+        WHERE type IN (${quoted([...ON_DATASET, "USES_JOIN"])}) AND id IN (SELECT value FROM json_each(?))`,
+      [JSON.stringify([...waiting])],
+    );
+    for (const row of rows) items.add(row.subject_id as number);
+  }
+  if (items.size > 0) {
+    const rows = tx.all(
+      `SELECT f.id FROM facts f WHERE f.item_id IN (SELECT value FROM json_each(?)) AND ${CHECK_NEEDING}`,
+      [JSON.stringify([...items])],
+    );
+    for (const row of rows) facts.add(row.id as number);
+  }
+  return [...facts]
+    .sort((a, b) => a - b)
+    .map((factId) => {
+      const item = tx.all("SELECT item_id FROM facts WHERE id = ?", [factId])[0]?.item_id as number;
+      const basis = tableSourcesOf(tx, item, "live-or-waiting").flatMap(
+        (source) => currentVersion(tx, source) ?? [],
+      );
+      return { factId, basis };
+    });
+}
+
+/**
+ * The `verified` check-needing facts of the items a split's record names for a table source (S03-R12): a move
+ * of a relation whose object is a Dataset bound to the source (or a Join with a side on one), or of a
+ * check-needing fact whose original item reaches the source. The record is read through `listSplitMoves`
+ * and starts from the facts, so its size does not grow the cost. The `no-dataset` filter and the exclusion of
+ * waiting rows are the judgement's (S03-T06). Ascending.
+ */
+export function splitMovedClaims(tx: SqlDriver, sourceId: number): number[] {
+  const touches = (itemId: number): boolean => {
+    const bound = tx.all(
+      "SELECT 1 FROM dataset_tables WHERE item_id = ? AND source_id = ? LIMIT 1",
+      [itemId, sourceId],
+    );
+    if (bound.length > 0) return true;
+    return (
+      tx.all(
+        `SELECT 1 FROM relations r JOIN dataset_tables t ON t.item_id = r.object_id
+          WHERE r.subject_id = ? AND r.type IN ('JOIN_LEFT', 'JOIN_RIGHT') AND t.source_id = ? LIMIT 1`,
+        [itemId, sourceId],
+      ).length > 0
+    );
+  };
+  const isChecked = (factId: number): boolean =>
+    tx.all(`SELECT 1 FROM facts f WHERE f.id = ? AND ${CHECK_NEEDING}`, [factId]).length > 0;
+  const found: number[] = [];
+  const candidates = tx.all(
+    `SELECT f.id, f.item_id FROM facts f WHERE f.status = 'verified' AND ${CHECK_NEEDING} ORDER BY f.id`,
+  );
+  for (const row of candidates) {
+    const itemId = row.item_id as number;
+    const moves = [
+      ...listSplitMoves(tx, { fromItemId: itemId }),
+      ...listSplitMoves(tx, { toItemId: itemId }),
+    ];
+    const hit = moves.some((move) => {
+      if (move.relationId !== null) {
+        const object = tx.all("SELECT object_id FROM relations WHERE id = ?", [move.relationId])[0]
+          ?.object_id;
+        return typeof object === "number" && touches(object);
+      }
+      return (
+        move.factId !== null &&
+        isChecked(move.factId) &&
+        tableSourcesOf(tx, move.fromItemId).includes(sourceId)
+      );
+    });
+    if (hit) found.push(row.id as number);
+  }
+  return found;
+}
