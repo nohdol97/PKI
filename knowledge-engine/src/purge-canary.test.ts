@@ -59,6 +59,7 @@ const CANARY = {
   identifier: "rqvidentifier", // ⑨ an identifier, the value of an `identifier.*` fact (S02-R2)
   statement: "zcwstatement", // ⑨ a statement, the value of a `statement` fact (S02-R2)
   tag: "tgdtag", // ⑨ the context tag of an `identifier.key` (S02-R4)
+  attachment: "bzqattachment", // ⑤ an attachment name in the current version's provenance (I02C-R7)
 };
 const ALL = Object.values(CANARY);
 const AT = "2026-11-22T00:00:00.000Z";
@@ -111,7 +112,12 @@ function seed() {
     db,
     "c1",
     record(NEW_BODY, {
-      blocks: [{ start: 0, end: 2, locator: { format: "xlsx", sheet: CANARY.locator } }],
+      provenance: {
+        attachments: [{ name: CANARY.attachment, mediaType: "application/pdf", size: 1 }],
+      },
+      blocks: [
+        { start: 0, end: 2, attachment: 0, locator: { format: "xlsx", sheet: CANARY.locator } },
+      ],
     }),
   );
   if (first.status !== "created" || second.status !== "created") throw new Error("seed");

@@ -26,6 +26,7 @@ import { bootBackend } from "./boot.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
 const TOKEN = "g".repeat(43);
+const ATTACHMENT_NAME = "첨부-표식.pdf";
 
 let dir: string;
 let booted: Awaited<ReturnType<typeof bootBackend>> | undefined;
@@ -68,7 +69,13 @@ async function boot(registry?: DerivativeRegistry) {
   const { db, server } = booted;
   const headers = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${TOKEN}` };
   registerConnectorInstance(db, "c", "test-fixtures");
-  const saved = saveSourceRecord(db, "c", { externalId: "s", title: "제목 s", body: "합성 등대" });
+  const saved = saveSourceRecord(db, "c", {
+    externalId: "s",
+    title: "제목 s",
+    body: "합성 등대",
+    provenance: { attachments: [{ name: ATTACHMENT_NAME, mediaType: "application/pdf", size: 7 }] },
+    blocks: [{ start: 0, end: 4, attachment: 0, locator: { format: "pdf", page: 3 } }],
+  });
   if (saved.status !== "created") throw new Error(saved.status);
   const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
   const attrs = {
@@ -107,7 +114,9 @@ describe("the registry boot builds reaches the read paths", () => {
     });
     expect((await call("insights")).body).toMatchObject({ insights: [{ summary: "요약" }] });
     expect((await call("insightEvidence", { insightId })).status).toBe(200);
-    expect((await call("evidenceSource", { evidenceId })).status).toBe(200);
+    const shown = await call("evidenceSource", { evidenceId });
+    expect(shown.status).toBe(200);
+    expect(shown.body).toMatchObject({ attachment: { name: ATTACHMENT_NAME } });
   });
 
   it("the 'where is it now' answer of a source version (I02B-R39, P7)", async () => {
@@ -164,6 +173,7 @@ describe("the registry boot builds reaches the read paths", () => {
     const res = await call("evidenceSource", { evidenceId });
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "not-found" });
+    expect(JSON.stringify(res.body)).not.toContain(ATTACHMENT_NAME);
     expect(asked).toContain("evidence");
   });
 });

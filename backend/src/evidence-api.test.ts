@@ -331,6 +331,61 @@ describe("evidence locator (I01-T07)", () => {
     expect(gap.locator).toBeNull();
   });
 
+  // I02C-C4: the attachment of the block holding the span start, null elsewhere and without meta
+  it("returns the attachment of the block holding the span start, and null for a body block or no attachments", async () => {
+    await start(["plain"]);
+    registerConnectorInstance(db, "c-attach", "test-fixtures");
+    const attachments = [
+      { name: "plan.pdf", mediaType: "application/pdf", size: 1024 },
+      { name: "table.pdf", mediaType: "application/pdf", size: 2048 },
+    ];
+    saveSourceRecord(db, "c-attach", {
+      externalId: "mail",
+      title: "합성 메일",
+      body: "본문 한줄 첨부 글자",
+      provenance: { attachments },
+      blocks: [
+        { start: 0, end: 5, locator: { format: "txt", line: 1 } },
+        { start: 5, end: 11, attachment: 1, locator: { format: "pdf", page: 3 } },
+      ],
+    });
+    const plain = saveSourceRecord(db, "c-attach", {
+      externalId: "plain",
+      title: "첨부 없음",
+      body: "본문만",
+      blocks: [{ start: 0, end: 3, locator: { format: "txt", line: 1 } }],
+    });
+    if (plain.status !== "created") throw new Error(plain.status);
+    const versionOf = (title: string) =>
+      db.all("SELECT id FROM source_versions WHERE title = ?", [title])[0]?.id as number;
+    const attrs = {
+      epistemic: "explicit",
+      status: "candidate",
+      validAt: null,
+      observedAt: "2026-11-21T00:00:00Z",
+    } as const;
+    const x = insertItem(db, { ...attrs, type: "Project", name: "XA" });
+    const fact = saveFact(db, { ...attrs, itemId: x, kind: "target_date", value: "2026-12-05" });
+    const evidence = (title: string, start: number, end: number, quote: string) =>
+      addEvidence(db, {
+        target: { factId: fact.id },
+        sourceVersionId: versionOf(title),
+        start,
+        end,
+        quote,
+      });
+    const inAttachment = evidence("합성 메일", 6, 8, "첨부");
+    const inBody = evidence("합성 메일", 0, 2, "본문");
+    const noAttachments = evidence("첨부 없음", 0, 2, "본문");
+    const attachmentOf = async (id: number) =>
+      routes.evidenceSource.response.parse((await call("evidenceSource", { evidenceId: id })).body);
+    const shown = await attachmentOf(inAttachment);
+    expect(shown.attachment).toEqual(attachments[1]);
+    expect(shown.locator).toEqual({ format: "pdf", page: 3 });
+    expect((await attachmentOf(inBody)).attachment).toBeNull();
+    expect((await attachmentOf(noAttachments)).attachment).toBeNull();
+  });
+
   it("is null for the fixture evidence, whose versions have no blocks", async () => {
     await start(["plain"]);
     const [insight] = routes.insights.response.parse((await call("insights")).body).insights;
