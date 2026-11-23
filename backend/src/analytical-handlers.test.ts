@@ -6,6 +6,7 @@ import {
   insertItem,
   registerConnectorInstance,
   saveDatasetTable,
+  saveRelation,
   saveSourceRecord,
   type SqlDriver,
 } from "@pki/storage";
@@ -91,5 +92,19 @@ describe("analytical.api (handlers)", () => {
     const reader = api((k) => k !== "item");
     expect(reader.list()).toEqual({ datasets: [], metrics: [], joins: [], truncated: false });
     expect(reader.seen).toEqual(["hidden"]);
+  });
+
+  it("F1: a check request through a hidden relation queues nothing", () => {
+    const t = table("orders");
+    const metric = insertItem(db, { type: "Metric", name: "m", ...attrs });
+    const rel = saveRelation(db, {
+      subjectId: metric,
+      type: "MEASURED_ON",
+      objectId: t.item,
+      ...attrs,
+    }).id;
+    const hidden = api((k, id) => !(k === "relation" && id === String(rel)));
+    expect(hidden.check({ itemId: metric })).toEqual({ jobIds: [] });
+    expect(api().check({ itemId: metric })).toEqual({ jobIds: [expect.any(Number)] });
   });
 });

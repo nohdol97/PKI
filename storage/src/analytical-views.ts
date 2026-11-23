@@ -150,12 +150,13 @@ class Reader {
     if (!this.awaiting) {
       this.awaiting = new Map();
       const waits = waitingRelations(this.db);
-      if (waits.length > 0) {
-        const bySource = new Map(waits.map((w) => [w.relationId, w.sourceId]));
+      if (waits.some((w) => this.shown("relation", w.relationId))) {
+        const seen = waits.filter((w) => this.shown("relation", w.relationId));
+        const bySource = new Map(seen.map((w) => [w.relationId, w.sourceId]));
         const rows = this.db.all(
           `SELECT id, subject_id FROM relations WHERE id IN (SELECT value FROM json_each(?))
              AND type IN ('MEASURED_ON', 'JOIN_LEFT', 'JOIN_RIGHT')`,
-          [JSON.stringify(waits.map((w) => w.relationId))],
+          [JSON.stringify(seen.map((w) => w.relationId))],
         );
         for (const r of rows) {
           const subject = r.subject_id as number;
@@ -203,9 +204,28 @@ class Reader {
       evidenceCount: ids.length,
       checkNeeded: needed,
       checks,
-      unmet: needed ? [...dataChecksUnmet(this.db, { kind: "fact", id: f.id })] : [],
+      unmet: needed ? this.unmet(f.id, lineIds) : [],
       awaitingSourceIds: needed ? this.waitingSources(itemId) : [],
     };
+  }
+
+  /** The unmet conditions as this caller sees them: a hidden line is absent, so it is `check-missing`, never its name. */
+  private unmet(factId: number, lineIds: ReadonlyMap<string, number>): DataCheckUnmet[] {
+    const hidden = new Set(
+      [...lineIds]
+        .filter(([, id]) => !this.shown("analytical-check", `check:${id}`))
+        .map(([n]) => n),
+    );
+    const raw = dataChecksUnmet(this.db, { kind: "fact", id: factId });
+    if (hidden.size === 0) return [...raw];
+    const kept = raw.filter((u) => !hidden.has(u));
+    return kept.includes("check-missing")
+      ? kept
+      : [
+          ...kept.filter((u) => u === "no-dataset" || u === "spec-conflict"),
+          "check-missing" as const,
+          ...kept.filter((u) => u !== "no-dataset" && u !== "spec-conflict"),
+        ];
   }
 
   facts(itemId: number): FactRowView[] {
@@ -279,11 +299,12 @@ class Reader {
   objects(itemId: number, type: string): number[] {
     return this.db
       .all(
-        `SELECT DISTINCT object_id FROM relations WHERE subject_id = ? AND type = ? AND ${LIVE} ORDER BY object_id`,
+        `SELECT id, object_id FROM relations WHERE subject_id = ? AND type = ? AND ${LIVE} ORDER BY object_id, id`,
         [itemId, type],
       )
+      .filter((r) => this.shown("relation", r.id as number))
       .map((r) => r.object_id as number)
-      .filter((id) => this.shown("item", id));
+      .filter((id, i, all) => all.indexOf(id) === i && this.shown("item", id));
   }
 
   /** S03-R9: the group-wide conflicts of an item, with the rows the caller may see; fewer than two is none. */
@@ -429,16 +450,21 @@ function metricView(r: Reader, id: number): MetricView | undefined {
   };
 }
 
-const notMember =
-  "NOT EXISTS (SELECT 1 FROM item_merges m WHERE m.member_id = items.id AND m.active = 1)";
-
-function itemIds(db: SqlDriver, type: string, limit: number, grouped: boolean): number[] {
-  return db
-    .all(`SELECT id FROM items WHERE type = ? ${grouped ? `AND ${notMember}` : ""} ORDER BY id`, [
-      type,
-    ])
-    .map((r) => r.id as number)
-    .slice(0, limit + 1);
+/**
+ * The items of a type the caller sees, at the top level: a member of a group is listed under its representative
+ * unless that representative is hidden, then it stands on its own (F4). Visibility is judged before the limit
+ * (F3): `truncated` counts visible items only.
+ */
+function itemIds(r: Reader, type: string, limit: number): { ids: number[]; truncated: boolean } {
+  const ids = r.db
+    .all("SELECT id FROM items WHERE type = ? ORDER BY id", [type])
+    .map((row) => row.id as number)
+    .filter((id) => {
+      if (!r.shown("item", id)) return false;
+      const rep = entityGroups.representativeOf(r.db, id);
+      return rep === id || !r.shown("item", rep);
+    });
+  return { ids: ids.slice(0, limit), truncated: ids.length > limit };
 }
 
 /**
@@ -452,9 +478,7 @@ export function listMetricViews(
   limit = DEFAULT_LIMIT,
 ): MetricView[] {
   const r = new Reader(db, vis);
-  return itemIds(db, "Metric", limit, true)
-    .slice(0, limit)
-    .flatMap((id) => metricView(r, id) ?? []);
+  return itemIds(r, "Metric", limit).ids.flatMap((id) => metricView(r, id) ?? []);
 }
 
 function datasetView(r: Reader, id: number, withMembers: boolean): DatasetView | undefined {
@@ -512,13 +536,13 @@ export function listAnalytical(
   limit = DEFAULT_LIMIT,
 ): AnalyticalList {
   const r = new Reader(db, vis);
-  const datasetIds = itemIds(db, "Dataset", limit, true);
-  const metricIds = itemIds(db, "Metric", limit, true);
-  const joinIds = itemIds(db, "Join", limit, true);
+  const datasets = itemIds(r, "Dataset", limit);
+  const metrics = itemIds(r, "Metric", limit);
+  const joins = itemIds(r, "Join", limit);
   return {
-    datasets: datasetIds.slice(0, limit).flatMap((id) => datasetView(r, id, true) ?? []),
-    metrics: metricIds.slice(0, limit).flatMap((id) => metricView(r, id) ?? []),
-    joins: joinIds.slice(0, limit).flatMap((id) => joinView(r, id) ?? []),
-    truncated: [datasetIds, metricIds, joinIds].some((ids) => ids.length > limit),
+    datasets: datasets.ids.flatMap((id) => datasetView(r, id, true) ?? []),
+    metrics: metrics.ids.flatMap((id) => metricView(r, id) ?? []),
+    joins: joins.ids.flatMap((id) => joinView(r, id) ?? []),
+    truncated: datasets.truncated || metrics.truncated || joins.truncated,
   };
 }

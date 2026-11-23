@@ -223,3 +223,54 @@ describe("analytical.no-query-surface", () => {
     ]);
   });
 });
+
+describe("rework 1: visibility of paths, unmet, limit and group members", () => {
+  it("F1: a hidden MEASURED_ON relation leaves the Metric with no Dataset, no column match and no grain", () => {
+    const w = world();
+    fact(db, w.d, "dataset.grain", '["id"]');
+    const rel = db.all("SELECT id FROM relations WHERE type = 'MEASURED_ON'")[0]?.id as number;
+    const view = listMetricViews(
+      db,
+      hiding((k, id) => k === "relation" && id === String(rel)),
+    )[0];
+    expect(view?.datasets).toEqual([]);
+    expect(view?.grain).toEqual([]);
+    expect(view?.columns[0]?.missing).toBe("no-table");
+  });
+
+  it("F2: a hidden failed check line does not name its check in unmet; check-missing stands for it", () => {
+    const w = world();
+    db.run(
+      "UPDATE analytical_checks SET passed = 0, failure_code = 'column-missing' WHERE fact_id = ? AND check_name = 'schema'",
+      [w.calc],
+    );
+    const lineId = db.all("SELECT id FROM analytical_checks WHERE check_name = 'schema'")[0]
+      ?.id as number;
+    const open = listMetricViews(db)[0]?.calculations[0]?.unmet;
+    expect(open).toContain("schema");
+    const hidden = listMetricViews(
+      db,
+      hiding((k, id) => k === "analytical-check" && id === `check:${lineId}`),
+    )[0]?.calculations[0]?.unmet;
+    expect(hidden).not.toContain("schema");
+    expect(hidden).toContain("check-missing");
+  });
+
+  it("F3: hidden low-id items do not use up the limit and do not set truncated", () => {
+    const [a, b, c] = [1, 2, 3].map((n) => item(db, "Metric", `m${n}`));
+    const vis = hiding((k, id) => k === "item" && (id === String(a) || id === String(b)));
+    expect(listMetricViews(db, vis, 1).map((m) => m.itemId)).toEqual([c]);
+    expect(listAnalytical(db, vis, 1).truncated).toBe(false);
+  });
+
+  it("F4: a visible member is listed at the top level when its representative is hidden", () => {
+    const table = storeVersion(db, "t1");
+    const real = dataset(db, "orders", table.sourceId);
+    const doc = item(db, "Dataset", "orders");
+    db.transaction(() => userDecisions.entities.merge(db, real, doc, "2026-11-23T00:00:00.000Z"));
+    const vis = hiding((k, id) => k === "item" && id === String(doc));
+    const list = listAnalytical(db, vis).datasets;
+    expect(list.map((d) => d.itemId)).toEqual([real]);
+    expect(list[0]?.members).toEqual([]);
+  });
+});

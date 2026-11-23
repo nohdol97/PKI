@@ -7,7 +7,6 @@
 import {
   ANALYTICAL_CHECK_JOB_KIND,
   registerAnalyticalCheckJob,
-  tableSourcesOf,
   type SqlDriver,
 } from "@pki/storage";
 
@@ -44,6 +43,37 @@ function jobOf(db: SqlDriver, sourceId: number): number | undefined {
   return row?.id as number | undefined;
 }
 
+const LIVE = "status NOT IN ('superseded', 'rejected')";
+
+/**
+ * The table sources an item reaches over the relations the caller sees: its own tables, and those of the
+ * Datasets on its `MEASURED_ON`/`JOIN_*` relations and of the Joins on its `USES_JOIN` (the two written paths
+ * of S03-R12), a hidden relation being no path.
+ */
+function visibleTableSources(db: SqlDriver, shown: AnalyticalVisibility["shown"], itemId: number) {
+  const objects = (subject: number, types: string[]) =>
+    db
+      .all(
+        `SELECT id, object_id FROM relations WHERE subject_id = ? AND type IN (SELECT value FROM json_each(?)) AND ${LIVE}`,
+        [subject, JSON.stringify(types)],
+      )
+      .filter((r) => shown("relation", String(r.id)))
+      .map((r) => r.object_id as number);
+  const datasets = new Set<number>([
+    itemId,
+    ...objects(itemId, ["MEASURED_ON", "JOIN_LEFT", "JOIN_RIGHT"]),
+  ]);
+  for (const join of objects(itemId, ["USES_JOIN"])) {
+    for (const d of objects(join, ["JOIN_LEFT", "JOIN_RIGHT"])) datasets.add(d);
+  }
+  return db
+    .all(
+      "SELECT DISTINCT source_id FROM dataset_tables WHERE item_id IN (SELECT value FROM json_each(?)) ORDER BY source_id",
+      [JSON.stringify([...datasets])],
+    )
+    .map((r) => r.source_id as number);
+}
+
 export function createAnalyticalApi<List>(deps: AnalyticalApiDeps<List>): AnalyticalApi<List> {
   const { db } = deps;
   return {
@@ -55,7 +85,7 @@ export function createAnalyticalApi<List>(deps: AnalyticalApiDeps<List>): Analyt
       }
       return db.transaction(() => {
         const jobIds: number[] = [];
-        for (const sourceId of tableSourcesOf(db, itemId)) {
+        for (const sourceId of visibleTableSources(db, deps.shown, itemId)) {
           // a source the caller may not see is not queued: its table is hidden from this caller whole
           if (!deps.shown("source", String(sourceId))) continue;
           registerAnalyticalCheckJob(db, sourceId, deps.now?.());
