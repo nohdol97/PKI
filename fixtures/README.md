@@ -20,7 +20,9 @@
 
 여기의 자료를 고치거나 더하면 `pnpm --filter @pki/providers build:synthetic-manifest`로 합성 목록을 다시 만들어 함께 커밋한다. 목록이 자료와 어긋나면 `pnpm test`가 실패한다.
 
-- `p01-insights.json`: P01(Insight 발견)의 규칙 층 시나리오([P01 spec](../docs/specs/2026-11-23-P01-insight-discovery.md) D8). 13개 유형마다 `support`(`supported`·`unsupported`)가 있고, 지원 유형은 항목·원본·사실·관계로 된 `scenario`, 조건을 깨는 `variant`(사실만 바꿈), 기대 결과(`expected`: Insight의 항목, 사실 줄, 근거 인용문)를 갖는다. 미지원 유형은 `support`만 둔다. 가져오기를 지나지 않는 JSON이라 합성 목록(`.jsonl`만 읽음)에 넣지 않는다. 유형 표와 같은 13개인지는 `knowledge-engine/src/insight-code-rules.test.ts`가 대조한다.
+- `p01-insights.json`: P01(Insight 발견)의 규칙 층 시나리오([P01 spec](../docs/specs/2026-11-23-P01-insight-discovery.md) D8). 13개 유형마다 `support`(`supported`·`unsupported`)가 있고, 지원 유형은 항목·원본·사실·관계로 된 `scenario`, 조건을 깨는 `variant`(사실 또는 관계만 바꿈), 기대 결과(`expected`: Insight의 항목, 사실 줄, 근거 인용문)를 갖는다. 관계에는 `observedAt`을 줄 수 있다(항목은 2026-11-21): "새 관계"는 관계가 항목보다 늦게 관측될 때만 선다. 미지원 유형은 `support`만 둔다. 가져오기를 지나지 않는 JSON이라 합성 목록(`.jsonl`만 읽음)에 넣지 않는다. 유형 표와 같은 13개인지는 `knowledge-engine/src/insight-code-rules.test.ts`가 대조한다.
+- `p01-status.jsonl`: P01-T05의 가져오기 원본(스펙 R11·R12). 한 줄이 원본 version 하나이고 모양은 `v02-*.jsonl`과 같다. 요청(Request) "결제 연동 요청"의 상태 `open`과 목표일(`wiki-p01-0001`), 이슈(Issue) "정산 오류 이슈"의 상태 `in_progress`(`wiki-p01-0002`)다. 가져오면 "미처리 요청"과 "미해결 이슈"가 한 건씩 생긴다.
+- `p01-expected.json`: 위 원본의 기대 결과(`base`). 항목, 사실(값, 근거), Insight와 각 근거(코드 포인트 `[시작, 끝)`, 인용문). 인용문은 자기 원본에 정확히 한 번 나온다. 추출 double(`fixtureExtraction`)이 `v02-expected.json`과 같은 모양으로 읽고, `knowledge-engine/src/insight-import.test.ts`가 대조한다.
 
 ## documents/
 
