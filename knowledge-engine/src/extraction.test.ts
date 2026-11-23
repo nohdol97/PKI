@@ -195,7 +195,7 @@ describe("extraction.calls", () => {
     expect(facts()).toHaveLength(1);
   });
 
-  it("hands over the job's bookkeeping, one item per kept fact, the automatic promotion's judgement, the rule, the link-check marks and the candidates, each with this version as lineage (I04-R11)", async () => {
+  it("hands over the job's bookkeeping, one item per kept fact, the conflicts' judgement, the automatic promotion's judgement, the rule, the link-check marks and the candidates, each with this version as lineage (I04-R11)", async () => {
     imported(mail);
     const { job, result } = await runNext();
     if (result.status !== "succeeded") throw new Error("expected a result");
@@ -205,6 +205,7 @@ describe("extraction.calls", () => {
       "extraction",
       "fact",
       "extraction",
+      "extraction",
       "insight",
       "extraction",
       "extraction",
@@ -212,12 +213,21 @@ describe("extraction.calls", () => {
     expect(result.items.map((i) => i.itemKey)).toEqual([
       "bookkeeping",
       expect.any(String),
+      "conflicts",
       "auto-verify",
       "dependency-delay",
       "link-check",
       "merge-candidates",
     ]);
-    expect(result.items.map((i) => i.lineage)).toEqual([[own], [own], [own], [own], [own], [own]]);
+    expect(result.items.map((i) => i.lineage)).toEqual([
+      [own],
+      [own],
+      [own],
+      [own],
+      [own],
+      [own],
+      [own],
+    ]);
     expect(facts()).toHaveLength(1);
   });
 

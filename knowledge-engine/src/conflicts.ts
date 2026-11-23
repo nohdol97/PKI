@@ -17,13 +17,16 @@ import {
   listEvidenceVersions,
   readSetting,
   rowLineage,
+  oneValueKind,
   slotRivals,
+  supersededByVersion,
   unionOfVersions,
   withGroups,
   type KnowledgeStatus,
   type LinkType,
   type MembershipListener,
   type MembershipScope,
+  type SourceVersionRef,
   type SqlDriver,
 } from "@pki/storage";
 
@@ -178,3 +181,51 @@ export const conflictsReceiver: MembershipListener = (tx, change, scope) => {
   const { created, removed } = refreshConflicts(tx, change.items, scope);
   scope.recomputed?.("assertion-link", created + removed);
 };
+
+/**
+ * S02-R19's propagation link: a fact this extraction wrote, of a `one` kind and with current evidence on this
+ * source version, supersedes the fact of its slot that the propagation of this same version replaced
+ * ("the same source said another value in the same place": a key match, no value is compared). The link
+ * rests on this version and is not recomputed. A pair the scope policy will not put together gets none.
+ */
+export function linkPropagationSupersedes(
+  tx: SqlDriver,
+  written: readonly number[],
+  own: SourceVersionRef,
+  scope: Pick<MembershipScope, "combinable">,
+  at: string,
+): number {
+  let created = 0;
+  for (const id of [...new Set(written)].sort((a, b) => a - b)) {
+    const row = tx.all("SELECT kind, status FROM facts WHERE id = ?", [id])[0];
+    if (!row || !oneValueKind(tx, row.kind as string)) continue;
+    if (!isValidRow(tx, { kind: "fact", id }, row.status as KnowledgeStatus)) continue;
+    const current = listEvidence(tx, { factId: id })
+      .filter((e) => e.current)
+      .map((e) => e.id);
+    if (
+      !listEvidenceVersions(tx, current).some(
+        (v) => v.sourceId === own.sourceId && v.version === own.version,
+      )
+    ) {
+      continue;
+    }
+    for (const old of supersededByVersion(tx, id, own)) {
+      const lineage = unionOfVersions(
+        rowLineage(tx, { kind: "fact", id }),
+        rowLineage(tx, { kind: "fact", id: old }),
+      );
+      if (!scope.combinable(lineage)) continue;
+      const link = insertAssertionLink(tx, {
+        type: "SUPERSEDES",
+        fromFactId: id,
+        toFactId: old,
+        createdBy: "propagation",
+        basis: own,
+        at,
+      });
+      if (link.created) created++;
+    }
+  }
+  return created;
+}

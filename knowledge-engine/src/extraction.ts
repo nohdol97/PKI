@@ -66,7 +66,9 @@ import {
   BOOKKEEPING_KIND,
   recordExtractionDrops,
   recordWithheldCandidate,
+  fillValidity,
   followMovedRow,
+  isDate,
   saveFact,
   saveRelation,
   valueFits,
@@ -79,6 +81,7 @@ import {
   type SqlDriver,
   type StoredJob,
 } from "@pki/storage";
+import { linkPropagationSupersedes, refreshConflicts } from "./conflicts.ts";
 import { assessAfterExtraction } from "./auto-verify.ts";
 import { derivativeRegistry, RECOMPUTE_PREFIX } from "./canonical-kinds.ts";
 import { recomputeDependencyDelay } from "./dependency-delay.ts";
@@ -127,6 +130,21 @@ export interface ExtractHandlerOptions {
 }
 
 type Item = ExtractionOutput["items"][number];
+
+/**
+ * The interval an answer states for a row (S02-R17): each stated end must be a real date and, when both are
+ * stated, the start must be before the end. Otherwise the row is kept with no interval and counted.
+ */
+function validityOf(from: string | null | undefined, until: string | null | undefined) {
+  const stated = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
+  const start = stated(from);
+  const end = stated(until);
+  const real = (v: string | null) => v === null || isDate(v);
+  const ordered = start === null || end === null || start < end;
+  return real(start) && real(end) && ordered
+    ? { from: start, until: end, dropped: false }
+    : { from: null, until: null, dropped: true };
+}
 interface Planned {
   /** `fact` or `relation`: the registered kind of the row it writes. */
   kind: "fact" | "relation";
@@ -139,6 +157,8 @@ interface Planned {
   ) => { target: EvidenceTarget; created: boolean };
   /** The answer states it as explicit (S01-R11): a hypothesis row with this evidence becomes explicit. */
   explicit: boolean;
+  /** The valid interval the answer states (S02-R17); `dropped` when it was not accepted and the row is kept without one. */
+  validity?: { from: string | null; until: string | null; dropped: boolean };
   span: QuoteSpan;
   quote: string;
 }
@@ -341,7 +361,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // The check is cumulative, in id order: a candidate is offered only if its sources may be put
     // together with this version and with every candidate already offered, so one request never
     // carries a combination the policy refuses. The ones left out are counted as dropped.
-    const drops = { quotes: 0, other: 0 };
+    const drops = { quotes: 0, other: 0, validity: 0 };
     const candidateLineage = new Map<string, LineageRef[]>();
     /** The stored type of each candidate item, read with its lineage: a candidate deleted during the call still has one. */
     const candidateType = new Map<string, string>();
@@ -454,6 +474,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     });
     for (const fact of answer.facts) {
       const value = fact.value.trim();
+      const validity = validityOf(fact.validFrom, fact.validUntil);
       const rule = rules.factKind(fact.kind);
       const type = typeOf(fact.item);
       if (
@@ -485,6 +506,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         key: JSON.stringify(["fact", items.get(fact.item)?.name, fact.kind, value]),
         target: { item: fact.item },
         explicit: fact.epistemic === "explicit",
+        validity,
         save: (tx, ids) => {
           const saved = saveFact(tx, {
             itemId: ids(fact.item),
@@ -492,12 +514,15 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
             value,
             context: tag,
             ...attributes(fact.epistemic, fact.confidence),
+            validAt: validity.from,
+            validUntil: validity.until,
           });
           return { target: { factId: saved.id }, created: saved.created };
         },
       });
     }
     for (const relation of answer.relations) {
+      const validity = validityOf(relation.validFrom, relation.validUntil);
       const rule = rules.relationType(relation.type);
       const subject = typeOf(relation.subject);
       const object = typeOf(relation.object);
@@ -522,12 +547,15 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         ]),
         target: { subject: relation.subject, object: relation.object },
         explicit: true,
+        validity,
         save: (tx, ids) => {
           const saved = saveRelation(tx, {
             subjectId: ids(relation.subject),
             type: relation.type,
             objectId: ids(relation.object),
             ...attributes("explicit", relation.confidence),
+            validAt: validity.from,
+            validUntil: validity.until,
           });
           return { target: { relationId: saved.id }, created: saved.created };
         },
@@ -677,6 +705,8 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // This state lives for one commit: closeJob calls each item's write once inside its
     // transaction, and a failed commit is never re-run with these items (a locked file
     // runs the handler again for a fresh closure, a throwing write closes the job).
+    // a kept row whose stated interval was not accepted is counted (S02-R17)
+    drops.validity = planned.filter((p) => p.validity?.dropped).length;
     const ids = new Map<string, number>();
     const touched = new Set<number>();
     const judgedFacts = new Set<number>();
@@ -721,6 +751,8 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
               ? ({ kind: "fact", id: target.factId } as const)
               : ({ kind: "relation", id: target.relationId } as const);
           if (created) automatedLifecycle.created(tx, row, "extraction", own, at);
+          // a stored row's interval is filled only while both ends are empty and the user never set it (S02-R17)
+          else if (entry.validity) fillValidity(tx, row, entry.validity.from, entry.validity.until);
           addEvidence(tx, {
             target,
             sourceVersionId: versionId,
@@ -807,6 +839,20 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
     // content-free item (status lines only, like the bookkeeping): a scope policy that refuses the
     // Insight rule's combined lineage must not skip it, or a rival written in this run would leave a
     // promoted sibling verified.
+    // S02-R19: the links of the slots this answer touched, judged after every row is written and before the
+    // promotion reads them (its condition 5 asks which values are superseded). Content-free like the judgement.
+    const conflictsItem: DerivedItem = {
+      kind: BOOKKEEPING_KIND,
+      itemKey: "conflicts",
+      lineage: [own],
+      unjudged: true as const,
+      write: (tx) => {
+        const scope = { combinable: (lineage: LineageRef[]) => registry.combinable(tx, lineage) };
+        const at = now().toISOString();
+        linkPropagationSupersedes(tx, [...judgedFacts], own, scope, at);
+        refreshConflicts(tx, [...touched], scope, { at });
+      },
+    };
     const judgement: DerivedItem = {
       kind: BOOKKEEPING_KIND,
       itemKey: "auto-verify",
@@ -824,6 +870,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
       items: [
         bookkeeping,
         ...written,
+        conflictsItem,
         judgement,
         rule,
         linkMarks,

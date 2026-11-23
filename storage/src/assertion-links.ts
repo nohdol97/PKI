@@ -3,6 +3,7 @@
 // `otherValidValues` is the one function that says whether a fact has another valid value in its slot.
 import { entityGroups } from "./entity-groups.ts";
 import { listOntologyElements } from "./ontology.ts";
+import { STATE_NEUTRAL_ACTIONS } from "./semantic-lifecycle.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 import type { KnowledgeStatus } from "./knowledge.ts";
 import { isValidRow } from "./valid-row.ts";
@@ -120,6 +121,14 @@ export function effectiveUntil(
   return dates.length === 0 ? null : dates.reduce((min, d) => (d < min ? d : min));
 }
 
+/** Whether the kind has a `verified` fact-kind definition whose value count is `one`. */
+export function oneValueKind(db: SqlDriver, kind: string): boolean {
+  const definition = listOntologyElements(db).find(
+    (e) => e.elementKind === "fact-kind" && e.name === kind && e.status === "verified",
+  );
+  return definition?.rule.elementKind === "fact-kind" && definition.rule.cardinality === "one";
+}
+
 /**
  * The other valid facts that state a different value in the asked fact's slot (same kind, same
  * context tag), ascending, before any supersession is subtracted. Answers [] for a fact not stored and for
@@ -129,12 +138,7 @@ export function slotRivals(db: SqlDriver, fact: number, within: ConflictReach): 
   const own = db.all("SELECT item_id, kind, value, context FROM facts WHERE id = ?", [fact])[0];
   if (!own) return [];
   const kind = own.kind as string;
-  const definition = listOntologyElements(db).find(
-    (e) => e.elementKind === "fact-kind" && e.name === kind && e.status === "verified",
-  );
-  if (definition?.rule.elementKind !== "fact-kind" || definition.rule.cardinality !== "one") {
-    return [];
-  }
+  if (!oneValueKind(db, kind)) return [];
   const items =
     within === "item" ? [own.item_id as number] : entityGroups.membersOf(db, own.item_id as number);
   return db
@@ -172,4 +176,43 @@ export function otherValidValues(
       .map((r) => r.from_fact_id as number),
   );
   return rivals.filter((id) => !superseded.has(id) && !supersedes.has(id));
+}
+
+/**
+ * The facts of the asked fact's slot (same merge group, kind and tag, another value) whose newest state line
+ * is the propagation's `supersede` resting on this source version: what the new version replaced (S02-R19's
+ * propagation link). Ascending ids; [] for a kind that is not `one`.
+ */
+export function supersededByVersion(
+  db: SqlDriver,
+  fact: number,
+  basis: { sourceId: number; version: number },
+): number[] {
+  const own = db.all("SELECT item_id, kind, value, context FROM facts WHERE id = ?", [fact])[0];
+  if (!own || !oneValueKind(db, own.kind as string)) return [];
+  return db
+    .all(
+      `SELECT id FROM facts
+       WHERE item_id IN ${IDS} AND kind = ? AND context IS ? AND value <> ? AND status = 'superseded' ORDER BY id`,
+      [
+        JSON.stringify(entityGroups.membersOf(db, own.item_id as number)),
+        own.kind as string,
+        own.context as string | null,
+        own.value as string,
+      ],
+    )
+    .map((r) => r.id as number)
+    .filter((id) => {
+      const line = db.all(
+        `SELECT actor, action, basis_source_id, basis_version FROM fact_history
+         WHERE fact_id = ? AND action NOT IN ${IDS} ORDER BY seq DESC LIMIT 1`,
+        [id, JSON.stringify([...STATE_NEUTRAL_ACTIONS])],
+      )[0];
+      return (
+        line?.actor === "propagation" &&
+        line.action === "supersede" &&
+        line.basis_source_id === basis.sourceId &&
+        line.basis_version === basis.version
+      );
+    });
 }
