@@ -366,3 +366,24 @@ describe("X01-R6 R12 a hidden newer version leaves no trace in the marks", () =>
     expect(found.notes.filter((n) => n.kind === "stale")).toEqual([]);
   });
 });
+
+describe("X01-R12 the visibility check comes before the strategy cut", () => {
+  it("keeps the visible hits a strategy would cut off behind the hidden ones", async () => {
+    const denying = createProductRegistry({
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) => !scopes.some((s) => s?.includes("denied")),
+      },
+    });
+    const db: SqlDriver = openBetterSqlite3(":memory:");
+    migrate(db);
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    const add = (mark: string, scope: string[], body: string) =>
+      saveSourceRecord(db, "c1", { externalId: mark, title: mark, body, accessScope: scope });
+    for (let i = 0; i < 60; i++) add(`denied-${i}`, ["denied"], "프로브낱말 프로브낱말 프로브낱말");
+    for (let i = 0; i < 5; i++) add(`open-${i}`, ["open"], "프로브낱말");
+    const found = await retrieve(db, denying, "프로브낱말");
+    expect(found.hits).toHaveLength(5);
+    db.close();
+  });
+});
