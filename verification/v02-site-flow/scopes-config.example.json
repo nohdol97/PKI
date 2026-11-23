@@ -1,0 +1,5 @@
+{
+  "_notice": "NEVER USED. Example only: copy to v02-result\\scopes-config.json (gitignored, at the repository root) after the fork's installer is installed. Values in <angle brackets> are placeholders. productName must equal the DisplayName of the installer's Windows uninstall entry; installedExe must lie under its InstallLocation. No Provider is needed.",
+  "productName": "<PRODUCT-DISPLAY-NAME>",
+  "installedExe": "%LOCALAPPDATA%\\Programs\\<PRODUCT-FOLDER>\\<PRODUCT>.exe"
+}

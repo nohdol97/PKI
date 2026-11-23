@@ -252,3 +252,21 @@ C4는 test double 결과와 실제 Provider 결과를 구분해 적으라고 요
 **붙이기.** 파일의 숫자와, 프로파일을 켤지 정한 결과(켠다·끈 채로 둔다·더 잰다)를 이슈 #24(S03)에 남깁니다. 글, 값, 항목 이름, 설정 파일은 붙이지 않습니다.
 
 **이 절차가 확인하지 못하는 것(미검증으로 둡니다).** 이 실행기는 Windows에서 돌려 본 적이 없습니다. 설치본의 정본 경로가 `%LOCALAPPDATA%\PKI\pki.sqlite`와 같은지(포크의 빌드에서)와 실제 Provider가 열 이름·집계를 맞게 돌려주는지는 확인하지 못했습니다. 표가 아닌 것의 이유별 수는 세지 않습니다. 숫자가 작으면 정밀도로 읽을 수 없습니다.
+
+## 13. 설치본 범위 확인 (scopes-check, S31, I07-R12)
+
+> **상태: 작성만 됨 — 실행된 적 없음.** Windows 설치본에서도 실제 포크에서도 돌려 본 적이 없습니다. 사외에서는 거부 경로와 판정·기록 형식만 합성 SQLite와 합성 기대 값 파일로 단위 시험했습니다. 그 통과는 배포처 결과가 아닙니다. 스펙: [I07 spec](../../docs/specs/2026-11-22-I07-installed-scopes-file.md) I07-R12·R17, 배포처 항목: [site-setup.md S31](../../docs/site-setup.md).
+
+**무엇을 하나.** 포크의 설치본이 만든 정본 `pki.sqlite`의 `connector_instances.configured_scope`를 읽기 전용으로 열어, 포크의 범위 파일(`site/config/connector-scopes.json`)의 값과 견줍니다. 정본에는 정렬하고 중복을 없앤 값이 저장되므로 파일의 값도 같은 방식으로 고쳐 견줍니다. **이 실행이 증명하는 것은 "값이 정본까지 복사되었다"까지**이고, Broker가 그 값을 쓰는지는 공용 저장소의 시험이 봅니다.
+
+**준비.** 3절과 같습니다. 설정은 `scopes-config.example.json`(또는 `config.example.json`)을 `v02-result\config.json`으로 복사해 `productName`과 `installedExe`를 채웁니다(Provider는 보지 않습니다). 포크의 빌드로 만든 설치본을 설치해 켜고, 범위 파일이 이름 댄 인스턴스를 한 번 동기화하거나 가져와 정본에 생기게 한 뒤 앱을 **완전히 닫습니다**(알림 영역 포함).
+
+| 순서 | 할 일 | 확인 |
+|---|---|---|
+| 1 | `python verification\v02-site-flow\run.py scopes-check --config v02-result\config.json --expected site\config\connector-scopes.json --out v02-result` | 종료 값 0이고 `PASS`. Windows 설치본이 아니면 `배포처 후속`으로 시작하는 알림과 종료 값 3, 기대 값 파일이 틀리면 설정 오류와 종료 값 2(판정 없음) |
+
+**판정.** 범위가 있는 기대 항목이 모두 정본에 같은 값으로 있으면 `PASS`입니다. 하나라도 다르거나 정본의 값이 `NULL`이면 `FAIL`이고, 이것은 정본에 없는 항목이 함께 있어도 `FAIL`입니다. 범위가 있는 기대 항목이 하나도 없거나 기대한 인스턴스가 정본에 아직 없으면(한 번도 동기화·가져오기를 하지 않았습니다) `INCONCLUSIVE`입니다. 아무것도 증명하지 못한 실행을 통과로 읽지 않습니다. `FAIL`과 `INCONCLUSIVE`의 종료 값은 1입니다.
+
+**결과.** `--out`의 `scopes-check-result.json` 하나입니다. OS, 앱 버전, 판정, `compared`(범위가 있는 기대 항목 수), `same`, `different`(정본이 `NULL`인 것 포함), `missing`(정본에 없는 수)만 담고 **범위 값과 인스턴스 ID는 담지 않습니다.** 이 파일의 숫자와 판정만 이슈 #115와 S31에 붙입니다.
+
+**이 절차가 확인하지 못하는 것(미검증으로 둡니다).** Windows와 설치본에서 돌려 본 적이 없습니다. 설치본의 정본 경로가 `%LOCALAPPDATA%\PKI\pki.sqlite`와 같은지(포크의 빌드에서)는 확인하지 못했습니다. 인스턴스 ID를 잘못 적은 항목은 `missing`으로만 드러납니다. 앱을 닫지 않고 돌리면 정본이 잠겨 거부될 수 있습니다.
