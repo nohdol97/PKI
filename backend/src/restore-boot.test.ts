@@ -53,6 +53,7 @@ import {
   RestoreStateError,
   rollbackRestore,
   applyPendingRestore,
+  embeddingSpaceDiffers,
   finishRestore,
   type RestoreStep,
 } from "./restore-boot.ts";
@@ -251,6 +252,16 @@ describe("restore.swap crash matrix (H01-C2b)", () => {
     expect(sourceCount(db)).toBe(2);
     expect(existsSync(`${live()}-journal`)).toBe(false);
     db.close();
+  });
+});
+
+describe("embeddingSpaceDiffers (RVF-R3)", () => {
+  const space = { modelId: "m", revision: "r1", dimension: 8 };
+  it("is true only when both spaces exist and a field differs", () => {
+    expect(embeddingSpaceDiffers(space, { ...space })).toBe(false);
+    expect(embeddingSpaceDiffers(space, { ...space, revision: "r2" })).toBe(true);
+    expect(embeddingSpaceDiffers(space, null)).toBe(false);
+    expect(embeddingSpaceDiffers(null, space)).toBe(false);
   });
 });
 

@@ -271,10 +271,24 @@ export function readRestoreLast(db: SqlDriver): RestoreLast | undefined {
   }
 }
 
+/** RVF-R3: true only when both spaces exist and the model, the revision or the dimension differs. */
+export function embeddingSpaceDiffers(
+  backup: EmbeddingSpace | null,
+  now: EmbeddingSpace | null,
+): boolean {
+  return (
+    backup !== null &&
+    now !== null &&
+    (backup.modelId !== now.modelId ||
+      backup.revision !== now.revision ||
+      backup.dimension !== now.dimension)
+  );
+}
+
 export interface FinishReport {
   /** How many deletions the ledger re-apply applied (`reapplyAtStart`). */
   reapplied: number;
-  /** The index's embedding space now; compared with the backup's. */
+  /** The bound embedder's embedding space now (null: none bound); compared with the backup's. */
   embeddingSpace: EmbeddingSpace | null;
   now: Date;
 }
@@ -324,8 +338,10 @@ export function finishRestore(
           reapplied: report.reapplied,
           pausedLocations: paused,
           clearedConsents,
-          embeddingSpaceDiffers:
-            JSON.stringify(summary.embeddingSpace) !== JSON.stringify(report.embeddingSpace),
+          embeddingSpaceDiffers: embeddingSpaceDiffers(
+            summary.embeddingSpace,
+            report.embeddingSpace,
+          ),
         };
         writeSetting(db, RESTORE_LAST_SETTING, JSON.stringify(recorded));
         return recorded;
