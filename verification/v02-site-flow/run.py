@@ -15,6 +15,8 @@ and this runner checks the preconditions, prepares the synthetic input, then cou
               ("배포처 후속", I03-H2 ① outside the Windows installer, ② no manual sleep confirmation record); needs no Provider
   delete-scenario preflight|prepare|record   the deletion scenario of I04 (S22, see delete_scenario.py): its own refusal
               ("배포처 후속", I04-H2 ②) outside the Windows installer; needs no Provider
+  semantic-scenario preflight|record --phase off|on   the Semantic measurement of S01 (S32, see semantic_scenario.py): its own
+              refusal ("배포처 후속", S01-H2) outside a Windows installed build with a real Provider; `record` writes counts, no verdict
 
 Exit values: 0 ok/PASS, 1 FAIL or INCONCLUSIVE or a write refusal, 2 config error, 3 `배포처 후속` notice, 4 stale data.
 """
@@ -37,6 +39,7 @@ for _p in (HERE, VERIF):
 
 import delete_scenario  # noqa: E402
 import queue_scenario  # noqa: E402
+import semantic_scenario  # noqa: E402
 import run_record as rr  # noqa: E402
 from common import results  # noqa: E402
 from common.fingerprint import environment_fingerprint  # noqa: E402
@@ -55,6 +58,10 @@ NOTICE_QUEUE_NOT_INSTALLER = ("배포처 후속: S19 Windows 설치본이 아닌
                               "미구현, 배포처 후속: R04의 설치 파일로 설치한 Windows 11에서 실행한다(I03-H2 ①, 이유: {code}).")
 NOTICE_SLEEP_RECORD = ("배포처 후속: S19 절전·최대 절전 시나리오의 수동 확인 기록({file})이 없거나 이 실행과 맞지 않아 배포처 결과로 기록하지 않는다. "
                        "RUNBOOK 9절의 양식으로 PC를 실제로 재운 뒤 적는다(I03-H2 ②, 이유: {code}).")
+NOTICE_SEMANTIC_DOUBLE = ("배포처 후속: S32 test double Provider(또는 설정과 다른 Provider)로는 표기·정의 추출과 자동 승격을 배포처 결과로 재지 않는다. "
+                          "실제 Provider(openai-compatible, claude-code, codex)를 설정하고 Windows 설치본에서 다시 실행한다(S01-H2, 이유: test-double).")
+NOTICE_SEMANTIC_NOT_INSTALLER = ("배포처 후속: S32 Windows 설치본이 아닌 환경에서는 표기·정의 추출과 자동 승격을 배포처 결과로 재지 않는다. "
+                                 "R04의 설치 파일로 설치한 Windows 11에서 실제 Provider로 실행한다(S01-H2, 이유: {code}).")
 # the operator attests these; `launched-installed`: every start was the installed exe (the DB does not say which
 # binary wrote it, and dist\app or source runs use the same data folder)
 OBSERVATIONS = ("launched-installed", "insight-inference", "evidence-opened", "reimport-no-new", "restart-kept")
@@ -198,6 +205,17 @@ def queue_gate(cfg, platform=None, read_uninstall=None, is_file=None, in_git_tre
     """The installer check of the queue scenarios (I03-H2 ①): the same measured inputs, the S19 notice, no Provider."""
     return check_installer(cfg, platform or sys.platform, read_uninstall or read_uninstall_windows, is_file or os.path.isfile,
                            in_git_tree or _in_git_tree, notice=NOTICE_QUEUE_NOT_INSTALLER)
+
+
+def semantic_gate(cfg, platform=None, read_uninstall=None, is_file=None, in_git_tree=None):
+    """The two conditions of the Semantic scenario (S01-H2): a real Provider, then the installed build. Provider first, so one
+    run prints one notice; both notices start with `배포처 후속` and name S32. The inputs are measured, never overridable."""
+    try:
+        check_provider(cfg)
+    except Refusal:
+        raise Refusal(NOTICE_SEMANTIC_DOUBLE, "test-double")
+    return check_installer(cfg, platform or sys.platform, read_uninstall or read_uninstall_windows, is_file or os.path.isfile,
+                           in_git_tree or _in_git_tree, notice=NOTICE_SEMANTIC_NOT_INSTALLER)
 
 
 # ---- prepare / record ------------------------------------------------------------------------------------------------
@@ -371,6 +389,28 @@ def run_delete_scenario(args):
     return 0 if verdict == "PASS" else 1
 
 
+# ---- Semantic measurement (S01-R25, S32) -----------------------------------------------------------------------------
+
+def run_semantic_scenario(args):
+    """Refusal first, before the config is read: outside Windows nothing else is looked at. Raises like the other commands."""
+    if sys.platform != "win32":
+        raise Refusal(NOTICE_SEMANTIC_NOT_INSTALLER.format(code="not-windows"), "not-windows")
+    cfg = load_config(args.config)
+    app_version = semantic_gate(cfg)
+    if args.action == "preflight":
+        print("preflight ok: installed app {}, provider {}".format(app_version, cfg["provider"]["id"]))
+        return 0
+    if not args.out or not args.phase:
+        raise ConfigError("--out and --phase are required for record")
+    counts = semantic_scenario.read_counts(site_db_path(), args.phase)
+    warning = semantic_scenario.phase_warning(counts)
+    if warning:
+        print("warning: {}".format(warning), file=sys.stderr)
+    path = semantic_scenario.write_counts(counts, args.out)
+    print("wrote {} (counts only, no text; this is a measurement, not a verdict)".format(os.path.basename(path)))
+    return 0
+
+
 # ---- queue and scheduler recovery scenarios (I03-R25, S19) ------------------------------------------------------------
 
 def run_queue_scenario(args, installer_check=None, db_path=None):
@@ -436,6 +476,11 @@ def main(argv=None, installer_check=None, db_path=None):
     sp.add_argument("--out")
     sp.add_argument("--observed", action="append", default=[], choices=delete_scenario.OBSERVATIONS)
     sp.add_argument("--redact", action="append", default=[])
+    sp = sub.add_parser("semantic-scenario")
+    sp.add_argument("action", choices=("preflight", "record"))
+    sp.add_argument("--config", required=True)
+    sp.add_argument("--out")
+    sp.add_argument("--phase", choices=semantic_scenario.PHASES)
     sp = sub.add_parser("queue-scenario")
     sp.add_argument("action", choices=("preflight", "prepare", "record"))
     sp.add_argument("--scenario", required=True, choices=queue_scenario.SCENARIOS)
@@ -476,6 +521,8 @@ def main(argv=None, installer_check=None, db_path=None):
     try:
         if args.command == "delete-scenario":
             return run_delete_scenario(args)
+        if args.command == "semantic-scenario":
+            return run_semantic_scenario(args)
         if args.command == "queue-scenario":
             return run_queue_scenario(args, installer_check=installer_check, db_path=db_path)
         cfg = load_config(args.config)
