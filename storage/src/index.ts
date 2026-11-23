@@ -344,6 +344,14 @@ export {
   type SemanticRowView,
 } from "./semantic-view.ts";
 export {
+  listExploreItems,
+  readSourceVersionView,
+  readValidIntervals,
+  type ExploreItemRow,
+  type SourceVersionView,
+  type ValidInterval,
+} from "./explore-reads.ts";
+export {
   componentOf,
   entityGroups,
   lineageOfItems,

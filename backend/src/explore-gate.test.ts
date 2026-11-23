@@ -93,7 +93,12 @@ let counter = 0;
 /** A source and the id of its version; `scope` is what the source is restricted to. */
 function source(body: string, scope: string[] | null) {
   const externalId = `s${++counter}`;
-  const saved = saveSourceRecord(db, "c", { externalId, title: `제목 ${body}`, body, accessScope: scope });
+  const saved = saveSourceRecord(db, "c", {
+    externalId,
+    title: `제목 ${body}`,
+    body,
+    accessScope: scope,
+  });
   if (saved.status !== "created") throw new Error(saved.status);
   const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
   return { versionId, sourceId: saved.sourceId };
@@ -114,8 +119,12 @@ function item(name: string, versionId: number, value = "공개 값") {
   return id;
 }
 function relation(subject: number, object: number, versionId: number) {
-  const id = saveRelation(db, { subjectId: subject, type: "DEPENDS_ON", objectId: object, ...attrs })
-    .id;
+  const id = saveRelation(db, {
+    subjectId: subject,
+    type: "DEPENDS_ON",
+    objectId: object,
+    ...attrs,
+  }).id;
   automatedLifecycle.created(db, { kind: "relation", id }, "extraction", null);
   addEvidence(db, {
     target: { relationId: id },
@@ -138,8 +147,9 @@ describe("explore.gate (X02-C2b)", () => {
     const denied = item(CANARY_DENIED, secret.versionId, `${CANARY_DENIED} 값`);
     const deleted = item(CANARY_DELETED, gone.versionId, `${CANARY_DELETED} 값`);
     relation(shownA, shownB, open.versionId);
-    relation(shownA, denied, secret.versionId);
-    relation(shownA, deleted, gone.versionId);
+    // the relations rest on the open source: only the far item's own facts are hidden, so the edge is dropped by its end
+    relation(shownA, denied, open.versionId);
+    relation(shownA, deleted, open.versionId);
     // a cover whose purge never ran: only the gate keeps the version out
     seedLegacyTombstone(db, {
       sourceId: gone.sourceId,
@@ -162,7 +172,9 @@ describe("explore.gate (X02-C2b)", () => {
     const seen = JSON.stringify([list.body, centre.body, text.body, logged]);
     for (const canary of [CANARY_DENIED, CANARY_DELETED]) expect(seen).not.toContain(canary);
     for (const hidden of [denied, deleted]) {
-      expect(seen).not.toMatch(new RegExp(`"(id|to|from|itemId|subjectId|objectId)":${hidden}[,}]`));
+      expect(seen).not.toMatch(
+        new RegExp(`"(id|to|from|itemId|subjectId|objectId)":${hidden}[,}]`),
+      );
       expect(await call("exploreItem", { itemId: hidden, depth: 1 })).toEqual(NOT_FOUND);
     }
     expect(await call("exploreItem", { itemId: 99_999, depth: 1 })).toEqual(NOT_FOUND);

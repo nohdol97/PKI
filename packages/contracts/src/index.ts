@@ -42,11 +42,20 @@ import {
   FeedbackUndoResponseSchema,
 } from "./feedback-types.ts";
 import { INSIGHT_TYPE_NAMES } from "./insight-types.ts";
+import {
+  ExploreItemRequestSchema,
+  ExploreItemResponseSchema,
+  ExploreItemsRequestSchema,
+  ExploreItemsResponseSchema,
+  ExploreSourceRequestSchema,
+  ExploreSourceResponseSchema,
+} from "./explore.ts";
 import { DATA_CLASSES, PROVIDER_IDS } from "./provider.ts";
 
 export * from "./adapter-errors.ts";
 export * from "./analytical-types.ts";
 export * from "./ask.ts";
+export * from "./explore.ts";
 export type * from "./embedding.ts";
 export type * from "./knowledge-engine.ts";
 export type * from "./vector-index.ts";
@@ -2066,6 +2075,25 @@ export const routes = {
     path: "/api/wiki/page",
     request: WikiPageRequestSchema,
     response: WikiPageResponseSchema,
+  },
+  // X02 (R1-R3): the Explore screen's reads.
+  exploreItems: {
+    method: "POST",
+    path: "/api/explore/items",
+    request: ExploreItemsRequestSchema,
+    response: ExploreItemsResponseSchema,
+  },
+  exploreItem: {
+    method: "POST",
+    path: "/api/explore/item",
+    request: ExploreItemRequestSchema,
+    response: ExploreItemResponseSchema,
+  },
+  exploreSource: {
+    method: "POST",
+    path: "/api/explore/source",
+    request: ExploreSourceRequestSchema,
+    response: ExploreSourceResponseSchema,
   },
   wikiEdit: {
     method: "POST",

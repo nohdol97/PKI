@@ -89,8 +89,12 @@ function fact(itemId: number, value: string, versionId: number, validAt: string 
   return id;
 }
 function relation(subject: number, object: number, versionId: number) {
-  const id = saveRelation(db, { subjectId: subject, type: "DEPENDS_ON", objectId: object, ...attrs })
-    .id;
+  const id = saveRelation(db, {
+    subjectId: subject,
+    type: "DEPENDS_ON",
+    objectId: object,
+    ...attrs,
+  }).id;
   automatedLifecycle.created(db, { kind: "relation", id }, "extraction", null);
   cite({ relationId: id }, versionId);
   return id;
@@ -134,7 +138,13 @@ describe("explore.api (X02-C2a)", () => {
     expect(body.center?.facts[0]).toMatchObject({ validAt: "2026-01-01", validUntil: null });
     expect(body.items?.map((i) => i.name)).toEqual(["물결"]);
     expect(body.edges).toEqual([
-      expect.objectContaining({ type: "DEPENDS_ON", direction: "forward", from: a, to: b, step: 1 }),
+      expect.objectContaining({
+        type: "DEPENDS_ON",
+        direction: "forward",
+        from: a,
+        to: b,
+        step: 1,
+      }),
     ]);
     const deeper = routes.exploreItem.response.parse(
       (await call("exploreItem", { itemId: a, depth: 2 })).body,
