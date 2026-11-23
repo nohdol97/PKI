@@ -9,6 +9,7 @@ import type { ApiClient } from "./api.ts";
 import {
   ItemList,
   Neighbourhood,
+  searchMore,
   searchPage,
   shownEdges,
   timelineOf,
@@ -149,6 +150,19 @@ describe("탐색 목록 (X02-C3a ①, ②)", () => {
       <ItemList state={{ status: "ready", ...more }} onOpen={noop} onMore={noop} />,
     );
     expect(out).not.toContain("더 보기");
+  });
+
+  it("continues with the query that made the list, not a later-edited input", async () => {
+    const { api, calls } = fake({
+      exploreItems: (request) =>
+        (request as { after?: number }).after === undefined
+          ? { items: [{ id: 1, type: "Project", name: "가" }], next: 1 }
+          : { items: [{ id: 2, type: "Project", name: "나" }], next: null },
+    });
+    const first = await searchPage(api, "미리내");
+    // the input box now reads "물결", but nothing was submitted
+    await searchMore(api, first);
+    expect(calls[1]).toEqual(["exploreItems", { query: "미리내", after: 1 }]);
   });
 });
 
