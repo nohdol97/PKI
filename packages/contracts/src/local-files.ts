@@ -230,12 +230,11 @@ const LocationTypeSchema = z.enum(["folder", "file", "jsonl-file"]);
 
 /**
  * An approval: the kind and either a typed path (the development and test builds) or the one-time
- * ticket the shell's picker made (I02B-R37). Both, or neither, is a bad request. Only `folder` is
- * accepted until the file kinds have their own walk and API (I02B-D2, T06).
+ * ticket the shell's picker made (I02B-R37). Both, or neither, is a bad request.
  */
 export const LocalApprovalRequestSchema = z
   .strictObject({
-    type: z.literal("folder"),
+    type: LocationTypeSchema,
     path: z.string().min(1).max(4096).optional(),
     ticket: z.string().min(16).max(256).optional(),
   })

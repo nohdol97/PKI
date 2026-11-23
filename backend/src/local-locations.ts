@@ -2,7 +2,12 @@
 // one-time ticket outside a test build, one row stored only after the check passed), the list the
 // screen reads, and the limits as settings. Nothing here reads a file's content. The routes are
 // server.ts's; the composition point (composition.ts) builds this with the canonical database.
-import { checkApproval, type ApprovalContext, type BoundaryFs } from "@pki/connector-sdk";
+import {
+  checkApproval,
+  type ApprovalContext,
+  type BoundaryFs,
+  type PathRules,
+} from "@pki/connector-sdk";
 import type {
   LocalApprovalRejectionCode,
   LocalApprovalRequest,
@@ -22,8 +27,9 @@ import type {
   LocalPassReport,
 } from "@pki/contracts";
 import { errorClass, log, type BuildKind } from "@pki/providers";
+import type { JsonlFileHooks } from "./jsonl-file-instances.ts";
 import { sourceInfoOf } from "./local-reveal.ts";
-import type { LocalRevoke, RevokeAnswer } from "./local-revoke.ts";
+import { sourceScopeOf, type LocalRevoke, type RevokeAnswer } from "./local-revoke.ts";
 import {
   closeLocation,
   confirmDeletions,
@@ -133,11 +139,15 @@ const LOWERING_DROPS_ENTRIES: ReadonlySet<string> = new Set([
 export const TICKET_TTL_MS = 5 * 60_000;
 const TICKETS_HELD = 16;
 
+/** What a picked path is to be approved as (the location kinds, I02B-R3). */
+export type TicketKind = LocalApprovalRequest["type"];
+const TICKET_KINDS: readonly string[] = ["folder", "file", "jsonl-file"];
+
 export interface ApprovalTickets {
   /** The shell's main process registers a picked path under a ticket it made; the backend never makes one. */
-  register(input: { ticket: string; type: "folder"; path: string }): void;
+  register(input: { ticket: string; type: TicketKind; path: string }): void;
   /** The path a ticket stands for, once: the ticket is gone after it, valid or not. */
-  redeem(ticket: string, type: "folder"): string | undefined;
+  redeem(ticket: string, type: TicketKind): string | undefined;
 }
 
 export function createApprovalTickets(
@@ -145,7 +155,7 @@ export function createApprovalTickets(
 ): ApprovalTickets {
   const now = options.now ?? Date.now;
   const ttl = options.ttlMs ?? TICKET_TTL_MS;
-  const held = new Map<string, { type: "folder"; path: string; expires: number }>();
+  const held = new Map<string, { type: TicketKind; path: string; expires: number }>();
   return {
     register({ ticket, type, path }) {
       held.set(ticket, { type, path, expires: now() + ttl });
@@ -163,15 +173,17 @@ export function createApprovalTickets(
 /** The shell's `location-ticket` message on the parent channel (exactly that shape), or undefined. */
 export function locationTicket(
   data: unknown,
-): { ticket: string; type: "folder"; path: string } | undefined {
+): { ticket: string; type: TicketKind; path: string } | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   if (Object.keys(data).sort().join(",") !== "kind,path,ticket,type") return undefined;
   const { type, ticket, kind, path } = data as Record<string, unknown>;
   const sized = (v: unknown, min: number, max: number): v is string =>
     typeof v === "string" && v.length >= min && v.length <= max;
-  if (type !== "location-ticket" || kind !== "folder") return undefined;
+  if (type !== "location-ticket" || typeof kind !== "string" || !TICKET_KINDS.includes(kind)) {
+    return undefined;
+  }
   if (!sized(ticket, 16, 256) || !sized(path, 1, 4096)) return undefined;
-  return { ticket, type: "folder", path };
+  return { ticket, type: kind as TicketKind, path };
 }
 
 // --- the handler ---------------------------------------------------------------------------------------
@@ -243,8 +255,14 @@ export interface LocalLocationsOptions {
   changed?: () => void;
   /** Starts a full sync of the `local-files` instance; the composition point binds the manager. */
   rescan?: () => void;
+  /** The running instances of JSONL file locations (I02B-R41); without it an approval stores the row only. */
+  jsonlFile?: JsonlFileHooks;
+  /** Whether a file name is a document format a `file` location may be (the connector knows the list; the composition point passes it). */
+  isDocumentFile?: (fileName: string) => boolean;
   now?: () => number;
   fs?: BoundaryFs;
+  /** The OS rules for path shapes; the host's by default (a test sets another to meet a Windows-only shape). */
+  rules?: PathRules;
 }
 
 export function createLocalLocations(options: LocalLocationsOptions): LocalLocations {
@@ -266,8 +284,12 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
   });
 
   /** The path a request stands for: a ticket's, or a typed one only where the build has an input field for it (I02B-R37). */
-  function pathOf(request: { ticket?: string | undefined; path?: string | undefined }) {
-    if (request.ticket !== undefined) return options.tickets.redeem(request.ticket, "folder");
+  function pathOf(request: {
+    type: TicketKind;
+    ticket?: string | undefined;
+    path?: string | undefined;
+  }) {
+    if (request.ticket !== undefined) return options.tickets.redeem(request.ticket, request.type);
     return options.buildKind !== "production" ? request.path : undefined;
   }
 
@@ -278,9 +300,9 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     const context: ApprovalContext = {
       forbidden: options.forbidden,
       locations: listLocations(db),
-      // only folders are approved in this release (I02B-D2); a file kind comes with its API
-      isDocumentFile: () => false,
+      isDocumentFile: options.isDocumentFile ?? (() => false),
       ...(options.fs ? { fs: options.fs } : {}),
+      ...(options.rules ? { rules: options.rules } : {}),
     };
     const checked = await checkApproval({ kind: request.type, path }, context);
     if (!checked.ok) return rejected(checked.code);
@@ -295,13 +317,15 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
       rootIno: checked.ino,
       createdAt: new Date(now()).toISOString(),
     });
+    const stored = listLocations(db).find((l) => l.id === id) as LocalLocation;
     try {
-      options.onApproved();
+      // a JSONL file is its own instance, made now; any other location is read by the `local-files` sync
+      if (stored.type === "jsonl-file") await options.jsonlFile?.approved(stored);
+      else options.onApproved();
     } catch (error) {
-      // the location stays; the hourly sync finds it. Class only: a message can name a path
+      // the location stays; a start makes the instance, the hourly sync finds the rest. Class only: a message can name a path
       log("local-sync-register-failed", { error: errorClass(error) });
     }
-    const stored = listLocations(db).find((l) => l.id === id) as LocalLocation;
     changed();
     return view(stored);
   }
@@ -312,17 +336,20 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     if (location.state !== "unavailable" && location.state !== "needs-confirmation") {
       return { error: "bad-request" };
     }
-    const path = pathOf(request);
+    // a JSONL file location has no relink: its instance is made from the row it was approved with
+    if (location.type === "jsonl-file") return { error: "bad-request" };
+    const path = pathOf({ ...request, type: location.type });
     if (path === undefined) return rejected("ticket-required");
     // the same checks as an approval; the location itself is left out of the overlap check (I02B-R9)
     const checked = await checkApproval(
-      { kind: "folder", path },
+      { kind: location.type, path },
       {
         forbidden: options.forbidden,
         locations: listLocations(db),
         ignoreLocationId: location.id,
-        isDocumentFile: () => false,
+        isDocumentFile: options.isDocumentFile ?? (() => false),
         ...(options.fs ? { fs: options.fs } : {}),
+        ...(options.rules ? { rules: options.rules } : {}),
       },
     );
     if (!checked.ok) return rejected(checked.code);
@@ -370,7 +397,7 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
         skipped: entries.filter((e) => e.state === "skipped" || e.state === "forgotten").length,
         ignored: report?.ignored ?? 0,
         pendingDeletes: entries.filter((e) => e.pendingDelete === 1).length,
-        sources: liveSourceCount(db, location.id),
+        sources: liveSourceCount(db, location.id, sourceScopeOf(location)),
       },
       limitExceeded: report?.limitExceeded ?? location.limitExceeded,
       lastPassAt:

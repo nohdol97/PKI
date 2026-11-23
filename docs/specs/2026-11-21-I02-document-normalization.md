@@ -138,6 +138,8 @@ function codePointSlice(text: string, start: number, end: number): string;  // �
 
 ### 위치표의 모양
 
+이 표를 넓히는 것은 I02-B의 [I02B-R30](2026-11-22-I02-local-file-import.md)이다(DOCX 메모의 시각과 답글).
+
 | 형식 | 위치표 | 번호의 기준 |
 |---|---|---|
 | PDF | `{ format: "pdf", page }` | 쪽 1부터 |
@@ -166,6 +168,8 @@ function codePointSlice(text: string, start: number, end: number): string;  // �
 기본값은 배포처 값이 아니라 로컬에서 도는 값이다. 이 조각에서는 값을 넘기는 쪽이 테스트뿐이다. 앱의 설정으로 잇는 일은 I02-B가 가져오기 경로와 함께 한다.
 
 ### 한계 표시 코드
+
+이 표를 바꾸는 것도 I02B-R30이다(`docx.comments-omitted`를 없애고 `xlsx.comments-omitted`를 더함).
 
 | 코드 | 형식 | 언제 달리는가 | 늘 있는 한계(달지 않음) |
 |---|---|---|---|
@@ -219,11 +223,11 @@ flowchart TD
 
 이 조각이 일부러 정하지 않고 넘기는 것이다. I01(#18)의 규격이 정해지면 하나씩 맞춰 본다.
 
-1. **SourceRecord로 옮기기.** `body`는 `text`를 그대로, `title`은 `metadata.title`이 없으면 파일 이름. V02-R3의 근거 위치는 `body`의 코드 포인트이므로 `blocks`의 구간을 그대로 쓸 수 있다. I01-C2의 "span/page/sheet"가 위치표를 어떻게 담을지(근거 행의 열인가, 원본 version의 부속 데이터인가)는 I01이 정한다.
-2. **내용 해시.** 지금 정본의 해시는 제목과 본문으로 계산한다(`storage/src/sources.ts`). 파서의 버전을 올려 같은 파일의 `text`가 바뀌면 새 version이 생긴다. 이것을 받아들일지 정한다.
-3. **합성 등급.** `fixtures/documents/`의 자료는 합성 목록에 없으므로, 앱으로 가져오면 "합성"이 아닌 일반 등급이 된다. 문서 fixture를 합성으로 다룰 필요가 생기면 합성 목록 생성기를 넓힌다.
-4. **시간 상한 없이는 가져오기에 넣지 않는다(검토 B2, 오케스트레이터가 위험으로 받아들임).** I02-A의 `normalizeDocument`는 제품 쪽 호출자가 없고, 파서에는 시간 상한이 없다. 검토의 실측: 24 KB Markdown이 14 s(micromark의 제곱 시간), 3.1 MB PDF가 CPU 359 s(PDF.js가 3 GiB로 펴지는 압축 흐름을 끝까지 푼다). 최초의 제품 호출자(I02-B의 가져오기·폴더 훑기)는 폴더 훑기가 나가기 전에, 정규화를 `worker_threads`(`resourceLimits` 포함)나 utility process에서 제한 시간을 두고 돌려야 하며, 시간 초과를 알리는 새 오류 코드(R5의 목록에 더한다)를 정한다. 이것이 없으면 작은 파일 하나가 백엔드를 멈춘다.
-5. **원본 파일 보관과 삭제.** 원본을 보관하면 ADR 0013의 삭제 경로(모든 version의 내용 삭제)가 그 파일까지 따라가야 한다.
+1. **SourceRecord로 옮기기.**(I02B-R26~R28) `body`는 `text`를 그대로, `title`은 `metadata.title`이 없으면 파일 이름. V02-R3의 근거 위치는 `body`의 코드 포인트이므로 `blocks`의 구간을 그대로 쓸 수 있다. I01-C2의 "span/page/sheet"가 위치표를 어떻게 담을지(근거 행의 열인가, 원본 version의 부속 데이터인가)는 I01이 정한다.
+2. **내용 해시.**(I02B-R13, R14) 지금 정본의 해시는 제목과 본문으로 계산한다(`storage/src/sources.ts`). 파서의 버전을 올려 같은 파일의 `text`가 바뀌면 새 version이 생긴다. 이것을 받아들일지 정한다.
+3. **합성 등급.**(I02B-R31) `fixtures/documents/`의 자료는 합성 목록에 없으므로, 앱으로 가져오면 "합성"이 아닌 일반 등급이 된다. 문서 fixture를 합성으로 다룰 필요가 생기면 합성 목록 생성기를 넓힌다.
+4. **시간 상한 없이는 가져오기에 넣지 않는다(검토 B2, 오케스트레이터가 위험으로 받아들임).**(I02B-R22~R25, R50) I02-A의 `normalizeDocument`는 제품 쪽 호출자가 없고, 파서에는 시간 상한이 없다. 검토의 실측: 24 KB Markdown이 14 s(micromark의 제곱 시간), 3.1 MB PDF가 CPU 359 s(PDF.js가 3 GiB로 펴지는 압축 흐름을 끝까지 푼다). 최초의 제품 호출자(I02-B의 가져오기·폴더 훑기)는 폴더 훑기가 나가기 전에, 정규화를 `worker_threads`(`resourceLimits` 포함)나 utility process에서 제한 시간을 두고 돌려야 하며, 시간 초과를 알리는 새 오류 코드(R5의 목록에 더한다)를 정한다. 이것이 없으면 작은 파일 하나가 백엔드를 멈춘다.
+5. **원본 파일 보관과 삭제.**(I02B-R32~R34, R49) 원본을 보관하면 ADR 0013의 삭제 경로(모든 version의 내용 삭제)가 그 파일까지 따라가야 한다.
 6. **표 원본을 읽는 쪽이 하나 더 있다.** S03의 `TabularSource`(`knowledge-engine/src/tabular-source.ts`, S03-T02)는 정본에 저장된 version의 본문과 블록에서 표를 읽는다. 블록 하나가 칸 하나라는 것, 위치표의 필드(`csv`는 레코드·칸 번호, `xlsx`는 시트·행·열 번호), XLSX의 시트 이름 블록(행·열이 없다), 한계 표시가 `metadata.limitations`의 코드 목록으로 저장된다는 것에 기댄다. I02-B가 이 모양(블록의 구분자, 위치표의 필드, 한계 표시의 저장 자리)을 바꾸면 그 파일 하나를 함께 고친다.
 
 ### 작업 분해

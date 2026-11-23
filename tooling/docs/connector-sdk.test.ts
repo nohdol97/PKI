@@ -377,7 +377,8 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     const code = read("backend/src/connectors.ts");
     expect(code).toContain("export const INITIALIZE_TIMEOUT_MS = 10_000;");
     expect(code).toContain("export const RECHECK_LATE_LIMIT = 3;");
-    expect(code).toContain("instances.map(async ({ id, kind, config, credentials }): Promise<Entry> => {");
+    expect(code).toContain("async function makeEntry(given: ConnectorInstanceConfig): Promise<Entry> {");
+    expect(code).toContain("await Promise.all(instances.map(makeEntry))");
     expect(code).toContain('log("connector-kind-unknown", { id });');
     expect(code).toContain('log("connector-initialize-timeout", { id });');
     expect(code).toContain('log("connector-factory-failed", { id });');
@@ -424,10 +425,11 @@ describe("docs.connector-sdk: what the text says is not built stays unbuilt", ()
     expect(read("backend/src/connectors.ts").match(/\.healthCheck\(/g)).toHaveLength(1);
   });
 
-  it("the file collector reads its path as given (chapter 9's open item)", () => {
+  it("the file collector opens an approved location's file through the path boundary and reads a plain { path } as given (chapter 9)", () => {
     const collector = read("backend/src/adapters/jsonl-connector.ts");
+    expect(collector).toContain("readLocationFile({");
     expect(collector).toContain("statSync(source.path)");
-    expect(collector).not.toMatch(/realpath|symlink|lstat/i);
+    expect(docText).toContain("### 승인한 JSONL 파일 위치(공용 저장소 #116)");
   });
 
   it("only the evidence screen draws a locator (chapter 11, I02B-R39)", () => {
@@ -1083,17 +1085,13 @@ describe("docs.connector-sdk (I07): the scopes file in chapter 7 (I07-R15)", () 
 });
 
 describe("docs.connector-sdk (I07): chapters 7 and 11 no longer list the installed build's gap, ownership.md says the registration binds the file (I07-R15)", () => {
-  it("chapter 7's list of what is missing keeps #116 alone, as item 1 (#114 is built by I06, the scopes file by I07)", () => {
+  it("chapter 7 has no list of what is missing any more: #116 is built by I02B-T06 (#114 by I06, the scopes file by I07)", () => {
     const seven = chapter(docText, 7);
-    const at = seven.indexOf("### 아직 없는 것");
-    const list = seven.slice(at, seven.indexOf("### 포크가 수집기를 만들 때 지킬 것"));
-    expect(list).toContain("1. **`jsonl-import` 파일 인스턴스를 설정하는 제품의 길이 없다**(공용 저장소 #116).");
-    expect(list).not.toContain("2. ");
-    expect(list).toContain("번호(공용 저장소 #116 등)는 **공용(upstream) 저장소**의 추적 이슈다. 포크에서 `#116`은 포크 자신의 이슈를 가리키므로");
-    expect(list).not.toContain("connector-scopes.json");
-    expect(list).not.toContain("#115");
-    expect(list).not.toContain("#114");
-    expect(list).not.toContain("비밀 값을 건네는 통로");
+    expect(seven).not.toContain("### 아직 없는 것");
+    expect(seven).not.toContain("#116");
+    expect(seven).not.toContain("#115");
+    expect(seven).not.toContain("#114");
+    expect(seven).not.toContain("비밀 값을 건네는 통로");
   });
 
   it("chapter 11's table has no row for the scopes file and no 'only the source tree reads it' sentence", () => {
@@ -1128,7 +1126,7 @@ describe("docs.connector-sdk (I07): the ADR and its index (I07-R15)", () => {
     expect(docsIndex).toContain("결정 기록 19건(잠정 14, 확정 4, 미결 1.");
   });
 
-  it("the ADR index links only files that exist (0017 stays reserved for I02-B: no link to a file not written yet; 0019 is written by I06)", () => {
+  it("the ADR index links only files that exist (0017 is written by I02-B, 0019 by I06)", () => {
     const index = read("docs/adr/README.md");
     const links = [...index.matchAll(/\]\((\d{4}-[a-z0-9-]+\.md)\)/g)].map((m) => m[1] as string);
     expect(links.length).toBeGreaterThanOrEqual(18);
@@ -1136,11 +1134,11 @@ describe("docs.connector-sdk (I07): the ADR and its index (I07-R15)", () => {
     const numbers = readdirSync(resolve(docsDir, "adr")).flatMap((f) => /^(\d{4})-/.exec(f)?.[1] ?? []);
     expect(numbers).toContain("0020");
     expect(numbers).toContain("0019");
-    // 0017 is not written: neither a file nor a row of the index may imply it exists
-    expect(numbers).not.toContain("0017");
-    expect(links.filter((l) => l.startsWith("0017-"))).toEqual([]);
-    expect(index).not.toContain("| [0017]");
-    expect(index).toContain("0017은 I02-B spec이 정해 둔 번호이고 아직 쓰이지 않았다.");
+    // 0017 is written (I02B-T06): the file, its row of the index, and no "reserved" sentence left behind
+    expect(numbers).toContain("0017");
+    expect(links.filter((l) => l.startsWith("0017-"))).toEqual(["0017-local-files-in-place.md"]);
+    expect(index).toContain("| [0017](0017-local-files-in-place.md) |");
+    expect(index).not.toContain("0017은 I02-B spec이 정해 둔 번호이고 아직 쓰이지 않았다.");
     expect(index).not.toContain("0019는 I06 spec이 정해 둔 번호");
   });
 

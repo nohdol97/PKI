@@ -155,9 +155,9 @@ describe("docs.connector-sdk: the tables equal the code", () => {
     return out;
   }
 
-  it("the sync-outcome table equals SYNC_OUTCOMES, row by row (thirteen rows)", () => {
+  it("the sync-outcome table equals SYNC_OUTCOMES, row by row (fourteen rows)", () => {
     const rows = outcomeRows(lines);
-    expect(rows).toHaveLength(13);
+    expect(rows).toHaveLength(14);
     expect(rows).toEqual(SYNC_OUTCOMES);
   });
 

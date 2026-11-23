@@ -41,6 +41,7 @@ import {
   productVisibleEngine,
   sweepCliRuns,
   cliRunsRoot,
+  withJsonlFilePorts,
   withLocalFilesPorts,
   type ConnectorSet,
 } from "./composition.ts";
@@ -76,6 +77,7 @@ import {
   nodeWatch,
   type LocalFilesDriver,
 } from "./local-files-driver.ts";
+import { createJsonlFileHooks, jsonlFileInstances } from "./jsonl-file-instances.ts";
 import { checkProjectionMarkers, type ProjectionPorts } from "./projection-jobs.ts";
 import { ensureReflectionSchedules } from "./reflection-schedules.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
@@ -272,14 +274,22 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
     watching: (id) => late.driver?.watching(id) ?? false,
     changed: () => late.driver?.refresh(),
     // a revocation needs the instance lock: the running sync is asked to stop (it continues from its cursor)
-    cancelSync: () => {
+    cancelSync: (instanceId) => {
       for (const row of db.all(
         "SELECT id FROM jobs WHERE kind = ? AND target = ? AND status = 'running'",
-        [CONNECTOR_SYNC_KIND, LOCAL_FILES_INSTANCE_ID],
+        [CONNECTOR_SYNC_KIND, instanceId],
       )) {
         actions.cancel(row.id as number);
       }
     },
+    // the instances of approved JSONL file locations come and go with their approval (I02B-R41)
+    jsonlFile: createJsonlFileHooks({
+      db,
+      manager: () => connectors,
+      scheduler: () => late.scheduler,
+      actions: () => actions,
+      wake: () => void runner.wake(),
+    }),
     // every location is walked from the start by the next sync (I02B-R13)
     rescan: () =>
       void late.manager
@@ -303,8 +313,12 @@ export async function bootBackend(options: BootOptions): Promise<BootedBackend> 
   const actions = createJobActions({ db, runner, clock });
   const connectors = await createConnectorManager(
     db,
-    instances,
-    withLocalFilesPorts(kinds, () => localFiles.ports),
+    // the approved JSONL files' instances are made from their rows; a registration cannot name them (I02B-R51)
+    [...instances, ...jsonlFileInstances(db)],
+    withJsonlFilePorts(
+      withLocalFilesPorts(kinds, () => localFiles.ports),
+      () => localFiles.jsonlPorts,
+    ),
     {
       runner,
       projections,

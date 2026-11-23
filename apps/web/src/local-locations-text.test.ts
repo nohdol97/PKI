@@ -16,3 +16,8 @@ it("has one text per skip reason code (C28)", () => {
   expect(Object.keys(SKIP_REASON_TEXT).sort()).toEqual([...LOCAL_SKIP_REASON_CODES].sort());
   for (const text of Object.values(SKIP_REASON_TEXT)) expect(text.length).toBeGreaterThan(0);
 });
+
+it("says where a .jsonl file in a folder goes, and what a network location is (I02B-R42, S25)", () => {
+  expect(SKIP_REASON_TEXT["unsupported-format"]).toContain("JSONL 파일 추가");
+  expect(APPROVAL_REJECTION_TEXT["network-location"]).toContain("미구현, 배포처 후속");
+});

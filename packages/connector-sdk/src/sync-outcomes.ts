@@ -4,12 +4,18 @@
 import type { SyncStopCode } from "@pki/contracts";
 
 /** The instance states and the end without a stop that have a row besides the stop codes. */
-export type SyncEnd = SyncStopCode | "completed" | "unavailable" | "not-implemented";
+export type SyncEnd =
+  | SyncStopCode
+  | "completed"
+  | "unavailable"
+  | "not-implemented"
+  /** The sync left at a page boundary because the run's time was nearly used (I02B-R21): not a stop code, no error. */
+  | "yield";
 
 export interface SyncOutcomeRow {
   end: SyncEnd;
   /** What the job's handler answers; `done` closes as I03's `succeeded`. */
-  result: "retry" | "held" | "dead_letter" | "done";
+  result: "retry" | "held" | "dead_letter" | "done" | "yield";
   /** Whether the run uses one of the job's attempts: only a run that called the Connector does. */
   attempt: "spent" | "unspent" | "n/a";
   /** What a `retry` becomes when the attempts run out. */
@@ -60,4 +66,7 @@ export const SYNC_OUTCOMES: readonly SyncOutcomeRow[] = [
   // The Connector refused the credential (I06-R10): the instance's own state, judged after the stop,
   // is the job's held reason; the run called the Connector, but a held close always gives its attempt back.
   { end: "credential-unusable", result: "held", attempt: "unspent", nextRun: "instance-ready" },
+  // The run's time was nearly up (I02B-R21): the sync stopped after a stored page and the job runs on from the
+  // stored cursor. I03 gives the attempt back and queues it a minute later only when the checkpoint moved.
+  { end: "yield", result: "yield", attempt: "unspent", nextRun: "one-minute" },
 ];

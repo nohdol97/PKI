@@ -74,7 +74,7 @@ function docRows(): SyncOutcomeRow[] {
 describe("sync.outcome-map", () => {
   it("① equals the I01-R20 table of the spec, row by row", () => {
     const rows = docRows();
-    expect(rows).toHaveLength(13);
+    expect(rows).toHaveLength(14);
     expect(SYNC_OUTCOMES).toEqual(rows);
   });
 
@@ -88,12 +88,14 @@ describe("sync.outcome-map", () => {
     for (const state of ["completed", "unavailable", "not-implemented"]) {
       expect(ends.filter((e) => e === state)).toHaveLength(1);
     }
-    expect(ends).toHaveLength(SYNC_STOP_CODES.length + 3);
+    // the yield (I02B-R21) is an end the caller asks for, not a stop code: it has its own row
+    expect(ends.filter((e) => e === "yield")).toHaveLength(1);
+    expect(ends).toHaveLength(SYNC_STOP_CODES.length + 4);
   });
 
-  it("③ every result is retry, held, dead_letter or done", () => {
+  it("③ every result is retry, held, dead_letter, done or yield", () => {
     for (const row of SYNC_OUTCOMES) {
-      expect(["retry", "held", "dead_letter", "done"]).toContain(row.result);
+      expect(["retry", "held", "dead_letter", "done", "yield"]).toContain(row.result);
     }
   });
 
@@ -122,6 +124,16 @@ describe("sync.outcome-map", () => {
       attempt: "unspent",
       nextRun: "instance-ready",
     });
+  });
+
+  it("⑧ a yield spends no attempt, runs again a minute later and sits after the credential-unusable row (I02B-C35)", () => {
+    expect(row("yield")).toMatchObject({
+      result: "yield",
+      attempt: "unspent",
+      nextRun: "one-minute",
+    });
+    const ends = SYNC_OUTCOMES.map((r) => r.end);
+    expect(ends.indexOf("yield")).toBe(ends.indexOf("credential-unusable") + 1);
   });
 
   it("⑥ an unavailable or not-implemented instance is held, spending no attempt", () => {

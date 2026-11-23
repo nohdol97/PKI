@@ -15,6 +15,11 @@ export const RATE_LIMIT_MIN_MS = 5 * 60_000;
 export const YIELD_DELAY_MS = 60_000;
 /** One run's time limit for a kind that names none (I03-R14). */
 export const DEFAULT_RUN_TIMEOUT_MS = 10 * 60_000;
+/**
+ * The part of a run's time limit after which a handler that can leave at a page boundary does (I02B-R21).
+ * Provisional: the rest is left for the page that is under way.
+ */
+export const RUN_YIELD_FRACTION = 0.8;
 
 /**
  * How long a retryable failure waits: 30 s × 2^(attempt − 1), at most an hour; a

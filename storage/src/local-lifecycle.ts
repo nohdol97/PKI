@@ -136,12 +136,27 @@ export function confirmDeletions(db: SqlDriver, id: string, expectedCount: numbe
   );
 }
 
-/** The sources of the location that are still whole: plain identity, in its namespace (a purged source's identity is hashed). */
-export function liveSourceCount(db: SqlDriver, id: string): number {
+/**
+ * Where the sources of a location live: the `local-files` instance in the location's namespace, or, for a
+ * JSONL file location (I02B-R41), every source of its own instance whatever namespace the lines claimed.
+ */
+export interface SourceScope {
+  instanceId: string;
+  /** Null: every namespace of the instance. */
+  namespace: string | null;
+}
+
+const scopeOf = (id: string, scope?: SourceScope): SourceScope =>
+  scope ?? { instanceId: LOCAL_FILES_INSTANCE_ID, namespace: id };
+
+/** The sources of the location that are still whole: plain identity, in its scope (a purged source's identity is hashed). */
+export function liveSourceCount(db: SqlDriver, id: string, scope?: SourceScope): number {
+  const { instanceId, namespace } = scopeOf(id, scope);
   return Number(
     db.all(
-      "SELECT count(*) AS n FROM sources WHERE connector_instance_id = ? AND namespace = ? AND identity_hashed = 0",
-      [LOCAL_FILES_INSTANCE_ID, id],
+      `SELECT count(*) AS n FROM sources
+       WHERE connector_instance_id = ? AND (? IS NULL OR namespace = ?) AND identity_hashed = 0`,
+      [instanceId, namespace, namespace],
     )[0]?.n,
   );
 }
@@ -170,21 +185,28 @@ export function revokeBatch(
     namespace: string;
     externalId: string;
   }) => void,
+  scope?: SourceScope,
 ): RevokeBatchResult {
+  const { instanceId, namespace } = scopeOf(id, scope);
   const batch = tx.all(
-    `SELECT external_id FROM sources
-     WHERE connector_instance_id = ? AND namespace = ? AND identity_hashed = 0 ORDER BY id LIMIT ?`,
-    [LOCAL_FILES_INSTANCE_ID, id, max],
+    `SELECT namespace, external_id FROM sources
+     WHERE connector_instance_id = ? AND (? IS NULL OR namespace = ?) AND identity_hashed = 0
+     ORDER BY id LIMIT ?`,
+    [instanceId, namespace, namespace, max],
   );
   for (const row of batch) {
     const externalId = row.external_id as string;
-    deleteSource({ connectorInstanceId: LOCAL_FILES_INSTANCE_ID, namespace: id, externalId });
+    deleteSource({
+      connectorInstanceId: instanceId,
+      namespace: row.namespace as string,
+      externalId,
+    });
     tx.run("DELETE FROM local_file_entries WHERE location_id = ? AND external_id = ?", [
       id,
       externalId,
     ]);
   }
-  const remaining = liveSourceCount(tx, id);
+  const remaining = liveSourceCount(tx, id, scope);
   const done = remaining === 0;
   if (done) {
     tx.run("DELETE FROM local_file_entries WHERE location_id = ?", [id]);

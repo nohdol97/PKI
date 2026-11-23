@@ -41,6 +41,7 @@ import {
 } from "@pki/storage";
 import { systemClock, type Clock } from "./clock.ts";
 import { tryLockInstance } from "./instance-lock.ts";
+import { isJsonlFileInstanceId } from "./public-kinds.ts";
 import type { JobRunner } from "./job-runner.ts";
 
 /** Provisional: refused records listed in a result; `rejectedCount` counts them all. */
@@ -65,8 +66,11 @@ export type RefusalReason = "revision-not-newer" | "tombstoned" | "scope-change-
 export type StoredOutcome =
   "created" | "unchanged" | "deleted" | "scope-updated" | "stale" | "stale-tombstone";
 
-/** What one sync did; the API adds the instance's id (SyncResponse). */
-export type SyncResult = Omit<SyncResponse, "connectorId">;
+/**
+ * What one sync did; the API adds the instance's id (SyncResponse). `yielded` is set only for a sync that
+ * left at a page boundary because its caller asked to (`shouldYield`, I02B-R21): it stopped for no fault.
+ */
+export type SyncResult = Omit<SyncResponse, "connectorId"> & { yielded?: true };
 
 /** What a page store reports to and asks of its caller; a sync's options are these and more. */
 export interface PageOptions {
@@ -268,9 +272,12 @@ export function storePage(
           rejected.push({ at: place(i), code: "schema" });
           continue;
         }
-        const at = scopeClaimed
-          ? resolveImported(tx, instanceId, change, lockLegacy)
-          : { instanceId, change };
+        // an approved JSONL file's lines stay in its own instance: the route that moves a line to the older
+        // instance named in its `connector_instance_id` is not taken (I02B-R41; paste and API imports keep it)
+        const at =
+          scopeClaimed && !isJsonlFileInstanceId(instanceId)
+            ? resolveImported(tx, instanceId, change, lockLegacy)
+            : { instanceId, change };
         const outcome =
           seen &&
           at.change.kind === "scope-change" &&

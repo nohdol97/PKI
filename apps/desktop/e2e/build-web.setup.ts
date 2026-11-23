@@ -12,5 +12,5 @@ test("build the screens", () => {
   const js = readdirSync(assets).filter((name) => name.endsWith(".js"));
   expect(js.length).toBeGreaterThan(0);
   for (const name of js)
-    expect(readFileSync(`${assets}/${name}`, "utf8")).not.toContain("폴더 경로(개발용)");
+    expect(readFileSync(`${assets}/${name}`, "utf8")).not.toContain("경로(개발용)");
 });

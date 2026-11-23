@@ -192,7 +192,11 @@ export interface Backend {
    * Hands the backend a path the user picked under a ticket the shell made (I02B-R37), one way, no
    * answer. False when the process has ended.
    */
-  registerLocationTicket(input: { ticket: string; kind: "folder"; path: string }): boolean;
+  registerLocationTicket(input: {
+    ticket: string;
+    kind: "folder" | "file" | "jsonl-file";
+    path: string;
+  }): boolean;
   /**
    * Asks the backend where a local source's file is (I02B-R39, over this channel, never HTTP). Resolves
    * undefined when the backend has no path to show, ends, or does not answer in time.

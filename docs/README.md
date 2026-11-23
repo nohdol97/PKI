@@ -14,7 +14,8 @@
 | [research/2026-11-21-R00-initial-base.md](research/2026-11-21-R00-initial-base.md) | 빈 저장소에 최초 commit을 올린 절차와 증거 | 보관 |
 | [research/2026-11-22-I02B-T01-poc.md](research/2026-11-22-I02B-T01-poc.md) | I02-B 착수 전 측정(I02B-T01): 격리 실행기·경로 경계·철회 묶음이 기대는 가정을 macOS에서 실제로 돌려 적은 판정 기록(Windows·Linux 제외) | 측정 완료, 검토 반영 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 구성요소, 프로세스, 정본과 투영, 어댑터 규격, 실패 복구, 보안, **가정 표** | 잠정 |
-| [adr/](adr/README.md) | 결정 기록 19건(잠정 14, 확정 4, 미결 1. 0017은 I02-B spec이 맡은 번호로 아직 쓰이지 않았다) | 색인 참조 |
+| [adr/](adr/README.md) | 결정 기록 19건(잠정 14, 확정 4, 미결 1. 0017은 I02-B의 ADR로 들어왔다) | 색인 참조 |
+| [adr/0017-local-files-in-place.md](adr/0017-local-files-in-place.md) | 로컬 파일은 사본 없이 승인한 자리에서 읽는다: 색인은 정본 안의 원본 정체 기록, 정규화는 백엔드 밖의 호스트 프로세스, 경로 경계는 닫는 쪽(I02-B) | 잠정(Windows 확인은 S23) |
 | [REUSE_AND_BUILD.md](REUSE_AND_BUILD.md) | 기능별 재사용·직접 개발·미룸 목록 | 잠정 |
 | [ownership.md](ownership.md) | 공용 저장소와 배포처 포크가 각각 무엇을 갖는가 | 확정(ADR 0012) |
 | [site-setup.md](site-setup.md) | 배포처가 채울 설정의 형태와 체크리스트 | 잠정(설정 키 이름은 V01-T17이 구현과 맞춤. 이름과 값의 형태는 잠정) |

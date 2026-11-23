@@ -12,6 +12,11 @@
 // contract's one upsert per source per read, which the contract scenarios keep to. The
 // importer of the V02 screen (jsonl-import.ts) hands lines it parsed itself
 // (`{ records }`); they are in the namespace of their `connector_instance_id` like a file's.
+// An instance made for an approved JSONL file location (I02B-R41, configuration `{ path, locationId }`) does
+// not read the path as it stands: the file is opened through the path boundary of @pki/connector-sdk, which
+// reads it only when the opened handle is the file the approval recorded (a regular file, the same
+// identity, outside the data directory). It reads while the location is `active` and gives nothing otherwise.
+// This is the one place of the product that reads a JSONL file's path.
 import {
   CONNECTOR_SDK_VERSION,
   ConnectorError,
@@ -25,14 +30,30 @@ import {
   JSONL_CAPABILITIES,
   JSONL_IMPORT_KIND,
   MAX_JSONL_BYTES,
+  nodeBoundaryFs,
   parseJsonl,
+  readLocationFile,
   recordToChange,
+  resolveExcluded,
+  type BoundaryFs,
   type JsonlRejection,
 } from "@pki/connector-sdk";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 
-export type JsonlConnectorConfig = { path: string } | { records: readonly ImportRecord[] };
+/** What the composition point hands an instance of an approved JSONL file location (I02B-R4, R41). */
+export interface JsonlFilePorts {
+  /** The approval of a location: where the file is and the identity recorded then; undefined when none is read now. */
+  location(
+    locationId: string,
+  ): { realPath: string; rootDev: string; rootIno: string; active: boolean } | undefined;
+  /** Folders a read never reaches into: the data directory, the shell's user-data folder. */
+  excluded(): readonly string[];
+  fs?: BoundaryFs;
+}
+
+export type JsonlConnectorConfig =
+  { path: string; locationId?: string } | { records: readonly ImportRecord[] };
 
 /** A line of the file, as one entry of a read. */
 type Entry = { change: Change } | { rejected: Pick<JsonlRejection, "line" | "code"> };
@@ -44,14 +65,19 @@ interface Snapshot {
 
 function readConfig(config: unknown): JsonlConnectorConfig {
   const given = config as Partial<{ path: unknown; records: unknown }> | null;
-  if (typeof given?.path === "string" && given.path !== "") return { path: given.path };
+  const locationId = (config as { locationId?: unknown } | null)?.locationId;
+  if (typeof given?.path === "string" && given.path !== "") {
+    return typeof locationId === "string" && locationId !== ""
+      ? { path: given.path, locationId }
+      : { path: given.path };
+  }
   if (Array.isArray(given?.records)) return { records: given.records as ImportRecord[] };
   throw new Error("jsonl-import needs { path: string }");
 }
 
 const sha256 = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
 
-export function createJsonlConnector(): Connector {
+export function createJsonlConnector(ports?: () => JsonlFilePorts | undefined): Connector {
   let config: JsonlConnectorConfig | undefined;
   // the last parse, kept by the file's hash: a page is a slice of it
   let cached: Snapshot | undefined;
@@ -61,8 +87,37 @@ export function createJsonlConnector(): Connector {
     return config;
   };
 
-  /** The file as it is now. What failed is the file's, never its text: a plain code. */
-  function snapshot(): Snapshot {
+  /** The bytes of an approved location's file, opened through the path boundary; undefined while the location is not read. */
+  async function readApproved(locationId: string): Promise<Buffer | undefined> {
+    const bound = ports?.();
+    if (!bound) {
+      throw new ConnectorError("jsonl-import: the ports are not bound", { retryable: true });
+    }
+    const location = bound.location(locationId);
+    if (!location) {
+      throw new ConnectorError("jsonl-import: the location is not approved", { retryable: false });
+    }
+    if (!location.active) return undefined;
+    const fs = bound.fs ?? nodeBoundaryFs;
+    const read = await readLocationFile({
+      fs,
+      rootRealPath: location.realPath,
+      relativePath: "",
+      kind: "file",
+      maxFileBytes: MAX_JSONL_BYTES,
+      excluded: await resolveExcluded(fs, bound.excluded()),
+      expectedId: { dev: location.rootDev, ino: location.rootIno },
+    });
+    if (!read.ok) {
+      throw new ConnectorError(`jsonl-import: the file cannot be read (${read.reason})`, {
+        retryable: false,
+      });
+    }
+    return Buffer.from(read.bytes);
+  }
+
+  /** The file as it is now; undefined for a location that is not read. What failed is the file's, never its text: a plain code. */
+  async function snapshot(): Promise<Snapshot | undefined> {
     const source = configured();
     if ("records" in source) {
       cached ??= {
@@ -71,13 +126,17 @@ export function createJsonlConnector(): Connector {
       };
       return cached;
     }
-    let raw: Buffer;
-    try {
-      if (statSync(source.path).size > MAX_JSONL_BYTES) throw new Error("too large");
-      raw = readFileSync(source.path);
-    } catch {
-      throw new ConnectorError("jsonl-import: the file cannot be read", { retryable: false });
+    let raw: Buffer | undefined;
+    if (source.locationId !== undefined) raw = await readApproved(source.locationId);
+    else {
+      try {
+        if (statSync(source.path).size > MAX_JSONL_BYTES) throw new Error("too large");
+        raw = readFileSync(source.path);
+      } catch {
+        throw new ConnectorError("jsonl-import: the file cannot be read", { retryable: false });
+      }
     }
+    if (raw === undefined) return undefined;
     const hash = sha256(raw);
     if (cached?.hash === hash) return cached;
     const { lines, rejected } = parseJsonl(raw.toString("utf8"));
@@ -103,7 +162,7 @@ export function createJsonlConnector(): Connector {
     async healthCheck() {
       if (!config) return { state: "unavailable", reason: "not initialized" };
       try {
-        snapshot();
+        await snapshot();
         return { state: "ok" };
       } catch {
         return { state: "unavailable", reason: "the file cannot be read" };
@@ -111,7 +170,10 @@ export function createJsonlConnector(): Connector {
     },
     async getChanges(cursor, { limit, signal }): Promise<ChangeSet> {
       signal.throwIfAborted();
-      const { hash, entries } = snapshot();
+      const read = await snapshot();
+      // a location that is not read gives nothing and keeps the cursor (a later read compares it with the file)
+      if (!read) return { changes: [], nextCursor: cursor ?? "", hasMore: false };
+      const { hash, entries } = read;
       let start = 0;
       if (cursor !== null) {
         const match = /^([0-9a-f]{64}):(\d+)$/.exec(cursor);
@@ -135,7 +197,7 @@ export function createJsonlConnector(): Connector {
     },
     async getDocument({ namespace, externalId }): Promise<SourceRecord | null> {
       let latest: Change | undefined;
-      for (const entry of snapshot().entries) {
+      for (const entry of (await snapshot())?.entries ?? []) {
         if (!("change" in entry)) continue;
         const { change } = entry;
         const ns = change.kind === "upsert" ? change.record.namespace : change.namespace;

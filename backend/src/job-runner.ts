@@ -41,7 +41,13 @@ import {
 import { randomUUID } from "node:crypto";
 import { systemClock, type Clock } from "./clock.ts";
 import { DEFAULT_MAX_REQUESTS, jobBroker, type JobBroker } from "./job-broker.ts";
-import { classifyResult, DEFAULT_RUN_TIMEOUT_MS, failure, type JobResult } from "./job-outcomes.ts";
+import {
+  classifyResult,
+  DEFAULT_RUN_TIMEOUT_MS,
+  failure,
+  RUN_YIELD_FRACTION,
+  type JobResult,
+} from "./job-outcomes.ts";
 
 export type { JobResult } from "./job-outcomes.ts";
 
@@ -56,6 +62,8 @@ export interface JobRunContext {
   broker: JobBroker;
   /** The checkpoint the job was claimed with: where a job claimed again goes on (I03-R8). */
   lastCheckpoint: Checkpoint | null;
+  /** Whether the run has used `RUN_YIELD_FRACTION` of its time limit, on the runner's monotonic clock (I02B-R21). */
+  shouldYield(): boolean;
   /**
    * Writes one step's result and its checkpoint in one transaction, behind the
    * checks a result passes (storage checkpointJob). Anything but "saved" closed
@@ -292,7 +300,13 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     }, heartbeatMs);
     active.set(job.id, () => end(CANCELLED));
     try {
-      return await attempt(job, cut.signal, ended, end);
+      return await attempt(
+        job,
+        cut.signal,
+        ended,
+        end,
+        () => clock.monotonic() - started >= limit * RUN_YIELD_FRACTION,
+      );
     } finally {
       active.delete(job.id);
       clearInterval(beat);
@@ -309,6 +323,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     signal: AbortSignal,
     ended: Promise<RunEnd>,
     end: (why: RunEnd) => void,
+    shouldYield: () => boolean,
   ): Promise<JobRun> {
     // a hold records the policy it was judged under (I03-R16 ③)
     const stamped = (closing: JobClosing): JobClosing =>
@@ -345,6 +360,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
         signal,
       }),
       lastCheckpoint: readCheckpoint(job),
+      shouldYield,
       checkpoint(value, write) {
         const fields = kindSettings[job.kind]?.checkpointFields ?? [];
         const saved = checkpointJob(

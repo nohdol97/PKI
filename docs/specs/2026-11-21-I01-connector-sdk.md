@@ -245,7 +245,7 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
   - **멈춤**: `invalid-page`, `no-progress`, `cursor-expired`, `rate-limited`, `connector-error`, `connector-failed`, `aborted`, `instance-busy`, `storage-failed`, `credential-unusable`. `credential-unusable`은 `getChanges`가 `ConnectorCredentialError`를 던진 멈춤이다(I06-R10). 같은 호출을 다시 시도하지 않는다. `storage-failed`는 페이지 저장 트랜잭션의 실패(트리거의 거부 포함, I01-R14)다. 그 페이지는 저장되지 않고 cursor는 그대로다.
 
   `unsupported-sdk-version`은 멈춤 코드가 아니라 인스턴스 상태의 사유다(I01-R1).
-- **I01-R20 정해진 동기화는 I03의 작업이다.** 주기적으로 끌어오는 동기화는 I03의 작업 종류 `connector-sync`로 돌며, 그 작업이 이 관리 모듈의 동기화를 부른다. 멈춤 코드가 I03의 결과로 옮겨지는 표는 **이 spec이 정하고 I03이 가리킨다.** 결과는 `retry`, `held`, `dead_letter`, `done` 넷 가운데 하나이며, 멈춤 코드(I01-R19)와 인스턴스 상태마다 한 행이 있다. `done`은 I03의 `succeeded`로 닫힌다.
+- **I01-R20 정해진 동기화는 I03의 작업이다.** 주기적으로 끌어오는 동기화는 I03의 작업 종류 `connector-sync`로 돌며, 그 작업이 이 관리 모듈의 동기화를 부른다. 멈춤 코드가 I03의 결과로 옮겨지는 표는 **이 spec이 정하고 I03이 가리킨다.** 결과는 `retry`, `held`, `dead_letter`, `done`, `yield` 다섯 가운데 하나이며, 멈춤 코드(I01-R19)와 인스턴스 상태마다 한 행이 있고, 양보(`yield`)가 한 행을 더 갖는다. `done`은 I03의 `succeeded`로 닫힌다.
 
   | 동기화의 끝 | I03 결과 | 시도 | 다음 실행 | 이유 |
   |---|---|---|---|---|
@@ -262,6 +262,7 @@ V01은 Connector 규격의 첫 모양(`packages/contracts/src/connector.ts`)과 
   | 인스턴스가 `unavailable`(초기화 실패, `unsupported-sdk-version`) | `held` | 쓰지 않음 | 그 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 I03의 시간당 묶음 재점검 | 설정이나 수집기가 바뀌어야 풀린다 |
   | 인스턴스가 `not-implemented`(`site-*`) | `held` | 쓰지 않음 | 그 인스턴스의 설정이 바뀌거나 앱이 갱신될 때, 그리고 I03의 시간당 묶음 재점검 | 포크가 실제 구현을 등록해야 풀린다 |
   | `credential-unusable` | `held` | 쓰지 않음 | 그 인스턴스가 `ready`가 될 때(변경 알림, 앱을 다시 시작함, 사유가 `credential-rejected`가 아니면 I03의 시간당 묶음 재점검) | 수집기가 자격 증명을 쓸 수 없다고 알렸다(I06-R10). 값을 고치면 풀린다. 수집기를 불렀지만 `held`로 닫으면 시도는 되돌려진다 |
+  | `yield` | `yield` | 쓰지 않음 | 1분 뒤 | 실행 시간 상한이 가까워 페이지 경계에서 나왔다(I02B-R21). 멈춤 코드가 아니고 오류도 아니다. 저장한 페이지와 cursor는 그대로이고 다음 실행이 이어서 한다. I03은 checkpoint가 나아간 양보만 시도를 쓰지 않고 다시 대기시킨다(I03-R14) |
 
   `held`인 주기는 I03이 "멈춤"과 그 이유로 보인다. 처리기는 I03의 처리기 결과 `held(reason)`를 돌려주며, 이유 코드는 인스턴스 상태의 사유다.
 

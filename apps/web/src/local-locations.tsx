@@ -1,7 +1,8 @@
-// Settings' "로컬 자료" section (I02B-R36, R37, R38): the approved locations and one way to add a folder.
-// In the Electron shell the button opens the OS folder picker through the preload and approves with the
-// one-time ticket it returns; the page never holds the path. In browser development (Vite dev server) a
-// labelled input takes a typed absolute path instead; the branch tests the compile-time `import.meta.env.DEV`,
+// Settings' "로컬 자료" section (I02B-R36, R37, R38): the approved locations and the ways to add one: a folder,
+// a document file ("파일 추가") and a JSONL file ("JSONL 파일 추가", I02B-R41).
+// In the Electron shell a button opens the OS picker through the preload and approves with the one-time
+// ticket it returns; the page never holds the path. In browser development (Vite dev server) a labelled input
+// takes a typed absolute path instead; the branch tests the compile-time `import.meta.env.DEV`,
 // so the production build drops it and its label (bundle check: apps/desktop/e2e/build-web.setup.ts).
 import type {
   LocalApprovalRejectionCode,
@@ -29,8 +30,18 @@ import {
 
 /** The part of the Electron preload's `window.pki` this section uses. */
 export interface PickerBridge {
-  pickLocation?(type: "folder"): Promise<{ ticket: string | null }>;
+  pickLocation?(type: LocationKind): Promise<{ ticket: string | null }>;
 }
+
+/** The kinds of an approved location the screen adds (I02B-R3). */
+export type LocationKind = LocalLocationInfo["type"];
+
+/** The buttons that add a location, by kind. */
+const ADD_BUTTON: readonly { type: LocationKind; text: string }[] = [
+  { type: "folder", text: "폴더 추가" },
+  { type: "file", text: "파일 추가" },
+  { type: "jsonl-file", text: "JSONL 파일 추가" },
+];
 
 const noAction = () => undefined;
 
@@ -46,9 +57,9 @@ export function actionFailure(error: unknown): string {
 export type AddResult = { added: true } | { added: false; text: string };
 
 /** Asks the backend to approve; a refusal becomes its text, any other failure its message. */
-export async function addFolder(
+export async function addLocation(
   api: ApiClient,
-  request: { type: "folder"; path: string } | { type: "folder"; ticket: string },
+  request: { type: LocationKind; path: string } | { type: LocationKind; ticket: string },
 ): Promise<AddResult> {
   try {
     await api("approveLocalLocation", request);
@@ -69,9 +80,10 @@ export async function addFolder(
 export async function pickAndAdd(
   api: ApiClient,
   pick: NonNullable<PickerBridge["pickLocation"]>,
+  type: LocationKind = "folder",
 ): Promise<AddResult | undefined> {
-  const { ticket } = await pick("folder");
-  return ticket === null ? undefined : addFolder(api, { type: "folder", ticket });
+  const { ticket } = await pick(type);
+  return ticket === null ? undefined : addLocation(api, { type, ticket });
 }
 
 export function LocationList({
@@ -244,9 +256,9 @@ export function LocalLocations({
     );
   }
 
-  const submitTyped = (event: FormEvent) => {
+  const submitTyped = (event: FormEvent, type: LocationKind) => {
     event.preventDefault();
-    void run(() => addFolder(api, { type: "folder", path }));
+    void run(() => addLocation(api, { type, path }));
   };
 
   return (
@@ -283,25 +295,34 @@ export function LocalLocations({
         />
       )}
       {import.meta.env.DEV ? (
-        <form onSubmit={submitTyped}>
+        <form onSubmit={(event) => submitTyped(event, "folder")}>
           <label>
-            폴더 경로(개발용)
+            경로(개발용)
             <input type="text" value={path} onChange={(e) => setPath(e.target.value)} />
           </label>
-          <button type="submit" disabled={busy || path === ""}>
-            폴더 추가
-          </button>
+          {ADD_BUTTON.map(({ type, text }) => (
+            <button
+              key={type}
+              type={type === "folder" ? "submit" : "button"}
+              disabled={busy || path === ""}
+              onClick={type === "folder" ? undefined : (e) => submitTyped(e, type)}
+            >
+              {text}
+            </button>
+          ))}
         </form>
       ) : (
-        pick && (
+        pick &&
+        ADD_BUTTON.map(({ type, text }) => (
           <button
+            key={type}
             type="button"
             disabled={busy}
-            onClick={() => void run(() => pickAndAdd(api, pick))}
+            onClick={() => void run(() => pickAndAdd(api, pick, type))}
           >
-            폴더 추가
+            {text}
           </button>
-        )
+        ))
       )}
       {refusal && <p role="alert">{refusal}</p>}
     </section>

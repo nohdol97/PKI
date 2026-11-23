@@ -10,6 +10,7 @@ Phase 1의 골격(V01: 화면, 로컬 API, Electron 쉘, 정본 저장, Provider
 
 - 전체 계획과 완료 기준: [#1 총괄](https://github.com/nohdol97/PKI/issues/1)
 - 지금 진행 중인 단계: [#2 Phase 0 — OSS Research & PoC](https://github.com/nohdol97/PKI/issues/2)
+- 로컬 폴더·파일 가져오기(설정 화면의 폴더 추가, 파일 추가, JSONL 파일 추가): [I02-B spec](docs/specs/2026-11-22-I02-local-file-import.md)
 
 ## 개발 명령
 

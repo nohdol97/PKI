@@ -26,7 +26,7 @@ function handlers(
   };
   const asked: number[] = [];
   const shown: string[] = [];
-  const registered: { ticket: string; kind: "folder"; path: string }[] = [];
+  const registered: { ticket: string; kind: "folder" | "file" | "jsonl-file"; path: string }[] = [];
   const bridge = createBridgeHandlers({
     session: SESSION,
     secrets,
@@ -76,6 +76,14 @@ describe("bridge handlers", () => {
     );
     await expect(foreign.bridge.pickLocation(PAGE, ["/etc"])).rejects.toThrow("invalid-input");
     expect(foreign.registered).toEqual([]);
+  });
+
+  it("pickLocation takes the file kinds too and registers the ticket under that kind (I02B-T06)", async () => {
+    const { bridge, registered } = handlers();
+    for (const kind of ["file", "jsonl-file"] as const) {
+      const answer = (await bridge.pickLocation(PAGE, [kind])) as { ticket: string };
+      expect(registered.at(-1)).toEqual({ ticket: answer.ticket, kind, path: "/picked/folder" });
+    }
   });
 
   it("revealSource takes a version id only, asks the backend for the path, shows it in the folder, and never opens the file (C29)", async () => {
