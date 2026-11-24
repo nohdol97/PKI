@@ -45,7 +45,12 @@ function goodMap(): Json {
     })),
   };
 }
-const fakeRead = (path: string) => (path.endsWith(".test.ts") ? "it('does the thing')" : "x");
+const fakeRead = (path: string) =>
+  path === "playwright.config.ts"
+    ? 'testIgnore: ["apps/desktop/**", "backend/src/v02-seed.e2e.ts"],'
+    : path.endsWith(".test.ts") || path.endsWith(".e2e.ts")
+      ? "it('does the thing')"
+      : "x";
 const scenario = (map: Json, id: string): Json => map.scenarios.find((s: Json) => s.id === id);
 const mentions = (lines: string[], id: string) => lines.filter((l) => l.includes(id));
 
@@ -215,5 +220,32 @@ describe("H03C3-C5 the generated document", () => {
     expect(readFile("docs/FINAL_SCENARIOS.md")).toBe(doc);
     for (const { id } of FINAL_SCENARIOS) expect(doc).toContain(id);
     expect(doc).toContain("대역 통과는 실제 동작의 증거가 아니다");
+  });
+});
+
+describe("HVT (final-scenarios checker)", () => {
+  it("HVT-C6: an e2e evidence the playwright config ignores by name is rejected; the repository's table stays clean", () => {
+    const map = goodMap();
+    scenario(map, "FS06").evidence[0] = {
+      kind: "e2e",
+      path: "backend/src/v02-seed.e2e.ts",
+      title: "does the thing",
+      provider: "mock",
+      environment: "dev",
+    };
+    expect(mentions(checkScenarioMap(map, fakeRead), "FS06")).not.toEqual([]);
+    expect(checkScenarioMap(repoMap, readFile)).toEqual([]);
+  });
+
+  it("HVT-C7: the folder rule follows vitest's exclude (root-only eval/, any-depth node_modules) without case", () => {
+    const lines = (path: string) => {
+      const map = goodMap();
+      scenario(map, "FS06").evidence[0].path = path;
+      return mentions(checkScenarioMap(map, fakeRead), "FS06");
+    };
+    expect(lines("x/eval/a.test.ts")).toEqual([]);
+    expect(lines("Eval/a.test.ts")).not.toEqual([]);
+    for (const path of ["eval/a.test.ts", "verification/a.test.ts", "x/node_modules/a.test.ts"])
+      expect(lines(path), path).not.toEqual([]);
   });
 });

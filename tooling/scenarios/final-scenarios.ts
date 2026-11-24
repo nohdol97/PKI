@@ -48,8 +48,21 @@ const safePath = (p: unknown): p is string =>
   !/^[a-zA-Z]:/.test(p) &&
   !p.split("/").includes("..");
 
-// Folders vitest.config.ts does not run (its `exclude`): a unit evidence there is never run by `pnpm test`.
-const UNIT_NOT_RUN = /(^|\/)(node_modules|eval|verification)\//;
+// Folders vitest.config.ts does not run (its `exclude`): node_modules at any depth, eval/ and verification/ under
+// the root only. Case-insensitive: a case-insensitive file system reads Eval/x as eval/x, which vitest excludes.
+const UNIT_NOT_RUN = /(^|\/)node_modules\/|^(eval|verification)\//i;
+
+/**
+ * Scripts `playwright.config.ts` names in its `testIgnore` (HVT-R6): read as text, not imported, so the checker runs
+ * no test code. Glob entries are not judged. Undefined when the list cannot be found.
+ */
+function ignoredE2e(read: ReadFile): Set<string> | undefined {
+  const { text } = readOrFault(read, "playwright.config.ts");
+  const list = text?.match(/testIgnore:\s*\[([\s\S]*?)\]/)?.[1];
+  if (list === undefined) return undefined;
+  const names = [...list.matchAll(/"([^"]+)"/g)].map((m) => (m[1] as string).toLowerCase());
+  return new Set(names.filter((n) => !n.includes("*")));
+}
 
 /** Reading a path that is a directory (or unreadable) throws; that is a fault of the table, not a crash. */
 function readOrFault(read: ReadFile, path: string): { text?: string | undefined; fault?: string } {
@@ -60,7 +73,13 @@ function readOrFault(read: ReadFile, path: string): { text?: string | undefined;
   }
 }
 
-function checkEvidence(id: string, e: unknown, read: ReadFile, out: string[]): Obj | undefined {
+function checkEvidence(
+  id: string,
+  e: unknown,
+  read: ReadFile,
+  ignored: Set<string>,
+  out: string[],
+): Obj | undefined {
   if (!isObj(e)) {
     out.push(`${id}: evidence entry is not an object`);
     return undefined;
@@ -107,6 +126,8 @@ function checkEvidence(id: string, e: unknown, read: ReadFile, out: string[]): O
   if (kind === "unit" && UNIT_NOT_RUN.test(path)) {
     out.push(`${id}: unit path ${path} is in a folder vitest does not run`);
   }
+  if (kind === "e2e" && ignored.has(path.toLowerCase()))
+    out.push(`${id}: e2e path ${path} is a script Playwright does not run (testIgnore)`);
   const suffix = { unit: /\.test\.tsx?$/, e2e: /\.e2e\.ts$/, measure: /^eval\/results\/.+\.json$/ }[
     kind
   ];
@@ -118,7 +139,7 @@ function checkEvidence(id: string, e: unknown, read: ReadFile, out: string[]): O
   return e;
 }
 
-function checkScenario(s: unknown, read: ReadFile, out: string[]): void {
+function checkScenario(s: unknown, read: ReadFile, ignored: Set<string>, out: string[]): void {
   if (!isObj(s)) {
     out.push("map: a scenario entry is not an object");
     return;
@@ -136,7 +157,7 @@ function checkScenario(s: unknown, read: ReadFile, out: string[]): void {
   if (!Array.isArray(s.evidence)) out.push(`${id}: evidence must be a list`);
   else {
     for (const e of s.evidence) {
-      const checked = checkEvidence(id, e, read, out);
+      const checked = checkEvidence(id, e, read, ignored, out);
       if (checked) evidence.push(checked);
     }
   }
@@ -197,9 +218,11 @@ export function checkScenarioMap(map: unknown, read: ReadFile): string[] {
   if (map.schemaVersion !== 1) out.push("map: schemaVersion must be 1");
   if (!Array.isArray(map.scenarios)) return [...out, "map: scenarios must be a list"];
   const seen = new Map<string, number>();
+  const ignored = ignoredE2e(read);
+  if (ignored === undefined) out.push("map: playwright.config.ts has no testIgnore list");
   for (const s of map.scenarios) {
     if (isObj(s) && typeof s.id === "string") seen.set(s.id, (seen.get(s.id) ?? 0) + 1);
-    checkScenario(s, read, out);
+    checkScenario(s, read, ignored ?? new Set(), out);
   }
   for (const { id, title } of FINAL_SCENARIOS) {
     const n = seen.get(id) ?? 0;
