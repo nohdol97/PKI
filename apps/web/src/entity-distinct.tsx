@@ -71,8 +71,8 @@ type State = { status: "loading" } | ({ status: "ready" } & DistinctMarks);
 export function createMarksSession(
   api: ApiClient,
   view: { setState(state: State): void; setNotice(notice: string | undefined): void },
+  latest: ReturnType<typeof createLatest>,
 ) {
-  const latest = createLatest();
   const busy = createBusy();
   return {
     load(itemId: number) {
@@ -118,7 +118,12 @@ export function DistinctMarksSection({
 }) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [notice, setNotice] = useState<string>();
-  const session = useMemo(() => createMarksSession(api, { setState, setNotice }), [api]);
+  // One `latest` for the component's life: a session made for a new `api` still outranks the old session's late answers.
+  const [latest] = useState(createLatest);
+  const session = useMemo(
+    () => createMarksSession(api, { setState, setNotice }, latest),
+    [api, latest],
+  );
 
   useEffect(() => session.load(itemId), [session, itemId, version]);
 

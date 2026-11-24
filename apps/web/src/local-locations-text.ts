@@ -85,7 +85,7 @@ export const ACTION_REFUSAL_TEXT: Record<string, string> = {
 
 /** The shell could not hand the picked place to the backend (it has ended); a cancel says nothing (LCF-R2). */
 export const PICK_BACKEND_UNAVAILABLE_TEXT =
-  "백엔드가 응답하지 않아 위치를 추가하지 못했습니다. 잠시 뒤에 다시 시도해 주세요.";
+  "백엔드가 응답하지 않아 고른 폴더나 파일을 넘기지 못했습니다. 잠시 뒤에 다시 시도해 주세요.";
 
 export const ACTION_TEXT = {
   pause: "일시 중지",

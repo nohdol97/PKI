@@ -233,11 +233,36 @@ async function headingOrderViolations(
     await nav.getByRole("button", { name: new RegExp(`^${s.name}`) }).click();
     await expect(s.ready(page)).toBeVisible();
     await expect.poll(apiOut, { message: `${s.name}: /api/ requests still out` }).toBe(0);
-    const result = await new AxeBuilder({ page }).withRules(["heading-order"]).analyze();
-    expect(result.passes.length, `${s.name}: heading-order did not run`).toBeGreaterThan(0);
-    for (const v of result.violations)
-      for (const n of v.nodes) found.push(`${s.name} | ${v.id} | ${n.target.join(" ")}`);
+    found.push(...(await scanHeadingOrder(page, s.name)));
+    if (s.name === "알림") found.push(...(await notificationsDeepHeadingOrder(page, apiOut)));
   }
+  return found;
+}
+
+async function scanHeadingOrder(page: Page, name: string) {
+  const result = await new AxeBuilder({ page }).withRules(["heading-order"]).analyze();
+  expect(result.passes.length, `${name}: heading-order did not run`).toBeGreaterThan(0);
+  return result.violations.flatMap((v) =>
+    v.nodes.map((n) => `${name} | ${v.id} | ${n.target.join(" ")}`),
+  );
+}
+
+// UIF-R5: the timeline's day headings and an opened digest's heading sit below the screen's `h1`, so they are scanned too.
+async function notificationsDeepHeadingOrder(page: Page, apiOut: () => number) {
+  const found: string[] = [];
+  const tabs = page.getByRole("group", { name: "알림 보기" });
+  await tabs.getByRole("button", { name: "타임라인" }).click();
+  await expect(page.getByRole("list", { name: /알림 타임라인/ }).first()).toBeVisible();
+  await expect.poll(apiOut, { message: "알림 타임라인: /api/ requests still out" }).toBe(0);
+  found.push(...(await scanHeadingOrder(page, "알림 타임라인")));
+  await tabs.getByRole("button", { name: "요약", exact: true }).click();
+  await page
+    .getByRole("button", { name: /내용 보기: 매일 요약/ })
+    .first()
+    .click();
+  await expect(page.getByRole("list", { name: "요약 내용" })).toBeVisible();
+  await expect.poll(apiOut, { message: "알림 요약 내용: /api/ requests still out" }).toBe(0);
+  found.push(...(await scanHeadingOrder(page, "알림 요약 내용")));
   return found;
 }
 

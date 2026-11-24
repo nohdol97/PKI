@@ -71,7 +71,14 @@ describe("합치기 되돌리기와 다시 읽기 (HOC-C3)", () => {
       attemptOnce(
         busy,
         () => {},
-        () => unmergeAndReread(api, 4, true, () => reread),
+        () =>
+          unmergeAndReread(
+            api,
+            4,
+            true,
+            () => reread,
+            () => {},
+          ),
       );
     const first = press();
     await vi.waitFor(() => expect(calls).toHaveLength(1));
@@ -82,6 +89,30 @@ describe("합치기 되돌리기와 다시 읽기 (HOC-C3)", () => {
     await first;
     await press();
     expect(calls).toHaveLength(2);
+  });
+
+  it("UIF-C4: clears the notice before the reread starts, so a notice written during the reread stays", async () => {
+    const order: string[] = [];
+    const api = vi.fn(async () => {
+      order.push("unmerge");
+      return { status: "applied" };
+    }) as unknown as ApiClient;
+    let notice: string | undefined = "old";
+    await unmergeAndReread(
+      api,
+      4,
+      true,
+      async () => {
+        order.push("onChanged");
+        notice = "검색 오류";
+      },
+      () => {
+        order.push("onUnmerged");
+        notice = undefined;
+      },
+    );
+    expect(order).toEqual(["unmerge", "onUnmerged", "onChanged"]);
+    expect(notice).toBe("검색 오류");
   });
 });
 

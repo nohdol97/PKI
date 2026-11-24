@@ -5,6 +5,7 @@ import type { RouteName } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
+import { createLatest } from "./latest.ts";
 import {
   createMarksSession,
   DistinctList,
@@ -99,7 +100,7 @@ describe("안내는 지금 항목의 것만 보인다 (LCF-C3)", () => {
       return { marks: [], truncated: false };
     }) as unknown as ApiClient;
     const { seen, view } = sink();
-    const session = createMarksSession(api, view);
+    const session = createMarksSession(api, view, createLatest());
 
     const releasing = session.release(1, 9);
     session.load(2);
@@ -113,7 +114,7 @@ describe("안내는 지금 항목의 것만 보인다 (LCF-C3)", () => {
     const failC = later<never>();
     const apiC = vi.fn(async () => failC.promise) as unknown as ApiClient;
     const again = sink();
-    const releasingC = createMarksSession(apiC, again.view).release(2, 9);
+    const releasingC = createMarksSession(apiC, again.view, createLatest()).release(2, 9);
     failC.reject(new Error("boom"));
     await releasingC;
     expect(again.seen.notice).toContain("boom");
@@ -123,7 +124,23 @@ describe("안내는 지금 항목의 것만 보인다 (LCF-C3)", () => {
     const api = vi.fn(async () => ({ marks: [], truncated: false })) as unknown as ApiClient;
     const { seen, view } = sink();
     seen.notice = "old";
-    createMarksSession(api, view).load(3);
+    createMarksSession(api, view, createLatest()).load(3);
     expect(seen.notice).toBeUndefined();
+  });
+
+  it("UIF-C1: sessions sharing one `latest` let a newer session's read win over an older session's late answer", async () => {
+    const oldRead = later<DistinctMarks>();
+    const oldApi = vi.fn(async () => oldRead.promise) as unknown as ApiClient;
+    const listTwo: DistinctMarks = { marks: [marks[1]], truncated: false };
+    const newApi = vi.fn(async () => listTwo) as unknown as ApiClient;
+    const { seen, view } = sink();
+    const latest = createLatest();
+
+    createMarksSession(oldApi, view, latest).load(1);
+    createMarksSession(newApi, view, latest).load(2);
+    await vi.waitFor(() => expect(seen.state).toEqual({ status: "ready", ...listTwo }));
+    oldRead.resolve(listB);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(seen.state).toEqual({ status: "ready", ...listTwo });
   });
 });
