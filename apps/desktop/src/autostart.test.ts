@@ -21,4 +21,23 @@ describe("autostartMenuItem", () => {
     item.click();
     expect(set).not.toHaveBeenCalled();
   });
+
+  it("SLF-C3: a click whose set throws does not throw and leaves the check at the OS state; a good set shows the new state", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const clicked = { checked: true }; // Electron flips the check before calling click
+    autostartMenuItem({
+      packaged: true,
+      get: () => false,
+      set: () => {
+        throw new Error("denied");
+      },
+    }).click(clicked);
+    expect(clicked.checked).toBe(false);
+    expect(error).toHaveBeenCalledTimes(1);
+    error.mockRestore();
+    let os = false;
+    const ok = { checked: true };
+    autostartMenuItem({ packaged: true, get: () => os, set: (on) => (os = on) }).click(ok);
+    expect(ok.checked).toBe(true);
+  });
 });
