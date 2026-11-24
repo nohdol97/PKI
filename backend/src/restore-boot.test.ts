@@ -17,6 +17,7 @@ import {
   BEFORE_RESTORE_FILE,
   RESTORE_DIR,
   RESTORE_LAST_SETTING,
+  RESTORE_PENDING_SETTING,
   STAGED_FILE,
   createBackup,
   insertLocation,
@@ -191,6 +192,7 @@ describe("restore.swap crash matrix (H01-C2b)", () => {
     expect(JSON.parse(readSetting(db, RESTORE_LAST_SETTING) as string)).toMatchObject({
       backupId: readPendingBackupId(last),
     });
+    expect(readSetting(db, RESTORE_PENDING_SETTING)).toBeUndefined(); // RLD-C3: the finish clears the mark
     db.close();
     // the previous data is gone (the deletion promise) and nothing is left to apply again
     expect(existsSync(join(data, BEFORE_RESTORE_FILE))).toBe(false);
@@ -419,6 +421,10 @@ describe("restore.rollback (H01-R13)", () => {
     expect(readPending(data)).toEqual({ state: "failed", code: "start-failed" });
     expect(existsSync(join(data, BEFORE_RESTORE_FILE))).toBe(false);
     expect(existsSync(join(data, RESTORE_DIR, STAGED_FILE))).toBe(false);
+    // RLD-C3: the previous data came back without a mark
+    const back = openBetterSqlite3(live());
+    expect(readSetting(back, RESTORE_PENDING_SETTING)).toBeUndefined();
+    back.close();
 
     // the next start is an ordinary one on the previous data
     const running = await bootBackend(options);

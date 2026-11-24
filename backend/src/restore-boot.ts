@@ -9,6 +9,7 @@ import {
   BEFORE_RESTORE_FILE,
   RESTORE_DIR,
   RESTORE_LAST_SETTING,
+  RESTORE_PENDING_SETTING,
   STAGED_FILE,
   closeLocation,
   listLocations,
@@ -206,6 +207,36 @@ export function applyPendingRestore(
   }
 }
 
+/**
+ * RLD-R3, R4: a database that carries the mark `restore.pending` is a restored one whose finish never committed,
+ * whatever the marker file and the previous copy were made to say since (a user may have moved either). When this
+ * start applied no restore and the previous copy is gone, the restore this mark names is carried out now: the
+ * start goes on as a restore start (consents cleared, folders paused). With the previous copy still there the
+ * start stops and nothing is moved, since the finish would delete that copy.
+ */
+export function adoptUnfinishedRestore(db: SqlDriver, run: RestoreRun): void {
+  if (run.applied) return;
+  const mark = readSetting(db, RESTORE_PENDING_SETTING);
+  if (mark === undefined) return;
+  if (existsSync(paths(run.dataDir).before))
+    throw new RestoreStateError("restore-state-inconsistent");
+  let parsed: Partial<RestoreSummary> = {};
+  try {
+    parsed = JSON.parse(mark) as Partial<RestoreSummary>;
+  } catch {
+    // an unreadable value is still a mark: the finish runs with empty fields
+  }
+  run.summary = {
+    backupId: parsed.backupId ?? "",
+    backupCreatedAt: parsed.backupCreatedAt ?? "",
+    stagedAt: parsed.stagedAt ?? "",
+    backupSchemaVersion: parsed.backupSchemaVersion ?? 0,
+    counts: parsed.counts as RestoreSummary["counts"],
+    embeddingSpace: parsed.embeddingSpace ?? null,
+  };
+  run.applied = true;
+}
+
 /** Whether the live file already holds the finish's record of this very restore. Unreadable: not finished. */
 function finishCommitted(
   live: string,
@@ -365,6 +396,8 @@ export function finishRestore(
           ),
         };
         writeSetting(db, RESTORE_LAST_SETTING, JSON.stringify(recorded));
+        // the restored file is finished: its mark goes in the same commit as the record (RLD-R2)
+        db.run("DELETE FROM settings WHERE key = ?", [RESTORE_PENDING_SETTING]);
         return recorded;
       },
       { immediate: true, beforeCommit: () => reach(hooks, "before-commit") },

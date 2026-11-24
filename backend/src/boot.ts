@@ -101,6 +101,7 @@ import { createNotifyOutbox, type NotifyChannel, type NotifyOutbox } from "./not
 import { ensureNotifySchedules, wakeNotifyScan } from "./notify-schedules.ts";
 import { createScheduler, type Scheduler } from "./scheduler.ts";
 import {
+  adoptUnfinishedRestore,
   applyPendingRestore,
   finishRestore,
   rollbackRestore,
@@ -253,6 +254,13 @@ async function startBackend(
   // H01-R11: a staged restore is swapped in before the database is opened
   const restore = (holder.restore = applyPendingRestore(options.dataDir, openSqlFile));
   const db = openCanonicalDb(options.dataDir);
+  try {
+    // RLD-R3: a restored database whose finish never ran is finished now, or the start stops (before the vectors go)
+    adoptUnfinishedRestore(db, restore);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   restore.db = db;
   // the instances' configured scopes follow the registration's value before anything is graded (I01-R15);
   // one table, handed to every place that copies it (I07-R2). It never stops the start: what is bad is unknown
