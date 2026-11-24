@@ -306,6 +306,11 @@ class SemanticCounts(unittest.TestCase):
         self.assertIsNone(ss.phase_warning(self.counts("on")))
         self.assertEqual(ss.phase_warning(self.counts("off")), "phase off, but the stored setting is on")
 
+    def test_a_revert_pointing_at_or_past_its_own_line_reads_as_no_line_and_ends(self):
+        # RFU-C2: a hand-edited history whose newest line reverts a later line number must not loop
+        lines = [(1, "policy", "auto-verify", None), (2, "user", "undo", 5)]
+        self.assertIsNone(ss._state_maker_actor(lines))
+
 
 if __name__ == "__main__":
     unittest.main()
