@@ -168,7 +168,9 @@ describe("backup file", () => {
     };
     const huge = forge("huge.pkibak", { N: 2 ** 20, r: 8, p: 1 });
     const extra = forge("extra.pkibak", { ...FAST, cost: 5 });
-    for (const forged of [huge, extra]) {
+    // memory 128 MiB passes the memory cap; only the work cap (N*r*p = 2^24 > 2^22) refuses this one
+    const slow = forge("slow.pkibak", { N: 2 ** 17, r: 8, p: 16 });
+    for (const forged of [huge, extra, slow]) {
       expect(codeOf(() => readBackupHeader(forged))).toBe("damaged");
       expect(codeOf(() => openBackup(forged, PASSPHRASE))).toBe("damaged");
     }

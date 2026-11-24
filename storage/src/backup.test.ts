@@ -443,4 +443,21 @@ describe("restore.stage (H01-C2a, storage half)", () => {
     expect(readSetting(staged, "wiki.summary")).toBe("their-value");
     staged.close();
   });
+
+  // 기준선: 처음 33개 마이그레이션이 만드는 스키마 글(sqlite_master의 type·name·tbl_name·sql)의 해시다. 빨개졌다면
+  // 이미 머지된 마이그레이션의 SQL 글이 바뀌었거나 번들 SQLite가 스스로 지어 쓰는 스키마 글이 달라졌다는 뜻이고,
+  // 이 빌드의 이전 백업이 준비 검사 ⑥에서 foreign-schema로 거절된다. 값을 고쳐 써서 통과시키지 말 것:
+  // 준비 검사 ⑥을 먼저 다룬 뒤(BRG spec의 D1) 값을 바꾼다.
+  it("BRG-C2: the schema text of the first 33 migrations is the pinned baseline", () => {
+    const db = openBetterSqlite3(":memory:");
+    migrate(db, migrations.slice(0, 33));
+    const lines = db
+      .all("SELECT type, name, tbl_name, sql FROM sqlite_master")
+      .map((r) => JSON.stringify([r.type, r.name, r.tbl_name, r.sql]))
+      .sort();
+    db.close();
+    expect(createHash("sha256").update(lines.join("\n")).digest("hex")).toBe(
+      "32a1f44d77d161841162cc208e21fb6cf64c922a73d7fb162ed4f0f0916eb03f",
+    );
+  });
 });
