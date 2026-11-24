@@ -285,7 +285,8 @@ export function createReadGate(
         if (lineHidden(line)) return false;
         at = line.mergedInto;
       }
-      return true;
+      // the bound ran out with lines above still unjudged: left out, as `nearestShown` does
+      return false;
     });
   };
   const semanticItem = (item: SemanticItemView) => ({

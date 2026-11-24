@@ -394,6 +394,27 @@ describe("read-gate: a member is carried only while its merge line is shown (RVS
   });
 });
 
+describe("read-gate: a merge chain deeper than the bound (RVS-R2)", () => {
+  it("carries a member near the representative and leaves out one whose chain outruns the bound", () => {
+    const depth = 1003;
+    db.transaction(() => {
+      for (let i = 1; i <= depth; i++)
+        insertItem(db, { ...attrs, type: "Project", name: `사슬 ${i}` });
+      // item i is merged into item i + 1: the representative is the last, the first sits 1002 lines below it
+      for (let i = 1; i < depth; i++)
+        db.run(
+          "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+          [i, i + 1, "2026-11-24T00:00:00.000Z"],
+        );
+    });
+    const ids = createReadGate(db, registryOf(policy()))
+      .semanticMembers(depth)
+      .map((m) => m.id);
+    expect(ids).toContain(depth - 1);
+    expect(ids).not.toContain(1);
+  });
+});
+
 describe("read-gate: the source list at the scan cap (RVS-C3)", () => {
   it("answers `next` as the last shown source on the page, and following it reaches the shown source beyond the cap", () => {
     const beyond = source("beyond").versionId;
