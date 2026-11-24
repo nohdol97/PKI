@@ -266,10 +266,10 @@ function Digests({
       </ul>
       {open !== undefined && digest && (
         <section aria-label="요약 내용 보기">
-          <h3>
+          <h2 className="sub-title">
             {DIGEST_KIND[digest.kind]} · {dateText(digest.windowStart)} ~{" "}
             {dateText(digest.windowEnd)}
-          </h3>
+          </h2>
           {digest.lines.length === 0 && <p>{DIGEST_LINES_EMPTY}</p>}
           {digest.lines.length > 0 && (
             <ul aria-label="요약 내용">
@@ -324,7 +324,7 @@ function Timeline({
     <>
       {[...days].map(([day, dayLines]) => (
         <section key={day}>
-          <h3>{day}</h3>
+          <h2 className="sub-title">{day}</h2>
           <ul className="rows" aria-label={`알림 타임라인 ${day}`}>
             {dayLines.map((line) => (
               <li key={line.id}>

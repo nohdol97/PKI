@@ -221,6 +221,48 @@ test("a11y.e2e: 알림 has no serious or critical violation", async ({ page }) =
   }
 });
 
+// HOC-C1: the outline steps down one level at a time on the four screens #308 named; one rule only (HOC-D3).
+async function headingOrderViolations(
+  page: Page,
+  screens: { name: string; ready: (p: Page) => Locator }[],
+  apiOut: () => number,
+) {
+  const nav = page.getByRole("navigation");
+  const found: string[] = [];
+  for (const s of screens) {
+    await nav.getByRole("button", { name: new RegExp(`^${s.name}`) }).click();
+    await expect(s.ready(page)).toBeVisible();
+    await expect.poll(apiOut, { message: `${s.name}: /api/ requests still out` }).toBe(0);
+    const result = await new AxeBuilder({ page }).withRules(["heading-order"]).analyze();
+    expect(result.passes.length, `${s.name}: heading-order did not run`).toBeGreaterThan(0);
+    for (const v of result.violations)
+      for (const n of v.nodes) found.push(`${s.name} | ${v.id} | ${n.target.join(" ")}`);
+  }
+  return found;
+}
+
+test("a11y.e2e: heading-order holds on 홈, 위키, 점검 and 알림", async ({ page }) => {
+  test.setTimeout(240_000);
+  const byName = (name: string) => [...STACK_A, ...STACK_B].filter((s) => s.name === name);
+  const a = await startStack(K02_SEED, []);
+  try {
+    const apiOut = trackApiRequests(page);
+    await page.goto(a.url);
+    const screens = ["홈", "위키", "점검"].flatMap(byName);
+    expect(await headingOrderViolations(page, screens, apiOut)).toEqual([]);
+  } finally {
+    await a.close();
+  }
+  const b = await startStack(P02_SEED, []);
+  try {
+    const apiOut = trackApiRequests(page);
+    await page.goto(b.url);
+    expect(await headingOrderViolations(page, byName("알림"), apiOut)).toEqual([]);
+  } finally {
+    await b.close();
+  }
+});
+
 // C4: only the keyboard — no click, no focus() call. Tab until the wanted control has focus (bounded), then act.
 async function tabTo(page: Page, target: Locator, max = 60) {
   for (let i = 0; i < max; i += 1) {

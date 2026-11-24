@@ -81,9 +81,9 @@ export function InsightRow({
 export function InsightBody({ insight, lead }: { insight: InsightData; lead?: ReactNode }) {
   return (
     <>
-      <h3 className="detail-title">
+      <h2 className="detail-title">
         <bdi>{insight.summary}</bdi>
-      </h3>
+      </h2>
       <Props
         items={[
           [
@@ -99,7 +99,7 @@ export function InsightBody({ insight, lead }: { insight: InsightData; lead?: Re
       {insight.autoNotifyExcluded && <p className="meta">{AUTO_NOTIFY_EXCLUDED}</p>}
       {lead}
       <div className="sec">
-        <h4>요약</h4>
+        <h3>요약</h3>
         <p>{INSIGHT_NOT_CONFIRMED}</p>
         {insight.factLines.length > 0 && (
           <ul aria-label="사실 줄">
@@ -113,7 +113,7 @@ export function InsightBody({ insight, lead }: { insight: InsightData; lead?: Re
       </div>
       {insight.reasoningSummary !== null && insight.reasoningBy !== null && (
         <div className="sec">
-          <h4>판단 근거</h4>
+          <h3>판단 근거</h3>
           <p className="basis">
             {REASONING_BY[insight.reasoningBy]}: <bdi>{insight.reasoningSummary}</bdi>
           </p>

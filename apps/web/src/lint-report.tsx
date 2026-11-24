@@ -93,9 +93,9 @@ export function LintReport({ api, onReported }: { api: ApiClient; onReported: ()
     setPicked((p) => (p.some((i) => i.id === item.id) ? p : [...p, item]));
   return (
     <section aria-labelledby="lint-report-heading">
-      <h3 id="lint-report-heading" className="group-label">
+      <h2 id="lint-report-heading" className="group-label">
         {REPORT_HEADING}
-      </h3>
+      </h2>
       <p className="meta">{REPORT_HINT}</p>
       {notice && <p role={notice.alert ? "alert" : "status"}>{notice.text}</p>}
       <form onSubmit={send}>

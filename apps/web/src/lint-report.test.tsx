@@ -27,7 +27,7 @@ describe("LintReport (CUF-C1)", () => {
     const controls = html.match(/<(input|select)\b[^>]*>/g) ?? [];
     expect(controls.length).toBeGreaterThan(0);
     for (const control of controls) expect(control).toMatch(/aria-label="[^"]+"/);
-    expect(html).toMatch(/<h3[^>]*>놓친 것 알리기<\/h3>/);
+    expect(html).toMatch(/<h2[^>]*>놓친 것 알리기<\/h2>/);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>알리기<\/button>/);
   });
 });

@@ -5,7 +5,9 @@ import type { RouteName } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
+import { createBusy } from "./latest.ts";
 import {
+  attemptOnce,
   EntityCuration,
   markDistinct,
   mergeInto,
@@ -13,6 +15,7 @@ import {
   splitRowsOf,
   splitOff,
   unmerge,
+  unmergeAndReread,
 } from "./entity-curation.tsx";
 import { actionText } from "./entity-text.ts";
 import type { Center } from "./explore.tsx";
@@ -56,6 +59,31 @@ const center: Center = {
     { id: 11, type: "OWNS", subjectId: 9, objectId: 2, ...row },
   ],
 };
+
+// HOC-C3 (R2): the press stays blocked until the reread is done, so a second press cannot reach a merge that is gone.
+describe("합치기 되돌리기와 다시 읽기 (HOC-C3)", () => {
+  it("does not send a second unmerge while onChanged is still out, and sends one after it ends", async () => {
+    const { api, calls } = fake({ entityUnmerge: () => ({ status: "applied" }) });
+    const busy = createBusy();
+    let finishReread = () => {};
+    const reread = new Promise<void>((resolve) => (finishReread = resolve));
+    const press = () =>
+      attemptOnce(
+        busy,
+        () => {},
+        () => unmergeAndReread(api, 4, true, () => reread),
+      );
+    const first = press();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(press()).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    finishReread();
+    await first;
+    await press();
+    expect(calls).toHaveLength(2);
+  });
+});
 
 describe("항목 정리 (X02B-C3)", () => {
   it("merges the chosen item into the centre by number; a refusal is shown in words", async () => {
