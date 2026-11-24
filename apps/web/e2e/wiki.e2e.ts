@@ -68,6 +68,15 @@ test("wiki.e2e: open a page, its claim and evidence, follow a link to the backli
   // a page: its heading takes focus, and a claim shows its value and status
   await page.getByRole("list", { name: "프로젝트" }).getByRole("button", { name: PROJECT }).click();
   await expect(page.getByRole("heading", { name: PROJECT, level: 2 })).toBeFocused();
+  // the chosen row is marked, and the page is the detail pane to the right of the list (UI01-C8)
+  await expect(
+    page.getByRole("list", { name: "프로젝트" }).getByRole("button", { name: PROJECT }),
+  ).toHaveAttribute("aria-current", "true");
+  const [listBox, detailBox] = [
+    await page.getByRole("list", { name: "프로젝트" }).boundingBox(),
+    await page.getByRole("region", { name: "페이지 상세" }).boundingBox(),
+  ];
+  expect(detailBox?.x).toBeGreaterThanOrEqual((listBox?.x ?? 0) + (listBox?.width ?? 0));
   const claims = page.getByRole("list", { name: "주장" });
   const dated = claims.getByRole("listitem").filter({ hasText: "2026-12-05" });
   await expect(dated).toHaveCount(1);

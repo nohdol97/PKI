@@ -71,8 +71,32 @@ test("ask.e2e: the hits, then the answer's sentences with their quotes and the r
 
   const sentences = page.getByRole("list", { name: "답 문장" }).getByRole("listitem");
   await expect(sentences.first()).toBeVisible();
-  await expect(sentences.filter({ hasText: QUOTE })).toHaveCount(1);
+  // UI01-C10: the quote is on a card of the cited sources (card n for sentence n), not in the sentence
+  await expect(sentences.first()).toContainText("[1]");
+  await expect(sentences.filter({ hasText: QUOTE })).toHaveCount(0);
+  const cards = page.getByRole("list", { name: "인용한 원본" }).getByRole("listitem");
+  await expect(cards.filter({ hasText: QUOTE })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: QUESTION })).toBeVisible();
   await expect(page.getByRole("button", { name: "취소" })).toHaveCount(0);
+
+  // UI01-C10: the input bar stays at the pane's bottom edge, also after the answer came and the body scrolls;
+  // the main action is filled; the head bar is 48px
+  const edge = async () => {
+    const [pane, bar] = [
+      await page.locator(".pane-wide").boundingBox(),
+      await page.locator(".ask-bar").boundingBox(),
+    ];
+    return (pane?.y ?? 0) + (pane?.height ?? 0) - ((bar?.y ?? 0) + (bar?.height ?? 0));
+  };
+  expect(Math.abs(await edge())).toBeLessThanOrEqual(1);
+  await page.locator(".pane-wide .pane-body").evaluate((e) => (e.scrollTop = e.scrollHeight));
+  expect(Math.abs(await edge())).toBeLessThanOrEqual(1);
+  expect(
+    await page
+      .getByRole("button", { name: "질문하기" })
+      .evaluate((e) => getComputedStyle(e).backgroundColor),
+  ).toBe("rgb(30, 58, 95)");
+  expect((await page.locator(".pane-head").first().boundingBox())?.height).toBe(48);
 });
 
 test("ask.e2e: with no Provider chosen the hits show and the answer cannot be made", async ({

@@ -97,6 +97,10 @@ test("explore-curation.e2e: filter 지식 검토 by status on the server, read m
   const nav = page.getByRole("navigation");
   await page.goto(`http://127.0.0.1:${port}`);
   await nav.getByRole("button", { name: "지식 검토" }).click();
+  const head = page.locator(".pane-head").first();
+  // UI01-C8: 지식 검토 is a pane with a 48px head bar that holds the state select
+  expect((await head.boundingBox())?.height).toBe(48);
+  await expect(head.getByLabel("상태")).toBeVisible();
   const list = page.getByRole("list", { name: "지식 목록" });
   const rows = list.locator("> li"); // one per item; facts and relations are nested lists
   // candidates are the default filter; 57 candidate items exceed the 50 of one page
@@ -115,6 +119,7 @@ test("explore-curation.e2e: filter 지식 검토 by status on the server, read m
   await expect(page.getByRole("heading", { name: "유형 정의", level: 1 })).toBeVisible();
   for (const kind of ["항목 종류", "사실 종류", "관계 종류"])
     await expect(page.getByRole("region", { name: kind })).toBeVisible();
+  expect((await page.locator(".pane-head").first().boundingBox())?.height).toBe(48); // UI01-C8
 
   // add an item type: it shows in the 항목 종류 section
   const form = page.getByRole("form", { name: "정의 더하기" });

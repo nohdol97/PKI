@@ -1,0 +1,179 @@
+/* 질문 (UI01-D15, D17): one reading-width pane: the question as the title, the answer as flowing text with [n]
+   marks, the cited sources as cards, the hits, and the input bar pinned under the body. */
+
+.pane-read {
+  background: var(--surface);
+}
+.pane-read .pane-body {
+  padding: var(--sp-6) var(--sp-6) var(--sp-5);
+}
+.pane-read .pane-body > *,
+.ask-bar > * {
+  max-width: 700px;
+  margin-right: auto;
+  margin-left: auto;
+}
+.pane-read .pane-head {
+  background: var(--surface);
+}
+.pane-read .pane-body > .detail-title {
+  margin-top: 0;
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-h1);
+}
+.pane-read .pane-body > [role="status"] {
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+}
+
+.ask-label {
+  margin: var(--sp-5) 0 var(--sp-2);
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+.ask-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-3);
+  margin-bottom: var(--sp-4);
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+}
+.ask-route .ask-label {
+  margin: 0;
+}
+.ask-route ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ask-route li {
+  margin: 0;
+}
+
+.ask-answer ol {
+  margin: 0 0 var(--sp-3);
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-lead);
+  line-height: 1.8;
+}
+.ask-answer li {
+  display: inline;
+  margin: 0 0.35em 0 0;
+}
+.ask-answer sup {
+  margin-left: 1px;
+  color: var(--accent);
+  font-size: var(--fs-meta);
+  font-weight: 700;
+}
+
+.ask-cites > ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cite-card {
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-quiet);
+}
+.cite-card > p {
+  margin: 0 0 var(--sp-2);
+}
+.cite-quote {
+  font-size: var(--fs-body);
+  line-height: 1.6;
+}
+.cite-quote strong {
+  margin-right: var(--sp-1);
+  color: var(--accent);
+  font-size: var(--fs-meta);
+}
+.cite-card .src {
+  color: var(--ink-meta);
+  font-size: var(--fs-meta);
+}
+.cite-card button {
+  min-height: calc(var(--control-h) - var(--sp-2));
+  font-size: var(--fs-meta);
+}
+.cite-card section {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--line);
+}
+.ask-hits ol {
+  padding-left: var(--sp-5);
+}
+
+/* the input bar pinned under the body */
+.ask-bar {
+  flex: none;
+  margin: 0;
+  padding: 14px var(--sp-6);
+  border-top: var(--border);
+  background: var(--surface);
+}
+.ask-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-4);
+  margin-bottom: var(--sp-2);
+  color: var(--ink-2);
+  font-size: var(--fs-meta);
+}
+.ask-filters label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  font-size: var(--fs-meta);
+}
+.ask-filters select,
+.ask-filters input:not([type="checkbox"]) {
+  min-height: 28px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-meta);
+}
+.ask-filters label > input,
+.ask-filters label > select {
+  margin: 0;
+}
+.ask-compose {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: stretch;
+}
+.ask-compose label {
+  flex: 1;
+  margin: 0;
+}
+.ask-compose textarea {
+  height: 100%;
+  min-height: 52px;
+  resize: none;
+}
+.ask-buttons {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+.ask-buttons button + button {
+  margin-left: 0;
+}
+
+/* the head title starts on the same left line as the centred body column */
+.pane-read .pane-head {
+  padding-left: max(var(--sp-6), calc((100% - 700px) / 2));
+}

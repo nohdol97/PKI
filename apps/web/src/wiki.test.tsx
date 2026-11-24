@@ -70,3 +70,18 @@ describe("buildState (#220)", () => {
     expect(buildState({ stale: false, buildDead: false }, { stale: false })).toBe("idle");
   });
 });
+
+// UI01-C8 (R6, R7, R10): an opened page is the detail pane: its title is the focus target heading, its
+// claims and sections follow, and the note form sits in the action bar under the body.
+describe("PageView's detail pane", () => {
+  it("is one section named 페이지 상세 with the title heading, the claims and the note form in the bar", () => {
+    const html = renderToStaticMarkup(<PageView {...props} position="1 / 3" />);
+    expect(html).toMatch(/^<section class="pane-detail" aria-label="페이지 상세">/);
+    expect(html).toContain("페이지<span> 1 / 3</span>");
+    expect(html).toMatch(/<h2 class="detail-title" id="wiki-page-heading" tabindex="-1">/);
+    expect(html).toContain('aria-label="주장"');
+    const bar = html.indexOf('<form class="actions"');
+    expect(bar).toBeGreaterThan(html.indexOf("변경 이력"));
+    expect(html.slice(bar)).toMatch(/메모 쓰기[\s\S]*메모 추가/);
+  });
+});

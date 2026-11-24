@@ -281,3 +281,80 @@ describe("ask view: a sentence's source (X02-C1a ②)", () => {
     expect(failed[0]).toContain("API 404");
   });
 });
+
+// UI01-C10 (R6, R7, R10): the answer is flowing text whose sentence n ends with [n]; the quotes and their source
+// lines are the cards of the list "인용한 원본", card n for sentence n; only an opened card holds the source view.
+describe("ask view: the answer and the cited sources (UI01-C10)", () => {
+  const second: AskEvent = {
+    type: "sentence",
+    text: "두 번째 문장입니다.",
+    citation: {
+      versionId: 4,
+      sourceId: 2,
+      version: 1,
+      start: 30,
+      end: 36,
+      quote: "<b>둘째</b> 인용",
+    },
+  };
+  const answered = fold(
+    route,
+    hits,
+    { type: "answer", status: "started", reason: null },
+    sentence,
+    second,
+    { type: "done", sentences: 2, dropped: 0, insufficient: false },
+  );
+  const render = (opened?: { index: number; source: Parameters<typeof SourceView>[0]["source"] }) =>
+    renderToStaticMarkup(
+      <AskResults
+        state={answered}
+        running={false}
+        question="<i>배포일</i>이 언제야?"
+        opened={opened}
+      />,
+    );
+  const items = (out: string, name: string) => {
+    const list = new RegExp(`<ol aria-label="${name}">([\\s\\S]*?)</ol>`).exec(out)?.[1] ?? "";
+    return list.split(/<li[ >]/).slice(1);
+  };
+
+  it("shows the asked question as the title, as text", () => {
+    const out = render();
+    expect(out).toContain(
+      '<h2 class="detail-title"><bdi>&lt;i&gt;배포일&lt;/i&gt;이 언제야?</bdi></h2>',
+    );
+  });
+
+  it("ends sentence n with [n] and keeps the quotes out of the sentence list", () => {
+    const sentences = items(render(), "답 문장");
+    expect(sentences).toHaveLength(2);
+    expect(sentences[0]).toMatch(/배포일은 12월 10일입니다\.[\s\S]*\[1\]<\/sup>\s*<\/li>/);
+    expect(sentences[1]).toMatch(/\[2\]<\/sup>\s*<\/li>/);
+    expect(sentences.join("")).not.toMatch(/12월 10일이다|둘째|<blockquote/);
+  });
+
+  it("draws card n of 인용한 원본 with [n], the quote, the source line and the button; the source view only in the opened card", () => {
+    const plain = items(render(), "인용한 원본");
+    expect(plain).toHaveLength(2);
+    expect(plain[0]).toContain("[1]");
+    expect(plain[0]).toContain("배포일은 12월 10일이다");
+    expect(plain[0]).toContain("&lt;img"); // the source title, as text
+    expect(plain[0]).toContain("(version 1, 위치 7–20)");
+    expect(plain[0]).toMatch(/<button[^>]*>원본 보기<\/button>/);
+    expect(plain[1]).toContain("&lt;b&gt;둘째&lt;/b&gt; 인용");
+    expect(render()).not.toContain("인용 원본");
+    const source = {
+      evidenceId: 0,
+      quote: "q",
+      start: 0,
+      end: 1,
+      locator: null,
+      attachment: null,
+      sourceVersion: { id: 4, version: 1, latestVersion: 1, title: "t", body: "가나" },
+    };
+    const opened = items(render({ index: 1, source }), "인용한 원본");
+    expect(opened[0]).not.toContain("인용 원본");
+    expect(opened[1]).toContain('aria-label="인용 원본"');
+  });
+});

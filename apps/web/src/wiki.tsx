@@ -8,6 +8,7 @@ import { ApiError, type ApiClient } from "./api.ts";
 import { SOURCE_GONE } from "./evidence-text.ts";
 import { SourceView, useFocusOn } from "./evidence-view.tsx";
 import { useNav } from "./nav.tsx";
+import { DetailPane, DETAIL_HINT, PaneHead, Row } from "./panes.tsx";
 import {
   claimMarks,
   epistemicText,
@@ -44,6 +45,8 @@ export interface PageViewProps {
   source: EvidenceSource | undefined;
   headingRef: Ref<HTMLHeadingElement>;
   sourceHeadingRef: Ref<HTMLHeadingElement>;
+  /** "n / N" among the listed pages, where the screen knows it. */
+  position?: string | undefined;
   onOpenPage: (key: string) => void;
   onOpenEvidence: (evidenceId: number) => void;
   onHide: (claim: WikiClaim) => void;
@@ -77,8 +80,22 @@ export function PageView(props: PageViewProps) {
       ))
     );
   return (
-    <section aria-labelledby="wiki-page-heading">
-      <h2 id="wiki-page-heading" tabIndex={-1} ref={props.headingRef}>
+    <DetailPane
+      label="페이지 상세"
+      head={{ title: "페이지", count: props.position }}
+      actions={
+        <form className="actions" onSubmit={addNote}>
+          <label>
+            메모 쓰기
+            <textarea maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
+          </label>
+          <button type="submit" className="btn-primary" disabled={note.trim() === ""}>
+            메모 추가
+          </button>
+        </form>
+      }
+    >
+      <h2 className="detail-title" id="wiki-page-heading" tabIndex={-1} ref={props.headingRef}>
         <bdi>{page.title}</bdi>
       </h2>
       <p>
@@ -108,7 +125,7 @@ export function PageView(props: PageViewProps) {
       )}
 
       {page.summary.state === "ready" && (
-        <section aria-label={WIKI_SUMMARY_LABEL}>
+        <section className="sec" aria-label={WIKI_SUMMARY_LABEL}>
           <h3>{WIKI_SUMMARY_LABEL}</h3>
           <ul>
             {page.summary.sentences?.map((s) => (
@@ -121,34 +138,36 @@ export function PageView(props: PageViewProps) {
       )}
       {page.summary.state === "held" && <p role="status">{WIKI_SUMMARY_HELD}</p>}
 
-      <h3>주장</h3>
-      {page.claims.length === 0 && <p>보여 줄 주장이 없습니다.</p>}
-      {page.claims.length > 0 && (
-        <ul aria-label="주장">
-          {page.claims.map((c) => {
-            const title = claimTitle(c, titleOf);
-            const validity = validityText(c);
-            return (
-              <li key={`${c.ref.kind}:${c.ref.id}`}>
-                <bdi>{title}</bdi> <strong>{claimMarks(c).join(" · ")}</strong>{" "}
-                {epistemicText(c.epistemic)}
-                {validity && ` · ${validity}`} {evidenceButtons(c.evidence, title)}
-                <button
-                  type="button"
-                  aria-label={`숨기기: ${title}`}
-                  onClick={() => props.onHide(c)}
-                >
-                  숨기기
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <div className="sec">
+        <h3>주장</h3>
+        {page.claims.length === 0 && <p>보여 줄 주장이 없습니다.</p>}
+        {page.claims.length > 0 && (
+          <ul className="plain-list" aria-label="주장">
+            {page.claims.map((c) => {
+              const title = claimTitle(c, titleOf);
+              const validity = validityText(c);
+              return (
+                <li key={`${c.ref.kind}:${c.ref.id}`}>
+                  <bdi>{title}</bdi> <strong>{claimMarks(c).join(" · ")}</strong>{" "}
+                  {epistemicText(c.epistemic)}
+                  {validity && ` · ${validity}`} {evidenceButtons(c.evidence, title)}
+                  <button
+                    type="button"
+                    aria-label={`숨기기: ${title}`}
+                    onClick={() => props.onHide(c)}
+                  >
+                    숨기기
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
       {hidden.length > 0 && (
-        <>
+        <div className="sec">
           <h3>숨긴 주장</h3>
-          <ul aria-label="숨긴 주장">
+          <ul className="plain-list" aria-label="숨긴 주장">
             {hidden.map((c) => {
               const title = claimTitle(c, titleOf);
               return (
@@ -165,10 +184,10 @@ export function PageView(props: PageViewProps) {
               );
             })}
           </ul>
-        </>
+        </div>
       )}
       {source && (
-        <section aria-labelledby="wiki-source-heading">
+        <section className="sec" aria-labelledby="wiki-source-heading">
           <h3 id="wiki-source-heading" tabIndex={-1} ref={props.sourceHeadingRef}>
             원본 보기
           </h3>
@@ -176,73 +195,72 @@ export function PageView(props: PageViewProps) {
         </section>
       )}
 
-      <h3>링크</h3>
-      {page.links.length === 0 ? (
-        <p>이 페이지가 가리키는 페이지가 없습니다.</p>
-      ) : (
-        <ul aria-label="링크">
-          {page.links.map((l) => (
-            <li key={l.key}>
-              <button type="button" onClick={() => onOpenPage(l.key)}>
-                <bdi>{l.title}</bdi>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <h3>이 페이지를 가리키는 페이지</h3>
-      {page.backlinks.length === 0 ? (
-        <p>이 페이지를 가리키는 페이지가 없습니다.</p>
-      ) : (
-        <ul aria-label="이 페이지를 가리키는 페이지">
-          {page.backlinks.map((b) => (
-            <li key={`${b.fromKey}:${b.basisKind}:${b.basisId}`}>
-              <button type="button" onClick={() => onOpenPage(b.fromKey)}>
-                <bdi>{b.title}</bdi>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="sec">
+        <h3>링크</h3>
+        {page.links.length === 0 ? (
+          <p>이 페이지가 가리키는 페이지가 없습니다.</p>
+        ) : (
+          <ul className="link-list" aria-label="링크">
+            {page.links.map((l) => (
+              <li key={l.key}>
+                <button type="button" onClick={() => onOpenPage(l.key)}>
+                  <bdi>{l.title}</bdi>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="sec">
+        <h3>이 페이지를 가리키는 페이지</h3>
+        {page.backlinks.length === 0 ? (
+          <p>이 페이지를 가리키는 페이지가 없습니다.</p>
+        ) : (
+          <ul className="link-list" aria-label="이 페이지를 가리키는 페이지">
+            {page.backlinks.map((b) => (
+              <li key={`${b.fromKey}:${b.basisKind}:${b.basisId}`}>
+                <button type="button" onClick={() => onOpenPage(b.fromKey)}>
+                  <bdi>{b.title}</bdi>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
-      <h3>메모</h3>
-      {page.notes.length > 0 && (
-        <ul aria-label="메모">
-          {page.notes.map((n) => (
-            <li key={n.id}>
-              <bdi>{n.text}</bdi> ({n.at}){" "}
-              <button
-                type="button"
-                aria-label={`메모 지우기: ${n.text}`}
-                onClick={() => props.onRemoveNote(n.id)}
-              >
-                지우기
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <form onSubmit={addNote}>
-        <label>
-          메모 쓰기
-          <textarea maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
-        </label>
-        <button type="submit" disabled={note.trim() === ""}>
-          메모 추가
-        </button>
-      </form>
+      <div className="sec">
+        <h3>메모</h3>
+        {page.notes.length > 0 && (
+          <ul className="plain-list" aria-label="메모">
+            {page.notes.map((n) => (
+              <li key={n.id}>
+                <bdi>{n.text}</bdi> ({n.at}){" "}
+                <button
+                  type="button"
+                  aria-label={`메모 지우기: ${n.text}`}
+                  onClick={() => props.onRemoveNote(n.id)}
+                >
+                  지우기
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
-      <h3>변경 이력</h3>
-      {page.history.length === 0 ? (
-        <p>변경 이력이 없습니다.</p>
-      ) : (
-        <ol aria-label="변경 이력">
-          {page.history.map((h) => (
-            <li key={`${h.changeSeq}:${h.at}:${h.action}`}>{historyText(h)}</li>
-          ))}
-        </ol>
-      )}
-    </section>
+      <div className="sec">
+        <h3>변경 이력</h3>
+        {page.history.length === 0 ? (
+          <p>변경 이력이 없습니다.</p>
+        ) : (
+          <ol aria-label="변경 이력">
+            {page.history.map((h) => (
+              <li key={`${h.changeSeq}:${h.at}:${h.action}`}>{historyText(h)}</li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </DetailPane>
   );
 }
 
@@ -340,63 +358,77 @@ export function Wiki({ api }: { api: ApiClient }) {
       if (pageKey !== undefined) void readPage(pageKey, false);
     }, fail);
 
+  const listed = index?.kinds.flatMap((k) => k.pages) ?? [];
+  const at = listed.findIndex((p) => p.key === pageKey);
   return (
     <>
-      {notice && <p role="alert">{notice}</p>}
-      <p>
-        <button type="button" onClick={() => void rebuild()}>
-          다시 만들기
-        </button>{" "}
-        {rebuilding && <span role="status">{rebuilding}</span>}
-      </p>
-      {state === "dead" ? (
-        <p role="alert">{WIKI_BUILD_DEAD}</p>
-      ) : (
-        index?.stale && <p role="status">{WIKI_STALE}</p>
-      )}
-      <h2>페이지</h2>
-      {index && index.kinds.length === 0 && <p>{WIKI_EMPTY}</p>}
-      {index?.kinds.map((k) => (
-        <section key={k.kind} aria-label={`${pageKindText(k.kind)} 종류`}>
-          <h3>{pageKindText(k.kind)}</h3>
-          <ul aria-label={pageKindText(k.kind)}>
-            {k.pages.map((p) => (
-              <li key={p.key}>
-                <button type="button" onClick={() => void readPage(p.key, true)}>
-                  <bdi>{p.title}</bdi>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-      {index && index.orphanNotes.length > 0 && (
-        <>
-          <h3>붙을 페이지가 없는 메모</h3>
-          <ul aria-label="붙을 페이지가 없는 메모">
-            {index.orphanNotes.map((n) => (
-              <li key={n.id}>
-                <bdi>{n.text}</bdi> ({n.at}){" "}
-                <button
-                  type="button"
-                  aria-label={`메모 지우기: ${n.text}`}
-                  onClick={() =>
-                    void edit({ op: "note-remove", id: n.id }).then((ok) => ok && void readIndex())
-                  }
-                >
-                  지우기
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {page && (
+      <div className="pane-list">
+        <PaneHead title="위키" as="h1" count={listed.length}>
+          <button type="button" onClick={() => void rebuild()}>
+            다시 만들기
+          </button>
+        </PaneHead>
+        <div className="pane-body">
+          {notice && <p role="alert">{notice}</p>}
+          {rebuilding && (
+            <p>
+              <span role="status">{rebuilding}</span>
+            </p>
+          )}
+          {state === "dead" ? (
+            <p role="alert">{WIKI_BUILD_DEAD}</p>
+          ) : (
+            index?.stale && <p role="status">{WIKI_STALE}</p>
+          )}
+          {index && index.kinds.length === 0 && <p>{WIKI_EMPTY}</p>}
+          {index?.kinds.map((k) => (
+            <section key={k.kind} aria-label={`${pageKindText(k.kind)} 종류`}>
+              <h3 className="group-label">{pageKindText(k.kind)}</h3>
+              <ul className="rows" aria-label={pageKindText(k.kind)}>
+                {k.pages.map((p) => (
+                  <li key={p.key}>
+                    <Row
+                      title={<bdi>{p.title}</bdi>}
+                      selected={p.key === pageKey}
+                      onClick={() => void readPage(p.key, true)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+          {index && index.orphanNotes.length > 0 && (
+            <>
+              <h3 className="group-label">붙을 페이지가 없는 메모</h3>
+              <ul className="plain-list" aria-label="붙을 페이지가 없는 메모">
+                {index.orphanNotes.map((n) => (
+                  <li key={n.id}>
+                    <bdi>{n.text}</bdi> ({n.at}){" "}
+                    <button
+                      type="button"
+                      aria-label={`메모 지우기: ${n.text}`}
+                      onClick={() =>
+                        void edit({ op: "note-remove", id: n.id }).then(
+                          (ok) => ok && void readIndex(),
+                        )
+                      }
+                    >
+                      지우기
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      </div>
+      {page ? (
         <PageView
           page={page}
           source={source}
           headingRef={headingRef}
           sourceHeadingRef={sourceHeadingRef}
+          position={at >= 0 ? `${at + 1} / ${listed.length}` : undefined}
           onOpenPage={(key) => void readPage(key, true)}
           onOpenEvidence={(id) => void openEvidence(id)}
           onHide={(claim) =>
@@ -410,6 +442,10 @@ export function Wiki({ api }: { api: ApiClient }) {
           }
           onRemoveNote={(id) => void edit({ op: "note-remove", id }).then((ok) => ok && after())}
         />
+      ) : (
+        <DetailPane label="페이지 상세" head={{ title: "페이지" }}>
+          <p className="hint">{DETAIL_HINT}</p>
+        </DetailPane>
       )}
     </>
   );

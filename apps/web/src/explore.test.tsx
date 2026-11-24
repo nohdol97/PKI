@@ -420,3 +420,52 @@ describe("늦은 응답 (X02F-C4)", () => {
     expect(calls.filter(([name]) => name === "exploreItem")).toHaveLength(3);
   });
 });
+
+// UI01-C8 (R5, R6, D11, D18): the found items are rows (one button each, named from the item's name then its type
+// and alias, the open one marked); the open item is the detail pane with its name as the focus-target title, the
+// way to its Wiki page in the head bar and its type in the properties; with nothing chosen the pane is a guidance line.
+describe("탐색 목록과 상세 칸 (UI01)", () => {
+  const page = (selected?: number) =>
+    renderToStaticMarkup(
+      <ItemList
+        state={{
+          status: "ready",
+          items: [
+            { id: 1, type: "Project", name: "미리내", alias: "<i>별칭</i>" },
+            { id: 2, type: "System", name: "물결 API", alias: null },
+          ],
+          next: null,
+          query: "",
+        }}
+        selected={selected}
+        onOpen={noop}
+        onMore={noop}
+      />,
+    );
+
+  it("draws each item as one row button that starts with its name, then type and alias as text", () => {
+    const out = page(1);
+    const items = out.split("<li>").slice(1);
+    expect(items).toHaveLength(2);
+    expect(items[0]?.match(/<button/g)).toHaveLength(1);
+    expect(items[0]).toMatch(/<bdi>미리내<\/bdi>[\s\S]*Project[\s\S]*&lt;i&gt;별칭&lt;\/i&gt;/);
+    expect(out).not.toContain("<i>");
+  });
+
+  it("marks only the open item's row", () => {
+    const out = page(1);
+    expect(out.match(/aria-current="true"/g)).toHaveLength(1);
+    expect(out.indexOf('aria-current="true"')).toBeLessThan(out.indexOf("물결 API"));
+    expect(page()).not.toContain("aria-current");
+  });
+
+  it("is the detail pane of the item, with the focus-target title, the type, and the Wiki way in the head", () => {
+    const out = neighbourhood();
+    expect(out).toMatch(/^<section class="pane-detail" aria-label="항목 상세">/);
+    expect(out).toMatch(
+      /<h2[^>]*class="detail-title"[^>]*tabindex="-1"|<h2[^>]*tabindex="-1"[^>]*class="detail-title"/,
+    );
+    expect(out).toContain("<dt>유형</dt><dd>Project</dd>");
+    expect(out.indexOf("위키 페이지 열기")).toBeLessThan(out.indexOf("detail-title"));
+  });
+});

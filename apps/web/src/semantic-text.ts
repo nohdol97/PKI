@@ -16,6 +16,14 @@ export const STATUS_TEXT: Record<Status, string> = {
   superseded: "대체됨",
   rejected: "기각",
 };
+/** The dot colour of a status (UI01-R9); the word beside it says the same. */
+export const STATUS_CLASS: Record<Status, string> = {
+  candidate: "state-warn",
+  verified: "state-ok",
+  disputed: "state-attn",
+  superseded: "state-none",
+  rejected: "state-none",
+};
 export const STATUS_ORDER: readonly Status[] = [
   "candidate",
   "verified",

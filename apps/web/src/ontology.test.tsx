@@ -177,3 +177,13 @@ describe("유형 정의 screen: editing a stored rule", () => {
     });
   });
 });
+
+// UI01-C8, R8: 유형 정의 draws each kind as a group box, and a row's status as a colour dot with its word.
+describe("유형 정의 화면 구성 (UI01)", () => {
+  it("makes one group box per kind and gives the status a dot class", () => {
+    const out = view();
+    expect(out.match(/<section class="group"/g)).toHaveLength(3);
+    expect(out).toMatch(/<span class="state state-warn">후보<\/span>/);
+    expect(out).toMatch(/<span class="state state-ok">확정<\/span>/);
+  });
+});

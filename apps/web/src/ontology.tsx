@@ -28,6 +28,7 @@ import {
   type Draft,
   type ElementKind,
 } from "./ontology-text.ts";
+import { STATUS_CLASS } from "./semantic-text.ts";
 
 type Element = RouteResponse<"ontology">["elements"][number];
 type HistoryLines = RouteResponse<"ontologyHistory">["lines"];
@@ -76,11 +77,11 @@ export function OntologyView({
       {KIND_ORDER.map((kind) => {
         const rows = elements.filter((e) => e.elementKind === kind);
         return (
-          <section key={kind} aria-label={KIND_TEXT[kind]}>
+          <section className="group" key={kind} aria-label={KIND_TEXT[kind]}>
             <h2>{KIND_TEXT[kind]}</h2>
             {rows.length === 0 && <p>{ONTOLOGY_EMPTY}</p>}
             {rows.length > 0 && (
-              <ul>
+              <ul className="line-list">
                 {rows.map((e) => {
                   const act = (label: string, action: OntologyAction) => (
                     <button
@@ -96,7 +97,11 @@ export function OntologyView({
                       <strong>
                         <bdi>{e.name}</bdi>
                       </strong>{" "}
-                      — {STATUS_TEXT[e.status]} · {e.edition}판 · {ORIGIN_TEXT[e.origin]}
+                      —{" "}
+                      <span className={`state ${STATUS_CLASS[e.status]}`}>
+                        {STATUS_TEXT[e.status]}
+                      </span>{" "}
+                      · {e.edition}판 · {ORIGIN_TEXT[e.origin]}
                       <br />
                       <bdi>{ruleSummary(e.rule)}</bdi>
                       <br />
@@ -354,14 +359,16 @@ export function Ontology({ api }: { api: ApiClient }) {
           onHistory={showHistory}
         />
       )}
-      <ChangeForm
-        draft={draft}
-        onDraft={edit}
-        onCheck={check}
-        onApply={() => act({ type: "change", change: changeOf(draft) })}
-        onCancel={() => edit(EMPTY_DRAFT)}
-      />
-      {checked && <p role="status">{checked}</p>}
+      <div className="group">
+        <ChangeForm
+          draft={draft}
+          onDraft={edit}
+          onCheck={check}
+          onApply={() => act({ type: "change", change: changeOf(draft) })}
+          onCancel={() => edit(EMPTY_DRAFT)}
+        />
+        {checked && <p role="status">{checked}</p>}
+      </div>
     </>
   );
 }

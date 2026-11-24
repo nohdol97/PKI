@@ -26,49 +26,74 @@ import {
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const gone = (error: unknown) => error instanceof ApiError && error.status === 404;
 
+/** A notice held with the target it was made for; it is shown only while that target is the one on screen. */
+export const scopedNotice = (
+  held: { id: number; text: string | undefined } | undefined,
+  id: number,
+): string | undefined => (held?.id === id ? held.text : undefined);
+
 /** The record call every button makes: the refusal or failure text it leaves, and the press itself. */
 function useRecord(api: ApiClient, target: FeedbackTarget, onChange: () => void) {
-  const [notice, setNotice] = useState<string>();
-  const press = (kind: FeedbackKind) =>
-    api("feedbackRecord", { target, kind }).then(
+  const [held, setHeld] = useState<{ id: number; text: string | undefined }>();
+  const press = (kind: FeedbackKind) => {
+    const id = target.id;
+    return api("feedbackRecord", { target, kind }).then(
       (r) => {
-        setNotice(r.status === "refused" ? feedbackRefusalText(r.reason) : undefined);
+        setHeld({ id, text: r.status === "refused" ? feedbackRefusalText(r.reason) : undefined });
         onChange();
       },
       (error: unknown) => {
-        setNotice(gone(error) ? FEEDBACK_GONE : `보내지 못했습니다: ${message(error)}`);
+        setHeld({
+          id,
+          text: gone(error) ? FEEDBACK_GONE : `보내지 못했습니다: ${message(error)}`,
+        });
         if (gone(error)) onChange();
       },
     );
-  return { notice, press };
+  };
+  return { notice: scopedNotice(held, target.id), press };
 }
 
+/** The record call of one Insight, shared by the head bar's and the action bar's buttons of its detail pane. */
+export const useInsightRecord = (api: ApiClient, insightId: number, onChange: () => void) =>
+  useRecord(api, { kind: "insight", id: insightId }, onChange);
+
+/**
+ * The Insight's feedback in its detail pane: "확인 완료" in the head bar (part "head"), the other kinds in the action
+ * bar (part "bar"), where the first of them (유용함) is the main action and a refusal or failure is told.
+ */
 export function InsightFeedback({
-  api,
   insight,
-  onChange,
+  record,
+  part,
 }: {
-  api: ApiClient;
   insight: { id: number; summary: string };
-  onChange: () => void;
+  record: ReturnType<typeof useInsightRecord>;
+  part: "head" | "bar";
 }) {
-  const { notice, press } = useRecord(api, { kind: "insight", id: insight.id }, onChange);
+  const { notice, press } = record;
+  const kinds = INSIGHT_FEEDBACK_KINDS.filter(
+    (kind) => (kind === "confirmed") === (part === "head"),
+  );
+  const buttons = kinds.map((kind) => (
+    <button
+      key={kind}
+      type="button"
+      className={part === "head" ? "btn-text" : kind === "useful" ? "btn-primary" : undefined}
+      title={insightHint(kind)}
+      aria-label={feedbackButtonName(kind, insight.summary)}
+      onClick={() => void press(kind)}
+    >
+      {feedbackLabel(kind)}
+    </button>
+  ));
+  if (part === "head") return <>{buttons}</>;
   return (
     <>
-      <div role="group" aria-label={`피드백: ${insight.summary}`}>
-        {INSIGHT_FEEDBACK_KINDS.map((kind) => (
-          <button
-            key={kind}
-            type="button"
-            title={insightHint(kind)}
-            aria-label={feedbackButtonName(kind, insight.summary)}
-            onClick={() => void press(kind)}
-          >
-            {feedbackLabel(kind)}
-          </button>
-        ))}
-      </div>
       {notice && <p role="alert">{notice}</p>}
+      <div className="actions" role="group" aria-label={`피드백: ${insight.summary}`}>
+        {buttons}
+      </div>
     </>
   );
 }
@@ -88,7 +113,7 @@ export function RowFeedback({
   const { notice, press } = useRecord(api, target, onChange);
   return (
     <>
-      <div role="group" aria-label={`교정: ${label}`}>
+      <div className="row-actions" role="group" aria-label={`교정: ${label}`}>
         {rowFeedbackKinds(target.kind).map((kind) => (
           <button
             key={kind}
@@ -140,7 +165,7 @@ export function RecentFeedback({
       {notice && <p role="alert">{notice}</p>}
       {lines?.length === 0 && <p>{FEEDBACK_EMPTY}</p>}
       {lines && lines.length > 0 && (
-        <ul aria-label="최근 피드백 목록">
+        <ul className="plain-list" aria-label="최근 피드백 목록">
           {lines.map((line) => (
             <li key={line.id}>
               <strong>{feedbackLabel(line.kind)}</strong> <bdi>{line.label}</bdi>{" "}

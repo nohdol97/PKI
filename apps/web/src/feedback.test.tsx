@@ -3,7 +3,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ApiClient } from "./api.ts";
-import { RowFeedback } from "./feedback.tsx";
+import { InsightFeedback, RowFeedback, scopedNotice } from "./feedback.tsx";
 
 const api = (() => Promise.reject(new Error("not called"))) as unknown as ApiClient;
 const names = (html: string) =>
@@ -24,5 +24,47 @@ describe("RowFeedback", () => {
       />,
     );
     expect(names(relation)).toEqual(["확인 완료: 인용 5", "잘못된 관계: 인용 5"]);
+  });
+});
+
+// UI01 (R6): the Insight's feedback is split over the detail pane: "확인 완료" is the head bar's action (the
+// mockup's "검토 완료" slot), the other kinds are the action bar, the first of them (유용함) the main one.
+describe("InsightFeedback", () => {
+  const record = { notice: undefined, press: () => Promise.resolve() };
+  const insight = { id: 1, summary: "요약" };
+
+  it("offers only 확인 완료 in the head, with its name unchanged", () => {
+    const head = renderToStaticMarkup(
+      <InsightFeedback insight={insight} record={record} part="head" />,
+    );
+    expect(names(head)).toEqual(["확인 완료: 요약"]);
+    expect(head).not.toContain('role="group"');
+  });
+
+  it("offers the other kinds in a named group, 유용함 first and filled", () => {
+    const bar = renderToStaticMarkup(
+      <InsightFeedback insight={insight} record={record} part="bar" />,
+    );
+    expect(names(bar)).toEqual([
+      "유용함: 요약",
+      "중요함: 요약",
+      "관련 없음: 요약",
+      "이미 알고 있음: 요약",
+      "다시 알리지 않기: 요약",
+    ]);
+    expect(bar).toContain('role="group" aria-label="피드백: 요약"');
+    expect(bar).toMatch(
+      /class="btn-primary"[^>]*aria-label="유용함: 요약"|aria-label="유용함: 요약"[^>]*class="btn-primary"/,
+    );
+  });
+});
+
+// UI01 review A1: a refusal or failure belongs to the Insight it was made for; it never shows under another one.
+describe("scopedNotice", () => {
+  it("shows a held notice only for its own Insight", () => {
+    const held = { id: 1, text: "거절" };
+    expect(scopedNotice(held, 1)).toBe("거절");
+    expect(scopedNotice(held, 2)).toBeUndefined();
+    expect(scopedNotice(undefined, 1)).toBeUndefined();
   });
 });

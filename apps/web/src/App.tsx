@@ -37,13 +37,14 @@ import { Ask } from "./ask.tsx";
 import { useChanges } from "./changes.ts";
 import { Lint } from "./lint.tsx";
 import { Notifications } from "./notifications.tsx";
-import { unreadBadge } from "./notifications-text.ts";
 import { Wiki } from "./wiki.tsx";
 import { importSummaryText, lineErrorText } from "./import-text.ts";
 import { Explore } from "./explore.tsx";
 import { BackupRestore } from "./backup.tsx";
 import { LocalLocations } from "./local-locations.tsx";
 import { NavProvider } from "./nav.tsx";
+import { Icon } from "./icons.tsx";
+import { PaneHead } from "./panes.tsx";
 import { SemanticReview } from "./semantic-review.tsx";
 import { Ontology } from "./ontology.tsx";
 import { MoreButton, usePaged } from "./paged-list.tsx";
@@ -93,26 +94,81 @@ export function App({ api }: { api: ApiClient }) {
     activity: () => <Activity api={api} />,
     settings: () => <Settings api={api} />,
   }[screen];
+  // the screens with a list and a detail draw their own panes, 질문 draws its own pane (the input bar is pinned in
+  // it); the others are one pane under a head bar
+  const split =
+    screen === "home" ||
+    screen === "notifications" ||
+    screen === "wiki" ||
+    screen === "lint" ||
+    screen === "explore";
+  const own = screen === "ask" || screen === "semantic";
   return (
     <NavProvider screen={screen} onScreen={setScreen}>
-      <nav>
-        {(Object.keys(SCREENS) as Screen[]).map((id) => (
-          <button
-            key={id}
-            type="button"
-            aria-current={screen === id ? "page" : undefined}
-            onClick={() => setScreen(id)}
-          >
-            {SCREENS[id]}
-            {id === "notifications" && unreadBadge(changes.unread)}
-          </button>
-        ))}
-      </nav>
-      <main>
-        <h1>{SCREENS[screen]}</h1>
-        {shown()}
-      </main>
+      <div className="app">
+        <div className="side">
+          <div className="wordmark">PKI</div>
+          <nav>
+            {(Object.keys(SCREENS) as Screen[]).map((id) => (
+              <button
+                key={id}
+                type="button"
+                aria-current={screen === id ? "page" : undefined}
+                onClick={() => setScreen(id)}
+              >
+                <Icon name={id} />
+                {SCREENS[id]}
+                {id === "notifications" && changes.unread > 0 && (
+                  <span className="badge">{changes.unread}</span>
+                )}
+              </button>
+            ))}
+          </nav>
+        </div>
+        {split ? (
+          <main className="screen screen-split" data-screen={screen}>
+            {screen === "home" && <h1 className="sr-only">{SCREENS[screen]}</h1>}
+            {shown()}
+          </main>
+        ) : own ? (
+          <main className="screen" data-screen={screen}>
+            {shown()}
+          </main>
+        ) : (
+          <main className="screen" data-screen={screen}>
+            <div className="pane-wide">
+              <PaneHead title={SCREENS[screen]} as="h1" />
+              <div className="pane-body">{shown()}</div>
+            </div>
+          </main>
+        )}
+        <StatusLine api={api} refresh={changes.key} unread={changes.unread} />
+      </div>
     </NavProvider>
+  );
+}
+
+/** The status line (UI01-R3, D3): the backend's own words about each part, and the unread count at the right. */
+function StatusLine({ api, refresh, unread }: { api: ApiClient; refresh: string; unread: number }) {
+  const { data, reload } = useRoute(api, "status");
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) first.current = false;
+    else reload();
+  }, [refresh, reload]);
+  return (
+    <footer className="statusbar">
+      {data && (
+        <>
+          <span className={`state ${data.backend.state === "ready" ? "state-ok" : "state-attn"}`}>
+            {`백엔드 ${componentText(data.backend)}`}
+          </span>
+          <span>{`Provider ${providerStatusText(data.provider).text}`}</span>
+          <span>{`Embedding ${embeddingText(data.embedding)}`}</span>
+        </>
+      )}
+      {unread > 0 && <span className="end">{`읽지 않은 알림 ${unread}건`}</span>}
+    </footer>
   );
 }
 
@@ -165,27 +221,32 @@ function Home({ api, refresh }: { api: ApiClient; refresh: string }) {
   }, [preparing, data, reload]);
   const guidance = data && providerStatusText(data.provider).guidance;
   return (
-    <>
-      <Insights api={api} refresh={refresh} />
-      <h2>상태</h2>
-      <Failure error={error} />
-      {data && (
-        <table>
-          <tbody>
-            {statusRows(data).map(([label, text]) => (
-              <tr key={label}>
-                <th scope="row">{label}</th>
-                <td>{text}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {guidance && <p>{guidance}</p>}
-      {data && ["model-missing", "unavailable"].includes(data.embedding.state) && (
-        <PrepareModel api={api} onStarted={reload} />
-      )}
-    </>
+    <Insights
+      api={api}
+      refresh={refresh}
+      below={
+        <>
+          <h2>상태</h2>
+          <Failure error={error} />
+          {data && (
+            <table>
+              <tbody>
+                {statusRows(data).map(([label, text]) => (
+                  <tr key={label}>
+                    <th scope="row">{label}</th>
+                    <td>{text}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {guidance && <p>{guidance}</p>}
+          {data && ["model-missing", "unavailable"].includes(data.embedding.state) && (
+            <PrepareModel api={api} onStarted={reload} />
+          )}
+        </>
+      }
+    />
   );
 }
 
@@ -349,96 +410,104 @@ function Sources({ api }: { api: ApiClient }) {
   return (
     <>
       <Failure error={connectors.error ?? stored.error ?? error} />
-      <h2>Connector</h2>
-      <ConnectorTable
-        connectors={connectors.data?.connectors ?? []}
-        syncStops={syncStops}
-        onSync={sync}
-        canEnterCredentials={bridge !== undefined}
-        credentialNotes={credentialNotes}
-        onCredentialChange={changeConnectorCredential}
-      />
-      <h2>JSONL 가져오기</h2>
-      <input
-        type="file"
-        aria-label="JSONL 파일 가져오기"
-        accept=".jsonl,application/jsonl,application/x-ndjson"
-        onChange={importFile}
-      />
-      {imported && (
-        <>
-          <p role="status">{importSummaryText(imported)}</p>
-          {imported.errors.length > 0 && (
-            <ul aria-label="거부된 줄">
-              {imported.errors.map((e) => (
-                <li key={e.line}>{lineErrorText(e)}</li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-      <h2>저장된 원본</h2>
-      <form role="search" onSubmit={search}>
+      <div className="group">
+        <h2>Connector</h2>
+        <ConnectorTable
+          connectors={connectors.data?.connectors ?? []}
+          syncStops={syncStops}
+          onSync={sync}
+          canEnterCredentials={bridge !== undefined}
+          credentialNotes={credentialNotes}
+          onCredentialChange={changeConnectorCredential}
+        />
+      </div>
+      <div className="group">
+        <h2>JSONL 가져오기</h2>
         <input
-          type="search"
-          aria-label="검색어"
-          maxLength={200}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          type="file"
+          aria-label="JSONL 파일 가져오기"
+          accept=".jsonl,application/jsonl,application/x-ndjson"
+          onChange={importFile}
         />
-        <button type="submit">검색</button>
-      </form>
-      {deleted && <p role="status">{deleted}</p>}
-      {confirming && (
-        <div role="alertdialog" aria-label="원본 삭제 확인">
-          <p>{deleteConfirmText(confirming.title)}</p>
-          <button type="button" onClick={() => remove(confirming)}>
-            지우기
-          </button>
-          <button type="button" onClick={() => setConfirming(undefined)}>
-            취소
-          </button>
-        </div>
-      )}
-      {stored.loading && !stored.shown && !found && (
-        <p role="status">저장된 원본을 불러오는 중입니다.</p>
-      )}
-      {shown?.length === 0 && <p>{found ? "찾은 원본이 없습니다." : "저장된 원본이 없습니다."}</p>}
-      {shown && shown.length > 0 && (
-        <table>
-          <tbody>
-            {shown.map((s) => (
-              <tr key={s.id}>
-                <td>{s.title}</td>
-                <td>{s.connectorId}</td>
-                <td>{s.namespace ? `${s.namespace} / ${s.externalId}` : s.externalId}</td>
-                <td>
-                  <button
-                    type="button"
-                    aria-label={`${s.title} 삭제`}
-                    onClick={() => {
-                      // one result at a time: the earlier import's or deletion's goes
-                      setImported(undefined);
-                      setDeleted(undefined);
-                      setConfirming(s);
-                    }}
-                  >
-                    삭제
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {!found && (
-        <MoreButton
-          next={stored.shown?.next ?? null}
-          loading={stored.loading}
-          onMore={stored.more}
-          label="원본"
-        />
-      )}
+        {imported && (
+          <>
+            <p role="status">{importSummaryText(imported)}</p>
+            {imported.errors.length > 0 && (
+              <ul aria-label="거부된 줄">
+                {imported.errors.map((e) => (
+                  <li key={e.line}>{lineErrorText(e)}</li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
+      <div className="group">
+        <h2>저장된 원본</h2>
+        <form role="search" onSubmit={search}>
+          <input
+            type="search"
+            aria-label="검색어"
+            maxLength={200}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <button type="submit">검색</button>
+        </form>
+        {deleted && <p role="status">{deleted}</p>}
+        {confirming && (
+          <div role="alertdialog" aria-label="원본 삭제 확인">
+            <p>{deleteConfirmText(confirming.title)}</p>
+            <button type="button" onClick={() => remove(confirming)}>
+              지우기
+            </button>
+            <button type="button" onClick={() => setConfirming(undefined)}>
+              취소
+            </button>
+          </div>
+        )}
+        {stored.loading && !stored.shown && !found && (
+          <p role="status">저장된 원본을 불러오는 중입니다.</p>
+        )}
+        {shown?.length === 0 && (
+          <p>{found ? "찾은 원본이 없습니다." : "저장된 원본이 없습니다."}</p>
+        )}
+        {shown && shown.length > 0 && (
+          <table>
+            <tbody>
+              {shown.map((s) => (
+                <tr key={s.id}>
+                  <td>{s.title}</td>
+                  <td>{s.connectorId}</td>
+                  <td>{s.namespace ? `${s.namespace} / ${s.externalId}` : s.externalId}</td>
+                  <td>
+                    <button
+                      type="button"
+                      aria-label={`${s.title} 삭제`}
+                      onClick={() => {
+                        // one result at a time: the earlier import's or deletion's goes
+                        setImported(undefined);
+                        setDeleted(undefined);
+                        setConfirming(s);
+                      }}
+                    >
+                      삭제
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!found && (
+          <MoreButton
+            next={stored.shown?.next ?? null}
+            loading={stored.loading}
+            onMore={stored.more}
+            label="원본"
+          />
+        )}
+      </div>
     </>
   );
 }
@@ -467,53 +536,61 @@ function Activity({ api }: { api: ApiClient }) {
   const status = useRoute(api, "status");
   return (
     <>
-      <JobsArea api={api} onRefresh={status.reload} />
-      <h2>무효화 기록</h2>
-      <Failure error={status.error} />
-      {status.data && <p>{invalidationText(status.data.invalidations)}</p>}
-      <h2>Provider 호출 기록</h2>
-      <Failure error={error} />
-      {data?.calls.length === 0 && <p>Provider 호출 기록이 없습니다.</p>}
-      {data && data.calls.length > 0 && (
-        <table aria-label="Provider 호출 기록">
-          <thead>
-            <tr>
-              <th>시각</th>
-              <th>Provider</th>
-              <th>전송</th>
-              <th>목적지</th>
-              <th>작업</th>
-              <th>등급</th>
-              <th>정책 버전</th>
-              <th>결과</th>
-              <th>사유</th>
-              <th>소요(ms)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.calls.map((c) => (
-              <tr key={`${c.requestId}/${c.attempt}`}>
-                <td>{c.createdAt}</td>
-                <td>{c.provider}</td>
-                <td>{EGRESS_LABEL[c.egress]}</td>
-                <td>{c.destination ?? NONE}</td>
-                <td>{c.taskKind}</td>
-                <td>{c.classification}</td>
-                <td>{c.policyVersion ?? NONE}</td>
-                <td>{outcomeText(c.outcome)}</td>
-                <td>{c.reason ?? NONE}</td>
-                <td>{c.durationMs ?? NONE}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <MoreButton
-        next={calls.shown?.next ?? null}
-        loading={calls.loading}
-        onMore={calls.more}
-        label="Provider 호출 기록"
-      />
+      <div className="group">
+        <JobsArea api={api} onRefresh={status.reload} />
+      </div>
+      <div className="group">
+        <h2>무효화 기록</h2>
+        <Failure error={status.error} />
+        {status.data && <p>{invalidationText(status.data.invalidations)}</p>}
+      </div>
+      <div className="group">
+        <h2>Provider 호출 기록</h2>
+        <Failure error={error} />
+        {data?.calls.length === 0 && <p>Provider 호출 기록이 없습니다.</p>}
+        {data && data.calls.length > 0 && (
+          <div className="scroll-x">
+            <table aria-label="Provider 호출 기록">
+              <thead>
+                <tr>
+                  <th>시각</th>
+                  <th>Provider</th>
+                  <th>전송</th>
+                  <th>목적지</th>
+                  <th>작업</th>
+                  <th>등급</th>
+                  <th>정책 버전</th>
+                  <th>결과</th>
+                  <th>사유</th>
+                  <th>소요(ms)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.calls.map((c) => (
+                  <tr key={`${c.requestId}/${c.attempt}`}>
+                    <td>{c.createdAt}</td>
+                    <td>{c.provider}</td>
+                    <td>{EGRESS_LABEL[c.egress]}</td>
+                    <td>{c.destination ?? NONE}</td>
+                    <td>{c.taskKind}</td>
+                    <td>{c.classification}</td>
+                    <td>{c.policyVersion ?? NONE}</td>
+                    <td>{outcomeText(c.outcome)}</td>
+                    <td>{c.reason ?? NONE}</td>
+                    <td>{c.durationMs ?? NONE}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <MoreButton
+          next={calls.shown?.next ?? null}
+          loading={calls.loading}
+          onMore={calls.more}
+          label="Provider 호출 기록"
+        />
+      </div>
     </>
   );
 }
@@ -526,32 +603,44 @@ function Settings({ api }: { api: ApiClient }) {
     <>
       <Failure error={error} />
       {data && (
-        <table>
-          <tbody>
-            <tr>
-              <th scope="row">데이터 폴더</th>
-              <td>{data.dataDirectory}</td>
-            </tr>
-            <tr>
-              <th scope="row">스키마 버전</th>
-              <td>{data.schemaVersion}</td>
-            </tr>
-            <tr>
-              <th scope="row">데이터베이스 암호화</th>
-              <td>{ENCRYPTION_LABEL[data.databaseEncryption]}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="group">
+          <table>
+            <tbody>
+              <tr>
+                <th scope="row">데이터 폴더</th>
+                <td>{data.dataDirectory}</td>
+              </tr>
+              <tr>
+                <th scope="row">스키마 버전</th>
+                <td>{data.schemaVersion}</td>
+              </tr>
+              <tr>
+                <th scope="row">데이터베이스 암호화</th>
+                <td>{ENCRYPTION_LABEL[data.databaseEncryption]}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       )}
-      {data && <OpenAICompatible api={api} settings={data} reload={reload} />}
-      <Providers api={api} />
-      <Consents api={api} />
-      <ConnectionTest api={api} />
-      <BackgroundExecution api={api} />
-      <InsightInterpretSetting api={api} />
-      <FeedbackLearnedSetting api={api} />
-      <LocalLocations api={api} />
-      <BackupRestore api={api} />
+      {data && (
+        <div className="group">
+          <OpenAICompatible api={api} settings={data} reload={reload} />
+        </div>
+      )}
+      {[
+        Providers,
+        Consents,
+        ConnectionTest,
+        BackgroundExecution,
+        InsightInterpretSetting,
+        FeedbackLearnedSetting,
+        LocalLocations,
+        BackupRestore,
+      ].map((Section, i) => (
+        <div className="group" key={i}>
+          <Section api={api} />
+        </div>
+      ))}
     </>
   );
 }

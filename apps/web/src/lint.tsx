@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import { SOURCE_GONE } from "./evidence-text.ts";
 import { SourceView, useFocusOn } from "./evidence-view.tsx";
+import { DETAIL_HINT, DetailPane, PaneHead, Props, Row } from "./panes.tsx";
 import {
   countsText,
   lastRunText,
@@ -31,6 +32,17 @@ type Finding = Lint["findings"][number];
 const RULE_ORDER = ["synonym", "stale", "overdue-work", "missing-link"] as const;
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const gone = (error: unknown) => error instanceof ApiError && error.status === 404;
+/** The dot colour of a finding's status; the word beside it says the same (UI01-R7). */
+const STATE_CLASS: Readonly<Record<string, string>> = {
+  open: "state-attn",
+  oscillating: "state-attn",
+  accepted: "state-ok",
+  resolved: "state-ok",
+  dismissed: "state-none",
+};
+/** The findings in the order the rows are drawn: grouped by rule, the API's order inside a rule. */
+export const drawnOrder = <T extends { rule: string }>(findings: readonly T[]): T[] =>
+  RULE_ORDER.flatMap((rule) => findings.filter((f) => f.rule === rule));
 const heading = (f: Finding) => f.targets.map((t) => t.label).join(" ↔ ");
 
 export function Lint({ api }: { api: ApiClient }) {
@@ -40,6 +52,7 @@ export function Lint({ api }: { api: ApiClient }) {
   const [types, setTypes] = useState<string[]>([]);
   const [picked, setPicked] = useState<Record<number, string>>({});
   const [sourceOpens, setSourceOpens] = useState(0);
+  const [chosen, setChosen] = useState<number>();
   const sourceHeadingRef = useFocusOn(sourceOpens, source !== undefined);
   const fail = (e: unknown) => setNotice(`불러오지 못했습니다: ${message(e)}`);
 
@@ -78,105 +91,150 @@ export function Lint({ api }: { api: ApiClient }) {
       (e: unknown) => (gone(e) ? setNotice(SOURCE_GONE) : fail(e)),
     );
 
+  const findings = drawnOrder(lint?.findings ?? []);
+  const current = findings.find((f) => f.id === chosen);
+  const at = current ? findings.indexOf(current) : -1;
+  const stateOf = (f: Finding) => (
+    <strong className={`state ${STATE_CLASS[f.status] ?? "state-none"}`}>
+      {statusText(f.status)}
+    </strong>
+  );
+  const open = current && (current.status === "open" || current.status === "oscillating");
   return (
     <>
-      {notice && <p role="alert">{notice}</p>}
-      <p>{LINT_NOT_FACT}</p>
-      {lint && <p role="status">{lastRunText(lint.lastRun, lint.dirty)}</p>}
-      {lint && lint.findings.length === 0 && <p>{LINT_EMPTY}</p>}
-      {lint &&
-        RULE_ORDER.map((rule) => {
-          const mine = lint.findings.filter((f) => f.rule === rule);
-          const counts = lint.counts.find((c) => c.rule === rule);
-          return (
-            <section key={rule} aria-label={`${ruleText(rule)} 종류`}>
-              <h2>{ruleText(rule)}</h2>
-              {counts && <p>{countsText(counts)}</p>}
-              <p>{ruleHint(rule)}</p>
-              {mine.length > 0 && (
-                <ul aria-label={ruleText(rule)}>
-                  {mine.map((f) => (
-                    <li key={f.id}>
-                      <bdi>{heading(f)}</bdi> <strong>{statusText(f.status)}</strong>
-                      {f.status === "oscillating" && <> {LINT_OSCILLATING}</>}{" "}
-                      {f.opinion && <span>{opinionText(f.opinion)} </span>}
-                      {f.evidence.length === 0 ? (
-                        <span>{LINT_NO_EVIDENCE}</span>
-                      ) : (
-                        f.evidence.map((id, i) => (
-                          <button
-                            key={id}
-                            type="button"
-                            aria-label={`근거 보기 ${i + 1}: ${heading(f)}`}
-                            onClick={() => void openEvidence(id)}
-                          >
-                            근거 보기 {i + 1}
-                          </button>
-                        ))
-                      )}
-                      {(f.status === "open" || f.status === "oscillating") && (
-                        <>
-                          {f.rule === "missing-link" && (
-                            <label>
-                              {LINT_RELATION_TYPE}
-                              <select
-                                aria-label={`${LINT_RELATION_TYPE}: ${heading(f)}`}
-                                value={picked[f.id] ?? ""}
-                                onChange={(e) => setPicked({ ...picked, [f.id]: e.target.value })}
-                              >
-                                <option value="">
-                                  {types.length === 0 ? LINT_NO_TYPES : LINT_PICK_TYPE}
-                                </option>
-                                {types.map((t) => (
-                                  <option key={t} value={t}>
-                                    {t}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          )}
-                          {f.rule !== "overdue-work" && (
-                            <button
-                              type="button"
-                              aria-label={`받아들이기: ${heading(f)}`}
-                              disabled={f.rule === "missing-link" && !picked[f.id]}
-                              onClick={() => void decide(f, "accept")}
-                            >
-                              받아들이기
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            aria-label={`닫기: ${heading(f)}`}
-                            onClick={() => void decide(f, "dismiss")}
-                          >
-                            닫기
-                          </button>
-                        </>
-                      )}
-                      {f.status === "dismissed" && (
-                        <button
-                          type="button"
-                          aria-label={`다시 열기: ${heading(f)}`}
-                          onClick={() => void decide(f, "reopen")}
-                        >
-                          다시 열기
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+      <div className="pane-list">
+        <PaneHead title="점검" as="h1" count={lint ? findings.length : undefined} />
+        <div className="pane-body">
+          {notice && <p role="alert">{notice}</p>}
+          <p>{LINT_NOT_FACT}</p>
+          {lint && <p role="status">{lastRunText(lint.lastRun, lint.dirty)}</p>}
+          {lint && lint.findings.length === 0 && <p>{LINT_EMPTY}</p>}
+          {lint &&
+            RULE_ORDER.map((rule) => {
+              const mine = lint.findings.filter((f) => f.rule === rule);
+              const counts = lint.counts.find((c) => c.rule === rule);
+              return (
+                <section key={rule} aria-label={`${ruleText(rule)} 종류`}>
+                  <h3 className="group-label">{ruleText(rule)}</h3>
+                  {counts && <p className="meta">{countsText(counts)}</p>}
+                  <p className="meta">{ruleHint(rule)}</p>
+                  {mine.length > 0 && (
+                    <ul className="rows" aria-label={ruleText(rule)}>
+                      {mine.map((f) => (
+                        <li key={f.id}>
+                          <Row
+                            title={<bdi>{heading(f)}</bdi>}
+                            meta={stateOf(f)}
+                            selected={f.id === chosen}
+                            onClick={() => (setChosen(f.id), setSource(undefined))}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              );
+            })}
+        </div>
+      </div>
+      {current ? (
+        <DetailPane
+          label="발견 상세"
+          head={{ title: "발견", count: `${at + 1} / ${findings.length}` }}
+          actions={
+            <div className="actions" role="group" aria-label={`조치: ${heading(current)}`}>
+              {open && current.rule === "missing-link" && (
+                <label>
+                  {LINT_RELATION_TYPE}
+                  <select
+                    aria-label={`${LINT_RELATION_TYPE}: ${heading(current)}`}
+                    value={picked[current.id] ?? ""}
+                    onChange={(e) => setPicked({ ...picked, [current.id]: e.target.value })}
+                  >
+                    <option value="">{types.length === 0 ? LINT_NO_TYPES : LINT_PICK_TYPE}</option>
+                    {types.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
-            </section>
-          );
-        })}
-      {source && (
-        <section aria-labelledby="lint-source-heading">
-          <h3 id="lint-source-heading" tabIndex={-1} ref={sourceHeadingRef}>
-            원본 보기
+              {open && current.rule !== "overdue-work" && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  aria-label={`받아들이기: ${heading(current)}`}
+                  disabled={current.rule === "missing-link" && !picked[current.id]}
+                  onClick={() => void decide(current, "accept")}
+                >
+                  받아들이기
+                </button>
+              )}
+              {open && (
+                <button
+                  type="button"
+                  aria-label={`닫기: ${heading(current)}`}
+                  onClick={() => void decide(current, "dismiss")}
+                >
+                  닫기
+                </button>
+              )}
+              {current.status === "dismissed" && (
+                <button
+                  type="button"
+                  aria-label={`다시 열기: ${heading(current)}`}
+                  onClick={() => void decide(current, "reopen")}
+                >
+                  다시 열기
+                </button>
+              )}
+            </div>
+          }
+        >
+          <h3 className="detail-title">
+            <bdi>{heading(current)}</bdi>
           </h3>
-          <SourceView source={source} />
-        </section>
+          <Props
+            items={[
+              ["종류", ruleText(current.rule)],
+              ["상태", stateOf(current)],
+            ]}
+          />
+          {current.status === "oscillating" && <p>{LINT_OSCILLATING}</p>}
+          {current.opinion && <p>{opinionText(current.opinion)}</p>}
+          <div className="sec">
+            <h4>근거</h4>
+            {current.evidence.length === 0 ? (
+              <p>{LINT_NO_EVIDENCE}</p>
+            ) : (
+              <p className="row-actions">
+                {current.evidence.map((id, i) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-label={`근거 보기 ${i + 1}: ${heading(current)}`}
+                    onClick={() => void openEvidence(id)}
+                  >
+                    근거 보기 {i + 1}
+                  </button>
+                ))}
+              </p>
+            )}
+          </div>
+          {source && (
+            <section className="sec" aria-labelledby="lint-source-heading">
+              <h3 id="lint-source-heading" tabIndex={-1} ref={sourceHeadingRef}>
+                원본 보기
+              </h3>
+              <SourceView source={source} />
+            </section>
+          )}
+        </DetailPane>
+      ) : (
+        <DetailPane label="발견 상세" head={{ title: "발견" }}>
+          <p className="hint">{DETAIL_HINT}</p>
+        </DetailPane>
       )}
     </>
   );

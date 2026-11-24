@@ -315,3 +315,38 @@ describe("지식 검토 (X02-C2c)", () => {
     expect(admit(busy, async () => "again").accepted).toBe(true);
   });
 });
+
+// UI01-C8, R8, D18: 지식 검토 is one wide pane: the head bar holds the screen's h1 and the existing state select, the
+// three lists are group boxes, and a row's status is a colour dot with its word.
+describe("지식 검토 화면 구성 (UI01)", () => {
+  const out = view(
+    {
+      list: list("candidate"),
+      conflicts: noConflicts,
+      pairs: [],
+      pages: 1,
+    } as unknown as Review,
+    "all",
+  );
+
+  it("has the h1 and the state select, still labelled 상태, in the head bar", () => {
+    const head = /<div class="pane-head">([\s\S]*?)<div class="pane-body">/.exec(out)?.[1] ?? "";
+    expect(head).toMatch(/<h1[^>]*>지식 검토<\/h1>/);
+    expect(head).toMatch(/<label[^>]*>[\s\S]*상태[\s\S]*<select/);
+    expect(out.match(/<select/g)).toHaveLength(1);
+  });
+
+  it("sets each line's words apart from its action buttons, which come after them", () => {
+    const line = /<li><span class="line-text">([\s\S]*?)<\/span><span>/.exec(out)?.[1] ?? "";
+    expect(line).toContain("항목");
+    expect(line).not.toContain("<button");
+    expect(out).toMatch(/<\/span><span><button[^>]*aria-label="승인: /);
+  });
+
+  it("puts the lists in three group boxes and shows a row's status as a dot with its word", () => {
+    expect(out.match(/class="group"/g)).toHaveLength(3);
+    expect(out).toContain('aria-label="지식 목록"');
+    expect(out).toMatch(/<span class="state state-warn">후보<\/span>/);
+    expect(out).toMatch(/<span class="state state-ok">확정<\/span>/);
+  });
+});

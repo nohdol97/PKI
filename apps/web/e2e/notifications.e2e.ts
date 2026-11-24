@@ -59,8 +59,22 @@ test("notifications.e2e: read a card, open its evidence, snooze one, read the su
   await expect(feed).toHaveCount(2);
   const first = feed.filter({ hasText: `${FIRST} 요약` });
   await expect(first.getByText("추론", { exact: true })).toBeVisible();
-  await expect(first).toContainText(`${FIRST} 이유`);
-  await expect(first).toContainText(`${FIRST} 줄`);
+  // choosing a row shows the Insight, the reason and the fact line in the detail pane to its right (UI01-C8)
+  const detail = page.getByRole("region", { name: "Insight 상세" });
+  await first.getByRole("button").click();
+  await expect(first.getByRole("button")).toHaveAttribute("aria-current", "true");
+  await expect(detail).toContainText(`${FIRST} 이유`);
+  await expect(detail).toContainText(`${FIRST} 줄`);
+  const [listBox, detailBox] = [
+    await page.getByRole("list", { name: "알림 피드" }).boundingBox(),
+    await detail.boundingBox(),
+  ];
+  expect(detailBox?.x).toBeGreaterThanOrEqual((listBox?.x ?? 0) + (listBox?.width ?? 0));
+
+  // snoozing the first (its action is in the bar of the detail pane) leaves the feed, and the timeline keeps
+  // it as "다시 알림 예정"
+  await detail.getByRole("button", { name: `다시 알림 1시간: ${FIRST} 요약` }).click();
+  await expect(feed).toHaveCount(1);
 
   // the second one's evidence opens in the source view the other screens use
   const second = feed.filter({ hasText: `${SECOND} 요약` });
@@ -71,9 +85,6 @@ test("notifications.e2e: read a card, open its evidence, snooze one, read the su
     `${SECOND}의 본문`,
   );
 
-  // snoozing the first leaves the feed, and the timeline keeps it as "다시 알림 예정"
-  await first.getByRole("button", { name: `다시 알림 1시간: ${FIRST} 요약` }).click();
-  await expect(feed).toHaveCount(1);
   await page.getByRole("button", { name: "타임라인" }).click();
   const line = page
     .getByRole("list", { name: "알림 타임라인" })

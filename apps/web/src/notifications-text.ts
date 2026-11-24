@@ -49,5 +49,3 @@ export function wayText(line: Pick<NotificationLine, "status" | "reason" | "notB
       return "닫음";
   }
 }
-
-export const unreadBadge = (n: number): string => (n > 0 ? ` (${n})` : "");
