@@ -201,6 +201,23 @@ function columnNames(valueType: AnalyticalValueType, stored: string): string[] {
   }
 }
 
+const WORD_CHAR = /[\p{L}\p{N}_]/u;
+const UNSPACED_SCRIPT = /[\p{Script=Hangul}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const wordChar = (c: string | undefined): boolean =>
+  c !== undefined && WORD_CHAR.test(c) && !UNSPACED_SCRIPT.test(c);
+
+/** P3D-R1: `name` stands in `quoted` at least once with neither edge glued to a word character of the quote. */
+function namedAtBoundary(quoted: string, name: string): boolean {
+  const first = [...name][0];
+  const last = [...name].at(-1);
+  for (let at = quoted.indexOf(name); at !== -1; at = quoted.indexOf(name, at + 1)) {
+    const before = [...quoted.slice(0, at)].at(-1);
+    const after = [...quoted.slice(at + name.length)][0];
+    if (!(wordChar(first) && wordChar(before)) && !(wordChar(last) && wordChar(after))) return true;
+  }
+  return false;
+}
+
 /** The context tag of an entry: trimmed, null when empty. */
 const tagOf = (raw: string | null | undefined): string | null => raw?.trim() || null;
 
@@ -547,7 +564,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         continue;
       }
       // S03-R7: an analytical value is stored normalized; a unit or version is a span of the quote; a value
-      // naming columns is the answer's explicit only when the quote holds every column name
+      // naming columns is the answer's explicit only when the quote holds every column name at a word boundary
       let stored = value;
       let epistemic = fact.epistemic;
       const quotedMax = QUOTED_TEXT_FACT_MAX[fact.kind];
@@ -566,7 +583,7 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         const valueType = rule.valueType as AnalyticalValueType;
         stored = normalizeValue(valueType, value) as string; // valueFits said it is one
         const quoted = normalizeColumnName(fact.quote);
-        if (!columnNames(valueType, stored).every((name) => quoted.includes(name))) {
+        if (!columnNames(valueType, stored).every((name) => namedAtBoundary(quoted, name))) {
           epistemic = "hypothesis";
         }
       }

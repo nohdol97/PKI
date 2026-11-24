@@ -93,11 +93,12 @@ function targetsOf(tx: SqlDriver, itemId: number, seen?: Seen): number[] {
   return objectsOf(tx, itemId, "MEASURED_ON", seen);
 }
 
-/** A Dataset bound to a table of a source that still has a version no tombstone covers. */
+/** A live Dataset item (P3D-R3) bound to a table of a source that still has a version no tombstone covers. */
 const bound = (tx: SqlDriver, datasetId: number, seen?: Seen): boolean =>
   tx
     .all(
-      `SELECT t.id FROM dataset_tables t WHERE t.item_id = ? AND EXISTS (
+      `SELECT t.id FROM dataset_tables t WHERE t.item_id = ?
+       AND EXISTS (SELECT 1 FROM items WHERE id = t.item_id AND ${LIVE}) AND EXISTS (
        SELECT 1 FROM source_versions v WHERE v.source_id = t.source_id
           AND NOT EXISTS (SELECT 1 FROM tombstones x WHERE x.source_id = v.source_id AND x.covers_version >= v.version))`,
       [datasetId],
@@ -348,6 +349,25 @@ export function judgePathCut(
   if (waitingItems(tx).has(ends.subjectId)) return;
   const basis = tableBasis(tx, ends.objectId);
   for (const fact of standing) lose(tx, fact.id, "data-basis-lost", basis, at);
+}
+
+/**
+ * A user action applied to an item (P3D-R4, seat ②): the item itself and each subject of a live relation that
+ * points at it get the cut judgement with this item as the object. Only the id is taken; no type is read here.
+ */
+export function judgeItemAction(tx: SqlDriver, itemId: number, at?: string): void {
+  if (!anyTable(tx)) return;
+  const subjects = tx
+    .all(
+      `SELECT DISTINCT subject_id FROM relations
+        WHERE object_id = ? AND type IN ('MEASURED_ON', 'JOIN_LEFT', 'JOIN_RIGHT') AND ${LIVE}
+        ORDER BY subject_id`,
+      [itemId],
+    )
+    .map((r) => r.subject_id as number);
+  for (const subjectId of new Set([itemId, ...subjects])) {
+    judgePathCut(tx, { subjectId, objectId: itemId }, at);
+  }
 }
 
 /**

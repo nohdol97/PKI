@@ -81,6 +81,7 @@
 | [specs/2026-11-24-H03C2F-runner-followups.md](specs/2026-11-24-H03C2F-runner-followups.md) | H03-C2 측정 실행기 후속 묶음(H03C2F, #296): 12건을 코드와 대조해 분류하고, 유실·중복을 근거 줄 수로 세기, 실패한 추출을 표본에서 빼기, 유휴 때 남은 작업 수와 macOS RSS 주의 적기, 재개를 새 시도로만 보기, `unverified`와 검사기 보강, 신호를 받았을 때의 뒷정리, 결과 파일 덮어쓰기는 `--force`로만. 추적 중인 결과 파일은 다시 만들지 않음 | 확정(잠정 결정 포함) |
 | [reviews/README.md](reviews/README.md) | 단계(Phase 0~7) 완료 Gate 검토 문서 색인: 에픽 #2~#9의 완료 기준마다 머지된 PR·시험·문서 근거와 판정(증거 있음·미검증·증거 없음)을 적었다. 어느 Phase도 통과로 선언하지 않는다 | 2026-11-24 검토(origin/main `80a7962b` 기준) |
 | [specs/2026-11-24-A11Y-accessibility-audit.md](specs/2026-11-24-A11Y-accessibility-audit.md) | 접근성 자동 점검(A11Y, #34·#308): 메뉴의 열한 화면과 근거를 연 탐색 화면을 `@axe-core/playwright`로 WCAG 2.1 A·AA 검사(`serious`·`critical` 0건), 키보드만으로 가는 탐색 흐름 하나. 다른 묶음이 고치는 네 화면 파일의 위반은 줄 단위 예외로 미룸. 화면 낭독기·Windows·설치본은 미검증 | 확정 |
+| [specs/2026-11-24-P3D-pending-decisions.md](specs/2026-11-24-P3D-pending-decisions.md) | Phase 3 결정 대기 묶음(P3D, #218·#209): 추출의 열 이름 대조를 부분 문자열에서 낱말 경계로(열 `id`가 "valid" 안에서 맞지 않음, 한글 조사는 경계로 봄), 기각되거나 물린 Dataset 항목을 승격 조건의 실제 표로 치지 않고 항목의 기각을 "표를 잃음" 판정의 자리로 더함. S03-R7·R14·R16의 문장을 함께 고침. 마이그레이션·계약 변경 없음 | 확정(잠정 결정 포함) |
 
 ## 동작 방식
 
