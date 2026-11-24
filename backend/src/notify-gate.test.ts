@@ -157,6 +157,17 @@ describe("notify.gate: the user's feedback is read before every delivery (P03 ha
     expect(states()).toEqual(["digest/cancelled"]);
   });
 
+  it("an irrelevant mark that arrives after the line was queued withdraws it at the flush, not down to the digest", () => {
+    const a = seedInsight(db, { name: "하나" });
+    notifyNow(db, "scan", AT);
+    expect(states()).toEqual(["sent/queued"]);
+
+    feedback(a.insightId, "irrelevant");
+
+    expect(flush()).toEqual([]);
+    expect(states()).toEqual(["withdrawn/cancelled"]);
+  });
+
   it("a muted line that was deferred does not come back to the feed", () => {
     const a = seedInsight(db, { name: "하나" });
     notifyNow(db, "scan", AT);
@@ -180,7 +191,7 @@ describe("notify.gate ③: an Insight whose end item holds a fact from a refused
   };
 
   /** The Insight's own lineage stays on an allowed source; its X item gains a fact quoted from a refused one. */
-  function hideEndItem(xItemId: number) {
+  function hideEndItem(itemId: number) {
     const saved = saveSourceRecord(db, "c1", {
       externalId: "secret",
       title: "제목 secret",
@@ -190,7 +201,7 @@ describe("notify.gate ③: an Insight whose end item holds a fact from a refused
     if (saved.status !== "created") throw new Error(saved.status);
     const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
     const fact = saveFact(db, {
-      itemId: xItemId,
+      itemId,
       kind: "target_date",
       value: "2026-12-10",
       epistemic: "explicit",
@@ -207,30 +218,37 @@ describe("notify.gate ③: an Insight whose end item holds a fact from a refused
     });
   }
 
-  it("withdraws the line at the scan, sends nothing and counts nothing unread", () => {
-    const { key } = seedInsight(db, { name: "하나" });
-    hideEndItem(key.xItemId);
-    const registry = createProductRegistry({ policy: refusing });
+  it.each(["xItemId", "yItemId"] as const)(
+    "withdraws the line at the scan when the %s end is hidden, sends nothing and counts nothing unread",
+    (end) => {
+      const { key } = seedInsight(db, { name: "하나" });
+      hideEndItem(key[end]);
+      const registry = createProductRegistry({ policy: refusing });
 
-    notifyNow(db, "scan", AT, { registry });
+      notifyNow(db, "scan", AT, { registry });
 
-    expect(states()).toEqual(["withdrawn/none"]);
-    expect(flush(registry)).toEqual([]);
-    expect(unreadCount(db, registry)).toBe(0);
-  });
+      expect(states()).toEqual(["withdrawn/none"]);
+      expect(flush(registry)).toEqual([]);
+      expect(unreadCount(db, registry)).toBe(0);
+    },
+  );
 
-  it("stops counting a sent line once its end item is hidden, and sends nothing", () => {
-    const { key } = seedInsight(db, { name: "하나" });
-    const registry = createProductRegistry({ policy: refusing });
-    notifyNow(db, "scan", AT, { registry });
-    expect(states()).toEqual(["sent/queued"]);
-    expect(unreadCount(db, registry)).toBe(1);
+  it.each(["xItemId", "yItemId"] as const)(
+    "stops counting a sent line once its %s end is hidden, and sends nothing",
+    (end) => {
+      const { key } = seedInsight(db, { name: "하나" });
+      const registry = createProductRegistry({ policy: refusing });
+      notifyNow(db, "scan", AT, { registry });
+      expect(states()).toEqual(["sent/queued"]);
+      expect(unreadCount(db, registry)).toBe(1);
 
-    hideEndItem(key.xItemId);
+      hideEndItem(key[end]);
 
-    expect(unreadCount(db, registry)).toBe(0);
-    expect(flush(registry)).toEqual([]);
-  });
+      expect(unreadCount(db, registry)).toBe(0);
+      expect(flush(registry)).toEqual([]);
+      expect(states()).toEqual(["withdrawn/cancelled"]);
+    },
+  );
 
   it("still sends an Insight whose end items are all shown", () => {
     seedInsight(db, { name: "하나" });
