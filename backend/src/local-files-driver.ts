@@ -6,6 +6,7 @@
 // the periodic sync and the next full walk give the same result.
 import { watch as fsWatch } from "node:fs";
 import { closeLocation, listLocations, type LocalLocation, type SqlDriver } from "@pki/storage";
+import { clearHaltPending, haltPending } from "./ledger-boot.ts";
 import type { LocalRevoke } from "./local-revoke.ts";
 
 export interface Watcher {
@@ -121,11 +122,15 @@ export function createLocalFilesDriver(options: LocalFilesDriverOptions): LocalF
 
   return {
     start(restored) {
-      if (restored) {
-        // before any sync is registered: the restored rows are `active`, the folders may be revoked ones
-        for (const location of listLocations(db)) {
-          if (isReadable(location)) closeLocation(db, location.id, "paused", "restored");
-        }
+      if (restored || haltPending(db)) {
+        // before any sync is registered: the restored rows are `active`, the folders may be revoked ones.
+        // The halt and the end of the pending mark are one commit: a crash keeps the mark (RDF-R3)
+        db.transaction(() => {
+          for (const location of listLocations(db)) {
+            if (isReadable(location)) closeLocation(db, location.id, "paused", "restored");
+          }
+          clearHaltPending(db);
+        });
       }
       options.revoke.resume();
       if (listLocations(db).some(isRead)) options.registerSync();
