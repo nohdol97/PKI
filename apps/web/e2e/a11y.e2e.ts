@@ -22,7 +22,7 @@ const HELD_SCREENS = ["홈", "알림", "위키", "점검"];
 type ScanException = { screen: string; rule: string; selector: string; reason: string };
 const EXCEPTIONS: ScanException[] = [];
 
-// The nine screens of stack A and the readiness hint that shows the screen's data; 알림 is scanned on stack B.
+// The ten screens of stack A and the readiness hint that shows the screen's data; 알림 is scanned on stack B.
 const STACK_A: { name: string; ready: (page: Page) => Locator }[] = [
   {
     name: "홈",
@@ -132,16 +132,30 @@ async function scan(page: Page, screen: string, matched: Set<ScanException>): Pr
 const describeFound = (found: Found[]) =>
   found.map((f) => `${f.screen} | ${f.impact} | ${f.rule} | ${f.selector} | ${f.help}`);
 
+// Counts the `/api/` requests that are out, from the call on: a screen's secondary reads (connector list,
+// the activity sections, the eight settings sections) go out on their own requests after its readiness hint.
+function trackApiRequests(page: Page): () => number {
+  let out = 0;
+  const isApi = (url: string) => new URL(url).pathname.startsWith("/api/");
+  page.on("request", (r) => void (isApi(r.url()) && (out += 1)));
+  page.on("requestfinished", (r) => void (isApi(r.url()) && (out -= 1)));
+  page.on("requestfailed", (r) => void (isApi(r.url()) && (out -= 1)));
+  return () => out;
+}
+
 async function scanScreens(
   page: Page,
   screens: { name: string; ready: (p: Page) => Locator }[],
   matched: Set<ScanException>,
+  apiOut: () => number,
 ) {
   const nav = page.getByRole("navigation");
   const leftover: Found[] = [];
   for (const s of screens) {
-    await nav.getByRole("button", { name: s.name, exact: true }).click();
+    // the name starts with the screen's: the 알림 button also carries its unread count
+    await nav.getByRole("button", { name: new RegExp(`^${s.name}`) }).click();
     await expect(s.ready(page)).toBeVisible();
+    await expect.poll(apiOut, { message: `${s.name}: /api/ requests still out` }).toBe(0);
     leftover.push(...(await scan(page, s.name, matched)));
   }
   return leftover;
@@ -161,9 +175,10 @@ test("a11y.e2e: ten screens and the opened evidence source have no serious or cr
   const stack = await startStack(K02_SEED, []);
   try {
     const matched = new Set<ScanException>();
+    const apiOut = trackApiRequests(page);
     await page.goto(stack.url);
-    expect(await page.getByRole("navigation").getByRole("button").count()).toBe(MENU_LENGTH);
-    const leftover = await scanScreens(page, STACK_A, matched);
+    await expect(page.getByRole("navigation").getByRole("button")).toHaveCount(MENU_LENGTH);
+    const leftover = await scanScreens(page, STACK_A, matched, apiOut);
 
     // C2: the evidence source of a fact, opened from 탐색
     const nav = page.getByRole("navigation");
@@ -195,8 +210,9 @@ test("a11y.e2e: 알림 has no serious or critical violation", async ({ page }) =
   const stack = await startStack(P02_SEED, []);
   try {
     const matched = new Set<ScanException>();
+    const apiOut = trackApiRequests(page);
     await page.goto(stack.url);
-    const leftover = await scanScreens(page, STACK_B, matched);
+    const leftover = await scanScreens(page, STACK_B, matched, apiOut);
     const stale = EXCEPTIONS.filter((e) => e.screen === "알림" && !matched.has(e));
     expect(describeFound(leftover)).toEqual([]);
     expect(stale, "exceptions that match no reported violation").toEqual([]);

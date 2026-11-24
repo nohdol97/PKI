@@ -43,6 +43,14 @@ const STATE_CLASS: Readonly<Record<string, string>> = {
 /** The findings in the order the rows are drawn: grouped by rule, the API's order inside a rule. */
 export const drawnOrder = <T extends { rule: string }>(findings: readonly T[]): T[] =>
   RULE_ORDER.flatMap((rule) => findings.filter((f) => f.rule === rule));
+export const findingActions = (
+  f: Pick<Finding, "rule" | "status">,
+): ("accept" | "dismiss" | "reopen")[] => {
+  if (f.status === "open" || f.status === "oscillating")
+    return f.rule === "overdue-work" ? ["dismiss"] : ["accept", "dismiss"];
+  return f.status === "dismissed" ? ["reopen"] : [];
+};
+
 const heading = (f: Finding) => f.targets.map((t) => t.label).join(" ↔ ");
 
 export function Lint({ api }: { api: ApiClient }) {
@@ -103,7 +111,7 @@ export function Lint({ api }: { api: ApiClient }) {
       {statusText(f.status)}
     </strong>
   );
-  const open = current && (current.status === "open" || current.status === "oscillating");
+  const actions = current ? findingActions(current) : [];
   return (
     <>
       <div className="pane-list">
@@ -146,54 +154,58 @@ export function Lint({ api }: { api: ApiClient }) {
           label="발견 상세"
           head={{ title: "발견", count: `${at + 1} / ${findings.length}` }}
           actions={
-            <div className="actions" role="group" aria-label={`조치: ${heading(current)}`}>
-              {open && current.rule === "missing-link" && (
-                <label>
-                  {LINT_RELATION_TYPE}
-                  <select
-                    aria-label={`${LINT_RELATION_TYPE}: ${heading(current)}`}
-                    value={picked[current.id] ?? ""}
-                    onChange={(e) => setPicked({ ...picked, [current.id]: e.target.value })}
-                  >
-                    <option value="">{types.length === 0 ? LINT_NO_TYPES : LINT_PICK_TYPE}</option>
-                    {types.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
+            actions.length > 0 && (
+              <div className="actions" role="group" aria-label={`조치: ${heading(current)}`}>
+                {actions.includes("accept") && current.rule === "missing-link" && (
+                  <label>
+                    {LINT_RELATION_TYPE}
+                    <select
+                      aria-label={`${LINT_RELATION_TYPE}: ${heading(current)}`}
+                      value={picked[current.id] ?? ""}
+                      onChange={(e) => setPicked({ ...picked, [current.id]: e.target.value })}
+                    >
+                      <option value="">
+                        {types.length === 0 ? LINT_NO_TYPES : LINT_PICK_TYPE}
                       </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              {open && current.rule !== "overdue-work" && (
-                <button
-                  type="button"
-                  className="btn-primary"
-                  aria-label={`받아들이기: ${heading(current)}`}
-                  disabled={current.rule === "missing-link" && !picked[current.id]}
-                  onClick={() => void decide(current, "accept")}
-                >
-                  받아들이기
-                </button>
-              )}
-              {open && (
-                <button
-                  type="button"
-                  aria-label={`닫기: ${heading(current)}`}
-                  onClick={() => void decide(current, "dismiss")}
-                >
-                  닫기
-                </button>
-              )}
-              {current.status === "dismissed" && (
-                <button
-                  type="button"
-                  aria-label={`다시 열기: ${heading(current)}`}
-                  onClick={() => void decide(current, "reopen")}
-                >
-                  다시 열기
-                </button>
-              )}
-            </div>
+                      {types.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {actions.includes("accept") && (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    aria-label={`받아들이기: ${heading(current)}`}
+                    disabled={current.rule === "missing-link" && !picked[current.id]}
+                    onClick={() => void decide(current, "accept")}
+                  >
+                    받아들이기
+                  </button>
+                )}
+                {actions.includes("dismiss") && (
+                  <button
+                    type="button"
+                    aria-label={`닫기: ${heading(current)}`}
+                    onClick={() => void decide(current, "dismiss")}
+                  >
+                    닫기
+                  </button>
+                )}
+                {actions.includes("reopen") && (
+                  <button
+                    type="button"
+                    aria-label={`다시 열기: ${heading(current)}`}
+                    onClick={() => void decide(current, "reopen")}
+                  >
+                    다시 열기
+                  </button>
+                )}
+              </div>
+            )
           }
         >
           <h3 className="detail-title">
