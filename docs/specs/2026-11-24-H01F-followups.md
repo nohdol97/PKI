@@ -68,6 +68,8 @@ H01의 독립 검토 두 건이 "재작업 아님"으로 넘긴 지적과 뒤로
 
 ### 복구 절차 (R1의 문서)
 
+> 이 절은 [`docs/site-setup.md`](../site-setup.md)의 "복원 때문에 시작이 멈췄을 때"로 옮겼고 그쪽이 기준이다([RLD spec](2026-11-24-RLD-restore-lock-decisions.md) R5).
+
 먼저 앱을 끄고 **데이터 폴더를 통째로 다른 곳에 복사**한다. 파일은 지우지 말고 폴더 밖으로 옮긴다.
 
 - **절차 A(이전 데이터로 돌아가기)**: `pki.sqlite`가 있으면 밖으로 옮긴다 → `pki.sqlite.before-restore`의 이름을 `pki.sqlite`로 바꾼다 → `restore` 폴더를 밖으로 옮긴다 → 시작한다.
