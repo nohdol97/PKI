@@ -6,6 +6,7 @@ import type { EvidenceSource, RouteResponse } from "@pki/contracts";
 import { useEffect, useMemo, useState, type FormEvent, type Ref } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import { EntityCuration } from "./entity-curation.tsx";
+import { ItemFeedback } from "./feedback.tsx";
 import { SOURCE_GONE } from "./evidence-text.ts";
 import { SourceView, useFocusOn } from "./evidence-view.tsx";
 import { DETAIL_HINT, DetailPane, PaneHead, Props, Row as PaneRow } from "./panes.tsx";
@@ -406,6 +407,12 @@ export function Neighbourhood({
           )}
         </ol>
       </div>
+      <ItemFeedback
+        key={`preference:${center.id}`}
+        api={api}
+        item={center}
+        memberIds={center.members.map((m) => m.id)}
+      />
       <EntityCuration
         key={`curation:${center.id}`}
         api={api}

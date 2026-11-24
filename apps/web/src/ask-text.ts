@@ -1,5 +1,6 @@
 // Words for the 질문 screen (X01-R11). The API sends codes and the rows' own text; each code gets a fixed Korean
 // text here, and a code this file does not know is shown as itself.
+import { ASK_QUESTION_MAX } from "@pki/contracts";
 import { blockReasonText } from "./connection-test-text.ts";
 
 export const ASK_INTRO =
@@ -67,3 +68,27 @@ export const droppedText = (n: number): string =>
 export const failureText = (code: string): string => `질문을 처리하지 못했습니다: ${code}`;
 export const sourceFailureText = (reason: string): string =>
   `원본을 불러오지 못했습니다: ${reason}`;
+
+/** CUF-R4: the notice of a question over the limit, counted as the contract counts it (the trimmed length); `null` within it. */
+export const questionLimitText = (question: string): string | null => {
+  const length = question.trim().length;
+  return length > ASK_QUESTION_MAX
+    ? `질문은 ${ASK_QUESTION_MAX}자까지 보낼 수 있습니다. 지금 ${length}자입니다.`
+    : null;
+};
+
+/**
+ * CUF-R5: the three steps no other status paragraph says, for the screen's always-present status line: searching,
+ * how many sources were found, and done. Empty before a question was sent. One line per step, not one per sentence.
+ */
+export function progressText(
+  state: {
+    hits?: { hits: readonly unknown[] } | undefined;
+    done?: { sentences: number } | undefined;
+  },
+  running: boolean,
+): string {
+  if (state.done) return `끝났습니다. 답 ${state.done.sentences}문장`;
+  if (state.hits) return `원본 ${state.hits.hits.length}건을 찾았습니다.`;
+  return running ? "원본을 찾는 중입니다." : "";
+}
