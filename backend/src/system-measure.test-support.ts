@@ -88,13 +88,13 @@ export interface KillRecoverValue {
   /** Restart to the first job to run (D5), restart to every job finished. */
   firstJobAfterRestartMs: number;
   allJobsDoneMs: number;
-  /** Documents not found by search plus the evidence rows short of one per document (H03C2F-R1). */
+  /** Documents not found by search, plus `dead_letter`/`cancelled` extractions, plus evidence rows short of the expected (documents minus those failures) (H03C2F-R1, HVT-R1). */
   lostDocs: number;
-  /** The `extract` jobs that ended dead_letter, cancelled or superseded: an explanation only, not added to `lostDocs`. */
+  /** The `extract` jobs that ended dead_letter, cancelled or superseded: dead_letter and cancelled are added to `lostDocs` and taken off the expected rows; superseded is an explanation only. */
   failedJobs: Record<string, number>;
-  /** Items of the stub's name beyond the first plus evidence rows beyond one per document. */
+  /** Items of the stub's name beyond the first plus evidence rows beyond the expected (documents minus failures). */
   duplicateItems: number;
-  /** What the product reads after the restart: the stub's facts, their evidence rows, and the rows expected (documents). */
+  /** What the product reads after the restart: the stub's facts, their evidence rows, and `expectedEvidence`, the document count (failures are not subtracted, H03C2F-R1). */
   knowledge: { facts: number; evidence: number; expectedEvidence: number };
   note: string;
 }
@@ -666,7 +666,13 @@ export function resultPath(outDir: string, name: string, force: boolean): string
 // Signals (H03C2F-R5): one pair of listeners while any run is going, so a run is cleaned up whoever started it.
 const cleanups = new Set<() => void>();
 const onSignal = (signal: "SIGINT" | "SIGTERM") => () => {
-  for (const cleanup of cleanups) cleanup();
+  for (const cleanup of cleanups) {
+    try {
+      cleanup();
+    } catch (error) {
+      process.stderr.write(`cleanup on ${signal} failed: ${(error as Error).message}\n`);
+    }
+  }
   process.exit(signal === "SIGINT" ? 130 : 143);
 };
 const listeners = { SIGINT: onSignal("SIGINT"), SIGTERM: onSignal("SIGTERM") } as const;
