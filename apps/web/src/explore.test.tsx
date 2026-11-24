@@ -386,12 +386,36 @@ describe("늦은 응답 (X02F-C4)", () => {
     const session = createExploreSession(api, show);
     session.open(1);
     await flush();
-    session.evidence({ kind: "fact", id: 4 }, "사실");
+    session.evidence({ kind: "fact", id: 4 }, "사실", 1);
     session.open(2);
     await flush();
     trace.settle({ truncated: false, chains: [] });
     await flush();
     expect(seen.evidence).toEqual([]);
+  });
+
+  it("does not read evidence for a line of item A while item B is open and not yet shown (UI01F-C3)", async () => {
+    const slow = later<unknown>();
+    const { api, calls } = fake({
+      exploreItem: (request) => {
+        const id = (request as { itemId: number }).itemId;
+        return id === 2 ? slow.promise : okRead(id);
+      },
+      graphTrace: () => ({ truncated: false, chains: [] }),
+    });
+    const { seen, show } = recorder();
+    const session = createExploreSession(api, show);
+    session.open(1);
+    await flush();
+    session.open(2);
+    session.evidence({ kind: "fact", id: 4 }, "사실", 1);
+    await flush();
+    expect(calls.filter(([name]) => name === "graphTrace")).toEqual([]);
+    expect(seen.evidence).toEqual([]);
+    // the line of the open item is read as before
+    session.evidence({ kind: "fact", id: 4 }, "사실", 2);
+    await flush();
+    expect(calls.filter(([name]) => name === "graphTrace")).toHaveLength(1);
   });
 
   it("does not read item A again after an action on A when B was opened before the action ended", async () => {
@@ -467,5 +491,46 @@ describe("탐색 목록과 상세 칸 (UI01)", () => {
     );
     expect(out).toContain("<dt>유형</dt><dd>Project</dd>");
     expect(out.indexOf("위키 페이지 열기")).toBeLessThan(out.indexOf("detail-title"));
+  });
+});
+
+// UI01F-C1: siblings of the detail pane carry distinct keys, and both change with the centre item, so React
+// neither overwrites one in its reconciliation map nor keeps the old item's row detail.
+describe("탐색 상세 칸의 key (UI01F-C1)", () => {
+  const keysFor = (id: number) => {
+    let keys: string[] = [];
+    function Probe() {
+      const element = Neighbourhood({
+        api: fake({}).api,
+        read: okRead(id),
+        depth: 1,
+        off: new Set(),
+        headingRef: null,
+        sourceHeadingRef: null,
+        evidence: undefined,
+        onDepth: noop,
+        onToggleType: noop,
+        onOpen: noop,
+        onEvidence: noop,
+        onAct: noop,
+        onChanged: noop,
+        onWiki: noop,
+      }) as unknown as { props: { children: unknown } };
+      keys = [element.props.children]
+        .flat(Infinity)
+        .map((child) => (child as { key?: string | null } | null)?.key)
+        .filter((key): key is string => typeof key === "string");
+      return null;
+    }
+    renderToStaticMarkup(<Probe />);
+    return keys;
+  };
+
+  it("gives the row detail and the curation different keys that both change with the centre item", () => {
+    const a = keysFor(5);
+    const b = keysFor(7);
+    expect(a).toHaveLength(2);
+    expect(new Set(a).size).toBe(a.length);
+    expect(a.filter((key) => b.includes(key))).toEqual([]);
   });
 });

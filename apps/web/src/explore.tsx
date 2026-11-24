@@ -314,7 +314,7 @@ export function Neighbourhood({
       </h2>
       <Props items={[["유형", center.type]]} />
       <RowDetail
-        key={center.id}
+        key={`detail:${center.id}`}
         api={api}
         kind="item"
         id={center.id}
@@ -407,7 +407,7 @@ export function Neighbourhood({
         </ol>
       </div>
       <EntityCuration
-        key={center.id}
+        key={`curation:${center.id}`}
         api={api}
         center={center}
         onChanged={onChanged}
@@ -491,8 +491,8 @@ export function createExploreSession(api: ApiClient, show: ExploreShow) {
       current = { ...current, depth };
       void load(current.id, depth, false);
     },
-    evidence(row: Row, label: string) {
-      if (!current) return;
+    evidence(row: Row, label: string, forId: number) {
+      if (current?.id !== forId) return;
       const newest = evidences.begin();
       traceEvidence(api, row, current.id).then(
         (sources) => newest() && show.evidence({ label, sources }),
@@ -610,7 +610,7 @@ export function Explore({ api }: { api: ApiClient }) {
             })
           }
           onOpen={open}
-          onEvidence={session.evidence}
+          onEvidence={(row, label) => session.evidence(row, label, read.center.id)}
           onAct={(a) => void session.act(a, read.center.id)}
           onChanged={() => session.changed(read.center.id)}
           onWiki={(key) => nav.go("wiki", { wikiKey: key })}
