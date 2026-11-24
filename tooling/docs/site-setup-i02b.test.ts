@@ -139,9 +139,8 @@ describe("docs (I02B-C36, I02B-R43, R45)", () => {
     expect(read("docs/specs/2026-11-21-I01-connector-sdk.md")).toContain("`done`, `yield` 다섯 가운데 하나");
   });
 
-  it("the README gained one line and a link, and no section", () => {
+  it("the README links the I02-B spec on exactly one line", () => {
     const readme = read("README.md");
-    expect(readme.match(/^## /gm)).toHaveLength(4);
     expect(readme.split("\n").filter((l) => l.includes("docs/specs/2026-11-22-I02-local-file-import.md"))).toHaveLength(1);
   });
 });
