@@ -4,6 +4,7 @@
 // lineage is its item's, a relation's the union of its two items', and an item the user created has
 // none, whatever extraction attached to it afterwards (the facts attached carry their own lineage).
 import type { SourceVersionRef } from "./derivatives.ts";
+import { keyedRead, preloadReads, type KeyedRead } from "./read-memo.ts";
 import type { EntryRef } from "./semantic-lifecycle.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -26,9 +27,44 @@ export function unionOfVersions(...lists: readonly (readonly SourceVersionRef[])
 
 const TABLE = { item: "items", fact: "facts", relation: "relations" } as const;
 
+/** Whether the user wrote the row, and its twin; the lifecycle's `userAuthored` asks the same text (ARB-R1). */
+export const USER_AUTHORED_READS = {
+  item: keyedRead({ columns: "user_authored", from: TABLE.item, key: "id" }),
+  fact: keyedRead({ columns: "user_authored", from: TABLE.fact, key: "id" }),
+  relation: keyedRead({ columns: "user_authored", from: TABLE.relation, key: "id" }),
+};
+
 const authored = (db: SqlDriver, ref: EntryRef): boolean =>
-  db.all(`SELECT user_authored FROM ${TABLE[ref.kind]} WHERE id = ?`, [ref.id])[0]
-    ?.user_authored === 1;
+  db.all(USER_AUTHORED_READS[ref.kind].one, [ref.id])[0]?.user_authored === 1;
+
+const evidenceVersions = (key: string): KeyedRead => ({
+  one: EVIDENCE_VERSIONS(`${key} = ?`),
+  many: `SELECT DISTINCT ${key} AS key, v.source_id, v.version
+   FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
+   WHERE ${key} IN (SELECT value FROM json_each(?)) ORDER BY ${key}, v.source_id, v.version`,
+});
+/** The versions a fact's, a relation's and an evidence's own lineage reads, and their twins (ARB-R1). */
+export const LINEAGE_READS = {
+  fact: evidenceVersions("e.fact_id"),
+  relation: evidenceVersions("e.relation_id"),
+  evidence: evidenceVersions("e.id"),
+};
+
+/** The lineage of one evidence row: the version it cites. */
+export const evidenceLineage = (db: SqlDriver, evidenceId: number): SourceVersionRef[] =>
+  db
+    .all(LINEAGE_READS.evidence.one, [evidenceId])
+    .map((r) => ({ sourceId: r.source_id as number, version: r.version as number }));
+
+/** Primes `rowLineage` of these facts or relations, and of these evidence rows with `evidenceLineage`. */
+export function preloadLineage(
+  db: SqlDriver,
+  kind: keyof typeof LINEAGE_READS,
+  ids: readonly number[],
+): void {
+  preloadReads(db, LINEAGE_READS[kind], ids);
+  if (kind !== "evidence") preloadReads(db, USER_AUTHORED_READS[kind], ids);
+}
 
 export function rowLineage(db: SqlDriver, ref: EntryRef): SourceVersionRef[] {
   if (ref.kind === "item") {
