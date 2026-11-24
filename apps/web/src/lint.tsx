@@ -4,8 +4,9 @@
 // backend; row labels are imported or user-written text, so they reach the page as React text nodes inside
 // <bdi> only (V02-R15).
 import type { EvidenceSource, RouteResponse } from "@pki/contracts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
+import { createLatest } from "./latest.ts";
 import { SOURCE_GONE } from "./evidence-text.ts";
 import { SourceView, useFocusOn } from "./evidence-view.tsx";
 import { DETAIL_HINT, DetailPane, PaneHead, Props, Row } from "./panes.tsx";
@@ -43,6 +44,30 @@ const STATE_CLASS: Readonly<Record<string, string>> = {
 /** The findings in the order the rows are drawn: grouped by rule, the API's order inside a rule. */
 export const drawnOrder = <T extends { rule: string }>(findings: readonly T[]): T[] =>
   RULE_ORDER.flatMap((rule) => findings.filter((f) => f.rule === rule));
+/**
+ * Opens the source of a finding's evidence. `reset()` (another finding chosen) drops a read still out, and a
+ * newer read drops an older one, so a source never shows under a finding it does not belong to (UI01F-R2).
+ */
+export function evidenceOpener(
+  api: ApiClient,
+  show: (source: EvidenceSource) => void,
+  fail: (error: unknown) => void,
+) {
+  const reads = createLatest();
+  return {
+    open(evidenceId: number) {
+      const current = reads.begin();
+      api("evidenceSource", { evidenceId }).then(
+        (source) => current() && show(source),
+        (error: unknown) => current() && fail(error),
+      );
+    },
+    reset() {
+      reads.begin();
+    },
+  };
+}
+
 const heading = (f: Finding) => f.targets.map((t) => t.label).join(" ↔ ");
 
 export function Lint({ api }: { api: ApiClient }) {
@@ -82,14 +107,18 @@ export function Lint({ api }: { api: ApiClient }) {
       setNotice(r.status === "applied" ? undefined : refusalText(r.reason));
       void read();
     }, fail);
-  const openEvidence = (evidenceId: number) =>
-    api("evidenceSource", { evidenceId }).then(
-      (s) => {
-        setSource(s);
-        setSourceOpens((n) => n + 1);
-      },
-      (e: unknown) => (gone(e) ? setNotice(SOURCE_GONE) : fail(e)),
-    );
+  const opener = useMemo(
+    () =>
+      evidenceOpener(
+        api,
+        (s) => {
+          setSource(s);
+          setSourceOpens((n) => n + 1);
+        },
+        (e) => (gone(e) ? setNotice(SOURCE_GONE) : fail(e)),
+      ),
+    [api],
+  );
 
   const findings = drawnOrder(lint?.findings ?? []);
   const current = findings.find((f) => f.id === chosen);
@@ -126,7 +155,7 @@ export function Lint({ api }: { api: ApiClient }) {
                             title={<bdi>{heading(f)}</bdi>}
                             meta={stateOf(f)}
                             selected={f.id === chosen}
-                            onClick={() => (setChosen(f.id), setSource(undefined))}
+                            onClick={() => (setChosen(f.id), setSource(undefined), opener.reset())}
                           />
                         </li>
                       ))}
@@ -214,7 +243,7 @@ export function Lint({ api }: { api: ApiClient }) {
                     key={id}
                     type="button"
                     aria-label={`근거 보기 ${i + 1}: ${heading(current)}`}
-                    onClick={() => void openEvidence(id)}
+                    onClick={() => opener.open(id)}
                   >
                     근거 보기 {i + 1}
                   </button>
