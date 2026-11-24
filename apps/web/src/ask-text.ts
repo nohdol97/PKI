@@ -88,7 +88,10 @@ export function progressText(
   },
   running: boolean,
 ): string {
-  if (state.done) return `끝났습니다. 답 ${state.done.sentences}문장`;
+  if (state.done)
+    return state.done.sentences === 0
+      ? "끝났습니다."
+      : `끝났습니다. 답 ${state.done.sentences}문장`;
   if (state.hits) return `원본 ${state.hits.hits.length}건을 찾았습니다.`;
   return running ? "원본을 찾는 중입니다." : "";
 }

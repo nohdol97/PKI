@@ -2,7 +2,7 @@
 // Only the three rules whose target is an item are offered; the user picks a rule, finds items by name and picks
 // as many as that rule takes. The rule of how many is a plain function so it is tested without a DOM. Item names
 // are imported text: they reach the page as React text nodes inside <bdi> only (V02-R15).
-import type { RouteRequest } from "@pki/contracts";
+import { EXPLORE_QUERY_MAX, type RouteRequest } from "@pki/contracts";
 import { type FormEvent, useState } from "react";
 import type { ApiClient } from "./api.ts";
 import { createBusy, createLatest } from "./latest.ts";
@@ -21,6 +21,7 @@ import {
   REPORT_SEARCH_SUBMIT,
   REPORT_SUBMIT,
   reportFailedText,
+  reportSearchFailedText,
   ruleText,
 } from "./lint-text.ts";
 
@@ -39,6 +40,31 @@ export function reportRequest(rule: string, ids: readonly number[]): Report | un
   if (rule === "overdue-work") return ids.length === 1 ? { rule, kind: "item", a } : undefined;
   if (rule !== "synonym" && rule !== "missing-link") return undefined;
   return ids.length === 2 && b !== undefined && a !== b ? { rule, kind: "item", a, b } : undefined;
+}
+
+/** The picks left after a report: the sent items go, an item picked while the answer was out stays (UIF2-R2). */
+export const withoutSent = <T extends { id: number }>(picked: readonly T[], request: Report): T[] =>
+  picked.filter((i) => i.id !== request.a && !("b" in request && i.id === request.b));
+
+/** One report call (UIF2-R1): never rejects; says what to tell, whether the picks are spent, and whether to reread. */
+export async function sendReport(
+  api: ApiClient,
+  request: Report,
+): Promise<{ notice: { text: string; alert: boolean }; clear: boolean; reread: boolean }> {
+  try {
+    const r = await api("lintReport", request);
+    if (r.status === "applied")
+      return { notice: { text: REPORT_APPLIED, alert: false }, clear: true, reread: true };
+    if (r.status === "exists")
+      return { notice: { text: REPORT_EXISTS, alert: false }, clear: false, reread: true };
+    return { notice: { text: REPORT_NOT_FOUND, alert: false }, clear: false, reread: false };
+  } catch (error) {
+    return {
+      notice: { text: reportFailedText(message(error)), alert: true },
+      clear: false,
+      reread: false,
+    };
+  }
 }
 
 export function LintReport({ api, onReported }: { api: ApiClient; onReported: () => void }) {
@@ -63,31 +89,19 @@ export function LintReport({ api, onReported }: { api: ApiClient; onReported: ()
       (error: unknown) => {
         if (!current()) return;
         setSearch({ status: "idle" });
-        setNotice({ text: reportFailedText(message(error)), alert: true });
+        setNotice({ text: reportSearchFailedText(message(error)), alert: true });
       },
     );
   };
   const send = (event: FormEvent) => {
     event.preventDefault();
     if (!request) return;
-    void busy(() =>
-      api("lintReport", request).then(
-        (r) => {
-          setNotice({
-            text:
-              r.status === "applied"
-                ? REPORT_APPLIED
-                : r.status === "exists"
-                  ? REPORT_EXISTS
-                  : REPORT_NOT_FOUND,
-            alert: false,
-          });
-          if (r.status === "applied") setPicked([]);
-          if (r.status !== "not-found") onReported();
-        },
-        (error: unknown) => setNotice({ text: reportFailedText(message(error)), alert: true }),
-      ),
-    );
+    void busy(async () => {
+      const done = await sendReport(api, request);
+      setNotice(done.notice);
+      if (done.clear) setPicked((p) => withoutSent(p, request));
+      if (done.reread) onReported();
+    });
   };
   const pick = (item: Item) =>
     setPicked((p) => (p.some((i) => i.id === item.id) ? p : [...p, item]));
@@ -126,6 +140,7 @@ export function LintReport({ api, onReported }: { api: ApiClient; onReported: ()
           <input
             aria-label={REPORT_SEARCH}
             value={query}
+            maxLength={EXPLORE_QUERY_MAX}
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>{" "}

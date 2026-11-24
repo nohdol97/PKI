@@ -1,10 +1,11 @@
 // P5F-R6: the correction buttons on an evidence row. A fact offers "잘못된 정보" and "확인 완료", a relation
 // "잘못된 관계" and "확인 완료"; the labels name the row's quote, which reaches the page as text only.
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
 import type { FeedbackLine } from "@pki/contracts";
 import {
+  createFeedbackCalls,
   InsightFeedback,
   ItemFeedback,
   itemPreferenceLines,
@@ -114,5 +115,24 @@ describe("ItemFeedback (CUF-C3)", () => {
       line(5, "useful", "preference", 7, "insight"),
     ];
     expect(itemPreferenceLines(lines, new Set([7, 8])).map((l) => l.id)).toEqual([1, 2]);
+  });
+});
+
+describe("createFeedbackCalls (UIF2-C4)", () => {
+  it("sends one call at a time across record and undo, and sends again after the answer", async () => {
+    let release: (v: unknown) => void = () => {};
+    const call = vi.fn(() => new Promise((resolve) => (release = resolve)));
+    const calls = createFeedbackCalls(call as unknown as ApiClient);
+    const first = calls.record({ kind: "item", id: 1 }, "useful");
+    expect(calls.record({ kind: "item", id: 1 }, "useful")).toBeUndefined();
+    expect(calls.undo(7)).toBeUndefined();
+    expect(call).toHaveBeenCalledTimes(1);
+    release({ status: "recorded" });
+    expect((await first)?.changed).toBe(true);
+    const later = calls.undo(7);
+    expect(later).toBeDefined();
+    release({ status: "undone" });
+    await later;
+    expect(call).toHaveBeenCalledTimes(2);
   });
 });

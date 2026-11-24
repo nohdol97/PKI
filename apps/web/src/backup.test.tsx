@@ -22,4 +22,11 @@ describe("백업 폴더 고르기 (UIF-C2)", () => {
     expect(choose).toHaveBeenCalledTimes(1);
     expect(choose).toHaveBeenCalledWith({ ticket: "t" });
   });
+
+  it("does nothing on a cancel (UIF2-C7)", async () => {
+    const choose = vi.fn(async () => undefined);
+    const text = await pickBackupFolder(async () => ({ ticket: null }), choose);
+    expect(text).toBeUndefined();
+    expect(choose).not.toHaveBeenCalled();
+  });
 });
