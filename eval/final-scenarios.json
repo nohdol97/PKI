@@ -8,7 +8,6 @@
         "R04",
         "H02"
       ],
-      "needsProvider": false,
       "status": "mock-only",
       "evidence": [
         {
@@ -53,7 +52,6 @@
         "R02",
         "V01"
       ],
-      "needsProvider": true,
       "status": "mock-only",
       "evidence": [
         {
@@ -99,7 +97,6 @@
         "I02",
         "V02"
       ],
-      "needsProvider": false,
       "status": "mock-only",
       "evidence": [
         {
@@ -151,7 +148,6 @@
         "V02",
         "S01"
       ],
-      "needsProvider": true,
       "status": "mock-only",
       "evidence": [
         {
@@ -196,7 +192,6 @@
         "V02",
         "S02"
       ],
-      "needsProvider": true,
       "status": "mock-only",
       "evidence": [
         {
@@ -235,7 +230,6 @@
         "S02",
         "S03"
       ],
-      "needsProvider": true,
       "status": "mock-only",
       "evidence": [
         {
@@ -280,7 +274,6 @@
         "S02",
         "K01"
       ],
-      "needsProvider": true,
       "status": "mock-only",
       "evidence": [
         {
@@ -324,7 +317,6 @@
       "owners": [
         "K02"
       ],
-      "needsProvider": true,
       "status": "mock-only",
       "evidence": [
         {
@@ -375,7 +367,6 @@
       "owners": [
         "P01"
       ],
-      "needsProvider": true,
       "status": "mock-only",
       "evidence": [
         {
@@ -426,7 +417,6 @@
       "owners": [
         "P02"
       ],
-      "needsProvider": false,
       "status": "mock-only",
       "evidence": [
         {
@@ -465,7 +455,6 @@
       "owners": [
         "P03"
       ],
-      "needsProvider": false,
       "status": "mock-only",
       "evidence": [
         {
@@ -504,7 +493,6 @@
       "owners": [
         "X01"
       ],
-      "needsProvider": true,
       "status": "mock-only",
       "evidence": [
         {
@@ -548,7 +536,6 @@
         "I04",
         "H01"
       ],
-      "needsProvider": false,
       "status": "mock-only",
       "evidence": [
         {
@@ -595,7 +582,6 @@
         "I03",
         "H02"
       ],
-      "needsProvider": false,
       "status": "mock-only",
       "evidence": [
         {

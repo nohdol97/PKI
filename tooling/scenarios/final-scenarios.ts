@@ -2,22 +2,26 @@
 // its checker and the document made from it. The checker reads the table and a "read file" function: it runs no
 // test and uses no network (R4). A passing mock is never recorded as a real-Provider or installer result (R2, R3).
 
+// `needsProvider` (does a step of the scenario itself call a Provider) is fixed here like the title: the table
+// cannot lower it, so a Provider-calling scenario is never `verified` without a real-Provider installer result.
 export const FINAL_SCENARIOS = [
-  { id: "FS01", title: "설치 파일 설치" },
-  { id: "FS02", title: "기존 CLI 탐색" },
-  { id: "FS03", title: "메일/메신저/Wiki형 데이터 import" },
-  { id: "FS04", title: "의미 지식 추출" },
-  { id: "FS05", title: "출처 간 관계" },
-  { id: "FS06", title: "개인 Semantic 자동 구성" },
-  { id: "FS07", title: "Graph/Wiki 증분 갱신" },
-  { id: "FS08", title: "Reflection 새 관계" },
-  { id: "FS09", title: "다출처 Insight" },
-  { id: "FS10", title: "근거 있는 능동 전달" },
-  { id: "FS11", title: "피드백 개선" },
-  { id: "FS12", title: "근거 기반 자연어 답변" },
-  { id: "FS13", title: "원본 삭제 파생물 갱신" },
-  { id: "FS14", title: "재시작 작업 재개" },
+  { id: "FS01", title: "설치 파일 설치", needsProvider: false },
+  { id: "FS02", title: "기존 CLI 탐색", needsProvider: true },
+  { id: "FS03", title: "메일/메신저/Wiki형 데이터 import", needsProvider: false },
+  { id: "FS04", title: "의미 지식 추출", needsProvider: true },
+  { id: "FS05", title: "출처 간 관계", needsProvider: true },
+  { id: "FS06", title: "개인 Semantic 자동 구성", needsProvider: true },
+  { id: "FS07", title: "Graph/Wiki 증분 갱신", needsProvider: true },
+  { id: "FS08", title: "Reflection 새 관계", needsProvider: true },
+  { id: "FS09", title: "다출처 Insight", needsProvider: true },
+  { id: "FS10", title: "근거 있는 능동 전달", needsProvider: false },
+  { id: "FS11", title: "피드백 개선", needsProvider: false },
+  { id: "FS12", title: "근거 기반 자연어 답변", needsProvider: true },
+  { id: "FS13", title: "원본 삭제 파생물 갱신", needsProvider: false },
+  { id: "FS14", title: "재시작 작업 재개", needsProvider: false },
 ] as const;
+const needsProviderOf = (id: string): boolean =>
+  FINAL_SCENARIOS.find((f) => f.id === id)?.needsProvider ?? false;
 
 const STATUSES = ["verified", "mock-only", "unverified"] as const;
 const PROVIDERS = ["mock", "real", "none"] as const;
@@ -38,7 +42,23 @@ const unknownKeys = (o: Obj, allowed: string[]) =>
 
 /** The path is repository-relative; the reader resolves it against the root. */
 const safePath = (p: unknown): p is string =>
-  nonEmpty(p) && !p.startsWith("/") && !p.split(/[\\/]/).includes("..");
+  nonEmpty(p) &&
+  !p.startsWith("/") &&
+  !p.includes("\\") &&
+  !/^[a-zA-Z]:/.test(p) &&
+  !p.split("/").includes("..");
+
+// Folders vitest.config.ts does not run (its `exclude`): a unit evidence there is never run by `pnpm test`.
+const UNIT_NOT_RUN = /(^|\/)(node_modules|eval|verification)\//;
+
+/** Reading a path that is a directory (or unreadable) throws; that is a fault of the table, not a crash. */
+function readOrFault(read: ReadFile, path: string): { text?: string | undefined; fault?: string } {
+  try {
+    return { text: read(path) };
+  } catch (error) {
+    return { fault: `cannot be read (${(error as Error).message})` };
+  }
+}
 
 function checkEvidence(id: string, e: unknown, read: ReadFile, out: string[]): Obj | undefined {
   if (!isObj(e)) {
@@ -75,10 +95,17 @@ function checkEvidence(id: string, e: unknown, read: ReadFile, out: string[]): O
     out.push(`${id}: ${kind} path must be a repository-relative path`);
     return e;
   }
-  const text = read(path);
+  const { text, fault } = readOrFault(read, path);
+  if (fault !== undefined) {
+    out.push(`${id}: ${kind} path ${path} ${fault}`);
+    return e;
+  }
   if (text === undefined) {
     out.push(`${id}: ${kind} path ${path} does not exist`);
     return e;
+  }
+  if (kind === "unit" && UNIT_NOT_RUN.test(path)) {
+    out.push(`${id}: unit path ${path} is in a folder vitest does not run`);
   }
   const suffix = { unit: /\.test\.tsx?$/, e2e: /\.e2e\.ts$/, measure: /^eval\/results\/.+\.json$/ }[
     kind
@@ -97,21 +124,12 @@ function checkScenario(s: unknown, read: ReadFile, out: string[]): void {
     return;
   }
   const id = nonEmpty(s.id) ? s.id : "map";
-  for (const k of unknownKeys(s, [
-    "id",
-    "title",
-    "owners",
-    "needsProvider",
-    "status",
-    "evidence",
-    "blockers",
-  ])) {
+  for (const k of unknownKeys(s, ["id", "title", "owners", "status", "evidence", "blockers"])) {
     out.push(`${id}: unknown key ${k}`);
   }
   if (!Array.isArray(s.owners) || !s.owners.every(nonEmpty) || s.owners.length === 0) {
     out.push(`${id}: owners must be a list of task names`);
   }
-  if (typeof s.needsProvider !== "boolean") out.push(`${id}: needsProvider must be true or false`);
   if (!oneOf(STATUSES, s.status))
     out.push(`${id}: status must be verified, mock-only or unverified`);
   const evidence: Obj[] = [];
@@ -138,8 +156,12 @@ function checkScenario(s: unknown, read: ReadFile, out: string[]): void {
       if (b.procedure !== undefined) {
         if (!safePath(b.procedure))
           out.push(`${id}: blocker procedure must be a repository-relative path`);
-        else if (read(b.procedure) === undefined)
-          out.push(`${id}: blocker procedure ${b.procedure} does not exist`);
+        else {
+          const { text, fault } = readOrFault(read, b.procedure);
+          if (fault !== undefined) out.push(`${id}: blocker procedure ${b.procedure} ${fault}`);
+          else if (text === undefined)
+            out.push(`${id}: blocker procedure ${b.procedure} does not exist`);
+        }
       }
     }
   }
@@ -148,7 +170,7 @@ function checkScenario(s: unknown, read: ReadFile, out: string[]): void {
   );
   const meetsVerified =
     installer.length > 0 &&
-    (s.needsProvider !== true || installer.some((e) => e.provider === "real")) &&
+    (!needsProviderOf(id) || installer.some((e) => e.provider === "real")) &&
     blockers?.length === 0;
   const inRepo = evidence.filter((e) => oneOf(IN_REPO, e.kind)).length;
   if (s.status === "verified" && !meetsVerified) {
@@ -195,7 +217,6 @@ interface Scenario {
   id: string;
   title: string;
   owners: string[];
-  needsProvider: boolean;
   status: string;
   evidence: Obj[];
   blockers: Obj[];
@@ -223,6 +244,7 @@ export function renderScenarioDoc(map: unknown): string {
     "",
     "> 이 문서는 `eval/final-scenarios.json`에서 `pnpm check:scenarios --write`로 만든다. 손으로 고치지 않는다.",
     '> **대역 통과는 실제 동작의 증거가 아니다.** 아래 "대역·개발 장비 증거"는 개발 장비에서 대역(mock)이나 Provider 없이 돈 시험이고, 설치본과 실제 Provider에서 확인된 것은 "설치본·실제 Provider 증거"뿐이다.',
+    "> `provider: none`은 그 시험 자체가 Provider도 대역도 부르지 않는다는 뜻이다. 시험이 읽는 미리 채운 자료는 이전에 대역이 만들었을 수 있다.",
     "",
     `상태: 확인됨 ${count("verified")}, 대역만 ${count("mock-only")}, 증거 없음 ${count("unverified")}. 명세: [H03-C3](specs/2026-11-24-H03-C3-final-scenarios.md)`,
   ];
@@ -235,7 +257,7 @@ export function renderScenarioDoc(map: unknown): string {
       "",
       `- 상태: ${s.status}`,
       `- 책임 작업: ${s.owners.join(", ")}`,
-      `- Provider 호출: ${s.needsProvider ? "함" : "안 함"}`,
+      `- Provider 호출: ${needsProviderOf(s.id) ? "함" : "안 함"}`,
     );
     lines.push(
       "- 대역·개발 장비 증거:",
