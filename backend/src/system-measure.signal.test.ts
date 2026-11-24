@@ -50,8 +50,8 @@ describe.skipIf(process.platform === "win32")("system-measure signal (H03C2F)", 
       { cwd: ROOT, stdio: "ignore", env: { ...process.env, TMPDIR: temp } },
     );
     const exited = new Promise<number | null>((r) => command.on("exit", (code) => r(code)));
+    let backend: number[] = [];
     try {
-      let backend: number[] = [];
       const deadline = Date.now() + 60_000;
       while (backend.length === 0 && Date.now() < deadline) {
         await sleep(200);
@@ -67,6 +67,14 @@ describe.skipIf(process.platform === "win32")("system-measure signal (H03C2F)", 
       expect(workDirs()).toEqual([]);
     } finally {
       command.kill("SIGKILL");
+      // the backend is detached: a run that fails before the SIGTERM step must not orphan it
+      for (const pid of backend) {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {
+          // already gone
+        }
+      }
       rmSync(out, { recursive: true, force: true });
       rmSync(temp, { recursive: true, force: true });
     }

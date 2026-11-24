@@ -941,10 +941,10 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       note: "firstJobAfterRestartMs is the time from the restart to the first job to run (any job); allJobsDoneMs to every job finished, the interrupted job included, which the restarted backend reclaims at its start whatever its lease end",
     };
   } finally {
-    stopCleaning();
     if (backend) await stopBackend(backend);
     for (const pid of pids) killGroup(pid);
     rmSync(workDir, { recursive: true, force: true });
+    stopCleaning();
   }
 }
 
@@ -1240,9 +1240,9 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
     };
     return { result, trace: { pids, workDir, rawBytes } };
   } finally {
-    stopCleaning();
     if (backend) await stopBackend(backend);
     for (const pid of pids) killGroup(pid);
     rmSync(workDir, { recursive: true, force: true });
+    stopCleaning();
   }
 }
