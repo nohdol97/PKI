@@ -10,6 +10,7 @@
 |---|---|---|
 | [design/original-design.md](design/original-design.md) | 사용자가 쓴 원 설계. 요구사항의 출처이며 고치지 않고 보관한다 | 원문 |
 | [OSS_EVALUATION.md](OSS_EVALUATION.md) | 재사용할 오픈소스 엔진과 스택의 비교, 채택·보류·기각 판정 | 소스 읽기 결과, 실행 전 |
+| [FINAL_SCENARIOS.md](FINAL_SCENARIOS.md) | 최종 시나리오 FS01~FS14가 지금 어떤 증거(대역·개발 장비)에 기대는지와 출시 차단 항목. `eval/final-scenarios.json`에서 만든다 | 설치본 확인 0개 |
 | [research/2026-11-21-cli-provider-terms-and-isolation.md](research/2026-11-21-cli-provider-terms-and-isolation.md) | Claude Code·Codex CLI를 제품이 호출해도 되는지(약관)와 격리할 수 있는지의 문서 조사 | 문서 조사, 실행 전 |
 | [research/2026-11-21-R00-initial-base.md](research/2026-11-21-R00-initial-base.md) | 빈 저장소에 최초 commit을 올린 절차와 증거 | 보관 |
 | [research/2026-11-22-I02B-T01-poc.md](research/2026-11-22-I02B-T01-poc.md) | I02-B 착수 전 측정(I02B-T01): 격리 실행기·경로 경계·철회 묶음이 기대는 가정을 macOS에서 실제로 돌려 적은 판정 기록(Windows·Linux 제외) | 측정 완료, 검토 반영 |
