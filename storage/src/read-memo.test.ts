@@ -105,25 +105,29 @@ describe("preloadReads (ARB-C2)", () => {
 });
 
 describe("every point read has a twin that answers alike (ARB-C2)", () => {
-  const twins: [string, KeyedRead, SqlValue[]][] = [
-    ...Object.entries(EVIDENCE_READS).map(([k, r]) => [`evidence ${k}`, r, []] as const),
-    ...Object.entries(USER_AUTHORED_READS).map(([k, r]) => [`user_authored ${k}`, r, []] as const),
-    ...Object.entries(ROW_READS).map(([k, r]) => [`row ${k}`, r, []] as const),
-    ...Object.entries(LINE_READS).map(([k, r]) => [`lines ${k}`, r, []] as const),
-    ...Object.entries(LINEAGE_READS).map(([k, r]) => [`lineage ${k}`, r, []] as const),
-    ["check lines", CHECK_LINES_READ, []],
-    ["slot", SLOT_OWN_READ, []],
-    ["fact head", FACT_HEAD_READ, []],
-    ["item type", ITEM_TYPE_READ, []],
-    ["item name", ITEM_NAME_READ, []],
-    ["item base", ITEM_BASE_READ, []],
-    ...["MEASURED_ON", "JOIN_LEFT", "JOIN_RIGHT"].map(
-      (t) => [`gate objects ${t}`, OBJECTS_READ, [t]] as const,
+  type Twin = [name: string, read: KeyedRead, fixed: SqlValue[]];
+  const twin = (name: string, read: KeyedRead, fixed: SqlValue[] = []): Twin => [name, read, fixed];
+  const named = (label: string, reads: Record<string, KeyedRead>) =>
+    Object.entries(reads).map(([k, r]) => twin(`${label} ${k}`, r));
+  const twins: Twin[] = [
+    ...named("evidence", EVIDENCE_READS),
+    ...named("user_authored", USER_AUTHORED_READS),
+    ...named("row", ROW_READS),
+    ...named("lines", LINE_READS),
+    ...named("lineage", LINEAGE_READS),
+    twin("check lines", CHECK_LINES_READ),
+    twin("slot", SLOT_OWN_READ),
+    twin("fact head", FACT_HEAD_READ),
+    twin("item type", ITEM_TYPE_READ),
+    twin("item name", ITEM_NAME_READ),
+    twin("item base", ITEM_BASE_READ),
+    ...["MEASURED_ON", "JOIN_LEFT", "JOIN_RIGHT"].map((t) =>
+      twin(`gate objects ${t}`, OBJECTS_READ, [t]),
     ),
-    ...["MEASURED_ON", "USES_JOIN", "JOIN_LEFT", "JOIN_RIGHT"].map(
-      (t) => [`view objects ${t}`, OBJECTS_VIEW_READ, [t]] as const,
+    ...["MEASURED_ON", "USES_JOIN", "JOIN_LEFT", "JOIN_RIGHT"].map((t) =>
+      twin(`view objects ${t}`, OBJECTS_VIEW_READ, [t]),
     ),
-  ].map(([name, read, fixed]) => [name, read, [...fixed]]);
+  ];
 
   it.each(twins)(
     "%s: mixed ids, a primed point read reaches no driver and equals the plain one",
