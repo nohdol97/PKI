@@ -205,6 +205,21 @@ describe("extract.analytical: a document's analytical rows (X-C2)", () => {
     ]);
     expect(drops(job)).toEqual({ quotes: 0, other: 0 });
   });
+
+  it("PD3-C3: a kana prolonged sound mark (U+30FC) is no word character: a column name after it is explicit", async () => {
+    const quote = "ユーザーid 목록";
+    const job = await extract(
+      answer({
+        items: [item("a", "Metric", "사용자 수")],
+        facts: [fact("a", "metric.calculation", '{"aggregation":"count","column":"id"}', quote)],
+      }),
+      { body: `${quote}.` },
+    );
+    expect(facts().map((f) => [f.item, f.status, f.epistemic])).toEqual([
+      ["사용자 수", "candidate", "explicit"],
+    ]);
+    expect(drops(job)).toEqual({ quotes: 0, other: 0 });
+  });
 });
 
 describe("extract.analytical: a table source's own extraction (X-C3)", () => {
