@@ -23,6 +23,7 @@ import {
   writeWikiPage,
   listWikiHidden,
 } from "./wiki.ts";
+import { cancelJob } from "./job-actions.ts";
 import { leaseNextJob, closeJob } from "./jobs.ts";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import type { SqlDriver } from "./sql-driver.ts";
@@ -114,6 +115,20 @@ describe("wiki.request: one open build, and a dead one is not asked again for th
     expect(requestWikiBuild(db).status).toBe("dead");
     expect(requestWikiRebuild(db).status).toBe("registered");
     expect(readWikiState(db).forceSeq).toBe(1);
+  });
+
+  it("does not register again after the user cancelled the build, until the input changes (PD2-C2)", () => {
+    insertItem(db, { type: "Project", name: "가", ...attrs });
+    const registered = requestWikiBuild(db);
+    if (registered.status !== "registered") throw new Error("not registered");
+    expect(cancelJob(db, registered.job.id)).toBe("cancelled");
+    expect(requestWikiBuild(db).status).toBe("dead");
+    expect(db.all("SELECT count(*) AS n FROM jobs WHERE kind = ?", [WIKI_BUILD_KIND])[0]?.n).toBe(
+      1,
+    );
+    expect(isWikiBuildDead(db)).toBe(true);
+    insertItem(db, { type: "Project", name: "나", ...attrs });
+    expect(requestWikiBuild(db).status).toBe("registered");
   });
 });
 
