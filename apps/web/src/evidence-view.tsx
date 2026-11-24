@@ -317,12 +317,15 @@ export function evidenceReducer(state: EvidenceState, action: EvidenceAction): E
       if (state.opened) return state;
       return { ...state, opened: { insightId: action.insightId, evidence: action.evidence } };
     case "source-opened":
+      if (!state.opened) return state;
       return { ...insights, ...opened, source: action.source, opens: opens + 1 };
     case "evidence-refreshed": {
       if (state.opened?.insightId !== action.insightId) return state;
       const { source, ...rest } = state;
-      // an open source whose evidence is no longer in the list is gone with it
-      const keeps = source !== undefined && action.evidence.some((e) => e.id === source.evidenceId);
+      // an open source whose evidence is no longer in the list is gone with it; a thread message (id 0) has none
+      const keeps =
+        source !== undefined &&
+        (source.evidenceId === 0 || action.evidence.some((e) => e.id === source.evidenceId));
       return {
         ...rest,
         opened: { insightId: action.insightId, evidence: action.evidence },

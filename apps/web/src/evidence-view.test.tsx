@@ -364,6 +364,24 @@ describe("evidenceReducer", () => {
     expect(gone.opens).toBe(shown.opens);
     expect(gone.notice).toBe(SOURCE_GONE);
   });
+
+  // UI01H-C2: a source that arrives with no open Insight changes nothing
+  it("UI01H-C2: ignores an arriving source when no Insight is open, keeping the notice", () => {
+    const closed: EvidenceState = { insights: [insight(2)], opens: 2, notice: INSIGHT_GONE };
+    expect(evidenceReducer(closed, { type: "source-opened", source: source(1, 1) })).toBe(closed);
+  });
+
+  // UI01H-C3: a thread message (evidence id 0) belongs to no evidence entry, so a refresh keeps it
+  it("UI01H-C3: keeps an opened source with evidence id 0 across an evidence refresh", () => {
+    const thread: EvidenceState = { ...open, source: { ...source(1, 1), evidenceId: 0 } };
+    const next = evidenceReducer(thread, {
+      type: "evidence-refreshed",
+      insightId: 1,
+      evidence: [entry(8)],
+    });
+    expect(next.source).toEqual(thread.source);
+    expect(next.notice).toBeUndefined();
+  });
 });
 
 // I02B-R39, C28 (evidence half): a local source shows its place in the folder; when the file is gone the
