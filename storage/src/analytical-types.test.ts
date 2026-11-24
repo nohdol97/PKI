@@ -65,7 +65,12 @@ describe("analytical.value-types", () => {
     const names = (n: number) => Array.from({ length: n }, (_, i) => `c${i}`);
     expect(normalizeValue("column-set", names(50))).not.toBeNull();
     expect(normalizeValue("column-set", names(51))).toBeNull();
-    expect(normalizeValue("key-pairs", names(51).map((n) => [n, "k"]))).toBeNull();
+    expect(
+      normalizeValue(
+        "key-pairs",
+        names(51).map((n) => [n, "k"]),
+      ),
+    ).toBeNull();
   });
 
   it("makes a column-set a sorted JSON array of processed names: the order and the case do not matter", () => {

@@ -140,7 +140,12 @@ describe("a cleared interpretation is asked for again once (PD3-R1)", () => {
     const seeded = seed();
     setInsightInterpret(db, true, new Date(at));
     const target = `${seeded.parent.id}#${insightBasis(seeded.parent)}`;
-    registerJob(db, { kind: INSIGHT_INTERPRET_KIND, target, priority: "maintenance", at: new Date(at) });
+    registerJob(db, {
+      kind: INSIGHT_INTERPRET_KIND,
+      target,
+      priority: "maintenance",
+      at: new Date(at),
+    });
     db.run("UPDATE jobs SET status = 'succeeded' WHERE kind = ? AND target = ?", [
       INSIGHT_INTERPRET_KIND,
       target,
