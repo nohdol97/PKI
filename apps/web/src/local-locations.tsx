@@ -26,12 +26,15 @@ import {
   LOCATION_STATE_TEXT,
   NORMALIZER_UNAVAILABLE_TEXT,
   NOT_WATCHING_TEXT,
+  PICK_BACKEND_UNAVAILABLE_TEXT,
   REVOKE_WARNING_TEXT,
 } from "./local-locations-text.ts";
 
 /** The part of the Electron preload's `window.pki` this section uses. */
 export interface PickerBridge {
-  pickLocation?(type: LocationKind): Promise<{ ticket: string | null }>;
+  pickLocation?(
+    type: LocationKind,
+  ): Promise<{ ticket: string | null; failed?: "backend-unavailable" }>;
 }
 
 /** The kinds of an approved location the screen adds (I02B-R3). */
@@ -83,18 +86,21 @@ export async function pickAndAdd(
   pick: NonNullable<PickerBridge["pickLocation"]>,
   type: LocationKind = "folder",
 ): Promise<AddResult | undefined> {
-  const { ticket } = await pick(type);
+  const { ticket, failed } = await pick(type);
+  if (failed !== undefined) return { added: false, text: PICK_BACKEND_UNAVAILABLE_TEXT };
   return ticket === null ? undefined : addLocation(api, { type, ticket });
 }
 
-/** The shell's picker of the location's own kind, then the relink with its ticket; nothing when the user cancelled. */
+/** The shell's picker of the location's own kind, then the relink with its ticket; the text to show when the pick could not be handed to the backend, nothing when the user cancelled. */
 export async function pickAndRelink(
   api: ApiClient,
   pick: NonNullable<PickerBridge["pickLocation"]>,
   location: Pick<LocalLocationInfo, "id" | "type">,
-): Promise<void> {
-  const { ticket } = await pick(location.type);
+): Promise<string | undefined> {
+  const { ticket, failed } = await pick(location.type);
+  if (failed !== undefined) return PICK_BACKEND_UNAVAILABLE_TEXT;
   if (ticket !== null) await api("relinkLocalLocation", { locationId: location.id, ticket });
+  return undefined;
 }
 
 export function LocationList({
@@ -237,7 +243,8 @@ export function LocalLocations({
           if (import.meta.env.DEV) {
             await api("relinkLocalLocation", { locationId, path });
           } else if (pick) {
-            await pickAndRelink(api, pick, location);
+            const text = await pickAndRelink(api, pick, location);
+            if (text !== undefined) setRefusal(text);
           }
         });
       case "confirm":

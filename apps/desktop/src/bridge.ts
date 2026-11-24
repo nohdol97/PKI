@@ -105,7 +105,9 @@ export function createBridgeHandlers(deps: BridgeDeps): BridgeHandlers {
       const path = await deps.pickLocation(type);
       if (path === undefined) return { ticket: null };
       const ticket = randomBytes(32).toString("base64url");
-      return { ticket: deps.registerLocationTicket({ ticket, kind: type, path }) ? ticket : null };
+      if (deps.registerLocationTicket({ ticket, kind: type, path })) return { ticket };
+      // the path was picked but the backend did not take it: not a cancel, the page says so (LCF-R2)
+      return { ticket: null, failed: "backend-unavailable" as const };
     }),
     // the page names a version; the path comes from the backend and goes only to the file manager
     revealSource: checked("revealSource", async ([sourceVersionId]) => {

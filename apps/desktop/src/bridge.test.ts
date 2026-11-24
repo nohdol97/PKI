@@ -13,6 +13,7 @@ function handlers(
   confirm = true,
   picked: string | null = "/picked/folder",
   revealed: string | null = "/docs/a.md",
+  accepted = true,
 ) {
   const opened: string[] = [];
   const confirmExternal = vi.fn<(target: ExternalTarget) => Promise<boolean>>(async () => confirm);
@@ -33,7 +34,7 @@ function handlers(
     confirmExternal,
     openExternal: async (url) => void opened.push(url),
     pickLocation: async () => picked ?? undefined,
-    registerLocationTicket: (input) => (registered.push(input), true),
+    registerLocationTicket: (input) => (registered.push(input), accepted),
     revealPath: async (id) => (asked.push(id), revealed ?? undefined),
     showInFolder: (path) => void shown.push(path),
   });
@@ -76,6 +77,14 @@ describe("bridge handlers", () => {
     );
     await expect(foreign.bridge.pickLocation(PAGE, ["/etc"])).rejects.toThrow("invalid-input");
     expect(foreign.registered).toEqual([]);
+  });
+
+  it("a pick the backend cannot take is told apart from a cancel (LCF-R2)", async () => {
+    const { bridge } = handlers(true, "/picked/folder", "/docs/a.md", false);
+    expect(await bridge.pickLocation(PAGE, ["folder"])).toEqual({
+      ticket: null,
+      failed: "backend-unavailable",
+    });
   });
 
   it("pickLocation takes the file kinds too and registers the ticket under that kind (I02B-T06)", async () => {

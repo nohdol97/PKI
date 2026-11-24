@@ -83,6 +83,10 @@ export const ACTION_REFUSAL_TEXT: Record<string, string> = {
   "not-lifted": "사용자가 지운 파일은 지운 원본의 삭제를 해제한 뒤에 다시 가져올 수 있습니다.",
 };
 
+/** The shell could not hand the picked place to the backend (it has ended); a cancel says nothing (LCF-R2). */
+export const PICK_BACKEND_UNAVAILABLE_TEXT =
+  "백엔드가 응답하지 않아 위치를 추가하지 못했습니다. 잠시 뒤에 다시 시도해 주세요.";
+
 export const ACTION_TEXT = {
   pause: "일시 중지",
   resume: "다시 켜기",
