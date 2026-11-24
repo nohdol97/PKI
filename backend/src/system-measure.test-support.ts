@@ -295,9 +295,14 @@ export function validateResult(value: unknown): string[] {
         get(value, "metrics.killRecover.failedJobs") !== null,
       "missing",
     );
-    for (const k of ["facts", "evidence", "expectedEvidence"]) {
-      if (get(value, `metrics.killRecover.knowledge.${k}`) !== undefined)
-        nonNegative(`metrics.killRecover.knowledge.${k}`);
+    const knowledge = get(value, "metrics.killRecover.knowledge");
+    if (knowledge !== undefined) {
+      const isObject =
+        typeof knowledge === "object" && knowledge !== null && !Array.isArray(knowledge);
+      at("metrics.killRecover.knowledge", isObject, "not an object");
+      if (isObject)
+        for (const k of ["facts", "evidence", "expectedEvidence"])
+          nonNegative(`metrics.killRecover.knowledge.${k}`);
     }
   }
   const unverified = get(value, "unverified");
@@ -585,14 +590,16 @@ const FAILED = ["dead_letter", "cancelled", "superseded"] as const;
 
 /**
  * `extract` jobs that ended without producing their result, by status (H03C2F-R1). A truncated job list cannot be
- * filtered by kind, so it falls back to the counts over every kind (the larger number).
+ * filtered by kind for the lines it hides, so those count whatever their kind (HVT-R2); visible lines are filtered.
  */
 export function failedJobCounts(jobs: JobsResponse): Record<string, number> {
   const failed: Record<string, number> = {};
   for (const status of FAILED) {
+    const visible = jobs.jobs.filter((j) => j.status === status);
+    const visibleExtract = visible.filter((j) => j.kind === "extract").length;
     const n = jobs.truncated
-      ? (jobs.counts[status] ?? 0)
-      : jobs.jobs.filter((j) => j.kind === "extract" && j.status === status).length;
+      ? visibleExtract + Math.max(0, (jobs.counts[status] ?? 0) - visible.length)
+      : visibleExtract;
     if (n > 0) failed[status] = n;
   }
   return failed;
@@ -605,16 +612,21 @@ export function assertNoFailedExtract(jobs: JobsResponse, what: string): void {
     throw new Error(`${what}: an extract job ended without its result ${JSON.stringify(failed)}`);
 }
 
-/** H03C2F-R1: lost and duplicate knowledge from the evidence rows (one per document is expected) and the item count. */
+/**
+ * H03C2F-R1 + HVT-R1: lost and duplicate knowledge from the evidence rows and the item count. A document whose
+ * extraction failed yields no evidence row, so it is subtracted from the expected rows and counted as lost.
+ */
 export function tallyKnowledge(input: {
   docs: number;
   notSearchable: number;
   evidence: number;
   itemsNamed: number;
+  failedExtract: number;
 }): { lostDocs: number; duplicateItems: number } {
+  const expected = Math.max(0, input.docs - input.failedExtract);
   return {
-    lostDocs: input.notSearchable + Math.max(0, input.docs - input.evidence),
-    duplicateItems: Math.max(0, input.itemsNamed - 1) + Math.max(0, input.evidence - input.docs),
+    lostDocs: input.notSearchable + input.failedExtract + Math.max(0, expected - input.evidence),
+    duplicateItems: Math.max(0, input.itemsNamed - 1) + Math.max(0, input.evidence - expected),
   };
 }
 
@@ -658,12 +670,14 @@ const onSignal = (signal: "SIGINT" | "SIGTERM") => () => {
   process.exit(signal === "SIGINT" ? 130 : 143);
 };
 const listeners = { SIGINT: onSignal("SIGINT"), SIGTERM: onSignal("SIGTERM") } as const;
-function cleanOnSignal(cleanup: () => void): () => void {
+/** Returns the run's end: it detaches the listeners first, then runs the cleanup once (HVT-R4), so a throwing cleanup leaves none behind. */
+export function cleanOnSignal(cleanup: () => void): () => void {
   if (cleanups.size === 0) for (const [s, l] of Object.entries(listeners)) process.on(s, l);
   cleanups.add(cleanup);
   return () => {
     cleanups.delete(cleanup);
     if (cleanups.size === 0) for (const [s, l] of Object.entries(listeners)) process.off(s, l);
+    cleanup();
   };
 }
 
@@ -864,7 +878,7 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       ...backendOptions,
     });
   let backend: Backend | undefined;
-  const stopCleaning = cleanOnSignal(() => {
+  const finish = cleanOnSignal(() => {
     for (const pid of pids) killGroup(pid);
     rmSync(workDir, { recursive: true, force: true });
   });
@@ -925,6 +939,7 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       notSearchable,
       evidence,
       itemsNamed: itemIds.length,
+      failedExtract: (failedJobs.dead_letter ?? 0) + (failedJobs.cancelled ?? 0),
     });
     const leaseMs = options.mode === "test-build" ? (options.leaseMs ?? 0) : 120_000;
     return {
@@ -941,10 +956,11 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       note: "firstJobAfterRestartMs is the time from the restart to the first job to run (any job); allJobsDoneMs to every job finished, the interrupted job included, which the restarted backend reclaims at its start whatever its lease end",
     };
   } finally {
-    if (backend) await stopBackend(backend);
-    for (const pid of pids) killGroup(pid);
-    rmSync(workDir, { recursive: true, force: true });
-    stopCleaning();
+    try {
+      if (backend) await stopBackend(backend);
+    } finally {
+      finish();
+    }
   }
 }
 
@@ -987,7 +1003,7 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
   const pids: number[] = [];
   const ranAt = new Date().toISOString();
   let backend: Backend | undefined;
-  const stopCleaning = cleanOnSignal(() => {
+  const finish = cleanOnSignal(() => {
     for (const pid of pids) killGroup(pid);
     rmSync(workDir, { recursive: true, force: true });
   });
@@ -1240,9 +1256,10 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
     };
     return { result, trace: { pids, workDir, rawBytes } };
   } finally {
-    if (backend) await stopBackend(backend);
-    for (const pid of pids) killGroup(pid);
-    rmSync(workDir, { recursive: true, force: true });
-    stopCleaning();
+    try {
+      if (backend) await stopBackend(backend);
+    } finally {
+      finish();
+    }
   }
 }

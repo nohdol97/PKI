@@ -9,6 +9,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
 import {
   assertNoFailedExtract,
+  cleanOnSignal,
   failedJobCounts,
   hasResumed,
   idleConditionLine,
@@ -112,11 +113,15 @@ describe("system-measure (H03-C2)", () => {
     ({ jobs: list, counts, truncated: false }) as never;
 
   it("H03C2F-C1: counts lost and duplicate knowledge from evidence rows, and failedJobs only for extract jobs", () => {
-    expect(tallyKnowledge({ docs: 3, notSearchable: 0, evidence: 4, itemsNamed: 1 })).toEqual({
+    expect(
+      tallyKnowledge({ docs: 3, notSearchable: 0, evidence: 4, itemsNamed: 1, failedExtract: 0 }),
+    ).toEqual({
       lostDocs: 0,
       duplicateItems: 1,
     });
-    expect(tallyKnowledge({ docs: 3, notSearchable: 0, evidence: 2, itemsNamed: 1 })).toEqual({
+    expect(
+      tallyKnowledge({ docs: 3, notSearchable: 0, evidence: 2, itemsNamed: 1, failedExtract: 0 }),
+    ).toEqual({
       lostDocs: 1,
       duplicateItems: 0,
     });
@@ -180,6 +185,57 @@ describe("system-measure (H03-C2)", () => {
       expect(() => resultPath(dir, "../x", true)).toThrow(/name/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// HVT (docs/specs/2026-11-24-HVT-h03-verification-tools.md): pure checks, no measurement run.
+describe("HVT (system-measure)", () => {
+  const job = (id: number, kind: string, status: string) =>
+    ({ id, kind, status, attempts: 1 }) as never;
+
+  it("HVT-C1: a failed extract is subtracted from the expected evidence, so a loss and a duplicate no longer cancel", () => {
+    expect(
+      tallyKnowledge({ docs: 3, notSearchable: 0, evidence: 3, itemsNamed: 1, failedExtract: 1 }),
+    ).toEqual({ lostDocs: 1, duplicateItems: 1 });
+    expect(
+      tallyKnowledge({ docs: 3, notSearchable: 0, evidence: 4, itemsNamed: 1, failedExtract: 0 }),
+    ).toEqual({ lostDocs: 0, duplicateItems: 1 });
+    expect(
+      tallyKnowledge({ docs: 3, notSearchable: 0, evidence: 2, itemsNamed: 1, failedExtract: 0 }),
+    ).toEqual({ lostDocs: 1, duplicateItems: 0 });
+  });
+
+  it("HVT-C2: a truncated list counts the hidden failures but not a visible other kind", () => {
+    const jobs = (list: unknown[], counts: Record<string, number>) =>
+      ({ jobs: list, counts, truncated: true }) as never;
+    expect(failedJobCounts(jobs([job(1, "maintenance", "superseded")], { superseded: 1 }))).toEqual(
+      {},
+    );
+    expect(failedJobCounts(jobs([], { dead_letter: 2 }))).toEqual({ dead_letter: 2 });
+  });
+
+  it("HVT-C3: the validator rejects a null or empty knowledge block and accepts its absence", () => {
+    const base = JSON.parse(readFileSync(join(ROOT, "eval/results/h03-c2-dev.json"), "utf8"));
+    const withKnowledge = (knowledge: unknown) => {
+      const copy = structuredClone(base);
+      copy.metrics.killRecover = { ...copy.metrics.killRecover, knowledge };
+      return validateResult(copy).join("\n");
+    };
+    expect(validateResult(base)).toEqual([]);
+    expect(withKnowledge(null)).toContain("knowledge");
+    expect(withKnowledge({})).toContain("knowledge.facts");
+  });
+
+  it("HVT-C4: a throwing cleanup still detaches the signal listeners", () => {
+    for (const signal of ["SIGTERM", "SIGINT"] as const) {
+      const before = process.listenerCount(signal);
+      const finish = cleanOnSignal(() => {
+        throw new Error("rm failed");
+      });
+      expect(process.listenerCount(signal)).toBe(before + 1);
+      expect(() => finish()).toThrow("rm failed");
+      expect(process.listenerCount(signal)).toBe(before);
     }
   });
 });

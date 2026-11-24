@@ -1,5 +1,5 @@
 // H03C2F-C7 (docs/specs/2026-11-24-H03C2F-runner-followups.md): a measurement command that gets SIGTERM while its
-// backend runs ends non-zero and leaves neither the backend nor its work folder behind. POSIX only: it probes a
+// backend runs ends 143 (SIGTERM) and leaves neither the backend nor its work folder behind. POSIX only: it probes a
 // process group.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -62,7 +62,7 @@ describe.skipIf(process.platform === "win32")("system-measure signal (H03C2F)", 
       expect(created.length).toBe(1);
       command.kill("SIGTERM");
       const code = await exited;
-      expect(code).not.toBe(0);
+      expect(code).toBe(143);
       for (const pid of backend) expect(groupAlive(pid)).toBe(false);
       expect(workDirs()).toEqual([]);
     } finally {

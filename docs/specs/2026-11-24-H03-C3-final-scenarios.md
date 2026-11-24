@@ -88,7 +88,7 @@ H03-C3은 "FS01~FS14를 Windows 설치본에서 모두 증거 링크로 매핑�
 - **H03C3-R7 (첫 표)** 첫 표는 14개 모두를 채운다. 증거는 파일을 열어 확인한 시험만 적는다. 이 저장소에는 설치본 결과가 없으므로 `verified`는 0개다.
 - **H03C3-R8 (후속, 이슈 #317)** 검사기를 다음처럼 조인다.
   1. `needsProvider`는 이름처럼 검사기의 고정 목록이 들고 있고 표에는 없다. 표에 `needsProvider` 키가 있으면 모르는 키로 어긋난다. Provider를 부르는 시나리오는 표가 무엇을 적든 실제 Provider의 설치본 `site-result` 없이 `verified`가 될 수 없다.
-  2. `unit` 증거의 `path`가 vitest가 돌리지 않는 폴더(`node_modules`·`eval`·`verification`, `vitest.config.ts`의 `exclude`를 그대로 옮긴 고정 목록) 아래이면 어긋난다. `measure`의 `eval/results/` 경로는 영향이 없다.
+  2. `unit` 증거의 `path`가 vitest가 돌리지 않는 폴더(`vitest.config.ts`의 `exclude`를 그대로 옮긴 고정 목록: `node_modules`는 깊이와 무관, `eval`·`verification`은 저장소 루트 바로 아래만, 대소문자 무시 — [HVT spec](2026-11-24-HVT-h03-verification-tools.md) R7) 아래이면 어긋난다. `measure`의 `eval/results/` 경로는 영향이 없다.
   3. `path`나 `procedure`가 폴더라서 읽다가 예외가 나면 그 시나리오 ID를 든 어긋난 줄을 내고 종료 값 1이다(예외로 끝나지 않는다).
   4. `path`·`procedure`는 윈도 드라이브 절대 경로(`C:\x`, `C:/x`, `C:x`)와 역슬래시를 거부한다.
   5. `provider: none`은 "그 시험 자체가 Provider도 대역도 부르지 않는다"는 뜻이다. 시험이 읽는 미리 채운 자료는 이전에 대역이 만들었을 수 있다. 만든 문서 머리말에 이 한 줄을 적는다.
@@ -118,7 +118,7 @@ H03-C3은 "FS01~FS14를 Windows 설치본에서 모두 증거 링크로 매핑�
 - **H03C3-C7** (R8의 1) 표에 `needsProvider: false`를 적고 대역 설치본 `site-result`로 FS04를 `verified`로 바꾸면, 검사가 FS04를 든 줄을 `needsProvider`(모르는 키)와 `verified needs`(상태 조건) 두 가지로 낸다. 검사기의 상태 조건에서 고정 목록 확인을 빼면 이 시험이 빨개진다.
 - **H03C3-C8** (R8의 2·3·4) `eval/`·`verification/`·`node_modules/` 아래 `unit` 경로, 폴더를 가리키는 `path`·`procedure`(읽기가 예외를 던지는 경우), 드라이브 절대·역슬래시 경로는 각각 그 시나리오 ID를 든 줄을 내고(폴더는 종료 값 1), `eval/results/` 아래 `measure`는 어긋나지 않는다. R8의 5는 C5가 머리말 글자까지 같은지 본다.
 
-검사기는 출시 여부를 알리는 보고 도구이고 보안·자료 보호의 허용·차단을 가르지 않으므로 변이 확인은 하지 않는다. C2·C3의 "어긋난 표가 걸린다"가 그 몫을 한다.
+변이 확인은 C7의 고정 목록 확인(Provider를 부르는 시나리오가 실제 Provider 결과 없이 `verified`가 되는 것을 막는 한 줄)에만 한다. 나머지 검사(C2~C5·C8)는 출시 여부를 알리는 보고 도구의 검사이고 보안·자료 보호의 허용·차단을 가르지 않으므로 변이 확인을 하지 않는다. C2·C3의 "어긋난 표가 걸린다"가 그 몫을 한다.
 
 ## 잠정 결정
 
@@ -148,3 +148,4 @@ H03-C3은 "FS01~FS14를 Windows 설치본에서 모두 증거 링크로 매핑�
 |---|---|---|
 | 2026-11-24 | 작성·확정 | #34 H03-C3 공용 범위 |
 | 2026-11-24 | R8·C7·C8 추가, D7 수정(`needsProvider`를 검사기 고정 목록으로, 폴더 경로·드라이브 경로 거부, `provider: none` 뜻) | 이슈 #317 독립 검토 지적 F1·F3·F4·F5·F6 |
+| 2026-11-24 | 변이 확인 문장을 C7에만 하는 것으로 고침(C7과 모순), R8의 2 폴더 범위를 vitest `exclude`와 같게(루트 기준·대소문자 무시) | 이슈 #317 FU2·FU3·FU4, [HVT spec](2026-11-24-HVT-h03-verification-tools.md) |
