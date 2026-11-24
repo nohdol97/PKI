@@ -474,6 +474,7 @@ export {
   judgeCheckJob,
   judgeClaims,
   judgePathCut,
+  judgeStatedRelations,
   judgeWaitingOn,
   type DataCheckReason,
   type DataCheckUnmet,

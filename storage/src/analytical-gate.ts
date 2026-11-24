@@ -395,3 +395,26 @@ export function judgeWaitingOn(tx: SqlDriver, sourceId: number, at?: string): vo
     for (const fact of standingFacts(tx, subject)) lose(tx, fact.id, "data-basis-lost", basis, at);
   }
 }
+
+/**
+ * An extraction wrote its result (seat ③): the live path relations it put evidence on, stated again or kept,
+ * get the cut judgement of seat ②, so a subject whose Dataset was rejected while its relation waited is judged
+ * now that the relation is live again (BGL-R1). Only the ids are taken; the types are read here.
+ */
+export function judgeStatedRelations(
+  tx: SqlDriver,
+  relationIds: readonly number[],
+  at?: string,
+): void {
+  if (!anyTable(tx) || relationIds.length === 0) return;
+  const rows = tx.all(
+    `SELECT subject_id, object_id FROM relations
+      WHERE id IN (SELECT value FROM json_each(?)) AND type IN ('MEASURED_ON', 'JOIN_LEFT', 'JOIN_RIGHT')
+        AND ${LIVE}
+      ORDER BY id`,
+    [JSON.stringify(relationIds)],
+  );
+  for (const r of rows) {
+    judgePathCut(tx, { subjectId: r.subject_id as number, objectId: r.object_id as number }, at);
+  }
+}

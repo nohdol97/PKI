@@ -78,6 +78,7 @@ import {
   followMovedRow,
   isDate,
   isTabularVersion,
+  judgeStatedRelations,
   judgeWaitingOn,
   normalizeColumnName,
   normalizeValue,
@@ -963,6 +964,8 @@ export function createExtractHandler(options: ExtractHandlerOptions) {
         const at = now().toISOString();
         // S03-R16 ③: what still waits on this source after its extraction is not stated again
         judgeWaitingOn(tx, own.sourceId, at);
+        // BGL-R1: a path relation this extraction stated again is live; its subject is judged at this seat too
+        judgeStatedRelations(tx, [...judgedRelations], at);
         assessAfterExtraction(
           tx,
           { factIds: [...judgedFacts], relationIds: [...judgedRelations] },
