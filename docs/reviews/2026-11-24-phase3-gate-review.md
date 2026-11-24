@@ -1,6 +1,6 @@
 # Phase 3 (Semantic Knowledge) 완료 Gate 검토
 
-- 검토일: 2026-11-24 (origin/main `d1384090` 기준, 이슈 상태는 같은 날 `gh`로 측정)
+- 검토일: 2026-11-24 (origin/main `80a7962b` 기준, 이슈 상태는 같은 날 `gh`로 측정)
 - 범위: 공용(개인 저장소) 쪽에서 확인할 수 있는 것만 판정한다. 실제 Provider로 한 추출, Windows 실행, 배포처 실행이 필요한 기준은 통과로 쓰지 않는다.
 - 판정 말: `증거 있음` / `미검증 — Windows 필요` / `미검증 — 배포처 필요` / `미검증 — 보류(사유)` / `증거 없음`
 - 증거 표기: PR 번호 뒤 괄호는 `origin/main`에 들어 있는 merge commit 짧은 SHA다.
@@ -48,7 +48,7 @@
 |---|---|---|
 | S03-C1 문서에서 KPI 정의를 후보로 추출하고 근거 문서·실제 dataset schema와 연결 | #142 (`622c7bc9`) #157 (`3ab9d688`) #164 (`5af6fd40`) #217 (`453a3886`) #230 (`f234f710`); `knowledge-engine/src/tabular-source.test.ts`, `packages/contracts/src/cell-grammar.test.ts`, `knowledge-engine/src/dataset-profile.test.ts`, `knowledge-engine/src/extraction-v5.test.ts`, `backend/src/analytical.e2e-import.test.ts` | 증거 있음 |
 | S03-C2 실제 schema·grain·join·집계 검증 없이는 verified 승격 불가, 단위·통화·기간·version 충돌 fixture | #143 (`df35c739`) #186 (`07496f3c`) #208 (`142a823a`) #205 (`6192bdb8`); `knowledge-engine/src/analytical-checks.test.ts`, `knowledge-engine/src/analytical-check-job.test.ts`, `storage/src/analytical-gate.test.ts`, `backend/src/analytical-api.test.ts`, `knowledge-engine/src/conflict-fixtures.test.ts` | 증거 있음 |
-| S03-C3 독립 BI·SQL 생성기 없이 Knowledge Semantic 확장과 사용자 검토 UI 계약으로 끝냄 | #228 (`a128e1f7`) #230 (`f234f710`); 결정 기록 `docs/adr/0023-analytical-semantic-rows-and-data-checks.md`, 읽기 계약 시험 `backend/src/analytical-api.test.ts`, `backend/src/analytical-handlers.test.ts`, `packages/contracts/src/analytical-types.test.ts`. "SQL 생성기가 없다"는 부정 사실은 ADR과 코드 검토로만 뒷받침된다 | 증거 있음 |
+| S03-C3 독립 BI·SQL 생성기 없이 Knowledge Semantic 확장과 사용자 검토 UI 계약으로 끝냄 | #228 (`a128e1f7`) #230 (`f234f710`); 결정 기록 `docs/adr/0023-analytical-semantic-rows-and-data-checks.md`, 읽기 계약 시험 `backend/src/analytical-api.test.ts`, `backend/src/analytical-handlers.test.ts`, `packages/contracts/src/analytical-types.test.ts`. 이 기준은 "만들지 않았다"는 부정 사실이라 ADR 0023(결정)과 읽기 계약 시험(Semantic 확장과 검토 UI 계약이 동작함)에 기대며, "SQL 생성기가 없다"를 기계적으로 막는 구조 시험은 없다. ADR과 코드 검토로만 뒷받침된다 | 증거 있음 |
 | S03 배포처 확인: 실제 dataset 연결·Windows(site-setup S34, RUNBOOK 12절) | 실행기: #230 (`f234f710`) `verification/tests/test_s03_analytical_scenario.py`(합성 입력). 실행 결과 없음 | 미검증 — 배포처 필요 |
 
 ## 3. 남은 항목
@@ -65,4 +65,4 @@
 
 공용 범위에서 확인된 것: S01-C1~C3, S02-C1~C3의 시험 가능한 부분, S03-C1~C3은 머지된 PR과 존재하는 시험 파일로 뒷받침된다. 증거는 합성 fixture와 test double Provider 위의 것이다.
 
-남은 것: 세 작업 모두 배포처 실행(S32·S33·S34)이 남아 있어 실제 Provider 추출 품질과 Windows 동작은 확인되지 않았다. S02-C3의 일부 범위 교차 증명은 대표 시험만 있다. Phase 3의 Gate는 `미검증` 행이 남아 있어 충족되었다고 선언하지 않는다. 이 문서가 확인한 공용 범위에서는 S01~S03의 구현과 시험이 다 들어와 있다.
+남은 것: 세 작업 모두 배포처 실행(S32·S33·S34)이 남아 있어 실제 Provider 추출 품질과 Windows 동작은 확인되지 않았다. S02-C3의 일부 범위 교차 증명은 대표 시험만 있다. Phase 3의 Gate는 `미검증` 행이 남아 있어 충족되었다고 선언하지 않는다. 이 문서가 확인한 공용 범위에서 S01~S03의 구현은 머지됐고 인용한 시험 파일도 있다. 다만 S02-C3c의 일부 증명 표는 대표 시험만 있어 `보류`로 남아 있으므로 "시험이 다 들어와 있다"고까지는 말하지 않는다.

@@ -1,6 +1,6 @@
 # Phase 4 (Knowledge Consolidation) 완료 Gate 검토
 
-- 검토일: 2026-11-24 (origin/main `d1384090` 기준, 이슈 상태는 같은 날 `gh`로 측정)
+- 검토일: 2026-11-24 (origin/main `80a7962b` 기준, 이슈 상태는 같은 날 `gh`로 측정)
 - 범위: 공용(개인 저장소) 쪽에서 확인할 수 있는 것만 판정한다. 실제 Provider로 한 요약·의견, Windows 실행, 배포처 실행이 필요한 기준은 통과로 쓰지 않는다.
 - 판정 말: `증거 있음` / `미검증 — Windows 필요` / `미검증 — 배포처 필요` / `미검증 — 보류(사유)` / `증거 없음`
 - 증거 표기: PR 번호 뒤 괄호는 `origin/main`에 들어 있는 merge commit 짧은 SHA다.
@@ -30,7 +30,10 @@
 | K01-C3a 부분 쓰기 실패 복구 | #219 (`18e0b958`); `knowledge-engine/src/wiki-build-job.test.ts` | 증거 있음 |
 | K01-C3b 원본 삭제와 access_scope 승계 반영 | #219 (`18e0b958`) #236 (`ca7e45f7`) #269 (`620dabad`); `backend/src/wiki-gate.test.ts`, `backend/src/wiki-flow.test.ts`, `backend/src/scope-policy.test.ts` | 증거 있음 |
 | K01-C3c 같은 knowledge revision에서 재생성해도 내용 해시가 같고 사용자 메모·숨김이 유지 | #219 (`18e0b958`); `backend/src/wiki-flow.test.ts`, `knowledge-engine/src/wiki-build-job.test.ts` | 증거 있음 |
-| K01-C4 LLM 요약(spec이 더한 기준): 인용문이 원문에 있는 문장만 저장, 동의 없으면 held | #226 (`f6b27be4`); `knowledge-engine/src/wiki-summary-job.test.ts`, `providers/src/broker.wiki-summary.test.ts`. 시험은 fake Provider로 돈다 | 증거 있음 |
+| K01-C4 LLM 요약(spec이 더한 기준): 인용문이 원문에 있는 문장만 저장, 동의 없으면 held | #226 (`f6b27be4`); `knowledge-engine/src/wiki-summary-job.test.ts`, `providers/src/broker.wiki-summary.test.ts`; 동의 없으면 held는 `backend/src/wiki-flow.test.ts`의 "② without consent the job is held, no Provider is asked, the page says `held`; with consent it becomes `ready`", 설정이 꺼져 있으면 작업이 없음은 같은 파일의 "③ with the setting off (the default) queues no summary job and the page says `off`". 시험은 fake Provider로 돈다 | 증거 있음 |
+| K01-C5 한 페이지의 변경 수 줄별 가리기(공개 주장 → 거부 범위 주장이 더해졌다 빠짐 → 공개 주장 추가; 빠진 수는 모든 줄에서 0) | #269 (`620dabad`); `backend/src/wiki-gate.test.ts`의 "gives a line's added count only while no later line of the page removed a claim, and never a removed count (K01-R18 1, C5)" | 증거 있음 |
+| K01-C6 관계 끝이 숨은 구성원이면 관계 주체 페이지의 생성 줄 변경 수가 0 | #269 (`620dabad`); `backend/src/wiki-gate.test.ts`의 "gives no change count for a page whose relation claim names an end the reader cannot see (K01-R18 2, C6)" | 증거 있음 |
+| K01-C7 사용자가 만든 항목의 만들기를 되돌리면 그 항목과 Insight의 페이지·계보 행이 지워짐 | #269 (`620dabad`); `storage/src/wiki.test.ts`의 "leaves no page, lineage or link row for the item or for the Insight that went with it" | 증거 있음 |
 | K01 실제 Provider의 요약 품질·Windows 설치본(site-setup 해당 절) | 실행 결과 없음 | 미검증 — 배포처 필요 |
 
 ### K02 Reflection·Consolidation·Lint (#26)
@@ -58,6 +61,6 @@
 
 ## 4. 결론
 
-공용 범위에서 확인된 것: Wiki 투영(K01-C1 대부분, C2a·b, C3a·b·c, C4)과 Reflection·Lint(K02-C1, C2a·b, C3a·b·c, C4)는 머지된 PR과 존재하는 시험 파일로 뒷받침된다. 증거는 fake Provider와 합성 fixture 위의 것이다.
+공용 범위에서 확인된 것: Wiki 투영(K01-C1 대부분, C2a·b, C3a·b·c, C4~C7)과 Reflection·Lint(K02-C1, C2a·b, C3a·b·c, C4)는 머지된 PR과 존재하는 시험 파일로 뒷받침된다. 증거는 fake Provider와 합성 fixture 위의 것이다.
 
 남은 것: `metrics` 페이지의 분석 검사 결과는 하지 않기로 해서 K01-C1 전체를 통과로 볼 수 없다. 실제 Provider의 요약·의견 품질과 Windows 동작은 배포처에서만 확인된다. 열린 후속 이슈가 남아 있다. 따라서 Phase 4의 Gate는 충족되었다고 선언하지 않는다.

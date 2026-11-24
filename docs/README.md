@@ -77,7 +77,7 @@
 | [specs/2026-11-24-SLF-shell-lifecycle-followups.md](specs/2026-11-24-SLF-shell-lifecycle-followups.md) | 셸 수명주기 후속 묶음(SLF, #295·#304): 자동 시작을 끄는 호출이 던져도 제거 호출이 한 줄과 종료 코드 1로 끝남, `instance.lock`으로 시작하는 폴더가 지우기를 반쯤 남기지 않음, 트레이 자동 시작 체크가 OS 상태와 같음, `runUpdate`가 받은 파일 삭제 실패에도 거절되지 않음. 열린 잠금 파일 틈(A2)·종료 코드 분리 등은 보류·문구로 분류 | 확정(잠정 결정 포함) |
 | [specs/2026-11-24-MGV-member-visibility-followups.md](specs/2026-11-24-MGV-member-visibility-followups.md) | 묶음 구성원 가시성 후속(MGV, #310·#287 F2): 탐색의 가운데 항목 답과 지식 목록이 가려진 줄이나 가려진 항목을 지나야 닿는 구성원을 싣지 않게(그래프 읽기와 같은 규칙), 깊이 상한 숫자 없애기, 지우기 거절 답의 "걸린 것" 수가 가려진 줄을 세지 않게. X02F-D4·RVS-D3의 `mergeId: null`로 싣기를 대체. 마이그레이션·계약 변경 없음 | 확정 |
 | [specs/2026-11-24-H03C2F-runner-followups.md](specs/2026-11-24-H03C2F-runner-followups.md) | H03-C2 측정 실행기 후속 묶음(H03C2F, #296): 12건을 코드와 대조해 분류하고, 유실·중복을 근거 줄 수로 세기, 실패한 추출을 표본에서 빼기, 유휴 때 남은 작업 수와 macOS RSS 주의 적기, 재개를 새 시도로만 보기, `unverified`와 검사기 보강, 신호를 받았을 때의 뒷정리, 결과 파일 덮어쓰기는 `--force`로만. 추적 중인 결과 파일은 다시 만들지 않음 | 확정(잠정 결정 포함) |
-| [reviews/README.md](reviews/README.md) | 단계(Phase 0~7) 완료 Gate 검토 문서 색인: 에픽 #2~#9의 완료 기준마다 머지된 PR·시험·문서 근거와 판정(증거 있음·미검증·증거 없음)을 적었다. 어느 Phase도 통과로 선언하지 않는다 | 2026-11-24 검토(origin/main `d1384090` 기준) |
+| [reviews/README.md](reviews/README.md) | 단계(Phase 0~7) 완료 Gate 검토 문서 색인: 에픽 #2~#9의 완료 기준마다 머지된 PR·시험·문서 근거와 판정(증거 있음·미검증·증거 없음)을 적었다. 어느 Phase도 통과로 선언하지 않는다 | 2026-11-24 검토(origin/main `80a7962b` 기준) |
 | [specs/2026-11-24-A11Y-accessibility-audit.md](specs/2026-11-24-A11Y-accessibility-audit.md) | 접근성 자동 점검(A11Y, #34·#308): 메뉴의 열한 화면과 근거를 연 탐색 화면을 `@axe-core/playwright`로 WCAG 2.1 A·AA 검사(`serious`·`critical` 0건), 키보드만으로 가는 탐색 흐름 하나. 다른 묶음이 고치는 네 화면 파일의 위반은 줄 단위 예외로 미룸. 화면 낭독기·Windows·설치본은 미검증 | 확정 |
 
 ## 동작 방식
