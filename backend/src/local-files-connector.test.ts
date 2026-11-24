@@ -1,9 +1,14 @@
 // I02B-T03a: the `local-files` connector over its ports (one representative case per criterion; the
 // clauses not tested are listed in the PR as deferred). The index is the canonical one on an in-memory
 // database, the file system is a real temporary folder, the normalizer is the in-process one or a stand-in.
-import { blocksValid, SourceRecordSchema, type LocalIndexPort } from "@pki/contracts";
+import {
+  blocksValid,
+  SourceRecordSchema,
+  type LocalIndexEntry,
+  type LocalIndexPort,
+} from "@pki/contracts";
 import { normalizeDocument } from "@pki/document-normalize";
-import { createLocalFileIndex, type LocalFileIndex } from "@pki/storage";
+import { createLocalFileIndex, type LocalFileEntry, type LocalFileIndex } from "@pki/storage";
 import { createHash } from "node:crypto";
 import {
   mkdirSync,
@@ -72,7 +77,17 @@ describe("the canonical index satisfies the port (compile-time)", () => {
       keyof Arg<LocalFileIndex["insertEntry"], 0>,
       keyof Arg<LocalIndexPort["insertEntry"], 0>
     > = true;
-    expect([update, insert, updateKeys, insertKeys]).toEqual([true, true, true, true]);
+    // The read entry type: the port's LocalIndexEntry must stay the index's LocalFileEntry (#353).
+    const entry: Same<LocalFileEntry, LocalIndexEntry> = true;
+    const entryKeys: Same<keyof LocalFileEntry, keyof LocalIndexEntry> = true;
+    expect([update, insert, updateKeys, insertKeys, entry, entryKeys]).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
   });
 });
 
