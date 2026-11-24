@@ -5,6 +5,7 @@ import {
   confirmDeletions,
   listLocations,
   relinkLocation,
+  reopenLocation,
   type LocalLocation,
 } from "@pki/storage";
 import { chmodSync, utimesSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
@@ -213,6 +214,22 @@ describe("C12: the deletion brake", () => {
     expect(stateOf(w)).toBe("needs-confirmation");
     expect(confirmDeletions(w.db, w.locationId, 25)).toMatchObject({ ok: true });
     expect(deletes(await w.sync())).toHaveLength(25);
+  }, 30_000);
+
+  it("IGT-C3: a held deletion on an active location is read as needs-confirmation again, whatever the ratio", async () => {
+    const w = make();
+    await seed(w, 40);
+    remove(w, 0, 25);
+    await w.sync();
+    await w.sync();
+    for (let i = 0; i < 20; i++) w.write(`n${i}.md`, `# n${i}\n\nbody of n${i}\n`);
+    await w.settle(); // 25 of 60: the brake judgement is false now
+    closeLocation(w.db, w.locationId, "paused", null);
+    expect(reopenLocation(w.db, w.locationId)).toBe(true);
+    expect(stateOf(w)).toBe("active");
+    expect(deletes(await w.sync())).toHaveLength(0);
+    expect(stateOf(w)).toBe("needs-confirmation");
+    expect(held(w)).toBe(25);
   }, 30_000);
 
   it("held deletions survive a folder that went away and came back: the location returns as needs-confirmation with the same count (C11)", async () => {
