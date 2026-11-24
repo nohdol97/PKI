@@ -339,7 +339,8 @@ function policyVerifiedLine(lines: readonly StoredLine[]): StoredLine | undefine
     const line = upto[upto.length - 1];
     if (!line) return undefined;
     if (line.action === "undo" || line.action === "evidence-returned") {
-      if (line.revertsSeq === null) return undefined;
+      // a number at or past the line's own is a hand-edited history: no line to point at (RFU-R1)
+      if (line.revertsSeq === null || line.revertsSeq >= line.seq) return undefined;
       const before: number = line.revertsSeq;
       upto = upto.filter((l) => l.seq < before);
       continue;
@@ -470,7 +471,7 @@ function stateMaker(lines: readonly StoredLine[]): StoredLine | undefined | "unr
   let line = lines[lines.length - 1];
   while (line?.action === "undo") {
     // the gate always names the line it reverted; one that does not is no history to restore from
-    if (line.revertsSeq === null) return "unreadable";
+    if (line.revertsSeq === null || line.revertsSeq >= line.seq) return "unreadable";
     const reverted: number = line.revertsSeq;
     // the line before it: a state-neutral line between the two (S02-R11) is no state to restore
     line = lines.findLast((l) => l.seq < reverted);
