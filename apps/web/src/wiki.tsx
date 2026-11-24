@@ -275,6 +275,40 @@ export const buildState = (
       ? "building"
       : "idle";
 
+export interface PageReadEffects {
+  /** `fresh`: a page the user just opened (focus, and nothing carried over). */
+  shown: (page: Page, fresh: boolean) => void;
+  gone: () => void;
+  failed: (error: unknown) => void;
+}
+
+/**
+ * Page reads. `open` is a page the user asked for and always lands. `reread` reads the shown page
+ * again and lands only if that page is still the one shown when the answer comes, so a late answer
+ * neither swaps the page back nor closes the page now shown (UI01H-R1).
+ */
+export function createPageReads(api: ApiClient, on: PageReadEffects) {
+  let shownKey: string | undefined;
+  const read = (key: string, fresh: boolean) =>
+    api("wikiPage", { key }).then(
+      (page) => {
+        if (!fresh && shownKey !== key) return;
+        shownKey = page.key;
+        on.shown(page, fresh);
+      },
+      (error: unknown) => {
+        if (!fresh && shownKey !== key) return;
+        if (!gone(error)) return on.failed(error);
+        shownKey = undefined;
+        on.gone();
+      },
+    );
+  return {
+    open: (key: string) => read(key, true),
+    reread: () => (shownKey === undefined ? undefined : read(shownKey, false)),
+  };
+}
+
 export function Wiki({ api }: { api: ApiClient }) {
   const [index, setIndex] = useState<Index>();
   const [page, setPage] = useState<Page>();
@@ -305,11 +339,10 @@ export function Wiki({ api }: { api: ApiClient }) {
       api("wiki").then(setIndex, (e: unknown) => setNotice(`불러오지 못했습니다: ${message(e)}`)),
     [api],
   );
-  /** Reads the page again; `fresh` is a page the user just opened (focus, and nothing carried over). */
-  const readPage = useCallback(
-    (key: string, fresh: boolean) =>
-      api("wikiPage", { key }).then(
-        (p) => {
+  const pages = useMemo(
+    () =>
+      createPageReads(api, {
+        shown: (p, fresh) => {
           setPage(p);
           if (fresh) {
             setSource(undefined);
@@ -318,15 +351,15 @@ export function Wiki({ api }: { api: ApiClient }) {
             setOpens((n) => n + 1);
           }
         },
-        (e: unknown) => {
-          if (!gone(e)) return setNotice(`불러오지 못했습니다: ${message(e)}`);
+        gone: () => {
           setPage(undefined);
           setSource(undefined);
           opener.reset();
           setNotice(WIKI_PAGE_GONE);
           void readIndex();
         },
-      ),
+        failed: (e) => setNotice(`불러오지 못했습니다: ${message(e)}`),
+      }),
     [api, readIndex, opener],
   );
 
@@ -334,8 +367,8 @@ export function Wiki({ api }: { api: ApiClient }) {
   // another screen sent the user to a page (X02-R5)
   const wanted = useNav().target("wiki")?.wikiKey;
   useEffect(() => {
-    if (wanted !== undefined) void readPage(wanted, true);
-  }, [wanted, readPage]);
+    if (wanted !== undefined) void pages.open(wanted);
+  }, [wanted, pages]);
   const pageKey = page?.key;
   const state = buildState(index, page);
   const pending = state === "building";
@@ -344,10 +377,10 @@ export function Wiki({ api }: { api: ApiClient }) {
     if (!pending) return;
     const timer = setTimeout(() => {
       void readIndex();
-      if (pageKey !== undefined) void readPage(pageKey, false);
+      void pages.reread();
     }, STALE_POLL_MS);
     return () => clearTimeout(timer);
-  }, [pending, index, page, pageKey, readIndex, readPage]);
+  }, [pending, index, page, readIndex, pages]);
 
   const edit = (request: RouteRequest<"wikiEdit">) =>
     api("wikiEdit", request).then(
@@ -355,14 +388,14 @@ export function Wiki({ api }: { api: ApiClient }) {
       (e: unknown) => (fail(e), false),
     );
   const after = () => {
-    if (pageKey !== undefined) void readPage(pageKey, false);
+    void pages.reread();
     void readIndex();
   };
   const rebuild = () =>
     api("wikiRebuild", {}).then((r) => {
       setRebuilding(rebuildText(r.status));
       void readIndex();
-      if (pageKey !== undefined) void readPage(pageKey, false);
+      void pages.reread();
     }, fail);
 
   const listed = index?.kinds.flatMap((k) => k.pages) ?? [];
@@ -397,7 +430,7 @@ export function Wiki({ api }: { api: ApiClient }) {
                     <Row
                       title={<bdi>{p.title}</bdi>}
                       selected={p.key === pageKey}
-                      onClick={() => void readPage(p.key, true)}
+                      onClick={() => void pages.open(p.key)}
                     />
                   </li>
                 ))}
@@ -436,7 +469,7 @@ export function Wiki({ api }: { api: ApiClient }) {
           headingRef={headingRef}
           sourceHeadingRef={sourceHeadingRef}
           position={at >= 0 ? `${at + 1} / ${listed.length}` : undefined}
-          onOpenPage={(key) => void readPage(key, true)}
+          onOpenPage={(key) => void pages.open(key)}
           onOpenEvidence={opener.open}
           onHide={(claim) =>
             void edit({ op: "hide", claim: claim.ref }).then((ok) => ok && after())
