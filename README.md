@@ -189,12 +189,12 @@ pnpm이 `package.json`의 `devEngines`에 고정한 Node.js 24로 명령을 실�
 5. 느린 정규화 시험: 재현 입력 둘의 상한 시험과, 유발 입력을 30번 되풀이하는 시험입니다. 한 번에 몇 분이 걸리고 메모리를 1 GB 넘게 쓰므로 `pnpm test`는 돌리지 않습니다. 정규화는 백엔드와 다른 호스트 프로세스에서 돌고, 묶인 앱에서는 주 프로세스가 그 호스트를 띄웁니다. G23 측정은 유발 XLSX가 Electron V8에서 쓰는 힙을 기록하며, 단언이 "두 행"과 종료 상태 형식뿐인 측정이라 기본 `pnpm e2e`에서는 건너뜁니다.
 6. H03-C2 측정: 유휴 CPU·RSS, 문서 처리·검색 시간, LLM 호출 수, 저장 증가, 강제 종료 뒤 복구를 실제 백엔드(별도 프로세스)와 Provider 대역으로 재고 `eval/results/<이름>.json`에 씁니다. 제품의 작업 임대 2분을 그대로 두므로 기본 실행은 몇 분 걸리고(`--skip-kill`로 생략), `pnpm test`에는 작은 값으로 한 번 도는 시험만 들어갑니다. 개발 장비의 값은 판정이 아니라 참고값입니다(통과선은 값 옆에 적기만 합니다). 설치 파일 크기·Windows 설치본·실제 Provider·수 시간 연속 가동은 재지 않습니다([spec](docs/specs/2026-11-24-H03-C2-measure-runner.md)).
 
-**배포처** (공용 저장소에서는 `미구현, 배포처 후속`을 알리고 실패합니다)
+**배포처**
 
 | 명령 | 하는 일 |
 | --- | --- |
 | `python3 verification/v02-site-flow/run.py preflight --config <config.json>` | V02 배포처 검증 실행기. Windows 설치본과 실제 Provider 전용이며 그 밖에서는 `배포처 후속`을 알리고 실패한다. 절차: [RUNBOOK](verification/v02-site-flow/RUNBOOK.md) |
-| `pnpm --filter @pki/backend site-check <종류>` | 배포처 수집기(`site-mail`, `site-messenger`, `site-wiki`) 초기화 확인 |
+| `pnpm --filter @pki/backend site-check <종류>` | 배포처 수집기(`site-mail`, `site-messenger`, `site-wiki`) 초기화 확인. 공용 저장소에서는 `미구현, 배포처 후속`을 알리고 실패한다 |
 | `pnpm --filter @pki/site-example site-check <종류>` | 배포처 포크의 조립 패키지(`site/composition`)가 갖는 `site-check`와 같은 모양의 예시. 예시 등록의 수집기 종류(`connector-example`)를 확인한다 |
 
 ## 설정 레퍼런스
