@@ -279,6 +279,22 @@ describe("notify.flow: the user's actions (P02-R11, C3c ②)", () => {
     expect(await act({ id: 999_999, op: "read" })).toMatchObject({ status: "not-found" });
   });
 
+  it("reads and dismisses a digest line too: read fills its readAt, dismiss takes it out of the digests (NGT-C4)", async () => {
+    const { call } = await backend();
+    seedInsight(db, { name: "알림" });
+    notifyNow(db, "scan");
+    notifyNow(db, "daily", "2026-11-24T09:00:00.000Z");
+    const digests = async () => (await call("notifications")).body.digests;
+    const id = (await digests())[0]?.id as number;
+    const act = async (op: "read" | "dismiss") => (await call("notificationAct", { id, op })).body;
+
+    expect(await act("read")).toMatchObject({ status: "applied" });
+    expect((await digests()).find((d) => d.id === id)?.readAt).not.toBeNull();
+
+    expect(await act("dismiss")).toMatchObject({ status: "applied" });
+    expect((await digests()).map((d) => d.id)).not.toContain(id);
+  });
+
   it("answers 400 to an op outside the four and to a snooze time outside the three values", async () => {
     const { call } = await backend();
     seedInsight(db, { name: "알림" });
@@ -293,6 +309,24 @@ describe("notify.flow: the user's actions (P02-R11, C3c ②)", () => {
       expect((await call("notificationAct", body as never)).status).toBe(400);
     }
     expect(listNotifications(db)[0]?.status).toBe("sent");
+  });
+});
+
+describe("notify.flow: the type step weighs a line like the list does (NGT-C5, P5F-R4)", () => {
+  it("gives a line the same negative preference as the Insights list when a hidden sibling was disliked", async () => {
+    const { call } = await backend();
+    const s = seedInsight(db, { name: "싫음" });
+    const b = seedInsight(db, { name: "남음" });
+    await call("setFeedbackSettings", { learned: true });
+    for (const kind of ["useful", "irrelevant"] as const) {
+      await call("feedbackRecord", { target: { kind: "insight", id: s.insightId }, kind });
+    }
+    notifyNow(db, "scan");
+
+    const line = (await call("notifications")).body.lines.find((l) => l.insight.id === b.insightId);
+    const listed = (await call("insights")).body.insights.find((i) => i.id === b.insightId);
+    expect(line?.insight.ranking.preference).toBeLessThan(0);
+    expect(line?.insight.ranking.preference).toBe(listed?.ranking.preference);
   });
 });
 
