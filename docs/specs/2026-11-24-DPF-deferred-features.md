@@ -60,7 +60,7 @@
 
 - **DPF-R4 실패를 위치 상태로 적는다.** `active`인 `jsonl-file` 위치의 읽기가 자리나 정체 때문에 거절되면, 그 동기화는 지금처럼 아무것도 읽지 않고 `connector-failed`로 끝나며(I02B-C33 그대로), 위치를 `unavailable`로 옮긴다. 사유는 기존 낱말을 쓴다: `redirected`·`symlink`·`not-regular-file`은 `root-changed`, `not-readable`은 `root-missing`. 상태는 그때도 `active`일 때만 옮긴다(사이에 사용자가 일시 중지했으면 그대로 둔다).
 - **DPF-R5 `unavailable`인 동안.** 동기화마다 **승인 때 적은 정체로** 다시 열어 본다. 맞으면 위치를 `active`로 되돌리고 읽는다(뺐던 디스크가 돌아온 경우, 폴더 위치의 I02B-R7과 같은 규칙). 맞지 않으면 빈 페이지를 돌려주고 cursor를 그대로 둔다. 실패 작업은 더 쌓이지 않는다.
-- **DPF-R6 다시 연결.** `relinkLocalLocation`이 `jsonl-file` 위치를 받는다. ① 승인과 **같은 검사**(`checkApproval`, 종류 `jsonl-file`: 실제 경로, 일반 파일, `.jsonl`, 데이터 폴더 밖, 다른 위치와 겹치지 않음. 겹침 검사에서 자기 자신만 뺀다)를 지난다. ② 경로는 I02B-R37 그대로 선택 창의 표(ticket)로만 받는다(개발·시험 빌드만 글로 적은 경로). ③ 상태가 `unavailable`일 때만 받는다. ④ 통과하면 경로와 정체를 새로 적고 `active`가 되며, 위치 ID·인스턴스 ID·이미 들어온 원본은 그대로이고 그 인스턴스의 동기화를 지금 등록한다. ⑤ 거절이면 아무것도 바뀌지 않는다. 다시 연결 뒤 첫 동기화는 파일 해시가 달라 전체 다시 읽기다(I01-R23, `deletionsMayBeMissed`).
+- **DPF-R6 다시 연결.** `relinkLocalLocation`이 `jsonl-file` 위치를 받는다. ① 승인과 **같은 검사**(`checkApproval`, 종류 `jsonl-file`: 실제 경로로 풀기(심볼릭 링크는 가리키는 파일로 풀려 그 파일이 승인 대상이 된다), 일반 파일, `.jsonl`, 데이터 폴더 밖, 다른 위치와 겹치지 않음. 겹침 검사에서 자기 자신만 뺀다)를 지난다. ② 경로는 I02B-R37 그대로 선택 창의 표(ticket)로만 받는다(개발·시험 빌드만 글로 적은 경로). ③ 상태가 `unavailable`일 때만 받는다. ④ 통과하면 경로와 정체를 새로 적고 `active`가 되며, 위치 ID·인스턴스 ID·이미 들어온 원본은 그대로이고 그 인스턴스의 동기화를 지금 등록한다. ⑤ 거절이면 아무것도 바뀌지 않는다. 다시 연결 뒤 첫 동기화는 파일 해시가 달라 전체 다시 읽기다(I01-R23, `deletionsMayBeMissed`).
 - **DPF-R7 화면.** ① `unavailable`인 `jsonl-file` 줄에 안내를 보인다: "파일이 승인한 때와 달라졌습니다. 같은 파일이 맞으면 '다시 연결'로 다시 골라 주세요. 원본은 지워지지 않습니다." ② "다시 연결"은 그 위치의 **종류**에 맞는 선택 창을 연다(`jsonl-file`이면 JSONL 파일 선택). 폴더 선택으로 고정돼 있던 것을 고친다.
 
 ### 바꾸는 자리
@@ -85,7 +85,7 @@
 - [ ] **DPF-C2** (R1): 계약 시험의 경로 표에 `entityDistinctMarks`가 있고 실제 응답이 그 스키마를 지난다. — `backend/src/api.contract.test.ts`
 - [ ] **DPF-C3** (R3): 목록이 줄마다 이름 붙은 풀기 버튼을 그리고, 풀기를 하면 `entityDistinct`가 `{ a, b, on: false }`로 불린 뒤 목록을 다시 읽는다. 빈 목록이면 "없습니다" 글이 보인다. — `apps/web/src/entity-distinct.test.tsx`
 - [ ] **DPF-C4** (R4, R5): 승인한 JSONL 파일을 새 파일로 이름 바꿔 덮으면 ① 그 동기화는 `connector-failed`이고 새 내용의 원본이 0건이며 ② 위치 목록에서 그 위치가 `unavailable`·`root-changed`다 ③ 다음 동기화는 실패가 아니고 원본 수가 그대로다. 파일을 다른 이름으로 치웠다가 **같은 파일을** 제자리에 돌려놓으면 다음 동기화 뒤 위치가 `active`다. — `backend/src/jsonl-file-location.test.ts`
-- [ ] **DPF-C5** (R6): C4의 `unavailable` 위치를 같은 경로로 다시 연결하면 `active`가 되고 적힌 `ino`가 새 파일의 것이며, 같은 인스턴스 ID로 새 내용이 들어오고 앞서 들어온 원본이 남아 있다. 심볼릭 링크나 `.jsonl`이 아닌 파일로 다시 연결하면 거절되고 위치는 `unavailable` 그대로이며 아무것도 읽지 않는다. `active`인 위치의 다시 연결은 `bad-request`다. — `backend/src/local-locations.relink.test.ts`, `backend/src/jsonl-file-location.test.ts`
+- [ ] **DPF-C5** (R6): C4의 `unavailable` 위치를 같은 경로로 다시 연결하면 `active`가 되고 적힌 `ino`가 새 파일의 것이며, 같은 인스턴스 ID로 새 내용이 들어오고 앞서 들어온 원본이 남아 있다. `.jsonl`이 아닌 파일이나 폴더로 다시 연결하면 거절되고 위치는 `unavailable` 그대로이며 아무것도 읽지 않는다. `active`인 위치의 다시 연결은 `bad-request`다. — `backend/src/local-locations.relink.test.ts`, `backend/src/jsonl-file-location.test.ts`
 - [ ] **DPF-C6** (R7): `unavailable`인 `jsonl-file` 줄에 안내 글과 "다시 연결" 버튼이 보이고, 누르면 선택 창이 종류 `jsonl-file`로 열려 그 표로 `relinkLocalLocation`이 불린다. — `apps/web/src/local-locations.test.tsx`
 
 **변이 확인**(허용·차단을 정하는 가드만): ① R2의 상대 항목 가림 판정을 빼면 C1이 빨개진다. ② R6의 승인 검사를 건너뛰면 C5의 거절 단언이 빨개진다. 결과를 PR 본문에 적는다.
@@ -129,3 +129,4 @@ PR 하나, 한 worktree에서 이어서 한다. ①과 ②는 서로 기대지 �
 | 날짜 | 변경 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-24 | 처음 씀 | 이 문서 | #283 "spec이 넘긴 것" 첫 줄과 #258 F5를 한 묶음으로 |
+| 2026-11-24 | R6·C5에서 "심볼릭 링크 거절"을 "심볼릭 링크는 실제 파일로 풀림, 거절은 `.jsonl`이 아닌 파일·폴더"로 고침 | R6, C5 | 구현 중 `checkApproval`이 승인 때부터 `realpath`로 링크를 풀어 가리키는 파일을 승인한다는 것을 확인(`local-path.ts:330`). 다시 연결도 같은 검사이므로 같은 동작이다 |
