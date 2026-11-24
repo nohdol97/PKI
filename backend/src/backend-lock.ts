@@ -13,6 +13,9 @@ export const BACKEND_LOCK_FILE = "backend.lock";
 
 const SQLITE_BUSY = 5;
 
+/** Strong references until close(): a lock must not depend on the caller keeping its value (LKH-R3). */
+const held = new Set<DatabaseSync>();
+
 export interface BackendLock {
   /** Frees the lock: on close and on a failed start; the OS frees it at process end. */
   close(): void;
@@ -28,13 +31,18 @@ export function takeBackendLock(dataDir: string): BackendLock | undefined {
     const db = new DatabaseSync(join(dataDir, BACKEND_LOCK_FILE));
     try {
       db.exec("BEGIN EXCLUSIVE");
+      // write probe, never committed (LKH-R2): a read-only file is opened read-only and grants
+      // BEGIN EXCLUSIVE without a lock; the failed write sends it down the "not obtained" path
+      db.exec("PRAGMA user_version = 1");
     } catch (error) {
       db.close();
       if ((error as { errcode?: number }).errcode === SQLITE_BUSY) return undefined;
       throw error;
     }
+    held.add(db);
     return {
       close: () => {
+        held.delete(db);
         if (db.isOpen) db.close(); // closing twice is harmless: close and a failed start both call it
       },
     };
