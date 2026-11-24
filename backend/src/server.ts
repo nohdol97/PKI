@@ -606,7 +606,8 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
   const clock = () => new Date(options.now?.() ?? Date.now());
   const analytical = createAnalyticalApi({
     db: options.db,
-    shown: (kind, id) => registry.visible(options.db, [{ kind, id }], "display").length > 0,
+    shown: (kind, id, db = options.db) =>
+      registry.visible(db, [{ kind, id }], "display").length > 0,
     views: { listAnalytical },
     now: () => new Date(options.now?.() ?? Date.now()),
   });

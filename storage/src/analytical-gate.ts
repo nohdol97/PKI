@@ -7,6 +7,7 @@
 // a value, and a history line carries a reason code and a number pair (the source version it rests on).
 import { otherValidValues } from "./assertion-links.ts";
 import { listCheckLines, waitingRelations, type CheckName } from "./analytical-check-lines.ts";
+import { keyedRead, preloadReads } from "./read-memo.ts";
 import type { SourceVersionRef } from "./derivatives.ts";
 import type { KnowledgeStatus } from "./knowledge.ts";
 import {
@@ -51,12 +52,28 @@ const anyTable = (tx: SqlDriver): boolean =>
  */
 export type Seen = (kind: string, id: string) => boolean;
 
+/** What the judgement reads about a fact (`dataChecksUnmet`), an item's type, an item's live objects of a type; each with its twin (ARB-R1). */
+export const FACT_HEAD_READ = keyedRead({ columns: "item_id, kind", from: "facts", key: "id" });
+export const ITEM_TYPE_READ = keyedRead({ columns: "type", from: "items", key: "id" });
+export const OBJECTS_READ = keyedRead({
+  columns: "id, object_id",
+  from: "relations",
+  key: "subject_id",
+  where: `type = ? AND ${LIVE}`,
+  order: "object_id, id",
+  distinct: true,
+});
+
+/** Primes the reads of `dataChecksUnmet` for these facts and their items (a no-op unless `tx` is a read memo). */
+export function preloadGate(tx: SqlDriver, factIds: readonly number[], itemIds: readonly number[]) {
+  preloadReads(tx, FACT_HEAD_READ, factIds);
+  preloadReads(tx, ITEM_TYPE_READ, itemIds);
+  for (const type of WAITING_TYPES) preloadReads(tx, OBJECTS_READ, itemIds, [type]);
+}
+
 const objectsOf = (tx: SqlDriver, itemId: number, type: string, seen?: Seen): number[] =>
   tx
-    .all(
-      `SELECT DISTINCT id, object_id FROM relations WHERE subject_id = ? AND type = ? AND ${LIVE} ORDER BY object_id, id`,
-      [itemId, type],
-    )
+    .all(OBJECTS_READ.one, [itemId, type])
     .filter((r) => !seen || (seen("relation", String(r.id)) && seen("item", String(r.object_id))))
     .map((r) => r.object_id as number)
     .filter((id, i, all) => all.indexOf(id) === i);
@@ -66,7 +83,7 @@ const objectsOf = (tx: SqlDriver, itemId: number, type: string, seen?: Seen): nu
  * a Join has its left and right objects (both sides are required), any other item its `MEASURED_ON` objects.
  */
 function targetsOf(tx: SqlDriver, itemId: number, seen?: Seen): number[] {
-  const type = tx.all("SELECT type FROM items WHERE id = ?", [itemId])[0]?.type;
+  const type = tx.all(ITEM_TYPE_READ.one, [itemId])[0]?.type;
   if (type === "Dataset") return [itemId];
   if (type === "Join")
     return [
@@ -89,7 +106,7 @@ const bound = (tx: SqlDriver, datasetId: number, seen?: Seen): boolean =>
 
 /** No table: a required side has no live target bound to a table (an extra unbound target is a conflict, not a loss). */
 function noDataset(tx: SqlDriver, itemId: number, seen?: Seen): boolean {
-  const type = tx.all("SELECT type FROM items WHERE id = ?", [itemId])[0]?.type;
+  const type = tx.all(ITEM_TYPE_READ.one, [itemId])[0]?.type;
   const sides =
     type === "Dataset"
       ? [[itemId]]
@@ -152,7 +169,7 @@ export function dataChecksUnmet(
   seen?: Seen,
 ): readonly DataCheckUnmet[] {
   if (ref.kind !== "fact") return [];
-  const own = tx.all("SELECT item_id, kind FROM facts WHERE id = ?", [ref.id])[0];
+  const own = tx.all(FACT_HEAD_READ.one, [ref.id])[0];
   if (!own) return [];
   const checks = requiredChecks(tx, own.kind as string);
   if (checks.length === 0) return [];

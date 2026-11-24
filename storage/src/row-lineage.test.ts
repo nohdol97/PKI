@@ -11,7 +11,7 @@ import {
   type KnowledgeAttributes,
 } from "./knowledge.ts";
 import { migrate } from "./migrations.ts";
-import { rowLineage, unionOfVersions } from "./row-lineage.ts";
+import { evidenceLineage, rowLineage, unionOfVersions } from "./row-lineage.ts";
 import { automatedLifecycle, userInputKind } from "./semantic-lifecycle.ts";
 import { userDecisions } from "./semantic-user.ts";
 import { registerConnectorInstance, saveSourceRecord } from "./sources.ts";
@@ -203,5 +203,16 @@ describe("userInputKind (S01-R15)", () => {
     userDecisions.decide(db, { kind: "fact", id: other }, "approve");
     userDecisions.undo(db, { kind: "fact", id: other });
     expect(userInputKind(db, { kind: "fact", id: other })).toBeNull();
+  });
+});
+
+describe("evidenceLineage (ARB-R1)", () => {
+  it("is the version the evidence cites, and nothing for an evidence id that is not stored", () => {
+    const a = source("a", 2);
+    const f = extractedFact(extractedItem("X"), "가");
+    cite({ factId: f }, a.versionId(2));
+    const evidenceId = db.all("SELECT id FROM evidence WHERE fact_id = ?", [f])[0]?.id as number;
+    expect(evidenceLineage(db, evidenceId)).toEqual([{ sourceId: a.sourceId, version: 2 }]);
+    expect(evidenceLineage(db, 999_999)).toEqual([]);
   });
 });

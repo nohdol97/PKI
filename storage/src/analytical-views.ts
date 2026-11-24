@@ -5,13 +5,29 @@
 // predicate, so a row it hides, a check line it hides and a table it hides are absent whole, as is anything that
 // would name them (a count, an id in a conflict list). Storage never imports the registry.
 import { limitationCodes } from "@pki/contracts";
-import { otherValidValues } from "./assertion-links.ts";
-import { dataChecksUnmet, needsDataChecks, type DataCheckUnmet } from "./analytical-gate.ts";
-import { listCheckLines, waitingRelations, type CheckName } from "./analytical-check-lines.ts";
+import { otherValidValues, preloadSlots } from "./assertion-links.ts";
+import {
+  dataChecksUnmet,
+  needsDataChecks,
+  preloadGate,
+  type DataCheckUnmet,
+} from "./analytical-gate.ts";
+import {
+  listCheckLines,
+  preloadCheckLines,
+  waitingRelations,
+  type CheckName,
+} from "./analytical-check-lines.ts";
 import { entityGroups } from "./entity-groups.ts";
-import { listEvidence, type EpistemicType, type KnowledgeStatus } from "./knowledge.ts";
-import { memoReads } from "./read-memo.ts";
-import { isUserDecided } from "./semantic-lifecycle.ts";
+import {
+  listEvidence,
+  preloadEvidence,
+  type EpistemicType,
+  type KnowledgeStatus,
+} from "./knowledge.ts";
+import { keyedRead, memoReads, preloadReads } from "./read-memo.ts";
+import { preloadLineage } from "./row-lineage.ts";
+import { isUserDecided, preloadRows } from "./semantic-lifecycle.ts";
 import {
   listSemanticFacts,
   listSemanticRelations,
@@ -23,7 +39,8 @@ import { isValidRow } from "./valid-row.ts";
 
 /** Whether a derived row is shown: `kind` is the registry's (`item`, `fact`, `relation`, `evidence`, `source`, `analytical-check`). */
 export interface Visibility {
-  shown(kind: string, id: string): boolean;
+  /** `db` is the driver the read asks through; a predicate that reads the store may ask through it too. */
+  shown(kind: string, id: string, db?: SqlDriver): boolean;
 }
 export const SHOW_ALL: Visibility = { shown: () => true };
 
@@ -155,6 +172,22 @@ const LIVE = "status NOT IN ('superseded', 'rejected')";
 const DEFAULT_LIMIT = 200;
 const ascending = (ids: Iterable<number>): number[] => [...new Set(ids)].sort((a, b) => a - b);
 
+/** The point reads of this file with their twins over many items (ARB-R1). */
+export const ITEM_NAME_READ = keyedRead({ columns: "name", from: "items", key: "id" });
+export const ITEM_BASE_READ = keyedRead({
+  columns: "status, epistemic, user_authored",
+  from: "items",
+  key: "id",
+});
+export const OBJECTS_VIEW_READ = keyedRead({
+  columns: "id, object_id",
+  from: "relations",
+  key: "subject_id",
+  where: `type = ? AND ${LIVE}`,
+  order: "object_id, id",
+});
+const OBJECT_TYPES = ["MEASURED_ON", "USES_JOIN", "JOIN_LEFT", "JOIN_RIGHT"];
+
 class Reader {
   readonly db: SqlDriver;
   readonly vis: Visibility;
@@ -169,7 +202,7 @@ class Reader {
     const key = `${kind}:${id}`;
     let answer = this.seen.get(key);
     if (answer === undefined) {
-      answer = this.vis.shown(kind, String(id));
+      answer = this.vis.shown(kind, String(id), this.db);
       this.seen.set(key, answer);
     }
     return answer;
@@ -206,13 +239,44 @@ class Reader {
     return ascending(this.awaiting.get(itemId) ?? []).filter((s) => this.shown("source", s));
   }
 
+  /**
+   * Answers the per-row reads of these items, their facts and relations, and their evidence in a few queries
+   * (ARB-R2): what a row read asks next finds its answer in the memo. An item or row left out is read as before.
+   */
+  preload(itemIds: readonly number[]): void {
+    const json = JSON.stringify(itemIds);
+    const factIds = this.db
+      .all("SELECT id FROM facts WHERE item_id IN (SELECT value FROM json_each(?))", [json])
+      .map((r) => r.id as number);
+    const relationIds = this.db
+      .all("SELECT id FROM relations WHERE subject_id IN (SELECT value FROM json_each(?))", [json])
+      .map((r) => r.id as number);
+    for (const reads of [ITEM_NAME_READ, ITEM_BASE_READ]) preloadReads(this.db, reads, itemIds);
+    for (const type of OBJECT_TYPES) preloadReads(this.db, OBJECTS_VIEW_READ, itemIds, [type]);
+    preloadRows(this.db, "item", itemIds);
+    preloadRows(this.db, "fact", factIds);
+    preloadRows(this.db, "relation", relationIds);
+    preloadEvidence(this.db, "fact", factIds);
+    preloadEvidence(this.db, "relation", relationIds);
+    preloadCheckLines(this.db, factIds);
+    preloadSlots(this.db, factIds);
+    preloadGate(this.db, factIds, itemIds);
+    preloadLineage(this.db, "fact", factIds);
+    preloadLineage(this.db, "relation", relationIds);
+    const evidenceIds = [
+      ...factIds.flatMap((id) => listEvidence(this.db, { factId: id })),
+      ...relationIds.flatMap((id) => listEvidence(this.db, { relationId: id })),
+    ].map((e) => e.id);
+    preloadLineage(this.db, "evidence", evidenceIds);
+  }
+
   evidenceIds(target: { factId: number } | { relationId: number }): number[] {
     return listEvidence(this.db, target)
       .filter((e) => e.current && this.shown("evidence", e.id))
       .map((e) => e.id);
   }
 
-  factRow(f: SemanticFactView): FactRowView {
+  factRow(f: SemanticFactView, itemId: number): FactRowView {
     const needed = this.once(`needs:${f.kind}`, () => needsDataChecks(this.db, f.kind));
     const ids = this.evidenceIds({ factId: f.id });
     const checks = needed
@@ -227,8 +291,6 @@ class Reader {
             skipped,
           }))
       : [];
-    const itemId = this.db.all("SELECT item_id FROM facts WHERE id = ?", [f.id])[0]
-      ?.item_id as number;
     return {
       ...f,
       evidenceIds: ids,
@@ -244,7 +306,7 @@ class Reader {
     return this.once(`facts:${itemId}`, () =>
       listSemanticFacts(this.db, itemId)
         .filter((f) => this.shown("fact", f.id))
-        .map((f) => this.factRow(f)),
+        .map((f) => this.factRow(f, itemId)),
     );
   }
 
@@ -259,8 +321,7 @@ class Reader {
 
   name(itemId: number): string | undefined {
     return this.shown("item", itemId)
-      ? (this.db.all("SELECT name FROM items WHERE id = ?", [itemId])[0]?.name as
-          string | undefined)
+      ? (this.db.all(ITEM_NAME_READ.one, [itemId])[0]?.name as string | undefined)
       : undefined;
   }
 
@@ -316,10 +377,7 @@ class Reader {
   /** The live objects of a relation type from an item (R10's two written paths read these). */
   objects(itemId: number, type: string): number[] {
     return this.db
-      .all(
-        `SELECT id, object_id FROM relations WHERE subject_id = ? AND type = ? AND ${LIVE} ORDER BY object_id, id`,
-        [itemId, type],
-      )
+      .all(OBJECTS_VIEW_READ.one, [itemId, type])
       .filter((r) => this.shown("relation", r.id as number))
       .map((r) => r.object_id as number)
       .filter((id, i, all) => all.indexOf(id) === i && this.shown("item", id));
@@ -373,7 +431,7 @@ const ofKind = (rows: readonly FactRowView[], ...kinds: string[]) =>
   rows.filter((r) => kinds.includes(r.kind));
 
 function base(r: Reader, id: number, name: string, type: string): ItemBase | undefined {
-  const row = r.db.all("SELECT status, epistemic, user_authored FROM items WHERE id = ?", [id])[0];
+  const row = r.db.all(ITEM_BASE_READ.one, [id])[0];
   if (!row) return undefined;
   return {
     itemId: id,
@@ -499,6 +557,12 @@ function itemIds(r: Reader, type: string, limit: number): { ids: number[]; trunc
   return { ids: ids.slice(0, limit), truncated: ids.length > limit };
 }
 
+/** Primes the reader for the listed items and the members of their groups (ARB-R2). */
+function preloadListed(r: Reader, ...lists: readonly { ids: readonly number[] }[]): void {
+  const listed = lists.flatMap((l) => l.ids);
+  r.preload(ascending([...listed, ...listed.flatMap((id) => entityGroups.membersOf(r.db, id))]));
+}
+
 /**
  * The Metrics, each answering exactly the fields of S03-R19 and nothing else. The API's Metric list is this
  * result as it is, and K01's `metrics` page calls it too. A Metric the caller may not see is absent, as is every
@@ -510,7 +574,9 @@ export function listMetricViews(
   limit = DEFAULT_LIMIT,
 ): MetricView[] {
   const r = new Reader(db, vis);
-  return itemIds(r, "Metric", limit).ids.flatMap((id) => withMembers(r, id, metricBody) ?? []);
+  const metrics = itemIds(r, "Metric", limit);
+  preloadListed(r, metrics);
+  return metrics.ids.flatMap((id) => withMembers(r, id, metricBody) ?? []);
 }
 
 function datasetBody(r: Reader, id: number): DatasetBody | undefined {
@@ -565,6 +631,7 @@ export function listAnalytical(
   const datasets = itemIds(r, "Dataset", limit);
   const metrics = itemIds(r, "Metric", limit);
   const joins = itemIds(r, "Join", limit);
+  preloadListed(r, datasets, metrics, joins);
   return {
     datasets: datasets.ids.flatMap((id) => withMembers(r, id, datasetBody) ?? []),
     metrics: metrics.ids.flatMap((id) => withMembers(r, id, metricBody) ?? []),
