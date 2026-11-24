@@ -62,7 +62,17 @@ describe("the canonical index satisfies the port (compile-time)", () => {
       Parameters<LocalFileIndex["insertEntry"]>,
       Parameters<LocalIndexPort["insertEntry"]>
     > = true;
-    expect([update, insert]).toEqual([true, true]);
+    // Mutual assignability lets an OPTIONAL field on one side through, so the key sets are compared too.
+    type Arg<F extends (...a: never[]) => unknown, I extends number> = Parameters<F>[I];
+    const updateKeys: Same<
+      keyof Arg<LocalFileIndex["updateEntry"], 2>,
+      keyof Arg<LocalIndexPort["updateEntry"], 2>
+    > = true;
+    const insertKeys: Same<
+      keyof Arg<LocalFileIndex["insertEntry"], 0>,
+      keyof Arg<LocalIndexPort["insertEntry"], 0>
+    > = true;
+    expect([update, insert, updateKeys, insertKeys]).toEqual([true, true, true, true]);
   });
 });
 

@@ -812,7 +812,7 @@ export function isolatedNormalizerPort(
     return {
       normalize: async () => ({
         ok: false,
-        error: { code: "worker-failed" },
+        error: { code: "worker-failed" satisfies IsolatedErrorCode },
         unavailable: true,
       }),
       unavailable: () => true,
