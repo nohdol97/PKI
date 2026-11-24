@@ -158,4 +158,24 @@ describe("POST /api/entities/distinct/marks (DPF-R1, R2)", () => {
       truncated: false,
     });
   });
+
+  it("leaves out a hidden member under a shown group top: the mark names the member, whose own sources are hidden (LCF-C4)", async () => {
+    const x = itemFrom("x");
+    const top = itemFrom("top");
+    const hiddenMember = itemFrom("member", ["secret"]);
+    db.run("INSERT INTO item_distinct (item_a, item_b, by, at) VALUES (?, ?, 'user', ?)", [
+      x,
+      hiddenMember,
+      "2026-11-24T00:00:00Z",
+    ]);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+      [hiddenMember, top, "2026-11-24T00:00:00Z"],
+    );
+    await start();
+    expect((await call("entityDistinctMarks", { itemId: x })).body).toEqual({
+      marks: [],
+      truncated: false,
+    });
+  });
 });

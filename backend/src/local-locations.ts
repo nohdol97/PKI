@@ -44,6 +44,7 @@ import {
   writeSetting,
   type LocalFileIndex,
   type LocalLocation,
+  type LocationState,
   type SqlDriver,
 } from "@pki/storage";
 
@@ -342,6 +343,8 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     if (location.type === "jsonl-file" && location.state !== "unavailable") {
       return { error: "bad-request" };
     }
+    const allowed: readonly LocationState[] =
+      location.type === "jsonl-file" ? ["unavailable"] : ["unavailable", "needs-confirmation"];
     const path = pathOf({ ...request, type: location.type });
     if (path === undefined) return rejected("ticket-required");
     // the same checks as an approval; the location itself is left out of the overlap check (I02B-R9)
@@ -357,12 +360,19 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
       },
     );
     if (!checked.ok) return rejected(checked.code);
-    relinkLocation(db, location.id, {
-      displayPath: checked.displayPath,
-      realPath: checked.realPath,
-      rootDev: checked.dev,
-      rootIno: checked.ino,
-    });
+    // the state is read again where it is written: a pause or revocation that came in while the path was checked stands
+    const written = relinkLocation(
+      db,
+      location.id,
+      {
+        displayPath: checked.displayPath,
+        realPath: checked.realPath,
+        rootDev: checked.dev,
+        rootIno: checked.ino,
+      },
+      allowed,
+    );
+    if (!written) return { error: "bad-request" };
     const relinked = listLocations(db).find((l) => l.id === location.id) as LocalLocation;
     try {
       // a JSONL file's instance exists already: it only needs its sync now; any other location is read by the `local-files` sync

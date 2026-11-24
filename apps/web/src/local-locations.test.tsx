@@ -9,6 +9,7 @@ import { ConfirmDialog } from "./local-location-actions.tsx";
 import { LocalLocations, LocationList, pickAndAdd, pickAndRelink } from "./local-locations.tsx";
 import {
   APPROVAL_REJECTION_TEXT,
+  PICK_BACKEND_UNAVAILABLE_TEXT,
   NORMALIZER_UNAVAILABLE_TEXT,
   NOT_WATCHING_TEXT,
   REVOKE_WARNING_TEXT,
@@ -69,6 +70,23 @@ describe("the shell's folder picker", () => {
     expect(
       await pickAndAdd(untouched as unknown as ApiClient, async () => ({ ticket: null })),
     ).toBeUndefined();
+    expect(untouched).not.toHaveBeenCalled();
+  });
+});
+
+describe("a pick the backend could not take (LCF-R2)", () => {
+  const failed = async () => ({ ticket: null, failed: "backend-unavailable" as const });
+
+  it("adding and relinking say so instead of ending silently, and call nothing", async () => {
+    const untouched = vi.fn();
+    expect(await pickAndAdd(untouched as unknown as ApiClient, failed)).toEqual({
+      added: false,
+      text: PICK_BACKEND_UNAVAILABLE_TEXT,
+    });
+    const location = list().locations[0] as LocalLocationList["locations"][number];
+    expect(await pickAndRelink(untouched as unknown as ApiClient, failed, location)).toBe(
+      PICK_BACKEND_UNAVAILABLE_TEXT,
+    );
     expect(untouched).not.toHaveBeenCalled();
   });
 });

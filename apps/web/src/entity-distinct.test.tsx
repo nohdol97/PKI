@@ -5,7 +5,13 @@ import type { RouteName } from "@pki/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
-import { DistinctList, loadMarks, releaseMark } from "./entity-distinct.tsx";
+import {
+  createMarksSession,
+  DistinctList,
+  loadMarks,
+  releaseMark,
+  type DistinctMarks,
+} from "./entity-distinct.tsx";
 
 function fake(handlers: Partial<Record<RouteName, (request: unknown) => unknown>>) {
   const calls: [string, unknown][] = [];
@@ -58,5 +64,66 @@ describe("다른 것으로 표시한 항목 (DPF-C3)", () => {
       ["entityDistinct", { a: 1, b: 9, on: false }],
       ["entityDistinctMarks", { itemId: 1 }],
     ]);
+  });
+});
+
+describe("안내는 지금 항목의 것만 보인다 (LCF-C3)", () => {
+  type Seen = { state?: unknown; notice?: string | undefined };
+  const sink = () => {
+    const seen: Seen = {};
+    return {
+      seen,
+      view: {
+        setState: (state: unknown) => void (seen.state = state),
+        setNotice: (notice: string | undefined) => void (seen.notice = notice),
+      },
+    };
+  };
+  const later = <T,>() => {
+    let resolve: (value: T) => void = () => undefined;
+    let reject: (error: Error) => void = () => undefined;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+  const listB: DistinctMarks = { marks: [marks[0]], truncated: false };
+
+  it("a release that fails after another item's read began leaves no notice; the newest failure is written", async () => {
+    const failA = later<never>();
+    const readB = later<DistinctMarks>();
+    const api = vi.fn(async (name: string, request?: unknown) => {
+      if (name === "entityDistinct") return failA.promise;
+      if ((request as { itemId: number }).itemId === 2) return readB.promise;
+      return { marks: [], truncated: false };
+    }) as unknown as ApiClient;
+    const { seen, view } = sink();
+    const session = createMarksSession(api, view);
+
+    const releasing = session.release(1, 9);
+    session.load(2);
+    failA.reject(new Error("boom"));
+    await releasing;
+    expect(seen.notice).toBeUndefined();
+    readB.resolve(listB);
+    await vi.waitFor(() => expect(seen.state).toEqual({ status: "ready", ...listB }));
+    expect(seen.notice).toBeUndefined();
+
+    const failC = later<never>();
+    const apiC = vi.fn(async () => failC.promise) as unknown as ApiClient;
+    const again = sink();
+    const releasingC = createMarksSession(apiC, again.view).release(2, 9);
+    failC.reject(new Error("boom"));
+    await releasingC;
+    expect(again.seen.notice).toContain("boom");
+  });
+
+  it("starting a read clears the notice of the item before", async () => {
+    const api = vi.fn(async () => ({ marks: [], truncated: false })) as unknown as ApiClient;
+    const { seen, view } = sink();
+    seen.notice = "old";
+    createMarksSession(api, view).load(3);
+    expect(seen.notice).toBeUndefined();
   });
 });

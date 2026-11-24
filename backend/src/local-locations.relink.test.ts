@@ -19,6 +19,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { nodeBoundaryFs, type BoundaryFs } from "@pki/connector-sdk";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -39,7 +40,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function setup(buildKind: "production" | "test") {
+function setup(buildKind: "production" | "test", fs?: BoundaryFs) {
   const db: SqlDriver = openCanonicalDb(data);
   registerConnectorInstance(db, "local-files", "local-files");
   const tickets = createApprovalTickets();
@@ -62,6 +63,7 @@ function setup(buildKind: "production" | "test") {
     tickets,
     onApproved: vi.fn(),
     normalizerUnavailable: () => false,
+    ...(fs ? { fs } : {}),
   });
   const moved = join(root, "moved");
   const rename = () => {
@@ -109,6 +111,44 @@ describe("relink", () => {
       });
       expect(await locations.relink({ locationId: newLocalId(), path: moved })).toEqual({
         error: "not-found",
+      });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("relink waits for the path check (LCF-R1)", () => {
+  it("a pause that lands while the check is awaited stands: the relink is refused and writes nothing (LCF-C1)", async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached: () => void = () => undefined;
+    const atCheck = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const fs: BoundaryFs = {
+      ...nodeBoundaryFs,
+      realpath: async (path) => {
+        reached();
+        await held;
+        return nodeBoundaryFs.realpath(path);
+      },
+    };
+    const { db, id, locations, moved, rename } = setup("test", fs);
+    try {
+      rename();
+      const before = row(db, id);
+      const pending = locations.relink({ locationId: id, path: moved });
+      await atCheck;
+      expect(locations.pause({ locationId: id })).toMatchObject({ state: "paused" });
+      release();
+      expect(await pending).toEqual({ error: "bad-request" });
+      expect(row(db, id)).toMatchObject({
+        state: "paused",
+        realPath: before.realPath,
+        rootIno: before.rootIno,
       });
     } finally {
       db.close();

@@ -85,11 +85,21 @@ export interface RelinkTarget {
 /**
  * The location is the folder `target` now, under the same id: the path and identity are written, held
  * deletions are let go (the next pass judges them again against the new folder) and the location is
- * read again. False when there is no such location.
+ * read again. False when there is no such location, or, when `states` is given, when its state now is not
+ * one of them: nothing is written then (a pause or revocation that came in meanwhile stands, LCF-R1).
  */
-export function relinkLocation(db: SqlDriver, id: string, target: RelinkTarget): boolean {
+export function relinkLocation(
+  db: SqlDriver,
+  id: string,
+  target: RelinkTarget,
+  states?: readonly LocationState[],
+): boolean {
   return db.transaction(
     () => {
+      if (states !== undefined) {
+        const state = readLocation(db, id)?.state;
+        if (state === undefined || !states.includes(state)) return false;
+      }
       const changed = db.run(
         "UPDATE local_locations SET display_path = ?, real_path = ?, root_dev = ?, root_ino = ? WHERE id = ?",
         [target.displayPath, target.realPath, target.rootDev, target.rootIno, id],
