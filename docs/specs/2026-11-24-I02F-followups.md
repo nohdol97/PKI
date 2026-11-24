@@ -68,7 +68,7 @@
 | D2 | 관문 술어를 `revealPathOf`의 필수 인자로 둔다 | 관문 없이 부를 수 있는 모양이 남으면 같은 결함이 다시 생긴다. 호출하는 곳이 하나다 | — |
 | D3 | 삭제 반영은 `paused`·`revoking`만 거절하고 `active`·`unavailable`·`needs-confirmation`은 받는다 | 읽지 않는 위치는 삭제도 알리지 않는다(I02 P2). 화면은 두 상태에서 이 동작을 내놓지 않는다. `active`는 다시 켠 직후 보류가 남은 짧은 구간이 있어 받는다 | `needs-confirmation`만 받게 하려면 상태 목록 한 줄과 기존 시험 둘(`local-locations.pause.test.ts`, `local-lifecycle.api.test.ts`의 `count-mismatch` 단언)을 고친다 |
 | D4 | 잠금이 잡혀 있으면 다시 훑기를 **거절**한다. 기억해 두었다 나중에 돌리지 않는다 | 화면에 `instance-busy` 문구가 이미 있고, 사용자가 다시 누르면 된다. 기억하려면 재시작을 넘는 표시가 필요해 저장 변경이 된다 | `boot.ts`의 `rescan`에서 돌던 동기화가 끝날 때 한 번 더 부르게 하고 답을 `queued`로 되돌린다 |
-| D5 | 같은 revision에서 첨부만 다르면 `revision-conflict`다 | revision 하나는 원본의 한 상태를 가리킨다(I01-R10). 조용한 "변경 없음"보다 거부 사유가 보이는 쪽이 낫다 | 같은 revision의 첨부 차이를 받으려면 같은 revision 가지에서 첨부 비교를 빼고 새 version을 만든다(한 revision에 version 둘이 생긴다) |
+| D5 | 같은 revision에서 첨부만 다르면 `revision-conflict`다(PD3-D3이 유지함, [PD3 spec](2026-11-24-PD3-pending-decisions.md)) | revision 하나는 원본의 한 상태를 가리킨다(I01-R10). 조용한 "변경 없음"보다 거부 사유가 보이는 쪽이 낫다 | 같은 revision의 첨부 차이를 받으려면 같은 revision 가지에서 첨부 비교를 빼고 새 version을 만든다(한 revision에 version 둘이 생긴다) | 
 | D6 | 첨부 목록은 순서까지 비교한다 | block의 `attachment`가 순번이라 순서가 뜻을 가진다(F-2) | — |
 | D7 | 메모 문구는 `문단 N · 메모 T의 I번째 글(머리|본문)` | 메모가 달린 문단을 먼저 보여 문서에서 찾기 쉽다. `머리`는 작성자·시각 줄이다 | `locatorText`의 한 줄과 C6 |
 
@@ -100,3 +100,4 @@
 |---|---|---|---|
 | 2026-11-24 | 초안 | 문서 전체 | 이슈 #237·#263·#249·#258·#200·#190·#179 |
 | 2026-11-24 | 초안에서 확정으로 | 상태 | 구현 착수 |
+| 2026-11-24 | D5 유지 가리킴: PD3-D3이 같은 revision의 첨부 차이를 `revision-conflict`로 두는 이 결정을 유지함([PD3 spec](2026-11-24-PD3-pending-decisions.md)) | D5 | 이슈 #263 |

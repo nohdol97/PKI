@@ -203,7 +203,8 @@ function columnNames(valueType: AnalyticalValueType, stored: string): string[] {
 }
 
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
-const UNSPACED_SCRIPT = /[\p{Script=Hangul}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const UNSPACED_SCRIPT =
+  /[\p{Script_Extensions=Hangul}\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}]/u;
 const wordChar = (c: string | undefined): boolean =>
   c !== undefined && WORD_CHAR.test(c) && !UNSPACED_SCRIPT.test(c);
 
