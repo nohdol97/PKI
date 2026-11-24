@@ -1,7 +1,7 @@
 // The "다른 것" marks on the item shown in 항목 정리 (DPF-R3): who left each, and a button that clears it. The list is
 // read by the item's own number, so the screen around it needs no change to show it. Names are imported text: <bdi> only.
 import type { RouteResponse } from "@pki/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "./api.ts";
 import {
   CURATE_DISTINCT_BY,
@@ -64,6 +64,48 @@ export function DistinctList({
 
 type State = { status: "loading" } | ({ status: "ready" } & DistinctMarks);
 
+/**
+ * The reading and releasing rules, kept out of the component so a test can reach them (X02F-D5). A read clears
+ * the notice (it belonged to the item before); a failure is written only while its request is the newest (LCF-R3).
+ */
+export function createMarksSession(
+  api: ApiClient,
+  view: { setState(state: State): void; setNotice(notice: string | undefined): void },
+) {
+  const latest = createLatest();
+  const busy = createBusy();
+  return {
+    load(itemId: number) {
+      const current = latest.begin();
+      view.setNotice(undefined);
+      view.setState({ status: "loading" });
+      void loadMarks(api, itemId).then(
+        (list) => {
+          if (current()) view.setState({ status: "ready", ...list });
+        },
+        (error: unknown) => {
+          if (current()) view.setNotice(`${CURATE_FAILED}: ${message(error)}`);
+        },
+      );
+    },
+    release(itemId: number, otherId: number) {
+      return busy(() => {
+        const current = latest.begin();
+        return releaseMark(api, itemId, otherId).then(
+          (list) => {
+            if (!current()) return;
+            view.setNotice(undefined);
+            view.setState({ status: "ready", ...list });
+          },
+          (error: unknown) => {
+            if (current()) view.setNotice(`${CURATE_FAILED}: ${message(error)}`);
+          },
+        );
+      });
+    },
+  };
+}
+
 /** Reads the list when the item changes or `version` does (a mark was just made), and clears one mark on a press. */
 export function DistinctMarksSection({
   api,
@@ -76,35 +118,11 @@ export function DistinctMarksSection({
 }) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [notice, setNotice] = useState<string>();
-  const [latest] = useState(createLatest);
-  const [busy] = useState(createBusy);
+  const session = useMemo(() => createMarksSession(api, { setState, setNotice }), [api]);
 
-  useEffect(() => {
-    const current = latest.begin();
-    setState({ status: "loading" });
-    loadMarks(api, itemId).then(
-      (list) => {
-        if (current()) setState({ status: "ready", ...list });
-      },
-      (error: unknown) => {
-        if (current()) setNotice(`${CURATE_FAILED}: ${message(error)}`);
-      },
-    );
-  }, [api, itemId, version, latest]);
+  useEffect(() => session.load(itemId), [session, itemId, version]);
 
-  const release = (otherId: number) => {
-    void busy(() => {
-      const current = latest.begin();
-      return releaseMark(api, itemId, otherId).then(
-        (list) => {
-          if (!current()) return;
-          setNotice(undefined);
-          setState({ status: "ready", ...list });
-        },
-        (error: unknown) => setNotice(`${CURATE_FAILED}: ${message(error)}`),
-      );
-    });
-  };
+  const release = (otherId: number) => void session.release(itemId, otherId);
 
   return (
     <>
