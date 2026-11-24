@@ -236,3 +236,15 @@ export function clearDirty(tx: SqlDriver, read: readonly DirtyMark[]): void {
     tx.run("DELETE FROM reflection_dirty WHERE item_id = ? AND seq <= ?", [m.itemId, m.seq]);
   }
 }
+
+/** Marks items as to be looked at again, in the result's transaction: the current sequence, an older mark kept, an item that is gone skipped. */
+export function markDirty(tx: SqlDriver, itemIds: readonly number[]): void {
+  for (const id of itemIds) {
+    tx.run(
+      `INSERT INTO reflection_dirty (item_id, seq)
+       SELECT id, (SELECT dirty_seq FROM reflection_state WHERE id = 1) FROM items WHERE id = ?
+       ON CONFLICT (item_id) DO NOTHING`,
+      [id],
+    );
+  }
+}
