@@ -62,6 +62,8 @@ export function disableOrphanJsonlFileSchedules(
 export interface JsonlFileHooks {
   /** A JSONL file location was approved: its instance runs now, with its default period. */
   approved(location: LocalLocation): Promise<void>;
+  /** A relink gave it a file again: its sync runs now (the instance, its sources and its period are as they were). */
+  relinked(location: LocalLocation): void;
   /** Its last source is gone: the instance stops and its period is off. */
   revoked(location: LocalLocation): void;
 }
@@ -91,6 +93,15 @@ export function createJsonlFileHooks(parts: {
         .list()
         .find((s) => s.kind === CONNECTOR_SYNC_KIND && s.target === summary.id);
       if (period) scheduler.runNow(period.id);
+      parts.wake();
+    },
+    relinked(location) {
+      const id = jsonlFileInstanceId(location.id);
+      const period = parts
+        .scheduler()
+        ?.list()
+        .find((s) => s.kind === CONNECTOR_SYNC_KIND && s.target === id);
+      if (period) parts.scheduler()?.runNow(period.id);
       parts.wake();
     },
     revoked(location) {

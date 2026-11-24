@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient } from "./api.ts";
 import { ConfirmDialog } from "./local-location-actions.tsx";
-import { LocalLocations, LocationList, pickAndAdd } from "./local-locations.tsx";
+import { LocalLocations, LocationList, pickAndAdd, pickAndRelink } from "./local-locations.tsx";
 import {
   APPROVAL_REJECTION_TEXT,
   NORMALIZER_UNAVAILABLE_TEXT,
@@ -153,5 +153,45 @@ describe("location actions (C28)", () => {
     );
     expect(html).toContain(">철회</button>");
     expect(html).toContain(">취소</button>");
+  });
+});
+
+describe("a JSONL file location that cannot be read (DPF-C6)", () => {
+  const jsonl = (state: LocalLocationList["locations"][number]["state"]) =>
+    list({
+      locations: [
+        {
+          ...(list().locations[0] as LocalLocationList["locations"][number]),
+          type: "jsonl-file",
+          displayPath: "/notes/a.jsonl",
+          state,
+        },
+      ],
+    });
+
+  it("shows the guidance and the relink button on an unavailable row only", () => {
+    const html = renderToStaticMarkup(<LocationList list={jsonl("unavailable")} />);
+    expect(html).toContain("원본은 지워지지 않습니다");
+    expect(html).toContain("다시 연결");
+    expect(renderToStaticMarkup(<LocationList list={jsonl("active")} />)).not.toContain(
+      "원본은 지워지지 않습니다",
+    );
+  });
+
+  it("relinks through the picker of the location's own kind and sends its ticket", async () => {
+    const api = vi.fn(async () => ({}));
+    const pick = vi.fn(async () => ({ ticket: "t".repeat(40) }));
+    const location = (jsonl("unavailable").locations[0] ??
+      {}) as LocalLocationList["locations"][number];
+    await pickAndRelink(api as unknown as ApiClient, pick, location);
+    expect(pick).toHaveBeenCalledWith("jsonl-file");
+    expect(api).toHaveBeenCalledWith("relinkLocalLocation", {
+      locationId: location.id,
+      ticket: "t".repeat(40),
+    });
+    const cancelled = vi.fn(async () => ({ ticket: null }));
+    const untouched = vi.fn();
+    await pickAndRelink(untouched as unknown as ApiClient, cancelled, location);
+    expect(untouched).not.toHaveBeenCalled();
   });
 });

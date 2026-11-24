@@ -35,6 +35,8 @@ export const LOCATION_STATE_TEXT: Record<LocalLocationInfo["state"], string> = {
   revoking: "철회하는 중",
 };
 
+export const JSONL_UNAVAILABLE_TEXT =
+  "파일이 승인한 때와 달라졌습니다. 같은 파일이 맞으면 '다시 연결'로 다시 골라 주세요. 원본은 지워지지 않습니다.";
 export const NORMALIZER_UNAVAILABLE_TEXT = "문서를 읽는 프로그램이 뜨지 않아 멈춤";
 export const NOT_WATCHING_TEXT = "실시간 감시 없음";
 
