@@ -470,9 +470,8 @@ export function createExploreSession(api: ApiClient, show: ExploreShow) {
       },
     );
   };
-  const reload = (forId: number) => {
-    if (current?.id === forId) void load(forId, current.depth, false);
-  };
+  const reload = (forId: number) =>
+    current?.id === forId ? load(forId, current.depth, false) : undefined;
   const listed = (read: () => Promise<ItemsPage>) => {
     const newest = lists.begin();
     read().then(

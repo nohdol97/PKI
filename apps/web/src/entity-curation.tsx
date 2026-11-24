@@ -49,6 +49,24 @@ export async function mergeInto(
 export const unmerge = (api: ApiClient, mergeId: number, keepDistinct: boolean) =>
   api("entityUnmerge", { mergeId, keepDistinct });
 
+/** One action out at a time; an error is handed to `onError`. A second call while one is out answers `undefined`. */
+export const attemptOnce = (
+  busy: ReturnType<typeof createBusy>,
+  onError: (error: unknown) => void,
+  work: () => Promise<void>,
+) => busy(() => work().catch(onError));
+
+/** Unmerges, then reads again (HOC-R2): the busy guard around it is held until the reread is shown. */
+export async function unmergeAndReread(
+  api: ApiClient,
+  mergeId: number,
+  keepDistinct: boolean,
+  onChanged: () => unknown,
+) {
+  await unmerge(api, mergeId, keepDistinct);
+  await onChanged();
+}
+
 /** Moves `rows` of the item to a new item named `name`: the created item, or the refusal in words. */
 export async function splitOff(
   api: ApiClient,
@@ -101,8 +119,8 @@ export function EntityCuration({
 }: {
   api: ApiClient;
   center: Center;
-  /** Read the centre item again. */
-  onChanged: () => void;
+  /** Read the centre item again; the promise, if given, ends when the reread is shown. */
+  onChanged: () => unknown;
   onOpen: (itemId: number) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -118,7 +136,7 @@ export function EntityCuration({
   // one action out at a time: a second press before the answer is not sent (X02F-R6)
   const [busy] = useState(createBusy);
   const attempt = (work: () => Promise<void>) =>
-    busy(() => work().catch((error: unknown) => setNotice(`${CURATE_FAILED}: ${message(error)}`)));
+    attemptOnce(busy, (error) => setNotice(`${CURATE_FAILED}: ${message(error)}`), work);
   const find = (event: FormEvent) => {
     event.preventDefault();
     const turn = ++latest.current;
@@ -140,7 +158,7 @@ export function EntityCuration({
     attempt(async () => {
       setNotice(await mergeInto(api, id, center.id));
       setSearch({ status: "idle" });
-      onChanged();
+      await onChanged();
     });
   const mark = (id: number) =>
     attempt(async () => {
@@ -160,7 +178,7 @@ export function EntityCuration({
         setNotice(undefined);
         setChosen(new Set());
         setSplitName("");
-        onChanged();
+        await onChanged();
       } else setNotice(done.refusal);
     });
   };
@@ -198,9 +216,8 @@ export function EntityCuration({
                     aria-label={`합치기 되돌리기: ${m.name}`}
                     onClick={() =>
                       void attempt(async () => {
-                        await unmerge(api, m.mergeId as number, keepDistinct);
+                        await unmergeAndReread(api, m.mergeId as number, keepDistinct, onChanged);
                         setNotice(undefined);
-                        onChanged();
                       })
                     }
                   >
