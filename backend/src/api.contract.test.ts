@@ -185,6 +185,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     entityMerge: { member: 1, into: 1 },
     entityUnmerge: { mergeId: 1 },
     entityDistinct: { a: 1, b: 2, on: true },
+    entityDistinctMarks: { itemId: 1 },
     entitySplit: { itemId: 1, rows: [], name: "x" }, // set in beforeAll: an item with two facts of the user's
     // the graph reads (S02-T09): set in beforeAll, an item of the user's own, which is shown and has no rows yet
     graphTrace: { kind: "item", id: 1 },
@@ -241,6 +242,7 @@ describe.each(engines)("with %s", (_name, engine, proposed) => {
     requests.entityMerge = { member: made[0], into: made[0] }; // already one: a refusal code in a 200 body
     requests.entityUnmerge = { mergeId: merged.mergeId };
     requests.entityDistinct = { a: made[0], b: made[1], on: true };
+    requests.entityDistinctMarks = { itemId: made[0] };
     requests.graphTrace = { kind: "item", id: made[0] };
     requests.graphPaths = { from: made[0], depth: 2 };
     requests.exploreItem = { itemId: made[0], depth: 2 };

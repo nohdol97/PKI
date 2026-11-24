@@ -34,9 +34,11 @@ import {
   listSemanticRelations,
   listSources,
   readEvidenceSource,
+  readItem,
   readOntologyElementById,
   readInsightEvidence,
   readSemanticState,
+  rootOf,
   type ActiveInsight,
   type DataCheckUnmet,
   type DerivativeRegistry,
@@ -137,6 +139,11 @@ export interface ReadGate {
   /** What hangs on an item, counting shown rows only (S03 decision 36 ②). */
   heldShown(itemId: number): HeldCounts;
   /**
+   * The "not the same" marks on an item (DPF-R2): a mark whose row, other item and the other item's group top are all
+   * shown, so every listed mark can be cleared. Filtered first, then cut at 100 (`truncated` counts shown marks only).
+   */
+  distinctMarks(itemId: number): RouteResponse<"entityDistinctMarks">;
+  /**
    * The type definitions shown (S01-R23). A `candidate` or `rejected` element follows its lineage and
    * is judged like any derived row; a `verified` or retired one has none and is always shown.
    */
@@ -164,6 +171,8 @@ const SOURCES_LIMIT = 100;
 const SEARCH_LIMIT = 50;
 /** Provisional (S01-T02): the Semantic list's items per answer; `truncated` says more exist. */
 const SEMANTIC_LIMIT = 100;
+/** DPF-D4: the marks listed on one item; a person leaves them by hand, so no paging. */
+const DISTINCT_MARKS_LIMIT = 100;
 /** Items read per round while filling a page of `semanticPage`. */
 const SEMANTIC_BATCH = 100;
 /** The most rows read to fill a limit when many are hidden (the window grows fourfold until then). */
@@ -243,6 +252,59 @@ export function createReadGate(
   const semanticLimit = options.semanticLimit ?? SEMANTIC_LIMIT;
   const isShown = (kind: string, id: number) =>
     shown([{ kind, id: String(id) }], "display").has(String(id));
+  /**
+   * The rows of a merge line, distinct mark or split record on an item that count as shown: the row itself and the
+   * other item it names are shown. `a` and `b` are the two ends in the row.
+   */
+  const shownOthers = (
+    itemId: number,
+    kind: string,
+    sql: string,
+    rowId: (r: SqlRow) => string,
+  ): { row: SqlRow; other: number }[] => {
+    const rows = db.all(sql, [itemId, itemId]).map((row) => ({
+      row,
+      other: (row.a as number) === itemId ? (row.b as number) : (row.a as number),
+    }));
+    const rowOk = shown(
+      rows.map((r) => ({ kind, id: rowId(r.row) })),
+      "display",
+    );
+    const itemOk = shown(
+      rows.map((r) => ({ kind: "item", id: String(r.other) })),
+      "display",
+    );
+    return rows.filter((r) => rowOk.has(rowId(r.row)) && itemOk.has(String(r.other)));
+  };
+  const distinctRow = (r: SqlRow) => `distinct:${r.a}:${r.b}`;
+  const distinctMarks = (itemId: number): RouteResponse<"entityDistinctMarks"> => {
+    const listed = shownOthers(
+      itemId,
+      "entity-merge",
+      "SELECT item_a AS a, item_b AS b, by, at FROM item_distinct WHERE item_a = ? OR item_b = ?",
+      distinctRow,
+    )
+      .filter((m) => isShown("item", rootOf(db, m.other)))
+      .flatMap((m) => {
+        const item = readItem(db, m.other);
+        return item
+          ? [
+              {
+                id: m.other,
+                type: item.type,
+                name: item.name,
+                by: m.row.by as "user" | "link-check",
+                at: m.row.at as string,
+              },
+            ]
+          : [];
+      })
+      .sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : x.id - y.id));
+    return {
+      marks: listed.slice(0, DISTINCT_MARKS_LIMIT),
+      truncated: listed.length > DISTINCT_MARKS_LIMIT,
+    };
+  };
   const rowsOf = <T extends { id: number }>(item: T) => ({
     ...item,
     facts: only(listSemanticFacts(db, item.id), "fact", (f) => f.id, "display"),
@@ -506,23 +568,9 @@ export function createReadGate(
       );
       return list.length > 0 ? list : ["check-missing"];
     },
+    distinctMarks,
     heldShown: (itemId) => {
       const ids = (sql: string, params: number[]) => db.all(sql, params).map((r) => r.id as number);
-      // a merge line, distinct mark or split record counts when its own row and the other item it names are shown
-      const others = (kind: string, sql: string, rowId: (r: SqlRow) => string) => {
-        const rows = db.all(sql, [itemId, itemId]);
-        const rowOk = shown(
-          rows.map((r) => ({ kind, id: rowId(r) })),
-          "display",
-        );
-        const itemOk = shown(
-          rows.map((r) => ({ kind: "item", id: String(otherEnd(r)) })),
-          "display",
-        );
-        return rows.filter((r) => rowOk.has(rowId(r)) && itemOk.has(String(otherEnd(r)))).length;
-      };
-      const otherEnd = (r: SqlRow) =>
-        (r.a as number) === itemId ? (r.b as number) : (r.a as number);
       return {
         facts: ids("SELECT id FROM facts WHERE item_id = ?", [itemId]).filter((id) =>
           isShown("fact", id),
@@ -531,21 +579,24 @@ export function createReadGate(
           itemId,
           itemId,
         ]).filter((id) => isShown("relation", id)).length,
-        merges: others(
+        merges: shownOthers(
+          itemId,
           "entity-merge",
           "SELECT id, member_id AS a, representative_id AS b FROM item_merges WHERE member_id = ? OR representative_id = ?",
           (r) => `merge:${r.id}`,
-        ),
-        distinct: others(
+        ).length,
+        distinct: shownOthers(
+          itemId,
           "entity-merge",
           "SELECT item_a AS a, item_b AS b FROM item_distinct WHERE item_a = ? OR item_b = ?",
-          (r) => `distinct:${r.a}:${r.b}`,
-        ),
-        splitMoves: others(
+          distinctRow,
+        ).length,
+        splitMoves: shownOthers(
+          itemId,
           "entity-merge",
           "SELECT id, from_item_id AS a, to_item_id AS b FROM item_split_moves WHERE from_item_id = ? OR to_item_id = ?",
           (r) => `split:${r.id}`,
-        ),
+        ).length,
       };
     },
     ontology: () => ({

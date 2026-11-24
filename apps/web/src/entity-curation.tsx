@@ -1,11 +1,11 @@
 // Item curation on the 탐색 screen (X02B-R7) and the calls the 지식 검토 screen's merge candidates share (R10):
 // merge another item into the one on screen, take a member back out, split rows off into a new item, and mark two
-// items as different (with that mark taken back on the spot). Every action goes to the existing gated route and is
-// followed by the caller's re-read, so the screen shows what is stored. Names are imported text: <bdi> only.
+// items as different (the marks listed, each with a button that clears it). Every action goes to the existing gated
+// route and is followed by the caller's re-read, so the screen shows what is stored. Names are imported text: <bdi>
+// only.
 import { useRef, useState, type FormEvent } from "react";
 import type { ApiClient } from "./api.ts";
 import {
-  CURATE_DISTINCT_UNDO,
   CURATE_FAILED,
   CURATE_HEADING,
   CURATE_KEEP_DISTINCT,
@@ -23,6 +23,7 @@ import {
   MERGE_REFUSAL_TEXT,
   SPLIT_REFUSAL_TEXT,
 } from "./entity-text.ts";
+import { DistinctMarksSection } from "./entity-distinct.tsx";
 import type { Center } from "./explore.tsx";
 import { createBusy } from "./latest.ts";
 
@@ -111,7 +112,7 @@ export function EntityCuration({
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   const [splitName, setSplitName] = useState("");
   const [created, setCreated] = useState<number>();
-  const [marked, setMarked] = useState<{ id: number; name: string }>();
+  const [marksVersion, setMarksVersion] = useState(0);
   const latest = useRef(0);
 
   // one action out at a time: a second press before the answer is not sent (X02F-R6)
@@ -141,10 +142,10 @@ export function EntityCuration({
       setSearch({ status: "idle" });
       onChanged();
     });
-  const mark = (id: number, name: string, on: boolean) =>
+  const mark = (id: number) =>
     attempt(async () => {
-      await markDistinct(api, center.id, id, on);
-      setMarked(on ? { id, name } : undefined);
+      await markDistinct(api, center.id, id, true);
+      setMarksVersion((v) => v + 1);
       setNotice(undefined);
     });
   const split = (event: FormEvent) => {
@@ -234,7 +235,7 @@ export function EntityCuration({
               <button
                 type="button"
                 aria-label={`다른 것 표시: ${i.name}`}
-                onClick={() => void mark(i.id, i.name, true)}
+                onClick={() => void mark(i.id)}
               >
                 다른 것 표시
               </button>
@@ -242,18 +243,7 @@ export function EntityCuration({
           ))}
         </ul>
       )}
-      {marked && (
-        <p>
-          <bdi>{marked.name}</bdi>을(를) 다른 것으로 표시했습니다.{" "}
-          <button
-            type="button"
-            aria-label={`${CURATE_DISTINCT_UNDO}: ${marked.name}`}
-            onClick={() => void mark(marked.id, marked.name, false)}
-          >
-            {CURATE_DISTINCT_UNDO}
-          </button>
-        </p>
-      )}
+      <DistinctMarksSection api={api} itemId={center.id} version={marksVersion} />
       <h4>{CURATE_SPLIT}</h4>
       {rows.length === 0 ? (
         <p>{CURATE_SPLIT_NONE}</p>
