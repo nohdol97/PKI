@@ -23,6 +23,7 @@ describe.skipIf(process.platform === "win32")("system-measure kill (H03-C2, C3)"
     expect(value.failedJobs).toEqual({});
     expect(value.lostDocs).toBe(0);
     expect(value.duplicateItems).toBe(0);
+    expect(value.knowledge).toMatchObject({ evidence: 3, expectedEvidence: 3 }); // H03C2F-C1: one row per document
     expect(value.firstJobAfterRestartMs).toBeGreaterThan(0);
     expect(value.allJobsDoneMs).toBeGreaterThanOrEqual(value.firstJobAfterRestartMs);
     expect(value.note).toContain("reclaims at its start"); // P7F-R2: no longer "waits for its lease"
