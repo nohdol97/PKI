@@ -3,7 +3,7 @@
 // plain. The Ask screen's related-knowledge links call `go` with the item and the page key.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { App } from "./App.tsx";
+import { App, NavBadge } from "./App.tsx";
 import type { ApiClient } from "./api.ts";
 import { relatedActions } from "./ask.tsx";
 import { NavProvider, pendingFor, useNav, type NavState } from "./nav.tsx";
@@ -60,5 +60,16 @@ describe("the navigation", () => {
     expect(out).toMatch(/<button[^>]*>(<svg[\s\S]*?<\/svg>)?지식 검토<\/button>/);
     expect(out).toMatch(/<button[^>]*>(<svg[\s\S]*?<\/svg>)?탐색<\/button>/);
     expect(out).toMatch(/<button[^>]*>(<svg[\s\S]*?<\/svg>)?질문<\/button>/);
+  });
+});
+
+// UI01I-C1: the notifications badge says what it counts; the visible text stays the number.
+describe("the notifications badge", () => {
+  it("names the unread count to a screen reader and draws nothing at zero", () => {
+    const out = renderToStaticMarkup(<NavBadge unread={3} />);
+    expect(out).toContain('<span class="sr-only">읽지 않음 </span>');
+    expect(out).toContain('<span class="sr-only">건</span>');
+    expect(out).toContain("3");
+    expect(renderToStaticMarkup(<NavBadge unread={0} />)).toBe("");
   });
 });

@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
 import { evidenceOpener } from "./evidence-view.tsx";
-import { drawnOrder } from "./lint.tsx";
+import { drawnOrder, findingActions } from "./lint.tsx";
 
 describe("점검 drawn order", () => {
   it("groups findings by rule in the screen's rule order, keeping the API order inside a rule", () => {
@@ -40,5 +40,15 @@ describe("점검 원본 읽기 (UI01F-C2)", () => {
     quick.settle({ evidenceId: 2 });
     await flush();
     expect(show).toHaveBeenCalledWith({ evidenceId: 2 });
+  });
+});
+
+// UI01I-C3: the action row is drawn only when the finding has an action.
+describe("점검 finding actions", () => {
+  const f = (rule: string, status: string) => ({ rule, status }) as never;
+  it("offers none for an accepted finding, accept and dismiss for an open one, reopen for a dismissed one", () => {
+    expect(findingActions(f("synonym", "accepted"))).toEqual([]);
+    expect(findingActions(f("synonym", "open"))).toEqual(["accept", "dismiss"]);
+    expect(findingActions(f("synonym", "dismissed"))).toEqual(["reopen"]);
   });
 });
