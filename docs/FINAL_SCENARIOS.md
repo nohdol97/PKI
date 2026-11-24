@@ -2,6 +2,7 @@
 
 > 이 문서는 `eval/final-scenarios.json`에서 `pnpm check:scenarios --write`로 만든다. 손으로 고치지 않는다.
 > **대역 통과는 실제 동작의 증거가 아니다.** 아래 "대역·개발 장비 증거"는 개발 장비에서 대역(mock)이나 Provider 없이 돈 시험이고, 설치본과 실제 Provider에서 확인된 것은 "설치본·실제 Provider 증거"뿐이다.
+> `provider: none`은 그 시험 자체가 Provider도 대역도 부르지 않는다는 뜻이다. 시험이 읽는 미리 채운 자료는 이전에 대역이 만들었을 수 있다.
 
 상태: 확인됨 0, 대역만 14, 증거 없음 0. 명세: [H03-C3](specs/2026-11-24-H03-C3-final-scenarios.md)
 
