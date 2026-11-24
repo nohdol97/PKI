@@ -12,7 +12,7 @@
 
 | 이슈 | 상태 | 라벨 |
 |---|---|---|
-| #25 [K01] 근거 기반 LLM Wiki·Backlink·재생성 | open | in-progress |
+| #25 [K01] 근거 기반 LLM Wiki·Backlink·재생성 | open | site-verify |
 | #26 [K02] Reflection·Consolidation·Knowledge Lint | open | site-verify |
 
 에픽 체크박스 두 개가 모두 `[ ]`이고 실제도 모두 open이라 일치한다. 구현 작업(K01-T1·T2, K02-T1~T3)은 머지됐다. K01-T3(`metrics` 페이지)는 하지 않기로 했다.
@@ -55,7 +55,7 @@
 |---|---|
 | 열린 후속 이슈(K01) | #220 Wiki 투영 검토 지적, #225 Wiki 요약 검토 지적, #235 정확성 수정 검토 지적 |
 | 열린 후속 이슈(K02) | #247 재검토·점검 검토 지적(U1~U5, 시험 보강·비용 측정·문구 항목) |
-| 열린 하위 이슈 | #25(`in-progress`), #26(`site-verify`) |
+| 열린 하위 이슈 | #25(`site-verify`), #26(`site-verify`) |
 | 보류 | 없음(느린 정규화기 시험은 이 Phase에 걸리지 않는다) |
 | 의도적으로 하지 않은 것 | K01-T3 `metrics` 페이지(구현 세션이 #25 댓글과 K01 spec D10에 사유와 함께 기록한 결정) |
 

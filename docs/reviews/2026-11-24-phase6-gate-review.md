@@ -13,9 +13,9 @@
 | 이슈 | 상태 | 라벨 |
 |---|---|---|
 | #30 [X01] 질문별 Hybrid Retrieval·근거 Q&A | open | site-verify |
-| #31 [X02] Knowledge·Explore·Semantic·Evidence 전체 탐색 UX | closed | blocked |
+| #31 [X02] Knowledge·Explore·Semantic·Evidence 전체 탐색 UX | closed | 없음 |
 
-에픽 체크박스는 #30 `[ ]`, #31 `[x]`이며 실제 상태(#30 open, #31 closed)와 일치한다. #31이 closed인데 `blocked` 라벨이 남아 있다([색인의 이슈 표류](README.md#이슈-표류) 참고). 구현 작업: X01 #255 (`8c1d4a98`) #259 (`16513bc7`) #261 (`d12ba24b`) #266 (`68a48c0e`) #292 (`e051fcf3`) #303 (`dbe60113`) #311 (`f3ddb240`) #315 (`b1b0e53c`), X02 #267 (`4ca07abc`) #288 (`a502fb6a`) #300 (`a46b4aeb`).
+에픽 체크박스는 #30 `[ ]`, #31 `[x]`이며 실제 상태(#30 open, #31 closed)와 일치한다. #31(closed)의 `blocked` 라벨은 2026-11-24에 제거됐다([색인의 이슈 표류](README.md#이슈-표류) 참고). 구현 작업: X01 #255 (`8c1d4a98`) #259 (`16513bc7`) #261 (`d12ba24b`) #266 (`68a48c0e`) #292 (`e051fcf3`) #303 (`dbe60113`) #311 (`f3ddb240`) #315 (`b1b0e53c`), X02 #267 (`4ca07abc`) #288 (`a502fb6a`) #300 (`a46b4aeb`).
 
 ## 2. 완료 기준별 증거
 
