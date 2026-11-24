@@ -122,26 +122,29 @@ describe("restore.adopt (RLD-C1, C2)", () => {
     expect(existsSync(join(data, RESTORE_DIR))).toBe(false);
   });
 
-  it("C2b: an unreadable mark is still a mark: the restored database is finished at the next start (RPF-C2)", async () => {
-    const marked = openBetterSqlite3(live());
-    writeSetting(marked, RESTORE_PENDING_SETTING, "{not json");
-    marked.close();
-    writeFileSync(before(), "not a database");
-    expect(() =>
-      rollbackRestore({ dataDir: data, applied: true, finished: false }, "start-failed"),
-    ).toThrow(RestoreStateError);
-    rmSync(before());
+  it.each(["{not json", "null"])(
+    "C2b: an unreadable or non-object mark (%s) is still a mark: the restored database is finished at the next start (RPF-C2, FUB-C1)",
+    async (value) => {
+      const marked = openBetterSqlite3(live());
+      writeSetting(marked, RESTORE_PENDING_SETTING, value);
+      marked.close();
+      writeFileSync(before(), "not a database");
+      expect(() =>
+        rollbackRestore({ dataDir: data, applied: true, finished: false }, "start-failed"),
+      ).toThrow(RestoreStateError);
+      rmSync(before());
 
-    const booted = await bootBackend(options());
-    const consents = Number(booted.db.all("SELECT count(*) AS n FROM consents")[0]?.n);
-    const states = listLocations(booted.db).map((l) => [l.state, l.stateReason]);
-    const mark = readSetting(booted.db, RESTORE_PENDING_SETTING);
-    await booted.server.close();
-    booted.db.close();
-    expect(consents).toBe(0);
-    expect(states).toEqual([["paused", "restored"]]);
-    expect(mark).toBeUndefined();
-  });
+      const booted = await bootBackend(options());
+      const consents = Number(booted.db.all("SELECT count(*) AS n FROM consents")[0]?.n);
+      const states = listLocations(booted.db).map((l) => [l.state, l.stateReason]);
+      const mark = readSetting(booted.db, RESTORE_PENDING_SETTING);
+      await booted.server.close();
+      booted.db.close();
+      expect(consents).toBe(0);
+      expect(states).toEqual([["paused", "restored"]]);
+      expect(mark).toBeUndefined();
+    },
+  );
 
   it("C2: a restored database with its previous copy still there stops the start and moves nothing", async () => {
     writePending(data, { state: "failed", code: "start-failed" });

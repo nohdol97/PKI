@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
 import {
   assertNoFailedExtract,
@@ -237,5 +237,32 @@ describe("HVT (system-measure)", () => {
       expect(() => finish()).toThrow("rm failed");
       expect(process.listenerCount(signal)).toBe(before);
     }
+  });
+
+  it("FUB-C2: a throwing cleanup on a signal still runs the others and exits 143", () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const before = process.listenerCount("SIGTERM");
+    let done = false;
+    let ran = 0;
+    const first = cleanOnSignal(() => {
+      if (!done) throw new Error("rm failed");
+    });
+    const second = cleanOnSignal(() => {
+      ran++;
+    });
+    try {
+      (process.listeners("SIGTERM").at(-1) as () => void)();
+      expect(ran).toBe(1);
+      expect(exit).toHaveBeenCalledWith(143);
+      expect(stderr).toHaveBeenCalledWith(expect.stringContaining("rm failed"));
+    } finally {
+      done = true;
+      first();
+      second();
+      exit.mockRestore();
+      stderr.mockRestore();
+    }
+    expect(process.listenerCount("SIGTERM")).toBe(before);
   });
 });
