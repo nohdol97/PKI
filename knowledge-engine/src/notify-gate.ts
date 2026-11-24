@@ -19,7 +19,7 @@ export interface DeliveryLine {
 
 /**
  * ① The line's Insight is active and has the content the line was made for, and ② the registry's scope policy
- * allows it for the purpose `notify`. What a digest line is counted and shown by: a line that went to the digest
+ * allows it and both its end items for the purpose `notify` (P01-R15: an end item that cannot show hides the Insight). What a digest line is counted and shown by: a line that went to the digest
  * because its confidence is low is still one of the day's changes. A registry that cannot judge throws.
  */
 export function insightHolds(
@@ -31,9 +31,22 @@ export function insightHolds(
   if (insight?.state !== "active" || (insight.changedAt ?? "") !== (line.insightChangedAt ?? "")) {
     return false;
   }
-  return registry
-    .visible(db, [{ kind: "insight", id: String(line.insightId) }], "notify")
-    .some((r) => r.id === String(line.insightId));
+  const shown = (kind: "insight" | "item", ids: number[]) =>
+    new Set(
+      registry
+        .visible(
+          db,
+          ids.map((id) => ({ kind, id: String(id) })),
+          "notify",
+        )
+        .map((r) => r.id),
+    );
+  const ends = shown("item", [insight.xItemId, insight.yItemId]);
+  return (
+    shown("insight", [line.insightId]).has(String(line.insightId)) &&
+    ends.has(String(insight.xItemId)) &&
+    ends.has(String(insight.yItemId))
+  );
 }
 
 /**

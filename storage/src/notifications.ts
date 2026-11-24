@@ -104,7 +104,10 @@ export function insertInsightNotification(
   return lastInsertRowid;
 }
 
-/** The lines of the Insight told immediately (no reason, not withdrawn) made at or after `since`. */
+/**
+ * The lines of the Insight told immediately made at or after `since`: no reason, or an OS channel that left `none`
+ * (a line that entered the feed as `sent` keeps it when it is later demoted to the digest); not withdrawn.
+ */
 export function immediateLinesSince(
   db: SqlDriver,
   insightId: number,
@@ -113,7 +116,8 @@ export function immediateLinesSince(
   return db
     .all(
       `SELECT created_at FROM notifications
-        WHERE insight_id = ? AND reason IS NULL AND status <> 'withdrawn' AND created_at >= ?`,
+        WHERE insight_id = ? AND (reason IS NULL OR os_state <> 'none') AND status <> 'withdrawn'
+          AND created_at >= ?`,
       [insightId, since],
     )
     .map((r) => ({ insightId, immediate: true as const, at: r.created_at as string }));

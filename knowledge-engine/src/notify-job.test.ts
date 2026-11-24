@@ -2,6 +2,8 @@
 // no text; a rerun, a run that failed before it committed, and a changed Insight leave one line per content.
 // `daily` and `weekly` make one line holding a window, none for an empty one.
 import {
+  demoteNotificationToDigest,
+  deferNotification,
   insertFinding,
   listNotifications,
   migrate,
@@ -134,5 +136,51 @@ describe("notify.job daily and weekly: one line holding a window, none for an em
     notifyNow(db, "daily");
     notifyNow(db, "weekly");
     expect(digests().map((d) => d.kind)).toEqual(["weekly"]);
+  });
+});
+
+describe("notify.job scan: the 24-hour repeat rule keeps an immediate line after it went to the digest (NTF-R2, NTF-C2)", () => {
+  const change = (a: ReturnType<typeof seedInsight>, changedAt: string) =>
+    saveInsight(db, a.key, {
+      state: "active",
+      summary: "바뀐 요약",
+      evidenceIds: [a.evidenceId],
+      confidence: 100,
+      urgencyDate: "2026-11-25",
+      changedAt,
+    });
+
+  it("a line told immediately, snoozed and then demoted (muted) still makes the next change a repeat", () => {
+    const a = seedInsight(db, { name: "변경" });
+    notifyNow(db, "scan");
+    const first = listNotifications(db)[0]?.id as number;
+    expect(deferNotification(db, first, "2026-11-23T10:00:00.000Z")).toBe(true);
+    expect(demoteNotificationToDigest(db, first)).toBe(true);
+
+    change(a, "2026-11-23T12:00:00.000Z");
+    notifyNow(db, "scan", "2026-11-23T12:05:00.000Z");
+
+    expect(lines()).toEqual([
+      { insight: a.insightId, status: "digest", reason: "muted", os: "cancelled" },
+      { insight: a.insightId, status: "digest", reason: "repeat", os: "none" },
+    ]);
+  });
+
+  it("an Insight whose only earlier line went to the digest from the start is still sent when it changes", () => {
+    const a = seedInsight(db, { name: "미달", confidence: 30 });
+    notifyNow(db, "scan");
+    expect(lines()).toEqual([
+      { insight: a.insightId, status: "digest", reason: "low-confidence", os: "none" },
+    ]);
+
+    change(a, "2026-11-23T12:00:00.000Z");
+    notifyNow(db, "scan", "2026-11-23T12:05:00.000Z");
+
+    expect(lines().at(-1)).toEqual({
+      insight: a.insightId,
+      status: "sent",
+      reason: null,
+      os: "queued",
+    });
   });
 });
