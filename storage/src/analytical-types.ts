@@ -150,9 +150,12 @@ const knownCurrency = (code: string): boolean => {
 const closed = (list: readonly string[], raw: unknown): string | null =>
   typeof raw === "string" && list.includes(raw) ? raw : null;
 
+/** Same as the contract's SemanticPiecesSchema max (packages/contracts/src/analytical-types.ts): a list longer than this is not a value. */
+const MAX_PIECES = 50;
+
 function columnSet(raw: unknown): string | null {
   const list = structured(raw);
-  if (!Array.isArray(list) || list.length === 0) return null;
+  if (!Array.isArray(list) || list.length === 0 || list.length > MAX_PIECES) return null;
   const names = list.map(columnName);
   if (names.some((n) => n === null)) return null;
   const unique = new Set(names as string[]);
@@ -161,7 +164,7 @@ function columnSet(raw: unknown): string | null {
 
 function keyPairs(raw: unknown): string | null {
   const list = structured(raw);
-  if (!Array.isArray(list) || list.length === 0) return null;
+  if (!Array.isArray(list) || list.length === 0 || list.length > MAX_PIECES) return null;
   const pairs: string[] = [];
   for (const pair of list) {
     if (!Array.isArray(pair) || pair.length !== 2) return null;
