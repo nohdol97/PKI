@@ -237,6 +237,14 @@ describe("HVT (final-scenarios checker)", () => {
     expect(checkScenarioMap(repoMap, readFile)).toEqual([]);
   });
 
+  it("FUB-C3: a playwright config without a testIgnore list is a map: fault", () => {
+    const read = (path: string) =>
+      path === "playwright.config.ts" ? "export default {}" : fakeRead(path);
+    expect(checkScenarioMap(goodMap(), read)).toContain(
+      "map: playwright.config.ts has no testIgnore list",
+    );
+  });
+
   it("HVT-C7: the folder rule follows vitest's exclude (root-only eval/, any-depth node_modules) without case", () => {
     const lines = (path: string) => {
       const map = goodMap();
