@@ -1,8 +1,9 @@
 // K01-R16, V02-R15: a page draws its claims with the status and conflict marker, and imported text
 // (a page title with markup) only as text, never as elements.
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import { buildState, PageView, type PageViewProps } from "./wiki.tsx";
+import { describe, expect, it, vi } from "vitest";
+import { ApiError, type ApiClient } from "./api.ts";
+import { buildState, createPageReads, PageView, type PageViewProps } from "./wiki.tsx";
 
 const noop = () => undefined;
 const props: PageViewProps = {
@@ -83,5 +84,60 @@ describe("PageView's detail pane", () => {
     const bar = html.indexOf('<form class="actions"');
     expect(bar).toBeGreaterThan(html.indexOf("변경 이력"));
     expect(html.slice(bar)).toMatch(/메모 쓰기[\s\S]*메모 추가/);
+  });
+});
+
+// UI01H-C1: a re-read that comes after another page was opened changes nothing; one with no page opened between applies.
+describe("createPageReads (UI01H)", () => {
+  const deferred = () => {
+    let settle!: (value: unknown) => void;
+    let fail!: (error: unknown) => void;
+    const promise = new Promise<unknown>(
+      (resolve, reject) => ((settle = resolve), (fail = reject)),
+    );
+    return { promise, settle, fail };
+  };
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const page = (key: string) => ({ key });
+  const setup = () => {
+    const reads: Array<ReturnType<typeof deferred>> = [];
+    const api = (() => {
+      const read = deferred();
+      reads.push(read);
+      return read.promise;
+    }) as unknown as ApiClient;
+    const on = { shown: vi.fn(), gone: vi.fn(), failed: vi.fn() };
+    return { reads, on, pages: createPageReads(api, on) };
+  };
+
+  it.each([
+    ["a page", (r: ReturnType<typeof deferred>) => r.settle(page("P"))],
+    ["a 404", (r: ReturnType<typeof deferred>) => r.fail(new ApiError("not-found", 404))],
+  ])("UI01H-C1: drops a re-read of P answered with %s after Q was opened", async (_, answer) => {
+    const { reads, on, pages } = setup();
+    void pages.open("P");
+    reads[0]?.settle(page("P"));
+    await flush();
+    void pages.reread();
+    void pages.open("Q");
+    reads[2]?.settle(page("Q"));
+    await flush();
+    on.shown.mockClear();
+    answer(reads[1] as ReturnType<typeof deferred>);
+    await flush();
+    expect(on.shown).not.toHaveBeenCalled();
+    expect(on.gone).not.toHaveBeenCalled();
+    expect(on.failed).not.toHaveBeenCalled();
+  });
+
+  it("UI01H-C1: applies the re-read of the page still shown", async () => {
+    const { reads, on, pages } = setup();
+    void pages.open("P");
+    reads[0]?.settle(page("P"));
+    await flush();
+    void pages.reread();
+    reads[1]?.settle(page("P"));
+    await flush();
+    expect(on.shown).toHaveBeenLastCalledWith(page("P"), false);
   });
 });
