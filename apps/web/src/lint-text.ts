@@ -1,6 +1,6 @@
 // Words for the 점검 screen (K02-R15). The API sends codes, ids and the rows' own text; each code gets a fixed
 // Korean text here, and a code this file does not know is shown as itself.
-import type { RouteResponse } from "@pki/contracts";
+import { EXPLORE_QUERY_MAX, type RouteResponse } from "@pki/contracts";
 
 type Lint = RouteResponse<"lint">;
 export type LintRuleName = Lint["findings"][number]["rule"];
@@ -74,8 +74,7 @@ export const refusalText = (reason: string | undefined): string =>
 
 // CUF-R1: the "놓친 것 알리기" form. Only the three rules whose target is an item are offered (CUF-D1).
 export const REPORT_HEADING = "놓친 것 알리기";
-export const REPORT_HINT =
-  "규칙이 찾지 못한 것을 알립니다. 규칙을 고르고, 항목을 이름으로 찾아 그 규칙이 받는 수만큼 고르세요.";
+export const REPORT_HINT = `규칙이 찾지 못한 것을 알립니다. 규칙을 고르고, 항목을 이름으로 찾아 그 규칙이 받는 수만큼 고르세요. 이름은 ${EXPLORE_QUERY_MAX}자까지 찾습니다.`;
 export const REPORT_RULE = "규칙";
 export const REPORT_SEARCH = "항목 이름";
 export const REPORT_SEARCH_SUBMIT = "찾기";
@@ -87,4 +86,5 @@ export const REPORT_RESULTS = "찾은 항목";
 export const REPORT_APPLIED = "알렸습니다. 점검 목록을 다시 읽었습니다.";
 export const REPORT_EXISTS = "이미 점검 목록에 있는 것입니다.";
 export const REPORT_NOT_FOUND = "대상이 없거나 볼 수 없거나, 두 항목이 이미 한 묶음입니다.";
+export const reportSearchFailedText = (message: string): string => `찾지 못했습니다: ${message}`;
 export const reportFailedText = (message: string): string => `알리지 못했습니다: ${message}`;

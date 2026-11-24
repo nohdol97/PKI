@@ -360,33 +360,25 @@ describe("ask view: the answer and the cited sources (UI01-C10)", () => {
   });
 });
 
-// CUF-C5 (R3): the chosen days are the user's local days, whatever the machine's time zone.
+// CUF-C5 (R3, UIF2-C6): the chosen days are the user's local days; the zone is pinned so the check guards on any machine.
 describe("ask view: the range is the user's days (CUF-C5)", () => {
   it("sends the local start of the first day and the local end of the last", () => {
-    const req = buildRequest({
-      question: "배포일",
-      answer: true,
-      connectorId: "",
-      from: "2026-11-01",
-      to: "2026-11-30",
-    });
-    const from = new Date(req.from as string);
-    const to = new Date(req.to as string);
-    expect([
-      from.getFullYear(),
-      from.getMonth(),
-      from.getDate(),
-      from.getHours(),
-      from.getMinutes(),
-    ]).toEqual([2026, 10, 1, 0, 0]);
-    expect([
-      to.getFullYear(),
-      to.getMonth(),
-      to.getDate(),
-      to.getHours(),
-      to.getMinutes(),
-      to.getSeconds(),
-    ]).toEqual([2026, 10, 30, 23, 59, 59]);
+    const saved = process.env.TZ;
+    process.env.TZ = "Asia/Seoul";
+    try {
+      const req = buildRequest({
+        question: "배포일",
+        answer: true,
+        connectorId: "",
+        from: "2026-11-01",
+        to: "2026-11-30",
+      });
+      expect(req.from).toBe("2026-10-31T15:00:00.000Z");
+      expect(req.to).toBe("2026-11-30T14:59:59.999Z");
+    } finally {
+      if (saved === undefined) delete process.env.TZ;
+      else process.env.TZ = saved;
+    }
   });
 });
 
@@ -415,5 +407,15 @@ describe("progressText (CUF-C7)", () => {
       insufficient: false,
     });
     expect(progressText(done, false)).toContain("1문장");
+  });
+
+  it("says only that it ended when the answer has no sentence (UIF2-C5)", () => {
+    const empty = applyEvent(INITIAL_ASK, {
+      type: "done",
+      sentences: 0,
+      dropped: 0,
+      insufficient: true,
+    });
+    expect(progressText(empty, false)).toBe("끝났습니다.");
   });
 });

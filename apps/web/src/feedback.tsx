@@ -12,9 +12,9 @@ import {
   type FeedbackKind,
   type FeedbackTarget,
 } from "@pki/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
-import { createLatest } from "./latest.ts";
+import { createBusy, createLatest } from "./latest.ts";
 import {
   FEEDBACK_EMPTY,
   FEEDBACK_GONE,
@@ -40,31 +40,60 @@ export const scopedNotice = (
   id: number,
 ): string | undefined => (held?.id === id ? held.text : undefined);
 
-/** The record call every button makes: the refusal or failure text it leaves, and the press itself. */
-function useRecord(api: ApiClient, target: FeedbackTarget, onChange: () => void) {
-  const [held, setHeld] = useState<{ id: number; text: string | undefined }>();
-  const press = (kind: FeedbackKind) => {
-    const id = target.id;
-    return api("feedbackRecord", { target, kind }).then(
-      (r) => {
-        setHeld({ id, text: r.status === "refused" ? feedbackRefusalText(r.reason) : undefined });
-        onChange();
-      },
-      (error: unknown) => {
-        setHeld({
-          id,
-          text: gone(error) ? FEEDBACK_GONE : `보내지 못했습니다: ${message(error)}`,
-        });
-        if (gone(error)) onChange();
-      },
+type Reason = Parameters<typeof feedbackRefusalText>[0];
+
+/**
+ * The record and undo calls of one component (UIF2-R4). They share one lock: while a call is out the next is not
+ * sent and answers `undefined`. A sent call never rejects; it says what to tell and whether the lists changed.
+ */
+export function createFeedbackCalls(api: ApiClient) {
+  const busy = createBusy();
+  type Outcome = { text: string | undefined; changed: boolean };
+  const settle = (
+    call: Promise<{ status: string; reason?: Reason | undefined }>,
+    failed: string,
+  ): Promise<Outcome> =>
+    call.then(
+      (r) => ({
+        text: r.status === "refused" ? feedbackRefusalText(r.reason as Reason) : undefined,
+        changed: true,
+      }),
+      (error: unknown) => ({
+        text: gone(error) ? FEEDBACK_GONE : `${failed}: ${message(error)}`,
+        changed: gone(error),
+      }),
     );
+  return {
+    record: (target: FeedbackTarget, kind: FeedbackKind) =>
+      busy(() => settle(api("feedbackRecord", { target, kind }), "보내지 못했습니다")),
+    undo: (id: number) => busy(() => settle(api("feedbackUndo", { id }), "취소하지 못했습니다")),
+  };
+}
+
+/** The record call every button makes: the refusal or failure text it leaves, and the press itself. */
+function useRecord(
+  calls: ReturnType<typeof createFeedbackCalls>,
+  target: FeedbackTarget,
+  onChange: () => void,
+) {
+  const [held, setHeld] = useState<{ id: number; text: string | undefined }>();
+  const press = async (kind: FeedbackKind) => {
+    const id = target.id;
+    const done = await calls.record(target, kind);
+    if (!done) return;
+    setHeld({ id, text: done.text });
+    if (done.changed) onChange();
   };
   return { notice: scopedNotice(held, target.id), press };
 }
 
 /** The record call of one Insight, shared by the head bar's and the action bar's buttons of its detail pane. */
 export const useInsightRecord = (api: ApiClient, insightId: number, onChange: () => void) =>
-  useRecord(api, { kind: "insight", id: insightId }, onChange);
+  useRecord(
+    useMemo(() => createFeedbackCalls(api), [api]),
+    { kind: "insight", id: insightId },
+    onChange,
+  );
 
 /**
  * The Insight's feedback in its detail pane: "확인 완료" in the head bar (part "head"), the other kinds in the action
@@ -118,7 +147,8 @@ export function RowFeedback({
   label: string;
   onChange: () => void;
 }) {
-  const { notice, press } = useRecord(api, target, onChange);
+  const calls = useMemo(() => createFeedbackCalls(api), [api]);
+  const { notice, press } = useRecord(calls, target, onChange);
   return (
     <>
       <div className="row-actions" role="group" aria-label={`교정: ${label}`}>
@@ -156,17 +186,13 @@ export function RecentFeedback({
       (error: unknown) => setNotice(`불러오지 못했습니다: ${message(error)}`),
     );
   }, [api, version]);
-  const undo = (line: FeedbackLine) =>
-    api("feedbackUndo", { id: line.id }).then(
-      (r) => {
-        setNotice(r.status === "refused" ? feedbackRefusalText(r.reason) : undefined);
-        onChange();
-      },
-      (error: unknown) => {
-        setNotice(gone(error) ? FEEDBACK_GONE : `취소하지 못했습니다: ${message(error)}`);
-        if (gone(error)) onChange();
-      },
-    );
+  const calls = useMemo(() => createFeedbackCalls(api), [api]);
+  const undo = async (line: FeedbackLine) => {
+    const done = await calls.undo(line.id);
+    if (!done) return;
+    setNotice(done.text);
+    if (done.changed) onChange();
+  };
   return (
     <section aria-labelledby="feedback-heading">
       <h3 id="feedback-heading">{FEEDBACK_HEADING}</h3>
@@ -221,7 +247,8 @@ export function ItemFeedback({
   const [notice, setNotice] = useState<string>();
   const [version, setVersion] = useState(0);
   const [latest] = useState(createLatest);
-  const { notice: recordNotice, press } = useRecord(api, { kind: "item", id: item.id }, () =>
+  const calls = useMemo(() => createFeedbackCalls(api), [api]);
+  const { notice: recordNotice, press } = useRecord(calls, { kind: "item", id: item.id }, () =>
     setVersion((v) => v + 1),
   );
   useEffect(() => {
@@ -231,17 +258,12 @@ export function ItemFeedback({
       (error: unknown) => current() && setNotice(`불러오지 못했습니다: ${message(error)}`),
     );
   }, [api, latest, version]);
-  const undo = (line: FeedbackLine) =>
-    api("feedbackUndo", { id: line.id }).then(
-      (r) => {
-        setNotice(r.status === "refused" ? feedbackRefusalText(r.reason) : undefined);
-        setVersion((v) => v + 1);
-      },
-      (error: unknown) => {
-        setNotice(gone(error) ? FEEDBACK_GONE : `취소하지 못했습니다: ${message(error)}`);
-        if (gone(error)) setVersion((v) => v + 1);
-      },
-    );
+  const undo = async (line: FeedbackLine) => {
+    const done = await calls.undo(line.id);
+    if (!done) return;
+    setNotice(done.text);
+    if (done.changed) setVersion((v) => v + 1);
+  };
   const mine = lines && itemPreferenceLines(lines, new Set([item.id, ...memberIds]));
   return (
     <section aria-label={ITEM_FEEDBACK_HEADING}>
