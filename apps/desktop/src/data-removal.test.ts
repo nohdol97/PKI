@@ -1,6 +1,14 @@
 // H02A-C4: what the uninstall switch may delete (spec 2026-11-24-H02-common, R6-R9).
 // Real temp folders; the held lock is a second connection in this process.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,7 +31,12 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 const run = (choice: string | undefined, dir = data) => {
   const disableAutostart = vi.fn();
-  const result = removeUserData({ choice, dir, lock: lockDataDirectory, disableAutostart });
+  const result = removeUserData({
+    choice,
+    dir: () => dir,
+    lock: lockDataDirectory,
+    disableAutostart,
+  });
   return { result, disableAutostart };
 };
 const withDatabase = () => {
@@ -101,9 +114,44 @@ describe("removeUserData", () => {
         },
       };
     };
-    const result = removeUserData({ choice: "delete", dir: data, lock, disableAutostart: vi.fn() });
+    const result = removeUserData({
+      choice: "delete",
+      dir: () => data,
+      lock,
+      disableAutostart: vi.fn(),
+    });
     expect(journalAtClose).toBe(true);
     expect(result.code).toBe(0);
     expect(existsSync(data)).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "LKH-C2: a read-only instance.lock is not a lock: delete refuses and removes nothing, code 1",
+    () => {
+      withDatabase();
+      writeFileSync(join(data, "instance.lock"), "");
+      chmodSync(join(data, "instance.lock"), 0o444);
+      const { result } = run("delete");
+      expect(result.code).toBe(1);
+      expect(result.line).toContain("nothing was removed");
+      expect(readFileSync(join(data, "pki.sqlite"), "utf8")).toBe("db");
+    },
+  );
+
+  it("LKH-C5: a data location that cannot be worked out: delete refuses (1), keep still succeeds (0)", () => {
+    const noLocation = () => {
+      throw new Error("LOCALAPPDATA is not set");
+    };
+    const call = (choice: string) =>
+      removeUserData({
+        choice,
+        dir: noLocation,
+        lock: lockDataDirectory,
+        disableAutostart: vi.fn(),
+      });
+    const refused = call("delete");
+    expect(refused.code).toBe(1);
+    expect(refused.line).toContain("nothing was removed");
+    expect(call("keep").code).toBe(0);
   });
 });
