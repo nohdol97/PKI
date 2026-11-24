@@ -122,6 +122,12 @@
   font-weight: 700;
 }
 
+/* a list-pane heading that is an h2 for the outline but keeps the h3 look it had */
+.sub-title {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-size: var(--fs-h3);
+}
+
 /* a bordered list of free-form entries */
 .plain-list {
   margin: 0 0 var(--sp-4);

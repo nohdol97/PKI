@@ -238,7 +238,7 @@ describe("bidi isolation of imported text", () => {
   it("wraps the Insight summary in <bdi>, in the detail title and in the list row", () => {
     const insight = row({ summary: `${RLO}위험(추론)` });
     const html = renderToStaticMarkup(<InsightBody insight={insight} />);
-    expect(html).toContain(`<h3 class="detail-title"><bdi>${RLO}위험(추론)</bdi></h3>`);
+    expect(html).toContain(`<h2 class="detail-title"><bdi>${RLO}위험(추론)</bdi></h2>`);
     const listed = renderToStaticMarkup(
       <InsightRowView insight={insight} selected={false} onOpen={() => undefined} />,
     );
@@ -548,7 +548,8 @@ describe("Insight rows and detail pane", () => {
     const html = detail();
     expect(html).toMatch(/^<section class="pane-detail" aria-label="Insight 상세">/);
     expect(html).toContain("Insight<span> 1 / 2</span>");
-    expect(html).toContain('<h3 class="detail-title"><bdi>요약 하나 &lt;b&gt;</bdi></h3>');
+    expect(html).toContain('<h2 class="detail-title"><bdi>요약 하나 &lt;b&gt;</bdi></h2>');
+    expect(html).toContain("<h3>요약</h3>");
     expect(html).toMatch(/<dt>유형<\/dt><dd>의존 업무 지연 · <strong>추론<\/strong><\/dd>/);
     expect(html).toContain("<dt>근거</dt><dd>2건</dd>");
     expect(html).toContain(rankingText(one.ranking));

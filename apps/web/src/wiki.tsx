@@ -423,7 +423,7 @@ export function Wiki({ api }: { api: ApiClient }) {
           {index && index.kinds.length === 0 && <p>{WIKI_EMPTY}</p>}
           {index?.kinds.map((k) => (
             <section key={k.kind} aria-label={`${pageKindText(k.kind)} 종류`}>
-              <h3 className="group-label">{pageKindText(k.kind)}</h3>
+              <h2 className="group-label">{pageKindText(k.kind)}</h2>
               <ul className="rows" aria-label={pageKindText(k.kind)}>
                 {k.pages.map((p) => (
                   <li key={p.key}>
@@ -439,7 +439,7 @@ export function Wiki({ api }: { api: ApiClient }) {
           ))}
           {index && index.orphanNotes.length > 0 && (
             <>
-              <h3 className="group-label">붙을 페이지가 없는 메모</h3>
+              <h2 className="group-label">붙을 페이지가 없는 메모</h2>
               <ul className="plain-list" aria-label="붙을 페이지가 없는 메모">
                 {index.orphanNotes.map((n) => (
                   <li key={n.id}>

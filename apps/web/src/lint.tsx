@@ -128,7 +128,7 @@ export function Lint({ api }: { api: ApiClient }) {
               const counts = lint.counts.find((c) => c.rule === rule);
               return (
                 <section key={rule} aria-label={`${ruleText(rule)} 종류`}>
-                  <h3 className="group-label">{ruleText(rule)}</h3>
+                  <h2 className="group-label">{ruleText(rule)}</h2>
                   {counts && <p className="meta">{countsText(counts)}</p>}
                   <p className="meta">{ruleHint(rule)}</p>
                   {mine.length > 0 && (
@@ -210,9 +210,9 @@ export function Lint({ api }: { api: ApiClient }) {
             )
           }
         >
-          <h3 className="detail-title">
+          <h2 className="detail-title">
             <bdi>{heading(current)}</bdi>
-          </h3>
+          </h2>
           <Props
             items={[
               ["종류", ruleText(current.rule)],
@@ -222,7 +222,7 @@ export function Lint({ api }: { api: ApiClient }) {
           {current.status === "oscillating" && <p>{LINT_OSCILLATING}</p>}
           {current.opinion && <p>{opinionText(current.opinion)}</p>}
           <div className="sec">
-            <h4>근거</h4>
+            <h3>근거</h3>
             {current.evidence.length === 0 ? (
               <p>{LINT_NO_EVIDENCE}</p>
             ) : (
