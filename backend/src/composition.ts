@@ -896,10 +896,12 @@ export function productLocalFiles(
               realPath: found.realPath,
               rootDev: found.rootDev,
               rootIno: found.rootIno,
-              active: found.state === "active",
+              state: found.state,
             }
           : undefined;
       },
+      markUnavailable: (id, reason) => void closeLocation(db, id, "unavailable", reason, "active"),
+      markActive: (id) => void reopenLocation(db, id, null, "unavailable"),
       excluded: () => forbidden,
     },
     ports: {

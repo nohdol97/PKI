@@ -338,8 +338,10 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
     if (location.state !== "unavailable" && location.state !== "needs-confirmation") {
       return { error: "bad-request" };
     }
-    // a JSONL file location has no relink: its instance is made from the row it was approved with
-    if (location.type === "jsonl-file") return { error: "bad-request" };
+    // a JSONL file location is never held for a confirmation; only one that cannot be read is relinked (DPF-R6)
+    if (location.type === "jsonl-file" && location.state !== "unavailable") {
+      return { error: "bad-request" };
+    }
     const path = pathOf({ ...request, type: location.type });
     if (path === undefined) return rejected("ticket-required");
     // the same checks as an approval; the location itself is left out of the overlap check (I02B-R9)
@@ -361,13 +363,16 @@ export function createLocalLocations(options: LocalLocationsOptions): LocalLocat
       rootDev: checked.dev,
       rootIno: checked.ino,
     });
+    const relinked = listLocations(db).find((l) => l.id === location.id) as LocalLocation;
     try {
-      options.onApproved();
+      // a JSONL file's instance exists already: it only needs its sync now; any other location is read by the `local-files` sync
+      if (relinked.type === "jsonl-file") options.jsonlFile?.relinked(relinked);
+      else options.onApproved();
     } catch (error) {
       log("local-sync-register-failed", { error: errorClass(error) });
     }
     changed();
-    return view(listLocations(db).find((l) => l.id === location.id) as LocalLocation);
+    return view(relinked);
   }
 
   /** Runs a change on a location in one of `states`; the answer is the location afterwards. */

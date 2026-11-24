@@ -16,6 +16,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -212,12 +213,69 @@ describe("jsonl-file location (I02B-C33): the life of the instance", () => {
     const swapped = await t.sync(id);
     expect(swapped.body).toMatchObject({ stopped: "connector-failed", created: 0 });
 
-    // a symlink to a file in its place
+    // a symlink to a file in its place (the swap above made the location unavailable, DPF-R4; back to active here)
+    t.db.run("UPDATE local_locations SET state = 'active', state_reason = NULL WHERE id = ?", [id]);
     unlinkSync(path);
     symlinkSync(decoy, path);
     const linked = await t.sync(id);
     expect(linked.body).toMatchObject({ stopped: "connector-failed", created: 0 });
     expect(snapshot(t.db, `jsonl-file:${id}`)).toEqual(before);
+  });
+
+  it("a refused read turns the location unavailable, the next syncs read nothing and do not fail, and the file's return reads again (DPF-C4)", async () => {
+    const t = await start();
+    const states = async () =>
+      (
+        (await t.call(routes.localLocations.path)).body as {
+          locations: { id: string; state: string; stateReason: string | null }[];
+        }
+      ).locations;
+    const stateOf = async (id: string) => (await states()).find((l) => l.id === id);
+
+    const path = file("a.jsonl", lines(line({ external_id: "e1" })));
+    const id = await t.approve(path);
+    const before = snapshot(t.db, `jsonl-file:${id}`);
+    // saved by a rename over the path: another file, another identity
+    renameSync(file("new.jsonl", lines(line({ external_id: "swapped" }))), path);
+    expect((await t.sync(id)).body).toMatchObject({ stopped: "connector-failed", created: 0 });
+    expect(await stateOf(id)).toMatchObject({ state: "unavailable", stateReason: "root-changed" });
+    const again = await t.sync(id);
+    expect(again.body).not.toMatchObject({ stopped: "connector-failed" });
+    expect(snapshot(t.db, `jsonl-file:${id}`)).toEqual(before);
+
+    // the same file moved aside and put back is read again
+    const second = file("b.jsonl", lines(line({ external_id: "b1", id: "r2" })));
+    const idB = await t.approve(second);
+    renameSync(second, join(root, "aside.jsonl"));
+    expect((await t.sync(idB)).body).toMatchObject({ stopped: "connector-failed" });
+    expect(await stateOf(idB)).toMatchObject({ state: "unavailable", stateReason: "root-missing" });
+    renameSync(join(root, "aside.jsonl"), second);
+    expect((await t.sync(idB)).body).not.toMatchObject({ stopped: "connector-failed" });
+    expect(await stateOf(idB)).toMatchObject({ state: "active", stateReason: null });
+  });
+
+  it("a relink of the unavailable location to the same path reads the new file under the same instance and keeps what came in before (DPF-C5)", async () => {
+    const t = await start();
+    const path = file("a.jsonl", lines(line({ external_id: "e1" })));
+    const id = await t.approve(path);
+    const before = snapshot(t.db, `jsonl-file:${id}`);
+    expect(before.sources).toBe(1);
+    renameSync(
+      file("new.jsonl", lines(line({ external_id: "e1" }), line({ external_id: "e2", id: "r2" }))),
+      path,
+    );
+    expect((await t.sync(id)).body).toMatchObject({ stopped: "connector-failed" });
+
+    const relinked = await t.call(routes.relinkLocalLocation.path, "POST", {
+      locationId: id,
+      path,
+    });
+    expect(relinked.status, JSON.stringify(relinked.body)).toBe(200);
+    expect(relinked.body).toMatchObject({ id, state: "active" });
+    const stored = t.db.all("SELECT root_ino FROM local_locations WHERE id = ?", [id])[0];
+    expect(stored?.root_ino).toBe(String(statSync(path, { bigint: true }).ino));
+    await vi.waitFor(() => expect(snapshot(t.db, `jsonl-file:${id}`).sources).toBe(2));
+    expect(snapshot(t.db, `jsonl-file:${id}`).sources).toBeGreaterThan(before.sources);
   });
 
   it("a line cannot reach the sources of another jsonl-file location, nor of an older jsonl-import instance, while the paste import still does", async () => {

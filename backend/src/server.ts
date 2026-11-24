@@ -1177,6 +1177,9 @@ function createHandlers(options: ServerOptions, preparations: Set<AbortControlle
         const set = decisions.entities.setDistinct(options.db, a, b, on, at);
         return set.status === "refused" ? { error: "not-found" as const } : set;
       }),
+    // DPF-R2: a read; an item that is absent, hidden, or whose group's top is hidden is the same not-found
+    entityDistinctMarks: async ({ itemId }) =>
+      shownItems([itemId]) ? gate.distinctMarks(itemId) : { error: "not-found" as const },
     // S01-R23, T07: the type definitions. The user's operations take the same one entry; an id that is
     // absent, deleted or hidden is the one same not-found; a refusal is a code with counts in a 200 body.
     entityCandidates: async () => gate.mergeCandidates(),

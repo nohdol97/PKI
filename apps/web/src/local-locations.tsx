@@ -22,6 +22,7 @@ import {
   ACTION_REFUSAL_TEXT,
   APPROVAL_REJECTION_TEXT,
   CONFIRM_DELETIONS_WARNING_TEXT,
+  JSONL_UNAVAILABLE_TEXT,
   LOCATION_STATE_TEXT,
   NORMALIZER_UNAVAILABLE_TEXT,
   NOT_WATCHING_TEXT,
@@ -86,6 +87,16 @@ export async function pickAndAdd(
   return ticket === null ? undefined : addLocation(api, { type, ticket });
 }
 
+/** The shell's picker of the location's own kind, then the relink with its ticket; nothing when the user cancelled. */
+export async function pickAndRelink(
+  api: ApiClient,
+  pick: NonNullable<PickerBridge["pickLocation"]>,
+  location: Pick<LocalLocationInfo, "id" | "type">,
+): Promise<void> {
+  const { ticket } = await pick(location.type);
+  if (ticket !== null) await api("relinkLocalLocation", { locationId: location.id, ticket });
+}
+
 export function LocationList({
   list,
   onAction = noAction,
@@ -126,6 +137,9 @@ export function LocationList({
                     {l.state === "revoking" && ` · 남은 원본 ${l.counts.sources}개`}
                     {" · "}
                     {l.watching ? "실시간 감시 중" : NOT_WATCHING_TEXT}
+                    {l.type === "jsonl-file" && l.state === "unavailable" && (
+                      <p>{JSONL_UNAVAILABLE_TEXT}</p>
+                    )}
                   </td>
                   <td>
                     {l.counts.tracked} / {l.counts.skipped} / {l.counts.ignored}
@@ -223,8 +237,7 @@ export function LocalLocations({
           if (import.meta.env.DEV) {
             await api("relinkLocalLocation", { locationId, path });
           } else if (pick) {
-            const { ticket } = await pick("folder");
-            if (ticket !== null) await api("relinkLocalLocation", { locationId, ticket });
+            await pickAndRelink(api, pick, location);
           }
         });
       case "confirm":

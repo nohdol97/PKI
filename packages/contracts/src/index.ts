@@ -1194,6 +1194,20 @@ export const EntityDistinctRequestSchema = z
   })
   .refine((r) => r.a !== r.b);
 export const EntityDistinctResponseSchema = z.object({ status: z.enum(["applied", "unchanged"]) });
+/** DPF-R1: the "not the same" marks on one item; the pair is read through the item, the other end is listed. */
+export const EntityDistinctMarksRequestSchema = z.strictObject({ itemId: EntityItemIdSchema });
+export const EntityDistinctMarksResponseSchema = z.object({
+  marks: z.array(
+    z.object({
+      id: z.int().positive(),
+      type: z.string(),
+      name: z.string(),
+      by: z.enum(["user", "link-check"]),
+      at: z.string(),
+    }),
+  ),
+  truncated: z.boolean(),
+});
 /** A valid-interval end: `YYYY-MM-DD` in shape; the API judges that the day exists (S02-R17). */
 const ValidityDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const SemanticValidityRequestSchema = z.strictObject({
@@ -2183,6 +2197,12 @@ export const routes = {
     path: "/api/entities/distinct",
     request: EntityDistinctRequestSchema,
     response: EntityDistinctResponseSchema,
+  },
+  entityDistinctMarks: {
+    method: "POST",
+    path: "/api/entities/distinct/marks",
+    request: EntityDistinctMarksRequestSchema,
+    response: EntityDistinctMarksResponseSchema,
   },
   entityCandidates: {
     method: "GET",

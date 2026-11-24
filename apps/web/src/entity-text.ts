@@ -30,6 +30,10 @@ export const CURATE_SPLIT_SUBMIT = "나누기";
 export const CURATE_SPLIT_NONE = "나눌 사실·관계가 없습니다.";
 export const CURATE_SPLIT_OPEN = "만들어진 항목 열기";
 export const CURATE_DISTINCT_UNDO = "다른 것 표시 풀기";
+export const CURATE_DISTINCT_HEADING = "다른 것으로 표시한 항목";
+export const CURATE_DISTINCT_NONE = "다른 것으로 표시한 항목이 없습니다";
+export const CURATE_DISTINCT_TRUNCATED = "처음 100개만 보입니다";
+export const CURATE_DISTINCT_BY = { user: "사용자", "link-check": "연결 검사" } as const;
 export const CURATE_FAILED = "조치하지 못했습니다";
 export const CURATE_LOADING = "찾는 중입니다.";
 

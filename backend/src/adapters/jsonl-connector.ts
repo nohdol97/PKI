@@ -15,7 +15,10 @@
 // An instance made for an approved JSONL file location (I02B-R41, configuration `{ path, locationId }`) does
 // not read the path as it stands: the file is opened through the path boundary of @pki/connector-sdk, which
 // reads it only when the opened handle is the file the approval recorded (a regular file, the same
-// identity, outside the data directory). It reads while the location is `active` and gives nothing otherwise.
+// identity, outside the data directory). It reads while the location is `active`. A refusal for the place or the
+// identity (DPF-R4) leaves the sync failed as before and moves the location to `unavailable`; while it is
+// `unavailable` the file is opened with the recorded identity each sync (DPF-R5): a match makes the location
+// `active` again, anything else gives an empty page and no failure. Any other state gives nothing.
 // This is the one place of the product that reads a JSONL file's path.
 import {
   CONNECTOR_SDK_VERSION,
@@ -43,10 +46,14 @@ import { readFileSync, statSync } from "node:fs";
 
 /** What the composition point hands an instance of an approved JSONL file location (I02B-R4, R41). */
 export interface JsonlFilePorts {
-  /** The approval of a location: where the file is and the identity recorded then; undefined when none is read now. */
+  /** The approval of a location: where the file is, the identity recorded then and the state; undefined when none. */
   location(
     locationId: string,
-  ): { realPath: string; rootDev: string; rootIno: string; active: boolean } | undefined;
+  ): { realPath: string; rootDev: string; rootIno: string; state: string } | undefined;
+  /** Moves an `active` location to `unavailable` with a reason; a state the user set meanwhile is left alone. */
+  markUnavailable(locationId: string, reason: "root-changed" | "root-missing"): void;
+  /** Moves an `unavailable` location back to `active`. */
+  markActive(locationId: string): void;
   /** Folders a read never reaches into: the data directory, the shell's user-data folder. */
   excluded(): readonly string[];
   fs?: BoundaryFs;
@@ -75,6 +82,14 @@ function readConfig(config: unknown): JsonlConnectorConfig {
   throw new Error("jsonl-import needs { path: string }");
 }
 
+/** The refusals that mean the file is not the approved one or is not there: the state reason they leave (DPF-R4). */
+const UNAVAILABLE_REASON: Partial<Record<string, "root-changed" | "root-missing">> = {
+  redirected: "root-changed",
+  symlink: "root-changed",
+  "not-regular-file": "root-changed",
+  "not-readable": "root-missing",
+};
+
 const sha256 = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
 
 export function createJsonlConnector(ports?: () => JsonlFilePorts | undefined): Connector {
@@ -97,7 +112,8 @@ export function createJsonlConnector(ports?: () => JsonlFilePorts | undefined): 
     if (!location) {
       throw new ConnectorError("jsonl-import: the location is not approved", { retryable: false });
     }
-    if (!location.active) return undefined;
+    const wasActive = location.state === "active";
+    if (!wasActive && location.state !== "unavailable") return undefined;
     const fs = bound.fs ?? nodeBoundaryFs;
     const read = await readLocationFile({
       fs,
@@ -109,10 +125,14 @@ export function createJsonlConnector(ports?: () => JsonlFilePorts | undefined): 
       expectedId: { dev: location.rootDev, ino: location.rootIno },
     });
     if (!read.ok) {
+      if (!wasActive) return undefined;
+      const reason = UNAVAILABLE_REASON[read.reason];
+      if (reason) bound.markUnavailable(locationId, reason);
       throw new ConnectorError(`jsonl-import: the file cannot be read (${read.reason})`, {
         retryable: false,
       });
     }
+    if (!wasActive) bound.markActive(locationId);
     return Buffer.from(read.bytes);
   }
 

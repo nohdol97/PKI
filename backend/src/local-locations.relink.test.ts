@@ -10,7 +10,15 @@ import {
   type LocalLocation,
   type SqlDriver,
 } from "@pki/storage";
-import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -102,6 +110,78 @@ describe("relink", () => {
       expect(await locations.relink({ locationId: newLocalId(), path: moved })).toEqual({
         error: "not-found",
       });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("relink of a jsonl-file location (DPF-R6)", () => {
+  function setupFile() {
+    const db: SqlDriver = openCanonicalDb(data);
+    const path = join(root, "notes.jsonl");
+    writeFileSync(path, "{}\n");
+    const stat = statSync(path, { bigint: true });
+    const id = newLocalId();
+    insertLocation(db, {
+      id,
+      type: "jsonl-file",
+      displayPath: path,
+      realPath: path,
+      rootDev: stat.dev.toString(),
+      rootIno: stat.ino.toString(),
+      createdAt: "2026-11-24T00:00:00.000Z",
+    });
+    const relinked = vi.fn();
+    const locations = createLocalLocations({
+      db,
+      index: createLocalFileIndex(db),
+      forbidden: [data],
+      buildKind: "test",
+      tickets: createApprovalTickets(),
+      onApproved: vi.fn(),
+      normalizerUnavailable: () => false,
+      jsonlFile: { approved: vi.fn(), revoked: vi.fn(), relinked },
+    });
+    return { db, id, path, stat, locations, relinked };
+  }
+
+  it("takes an unavailable location to the file chosen: the id stays, the identity is the new file's, the instance is told", async () => {
+    const { db, id, path, stat, locations, relinked } = setupFile();
+    try {
+      closeLocation(db, id, "unavailable", "root-changed");
+      writeFileSync(join(root, "fresh.jsonl"), "{}\n");
+      renameSync(join(root, "fresh.jsonl"), path);
+      const now = statSync(path, { bigint: true });
+      expect(now.ino).not.toBe(stat.ino);
+      expect(await locations.relink({ locationId: id, path })).toMatchObject({
+        id,
+        state: "active",
+      });
+      expect(row(db, id)).toMatchObject({ rootIno: now.ino.toString(), state: "active" });
+      expect(relinked).toHaveBeenCalledWith(expect.objectContaining({ id }));
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses a file that is not .jsonl and a folder and changes nothing; an active location is not relinked", async () => {
+    const { db, id, path, locations, relinked } = setupFile();
+    try {
+      expect(await locations.relink({ locationId: id, path })).toEqual({ error: "bad-request" });
+      closeLocation(db, id, "unavailable", "root-changed");
+      const before = row(db, id);
+      const dir = join(root, "dir.jsonl");
+      mkdirSync(dir);
+      const text = join(root, "notes.txt");
+      writeFileSync(text, "{}\n");
+      for (const target of [dir, text]) {
+        expect(await locations.relink({ locationId: id, path: target })).toMatchObject({
+          error: "approval-rejected",
+        });
+      }
+      expect(row(db, id)).toEqual(before);
+      expect(relinked).not.toHaveBeenCalled();
     } finally {
       db.close();
     }
