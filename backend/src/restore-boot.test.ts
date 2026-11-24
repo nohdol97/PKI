@@ -394,6 +394,14 @@ describe("restore.rollback (H01-R13)", () => {
       { connectorInstanceId: "c1", namespace: "n", externalId: "a" },
       NOW.toISOString(),
     );
+    // a consent in the previous data: the ordinary start after the undo must not clear it (RPF-C1)
+    saveConsent(db, {
+      provider: "openai-compatible",
+      destination: "https://example.invalid",
+      policyVersion: "1",
+      allowedClasses: ["public"],
+      grantedAt: NOW.toISOString(),
+    });
     db.close();
     const hash = sha(live());
     const failing: DerivativeRegistry = {
@@ -429,6 +437,7 @@ describe("restore.rollback (H01-R13)", () => {
     // the next start is an ordinary one on the previous data
     const running = await bootBackend(options);
     expect(sourceCount(running.db)).toBe(before.sources);
+    expect(Number(running.db.all("SELECT count(*) AS n FROM consents")[0]?.n)).toBe(1);
     await running.server.close();
     running.db.close();
   });

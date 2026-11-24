@@ -11,6 +11,7 @@ import {
   readInsightById,
   registerConnectorInstance,
   registerJob,
+  requestInsightInterpretations,
   saveFact,
   saveInsight,
   saveSourceRecord,
@@ -166,5 +167,31 @@ describe("a cleared interpretation is asked for again once (PD3-R1)", () => {
     purgeSource(db, other, { reason: "source-deleted", at: "2026-11-23T01:00:00.000Z" });
     expect(readInsightById(db, parent.id)).toMatchObject({ interpretation: null });
     expect(queuedAt(target)).toBe(0);
+  });
+
+  const jobsAt = (target: string) =>
+    db.all("SELECT 1 FROM jobs WHERE kind = ? AND target = ?", [INSIGHT_INTERPRET_KIND, target])
+      .length;
+
+  it("an open job at the same target is kept: no second job (RPF-C3)", () => {
+    const { other, target } = triedBasis();
+    db.run("UPDATE jobs SET status = 'queued' WHERE kind = ? AND target = ?", [
+      INSIGHT_INTERPRET_KIND,
+      target,
+    ]);
+    purgeSource(db, other, { reason: "source-deleted", at: "2026-11-23T01:00:00.000Z" });
+    expect(jobsAt(target)).toBe(1);
+  });
+
+  it("a re-asked job that closes without an interpretation is not asked again (RPF-C4)", () => {
+    const { other, target } = triedBasis();
+    purgeSource(db, other, { reason: "source-deleted", at: "2026-11-23T01:00:00.000Z" });
+    expect(queuedAt(target)).toBe(1);
+    db.run(
+      "UPDATE jobs SET status = 'succeeded' WHERE kind = ? AND target = ? AND status = 'queued'",
+      [INSIGHT_INTERPRET_KIND, target],
+    );
+    expect(requestInsightInterpretations(db, new Date(at))).toBe(0);
+    expect(jobsAt(target)).toBe(2);
   });
 });
