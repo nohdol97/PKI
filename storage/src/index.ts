@@ -351,7 +351,7 @@ export {
   type StoredFeedback,
   type UndoFeedbackResult,
 } from "./feedback.ts";
-export { rowLineage, unionOfVersions } from "./row-lineage.ts";
+export { evidenceLineage, rowLineage, unionOfVersions } from "./row-lineage.ts";
 export { INVALID, isValidRow, validRow, type ValidRow } from "./valid-row.ts";
 export {
   listSemanticFacts,

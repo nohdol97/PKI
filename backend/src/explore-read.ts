@@ -7,7 +7,6 @@ import { pageKindOfType, WIKI_PAGE_KIND_NAME } from "@pki/knowledge-engine";
 import {
   listExploreItems,
   listSemanticFacts,
-  listSemanticMembers,
   listSemanticRelations,
   readItem,
   readSourceVersionView,
@@ -114,9 +113,7 @@ export function createExploreReads(
       if (paths.status === "refused") return { status: "refused", reason: "depth-exceeded" };
       const walks = paths.paths ?? [];
       // the item's own rows and those of its shown members (S02-R13), each row judged by itself
-      const members = listSemanticMembers(db, itemId).filter((m) =>
-        gate.semanticShown("item", m.id),
-      );
+      const members = gate.semanticMembers(itemId);
       const owners = [itemId, ...members.map((m) => m.id)];
       const facts = owners
         .flatMap((id) => listSemanticFacts(db, id).map((f) => ({ ...f, itemId: id })))
@@ -163,8 +160,7 @@ export function createExploreReads(
             id: m.id,
             type: m.type,
             name: m.name,
-            // a line that points at a hidden item is not undoable from here: its number would name nothing shown
-            mergeId: gate.semanticShown("item", m.mergedInto) ? m.mergeId : null,
+            mergeId: m.mergeId,
           })),
           facts: facts.map((f) => ({ ...f, ...(factTimes.get(f.id) ?? empty) })),
           relations: relations.map((r) => ({ ...r, ...(relationTimes.get(r.id) ?? empty) })),

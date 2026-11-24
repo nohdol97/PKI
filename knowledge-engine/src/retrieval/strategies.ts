@@ -3,7 +3,6 @@
 // (the judge of graph-read.ts); the versions it names are judged once more by the caller at its boundary (R12).
 import { AdapterUnavailableError } from "@pki/contracts";
 import {
-  entityGroups,
   findSourceVersionId,
   isValidRow,
   linksOfFacts,
@@ -19,8 +18,8 @@ import {
   type SourceVersionRef,
   type SqlDriver,
 } from "@pki/storage";
-import { relationPaths, visibleLinks, type GraphJudge } from "../graph-read.ts";
-import { findCandidates, groupLineage } from "../linking.ts";
+import { groupView, relationPaths, visibleLinks, type GraphJudge } from "../graph-read.ts";
+import { findCandidates } from "../linking.ts";
 import { pageKindOfType } from "../wiki-render.ts";
 import { WIKI_PAGE_KIND_NAME } from "../wiki-kind.ts";
 import { reciprocalSum, bestFirst } from "./fusion.ts";
@@ -55,16 +54,25 @@ export function matchItems({ db, registry, judge, question }: Reading): number[]
 
 /** `concept`: the sources the matched items rest on, newest version first within an item. */
 export function conceptIds(reading: Reading, items: readonly number[]): number[] {
-  const { db, registry } = reading;
+  const { db, registry, judge } = reading;
+  const groups = groupView(db, judge);
   return items
-    .flatMap((item) => versionIds(db, groupLineage(db, registry, item)).sort((a, b) => b - a))
+    .flatMap((item) =>
+      versionIds(
+        db,
+        groups
+          .membersOfTop(groups.topOf(item))
+          .flatMap((m) => registry.lineage(db, { kind: "item", id: String(m) })),
+      ).sort((a, b) => b - a),
+    )
     .filter((id, i, all) => all.indexOf(id) === i);
 }
 
 /** `concept` also adds the matched items' names and `verified` forms (shown ones) as queries to the keyword strategy. */
 export function conceptQueries({ db, judge }: Reading, items: readonly number[]): string[] {
   const names = items.flatMap((id) => readItem(db, id)?.name ?? []);
-  const members = new Set(items.flatMap((id) => entityGroups.membersOf(db, id)));
+  const groups = groupView(db, judge);
+  const members = new Set(items.flatMap((id) => groups.membersOfTop(groups.topOf(id))));
   const forms = listVerifiedForms(db).filter((f) => members.has(f.itemId));
   const ref = (f: { factId: number }): DerivedRef => ({ kind: "fact", id: String(f.factId) });
   const shown = judge.shown(forms.map(ref));
@@ -153,8 +161,9 @@ export function temporalIds(
   paging: { size: number; pages: number } = TEMPORAL_PAGING,
 ): number[] {
   const { db, registry, judge, question } = reading;
+  const groups = groupView(db, judge);
   const members =
-    items.length > 0 ? items.flatMap((id) => entityGroups.membersOf(db, id)) : undefined;
+    items.length > 0 ? items.flatMap((id) => groups.membersOfTop(groups.topOf(id))) : undefined;
   const factRef = (id: number): DerivedRef => ({ kind: "fact", id: String(id) });
   const dates = explicitDates(question);
   const sourcesOf = (factId: number) =>

@@ -21,6 +21,14 @@ export interface RemovalResult {
 
 const refuse = (line: string): RemovalResult => ({ code: 1, line: `PKI: ${line}` });
 
+const isDirectory = (path: string) => {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
 const isFile = (path: string) => {
   try {
     return lstatSync(path).isFile();
@@ -31,17 +39,33 @@ const isFile = (path: string) => {
 
 export function removeUserData(input: {
   choice: string | undefined;
-  dir: string;
+  /** Called after `keep` is ruled out: keep needs no location, so a location that cannot be worked out is no failure there. */
+  dir: () => string;
   lock: (dir: string) => DataLock | undefined;
   disableAutostart: () => void;
 }): RemovalResult {
-  const { choice, dir } = input;
+  const { choice } = input;
   if (choice !== "keep" && choice !== "delete") {
     return refuse("--pki-uninstall-data takes keep or delete; nothing was removed");
   }
-  input.disableAutostart();
+  try {
+    input.disableAutostart();
+  } catch (error) {
+    // the registration is still on: keep and delete both answer 1 and delete removes nothing (SLF-D2)
+    return refuse(
+      `could not switch off start at login (${(error as Error).message}); nothing was removed`,
+    );
+  }
   if (choice === "keep") return { code: 0, line: "" };
 
+  let dir: string;
+  try {
+    dir = input.dir();
+  } catch (error) {
+    return refuse(
+      `could not work out the data folder (${(error as Error).message}); nothing was removed`,
+    );
+  }
   let stat;
   try {
     stat = lstatSync(dir);
@@ -67,14 +91,19 @@ export function removeUserData(input: {
 
   try {
     for (const name of readdirSync(dir)) {
-      // SQLite keeps instance.lock-journal open while the lock is held; it goes after close
-      if (!name.startsWith(DATA_LOCK_FILE))
+      // SQLite keeps instance.lock-journal open while the lock is held; it goes after close.
+      // Only a non-folder is deferred: a folder with that prefix is not SQLite's (SLF-R2).
+      if (!name.startsWith(DATA_LOCK_FILE) || isDirectory(join(dir, name)))
         rmSync(join(dir, name), { recursive: true, force: true });
     }
   } catch (error) {
     return refuse(`removal stopped (${(error as Error).message}); the data folder may be partial`);
   } finally {
-    held.close();
+    try {
+      held.close();
+    } catch {
+      // the process ends soon and the OS frees the lock (SLF-D4)
+    }
   }
   try {
     for (const name of readdirSync(dir)) {

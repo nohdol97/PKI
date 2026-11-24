@@ -131,7 +131,7 @@ describe("explore-read items at the scan cap (X02F-C1)", () => {
 });
 
 describe("explore-read item: owner, undo line and representative (X02F-C2)", () => {
-  it("tags each fact with its owner, nulls the merge line of a member whose target is hidden, and names the representative of a member centre", () => {
+  it("tags each fact with its owner, leaves out a member behind a hidden item (MGV-C1), and names the representative of a member centre", () => {
     const rep = item("대표", versions.open, "대표 값");
     const hiddenMid = item("가려진 중간", versions.secret);
     const leaf = item("끝 구성원", versions.open, "구성원 값");
@@ -142,11 +142,10 @@ describe("explore-read item: owner, undo line and representative (X02F-C2)", () 
     expect(decisions.entities.merge(db, hiddenMid, rep).status).toBe("applied");
     const answer = reads().item({ itemId: rep, depth: 1 });
     if (answer?.status !== "ok") throw new Error("not ok");
-    expect(answer.center?.facts.map((f) => [f.value, f.itemId])).toEqual([
-      ["대표 값", rep],
-      ["구성원 값", leaf],
-    ]);
-    expect(answer.center?.members).toEqual([expect.objectContaining({ id: leaf, mergeId: null })]);
+    expect(answer.center?.facts.map((f) => [f.value, f.itemId])).toEqual([["대표 값", rep]]);
+    expect(answer.center?.members).toEqual([]);
+    // the leaf itself is shown: opened by its own number it is a lone item
+    expect(reads().item({ itemId: leaf, depth: 1 })?.status).toBe("ok");
 
     // a shown target keeps its line number
     const visible = item("보이는 대표", versions.open);
@@ -174,5 +173,85 @@ describe("explore-read item: owner, undo line and representative (X02F-C2)", () 
     const fromMember = reads().item({ itemId: member, depth: 1 });
     expect(fromMember?.edges?.[0]?.from).toBe(visible);
     expect(fromMember?.items).toContainEqual({ id: visible, type: "Project", name: "보이는 대표" });
+  });
+});
+
+describe("explore-read item: a member is carried only while its merge line is shown (RVS-C2)", () => {
+  /** Two items of different scopes, merged; the policy hides a line that joins two scopes, not either item. */
+  function merged(allows: (scopes: readonly unknown[]) => boolean) {
+    const joined = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: { ...defaultScopePolicy, allows },
+    });
+    const rep = item("합침 대표", source("m-a", ["a"]), "대표 값");
+    const member = item("합침 구성원", source("m-b", ["b"]), "구성원 값");
+    const done = productUserDecisions(joined).entities.merge(db, member, rep);
+    if (done.status !== "applied") throw new Error("merge");
+    return {
+      rep,
+      member,
+      mergeId: done.mergeId,
+      reads: createExploreReads(db, joined, createReadGate(db, joined)),
+    };
+  }
+
+  it("leaves out the member and its facts when the line is hidden", () => {
+    const hidden = merged((scopes) => scopes.length < 2);
+    const answer = hidden.reads.item({ itemId: hidden.rep, depth: 1 });
+    if (answer?.status !== "ok") throw new Error("not ok");
+    expect(answer.center?.members).toEqual([]);
+    expect(answer.center?.facts.map((f) => f.value)).toEqual(["대표 값"]);
+  });
+
+  it("carries the member with its line number when the policy shows the line", () => {
+    const open = merged(() => true);
+    const answer = open.reads.item({ itemId: open.rep, depth: 1 });
+    if (answer?.status !== "ok") throw new Error("not ok");
+    expect(answer.center?.members).toEqual([
+      expect.objectContaining({ id: open.member, mergeId: open.mergeId }),
+    ]);
+    expect(answer.center?.facts.map((f) => f.value)).toEqual(["대표 값", "구성원 값"]);
+  });
+});
+
+describe("explore-read item: a member centre whose own line is hidden carries no sibling (MGV-C2)", () => {
+  it("leaves out the sibling of another scope's line, and the sibling's facts", () => {
+    // the policy refuses scope a and scope b together: the centre's line (b to a) is hidden, the sibling's (a to a) is not
+    const split = createDerivativeRegistry({
+      kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+      policy: {
+        ...defaultScopePolicy,
+        allows: (scopes) =>
+          !(scopes.some((s) => s?.includes("a")) && scopes.some((s) => s?.includes("b"))),
+      },
+    });
+    const rep = item("분리 대표", source("g-a", ["a"]), "대표 값");
+    const centre = item("분리 가운데", source("g-b", ["b"]), "가운데 값");
+    const sibling = item("분리 형제", source("g-c", ["a"]), "형제 값");
+    const decisions = productUserDecisions(split);
+    expect(decisions.entities.merge(db, centre, rep).status).toBe("applied");
+    expect(decisions.entities.merge(db, sibling, rep).status).toBe("applied");
+    const answer = createExploreReads(db, split, createReadGate(db, split)).item({
+      itemId: centre,
+      depth: 1,
+    });
+    if (answer?.status !== "ok") throw new Error("not ok");
+    expect(answer.center?.members).toEqual([]);
+    expect(answer.center?.facts.map((f) => f.value)).toEqual(["가운데 값"]);
+  });
+});
+
+describe("explore-read item: a member centre still carries its siblings (RVS-R2)", () => {
+  it("lists the other member of the group and its facts when the centre is itself a member", () => {
+    const rep = item("형제 대표", versions.open, "대표 값");
+    const centre = item("형제 가운데", versions.open, "가운데 값");
+    const sibling = item("형제 구성원", versions.open, "형제 값");
+    const decisions = productUserDecisions(registry);
+    expect(decisions.entities.merge(db, centre, rep).status).toBe("applied");
+    expect(decisions.entities.merge(db, sibling, rep).status).toBe("applied");
+    const answer = reads().item({ itemId: centre, depth: 1 });
+    if (answer?.status !== "ok") throw new Error("not ok");
+    expect(answer.center?.members.map((m) => m.id)).toContain(sibling);
+    expect(answer.center?.facts.map((f) => f.value)).toContain("형제 값");
   });
 });

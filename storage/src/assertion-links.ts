@@ -3,6 +3,7 @@
 // `otherValidValues` is the one function that says whether a fact has another valid value in its slot.
 import { entityGroups } from "./entity-groups.ts";
 import { listOntologyElements } from "./ontology.ts";
+import { keyedRead, preloadReads } from "./read-memo.ts";
 import { STATE_NEUTRAL_ACTIONS } from "./semantic-lifecycle.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 import type { KnowledgeStatus } from "./knowledge.ts";
@@ -159,13 +160,24 @@ export function oneValueKind(db: SqlDriver, kind: string): boolean {
   return definition?.rule.elementKind === "fact-kind" && definition.rule.cardinality === "one";
 }
 
+/** The asked fact's own slot (`slotRivals`), and its twin over many facts (ARB-R1). */
+export const SLOT_OWN_READ = keyedRead({
+  columns: "item_id, kind, value, context",
+  from: "facts",
+  key: "id",
+});
+
+/** Primes `slotRivals`' read of each fact's own slot (a no-op unless `db` is a read memo). */
+export const preloadSlots = (db: SqlDriver, factIds: readonly number[]) =>
+  preloadReads(db, SLOT_OWN_READ, factIds);
+
 /**
  * The other valid facts that state a different value in the asked fact's slot (same kind, same
  * context tag), ascending, before any supersession is subtracted. Answers [] for a fact not stored and for
  * a kind with no `verified` fact-kind definition of cardinality `one`. The conflict rule's own input.
  */
 export function slotRivals(db: SqlDriver, fact: number, within: ConflictReach): number[] {
-  const own = db.all("SELECT item_id, kind, value, context FROM facts WHERE id = ?", [fact])[0];
+  const own = db.all(SLOT_OWN_READ.one, [fact])[0];
   if (!own) return [];
   const kind = own.kind as string;
   if (!oneValueKind(db, kind)) return [];

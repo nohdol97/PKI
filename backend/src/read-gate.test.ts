@@ -7,6 +7,7 @@
 import { createProductRegistry } from "@pki/knowledge-engine";
 import {
   addEvidence,
+  automatedLifecycle,
   createDerivativeRegistry,
   insertItem,
   recordTombstone,
@@ -24,7 +25,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openCanonicalDb } from "./composition.ts";
+import { openCanonicalDb, productUserDecisions } from "./composition.ts";
 import { createReadGate } from "./read-gate.ts";
 import { dirTemplate } from "@pki/testkit";
 
@@ -353,5 +354,87 @@ describe("read-gate: Home's Insights, their evidence and an evidence row's sourc
     expect(() => gate.insights()).toThrow("cannot judge");
     expect(() => gate.insightEvidence(one.id)).toThrow("cannot judge");
     expect(() => gate.evidenceSource(one.evidenceIds[0] as number)).toThrow("cannot judge");
+  });
+});
+
+describe("read-gate: a member is carried only while its merge line is shown (RVS-C2)", () => {
+  const joined = (allows: ScopePolicy["allows"]) => registryOf({ ...defaultScopePolicy, allows });
+  /** An item with one fact citing `versionId`: it is shown exactly when that version is. */
+  function item(name: string, versionId: number) {
+    const id = insertItem(db, { ...attrs, type: "Project", name });
+    automatedLifecycle.created(db, { kind: "item", id }, "extraction", null);
+    const fact = saveFact(db, { ...attrs, itemId: id, kind: "memo", value: "값" }).id;
+    automatedLifecycle.created(db, { kind: "fact", id: fact }, "extraction", null);
+    addEvidence(db, {
+      target: { factId: fact },
+      sourceVersionId: versionId,
+      start: 0,
+      end: 2,
+      quote: "합성",
+    });
+    return id;
+  }
+  function merged(registry: DerivativeRegistry) {
+    const rep = item("대표", source("a", ["a"]).versionId);
+    const member = item("구성원", source("b", ["b"]).versionId);
+    expect(productUserDecisions(registry).entities.merge(db, member, rep).status).toBe("applied");
+    return rep;
+  }
+
+  it("counts a merge line held on the item only while the line is shown (MGV-C4)", () => {
+    const hidden = joined((scopes) => scopes.length < 2);
+    const rep = merged(hidden);
+    expect(createReadGate(db, hidden).heldShown(rep).merges).toBe(0);
+    const open = joined(() => true);
+    expect(createReadGate(db, open).heldShown(rep).merges).toBe(1);
+  });
+
+  it("lists no member under its representative when the line is hidden, and lists it when the policy shows the line", () => {
+    const hidden = joined((scopes) => scopes.length < 2);
+    const rep = merged(hidden);
+    const gate = createReadGate(db, hidden);
+    expect(gate.semanticPage({}).items.map((i) => [i.id, i.members])).toEqual([[rep, []]]);
+    const open = createReadGate(
+      db,
+      joined(() => true),
+    );
+    expect(open.semanticPage({}).items[0]?.members).toHaveLength(1);
+  });
+});
+
+describe("read-gate: a merge chain deeper than the old bound (RVS-R2, MGV-R2)", () => {
+  it("carries a member at any depth when every line is shown (MGV-C3)", () => {
+    const depth = 1003;
+    db.transaction(() => {
+      for (let i = 1; i <= depth; i++)
+        insertItem(db, { ...attrs, type: "Project", name: `사슬 ${i}` });
+      // item i is merged into item i + 1: the representative is the last, the first sits 1002 lines below it
+      for (let i = 1; i < depth; i++)
+        db.run(
+          "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+          [i, i + 1, "2026-11-24T00:00:00.000Z"],
+        );
+    });
+    const ids = createReadGate(db, registryOf(policy()))
+      .semanticMembers(depth)
+      .map((m) => m.id);
+    expect(ids).toContain(depth - 1);
+    expect(ids).toContain(1);
+  });
+});
+
+describe("read-gate: the source list at the scan cap (RVS-C3)", () => {
+  it("answers `next` as the last shown source on the page, and following it reaches the shown source beyond the cap", () => {
+    const beyond = source("beyond").versionId;
+    for (let i = 0; i < 10; i++) source(`h${i}`, SECRET);
+    const first = source("first").versionId;
+    const second = source("second").versionId;
+    const gate = createReadGate(db, registryOf(policy()), { maxScan: 12 });
+    const page = gate.sourcesPage({});
+    expect(page.sources.map((s) => s.id)).toEqual([second, first]);
+    expect(page.next).toBe(first);
+    const more = gate.sourcesPage({ before: page.next as number });
+    expect(more.sources.map((s) => s.id)).toEqual([beyond]);
+    expect(more.next).toBeNull();
   });
 });

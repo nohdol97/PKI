@@ -21,6 +21,9 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createLintReads } from "./lint-read.ts";
 import { createReadGate } from "./read-gate.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const attrs: KnowledgeAttributes = {
   epistemic: "explicit",
@@ -45,8 +48,7 @@ const refuseSecret: ScopePolicy = {
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

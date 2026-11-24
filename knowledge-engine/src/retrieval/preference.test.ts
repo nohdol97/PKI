@@ -20,6 +20,9 @@ import { describe, expect, it } from "vitest";
 import { createProductRegistry } from "../canonical-kinds.ts";
 import { feedbackPreference } from "./preference.ts";
 import { retrieve } from "./index.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const registry = createProductRegistry({ policy: defaultScopePolicy });
 const attrs = {
@@ -32,8 +35,7 @@ const TABLES = ["items", "facts", "relations", "evidence", "feedback"];
 
 /** Six sources with the probe word; an item with a fact resting on the 3rd-ranked one. Feedback is not yet recorded. */
 async function plant(reg: typeof registry = registry, groupMate = false) {
-  const db: SqlDriver = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db: SqlDriver = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   for (let i = 0; i < 6; i++)
     saveSourceRecord(db, "c1", {

@@ -7,6 +7,7 @@ import { registerAnalyticalCheckJob } from "./analytical.ts";
 import type { SourceVersionRef } from "./derivatives.ts";
 import type { MembershipListener } from "./entity-groups.ts";
 import type { EntryRef } from "./semantic-lifecycle.ts";
+import { keyedRead, preloadReads } from "./read-memo.ts";
 import { listSplitMoves } from "./split-moves.ts";
 import type { SqlDriver } from "./sql-driver.ts";
 
@@ -119,29 +120,35 @@ const CURRENT = (column: string) => `(${column} IS NULL OR EXISTS (
    WHERE v.id = ${column} AND v.id = (SELECT max(id) FROM source_versions WHERE source_id = v.source_id)
      AND NOT EXISTS (SELECT 1 FROM tombstones t WHERE t.source_id = v.source_id AND t.covers_version >= v.version)))`;
 
+/** The lines of one fact and its twin over many facts (ARB-R1). */
+export const CHECK_LINES_READ = keyedRead({
+  columns: `c.id, c.check_name, c.passed, c.failure_code, c.examined, c.violations, c.skipped, c.version_id,
+              c.other_version_id, c.checked_at,
+              (${CURRENT("c.version_id")} AND ${CURRENT("c.other_version_id")}) AS current`,
+  from: "analytical_checks c",
+  key: "c.fact_id",
+  order: "c.check_name",
+});
+
+/** Primes `listCheckLines` for these facts (a no-op unless `tx` is a read memo). */
+export const preloadCheckLines = (tx: SqlDriver, factIds: readonly number[]) =>
+  preloadReads(tx, CHECK_LINES_READ, factIds);
+
 /** The lines of one fact, by check name, each with whether it is current. */
 export function listCheckLines(tx: SqlDriver, factId: number): StoredCheckLine[] {
-  return tx
-    .all(
-      `SELECT c.id, c.check_name, c.passed, c.failure_code, c.examined, c.violations, c.skipped, c.version_id,
-              c.other_version_id, c.checked_at,
-              (${CURRENT("c.version_id")} AND ${CURRENT("c.other_version_id")}) AS current
-         FROM analytical_checks c WHERE c.fact_id = ? ORDER BY c.check_name`,
-      [factId],
-    )
-    .map((r) => ({
-      id: r.id as number,
-      check: r.check_name as CheckName,
-      passed: r.passed === 1,
-      failure: r.failure_code as string | null,
-      examined: r.examined as number,
-      violations: r.violations as number,
-      skipped: r.skipped as number,
-      versionId: r.version_id as number,
-      otherVersionId: r.other_version_id as number | null,
-      at: r.checked_at as string,
-      current: r.current === 1,
-    }));
+  return tx.all(CHECK_LINES_READ.one, [factId]).map((r) => ({
+    id: r.id as number,
+    check: r.check_name as CheckName,
+    passed: r.passed === 1,
+    failure: r.failure_code as string | null,
+    examined: r.examined as number,
+    violations: r.violations as number,
+    skipped: r.skipped as number,
+    versionId: r.version_id as number,
+    otherVersionId: r.other_version_id as number | null,
+    at: r.checked_at as string,
+    current: r.current === 1,
+  }));
 }
 
 // ---- erasing the lines another row's change makes stale (S03-R11) ------------------------------------------

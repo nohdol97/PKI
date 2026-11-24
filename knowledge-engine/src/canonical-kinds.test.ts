@@ -47,6 +47,7 @@ import {
   seedLegacyTombstone,
   setStatusForTest,
   type DerivativeContractSubject,
+  memoryDbTemplate,
 } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -67,6 +68,8 @@ import {
 } from "./dependency-delay.ts";
 import { propagateNewVersion } from "./propagation.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const AT = "2026-11-22T00:00:00.000Z";
 const attrs: KnowledgeAttributes = {
   epistemic: "explicit",
@@ -84,8 +87,7 @@ const permissive: ScopePolicy = {
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

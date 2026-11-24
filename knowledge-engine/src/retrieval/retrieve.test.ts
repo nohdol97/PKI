@@ -27,6 +27,9 @@ import {
   type PreferenceSignal,
   type StrategyName,
 } from "./index.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const FIXTURES = resolve(import.meta.dirname, "../../../fixtures");
 const lines = readFileSync(resolve(FIXTURES, "x01-ask.jsonl"), "utf8")
@@ -58,8 +61,7 @@ const attrs = {
 
 /** The fixture world: every record stored, the labelled knowledge planted. `version` maps a record id to its row id. */
 function world() {
-  const db: SqlDriver = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db: SqlDriver = freshDb();
   const version = new Map<string, number>();
   for (const l of lines) {
     const instance = l.connector_instance_id as string;
@@ -349,8 +351,7 @@ describe("X01-R12 what a search hides takes no hit slot", () => {
       },
     });
     const hitsWith = async (hidden: number) => {
-      const db: SqlDriver = openBetterSqlite3(":memory:");
-      migrate(db);
+      const db: SqlDriver = freshDb();
       registerConnectorInstance(db, "c1", "test-fixtures");
       const add = (mark: string, scope: string[], extra: string) =>
         saveSourceRecord(db, "c1", {
@@ -411,8 +412,7 @@ describe("X01-R12 the visibility check comes before the strategy cut", () => {
         allows: (scopes) => !scopes.some((s) => s?.includes("denied")),
       },
     });
-    const db: SqlDriver = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db: SqlDriver = freshDb();
     registerConnectorInstance(db, "c1", "test-fixtures");
     const add = (mark: string, scope: string[], body: string) =>
       saveSourceRecord(db, "c1", { externalId: mark, title: mark, body, accessScope: scope });
@@ -433,8 +433,7 @@ describe("X01-C6a X01-C6b ③ keyword reads in pages, metadata counts after the 
     },
   });
   const plant = (denied: number, open: number, deniedConnector = "c1") => {
-    const db: SqlDriver = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db: SqlDriver = freshDb();
     registerConnectorInstance(db, "c1", "test-fixtures");
     registerConnectorInstance(db, "c2", "test-fixtures");
     const add = (connector: string, mark: string, scope: string[], body: string) =>
@@ -503,8 +502,7 @@ describe("RSP-C4 RSP-C5 a related link follows only shown evidence and a shown e
   });
   /** One source whose only evidence is one fact of item A; `merged` puts A under a second item B. */
   const plantEvidence = (merged: boolean) => {
-    const db: SqlDriver = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db: SqlDriver = freshDb();
     registerConnectorInstance(db, "c1", "test-fixtures");
     const body = "프로브낱말 근거문장";
     saveSourceRecord(db, "c1", { externalId: "e", title: "t", body, accessScope: ["open"] });
@@ -550,8 +548,7 @@ describe("RSP-C2 vector asks the index for more until enough visible sources pas
         allows: (scopes) => !scopes.some((s) => s?.includes("denied")),
       },
     });
-    const db: SqlDriver = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db: SqlDriver = freshDb();
     registerConnectorInstance(db, "c1", "test-fixtures");
     for (let i = 0; i < 60; i++)
       saveSourceRecord(db, "c1", {

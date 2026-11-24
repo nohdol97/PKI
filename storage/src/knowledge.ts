@@ -3,6 +3,7 @@
 // Same-row rules (V02-R8) are the tables' unique keys: saving the same row again
 // returns the stored one unchanged, so a caller only adds evidence to it.
 import { analyticalRowChanged } from "./analytical-check-lines.ts";
+import { keyedRead, preloadReads } from "./read-memo.ts";
 import type { SqlDriver, SqlRow } from "./sql-driver.ts";
 
 export type EpistemicType = "explicit" | "user-approved" | "inferred" | "hypothesis";
@@ -220,17 +221,32 @@ export function addEvidence(db: SqlDriver, evidence: NewEvidence): number {
   )[0]?.id as number;
 }
 
+const evidenceRead = (column: "fact_id" | "relation_id") =>
+  keyedRead({
+    columns: `e.id, e.source_version_id, e.start_offset, e.end_offset, e.quote, ${CURRENT} AS current`,
+    from: "evidence e JOIN source_versions v ON v.id = e.source_version_id",
+    key: `e.${column}`,
+    order: "e.id",
+  });
+/** The evidence list of a fact and of a relation, and its twin over many (ARB-R1). */
+export const EVIDENCE_READS = {
+  fact: evidenceRead("fact_id"),
+  relation: evidenceRead("relation_id"),
+};
+
+/** Primes `listEvidence` for these facts or relations (a no-op unless `db` is a read memo). */
+export const preloadEvidence = (
+  db: SqlDriver,
+  kind: keyof typeof EVIDENCE_READS,
+  ids: readonly number[],
+) => preloadReads(db, EVIDENCE_READS[kind], ids);
+
 /** Evidence of one fact or relation, oldest first, with whether each is current. */
 export function listEvidence(db: SqlDriver, target: EvidenceTarget): StoredEvidence[] {
-  const column = "factId" in target ? "fact_id" : "relation_id";
   return db
-    .all(
-      `SELECT e.id, e.source_version_id, e.start_offset, e.end_offset, e.quote,
-         ${CURRENT} AS current
-       FROM evidence e JOIN source_versions v ON v.id = e.source_version_id
-       WHERE e.${column} = ? ORDER BY e.id`,
-      [targetValues(target).find((v) => v !== null) as number],
-    )
+    .all(EVIDENCE_READS["factId" in target ? "fact" : "relation"].one, [
+      targetValues(target).find((v) => v !== null) as number,
+    ])
     .map((row) => ({
       id: row.id as number,
       target,

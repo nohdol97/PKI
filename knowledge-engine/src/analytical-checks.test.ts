@@ -296,6 +296,10 @@ describe("checks.aggregation", () => {
       false,
       "column-missing",
     ]);
+    expect(pass(run(sales(["1"]), "count_distinct", undefined, { column: undefined }))).toEqual([
+      false,
+      "column-missing",
+    ]);
     expect(pass(run(undefined, "sum"))).toEqual([false, "no-table"]);
     expect(pass(run(notTable("too-large"), "sum"))).toEqual([false, "too-large"]);
   });

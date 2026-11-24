@@ -127,4 +127,29 @@ describe("SqliteVectorIndex file", () => {
     expect((await again.search(v(1, 0), 5)).map((hit) => hit.ref)).toEqual(["a"]);
     again.close();
   });
+
+  it("starts empty when probing the file throws an extended corruption code (RVS-C4)", async () => {
+    const path = freshPath();
+    const first = open(path);
+    const build = await first.beginRebuild(SPACE);
+    await build.upsert([{ ref: "a", vector: v(1, 0) }], 1);
+    await build.activate(["a"], 1);
+    first.close();
+
+    let opened = 0;
+    const corrupt = (target: string) => {
+      const db = openBetterSqlite3(target);
+      if (opened++ > 0) return db;
+      return {
+        ...db,
+        all: () => {
+          throw Object.assign(new Error("index is corrupt"), { code: "SQLITE_CORRUPT_INDEX" });
+        },
+      };
+    };
+    const index = new SqliteVectorIndex(path, corrupt);
+    expect(await index.embeddingSpace()).toBeNull();
+    expect(opened).toBe(2);
+    index.close();
+  });
 });

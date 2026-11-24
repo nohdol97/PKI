@@ -9,12 +9,14 @@ import {
 } from "@pki/storage";
 import type { SqlDriver } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createBroker, type CandidateItem } from "./broker.ts";
 import { createUserActionLedger } from "./user-actions.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const listed = readFileSync(
   resolve(import.meta.dirname, "../../fixtures/test-connector.jsonl"),
@@ -38,8 +40,7 @@ let broker: ReturnType<typeof createBroker>;
 const candidates = new Map<string, CandidateItem>();
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   provider = new FakeProvider({ answer: () => valid });
   candidates.clear();
