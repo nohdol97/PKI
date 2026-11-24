@@ -41,6 +41,8 @@ import type { OpenSqlDriver, SqlDriver } from "./sql-driver.ts";
 export const BACKUP_FOLDER_SETTING = "backup.folder";
 /** The result of the last applied restore (H01-R12). */
 export const RESTORE_LAST_SETTING = "restore.last";
+/** In a restored file until its finish commits: "this database is a restore that was not finished" (RLD-R1). */
+export const RESTORE_PENDING_SETTING = "restore.pending";
 /** Plain snapshots live here for the time of one backup; a start removes what a crash left. */
 export const BACKUP_TMP_DIR = "backup-tmp";
 export const RESTORE_DIR = "restore";
@@ -486,12 +488,6 @@ export function stageRestore(input: StageInput): StageResult {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const stagedPath = join(dir, STAGED_FILE);
   try {
-    const verdict = checkAndLift(input, opened, manifest, stagedPath);
-    if (verdict) {
-      removeRestoreArtifacts(dataDir);
-      return refused(verdict);
-    }
-    syncPath(stagedPath);
     const summary: RestoreSummary = {
       backupId: manifest.backupId,
       backupCreatedAt: manifest.createdAt,
@@ -500,6 +496,12 @@ export function stageRestore(input: StageInput): StageResult {
       counts: manifest.counts,
       embeddingSpace: manifest.embeddingSpace ?? null,
     };
+    const verdict = checkAndLift(input, opened, manifest, stagedPath, summary);
+    if (verdict) {
+      removeRestoreArtifacts(dataDir);
+      return refused(verdict);
+    }
+    syncPath(stagedPath);
     writePending(dataDir, { state: "staged", ...summary });
     return { status: "staged", summary };
   } catch (error) {
@@ -514,10 +516,18 @@ export function stageRestore(input: StageInput): StageResult {
 /** Settings that say where this PC writes and sends: the copy's values are not applied (H01F-R6, D6). */
 const keptSetting = "key = 'backup.folder' OR substr(key, 1, 10) = 'providers.'";
 
-function keepLocalSettings(live: SqlDriver, staged: SqlDriver): void {
+function keepLocalSettings(live: SqlDriver, staged: SqlDriver, summary: RestoreSummary): void {
   const mine = live.all(`SELECT key, value FROM settings WHERE ${keptSetting}`);
   staged.transaction(() => {
-    staged.run(`DELETE FROM settings WHERE ${keptSetting} OR key = ?`, [RESTORE_LAST_SETTING]);
+    staged.run(`DELETE FROM settings WHERE ${keptSetting} OR key IN (?, ?)`, [
+      RESTORE_LAST_SETTING,
+      RESTORE_PENDING_SETTING,
+    ]);
+    // the copy's own value of the mark is not trusted: it is written afresh for this restore (RLD-R1)
+    staged.run("INSERT INTO settings (key, value) VALUES (?, ?)", [
+      RESTORE_PENDING_SETTING,
+      JSON.stringify(summary),
+    ]);
     for (const row of mine) {
       staged.run("INSERT INTO settings (key, value) VALUES (?, ?)", [
         row.key ?? null,
@@ -533,6 +543,7 @@ function checkAndLift(
   opened: OpenedBackup,
   manifest: BackupManifest,
   stagedPath: string,
+  summary: RestoreSummary,
 ): RestoreRefusal | undefined {
   // ① every chunk's authentication, the byte count and the SHA-256
   const done = opened.extract(stagedPath);
@@ -577,7 +588,7 @@ function checkAndLift(
     if (found.length !== expected.length || found.some((line, i) => line !== expected[i])) {
       return "foreign-schema";
     }
-    keepLocalSettings(input.db, staged);
+    keepLocalSettings(input.db, staged, summary);
     return undefined;
   } finally {
     staged.close();
