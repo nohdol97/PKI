@@ -12,6 +12,7 @@ import {
   saveRelation,
   saveSourceRecord,
   setWikiSummary,
+  userDecisions,
   type KnowledgeAttributes,
   type ScopePolicy,
   type SqlDriver,
@@ -529,5 +530,43 @@ describe("wiki.gate: change counts do not reveal claims the caller cannot see (#
         [0, 0],
       ]);
     }
+  });
+});
+
+describe("wiki.gate: a taken-back item's notes do not follow its reused id (KGT-C3, K01-D20, R19)", () => {
+  it("moves the note to `#gone`: not on the new page, listed without a page, and removable", () => {
+    const build = () =>
+      db.transaction(() =>
+        commitDerived(db, {
+          source: null,
+          items: planWikiBuild(db, { at: "2026-11-23T00:00:00.000Z" }).items,
+        }),
+      );
+    const registry = createProductRegistry({ policy: { ...policy, allows: () => true } });
+    const reads = createWikiReads(db, registry, createReadGate(db, registry));
+    const made = userDecisions.add(db, { kind: "item", type: "Project", name: "옛 이름" });
+    if (made.status !== "applied" || made.ref.kind !== "item") throw new Error(made.status);
+    const key = `projects/${made.ref.id}`;
+    build();
+    expect(
+      reads.edit({ op: "note-add", key, text: "옛 메모" }, "2026-11-24T00:00:00.000Z"),
+    ).toEqual({
+      status: "applied",
+    });
+    expect(reads.page(key)?.notes.map((n) => n.text)).toEqual(["옛 메모"]);
+
+    expect(db.transaction(() => userDecisions.undo(db, made.ref))).toEqual({ status: "removed" });
+    const again = userDecisions.add(db, { kind: "item", type: "Project", name: "새 이름" });
+    if (again.status !== "applied" || again.ref.kind !== "item") throw new Error(again.status);
+    expect(`projects/${again.ref.id}`).toBe(key);
+    build();
+
+    expect(reads.page(key)?.notes).toEqual([]);
+    const orphan = reads.index().orphanNotes.find((n) => n.text === "옛 메모");
+    expect(orphan?.pageKey).toBe(`${key}#gone`);
+    expect(reads.edit({ op: "note-remove", id: orphan?.id }, "2026-11-24T00:01:00.000Z")).toEqual({
+      status: "applied",
+    });
+    expect(reads.index().orphanNotes).toEqual([]);
   });
 });

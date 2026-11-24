@@ -12,6 +12,7 @@ import {
   commitDerived,
   userDecisions,
   addWikiNote,
+  writeWikiSummary,
   listWikiNotes,
   type DerivedRef,
   type SourceChange,
@@ -246,5 +247,42 @@ describe("wiki.kind: a deleted item's key does not carry its notes and history t
     expect(db.all("SELECT 1 FROM wiki_log WHERE page_key = ?", [key])).toHaveLength(0);
     expect(listWikiNotes(db, key)).toHaveLength(0);
     expect(listWikiNotes(db, `${key}#gone`).map((n) => n.text)).toEqual(["내 메모"]);
+  });
+});
+
+describe("wiki.kind: a stored summary does not outlive the source it was drawn from (KGT-C4, K01-C3b ①)", () => {
+  it("leaves the canary in no Wiki table when the source goes while the page holds a summary of it", () => {
+    const a = addSource(db, "a", `a의 본문 ${CANARY}`);
+    const b = addSource(db, "b", "b의 본문");
+    const item = addItem(db, "Project", "미리내");
+    cite(db, { factId: addFact(db, item, "memo", `${CANARY} 값`) }, a.id);
+    cite(db, { factId: addFact(db, item, "memo", "남는 값") }, b.id);
+    buildWiki(db);
+    const key = `projects/${item}`;
+    const hash = db.all("SELECT content_hash FROM wiki_pages WHERE key = ?", [key])[0]
+      ?.content_hash as string;
+    const sentence = {
+      sentence: `${CANARY} 요약`,
+      sourceId: a.sourceId,
+      version: a.version,
+      start: 0,
+      end: 2,
+    };
+    expect(db.transaction(() => writeWikiSummary(db, key, hash, JSON.stringify([sentence])))).toBe(
+      true,
+    );
+    const wikiText = () =>
+      db
+        .all(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'wiki\\_%' ESCAPE '\\'",
+        )
+        .map((t) => JSON.stringify(db.all(`SELECT * FROM ${String(t.name)}`)))
+        .join("\n");
+    expect(wikiText()).toContain(CANARY);
+
+    deleteSource(a.sourceId);
+
+    expect(listStoredWikiPages(db).map((p) => p.key)).toEqual([key]);
+    expect(wikiText()).not.toContain(CANARY);
   });
 });

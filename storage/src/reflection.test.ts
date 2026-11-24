@@ -130,3 +130,50 @@ describe("reflection.dangling: a finding goes with the row the user's undo remov
     expect(listFindings(db)).toEqual([]);
   });
 });
+
+describe("reflection.dangling: a finding goes with its second item and with a taken-back relation (KGT-C2)", () => {
+  const AT = "2026-11-24T00:00:00Z";
+  const lineage = [{ sourceId: 1, version: 1 }];
+
+  it("removes a synonym finding whose second item was taken back", () => {
+    const kept = insertItem(db, { type: "Project", name: "남는 항목", ...attrs });
+    const added = userDecisions.add(db, { kind: "item", type: "Project", name: "되돌릴 항목" });
+    if (added.status !== "applied" || added.ref.kind !== "item") throw new Error(added.status);
+    insertFinding(db, {
+      rule: "synonym",
+      target: { kind: "item", a: kept, b: added.ref.id },
+      origin: "rule",
+      status: "open",
+      lineage,
+      at: AT,
+    });
+
+    expect(db.transaction(() => userDecisions.undo(db, added.ref))).toEqual({ status: "removed" });
+
+    expect(listFindings(db)).toEqual([]);
+  });
+
+  it("removes a finding on a relation the user added and took back", () => {
+    const a = insertItem(db, { type: "Project", name: "가", ...attrs });
+    const b = insertItem(db, { type: "Project", name: "나", ...attrs });
+    const added = userDecisions.add(db, {
+      kind: "relation",
+      subjectId: a,
+      type: "uses",
+      objectId: b,
+    });
+    if (added.status !== "applied") throw new Error(added.status);
+    insertFinding(db, {
+      rule: "stale",
+      target: { kind: "relation", a: added.ref.id, b: null },
+      origin: "user",
+      status: "open",
+      lineage,
+      at: AT,
+    });
+
+    expect(db.transaction(() => userDecisions.undo(db, added.ref))).toEqual({ status: "removed" });
+
+    expect(listFindings(db)).toEqual([]);
+  });
+});
