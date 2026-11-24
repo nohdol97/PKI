@@ -6,9 +6,8 @@
 import type { EvidenceSource, RouteResponse } from "@pki/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
-import { createLatest } from "./latest.ts";
 import { SOURCE_GONE } from "./evidence-text.ts";
-import { SourceView, useFocusOn } from "./evidence-view.tsx";
+import { evidenceOpener, SourceView, useFocusOn } from "./evidence-view.tsx";
 import { DETAIL_HINT, DetailPane, PaneHead, Props, Row } from "./panes.tsx";
 import {
   countsText,
@@ -44,30 +43,6 @@ const STATE_CLASS: Readonly<Record<string, string>> = {
 /** The findings in the order the rows are drawn: grouped by rule, the API's order inside a rule. */
 export const drawnOrder = <T extends { rule: string }>(findings: readonly T[]): T[] =>
   RULE_ORDER.flatMap((rule) => findings.filter((f) => f.rule === rule));
-/**
- * Opens the source of a finding's evidence. `reset()` (another finding chosen) drops a read still out, and a
- * newer read drops an older one, so a source never shows under a finding it does not belong to (UI01F-R2).
- */
-export function evidenceOpener(
-  api: ApiClient,
-  show: (source: EvidenceSource) => void,
-  fail: (error: unknown) => void,
-) {
-  const reads = createLatest();
-  return {
-    open(evidenceId: number) {
-      const current = reads.begin();
-      api("evidenceSource", { evidenceId }).then(
-        (source) => current() && show(source),
-        (error: unknown) => current() && fail(error),
-      );
-    },
-    reset() {
-      reads.begin();
-    },
-  };
-}
-
 const heading = (f: Finding) => f.targets.map((t) => t.label).join(" ↔ ");
 
 export function Lint({ api }: { api: ApiClient }) {

@@ -377,6 +377,12 @@ export interface OpenLedgerOptions {
    * the whole new ledger or none, never a header-only file over a database with deletions.
    */
   seed?: () => readonly LedgerLineDraft[];
+  /**
+   * Called before a new file replaces a missing one (a database with data) or before another
+   * installation's file is renamed aside: the caller records the fact first, so a crash after the file
+   * change cannot lose it. Not called for a fresh install.
+   */
+  beforeReplace?: () => void;
   io?: LedgerIo;
 }
 
@@ -468,11 +474,13 @@ function openLedgerUnchecked(options: OpenLedgerOptions): TombstoneLedger {
   const text = io.read(path);
   if (text === undefined) {
     status.missing = options.canonicalSeq > 0 || options.hasData;
+    if (status.missing) options.beforeReplace?.();
     createWithSeed();
   } else {
     const found = parseLedger(text);
     if (found.key === undefined || found.key !== hex(key)) {
       const file = freeName(io, path, found.key === undefined ? "damaged" : "other-key");
+      options.beforeReplace?.();
       io.rename(path, file);
       status.setAside.push({
         file,

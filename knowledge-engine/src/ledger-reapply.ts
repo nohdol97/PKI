@@ -94,6 +94,8 @@ export interface ReapplyOptions {
   knownKind?: (kind: string) => boolean;
   /** Runs once the lines are applied (the database and the ledger agree up to the file's highest); returns lines written. */
   afterReconcile?: (db: SqlDriver) => { healed: number; unwritable: number };
+  /** Runs inside the transaction of every line that was applied (not a deferred or pending one). */
+  onApplied?: (tx: SqlDriver) => void;
 }
 
 const sourceKey = (line: LedgerLine): string => `${line.connectorInstanceId}\0${line.identityHash}`;
@@ -190,6 +192,7 @@ export function createLedgerReapply(
       } else {
         writeLedgerSeq(tx, line.seq);
       }
+      options.onApplied?.(tx);
       return { result: "applied", registered };
     });
 

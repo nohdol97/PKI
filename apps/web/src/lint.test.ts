@@ -1,7 +1,8 @@
 // UI01 review A2: the "n / N" of a finding counts in the order the rows are drawn (grouped by rule), not in API order.
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api.ts";
-import { drawnOrder, evidenceOpener } from "./lint.tsx";
+import { evidenceOpener } from "./evidence-view.tsx";
+import { drawnOrder } from "./lint.tsx";
 
 describe("점검 drawn order", () => {
   it("groups findings by rule in the screen's rule order, keeping the API order inside a rule", () => {

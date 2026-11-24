@@ -12,8 +12,9 @@ import {
   type LocalSourceInfo,
   type SourceThreadResponse,
 } from "@pki/contracts";
-import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
+import { createLatest } from "./latest.ts";
 import { InsightFeedback, RecentFeedback, RowFeedback, useInsightRecord } from "./feedback.tsx";
 import { DETAIL_HINT, DetailPane, PaneHead, Props, Row } from "./panes.tsx";
 import {
@@ -477,6 +478,92 @@ export function InsightDetail({
   );
 }
 
+/**
+ * Opens the source of an evidence entry for the 점검 and Wiki screens. `reset()` (another finding or page chosen)
+ * drops a read still out, and a newer read drops an older one, so a source never shows under an item it does not
+ * belong to (UI01F-R2, UI01G-R3).
+ */
+export function evidenceOpener(
+  api: ApiClient,
+  show: (source: EvidenceSource) => void,
+  fail: (error: unknown) => void,
+) {
+  const reads = createLatest();
+  return {
+    open(evidenceId: number) {
+      const current = reads.begin();
+      api("evidenceSource", { evidenceId }).then(
+        (source) => current() && show(source),
+        (error: unknown) => current() && fail(error),
+      );
+    },
+    reset() {
+      reads.begin();
+    },
+  };
+}
+
+/**
+ * Opens an Insight's evidence and its sources for Home and 알림. A source read is shown only while it is the
+ * newest one and no other Insight's evidence has been shown since; the local position and the thread of a source
+ * only while that source is still the newest (UI01G-R1, R2). Without `extras` those two reads are not made.
+ */
+export function createInsightSession(
+  api: ApiClient,
+  dispatch: (action: EvidenceAction) => void,
+  extras?: {
+    local: (info: LocalSourceInfo | undefined) => void;
+    thread: (thread: SourceThreadResponse | undefined) => void;
+  },
+) {
+  const reads = createLatest();
+  const shown = (s: EvidenceSource, current: () => boolean, withLocal: boolean) => {
+    const versionId = s.sourceVersion.id;
+    dispatch({ type: "source-opened", source: s });
+    if (!extras) return;
+    extras.local(undefined);
+    extras.thread(undefined);
+    // a failure or a source without a thread or a known file only leaves that line out
+    api("sourceThread", { versionId }).then(
+      (r) => current() && extras.thread(r),
+      () => undefined,
+    );
+    if (withLocal)
+      api("localSourceInfo", { sourceVersionId: versionId }).then(
+        (r) => current() && extras.local(r),
+        () => undefined,
+      );
+  };
+  return {
+    openInsight(insightId: number) {
+      api("insightEvidence", { insightId }).then(
+        (r) => {
+          reads.begin();
+          dispatch({ type: "insight-opened", insightId, evidence: r.evidence });
+        },
+        (error: unknown) => dispatch({ type: "failed", what: "insight", id: insightId, error }),
+      );
+    },
+    openSource(evidenceId: number) {
+      const current = reads.begin();
+      api("evidenceSource", { evidenceId }).then(
+        (s) => current() && shown(s, current, true),
+        (error: unknown) =>
+          current() && dispatch({ type: "failed", what: "source", id: evidenceId, error }),
+      );
+    },
+    openMessage(versionId: number) {
+      const current = reads.begin();
+      openThreadMessage(api, versionId).then(
+        (s) => current() && shown(s, current, false),
+        (error: unknown) =>
+          // id 0 names no evidence entry, so only the notice changes
+          current() && dispatch({ type: "failed", what: "source", id: 0, error }),
+      );
+    },
+  };
+}
+
 export function Insights({
   api,
   bridge = (globalThis as { pki?: RevealBridge }).pki,
@@ -538,42 +625,19 @@ export function Insights({
     );
   }, [api]);
 
-  const openInsight = (insightId: number) =>
-    api("insightEvidence", { insightId }).then(
-      (r) => dispatch({ type: "insight-opened", insightId, evidence: r.evidence }),
-      (error: unknown) => dispatch({ type: "failed", what: "insight", id: insightId, error }),
-    );
-  const showThread = (versionId: number) => {
-    setThread(undefined);
-    // a failure or a source without a thread only leaves the list out
-    api("sourceThread", { versionId }).then(setThread, () => undefined);
-  };
-  const openMessage = (versionId: number) =>
-    openThreadMessage(api, versionId).then(
-      (s) => {
-        setLocal(undefined);
-        dispatch({ type: "source-opened", source: s });
-        showThread(versionId);
-      },
-      (error: unknown) =>
-        // id 0 names no evidence entry, so only the notice changes
-        dispatch({ type: "failed", what: "source", id: 0, error }),
-    );
-  const openSource = (evidenceId: number) =>
-    api("evidenceSource", { evidenceId }).then(
-      (s) => {
-        setLocal(undefined);
-        setRevealFailed(false);
-        dispatch({ type: "source-opened", source: s });
-        showThread(s.sourceVersion.id);
-        // where the file is now: a failure only leaves this line out, the stored text is shown anyway
-        api("localSourceInfo", { sourceVersionId: s.sourceVersion.id }).then(
-          setLocal,
-          () => undefined,
-        );
-      },
-      (error: unknown) => dispatch({ type: "failed", what: "source", id: evidenceId, error }),
-    );
+  // the local position and the thread are not part of the evidence state; a new source clears the failed reveal too
+  // kept across renders: the newest-read counter lives in the session
+  const { openInsight, openSource, openMessage } = useMemo(
+    () =>
+      createInsightSession(api, dispatch, {
+        local: (info) => {
+          setLocal(info);
+          if (!info) setRevealFailed(false);
+        },
+        thread: setThread,
+      }),
+    [api],
+  );
 
   return (
     <>
@@ -589,7 +653,7 @@ export function Insights({
                   <InsightRow
                     insight={insight}
                     selected={insight.id === openedId}
-                    onOpen={() => void openInsight(insight.id)}
+                    onOpen={() => openInsight(insight.id)}
                   />
                 </li>
               ))}
@@ -631,7 +695,7 @@ export function Insights({
                   )
               : undefined,
           thread,
-          onOpenMessage: (id) => void openMessage(id),
+          onOpenMessage: openMessage,
           rowActions: (e) => (
             <RowFeedback
               api={api}

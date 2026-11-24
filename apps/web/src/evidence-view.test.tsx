@@ -12,6 +12,7 @@ import {
   InsightBody,
   InsightDetail,
   InsightRow as InsightRowView,
+  createInsightSession,
   evidenceReducer,
   openThreadMessage,
   SameThread,
@@ -545,5 +546,63 @@ describe("Insight rows and detail pane", () => {
     const html = detail({ insight: undefined, actions: undefined });
     expect(html).toContain("왼쪽 목록에서 고르면 여기에 보입니다.");
     expect(html).not.toMatch(/evidence-heading|detail-title|class="actions"/);
+  });
+});
+
+// UI01G-C1, C2: an answer that comes after the screen moved on lands neither under another Insight nor another source.
+describe("Insight 세션의 늦은 답 (UI01G)", () => {
+  const deferred = () => {
+    let settle!: (value: unknown) => void;
+    const promise = new Promise<unknown>((resolve) => (settle = resolve));
+    return { promise, settle };
+  };
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const source = (versionId: number) => ({ sourceVersion: { id: versionId } });
+
+  it("UI01G-C1: drops a source read that was out when another Insight's evidence was shown", async () => {
+    const slowSource = deferred();
+    const insight = deferred();
+    const api = ((name: string) =>
+      name === "evidenceSource" ? slowSource.promise : insight.promise) as unknown as ApiClient;
+    const dispatch = vi.fn();
+    const session = createInsightSession(api, dispatch);
+    session.openSource(7);
+    session.openInsight(2);
+    insight.settle({ evidence: [] });
+    await flush();
+    slowSource.settle(source(1));
+    await flush();
+    expect(dispatch.mock.calls.map(([action]) => action.type)).toEqual(["insight-opened"]);
+
+    const quick = deferred();
+    const dispatchOk = vi.fn();
+    createInsightSession((() => quick.promise) as unknown as ApiClient, dispatchOk).openSource(8);
+    quick.settle(source(2));
+    await flush();
+    expect(dispatchOk).toHaveBeenCalledWith({ type: "source-opened", source: source(2) });
+  });
+
+  it("UI01G-C2: drops the thread of a source that a newer source replaced", async () => {
+    const threads = new Map<number, ReturnType<typeof deferred>>([
+      [1, deferred()],
+      [2, deferred()],
+    ]);
+    const api = ((name: string, req: { evidenceId?: number; versionId?: number }) => {
+      if (name === "evidenceSource") return Promise.resolve(source(req.evidenceId as number));
+      if (name === "sourceThread") return threads.get(req.versionId as number)?.promise;
+      return new Promise(() => undefined);
+    }) as unknown as ApiClient;
+    const thread = vi.fn();
+    const session = createInsightSession(api, vi.fn(), { local: vi.fn(), thread });
+    session.openSource(1);
+    await flush();
+    session.openSource(2);
+    await flush();
+    threads.get(1)?.settle({ id: "one" });
+    await flush();
+    expect(thread).not.toHaveBeenCalledWith({ id: "one" });
+    threads.get(2)?.settle({ id: "two" });
+    await flush();
+    expect(thread).toHaveBeenCalledWith({ id: "two" });
   });
 });

@@ -31,7 +31,6 @@ function goodMap(): Json {
       id,
       title,
       owners: ["X01"],
-      needsProvider: true,
       status: "mock-only",
       evidence: [
         {
@@ -120,6 +119,69 @@ describe("H03C3-C3 the vocabulary and the status conditions", () => {
     // a Provider-calling scenario with only a mock installer result is not enough
     fs.evidence[fs.evidence.length - 1] = siteResult("mock");
     expect(mentions(checkScenarioMap(map, fakeRead), "FS04")).not.toEqual([]);
+  });
+});
+
+describe("H03C3-C7 needsProvider is fixed in the checker", () => {
+  it("rejects the key in the table, so a map cannot lower it for FS04", () => {
+    const map = goodMap();
+    const fs = scenario(map, "FS04");
+    fs.needsProvider = false;
+    fs.status = "verified";
+    fs.blockers = [];
+    fs.evidence.push(siteResult("mock"));
+    const lines = mentions(checkScenarioMap(map, fakeRead), "FS04");
+    expect(lines.some((l) => l.includes("needsProvider"))).toBe(true);
+    expect(lines.some((l) => l.includes("verified needs"))).toBe(true);
+  });
+});
+
+describe("H03C3-C8 evidence paths", () => {
+  it("rejects a unit evidence under a folder vitest does not run, but not a measure under eval/results", () => {
+    for (const path of ["eval/a.test.ts", "verification/a.test.ts", "x/node_modules/a.test.ts"]) {
+      const map = goodMap();
+      scenario(map, "FS06").evidence[0].path = path;
+      expect(mentions(checkScenarioMap(map, fakeRead), "FS06"), path).not.toEqual([]);
+    }
+    const map = goodMap();
+    scenario(map, "FS06").evidence.push({
+      kind: "measure",
+      path: "eval/results/a.json",
+      provider: "none",
+      environment: "dev",
+    });
+    expect(checkScenarioMap(map, fakeRead)).toEqual([]);
+  });
+
+  it("turns a directory path into a fault line naming the scenario, exit 1", () => {
+    const map = goodMap();
+    scenario(map, "FS10").evidence[0].path = "tooling";
+    scenario(map, "FS11").blockers[0].procedure = "tooling";
+    const out: string[] = [];
+    const code = runScenarioCheck([], {
+      loadMap: () => map,
+      read: (path) => {
+        if (path === "tooling") throw new Error("EISDIR: illegal operation on a directory, read");
+        return fakeRead(path);
+      },
+      out: (line) => out.push(line),
+      writeDoc: () => {},
+    });
+    expect(code).toBe(1);
+    expect(mentions(out, "FS10")).not.toEqual([]);
+    expect(mentions(out, "FS11")).not.toEqual([]);
+  });
+
+  it("rejects a Windows drive-absolute path and a backslash path", () => {
+    for (const path of ["C:\\x\\a.test.ts", "C:/x/a.test.ts", "c:a.test.ts", "a\\b.test.ts"]) {
+      const map = goodMap();
+      scenario(map, "FS12").evidence[0].path = path;
+      const lines = mentions(checkScenarioMap(map, fakeRead), "FS12");
+      expect(
+        lines.some((l) => l.includes("repository-relative")),
+        path,
+      ).toBe(true);
+    }
   });
 });
 

@@ -19,6 +19,7 @@ import {
   parseLedger,
   readKey,
   readLedgerSeq,
+  readSetting,
   readTombstoneState,
   sourceLedgerName,
   writeLedgerSeq,
@@ -35,6 +36,18 @@ import { join } from "node:path";
 import { applyConfiguredScopes, NO_SCOPES, type ConnectorScopes } from "./connector-scopes.ts";
 import { LEDGER_HISTORY_SETTING, readLedgerHistory, type HistoryName } from "./ledger-history.ts";
 import { requestProjectionRebuild } from "./projection-jobs.ts";
+
+/**
+ * The halt-pending marker (RDF-R1~R3): this database looked restored and the folder halt (I02B-R34) is not
+ * done yet. Written before the change that makes the database look restored is durable, cleared by the halt
+ * in its own transaction; a row absent means nothing is pending.
+ */
+export const HALT_PENDING_SETTING = "tombstone-ledger.halt-pending";
+export const markHaltPending = (db: SqlDriver): void => writeSetting(db, HALT_PENDING_SETTING, "1");
+export const haltPending = (db: SqlDriver): boolean =>
+  readSetting(db, HALT_PENDING_SETTING) !== undefined;
+export const clearHaltPending = (db: SqlDriver): void =>
+  void db.run("DELETE FROM settings WHERE key = ?", [HALT_PENDING_SETTING]);
 
 export const ledgerPath = (dir: string): string => join(dir, LEDGER_FILE);
 
@@ -86,6 +99,7 @@ export function attachDirectoryLedger(db: SqlDriver, dir: string): void {
     canonicalSeq: readLedgerSeq(db),
     hasData,
     seed: () => tombstoneDrafts(db),
+    beforeReplace: () => markHaltPending(db),
   });
   if (ledger.status.seededThrough > 0) writeLedgerSeq(db, ledger.status.seededThrough);
   attachLedger(db, ledger);
@@ -167,12 +181,13 @@ export function reapplyAtStart(
   const ledger = ledgerOf(db);
   const report = createLedgerReapply(registry, {
     ...(knownKind && { knownKind }),
+    onApplied: markHaltPending,
     afterReconcile: (d) => (ledger ? healFromDatabase(d, ledger) : { healed: 0, unwritable: 0 }),
   })(db);
   // an instance the re-apply registered gets the scope the deployment configured, like every other path (I01-R15)
   applyConfiguredScopes(db, scopes ?? NO_SCOPES);
   recordHistory(db, report, new Date(now).toISOString());
-  if (needsRebuild(report)) {
+  if (needsRebuild(report) || haltPending(db)) {
     for (const target of [ENGINE_KIND, VECTOR_KIND]) {
       requestProjectionRebuild(db, target, { at: new Date(now) });
     }
