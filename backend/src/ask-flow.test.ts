@@ -14,7 +14,7 @@ import {
   writeSetting,
   type SqlDriver,
 } from "@pki/storage";
-import { FakeProvider, send, type FakeStep } from "@pki/testkit";
+import { dirTemplate, FakeProvider, send, type FakeStep } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
@@ -31,6 +31,8 @@ import {
 import type { ConnectorManager } from "./connectors.ts";
 import { defaultReadRegistry } from "./read-gate.ts";
 import { startServer, type RunningServer } from "./server.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const text = readFileSync(resolve(FIXTURES, "x01-ask.jsonl"), "utf8");
@@ -66,6 +68,7 @@ let db: SqlDriver;
 let server: RunningServer | undefined;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-ask-flow-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
 });
 afterEach(async () => {

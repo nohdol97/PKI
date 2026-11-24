@@ -18,12 +18,14 @@ import { defaultScopePolicy } from "@pki/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fakeChannel, notifyNow, seedInsight } from "./notify.test-support.ts";
 import { createNotifyOutbox } from "./notify-outbox.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const registry = createProductRegistry({ policy: defaultScopePolicy });
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());
@@ -89,8 +91,7 @@ describe("notify.outbox: the feed lines stay whatever the shell says (P02-C2c â‘
     expect(outbox.acknowledge({ type: "notify-ack", id, result: "unavailable" })).toBe(true);
     expect(states()).toEqual(["sent/unavailable"]);
 
-    const other = openBetterSqlite3(":memory:");
-    migrate(other);
+    const other = freshDb();
     registerConnectorInstance(other, "c1", "test-fixtures");
     seedInsight(other, { name: "ë‘˜" });
     notifyNow(other, "scan", "2026-11-23T12:00:00.000Z");

@@ -16,14 +16,16 @@ import { createProductRegistry } from "../canonical-kinds.ts";
 import { createJudge } from "../graph-read.ts";
 import { shownVersions } from "./notes.ts";
 import { conceptIds, conceptQueries, keywordIds, temporalIds } from "./strategies.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const registry = createProductRegistry({
   policy: { ...defaultScopePolicy, allows: (scopes) => !scopes.some((s) => s?.includes("denied")) },
 });
 
 function plant(denied: number) {
-  const db: SqlDriver = openBetterSqlite3(":memory:");
-  migrate(db);
+  const db: SqlDriver = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   const add = (mark: string, scope: string[], body: string) =>
     saveSourceRecord(db, "c1", { externalId: mark, title: mark, body, accessScope: scope });
@@ -56,8 +58,7 @@ describe("X01-C6a ② keywordIds pages", () => {
 
 describe("RSP-C1 temporalIds pages the dated facts and filters before the cut", () => {
   it("reaches a visible older fact behind 210 newer facts the search hides", async () => {
-    const db: SqlDriver = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db: SqlDriver = freshDb();
     registerConnectorInstance(db, "c1", "test-fixtures");
     saveSourceRecord(db, "c1", {
       externalId: "e",
@@ -123,8 +124,7 @@ describe("RVS-C1 the strategies widen a matched item only by the merge lines the
   function merged(allows: (scopes: readonly (readonly string[] | null)[]) => boolean) {
     const policy = { ...defaultScopePolicy, allows };
     const reg = createProductRegistry({ policy });
-    const db: SqlDriver = openBetterSqlite3(":memory:");
-    migrate(db);
+    const db: SqlDriver = freshDb();
     registerConnectorInstance(db, "c1", "test-fixtures");
     const attrs = {
       epistemic: "explicit",

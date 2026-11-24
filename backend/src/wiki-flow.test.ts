@@ -6,7 +6,7 @@
 import { routes, type RouteName, type RouteRequest, type RouteResponse } from "@pki/contracts";
 import { DEFAULT_PROVIDER_SETTING, type EgressControls } from "@pki/providers";
 import { writeSetting, type SqlDriver } from "@pki/storage";
-import { FakeProvider, fixtureExtraction, send } from "@pki/testkit";
+import { dirTemplate, FakeProvider, fixtureExtraction, send } from "@pki/testkit";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -24,6 +24,8 @@ import { releaseHeldOnEvent } from "./held-release.ts";
 import type { JobRunner } from "./job-runner.ts";
 import { startServer, type RunningServer } from "./server.ts";
 
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
+
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const read = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8");
 const TOKEN = "w".repeat(43);
@@ -36,6 +38,7 @@ let runner: JobRunner | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-wiki-flow-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
 });
 afterEach(async () => {

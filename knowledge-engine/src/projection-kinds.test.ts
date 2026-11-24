@@ -26,6 +26,9 @@ import {
 import { createCanonicalEntries } from "./entries.ts";
 import { ENGINE_KIND, VECTOR_KIND, projectionKinds } from "./projection-kinds.ts";
 import { applyTombstone } from "./tombstone-entry.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const AT = "2026-11-22T00:00:00.000Z";
 const permissive: ScopePolicy = {
@@ -37,8 +40,7 @@ const permissive: ScopePolicy = {
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

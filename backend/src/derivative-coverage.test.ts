@@ -20,7 +20,7 @@ import {
   defaultScopePolicy,
 } from "@pki/storage";
 import { EmptyVectorIndex, openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider, fixtureExtraction, send } from "@pki/testkit";
+import { FakeProvider, fixtureExtraction, send, memoryDbTemplate } from "@pki/testkit";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -40,6 +40,8 @@ import {
 } from "./derivative-coverage.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 const TOKEN = "c".repeat(43);
 const registry = productRegistry({ engine: productEngine(), vectorIndex: new EmptyVectorIndex() });
 
@@ -56,12 +58,6 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-coverage-"));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-function freshDb() {
-  const db = openBetterSqlite3(":memory:");
-  migrate(db);
-  return db;
-}
 
 describe("resolution.group-reads: the membership receivers (S02-R13)", () => {
   it("are one fixed list with the rule's receiver first and the candidates' last, and both the registry and the user's entry are built from it", () => {

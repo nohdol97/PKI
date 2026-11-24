@@ -26,6 +26,9 @@ import {
 import { leaseNextJob, closeJob } from "./jobs.ts";
 import { openBetterSqlite3 } from "./adapters/better-sqlite3-driver.ts";
 import type { SqlDriver } from "./sql-driver.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const attrs = {
   epistemic: "explicit",
@@ -37,8 +40,7 @@ const AT = "2026-11-23T00:00:00.000Z";
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
 });
 afterEach(() => db.close());
 

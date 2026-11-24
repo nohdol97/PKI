@@ -23,11 +23,13 @@ import { decideFinding } from "./lint-decide.ts";
 import { loadLintFixture, NOW, reflectNow } from "./lint.test-support.ts";
 import { planReflect } from "./reflect-job.ts";
 import { addFact, addItem, addSource, buildWiki, cite } from "./wiki.test-support.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
 });
 afterEach(() => db.close());
 
@@ -91,8 +93,7 @@ describe("reflect.job: a flip-flopping finding stops (K02-C2a ③)", () => {
 
 describe("reflect.job: what the product wrote is not an input (K02-C2a ④)", () => {
   it("lists the same findings with Wiki pages, a summary and an Insight made first as without them", () => {
-    const plain = openBetterSqlite3(":memory:");
-    migrate(plain);
+    const plain = freshDb();
     loadLintFixture(plain);
     reflectNow(plain);
 
