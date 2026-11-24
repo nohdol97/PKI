@@ -148,6 +148,32 @@ describe("reflect.job: a bounded run goes on where it stopped (K02-C2b)", () => 
   });
 });
 
+describe("reflect.job: overdue work the cap left unseen is carried on (PD2-C1, R1)", () => {
+  it("marks the work a cap of 1 did not reach, and the next runs go on until each has its finding", () => {
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    const src = addSource(db, "a", "합성 본문");
+    const tasks = ["가", "나", "다"].map((n) => {
+      const task = addItem(db, "Task", `업무 ${n}`);
+      cite(db, { factId: addFact(db, task, "target_date", "2027-03-10") }, src.id);
+      return task;
+    });
+    reflectNow(db, "daily", { at: "2027-03-09T00:00:00Z" }); // clears every mark; the next window starts here
+    expect(countDirty(db)).toBe(0);
+
+    const at = "2027-03-12T00:00:00Z";
+    expect(reflectNow(db, "daily", { cap: 1, at }).counts).toMatchObject({
+      bundles: 1,
+      dirtyLeft: 2,
+    });
+    expect(reflectNow(db, "daily", { cap: 1, at }).counts).toMatchObject({ dirtyLeft: 1 });
+    expect(reflectNow(db, "daily", { cap: 1, at }).counts).toMatchObject({ dirtyLeft: 0 });
+    const overdue = listFindings(db)
+      .filter((f) => f.rule === "overdue-work" && f.status === "open")
+      .map((f) => f.target.a);
+    expect(overdue.sort()).toEqual([...tasks].sort());
+  });
+});
+
 describe("reflect.job: a pair that stands from one side is not closed by a run of the other (K02-C2a ③, R8)", () => {
   it("keeps a missing link open and unflipped through runs that see only A, then only B", () => {
     registerConnectorInstance(db, "c1", "test-fixtures");

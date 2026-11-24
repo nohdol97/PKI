@@ -166,13 +166,15 @@ describe("feedback.undo (P03-C1b)", () => {
     expect(statusOf("fact", fact)).toBe("verified");
   });
 
-  it("refuses with not-latest when another user action came after, and changes nothing", () => {
+  it("refuses with not-latest when another user action came after, changes no state, and retires the line (PD2-C3)", () => {
     const { feedback } = applied(record({ kind: "fact", id: fact }, "wrong_info"));
     db.transaction(() => userDecisions.decide(db, { kind: "fact", id: fact }, "approve", at(5)));
     expect(statusOf("fact", fact)).toBe("verified");
     expect(undo(feedback.id)).toEqual({ status: "refused", reason: "not-latest" });
     expect(statusOf("fact", fact)).toBe("verified");
-    expect(db.all("SELECT undone_at FROM feedback")).toEqual([{ undone_at: null }]);
+    expect(db.all("SELECT undone_at FROM feedback")).toEqual([{ undone_at: at(30) }]);
+    expect(listFeedback(db, 10)).toEqual([]);
+    expect(undo(feedback.id)).toEqual({ status: "refused", reason: "nothing-to-undo" });
   });
 });
 

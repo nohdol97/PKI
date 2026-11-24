@@ -70,7 +70,7 @@ describe("wiki.build-job: a failing write leaves nothing half written", () => {
     expect(isWikiStale(db)).toBe(true);
 
     db.exec("DROP TRIGGER fail_one");
-    db.run("UPDATE jobs SET status = 'cancelled' WHERE kind = ?", [WIKI_BUILD_KIND]);
+    db.run("UPDATE jobs SET status = 'superseded' WHERE kind = ?", [WIKI_BUILD_KIND]);
     expect(await run()).toBe("succeeded");
     expect(isWikiStale(db)).toBe(false);
     const clean = Object.fromEntries(renderWikiPages(db).map((p) => [p.key, p.contentHash]));

@@ -198,7 +198,7 @@ export function recordFeedback(
 /**
  * Cancels one live line. A preference only gets an undone time. A correction that changed a row is taken back
  * through the entry's undo, and only while its history line is still the row's newest: after another action the
- * answer is `not-latest` and nothing changes (R5).
+ * answer is `not-latest`, the row's state is not changed and the line itself is retired (R5, PD2-R3).
  */
 export function undoFeedback(
   tx: SqlDriver,
@@ -217,6 +217,8 @@ export function undoFeedback(
   if (feedback.appliedSeq !== null) {
     const ref = feedback.target as EntryRef;
     if (stateLinesOf(tx, ref).at(-1)?.seq !== feedback.appliedSeq) {
+      // the line can never be taken back, so it is retired here (PD2-R3)
+      tx.run("UPDATE feedback SET undone_at = ? WHERE id = ?", [at, id]);
       return { status: "refused", reason: "not-latest" };
     }
     const outcome = decisions.undo(tx, ref, at);

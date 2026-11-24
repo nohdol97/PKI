@@ -4,7 +4,7 @@
 // taken round by round after a cursor. It reads the DB only, calls no Provider and writes nothing but the
 // candidate tables, the findings and the state, in the one transaction the runner commits the result in
 // (a `lint-finding` item of commitDerived). The bundles it did not reach, and the items that changed while it
-// ran, keep their dirty mark and the next run goes on (K02-D4).
+// ran, keep their dirty mark and the next run goes on (K02-D4); overdue work the cap did not reach gets one (PD2-R1).
 import {
   clearDirty,
   countDirty,
@@ -16,6 +16,7 @@ import {
   LINT_RULES,
   listDirty,
   listFindings,
+  markDirty,
   readReflectionState,
   recordReflectionRun,
   recordResultCounts,
@@ -118,9 +119,15 @@ export function planReflect(
     read.push(mark);
   }
   const lastRun = target === "daily" ? state.lastDailyAt : state.lastWeeklyAt;
+  // overdue work the cap does not reach is marked in the result, so the next run goes on (PD2-R1)
+  const unseen: number[] = [];
   for (const item of overdueSince(db, lastRun, at)) {
-    if (reps.size >= cap) break;
-    reps.add(repOf(item));
+    const rep = repOf(item);
+    if (!reps.has(rep) && reps.size >= cap) {
+      unseen.push(item);
+      continue;
+    }
+    reps.add(rep);
   }
   let cursor: number | undefined;
   if (target === "weekly") {
@@ -167,6 +174,7 @@ export function planReflect(
       refreshConflicts(tx, touched, scope, { at });
       const reconciled = reconcile(tx, groups, lintFindings(tx, groups, at), at);
       clearDirty(tx, read);
+      markDirty(tx, unseen);
       recordReflectionRun(tx, { target, at, ...(cursor === undefined ? {} : { cursor }) });
       Object.assign(counts, reconciled, { bundles: groups.length, dirtyLeft: countDirty(tx) });
       if (options.jobId !== undefined) recordResultCounts(tx, options.jobId, counts);

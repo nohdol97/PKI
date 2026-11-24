@@ -388,7 +388,7 @@ export type WikiBuildRequest =
   | { status: "fresh" }
   /** A build is already open (queued, running, retrying or held). */
   | { status: "open" }
-  /** The last build gave up and the input has not changed since: not asked again (K01-R5). */
+  /** The last build gave up or was cancelled and the input has not changed since: not asked again (K01-R5, PD2-R2). */
   | { status: "dead" };
 
 const TARGET_PREFIX = "seq:";
@@ -398,12 +398,12 @@ const isDeadAt = (db: SqlDriver, inputSeq: number): boolean => {
     WIKI_BUILD_KIND,
   ])[0];
   return (
-    last?.status === "dead_letter" &&
+    (last?.status === "dead_letter" || last?.status === "cancelled") &&
     Number((last.target as string).slice(TARGET_PREFIX.length)) >= inputSeq
   );
 };
 
-/** Whether the Wiki is behind and the last build gave up on the input as it stands (K01-R5): nothing is retrying. */
+/** Whether the Wiki is behind and the last build gave up or was cancelled on the input as it stands (K01-R5, PD2-R2): nothing is retrying. */
 export const isWikiBuildDead = (db: SqlDriver): boolean => {
   const { inputSeq, builtSeq } = readWikiState(db);
   return inputSeq > builtSeq && isDeadAt(db, inputSeq);
@@ -411,7 +411,7 @@ export const isWikiBuildDead = (db: SqlDriver): boolean => {
 
 /**
  * Queues the one `wiki-build` job when the Wiki is stale (K01-R5). The job's target names the input
- * sequence it was asked at, so a dead letter is read against the sequence now. Call it in the transaction
+ * sequence it was asked at, so a dead letter or a cancelled build is read against the sequence now. Call it in the transaction
  * that changed the input, or on its own: it writes only the job.
  */
 export function requestWikiBuild(db: SqlDriver, at: Date = new Date()): WikiBuildRequest {

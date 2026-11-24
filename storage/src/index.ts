@@ -188,6 +188,7 @@ export {
   lineageOfFinding,
   listDirty,
   listFindings,
+  markDirty,
   readFinding,
   readReflectionState,
   recordReflectionRun,
