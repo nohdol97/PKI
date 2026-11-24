@@ -19,7 +19,7 @@ P4F가 "시험 보강"으로 남긴 줄을 코드와 다시 대조했다. 가드
 | K-5 #235 F4·F7 원본 삭제 경로의 `#gone` | 이미 있음 | `knowledge-engine/src/wiki-kind.test.ts:236-249` | 하지 않음 |
 | K-5 #235 F4·F7 `undoCreated` 자리, API의 `#gone` 조회·삭제 | 시험 없음 | 되돌리기의 이동은 `storage/src/semantic-user.ts:259`, API는 `backend/src/wiki-read.ts:241`(주인 없는 메모 목록)·`:400`(삭제 허용). `orphanNotes`·`note-remove`를 부르는 백엔드 시험이 없다 | R3 |
 | K-6 #235 C7 되돌리기 경로의 `#gone` 이동 | 시험 없음 | `storage/src/wiki.test.ts:190`은 페이지·계보·연결만 본다 | R3(K-5와 한 시험) |
-| K-7 #225 C3b ① 저장된 요약이 있는 채로 원본 삭제 | 시험 없음(경로) | 요약 비우기 `storage/src/wiki.ts:148`, 삭제 경로가 같은 함수를 부름 `knowledge-engine/src/wiki-kind.ts:63`. 카나리 시험 `wiki-kind.test.ts:152`는 요약 없이 돈다 | R4 |
+| K-7 #225 C3b ① 저장된 요약이 있는 채로 원본 삭제 | 시험 없음(경로) | 요약 비우기 `storage/src/wiki.ts:149`, 삭제 경로가 같은 함수를 부름 `knowledge-engine/src/wiki-kind.ts:63`. 카나리 시험 `wiki-kind.test.ts:152`는 요약 없이 돈다 | R4 |
 
 ## 목표
 
@@ -55,7 +55,7 @@ P4F가 "시험 보강"으로 남긴 줄을 코드와 다시 대조했다. 가드
 | KGT-C1 ② | `storage/src/reflection-refine.ts:99`의 ` AND status = 'open'` | ② |
 | KGT-C2 | `storage/src/reflection.ts:172` `OR (target_b IS NOT NULL AND target_b NOT IN (SELECT id FROM items))`, 따로 `:174` 관계 갈래 | 각 발견 |
 | KGT-C3 | `storage/src/semantic-user.ts:259` `endWikiItemIncarnation(tx, ref.id);` | `notes`가 빈다 |
-| KGT-C4 | `storage/src/wiki.ts:148`의 `summary = NULL, summary_hash = NULL` | 카나리 없음 |
+| KGT-C4 | `storage/src/wiki.ts:149`의 `summary = NULL, summary_hash = NULL` | 카나리 없음 |
 
 ## 잠정 결정
 
