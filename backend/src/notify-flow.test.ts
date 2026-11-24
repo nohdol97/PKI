@@ -288,6 +288,7 @@ describe("notify.flow: the user's actions (P02-R11, C3c ②)", () => {
     const id = (await digests())[0]?.id as number;
     const act = async (op: "read" | "dismiss") => (await call("notificationAct", { id, op })).body;
 
+    expect((await digests()).find((d) => d.id === id)?.readAt).toBeNull();
     expect(await act("read")).toMatchObject({ status: "applied" });
     expect((await digests()).find((d) => d.id === id)?.readAt).not.toBeNull();
 

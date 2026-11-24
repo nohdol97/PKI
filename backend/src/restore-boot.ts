@@ -222,9 +222,10 @@ export function adoptUnfinishedRestore(db: SqlDriver, run: RestoreRun): void {
     throw new RestoreStateError("restore-state-inconsistent");
   let parsed: Partial<RestoreSummary> = {};
   try {
-    parsed = JSON.parse(mark) as Partial<RestoreSummary>;
+    const value: unknown = JSON.parse(mark);
+    if (typeof value === "object" && value !== null) parsed = value as Partial<RestoreSummary>;
   } catch {
-    // an unreadable value is still a mark: the finish runs with empty fields
+    // an unreadable or non-object value is still a mark: the finish runs with empty fields
   }
   run.summary = {
     backupId: parsed.backupId ?? "",
