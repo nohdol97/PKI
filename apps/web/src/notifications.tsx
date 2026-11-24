@@ -7,10 +7,15 @@
 // (V02-R15). The screen reads again when `refresh` changes (`useChanges`); a line, an Insight or a source that went
 // away shows its plain sentence instead of staying on screen.
 import type { NotificationLine, RouteRequest, RouteResponse } from "@pki/contracts";
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import { countsText, ruleText } from "./lint-text.ts";
-import { evidenceReducer, InsightDetail, InsightRow } from "./evidence-view.tsx";
+import {
+  createInsightSession,
+  evidenceReducer,
+  InsightDetail,
+  InsightRow,
+} from "./evidence-view.tsx";
 import { PaneHead, Row as PaneRow } from "./panes.tsx";
 import { insightType } from "@pki/contracts";
 import { INSIGHT_EPISTEMIC } from "./evidence-text.ts";
@@ -76,16 +81,10 @@ export function Notifications({ api, refresh }: { api: ApiClient; refresh: strin
       () => setMine((n) => n + 1),
       (e: unknown) => (gone(e) ? setMine((n) => n + 1) : setFailure(message(e))),
     );
-  const openEvidence = (insightId: number) =>
-    api("insightEvidence", { insightId }).then(
-      (r) => dispatch({ type: "insight-opened", insightId, evidence: r.evidence }),
-      (error: unknown) => dispatch({ type: "failed", what: "insight", id: insightId, error }),
-    );
-  const openSource = (evidenceId: number) =>
-    api("evidenceSource", { evidenceId }).then(
-      (s) => dispatch({ type: "source-opened", source: s }),
-      (error: unknown) => dispatch({ type: "failed", what: "source", id: evidenceId, error }),
-    );
+  const { openInsight: openEvidence, openSource } = useMemo(
+    () => createInsightSession(api, dispatch),
+    [api],
+  );
 
   const feed = list?.lines.filter((l) => l.status === "sent") ?? [];
   // the chosen notification is the one whose Insight's evidence is open (the feed's line first)
@@ -120,7 +119,7 @@ export function Notifications({ api, refresh }: { api: ApiClient; refresh: strin
                       <InsightRow
                         insight={line.insight}
                         selected={line.insight.id === openedId}
-                        onOpen={() => void openEvidence(line.insight.id)}
+                        onOpen={() => openEvidence(line.insight.id)}
                         time={timeText(line.createdAt)}
                         note={line.readAt === null ? "읽지 않음" : undefined}
                       />

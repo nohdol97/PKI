@@ -3,10 +3,10 @@
 // page titles, claim values and notes are imported or user-written text, so they reach the page
 // as React text nodes inside <bdi> only (V02-R15). Evidence opens in the same source view Home uses.
 import type { EvidenceSource, RouteRequest, RouteResponse, WikiClaim } from "@pki/contracts";
-import { useCallback, useEffect, useState, type FormEvent, type Ref } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type Ref } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import { SOURCE_GONE } from "./evidence-text.ts";
-import { SourceView, useFocusOn } from "./evidence-view.tsx";
+import { evidenceOpener, SourceView, useFocusOn } from "./evidence-view.tsx";
 import { useNav } from "./nav.tsx";
 import { DetailPane, DETAIL_HINT, PaneHead, Row } from "./panes.tsx";
 import {
@@ -286,6 +286,19 @@ export function Wiki({ api }: { api: ApiClient }) {
   const headingRef = useFocusOn(opens, page !== undefined);
   const sourceHeadingRef = useFocusOn(sourceOpens, source !== undefined);
   const fail = (e: unknown) => setNotice(`불러오지 못했습니다: ${message(e)}`);
+  // a source read still out when another page is opened shows neither its source nor a failure (UI01G-R3)
+  const opener = useMemo(
+    () =>
+      evidenceOpener(
+        api,
+        (s) => {
+          setSource(s);
+          setSourceOpens((n) => n + 1);
+        },
+        (e) => (gone(e) ? setNotice(SOURCE_GONE) : fail(e)),
+      ),
+    [api],
+  );
 
   const readIndex = useCallback(
     () =>
@@ -300,6 +313,7 @@ export function Wiki({ api }: { api: ApiClient }) {
           setPage(p);
           if (fresh) {
             setSource(undefined);
+            opener.reset();
             setNotice(undefined);
             setOpens((n) => n + 1);
           }
@@ -308,11 +322,12 @@ export function Wiki({ api }: { api: ApiClient }) {
           if (!gone(e)) return setNotice(`불러오지 못했습니다: ${message(e)}`);
           setPage(undefined);
           setSource(undefined);
+          opener.reset();
           setNotice(WIKI_PAGE_GONE);
           void readIndex();
         },
       ),
-    [api, readIndex],
+    [api, readIndex, opener],
   );
 
   useEffect(() => void readIndex(), [readIndex]);
@@ -343,14 +358,6 @@ export function Wiki({ api }: { api: ApiClient }) {
     if (pageKey !== undefined) void readPage(pageKey, false);
     void readIndex();
   };
-  const openEvidence = (evidenceId: number) =>
-    api("evidenceSource", { evidenceId }).then(
-      (s) => {
-        setSource(s);
-        setSourceOpens((n) => n + 1);
-      },
-      (e: unknown) => (gone(e) ? setNotice(SOURCE_GONE) : fail(e)),
-    );
   const rebuild = () =>
     api("wikiRebuild", {}).then((r) => {
       setRebuilding(rebuildText(r.status));
@@ -430,7 +437,7 @@ export function Wiki({ api }: { api: ApiClient }) {
           sourceHeadingRef={sourceHeadingRef}
           position={at >= 0 ? `${at + 1} / ${listed.length}` : undefined}
           onOpenPage={(key) => void readPage(key, true)}
-          onOpenEvidence={(id) => void openEvidence(id)}
+          onOpenEvidence={opener.open}
           onHide={(claim) =>
             void edit({ op: "hide", claim: claim.ref }).then((ok) => ok && after())
           }
