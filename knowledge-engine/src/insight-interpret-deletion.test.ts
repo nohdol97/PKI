@@ -2,17 +2,22 @@
 // even when the Insight's own fields are unchanged (the interpretation columns and an `opportunity` row).
 import {
   addEvidence,
+  INSIGHT_INTERPRET_KIND,
+  INSIGHT_INTERPRET_SETTING,
   insertItem,
   insightBasis,
   migrate,
   readInsight,
   readInsightById,
   registerConnectorInstance,
+  registerJob,
   saveFact,
   saveInsight,
   saveSourceRecord,
+  setInsightInterpret,
   userDecisions,
   writeInsightInterpretation,
+  writeSetting,
   type KnowledgeAttributes,
   type SqlDriver,
   type StoredInsight,
@@ -121,5 +126,45 @@ describe("a source the interpretation read changes (P01-R3, D13)", () => {
       interpretation: { reasoningSummary: "합성 해석" },
     });
     expect(readInsight(db, oppKey)).toMatchObject({ state: "active", summary: "합성 기회" });
+  });
+});
+
+describe("a cleared interpretation is asked for again once (PD3-R1)", () => {
+  const queuedAt = (target: string) =>
+    db.all("SELECT 1 FROM jobs WHERE kind = ? AND target = ? AND status = 'queued'", [
+      INSIGHT_INTERPRET_KIND,
+      target,
+    ]).length;
+  /** The basis the interpretation was asked at is already tried: its job closed. */
+  function triedBasis() {
+    const seeded = seed();
+    setInsightInterpret(db, true, new Date(at));
+    const target = `${seeded.parent.id}#${insightBasis(seeded.parent)}`;
+    registerJob(db, {
+      kind: INSIGHT_INTERPRET_KIND,
+      target,
+      priority: "maintenance",
+      at: new Date(at),
+    });
+    db.run("UPDATE jobs SET status = 'succeeded' WHERE kind = ? AND target = ?", [
+      INSIGHT_INTERPRET_KIND,
+      target,
+    ]);
+    return { ...seeded, target };
+  }
+
+  it("deleting a source queues one job at the same target while the setting is on", () => {
+    const { other, parent, target } = triedBasis();
+    purgeSource(db, other, { reason: "source-deleted", at: "2026-11-23T01:00:00.000Z" });
+    expect(readInsightById(db, parent.id)).toMatchObject({ interpretation: null });
+    expect(queuedAt(target)).toBe(1);
+  });
+
+  it("queues nothing while the setting is off", () => {
+    const { other, parent, target } = triedBasis();
+    writeSetting(db, INSIGHT_INTERPRET_SETTING, "off");
+    purgeSource(db, other, { reason: "source-deleted", at: "2026-11-23T01:00:00.000Z" });
+    expect(readInsightById(db, parent.id)).toMatchObject({ interpretation: null });
+    expect(queuedAt(target)).toBe(0);
   });
 });

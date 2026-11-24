@@ -2,6 +2,7 @@
 // code-written ones, and is stored only by `writeInsightInterpretation`: while the Insight is active and still
 // has the content (the basis) the job was asked at. Every `saveInsight` empties it. A job's target is
 // `<insight id>#<basis>`: ids and a hash, the mark of the attempt, as the Wiki summary's is (K01-D13).
+// A deletion, prune or scope change that empties it queues one fresh job at the same basis (PD3-R1).
 import { createHash } from "node:crypto";
 import { readInsight, type InsightInterpretation, type StoredInsight } from "./insights.ts";
 import { INSIGHT_INTERPRET_KIND } from "./job-kinds.ts";
@@ -119,6 +120,30 @@ export function requestInsightInterpretations(db: SqlDriver, at: Date = new Date
     }
     return queued;
   });
+}
+
+/**
+ * Queues one `insight-interpret` job at the current basis for each of `ids` that is active, not an `opportunity`
+ * and without an interpretation (PD3-R1: the ones a deletion, prune or scope change just emptied). The "basis
+ * already tried" check is skipped here on purpose, since the emptied reading is what that attempt produced.
+ * Nothing is queued while the setting is off; an open job at the target is kept (the registry's conflict rule).
+ */
+export function requeueClearedInterpretations(db: SqlDriver, ids: number[], at: Date): number {
+  if (!readInsightInterpret(db)) return 0;
+  let queued = 0;
+  for (const id of ids) {
+    const insight = readInsightById(db, id);
+    if (!insight || insight.state !== "active" || insight.rule === OPPORTUNITY_RULE) continue;
+    if (insight.interpretation) continue;
+    const registered = registerJob(db, {
+      kind: INSIGHT_INTERPRET_KIND,
+      target: `${id}#${insightBasis(insight)}`,
+      priority: "maintenance",
+      at,
+    });
+    if (registered.registered) queued++;
+  }
+  return queued;
 }
 
 /** Stores the switch. From OFF to ON it queues the jobs in the same transaction; ON to ON and OFF queue nothing. */

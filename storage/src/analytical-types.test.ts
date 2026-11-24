@@ -61,6 +61,18 @@ describe("analytical.value-types", () => {
     }
   });
 
+  it("takes a column-set or key-pairs of at most 50 elements (PD3-R2)", () => {
+    const names = (n: number) => Array.from({ length: n }, (_, i) => `c${i}`);
+    expect(normalizeValue("column-set", names(50))).not.toBeNull();
+    expect(normalizeValue("column-set", names(51))).toBeNull();
+    expect(
+      normalizeValue(
+        "key-pairs",
+        names(51).map((n) => [n, "k"]),
+      ),
+    ).toBeNull();
+  });
+
   it("makes a column-set a sorted JSON array of processed names: the order and the case do not matter", () => {
     const a = normalizeValue("column-set", ["Region", "Month"]);
     expect(a).toBe('["month","region"]');

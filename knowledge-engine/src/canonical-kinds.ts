@@ -53,6 +53,7 @@ import {
   type SqlValue,
   withGroups,
   endWikiItemIncarnation,
+  requeueClearedInterpretations,
 } from "@pki/storage";
 import { assessAfterPropagation } from "./auto-verify.ts";
 import { refreshConflicts } from "./conflicts.ts";
@@ -540,9 +541,17 @@ const INSIGHT: DerivativeKind = {
   invalidate: (ctx, snapshot, change) => {
     const { tx } = ctx;
     // P01-D13: an LLM reading was made from the lineage as it was, and an unchanged Insight is not rewritten, so
-    // a deletion, prune or scope change (not a new version: a changed Insight is rewritten, which empties it) empties the reading of every collected Insight and resolves its opportunity
+    // a deletion, prune or scope change (not a new version: a changed Insight is rewritten, which empties it) empties the reading of every collected Insight and resolves its opportunity;
+    // an Insight that had a reading is asked for it again once the rules have judged it anew (PD3-R1)
     const withdrawn: { key: InsightKey; outcome: "resolved" }[] = [];
+    const emptied: number[] = [];
     for (const { ref } of supported(change) === "new-version" ? [] : snapshot) {
+      if (
+        tx.all("SELECT 1 FROM insights WHERE id = ? AND llm_reasoning_summary IS NOT NULL", [
+          Number(ref.id),
+        ]).length > 0
+      )
+        emptied.push(Number(ref.id));
       tx.run(
         "UPDATE insights SET llm_reasoning_summary = NULL, llm_impact = NULL, llm_actionability = NULL WHERE id = ?",
         [Number(ref.id)],
@@ -588,6 +597,7 @@ const INSIGHT: DerivativeKind = {
       ascending([...remaining, ...survivors, ...viaGroup.filter((id) => stored(tx, "items", id))]),
       { scope: ctx, ...(running ? { at: running.at } : {}) },
     );
+    requeueClearedInterpretations(tx, emptied, new Date(running?.at ?? Date.now()));
     const report = noting(ctx);
     if (report) {
       report.remainingItemIds = remaining;
