@@ -31,7 +31,6 @@ import {
   listSemanticFacts,
   listSemanticItems,
   listSemanticMembers,
-  mergedIntoOf,
   listSemanticRelations,
   listSources,
   readEvidenceSource,
@@ -52,6 +51,7 @@ import {
   type SemanticItemView,
   type SemanticMemberView,
   type SqlDriver,
+  type SqlRow,
   effectiveUntil,
   entityGroups,
   listAssertionLinks,
@@ -125,8 +125,8 @@ export interface ReadGate {
   /** Whether the registry row is stored and shown: the one answer for a row that is absent, deleted or hidden. */
   semanticShown(kind: SemanticKind, id: number): boolean;
   /**
-   * The members of the item's group whose every merge line up to the item is shown (RVS-R2): a member behind a hidden
-   * line is left out whole. A member or item between is not judged here, so the caller applies its own item rule.
+   * The members of the item's group listed under it (MGV-R1): a member whose every merge line and every item on the
+   * way to the item (itself, those between, the item) is shown. The caller needs no rule of its own.
    */
   semanticMembers(itemId: number): SemanticMemberView[];
   /**
@@ -248,52 +248,63 @@ export function createReadGate(
     facts: only(listSemanticFacts(db, item.id), "fact", (f) => f.id, "display"),
     relations: only(listSemanticRelations(db, item.id), "relation", (r) => r.id, "display"),
   });
-  // `mergedInto` is the nearest item along the chain the caller may see: a hidden item is named nowhere,
-  // and a member with none visible is left out
-  const nearestShown = <T extends { mergedInto: number }>(members: T[]): T[] =>
-    members.flatMap((m) => {
-      for (let at: number | undefined = m.mergedInto, n = 0; at !== undefined && n < 1000; n++) {
-        if (isShown("item", at)) return [{ ...m, mergedInto: at }];
-        at = mergedIntoOf(db, at);
-      }
-      return [];
-    });
+  /**
+   * The members of the item's group whose whole way to the item is shown (MGV-R1): every merge line and every item
+   * on it. A member and the item each climb while the line and the item above are shown, and the member is listed
+   * when both reach the same top, the rule `groupView` applies to a group. Read once, judged in two batches.
+   */
   const semanticMembers = (itemId: number): SemanticMemberView[] => {
     const all = listSemanticMembers(db, itemId);
+    const own = db.all(
+      "SELECT id, representative_id FROM item_merges WHERE member_id = ? AND active = 1",
+      [itemId],
+    )[0];
+    const up = new Map<number, { mergeId: number; into: number }>(
+      all.map((m) => [m.id, { mergeId: m.mergeId, into: m.mergedInto }]),
+    );
+    if (own) up.set(itemId, { mergeId: own.id as number, into: own.representative_id as number });
     const lineShown = shown(
-      all.map((m) => ({ kind: "entity-merge", id: `merge:${m.mergeId}` })),
+      [...up.values()].map((l) => ({ kind: "entity-merge", id: `merge:${l.mergeId}` })),
       "display",
     );
-    const itemsShown = shown(
-      [...new Set([itemId, ...all.map((m) => m.id)])].map((id) => ({
-        kind: "item",
-        id: String(id),
-      })),
+    const itemShown = shown(
+      [...new Set([itemId, ...all.map((m) => m.id), ...[...up.values()].map((l) => l.into)])].map(
+        (id) => ({ kind: "item", id: String(id) }),
+      ),
       "display",
     );
-    const byId = new Map(all.map((m) => [m.id, m]));
-    // a line is judged where both of its items are shown; one that touches a hidden item stays as it was (RVS-D3)
-    const lineHidden = (m: SemanticMemberView) =>
-      itemsShown.has(String(m.id)) &&
-      itemsShown.has(String(m.mergedInto)) &&
-      !lineShown.has(`merge:${m.mergeId}`);
-    // only a hidden line on the member's own chain drops it; the chain ends at the root or at the centre (no entry)
-    return all.filter((m) => {
-      for (let at = m.id, n = 0; n <= 1000; n++) {
-        const line = byId.get(at);
-        if (!line) return true;
-        if (lineHidden(line)) return false;
-        at = line.mergedInto;
+    // the shown top of each item, found once; undefined when the climb meets an item twice (never listed)
+    const tops = new Map<number, number | undefined>();
+    const topOf = (start: number): number | undefined => {
+      const path: number[] = [];
+      const seen = new Set<number>();
+      let at = start;
+      let top: number | undefined;
+      for (;;) {
+        if (tops.has(at)) {
+          top = tops.get(at);
+          break;
+        }
+        if (seen.has(at)) break;
+        seen.add(at);
+        path.push(at);
+        const line = up.get(at);
+        if (!line || !lineShown.has(`merge:${line.mergeId}`) || !itemShown.has(String(line.into))) {
+          top = at;
+          break;
+        }
+        at = line.into;
       }
-      // the bound ran out with lines above still unjudged: left out, as `nearestShown` does
-      return false;
-    });
+      for (const id of path) tops.set(id, top);
+      return top;
+    };
+    const centre = itemShown.has(String(itemId)) ? topOf(itemId) : undefined;
+    if (centre === undefined) return [];
+    return all.filter((m) => itemShown.has(String(m.id)) && topOf(m.id) === centre);
   };
   const semanticItem = (item: SemanticItemView) => ({
     ...rowsOf(item),
-    members: nearestShown(only(semanticMembers(item.id), "item", (m) => m.id, "display")).map(
-      rowsOf,
-    ),
+    members: semanticMembers(item.id).map(rowsOf),
   });
   const hasStatus = (view: ReturnType<typeof semanticItem>, status: string) =>
     [view, ...view.members].some(
@@ -303,6 +314,13 @@ export function createReadGate(
         row.relations.some((r) => r.status === status),
     );
   const endsShown = (x: number, y: number) => isShown("item", x) && isShown("item", y);
+  /** Whether both end items of the stored Insight are shown; false when no row is stored. */
+  const insightEnds = (insightId: number) => {
+    const ends = db.all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [
+      insightId,
+    ])[0];
+    return ends !== undefined && endsShown(ends.x as number, ends.y as number);
+  };
   return {
     sources: () => filled((n) => listSources(db, n), "source", "display", sourcesLimit),
     searchSources: (query) =>
@@ -338,10 +356,7 @@ export function createReadGate(
       };
     },
     insightEndsShown(insightId) {
-      const ends = db.all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [
-        insightId,
-      ])[0];
-      return ends !== undefined && endsShown(ends.x as number, ends.y as number);
+      return insightEnds(insightId);
     },
     evidenceSource(evidenceId) {
       return isShown("evidence", evidenceId) ? readEvidenceSource(db, evidenceId) : undefined;
@@ -478,15 +493,7 @@ export function createReadGate(
     },
     graphTrace: (start) => {
       // an Insight whose end items are not shown is not-found here too (P5F-R2, P01-R15)
-      const ends =
-        start.kind === "insight"
-          ? db.all("SELECT x_item_id AS x, y_item_id AS y FROM insights WHERE id = ?", [
-              start.id,
-            ])[0]
-          : undefined;
-      if (start.kind === "insight" && !(ends && endsShown(ends.x as number, ends.y as number))) {
-        return undefined;
-      }
+      if (start.kind === "insight" && !insightEnds(start.id)) return undefined;
       return traceChains(db, registry, start, "display");
     },
     graphPaths: (query) => relationPaths(db, registry, query, "display"),
@@ -501,12 +508,21 @@ export function createReadGate(
     },
     heldShown: (itemId) => {
       const ids = (sql: string, params: number[]) => db.all(sql, params).map((r) => r.id as number);
-      // a merge line, distinct mark or split record counts when the other item it names is shown
-      const others = (sql: string) =>
-        db.all(sql, [itemId, itemId]).filter((r) => {
-          const other = (r.a as number) === itemId ? (r.b as number) : (r.a as number);
-          return isShown("item", other);
-        }).length;
+      // a merge line, distinct mark or split record counts when its own row and the other item it names are shown
+      const others = (kind: string, sql: string, rowId: (r: SqlRow) => string) => {
+        const rows = db.all(sql, [itemId, itemId]);
+        const rowOk = shown(
+          rows.map((r) => ({ kind, id: rowId(r) })),
+          "display",
+        );
+        const itemOk = shown(
+          rows.map((r) => ({ kind: "item", id: String(otherEnd(r)) })),
+          "display",
+        );
+        return rows.filter((r) => rowOk.has(rowId(r)) && itemOk.has(String(otherEnd(r)))).length;
+      };
+      const otherEnd = (r: SqlRow) =>
+        (r.a as number) === itemId ? (r.b as number) : (r.a as number);
       return {
         facts: ids("SELECT id FROM facts WHERE item_id = ?", [itemId]).filter((id) =>
           isShown("fact", id),
@@ -516,13 +532,19 @@ export function createReadGate(
           itemId,
         ]).filter((id) => isShown("relation", id)).length,
         merges: others(
-          "SELECT member_id AS a, representative_id AS b FROM item_merges WHERE member_id = ? OR representative_id = ?",
+          "entity-merge",
+          "SELECT id, member_id AS a, representative_id AS b FROM item_merges WHERE member_id = ? OR representative_id = ?",
+          (r) => `merge:${r.id}`,
         ),
         distinct: others(
+          "entity-merge",
           "SELECT item_a AS a, item_b AS b FROM item_distinct WHERE item_a = ? OR item_b = ?",
+          (r) => `distinct:${r.a}:${r.b}`,
         ),
         splitMoves: others(
-          "SELECT from_item_id AS a, to_item_id AS b FROM item_split_moves WHERE from_item_id = ? OR to_item_id = ?",
+          "entity-merge",
+          "SELECT id, from_item_id AS a, to_item_id AS b FROM item_split_moves WHERE from_item_id = ? OR to_item_id = ?",
+          (r) => `split:${r.id}`,
         ),
       };
     },

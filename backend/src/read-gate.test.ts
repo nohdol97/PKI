@@ -381,6 +381,14 @@ describe("read-gate: a member is carried only while its merge line is shown (RVS
     return rep;
   }
 
+  it("counts a merge line held on the item only while the line is shown (MGV-C4)", () => {
+    const hidden = joined((scopes) => scopes.length < 2);
+    const rep = merged(hidden);
+    expect(createReadGate(db, hidden).heldShown(rep).merges).toBe(0);
+    const open = joined(() => true);
+    expect(createReadGate(db, open).heldShown(rep).merges).toBe(1);
+  });
+
   it("lists no member under its representative when the line is hidden, and lists it when the policy shows the line", () => {
     const hidden = joined((scopes) => scopes.length < 2);
     const rep = merged(hidden);
@@ -394,8 +402,8 @@ describe("read-gate: a member is carried only while its merge line is shown (RVS
   });
 });
 
-describe("read-gate: a merge chain deeper than the bound (RVS-R2)", () => {
-  it("carries a member near the representative and leaves out one whose chain outruns the bound", () => {
+describe("read-gate: a merge chain deeper than the old bound (RVS-R2, MGV-R2)", () => {
+  it("carries a member at any depth when every line is shown (MGV-C3)", () => {
     const depth = 1003;
     db.transaction(() => {
       for (let i = 1; i <= depth; i++)
@@ -411,7 +419,7 @@ describe("read-gate: a merge chain deeper than the bound (RVS-R2)", () => {
       .semanticMembers(depth)
       .map((m) => m.id);
     expect(ids).toContain(depth - 1);
-    expect(ids).not.toContain(1);
+    expect(ids).toContain(1);
   });
 });
 
