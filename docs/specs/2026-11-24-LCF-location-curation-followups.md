@@ -67,7 +67,7 @@ R1 뒤에는 넷째 화살표의 트랜잭션이 상태 `revoking`을 보고 아
   - 목록을 받지 않는 기존 호출(시험)은 지금처럼 동작한다.
 - **LCF-R2 백엔드에 맡기지 못한 고르기는 취소와 다르게 답한다.** 셸의 `pickLocation`은 사용자가 고른 경로를 맡기지 못하면 `{ ticket: null, failed: "backend-unavailable" }`을 준다. 취소는 지금처럼 `{ ticket: null }`이다. 화면은 `failed`가 있으면 추가·다시 연결 모두 "백엔드가 응답하지 않아 위치를 추가하지 못했습니다. 잠시 뒤에 다시 시도해 주세요." 류의 문구 하나를 거절 자리(`local-locations.tsx:340`)에 보인다. 문구는 `apps/web/src/local-locations-text.ts`에 둔다.
 - **LCF-R3 "다른 것" 목록의 안내는 지금 항목의 것만 보인다.** 항목이 바뀌어 다시 읽기를 시작할 때 안내를 지운다. 풀기의 실패는 그 요청이 아직 가장 새것일 때만 안내로 적는다. 시험할 수 있게 읽기·풀기 규칙을 컴포넌트 밖의 작은 함수로 뺀다(웹 단위 시험에 DOM이 없다, X02F-D5).
-- **LCF-R4 보이는 대표 밑 가려진 구성원의 표시는 목록에 없다(시험).** 보이는 대표 R과 그 구성원 M(가려진 범위의 원본에서 나옴), 보이는 항목 X가 있고 X와 M 사이에 "다른 것" 표시가 있을 때, X의 목록에 M이 없다. 제품 코드는 고치지 않는다. DPF spec의 변이 ① 문장을 실제(대표 검사만 붙잡혔다)와 맞춘다.
+- **LCF-R4 보이는 대표 밑 가려진 구성원의 표시는 목록에 없다(시험).** 보이는 대표 R과 그 구성원 M(가려진 범위의 원본에서 나옴), 보이는 항목 X가 있고 X와 M 사이에 "다른 것" 표시가 있을 때, X의 목록에 M이 없다. 제품 코드는 고치지 않는다. DPF spec의 변이 ① 문장을 실제와 맞춘다: 구현 중 측정해 보니 `rowOk`(표시 행 검사)와 `itemOk`(상대 항목 검사)가 같은 원본 합집합을 보고 서로 대신 막아, 한 겹만 지우면 이 시험도 초록이고 **두 겹을 함께 지워야** 빨개진다.
 - **LCF-R5 I02 D33 행을 고친다.** "`active`가 아닐 때는 빈 페이지"를 "일시 중지·철회 중에는 빈 페이지, `unavailable`이면 원래 파일이 돌아왔을 때 다시 읽는다(DPF-D6)"로.
 
 ### 바꾸는 자리
@@ -88,7 +88,7 @@ R1 뒤에는 넷째 화살표의 트랜잭션이 상태 `revoking`을 보고 아
 | LCF-C1 | `unavailable`인 폴더 위치의 다시 연결이 경로 검사에서 기다리는 동안 그 위치를 일시 중지하면, 다시 연결의 답은 `bad-request`이고 위치는 `paused`이며 경로·정체는 옛 값 그대로다(R1). **변이**: `relinkLocation`의 상태 확인을 지우면 빨개진다 | `backend/src/local-locations.relink.test.ts`(경로 검사의 `fs.realpath`를 붙잡아 두는 대역) |
 | LCF-C2 | 셸의 맡기기가 `false`면 `pickLocation`이 `{ ticket: null, failed: "backend-unavailable" }`을, 취소면 `{ ticket: null }`을 준다. 화면 쪽 `pickAndAdd`는 앞의 답에 `{ added: false, text: <R2 문구> }`, 뒤의 답에 `undefined`를 돌려준다(R2) | `apps/desktop/src/bridge.test.ts`, `apps/web/src/local-locations.test.tsx` |
 | LCF-C3 | 항목 A의 풀기가 실패하기 전에 항목 B의 읽기가 시작되면, 안내는 비어 있고 상태는 B의 목록이다. A의 풀기 실패가 가장 새 요청이면 안내가 적힌다(R3) | `apps/web/src/entity-distinct.test.tsx` |
-| LCF-C4 | R4의 배치에서 `entityDistinctMarks({ itemId: X })`에 M이 없다. **변이**: `read-gate.ts:277`의 `itemOk` 조건을 지우면 빨개진다 | `backend/src/entity-distinct-marks.test.ts` |
+| LCF-C4 | R4의 배치에서 `entityDistinctMarks({ itemId: X })`에 M이 없다. **변이**: `read-gate.ts`의 `rowOk`와 `itemOk`를 함께 지우면 빨개진다(한 겹만 지우면 다른 겹이 막아 초록 — 구현 중 측정) | `backend/src/entity-distinct-marks.test.ts` |
 
 경계값·조합의 전수 시험은 하지 않는다(일시 중지 하나로 철회를 대표, 추가 하나로 다시 연결의 `failed`를 대표). 변이 확인은 C1(사용자의 철회·일시 중지가 서는가)과 C4(보임 가드) 두 건만 한다. 기존 시험은 `bridge.test.ts:70`(취소의 답)이 그대로 통과해야 한다.
 
@@ -127,3 +127,4 @@ PR 하나, 한 worktree, 구현자 한 명이 차례로 한다. 전체 시험은
 | 날짜 | 변경 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-24 | 처음 씀 | 전체 | #335(DPF 검토)와 #200의 남은 줄 가운데 상태 결함·안내 누락·보임 가드 시험을 한 묶음으로 |
+| 2026-11-24 | C4의 변이를 "`itemOk`만 지우면"에서 "`rowOk`와 `itemOk`를 함께 지우면"으로 고침 | R4, C4 | 구현 중 측정: 한 겹만 지운 변이는 시험이 초록(두 검사가 같은 합집합을 봄), 둘 다 지우면 빨개짐 |
