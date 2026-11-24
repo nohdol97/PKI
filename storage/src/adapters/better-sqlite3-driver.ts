@@ -26,7 +26,11 @@ export const openBetterSqlite3: OpenSqlDriver = (path, options = {}) => {
     // of the schema too; the setting is per connection, so it is set here, not left to a compile default.
     db.pragma("foreign_keys = ON");
   } catch (error) {
-    db.close();
+    try {
+      db.close();
+    } catch {
+      // the pragma error is the one to report
+    }
     throw error;
   }
   const statements = new Map<string, Database.Statement>();

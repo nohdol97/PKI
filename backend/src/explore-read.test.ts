@@ -214,3 +214,18 @@ describe("explore-read item: a member is carried only while its merge line is sh
     expect(answer.center?.facts.map((f) => f.value)).toEqual(["대표 값", "구성원 값"]);
   });
 });
+
+describe("explore-read item: a member centre still carries its siblings (RVS-R2)", () => {
+  it("lists the other member of the group and its facts when the centre is itself a member", () => {
+    const rep = item("형제 대표", versions.open, "대표 값");
+    const centre = item("형제 가운데", versions.open, "가운데 값");
+    const sibling = item("형제 구성원", versions.open, "형제 값");
+    const decisions = productUserDecisions(registry);
+    expect(decisions.entities.merge(db, centre, rep).status).toBe("applied");
+    expect(decisions.entities.merge(db, sibling, rep).status).toBe("applied");
+    const answer = reads().item({ itemId: centre, depth: 1 });
+    if (answer?.status !== "ok") throw new Error("not ok");
+    expect(answer.center?.members.map((m) => m.id)).toContain(sibling);
+    expect(answer.center?.facts.map((f) => f.value)).toContain("형제 값");
+  });
+});

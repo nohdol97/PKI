@@ -277,11 +277,12 @@ export function createReadGate(
       itemsShown.has(String(m.id)) &&
       itemsShown.has(String(m.mergedInto)) &&
       !lineShown.has(`merge:${m.mergeId}`);
+    // only a hidden line on the member's own chain drops it; the chain ends at the root or at the centre (no entry)
     return all.filter((m) => {
-      for (let at: number | undefined = m.id, n = 0; at !== itemId; n++) {
-        const line: SemanticMemberView | undefined =
-          at === undefined || n > 1000 ? undefined : byId.get(at);
-        if (!line || lineHidden(line)) return false;
+      for (let at = m.id, n = 0; n <= 1000; n++) {
+        const line = byId.get(at);
+        if (!line) return true;
+        if (lineHidden(line)) return false;
         at = line.mergedInto;
       }
       return true;
