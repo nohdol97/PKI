@@ -1,7 +1,7 @@
 // H02A-C2, C3: update verification (spec 2026-11-24-H02-common, R3-R5). Keys are generated
 // here, per run; nothing is committed. The channel is a fake.
 import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -102,6 +102,23 @@ describe("runUpdate", () => {
     expect(result).toEqual({ ok: true, version: "1.2.0" });
     expect(install).toHaveBeenCalledTimes(1);
     expect(readFileSync(join(work, "pki-setup.exe"))).toEqual(payload);
+  });
+
+  it("SLF-C4: a folder where the download should go, with the download failing, still returns the download's reason", async () => {
+    const { publicKey, privateKey } = keys();
+    mkdirSync(join(work, "pki-setup.exe"));
+    const install = vi.fn(async () => {});
+    const channel: UpdateChannel = {
+      fetchManifest: async () => signed(manifestFor("1.2.0"), privateKey),
+      download: async () => {
+        throw new Error("network down");
+      },
+      install,
+    };
+    const result = await runUpdate({ channel, publicKey, currentVersion: "1.0.0", workDir: work });
+    expect(result).toEqual({ ok: false, reason: "network down" });
+    expect(install).not.toHaveBeenCalled();
+    expect(existsSync(join(work, "pki-setup.exe"))).toBe(true);
   });
 
   it("H02A-C3: the shared channel fails with a reason starting 미구현, 배포처 후속", async () => {
