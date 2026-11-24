@@ -3,6 +3,7 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -54,6 +55,21 @@ describe("removeUserData", () => {
     expect(existsSync(data)).toBe(false);
     expect(readFileSync(join(beside, "keep.txt"), "utf8")).toBe("beside");
     expect(disableAutostart).toHaveBeenCalledTimes(1);
+  });
+
+  it("BGL-C2: a data folder that is itself a link to a PKI-looking folder is refused, and neither the target nor the link is touched", () => {
+    const target = join(root, "real");
+    mkdirSync(target);
+    writeFileSync(join(target, "pki.sqlite"), "db");
+    writeFileSync(join(target, "note.txt"), "keep");
+    const link = join(root, "link-to-data");
+    symlinkSync(target, link);
+    const { result } = run("delete", link);
+    expect(result.code).toBe(1);
+    expect(result.line).toContain("is not a data folder");
+    expect(readFileSync(join(target, "pki.sqlite"), "utf8")).toBe("db");
+    expect(readFileSync(join(target, "note.txt"), "utf8")).toBe("keep");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
   });
 
   it("H02A-C4: keep leaves every byte and still switches autostart off", () => {
