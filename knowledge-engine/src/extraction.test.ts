@@ -1077,4 +1077,89 @@ describe("gate.lost (S03-R16 ③, G-C4): the extraction of the source a path rel
       },
     ]);
   });
+
+  // BGL-C1: the relation is stated again by the extraction of the new version; the Dataset was rejected while it waited
+  const restatedPath = async (rejectDataset: boolean) => {
+    const statement = "합계는 매출 표에서 잰다";
+    const stated = (metric: string | null, dataset: string | null) =>
+      output({
+        items: [
+          { ref: "m", type: "Metric", name: "합계", existingItemId: metric },
+          { ref: "d", type: "Dataset", name: "매출", existingItemId: dataset },
+        ],
+        relations: [{ subject: "m", type: "MEASURED_ON", object: "d", quote: statement }],
+      });
+    setUp([stated(null, null)]);
+    const first = imported({ id: "doc", title: "t", content: statement });
+    await runNext();
+    const path = db.all("SELECT id, subject_id, object_id FROM relations")[0] as {
+      id: number;
+      subject_id: number;
+      object_id: number;
+    };
+    const table = saveSourceRecord(db, "imported", { externalId: "tbl", title: "tbl", body: "x" });
+    if (table.status !== "created") throw new Error(table.status);
+    saveDatasetTable(db, {
+      itemId: path.object_id,
+      sourceId: table.sourceId,
+      key: "",
+      rowCount: 1,
+    });
+    const calc = saveFact(db, {
+      itemId: path.subject_id,
+      kind: "metric.calculation",
+      value: '{"aggregation":"count"}',
+      epistemic: "explicit",
+      status: "verified",
+      validAt: null,
+      observedAt: "t",
+    }).id;
+    setUp([stated(String(path.subject_id), String(path.object_id))]);
+    imported({ id: "doc", title: "t", content: `${statement}\n이제 새 version이다` });
+    propagateNewVersion(db, first.sourceId as number);
+    expect(db.all("SELECT status FROM relations WHERE id = ?", [path.id])).toEqual([
+      { status: "superseded" },
+    ]);
+    if (rejectDataset) {
+      expect(userDecisions.decide(db, { kind: "item", id: path.object_id }, "reject").status).toBe(
+        "applied",
+      );
+    }
+    expect(db.all("SELECT status FROM facts WHERE id = ?", [calc])).toEqual([
+      { status: "verified" },
+    ]);
+    await runNext();
+    expect(db.all("SELECT status FROM relations WHERE id = ?", [path.id])).toEqual([
+      { status: "candidate" },
+    ]);
+    return { calc, table };
+  };
+
+  it("BGL-C1 (a): a path relation the new version states again is judged when its Dataset was rejected while it waited", async () => {
+    const { calc, table } = await restatedPath(true);
+    expect(db.all("SELECT status FROM facts WHERE id = ?", [calc])).toEqual([
+      { status: "disputed" },
+    ]);
+    expect(
+      db.all(
+        "SELECT actor, action, reason, basis_source_id, basis_version FROM fact_history WHERE fact_id = ? ORDER BY seq DESC LIMIT 1",
+        [calc],
+      ),
+    ).toEqual([
+      {
+        actor: "policy",
+        action: "dispute",
+        reason: "data-basis-lost",
+        basis_source_id: table.sourceId,
+        basis_version: 1,
+      },
+    ]);
+  });
+
+  it("BGL-C1 (b): the same flow without a rejection keeps the calculation verified", async () => {
+    const { calc } = await restatedPath(false);
+    expect(db.all("SELECT status FROM facts WHERE id = ?", [calc])).toEqual([
+      { status: "verified" },
+    ]);
+  });
 });
