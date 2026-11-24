@@ -91,8 +91,8 @@
 
 ## 인터페이스 / 설계 개요
 
-- `storage/src/read-memo.ts`: `KeyedRead`(한 줄 읽기의 SQL 글 `one`과 짝 `many`. `many`는 첫 열 `key`에 id를 담고 `key`, 그다음 `one`과 같은 순서로 정렬한다)와 `preloadReads(db, read, ids, fixed?)`. 아직 답이 없는 id만 `many`로 한 번 읽어, `key` 열을 뗀 행을 `one`의 열쇠(`[id, ...fixed]`) 아래에 얼려 넣는다. 열쇠는 `memoReads`의 `all`과 같은 함수로 만든다. `db`가 읽기 기억이 아니면 아무것도 하지 않는다.
-- 한 줄 읽기를 가진 모듈마다 `KeyedRead` 상수와 내보내는 미리 채우기 함수 하나: `knowledge.ts`(근거 목록), `semantic-lifecycle.ts`(`user_authored`, `status·epistemic`, 이력 줄), `row-lineage.ts`(사실·관계·근거의 계보), `analytical-check-lines.ts`(검사 줄 목록), `assertion-links.ts`(`slotRivals`의 자기 줄), `analytical-gate.ts`(사실의 `item_id·kind`, 항목의 유형, `objectsOf`). 한 줄 읽기 함수는 그 상수의 `one`을 그대로 쓴다. 그래서 두 글이 따로 놀 수 없다.
+- `storage/src/read-memo.ts`: `KeyedRead`(한 줄 읽기의 SQL 글 `one`과 짝 `many`. `many`는 첫 열 `key`에 id를 담고 `key`, 그다음 `one`과 같은 순서로 정렬한다)와 `preloadReads(db, read, ids, fixed?)`, 짝을 한 곳에서 만드는 `keyedRead({ columns, from, key, where?, order?, distinct? })`. 아직 답이 없는 id만 `many`로 한 번 읽어, `key` 열을 뗀 행을 `one`의 열쇠(`[id, ...fixed]`) 아래에 얼려 넣는다. 열쇠는 `memoReads`의 `all`과 같은 함수로 만든다. `db`가 읽기 기억이 아니면 아무것도 하지 않는다.
+- 한 줄 읽기를 가진 모듈마다 `KeyedRead` 상수와 내보내는 미리 채우기 함수 하나: `knowledge.ts`(근거 목록), `semantic-lifecycle.ts`(`status·epistemic`, 이력 줄)와 `row-lineage.ts`(`user_authored`: 두 모듈이 같은 글을 읽고, `row-lineage.ts`가 잎 모듈이라 순환 없이 공유할 수 있다), `row-lineage.ts`(사실·관계·근거의 계보), `analytical-check-lines.ts`(검사 줄 목록), `assertion-links.ts`(`slotRivals`의 자기 줄), `analytical-gate.ts`(사실의 `item_id·kind`, 항목의 유형, `objectsOf`). 한 줄 읽기 함수는 그 상수의 `one`을 그대로 쓴다. 그래서 두 글이 따로 놀 수 없다.
 - `storage/src/analytical-views.ts`: `Reader`에 미리 채우기 한 단계. 자기 한 줄 읽기(항목 이름, 항목 상태, `objects`)의 짝도 여기 둔다. `Visibility.shown(kind, id, db?)`의 셋째 인자로 `Reader`의 드라이버를 넘긴다.
 - `backend/src/analytical-api.ts`(타입만), `backend/src/server.ts`의 `shown` 한 줄: 받은 드라이버가 있으면 그것으로 `registry.visible`을 부른다.
 - `knowledge-engine/src/canonical-kinds.ts`: 근거 종류의 계보를 `storage`의 함수로 읽는다(한 줄). 계보의 SQL 글이 두 패키지에 따로 있어 그대로는 미리 채운 답과 열쇠가 맞지 않기 때문이다.
@@ -177,3 +177,4 @@ PR 하나. 자세한 그래프(파일·함수·위험)는 작업 폴더의 설�
 | 날짜 | 변경 | 대상 | 사유 |
 |---|---|---|---|
 | 2026-11-24 | 처음 씀 | 전체 | #233이 #293 뒤에도 1초 기준을 넘어(중앙값 1,108ms), P3F spec이 미룬 두 항목을 실측으로 다시 재고 묶음 읽기로 줄이기로 정함 |
+| 2026-11-24 | 구현 중 보정: `user_authored` 짝을 `row-lineage.ts`에 두고(순환 회피) `keyedRead` 도우미를 더함. 상한은 실측(C1 4묶음 165, C4 4묶음 234)이 모두 아래라 그대로 | 인터페이스 / 설계 개요 | 구현 |
