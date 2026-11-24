@@ -89,6 +89,15 @@ test("explore-curation.e2e: find an item, see the graph, merge another Project i
   await page.getByRole("button", { name: `합치기 되돌리기: ${MEMBER}` }).click();
   await expect(page.getByRole("list", { name: "구성원 목록" })).toHaveCount(0);
   await expect(curate.getByText("합쳐진 항목이 없습니다.")).toBeVisible();
+
+  // CUF-C4: a preference on the open item shows in "남긴 선호" and is cancelled there
+  const prefs = page.getByRole("region", { name: "선호 남기기" });
+  await expect(prefs.getByText("남긴 선호가 없습니다.")).toBeVisible();
+  await prefs.getByRole("button", { name: `유용함: ${PROJECT}` }).click();
+  const kept = prefs.getByRole("list", { name: "남긴 선호 목록" });
+  await expect(kept).toContainText("유용함");
+  await kept.getByRole("button", { name: `취소: ${PROJECT}` }).click();
+  await expect(prefs.getByText("남긴 선호가 없습니다.")).toBeVisible();
 });
 
 test("explore-curation.e2e: filter 지식 검토 by status on the server, read more, see the 유형 정의 sections", async ({

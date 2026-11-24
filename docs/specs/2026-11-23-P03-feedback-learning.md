@@ -95,7 +95,7 @@
   - `POST /api/feedback` `{ target: { kind, id }, kind }` → `{ status: "applied", feedback }` 또는 `{ status: "refused", reason }`. 교정이면 바뀐 행의 상태를 함께 싣는다.
   - `POST /api/feedback/undo` `{ id }` → `{ status: "applied" }` 또는 `{ status: "refused", reason }`.
   - `GET /api/feedback` → 유효한 줄을 새 것부터 100건까지(ID, 종류, 분류, 대상, 대상의 표시 이름, 시각).
-- **P03-R15 화면.** 홈의 Insight마다 Insight에 허용된 여섯 종류의 버튼을 두고, 홈 아래 "최근 피드백" 목록에서 줄마다 취소한다. 누른 직후와 취소 직후 Insight 목록을 다시 읽는다. 새 컴포넌트는 새 파일(`apps/web/src/feedback.tsx`·`feedback-text.ts`)에 두고 기존 파일에는 끼우는 줄만 더한다.
+- **P03-R15 화면.** 홈의 Insight마다 Insight에 허용된 여섯 종류의 버튼을 두고, 홈 아래 "최근 피드백" 목록에서 줄마다 취소한다. 누른 직후와 취소 직후 Insight 목록을 다시 읽는다. 새 컴포넌트는 새 파일(`apps/web/src/feedback.tsx`·`feedback-text.ts`)에 두고 기존 파일에는 끼우는 줄만 더한다. 탐색의 항목 상세에 두는 선호 버튼과 "남긴 선호"(취소 포함)는 [CUF spec](2026-11-24-CUF-curation-ui.md)의 CUF-R2가 더한다.
 
 ## 인터페이스 / 설계 개요
 
@@ -199,3 +199,4 @@ PR 하나로 간다. T2·T3은 T1 뒤에 나란히, T4·T5는 T3 뒤에 나란�
 | 2026-11-23 | 처음 씀, 확정 | 전체 | 이슈 #29 착수. P02·X01·P01-T03이 진행 중이라 알림·검색·순위 응답은 읽기 함수 하나로 경계를 긋고 넘김 |
 | 2026-11-23 | D3·D7·넘기는 것·미해결에 X01-R19(항목 선호에서 유도한 검색 가중, `feedback.learned` 뒤)를 가리키는 문장을 더함. 요구사항·기준·스키마는 그대로 | D3, D7, 미해결 질문, 넘기는 것 | #252 덧붙임. P03-D3(원본은 대상이 아님)과 X01-R4가 부딪히지 않음을 양쪽에 적음 |
 | 2026-11-24 | R7 유형 단계의 줄 세기를 "Insight마다 가장 새 줄 하나"로 맞추고, D7·D10·D11에 [Phase 5 후속 spec](2026-11-24-P5-followups.md)가 후속을 처리했음을 가리키는 문장을 더함. 요구사항 번호·기준은 그대로 | R7, D7, D10, D11 | 이슈 #252 첫째~셋째 항목 |
+| 2026-11-24 | R15에 항목 상세의 선호 버튼·남긴 선호를 더하는 곳(CUF-R2)을 가리키는 문장을 더함. 요구사항 번호·기준은 그대로 | R15 | [CUF spec](2026-11-24-CUF-curation-ui.md) CUF-R2 (#252, #287) |

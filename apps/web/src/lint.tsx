@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
 import { SOURCE_GONE } from "./evidence-text.ts";
 import { evidenceOpener, SourceView, useFocusOn } from "./evidence-view.tsx";
+import { LintReport } from "./lint-report.tsx";
 import { DETAIL_HINT, DetailPane, PaneHead, Props, Row } from "./panes.tsx";
 import {
   countsText,
@@ -147,6 +148,7 @@ export function Lint({ api }: { api: ApiClient }) {
                 </section>
               );
             })}
+          <LintReport api={api} onReported={read} />
         </div>
       </div>
       {current ? (

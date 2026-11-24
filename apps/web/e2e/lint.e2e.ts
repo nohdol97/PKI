@@ -14,6 +14,7 @@ import { freePort, ROOT } from "./v02-screens.ts";
 
 const SEED = join(ROOT, "backend/src/k02-seed.e2e.ts");
 const TASK = "예약 점검 업무";
+const PROJECT = "미리내 프로젝트";
 const QUOTE = "미리내 프로젝트의 완료 목표는 2026-12-05입니다";
 
 let dir: string;
@@ -80,4 +81,16 @@ test("lint.e2e: see a finding, open its evidence, close it, and find it closed w
   await openLint();
   await expect(list.getByRole("listitem").filter({ hasText: TASK })).toContainText("닫음");
   await expect(page.getByText(/오탐 1/)).toBeVisible();
+
+  // CUF-C2: tell the lint what it missed: an item found by name, reported under "목표일이 지난 업무"
+  const report = page.getByRole("region", { name: "놓친 것 알리기" });
+  await report
+    .getByRole("combobox", { name: "규칙" })
+    .selectOption({ label: "목표일이 지난 업무" });
+  await report.getByRole("textbox", { name: "항목 이름" }).fill("미리내");
+  await report.getByRole("button", { name: "찾기", exact: true }).click();
+  await report.getByRole("button", { name: `고르기: ${PROJECT}` }).click();
+  await report.getByRole("button", { name: "알리기", exact: true }).click();
+  await expect(list.getByRole("listitem").filter({ hasText: PROJECT })).toContainText("열림");
+  await expect(page.getByText(/미탐 1/)).toBeVisible();
 });

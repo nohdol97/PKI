@@ -15,6 +15,7 @@ import {
   sourceOpener,
   type AskState,
 } from "./ask.tsx";
+import { progressText, questionLimitText } from "./ask-text.ts";
 import { SourceView } from "./evidence-view.tsx";
 
 const route: AskEvent = {
@@ -134,7 +135,7 @@ describe("ask view: the results", () => {
 });
 
 describe("ask view: the request", () => {
-  it("leaves out an empty filter and turns a day into the whole day in UTC", () => {
+  it("leaves out an empty filter and turns a day into a time range", () => {
     expect(
       buildRequest({ question: " 배포일 ", answer: true, connectorId: "", from: "", to: "" }),
     ).toEqual({
@@ -154,8 +155,8 @@ describe("ask view: the request", () => {
       question: "배포일",
       answer: false,
       connectorIds: ["c1"],
-      from: "2026-11-01T00:00:00.000Z",
-      to: "2026-11-30T23:59:59.999Z",
+      from: expect.any(String),
+      to: expect.any(String),
       acknowledgeUnverified: true,
     });
   });
@@ -356,5 +357,63 @@ describe("ask view: the answer and the cited sources (UI01-C10)", () => {
     const opened = items(render({ index: 1, source }), "인용한 원본");
     expect(opened[0]).not.toContain("인용 원본");
     expect(opened[1]).toContain('aria-label="인용 원본"');
+  });
+});
+
+// CUF-C5 (R3): the chosen days are the user's local days, whatever the machine's time zone.
+describe("ask view: the range is the user's days (CUF-C5)", () => {
+  it("sends the local start of the first day and the local end of the last", () => {
+    const req = buildRequest({
+      question: "배포일",
+      answer: true,
+      connectorId: "",
+      from: "2026-11-01",
+      to: "2026-11-30",
+    });
+    const from = new Date(req.from as string);
+    const to = new Date(req.to as string);
+    expect([
+      from.getFullYear(),
+      from.getMonth(),
+      from.getDate(),
+      from.getHours(),
+      from.getMinutes(),
+    ]).toEqual([2026, 10, 1, 0, 0]);
+    expect([
+      to.getFullYear(),
+      to.getMonth(),
+      to.getDate(),
+      to.getHours(),
+      to.getMinutes(),
+      to.getSeconds(),
+    ]).toEqual([2026, 10, 30, 23, 59, 59]);
+  });
+});
+
+// CUF-C6 (R4): a question over the limit is told, not cut.
+describe("questionLimitText (CUF-C6)", () => {
+  it("says the limit and the count for 2001 characters, and nothing for 2000", () => {
+    const text = questionLimitText("가".repeat(2001));
+    expect(text).toContain("2000");
+    expect(text).toContain("2001");
+    expect(questionLimitText("가".repeat(2000))).toBeNull();
+    expect(questionLimitText(`  ${"가".repeat(2000)}  `)).toBeNull();
+  });
+});
+
+// CUF-C7 (R5): the one always-present status line says the three steps the other paragraphs do not.
+describe("progressText (CUF-C7)", () => {
+  it("is empty before asking, then searching, the hit count, and the sentence count when done", () => {
+    expect(progressText(INITIAL_ASK, false)).toBe("");
+    expect(progressText(INITIAL_ASK, true)).toContain("찾는 중");
+    const withHits = fold(route, hits);
+    expect(progressText(withHits, true)).toContain("1건");
+    const done = applyEvent(applyEvent(withHits, sentence), {
+      type: "done",
+      sentences: 1,
+      dropped: 0,
+      insufficient: false,
+    });
+    expect(progressText(done, false)).toContain("1문장");
   });
 });

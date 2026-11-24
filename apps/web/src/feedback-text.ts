@@ -33,3 +33,17 @@ const REFUSAL: Readonly<Record<string, string>> = {
 };
 export const feedbackRefusalText = (reason: string | undefined): string =>
   (reason === undefined ? undefined : REFUSAL[reason]) ?? `처리하지 못했습니다: ${reason ?? ""}`;
+
+// CUF-R2: the preference buttons of an item in 탐색 and the lines it keeps.
+export const ITEM_FEEDBACK_HEADING = "선호 남기기";
+export const ITEM_FEEDBACK_LINES = "남긴 선호";
+export const ITEM_FEEDBACK_NONE = "남긴 선호가 없습니다.";
+export const itemFeedbackGroupName = (name: string): string => `선호: ${name}`;
+/** What the kind does once given to an item; the item's knowledge itself is never changed (P03-R6). */
+const ITEM_HINT: Readonly<Record<string, string>> = {
+  useful: "이 항목이 걸린 Insight의 순위를 조금 올립니다.",
+  important: "이 항목이 걸린 Insight의 순위를 올립니다.",
+  irrelevant: "이 항목이 걸린 Insight를 내 피드에서 숨기고 알리지 않습니다.",
+  mute: "이 항목이 걸린 Insight를 다시 알리지 않습니다.",
+};
+export const itemHint = (kind: FeedbackKind): string => ITEM_HINT[kind] ?? "";

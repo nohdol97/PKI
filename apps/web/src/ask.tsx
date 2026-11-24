@@ -30,6 +30,8 @@ import {
   ASK_WANT_ANSWER,
   droppedText,
   failureText,
+  progressText,
+  questionLimitText,
   sourceFailureText,
   routeStatusText,
   strategyText,
@@ -115,14 +117,22 @@ export interface AskForm {
   acknowledgeUnverified?: boolean;
 }
 
-/** The request of a form: an empty filter is left out, and a day is the whole day in UTC. */
+/** The start of a day (`from`) or its last millisecond (`to`) as the user's local clock reads it, as an instant. */
+const localDay = (day: string, end: boolean): string => {
+  const [y = 0, m = 1, d = 1] = day.split("-").map(Number);
+  return (
+    end ? new Date(y, m - 1, d, 23, 59, 59, 999) : new Date(y, m - 1, d, 0, 0, 0, 0)
+  ).toISOString();
+};
+
+/** The request of a form: an empty filter is left out, and a day is the whole day on the user's clock (CUF-R3). */
 export function buildRequest(form: AskForm): AskRequest {
   return {
     question: form.question.trim(),
     answer: form.answer,
     ...(form.connectorId ? { connectorIds: [form.connectorId] } : {}),
-    ...(form.from ? { from: `${form.from}T00:00:00.000Z` } : {}),
-    ...(form.to ? { to: `${form.to}T23:59:59.999Z` } : {}),
+    ...(form.from ? { from: localDay(form.from, false) } : {}),
+    ...(form.to ? { to: localDay(form.to, true) } : {}),
     ...(form.acknowledgeUnverified ? { acknowledgeUnverified: true } : {}),
   };
 }
@@ -306,9 +316,10 @@ export function Ask({ api }: { api: ApiClient }) {
       ),
     [api],
   );
+  const limitNotice = questionLimitText(form.question);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!connection || running || form.question.trim() === "") return;
+    if (!connection || running || form.question.trim() === "" || limitNotice !== null) return;
     const mine = new AbortController();
     controller.current = mine;
     setState(INITIAL_ASK);
@@ -346,6 +357,9 @@ export function Ask({ api }: { api: ApiClient }) {
     <div className="pane-wide pane-read">
       <PaneHead title="질문" as="h1" />
       <div className="pane-body">
+        <p role="status" className="sr-only">
+          {progressText(state, running)}
+        </p>
         {asked === undefined && <p>{ASK_INTRO}</p>}
         {failure && <p role="alert">{failure}</p>}
         {cancelled && <p role="status">{ASK_CANCELLED}</p>}
@@ -415,6 +429,7 @@ export function Ask({ api }: { api: ApiClient }) {
               rows={2}
               placeholder="다음 질문을 입력하세요"
               value={form.question}
+              aria-describedby={limitNotice === null ? undefined : "ask-limit"}
               onChange={(e) => setForm({ ...form, question: e.target.value })}
             />
           </label>
@@ -422,7 +437,7 @@ export function Ask({ api }: { api: ApiClient }) {
             <button
               type="submit"
               className="btn-primary"
-              disabled={running || form.question.trim() === ""}
+              disabled={running || form.question.trim() === "" || limitNotice !== null}
             >
               {ASK_SUBMIT}
             </button>
@@ -433,6 +448,7 @@ export function Ask({ api }: { api: ApiClient }) {
             )}
           </div>
         </div>
+        {limitNotice !== null && <p id="ask-limit">{limitNotice}</p>}
       </form>
     </div>
   );
