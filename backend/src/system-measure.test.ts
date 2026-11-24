@@ -3,14 +3,22 @@
 // (eval/results/h03-c2-dev.json) is checked in the last case; the forced-kill phase is system-measure.kill.test.ts.
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { beforeAll, describe, expect, it } from "vitest";
 import { openCanonicalDb } from "./composition.ts";
 import {
+  assertNoFailedExtract,
   failedJobCounts,
+  hasResumed,
+  idleConditionLine,
+  resultPath,
+  rssCaveat,
   runMeasurement,
   SYSTEM_THRESHOLDS,
   validateResult,
   type MeasurementResult,
+  tallyKnowledge,
   type MeasurementRun,
 } from "./system-measure.test-support.ts";
 
@@ -98,9 +106,80 @@ describe("system-measure (H03-C2)", () => {
     expect(committed.args).toMatchObject({ sources: 200, queries: 220, idleSeconds: 30 });
   });
 
-  it("F1: counts jobs that ended in a terminal status other than succeeded", () => {
-    const counts = { succeeded: 9, dead_letter: 1, cancelled: 0, superseded: 2 };
-    expect(failedJobCounts({ counts } as never)).toEqual({ dead_letter: 1, superseded: 2 });
-    expect(failedJobCounts({ counts: { succeeded: 3 } } as never)).toEqual({});
+  const job = (id: number, kind: string, status: string, attempts = 1) =>
+    ({ id, kind, status, attempts }) as never;
+  const jobsOf = (list: unknown[], counts: Record<string, number> = {}) =>
+    ({ jobs: list, counts, truncated: false }) as never;
+
+  it("H03C2F-C1: counts lost and duplicate knowledge from evidence rows, and failedJobs only for extract jobs", () => {
+    expect(tallyKnowledge({ docs: 3, notSearchable: 0, evidence: 4, itemsNamed: 1 })).toEqual({
+      lostDocs: 0,
+      duplicateItems: 1,
+    });
+    expect(tallyKnowledge({ docs: 3, notSearchable: 0, evidence: 2, itemsNamed: 1 })).toEqual({
+      lostDocs: 1,
+      duplicateItems: 0,
+    });
+    const jobs = jobsOf([job(1, "extract", "dead_letter"), job(2, "reindex", "superseded")]);
+    expect(failedJobCounts(jobs)).toEqual({ dead_letter: 1 });
+  });
+
+  it("H03C2F-C2: resumes only on a new attempt, not on a job that finished without one", () => {
+    const snapshot = new Map([[1, 1]]);
+    expect(hasResumed(snapshot, jobsOf([job(1, "extract", "succeeded", 1)]))).toBe(false);
+    expect(hasResumed(snapshot, jobsOf([job(1, "extract", "running", 2)]))).toBe(true);
+  });
+
+  it("H03C2F-C3: a newly dead-lettered extract job ends the measurement with an error", () => {
+    expect(() =>
+      assertNoFailedExtract(jobsOf([job(1, "extract", "succeeded")]), "doc-1"),
+    ).not.toThrow();
+    expect(() =>
+      assertNoFailedExtract(jobsOf([job(1, "extract", "dead_letter")]), "doc-1"),
+    ).toThrow(/doc-1.*dead_letter/);
+  });
+
+  it("H03C2F-C4: states the idle conditions and what was not measured", () => {
+    const { metrics, unverified } = run.result;
+    if (metrics.idleCpu.status !== "measured" || metrics.idleRss.status !== "measured")
+      throw new Error("idle not measured");
+    expect(metrics.idleCpu.openJobs).toBe(0);
+    expect(metrics.idleRss.openJobs).toBe(0);
+    const items = unverified.map((u) => u.item).join("\n");
+    for (const part of ["per document", "per question", "per day", "embedding"]) {
+      expect(items).toContain(part);
+    }
+    expect(items).not.toContain("idle with open jobs");
+    if (process.platform === "darwin") expect(metrics.idleRss.note).toContain("compressed");
+    expect(rssCaveat("darwin")).toContain("compressed");
+    expect(rssCaveat("linux")).toBeUndefined();
+    expect(idleConditionLine(140)?.reason).toContain("140");
+    expect(idleConditionLine(0)).toBeUndefined();
+  });
+
+  it("H03C2F-C5: the validator names an unexplained not-measured metric and a null failedJobs; the committed result still passes", () => {
+    const copy = structuredClone(run.result) as MeasurementResult;
+    copy.unverified = copy.unverified.filter((u) => u.item !== "forced kill and recovery");
+    expect(validateResult(copy).join("\n")).toContain("killRecover");
+    const killed = structuredClone(run.result) as unknown as Record<string, unknown>;
+    (killed.metrics as Record<string, unknown>).killRecover = {
+      ...(run.result.metrics.killRecover as object),
+      status: "measured",
+      failedJobs: null,
+    };
+    expect(validateResult(killed).join("\n")).toContain("failedJobs");
+  });
+
+  it("H03C2F-C6: refuses an existing result file without --force and an unsafe name", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pki-c6-"));
+    try {
+      writeFileSync(join(dir, "x.json"), "keep");
+      expect(() => resultPath(dir, "x", false)).toThrow(/exists/);
+      expect(readFileSync(join(dir, "x.json"), "utf8")).toBe("keep");
+      expect(resultPath(dir, "x", true)).toBe(join(dir, "x.json"));
+      expect(() => resultPath(dir, "../x", true)).toThrow(/name/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

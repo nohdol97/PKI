@@ -88,17 +88,21 @@ export interface KillRecoverValue {
   /** Restart to the first job to run (D5), restart to every job finished. */
   firstJobAfterRestartMs: number;
   allJobsDoneMs: number;
-  /** Documents not found by search plus jobs that ended dead_letter, cancelled or superseded (no knowledge produced). */
+  /** Documents not found by search plus the evidence rows short of one per document (H03C2F-R1). */
   lostDocs: number;
-  /** The terminal non-succeeded jobs by status, already part of `lostDocs`. */
+  /** The `extract` jobs that ended dead_letter, cancelled or superseded: an explanation only, not added to `lostDocs`. */
   failedJobs: Record<string, number>;
+  /** Items of the stub's name beyond the first plus evidence rows beyond one per document. */
   duplicateItems: number;
+  /** What the product reads after the restart: the stub's facts, their evidence rows, and the rows expected (documents). */
+  knowledge: { facts: number; evidence: number; expectedEvidence: number };
   note: string;
 }
 
 export interface MeasurementResult {
   schemaVersion: 1;
   ranAt: string;
+  /** `HEAD` when the run started; after a rebase or amend it can be a SHA that `main` does not have (H03C2F-R9). */
   productCommit: string;
   workingTreeClean: boolean;
   mode: RunMode;
@@ -133,12 +137,19 @@ export interface MeasurementResult {
   };
   metrics: {
     installerSize: NotMeasured & WithThreshold;
-    idleCpu: Metric<{ percentOfAllCores: number; observedSeconds: number; note: string }>;
+    idleCpu: Metric<{
+      percentOfAllCores: number;
+      observedSeconds: number;
+      /** Jobs not finished just before the sample (H03C2F-R3); absent in a result made before it. */
+      openJobs?: number;
+      note: string;
+    }>;
     idleRss: Metric<{
       minMiB: number;
       medianMiB: number;
       maxMiB: number;
       observedSeconds: number;
+      openJobs?: number;
       note: string;
     }>;
     processingSearchable: Metric<Latency & { definition: string }>;
@@ -257,6 +268,9 @@ export function validateResult(value: unknown): string[] {
   }
   const measured = (path: string) => get(value, `${path}.status`) === "measured";
   if (measured("metrics.idleCpu")) nonNegative("metrics.idleCpu.percentOfAllCores");
+  for (const m of ["idleCpu", "idleRss"]) {
+    if (get(value, `metrics.${m}.openJobs`) !== undefined) nonNegative(`metrics.${m}.openJobs`);
+  }
   if (measured("metrics.idleRss")) positive("metrics.idleRss.medianMiB");
   for (const m of ["processingSearchable", "processingExtracted", "search"]) {
     if (measured(`metrics.${m}`)) {
@@ -277,9 +291,14 @@ export function validateResult(value: unknown): string[] {
     nonNegative("metrics.killRecover.duplicateItems");
     at(
       "metrics.killRecover.failedJobs",
-      typeof get(value, "metrics.killRecover.failedJobs") === "object",
+      typeof get(value, "metrics.killRecover.failedJobs") === "object" &&
+        get(value, "metrics.killRecover.failedJobs") !== null,
       "missing",
     );
+    for (const k of ["facts", "evidence", "expectedEvidence"]) {
+      if (get(value, `metrics.killRecover.knowledge.${k}`) !== undefined)
+        nonNegative(`metrics.killRecover.knowledge.${k}`);
+    }
   }
   const unverified = get(value, "unverified");
   const items = Array.isArray(unverified)
@@ -293,9 +312,14 @@ export function validateResult(value: unknown): string[] {
     );
   }
   for (const key of keys) {
-    const m = get(value, `metrics.${metricKey[key]}`) as { status?: string } | undefined;
+    const m = get(value, `metrics.${metricKey[key]}`) as
+      { status?: string; reason?: string } | undefined;
     if (m?.status === "not-measured" && key !== "installerSize") {
-      at("unverified", items.length > FIXED_UNVERIFIED.length, `lacks the not-measured ${key}`);
+      at(
+        "unverified",
+        items.some((u) => u.reason === m.reason),
+        `lacks a line with the reason of the not-measured ${metricKey[key]}`,
+      );
     }
   }
   return problems;
@@ -557,14 +581,90 @@ async function bindStub(backend: Backend): Promise<void> {
 const OPEN = ["queued", "running", "retry", "held"] as const;
 const openJobs = (jobs: JobsResponse) => OPEN.reduce((n, s) => n + (jobs.counts[s] ?? 0), 0);
 
-/** Jobs that ended without producing their result, by status: a document whose extraction failed is lost knowledge. */
+const FAILED = ["dead_letter", "cancelled", "superseded"] as const;
+
+/**
+ * `extract` jobs that ended without producing their result, by status (H03C2F-R1). A truncated job list cannot be
+ * filtered by kind, so it falls back to the counts over every kind (the larger number).
+ */
 export function failedJobCounts(jobs: JobsResponse): Record<string, number> {
   const failed: Record<string, number> = {};
-  for (const status of ["dead_letter", "cancelled", "superseded"] as const) {
-    const n = jobs.counts[status] ?? 0;
+  for (const status of FAILED) {
+    const n = jobs.truncated
+      ? (jobs.counts[status] ?? 0)
+      : jobs.jobs.filter((j) => j.kind === "extract" && j.status === status).length;
     if (n > 0) failed[status] = n;
   }
   return failed;
+}
+
+/** H03C2F-R2: an extraction that ended failed is investigated, never timed. */
+export function assertNoFailedExtract(jobs: JobsResponse, what: string): void {
+  const failed = failedJobCounts(jobs);
+  if (Object.keys(failed).length > 0)
+    throw new Error(`${what}: an extract job ended without its result ${JSON.stringify(failed)}`);
+}
+
+/** H03C2F-R1: lost and duplicate knowledge from the evidence rows (one per document is expected) and the item count. */
+export function tallyKnowledge(input: {
+  docs: number;
+  notSearchable: number;
+  evidence: number;
+  itemsNamed: number;
+}): { lostDocs: number; duplicateItems: number } {
+  return {
+    lostDocs: input.notSearchable + Math.max(0, input.docs - input.evidence),
+    duplicateItems: Math.max(0, input.itemsNamed - 1) + Math.max(0, input.evidence - input.docs),
+  };
+}
+
+/** H03C2F-R6: the backend resumed when a job runs an attempt it had not run before the kill. */
+export function hasResumed(attemptsAtKill: Map<number, number>, jobs: JobsResponse): boolean {
+  return jobs.jobs.some((j) => j.attempts > (attemptsAtKill.get(j.id) ?? 0));
+}
+
+/** H03C2F-R4: macOS's `ps` RSS leaves compressed memory out. */
+export function rssCaveat(platform: NodeJS.Platform): string | undefined {
+  return platform === "darwin"
+    ? "ps RSS leaves out compressed memory, so it reads low when memory is short"
+    : undefined;
+}
+
+/** H03C2F-R3: the unverified line for an idle sample taken with jobs still open. */
+export function idleConditionLine(openJobs: number): { item: string; reason: string } | undefined {
+  return openJobs > 0
+    ? {
+        item: "idle with open jobs",
+        reason: `${openJobs} jobs were still open at the idle sample, so it is not an idle with nothing to process`,
+      }
+    : undefined;
+}
+
+/** H03C2F-R8: where a result goes; refuses an unsafe name and, without `force`, a file that already exists. */
+export function resultPath(outDir: string, name: string, force: boolean): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name))
+    throw new Error(
+      `the result name "${name}" must start with a letter or digit and hold only letters, digits . _ -`,
+    );
+  const path = join(outDir, `${name}.json`);
+  if (existsSync(path) && !force) throw new Error(`${path} exists; --force replaces it`);
+  return path;
+}
+
+// Signals (H03C2F-R5): one pair of listeners while any run is going, so a run is cleaned up whoever started it.
+const cleanups = new Set<() => void>();
+const onSignal = (signal: "SIGINT" | "SIGTERM") => () => {
+  for (const cleanup of cleanups) cleanup();
+  process.exit(signal === "SIGINT" ? 130 : 143);
+};
+const listeners = { SIGINT: onSignal("SIGINT"), SIGTERM: onSignal("SIGTERM") } as const;
+function cleanOnSignal(cleanup: () => void): () => void {
+  if (cleanups.size === 0) for (const [s, l] of Object.entries(listeners)) process.on(s, l);
+  cleanups.add(cleanup);
+  return () => {
+    cleanups.delete(cleanup);
+    if (cleanups.size === 0) for (const [s, l] of Object.entries(listeners)) process.off(s, l);
+  };
 }
 
 async function importDoc(backend: Backend, doc: SyntheticDoc): Promise<void> {
@@ -579,7 +679,10 @@ async function waitDrained(backend: Backend, timeoutMs: number, what: string): P
   const deadline = ms() + timeoutMs;
   for (;;) {
     const jobs = await backend.call(routes.jobs);
-    if (openJobs(jobs) === 0) return;
+    if (openJobs(jobs) === 0) {
+      assertNoFailedExtract(jobs, what);
+      return;
+    }
     const held = jobs.jobs.find((j) => j.status === "held");
     if (held)
       throw new Error(
@@ -652,7 +755,7 @@ function rssMiB(pid: number): number {
 
 // ---------------------------------------------------------------- phases
 
-async function idlePhase(backend: Backend, seconds: number) {
+async function idlePhase(backend: Backend, seconds: number, openJobsNow: number) {
   const startCpu = cpuSeconds(backend.pid);
   const started = ms();
   const rss: number[] = [];
@@ -664,6 +767,7 @@ async function idlePhase(backend: Backend, seconds: number) {
   const used = cpuSeconds(backend.pid) - startCpu;
   const sorted = [...rss].sort((a, b) => a - b);
   const short = seconds < 600;
+  const caveat = rssCaveat(process.platform);
   const shortNote = short
     ? `observed ${seconds} s; EVALUATION asks for a 10-minute idle, so this is shorter than the reference`
     : "observed at least the 10 minutes EVALUATION names";
@@ -672,6 +776,7 @@ async function idlePhase(backend: Backend, seconds: number) {
       status: "measured" as const,
       percentOfAllCores: (used / wall / cpus().length) * 100,
       observedSeconds: wall,
+      openJobs: openJobsNow,
       note: `${shortNote}; the sample is CPU time over wall time across all logical cores`,
       threshold: thresholdOf("idleCpu"),
     },
@@ -681,22 +786,23 @@ async function idlePhase(backend: Backend, seconds: number) {
       medianMiB: percentile(sorted, 0.5),
       maxMiB: sorted.at(-1) as number,
       observedSeconds: wall,
-      note: `${shortNote}; the embedding model is not loaded in this run`,
+      openJobs: openJobsNow,
+      note: `${shortNote}; the embedding model is not loaded in this run${caveat ? `; ${caveat}` : ""}`,
       threshold: thresholdOf("idleMemory"),
     },
   };
 }
 
-async function itemsNamed(backend: Backend, name: string): Promise<number> {
-  let count = 0;
+async function itemIdsNamed(backend: Backend, name: string): Promise<number[]> {
+  const ids: number[] = [];
   let after: number | undefined;
   for (;;) {
     const page = await backend.call(routes.exploreItems, {
       query: name,
       ...(after === undefined ? {} : { after }),
     });
-    count += page.items.filter((i) => i.name === name).length;
-    if (page.next === null) return count;
+    ids.push(...page.items.filter((i) => i.name === name).map((i) => i.id));
+    if (page.next === null) return ids;
     after = page.next;
   }
 }
@@ -758,6 +864,10 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       ...backendOptions,
     });
   let backend: Backend | undefined;
+  const stopCleaning = cleanOnSignal(() => {
+    for (const pid of pids) killGroup(pid);
+    rmSync(workDir, { recursive: true, force: true });
+  });
   try {
     backend = await start();
     await bindStub(backend);
@@ -771,7 +881,6 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
     }
     const runningAtKill = before.counts.running ?? 0;
     const attemptsAtKill = new Map(before.jobs.map((j) => [j.id, j.attempts]));
-    const succeededAtKill = before.counts.succeeded ?? 0;
     await stopBackend(backend);
     if (groupAlive(backend.pid)) throw new Error("the killed backend left a process behind");
 
@@ -782,11 +891,7 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
     const waitEnd = ms() + KILL_WAIT_MS;
     for (;;) {
       const jobs = await backend.call(routes.jobs);
-      if (
-        firstJobAfterRestartMs === undefined &&
-        ((jobs.counts.succeeded ?? 0) > succeededAtKill ||
-          jobs.jobs.some((j) => j.attempts > (attemptsAtKill.get(j.id) ?? 0)))
-      ) {
+      if (firstJobAfterRestartMs === undefined && hasResumed(attemptsAtKill, jobs)) {
         firstJobAfterRestartMs = ms() - restarted;
       }
       if (openJobs(jobs) === 0) break;
@@ -799,14 +904,28 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       await sleep(100);
     }
     const allJobsDoneMs = ms() - restarted;
-    let lostDocs = 0;
+    let notSearchable = 0;
     for (const doc of docs) {
       const found = await backend.call(routes.searchSources, { query: doc.token });
-      if (!found.sources.some((s) => s.externalId === doc.externalId)) lostDocs++;
+      if (!found.sources.some((s) => s.externalId === doc.externalId)) notSearchable++;
     }
     const failedJobs = failedJobCounts(await backend.call(routes.jobs));
-    lostDocs += Object.values(failedJobs).reduce((a, b) => a + b, 0);
-    const names = await itemsNamed(backend, STUB_ITEM_NAME);
+    const itemIds = await itemIdsNamed(backend, STUB_ITEM_NAME);
+    let facts = 0;
+    let evidence = 0;
+    for (const itemId of itemIds) {
+      const shown = await backend.call(routes.exploreItem, { itemId, depth: 1 });
+      for (const fact of shown.center?.facts ?? []) {
+        facts++;
+        evidence += fact.evidenceCount;
+      }
+    }
+    const { lostDocs, duplicateItems } = tallyKnowledge({
+      docs: docs.length,
+      notSearchable,
+      evidence,
+      itemsNamed: itemIds.length,
+    });
     const leaseMs = options.mode === "test-build" ? (options.leaseMs ?? 0) : 120_000;
     return {
       leaseMs,
@@ -817,10 +936,12 @@ export async function runKillPhase(options: KillOptions): Promise<KillRecoverVal
       allJobsDoneMs,
       lostDocs,
       failedJobs,
-      duplicateItems: Math.max(0, names - 1),
+      duplicateItems,
+      knowledge: { facts, evidence, expectedEvidence: docs.length },
       note: "firstJobAfterRestartMs is the time from the restart to the first job to run (any job); allJobsDoneMs to every job finished, the interrupted job included, which the restarted backend reclaims at its start whatever its lease end",
     };
   } finally {
+    stopCleaning();
     if (backend) await stopBackend(backend);
     for (const pid of pids) killGroup(pid);
     rmSync(workDir, { recursive: true, force: true });
@@ -866,6 +987,10 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
   const pids: number[] = [];
   const ranAt = new Date().toISOString();
   let backend: Backend | undefined;
+  const stopCleaning = cleanOnSignal(() => {
+    for (const pid of pids) killGroup(pid);
+    rmSync(workDir, { recursive: true, force: true });
+  });
   try {
     backend = await startBackend({
       mode: "source-run",
@@ -920,7 +1045,8 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
     const last = points.at(-1) as { dataDirBytes: number; rawBytes: number };
 
     // idle: the jobs are done; sample from outside
-    const idle = posix ? await idlePhase(backend, options.idleSeconds) : undefined;
+    const openAtIdle = openJobs(await backend.call(routes.jobs));
+    const idle = posix ? await idlePhase(backend, options.idleSeconds, openAtIdle) : undefined;
 
     // soak: ingest and search again for the given time
     let soak: MeasurementResult["metrics"]["soak"];
@@ -1054,6 +1180,20 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
     ] as const) {
       if (metric.status === "not-measured") unverified.push({ item, reason: metric.reason });
     }
+    const heldBack = idleConditionLine(openAtIdle);
+    if (heldBack) unverified.push(heldBack);
+    unverified.push(
+      {
+        item: "LLM calls per document, maximum",
+        reason: "the call history carries no document number (D8)",
+      },
+      { item: "LLM calls per question", reason: "Q&A needs an answer double of its own (D8)" },
+      { item: "LLM calls per day", reason: "no day of use was run (D8)" },
+      {
+        item: "idle memory with the embedding model loaded",
+        reason: "the embedding model is not loaded in this run",
+      },
+    );
     const cpuModel = cpu[0]?.model ?? "unknown";
     const result: MeasurementResult = {
       schemaVersion: 1,
@@ -1100,6 +1240,7 @@ export async function runMeasurement(options: MeasurementOptions): Promise<Measu
     };
     return { result, trace: { pids, workDir, rawBytes } };
   } finally {
+    stopCleaning();
     if (backend) await stopBackend(backend);
     for (const pid of pids) killGroup(pid);
     rmSync(workDir, { recursive: true, force: true });
