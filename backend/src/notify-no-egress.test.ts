@@ -1,6 +1,7 @@
 // P02-C3c ① ③ (outside the app, R3): the three `notify` jobs succeed with a Broker that throws when called (no
 // Provider call), and the notification modules import no network, Connector or Broker module.
 import { registerConnectorInstance, registerJob, type SqlDriver } from "@pki/storage";
+import { dirTemplate } from "@pki/testkit";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,10 +9,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openCanonicalDb, productRunner } from "./composition.ts";
 import { seedInsight } from "./notify.test-support.ts";
 
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
+
 let dir: string;
 let db: SqlDriver;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-notify-egress-"));
+  seedDataDir(dir);
   db = openCanonicalDb(dir);
   registerConnectorInstance(db, "c1", "test-fixtures");
 });

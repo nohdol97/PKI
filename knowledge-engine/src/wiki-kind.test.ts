@@ -22,6 +22,7 @@ import {
   derivativeKindContract,
   seedLegacyTombstone,
   type DerivativeContractSubject,
+  memoryDbTemplate,
 } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { derivativeRegistry, propagateCanonical } from "./canonical-kinds.ts";
@@ -29,10 +30,11 @@ import { planWikiBuild } from "./wiki-build-job.ts";
 import { WIKI_PAGE_KIND } from "./wiki-kind.ts";
 import { AT, addFact, addItem, addSource, buildWiki, cite } from "./wiki.test-support.ts";
 
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
+
 let db: SqlDriver;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
 });
 afterEach(() => db.close());

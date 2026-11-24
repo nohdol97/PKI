@@ -11,7 +11,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { seedLegacyTombstone } from "@pki/testkit";
+import { dirTemplate, seedLegacyTombstone } from "@pki/testkit";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { CANONICAL_DB_FILE, openCanonicalDb, productImporter } from "./composition.ts";
 import { EXTRACT_JOB_KIND, tryLockInstance, type SyncOptions } from "./connectors.ts";
@@ -23,6 +23,8 @@ import {
   InstanceBusyError,
   MAX_IMPORT_INSTANCES,
 } from "./jsonl-import.ts";
+
+const seedDataDir = dirTemplate((path) => openCanonicalDb(path).close());
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 const fixture = (name: string) => readFileSync(resolve(FIXTURES, name), "utf8");
@@ -38,6 +40,7 @@ const importJsonl = (target: SqlDriver, text: string, options: Pick<SyncOptions,
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pki-import-"));
+  seedDataDir(join(dir, "data"));
   db = openCanonicalDb(join(dir, "data"));
 });
 

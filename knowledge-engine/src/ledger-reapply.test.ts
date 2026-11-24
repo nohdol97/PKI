@@ -405,6 +405,41 @@ describe("restore.reapply", () => {
     // one pass over the M plain sources, not one per line (base: at least M * N)
     expect(returned).toBeLessThan(3 * M);
   });
+
+  it("RFU-C5 neither adds nor removes a plain source, nor unhashes one, when lines are re-applied", () => {
+    for (let i = 0; i < 5; i++) {
+      db.run(
+        "INSERT INTO sources (connector_instance_id, namespace, external_id) VALUES (?, ?, ?)",
+        ["c1", "n", `plain-${i}`],
+      );
+    }
+    const old = backup(db);
+    for (const externalId of ["plain-2", "never-seen"]) {
+      canonicalTransaction(db, (tx) =>
+        applyTombstone(tx, {
+          identity: { connectorInstanceId: "c1", namespace: "n", externalId },
+          reason: "user-deleted",
+          lastRevision: null,
+          at: AT,
+        }),
+      );
+    }
+    restart(old);
+    const sourcesOf = (d: SqlDriver) =>
+      d.all("SELECT id, namespace, external_id, identity_hashed FROM sources");
+    const before = sourcesOf(old);
+
+    expect(reapplyLedger(old).applied).toBe(2);
+
+    const after = sourcesOf(old);
+    // every row there before is there after
+    const idsAfter = after.map((r) => r.id);
+    for (const r of before) expect(idsAfter).toContain(r.id);
+    // a row that is plain after was the same plain row before
+    for (const r of after.filter((x) => x.identity_hashed === 0)) {
+      expect(before).toContainEqual(r);
+    }
+  });
 });
 
 describe("under a scope policy (I04-T09)", () => {

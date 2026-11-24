@@ -14,6 +14,7 @@ import {
   ensureTombstoneSource,
   hashSourceIdentity,
   identityKey,
+  keyedTextHash,
   prepareCanonicalDb,
 } from "./identity.ts";
 import { migrate, schemaVersion } from "./migrations.ts";
@@ -68,6 +69,16 @@ describe("identity.key", () => {
     const other = openBetterSqlite3(":memory:");
     migrate(other);
     expect(other.all("SELECT key FROM identity_key")[0]?.key).not.toEqual(storedKey());
+  });
+
+  it("RFU-C4 hashes to fixed bytes under a fixed key (vectors computed outside the product code)", () => {
+    db.run("UPDATE identity_key SET key = ?", [Uint8Array.from({ length: 32 }, (_, i) => i)]);
+    expect(identityKey(db, "c1", "ns", "e1")).toBe(
+      "76e4cfdacc9154f321d6069c70716a254bc03d1683dcf9704dc9bcd441590f11",
+    );
+    expect(keyedTextHash(db, "domain", "text")).toBe(
+      "1f72b68891ee2a4b0824c1ee9da23e37b2c0fda09f59cd347d270675a4f35340",
+    );
   });
 
   it("hashes the length-prefixed (instance, namespace, external id) with HMAC-SHA-256", () => {

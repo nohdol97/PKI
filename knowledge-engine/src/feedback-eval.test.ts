@@ -16,6 +16,9 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rankInsight } from "./insight-ranking.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 interface FixtureInsight {
   key: string;
@@ -37,8 +40,7 @@ const fixture = JSON.parse(
 let db: SqlDriver;
 const ids = new Map<string, number>();
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   const attrs = {
     epistemic: "explicit",
     status: "verified",

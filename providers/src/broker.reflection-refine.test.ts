@@ -10,10 +10,12 @@ import {
 } from "@pki/storage";
 import type { SqlDriver } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createBroker, type CandidateItem } from "./broker.ts";
 import { createUserActionLedger } from "./user-actions.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 let db: SqlDriver;
 let provider: FakeProvider;
@@ -44,8 +46,7 @@ const broker = () =>
   });
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   consent = true;
   candidates.clear();

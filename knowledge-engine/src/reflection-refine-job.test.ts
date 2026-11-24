@@ -18,11 +18,13 @@ import {
   type StoredJob,
 } from "@pki/storage";
 import { openBetterSqlite3 } from "@pki/storage/adapters";
-import { FakeProvider } from "@pki/testkit";
+import { FakeProvider, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { knowledgeCandidates } from "./linking.ts";
 import { loadLintFixture, reflectNow, type LoadedLint } from "./lint.test-support.ts";
 import { createReflectionRefineHandler } from "./reflection-refine-job.ts";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const AT = new Date("2026-11-23T00:00:00.000Z");
 const QUOTE = "합성 자료 1";
@@ -33,8 +35,7 @@ let provider: FakeProvider;
 let attempts: { outcome: string }[];
 
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   loaded = loadLintFixture(db);
   reflectNow(db);
 });

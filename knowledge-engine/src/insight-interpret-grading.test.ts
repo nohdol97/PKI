@@ -31,6 +31,9 @@ import { recomputeInsights } from "./insight-code-rules.ts";
 import { purgeSource } from "./purge.test-support.ts";
 import { createInsightInterpretHandler } from "./insight-interpret.ts";
 import { knowledgeCandidates } from "./linking.ts";
+import { memoryDbTemplate } from "@pki/testkit";
+
+const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
 const allow = { combinable: () => true };
 const at = "2026-11-23T00:00:00.000Z";
@@ -44,8 +47,7 @@ const attrs: KnowledgeAttributes = {
 let db: SqlDriver;
 let item: number;
 beforeEach(() => {
-  db = openBetterSqlite3(":memory:");
-  migrate(db);
+  db = freshDb();
   registerConnectorInstance(db, "c1", "test-fixtures");
   item = insertItem(db, { type: "Project", name: "미리내 프로젝트", ...attrs });
 });

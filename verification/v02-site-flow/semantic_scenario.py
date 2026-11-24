@@ -37,10 +37,10 @@ def _state_maker_actor(lines):
     stateMaker, policyVerifiedLine): from the newest state line, an `undo` or `evidence-returned` line is read as the
     line before the line it reverted. `lines` are (seq, actor, action, reverts_seq), state-neutral lines excluded."""
     while lines:
-        _, actor, action, reverts = lines[-1]
+        seq, actor, action, reverts = lines[-1]
         if action not in ("undo", "evidence-returned"):
             return actor
-        if reverts is None:
+        if reverts is None or reverts >= seq:  # a hand-edited history: no line to point at, and the loop must end
             return None
         lines = [line for line in lines if line[0] < reverts]
     return None
