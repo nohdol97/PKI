@@ -3,7 +3,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ApiClient } from "./api.ts";
-import { InsightFeedback, RowFeedback, scopedNotice } from "./feedback.tsx";
+import type { FeedbackLine } from "@pki/contracts";
+import {
+  InsightFeedback,
+  ItemFeedback,
+  itemPreferenceLines,
+  RowFeedback,
+  scopedNotice,
+} from "./feedback.tsx";
 
 const api = (() => Promise.reject(new Error("not called"))) as unknown as ApiClient;
 const names = (html: string) =>
@@ -66,5 +73,46 @@ describe("scopedNotice", () => {
     expect(scopedNotice(held, 1)).toBe("거절");
     expect(scopedNotice(held, 2)).toBeUndefined();
     expect(scopedNotice(undefined, 1)).toBeUndefined();
+  });
+});
+
+// CUF-C3 (R2): the preference buttons of an item in 탐색 and the lines it keeps.
+describe("ItemFeedback (CUF-C3)", () => {
+  it("draws the four preference kinds the table allows on an item, named by the item", () => {
+    const html = renderToStaticMarkup(
+      <ItemFeedback api={api} item={{ id: 7, name: "미리내 프로젝트" }} memberIds={[]} />,
+    );
+    expect(names(html)).toEqual([
+      "유용함: 미리내 프로젝트",
+      "중요함: 미리내 프로젝트",
+      "관련 없음: 미리내 프로젝트",
+      "다시 알리지 않기: 미리내 프로젝트",
+    ]);
+    expect(html).toContain('role="group" aria-label="선호: 미리내 프로젝트"');
+  });
+
+  it("keeps only the preference lines of the item and its members", () => {
+    const line = (
+      id: number,
+      kind: FeedbackLine["kind"],
+      cls: FeedbackLine["class"],
+      tid: number,
+      tk: FeedbackLine["target"]["kind"] = "item",
+    ): FeedbackLine => ({
+      id,
+      kind,
+      class: cls,
+      target: { kind: tk, id: tid },
+      label: `대상 ${tid}`,
+      at: "2026-11-24T00:00:00Z",
+    });
+    const lines = [
+      line(1, "useful", "preference", 7),
+      line(2, "mute", "preference", 8),
+      line(3, "important", "preference", 9),
+      line(4, "confirmed", "correction", 7),
+      line(5, "useful", "preference", 7, "insight"),
+    ];
+    expect(itemPreferenceLines(lines, new Set([7, 8])).map((l) => l.id)).toEqual([1, 2]);
   });
 });

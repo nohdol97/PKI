@@ -4,6 +4,8 @@
 // inside <bdi> only (V02-R15). A correction (wrong info, wrong relation, confirmed) is offered on an evidence row
 // through `RowFeedback`, by the row's `targetId` (P5F-R6).
 import {
+  FEEDBACK_KINDS,
+  feedbackClass,
   INSIGHT_FEEDBACK_KINDS,
   rowFeedbackKinds,
   type FeedbackLine,
@@ -12,6 +14,7 @@ import {
 } from "@pki/contracts";
 import { useEffect, useState } from "react";
 import { ApiError, type ApiClient } from "./api.ts";
+import { createLatest } from "./latest.ts";
 import {
   FEEDBACK_EMPTY,
   FEEDBACK_GONE,
@@ -20,6 +23,11 @@ import {
   feedbackLabel,
   feedbackRefusalText,
   insightHint,
+  ITEM_FEEDBACK_HEADING,
+  ITEM_FEEDBACK_LINES,
+  ITEM_FEEDBACK_NONE,
+  itemFeedbackGroupName,
+  itemHint,
   undoButtonName,
 } from "./feedback-text.ts";
 
@@ -167,6 +175,97 @@ export function RecentFeedback({
       {lines && lines.length > 0 && (
         <ul className="plain-list" aria-label="최근 피드백 목록">
           {lines.map((line) => (
+            <li key={line.id}>
+              <strong>{feedbackLabel(line.kind)}</strong> <bdi>{line.label}</bdi>{" "}
+              <button
+                type="button"
+                aria-label={undoButtonName(line.label)}
+                onClick={() => void undo(line)}
+              >
+                취소
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+const ITEM_PREFERENCE_KINDS = FEEDBACK_KINDS.filter(
+  (kind) => feedbackClass(kind, "item") === "preference",
+);
+
+/** The live lines that are preferences on one of `ids` (the item and the members of its bundle). */
+export const itemPreferenceLines = (
+  lines: readonly FeedbackLine[],
+  ids: ReadonlySet<number>,
+): FeedbackLine[] =>
+  lines.filter((l) => l.class === "preference" && l.target.kind === "item" && ids.has(l.target.id));
+
+/**
+ * An item's preferences in 탐색 (CUF-R2): a button for each kind the table allows on an item, and below them the
+ * lines left on the item (and its bundle's members) with a cancel each. The caller mounts it with the item's id as
+ * its `key`, so a read or an answer that was out when another item was opened has nothing to land on.
+ */
+export function ItemFeedback({
+  api,
+  item,
+  memberIds,
+}: {
+  api: ApiClient;
+  item: { id: number; name: string };
+  memberIds: readonly number[];
+}) {
+  const [lines, setLines] = useState<FeedbackLine[]>();
+  const [notice, setNotice] = useState<string>();
+  const [version, setVersion] = useState(0);
+  const [latest] = useState(createLatest);
+  const { notice: recordNotice, press } = useRecord(api, { kind: "item", id: item.id }, () =>
+    setVersion((v) => v + 1),
+  );
+  useEffect(() => {
+    const current = latest.begin();
+    void api("feedbackList").then(
+      (r) => current() && setLines(r.feedback),
+      (error: unknown) => current() && setNotice(`불러오지 못했습니다: ${message(error)}`),
+    );
+  }, [api, latest, version]);
+  const undo = (line: FeedbackLine) =>
+    api("feedbackUndo", { id: line.id }).then(
+      (r) => {
+        setNotice(r.status === "refused" ? feedbackRefusalText(r.reason) : undefined);
+        setVersion((v) => v + 1);
+      },
+      (error: unknown) => {
+        setNotice(gone(error) ? FEEDBACK_GONE : `취소하지 못했습니다: ${message(error)}`);
+        if (gone(error)) setVersion((v) => v + 1);
+      },
+    );
+  const mine = lines && itemPreferenceLines(lines, new Set([item.id, ...memberIds]));
+  return (
+    <section aria-label={ITEM_FEEDBACK_HEADING}>
+      <h3>{ITEM_FEEDBACK_HEADING}</h3>
+      {recordNotice && <p role="alert">{recordNotice}</p>}
+      <div className="row-actions" role="group" aria-label={itemFeedbackGroupName(item.name)}>
+        {ITEM_PREFERENCE_KINDS.map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            title={itemHint(kind)}
+            aria-label={feedbackButtonName(kind, item.name)}
+            onClick={() => void press(kind)}
+          >
+            {feedbackLabel(kind)}
+          </button>
+        ))}
+      </div>
+      <h4>{ITEM_FEEDBACK_LINES}</h4>
+      {notice && <p role="alert">{notice}</p>}
+      {mine?.length === 0 && <p>{ITEM_FEEDBACK_NONE}</p>}
+      {mine && mine.length > 0 && (
+        <ul className="plain-list" aria-label="남긴 선호 목록">
+          {mine.map((line) => (
             <li key={line.id}>
               <strong>{feedbackLabel(line.kind)}</strong> <bdi>{line.label}</bdi>{" "}
               <button

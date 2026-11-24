@@ -526,10 +526,10 @@ describe("탐색 상세 칸의 key (UI01F-C1)", () => {
     return keys;
   };
 
-  it("gives the row detail and the curation different keys that both change with the centre item", () => {
+  it("gives the row detail, the preferences and the curation different keys that all change with the centre item", () => {
     const a = keysFor(5);
     const b = keysFor(7);
-    expect(a).toHaveLength(2);
+    expect(a).toHaveLength(3);
     expect(new Set(a).size).toBe(a.length);
     expect(a.filter((key) => b.includes(key))).toEqual([]);
   });
