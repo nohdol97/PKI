@@ -43,7 +43,9 @@ import {
   productEgress,
   productProviders,
   productUserDecisions,
+  withLocalFilesPorts,
 } from "./composition.ts";
+import type { LocalFilesPorts } from "./adapters/local-files-connector.ts";
 import { NO_SECRET_STORE } from "./secret-sources.ts";
 import type { HostSpawner } from "@pki/document-normalize";
 
@@ -55,6 +57,22 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
+});
+
+describe("withLocalFilesPorts (IGT-C2, #190 FU-4)", () => {
+  const health = async (make: () => ReturnType<(typeof connectorKinds)["local-files"]>) => {
+    const instance = make();
+    await instance.initialize({});
+    return instance.healthCheck();
+  };
+
+  it("the product list is unbound, a bound list is ok, and binding does not leak into the product list", async () => {
+    const unbound = { state: "unavailable", reason: "the local file ports are not bound" };
+    expect(await health(connectorKinds["local-files"])).toEqual(unbound);
+    const bound = withLocalFilesPorts(connectorKinds, () => ({}) as LocalFilesPorts);
+    expect(await health(bound["local-files"])).toEqual({ state: "ok" });
+    expect(await health(connectorKinds["local-files"])).toEqual(unbound);
+  });
 });
 
 describe("openCanonicalDb", () => {

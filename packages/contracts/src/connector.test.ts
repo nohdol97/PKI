@@ -13,6 +13,8 @@ import {
   ConnectorNotImplementedError,
   ConnectorRateLimitError,
   EvidenceViewSchema,
+  MAX_ATTACHMENT_MEDIA_TYPE_LENGTH,
+  MAX_ATTACHMENT_NAME_LENGTH,
   NativeLocatorSchema,
   rejectedPositionValid,
   SourceRecordSchema,
@@ -207,6 +209,36 @@ describe("attachments (I02C-C1)", () => {
       const attachments = [{ ...two[0], name }];
       expect(SourceRecordSchema.safeParse({ ...record, attachments }).success, name).toBe(false);
     }
+  });
+
+  it("IGT-C5: name and mediaType limits are inclusive, and a negative or fractional size or block index is refused (#263 F-3)", () => {
+    const ok = (attachment: object, blockAttachment?: number) =>
+      SourceRecordSchema.safeParse({
+        ...record,
+        attachments: [{ ...two[0], ...attachment }],
+        ...(blockAttachment === undefined
+          ? {}
+          : {
+              blocks: [
+                {
+                  start: 0,
+                  end: 1,
+                  locator: { format: "txt" as const, line: 1 },
+                  attachment: blockAttachment,
+                },
+              ],
+            }),
+      }).success;
+    const mediaType = (length: number) => `a/${"b".repeat(length - 2)}`;
+    expect(ok({ name: "a".repeat(MAX_ATTACHMENT_NAME_LENGTH) })).toBe(true);
+    expect(ok({ name: "a".repeat(MAX_ATTACHMENT_NAME_LENGTH + 1) })).toBe(false);
+    expect(ok({ mediaType: mediaType(MAX_ATTACHMENT_MEDIA_TYPE_LENGTH) })).toBe(true);
+    expect(ok({ mediaType: mediaType(MAX_ATTACHMENT_MEDIA_TYPE_LENGTH + 1) })).toBe(false);
+    expect(ok({ size: -1 })).toBe(false);
+    expect(ok({ size: 1.5 })).toBe(false);
+    expect(ok({}, 0)).toBe(true);
+    expect(ok({}, -1)).toBe(false);
+    expect(ok({}, 0.5)).toBe(false);
   });
 
   it("blocksValid refuses an attachment index at or past the list length (I02C-C2)", () => {

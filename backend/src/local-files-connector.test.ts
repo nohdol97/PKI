@@ -1,9 +1,9 @@
 // I02B-T03a: the `local-files` connector over its ports (one representative case per criterion; the
 // clauses not tested are listed in the PR as deferred). The index is the canonical one on an in-memory
 // database, the file system is a real temporary folder, the normalizer is the in-process one or a stand-in.
-import { blocksValid, SourceRecordSchema } from "@pki/contracts";
+import { blocksValid, SourceRecordSchema, type LocalIndexPort } from "@pki/contracts";
 import { normalizeDocument } from "@pki/document-normalize";
-import { createLocalFileIndex } from "@pki/storage";
+import { createLocalFileIndex, type LocalFileIndex } from "@pki/storage";
 import { createHash } from "node:crypto";
 import {
   mkdirSync,
@@ -48,6 +48,21 @@ describe("the canonical index satisfies the port (compile-time)", () => {
     const w = make();
     const port: typeof w.ports.index = createLocalFileIndex(w.db);
     expect(port.lastSeq()).toBe(0);
+  });
+
+  // IGT-C1: the port's methods are declared with method syntax, so the assignment above checks their
+  // arguments loosely; the write arguments must be the same types on both sides (#179 FU2).
+  it("the write arguments of the index and of the port are the same types", () => {
+    type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+    const update: Same<
+      Parameters<LocalFileIndex["updateEntry"]>,
+      Parameters<LocalIndexPort["updateEntry"]>
+    > = true;
+    const insert: Same<
+      Parameters<LocalFileIndex["insertEntry"]>,
+      Parameters<LocalIndexPort["insertEntry"]>
+    > = true;
+    expect([update, insert]).toEqual([true, true]);
   });
 });
 
