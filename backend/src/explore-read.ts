@@ -7,7 +7,6 @@ import { pageKindOfType, WIKI_PAGE_KIND_NAME } from "@pki/knowledge-engine";
 import {
   listExploreItems,
   listSemanticFacts,
-  listSemanticMembers,
   listSemanticRelations,
   readItem,
   readSourceVersionView,
@@ -114,9 +113,7 @@ export function createExploreReads(
       if (paths.status === "refused") return { status: "refused", reason: "depth-exceeded" };
       const walks = paths.paths ?? [];
       // the item's own rows and those of its shown members (S02-R13), each row judged by itself
-      const members = listSemanticMembers(db, itemId).filter((m) =>
-        gate.semanticShown("item", m.id),
-      );
+      const members = gate.semanticMembers(itemId).filter((m) => gate.semanticShown("item", m.id));
       const owners = [itemId, ...members.map((m) => m.id)];
       const facts = owners
         .flatMap((id) => listSemanticFacts(db, id).map((f) => ({ ...f, itemId: id })))

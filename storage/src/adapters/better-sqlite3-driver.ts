@@ -14,16 +14,25 @@ export const openBetterSqlite3: OpenSqlDriver = (path, options = {}) => {
     sleep = blockingSleep,
   } = options;
   const db = new Database(path);
-  db.pragma(`busy_timeout = ${busyTimeoutMs}`);
-  // V02-R12: a deleted row's bytes are overwritten, not left in free space. The
-  // setting lives on the connection, so it is set on every open, never in a migration.
-  db.pragma("secure_delete = ON");
-  // WAL would keep the purged pages in -wal after commit, and a file remembers WAL
-  // across opens, so the rollback journal (deleted at commit) is pinned (review B2).
-  db.pragma("journal_mode = DELETE");
-  // A row's history lines go with the row through ON DELETE CASCADE (S01-R6), and every other cascade
-  // of the schema too; the setting is per connection, so it is set here, not left to a compile default.
-  db.pragma("foreign_keys = ON");
+  try {
+    db.pragma(`busy_timeout = ${busyTimeoutMs}`);
+    // V02-R12: a deleted row's bytes are overwritten, not left in free space. The
+    // setting lives on the connection, so it is set on every open, never in a migration.
+    db.pragma("secure_delete = ON");
+    // WAL would keep the purged pages in -wal after commit, and a file remembers WAL
+    // across opens, so the rollback journal (deleted at commit) is pinned (review B2).
+    db.pragma("journal_mode = DELETE");
+    // A row's history lines go with the row through ON DELETE CASCADE (S01-R6), and every other cascade
+    // of the schema too; the setting is per connection, so it is set here, not left to a compile default.
+    db.pragma("foreign_keys = ON");
+  } catch (error) {
+    try {
+      db.close();
+    } catch {
+      // the pragma error is the one to report
+    }
+    throw error;
+  }
   const statements = new Map<string, Database.Statement>();
   const statement = (sql: string): Database.Statement => {
     const kept = statements.get(sql);

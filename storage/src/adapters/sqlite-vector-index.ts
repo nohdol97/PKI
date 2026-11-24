@@ -73,7 +73,7 @@ function isOtherFile(error: unknown): boolean {
   const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
   return (
     code === "SQLITE_NOTADB" ||
-    code === "SQLITE_CORRUPT" ||
+    (typeof code === "string" && code.startsWith("SQLITE_CORRUPT")) ||
     (code === "SQLITE_ERROR" && /no such (table|column)/.test(String(message)))
   );
 }

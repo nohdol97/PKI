@@ -50,6 +50,7 @@ import {
   defaultScopePolicy,
   type ScopePurpose,
   type SemanticItemView,
+  type SemanticMemberView,
   type SqlDriver,
   effectiveUntil,
   entityGroups,
@@ -124,6 +125,11 @@ export interface ReadGate {
   /** Whether the registry row is stored and shown: the one answer for a row that is absent, deleted or hidden. */
   semanticShown(kind: SemanticKind, id: number): boolean;
   /**
+   * The members of the item's group whose every merge line up to the item is shown (RVS-R2): a member behind a hidden
+   * line is left out whole. A member or item between is not judged here, so the caller applies its own item rule.
+   */
+  semanticMembers(itemId: number): SemanticMemberView[];
+  /**
    * The unmet data conditions of a refused approval as the caller sees them (S03 decision 36 ①): judged over the
    * rows shown; `check-missing` alone when only hidden rows block.
    */
@@ -181,12 +187,12 @@ export function createReadGate(
    * Reads `limit` rows and, while hidden ones left the answer short, a window fourfold wider, never
    * past the cap. A row is judged once per call: the wider read repeats the rows already judged.
    */
-  const filled = <T extends { id: number }>(
+  const scanned = <T extends { id: number }>(
     read: (n: number) => T[],
     kind: string,
     purpose: ScopePurpose,
     limit: number,
-  ): T[] => {
+  ): { rows: T[]; capped: boolean } => {
     const verdict = new Map<number, boolean>();
     const cap = Math.max(maxScan, 1);
     for (let n = Math.min(limit, cap); ; n = Math.min(n * 4, cap)) {
@@ -198,9 +204,18 @@ export function createReadGate(
       );
       for (const row of fresh) verdict.set(row.id, ids.has(String(row.id)));
       const kept = rows.filter((row) => verdict.get(row.id));
-      if (kept.length >= limit || rows.length < n || n >= cap) return kept.slice(0, limit);
+      if (kept.length >= limit || rows.length < n || n >= cap) {
+        // `capped`: the scan stopped at the cap with rows left in the store and the answer still short
+        return { rows: kept.slice(0, limit), capped: kept.length < limit && rows.length >= n };
+      }
     }
   };
+  const filled = <T extends { id: number }>(
+    read: (n: number) => T[],
+    kind: string,
+    purpose: ScopePurpose,
+    limit: number,
+  ): T[] => scanned(read, kind, purpose, limit).rows;
   /** The evidence ids of an Insight that are shown: the count the API gives is of these, never of the stored links. */
   const shownEvidence = (insightId: number) => {
     const ids = listInsightEvidenceIds(db, insightId);
@@ -243,11 +258,42 @@ export function createReadGate(
       }
       return [];
     });
+  const semanticMembers = (itemId: number): SemanticMemberView[] => {
+    const all = listSemanticMembers(db, itemId);
+    const lineShown = shown(
+      all.map((m) => ({ kind: "entity-merge", id: `merge:${m.mergeId}` })),
+      "display",
+    );
+    const itemsShown = shown(
+      [...new Set([itemId, ...all.map((m) => m.id)])].map((id) => ({
+        kind: "item",
+        id: String(id),
+      })),
+      "display",
+    );
+    const byId = new Map(all.map((m) => [m.id, m]));
+    // a line is judged where both of its items are shown; one that touches a hidden item stays as it was (RVS-D3)
+    const lineHidden = (m: SemanticMemberView) =>
+      itemsShown.has(String(m.id)) &&
+      itemsShown.has(String(m.mergedInto)) &&
+      !lineShown.has(`merge:${m.mergeId}`);
+    // only a hidden line on the member's own chain drops it; the chain ends at the root or at the centre (no entry)
+    return all.filter((m) => {
+      for (let at = m.id, n = 0; n <= 1000; n++) {
+        const line = byId.get(at);
+        if (!line) return true;
+        if (lineHidden(line)) return false;
+        at = line.mergedInto;
+      }
+      // the bound ran out with lines above still unjudged: left out, as `nearestShown` does
+      return false;
+    });
+  };
   const semanticItem = (item: SemanticItemView) => ({
     ...rowsOf(item),
-    members: nearestShown(
-      only(listSemanticMembers(db, item.id), "item", (m) => m.id, "display"),
-    ).map(rowsOf),
+    members: nearestShown(only(semanticMembers(item.id), "item", (m) => m.id, "display")).map(
+      rowsOf,
+    ),
   });
   const hasStatus = (view: ReturnType<typeof semanticItem>, status: string) =>
     [view, ...view.members].some(
@@ -340,16 +386,17 @@ export function createReadGate(
       return { items: page, next };
     },
     sourcesPage({ before }) {
-      const rows = filled(
+      const { rows, capped } = scanned(
         (n) => listSources(db, n, before),
         "source",
         "display",
         LIST_PAGE_SIZE + 1,
       );
       const page = rows.slice(0, LIST_PAGE_SIZE);
+      // stopped at the cap with sources left: `next` is the last source on the page, never a hidden one's number (RVS-R3)
       return {
         sources: page,
-        next: rows.length > LIST_PAGE_SIZE ? (page.at(-1)?.id ?? null) : null,
+        next: rows.length > LIST_PAGE_SIZE || capped ? (page.at(-1)?.id ?? null) : null,
       };
     },
     mergeCandidates() {
@@ -443,6 +490,7 @@ export function createReadGate(
       return traceChains(db, registry, start, "display");
     },
     graphPaths: (query) => relationPaths(db, registry, query, "display"),
+    semanticMembers,
     semanticShown: (kind, id) =>
       readSemanticState(db, { kind, id }) !== undefined && isShown(kind, id),
     dataUnmetShown: (factId) => {

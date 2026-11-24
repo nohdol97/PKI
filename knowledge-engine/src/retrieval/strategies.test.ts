@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { createProductRegistry } from "../canonical-kinds.ts";
 import { createJudge } from "../graph-read.ts";
 import { shownVersions } from "./notes.ts";
-import { keywordIds, temporalIds } from "./strategies.ts";
+import { conceptIds, conceptQueries, keywordIds, temporalIds } from "./strategies.ts";
 
 const registry = createProductRegistry({
   policy: { ...defaultScopePolicy, allows: (scopes) => !scopes.some((s) => s?.includes("denied")) },
@@ -115,5 +115,74 @@ describe("RSP-C1 temporalIds pages the dated facts and filters before the cut", 
       return ids.filter((id) => shown.has(id));
     };
     expect(temporalIds(reading, [], admit)).toEqual([versionId]);
+  });
+});
+
+describe("RVS-C1 the strategies widen a matched item only by the merge lines the search shows", () => {
+  /** Two items of different scopes merged; the policy hides a line that joins two scopes but shows each item. */
+  function merged(allows: (scopes: readonly (readonly string[] | null)[]) => boolean) {
+    const policy = { ...defaultScopePolicy, allows };
+    const reg = createProductRegistry({ policy });
+    const db: SqlDriver = openBetterSqlite3(":memory:");
+    migrate(db);
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    const attrs = {
+      epistemic: "explicit",
+      status: "verified",
+      observedAt: "2026-11-21T00:00:00Z",
+    } as const;
+    const side = (name: string, scope: string[]) => {
+      saveSourceRecord(db, "c1", {
+        externalId: name,
+        title: name,
+        body: `${name} 본문`,
+        accessScope: scope,
+      });
+      const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+      const id = insertItem(db, { type: "Project", name, ...attrs, validAt: null });
+      const fact = (kind: string, value: string, validAt: string | null) => {
+        const factId = saveFact(db, { itemId: id, kind, value, ...attrs, validAt }).id;
+        addEvidence(db, {
+          target: { factId },
+          sourceVersionId: versionId,
+          start: 0,
+          end: 2,
+          quote: name.slice(0, 2),
+        });
+      };
+      fact("memo", "날짜", "2026-06-01");
+      return { id, versionId, fact };
+    };
+    const rep = side("대표항목", ["a"]);
+    const member = side("구성원항목", ["b"]);
+    member.fact("alias.name", "구성원별칭", null);
+    db.run(
+      "INSERT INTO item_merges (member_id, representative_id, active, at) VALUES (?, ?, 1, ?)",
+      [member.id, rep.id, "2026-11-24T00:00:00.000Z"],
+    );
+    const reading = {
+      db,
+      registry: reg,
+      judge: createJudge(db, reg, "search", false),
+      question: "무관",
+    };
+    const admit = (ids: readonly number[]) => [...ids];
+    return { reading, rep, member, admit };
+  }
+
+  it("leaves out the member's dated source and verified form when the merge line is hidden", () => {
+    const hidden = merged((scopes) => scopes.length < 2);
+    expect(temporalIds(hidden.reading, [hidden.rep.id], hidden.admit)).toEqual([
+      hidden.rep.versionId,
+    ]);
+    expect(conceptQueries(hidden.reading, [hidden.rep.id])).not.toContain("구성원별칭");
+    expect(conceptIds(hidden.reading, [hidden.rep.id])).toEqual([hidden.rep.versionId]);
+  });
+
+  it("keeps them when the policy shows the line", () => {
+    const open = merged(() => true);
+    expect(temporalIds(open.reading, [open.rep.id], open.admit)).toContain(open.member.versionId);
+    expect(conceptQueries(open.reading, [open.rep.id])).toContain("구성원별칭");
+    expect(conceptIds(open.reading, [open.rep.id])).toContain(open.member.versionId);
   });
 });

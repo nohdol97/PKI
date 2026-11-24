@@ -18,10 +18,14 @@ export function shownItemsEvidencedBy(
     r.factId !== null ? ref("fact", r.factId) : ref("relation", r.relationId as number);
   const viaOk = judge.shown(rows.map(via));
   const itemOk = judge.shown(rows.map((r) => ref("item", r.itemId)));
-  const pairs = rows
-    .filter((r) => viaOk.has(key(via(r))) && itemOk.has(key(ref("item", r.itemId))))
-    .map((r) => ({ versionId: r.versionId, itemId: r.itemId }));
-  return pairs.filter(
-    (p, i) => pairs.findIndex((q) => q.versionId === p.versionId && q.itemId === p.itemId) === i,
-  );
+  const seen = new Set<string>();
+  const pairs: { versionId: number; itemId: number }[] = [];
+  for (const r of rows) {
+    if (!viaOk.has(key(via(r))) || !itemOk.has(key(ref("item", r.itemId)))) continue;
+    const pair = `${r.versionId}:${r.itemId}`;
+    if (seen.has(pair)) continue;
+    seen.add(pair);
+    pairs.push({ versionId: r.versionId, itemId: r.itemId });
+  }
+  return pairs;
 }
