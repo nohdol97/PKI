@@ -232,7 +232,7 @@ export function Neighbourhood({
   onEvidence: (row: Row, label: string) => void;
   onAct: (action: ReviewAction) => boolean | undefined;
   /** Read the centre item again after a curation action. */
-  onChanged: () => void;
+  onChanged: () => unknown;
   onWiki: (key: string) => void;
 }) {
   const { center } = read;

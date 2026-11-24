@@ -17,6 +17,7 @@ import {
   restoreResultText,
 } from "./backup-text.ts";
 import type { PickerBridge } from "./local-locations.tsx";
+import { PICK_BACKEND_UNAVAILABLE_TEXT } from "./local-locations-text.ts";
 
 type Status = RouteResponse<"backupStatus">;
 type Inspection = RouteResponse<"inspectRestore">;
@@ -31,6 +32,17 @@ const COUNT_LABELS: readonly [keyof Counts, string][] = [
   ["openJobs", "열린 작업"],
   ["tombstones", "삭제 기록"],
 ];
+
+/** The shell's folder picker, then `choose` with its ticket; the text to show when the pick could not be handed to the backend, nothing on a cancel (UIF-R2). */
+export async function pickBackupFolder(
+  pick: NonNullable<PickerBridge["pickLocation"]>,
+  choose: (request: { ticket: string }) => Promise<unknown>,
+): Promise<string | undefined> {
+  const { ticket, failed } = await pick("folder");
+  if (failed !== undefined) return PICK_BACKEND_UNAVAILABLE_TEXT;
+  if (ticket !== null) await choose({ ticket });
+  return undefined;
+}
 
 const SHOWN_RESULT_KEY = "pki.restore.shown";
 
@@ -215,8 +227,8 @@ export function BackupRestore({
             disabled={busy}
             onClick={() =>
               void (async () => {
-                const { ticket } = await pick("folder");
-                if (ticket !== null) await chooseFolder({ ticket });
+                const text = await pickBackupFolder(pick, chooseFolder);
+                if (text !== undefined) setRefusal(text);
               })()
             }
           >

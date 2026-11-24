@@ -56,14 +56,16 @@ export const attemptOnce = (
   work: () => Promise<void>,
 ) => busy(() => work().catch(onError));
 
-/** Unmerges, then reads again (HOC-R2): the busy guard around it is held until the reread is shown. */
+/** Unmerges, clears the old notice, then reads again (HOC-R2, UIF-R4): the busy guard around it is held until the reread's state is queued for rendering, and a notice written during the reread stays. */
 export async function unmergeAndReread(
   api: ApiClient,
   mergeId: number,
   keepDistinct: boolean,
   onChanged: () => unknown,
+  onUnmerged: () => void,
 ) {
   await unmerge(api, mergeId, keepDistinct);
+  onUnmerged();
   await onChanged();
 }
 
@@ -119,7 +121,7 @@ export function EntityCuration({
 }: {
   api: ApiClient;
   center: Center;
-  /** Read the centre item again; the promise, if given, ends when the reread is shown. */
+  /** Read the centre item again; the promise, if given, ends when the reread's state is queued for rendering. */
   onChanged: () => unknown;
   onOpen: (itemId: number) => void;
 }) {
@@ -215,10 +217,11 @@ export function EntityCuration({
                     type="button"
                     aria-label={`합치기 되돌리기: ${m.name}`}
                     onClick={() =>
-                      void attempt(async () => {
-                        await unmergeAndReread(api, m.mergeId as number, keepDistinct, onChanged);
-                        setNotice(undefined);
-                      })
+                      void attempt(() =>
+                        unmergeAndReread(api, m.mergeId as number, keepDistinct, onChanged, () =>
+                          setNotice(undefined),
+                        ),
+                      )
                     }
                   >
                     합치기 되돌리기

@@ -443,6 +443,29 @@ describe("늦은 응답 (X02F-C4)", () => {
     await flush();
     expect(calls.filter(([name]) => name === "exploreItem")).toHaveLength(3);
   });
+
+  it("UIF-C3: changed(id) returns the reread's promise, which ends only after show.read ran", async () => {
+    const held = later<unknown>();
+    let rereads = 0;
+    const { api } = fake({
+      exploreItem: (request) => {
+        const id = (request as { itemId: number }).itemId;
+        return ++rereads === 1 ? okRead(id) : held.promise;
+      },
+    });
+    const { seen, show } = recorder();
+    const session = createExploreSession(api, show);
+    session.open(1);
+    await flush();
+    const reads = seen.reads.length;
+    let ended = false;
+    const changed = Promise.resolve(session.changed(1)).then(() => (ended = true));
+    await flush();
+    expect(ended).toBe(false);
+    held.settle(okRead(1));
+    await changed;
+    expect(seen.reads.length).toBe(reads + 1);
+  });
 });
 
 // UI01-C8 (R5, R6, D11, D18): the found items are rows (one button each, named from the item's name then its type
