@@ -166,6 +166,21 @@ describe("gate.lost", () => {
     });
   });
 
+  it("P3D-C3: the user's rejection of the Dataset item a verified calculation is measured on disputes it in the same call, with the table version as the basis", () => {
+    const w = world();
+    expect(userDecisions.decide(db, { kind: "fact", id: w.calc }, "approve").status).toBe(
+      "applied",
+    );
+    expect(userDecisions.decide(db, { kind: "item", id: w.d }, "reject").status).toBe("applied");
+    expect(readFact(db, w.calc)?.status).toBe("disputed");
+    expect(history(w.calc).at(-1)).toMatchObject({
+      actor: "policy",
+      reason: "data-basis-lost",
+      basis_source_id: w.table.sourceId,
+      basis_version: w.table.version,
+    });
+  });
+
   it("G-C4: a stray candidate MEASURED_ON to an unbound Dataset beside a bound one does not make a verified calculation lose its table at a judgement point", () => {
     const w = world();
     expect(userDecisions.decide(db, { kind: "fact", id: w.calc }, "approve").status).toBe(

@@ -352,6 +352,25 @@ export function judgePathCut(
 }
 
 /**
+ * A user action applied to an item (P3D-R4, seat ②): the item itself and each subject of a live relation that
+ * points at it get the cut judgement with this item as the object. Only the id is taken; no type is read here.
+ */
+export function judgeItemAction(tx: SqlDriver, itemId: number, at?: string): void {
+  if (!anyTable(tx)) return;
+  const subjects = tx
+    .all(
+      `SELECT DISTINCT subject_id FROM relations
+        WHERE object_id = ? AND type IN ('MEASURED_ON', 'JOIN_LEFT', 'JOIN_RIGHT') AND ${LIVE}
+        ORDER BY subject_id`,
+      [itemId],
+    )
+    .map((r) => r.subject_id as number);
+  for (const subjectId of new Set([itemId, ...subjects])) {
+    judgePathCut(tx, { subjectId, objectId: itemId }, at);
+  }
+}
+
+/**
  * An extraction of `sourceId` wrote its result (seat ③): the relations still waiting on that source were not
  * stated again, so the facts of their subjects that still have no table lose their standing, on the current
  * version of the lowest table source bound to the waiting relation's object.
