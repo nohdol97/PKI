@@ -153,7 +153,7 @@ flowchart LR
 
 - 글꼴: `--font: "Pretendard Variable", "Malgun Gothic", sans-serif`
 - 글자: `--fs-meta: 13px`, `--fs-sub: 15px`, `--fs-body: 16px`, `--fs-lead: 17px`, `--fs-h3: 18px`, `--fs-h2: 20px`, `--fs-h1: 24px`, `--lh: 1.6`
-- 색: `--bg: #F6F5F2`, `--bg-side: #EFEDE8`, `--surface: #FFFFFF`, `--surface-quiet: #FBFAF8`, `--ink: #1B1F24`, `--ink-2: #454B54`, `--ink-meta: #5A616B`, `--line: #DAD7D0`, `--line-strong: #B9B5AC`, `--accent: #1E3A5F`, `--accent-quiet: #E9EEF4`, `--on-accent: #FFFFFF`, `--attn: #8F2F1F`, `--attn-bg: #FBEDE9`, `--warn: #7A5200`, `--warn-bg: #FBF3DD`, `--ok: #2B5B45`, `--none: #6B7079`, `--mark: #FBEFC2`
+- 색: `--bg: #F6F5F2`, `--bg-side: #EFEDE8`, `--surface: #FFFFFF`, `--surface-quiet: #FBFAF8`, `--ink: #1B1F24`, `--ink-2: #454B54`, `--ink-meta: #5A616B`, `--line: #DAD7D0`, `--line-strong: #8A867E`, `--accent: #1E3A5F`, `--accent-quiet: #E9EEF4`, `--on-accent: #FFFFFF`, `--attn: #8F2F1F`, `--attn-bg: #FBEDE9`, `--warn: #7A5200`, `--warn-bg: #FBF3DD`, `--ok: #2B5B45`, `--none: #6B7079`, `--mark: #FBEFC2`
 - 간격: `--sp-1: 4px`, `--sp-2: 8px`, `--sp-3: 12px`, `--sp-4: 16px`, `--sp-5: 24px`, `--sp-6: 32px`
 - 모서리·선·크기: `--radius: 8px`, `--radius-sm: 6px`, `--border: 1px solid var(--line)`, `--control-h: 36px`, `--nav-w: 208px`, `--list-w: clamp(320px, 32vw, 408px)`, `--status-h: 30px`, 추가 `--pane-head-h: 48px`, `--row-accent-w: 3px`
 
@@ -226,3 +226,4 @@ flowchart LR
 | 2026-11-24 | 개정: DOM 재구성 허용. 줄·머리줄·상세 구성·조치 줄·아이콘·배지·상태 줄을 목업대로(R3·R5~R8·R10 새로 씀, 옛 R6 "기존 계약 유지" 폐기), "목업에 있으나 뺀 것"과 "제품에만 있는 것의 자리" 표 추가, D3·D5·D6·D7 바꿈, D11~D14 추가, C4~C9 다시 씀(옛 C8 "단언을 고치지 않는다" → C9 "지킨 동작을 계속 지킨다") | 배경, 목표, 비목표, 요구사항, 설계 개요, 완료 기준 | 사용자가 1차 구현(`6e723cfd`)을 목업과 다르다는 이유로 반려하고 목업 구성을 그대로 쓰라고 지시 |
 | 2026-11-24 | 개정 3: 제외 파일 절을 없애고 질문·탐색·지식 검토·유형 정의를 범위에 넣음. 질문은 `ask.png`의 오른쪽 칸 구성(한 칸, 답과 인용 카드 분리, 아래에 붙은 입력 줄), 탐색은 목록 + 상세, 지식 검토·유형 정의는 넓은 한 칸. "목업에 있으나 뺀 것"에 `ask.png` 여섯 줄, D15~D19 추가, C8 넓힘, C10 추가 | 관련, 배경, 목표, 비목표, 화면 대응, 결정, 완료 기준, 스타일시트 | #268 묶음(PR #300)이 `origin/main`에 머지돼 그 파일들의 겹침이 풀림 |
 | 2026-11-24 | 리뷰 반영: D12에 읽기가 POST 경로이고 `afterWrite`가 위키 빌드 작업을 대기열에 넣을 수 있음을 적음, D14에 타임라인·다시 알림 줄의 조치 줄 동작을 적음, C8 문장과 미해결 질문 표기 바로잡음 | D12, D14, C8, 미해결 질문, 상태 | 독립 리뷰 A6·A5·B18 |
+| 2026-11-24 | `--line-strong` 값을 `#B9B5AC`에서 `#8A867E`로(목업 색에서 벗어남) | 색 토큰 줄 | UI01I-D2: 입력 칸 테두리·관계 그림 선 비텍스트 명암비 3:1 확보 |

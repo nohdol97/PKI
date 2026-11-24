@@ -93,11 +93,12 @@ function targetsOf(tx: SqlDriver, itemId: number, seen?: Seen): number[] {
   return objectsOf(tx, itemId, "MEASURED_ON", seen);
 }
 
-/** A Dataset bound to a table of a source that still has a version no tombstone covers. */
+/** A live Dataset item (P3D-R3) bound to a table of a source that still has a version no tombstone covers. */
 const bound = (tx: SqlDriver, datasetId: number, seen?: Seen): boolean =>
   tx
     .all(
-      `SELECT t.id FROM dataset_tables t WHERE t.item_id = ? AND EXISTS (
+      `SELECT t.id FROM dataset_tables t WHERE t.item_id = ?
+       AND EXISTS (SELECT 1 FROM items WHERE id = t.item_id AND ${LIVE}) AND EXISTS (
        SELECT 1 FROM source_versions v WHERE v.source_id = t.source_id
           AND NOT EXISTS (SELECT 1 FROM tombstones x WHERE x.source_id = v.source_id AND x.covers_version >= v.version))`,
       [datasetId],
@@ -351,6 +352,25 @@ export function judgePathCut(
 }
 
 /**
+ * A user action applied to an item (P3D-R4, seat ②): the item itself and each subject of a live relation that
+ * points at it get the cut judgement with this item as the object. Only the id is taken; no type is read here.
+ */
+export function judgeItemAction(tx: SqlDriver, itemId: number, at?: string): void {
+  if (!anyTable(tx)) return;
+  const subjects = tx
+    .all(
+      `SELECT DISTINCT subject_id FROM relations
+        WHERE object_id = ? AND type IN ('MEASURED_ON', 'JOIN_LEFT', 'JOIN_RIGHT') AND ${LIVE}
+        ORDER BY subject_id`,
+      [itemId],
+    )
+    .map((r) => r.subject_id as number);
+  for (const subjectId of new Set([itemId, ...subjects])) {
+    judgePathCut(tx, { subjectId, objectId: itemId }, at);
+  }
+}
+
+/**
  * An extraction of `sourceId` wrote its result (seat ③): the relations still waiting on that source were not
  * stated again, so the facts of their subjects that still have no table lose their standing, on the current
  * version of the lowest table source bound to the waiting relation's object.
@@ -373,5 +393,28 @@ export function judgeWaitingOn(tx: SqlDriver, sourceId: number, at?: string): vo
     if (!noDataset(tx, subject)) continue;
     const basis = tableBasis(tx, r.object_id as number);
     for (const fact of standingFacts(tx, subject)) lose(tx, fact.id, "data-basis-lost", basis, at);
+  }
+}
+
+/**
+ * An extraction wrote its result (seat ③): the live path relations it put evidence on, stated again or kept,
+ * get the cut judgement of seat ②, so a subject whose Dataset was rejected while its relation waited is judged
+ * now that the relation is live again (BGL-R1). Only the ids are taken; the types are read here.
+ */
+export function judgeStatedRelations(
+  tx: SqlDriver,
+  relationIds: readonly number[],
+  at?: string,
+): void {
+  if (!anyTable(tx) || relationIds.length === 0) return;
+  const rows = tx.all(
+    `SELECT subject_id, object_id FROM relations
+      WHERE id IN (SELECT value FROM json_each(?)) AND type IN ('MEASURED_ON', 'JOIN_LEFT', 'JOIN_RIGHT')
+        AND ${LIVE}
+      ORDER BY id`,
+    [JSON.stringify(relationIds)],
+  );
+  for (const r of rows) {
+    judgePathCut(tx, { subjectId: r.subject_id as number, objectId: r.object_id as number }, at);
   }
 }

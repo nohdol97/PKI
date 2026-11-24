@@ -148,6 +148,8 @@ describe("UI01-C2 contrast of the token values", () => {
     ["on-accent", "accent", 4.5],
     ["attn", "attn-bg", 4.5],
     ["warn", "warn-bg", 4.5],
+    ["line-strong", "surface", 3],
+    ["line-strong", "surface-quiet", 3],
   ])("--%s on --%s is at least %s:1", (fg, bg, min) => {
     expect(contrast(colour(fg), colour(bg))).toBeGreaterThanOrEqual(min);
   });

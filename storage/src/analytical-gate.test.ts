@@ -93,6 +93,19 @@ describe("gate.user-approve", () => {
     expect(listCheckLines(db, w.calc)).toHaveLength(2);
   });
 
+  it("P3D-C2: the user's rejection of the bound Dataset item leaves no table (no-dataset) and refuses the approval; undoing the rejection leaves no unmet condition", () => {
+    const w = world();
+    expect(userDecisions.decide(db, { kind: "item", id: w.d }, "reject").status).toBe("applied");
+    expect(dataChecksUnmet(db, { kind: "fact", id: w.calc })).toEqual(["no-dataset"]);
+    expect(userDecisions.decide(db, { kind: "fact", id: w.calc }, "approve")).toEqual({
+      status: "refused",
+      reason: "data-check-unmet",
+      unmet: ["no-dataset"],
+    });
+    expect(userDecisions.undo(db, { kind: "item", id: w.d }).status).toBe("applied");
+    expect(dataChecksUnmet(db, { kind: "fact", id: w.calc })).toEqual([]);
+  });
+
   it("G-C2: a direct add and a value fix of a kind with checks make a candidate hypothesis the user wrote; a kind with none stays verified", () => {
     const w = world("verified");
     const added = userDecisions.add(db, {
@@ -147,6 +160,21 @@ describe("gate.lost", () => {
       action: "dispute",
       from_status: "verified",
       to_status: "disputed",
+      reason: "data-basis-lost",
+      basis_source_id: w.table.sourceId,
+      basis_version: w.table.version,
+    });
+  });
+
+  it("P3D-C3: the user's rejection of the Dataset item a verified calculation is measured on disputes it in the same call, with the table version as the basis", () => {
+    const w = world();
+    expect(userDecisions.decide(db, { kind: "fact", id: w.calc }, "approve").status).toBe(
+      "applied",
+    );
+    expect(userDecisions.decide(db, { kind: "item", id: w.d }, "reject").status).toBe("applied");
+    expect(readFact(db, w.calc)?.status).toBe("disputed");
+    expect(history(w.calc).at(-1)).toMatchObject({
+      actor: "policy",
       reason: "data-basis-lost",
       basis_source_id: w.table.sourceId,
       basis_version: w.table.version,

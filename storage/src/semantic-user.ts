@@ -18,6 +18,7 @@ import { insertAssertionLink } from "./assertion-links.ts";
 import { eraseChecksReading, queueChecksAround } from "./analytical-check-lines.ts";
 import {
   dataChecksUnmet,
+  judgeItemAction,
   judgePathCut,
   needsDataChecks,
   type DataCheckUnmet,
@@ -364,6 +365,7 @@ const buildUserDecisions = (entities: EntityDecisions): UserDecisions => ({
     const ends = pathEnds(tx, ref);
     const outcome = applyTransition(tx, ref, "user", TARGET[action], { at });
     if (outcome.status === "applied" && ends) judgePathCut(tx, ends, at);
+    if (outcome.status === "applied" && ref.kind === "item") judgeItemAction(tx, ref.id, at);
     return outcome;
   },
 
@@ -427,6 +429,7 @@ const buildUserDecisions = (entities: EntityDecisions): UserDecisions => ({
     if ((result.status === "applied" || result.status === "removed") && ends) {
       judgePathCut(tx, ends, at);
     }
+    if (result.status === "applied" && ref.kind === "item") judgeItemAction(tx, ref.id, at);
     return result;
   },
 });

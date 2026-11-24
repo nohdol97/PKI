@@ -77,6 +77,18 @@ const SCREENS = {
 } as const;
 type Screen = keyof typeof SCREENS;
 
+/** The unread count of the nav: the digit is what is seen, the hidden words say what it counts. */
+export function NavBadge({ unread }: { unread: number }) {
+  if (unread <= 0) return null;
+  return (
+    <span className="badge">
+      <span className="sr-only">읽지 않음 </span>
+      {unread}
+      <span className="sr-only">건</span>
+    </span>
+  );
+}
+
 export function App({ api }: { api: ApiClient }) {
   const [screen, setScreen] = useState<Screen>("home");
   // P02-R16: one poll of the change numbers; a screen that gets `key` reads its data again when it changes
@@ -118,9 +130,7 @@ export function App({ api }: { api: ApiClient }) {
               >
                 <Icon name={id} />
                 {SCREENS[id]}
-                {id === "notifications" && changes.unread > 0 && (
-                  <span className="badge">{changes.unread}</span>
-                )}
+                {id === "notifications" && <NavBadge unread={changes.unread} />}
               </button>
             ))}
           </nav>

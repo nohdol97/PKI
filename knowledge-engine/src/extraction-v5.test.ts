@@ -185,6 +185,26 @@ describe("extract.analytical: a document's analytical rows (X-C2)", () => {
     ]);
     expect(drops(job)).toEqual({ quotes: 1, other: 1 });
   });
+
+  it("P3D-C1: a column name inside another word is no explicit basis (hypothesis), one at a word boundary is, and nothing is dropped", async () => {
+    const valid = "valid orders only";
+    const orderId = "order_id를 센다";
+    const job = await extract(
+      answer({
+        items: [item("a", "Metric", "유효 주문"), item("b", "Metric", "주문 수")],
+        facts: [
+          fact("a", "metric.calculation", '{"aggregation":"count","column":"id"}', valid),
+          fact("b", "metric.calculation", '{"aggregation":"count","column":"order_id"}', orderId),
+        ],
+      }),
+      { body: `${valid}.\n${orderId}.` },
+    );
+    expect(facts().map((f) => [f.item, f.status, f.epistemic])).toEqual([
+      ["유효 주문", "candidate", "hypothesis"],
+      ["주문 수", "candidate", "explicit"],
+    ]);
+    expect(drops(job)).toEqual({ quotes: 0, other: 0 });
+  });
 });
 
 describe("extract.analytical: a table source's own extraction (X-C3)", () => {

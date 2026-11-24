@@ -85,6 +85,14 @@ async function recordingPreload(page: Page, setOk: boolean) {
 const preloadCalls = (page: Page) =>
   page.evaluate(() => (window as unknown as { pkiCalls: unknown[] }).pkiCalls);
 
+/** The credential note of the `mail-1` row: the page's other status (the source list loading) lies outside the table. */
+function credentialStatus(page: Page) {
+  return page
+    .getByRole("row")
+    .filter({ has: page.getByRole("rowheader", { name: "mail-1", exact: true }) })
+    .getByRole("status");
+}
+
 async function open(page: Page, backend: Backend) {
   const dir = mkdtempSync(join(tmpdir(), "pki-e2e-credential-"));
   const port = await freePort();
@@ -155,7 +163,7 @@ test("a value typed into the slot goes to the preload under the listed name, the
     await field.press("Enter"); // the keyboard submits like the button
     await expect(field).toHaveValue("");
     await expect(field).toBeFocused(); // the place is kept for the keyboard (F4)
-    await expect(page.getByRole("status")).toContainText("반영했습니다.");
+    await expect(credentialStatus(page)).toContainText("반영했습니다.");
     expect(await preloadCalls(page)).toEqual([["set", NAME, CANARY.length]]);
     expect(backend.notices).toHaveLength(1);
     expect(backend.notices[0]?.url).toContain("/api/connectors/credentials-changed");
@@ -194,7 +202,7 @@ test("a store the shell refuses is said so and gives no notice, and the field st
     const field = page.getByLabel("mail-1 token 값");
     await field.fill(CANARY);
     await page.getByRole("button", { name: "mail-1 token 저장" }).click();
-    await expect(page.getByRole("status")).toContainText("자격 증명을 저장할 수 없습니다");
+    await expect(credentialStatus(page)).toContainText("자격 증명을 저장할 수 없습니다");
     await expect(field).toHaveValue("");
     expect(backend.notices).toEqual([]);
     expect(await page.content()).not.toContain(CANARY);
@@ -212,7 +220,7 @@ test("a value the screen cannot take whole is refused in words, never stored cut
   try {
     await show();
     const field = page.getByLabel("mail-1 token 값");
-    const status = page.getByRole("status");
+    const status = credentialStatus(page);
     const refused = "한 줄 값만 넣을 수 있습니다";
 
     // typed or inserted text with a line break
@@ -268,7 +276,7 @@ test("a queued notice says it will be reflected soon and reads the list again af
     const before = backend.lists;
     await page.getByLabel("mail-1 token 값").fill(CANARY);
     await page.getByRole("button", { name: "mail-1 token 저장" }).click();
-    await expect(page.getByRole("status")).toContainText("곧 반영됩니다.");
+    await expect(credentialStatus(page)).toContainText("곧 반영됩니다.");
     await expect.poll(() => backend.lists).toBe(before + 1); // at once
     await page.clock.fastForward(CREDENTIAL_RETRY_MIN_MS);
     await expect.poll(() => backend.lists).toBe(before + 2); // and after the gap
@@ -276,7 +284,7 @@ test("a queued notice says it will be reflected soon and reads the list again af
     backend.rebuild = "skipped";
     await page.getByLabel("mail-1 token 값").fill(CANARY);
     await page.getByRole("button", { name: "mail-1 token 저장" }).click();
-    await expect(page.getByRole("status")).toContainText("앱을 다시 시작해야 반영됩니다.");
+    await expect(credentialStatus(page)).toContainText("앱을 다시 시작해야 반영됩니다.");
   } finally {
     await stop();
   }
@@ -330,7 +338,7 @@ for (const way of ["drop", "beforeinput-drop"] as const) {
     const { show, stop } = await open(page, backend);
     try {
       await show();
-      const status = page.getByRole("status");
+      const status = credentialStatus(page);
       expect(await insert(page, way, "no-break-here"), "without a break").toBe(true);
       await expect(status).toHaveCount(0);
       expect(await insert(page, way, BROKEN), "with a break").toBe(false);
@@ -355,11 +363,11 @@ for (const way of WAYS.filter((w) => w !== "beforeinput-drop")) {
       const field = page.getByLabel("mail-1 token 값");
       await field.fill("abc");
       await insert(page, way, BROKEN);
-      await expect(page.getByRole("status")).toContainText(REFUSED);
+      await expect(credentialStatus(page)).toContainText(REFUSED);
       await expect(field).toHaveValue("abc");
       await expect(page.getByRole("button", { name: "mail-1 token 저장" })).toBeEnabled();
       await field.press("Enter");
-      await expect(page.getByRole("status")).toContainText("반영했습니다.");
+      await expect(credentialStatus(page)).toContainText("반영했습니다.");
       expect(await preloadCalls(page)).toEqual([["set", NAME, 3]]);
     } finally {
       await stop();
@@ -382,7 +390,7 @@ test("I06F-C5 the focus is not taken back from where the user moved while the no
     const other = page.getByRole("button", { name: "plain 동기화" });
     await other.focus();
     release();
-    await expect(page.getByRole("status")).toContainText("반영했습니다.");
+    await expect(credentialStatus(page)).toContainText("반영했습니다.");
     await page.waitForTimeout(150); // the refocus, if any, runs just after the words appear
     await expect(other).toBeFocused();
   } finally {
@@ -414,12 +422,12 @@ test("I06F-C6 KNOWN LIMIT: a value put in by code arrives with its line breaks a
     expect(seen).not.toMatch(/[\r\n]/); // 1
     expect(seen).toBe("abcdef"); // measured in Chromium: the breaks are removed, not turned into spaces
     await field.press("Enter");
-    await expect(page.getByRole("status")).toContainText("반영했습니다."); // 2
+    await expect(credentialStatus(page)).toContainText("반영했습니다."); // 2
     expect(await preloadCalls(page)).toEqual([["set", NAME, seen.length]]);
 
     await put("z".repeat(8193));
     await field.press("Enter");
-    await expect(page.getByRole("status")).toContainText("8192"); // 3
+    await expect(credentialStatus(page)).toContainText("8192"); // 3
     expect(await preloadCalls(page)).toEqual([["set", NAME, seen.length]]);
   } finally {
     await stop();

@@ -4,13 +4,16 @@
 // remove the active/changed check and ① goes red; remove the scope check and ② goes red.
 import { createProductRegistry, derivativeRegistry } from "@pki/knowledge-engine";
 import {
+  addEvidence,
   defaultScopePolicy,
   listNotifications,
   recordFeedback,
   userDecisions,
   migrate,
   registerConnectorInstance,
+  saveFact,
   saveInsight,
+  saveSourceRecord,
   type ScopePolicy,
   type SqlDriver,
 } from "@pki/storage";
@@ -18,7 +21,7 @@ import { openBetterSqlite3 } from "@pki/storage/adapters";
 import { seedLegacyTombstone, memoryDbTemplate } from "@pki/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fakeChannel, NOW, notifyNow, seedInsight } from "./notify.test-support.ts";
-import { createNotifyOutbox } from "./notify-outbox.ts";
+import { createNotifyOutbox, unreadCount } from "./notify-outbox.ts";
 
 const freshDb = memoryDbTemplate(openBetterSqlite3, migrate);
 
@@ -167,5 +170,75 @@ describe("notify.gate: the user's feedback is read before every delivery (P03 ha
     notifyNow(db, "scan", "2026-11-23T14:00:00.000Z");
 
     expect(states()).toEqual(["digest/cancelled"]);
+  });
+});
+
+describe("notify.gate ③: an Insight whose end item holds a fact from a refused scope (NTF-R1, NTF-C1)", () => {
+  const refusing: ScopePolicy = {
+    ...defaultScopePolicy,
+    allows: (scopes) => !scopes.some((s) => s?.includes("secret")),
+  };
+
+  /** The Insight's own lineage stays on an allowed source; its X item gains a fact quoted from a refused one. */
+  function hideEndItem(xItemId: number) {
+    const saved = saveSourceRecord(db, "c1", {
+      externalId: "secret",
+      title: "제목 secret",
+      body: "합성 비밀",
+      accessScope: ["secret"],
+    });
+    if (saved.status !== "created") throw new Error(saved.status);
+    const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    const fact = saveFact(db, {
+      itemId: xItemId,
+      kind: "target_date",
+      value: "2026-12-10",
+      epistemic: "explicit",
+      status: "candidate",
+      validAt: null,
+      observedAt: "2026-11-21T00:00:00Z",
+    });
+    addEvidence(db, {
+      target: { factId: fact.id },
+      sourceVersionId: versionId,
+      start: 0,
+      end: 2,
+      quote: "합성",
+    });
+  }
+
+  it("withdraws the line at the scan, sends nothing and counts nothing unread", () => {
+    const { key } = seedInsight(db, { name: "하나" });
+    hideEndItem(key.xItemId);
+    const registry = createProductRegistry({ policy: refusing });
+
+    notifyNow(db, "scan", AT, { registry });
+
+    expect(states()).toEqual(["withdrawn/none"]);
+    expect(flush(registry)).toEqual([]);
+    expect(unreadCount(db, registry)).toBe(0);
+  });
+
+  it("stops counting a sent line once its end item is hidden, and sends nothing", () => {
+    const { key } = seedInsight(db, { name: "하나" });
+    const registry = createProductRegistry({ policy: refusing });
+    notifyNow(db, "scan", AT, { registry });
+    expect(states()).toEqual(["sent/queued"]);
+    expect(unreadCount(db, registry)).toBe(1);
+
+    hideEndItem(key.xItemId);
+
+    expect(unreadCount(db, registry)).toBe(0);
+    expect(flush(registry)).toEqual([]);
+  });
+
+  it("still sends an Insight whose end items are all shown", () => {
+    seedInsight(db, { name: "하나" });
+    const registry = createProductRegistry({ policy: refusing });
+
+    notifyNow(db, "scan", AT, { registry });
+
+    expect(states()).toEqual(["sent/queued"]);
+    expect(flush(registry)).toHaveLength(1);
   });
 });
