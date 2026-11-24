@@ -125,6 +125,42 @@ describe("removeUserData", () => {
     expect(existsSync(data)).toBe(false);
   });
 
+  it("SLF-C1: a throwing disableAutostart removes nothing and answers 1; a throwing close() does not stop the removal", () => {
+    withDatabase();
+    const failing = removeUserData({
+      choice: "delete",
+      dir: () => data,
+      lock: lockDataDirectory,
+      disableAutostart: () => {
+        throw new Error("registry denied");
+      },
+    });
+    expect(failing.code).toBe(1);
+    expect(failing.line).toContain("nothing was removed");
+    expect(readFileSync(join(data, "pki.sqlite"), "utf8")).toBe("db");
+    const closing = removeUserData({
+      choice: "delete",
+      dir: () => data,
+      lock: () => ({
+        close: () => {
+          throw new Error("already closed");
+        },
+      }),
+      disableAutostart: vi.fn(),
+    });
+    expect(closing.code).toBe(0);
+    expect(existsSync(data)).toBe(false);
+  });
+
+  it("SLF-C2: a folder named like the lock file is removed with the rest, code 0", () => {
+    withDatabase();
+    mkdirSync(join(data, "instance.lock.d"));
+    writeFileSync(join(data, "instance.lock.d", "x"), "x");
+    const { result } = run("delete");
+    expect(result.code).toBe(0);
+    expect(existsSync(data)).toBe(false);
+  });
+
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     "LKH-C2: a read-only instance.lock is not a lock: delete refuses and removes nothing, code 1",
     () => {

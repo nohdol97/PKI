@@ -4,6 +4,8 @@
 // for, freed by the OS when the holder dies, even by SIGKILL. A start that obtains it knows no
 // live backend runs on the folder, so what is left `running` is a dead backend's and is
 // reclaimed at once instead of at its lease end. A start that does not obtain it changes nothing.
+// Like the shell's, the lock is only real after a write attempt (a read-only file is not a lock,
+// LKH-R2) and the connection is held strongly inside the module until close() (LKH-R3).
 import { ensureDataDirectory, reclaimLeases, type SqlDriver } from "@pki/storage";
 import { errorClass, log } from "@pki/providers";
 import { DatabaseSync } from "node:sqlite";

@@ -266,16 +266,26 @@ function takeDataLock(): boolean {
 /** The installer's call (H02A-R6): decide about the data folder, print, exit. No window, no backend. */
 function uninstallData(): void {
   // the OS registration is switched off once Electron is ready; no window is made either way
-  void app.whenReady().then(() => {
-    const { code, line } = removeUserData({
-      choice: app.commandLine.getSwitchValue(UNINSTALL_SWITCH),
-      dir: resolveDataPath,
-      lock: lockDataDirectory,
-      disableAutostart: () => app.setLoginItemSettings({ openAtLogin: false }),
+  void app
+    .whenReady()
+    .then(() => {
+      const { code, line } = removeUserData({
+        choice: app.commandLine.getSwitchValue(UNINSTALL_SWITCH),
+        dir: resolveDataPath,
+        lock: lockDataDirectory,
+        // a development run never registered anything (H02A-D8)
+        disableAutostart: () => {
+          if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: false });
+        },
+      });
+      if (line) console.error(line);
+      app.exit(code);
+    })
+    .catch((error: unknown) => {
+      // the installer waits on this process: any failure still ends it with a line and code 1 (SLF-R1)
+      console.error(`PKI: the uninstall call failed (${(error as Error).message})`);
+      app.exit(1);
     });
-    if (line) console.error(line);
-    app.exit(code);
-  });
 }
 
 const debugging =

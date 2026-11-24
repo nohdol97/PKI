@@ -7,7 +7,8 @@ export interface AutostartItem {
   type: "checkbox";
   checked: boolean;
   enabled: boolean;
-  click: () => void;
+  /** Electron passes the clicked item, whose check it has already flipped. */
+  click: (item?: { checked: boolean }) => void;
 }
 
 export function autostartMenuItem(input: {
@@ -20,8 +21,15 @@ export function autostartMenuItem(input: {
     type: "checkbox",
     checked: input.packaged && input.get(),
     enabled: input.packaged,
-    click: () => {
-      if (input.packaged) input.set(!input.get());
+    click: (item) => {
+      if (!input.packaged) return;
+      try {
+        input.set(!input.get());
+      } catch (error) {
+        console.error(`PKI: could not change start at login (${(error as Error).message})`);
+      }
+      // the display is the OS state, whether or not the write took (H02A-R10)
+      if (item) item.checked = input.get();
     },
   };
 }

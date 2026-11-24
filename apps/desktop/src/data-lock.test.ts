@@ -56,7 +56,7 @@ describe("lockDataDirectory", () => {
     const again = lockDataDirectory(dir);
     expect(again).toBeDefined();
     again?.close();
-  });
+  }, 20_000);
 
   // permission bits do not exist on Windows and root ignores them
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(

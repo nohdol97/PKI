@@ -129,6 +129,12 @@ export async function runUpdate(input: {
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 function failed(file: string | undefined, reason: string): UpdateResult {
-  if (file !== undefined) rmSync(file, { force: true });
+  if (file !== undefined) {
+    try {
+      rmSync(file, { force: true });
+    } catch {
+      // what cannot be deleted (a folder at that path) stays; the first reason is the result (SLF-D5)
+    }
+  }
   return { ok: false, reason };
 }
