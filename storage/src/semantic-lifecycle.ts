@@ -16,6 +16,8 @@
 // A history line holds numbers and codes only, never a name, value or quote (R6).
 import { analyticalRowChanged } from "./analytical-check-lines.ts";
 import { listEvidence, type EpistemicType, type KnowledgeStatus } from "./knowledge.ts";
+import { keyedRead, preloadReads } from "./read-memo.ts";
+import { USER_AUTHORED_READS } from "./row-lineage.ts";
 import type { SqlDriver, SqlRow } from "./sql-driver.ts";
 
 export type Actor = "user" | "extraction" | "propagation" | "policy";
@@ -146,10 +148,35 @@ export interface Row {
   epistemic: EpistemicType;
 }
 
+/** `readRow` and `linesOf` by row kind, each with its twin over many rows (ARB-R1). */
+export const ROW_READS = {
+  item: keyedRead({ columns: "status, epistemic", from: TABLES.item.table, key: "id" }),
+  fact: keyedRead({ columns: "status, epistemic", from: TABLES.fact.table, key: "id" }),
+  relation: keyedRead({ columns: "status, epistemic", from: TABLES.relation.table, key: "id" }),
+};
+
+const lineRead = (kind: EntryKind) =>
+  keyedRead({
+    columns:
+      "seq, actor, action, reason, from_status, from_epistemic, to_status, batch, reverts_seq",
+    from: TABLES[kind].history,
+    key: TABLES[kind].fk,
+    order: "seq",
+  });
+export const LINE_READS = {
+  item: lineRead("item"),
+  fact: lineRead("fact"),
+  relation: lineRead("relation"),
+};
+
+/** Primes `readRow`, `userAuthored` and `linesOf` for these rows of one kind (a no-op unless `tx` is a read memo). */
+export function preloadRows(tx: SqlDriver, kind: EntryKind, ids: readonly number[]): void {
+  for (const reads of [USER_AUTHORED_READS, ROW_READS, LINE_READS])
+    preloadReads(tx, reads[kind], ids);
+}
+
 export function readRow(tx: SqlDriver, ref: EntryRef): Row | undefined {
-  const row = tx.all(`SELECT status, epistemic FROM ${TABLES[ref.kind].table} WHERE id = ?`, [
-    ref.id,
-  ])[0];
+  const row = tx.all(ROW_READS[ref.kind].one, [ref.id])[0];
   return row
     ? { status: row.status as KnowledgeStatus, epistemic: row.epistemic as EpistemicType }
     : undefined;
@@ -252,8 +279,7 @@ export const isUserDecided = (tx: SqlDriver, ref: EntryRef): boolean =>
   standingUserActions(linesOf(tx, ref)).length > 0;
 
 const userAuthored = (tx: SqlDriver, ref: EntryRef): boolean =>
-  tx.all(`SELECT user_authored FROM ${TABLES[ref.kind].table} WHERE id = ?`, [ref.id])[0]
-    ?.user_authored === 1;
+  tx.all(USER_AUTHORED_READS[ref.kind].one, [ref.id])[0]?.user_authored === 1;
 
 /**
  * The refusal an automated call on a row gets when the user decided it (S01-R12), undefined when it
@@ -421,24 +447,17 @@ export const stateLinesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] =>
   linesOf(tx, ref).filter((l) => !STATE_NEUTRAL_ACTIONS.has(l.action));
 
 export const linesOf = (tx: SqlDriver, ref: EntryRef): StoredLine[] => {
-  const { history, fk } = TABLES[ref.kind];
-  return tx
-    .all(
-      `SELECT seq, actor, action, reason, from_status, from_epistemic, to_status, batch, reverts_seq
-       FROM ${history} WHERE ${fk} = ? ORDER BY seq`,
-      [ref.id],
-    )
-    .map((r: SqlRow) => ({
-      seq: r.seq as number,
-      actor: r.actor as Actor,
-      action: r.action as string,
-      reason: r.reason as string | null,
-      fromStatus: r.from_status as KnowledgeStatus | null,
-      fromEpistemic: r.from_epistemic as EpistemicType | null,
-      toStatus: r.to_status as KnowledgeStatus,
-      batch: r.batch as number | null,
-      revertsSeq: r.reverts_seq as number | null,
-    }));
+  return tx.all(LINE_READS[ref.kind].one, [ref.id]).map((r: SqlRow) => ({
+    seq: r.seq as number,
+    actor: r.actor as Actor,
+    action: r.action as string,
+    reason: r.reason as string | null,
+    fromStatus: r.from_status as KnowledgeStatus | null,
+    fromEpistemic: r.from_epistemic as EpistemicType | null,
+    toStatus: r.to_status as KnowledgeStatus,
+    batch: r.batch as number | null,
+    revertsSeq: r.reverts_seq as number | null,
+  }));
 };
 
 /**

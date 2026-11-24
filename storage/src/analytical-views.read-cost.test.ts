@@ -107,4 +107,15 @@ describe("analytical read cost", () => {
     const eight = measure(8);
     expect(eight.queries).toBeLessThanOrEqual(four.queries * 2 + 20);
   });
+
+  it("ARB-C1: per-row reads are batched, so the query count is at most 45 per triple and 60 over", () => {
+    const four = measure(4);
+    expect(four.queries).toBeLessThanOrEqual(45 * 4 + 60);
+    db.close();
+    db = openBetterSqlite3(":memory:");
+    migrate(db);
+    registerConnectorInstance(db, "c1", "test-fixtures");
+    const eight = measure(8);
+    expect(eight.queries).toBeLessThanOrEqual(45 * 8 + 60);
+  });
 });

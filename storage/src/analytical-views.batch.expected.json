@@ -1,0 +1,1103 @@
+{
+  "analytical": {
+    "datasets": [
+      {
+        "itemId": 2,
+        "name": "orders-doc",
+        "status": "candidate",
+        "epistemic": "explicit",
+        "userDecided": false,
+        "userAuthored": false,
+        "conflicts": [],
+        "tables": [],
+        "columns": [],
+        "roles": [],
+        "grain": [],
+        "measures": [],
+        "dimensions": [],
+        "timeDimensions": [],
+        "groupTableItemIds": [1],
+        "representativeLacksTable": true,
+        "members": [
+          {
+            "itemId": 1,
+            "name": "orders",
+            "status": "candidate",
+            "epistemic": "explicit",
+            "userDecided": false,
+            "userAuthored": false,
+            "conflicts": [],
+            "tables": [
+              {
+                "tableId": 1,
+                "sourceId": 1,
+                "rowCount": 1,
+                "limitations": []
+              }
+            ],
+            "columns": [
+              {
+                "id": 1,
+                "status": "candidate",
+                "epistemic": "explicit",
+                "confidence": null,
+                "userDecided": false,
+                "userAuthored": false,
+                "kind": "dataset.column",
+                "value": "id",
+                "context": null,
+                "evidenceCount": 1,
+                "evidenceIds": [1],
+                "checkNeeded": false,
+                "checks": [],
+                "unmet": [],
+                "awaitingSourceIds": []
+              },
+              {
+                "id": 2,
+                "status": "candidate",
+                "epistemic": "explicit",
+                "confidence": null,
+                "userDecided": false,
+                "userAuthored": false,
+                "kind": "dataset.column",
+                "value": "amount",
+                "context": null,
+                "evidenceCount": 1,
+                "evidenceIds": [2],
+                "checkNeeded": false,
+                "checks": [],
+                "unmet": [],
+                "awaitingSourceIds": []
+              }
+            ],
+            "roles": [],
+            "grain": [
+              {
+                "id": 3,
+                "status": "candidate",
+                "epistemic": "explicit",
+                "confidence": null,
+                "userDecided": false,
+                "userAuthored": false,
+                "kind": "dataset.grain",
+                "value": "[\"id\"]",
+                "context": null,
+                "evidenceCount": 1,
+                "evidenceIds": [3],
+                "checkNeeded": true,
+                "checks": [
+                  {
+                    "check": "grain",
+                    "passed": true,
+                    "failure": null,
+                    "examined": 1,
+                    "violations": 0,
+                    "skipped": 0
+                  }
+                ],
+                "unmet": ["check-missing"],
+                "awaitingSourceIds": []
+              }
+            ],
+            "measures": [],
+            "dimensions": [],
+            "timeDimensions": [],
+            "groupTableItemIds": [],
+            "representativeLacksTable": false,
+            "members": []
+          }
+        ]
+      }
+    ],
+    "metrics": [
+      {
+        "itemId": 3,
+        "name": "매출",
+        "status": "candidate",
+        "epistemic": "explicit",
+        "userDecided": false,
+        "userAuthored": false,
+        "conflicts": [
+          {
+            "kind": "metric.unit",
+            "rowKind": "fact",
+            "ids": [5, 6]
+          }
+        ],
+        "terms": [
+          {
+            "id": 8,
+            "status": "verified",
+            "epistemic": "user-approved",
+            "confidence": null,
+            "userDecided": true,
+            "userAuthored": true,
+            "kind": "alias.synonym",
+            "value": "revenue",
+            "context": null,
+            "evidenceCount": 0,
+            "evidenceIds": [],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "definitions": [
+          {
+            "id": 7,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "definition",
+            "value": "월 매출 합계",
+            "context": null,
+            "evidenceCount": 0,
+            "evidenceIds": [],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "calculations": [
+          {
+            "id": 4,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.calculation",
+            "value": "{\"aggregation\":\"sum\",\"column\":\"amount\"}",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [4],
+            "checkNeeded": true,
+            "checks": [
+              {
+                "check": "schema",
+                "passed": true,
+                "failure": null,
+                "examined": 1,
+                "violations": 0,
+                "skipped": 0
+              }
+            ],
+            "unmet": ["spec-conflict", "check-missing"],
+            "awaitingSourceIds": []
+          }
+        ],
+        "calculationConfirmed": false,
+        "datasets": [
+          {
+            "itemId": 1,
+            "name": "orders",
+            "tables": [
+              {
+                "tableId": 1,
+                "sourceId": 1,
+                "rowCount": 1,
+                "limitations": []
+              }
+            ],
+            "groupTableItemIds": [],
+            "representativeLacksTable": false
+          }
+        ],
+        "columns": [
+          {
+            "column": "amount",
+            "factId": 2,
+            "missing": null
+          }
+        ],
+        "grain": [
+          {
+            "id": 3,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "dataset.grain",
+            "value": "[\"id\"]",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [3],
+            "checkNeeded": true,
+            "checks": [
+              {
+                "check": "grain",
+                "passed": true,
+                "failure": null,
+                "examined": 1,
+                "violations": 0,
+                "skipped": 0
+              }
+            ],
+            "unmet": ["check-missing"],
+            "awaitingSourceIds": []
+          }
+        ],
+        "joins": [
+          {
+            "itemId": 5,
+            "name": "orders-self"
+          }
+        ],
+        "units": [
+          {
+            "id": 5,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.unit",
+            "value": "won",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [5],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          },
+          {
+            "id": 6,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.unit",
+            "value": "usd",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [6],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "currencies": [],
+        "periods": [],
+        "versions": [
+          {
+            "id": 10,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.version",
+            "value": "v1",
+            "context": null,
+            "evidenceCount": 0,
+            "evidenceIds": [],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "relations": [
+          {
+            "id": 1,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "type": "MEASURED_ON",
+            "subjectId": 3,
+            "objectId": 1,
+            "evidenceCount": 0,
+            "evidenceIds": []
+          },
+          {
+            "id": 4,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "type": "USES_JOIN",
+            "subjectId": 3,
+            "objectId": 5,
+            "evidenceCount": 0,
+            "evidenceIds": []
+          }
+        ],
+        "members": []
+      }
+    ],
+    "joins": [
+      {
+        "itemId": 5,
+        "name": "orders-self",
+        "status": "candidate",
+        "epistemic": "explicit",
+        "userDecided": false,
+        "userAuthored": false,
+        "conflicts": [],
+        "left": [],
+        "right": [
+          {
+            "itemId": 1,
+            "name": "orders"
+          }
+        ],
+        "keys": [
+          {
+            "id": 12,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "join.keys",
+            "value": "[[\"id\",\"id\"]]",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [10],
+            "checkNeeded": true,
+            "checks": [],
+            "unmet": ["no-dataset", "check-missing"],
+            "awaitingSourceIds": []
+          }
+        ],
+        "cardinality": [],
+        "relations": [
+          {
+            "id": 3,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "type": "JOIN_RIGHT",
+            "subjectId": 5,
+            "objectId": 1,
+            "evidenceCount": 0,
+            "evidenceIds": []
+          }
+        ],
+        "members": []
+      }
+    ],
+    "truncated": false
+  },
+  "metrics": [
+    {
+      "itemId": 3,
+      "name": "매출",
+      "status": "candidate",
+      "epistemic": "explicit",
+      "userDecided": false,
+      "userAuthored": false,
+      "conflicts": [
+        {
+          "kind": "metric.unit",
+          "rowKind": "fact",
+          "ids": [5, 6]
+        }
+      ],
+      "terms": [
+        {
+          "id": 8,
+          "status": "verified",
+          "epistemic": "user-approved",
+          "confidence": null,
+          "userDecided": true,
+          "userAuthored": true,
+          "kind": "alias.synonym",
+          "value": "revenue",
+          "context": null,
+          "evidenceCount": 0,
+          "evidenceIds": [],
+          "checkNeeded": false,
+          "checks": [],
+          "unmet": [],
+          "awaitingSourceIds": []
+        }
+      ],
+      "definitions": [
+        {
+          "id": 7,
+          "status": "candidate",
+          "epistemic": "explicit",
+          "confidence": null,
+          "userDecided": false,
+          "userAuthored": false,
+          "kind": "definition",
+          "value": "월 매출 합계",
+          "context": null,
+          "evidenceCount": 0,
+          "evidenceIds": [],
+          "checkNeeded": false,
+          "checks": [],
+          "unmet": [],
+          "awaitingSourceIds": []
+        }
+      ],
+      "calculations": [
+        {
+          "id": 4,
+          "status": "candidate",
+          "epistemic": "explicit",
+          "confidence": null,
+          "userDecided": false,
+          "userAuthored": false,
+          "kind": "metric.calculation",
+          "value": "{\"aggregation\":\"sum\",\"column\":\"amount\"}",
+          "context": null,
+          "evidenceCount": 1,
+          "evidenceIds": [4],
+          "checkNeeded": true,
+          "checks": [
+            {
+              "check": "schema",
+              "passed": true,
+              "failure": null,
+              "examined": 1,
+              "violations": 0,
+              "skipped": 0
+            }
+          ],
+          "unmet": ["spec-conflict", "check-missing"],
+          "awaitingSourceIds": []
+        }
+      ],
+      "calculationConfirmed": false,
+      "datasets": [
+        {
+          "itemId": 1,
+          "name": "orders",
+          "tables": [
+            {
+              "tableId": 1,
+              "sourceId": 1,
+              "rowCount": 1,
+              "limitations": []
+            }
+          ],
+          "groupTableItemIds": [],
+          "representativeLacksTable": false
+        }
+      ],
+      "columns": [
+        {
+          "column": "amount",
+          "factId": 2,
+          "missing": null
+        }
+      ],
+      "grain": [
+        {
+          "id": 3,
+          "status": "candidate",
+          "epistemic": "explicit",
+          "confidence": null,
+          "userDecided": false,
+          "userAuthored": false,
+          "kind": "dataset.grain",
+          "value": "[\"id\"]",
+          "context": null,
+          "evidenceCount": 1,
+          "evidenceIds": [3],
+          "checkNeeded": true,
+          "checks": [
+            {
+              "check": "grain",
+              "passed": true,
+              "failure": null,
+              "examined": 1,
+              "violations": 0,
+              "skipped": 0
+            }
+          ],
+          "unmet": ["check-missing"],
+          "awaitingSourceIds": []
+        }
+      ],
+      "joins": [
+        {
+          "itemId": 5,
+          "name": "orders-self"
+        }
+      ],
+      "units": [
+        {
+          "id": 5,
+          "status": "candidate",
+          "epistemic": "explicit",
+          "confidence": null,
+          "userDecided": false,
+          "userAuthored": false,
+          "kind": "metric.unit",
+          "value": "won",
+          "context": null,
+          "evidenceCount": 1,
+          "evidenceIds": [5],
+          "checkNeeded": false,
+          "checks": [],
+          "unmet": [],
+          "awaitingSourceIds": []
+        },
+        {
+          "id": 6,
+          "status": "candidate",
+          "epistemic": "explicit",
+          "confidence": null,
+          "userDecided": false,
+          "userAuthored": false,
+          "kind": "metric.unit",
+          "value": "usd",
+          "context": null,
+          "evidenceCount": 1,
+          "evidenceIds": [6],
+          "checkNeeded": false,
+          "checks": [],
+          "unmet": [],
+          "awaitingSourceIds": []
+        }
+      ],
+      "currencies": [],
+      "periods": [],
+      "versions": [
+        {
+          "id": 10,
+          "status": "candidate",
+          "epistemic": "explicit",
+          "confidence": null,
+          "userDecided": false,
+          "userAuthored": false,
+          "kind": "metric.version",
+          "value": "v1",
+          "context": null,
+          "evidenceCount": 0,
+          "evidenceIds": [],
+          "checkNeeded": false,
+          "checks": [],
+          "unmet": [],
+          "awaitingSourceIds": []
+        }
+      ],
+      "relations": [
+        {
+          "id": 1,
+          "status": "candidate",
+          "epistemic": "explicit",
+          "confidence": null,
+          "userDecided": false,
+          "userAuthored": false,
+          "type": "MEASURED_ON",
+          "subjectId": 3,
+          "objectId": 1,
+          "evidenceCount": 0,
+          "evidenceIds": []
+        },
+        {
+          "id": 4,
+          "status": "candidate",
+          "epistemic": "explicit",
+          "confidence": null,
+          "userDecided": false,
+          "userAuthored": false,
+          "type": "USES_JOIN",
+          "subjectId": 3,
+          "objectId": 5,
+          "evidenceCount": 0,
+          "evidenceIds": []
+        }
+      ],
+      "members": []
+    }
+  ],
+  "analyticalAll": {
+    "datasets": [
+      {
+        "itemId": 2,
+        "name": "orders-doc",
+        "status": "candidate",
+        "epistemic": "explicit",
+        "userDecided": false,
+        "userAuthored": false,
+        "conflicts": [],
+        "tables": [],
+        "columns": [],
+        "roles": [],
+        "grain": [],
+        "measures": [],
+        "dimensions": [],
+        "timeDimensions": [],
+        "groupTableItemIds": [1],
+        "representativeLacksTable": true,
+        "members": [
+          {
+            "itemId": 1,
+            "name": "orders",
+            "status": "candidate",
+            "epistemic": "explicit",
+            "userDecided": false,
+            "userAuthored": false,
+            "conflicts": [],
+            "tables": [
+              {
+                "tableId": 1,
+                "sourceId": 1,
+                "rowCount": 1,
+                "limitations": []
+              }
+            ],
+            "columns": [
+              {
+                "id": 1,
+                "status": "candidate",
+                "epistemic": "explicit",
+                "confidence": null,
+                "userDecided": false,
+                "userAuthored": false,
+                "kind": "dataset.column",
+                "value": "id",
+                "context": null,
+                "evidenceCount": 1,
+                "evidenceIds": [1],
+                "checkNeeded": false,
+                "checks": [],
+                "unmet": [],
+                "awaitingSourceIds": []
+              },
+              {
+                "id": 2,
+                "status": "candidate",
+                "epistemic": "explicit",
+                "confidence": null,
+                "userDecided": false,
+                "userAuthored": false,
+                "kind": "dataset.column",
+                "value": "amount",
+                "context": null,
+                "evidenceCount": 1,
+                "evidenceIds": [2],
+                "checkNeeded": false,
+                "checks": [],
+                "unmet": [],
+                "awaitingSourceIds": []
+              }
+            ],
+            "roles": [],
+            "grain": [
+              {
+                "id": 3,
+                "status": "candidate",
+                "epistemic": "explicit",
+                "confidence": null,
+                "userDecided": false,
+                "userAuthored": false,
+                "kind": "dataset.grain",
+                "value": "[\"id\"]",
+                "context": null,
+                "evidenceCount": 1,
+                "evidenceIds": [3],
+                "checkNeeded": true,
+                "checks": [
+                  {
+                    "check": "grain",
+                    "passed": true,
+                    "failure": null,
+                    "examined": 1,
+                    "violations": 0,
+                    "skipped": 0
+                  }
+                ],
+                "unmet": ["check-missing"],
+                "awaitingSourceIds": []
+              }
+            ],
+            "measures": [],
+            "dimensions": [],
+            "timeDimensions": [],
+            "groupTableItemIds": [],
+            "representativeLacksTable": false,
+            "members": []
+          }
+        ]
+      }
+    ],
+    "metrics": [
+      {
+        "itemId": 3,
+        "name": "매출",
+        "status": "candidate",
+        "epistemic": "explicit",
+        "userDecided": false,
+        "userAuthored": false,
+        "conflicts": [
+          {
+            "kind": "metric.unit",
+            "rowKind": "fact",
+            "ids": [5, 6]
+          }
+        ],
+        "terms": [
+          {
+            "id": 8,
+            "status": "verified",
+            "epistemic": "user-approved",
+            "confidence": null,
+            "userDecided": true,
+            "userAuthored": true,
+            "kind": "alias.synonym",
+            "value": "revenue",
+            "context": null,
+            "evidenceCount": 0,
+            "evidenceIds": [],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "definitions": [
+          {
+            "id": 7,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "definition",
+            "value": "월 매출 합계",
+            "context": null,
+            "evidenceCount": 0,
+            "evidenceIds": [],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "calculations": [
+          {
+            "id": 4,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.calculation",
+            "value": "{\"aggregation\":\"sum\",\"column\":\"amount\"}",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [4],
+            "checkNeeded": true,
+            "checks": [
+              {
+                "check": "schema",
+                "passed": true,
+                "failure": null,
+                "examined": 1,
+                "violations": 0,
+                "skipped": 0
+              }
+            ],
+            "unmet": ["spec-conflict", "check-missing"],
+            "awaitingSourceIds": []
+          }
+        ],
+        "calculationConfirmed": false,
+        "datasets": [
+          {
+            "itemId": 1,
+            "name": "orders",
+            "tables": [
+              {
+                "tableId": 1,
+                "sourceId": 1,
+                "rowCount": 1,
+                "limitations": []
+              }
+            ],
+            "groupTableItemIds": [],
+            "representativeLacksTable": false
+          }
+        ],
+        "columns": [
+          {
+            "column": "amount",
+            "factId": 2,
+            "missing": null
+          }
+        ],
+        "grain": [
+          {
+            "id": 3,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "dataset.grain",
+            "value": "[\"id\"]",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [3],
+            "checkNeeded": true,
+            "checks": [
+              {
+                "check": "grain",
+                "passed": true,
+                "failure": null,
+                "examined": 1,
+                "violations": 0,
+                "skipped": 0
+              }
+            ],
+            "unmet": ["check-missing"],
+            "awaitingSourceIds": []
+          }
+        ],
+        "joins": [
+          {
+            "itemId": 5,
+            "name": "orders-self"
+          }
+        ],
+        "units": [
+          {
+            "id": 5,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.unit",
+            "value": "won",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [5],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          },
+          {
+            "id": 6,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.unit",
+            "value": "usd",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [6],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "currencies": [],
+        "periods": [
+          {
+            "id": 9,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.period",
+            "value": "month",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [7],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "versions": [
+          {
+            "id": 10,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.version",
+            "value": "v1",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [8],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "relations": [
+          {
+            "id": 1,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "type": "MEASURED_ON",
+            "subjectId": 3,
+            "objectId": 1,
+            "evidenceCount": 0,
+            "evidenceIds": []
+          },
+          {
+            "id": 4,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "type": "USES_JOIN",
+            "subjectId": 3,
+            "objectId": 5,
+            "evidenceCount": 0,
+            "evidenceIds": []
+          }
+        ],
+        "members": []
+      },
+      {
+        "itemId": 4,
+        "name": "secret",
+        "status": "candidate",
+        "epistemic": "explicit",
+        "userDecided": false,
+        "userAuthored": false,
+        "conflicts": [],
+        "terms": [],
+        "definitions": [],
+        "calculations": [],
+        "calculationConfirmed": false,
+        "datasets": [],
+        "columns": [],
+        "grain": [],
+        "joins": [],
+        "units": [
+          {
+            "id": 11,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "metric.unit",
+            "value": "won",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [9],
+            "checkNeeded": false,
+            "checks": [],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "currencies": [],
+        "periods": [],
+        "versions": [],
+        "relations": [],
+        "members": []
+      }
+    ],
+    "joins": [
+      {
+        "itemId": 5,
+        "name": "orders-self",
+        "status": "candidate",
+        "epistemic": "explicit",
+        "userDecided": false,
+        "userAuthored": false,
+        "conflicts": [],
+        "left": [
+          {
+            "itemId": 1,
+            "name": "orders"
+          }
+        ],
+        "right": [
+          {
+            "itemId": 1,
+            "name": "orders"
+          }
+        ],
+        "keys": [
+          {
+            "id": 12,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "kind": "join.keys",
+            "value": "[[\"id\",\"id\"]]",
+            "context": null,
+            "evidenceCount": 1,
+            "evidenceIds": [10],
+            "checkNeeded": true,
+            "checks": [
+              {
+                "check": "schema",
+                "passed": true,
+                "failure": null,
+                "examined": 1,
+                "violations": 0,
+                "skipped": 0
+              }
+            ],
+            "unmet": [],
+            "awaitingSourceIds": []
+          }
+        ],
+        "cardinality": [],
+        "relations": [
+          {
+            "id": 2,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "type": "JOIN_LEFT",
+            "subjectId": 5,
+            "objectId": 1,
+            "evidenceCount": 0,
+            "evidenceIds": []
+          },
+          {
+            "id": 3,
+            "status": "candidate",
+            "epistemic": "explicit",
+            "confidence": null,
+            "userDecided": false,
+            "userAuthored": false,
+            "type": "JOIN_RIGHT",
+            "subjectId": 5,
+            "objectId": 1,
+            "evidenceCount": 0,
+            "evidenceIds": []
+          }
+        ],
+        "members": []
+      }
+    ],
+    "truncated": false
+  }
+}

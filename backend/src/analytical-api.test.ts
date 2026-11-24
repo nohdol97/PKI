@@ -12,8 +12,10 @@ import {
   saveCheckLine,
   saveDatasetTable,
   insertItem,
+  recordTombstone,
   registerConnectorInstance,
   saveFact,
+  saveRelation,
   saveSourceRecord,
   userDecisions,
   type SqlDriver,
@@ -415,5 +417,164 @@ describe("analytical routes (S03-R19)", () => {
         held: { facts: 1, relations: 0, merges: 0, distinct: 0, splitMoves: 0 },
       });
     });
+  });
+});
+
+describe("analytical read, batched (ARB-C4)", () => {
+  const attrs = {
+    epistemic: "explicit",
+    status: "candidate",
+    validAt: null,
+    observedAt: "2026-11-23T00:00:00Z",
+  } as const;
+  const blocks = [
+    { start: 0, end: 2, locator: { format: "csv", record: 1, line: 1, field: 1 } },
+    { start: 3, end: 9, locator: { format: "csv", record: 1, line: 1, field: 2 } },
+  ];
+
+  /** Three items, their facts and check lines, every row cited from the triple's own source. */
+  function triple(n: number) {
+    const saved = saveSourceRecord(db, "c", {
+      namespace: "",
+      externalId: `t${n}`,
+      title: `t${n}`,
+      body: `id\tamount\n${n}\t10`,
+      blocks,
+    } as Parameters<typeof saveSourceRecord>[2]);
+    if (saved.status !== "created") throw new Error(saved.status);
+    const versionId = db.all("SELECT max(id) AS id FROM source_versions")[0]?.id as number;
+    const cite = (factId: number) =>
+      addEvidence(db, {
+        target: { factId },
+        sourceVersionId: versionId,
+        start: 0,
+        end: 2,
+        quote: "id",
+      });
+    const line = (factId: number, check: "schema" | "grain" | "aggregation" | "join-cardinality") =>
+      saveCheckLine(db, {
+        factId,
+        check,
+        passed: true,
+        failure: null,
+        examined: 1,
+        violations: 0,
+        skipped: 0,
+        versionId,
+        otherVersionId: null,
+        at: "2026-11-23T00:00:00.000Z",
+      });
+    const made = (type: string) => {
+      const id = insertItem(db, { type, name: `${type}-${n}`, ...attrs });
+      automatedLifecycle.created(db, { kind: "item", id }, "extraction", null);
+      return id;
+    };
+    const fact = (itemId: number, kind: string, value: string) => {
+      const id = saveFact(db, { itemId, kind, value, ...attrs }).id;
+      cite(id);
+      return id;
+    };
+    const d = made("Dataset");
+    saveDatasetTable(db, { itemId: d, sourceId: saved.sourceId, key: "", rowCount: 1 });
+    for (const column of ["id", "day", "amount"]) fact(d, "dataset.column", column);
+    line(fact(d, "dataset.grain", '["id"]'), "grain");
+    const m = made("Metric");
+    saveRelation(db, { subjectId: m, type: "MEASURED_ON", objectId: d, ...attrs });
+    const calc = fact(m, "metric.calculation", '{"aggregation":"sum","column":"amount"}');
+    line(calc, "schema");
+    line(calc, "aggregation");
+    fact(m, "metric.unit", "won");
+    const j = made("Join");
+    saveRelation(db, { subjectId: j, type: "JOIN_LEFT", objectId: d, ...attrs });
+    saveRelation(db, { subjectId: j, type: "JOIN_RIGHT", objectId: d, ...attrs });
+    line(fact(j, "join.keys", '[["id","id"]]'), "schema");
+    line(fact(j, "join.cardinality", "one-to-one"), "join-cardinality");
+    return { sourceId: saved.sourceId, versionId, items: [d, m, j] };
+  }
+
+  /** The server over a driver that counts what the read sends; the product registry and the default policy. */
+  async function counted() {
+    let queries = 0;
+    const counting: SqlDriver = {
+      ...db,
+      all: (sql, params) => {
+        queries++;
+        return db.all(sql, params);
+      },
+    };
+    server = await startServer({
+      token: TOKEN,
+      allowedOrigins: [],
+      connectors,
+      db: counting,
+      dataDirectory: dir,
+      egress: productEgress(db),
+      ...productAdapters(dir),
+      decisions: userDecisions,
+      registry: createDerivativeRegistry({
+        kinds: createProductRegistry({ policy: defaultScopePolicy }).kinds,
+        policy: defaultScopePolicy,
+      }),
+    });
+    return {
+      read: async () => {
+        queries = 0;
+        const res = await call("analytical");
+        return { body: res.body as unknown, queries };
+      },
+    };
+  }
+
+  /** Every id a response states, under the keys that carry one. */
+  function idsIn(value: unknown, found = new Set<string>()): Set<string> {
+    if (Array.isArray(value)) value.forEach((v) => idsIn(v, found));
+    else if (value && typeof value === "object") {
+      for (const [key, v] of Object.entries(value)) {
+        if (["id", "itemId", "factId"].includes(key)) found.add(`${key}:${String(v)}`);
+        if (key === "evidenceIds") (v as number[]).forEach((n) => found.add(`${key}:${n}`));
+        idsIn(v, found);
+      }
+    }
+    return found;
+  }
+
+  it("ARB-C4: four triples cost at most 75 queries each and 60 over, and a row of a deleted source stays hidden", async () => {
+    const triples = [1, 2, 3, 4].map(triple);
+    const [first] = triples as [ReturnType<typeof triple>];
+    // a row the user wrote shows whatever its evidence; its fact cited from the first source is the one that hides
+    const authored = userDecisions.add(db, { kind: "item", type: "Metric", name: "authored" });
+    if (authored.status !== "applied") throw new Error("not added");
+    const covered = saveFact(db, {
+      itemId: authored.ref.id,
+      kind: "metric.unit",
+      value: "usd",
+      ...attrs,
+    }).id;
+    const evidence = addEvidence(db, {
+      target: { factId: covered },
+      sourceVersionId: first.versionId,
+      start: 0,
+      end: 2,
+      quote: "id",
+    });
+    const { read } = await counted();
+
+    const before = await read();
+    expect(before.queries).toBeLessThanOrEqual(75 * 4 + 60);
+    const open = idsIn(before.body);
+    expect(open).toContain(`itemId:${first.items[0]}`);
+    expect(open).toContain(`id:${covered}`);
+    expect(open).toContain(`evidenceIds:${evidence}`);
+
+    recordTombstone(db, first.sourceId, {
+      reason: "user-deleted",
+      lastRevision: null,
+      at: "2026-11-24T00:00:00Z",
+    });
+    const after = idsIn((await read()).body);
+    for (const id of first.items) expect(after).not.toContain(`itemId:${id}`);
+    expect(after).toContain(`itemId:${authored.ref.id}`);
+    expect(after).not.toContain(`id:${covered}`);
+    expect(after).not.toContain(`evidenceIds:${evidence}`);
   });
 });

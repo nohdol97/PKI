@@ -11,7 +11,8 @@ import {
 } from "@pki/storage";
 
 export interface AnalyticalVisibility {
-  shown(kind: string, id: string): boolean;
+  /** `db` is the driver the read asks through; the registry's `visible` reads the lineage through it. */
+  shown(kind: string, id: string, db?: SqlDriver): boolean;
 }
 
 export interface AnalyticalApiDeps<List> {

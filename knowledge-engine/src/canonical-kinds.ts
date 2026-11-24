@@ -26,6 +26,7 @@ import {
   createDerivativeRegistry,
   defaultScopePolicy,
   EXTRACT_JOB_KIND,
+  evidenceLineage,
   lineageOfItems,
   listEvidence,
   notifyMembership,
@@ -166,7 +167,7 @@ const CITED_ITEMS = citedItems();
 
 const lineageOf: Record<string, (db: SqlDriver, id: number) => SourceVersionRef[]> = {
   source: (db, id) => versionsOf(db, VERSIONS("v.id = ?"), [id]),
-  evidence: (db, id) => versionsOf(db, EVIDENCE_VERSIONS("e.id = ?"), [id]),
+  evidence: (db, id) => evidenceLineage(db, id),
   // a row the user wrote has the lineage of the item it is on, and an item the user created none
   // (S01-R22); the three share one definition with the rule's lineage of a user input (storage)
   fact: (db, id) => rowLineage(db, { kind: "fact", id }),
