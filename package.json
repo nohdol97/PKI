@@ -15,7 +15,8 @@
     "lint": "eslint -c eslint.config.js . && prettier --check .",
     "typecheck": "node tooling/workspace/typecheck.ts",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "check:scenarios": "node tooling/scenarios/check.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

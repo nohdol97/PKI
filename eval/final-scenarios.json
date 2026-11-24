@@ -1,0 +1,643 @@
+{
+  "schemaVersion": 1,
+  "scenarios": [
+    {
+      "id": "FS01",
+      "title": "설치 파일 설치",
+      "owners": [
+        "R04",
+        "H02"
+      ],
+      "needsProvider": false,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "e2e",
+          "path": "apps/desktop/artifact/artifact.shell.e2e.ts",
+          "title": "starts its backend on the user's data directory and ignores the switches",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/desktop/artifact/artifact.contents.e2e.ts",
+          "title": "the app folder is laid out for Electron",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/desktop/e2e/lifecycle.e2e.ts",
+          "title": "--pki-uninstall-data=delete is refused while PKI runs",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "windows-installer",
+          "note": "설치 파일이 이 저장소에서 만들어지지 않는다. 증거는 개발 장비에서 띄운 앱 폴더이고, 깨끗한 Windows 11에서의 설치·실행·제거는 돌린 적 없다",
+          "procedure": "verification/r04-windows-installer/RUNBOOK.md"
+        },
+        {
+          "kind": "site",
+          "note": "설치 파일 서명과 배포 채널은 배포처의 몫이다(site-setup S12)",
+          "procedure": "docs/site-setup.md"
+        }
+      ]
+    },
+    {
+      "id": "FS02",
+      "title": "기존 CLI 탐색",
+      "owners": [
+        "R02",
+        "V01"
+      ],
+      "needsProvider": true,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/providers-api.test.ts",
+          "title": "checks each Provider with the version and login status queries only",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/connection-test.e2e.ts",
+          "title": "with both CLIs found, the user picks the default and the next test goes to it",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/degraded.e2e.ts",
+          "title": "no CLI, no model, no vector index: Home says so and guides",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "real-provider",
+          "note": "실제 Claude Code·Codex CLI를 찾고 상태를 묻는 실행은 돌린 적 없다. 증거는 가짜 CLI다",
+          "procedure": "verification/r02-cli-isolation/RUNBOOK.md"
+        },
+        {
+          "kind": "windows-installer",
+          "note": "Windows 설치본의 PATH 탐색은 확인하지 않았다",
+          "procedure": "verification/r04-windows-installer/RUNBOOK.md"
+        }
+      ]
+    },
+    {
+      "id": "FS03",
+      "title": "메일/메신저/Wiki형 데이터 import",
+      "owners": [
+        "I01",
+        "I02",
+        "V02"
+      ],
+      "needsProvider": false,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/jsonl-import.test.ts",
+          "title": "stores the three fixtures under their own instances with one queued extraction job each",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/jsonl-import.e2e.ts",
+          "title": "imports a JSONL file on the Sources screen",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/local-files.e2e.ts",
+          "title": "local-files.e2e: approve a folder",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "backend/src/adapters/site-connectors.test.ts",
+          "title": "yields not-implemented from checkConnector",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "site",
+          "note": "실제 메일·메신저·Wiki 수집기는 배포처 후속이다. 공용 저장소는 합성 JSONL과 로컬 파일 가져오기만 증명하고 site-* 수집기는 미구현을 답한다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        },
+        {
+          "kind": "windows-installer",
+          "note": "설치본에서의 가져오기는 실행한 적 없다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        }
+      ]
+    },
+    {
+      "id": "FS04",
+      "title": "의미 지식 추출",
+      "owners": [
+        "V02",
+        "S01"
+      ],
+      "needsProvider": true,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "knowledge-engine/src/extraction.test.ts",
+          "title": "makes exactly one Provider call for one source version",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "backend/src/extraction-flow.test.ts",
+          "title": "links A and B across the three imported sources into one inferred Insight with three evidence",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/v02-flow.e2e.ts",
+          "title": "v02-flow.e2e: import",
+          "provider": "mock",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "real-provider",
+          "note": "실제 Provider의 추출 결과 형태와 품질은 모른다. 지식 품질 지표(EVALUATION 2.1)는 재지 않았다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        },
+        {
+          "kind": "windows-installer",
+          "note": "설치본에서의 수직 흐름은 실행한 적 없다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        }
+      ]
+    },
+    {
+      "id": "FS05",
+      "title": "출처 간 관계",
+      "owners": [
+        "V02",
+        "S02"
+      ],
+      "needsProvider": true,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/extraction-flow.test.ts",
+          "title": "links A and B across the three imported sources into one inferred Insight with three evidence",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/explore.e2e.ts",
+          "title": "explore.e2e: approve a candidate",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "real-provider",
+          "note": "실제 Provider가 출처 사이의 관계를 만드는지 확인하지 않았다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        },
+        {
+          "kind": "windows-installer",
+          "note": "설치본에서는 실행한 적 없다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        }
+      ]
+    },
+    {
+      "id": "FS06",
+      "title": "개인 Semantic 자동 구성",
+      "owners": [
+        "S01",
+        "S02",
+        "S03"
+      ],
+      "needsProvider": true,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "storage/src/semantic-auto-verify.test.ts",
+          "title": "moves a candidate to verified by the policy and nothing else",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "backend/src/semantic-api.test.ts",
+          "title": "lists items with their facts and relations, status",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/explore-curation.e2e.ts",
+          "title": "explore-curation.e2e: filter",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "real-provider",
+          "note": "정책이 올리는 후보는 추출에서 오므로 실제 Provider의 후보로는 확인하지 않았다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        },
+        {
+          "kind": "windows-installer",
+          "note": "설치본에서는 실행한 적 없다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        }
+      ]
+    },
+    {
+      "id": "FS07",
+      "title": "Graph/Wiki 증분 갱신",
+      "owners": [
+        "S02",
+        "K01"
+      ],
+      "needsProvider": true,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/wiki-flow.test.ts",
+          "title": "builds pages with openable evidence and a backlink",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "knowledge-engine/src/wiki-build-job.test.ts",
+          "title": "writes only the changed pages and removes the page",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/wiki.e2e.ts",
+          "title": "wiki.e2e: open a page",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "real-provider",
+          "note": "들어오는 지식을 만드는 추출이 실제 Provider로 돈 적 없다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        },
+        {
+          "kind": "windows-installer",
+          "note": "설치본에서는 실행한 적 없다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        }
+      ]
+    },
+    {
+      "id": "FS08",
+      "title": "Reflection 새 관계",
+      "owners": [
+        "K02"
+      ],
+      "needsProvider": true,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/lint-flow.test.ts",
+          "title": "lists the missing link with evidence; accepting with a type",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "backend/src/lint-flow.test.ts",
+          "title": "a started backend has the daily and the weekly period",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "knowledge-engine/src/reflection-refine-job.test.ts",
+          "title": "stores the verdict whose quote is in the document",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/lint.e2e.ts",
+          "title": "lint.e2e: see a finding",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "real-provider",
+          "note": "정제 판정을 실제 Provider로 받은 적 없다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        },
+        {
+          "kind": "windows-installer",
+          "note": "정기 실행이 Windows 절전·시계 변경 뒤에 도는지 확인하지 않았다(site-setup S19)",
+          "procedure": "docs/site-setup.md"
+        }
+      ]
+    },
+    {
+      "id": "FS09",
+      "title": "다출처 Insight",
+      "owners": [
+        "P01"
+      ],
+      "needsProvider": true,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/extraction-flow.test.ts",
+          "title": "links A and B across the three imported sources into one inferred Insight with three evidence",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "knowledge-engine/src/insight-import.test.ts",
+          "title": "gives one pending_request and one open_issue",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "backend/src/insight-api.test.ts",
+          "title": "lists active Insights highest score first",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/evidence.e2e.ts",
+          "title": "evidence.e2e: the Insight's three evidence",
+          "provider": "mock",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "real-provider",
+          "note": "실제 Provider로 만든 Insight의 품질(EVALUATION 2.2)은 재지 않았다",
+          "procedure": "docs/EVALUATION.md"
+        },
+        {
+          "kind": "windows-installer",
+          "note": "설치본에서는 실행한 적 없다",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        }
+      ]
+    },
+    {
+      "id": "FS10",
+      "title": "근거 있는 능동 전달",
+      "owners": [
+        "P02"
+      ],
+      "needsProvider": false,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/notify-flow.test.ts",
+          "title": "lists an important Insight as sent with its words",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "apps/desktop/src/notifier.test.ts",
+          "title": "shows one toast with the fixed words",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/notifications.e2e.ts",
+          "title": "notifications.e2e: read a card",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "windows-installer",
+          "note": "OS 토스트와 트레이는 가짜 Electron 객체로만 시험했고 Windows 설치본에서 띄워 보지 않았다(site-setup S44)",
+          "procedure": "docs/site-setup.md"
+        }
+      ]
+    },
+    {
+      "id": "FS11",
+      "title": "피드백 개선",
+      "owners": [
+        "P03"
+      ],
+      "needsProvider": false,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/feedback-api.test.ts",
+          "title": "puts the liked Insight first among equals",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "knowledge-engine/src/feedback-eval.test.ts",
+          "title": "computes both metrics over the Insights without feedback",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/feedback.e2e.ts",
+          "title": "feedback.e2e: mark an Insight irrelevant",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "windows-installer",
+          "note": "설치본에서는 실행한 적 없다",
+          "procedure": "docs/site-setup.md"
+        }
+      ]
+    },
+    {
+      "id": "FS12",
+      "title": "근거 기반 자연어 답변",
+      "owners": [
+        "X01"
+      ],
+      "needsProvider": true,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/ask-flow.test.ts",
+          "title": "streams route, hits, answer, sentences, done",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/ask.e2e.ts",
+          "title": "ask.e2e: the hits",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "measure",
+          "path": "eval/results/x01-dev-t0.json",
+          "provider": "none",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "real-provider",
+          "note": "실제 Provider의 답 인용 정확도와 답변 시간은 재지 않았다. 측정 파일도 답 없이 검색만 잰 것이다(site-setup S37)",
+          "procedure": "docs/site-setup.md"
+        },
+        {
+          "kind": "windows-installer",
+          "note": "설치본에서는 실행한 적 없다",
+          "procedure": "docs/site-setup.md"
+        }
+      ]
+    },
+    {
+      "id": "FS13",
+      "title": "원본 삭제 파생물 갱신",
+      "owners": [
+        "I04",
+        "H01"
+      ],
+      "needsProvider": false,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/source-deletion.test.ts",
+          "title": "resolves and empties the Insight when the dependency's source is deleted",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "knowledge-engine/src/deletion.test.ts",
+          "title": "writes a tombstone at the latest product version",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "backend/src/derivative-coverage.test.ts",
+          "title": "every table of the migrated schema is classified",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/web/e2e/v02-flow.e2e.ts",
+          "title": "read-gate.e2e: right after a source is deleted",
+          "provider": "mock",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "windows-installer",
+          "note": "설치본의 데이터 폴더 파일에서 지운 내용이 사라지는지 확인하지 않았다(site-setup S22)",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        }
+      ]
+    },
+    {
+      "id": "FS14",
+      "title": "재시작 작업 재개",
+      "owners": [
+        "I03",
+        "H02"
+      ],
+      "needsProvider": false,
+      "status": "mock-only",
+      "evidence": [
+        {
+          "kind": "unit",
+          "path": "backend/src/job-kill.test.ts",
+          "title": "finishes three jobs after a kill in the middle of one",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "unit",
+          "path": "backend/src/boot.resume.test.ts",
+          "title": "H02A-C7: registers the job of an overdue period",
+          "provider": "mock",
+          "environment": "dev"
+        },
+        {
+          "kind": "e2e",
+          "path": "apps/desktop/e2e/lifecycle.e2e.ts",
+          "title": "a backend that dies is restarted at a new address",
+          "provider": "none",
+          "environment": "dev"
+        },
+        {
+          "kind": "measure",
+          "path": "eval/results/h03-c2-dev.json",
+          "provider": "mock",
+          "environment": "dev"
+        }
+      ],
+      "blockers": [
+        {
+          "kind": "windows-installer",
+          "note": "Windows에서의 강제 종료·절전·최대 절전·시계 변경 뒤 재개는 확인하지 않았다(site-setup S19)",
+          "procedure": "verification/v02-site-flow/RUNBOOK.md"
+        },
+        {
+          "kind": "threshold",
+          "note": "기록된 유일한 측정(eval/results/h03-c2-dev.json)의 재시작 뒤 첫 작업까지가 약 120초로 통과선 60초를 넘는다. 개발 장비 값이고 그 뒤의 수정(#294)을 다시 재지 않았다",
+          "procedure": "docs/EVALUATION.md"
+        }
+      ]
+    }
+  ]
+}
