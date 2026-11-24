@@ -1,6 +1,6 @@
 # Phase 7 (Production Readiness) 완료 Gate 검토
 
-- 검토일: 2026-11-24 (origin/main `8bd2cc52` 기준, 이슈 상태는 같은 날 `gh`로 측정)
+- 검토일: 2026-11-24 (origin/main `d1384090` 기준, 이슈 상태는 같은 날 `gh`로 측정)
 - 범위: 공용(개인 저장소) 쪽에서 확인할 수 있는 것만 판정한다. 이 Phase의 완료 기준은 대부분 Windows 11 설치본과 배포처 환경을 요구한다. 그 실행이 없으면 통과로 쓰지 않는다.
 - 판정 말: `증거 있음` / `미검증 — Windows 필요` / `미검증 — 배포처 필요` / `미검증 — 보류(사유)` / `증거 없음`
 - 증거 표기: PR 번호 뒤 괄호는 `origin/main`에 들어 있는 merge commit 짧은 SHA다.
@@ -16,7 +16,7 @@
 | #33 [H02] Windows 배포·업데이트·OS Lifecycle 완성 | open | blocked |
 | #34 [H03] 보안 부정 테스트·장시간 성능·14개 최종 시나리오 | open | in-progress |
 
-에픽 체크박스 셋은 모두 `[ ]`이고 실제도 모두 open이라 에픽 쪽은 일치한다. 다만 #32 이슈 본문의 `H01-C1`~`C3` 체크박스는 세 개 모두 `[x]`로 바뀌어 있는데, 이슈는 open이고 진행 로그는 암호화 드라이버·Windows·실제 모델을 미검증으로 남겼다(이슈 표류 참고). #34 H03-C3의 공용 범위 작업(FS01~FS14 표와 검사 실행기)은 다른 세션이 진행 중이고 아직 머지되지 않았다.
+에픽 체크박스 셋은 모두 `[ ]`이고 실제도 모두 open이라 에픽 쪽은 일치한다. 다만 #32 이슈 본문의 `H01-C1`~`C3` 체크박스는 세 개 모두 `[x]`로 바뀌어 있는데, 이슈는 open이고 진행 로그는 암호화 드라이버·Windows·실제 모델을 미검증으로 남겼다(이슈 표류 참고). #34 H03-C3의 공용 범위 작업(FS01~FS14 증거 표와 검사기)은 PR #318(`d1384090`)로 머지됐다.
 
 ## 2. 완료 기준별 증거
 
@@ -54,7 +54,7 @@
 | H03-C1b Windows 설치본에서의 sandbox·CSP·경로 처리(역슬래시·드라이브 문자·UNC), 실제 모델의 주입 문장 반응, 실제 CLI 도구 격리 | H03-C1 spec의 "미검증 범위"가 H03-C3으로 넘김 | 미검증 — Windows 필요 |
 | H03-C2a 공용에서 도는 측정 실행기(유휴 CPU·RSS, 처리·검색 p50/p95, LLM 호출 수, 저장 증가율, 강제 종료 복구)와 개발 장비 값 | #297 (`1e966a48`) #316 (`f15aba81`); `backend/src/system-measure.test.ts`, `backend/src/system-measure.kill.test.ts`, `backend/src/system-measure.signal.test.ts`, `eval/results/h03-c2-dev.json`. 개발 장비(M1, 8GB)는 R05의 기준 등급이 아니다. 결과 파일의 값은 이 기준의 충족이 아니다 | 증거 있음 |
 | H03-C2b R05 고정 환경(등급 A Windows 11, 코퍼스 T2)에서의 installer 크기·idle CPU/RSS·p95·장시간 안정성·실제 Provider | 그 환경과 설치 파일이 없음(#34 댓글: A등급 Windows·T2 코퍼스·설치본 크기·장시간·실제 Provider 미검증) | 미검증 — Windows 필요 |
-| H03-C3 최종 시나리오 FS01~FS14를 Windows 설치본에서 증거 링크로 매핑, 실제 provider와 mock 구분, 미달·미검증은 release blocker | `git grep -n "FS01"`을 `origin/main`에서 찾으면 `docs/specs/2026-11-24-H03-C1-security-negative-tests.md`의 한 줄(넘김 문장)뿐이다. 매핑 표·검사 실행기는 이 시점에 없고, 다른 세션이 브랜치 `feat/h03-c3-final-scenarios`에서 작업 중이나 미머지다. FS 시나리오 목록은 총괄 #1 본문에 있다 | 증거 없음 |
+| H03-C3 최종 시나리오 FS01~FS14를 Windows 설치본에서 증거 링크로 매핑, 실제 provider와 mock 구분, 미달·미검증은 release blocker | #318 (`d1384090`); `docs/FINAL_SCENARIOS.md`, `eval/final-scenarios.json`, `tooling/scenarios/final-scenarios.test.ts`. 매핑은 있으나 `docs/FINAL_SCENARIOS.md` 상태 줄이 "확인됨 0, 대역만 14, 증거 없음 0"이다. 14개 모두 대역(mock) 증거뿐이고 Windows 설치본·실제 provider로 확인된 시나리오는 없다 | 미검증 — Windows 필요 |
 
 ## 3. 남은 항목
 
@@ -72,4 +72,4 @@
 
 공용 범위에서 확인된 것: 백업·복원·세대별 embedding 교체(H01-C1a·b, C2a·b·c, C3a), 업데이트 서명 검증·SBOM·제거 시 데이터 선택(H02-C2a·b·c), 보안 부정 시험(H03-C1a), 측정 실행기와 개발 장비 값(H03-C2a)은 머지된 PR과 존재하는 시험 파일로 뒷받침된다.
 
-남은 것: H02-C1·C3b와 H03-C1b·C2b는 Windows 11 설치본이 있어야 하고, H02-C2d와 H01-C3b는 배포처 결정·환경이 필요하다. 정본 DB 암호화는 보류, H03-C3(최종 시나리오 매핑)은 증거가 없다. 따라서 Phase 7은 가장 많이 남은 Phase이며 Gate는 충족되었다고 선언하지 않는다. 에픽이 요구하는 "최종 14개 시나리오 통합 통과"는 아직 시작 전이다.
+남은 것: H02-C1·C3b와 H03-C1b·C2b는 Windows 11 설치본이 있어야 하고, H02-C2d와 H01-C3b는 배포처 결정·환경이 필요하다. 정본 DB 암호화는 보류, H03-C3은 FS01~FS14 매핑이 있으나 14개 모두 대역 증거뿐(확인됨 0)이라 Windows 설치본이 필요하다. 따라서 Phase 7은 가장 많이 남은 Phase이며 Gate는 충족되었다고 선언하지 않는다. 에픽이 요구하는 "최종 14개 시나리오 통합 통과"는 확인된 시나리오가 0개라 충족되지 않았다.

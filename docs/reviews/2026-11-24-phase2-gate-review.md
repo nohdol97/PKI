@@ -1,6 +1,6 @@
 # Phase 2 (Information Ingestion) 완료 Gate 검토
 
-- 검토일: 2026-11-24 (origin/main `8bd2cc52` 기준, 이슈 상태는 같은 날 `gh`로 측정)
+- 검토일: 2026-11-24 (origin/main `d1384090` 기준, 이슈 상태는 같은 날 `gh`로 측정)
 - 범위: 공용(개인 저장소) 쪽에서 확인할 수 있는 것만 판정한다. 실제 메일·메신저·Wiki 수집 client, Windows 설치본, 배포처 실행이 필요한 기준은 통과로 쓰지 않는다.
 - 판정 말: `증거 있음` / `미검증 — Windows 필요` / `미검증 — 배포처 필요` / `미검증 — 보류(사유)` / `증거 없음`
 - 증거 표기: PR 번호 뒤 괄호는 `origin/main`에 들어 있는 merge commit 짧은 SHA다.
