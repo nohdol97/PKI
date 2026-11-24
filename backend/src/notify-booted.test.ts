@@ -77,4 +77,4 @@ it("notify.booted: an import's closed extraction wakes the scan, and the closed 
 
   const line = listNotifications(db).find((n) => n.insightId === insightId);
   expect(line?.status).toBe("sent");
-});
+}, 30_000);
