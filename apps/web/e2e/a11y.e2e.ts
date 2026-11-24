@@ -28,7 +28,10 @@ const STACK_A: { name: string; ready: (page: Page) => Locator }[] = [
     name: "홈",
     ready: (p) => p.getByRole("list", { name: "Insight 목록" }).getByRole("listitem").first(),
   },
-  { name: "원본", ready: (p) => p.getByRole("heading", { name: "저장된 원본" }) },
+  {
+    name: "원본",
+    ready: (p) => p.getByRole("button", { name: /삭제$/ }).first(),
+  },
   {
     name: "위키",
     ready: (p) => p.getByRole("list", { name: "프로젝트" }).getByRole("button").first(),
@@ -38,14 +41,26 @@ const STACK_A: { name: string; ready: (page: Page) => Locator }[] = [
     ready: (p) => p.getByRole("list", { name: "목표일이 지난 업무" }).getByRole("listitem").first(),
   },
   { name: "질문", ready: (p) => p.getByRole("heading", { name: "질문", level: 1 }) },
-  { name: "탐색", ready: (p) => p.getByLabel("항목 이름") },
+  {
+    name: "탐색",
+    ready: (p) => p.getByRole("list", { name: "항목 목록" }).getByRole("button").first(),
+  },
   {
     name: "지식 검토",
     ready: (p) => p.getByRole("list", { name: "지식 목록" }).getByRole("listitem").first(),
   },
-  { name: "유형 정의", ready: (p) => p.getByRole("heading", { name: "유형 정의", level: 1 }) },
-  { name: "활동", ready: (p) => p.getByRole("heading", { name: "활동", level: 1 }) },
-  { name: "설정", ready: (p) => p.getByRole("heading", { name: "Provider" }) },
+  {
+    name: "유형 정의",
+    ready: (p) => p.getByRole("region", { name: "항목 종류" }).getByRole("listitem").first(),
+  },
+  {
+    name: "활동",
+    ready: (p) => p.getByRole("list", { name: "상태별 작업 수" }),
+  },
+  {
+    name: "설정",
+    ready: (p) => p.getByRole("group", { name: "기본 Provider" }).getByRole("radio").first(),
+  },
 ];
 const STACK_B = [
   {
