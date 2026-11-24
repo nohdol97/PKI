@@ -546,6 +546,7 @@ export {
   readInsightById,
   readInsightInterpret,
   requestInsightInterpretations,
+  requeueClearedInterpretations,
   setInsightInterpret,
   writeInsightInterpretation,
 } from "./insight-interpretation.ts";
