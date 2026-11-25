@@ -1,6 +1,6 @@
 // I01-R17: the Sources screen marks a Connector whose rescan may have missed
 // deletions, so that a source gone at the origin but still shown is not a surprise.
-import { CREDENTIAL_REASONS, SYNC_STOP_CODES } from "@pki/contracts";
+import { CREDENTIAL_REASONS, LOGIN_ERRORS, SYNC_STOP_CODES } from "@pki/contracts";
 import { describe, expect, it } from "vitest";
 import {
   CREDENTIAL_REASON_TEXT,
@@ -80,5 +80,14 @@ describe("credential wording (I06-R14, I06-C11 ⑤)", () => {
     expect(text).toContain("다시 시작");
     expect(text).toContain("다른 종류");
     expect(Object.values(CREDENTIAL_REASON_TEXT)).not.toContain(text);
+  });
+});
+
+describe("login wording (I06S-C7, R6)", () => {
+  it("has its own text for every login error, none empty", async () => {
+    const { LOGIN_ERROR_TEXT } = await import("./connector-text.ts");
+    const texts = LOGIN_ERRORS.map((error) => LOGIN_ERROR_TEXT[error]);
+    expect(texts.every((t) => t.length > 0)).toBe(true);
+    expect(new Set(texts).size).toBe(LOGIN_ERRORS.length);
   });
 });

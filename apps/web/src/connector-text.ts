@@ -3,6 +3,7 @@ import {
   CREDENTIAL_REASONS,
   type ConnectorSummary,
   type CredentialReason,
+  type LoginError,
   type SyncStopCode,
 } from "@pki/contracts";
 
@@ -52,6 +53,18 @@ export const CREDENTIAL_REASON_TEXT: Readonly<Record<CredentialReason, string>> 
   "credential-rejected":
     "원 시스템이 자격 증명을 거부했습니다(틀림, 만료, 철회). 값을 고쳐 입력하세요.",
   "login-required": "로그인이 필요합니다(세션 만료·로그아웃). 로그인 창을 다시 여세요.",
+};
+
+/** Why the login window ended without a stored session, in words (I06S-R5, R6); none holds a value. */
+export const LOGIN_ERROR_TEXT: Readonly<Record<LoginError, string>> = {
+  cancelled: "로그인 창을 닫았습니다. 로그인하지 않아 세션을 저장하지 않았습니다.",
+  timeout: "로그인 시간이 지났습니다(5분). 로그인 창을 다시 여세요.",
+  "no-session":
+    "로그인은 끝났지만 필요한 세션 정보를 받지 못했습니다. 다시 로그인하거나 배포처 설정(쿠키 이름)을 확인하세요.",
+  "too-large": "세션 정보가 너무 커서(8192자 초과) 저장하지 않았습니다.",
+  "store-unavailable": "세션을 저장할 수 없습니다(OS 보호 저장소를 쓸 수 없음).",
+  invalid: "이 수집기의 로그인 설정을 쓸 수 없어 로그인 창을 열지 않았습니다.",
+  busy: "다른 로그인 창이 열려 있습니다. 먼저 그 창을 마치세요.",
 };
 
 /** A slot as the store last answered for it (I06-R13); the value is never shown. */

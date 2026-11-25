@@ -433,3 +433,132 @@ test("I06F-C6 KNOWN LIMIT: a value put in by code arrives with its line breaks a
     await stop();
   }
 });
+
+// I06S-C7 (R2, R6, R10): an instance with a session slot (`login: true`) shows no value input but 「로그인 창 열기」;
+// the click hands the recording preload the instance ID only; on ok:true the one change notice carries
+// {connectorId}; the reason text is shown; without the preload there is no button.
+const SESSION_NAME = `connector.${"d".repeat(32)}.session`;
+
+/** The list and the notice of one session instance; `loggedIn` is what the backend sees after the shell stored a session. */
+async function stubSessionBackend(page: Page, state: { loggedIn: boolean; notices: string[] }) {
+  const summary = () => ({
+    id: "mail-1",
+    kind: "fork",
+    state: state.loggedIn ? "ready" : "unavailable",
+    ...(state.loggedIn ? {} : { reason: "login-required" }),
+    credentials: [
+      {
+        slot: "session",
+        name: SESSION_NAME,
+        state: state.loggedIn ? "present" : "missing",
+        login: true,
+      },
+    ],
+  });
+  await page.route("**/api/connectors", (route: Route) =>
+    route.fulfill({ json: { connectors: [summary()] } }),
+  );
+  await page.route(NOTICE_PATH, (route: Route) => {
+    state.notices.push(route.request().postData() ?? "");
+    return route.fulfill({ json: { summary: summary(), rebuild: "done" } });
+  });
+}
+
+/** A preload with `openLogin` that records its arguments and answers as the test says; no store function is used. */
+async function loginPreload(page: Page, result: unknown) {
+  await page.addInitScript((answer: unknown) => {
+    const calls: unknown[][] = [];
+    Object.assign(window, {
+      pkiLogins: calls,
+      pki: {
+        getSession: () => fetch("/__pki/session").then((r) => r.json()),
+        setSecret: async () => ({ ok: true }),
+        deleteSecret: async () => ({ ok: true }),
+        openLogin: async (...args: unknown[]) => (calls.push(args), answer),
+      },
+    });
+  }, result);
+}
+const loginCalls = (page: Page) =>
+  page.evaluate(() => (window as unknown as { pkiLogins: unknown[][] }).pkiLogins);
+
+async function openSessionScreen(page: Page, state: { loggedIn: boolean; notices: string[] }) {
+  const dir = mkdtempSync(join(tmpdir(), "pki-e2e-login-"));
+  const port = await freePort();
+  const vite = await createServer({
+    ...webConfig({ port, dataDir: join(dir, "data") }),
+    configFile: false,
+    logLevel: "warn",
+  });
+  await vite.listen();
+  await stubSessionBackend(page, state);
+  await page.goto(`http://127.0.0.1:${port}`);
+  await page.getByRole("navigation").getByRole("button", { name: "원본" }).click();
+  return async () => {
+    await vite.close();
+    rmSync(dir, { recursive: true, force: true });
+  };
+}
+
+test("a session slot shows the login button and no input; the click hands the preload the ID only, and the notice follows on success", async ({
+  page,
+}) => {
+  const state = { loggedIn: false, notices: [] as string[] };
+  await loginPreload(page, { ok: true });
+  const stop = await openSessionScreen(page, state);
+  try {
+    const row = page.getByRole("row", { name: /mail-1/ });
+    await expect(row).toContainText(
+      "로그인이 필요합니다(세션 만료·로그아웃). 로그인 창을 다시 여세요.",
+    );
+    await expect(page.getByLabel("mail-1 session 값")).toHaveCount(0);
+    await expect(page.locator("input[type=password]")).toHaveCount(0);
+    const open = page.getByRole("button", { name: "mail-1 session 로그인 창 열기" });
+    await expect(open).toBeVisible();
+    state.loggedIn = true; // what the backend sees once the shell stored the session
+    await open.click();
+    await expect.poll(() => state.notices.length).toBe(1);
+    expect(await loginCalls(page)).toEqual([["mail-1"]]); // the instance ID only
+    expect(JSON.parse(state.notices[0] ?? "")).toEqual({ connectorId: "mail-1" });
+    await expect(row.getByRole("status")).toContainText("반영했습니다.");
+    await expect(page.getByRole("list", { name: "mail-1 자격 증명" })).toContainText(
+      "session: 저장됨",
+    );
+    await expect(page.getByRole("button", { name: "mail-1 session 삭제" })).toContainText(
+      "로그아웃",
+    );
+  } finally {
+    await stop();
+  }
+});
+
+test("a login that ended without a session says its reason and makes no notice", async ({
+  page,
+}) => {
+  const state = { loggedIn: false, notices: [] as string[] };
+  await loginPreload(page, { ok: false, error: "cancelled" });
+  const stop = await openSessionScreen(page, state);
+  try {
+    await page.getByRole("button", { name: "mail-1 session 로그인 창 열기" }).click();
+    await expect(page.getByRole("row", { name: /mail-1/ }).getByRole("status")).toContainText(
+      "로그인 창을 닫았습니다",
+    );
+    expect(state.notices).toEqual([]);
+    expect(await loginCalls(page)).toEqual([["mail-1"]]);
+  } finally {
+    await stop();
+  }
+});
+
+test("without the preload the session slot shows its reason and no login button", async ({
+  page,
+}) => {
+  const state = { loggedIn: false, notices: [] as string[] };
+  const stop = await openSessionScreen(page, state);
+  try {
+    await expect(page.getByRole("row", { name: /mail-1/ })).toContainText("로그인이 필요합니다");
+    await expect(page.getByRole("button", { name: /로그인 창 열기/ })).toHaveCount(0);
+  } finally {
+    await stop();
+  }
+});

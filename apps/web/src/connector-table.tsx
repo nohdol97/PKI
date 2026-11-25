@@ -1,6 +1,7 @@
 // The Sources screen's Connector table: state, the note of I01-R17, the sync button,
 // the reason a sync stopped, from its code only (I01-R19), and for an instance that declared
 // credential slots the slots' states with the input, save and delete (I06-R14).
+import { useState } from "react";
 import type { ConnectorSummary } from "@pki/contracts";
 import type { SecretAction } from "./api-key.ts";
 import { SecretField } from "./secret-field.tsx";
@@ -19,19 +20,57 @@ const CONNECTOR_STATE: Record<ConnectorSummary["state"], string> = {
 
 type Slot = NonNullable<ConnectorSummary["credentials"]>[number];
 
-/** One slot: its state, and where the shell is there the secret field for its value (I06-R14). */
+/**
+ * One slot: its state, and where the shell is there the secret field for its value (I06-R14). The session
+ * slot of an interactive-login instance takes no value: it shows the login button and, where a session is
+ * stored, the delete (I06S-R2).
+ */
 function SlotEntry({
   connectorId,
   slot,
   canEnter,
+  canLogin,
   onChange,
+  onLogin,
 }: {
   connectorId: string;
   slot: Slot;
   canEnter: boolean;
+  canLogin: boolean;
   onChange: (connectorId: string, name: string, action: SecretAction) => Promise<void> | void;
+  onLogin: (connectorId: string) => Promise<void> | void;
 }) {
   const label = `${connectorId} ${slot.slot}`;
+  const [opening, setOpening] = useState(false);
+  if (slot.login) {
+    return (
+      <li>
+        {slot.slot}: {CREDENTIAL_SLOT_STATE_TEXT[slot.state]}
+        {canLogin && (
+          <button
+            type="button"
+            aria-label={`${label} 로그인 창 열기`}
+            disabled={opening}
+            onClick={() => {
+              setOpening(true);
+              void Promise.resolve(onLogin(connectorId)).finally(() => setOpening(false));
+            }}
+          >
+            로그인 창 열기
+          </button>
+        )}
+        {canEnter && slot.state === "present" && (
+          <button
+            type="button"
+            aria-label={`${label} 삭제`}
+            onClick={() => void onChange(connectorId, slot.name, { kind: "delete" })}
+          >
+            로그아웃
+          </button>
+        )}
+      </li>
+    );
+  }
   return (
     <li>
       {slot.slot}: {CREDENTIAL_SLOT_STATE_TEXT[slot.state]}
@@ -53,8 +92,10 @@ export function ConnectorTable({
   syncStops,
   onSync,
   canEnterCredentials = false,
+  canLogin = false,
   credentialNotes = {},
   onCredentialChange = () => {},
+  onLogin = () => {},
 }: {
   connectors: readonly ConnectorSummary[];
   /** By instance id: the text naming why that instance's last sync stopped. */
@@ -62,6 +103,8 @@ export function ConnectorTable({
   onSync: (id: string) => void;
   /** True where the shell's store is (Electron); without it a slot is shown but takes no value (I06-R14). */
   canEnterCredentials?: boolean;
+  /** True where the shell can open a login window (the preload's `openLogin`, I06S-R2). */
+  canLogin?: boolean;
   /** By instance id: what became of the last credential action. */
   credentialNotes?: Readonly<Record<string, string>>;
   onCredentialChange?: (
@@ -69,6 +112,8 @@ export function ConnectorTable({
     name: string,
     action: SecretAction,
   ) => Promise<void> | void;
+  /** The login button of an interactive-login instance's session slot; given the instance's id only. */
+  onLogin?: (connectorId: string) => Promise<void> | void;
 }) {
   return (
     <>
@@ -92,7 +137,9 @@ export function ConnectorTable({
                           connectorId={c.id}
                           slot={slot}
                           canEnter={canEnterCredentials}
+                          canLogin={canLogin}
                           onChange={onCredentialChange}
+                          onLogin={onLogin}
                         />
                       ))}
                     </ul>
