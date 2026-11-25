@@ -6,8 +6,10 @@
 import {
   isBackendReadableSecret,
   isConnectorCredentialSecret,
+  LoginSettingsSchema,
   SecretNameSchema,
   SecretValueSchema,
+  type LoginSettings,
   type SecretRead,
 } from "@pki/contracts";
 import { randomBytes } from "node:crypto";
@@ -84,6 +86,13 @@ export class BackendStartError extends Error {
   }
 }
 
+/** A login answer without its message fields: the description it carries, if any. */
+function settingsOf(message: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(message).filter(([key]) => key !== "type" && key !== "id" && key !== "none"),
+  );
+}
+
 const FromBackend = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("ready"), port: z.int().min(1).max(65535) }),
   z.strictObject({
@@ -117,6 +126,14 @@ const FromBackend = z.discriminatedUnion("type", [
   }),
   // the backend's count-only message for an OS toast (P02-R9): its five keys exactly, checked again by the notifier
   NotifyMessageSchema,
+  // the answer to a login request: the description with the stored name, or none (I06S-R3)
+  LoginSettingsSchema.partial()
+    .extend({ type: z.literal("login"), id: z.int().positive(), none: z.literal(true).optional() })
+    .refine((message) =>
+      message.none === true
+        ? Object.keys(settingsOf(message)).length === 0
+        : LoginSettingsSchema.safeParse(settingsOf(message)).success,
+    ),
   // a "write" carries the value (a Connector's rotated session value, I06S-R8); no other mode does
   z
     .strictObject({
@@ -212,6 +229,8 @@ export interface BackendOptions {
   normalizerHost?: ((backend: BackendChild) => NormalizerHostBroker) | undefined;
   /** How long a reveal request waits for the backend's answer (default 5 s). */
   revealTimeoutMs?: number | undefined;
+  /** How long a login request waits for the backend's answer (default 5 s). */
+  loginTimeoutMs?: number | undefined;
   /**
    * Shows the OS toast of a `notify` message (P02-R9, notifier.ts) and answers what the platform did, which goes
    * back to the backend as `notify-ack`; undefined answers nothing. Without it the answer is `unavailable`.
@@ -239,6 +258,12 @@ export interface Backend {
    * undefined when the backend has no path to show, ends, or does not answer in time.
    */
   revealPath(sourceVersionId: number): Promise<string | undefined>;
+  /**
+   * Asks the backend for an instance's login description and the stored name of its session slot (I06S-R3, over
+   * this channel, never HTTP). Resolves undefined when the instance has none, the backend ends, or it does
+   * not answer in time.
+   */
+  loginSettings(connectorId: string): Promise<LoginSettings | undefined>;
   /** Tells the backend the OS woke from sleep (H02A-R11), one way; nothing once the process has ended. */
   resumed(): void;
   /**
@@ -275,6 +300,9 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
   const reveals = new Map<number, (path: string | undefined) => void>();
   let revealIds = 0;
   void exited.then(() => reveals.forEach((answer) => answer(undefined)));
+  const logins = new Map<number, (settings: LoginSettings | undefined) => void>();
+  let loginIds = 0;
+  void exited.then(() => logins.forEach((answer) => answer(undefined)));
 
   const port = await new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -313,6 +341,13 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
       }
       if (message.data.type === "reveal-path") {
         return reveals.get(message.data.id)?.(message.data.path ?? undefined);
+      }
+      if (message.data.type === "login") {
+        const { id, none } = message.data;
+        // the schema already held the rest to the description's shape; `none` is no description
+        return logins.get(id)?.(
+          none === true ? undefined : LoginSettingsSchema.parse(settingsOf(message.data)),
+        );
       }
       if (message.data.type === "normalizer-host-start") {
         return normalizerHost?.start(message.data.id);
@@ -356,6 +391,20 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
         };
         reveals.set(id, answer);
         child.postMessage({ type: "reveal-request", id, sourceVersionId });
+      });
+    },
+    loginSettings(connectorId) {
+      if (ended) return Promise.resolve(undefined);
+      const id = (loginIds += 1);
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => answer(undefined), options.loginTimeoutMs ?? 5_000);
+        const answer = (settings: LoginSettings | undefined) => {
+          clearTimeout(timer);
+          logins.delete(id);
+          resolve(settings);
+        };
+        logins.set(id, answer);
+        child.postMessage({ type: "login-request", id, connectorId });
       });
     },
     async stop() {

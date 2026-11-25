@@ -6,6 +6,7 @@
 // port can be taken by any local process, T06 handoff 3). A quit stops whatever is
 // running or still starting, and starts nothing more.
 import { randomBytes } from "node:crypto";
+import type { LoginSettings } from "@pki/contracts";
 import type { Backend } from "./backend-process.ts";
 
 export interface SupervisorOptions {
@@ -25,6 +26,8 @@ export interface Supervisor {
   registerLocationTicket(input: Parameters<Backend["registerLocationTicket"]>[0]): boolean;
   /** Asks the running backend where a local source's file is; undefined when none is running or none to show. */
   revealPath(sourceVersionId: number): Promise<string | undefined>;
+  /** Asks the running backend for an instance's login description; undefined when none is running or it has none. */
+  loginSettings(connectorId: string): Promise<LoginSettings | undefined>;
   /** Tells the running backend the OS woke from sleep; nothing when none is running. */
   resumed(): void;
   /** Stops the backend (or the one starting) and restarts nothing after it. */
@@ -69,6 +72,7 @@ export async function superviseBackend(options: SupervisorOptions): Promise<Supe
     url: () => running?.url,
     registerLocationTicket: (input) => running?.registerLocationTicket(input) ?? false,
     revealPath: async (sourceVersionId) => running?.revealPath(sourceVersionId),
+    loginSettings: async (connectorId) => running?.loginSettings(connectorId),
     resumed: () => running?.resumed(),
     async stop() {
       stopping = true;
