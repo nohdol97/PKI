@@ -1301,11 +1301,11 @@ describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a creden
   it("is true to the code: one place makes the object, asks the slots first, reads only the fixed health reason, skips the rejected hourly", () => {
     const open = connectors.slice(connectors.indexOf("async function openConnector("));
     const body = open.slice(0, open.indexOf("\n}\n"));
-    expect(body.indexOf("reasonOfPresence(await access.check())")).toBeGreaterThan(0);
-    expect(body.indexOf("reasonOfPresence(await access.check())")).toBeLessThan(body.indexOf("connector = factory();"));
+    expect(body.indexOf("access.presenceReason(await access.check())")).toBeGreaterThan(0);
+    expect(body.indexOf("access.presenceReason(await access.check())")).toBeLessThan(body.indexOf("connector = factory();"));
     expect(body.indexOf("connector = factory();")).toBeLessThan(body.indexOf("initializeConnector(connector, config, { credentials: access.credentials })"));
     expect(connectors).toContain("return health.reason === HEALTH_REASON_CREDENTIAL_REJECTED ? \"rejected\" : \"down\";");
-    expect(connectors).toContain('if (entry.summary.reason === "credential-rejected" || entry.slot) return entry.summary.state;');
+    expect(connectors).toContain("if (isRejection(entry.summary.reason) || entry.slot) return entry.summary.state;");
     expect(connectors).toContain('return { stop: "credential-unusable" }; // the same call is not tried again (I06-R10)');
     const screen = read("apps/web/src/connector-credential.ts");
     const secretCheck = read("apps/web/src/api-key.ts");
