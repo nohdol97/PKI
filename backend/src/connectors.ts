@@ -54,7 +54,6 @@ import {
   createCredentialAccess,
   declareCredentials,
   loginValid,
-  reasonOfPresence,
   REFUSING_CREDENTIALS,
   type CredentialAccess,
   type CredentialStore,
@@ -319,6 +318,13 @@ async function runSync(
 }
 
 /**
+ * Whether a reason says the origin system refused the credential or its session (I06-R11, I06S-R11): such
+ * an instance is not offered to the origin again by the clock, and its notices keep a gap. One rule for both.
+ */
+const isRejection = (reason: ConnectorSummary["reason"]): boolean =>
+  reason === "credential-rejected" || reason === "login-required";
+
+/**
  * The sync answers whose stop came from an object the instance had already replaced (I06-R10). A side
  * table, not a field: the answer is the API's body and carries nothing about the manager's objects.
  */
@@ -436,7 +442,7 @@ async function openConnector(
   access: CredentialAccess,
 ): Promise<{ connector: Connector | undefined; outcome: InitializeOutcome }> {
   if (access.declared) {
-    const reason = reasonOfPresence(await access.check());
+    const reason = access.presenceReason(await access.check());
     if (reason) return { connector: undefined, outcome: { state: "unavailable", reason } };
   }
   let connector: Connector;
@@ -646,9 +652,7 @@ export async function createConnectorManager(
     }
     // the gap of a rejected instance runs from the start of the rebuild that ended so; set before the slot frees
     entry.rejectedRebuildAt =
-      rebuiltAt !== undefined && entry.summary.reason === "credential-rejected"
-        ? rebuiltAt
-        : undefined;
+      rebuiltAt !== undefined && isRejection(entry.summary.reason) ? rebuiltAt : undefined;
     return "kept";
   }
 
@@ -675,7 +679,7 @@ export async function createConnectorManager(
   }
 
   const gapLeftMs = (entry: Entry): number =>
-    entry.summary.reason === "credential-rejected" && entry.rejectedRebuildAt !== undefined
+    isRejection(entry.summary.reason) && entry.rejectedRebuildAt !== undefined
       ? Math.max(0, entry.rejectedRebuildAt + CREDENTIAL_RETRY_MIN_MS - clock.now())
       : 0;
 
@@ -763,6 +767,7 @@ export async function createConnectorManager(
             slot,
             name,
             state: states[i] ?? "unavailable",
+            ...(slot === entry.login?.slot ? { login: true as const } : {}),
           })),
         }
       : shown;
@@ -805,7 +810,7 @@ export async function createConnectorManager(
       if (entry.summary.state === "ready") return "ready";
       if (!entry.factory || !entry.slots) return entry.summary.state; // nothing to make, or a declaration that cannot be used
       // a refused value is not offered to the origin again by the clock (I06-R11), nor while the slot is taken
-      if (entry.summary.reason === "credential-rejected" || entry.slot) return entry.summary.state;
+      if (isRejection(entry.summary.reason) || entry.slot) return entry.summary.state;
       if (entry.lateRechecks >= RECHECK_LATE_LIMIT) {
         const { id: instanceId } = entry.summary;
         if (!entry.abandonedLogged) log("connector-recheck-abandoned", { id: instanceId });

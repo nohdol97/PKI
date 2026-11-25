@@ -113,14 +113,22 @@ async function within<T>(work: () => Promise<T>, ms: number): Promise<T | undefi
 
 /**
  * The reason the answers of a presence check give before a Connector is made (I06-R9): a store that
- * cannot answer, then a value that is missing; none when every slot is there.
+ * cannot answer, then a value that is missing; none when every slot is there. When only the session
+ * slot (index `sessionAt`) is empty the way out is a login, not a value to type (I06S-R10).
  */
 export function reasonOfPresence(
   states: readonly SecretPresence[],
-): Extract<CredentialReason, "credential-store-unavailable" | "credential-missing"> | undefined {
+  sessionAt?: number,
+):
+  | Extract<
+      CredentialReason,
+      "credential-store-unavailable" | "credential-missing" | "login-required"
+    >
+  | undefined {
   if (states.includes("unavailable")) return "credential-store-unavailable";
-  if (states.includes("missing")) return "credential-missing";
-  return undefined;
+  const empty = states.flatMap((state, i) => (state === "missing" ? [i] : []));
+  if (empty.length === 0) return undefined;
+  return empty.every((i) => i === sessionAt) ? "login-required" : "credential-missing";
 }
 
 /** What one Connector object's accessor handed it, and how to cut the accessor and judge a refusal. */
@@ -133,6 +141,8 @@ export interface CredentialAccess {
   states(): SecretPresence[];
   /** Asks the store whether each declared slot has a value, all at once under one limit (I06-R6). */
   check(): Promise<SecretPresence[]>;
+  /** `reasonOfPresence` for this accessor's declaration: an empty session slot alone is `login-required`. */
+  presenceReason(states: readonly SecretPresence[]): ReturnType<typeof reasonOfPresence>;
   /** From now on every read is refused without asking the store (I06-R7). */
   revoke(): void;
   /**
@@ -153,7 +163,10 @@ export function createCredentialAccess(
   sessionSlot?: string,
 ): CredentialAccess {
   const names = new Map(declaration.map(({ slot, name }) => [slot, name]));
-  const marks = { missing: false, unreadable: false, undeclared: false };
+  const marks = { missing: false, missingSession: false, unreadable: false, undeclared: false };
+  const sessionAt = declaration.findIndex(({ slot }) => slot === sessionSlot);
+  const presenceReason = (states: readonly SecretPresence[]) =>
+    reasonOfPresence(states, sessionAt < 0 ? undefined : sessionAt);
   let revoked = false;
   let last: SecretPresence[] = declaration.map(() => "unavailable");
 
@@ -197,8 +210,10 @@ export function createCredentialAccess(
       if (revoked || !live()) return refuse(); // cut while it waited: the value goes nowhere
       const answer = SecretReadSchema.safeParse(raw);
       if (answer.success && answer.data.state === "present") return answer.data.value;
-      if (answer.success && answer.data.state === "missing") marks.missing = true;
-      else marks.unreadable = true; // unavailable, late, thrown or of a wrong shape
+      if (answer.success && answer.data.state === "missing") {
+        if (slot === sessionSlot) marks.missingSession = true;
+        else marks.missing = true;
+      } else marks.unreadable = true; // unavailable, late, thrown or of a wrong shape
       return refuse();
     },
     async write(slot, value) {
@@ -224,14 +239,17 @@ export function createCredentialAccess(
     declared: declaration.length > 0,
     states: () => [...last],
     check,
+    presenceReason,
     revoke: () => void (revoked = true),
     async judge() {
       if (declaration.length === 0 || marks.undeclared) return undefined;
-      const fromStore = reasonOfPresence(await check());
+      const fromStore = presenceReason(await check());
       if (fromStore) return fromStore;
       if (marks.missing) return "credential-missing";
+      if (marks.missingSession) return "login-required";
       if (marks.unreadable) return "credential-unreadable";
-      return "credential-rejected";
+      // an instance with a session slot: every refusal asks for a login, whichever slot the origin refused (I06S-D7)
+      return sessionAt < 0 ? "credential-rejected" : "login-required";
     },
   };
 }

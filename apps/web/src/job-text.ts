@@ -77,6 +77,7 @@ const REASON: Readonly<Record<string, string>> = {
   "credential-missing": "수집기의 자격 증명 값이 없어 실행할 수 없음",
   "credential-unreadable": "저장된 수집기 자격 증명을 읽을 수 없어 실행할 수 없음",
   "credential-rejected": "원 시스템이 수집기의 자격 증명을 받아 주지 않아 실행할 수 없음",
+  "login-required": "수집기의 로그인이 필요해(세션 만료·로그아웃) 실행할 수 없음",
   "manager-not-ready": "수집기 관리자가 아직 준비되지 않아 잠시 미룸",
   "instance-not-found": "설정에서 사라진 수집기의 작업",
   "unmapped-sync-end": "알 수 없는 동기화 종료",
