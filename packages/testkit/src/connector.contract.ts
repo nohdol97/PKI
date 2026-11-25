@@ -698,7 +698,7 @@ async function runCheck(
     await finalCursor(check, subject, whole);
     await documents(check, subject, whole);
     if (scenario.later !== undefined) {
-      await rescan(check, create, scenario.later, whole, upserts, context);
+      await rescan(check, create, scenario.later, whole, upserts, context, session !== undefined);
     }
   }
 
@@ -816,17 +816,29 @@ async function rescan(
   whole: Read,
   upserts: Map<Identity, number>,
   context: ConnectorContext | undefined,
+  /** The scenario has a session slot: a new instance refused for the stored session did not get it written back. */
+  hasSession: boolean,
 ) {
   const connector = create();
+  const refusedAsStale = (error: unknown) =>
+    hasSession &&
+    isConnectorCredentialError(error instanceof Error ? (error.cause ?? error) : error);
   try {
     await initialize(connector, later, context);
   } catch (error) {
+    if (refusedAsStale(error)) return void check.add("session-not-persisted");
     throw new Error(
       "the Connector did not initialize with the scenario's later config",
       check.thrown(error) ? undefined : { cause: error },
     );
   }
-  const after = await check.read(connector, 1000, upserts);
+  let after: Read;
+  try {
+    after = await check.read(connector, 1000, upserts);
+  } catch (error) {
+    if (refusedAsStale(error)) return void check.add("session-not-persisted");
+    throw error;
+  }
   if (!after.complete) return;
   const deleted = new Set<Identity>();
   const upserted = new Map<Identity, Record<string, unknown>>();

@@ -1368,14 +1368,14 @@ describe("docs.connector-sdk (I06): chapters 2, 5, 6 and 7 carry what the creden
       "값은 원래 글, base64로 바꾼 글, 주소용으로 바꾼 글(percent-encoding) 세 모양으로 찾는다.",
       "값이 든 시나리오의 확인은 4초(`LOG_TAP_DEADLINE_MS`) 안에 끝나야 한다. 더 느린 수집기는 시험의 제한 시간을 늘려도 그 상한에서 확인이 실패한다. 상한 뒤에 버려진 실행의 뒤늦은 출력은 다음 확인의 것으로 잡히거나 실제 `console`로 나갈 수 있다.",
       "이 예시는 `exports`에 올라 있지 않다. 포크는 이 파일과 그것이 가져오는 `example-connector.ts`, 계약 시험이 쓰는 `synthetic-notes.ts`를 자기 수집기 패키지로 복사해 모델로 삼는다.",
-      "예시 패키지에는 규격을 한 곳만 어긴 변형이 여덟 있다.",
+      "예시 패키지에는 규격을 한 곳만 어긴 변형이 열 있다.",
     ]) {
       expect(six, sentence).toContain(sentence);
     }
-    // the example is not exported (the doc says so) and the eight variants are in the file
+    // the example is not exported (the doc says so) and the ten variants are in the file
     expect(JSON.parse(read("packages/connector-example/package.json")).exports).toEqual({ "./adapters": "./src/adapters/example-connector.ts" });
     const variants = read("packages/connector-example/src/adapters/violating-connectors.ts").match(/^export function create\w+Connector\(\)/gm) ?? [];
-    expect(variants).toHaveLength(8);
+    expect(variants).toHaveLength(10);
   });
 
   it("chapter 7 lists the optional `credentials` of an instance and says the slots are asked for before the factory is called", () => {

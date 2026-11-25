@@ -2,6 +2,11 @@
 // here comes from a real system.
 import type { CredentialedConfig } from "./credentialed-connector.ts";
 import type { ExampleConfig } from "./example-connector.ts";
+import {
+  createRotatingOrigin,
+  sessionValueOf,
+  type RotatingConfig,
+} from "./rotating-session-connector.ts";
 
 const NAMESPACE = "example-notes";
 
@@ -72,3 +77,23 @@ export const CREDENTIALED_EARLIER: CredentialedConfig = {
   acceptedToken: SYNTHETIC_TOKEN,
 };
 export const CREDENTIALED_LATER: CredentialedConfig = { ...LATER, acceptedToken: SYNTHETIC_TOKEN };
+
+/**
+ * The session origin at two moments, signed in once (I06S-R13): the notes of EARLIER and LATER behind one
+ * origin whose token rotates. A new origin per call, because the sign-in state is the origin's own.
+ */
+export function rotatingSession() {
+  const origin = createRotatingOrigin();
+  const first = sessionValueOf(origin.login());
+  const earlier: RotatingConfig = { ...EARLIER, origin };
+  const later: RotatingConfig = { ...LATER, origin };
+  return {
+    origin,
+    /** The session slot's value the user's sign-in stored. */
+    first,
+    earlier,
+    later,
+    /** A session the origin never issued: what an expired or signed-out one looks like. */
+    wrong: sessionValueOf("synthetic-session-expired-0000"),
+  };
+}

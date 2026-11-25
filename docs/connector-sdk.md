@@ -417,7 +417,7 @@ AssertionError: expected [ 'no-progress' ] to deeply equal []
 
 ### 일부러 어긴 변형 — 위반 코드가 나오는 것을 보여 주는 것
 
-예시 패키지에는 규격을 한 곳만 어긴 변형이 여덟 있다. 다섯은 위의 자격 증명 코드를 하나씩만 어기는 변형이고, 나머지 셋은 다음과 같다. 진행 없는 cursor를 돌려주면 `no-progress`, 능력에서 `deletes`를 거짓으로 선언하고 삭제 사건을 내면 `capability-deletes`, 초기화 전에 `getChanges`에 빈 페이지로 답하면 `responds-before-init`이다. 이 변형들은 모델로 삼으면 안 되고, 어떤 위반이 어떤 코드로 나오는지 보는 용도다. 변형 하나는 이렇게 생겼다.
+예시 패키지에는 규격을 한 곳만 어긴 변형이 열 있다. 다섯은 위의 자격 증명 코드를 하나씩만 어기는 변형이고, 둘은 세션 코드(`rotated-credential-leaked`, `session-not-persisted`)를 하나씩만 어기는 변형이며, 나머지 셋은 다음과 같다. 진행 없는 cursor를 돌려주면 `no-progress`, 능력에서 `deletes`를 거짓으로 선언하고 삭제 사건을 내면 `capability-deletes`, 초기화 전에 `getChanges`에 빈 페이지로 답하면 `responds-before-init`이다. 이 변형들은 모델로 삼으면 안 되고, 어떤 위반이 어떤 코드로 나오는지 보는 용도다. 변형 하나는 이렇게 생겼다.
 
 <!-- excerpt: packages/connector-example/src/adapters/violating-connectors.ts -->
 ```ts
