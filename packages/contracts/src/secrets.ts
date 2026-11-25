@@ -70,9 +70,62 @@ export interface SecretSource {
    * never silently reuses its key. "done" also when nothing was stored.
    */
   deleteOthers(keep: string): Promise<"done" | "unavailable">;
+  /**
+   * Stores `value` under a Connector credential name (I06S-R8): "done" when stored, "unavailable" when the
+   * store refuses the name or cannot be used. Absent on a source that cannot store.
+   */
+  write?(name: string, value: string): Promise<"done" | "unavailable">;
 }
 
 /** What the preload's secret functions answer the page; no answer carries a value. */
 export type SecretWriteResult = { ok: true } | { ok: false; error: "unavailable" };
 export type SecretPresenceResult =
   { ok: true; present: boolean } | { ok: false; error: "unavailable" };
+
+/** Provisional (I06S-R5), one place: how long a login window may stay open before it ends `timeout`. */
+export const LOGIN_TIMEOUT_MS = 300_000;
+
+const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,64}$/;
+
+/** An https address, or an http one on the loopback (`127.0.0.1`, `localhost`) (I06S-R1). */
+function loginUrl(value: string): boolean {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  if (url.protocol === "https:") return true;
+  return url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost");
+}
+
+/**
+ * What a fork's registration says about one interactive login (I06S-R1): the session slot, the page to
+ * open, the address prefix that means "logged in", and the 1-8 cookies that make up the session.
+ */
+export const LoginDescriptionSchema = z.strictObject({
+  slot: z.string(),
+  startUrl: z.string().refine(loginUrl),
+  doneUrlPrefix: z.string().refine(loginUrl),
+  cookies: z
+    .array(z.string().regex(COOKIE_NAME))
+    .min(1)
+    .max(8)
+    .refine((names) => new Set(names).size === names.length),
+});
+export type LoginDescription = z.infer<typeof LoginDescriptionSchema>;
+
+/** What the shell gets from the backend to open a login (I06S-R3): the description without its slot, and the stored name. */
+export const LoginSettingsSchema = LoginDescriptionSchema.omit({ slot: true }).extend({
+  name: SecretNameSchema,
+});
+export type LoginSettings = z.infer<typeof LoginSettingsSchema>;
+
+/** Why a login ended without storing a session (I06S-R5). */
+export const LOGIN_ERRORS = [
+  "cancelled",
+  "timeout",
+  "no-session",
+  "too-large",
+  "store-unavailable",
+  "invalid",
+  "busy",
+] as const;
+export type LoginError = (typeof LOGIN_ERRORS)[number];
+export type LoginResult = { ok: true } | { ok: false; error: LoginError };

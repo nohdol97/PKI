@@ -51,6 +51,7 @@ export const CREDENTIAL_REASON_TEXT: Readonly<Record<CredentialReason, string>> 
   "credential-unreadable": "저장된 자격 증명을 읽을 수 없습니다. 값을 지우고 다시 입력하세요.",
   "credential-rejected":
     "원 시스템이 자격 증명을 거부했습니다(틀림, 만료, 철회). 값을 고쳐 입력하세요.",
+  "login-required": "로그인이 필요합니다(세션 만료·로그아웃). 로그인 창을 다시 여세요.",
 };
 
 /** A slot as the store last answered for it (I06-R13); the value is never shown. */

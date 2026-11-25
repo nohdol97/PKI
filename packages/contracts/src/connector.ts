@@ -74,6 +74,11 @@ export const HEALTH_REASON_CREDENTIAL_REJECTED = "credential-rejected";
 export interface ConnectorCredentials {
   /** The slot's value; a slot that cannot be used is refused with ConnectorCredentialError. */
   read(slot: string): Promise<string>;
+  /**
+   * Replaces the session slot's value (I06S-R7), e.g. with a rotated token before the next request. Only
+   * the instance's session slot takes one; any other write is refused with ConnectorCredentialError.
+   */
+  write?(slot: string, value: string): Promise<void>;
 }
 
 /** What the product hands `initialize` beside the config (I06-R5). */

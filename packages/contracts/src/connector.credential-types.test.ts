@@ -11,6 +11,8 @@ import {
   type Connector,
   type ConnectorContext,
 } from "./connector.ts";
+import { CREDENTIAL_REASONS, ConnectorSummarySchema } from "./index.ts";
+import { LOGIN_TIMEOUT_MS, LoginDescriptionSchema } from "./secrets.ts";
 
 /** The shape every Connector had before this change: `initialize` takes the config only. */
 const legacy: Connector = {
@@ -68,5 +70,45 @@ describe("connector.credential-types", () => {
 
   it("names the health reason that reports a rejection", () => {
     expect(HEALTH_REASON_CREDENTIAL_REJECTED).toBe("credential-rejected");
+  });
+
+  it("adds the session surface as optional pieces (I06S-C1 types)", async () => {
+    const readOnly: ConnectorContext = { credentials: { read: async () => "x" } };
+    const writing: ConnectorContext = {
+      credentials: { read: async () => "x", write: async () => {} },
+    };
+    await expect(writing.credentials.write?.("session", "v")).resolves.toBeUndefined();
+    expect(readOnly.credentials.write).toBeUndefined();
+    expect(CREDENTIAL_REASONS).toContain("login-required");
+    expect(LOGIN_TIMEOUT_MS).toBe(300_000);
+    const summary = ConnectorSummarySchema.parse({
+      id: "a",
+      kind: "k",
+      state: "unavailable",
+      reason: "login-required",
+      credentials: [{ slot: "session", name: "n", state: "missing", login: true }],
+    });
+    expect(summary.credentials?.[0]?.login).toBe(true);
+  });
+
+  it("accepts https and loopback http login descriptions and rejects the rest", () => {
+    const base = {
+      slot: "session",
+      startUrl: "https://idp.example.test/login",
+      doneUrlPrefix: "https://app.example.test/home",
+      cookies: ["sid"],
+    };
+    expect(LoginDescriptionSchema.safeParse(base).success).toBe(true);
+    expect(
+      LoginDescriptionSchema.safeParse({ ...base, startUrl: "http://127.0.0.1:8080/x" }).success,
+    ).toBe(true);
+    expect(
+      LoginDescriptionSchema.safeParse({ ...base, startUrl: "http://example.com/x" }).success,
+    ).toBe(false);
+    expect(LoginDescriptionSchema.safeParse({ ...base, cookies: [] }).success).toBe(false);
+    const nine = Array.from({ length: 9 }, (_, i) => `c${i}`);
+    expect(LoginDescriptionSchema.safeParse({ ...base, cookies: nine }).success).toBe(false);
+    expect(LoginDescriptionSchema.safeParse({ ...base, cookies: ["a", "a"] }).success).toBe(false);
+    expect(LoginDescriptionSchema.safeParse({ ...base, cookies: ["a b"] }).success).toBe(false);
   });
 });

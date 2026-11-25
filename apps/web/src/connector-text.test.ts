@@ -44,6 +44,7 @@ describe("credential wording (I06-R14, I06-C11 ⑤)", () => {
     expect(CREDENTIAL_REASON_TEXT["credential-unreadable"]).toContain("지우고 다시");
     expect(CREDENTIAL_REASON_TEXT["credential-rejected"]).toContain("거부");
     expect(CREDENTIAL_REASON_TEXT["credential-store-unavailable"]).toContain("저장소");
+    expect(CREDENTIAL_REASON_TEXT["login-required"]).toContain("로그인 창을 다시 여세요");
   });
 
   it("has its own text for each state of a slot", () => {
