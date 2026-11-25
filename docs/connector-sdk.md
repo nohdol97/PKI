@@ -623,6 +623,7 @@ describe("site.example-registration", () => {
 | `instance-id-invalid` | 인스턴스 `id`가 한도 밖 | 그 인스턴스를 빼고 계속한다 |
 | `instance-id-duplicate` | 같은 `id`가 둘 이상 | 첫 것만 쓰고 계속한다 |
 | `instance-credentials-invalid` | 인스턴스의 `credentials`(칸 이름의 목록)가 모양을 벗어남(이름의 모양, 중복, 8개 초과) | 그 인스턴스를 빼고 계속한다 |
+| `instance-login-invalid` | 인스턴스의 `login`(세션형 수집기의 로그인 설명)이 모양을 벗어나거나 그 `slot`이 같은 인스턴스의 `credentials`에 없음 | 그 인스턴스를 빼고 계속한다 |
 | `instance-kind-unknown` | 어디에도 없는 종류의 인스턴스 | 그 인스턴스만 `unavailable`로 두고 계속한다 |
 | `instance-kind-reserved` | 공용 종류나 대체하지 않은 자리표시의 인스턴스 | **시작을 멈춘다** |
 | `instance-id-reserved` | 공용 인스턴스의 ID | **시작을 멈춘다** |

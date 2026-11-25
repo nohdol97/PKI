@@ -9,11 +9,12 @@
 // and `--fixtures` as in dev.ts, the production build neither (shell-options.ts).
 import { startFailureLine, startFailureReport } from "./start-failure.ts";
 import { dataDirectory } from "@pki/storage";
-import type { LLMProvider } from "@pki/contracts";
+import type { LLMProvider, LoginSettings } from "@pki/contracts";
 import { bootBackend, closeProviders } from "./boot.ts";
 import { electronHostChannel } from "./normalizer-host-electron.ts";
 import { channelSecrets } from "./secret-sources.ts";
 import { locationTicket, type ApprovalTickets } from "./local-locations.ts";
+import { loginAnswer, loginRequest } from "./login-request.ts";
 import { revealRequest } from "./local-reveal.ts";
 import { shellOptions } from "./shell-options.ts";
 import type { RunningServer } from "./server.ts";
@@ -78,6 +79,8 @@ export async function runShell(site: SiteRegistration): Promise<void> {
         tickets: ApprovalTickets;
         /** The absolute path of a local source's file, for the shell only (P6). */
         revealPath(sourceVersionId: number): string | undefined;
+        /** An instance's interactive login, for the shell's login window only (I06S-R3). */
+        loginOf(connectorId: string): LoginSettings | undefined;
         /** The OS woke from sleep (H02A-R11). */
         resumed(): void;
         /** The shell's answer to a notify message (P02-R8). */
@@ -105,12 +108,13 @@ export async function runShell(site: SiteRegistration): Promise<void> {
       // the count-only message of an OS toast goes to the shell over this channel; its answer comes back below (P02-R8, R9)
       notifyChannel: { send: (message) => channel.post(message) },
     });
-    const { server, providers, tickets, notifyOutbox, revealPath, resumed, db } = booted;
+    const { server, providers, tickets, notifyOutbox, revealPath, loginOf, resumed, db } = booted;
     running = {
       server,
       providers,
       tickets,
       revealPath,
+      loginOf,
       resumed,
       notifyAck: (data) => notifyOutbox.acknowledge(data),
       close: () => db.close(),
@@ -164,6 +168,9 @@ export async function runShell(site: SiteRegistration): Promise<void> {
       const path = running?.revealPath(reveal.sourceVersionId) ?? null;
       return void channel.post({ type: "reveal-path", id: reveal.id, path });
     }
+    // the login description of an instance, answered to the shell only; never over HTTP (I06S-R3)
+    const login = loginRequest(data);
+    if (login) return void channel.post(loginAnswer(login.id, running?.loginOf(login.connectorId)));
     const message = parse(data);
     if (message?.type === "stop") return void stop();
     // dropped while no backend runs (H02A-R11)

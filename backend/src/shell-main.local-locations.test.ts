@@ -67,6 +67,13 @@ describe("the shell's location tickets", () => {
       proc.send({ type: "reveal-request", id: 5, sourceVersionId: 999 });
       expect(await answer).toEqual({ type: "reveal-path", id: 5, path: null });
 
+      // the shell asks for an instance's login; an instance with none answers `none`, over the channel only (I06S-R3)
+      const login = new Promise<unknown>((resolve) =>
+        proc.on("message", (m) => (m as { type: string }).type === "login" && resolve(m)),
+      );
+      proc.send({ type: "login-request", id: 6, connectorId: "nowhere" });
+      expect(await login).toEqual({ type: "login", id: 6, none: true });
+
       const listed = await send(port, routes.localLocations.path, h);
       expect((listed.body as { locations: unknown[] }).locations).toHaveLength(1);
     } finally {

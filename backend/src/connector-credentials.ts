@@ -6,7 +6,9 @@ import {
   CREDENTIAL_RETRY_MIN_MS,
   ConnectorCredentialError,
   isConnectorCredentialSecret,
+  LoginDescriptionSchema,
   SecretReadSchema,
+  SecretValueSchema,
   type ConnectorCredentials,
   type CredentialReason,
   type SecretPresence,
@@ -23,8 +25,8 @@ export const CREDENTIAL_CHECK_TIMEOUT_MS = 3_000;
 /** The shortest gap between two notice-driven rebuilds of a rejected instance; one value, in `@pki/contracts` (the screen reads it too). */
 export { CREDENTIAL_RETRY_MIN_MS };
 
-/** What the manager needs of the store: the two calls an accessor and a presence check make. */
-export type CredentialStore = Pick<SecretSource, "read" | "has">;
+/** What the manager needs of the store: the calls an accessor and a presence check make (`write`: session slot only). */
+export type CredentialStore = Pick<SecretSource, "read" | "has" | "write">;
 
 /**
  * `connector.<first 32 hex of sha256(kind + "\n" + instanceId)>.<slot>`. The kind in
@@ -52,6 +54,19 @@ export function credentialSlotsValid(slots: unknown): slots is readonly string[]
       slots.every((slot) => typeof slot === "string" && CREDENTIAL_SLOT_PATTERN.test(slot)) &&
       new Set(slots).size === slots.length
     );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether an instance's interactive-login description is well formed (I06S-R1): the shared schema, and a
+ * session slot that is one of the slots the same instance declares. A value that throws when read is not.
+ */
+export function loginValid(login: unknown, credentials: unknown): boolean {
+  try {
+    const parsed = LoginDescriptionSchema.safeParse(login);
+    return parsed.success && Array.isArray(credentials) && credentials.includes(parsed.data.slot);
   } catch {
     return false;
   }
@@ -134,6 +149,8 @@ export function createCredentialAccess(
   store: CredentialStore | undefined,
   /** False while the object this accessor belongs to is abandoned before it was ever adopted (I06-R7). */
   live: () => boolean = () => true,
+  /** The one slot a Connector may write (I06S-R7); none: the accessor only reads. */
+  sessionSlot?: string,
 ): CredentialAccess {
   const names = new Map(declaration.map(({ slot, name }) => [slot, name]));
   const marks = { missing: false, unreadable: false, undeclared: false };
@@ -183,6 +200,22 @@ export function createCredentialAccess(
       if (answer.success && answer.data.state === "missing") marks.missing = true;
       else marks.unreadable = true; // unavailable, late, thrown or of a wrong shape
       return refuse();
+    },
+    async write(slot, value) {
+      if (revoked || !live()) return refuse();
+      const name = sessionSlot !== undefined && slot === sessionSlot ? names.get(slot) : undefined;
+      // one line within the shell's limit; a value the shell would refuse is not sent (I06S-R7)
+      if (
+        name === undefined ||
+        store?.write === undefined ||
+        !SecretValueSchema.safeParse(value).success ||
+        /[\r\n]/.test(value)
+      ) {
+        return refuse();
+      }
+      const write = store.write.bind(store);
+      const answer = await within(() => write(name, value), CREDENTIAL_CHECK_TIMEOUT_MS);
+      if (revoked || !live() || answer !== "done") return refuse();
     },
   };
 

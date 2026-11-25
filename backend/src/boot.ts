@@ -11,6 +11,7 @@ import type {
   KnowledgeEngine,
   LLMProvider,
   LocalNormalizerPort,
+  LoginSettings,
   SecretSource,
   VectorIndex,
 } from "@pki/contracts";
@@ -212,6 +213,8 @@ export interface BootedBackend {
   notifyOutbox: NotifyOutbox;
   /** The file path of a local source for the shell's "show in folder": undefined unless the read gate shows the version (I02F-R2). */
   revealPath(sourceVersionId: number): string | undefined;
+  /** The interactive login of an instance, for the shell's login window only; undefined when it has none (I06S-R3). */
+  loginOf(connectorId: string): LoginSettings | undefined;
   /** The OS woke from sleep: check the periods now and wake the runner, not at the next 30-second check (H02A-R11). */
   resumed(): void;
 }
@@ -572,6 +575,7 @@ async function startBackend(
     tickets: localFiles.tickets,
     notifyOutbox,
     revealPath: (id) => revealPathOf(db, id, revealGate.sourceShown),
+    loginOf: (id) => connectors.loginOf(id),
     resumed() {
       try {
         scheduler.check();

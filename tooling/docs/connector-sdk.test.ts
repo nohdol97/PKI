@@ -674,13 +674,13 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     const code = read("backend/src/site-registration.ts");
     const union = /export type SiteRegistrationCode =([^;]*);/.exec(code)?.[1] ?? "";
     const all = [...union.matchAll(/"([a-z-]+)"/g)].map((m) => m[1] as string);
-    expect(all.length).toBe(13);
+    expect(all.length).toBe(14);
     for (const name of all) expect(namesToken(seven, name), name).toBe(true);
     const stopping = [...(/const STOPPING_CODES = \[([^\]]*)\]/.exec(code)?.[1] ?? "").matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
     const rows = seven.split("\n").filter((l) => /^\| `[a-z-]+` \|/.test(l));
     const stoppingRows = rows.filter((l) => l.includes("**시작을 멈춘다**")).map((l) => /^\| `([a-z-]+)`/.exec(l)?.[1]);
     expect(stoppingRows).toEqual(stopping);
-    expect(rows.length).toBe(11);
+    expect(rows.length).toBe(12);
   });
 
   it("names the public kinds and the placeholders the registration cannot or may take, as the code lists them", () => {
@@ -1261,7 +1261,7 @@ describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a creden
     const rows = eight
       .split("\n")
       .filter((l) => l.startsWith("| ") && !l.startsWith("| 경우 ") && !l.startsWith("| 사유 "))
-      .filter((l) => !l.startsWith("| `credential-"))
+      .filter((l) => !l.startsWith("| `credential-") && !l.startsWith("| `login-required`"))
       .map((l) => l.split("|")[1]?.trim());
     expect(rows).toEqual([
       "수집기가 값을 레코드의 본문이나 `metadata`에 넣어 돌려준다",

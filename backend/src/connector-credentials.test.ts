@@ -191,3 +191,102 @@ describe("the wait for a judgement fits the job's lease (I06-R10)", () => {
     expect(CREDENTIAL_CHECK_TIMEOUT_MS).toBeLessThan(DEFAULT_LEASE_MS);
   });
 });
+
+describe("the accessor's write: the session slot only (I06S-C1, R7)", () => {
+  const declaration = declareCredentials("k", "i", ["session", "token"]) as {
+    slot: string;
+    name: string;
+  }[];
+  const [sessionName, tokenName] = declaration.map((d) => d.name) as [string, string];
+
+  /** A memory store with a write that stores what it is given. */
+  function memory(seed: Record<string, string> = {}) {
+    const data = new Map(Object.entries(seed));
+    return {
+      data,
+      store: {
+        read: async (name: string) =>
+          data.has(name)
+            ? { state: "present" as const, value: data.get(name) as string }
+            : { state: "missing" as const },
+        has: async (name: string) => (data.has(name) ? ("present" as const) : ("missing" as const)),
+        write: async (name: string, value: string) => (data.set(name, value), "done" as const),
+      },
+    };
+  }
+  const seeded = () => memory({ [sessionName]: "first-0123456789", [tokenName]: "fixed-token-1" });
+
+  it("stores the value under the session slot's name and the next read returns it", async () => {
+    const { data, store } = seeded();
+    const access = createCredentialAccess(declaration, store, undefined, "session");
+    await access.credentials.write?.("session", "rotated-0123456789");
+    expect(data.get(sessionName)).toBe("rotated-0123456789");
+    await expect(access.credentials.read("session")).resolves.toBe("rotated-0123456789");
+  });
+
+  it.each([
+    ["a fixed slot", "token", "synthetic-value-1"],
+    ["an undeclared slot", "other", "synthetic-value-1"],
+    ["a value with a line break", "session", "line1\nline2"],
+    ["a value with a carriage return", "session", "line1\rline2"],
+    ["an empty value", "session", ""],
+    ["a value of 8193 characters", "session", "a".repeat(8193)],
+  ])("refuses %s and leaves the store as it was", async (_name, slot, value) => {
+    const { data, store } = seeded();
+    const before = new Map(data);
+    const access = createCredentialAccess(declaration, store, undefined, "session");
+    await expect(access.credentials.write?.(slot, value)).rejects.toBeInstanceOf(
+      ConnectorCredentialError,
+    );
+    expect(data).toEqual(before);
+  });
+
+  it("accepts a value of 8192 characters", async () => {
+    const { data, store } = memory();
+    const access = createCredentialAccess(declaration, store, undefined, "session");
+    await access.credentials.write?.("session", "a".repeat(8192));
+    expect(data.get(sessionName)).toHaveLength(8192);
+  });
+
+  it("refuses a write from a revoked accessor and from an abandoned object without asking the store", async () => {
+    const { data, store } = memory();
+    const write = vi.spyOn(store, "write");
+    const revoked = createCredentialAccess(declaration, store, undefined, "session");
+    revoked.revoke();
+    await expect(
+      revoked.credentials.write?.("session", "synthetic-value-1"),
+    ).rejects.toBeInstanceOf(ConnectorCredentialError);
+    const dead = createCredentialAccess(declaration, store, () => false, "session");
+    await expect(dead.credentials.write?.("session", "synthetic-value-1")).rejects.toBeInstanceOf(
+      ConnectorCredentialError,
+    );
+    expect(write).not.toHaveBeenCalled();
+    expect(data.size).toBe(0);
+  });
+
+  it("refuses when the instance has no session slot, the store cannot write, or the store says unavailable", async () => {
+    const { store } = memory();
+    const noSession = createCredentialAccess(declaration, store);
+    await expect(noSession.credentials.write?.("session", "synthetic-value-1")).rejects.toThrow(
+      "connector credential unusable",
+    );
+    const readOnly = createCredentialAccess(
+      declaration,
+      { read: store.read, has: store.has },
+      undefined,
+      "session",
+    );
+    await expect(readOnly.credentials.write?.("session", "synthetic-value-1")).rejects.toThrow(
+      "connector credential unusable",
+    );
+    const refusing = createCredentialAccess(
+      declaration,
+      { ...store, write: async () => "unavailable" as const },
+      undefined,
+      "session",
+    );
+    await expect(refusing.credentials.write?.("session", "synthetic-value-1")).rejects.toThrow(
+      "connector credential unusable",
+    );
+  });
+});
