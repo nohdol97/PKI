@@ -7,6 +7,7 @@ import {
   isBackendReadableSecret,
   isConnectorCredentialSecret,
   SecretNameSchema,
+  SecretValueSchema,
   type SecretRead,
 } from "@pki/contracts";
 import { randomBytes } from "node:crypto";
@@ -116,21 +117,39 @@ const FromBackend = z.discriminatedUnion("type", [
   }),
   // the backend's count-only message for an OS toast (P02-R9): its five keys exactly, checked again by the notifier
   NotifyMessageSchema,
-  z.strictObject({
-    type: z.literal("secret-request"),
-    id: z.int().positive(),
-    name: SecretNameSchema,
-    mode: z.enum(["read", "presence", "prune"]),
-  }),
+  // a "write" carries the value (a Connector's rotated session value, I06S-R8); no other mode does
+  z
+    .strictObject({
+      type: z.literal("secret-request"),
+      id: z.int().positive(),
+      name: SecretNameSchema,
+      mode: z.enum(["read", "presence", "prune", "write"]),
+      value: SecretValueSchema.optional(),
+    })
+    .refine((request) => (request.mode === "write") === (request.value !== undefined)),
 ]);
+
+type SecretStoreView = Pick<SecretStore, "read" | "has" | "set" | "deleteOthers" | "available">;
 
 const SECRET_UNAVAILABLE: SecretRead = { state: "unavailable" };
 
 async function answerSecret(
-  store: Pick<SecretStore, "read" | "has" | "deleteOthers" | "available"> | undefined,
+  store: SecretStoreView | undefined,
   name: string,
-  mode: "read" | "presence" | "prune",
+  mode: "read" | "presence" | "prune" | "write",
+  value?: string,
 ): Promise<SecretRead | { state: SecretRead["state"] }> {
+  if (mode === "write") {
+    // only a Connector credential name takes a value from the backend; a Provider key never does (I06S-R8).
+    // The answer says stored ("present") or not, and carries no value; the store refuses without OS protection.
+    if (!store || value === undefined || !isConnectorCredentialSecret(name))
+      return SECRET_UNAVAILABLE;
+    try {
+      return (await store.set(name, value)).ok ? { state: "present" } : SECRET_UNAVAILABLE;
+    } catch {
+      return SECRET_UNAVAILABLE;
+    }
+  }
   const provider = isBackendReadableSecret(name);
   // a prune keeps a Provider key and deletes other Provider keys only (I06-R4)
   const allowed = provider || (mode !== "prune" && isConnectorCredentialSecret(name));
@@ -184,7 +203,7 @@ export interface BackendOptions {
    * (`isConnectorCredentialSecret`, never for a prune) are looked up; a presence
    * request gets the state alone, never the value.
    */
-  secrets?: Pick<SecretStore, "read" | "has" | "deleteOthers" | "available"> | undefined;
+  secrets?: SecretStoreView | undefined;
   /**
    * Answers the backend's requests to start and end its normalizer host (I02B-R22, adapter ⓑ). Given
    * the backend's channel when it is forked; stopped when the backend exits. Without it the requests
@@ -275,7 +294,8 @@ export async function startBackendProcess(options: BackendOptions): Promise<Back
       if (!message.success) return fail("sent an unexpected message");
       if (message.data.type === "secret-request") {
         const { id, name, mode } = message.data;
-        void answerSecret(options.secrets, name, mode).then((answer) => {
+        const value = "value" in message.data ? message.data.value : undefined;
+        void answerSecret(options.secrets, name, mode, value).then((answer) => {
           // the backend may have exited meanwhile; nothing to answer then
           if (!ended) child.postMessage({ type: "secret", id, ...answer });
         });
