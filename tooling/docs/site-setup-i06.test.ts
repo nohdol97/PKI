@@ -167,7 +167,7 @@ describe("docs.site-setup (I06): S28 and S29 say what the fork runs, records and
       "원 시스템이 자격 증명을 거부할 때 수집기가 `ConnectorCredentialError`를 던지는지(그 밖의 오류나 `healthCheck`의 다른 사유로 알리면 제품은 거부인지 알 수 없고 같은 값으로 한 시간마다 다시 시도한다), 일시 장애는 `ConnectorError`(`retryable: true`)로 알리는지 본다.",
       "원 시스템의 만료 주기와 계정 잠금 정책, 만료되었을 때 사용자가 값을 다시 넣는 절차를 적는다.",
       "제품은 거부된 값을 한 시간마다 다시 시도하지 않고 변경 알림에는 30초에 한 번, 앱을 켤 때 한 번 시도하므로 그 횟수가 잠금 정책 안에 드는지 본다.",
-      "(회전하는 토큰)이면 수집기가 값을 되쓸 길이 없다. 그 사실을 [ownership.md 5절](ownership.md)의 방법으로 공용 저장소에 알린다.",
+      "세션 칸(`login`)으로 선언해 수집기가 `write`로 되쓰게 한다(S49, [connector-sdk.md](connector-sdk.md) 8장 「세션형 자격 증명」). 세션 칸이 아닌 고정 값 칸의 인스턴스는 수집기가 값을 되쓸 길이 없다. 그 사실을 [ownership.md 5절](ownership.md)의 방법으로 공용 저장소에 알린다.",
       "기록할 것: 결과와 원 시스템의 정책의 일반 요약(주소, 계정, 값은 적지 않는다).",
     ]) {
       expect(s29, sentence).toContain(sentence);
@@ -227,5 +227,28 @@ describe("docs.site-setup (I06): the settings row, S04's pointer and the range n
     const at = (n: string) => section.indexOf(`- [ ] **${n} `);
     expect(at("S27")).toBeLessThan(at("S28"));
     expect(at("S29")).toBeLessThan(at("S30"));
+  });
+});
+
+describe("docs.site-setup (I06S): S49 says what the fork runs on the Windows build and what stays unverified", () => {
+  it("S49 follows S29, names the five checks, the limit it hands over and what is not implemented", () => {
+    const s49 = item(siteText, "S49");
+    for (const sentence of [
+      "**S49 세션형 수집기의 로그인 설명(`login`)을 포크 등록에 적고, Windows 11 설치본에서 로그인 창, 세션 보존, 회전, 만료 뒤 다시 로그인, 누출 없음을 확인해 기록.**",
+      "공용 저장소는 가짜 `LoginHost`와 지어낸 원 시스템으로만 증명했고",
+      "① 로그인 창이 열리고 로그인 뒤 인스턴스가 `ready`",
+      "② 앱을 다시 켜도 세션이 남아 로그인 없이 동기화",
+      "③ 회전 뒤에도 동기화가 이어짐",
+      "④ 로그아웃이나 만료 뒤 `login-required`와 다시 로그인으로 풀림",
+      "⑤ 데이터 폴더·로그에 세션 값과 회전값이 없음",
+      "쿠키가 아닌 곳에 세션을 두거나 팝업 로그인을 쓰는 원 시스템이면 미구현, 배포처 후속으로 적고 [ownership.md 5절](ownership.md)로 알린다.",
+    ]) {
+      expect(s49, sentence).toContain(sentence);
+    }
+    expect(siteText.indexOf("- [ ] **S29 ")).toBeLessThan(siteText.indexOf("- [ ] **S49 "));
+    expect(siteText).toContain("이어서 [I06S](specs/2026-11-26-I06S-session-credentials.md) S49.");
+    // what S49 names in the code still exists
+    expect(read("packages/contracts/src/index.ts")).toContain('"login-required",');
+    expect(read("backend/src/site-registration.ts")).toContain('"instance-login-invalid"');
   });
 });

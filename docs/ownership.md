@@ -57,7 +57,7 @@ site/
 
 `site/config/connector-scopes.json`은 수집기 인스턴스마다의 접근 범위를 두는 파일이고, 가져온 범위가 인스턴스에 정해 둔 범위보다 느슨한 등급을 얻지 못하게 하는 기준이다([site-setup.md](site-setup.md) S18). 이 파일은 포크의 등록(`connectorScopes`)에 묶어야 쓰이고, 포크의 빌드가 그 값을 백엔드 묶음에 넣는다. 파일은 `site/config/connector-scopes.json`에만 둔다(다른 자리나 이름이면 빌드가 멈추거나 판정을 벗어난다. 방법은 [connector-sdk.md](connector-sdk.md) 7장). 공용 저장소의 import 검사(수집기 경로가 허용 목록 밖의 패키지나 네트워크를 쓰지 못하게 하는 검사)는 `site/`를 보지 않으므로, 포크의 수집기는 `site/connectors/`에서 자기 시스템의 클라이언트를 쓸 수 있다.
 
-수집기가 원 시스템에 낼 자격 증명은 `site/`에 두지 않는다. 포크는 필요한 칸의 이름을 등록의 인스턴스 정의(`credentials`)에 선언하고 수집기가 `initialize`의 접근자로 읽게 할 뿐이고, 값은 앱의 출처 화면에서 사용자가 넣어 OS가 보호하는 저장소에만 남는다. 값을 넣는 화면과 저장소는 공용 저장소의 것이라 포크는 화면을 고치지 않는다. 방법은 [connector-sdk.md](connector-sdk.md) 8장에, 이렇게 정한 이유는 [ADR 0019](adr/0019-connector-credentials.md)에 있다.
+수집기가 원 시스템에 낼 자격 증명은 `site/`에 두지 않는다. 포크는 필요한 칸의 이름을 등록의 인스턴스 정의(`credentials`)에 선언하고 수집기가 `initialize`의 접근자로 읽게 할 뿐이고, 값은 앱의 출처 화면에서 사용자가 넣어 OS가 보호하는 저장소에만 남는다. 값을 넣는 화면과 저장소는 공용 저장소의 것이라 포크는 화면을 고치지 않는다. 인증이 웹 로그인이면 포크는 세션 칸과 로그인 설명(`login`)을 같은 인스턴스 정의에 적고, 로그인 창과 세션 저장은 공용의 셸과 화면이 맡는다(쿠키 밖의 세션은 미구현, 배포처 후속). 방법은 [connector-sdk.md](connector-sdk.md) 8장에, 이렇게 정한 이유는 [ADR 0019](adr/0019-connector-credentials.md)에 있다.
 
 `site/connectors/`에 둔 수집기를 계약 테스트로 확인하는 방법은 [connector-sdk.md](connector-sdk.md) 6장에, 제품에 연결하는 방법은 7장에 있다.
 

@@ -37,6 +37,7 @@
 | [0024](0024-wiki-as-projection-in-canonical-sqlite.md) | Wiki는 정본 SQLite 안의 투영이고 OSS는 들이지 않는다 — 삭제는 같은 트랜잭션에서, 낡음은 Wiki 자신의 입력 순번으로, 사용자 편집은 읽을 때 겹친다(I04 등록표의 Wiki 줄 실행 위치를 `canonical`로 고침) | 잠정 | — (배포처 S35) |
 | [0025](0025-retrieval-strategies.md) | 검색 전략의 기본 켬 목록 — dev·T0 측정에서 선택 전략이 유지 조건을 채우지 못해 키워드·메타데이터·합치기만 켠다 | 잠정 | — (배포처 T1·실제 추출로 재판정) |
 | [0026](0026-vector-index-generations.md) | 벡터 색인은 앱 코드의 전수 코사인 비교를 잠정 구현으로 하고, 세대를 옆에 만들어 한 번에 바꾼다 — 정본과 다른 SQLite 파일, `reset` 대신 `beginRebuild`·`activate`, 교체는 `projection-rebuild` 작업, 켜는 것은 옵션 `vectorIndexing`(ADR 0004의 첫 색인 전 구현 선택·ARCHITECTURE 3.2절을 R07보다 먼저 잠정으로 넘음) | 잠정 | — (R07, 배포처 S39) |
+| [0027](0027-session-credentials-interactive-login.md) | 대화형 로그인 세션은 셸의 로그인 창이 얻어 같은 저장소 칸에 두고, 회전값은 수집기가 세션 칸에만 되쓴다 — 로그인 창은 화면의 단추가 열고 설명은 포크 등록의 `login`, 창은 어댑터 `LoginHost` 뒤, 새 사유 `login-required`(재시도 상한은 거부와 같음), 규격 버전 2 그대로(ADR 0019를 고치지 않고 잇는다) | 잠정 | — (배포처 S49) |
 
 A21(실제 Provider의 인용문 정확도)은 ADR이 아니라 V02 spec의 추출 요구사항에 걸려 있다.
 

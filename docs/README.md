@@ -20,7 +20,7 @@
 | [REUSE_AND_BUILD.md](REUSE_AND_BUILD.md) | 기능별 재사용·직접 개발·미룸 목록 | 잠정 |
 | [ownership.md](ownership.md) | 공용 저장소와 배포처 포크가 각각 무엇을 갖는가 | 확정(ADR 0012) |
 | [site-setup.md](site-setup.md) | 배포처가 채울 설정의 형태와 체크리스트 | 잠정(설정 키 이름은 V01-T17이 구현과 맞춤. 이름과 값의 형태는 잠정) |
-| [connector-sdk.md](connector-sdk.md) | 수집기(Connector)를 이 저장소 밖에서 만드는 사람을 위한 안내: 규격, 받아들이는 규칙, 오류와 재시도, 계약 테스트, 예시 수집기, 아직 없는 것 | 잠정(규격은 ADR 0016, 포크에 두고 연결하는 방식은 ADR 0018, 실제 원 시스템에서의 확인은 S18, 포크 조립은 S26, 수집기 자격 증명은 ADR 0019와 S28·S29, 인스턴스 범위 파일은 ADR 0020과 S30·S31) |
+| [connector-sdk.md](connector-sdk.md) | 수집기(Connector)를 이 저장소 밖에서 만드는 사람을 위한 안내: 규격, 받아들이는 규칙, 오류와 재시도, 계약 테스트, 예시 수집기, 아직 없는 것 | 잠정(규격은 ADR 0016, 포크에 두고 연결하는 방식은 ADR 0018, 실제 원 시스템에서의 확인은 S18, 포크 조립은 S26, 수집기 자격 증명은 ADR 0019와 S28·S29, 웹 로그인 세션은 ADR 0027과 S49, 인스턴스 범위 파일은 ADR 0020과 S30·S31) |
 | [specs/2026-11-21-R01-oss-evaluation.md](specs/2026-11-21-R01-oss-evaluation.md) | OSS 평가 작업(R01)의 요구사항과 완료 기준 | 확정 |
 | [specs/2026-11-21-R06-provisional-architecture.md](specs/2026-11-21-R06-provisional-architecture.md) | 잠정 아키텍처 작업(R06)의 완료 기준과, 기준마다 그것을 충족하는 문서 | 초안 |
 | [specs/2026-11-21-V01-vertical-skeleton.md](specs/2026-11-21-V01-vertical-skeleton.md) | Phase 1 뼈대(V01)의 요구사항, 완료 기준, 테스트, 작업 분해 | 확정 |
@@ -36,6 +36,7 @@
 | [specs/2026-11-22-I07-installed-scopes-file.md](specs/2026-11-22-I07-installed-scopes-file.md) | 설치본이 인스턴스 범위(`site/config/connector-scopes.json`)를 얻는 길(I07, #115): 포크의 등록이 빌드할 때 값을 묶고 실행본은 파일을 읽지 않음, 빌드 판정, 산출물 검사, 설치본 확인 절차, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-23-I05F-sync-kind-mismatch.md](specs/2026-11-23-I05F-sync-kind-mismatch.md) | 저장된 종류와 어긋난 인스턴스의 동기화(I05 후속, #128): 시작할 때 판정해 `unavailable`(사유 `instance-kind-mismatch`)로 두고, 동기화 요청은 409 `connector-unavailable`, 수집 작업은 그 사유로 보류, 작업 분해 | 확정(잠정 결정 포함) |
 | [specs/2026-11-23-I06F-secret-input-gaps.md](specs/2026-11-23-I06F-secret-input-gaps.md) | 자격 증명·API 키 입력란의 남은 틈(I06 후속, #162): 두 입력란을 컴포넌트 하나로, 저장 직전의 줄바꿈·길이 검사, 끌어 놓기, 거부 때 앞 글자 보존, 초점의 조건, 브라우저가 바꾼 값의 한계, `cli-kill` 시험의 부하 실패, 설정 화면 키 입력란의 호스트 변경 시 초기화·저장·삭제 결과 문구(#174) | 확정(잠정 결정 포함) |
+| [specs/2026-11-26-I06S-session-credentials.md](specs/2026-11-26-I06S-session-credentials.md) | 웹 로그인이 인증인 수집기의 자격 증명(I06S, #362): 세션 칸과 로그인 설명, 셸의 로그인 창(`LoginHost`)이 얻은 세션을 같은 저장소 칸에 한 줄 JSON으로 두고 수집기가 회전값을 세션 칸에만 `write`, 새 사유 `login-required`와 같은 재시도 상한, 계약 묶음의 두 코드와 예시, 누출 없음 시험, [ADR 0027](adr/0027-session-credentials-interactive-login.md) | 확정(잠정 결정 포함). 실제 IdP·Windows 로그인 창 확인은 배포처 S49 |
 | [specs/2026-11-23-R04-data-dir-lock.md](specs/2026-11-23-R04-data-dir-lock.md) | 단일 실행의 기준을 데이터 폴더의 잠금으로(R04 후속, #13): `node:sqlite` 배타 잠금을 셸이 프로세스 끝까지 쥠, 다른 userData로 같은 폴더를 여는 두 번째 실행은 표준 오류 한 줄과 종료 코드 1, 낡은 잠금 추정 없음 | 확정(잠정 결정 포함) |
 | [specs/2026-11-23-I04-ledger-reapply-cost.md](specs/2026-11-23-I04-ledger-reapply-cost.md) | 삭제 장부 재적용의 줄마다 원본 훑기 비용(I04 후속, #123): 실행 색인을 인스턴스마다 첫 미스에 한 번 만들어 `ensureSourceByHash`에 넘김, 스키마 변경 없음, 읽은 행 수로 검증, 합성 규모 측정 | 확정(잠정 결정 포함) |
 | [specs/2026-11-22-S01-semantic-registry.md](specs/2026-11-22-S01-semantic-registry.md) | Semantic 등록부(S01): 상태 전이와 변경 이력·취소, 자동 승격 조건, 인식 유형과 confidence의 분리, 사용자 교정 보존, 표기와 문맥별 정의, 유형 정의 변경의 검사 | 확정(잠정 결정 포함) |

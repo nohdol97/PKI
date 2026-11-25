@@ -540,8 +540,8 @@ describe("docs.connector-sdk (I06): chapter 8 and chapter 6 equal the code", () 
   const six = DOC.slice(DOC.indexOf("## 6. "), DOC.indexOf("## 7. "));
   const eightLines = eight.split("\n");
 
-  it("the table of the four reasons lists CREDENTIAL_REASONS, in order, each with the user's action and the way out", () => {
-    const rows = tableAfter("#### 5. 네 사유와 풀리는 길", eightLines);
+  it("the table of the five reasons lists CREDENTIAL_REASONS, in order, each with the user's action and the way out", () => {
+    const rows = tableAfter("#### 5. 다섯 사유와 풀리는 길", eightLines);
     expect(rows.map((r) => (r[0] as string).replaceAll("`", ""))).toEqual([...CREDENTIAL_REASONS]);
     for (const row of rows) expect(row, String(row[0])).toHaveLength(4);
     expect(rows[3]?.[3]).toBe("변경 알림과 앱을 다시 시작할 때뿐이다");
@@ -549,7 +549,7 @@ describe("docs.connector-sdk (I06): chapter 8 and chapter 6 equal the code", () 
 
   it("fails when a reason is missing from the table", () => {
     const dropped = eightLines.filter((l) => !l.startsWith("| `credential-unreadable` |"));
-    const rows = tableAfter("#### 5. 네 사유와 풀리는 길", dropped);
+    const rows = tableAfter("#### 5. 다섯 사유와 풀리는 길", dropped);
     expect(rows.map((r) => (r[0] as string).replaceAll("`", ""))).not.toEqual([
       ...CREDENTIAL_REASONS,
     ]);

@@ -1,7 +1,7 @@
 # 스펙: I06S 대화형 로그인(브라우저 세션)으로 인증하는 수집기의 자격 증명
 
-- 날짜: 2026-11-26 / 상태: 초안(architect) — 잠정 결정 I06S-D1~D10 포함
-- 관련: 이슈 #362, [I06 spec](2026-11-22-I06-connector-credentials.md), [I06F spec](2026-11-23-I06F-secret-input-gaps.md), [ADR 0010](../adr/0010-encryption-at-rest.md), [ADR 0019](../adr/0019-connector-credentials.md), [ADR 0027](../adr/0027-session-credentials-interactive-login.md)(이 spec과 함께 쓴 초안), [connector-sdk.md 8장](../connector-sdk.md), [site-setup.md](../site-setup.md) S28·S29
+- 날짜: 2026-11-26 / 상태: 확정(잠정 결정 I06S-D1~D10 포함) — 구현·시험 완료, 실제 IdP·Windows 확인은 S49
+- 관련: 이슈 #362, [I06 spec](2026-11-22-I06-connector-credentials.md), [I06F spec](2026-11-23-I06F-secret-input-gaps.md), [ADR 0010](../adr/0010-encryption-at-rest.md), [ADR 0019](../adr/0019-connector-credentials.md), [ADR 0027](../adr/0027-session-credentials-interactive-login.md)(이 spec과 함께 쓴 결정 기록), [connector-sdk.md 8장](../connector-sdk.md), [site-setup.md](../site-setup.md) S28·S29
 - 번호: 요구사항 `I06S-R<n>`, 완료 기준 `I06S-C<n>`, 결정 `I06S-D<n>`. 배포처 후속은 `S49`(새 항목).
 - 기준 코드: `origin/main` `c2630b26`. 아래 `파일:줄`은 그 커밋에서 열어 읽은 자리다(실행한 것은 아니다).
 
@@ -45,7 +45,7 @@
 ### 획득(로그인 창)
 
 - **I06S-R2** 로그인 창은 **제품 화면이 연다**(D1). 출처 화면은 세션 칸에 값 입력란 대신 「로그인 창 열기」와 기존 삭제(「로그아웃」)를 보인다. 누르면 preload의 새 함수 `openLogin(connectorId)`를 부른다. 인자는 인스턴스 ID 하나이고 주소나 이름을 화면이 건네지 않는다.
-- **I06S-R3** 셸은 `openLogin`을 받으면 백엔드에 `{type:"login-request", id, connectorId}`를 보내고, 백엔드는 그 인스턴스의 설명과 저장 이름(`connectorCredentialName`)을 `{type:"login", id, name, startUrl, doneUrlPrefix, cookies}`로, 없으면 `{type:"login", id, none:true}`로 답한다(D2). 셸은 이름이 수집기 자격 증명 모양인지(`isConnectorCredentialSecret`)와 R1의 주소 규칙을 다시 검사한다.
+- **I06S-R3** 셸은 `openLogin`을 받으면 백엔드에 `{type:"login-request", id, connectorId}`를 보내고, 백엔드는 그 인스턴스의 설명과 저장 이름(`connectorCredentialName`)을 `{type:"login", id, name, startUrl, doneUrlPrefix, cookies}`로, 없으면 `{type:"login", id, none:true}`로 답한다(D2). 설명이 규칙을 어기면 셸은 그 답을 받아들이지 않고 5초 뒤 `invalid`로 끝낸다. 셸은 이름이 수집기 자격 증명 모양인지(`isConnectorCredentialSecret`)와 R1의 주소 규칙을 다시 검사한다.
 - **I06S-R4** 셸의 로그인은 어댑터 `LoginHost`를 거친다(D3). 셸의 판단(`runLogin`)은 어댑터에 다음만 시킨다: 창을 열고, 주 프레임의 이동을 알리고, 정해진 주소의 쿠키를 읽고, 닫고 지운다. Electron 구현은 **preload 없음, `sandbox: true`, `contextIsolation: true`, 로그인마다 새 비영속 partition**으로 창을 만들고, `http:`/`https:` 밖의 이동·다운로드·권한 요청·새 창을 거부한다. 시험은 가짜 어댑터로 한다.
 - **I06S-R5** 주 프레임이 `doneUrlPrefix`로 시작하는 주소에 닿으면 셸은 그 주소의 쿠키 가운데 `cookies`에 든 이름을 읽어 **한 줄 JSON** `{"cookies":{"<이름>":"<값>",…}}`(선언 순서)로 만들고, 그 이름으로 저장소에 쓴 뒤 partition을 지우고 창을 닫는다(D5). 화면에 돌아가는 답은 `{ok:true}` 또는 `{ok:false, error}`이고 값이 없다. `error`는 `cancelled`(사용자가 닫음), `timeout`(5분, `LOGIN_TIMEOUT_MS`), `no-session`(닿았는데 이름 하나라도 없음), `too-large`(8192자 초과), `store-unavailable`(OS 보호 없음·쓰기 실패), `invalid`(설명 없음·검사 실패), `busy`(다른 로그인 창이 열려 있음) 가운데 하나이고, `ok:true`가 아니면 아무것도 저장하지 않는다.
 - **I06S-R6** 화면은 `ok:true`이면 기존 변경 알림 `POST /api/connectors/credentials-changed`(`{connectorId}`)를 한 번 부르고 기존 `rebuild` 안내를 그대로 쓴다(ADR 0019 결정 7). 실패면 알림을 부르지 않고 코드마다 정한 문장을 보인다.
@@ -58,14 +58,15 @@
 ### 만료·회전
 
 - **I06S-R9** 회전: 원 시스템이 새 토큰을 내면 수집기는 **다음 요청 전에** `write`로 세션 칸을 갱신한다. `write`가 거부되면 수집기는 `ConnectorCredentialError`를 던진다(새 토큰을 잃은 세션으로 계속하지 않는다).
-- **I06S-R10** 새 사유 `login-required`를 `CREDENTIAL_REASONS`에 더한다. 세션 칸이 있는 인스턴스에서 ① 세션 칸이 비어 있으면(존재 확인) `credential-missing` 대신 `login-required`이고 객체를 만들지 않는다. ② 수집기가 `ConnectorCredentialError`를 던졌고 판정(`judge`)이 `credential-rejected`가 될 자리이면 `login-required`다(D7). 세션 칸이 없는 인스턴스는 지금과 같다. 화면 문장은 "로그인이 필요합니다(세션 만료·로그아웃). 로그인 창을 다시 여세요."이고 그 줄에 「로그인 창 열기」가 있다.
-- **I06S-R11** `login-required`는 재시도에서 `credential-rejected`와 같다: 한 시간 재점검이 건너뛰고, 변경 알림(30초 간격, `CREDENTIAL_RETRY_MIN_MS`)과 앱을 켤 때 한 번만 다시 만들며, 동기화 도중이면 멈춤 코드 `credential-unusable`로 작업이 `held`가 되고 다시 만들어져 `ready`가 되면 풀린다. 제품은 로그인 창을 스스로 열지 않는다(D8).
+- **I06S-R10** 새 사유 `login-required`를 `CREDENTIAL_REASONS`에 더한다. 세션 칸이 있는 인스턴스에서 ① 세션 칸이 비어 있으면(존재 확인) `credential-missing` 대신 `login-required`이고 객체를 만들지 않는다. 같은 인스턴스의 고정 칸도 비어 있으면 `credential-missing`이 먼저다(사용자가 먼저 할 일이 값 입력이다). ② 수집기가 `ConnectorCredentialError`를 던졌고 판정(`judge`)이 `credential-rejected`가 될 자리이면 `login-required`다(D7). 세션 칸이 없는 인스턴스는 지금과 같다. 화면 문장은 "로그인이 필요합니다(세션 만료·로그아웃). 로그인 창을 다시 여세요."이고 그 줄에 「로그인 창 열기」가 있다.
+- **I06S-R11** `login-required`는 재시도에서 `credential-rejected`와 같다: 한 시간 재점검이 건너뛰고, 변경 알림(30초 간격, `CREDENTIAL_RETRY_MIN_MS`)과 앱을 켤 때 한 번만 다시 만들며, 동기화 도중이면 멈춤 코드 `credential-unusable`로 작업이 `held`(사유 `login-required`, 화면 문장은 작업 목록의 보류 사유 표에도 있다)가 되고 다시 만들어져 `ready`가 되면 풀린다. 제품은 로그인 창을 스스로 열지 않는다(D8).
 
 ### 계약 묶음과 예시
 
 - **I06S-R12** `ConnectorScenario`에 선택 필드 `login?: string`(세션 칸의 이름, `credentials`에 있어야 함)을 더한다. 있으면 묶음의 접근자가 그 칸에만 `write`를 받아 메모리에 두고, 쓰인 값(16자 이상)도 세 모양으로 찾는다. 새 위반 코드 둘:
   - `rotated-credential-leaked`: 수집기가 `write`로 쓴 값이 돌려준 것, 던진 것, 건강 답, `console`·표준 출력·오류에 있다.
   - `session-not-persisted`: 첫 읽기가 끝난 뒤, 묶음의 접근자에 남은 값(쓴 값)으로 초기화한 새 객체가 `initialize`나 첫 `getChanges`에서 `ConnectorCredentialError`로 끝난다.
+  재스캔(`later`)의 새 객체가 같은 이유(쓰지 않은 옛 세션)로 거부되면 시나리오의 오류가 아니라 이 코드다.
   시나리오가 준 첫 세션 값의 누출은 기존 코드 넷이 그대로 잡는다. `login`이 없는 시나리오의 결과는 지금과 같다.
 - **I06S-R13** 예시 패키지(`packages/connector-example`)에 지어낸 원 시스템 `rotating-session-notes`와 그 수집기를 더한다. 원 시스템은 고정 값을 받지 않고 `login()`이 세션 토큰을 내며, 응답마다 새 토큰을 싣고 옛 토큰은 다음 요청부터 무효다. 수집기는 세션 칸의 한 줄 JSON에서 토큰을 읽고 회전값을 되쓴다. 규격을 한 곳만 어긴 변형 둘(되쓰지 않음, 회전값을 `console`에 씀)을 `violating-connectors.ts`에 더한다.
 
@@ -170,10 +171,11 @@ interface ConnectorCredentials {
 
 ## 작업
 
-`_workspace/pki-i06s/phase1_architect_tasks.md`(잠정 분해, 오케스트레이터가 확정)의 T1~T7.
+T1 계약 표면, T2a 백엔드 `write`·`login` 선언·`login-request` 답, T2b `login-required`, T2c 누출 없음 시험, T3 셸 `write` 모드, T4 셸 로그인 창, T5 계약 묶음, T6 예시, T7 화면, T8 문서.
 
 ## 변경 이력
 
 | 날짜 | 변경 내용 | 사유 |
 |---|---|---|
 | 2026-11-26 | 초안 | #362 |
+| 2026-11-26 | 구현을 마치며 확정: R3(규칙을 어긴 `login` 답은 받지 않음), R10(고정 칸이 함께 비면 `credential-missing` 우선), R11(보류 사유 `login-required`), R12(재스캔 객체의 거부도 `session-not-persisted`)를 코드에 맞춰 적음. `SecretSource.write`는 선택 항목(쓸 수 없는 원본은 `unavailable`) | #362 구현 |

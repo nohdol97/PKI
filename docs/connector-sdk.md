@@ -268,7 +268,7 @@ export class ConnectorError extends Error {
 
 표의 `held` 행에 적힌 풀리는 때 가운데 "인스턴스의 설정이 바뀌거나"는 **지금은 일어나지 않는다.** 제품에 인스턴스의 설정을 쓰는 곳이 없기 때문이다(7장). 지금 보류가 풀리는 때는 앱을 시작했을 때 인스턴스가 준비되어 있는 경우(앱 갱신으로 수집기가 동작하게 된 시작을 포함해 모든 시작)와 한 시간마다의 재점검이다. 재점검은 인스턴스마다 60초(`RECHECK_TIMEOUT_MS`) 안에 끝나지 않으면 기다리지 않고 넘어가며, 끝나지 않은 재점검이 있는 인스턴스는 다시 시작하지 않는다. 60초를 넘겨 끝난 재점검의 결과는 성공이든 실패든 버린다. 결과를 받는 것은 그것을 기다리고 있는 차례뿐이어야 "준비됨으로 바뀜"과 "보류된 작업을 풂"이 늘 함께 일어나기 때문이다.
 
-자격 증명 때문에 `unavailable`인 인스턴스(사유 `credential-store-unavailable`, `credential-missing`, `credential-unreadable`, `credential-rejected`)의 수집 작업은 `connector-unavailable`이 아니라 그 인스턴스의 사유로 보류되고, 그 인스턴스가 `ready`가 되면 풀린다. 네 사유와 풀리는 길은 8장에 있다.
+자격 증명 때문에 `unavailable`인 인스턴스(사유 `credential-store-unavailable`, `credential-missing`, `credential-unreadable`, `credential-rejected`)의 수집 작업은 `connector-unavailable`이 아니라 그 인스턴스의 사유로 보류되고, 그 인스턴스가 `ready`가 되면 풀린다. 세션 칸이 있는 인스턴스의 `login-required`도 같고, 재점검이 건너뛰는 것도 `credential-rejected`와 같다. 다섯 사유와 풀리는 길은 8장에 있다.
 
 등록의 인스턴스 ID가 정본에 다른 종류로 묶여 있으면 그 인스턴스는 `unavailable`(사유 `instance-kind-mismatch`)이고, 제품은 그 수집기를 만들지도 초기화하지도 않는다. 그 수집 작업은 그 사유로 보류되며, 등록의 ID나 종류를 고쳐 다시 시작해 어긋남이 없어지면 풀린다.
 
@@ -283,7 +283,7 @@ export class ConnectorError extends Error {
 - 일시 장애는 `ConnectorError(retryable: true)`나 `ConnectorRateLimitError`로 던진다. 그 밖의 예외는 영구 실패로 보인다.
 - 한 페이지의 시도는 3회이고 대기는 30초를 넘지 않는다. 값은 잠정이다.
 - 만료된 cursor는 `cursorExpired`로 알린다. 제품이 처음부터 다시 읽는다.
-- 인스턴스가 준비되지 않으면 한 시간마다 다시 초기화해 본다. 다만 원 시스템이 자격 증명을 거부한 인스턴스(`credential-rejected`)는 한 시간마다는 건너뛴다(8장).
+- 인스턴스가 준비되지 않으면 한 시간마다 다시 초기화해 본다. 다만 원 시스템이 자격 증명을 거부한 인스턴스(`credential-rejected`)는 한 시간마다는 건너뛴다(8장). 세션형 인스턴스의 `login-required`도 같다.
 - 자격 증명이 거부되었음은 `ConnectorCredentialError`로 알린다. 그 밖의 예외는 거부로 읽히지 않는다.
 
 ## 6. 계약 테스트와 예시 수집기
@@ -864,7 +864,7 @@ pnpm --filter @pki/desktop build
 ```
 
 - **`healthCheck`의 그 밖의 `unavailable`은 거부로 읽히지 않고** 한 시간마다 같은 값으로 다시 시도된다. 거부가 아닌 일시 장애(인증 서버의 장애 등)는 `ConnectorError`(`retryable: true`)로 알린다. 거부로 알리면 사용자가 값을 고칠 때까지 한 시간마다의 재점검이 건너뛰기 때문이다.
-- **값을 되쓰는 길은 없다.** 접근자는 읽기만 한다. 원 시스템이 새 토큰을 내어 주며 옛 토큰을 버리는 방식(회전하는 토큰)이면 수집기가 새 값을 저장할 수 없으므로 사용자가 값을 다시 넣어야 한다. 그런 원 시스템이면 공용 저장소에 알린다([ownership.md 5절](ownership.md), site-setup S29).
+- **값을 되쓰는 길은 없다.** 접근자는 읽기만 한다. 다만 인스턴스가 세션 칸(`login`)을 선언했다면 그 칸에만 `write`가 있다(아래 「세션형 자격 증명」). 세션 칸이 없는 고정 값 인스턴스에서 원 시스템이 새 토큰을 내어 주며 옛 토큰을 버리는 방식(회전하는 토큰)이면 수집기가 새 값을 저장할 수 없으므로 사용자가 값을 다시 넣어야 한다. 그런 원 시스템이면 공용 저장소에 알린다([ownership.md 5절](ownership.md), site-setup S29).
 - 수집기가 직접 OS 보관함을 부르거나 환경 변수나 파일에서 값을 읽는 길은 두지 않는다. 브라우저 개발용 백엔드(`backend/src/dev.ts`)에는 저장소가 없어 칸을 선언한 인스턴스는 `credential-store-unavailable`이다.
 
 #### 4. 값은 화면에서 넣는다
@@ -878,9 +878,9 @@ pnpm --filter @pki/desktop build
 - 셸이 없는 브라우저 개발 실행에서는 입력란을 보이지 않고 "이 실행에는 저장소가 없습니다."로 시작하는 안내만 보인다.
 - OS 보호(Windows의 DPAPI)를 쓸 수 없으면 값은 저장되지 않는다. 환경 변수나 설정 파일의 평문으로 조용히 넘어가지 않는다.
 
-#### 5. 네 사유와 풀리는 길
+#### 5. 다섯 사유와 풀리는 길
 
-자격 증명 때문에 인스턴스를 쓸 수 없으면 목록의 사유(`reason`)가 다음 넷 가운데 하나다. 상태는 모두 `unavailable`이고, 그 인스턴스의 동기화는 `connector-unavailable`로 답하며 수집 작업은 그 사유로 보류된다.
+자격 증명 때문에 인스턴스를 쓸 수 없으면 목록의 사유(`reason`)가 다음 다섯 가운데 하나다. 다섯째는 세션형 수집기의 것이다(아래 「세션형 자격 증명」). 상태는 모두 `unavailable`이고, 그 인스턴스의 동기화는 `connector-unavailable`로 답하며 수집 작업은 그 사유로 보류된다.
 
 | 사유 | 뜻 | 사용자가 할 일 | 풀리는 길 |
 |---|---|---|---|
@@ -934,14 +934,84 @@ pnpm --filter @pki/desktop build
 
 계약 묶음이 재지 않는 누출 모양도 있다: 둘로 나눠 쓴 글, 16진수, `user:`와 값을 이은 `Basic` base64, 패딩이 없거나 어긋난 base64, 처리되지 않은 약속 거부, 한 바퀴보다 늦게 도는 타이머다. 이 모양으로 새는 수집기는 코드 검토와 S29가 잡는다.
 
-값이 지나는 길은 둘뿐이다. "화면 입력 → 셸의 저장소"와 "셸 → 백엔드 프로세스 → 수집기"다. 셸은 값이 든 답을 백엔드 프로세스에만 보내고, 백엔드에는 Provider 키의 이름과 수집기 자격 증명의 이름 모양만 내어 준다. Provider의 주소를 바꿔 키를 정리할 때 수집기 자격 증명은 지워지지 않는다. 포크의 수집기는 같은 프로세스에서 같은 권한으로 도는 믿는 코드이므로 칸의 제한은 실수를 잡는 장치이지 격리가 아니다(7장).
+고정 값 칸에서 값이 지나는 길은 둘뿐이다. "화면 입력 → 셸의 저장소"와 "셸 → 백엔드 프로세스 → 수집기"다. 세션 칸에는 "수집기 → 백엔드 프로세스 → 셸의 저장소"가 하나 더 있고, 로그인 창이 얻은 값은 셸 안에서 곧장 저장소로 간다(아래 「세션형 자격 증명」). 셸은 값이 든 답을 백엔드 프로세스에만 보내고, 백엔드에는 Provider 키의 이름과 수집기 자격 증명의 이름 모양만 내어 준다. Provider의 주소를 바꿔 키를 정리할 때 수집기 자격 증명은 지워지지 않는다. 포크의 수집기는 같은 프로세스에서 같은 권한으로 도는 믿는 코드이므로 칸의 제한은 실수를 잡는 장치이지 격리가 아니다(7장).
+
+### 세션형 자격 증명
+
+원 시스템의 인증이 **웹에서 로그인**하는 것(IdP에 로그인하면 받는 세션 쿠키)이면 위의 "사용자가 값을 한 줄로 넣는다"가 맞지 않는다. 사용자는 세션 쿠키를 볼 수 없어 넣을 수 없고, 원 시스템이 응답마다 새 토큰을 내면 수집기가 그것을 저장할 곳이 있어야 하며, 만료되었을 때의 할 일은 "값을 고친다"가 아니라 "다시 로그인한다"이다. 이 절이 그 길이다. 이 저장소의 결정은 [ADR 0027](adr/0027-session-credentials-interactive-login.md)이고 위 고정 값의 길(ADR 0019)을 바꾸지 않고 잇는다. 규격 버전은 2 그대로다. 새 항목은 모두 선택이라 기존 수집기는 고칠 것이 없다.
+
+#### 1. 세션 칸과 로그인 설명을 선언한다
+
+인스턴스 정의에 `credentials`의 칸 하나를 **세션 칸**으로 정해 `login`에 적는다. 값이 아니라 설명이다.
+
+```text
+{ id: "<인스턴스 ID>", kind: "<종류>", config: { ... }, credentials: ["session"],
+  login: { slot: "session", startUrl: "<로그인 창이 처음 여는 주소>",
+           doneUrlPrefix: "<로그인이 끝났을 때 닿는 주소의 앞부분>", cookies: ["sid"] } }
+```
+
+- `slot`은 같은 인스턴스의 `credentials`에 있는 칸이다. `startUrl`(로그인 창이 처음 여는 주소)과 `doneUrlPrefix`(주 프레임이 이 주소로 시작하는 곳에 닿으면 로그인이 끝난 것)는 `https:` 주소이거나 루프백(`127.0.0.1`, `localhost`)의 `http:` 주소다. `cookies`는 세션을 이루는 쿠키의 이름 1~8개다(RFC 6265의 token 글자 1~64자, 서로 달라야 한다).
+- 어기면 등록 검사가 `instance-login-invalid`를 돌려주고, 시작할 때는 그 인스턴스를 빼고 계속한다(7장).
+- 세션은 **쿠키**로만 잡는다. 쿠키가 아닌 곳(localStorage, 응답 본문)에 세션을 두거나 팝업으로 로그인하는 원 시스템은 `미구현, 배포처 후속`이다(site-setup S49, [ownership.md 5절](ownership.md)).
+
+#### 2. 로그인 창은 사용자가 화면에서 연다
+
+공용 출처 화면의 세션 칸에는 값 입력란이 없고 「로그인 창 열기」와 (세션이 있으면) 「로그아웃」(삭제)이 있다. **포크는 화면도 셸도 고치지 않는다.**
+
+- 단추는 preload의 `openLogin(인스턴스 ID)`를 부른다. 인자는 ID 하나이고 화면은 주소나 이름을 건네지 않는다. 셸이 백엔드에 그 인스턴스의 설명과 세션 칸의 저장 이름을 묻는다(`login-request` → `login`, 부모 채널로만). 설명은 포크의 등록에서 왔고 셸은 이름이 수집기 자격 증명의 모양인지와 위 주소 규칙을 다시 검사한다.
+- 창은 **preload 없이**, `sandbox`와 `contextIsolation`을 켜고 로그인마다 **새 비영속 partition**으로 열린다. `http:`·`https:` 밖의 이동, 다운로드, 권한 요청, 새 창은 거부하고, 끝나면 partition을 지우고 창을 없앤다. 한 번에 하나만 열린다.
+- 주 프레임이 `doneUrlPrefix`에 닿으면 셸은 그 주소의 쿠키 가운데 `cookies`의 이름을 읽어 **한 줄 JSON** `{"cookies":{"<이름>":"<값>",…}}`(선언한 순서)로 만들고 셸의 같은 저장소에 쓴다. 이 값은 셸 안에서 곧장 저장소로 가고 화면과 백엔드 API를 지나지 않는다.
+- 화면에 돌아가는 답은 `{ ok: true }` 아니면 `{ ok: false, error }`이고 값이 없다. `error`는 `cancelled`(사용자가 닫음), `timeout`(5분, `LOGIN_TIMEOUT_MS`), `no-session`(주소에 닿았는데 쿠키가 하나라도 없음), `too-large`(8192자 초과), `store-unavailable`(OS 보호를 쓸 수 없음, 쓰기 실패), `invalid`(설명이 없거나 검사에 실패함), `busy`(다른 로그인 창이 열려 있음)다. `ok: true`가 아니면 아무것도 저장하지 않고 변경 알림도 부르지 않으며 화면이 코드마다 정한 문장을 보인다.
+- `ok: true`이면 화면이 위 4의 변경 알림(`POST /api/connectors/credentials-changed`, `{ connectorId }`)을 한 번 부르고 그 응답의 `rebuild` 안내를 그대로 쓴다. 제품은 로그인 창을 **스스로 열지 않는다.** 만료되면 사용자가 단추를 누를 때까지 멈춘다.
+
+#### 3. 수집기는 읽고, 회전한 값을 되쓴다
+
+세션 칸에는 `context.credentials.write(칸, 값)`이 있다. 원 시스템이 새 토큰을 내면 수집기는 **다음 요청 전에** 그 칸을 갱신하고, 읽을 때마다 저장소에서 읽는다(제품은 값을 기억하지 않는다). 예시 수집기(`rotating-session-connector.ts`, 지어낸 원 시스템 `rotating-session-notes`: `login()`이 토큰을 내고 응답마다 새 토큰을 싣고 옛 토큰은 다음 요청부터 무효다)의 발췌다.
+
+<!-- excerpt: packages/connector-example/src/adapters/rotating-session-connector.ts -->
+```ts
+  /** One request to the origin: the stored session is read now, and the next one is stored before this returns. */
+  async function request() {
+    if (!credentials || !origin) throw new ConnectorError("not initialized", { retryable: false });
+    if (!credentials.write) throw new ConnectorCredentialError();
+    const next = origin.request(sessionTokenOf(await credentials.read(SESSION_SLOT)));
+    if (next === undefined) throw new ConnectorCredentialError(); // the origin refused it: expired or signed out
+    await credentials.write(SESSION_SLOT, sessionValueOf(next));
+  }
+```
+
+- **쓸 수 있는 칸은 세션 칸 하나다.** 다른 칸, 선언하지 않은 칸, 끊긴 접근자(버린 객체), 한 줄이 아니거나 8192자를 넘거나 빈 값, 3초(`CREDENTIAL_CHECK_TIMEOUT_MS`) 안에 끝나지 않은 쓰기, 저장소가 쓸 수 없다고 답한 쓰기는 저장소를 바꾸지 않고 `ConnectorCredentialError`로 거부된다. 쓴 뒤의 `read`는 쓴 값을 돌려준다.
+- **되쓰기가 거부되면 수집기가 `ConnectorCredentialError`를 던진다.** 새 토큰을 잃은 세션으로 계속하지 않는다. `write`가 없는 제품(`context.credentials.write`가 `undefined`)이면 위 발췌처럼 같은 오류로 끝낸다.
+- 쓰기는 변경 알림도 다시 만들기도 일으키지 않는다(쓴 객체가 이미 새 값을 쥐고 있다).
+- 쓴 값도 위 8의 "값이 남지 않는 곳"에 같다. 백엔드를 띄워 수집기가 쓴 표식 값이 데이터 폴더, 로그, API 응답, 동기화 결과·작업에 세 모양으로 없는지 훑는 시험이 있다.
+
+#### 4. `login-required`와 다시 시도하는 횟수
+
+세션 칸이 있는 인스턴스에서 세션 칸이 **비어 있거나**(고정 칸은 모두 있을 때) 수집기가 `ConnectorCredentialError`를 던져 거부로 판정되면 사유는 `credential-missing`·`credential-rejected` 대신 `login-required`다. 고정 칸이 함께 비어 있으면 `credential-missing`이 먼저다. 사용자가 할 일은 "로그인 창을 다시 연다"이고 그 줄에 「로그인 창 열기」가 있다. 세션 칸이 없는 인스턴스는 지금까지와 같다.
+
+- `login-required`는 `credential-rejected`와 **같은 상한**을 받는다. 한 시간마다의 재점검은 건너뛰고, 변경 알림은 30초(`CREDENTIAL_RETRY_MIN_MS`) 간격으로, 앱을 켤 때 한 번만 다시 만든다. 동기화 도중이면 멈춤 코드 `credential-unusable`로 작업이 `held`가 되고(사유는 `login-required`), 다시 만들어 `ready`가 되면 풀린다. 계정 잠금 방지를 지키려고 자동 재로그인은 없다.
+- 세션 칸이 있는 인스턴스의 거부는 어느 칸이 틀렸든 모두 `login-required`다(오류 종류를 더하지 않았다).
+
+#### 5. 계약 묶음과 막지 못하는 것
+
+시나리오에 `login`(세션 칸의 이름, `credentials`에 있어야 한다)을 더하면 묶음의 접근자가 그 칸에만 `write`를 받아 메모리에 두고, 쓰인 값(16자 이상)을 세 모양으로 찾는다. 새 위반 코드는 6장의 `rotated-credential-leaked`, `session-not-persisted`다. `login`이 없는 시나리오의 결과는 그대로다. 수집기마다 지어낸 원 시스템이 응답마다 토큰을 돌리게 하고, 되쓴 값으로 새 객체를 초기화해 `initialize`와 첫 `getChanges`가 거부되지 않는지 본다.
+
+| 경우 | 누가 맡는가 |
+|---|---|
+| 새 로그인을 저장한 직후 알림이 닿기 전에 옛 객체가 회전값을 써 새 세션을 덮는다(밀리초 단위 틈) | 옛 세션의 회전값도 유효하면 그대로 돈다. 무효면 `login-required`가 되어 다시 로그인한다 |
+| 세션 칸과 고정 칸을 함께 둔 인스턴스에서 고정 칸이 틀려도 `login-required`로 보인다 | 이 장의 한계(오류 종류를 가르지 않았다). S49에서 그런 원 시스템이면 알린다 |
+| 로그인 창 안의 IdP 페이지가 무엇을 하는지(피싱 주소로의 이동 등) | 설명의 주소는 포크의 등록이 정하고 창에는 preload가 없다. 주소의 검토는 포크 |
+| 쿠키 밖에 세션을 두는 원 시스템 | 미구현, 배포처 후속(S49, ownership 5절) |
+
+이 절은 공용이 **가짜 로그인 창 어댑터와 지어낸 원 시스템**으로만 증명했다. 실제 IdP, Windows 설치본의 Electron 로그인 창·partition·쿠키 읽기, 실제 세션의 만료·회전 주기와 잠금 정책은 확인하지 못했다(site-setup S49).
 
 ### 이 장을 줄이면
 
 - 정수 revision이 없으면 수정 시각의 밀리초를 쓴다. 같은 밀리초의 두 번 수정은 충돌이 된다.
 - 자격 증명은 OS 자격 증명 저장소에만 두고, 인스턴스 정의의 `credentials`로 칸을 선언하며, 수집기는 `initialize`의 `context.credentials.read(칸)`으로 읽는다. 값은 화면에서 넣고 화면으로 돌아오지 않는다.
 - 원 시스템이 거부하면 `ConnectorCredentialError`를 던진다. 없음, 저장소 불가, 읽을 수 없음, 거부가 각각 사유 코드로 보이고 값을 고치면 풀린다. 거부된 값은 한 시간마다 다시 시도되지 않는다.
-- 인스턴스가 가리키는 원 시스템을 바꾸면 인스턴스 ID도 바꾼다. 값을 되쓰는 길은 없다.
+- 인스턴스가 가리키는 원 시스템을 바꾸면 인스턴스 ID도 바꾼다. 고정 칸에는 값을 되쓰는 길이 없다.
+- 웹 로그인이 인증인 원 시스템은 세션 칸(`login`)을 선언한다. 로그인 창은 사용자가 화면에서 열고 수집기는 회전한 값을 세션 칸에만 `write`로 되쓴다. 세션이 비거나 거부되면 `login-required`이고 다시 시도하는 횟수의 상한은 거부와 같다.
 - 수집기가 값을 레코드, 오류, 건강 사유, 자기 로그에 넣는 것은 제품이 막지 못한다. 계약 묶음의 코드 다섯과 S29가 맡는다.
 
 ## 9. JSONL 가져오기 — 수집기를 만들지 않고 파일로 넣는 길
@@ -1022,7 +1092,8 @@ pnpm --filter @pki/desktop build
 |---|---|
 | 실제 메일·메신저·Wiki 수집기 | 이 저장소에 없다. 자리표시(`site-mail`, `site-messenger`, `site-wiki`)와 지어낸 자료를 내는 예시뿐이다. 구현은 배포처 포크의 일이다 |
 | 실제 원 시스템에서의 규격 확인 | 하지 않았다. 요청 한도, cursor 만료, 대량 페이지, 만료된 동안의 삭제, 범위와 revision 채우기는 S18이 배포처에서 확인한다 |
-| 수집기가 자격 증명 값을 저장소에 되쓰는 길 | 없다. 접근자는 읽기만 하므로 값을 되써야 하는 원 시스템(회전하는 토큰)이면 사용자가 값을 다시 넣는다(8장) |
+| 수집기가 자격 증명 값을 저장소에 되쓰는 길 | 세션 칸에만 있다(8장 「세션형 자격 증명」). 고정 칸의 접근자는 읽기만 하므로 값을 되써야 하는 원 시스템(회전하는 토큰)은 세션 칸으로 선언한다. 쿠키가 아닌 곳에 세션을 두거나 팝업으로 로그인하는 원 시스템은 미구현, 배포처 후속이다(S49) |
+| 실제 IdP와 Windows 설치본의 로그인 창에서의 확인 | 하지 않았다. 시험은 가짜 로그인 창 어댑터와 지어낸 원 시스템을 쓴다. site-setup의 S49가 배포처에서 확인한다(8장) |
 | 화면에서 여러 줄 자격 증명을 넣는 일 | 없다. 한 줄, 8192자 이하만 받는다. 코드가 넣은 값의 줄바꿈은 화면이 알 수 없다(8장) |
 | 등록에서 빠진 인스턴스의 자격 증명을 한 번에 정리하는 화면 | 없다. 값은 암호문으로 남고 어느 수집기에도 건네지지 않는다(8장) |
 | Windows의 OS 보호(DPAPI)와 실제 원 시스템에서의 자격 증명 확인 | 하지 않았다. 시험은 암호화 대역과 지어낸 원 시스템을 쓴다. site-setup의 S28·S29가 배포처에서 확인한다(8장) |
