@@ -373,6 +373,8 @@ export class ConnectorError extends Error {
 - `credential-in-error`: 값이 수집기가 던진 오류의 문구, 이름, 열거되는 필드, `cause` 사슬 안에 있다.
 - `credential-in-log`: `checkConnector` 한 번이 도는 동안 `console`과 표준 출력·오류로 나간 글 안에 값이 있다.
 - `credential-rejection-unsignalled`: 거부 시나리오인데 `initialize`도 첫 `getChanges`도 `ConnectorCredentialError`로 끝나지 않았다. `healthCheck`가 거부를 알리는 값을 답해도 이 코드를 면하지 않는다. 시작과 동기화에서의 거부는 오류로만 알려지기 때문이다(8장).
+- `rotated-credential-leaked`: 시나리오에 `login`(세션 칸)이 있을 때 수집기가 `write`로 쓴 값이 `getChanges`·`getDocument`가 돌려준 것, 던진 오류, `healthCheck`의 답, `console`과 표준 출력·오류 안에 있다. 시나리오가 준 첫 세션 값의 누출은 위 넷이 잡는다.
+- `session-not-persisted`: 시나리오에 `login`이 있을 때, 읽기가 끝난 뒤 묶음의 접근자에 남은 값(쓴 값)으로 초기화한 새 객체가 `initialize`나 첫 `getChanges`에서 `ConnectorCredentialError`로 끝났다. 회전한 값을 `write`로 되쓰지 않은 수집기다(8장).
 
 값은 원래 글, base64로 바꾼 글, 주소용으로 바꾼 글(percent-encoding) 세 모양으로 찾는다. 가로채기는 `checkConnector` 한 번 동안만 걸고 끝나면 원래대로 돌린다. 값이 든 글은 가로챈 채 내보내지 않으므로 계약 묶음의 출력에도 값이 남지 않는다. 값이 든 시나리오의 확인은 4초(`LOG_TAP_DEADLINE_MS`) 안에 끝나야 한다. 더 느린 수집기는 시험의 제한 시간을 늘려도 그 상한에서 확인이 실패한다. 상한 뒤에 버려진 실행의 뒤늦은 출력은 다음 확인의 것으로 잡히거나 실제 `console`로 나갈 수 있다. 계약 묶음이 재지 않는 누출 모양은 8장의 "막지 못하는 것"에 적었다. 자격 증명을 쓰지 않는 수집기의 시나리오(두 필드가 없는 것)에서는 가로채기가 걸리지 않고 결과가 이 필드가 생기기 전과 같다.
 
@@ -477,6 +479,8 @@ export function createStuckCursorConnector(): Connector {
 | `credential-in-error` | 시나리오의 값이 수집기가 던진 오류의 문구·이름·열거되는 필드·`cause` 사슬 안에 있음(`credentials`나 `rejected`가 있을 때) |
 | `credential-in-log` | `checkConnector` 한 번이 도는 동안 `console`과 표준 출력·오류로 나간 글 안에 시나리오의 값이 있음(`credentials`나 `rejected`가 있을 때) |
 | `credential-rejection-unsignalled` | 거부 시나리오(`rejected`)로 새 객체를 초기화하고 한 번 읽었는데 `initialize`도 첫 `getChanges`도 `ConnectorCredentialError`로 끝나지 않음. `healthCheck`의 값은 이 코드를 면하지 않는다 |
+| `rotated-credential-leaked` | 시나리오의 `login` 칸에 수집기가 `write`한 값(16자 이상)이 `getChanges`·`getDocument`가 돌려준 것, 던진 오류, `healthCheck`의 답, `console`과 표준 출력·오류 안에 있음(I06S-R12) |
+| `session-not-persisted` | 시나리오에 `login`이 있고, 읽기 뒤 접근자에 남은 값으로 초기화한 새 객체가 `initialize`나 첫 `getChanges`에서 `ConnectorCredentialError`로 끝남(I06S-R12) |
 
 아직 구현하지 않은 자리표시용(`ConnectorNotImplementedError`로 초기화가 실패하는 것)에 돌리면 위반 대신 `not-implemented` 하나만 돌려준다. 그 밖의 초기화 실패나 읽는 도중의 예외는 위반이 아니라 시나리오가 틀린 것으로 보고 던져진다. 이 검사는 `getChanges`를 `limit` 1000과 1로 두 번 읽어 비교한다. 제품이 쓰는 100은 아니다. 제품과 다르게 보이는 곳이 셋 있다. ① 페이지의 겉모양이 틀린 것은 계약 묶음에서는 `record-schema`이고 제품에서는 `invalid-page`로 멈춘다. ② 묶음의 `no-progress`는 같은 cursor를 되풀이하는 것뿐 아니라 **앞서 본 cursor로 되돌아가는 순환**도 잡는다. 제품은 받은 cursor와 같은 것만 잡는다. ③ 위반이 둘 이상이면 머리 줄의 `expected [ ... ] to deeply equal []`는 줄여 보일 수 있으니 그 아래의 차이(diff)에서 코드를 전부 읽는다.
 

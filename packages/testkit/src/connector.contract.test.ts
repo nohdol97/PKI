@@ -163,6 +163,8 @@ const CREDENTIAL_CODES = [
   "credential-in-error",
   "credential-in-log",
   "credential-rejection-unsignalled",
+  "rotated-credential-leaked",
+  "session-not-persisted",
 ] as const;
 type LegacyCode = Exclude<ConnectorViolationCode, (typeof CREDENTIAL_CODES)[number]>;
 const LEGACY_CODES = CONNECTOR_VIOLATION_CODES.filter(
@@ -326,7 +328,7 @@ const RED: Record<LegacyCode, () => Double> = {
 };
 
 describe("contract-suite.red", () => {
-  it("names exactly the codes of the I01-R25 table (21 of I01 and the 5 of I06-R21), in its order", () => {
+  it("names exactly the codes of the I01-R25 table (21 of I01 and the 5 of I06-R21), in its order, then the 2 of I06S-R12", () => {
     const spec = readFileSync(
       resolve(import.meta.dirname, "../../../docs/specs/2026-11-21-I01-connector-sdk.md"),
       "utf8",
@@ -334,7 +336,12 @@ describe("contract-suite.red", () => {
     const section = spec.slice(spec.indexOf("**I01-R25 "), spec.indexOf("**I01-R26 "));
     const codes = [...section.matchAll(/^\s*\| `([a-z-]+)` \|/gm)].map((m) => m[1]);
     expect(codes).toHaveLength(26);
-    expect([...CONNECTOR_VIOLATION_CODES]).toEqual(codes);
+    expect(CONNECTOR_VIOLATION_CODES.slice(0, 26)).toEqual(codes);
+    // after the I01 table: the two codes of the session scenario (I06S-R12)
+    expect(CONNECTOR_VIOLATION_CODES.slice(26)).toEqual([
+      "rotated-credential-leaked",
+      "session-not-persisted",
+    ]);
   });
 
   it("finds nothing wrong with the base the doubles depart from", async () => {

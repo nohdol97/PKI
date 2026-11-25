@@ -152,15 +152,17 @@ const refusing = (
 const log = (text: string) => process.stdout.write(`${text}\n`);
 
 describe("connector.contract.credentials", () => {
-  it("names the five credential codes after the twenty-one of I01-R25, in I06-R21's order", () => {
+  it("names the five credential codes after the twenty-one of I01-R25, in I06-R21's order, then the two session codes (I06S-R12)", () => {
     expect(CONNECTOR_VIOLATION_CODES.slice(21)).toEqual([
       "credential-in-record",
       "credential-in-health",
       "credential-in-error",
       "credential-in-log",
       "credential-rejection-unsignalled",
+      "rotated-credential-leaked",
+      "session-not-persisted",
     ]);
-    expect(CONNECTOR_VIOLATION_CODES).toHaveLength(26);
+    expect(CONNECTOR_VIOLATION_CODES).toHaveLength(28);
   });
 
   it("finds nothing wrong with a Connector that reads its credentials and leaks none", async () => {
@@ -894,5 +896,135 @@ describe("connector.contract.output-clean", () => {
         expect(CONNECTOR_VIOLATION_CODES as readonly string[]).toContain(code);
       expect(hasValue(JSON.stringify(codes))).toBe(false);
     });
+  });
+});
+
+// I06S-C5 (suite side; R12): a scenario with `login` gives the Connector a `write` on the session slot, looks
+// for what it wrote like the scenario's own values, and asks a new instance whether the session was kept.
+describe("connector.contract.session (I06S-R12)", () => {
+  const FIRST = "first session/é+0123456789";
+  const ROTATED = "rotated session/é+abcdefghij";
+
+  /**
+   * A made-up origin whose session token rotates: every request is answered with a new one and the old
+   * one is refused from then on. `behaviour` decides what a Connector does with the new token.
+   */
+  function origin(behaviour: { write: boolean; leakTo?: (value: string) => void }) {
+    let valid = FIRST;
+    let counter = 0;
+    class Rotating extends ScriptedConnector {
+      private context: ConnectorContext | undefined;
+      /** The token this object holds in memory: what a Connector that does not write back lives on. */
+      private token = "";
+      override async initialize(config: unknown, context?: ConnectorContext) {
+        await super.initialize(config, context);
+        this.context = context;
+        this.token = (await context?.credentials.read("session")) as string;
+        await this.request();
+      }
+      /** One request to the origin: the held token must be the valid one; the answer carries the next. */
+      private async request() {
+        if (this.token !== valid) throw new ConnectorCredentialError();
+        valid = counter++ === 0 ? ROTATED : `${ROTATED}-${counter}`;
+        this.token = valid;
+        behaviour.leakTo?.(valid);
+        if (behaviour.write) await this.context?.credentials.write?.("session", valid);
+      }
+      override async getChanges(
+        cursor: string | null,
+        opts: { limit: number; signal: AbortSignal },
+      ): Promise<ChangeSet> {
+        await this.request();
+        return super.getChanges(cursor, opts);
+      }
+      echo() {
+        return this.token;
+      }
+    }
+    return Rotating;
+  }
+  const login = (patch: Partial<ConnectorScenario> = {}): ConnectorScenario => ({
+    config: ORIGIN,
+    credentials: { session: FIRST },
+    login: "session",
+    ...patch,
+  });
+
+  it("a Connector that writes every rotated token back has no violation", async () => {
+    const Good = origin({ write: true });
+    expect(await checkConnector(() => new Good(), login())).toEqual([]);
+  });
+
+  it("a Connector that never writes the rotated token back is session-not-persisted", async () => {
+    const Lazy = origin({ write: false });
+    expect(await checkConnector(() => new Lazy(), login())).toEqual(["session-not-persisted"]);
+  });
+
+  it("a Connector that prints a value it wrote is rotated-credential-leaked, and the value never leaves the check", async () => {
+    const Loud = origin({ write: true, leakTo: (value) => console.log(`token is ${value}`) });
+    const seen: string[] = [];
+    const out = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      seen.push(String(chunk));
+      return true;
+    });
+    try {
+      expect(await checkConnector(() => new Loud(), login())).toEqual([
+        "rotated-credential-leaked",
+      ]);
+    } finally {
+      out.mockRestore();
+    }
+    expect(seen.join("")).not.toContain(ROTATED);
+  });
+
+  it("a Connector that throws or returns a value it wrote is rotated-credential-leaked too", async () => {
+    class Echo extends origin({ write: true }) {
+      override async getDocument(ref: { namespace: string; externalId: string }) {
+        const doc = await super.getDocument(ref);
+        const written = await (
+          this as unknown as { context: ConnectorContext }
+        ).context.credentials.read("session");
+        return doc && { ...doc, metadata: { echo: written } };
+      }
+    }
+    expect(await checkConnector(() => new Echo(), login())).toContain("rotated-credential-leaked");
+  });
+
+  it("a scenario without login runs as before: a write is not offered and nothing is looked for", async () => {
+    let offered: boolean | undefined;
+    class Probe extends ScriptedConnector {
+      override async initialize(config: unknown, context?: ConnectorContext) {
+        await super.initialize(config, context);
+        offered = context?.credentials.write !== undefined;
+      }
+    }
+    expect(await checkConnector(() => new Probe(), scenario())).toEqual([]);
+    expect(offered).toBe(false);
+  });
+
+  it("the session accessor writes the session slot only and refuses a value the product would refuse", async () => {
+    const refusals: unknown[] = [];
+    class Writer extends ScriptedConnector {
+      override async initialize(config: unknown, context?: ConnectorContext) {
+        await super.initialize(config, context);
+        for (const [slot, value] of [
+          ["other", "x".repeat(20)],
+          ["session", "line1\nline2"],
+          ["session", ""],
+        ] as const) {
+          await context?.credentials.write?.(slot, value).catch((e: unknown) => refusals.push(e));
+        }
+      }
+    }
+    const both = { session: FIRST, other: "other token/é+0123456789" };
+    await checkConnector(() => new Writer(), login({ credentials: both }));
+    expect(refusals.length).toBeGreaterThanOrEqual(3);
+    expect(refusals.every((e) => e instanceof ConnectorCredentialError)).toBe(true);
+  });
+
+  it("a login that is not one of the credentials is a scenario error", async () => {
+    await expect(
+      checkConnector(() => new ScriptedConnector(), login({ login: "nope" })),
+    ).rejects.toThrow("login must name one of its credentials");
   });
 });
