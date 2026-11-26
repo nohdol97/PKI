@@ -6,7 +6,9 @@ import {
   CREDENTIAL_RETRY_MIN_MS,
   ConnectorCredentialError,
   isConnectorCredentialSecret,
+  LoginDescriptionSchema,
   SecretReadSchema,
+  SecretValueSchema,
   type ConnectorCredentials,
   type CredentialReason,
   type SecretPresence,
@@ -23,8 +25,8 @@ export const CREDENTIAL_CHECK_TIMEOUT_MS = 3_000;
 /** The shortest gap between two notice-driven rebuilds of a rejected instance; one value, in `@pki/contracts` (the screen reads it too). */
 export { CREDENTIAL_RETRY_MIN_MS };
 
-/** What the manager needs of the store: the two calls an accessor and a presence check make. */
-export type CredentialStore = Pick<SecretSource, "read" | "has">;
+/** What the manager needs of the store: the calls an accessor and a presence check make (`write`: session slot only). */
+export type CredentialStore = Pick<SecretSource, "read" | "has" | "write">;
 
 /**
  * `connector.<first 32 hex of sha256(kind + "\n" + instanceId)>.<slot>`. The kind in
@@ -52,6 +54,19 @@ export function credentialSlotsValid(slots: unknown): slots is readonly string[]
       slots.every((slot) => typeof slot === "string" && CREDENTIAL_SLOT_PATTERN.test(slot)) &&
       new Set(slots).size === slots.length
     );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether an instance's interactive-login description is well formed (I06S-R1): the shared schema, and a
+ * session slot that is one of the slots the same instance declares. A value that throws when read is not.
+ */
+export function loginValid(login: unknown, credentials: unknown): boolean {
+  try {
+    const parsed = LoginDescriptionSchema.safeParse(login);
+    return parsed.success && Array.isArray(credentials) && credentials.includes(parsed.data.slot);
   } catch {
     return false;
   }
@@ -98,14 +113,22 @@ async function within<T>(work: () => Promise<T>, ms: number): Promise<T | undefi
 
 /**
  * The reason the answers of a presence check give before a Connector is made (I06-R9): a store that
- * cannot answer, then a value that is missing; none when every slot is there.
+ * cannot answer, then a value that is missing; none when every slot is there. When only the session
+ * slot (index `sessionAt`) is empty the way out is a login, not a value to type (I06S-R10).
  */
 export function reasonOfPresence(
   states: readonly SecretPresence[],
-): Extract<CredentialReason, "credential-store-unavailable" | "credential-missing"> | undefined {
+  sessionAt?: number,
+):
+  | Extract<
+      CredentialReason,
+      "credential-store-unavailable" | "credential-missing" | "login-required"
+    >
+  | undefined {
   if (states.includes("unavailable")) return "credential-store-unavailable";
-  if (states.includes("missing")) return "credential-missing";
-  return undefined;
+  const empty = states.flatMap((state, i) => (state === "missing" ? [i] : []));
+  if (empty.length === 0) return undefined;
+  return empty.every((i) => i === sessionAt) ? "login-required" : "credential-missing";
 }
 
 /** What one Connector object's accessor handed it, and how to cut the accessor and judge a refusal. */
@@ -118,6 +141,8 @@ export interface CredentialAccess {
   states(): SecretPresence[];
   /** Asks the store whether each declared slot has a value, all at once under one limit (I06-R6). */
   check(): Promise<SecretPresence[]>;
+  /** `reasonOfPresence` for this accessor's declaration: an empty session slot alone is `login-required`. */
+  presenceReason(states: readonly SecretPresence[]): ReturnType<typeof reasonOfPresence>;
   /** From now on every read is refused without asking the store (I06-R7). */
   revoke(): void;
   /**
@@ -134,9 +159,14 @@ export function createCredentialAccess(
   store: CredentialStore | undefined,
   /** False while the object this accessor belongs to is abandoned before it was ever adopted (I06-R7). */
   live: () => boolean = () => true,
+  /** The one slot a Connector may write (I06S-R7); none: the accessor only reads. */
+  sessionSlot?: string,
 ): CredentialAccess {
   const names = new Map(declaration.map(({ slot, name }) => [slot, name]));
-  const marks = { missing: false, unreadable: false, undeclared: false };
+  const marks = { missing: false, missingSession: false, unreadable: false, undeclared: false };
+  const sessionAt = declaration.findIndex(({ slot }) => slot === sessionSlot);
+  const presenceReason = (states: readonly SecretPresence[]) =>
+    reasonOfPresence(states, sessionAt < 0 ? undefined : sessionAt);
   let revoked = false;
   let last: SecretPresence[] = declaration.map(() => "unavailable");
 
@@ -180,9 +210,27 @@ export function createCredentialAccess(
       if (revoked || !live()) return refuse(); // cut while it waited: the value goes nowhere
       const answer = SecretReadSchema.safeParse(raw);
       if (answer.success && answer.data.state === "present") return answer.data.value;
-      if (answer.success && answer.data.state === "missing") marks.missing = true;
-      else marks.unreadable = true; // unavailable, late, thrown or of a wrong shape
+      if (answer.success && answer.data.state === "missing") {
+        if (slot === sessionSlot) marks.missingSession = true;
+        else marks.missing = true;
+      } else marks.unreadable = true; // unavailable, late, thrown or of a wrong shape
       return refuse();
+    },
+    async write(slot, value) {
+      if (revoked || !live()) return refuse();
+      const name = sessionSlot !== undefined && slot === sessionSlot ? names.get(slot) : undefined;
+      // one line within the shell's limit; a value the shell would refuse is not sent (I06S-R7)
+      if (
+        name === undefined ||
+        store?.write === undefined ||
+        !SecretValueSchema.safeParse(value).success ||
+        /[\r\n]/.test(value)
+      ) {
+        return refuse();
+      }
+      const write = store.write.bind(store);
+      const answer = await within(() => write(name, value), CREDENTIAL_CHECK_TIMEOUT_MS);
+      if (revoked || !live() || answer !== "done") return refuse();
     },
   };
 
@@ -191,14 +239,17 @@ export function createCredentialAccess(
     declared: declaration.length > 0,
     states: () => [...last],
     check,
+    presenceReason,
     revoke: () => void (revoked = true),
     async judge() {
       if (declaration.length === 0 || marks.undeclared) return undefined;
-      const fromStore = reasonOfPresence(await check());
+      const fromStore = presenceReason(await check());
       if (fromStore) return fromStore;
       if (marks.missing) return "credential-missing";
+      if (marks.missingSession) return "login-required";
       if (marks.unreadable) return "credential-unreadable";
-      return "credential-rejected";
+      // an instance with a session slot: every refusal asks for a login, whichever slot the origin refused (I06S-D7)
+      return sessionAt < 0 ? "credential-rejected" : "login-required";
     },
   };
 }

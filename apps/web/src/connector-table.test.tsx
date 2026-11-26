@@ -148,3 +148,65 @@ describe("ConnectorTable credentials", () => {
     expect(second).toContain("곧 반영됩니다");
   });
 });
+
+// I06S-C7 (R2, R10): the session slot of an interactive-login instance shows the login button and no value input
+describe("ConnectorTable: the session slot", () => {
+  const SESSION = `connector.${"d".repeat(32)}.session`;
+  const session = (
+    state: "missing" | "present",
+    over: Partial<ConnectorSummary> = {},
+  ): ConnectorSummary => ({
+    id: "mail-1",
+    kind: "k",
+    state: "unavailable",
+    reason: "login-required",
+    credentials: [{ slot: "session", name: SESSION, state, login: true }],
+    ...over,
+  });
+  const renderSession = (connector: ConnectorSummary, shell = true) =>
+    render({
+      connectors: [connector],
+      canEnterCredentials: shell,
+      canLogin: shell,
+      credentialNotes: {},
+      onCredentialChange: () => {},
+      onLogin: () => {},
+    });
+
+  it("shows 로그인 창 열기 and no input, and says the reason in words on the same row", () => {
+    const html = renderSession(session("missing"));
+    expect(html).toContain("로그인 창 열기");
+    expect(html).toContain('aria-label="mail-1 session 로그인 창 열기"');
+    expect(html).not.toContain("<input");
+    expect(html).not.toContain('type="password"');
+    expect(html).toContain(CREDENTIAL_REASON_TEXT["login-required"]);
+    expect(html).not.toContain("session 삭제"); // nothing stored: nothing to delete
+  });
+
+  it("offers the logout (the delete) only where a session is stored, and never shows the stored name", () => {
+    const html = renderSession(session("present", { state: "ready" }));
+    expect(html).toContain('aria-label="mail-1 session 삭제"');
+    expect(html).toContain(">로그아웃</button>");
+    expect(html).not.toContain(SESSION);
+  });
+
+  it("draws no button without the shell's preload", () => {
+    const html = renderSession(session("missing"), false);
+    expect(html).not.toContain("로그인 창 열기");
+    expect(html).not.toContain("<button");
+    expect(html).toContain("이 실행에는 저장소가 없습니다");
+  });
+
+  it("a fixed slot of the same instance keeps its input", () => {
+    const html = renderSession(
+      session("missing", {
+        credentials: [
+          { slot: "session", name: SESSION, state: "missing", login: true },
+          { slot: "token", name: NAME, state: "present" },
+        ],
+      }),
+    );
+    expect(html).toContain('aria-label="mail-1 token 값"');
+    expect(html).not.toContain('aria-label="mail-1 session 값"');
+  });
+});

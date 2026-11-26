@@ -176,6 +176,7 @@ export const CREDENTIAL_REASONS = [
   "credential-missing",
   "credential-unreadable",
   "credential-rejected",
+  "login-required",
 ] as const;
 export type CredentialReason = (typeof CREDENTIAL_REASONS)[number];
 
@@ -197,6 +198,8 @@ export const ConnectorSummarySchema = z.object({
         slot: z.string(),
         name: z.string(),
         state: z.enum(["present", "missing", "unavailable"]),
+        // the session slot of an interactive-login instance (I06S-R2): the screen offers the login window, no input
+        login: z.literal(true).optional(),
       }),
     )
     .optional(),

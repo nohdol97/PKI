@@ -2,7 +2,12 @@
 // shell's store through the preload under the name the list gave (the same path as the Provider's API key); the
 // backend is told only that this instance's credential changed, never the value. The page never reads a value
 // back and puts none into a request, an address, a result or a text. The browser has no shell, so it has no store.
-import { CREDENTIAL_RETRY_MIN_MS, type RouteResponse } from "@pki/contracts";
+import {
+  CREDENTIAL_RETRY_MIN_MS,
+  LOGIN_ERRORS,
+  type LoginError,
+  type RouteResponse,
+} from "@pki/contracts";
 import type { ApiClient } from "./api.ts";
 import {
   deleteApiKey,
@@ -12,6 +17,7 @@ import {
   type SecretBridge,
   type SecretRefusal,
 } from "./api-key.ts";
+import { LOGIN_ERROR_TEXT } from "./connector-text.ts";
 
 type Notice = RouteResponse<"credentialsChanged">;
 
@@ -21,6 +27,7 @@ export type CredentialOutcome =
   | { status: "delete-failed" }
   | { status: "notify-failed" }
   | { status: "refused"; reason: SecretRefusal }
+  | { status: "login-failed"; error: LoginError }
   | { status: "notified"; summary: Notice["summary"]; rebuild: Notice["rebuild"] };
 
 /**
@@ -55,6 +62,44 @@ export async function changeCredential(
   }
 }
 
+/** The part of the Electron preload's `window.pki` the login button uses (I06S-R2). */
+export interface LoginBridge {
+  openLogin(connectorId: string): Promise<unknown>;
+}
+
+export function loginBridge(
+  pki: unknown = (globalThis as { pki?: unknown }).pki,
+): LoginBridge | undefined {
+  const candidate = pki as Partial<LoginBridge> | undefined;
+  return typeof candidate?.openLogin === "function" ? (candidate as LoginBridge) : undefined;
+}
+
+/**
+ * Opens the instance's login window through the shell, which holds the description, stores the session and
+ * answers `{ok}` without a value; the page hands it the instance ID and nothing else (I06S-R2). Only when it
+ * succeeded is the backend told the instance's credential changed, the one notice every credential change
+ * makes (I06S-R6). A failure, a rejected call or an answer of another shape gives no notice.
+ */
+export async function openLogin(
+  deps: { bridge: LoginBridge; api: ApiClient },
+  connectorId: string,
+): Promise<CredentialOutcome> {
+  const result = (await deps.bridge.openLogin(connectorId).catch(() => undefined)) as
+    { ok?: unknown; error?: unknown } | null | undefined;
+  if (result?.ok !== true) {
+    const error = (LOGIN_ERRORS as readonly unknown[]).includes(result?.error)
+      ? (result?.error as LoginError)
+      : "invalid";
+    return { status: "login-failed", error };
+  }
+  try {
+    const { summary, rebuild } = await deps.api("credentialsChanged", { connectorId });
+    return { status: "notified", summary, rebuild };
+  } catch {
+    return { status: "notify-failed" };
+  }
+}
+
 const NOTICE_TEXT = {
   done: "반영했습니다.",
   queued: "곧 반영됩니다.",
@@ -65,6 +110,8 @@ export function credentialOutcomeText(outcome: CredentialOutcome): string {
   switch (outcome.status) {
     case "refused":
       return SECRET_REFUSAL_TEXT[outcome.reason];
+    case "login-failed":
+      return LOGIN_ERROR_TEXT[outcome.error];
     case "store-unavailable":
       return "자격 증명을 저장할 수 없습니다 (OS 보호 저장소를 쓸 수 없음).";
     case "delete-failed":

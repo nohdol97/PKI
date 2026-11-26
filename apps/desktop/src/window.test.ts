@@ -6,6 +6,8 @@ import { APP_ORIGIN } from "./app-protocol.ts";
 import {
   loadScreens,
   lockDown,
+  lockDownUnlessLogin,
+  markLoginSession,
   refuseDownloads,
   SCREENS_LOADED,
   secureWebPreferences,
@@ -139,5 +141,42 @@ describe("loadScreens (V01-T15 review D1)", () => {
     await expect(
       loadScreens(window, "/web", { exists: () => true, log: () => undefined }),
     ).rejects.toThrow(/ERR_FAILED/);
+  });
+});
+
+// I06S-R4: the app-wide lockDown must not hold a login window to app://, which would stop a real login at its first page
+describe("lockDownUnlessLogin", () => {
+  function contentsOf(session: object) {
+    const emitter = new EventEmitter();
+    let openHandler: unknown;
+    const contents = Object.assign(emitter, {
+      session,
+      setWindowOpenHandler: (handler: unknown) => void (openHandler = handler),
+    });
+    lockDownUnlessLogin(contents);
+    return {
+      handlers: emitter.listenerCount("will-navigate"),
+      opened: () => openHandler !== undefined,
+      navigate(url: string) {
+        let prevented = false;
+        emitter.emit("will-navigate", { preventDefault: () => (prevented = true), url }, url);
+        return prevented;
+      },
+    };
+  }
+
+  it("leaves a marked login session alone: it may leave app:// (the window keeps its own rules)", () => {
+    const login = {};
+    markLoginSession(login);
+    const c = contentsOf(login);
+    expect(c.handlers).toBe(0);
+    expect(c.opened()).toBe(false);
+  });
+
+  it("still locks every other window down: an ordinary or unmarked session cannot leave app://", () => {
+    const c = contentsOf({});
+    expect(c.handlers).toBe(1);
+    expect(c.navigate("https://idp.example.test/")).toBe(true);
+    expect(c.navigate(`${APP_ORIGIN}/`)).toBe(false);
   });
 });

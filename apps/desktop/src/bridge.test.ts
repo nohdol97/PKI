@@ -4,6 +4,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { APP_ORIGIN } from "./app-protocol.ts";
+import type { LoginResult } from "@pki/contracts";
 import { BRIDGE, createBridgeHandlers, type ExternalTarget } from "./bridge.ts";
 
 const SESSION = { baseUrl: "", token: "t".repeat(43) };
@@ -14,6 +15,7 @@ function handlers(
   picked: string | null = "/picked/folder",
   revealed: string | null = "/docs/a.md",
   accepted = true,
+  login: LoginResult = { ok: true },
 ) {
   const opened: string[] = [];
   const confirmExternal = vi.fn<(target: ExternalTarget) => Promise<boolean>>(async () => confirm);
@@ -27,6 +29,7 @@ function handlers(
   };
   const asked: number[] = [];
   const shown: string[] = [];
+  const logins: string[] = [];
   const registered: { ticket: string; kind: "folder" | "file" | "jsonl-file"; path: string }[] = [];
   const bridge = createBridgeHandlers({
     session: SESSION,
@@ -37,8 +40,9 @@ function handlers(
     registerLocationTicket: (input) => (registered.push(input), accepted),
     revealPath: async (id) => (asked.push(id), revealed ?? undefined),
     showInFolder: (path) => void shown.push(path),
+    openLogin: async (id) => (logins.push(id), login),
   });
-  return { bridge, opened, confirmExternal, secrets, stored, registered, asked, shown };
+  return { bridge, opened, confirmExternal, secrets, stored, registered, asked, shown, logins };
 }
 
 describe("bridge handlers", () => {
@@ -49,6 +53,7 @@ describe("bridge handlers", () => {
         "getSession",
         "hasSecret",
         "openExternal",
+        "openLogin",
         "pickLocation",
         "revealSource",
         "setSecret",
@@ -123,6 +128,32 @@ describe("bridge handlers", () => {
     )) {
       expect(readFileSync(new URL(name, dir), "utf8"), name).not.toContain("openPath");
     }
+  });
+
+  it("openLogin takes an instance id only and answers the login's result, which holds no value (I06S-C3, R2)", async () => {
+    const { bridge, logins } = handlers();
+    expect(await bridge.openLogin(PAGE, ["inst-1"])).toEqual({ ok: true });
+    expect(logins).toEqual(["inst-1"]);
+    const failed = handlers(true, "/p", null, true, { ok: false, error: "cancelled" });
+    expect(await failed.bridge.openLogin(PAGE, ["inst-1"])).toEqual({
+      ok: false,
+      error: "cancelled",
+    });
+
+    const refused = handlers();
+    for (const args of [
+      [],
+      [""],
+      ["a".repeat(129)],
+      [7],
+      ["inst-1", "https://idp.example.test/"],
+    ]) {
+      await expect(refused.bridge.openLogin(PAGE, args)).rejects.toThrow("invalid-input");
+    }
+    await expect(refused.bridge.openLogin("https://evil.example/", ["inst-1"])).rejects.toThrow(
+      "forbidden-sender",
+    );
+    expect(refused.logins).toEqual([]);
   });
 
   it("gives the app page its session", async () => {

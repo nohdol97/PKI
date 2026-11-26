@@ -71,6 +71,9 @@ describe("reasonText", () => {
     const texts = codes.map(reasonText);
     expect(new Set([...texts, reasonText("connector-unavailable")]).size).toBe(5);
     for (const text of texts) expect(text).toMatch(/자격 증명/);
+    // the session instance's hold has its own words (I06S-R10)
+    expect(texts).not.toContain(reasonText("login-required"));
+    expect(reasonText("login-required")).toContain("로그인");
   });
 
   it("never turns text into a sentence: a string that is not a code shape comes back unchanged and the screen renders it as text", () => {

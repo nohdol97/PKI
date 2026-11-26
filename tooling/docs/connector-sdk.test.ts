@@ -674,13 +674,13 @@ describe("docs.connector-sdk (I05): chapter 7, the fork's way in", () => {
     const code = read("backend/src/site-registration.ts");
     const union = /export type SiteRegistrationCode =([^;]*);/.exec(code)?.[1] ?? "";
     const all = [...union.matchAll(/"([a-z-]+)"/g)].map((m) => m[1] as string);
-    expect(all.length).toBe(13);
+    expect(all.length).toBe(14);
     for (const name of all) expect(namesToken(seven, name), name).toBe(true);
     const stopping = [...(/const STOPPING_CODES = \[([^\]]*)\]/.exec(code)?.[1] ?? "").matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
     const rows = seven.split("\n").filter((l) => /^\| `[a-z-]+` \|/.test(l));
     const stoppingRows = rows.filter((l) => l.includes("**시작을 멈춘다**")).map((l) => /^\| `([a-z-]+)`/.exec(l)?.[1]);
     expect(stoppingRows).toEqual(stopping);
-    expect(rows.length).toBe(11);
+    expect(rows.length).toBe(12);
   });
 
   it("names the public kinds and the placeholders the registration cannot or may take, as the code lists them", () => {
@@ -1160,16 +1160,19 @@ describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a creden
   const eight = chapter(docText, 8);
   const connectors = read("backend/src/connectors.ts");
 
-  it("takes exactly two code blocks, both from the example that reads its token, and they are that file's lines", () => {
+  it("takes exactly three code blocks, two from the example that reads its token and one from the session example, and they are those files' lines", () => {
     const blocks = excerpts(eight).found;
     expect(blocks.map((b) => b.file)).toEqual([
       "packages/connector-example/src/adapters/credentialed-connector.ts",
       "packages/connector-example/src/adapters/credentialed-connector.ts",
+      "packages/connector-example/src/adapters/rotating-session-connector.ts",
     ]);
     expect(excerptProblems(eight)).toEqual([]);
     // the first block holds the read and the refusal, the second the health answer
     expect(blocks[0]?.lines.join("\n")).toContain("if ((await credentials.read(SLOT)) !== acceptedToken) throw new ConnectorCredentialError();");
     expect(blocks[1]?.lines.join("\n")).toContain('return { state: "unavailable", reason: HEALTH_REASON_CREDENTIAL_REJECTED };');
+    // the third holds the write of the rotated session before the request returns (I06S-R9)
+    expect(blocks[2]?.lines.join("\n")).toContain("await credentials.write(SESSION_SLOT, sessionValueOf(next));");
   });
 
   it("says how to declare a slot: in the registration's instance, never the config or the manifest, and what the check says", () => {
@@ -1207,7 +1210,7 @@ describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a creden
       "제품은 시작할 때 `healthCheck`를 묻지 않으므로 시작과 동기화에서의 거부는 `ConnectorCredentialError`로 알려야 하고, 건강 사유로만 알리는 수집기는 계약 묶음이 `credential-rejection-unsignalled`로 잡는다.",
       "제품은 이 오류를 `instanceof`와 고정된 이름·문구 쌍 **둘 다**로 알아본다(`@pki/contracts`의 `isConnectorCredentialError`). 포크의 번들이 `@pki/contracts`를 한 벌 더 싣더라도 거부가 읽힌다.",
       "- **`healthCheck`의 그 밖의 `unavailable`은 거부로 읽히지 않고** 한 시간마다 같은 값으로 다시 시도된다.",
-      "- **값을 되쓰는 길은 없다.** 접근자는 읽기만 한다.",
+      "- **값을 되쓰는 길은 없다.** 접근자는 읽기만 한다. 다만 인스턴스가 세션 칸(`login`)을 선언했다면 그 칸에만 `write`가 있다(아래 「세션형 자격 증명」).",
     ]) {
       expect(eight, sentence).toContain(sentence);
     }
@@ -1257,11 +1260,11 @@ describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a creden
     }
   });
 
-  it("lists the ten things the product cannot catch, each with who owns it, and says nothing is left in the places it writes", () => {
+  it("lists the ten things the product cannot catch, then the session section's four, each with who owns it, and says nothing is left in the places it writes", () => {
     const rows = eight
       .split("\n")
       .filter((l) => l.startsWith("| ") && !l.startsWith("| 경우 ") && !l.startsWith("| 사유 "))
-      .filter((l) => !l.startsWith("| `credential-"))
+      .filter((l) => !l.startsWith("| `credential-") && !l.startsWith("| `login-required`"))
       .map((l) => l.split("|")[1]?.trim());
     expect(rows).toEqual([
       "수집기가 값을 레코드의 본문이나 `metadata`에 넣어 돌려준다",
@@ -1274,12 +1277,17 @@ describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a creden
       "수집기가 거부를 알리지 않는다(`healthCheck`의 다른 사유, 다른 종류의 오류)",
       "칸을 선언하지 않은 수집기(OS 로그인에 기대는 것)의 인증 실패",
       "화면(렌더러)이 깨져 값을 바꿔 넣거나 지운다",
+      // the session section's own four (I06S-R15)
+      "새 로그인을 저장한 직후 알림이 닿기 전에 옛 객체가 회전값을 써 새 세션을 덮는다(밀리초 단위 틈)",
+      "세션 칸과 고정 칸을 함께 둔 인스턴스에서 고정 칸이 틀려도 `login-required`로 보인다",
+      "로그인 창 안의 IdP 페이지가 무엇을 하는지(피싱 주소로의 이동 등)",
+      "쿠키 밖에 세션을 두는 원 시스템",
     ]);
     for (const sentence of [
       "제품이 쓰는 어느 곳에도 값이 남지 않는다: 데이터 폴더의 모든 파일(정본 DB와 보조 파일, 삭제 장부, `secrets.json`에는 암호문뿐), 설정 파일, 백엔드와 셸의 로그와 표준 출력·오류, 모든 API 응답과 셸이 화면에 돌려주는 답, 동기화 결과와 작업과 활동 목록, `site-check`의 출력이다.",
       "수집기가 값을 오류의 문구나 건강 사유에 **일부러 실어도** 같다.",
       "계약 묶음이 재지 않는 누출 모양도 있다: 둘로 나눠 쓴 글, 16진수, `user:`와 값을 이은 `Basic` base64, 패딩이 없거나 어긋난 base64, 처리되지 않은 약속 거부, 한 바퀴보다 늦게 도는 타이머다.",
-      "값이 지나는 길은 둘뿐이다. \"화면 입력 → 셸의 저장소\"와 \"셸 → 백엔드 프로세스 → 수집기\"다.",
+      "고정 값 칸에서 값이 지나는 길은 둘뿐이다. \"화면 입력 → 셸의 저장소\"와 \"셸 → 백엔드 프로세스 → 수집기\"다. 세션 칸에는 \"수집기 → 백엔드 프로세스 → 셸의 저장소\"가 하나 더 있고, 로그인 창이 얻은 값은 셸 안에서 곧장 저장소로 간다(아래 「세션형 자격 증명」).",
       "포크의 수집기는 같은 프로세스에서 같은 권한으로 도는 믿는 코드이므로 칸의 제한은 실수를 잡는 장치이지 격리가 아니다(7장).",
     ]) {
       expect(eight, sentence).toContain(sentence);
@@ -1301,11 +1309,11 @@ describe("docs.connector-sdk (I06): chapter 8, the way a Connector gets a creden
   it("is true to the code: one place makes the object, asks the slots first, reads only the fixed health reason, skips the rejected hourly", () => {
     const open = connectors.slice(connectors.indexOf("async function openConnector("));
     const body = open.slice(0, open.indexOf("\n}\n"));
-    expect(body.indexOf("reasonOfPresence(await access.check())")).toBeGreaterThan(0);
-    expect(body.indexOf("reasonOfPresence(await access.check())")).toBeLessThan(body.indexOf("connector = factory();"));
+    expect(body.indexOf("access.presenceReason(await access.check())")).toBeGreaterThan(0);
+    expect(body.indexOf("access.presenceReason(await access.check())")).toBeLessThan(body.indexOf("connector = factory();"));
     expect(body.indexOf("connector = factory();")).toBeLessThan(body.indexOf("initializeConnector(connector, config, { credentials: access.credentials })"));
     expect(connectors).toContain("return health.reason === HEALTH_REASON_CREDENTIAL_REJECTED ? \"rejected\" : \"down\";");
-    expect(connectors).toContain('if (entry.summary.reason === "credential-rejected" || entry.slot) return entry.summary.state;');
+    expect(connectors).toContain("if (isRejection(entry.summary.reason) || entry.slot) return entry.summary.state;");
     expect(connectors).toContain('return { stop: "credential-unusable" }; // the same call is not tried again (I06-R10)');
     const screen = read("apps/web/src/connector-credential.ts");
     const secretCheck = read("apps/web/src/api-key.ts");
@@ -1368,14 +1376,14 @@ describe("docs.connector-sdk (I06): chapters 2, 5, 6 and 7 carry what the creden
       "값은 원래 글, base64로 바꾼 글, 주소용으로 바꾼 글(percent-encoding) 세 모양으로 찾는다.",
       "값이 든 시나리오의 확인은 4초(`LOG_TAP_DEADLINE_MS`) 안에 끝나야 한다. 더 느린 수집기는 시험의 제한 시간을 늘려도 그 상한에서 확인이 실패한다. 상한 뒤에 버려진 실행의 뒤늦은 출력은 다음 확인의 것으로 잡히거나 실제 `console`로 나갈 수 있다.",
       "이 예시는 `exports`에 올라 있지 않다. 포크는 이 파일과 그것이 가져오는 `example-connector.ts`, 계약 시험이 쓰는 `synthetic-notes.ts`를 자기 수집기 패키지로 복사해 모델로 삼는다.",
-      "예시 패키지에는 규격을 한 곳만 어긴 변형이 여덟 있다.",
+      "예시 패키지에는 규격을 한 곳만 어긴 변형이 열 있다.",
     ]) {
       expect(six, sentence).toContain(sentence);
     }
-    // the example is not exported (the doc says so) and the eight variants are in the file
+    // the example is not exported (the doc says so) and the ten variants are in the file
     expect(JSON.parse(read("packages/connector-example/package.json")).exports).toEqual({ "./adapters": "./src/adapters/example-connector.ts" });
     const variants = read("packages/connector-example/src/adapters/violating-connectors.ts").match(/^export function create\w+Connector\(\)/gm) ?? [];
-    expect(variants).toHaveLength(8);
+    expect(variants).toHaveLength(10);
   });
 
   it("chapter 7 lists the optional `credentials` of an instance and says the slots are asked for before the factory is called", () => {

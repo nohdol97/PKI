@@ -40,6 +40,8 @@ import { startFailureText } from "./start-failure-text.ts";
 import { startBackendProcess, type ForkBackend } from "./backend-process.ts";
 import { superviseBackend, type Supervisor } from "./backend-supervisor.ts";
 import { BRIDGE, createBridgeHandlers, type BridgeFunction } from "./bridge.ts";
+import { createLoginRunner } from "./login.ts";
+import { electronLoginHost } from "./login-electron.ts";
 import { createSecretStore, electronCipher } from "./secret-store.ts";
 import { debuggingRequested } from "./debugging.ts";
 import {
@@ -52,7 +54,12 @@ import {
 } from "./layout.ts";
 import { createNotifier } from "./notifier.ts";
 import { createProductNormalizerHostBroker } from "./normalizer-host.ts";
-import { loadScreens, lockDown, refuseDownloads, secureWebPreferences } from "./window.ts";
+import {
+  loadScreens,
+  lockDownUnlessLogin,
+  refuseDownloads,
+  secureWebPreferences,
+} from "./window.ts";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 /** In the data directory: per OS user, not roaming (ADR 0010). */
@@ -192,6 +199,8 @@ async function run() {
     createAppHandler({ webRoot: WEB_ROOT, backendUrl: () => supervisor.url() }),
   );
 
+  // one login window at a time; the description comes from the backend, the value goes only to the store (I06S-R3, R5)
+  const login = createLoginRunner({ host: electronLoginHost(), store: secrets });
   const handlers = createBridgeHandlers({
     session: { baseUrl: "", token: backend.token },
     secrets,
@@ -229,6 +238,7 @@ async function run() {
     },
     registerLocationTicket: (input) => supervisor.registerLocationTicket(input),
     revealPath: (sourceVersionId) => supervisor.revealPath(sourceVersionId),
+    openLogin: async (connectorId) => login(await supervisor.loginSettings(connectorId)),
     showInFolder: (path) => shell.showItemInFolder(path),
   });
   for (const name of Object.keys(BRIDGE) as BridgeFunction[]) {
@@ -310,7 +320,7 @@ if (debugging) {
 } else if (!takeDataLock()) {
   app.exit(1);
 } else {
-  app.on("web-contents-created", (_event, contents) => lockDown(contents));
+  app.on("web-contents-created", (_event, contents) => lockDownUnlessLogin(contents));
   app.on("second-instance", () => {
     if (window?.isMinimized()) window.restore();
     window?.focus();

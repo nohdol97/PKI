@@ -21,7 +21,10 @@ import {
 import { format } from "node:util";
 import { describe, expect, it } from "vitest";
 
-/** I01-R25's table and, from `credential-in-record` on, I06-R21's, in their order. */
+/**
+ * I01-R25's table and, from `credential-in-record` on, I06-R21's, in their order; the last two are
+ * I06S-R12's (the session slot's rotated value, and a session nobody wrote back).
+ */
 export const CONNECTOR_VIOLATION_CODES = [
   "manifest-invalid",
   "sdk-version-mismatch",
@@ -49,6 +52,8 @@ export const CONNECTOR_VIOLATION_CODES = [
   "credential-in-error",
   "credential-in-log",
   "credential-rejection-unsignalled",
+  "rotated-credential-leaked",
+  "session-not-persisted",
 ] as const;
 export type ConnectorViolationCode = (typeof CONNECTOR_VIOLATION_CODES)[number];
 /** A not-implemented placeholder yields `not-implemented` alone, instead of violations. */
@@ -85,6 +90,14 @@ export interface ConnectorScenario {
    * ConnectorCredentialError (`credential-rejection-unsignalled`, I06-R20).
    */
   rejected?: { config: unknown; credentials: Record<string, string> };
+  /**
+   * The session slot (I06S-R12), one of `credentials`' keys: the check's accessor takes a `write` for
+   * that slot only and keeps what is written. A value written (16 characters or more) is looked for
+   * like the scenario's own, and its leak is `rotated-credential-leaked`. After the reads a new instance
+   * is initialized with the accessor's current values: if it ends `initialize` or its first `getChanges` in
+   * ConnectorCredentialError, the rotated value was not written back (`session-not-persisted`).
+   */
+  login?: string;
 }
 
 /** Values shorter than this are not distinctive enough to look for (I06-R20). */
@@ -132,15 +145,42 @@ function canonical(value: unknown): string {
 }
 const signal = () => new AbortController().signal;
 
-/** The accessor the contract hands `initialize`: the scenario's values, other slots refused. */
-function accessorOf(values: Readonly<Record<string, string>>): ConnectorCredentials {
-  return {
+/** The session slot of a check: its name, and what a `write` to it reports to the check. */
+interface Session {
+  slot: string;
+  /** Called with a value the Connector wrote; the check looks for it from then on (I06S-R12). */
+  wrote(value: string): void;
+}
+
+/** What the product refuses to write: not a string, empty, over 8192 characters or more than one line. */
+const writable = (value: unknown): value is string =>
+  typeof value === "string" && value.length >= 1 && value.length <= 8192 && !/[\r\n]/.test(value);
+
+/**
+ * The accessor the contract hands `initialize`: the scenario's values, other slots refused. With a
+ * session, that slot also takes `write` and the next read returns what was written (I06S-R12); the
+ * values it holds are a copy, so the scenario's own are never changed.
+ */
+function accessorOf(
+  initial: Readonly<Record<string, string>>,
+  session?: Session,
+): ConnectorCredentials {
+  const values: Record<string, string> = { ...initial };
+  const accessor: ConnectorCredentials = {
     async read(slot) {
       const value = Object.hasOwn(values, slot) ? values[slot] : undefined;
       if (value === undefined) throw new ConnectorCredentialError();
       return value;
     },
   };
+  if (session) {
+    accessor.write = async (slot, value) => {
+      if (slot !== session.slot || !writable(value)) throw new ConnectorCredentialError();
+      values[slot] = value;
+      session.wrote(value);
+    };
+  }
+  return accessor;
 }
 const initialize = (connector: Connector, config: unknown, context?: ConnectorContext) =>
   context ? connector.initialize(config, context) : connector.initialize(config);
@@ -210,11 +250,27 @@ class Check {
   readonly versioned: boolean;
   /** What the scenario's credential values look like; none: no credential check is on. */
   readonly needles: readonly string[];
-  constructor(caps: Caps, maxPages: number, versioned: boolean, needles: readonly string[]) {
+  /** What the values the Connector wrote look like; grows as it writes (I06S-R12). */
+  readonly rotated: readonly string[];
+  constructor(
+    caps: Caps,
+    maxPages: number,
+    versioned: boolean,
+    needles: readonly string[],
+    rotated: readonly string[],
+  ) {
     this.caps = caps;
     this.maxPages = maxPages;
     this.versioned = versioned;
     this.needles = needles;
+    this.rotated = rotated;
+  }
+
+  /** A value the Connector wrote that shows in `value` is `rotated-credential-leaked`; true when it does. */
+  rotatedIn(value: unknown): boolean {
+    const leaked = holds(value, this.rotated);
+    if (leaked) this.add("rotated-credential-leaked");
+    return leaked;
   }
 
   add(code: ConnectorViolationCode) {
@@ -224,6 +280,7 @@ class Check {
   /** What a call returned: a value of the scenario in it is `credential-in-record`. */
   returned(value: unknown) {
     if (holds(value, this.needles)) this.add("credential-in-record");
+    this.rotatedIn(value);
   }
 
   /**
@@ -233,7 +290,7 @@ class Check {
   thrown(error: unknown) {
     const leaked = holds(error, this.needles);
     if (leaked) this.add("credential-in-error");
-    return leaked;
+    return this.rotatedIn(error) || leaked;
   }
 
   /** Whether a call to the Connector settled; what it threw is looked at. */
@@ -441,22 +498,27 @@ function printsValue(args: unknown[], needles: readonly string[]): boolean {
  */
 async function withLogTaps<T>(
   needles: readonly string[],
+  rotated: readonly string[],
   run: () => Promise<T>,
-): Promise<{ result: T; leaked: boolean }> {
+): Promise<{ result: T; leaked: boolean; rotatedLeaked: boolean }> {
   const before = tapQueue;
   let release!: () => void;
   tapQueue = new Promise<void>((resolve) => (release = resolve));
   await before;
   const restores: (() => void)[] = [];
   let leaked = false;
+  let rotatedLeaked = false;
   try {
     const targets = console as unknown as Record<string, unknown>;
     for (const name of CONSOLE_FUNCTIONS) {
       const original = targets[name];
       if (typeof original !== "function") continue;
       targets[name] = function (this: unknown, ...args: unknown[]) {
-        if (printsValue(args, needles)) {
-          leaked = true;
+        const own = printsValue(args, needles);
+        const wrote = printsValue(args, rotated);
+        if (own || wrote) {
+          leaked ||= own;
+          rotatedLeaked ||= wrote;
           return undefined;
         }
         return (original as (...a: unknown[]) => unknown).apply(this, args);
@@ -468,8 +530,11 @@ async function withLogTaps<T>(
       stream.write = function (chunk: unknown, ...rest: unknown[]) {
         const text =
           typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString();
-        if (holds(text, needles)) {
-          leaked = true;
+        const own = holds(text, needles);
+        const wrote = holds(text, rotated);
+        if (own || wrote) {
+          leaked ||= own;
+          rotatedLeaked ||= wrote;
           (rest.find((a) => typeof a === "function") as (() => void) | undefined)?.();
           return true;
         }
@@ -487,7 +552,7 @@ async function withLogTaps<T>(
     try {
       const result = await Promise.race([run(), deadline]);
       await new Promise((resolve) => setTimeout(resolve, 0));
-      return { result, leaked };
+      return { result, leaked, rotatedLeaked };
     } finally {
       clearTimeout(timer);
     }
@@ -519,12 +584,22 @@ export async function checkConnector(
       `the scenario's credential values must be strings of ${MIN_CREDENTIAL_LENGTH} characters or more`,
     );
   }
-  if (values.length === 0) return runCheck(create, scenario, []);
+  if (scenario.login !== undefined && !Object.hasOwn(scenario.credentials ?? {}, scenario.login)) {
+    throw new Error("the scenario's login must name one of its credentials");
+  }
+  if (values.length === 0) return runCheck(create, scenario, [], []);
   const needles = values.flatMap(shapesOf);
-  const { result, leaked } = await withLogTaps(needles, () => runCheck(create, scenario, needles));
-  if (!leaked || result.includes("not-implemented")) return result;
+  // grows as the Connector writes the session slot (I06S-R12); the taps and the check read it as it is
+  const rotated: string[] = [];
+  const { result, leaked, rotatedLeaked } = await withLogTaps(needles, rotated, () =>
+    runCheck(create, scenario, needles, rotated),
+  );
+  if ((!leaked && !rotatedLeaked) || result.includes("not-implemented")) return result;
   return CONNECTOR_VIOLATION_CODES.filter(
-    (code) => code === "credential-in-log" || (result as string[]).includes(code),
+    (code) =>
+      (code === "credential-in-log" && leaked) ||
+      (code === "rotated-credential-leaked" && rotatedLeaked) ||
+      (result as string[]).includes(code),
   );
 }
 
@@ -532,11 +607,22 @@ async function runCheck(
   create: () => Connector,
   scenario: ConnectorScenario,
   needles: readonly string[],
+  rotated: string[],
 ): Promise<ConnectorCheckCode[]> {
   const { maxPages = PAGE_CAP } = scenario;
-  const context = scenario.credentials
-    ? { credentials: accessorOf(scenario.credentials) }
-    : undefined;
+  // a written value of 16 characters or more is looked for from then on, unless it is one the scenario gave
+  const session: Session | undefined =
+    scenario.login === undefined
+      ? undefined
+      : {
+          slot: scenario.login,
+          wrote(value) {
+            if (value.length < MIN_CREDENTIAL_LENGTH || needles.includes(value)) return;
+            for (const shape of shapesOf(value)) if (!rotated.includes(shape)) rotated.push(shape);
+          },
+        };
+  const accessor = scenario.credentials ? accessorOf(scenario.credentials, session) : undefined;
+  const context = accessor ? { credentials: accessor } : undefined;
   const subject = create();
   const manifest = manifestOf(subject);
   if (!isObject(manifest)) return ["manifest-invalid"];
@@ -568,6 +654,7 @@ async function runCheck(
     maxPages,
     scenario.versionedSources === true,
     needles,
+    rotated,
   );
   for (const code of manifestFaults) check.add(code);
 
@@ -593,6 +680,7 @@ async function runCheck(
     const health: unknown = await subject.healthCheck();
     if (!isObject(health) || health.state !== "ok") check.add("unhealthy-after-init");
     if (holds(health, needles)) check.add("credential-in-health");
+    check.rotatedIn(health);
   } catch (error) {
     check.thrown(error);
     check.add("health-threw"); // and so not unhealthy-after-init
@@ -610,7 +698,7 @@ async function runCheck(
     await finalCursor(check, subject, whole);
     await documents(check, subject, whole);
     if (scenario.later !== undefined) {
-      await rescan(check, create, scenario.later, whole, upserts, context);
+      await rescan(check, create, scenario.later, whole, upserts, context, session !== undefined);
     }
   }
 
@@ -619,9 +707,31 @@ async function runCheck(
   if (await check.settles(() => subject.getChanges(null, { limit: 1, signal: aborted.signal }))) {
     check.add("abort-ignored");
   }
-  if (scenario.rejected) await rejection(check, create, scenario.rejected);
+  if (session && context) await persistence(check, create, scenario.config, context);
+  if (scenario.rejected) await rejection(check, create, scenario.rejected, session);
 
   return CONNECTOR_VIOLATION_CODES.filter((code) => check.found.has(code));
+}
+
+/**
+ * The session the Connector wrote back (I06S-R12): a new instance, initialized with the accessor's
+ * values as they are after the reads, must not end `initialize` or its first `getChanges` in
+ * ConnectorCredentialError. Any other failure of this extra instance is not this code's.
+ */
+async function persistence(
+  check: Check,
+  create: () => Connector,
+  config: unknown,
+  context: ConnectorContext,
+) {
+  const connector = create();
+  try {
+    await initialize(connector, config, context);
+    check.returned(await connector.getChanges(null, { limit: 1, signal: signal() }));
+  } catch (error) {
+    check.thrown(error);
+    if (isConnectorCredentialError(error)) check.add("session-not-persisted");
+  }
 }
 
 async function finalCursor(check: Check, connector: Connector, whole: Read) {
@@ -706,17 +816,29 @@ async function rescan(
   whole: Read,
   upserts: Map<Identity, number>,
   context: ConnectorContext | undefined,
+  /** The scenario has a session slot: a new instance refused for the stored session did not get it written back. */
+  hasSession: boolean,
 ) {
   const connector = create();
+  const refusedAsStale = (error: unknown) =>
+    hasSession &&
+    isConnectorCredentialError(error instanceof Error ? (error.cause ?? error) : error);
   try {
     await initialize(connector, later, context);
   } catch (error) {
+    if (refusedAsStale(error)) return void check.add("session-not-persisted");
     throw new Error(
       "the Connector did not initialize with the scenario's later config",
       check.thrown(error) ? undefined : { cause: error },
     );
   }
-  const after = await check.read(connector, 1000, upserts);
+  let after: Read;
+  try {
+    after = await check.read(connector, 1000, upserts);
+  } catch (error) {
+    if (refusedAsStale(error)) return void check.add("session-not-persisted");
+    throw error;
+  }
   if (!after.complete) return;
   const deleted = new Set<Identity>();
   const upserted = new Map<Identity, Record<string, unknown>>();
@@ -759,11 +881,12 @@ async function rejection(
   check: Check,
   create: () => Connector,
   rejected: NonNullable<ConnectorScenario["rejected"]>,
+  session?: Session,
 ) {
   const connector = create();
   try {
     await connector.initialize(rejected.config, {
-      credentials: accessorOf(rejected.credentials),
+      credentials: accessorOf(rejected.credentials, session),
     });
   } catch (error) {
     check.thrown(error);

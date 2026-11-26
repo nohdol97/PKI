@@ -10,7 +10,7 @@ import { CONNECTOR_KIND_PATTERN, MAX_INSTANCE_ID_LENGTH, type Connector } from "
 import { log, SCOPE_CLASSES, type ScopeGrading } from "@pki/providers";
 import type { ScopePolicy } from "@pki/storage";
 import { productConnectors, type ConnectorSet } from "./composition.ts";
-import { credentialSlotsValid } from "./connector-credentials.ts";
+import { credentialSlotsValid, loginValid } from "./connector-credentials.ts";
 import { bindConnectorScopes } from "./connector-scopes.ts";
 import type { ConnectorFactory, ConnectorInstanceConfig } from "./connectors.ts";
 import {
@@ -48,6 +48,7 @@ export type SiteRegistrationCode =
   | "instance-id-duplicate"
   | "instance-kind-unknown"
   | "instance-credentials-invalid"
+  | "instance-login-invalid"
   | "instance-kind-reserved"
   | "instance-id-reserved"
   | "kind-factory-threw"
@@ -63,6 +64,7 @@ const DROPPED_CODES = [
   "instance-id-invalid",
   "instance-id-duplicate",
   "instance-credentials-invalid",
+  "instance-login-invalid",
 ] as const satisfies readonly SiteRegistrationCode[];
 
 /** The violations that stop the start: a try at what the public code keeps for itself. */
@@ -162,6 +164,15 @@ function analyse(site: SiteRegistration, base: ConnectorSet): Analysis {
       !credentialSlotsValid(instance.credentials)
     ) {
       violations.push("instance-credentials-invalid");
+      continue;
+    }
+    // the interactive-login description: well formed, and its slot is one this instance declares (I06S-R1)
+    if (
+      !stops &&
+      instance.login !== undefined &&
+      !loginValid(instance.login, instance.credentials)
+    ) {
+      violations.push("instance-login-invalid");
       continue;
     }
     if (!stops) instances.push(instance);

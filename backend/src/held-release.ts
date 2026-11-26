@@ -64,6 +64,7 @@ export const HELD_REASONS: Readonly<Record<string, HeldReason>> = {
   "credential-missing": { events: [], collector: true },
   "credential-unreadable": { events: [], collector: true },
   "credential-rejected": { events: [], collector: true },
+  "login-required": { events: [], collector: true },
   // Only the development exception gives these (execution-gate.ts), so a production
   // build never holds a job for them; the constant folds and the bundle keeps none of
   // the exception's strings (artifact.contents). Provisional: a production start on a

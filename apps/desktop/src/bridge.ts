@@ -3,7 +3,13 @@
 // opening an external https link after the user confirms. The preload passes the page's
 // arguments through unchanged; every call is checked here against its sender and its
 // schema before anything happens.
-import { SecretNameSchema, SecretValueSchema, type Session } from "@pki/contracts";
+import {
+  MAX_INSTANCE_ID_LENGTH,
+  SecretNameSchema,
+  SecretValueSchema,
+  type LoginResult,
+  type Session,
+} from "@pki/contracts";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { onAppOrigin } from "./app-protocol.ts";
@@ -17,6 +23,7 @@ export const BRIDGE = {
   openExternal: "pki:open-external",
   pickLocation: "pki:pick-location",
   revealSource: "pki:reveal-source",
+  openLogin: "pki:open-login",
 } as const;
 export type BridgeFunction = keyof typeof BRIDGE;
 
@@ -40,6 +47,8 @@ const INPUTS = {
   pickLocation: z.tuple([LocationKindSchema]),
   // a source version id, never a path: the main process asks the backend where the file is (I02B-R39)
   revealSource: z.tuple([z.int().positive()]),
+  // an instance id, never an address or a name: the main process asks the backend for the login (I06S-R2, R3)
+  openLogin: z.tuple([z.string().min(1).max(MAX_INSTANCE_ID_LENGTH)]),
 } satisfies Record<BridgeFunction, z.ZodType>;
 
 export interface ExternalTarget {
@@ -64,6 +73,11 @@ export interface BridgeDeps {
   registerLocationTicket(input: { ticket: string; kind: LocationKind; path: string }): boolean;
   /** Asks the backend for the absolute path of a local source's file; undefined when there is none to show. */
   revealPath(sourceVersionId: number): Promise<string | undefined>;
+  /**
+   * Opens the instance's login window and answers how it ended (I06S-R3 to R5); the answer carries no value.
+   * An instance without a login, or no backend running, is `invalid`.
+   */
+  openLogin(connectorId: string): Promise<LoginResult>;
   /** Shows the file in the OS file manager (`shell.showItemInFolder`); never opens it. */
   showInFolder(path: string): void;
 }
@@ -109,6 +123,8 @@ export function createBridgeHandlers(deps: BridgeDeps): BridgeHandlers {
       // the path was picked but the backend did not take it: not a cancel, the page says so (LCF-R2)
       return { ticket: null, failed: "backend-unavailable" as const };
     }),
+    // the page names an instance; the description comes from the backend and the value goes only to the store (I06S-R2)
+    openLogin: checked("openLogin", ([connectorId]) => deps.openLogin(connectorId)),
     // the page names a version; the path comes from the backend and goes only to the file manager
     revealSource: checked("revealSource", async ([sourceVersionId]) => {
       const path = await deps.revealPath(sourceVersionId);

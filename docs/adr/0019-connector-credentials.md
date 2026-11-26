@@ -2,6 +2,7 @@
 
 - 날짜: 2026-11-23 / 상태: **잠정 — 배포처 검증 대기**(Windows 설치본에서 OS 보호가 값을 실제로 지키는지와 실제 원 시스템의 거부·잠금 동작은 S28과 S29에서 확인한다. 번호는 머지 순서로 조정한 잠정이다)
 - 관련: [I06 spec](../specs/2026-11-22-I06-connector-credentials.md)(I06-R1~R25, "대안과 기각 사유", "잠정 결정과 가정", I06-R19의 남는 위험 표), 이슈 #114, [ADR 0010](0010-encryption-at-rest.md), [ADR 0016](0016-connector-sdk-v2.md), [ADR 0018](0018-fork-registration-at-build-time.md), [ownership.md 3절](../ownership.md), [connector-sdk.md 8장](../connector-sdk.md), [site-setup.md](../site-setup.md)의 S28·S29
+- 후속: 웹 로그인이 인증인 원 시스템(세션 쿠키, 회전하는 토큰)의 길은 [ADR 0027](0027-session-credentials-interactive-login.md)이 잇는다. 결정 8의 "값이 지나는 길은 둘뿐"에 세션 칸에 한해 "수집기 → 백엔드 → 셸의 저장소"가 더해지고, 「되돌리거나 다시 볼 조건」 1의 `write`가 그 칸에만 생겼다. 이 ADR의 나머지 결정(고정 값 칸, 사유, 재시도 상한, 누출 없음)은 그대로다.
 
 ## 맥락
 

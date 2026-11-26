@@ -8,9 +8,12 @@ import { MAX_SECRET_LENGTH, checkSecretValue } from "./api-key.ts";
 import {
   changeCredential,
   credentialOutcomeText,
+  loginBridge,
+  openLogin,
   rereadDelaysMs,
   type CredentialOutcome,
 } from "./connector-credential.ts";
+import { LOGIN_ERROR_TEXT } from "./connector-text.ts";
 
 const CANARY = "synthetic-canary-value-0001";
 const NAME = `connector.${"a".repeat(32)}.token`;
@@ -190,3 +193,67 @@ describe("connector-credential (I06-C11)", () => {
 function outcomeOf(rebuild: Answer["rebuild"]): CredentialOutcome {
   return { status: "notified", ...answer(rebuild) };
 }
+
+// I06S-C7 (R2, R6): the login button's path. The preload double records what the page hands `openLogin`; the
+// shell's answer is `{ok}` without a value, and only a success makes the one change notice.
+describe("connector-credential: the login (I06S-C7)", () => {
+  function login(result: unknown) {
+    const { requests, deps } = harness();
+    const bridge = {
+      openLogin: vi.fn<(connectorId: string) => Promise<unknown>>(async () => result),
+    };
+    return { bridge, requests, deps: { bridge, api: deps.api } };
+  }
+
+  it("hands the preload the instance ID only and, on ok:true, makes the one notice with {connectorId}", async () => {
+    const { bridge, requests, deps } = login({ ok: true });
+    const outcome = await openLogin(deps, "mail-1");
+    expect(bridge.openLogin).toHaveBeenCalledTimes(1);
+    expect(bridge.openLogin.mock.calls[0]).toEqual(["mail-1"]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("http://127.0.0.1:1/api/connectors/credentials-changed");
+    expect(JSON.parse(requests[0]?.body ?? "")).toEqual({ connectorId: "mail-1" });
+    expect(outcome).toMatchObject({ status: "notified", rebuild: "done" });
+    expect(credentialOutcomeText(outcome)).toBe("반영했습니다.");
+  });
+
+  it("a failure says its code in words and makes no notice; a rejected call or an odd answer is invalid", async () => {
+    for (const error of ["cancelled", "timeout", "no-session"] as const) {
+      const { requests, deps } = login({ ok: false, error });
+      const outcome = await openLogin(deps, "mail-1");
+      expect(outcome).toEqual({ status: "login-failed", error });
+      expect(credentialOutcomeText(outcome)).toBe(LOGIN_ERROR_TEXT[error]);
+      expect(requests).toEqual([]);
+    }
+    const odd = login({ ok: false, error: "something-else" });
+    expect(await openLogin(odd.deps, "mail-1")).toEqual({
+      status: "login-failed",
+      error: "invalid",
+    });
+    const rejecting = login(undefined);
+    rejecting.bridge.openLogin.mockRejectedValue(new Error("forbidden-sender"));
+    expect(await openLogin(rejecting.deps, "mail-1")).toEqual({
+      status: "login-failed",
+      error: "invalid",
+    });
+    expect(odd.requests).toEqual([]);
+    expect(rejecting.requests).toEqual([]);
+  });
+
+  it("a login that stored the session but whose notice failed says so", async () => {
+    const { deps } = login({ ok: true });
+    const failing = createApiClient(
+      { baseUrl: "http://127.0.0.1:1", token: "t".repeat(43) },
+      (async () => new Response("{}", { status: 500 })) as unknown as typeof fetch,
+    );
+    expect(await openLogin({ ...deps, api: failing }, "mail-1")).toEqual({
+      status: "notify-failed",
+    });
+  });
+
+  it("the bridge exists only where the preload has openLogin", () => {
+    expect(loginBridge({ openLogin: async () => ({ ok: true }) })).toBeDefined();
+    expect(loginBridge({ setSecret: async () => ({}) })).toBeUndefined();
+    expect(loginBridge(undefined)).toBeUndefined();
+  });
+});

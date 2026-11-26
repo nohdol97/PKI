@@ -11,6 +11,12 @@ import {
 } from "@pki/contracts";
 import { createCredentialedConnector } from "./credentialed-connector.ts";
 import { createExampleConnector } from "./example-connector.ts";
+import {
+  createRotatingSessionConnector,
+  SESSION_SLOT,
+  sessionTokenOf,
+  type RotatingConfig,
+} from "./rotating-session-connector.ts";
 
 /** `no-progress`: it hands back the cursor it was given and says there is more. */
 export function createStuckCursorConnector(): Connector {
@@ -146,5 +152,57 @@ export function createUnsignalledRejectionConnector(): Connector {
     ...credentialed,
     initialize: (config, context) => plain(() => credentialed.initialize(config, context)),
     getChanges: (cursor, opts) => plain(() => credentialed.getChanges(cursor, opts)),
+  };
+}
+
+// Two variants of the session example (I06S-R13), each breaking one session rule.
+
+/**
+ * `session-not-persisted`: it keeps the rotated token in memory and never writes it back, so it runs on
+ * until the process ends and a new object, which reads the stored session, is refused.
+ */
+export function createUnwrittenSessionConnector(): Connector {
+  const notes = createExampleConnector();
+  let origin: RotatingConfig["origin"] | undefined;
+  let held = "";
+  const request = () => {
+    const next = origin?.request(held);
+    if (next === undefined) throw new ConnectorCredentialError();
+    held = next;
+  };
+  return {
+    ...notes,
+    async initialize(config, context) {
+      const { origin: given, ...rest } = config as RotatingConfig;
+      origin = given;
+      held = sessionTokenOf((await context?.credentials.read(SESSION_SLOT)) ?? "");
+      request();
+      await notes.initialize(rest);
+    },
+    async getChanges(cursor, opts) {
+      request();
+      return notes.getChanges(cursor, opts);
+    },
+  };
+}
+
+/** `rotated-credential-leaked`: after each request it writes the rotated session to the console. */
+export function createRotatedLeakingConnector(): Connector {
+  const rotating = createRotatingSessionConnector();
+  let context: ConnectorContext | undefined;
+  const show = async () =>
+    console.log("session now", await context?.credentials.read(SESSION_SLOT));
+  return {
+    ...rotating,
+    async initialize(config, given) {
+      context = given;
+      await rotating.initialize(config, given);
+      await show();
+    },
+    async getChanges(cursor, opts) {
+      const page = await rotating.getChanges(cursor, opts);
+      await show();
+      return page;
+    },
   };
 }

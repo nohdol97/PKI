@@ -12,6 +12,7 @@ const SPEC_FUNCTIONS = [
   "getSession",
   "hasSecret",
   "openExternal",
+  "openLogin",
   "pickLocation",
   "revealSource",
   "setSecret",

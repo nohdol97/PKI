@@ -1,5 +1,5 @@
 // Window settings and navigation rules (V01-R4, ADR 0008). lockDown applies to every
-// web contents the app creates: it may move only within app://pki, never opens a
+// web contents the app creates but a login window's (lockDownUnlessLogin, I06S-R4): it may move only within app://pki, never opens a
 // window (links leave through the bridge's openExternal), and never embeds a webview.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -40,6 +40,19 @@ interface Preventable {
 export interface LockableContents {
   on(event: string, listener: (event: Preventable, url?: unknown) => void): unknown;
   setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void;
+}
+
+/** The sessions of login windows (I06S-R4): marked by the shell before the window exists, never by a page. */
+const loginSessions = new WeakSet<object>();
+export const markLoginSession = (session: object): void => void loginSessions.add(session);
+
+/**
+ * `lockDown` for every web contents the app creates except a login window's: that one must follow the origin
+ * system's own pages off app://, and holds its own rules (login-electron.ts: no preload, http(s) only, no new
+ * windows, downloads or permissions). Which contents it is comes from the session the shell marked.
+ */
+export function lockDownUnlessLogin(contents: LockableContents & { session: object }): void {
+  if (!loginSessions.has(contents.session)) lockDown(contents);
 }
 
 export function lockDown(contents: LockableContents): void {

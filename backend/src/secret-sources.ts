@@ -21,16 +21,23 @@ export const NO_SECRET_STORE: SecretSource = Object.freeze({
   has: async () => "unavailable" as const,
   // nothing is stored, so nothing is left to delete
   deleteOthers: async () => "done" as const,
+  write: async () => "unavailable" as const,
 });
 
-type Mode = "read" | "presence" | "prune";
+type Mode = "read" | "presence" | "prune" | "write";
 type Answer = SecretRead | { state: "present" };
 const PRESENCES: readonly unknown[] = ["present", "missing", "unavailable"];
 
 /** A read answer is exactly a SecretRead; a presence answer is a bare state, no value. */
 function parseAnswer(mode: Mode, rest: Record<string, unknown>): Answer | undefined {
   if (mode === "read") return SecretReadSchema.safeParse(rest).data;
-  const states = mode === "prune" ? ["missing", "unavailable"] : PRESENCES;
+  // a write is answered "present" (stored; no value comes back) or "unavailable"
+  const states =
+    mode === "prune"
+      ? ["missing", "unavailable"]
+      : mode === "write"
+        ? ["present", "unavailable"]
+        : PRESENCES;
   const only = Object.keys(rest).length === 1 && states.includes(rest.state);
   return only ? ({ state: rest.state } as Answer) : undefined;
 }
@@ -44,7 +51,7 @@ export function channelSecrets(post: (message: unknown) => void, timeoutMs = 10_
   const pending = new Map<number, { mode: Mode; settle: (answer: Answer) => void }>();
   let next = 1;
 
-  function ask(name: string, mode: Mode): Promise<Answer> {
+  function ask(name: string, mode: Mode, value?: string): Promise<Answer> {
     if (!SecretNameSchema.safeParse(name).success) return Promise.resolve(UNAVAILABLE);
     const id = next++;
     return new Promise<Answer>((resolve) => {
@@ -60,7 +67,11 @@ export function channelSecrets(post: (message: unknown) => void, timeoutMs = 10_
           resolve(answer);
         },
       });
-      post({ type: "secret-request", id, name, mode });
+      post(
+        value === undefined
+          ? { type: "secret-request", id, name, mode }
+          : { type: "secret-request", id, name, mode, value },
+      );
     });
   }
 
@@ -69,6 +80,11 @@ export function channelSecrets(post: (message: unknown) => void, timeoutMs = 10_
     has: async (name): Promise<SecretPresence> => (await ask(name, "presence")).state,
     deleteOthers: async (keep) =>
       (await ask(keep, "prune")).state === "missing" ? "done" : "unavailable",
+    write: async (name, value) =>
+      SecretValueSchema.safeParse(value).success &&
+      (await ask(name, "write", value)).state === "present"
+        ? "done"
+        : "unavailable",
   };
 
   /** True when `message` was the answer to a pending request (and is consumed). */
@@ -110,5 +126,6 @@ export function envSecrets(env: Readonly<Record<string, string | undefined>>): S
     read: async (name) => lookup(name),
     has: async (name) => lookup(name).state,
     deleteOthers: async () => "done", // the environment holds the one key it names
+    write: async () => "unavailable", // no environment route to a stored value (I06S-R8)
   };
 }

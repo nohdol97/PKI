@@ -38,6 +38,10 @@ function store(read: SecretRead, usable = true) {
   const calls: string[] = [];
   return {
     calls,
+    set: async (name: string, value: string) => (
+      calls.push(`set ${name} ${value}`),
+      usable ? ({ ok: true } as const) : ({ ok: false, error: "unavailable" } as const)
+    ),
     available: async () => (calls.push("available"), usable),
     read: async (name: string) => (calls.push(`read ${name}`), read),
     has: async (name: string) => (
@@ -161,6 +165,7 @@ describe("backend secret requests", () => {
       read: () => Promise.reject(new Error("x")),
       has: () => Promise.reject(new Error("x")),
       deleteOthers: () => Promise.reject(new Error("x")),
+      set: () => Promise.reject(new Error("x")),
     };
     for (const secrets of [undefined, failing]) {
       const child = fakeChild();
@@ -368,5 +373,59 @@ describe("backend secret requests through the real store (I06-C1 ③⑤)", () =>
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// I06S-C2 `backend-process.secrets` (I06S-R8): a Connector's value is stored under a credential name
+// only; a Provider key name or an unusable OS protection answers `unavailable` and stores nothing.
+describe("backend secret requests: write mode (I06S-C2)", () => {
+  const VALUE = "synthetic-rotated-session-value";
+  async function write(secrets: ReturnType<typeof store> | undefined, name: string, value = VALUE) {
+    const child = fakeChild();
+    await start(child, secrets);
+    const before = child.posted.length;
+    child.send({ type: "secret-request", id: 9, name, mode: "write", value });
+    await settle();
+    return child.posted.length > before ? child.posted.at(-1) : "no answer";
+  }
+
+  it("stores a value under a credential name and answers present without the value", async () => {
+    const secrets = store({ state: "missing" });
+    expect(await write(secrets, CONNECTOR_NAME)).toEqual({
+      type: "secret",
+      id: 9,
+      state: "present",
+    });
+    expect(secrets.calls).toEqual([`set ${CONNECTOR_NAME} ${VALUE}`]);
+  });
+
+  it("refuses a Provider key name and any other name: unavailable, the store untouched", async () => {
+    for (const name of [KEY_NAME, "some-other-secret", `connector.${"0".repeat(31)}.token`]) {
+      const secrets = store({ state: "missing" });
+      expect(await write(secrets, name)).toEqual({ type: "secret", id: 9, state: "unavailable" });
+      expect(secrets.calls).toEqual([]);
+    }
+  });
+
+  it("answers unavailable without OS protection or without a store, and ignores a write without a value", async () => {
+    expect(await write(store({ state: "missing" }, false), CONNECTOR_NAME)).toEqual({
+      type: "secret",
+      id: 9,
+      state: "unavailable",
+    });
+    expect(await write(undefined, CONNECTOR_NAME)).toEqual({
+      type: "secret",
+      id: 9,
+      state: "unavailable",
+    });
+    const child = fakeChild();
+    const secrets = store({ state: "missing" });
+    await start(child, secrets);
+    const before = child.posted.length;
+    child.send({ type: "secret-request", id: 9, name: CONNECTOR_NAME, mode: "write" });
+    child.send({ type: "secret-request", id: 9, name: CONNECTOR_NAME, mode: "write", value: "" });
+    await settle();
+    expect(child.posted.length).toBe(before);
+    expect(secrets.calls).toEqual([]);
   });
 });

@@ -26,7 +26,14 @@ import {
 import { connectionTestText, needsUnverifiedConfirmation } from "./connection-test-text.ts";
 import { BACKGROUND_EXECUTION_TEXT } from "./background-text.ts";
 import { CONSENT_NOTICE } from "./consent-text.ts";
-import { changeCredential, credentialOutcomeText, rereadDelaysMs } from "./connector-credential.ts";
+import {
+  changeCredential,
+  credentialOutcomeText,
+  loginBridge,
+  openLogin,
+  rereadDelaysMs,
+  type CredentialOutcome,
+} from "./connector-credential.ts";
 import { ConnectorTable } from "./connector-table.tsx";
 import { SecretField } from "./secret-field.tsx";
 import { nextSyncStops } from "./connector-text.ts";
@@ -346,6 +353,7 @@ function Sources({ api }: { api: ApiClient }) {
     return () => timers.forEach(clearTimeout);
   }, []);
   const bridge = secretBridge();
+  const login = loginBridge();
   const fail = (e: unknown) => setError(message(e));
 
   // I06-R14: the value goes to the shell's store, the backend is told which instance changed
@@ -355,7 +363,17 @@ function Sources({ api }: { api: ApiClient }) {
     action: SecretAction,
   ) => {
     if (!bridge) return;
-    const outcome = await changeCredential({ bridge, api }, connectorId, name, action);
+    await showCredentialOutcome(
+      connectorId,
+      await changeCredential({ bridge, api }, connectorId, name, action),
+    );
+  };
+  // I06S-R2, R6: the shell opens the login window and stores the session; the same notice follows
+  const openConnectorLogin = async (connectorId: string) => {
+    if (!login) return;
+    await showCredentialOutcome(connectorId, await openLogin({ bridge: login, api }, connectorId));
+  };
+  const showCredentialOutcome = async (connectorId: string, outcome: CredentialOutcome) => {
     setCredentialNotes((notes) => ({ ...notes, [connectorId]: credentialOutcomeText(outcome) }));
     for (const delay of rereadDelaysMs(outcome)) {
       if (delay === 0) connectors.reload();
@@ -427,6 +445,8 @@ function Sources({ api }: { api: ApiClient }) {
           syncStops={syncStops}
           onSync={sync}
           canEnterCredentials={bridge !== undefined}
+          canLogin={login !== undefined}
+          onLogin={openConnectorLogin}
           credentialNotes={credentialNotes}
           onCredentialChange={changeConnectorCredential}
         />

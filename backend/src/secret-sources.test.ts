@@ -79,6 +79,31 @@ describe("channelSecrets", () => {
     await expect(failed).resolves.toBe("unavailable");
   });
 
+  it("asks the shell to write a value and takes a bare present answer (I06S-R8)", async () => {
+    const { posted, secrets } = setup();
+    const done = secrets.source.write?.(CONNECTOR_SECRET, "synthetic-session-value");
+    expect(posted).toEqual([
+      {
+        type: "secret-request",
+        id: 1,
+        name: CONNECTOR_SECRET,
+        mode: "write",
+        value: "synthetic-session-value",
+      },
+    ]);
+    // the answer carries no value, and a "missing" answer is not an answer to a write
+    expect(secrets.deliver({ type: "secret", id: 1, state: "present", value: "x" })).toBe(false);
+    expect(secrets.deliver({ type: "secret", id: 1, state: "missing" })).toBe(false);
+    expect(secrets.deliver({ type: "secret", id: 1, state: "present" })).toBe(true);
+    await expect(done).resolves.toBe("done");
+    const failed = secrets.source.write?.(CONNECTOR_SECRET, "synthetic-session-value");
+    secrets.deliver({ type: "secret", id: 2, state: "unavailable" });
+    await expect(failed).resolves.toBe("unavailable");
+    // a value the shell would refuse is not sent
+    await expect(secrets.source.write?.(CONNECTOR_SECRET, "")).resolves.toBe("unavailable");
+    expect(posted).toHaveLength(2);
+  });
+
   it("refuses a read answer without its value", async () => {
     const { secrets } = setup();
     void secrets.source.read("a");

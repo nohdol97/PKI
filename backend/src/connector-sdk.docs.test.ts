@@ -91,7 +91,7 @@ function codesOfLine(prefix: string): string[] {
 describe("docs.connector-sdk: the tables equal the code", () => {
   it("the violation-code table lists CONNECTOR_VIOLATION_CODES, in order", () => {
     const rows = tableAfter("### 위반 코드 표");
-    expect(rows).toHaveLength(26);
+    expect(rows).toHaveLength(28);
     expect(rows.map((r) => (r[0] as string).replaceAll("`", ""))).toEqual([
       ...CONNECTOR_VIOLATION_CODES,
     ]);
@@ -540,8 +540,8 @@ describe("docs.connector-sdk (I06): chapter 8 and chapter 6 equal the code", () 
   const six = DOC.slice(DOC.indexOf("## 6. "), DOC.indexOf("## 7. "));
   const eightLines = eight.split("\n");
 
-  it("the table of the four reasons lists CREDENTIAL_REASONS, in order, each with the user's action and the way out", () => {
-    const rows = tableAfter("#### 5. 네 사유와 풀리는 길", eightLines);
+  it("the table of the five reasons lists CREDENTIAL_REASONS, in order, each with the user's action and the way out", () => {
+    const rows = tableAfter("#### 5. 다섯 사유와 풀리는 길", eightLines);
     expect(rows.map((r) => (r[0] as string).replaceAll("`", ""))).toEqual([...CREDENTIAL_REASONS]);
     for (const row of rows) expect(row, String(row[0])).toHaveLength(4);
     expect(rows[3]?.[3]).toBe("변경 알림과 앱을 다시 시작할 때뿐이다");
@@ -549,7 +549,7 @@ describe("docs.connector-sdk (I06): chapter 8 and chapter 6 equal the code", () 
 
   it("fails when a reason is missing from the table", () => {
     const dropped = eightLines.filter((l) => !l.startsWith("| `credential-unreadable` |"));
-    const rows = tableAfter("#### 5. 네 사유와 풀리는 길", dropped);
+    const rows = tableAfter("#### 5. 다섯 사유와 풀리는 길", dropped);
     expect(rows.map((r) => (r[0] as string).replaceAll("`", ""))).not.toEqual([
       ...CREDENTIAL_REASONS,
     ]);
@@ -589,7 +589,7 @@ describe("docs.connector-sdk (I06): chapter 8 and chapter 6 equal the code", () 
   });
 
   it("chapter 6 lists the five codes the credential scenarios open, in the order and under the names CONNECTOR_VIOLATION_CODES has them", () => {
-    const five = CONNECTOR_VIOLATION_CODES.slice(-5);
+    const five = CONNECTOR_VIOLATION_CODES.slice(21, 26);
     expect([...five]).toEqual([
       "credential-in-record",
       "credential-in-health",
@@ -602,6 +602,10 @@ describe("docs.connector-sdk (I06): chapter 8 and chapter 6 equal the code", () 
       .filter((l) => /^- `credential-[a-z-]+`: /.test(l))
       .map((l) => /^- `([a-z-]+)`/.exec(l)?.[1]);
     expect(bullets).toEqual([...five]);
+    // the two codes of the session scenario follow (I06S-R12)
+    const session = CONNECTOR_VIOLATION_CODES.slice(26);
+    expect([...session]).toEqual(["rotated-credential-leaked", "session-not-persisted"]);
+    for (const code of session) expect(six, code).toContain(`- \`${code}\`: `);
   });
 
   it("every credential violation code chapter 8 names is one the contract suite has", () => {

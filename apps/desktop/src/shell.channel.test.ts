@@ -176,6 +176,7 @@ describe("shell ↔ backend channel", () => {
         available: async () => true,
         read: async () => ({ state: "present", value: canary }),
         has: async () => ({ ok: true, present: true }),
+        set: async () => ({ ok: true }),
         deleteOthers: async () => ({ ok: true }),
       },
     });
@@ -203,6 +204,7 @@ describe("shell ↔ backend channel", () => {
         available: async () => true,
         read: async () => ({ state: "unavailable" }),
         has: async (name) => (asked.push(name), { ok: true, present: name === keyName }),
+        set: async () => ({ ok: true }),
         deleteOthers: async (keep) => (pruned.push(keep), { ok: true }),
       },
     });
@@ -278,6 +280,7 @@ describe("shell ↔ backend channel", () => {
               asked.push(`has ${name}`),
               { ok: true, present: name === keyName }
             ),
+            set: async () => ({ ok: true }),
             deleteOthers: async () => ({ ok: true }),
           },
         });

@@ -21,4 +21,5 @@ contextBridge.exposeInMainWorld("pki", {
   openExternal: call("pki:open-external"),
   pickLocation: call("pki:pick-location"),
   revealSource: call("pki:reveal-source"),
+  openLogin: call("pki:open-login"),
 });

@@ -135,6 +135,32 @@ describe("site.registration: checkSiteRegistration answers a list of codes", () 
     });
   });
 
+  describe("instance-login-invalid (I06S-C1, R1)", () => {
+    const login = {
+      slot: "session",
+      startUrl: "https://idp.example.test/login",
+      doneUrlPrefix: "https://app.example.test/home",
+      cookies: ["sid"],
+    };
+    const declared = (value: unknown, credentials: readonly string[] = ["session", "token"]) =>
+      withFork({
+        connectorInstances: [{ ...instance("fork-1", "fork"), credentials, login: value } as never],
+      });
+    it("passes a well formed description whose slot is declared", () => {
+      expect(checkSiteRegistration(declared(login))).toEqual([]);
+    });
+    it.each([
+      ["a slot the instance does not declare", { ...login, slot: "other" }],
+      ["a plain http address outside the loopback", { ...login, startUrl: "http://example.com/x" }],
+      ["no cookie", { ...login, cookies: [] }],
+      ["a description that is not an object", "session"],
+    ])("%s leaves the instance out", (_name, value) => {
+      expect(checkSiteRegistration(declared(value))).toEqual(["instance-login-invalid"]);
+      const merged = mergeSiteRegistration(declared(value), { instances: [], kinds: {} });
+      expect(merged.connectors.instances).toEqual([]);
+    });
+  });
+
   it("instance-kind-unknown: a kind that is nowhere", () => {
     expect(
       checkSiteRegistration(withFork({ connectorInstances: [instance("a", "nowhere")] })),
