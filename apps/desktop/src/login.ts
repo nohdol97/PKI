@@ -63,6 +63,23 @@ export interface LoginDeps {
   startTimer?: (run: () => void, ms: number) => () => void;
 }
 
+/**
+ * Whether `url` is the done address (I06S-R4): the same origin (scheme, host, port) as `prefix`, no user name or
+ * password in it, and a path that starts with the prefix's path. A text prefix would pass look-alike hosts
+ * (`app.example.com.evil.test`, `app.example.com@evil.test`).
+ */
+export function reachedDone(url: string, prefix: string): boolean {
+  if (!URL.canParse(url) || !URL.canParse(prefix)) return false;
+  const reached = new URL(url);
+  const done = new URL(prefix);
+  return (
+    reached.origin === done.origin &&
+    reached.username === "" &&
+    reached.password === "" &&
+    reached.pathname.startsWith(done.pathname)
+  );
+}
+
 const freshPartition = () => `pki-login-${randomBytes(12).toString("hex")}`;
 const nodeTimer = (run: () => void, ms: number) => {
   const timer = setTimeout(run, ms);
@@ -86,11 +103,13 @@ export async function runLogin(settings: unknown, deps: LoginDeps): Promise<Logi
   return new Promise<LoginResult>((resolve) => {
     let finished = false;
     let reached = false;
+    /** Once the store is being written the ending is the write's: a close or the timer no longer answers. */
+    let storing = false;
     let cancelTimer: () => void = () => undefined;
     let window: LoginWindow | undefined;
 
-    const finish = (result: LoginResult) => {
-      if (finished) return;
+    const finish = (result: LoginResult, fromCapture = false) => {
+      if (finished || (storing && !fromCapture)) return;
       finished = true;
       cancelTimer();
       // the partition is cleared and the window destroyed before the answer, stored or not
@@ -101,6 +120,7 @@ export async function runLogin(settings: unknown, deps: LoginDeps): Promise<Logi
     const capture = async (url: string) => {
       try {
         const held = await window?.cookies(url);
+        if (finished) return; // closed or timed out while the cookies were read: nothing is stored
         const values = cookies.map((cookie) => held?.find((c) => c.name === cookie)?.value);
         if (values.some((value) => value === undefined))
           return finish({ ok: false, error: "no-session" });
@@ -109,10 +129,11 @@ export async function runLogin(settings: unknown, deps: LoginDeps): Promise<Logi
         });
         if (!SecretValueSchema.safeParse(line).success)
           return finish({ ok: false, error: "too-large" });
+        storing = true;
         const stored = await store.set(name, line);
-        finish(stored.ok ? { ok: true } : { ok: false, error: "store-unavailable" });
+        finish(stored.ok ? { ok: true } : { ok: false, error: "store-unavailable" }, true);
       } catch {
-        finish({ ok: false, error: "store-unavailable" });
+        finish({ ok: false, error: "store-unavailable" }, true);
       }
     };
 
@@ -122,7 +143,7 @@ export async function runLogin(settings: unknown, deps: LoginDeps): Promise<Logi
       return resolve({ ok: false, error: "invalid" });
     }
     window.onNavigate((url) => {
-      if (finished || reached || !url.startsWith(doneUrlPrefix)) return;
+      if (finished || reached || !reachedDone(url, doneUrlPrefix)) return;
       reached = true;
       void capture(url);
     });

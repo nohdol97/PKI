@@ -46,8 +46,8 @@
 
 - **I06S-R2** 로그인 창은 **제품 화면이 연다**(D1). 출처 화면은 세션 칸에 값 입력란 대신 「로그인 창 열기」와 기존 삭제(「로그아웃」)를 보인다. 누르면 preload의 새 함수 `openLogin(connectorId)`를 부른다. 인자는 인스턴스 ID 하나이고 주소나 이름을 화면이 건네지 않는다.
 - **I06S-R3** 셸은 `openLogin`을 받으면 백엔드에 `{type:"login-request", id, connectorId}`를 보내고, 백엔드는 그 인스턴스의 설명과 저장 이름(`connectorCredentialName`)을 `{type:"login", id, name, startUrl, doneUrlPrefix, cookies}`로, 없으면 `{type:"login", id, none:true}`로 답한다(D2). 설명이 규칙을 어기면 셸은 그 답을 받아들이지 않고 5초 뒤 `invalid`로 끝낸다. 셸은 이름이 수집기 자격 증명 모양인지(`isConnectorCredentialSecret`)와 R1의 주소 규칙을 다시 검사한다.
-- **I06S-R4** 셸의 로그인은 어댑터 `LoginHost`를 거친다(D3). 셸의 판단(`runLogin`)은 어댑터에 다음만 시킨다: 창을 열고, 주 프레임의 이동을 알리고, 정해진 주소의 쿠키를 읽고, 닫고 지운다. Electron 구현은 **preload 없음, `sandbox: true`, `contextIsolation: true`, 로그인마다 새 비영속 partition**으로 창을 만들고, `http:`/`https:` 밖의 이동·다운로드·권한 요청·새 창을 거부한다. 시험은 가짜 어댑터로 한다.
-- **I06S-R5** 주 프레임이 `doneUrlPrefix`로 시작하는 주소에 닿으면 셸은 그 주소의 쿠키 가운데 `cookies`에 든 이름을 읽어 **한 줄 JSON** `{"cookies":{"<이름>":"<값>",…}}`(선언 순서)로 만들고, 그 이름으로 저장소에 쓴 뒤 partition을 지우고 창을 닫는다(D5). 화면에 돌아가는 답은 `{ok:true}` 또는 `{ok:false, error}`이고 값이 없다. `error`는 `cancelled`(사용자가 닫음), `timeout`(5분, `LOGIN_TIMEOUT_MS`), `no-session`(닿았는데 이름 하나라도 없음), `too-large`(8192자 초과), `store-unavailable`(OS 보호 없음·쓰기 실패), `invalid`(설명 없음·검사 실패), `busy`(다른 로그인 창이 열려 있음) 가운데 하나이고, `ok:true`가 아니면 아무것도 저장하지 않는다.
+- **I06S-R4** 셸의 로그인은 어댑터 `LoginHost`를 거친다(D3). 셸의 판단(`runLogin`)은 어댑터에 다음만 시킨다: 창을 열고, 주 프레임의 이동을 알리고, 정해진 주소의 쿠키를 읽고, 닫고 지운다. Electron 구현은 **preload 없음, `sandbox: true`, `contextIsolation: true`, 로그인마다 새 비영속 partition**으로 창을 만들고(앱 전체의 이동 차단은 셸이 표시한 이 세션의 창에는 걸지 않는다), `http:`/`https:` 밖의 이동·다운로드·권한 요청·새 창을 거부한다. 시험은 가짜 어댑터로 한다.
+- **I06S-R5** 주 프레임이 `doneUrlPrefix`와 같은 출처(스킴·호스트·포트)이고 사용자 정보가 없으며 경로가 그 경로로 시작하는 주소에 닿으면(글자 접두 비교는 하지 않는다) 셸은 그 주소의 쿠키 가운데 `cookies`에 든 이름을 읽어 **한 줄 JSON** `{"cookies":{"<이름>":"<값>",…}}`(선언 순서)로 만들고, 그 이름으로 저장소에 쓴 뒤 partition을 지우고 창을 닫는다(D5). 화면에 돌아가는 답은 `{ok:true}` 또는 `{ok:false, error}`이고 값이 없다. `error`는 `cancelled`(사용자가 닫음), `timeout`(5분, `LOGIN_TIMEOUT_MS`), `no-session`(닿았는데 이름 하나라도 없음), `too-large`(8192자 초과), `store-unavailable`(OS 보호 없음·쓰기 실패), `invalid`(설명 없음·검사 실패), `busy`(다른 로그인 창이 열려 있음) 가운데 하나이고, `ok:true`가 아니면 아무것도 저장하지 않는다. 쿠키를 읽는 사이 창이 닫히거나 시간이 다하면 `cancelled`·`timeout`이고 저장하지 않으며, 저장을 시작한 뒤에는 그 쓰기의 결과가 끝을 정한다.
 - **I06S-R6** 화면은 `ok:true`이면 기존 변경 알림 `POST /api/connectors/credentials-changed`(`{connectorId}`)를 한 번 부르고 기존 `rebuild` 안내를 그대로 쓴다(ADR 0019 결정 7). 실패면 알림을 부르지 않고 코드마다 정한 문장을 보인다.
 
 ### 저장(되쓰기)
@@ -178,4 +178,5 @@ T1 계약 표면, T2a 백엔드 `write`·`login` 선언·`login-request` 답, T2
 | 날짜 | 변경 내용 | 사유 |
 |---|---|---|
 | 2026-11-26 | 초안 | #362 |
+| 2026-11-26 | 검토 반영: 완료 주소는 같은 출처·경로 접두로 판정, 로그인 창은 앱 전체 이동 차단에서 제외, 쿠키 읽는 중의 닫힘·시간 초과는 저장하지 않음 | #362 검토 S1~S3 |
 | 2026-11-26 | 구현을 마치며 확정: R3(규칙을 어긴 `login` 답은 받지 않음), R10(고정 칸이 함께 비면 `credential-missing` 우선), R11(보류 사유 `login-required`), R12(재스캔 객체의 거부도 `session-not-persisted`)를 코드에 맞춰 적음. `SecretSource.write`는 선택 항목(쓸 수 없는 원본은 `unavailable`) | #362 구현 |

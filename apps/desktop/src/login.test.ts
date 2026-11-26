@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createLoginRunner,
   loginWebPreferences,
+  reachedDone,
   runLogin,
   type LoginDeps,
   type LoginHost,
@@ -268,5 +269,96 @@ describe("login: one at a time (I06S-R5)", () => {
     expect(t.opened).toHaveLength(2);
     t.windows[1]?.close();
     await again;
+  });
+});
+
+describe("login: the done address is the same origin (I06S-R4)", () => {
+  const PREFIX = "https://app.example.test/home";
+  it.each([
+    "https://app.example.test.evil.test/home",
+    "https://app.example.test@evil.test/home",
+    "https://user:pw@app.example.test/home",
+    "http://app.example.test/home",
+    "https://app.example.test:8443/home",
+    "https://app.example.test/other",
+    "not a url",
+  ])("%s is not the done address", (url) => {
+    expect(reachedDone(url, PREFIX)).toBe(false);
+  });
+
+  it("accepts the same origin with a path under the prefix, query and fragment included", () => {
+    expect(reachedDone("https://app.example.test/home?welcome=1#x", PREFIX)).toBe(true);
+    expect(reachedDone("https://app.example.test/home/inbox", PREFIX)).toBe(true);
+  });
+
+  it("a look-alike host reaching the page stores nothing: runLogin ignores it and the window stays open", async () => {
+    const t = setup();
+    // a prefix that names a host only, as a text prefix would let look-alike hosts through
+    const done = runLogin({ ...SETTINGS, doneUrlPrefix: "https://app.example.test" }, t.deps);
+    t.windows[0]?.navigate("https://app.example.test.evil.test/");
+    t.windows[0]?.navigate("https://app.example.test@evil.test/");
+    await settle();
+    expect(t.store.stored).toEqual([]);
+    expect(t.windows[0]?.disposed).toBe(0);
+    t.windows[0]?.close();
+    expect(await done).toEqual({ ok: false, error: "cancelled" });
+  });
+});
+
+describe("login: an ending that came while the cookies were read stores nothing (I06S-R5)", () => {
+  function deferred() {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const held = [
+      { name: "csrf", value: CSRF },
+      { name: "sid", value: SID },
+    ];
+    const t = setup();
+    const open = t.deps.host.open.bind(t.deps.host);
+    t.deps.host = {
+      open(spec) {
+        const window = open(spec);
+        return { ...window, cookies: async () => (await gate, held) };
+      },
+    };
+    return { t, release };
+  }
+
+  it("the window closed during the cookie read: cancelled, and nothing stored", async () => {
+    const { t, release } = deferred();
+    const done = runLogin(SETTINGS, t.deps);
+    t.windows[0]?.navigate("https://app.example.test/home");
+    t.windows[0]?.close();
+    release();
+    expect(await done).toEqual({ ok: false, error: "cancelled" });
+    await settle();
+    expect(t.store.stored).toEqual([]);
+  });
+
+  it("the timer fired during the cookie read: timeout, and nothing stored", async () => {
+    const { t, release } = deferred();
+    const done = runLogin(SETTINGS, t.deps);
+    t.windows[0]?.navigate("https://app.example.test/home");
+    t.timer.timers[0]?.run();
+    release();
+    expect(await done).toEqual({ ok: false, error: "timeout" });
+    await settle();
+    expect(t.store.stored).toEqual([]);
+  });
+
+  it("a close while the store is being written does not answer cancelled: the write owns the ending", async () => {
+    const t = setup();
+    let finishWrite: () => void = () => undefined;
+    const written = new Promise<void>((resolve) => (finishWrite = resolve));
+    t.deps.store = {
+      set: async (...args) => (await written, t.store.set(...args)),
+    };
+    const done = runLogin(SETTINGS, t.deps);
+    t.windows[0]?.navigate("https://app.example.test/home");
+    await settle();
+    t.windows[0]?.close();
+    finishWrite();
+    expect(await done).toEqual({ ok: true });
+    expect(t.store.stored).toHaveLength(1);
   });
 });

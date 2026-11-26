@@ -4,6 +4,7 @@
 // checked on the real site's IdP in the deployment fork (S49). Its web preferences are `loginWebPreferences`.
 import { BrowserWindow, session } from "electron";
 import { loginWebPreferences, type LoginHost } from "./login.ts";
+import { markLoginSession } from "./window.ts";
 
 const isWeb = (value: unknown): boolean =>
   typeof value === "string" && URL.canParse(value) && /^https?:$/.test(new URL(value).protocol);
@@ -13,6 +14,7 @@ export function electronLoginHost(): LoginHost {
     open({ url, partition }) {
       // a partition name without the `persist:` prefix lives in memory only
       const ses = session.fromPartition(partition);
+      markLoginSession(ses); // before the window: the app-wide lockDown skips this session only
       ses.setPermissionRequestHandler((_contents, _permission, grant) => grant(false));
       ses.setPermissionCheckHandler(() => false);
       ses.on("will-download", (event) => event.preventDefault());
